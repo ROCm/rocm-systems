@@ -4,6 +4,7 @@
 #include "lds_fixture.h"
 #include "rocjitsu/code/patch/fault_injection/drop_barrier.h"
 #include "rocjitsu/code/patch/fault_injection/lds_wrong_address.h"
+#include "two_address_fixture.h"
 
 #include <gtest/gtest.h>
 
@@ -18,7 +19,7 @@ namespace {
 
 TEST(FaultLdsWrongAddress, Rdna4Wave32BasicFormsPreserveGuestAndAllocation) {
   const std::vector<LdsCapability> capabilities = lds_wrong_address_capabilities();
-  ASSERT_EQ(capabilities.size(), 14u);
+  ASSERT_EQ(capabilities.size(), 104u);
   for (uint32_t machine : {EF_AMDGPU_MACH_AMDGCN_GFX1200, EF_AMDGPU_MACH_AMDGCN_GFX1201}) {
     SCOPED_TRACE(machine);
     const std::vector<uint8_t> image = test::make_lds_load_elf(machine, true, 0);
@@ -145,8 +146,25 @@ TEST(FaultLdsWrongAddress, Rdna4LoadSelectionMutationAndControls) {
     const FailureOr<LdsInventory> dual_inventory =
         discover_lds_wrong_address(dual, "test_kernel", error);
     ASSERT_TRUE(dual_inventory.succeeded());
-    ASSERT_EQ(dual_inventory.value().sites().size(), 1u);
-    EXPECT_EQ(dual_inventory.value().sites().front().offset, 8u);
+    ASSERT_EQ(dual_inventory.value().sites().size(), 2u);
+    EXPECT_EQ(dual_inventory.value().sites()[0].offset, 0u);
+    EXPECT_EQ(dual_inventory.value().sites()[0].form, "ds_load_2addr_b32");
+    EXPECT_EQ(dual_inventory.value().sites()[1].offset, 8u);
+    EXPECT_EQ(dual_inventory.value().sites()[1].form, "ds_store_b32");
+    const test::LdsFormCase dual_case = {
+        .target = dual.source().target_id(),
+        .machine = target,
+        .arch = IsaFamily::Rdna4,
+        .form = "ds_load_2addr_b32",
+        .words =
+            rdna4::build_vds(rdna4::kDsLoad2addrB32Vds, {.offset0 = 4, .addr = 2, .data0 = 3})};
+    const FailureOr<LdsSelection> dual_selection =
+        select_lds_wrong_address(dual_inventory.value(), {}, error);
+    ASSERT_TRUE(dual_selection.succeeded()) << error.message;
+    const FailureOr<LdsResult> dual_mutant =
+        apply_lds_wrong_address(dual, dual_selection.value(), 6, error);
+    ASSERT_TRUE(dual_mutant.succeeded()) << error.message;
+    EXPECT_TRUE(test::lds_form_output_matches(dual, dual_case, 0, 6, dual_mutant.value().image));
 
     std::vector<uint8_t> truncated = test::make_amdgpu_kernel_elf({0xd8d80004u}, 0, 3, target, 1);
     truncated[EI_DATA] = ELFDATA2LSB;
@@ -402,8 +420,24 @@ TEST(FaultLdsWrongAddress, Gfx1200RejectsUnsupportedShapesAndRollsBack) {
   const FailureOr<LdsInventory> dual_inventory =
       discover_lds_wrong_address(dual, "test_kernel", error);
   ASSERT_TRUE(dual_inventory.succeeded()) << error.message;
-  ASSERT_EQ(dual_inventory.value().sites().size(), 1u);
-  EXPECT_EQ(dual_inventory.value().sites().front().offset, 8u);
+  ASSERT_EQ(dual_inventory.value().sites().size(), 2u);
+  EXPECT_EQ(dual_inventory.value().sites()[0].offset, 0u);
+  EXPECT_EQ(dual_inventory.value().sites()[0].form, "ds_load_2addr_b32");
+  EXPECT_EQ(dual_inventory.value().sites()[1].offset, 8u);
+  EXPECT_EQ(dual_inventory.value().sites()[1].form, "ds_store_b32");
+  const test::LdsFormCase dual_case = {
+      .target = dual.source().target_id(),
+      .machine = EF_AMDGPU_MACH_AMDGCN_GFX1200,
+      .arch = IsaFamily::Rdna4,
+      .form = "ds_load_2addr_b32",
+      .words = rdna4::build_vds(rdna4::kDsLoad2addrB32Vds, {.offset0 = 4, .addr = 2, .data0 = 3})};
+  const FailureOr<LdsSelection> dual_selection =
+      select_lds_wrong_address(dual_inventory.value(), {}, error);
+  ASSERT_TRUE(dual_selection.succeeded()) << error.message;
+  const FailureOr<LdsResult> dual_mutant =
+      apply_lds_wrong_address(dual, dual_selection.value(), 6, error);
+  ASSERT_TRUE(dual_mutant.succeeded()) << error.message;
+  EXPECT_TRUE(test::lds_form_output_matches(dual, dual_case, 0, 6, dual_mutant.value().image));
 
   std::optional<LdsInventory> expired_inventory;
   std::optional<LdsSelection> expired_selection;
@@ -578,8 +612,24 @@ TEST(FaultLdsWrongAddress, TargetsWavesAndTwoAddressFormsStayBounded) {
       test::make_lds_elf(1, false, EF_AMDGPU_MACH_AMDGCN_GFX1201, true));
   const FailureOr<LdsInventory> inventory = discover_lds_wrong_address(dual, "test_kernel", error);
   ASSERT_TRUE(inventory.succeeded()) << error.message;
-  ASSERT_EQ(inventory.value().sites().size(), 1u);
-  EXPECT_EQ(inventory.value().sites().front().offset, 8u);
+  ASSERT_EQ(inventory.value().sites().size(), 2u);
+  EXPECT_EQ(inventory.value().sites()[0].offset, 0u);
+  EXPECT_EQ(inventory.value().sites()[0].form, "ds_load_2addr_b32");
+  EXPECT_EQ(inventory.value().sites()[1].offset, 8u);
+  EXPECT_EQ(inventory.value().sites()[1].form, "ds_store_b32");
+  const test::LdsFormCase dual_case = {
+      .target = dual.source().target_id(),
+      .machine = EF_AMDGPU_MACH_AMDGCN_GFX1201,
+      .arch = IsaFamily::Rdna4,
+      .form = "ds_load_2addr_b32",
+      .words = rdna4::build_vds(rdna4::kDsLoad2addrB32Vds, {.offset0 = 4, .addr = 2, .data0 = 3})};
+  const FailureOr<LdsSelection> dual_selection =
+      select_lds_wrong_address(inventory.value(), {}, error);
+  ASSERT_TRUE(dual_selection.succeeded()) << error.message;
+  const FailureOr<LdsResult> dual_mutant =
+      apply_lds_wrong_address(dual, dual_selection.value(), 6, error);
+  ASSERT_TRUE(dual_mutant.succeeded()) << error.message;
+  EXPECT_TRUE(test::lds_form_output_matches(dual, dual_case, 0, 6, dual_mutant.value().image));
 }
 
 TEST(FaultLdsWrongAddress, ExpiredSourceCannotBeSelectedOrApplied) {
@@ -653,6 +703,126 @@ TEST(FaultLdsWrongAddress, EmissionFailureDoesNotChangeSource) {
   ASSERT_TRUE(selection.succeeded()) << error.message;
   EXPECT_TRUE(apply_lds_wrong_address(context, selection.value(), 6, error).failed());
   EXPECT_TRUE(std::ranges::equal(context.image(), image));
+}
+
+TEST(FaultLdsWrongAddress, TwoAddressFormsAreSelectedAndMutated) {
+  for (const test::TwoAddressTarget &target : test::kTwoAddressTargets) {
+    for (bool wave32 : {false, true}) {
+      if (target.cdna && wave32)
+        continue;
+      SCOPED_TRACE(static_cast<int>(target.target));
+      SCOPED_TRACE(wave32);
+      const uint32_t allocation = wave32 ? 32 : 16;
+      const std::vector<uint8_t> image = test::make_two_address_elf(target, wave32);
+      const FaultMutationContext context(image), foreign(image);
+      FaultMutationError error;
+      const FailureOr<LdsInventory> inventory =
+          discover_lds_wrong_address(context, "test_kernel", error);
+      ASSERT_TRUE(inventory.succeeded()) << error.message;
+      ASSERT_EQ(inventory.value().sites().size(), 2u);
+      for (size_t ordinal = 0; ordinal < 2; ++ordinal) {
+        SCOPED_TRACE(ordinal);
+        const FailureOr<LdsSelection> selection = select_lds_wrong_address(
+            inventory.value(), {.exact = std::nullopt, .ordinal = ordinal}, error);
+        ASSERT_TRUE(selection.succeeded());
+        EXPECT_EQ(selection.value().site().offset, ordinal * 8);
+        const FailureOr<LdsSelection> exact = select_lds_wrong_address(
+            inventory.value(),
+            {.exact = selection.value(), .ordinal = std::numeric_limits<size_t>::max()}, error);
+        ASSERT_TRUE(exact.succeeded());
+        EXPECT_TRUE(apply_lds_wrong_address(context, exact.value(), std::nullopt, error).failed());
+        EXPECT_TRUE(apply_lds_wrong_address(context, exact.value(), 2, error).failed());
+        EXPECT_TRUE(apply_lds_wrong_address(context, exact.value(), allocation, error).failed());
+        EXPECT_TRUE(apply_lds_wrong_address(context, exact.value(), 256, error).failed());
+        EXPECT_TRUE(apply_lds_wrong_address(foreign, exact.value(), 6, error).failed());
+        const FailureOr<LdsResult> boundary =
+            apply_lds_wrong_address(context, exact.value(), allocation - 1, error);
+        ASSERT_TRUE(boundary.succeeded()) << error.message;
+        EXPECT_TRUE(test::two_address_output_matches(context, target, ordinal * 8, allocation - 1,
+                                                     boundary.value().image));
+        const FailureOr<LdsResult> result =
+            apply_lds_wrong_address(context, exact.value(), 6, error);
+        ASSERT_TRUE(result.succeeded()) << error.message;
+        EXPECT_TRUE(test::two_address_output_matches(context, target, ordinal * 8, 6,
+                                                     result.value().image));
+        const FailureOr<LdsResult> by_ordinal =
+            apply_lds_wrong_address(context, selection.value(), 6, error);
+        ASSERT_TRUE(by_ordinal.succeeded()) << error.message;
+        EXPECT_EQ(by_ordinal.value().image, result.value().image);
+        const AmdGpuCodeObject output(result.value().image.data(), result.value().image.size());
+        ASSERT_TRUE(output.is_valid());
+        const std::optional<uint64_t> guest =
+            test::lds_emitted_guest(*output.text_sections().front(), ordinal * 8, target.target);
+        ASSERT_TRUE(guest);
+        for (uint64_t offset : std::array<uint64_t, 3>{ordinal * 8, *guest + 5, *guest + 8}) {
+          std::vector<uint8_t> corrupted = result.value().image;
+          const uint64_t corrupted_offset =
+              output.text_sections().front()->sectionOffset() + offset;
+          ASSERT_LT(corrupted_offset, corrupted.size());
+          corrupted[corrupted_offset] ^= 1;
+          EXPECT_FALSE(
+              test::two_address_output_matches(context, target, ordinal * 8, 6, corrupted));
+        }
+        const FailureOr<LdsResult> repeated =
+            apply_lds_wrong_address(context, exact.value(), 6, error);
+        ASSERT_TRUE(repeated.succeeded());
+        EXPECT_EQ(repeated.value().image, result.value().image);
+      }
+      EXPECT_TRUE(std::ranges::equal(context.image(), image));
+      std::optional<LdsSelection> expired;
+      {
+        const FaultMutationContext temporary(image);
+        const FailureOr<LdsInventory> found =
+            discover_lds_wrong_address(temporary, "test_kernel", error);
+        ASSERT_TRUE(found.succeeded());
+        const FailureOr<LdsSelection> selection =
+            select_lds_wrong_address(found.value(), {}, error);
+        ASSERT_TRUE(selection.succeeded());
+        expired = selection.value();
+      }
+      EXPECT_TRUE(apply_lds_wrong_address(context, *expired, 6, error).failed());
+      EXPECT_TRUE(select_lds_wrong_address(inventory.value(),
+                                           {.exact = LdsSelection{}, .ordinal = 0}, error)
+                      .failed());
+      const std::array<uint32_t, 2> first = target.cdna
+                                                ? std::array<uint32_t, 2>{0xd8ee0301u, 0x04000002u}
+                                                : std::array<uint32_t, 2>{0xd9dc0301u, 0x04000002u};
+      std::vector<uint8_t> truncated = test::make_amdgpu_kernel_elf(
+          {first[0]}, 0, 3, target.machine, 3, 3, false, false, false, false, wave32);
+      truncated[EI_DATA] = ELFDATA2LSB;
+      truncated[EI_ABIVERSION] = ELFABIVERSION_AMDGPU_HSA_V5;
+      const FaultMutationContext incomplete(truncated);
+      EXPECT_TRUE(discover_lds_wrong_address(incomplete, "test_kernel", error).failed());
+      EXPECT_TRUE(std::ranges::equal(incomplete.image(), truncated));
+      if (target.cdna) {
+        std::vector<uint8_t> gds = test::make_amdgpu_kernel_elf(
+            {first[0] | 0x10000u, first[1], 0xbf810000u}, 0, 3, target.machine, 3, 3);
+        gds[EI_DATA] = ELFDATA2LSB;
+        gds[EI_ABIVERSION] = ELFABIVERSION_AMDGPU_HSA_V5;
+        const FaultMutationContext gds_context(gds);
+        const FailureOr<LdsInventory> gds_inventory =
+            discover_lds_wrong_address(gds_context, "test_kernel", error);
+        ASSERT_TRUE(gds_inventory.succeeded()) << error.message;
+        EXPECT_TRUE(gds_inventory.value().sites().empty());
+      }
+      std::vector<uint32_t> words = {first[0], first[1]};
+      words.insert(words.end(), 32769, 0xbf800000u);
+      words.push_back(target.cdna ? 0xbf810000u : 0xbfb00000u);
+      std::vector<uint8_t> long_image = test::make_amdgpu_kernel_elf(
+          words, 0, 3, target.machine, 3, 3, false, false, false, false, wave32);
+      long_image[EI_DATA] = ELFDATA2LSB;
+      long_image[EI_ABIVERSION] = ELFABIVERSION_AMDGPU_HSA_V5;
+      const FaultMutationContext long_context(long_image);
+      const FailureOr<LdsInventory> long_inventory =
+          discover_lds_wrong_address(long_context, "test_kernel", error);
+      ASSERT_TRUE(long_inventory.succeeded()) << error.message;
+      const FailureOr<LdsSelection> long_selection =
+          select_lds_wrong_address(long_inventory.value(), {}, error);
+      ASSERT_TRUE(long_selection.succeeded());
+      EXPECT_TRUE(apply_lds_wrong_address(long_context, long_selection.value(), 6, error).failed());
+      EXPECT_TRUE(std::ranges::equal(long_context.image(), long_image));
+    }
+  }
 }
 
 } // namespace

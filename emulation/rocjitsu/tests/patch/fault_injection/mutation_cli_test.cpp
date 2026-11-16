@@ -12,6 +12,7 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "scoped_temp.h"
+#include "two_address_fixture.h"
 
 #include <gtest/gtest.h>
 
@@ -334,14 +335,14 @@ TEST_F(FaultMutationCli, ListsCdnaAndBankedForms) {
 TEST_F(FaultMutationCli, HelpCapabilitiesAndArguments) {
   EXPECT_EQ(invoke({"--help"}), 0);
   EXPECT_NE(stdout_.find("Exact takes precedence"), std::string::npos);
-  EXPECT_NE(stdout_.find("LdsWrongAddress admits gfx1200/gfx1201 wave32/wave64 ds_store_b32"),
+  EXPECT_NE(stdout_.find("LdsWrongAddress admits gfx1200/gfx1201 wave32/wave64 scalar"),
             std::string::npos);
   EXPECT_NE(stdout_.find("allocated --address-vgpr"), std::string::npos);
   EXPECT_NE(stdout_.find("the first member of a barrier, or the LDS instruction"),
             std::string::npos);
   EXPECT_EQ(invoke({"--capabilities"}), 0);
   const std::string capabilities = stdout_;
-  EXPECT_EQ(std::count(capabilities.begin(), capabilities.end(), '\n'), 24);
+  EXPECT_EQ(std::count(capabilities.begin(), capabilities.end(), '\n'), 114);
   EXPECT_NE(capabilities.find("kind=LdsWrongAddress target=gfx1250 wave=32 "
                               "form=ds_store_b32 admission=direct-single-owner\n"),
             std::string::npos);
@@ -369,6 +370,19 @@ TEST_F(FaultMutationCli, HelpCapabilitiesAndArguments) {
       EXPECT_NE(capabilities.find("kind=LdsWrongAddress target=" + target +
                                   " wave=64 form=" + form + " admission=direct-single-owner\n"),
                 std::string::npos);
+  }
+  const std::vector<LdsCapability> lds_capabilities = lds_wrong_address_capabilities();
+  ASSERT_EQ(lds_capabilities.size(), 104u);
+  for (const LdsCapability &capability : lds_capabilities) {
+    const IsaTargetBinding *target = default_isa_target_registry().find_target(capability.target);
+    ASSERT_NE(target, nullptr);
+    const std::string line = "kind=LdsWrongAddress target=" + std::string(target->id) +
+                             " wave=" + std::to_string(capability.wave_size) +
+                             " form=" + std::string(capability.form) +
+                             " admission=direct-single-owner\n";
+    const size_t position = capabilities.find(line);
+    ASSERT_NE(position, std::string::npos) << line;
+    EXPECT_EQ(capabilities.find(line, position + line.size()), std::string::npos) << line;
   }
   for (const FaultMutationCapability &capability : fault_mutation_capabilities()) {
     const std::string target(default_isa_target_registry().find_target(capability.target)->id);
@@ -878,6 +892,25 @@ TEST_F(FaultMutationCli, FileFailuresPreserveInputAndExistingDestination) {
   EXPECT_NE(stderr_.find("write/close"), std::string::npos);
   EXPECT_FALSE(std::filesystem::exists(output_));
   EXPECT_EQ(read(input_), image);
+}
+
+TEST_F(FaultMutationCli, ListsTwoAddressForms) {
+  for (const test::TwoAddressTarget &target : test::kTwoAddressTargets) {
+    for (bool wave32 : {false, true}) {
+      if (target.cdna && wave32)
+        continue;
+      SCOPED_TRACE(static_cast<int>(target.target));
+      SCOPED_TRACE(wave32);
+      write(input_, test::make_two_address_elf(target, wave32));
+      ASSERT_EQ(invoke({"--input", input_.string(), "--kernel", "test_kernel", "--kind",
+                        "LdsWrongAddress", "--list"}),
+                0);
+      EXPECT_NE(stdout_.find(target.cdna ? "form=ds_read2_b64" : "form=ds_load_2addr_b64"),
+                std::string::npos);
+      EXPECT_NE(stdout_.find(target.cdna ? "form=ds_write2st64_b64" : "form=ds_store_2addr_b32"),
+                std::string::npos);
+    }
+  }
 }
 
 } // namespace
