@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <functional>
 #include <limits>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -155,6 +156,9 @@ struct WaitcheckKernelInfo {
   /// Bounds across descriptors sharing this entry and wave size, in dwords.
   uint32_t min_vgprs = 0, max_vgprs = 0;
   uint32_t min_sgprs = 0, max_sgprs = 0;
+  /// Kernel argument SGPR pair and byte extent common to the descriptors.
+  std::optional<uint16_t> kernarg_sgpr = std::nullopt;
+  uint32_t kernarg_size = 0;
 };
 
 /// @brief Result of one waitcheck analysis run.

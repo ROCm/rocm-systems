@@ -23,6 +23,7 @@ struct MetadataKernel {
   uint32_t sgprs;
   uint32_t vgprs;
   uint32_t private_bytes = 4096;
+  std::string_view descriptor_symbol{};
 };
 
 inline void append_metadata_text(std::vector<uint8_t> &bytes, std::string_view text) {
@@ -54,7 +55,10 @@ inline std::vector<uint8_t> resource_metadata_payload(std::initializer_list<Meta
     append_metadata_text(bytes, ".name");
     append_metadata_text(bytes, kernel.name);
     append_metadata_text(bytes, ".symbol");
-    append_metadata_text(bytes, std::string(kernel.name) + ".kd");
+    if (kernel.descriptor_symbol.empty())
+      append_metadata_text(bytes, std::string(kernel.name) + ".kd");
+    else
+      append_metadata_text(bytes, kernel.descriptor_symbol);
     append_metadata_text(bytes, ".kernarg_segment_size");
     append_metadata_integer(bytes, kernel.kernarg_bytes, narrow);
     append_metadata_text(bytes, ".sgpr_count");

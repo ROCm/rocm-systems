@@ -1385,6 +1385,7 @@ target_link_libraries(
     waitcheck_object_test
     PRIVATE
         rocjitsu_waitcheck_internal
+        rocjitsu_dbt_internal
         rocjitsu_amdgpu_isa_model_registry
         GTest::gtest_main
 )

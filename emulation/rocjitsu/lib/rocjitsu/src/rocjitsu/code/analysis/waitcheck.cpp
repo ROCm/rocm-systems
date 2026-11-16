@@ -5,7 +5,9 @@
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/amdhsa_metadata.h"
 #include "rocjitsu/code/analysis/def_use_chain.h"
+#include "rocjitsu/code/analysis/waitcheck/byte_interval.h"
 #include "rocjitsu/code/analysis/waitcheck/state.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/code_object.h"
@@ -114,6 +116,30 @@ find_waitcheck_function_sizes(const CodeObject &code_object) {
     }
   }
   return function_sizes;
+}
+
+// Older hand-written objects can supply the kernel argument extent solely in the
+// AMDHSA metadata consumed by the loader. Require an unambiguous descriptor symbol.
+std::map<std::string, uint32_t> metadata_kernarg_sizes(std::span<const uint8_t> image) {
+  std::map<std::string, uint32_t> sizes;
+  const auto document = amdhsa::MetadataDocument::parse(image);
+  if (document.failed())
+    return sizes;
+  const auto *kernels = document.value().root().field("amdhsa.kernels");
+  if (!kernels)
+    return sizes;
+  for (const auto &entry : kernels->array) {
+    const auto *symbol = entry.field(".symbol");
+    if (!symbol || symbol->kind != amdhsa::MetadataValue::Kind::String ||
+        !symbol->string.ends_with(".kd"))
+      continue;
+    const auto name = symbol->string.substr(0, symbol->string.size() - 3);
+    auto [item, unique] = sizes.try_emplace(
+        std::string(name), entry.integer_field(".kernarg_segment_size").value_or(0));
+    if (!unique)
+      item->second = 0;
+  }
+  return sizes;
 }
 
 [[nodiscard]] std::vector<WaitcheckKernelInfo> find_waitcheck_kernels(const CodeObject &code_object,
@@ -225,8 +251,9 @@ struct SccPredicate {
 };
 
 struct Analyzer : private WaitcheckStateOps {
-  Analyzer(WaitcheckReport &report, WaitcheckOptions options, uint32_t elf_machine = 0)
-      : report_(report), options_(options) {
+  Analyzer(WaitcheckReport &report, WaitcheckOptions options, uint32_t elf_machine = 0,
+           std::span<const uint8_t> image = {})
+      : report_(report), options_(options), image_(image) {
     const auto &registry = options.registry.get();
     if (const auto *arch = registry.find(report.arch)) {
       const auto bound =
@@ -684,6 +711,7 @@ struct Analyzer : private WaitcheckStateOps {
       return;
     }
 
+    cfg_has_unknown_successor_ = missing_successor.has_value();
     prepare_cfg_path_filter(analysis_blocks, cfg_predecessors, cfg_successors, arch);
     cfg_outputs_ = out;
     relative_entry_proven_ = current_kernel_ && !missing_successor;
@@ -745,6 +773,86 @@ private:
   }
 
   [[nodiscard]] bool should_stop_after_diagnostic() const { return report_.stopped_early; }
+
+  struct KernargRead {
+    ByteInterval bytes;
+    RegisterRef destination;
+  };
+
+  std::optional<KernargRead> kernarg_read(const Instruction &inst, RegisterRef base) const {
+    if (!inst.mnemonic().starts_with("s_load_dword") || inst.num_dst_operands() != 1 ||
+        inst.num_src_operands() != 3 || inst.src_operand(0)->to_register_ref() != base ||
+        !inst.raw_encoding() || inst.size() != sizeof(amdgpu::SmemMachineInst))
+      return std::nullopt;
+    amdgpu::SmemMachineInst smem{};
+    std::memcpy(&smem, inst.raw_encoding(), sizeof(smem));
+    const auto dst = inst.dst_operand(0)->to_register_ref();
+    if (!dst || dst->cls != RegClass::SGPR ||
+        dst->index + dst->width > current_kernel_->min_sgprs || !smem.imm || smem.soffset_en ||
+        smem.offset >= (1u << 20) || smem.offset % 4)
+      return std::nullopt;
+    // A positive CDNA3 SMEM immediate has only 20 bits. The last byte fits in uint32_t.
+    return KernargRead{{smem.offset, smem.offset + static_cast<uint32_t>(dst->width) * 4}, *dst};
+  }
+
+  bool repeats_kernarg_read(uint64_t producer, const Instruction &consumer) {
+    if (report_.arch != ROCJITSU_CODE_ARCH_CDNA3 || !current_kernel_ ||
+        !current_kernel_->kernarg_sgpr || !current_kernel_->alias_descriptor_vaddrs.empty() ||
+        image_.size() < sizeof(Elf64_Ehdr) || image_[EI_OSABI] != ELFOSABI_AMDGPU_HSA ||
+        cfg_has_unknown_successor_ || current_cfg_view_index_ != 0 || cfg_views_.empty())
+      return false;
+    const auto &entry = cfg_views_.front();
+    if (!entry.predecessors.empty() || entry.instructions.empty() ||
+        entry.block->start_offset() != current_kernel_->entry_offset ||
+        path_query_starts_.at(entry.block->start_offset()).contexts != 1)
+      return false;
+
+    const RegisterRef base{RegClass::SGPR, *current_kernel_->kernarg_sgpr, 2};
+    const auto later = kernarg_read(consumer, base);
+    if (!later)
+      return false;
+    // Only prove a straight-line prefix of the ABI entry. Everything past the
+    // budget keeps its original overwrite diagnostic.
+    constexpr size_t max_preceding_instructions = 32;
+    auto prefix = std::span(entry.instructions)
+                      .first(std::min(entry.instructions.size(), max_preceding_instructions + 1));
+    auto pos = std::ranges::lower_bound(prefix, consumer.src_loc(), {},
+                                        &CfgInstructionView::section_offset);
+    if (pos == prefix.end() || pos->instruction != &consumer)
+      return false;
+    auto prior = std::ranges::lower_bound(prefix.begin(), pos, producer, {},
+                                          &CfgInstructionView::section_offset);
+    if (prior == pos || prior->section_offset != producer)
+      return false;
+    const auto earlier = kernarg_read(*prior->instruction, base);
+    if (!earlier || earlier->destination != later->destination ||
+        compare_intervals(earlier->bytes, later->bytes) != IntervalRelation::Identical)
+      return false;
+
+    const RegisterRef high{RegClass::SGPR, static_cast<uint16_t>(base.index + 1), 1};
+    while (pos != prefix.begin()) {
+      --pos;
+      const auto &inst = *pos->instruction;
+      const auto &defs = path_scalar_defs_.at(&inst);
+      if (std::ranges::find(defs, base.index) == defs.end() &&
+          std::ranges::find(defs, high.index) == defs.end())
+        continue;
+      // CDNA3 GPUVM uses 48 address bits. Clearing higher bits preserves the address.
+      if (inst.mnemonic() == "s_and_b32" && inst.dst_operand(0)->to_register_ref() == high &&
+          inst.src_operand(0)->to_register_ref() == high &&
+          inst.src_operand(1)->const_value() == 0xffffu)
+        continue;
+      return false;
+    }
+
+    if (!metadata_sizes_)
+      metadata_sizes_ = metadata_kernarg_sizes(image_);
+    uint32_t extent = current_kernel_->kernarg_size;
+    const auto metadata = metadata_sizes_->find(current_kernel_->name);
+    if (metadata != metadata_sizes_->end())
+      extent = extent ? std::min(extent, metadata->second) : metadata->second;
+    return later->bytes.end <= extent;
+  }
 
   void prepare_cfg_path_filter(const std::vector<BasicBlock *> &blocks,
                                const std::vector<std::vector<size_t>> &predecessors,
@@ -4025,6 +4133,12 @@ private:
         if (access == WaitcheckAccessKind::Use && event.check_defs &&
             inst.mnemonic() == "v_writelane_b32" && du.defs.contains(*reg))
           access = WaitcheckAccessKind::Def;
+        // The HSA argument segment is immutable throughout dispatch. Two loads
+        // writing identical bytes into the same dwords can finish in either order.
+        // Both results remain outstanding for reads and other overwrites.
+        if (access == WaitcheckAccessKind::Def && event.counter == WaitCounterKind::Ds &&
+            event.kind == WaitEventKind::Smem && repeats_kernarg_read(event.section_offset, inst))
+          continue;
         if (access == WaitcheckAccessKind::Def &&
             !(event.counter == WaitCounterKind::Load &&
               inst.mnemonic().find("atomic") != std::string_view::npos) &&
@@ -4577,6 +4691,9 @@ private:
   std::set<std::tuple<std::string, WaitCounterKind, uint64_t, uint64_t, uint64_t, uint32_t,
                       uint32_t, bool>>
       counter_underaccounting_keys_;
+  std::span<const uint8_t> image_;
+  std::optional<std::map<std::string, uint32_t>> metadata_sizes_;
+  bool cfg_has_unknown_successor_ = false;
   std::unordered_map<const Instruction *, std::vector<uint16_t>> path_scalar_defs_;
   std::set<uint16_t> path_mask_inputs_;
   bool cfg_has_mask_branches_ = false;
@@ -4631,7 +4748,9 @@ waitcheck_kernel_from_descriptor(std::string name, uint64_t descriptor_vaddr, ui
           vgprs,
           vgprs,
           sgprs,
-          sgprs};
+          sgprs,
+          kernarg_segment_ptr_sgpr(descriptor),
+          descriptor.kernarg_size};
 }
 
 rj_code_arch_t waitcheck_arch_for_target(rj_code_target_id_t target) {
@@ -4704,7 +4823,9 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
     }
   }
 
-  Analyzer analyzer(report, options, elf_machine);
+  const auto image = std::span(reinterpret_cast<const uint8_t *>(code_object.image_data()),
+                               code_object.image_size());
+  Analyzer analyzer(report, options, elf_machine, image);
   if (!report.supported)
     return report;
 

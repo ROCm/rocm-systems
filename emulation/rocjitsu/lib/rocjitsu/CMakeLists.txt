@@ -96,7 +96,7 @@ add_library(
 )
 target_link_libraries(
     rocjitsu_waitcheck_internal
-    PUBLIC rocjitsu_analysis_internal
+    PUBLIC rocjitsu_analysis_internal rocjitsu_amdhsa_metadata
 )
 set_target_properties(
     rocjitsu_waitcheck_internal

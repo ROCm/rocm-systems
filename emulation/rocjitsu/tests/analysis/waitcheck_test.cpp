@@ -1,11 +1,13 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "../amdhsa_metadata_test_util.h"
 #include "../tools/waitcheck_fixture.h"
 #include "decode_test_util.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/analysis/indirect_branch_discovery.h"
 #include "rocjitsu/code/analysis/waitcheck.h"
+#include "rocjitsu/code/analysis/waitcheck/byte_interval.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/builders/spill_builders.h"
@@ -148,6 +150,169 @@ constexpr std::array<uint32_t, 4> kGfx1250ScaledWmma{
     0xcc336008u,
     0x04223110u,
 };
+
+TEST(WaitcheckTest, ByteIntervalsRequireACommonBoundedBase) {
+  using namespace waitcheck_detail;
+  constexpr auto a = ByteInterval::within(4, 8, 16);
+  EXPECT_EQ(compare_intervals(a, ByteInterval::within(4, 8, 16)), IntervalRelation::Identical);
+  EXPECT_EQ(compare_intervals(a, ByteInterval::within(8, 4, 16)), IntervalRelation::Overlap);
+  EXPECT_EQ(compare_intervals(a, ByteInterval::within(0, 8, 16)), IntervalRelation::Overlap);
+  EXPECT_EQ(compare_intervals(a, ByteInterval::within(12, 4, 16)), IntervalRelation::Disjoint);
+  EXPECT_EQ(compare_intervals(a, ByteInterval::within(0, 4, 16)), IntervalRelation::Disjoint);
+  EXPECT_EQ(compare_intervals(a, std::nullopt), IntervalRelation::Unknown);
+  EXPECT_EQ(compare_intervals(a, ByteInterval::within(UINT32_MAX - 3, 4, UINT32_MAX)),
+            IntervalRelation::Unknown);
+}
+
+WaitcheckReport check_gfx942_kernarg(std::vector<uint32_t> words, uint32_t size = 16,
+                                     uint16_t properties = 8,
+                                     std::initializer_list<test::MetadataKernel> metadata = {}) {
+  words.push_back(0xbf8cc07f);  // s_waitcnt lgkmcnt(0)
+  words.push_back(0xBF810000u); // s_endpgm
+  auto image = waitcheck_test::make_gfx_code_object(words, EF_AMDGPU_MACH_AMDGCN_GFX942);
+  Elf64_Ehdr header{};
+  std::memcpy(&header, image.data(), sizeof(header));
+  Elf64_Shdr rodata{};
+  std::memcpy(&rodata, image.data() + header.e_shoff + 2 * sizeof(rodata), sizeof(rodata));
+  const size_t kd = rodata.sh_offset;
+  std::memcpy(image.data() + kd + offsetof(amdhsa::kernel_descriptor_t, kernarg_size), &size,
+              sizeof(size));
+  std::memcpy(image.data() + kd + offsetof(amdhsa::kernel_descriptor_t, kernel_code_properties),
+              &properties, sizeof(properties));
+  if (metadata.size())
+    image = test::with_resource_metadata(image, metadata);
+  const AmdGpuCodeObject object(image.data(), image.size());
+  return analyze_waitcnts(object, ROCJITSU_CODE_ARCH_CDNA3);
+}
+
+TEST(WaitcheckTest, Gfx942KernargMetadataUsesTheUniqueDescriptorSymbol) {
+  constexpr uint32_t load = 0xc0020100; // s_load_dword s4, s[0:1], imm
+  const test::MetadataKernel first{"source", 16, 16, 4, 0, "waitcheck.kd"};
+  const test::MetadataKernel other{"alias", 64, 16, 4, 0, "waitcheck.kd"};
+  const test::MetadataKernel unrelated{"waitcheck", 64, 16, 4, 0, "other.kd"};
+  const auto check = [&](std::initializer_list<test::MetadataKernel> entries, size_t expected) {
+    const auto report = check_gfx942_kernarg({load, 4, load, 4}, 0, 8, entries);
+    ASSERT_TRUE(report.complete && report.supported) << report.analysis_error;
+    EXPECT_EQ(report.diagnostics.size(), expected);
+  };
+  check({first}, 0);
+  check({first, unrelated}, 0);
+  check({first, other}, 1);
+  check({unrelated}, 1);
+  const auto bounded = check_gfx942_kernarg({load, 12, load, 12}, 8, 8, {first});
+  ASSERT_TRUE(bounded.complete && bounded.supported) << bounded.analysis_error;
+  EXPECT_EQ(bounded.diagnostics.size(), 1u);
+}
+
+TEST(WaitcheckTest, Gfx942IdenticalKernargLoadsOnlyExemptTheirResultOverwrite) {
+  constexpr uint32_t load_s4 = 0xc0020100; // s_load_dword s4, s[0:1], imm
+  auto report = check_gfx942_kernarg({0x8601ff01, 0xffff, load_s4, 4, load_s4, 4});
+  ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+  report = check_gfx942_kernarg({load_s4, 4, load_s4, 4, 0xbe880004}); // read s4 before wait
+  ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 2u) << diagnostic_summary(report);
+  for (const auto &d : report.diagnostics) {
+    EXPECT_EQ(d.access, WaitcheckAccessKind::Use);
+    EXPECT_EQ(d.section_offset, 16u);
+  }
+}
+
+TEST(WaitcheckTest, Gfx942IdenticalKernargBytesMustMapToTheSameSgprs) {
+  // The two x8 loads map different argument dwords into the shared s[8:11] lanes.
+  const auto report = check_gfx942_kernarg({0xc00e0100, 0, 0xc00e0200, 0}, 32);
+  ASSERT_TRUE(report.complete && report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u);
+  const auto &diagnostic = report.diagnostics.front();
+  EXPECT_EQ(diagnostic.access, WaitcheckAccessKind::Def);
+  EXPECT_EQ(diagnostic.reg.index, 8u);
+  EXPECT_EQ(diagnostic.section_offset, 8u);
+}
+
+TEST(WaitcheckTest, Gfx942KernargProofRejectsABackedgeThatCanClobberTheBase) {
+  constexpr uint32_t load = 0xc0020100;
+  const auto report = check_gfx942_kernarg({load, 0, load, 0, 0xbf8cc07f, 0xbe800002, 0xbf84fff9});
+  ASSERT_TRUE(report.complete && report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u);
+  EXPECT_EQ(report.diagnostics[0].producer_section_offset, 0u);
+  EXPECT_EQ(report.diagnostics[0].section_offset, 8u);
+}
+
+TEST(WaitcheckTest, Gfx942KernargProofRequiresAnUnambiguousEntryAbi) {
+  const std::vector<uint32_t> words{0xc0020100, 0x38, 0xc0020100, 0x38, 0xbf8cc07f, 0xbf810000};
+  auto image = waitcheck_test::make_gfx_multi_kernel_code_object(
+      {{"first", words}, {"alias", words}}, EF_AMDGPU_MACH_AMDGCN_GFX942);
+  Elf64_Ehdr header{};
+  std::memcpy(&header, image.data(), sizeof(header));
+  Elf64_Shdr rodata{};
+  std::memcpy(&rodata, image.data() + header.e_shoff + 2 * sizeof(rodata), sizeof(rodata));
+  for (size_t i = 0; i < 2; ++i) {
+    const auto offset = rodata.sh_offset + i * sizeof(amdhsa::kernel_descriptor_t);
+    amdhsa::kernel_descriptor_t descriptor{};
+    std::memcpy(&descriptor, image.data() + offset, sizeof(descriptor));
+    descriptor.kernarg_size = 64;
+    descriptor.kernel_code_properties =
+        amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR;
+    if (i == 1) {
+      // This descriptor puts the queue pointer in s[0:1] and moves kernarg to s[2:3].
+      descriptor.kernel_code_properties |= amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_QUEUE_PTR;
+      descriptor.kernel_code_entry_byte_offset -= words.size() * sizeof(uint32_t);
+    }
+    std::memcpy(image.data() + offset, &descriptor, sizeof(descriptor));
+  }
+  const AmdGpuCodeObject object(image.data(), image.size());
+  const auto kernels = waitcheck_kernels(object);
+  ASSERT_EQ(kernels.size(), 1u);
+  ASSERT_EQ(kernels.front().alias_descriptor_vaddrs.size(), 1u);
+  for (const auto &report :
+       {analyze_waitcnts(object, ROCJITSU_CODE_ARCH_CDNA3),
+        analyze_waitcnts_for_kernel(object, ROCJITSU_CODE_ARCH_CDNA3, kernels.front())}) {
+    ASSERT_TRUE(report.complete && report.supported) << report.analysis_error;
+    ASSERT_EQ(report.diagnostics.size(), 1u);
+    EXPECT_EQ(report.diagnostics[0].section_offset, 8u);
+    EXPECT_EQ(report.diagnostics[0].reg.index, 4u);
+  }
+}
+
+TEST(WaitcheckTest, Gfx942KernargProofStopsAtTheBackwardSearchLimit) {
+  constexpr uint32_t load = 0xc0020100;
+  for (const unsigned padding : {31u, 32u}) {
+    std::vector<uint32_t> words(padding, 0xbf800000u); // s_nop 0
+    words.insert(words.end(), {load, 4, load, 4});
+    const auto report = check_gfx942_kernarg(words);
+    ASSERT_TRUE(report.complete && report.supported) << report.analysis_error;
+    EXPECT_EQ(report.diagnostics.size(), padding == 31 ? 0u : 1u);
+  }
+}
+
+TEST(WaitcheckTest, Gfx942DistinctOrUnknownKernargLoadsKeepOverwriteWaits) {
+  constexpr uint32_t load = 0xc0020100; // s_load_dword s4, s[0:1], imm
+  const std::vector<std::vector<uint32_t>> programs{
+      {load, 4, load, 8},                               // disjoint byte interval, same SGPR
+      {0xc0060100, 4, load, 8},                         // partially overlapping input/destination
+      {load, 0, load + 1, 0},                           // second SMEM base is s[2:3]
+      {load, 0, 0xbe800002, load, 0},                   // overwrite the low kernarg SGPR
+      {0x8601ff01, 0xfffe, load, 0, load, 0},           // mask changes a translated address bit
+      {0x8601ff02, 0xffff, load, 0, load, 0},           // mask source is a different SGPR
+      {load, 16, load, 16},                             // first byte beyond the argument segment
+      {0xc0060100, 12, 0xc0060100, 12},                 // last dword falls outside
+      {load, 0x1ffffc, load, 0x1ffffc},                 // signed offset -4
+      {0xc0024100, 0x04000000, 0xc0024100, 0x04000000}, // s2 + immediate offset
+      {0xbf840001, 0xbe800002, load, 0, load, 0},       // changed and unchanged bases join
+      {load, 0, load, 0, 0xbe800002, 0xbf84fffa},       // backedge with a changed base
+  };
+  for (const auto &words : programs) {
+    const auto report = check_gfx942_kernarg(words);
+    ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+    EXPECT_FALSE(report.diagnostics.empty()) << std::hex << words.front();
+  }
+  for (const auto &[size, properties] :
+       std::array<std::pair<uint32_t, uint16_t>, 2>{{{0, 8}, {16, 0}}}) {
+    const auto report = check_gfx942_kernarg({load, 4, load, 4}, size, properties);
+    ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+    EXPECT_EQ(report.diagnostics.size(), 1u);
+  }
+}
 
 TEST(WaitcheckTest, ReachableGfx1250DecodePreservesFourWordInstruction) {
   std::vector<uint32_t> program(kGfx1250ScaledWmma.begin(), kGfx1250ScaledWmma.end());
