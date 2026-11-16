@@ -124,7 +124,7 @@ __launch_bounds__(512)
 
   // Phase 1: send each peer the shard that peer owns, kBatch peers per round.
   // Staged: a push returns once issued, so loading one peer ahead hides the load; a batch of 8 would spill.
-  // Coop: load a batch of 8 peers, then store it.
+  // Coop: load a batch of 8 peers, then store it; every load of the batch issues before any flag-lane shuffle.
   constexpr int kAhead = ddaLL128Staged<WIRE>() ? 1 : 0;
   constexpr int kBatch = kAhead ? 1 : kDdaLLPeerBatch;
   for (size_t s = gwarp; s < slicesTotal; s += wstride) {
@@ -151,10 +151,19 @@ __launch_bounds__(512)
         if (r + kAhead < nRanks) {
           const int peer = (selfRank + r) % nRanks;
           const int src = kAhead ? (peer + 1) % nRanks : peer;
-          ddaLL128LoadRegs<int8_t>(next[i], srcBytes + (size_t)src * shardBytes + sliceByte, eltInSlice, lane,
-                                   flagLane);
+          if constexpr (kAhead) {
+            ddaLL128LoadRegs<int8_t>(next[i], srcBytes + (size_t)src * shardBytes + sliceByte, eltInSlice, lane,
+                                     flagLane);
+          } else {
+            ddaLL128LoadRegsBegin<int8_t>(next[i], srcBytes + (size_t)src * shardBytes + sliceByte, eltInSlice, lane,
+                                          flagLane);
+          }
         }
       } while (++i < kBatch);
+      if constexpr (!kAhead) {
+        // Keeps every flag-lane shuffle below the batch's loads, so no peer's loads wait on another peer's.
+        __builtin_amdgcn_sched_barrier(0);
+      }
       uint64_t (&send)[kBatch][kDdaLL128WordsPerThread] = kAhead ? cur : next;
       i = 0;
 #pragma unroll
@@ -162,6 +171,9 @@ __launch_bounds__(512)
         const int r = base + i;
         if (r < nRanks) {
           const int peer = (selfRank + r) % nRanks;
+          if constexpr (!kAhead) {
+            ddaLL128LoadRegsFinish(send[i], flagLane);
+          }
           ddaLL128StageFill<WIRE>(stage, send[i], flag, flagLane, lane);
           ddaLL128StagePush<WIRE>(stage, scatterSlice(peer, bankWords, wireOff), send[i], flag, flagLane, lane);
         }
@@ -177,7 +189,14 @@ __launch_bounds__(512)
 
   // Phase 2: fold every copy of my shard, hand the result back out, then keep it.
   // The staged kernel folds over the runtime count: an unrolled fold on top of the staging state raises register use.
+  // Coop polls kPollBatch peers at a time (a fixed-rank instance at most its peers), staged one at a time.
   const int foldRanks = ddaLL128Staged<WIRE>() ? nRanksRt : nRanks;
+  constexpr int kPollBatch =
+    NRANKS_CT && NRANKS_CT - 1 < kDdaLL128ArPollBatch<T> ? NRANKS_CT - 1 : kDdaLL128ArPollBatch<T>;
+  const int laneWord = 2 * lane;
+  const int firstPeer = ddaLL128ArNextRank(selfRank, nRanks);
+  // Abort exits via the common tail.
+  bool aborted = false;
   for (size_t s = gwarp; s < slicesTotal; s += wstride) {
     const size_t sliceByte = s * (size_t)kDdaLL128DataBytesPerSlice;
     const size_t rem = shardBytes - sliceByte;
@@ -187,25 +206,67 @@ __launch_bounds__(512)
 
     // Seed with my own shard; peers are folded on top.
     uint64_t acc[kDdaLL128WordsPerThread] = {};
-    ddaLL128LoadRegs<int8_t>(acc, srcBytes + (size_t)selfRank * shardBytes + sliceByte, eltInSlice, lane, flagLane);
-
-    for (int r = 1; r < foldRanks; ++r) {
-      const int peer = (selfRank + r) % nRanks;
-      const uint64_t* gatherSlot = selfBase + bankWords + (uint64_t)peer * (uint64_t)slotWords;
-      uint64_t vr[kDdaLL128WordsPerThread];
-      if (!ddaLL128PollWire(gatherSlot + wireOff, vr, flag, lane, params)) {
-        ddaLL128StageDrain<WIRE>();
-        ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag32);
-        return;
-      }
-      // On a flag lane the odd words hold flags rather than payload, so the sums
-      // landing there are meaningless -- ddaLL128StoreRegs re-derives those slots
-      // from the even ones and never writes them out, so folding blind is cheaper
-      // than predicating the loop.
+    if constexpr (ddaLL128Staged<WIRE>()) {
+      ddaLL128LoadRegs<int8_t>(acc, srcBytes + (size_t)selfRank * shardBytes + sliceByte, eltInSlice, lane, flagLane);
+      for (int r = 1; r < foldRanks; ++r) {
+        const int peer = (selfRank + r) % nRanks;
+        const uint64_t* gatherSlot = selfBase + bankWords + (uint64_t)peer * (uint64_t)slotWords;
+        uint64_t vr[kDdaLL128WordsPerThread];
+        if (!ddaLL128PollWire(gatherSlot + wireOff, vr, flag, lane, params)) {
+          aborted = true;
+          break;
+        }
+        // On a flag lane the odd words hold flags rather than payload, so the sums
+        // landing there are meaningless -- ddaLL128StoreRegs re-derives those slots
+        // from the even ones and never writes them out, so folding blind is cheaper
+        // than predicating the loop.
 #pragma unroll
-      for (int u = 0; u < kDdaLL128WordsPerThread; ++u) {
-        acc[u] = ddaLL128AddWord<T>(acc[u], vr[u]);
+        for (int u = 0; u < kDdaLL128WordsPerThread; ++u) {
+          acc[u] = ddaLL128AddWord<T>(acc[u], vr[u]);
+        }
       }
+    } else {
+      // Its loads stay in flight through the first poll batch, which is when it is finished.
+      ddaLL128LoadRegsBegin<int8_t>(acc, srcBytes + (size_t)selfRank * shardBytes + sliceByte, eltInSlice, lane,
+                                    flagLane);
+      const size_t sliceWire = s * (size_t)kDdaLL128WireWordsPerSlice;
+      int peer = firstPeer;
+      for (int base = 1; base < nRanks; base += kPollBatch) {
+        int peers[kPollBatch];
+        bool valid[kPollBatch];
+        peer = ddaLL128ArBatchPeers(peer, base, nRanks, peers, valid);
+        const uint64_t* lines[kPollBatch];
+#pragma unroll
+        for (int k = 0; k < kPollBatch; ++k) {
+          // Every line is read to stay branch-free; a past-the-end one is my own unused slot, ignored.
+          lines[k] = selfBase + bankWords + (uint64_t)peers[k] * (uint64_t)slotWords + sliceWire;
+        }
+        uint64_t vr[kPollBatch][kDdaLL128WordsPerThread];
+        if (!ddaLL128ArWaitBatch(lines, valid, laneWord, flag, flagLane, params, vr)) {
+          aborted = true;
+          break;
+        }
+        if (base == 1) {
+          ddaLL128LoadRegsFinish(acc, flagLane);
+        }
+        // Fold word by word, each word taking the batch's peers in walk order, as the one-peer loop did.
+#pragma unroll
+        for (int u = 0; u < kDdaLL128WordsPerThread; ++u) {
+#pragma unroll
+          for (int k = 0; k < kPollBatch; ++k) {
+            // A select rather than a branch, so the batch's reads stay in flight together.
+            const uint64_t sum = ddaLL128AddWord<T>(acc[u], vr[k][u]);
+            acc[u] = valid[k] ? sum : acc[u];
+          }
+          if constexpr (is_fp8_v<T>) {
+            // Fold fp8 per word: hoisted pk8 upconverts take 8 VGPRs each and spill; mask 0x20 lets VMEM reads cross.
+            __builtin_amdgcn_sched_barrier(0x20);
+          }
+        }
+      }
+    }
+    if (aborted) {
+      break;
     }
 
     // Publish before the local unpack: it is what the peers are spinning on, and
@@ -224,24 +285,51 @@ __launch_bounds__(512)
     ddaLL128StoreRegs<int8_t>(dstBytes + (size_t)selfRank * shardBytes + sliceByte, acc, eltInSlice, lane, flagLane);
   }
 
-  // Phase 3: collect the peers' reduced shards into the rest of recvbuff.
-  for (size_t s = gwarp; s < slicesTotal; s += wstride) {
+  // Phase 3: collect the peers' reduced shards into the rest of recvbuff. Coop polls kPollBatch peers at a time.
+  for (size_t s = gwarp; !aborted && s < slicesTotal; s += wstride) {
     const size_t sliceByte = s * (size_t)kDdaLL128DataBytesPerSlice;
     const size_t rem = shardBytes - sliceByte;
     const int eltInSlice =
       rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
     const size_t wireOff = s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane;
 
-    for (int r = 1; r < nRanks; ++r) {
-      const int peer = (selfRank + r) % nRanks;
-      const uint64_t* gatherSlot = selfBase + bankWordsNext + (uint64_t)peer * (uint64_t)slotWords;
-      uint64_t vr[kDdaLL128WordsPerThread];
-      if (!ddaLL128PollWire(gatherSlot + wireOff, vr, flag, lane, params)) {
-        ddaLL128StageDrain<WIRE>();
-        ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag32);
-        return;
+    if constexpr (ddaLL128Staged<WIRE>()) {
+      for (int r = 1; r < nRanks; ++r) {
+        const int peer = (selfRank + r) % nRanks;
+        const uint64_t* gatherSlot = selfBase + bankWordsNext + (uint64_t)peer * (uint64_t)slotWords;
+        uint64_t vr[kDdaLL128WordsPerThread];
+        if (!ddaLL128PollWire(gatherSlot + wireOff, vr, flag, lane, params)) {
+          aborted = true;
+          break;
+        }
+        ddaLL128StoreRegs<int8_t>(dstBytes + (size_t)peer * shardBytes + sliceByte, vr, eltInSlice, lane, flagLane);
       }
-      ddaLL128StoreRegs<int8_t>(dstBytes + (size_t)peer * shardBytes + sliceByte, vr, eltInSlice, lane, flagLane);
+    } else {
+      const size_t sliceWire = s * (size_t)kDdaLL128WireWordsPerSlice;
+      int peer = firstPeer;
+      for (int base = 1; base < nRanks; base += kPollBatch) {
+        int peers[kPollBatch];
+        bool valid[kPollBatch];
+        peer = ddaLL128ArBatchPeers(peer, base, nRanks, peers, valid);
+        const uint64_t* lines[kPollBatch];
+#pragma unroll
+        for (int k = 0; k < kPollBatch; ++k) {
+          // A past-the-end line is my own unused slot, read and ignored.
+          lines[k] = selfBase + bankWordsNext + (uint64_t)peers[k] * (uint64_t)slotWords + sliceWire;
+        }
+        uint64_t vr[kPollBatch][kDdaLL128WordsPerThread];
+        if (!ddaLL128ArWaitBatch(lines, valid, laneWord, flag, flagLane, params, vr)) {
+          aborted = true;
+          break;
+        }
+#pragma unroll
+        for (int k = 0; k < kPollBatch; ++k) {
+          if (valid[k]) {
+            ddaLL128StoreRegs<int8_t>(dstBytes + (size_t)peers[k] * shardBytes + sliceByte, vr[k], eltInSlice, lane,
+                                      flagLane);
+          }
+        }
+      }
     }
   }
 
