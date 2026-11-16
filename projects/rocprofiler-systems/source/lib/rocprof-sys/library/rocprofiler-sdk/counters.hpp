@@ -97,7 +97,7 @@ namespace tim::operation
 template <>
 struct set_storage<::rocprofsys::rocprofiler_sdk::counter_data_tracker>
 {
-    static constexpr size_t max_threads = 4096;
+    static constexpr size_t max_threads = ROCPROFSYS_MAX_THREADS;
     using type            = ::rocprofsys::rocprofiler_sdk::counter_data_tracker;
     using storage_array_t = std::array<storage<type>*, max_threads>;
     friend struct get_storage<rocprofsys::rocprofiler_sdk::counter_data_tracker>;

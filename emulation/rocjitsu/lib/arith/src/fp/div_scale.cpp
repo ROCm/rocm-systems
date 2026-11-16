@@ -4,10 +4,10 @@
 // Division operand rescaling and its per-lane scaling-condition output.
 // Owns public entry points and their validation/dispatch policy.
 
-#include "common/internal.h"
+#include "common/validation.h"
 #include "fp/div_scale_impl.h"
 #include "fp/float_output.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 
 #include <stdint.h>
 

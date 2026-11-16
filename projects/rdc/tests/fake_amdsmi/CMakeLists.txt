@@ -37,7 +37,19 @@ install(
 # tests/ci skips them.
 file(GLOB FAKE_GPU_TESTS CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/tests/ci/test_fake_gpu*.py)
 install(
-    FILES fake_values.inc ${FAKE_GPU_TESTS} ${PROJECT_SOURCE_DIR}/tests/ci/fake_gpu_golden.py
+    FILES
+        fake_values.inc
+        ${FAKE_GPU_TESTS}
+        ${PROJECT_SOURCE_DIR}/tests/ci/fake_gpu_golden.py
+        ${PROJECT_SOURCE_DIR}/tests/ci/fake_gpu_stress.py
     DESTINATION ${FAKE_GPU_TEST_DIR}
     COMPONENT ${TESTS_COMPONENT}
+)
+# The installed suite's conftest.py carries only the stress plumbing; helpers and fixtures come
+# from test_fake_gpu.py.
+install(
+    FILES ${PROJECT_SOURCE_DIR}/tests/ci/fake_gpu_conftest.py
+    DESTINATION ${FAKE_GPU_TEST_DIR}
+    COMPONENT ${TESTS_COMPONENT}
+    RENAME conftest.py
 )

@@ -11,13 +11,15 @@ namespace amdgpu {
 
 /// Raw LDS barrier cell used by the gfx1250 DS barrier-arrive instructions.
 ///
-/// RocJITsu uses the CDNA5 WIDTH=29 form described by the architectural LDS
-/// barrier layout: [28:0] pending, [31:29] phase, and [47:32] init count.
+/// RocJITsu models WIDTH=29 from CDNA5 ISA section 11.2.2. Bits [28:0] hold
+/// the pending count, [31:29] the phase, and [47:32] the initial count.
 /// Polling kernels test bit 29 for phase parity.
+constexpr uint64_t kLdsBarrierCellBarStateMask = 0xffffffffull;
 constexpr uint64_t kLdsBarrierCellPendingMask = (1ull << 29) - 1;
 constexpr uint64_t kLdsBarrierCellPhaseMask = 0x7ull;
 constexpr uint64_t kLdsBarrierCellInitCountMask = 0xffffull;
 constexpr uint32_t kLdsBarrierCellPhaseShift = 29;
+constexpr uint32_t kLdsBarrierCellPendingRollUnderBit = 1u << (kLdsBarrierCellPhaseShift - 1);
 constexpr uint32_t kLdsBarrierCellInitCountShift = 32;
 constexpr uint64_t kLdsBarrierCellReservedMask = 0xffff000000000000ull;
 
@@ -36,37 +38,15 @@ inline uint64_t lds_barrier_cell_init_count(uint64_t state) {
   return (state >> kLdsBarrierCellInitCountShift) & kLdsBarrierCellInitCountMask;
 }
 
-/// Apply one or more barrier-arrive operations to a raw barrier cell.
-///
-/// A zero decrement is a no-op. A decrement larger than the remaining pending
-/// count may complete multiple phases.
-inline uint64_t lds_barrier_cell_update_arrive(uint64_t state, uint64_t decrement = 1) {
-  uint64_t pending = lds_barrier_cell_pending_count(state);
-  uint64_t phase_value = lds_barrier_cell_phase(state);
-  const uint64_t initial_count = lds_barrier_cell_init_count(state);
-
-  if (decrement == 0) {
-    // Explicitly arriving zero waves is a no-op; it must not flip phase on an
-    // already-drained cell.
-    return state;
-  }
-
-  if (decrement <= pending) {
-    pending -= decrement;
-  } else {
-    decrement -= pending + 1;
-    phase_value = (phase_value - 1) & kLdsBarrierCellPhaseMask;
-
-    const uint64_t phase_period = initial_count + 1;
-    const uint64_t full_periods = decrement / phase_period;
-    phase_value = (phase_value - full_periods) & kLdsBarrierCellPhaseMask;
-
-    const uint64_t remainder = decrement % phase_period;
-    pending = initial_count - remainder;
-  }
-
-  return (state & kLdsBarrierCellReservedMask) | (initial_count << kLdsBarrierCellInitCountShift) |
-         (phase_value << kLdsBarrierCellPhaseShift) | pending;
+/// Subtract the update once from the packed 32-bit phase and pending count.
+/// CDNA5 ISA section 15.15 tests bit 28 of the result for roll-under at WIDTH=29.
+/// When set, keep the phase from the subtraction and reload the initial count.
+inline uint64_t lds_barrier_cell_update_arrive(uint64_t state, uint32_t update = 1) {
+  const uint32_t next = static_cast<uint32_t>(state) - update;
+  uint64_t result = (state & ~kLdsBarrierCellBarStateMask) | next;
+  if (next & kLdsBarrierCellPendingRollUnderBit)
+    result = (result & ~kLdsBarrierCellPendingMask) | lds_barrier_cell_init_count(state);
+  return result;
 }
 
 /// Initialize a raw barrier cell for the requested arrivals per phase.

@@ -47,6 +47,9 @@ typedef enum {
   RAS_ACS_ABORT = 16
 } rasACStatus;
 
+// A rank's nvmlDev indexes a 64-bit device bitmask (peerNvmlDevs, via 1ULL << nvmlDev), so it must be in [0, 64).
+#define RAS_MAX_NVML_DEVS (8 * (int)sizeof(uint64_t))
+
 // Communicator errors, used in rasAuxComm below.  The values are bitmasks so that they can be combined (with the
 // exception of RAS_ACE_OK).
 typedef enum {
@@ -481,10 +484,13 @@ void rasClientEventLoop(struct rasClient* client, int pollIdx) {
         char* endPtr = nullptr;
         errno = 0;
         double timeout = strtod(cmd + strlen("timeout "), &endPtr);
-        if (errno != 0 || !endPtr || *endPtr != '\0' || !std::isfinite(timeout) || timeout < 0.0) {
+        // Range-check before the int64 conversion (out of range is UB); collectives.cc adds it to timestamps.
+        const double scaledTimeout = timeout * (double)CLOCK_UNITS_PER_SEC;
+        if (errno != 0 || !endPtr || *endPtr != '\0' || !std::isfinite(timeout) || timeout < 0.0 ||
+            !(scaledTimeout <= (double)RAS_MAX_TIMEOUT_NS)) {
           snprintf(rasLine, sizeof(rasLine), "ERROR: Invalid timeout value %s\n", cmd + strlen("timeout "));
         } else {
-          client->timeout = timeout * CLOCK_UNITS_PER_SEC;
+          client->timeout = (int64_t)scaledTimeout;
           strcpy(rasLine, "OK\n");
         }
         if (rasClientEnqueueString(client, rasLine) != ncclSuccess) {
@@ -1158,6 +1164,70 @@ fail:
 }
 #endif
 
+// Byte size of one variable-length rasCollComms::comm record: the fixed header plus its nRanks rank
+// entries and the nMissingRanks missing-rank entries that follow them.  Valid only once the counts
+// have been range-checked (rasClientValidateComms).
+static inline size_t rasCommRecordSize(const struct rasCollComms::comm* comm) {
+  return sizeof(*comm) + (size_t)comm->nRanks * sizeof(*comm->ranks) +
+         (size_t)comm->nMissingRanks * sizeof(struct rasCollCommsMissingRank);
+}
+
+// Index into statusStr[] of a communicator status bitmask: the position of its highest set bit.  A
+// zeroed status (a comm with no reported ranks, e.g. one still initializing) has no bit set and maps
+// to NOCOMM (index 0); COMPILER_CLZ(0) would be undefined.
+static inline int rasCommStatusIndex(unsigned int status) {
+  return status == 0 ? 0 : (int)(sizeof(unsigned int) * 8 - 1) - COMPILER_CLZ(status);
+}
+
+// Rejects peer-supplied RAS_COLL_COMMS records whose extent would overrun the report buffer.  Only the record
+// geometry has to be sound here: negative counts, or a record whose ranks/missing-ranks run past coll->data.
+// Count relationships are deliberately not enforced -- a zeroed record (nRanks == 0, a comm still initializing)
+// and an over-subscribed one (nRanks + nMissingRanks > commNRanks, which rasCollCommsMerge emits on a commHash
+// collision or a rank destroyed mid-collective) are both processed rather than dropped, since dropping would
+// terminate the client and hide the whole report.  rasClientRunComms sizes its scratch arrays from nRanks (not
+// the peer's commNRanks) and indexes them only by nRanks, so those cases stay memory-safe.
+static ncclResult_t rasClientValidateComms(const struct rasCollective* coll) {
+  const char* const end = coll->data + coll->nData;
+  const struct rasCollComms* commsData = (const struct rasCollComms*)coll->data;
+  if (coll->nData < (int)offsetof(struct rasCollComms, comms) || commsData->nComms < 0) {
+    INFO(NCCL_RAS, "RAS rejecting malformed communicators report (nData %d)", coll->nData);
+    return ncclInternalError;
+  }
+
+  const struct rasCollComms::comm* comm = commsData->comms;
+  for (int commIdx = 0; commIdx < commsData->nComms; commIdx++) {
+    if (end - (const char*)comm < (ptrdiff_t)sizeof(*comm) || comm->commNRanks < 0 || comm->nRanks < 0 ||
+        comm->nMissingRanks < 0) {
+      INFO(NCCL_RAS, "RAS rejecting malformed communicator record %d", commIdx);
+      return ncclInternalError;
+    }
+
+    const size_t recordSize = rasCommRecordSize(comm);
+    if ((size_t)(end - (const char*)comm) < recordSize) {
+      INFO(NCCL_RAS, "RAS rejecting truncated communicator record %d", commIdx);
+      return ncclInternalError;
+    }
+
+    for (int rankIdx = 0; rankIdx < comm->nRanks; rankIdx++) {
+      const struct rasCollComms::comm::rank* rank = comm->ranks + rankIdx;
+      const int initState = rank->status.initState;
+      const int asyncError = rank->status.asyncError;
+      if (rank->peerIdx < 0 || rank->peerIdx >= coll->nPeers || rank->nvmlDev < 0 ||
+          rank->nvmlDev >= RAS_MAX_NVML_DEVS || initState < 0 || initState >= ncclNumResults || asyncError < 0 ||
+          asyncError >= ncclNumResults) {
+        INFO(NCCL_RAS,
+             "RAS rejecting malformed rank record (commRank %d, peerIdx %d of %d, nvmlDev %d, initState %d, "
+             "asyncError %d)",
+             rank->commRank, rank->peerIdx, coll->nPeers, (int)rank->nvmlDev, initState, asyncError);
+        return ncclInternalError;
+      }
+    }
+
+    comm = (const struct rasCollComms::comm*)(((const char*)comm) + recordSize);
+  }
+  return ncclSuccess;
+}
+
 // Processes the response from the RAS_COLL_COMMS collective operation and sends the data to the client:
 // statistics on the communicators, missing data from ranks, inconsistent collective operation counts,
 // initialization and asynchronous errors, and inconsistent initialization/termination status.
@@ -1166,6 +1236,10 @@ static ncclResult_t rasClientRunComms(struct rasClient* client) {
   char* msg = nullptr;
   int msgLen;
   struct rasCollective* coll = client->coll;
+  if (coll == nullptr || coll->data == nullptr) {
+    INFO(NCCL_RAS, "RAS invalid collective operation status; client status %d -- internal error?", client->status);
+    return ncclInternalError;
+  }
   struct rasCollComms* commsData = (struct rasCollComms*)coll->data;
   struct rasCollComms::comm* comm;
   struct rasAuxCommRank* auxCommRanks = nullptr;
@@ -1192,13 +1266,15 @@ static ncclResult_t rasClientRunComms(struct rasClient* client) {
   };
 
   TRACE(NCCL_RAS, "RAS: rasClientRunComms: starting");
-  TRACE(NCCL_RAS, "RAS: coll nLegTimeouts %d, nPeers %d, nData %d; commsData nComms %d", coll->nLegTimeouts,
-        coll->nPeers, coll->nData, commsData->nComms);
 
-  if (coll == nullptr || coll->nFwdSent != coll->nFwdRecv) {
+  if (coll->nFwdSent != coll->nFwdRecv) {
     INFO(NCCL_RAS, "RAS invalid collective operation status; client status %d -- internal error?", client->status);
     return ncclInternalError;
   }
+  // Before any read of commsData, and while client->coll is still set so that rasClientRun frees it.
+  NCCLCHECK(rasClientValidateComms(coll));
+  TRACE(NCCL_RAS, "RAS: coll nLegTimeouts %d, nPeers %d, nData %d; commsData nComms %d", coll->nLegTimeouts,
+        coll->nPeers, coll->nData, commsData->nComms);
   client->coll = nullptr;
 
   rasOutReset();
@@ -1211,15 +1287,16 @@ static ncclResult_t rasClientRunComms(struct rasClient* client) {
   // of variable length, we create an auxiliary array that includes pointers to individual elements and simply sort
   // that array while keeping the data intact.
   NCCLCHECKGOTO(ncclCalloc(&auxComms, commsData->nComms), ret, fail);
-  // While initializing the just allocated array, also find out the size of the largest communicator so that we know
-  // how much memory to allocate for another temporary array.
+  // While initializing the just allocated array, also find out the largest number of reported ranks so that we
+  // know how much memory to allocate for another temporary array.  We size from nRanks rather than the peer's
+  // commNRanks: the scratch arrays are only ever indexed by nRanks, and commNRanks is both unbounded (a bogus
+  // INT_MAX would demand a ~32 GB allocation) and not guaranteed >= nRanks in an over-subscribed record.
   maxCommSize = 0;
   comm = commsData->comms;
   for (int commIdx = 0; commIdx < commsData->nComms; commIdx++) {
-    if (maxCommSize < comm->commNRanks) maxCommSize = comm->commNRanks;
+    if (maxCommSize < comm->nRanks) maxCommSize = comm->nRanks;
     auxComms[commIdx].comm = comm;
-    comm = (struct rasCollComms::comm*)(((char*)(comm + 1)) + comm->nRanks * sizeof(*comm->ranks) +
-                                        comm->nMissingRanks * sizeof(struct rasCollCommsMissingRank));
+    comm = (struct rasCollComms::comm*)((char*)comm + rasCommRecordSize(comm));
   }
   NCCLCHECKGOTO(ncclCalloc(&auxCommRanks, maxCommSize), ret, fail);
   TRACE(NCCL_RAS, "RAS: maxCommSize %d", maxCommSize);
@@ -1323,7 +1400,9 @@ static ncclResult_t rasClientRunComms(struct rasClient* client) {
         // rankIdx > 0
         if (auxRank->value != auxRank[-1].value) {
           auxComm->nPeers++;
-          if (!ncclSocketsSameNode(&rasPeers[auxRank->value].addr, &rasPeers[auxRank[-1].value].addr)) {
+          // -1: a peer this process does not know (rasPeerFind miss); count it as a separate node.
+          if (auxRank->value == -1 || auxRank[-1].value == -1 ||
+              !ncclSocketsSameNode(&rasPeers[auxRank->value].addr, &rasPeers[auxRank[-1].value].addr)) {
             auxComm->nNodes++;
             if (auxComm->ranksPerNodeMin > nRanks) auxComm->ranksPerNodeMin = nRanks;
             if (auxComm->ranksPerNodeMax < nRanks) auxComm->ranksPerNodeMax = nRanks;
@@ -1380,8 +1459,8 @@ static ncclResult_t rasClientRunComms(struct rasClient* client) {
   for (int commIdx = 0; commIdx < commsData->nComms; commIdx++) {
     if (commIdx == 0 || auxComms[commIdx].comm->commNRanks != auxComms[commIdx - 1].comm->commNRanks ||
         auxComms[commIdx].nNodes != auxComms[commIdx - 1].nNodes ||
-        // COMPILER_CLZ returns the number of leading 0-bits, which is a proxy for the index of the highest 1-bit.
-        COMPILER_CLZ(auxComms[commIdx].status) != COMPILER_CLZ(auxComms[commIdx - 1].status) ||
+        // Group by the highest status bit set (its statusStr index), tolerating a zeroed status.
+        rasCommStatusIndex(auxComms[commIdx].status) != rasCommStatusIndex(auxComms[commIdx - 1].status) ||
         auxComms[commIdx].errors != auxComms[commIdx - 1].errors) {
       valCounts[nValCounts].value = 0; // We have many distinguishing values but only one field to store them.
       // It doesn't really matter, given that we can extract them via firstIdx.
@@ -1432,9 +1511,8 @@ static ncclResult_t rasClientRunComms(struct rasClient* client) {
     else snprintf(rasLine, sizeof(rasLine), "%d-%d", ranksPerNodeMin, ranksPerNodeMax);
     rasOutAppend("%5d  %8d  %8d  %8s  %8d  %8d  %8s  %6s\n", vcIdx, vc->count, auxComm->nNodes, rasLine,
                  auxComm->comm->commNRanks, ranksTotal,
-                 // COMPILER_CLZ returns the number of leading 0-bits.  This makes it possible to translate the
-                 // status (which is a bitmask) into an array index.
-                 statusStr[(sizeof(unsigned int) * 8 - 1) - COMPILER_CLZ(auxComm->status)], errorStr[auxComm->errors]);
+                 // Translate the status bitmask into a statusStr index via its highest set bit.
+                 statusStr[rasCommStatusIndex(auxComm->status)], errorStr[auxComm->errors]);
   }
   msgLen = rasOutLength();
   NCCLCHECKGOTO(rasClientAllocMsg(&msg, msgLen), ret, fail);
@@ -1630,10 +1708,10 @@ static ncclResult_t rasClientRunComms(struct rasClient* client) {
         rasOutAppend("#%d-%d (%016lx) MISMATCH\n", vcIdx, commIdx - vc->firstIdx, comm->commId.commHash);
 
         if (collOpCounts == nullptr) {
-          // Allocating comm->commNRanks elements ensures that we won't need to reallocate, because the valCounts
-          // array is reverse-sorted by commNRanks.  On the other hand, for this purpose allocating commNRanks
-          // elements may be massively overpessimistic...
-          NCCLCHECKGOTO(ncclCalloc(&collOpCounts, comm->commNRanks), ret, fail);
+          // Both frequency tallies below produce at most one entry per reported rank, plus (in the status tally)
+          // one "fake" NOCOMM entry, so maxCommSize + 1 never needs to reallocate.  maxCommSize is the largest
+          // nRanks across the report, so this one allocation is reused for every comm regardless of ordering.
+          NCCLCHECKGOTO(ncclCalloc(&collOpCounts, maxCommSize + 1), ret, fail);
         }
 
         if (COMPILER_POPCOUNT32(auxComm->status) > 1) {
@@ -2051,12 +2129,10 @@ static int rasAuxCommsCompareRev(const void* p1, const void* p2) {
   if (c1->comm->commNRanks == c2->comm->commNRanks) {
     if (c1->nNodes == c2->nNodes) {
       // We don't want to compare the status values directly because they could be bitmasks and we are only
-      // interested in the highest bit set.
-      // COMPILER_CLZ returns the number of leading 0-bits, so in our case the value will be the *smallest*
-      // if RAS_ACS_ABORT (8) is set and the *largest* if only RAS_ACS_INIT (1) is set, so we reverse the
-      // comparison to get the desired sorting order.
-      int s1 = COMPILER_CLZ(c1->status);
-      int s2 = COMPILER_CLZ(c2->status);
+      // interested in the highest bit set.  rasCommStatusIndex gives that bit's position (and tolerates a
+      // zeroed status); a higher index is the more severe state, which we want sorted first.
+      int s1 = rasCommStatusIndex(c1->status);
+      int s2 = rasCommStatusIndex(c2->status);
       if (s1 == s2) {
         if (c1->errors == c2->errors) {
           if (c1->comm->nRanks == c2->comm->nRanks) {
@@ -2068,7 +2144,7 @@ static int rasAuxCommsCompareRev(const void* p1, const void* p2) {
           return (c1->errors > c2->errors ? -1 : 1);
         }
       } else {
-        return (s1 < s2 ? -1 : 1);
+        return (s1 > s2 ? -1 : 1);
       }
     } else {
       return (c1->nNodes > c2->nNodes ? -1 : 1);

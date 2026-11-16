@@ -80,8 +80,10 @@ static ncclResult_t ncclTopoGetInterCpuBw(struct ncclTopoNode* cpu, float* bw) {
                                                             BDW_QPI_BW;
   }
   if (cpu->cpu.arch == NCCL_TOPO_CPU_ARCH_X86 && cpu->cpu.vendor == NCCL_TOPO_CPU_VENDOR_AMD) {
-    // RCCL: AMD_ZEN34_BW/AMD_ZEN5_BW are not yet validated with AMD GPUs; keep one value for every Zen generation.
-    *bw = AMD_ZEN12_BW;
+    // NCCL 2.31.2 modeled inter-socket rates. cpu.model is the Zen generation; Rome-class presets use cpu.rome.
+    *bw = cpu->cpu.model == NCCL_TOPO_CPU_MODEL_AMD_ZEN5  ? AMD_ZEN5_BW :
+          cpu->cpu.model == NCCL_TOPO_CPU_MODEL_AMD_ZEN34 ? AMD_ZEN34_BW :
+                                                            AMD_ZEN12_BW;
   }
   if (cpu->cpu.arch == NCCL_TOPO_CPU_ARCH_X86 && cpu->cpu.vendor == NCCL_TOPO_CPU_VENDOR_ZHAOXIN) {
     *bw = cpu->cpu.model == NCCL_TOPO_CPU_MODEL_YONGFENG ? YONGFENG_ZPI_BW : ZPI_BW;
@@ -984,6 +986,19 @@ static ncclResult_t ncclTopoGetDevForPciBusId(struct ncclTopoSystem* system, int
   return ncclSuccess;
 }
 
+// RCCL: workaround (AICOMNET-435) until fused MNNVL hosts are recognised as NVL-connected. Only a
+// scale-out comm (cross_clique on <system>, set by ncclTopoGetSystem) links UALoE fabric peers through
+// the shared NVS; a comm inside one clique keeps the per-host topology its ring search and channel
+// setup are tuned for.
+static ncclResult_t rcclTopoXmlIsCrossClique(struct ncclXmlNode* node, bool* crossClique) {
+  struct ncclXmlNode* topNode = node;
+  while (topNode->parent) topNode = topNode->parent;
+  int value = 0;
+  NCCLCHECK(xmlGetAttrIntDefault(topNode, "cross_clique", &value, 0));
+  *crossClique = value == 1;
+  return ncclSuccess;
+}
+
 // RCCL: XGMI is the AMD analogue of NVLink. Upstream v2.30 introduced the generic DEV
 // (physical device) topology node, with GPU (rank) nodes hanging off their parent DEV node
 // via LINK_LOC. ncclTopoComputePaths()/search now assemble inter-GPU links as DEV->DEV hops
@@ -1017,7 +1032,15 @@ ncclResult_t ncclTopoAddXGMI(struct ncclXmlNode* node, struct ncclTopoSystem* sy
     int targetType;
     NCCLCHECK(kvConvertToInt(targetClass, &targetType, kvDictPciClass));
     struct ncclTopoNode* remote = NULL;
-    if (targetType == GPU) {
+    // RCCL: amd-smi lists only local fabric peers, so with several MNNVL hosts link every GPU's fabric
+    // entries to one shared NVS (each adds one link width); a single host keeps direct links.
+    int fabricSupported = 0;
+    NCCLCHECK(xmlGetAttrIntDefault(node, "fabric_supported", &fabricSupported, 0));
+    bool viaFabricSwitch = false;
+    if (targetType == GPU && fabricSupported == 1 && system->nHosts > 1) {
+      NCCLCHECK(rcclTopoXmlIsCrossClique(node, &viaFabricSwitch));
+    }
+    if (targetType == GPU && !viaFabricSwitch) {
       // XGMI P2P connection to another GPU (between physical DEV nodes)
       const char* target;
       NCCLCHECK(xmlGetAttrStr(node, "target", &target));
@@ -1037,7 +1060,7 @@ ncclResult_t ncclTopoAddXGMI(struct ncclXmlNode* node, struct ncclTopoSystem* sy
     if (remote) {
       float nvlSpeed = ncclTopoXGMISpeed(devNode->dev.gcn);
       NCCLCHECK(ncclTopoConnectNodes(devNode, remote, LINK_NVL, count * nvlSpeed));
-      if (targetType != GPU) {
+      if (targetType != GPU || viaFabricSwitch) {
         NCCLCHECK(ncclTopoConnectNodes(remote, devNode, LINK_NVL, count * nvlSpeed));
       }
     }
@@ -2390,6 +2413,15 @@ ncclResult_t ncclTopoGetSystem(struct ncclComm* comm, struct ncclTopoSystem** sy
     struct ncclXml* peerXml = (struct ncclXml*)(mem + xmlMemSize(NCCL_TOPO_XML_MAX_NODES) * i);
     NCCLCHECKGOTO(ncclTopoConvertXml(peerXml, (uintptr_t)peerXml->nodes, 0), ret, fail);
     NCCLCHECKGOTO(ncclTopoFuseXml(xml, peerXml), ret, fail);
+  }
+
+  {
+    struct ncclXmlNode* topNode;
+    NCCLCHECKGOTO(xmlFindTag(xml, "system", &topNode), ret, fail);
+    if (topNode) {
+      NCCLCHECKGOTO(xmlSetAttrInt(topNode, "cross_clique", comm->MNNVL && comm->clique.size < comm->nRanks),
+                    ret, fail);
+    }
   }
 
   if (dumpXmlFile && comm->rank == ncclParamTopoDumpFileRank()) {

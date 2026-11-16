@@ -24,6 +24,19 @@ def _write_explicit_lane_mask(
     return [f'  amdgpu::write_wave_mask_scalar({dst}, wf, {value});']
 
 
+def _write_cmpx_result(
+    dst: list[str], is_vop3: bool, cmpx_writes_vcc: bool, result_writer: str | None
+) -> list[str]:
+    writes = []
+    if cmpx_writes_vcc:
+        if dst and is_vop3:
+            writes.extend(_write_explicit_lane_mask(dst[0], 'result'))
+        else:
+            writes.append('  wf.set_vcc_mask(result);')
+    writes.append(f'  {result_writer or "wf.set_exec"}(result);')
+    return writes
+
+
 def gen_vector_cmp_class(
     dst: list[str],
     src: list[str],
@@ -168,12 +181,7 @@ def gen_vector_cmp_class(
         L.append('    if (match) vcc |= (1ULL << lane);')
     L.append('  }')
     if is_cmpx:
-        if cmpx_writes_vcc:
-            L.append('  wf.set_vcc_mask(result);')
-        if result_writer is not None:
-            L.append(f'  {result_writer}(result);')
-        else:
-            L.append('  wf.set_exec(result);')
+        L.extend(_write_cmpx_result(dst, is_vop3, cmpx_writes_vcc, result_writer))
     elif dst:
         L.extend(_write_explicit_lane_mask(dst[0], 'vcc', result_writer))
     else:
@@ -375,15 +383,7 @@ def gen_vector_cmpx(
         L.append(f'    if ({cond})')
         L.append('      result |= (1ULL << lane);')
     L.append('  }')
-    if cmpx_writes_vcc:
-        if dst and is_vop3:
-            L.extend(_write_explicit_lane_mask(dst[0], 'result'))
-        else:
-            L.append('  wf.set_vcc_mask(result);')
-    if result_writer is not None:
-        L.append(f'  {result_writer}(result);')
-    else:
-        L.append('  wf.set_exec(result);')
+    L.extend(_write_cmpx_result(dst, is_vop3, cmpx_writes_vcc, result_writer))
     return '\n'.join(L)
 
 

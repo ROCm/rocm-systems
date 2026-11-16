@@ -76,7 +76,8 @@ struct rcclArchThresholds {
   // Symmetric kernel upper-bound per collective when recv buffer is registered (R2).
   // Above this size CE is faster than symk; setting this withdraws symk as the final
   // choice in rcclSelectAllReduce so CE-registered can win. It does not unblock the
-  // CE 2-shot or DDA branches, which stay gated on whether symk was requested at all.
+  // CE 2-shot or DDA branches, which stay gated on whether symk was requested at all,
+  // except on gfx1250, where a withdrawn symk hands some registered AllReduce to fabric DDA.
   // kThreshUnlimited means no suppression (symk may win at any size for that collective).
   // Unused collectives default to kThreshUnlimited.
   size_t symMaxR2[RCCL_DDA_FUNC_COUNT];
@@ -118,6 +119,12 @@ struct rcclArchThresholds {
   size_t ddaArVmmFirstMinBytes;
   size_t ddaArVmmFirstMaxPerRank;
 
+  // AllReduce only: registered sum calls symkWithdrawn hands to DDA (rccl_wrap.cc). 0 turns that re-route off.
+  size_t ddaArRegCaptureMinBytes;      // graph capture: DDA instead of Ring up to max(this, nRanks x the next)
+  size_t ddaArRegCapturePerRankBytes;  // per-rank part of the capture bound
+  size_t ddaArRegEagerMinShardBytes;   // eager: DDA LL128 instead of CE-registered from this per-rank shard
+  size_t ddaArRegEagerMaxShardBytes;   // up to this per-rank shard
+
   // DDA VMM (AllReduce / ReduceScatter) launches min(init block cap,
   // clamp(ddaVmmBlockBudget / nRanks, ddaVmmMinBlocks, ddaVmmMaxBlocks)) blocks
   // on comms of at least rankScaledMinRanks ranks. Budget 0 = the init block cap.
@@ -133,6 +140,15 @@ struct rcclArchThresholds {
   int ddaAgLL128MaxBlocks;
   size_t ddaAgLL128MaxBlocksMinBytes;
   size_t ddaAgLL128MaxBlocksMaxBytes;
+
+  // DDA LL128 AllToAll block size and block cap, as the AllGather pair above. 0 keeps 256 threads
+  // and the init block cap.
+  int ddaA2aLL128Threads;
+  size_t ddaA2aLL128ThreadsMinBytes;
+  size_t ddaA2aLL128ThreadsMaxBytes;
+  int ddaA2aLL128MaxBlocks;
+  size_t ddaA2aLL128MaxBlocksMinBytes;
+  size_t ddaA2aLL128MaxBlocksMaxBytes;
 
   // Ring / Tree crossovers that replace the tuning model's ranges on single-node
   // comms (nNodes == 1). Sizes are per rank as rcclGetSizePerRank() reports them

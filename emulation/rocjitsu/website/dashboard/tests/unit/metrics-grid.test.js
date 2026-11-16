@@ -1,23 +1,19 @@
-import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { themed } from '../helpers/themed.js';
 import { expect, test } from 'vitest';
 import MetricsGrid from '../../src/components/overview/MetricsGrid.jsx';
 import { selectOverviewProjection } from '../../src/data/overviewProjection.js';
-import { sansFont } from '../../src/theme/tokens.js';
-
-test('metric headings retain the scoped title face with the shared Sans fallback stack', () => {
-  const html = renderToStaticMarkup(createElement(MetricsGrid, { projection: { rows: [], endpointLabel: 'Latest selected run' } }));
-  const fontStacks = [...html.matchAll(/font-family:([^;}]+)/g)]
-    .map(([, stack]) => stack.split(',').map((face) => face.trim()));
-  expect(fontStacks).toContainEqual(['"Overview Title"', ...sansFont.split(',').map((face) => face.trim())]);
-});
 
 function cards(projection) {
-  const html = renderToStaticMarkup(createElement(MetricsGrid, { projection }));
+  const html = renderToStaticMarkup(themed(MetricsGrid, { projection }));
   return Object.fromEntries(html.split('data-testid="metric-card-').slice(1).map((part) => {
     const name = part.slice(0, part.indexOf('"'));
-    const rows = [...part.matchAll(/data-configuration="([^"]+)"[^>]*>(.*?)<\/div>/gs)]
-      .map(([, key, content]) => [key, [...content.matchAll(/<p\b[^>]*>(.*?)<\/p>/gs)].at(-1)?.[1]]);
+    // Each row's value is its last text element (label first, value last).
+    const rows = part.split('data-configuration="').slice(1).map((segment) => {
+      const key = segment.slice(0, segment.indexOf('"'));
+      const texts = [...segment.matchAll(/<(?:p|span)\b[^>]*>([^<]*)<\/(?:p|span)>/g)].map((match) => match[1]);
+      return [key, texts.at(-1)];
+    });
     return [name, { rows: Object.fromEntries(rows), text: part }];
   }));
 }

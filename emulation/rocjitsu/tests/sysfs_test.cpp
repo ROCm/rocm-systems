@@ -293,8 +293,9 @@ TEST(SysfsTopologyTest, RejectsCuLdsCapacityBeyondAdvertisedCwsrBound) {
   EXPECT_TRUE(loaded.failed());
   EXPECT_EQ(diagnostic.message(), "CWSR CU LDS capacity exceeds advertised device LDS capacity");
 
-  test::ScopedTempFile file("rocjitsu-cwsr-config-");
-  file.write(config);
+  test::ScopedTempFile file;
+  ASSERT_TRUE(file.initialize("rocjitsu-cwsr-config-"));
+  ASSERT_TRUE(file.write(config));
   util::StringDiagnostic validate_diagnostic;
   EXPECT_TRUE(config::validate_config(file.path(), kEmbeddedSchema, validate_diagnostic.emitter())
                   .failed());
@@ -318,8 +319,9 @@ TEST(SysfsTopologyTest, RejectsCuWaveSlotsBeyondAdvertisedCwsrBound) {
   EXPECT_TRUE(loaded.failed());
   EXPECT_EQ(diagnostic.message(), "CWSR CU wave slots exceed advertised device wave capacity");
 
-  test::ScopedTempFile file("rocjitsu-cwsr-config-");
-  file.write(config);
+  test::ScopedTempFile file;
+  ASSERT_TRUE(file.initialize("rocjitsu-cwsr-config-"));
+  ASSERT_TRUE(file.write(config));
   util::StringDiagnostic validate_diagnostic;
   EXPECT_TRUE(config::validate_config(file.path(), kEmbeddedSchema, validate_diagnostic.emitter())
                   .failed());
@@ -346,8 +348,9 @@ TEST(SysfsTopologyTest, RejectsCuCountBeyondAdvertisedCwsrBound) {
   EXPECT_TRUE(loaded.failed());
   EXPECT_EQ(diagnostic.message(), "CWSR CU count exceeds advertised device CU capacity");
 
-  test::ScopedTempFile file("rocjitsu-cwsr-config-");
-  file.write(config);
+  test::ScopedTempFile file;
+  ASSERT_TRUE(file.initialize("rocjitsu-cwsr-config-"));
+  ASSERT_TRUE(file.write(config));
   util::StringDiagnostic validate_diagnostic;
   EXPECT_TRUE(config::validate_config(file.path(), kEmbeddedSchema, validate_diagnostic.emitter())
                   .failed());
@@ -997,7 +1000,8 @@ TEST(SysfsTopologyGeometryTest, ShippedConfigsMatchTheSimulatedSoC) {
     SCOPED_TRACE(name);
 
     config::LoadedConfig loaded;
-    if (name == "gfx1250_mi455x_kmd_2node_net.json") {
+    if (name == "gfx1250_mi455x_kmd_2node_net.json" ||
+        name == "gfx1250_mi455x_kmd_4node_2gpu_if.json") {
       ASSERT_TRUE(test::load_valid_config_for_node(entry.path().string(), loaded, "node0"));
     } else {
       ASSERT_TRUE(test::load_valid_config(entry.path().string(), loaded));

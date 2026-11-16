@@ -7,7 +7,7 @@
 #pragma once
 
 #include "common/bits.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 #include <immintrin.h>
 #include <stdint.h>
 
@@ -59,55 +59,55 @@ inline __m256d selection_omod_round(__m256d before, __m256d scaled, uint64_t fla
 }
 
 // Correct the x86 selection rules for NaNs and opposite-signed zeros.
+// Requires the default CPU FP environment. Bitwise NaN selection/quieting keeps
+// the Compatibility payload contract independent of compiler FP optimizations.
 template <bool Maximum, bool PropagateNaN> __m256 minmax(__m256 x, __m256 y) {
-  auto a = _mm256_castps_si256(x), b = _mm256_castps_si256(y);
-  auto magnitude = _mm256_set1_epi32(INT32_MAX);
-  auto infinity = _mm256_set1_epi32(0x7f800000);
-  auto quiet = _mm256_set1_epi32(0x00400000);
-  auto an = _mm256_cmpgt_epi32(_mm256_and_si256(a, magnitude), infinity);
-  auto bn = _mm256_cmpgt_epi32(_mm256_and_si256(b, magnitude), infinity);
-  auto value = Maximum ? _mm256_max_ps(x, y) : _mm256_min_ps(x, y);
-  auto equal = _mm256_cmp_ps(x, y, _CMP_EQ_OQ);
-  auto tie = Maximum ? _mm256_and_si256(a, b) : _mm256_or_si256(a, b);
-  value = _mm256_blendv_ps(value, _mm256_castsi256_ps(tie), equal);
+  auto x_nan = _mm256_cmp_ps(x, x, _CMP_UNORD_Q);
+  auto quiet_bit = _mm256_castsi256_ps(_mm256_set1_epi32(0x00400000));
   if constexpr (PropagateNaN) {
-    auto selected = _mm256_blendv_epi8(b, a, an);
-    value = _mm256_blendv_ps(value, _mm256_castsi256_ps(_mm256_or_si256(selected, quiet)),
-                             _mm256_castsi256_ps(_mm256_or_si256(an, bn)));
+    // Select the first NaN before setting its quiet bit; preserve sign/payload.
+    auto nan = _mm256_or_ps(_mm256_blendv_ps(y, x, x_nan), quiet_bit);
+    auto either_nan = _mm256_cmp_ps(x, y, _CMP_UNORD_Q);
+    // Opposite operand orders expose both zero signs; AND selects +0, OR -0.
+    auto value = Maximum ? _mm256_and_ps(_mm256_max_ps(x, y), _mm256_max_ps(y, x))
+                         : _mm256_or_ps(_mm256_min_ps(x, y), _mm256_min_ps(y, x));
+    return _mm256_blendv_ps(value, nan, either_nan);
   } else {
-    value = _mm256_blendv_ps(value, x, _mm256_castsi256_ps(bn));
-    value = _mm256_blendv_ps(value, _mm256_castsi256_ps(_mm256_or_si256(a, quiet)),
-                             _mm256_castsi256_ps(_mm256_and_si256(an, bn)));
+    auto x_quiet = _mm256_or_ps(x, _mm256_and_ps(x_nan, quiet_bit));
+    auto equal = _mm256_cmp_ps(x, y, _CMP_EQ_OQ);
+    auto y_nan = _mm256_cmp_ps(y, y, _CMP_UNORD_Q);
+    auto value = Maximum ? _mm256_max_ps(x, y) : _mm256_min_ps(x, y);
+    auto tie = Maximum ? _mm256_and_ps(x, y) : _mm256_or_ps(x, y);
+    value = _mm256_blendv_ps(value, tie, equal);
+    return _mm256_blendv_ps(value, x_quiet, y_nan);
   }
-  return value;
 }
 
 // Correct the x86 selection rules for NaNs and opposite-signed zeros.
 template <bool Maximum, bool PropagateNaN> __m256d minmax(__m256d x, __m256d y) {
-  auto a = _mm256_castpd_si256(x), b = _mm256_castpd_si256(y);
-  auto magnitude = _mm256_set1_epi64x(INT64_MAX);
-  auto infinity = _mm256_set1_epi64x(INT64_C(0x7ff0000000000000));
-  auto quiet = _mm256_set1_epi64x(INT64_C(0x0008000000000000));
-  auto an = _mm256_cmpgt_epi64(_mm256_and_si256(a, magnitude), infinity);
-  auto bn = _mm256_cmpgt_epi64(_mm256_and_si256(b, magnitude), infinity);
-  auto value = Maximum ? _mm256_max_pd(x, y) : _mm256_min_pd(x, y);
-  auto equal = _mm256_cmp_pd(x, y, _CMP_EQ_OQ);
-  auto tie = Maximum ? _mm256_and_si256(a, b) : _mm256_or_si256(a, b);
-  value = _mm256_blendv_pd(value, _mm256_castsi256_pd(tie), equal);
+  auto x_nan = _mm256_cmp_pd(x, x, _CMP_UNORD_Q);
+  auto quiet_bit = _mm256_castsi256_pd(_mm256_set1_epi64x(0x0008000000000000LL));
   if constexpr (PropagateNaN) {
-    auto selected = _mm256_blendv_epi8(b, a, an);
-    value = _mm256_blendv_pd(value, _mm256_castsi256_pd(_mm256_or_si256(selected, quiet)),
-                             _mm256_castsi256_pd(_mm256_or_si256(an, bn)));
+    // Select the first NaN before setting its quiet bit; preserve sign/payload.
+    auto nan = _mm256_or_pd(_mm256_blendv_pd(y, x, x_nan), quiet_bit);
+    auto either_nan = _mm256_cmp_pd(x, y, _CMP_UNORD_Q);
+    // Opposite operand orders expose both zero signs; AND selects +0, OR -0.
+    auto value = Maximum ? _mm256_and_pd(_mm256_max_pd(x, y), _mm256_max_pd(y, x))
+                         : _mm256_or_pd(_mm256_min_pd(x, y), _mm256_min_pd(y, x));
+    return _mm256_blendv_pd(value, nan, either_nan);
   } else {
-    value = _mm256_blendv_pd(value, x, _mm256_castsi256_pd(bn));
-    value = _mm256_blendv_pd(value, _mm256_castsi256_pd(_mm256_or_si256(a, quiet)),
-                             _mm256_castsi256_pd(_mm256_and_si256(an, bn)));
+    auto x_quiet = _mm256_or_pd(x, _mm256_and_pd(x_nan, quiet_bit));
+    auto equal = _mm256_cmp_pd(x, y, _CMP_EQ_OQ);
+    auto y_nan = _mm256_cmp_pd(y, y, _CMP_UNORD_Q);
+    auto value = Maximum ? _mm256_max_pd(x, y) : _mm256_min_pd(x, y);
+    auto tie = Maximum ? _mm256_and_pd(x, y) : _mm256_or_pd(x, y);
+    value = _mm256_blendv_pd(value, tie, equal);
+    return _mm256_blendv_pd(value, x_quiet, y_nan);
   }
-  return value;
 }
 
-// RDNA3 selection adds IEEE-mode signaling-NaN priority to number preference.
-template <bool Maximum> __m256 minmax_rdna3(__m256 x, __m256 y, bool ieee) {
+// Legacy selection adds IEEE signaling-NaN priority and architecture-specific two-NaN order.
+template <bool Maximum, bool FirstNaN = true> __m256 minmax_legacy(__m256 x, __m256 y, bool ieee) {
   auto value = minmax<Maximum, false>(x, y);
   auto a_bits = _mm256_castps_si256(x), b_bits = _mm256_castps_si256(y);
   auto magnitude = _mm256_set1_epi32(INT32_MAX);
@@ -115,6 +115,7 @@ template <bool Maximum> __m256 minmax_rdna3(__m256 x, __m256 y, bool ieee) {
   auto quiet = _mm256_set1_epi32(0x00400000);
   auto an = _mm256_cmpgt_epi32(_mm256_and_si256(a_bits, magnitude), infinity);
   auto bn = _mm256_cmpgt_epi32(_mm256_and_si256(b_bits, magnitude), infinity);
+  value = _mm256_blendv_ps(value, FirstNaN ? x : y, _mm256_castsi256_ps(_mm256_and_si256(an, bn)));
   if (ieee) {
     auto sna = _mm256_andnot_si256(_mm256_cmpeq_epi32(_mm256_and_si256(a_bits, quiet), quiet), an);
     auto snb = _mm256_andnot_si256(_mm256_cmpeq_epi32(_mm256_and_si256(b_bits, quiet), quiet), bn);
@@ -122,14 +123,13 @@ template <bool Maximum> __m256 minmax_rdna3(__m256 x, __m256 y, bool ieee) {
                              _mm256_castsi256_ps(snb));
     value = _mm256_blendv_ps(value, _mm256_castsi256_ps(_mm256_or_si256(a_bits, quiet)),
                              _mm256_castsi256_ps(sna));
-  } else {
-    value = _mm256_blendv_ps(value, x, _mm256_castsi256_ps(_mm256_and_si256(an, bn)));
   }
   return value;
 }
 
-// RDNA3 selection adds IEEE-mode signaling-NaN priority to number preference.
-template <bool Maximum> __m256d minmax_rdna3(__m256d x, __m256d y, bool ieee) {
+// Legacy selection adds IEEE signaling-NaN priority and architecture-specific two-NaN order.
+template <bool Maximum, bool FirstNaN = true>
+__m256d minmax_legacy(__m256d x, __m256d y, bool ieee) {
   auto value = minmax<Maximum, false>(x, y);
   auto a_bits = _mm256_castpd_si256(x), b_bits = _mm256_castpd_si256(y);
   auto magnitude = _mm256_set1_epi64x(INT64_MAX);
@@ -137,6 +137,7 @@ template <bool Maximum> __m256d minmax_rdna3(__m256d x, __m256d y, bool ieee) {
   auto quiet = _mm256_set1_epi64x(0x0008000000000000LL);
   auto an = _mm256_cmpgt_epi64(_mm256_and_si256(a_bits, magnitude), infinity);
   auto bn = _mm256_cmpgt_epi64(_mm256_and_si256(b_bits, magnitude), infinity);
+  value = _mm256_blendv_pd(value, FirstNaN ? x : y, _mm256_castsi256_pd(_mm256_and_si256(an, bn)));
   if (ieee) {
     auto sna = _mm256_andnot_si256(_mm256_cmpeq_epi64(_mm256_and_si256(a_bits, quiet), quiet), an);
     auto snb = _mm256_andnot_si256(_mm256_cmpeq_epi64(_mm256_and_si256(b_bits, quiet), quiet), bn);
@@ -144,8 +145,6 @@ template <bool Maximum> __m256d minmax_rdna3(__m256d x, __m256d y, bool ieee) {
                              _mm256_castsi256_pd(snb));
     value = _mm256_blendv_pd(value, _mm256_castsi256_pd(_mm256_or_si256(a_bits, quiet)),
                              _mm256_castsi256_pd(sna));
-  } else {
-    value = _mm256_blendv_pd(value, x, _mm256_castsi256_pd(_mm256_and_si256(an, bn)));
   }
   return value;
 }
@@ -169,20 +168,31 @@ __m256 minmax3_value(__m256 x, __m256 y, __m256 z) {
   return value;
 }
 
-// Apply RDNA3's binary selection policy at each step of the ternary operation.
-template <bool FirstMaximum, bool SecondMaximum, bool Median>
-__m256 minmax3_rdna3(__m256 x, __m256 y, __m256 z, bool ieee) {
+// Apply the legacy binary policy at each step, including CDNA's numerical median ties.
+template <bool FirstMaximum, bool SecondMaximum, bool Median, bool FirstNaN = true>
+__m256 minmax3_legacy(__m256 x, __m256 y, __m256 z, bool ieee) {
   if constexpr (Median) {
-    // Match the ordered-zero median used by the scalar RDNA3 model.
-    auto value =
-        minmax_rdna3<true>(minmax_rdna3<false>(x, y, ieee),
-                           minmax_rdna3<false>(minmax_rdna3<true>(x, y, ieee), z, ieee), ieee);
+    __m256 value;
+    if constexpr (FirstNaN) {
+      value =
+          minmax_legacy<true>(minmax_legacy<false>(x, y, ieee),
+                              minmax_legacy<false>(minmax_legacy<true>(x, y, ieee), z, ieee), ieee);
+    } else {
+      auto ab = minmax_legacy<true, false>(x, y, ieee);
+      auto largest = minmax_legacy<true, false>(ab, z, ieee);
+      value = _mm256_blendv_ps(ab, minmax_legacy<true, false>(x, z, ieee),
+                               _mm256_cmp_ps(largest, y, _CMP_EQ_OQ));
+      value = _mm256_blendv_ps(value, minmax_legacy<true, false>(y, z, ieee),
+                               _mm256_cmp_ps(largest, x, _CMP_EQ_OQ));
+    }
     auto has_nan =
         _mm256_or_ps(_mm256_cmp_ps(x, y, _CMP_UNORD_Q), _mm256_cmp_ps(z, z, _CMP_UNORD_Q));
-    auto minimum = minmax_rdna3<false>(minmax_rdna3<false>(x, y, ieee), z, ieee);
+    auto minimum =
+        minmax_legacy<false, FirstNaN>(minmax_legacy<false, FirstNaN>(x, y, ieee), z, ieee);
     return _mm256_blendv_ps(value, minimum, has_nan);
   }
-  return minmax_rdna3<SecondMaximum>(minmax_rdna3<FirstMaximum>(x, y, ieee), z, ieee);
+  return minmax_legacy<SecondMaximum, FirstNaN>(minmax_legacy<FirstMaximum, FirstNaN>(x, y, ieee),
+                                                z, ieee);
 }
 
 } // namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE
