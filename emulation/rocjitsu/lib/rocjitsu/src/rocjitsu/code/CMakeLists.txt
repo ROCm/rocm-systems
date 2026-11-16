@@ -100,7 +100,13 @@ rj_add_object_library(rocjitsu_code
     patch/trampoline_builder.cpp
 )
 if(RJ_BUILD_FAULT_INJECTION)
-    target_sources(rocjitsu_code PRIVATE patch/fault_injection/drop_barrier.cpp)
+    target_sources(
+        rocjitsu_code
+        PRIVATE
+            patch/fault_injection/drop_barrier.cpp
+            patch/fault_injection/fault_mutation_context.cpp
+            patch/fault_injection/lds_wrong_address.cpp
+    )
 endif()
 target_link_libraries(
     rocjitsu_code

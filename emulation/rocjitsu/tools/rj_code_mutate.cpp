@@ -4,6 +4,7 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/file_io.h"
 #include "rocjitsu/code/patch/fault_injection/drop_barrier.h"
+#include "rocjitsu/code/patch/fault_injection/lds_wrong_address.h"
 #include "rocjitsu/isa/target_registry.h"
 
 #include <algorithm>
@@ -26,15 +27,15 @@ using namespace rocjitsu;
 
 constexpr size_t kMaxImageBytes = 256 * 1024 * 1024;
 constexpr std::string_view kUsage =
-    "Usage: rj_code_mutate --input FILE --kernel ENTRY [--kind DropBarrier]\n"
+    "Usage: rj_code_mutate --input FILE --kernel ENTRY [--kind DropBarrier|LdsWrongAddress]\n"
     "       --list | --output NEW-FILE [--exact TEXT-OFFSET] [--ordinal N]\n"
-    "       [--target GFX-NAME]\n"
+    "       [--target GFX-NAME] [--address-vgpr N]\n"
     "       rj_code_mutate --capabilities | --help\n\n"
-    "List complete logical barriers for the exact kernel entry in this input.\n"
-    "Mutate one barrier with DropBarrier (the only available kind). --exact is\n"
-    "the first member's .text-relative byte offset from --list, decimal or 0x hex.\n"
-    "Exact takes precedence over the zero-based logical --ordinal (default 0);\n"
-    "invalid exact selection never falls back. Split pairs count as one barrier.\n"
+    "List sites for the selected kind and exact kernel entry in this input.\n"
+    "--exact is the .text-relative byte offset from --list, decimal or 0x hex:\n"
+    "the first member of a barrier, or the LDS instruction. Exact takes precedence\n"
+    "over the zero-based --ordinal (default 0); invalid exact never falls back.\n"
+    "Split pairs count as one barrier.\n"
     "--target only asserts the source identity; it cannot override the ELF.\n"
     "Input: extracted little-endian AMDHSA ET_DYN ELF64, at most 256 MiB.\n"
     "Complete builtin split pairs: RDNA4 workgroup; CDNA5 workgroup/cluster.\n"
@@ -43,6 +44,12 @@ constexpr std::string_view kUsage =
     "owners/helpers and multiple .text sections are not supported.\n"
     "Trap-handler barrier IDs are rejected. Cluster barriers require a clustered\n"
     "dispatch that activates cluster semantics.\n"
+    "LdsWrongAddress admits gfx1200/gfx1201 wave32/wave64 ds_store_b32/ds_load_b32 and "
+    "gfx942/gfx950\n"
+    "wave64 ds_write_b32/ds_write_b128, and gfx1250 wave32 ds_store_b32/\n"
+    "ds_load_b32. It requires a distinct allocated --address-vgpr for mutation.\n"
+    "This argument is an encoded selector; allocation uses the address bank.\n"
+    "The caller supplies its runtime value.\n"
     "Output must be new; existing files, aliases and in-place mutation are refused.\n"
     "Host transformation only; no GPU execution or detector qualification.\n";
 
@@ -138,12 +145,20 @@ int run(int argc, char **argv) {
                                                                            : "full-singleton")
                 << " admission=" << capability.admission << '\n';
     }
+    for (const LdsCapability &capability : lds_wrong_address_capabilities()) {
+      const IsaGpuTargetDescription *target =
+          default_isa_target_registry().find_gpu_target(capability.target);
+      std::cout << "kind=LdsWrongAddress target=" << target->code_object_id
+                << " wave=" << capability.wave_size << " form=" << capability.form
+                << " admission=direct-single-owner\n";
+    }
     return finish_stdout();
   }
   const char *input = nullptr;
   const char *output = nullptr;
   std::string_view kernel, kind = "DropBarrier", target_assertion;
   std::optional<uint64_t> exact;
+  std::optional<uint32_t> address_vgpr;
   size_t ordinal = 0;
   bool list = false;
   std::vector<std::string_view> seen;
@@ -157,7 +172,8 @@ int run(int argc, char **argv) {
       continue;
     }
     if (option != "--input" && option != "--output" && option != "--kernel" && option != "--kind" &&
-        option != "--target" && option != "--exact" && option != "--ordinal")
+        option != "--target" && option != "--exact" && option != "--ordinal" &&
+        option != "--address-vgpr")
       return reject("unknown option: " + std::string(option));
     if (++index == argc || std::string_view(argv[index]).empty() ||
         std::string_view(argv[index]).starts_with("--"))
@@ -175,10 +191,13 @@ int run(int argc, char **argv) {
       target_assertion = value;
     else {
       uint64_t number = 0;
-      if (!parse_number(value, number) || (option == "--ordinal" && number > SIZE_MAX))
+      if (!parse_number(value, number) || (option == "--ordinal" && number > SIZE_MAX) ||
+          (option == "--address-vgpr" && number > UINT32_MAX))
         return reject("invalid unsigned integer for " + std::string(option));
       if (option == "--exact")
         exact = number;
+      else if (option == "--address-vgpr")
+        address_vgpr = static_cast<uint32_t>(number);
       else
         ordinal = static_cast<size_t>(number);
     }
@@ -190,14 +209,61 @@ int run(int argc, char **argv) {
     std::cerr << kUsage;
     return reject("require input, exact kernel, and either --list or --output");
   }
-  if (kind != "DropBarrier")
+  if (kind != "DropBarrier" && kind != "LdsWrongAddress")
     return reject("unsupported mutation kind: " + std::string(kind));
+  if ((kind == "DropBarrier" && address_vgpr) || (list && address_vgpr))
+    return reject("--address-vgpr applies only to LdsWrongAddress mutation");
   const util::FailureOr<std::vector<char>> bytes = detail::read_file_bytes(input, kMaxImageBytes);
   if (bytes.failed() || bytes.value().empty())
     return reject("cannot read bounded input code object (regular file, 1..256 MiB)");
   const FaultMutationContext context(
       std::span(reinterpret_cast<const uint8_t *>(bytes.value().data()), bytes.value().size()));
   FaultMutationError error;
+  if (kind == "LdsWrongAddress") {
+    const FailureOr<LdsInventory> inventory = discover_lds_wrong_address(context, kernel, error);
+    if (inventory.failed())
+      return reject(error, "discovery");
+    const IsaGpuTargetDescription *target =
+        default_isa_target_registry().find_gpu_target(context.source().target_id());
+    if (!target_assertion.empty() && target_assertion != target->code_object_id)
+      return reject("target assertion does not match source ELF identity");
+    if (list) {
+      size_t index = 0;
+      for (const LdsSite &site : inventory.value().sites())
+        std::cout << "ordinal=" << index++ << " exact=" << site.offset
+                  << " address_vgpr=" << site.address_vgpr << " address_bank=" << site.address_bank
+                  << " target=" << target->code_object_id << " form=" << site.form << '\n';
+      return finish_stdout();
+    }
+    LdsSelector selector = {.exact = std::nullopt, .ordinal = ordinal};
+    if (exact) {
+      const std::span<const LdsSite> sites = inventory.value().sites();
+      const std::span<const LdsSite>::iterator found =
+          std::ranges::find(sites, *exact, &LdsSite::offset);
+      if (found == sites.end())
+        return reject({.code = FaultMutationErrorCode::InvalidParameters,
+                       .offset = *exact,
+                       .message = "no LDS site at the requested offset"},
+                      "selection", exact);
+      selector.ordinal = static_cast<size_t>(found - sites.begin());
+    }
+    const FailureOr<LdsSelection> selection =
+        select_lds_wrong_address(inventory.value(), selector, error);
+    if (selection.failed())
+      return reject(error, "selection");
+    const FailureOr<LdsResult> mutant =
+        apply_lds_wrong_address(context, selection.value(), address_vgpr, error);
+    if (mutant.failed())
+      return reject(error, "mutation");
+    if (!write_new_file(output, mutant.value().image)) {
+      std::cerr << "rj_code_mutate: cannot create/write/close new output file\n";
+      return 3;
+    }
+    std::cout << "kind=LdsWrongAddress target=" << target->code_object_id
+              << " exact=" << selection.value().site().offset << " address_vgpr=" << *address_vgpr
+              << " logical_mutations=1 output_bytes=" << mutant.value().image.size() << '\n';
+    return finish_stdout();
+  }
   const FailureOr<FaultBarrierInventory> inventory = discover_drop_barriers(context, kernel, error);
   if (inventory.failed())
     return reject(error, "discovery");
