@@ -32,9 +32,8 @@ dispatch.sgprs:
   formula: AVG(SGPR)
   unit: Registers
   description: >-
-    Scalar general-purpose registers allocated for the kernel, from dispatch
-    metadata. Allocation granularity can increase the reported value above the
-    compiler's request.
+    Scalar general-purpose registers allocated for the kernel, from dispatch metadata.
+    On this architecture every wavefront gets 128.
 dispatch.vgprs:
   name: VGPRs
   formula: AVG(Arch_VGPR)

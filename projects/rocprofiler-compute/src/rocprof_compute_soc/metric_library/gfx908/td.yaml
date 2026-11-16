@@ -4,9 +4,9 @@ td.atomic_insts:
   unit: (Instructions + $normUnit)
   description: >-
     The number of atomic instructions submitted to the data-return unit by the address
-    processor summed over all compute units on the accelerator, per normalization
-    unit. This is expected to be the sum of global/generic and spill/stack atomics
-    in the address processor.
+    processor summed over all compute units on the accelerator, per normalization unit.
+    This is expected to be the sum of global/generic and buffer atomics in the address
+    processor.
 td.busy:
   name: Data-Return Busy
   formula: 100 * SUM(TD_TD_BUSY_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
@@ -27,9 +27,9 @@ td.rd_insts:
   unit: (Instructions + $normUnit)
   description: >-
     The number of read instructions submitted to the data-return unit by the address
-    processor summed over all compute units on the accelerator, per normalization
-    unit. This is expected to be the sum of global/generic and spill/stack reads in
-    the address processor.
+    processor summed over all compute units on the accelerator, per normalization unit.
+    This is expected to be the sum of global/generic and buffer reads in the address
+    processor.
 td.tc_stall:
   name: Cache RAM -> Data-Return Stall
   formula: 100 * SUM(TD_TC_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
@@ -43,6 +43,6 @@ td.wr_insts:
   unit: (Instructions + $normUnit)
   description: >-
     The number of store instructions submitted to the data-return unit by the address
-    processor summed over all compute units on the accelerator, per normalization
-    unit. This is expected to be the sum of global/generic and spill/stack stores
-    in the address processor.
+    processor summed over all compute units on the accelerator, per normalization unit.
+    This is expected to be the sum of global/generic and buffer stores in the address
+    processor.
