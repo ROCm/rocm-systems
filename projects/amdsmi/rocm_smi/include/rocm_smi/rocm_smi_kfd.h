@@ -112,6 +112,11 @@ const char* KFDProcPathRoot();
 // are named by this process's PIDs; nullptr restores the real one.
 void SetKFDProcPathRootForTesting(const char* path);
 
+// Test-only hook to read processes from a mock /proc tree (its devices file and
+// each <pid>/fd, <pid>/maps), as from a PID namespace other than the initial one;
+// nullptr restores /proc. The tree must outlive the hook.
+void SetProcPathRootForTesting(const char* path);
+
 int GetProcessGPUs(uint32_t pid, std::unordered_set<uint64_t>* gpu_count);
 int ReadKFDDeviceProperties(uint32_t dev_id, std::vector<std::string>* retVec);
 

@@ -43,11 +43,21 @@ namespace amd::smi {
 
 static bool is_number(const std::string& s);
 static const char kDefaultKFDProcPathRoot[] = "/sys/class/kfd/kfd/proc";
-// Set only by SetKFDProcPathRootForTesting(); production never writes it.
-static const char* g_kfd_proc_path_root_override = nullptr;
+// Set only by SetKFDProcPathRootForTesting() and SetProcPathRootForTesting();
+// production never writes them.
+static std::atomic<const char*> g_kfd_proc_path_root_override{nullptr};
+static std::atomic<const char*> g_proc_path_root_override{nullptr};
 
 const char* KFDProcPathRoot() {
-  return g_kfd_proc_path_root_override ? g_kfd_proc_path_root_override : kDefaultKFDProcPathRoot;
+  const char* path = g_kfd_proc_path_root_override.load();
+  return path != nullptr ? path : kDefaultKFDProcPathRoot;
+}
+
+// The /proc that the processes of a PID namespace other than the initial one
+// are read from.
+static const char* ProcPathRoot() {
+  const char* path = g_proc_path_root_override.load();
+  return path != nullptr ? path : "/proc";
 }
 static const char* kKFDVramPrefix = "vram_";
 
@@ -57,8 +67,10 @@ static const char* kKFDVramPrefix = "vram_";
 // so processes are read from this namespace's /proc instead. A
 // /proc/self/ns/pid that cannot be read counts as another namespace.
 static bool IsKfdPidNamespaced() {
-  // A mock tree (SetKFDProcPathRootForTesting()) is named by this process's PIDs.
-  if (g_kfd_proc_path_root_override != nullptr) return false;
+  // A mock /proc (SetProcPathRootForTesting()) is such a namespace's view; a mock
+  // KFD tree alone (SetKFDProcPathRootForTesting()) is named by this process's PIDs.
+  if (g_proc_path_root_override.load() != nullptr) return true;
+  if (g_kfd_proc_path_root_override.load() != nullptr) return false;
   // The initial PID namespace has a fixed inode number (PROC_PID_INIT_INO).
   constexpr char kInitPidNamespace[] = "pid:[4026531836]";
   constexpr size_t kInitLen = sizeof(kInitPidNamespace) - 1;
@@ -91,7 +103,7 @@ struct GpuCharMajors {
 
 static GpuCharMajors ReadGpuCharMajors() {
   GpuCharMajors majors;
-  std::ifstream devices("/proc/devices");
+  std::ifstream devices(std::string(ProcPathRoot()) + "/devices");
   // Character devices come first; block devices reuse their numbers.
   for (std::string line; std::getline(devices, line) && line != "Block devices:";) {
     std::istringstream fields(line);
@@ -110,8 +122,10 @@ static GpuCharMajors ReadGpuCharMajors() {
   return majors;
 }
 
-// Read once: amdgpu registers both majors when it loads and keeps them.
-static const GpuCharMajors& GetGpuCharMajors() {
+// Read once: amdgpu registers both majors when it loads and keeps them. A mock
+// /proc is read every time, since tests change it.
+static GpuCharMajors GetGpuCharMajors() {
+  if (g_proc_path_root_override.load() != nullptr) return ReadGpuCharMajors();
   static const GpuCharMajors majors = ReadGpuCharMajors();
   return majors;
 }
@@ -235,8 +249,8 @@ enum class LocalGpuRead { kKfd, kHeld, kQueues };
 // process. Returns 0, or the errno of the reads: ENOENT or ESRCH once the
 // process has exited, EACCES when the caller may not read its open files.
 static int ReadLocalGpuUse(uint32_t pid, LocalGpuRead what, LocalGpuUse* use) {
-  const GpuCharMajors& majors = GetGpuCharMajors();
-  const std::string proc_path = "/proc/" + std::to_string(pid);
+  const GpuCharMajors majors = GetGpuCharMajors();
+  const std::string proc_path = std::string(ProcPathRoot()) + "/" + std::to_string(pid);
   const int proc_fd = open(proc_path.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
   if (proc_fd < 0) return errno;
   const int fd_dir_fd = openat(proc_fd, "fd", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
@@ -297,7 +311,7 @@ static int ScanProcForKfdPids(rsmi_process_info_t* procs, uint32_t num_allocated
                               uint32_t* num_found) {
   *num_found = 0;
 
-  DIR* proc_dir = opendir("/proc");
+  DIR* proc_dir = opendir(ProcPathRoot());
   if (!proc_dir) return errno;
 
   uint32_t unreadable = 0;
@@ -712,6 +726,8 @@ void SetKFDProcPathRootForTesting(const char* path) {
   index.dirs.clear();
   index.valid = false;
 }
+
+void SetProcPathRootForTesting(const char* path) { g_proc_path_root_override.store(path); }
 
 // Rebuilds the index from the root `names` listed at `listed_at`, unless it
 // already holds a later listing. The caller holds index->mtx.

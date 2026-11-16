@@ -146,7 +146,9 @@ The one piece that must live in production code (compiled into
   as the boot state. `FakeKfdTopology` points the hook at its tree, so tests neither
   leave those files behind nor read another run's.
 - The /proc hook: `ProcRoot()` and `SetProcRoot()`, default `/proc`, with no trailing
-  `/`. The fdinfo code reads a process's fdinfo, exe link and cgroup under it.
+  `/`. The fdinfo code reads a process's fdinfo, exe link and cgroup under it. rocm_smi
+  reads a PID namespace's `/proc` through its own hook, `SetProcPathRootForTesting()`,
+  which also makes it take the caller to be in such a namespace.
 
 Each test uses the `FakeSysfsTree` fixture helper to build a real, temporary,
 hardware-inert file tree, and constructs a real `AMDSmiDrm` + `AMDSmiGPUDevice`

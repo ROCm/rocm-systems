@@ -208,6 +208,42 @@ struct UnprivilegedResult {
   _exit(write(fd, &result, sizeof(result)) == sizeof(result) ? 0 : 1);
 }
 
+// Forks a caller that may not read the open files of root's process `helper` and
+// checks what the library tells it about the helper. Adds to `left_out` if the
+// caller cannot drop root.
+void CheckCallerWithoutAccess(pid_t helper, pid_t parent, std::vector<std::string>* left_out) {
+  int result_fds[2];
+  ASSERT_EQ(pipe(result_fds), 0);
+  const pid_t caller = fork();
+  if (caller < 0) {
+    close(result_fds[0]);
+    close(result_fds[1]);
+    FAIL() << "fork failed, errno " << errno;
+  }
+  if (caller == 0) RunUnprivileged(helper, parent, result_fds[1]);
+  close(result_fds[1]);
+  UnprivilegedResult result{};
+  pollfd result_poll{result_fds[0], POLLIN, 0};
+  const bool reported = poll(&result_poll, 1, kForkedTimeoutMs) == 1 &&
+                        read(result_fds[0], &result, sizeof(result)) == sizeof(result);
+  close(result_fds[0]);
+  KillAndReap(caller);
+  ASSERT_TRUE(reported) << "The caller without access exited or did not report within "
+                        << kForkedTimeoutMs << " ms";
+  if (!result.dropped_root) {
+    left_out->push_back(
+        "the checks of a caller without access to the helper: cannot become "
+        "user nobody");
+    return;
+  }
+  EXPECT_EQ(result.by_pid, AMDSMI_STATUS_NO_PERM)
+      << "amdsmi_get_gpu_compute_process_info_by_pid for the helper";
+  EXPECT_EQ(result.gpus, AMDSMI_STATUS_NO_PERM)
+      << "amdsmi_get_gpu_compute_process_gpus for the helper";
+  EXPECT_EQ(result.list, AMDSMI_STATUS_SUCCESS) << "amdsmi_get_gpu_compute_process_info";
+  EXPECT_FALSE(result.helper_listed) << "amdsmi_get_gpu_compute_process_info lists the helper";
+}
+
 }  // namespace
 
 TestProcessPidNamespaceRead::TestProcessPidNamespaceRead() : TestBase() {
@@ -299,27 +335,30 @@ void TestProcessPidNamespaceRead::Run(void) {
   }
   const uint64_t drm_vram = DrmVramBytes(helper, render_node);
   ASSERT_GE(drm_vram, vram) << "GPU 0's fdinfo misses the helper's VRAM";
-  // KFD knows the helper by its PID in the initial PID namespace. Two matches
-  // are another run of this test that drew the same size; then, as without a
-  // match, the checks of that PID are left out.
+  // KFD knows the helper by its PID in the initial PID namespace. A second match
+  // is another run of this test that drew the same size.
   const std::vector<pid_t> kfd_pids = FindHelperKfdPids(helper, kfd_gpu_id, vram);
-  const pid_t kfd_pid = kfd_pids.size() == 1 ? kfd_pids[0] : 0;
+  if (kfd_pids.size() > 1) GTEST_SKIP() << "Another process holds the helper's exact VRAM";
+  ASSERT_EQ(kfd_pids.size(), 1u) << "KFD does not report exactly the helper's VRAM";
+  const pid_t kfd_pid = kfd_pids[0];
   helper_stopper.kfd_pid = kfd_pid;
 
   // A process of this namespace that does not use a GPU. When it can, it takes
   // the PID KFD knows the helper by, under which a library that read KFD's
   // process directories would report the helper's data.
   pid_t bystander = -1;
-  if (kfd_pid > 0 && !IsLocalPid(kfd_pid)) bystander = StartBystanderAt(kfd_pid, parent);
+  if (!IsLocalPid(kfd_pid)) bystander = StartBystanderAt(kfd_pid, parent);
   if (bystander < 0) bystander = StartBystander(parent);
   ASSERT_GT(bystander, 0) << "Could not start the bystander";
   HelperStopper bystander_stopper{bystander, 0};
+  // The checks this run cannot make, reported as a skip at the end.
+  std::vector<std::string> left_out;
   // Unless another process of this namespace has KFD's PID for the helper, no
   // API may report anything for it.
-  const bool check_kfd_pid = kfd_pid > 0 && (bystander == kfd_pid || !IsLocalPid(kfd_pid));
+  const bool check_kfd_pid = bystander == kfd_pid || !IsLocalPid(kfd_pid);
   if (!check_kfd_pid) {
-    std::cout << "\t**KFD's PID for the helper is " << (kfd_pid > 0 ? "a process here" : "unknown")
-              << ": the checks that nothing is reported for it are left out" << std::endl;
+    left_out.push_back("the checks that nothing is reported for KFD's PID for the helper, " +
+                       std::to_string(kfd_pid) + ", which another process here has");
   }
   IF_VERB(STANDARD) {
     std::cout << "\t**Helper PID " << helper << ", KFD's PID for it " << kfd_pid
@@ -445,38 +484,14 @@ void TestProcessPidNamespaceRead::Run(void) {
   // root, gets NO_PERM for it and a KFD process list without it. Only root can
   // start such a caller. The library starts no thread, so the child may call it
   // after fork().
-  if (geteuid() != 0) {
-    std::cout << "\t**Not root: the checks of a caller without access are left out" << std::endl;
-    return;
+  if (geteuid() == 0) {
+    CheckCallerWithoutAccess(helper, parent, &left_out);
+  } else {
+    left_out.push_back("the checks of a caller without access to the helper, which need root");
   }
-  int result_fds[2];
-  ASSERT_EQ(pipe(result_fds), 0);
-  const pid_t caller = fork();
-  if (caller < 0) {
-    close(result_fds[0]);
-    close(result_fds[1]);
-    FAIL() << "fork failed, errno " << errno;
+  if (!left_out.empty()) {
+    std::string reasons;
+    for (const std::string& reason : left_out) reasons += (reasons.empty() ? "" : "; ") + reason;
+    GTEST_SKIP() << "Left out " << reasons;
   }
-  if (caller == 0) RunUnprivileged(helper, parent, result_fds[1]);
-  close(result_fds[1]);
-  UnprivilegedResult result{};
-  pollfd result_poll{result_fds[0], POLLIN, 0};
-  const bool reported = poll(&result_poll, 1, kForkedTimeoutMs) == 1 &&
-                        read(result_fds[0], &result, sizeof(result)) == sizeof(result);
-  close(result_fds[0]);
-  KillAndReap(caller);
-  ASSERT_TRUE(reported) << "The caller without access exited or did not report within "
-                        << kForkedTimeoutMs << " ms";
-  if (!result.dropped_root) {
-    std::cout << "\t**Cannot become user nobody: the checks of a caller without access are "
-                 "left out"
-              << std::endl;
-    return;
-  }
-  EXPECT_EQ(result.by_pid, AMDSMI_STATUS_NO_PERM)
-      << "amdsmi_get_gpu_compute_process_info_by_pid for the helper";
-  EXPECT_EQ(result.gpus, AMDSMI_STATUS_NO_PERM)
-      << "amdsmi_get_gpu_compute_process_gpus for the helper";
-  EXPECT_EQ(result.list, AMDSMI_STATUS_SUCCESS) << "amdsmi_get_gpu_compute_process_info";
-  EXPECT_FALSE(result.helper_listed) << "amdsmi_get_gpu_compute_process_info lists the helper";
 }
