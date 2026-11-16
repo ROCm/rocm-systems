@@ -23,9 +23,22 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC"
     OR CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
   target_compile_options(clr_warnings INTERFACE /W4 /WX)
 
-  # C4714: "function marked as __forceinline not inlined". Whether the compiler
+  # Ignore C4714: "function marked as __forceinline not inlined". Whether the compiler
   # honours __forceinline is its own decision, so this can be ignored.
   target_compile_options(clr_warnings INTERFACE /wd4714)
+
+  # Ignore C4201: "nonstandard extension used: nameless struct/union". This
+  # is required for our vector implementation.
+  target_compile_options(clr_warnings INTERFACE /wd4201)
+
+  # Ignore C4324: "structure was padded due to alignment specifier". Padding is
+  # fine and not a problem
+  target_compile_options(clr_warnings INTERFACE /wd4324)
+
+  # Ignore C4200: "nonstandard extension used: zero-sized array in struct/union".
+  # rocglinterop.hpp's metadata_amd_ci_vi_t ends in a flexible array member
+  # overlaid on a hardware descriptor.
+  target_compile_options(clr_warnings INTERFACE /wd4200)
 
   if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     target_compile_options(clr_warnings INTERFACE
