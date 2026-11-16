@@ -48,8 +48,8 @@ struct GraphRecapture {
   size_t next = 0;                    //!< First unmatched original.
   hipGraphRecaptureCallbackData callback{};
   bool terminated = false;
-  bool callbackInProgress = false;  //!< Capture from callbackThread fails. Other threads wait.
-  std::thread::id callbackThread;   //!< Valid while callbackInProgress.
+  bool callbackInProgress = false;       //!< Capture from callbackThread fails. Other threads wait.
+  std::thread::id callbackThread;        //!< Valid while callbackInProgress.
   bool* callbackEndedCapture = nullptr;  //!< Matcher's flag, valid while callbackInProgress. Set
                                          //!< when callbackThread ends the capture; the state is
                                          //!< freed then.
@@ -85,7 +85,7 @@ inline bool HasMatchingDependencies(const std::vector<Node>& oldDependencies,
   }
   return true;
 }
-hipError_t ihipGraphAddNode(hip::GraphNode* graphNode, hip::Graph* graph,
+hipError_t ihipGraphAddNode(hip::GraphNode*& graphNode, hip::Graph* graph,
                             hip::GraphNode* const* pDependencies, size_t numDependencies,
                             bool capture = true, int devId = 0);
 // Adds a captured node to graph, making it the stream's last captured node. With
@@ -3353,12 +3353,14 @@ class GraphMemsetNode : public GraphNode {
     std::memcpy(params, &memsetParams_, sizeof(hipMemsetParams));
   }
 
+  size_t GetDepth() const { return depth_; }
+
   //! Exec-only rules: the destination stays on the same device, and a 2D/3D memset keeps
   //! its row size, height and depth.
-  bool IsExecUpdatableTo(const hipMemsetParams* params, size_t depth) const {
-    if (params->dst != memsetParams_.dst) {
+  bool IsExecUpdatableTo(const hipMemsetParams& params, size_t depth) const {
+    if (params.dst != memsetParams_.dst) {
       size_t discardOffset = 0;
-      amd::Memory* memObj = getMemoryObjectForCurrentDevice(params->dst, discardOffset);
+      amd::Memory* memObj = getMemoryObjectForCurrentDevice(params.dst, discardOffset);
       if (memObj != nullptr) {
         amd::Memory* memObjOri = getMemoryObjectForCurrentDevice(memsetParams_.dst, discardOffset);
         if (memObjOri != nullptr &&
@@ -3367,16 +3369,13 @@ class GraphMemsetNode : public GraphNode {
         }
       }
     }
-    if (params->height != 1 &&
-        (memsetParams_.width * memsetParams_.elementSize != params->width * params->elementSize ||
-         memsetParams_.height != params->height || depth != depth_)) {
+
+    if (params.height != 1 &&
+        (memsetParams_.width * memsetParams_.elementSize != params.width * params.elementSize ||
+         memsetParams_.height != params.height || depth != depth_)) {
       return false;
     }
     return true;
-  }
-
-  bool IsExecUpdatableTo(const GraphMemsetNode& newNode) const {
-    return IsExecUpdatableTo(&newNode.memsetParams_, newNode.depth_);
   }
 
   hipError_t SetParamsInternal(const hipMemsetParams* params, bool isExec, size_t depth = 1) {
@@ -3388,7 +3387,7 @@ class GraphMemsetNode : public GraphNode {
     if (depth == 0) {
       return hipErrorInvalidValue;
     }
-    if (isExec && !IsExecUpdatableTo(params, depth)) {
+    if (isExec && !IsExecUpdatableTo(*params, depth)) {
       return hipErrorInvalidValue;
     }
     size_t sizeBytes;
