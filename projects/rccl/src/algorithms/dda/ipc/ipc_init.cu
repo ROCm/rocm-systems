@@ -16,6 +16,7 @@
 #include "bootstrap.h"
 
 #include <cuda_runtime.h>
+#include <hip/hip_runtime_api.h>
 
 #include <algorithm>
 #include <vector>
@@ -246,15 +247,29 @@ ncclResult_t ncclDdaIpcCommClosePeerMappings(ncclComm* comm) {
   auto* barrierState = comm->ddaIpcBarrierState;
   const bool hasBarrierMappings = barrierState != nullptr && barrierState->resources != nullptr &&
                                   barrierState->resources->ipcMemHandler != nullptr;
-  if ((hasBarrierMappings || comm->ddaIpcMemHandler != nullptr) && comm->doneEvent != nullptr) {
+  if (hasBarrierMappings || comm->ddaIpcMemHandler != nullptr) {
     // DDA kernels and CE-scratch copies run on the user stream, which the
-    // hostStream/deviceStream syncs in commDestroySync do not cover. doneEvent
-    // is recorded after every kernel and CE launch, so waiting on it keeps
-    // in-flight work off unmapped peers.
-    cudaError_t syncErr = cudaEventSynchronize(comm->doneEvent);
-    if (syncErr != cudaSuccess) {
-      WARN("ncclDdaIpcCommClosePeerMappings: doneEvent sync failed (%s); continuing cleanup",
-           cudaGetErrorString(syncErr));
+    // hostStream/deviceStream syncs in commDestroySync do not cover. The last
+    // DDA-IPC launch published addonDoneWait; anything else recorded doneEvent.
+    if (comm->addonDoneWait != 0 && comm->addonDone != nullptr) {
+      hipStream_t waitStream = nullptr;
+      hipError_t waitErr = hipStreamCreateWithFlags(&waitStream, hipStreamNonBlocking);
+      if (waitErr == hipSuccess) {
+        waitErr = hipStreamWaitValue64(waitStream, comm->addonDone, comm->addonDoneWait, hipStreamWaitValueGte,
+                                       ~0ull);
+      }
+      if (waitErr == hipSuccess) waitErr = hipStreamSynchronize(waitStream);
+      if (waitStream != nullptr) hipStreamDestroy(waitStream);
+      if (waitErr != hipSuccess) {
+        WARN("ncclDdaIpcCommClosePeerMappings: addon completion wait failed (%s); continuing cleanup",
+             hipGetErrorString(waitErr));
+      }
+    } else if (comm->doneEvent != nullptr) {
+      cudaError_t syncErr = cudaEventSynchronize(comm->doneEvent);
+      if (syncErr != cudaSuccess) {
+        WARN("ncclDdaIpcCommClosePeerMappings: doneEvent sync failed (%s); continuing cleanup",
+             cudaGetErrorString(syncErr));
+      }
     }
   }
   if (hasBarrierMappings) {

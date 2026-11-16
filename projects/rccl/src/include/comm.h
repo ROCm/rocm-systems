@@ -28,6 +28,7 @@
 #include "ce_coll.h"
 #include "rma/rma.h"
 #include "argcheck.h"
+#include "dda_done.h"
 #include "latency_profiler/CollTrace.h"
 #include "rccl_common.h"
 #include "recorder.h"
@@ -1004,6 +1005,13 @@ struct ncclComm {
   // record. Non-null only between rcclAddonLaunchBegin, which sets it to doneEvent, and
   // rcclTakeAddonStopEvent, which hands it out.
   hipEvent_t addonStopEvent;
+  // Signal-memory completion for DDA-IPC. addonDoneWait is the seq the next stream must observe;
+  // 0 means the last completion was doneEvent instead. HIP signal memory must be exactly 8 bytes, so
+  // the kernel's block counter lives in a separate device allocation.
+  uint64_t* addonDone;
+  unsigned* addonDoneGrid;
+  uint64_t addonDoneSeq;
+  uint64_t addonDoneWait;
   latency_profiler::CollTrace* ctrace;
 
 #ifdef ENABLE_WARP_SPEED
@@ -1313,6 +1321,24 @@ static inline hipEvent_t rcclTakeAddonStopEvent(struct ncclComm* comm) {
   hipEvent_t stopEvent = comm->addonStopEvent;
   comm->addonStopEvent = nullptr;
   return stopEvent;
+}
+
+// Prepare a kernel-published completion. Empty when capturing, where the epilogue still records doneEvent.
+static inline DdaDoneMark rcclPrepareAddonDone(struct ncclComm* comm) {
+  DdaDoneMark mark{nullptr, nullptr, 0};
+  if (comm->addonStopEvent == nullptr || comm->addonDone == nullptr || comm->addonDoneGrid == nullptr) return mark;
+  comm->addonDoneSeq += 1;
+  mark.seq = comm->addonDone;
+  mark.grid = comm->addonDoneGrid;
+  mark.value = comm->addonDoneSeq;
+  return mark;
+}
+
+// Call after the kernel launch succeeds. Taking the stop event tells the epilogue not to record.
+static inline void rcclCommitAddonDone(struct ncclComm* comm, DdaDoneMark mark) {
+  if (mark.seq == nullptr) return;
+  comm->addonDoneWait = mark.value;
+  (void)rcclTakeAddonStopEvent(comm);
 }
 
 ncclResult_t ncclCommEnsureReady(ncclComm_t comm);

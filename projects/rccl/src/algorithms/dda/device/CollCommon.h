@@ -33,6 +33,7 @@ using bf16 = __nv_bfloat16;
 using bf162 = __nv_bfloat162;
 #endif
 
+#include "dda_done.h"
 #include "algorithms/dda/device/dda_kernel_params.h"
 #include "nccl_device/rccl_ptr.h"
 
@@ -136,6 +137,25 @@ static inline __device__ uint4 vecElementAdd(const uint4& a, const uint4& b) {
     res.w = vecElementAdd<T>(a.w, b.w);
   }
   return res;
+}
+
+// Last block publishes the launch sequence. A null seq means this launch still uses doneEvent.
+static inline __device__ void ddaPublishDone(DdaDoneMark mark) {
+  if (mark.seq == nullptr) return;
+  __shared__ int isLast;
+  if (threadIdx.x == 0) {
+    isLast = atomicAdd(mark.grid, 1u) == static_cast<unsigned>(gridDim.x) - 1u;
+  }
+  __syncthreads();
+  if (isLast && threadIdx.x == 0) {
+#if defined(__HIP_DEVICE_COMPILE__)
+    __scoped_atomic_store_n(mark.seq, mark.value, __ATOMIC_RELEASE, __MEMORY_SCOPE_SYSTEM);
+    __scoped_atomic_store_n(mark.grid, 0u, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
+#else
+    *mark.seq = mark.value;
+    *mark.grid = 0u;
+#endif
+  }
 }
 
 template <typename T>
