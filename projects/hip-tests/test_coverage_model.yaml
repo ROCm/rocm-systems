@@ -49,9 +49,18 @@ coverage_model:
       informational_classes: [amd_linux, amd_windows, amd_wsl]
     - id: cadence
       classes: [pr, nightly, release, on_demand]
-      # nightly/release cadence is documented in TESTING.md but no inventory suite
-      # currently declares that cadence (the actual cadence table lists only PR and
-      # on-demand); these remain declared vocabulary, not yet an audited claim.
+      # No inventory suite currently declares a nightly or release cadence: the
+      # actual cadences any suite runs on are PR and on-demand (see the "Actual
+      # cadence and gating" table in TESTING.md). nightly/release therefore remain
+      # declared vocabulary, not yet an audited claim, and are marked
+      # informational below. TESTING.md's per-tier "Testing strategy and layers"
+      # prose is kept conservative to match: it describes each tier only with the
+      # PR/on-demand cadences the inventory backs, and tools/check_testing_docs.py
+      # (cadence-prose check) guards that section against reintroducing an
+      # unaudited nightly/release per-tier cadence. The dedicated "## Nightly
+      # validation" / "## Release validation" sections stay out of that scope -
+      # they describe broader external validation flows, not a per-tier build
+      # cadence.
       informational_classes: [nightly, release]
     - id: architecture
       source: catch/unit/CMakeLists.txt platform guards and TESTING.md "Supported configurations"

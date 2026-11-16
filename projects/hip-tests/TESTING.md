@@ -55,7 +55,7 @@ The suite lives under `projects/hip-tests/catch/`. Each layer is gated by a CMak
 |---|---|---|---|
 | Contract | `catch/contract/` | ON through `BUILD_CONTRACT_TESTS` | Small public-API invariants and coverage drift |
 | Unit / functional | `catch/unit/` plus related focused suites | ON through `BUILD_UNIT_TESTS` | Per-API and per-feature behavior |
-| Integration | Currently distributed across unit, interop, multi-GPU, multiprocess, RTC, loader, and graph areas | No separate top-level build option today; runs as a PR/nightly subset depending on platform and capability | Runtime interaction with the ROCm stack and real devices |
+| Integration | Currently distributed across unit, interop, multi-GPU, multiprocess, RTC, loader, and graph areas | No separate top-level build option today; runs as a PR or on-demand subset depending on platform and capability | Runtime interaction with the ROCm stack and real devices |
 | Performance | `catch/performance/` | OFF by default through `BUILD_PERF_TESTS` | Hot-path throughput and latency measurements |
 | Stress | `catch/stress/` | OFF by default through `BUILD_STRESS_TESTS` | Long-running and high-load behavior |
 
@@ -77,7 +77,7 @@ Performance tests live in `catch/performance/` and are OFF by default through `B
 
 ### Stress and system-style validation
 
-Stress tests live in `catch/stress/` and are OFF by default through `BUILD_STRESS_TESTS`. They cover long-running and high-load soak behavior and are run on a periodic or release cadence rather than per PR. End-to-end, full-stack system-style scenarios are today expressed through the integration and stress areas rather than a distinct top-level system tier.
+Stress tests live in `catch/stress/` and are OFF by default through `BUILD_STRESS_TESTS`. They cover long-running and high-load soak behavior and are run on demand or on a periodic/scheduled cadence rather than per PR. End-to-end, full-stack system-style scenarios are today expressed through the integration and stress areas rather than a distinct top-level system tier.
 
 ## Pre-submit and CI gates
 

@@ -202,6 +202,21 @@ for itself (workstreams WS-1 and WS-2):
       non-string value, an absolute path, or a traversal outside the boundary root
       is a schema error).
 
+  cadence prose
+    - TESTING.md's ``## Testing strategy and layers`` section may describe each
+      tier only with a cadence the inventory actually backs. A cadence word the
+      coverage model keeps as declared vocabulary but that no inventory suite runs
+      on - the cadence axis's ``informational_classes`` (for example
+      nightly/release) minus any cadence an inventory suite actually claims - may
+      not appear in that section as a concrete per-tier cadence, because doing so
+      asserts an audited cadence the inventory does not support. The guarded word
+      set is derived from the documents, so the check follows the data rather than
+      a hardcoded list; the separate ``## Nightly validation`` / ``## Release
+      validation`` sections (which describe broader external validation, not a
+      per-tier build cadence) are out of scope and never scanned. The check is
+      feasibility-gated: it is a no-op when the documents name no guarded cadence
+      word or the strategy section is absent.
+
 This is a pure static consistency check: it needs only Python 3 and PyYAML, no
 ROCm, GPU, or build, so it is safe as a fast gate. Paths are taken as arguments
 (``--root`` or the per-document overrides) or resolved repo-relative from this
@@ -533,6 +548,22 @@ _CODE_FENCE_RE = re.compile(r"^(\s*)(`{3,}|~{3,})(.*)$")
 _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 # URLs preserved as external references; existence is not checked for these.
 _EXTERNAL_LINK_PREFIXES = ("http://", "https://", "mailto:")
+
+# Cadence-prose consistency (TESTING.md per-tier strategy section vs inventory).
+# The ``## Testing strategy and layers`` section describes each tier's build
+# status and *cadence*. A cadence word the coverage model keeps as declared
+# vocabulary but that no inventory suite actually runs on - the cadence axis's
+# ``informational_classes`` (for example nightly/release) minus any cadence an
+# inventory suite actually claims - must not be presented there as a concrete
+# per-tier cadence, because that asserts an audited cadence the inventory does not
+# back. The guarded word set is derived from the documents (not hardcoded) so it
+# follows the data: the day a suite genuinely declares a nightly cadence, that
+# word leaves the guarded set automatically. The separate ``## Nightly
+# validation`` / ``## Release validation`` sections are deliberately out of scope
+# (they describe broader external validation flows, not a per-tier build cadence)
+# and are never scanned.
+CADENCE_STRATEGY_SECTION_TITLE = "Testing strategy and layers"
+CADENCE_AXIS_ID = "cadence"
 
 
 class _UniqueKeyLoader(yaml.SafeLoader):
@@ -2954,6 +2985,119 @@ def check_markdown_links(md_path, anchors_cache, boundary_root=None):
     return errors, refs_ok
 
 
+def _inventory_claimed_cadences(inventory):
+    """Return the set of ``execution.cadence`` values any inventory suite claims.
+
+    These are the cadences the inventory actually backs with a suite (for the
+    live documents, ``pr`` and ``on_demand``). A malformed or missing cadence is
+    simply not added; cadence shape itself is validated by ``check_inventory``.
+    """
+    cadences = set()
+    if not isinstance(inventory, dict):
+        return cadences
+    for suite in inventory.get("suites") or []:
+        if not isinstance(suite, dict):
+            continue
+        execution = suite.get("execution")
+        if isinstance(execution, dict):
+            cadence = execution.get("cadence")
+            if isinstance(cadence, str) and cadence.strip():
+                cadences.add(cadence.strip())
+    return cadences
+
+
+def _coverage_informational_cadences(coverage):
+    """Return the cadence axis's ``informational_classes`` from the coverage model.
+
+    These are the cadence values the model declares as vocabulary but does not
+    audit as a concrete claim (nightly/release). An absent cadence axis or
+    ``informational_classes`` list yields the empty set, which makes the
+    cadence-prose check a no-op (feasibility-gated).
+    """
+    informational = set()
+    if not isinstance(coverage, dict):
+        return informational
+    cm = coverage.get("coverage_model")
+    if not isinstance(cm, dict):
+        return informational
+    for axis in cm.get("axes") or []:
+        if not isinstance(axis, dict) or axis.get("id") != CADENCE_AXIS_ID:
+            continue
+        for cls in axis.get("informational_classes") or []:
+            if isinstance(cls, str) and cls.strip():
+                informational.add(cls.strip())
+    return informational
+
+
+def _h2_section_body(text, title):
+    """Return the body of the ``## <title>`` section, or None when it is absent.
+
+    The body runs from just after the heading line to the next level-2 (``## ``)
+    heading or end of document. Bounding the scan to one section keeps the
+    separate ``## Nightly validation`` / ``## Release validation`` sections -
+    which legitimately describe broader external validation - out of the
+    per-tier cadence-prose check.
+    """
+    if not isinstance(text, str):
+        return None
+    heading = re.compile(
+        r"^##[ \t]+" + re.escape(title) + r"[ \t]*$", re.MULTILINE)
+    match = heading.search(text)
+    if match is None:
+        return None
+    start = match.end()
+    nxt = re.compile(r"^##[ \t]+", re.MULTILINE).search(text, start)
+    end = nxt.start() if nxt else len(text)
+    return text[start:end]
+
+
+def check_cadence_prose(testing_text, inventory, coverage):
+    """Flag per-tier cadence prose that overclaims an unaudited cadence.
+
+    Within TESTING.md's ``## Testing strategy and layers`` section, each tier's
+    build-status/cadence prose must describe only a cadence the inventory
+    actually backs. A cadence word the coverage model keeps as declared
+    vocabulary but that no inventory suite runs on - the cadence axis's
+    ``informational_classes`` (e.g. nightly/release) minus any cadence an
+    inventory suite actually claims - must not appear there as a concrete
+    per-tier cadence, because it asserts an audited cadence the inventory does not
+    support. The separate ``## Nightly validation`` / ``## Release validation``
+    sections are out of scope (they describe broader external validation, not a
+    per-tier build cadence) and are never scanned.
+
+    The check is feasibility-gated: when the documents name no guarded cadence
+    word (the coverage model declares no informational cadence class, or every
+    such class is actually claimed by a suite) or the strategy section is absent,
+    it is a no-op. Code spans, fenced blocks, and HTML comments are masked before
+    scanning, so a cadence word shown in an example is not flagged.
+
+    Returns a list of deterministic error strings.
+    """
+    errors = []
+    if not isinstance(testing_text, str):
+        return errors
+    informational = _coverage_informational_cadences(coverage)
+    claimed = _inventory_claimed_cadences(inventory)
+    guarded = {word for word in informational if word not in claimed}
+    if not guarded:
+        return errors
+    body = _h2_section_body(testing_text, CADENCE_STRATEGY_SECTION_TITLE)
+    if body is None:
+        return errors
+    masked = _mask_code(body)
+    backed = ", ".join(sorted(claimed)) or "none"
+    for word in sorted(guarded):
+        if re.search(r"\b" + re.escape(word) + r"\b", masked, re.IGNORECASE):
+            errors.append(
+                "TESTING.md {!r} section asserts an unaudited per-tier cadence "
+                "{!r}: no inventory suite declares that cadence (it is a "
+                "coverage-model informational cadence class). Describe the tier "
+                "with a cadence the inventory backs ({}), or make a suite declare "
+                "{!r} in test_inventory.yaml.".format(
+                    CADENCE_STRATEGY_SECTION_TITLE, word, backed, word))
+    return errors
+
+
 def validate(root=None, inventory_path=None, coverage_path=None,
              testing_path=None, incidents_path=None, restructuring_path=None):
     """Run every check.
@@ -3047,12 +3191,29 @@ def validate(root=None, inventory_path=None, coverage_path=None,
         refs_total += refs_ok
     results["markdown_links"] = sorted(md_errors)
 
+    # Cadence-prose consistency: the per-tier strategy section of TESTING.md may
+    # not assert a cadence (nightly/release) that no inventory suite backs. This
+    # is a live cross-check between TESTING.md, the coverage model (which declares
+    # the informational cadence classes), and the inventory (which declares the
+    # cadences actually claimed), and is a no-op when the documents name no
+    # guarded cadence word or the strategy section is absent.
+    cadence_text = None
+    try:
+        cadence_text = Path(testing_path).read_text(encoding="utf-8")
+    except (FileNotFoundError, UnicodeDecodeError):
+        cadence_text = None
+    if cadence_text is None:
+        results["cadence_prose"] = []
+    else:
+        results["cadence_prose"] = sorted(
+            check_cadence_prose(cadence_text, inventory, coverage))
+
     counts["validated_references"] = refs_total
     return results, counts
 
 
 _SUMMARY_KEYS = ("load", "inventory", "cmake_reconciliation", "coverage_model",
-                 "incidents", "markdown_links")
+                 "incidents", "markdown_links", "cadence_prose")
 
 
 def _print_summary(results, counts):
@@ -3063,6 +3224,7 @@ def _print_summary(results, counts):
         "coverage_model": "Coverage model refs / axes / paths",
         "incidents": "Incident ID references and fields",
         "markdown_links": "Local Markdown links and anchors",
+        "cadence_prose": "TESTING.md per-tier cadence vs inventory",
     }
     print("HIP testing-docs consistency check")
     total = 0

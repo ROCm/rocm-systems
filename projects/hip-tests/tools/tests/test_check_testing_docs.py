@@ -3868,5 +3868,138 @@ class CheckTestingDocsTest(unittest.TestCase):
         self.assertEqual(results["inventory"], [], msg=results["inventory"])
 
 
+# Cadence words and a strategy-section template for the cadence-prose check. The
+# ``## Testing strategy and layers`` section is the per-tier region the check
+# bounds to; the trailing ``## Nightly validation`` section is intentionally
+# present so a test can prove that legitimate external-validation prose outside
+# the strategy section is never scanned.
+_STRATEGY_DOC = (
+    "# Testing strategy\n"
+    "\n"
+    "## Testing strategy and layers\n"
+    "\n"
+    "{body}\n"
+    "\n"
+    "## Nightly validation\n"
+    "\n"
+    "Nightly and multi-arch runs extend the per-PR flow; release validation "
+    "adds broader coverage.\n"
+)
+
+
+def _inventory_with_cadences(*cadences):
+    """A minimal parsed inventory whose suites claim the given cadences."""
+    return {"suites": [{"execution": {"cadence": c}} for c in cadences]}
+
+
+def _coverage_with_cadence_axis(informational, classes=None):
+    """A minimal parsed coverage model carrying one cadence axis.
+
+    ``informational`` is the cadence axis's informational_classes list (or None
+    to omit it); ``classes`` defaults to the full declared cadence vocabulary.
+    """
+    axis = {"id": "cadence",
+            "classes": classes or ["pr", "nightly", "release", "on_demand"]}
+    if informational is not None:
+        axis["informational_classes"] = informational
+    return {"coverage_model": {"axes": [axis]}}
+
+
+class CheckCadenceProseTest(unittest.TestCase):
+    """Unit tests for the per-tier cadence-prose consistency check."""
+
+    def test_flags_unaudited_cadence_word_in_strategy_section(self):
+        # An informational cadence word (nightly) asserted as a per-tier cadence
+        # in the strategy section, with no suite claiming it, is reported.
+        text = _STRATEGY_DOC.format(
+            body="Integration runs as a PR/nightly subset depending on platform.")
+        errs = checker.check_cadence_prose(
+            text,
+            _inventory_with_cadences("pr", "on_demand"),
+            _coverage_with_cadence_axis(["nightly", "release"]))
+        self.assertTrue(
+            any("nightly" in err and "unaudited per-tier cadence" in err
+                for err in errs),
+            msg=errs)
+
+    def test_clean_strategy_section_passes(self):
+        # Describing the tier with cadences the inventory backs is accepted.
+        text = _STRATEGY_DOC.format(
+            body="Integration runs as a PR or on-demand subset, platform-gated.")
+        errs = checker.check_cadence_prose(
+            text,
+            _inventory_with_cadences("pr", "on_demand"),
+            _coverage_with_cadence_axis(["nightly", "release"]))
+        self.assertEqual(errs, [], msg=errs)
+
+    def test_nightly_validation_section_is_out_of_scope(self):
+        # The guarded words appear only in the separate ``## Nightly validation``
+        # section (part of the template), never in the strategy body; the check
+        # bounds its scan to the strategy section, so this is clean.
+        text = _STRATEGY_DOC.format(
+            body="Each tier runs on PR or on-demand cadence.")
+        errs = checker.check_cadence_prose(
+            text,
+            _inventory_with_cadences("pr", "on_demand"),
+            _coverage_with_cadence_axis(["nightly", "release"]))
+        self.assertEqual(errs, [], msg=errs)
+
+    def test_noop_without_informational_cadence_classes(self):
+        # With no informational cadence classes declared the guarded set is empty
+        # and the check is a no-op even if the word appears in the strategy body.
+        text = _STRATEGY_DOC.format(
+            body="Integration runs as a PR/nightly subset depending on platform.")
+        errs = checker.check_cadence_prose(
+            text,
+            _inventory_with_cadences("pr", "on_demand"),
+            _coverage_with_cadence_axis(None))
+        self.assertEqual(errs, [], msg=errs)
+
+    def test_cadence_actually_claimed_by_a_suite_is_not_guarded(self):
+        # A cadence that is listed as informational but that a suite actually
+        # claims is data-driven out of the guarded set, so it is not flagged.
+        text = _STRATEGY_DOC.format(
+            body="Integration runs on nightly cadence.")
+        errs = checker.check_cadence_prose(
+            text,
+            _inventory_with_cadences("pr", "nightly"),
+            _coverage_with_cadence_axis(["nightly", "release"]))
+        self.assertEqual(errs, [], msg=errs)
+
+    def test_cadence_word_inside_code_span_is_not_flagged(self):
+        # A cadence word shown in an inline code span is masked before scanning.
+        text = _STRATEGY_DOC.format(
+            body="The `nightly` ctest label is unrelated to build cadence.")
+        errs = checker.check_cadence_prose(
+            text,
+            _inventory_with_cadences("pr", "on_demand"),
+            _coverage_with_cadence_axis(["nightly", "release"]))
+        self.assertEqual(errs, [], msg=errs)
+
+    def test_noop_without_strategy_section(self):
+        # No ``## Testing strategy and layers`` section means nothing to scan.
+        text = "# Doc\n\n## Other\n\nIntegration runs on nightly cadence.\n"
+        errs = checker.check_cadence_prose(
+            text,
+            _inventory_with_cadences("pr", "on_demand"),
+            _coverage_with_cadence_axis(["nightly", "release"]))
+        self.assertEqual(errs, [], msg=errs)
+
+    def test_live_testing_md_cadence_prose_matches_inventory(self):
+        # Live regression guard: the real TESTING.md per-tier strategy prose must
+        # not assert a cadence the real inventory does not back. This reads the
+        # committed component documents directly through the checker's loaders.
+        import yaml  # available transitively via the checker module
+
+        component = checker.HIP_TESTS_DIR
+        inventory = yaml.safe_load(
+            (component / "test_inventory.yaml").read_text(encoding="utf-8"))
+        coverage = yaml.safe_load(
+            (component / "test_coverage_model.yaml").read_text(encoding="utf-8"))
+        text = (component / "TESTING.md").read_text(encoding="utf-8")
+        errs = checker.check_cadence_prose(text, inventory, coverage)
+        self.assertEqual(errs, [], msg=errs)
+
+
 if __name__ == "__main__":
     unittest.main()
