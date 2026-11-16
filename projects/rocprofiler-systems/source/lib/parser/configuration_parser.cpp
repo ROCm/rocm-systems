@@ -285,20 +285,6 @@ catalog_errors(const schema& catalog)
     return fmt::format(
         "{}", fmt::join(problems | std::views::transform(&violation::message), "; "));
 }
-
-void
-install_resolved(config_store& live, const schema& config_schema,
-                 const resolved_config& resolved)
-{
-    config_store staged{ config_schema };
-    apply_resolved(staged, resolved);
-    const auto slots = staged.slots();
-    live.clear();
-    for(const auto& slot : slots)
-    {
-        live.set_value(slot.id, slot.value, slot.source);
-    }
-}
 }  // namespace
 
 void
@@ -404,7 +390,8 @@ configuration_parser::parse(const std::vector<std::string>& arguments)
     append_violations(m_errors, request.config_schema, resolved);
     try
     {
-        install_resolved(*m_store, *schema_ptr, resolved);
+        m_store->clear();
+        apply_resolved(*m_store, resolved);
     } catch(const std::exception& err)
     {
         m_errors.emplace_back(err.what());
