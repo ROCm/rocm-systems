@@ -11,9 +11,37 @@
 #include <utils.hh>
 #include <resource_guards.hh>
 
+#include <atomic>
+#include <thread>
+
 namespace {
 inline constexpr size_t kLaunchIters = 10;
 }  // anonymous namespace
+
+// Wait() returns false once any thread has recorded a failure, because HIP_CHECK_THREAD makes the
+// failing thread return early and the others would otherwise wait for it forever.
+class ThreadBarrier {
+ public:
+  explicit ThreadBarrier(int count) : count_(count) {}
+
+  bool Wait() {
+    const int generation = generation_.load();
+    if (arrived_.fetch_add(1) + 1 == count_) {
+      arrived_.store(0);
+      generation_.fetch_add(1);
+    } else {
+      while (generation_.load() == generation && !TestContext::get().hasErrorOccured()) {
+        std::this_thread::yield();
+      }
+    }
+    return !TestContext::get().hasErrorOccured();
+  }
+
+ private:
+  const int count_;
+  std::atomic<int> arrived_{0};
+  std::atomic<int> generation_{0};
+};
 
 template <typename T> void captureSequenceSimple(T* hostMem1, T* devMem1, T* hostMem2, size_t N,
                                                  hipStream_t captureStream,

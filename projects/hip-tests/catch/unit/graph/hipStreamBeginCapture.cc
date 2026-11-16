@@ -2898,6 +2898,121 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_InvalidationReachesSiblingFork
   requireWholeCaptureInvalidated(origin, forks);
 }
 
+__global__ void SharedGraphIncrement(int* counter) { atomicAdd(counter, 1); }
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Several threads capture into one graph, joined through events they record for each other.
+ * Test source
+ * ------------------------
+ *  - unit/graph/hipStreamBeginCapture.cc
+ */
+// If this test is flaky, debug the runtime race it exposes instead of disabling the test.
+HIP_TEST_CASE(Unit_hipStreamBeginCapture_MultiThread_SharedGraph) {
+  const hipStreamCaptureMode mode = GENERATE(
+      hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal, hipStreamCaptureModeRelaxed);
+  const int num_threads = GENERATE(2, 4);
+  constexpr int kIterations = 20;
+  constexpr int kKernels = 32;
+
+  struct Rank {
+    StreamGuard local{Streams::withFlags, hipStreamNonBlocking};
+    StreamGuard remote{Streams::withFlags, hipStreamNonBlocking};
+    EventsGuard fork{1};
+    EventsGuard done{1};
+    EventsGuard halo{kKernels};
+    LinearAllocGuard<int> counters{LinearAllocs::hipMalloc, 2 * sizeof(int)};
+    LinearAllocGuard<int> scratch{LinearAllocs::hipMalloc, sizeof(int)};
+  };
+  std::vector<Rank> ranks(num_threads);
+  for (auto& rank : ranks) {
+    HIP_CHECK(hipMemset(rank.counters.ptr(), 0, 2 * sizeof(int)));
+  }
+  HIP_CHECK(hipDeviceSynchronize());
+  std::vector<hipEvent_t> published(num_threads);
+  const size_t expected_nodes = num_threads * (4 * kKernels + 1);
+  ThreadBarrier barrier(num_threads);
+
+  auto run_rank = [&](int r) {
+    Rank& rank = ranks[r];
+    Rank& peer = ranks[(r + 1) % num_threads];
+    hipStream_t local = rank.local.stream();
+    hipStream_t remote = rank.remote.stream();
+    int* local_counter = rank.counters.ptr();
+    int* remote_counter = rank.counters.ptr() + 1;
+
+    for (int iteration = 0; iteration < kIterations; ++iteration) {
+      if (!barrier.Wait()) return;
+      if (r == 0) {
+        HIP_CHECK_THREAD(hipStreamBeginCapture(local, mode));
+        HIP_CHECK_THREAD(hipEventRecord(rank.fork, local));
+        published[0] = rank.fork;
+      }
+      if (!barrier.Wait()) return;
+      if (r != 0) {
+        HIP_CHECK_THREAD(hipStreamWaitEvent(local, published[0], 0));
+      }
+      if (!barrier.Wait()) return;
+
+      HIP_CHECK_THREAD(hipEventRecord(rank.fork, local));
+      HIP_CHECK_THREAD(hipStreamWaitEvent(remote, rank.fork, 0));
+      HIP_CHECK_THREAD(hipMemsetAsync(rank.scratch.ptr(), 0, sizeof(int), remote));
+      for (int k = 0; k < kKernels; ++k) {
+        SharedGraphIncrement<<<1, 1, 0, local>>>(local_counter);
+        SharedGraphIncrement<<<1, 1, 0, remote>>>(remote_counter);
+        HIP_CHECK_THREAD(hipEventRecord(rank.halo[k], local));
+      }
+      if (!barrier.Wait()) return;
+
+      for (int k = 0; k < kKernels; ++k) {
+        HIP_CHECK_THREAD(hipStreamWaitEvent(remote, peer.halo.event_list()[k], 0));
+        SharedGraphIncrement<<<1, 1, 0, remote>>>(remote_counter);
+        SharedGraphIncrement<<<1, 1, 0, local>>>(local_counter);
+      }
+      HIP_CHECK_THREAD(hipGetLastError());
+      HIP_CHECK_THREAD(hipEventRecord(rank.done, remote));
+      HIP_CHECK_THREAD(hipStreamWaitEvent(local, rank.done, 0));
+      HIP_CHECK_THREAD(hipEventRecord(rank.done, local));
+      published[r] = rank.done;
+      if (!barrier.Wait()) return;
+
+      if (r == 0) {
+        for (int p = 1; p < num_threads; ++p) {
+          HIP_CHECK_THREAD(hipStreamWaitEvent(local, published[p], 0));
+        }
+        hipGraph_t graph = nullptr;
+        HIP_CHECK_THREAD(hipStreamEndCapture(local, &graph));
+        size_t node_count = 0;
+        HIP_CHECK_THREAD(hipGraphGetNodes(graph, nullptr, &node_count));
+        REQUIRE_THREAD(node_count == expected_nodes);
+        hipGraphExec_t exec = nullptr;
+        HIP_CHECK_THREAD(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+        HIP_CHECK_THREAD(hipGraphLaunch(exec, local));
+        HIP_CHECK_THREAD(hipStreamSynchronize(local));
+        HIP_CHECK_THREAD(hipGraphExecDestroy(exec));
+        HIP_CHECK_THREAD(hipGraphDestroy(graph));
+      }
+    }
+  };
+
+  std::vector<std::thread> threads;
+  for (int r = 0; r < num_threads; ++r) {
+    threads.emplace_back(run_rank, r);
+  }
+  for (auto& t : threads) {
+    t.join();
+  }
+  HIP_CHECK_THREAD_FINALIZE();
+
+  for (auto& rank : ranks) {
+    int counters[2] = {};
+    HIP_CHECK(hipMemcpy(counters, rank.counters.ptr(), sizeof(counters), hipMemcpyDeviceToHost));
+    REQUIRE(counters[0] == kIterations * 2 * kKernels);
+    REQUIRE(counters[1] == kIterations * 2 * kKernels);
+  }
+}
+
 /**
  * End doxygen group GraphTest.
  * @}

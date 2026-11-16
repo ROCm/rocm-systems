@@ -560,6 +560,7 @@ namespace hip {
                                                           //!< excluding the origin. Origin only.
     std::unordered_set<hipEvent_t> captureEvents_;        //!< Events tied to this capture
     uint64_t captureID_ = 0;                              //!< Unique ID for this capture sequence
+    uint64_t captureSeq_ = 0;                             //!< Nodes captured on this stream so far
 
     // ----- Execution context (green context) state -----
     std::atomic<bool> detached_{false};  //!< True once the owning ExecutionCtx has been destroyed
