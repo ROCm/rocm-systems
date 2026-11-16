@@ -214,10 +214,10 @@ After installation, the following files are available:
 If you obtain rocDecode from [TheRock](https://github.com/ROCm/TheRock)'s generic
 (`.tar.zst`) artifacts instead of distribution packages, the `utils/` and
 `samples/` sources under `share/rocdecode/` ship in the `rocdecode-dev` artifact
-(for example, `rocdecode_dev_generic`). The bundled test media ships separately in
-the `rocdecode-test` artifact (for example, `rocdecode_test_generic`); add
-`--tests` alongside `--rocdecode` with TheRock's `install_rocm_from_artifacts.py`
-helper to install it:
+(for example, `rocdecode_dev_generic`). The CTest project, test scripts, and
+bundled test media ship in the `rocdecode-test` artifact (for example,
+`rocdecode_test_generic`). Add `--tests` alongside `--rocdecode` with TheRock's
+`install_rocm_from_artifacts.py` helper to install that artifact:
 
   ```shell
   python build_tools/install_rocm_from_artifacts.py \
