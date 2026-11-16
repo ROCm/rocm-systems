@@ -22,8 +22,9 @@ namespace rocprofsys::parser
  * parameter in the wrong category are errors. A JSON boolean or number that
  * matches the parameter type is stored as typed without a text round trip.
  * Other scalars are checked as text. A JSON array is accepted only for an
- * enumeration_list and is joined with that parameter's list separator. Values
- * the schema rejects are reported and not stored.
+ * enumeration_list; join_list() joins its items as it joins the tokens of that
+ * option on the command line, so the same items get the same verdict from both.
+ * Values the schema rejects are reported and not stored.
  * catalog_document() writes this shape. It omits default_value sources and
  * parameters whose category is empty.
  */

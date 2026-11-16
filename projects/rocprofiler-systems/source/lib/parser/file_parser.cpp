@@ -9,7 +9,6 @@
 #include "parser/value_text.hpp"
 
 #include <fmt/format.h>
-#include <fmt/ranges.h>
 #include <nlohmann/json.hpp>
 #include <nlohmann/json_fwd.hpp>
 
@@ -79,6 +78,7 @@ typed_scalar(const schema_param& param, const nlohmann::json& value)
     return std::nullopt;
 }
 
+/// An array's items are joined as the tokens of a command-line list option are.
 std::optional<std::string>
 joined_array(const nlohmann::json& value, std::string_view separator)
 {
@@ -86,14 +86,14 @@ joined_array(const nlohmann::json& value, std::string_view separator)
     items.reserve(value.size());
     for(const auto& item : value)
     {
-        const auto text = scalar_text(item);
+        auto text = scalar_text(item);
         if(!text)
         {
             return std::nullopt;
         }
-        items.push_back(*text);
+        items.push_back(std::move(*text));
     }
-    return fmt::format("{}", fmt::join(items, separator));
+    return join_list(items, separator);
 }
 
 struct decoded_value

@@ -1,8 +1,10 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "parser/cli_parser.hpp"
 #include "parser/config_store.hpp"
 #include "parser/file_parser.hpp"
+#include "parser/parse_result.hpp"
 #include "parser/precedence.hpp"
 #include "parser/preset_parser.hpp"
 #include "parser/schema.hpp"
@@ -18,6 +20,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -73,6 +76,7 @@ make_schema()
     components.category = "sampling";
     components.choices  = { "wall_clock", "cpu_clock" };
     components.env      = "ROCPROFSYS_COMPONENTS";
+    components.arg      = "--components";
     add_param(value, std::move(trace));
     add_param(value, std::move(freq));
     add_param(value, std::move(components));
@@ -128,6 +132,38 @@ expect_mentions(const std::vector<std::string>& errors, std::string_view fragmen
                                        return message.find(fragment) != std::string::npos;
                                    });
     EXPECT_TRUE(found) << fragment;
+}
+
+/// Canonical text of the value stored for @p param_id; nullopt when nothing is stored.
+std::optional<std::string>
+stored_text(const parse_result& parsed, std::string_view param_id)
+{
+    const auto found = parsed.values.find(param_id);
+    return found == parsed.values.end() ? std::nullopt
+                                        : std::optional{ format_value(found->second) };
+}
+
+/// What "components" stores from @p items as a JSON array and as command-line tokens.
+struct list_verdicts
+{
+    std::optional<std::string> file;
+    std::optional<std::string> command_line;
+};
+
+list_verdicts
+read_items(const std::vector<std::string>& items)
+{
+    const auto config_schema           = make_schema();
+    auto       document                = nlohmann::json::object();
+    document["sampling"]["components"] = items;
+
+    std::vector<std::string> args{ "--components" };
+    args.insert(args.end(), items.begin(), items.end());
+    const auto from_file = file_parser{}.parse(config_schema, document);
+    const auto from_cli =
+        cli_parser{ std::move(args), unknown_option::report }.parse(config_schema);
+    return { .file         = stored_text(from_file, "components"),
+             .command_line = stored_text(from_cli, "components") };
 }
 }  // namespace
 
@@ -191,6 +227,29 @@ TEST(parser_file, rejects_an_array_for_a_scalar_parameter)
     EXPECT_EQ(parsed.values.find("freq"), parsed.values.end());
     ASSERT_EQ(parsed.errors.size(), 2U);
     EXPECT_NE(parsed.errors.front().find("does not accept an array"), std::string::npos);
+}
+
+TEST(parser_file, reads_array_items_like_command_line_tokens)
+{
+    using items      = std::vector<std::string>;
+    const auto cases = std::vector<std::pair<items, std::optional<std::string>>>{
+        { items{ "wall_clock", "cpu_clock" }, "wall_clock,cpu_clock" },
+        { items{ "wall_clock", "", "cpu_clock" }, "wall_clock,cpu_clock" },
+        { items{ "wall_clock,", "cpu_clock" }, "wall_clock,cpu_clock" },
+        { items{ "wall_clock", "," }, "wall_clock" },
+        { items{ " wall_clock " }, "wall_clock" },
+        { items{ "" }, "" },
+        { items{ "," }, std::nullopt },
+        { items{ "wall_clock", ",", ",", "cpu_clock" }, std::nullopt },
+        { items{ "wall_clock", "bogus" }, std::nullopt },
+    };
+    for(const auto& [list, expected] : cases)
+    {
+        SCOPED_TRACE(nlohmann::json(list).dump());
+        const auto found = read_items(list);
+        EXPECT_EQ(found.file, expected);
+        EXPECT_EQ(found.command_line, expected);
+    }
 }
 
 TEST(parser_file, rejects_an_environment_name_and_a_misplaced_parameter)
