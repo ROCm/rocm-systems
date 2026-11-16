@@ -44,8 +44,7 @@ __all__ = [
     "main",
 ]
 
-_get_rank_env_variable_name = None
-_get_rank_already_searched = False
+_MISSING = object()
 
 
 def check_function_availability(connection, function_name):
@@ -179,10 +178,9 @@ def get_rank_env_variable_name(connection: RocpdImportData) -> str:
         "PBS_NODENUM",
     ]
 
-    global _get_rank_env_variable_name
-    global _get_rank_already_searched
-    if _get_rank_already_searched is True:
-        return _get_rank_env_variable_name
+    cached = getattr(get_rank_env_variable_name, "_rank_env_name_cached", _MISSING)
+    if cached is not _MISSING:
+        return cached
 
     environment_vars = execute_statement(
         connection, "SELECT environment FROM rocpd_info_process LIMIT 1"
@@ -198,14 +196,19 @@ def get_rank_env_variable_name(connection: RocpdImportData) -> str:
         columns = env_data.keys()
         break  # only need to check the first row
 
+    # ROCPROFV3 already cached the rank variable name, lets just use it
+    if "ROCPROF_MPI_RANK_VAR" in columns:
+        get_rank_env_variable_name._rank_env_name_cached = env_data[
+            "ROCPROF_MPI_RANK_VAR"
+        ]
+        return get_rank_env_variable_name._rank_env_name_cached
+
     current_rank_column = None
     for rank_column in possible_rank_columns:
         if rank_column in columns:
             current_rank_column = rank_column  # any subsequent matches will override previous ones, to get most specific
 
-    _get_rank_env_variable_name = current_rank_column
-    _get_rank_already_searched = True
-
+    get_rank_env_variable_name._rank_env_name_cached = current_rank_column
     return current_rank_column
 
 
