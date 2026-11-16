@@ -90,6 +90,7 @@ def test_jax_trace_profile_csvs(jax_trace_profiled_workload):
     assert any("jax.jit.matmul_relu" in fn for fn in functions)
     assert any("jax.dot_general" in fn for fn in functions)
     assert any("jax.pmap." in fn for fn in functions)
+    assert any("jax.shard_map." in fn for fn in functions)
 
 
 def test_list_jax_operators_prints_call_tree(
@@ -212,7 +213,22 @@ def test_pmap_is_root(
     out = captured_analyze_output(capsys)
     root_operator_line(out, "jax.pmap.pmap_square")
     root_operator_line(out, "jax.pmap.pmap_double")
-    assert "jax.shard_map." not in out
+
+
+def test_shard_map_is_root(
+    jax_trace_profiled_workload, binary_handler_analyze_rocprof_compute, capsys
+):
+    code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--list-operators",
+        "jax",
+        "--path",
+        jax_trace_profiled_workload,
+    ])
+    assert code == 0
+    out = captured_analyze_output(capsys)
+    root_operator_line(out, "jax.shard_map.shard_map_cube")
 
 
 def test_jax_operator_filter_train_step(

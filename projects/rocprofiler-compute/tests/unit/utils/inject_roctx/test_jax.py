@@ -9,6 +9,8 @@ from types import ModuleType, SimpleNamespace
 from utils.inject_roctx import core
 from utils.inject_roctx._backends import jax as jax_backend
 
+FAKE_JAX_PACKAGE_INIT = "/opt/fake/jax/__init__.py"
+
 
 def fake_compiled_type():
     class FakeCompiled:
@@ -35,7 +37,7 @@ def fake_primitive_type():
     return FakePrimitive
 
 
-def install_fake_jax(monkeypatch, jax_file="/tmp/fake_jax/__init__.py"):
+def install_fake_jax(monkeypatch, jax_package_init=FAKE_JAX_PACKAGE_INIT):
     compiled_type = fake_compiled_type()
     primitive_type = fake_primitive_type()
 
@@ -52,10 +54,20 @@ def install_fake_jax(monkeypatch, jax_file="/tmp/fake_jax/__init__.py"):
         mapped.__name__ = name
         return mapped
 
+    def fake_shard_map(fun, *args, **kwargs):
+        name = getattr(fun, "__name__", "<unknown>")
+
+        def mapped(*mapped_args, **mapped_kwargs):
+            return fun(*mapped_args, **mapped_kwargs)
+
+        mapped.__name__ = name
+        return mapped
+
     jax_mod = ModuleType("jax")
-    jax_mod.__file__ = jax_file
+    jax_mod.__file__ = jax_package_init
     jax_mod.jit = fake_jit
     jax_mod.pmap = fake_pmap
+    jax_mod.shard_map = fake_shard_map
     extend = ModuleType("jax.extend")
     extend_core = ModuleType("jax.extend.core")
     extend_core.Primitive = primitive_type
@@ -75,13 +87,9 @@ def reset_jax_backend_state():
     jax_backend._jax_thread_local.depth = 0
 
 
-def install_jax_backend(
-    monkeypatch, python_tier=True, jax_file="/tmp/fake_jax/__init__.py"
-):
+def install_jax_backend(monkeypatch, python_tier=True):
     reset_jax_backend_state()
-    jax_mod, compiled_type, primitive_type = install_fake_jax(
-        monkeypatch, jax_file=jax_file
-    )
+    jax_mod, compiled_type, primitive_type = install_fake_jax(monkeypatch)
     monkeypatch.setattr(core, "ensure_python_tier", lambda: python_tier)
     monkeypatch.setattr(core, "add_framework_root", lambda path: None)
     jax_backend.JaxBackend().install()
@@ -163,6 +171,18 @@ def test_jax_pmap_call_emits_pmap_marker(monkeypatch):
     assert pushes[0]["backend"] == "jax"
 
 
+def test_jax_shard_map_call_emits_shard_map_marker(monkeypatch):
+    jax_mod, _compiled_type, _primitive_type = install_jax_backend(monkeypatch)
+    pushes = record_scopes(monkeypatch)
+
+    def shard_map_square(value):
+        return value
+
+    assert jax_mod.shard_map(shard_map_square)(1) == 1
+    assert [item["marker"] for item in pushes] == ["jax.shard_map.shard_map_square"]
+    assert pushes[0]["backend"] == "jax"
+
+
 def test_jax_primitive_emits_dot_general_marker(monkeypatch):
     _jax_mod, _compiled_type, primitive_type = install_jax_backend(monkeypatch)
     pushes = record_scopes(monkeypatch)
@@ -202,10 +222,9 @@ def test_jax_primitive_skips_when_range_open(monkeypatch):
 
 def test_jax_backend_registers_framework_root(monkeypatch):
     roots = []
-    jax_file = "/tmp/fake_jax/__init__.py"
     reset_jax_backend_state()
-    install_fake_jax(monkeypatch, jax_file=jax_file)
+    install_fake_jax(monkeypatch)
     monkeypatch.setattr(core, "ensure_python_tier", lambda: True)
     monkeypatch.setattr(core, "add_framework_root", roots.append)
     jax_backend.JaxBackend().install()
-    assert roots == ["/tmp/fake_jax"]
+    assert roots == ["/opt/fake/jax"]
