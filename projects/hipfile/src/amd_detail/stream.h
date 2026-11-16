@@ -46,6 +46,7 @@ public:
     virtual bool     isRetired() const     = 0;
     virtual uint64_t nextSignalTarget()    = 0;
     virtual uint64_t releaseSignalTarget() = 0;
+    virtual void     ensureSignalSlot()    = 0; // Allocates the signal slot once, on first gated use.
 
     virtual void applyFlags(uint32_t flags) = 0; // Takes the lock.
     virtual void drainAndRelease()          = 0; // Takes the lock; must not be called with it held.
@@ -78,6 +79,7 @@ public:
     bool     isRetired() const override;
     uint64_t nextSignalTarget() override;
     uint64_t releaseSignalTarget() override;
+    void     ensureSignalSlot() override;
 
     void applyFlags(uint32_t flags) override;
     void drainAndRelease() override;
