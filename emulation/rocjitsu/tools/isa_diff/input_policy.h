@@ -133,6 +133,15 @@ void project_onto_constraints(Sample &sample, const RegionContract &contract, ui
 [[nodiscard]] uint32_t canary_value(uint64_t seed, uint64_t case_index, unsigned loc,
                                     bool new_side);
 
+/// @brief Initial memory content (memory model): the 32-bit word at byte address
+/// 4 * @p word for memory seed @p seed. Half of the words are 32-bit catalog values
+/// (NaN/Inf/denormal encodings, integer limits), the rest uniform random. Memory is an
+/// input of the region: both sides start from the same content.
+[[nodiscard]] uint32_t initial_memory_word(uint64_t seed, uint64_t word);
+[[nodiscard]] inline uint8_t initial_memory_byte(uint64_t seed, uint64_t addr) {
+  return static_cast<uint8_t>(initial_memory_word(seed, addr >> 2) >> ((addr & 3) * 8));
+}
+
 /// @brief SplitMix64 step (deterministic, portable).
 [[nodiscard]] uint64_t splitmix64(uint64_t x);
 

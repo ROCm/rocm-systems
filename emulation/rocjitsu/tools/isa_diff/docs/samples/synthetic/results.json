@@ -4,7 +4,7 @@
     "tool": "rj_isa_diff",
     "tool_version": "0.1.0-p0",
     "schema_version": "rj_isa_diff.v1",
-    "rocjitsu_revision": "d5b78f4fa542e119215503b081375738b94094f3",
+    "rocjitsu_revision": "0e0e4a72d7df1455a0a3dd9edc6f44a749467b6f",
     "rocjitsu_version": "0.3.0",
     "semantics": "RocJITsu ComputeUnitCore::execute_instruction, gfx950 (CDNA4) wave64, default arithmetic semantics",
     "compiler": "13.4.0"
@@ -54,15 +54,15 @@
         {
           "argv": ["/opt/rocm/llvm/bin/llvm-mc", "-triple=amdgcn-amd-amdhsa", "-mcpu=gfx950", "-filetype=obj", "-o", "co/artifacts/old.o", "co_old.s"],
           "exit_code": 0,
-          "elapsed_ns": 2578127
+          "elapsed_ns": 2603346
         },
         {
           "argv": ["/opt/rocm/llvm/bin/ld.lld", "-shared", "--emit-relocs", "-o", "co/artifacts/old.hsaco", "co/artifacts/old.o"],
           "exit_code": 0,
-          "elapsed_ns": 7607960
+          "elapsed_ns": 7086784
         }
       ],
-      "compile_ns": 10186087,
+      "compile_ns": 9690130,
       "executed_object": "linked_code_object",
       "note": "executed bytes are the code object linked from the re-assembled source, decoded by RocJITsu; they are not necessarily an original binary emission",
       "toolchain": {
@@ -83,15 +83,15 @@
         {
           "argv": ["/opt/rocm/llvm/bin/llvm-mc", "-triple=amdgcn-amd-amdhsa", "-mcpu=gfx950", "-filetype=obj", "-o", "co/artifacts/new.o", "co_new.s"],
           "exit_code": 0,
-          "elapsed_ns": 2535612
+          "elapsed_ns": 2198148
         },
         {
           "argv": ["/opt/rocm/llvm/bin/ld.lld", "-shared", "--emit-relocs", "-o", "co/artifacts/new.hsaco", "co/artifacts/new.o"],
           "exit_code": 0,
-          "elapsed_ns": 6653061
+          "elapsed_ns": 7648967
         }
       ],
-      "compile_ns": 9188673,
+      "compile_ns": 9847115,
       "executed_object": "linked_code_object",
       "note": "executed bytes are the code object linked from the re-assembled source, decoded by RocJITsu; they are not necessarily an original binary emission",
       "toolchain": {
@@ -193,13 +193,13 @@
         "new_insts_executed": 3118
       },
       "timing": {
-        "setup_ns": 503049,
-        "propose_ns": 537941,
-        "state_load_ns": 1328742,
-        "old_execute_ns": 190289,
-        "new_execute_ns": 199871,
-        "compare_ns": 1157271,
-        "triage_ns": 994208
+        "setup_ns": 620030,
+        "propose_ns": 543335,
+        "state_load_ns": 1372889,
+        "old_execute_ns": 212137,
+        "new_execute_ns": 204717,
+        "compare_ns": 1111658,
+        "triage_ns": 1056256
       },
       "mismatch_locations": "s8,s9",
       "vgpr_mismatch_locations": "",

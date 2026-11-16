@@ -159,10 +159,11 @@ TEST(IsaDiffEffects, ClassifiesSaluOperandsPrecisely) {
   Effects getpc = fx(13);
   EXPECT_FALSE(getpc.p0);
   EXPECT_TRUE(getpc.reads_pc);
-  EXPECT_FALSE(fx(14).p0); // s_waitcnt
+  EXPECT_TRUE(fx(14).p0); // s_waitcnt: executed in regions (memory model)
   EXPECT_FALSE(fx(14).implicit_special_reads);
   Effects load = fx(15);
-  EXPECT_FALSE(load.p0);
+  EXPECT_TRUE(load.p0); // s_load_dword: a region-executable scalar load
+  EXPECT_TRUE(load.mem_read);
   EXPECT_FALSE(load.implicit_special_reads); // SMEM: its operands name everything it reads
   EXPECT_TRUE(load.implicit_reads.none());
   EXPECT_EQ(load.reads, locs("s0,s1"));
@@ -230,8 +231,14 @@ TEST(IsaDiffKernelModel, ImplicitStoreBaseReadsKeepLivenessPrecise) {
   EXPECT_FALSE(fx.unknown_effect);
   EXPECT_TRUE(fx.reads.test(6));
   EXPECT_TRUE(fx.reads.test(7));
-  EXPECT_EQ(fx.implicit_reads, locs("exec_lo,exec_hi")); // a store never reads VCC or M0
-  EXPECT_FALSE(fx.reject_reason.empty());                // still outside the executable subset
+  // Region-executable now (memory model): the EXEC read is an ordinary read, and a store
+  // never reads VCC. (The decoder lists M0 among a global access's implicit uses; keeping
+  // that read is conservative.)
+  EXPECT_TRUE(fx.p0);
+  EXPECT_TRUE(fx.mem_write);
+  EXPECT_TRUE(fx.reject_reason.empty()) << fx.reject_reason;
+  EXPECT_TRUE(fx.implicit_reads.none());
+  EXPECT_EQ(fx.reads & locs("exec_lo,exec_hi,vcc_lo,vcc_hi"), locs("exec_lo,exec_hi"));
   CaseData d = analyze(k_valutemp_old, k_valutemp_new);
   ASSERT_EQ(d.regions.size(), 1u);
   const RegionContract &k = d.regions[0].contract;
@@ -537,19 +544,41 @@ TEST(IsaDiffValidator, UnknownSuccessorDescriptorAndUncoveredChangesKeepScopePar
   EXPECT_EQ(r.overall(), "INCONCLUSIVE");
   EXPECT_EQ(r.coverage(), "PARTIAL");
 
-  // Descriptor resource change: contract UNRESOLVED, scope partial.
+  // Register-allocation-only change (granulated VGPR and SGPR counts in rsrc1) while both
+  // kernels' registers fit their allocation: informational.
   Artifact a = artifact_from_words(k_shift_old, "old");
   Artifact b = artifact_from_words(k_shift_new, "new");
   a.descriptor.assign(64, 0);
   b.descriptor.assign(64, 0);
   b.descriptor[48] = 0x41; // compute_pgm_rsrc1
   std::string error;
+  auto alloc = analyze_artifacts(a, b, {}, error);
+  ASSERT_TRUE(alloc) << error;
+  EXPECT_TRUE(alloc->unresolved.empty());
+  EXPECT_EQ(alloc->regions[0].contract.status, ContractStatus::Established);
+  EXPECT_EQ(run(*alloc).overall(), "NO_MISMATCH_FOUND");
+
+  // Any other rsrc1 bit (IEEE_MODE, bit 23): contract UNRESOLVED, scope partial.
+  b.descriptor.assign(64, 0);
+  b.descriptor[50] = 0x80;
   auto desc = analyze_artifacts(a, b, {}, error);
   ASSERT_TRUE(desc) << error;
   EXPECT_EQ(desc->regions[0].contract.status, ContractStatus::Unresolved);
   TestRun rd = run(*desc);
   EXPECT_EQ(rd.overall(), "INCONCLUSIVE");
   EXPECT_EQ(rd.coverage(), "PARTIAL");
+
+  // The same allocation change is semantic when a kernel names more registers than its
+  // descriptor allocates (s21 plus the six extra SGPRs exceed granule 0's 16).
+  Artifact c = artifact_from_words(k_clobber_old, "old");
+  Artifact e = artifact_from_words(k_clobber_old, "new");
+  c.descriptor.assign(64, 0);
+  e.descriptor.assign(64, 0);
+  e.descriptor[48] = 0x41;
+  auto over = analyze_artifacts(c, e, {}, error);
+  ASSERT_TRUE(over) << error;
+  EXPECT_FALSE(over->unresolved.empty());
+  EXPECT_EQ(run(*over).overall(), "INCONCLUSIVE");
 
   // Entry-offset-only descriptor change is layout, not semantics.
   b.descriptor.assign(64, 0);
@@ -580,14 +609,30 @@ TEST(IsaDiffValidator, ExecZeroIsExecutedNotFiltered) {
   EXPECT_EQ(r.results[0].valid_pairs, r.results[0].accepted);
 }
 
-TEST(IsaDiffValidator, WaitcntMemoryPcAndHwregRegionsAreUnsupported) {
+TEST(IsaDiffValidator, PcAndHwregRegionsAreUnsupportedWhileMemoryRuns) {
+  // Waits and scalar loads are executed (memory model): an extra vmcnt field changes
+  // nothing, and a load from offset 0x4 instead of 0x0 reads a different input word.
+  CaseData wait = analyze(k_waitcnt_old, k_waitcnt_new);
+  ASSERT_EQ(wait.regions.size(), 1u);
+  ASSERT_EQ(wait.regions[0].status, RegionStatus::Ready) << wait.regions[0].reason;
+  EXPECT_EQ(run(wait).results[0].test_status, TestStatus::NoMismatchFound);
+  CaseData smem = analyze(k_smem_old, k_smem_new);
+  ASSERT_EQ(smem.regions.size(), 1u);
+  ASSERT_EQ(smem.regions[0].status, RegionStatus::Ready) << smem.regions[0].reason;
+  EXPECT_TRUE(smem.regions[0].contract.memory_reads);
+  bool pointer = false;
+  for (const auto &c : smem.regions[0].contract.constraints)
+    pointer |= c.source == "memory_model" && c.loc == 1 && c.known_one == 0x10u;
+  EXPECT_TRUE(pointer); // s[0:1] is a memory base: a canonical pointer input
+  TestRun sr = run(smem);
+  ASSERT_EQ(sr.results[0].test_status, TestStatus::LocalMismatch);
+  EXPECT_TRUE(sr.results[0].examples.at(0).locs.test(4));
+
   struct Case {
     const std::vector<uint32_t> &o, &n;
     const char *needle;
   };
   const Case cases[] = {
-      {k_waitcnt_old, k_waitcnt_new, "s_waitcnt"},
-      {k_smem_old, k_smem_new, "s_load_dword"},
       {k_getpc_old, k_getpc_new, "PC-derived"},
       {k_getreg_old, k_getreg_new, "allowlist"},
   };
@@ -1654,6 +1699,64 @@ TEST(IsaDiffValu, RegisterCountMetadataIsInformationalOnlyWithinTheAllocation) {
   for (const auto &u : beyond->unresolved)
     reported |= u.what.find("beyond its descriptor allocation of 4 VGPRs") != std::string::npos;
   EXPECT_TRUE(reported);
+}
+
+TEST(IsaDiffMemory, StoredBytesAreTheObservableOutput) {
+  // A renamed temporary stored through the same address: equal stored bytes.
+  CaseData d = analyze(k_memst_old, k_memst_new);
+  ASSERT_EQ(d.regions.size(), 1u);
+  ASSERT_EQ(d.regions[0].status, RegionStatus::Ready) << d.regions[0].reason;
+  EXPECT_TRUE(d.regions[0].contract.memory_writes);
+  TestRun t = run(d, 300);
+  EXPECT_EQ(t.results[0].test_status, TestStatus::NoMismatchFound) << t.results[0].reason;
+  EXPECT_GT(t.results[0].valid_pairs, 300u);
+  // The same value stored at offset 4: a memory mismatch, replayable.
+  const std::string cex = temp_dir("mem_cex");
+  CaseData w = analyze(k_memst_old, k_memstoff_new);
+  TestRun tw = run(w, 100, 1, cex);
+  ASSERT_EQ(tw.results[0].test_status, TestStatus::LocalMismatch);
+  const Mismatch &m = tw.results[0].examples.at(0);
+  EXPECT_TRUE(m.memory);
+  EXPECT_NE(m.detail.find("memory difference"), std::string::npos) << m.detail;
+  ASSERT_FALSE(tw.results[0].counterexample_files.empty());
+  auto text = read_text_file(tw.results[0].counterexample_files[0]);
+  ASSERT_TRUE(text);
+  std::string error;
+  auto bundle = Json::parse(*text, &error);
+  ASSERT_TRUE(bundle) << error;
+  EXPECT_TRUE((*bundle)["memory_differs"].as_bool());
+  EXPECT_FALSE((*bundle)["memory_differences"].items().empty());
+  const ReplayOutcome rep = replay_counterexample(*bundle, error);
+  EXPECT_TRUE(rep.reproduced) << rep.summary << error;
+  std::filesystem::remove_all(cex);
+}
+
+TEST(IsaDiffMemory, LoadsReadTheSameInputOnBothSides) {
+  CaseData d = analyze(k_memld_old, k_memld_new);
+  ASSERT_EQ(d.regions.size(), 1u);
+  ASSERT_EQ(d.regions[0].status, RegionStatus::Ready) << d.regions[0].reason;
+  EXPECT_TRUE(d.regions[0].contract.memory_reads);
+  EXPECT_TRUE(d.regions[0].contract.memory_writes);
+  TestRun t = run(d, 300);
+  ASSERT_EQ(t.results[0].test_status, TestStatus::NoMismatchFound) << t.results[0].reason;
+  EXPECT_EQ(t.results[0].harness_errors, 0u);
+  // The initial image is recorded in states: 64 lanes read different words.
+  MachineState probe;
+  probe.mem_seed = 1;
+  EXPECT_NE(initial_memory_word(1, 100), initial_memory_word(1, 101));
+}
+
+TEST(IsaDiffMemory, VectorMemoryCompletesInOrder) {
+  // vmcnt(1) after two loads retires the first one: reading its destination is fine.
+  CaseData ok = analyze(k_vmorder_old, k_vmorder_new);
+  ASSERT_EQ(ok.regions.size(), 1u);
+  EXPECT_NE(ok.regions[0].contract.pending_effects, "CONFLICT");
+  EXPECT_EQ(run(ok, 200).results[0].test_status, TestStatus::NoMismatchFound);
+  // Reading the second load's destination after vmcnt(1) may see a stale value.
+  CaseData early = analyze(k_vmorder_old, k_vmearly_new);
+  ASSERT_EQ(early.regions.size(), 1u);
+  EXPECT_EQ(early.regions[0].contract.pending_effects, "CONFLICT");
+  EXPECT_EQ(early.regions[0].contract.status, ContractStatus::Unresolved);
 }
 
 } // namespace

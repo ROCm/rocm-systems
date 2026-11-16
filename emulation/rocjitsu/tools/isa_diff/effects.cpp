@@ -380,6 +380,15 @@ bool is_p0_mnemonic(std::string_view mnemonic) {
   return std::ranges::find(kP0Mnemonics, mnemonic) != kP0Mnemonics.end();
 }
 
+bool is_region_memory(std::string_view m) {
+  auto starts = [&](std::string_view p) { return m.substr(0, p.size()) == p; };
+  if (m == "s_waitcnt")
+    return true;
+  if (starts("global_load_"))
+    return m.find("lds") == std::string_view::npos && m.find("_tr") == std::string_view::npos;
+  return starts("global_store_") || starts("s_load_dword");
+}
+
 bool is_region_valu(std::string_view mnemonic, uint64_t flags) {
   if (!(flags & VALU) ||
       (flags & (MFMA | MEMORY_OP | SMEM | VMEM | LDS | WAITCNT | BARRIER | SUSPENDS_WAVE)))
@@ -402,6 +411,7 @@ Effects classify(const Instruction &inst) {
                               PROGRAM_TERMINATOR | WRITES_PC | SOFTWARE_TRAP)) != 0;
 
   std::string first_outside;
+  const bool memory_inst = is_region_memory(mnemonic);
   bool unknown = false;
   std::string unknown_what;
   auto absorb = [&](const Operand &op, bool is_dst) {
@@ -432,6 +442,10 @@ Effects classify(const Instruction &inst) {
         first_outside = "accesses the program counter";
       break;
     case Space::Outside:
+      // The memory pseudo-operand of a supported memory instruction is the memory the
+      // region runner models (initial image in, stored bytes out).
+      if (memory_inst && op.is_fieldless())
+        break;
       if (first_outside.empty())
         first_outside = "operand outside the P0 state: " + cls.what;
       break;
@@ -536,20 +550,30 @@ Effects classify(const Instruction &inst) {
     fx.reads.set(kLocExecHi);
   }
 
-  // Region executability: the SALU allowlist, or a plain VALU instruction.
+  // Region executability: the SALU allowlist, a plain VALU instruction, or a supported
+  // memory instruction.
   const bool salu_ok = is_p0_mnemonic(mnemonic);
   const bool valu_ok = is_region_valu(mnemonic, flags);
-  if (!salu_ok && !valu_ok) {
-    fx.reject_reason = "opcode not in the region allowlist (SALU allowlist or plain VALU): " +
-                       std::string(mnemonic);
+  const bool mem_ok = is_region_memory(mnemonic);
+  if (mem_ok) {
+    fx.mem_read = mnemonic.substr(0, 12) == "global_load_" || mnemonic.substr(0, 6) == "s_load";
+    fx.mem_write = mnemonic.substr(0, 13) == "global_store_";
+    if ((flags & VMEM) != 0) { // vector memory moves the lanes in EXEC
+      fx.reads.set(kLocExecLo);
+      fx.reads.set(kLocExecHi);
+    }
+  }
+  if (!salu_ok && !valu_ok && !mem_ok) {
+    fx.reject_reason =
+        "opcode not in the region allowlist (SALU allowlist, plain VALU, global/scalar memory): " +
+        std::string(mnemonic);
   } else if (fx.unknown_effect) {
     fx.reject_reason = "unmodelled effect: " + unknown_what;
   } else if (!first_outside.empty()) {
     fx.reject_reason = first_outside;
   } else if (fx.control_flow ||
-             (flags & (MEMORY_OP | WAITCNT | BARRIER | SUSPENDS_WAVE | SMEM | VMEM | LDS | MFMA)) !=
-                 0 ||
-             (salu_ok && fx.valu)) {
+             (!mem_ok && (flags & (MEMORY_OP | WAITCNT | SMEM | VMEM | LDS)) != 0) ||
+             (flags & (BARRIER | SUSPENDS_WAVE | MFMA)) != 0 || (salu_ok && fx.valu)) {
     fx.reject_reason = "instruction class outside the executable region subset";
   } else if (inst.data() != nullptr) {
     fx.reject_reason = "instruction carries dynamic state";

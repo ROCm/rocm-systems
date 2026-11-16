@@ -198,22 +198,30 @@ TEST(IsaDiffLlvm, RealPairCombinerSwitchIsVerifiedEndToEnd) {
   std::filesystem::remove_all(dir);
 }
 
-TEST(IsaDiffLlvm, RealPairTouchingSmemIsReportedNotPassed) {
+TEST(IsaDiffLlvm, RealPairReorderingScalarLoadsRunsTheLoads) {
+  // Disabling the scheduler reorders the kernel-argument loads. Those loads now execute in
+  // the region against a shared memory input, so the pair is tested rather than rejected.
   const std::string dir = temp_dir("misched");
   Pair p = compile_pair(dir, kUniformI32, {"-O3"}, {}, {"-enable-misched=false"});
   std::string error;
   auto data = analyze_artifacts(p.old_a, p.new_a, {}, error);
   ASSERT_TRUE(data) << error;
   ASSERT_FALSE(data->regions.empty());
-  bool smem_rejected = false;
-  for (const auto &r : data->regions)
-    smem_rejected |=
-        r.status == RegionStatus::Unsupported && r.reason.find("s_load") != std::string::npos;
-  EXPECT_TRUE(smem_rejected);
+  bool loads = false;
+  for (const auto &r : data->regions) {
+    EXPECT_EQ(r.status, RegionStatus::Ready) << r.reason;
+    loads |= r.contract.memory_reads;
+  }
+  EXPECT_TRUE(loads);
   TestOptions opt;
-  opt.cases = 200;
-  Json report = test_case(*data, opt, "", nullptr);
-  EXPECT_NE(report["overall"]["test_status"].as_string(), "NO_MISMATCH_FOUND");
+  opt.cases = 300;
+  opt.case_log_dir.clear();
+  std::vector<RegionResult> results;
+  Json report = test_case(*data, opt, "", &results);
+  EXPECT_EQ(report["overall"]["test_status"].as_string(), "NO_MISMATCH_FOUND");
+  EXPECT_EQ(report["overall"]["contract_status"].as_string(), "ESTABLISHED");
+  for (const auto &r : results)
+    EXPECT_GT(r.valid_pairs, 300u);
   std::filesystem::remove_all(dir);
 }
 
@@ -354,30 +362,52 @@ declare i32 @llvm.umin.i32(i32, i32)
 declare i32 @llvm.smax.i32(i32, i32)
 )";
 
-TEST(IsaDiffLlvm, RealRegisterRenamingNeedsAnEntryMapAndIsNeverEstablished) {
+/// Index into `side` of the instruction at the PC that starts a hunk listing line.
+size_t index_of_listed_pc(const RegionSide &side, const Json &listing) {
+  const uint64_t pc = std::stoull(listing.items().at(0).as_string(), nullptr, 16);
+  for (size_t i = 0; i < side.insts.size(); ++i)
+    if (side.insts[i].pc == pc)
+      return side.begin + i;
+  return SIZE_MAX;
+}
+
+TEST(IsaDiffLlvm, RealRegisterRenamingIsInternalToTheMergedRegion) {
   const std::string dir = temp_dir("renamed");
   Pair p = compile_pair(dir, kRenamedTail, {"-O3"}, {}, {"-enable-misched=false"});
   std::string error;
   auto automatic = analyze_artifacts(p.old_a, p.new_a, {}, error);
   ASSERT_TRUE(automatic) << error;
-  // The automatic plan finds the renamed tail but cannot establish its entry relation.
-  const RegionPair *tail = nullptr;
-  for (const auto &r : automatic->regions)
-    if (r.status == RegionStatus::Ready)
-      tail = &r;
-  ASSERT_NE(tail, nullptr);
-  EXPECT_EQ(tail->contract.composition, "FAILS");
-  EXPECT_EQ(tail->contract.status, ContractStatus::Unresolved);
+  // The reordered argument loads and the renamed tail merge into one region across the
+  // scalar loads, so the renaming is internal to it; rsrc1 and .sgpr_count differ only in
+  // register allocation, which both kernels fit.
+  ASSERT_EQ(automatic->regions.size(), 1u);
+  const RegionPair &whole = automatic->regions[0];
+  ASSERT_EQ(whole.status, RegionStatus::Ready) << whole.reason;
+  EXPECT_TRUE(whole.contract.memory_reads);
+  EXPECT_EQ(whole.contract.composition, "HOLDS");
+  EXPECT_EQ(whole.contract.status, ContractStatus::Established);
+  EXPECT_TRUE(automatic->unresolved.empty());
   TestOptions opt;
   opt.cases = 500;
   opt.case_log_dir.clear();
   Json report = test_case(*automatic, opt, "", nullptr);
-  EXPECT_EQ(report["overall"]["test_status"].as_string(), "INCONCLUSIVE"); // not a bug claim
+  EXPECT_EQ(report["overall"]["test_status"].as_string(), "NO_MISMATCH_FOUND");
+  EXPECT_EQ(report["overall"]["contract_status"].as_string(), "ESTABLISHED");
 
-  // The same tail by hand: identity mapping is wrong, an entry map reconciles it.
+  // The renamed tail alone (from the first hunk that rewrites instructions to the region
+  // end): identity mapping is wrong there, an entry map reconciles it.
+  const Json *rewrite = nullptr;
+  for (const auto &h : automatic->changes.items())
+    if (!rewrite && !h["old"].items().empty() && !h["new"].items().empty())
+      rewrite = &h;
+  ASSERT_NE(rewrite, nullptr);
+  const size_t old_tail = index_of_listed_pc(whole.old_side, (*rewrite)["old"]);
+  const size_t new_tail = index_of_listed_pc(whole.new_side, (*rewrite)["new"]);
+  ASSERT_NE(old_tail, SIZE_MAX);
+  ASSERT_NE(new_tail, SIZE_MAX);
   const std::string range =
-      "old:" + std::to_string(tail->old_side.begin) + "-" + std::to_string(tail->old_side.end) +
-      ",new:" + std::to_string(tail->new_side.begin) + "-" + std::to_string(tail->new_side.end);
+      "old:" + std::to_string(old_tail) + "-" + std::to_string(whole.old_side.end) +
+      ",new:" + std::to_string(new_tail) + "-" + std::to_string(whole.new_side.end);
   PlanOptions manual;
   manual.manual_region = range;
   auto identity = analyze_artifacts(p.old_a, p.new_a, manual, error);
@@ -395,9 +425,8 @@ TEST(IsaDiffLlvm, RealRegisterRenamingNeedsAnEntryMapAndIsNeverEstablished) {
   Json r = test_case(*mapped, opt, "", &results);
   ASSERT_EQ(results.size(), 1u);
   EXPECT_EQ(results[0].test_status, TestStatus::NoMismatchFound) << results[0].reason;
-  // compute_pgm_rsrc1 and .sgpr_count differ between the sides, so even the hand-written
-  // relation stays UNRESOLVED (a manual contract is at best ASSUMED, never ESTABLISHED).
-  EXPECT_EQ(results[0].contract_status, ContractStatus::Unresolved);
+  // A hand-written relation is at best ASSUMED, never ESTABLISHED.
+  EXPECT_NE(results[0].contract_status, ContractStatus::Established);
   EXPECT_GT(results[0].valid_pairs, 500u);
   // The other hunks (the reordered loads) are outside the region: never a whole pass.
   EXPECT_NE(r["overall"]["coverage_scope"].as_string(), "COMPLETE_FOR_DECLARED_SCOPE");

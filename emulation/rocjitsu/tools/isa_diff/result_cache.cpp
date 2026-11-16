@@ -193,6 +193,7 @@ std::optional<RegionResult> load_cached_result(const std::string &cache_dir,
     r.mismatch_locs = *ml;
   if (auto mv = parse_vgprs(rj["vgpr_mismatch_locations"].as_string()))
     r.mismatch_vlocs = *mv;
+  r.mismatch_memory = rj["memory_mismatch"].as_bool();
   r.seed = rj["seed"].as_uint();
   const Json &e = rj["expansion"];
   if (e.is_object()) {

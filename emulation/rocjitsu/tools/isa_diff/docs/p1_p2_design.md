@@ -108,11 +108,22 @@ lane-parallel inputs (see README "VALU support"). What remains for P2:
 
 ### Memory, synchronisation and pending effects
 
-- **Memory state.** The machine state gets a byte-addressed memory image for the
-  addresses the region may touch, from a points-to or bounds contract. Loads read it,
-  and stores are compared as observable.
-- **Pending effects.** The P0 `pending_effects` analysis finds what is outstanding. P2
-  would model completion order instead of rejecting conflicts:
+Global and scalar memory is now executed (README "Memory"):
+- one seeded image per case, shared by both sides;
+- stored bytes compared as observable;
+- pointer-shaped words for loaded memory bases;
+- waits inside regions;
+- in-order VMEM in the pending analysis.
+
+What remains for P2:
+
+- **Memory state.** Replace the flat random image with a points-to or bounds contract
+  per base, so that aliasing between different bases is an explicit assumption rather
+  than an accident of pointer values. Add LDS (per-workgroup), flat, buffer, scratch and
+  atomics.
+- **Pending effects.** The `pending_effects` analysis finds what is outstanding, and
+  completion is eager inside regions. P2 would model completion order instead of
+  rejecting conflicts:
   - RocJITsu's memory-wait diagnostics give eager results and separate readiness;
   - checkpoints do not serialise completion dependencies;
   - so the region runner must own the readiness state itself.

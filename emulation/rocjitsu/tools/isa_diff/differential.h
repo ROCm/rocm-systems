@@ -82,6 +82,9 @@ struct Mismatch {
   std::string kind;  ///< observable | effect_model | frame_preservation | exit_status_divergence
   LocSet locs;
   VSet vlocs; ///< VGPRs involved (VALU support).
+  /// Memory model: stored bytes differ; the first differing byte addresses.
+  bool memory = false;
+  std::vector<uint64_t> mem_addrs;
   std::vector<std::string> frame_fields;
   std::string detail;
   MachineState init_old, init_new, final_old, final_new;
@@ -150,6 +153,7 @@ struct RegionResult {
   /// Union of the locations of every observable mismatch.
   LocSet mismatch_locs;
   VSet mismatch_vlocs;
+  bool mismatch_memory = false;
   /// Set by test_case: every mismatching location is read by changed code downstream of
   /// the region, which may compensate it; the mismatch is then a witness, not a verdict.
   bool compensable = false;

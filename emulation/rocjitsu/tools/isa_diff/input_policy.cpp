@@ -186,6 +186,15 @@ void fill_vgpr_lanes(Sample &s, unsigned vgpr_count, const VSet &wide, uint64_t 
   }
 }
 
+uint32_t initial_memory_word(uint64_t seed, uint64_t word) {
+  const uint64_t h = splitmix64(seed ^ splitmix64(word ^ 0x6d656d6f7279ull));
+  if (h & 1u) {
+    const auto &c32 = catalog32();
+    return c32[(h >> 1) % c32.size()].value;
+  }
+  return static_cast<uint32_t>(h >> 32);
+}
+
 void project_onto_constraints(Sample &sample, const RegionContract &contract, uint64_t entropy) {
   CaseRng rng(splitmix64(entropy));
   for (const Constraint &c : contract.constraints) {

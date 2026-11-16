@@ -538,3 +538,62 @@ inline const std::vector<uint32_t> k_valupending_new = {0xdc508000, 0x00000004, 
 // global_store_dword v2, v1, s[0:1]
 // s_endpgm
 inline const std::vector<uint32_t> k_valucvt = {0x7e021700, 0xdc708000, 0x00000102, 0xbf810000};
+
+// v_add_u32_e32 v2, v0, v1
+// global_store_dword v4, v2, s[0:1]
+// s_endpgm
+inline const std::vector<uint32_t> k_memst_old = {0x68040300, 0xdc708000, 0x00000204, 0xbf810000};
+
+// v_add_u32_e32 v3, v1, v0
+// global_store_dword v4, v3, s[0:1]
+// s_endpgm
+inline const std::vector<uint32_t> k_memst_new = {0x68060101, 0xdc708000, 0x00000304, 0xbf810000};
+
+// v_add_u32_e32 v2, v0, v1
+// global_store_dword v4, v2, s[0:1] offset:4
+// s_endpgm
+inline const std::vector<uint32_t> k_memstoff_new = {0x68040300, 0xdc708004, 0x00000204, 0xbf810000};
+
+// global_load_dword v1, v0, s[2:3]
+// s_waitcnt vmcnt(0)
+// v_add_u32_e32 v2, v1, v3
+// global_store_dword v0, v2, s[0:1]
+// s_endpgm
+inline const std::vector<uint32_t> k_memld_old = {0xdc508000, 0x01020000, 0xbf8c0f70, 0x68040701, 0xdc708000, 0x00000200, 0xbf810000};
+
+// global_load_dword v4, v0, s[2:3]
+// s_waitcnt vmcnt(0)
+// v_add_u32_e32 v7, v3, v4
+// global_store_dword v0, v7, s[0:1]
+// s_endpgm
+inline const std::vector<uint32_t> k_memld_new = {0xdc508000, 0x04020000, 0xbf8c0f70, 0x680e0903, 0xdc708000, 0x00000700, 0xbf810000};
+
+// global_load_dword v1, v0, s[2:3]
+// global_load_dword v5, v0, s[2:3] offset:4
+// s_waitcnt vmcnt(1)
+// v_add_u32_e32 v2, v1, v3
+// s_waitcnt vmcnt(0)
+// v_add_u32_e32 v6, v2, v5
+// global_store_dword v0, v6, s[0:1]
+// s_endpgm
+inline const std::vector<uint32_t> k_vmorder_old = {0xdc508000, 0x01020000, 0xdc508004, 0x05020000, 0xbf8c0f71, 0x68040701, 0xbf8c0f70, 0x680c0b02, 0xdc708000, 0x00000600, 0xbf810000};
+
+// global_load_dword v1, v0, s[2:3]
+// global_load_dword v5, v0, s[2:3] offset:4
+// s_waitcnt vmcnt(1)
+// v_add_u32_e32 v2, v3, v1
+// s_waitcnt vmcnt(0)
+// v_add_u32_e32 v6, v2, v5
+// global_store_dword v0, v6, s[0:1]
+// s_endpgm
+inline const std::vector<uint32_t> k_vmorder_new = {0xdc508000, 0x01020000, 0xdc508004, 0x05020000, 0xbf8c0f71, 0x68040303, 0xbf8c0f70, 0x680c0b02, 0xdc708000, 0x00000600, 0xbf810000};
+
+// global_load_dword v1, v0, s[2:3]
+// global_load_dword v5, v0, s[2:3] offset:4
+// s_waitcnt vmcnt(1)
+// v_add_u32_e32 v2, v5, v3
+// s_waitcnt vmcnt(0)
+// v_add_u32_e32 v6, v2, v1
+// global_store_dword v0, v6, s[0:1]
+// s_endpgm
+inline const std::vector<uint32_t> k_vmearly_new = {0xdc508000, 0x01020000, 0xdc508004, 0x05020000, 0xbf8c0f71, 0x68040705, 0xbf8c0f70, 0x680c0302, 0xdc708000, 0x00000600, 0xbf810000};

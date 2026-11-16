@@ -537,3 +537,62 @@ s_endpgm
 v_cvt_f32_f16_e32 v1, v0
 global_store_dword v2, v1, s[0:1]
 s_endpgm
+
+=== memst_old
+v_add_u32_e32 v2, v0, v1
+global_store_dword v4, v2, s[0:1]
+s_endpgm
+
+=== memst_new
+v_add_u32_e32 v3, v1, v0
+global_store_dword v4, v3, s[0:1]
+s_endpgm
+
+=== memstoff_new
+v_add_u32_e32 v2, v0, v1
+global_store_dword v4, v2, s[0:1] offset:4
+s_endpgm
+
+=== memld_old
+global_load_dword v1, v0, s[2:3]
+s_waitcnt vmcnt(0)
+v_add_u32_e32 v2, v1, v3
+global_store_dword v0, v2, s[0:1]
+s_endpgm
+
+=== memld_new
+global_load_dword v4, v0, s[2:3]
+s_waitcnt vmcnt(0)
+v_add_u32_e32 v7, v3, v4
+global_store_dword v0, v7, s[0:1]
+s_endpgm
+
+=== vmorder_old
+global_load_dword v1, v0, s[2:3]
+global_load_dword v5, v0, s[2:3] offset:4
+s_waitcnt vmcnt(1)
+v_add_u32_e32 v2, v1, v3
+s_waitcnt vmcnt(0)
+v_add_u32_e32 v6, v2, v5
+global_store_dword v0, v6, s[0:1]
+s_endpgm
+
+=== vmorder_new
+global_load_dword v1, v0, s[2:3]
+global_load_dword v5, v0, s[2:3] offset:4
+s_waitcnt vmcnt(1)
+v_add_u32_e32 v2, v3, v1
+s_waitcnt vmcnt(0)
+v_add_u32_e32 v6, v2, v5
+global_store_dword v0, v6, s[0:1]
+s_endpgm
+
+=== vmearly_new
+global_load_dword v1, v0, s[2:3]
+global_load_dword v5, v0, s[2:3] offset:4
+s_waitcnt vmcnt(1)
+v_add_u32_e32 v2, v5, v3
+s_waitcnt vmcnt(0)
+v_add_u32_e32 v6, v2, v1
+global_store_dword v0, v6, s[0:1]
+s_endpgm

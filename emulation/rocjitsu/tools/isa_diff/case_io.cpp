@@ -459,9 +459,10 @@ Json test_case(const CaseData &data, const TestOptions &options, const std::stri
       if (region.id != r.region_id)
         continue;
       const RegionContract &k = region.contract;
-      const bool any = r.mismatch_locs.any() || r.mismatch_vlocs.any();
+      const bool any = r.mismatch_locs.any() || r.mismatch_vlocs.any() || r.mismatch_memory;
       if (any && (r.mismatch_locs & ~k.downstream_reads).none() &&
-          (r.mismatch_vlocs & ~k.vdownstream_reads).none() && !k.downstream_changed.empty()) {
+          (r.mismatch_vlocs & ~k.vdownstream_reads).none() &&
+          (!r.mismatch_memory || k.downstream_memory_reads) && !k.downstream_changed.empty()) {
         r.compensable = true;
         std::string ids;
         for (const auto &d : k.downstream_changed)

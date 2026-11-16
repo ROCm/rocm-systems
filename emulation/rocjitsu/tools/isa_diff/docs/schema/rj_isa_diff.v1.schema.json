@@ -103,7 +103,8 @@
         "UNDEFINED_BEHAVIOR",
         "PC_WRITTEN",
         "WAVE_STATE_CHANGED",
-        "BUDGET_EXCEEDED"
+        "BUDGET_EXCEEDED",
+        "MEMORY_FAULT"
       ]
     },
     "phase": {
@@ -455,7 +456,8 @@
             "common_prefix_analysis",
             "relation_summary",
             "reachability_witness",
-            "user_assumption"
+            "user_assumption",
+            "memory_model"
           ]
         }
       },
@@ -621,6 +623,18 @@
         },
         "vgpr_downstream_reads": {
           "$ref": "#/$defs/vgprs"
+        },
+        "memory_reads": {
+          "type": "boolean",
+          "description": "A region instruction loads from memory (global_load_*, s_load_*); loads read one initial memory image shared by both sides. Absent when false."
+        },
+        "memory_writes": {
+          "type": "boolean",
+          "description": "A region instruction stores to memory (global_store_*); the stored bytes are an observable output. Absent when false."
+        },
+        "downstream_memory_reads": {
+          "type": "boolean",
+          "description": "Code after the region loads from memory, so a stored-byte difference can be compensated downstream. Absent when false."
         }
       },
       "additionalProperties": false,
@@ -1426,6 +1440,10 @@
         },
         "compensable_downstream": {
           "const": true
+        },
+        "memory_mismatch": {
+          "type": "boolean",
+          "description": "Some mismatch included a stored-byte difference."
         }
       },
       "additionalProperties": false
@@ -1670,6 +1688,39 @@
             "minItems": 64,
             "maxItems": 64
           }
+        },
+        "memory": {
+          "description": "Memory model state: the initial-image seed, the initial words the case read (byte address of the word -> value), and the bytes this side stored (byte address -> byte).",
+          "type": "object",
+          "required": [
+            "seed",
+            "initial",
+            "written"
+          ],
+          "properties": {
+            "seed": {
+              "$ref": "#/$defs/hex"
+            },
+            "initial": {
+              "type": "object",
+              "propertyNames": {
+                "$ref": "#/$defs/hex"
+              },
+              "additionalProperties": {
+                "$ref": "#/$defs/hex32"
+              }
+            },
+            "written": {
+              "type": "object",
+              "propertyNames": {
+                "$ref": "#/$defs/hex"
+              },
+              "additionalProperties": {
+                "$ref": "#/$defs/hex32"
+              }
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -1995,6 +2046,33 @@
         },
         "vgpr_locations": {
           "$ref": "#/$defs/vgprs"
+        },
+        "memory_differs": {
+          "type": "boolean",
+          "description": "The two sides stored different bytes, or stored to different addresses."
+        },
+        "memory_differences": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "address",
+              "old",
+              "new"
+            ],
+            "properties": {
+              "address": {
+                "$ref": "#/$defs/hex"
+              },
+              "old": {
+                "$ref": "#/$defs/hex32"
+              },
+              "new": {
+                "$ref": "#/$defs/hex32"
+              }
+            },
+            "additionalProperties": false
+          }
         }
       },
       "additionalProperties": false

@@ -31,10 +31,12 @@ struct Effects {
   LocSet writes; ///< Tracked locations written.
   /// Low location of each 64-bit source operand (input generation draws pair values).
   LocSet wide_reads;
-  VSet vreads;       ///< VGPRs read (whole registers; any lane).
-  VSet vwrites;      ///< VGPRs written (lanes under EXEC, or all for lane writes).
-  VSet vwide_reads;  ///< First register of each 64-bit VGPR source.
-  bool valu = false; ///< VALU instruction (reads EXEC; region-executable when allowed).
+  VSet vreads;            ///< VGPRs read (whole registers; any lane).
+  VSet vwrites;           ///< VGPRs written (lanes under EXEC, or all for lane writes).
+  VSet vwide_reads;       ///< First register of each 64-bit VGPR source.
+  bool valu = false;      ///< VALU instruction (reads EXEC; region-executable when allowed).
+  bool mem_read = false;  ///< Region-executable load (global_load_*, s_load_dword*).
+  bool mem_write = false; ///< Region-executable store (global_store_*).
   /// True when the instruction is in the P0 allowlist and every operand is a
   /// tracked location or a constant, so a region may execute it.
   bool p0 = false;
@@ -79,5 +81,9 @@ struct SourceOperand {
 /// A VALU instruction the region runner executes: not MFMA, memory, interpolation,
 /// indirect or exception-state access.
 [[nodiscard]] bool is_region_valu(std::string_view mnemonic, uint64_t flags);
+/// A memory instruction the region runner executes: global loads and stores (not LDS-DMA,
+/// transpose or atomic forms), scalar loads, and s_waitcnt. Memory is an input of the
+/// region (equal on both sides) and stored bytes are part of its output.
+[[nodiscard]] bool is_region_memory(std::string_view mnemonic);
 
 } // namespace rocjitsu::isa_diff

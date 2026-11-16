@@ -41,6 +41,13 @@ struct MachineState {
   /// VGPRs v0..v{vgpr_count-1}, register-major, kWaveLanes lanes each (VALU support).
   unsigned vgpr_count = 0;
   std::vector<uint32_t> vgpr;
+  /// Memory model: the seed of the initial memory content (0: the region has no memory
+  /// instruction) and, after a run, every byte the run stored, sorted by address.
+  uint64_t mem_seed = 0;
+  std::vector<std::pair<uint64_t, uint8_t>> mem_written;
+  /// Initial content of every 32-bit word the case read (word index, value), sorted:
+  /// the memory input shared by both sides, recorded so bundles replay exactly.
+  std::vector<std::pair<uint64_t, uint32_t>> mem_init;
 
   [[nodiscard]] uint32_t get(unsigned l) const { return loc[l]; }
   void set(unsigned l, uint32_t v) { loc[l] = v & loc_value_mask(l); }

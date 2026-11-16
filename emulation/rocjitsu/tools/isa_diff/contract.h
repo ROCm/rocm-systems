@@ -72,6 +72,11 @@ struct RegionContract {
   /// MODE at the region entry on each side (FP rounding/denormals, DX10_CLAMP, IEEE),
   /// from each kernel's descriptor. VALU float results depend on it.
   uint32_t mode_old = kDefaultInitialMode, mode_new = kDefaultInitialMode;
+  /// Memory (handoff P2 item, global and scalar): the region loads (memory is an input,
+  /// equal on both sides) and/or stores (the bytes either side stores are compared).
+  bool memory_reads = false, memory_writes = false;
+  /// Changed code downstream reads memory: a memory mismatch may be compensated there.
+  bool downstream_memory_reads = false;
   std::vector<Constraint> constraints;
   std::string exit_mapping = "single fall-through exit after the last region instruction";
   /// Hand-written register correspondence (handoff 3.1), old location -> new location,

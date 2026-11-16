@@ -21,6 +21,7 @@
 
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace rocjitsu {
@@ -43,6 +44,7 @@ enum class RunStatus {
   Unimplemented,
   UnsupportedOperand,
   InvalidRegisterAccess,
+  MemoryFault, ///< A memory access faulted (the wave halted or trapped).
   IllegalInstruction,
   ExecutionError,
   HostException,
@@ -70,6 +72,24 @@ struct TraceStep {
   MachineState after;
 };
 
+/// Initial memory content of one case, shared by the old and new runners so both read
+/// the same input. Words are generated on first read (data or pointer-shaped) and kept.
+class MemoryImage {
+public:
+  /// Start a case. The content is kept while the seed is unchanged (re-executions of the
+  /// same case: reduction, traces), otherwise cleared; preset words are added if absent.
+  void begin(uint64_t seed, const std::vector<std::pair<uint64_t, uint32_t>> &preset);
+  /// Initial value of word @p w; @p pointer_half is -1 for data, 0/1 for the low/high half
+  /// of a pointer (canonical, away from the region's code).
+  uint32_t word(uint64_t w, int pointer_half);
+  [[nodiscard]] std::vector<std::pair<uint64_t, uint32_t>> snapshot() const;
+
+private:
+  uint64_t seed_ = 0;
+  bool started_ = false;
+  std::unordered_map<uint64_t, uint32_t> words_;
+};
+
 class RegionRunner {
 public:
   /// @brief Build a runner. Decode failures do not fail creation; run() reports them.
@@ -86,6 +106,8 @@ public:
   [[nodiscard]] const Frame &baseline_frame() const { return baseline_; }
 
   void load(const MachineState &state);
+  /// Share the initial memory image with the other side's runner (one per case).
+  void set_memory_image(std::shared_ptr<MemoryImage> image) { image_ = std::move(image); }
   RunOutcome run(size_t budget, std::vector<TraceStep> *trace = nullptr);
   [[nodiscard]] MachineState capture() const;
 
@@ -111,6 +133,20 @@ private:
   std::string decode_error_;
   Frame baseline_;
   unsigned vgpr_count_ = 0;
+  /// Memory model: memory instructions are issued through ComputeUnitCore::step() (the
+  /// full fetch/execute/route path, synchronous in functional mode); a plugin seeds the
+  /// bytes a load reads first from the initial content and records stored bytes.
+  class MemoryModel;
+  bool has_memory_ = false;
+  std::vector<bool> is_mem_;
+  MemoryModel *mem_ = nullptr;
+  std::shared_ptr<void> plugin_group_;
+  std::shared_ptr<MemoryImage> image_ = std::make_shared<MemoryImage>();
+  /// Per instruction: dwords of a scalar load that later serve as a memory base
+  /// (bit k: dword k is a pointer's low half / high half).
+  std::vector<uint32_t> pointer_lo_, pointer_hi_;
+  uint64_t entry_pc_ = 0;
+  uint32_t vgpr_alloc_ = 0;
   uint64_t total_executed_ = 0;
 };
 

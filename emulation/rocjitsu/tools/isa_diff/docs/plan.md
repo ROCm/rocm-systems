@@ -266,7 +266,21 @@ report as unsupported.
 | E4 inputs | lane-parallel default fill; vector sweep phases; full EXEC on half the random cases | `EquivalentVectorRewriteIsExecutedOnAllLanes` |
 | E5 metadata | register-count fields informational when descriptors agree and VGPRs fit the allocation | `RegisterCountMetadataIsInformationalOnlyWithinTheAllocation` |
 
+## Phase F: memory in regions (2026-11-15, fourth goal)
+
+Driven by the six PR 242731 kernels that did not pass after Phase E. Every one had loads,
+waits or stores inside or between its changes.
+
+| task | content | tests |
+|---|---|---|
+| F1 memory execution | `global_load_*` (not LDS/`_tr`), `global_store_*`, `s_load_dword*`, `s_waitcnt` region-executable; memory steps through `ComputeUnitCore::step()` with code bytes in memory, the L2 backed by `GpuMemory`, and caches written back and invalidated per step; a memory-model execution plugin seeds touched words from a shared per-case image and records stored bytes; faults classified (`MEMORY_FAULT`) | `IsaDiffMemory.StoredBytesAreTheObservableOutput`, `LoadsReadTheSameInputOnBothSides` |
+| F2 pointers and inputs | pointer dataflow from `s_load` to memory bases; pointer-shaped words; `memory_model` constraints on entry base pairs; memory seed and initial words in states and bundles; replay | `PcAndHwregRegionsAreUnsupportedWhileMemoryRuns` |
+| F3 regions and pending effects | regions merge across common memory instructions; per-instruction pending check; VMEM in order (`vmcnt(N)`); `memory_reads`/`memory_writes`/`downstream_memory_reads` in contracts and composition | `VectorMemoryCompletesInOrder`, `RealPairReorderingScalarLoadsRunsTheLoads`, `RealRegisterRenamingIsInternalToTheMergedRegion` |
+| F4 register allocation | descriptor differences only in granulated VGPR/SGPR counts or `ACCUM_OFFSET` are informational when both kernels fit | `UnknownSuccessorDescriptorAndUncoveredChangesKeepScopePartial` |
+| F5 schema and report | schema fields for memory; validator memory scenarios; PR 242731 rerun (12 of 12 pass) | `isa_diff.schema_and_cli` |
+
 ## Not in P0 (design retained)
 P1 (scalar branches, multi-exit regions, loops, reachability witnesses, SemaAST/SMT proof) and
-P2 (VALU, memory, pending-effect execution, learned input policies) are designed in
-`p1_p2_design.md`. Nothing there is implemented.
+the rest of P2 (MFMA, LDS/flat/buffer/scratch/atomic memory, completion-order modelling,
+learned input policies) are designed in `p1_p2_design.md`. VALU (Phase E) and global and
+scalar memory (Phase F) are implemented.

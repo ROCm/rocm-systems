@@ -37,6 +37,11 @@ and `ScalarSccTest.*:*Sop*:*Scalar*` passes 1162/1162 on the base.
 | specials | `Wavefront::vcc()/set_vcc_raw`, `exec_raw()/set_exec_raw`, `m0()/set_m0`, `read_scc()/write_scc`, `status_raw/set_status_raw`, `mode_raw/set_mode_raw`, `trapsts`, `ttmp/set_ttmp`, `scratch_base`, `wait_counters()`, `in_trap_handler`, `sleep_cycles`, `pc` | On CDNA4, VCC is wave-local and is not aliased into the SGPR block (only CDNA3 binds it; see `compute_unit.cpp:556`). EXECZ and VCCZ are derived when read, not stored, so they cannot contradict EXEC or VCC. |
 | VGPR state (VALU support) | `ComputeUnitCore::write_vgpr(phys, lane, v)`, `read_vgpr_storage(phys, lane)` with `phys = wf.vgpr_alloc().base + n`; `dispatch_wf(..., nvgpr, ...)` | The CU is configured with a 256-VGPR file. The wave allocates exactly the region's tracked range, so an access beyond it fails as an invalid register access. |
 | initial MODE | `CommandProcessor` sets MODE from `compute_pgm_rsrc1` (`initial_mode_from_compute_pgm_rsrc1`, internal) | Reimplemented in `artifact.cpp` `initial_mode()` with the same fields. *Measured*: RocJITsu's `v_cvt_f32_f16` honours the f16 denormal mode, which a per-side MODE test relies on. |
+| memory instructions (memory support) | `ComputeUnitCore::step()`; region code bytes written into `GpuMemory` at their PCs | One step issues the single wave's instruction through fetch, execute and route. A functional access completes within the step. HALTED or MEMORY_TRAP after a step is a fault. |
+| memory backing | `L2Cache::set_backing_memory(GpuMemory*)` | *Measured*: without it every global access is malformed and the wave halts with PC 0 and no error. |
+| caches | `ComputeUnitCore::flush_all()`, `flush_l1()`, `L2Cache::invalidate_all()` | L1 scalar/vector caches are write-through and the L2 is write-back. The runner writes back and invalidates before every memory step and at load/capture. |
+| access observation | `ExecutionPlugin::observes_memory_routing()`, `onAmdgpuMemoryAccessRouted(MemoryAccessObservation)`; `ExecutionPluginGroup` + `ComputeUnitCore::set_plugin_group` | Fires after routing and before the pipeline access, with per-lane addresses, element size, lane mask, load/store, atomic op and secondary addresses. The memory model seeds touched words and records stores here. |
+| wait checker | `Config::memory_wait_diagnostics = MemoryWaitDiagnostics::Off` | The CU's scoreboard keeps state across cases that re-issue the same PCs. The planner's pending analysis replaces it. |
 | UB detection | `ComputeUnitCore::isa_diagnostic_count()` | Read the delta around each instruction. `report_undefined_behavior` only logs and bumps this counter. |
 | arithmetic mode | `ComputeUnitCore::Config::arithmetic` | Recorded in every contract. Integer SALU does not depend on it. |
 | VCC aliasing (assumption) | -- | On CDNA hardware VCC occupies the top of the kernel's SGPR allocation. RocJITsu's CDNA4 model keeps VCC wave-local, and RocJITsu execution is the trusted semantics here, so P0 tracks VCC_LO/HI separately from s0..s101. Compiled code never names the aliased SGPRs together with `vcc`. |
@@ -101,7 +106,9 @@ and `ScalarSccTest.*:*Sop*:*Scalar*` passes 1162/1162 on the base.
   moves, add/sub/carry, min/max, bitwise, shifts, bfe/bfm, mul, compare/select,
   `s_cmov*`, `*_saveexec`, `s_nop`). Each operand must classify into one of:
   s0..s101, VCC_LO/HI, EXEC_LO/HI, M0, SCC, a constant, or a literal.
-- The following are rejected with a reason in a region (a kernel may still contain them):
+- The following are rejected with a reason in a region (a kernel may still contain them).
+  VALU support later admitted plain VALU, and memory support admitted `global_load_*`,
+  `global_store_*`, `s_load_dword*` and `s_waitcnt`:
   VALU/VMEM/SMEM/LDS, MFMA, branches,
   waitcnt/barrier, getpc/setpc/swappc, getreg/setreg, movrel, sendmsg/trap,
   FLAT_SCRATCH/XNACK/TTMP/aperture selectors, any instruction with `data()` state,

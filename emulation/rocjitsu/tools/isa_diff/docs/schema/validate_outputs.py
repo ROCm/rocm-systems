@@ -36,6 +36,42 @@ SCHEMA_PATH = os.path.join(HERE, "rj_isa_diff.v1.schema.json")
 
 # gfx950 fixtures (words assembled by llvm-mc; see tests/isa_diff/fixtures/fixtures.asm).
 FIXTURES = {
+    "memst_old": [
+        0x68040300,
+        0xDC708000,
+        0x00000204,
+        0xBF810000,
+    ],
+    "memst_new": [
+        0x68060101,
+        0xDC708000,
+        0x00000304,
+        0xBF810000,
+    ],
+    "memstoff_new": [
+        0x68040300,
+        0xDC708004,
+        0x00000204,
+        0xBF810000,
+    ],
+    "memld_old": [
+        0xDC508000,
+        0x01020000,
+        0xBF8C0F70,
+        0x68040701,
+        0xDC708000,
+        0x00000200,
+        0xBF810000,
+    ],
+    "memld_new": [
+        0xDC508000,
+        0x04020000,
+        0xBF8C0F70,
+        0x680E0903,
+        0xDC708000,
+        0x00000700,
+        0xBF810000,
+    ],
     "shift_old": [
         0x80040302,
         0x82050100,
@@ -293,8 +329,18 @@ def drive_cli(tool, work, v):
     test("valu", {0})
     analyze("valu_wrong", "valu_old", "valuwrong_new")
     test("valu_wrong", {1})
-    analyze("valu_clobber", "valuclobber_old", "valuclobber_new")
+    # The clobbered inactive lanes die at s_endpgm: the base region is a local mismatch
+    # (no expansion), and the variant that runs the store resolves it by context.
+    analyze(
+        "valu_clobber",
+        "valuclobber_old",
+        "valuclobber_new",
+        "--max-expansions",
+        "0",
+    )
     test("valu_clobber", {1})
+    analyze("valu_clobber_ctx", "valuclobber_old", "valuclobber_new")
+    test("valu_clobber_ctx", {0})
     vb = sorted(os.listdir(path("valu_wrong", "counterexamples")))
     if vb:
         run(
@@ -309,6 +355,28 @@ def drive_cli(tool, work, v):
         )
     else:
         f.append("VALU wrong-shift case produced no counterexample bundle")
+    # Memory regions: stores are observable bytes, loads read one shared initial image;
+    # a store to a different offset is a memory counterexample that replays.
+    analyze("memst", "memst_old", "memst_new")
+    test("memst", {0})
+    analyze("memld", "memld_old", "memld_new")
+    test("memld", {0})
+    analyze("memst_off", "memst_old", "memstoff_new")
+    test("memst_off", {1})
+    mb = sorted(os.listdir(path("memst_off", "counterexamples")))
+    if mb:
+        run(
+            tool,
+            [
+                "replay",
+                "--counterexample",
+                path("memst_off", "counterexamples", mb[0]),
+            ],
+            {0},
+            f,
+        )
+    else:
+        f.append("memory store-offset case produced no counterexample bundle")
     # Synthetic error injection, its counterexamples, and replay of one bundle.
     run(
         tool,
@@ -373,6 +441,10 @@ def drive_cli(tool, work, v):
         "valu",
         "valu_wrong",
         "valu_clobber",
+        "valu_clobber_ctx",
+        "memst",
+        "memld",
+        "memst_off",
         "shift_injected",
     ]:
         v.check_tree(path(case))

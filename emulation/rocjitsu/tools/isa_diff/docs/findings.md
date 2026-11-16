@@ -10,12 +10,12 @@ f58b06dce1f9`). Every number here comes from that build and toolchain.
 | label | what |
 |---|---|
 | **implemented** | See the next section for the full list. |
-| **tested** | 65 isa_diff tests pass in Release and under ASan+UBSan+LSan with zero reports. They are 56 validator cases (`rj_isa_diff_tests`) covering every row of handoff section 13, every feature below and VALU support; 8 LLVM plugin cases (`rj_isa_diff_llvm_tests`) on real ROCm-LLVM output; and the schema/CLI test. Three real LLVM old/new pairs were run end to end, and the 55 functions of LLVM PR 242731's changed tests were run with before/after `llc` (see "VALU support and LLVM PR 242731"). The full tree was built and its full ctest run. |
+| **tested** | 68 isa_diff tests pass in Release and under ASan+UBSan+LSan with zero reports. They are 59 validator cases (`rj_isa_diff_tests`) covering every row of handoff section 13, every feature below, VALU support and memory; 8 LLVM plugin cases (`rj_isa_diff_llvm_tests`) on real ROCm-LLVM output; and the schema/CLI test. Three real LLVM old/new pairs were run end to end, and the 55 functions of LLVM PR 242731's changed tests were run with before/after `llc` (see "VALU support and LLVM PR 242731" and "Memory in regions: PR 242731 re-evaluated"). The full tree was built and its full ctest run. |
 | **not run** | SMT/SemaAST proofs (`proof_status` is always `NOT_RUN`). Reachability witnesses: the entry-prefix diagnostic path runs a prefix with arbitrary entry values, but no dispatch-ABI model exists. Learned input policies. Program (instruction) reduction of counterexamples. Multi-block, branching and loop regions (P1, designed in `p1_p2_design.md`). |
-| **unsupported** | Regions containing memory (SMEM/VMEM/LDS), MFMA, interpolation, indirect VGPR access, waits, barriers, branches, hwreg access, indirect SGPR access, TTMP/FLAT_SCRATCH/XNACK operands, PC-derived inputs, or relocated bytes. Multi-block regions. Code objects with several `.text` sections or zero-size kernel symbols. The real `-enable-misched=false` pairs, whose changes are reordered `s_load`s. |
-| **inconclusive** | Regions whose continuations read different locations (`INCONCLUSIVE_MAPPING`). Local mismatches that changed code downstream may compensate (`compensable_downstream`): the v2/v4 kernels of PR 242731. Mismatches under an `UNRESOLVED` contract: the renamed SALU tail of the real `k` misched pair. Relocation-only differences. Zero-valid-case runs. |
+| **unsupported** | Regions containing memory other than `global_load_*`/`global_store_*`/`s_load_dword*` (LDS, flat, buffer, scratch, atomics), MFMA, interpolation, indirect VGPR access, barriers, branches, hwreg access, indirect SGPR access, TTMP/FLAT_SCRATCH/XNACK operands, PC-derived inputs, or relocated bytes. Multi-block regions. Code objects with several `.text` sections or zero-size kernel symbols. |
+| **inconclusive** | Regions whose continuations read different locations (`INCONCLUSIVE_MAPPING`). Local mismatches that changed code downstream may compensate (`compensable_downstream`). Mismatches under an `UNRESOLVED` contract. Relocation-only differences. Zero-valid-case runs. No real pair or PR 242731 kernel is inconclusive any more. |
 | **synthetic mismatch** | Injected wrong opcode, immediate and operand: all detected, all replayed (`REPRODUCED`), all labelled `synthetic`. Sample: `samples/synthetic/`. |
-| **real finding** | **None.** Three real LLVM pairs were tested: one passed under an `ESTABLISHED` contract with complete scope, one is unsupported, and one is inconclusive. In LLVM PR 242731, 6 of the 12 changed gfx950 kernels pass under `ESTABLISHED` contracts with complete scope and none mismatches as a verdict. No LLVM bug is claimed. |
+| **real finding** | **None.** All three real LLVM pairs pass under `ESTABLISHED` contracts with complete scope. In LLVM PR 242731, all 12 changed gfx950 kernels pass under `ESTABLISHED` contracts with complete scope (6 of 12 before memory support). No LLVM bug is claimed. |
 | **proven** | **Nothing.** |
 
 The implemented items:
@@ -33,10 +33,14 @@ The implemented items:
   expansion and analysis time.
 - Contracts with sources:
   - known-bits constraints derived from the common prefix;
-  - a pending-effects analysis;
+  - a pending-effects analysis (in-order VMEM, out-of-order SMEM);
   - a composition check;
   - manual regions with entry/exit register maps, never more than `ASSUMED`.
-- Isolated old/new runners on `ComputeUnitCore::execute_instruction`.
+- Isolated old/new runners on `ComputeUnitCore::execute_instruction`, and on
+  `ComputeUnitCore::step()` for memory instructions against a shared, seeded memory
+  image (stored bytes are observable).
+- Register-allocation-only descriptor differences are informational when both kernels
+  fit their allocation.
 - The mandatory boundary/NaN/corner sweep, followed by the deterministic random policy.
 - An unrestricted re-run next to constrained verdicts.
 - Automatic context-expansion variants.
@@ -130,9 +134,9 @@ rj_isa_diff replay --counterexample syn/counterexamples/r0-syn-wrong-opcode-case
 | contradictory constraints | `ContradictoryConstraintsNeverPass` | 0 accepted, INCONCLUSIVE |
 | dependent hunks with common code | `DependentHunksMergeInsteadOfPassingIndependently` | merged into one 3-instruction region: NO_MISMATCH_FOUND. With `--no-merge`: r0 LOCAL_MISMATCH (local), r1 ASSUMED, depends on r0 |
 | RA rename without a mapping | `RenamingWithoutValueMappingIsInconclusive` | INCONCLUSIVE_MAPPING regions; overall INCONCLUSIVE, not a pass |
-| unknown successor / descriptor / uncovered | `UnknownSuccessorDescriptorAndUncoveredChangesKeepScopePartial` | `s_setpc`: contract ASSUMED, coverage PARTIAL. `compute_pgm_rsrc1`: UNRESOLVED, PARTIAL. Entry-offset-only: layout, no effect. Unreachable bytes changed: INCONCLUSIVE, NOT_ESTABLISHED |
+| unknown successor / descriptor / uncovered | `UnknownSuccessorDescriptorAndUncoveredChangesKeepScopePartial` | `s_setpc`: contract ASSUMED, coverage PARTIAL. `compute_pgm_rsrc1` granulated counts only, both kernels fit: informational, ESTABLISHED, NO_MISMATCH_FOUND. The same change on a kernel naming `s21`: semantic, INCONCLUSIVE. IEEE_MODE: UNRESOLVED, PARTIAL. Entry-offset-only: layout, no effect. Unreachable bytes changed: INCONCLUSIVE, NOT_ESTABLISHED |
 | EXEC=0, alias consistency | `ExecZeroIsExecutedNotFiltered` | samples with EXEC=0 are generated and executed (valid = accepted). EXECZ/VCCZ are derived on read, so they cannot be inconsistent |
-| waitcnt / memory / PC-as-data / hwreg | `WaitcntMemoryPcAndHwregRegionsAreUnsupported` | UNSUPPORTED with typed reasons |
+| waitcnt / memory / PC-as-data / hwreg | `PcAndHwregRegionsAreUnsupportedWhileMemoryRuns` | an extra `vmcnt` field: NO_MISMATCH_FOUND. `s_load_dword` from offset 0x0 vs 0x4: LOCAL_MISMATCH on `s4`, with a `memory_model` pointer constraint on `s[0:1]`. `s_getpc`/`s_getreg`: UNSUPPORTED with typed reasons |
 | decode failure / model-only / unsupported | `DecodeFailureAndModelOnlyAreClassifiedNotNops` | DECODE_FAILURE (0 executed). MISSING_EXECUTION_BACKEND at the failing index. Region UNSUPPORTED, 0 valid |
 | liveness change invalidates the cache key | `LivenessChangeInvalidatesThePreparedKey` | identical words and PCs; different consumer gives a different `prepared_key` and a different verdict |
 | injected opcode/immediate/operand | `InjectedErrorsAreDetectedReplayableAndSynthetic` | all three detected, replay REPRODUCED, `synthetic: true` |
@@ -157,13 +161,13 @@ Additional checks:
 | `IsaDiffCache.ResultCacheHitsOnlyForTheSamePreparedRegionAndBudget` | second run: hit, same verdict and counts; the cached counterexample replays. Another seed misses. The same bytes with one more observable location miss |
 | `IsaDiffCache.AnalysisCacheIsKeyedByArtifactsAndPlanOptions` | hit on identical input; miss with another plan option or other artifact bytes |
 | `IsaDiffDiagnostics.EntryPrefixRegionsRunOnlyWhenRequestedAndStayOutOfTheVerdict` | `r0.diag-entry` runs from instruction 0 and is reported under `diagnostics`; the verdict covers `r0` only. A region behind a branch: UNSUPPORTED, "not in the kernel's entry block" |
-| `IsaDiffKernelModel.ImplicitStoreBaseReadsKeepLivenessPrecise` | `global_store_dword` reports its SGPR base as implicit uses, now translated into reads. The renamed dead temporary `s8`/`s10` is not observable: NO_MISMATCH_FOUND, ESTABLISHED |
+| `IsaDiffKernelModel.ImplicitStoreBaseReadsKeepLivenessPrecise` | `global_store_dword` reports its SGPR base as implicit uses, now translated into reads; the store is region-executable and reads EXEC, never VCC. The renamed dead temporary `s8`/`s10` is not observable: NO_MISMATCH_FOUND, ESTABLISHED |
 | `IsaDiffLlvm.AssemblesKernelSourceAndBareListings` | `.s` with a descriptor goes through llvm-mc and ld.lld to a code object. A bare listing falls back to raw `.text`. Invalid assembly is a reported failure |
 | `IsaDiffLlvm.RealPairCombinerSwitchIsVerifiedEndToEnd` | see the real pairs below |
-| `IsaDiffLlvm.RealPairTouchingSmemIsReportedNotPassed` | see the real pairs below |
+| `IsaDiffLlvm.RealPairReorderingScalarLoadsRunsTheLoads` | see the real pairs below |
 | `IsaDiffLlvm.RelocationsAreKeptComparedAndNeverExecuted` | `@g` vs `@h`: identical `.text` bytes. Two GOTPCREL relocations differ, so the change is a semantic layout change and never NO_SEMANTIC_DIFF. A manual region over the relocated literal: UNSUPPORTED |
 | `IsaDiffLlvm.KernelMetadataIsComparedFieldByField` | one inserted kernel argument is exactly one metadata item: `.args differs (old 21 args, new 22 args); first difference at .args[2]` |
-| `IsaDiffLlvm.RealRegisterRenamingNeedsAnEntryMapAndIsNeverEstablished` | see the real pairs below |
+| `IsaDiffLlvm.RealRegisterRenamingIsInternalToTheMergedRegion` | see the real pairs below |
 | `IsaDiffLlvm.SideArgumentsThatChangeTheTargetAreRejected` | `-mcpu`, `-mattr` etc. in side arguments are rejected |
 
 ## Real LLVM pairs (handoff 13)
@@ -175,21 +179,26 @@ the switch. Each switch was tried with this `llc`, not assumed from memory. Upst
 | pair | kernel old/new insts | hunks | result |
 |---|---|---|---|
 | uniform i16 `k3`, `-combiner-disabled` (`samples/llvm_pair/`) | 21 / 22 | 3, merged into one region of 7 / 8 insts | **NO_MISMATCH_FOUND**, contract ESTABLISHED (composition HOLDS, pending NONE), coverage COMPLETE_FOR_DECLARED_SCOPE. 3,169 valid pairs (1,169 boundary + 2,000 random); executed 7 / 8 instructions per case |
-| `k2`, `-enable-misched=false` | 26 / 26 | 2 | **UNSUPPORTED**: both changes are reordered `s_load_dwordx4`. Coverage NOT_ESTABLISHED. The case was kept, as the handoff requires, instead of being hidden |
-| `k`, `-enable-misched=false` | 31 / 31 | 5 | **INCONCLUSIVE** (detailed below) |
+| `k2`, `-enable-misched=false` | 26 / 26 | 2, one region of 2 / 2 insts | **NO_MISMATCH_FOUND**, ESTABLISHED, complete scope. The two reordered `s_load_dwordx4` run against the shared memory image: 2,112 valid pairs. The 526 rejected boundary values break the pointer constraint on the kernarg base `s[4:5]`. Before memory support: UNSUPPORTED |
+| `k`, `-enable-misched=false` | 31 / 31 | 5, one region of 18 / 18 insts | **NO_MISMATCH_FOUND**, ESTABLISHED, complete scope; 2,120 valid pairs. Before memory support: INCONCLUSIVE (detailed below) |
 
 The `k`, `-enable-misched=false` pair in detail:
 
-- Three regions are UNSUPPORTED: reordered `s_load`s.
-- The SALU tail `r3` (6 / 6 insts) is READY, but its contract is UNRESOLVED:
-  - composition FAILS, because the loaded i64 sits in `s[4:5]` on the old side and
-    `s[8:9]` on the new side;
-  - the descriptor `compute_pgm_rsrc1` and the metadata `.sgpr_count` (15 → 17) also
-    differ.
-- `r3` shows LOCAL_MISMATCH on `s4` under that UNRESOLVED relation, so the witness is
-  LOCAL_ONLY and the overall result is INCONCLUSIVE with coverage PARTIAL. The tool does
-  not call it a bug.
-- The same tail as a manual region `old:12-18,new:12-18`:
+- Before memory support:
+  - three regions were UNSUPPORTED, because they held reordered `s_load`s;
+  - the SALU tail `r3` (6 / 6 insts) had an UNRESOLVED contract. Composition failed,
+    because the loaded i64 sits in `s[4:5]` on the old side and `s[8:9]` on the new side.
+    `compute_pgm_rsrc1` and `.sgpr_count` (15 → 17) also differed;
+  - `r3`'s LOCAL_MISMATCH on `s4` was therefore only a LOCAL_ONLY witness, and the
+    overall result was INCONCLUSIVE.
+- Now:
+  - the loads run, so the five hunks merge into one 18 / 18 region from the first
+    `s_load` to the tail;
+  - the `s[4:5]`/`s[8:9]` rename is internal to the region;
+  - the rsrc1 and `.sgpr_count` differences are register allocation only, and both
+    kernels fit (informational).
+- The same tail as a manual region `old:12-18,new:12-18` (contract ASSUMED, coverage
+  PARTIAL because of the uncovered hunks):
 
 | mapping | result |
 |---|---|
@@ -197,14 +206,12 @@ The `k`, `-enable-misched=false` pair in detail:
 | `--entry-map s4=s8,s5=s9` | **NO_MISMATCH_FOUND** (3,991 valid pairs) |
 | `--map s4=s8,s5=s9` | `INCONCLUSIVE_MAPPING`, because the result is in `s4` on both sides |
 
-  Even the reconciled run stays UNRESOLVED (metadata differs) and PARTIAL (uncovered
-  hunks).
-
 Region size against kernel size:
 
 | pair | kernel insts | instructions executed per case |
 |---|---|---|
 | k3 | 21 / 22 | 7 / 8 |
+| k (misched) | 31 / 31 | 18 / 18 |
 | `samples/codeobject` | 8 / 9 | 1 / 2 |
 | bench r16 | 2,048 | 16 / 16 |
 
@@ -268,6 +275,10 @@ was rerun.
 
    A kernel naming a VGPR beyond its allocation is reported as semantic.
 
+**The six that did not pass** (`s_{s,u}int_to_fp_v2i64_to_v2f16`, the two v4 kernels,
+`sitofp_i48_to_half`, `uitofp_i56_to_half`) all had loads, waits or stores inside or
+between their changes. They pass after memory support (next section).
+
 **VALU tests** (all in `rj_isa_diff_tests`):
 
 | test | observed |
@@ -280,6 +291,84 @@ was rerun.
 | `ModeIsPerSideAndMattersForFloatConversion` | identical `v_cvt_f32_f16`; the new side flushes f16 denormals: LOCAL_MISMATCH on `v1` |
 | `RegisterCountMetadataIsInformationalOnlyWithinTheAllocation` | `.vgpr_count` difference informational within `ACCUM_OFFSET`; naming `v4` with 4 allocated is semantic |
 | `DependentHunksMergeInsteadOfPassingIndependently` (extended) | with `--no-merge`, r0's mismatch on `s4` is read by r1: `compensable`, overall INCONCLUSIVE, LOCAL_ONLY |
+
+## Memory in regions: PR 242731 re-evaluated
+
+Three changes target the six PR 242731 kernels that did not pass (README "Memory" and
+"Register allocation"):
+
+1. **Memory instructions run inside regions.** `global_load_*`, `global_store_*`,
+   `s_load_dword*` and `s_waitcnt` use the CU's issue path (`ComputeUnitCore::step()`).
+   Memory is an input shared by both sides, and stored bytes are an output.
+2. **Regions merge across memory and end at the stores.** Hunks separated by common loads
+   and waits merge into one region, and the stores that consume the result belong to it.
+   This removed every `INCONCLUSIVE_MAPPING` and `compensable_downstream` split in these
+   kernels, so no separate fallback was needed.
+3. **Register-allocation-only descriptor changes are informational** when each kernel's
+   registers fit its allocation.
+
+The same experiment was rerun (mandatory sweep plus 5,000 random cases per kernel):
+
+| kernel | region old / new insts | result | valid cases |
+|---|---|---|---|
+| `s_sint_to_fp_i64_to_f16` | 12 / 6 | pass, `RESOLVED_BY_CONTEXT` (+1 after: `v_cvt_f16_f32`) | 6,414 |
+| `s_uint_to_fp_i64_to_f16` | 8 / 3 | pass, `RESOLVED_BY_CONTEXT` (+1 after) | 6,108 |
+| `s_uint_to_fp_31_zero_bits_to_f16` | 8 / 3 | pass, `RESOLVED_BY_CONTEXT` (+1 after) | 6,108 |
+| `s_sint_to_fp_32_sign_bits_to_f16` | 12 / 5 | pass, `RESOLVED_BY_CONTEXT` (+1 before, +1 after) | 6,420 |
+| `v_sint_to_fp_i64_to_f16` | 14 / 9 | pass | 5,603 |
+| `v_uint_to_fp_i64_to_f16` | 10 / 6 | pass | 5,302 |
+| `s_sint_to_fp_v2i64_to_v2f16` | 28 / 16 | **pass** (was INCONCLUSIVE) | 9,122 |
+| `s_uint_to_fp_v2i64_to_v2f16` | 20 / 10 | **pass** (was INCONCLUSIVE) | 7,805 |
+| `v_sint_to_fp_v4i64_to_v4f16` | 57 / 33 | **pass** (was INCONCLUSIVE) | 8,030 |
+| `v_uint_to_fp_v4i64_to_v4f16` | 41 / 25 | **pass** (was INCONCLUSIVE) | 6,532 |
+| `sitofp_i48_to_half` | 70 / 46 | **pass** (was INCONCLUSIVE) | 7,604 |
+| `uitofp_i56_to_half` | 70 / 44 | **pass** (was INCONCLUSIVE), `RESOLVED_BY_CONTEXT` (+4 before) | 6,008 |
+
+All 12 are `NO_MISMATCH_FOUND`, `ESTABLISHED`, with coverage
+`COMPLETE_FOR_DECLARED_SCOPE`. The 42 unchanged functions stay `NO_SEMANTIC_DIFF`.
+
+**What the context resolutions show.** Each base-region mismatch disappears once the code
+that produces the inputs, or consumes the outputs, is included. None is a verdict.
+
+- **Output masking** (the first three rows): the intermediate f32 differs (2³² against
+  the saturated 2³¹), and the next `v_cvt_f16_f32` maps both to the same f16.
+- **Input domain** (`s_sint_to_fp_32_sign_bits_to_f16`):
+  - with arbitrary 64-bit inputs, even the f16 result differs on lane 32 (old inf
+    `0x7c00`, new `0x7bf8`);
+  - the variant that also runs the preceding `s_ashr_i64 s[2:3], s[2:3], 31` gives the
+    input its known sign bits, and both sides agree;
+  - the PR's lowering relies on that fact, and here it holds.
+- **Input domain** (`uitofp_i56_to_half`):
+  - the base region starts after the `global_load_ubyte` that loads the i56's top byte,
+    so it treats that register as an arbitrary 32-bit value. One packed f16 then
+    differs (old inf, new `0x53e0`), and the variants that add the store show it as 38
+    differing stored bytes;
+  - the 4-before variant starts at the kernarg `s_load_dwordx4`, so the top byte is a
+    zero-extended byte, and the sides agree on all 6,008 valid cases.
+
+**Tool defects found and fixed during this work.**
+
+1. **The L2 had no backing memory.** Every global access was malformed and halted the
+   wave with PC 0. The runner now sets `L2Cache::set_backing_memory`.
+2. **Stale cache lines.** A scalar-cache line was filled before the words next to the
+   loaded one were seeded, so the misched pair showed a false mismatch. Every memory step
+   now starts with written-back and invalidated caches.
+3. **The pending check ran only at the region entry.** A wait inside the region did not
+   retire what it waited for, so the check now runs before every region instruction.
+   VMEM is also modelled in order, so `vmcnt(N)` retires all but the newest N.
+4. **A faulting case killed the runner.** The runner now re-dispatches the wave on the
+   next load.
+5. **The CU's wait checker warned on every case,** because each case re-issues the same
+   PCs. It is off in the runner, since the planner models waits.
+
+**Memory tests** (all in `rj_isa_diff_tests`):
+
+| test | observed |
+|---|---|
+| `StoredBytesAreTheObservableOutput` | renamed temporary stored through the same address: NO_MISMATCH_FOUND. The same value stored at offset 4: LOCAL_MISMATCH with `memory: true`, bundle `memory_differs` and `memory_differences`, replay REPRODUCED |
+| `LoadsReadTheSameInputOnBothSides` | renamed load destination and stored temporary: one region with `memory_reads` and `memory_writes`; NO_MISMATCH_FOUND, no harness errors |
+| `VectorMemoryCompletesInOrder` | two loads and `vmcnt(1)`: reading the first load's destination is not a conflict. Reading the second load's: CONFLICT, UNRESOLVED |
+| `PcAndHwregRegionsAreUnsupportedWhileMemoryRuns` | see the section 13 table |
 
 ## Cost
 
@@ -366,12 +455,18 @@ Steps:
     everything is live there.
 - **VCC aliasing**: RocJITsu's CDNA4 model keeps VCC wave-local, and that is the trusted
   semantics (see `implementation_map.md`).
-- **Reachability**: every mismatch is `LOCAL_ONLY`. The entry-prefix diagnostic needs a
-  P0-only prefix; real kernels start with `s_load`, so it is UNSUPPORTED there.
-- **Metadata**: compared field by field per kernel. Register-count fields such as
-  `.sgpr_count` count as semantic, which is conservative.
-- **Pending effects** follow the gfx9 counter rules (SMEM may return out of order). Only
-  a counter field of 0 clears destinations.
+- **Reachability**: every mismatch is `LOCAL_ONLY`. The entry-prefix diagnostic now runs
+  on real kernels, because their kernarg `s_load`s run. On `k3` it executes 14 / 15
+  instructions from the kernel entry, with no mismatch. Entry values still stand in for
+  the dispatch ABI.
+- **Metadata**: compared field by field per kernel. Register-allocation fields are
+  informational only when both kernels fit their allocation; everything else is semantic.
+- **Pending effects** follow the gfx9 counter rules: VMEM completes in order, and SMEM may
+  return out of order, so only `lgkmcnt(0)` clears scalar-load destinations.
+- **Memory model**: one flat, initially random image per case, with no aliasing
+  analysis. Two pointers alias only if their values are equal. Pointers come from
+  pointer-shaped words (64 KiB-aligned, high half 0x10..0x7f), so loads through
+  unrelated bases rarely overlap. LDS, flat, buffer, scratch and atomics are not modelled.
 - **Cache**: whole-build fingerprint. There is no finer dependency tracking.
 - **Build environment**: `hsa_init_test` and `interposer_dup_test` do not build on this
   host, and the full-ctest failures listed above are environmental. All are unrelated to
@@ -402,11 +497,14 @@ No rocjitsu undefined-behaviour diagnostic fired for any sweep value in the suit
 (vmcnt, lgkmcnt, expcnt) it tracks an upper bound of outstanding operations and the tracked
 locations they will write:
 - SMEM and LDS raise lgkmcnt, VMEM raises vmcnt, and anything else that may wait raises all three;
-- `s_waitcnt` (fields decoded by rocjitsu's `decode_gfx9_waitcnt`) lowers a counter, and only
-  a field of 0 clears its destinations;
+- `s_waitcnt` (fields decoded by rocjitsu's `decode_gfx9_waitcnt`) lowers a counter. For
+  lgkmcnt and expcnt only a field of 0 clears destinations. VMEM is in order: the vmcnt
+  state keeps the outstanding operations oldest first, and `vmcnt(N)` keeps only the
+  newest N;
 - joins take the maximum count and the union of destinations.
 
-At each region entry the contract records `pending_effects`:
+Before each region instruction the planner checks what is still pending. The contract
+records the worst result as `pending_effects`:
 
 | value | meaning | contract |
 |---|---|---|
@@ -419,6 +517,7 @@ At each region entry the contract records `pending_effects`:
 |---|---|
 | `OutstandingLoadIntoARegionInputLeavesTheContextUnresolved` | `s_load_dword s4` then the region reads `s4` before `s_waitcnt`: CONFLICT, UNRESOLVED. The commuted add has no local mismatch, but the overall result is INCONCLUSIVE with PARTIAL coverage, never a pass |
 | `DisjointWaitedAndPartiallyWaitedLoads` | load into `s10` with the region touching `s4/s5`: DISJOINT, ESTABLISHED, NO_MISMATCH_FOUND. After `s_waitcnt lgkmcnt(0)`: NONE. Two SMEM loads with `lgkmcnt(1)`: still CONFLICT (out-of-order SMEM), and the counter bound is 1 with both destinations pending |
+| `VectorMemoryCompletesInOrder` | two VMEM loads then `vmcnt(1)`: the first load's destination is ready, the second's is pending |
 
 ## Composition (handoff 5.2)
 

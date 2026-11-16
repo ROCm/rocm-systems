@@ -74,6 +74,58 @@ unsigned vgpr_allocation(const std::vector<uint8_t> &descriptor) {
   return (RJ_AMDHSA_BITS_GET(kd.compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET) + 1) * 4;
 }
 
+/// Highest SGPR any reachable instruction names, plus one.
+unsigned sgpr_usage(const KernelModel &m) {
+  unsigned used = 0;
+  for (const auto &ref : m.insts())
+    for (unsigned l = 0; l < kNumSgprs; ++l)
+      if (ref.fx.reads.test(l) || ref.fx.writes.test(l))
+        used = std::max(used, l + 1);
+  return used;
+}
+
+/// The descriptor's register allocation covers what the kernel names: arch VGPRs within
+/// ACCUM_OFFSET and the granulated VGPR count, SGPRs plus the six extra ones (VCC,
+/// FLAT_SCRATCH, XNACK) within the gfx9 granule of 16.
+bool allocation_covers_usage(const KernelModel &m) {
+  const auto &desc = m.artifact().descriptor;
+  if (desc.size() < sizeof(amdhsa::kernel_descriptor_t))
+    return false;
+  amdhsa::kernel_descriptor_t kd{};
+  std::memcpy(&kd, desc.data(), sizeof(kd));
+  using namespace amdhsa;
+  const unsigned vgpr_total =
+      (RJ_AMDHSA_BITS_GET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT) +
+       1) *
+      8;
+  const unsigned sgpr_total =
+      (RJ_AMDHSA_BITS_GET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT) +
+       1) *
+      16;
+  const unsigned vused = vgpr_usage(m);
+  return vused <= vgpr_allocation(desc) && vused <= vgpr_total && sgpr_usage(m) + 6 <= sgpr_total;
+}
+
+/// The two descriptors differ only in register-allocation bits of compute_pgm_rsrc1
+/// (granulated VGPR/SGPR counts) and compute_pgm_rsrc3 (ACCUM_OFFSET).
+bool allocation_only_difference(const std::vector<uint8_t> &a, const std::vector<uint8_t> &b,
+                                const std::string &field) {
+  if (a.size() < sizeof(amdhsa::kernel_descriptor_t) || a.size() != b.size())
+    return false;
+  amdhsa::kernel_descriptor_t ka{}, kb{};
+  std::memcpy(&ka, a.data(), sizeof(ka));
+  std::memcpy(&kb, b.data(), sizeof(kb));
+  using namespace amdhsa;
+  if (field == "compute_pgm_rsrc1")
+    return ((ka.compute_pgm_rsrc1 ^ kb.compute_pgm_rsrc1) &
+            ~(COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT |
+              COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT)) == 0;
+  if (field == "compute_pgm_rsrc3")
+    return ((ka.compute_pgm_rsrc3 ^ kb.compute_pgm_rsrc3) &
+            ~COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET) == 0;
+  return false;
+}
+
 } // namespace
 
 const char *change_kind_name(ChangeKind kind) {
@@ -213,12 +265,27 @@ DiffResult diff_kernels(const KernelModel &old_model, const KernelModel &new_mod
   // Descriptor and metadata.
   bool layout_only = false;
   const auto fields = descriptor_semantic_differences(oa.descriptor, na.descriptor, layout_only);
-  for (const auto &f : fields)
+  // Register-allocation-only descriptor changes (granulated counts, ACCUM_OFFSET) are
+  // informational when each kernel's allocation covers the registers it names; anything
+  // else in the descriptor is semantic.
+  const bool both_fit = allocation_covers_usage(old_model) && allocation_covers_usage(new_model);
+  std::vector<std::string> semantic_fields;
+  for (const auto &f : fields) {
+    if (both_fit && allocation_only_difference(oa.descriptor, na.descriptor, f)) {
+      r.notes.push_back({ChangeKind::Metadata,
+                         "kernel descriptor field differs: " + f +
+                             " (register allocation only; informational: each kernel's "
+                             "registers fit its allocation)",
+                         false});
+      continue;
+    }
+    semantic_fields.push_back(f);
     r.notes.push_back({ChangeKind::Metadata, "kernel descriptor field differs: " + f, true});
+  }
   // Register-count metadata (.vgpr_count, .sgpr_count, .agpr_count) is informational
   // when the descriptors agree on every semantic field and each kernel's VGPRs fit its
   // allocation; a kernel naming VGPRs beyond its allocation is reported as semantic.
-  bool counts_informational = fields.empty();
+  bool counts_informational = semantic_fields.empty();
   for (const auto *m : {&old_model, &new_model}) {
     const unsigned alloc = vgpr_allocation(m->artifact().descriptor);
     const unsigned used = vgpr_usage(*m);

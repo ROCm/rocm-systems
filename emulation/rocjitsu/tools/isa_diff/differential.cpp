@@ -9,6 +9,8 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <map>
+#include <set>
 #include <unordered_set>
 
 #ifndef RJ_ISA_DIFF_RJ_REVISION
@@ -76,6 +78,43 @@ Json outcome_json(const RunOutcome &o) {
   return j;
 }
 
+uint8_t initial_byte(const MachineState &s, uint64_t x) {
+  auto it = std::lower_bound(s.mem_init.begin(), s.mem_init.end(),
+                             std::pair<uint64_t, uint32_t>{x >> 2, 0});
+  if (it != s.mem_init.end() && it->first == (x >> 2))
+    return static_cast<uint8_t>(it->second >> ((x & 3) * 8));
+  return initial_memory_byte(s.mem_seed, x);
+}
+
+/// Bytes either side stored whose final values differ. A byte one side did not store
+/// keeps its initial content on that side.
+std::vector<uint64_t> differing_memory(const MachineState &a, const MachineState &b) {
+  std::vector<uint64_t> out;
+  if (a.mem_written.empty() && b.mem_written.empty())
+    return out;
+  std::map<uint64_t, uint8_t> ma(a.mem_written.begin(), a.mem_written.end());
+  std::map<uint64_t, uint8_t> mb(b.mem_written.begin(), b.mem_written.end());
+  std::set<uint64_t> addrs;
+  for (const auto &[x, v] : ma)
+    addrs.insert(x);
+  for (const auto &[x, v] : mb)
+    addrs.insert(x);
+  for (uint64_t x : addrs) {
+    const uint8_t va = ma.count(x) ? ma[x] : initial_byte(a, x);
+    const uint8_t vb = mb.count(x) ? mb[x] : initial_byte(b, x);
+    if (va != vb)
+      out.push_back(x);
+  }
+  return out;
+}
+
+uint8_t memory_byte(const MachineState &s, uint64_t x) {
+  for (const auto &[a, v] : s.mem_written)
+    if (a == x)
+      return v;
+  return initial_byte(s, x);
+}
+
 /// Compare one executed pair. Returns the mismatch kind, or empty when they agree.
 std::string compare_pair(const RegionPair &region, const MachineState &init_old,
                          const MachineState &init_new, const MachineState &final_old,
@@ -116,6 +155,19 @@ std::string compare_pair(const RegionPair &region, const MachineState &init_old,
       diff.set(l);
   // VGPRs: every lane, active or not (an inactive lane must keep its value).
   const VSet vdiff = differing_vgprs(final_old, final_new) & k.vobservable;
+  // Memory: every byte either side stored.
+  const std::vector<uint64_t> mdiff = differing_memory(final_old, final_new);
+  if (!mdiff.empty()) {
+    m.memory = true;
+    m.mem_addrs.assign(mdiff.begin(), mdiff.begin() + std::min<size_t>(mdiff.size(), 16));
+  }
+  if (diff.none() && vdiff.none() && !mdiff.empty()) {
+    const uint64_t x = mdiff.front();
+    m.detail = "first memory difference at " + hex64(x) + ": old " +
+               hex32(memory_byte(final_old, x)) + " new " + hex32(memory_byte(final_new, x)) +
+               " (" + std::to_string(mdiff.size()) + " stored bytes differ)";
+    return "observable";
+  }
   if (diff.none() && vdiff.any()) {
     m.vlocs = vdiff;
     for (unsigned r = 0; r < kNumVgprs; ++r)
@@ -235,6 +287,8 @@ Json reduce_mismatch(const RegionPair &region, RegionRunner &old_runner, RegionR
       return false;
     m.locs = t.locs;
     m.vlocs = t.vlocs;
+    m.memory = t.memory;
+    m.mem_addrs = t.mem_addrs;
     m.detail = t.detail;
     m.frame_fields = t.frame_fields;
     m.init_old = a;
@@ -587,6 +641,12 @@ void build_initial_states(const RegionContract &contract, const Sample &sample, 
         new_state.vset(r, lane, canary_value(seed, case_index, id, true));
       }
     }
+  // Memory model: both sides start from the same initial memory content.
+  if (contract.memory_reads || contract.memory_writes) {
+    const uint64_t mseed = splitmix64(seed ^ splitmix64(case_index ^ 0x6d656d6f7279ull)) | 1u;
+    old_state.mem_seed = mseed;
+    new_state.mem_seed = mseed;
+  }
   // Each side starts in its own kernel's MODE (FP rounding/denormals, DX10_CLAMP, IEEE).
   old_state.frame.mode = contract.mode_old;
   new_state.frame.mode = contract.mode_new;
@@ -682,9 +742,11 @@ Json RegionResult::to_json() const {
   tj.set("compare_ns", t.compare_ns);
   tj.set("triage_ns", t.triage_ns);
   j.set("timing", std::move(tj));
-  if (mismatch_locs.any() || mismatch_vlocs.any()) {
+  if (mismatch_locs.any() || mismatch_vlocs.any() || mismatch_memory) {
     j.set("mismatch_locations", format_locs(mismatch_locs));
     j.set("vgpr_mismatch_locations", format_vgprs(mismatch_vlocs));
+    if (mismatch_memory)
+      j.set("memory_mismatch", true);
   }
   if (compensable)
     j.set("compensable_downstream", true);
@@ -728,6 +790,18 @@ Json counterexample_json(const RegionPair &region, const Mismatch &m, uint64_t s
   j.set("locations", format_locs(m.locs));
   if (m.vlocs.any())
     j.set("vgpr_locations", format_vgprs(m.vlocs));
+  if (m.memory) {
+    j.set("memory_differs", true);
+    Json md = Json::array();
+    for (uint64_t x : m.mem_addrs) {
+      Json e = Json::object();
+      e.set("address", hex64(x));
+      e.set("old", hex32(memory_byte(m.final_old, x)));
+      e.set("new", hex32(memory_byte(m.final_new, x)));
+      md.push(std::move(e));
+    }
+    j.set("memory_differences", std::move(md));
+  }
   j.set("detail", m.detail);
   // Observable locations use old naming (the new side is read at map(l)); effect-model
   // locations are physical on their own side.
@@ -816,6 +890,11 @@ RegionResult test_region(const RegionPair &region, const TestOptions &options,
   auto new_runner =
       old_runner ? RegionRunner::create(region.new_side.insts, region.id + "_new", error, vgprs)
                  : nullptr;
+  if (old_runner && new_runner) {
+    auto image = std::make_shared<MemoryImage>();
+    old_runner->set_memory_image(image);
+    new_runner->set_memory_image(image);
+  }
   r.t.setup_ns = ns_since(setup_start);
   if (!old_runner || !new_runner) {
     r.test_status = TestStatus::HarnessError;
@@ -909,7 +988,27 @@ RegionResult test_region(const RegionPair &region, const TestOptions &options,
       if (fb.novel)
         ++(std::string_view(phase_name) == "boundary" ? r.novel_boundary : r.novel_random);
     };
-    if (out_old.status != RunStatus::Ok || out_new.status != RunStatus::Ok) {
+    const bool fault_old = out_old.status == RunStatus::MemoryFault;
+    const bool fault_new = out_new.status == RunStatus::MemoryFault;
+    if (fault_old != fault_new && (fault_old ? out_new.status : out_old.status) == RunStatus::Ok) {
+      // One side faults where the other completes: a behavioural divergence.
+      ++r.valid_pairs;
+      ++phase.valid;
+      kind = "exit_status_divergence";
+      m.kind = kind;
+      m.detail = std::string(fault_old ? "old" : "new") +
+                 " side: " + (fault_old ? out_old.detail : out_new.detail) +
+                 "; the other side completed";
+      m.final_old = old_runner->capture();
+      m.final_new = new_runner->capture();
+      ++r.mismatches;
+      ++phase.mismatches;
+      fb.compare_ns = ns_since(t4);
+      r.t.compare_ns += fb.compare_ns;
+      fb.mismatch = true;
+      fb.category = kind;
+      note_novelty(nullptr, nullptr);
+    } else if (out_old.status != RunStatus::Ok || out_new.status != RunStatus::Ok) {
       const std::string key = std::string("exit: old ") + run_status_name(out_old.status) +
                               " / new " + run_status_name(out_new.status);
       ++r.rejections[key];
@@ -921,6 +1020,9 @@ RegionResult test_region(const RegionPair &region, const TestOptions &options,
       } else if (out_old.status == RunStatus::UndefinedBehavior ||
                  out_new.status == RunStatus::UndefinedBehavior) {
         ++undefined;
+      } else if (fault_old && fault_new) {
+        // An input outside the memory model's address domain: excluded, counted.
+        ++r.rejections["memory fault on both sides (excluded input): " + out_old.detail];
       }
       fb.compare_ns = ns_since(t4);
       r.t.compare_ns += fb.compare_ns;
@@ -957,11 +1059,16 @@ RegionResult test_region(const RegionPair &region, const TestOptions &options,
         ++phase.mismatches;
         r.mismatch_locs |= m.locs;
         r.mismatch_vlocs |= m.vlocs;
+        r.mismatch_memory = r.mismatch_memory || m.memory;
       }
     }
     ++r.mismatch_kinds[kind];
     m.init_old = init_old;
     m.init_new = init_new;
+    if (!m.final_old.mem_init.empty()) {
+      m.init_old.mem_init = m.final_old.mem_init;
+      m.init_new.mem_init = m.final_old.mem_init;
+    }
     m.events = sample.events;
     if (r.examples.size() < options.max_counterexamples) {
       auto t5 = Clock::now();
@@ -1114,6 +1221,9 @@ ReplayOutcome replay_counterexample(const Json &bundle, std::string &error) {
                         : nullptr;
   if (!old_runner || !new_runner)
     return out;
+  auto image = std::make_shared<MemoryImage>();
+  old_runner->set_memory_image(image);
+  new_runner->set_memory_image(image);
   std::vector<TraceStep> trace_old, trace_new;
   old_runner->load(*init_old);
   const RunOutcome oo = old_runner->run(region->old_side.insts.size(), &trace_old);
@@ -1123,7 +1233,11 @@ ReplayOutcome replay_counterexample(const Json &bundle, std::string &error) {
   m.out_old = oo;
   m.out_new = on;
   std::string kind;
-  if (oo.status != RunStatus::Ok || on.status != RunStatus::Ok) {
+  const bool replay_fo = oo.status == RunStatus::MemoryFault;
+  const bool replay_fn = on.status == RunStatus::MemoryFault;
+  if (replay_fo != replay_fn && (replay_fo ? on.status : oo.status) == RunStatus::Ok) {
+    kind = "exit_status_divergence";
+  } else if (oo.status != RunStatus::Ok || on.status != RunStatus::Ok) {
     kind = "harness_exit";
   } else {
     kind = compare_pair(*region, *init_old, *init_new, old_runner->capture(), new_runner->capture(),
@@ -1132,7 +1246,8 @@ ReplayOutcome replay_counterexample(const Json &bundle, std::string &error) {
   const std::string recorded_kind = bundle["kind"].as_string();
   const std::string recorded_locs = bundle["locations"].as_string();
   out.reproduced = kind == recorded_kind && format_locs(m.locs) == recorded_locs &&
-                   format_vgprs(m.vlocs) == bundle["vgpr_locations"].as_string();
+                   format_vgprs(m.vlocs) == bundle["vgpr_locations"].as_string() &&
+                   m.memory == bundle["memory_differs"].as_bool();
   if (kind != "harness_exit" && oo.status == RunStatus::Ok && on.status == RunStatus::Ok) {
     // Final values must match the bundle exactly, not just the kind.
     auto fo = MachineState::from_json(bundle["final_state"]["old"], error);

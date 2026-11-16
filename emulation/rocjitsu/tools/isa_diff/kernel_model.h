@@ -58,8 +58,12 @@ struct PendingState {
   std::array<uint8_t, kNumCounters> count{}; ///< Upper bound of outstanding ops (saturating).
   std::array<LocSet, kNumCounters> dests;    ///< Tracked locations outstanding ops will write.
   std::array<VSet, kNumCounters> vdests;     ///< VGPRs outstanding ops will write.
-  std::array<bool, kNumCounters> unknown{};  ///< An outstanding op has unknown effects.
-  uint64_t example_pc = 0;                   ///< One outstanding producer (for messages).
+  /// Vector memory returns in issue order on gfx9 (vmcnt): the destinations of each
+  /// outstanding VMEM operation, oldest first, so s_waitcnt vmcnt(N) retires all but the
+  /// newest N. dests/vdests[kVm] are their union.
+  std::vector<std::pair<LocSet, VSet>> vm_ops;
+  std::array<bool, kNumCounters> unknown{}; ///< An outstanding op has unknown effects.
+  uint64_t example_pc = 0;                  ///< One outstanding producer (for messages).
 
   [[nodiscard]] bool any() const { return count[0] || count[1] || count[2]; }
   [[nodiscard]] LocSet all_dests() const { return dests[0] | dests[1] | dests[2]; }

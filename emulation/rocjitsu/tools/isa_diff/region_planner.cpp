@@ -174,9 +174,22 @@ void check_pending(const KernelModel &om, const KernelModel &nm, const Candidate
   const PendingState &pn = nm.pending_before(anchor_index(c.n));
   const LocSet touch_old = union_reads(om, c.o) | union_writes(om, c.o);
   const LocSet touch_new = union_reads(nm, c.n) | union_writes(nm, c.n);
-  const LocSet conflict = (po.all_dests() & touch_old) | (pn.all_dests() & touch_new);
-  const VSet vconflict =
-      (po.all_vdests() & union_vtouch(om, c.o)) | (pn.all_vdests() & union_vtouch(nm, c.n));
+  (void)touch_old;
+  (void)touch_new;
+  // A destination still pending when a region instruction reads or writes it conflicts:
+  // the isolated run sees it ready. Waits inside the region retire earlier operations,
+  // and loads inside the region are pending for later region instructions until a wait.
+  LocSet conflict;
+  VSet vconflict;
+  for (const auto *side : {&c.o, &c.n}) {
+    const KernelModel &m = side == &c.o ? om : nm;
+    for (size_t i = side->begin; i < side->end; ++i) {
+      const PendingState &p = m.pending_before(i);
+      const Effects &fx = m.insts()[i].fx;
+      conflict |= p.all_dests() & (fx.reads | fx.writes);
+      vconflict |= p.all_vdests() & (fx.vreads | fx.vwrites);
+    }
+  }
   const std::string state = describe_pending("old", po) + "; " + describe_pending("new", pn);
   if (po.any_unknown() || pn.any_unknown()) {
     k.pending_effects = "UNKNOWN";
@@ -315,6 +328,53 @@ RegionPair build_region(const KernelModel &om, const KernelModel &nm, const Cand
                              "come from VGPR liveness, in which a write never kills (lanes "
                              "outside EXEC keep their value)",
                          "KernelModel backward VSet liveness"});
+  }
+  for (const auto *side : {&region.old_side, &region.new_side}) {
+    const KernelModel &m = side == &region.old_side ? om : nm;
+    for (size_t i = side->begin; i < side->end; ++i) {
+      k.memory_reads = k.memory_reads || m.insts()[i].fx.mem_read;
+      k.memory_writes = k.memory_writes || m.insts()[i].fx.mem_write;
+    }
+  }
+  if (k.memory_reads || k.memory_writes) {
+    k.sources.push_back({"memory: loads read one initial memory image shared by both sides "
+                         "(an input); the bytes either side stores are compared at the exit",
+                         "memory model"});
+    // An SGPR pair the region uses as a memory base before writing it is a pointer input:
+    // canonical, 256-byte aligned, far above the code (high half in [0x10, 0x7f]).
+    LocSet bases;
+    for (const auto *side : {&region.old_side, &region.new_side}) {
+      const KernelModel &m = side == &region.old_side ? om : nm;
+      LocSet written;
+      for (size_t i = side->begin; i < side->end; ++i) {
+        const InstRef &ref = m.insts()[i];
+        if (ref.fx.mem_read || ref.fx.mem_write)
+          for (const SourceOperand &so : source_operands(*ref.inst))
+            if (so.locs.count() == 2) {
+              if ((so.locs & written).none())
+                bases |= so.locs;
+              break;
+            }
+        written |= ref.fx.writes;
+      }
+    }
+    for (unsigned l = 0; l + 1 < kNumSgprs; ++l) {
+      if (!bases.test(l) || !bases.test(l + 1) || (l > 0 && bases.test(l - 1) && l % 2 == 1))
+        continue;
+      if (!k.entry_equal.test(l) || !k.entry_equal.test(l + 1))
+        continue;
+      Constraint lo, hi;
+      lo.loc = l;
+      lo.known_zero = 0xffu;
+      lo.source = "memory_model";
+      hi.loc = l + 1;
+      hi.known_one = 0x10u;
+      hi.known_zero = 0xffffff80u;
+      hi.source = "memory_model";
+      k.constraints.push_back(lo);
+      k.constraints.push_back(hi);
+      ++l;
+    }
   }
   k.mode_old = initial_mode(om.artifact().descriptor);
   k.mode_new = initial_mode(nm.artifact().descriptor);
@@ -897,7 +957,8 @@ void record_composition(RegionPair &region, const EqState &s, const std::string 
   RegionContract &k = region.contract;
   const LocSet missing = s.top ? LocSet{} : (k.entry_equal & ~s.eq);
   const VSet vmissing = s.top ? VSet{} : (k.ventry_equal & ~s.veq);
-  if (missing.none() && vmissing.none()) {
+  const bool mmissing = !s.top && k.memory_reads && !s.mem;
+  if (missing.none() && vmissing.none() && !mmissing) {
     k.composition = "HOLDS";
     k.sources.push_back({"composition: every entry_equal location is established equal at the "
                          "entry by must-equality from the kernel entry through common code " +
@@ -908,6 +969,8 @@ void record_composition(RegionPair &region, const EqState &s, const std::string 
     std::string what = format_locs(missing);
     if (vmissing.any())
       what += (what.empty() ? "" : ",") + format_vgprs(vmissing);
+    if (mmissing)
+      what += (what.empty() ? "" : ",") + std::string("memory");
     k.sources.push_back({"composition: {" + what +
                              "} at the entry are not established equal by the kernel entry, "
                              "common code and upstream regions' R_out " +
@@ -1109,6 +1172,7 @@ PlanResult plan_regions(const KernelModel &old_model, const KernelModel &new_mod
     std::vector<std::string> ids;
     LocSet reads;
     VSet vreads;
+    bool mem = false;
   };
   std::vector<Downstream> downstream(result.regions.size());
   for (size_t r = 0; r < result.regions.size(); ++r) {
@@ -1126,6 +1190,7 @@ PlanResult plan_regions(const KernelModel &old_model, const KernelModel &new_mod
         }
         d.reads |= fx.reads | fx.implicit_reads;
         d.vreads |= fx.vreads;
+        d.mem = d.mem || fx.mem_read || (m.insts()[i].inst->flags() & MEMORY_OP) != 0;
       }
     };
     for (size_t q = 0; q < result.regions.size(); ++q) {
@@ -1147,6 +1212,7 @@ PlanResult plan_regions(const KernelModel &old_model, const KernelModel &new_mod
         d.ids.push_back("control-flow change");
         d.reads = all_locs();
         d.vreads.set();
+        d.mem = true;
       }
   }
 
@@ -1157,6 +1223,7 @@ PlanResult plan_regions(const KernelModel &old_model, const KernelModel &new_mod
     k.downstream_changed = downstream[base_index].ids;
     k.downstream_reads = downstream[base_index].reads;
     k.vdownstream_reads = downstream[base_index].vreads;
+    k.downstream_memory_reads = downstream[base_index].mem;
     const uint32_t ob =
         span_block(old_model, {base.old_side.begin, base.old_side.end, base.old_side.cut});
     const size_t opos =

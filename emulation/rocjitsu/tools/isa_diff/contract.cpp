@@ -148,6 +148,12 @@ Json RegionContract::to_json() const {
     j.set("vgpr_writes_new", format_vgprs(vwrites_new));
     j.set("vgpr_wide_reads", format_vgprs(vwide_reads));
   }
+  if (memory_reads)
+    j.set("memory_reads", true);
+  if (memory_writes)
+    j.set("memory_writes", true);
+  if (downstream_memory_reads)
+    j.set("downstream_memory_reads", true);
   j.set("mode_old", hex32(mode_old));
   j.set("mode_new", hex32(mode_new));
   Json cs = Json::array();
@@ -251,6 +257,9 @@ std::optional<RegionContract> RegionContract::from_json(const Json &j, std::stri
         !vlocs("vgpr_wide_reads", c.vwide_reads))
       return std::nullopt;
   }
+  c.memory_reads = j["memory_reads"].as_bool();
+  c.memory_writes = j["memory_writes"].as_bool();
+  c.downstream_memory_reads = j["downstream_memory_reads"].as_bool();
   for (const char *key : {"mode_old", "mode_new"}) {
     if (!j.has(key))
       continue;

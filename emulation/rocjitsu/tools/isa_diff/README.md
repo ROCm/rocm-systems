@@ -4,13 +4,19 @@
 where the machine code changed, cuts a contiguous region around each change, and
 writes an explicit entry/exit contract for that region. It then runs both versions of
 the region on paired inputs through RocJITsu's own instruction execution
-(`ComputeUnitCore::execute_instruction`). Each case executes **only the region**; the
-whole kernel is decoded and analysed once.
+(`ComputeUnitCore::execute_instruction`; memory instructions take the CU's issue path,
+`ComputeUnitCore::step()`, against a modelled memory). Each case executes **only the
+region**; the whole kernel is decoded and analysed once.
 
-Scope: gfx950 (CDNA4), wave64, straight-line regions inside one basic block, made of
-integer SALU instructions (an explicit allowlist) and plain VALU instructions. VALU
-excludes memory, MFMA, interpolation, indirect VGPR access, and exception state. The
-kernel around a region may contain anything; the region may not.
+Scope: gfx950 (CDNA4), wave64, straight-line regions inside one basic block, made of:
+- integer SALU instructions (an explicit allowlist);
+- plain VALU instructions, which exclude MFMA, interpolation, indirect VGPR access, and
+  exception state;
+- global and scalar memory instructions: `global_load_*` (not the LDS or `_tr` forms),
+  `global_store_*`, `s_load_dword*`, and `s_waitcnt` (see "Memory").
+
+LDS, flat, buffer, scratch and atomic accesses stay outside. The kernel around a region
+may contain anything; the region may not.
 
 Inputs are AMDGPU code objects, raw instruction words, and, through the LLVM plugin
 (`llvm/`), `.s` and `.ll` sources. The core never runs LLVM; the plugin is a separate
@@ -114,12 +120,17 @@ For each region pair (`case.json` → `regions[].contract`):
   and trap/wave state are fixed and must be preserved.
 - **Effect check**: each side may change only its `declared_writes_*`. Any other
   change is a `HARNESS_ERROR`, because it means the effect model is wrong.
-- **Pending effects** (`pending_effects`): memory operations that may still be in flight at
-  the entry, from an `s_waitcnt` dataflow over the gfx9 counters.
+- **Pending effects** (`pending_effects`): memory operations that may still be in flight,
+  from an `s_waitcnt` dataflow over the gfx9 counters.
+  - VMEM completes in order, so `vmcnt(N)` retires all but the newest N vector memory
+    operations. SMEM may complete out of order, so only `lgkmcnt(0)` clears scalar-load
+    destinations.
+  - The check runs before every region instruction, so a wait inside the region retires
+    what it waits for.
   - `NONE` and `DISJOINT` (in flight, but no destination is read or written by the region)
     leave the contract unaffected.
-  - `CONFLICT` and `UNKNOWN` leave the context unresolved: the isolated run starts with
-    every input ready, and real hardware might not.
+  - `CONFLICT` and `UNKNOWN` leave the context unresolved: the isolated run completes
+    every access at once, and real hardware might not.
 - **Composition** (`composition`): a forward must-equality analysis from the kernel entry,
   through common code and upstream regions' R_out, must establish every `entry_equal`
   location (`HOLDS`). Otherwise it reports `FAILS`, naming the missing locations.
@@ -129,8 +140,9 @@ For each region pair (`case.json` → `regions[].contract`):
   - `ASSUMED` when R_in relies on upstream regions' R_out, on untested upstream changes
     writing only their decoded destinations, or on an unchecked single-entry assumption
     (unknown CFG successors).
-  - `UNRESOLVED` when kernel metadata differs, a control-flow change can reach the entry,
-    composition fails, or pending effects conflict. An unresolved context is also listed
+  - `UNRESOLVED` when kernel metadata differs (except register allocation, see
+    "Register allocation"), a control-flow change can reach the entry, composition fails,
+    or pending effects conflict. An unresolved context is also listed
     in `unresolved`, so the overall result is never a pass.
 
 ## Context expansion
@@ -213,6 +225,64 @@ cannot reach it, because the code in between is not common. Such a mismatch:
 
 The contract records the consumers in `downstream_changed`, `downstream_reads` and
 `vgpr_downstream_reads`.
+
+## Memory
+
+Memory instructions run inside regions. The runner writes the region's code bytes into
+its memory at their PCs and issues each memory instruction with
+`ComputeUnitCore::step()`: fetch, execute, route, and a functional access that completes
+within the step.
+
+- **Input.** Memory is one more input, shared by both sides.
+  - Each case has a memory seed. A word that is not yet written reads
+    `initial_memory_word(seed, word)`: half catalog values, half random.
+  - An execution plugin sees every routed access before it reaches the caches, and
+    seeds the words it touches. Both sides see the same image.
+  - A case's states record the seed and the initial words read (`memory.initial`), so a
+    bundle replays without the generator.
+- **Pointers.** Some loaded words are pointers.
+  - An `s_load` whose destination SGPRs reach a memory base, through SALU moves and
+    adds, loads pointer-shaped words: the low half 64 KiB-aligned, the high half in
+    0x10..0x7f.
+  - Entry SGPR pairs used as memory bases get `memory_model` constraints of the same
+    shape (low `known_zero 0xff`; high `known_one 0x10`, `known_zero 0xffffff80`).
+    Boundary values that are not such pointers are rejected and counted, never changed.
+- **Output.** Stored bytes are observable.
+  - Both sides' stores are compared over the union of their addresses. An address one
+    side did not write keeps its initial byte.
+  - A difference is a memory mismatch: `memory_mismatch` in the result, and
+    `memory_differs` and `memory_differences` in the bundle. Bundles replay.
+- **Caches.** Before every memory step the runner writes back and invalidates the L1
+  (write-through) and L2 (write-back) caches, so each access fills from the seeded memory.
+  The CU's own wait checker is off, because the planner models waits (pending effects).
+- **Faults.** A wave that halts or traps on an access is a `MEMORY_FAULT`.
+  - On both sides, the input is excluded and counted as a rejection.
+  - On one side, it is an `exit_status_divergence` mismatch.
+  - Atomic, dual-address, and code-overwriting accesses are `UNSUPPORTED_OPERAND`.
+- **Contract.**
+  - `memory_reads` and `memory_writes` record what the region does.
+  - A region that loads needs memory equality at its entry in the composition check.
+    Upstream stores in common code with equal inputs keep it.
+  - `downstream_memory_reads` marks changed code downstream that loads, which may
+    compensate a stored-byte difference (`compensable_downstream`).
+- **Merging.** Hunks separated only by common memory instructions merge into one region.
+  - A reordering of loads and the code consuming them is tested as one unit.
+  - A register rename between the reordered loads becomes internal to the region,
+    instead of an entry relation that composition cannot establish.
+
+## Register allocation
+
+A descriptor difference only in register allocation is informational when each kernel's
+registers fit its own allocation. Register allocation means the granulated VGPR and
+SGPR counts in `compute_pgm_rsrc1` and `ACCUM_OFFSET` in `compute_pgm_rsrc3`. Fitting
+means:
+- every VGPR a kernel names is within both `ACCUM_OFFSET` and the granulated VGPR count;
+- the SGPRs it names, plus the six extra ones (VCC, FLAT_SCRATCH, XNACK), are within the
+  granulated SGPR count (granule 16).
+
+The note then says "register allocation only". Register-count metadata (`.vgpr_count`,
+`.sgpr_count`, `.agpr_count`) follows the same rule. Any other descriptor bit, or an
+allocation that a kernel overruns, stays semantic.
 
 ## Manual regions and register maps
 
@@ -323,8 +393,9 @@ entry values stand in for the dispatch ABI, which is not modelled.
 
 - Diagnostic regions are run by `test` and reported under `diagnostics`, never in the
   verdict.
-- A prefix with control flow or non-P0 instructions (`s_load`, ...) makes the
-  diagnostic `UNSUPPORTED` with that reason.
+- A prefix with control flow or instructions outside the executable subset (LDS, MFMA,
+  `s_getpc_b64`, ...) makes the diagnostic `UNSUPPORTED` with that reason. Kernel-argument
+  `s_load`s run.
 
 ## Stop rules
 
@@ -369,9 +440,11 @@ reduced inputs). `replay` runs the reduced case. The program is never reduced.
 
 A region is `UNSUPPORTED`, with a reason, if it contains any of:
 
-- opcodes outside the executable subset: memory (SMEM, VMEM, LDS), MFMA, `v_interp*`,
-  `v_movrel*`, `v_clrexcp`, `s_waitcnt`, barriers, branches, `s_getreg`/`s_setreg`,
-  `s_movrel*`, messages/traps, and SALU instructions not on the allowlist;
+- opcodes outside the executable subset: memory other than `global_load_*`,
+  `global_store_*` and `s_load_dword*` (LDS, flat, buffer, scratch, atomics,
+  `global_load_lds_*`, `_tr` loads), MFMA, `v_interp*`, `v_movrel*`, `v_clrexcp`,
+  barriers, branches, `s_getreg`/`s_setreg`, `s_movrel*`, messages/traps, and SALU
+  instructions not on the allowlist;
 - operands outside the modelled state: TTMP, FLAT_SCRATCH, XNACK_MASK, apertures, AGPRs;
 - PC-derived inputs, tracked by forward taint from `s_getpc_b64`;
 - instructions whose bytes are patched by a relocation.
@@ -382,7 +455,8 @@ Kernel-level items keep coverage `PARTIAL`:
 
 - control-flow hunks;
 - descriptor fields or this kernel's metadata fields that differ (a change in
-  `kernel_code_entry_byte_offset` alone is layout only);
+  `kernel_code_entry_byte_offset` alone is layout only, and a register-allocation-only
+  change that both kernels fit is informational);
 - relocations that differ at matched instructions;
 - changed unreachable bytes;
 - unknown CFG successors;
@@ -391,7 +465,8 @@ Kernel-level items keep coverage `PARTIAL`:
 
 Execution failures are classified and never treated as no-ops: decode failure,
 missing execution callback (model-only provider), unimplemented, illegal, host
-exception, ISA undefined behaviour (RocJITsu's isa-undefined counter), and PC written.
+exception, ISA undefined behaviour (RocJITsu's isa-undefined counter), PC written, and
+memory fault.
 
 ## Files
 

@@ -416,6 +416,19 @@ PendingState pending_transfer(const InstRef &ref, PendingState s) {
           s.unknown[c] = false;
         }
       }
+      // In-order vmcnt: only the newest vmcnt operations can still be outstanding.
+      if (s.vm_ops.size() > limit[PendingState::kVm]) {
+        s.vm_ops.erase(s.vm_ops.begin(),
+                       s.vm_ops.end() - static_cast<std::ptrdiff_t>(limit[PendingState::kVm]));
+        if (!s.unknown[PendingState::kVm]) {
+          s.dests[PendingState::kVm].reset();
+          s.vdests[PendingState::kVm].reset();
+          for (const auto &[l, v] : s.vm_ops) {
+            s.dests[PendingState::kVm] |= l;
+            s.vdests[PendingState::kVm] |= v;
+          }
+        }
+      }
     }
     return s;
   }
@@ -426,6 +439,14 @@ PendingState pending_transfer(const InstRef &ref, PendingState s) {
     s.count[c] = static_cast<uint8_t>(std::min<unsigned>(s.count[c] + 1u, 63u));
     s.dests[c] |= ref.fx.writes;
     s.vdests[c] |= ref.fx.vwrites;
+    if (c == PendingState::kVm) {
+      s.vm_ops.emplace_back(ref.fx.writes, ref.fx.vwrites);
+      if (s.vm_ops.size() > 63) { // saturate: fold the two oldest
+        s.vm_ops[1].first |= s.vm_ops[0].first;
+        s.vm_ops[1].second |= s.vm_ops[0].second;
+        s.vm_ops.erase(s.vm_ops.begin());
+      }
+    }
     s.unknown[c] = s.unknown[c] || ref.fx.unknown_effect;
     s.example_pc = ref.pc;
   }
@@ -439,6 +460,20 @@ PendingState pending_join(const PendingState &a, const PendingState &b) {
     r.dests[c] = a.dests[c] | b.dests[c];
     r.vdests[c] = a.vdests[c] | b.vdests[c];
     r.unknown[c] = a.unknown[c] || b.unknown[c];
+  }
+  // Align the in-order VMEM queues at their newest end and join element-wise.
+  const size_t n = std::max(a.vm_ops.size(), b.vm_ops.size());
+  r.vm_ops.assign(n, {});
+  for (size_t i = 0; i < n; ++i) {
+    const size_t ri = n - 1 - i;
+    if (i < a.vm_ops.size()) {
+      r.vm_ops[ri].first |= a.vm_ops[a.vm_ops.size() - 1 - i].first;
+      r.vm_ops[ri].second |= a.vm_ops[a.vm_ops.size() - 1 - i].second;
+    }
+    if (i < b.vm_ops.size()) {
+      r.vm_ops[ri].first |= b.vm_ops[b.vm_ops.size() - 1 - i].first;
+      r.vm_ops[ri].second |= b.vm_ops[b.vm_ops.size() - 1 - i].second;
+    }
   }
   r.example_pc = a.example_pc ? a.example_pc : b.example_pc;
   return r;

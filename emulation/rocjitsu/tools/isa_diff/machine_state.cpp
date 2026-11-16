@@ -42,6 +42,19 @@ Json MachineState::to_json() const {
     }
     j.set("vgprs", std::move(v));
   }
+  if (mem_seed != 0 || !mem_written.empty()) {
+    Json m = Json::object();
+    m.set("seed", hex64(mem_seed));
+    Json init = Json::object();
+    for (const auto &[w, v] : mem_init)
+      init.set(hex64(w << 2), hex32(v));
+    m.set("initial", std::move(init));
+    Json w = Json::object();
+    for (const auto &[addr, byte] : mem_written)
+      w.set(hex64(addr), hex32(byte));
+    m.set("written", std::move(w));
+    j.set("memory", std::move(m));
+  }
   return j;
 }
 
@@ -73,6 +86,30 @@ std::optional<MachineState> MachineState::from_json(const Json &j, std::string &
   s.frame.in_trap_handler = f["in_trap_handler"].as_bool();
   s.frame.wave_state = static_cast<uint8_t>(f["wave_state"].as_uint());
   s.frame.sleep_cycles = static_cast<uint32_t>(f["sleep_cycles"].as_uint());
+  const Json &mem = j["memory"];
+  if (mem.is_object()) {
+    s.mem_seed = json_u64(mem["seed"]).value_or(0);
+    for (const auto &[addr, byte] : mem["written"].members()) {
+      auto a = json_u64(Json(addr));
+      auto b = json_u64(byte);
+      if (!a || !b) {
+        error = "bad memory byte in state";
+        return std::nullopt;
+      }
+      s.mem_written.emplace_back(*a, static_cast<uint8_t>(*b));
+    }
+    std::sort(s.mem_written.begin(), s.mem_written.end());
+    for (const auto &[addr, value] : mem["initial"].members()) {
+      auto a = json_u64(Json(addr));
+      auto v = json_u64(value);
+      if (!a || !v) {
+        error = "bad initial memory word in state";
+        return std::nullopt;
+      }
+      s.mem_init.emplace_back(*a >> 2, static_cast<uint32_t>(*v));
+    }
+    std::sort(s.mem_init.begin(), s.mem_init.end());
+  }
   const Json &v = j["vgprs"];
   if (v.is_object()) {
     s.resize_vgprs(static_cast<unsigned>(v.members().size()));
