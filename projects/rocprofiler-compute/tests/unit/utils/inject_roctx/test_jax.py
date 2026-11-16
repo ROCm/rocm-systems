@@ -54,7 +54,9 @@ def install_fake_jax(monkeypatch, jax_package_init=FAKE_JAX_PACKAGE_INIT):
         mapped.__name__ = name
         return mapped
 
-    def fake_shard_map(fun, *args, **kwargs):
+    def fake_shard_map(fun=None, /, **kwargs):
+        if fun is None:
+            return lambda user_fun: fake_shard_map(user_fun, **kwargs)
         name = getattr(fun, "__name__", "<unknown>")
 
         def mapped(*mapped_args, **mapped_kwargs):
@@ -180,6 +182,19 @@ def test_jax_shard_map_call_emits_shard_map_marker(monkeypatch):
 
     assert jax_mod.shard_map(shard_map_square)(1) == 1
     assert [item["marker"] for item in pushes] == ["jax.shard_map.shard_map_square"]
+    assert pushes[0]["backend"] == "jax"
+
+
+def test_jax_shard_map_decorator_factory_emits_shard_map_marker(monkeypatch):
+    jax_mod, _compiled_type, _primitive_type = install_jax_backend(monkeypatch)
+    pushes = record_scopes(monkeypatch)
+
+    def shard_map_cube(value):
+        return value
+
+    mapped = jax_mod.shard_map(mesh=None)(shard_map_cube)
+    assert mapped(1) == 1
+    assert [item["marker"] for item in pushes] == ["jax.shard_map.shard_map_cube"]
     assert pushes[0]["backend"] == "jax"
 
 

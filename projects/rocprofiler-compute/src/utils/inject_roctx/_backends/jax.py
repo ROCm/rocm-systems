@@ -138,18 +138,31 @@ _roctx_compiled_call._roctx_wrapped = True
 def _roctx_mapped_factory(
     state_attr: str,
     marker_prefix: str,
-    fun: object,
+    fun: object = None,
+    /,
     *args: Any,
     **kwargs: Any,
 ) -> object:
     """Call the original factory and return a marked callable that forwards attrs."""
-    compiled = getattr(_STATE, state_attr)(fun, *args, **kwargs)
+    original = getattr(_STATE, state_attr)
+    if fun is None:
+        decorator = original(*args, **kwargs)
+
+        def wrap_user_function(user_fun: object) -> object:
+            compiled = decorator(user_fun)
+            if getattr(compiled, "_roctx_wrapped", False):
+                return compiled
+            return _RoctxMappedCallable(compiled, marker_prefix)
+
+        wrap_user_function._roctx_wrapped = True
+        return wrap_user_function
+    compiled = original(fun, *args, **kwargs)
     if getattr(compiled, "_roctx_wrapped", False):
         return compiled
     return _RoctxMappedCallable(compiled, marker_prefix)
 
 
-def _roctx_pmap_factory(fun: object, *args: Any, **kwargs: Any) -> object:
+def _roctx_pmap_factory(fun: object = None, /, *args: Any, **kwargs: Any) -> object:
     """Call original jax.pmap and return a marked callable that forwards attributes."""
     return _roctx_mapped_factory("pmap_factory", "jax.pmap", fun, *args, **kwargs)
 
@@ -157,7 +170,9 @@ def _roctx_pmap_factory(fun: object, *args: Any, **kwargs: Any) -> object:
 _roctx_pmap_factory._roctx_wrapped = True
 
 
-def _roctx_shard_map_factory(fun: object, *args: Any, **kwargs: Any) -> object:
+def _roctx_shard_map_factory(
+    fun: object = None, /, *args: Any, **kwargs: Any
+) -> object:
     """Call original jax.shard_map and return a marked callable that forwards attrs."""
     return _roctx_mapped_factory(
         "shard_map_factory", "jax.shard_map", fun, *args, **kwargs
