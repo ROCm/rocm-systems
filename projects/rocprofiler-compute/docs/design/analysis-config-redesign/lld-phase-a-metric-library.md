@@ -373,7 +373,7 @@ At the cutover, counters come from the metrics that the selected views place
 
 ### Validation
 
-The unit test `tests/unit/rocprof_compute_soc/metric_library/test_metric_library_sync.py`
+The unit test `tools/test_metric_library_sync.py`
 compares each arch's library with today's analysis configs. An arch without a roofline
 benchmark (gfx908) never shows its roofline panel, so the test leaves that panel out and
 the arch's library holds none of the metrics only that panel lists:
