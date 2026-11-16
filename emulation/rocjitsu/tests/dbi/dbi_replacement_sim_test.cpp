@@ -190,6 +190,35 @@ protected:
       *(restore + static_cast<std::ptrdiff_t>(index)) = nop.value();
   }
 
+  void without_site_v1_restore(std::vector<uint32_t> &words, const InstrumentedSite &site,
+                               uint32_t private_bytes) const {
+    ASSERT_EQ(site.instrumentation_offset % sizeof(uint32_t), 0u);
+    ASSERT_EQ(site.instrumentation_size % sizeof(uint32_t), 0u);
+    const size_t begin = site.instrumentation_offset / sizeof(uint32_t);
+    const size_t size = site.instrumentation_size / sizeof(uint32_t);
+    ASSERT_LE(begin + size, words.size());
+    std::span<uint32_t> envelope(words.data() + begin, size);
+    for (uint32_t offset = kInitialPrivateBytes; offset < private_bytes;
+         offset += sizeof(uint32_t)) {
+      const util::FailureOr<std::vector<uint32_t>> load =
+          build_scratch_load_dword(1, offset, GetParam().arch);
+      const util::FailureOr<std::vector<uint32_t>> store =
+          build_scratch_store_dword(1, offset, GetParam().arch);
+      ASSERT_TRUE(load.succeeded());
+      ASSERT_TRUE(store.succeeded());
+      const std::span<uint32_t>::iterator restore =
+          std::ranges::search(envelope, load.value()).begin();
+      if (restore == envelope.end())
+        continue;
+      ASSERT_NE(std::ranges::search(envelope, store.value()).begin(), envelope.end());
+      const util::FailureOr<uint32_t> nop = build_s_nop(0, GetParam().arch);
+      ASSERT_TRUE(nop.succeeded());
+      std::fill_n(restore, load.value().size(), nop.value());
+      return;
+    }
+    FAIL() << "the early probe did not preserve its later observer's v1";
+  }
+
   std::vector<uint32_t> setup_;
   std::vector<uint32_t> probe_words_;
   uint32_t copy_v3_v1_ = 0;
@@ -287,6 +316,107 @@ TEST_P(DbiReplacementSim, RemovingALaterDefinitionChangesLivenessAtAnEarlierProb
   replayed[definition_offset / sizeof(uint32_t)] = definition;
   ASSERT_NO_FATAL_FAILURE(expect_memory(replayed, scratch, kOriginalInput));
   EXPECT_EQ(std::memcmp(source.image_data(), image.data(), image.size()), 0);
+}
+
+TEST_P(DbiReplacementSim, LaterProbeArgumentsSurviveDeletingTheirOnlyGuestRead) {
+  const ReplacementSimTarget &target = GetParam();
+  const util::FailureOr<uint32_t> nop = build_s_nop(0, target.arch);
+  const util::FailureOr<uint32_t> end = build_s_endpgm(target.arch);
+  const util::FailureOr<uint32_t> ret = build_s_setpc_b64(30, target.arch);
+  const util::FailureOr<uint32_t> address_low = build_s_mov_b32(2, 255, target.arch);
+  const util::FailureOr<uint32_t> address_high = build_s_mov_b32(3, 128, target.arch);
+  const util::FailureOr<uint32_t> read_offset = build_v_mov_b32_src(3, 256, target.arch);
+  const util::FailureOr<std::vector<uint32_t>> store =
+      test::build_global_store_dword(0, 1, 2, 0, target.arch);
+  ASSERT_TRUE(nop.succeeded());
+  ASSERT_TRUE(end.succeeded());
+  ASSERT_TRUE(ret.succeeded());
+  ASSERT_TRUE(address_low.succeeded());
+  ASSERT_TRUE(address_high.succeeded());
+  ASSERT_TRUE(read_offset.succeeded());
+  ASSERT_TRUE(store.succeeded());
+  // The observer receives the value in v0 and the lane's byte offset in v1.
+  // Only the probe writes output, so guest execution cannot hide a bad capture.
+  std::vector<uint32_t> logger_words = {address_low.value(), static_cast<uint32_t>(kOutputAddress),
+                                        address_high.value()};
+  logger_words.insert(logger_words.end(), store.value().begin(), store.value().end());
+  logger_words.push_back(ret.value());
+  const std::vector<uint8_t> logger_image =
+      test::make_amdgpu_probe_elf("replacement_probe", logger_words, target.machine);
+  const std::vector<uint8_t> clobber_image =
+      test::make_amdgpu_probe_elf("replacement_probe", probe_words_, target.machine);
+  const AmdGpuCodeObject logger(logger_image.data(), logger_image.size());
+  const AmdGpuCodeObject clobber(clobber_image.data(), clobber_image.size());
+  ASSERT_TRUE(logger.is_valid());
+  ASSERT_TRUE(clobber.is_valid());
+  constexpr std::array<std::string_view, 5> cases = {
+      "retained guest read", "guest redefinition", "attached deletion",
+      "replacement queued before observer", "observer queued before replacement"};
+  for (size_t request_shape = 0; request_shape < cases.size(); ++request_shape) {
+    SCOPED_TRACE(cases[request_shape]);
+    const bool retained = request_shape == 0;
+    const bool redefined = request_shape == 1;
+    std::vector<uint32_t> words = setup_;
+    const uint64_t early_offset = words.size() * sizeof(uint32_t);
+    words.push_back(nop.value());
+    if (redefined)
+      words.push_back(test::make_mov_vgpr_inline(1, kOriginalInput));
+    const uint64_t observer_offset = words.size() * sizeof(uint32_t);
+    words.push_back(copy_v3_v1_);
+    // Keep the address argument live in the guest to isolate the value argument.
+    words.push_back(read_offset.value());
+    words.push_back(end.value());
+    std::vector<uint8_t> image;
+    ASSERT_NO_FATAL_FAILURE(make_image(words, image));
+    const std::vector<uint8_t> pristine = image;
+    const AmdGpuCodeObject source(image.data(), image.size());
+    ASSERT_TRUE(source.is_valid());
+    Instrumentor instrumentor(source, target.arch);
+    InstrumentationPoint early = probe_at(early_offset, clobber);
+    InstrumentationPoint observer = probe_at(observer_offset, logger);
+    observer.probe_args = {probe_arg_vgpr(1), probe_arg_vgpr(0)};
+    InstrumentationPoint mutation = replacement(observer_offset, copy_v3_v1_, {});
+    if (retained) {
+      instrumentor.add_point(std::move(early));
+      instrumentor.add_point(std::move(observer));
+    } else if (request_shape <= 2) {
+      mutation.probe_obj = &logger;
+      mutation.probe_symbol = "replacement_probe";
+      mutation.probe_args = observer.probe_args;
+      instrumentor.add_point(std::move(early));
+      instrumentor.add_point(std::move(mutation));
+    } else {
+      if (request_shape == 3) {
+        instrumentor.add_point(std::move(mutation));
+        instrumentor.add_point(std::move(observer));
+      } else {
+        instrumentor.add_point(std::move(observer));
+        instrumentor.add_point(std::move(mutation));
+      }
+      instrumentor.add_point(std::move(early));
+    }
+    const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
+    ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+    ASSERT_EQ(result.sites.size(), 2u);
+    ASSERT_EQ(result.patches.size(), 2u);
+    EXPECT_TRUE(std::ranges::all_of(result.patches, &InstrumentationPatch::is_probe_call));
+    EXPECT_EQ(image, pristine);
+    EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
+    const AmdGpuCodeObject candidate(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_TRUE(candidate.is_valid());
+    const std::vector<uint32_t> patched = test::section_words(candidate, ".text");
+    const uint32_t scratch = test::patched_private_segment_size(candidate);
+    ASSERT_NO_FATAL_FAILURE(
+        expect_memory(patched, scratch, redefined ? kOriginalInput : kReplacementInput));
+    if (!redefined) {
+      const std::vector<InstrumentedSite>::const_iterator early_site =
+          std::ranges::find(result.sites, early_offset, &InstrumentedSite::original_offset);
+      ASSERT_NE(early_site, result.sites.end());
+      std::vector<uint32_t> missing_restore = patched;
+      ASSERT_NO_FATAL_FAILURE(without_site_v1_restore(missing_restore, *early_site, scratch));
+      ASSERT_NO_FATAL_FAILURE(expect_memory(missing_restore, scratch, kProbeClobber));
+    }
+  }
 }
 
 TEST_P(DbiReplacementSim, EmptyReplacementRemovesTheOriginalEffect) {

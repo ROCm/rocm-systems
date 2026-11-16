@@ -1939,7 +1939,7 @@ TEST(CheckedTextEdits, InstrumentorChecksDirectReferencesIncludingUnreachableBra
 std::vector<uint8_t> make_external_branch_elf(uint64_t origin, uint64_t destination,
                                               bool terminal_text = false,
                                               bool truncated_external = false) {
-  constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Cdna4;
   constexpr uint64_t text_address = 0x300;
   const util::FailureOr<uint32_t> end = build_s_endpgm(arch);
   const std::optional<uint32_t> entry_branch =
@@ -2000,8 +2000,217 @@ std::vector<uint8_t> make_external_branch_elf(uint64_t origin, uint64_t destinat
   return image;
 }
 
+// Keep the existing two-kernel symbols/descriptors, but give the second kernel
+// independent loaded code. Only .text contains an edited instruction.
+std::vector<uint8_t> make_foreign_kernel_entry_elf(bool entry_moves, bool descriptor_moves) {
+  constexpr rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Cdna4;
+  const util::FailureOr<uint32_t> nop = build_s_nop(0, arch);
+  const util::FailureOr<uint32_t> end = build_s_endpgm(arch);
+  if (nop.failed() || end.failed())
+    return {};
+  const std::vector<uint8_t> original =
+      test::make_gfx950_two_kernel_elf({nop.value(), end.value()}, 0);
+  const AmdGpuCodeObject object(original.data(), original.size());
+  if (!object.is_valid())
+    return {};
+  std::vector<Elf64_Shdr> sections = CodeObjectPatcher(object).section_headers();
+  Elf64_Ehdr header = test_support::read_elf_struct_for_test<Elf64_Ehdr>(original, 0);
+  std::vector<std::vector<uint8_t>> contents(sections.size());
+  for (size_t index = 1; index < sections.size(); ++index) {
+    const Elf64_Shdr &section = sections[index];
+    contents[index].assign(original.begin() + section.sh_offset,
+                           original.begin() + section.sh_offset + section.sh_size);
+  }
+  // The shared builder puts .text, .rodata and .symtab at indices 1, 2 and 3.
+  sections[2].sh_offset = descriptor_moves ? 0x600 : 0x300;
+  sections[2].sh_addr = descriptor_moves ? 0x1600 : 0x300;
+  Elf64_Shdr sibling = sections[1];
+  sibling.sh_name =
+      test::add_elf_name(contents[header.e_shstrndx], entry_moves ? ".late" : ".early");
+  sibling.sh_addr = entry_moves ? 0x1500 : 0x200;
+  sibling.sh_offset = entry_moves ? 0x500 : 0x200;
+  sibling.sh_size = sizeof(uint32_t);
+  sections.push_back(sibling);
+  contents.push_back(make_instruction_bytes({end.value()}));
+  for (size_t index = 0; index < 2; ++index) {
+    const uint64_t descriptor_address =
+        sections[2].sh_addr + index * sizeof(amdhsa::kernel_descriptor_t);
+    amdhsa::kernel_descriptor_t descriptor =
+        test_support::read_elf_struct_for_test<amdhsa::kernel_descriptor_t>(
+            contents[2], index * sizeof(amdhsa::kernel_descriptor_t));
+    descriptor.kernel_code_entry_byte_offset =
+        static_cast<int64_t>(index == 0 ? sections[1].sh_addr : sibling.sh_addr) -
+        static_cast<int64_t>(descriptor_address);
+    test_support::write_elf_struct_for_test(contents[2], index * sizeof(descriptor), descriptor);
+    Elf64_Sym symbol = test_support::read_elf_struct_for_test<Elf64_Sym>(
+        contents[3], (index + 1) * sizeof(Elf64_Sym));
+    symbol.st_value = descriptor_address;
+    test_support::write_elf_struct_for_test(contents[3], (index + 1) * sizeof(symbol), symbol);
+  }
+  uint64_t metadata_offset =
+      std::max(sections[2].sh_offset + sections[2].sh_size, sibling.sh_offset + sibling.sh_size);
+  for (size_t index = 1; index < sections.size(); ++index) {
+    sections[index].sh_size = contents[index].size();
+    if ((sections[index].sh_flags & SHF_ALLOC) == 0) {
+      metadata_offset = test::align_up_for_test(metadata_offset, sections[index].sh_addralign);
+      sections[index].sh_offset = metadata_offset;
+      metadata_offset += contents[index].size();
+    }
+  }
+  header.e_phnum = 3;
+  header.e_shnum = sections.size();
+  header.e_shoff = test::align_up_for_test(metadata_offset, alignof(Elf64_Shdr));
+  std::vector<uint8_t> image(header.e_shoff + sections.size() * sizeof(Elf64_Shdr), 0);
+  test_support::write_elf_struct_for_test(image, 0, header);
+  std::array<size_t, 3> loaded_sections = {1, 2, sections.size() - 1};
+  // ROCr derives the allocation bounds from the first and last LOAD entries.
+  std::ranges::sort(loaded_sections, [&](size_t left, size_t right) {
+    return sections[left].sh_addr < sections[right].sh_addr;
+  });
+  for (size_t index = 0; index < loaded_sections.size(); ++index) {
+    const Elf64_Shdr &section = sections[loaded_sections[index]];
+    const Elf64_Phdr load = {
+        .p_type = PT_LOAD,
+        .p_flags = 0x4u | ((section.sh_flags & SHF_EXECINSTR) != 0 ? PF_X : 0u), // PF_R
+        .p_offset = section.sh_offset,
+        .p_vaddr = section.sh_addr,
+        .p_paddr = section.sh_addr,
+        .p_filesz = section.sh_size,
+        .p_memsz = section.sh_size,
+        .p_align = loaded_sections[index] == 2 ? 64u : 0x1000u};
+    test_support::write_elf_struct_for_test(image, header.e_phoff + index * sizeof(load), load);
+  }
+  for (size_t index = 1; index < sections.size(); ++index)
+    std::memcpy(image.data() + sections[index].sh_offset, contents[index].data(),
+                contents[index].size());
+  std::memcpy(image.data() + header.e_shoff, sections.data(), sections.size() * sizeof(Elf64_Shdr));
+  return image;
+}
+
+TEST(CheckedTextEdits, ReplacementGrowthRejectsMovedForeignKernelEntries) {
+  constexpr rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Cdna4;
+  const util::FailureOr<uint32_t> nop = build_s_nop(0, arch);
+  const util::FailureOr<uint32_t> end = build_s_endpgm(arch);
+  ASSERT_TRUE(nop.succeeded() && end.succeeded());
+  for (const bool entry_moves : {false, true}) {
+    for (const bool descriptor_moves : {false, true}) {
+      SCOPED_TRACE(entry_moves);
+      SCOPED_TRACE(descriptor_moves);
+      const std::vector<uint8_t> image =
+          make_foreign_kernel_entry_elf(entry_moves, descriptor_moves);
+      const std::vector<uint8_t> pristine = image;
+      const AmdGpuCodeObject source(image.data(), image.size());
+      ASSERT_TRUE(source.is_valid());
+      ASSERT_EQ(source.text_sections().size(), 1u);
+      ASSERT_EQ(source.allocated_executable_sections().size(), 2u);
+      const Section &text = *source.text_sections().front();
+      const Section *sibling = test_support::find_section(source, entry_moves ? ".late" : ".early");
+      ASSERT_NE(sibling, nullptr);
+      ASSERT_EQ(text.vaddr(), 0x1100u);
+      ASSERT_EQ(sibling->vaddr(), entry_moves ? 0x1500u : 0x200u);
+      ASSERT_EQ(sibling->size(), sizeof(uint32_t));
+      EXPECT_EQ(test_support::read_elf_struct_for_test<uint32_t>(image, sibling->sectionOffset()),
+                end.value());
+      const std::optional<Elf64_Sym> symbol =
+          test_support::find_elf_symbol_for_test(image, "test_kernel1.kd");
+      ASSERT_TRUE(symbol);
+      const std::optional<uint64_t> descriptor_offset =
+          test_support::loaded_vaddr_to_file_offset(image, symbol->st_value);
+      ASSERT_TRUE(descriptor_offset);
+      const amdhsa::kernel_descriptor_t descriptor =
+          test_support::read_elf_struct_for_test<amdhsa::kernel_descriptor_t>(image,
+                                                                              *descriptor_offset);
+      const std::optional<uint64_t> entry =
+          add_signed_offset(symbol->st_value, descriptor.kernel_code_entry_byte_offset);
+      ASSERT_TRUE(entry);
+      ASSERT_EQ(*entry, sibling->vaddr());
+      if (entry_moves && !descriptor_moves) {
+        EXPECT_EQ(symbol->st_value, 0x340u);
+        EXPECT_EQ(descriptor.kernel_code_entry_byte_offset, 0x11c0);
+      }
+      for (const Section *section : source.allocated_executable_sections()) {
+        EXPECT_EQ(test_support::loaded_vaddr_to_file_offset(image, section->vaddr()),
+                  section->sectionOffset());
+      }
+      ASSERT_EQ(scan_kernel_descriptors(image, text.sectionOffset(), text.size(),
+                                        text.sectionHeaderIndex())
+                    .size(),
+                1u);
+      ASSERT_EQ(scan_kernel_descriptors(image, sibling->sectionOffset(), sibling->size(),
+                                        sibling->sectionHeaderIndex())
+                    .size(),
+                1u);
+      const int route_count = entry_moves ? 4 : 1;
+      for (int route = 0; route < route_count; ++route) {
+        SCOPED_TRACE(route);
+        Instrumentor seed(source, arch);
+        Instrumentor *batch = &seed;
+        std::unique_ptr<Instrumentor> child;
+        TextEditError error;
+        if (route == 1) {
+          ASSERT_NE(seed.instruction_boundaries(error), nullptr) << error.message;
+        } else if (route >= 2) {
+          if (route == 3) {
+            seed.add_point_by_offset(0);
+            const Instrumentor::ValidationResult warmed = seed.validate_points();
+            ASSERT_TRUE(warmed.errors.empty()) << warmed.errors.front();
+            ASSERT_EQ(warmed.sites.size(), 1u);
+          }
+          FailureOr<std::unique_ptr<Instrumentor>> fork = seed.fork(error);
+          ASSERT_TRUE(fork.succeeded()) << error.message;
+          child = std::move(fork).value();
+          batch = child.get();
+        }
+        batch->add_point({.anchor_offset = 0,
+                          .kind = InstrumentationKind::ReplaceWithInst,
+                          .probe_symbol = {},
+                          .probe_args = {},
+                          .replacement = InstructionReplacement{
+                              .expected_bytes = make_instruction_bytes({nop.value()}),
+                              .replacement_bytes = {}}});
+        const Instrumentor::ValidationResult validated = batch->validate_points();
+        const InstrumentedCodeObjectDebug result = batch->patch_with_debug_summaries();
+        if (entry_moves) {
+          EXPECT_FALSE(validated.errors.empty());
+          EXPECT_TRUE(validated.sites.empty());
+          EXPECT_FALSE(result.errors.empty());
+          EXPECT_TRUE(result.elf_bytes.empty());
+          EXPECT_TRUE(result.sites.empty());
+          EXPECT_TRUE(result.patches.empty());
+          EXPECT_TRUE(result.edit_error);
+          if (result.edit_error) {
+            EXPECT_EQ(result.edit_error->code, TextEditErrorCode::UnsupportedReferences);
+            EXPECT_NE(result.edit_error->message.find("kernel entry"), std::string::npos);
+          }
+        } else {
+          ASSERT_TRUE(validated.errors.empty()) << validated.errors.front();
+          ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+          ASSERT_EQ(result.sites.size(), 1u);
+          const AmdGpuCodeObject output(result.elf_bytes.data(), result.elf_bytes.size());
+          ASSERT_TRUE(output.is_valid());
+          const Section *output_sibling = test_support::find_section(output, ".early");
+          ASSERT_NE(output_sibling, nullptr);
+          EXPECT_EQ(output_sibling->vaddr(), sibling->vaddr());
+          const std::vector<KernelDescriptorInfo> kernels =
+              scan_kernel_descriptors(result.elf_bytes, output_sibling->sectionOffset(),
+                                      output_sibling->size(), output_sibling->sectionHeaderIndex());
+          ASSERT_EQ(kernels.size(), 1u);
+          EXPECT_EQ(kernels.front().kernel_name, "test_kernel1");
+          EXPECT_EQ(kernels.front().entry_text_offset, 0u);
+          const std::optional<Elf64_Sym> output_symbol =
+              test_support::find_elf_symbol_for_test(result.elf_bytes, "test_kernel1.kd");
+          ASSERT_TRUE(output_symbol);
+          EXPECT_EQ(output_symbol->st_value > symbol->st_value, descriptor_moves);
+        }
+        EXPECT_EQ(image, pristine);
+        EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
+      }
+    }
+  }
+}
+
 TEST(CheckedTextEdits, ReplacementGrowthChecksCrossSectionFallthrough) {
-  constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Cdna4;
   const util::FailureOr<uint32_t> nop = build_s_nop(0, arch);
   const util::FailureOr<uint32_t> move = build_s_mov_b32(0, 0, arch);
   const util::FailureOr<uint32_t> end = build_s_endpgm(arch);
@@ -2160,7 +2369,7 @@ TEST(CheckedTextEdits, ReplacementGrowthChecksCrossSectionFallthrough) {
 }
 
 TEST(CheckedTextEdits, ReplacementGrowthChecksBranchesOriginatingOutsideText) {
-  constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Cdna4;
   const util::FailureOr<uint32_t> nop = build_s_nop(0, arch);
   ASSERT_TRUE(nop.succeeded());
   struct ExternalBranchCase {
@@ -2286,7 +2495,7 @@ TEST(CheckedTextEdits, ReplacementGrowthChecksBranchesOriginatingOutsideText) {
 }
 
 TEST(CheckedTextEdits, ReplacementRejectsUndecodableExternalExecutableSection) {
-  constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Cdna4;
   const util::FailureOr<uint32_t> nop = build_s_nop(0, arch);
   ASSERT_TRUE(nop.succeeded());
   const std::vector<uint8_t> image = make_external_branch_elf(0x200, 0x30c, false, true);
@@ -2346,7 +2555,7 @@ TEST(CheckedTextEdits, ReplacementRejectsUndecodableExternalExecutableSection) {
 }
 
 TEST(CheckedTextEdits, ReplacementChecksIncomingBranchesFromExternalSections) {
-  constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Cdna4;
   const util::FailureOr<uint32_t> nop = build_s_nop(0, arch);
   const util::FailureOr<uint32_t> end = build_s_endpgm(arch);
   ASSERT_TRUE(nop.succeeded());
@@ -2416,7 +2625,7 @@ TEST(CheckedTextEdits, ReplacementChecksIncomingBranchesFromExternalSections) {
 }
 
 TEST(CheckedTextEdits, RelocatableForeignBranchesKeepSectionRelativeCoordinates) {
-  constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Cdna4;
   const util::FailureOr<uint32_t> nop = build_s_nop(0, arch);
   const util::FailureOr<uint32_t> end = build_s_endpgm(arch);
   const std::optional<uint32_t> branch = test::expected_replacement_branch(0, 8, arch);
@@ -2503,7 +2712,7 @@ TEST(CheckedTextEdits, RelocatableForeignBranchesKeepSectionRelativeCoordinates)
 }
 
 TEST(CheckedTextEdits, ReplacementRetainsPcReadsOriginatingOutsideText) {
-  constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Cdna4;
   const util::FailureOr<uint32_t> nop = build_s_nop(0, arch);
   const util::FailureOr<uint32_t> getpc = build_s_getpc_b64(0, arch);
   ASSERT_TRUE(nop.succeeded());
@@ -2610,7 +2819,7 @@ std::vector<uint8_t> with_foreign_instruction_relocation(std::vector<uint8_t> im
 }
 
 TEST(CheckedTextEdits, ReplacementRejectsLoaderWritesIntoForeignInstructionFacts) {
-  constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Cdna4;
   constexpr uint64_t origin = 0x200;
   constexpr uint64_t destination = 0x400;
   const util::FailureOr<uint32_t> nop = build_s_nop(0, arch);

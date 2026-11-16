@@ -75,6 +75,7 @@ struct SourceTextFacts {
   TextEditReferences references;
   std::vector<SourceLocation> pc_reads;
   std::vector<ControlFlowEdge> flow_edges;
+  std::vector<uint64_t> foreign_kernel_entries;
 };
 
 struct Instrumentor::ResolvedPoints {
@@ -1723,6 +1724,10 @@ bool Instrumentor::ensure_source_facts(TextEditError &error) {
     InstructionBoundaries boundaries;
     if (!decode_section(*section, boundaries, false))
       return false;
+    const std::vector<KernelDescriptorInfo> foreign_kernels = scan_kernel_descriptors(
+        image, section->sectionOffset(), section->size(), section->sectionHeaderIndex());
+    for (const KernelDescriptorInfo &kernel : foreign_kernels)
+      facts->foreign_kernel_entries.push_back(section->vaddr() + kernel.entry_text_offset);
   }
   for (const SourceTextFacts::ControlFlowEdge &edge : facts->flow_edges) {
     if (!edge.fallthrough && !edge.source.text_offset)
@@ -2110,7 +2115,8 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
     const bool has_retained_edge = std::ranges::any_of(
         source_facts_->flow_edges,
         [&](const SourceTextFacts::ControlFlowEdge &edge) { return !is_removed(edge.source); });
-    if (retained_pc != source_facts_->pc_reads.end() || has_retained_edge) {
+    if (retained_pc != source_facts_->pc_reads.end() || has_retained_edge ||
+        !source_facts_->foreign_kernel_entries.empty()) {
       const Section &text = *obj_.text_sections().front();
       const uint64_t text_end = text.vaddr() + text.size();
       const uint64_t file_end = text.sectionOffset() + text.size();
@@ -2160,6 +2166,18 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
           out.errors.back() += " (source VA " + std::to_string(retained_pc->address) + ")";
         out.edit_error = TextEditError{.code = TextEditErrorCode::UnsupportedReferences,
                                        .offset = retained_pc->text_offset.value_or(0),
+                                       .message = out.errors.back()};
+        return out;
+      }
+      for (uint64_t entry : source_facts_->foreign_kernel_entries) {
+        if (!storage_moves(entry))
+          continue;
+        out.errors.emplace_back(
+            "replacement growth cannot preserve a kernel entry in another executable section "
+            "(entry VA " +
+            std::to_string(entry) + ")");
+        out.edit_error = TextEditError{.code = TextEditErrorCode::UnsupportedReferences,
+                                       .offset = 0,
                                        .message = out.errors.back()};
         return out;
       }
@@ -2237,7 +2255,9 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
                 ? terminator->src_loc()
                 : 0;
         out.errors.emplace_back(
-            "replacement probe requires an effective CFG with all guest successors analyzed");
+            !block->call_edges().empty()
+                ? "replacement probe does not support call/return liveness in the effective CFG"
+                : "replacement probe requires an effective CFG with all guest successors analyzed");
         out.edit_error = TextEditError{.code = TextEditErrorCode::UnsupportedReferences,
                                        .offset = offset,
                                        .message = out.errors.back()};
@@ -2731,6 +2751,22 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   KernelVgprBounds vgpr_bounds = kernels.size() == 1
                                      ? kernel_vgpr_bounds(arch_, kernels.front().descriptor)
                                      : KernelVgprBounds{};
+  // Observation inputs remain live across every probe, even if a replacement
+  // removes their last guest use. Queue order does not describe guest execution.
+  RegisterSet observed_vgprs;
+  const uint32_t source_vgpr_bound = std::min(vgpr_bounds.ordinary_bound, 256u);
+  for (const ResolvedInstrumentationSite &site : sites) {
+    if (!site.is_probe_call())
+      continue;
+    for (const ProbeArgValue &arg : site.probe_args) {
+      if (arg.source == ProbeArgSource::AnchorVgpr && arg.register_index >= source_vgpr_bound) {
+        result.errors.emplace_back(
+            "guest VGPR argument exceeds the kernel's ordinary VGPR allocation");
+        return result;
+      }
+    }
+    observed_vgprs |= probe_argument_registers(site.probe_args);
+  }
   // What each probe body overwrites. Keyed on the probe, not the site, so it is
   // decoded once per distinct body and indexed alongside resolved.probes.
   std::vector<ProbeClobberSummary> probe_summaries;
@@ -2811,6 +2847,9 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       link.expand(probe_link_pair(resolved.probes[index].abi));
       include_registers(link);
     }
+    // Inputs may occupy physical padding beyond the original metadata counts.
+    // Keep growth's backup destinations above those observed registers too.
+    include_registers(observed_vgprs);
     sgpr_save_base = result.resources.sgprs + kDbiEntryStorageRegisters;
     vgpr_save_base = result.resources.vgprs;
     kernel_sgpr_count = REGISTER_SET_ALLOCATABLE_SGPRS +
@@ -2978,7 +3017,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
         result.errors.emplace_back("internal: anchor liveness is unavailable");
         continue;
       }
-      RegisterSet live = *maybe_live.value() | probe_argument_registers(site.probe_args);
+      RegisterSet live = *maybe_live.value() | observed_vgprs;
       // Including original definitions conservatively covers live-after state:
       // the callback must observe and preserve the relocated instruction's result.
       if (site.kind == InstrumentationKind::AfterInst)
