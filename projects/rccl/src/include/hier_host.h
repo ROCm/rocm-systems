@@ -66,13 +66,14 @@ ncclResult_t rcclHostHierEnsure(struct ncclComm* comm);
 ncclResult_t rcclHostHierTeardown(struct ncclComm* comm);
 
 // Sizes, in bytes, at which host-hierarchical AllReduce beat the default path in
-// gfx1250 MNNVL sum measurements with 8 ranks per host: fp32 on 2, 4 and 8 hosts, fp16
-// and bf16 on 2 hosts. False for unmeasured host counts.
-bool rcclHostHierAllReduceAutoWindow(int nHosts, size_t bytes);
+// gfx1250 MNNVL sum measurements: with 8 ranks per host, fp32 on 2, 4 and 8 hosts and
+// fp16 and bf16 on 2 hosts; with 4 ranks per host, fp32 on 4 and 8 hosts. False for
+// unmeasured layouts.
+bool rcclHostHierAllReduceAutoWindow(int nHosts, int ranksPerHost, size_t bytes);
 
 // Sizes, in bytes, at which the fused DDA kernel beat the three collectives in gfx1250 fp32, fp16 and bf16 sum
-// measurements on one and two hosts with 8 ranks per host.
-bool rcclHostHierAllReduceFusedWindow(int nHosts, size_t bytes);
+// measurements on one and two hosts with 8 ranks per host. With 4 ranks per host it was slower at every size.
+bool rcclHostHierAllReduceFusedWindow(int nHosts, int ranksPerHost, size_t bytes);
 
 // Whether RCCL_HOST_HIER_ALLREDUCE and the operands allow host-hierarchical
 // AllReduce. registeredBuffers: the send or receive buffer is in a registered

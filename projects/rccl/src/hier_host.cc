@@ -233,23 +233,36 @@ exit:
   return res;
 }
 
-bool rcclHostHierAllReduceAutoWindow(int nHosts, size_t bytes) {
+bool rcclHostHierAllReduceAutoWindow(int nHosts, int ranksPerHost, size_t bytes) {
   constexpr size_t MiB = size_t{1} << 20;
-  switch (nHosts) {
-  case 2:
-    return bytes >= 2 * MiB && bytes <= 512 * MiB;
-  case 4:
-    return bytes >= 2 * MiB && bytes <= 1024 * MiB;
-  case 8:
-    return bytes >= 2 * MiB && bytes <= 2048 * MiB;
-  default:
-    return false;
+  if (ranksPerHost == 8) {
+    switch (nHosts) {
+    case 2:
+      return bytes >= 2 * MiB && bytes <= 512 * MiB;
+    case 4:
+      return bytes >= 2 * MiB && bytes <= 1024 * MiB;
+    case 8:
+      return bytes >= 2 * MiB && bytes <= 2048 * MiB;
+    default:
+      return false;
+    }
   }
+  if (ranksPerHost == 4) {
+    switch (nHosts) {
+    case 4:
+      return bytes >= 2 * MiB && bytes <= 32 * MiB;
+    case 8:
+      return bytes >= 2 * MiB && bytes <= 256 * MiB;
+    default:
+      return false;
+    }
+  }
+  return false;
 }
 
-bool rcclHostHierAllReduceFusedWindow(int nHosts, size_t bytes) {
+bool rcclHostHierAllReduceFusedWindow(int nHosts, int ranksPerHost, size_t bytes) {
   constexpr size_t MiB = size_t{1} << 20;
-  return nHosts <= 2 && bytes >= 4 * MiB && bytes <= 128 * MiB;
+  return ranksPerHost == 8 && nHosts <= 2 && bytes >= 4 * MiB && bytes <= 128 * MiB;
 }
 
 bool rcclHostHierAllReduceEligible(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op,
@@ -269,7 +282,7 @@ bool rcclHostHierAllReduceEligible(struct ncclComm* comm, size_t count, ncclData
   if (forced) return true;
   // FP16 and BF16 were measured on two hosts only.
   if (halfType && layout->nHosts != 2) return false;
-  return layout->ranksPerHost == 8 && rcclHostHierAllReduceAutoWindow(layout->nHosts, count * ncclTypeSize(datatype));
+  return rcclHostHierAllReduceAutoWindow(layout->nHosts, layout->ranksPerHost, count * ncclTypeSize(datatype));
 }
 
 ncclResult_t rcclHostHierAllReduce(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
@@ -278,7 +291,8 @@ ncclResult_t rcclHostHierAllReduce(const void* sendbuff, void* recvbuff, size_t 
   struct rcclHostHier* h = comm->hostHier;
   const struct rcclHostLayout& layout = h->layout;
   const int64_t fused = rcclParamHostHierAllReduceFused();
-  if ((fused == 1 || (fused == -1 && rcclHostHierAllReduceFusedWindow(layout.nHosts, count * ncclTypeSize(datatype)))) &&
+  if ((fused == 1 || (fused == -1 && rcclHostHierAllReduceFusedWindow(layout.nHosts, layout.ranksPerHost,
+                                                                     count * ncclTypeSize(datatype)))) &&
       ncclAllReduceDdaFabricHierEligible(comm, sendbuff, recvbuff, count, datatype, op, layout.nHosts,
                                          layout.ranksPerHost)) {
     std::vector<int> inter(layout.nHosts);
