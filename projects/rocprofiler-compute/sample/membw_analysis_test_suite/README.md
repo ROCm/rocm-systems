@@ -14,11 +14,11 @@ Each workload runs the baseline kernel by default and the optimized kernel with 
 | Workload | Baseline (intended effect) | Optimized (intended effect) |
 |---|---|---|
 | gl2_backpressure | Uncoalesced + large stride -> L2 misses -> fill LFIFO -> TCP stalls. | Shared mem, minimal L2 traffic. |
-| L1_stall_microbenchmark | Many scattered loads/stores -> VMEM issues many commands; TA/GL1 can't consume them fast enough -> VMEM FIFO fills. | Shared memory reduces VMEM FIFO pressure. |
+| L1_stall_microbenchmark | Uncoalesced loads/stores -> TA/UTCL1/L2 stalls. | Shared memory reduces VMEM FIFO pressure. |
 | utcl1_stall | Rapid page hopping (>32 pages) -> exceed UTCL1 entries -> in-flight stall. | Stay in one page. |
 | ta_tcp_stall | Random access, TA waits for TCP. | Sequential access, TCP serves TA quickly. |
 
-`L1_stall_microbenchmark` also takes `sq1`, which runs a kernel that tries to fill the SQ-to-TA FIFOs ("VMEM stalled by L1 Cache").
+`L1_stall_microbenchmark` also takes `sq1`, which runs a kernel that tries to fill the SQ-to-TA FIFOs ("VMEM stalled by L1 Cache"). It doesn't fill them yet.
 
 > [!NOTE]
 > Above workloads are still WIP, the profiled result may not reflect the intended results.
@@ -30,7 +30,8 @@ The metrics are in the "L1 Cache" table (3001) of the Memory Bandwidth Analysis 
 | Workload | Metric | Expression |
 |---|---|---|
 | gl2_backpressure | L1 Cache - TCP stalled by L2 | `TCP_TCR_TCP_STALL_CYCLES / TCP_GATE_EN2` |
-| L1_stall_microbenchmark | L1 Cache - VMEM stalled by L1 Cache | `SQ_VMEM_TA_CMD_FIFO_FULL / SQ_BUSY_CYCLES` |
+| L1_stall_microbenchmark | L1 Cache - TA stalled by TCP (aggregated), L1 Cache - TCP stalled by UTCL1, L1 Cache - TCP stalled by L2 | See the other rows |
+| L1_stall_microbenchmark `sq1` | L1 Cache - VMEM stalled by L1 Cache | `SQ_VMEM_TA_CMD_FIFO_FULL / SQ_BUSY_CYCLES` |
 | utcl1_stall | L1 Cache - TCP stalled by UTCL1 | `TCP_UTCL1_STALL_INFLIGHT_MAX / TCP_GATE_EN2` |
 | ta_tcp_stall | L1 Cache - TA stalled by TCP (aggregated) | `TCP_TCP_TA_ADDR_STALL_CYCLES / TCP_GATE_EN2` |
 
