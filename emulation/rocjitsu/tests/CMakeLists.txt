@@ -1091,10 +1091,12 @@ rj_configure_target(rocjitsu_text_edit_tests PRIVATE_INCLUDES WARNINGS)
 rj_add_gtest_tests(rocjitsu_text_edit_tests)
 
 if(RJ_BUILD_FAULT_INJECTION)
-    # Host-only Drop recipe tests use shared DBI replacement and model ISA providers.
+    # Host-only FI recipe tests use shared DBI replacement and model ISA providers.
     add_executable(
         rocjitsu_fault_injection_tests
         patch/fault_injection/drop_barrier_test.cpp
+        patch/fault_injection/lds_wrong_address_test.cpp
+        patch/fault_injection/cdna_lds_wrong_address_test.cpp
     )
     target_include_directories(
         rocjitsu_fault_injection_tests
@@ -1144,6 +1146,8 @@ if(RJ_BUILD_FAULT_INJECTION)
         add_executable(
             rocjitsu_fault_mutation_cli_tests
             patch/fault_injection/mutation_cli_test.cpp
+            patch/fault_injection/lds_cli_test.cpp
+            patch/fault_injection/cdna_lds_cli_test.cpp
         )
         target_include_directories(
             rocjitsu_fault_mutation_cli_tests
