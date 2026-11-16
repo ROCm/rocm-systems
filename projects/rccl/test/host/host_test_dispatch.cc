@@ -1714,198 +1714,6 @@ std::string coverageDirectory()
 
 // ── coverage merge ──────────────────────────────────────────────────
 
-// One source file's coverage, as an lcov tracefile records it.
-//
-// Every container is keyed rather than appended to, because the merge is a union and because
-// llvm-cov emits the same entity more than once within a single record (a line covered by two
-// regions, a function instantiated twice). Ordered maps, so the output of a merge depends only
-// on its inputs and two runs produce byte-identical tracefiles.
-struct LcovSource {
-    std::map<std::string, long> functionLines;        // FN: mangled name -> declaration line
-    std::map<std::string, long long> functionHits;    // FNDA: mangled name -> execution count
-    std::map<long, long long> lines;                  // DA: line -> execution count
-    // BRDA: (line, block, branch) -> taken count; nullopt for llvm-cov's '-', "not evaluated".
-    std::map<std::tuple<long, long, long>, std::optional<long long>> branches;
-};
-
-// A coverage counter from an lcov record, saturated rather than wrapped or rejected.
-//
-// llvm-cov prints its counters as unsigned 64-bit and does sometimes print one that has wrapped
-// -- a counter expression evaluating below zero comes out as 18446744073709551591 -- which does
-// not fit a signed long and would parse as a failure. Reading that as 0 turns a covered line
-// into an uncovered one in the merged view, which is the one failure this file must not have,
-// so it saturates instead. Only the non-zeroness of a count is ever read downstream.
-long long toCount(std::string_view text)
-{
-    unsigned long long value = 0;
-    const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
-    if (error == std::errc::result_out_of_range) {
-        return std::numeric_limits<long long>::max();
-    }
-    if (error != std::errc()) {
-        return 0;
-    }
-    return static_cast<long long>(
-        std::min<unsigned long long>(value, std::numeric_limits<long long>::max()));
-}
-
-// *left* + *right*, saturating. Two counters that each nearly fill the type are summed when the
-// same line is reached by several binaries, and a wrapped total would read as uncovered.
-long long addCounts(long long left, long long right)
-{
-    constexpr long long kMax = std::numeric_limits<long long>::max();
-    return left > kMax - right ? kMax : left + right;
-}
-
-// A whole tracefile: its source files, keyed by path.
-using LcovData = std::map<std::string, LcovSource>;
-
-// Split *text* on *separator*, keeping empty fields. Used for the comma-separated bodies of the
-// lcov record lines, where an empty field is a parse failure rather than something to skip.
-std::vector<std::string_view> splitOn(std::string_view text, char separator)
-{
-    std::vector<std::string_view> fields;
-    size_t start = 0;
-    for (size_t i = 0; i <= text.size(); ++i) {
-        if (i == text.size() || text[i] == separator) {
-            fields.push_back(text.substr(start, i - start));
-            start = i + 1;
-        }
-    }
-    return fields;
-}
-
-// Accumulate the lcov tracefile in *text* into *into*.
-//
-// The counting lines an input carries -- FNF/FNH/LF/LH/BRF/BRH -- are deliberately ignored and
-// recomputed by formatLcov(). They are not summaries OF the records beside them: llvm-cov counts
-// its own internal regions there, so a record with 648 FN lines can be headed FNF:258, and
-// summing those numbers across binaries would give totals matching neither the records nor
-// anything lcov would compute from them.
-void parseLcov(std::string_view text, LcovData &into)
-{
-    LcovSource *current = nullptr;
-    size_t start = 0;
-    while (start <= text.size()) {
-        const size_t end = std::min(text.find('\n', start), text.size());
-        const std::string_view line = text.substr(start, end - start);
-        start = end + 1;
-
-        if (startsWith(line, "SF:")) {
-            current = &into[std::string(line.substr(3))];
-        } else if (line == "end_of_record") {
-            current = nullptr;
-        } else if (current == nullptr) {
-            continue;   // a record line outside any SF: block has no file to belong to
-        } else if (startsWith(line, "FN:")) {
-            // FN:<line>,<name>. The name may itself contain commas (a template parameter list),
-            // so the split is on the FIRST comma only.
-            const std::string_view body = line.substr(3);
-            const size_t comma = body.find(',');
-            if (comma != std::string_view::npos) {
-                const std::string name(body.substr(comma + 1));
-                const long declaration = toLong(body.substr(0, comma), -1);
-                // Lowest line wins, so a name seen at several lines lands somewhere real.
-                const auto [entry, inserted] = current->functionLines.emplace(name, declaration);
-                if (!inserted && declaration >= 0 && declaration < entry->second) {
-                    entry->second = declaration;
-                }
-            }
-        } else if (startsWith(line, "FNDA:")) {
-            const std::string_view body = line.substr(5);
-            const size_t comma = body.find(',');
-            if (comma != std::string_view::npos) {
-                long long &hits = current->functionHits[std::string(body.substr(comma + 1))];
-                hits = addCounts(hits, toCount(body.substr(0, comma)));
-            }
-        } else if (startsWith(line, "DA:")) {
-            const std::vector<std::string_view> fields = splitOn(line.substr(3), ',');
-            if (fields.size() >= 2) {
-                long long &count = current->lines[toLong(fields[0], 0)];
-                count = addCounts(count, toCount(fields[1]));
-            }
-        } else if (startsWith(line, "BRDA:")) {
-            const std::vector<std::string_view> fields = splitOn(line.substr(5), ',');
-            if (fields.size() >= 4) {
-                const auto key = std::make_tuple(toLong(fields[0], 0), toLong(fields[1], 0),
-                                                 toLong(fields[2], 0));
-                std::optional<long long> &taken = current->branches[key];
-                if (fields[3] != "-") {
-                    // A branch one binary never evaluated and another took is taken: '-' is the
-                    // absence of information, so any count at all displaces it.
-                    taken = addCounts(taken.value_or(0), toCount(fields[3]));
-                }
-            }
-        }
-    }
-}
-
-// *data* as an lcov tracefile.
-//
-// The FNF/FNH/LF/LH/BRF/BRH lines are computed here from the records themselves, which is also
-// how lcov and genhtml treat the ones they read, so the totals a consumer reports are the ones
-// implied by the merged records.
-std::string formatLcov(const LcovData &data)
-{
-    std::string out;
-    for (const auto &[path, source] : data) {
-        out += fmt::format("SF:{}\n", path);
-        long functionsHit = 0;
-        for (const auto &[name, line] : source.functionLines) {
-            out += fmt::format("FN:{},{}\n", line, name);
-        }
-        for (const auto &[name, hits] : source.functionHits) {
-            out += fmt::format("FNDA:{},{}\n", hits, name);
-            if (hits > 0) {
-                ++functionsHit;
-            }
-        }
-        out += fmt::format("FNF:{}\n", source.functionLines.size());
-        out += fmt::format("FNH:{}\n", functionsHit);
-
-        long branchesHit = 0;
-        for (const auto &[key, taken] : source.branches) {
-            const auto [line, block, branch] = key;
-            out += fmt::format("BRDA:{},{},{},{}\n", line, block, branch,
-                               taken ? std::to_string(*taken) : std::string("-"));
-            if (taken && *taken > 0) {
-                ++branchesHit;
-            }
-        }
-        if (!source.branches.empty()) {
-            out += fmt::format("BRF:{}\n", source.branches.size());
-            out += fmt::format("BRH:{}\n", branchesHit);
-        }
-
-        long linesHit = 0;
-        for (const auto &[line, count] : source.lines) {
-            out += fmt::format("DA:{},{}\n", line, count);
-            if (count > 0) {
-                ++linesHit;
-            }
-        }
-        out += fmt::format("LF:{}\n", source.lines.size());
-        out += fmt::format("LH:{}\n", linesHit);
-        out += "end_of_record\n";
-    }
-    return out;
-}
-
-// *contents* (whole lcov tracefiles) merged into one.
-//
-// The union is per line and per branch: a line is covered if ANY input covered it. That is what
-// makes this the right merge for the host tree, where several binaries compile the same source
-// under different #defines -- their coverage-mapping hashes differ, so the profiles themselves
-// cannot be pooled, but the lines they each reached can be.
-std::string mergeLcovTracefiles(const std::vector<std::string> &contents)
-{
-    LcovData merged;
-    for (const std::string &tracefile : contents) {
-        parseLcov(tracefile, merged);
-    }
-    return formatLcov(merged);
-}
-
 // How a shell command is run, returning its exit status. A seam, so the export can be driven in
 // a test without llvm-profdata and llvm-cov on the machine.
 using CommandFn = std::function<int(const std::string &)>;
@@ -2027,6 +1835,45 @@ std::string lcovExportCommand(const std::string &tool, const std::string &binary
                        shellQuote(std::string(ignoreRegex)), shellQuote(output));
 }
 
+// The lcov flags needed to read llvm-cov's tracefiles, given the text of `lcov --version`.
+//
+// lcov 2.x enforces consistency checks that reject what llvm-cov emits ("line is hit but no
+// branches evaluated"); 1.x has neither those checks nor the error categories that silence them,
+// and rejects the unknown names outright, so the flags differ by major version.
+//
+// This sniff is also in run_host_tests.sh (coverage phase) and in the python test runner's
+// _merge_host_coverage(); three languages, three copies, and no way to share one. They are kept
+// character-identical so a change to one is greppable from the others.
+std::string lcovMergeFlags(std::string_view versionText)
+{
+    const size_t digit = versionText.find_first_of("0123456789");
+    const long major = digit == std::string_view::npos ? 0 : toLong(versionText.substr(digit), 0);
+    if (major >= 2) {
+        return "--rc branch_coverage=1 --rc check_data_consistency=0"
+               " --ignore-errors inconsistent,unsupported,corrupt,format";
+    }
+    return "--rc lcov_branch_coverage=1";
+}
+
+// The command that unions *tracefiles* into the single tracefile *output*.
+//
+// lcov's own union, rather than one hand-rolled here: a line or branch is covered if ANY input
+// covered it, which is the merge the host tree needs -- several binaries compile the same source
+// under different #defines, so their coverage-mapping hashes differ and the profiles cannot be
+// pooled, but the lines they each reached can be. The tree already depends on lcov for exactly
+// this union in run_host_tests.sh and in the python runner; this is the third caller, not a
+// third implementation.
+std::string lcovMergeCommand(const std::string &tool, const std::string &flags,
+                             const std::vector<std::string> &tracefiles,
+                             const std::string &output)
+{
+    std::string command = fmt::format("{} {}", shellQuote(tool), flags);
+    for (const std::string &tracefile : tracefiles) {
+        command += fmt::format(" --add-tracefile {}", shellQuote(tracefile));
+    }
+    return command + fmt::format(" -o {}", shellQuote(output));
+}
+
 // Every .profraw directly under *directory*, sorted.
 std::vector<std::string> profilesIn(const std::string &directory)
 {
@@ -2041,12 +1888,6 @@ std::vector<std::string> profilesIn(const std::string &directory)
     return profiles;
 }
 
-// Turn the children's profiles into one merged lcov tracefile beside them.
-//
-// Best effort throughout: a run whose tests all passed must not fail because llvm-cov is not
-// installed, so every problem is a warning and the tracefile is simply whatever could be
-// exported. Silence would be worse than either -- a missing tracefile reads downstream as "this
-// code is not covered" -- so each skipped binary says so by name.
 // Whether the lcov export should run at all, given *request* from the environment.
 //
 // Only "0" turns it off, so a caller who has not heard of this gets the export as before. The
@@ -2057,6 +1898,12 @@ bool coverageExportRequested(const char *request)
     return request == nullptr || std::string_view(request) != "0";
 }
 
+// Turn the children's profiles into one merged lcov tracefile beside them.
+//
+// Best effort throughout: a run whose tests all passed must not fail because llvm-cov or lcov is
+// not installed, so every problem is a warning and the tracefile is simply whatever could be
+// exported. Silence would be worse than either -- a missing tracefile reads downstream as "this
+// code is not covered" -- so each skipped binary, and a missing merge, says so by name.
 void writeMergedCoverage(const std::string &directory, const std::vector<std::string> &binaries,
                          const CommandFn &run, const TerminatedFn &terminated = {})
 {
@@ -2102,7 +1949,7 @@ void writeMergedCoverage(const std::string &directory, const std::vector<std::st
                (fs::path(directory) / kCoverageTracefile).string());
     std::fflush(stdout);
 
-    std::vector<std::string> tracefiles;
+    std::vector<std::string> tracefiles;   // paths, unioned by lcov below
     size_t exported = 0;
     for (const auto &[binary, profiles] : pending) {
         // Checked every binary, not only at the start: this phase is long enough that a stop
@@ -2138,21 +1985,32 @@ void writeMergedCoverage(const std::string &directory, const std::vector<std::st
             fs::remove(tracefile, ec);
             continue;
         }
-        tracefiles.push_back(readFile(tracefile));
+        tracefiles.push_back(tracefile);
     }
 
     if (tracefiles.empty()) {
         return;
     }
     const std::string path = (fs::path(directory) / kCoverageTracefile).string();
-    std::ofstream out(path, std::ios::binary | std::ios::trunc);
-    if (!out) {
-        fmt::print(stderr, "host-test-dispatch: cannot write {}: {}\n", path,
-                   std::strerror(errno));
+    // lcov is perl and is not needed to run the tests, so a machine without it still gets every
+    // per-binary coverage.lcov -- only the union is lost, and it says so rather than leaving a
+    // missing file to read as uncovered code.
+    const std::string versionPath = (fs::path(directory) / "lcov-version.txt").string();
+    if (run(fmt::format("lcov --version > {} 2>/dev/null", shellQuote(versionPath))) != 0) {
+        fmt::print(stderr, "host-test-dispatch: lcov is not installed -- {} was not written; the"
+                           " {} per-binary tracefiles are in place under {}\n",
+                   kCoverageTracefile, tracefiles.size(), directory);
         return;
     }
-    out << mergeLcovTracefiles(tracefiles);
-    out.close();
+    const std::string flags = lcovMergeFlags(readFile(versionPath));
+    std::error_code ec;
+    fs::remove(versionPath, ec);
+    if (run(lcovMergeCommand("lcov", flags, tracefiles, path)) != 0) {
+        fmt::print(stderr, "host-test-dispatch: lcov could not union the {} per-binary tracefiles"
+                           " -- {} was not written\n",
+                   tracefiles.size(), path);
+        return;
+    }
     fmt::print("----- coverage: merged {} tracefiles into {} -----\n", tracefiles.size(), path);
     std::fflush(stdout);
 }

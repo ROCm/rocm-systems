@@ -1504,200 +1504,6 @@ TEST(HostDispatchCoverageMicrotest, NoProfileVariableLeavesTheChildEnvironmentAl
 }
 
 
-// ── lcov merge ──────────────────────────────────────────────────────
-
-namespace {
-
-// The lcov records for one source file, with the counting lines left to the code under test.
-std::string tracefile(const std::string &path, const std::string &body)
-{
-    return "SF:" + path + "\n" + body + "end_of_record\n";
-}
-
-// Whether *text* contains *line* as a whole line.
-bool hasLine(const std::string &text, const std::string &line)
-{
-    return ("\n" + text).find("\n" + line + "\n") != std::string::npos;
-}
-
-}  // namespace
-
-TEST(HostDispatchLcovMicrotest, ALineCoveredByOneBinaryIsCoveredInTheMerge)
-{
-    // The point of the union: several binaries compile the same source under different #defines,
-    // so each reaches lines the others cannot, and the merged view has to credit all of them.
-    const std::string merged = mergeLcovTracefiles({
-        tracefile("/src/init.cc", "DA:10,1\nDA:20,0\n"),
-        tracefile("/src/init.cc", "DA:10,0\nDA:20,5\n"),
-    });
-
-    EXPECT_TRUE(hasLine(merged, "DA:10,1")) << merged;
-    EXPECT_TRUE(hasLine(merged, "DA:20,5")) << merged;
-    EXPECT_TRUE(hasLine(merged, "LF:2")) << merged;
-    EXPECT_TRUE(hasLine(merged, "LH:2")) << merged;
-}
-
-TEST(HostDispatchLcovMicrotest, ALineNoBinaryReachedStaysUncovered)
-{
-    const std::string merged = mergeLcovTracefiles({
-        tracefile("/src/init.cc", "DA:10,0\n"),
-        tracefile("/src/init.cc", "DA:10,0\n"),
-    });
-
-    EXPECT_TRUE(hasLine(merged, "DA:10,0")) << merged;
-    EXPECT_TRUE(hasLine(merged, "LH:0")) << merged;
-}
-
-TEST(HostDispatchLcovMicrotest, EachSourceFileKeepsItsOwnRecord)
-{
-    const std::string merged = mergeLcovTracefiles({
-        tracefile("/src/init.cc", "DA:10,1\n"),
-        tracefile("/src/enqueue.cc", "DA:7,1\n"),
-    });
-
-    // formatLcov walks a std::map, so the whole output is deterministic and path-sorted: pinning
-    // it is what proves each DA: line sits inside its own file's record rather than the other's.
-    EXPECT_EQ(merged,
-              "SF:/src/enqueue.cc\nFNF:0\nFNH:0\nDA:7,1\nLF:1\nLH:1\nend_of_record\n"
-              "SF:/src/init.cc\nFNF:0\nFNH:0\nDA:10,1\nLF:1\nLH:1\nend_of_record\n");
-}
-
-TEST(HostDispatchLcovMicrotest, CountingLinesAreRecomputedNotCarriedOver)
-{
-    // Why the inputs' counting lines are ignored rather than summed: see parseLcov().
-    const std::string merged = mergeLcovTracefiles({
-        tracefile("/src/init.cc", "DA:10,1\nDA:11,1\nLF:999\nLH:999\n"),
-    });
-
-    EXPECT_TRUE(hasLine(merged, "LF:2")) << merged;
-    EXPECT_TRUE(hasLine(merged, "LH:2")) << merged;
-    EXPECT_FALSE(hasLine(merged, "LF:999")) << merged;
-}
-
-TEST(HostDispatchLcovMicrotest, ARepeatedLineInOneRecordIsCountedOnce)
-{
-    // llvm-cov emits a line once per region covering it, so a record can carry the same DA line
-    // twice. Counting both would inflate LF and make the merged percentage a fiction.
-    const std::string merged = mergeLcovTracefiles({
-        tracefile("/src/init.cc", "DA:10,1\nDA:10,2\n"),
-    });
-
-    EXPECT_TRUE(hasLine(merged, "LF:1")) << merged;
-    EXPECT_TRUE(hasLine(merged, "DA:10,3")) << merged;
-}
-
-TEST(HostDispatchLcovMicrotest, ABranchOneBinaryNeverEvaluatedIsTakenIfAnotherTookIt)
-{
-    // '-' is the absence of information, not a zero: a binary whose #defines compile the branch
-    // out reports it unevaluated, and must not veto the binary that took it.
-    const std::string merged = mergeLcovTracefiles({
-        tracefile("/src/init.cc", "BRDA:10,0,0,-\n"),
-        tracefile("/src/init.cc", "BRDA:10,0,0,4\n"),
-    });
-
-    EXPECT_TRUE(hasLine(merged, "BRDA:10,0,0,4")) << merged;
-    EXPECT_TRUE(hasLine(merged, "BRH:1")) << merged;
-}
-
-TEST(HostDispatchLcovMicrotest, ABranchNoBinaryEvaluatedStaysUnevaluated)
-{
-    const std::string merged = mergeLcovTracefiles({
-        tracefile("/src/init.cc", "BRDA:10,0,0,-\n"),
-        tracefile("/src/init.cc", "BRDA:10,0,0,-\n"),
-    });
-
-    EXPECT_TRUE(hasLine(merged, "BRDA:10,0,0,-")) << merged;
-    EXPECT_TRUE(hasLine(merged, "BRF:1")) << merged;
-    EXPECT_TRUE(hasLine(merged, "BRH:0")) << merged;
-}
-
-TEST(HostDispatchLcovMicrotest, FunctionExecutionsAreSummedAcrossBinaries)
-{
-    const std::string merged = mergeLcovTracefiles({
-        tracefile("/src/init.cc", "FN:44,_Z4initv\nFNDA:3,_Z4initv\n"),
-        tracefile("/src/init.cc", "FN:44,_Z4initv\nFNDA:2,_Z4initv\n"),
-    });
-
-    EXPECT_TRUE(hasLine(merged, "FNDA:5,_Z4initv")) << merged;
-    EXPECT_TRUE(hasLine(merged, "FNF:1")) << merged;
-    EXPECT_TRUE(hasLine(merged, "FNH:1")) << merged;
-}
-
-TEST(HostDispatchLcovMicrotest, AFunctionNameCarryingACommaSurvives)
-{
-    // Mangled names of templates contain commas, so a split on every comma would truncate the
-    // name and make the same function look like two.
-    const std::string merged = mergeLcovTracefiles({
-        tracefile("/src/init.cc", "FN:7,file.cc:_ZL3fooIiEvT_,S0_\nFNDA:1,file.cc:_ZL3fooIiEvT_,S0_\n"),
-    });
-
-    EXPECT_TRUE(hasLine(merged, "FN:7,file.cc:_ZL3fooIiEvT_,S0_")) << merged;
-    EXPECT_TRUE(hasLine(merged, "FNF:1")) << merged;
-}
-
-TEST(HostDispatchLcovMicrotest, AFunctionSeenAtTwoLinesTakesTheEarlierOne)
-{
-    const std::string merged = mergeLcovTracefiles({
-        tracefile("/src/init.cc", "FN:90,_Z4initv\n"),
-        tracefile("/src/init.cc", "FN:44,_Z4initv\n"),
-    });
-
-    EXPECT_TRUE(hasLine(merged, "FN:44,_Z4initv")) << merged;
-    EXPECT_FALSE(hasLine(merged, "FN:90,_Z4initv")) << merged;
-}
-
-TEST(HostDispatchLcovMicrotest, AWrappedCounterStillReadsAsCovered)
-{
-    // llvm-cov prints counters as unsigned 64-bit and sometimes prints one that has wrapped --
-    // 18446744073709551591 is a counter expression that evaluated below zero. It does not fit a
-    // signed long, and rejecting it as unparseable would turn a covered line into an uncovered
-    // one, which is the one way this merge could understate coverage.
-    const std::string merged =
-        mergeLcovTracefiles({tracefile("/src/init.cc", "DA:18,18446744073709551591\n")});
-
-    EXPECT_TRUE(hasLine(merged, "LH:1")) << merged;
-}
-
-TEST(HostDispatchLcovMicrotest, SummingHugeCountersSaturatesRatherThanWraps)
-{
-    // Two near-maximal counters summed must not come out negative, which would read as
-    // uncovered -- the opposite of what two covering binaries mean.
-    const std::string merged = mergeLcovTracefiles({
-        tracefile("/src/init.cc", "DA:18,9223372036854775807\n"),
-        tracefile("/src/init.cc", "DA:18,9223372036854775807\n"),
-    });
-
-    EXPECT_TRUE(hasLine(merged, "DA:18,9223372036854775807")) << merged;
-    EXPECT_TRUE(hasLine(merged, "LH:1")) << merged;
-}
-
-TEST(HostDispatchLcovMicrotest, MergingTheSameInputTwiceIsByteIdentical)
-{
-    // The tracefile is an artifact a dashboard diffs between runs, so the merge has to be a
-    // function of its inputs alone and not of the order a directory happened to be read in.
-    const std::string one = mergeLcovTracefiles({
-        tracefile("/src/b.cc", "DA:2,1\n"), tracefile("/src/a.cc", "DA:1,1\n")});
-    const std::string two = mergeLcovTracefiles({
-        tracefile("/src/a.cc", "DA:1,1\n"), tracefile("/src/b.cc", "DA:2,1\n")});
-
-    EXPECT_EQ(one, two);
-}
-
-TEST(HostDispatchLcovMicrotest, NothingToMergeIsAnEmptyTracefileNotAMalformedOne)
-{
-    EXPECT_EQ(mergeLcovTracefiles({}), "");
-}
-
-TEST(HostDispatchLcovMicrotest, RecordLinesWithNoSourceFileAreIgnored)
-{
-    // A truncated tracefile (a killed llvm-cov) must not have its orphaned lines attributed to
-    // whichever file happened to be merged before it.
-    const std::string merged = mergeLcovTracefiles({"DA:10,1\n", tracefile("/src/a.cc", "DA:1,1\n")});
-
-    EXPECT_FALSE(hasLine(merged, "DA:10,1")) << merged;
-    EXPECT_TRUE(hasLine(merged, "LF:1")) << merged;
-}
-
 // ── coverage export commands ────────────────────────────────────────
 
 TEST(HostDispatchCoverageMicrotest, ExportNamesOnlyTheBinaryTheProfilesCameFrom)
@@ -1740,19 +1546,41 @@ TEST(HostDispatchCoverageMicrotest, APathWithAQuoteInItCannotBreakOutOfTheComman
 
 // ── writeMergedCoverage ─────────────────────────────────────────────
 
-// The llvm tools, replaced by a function that records every command and writes the file the
-// real tool would have written. Either step can be made to fail for a named binary, which is
-// how the degraded paths -- the ones that decide whether a binary's coverage survives into the
-// merged tracefile -- are reached without llvm-profdata or llvm-cov on the machine.
+// The llvm tools and lcov, replaced by a function that records every command and writes the file
+// the real tool would have written. Any step can be made to fail -- either llvm step for a named
+// binary, lcov as a whole -- which is how the degraded paths, the ones that decide whether a
+// binary's coverage survives into the merged tracefile, are reached without llvm-profdata,
+// llvm-cov or lcov on the machine.
 class FakeLlvm {
 public:
     void failMergeFor(std::string binary) { failMerge_ = std::move(binary); }
     void failExportFor(std::string binary) { failExport_ = std::move(binary); }
+    // What a machine with no lcov does: /bin/sh cannot find it and reports 127.
+    void withoutLcov() { lcov_ = false; }
+    void failLcovUnion() { lcovUnion_ = false; }
+    void lcovVersion(std::string text) { version_ = std::move(text); }
 
     CommandFn command()
     {
         return [this](const std::string &command) {
             commands_.push_back(command);
+            if (startsWith(command, "lcov --version")) {
+                if (!lcov_) {
+                    return 127;
+                }
+                std::ofstream(lastQuoted(command), std::ios::binary | std::ios::trunc)
+                    << version_;
+                return 0;
+            }
+            if (command.find("--add-tracefile") != std::string::npos) {
+                // lcov's union, as far as these tests care: every input's records end up in the
+                // output, so the merged file still says which binaries contributed to it.
+                std::ofstream out(lastQuoted(command), std::ios::binary | std::ios::trunc);
+                for (const std::string &input : addedTracefiles(command)) {
+                    out << readFile(input);
+                }
+                return lcovUnion_ ? 0 : 1;
+            }
             const bool merge = command.find(" merge ") != std::string::npos;
             // The output is the last quoted path: '-o <profdata>' for a merge, '> <lcov>' for
             // an export. Both are written before the status is checked, exactly as the shell
@@ -1770,7 +1598,31 @@ public:
 
     const std::vector<std::string> &commands() const { return commands_; }
 
+    // The command that unioned the per-binary tracefiles, or "" if lcov was never asked to.
+    std::string unionCommand() const
+    {
+        for (const std::string &command : commands_) {
+            if (command.find("--add-tracefile") != std::string::npos) {
+                return command;
+            }
+        }
+        return "";
+    }
+
 private:
+    // The paths after each --add-tracefile in *command*, unquoted.
+    static std::vector<std::string> addedTracefiles(const std::string &command)
+    {
+        static const std::string kFlag = "--add-tracefile '";
+        std::vector<std::string> inputs;
+        for (size_t at = command.find(kFlag); at != std::string::npos;
+             at = command.find(kFlag, at + 1)) {
+            const size_t open = at + kFlag.size();
+            inputs.push_back(command.substr(open, command.find('\'', open) - open));
+        }
+        return inputs;
+    }
+
     // The lcov record a binary's export stands for, named after the directory it came from so a
     // merged tracefile says which binaries contributed to it.
     static std::string tracefileFor(const std::string &output)
@@ -1789,6 +1641,9 @@ private:
     std::vector<std::string> commands_;
     std::string failMerge_;
     std::string failExport_;
+    bool lcov_ = true;
+    bool lcovUnion_ = true;
+    std::string version_ = "lcov: LCOV version 2.0-1\n";
 };
 
 // Seed *directory* with the profiles *binary* would have left behind, in the per-binary
@@ -1821,7 +1676,7 @@ TEST(HostDispatchCoverageMicrotest, ProfilesAreReadFromTheDirectoryNamedAfterThe
 
     writeMergedCoverage(dir.path(), {"/build/rccl-UnitTestsMicroInit"}, llvm.command());
 
-    ASSERT_EQ(llvm.commands().size(), 2u);
+    ASSERT_EQ(llvm.commands().size(), 4u);   // profdata, llvm-cov, lcov --version, lcov union
     EXPECT_NE(llvm.commands()[0].find("rccl-UnitTestsMicroInit/0.profraw"), std::string::npos)
         << llvm.commands()[0];
     EXPECT_NE(llvm.commands()[0].find("rccl-UnitTestsMicroInit/1.profraw"), std::string::npos)
@@ -1886,7 +1741,8 @@ TEST(HostDispatchCoverageMicrotest, ABinaryThatLeftNoProfilesIsPassedOverSilentl
                                      "/build/rccl-UnitTestsMicroInit"},
                         llvm.command());
 
-    EXPECT_EQ(llvm.commands().size(), 2u);   // the one binary that ran, merged and exported
+    // The one binary that ran, merged and exported, then the lcov version sniff and union.
+    EXPECT_EQ(llvm.commands().size(), 4u);
     EXPECT_EQ(mergedTracefile(dir.path()).find("NeverRan"), std::string::npos);
 }
 
@@ -2001,6 +1857,137 @@ TEST(HostDispatchCoverageMicrotest, OnlyTheBinariesWithProfilesAreCounted)
     EXPECT_NE(printed.find("exporting 1 binaries"), std::string::npos) << printed;
     EXPECT_NE(printed.find("[1/1] rccl-UnitTestsMicroInit"), std::string::npos) << printed;
     EXPECT_EQ(printed.find("NeverRan"), std::string::npos) << printed;
+}
+
+TEST(HostDispatchCoverageMicrotest, TheUnionIsLcovsOwn)
+{
+    // The merge is lcov's rather than this file's: the tree already unions tracefiles with lcov
+    // in run_host_tests.sh and in the python runner, and a fourth set of union semantics -- one
+    // with no equivalence test against the other three -- is the thing being avoided.
+    const ScopedUnset exportOn("RCCL_HOST_COVERAGE_EXPORT");
+    const ScopedDir dir("rccl-host-dispatch-coverage");
+    seedProfiles(dir.path(), "/build/rccl-UnitTestsMicroInit", 1);
+    seedProfiles(dir.path(), "/build/rccl-UnitTestsMicroUtils", 1);
+    FakeLlvm llvm;
+
+    writeMergedCoverage(dir.path(),
+                        {"/build/rccl-UnitTestsMicroInit", "/build/rccl-UnitTestsMicroUtils"},
+                        llvm.command());
+
+    const std::string command = llvm.unionCommand();
+    EXPECT_NE(command.find("rccl-UnitTestsMicroInit/coverage.lcov"), std::string::npos) << command;
+    EXPECT_NE(command.find("rccl-UnitTestsMicroUtils/coverage.lcov"), std::string::npos)
+        << command;
+    EXPECT_NE(command.find(std::string(kCoverageTracefile)), std::string::npos) << command;
+    // The flags its version needs, or lcov 2.x rejects llvm-cov's tracefiles outright.
+    EXPECT_NE(command.find("check_data_consistency=0"), std::string::npos) << command;
+}
+
+TEST(HostDispatchCoverageMicrotest, NoLcovLeavesThePerBinaryTracefilesAndSaysSo)
+{
+    // lcov is perl and is not needed to run the tests, so a machine without it must still get a
+    // green run and every per-binary tracefile. Only the union is lost, and a missing file reads
+    // downstream as "this code is not covered", so the reason is on stderr.
+    const ScopedUnset exportOn("RCCL_HOST_COVERAGE_EXPORT");
+    const ScopedDir dir("rccl-host-dispatch-coverage");
+    seedProfiles(dir.path(), "/build/rccl-UnitTestsMicroInit", 1);
+    FakeLlvm llvm;
+    llvm.withoutLcov();
+
+    const std::string printed = RcclUnitTesting::CaptureLog([&] {
+        writeMergedCoverage(dir.path(), {"/build/rccl-UnitTestsMicroInit"}, llvm.command());
+    });
+
+    EXPECT_NE(printed.find("lcov is not installed"), std::string::npos) << printed;
+    EXPECT_FALSE(
+        std::filesystem::exists(std::filesystem::path(dir.path()) / kCoverageTracefile));
+    EXPECT_TRUE(std::filesystem::exists(std::filesystem::path(dir.path()) /
+                                        "rccl-UnitTestsMicroInit" / "coverage.lcov"));
+}
+
+TEST(HostDispatchCoverageMicrotest, ALcovThatRejectsTheTracefilesIsReportedNotHidden)
+{
+    // Whatever lcov left behind on a failure is not a tracefile anyone should read as coverage,
+    // and a silent failure here reads as a tree that covers nothing.
+    const ScopedUnset exportOn("RCCL_HOST_COVERAGE_EXPORT");
+    const ScopedDir dir("rccl-host-dispatch-coverage");
+    seedProfiles(dir.path(), "/build/rccl-UnitTestsMicroInit", 1);
+    FakeLlvm llvm;
+    llvm.failLcovUnion();
+
+    const std::string printed = RcclUnitTesting::CaptureLog([&] {
+        writeMergedCoverage(dir.path(), {"/build/rccl-UnitTestsMicroInit"}, llvm.command());
+    });
+
+    EXPECT_NE(printed.find("could not union"), std::string::npos) << printed;
+}
+
+TEST(HostDispatchCoverageMicrotest, TheVersionSniffIsLeftWhereNoReportWillPickItUp)
+{
+    // The sniff writes lcov's version into the coverage directory, which run_host_tests.sh and
+    // the python runner both glob for tracefiles; leaving it behind would feed a stray file to
+    // whichever of them ran next.
+    const ScopedUnset exportOn("RCCL_HOST_COVERAGE_EXPORT");
+    const ScopedDir dir("rccl-host-dispatch-coverage");
+    seedProfiles(dir.path(), "/build/rccl-UnitTestsMicroInit", 1);
+    FakeLlvm llvm;
+
+    writeMergedCoverage(dir.path(), {"/build/rccl-UnitTestsMicroInit"}, llvm.command());
+
+    EXPECT_FALSE(std::filesystem::exists(std::filesystem::path(dir.path()) / "lcov-version.txt"));
+}
+
+// ── lcov flags and union command ────────────────────────────────────
+
+TEST(HostDispatchLcovMicrotest, LcovTwoNeedsItsConsistencyChecksOff)
+{
+    // 2.x rejects what llvm-cov emits -- "line is hit but no branches evaluated" -- so without
+    // these the union fails outright and the run loses its merged tracefile.
+    const std::string flags = lcovMergeFlags("lcov: LCOV version 2.0-1\n");
+
+    EXPECT_NE(flags.find("check_data_consistency=0"), std::string::npos) << flags;
+    EXPECT_NE(flags.find("inconsistent,unsupported,corrupt,format"), std::string::npos) << flags;
+    EXPECT_NE(flags.find("branch_coverage=1"), std::string::npos) << flags;
+}
+
+TEST(HostDispatchLcovMicrotest, LcovOneIsNotGivenOptionsItDoesNotHave)
+{
+    // 1.x has neither the checks nor those error categories and fails on the unknown names, so
+    // passing the 2.x flags everywhere would break the older toolchains instead.
+    const std::string flags = lcovMergeFlags("lcov: LCOV version 1.14\n");
+
+    EXPECT_EQ(flags, "--rc lcov_branch_coverage=1");
+}
+
+TEST(HostDispatchLcovMicrotest, AnUnreadableVersionIsTreatedAsTheOlderLcov)
+{
+    // The conservative end: the 1.x flags are accepted by 2.x as a deprecated alias, while the
+    // 2.x flags are fatal to 1.x.
+    EXPECT_EQ(lcovMergeFlags(""), "--rc lcov_branch_coverage=1");
+}
+
+TEST(HostDispatchLcovMicrotest, EveryExportedTracefileIsAnInputToTheUnion)
+{
+    // A binary missing from the command is a binary missing from the merged view, which reads
+    // downstream as code nothing covered rather than as a merge that dropped it.
+    const std::string command = lcovMergeCommand("lcov", "--rc branch_coverage=1",
+                                                 {"/c/a/coverage.lcov", "/c/b/coverage.lcov"},
+                                                 "/c/host-coverage.lcov");
+
+    EXPECT_NE(command.find("--add-tracefile '/c/a/coverage.lcov'"), std::string::npos) << command;
+    EXPECT_NE(command.find("--add-tracefile '/c/b/coverage.lcov'"), std::string::npos) << command;
+    EXPECT_NE(command.find("-o '/c/host-coverage.lcov'"), std::string::npos) << command;
+}
+
+TEST(HostDispatchLcovMicrotest, ATracefilePathWithAQuoteInItStaysData)
+{
+    // The paths come from the filesystem, not from this process, and the command is handed to
+    // /bin/sh.
+    const std::string command =
+        lcovMergeCommand("lcov", "", {"/c/a'; rm -rf /; echo '.lcov"}, "/c/out.lcov");
+
+    EXPECT_NE(command.find(R"('/c/a'\''; rm -rf /; echo '\''.lcov')"), std::string::npos)
+        << command;
 }
 
 // ── runShell ────────────────────────────────────────────────────────
