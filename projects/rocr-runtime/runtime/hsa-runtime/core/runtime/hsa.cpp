@@ -444,7 +444,8 @@ hsa_status_t hsa_system_get_major_extension_table(uint16_t extension, uint16_t v
     if (version_major != core::Runtime::runtime_singleton_->extensions_.pcs_api.version.major_id) {
       return HSA_STATUS_ERROR;
     }
-    hsa_ven_amd_pc_sampling_1_00_pfn_t ext_table;
+    hsa_ven_amd_pc_sampling_1_00_pfn_t ext_table{};
+    ext_table.hsa_ven_amd_pcs_iterate_configuration = hsa_ven_amd_pcs_iterate_configuration;
     ext_table.hsa_ven_amd_pcs_create = hsa_ven_amd_pcs_create;
     ext_table.hsa_ven_amd_pcs_create_from_id = hsa_ven_amd_pcs_create_from_id;
     ext_table.hsa_ven_amd_pcs_destroy = hsa_ven_amd_pcs_destroy;
@@ -453,6 +454,7 @@ hsa_status_t hsa_system_get_major_extension_table(uint16_t extension, uint16_t v
     ext_table.hsa_ven_amd_pcs_flush = hsa_ven_amd_pcs_flush;
 
     memcpy(table, &ext_table, Min(sizeof(ext_table), table_length));
+    return HSA_STATUS_SUCCESS;
   }
 
   if (extension == HSA_EXTENSION_FINALIZER) {
