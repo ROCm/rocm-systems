@@ -54,9 +54,11 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 using namespace rocjitsu;
 namespace {
 constexpr uint32_t kGfx9DataFormat32 = 4u << 15;
+constexpr uint32_t kRdnaFormat32 = 20u << 12; // V# word3 FORMAT = BUF_FMT_32_UINT
 
 class InstructionPolicyMachine {
 public:
@@ -74,6 +76,7 @@ public:
       return;
     decoder = Decoder::create(arch);
     wave = cu->dispatch_wf(0, 0, 106, 256);
+    wave->set_lds_size(1024);
     wave->set_exec(1);
     base = wave->vgpr_alloc().base;
   }
@@ -110,20 +113,21 @@ public:
   }
   template <size_t N>
   util::FailureOr<uint32_t> global(const std::array<uint32_t, N> &words, uint32_t old, uint32_t src,
-                                   bool buffer) {
+                                   bool buffer, bool returns = true) {
     memory.write32(0x1000, old);
     const uint32_t scalar = wave->sgpr_alloc().base;
     cu->write_sgpr(scalar + 4, 0x1000);
     cu->write_sgpr(scalar + 5, 0);
     cu->write_sgpr(scalar + 6, 4096);
-    // CDNA requires a valid DATA_FORMAT; RDNA selects COMPLETE byte-range bounds.
-    cu->write_sgpr(scalar + 7, arch_is_cdna_4_or_lower(cu->arch()) ? kGfx9DataFormat32 : 3u << 28);
+    // CDNA and RDNA require a valid format; RDNA selects COMPLETE byte-range bounds.
+    cu->write_sgpr(scalar + 7, arch_is_cdna_4_or_lower(cu->arch()) ? kGfx9DataFormat32
+                                                                   : (3u << 28) | kRdnaFormat32);
     cu->write_vgpr(base + 4, 0, 0);
     cu->write_vgpr(base + 5, 0, 0);
     util::FailureOr<uint32_t> returned = run(words, src, 0, 0, 0xf0, true, buffer);
     if (returned.failed())
       return util::Result::failure();
-    EXPECT_EQ(returned.value(), old);
+    EXPECT_EQ(returned.value(), returns ? old : (buffer ? src : 0xfacebeef));
     return memory.read32(0x1000);
   }
   amdgpu::GpuMemory memory;
@@ -180,6 +184,14 @@ TEST(AtomicSemanticsAndDecode, IntegerEvaluatorRejectsUnsupportedOperations) {
   }
 }
 
+TEST(AtomicSemanticsAndDecode, OrderedAddRequiresThePackedIdAndValue) {
+  constexpr auto op = amdgpu::AtomicOp::ORDERED_ADD;
+  EXPECT_TRUE(amdgpu::apply_int_atomic<uint32_t>(op, 1, 1, 0).failed());
+  const auto result = amdgpu::apply_int_atomic<uint64_t>(op, 0x200000001ull, 0x300000001ull, 0);
+  ASSERT_TRUE(result.succeeded());
+  EXPECT_EQ(result.value(), 0x500000002ull);
+}
+
 TEST(AtomicSemanticsAndDecode, ConditionalAndClampedMemorySubtract) {
   for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA4}) {
     InstructionPolicyMachine machine(arch);
@@ -207,6 +219,97 @@ TEST(AtomicSemanticsAndDecode, ConditionalAndClampedMemorySubtract) {
     }
   }
 }
+// Measured on gfx1030, gfx1100 and gfx1201: a resource whose FORMAT is INVALID
+// turns raw buffer loads, stores and atomics into no-ops for every OOB_SELECT,
+// with or without ADD_TID. Loads and returning atomics produce zero.
+TEST(AtomicSemanticsAndDecode, RdnaInvalidFormatBufferAccessesTouchNoMemory) {
+  enum class Op { Load, Store, AtomicAdd };
+  for (rj_code_arch_t arch :
+       {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3,
+        ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
+    SCOPED_TRACE(arch);
+    // s[4:7] holds the resource, v0 the data, v4 the unused address and base 0x1000 the target.
+    const auto words = [arch](Op op) {
+      const bool atomic = op == Op::AtomicAdd;
+      std::array<uint32_t, 3> words{};
+      const auto copy = [&](const auto &built) { std::ranges::copy(built, words.begin()); };
+      switch (arch) {
+      case ROCJITSU_CODE_ARCH_RDNA1:
+        copy(rdna1::build_mubuf(
+            op == Op::Load    ? rdna1::kBufferLoadDwordMubuf
+            : op == Op::Store ? rdna1::kBufferStoreDwordMubuf
+                              : rdna1::kBufferAtomicAddMubuf,
+            {.glc = atomic, .vaddr = 4, .vdata = 0, .srsrc = 1, .soffset = 128}));
+        break;
+      case ROCJITSU_CODE_ARCH_RDNA2:
+        copy(rdna2::build_mubuf(
+            op == Op::Load    ? rdna2::kBufferLoadDwordMubuf
+            : op == Op::Store ? rdna2::kBufferStoreDwordMubuf
+                              : rdna2::kBufferAtomicAddMubuf,
+            {.glc = atomic, .vaddr = 4, .vdata = 0, .srsrc = 1, .soffset = 128}));
+        break;
+      case ROCJITSU_CODE_ARCH_RDNA3:
+        copy(rdna3::build_mubuf(
+            op == Op::Load    ? rdna3::kBufferLoadB32Mubuf
+            : op == Op::Store ? rdna3::kBufferStoreB32Mubuf
+                              : rdna3::kBufferAtomicAddU32Mubuf,
+            {.glc = atomic, .vaddr = 4, .vdata = 0, .srsrc = 1, .soffset = 128}));
+        break;
+      case ROCJITSU_CODE_ARCH_RDNA3_5:
+        copy(rdna3_5::build_mubuf(
+            op == Op::Load    ? rdna3_5::kBufferLoadB32Mubuf
+            : op == Op::Store ? rdna3_5::kBufferStoreB32Mubuf
+                              : rdna3_5::kBufferAtomicAddU32Mubuf,
+            {.glc = atomic, .vaddr = 4, .vdata = 0, .srsrc = 1, .soffset = 128}));
+        break;
+      default:
+        copy(rdna4::build_vbuffer(
+            op == Op::Load    ? rdna4::kBufferLoadB32Vbuffer
+            : op == Op::Store ? rdna4::kBufferStoreB32Vbuffer
+                              : rdna4::kBufferAtomicAddU32Vbuffer,
+            {.soffset = 124, .vdata = 0, .rsrc = 4, .th = atomic, .vaddr = 4}));
+        break;
+      }
+      return words;
+    };
+    // Each OOB_SELECT and ADD_TID pairs FORMAT 0 with a bound control, so the
+    // bounds check alone cannot account for an unbound result.
+    std::vector<uint32_t> word3s;
+    for (uint32_t oob = 0; oob < 4; ++oob)
+      for (uint32_t add_tid : {0u, 1u << 23})
+        for (uint32_t format : {0u, kRdnaFormat32})
+          word3s.push_back((oob << 28) | add_tid | format);
+    // Word3 bit 18 is outside GFX11 and RDNA4 FORMAT (it selects STRIDE_SCALE on RDNA4).
+    if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+        arch == ROCJITSU_CODE_ARCH_RDNA4)
+      word3s.push_back(0x30040000u);
+    for (uint32_t word3 : word3s) {
+      SCOPED_TRACE(word3);
+      const bool bound = word3 & kRdnaFormat32;
+      for (Op op : {Op::Load, Op::Store, Op::AtomicAdd}) {
+        SCOPED_TRACE(static_cast<int>(op));
+        InstructionPolicyMachine machine(arch);
+        ASSERT_FALSE(::testing::Test::HasFatalFailure());
+        machine.memory.write32(0x1000, 7);
+        const uint32_t scalar = machine.wave->sgpr_alloc().base;
+        machine.cu->write_sgpr(scalar + 4, 0x1000);
+        machine.cu->write_sgpr(scalar + 5, 4u << 16); // A zero stride fails OOB_SELECT 0 on RDNA3+.
+        machine.cu->write_sgpr(scalar + 6, 4096);
+        machine.cu->write_sgpr(scalar + 7, word3);
+        machine.cu->write_vgpr(machine.base + 4, 0, 0);
+        const util::FailureOr<uint32_t> returned =
+            machine.run(words(op), 5, 0, 0, 0xf0, true, true);
+        ASSERT_TRUE(returned.succeeded());
+        EXPECT_EQ(returned.value(), op == Op::Store ? 5u : bound ? 7u : 0u);
+        EXPECT_EQ(machine.memory.read32(0x1000), !bound            ? 7u
+                                                 : op == Op::Load  ? 7u
+                                                 : op == Op::Store ? 5u
+                                                                   : 12u);
+      }
+    }
+  }
+}
+
 TEST(AtomicSemanticsAndDecode, ConditionalAndClampedLegacyCsub) {
   for (rj_code_arch_t arch :
        {ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
@@ -328,38 +431,71 @@ TEST(AtomicSemanticsAndDecode, GlobalOnlyPackedHalfAndScalarFloatAtomics) {
   for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2}) {
     InstructionPolicyMachine machine(arch);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
+    const bool returns = arch != ROCJITSU_CODE_ARCH_CDNA1; // MI100 forbids GLC on floating atomics.
     // Both opcodes are GLOBAL-only on these targets; FLAT and SCRATCH must reject them.
     for (uint16_t opcode : {uint16_t{77}, uint16_t{78}}) {
       for (uint8_t segment : {uint8_t{0}, uint8_t{1}, uint8_t{2}, uint8_t{3}}) {
         const std::array<uint32_t, 2> words = cdna1::build_flat(
-            opcode, {.seg = segment, .glc = 1, .addr = 4, .data = 0, .saddr = 4, .vdst = 6});
+            opcode, {.seg = segment, .glc = returns, .addr = 4, .data = 0, .saddr = 4, .vdst = 6});
         EXPECT_EQ(machine.decoder->decode(words.data()).failed(), segment != 2);
         if (segment != 2)
           continue;
         if (opcode == 78) {
           {
-            util::FailureOr<uint32_t> result = machine.global(words, 0x3c004000, 0x42004400, false);
+            util::FailureOr<uint32_t> result =
+                machine.global(words, 0x3c004000, 0x42004400, false, returns);
             ASSERT_TRUE(result.succeeded());
             EXPECT_EQ(result.value(), 0x44004600u);
           }
           {
-            util::FailureOr<uint32_t> result = machine.global(words, 0x00010001, 0x00010001, false);
+            util::FailureOr<uint32_t> result =
+                machine.global(words, 0x00010001, 0x00010001, false, returns);
             ASSERT_TRUE(result.succeeded());
             EXPECT_EQ(result.value(), 0x00020002u);
           }
           {
-            util::FailureOr<uint32_t> result = machine.global(words, 0x7bff7bff, 0x7bff7bff, false);
+            util::FailureOr<uint32_t> result =
+                machine.global(words, 0x7bff7bff, 0x7bff7bff, false, returns);
             ASSERT_TRUE(result.succeeded());
             EXPECT_EQ(result.value(), 0x7c007c00u);
           }
         } else {
           {
-            util::FailureOr<uint32_t> result = machine.global(words, 1, 1, false);
+            util::FailureOr<uint32_t> result = machine.global(words, 1, 1, false, returns);
             ASSERT_TRUE(result.succeeded());
             EXPECT_EQ(result.value(), 0u);
           }
         }
       }
+    }
+  }
+}
+
+TEST(AtomicSemanticsAndDecode, CdnaFlatOpcodesRespectSegment) {
+  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
+                              ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    auto decoder = Decoder::create(arch);
+    ASSERT_NE(decoder, nullptr);
+    for (uint8_t segment = 0; segment < 4; ++segment) {
+      SCOPED_TRACE(::testing::Message() << "architecture " << arch << ", segment " << +segment);
+      const auto load = cdna3::build_flat(cdna3::kFlatLoadDwordFlat, {.seg = segment});
+      const auto atomic = cdna3::build_flat(cdna3::kFlatAtomicAddFlat, {.seg = segment});
+      EXPECT_EQ(decoder->decode(load.data()).succeeded(), segment != 3);
+      EXPECT_EQ(decoder->decode(atomic.data()).succeeded(), segment == 0 || segment == 2);
+    }
+  }
+}
+TEST(AtomicSemanticsAndDecode, FlatOpcodeGapsAndIllegalSegmentsHaveDistinctDiagnostics) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_RDNA2}) {
+    auto decoder = Decoder::create(arch);
+    // FLAT_LOAD_UBYTE uses opcode 16 on CDNA3 and 8 on RDNA2. Segment 3 is reserved.
+    const uint32_t load = arch == ROCJITSU_CODE_ARCH_CDNA3 ? 0xdc400000u : 0xdc200000u;
+    for (auto [word, expected] : {std::pair{0xdc000000u, "Invalid instruction opcode"},
+                                  std::pair{load | 0xc000u, "invalid segment"}}) {
+      const std::array<uint32_t, 2> words = {word, 0x007f0000};
+      util::StringDiagnostic error;
+      EXPECT_TRUE(decoder->decode_window(words, 0, error.emitter()).failed());
+      EXPECT_NE(error.message().find(expected), std::string::npos) << error.message();
     }
   }
 }
@@ -427,22 +563,26 @@ TEST(AtomicSemanticsAndDecode, PackedAtomicsAcrossOlderTargets) {
                               ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
     InstructionPolicyMachine machine(arch);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
-    const std::array<uint32_t, 2> buffer =
-        cdna1::build_mubuf(78, {.glc = 1, .vaddr = 4, .vdata = 0, .srsrc = 1, .soffset = 128});
+    const bool returns = arch != ROCJITSU_CODE_ARCH_CDNA1; // MI100 forbids GLC on floating atomics.
+    const std::array<uint32_t, 2> buffer = cdna1::build_mubuf(
+        78, {.glc = returns, .vaddr = 4, .vdata = 0, .srsrc = 1, .soffset = 128});
     {
-      util::FailureOr<uint32_t> result = machine.global(buffer, 0x3c004000, 0x42004400, true);
+      util::FailureOr<uint32_t> result =
+          machine.global(buffer, 0x3c004000, 0x42004400, true, returns);
       ASSERT_TRUE(result.succeeded());
       EXPECT_EQ(result.value(), 0x44004600u);
     }
     {
-      util::FailureOr<uint32_t> result = machine.global(buffer, 0x00010001, 0x00010001, true);
+      util::FailureOr<uint32_t> result =
+          machine.global(buffer, 0x00010001, 0x00010001, true, returns);
       ASSERT_TRUE(result.succeeded());
       EXPECT_EQ(result.value(), 0x00020002u);
     }
     const rocjitsu::test::RestoreRounding restore_rounding;
     std::fesetround(FE_UPWARD);
     {
-      util::FailureOr<uint32_t> result = machine.global(buffer, 0x3c003c00, 0x10001000, true);
+      util::FailureOr<uint32_t> result =
+          machine.global(buffer, 0x3c003c00, 0x10001000, true, returns);
       ASSERT_TRUE(result.succeeded());
       EXPECT_EQ(result.value(), 0x3c003c00u);
     }
@@ -456,12 +596,14 @@ TEST(AtomicSemanticsAndDecode, PackedAtomicsAcrossOlderTargets) {
       const uint32_t three_four = bf16 ? 0x40404080u : 0x42004400u;
       const uint32_t four_six = bf16 ? 0x408040c0u : 0x44004600u;
       {
-        util::FailureOr<uint32_t> result = machine.global(global, one_two, three_four, false);
+        util::FailureOr<uint32_t> result =
+            machine.global(global, one_two, three_four, false, returns);
         ASSERT_TRUE(result.succeeded());
         EXPECT_EQ(result.value(), four_six);
       }
       {
-        util::FailureOr<uint32_t> result = machine.global(global, 0x00010001, 0x00010001, false);
+        util::FailureOr<uint32_t> result =
+            machine.global(global, 0x00010001, 0x00010001, false, returns);
         ASSERT_TRUE(result.succeeded());
         EXPECT_EQ(result.value(), 0x00020002u);
       }
@@ -512,7 +654,11 @@ protected:
                                                                     config, &memory_, &cache_));
     decoder_ = Decoder::create(arch);
     wave_ = compute_unit_->dispatch_wf(0, 0, 106, 256);
+    ASSERT_NE(wave_, nullptr);
+    wave_->set_lds_base(compute_unit_->allocate_lds(512));
+    wave_->set_lds_size(512);
     wave_->set_exec(1);
+    wave_->set_lds_size(config.lds_size_kb * 1024);
     base_ = wave_->vgpr_alloc().base;
   }
 
@@ -641,11 +787,10 @@ protected:
     case ROCJITSU_CODE_ARCH_CDNA1:
       if (buffer)
         words = cdna1::build_mubuf(cdna1::kBufferAtomicAddF32Mubuf,
-                                   {.glc = 1, .vaddr = 4, .vdata = 0, .srsrc = 1, .soffset = 128});
+                                   {.vaddr = 4, .vdata = 0, .srsrc = 1, .soffset = 128});
       else
-        words =
-            cdna1::build_flat(cdna1::kGlobalAtomicAddF32Flat,
-                              {.seg = 2, .glc = 1, .addr = 4, .data = 0, .saddr = 4, .vdst = 6});
+        words = cdna1::build_flat(cdna1::kGlobalAtomicAddF32Flat,
+                                  {.seg = 2, .addr = 4, .data = 0, .saddr = 4, .vdst = 6});
       break;
     case ROCJITSU_CODE_ARCH_CDNA2:
       if (buffer)
@@ -744,11 +889,13 @@ protected:
     compute_unit_->write_sgpr(scalar_base + 4, kAddress);
     compute_unit_->write_sgpr(scalar_base + 5, 0);
     compute_unit_->write_sgpr(scalar_base + 6, 4096);
-    // RDNA selects this fixture's range rule; CDNA1-4 needs a valid DATA_FORMAT.
+    // RDNA3+ selects this fixture's range rule; CDNA1-4 and RDNA need a valid format.
     // CDNA5 uses the default descriptor encoding.
     uint32_t word3 = 0;
     if (amdgpu::addr_calc::uses_rdna_buffer_range_check(GetParam()))
-      word3 = 2u << 28;
+      word3 = (2u << 28) | kRdnaFormat32;
+    else if (amdgpu::addr_calc::uses_rdna_buffer_addressing(GetParam()))
+      word3 = kRdnaFormat32;
     else if (arch_is_cdna_4_or_lower(GetParam()))
       word3 = kGfx9DataFormat32;
     compute_unit_->write_sgpr(scalar_base + 7, word3);
@@ -771,7 +918,10 @@ protected:
     wave_->set_mode_raw(mode ^ 0xf0);
     amdgpu::GlobalMemPipeline pipeline(nullptr, &cache_);
     pipeline.issue(instruction.release(), *wave_);
-    EXPECT_EQ(compute_unit_->read_vgpr(base_ + (buffer ? 0 : 6), 0), old_bits);
+    // MI100 floating atomics only support the non-returning encoding.
+    const auto expected =
+        GetParam() == ROCJITSU_CODE_ARCH_CDNA1 ? (buffer ? source_bits : 0xbadu) : old_bits;
+    EXPECT_EQ(compute_unit_->read_vgpr(base_ + (buffer ? 0 : 6), 0), expected);
     return memory_.read32(kAddress);
   }
 
@@ -1008,6 +1158,37 @@ TEST_P(AtomicPolicyExecutionTest, DsWrapSerializesSharedAddressesAndPreservesIna
   EXPECT_EQ(compute_unit_->read_vgpr(base_ + 6, 1), 0xdeadbeef);
 }
 
+TEST_P(AtomicPolicyExecutionTest, TwoAddressDsWrapsEachOffsetBeforeRelocation) {
+  if (GetParam() != ROCJITSU_CODE_ARCH_RDNA3 && GetParam() != ROCJITSU_CODE_ARCH_RDNA3_5 &&
+      GetParam() != ROCJITSU_CODE_ARCH_RDNA4)
+    GTEST_SKIP() << "GFX11/GFX12 DS encodings";
+  wave_->set_lds_base(512);
+  wave_->set_lds_size(512);
+  wave_->lds().write32(wave_->lds_base(), 0xabcddcba);
+  wave_->lds().write32(wave_->lds_base() + 4, 0x31323334u);
+  compute_unit_->write_vgpr(base_ + 2, 0, 0xfffffffcu);
+  compute_unit_->write_vgpr(base_ + 3, 0, 31);
+  compute_unit_->write_vgpr(base_ + 4, 0, 32);
+  for (bool store : {false, true}) {
+    // ds_load_2addr_b32 or ds_store_2addr_b32, at DWORD offsets one and two.
+    const std::array words =
+        store ? std::array{0xd8380201u, 0x00040302u} : std::array{0xd8dc0201u, 0x14000002u};
+    auto inst = decoder_->decode_window(words);
+    ASSERT_TRUE(inst.succeeded());
+    ASSERT_TRUE(compute_unit_->execute_instruction(inst.value().get(), *wave_).succeeded());
+    ASSERT_NE(inst.value()->data(), nullptr);
+    const auto *payload = inst.value()->data_as<amdgpu::VectorMemState>();
+    EXPECT_EQ(payload->per_lane_addr[0], wave_->lds_base());
+    EXPECT_EQ(payload->ds2_per_lane_addr[0], wave_->lds_base() + 4);
+    amdgpu::LocalMemPipeline pipeline;
+    pipeline.issue(std::move(inst).value().release(), *wave_);
+    EXPECT_EQ(wave_->lds().read32(wave_->lds_base()), store ? 31u : 0xabcddcbau);
+    EXPECT_EQ(wave_->lds().read32(wave_->lds_base() + 4), store ? 32u : 0x31323334u);
+    EXPECT_EQ(compute_unit_->read_vgpr(base_ + 20, 0), 0xabcddcbau);
+    EXPECT_EQ(compute_unit_->read_vgpr(base_ + 21, 0), 0x31323334u);
+  }
+}
+
 TEST_P(AtomicPolicyExecutionTest, LdsStackUpdatesPointerAndResultWithoutAnIntersectionEngine) {
   const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
   if (!gfx12 && GetParam() != ROCJITSU_CODE_ARCH_RDNA3 && GetParam() != ROCJITSU_CODE_ARCH_RDNA3_5)
@@ -1061,6 +1242,27 @@ TEST_P(AtomicPolicyExecutionTest, LdsStackUpdatesPointerAndResultWithoutAnInters
     }
     EXPECT_EQ(compute_unit_->read_vgpr(base_ + 12, 1), 0xdeadbeef);
     EXPECT_EQ(compute_unit_->read_vgpr(base_ + 16, 1), 1u << (gfx12 ? 15 : 18));
+  }
+  // The stack base lies in another workgroup's allocation. The first GFX11 child
+  // returns directly. Pop operations that require an out-of-window LDS word read zero.
+  wave_->set_lds_size(512);
+  wave_->set_exec(1);
+  constexpr uint32_t neighbor = 1024;
+  compute_unit_->write_vgpr(base_ + 16, 0, (neighbor / 4) << (gfx12 ? 15 : 18));
+  compute_unit_->write_vgpr(base_, 0, 0xffffffff);
+  for (unsigned slot = 0; slot < 4; ++slot)
+    wave_->lds().write32(wave_->lds_base() + neighbor + slot * 128, 0xdeadbeef);
+  for (bool push : {true, false}) {
+    for (unsigned slot = 0; slot < 4; ++slot)
+      compute_unit_->write_vgpr(base_ + 4 + slot, 0, push ? 0x104 + slot * 0x100 : 0xffffffff);
+    auto inst = decoder_->decode_window(words);
+    ASSERT_TRUE(inst.succeeded());
+    ASSERT_TRUE(compute_unit_->execute_instruction(inst.value().get(), *wave_).succeeded());
+    amdgpu::LocalMemPipeline pipeline;
+    pipeline.issue(std::move(inst).value().release(), *wave_);
+    EXPECT_EQ(compute_unit_->read_vgpr(base_ + 12, 0), push && !gfx12 ? 0x104u : 0u);
+    for (unsigned slot = 0; slot < 4; ++slot)
+      EXPECT_EQ(wave_->lds().read32(wave_->lds_base() + neighbor + slot * 128), 0xdeadbeefu);
   }
 }
 

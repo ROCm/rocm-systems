@@ -145,7 +145,8 @@ void WaitcheckStateOps::merge_into(PendingState &dst, const PendingState &src) {
     // Presence and old-value proofs do not change hardware issue order.
     const bool same_order = std::ranges::equal(
         dst.pending[i], src.pending[i], [](const PendingEvent &lhs, const PendingEvent &rhs) {
-          return same_event_identity(lhs, rhs) && lhs.min_younger == rhs.min_younger;
+          return same_event_identity(lhs, rhs) && lhs.min_younger == rhs.min_younger &&
+                 lhs.min_younger_in_fifo == rhs.min_younger_in_fifo;
         });
     if (!dst.pending[i].empty() && !src.pending[i].empty() && !same_order)
       dst.uncertain_order[i] = true;
@@ -178,6 +179,8 @@ void WaitcheckStateOps::merge_into(PendingState &dst, const PendingState &src) {
         position->present_on_all_paths = false;
       } else {
         position->min_younger = std::min(position->min_younger, event.min_younger);
+        position->min_younger_in_fifo =
+            std::min(position->min_younger_in_fifo, event.min_younger_in_fifo);
         position->old_value_regs &= event.old_value_regs;
       }
     }
@@ -517,6 +520,14 @@ util::FailureOr<bool> WaitcheckStateOps::counter_out_of_order(const PendingState
 
 util::Result WaitcheckStateOps::apply_counter_wait(PendingState &state, WaitCounterKind counter,
                                                    uint32_t count, rj_code_arch_t arch) {
+  if (counter == WaitCounterKind::Exp && amdgpu::has_typed_export_waits(arch) && count) {
+    // EXPCNT <= n bounds each ordered type separately, even in a mixed queue.
+    // The newest request of any one type may still be pending at a nonzero wait.
+    retire_events(state, state.pending[counter_index(counter)], [count](const PendingEvent &event) {
+      return event.min_younger_in_fifo >= count;
+    });
+    return util::Result::success();
+  }
   const auto out_of_order = counter_out_of_order(state, counter, arch);
   if (out_of_order.failed())
     return util::Result::failure();
@@ -529,6 +540,8 @@ util::Result WaitcheckStateOps::apply_counter_wait(PendingState &state, WaitCoun
 util::FailureOr<uint32_t> WaitcheckStateOps::dependency_required_count(const PendingState &state,
                                                                        const PendingEvent &event,
                                                                        rj_code_arch_t arch) {
+  if (event.counter == WaitCounterKind::Exp && amdgpu::has_typed_export_waits(arch))
+    return event.min_younger_in_fifo;
   const auto out_of_order = counter_out_of_order(state, event.counter, arch);
   if (out_of_order.failed())
     return util::Result::failure();

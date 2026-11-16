@@ -11,12 +11,7 @@
 Panel Config:
   id: 1700
   title: GRBM (Graphics Register Bus Manager)
-  description: |-
-    GRBM metrics for gfx1250. Provides top-level utilization metrics for major
-    GPU blocks, using GRBM_GUI_ACTIVE_sum as the baseline for active GPU cycles.
-
   data source:
-
   - metric_table:
       id: 1701
       title: GRBM Metrics

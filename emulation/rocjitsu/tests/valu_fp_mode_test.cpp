@@ -1442,6 +1442,7 @@ std::vector<ArithmeticCase> fma_mix_f32_cases() {
       {"SignalingNan", 0x7f800012, 0x3f800000, 0x3f800000, 0, 0x7f800012},
       {"IeeeNan", 0x7f800012, 0x3f800000, 0x3f800000, 0x200, 0x7fc00012},
   };
+  // Migrated gfx1250 mixed FMA shares rj-arith's default host-FP contract.
   std::vector<ArithmeticCase> cases;
   for (auto arch :
        {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3,
@@ -1457,9 +1458,13 @@ std::vector<ArithmeticCase> fma_mix_f32_cases() {
                        {{0, sample.a}, {1, sample.b}, {2, sample.c}},
                        {{6, expected}},
                        sample.mode,
-                       uses_default_host_controls(arch) ? FE_TONEAREST : (FE_DOWNWARD),
+                       (uses_default_host_controls(arch) || arch == ROCJITSU_CODE_ARCH_CDNA5)
+                           ? FE_TONEAREST
+                           : (FE_DOWNWARD),
                        0x9fc0u,
-                       uses_default_host_controls(arch) ? (0x1f80u & (0x9fc0u)) : (0x9f60u)});
+                       (uses_default_host_controls(arch) || arch == ROCJITSU_CODE_ARCH_CDNA5)
+                           ? (0x1f80u & (0x9fc0u))
+                           : (0x9f60u)});
     }
   }
   return cases;
@@ -1888,6 +1893,7 @@ std::vector<ArithmeticCase> half_log_exp_arithmetic_cases() {
 }
 
 std::vector<ArithmeticCase> fma_mix_half_cases() {
+  // Migrated gfx1250 mixed FMA shares rj-arith's default host-FP contract.
   std::vector<ArithmeticCase> cases;
   for (auto arch :
        {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3,
@@ -1904,9 +1910,13 @@ std::vector<ArithmeticCase> fma_mix_half_cases() {
                          {{2, 0x42b90000u}},
                          {{6, high ? (result << 16) | 0xbeefu : 0xdead0000u | result}},
                          240u | (mode << 2),
-                         uses_default_host_controls(arch) ? FE_TONEAREST : (FE_UPWARD),
+                         (uses_default_host_controls(arch) || arch == ROCJITSU_CODE_ARCH_CDNA5)
+                             ? FE_TONEAREST
+                             : (FE_UPWARD),
                          0x9fc0u,
-                         uses_default_host_controls(arch) ? (0x1f80u & (0x9fc0u)) : (0x9f60u)});
+                         (uses_default_host_controls(arch) || arch == ROCJITSU_CODE_ARCH_CDNA5)
+                             ? (0x1f80u & (0x9fc0u))
+                             : (0x9f60u)});
       }
     }
     // Both cards prioritize an invalid product over the addend NaN. Ordinary
@@ -1927,9 +1937,12 @@ std::vector<ArithmeticCase> fma_mix_half_cases() {
                {{0, a}, {1, b}, {2, 0x7fe9a000u}},
                {{6, high ? (result << 16) | 0xbeefu : 0xdead0000u | result}},
                0,
-               uses_default_host_controls(arch) ? FE_TONEAREST : FE_UPWARD,
+               (uses_default_host_controls(arch) || arch == ROCJITSU_CODE_ARCH_CDNA5) ? FE_TONEAREST
+                                                                                      : FE_UPWARD,
                0x9fc0u,
-               uses_default_host_controls(arch) ? (0x1f80u & 0x9fc0u) : 0x9f60u});
+               (uses_default_host_controls(arch) || arch == ROCJITSU_CODE_ARCH_CDNA5)
+                   ? (0x1f80u & 0x9fc0u)
+                   : 0x9f60u});
         }
       }
     }
@@ -2696,6 +2709,10 @@ std::vector<ArithmeticCase> legacy_rounded_result_modifier_cases() {
   };
   for (const Target &target : targets) {
     const std::string name = target.name;
+    // RDNA2 uses rj-arith for these operations, outside the legacy SIMD tracker.
+    const auto simd = target.arch == ROCJITSU_CODE_ARCH_RDNA2
+                          ? expect_simd_fallback()
+                          : expect_simd_path(amdgpu::SimdFastPath::VOP3_BINARY_MODE_FP16);
     const auto add = [&](const std::string &case_name, std::array<uint32_t, 2> words, uint32_t a,
                          uint32_t b, uint32_t result, uint32_t mode) {
       cases.push_back({name + case_name,
@@ -2707,7 +2724,7 @@ std::vector<ArithmeticCase> legacy_rounded_result_modifier_cases() {
                        FE_TONEAREST,
                        0,
                        0,
-                       expect_simd_path(amdgpu::SimdFastPath::VOP3_BINARY_MODE_FP16)});
+                       simd});
     };
     // 1.5 * 65504 overflows half before div:2, so the result stays infinite;
     // under FP16_OVFL it saturates to 65504 and then halves.
@@ -5381,7 +5398,7 @@ SimdPathExpectation simd_expectation_for_run(const ArithmeticCase &test, bool fo
 }
 
 void expect_arithmetic_case(const ArithmeticCase &test, SimdPathExpectation simd = {},
-                            bool uses_arith = false) {
+                            bool uses_arith = false, amdgpu::ArithmeticPolicy policy = {}) {
   uses_arith &= test.arch == ROCJITSU_CODE_ARCH_RDNA3 || test.arch == ROCJITSU_CODE_ARCH_RDNA4;
   const int host_rounding = test.host_rounding;
   if (uses_arith) {
@@ -5393,6 +5410,7 @@ void expect_arithmetic_case(const ArithmeticCase &test, SimdPathExpectation simd
   cache.set_backing_memory(&memory);
   amdgpu::ComputeUnitCore::Config config{};
   config.arch = test.arch;
+  config.arithmetic = policy;
   config.num_wf_slots = 1;
   config.sgprs_per_wf = 106;
   config.vgprs_per_wf = 256;
@@ -5487,6 +5505,69 @@ struct ForceScalarGuard {
   bool original = util::force_scalar();
   ~ForceScalarGuard() { util::set_force_scalar_for_testing(original); }
 };
+
+TEST(ValuFpModeHelpers, Gfx1150VectorExceptionsAreStickyAndMaskAware) {
+  struct Witness {
+    std::array<uint32_t, 3> words;
+    uint32_t lhs, rhs, causes;
+  };
+  // LLVM gfx1150 encodings, operands v1/v2. VOPD pairs a MUL with MOV.
+  const Witness cases[] = {
+      {{0x10000501}, 0, 0x7f800000, 0x01},                      // 0 * infinity
+      {{0x06000501}, 0x7f7fffff, 0x7f7fffff, 0x28},             // ADD overflow
+      {{0x08000501}, 0x7f800000, 0x7f800000, 0x01},             // SUB invalid
+      {{0x0a000501}, 0x7f800000, 0x7f800000, 0x01},             // SUBREV invalid
+      {{0x08000501}, 0x7f7fffff, 0xff7fffff, 0x28},             // SUB overflow
+      {{0xd5040000, 0x02020501}, 0x7f800000, 0x7f800000, 0x01}, // E64 SUB invalid
+      {{0xd6130000, 0x02020501}, 0, 0x7f800000, 0x01},          // FMA 0 * infinity + 0
+      {{0xc8d00501, 0x00020104}, 0x7f7fffff, 0x40000000, 0x28}, // dual MUL overflow
+      {{0xd412806a, 0x02020501}, 0x7fc00000, 0x3f800000, 0x01}, // signaling CMP
+      {{0xd412006a, 0x02020501}, 0x7fc00000, 0x3f800000, 0},    // quiet CMP
+      {{0xd400806a, 0x02020501}, 0x7e00, 0x3c00, 0x01},         // Signaling CMP_F_F16
+      {{0xd40f806a, 0x02020501}, 0x7e00, 0x3c00, 0x01},         // Signaling CMP_T_F16
+      {{0xd412006a, 0x02020501}, 0x7fa00000, 0x3f800000, 0x01}, // Quiet CMP_EQ_F32, sNaN
+      {{0xd400006a, 0x02020501}, 0x7d00, 0x3c00, 0x01},         // Quiet constant CMP_F_F16, sNaN
+      {{0x7c040501}, 0x7d00, 0x3c00, 0x01},                     // VOPC CMP_EQ_F16, sNaN
+  };
+  amdgpu::GpuMemory memory("gfx1150_memory");
+  amdgpu::L2Cache cache("gfx1150_cache");
+  cache.set_backing_memory(&memory);
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_RDNA3_5;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 106;
+  config.vgprs_per_wf = 256;
+  config.lds_size_kb = 64;
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "gfx1150", config, &memory, &cache));
+  auto decoder = Decoder::create(config.arch);
+  auto *wave = cu->dispatch_wf(0, 0, 106, 256);
+  ASSERT_NE(wave, nullptr);
+  const auto base = wave->vgpr_alloc().base;
+  ForceScalarGuard guard;
+  for (bool force_scalar : {false, true}) {
+    util::set_force_scalar_for_testing(force_scalar);
+    for (const auto &test : cases) {
+      SCOPED_TRACE(test.words[0]);
+      auto inst = decoder->decode_window(test.words);
+      ASSERT_TRUE(inst.succeeded());
+      cu->write_vgpr(base + 1, 0, 0x3f800000);
+      cu->write_vgpr(base + 2, 0, 0x3f800000);
+      cu->write_vgpr(base + 1, 1, test.lhs);
+      cu->write_vgpr(base + 2, 1, test.rhs);
+      for (bool dx10_clamp : {false, true}) {
+        wave->set_mode_raw(0x2f0 | (dx10_clamp ? 0x100 : 0));
+        for (uint32_t exec : {1u, 3u}) {
+          wave->set_exec(exec);
+          wave->set_trapsts(0x40);
+          ASSERT_TRUE(cu->execute_instruction(inst.value().get(), *wave).succeeded());
+          EXPECT_EQ(wave->trapsts(), 0x40u | (exec == 3 && !dx10_clamp ? test.causes : 0));
+        }
+      }
+    }
+  }
+}
 
 // A VOPD pair of an inexact ADD and a signaling-NaN MAX. The ADD raises inexact
 // on the host, so the caller's flags survive only if its slot is scoped; the

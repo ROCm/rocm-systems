@@ -25,8 +25,9 @@
 
 import os
 import re
+import sqlite3
 
-from .importer import RocpdImportData
+from .importer import RocpdImportData, add_decode_args, get_decode_args
 from .query import export_sqlite_query
 from . import output_config
 from . import libpyrocpd
@@ -38,8 +39,12 @@ def write_sql_query_to_csv(
     query,
     filename="",
     postfix="trace",
+    integer_columns=(),
 ) -> None:
-    """Write the contents of a SQL query to a CSV file in the specified output path."""
+    """Write the contents of a SQL query to a CSV file in the specified output path.
+
+    ``integer_columns`` names columns whose integer text is written as unquoted numbers.
+    """
 
     query_not_empty = f"""
         SELECT EXISTS (
@@ -58,7 +63,7 @@ def write_sql_query_to_csv(
         config.output_path, f"{file_prefix}{filename}{file_postfix}.csv"
     )
 
-    kwargs = {"title_columns": True}
+    kwargs = {"title_columns": True, "integer_columns": integer_columns}
     export_sqlite_query(
         connection, query, export_format="csv", export_path=export_path, **kwargs
     )
@@ -525,6 +530,78 @@ def write_region_csv(importData, config) -> None:
     write_sql_query_to_csv(importData, config, query, "regions")
 
 
+def _pc_sampling_query_runs(importData, query: str) -> bool:
+    """Return False when *query* needs a decoded view or column that is missing."""
+    try:
+        importData.execute(f"SELECT * FROM ({query}) LIMIT 0")
+        return True
+    except sqlite3.OperationalError as error:
+        message = str(error).lower()
+        if any(
+            text in message
+            for text in ("no such table", "no such view", "no such column")
+        ):
+            return False
+        raise
+
+
+def write_pc_sampling_host_trap_csv(importData, config) -> None:
+    query = """
+        SELECT
+            sample.guid,
+            sample.timestamp AS Sample_Timestamp,
+            sample.exec_mask AS Exec_Mask,
+            sample.dispatch_id AS Dispatch_Id,
+            sample.instruction AS Instruction,
+            sample.instruction_comment AS Instruction_Comment,
+            event.stack_id AS Correlation_Id
+        FROM "rocpd_gpu_pc_sample_decoded" sample
+        JOIN rocpd_event event ON event.guid = sample.guid AND event.id = sample.event_id
+        WHERE sample.wave_issued IS NULL
+        ORDER BY sample.guid ASC, sample.id ASC
+    """
+    if not _pc_sampling_query_runs(importData, query):
+        return
+    # exec_mask is stored as decimal text to keep all 64 bits; export it unquoted.
+    write_sql_query_to_csv(
+        importData,
+        config,
+        query,
+        "pc_sampling_host_trap",
+        integer_columns=("Exec_Mask",),
+    )
+
+
+def write_pc_sampling_stochastic_csv(importData, config) -> None:
+    query = """
+        SELECT
+            sample.guid,
+            sample.timestamp AS Sample_Timestamp,
+            sample.exec_mask AS Exec_Mask,
+            sample.dispatch_id AS Dispatch_Id,
+            sample.instruction AS Instruction,
+            sample.instruction_comment AS Instruction_Comment,
+            event.stack_id AS Correlation_Id,
+            sample.wave_issued AS Wave_Issued_Instruction,
+            sample.inst_type_name AS Instruction_Type,
+            sample.stall_reason_name AS Stall_Reason,
+            sample.wave_count AS Wave_Count
+        FROM "rocpd_gpu_pc_sample_decoded" sample
+        JOIN rocpd_event event ON event.guid = sample.guid AND event.id = sample.event_id
+        WHERE sample.wave_issued IS NOT NULL
+        ORDER BY sample.guid ASC, sample.id ASC
+    """
+    if not _pc_sampling_query_runs(importData, query):
+        return
+    write_sql_query_to_csv(
+        importData,
+        config,
+        query,
+        "pc_sampling_stochastic",
+        integer_columns=("Exec_Mask",),
+    )
+
+
 def write_csv(importData, config):
 
     write_agent_info_csv(importData, config)
@@ -534,6 +611,10 @@ def write_csv(importData, config):
     write_memory_copy_csv(importData, config)
     write_region_csv(importData, config)
     write_scratch_memory_csv(importData, config)
+
+    if "pc_sampling" in importData.supported_features:
+        write_pc_sampling_host_trap_csv(importData, config)
+        write_pc_sampling_stochastic_csv(importData, config)
 
     # graph launch was not introduced until schema version 3.0.2
     if "graph_launch" in importData.supported_features:
@@ -593,11 +674,14 @@ def main(argv=None):
     process_generic_args = output_config.add_generic_args(parser)
     process_time_window_args = time_window.add_args(parser)
     process_csv_args = add_args(parser)
+    add_decode_args(parser)
 
     args = parser.parse_args(argv)
 
     input = RocpdImportData(
-        args.input, automerge_limit=getattr(args, "automerge_limit", None)
+        args.input,
+        automerge_limit=getattr(args, "automerge_limit", None),
+        **get_decode_args(args),
     )
 
     out_cfg_args = process_out_config_args(input, args)

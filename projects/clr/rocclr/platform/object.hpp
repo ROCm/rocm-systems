@@ -120,7 +120,7 @@ CL_TYPES_DO(DEFINE_CL_TRAITS);
 
 struct ICDDispatchedObject {
 #ifdef __HIP_PLATFORM_AMD__
-  static inline cl_icd_dispatch icdVendorDispatch_[] = {0};
+  static inline cl_icd_dispatch icdVendorDispatch_[] = {{}};
 #else
   static cl_icd_dispatch icdVendorDispatch_[];
 #endif
@@ -210,7 +210,7 @@ template <class T> class SysmemPool {
   SysmemPool() {}
   ~SysmemPool() {
     if (free_chunk_num_ != max_chunk_idx_) {
-      for (int i = 0; i < kActiveAllocSize; ++i) {
+      for (size_t i = 0; i < kActiveAllocSize; ++i) {
         // Free any active chunks
         if (active_allocs_[i] != nullptr) {
           auto chunk = active_allocs_[i]->base_;
@@ -286,7 +286,7 @@ template <class T> class SysmemPool {
       {
         // Make sure active chunks don't have a stale pointer
         std::scoped_lock lock(chunk_access_);
-        for (int i = 0; i < kActiveAllocSize; ++i) {
+        for (size_t i = 0; i < kActiveAllocSize; ++i) {
           if (base->allocs_ == active_allocs_[i]) {
             active_allocs_[i] = nullptr;
             break;

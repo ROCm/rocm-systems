@@ -101,7 +101,7 @@ std::optional<uint32_t> Isa::resolved_vgpr_offset(const amdgpu::Wavefront &wf, O
 
 bool Isa::simd_capable_value(OperandType opr_type, int ev) {
   return resolved_vgpr_offset(opr_type, ev).has_value() || is_immediate_type(opr_type) ||
-         amdgpu::can_resolve_src_scalar(ev, kM0EncodingValue);
+         amdgpu::can_resolve_src_scalar(ev, ROCJITSU_CODE_ARCH_CDNA5);
 }
 
 bool Operand::simd_capable_exec() const {
@@ -521,6 +521,12 @@ bool Operand::full_execution_backend_complete() {
 std::optional<uint32_t> Operand::resolved_vgpr_offset_exec(const amdgpu::Wavefront &wf) const {
   if (!reads_value())
     return std::nullopt;
+  if (size_bits_ != 16 && wf.vgpr_msb_mode() == 0) {
+    if (opr_type_ == OperandType::OPR_VGPR)
+      return static_cast<uint32_t>(encoding_value_);
+    if (opr_type_ == OperandType::OPR_SRC && encoding_value_ >= 256 && encoding_value_ <= 511)
+      return static_cast<uint32_t>(encoding_value_ - 256);
+  }
   auto packed =
       packed_16bit_vgpr_source(packed_16bit_source_, size_bits_, opr_type_, encoding_value_);
   if (!packed)

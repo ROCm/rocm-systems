@@ -4488,6 +4488,12 @@ VMfmaScaleF3216x16x128F8f6f4Vop3px2::VMfmaScaleF3216x16x128F8f6f4Vop3px2(const M
       scale_src0(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src0),
       scale_src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
       raw_words_{inst[0], inst[1], inst[2], inst[3]} {
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
+  scale_src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  scale_src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   size_ = 16;
   raw_encoding_ = raw_words_.data();
   dst_operands_[0] = &vdst;
@@ -4532,6 +4538,12 @@ VMfmaScaleF3232x32x64F8f6f4Vop3px2::VMfmaScaleF3232x32x64F8f6f4Vop3px2(const Mac
       scale_src0(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src0),
       scale_src1(32, OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
       raw_words_{inst[0], inst[1], inst[2], inst[3]} {
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
+  scale_src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  scale_src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   size_ = 16;
   raw_encoding_ = raw_words_.data();
   dst_operands_[0] = &vdst;

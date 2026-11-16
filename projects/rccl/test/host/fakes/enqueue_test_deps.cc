@@ -19,6 +19,17 @@
 // rcclP2pPolicyChannels; wrap_fakes.cc supplies the body for binaries that
 // compile rccl_wrap.cc, which this target does not.
 int64_t ncclParamP2pDisable() { return g_loadParam("P2P_DISABLE", 0); }
+bool ncclP2pUsesMemcpy() {
+  const char* value = getenv("NCCL_P2P_USE_CUDA_MEMCPY");
+  return value != nullptr && strtoll(value, nullptr, 0) != 0;
+}
+int64_t rcclParamP2pCeChannelsPerPeer() { return g_loadParam("RCCL_P2P_CE_CHANNELS_PER_PEER", 16); }
+int rcclP2pCeChannelsPerPeerCap(int current, int pool, bool isGfx1250, bool useMemcpy, int64_t configuredCap) {
+  if (!isGfx1250 || !useMemcpy || configuredCap <= 0 || pool <= 0) return current;
+  int cap = pow2Down((int)(configuredCap < pool ? configuredCap : pool));
+  if (cap < 1) cap = 1;
+  return current < cap ? current : cap;
+}
 
 // rma.cc owns scheduleRmaTasksToPlan, but rma_fakes.cc also links into binaries that compile the
 // real rma.cc. api_trace.cc owns ncclGetErrorString, and api_trace_fakes.cc does not link here.

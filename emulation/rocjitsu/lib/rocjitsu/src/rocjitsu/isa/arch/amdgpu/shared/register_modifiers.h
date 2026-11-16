@@ -20,7 +20,10 @@ void for_each_memory_result_range(RegisterRef reg, const RegisterModifiers &modi
     return;
   }
   const uint16_t last = reg.index + reg.width - 1;
-  if (modifiers.memory_result_has_status)
+  const bool has_status =
+      modifiers.memory_result_has_status ||
+      (modifiers.memory_result_payload_words && reg.width > modifiers.memory_result_payload_words);
+  if (has_status)
     --reg.width;
   if (reg.width && data != tail) {
     const RegisterRef partial{reg.cls, static_cast<uint16_t>(reg.index + reg.width - 1), 1};
@@ -30,7 +33,7 @@ void for_each_memory_result_range(RegisterRef reg, const RegisterModifiers &modi
   } else if (reg.width) {
     visit(reg, data);
   }
-  if (modifiers.memory_result_has_status)
+  if (has_status)
     visit(RegisterRef{reg.cls, last, 1}, 0xf);
 }
 
@@ -54,6 +57,10 @@ void buffer_register_modifiers(const Inst &inst, RegisterModifiers &modifiers) {
     modifiers.buffer_resource = &inst.srsrc;
   if constexpr (requires { inst.vaddr; })
     modifiers.buffer_address = &inst.vaddr;
+  if constexpr (requires { inst.inst_.tfe; })
+    modifiers.buffer_tfe = inst.inst_.tfe;
+  if constexpr (requires { inst.inst_.format; })
+    modifiers.encoded_buffer_format = inst.inst_.format;
   if constexpr (requires { inst.soffset; })
     modifiers.buffer_offset = &inst.soffset;
   if constexpr (ResultBytes != 0xf)

@@ -8,10 +8,12 @@
 #include "rocjitsu/vm/amdgpu/pci/gpu_pci_device.h"
 #include "rocjitsu/vm/amdgpu/pci/gpu_pci_device_spec.h"
 #include "rocjitsu/vm/amdgpu/pci/register_symbols.h"
+#include "rocjitsu/vm/fabric_endpoint.h"
 #include "rocjitsu/vm/soc.h"
 #include "rocjitsu/vm/topology_assembly.h"
 #include "rocjitsu/vm/virtual_machine.h"
 #include "rocjitsu/vmm/vfu/vfio_device_host.h"
+#include "rocjitsu/vmm/vfu/vfio_target_grants.h"
 #include "simdojo/sim/simulation.h"
 #include "util/diagnostic.h"
 #include "util/log.h"
@@ -25,6 +27,7 @@
 #include <csignal>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <filesystem>
@@ -33,6 +36,7 @@
 #include <optional>
 #include <pthread.h>
 #include <stop_token>
+#include <string_view>
 #include <sys/un.h>
 #include <thread>
 #include <unistd.h>
@@ -207,8 +211,8 @@ public:
   ServingThread(const ServingThread &) = delete;
   ServingThread &operator=(const ServingThread &) = delete;
 
-  int start() {
-    const int error = pthread_create(&thread_, nullptr, &serve, this);
+  int start(decltype(&pthread_create) create_thread = &pthread_create) {
+    const int error = create_thread(&thread_, nullptr, &serve, this);
     started_ = error == 0;
     return error;
   }
@@ -244,9 +248,13 @@ private:
 
 int run_vfio_server_impl(const std::string &config_path,
                          const std::vector<std::string> &socket_paths, int ready_fd,
-                         std::optional<int> engine_exit_code_for_test,
+                         bool trace_effects, std::optional<int> engine_exit_code_for_test,
                          std::optional<std::size_t> serving_thread_failure_after = std::nullopt) {
   ReadinessPipe readiness(ready_fd);
+  if (trace_effects && socket_paths.size() < 2) {
+    util::Logger::warn("vfu: the fabric effect trace requires multiple VFIO functions");
+    return 1;
+  }
   // Config loading and machine construction may create helper threads. Block
   // before either one so every thread in the server inherits the mask and a
   // process-directed shutdown signal can only be consumed by sigtimedwait().
@@ -355,6 +363,11 @@ int run_vfio_server_impl(const std::string &config_path,
     if (!device->usable())
       return 1;
   }
+  if (trace_effects && (machine_ptr->fabric_endpoint() == nullptr ||
+                        !machine_ptr->fabric_endpoint()->enable_effect_trace(200000))) {
+    util::Logger::warn("vfu: cannot enable the bounded fabric effect trace");
+    return 1;
+  }
   if (engine.create(diagnostic.emitter()).failed()) {
     util::Logger::warn("vfu: cannot create the local GPU node: ", diagnostic.message());
     return 1;
@@ -424,6 +437,7 @@ int run_vfio_server_impl(const std::string &config_path,
 
   // Declare hosts before threads so every serving thread is joined before
   // destroying a host or stopping the engine.
+  VfioTargetGrants target_grants(socket_paths.size());
   std::vector<std::unique_ptr<VfioDeviceHost>> hosts;
   std::vector<std::unique_ptr<ServingThread>> serving_threads;
   if (status == 0) {
@@ -431,6 +445,15 @@ int run_vfio_server_impl(const std::string &config_path,
     for (std::size_t gpu_index = 0; gpu_index < socket_paths.size(); ++gpu_index) {
       hosts.push_back(
           std::make_unique<VfioDeviceHost>(socket_paths[gpu_index], *pci_devices[gpu_index]));
+      const config::KfdDeviceConfig &identity =
+          loaded.devices.empty() ? loaded.device : loaded.devices[gpu_index];
+      if (socket_paths.size() > 1 &&
+          !hosts.back()->enable_target_grants(target_grants, static_cast<uint32_t>(gpu_index),
+                                              identity.gpu_id, machine_ptr->fabric_endpoint())) {
+        util::Logger::warn("vfu: cannot bind the target-grant server group");
+        status = 1;
+        break;
+      }
       if (!hosts.back()->build()) {
         status = 1;
         break;
@@ -444,8 +467,12 @@ int run_vfio_server_impl(const std::string &config_path,
       const std::size_t gpu_index = serving_threads.size();
       serving_threads.push_back(std::make_unique<ServingThread>(*host));
       // Each host has its own protocol loop; all inherit the blocked mask.
-      const int error =
-          serving_thread_failure_after == gpu_index ? EAGAIN : serving_threads.back()->start();
+      const decltype(&pthread_create) create_thread =
+          serving_thread_failure_after == gpu_index
+              ? +[](pthread_t *, const pthread_attr_t *, void *(*)(void *),
+                    void *) noexcept { return EAGAIN; }
+              : &pthread_create;
+      const int error = serving_threads.back()->start(create_thread);
       if (error != 0) {
         util::Logger::warn(std::format("vfu: cannot start serving thread for PCI function {}: {}",
                                        gpu_index, std::strerror(error)));
@@ -609,6 +636,31 @@ int run_vfio_server_impl(const std::string &config_path,
   // owns the complete topology. Frontends release their borrowed SoC state
   // before the engine object later destroys that topology.
   engine_run.stop();
+  if (socket_paths.size() > 1) {
+    if (FabricEndpoint *fabric = machine_ptr->fabric_endpoint()) {
+      const FabricEndpoint::Diagnostics diagnostics = fabric->diagnostics();
+      for (const auto &edge : diagnostics.directed_effects)
+        util::Logger::warn(
+            std::format("vfu: committed fabric effects {} -> {}: reads={}, writes={}, "
+                        "read_bytes={}, write_bytes={}",
+                        edge.requester_gpu_id, edge.owner_gpu_id, edge.reads, edge.writes,
+                        edge.read_bytes, edge.write_bytes));
+      if (trace_effects) {
+        for (const auto &effect : diagnostics.committed_effects)
+          util::Logger::warn(std::format(
+              "vfu: committed fabric effect request={} {} -> {}: op={}, backing_id={}, "
+              "offset={}, bytes={}, map_id={}, gpu_va={:#x}, iova={:#x}",
+              effect.request_id, effect.requester_gpu_id, effect.owner_gpu_id,
+              effect.write ? "write" : "read", effect.backing_id, effect.backing_offset,
+              effect.bytes, effect.origin.map_id, effect.origin.gpu_va, effect.origin.iova));
+        util::Logger::warn(std::format("vfu: fabric effect trace captured={}, dropped={}",
+                                       diagnostics.committed_effects.size(),
+                                       diagnostics.effect_trace_dropped));
+        if (diagnostics.effect_trace_dropped != 0)
+          status = 1;
+      }
+    }
+  }
   std::vector<InterruptRing> interrupt_rings;
   interrupt_rings.reserve(pci_devices.size());
   for (GpuPciDevice *device : pci_devices)
@@ -644,13 +696,16 @@ int run_vfio_server_impl(const std::string &config_path,
 
 } // namespace
 
-int run_vfio_server(const std::string &config_path, const std::string &socket_path, int ready_fd) {
-  return run_vfio_server(config_path, std::vector<std::string>{socket_path}, ready_fd);
+int run_vfio_server(const std::string &config_path, const std::string &socket_path, int ready_fd,
+                    bool trace_fabric_effects) {
+  return run_vfio_server(config_path, std::vector<std::string>{socket_path}, ready_fd,
+                         trace_fabric_effects);
 }
 
 int run_vfio_server(const std::string &config_path, const std::vector<std::string> &socket_paths,
-                    int ready_fd) {
-  return run_vfio_server_impl(config_path, socket_paths, ready_fd, std::nullopt);
+                    int ready_fd, bool trace_fabric_effects) {
+  return run_vfio_server_impl(config_path, socket_paths, ready_fd, trace_fabric_effects,
+                              std::nullopt);
 }
 
 int run_vfio_server_with_engine_exit_for_test(const std::string &config_path,
@@ -663,13 +718,13 @@ int run_vfio_server_with_engine_exit_for_test(const std::string &config_path,
 int run_vfio_server_with_engine_exit_for_test(const std::string &config_path,
                                               const std::vector<std::string> &socket_paths,
                                               int ready_fd, int exit_code) {
-  return run_vfio_server_impl(config_path, socket_paths, ready_fd, exit_code);
+  return run_vfio_server_impl(config_path, socket_paths, ready_fd, false, exit_code);
 }
 
 int run_vfio_server_with_serving_thread_failure_for_test(
     const std::string &config_path, const std::vector<std::string> &socket_paths, int ready_fd,
     std::size_t successful_threads) {
-  return run_vfio_server_impl(config_path, socket_paths, ready_fd, std::nullopt,
+  return run_vfio_server_impl(config_path, socket_paths, ready_fd, false, std::nullopt,
                               successful_threads);
 }
 

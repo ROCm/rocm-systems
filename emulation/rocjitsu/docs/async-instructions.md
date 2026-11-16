@@ -6,10 +6,10 @@ wave. A register scoreboard keeps reads and writes ordered. The wave drains
 all pending work before leaving its bounded issue window or returning to CU
 scheduling.
 
-The gfx950 and gfx1250 single-GPU presets enable this path when their selected
-thread granule includes helpers. Other shipped targets and multi-GPU presets
-keep helpers disabled. This accelerates host execution; it does not model GPU
-MMA latency or validate application memory hazards.
+The matrix handlers currently execute synchronously through rj-arith: no handler
+is eligible for helper offload. Effective helper allocation is therefore zero,
+even when a preset or explicit setting requests helpers. The retained adapter
+and configuration described below can support future eligible handlers.
 
 ## Thread policy
 
@@ -19,12 +19,13 @@ VM's CUs. The dispatch pool accepts concurrent XCD submissions; each caller
 executes its own CUs while helpers can execute eligible MMA instructions.
 
 `async_helper_threads` extends the existing allocation tables. Omission or -1
-selects the configured policy; zero disables helpers. Explicit counts range
-from 0 to 128 and take priority over the automatic budget. Automatic selection
-uses CPU affinity and the target's allocation table. Desktop and older CDNA
-presets stop at an engine/dispatch cost of 24. gfx950 adds eight helpers for
-32 total threads; gfx1250 uses up to 40 engine/dispatch threads and eight
-helpers for 48 total.
+selects the configured policy; zero disables helpers. Explicit requests range
+from 0 to 128 and take priority over automatic helper selection only when an
+eligible handler exists. The requested value is retained for configuration and
+checkpoint serialization; the current effective helper count remains zero.
+Automatic selection uses CPU affinity and the target's allocation table.
+
+The table shows current effective allocations, including suppression of helpers:
 
 | Budget / affinity | gfx950 E/D/H | gfx1250 E/D/H | Total gfx950 / gfx1250 |
 |---:|---:|---:|---:|
@@ -34,21 +35,19 @@ helpers for 48 total.
 | 8 | 2/7/0 | 2/7/0 | 8 / 8 |
 | 16 | 8/9/0 | 8/9/0 | 16 / 16 |
 | 24 | 8/17/0 | 8/17/0 | 24 / 24 |
-| 32 | 8/17/8 | 8/25/0 | 32 / 32 |
-| 40 | 8/17/8 | 8/33/0 | 32 / 40 |
-| 48 and above | 8/17/8 | 8/33/8 | 32 / 48 |
+| 32 | 8/17/0 | 8/25/0 | 24 / 32 |
+| 40 | 8/17/0 | 8/33/0 | 24 / 40 |
+| 48 and above | 8/17/0 | 8/33/0 | 24 / 40 |
 
 A budget between entries selects the lower entry; 12 selects 8. Explicit
 `cpu_thread_budget` limits the combined allocation. Larger hosts retain the
 highest table entry. Custom JSON allocations and explicit knobs remain
 available for workloads that benefit from more workers.
 
-Both server targets add helpers after reaching their engine/dispatch ceiling.
-Lower-budget comparisons on IREE, Gluon and Tensile favor retaining general
-CU workers over reserving helper slots. Helpers are created lazily when
-eligible MMA reaches the adapter. Disabling helpers retains 8/17/0 on gfx950
-and 8/33/0 on gfx1250 at larger budgets. These defaults limit CPU use while
-retaining matrix overlap; they are not universal throughput optima.
+The retained server presets request helpers after reaching their engine/dispatch
+ceiling. While no handler is eligible, higher budgets retain 8/17/0 on gfx950 and
+8/33/0 on gfx1250. Re-enabling a handler would make helper allocation effective
+again; it would also require renewed validation of overlap and thread budgets.
 
 Desktop and MI210 presets stop at 1/24/0; CDNA3 stops at 8/17/0.
 Two- and four-GPU presets keep **1/1/0** for RCCL. Mirage embeds these native
@@ -94,10 +93,10 @@ cover this fallback; arbitrary forked application workloads are not qualified.
 
 ## Eligibility and fallback
 
-The eligible instruction families are scaled/unscaled f8f6f4 MFMA on
-gfx950, and dense FP4 and scaled 16x16x128 f8f6f4 WMMA on gfx1250.
-Dense FP16/BF16 and FP8/BF8 matrix instructions execute synchronously
-through rj-arith and do not use the helper pool.
+The previously eligible dense MFMA and WMMA families now execute
+synchronously through rj-arith. No current instruction family uses the helper
+pool; the configuration and adapter remain available for future integration.
+The adapter rules below apply when an instruction family opts back in.
 Both targets use [cached lookahead admission](mma-admission.md) to require an
 independent MMA that can remain on the issuer. Scaled instructions require
 vector or inline scale operands; scalar-register scales execute synchronously.
@@ -142,6 +141,11 @@ Unit tests cover register hazards, helper saturation, independent retirement,
 exceptions, floating-point state, instruction-cache invalidation, observer
 fallback, VM ownership and legacy checkpoint compatibility. Functional tests
 compare mixed MMA/memory instruction streams with serial execution.
+
+The [TSan concurrency campaign](../fuzz/execution/README.md#threadsanitizer-concurrency-campaign)
+currently checks concurrent issuer execution with helpers disabled. Its success
+criterion is no TSan reports, not nonzero offload counters. Helper-path coverage
+requires an eligible handler and verified nonzero offload.
 
 For performance comparisons use the same workload and total thread budget,
 reporting dispatch and process wall time

@@ -1,6 +1,14 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#![cfg_attr(
+    windows,
+    allow(
+        clippy::forget_non_drop,
+        reason = "resource Drop glue is absent until a native provider is installed"
+    )
+)]
+
 //! Linear copy and dword fill through a bounded native SDMA submission context.
 
 use std::mem::ManuallyDrop;
@@ -15,7 +23,7 @@ use crate::device::gpu::kernel_queue::{
 };
 use crate::device::gpu::queue::{
     Queue, QueueParameters, QueuePriority, QueueRequest, QueueRingMemory, SdmaEngineSelection,
-    ring_doorbell,
+    store_ordered_mmio64,
 };
 use crate::memory::{Allocation, DeviceAccess, MemoryKind};
 use crate::topology::{GpuSdmaDialect, GpuTargetProfile};
@@ -324,15 +332,39 @@ struct TimingState {
     started: bool,
 }
 
+/// Validates the provider's selected execution path against implemented packet
+/// and completion recipes. There is no fallback after native acquisition.
+fn copy_recipe(
+    info: &crate::topology::GpuInfo,
+) -> Option<(SdmaProtocol, crate::topology::GpuCopyTransport)> {
+    use crate::topology::GpuCopyTransport;
+    let protocol = match info.target_profile.sdma_dialect()? {
+        GpuSdmaDialect::Gfx9 => SdmaProtocol::Gfx9,
+        GpuSdmaDialect::Gfx1200 => SdmaProtocol::Gfx12_0,
+        GpuSdmaDialect::Gfx1250 => SdmaProtocol::Gfx12_5,
+    };
+    let transport = info.queues.copy?;
+    match transport {
+        GpuCopyTransport::User
+            if info.queues.sdma.is_none()
+                || !matches!(protocol, SdmaProtocol::Gfx9)
+                || !cfg!(target_arch = "x86_64") =>
+        {
+            None
+        }
+        GpuCopyTransport::Kernel if !info.queues.kernel_sdma => None,
+        _ => Some((protocol, transport)),
+    }
+}
+
 impl CopyResources {
     fn new(gpu: &GpuDevice<'_>, format: KernelQueueFormat) -> Result<Self, CopyFailure> {
-        let dialect = gpu.info().target_profile.sdma_dialect().ok_or_else(|| {
+        let (protocol, transport) = copy_recipe(gpu.info()).ok_or_else(|| {
             CopyFailure::retired(Error::Operation {
                 kind: ErrorKind::Unsupported,
-                detail: "no qualified SDMA packet dialect for this GPU",
+                detail: "provider has no implemented SDMA copy recipe",
             })
         })?;
-        let gfx9 = dialect == GpuSdmaDialect::Gfx9;
         let command = gpu
             .device()
             .allocate(
@@ -351,7 +383,7 @@ impl CopyResources {
         let command_address = command
             .device_address(gpu.device())
             .map_err(CopyFailure::retired)?;
-        let queue = if gfx9 {
+        let queue = if transport == crate::topology::GpuCopyTransport::User {
             let parameters = match format {
                 KernelQueueFormat::Sdma => QueueParameters::Sdma,
                 KernelQueueFormat::SdmaOnEngine(engine) => QueueParameters::SdmaByEngine {
@@ -388,11 +420,7 @@ impl CopyResources {
             submitting: false,
             submitted_any: false,
             timing: None,
-            protocol: match dialect {
-                GpuSdmaDialect::Gfx9 => SdmaProtocol::Gfx9,
-                GpuSdmaDialect::Gfx1200 => SdmaProtocol::Gfx12_0,
-                GpuSdmaDialect::Gfx1250 => SdmaProtocol::Gfx12_5,
-            },
+            protocol,
         };
         Ok(resources)
     }
@@ -517,7 +545,7 @@ impl CopyResources {
             }
             fence(Ordering::Release);
             (&*(info.write_index_host_address as *const AtomicU64)).store(next, Ordering::Release);
-            ring_doorbell(info.doorbell_host_address, next);
+            store_ordered_mmio64(info.doorbell_host_address, next);
         }
         self.pending = Some(next);
         self.submitting = false;
@@ -1440,12 +1468,7 @@ impl<'device> GpuDevice<'device> {
     /// and native submission path.
     #[must_use]
     pub fn supports_linear_copy(&self) -> bool {
-        let info = self.info();
-        match info.target_profile.sdma_dialect() {
-            Some(GpuSdmaDialect::Gfx9) => cfg!(target_arch = "x86_64") && info.queues.sdma,
-            Some(GpuSdmaDialect::Gfx1200 | GpuSdmaDialect::Gfx1250) => info.queues.kernel_sdma,
-            None => false,
-        }
+        copy_recipe(self.info()).is_some()
     }
 
     /// Copies a non-overlapping device-address range through the GFX12.0 SDMA

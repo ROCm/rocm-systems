@@ -20,7 +20,8 @@ enum class IntegerConversion {
   UnsignedWiden,
   SignedPack,
   UnsignedPack,
-  SaturateBytes
+  SaturateBytes,
+  SaturateBytesFullWord
 };
 
 // Check integer narrowing/extension with modifiers and aliases for the supplied entry point.
@@ -38,12 +39,15 @@ void check_integer(Call call, IntegerConversion operation) {
   }
   uint64_t modifiers = op < 2    ? RJ_ARITH_ALU_HIGH_A
                        : op == 4 ? RJ_ARITH_ALU_HIGH_D | RJ_ARITH_ALU_CLAMP
+                       : op == 5 ? RJ_ARITH_ALU_HIGH_D | RJ_ARITH_ALU_CLAMP
                                  : 0;
   check_conversion<Lanes, Operands, 1, 1, true>(
       call, input,
       [=](uint64_t a, uint32_t b, uint32_t, uint32_t d, uint64_t, uint32_t mode) {
-        return op == 4 ? pack_reference(bool(mode & RJ_ARITH_ALU_HIGH_D), uint32_t(a), b, d)
-                       : integer_conversion_reference(op, uint32_t(a), b, mode);
+        return op == 5   ? pack_reference(bool(mode & RJ_ARITH_ALU_HIGH_D), uint32_t(a), b,
+                                        mode & RJ_ARITH_ALU_HIGH_D ? d : 0)
+               : op == 4 ? pack_reference(bool(mode & RJ_ARITH_ALU_HIGH_D), uint32_t(a), b, d)
+                         : integer_conversion_reference(op, uint32_t(a), b, mode);
       },
       conversion_bits, modifiers, true);
 }
@@ -146,4 +150,14 @@ TEST(ConversionCvtPkI16I32W64, Arithmetic) {
 // Check integer narrowing/extension with modifiers and aliases.
 TEST(ConversionCvtPkU16U32W64, Arithmetic) {
   check_integer<64, 2>(rj_arith_v_cvt_pk_u16_u32_w64, IntegerConversion::UnsignedPack);
+}
+
+TEST(ConversionSatPkU8I16W32Gfx942, Arithmetic) {
+  check_integer<32, 1>(rj_arith_v_sat_pk_u8_i16_w32_gfx942,
+                       IntegerConversion::SaturateBytesFullWord);
+}
+
+TEST(ConversionSatPkU8I16W64Gfx942, Arithmetic) {
+  check_integer<64, 1>(rj_arith_v_sat_pk_u8_i16_w64_gfx942,
+                       IntegerConversion::SaturateBytesFullWord);
 }
