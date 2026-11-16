@@ -12,6 +12,12 @@
 
 namespace rocjitsu::arith {
 
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+// Select FP16 operands with validated controls, preserving inactive lanes and unselected halves.
+void selection_f16_x86_64_v4(Binary op, bool packed, uint64_t flags, uint32_t exec_mask,
+                             uint32_t mode, uint32_t *d, const uint32_t *a, const uint32_t *b);
+#endif
+
 // Evaluate FP16 binary arithmetic. Preserve destination lanes outside exec_mask.
 // compatibility preserves intermediate FP16 rounding; preserve_input_snan retains
 // selected input NaN bits unless that result is clamped.

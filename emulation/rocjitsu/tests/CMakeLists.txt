@@ -18,6 +18,34 @@ if(RJ_ENABLE_UBSAN)
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # A separate executable lets --wrap hide modern stat symbols without
+    # affecting any other test or the interposer's own symbol resolution.
+    add_executable(
+        libc_passthrough_test
+        libc_passthrough_test.cpp
+        ../lib/rocjitsu/src/rocjitsu/kmd/linux/libc_passthrough.cpp
+    )
+    target_include_directories(
+        libc_passthrough_test
+        PRIVATE ../lib/rocjitsu/src ../lib/util/include
+    )
+    target_link_libraries(
+        libc_passthrough_test
+        PRIVATE GTest::gtest_main ${CMAKE_DL_LIBS}
+    )
+    target_link_options(libc_passthrough_test PRIVATE "-Wl,--wrap=dlsym")
+    rj_configure_target(libc_passthrough_test WARNINGS)
+    add_test(NAME LibcPassthrough.NativeStat COMMAND libc_passthrough_test)
+    # Force the old ABI only on hosts for which the resolver knows the
+    # stat version even when the build headers omit _STAT_VER.
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64|aarch64|arm64)$")
+        add_test(
+            NAME LibcPassthrough.LegacyStat
+            COMMAND
+                ${CMAKE_COMMAND} -E env RJ_TEST_LEGACY_STAT=1
+                $<TARGET_FILE:libc_passthrough_test>
+        )
+    endif()
     add_test(
         NAME MemoryKeeper.ScrubbedEnvironmentStartup
         COMMAND
@@ -466,6 +494,7 @@ add_executable(
     config_test.cpp
     rj_vm_config_test.cpp
     checkpoint_restore_errors_test.cpp
+    cdna_integer_arith_test.cpp
     rj_arith_policy_test.cpp
     rj_arith_config_test.cpp
     rj_arith_bridge_test.cpp
@@ -1223,7 +1252,11 @@ if(RJ_BUILD_CONSAN_ANALYZER)
 endif()
 
 # Host-only checked anchor regressions use model ISA providers.
-add_executable(rocjitsu_text_edit_tests patch/checked_text_edits_test.cpp)
+add_executable(
+    rocjitsu_text_edit_tests
+    patch/checked_text_edits_test.cpp
+    patch/bi_edit_safety_test.cpp
+)
 target_include_directories(
     rocjitsu_text_edit_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
@@ -2657,6 +2690,7 @@ set(_rj_interposer_drm_tests
     KfdExportKeepsItsMetadataAfterTheAllocationIsFreed
     KfdImportsRetainMetadataAfterTheOriginalOwnerCloses
     MappingFlagsMatchBackingCapabilities
+    MissingMemfdRoutesRenderNodeIoctls
     OpensWithinCurrentDescriptorLimit
     PrimeHandleToFdReturnsTheBuffer
     PrimeImportKeepsTheBoStateAfterTheHandleCloses
@@ -3682,6 +3716,25 @@ if(HSA_RUNTIME64)
             TIMEOUT 300
         )
 
+        register_hsa_dbi_nop_asm_case(
+            Cdna2
+            Hardware
+            RejectsAppendedCodePastFileBackedLoad
+            SIM
+            CONFIG ${RJ_CDNA2_KMD_CONFIG}
+            CONFIG_NAME ${RJ_CDNA2_KMD_CONFIG_NAME}
+            TIMEOUT 300
+        )
+        register_hsa_dbi_nop_asm_case(
+            Cdna2
+            Hardware
+            AcceptsAppendedCodeAtFileBackedLoadEnd
+            SIM
+            CONFIG ${RJ_CDNA2_KMD_CONFIG}
+            CONFIG_NAME ${RJ_CDNA2_KMD_CONFIG_NAME}
+            TIMEOUT 300
+        )
+
         if(HAS_CDNA2_GPU)
             # Hardware-gated tests. The two that dispatch get an explicit
             # timeout; the load+validate one runs quickly enough for the
@@ -4246,6 +4299,7 @@ if(RJ_ENABLE_HIP_TESTS)
     rj_hip_runtime_supports_arch(RJ_HIP_RUNTIME_SUPPORTS_GFX950 "gfx950")
     rj_hip_runtime_supports_arch(RJ_HIP_RUNTIME_SUPPORTS_GFX942 "gfx942")
     rj_hip_runtime_supports_arch(RJ_HIP_RUNTIME_SUPPORTS_GFX1250 "gfx1250")
+    rj_hip_runtime_supports_arch(RJ_HIP_RUNTIME_SUPPORTS_GFX1251 "gfx1251")
 endif()
 
 if(RJ_ENABLE_HIP_TESTS)
@@ -4767,6 +4821,17 @@ if(RJ_ENABLE_HIP_TESTS)
             CONFIG ${RJ_CDNA3_KMD_CONFIG}
             ENVIRONMENT "RJ_HW_ID_XCDS=8" "RJ_HW_ID_SHADER_ENGINES=4" "RJ_HW_ID_CUS_PER_SE=10"
             TIMEOUT 120
+        )
+    endif()
+
+    if(HAS_GFX1251_DEVICE_KERNELS AND RJ_HIP_RUNTIME_SUPPORTS_GFX1251)
+        rj_add_hip_test(hip_vector_add_gfx1251_test ARCH gfx1251 SOURCE hip_vector_add_test.cpp)
+        rj_add_hip_test_case(
+            hip_vector_add_gfx1251_test
+            "HipVectorAddTest.PackedF64"
+            NAME "HipVectorAddTest.PackedF64.Gfx1251"
+            CONFIG ${PROJECT_SOURCE_DIR}/configs/gfx1251_synthetic.json
+            TIMEOUT 60
         )
     endif()
 

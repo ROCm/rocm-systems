@@ -11,6 +11,7 @@
 #include "device/rocm/rockernel.hpp"
 #include "device/rocm/rocsched.hpp"
 #include "utils/debug.hpp"
+#include "utils/nontemporal.hpp"
 #include <algorithm>
 #include <map>
 
@@ -2613,6 +2614,15 @@ static inline FillPatternPayload buildTilePattern(const void* pattern, size_t pa
   return payload;
 }
 
+// Copies a fill pattern into its kernarg block with non-temporal stores, so no line is left in the
+// CPU cache of a host that maps device memory write-back. nontemporalMemcpy stores a sub-dword
+// tail plainly, so the copy is padded to whole dwords, which the kCBSize block holds.
+static inline void copyFillPattern(void* kernarg_block, const void* pattern, size_t patternSize) {
+  alignas(16) unsigned char padded_pattern[amd::FillMemoryCommand::MaxFillPatterSize] = {};
+  std::memcpy(padded_pattern, pattern, patternSize);
+  amd::nontemporalMemcpy(kernarg_block, padded_pattern, alignUp(patternSize, sizeof(uint32_t)));
+}
+
 // ================================================================================================
 bool KernelBlitManager::fillBuffer1D(device::Memory& memory, const void* pattern,
                                      size_t patternSize, const amd::Coord3D& surface,
@@ -2728,7 +2738,7 @@ bool KernelBlitManager::fillBuffer1D(device::Memory& memory, const void* pattern
   size_t globalWorkSize = std::min(dev().settings().limit_blit_wg_ * localWorkSize, work_items);
   const size_t body_tile_passes = (body_tile_count + globalWorkSize - 1) / globalWorkSize;
 
-  memcpy(kernArgBase, pattern, patternSize);
+  copyFillPattern(kernArgBase, pattern, patternSize);
   constexpr bool kDirectVa = true;
   struct Ushort4 {
     uint16_t s0, s1, s2, s3;
@@ -2820,7 +2830,7 @@ bool KernelBlitManager::fillBuffer2D(device::Memory& memory, const void* pattern
     auto constBuf = isGraphPktCapturing
                         ? gpu().command()->getGraphKernArg(kCBSize, kCBAlignment, dev().index())
                         : gpu().allocKernArg(kCBSize, kCBAlignment);
-    memcpy(constBuf, pattern, patternSize);
+    copyFillPattern(constBuf, pattern, patternSize);
 
     constexpr bool kDirectVa = true;
     setArgument(kernels_[fillType], 4, sizeof(cl_mem), constBuf, 0, nullptr, kDirectVa);
