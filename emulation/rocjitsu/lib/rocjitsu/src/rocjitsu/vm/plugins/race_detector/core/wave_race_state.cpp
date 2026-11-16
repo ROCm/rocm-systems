@@ -14,7 +14,6 @@
 #include <cstdint>
 #include <limits>
 #include <span>
-#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -120,7 +119,8 @@ void WaveRaceState::registerEventWithIntervals(
   waveMemoryEvents.push_back(eventId);
 }
 
-void WaveRaceState::prepareForCounterIncrement(amdgpu::WaitCounterType type, uint8_t increment) {
+util::Result WaveRaceState::prepareForCounterIncrement(amdgpu::WaitCounterType type,
+                                                       uint8_t increment) {
   // The runtime plugin calls this only for pre-GFX12 capacity models, where
   // these internal split names alias the combined architectural counters.
   if (amdgpu::wait_counter_covers(amdgpu::WaitCounterType::VMCNT, type))
@@ -145,37 +145,36 @@ void WaveRaceState::prepareForCounterIncrement(amdgpu::WaitCounterType type, uin
   case amdgpu::WaitCounterType::TENSORCNT:
   case amdgpu::WaitCounterType::SAMPLECNT:
   case amdgpu::WaitCounterType::ASYNCCNT:
-    return;
+    return util::Result::success();
   default:
     assert(false && "invalid wait counter type");
-    return;
+    return util::Result::success();
   }
-  if (capacity <= 0)
-    throw std::logic_error("counter capacity is not configured");
-  assert(increment > 0 && increment <= capacity &&
-         "counter increment is outside the configured capacity");
-  if (increment == 0 || increment > capacity)
-    return;
+  if (capacity <= 0 || increment == 0 || increment > capacity)
+    return util::Result::failure();
 
   int pending_tokens = 0;
   for (const EventId event_id : waveMemoryEvents)
     pending_tokens += detector->events().pendingCounterIncrement(event_id, type);
   if (pending_tokens + increment <= capacity)
-    return;
+    return util::Result::success();
 
   // An instruction cannot issue if adding its counter token would overflow the
   // finite counter. Once participation is known, admission establishes the
   // same upper bound as an implicit partial wait.
   applyCounterConstraint(type, capacity - increment, /*includeUnordered=*/false);
+  return util::Result::success();
 }
 
-void WaveRaceState::prepareForMemoryIssue(const amdgpu::MemoryIssueInfo &info) {
+util::Result WaveRaceState::prepareForMemoryIssue(const amdgpu::MemoryIssueInfo &info) {
   for (const auto obligation : info.counter_obligations()) {
     const auto counter = obligation.wait_counter_type();
     if (amdgpu::wait_counter_covers(amdgpu::WaitCounterType::VMCNT, counter) ||
         amdgpu::wait_counter_covers(amdgpu::WaitCounterType::LGKMCNT, counter))
-      prepareForCounterIncrement(counter, obligation.counter_increment());
+      if (prepareForCounterIncrement(counter, obligation.counter_increment()).failed())
+        return util::Result::failure();
   }
+  return util::Result::success();
 }
 
 void WaveRaceState::registerLdsEvent(InstructionSnapshot instruction, MemoryEventType type,

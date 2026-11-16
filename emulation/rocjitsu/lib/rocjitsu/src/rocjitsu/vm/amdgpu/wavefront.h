@@ -17,9 +17,11 @@
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
 #include "rocjitsu/vm/plugins/wavefront_state.h"
 #include "rocjitsu/vm/thread_context.h"
+#include "util/diagnostic.h"
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cassert>
 #include <cstdint>
 #include <memory>
@@ -67,6 +69,7 @@ enum class InstructionExecutionError : uint8_t {
   UnimplementedInstruction,
   DecodeFailure,
   IllegalInstruction,
+  PluginFailure,
 };
 
 /// @brief Allocation slice within a register file.
@@ -321,19 +324,22 @@ public:
   /// queue whose context-save-restore area holds its saved state.
   void set_queue_id(uint32_t id) { queue_id_ = id; }
 
-  /// @brief Return the owning process ID (PASID analog).
+  /// @brief Return the dispatch's VMID or PASID, according to its identity kind.
   uint32_t process_id() const { return process_id_; }
 
-  /// @brief Set the owning process ID at dispatch time.
-  void set_process_id(uint32_t id) { process_id_ = id; }
+  /// @brief Set the owning VMID or PASID at dispatch time.
+  /// @details The default kind identifies a PASID.
+  void set_process_id(uint32_t id, ProcessIdentityKind kind = ProcessIdentityKind::Pasid);
 
   /// @brief Return the generation-safe identity of the owning GPU address space.
   AddressSpaceHandle address_space() const { return address_space_; }
 
   /// @brief Set the owning GPU address space at dispatch time.
   void set_address_space(AddressSpaceHandle address_space) {
-    if (address_space_ != address_space)
+    if (address_space_ != address_space) {
       vm_access_.reset();
+      execution_root_access_.reset();
+    }
     address_space_ = address_space;
   }
 
@@ -342,7 +348,25 @@ public:
 
   /// @brief Share the dispatch-scoped VM snapshot with this wave.
   void set_vm_access(util::IntrusiveSharedPtr<const GpuVmAccessSnapshot> access) {
+    if (access && !execution_root_access_)
+      execution_root_access_ = access;
     vm_access_ = std::move(access);
+  }
+  [[nodiscard]] bool same_execution_root(const GpuVmAccess &access) const {
+    return !execution_root_access_ || execution_root_access_->value.same_root_lineage(access);
+  }
+  void set_execution_effect_guard(std::shared_ptr<std::atomic_bool> marker) {
+    execution_effect_possible_ = std::move(marker);
+    execution_effect_marked_ = false;
+  }
+  [[nodiscard]] bool needs_execution_effect_mark() const {
+    return execution_effect_possible_ && !execution_effect_marked_;
+  }
+  void note_potential_execution_effect() {
+    if (needs_execution_effect_mark()) {
+      execution_effect_possible_->store(true, std::memory_order_release);
+      execution_effect_marked_ = true;
+    }
   }
   /// @brief Use host monotonic time for a live queue or model time for a standalone wave.
   void set_system_clock(bool enabled) { use_system_clock_ = enabled; }
@@ -460,9 +484,10 @@ public:
   /// decoder through this virtual call. It is pure virtual because an out-of-line
   /// definition would become Wavefront's key function, and plugins could then no
   /// longer emit Wavefront's type information themselves.
-  /// @throws std::logic_error if the encoding is empty, truncated, or undecodable.
-  virtual std::string disassemble_instruction(std::span<const uint32_t> encoding,
-                                              uint64_t pc) const = 0;
+  /// Returns failure and emits a diagnostic if the encoding is empty, truncated, or undecodable.
+  virtual util::FailureOr<std::string>
+  disassemble_instruction(std::span<const uint32_t> encoding, uint64_t pc,
+                          util::DiagnosticEmitter diagnostic = {}) const = 0;
 
   /// @brief Read GPU memory in this wave's process address space.
   [[nodiscard]] VmAccessOutcome read_gpu_memory(uint64_t addr, std::span<uint8_t> dst) const;
@@ -932,9 +957,19 @@ public:
     return instruction_execution_error_ != InstructionExecutionError::None;
   }
 
+  /// @brief Preserve the diagnostic name before a failed pipeline destroys its instruction.
+  void preserve_instruction_execution_error_mnemonic(std::string_view mnemonic) const {
+    instruction_execution_error_mnemonic_ = mnemonic;
+  }
+
+  std::string_view instruction_execution_error_mnemonic() const {
+    return instruction_execution_error_mnemonic_;
+  }
+
   void clear_instruction_execution_error() {
     instruction_execution_error_ = InstructionExecutionError::None;
     instruction_execution_error_detail_ = nullptr;
+    instruction_execution_error_mnemonic_.clear();
   }
 
   void begin_instruction_execution() { clear_instruction_execution_error(); }
@@ -1288,6 +1323,9 @@ public:
     wave_in_group_ = 0;
     address_space_ = {};
     vm_access_.reset();
+    execution_root_access_.reset();
+    execution_effect_possible_.reset();
+    execution_effect_marked_ = false;
     process_id_ = 0;
     use_system_clock_ = false;
     drm_shader_addresses_ = false;
@@ -1349,6 +1387,7 @@ public:
     pending_memory_trap_ = MemoryTrapDelivery::None;
     instruction_execution_error_ = InstructionExecutionError::None;
     instruction_execution_error_detail_ = nullptr;
+    instruction_execution_error_mnemonic_.clear();
     sleep_cycles_ = 0;
     sleep_wakeup_ = false;
     in_trap_handler_ = false;
@@ -1397,8 +1436,12 @@ protected:
   uint32_t wave_in_group_ = 0;   ///< Position of this wave within its workgroup (debugger).
   AddressSpaceHandle address_space_; ///< Generation-safe GPU address-space identity.
   util::IntrusiveSharedPtr<const GpuVmAccessSnapshot>
-      vm_access_;           ///< Dispatch-scoped immutable VM snapshot.
-  uint32_t process_id_ = 0; ///< Owning process ID (PASID analog, set per dispatch).
+      vm_access_; ///< Dispatch-scoped immutable VM snapshot.
+  util::IntrusiveSharedPtr<const GpuVmAccessSnapshot>
+      execution_root_access_; ///< Root retained across revocation.
+  std::shared_ptr<std::atomic_bool> execution_effect_possible_;
+  bool execution_effect_marked_ = false;
+  uint32_t process_id_ = 0; ///< Dispatch VMID or PASID, selected by the identity kind.
 
   bool use_system_clock_ = false; ///< Live queue timestamps use host monotonic time.
   bool drm_shader_addresses_ = false;
@@ -1407,6 +1450,7 @@ protected:
   uint32_t queue_id_ = 0; ///< KFD queue ID that launched this wave (debugger correlation).
   mutable InstructionExecutionError instruction_execution_error_ = InstructionExecutionError::None;
   mutable const char *instruction_execution_error_detail_ = nullptr;
+  mutable std::string instruction_execution_error_mnemonic_;
   uint32_t lds_base_ = 0;     ///< Per-WG LDS base offset (set per dispatch).
   uint32_t lds_size_ = 0;     ///< Aligned per-WG LDS allocation size.
   Lds *lds_ = nullptr;        ///< Placement-selected LDS backing; nullptr means CU-local LDS.
@@ -1638,8 +1682,9 @@ public:
       : Wavefront(cu, wf_id, Isa::WF_SIZE, Isa::WF_SIZE_MAX, Isa::MAX_SGPRS_PER_WF,
                   Isa::MAX_VGPRS_PER_WF, Isa::MODE_HAS_GPR_IDX_EN) {}
 
-  std::string disassemble_instruction(std::span<const uint32_t> encoding,
-                                      uint64_t pc) const override;
+  util::FailureOr<std::string>
+  disassemble_instruction(std::span<const uint32_t> encoding, uint64_t pc,
+                          util::DiagnosticEmitter diagnostic = {}) const override;
 };
 
 } // namespace amdgpu

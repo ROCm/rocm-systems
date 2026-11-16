@@ -30,7 +30,6 @@
 #include <optional>
 #include <span>
 #include <sstream>
-#include <stdexcept>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -39,28 +38,31 @@ namespace rocjitsu::plugins::race_detector {
 
 namespace {
 
-InstructionSnapshot capture_instruction(uint64_t pc, const Instruction &inst) {
-  static_assert(InstructionSnapshot::kMaxWords == amdgpu::DecodedInstructionCache::kNumWords);
-  if (!inst.raw_encoding())
-    throw std::logic_error(
-        std::format("race detector instruction at PC {:#x} has no encoding", pc));
-  if (inst.size() <= 0 || inst.size() % sizeof(uint32_t) != 0 ||
-      static_cast<size_t>(inst.size()) > InstructionSnapshot::kMaxWords * sizeof(uint32_t))
-    throw std::logic_error(std::format(
-        "race detector instruction at PC {:#x} has invalid encoding size {}", pc, inst.size()));
-  return {pc, std::span(inst.raw_encoding(), inst.size() / sizeof(uint32_t))};
+void report_plugin_failure(const amdgpu::Wavefront &wf, const char *detail) {
+  if (!wf.instruction_execution_failed())
+    wf.report_instruction_execution_error(amdgpu::InstructionExecutionError::PluginFailure, detail);
 }
 
-// onAmdgpuBeforeExecuteInstruction() records each instruction before it can
-// access registers or memory, so the newest trace entry is the instruction that
-// is executing. Use it instead of wf.pc, which some instructions change before
-// they finish accessing registers (for example, s_swappc_b64).
-const InstructionSnapshot &current_instruction(const RaceWavefrontState &state,
+util::FailureOr<InstructionSnapshot> capture_instruction(uint64_t pc, const Instruction &inst,
+                                                         const amdgpu::Wavefront &wf) {
+  static_assert(InstructionSnapshot::kMaxWords == amdgpu::DecodedInstructionCache::kNumWords);
+  if (!inst.raw_encoding() || inst.size() <= 0 || inst.size() % sizeof(uint32_t) != 0 ||
+      static_cast<size_t>(inst.size()) > InstructionSnapshot::kMaxWords * sizeof(uint32_t)) {
+    report_plugin_failure(wf, "race detector instruction has no valid encoding");
+    return util::Result::failure();
+  }
+  return InstructionSnapshot{pc, std::span(inst.raw_encoding(), inst.size() / sizeof(uint32_t))};
+}
+
+// Before-execute records the instruction before its register or memory hooks.
+// Reports may also be requested after a rejected capture; fail closed in that case.
+const InstructionSnapshot *current_instruction(const RaceWavefrontState &state,
                                                const amdgpu::Wavefront &wf) {
-  if (state.trace.size() == 0)
-    throw std::logic_error(
-        std::format("race detector has no current instruction at PC {:#x}", wf.pc));
-  return state.trace[state.trace.size() - 1];
+  if (state.trace.size() == 0) {
+    report_plugin_failure(wf, "race detector has no current instruction");
+    return nullptr;
+  }
+  return &state.trace[state.trace.size() - 1];
 }
 
 void warn_cluster_peer_writes_ignored_once() {
@@ -154,16 +156,18 @@ routed_flat_issue_info(const amdgpu::MemoryAccessObservation &access,
 
 } // namespace
 
-MarkedInstruction findConflict(const RaceViolation &v, RaceDetector &detector) {
+util::FailureOr<MarkedInstruction> findConflict(const RaceViolation &v, RaceDetector &detector) {
   EventId event_id = v.conflictingEvent;
   if (!detector.events().contains(event_id))
-    throw std::out_of_range("race violation references an unavailable conflicting event");
-  return {detector.events().instruction(event_id), detector.events().waveId(event_id).value, -1};
+    return util::Result::failure();
+  return MarkedInstruction{detector.events().instruction(event_id),
+                           detector.events().waveId(event_id).value, -1};
 }
 
-std::string formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
-                        const std::function<std::string(const InstructionSnapshot &)> &disassemble,
-                        std::optional<MarkedInstruction> conflict, MarkedInstruction read) {
+util::FailureOr<std::string> formatTrace(
+    const RingBuffer<InstructionSnapshot, 256> &trace,
+    const std::function<util::FailureOr<std::string>(const InstructionSnapshot &)> &disassemble,
+    std::optional<MarkedInstruction> conflict, MarkedInstruction read) {
   auto isMarked = [&](const InstructionSnapshot &instruction) {
     return instruction == read.instruction || (conflict && instruction == conflict->instruction);
   };
@@ -189,9 +193,11 @@ std::string formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
 
   if (conflict && !conflict_found) {
     oss << "  ==>  0x" << std::hex << conflict->instruction.pc() << std::dec << "  ";
-    const auto d = disassemble(conflict->instruction);
-    if (!d.empty())
-      oss << d << "  ";
+    util::FailureOr<std::string> text = disassemble(conflict->instruction);
+    if (text.failed())
+      return util::Result::failure();
+    if (!text.value().empty())
+      oss << text.value() << "  ";
     oss << "(before trace window)";
     oss << "  ; <-- wave " << conflict->wave;
     if (conflict->lane >= 0)
@@ -210,12 +216,15 @@ std::string formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
   constexpr size_t MAX_PRINT_SIZE = 32;
   size_t span = (last > first) ? last - first : 0;
 
-  auto emit = [&](size_t i) {
+  auto emit = [&](size_t i) -> util::Result {
     const auto &instruction = trace[i];
     bool is_conflict = conflict && instruction == conflict->instruction;
     bool is_read = instruction == read.instruction;
     oss << ((is_conflict || is_read) ? "  ==>  " : "       ");
-    oss << "0x" << std::hex << instruction.pc() << std::dec << "  " << disassemble(instruction);
+    util::FailureOr<std::string> text = disassemble(instruction);
+    if (text.failed())
+      return util::Result::failure();
+    oss << "0x" << std::hex << instruction.pc() << std::dec << "  " << text.value();
     if (is_conflict) {
       oss << "  ; <-- wave " << conflict->wave;
       if (conflict->lane >= 0)
@@ -227,18 +236,22 @@ std::string formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
         oss << " lane " << read.lane;
     }
     oss << "\n";
+    return util::Result::success();
   };
 
   if (span <= MAX_PRINT_SIZE) {
     for (size_t i = first; i < last; ++i)
-      emit(i);
+      if (emit(i).failed())
+        return util::Result::failure();
   } else {
     size_t half = MAX_PRINT_SIZE / 2;
     for (size_t i = first; i < first + half; ++i)
-      emit(i);
+      if (emit(i).failed())
+        return util::Result::failure();
     oss << "       ... " << (span - MAX_PRINT_SIZE) << " instructions elided ...\n";
     for (size_t i = last - half; i < last; ++i)
-      emit(i);
+      if (emit(i).failed())
+        return util::Result::failure();
   }
   return oss.str();
 }
@@ -291,8 +304,10 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
     amdgpu::Wavefront *wf = wf_ptrs[v.wave];
     auto *ws = get_state(wf);
     assert(ws && ws->race_state && "no wavefront state for race");
-    const InstructionSnapshot current = current_instruction(*ws, *wf);
-    uint64_t pc = current.pc();
+    const InstructionSnapshot *current = current_instruction(*ws, *wf);
+    if (!current)
+      return;
+    uint64_t pc = current->pc();
 
     {
       std::lock_guard<std::mutex> lock(report_mutex_);
@@ -301,7 +316,12 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
     }
 
     auto *detector = ws->race_state->getDetector();
-    MarkedInstruction conflict = findConflict(v, *detector);
+    util::FailureOr<MarkedInstruction> maybe_conflict = findConflict(v, *detector);
+    if (maybe_conflict.failed()) {
+      report_plugin_failure(*wf, "race violation references an unavailable conflicting event");
+      return;
+    }
+    const MarkedInstruction &conflict = maybe_conflict.value();
 
     std::ostringstream oss;
     if (v.space == RaceViolation::Space::VGPR)
@@ -318,13 +338,22 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
       oss << ", lane " << v.lane;
     oss << "]\n";
 
-    MarkedInstruction access_mark{current, v.wave, v.lane};
-    oss << formatTrace(
+    MarkedInstruction access_mark{*current, v.wave, v.lane};
+    util::StringDiagnostic diagnostic;
+    util::FailureOr<std::string> trace = formatTrace(
         ws->trace,
-        [wf](const InstructionSnapshot &instruction) {
-          return wf->disassemble_instruction(instruction.encoding(), instruction.pc());
+        [wf, &diagnostic](const InstructionSnapshot &instruction) {
+          return wf->disassemble_instruction(instruction.encoding(), instruction.pc(),
+                                             diagnostic.emitter());
         },
         conflict, access_mark);
+    if (trace.failed()) {
+      report_plugin_failure(*wf, "race detector could not disassemble the instruction trace");
+      std::lock_guard<std::mutex> lock(report_mutex_);
+      sink().write(diagnostic.message());
+      return;
+    }
+    oss << trace.value();
 
     {
       std::lock_guard<std::mutex> lock(report_mutex_);
@@ -410,7 +439,10 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
   auto *rs = s->race_state;
   auto *detector = rs->getDetector();
   auto waveId = rs->getWaveId();
-  const InstructionSnapshot &instruction = current_instruction(*s, wf);
+  const InstructionSnapshot *current = current_instruction(*s, wf);
+  if (!current)
+    return;
+  const InstructionSnapshot &instruction = *current;
   // One DDS request faults the entire FLAT operation before any segment accesses memory.
   if (access.flat_dds_lane_mask)
     return;
@@ -431,8 +463,11 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
   const auto &issue = routed ? *routed : *decoded;
   const auto obligations = issue.counter_obligations();
   const MemoryOrderClass memoryOrder = memoryOrderForObligations(obligations);
-  if (routed && access.request_lane_mask != 0 && supports_counter_capacity(wf.cu().arch()))
-    rs->prepareForMemoryIssue(issue);
+  if (routed && access.request_lane_mask != 0 && supports_counter_capacity(wf.cu().arch()) &&
+      rs->prepareForMemoryIssue(issue).failed()) {
+    report_plugin_failure(wf, "race detector counter capacity or increment is invalid");
+    return;
+  }
 
   const uint64_t sharedLanes = access.flat_local_lane_mask | access.flat_dds_lane_mask;
   const bool mixedFlat = inst.data()->tag() == amdgpu::GLOBAL_MEM && sharedLanes != 0;
@@ -542,8 +577,25 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
 
   if (inst.data()->tag() == amdgpu::GLOBAL_MEM) {
     auto &d = *inst.data_as<amdgpu::VectorMemState>();
-    if (d.exec_mask == 0)
+    if (d.exec_mask == 0) {
+      // A VMEM instruction with EXEC zero issues and counts like any other; the
+      // hardware may skip it only when LOADcnt, STOREcnt, ASYNCcnt and TENSORcnt
+      // are all zero (CDNA5 ISA 3.2.2.1). An async copy is therefore registered
+      // as an event without LDS bytes, so later partial waits complete the copies
+      // issued before it. Registering it is safe even if it was skipped: every
+      // earlier async copy had then completed, and partial waits retire the
+      // oldest copies first, so counting it never retires a later copy.
+      const bool asyncCopy =
+          (d.lds_src || d.lds_dst) && std::ranges::any_of(obligations, [](const auto &obligation) {
+            return obligation.wait_counter_type() == amdgpu::WaitCounterType::ASYNCCNT;
+          });
+      if (asyncCopy)
+        rs->registerLdsRangeEvent(instruction,
+                                  d.lds_src ? MemoryEventType::LDS_TO_GLOBAL
+                                            : MemoryEventType::GLOBAL_TO_LDS,
+                                  {}, obligations, memoryOrder);
       return;
+    }
     if (d.lds_dst) {
       uint32_t perLaneBytes = d.buffer_components
                                   ? 4u * d.destination_vgpr_count()
@@ -592,6 +644,36 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
       rs->registerLdsEvent(instruction, MemoryEventType::GLOBAL_TO_LDS, {}, validLaneMask,
                            wf.wf_size(), std::span<const uint32_t>(ldsAddrs, wf.wf_size()),
                            perLaneBytes, 0xF, obligations, memoryOrder);
+    } else if (d.lds_src) {
+      // An async store reads its LDS source, which stays an LDS read until a
+      // wait retires the store. Async copies may access LDS out of order with
+      // each other (CDNA5 ISA 10.8). The ISA does not establish their LDS access
+      // order relative to DS instructions or tensor DMA, so as a conservative
+      // rule the read is checked as unordered against every pending LDS write,
+      // including the wave's own DS writes, async loads and tensor loads.
+      // Each lane reads the leading bytes the execution recorded: the bytes of
+      // its source inside the allocation. They are checked and registered at
+      // byte granularity.
+      std::vector<LdsByteRange> ranges;
+      ranges.reserve(wf.wf_size());
+      for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+        const uint32_t address = d.per_lane_lds_addr[lane];
+        const uint32_t laneBytes = d.per_lane_lds_src_bytes[lane];
+        if (!(d.exec_mask & (1ULL << lane)) || address == amdgpu::kInvalidLdsAddress ||
+            laneBytes == 0)
+          continue;
+        ranges.push_back({.address = address, .bytes = laneBytes});
+        const auto bytes = detector->ldsBytesInRange(address, laneBytes, /*elementBytes=*/1);
+        if (bytes != 0)
+          detector->validateRead(static_cast<int>(address), waveId, static_cast<int>(lane),
+                                 static_cast<int>(bytes), MemoryOrderClass::UNORDERED);
+      }
+      if (obligations.empty())
+        return;
+      // One event per instruction, so the store takes one ASYNCcnt slot, also
+      // when no lane reads LDS.
+      rs->registerLdsRangeEvent(instruction, MemoryEventType::LDS_TO_GLOBAL, ranges, obligations,
+                                memoryOrder);
     } else if (d.is_load) {
       auto destinations = validated_load_destinations(d, wf);
       if (!destinations)
@@ -647,7 +729,10 @@ void RaceDetectorPlugin::onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObs
   // The hook fires in the tensor instruction's own step, before the transfer's
   // global requests and LDS writes, as onAmdgpuMemoryAccessRouted() does for
   // other memory instructions.
-  const InstructionSnapshot &instruction = current_instruction(*s, wf);
+  const InstructionSnapshot *current = current_instruction(*s, wf);
+  if (!current)
+    return;
+  const InstructionSnapshot &instruction = *current;
   auto *rs = s->race_state;
   auto *detector = rs->getDetector();
   const auto waveId = rs->getWaveId();
@@ -728,7 +813,9 @@ void RaceDetectorPlugin::onAmdgpuWriteScalarRegister(const amdgpu::Wavefront *wf
 
 void RaceDetectorPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
                                                           amdgpu::Wavefront &wf) {
-  const InstructionSnapshot instruction = capture_instruction(pc, inst);
+  util::FailureOr<InstructionSnapshot> instruction = capture_instruction(pc, inst, wf);
+  if (instruction.failed())
+    return;
   auto *s = get_state(wf);
   assert(s && s->race_state);
   if (supports_counter_capacity(wf.cu().arch())) {
@@ -737,17 +824,23 @@ void RaceDetectorPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Ins
     if (inst.is_memory_op() && !inst.mnemonic().starts_with("flat_")) {
       const auto *info = inst.amdgpu_memory_issue_info();
       assert(info && "memory instruction reached the race detector without issue metadata");
-      if (info && (!info->exec_masked || wf.exec() != 0))
-        s->race_state->prepareForMemoryIssue(*info);
+      if (info && (!info->exec_masked || wf.exec() != 0) &&
+          s->race_state->prepareForMemoryIssue(*info).failed()) {
+        report_plugin_failure(wf, "race detector counter capacity or increment is invalid");
+        return;
+      }
     }
 
     // Messages share LGKMCNT on the capacity-modeled targets but are not memory
     // instructions, so they intentionally remain outside memory issue metadata.
-    if (std::string_view(inst.mnemonic()).starts_with("s_sendmsg"))
-      s->race_state->prepareForCounterIncrement(amdgpu::WaitCounterType::LGKMCNT);
+    if (std::string_view(inst.mnemonic()).starts_with("s_sendmsg") &&
+        s->race_state->prepareForCounterIncrement(amdgpu::WaitCounterType::LGKMCNT).failed()) {
+      report_plugin_failure(wf, "race detector counter capacity or increment is invalid");
+      return;
+    }
   }
   s->lds_operand_read.reset();
-  s->trace.push(instruction);
+  s->trace.push(instruction.value());
   // Implicit VCC operands use wave mask operations directly. Observe only
   // the architectural mask, excluding temporary VCC saves by SDWA execution.
   if (wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA3 && !s->race_state->getWaveMemoryEvents().empty()) {
@@ -776,8 +869,10 @@ void RaceDetectorPlugin::onAmdgpuAfterExecuteInstruction(uint64_t /*pc*/, const 
   auto *s = get_state(wf);
   assert(s && s->race_state);
   if (auto &read = s->lds_operand_read) {
-    s->race_state->recordLdsOperandRead(current_instruction(*s, wf), read->address, read->bytes,
-                                        read->lane);
+    const InstructionSnapshot *current = current_instruction(*s, wf);
+    if (!current)
+      return;
+    s->race_state->recordLdsOperandRead(*current, read->address, read->bytes, read->lane);
     read.reset();
     return;
   }

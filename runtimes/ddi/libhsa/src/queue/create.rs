@@ -48,7 +48,7 @@ pub(crate) unsafe fn create_hardware_queue(
     } else {
         None
     };
-    let (size, callback, data, private_segment_size) = if cooperative {
+    let (mut size, callback, data, private_segment_size) = if cooperative {
         (
             16_384 / AQL_PACKET_BYTES as u32,
             None,
@@ -58,9 +58,6 @@ pub(crate) unsafe fn create_hardware_queue(
         )
     } else {
         (size.max(64), callback, data, private_segment_size)
-    };
-    let Some(ring_size_bytes) = u64::from(size).checked_mul(AQL_PACKET_BYTES as u64) else {
-        return INVALID_QUEUE_CREATION;
     };
     let prepared = {
         let mut guard = match lock() {
@@ -83,8 +80,33 @@ pub(crate) unsafe fn create_hardware_queue(
         let Some(index) = runtime.gpu_index(agent) else {
             return INVALID_AGENT;
         };
+        let info = runtime.gpus[index].info();
+        let Some((minimum, maximum)) = aql_queue_limits(&info) else {
+            return INVALID_QUEUE_CREATION;
+        };
         if cooperative {
-            if runtime.gpus[index].info().gws_count == 0 {
+            let Some(selected) = cooperative_queue_size(&info) else {
+                return INVALID_QUEUE_CREATION;
+            };
+            size = selected;
+        }
+        if size < minimum
+            || size > maximum
+            || (queue_type != QUEUE_TYPE_SINGLE
+                && info
+                    .queues
+                    .aql
+                    .is_none_or(|controls| !controls.multiple_producers))
+        {
+            return INVALID_QUEUE_CREATION;
+        }
+        if cooperative {
+            if !runtime.gpus[index]
+                .info()
+                .queues
+                .aql
+                .is_some_and(|queue| queue.cooperative)
+            {
                 return INVALID_QUEUE_CREATION;
             }
             if runtime
@@ -160,6 +182,7 @@ pub(crate) unsafe fn create_hardware_queue(
         }
     };
 
+    let ring_size_bytes = u64::from(size) * AQL_PACKET_BYTES as u64;
     let inactive_signal = match QueueEventSignal::create(
         prepared.event.clone(),
         &prepared.device,

@@ -945,14 +945,14 @@ configure_settings(bool _init)
     ROCPROFSYS_CONFIG_SETTING(
         std::string, env_vars::TRACE_PERIOD_CLOCK_ID,
         "Clock used to measure delay and duration for ROCPROFSYS_TRACE_DELAY, "
-        "ROCPROFSYS_TRACE_DURATION, and ROCPROFSYS_TRACE_PERIODS.\n"
-        "  realtime (default) : wall-clock time. A 10-second delay waits for\n"
-        "    10 real seconds regardless of how many CPU cores are active.\n"
-        "  cputime : process CPU time (CLOCK_PROCESS_CPUTIME_ID). A 10-second\n"
-        "    delay waits until the process has consumed 10 CPU-seconds in total\n"
-        "    across all threads. Useful when you want to skip a fixed amount of\n"
-        "    computation rather than a fixed elapsed time. Note: rocprof-sys\n"
-        "    instrumentation itself contributes to the CPU-time counter.",
+        "ROCPROFSYS_TRACE_DURATION, and ROCPROFSYS_TRACE_PERIODS."
+        "  realtime (default) : wall-clock time. A 10-second delay waits for"
+        " 10 real seconds regardless of how many CPU cores are active."
+        "  cputime : process CPU time (CLOCK_PROCESS_CPUTIME_ID). A 10-second"
+        " delay waits until the process has consumed 10 CPU-seconds in total"
+        " across all threads. Useful when you want to skip a fixed amount of"
+        " computation rather than a fixed elapsed time. Note: rocprof-sys"
+        " instrumentation itself contributes to the CPU-time counter.",
         "realtime", "trace", "profile", "perfetto", "timemory")
         ->set_choices({ "realtime", "cputime" });
 

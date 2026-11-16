@@ -1,0 +1,11 @@
+diff --git a/hw/pci-bridge/xio3130_downstream.c b/hw/pci-bridge/xio3130_downstream.c
+index dc7d1aa..c09e2db 100644
+--- a/hw/pci-bridge/xio3130_downstream.c
++++ b/hw/pci-bridge/xio3130_downstream.c
+@@ -27,0 +28 @@
++#include "hw/qdev-properties-system.h"
+@@ -139,0 +141,4 @@ static const Property xio3130_downstream_props[] = {
++    DEFINE_PROP_PCIE_LINK_SPEED("x-speed", PCIESlot,
++                                speed, PCIE_LINK_SPEED_2_5),
++    DEFINE_PROP_PCIE_LINK_WIDTH("x-width", PCIESlot,
++                                width, PCIE_LINK_WIDTH_1),

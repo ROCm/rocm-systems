@@ -1045,10 +1045,9 @@ TEST(XcdPartitioningTest, LoaderResolvesZeroThreadsAcrossExtraGpuBuilds) {
 // than in a CI grep keeps every config covered as new ones are added.
 TEST(XcdPartitioningTest, ShippedConfigsOmitNumThreadsExceptTheDocumentedPin) {
   const std::set<std::string> kPinnedConfigs = {
-      "gfx950_mi350x_kmd_2gpu.json",
-      "gfx950_mi355x_kmd_2gpu.json",
-      "gfx1250_mi455x_kmd_4gpu.json",
-      "gfx1250_mi455x_kmd_2node_net.json",
+      "gfx950_mi350x_kmd_2gpu.json",      "gfx950_mi355x_kmd_2gpu.json",
+      "gfx1250_mi455x_kmd_4gpu.json",     "gfx1250_mi455x_kmd_2node_net.json",
+      "gfx1250_mi455x_4gpu_scaleup.json", "gfx1250_mi455x_kmd_4node_2gpu_if.json",
   };
   std::set<std::string> saw_pinned_configs;
   uint32_t configs_checked = 0;
@@ -1078,7 +1077,8 @@ TEST(XcdPartitioningTest, ShippedConfigsOmitNumThreadsExceptTheDocumentedPin) {
       // turns a pin of 0 -- which opts back into the default -- into 1 as
       // surely as a real pin does. At 64 the config has to carry the literal 1.
       config::LoadedConfig pinned;
-      if (entry.path().filename() == "gfx1250_mi455x_kmd_2node_net.json") {
+      if (entry.path().filename() == "gfx1250_mi455x_kmd_2node_net.json" ||
+          entry.path().filename() == "gfx1250_mi455x_kmd_4node_2gpu_if.json") {
         ASSERT_TRUE(test::load_valid_config_for_node(entry.path().string(), pinned, "node0",
                                                      /*host_threads=*/64));
       } else {
@@ -1098,24 +1098,31 @@ TEST(XcdPartitioningTest, ShippedConfigsOmitNumThreadsExceptTheDocumentedPin) {
   EXPECT_GT(configs_checked, 1u);
 }
 
-TEST(XcdPartitioningTest, CApiDefaultsToOnePartitionPerXcdAndRuns) {
-  rj_vm_t *raw_vm = nullptr;
-  testing::internal::CaptureStderr();
-  const rj_status_t status = rj_vm_create(CONFIG_PATH.c_str(), RJ_VM_MODE_DEFAULT, &raw_vm);
-  const std::string warning = testing::internal::GetCapturedStderr();
-  ASSERT_EQ(status, ROCJITSU_STATUS_SUCCESS);
-  ASSERT_NE(raw_vm, nullptr);
-  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(raw_vm, &rj_vm_destroy);
+TEST(XcdPartitioningTest, CApiDefaultsFollowExecutionThreadBudgetAndRuns) {
+  // The shipped allocation table shares the budget with dispatch workers; a
+  // two-CPU host gets one engine, not min(host CPUs, XCDs). Pin the budgets so
+  // both small CI runners and large developer machines exercise this rule.
+  for (const auto &[budget, engines] :
+       {std::pair{1u, 1u}, std::pair{2u, 1u}, std::pair{4u, 2u}, std::pair{16u, 8u}}) {
+    SCOPED_TRACE(budget);
+    std::string json;
+    ASSERT_TRUE(config_json_with_num_threads(json, CONFIG_PATH, 0));
+    json.insert(json.find('{') + 1, "\"cpu_thread_budget\":" + std::to_string(budget) + ",");
+    rj_vm_t *raw_vm = nullptr;
+    testing::internal::CaptureStderr();
+    const rj_status_t status = rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw_vm);
+    const std::string warning = testing::internal::GetCapturedStderr();
+    ASSERT_EQ(status, ROCJITSU_STATUS_SUCCESS);
+    ASSERT_NE(raw_vm, nullptr);
+    std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(raw_vm, &rj_vm_destroy);
 
-  // Resolving the default is not a clamp, so it must not warn.
-  EXPECT_EQ(warning.find("num_threads clamped"), std::string::npos);
-  EXPECT_EQ(vm->engine_config.num_threads, amdgpu::default_xcd_partition_count(vm->soc));
-
-  ASSERT_NE(vm->soc, nullptr);
-  for (uint32_t i = 0; i < vm->soc->num_xcds(); ++i)
-    expect_subtree_partition(vm->soc->xcd(i), i % vm->engine_config.num_threads);
-
-  EXPECT_EQ(rj_vm_run(vm.get(), nullptr), ROCJITSU_STATUS_SUCCESS);
+    EXPECT_EQ(warning.find("num_threads clamped"), std::string::npos);
+    EXPECT_EQ(vm->engine_config.num_threads, engines);
+    ASSERT_NE(vm->soc, nullptr);
+    for (uint32_t i = 0; i < vm->soc->num_xcds(); ++i)
+      expect_subtree_partition(vm->soc->xcd(i), i % engines);
+    EXPECT_EQ(rj_vm_run(vm.get(), nullptr), ROCJITSU_STATUS_SUCCESS);
+  }
 }
 
 TEST(XcdPartitioningTest, CApiClampsMultiGpuThreadsToTotalXcdCountAndRuns) {

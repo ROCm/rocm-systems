@@ -1,0 +1,44 @@
+lds.ai:
+  name: LDS Arithmetic Intensity
+  formula: SUM($wave_size * SQ_INSTS_VALU_sum) / SUM((SQC_LDS_IDX_ACTIVE_sum - SQC_LDS_BANK_CONFLICT_sum) * 4 * $lds_banks_per_cu)
+  unit: FLOPs/Byte
+  description: >-
+    Arithmetic Intensity relative to the Local Data Share (LDS). Higher values indicate
+    more compute per byte of LDS traffic, suggesting effective reuse of shared data
+    within a workgroup. Lower values suggest memory-bound behavior limited by LDS
+    bandwidth or bank-conflict pressure.
+lds.bank_conflict_rate:
+  name: LDS Bank Conflict Rate
+  formula: 100 * SUM(SQC_LDS_BANK_CONFLICT_sum) / SUM(SQC_LDS_IDX_ACTIVE_sum)
+  unit: Percent
+  description: >-
+    Percentage of LDS accesses that experienced bank conflicts. Conflicts occur when
+    multiple work-items in a wavefront access different addresses in the same LDS
+    bank. High conflict rates reduce effective LDS bandwidth. Restructuring data layouts
+    can help.
+lds.bank_conflicts:
+  name: LDS Bank Conflicts
+  formula: AVG(SQC_LDS_BANK_CONFLICT)
+  unit: Conflicts
+  description: >-
+    Number of Local Data Share bank conflicts during execution. Bank conflicts occur
+    when multiple work-items in a wavefront access the same LDS bank simultaneously,
+    causing serialized accesses. Reducing conflicts improves shared memory throughput.
+lds.theoretical_bw:
+  name: Theoretical LDS Bandwidth
+  formula: SUM((SQC_LDS_IDX_ACTIVE_sum - SQC_LDS_BANK_CONFLICT_sum) * 4 * $lds_banks_per_cu) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: >-
+    Estimated achieved bandwidth for Local Data Share operations. This reflects the
+    effective throughput after accounting for bank conflicts. RDNA 3.5 provides 32 LDS
+    banks per compute unit for high-bandwidth shared memory access.
+  peak_empirical: $LDSBw_empirical_peak
+lds.util:
+  name: LDS Utilization
+  formula: 100 * SUM(SQC_LDS_IDX_ACTIVE_sum) / (SUM(GRBM_GUI_ACTIVE) * $cu_per_gpu)
+  unit: Percent
+  description: >-
+    Percentage of the LDS cycle budget across all CUs spent servicing indexed
+    (non-direct, non-interpolation) accesses, measured over GPU-active cycles. Because
+    two CUs share a workgroup processor's LDS, a saturated LDS reads well below 100% on
+    this architecture.
