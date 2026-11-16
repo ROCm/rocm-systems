@@ -1670,6 +1670,45 @@ TEST(WaitcheckTest, Rdna35ReportsMissingVmcntBeforeGlobalLoadUse) {
   EXPECT_NE(report.diagnostics[0].message.find("s_waitcnt vmcnt(0)"), std::string::npos);
 }
 
+TEST(WaitcheckTest, Rdna4ComplementaryD16LoadsPreserveIndependentHalves) {
+  const std::vector<uint32_t> program{
+      0xee08007c, 0x00000004, 0x00000000, // global_load_d16_b16 v4, v[0:1], off
+      0xee08c07c, 0x00000004, 0x00000000, // global_load_d16_hi_b16 v4, v[0:1], off
+      0xda980000, 0x04000000,             // ds_load_u16_d16 v4, v0
+      0xda9c0000, 0x04000000,             // ds_load_u16_d16_hi v4, v0
+  };
+  for (size_t prefix : {6u, 10u}) {
+    const size_t first = prefix == 6 ? 0 : 6;
+    auto pair = std::vector<uint32_t>(program.begin() + first, program.begin() + prefix);
+    auto report = analyze_waitcnts(pair, ROCJITSU_CODE_ARCH_RDNA4);
+    EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+
+    pair.push_back(0x7e100304); // v_mov_b32_e32 v8, v4
+    report = analyze_waitcnts(pair, ROCJITSU_CODE_ARCH_RDNA4);
+    ASSERT_EQ(report.diagnostics.size(), 2u) << diagnostic_summary(report);
+    EXPECT_EQ(report.diagnostics[0].reg.index, 4u);
+    EXPECT_EQ(report.diagnostics[1].reg.index, 4u);
+  }
+}
+
+TEST(WaitcheckTest, Rdna4D16AddressAndPackedFormatUseFullVgpr) {
+  const std::vector<uint32_t> address{
+      0xee08007c, 0x00000004, 0x00000000, // global_load_d16_b16 v4, v[0:1], off
+      0xee08c07c, 0x00000004, 0x00000004, // global_load_d16_hi_b16 v4, v[4:5], off
+  };
+  auto report = analyze_waitcnts(address, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics.front().reg.index, 4u);
+
+  const std::vector<uint32_t> packed{
+      0xc4024003, 0x00801004, 0x00000000, // buffer_load_d16_format_xy v4, off, s[8:11], s3
+      0xc4094003, 0x00801004, 0x00000000, // buffer_store_d16_hi_b16 v4, off, s[8:11], s3
+  };
+  report = analyze_waitcnts(packed, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics.front().reg.index, 4u);
+}
+
 TEST(WaitcheckTest, Rdna35AcceptsPendingD16LoadToOppositeVgprHalf) {
   std::vector<uint32_t> program;
   append_gfx1150_ds_load_u8_d16_hi_v1_v1(program);

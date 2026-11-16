@@ -2672,11 +2672,10 @@ private:
   }
 
   [[nodiscard]] static bool tracks_d16_subregisters(rj_code_arch_t arch) {
-    // GFX11 uses LLVM's VGPR_LO16/VGPR_HI16 register units for memory
-    // operations. The D16Writes32BitVgpr feature still makes VALU and some
-    // mixed-event cases conservative, but ordinary memory operations on
-    // disjoint halves remain independent.
-    return arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5;
+    // These families preserve the unselected half at memory writeback. VALU
+    // operand uses remain conservative when their selection is unknown.
+    return arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+           arch == ROCJITSU_CODE_ARCH_RDNA4;
   }
 
   [[nodiscard]] static std::optional<PartialRegisterAccess>
@@ -2687,6 +2686,12 @@ private:
     const std::string_view mnemonic = inst.mnemonic();
     if (mnemonic.find("load") == std::string_view::npos ||
         mnemonic.find("d16") == std::string_view::npos)
+      return std::nullopt;
+
+    // Packed format XY produces two half values in one full destination VGPR.
+    // Image D16 results depend on the component mask and resource format.
+    if (mnemonic.starts_with("image_") || mnemonic.find("format_xy") != std::string_view::npos ||
+        mnemonic.find("format_d16_xy") != std::string_view::npos)
       return std::nullopt;
 
     const Operand *dst = inst.dst_operand(0);
