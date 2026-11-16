@@ -128,8 +128,11 @@ for itself (workstreams WS-1 and WS-2):
       resolves specifically to a file (not a directory), unless explicitly marked
       ``external:``; an empty or whitespace-only ``source.paths`` entry is
       rejected rather than resolved to the component directory, and a bare
-      ``external:`` with no target is rejected (the marker must name the external
-      reference it stands in for).
+      ``external:`` with no target is rejected in every path-bearing field
+      (``source.paths``, ``evidence.path``, ``source_of_truth`` values,
+      ``metadata.config`` / ``metadata.generated_plan``, and
+      ``execution.ci_lane.in_repo``): the marker must name the external reference
+      it stands in for.
 
   repository path pointers
     - every repository-path-bearing field resolves relative to the component
@@ -142,7 +145,8 @@ for itself (workstreams WS-1 and WS-2):
   CMake suite-group reconciliation
     - for each Catch2 area (unit / contract / performance / stress) whose
       per-area ``CMakeLists.txt`` is present, every actively built group
-      (``add_subdirectory(<group>)`` on a non-commented line) must be represented
+      (``add_subdirectory(<group>)`` - matched case-insensitively and across a
+      multiline command, with line comments stripped first) must be represented
       by an inventory suite whose ``source.paths`` names ``catch/<area>/<group>``
       (or a path beneath it); a built group that no suite covers is reported,
       unless it is explicitly documented under the inventory's optional
@@ -160,9 +164,10 @@ for itself (workstreams WS-1 and WS-2):
     - every defined incident carries the required labelled fields (Finding,
       Control, Protects, Origin, Current status, Retirement condition);
     - every commit-like citation in an incident Origin field (an abbreviated or
-      full git SHA, typically in backticks) resolves to a commit in the
-      repository; a hash that git reports does not exist is reported unless the
-      author explicitly marks the citation ``external:`` or ``unverified:``. This
+      full git SHA, whether in backticks or bare in prose) resolves to a commit
+      in the repository; a hash that git reports does not exist is reported
+      unless the author explicitly marks the citation ``external:`` or
+      ``unverified:``. This
       check is feasibility-gated: when the document is not inside a git work tree
       (or git is unavailable) hash existence cannot be verified and the check is
       skipped.
@@ -176,9 +181,11 @@ for itself (workstreams WS-1 and WS-2):
       repository boundary, or that resolves to a directory rather than a file is
       rejected exactly like any other repository path pointer, while valid
       relative links and fragment anchors continue to resolve; link-like text
-      inside inline code spans and fenced code blocks is shown rather than linked
-      and is masked out before scanning, so a ``[text](path)`` in a code example
-      is neither validated nor reported;
+      inside inline code spans, fenced code blocks, and HTML comments is shown
+      rather than linked and is masked out before scanning, so a ``[text](path)``
+      in a code example or an ``<!-- commented-out link -->`` is neither validated
+      nor reported, and a backslash-escaped opener ``\\[text](path)`` is treated
+      as literal text rather than a link;
     - reference-style links ``[text][label]`` / ``[label][]`` are resolved through
       their ``[label]: target`` definitions and validated like inline links; a
       usage with no matching definition, or a definition that is never used, is
@@ -186,7 +193,10 @@ for itself (workstreams WS-1 and WS-2):
       and the first definition is preserved as authoritative rather than silently
       overwritten;
     - every in-page ``#anchor`` and ``file.md#anchor`` fragment resolves to a
-      heading in the target Markdown document;
+      heading in the target Markdown document; heading anchors are derived from
+      the same fence-masked and comment-masked Markdown, so a ``# Heading`` that
+      lives inside a fenced code block or an HTML comment does not satisfy a real
+      anchor;
     - every ``related_restructuring`` pointer in the inventory, when present, is a
       non-empty string that resolves on disk within the boundary root (an empty or
       non-string value, an absolute path, or a traversal outside the boundary root
@@ -394,11 +404,18 @@ EXTERNAL_MARKER = "external:"
 # but carries no inventory suite is surfaced rather than silently uncovered.
 CMAKE_RECONCILIATION_AREAS = ("unit", "contract", "performance", "stress")
 
-# An ``add_subdirectory(<group>)`` call naming the group as its first token. The
-# surrounding ``_active_cmake_groups`` scanner skips commented-out lines so a
+# An ``add_subdirectory(<group>)`` call naming the group as its first token.
+# CMake commands are case-insensitive (``ADD_SUBDIRECTORY`` is the same command),
+# so the match is case-insensitive; whitespace - including a newline - is allowed
+# between the command, its ``(``, and the group token, so a call split across
+# physical lines (the group name on the line after the opening paren) is still
+# recognized. A leading ``\b`` keeps ``add_subdirectory`` from matching as the
+# tail of a longer identifier (``foo_add_subdirectory``). The surrounding
+# ``_active_cmake_groups`` scanner strips line comments first so a
 # ``#add_subdirectory(gcc)`` is treated as an inactive (not-built) group rather
 # than an active one that must be represented.
-_ADD_SUBDIRECTORY_RE = re.compile(r"add_subdirectory\(\s*([A-Za-z0-9_.+\-]+)")
+_ADD_SUBDIRECTORY_RE = re.compile(
+    r"\badd_subdirectory\s*\(\s*([A-Za-z0-9_.+\-]+)", re.IGNORECASE)
 
 # The reasons a built CMake suite group may legitimately carry no inventory
 # suite. A documented exclusion must name one of these so the allowance is an
@@ -442,8 +459,10 @@ _INCIDENT_ID_FULL_RE = re.compile(r"^TI-\d+$")
 # ``)`` and so truncates a valid link whose destination carries a balanced pair
 # of parentheses (``[t](a/(v2)/b.md)``) or whose title is parenthesized
 # (``[t](dest (title))``). The body is extracted by _iter_inline_link_targets,
-# which scans for the matching close paren instead.
-_MD_LINK_OPEN_RE = re.compile(r"\[[^\]]*\]\(")
+# which scans for the matching close paren instead. A backslash-escaped opener
+# ``\[`` is a literal bracket, not a link (CommonMark shows ``\[text](path)`` as
+# text), so the ``(?<!\\)`` lookbehind refuses to match an escaped opener.
+_MD_LINK_OPEN_RE = re.compile(r"(?<!\\)\[[^\]]*\]\(")
 # Reference-style Markdown links: a usage ``[text][label]`` (or the collapsed
 # form ``[label][]``) paired with a ``[label]: target`` definition. The checker
 # resolves these through their definitions and validates them exactly like inline
@@ -457,6 +476,10 @@ _HEADING_RE = re.compile(r"^#{1,6}\s+(.*?)\s*$", re.MULTILINE)
 # matching opening and closing fence so a ``[text](path)`` inside a code block is
 # shown, not validated.
 _CODE_FENCE_RE = re.compile(r"^(\s*)(`{3,}|~{3,})(.*)$")
+# An HTML comment ``<!-- ... -->`` (which may span multiple lines). Link scanning
+# and heading extraction mask these out so a ``[text](path)`` or a ``# Heading``
+# hidden inside a comment is neither linked nor registered as a real anchor.
+_HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 # URLs preserved as external references; existence is not checked for these.
 _EXTERNAL_LINK_PREFIXES = ("http://", "https://", "mailto:")
 
@@ -528,6 +551,39 @@ def _boundary_root(component_dir, repo_root):
     return _repository_root(component_dir)
 
 
+def _derive_boundary_root(root, component_dir, inventory_path):
+    """Return the boundary a repository path may not resolve outside of.
+
+    This separates the *document root* a caller names from the *repository
+    boundary* a path may not escape, so an explicit ``--root`` that points at a
+    real checkout is usable rather than over-constrained:
+
+      * No explicit root (the default real-repo run): the boundary is the
+        repository root two levels above the component directory, which permits
+        the documents' legitimate ``../../.github`` references.
+      * An explicit root that is a real checkout / component root: it lives
+        inside a git work tree that tracks its documents, so the git repository
+        root is the boundary - a real ``--root projects/hip-tests`` then
+        validates documents that reference sibling trees like ``../../.github``
+        instead of rejecting them as escapes.
+      * An explicit root that is a self-contained temporary fixture: it is
+        untracked (even if it happens to sit under some ambient checkout), so it
+        remains its own boundary and a path may not traverse above it.
+
+    Anchoring the real-checkout case on tracked-ness (the same signal the
+    Origin-citation check uses) is what keeps a throwaway fixture bounded while
+    letting a genuine checkout reach its sibling trees.
+    """
+    if root is None:
+        return _repository_root(component_dir)
+    root_resolved = Path(root).resolve()
+    git_root = _git_repo_root(root_resolved)
+    if git_root is not None and _git_tracks(
+            str(git_root), Path(inventory_path).resolve()):
+        return git_root
+    return root_resolved
+
+
 def _path_location_status(component_dir, rel_path, repo_root=None):
     """Classify a repository path as usable, absolute, or outside its boundary.
 
@@ -588,8 +644,9 @@ def _glob_matches(component_dir, pattern):
 def _resolve_repo_path(component_dir, value, repo_root=None):
     """Classify a repository-path-bearing field value.
 
-    Returns one of ``external`` (an external: marker or URL, preserved and not
-    checked), ``empty`` (no path token), ``ok`` (the leading path token resolves
+    Returns one of ``external`` (a named external: marker or URL, preserved and
+    not checked), ``bare_external`` (a bare ``external:`` marker that names no
+    target), ``empty`` (no path token), ``ok`` (the leading path token resolves
     on disk, by literal existence or glob match), or ``missing``. A token carrying
     a glob metacharacter is resolved by recursive glob; otherwise it is
     existence-checked relative to the component directory. The boundary the token
@@ -598,6 +655,12 @@ def _resolve_repo_path(component_dir, value, repo_root=None):
     """
     stripped = value.strip()
     if _looks_external(stripped):
+        # A bare ``external:`` marker names nothing; like every other
+        # path-bearing field it must carry the external reference it stands in
+        # for. A URL or a named ``external: <target>`` is preserved as external.
+        if (stripped.startswith(EXTERNAL_MARKER)
+                and not stripped[len(EXTERNAL_MARKER):].strip()):
+            return "bare_external"
         return "external"
     token = _path_token(stripped)
     if not token:
@@ -624,6 +687,11 @@ def _check_repo_path_field(component_dir, value, label, errors, repo_root=None):
     status = _resolve_repo_path(component_dir, value, repo_root)
     if status == "empty":
         errors.append("{} is empty".format(label))
+        return 0
+    if status == "bare_external":
+        errors.append(
+            "{} external marker must name a target: {}".format(
+                label, value.strip()))
         return 0
     if status == "absolute":
         errors.append("{} must be repository-relative: {}".format(label, value.strip()))
@@ -1076,7 +1144,15 @@ def check_inventory(inventory, component_dir, repo_root=None):
                 errors.append("suite {!r} evidence entry missing a path".format(sid))
             if not _nonempty_str(ev.get("claim")):
                 errors.append("suite {!r} evidence entry missing a claim".format(sid))
-            if not isinstance(rel, str) or rel.startswith(EXTERNAL_MARKER):
+            if not isinstance(rel, str):
+                continue
+            if rel.startswith(EXTERNAL_MARKER):
+                # A bare ``external:`` with no target names nothing; the marker
+                # must carry the external reference it stands in for.
+                if not rel[len(EXTERNAL_MARKER):].strip():
+                    errors.append(
+                        "suite {!r} evidence path external marker must name a "
+                        "target: {}".format(sid, rel))
                 continue
             location = _path_location_status(component_dir, rel, repo_root)
             if location == "absolute":
@@ -1180,20 +1256,29 @@ def check_inventory(inventory, component_dir, repo_root=None):
 def _active_cmake_groups(cmake_path):
     """Return the list of group names a CMakeLists.txt actively builds.
 
-    Each ``add_subdirectory(<group>)`` on a non-commented line names an active
-    group; a commented-out call (``#add_subdirectory(gcc)``) is skipped so a
-    deliberately-disabled group is treated as not-built rather than as an active
-    group that must be represented by an inventory suite.
+    Each ``add_subdirectory(<group>)`` names an active group. CMake commands are
+    case-insensitive and may span several physical lines (the group name can sit
+    on the line after the opening paren), so the file's line comments are
+    stripped first and the comment-free text is then scanned as a whole with a
+    case-insensitive regex whose inter-token ``\\s*`` spans newlines. A line
+    comment is everything from the first ``#`` to end of line, so a fully
+    commented-out call (``#add_subdirectory(gcc)``) and an inline trailing
+    ``# ...`` comment both contribute nothing - a deliberately disabled group is
+    treated as not-built rather than as an active group that must be represented
+    by an inventory suite.
     """
-    groups = []
+    cleaned = []
     for line in cmake_path.read_text(encoding="utf-8").splitlines():
-        stripped = line.strip()
-        if stripped.startswith("#"):
-            continue
-        match = _ADD_SUBDIRECTORY_RE.match(stripped)
-        if match:
-            groups.append(match.group(1))
-    return groups
+        # Drop a line comment (first ``#`` to end of line) before joining, so a
+        # commented call or an inline comment never registers a group - the same
+        # comment handling the previous line-by-line scan gave, now preserved
+        # across a multiline command.
+        hash_index = line.find("#")
+        if hash_index != -1:
+            line = line[:hash_index]
+        cleaned.append(line)
+    text = "\n".join(cleaned)
+    return [match.group(1) for match in _ADD_SUBDIRECTORY_RE.finditer(text)]
 
 
 def _represented_group_dirs(inventory):
@@ -1586,7 +1671,15 @@ def check_coverage_model(model, suite_ids, component_dir, inventory_kind_vocab=N
                 errors.append("class {!r} evidence entry missing a path".format(cid))
             if not _nonempty_str(ev.get("claim")):
                 errors.append("class {!r} evidence entry missing a claim".format(cid))
-            if not isinstance(rel, str) or rel.startswith(EXTERNAL_MARKER):
+            if not isinstance(rel, str):
+                continue
+            if rel.startswith(EXTERNAL_MARKER):
+                # A bare ``external:`` with no target names nothing; the marker
+                # must carry the external reference it stands in for.
+                if not rel[len(EXTERNAL_MARKER):].strip():
+                    errors.append(
+                        "class {!r} evidence path external marker must name a "
+                        "target: {}".format(cid, rel))
                 continue
             location = _path_location_status(component_dir, rel, repo_root)
             if location == "absolute":
@@ -1887,6 +1980,30 @@ def _git_tracks(repo_dir, path):
     return result.returncode == 0
 
 
+def _git_repo_root(path):
+    """Return the git work-tree root that contains path, or None.
+
+    Used to separate the *document root* a caller names via ``--root`` from the
+    *repository boundary* a path may not escape. A real checkout (or a component
+    root such as ``projects/hip-tests``) lives inside a git work tree whose
+    top-level is the natural boundary, so documents that legitimately reference
+    sibling trees (``../../.github``) resolve. When git is unavailable, or path
+    is not inside a work tree (a self-contained temporary fixture), None is
+    returned and the caller falls back to treating the supplied root as its own
+    boundary.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(path), "rev-parse", "--show-toplevel"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    except (OSError, ValueError):
+        return None
+    if result.returncode != 0:
+        return None
+    top = result.stdout.strip()
+    return Path(top).resolve() if top else None
+
+
 def _git_commit_exists(repo_dir, commit):
     """Tri-state existence of a commit object in repo_dir.
 
@@ -1905,12 +2022,57 @@ def _git_commit_exists(repo_dir, commit):
     return result.returncode == 0
 
 
+def _strip_citation_marker(token):
+    """Return (bare_token, marked): drop a leading external:/unverified: marker.
+
+    A citation the author explicitly flags with an inline ``external:`` or
+    ``unverified:`` marker is preserved as-is and not existence-checked, so an
+    honest out-of-repository or unverifiable reference is kept without inventing a
+    ticket. ``marked`` is True when such a marker was stripped.
+    """
+    low = token.lower()
+    for marker in ORIGIN_CITATION_MARKERS:
+        if low.startswith(marker):
+            return token[len(marker):].strip(), True
+    return token, False
+
+
+def _iter_origin_commit_citations(origin):
+    """Yield (token, marked) for every commit-like citation in an Origin value.
+
+    Both backtick-quoted citations (``Landed in `0d90b30fb6c```) and bare,
+    unquoted hashes (``Landed in 0d90b30fb6c``) are yielded, so dropping the
+    backticks cannot let a fabricated hash evade validation. For a bare hash an
+    ``external:``/``unverified:`` marker that immediately precedes it marks it as
+    preserved. The quoted spans are blanked (offsets preserved) before the bare
+    scan so a hash is never yielded twice.
+    """
+    quoted = []
+
+    def _blank(match):
+        quoted.append(match.group(1))
+        return " " * len(match.group(0))
+
+    remainder = re.sub(r"`([^`]+)`", _blank, origin)
+    for span in quoted:
+        token, marked = _strip_citation_marker(span.strip())
+        yield token, marked
+    # Bare citations: a marker may immediately precede the hash. A mandatory hex
+    # run (group 2) means a lone ``external:`` with no following hash matches
+    # nothing, so marker prose is not mistaken for a citation.
+    for match in re.finditer(
+            r"(external:|unverified:)?\s*\b([0-9a-f]{7,40})\b",
+            remainder, re.IGNORECASE):
+        yield match.group(2), bool(match.group(1))
+
+
 def check_incident_origin_citations(incidents_path):
     """Validate commit-like citations in each incident's Origin field.
 
     An incident Origin names where a control was introduced, often citing an
-    abbreviated git SHA in backticks (``Landed in `0d90b30fb6c```). A fabricated
-    or stale hash makes the provenance unfollowable, so each commit-like citation
+    abbreviated git SHA in backticks (``Landed in `0d90b30fb6c```) or bare in
+    prose (``Landed in 0d90b30fb6c``). A fabricated or stale hash makes the
+    provenance unfollowable, so each commit-like citation - quoted or unquoted -
     is checked against the repository's object database: a hash that git reports
     does not exist is reported. A citation the author explicitly flags with an
     inline ``external:`` or ``unverified:`` marker is preserved as-is and not
@@ -1947,15 +2109,7 @@ def check_incident_origin_citations(incidents_path):
         if match is None:
             continue
         origin = match.group(1)
-        for span in re.findall(r"`([^`]+)`", origin):
-            token = span.strip()
-            marked = False
-            low = token.lower()
-            for marker in ORIGIN_CITATION_MARKERS:
-                if low.startswith(marker):
-                    token = token[len(marker):].strip()
-                    marked = True
-                    break
+        for token, marked in _iter_origin_commit_citations(origin):
             if not _is_commit_hash(token):
                 continue
             if marked:
@@ -1976,7 +2130,13 @@ def _heading_anchors(md_path, cache):
         return cache[resolved]
     anchors = set()
     if resolved.exists():
-        text = resolved.read_text(encoding="utf-8")
+        # Derive anchors from the same fence-masked and comment-masked Markdown
+        # the link scanner sees, so a ``# Heading`` that lives inside a fenced
+        # code block or an HTML comment is shown rather than registered as a real
+        # anchor. Inline code spans are deliberately NOT masked here: a heading
+        # that merely contains an inline ``code`` span keeps that span's text in
+        # its GitHub anchor slug, so masking it would corrupt a legitimate slug.
+        text = _mask_comments(_mask_fences(resolved.read_text(encoding="utf-8")))
         # GitHub disambiguates repeated heading slugs by appending ``-1``, ``-2``,
         # ... to the second and later occurrences, so track how many times each
         # base slug has been seen and register the suffixed anchor as well.
@@ -2194,15 +2354,26 @@ def _mask_inline_code(text):
     return "".join(out)
 
 
-def _mask_code(text):
-    """Return text with fenced code blocks and inline code spans blanked out.
+def _mask_comments(text):
+    """Return text with HTML comment regions (``<!-- ... -->``) blanked out.
 
-    Code content is replaced by spaces of equal length (newlines preserved) so
-    character offsets and line numbers are unchanged, but no ``[``, ``(``, or
-    backtick inside code can be mistaken for a Markdown link, link opener, or
-    reference definition. Real links and definitions outside code are untouched.
-    Fenced blocks are masked first (so backticks that open/close a fence are not
-    re-interpreted as inline code), then inline spans on the remaining text.
+    Offsets and line numbers are preserved (each comment character becomes a
+    space, newlines kept) so the surrounding document still scans with the same
+    positions and the ``^``-anchored reference-definition regex still sees real
+    line starts. A ``[text](path)`` or a ``# Heading`` hidden inside a comment is
+    thus neither linked nor registered as a heading anchor.
+    """
+    return _HTML_COMMENT_RE.sub(lambda match: _blank_like(match.group(0)), text)
+
+
+def _mask_fences(text):
+    """Return text with fenced code blocks blanked out (offsets preserved).
+
+    Every line inside a fenced block (``` or ~~~) is replaced by spaces of equal
+    length (newlines preserved) so a link opener, reference definition, or
+    heading inside a code block is shown rather than interpreted. Inline code
+    spans are left intact; mask them separately with ``_mask_inline_code`` where
+    a link opener (but not a heading slug) must be hidden.
     """
     lines = text.split("\n")
     out = []
@@ -2224,7 +2395,24 @@ def _mask_code(text):
                 if (marker_char == fence[0] and length >= fence[1]
                         and not match.group(3).strip()):
                     fence = None
-    return _mask_inline_code("\n".join(out))
+    return "\n".join(out)
+
+
+def _mask_code(text):
+    """Return text with fenced code blocks, HTML comments, and inline code spans
+    blanked out.
+
+    Code and comment content is replaced by spaces of equal length (newlines
+    preserved) so character offsets and line numbers are unchanged, but no
+    ``[``, ``(``, or backtick inside code - nor any link-like text inside an HTML
+    comment - can be mistaken for a Markdown link, link opener, or reference
+    definition. Real links and definitions outside code/comments are untouched.
+    Fenced blocks are masked first (so backticks that open/close a fence are not
+    re-interpreted as inline code), then HTML comments (so a comment wrapping a
+    backtick run is not re-read as a code span), then inline spans on the
+    remainder.
+    """
+    return _mask_inline_code(_mask_comments(_mask_fences(text)))
 
 
 def check_markdown_links(md_path, anchors_cache, boundary_root=None):
@@ -2337,14 +2525,15 @@ def validate(root=None, inventory_path=None, coverage_path=None,
     restructuring_path = restructuring_path or (base_root / RESTRUCTURING_NAME)
 
     component_dir = Path(inventory_path).resolve().parent
-    # Boundary a repository path may not resolve outside of. An explicitly
-    # supplied ``root`` is its own boundary (an arbitrary temporary root is self-
-    # contained, so a path may not traverse above it); the default real-repo run
-    # (root is None) keeps the repository root two levels above the component
-    # directory as the boundary, which is what permits the documents' legitimate
-    # ``../../.github`` references.
-    repo_root = Path(root).resolve() if root is not None else _repository_root(
-        component_dir)
+    # Boundary a repository path may not resolve outside of. This separates the
+    # document root the caller names from the repository boundary a path may not
+    # escape: the default real-repo run (root is None) keeps the repository root
+    # two levels above the component directory; an explicit ``--root`` that is a
+    # real checkout / component root derives the git repository root (so the
+    # documents' legitimate ``../../.github`` references resolve); and an explicit
+    # ``--root`` that is a self-contained temporary fixture stays its own boundary
+    # so a path may not traverse above it (see ``_derive_boundary_root``).
+    repo_root = _derive_boundary_root(root, component_dir, inventory_path)
     results = {}
     counts = {"inventory_records": 0, "coverage_classes": 0,
               "validated_references": 0}
@@ -2454,7 +2643,11 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.strip().splitlines()[0])
     parser.add_argument("--root", default=None,
                         help="component/repository root holding the testing docs "
-                             "(default: the component directory alongside this script)")
+                             "(default: the component directory alongside this "
+                             "script). A root inside a real checkout uses the git "
+                             "repository root as the path boundary, so sibling "
+                             "references such as ../../.github still resolve; a "
+                             "self-contained temporary root is its own boundary")
     parser.add_argument("--inventory", default=None,
                         help="override path to test_inventory.yaml")
     parser.add_argument("--coverage-model", default=None,

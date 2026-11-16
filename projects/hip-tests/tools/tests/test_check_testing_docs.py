@@ -2758,6 +2758,347 @@ class CheckTestingDocsTest(unittest.TestCase):
         errors = checker.check_incident_origin_citations(str(path))
         self.assertEqual(errors, [], msg=errors)
 
+    # -- final fix 1: explicit --root usable with a real checkout -------------
+
+    @unittest.skipUnless(_GIT, "git not available")
+    def test_explicit_root_real_checkout_allows_sibling_github_reference(self):
+        # Regression: with an explicit --root that points at a real checkout /
+        # component root, the boundary is the git repository root - not the
+        # supplied root - so a document that legitimately references a sibling
+        # tree (the real ``../../.github`` pattern from projects/hip-tests) still
+        # resolves instead of being rejected as an escape. The inventory is
+        # tracked so the boundary derives the git root rather than the component.
+        run = self._init_git_repo()
+        component = self.root / "projects" / "hip-tests"
+        component.mkdir(parents=True)
+        workflows = self.root / ".github" / "workflows"
+        workflows.mkdir(parents=True)
+        (workflows / "hip.yml").write_text("name: x\n", encoding="utf-8")
+        inv = VALID_INVENTORY.replace(
+            "      ci_lane:\n        external: documented elsewhere\n",
+            "      ci_lane:\n"
+            "        in_repo: ../../.github/workflows/hip.yml\n", 1)
+        _write_docs(component, {"test_inventory.yaml": inv})
+        run("add", "projects/hip-tests/test_inventory.yaml")
+        run("commit", "-q", "-m", "add inventory")
+        results, _ = checker.validate(root=str(component))
+        self.assertFalse(
+            any("escapes repository root" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_untracked_fixture_root_stays_bounded(self):
+        # The companion guarantee: a self-contained temporary root (untracked,
+        # even if it happened to sit under some ambient checkout) remains its own
+        # boundary, so a ``../../`` traversal above it is still an escape.
+        component = self.root / "projects" / "hip-tests"
+        component.mkdir(parents=True)
+        (self.root / "escape_target.txt").write_text("x\n", encoding="utf-8")
+        broken = VALID_INVENTORY.replace(
+            '      paths:\n        - "external: outside-this-repo"\n',
+            "      paths:\n        - ../../escape_target.txt\n", 1)
+        _write_docs(component, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(component))
+        self.assertTrue(
+            any("source path escapes repository root" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    # -- final fix 2: Markdown comments / escaped openers / fenced anchors ----
+
+    def test_link_inside_html_comment_is_ignored(self):
+        # A ``[text](path)`` hidden inside an HTML comment is not a live link and
+        # must not be existence-checked.
+        testing = (
+            "# Testing Strategy\n\n"
+            "See the [inventory](test_inventory.yaml).\n\n"
+            "<!-- [hidden](no_such_file.md) -->\n\n"
+            "## Known gaps\n\nBody.\n"
+        )
+        _write_docs(self.root, {"TESTING.md": testing})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertEqual(
+            results["markdown_links"], [], msg=results["markdown_links"])
+
+    def test_link_inside_multiline_html_comment_is_ignored(self):
+        # A comment may span multiple lines; a link anywhere inside it is still
+        # hidden, and a real link after the comment is still validated.
+        testing = (
+            "# Testing Strategy\n\n"
+            "<!--\n"
+            "[hidden](no_such_file.md)\n"
+            "still inside the comment\n"
+            "-->\n\n"
+            "A real [inventory](test_inventory.yaml) link.\n\n"
+            "## Known gaps\n\nBody.\n"
+        )
+        _write_docs(self.root, {"TESTING.md": testing})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertEqual(
+            results["markdown_links"], [], msg=results["markdown_links"])
+
+    def test_escaped_link_opener_is_ignored(self):
+        # A backslash-escaped opener ``\[text](path)`` is literal text, not a
+        # link, so its destination is neither validated nor reported.
+        testing = (
+            "# Testing Strategy\n\n"
+            "A literal \\[name](no_such_file.md) shown as text.\n\n"
+            "## Known gaps\n\nBody.\n"
+        )
+        _write_docs(self.root, {"TESTING.md": testing})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertEqual(
+            results["markdown_links"], [], msg=results["markdown_links"])
+
+    def test_escaped_and_real_link_together_reports_only_real(self):
+        # Masking the escaped opener must not blind the checker to a genuine
+        # broken link on the same line.
+        testing = (
+            "# Testing Strategy\n\n"
+            "A literal \\[a](ignored.md) and a real [b](no_such_file.md).\n\n"
+            "## Known gaps\n\nBody.\n"
+        )
+        _write_docs(self.root, {"TESTING.md": testing})
+        results, _ = checker.validate(root=str(self.root))
+        broken = [err for err in results["markdown_links"]
+                  if "broken local link" in err]
+        self.assertEqual(len(broken), 1, msg=results["markdown_links"])
+        self.assertIn("no_such_file.md", broken[0])
+
+    def test_fenced_heading_does_not_satisfy_anchor(self):
+        # A ``# Heading`` inside a fenced code block is example text, not a real
+        # heading, so an anchor pointing at its slug is broken.
+        testing = (
+            "# Testing Strategy\n\n"
+            "See the [fake](#fake-heading).\n\n"
+            "```\n"
+            "# Fake Heading\n"
+            "```\n\n"
+            "## Known gaps\n\nBody.\n"
+        )
+        _write_docs(self.root, {"TESTING.md": testing})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("broken anchor" in err and "#fake-heading" in err
+                for err in results["markdown_links"]),
+            msg=results["markdown_links"],
+        )
+
+    def test_commented_heading_does_not_satisfy_anchor(self):
+        # A ``# Heading`` inside an HTML comment is likewise not a real heading.
+        testing = (
+            "# Testing Strategy\n\n"
+            "See the [hidden](#hidden-heading).\n\n"
+            "<!-- # Hidden Heading -->\n\n"
+            "## Known gaps\n\nBody.\n"
+        )
+        _write_docs(self.root, {"TESTING.md": testing})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("broken anchor" in err and "#hidden-heading" in err
+                for err in results["markdown_links"]),
+            msg=results["markdown_links"],
+        )
+
+    def test_heading_with_inline_code_still_anchors(self):
+        # Regression guard for the fence/comment-only masking: a heading that
+        # merely contains an inline ``code`` span keeps that text in its GitHub
+        # slug, so an anchor to it must still resolve (inline code is NOT masked
+        # when deriving heading anchors).
+        testing = (
+            "# Testing Strategy\n\n"
+            "See the [api](#the-hipmalloc-api).\n\n"
+            "## The `hipMalloc` api\n\nBody.\n"
+        )
+        _write_docs(self.root, {"TESTING.md": testing})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertEqual(
+            results["markdown_links"], [], msg=results["markdown_links"])
+
+    # -- final fix 3: CMake add_subdirectory case / multiline parsing ---------
+
+    def test_cmake_uppercase_add_subdirectory_is_detected(self):
+        # CMake commands are case-insensitive; an uppercase invocation names an
+        # active group exactly like the lowercase form.
+        self._write_cmake_area("unit", "ADD_SUBDIRECTORY(memory)\n")
+        errors = checker.check_cmake_reconciliation(
+            self._recon_inventory(paths=[]), str(self.root))
+        self.assertTrue(
+            any("catch/unit/memory" in err and "not represented" in err
+                for err in errors),
+            msg=errors)
+
+    def test_cmake_multiline_add_subdirectory_is_detected(self):
+        # A call whose group name sits on the line after the opening paren is
+        # still an active group that must be represented.
+        self._write_cmake_area(
+            "unit", "add_subdirectory(\n    memory\n)\n")
+        errors = checker.check_cmake_reconciliation(
+            self._recon_inventory(paths=[]), str(self.root))
+        self.assertTrue(
+            any("catch/unit/memory" in err and "not represented" in err
+                for err in errors),
+            msg=errors)
+
+    def test_cmake_multiline_with_inline_comment_is_detected(self):
+        # Comment stripping is per-line before the command is scanned whole, so a
+        # trailing ``# ...`` on the opening line does not hide the group that
+        # follows on the next line; a represented group passes.
+        self._write_cmake_area(
+            "unit", "add_subdirectory( # add the memory group\n    memory\n)\n")
+        errors = checker.check_cmake_reconciliation(
+            self._recon_inventory(paths=["catch/unit/memory"]), str(self.root))
+        self.assertEqual(errors, [], msg=errors)
+
+    def test_cmake_commented_multiline_call_is_not_detected(self):
+        # A fully commented-out multiline-style call contributes nothing, so only
+        # the live group is required.
+        self._write_cmake_area(
+            "unit",
+            "# add_subdirectory(\n#   gcc\n# )\n"
+            "add_subdirectory(memory)\n")
+        errors = checker.check_cmake_reconciliation(
+            self._recon_inventory(paths=["catch/unit/memory"]), str(self.root))
+        self.assertEqual(errors, [], msg=errors)
+
+    def test_cmake_mixed_case_multiline_is_detected(self):
+        # Case-insensitivity and multiline parsing combine: a MixedCase call split
+        # across lines is detected.
+        self._write_cmake_area(
+            "unit", "Add_SubDirectory(\n  memory\n)\n")
+        errors = checker.check_cmake_reconciliation(
+            self._recon_inventory(paths=[]), str(self.root))
+        self.assertTrue(
+            any("catch/unit/memory" in err and "not represented" in err
+                for err in errors),
+            msg=errors)
+
+    # -- final fix 4: unquoted commit-like hashes in Origin citations ---------
+
+    @unittest.skipUnless(_GIT, "git not available")
+    def test_origin_citation_unquoted_bogus_hash_is_reported(self):
+        # A commit-like hash cited WITHOUT backticks is still validated: dropping
+        # the backticks must not let a fabricated hash evade the check.
+        run = self._init_git_repo()
+        path = self.root / "TESTING_INCIDENTS.md"
+        incidents = VALID_INCIDENTS.replace(
+            "**Origin.** Landed in `0d90b30fb6c`.\n",
+            "**Origin.** Landed in commit 0d90b30fb6c (no backticks).\n")
+        path.write_text(incidents, encoding="utf-8")
+        run("add", "TESTING_INCIDENTS.md")
+        run("commit", "-q", "-m", "add incidents")
+        errors = checker.check_incident_origin_citations(str(path))
+        self.assertTrue(
+            any("does not exist" in err and "0d90b30fb6c" in err
+                for err in errors),
+            msg=errors)
+
+    @unittest.skipUnless(_GIT, "git not available")
+    def test_origin_citation_unquoted_marker_is_skipped(self):
+        # A bare ``external:``/``unverified:`` marker immediately before an
+        # unquoted hash preserves it, just as for a backtick citation.
+        run = self._init_git_repo()
+        path = self.root / "TESTING_INCIDENTS.md"
+        incidents = VALID_INCIDENTS.replace(
+            "**Origin.** Landed in `0d90b30fb6c`.\n",
+            "**Origin.** Landed in unverified: 0d90b30fb6c elsewhere.\n")
+        path.write_text(incidents, encoding="utf-8")
+        run("add", "TESTING_INCIDENTS.md")
+        run("commit", "-q", "-m", "add incidents")
+        errors = checker.check_incident_origin_citations(str(path))
+        self.assertEqual(errors, [], msg=errors)
+
+    @unittest.skipUnless(_GIT, "git not available")
+    def test_origin_unquoted_hex_word_is_not_a_hash(self):
+        # A bare all-letter hex word ("defaced") in Origin prose has no digit and
+        # is not mistaken for a commit hash.
+        run = self._init_git_repo()
+        path = self.root / "TESTING_INCIDENTS.md"
+        incidents = VALID_INCIDENTS.replace(
+            "**Origin.** Landed in `0d90b30fb6c`.\n",
+            "**Origin.** The guard was defaced then restored by maintainers.\n")
+        path.write_text(incidents, encoding="utf-8")
+        run("add", "TESTING_INCIDENTS.md")
+        run("commit", "-q", "-m", "add incidents")
+        errors = checker.check_incident_origin_citations(str(path))
+        self.assertEqual(errors, [], msg=errors)
+
+    # -- final fix 5: bare external: markers in path-bearing fields -----------
+
+    def test_bare_external_source_of_truth_is_reported(self):
+        broken = VALID_INVENTORY.replace(
+            '  suite_placement: "external: catch/*/CMakeLists.txt"\n',
+            '  suite_placement: "external:"\n', 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("source_of_truth 'suite_placement'" in err
+                and "external marker must name a target" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_bare_external_suite_evidence_path_is_reported(self):
+        broken = VALID_INVENTORY.replace(
+            '      - path: "external: evidence-outside-repo"\n',
+            '      - path: "external:"\n', 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("evidence path external marker must name a target" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_bare_external_class_evidence_path_is_reported(self):
+        broken = VALID_COVERAGE.replace(
+            '        - path: "external: evidence-outside-repo"\n',
+            '        - path: "external:"\n', 1)
+        _write_docs(self.root, {"test_coverage_model.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("evidence path external marker must name a target" in err
+                for err in results["coverage_model"]),
+            msg=results["coverage_model"],
+        )
+
+    def test_bare_external_ci_lane_in_repo_is_reported(self):
+        broken = VALID_INVENTORY.replace(
+            "      ci_lane:\n        external: documented elsewhere\n",
+            '      ci_lane:\n        in_repo: "external:"\n', 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("ci_lane.in_repo" in err
+                and "external marker must name a target" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_bare_external_metadata_config_is_reported(self):
+        broken = VALID_INVENTORY.replace(
+            "    metadata:\n      framework: Catch2\n",
+            '    metadata:\n      framework: Catch2\n      config: "external:"\n',
+            1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("metadata.config" in err
+                and "external marker must name a target" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_named_external_in_path_fields_still_passes(self):
+        # Regression guard: a NAMED external target in these fields is still
+        # accepted (only the bare marker is rejected). The valid baseline already
+        # uses named external: markers for source_of_truth and evidence.
+        _write_docs(self.root)
+        results, _ = checker.validate(root=str(self.root))
+        self.assertEqual(results["inventory"], [], msg=results["inventory"])
+
 
 if __name__ == "__main__":
     unittest.main()
