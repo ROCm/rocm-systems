@@ -151,3 +151,10 @@ set_tests_properties(hipfileread_cpu_visibility_fallback_test PROPERTIES
     ENVIRONMENT "HIPFILE_FORCE_COMPAT_MODE=true"
     SKIP_REGULAR_EXPRESSION "VRAM is not CPU-accessible"
 )
+
+hipfile_add_test_executable(
+    NAME hipfileread-gpu-visibility
+    DEPS hipfile
+    SRCS "hipfileread-gpu-visibility.cpp" "hipfileread-gpu-visibility-kernel.hip"
+    SYSINCLS ${HIPFILE_AMD_SOURCE_PATH} ${HIPFILE_INCLUDE_PATH} ${HIPFILE_TEST_COMMON_PATH} ${HIPFILE_THIRD_PARTY_PATH}
+)
