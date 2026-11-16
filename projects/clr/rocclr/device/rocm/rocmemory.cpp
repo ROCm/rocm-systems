@@ -850,7 +850,7 @@ void Buffer::destroy() {
       }
     }
 
-    if (needUnlockHostMem) {
+    if (needUnlockHostMem && hostLockOwner_) {
       if (memFlags & (CL_MEM_USE_HOST_PTR | CL_MEM_ALLOC_HOST_PTR)) {
         if (dev().agent_profile() != HSA_PROFILE_FULL) Hsa::memory_unlock(owner()->getHostMem());
       }
@@ -1194,8 +1194,25 @@ bool Buffer::create(bool alloc_local, amd::Memory::ErrorCode* errorCode) {
     owner()->setHostMem(deviceMemory_);
   } else if (owner()->getSvmPtr() != owner()->getHostMem()) {
     if (memFlags & (CL_MEM_USE_HOST_PTR | CL_MEM_ALLOC_HOST_PTR)) {
-      deviceMemory_ =
-          dev().hostLock(owner()->getHostMem(), owner()->getSize(), getHostMemorySegment(memFlags));
+      // hipHostRegister creates this buffer on every device. Locking each device
+      // separately repeats register+map once per GPU. The first device locks every
+      // GPU in one call; the rest reuse that address.
+      void* shared = nullptr;
+      for (amd::Device* other : owner()->getContext().devices()) {
+        if (other == &dev()) continue;
+        device::Memory* existing = owner()->getDeviceMemory(*other, false);
+        if (existing == nullptr) continue;
+        shared = reinterpret_cast<void*>(existing->virtualAddress());
+        if (shared != nullptr) break;
+      }
+      if (shared != nullptr) {
+        deviceMemory_ = shared;
+      } else {
+        const bool mapAllAgents = owner()->getContext().devices().size() > 1;
+        deviceMemory_ = dev().hostLock(owner()->getHostMem(), owner()->getSize(),
+                                       getHostMemorySegment(memFlags), mapAllAgents);
+        hostLockOwner_ = deviceMemory_ != nullptr;
+      }
     } else {
       deviceMemory_ = owner()->getHostMem();
     }

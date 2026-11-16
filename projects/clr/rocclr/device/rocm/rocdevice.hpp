@@ -677,7 +677,10 @@ class Device : public NullDevice {
 
   //! Pin a host pointer allocated by C/C++ or OS allocator (i.e. ordinary system DRAM) and
   //! return a new device pointer accessible by the GPU agent.
-  void* hostLock(void* hostMem, size_t size, MemorySegment memSegment) const;
+  // mapAllAgents locks the range to every enumerated GPU in one call. The default
+  // locks only this device.
+  void* hostLock(void* hostMem, size_t size, MemorySegment memSegment,
+                 bool mapAllAgents = false) const;
 
   [[nodiscard]] bool writeDeviceGlobal(amd::Memory& dst, size_t offset, size_t size,
                                        const void* src) const override;
