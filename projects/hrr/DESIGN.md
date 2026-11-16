@@ -1276,8 +1276,7 @@ recorded address that was never passed through a HIP API (e.g. computed from an
 know about it and translation will fail.
 
 Translation cannot reach a pointer the application stored in device memory: it
-arrives inside an H2D payload, byte for byte. vLLM's block table is such a case
-([ROCM-31827](https://amd-hub.atlassian.net/browse/ROCM-31827)). On Linux, replay
+arrives inside an H2D payload, byte for byte. vLLM's block table is such a case. On Linux, replay
 therefore places `hipMalloc` and `hipMallocAsync` allocations at their recorded
 addresses, so that pointer is right again; `--no-placement` turns this off.
 
