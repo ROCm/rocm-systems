@@ -6,7 +6,36 @@
 #
 # https://clang.llvm.org/docs/DiagnosticsReference.html
 
-function(get_hipfile_clang_warning_flags outvar compiler_version)
+include(CheckCXXSourceCompiles)
+include(CMakePushCheckState)
+include(HipFileFortifySource)
+
+# Check whether calls to the C library's fortified functions trip
+# -Wused-but-marked-unused
+#
+# With _FORTIFY_SOURCE, glibc 2.40 and later give clang printf-family
+# wrappers that are declared static __attribute__((__unused__)), so
+# every call to fprintf, snprintf, and the like warns. The result is
+# cached, so the check only runs once.
+function(hipfile_check_fortify_used_but_marked_unused outvar)
+    cmake_push_check_state(RESET)
+    set(CMAKE_REQUIRED_FLAGS
+        "-O2 -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3 -Werror=used-but-marked-unused")
+    check_cxx_source_compiles("
+        #include <cstdio>
+        int main()
+        {
+            char buf[8];
+            std::snprintf(buf, sizeof(buf), \"%d\", 1);
+            std::fprintf(stderr, \"%s\", buf);
+            return 0;
+        }" HIPFILE_FORTIFY_ALLOWS_USED_BUT_MARKED_UNUSED)
+    cmake_pop_check_state()
+    set(${outvar} ${HIPFILE_FORTIFY_ALLOWS_USED_BUT_MARKED_UNUSED} PARENT_SCOPE)
+endfunction()
+
+# The flags are for sources in ``language`` (CXX or HIP)
+function(get_hipfile_clang_warning_flags outvar language compiler_version)
 
     # Warning flags for clang 17 and earlier
     set(flags
@@ -238,13 +267,22 @@ function(get_hipfile_clang_warning_flags outvar compiler_version)
     endif()
 
     # Only use _FORTIFY_SOURCE if the optimization level is -O2, -O3, or -Os
-    string(JOIN " " MYCXXFLAGS ${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${CMAKE_BUILD_TYPE}})
-    if(MYCXXFLAGS MATCHES "-O[2-3s]")
-        set(flags
-            -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3
-            ${flags}
-        )
+    hipfile_get_fortify_flags(fortify_flags ${language})
+
+    # Drop -Wused-but-marked-unused when the fortified C library functions
+    # trip it, since there's nothing to fix in hipFile's code. With a
+    # multi-config generator, this drops it from every configuration.
+    if(fortify_flags)
+        hipfile_check_fortify_used_but_marked_unused(fortify_allows_warning)
+        if(NOT fortify_allows_warning)
+            list(REMOVE_ITEM flags -Wused-but-marked-unused)
+        endif()
     endif()
+
+    set(flags
+        ${fortify_flags}
+        ${flags}
+    )
 
     set(${outvar} ${flags} PARENT_SCOPE)
 
