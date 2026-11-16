@@ -104,6 +104,11 @@ if(HIP_PLATFORM MATCHES "amd" AND UNIX)
   target_link_libraries(hipGraphInstantiateNullStreamFence_exe
                         ${GPGPU_LINKER_LIBRARIES})
   add_dependencies(GraphsTest1 hipGraphInstantiateNullStreamFence_exe)
+  # STANDALONE_TESTS creates a per-file target that also runs this helper.
+  if(TARGET hipGraphInstantiateNullStreamFence)
+    add_dependencies(hipGraphInstantiateNullStreamFence
+                     hipGraphInstantiateNullStreamFence_exe)
+  endif()
   set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS
                hipGraphInstantiateNullStreamFence_exe)
 endif()
