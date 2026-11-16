@@ -11,13 +11,7 @@
 Panel Config:
   id: 1000
   title: GL0 Texture Data (TXD)
-  description: |-
-    GL0 Texture Data (TXD) metrics for gfx1250. The TXD unit handles data return
-    paths from GL0 cache and LDS back to shader VGPRs. This panel covers TXD
-    utilization, stall analysis, and bus utilization metrics.
-
   data source:
-
   - metric_table:
       id: 1001
       title: TXD Utilization

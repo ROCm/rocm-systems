@@ -832,6 +832,16 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
     }
     if (!write && reg->cls == RegClass::VGPR && (inst.flags() & COMPACT_WAVE64_MEMORY_RESULT))
       accessed_lanes &= UINT32_MAX;
+    if (!write && modifiers.cvt_scale && op == inst.src_operand(1) && reg->cls == RegClass::VGPR) {
+      // Each data half-wave reads its selected byte, including from inactive lanes.
+      const CvtScaleSelection &scale = *modifiers.cvt_scale;
+      for (unsigned base = 0; base < wf.wf_size(); base += 16) {
+        const uint64_t consumers = (accessed_lanes >> base) & 0xffff;
+        if (consumers)
+          access(*reg, consumers << scale.lane(base), 1u << scale.byte(base), false);
+      }
+      return;
+    }
     // Interpolation coefficients are quad broadcasts, including inactive lanes.
     if (!write && reg->cls == RegClass::VGPR && name.starts_with("v_interp_") &&
         (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3 ||

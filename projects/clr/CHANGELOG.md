@@ -27,6 +27,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 * After `hipFuncSetCacheConfig`, `preferredShmemCarveout` reads back `-1` for `hipFuncCachePreferNone` (was `0`) and `0` for `hipFuncCachePreferL1` (was `1`).
 * `hipCtxDestroy` returns `hipErrorInvalidContext` for a context the caller did not create with `hipCtxCreate` (was `hipSuccess`).
 * On gfx12 and later, pitched allocations use 128-byte alignment instead of 256, matching the hardware's linear pitch granularity. `hipMallocPitch`, `hipMemAllocPitch` and `hipMalloc3D` return a 128-byte-aligned pitch, and `hipDeviceProp_t::texturePitchAlignment` (OpenCL `CL_DEVICE_IMAGE_PITCH_ALIGNMENT`) reports 128. A 260-byte row now yields a 384-byte pitch rather than 512, so the allocation size changes with it. Earlier hardware is unchanged at 256 bytes. Applications that hard-coded the previous pitch, or derived a buffer size from it, will see different values.
+* Stream completion signals are now placed in device memory by default, as graph signals already are, on GPUs with a large BAR whose ROCr reports a signal-capable device pool, while no profiler tool is attached. Empty kernel dispatches and multi-stream launches get faster, while host reads of completion state get slower: `hipEventQuery`, `hipEventElapsedTime`, and a short kernel launched and synchronized on its own can take a few microseconds longer. Set `DEBUG_CLR_DEV_SIGNALS=0` to keep stream completion signals in host memory.
 
 ## HIP 7.17.0 for ROCm 10.2.0
 

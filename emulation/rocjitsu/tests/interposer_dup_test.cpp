@@ -15,6 +15,7 @@
 /// tracking that lives in the interposer.
 
 #include "scoped_temp.h"
+#include "syscall_error_filter.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -1335,12 +1336,13 @@ int open_drm_render() {
     return -1;
   }
 
-  const std::string fd_path = "/proc/self/fd/" + std::to_string(fd);
-  std::array<char, 128> target{};
-  const ssize_t length = readlink(fd_path.c_str(), target.data(), target.size());
-  constexpr char kSyntheticDrmFd[] = "/memfd:rocjitsu_drm (deleted)";
-  if (length != sizeof(kSyntheticDrmFd) - 1 ||
-      std::memcmp(target.data(), kSyntheticDrmFd, sizeof(kSyntheticDrmFd) - 1) != 0) {
+  // The interposer reports a character device backed by an unlinked regular
+  // file. The raw stat prevents test ioctls from reaching a physical device.
+  struct stat backing {
+  }, reported{};
+  if (syscall(SYS_fstat, fd, &backing) != 0 || !S_ISREG(backing.st_mode) || backing.st_nlink != 0 ||
+      fstat(fd, &reported) != 0 || !S_ISCHR(reported.st_mode) ||
+      reported.st_rdev != makedev(226, minor)) {
     close(fd);
     errno = ENODEV;
     return -1;
@@ -2390,6 +2392,10 @@ TEST(InterposerDrmTest, DeviceViewRetainsDumpIdentityAfterReleaseAndMove) {
   ASSERT_NE(target, MAP_FAILED);
   ASSERT_EQ(mremap(mapped, 4096, 4096, MREMAP_MAYMOVE | MREMAP_FIXED, target), target);
   EXPECT_EQ(*static_cast<uint32_t *>(target), 0x12345678u);
+  // The token variant also exercises proc snapshots when memfd_create is unavailable.
+  const char *token = std::getenv("RJ_TEST_FORCE_TOKEN_BACKING");
+  if (token && std::strcmp(token, "1") == 0)
+    rocjitsu::test::set_syscall_error(SYS_memfd_create, ENOSYS);
   for (const char *path : {"/proc/self/maps", "/proc/self/smaps"}) {
     std::ifstream maps(path);
     std::string line;
@@ -5382,6 +5388,19 @@ TEST(InterposerDrmTest, CanonicalSysfsPathsRetainSimulatedDevice) {
   EXPECT_STREQ(resolved, "/");
   EXPECT_EQ(realpath("/sys/dev/char/226:999999/device/uevent", resolved), nullptr);
   EXPECT_EQ(errno, ENOENT);
+  close(kfd);
+}
+
+TEST(InterposerDrmTest, MissingMemfdRoutesRenderNodeIoctls) {
+  const int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  rocjitsu::test::set_syscall_error(SYS_memfd_create, ENOSYS);
+  const int drm = open_drm_render();
+  ASSERT_GE(drm, 0);
+  drm_amdgpu_info_device device{};
+  EXPECT_TRUE(query_drm_device_info(drm, &device));
+  EXPECT_GT(device.cu_active_number, 0u);
+  close(drm);
   close(kfd);
 }
 
