@@ -18,9 +18,19 @@ include(HipFileFortifySource)
 # every call to fprintf, snprintf, and the like warns. The result is
 # cached, so the check only runs once.
 function(hipfile_check_fortify_used_but_marked_unused outvar)
+    # _FORTIFY_SOURCE does nothing without optimization, so the check has
+    # to compile with -O2. try_compile() puts the flags of the try-compile
+    # configuration after CMAKE_REQUIRED_FLAGS, and with a multi-config
+    # generator that's Debug, so an -O0 in CMAKE_CXX_FLAGS_DEBUG would
+    # win. Pick the configuration and put -O2 at the end of its flags.
+    # Both variables are local to this function, so the caller's settings
+    # are unchanged.
+    set(CMAKE_TRY_COMPILE_CONFIGURATION Release)
+    string(APPEND CMAKE_CXX_FLAGS_RELEASE " -O2")
+
     cmake_push_check_state(RESET)
     set(CMAKE_REQUIRED_FLAGS
-        "-O2 -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3 -Werror=used-but-marked-unused")
+        "-U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3 -Werror=used-but-marked-unused")
     check_cxx_source_compiles("
         #include <cstdio>
         int main()
