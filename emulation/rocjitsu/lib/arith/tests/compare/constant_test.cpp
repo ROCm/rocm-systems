@@ -344,3 +344,99 @@ TEST(CompareCmpxTF64W64, Arithmetic) {
   rocjitsu::arith::test::check_constant_compare<64, 64, /*Floating=*/true>(
       rj_arith_v_cmpx_t_f64_w64, true);
 }
+
+// Check always-true and always-false comparison masks.
+TEST(CompareCmpFI16W32, Arithmetic) {
+  rocjitsu::arith::test::check_constant_compare<16, 32, /*Floating=*/false>(
+      rj_arith_v_cmp_f_i16_w32, false);
+}
+
+// Check always-true and always-false comparison masks.
+TEST(CompareCmpTI16W32, Arithmetic) {
+  rocjitsu::arith::test::check_constant_compare<16, 32, /*Floating=*/false>(
+      rj_arith_v_cmp_t_i16_w32, true);
+}
+
+// Check always-true and always-false comparison masks.
+TEST(CompareCmpxFI16W32, Arithmetic) {
+  rocjitsu::arith::test::check_constant_compare<16, 32, /*Floating=*/false>(
+      rj_arith_v_cmpx_f_i16_w32, false);
+}
+
+// Check always-true and always-false comparison masks.
+TEST(CompareCmpxTI16W32, Arithmetic) {
+  rocjitsu::arith::test::check_constant_compare<16, 32, /*Floating=*/false>(
+      rj_arith_v_cmpx_t_i16_w32, true);
+}
+
+// Check always-true and always-false comparison masks.
+TEST(CompareCmpFU16W32, Arithmetic) {
+  rocjitsu::arith::test::check_constant_compare<16, 32, /*Floating=*/false>(
+      rj_arith_v_cmp_f_u16_w32, false);
+}
+
+// Check always-true and always-false comparison masks.
+TEST(CompareCmpTU16W32, Arithmetic) {
+  rocjitsu::arith::test::check_constant_compare<16, 32, /*Floating=*/false>(
+      rj_arith_v_cmp_t_u16_w32, true);
+}
+
+// Check always-true and always-false comparison masks.
+TEST(CompareCmpxFU16W32, Arithmetic) {
+  rocjitsu::arith::test::check_constant_compare<16, 32, /*Floating=*/false>(
+      rj_arith_v_cmpx_f_u16_w32, false);
+}
+
+// Check always-true and always-false comparison masks.
+TEST(CompareCmpxTU16W32, Arithmetic) {
+  rocjitsu::arith::test::check_constant_compare<16, 32, /*Floating=*/false>(
+      rj_arith_v_cmpx_t_u16_w32, true);
+}
+
+// Check always-true and always-false comparison masks.
+TEST(CompareCmpFI16W64, Arithmetic) {
+  rocjitsu::arith::test::check_constant_compare<16, 64, /*Floating=*/false>(
+      rj_arith_v_cmp_f_i16_w64, false);
+}
+
+// Check always-true and always-false comparison masks.
+TEST(CompareCmpTI16W64, Arithmetic) {
+  rocjitsu::arith::test::check_constant_compare<16, 64, /*Floating=*/false>(
+      rj_arith_v_cmp_t_i16_w64, true);
+}
+
+// Check always-true and always-false comparison masks.
+TEST(CompareCmpxFI16W64, Arithmetic) {
+  rocjitsu::arith::test::check_constant_compare<16, 64, /*Floating=*/false>(
+      rj_arith_v_cmpx_f_i16_w64, false);
+}
+
+// Check always-true and always-false comparison masks.
+TEST(CompareCmpxTI16W64, Arithmetic) {
+  rocjitsu::arith::test::check_constant_compare<16, 64, /*Floating=*/false>(
+      rj_arith_v_cmpx_t_i16_w64, true);
+}
+
+// Check always-true and always-false comparison masks.
+TEST(CompareCmpFU16W64, Arithmetic) {
+  rocjitsu::arith::test::check_constant_compare<16, 64, /*Floating=*/false>(
+      rj_arith_v_cmp_f_u16_w64, false);
+}
+
+// Check always-true and always-false comparison masks.
+TEST(CompareCmpTU16W64, Arithmetic) {
+  rocjitsu::arith::test::check_constant_compare<16, 64, /*Floating=*/false>(
+      rj_arith_v_cmp_t_u16_w64, true);
+}
+
+// Check always-true and always-false comparison masks.
+TEST(CompareCmpxFU16W64, Arithmetic) {
+  rocjitsu::arith::test::check_constant_compare<16, 64, /*Floating=*/false>(
+      rj_arith_v_cmpx_f_u16_w64, false);
+}
+
+// Check always-true and always-false comparison masks.
+TEST(CompareCmpxTU16W64, Arithmetic) {
+  rocjitsu::arith::test::check_constant_compare<16, 64, /*Floating=*/false>(
+      rj_arith_v_cmpx_t_u16_w64, true);
+}

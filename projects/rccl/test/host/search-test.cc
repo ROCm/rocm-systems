@@ -701,7 +701,9 @@ TEST_F(SearchMicrotest, Compute_BalancedTreeSecondGpuAlsoReachesTheNic) {
 
   EXPECT_EQ(PATH_SYS, tree->typeInter);  // GPU 1 reaches the NIC across the sockets
   EXPECT_EQ(2, tree->nChannels);
-  EXPECT_FLOAT_EQ(15, tree->bwInter);
+  // Cpu() is Turin, so the socket link is 32 GB/s. Search then takes the largest
+  // inter speed-table entry that does not exceed that path, which is 24.
+  EXPECT_FLOAT_EQ(24, tree->bwInter);
 }
 
 TEST_F(SearchMicrotest, Compute_TreeStartsFromTheBandwidthItsReturnPathAdds) {

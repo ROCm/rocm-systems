@@ -504,6 +504,14 @@ public:
   /// @returns Pointer to the line data, or nullptr if not found.
   const uint8_t *line_data_for_read(uint64_t addr, uint32_t vmid = 0,
                                     uint64_t address_space_identity = 0) {
+    return line_data_for_read_if(addr, vmid, address_space_identity,
+                                 [](const CacheTag &) { return true; });
+  }
+
+  /// Update replacement order only when the caller accepts the resident tag.
+  template <typename Predicate>
+  const uint8_t *line_data_for_read_if(uint64_t addr, uint32_t vmid,
+                                       uint64_t address_space_identity, Predicate accept) {
     uint32_t set = set_index(addr);
     if constexpr (LazyStorage)
       if (!touched_sets_[set])
@@ -512,7 +520,7 @@ public:
     for (uint32_t w = 0; w < Associativity; ++w) {
       auto &t = tag_at(set, w);
       if (t.valid && t.tag == tag && t.vmid == vmid &&
-          t.address_space_identity == address_space_identity) {
+          t.address_space_identity == address_space_identity && accept(t)) {
         policy_.access(set, w);
         return line_data(set, w);
       }

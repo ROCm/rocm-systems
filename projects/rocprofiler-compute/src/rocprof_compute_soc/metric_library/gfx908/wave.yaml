@@ -1,0 +1,67 @@
+wave.active_cycles:
+  name: Wavefront Active Cycles
+  formula: 4 * SUM(SQ_ACTIVE_INST_ANY) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: >-
+    The average number of cycles a wavefront in the kernel dispatch was actively executing
+    instructions per normalization unit. This measurement is made on a per-wavefront
+    basis, and may include cycles that another wavefront spent actively executing
+    (on another execution unit, for example) or was stalled. As such, it is most useful
+    to get a sense of how waves were spending their time, rather than identification
+    of a precise limiter. The sum of this metric, Issue Wait Cycles and Active Wait
+    Cycles should be equal to the total Wave Cycles metric.
+wave.cycles:
+  name: Wavefront Cycles
+  formula: 4 * SUM(SQ_WAVE_CYCLES) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: >-
+    The number of cycles a wavefront in the kernel dispatch spent resident on a compute
+    unit per normalization unit. This is averaged over all wavefronts in a kernel
+    dispatch.
+wave.dep_wait_cycles:
+  name: Wavefront Dependency Wait Cycles
+  formula: 4 * SUM(SQ_WAIT_ANY) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: >-
+    The number of cycles a wavefront in the kernel dispatch spent resident on a compute
+    unit per normalization unit. This is averaged over all wavefronts in a kernel
+    dispatch.
+wave.issue_wait_cycles:
+  name: Wavefront Issue Wait Cycles
+  formula: 4 * SUM(SQ_WAIT_INST_ANY) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: >-
+    The number of cycles a wavefront in the kernel dispatch was unable to issue an
+    instruction for any reason (e.g., execution pipe back-pressure, arbitration loss,
+    etc.) per normalization unit. This counter is incremented at every cycle by all
+    wavefronts on a CU unable to issue an instruction. As such, it is most useful
+    to get a sense of how waves were spending their time, rather than identification
+    of a precise limiter because another wave could be actively executing while a
+    wave is issue stalled. The sum of this metric, Dependency Wait Cycles and Active
+    Cycles should be equal to the total Wave Cycles metric.
+wave.occupancy:
+  name: Wavefront Occupancy
+  formula: SUM(SQ_LEVEL_WAVES_ACCUM) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+  unit: Wavefronts
+  description: >-
+    The time-averaged number of wavefronts resident on the accelerator over the lifetime
+    of the kernel. Note: this metric may be inaccurate for short-running kernels (less
+    than 1ms).
+  peak: $max_waves_per_cu * $cu_per_gpu
+wave.occupancy_pct:
+  name: Wavefront Occupancy (Percent)
+  formula: 100 * SUM(SQ_LEVEL_WAVES_ACCUM) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $numActiveCUs * $max_waves_per_cu)
+  unit: Percent
+  description: >-
+    Resident wavefronts per active CU, averaged over GPU-active cycles, as a percent
+    of the maximum wavefronts per CU.
+wave.restored:
+  name: Restored Wavefronts
+  formula: AVG(SQ_WAVES_RESTORED)
+  unit: Wavefronts
+  description: The total number of wavefronts restored from a context-save.
+wave.saved:
+  name: Saved Wavefronts
+  formula: AVG(SQ_WAVES_SAVED)
+  unit: Wavefronts
+  description: The total number of wavefronts saved at a context-save.

@@ -4423,6 +4423,21 @@ TEST(MemoryWaitFootprintTest, NarrowDsAndBufferStoresCheckOnlyConsumedBytes) {
   }
 }
 
+TEST(MemoryWaitFootprintTest, PackedConversionTracksSelectedScaleLanesAndBytes) {
+  std::vector<std::vector<uint32_t>> cases;
+  for (uint16_t opcode : {cdna5::kVCvtScalePk8F32Fp4Vop3, cdna5::kVCvtScalePk16F32Fp6Vop3,
+                          cdna5::kVCvtScalePk8F32Fp8Vop3, cdna5::kVCvtScalePk8F32Bf8Vop3}) {
+    const bool table37 =
+        opcode == cdna5::kVCvtScalePk8F32Fp8Vop3 || opcode == cdna5::kVCvtScalePk8F32Bf8Vop3;
+    for (uint8_t opsel = 0; opsel < (table37 ? 12 : 16); ++opsel) {
+      const auto words =
+          cdna5::build_vop3(opcode, {.vdst = 8, .opsel = opsel, .src0 = 256, .src1 = 260});
+      cases.emplace_back(words.begin(), words.end());
+    }
+  }
+  check_vector_footprints(ROCJITSU_CODE_ARCH_CDNA5, 32, 24, cases);
+}
+
 TEST(MemoryWaitFootprintTest, WriteLaneChecksOnlyTheSelectedDestinationLane) {
   for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4,
                     ROCJITSU_CODE_ARCH_CDNA5}) {
@@ -7450,6 +7465,17 @@ TEST(MemoryWaitFootprintTest, DirectAluFamiliesMatchObservedAccesses) {
     EXPECT_TRUE(decoded.value()->flags() & DIRECT_REGISTER_ACCESSES) << decoded.value()->mnemonic();
   }
   check_vector_footprints(ROCJITSU_CODE_ARCH_CDNA4, 64, 16, cases);
+}
+
+// Selected SDWA bytes must have exactly the same lane dependencies as execution.
+TEST(MemoryWaitFootprintTest, CdnaConditionalSdwaMatchesWaitFootprints) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA4}) {
+    for (uint64_t condition : {0ULL, 1ULL, ~0ULL}) {
+      // v_cndmask_b32 v2, v0, v1; BYTE_1 sources and destination, preserve other bytes.
+      check_vector_footprints(arch, 64, 4, {{0x000402f9U, 0x01011100U}}, 0, 0,
+                              [condition](Wavefront &wf) { wf.set_vcc(condition); });
+    }
+  }
 }
 
 TEST(MemoryWaitFootprintTest, RestrictedPackedAndScalarBranchSourcesKeepVccWords) {

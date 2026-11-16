@@ -31,6 +31,7 @@
 #cmakedefine USE_IPC
 #cmakedefine USE_GDA
 #cmakedefine USE_SDMA
+#cmakedefine USE_LDS_STAGE
 #cmakedefine USE_TDM
 #cmakedefine USE_THREADS
 #cmakedefine USE_SHARED_CTX
@@ -47,6 +48,7 @@
 #cmakedefine USE_CONSTMEM
 #cmakedefine HAVE_EXTERNAL_MPI
 #cmakedefine HAVE_DEVICE_MALLOC_UNCACHED
+#cmakedefine ROCSHMEM_ROCPROFILER_REGISTER
 
 #define ROCSHMEM_VENDOR_MAJOR_VERSION @PROJECT_VERSION_MAJOR@
 #define ROCSHMEM_VENDOR_MINOR_VERSION @PROJECT_VERSION_MINOR@
