@@ -9,10 +9,11 @@ with the same arguments, and the two results are the same.
 
 This repository is public, so the output is kept minimal: a generic id for the
 host, the BIOS version, and pass or fail for the module and GPU checks. The real
-host name is never printed: the expected name comes from the EXPECT_HOSTNAME
-environment variable (a repo secret in CI, so it is masked in logs), and the
-identity check is skipped when it is not set. The amdgpu version and the output
-of rocminfo and docker are never read into the output.
+host name is never printed. When running by hand, set EXPECT_HOSTNAME to the
+machine's short host name to check that you are on the machine you mean; the
+check is skipped when it is not set, as in CI, where the runner labels pick the
+host. The amdgpu version and the output of rocminfo and docker are never read
+into the output.
 
 With --bmc it also checks that the host's BMC answers over IPMI. Only
 reachability is reported: the BMC firmware version is never read into the output.
@@ -51,7 +52,6 @@ class Report:
 def check_host(report):
     expected = os.environ.get("EXPECT_HOSTNAME", "").strip()
     if not expected:
-        report.line("- host identity: not checked (EXPECT_HOSTNAME is not set)")
         return True
     if socket.gethostname().split(".")[0] != expected:
         report.fail(
