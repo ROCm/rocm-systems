@@ -10,6 +10,9 @@ with the same arguments, and the two results are the same.
 This repository is public, so the output is kept minimal: the host name, the
 BIOS version, and pass or fail for the module and GPU checks. The amdgpu
 version and the output of rocminfo and docker are never read into the output.
+
+With --bmc it also checks that the host's BMC answers over IPMI. Only
+reachability is reported: the BMC firmware version is never read into the output.
 """
 
 import argparse
@@ -72,6 +75,31 @@ def check_driver(report):
     report.line("- amdgpu: loaded")
 
 
+def check_bmc(report):
+    def fail(msg):
+        report.fail(f"- BMC: {msg}", msg)
+
+    if not any(os.path.exists(d) for d in ("/dev/ipmi0", "/dev/ipmi/0", "/dev/ipmidev/0")):
+        return fail("no IPMI device on the host (/dev/ipmi0), so it cannot reach its BMC in-band")
+    try:
+        proc = subprocess.run(
+            ["sudo", "-n", "ipmitool", "mc", "info"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=60,
+        )
+    except FileNotFoundError:
+        return fail("sudo or ipmitool is not installed on the host")
+    except subprocess.TimeoutExpired:
+        return fail("ipmitool did not answer within 60 seconds: the BMC is not responding")
+    if proc.returncode != 0:
+        return fail(
+            f"`sudo -n ipmitool mc info` failed (exit {proc.returncode}): no passwordless "
+            "sudo rule for the runner user, or the BMC is not responding"
+        )
+    report.line("- BMC: reachable")
+
+
 def check_gpu(report, gfx, image):
     def fail(msg):
         report.fail(f"- GPU: {msg}", msg)
@@ -110,6 +138,7 @@ def main():
     p.add_argument("--host", required=True, help="expected short hostname")
     p.add_argument("--gfx", required=True, help="expected GPU target, e.g. gfx1151")
     p.add_argument("--image", default=DEFAULT_IMAGE, help="container image used to run rocminfo")
+    p.add_argument("--bmc", action="store_true", help="also check that the BMC answers over IPMI")
     args = p.parse_args()
 
     report = Report()
@@ -120,6 +149,8 @@ def main():
     if host_ok:
         check_bios(report)
         check_driver(report)
+        if args.bmc:
+            check_bmc(report)
         check_gpu(report, args.gfx, args.image)
     return 1 if report.failed else 0
 
