@@ -8034,6 +8034,18 @@ static hipError_t capture_hipExtMemcpyBatchAsync(void** dsts, void** srcs, size_
 }
 
 // Generated shim
+static hipError_t capture_hipMemcpyWithAttributesAsync(void* dst, const void* src, size_t size, hipMemcpyAttributes* attr, hipStream_t stream) {
+  hipError_t r = g_real_table.hipMemcpyWithAttributesAsync_fn(dst, src, size, attr, stream);
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipMemcpy3DWithAttributesAsync(struct hipMemcpy3DBatchOp* op, unsigned long long flags, hipStream_t stream) {
+  hipError_t r = g_real_table.hipMemcpy3DWithAttributesAsync_fn(op, flags, stream);
+  return r;
+}
+
+// Generated shim
 static hipError_t capture_hipGraphNodeGetLocalId(hipGraphNode_t node, unsigned int* nodeId) {
   hipError_t r = g_real_table.hipGraphNodeGetLocalId_fn(node, nodeId);
   if (r == hipSuccess) {
@@ -8825,6 +8837,8 @@ void hip_capture_build_table() {
   g_cap_table.hipKernelSetAttributeForDevice_fn = capture_hipKernelSetAttributeForDevice;
   g_cap_table.hipKernelSetCacheConfig_fn = capture_hipKernelSetCacheConfig;
   g_cap_table.hipExtMemcpyBatchAsync_fn = capture_hipExtMemcpyBatchAsync;
+  g_cap_table.hipMemcpyWithAttributesAsync_fn = capture_hipMemcpyWithAttributesAsync;
+  g_cap_table.hipMemcpy3DWithAttributesAsync_fn = capture_hipMemcpy3DWithAttributesAsync;
   g_cap_table.hipGraphNodeGetLocalId_fn = capture_hipGraphNodeGetLocalId;
   g_cap_table.hipGraphNodeGetToolsId_fn = capture_hipGraphNodeGetToolsId;
   g_cap_table.hipGraphGetId_fn = capture_hipGraphGetId;

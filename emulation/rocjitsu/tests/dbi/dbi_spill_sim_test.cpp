@@ -137,7 +137,7 @@ protected:
     // v_mov v2, K ; v_mov v3, v2 (ANCHOR at offset 4, v2 live) ; s_endpgm.
     auto target = test::make_amdgpu_kernel_elf(
         {test::make_mov_vgpr_inline(2, kSentinel), kMovV3V2, endpgm}, /*private_bytes=*/64,
-        /*granulated_sgpr_count=*/3, a_.e_flags);
+        test::kCallableProbeGranulatedSgprCount, a_.e_flags);
     target = test::with_descriptor_metadata(target, a_.arch);
     auto probe = test::make_amdgpu_probe_elf("rj_test_probe", {kMovV2Zero, setpc}, a_.e_flags);
 
@@ -282,7 +282,7 @@ protected:
     const uint32_t mov_s8_0 = maybe_s_mov_b32_48.value();
     // s_mov s8, K ; v_mov v3, s8 (ANCHOR at offset 4, s8 live) ; s_endpgm.
     auto target = test::make_amdgpu_kernel_elf({mov_s8_k, kMovV3S8, endpgm}, /*private_bytes=*/64,
-                                               /*granulated_sgpr_count=*/3, a_.e_flags);
+                                               test::kCallableProbeGranulatedSgprCount, a_.e_flags);
     target = test::with_descriptor_metadata(target, a_.arch);
     auto probe = test::make_amdgpu_probe_elf("rj_test_probe", {mov_s8_0, setpc}, a_.e_flags);
 
@@ -425,9 +425,9 @@ protected:
     const uint32_t mov_s9_k = maybe_s_mov_b32_43.value();
     // s_mov s8,K1 ; s_mov s9,K2 ; v_mov v3,s8 (ANCHOR at offset 8: reads s8, s9 read
     // next -> both live) ; v_mov v4,s9 ; s_endpgm.
-    auto target =
-        test::make_amdgpu_kernel_elf({mov_s8_k, mov_s9_k, kMovV3S8, kMovV4S9, endpgm},
-                                     /*private_bytes=*/64, /*granulated_sgpr_count=*/3, a_.e_flags);
+    auto target = test::make_amdgpu_kernel_elf({mov_s8_k, mov_s9_k, kMovV3S8, kMovV4S9, endpgm},
+                                               /*private_bytes=*/64,
+                                               test::kCallableProbeGranulatedSgprCount, a_.e_flags);
     target = test::with_descriptor_metadata(target, a_.arch);
     auto probe =
         test::make_amdgpu_probe_elf("rj_test_probe", {kMovS8Zero, kMovS9Zero, setpc}, a_.e_flags);
@@ -534,7 +534,7 @@ protected:
     auto target = test::make_amdgpu_kernel_elf(
         {kAccWriteA0ZeroLo, test::make_accvgpr_write_a0_inline_hi(kSentinel), kAccReadV3A0Lo,
          kAccReadV3A0Hi, endpgm},
-        /*private_bytes=*/64, /*granulated_sgpr_count=*/3, a_.e_flags);
+        /*private_bytes=*/64, test::kCallableProbeGranulatedSgprCount, a_.e_flags);
     target = test::with_descriptor_metadata(target, a_.arch);
     auto probe = test::make_amdgpu_probe_elf(
         "rj_test_probe", {kAccWriteA0ZeroLo, kAccWriteA0ZeroHi, setpc}, a_.e_flags);
@@ -683,7 +683,7 @@ protected:
         {test::make_mov_vgpr_inline(2, kSentinel), mov_s8_k, kAccWriteA0ZeroLo,
          test::make_accvgpr_write_a0_inline_hi(kSentinel), kMovV5V2, kMovV6S8, kAccReadV7A0Lo,
          kAccReadV7A0Hi, endpgm},
-        /*private_bytes=*/64, /*granulated_sgpr_count=*/3, a_.e_flags,
+        /*private_bytes=*/64, test::kCallableProbeGranulatedSgprCount, a_.e_flags,
         /*granulated_vgpr_count=*/1, /*accum_offset=*/1);
     target = test::with_descriptor_metadata(target, a_.arch);
     auto probe = test::make_amdgpu_probe_elf(
@@ -852,7 +852,7 @@ protected:
     auto target = test::make_amdgpu_kernel_elf(
         {test::make_mov_vgpr_inline(0, kSentinel), mov_s8_k, adds[0].value(), adds[1].value(),
          adds[2].value(), adds[3].value(), adds[4].value(), endpgm},
-        /*private_bytes=*/64, /*granulated_sgpr_count=*/3, a_.e_flags);
+        /*private_bytes=*/64, test::kCallableProbeGranulatedSgprCount, a_.e_flags);
     target = test::with_descriptor_metadata(target, a_.arch);
     auto probe = test::make_amdgpu_probe_elf(
         "rj_test_probe", {test::make_mov_vgpr_inline(0, 0), kMovS8Zero, setpc}, a_.e_flags);
@@ -1073,8 +1073,8 @@ protected:
     code.push_back(mov_v3_k);
     code.push_back(endpgm);
 
-    auto target = test::make_amdgpu_kernel_elf(code, /*private_bytes=*/0,
-                                               /*granulated_sgpr_count=*/3, a_.base.e_flags);
+    auto target = test::make_amdgpu_kernel_elf(
+        code, /*private_bytes=*/0, test::kCallableProbeGranulatedSgprCount, a_.base.e_flags);
 
     target = test::with_descriptor_metadata(target, a_.base.arch);
     auto probe =
@@ -1230,8 +1230,8 @@ protected:
     code.push_back(mov_v3_v2);
     code.push_back(endpgm);
 
-    auto target = test::make_amdgpu_kernel_elf(code, /*private_bytes=*/64,
-                                               /*granulated_sgpr_count=*/3, a_.base.e_flags);
+    auto target = test::make_amdgpu_kernel_elf(
+        code, /*private_bytes=*/64, test::kCallableProbeGranulatedSgprCount, a_.base.e_flags);
 
     target = test::with_descriptor_metadata(target, a_.base.arch);
     auto probe = test::make_amdgpu_probe_elf("rj_test_probe", {probe_widen, kMovV2Zero, setpc},
@@ -1394,8 +1394,8 @@ protected:
     code.insert(code.end(), a_.restore_full_mask.begin(), a_.restore_full_mask.end());
     code.push_back(endpgm);
 
-    auto target = test::make_amdgpu_kernel_elf(code, /*private_bytes=*/64,
-                                               /*granulated_sgpr_count=*/3, a_.base.e_flags);
+    auto target = test::make_amdgpu_kernel_elf(
+        code, /*private_bytes=*/64, test::kCallableProbeGranulatedSgprCount, a_.base.e_flags);
 
     target = test::with_descriptor_metadata(target, a_.base.arch);
     AmdGpuCodeObject obj(target.data(), target.size());

@@ -10,6 +10,7 @@ import re
 
 import pytest
 
+from amdisa.codegen.execute.rj_arith_scalar import MOVES, gen_scalar
 from amdisa.codegen.execute.rj_arith_vector import gen_vector32, gen_integer16
 
 
@@ -28,12 +29,34 @@ def context(arch, name, dst, src, *, is_vop3=False, result_writer=None):
     )
 
 
-@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+@pytest.mark.parametrize('name', sorted(MOVES))
+def test_scalar_moves_preserve_conditional_observation(name):
+    for arch in ('rdna3', 'rdna4'):
+        body = gen_scalar(context(arch, name, ['d'], ['a']))
+        assert f'rj_arith_{name.lower()}(' in body
+        assert 'wf.write_scc' not in body
+        assert 'read_scalar(d)' not in body
+        if name.startswith('S_CMOV'):
+            assert body.index('if (!input_scc) return;') < body.index(
+                'RegisterAccess registers'
+            )
+        else:
+            assert 'read_scc' not in body
+        assert ('uint16_t(a.encoding_value())' in body) == ('MOVK' in name)
+        assert body.index('status != RJ_ARITH_SUCCESS') < body.index(
+            'registers.write_scalar'
+        )
+    assert gen_scalar(context('cdna2', name, ['d'], ['a'])) is None
+
+
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4', 'cdna5'])
 def test_vector_move_and_conditional_controls(arch):
     word = gen_vector32(context(arch, 'V_MOV_B32', ['d'], ['a'], is_vop3=True))
     assert 'rj_arith_v_mov_b32_w64' in word
     assert 'inst_.clamp' not in word
-    assert 'RJ_ARITH_ALU_NEG_A' in word and 'RJ_ARITH_ALU_ABS_A' in word
+    # gfx942/gfx950 MOV preserves bits; RDNA and gfx1250 apply sign modifiers.
+    for modifier in ('RJ_ARITH_ALU_NEG_A', 'RJ_ARITH_ALU_ABS_A'):
+        assert (modifier in word) == (arch.startswith('rdna') or arch == 'cdna5')
     half = gen_integer16(context(arch, 'V_MOV_B16', ['d'], ['a'], is_vop3=True))
     assert 'rj_arith_v_mov_b16_w64' in half
     assert 'RJ_ARITH_ALU_HIGH_A' in half and 'RJ_ARITH_ALU_HIGH_D' in half
@@ -63,7 +86,7 @@ def test_all_move_and_selection_encodings_route_to_rj_arith(arch):
         / arch
     )
     count = 0
-    for file in ('vop1', 'vop2', 'vop3'):
+    for file in ('sop1', 'sopk', 'vop1', 'vop2', 'vop3'):
         source = (root / (file + '_exec.cpp')).read_text()
         pattern = r'void ((?:S(?:Mov|Cmov)(?:B32|B64|kI32)|VMovB(?:16|32)|VCndmaskB(?:16|32))\w+)::execute(?:_modifier)?_impl\([^)]*\)\s*\{'
         for match in re.finditer(pattern, source):
@@ -72,9 +95,23 @@ def test_all_move_and_selection_encodings_route_to_rj_arith(arch):
                 depth += (source[end] == '{') - (source[end] == '}')
                 end += 1
             body = source[match.end() : end - 1]
-            assert re.search(r'\brj_arith(?:_|::)', body), match[1]
+            assert re.search(
+                r'\b(?:rj_arith(?:_|::)|amdgpu::arith::execute_move32\()', body
+            ), match[1]
             assert 'try_execute_' not in body
             assert 'amdgpu::execute_s_' not in body
             assert 'amdgpu::execute_v_' not in body
             count += 1
-    assert count == 14  # Eight MOV and six CNDMASK methods.
+    assert count == 20  # Six scalar methods, eight MOV and six CNDMASK methods.
+
+
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4'])
+def test_accumulator_moves_reuse_raw_word_copy(arch):
+    from amdisa.codegen.execute.rj_arith_vector import ACCUMULATOR_MOVES
+
+    for name in ACCUMULATOR_MOVES:
+        body = gen_vector32(context(arch, name, ['acc_dst'], ['acc_src'], is_vop3=True))
+        assert 'execute_move32(*this, wf, acc_dst, acc_src)' in body
+        assert 'inst_.' not in body
+        assert gen_vector32(context('cdna2', name, ['d'], ['a'])) is None
+        assert gen_vector32(context('cdna2', name, ['d'], ['a'])) is None

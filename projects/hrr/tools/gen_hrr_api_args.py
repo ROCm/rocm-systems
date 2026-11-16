@@ -202,6 +202,10 @@ _VARIABLE_KERNEL_LAUNCH_MIN_PAYLOAD_EXPR = (
 # (hipModuleGetFunction: function handles identified by name at launch time)
 PASSTHROUGH_ONLY: Set[str] = {
     "hipModuleGetFunction",
+    # Generated capture would store these process-local struct pointers without
+    # their pointees, so replay could not reconstruct either operation.
+    "hipMemcpyWithAttributesAsync",
+    "hipMemcpy3DWithAttributesAsync",
 }
 
 # ---------------------------------------------------------------------------
@@ -2094,9 +2098,9 @@ _HEADER_PREAMBLE = """\
  * v12: hipExtMemcpyBatchAsync was appended to HipDispatchTable,
  * shifting the compiler API IDs up by one. A v11 reader would decode
  * those events as the wrong API.
- * v13: four graph ID queries were appended to HipDispatchTable,
- * shifting the compiler API IDs up by four. A v12 reader would decode
- * those events as the wrong API. */
+ * v13: hipMemcpyWithAttributesAsync, hipMemcpy3DWithAttributesAsync and four
+ * graph ID queries were appended to HipDispatchTable, shifting the compiler
+ * API IDs up by six. A v12 reader would decode those events as the wrong API. */
 #define HRR_VERSION ((uint16_t)13u)
 
 /* Written once at byte 0 of events.bin. */

@@ -5,9 +5,9 @@
 // Owns public entry points and their validation/dispatch policy.
 
 #include "conversion/pack.h"
-#include "common/internal.h"
+#include "common/validation.h"
 #include "register/dpp.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_conversion.h"
 
 #include <stdint.h>
 
@@ -17,12 +17,14 @@ namespace {
 // before changing outputs.
 template <bool Saturate>
 int run(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
-        const uint32_t *const *a, const uint32_t *const *b, bool quiet_nan = true) {
+        const uint32_t *const *a, const uint32_t *const *b, bool quiet_nan = true,
+        bool preserve_half = true) {
   if (mode >> 32) {
-    return rocjitsu::arith::execute_dpp(
-        flags, exec_mask, mode, a, [&](uint32_t exec_mask, const uint32_t *const *source) {
-          return run<Saturate>(flags, exec_mask, uint32_t(mode), d, source, b, quiet_nan);
-        });
+    return rocjitsu::arith::execute_dpp(flags, exec_mask, mode, a,
+                                        [&](uint32_t exec_mask, const uint32_t *const *source) {
+                                          return run<Saturate>(flags, exec_mask, uint32_t(mode), d,
+                                                               source, b, quiet_nan, preserve_half);
+                                        });
   }
   const uint32_t known = Saturate
                              ? RJ_ARITH_ALU_HIGH_D | RJ_ARITH_ALU_CLAMP
@@ -44,13 +46,15 @@ int run(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
   }
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
   if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
-    rocjitsu::arith::pack_x86_64_v4<Saturate>(flags, exec_mask, mode, d[0], a[0], bp, quiet_nan);
+    rocjitsu::arith::pack_x86_64_v4<Saturate>(flags, exec_mask, mode, d[0], a[0], bp, quiet_nan,
+                                              preserve_half);
     return RJ_ARITH_SUCCESS;
   }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
-    rocjitsu::arith::pack_x86_64_v3<Saturate>(flags, exec_mask, mode, d[0], a[0], bp, quiet_nan);
+    rocjitsu::arith::pack_x86_64_v3<Saturate>(flags, exec_mask, mode, d[0], a[0], bp, quiet_nan,
+                                              preserve_half);
     return RJ_ARITH_SUCCESS;
   }
 #endif
@@ -64,10 +68,12 @@ int run(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
         return uint32_t(rocjitsu::arith::clamp(value, 0, 255));
       };
 
-      // The packed-byte form updates only the selected destination halfword.
+      // RDNA selects a destination half; older CDNA zero-extends the packed result.
       uint32_t packed = convert(x & 65535) | (convert(x >> 16) << 8);
       unsigned shift = mode & RJ_ARITH_ALU_HIGH_D ? 16 : 0;
-      result[lane] = (d[0][lane] & ~(65535u << shift)) | (packed << shift);
+      result[lane] = (preserve_half || (mode & RJ_ARITH_ALU_HIGH_D))
+                         ? (d[0][lane] & ~(65535u << shift)) | (packed << shift)
+                         : packed;
     } else {
       x = (x >> (mode & RJ_ARITH_ALU_HIGH_A ? 16 : 0)) & 65535;
       uint32_t y = (bp[lane] >> (mode & RJ_ARITH_ALU_HIGH_B ? 16 : 0)) & 65535;
@@ -112,9 +118,11 @@ int run(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
 // changing outputs.
 template <bool Saturate>
 int run_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *d,
-               const uint32_t *const *a, const uint32_t *const *b, bool quiet_nan = true) {
+               const uint32_t *const *a, const uint32_t *const *b, bool quiet_nan = true,
+               bool preserve_half = true) {
   // Validate before either Wave64 half can modify outputs, even when EXEC is empty.
-  if (int error = run<Saturate>(flags, 0, mode, nullptr, nullptr, nullptr, quiet_nan)) {
+  if (int error =
+          run<Saturate>(flags, 0, mode, nullptr, nullptr, nullptr, quiet_nan, preserve_half)) {
     return error;
   }
   if (!exec_mask) {
@@ -128,7 +136,7 @@ int run_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *cons
       source_b = b[0] + half * 32;
     }
     if (int error = run<Saturate>(flags, uint32_t(exec_mask >> (half * 32)), half_instruction_flags,
-                                  &dest, &source_a, &source_b, quiet_nan)) {
+                                  &dest, &source_a, &source_b, quiet_nan, preserve_half)) {
       return error;
     }
   }
@@ -247,4 +255,30 @@ int rj_arith_v_pack_b32_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t ins
   }
   return run_wave64<false>(flags, exec_mask, instruction_flags, d, a, b,
                            bool(flags & RJ_ARITH_FP_IEEE_MODE));
+}
+
+// Saturate two signed halfwords to bytes. Low-half writes zero-extend; HIGH_D preserves the low
+// half.
+int rj_arith_v_sat_pk_u8_i16_w32_gfx942(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return run<true>(flags, exec_mask, instruction_flags, d, a, nullptr, true, false);
+}
+
+// Saturate two signed halfwords to bytes. Low-half writes zero-extend; HIGH_D preserves the low
+// half.
+int rj_arith_v_sat_pk_u8_i16_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return run_wave64<true>(flags, exec_mask, instruction_flags, d, a, nullptr, true, false);
 }

@@ -12019,7 +12019,7 @@ TEST(RjCodeTranslateCApi, RejectsSameArchGfx1250) {
   rj_code_dbt_options_t options{};
   options.guest_arch = ROCJITSU_CODE_ARCH_CDNA5;
   options.host_arch = ROCJITSU_CODE_ARCH_CDNA5;
-  rj_code_object_t *translated = nullptr;
+  rj_code_object_t *translated = &source;
   EXPECT_NE(rj_code_translate(&source, &options, &translated), ROCJITSU_STATUS_SUCCESS);
   EXPECT_EQ(translated, nullptr);
 }

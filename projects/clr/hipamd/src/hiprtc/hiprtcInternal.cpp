@@ -20,6 +20,14 @@
 namespace hiprtc {
 
 namespace {
+void crashWithMessage(std::string message) {
+#ifdef HIPRTC_USE_EXCEPTIONS
+  throw std::runtime_error(message);
+#else
+  guarantee(false, message.c_str());
+#endif
+}
+
 bool isProfileRuntimeOption(const std::string& option) {
   auto isExactOrJoined = [&option](const char* spelling) {
     return option == spelling || option.rfind(std::string(spelling) + "=", 0) == 0;

@@ -186,6 +186,72 @@ class ImageManager {
     word.bits.CLAMP_Z = static_cast<unsigned int>(clamp[2]);
     return HSA_STATUS_SUCCESS;
   }
+
+  /// @brief Values of the 3-bit SQ_IMG_SAMP_WORD0.MAX_ANISO_RATIO field, which
+  /// holds log2 of the ratio. Mirrors the hardware SQ_TEX_ANISO_RATIO enum,
+  /// which is not reachable from here - the generated register headers in this
+  /// directory define SQ_TEX_XY_FILTER and friends but not this one.
+  enum SqTexAnisoRatio {
+    kSqTexAnisoRatio1 = 0,
+    kSqTexAnisoRatio2 = 1,
+    kSqTexAnisoRatio4 = 2,
+    kSqTexAnisoRatio8 = 3,
+    kSqTexAnisoRatio16 = 4,
+  };
+
+  /// @brief Determine the appropriate anisotropic filtering ratio.
+  ///
+  /// Mirrors PAL's GetAnisoRatio():
+  ///  - for values of anisotropy not natively supported by the hardware we
+  ///    clamp to the closest value less than what was requested (3 -> 2:1,
+  ///    7 -> 4:1, ...);
+  ///  - 16 is the maximum supported ratio, and anything above it saturates
+  ///    there rather than being rejected or falling back to isotropic.
+  ///
+  /// Anisotropy applies to both point and linear sampling - the hardware has
+  /// SQ_TEX_XY_FILTER_ANISO_POINT as well as _ANISO_BILINEAR, matching PAL's
+  /// IsAnisoEnabled() which treats XyFilterAnisotropicPoint as aniso-enabled.
+  static inline uint32_t encodeMaxAnisoRatio(uint32_t max_anisotropy) {
+    uint32_t aniso_ratio = kSqTexAnisoRatio1;
+
+    if (max_anisotropy < 2) {
+      // Nothing to do.
+    } else if (max_anisotropy < 4) {
+      aniso_ratio = kSqTexAnisoRatio2;
+    } else if (max_anisotropy < 8) {
+      aniso_ratio = kSqTexAnisoRatio4;
+    } else if (max_anisotropy < 16) {
+      aniso_ratio = kSqTexAnisoRatio8;
+    } else {
+      aniso_ratio = kSqTexAnisoRatio16;
+    }
+
+    return aniso_ratio;
+  }
+
+  /// @brief SQ_IMG_SAMP_WORD0.ANISO_THRESHOLD, as PAL's !preciseAniso path
+  /// computes it: encoded ratio >> 1. Zero when anisotropy is off.
+  static inline uint32_t encodeAnisoThreshold(uint32_t max_anisotropy) {
+    return encodeMaxAnisoRatio(max_anisotropy) >> 1;
+  }
+
+  /// @brief SQ_IMG_SAMP_WORD0.ANISO_BIAS - PAL uses the encoded ratio itself.
+  /// PAL also sets PERF_MIP to (ratio + 6); not mirrored, because it is nonzero
+  /// even at ratio 0 and would change every existing isotropic SRD.
+  static inline uint32_t encodeAnisoBias(uint32_t max_anisotropy) {
+    return encodeMaxAnisoRatio(max_anisotropy);
+  }
+
+  /// @brief True when anisotropic filtering is in effect, in which case
+  /// XY_MIN/MAG_FILTER must select an SQ_TEX_XY_FILTER_ANISO_* variant for the
+  /// hardware to apply MAX_ANISO_RATIO at all. Keeping this in step with
+  /// encodeMaxAnisoRatio() is what makes the programmed filter and ratio agree,
+  /// the same invariant PAL's IsAnisoEnabled()/GetAnisoRatio() pair maintains.
+  static inline bool useAnisoFilter(
+      const hsa_ext_sampler_descriptor_v3_t& desc) {
+    return encodeMaxAnisoRatio(desc.max_anisotropy) != kSqTexAnisoRatio1;
+  }
+
  private:
   DISALLOW_COPY_AND_ASSIGN(ImageManager);
 };

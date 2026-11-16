@@ -13,22 +13,22 @@ contract tier intentionally pins only small, portable semantic guarantees.
 ## Snapshot
 
 <!-- contract-coverage-snapshot
-contract_tests: 639
-contract_domains: 119
-declared_apis: 509
-covered_apis: 496
+contract_tests: 643
+contract_domains: 120
+declared_apis: 511
+covered_apis: 498
 uncovered_allowlisted: 13
-coverage_pct: 97.4
+coverage_pct: 97.5
 -->
 
-- Snapshot date: 2026-11-02
-- Snapshot commit: `61053fb485b`
-- Contract tests: 639
-- Contract domains: 119
-- Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 509
-- Declared HIP runtime APIs directly exercised by contract tests: 496
+- Snapshot date: 2026-11-16
+- Snapshot commit: `6f9d517d5c6`
+- Contract tests: 643
+- Contract domains: 120
+- Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 511
+- Declared HIP runtime APIs directly exercised by contract tests: 498
 - Intentionally uncovered, allowlisted APIs: 13
-- Approximate declared API-name coverage: 97.4%
+- Approximate declared API-name coverage: 97.5%
 - Additional public macro exercised: `hipLaunchKernelGGL`
 - Additional non-runtime-header APIs exercised: HIPRTC (`hiprtcCreateProgram`,
   `hiprtcCompileProgram`, `hiprtcGetCodeSize`, `hiprtcGetCode`,

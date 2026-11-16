@@ -535,10 +535,14 @@ HIP_TEST_CASE(Unit_hipGraphSegmentOrdering_DisabledJoinHead) {
  * Test Description
  * ------------------------
  *  - Single-stream chains whose lengths straddle the boundaries of the chunks a large packet
- *    batch is submitted in. Every kernel checks it runs exactly in chain order, and no packet
- *    may be lost or repeated across launches.
+ *    batch is submitted in. The first launch finds the queue idle and starts with an 8-packet
+ *    lead chunk; the back-to-back launches after it usually do not. Covered: the lead alone,
+ *    lead plus one full 256-packet chunk, the largest remainder merged into the chunk before
+ *    it, and the same boundaries without a lead. Every kernel checks it runs exactly in chain
+ *    order, and no packet may be lost or repeated across launches.
  *  - The same chains on a 256-slot AQL queue, where the longer chains do not fit in the ring
- *    and the batch must be submitted as the GPU drains it.
+ *    and the batch must be submitted as the GPU drains it. There a full chunk is 128 packets
+ *    and already the half-ring cap, so a remainder is never merged and stays its own chunk.
  * Test source
  * ------------------------
  *  - unit/graph/hipGraphSegmentOrdering.cc
@@ -550,7 +554,8 @@ HIP_TEST_CASE(Unit_hipGraphSegmentOrdering_LongChainBatches) {
   if (!UsesSegmentedGraphPath()) HIP_SKIP_TEST("Requires the segmented graph executor");
   // Section names are passed on the child process command line, so they contain no spaces.
   SECTION("Chains") {
-    for (int chain_len : {1, 8, 9, 24, 25, 56, 57, 504, 505, 1000}) {
+    for (int chain_len :
+         {1, 8, 9, 24, 25, 56, 57, 128, 129, 136, 137, 264, 265, 383, 384, 391, 392, 1000}) {
       RunLongChain(chain_len);
     }
   }

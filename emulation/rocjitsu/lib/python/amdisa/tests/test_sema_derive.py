@@ -1519,7 +1519,7 @@ class TestDeriveVectorUnary:
         else:
             assert encode_helper in cpp
         assert 'util::e8m0_to_f32' in cpp
-        assert '((inst_.opsel & 0x3u) * 8u)' in cpp
+        assert 'amdgpu::CvtScaleSelection::f4_f6(inst_.opsel)' in cpp
         assert (
             'std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src1, lane))'
             not in cpp
@@ -3244,9 +3244,8 @@ class TestDeriveSpecialScalar:
         cpp = lower_sema_block(block)
         assert 'write_scalar' in cpp
         if dtype == 'b32':
-            assert 'wf.exec()' in cpp
-            assert 'wf.set_exec(' in cpp
-            assert 'wf.exec_raw()' not in cpp
+            assert 'static_cast<uint32_t>(wf.exec_raw())' in cpp
+            assert 'wf.write_exec_lo(' in cpp
         else:
             assert 'wf.exec_raw()' in cpp
             assert 'wf.write_exec(' in cpp
@@ -3314,7 +3313,7 @@ class TestDeriveSpecialScalar:
                 'amdgpu::RegisterAccess(wf).write_scalar(inst.dst0, '
                 'static_cast<uint32_t>(result));'
             ) in cpp
-            assert 'wf.set_exec(result);' in cpp
+            assert 'wf.write_exec_lo(result);' in cpp
         else:
             assert (
                 'amdgpu::RegisterAccess(wf).write_scalar(inst.dst0, '

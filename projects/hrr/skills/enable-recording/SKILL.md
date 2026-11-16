@@ -34,6 +34,7 @@ Run `scripts/hrr_capture.sh` for every step below; paths are relative to this sk
 Each of these changes the result silently, and the first two are the ones that waste an afternoon.
 
 - **`HIP_HRR_CAPTURE_OUTPUT`**: switches capture on and names the archive. A runtime without HRR ignores it and reports nothing, which is why preflight exists. Let `run` set it rather than exporting it yourself, because a variable exported in the shell that starts a container does not reach the process inside it.
+- **`HIP_HRR_CAPTURE_CONSENT`**: capture also needs the user's own consent, `yes` in this variable or in `${XDG_CONFIG_HOME:-$HOME/.config}/hrr/capture-consent`. Without it the workload runs unrecorded and its stderr has a line starting `[HRR capture] HIP_HRR_CAPTURE_OUTPUT ignored: capture needs your consent`. Show the user that line and let them give consent; never set the variable or write the file for them. Inside a container the user's file is not there, so the variable has to be passed in.
 - **`HIP_VISIBLE_DEVICES`**: changes which devices the workload sees and therefore what gets recorded. This skill never sets it. HIP's ordering is not `rocm-smi`'s, so device 4 here is not necessarily GPU 4 there; if you pin a device, confirm which one you got.
 - **`LD_PRELOAD` and `LD_LIBRARY_PATH`**: decide which runtime loads. `LD_PRELOAD` wins over everything, including a binary's own `DT_RPATH`; `LD_LIBRARY_PATH` is the one that loses to it. Winning the link is not the same as working, which is why preloading a runtime into a framework wheel breaks it. See step 1.
 - **`HRR_PLAYBACK` and `ROCM_PATH`**: where `verify` looks for `hrr-playback` when `--playback` is not given, in the same order as `ensure_playback.sh`: `HRR_PLAYBACK`, then `$ROCM_PATH/bin`, then `PATH`. The first reader found is often the wrong one.
@@ -120,9 +121,9 @@ Each process directory also reports its state:
 - `state: incomplete`: no trailer. Usually the process died, which is expected for a crash and still readable. It also appears when capture itself dropped an event it could not fit in the wire format, and that archive has a hole in the middle rather than a truncated tail. The workload's own stderr tells the two apart: capture prints `Archive marked INCOMPLETE` in the second case.
 - `state: not finalized`: events exist but no manifest, so it was killed before it could finalize. The counts then come from `--info`.
 
-An archive with several `pid-*` directories is one archive. Send the whole directory, since the processes belong together, and replay them one at a time (step 5).
+An archive with several `pid-*` directories is one archive. Share the whole directory, since the processes belong together, and replay them one at a time (step 5).
 
-## 4. Share it, knowing what is in it
+## 4. Share it only as agreed, after reading NOTICE.txt
 
 **There is no scrubbing, anonymisation or randomisation option for the data today.** Say that plainly before anyone asks whether the archive can be sanitised, because the answer shapes what they do next and there is no flag that changes it. Capture does drop two things on its own, with no flag: the `.comment` and debug sections of the code objects, which hold the compiler build and most build paths, and the GPU's hardware identifiers.
 
@@ -134,7 +135,7 @@ What the archive holds, per process, and it is worth reading out to whoever has 
 - **`manifest.json`**: process and parent process ids, event and blob counts, the clean-shutdown flag, the HIP and comgr versions that captured, and the device's name, architecture, memory size and clocks. Its PCI location, UUID and LUID are written blank.
 - **`regions/*.hrrr`**: the framework allocator's own layout, when a producer ran alongside capture.
 
-Apart from the few exceptions in step 2, failed HIP calls are not recorded, and nothing that never crossed a HIP call is. The archive is exactly as sensitive as the data the workload handled, so where it may go has to be agreed before it is uploaded. [PRIVACY.md](../../PRIVACY.md) is the page to hand to whoever approves it.
+Apart from the few exceptions in step 2, failed HIP calls are not recorded, and nothing that never crossed a HIP call is. The archive is exactly as sensitive as the data the workload handled, so where it may go has to be agreed before it is uploaded. Capture writes `NOTICE.txt` at the archive root with the terms; read it, or [Sharing an archive](../../PRIVACY.md#sharing-an-archive), before sharing. [PRIVACY.md](../../PRIVACY.md) is the page to hand to whoever approves it.
 
 `verify --json` gives each process's counts and sizes in a form you can attach to the request, and says whether any hardware identifier or code object build information is left (`hardware_ids`; `debug_info_files` for code objects still holding `.comment` or `.debug*` bytes; `path_files` for code objects whose loaded data holds an absolute path; `unchecked_fat_binaries` for the compressed ones it cannot read; `fat_binaries_scanned`, false when the archive's format version is not v8 to v13 and it cannot tell which blobs are fat binaries); the device details are in each `manifest.json`. For a multi-process archive, `hrr-playback --info` against the archive root prints a table covering every process at once. The cross-check in `verify` reports on one process, which is enough to judge the capture and not enough for a disclosure inventory.
 
@@ -142,7 +143,7 @@ If the content is the obstacle, three things exist and none of them is scrubbing
 
 ## 5. Then replay it, here, now
 
-**Do this before sending anything anywhere.** The machine that captured has the runtime the archive was written by, so the reader that matches it is here and nowhere else in particular. It is also the fastest way to learn that the archive is worth sending: a replay that reproduces the fault is proof, where a verdict of `recorded` is only a promise.
+**Do this before sending anything anywhere.** The machine that captured has the runtime the archive was written by, so the reader that matches it is here and nowhere else in particular. It is also the fastest way to learn that the archive is worth sharing: a replay that reproduces the fault is proof, where a verdict of `recorded` is only a promise.
 
 One thing still gets in the way. The triage skill's preflight compares the capture against the HIP version of the `hipconfig` on `PATH`, not against the reader you named, so on a host whose ROCm install differs from the build that captured it stops with a version prompt and wants `HRR_CONTINUE=1`. That is the check being coarse rather than a real mismatch.
 
@@ -156,4 +157,4 @@ Start with the process that did not shut down cleanly, `incomplete` or `not fina
 
 That skill replays the archive and reports what failed: fault class, faulting kernel, fault address, failing event. If no `hrr-playback` is around, its `scripts/ensure_playback.sh` finds one or builds it, which is also the answer to "where do I get the matching reader" in step 3.
 
-One rule for a multi-process archive, since the two skills sound contradictory and are not: **send it whole, replay one process at a time.** The processes belong together and the directory is the unit of transfer, while triage takes a single `pid-*` directory.
+One rule for a multi-process archive, since the two skills sound contradictory and are not: **share it whole, replay one process at a time.** The processes belong together and the directory is the unit of transfer, while triage takes a single `pid-*` directory.
