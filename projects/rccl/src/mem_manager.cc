@@ -1125,9 +1125,10 @@ ncclResult_t ncclCommSuspend_impl(ncclComm_t comm, int flags) {
     if (ncclParamEnqueueRearchEnable()) {
       NEW_NOTHROW_GOTO(suspendJob, ncclMemManagerSuspendAsyncJob, ret, fail);
       suspendJob->comm = comm;
-      NCCLCHECKGOTO(ncclMgmtTaskEnqueue((struct ncclAsyncJob*)suspendJob, ncclCommMemSuspendJob,
-                                        ncclMemManagerSuspendAsyncJobFree, comm),
-                    ret, fail);
+      ret = ncclMgmtTaskEnqueue((struct ncclAsyncJob*)suspendJob, ncclCommMemSuspendJob,
+                                ncclMemManagerSuspendAsyncJobFree, comm);
+      suspendJob = nullptr; // enqueue owns and destroys the job on both success and failure
+      NCCLCHECKGOTO(ret, ret, fail);
     } else {
       NCCLCHECKGOTO(ncclCalloc(&task, 1), ret, fail);
       task->comm = comm;

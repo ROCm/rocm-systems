@@ -8,6 +8,7 @@ Attaching to a running process
 
 `ROCm Systems Profiler <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems>`_ can attach
 to and profile an already running process using the ``rocprof-sys-attach`` executable.
+The experimental command ``rocsys attach`` forwards to that executable. See :doc:`using-rocsys`.
 This capability is useful for profiling long-running applications, daemons, or processes
 that are difficult to restart with instrumentation.
 

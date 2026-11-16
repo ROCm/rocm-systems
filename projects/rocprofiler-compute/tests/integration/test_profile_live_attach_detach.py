@@ -3,7 +3,6 @@
 
 """Integration tests for live attach/detach profiling."""
 
-import inspect
 import os
 import subprocess
 import time
@@ -15,19 +14,14 @@ from tests.integration.common import (
     attach_detach_interval_msec_no_delay,
     config,
     num_kernels,
-    validate,
 )
 
 
-def test_live_attach_detach_block(
+def test_live_attach_detach_set(
     binary_handler_profile_rocprof_compute,
 ):
-    options = [
-        "--block",
-        "3.1.1",
-        "4.1.1",
-        "5.1.1",
-    ]
+    # Live attachment cannot replay the workload for additional counter passes.
+    options = ["--set", common.SINGLE_PASS_SET]
     workload_dir = common.get_output_dir()
 
     # TODO: temp fix for sdk defautly disable attach/detach,
@@ -71,8 +65,7 @@ def test_live_attach_detach_block(
         )
 
     # Validate results
-    file_dict = integration_common.check_csv_files(workload_dir, 1, num_kernels)
-    validate(inspect.stack()[0][3], workload_dir, file_dict)
+    integration_common.check_csv_files(workload_dir, 1, num_kernels)
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
@@ -102,11 +95,13 @@ def test_live_attach_detach_pc_sampling(
         }
 
         # Profiling step (may fail)
-        binary_handler_profile_rocprof_compute(
+        code, stdout, stderr = binary_handler_profile_rocprof_compute(
             config,
             workload_dir,
             options,
-            check_success=True,
+            check_success=False,
+            capture_output=True,
+            stream=True,
             roof=False,
             app_name="app_hip_dynamic_shared",
             attach_detach_para=attach_detach,
@@ -124,4 +119,7 @@ def test_live_attach_detach_pc_sampling(
             capture_output=True,
         )
 
+    integration_common.skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir)
+
+    assert code == 0
     common.clean_output_dir(config["cleanup"], workload_dir)

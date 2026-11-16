@@ -154,6 +154,13 @@ void InstructionMixPlugin::onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) {
   merge(dispatches_[wf.dispatch_id()].counts, state->counts);
 }
 
+void InstructionMixPlugin::onAmdgpuWavefrontCancelled(amdgpu::Wavefront &wf) {
+  // Keep attempted instructions in the incomplete summary, without emitting
+  // a completed dispatch record.
+  if (wf.has_plugin_state(slot_index()))
+    onAmdgpuWavefrontHalted(wf);
+}
+
 void InstructionMixPlugin::onAmdgpuDispatchExecutionEnd(uint32_t dispatch_id) {
   auto iter = dispatches_.find(dispatch_id);
   if (iter == dispatches_.end())
@@ -178,7 +185,7 @@ void InstructionMixPlugin::onShutdown() {
   // in flight routinely. These dispatches get no per-dispatch record: their
   // totals are not final, and only the union is trustworthy.
   //
-  // Waves that never reached wavefront-halt are still missed: their counts
+  // Waves that reached neither halt nor cancellation are still missed: their counts
   // live in wavefront-local plugin state and the plugin has no way to
   // enumerate live wavefronts. `incomplete_dispatches` is what tells a reader
   // the summary may be a subset; a run that ends cleanly reports zero.

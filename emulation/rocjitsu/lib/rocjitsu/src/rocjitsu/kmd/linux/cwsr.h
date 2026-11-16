@@ -19,11 +19,16 @@
 #define ROCJITSU_KMD_LINUX_CWSR_H_
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/config/kfd_device_config.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna3/sgpr_layout.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <limits>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -37,21 +42,54 @@ enum class CwsrLayoutKind : uint8_t {
   Gfx12_5,
 };
 
+// The saved VGPR and LDS field encodings define these layout granules. The
+// serializer and its advertised capacity must round with the same widths.
+inline constexpr uint32_t kCwsrGfx94VgprGranule = 8;
+inline constexpr uint32_t kCwsrGfx1250VgprGranule = 16;
+inline constexpr uint32_t kCwsrGfx942LdsGranuleBytes = 512;
+inline constexpr uint32_t kCwsrGfx950LdsGranuleBytes = 1280;
+inline constexpr uint32_t kCwsrGfx1250LdsGranuleBytes = 1024;
+inline constexpr uint32_t kCwsrGfx94LdsFieldMax = 0xFFu;
+inline constexpr uint32_t kCwsrGfx1250LdsFieldMax = 0x1FFu;
+inline constexpr uint64_t kCwsrPageSize = 4096;
+inline constexpr uint64_t kCwsrMaxAlignedBytes =
+    std::numeric_limits<uint32_t>::max() - (kCwsrPageSize - 1);
+
+/// @brief Target-specific properties of a context-save ABI modelled here.
+struct CwsrAbiProperties {
+  /// Complete record layout supported by this codec.
+  CwsrLayoutKind layout_kind = CwsrLayoutKind::Unsupported;
+  /// Saved-state LDS encoding unit in bytes, independent of allocation alignment.
+  uint32_t lds_granule_bytes = 0;
+};
+
 /// @brief Select the exact context-save ABI implemented for @p arch.
-/// @details This is deliberately fail-closed. Wave width, register count, and
-/// TTMP placement are insufficient to infer compatibility with a dbgapi record.
-constexpr CwsrLayoutKind cwsr_layout_kind(rj_code_arch_t arch) {
-  // gfx908 adds an ACC-VGPR block and gfx908/gfx90a keep the packet id in
-  // TTMP6, so CDNA1/CDNA2 are deliberately excluded despite also being gfx9.
+/// @details LDS units follow ROCdbgapi's cwsr_record_t::lds_size(), not kernel
+/// LDS allocation granularity. gfx950 overrides the 512-byte gfx9 unit with
+/// 1280 bytes; gfx12.5 uses 1024 bytes.
+///
+/// CDNA1/CDNA2 and RDNA are intentionally unsupported even though their normal
+/// LDS unit is also 512 bytes. gfx908 saves a separate ACC-VGPR block and
+/// gfx908/gfx90a keep the packet id in TTMP6. RDNA changes the control stack,
+/// wave widths and register layout; RDNA4 also has a WGP-takeover LDS encoding.
+/// Supporting those targets requires their complete record layouts, not just
+/// an LDS unit. Unsupported targets have no layout or encoding unit here.
+constexpr CwsrAbiProperties cwsr_abi_properties(rj_code_arch_t arch) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA3:
+    return {CwsrLayoutKind::Gfx9_4, kCwsrGfx942LdsGranuleBytes};
   case ROCJITSU_CODE_ARCH_CDNA4:
-    return CwsrLayoutKind::Gfx9_4;
+    return {CwsrLayoutKind::Gfx9_4, kCwsrGfx950LdsGranuleBytes};
   case ROCJITSU_CODE_ARCH_CDNA5:
-    return CwsrLayoutKind::Gfx12_5;
+    return {CwsrLayoutKind::Gfx12_5, kCwsrGfx1250LdsGranuleBytes};
   default:
-    return CwsrLayoutKind::Unsupported;
+    return {};
   }
+}
+
+/// @brief Select the context-save record layout implemented for @p arch.
+constexpr CwsrLayoutKind cwsr_layout_kind(rj_code_arch_t arch) {
+  return cwsr_abi_properties(arch).layout_kind;
 }
 
 /// @brief Whether this module models the CWSR record layout for @p arch.
@@ -69,37 +107,122 @@ constexpr bool cwsr_layout_modelled(rj_code_arch_t arch) {
   return cwsr_layout_kind(arch) != CwsrLayoutKind::Unsupported;
 }
 
-/// @brief The same question as cwsr_layout_modelled(), asked of a GPU named the
-/// way KFD names one.
-/// @details The two predicates exist because their callers hold different
-/// identities. The DBG_TRAP paths have a SoC and so an arch enum; the KFD
-/// topology paths only ever see a @c gfx_target_version, which they translate to
-/// the GC hardware IP version the amdkfd driver keys on. Kept adjacent so the
-/// two architecture spellings cannot be updated apart --
-/// KfdTopologyTest.ArchAndGcSpellingsOfTheCwsrGateAgree pins them together.
+/// @brief Each modelled CDNA XCC has its own queue save area.
+constexpr uint32_t cwsr_area_count(rj_code_arch_t arch, uint32_t num_xcc) {
+  return cwsr_layout_modelled(arch) && num_xcc != 0 ? num_xcc : 1u;
+}
+
+/// @brief Area holding a queue whose owner is @p xcc_id.
+constexpr uint32_t cwsr_area_for_xcc(rj_code_arch_t arch, uint32_t xcc_id) {
+  return cwsr_layout_modelled(arch) ? xcc_id : 0u;
+}
+
+/// @brief Select the codec architecture from the GC version used by KFD.
+/// @details DBG_TRAP has a SoC architecture, while topology receives a
+/// gfx_target_version and translates it to the GC version. Keep those
+/// spellings adjacent; KfdTopologyTest.ArchAndGcSpellingsOfTheCwsrGateAgree
+/// pins their exact agreement.
 /// \NPI update this alongside cwsr_layout_modelled() when the codec learns a
 /// new record layout.
 /// @param gc_ip_version Packed GC hardware IP version, as
 ///        gc_ip_version_for_gfx_target_version() produces.
-/// @returns True if serialize/deserialize produce an image dbgapi can decode.
+/// @returns The exact modelled architecture, or INVALID for unsupported ones.
+constexpr rj_code_arch_t cwsr_arch_for_gc_ip_version(uint32_t gc_ip_version) {
+  if (gc_ip_version == make_gc_ip_version(9, 4, 3)) // gfx942
+    return ROCJITSU_CODE_ARCH_CDNA3;
+  if (gc_ip_version == make_gc_ip_version(9, 5, 0)) // gfx950
+    return ROCJITSU_CODE_ARCH_CDNA4;
+  if (gc_ip_version == make_gc_ip_version(12, 1, 0)) // gfx1250
+    return ROCJITSU_CODE_ARCH_CDNA5;
+  return ROCJITSU_CODE_ARCH_INVALID;
+}
+
+/// @brief The same layout selection as cwsr_layout_kind(), for KFD topology.
 constexpr CwsrLayoutKind cwsr_layout_kind_for_gc_ip_version(uint32_t gc_ip_version) {
-  if (gc_ip_version == make_gc_ip_version(9, 4, 3) || // gfx942 (CDNA3)
-      gc_ip_version == make_gc_ip_version(9, 5, 0))   // gfx950 (CDNA4)
-    return CwsrLayoutKind::Gfx9_4;
-  if (gc_ip_version == make_gc_ip_version(12, 1, 0)) // gfx1250 (CDNA5)
-    return CwsrLayoutKind::Gfx12_5;
-  return CwsrLayoutKind::Unsupported;
+  return cwsr_layout_kind(cwsr_arch_for_gc_ip_version(gc_ip_version));
 }
 
 constexpr bool cwsr_layout_modelled_for_gc_ip_version(uint32_t gc_ip_version) {
   return cwsr_layout_kind_for_gc_ip_version(gc_ip_version) != CwsrLayoutKind::Unsupported;
 }
 
-/// @brief Number of scalar slots in a saved SGPR block (gfx9.4 sgpr_count).
-/// @details The block is a fixed 112 slots regardless of how many scalars the
-/// dispatch actually allocated. It is also an input to the COMPUTE_RELAUNCH
-/// state word (sgprs_field = kCwsrSavedSgprSlots / 16, which must stay inside
-/// three bits), not just to the alias arithmetic below.
+/// @brief Bytes represented by one encoded LDS unit, or zero if unsupported.
+constexpr uint32_t cwsr_lds_granule_bytes(rj_code_arch_t arch) {
+  return cwsr_abi_properties(arch).lds_granule_bytes;
+}
+
+/// @brief Largest live LDS allocation representable in one save record.
+/// @returns Zero for unsupported architectures.
+constexpr uint32_t cwsr_max_encoded_lds_bytes(rj_code_arch_t arch) {
+  switch (cwsr_layout_kind(arch)) {
+  case CwsrLayoutKind::Gfx9_4:
+    return kCwsrGfx94LdsFieldMax * cwsr_lds_granule_bytes(arch);
+  case CwsrLayoutKind::Gfx12_5:
+    return kCwsrGfx1250LdsFieldMax * cwsr_lds_granule_bytes(arch);
+  default:
+    return 0;
+  }
+}
+
+/// @brief Whether a device has the geometry needed for an @p arch capacity.
+/// @details The caller separately decides whether this device is published.
+constexpr bool cwsr_capacity_eligible_device(const config::KfdDeviceConfig &device,
+                                             rj_code_arch_t arch) {
+  return device.simd_count != 0 && device.simd_per_cu != 0 && device.max_waves_per_simd != 0 &&
+         cwsr_arch_for_gc_ip_version(
+             gc_ip_version_for_gfx_target_version(device.gfx_target_version)) == arch;
+}
+
+/// @brief CU and wave-slot bounds used to size one XCC's CWSR area.
+/// @details Zero fields mean the device has no representable resident bound.
+struct CwsrProducerLimits {
+  uint64_t cus_per_xcc = 0;
+  uint64_t waves_per_xcc = 0;
+};
+
+[[nodiscard]] constexpr CwsrProducerLimits
+cwsr_producer_limits_for_device(const config::KfdDeviceConfig &device, uint32_t num_xcc) {
+  const rj_code_arch_t arch =
+      cwsr_arch_for_gc_ip_version(gc_ip_version_for_gfx_target_version(device.gfx_target_version));
+  if (num_xcc == 0 || !cwsr_capacity_eligible_device(device, arch))
+    return {};
+  const uint64_t kfd_cus =
+      ((uint64_t{device.simd_count} + device.simd_per_cu - 1) / device.simd_per_cu + num_xcc - 1) /
+      num_xcc;
+  // KFD can advertise only enabled SIMDs, while the simulator can stop waves
+  // in every configured CU slot. Bound the producer's complete XCC.
+  const uint64_t arrays = std::max(1u, device.num_shader_arrays_per_engine);
+  if (device.num_shader_engines != 0 && arrays > kCwsrMaxAlignedBytes / device.num_shader_engines)
+    return {};
+  const uint64_t shader_arrays = uint64_t{device.num_shader_engines} * arrays;
+  if (shader_arrays != 0 && device.num_cu_per_sh > kCwsrMaxAlignedBytes / shader_arrays)
+    return {};
+  const uint64_t simulated_cus = shader_arrays * device.num_cu_per_sh;
+  const uint64_t active_cus = std::max(kfd_cus, simulated_cus);
+  const uint64_t slots_per_cu = std::max(uint64_t{device.simd_per_cu} * device.max_waves_per_simd,
+                                         uint64_t{device.max_slots_scratch_cu});
+  if (active_cus == 0 || slots_per_cu == 0 || active_cus > kCwsrMaxAlignedBytes / slots_per_cu)
+    return {};
+  return {active_cus, active_cus * slots_per_cu};
+}
+
+/// @brief Page-aligned queue context storage, in bytes per XCC.
+struct CwsrCapacity {
+  uint32_t control_stack_size = 0;
+  uint32_t context_save_size = 0;
+};
+
+/// @brief Bound the implemented serializer's resident-wave image for one XCC.
+/// @details One high-VGPR wave can make every wave's record use that stride.
+/// The bound includes CU-local LDS capacity with per-group record rounding,
+/// debugger step area, and every simulated wave slot in one XCC.
+/// Unsupported layouts receive nonzero queue storage for runtimes that require
+/// it, but that fallback does not enable CWSR serialization. Invalid topology
+/// receives zero sizes.
+[[nodiscard]] CwsrCapacity cwsr_capacity_for_device(const config::KfdDeviceConfig &device,
+                                                    uint32_t num_xcc);
+
+/// @brief Maximum gfx9.4 SGPR block represented by COMPUTE_RELAUNCH.
 inline constexpr uint32_t kCwsrSavedSgprSlots = 112;
 /// @brief Number of saved scalar slots in a gfx12.5 record.
 /// @details The last 16 slots carry TTMP0-15 rather than ordinary SGPRs.
@@ -110,30 +233,26 @@ inline constexpr uint32_t kCwsrGfx1250SavedSgprSlots = 128;
 inline constexpr uint32_t kCwsrArchScalarRegisters = 102;
 /// @brief One past the last aliased slot (+ gfx9.4 scalar_alias_count() of 6).
 inline constexpr uint32_t kCwsrAliasedSgprEnd = kCwsrArchScalarRegisters + 6; // 108
-/// @brief Slot holding VCC_LO; VCC_HI is the next one up.
-inline constexpr uint32_t kCwsrVccLoSlot = kCwsrAliasedSgprEnd - 2; // 106
-/// @brief Slot holding FLAT_SCRATCH_LO; FLAT_SCRATCH_HI is the next one up.
-inline constexpr uint32_t kCwsrFlatScratchLoSlot = kCwsrAliasedSgprEnd - 6; // 102
 static_assert(kCwsrAliasedSgprEnd <= kCwsrSavedSgprSlots,
               "aliased slots must land inside the saved SGPR block");
 
-/// @brief Whether a saved SGPR slot is occupied by an aliased register.
-///
-/// @details gfx9.4 stores FLAT_SCRATCH and VCC in slots near the top of the
-/// block. gfx12.5 stores FLAT_SCRATCH in its HWREG block, retains the VCC
-/// aliases, and reserves the final 16 scalar slots for TTMP0-15. Every path
-/// that walks the block by slot index must consult this so a round trip does
-/// not read an alias or TTMP back as an SGPR. On gfx9.4 the aliases are not a
-/// contiguous top range: s104 and s105 sit between FLAT_SCRATCH and VCC and
-/// are ordinary registers, so a `slot < 102` bound is not equivalent.
-/// @param slot Index into the saved SGPR block.
-/// @returns True if the slot holds an alias rather than SGPR @p slot.
-constexpr bool cwsr_sgpr_slot_is_aliased(uint32_t slot, rj_code_arch_t arch) {
+/// One past the final special-register slot in the saved block.
+constexpr uint32_t cwsr_sgpr_alias_end(rj_code_arch_t arch, uint32_t sgpr_count) {
+  return arch == ROCJITSU_CODE_ARCH_CDNA3 ? cdna3::sgpr_alias_end(sgpr_count) : kCwsrAliasedSgprEnd;
+}
+
+/// VCC and FLAT_SCRATCH are marshalled from their own wave fields. gfx12.5
+/// stores FLAT_SCRATCH in HWREGs and uses the last 16 saved scalars for TTMP.
+constexpr bool cwsr_sgpr_slot_is_aliased(uint32_t slot, rj_code_arch_t arch,
+                                         uint32_t sgpr_count = kCwsrSavedSgprSlots) {
+  const uint32_t end = cwsr_sgpr_alias_end(arch, sgpr_count);
+  const uint32_t vcc = cdna3::vcc_base(end);
+  if (slot == vcc || slot == vcc + 1)
+    return true;
   if (cwsr_layout_kind(arch) == CwsrLayoutKind::Gfx12_5)
-    return slot == kCwsrVccLoSlot || slot == kCwsrVccLoSlot + 1 ||
-           slot >= kCwsrGfx1250SavedSgprSlots - 16;
-  return slot == kCwsrVccLoSlot || slot == kCwsrVccLoSlot + 1 || slot == kCwsrFlatScratchLoSlot ||
-         slot == kCwsrFlatScratchLoSlot + 1;
+    return slot >= kCwsrGfx1250SavedSgprSlots - 16;
+  const uint32_t flat_scratch = cdna3::flat_scratch_base(end);
+  return slot == flat_scratch || slot == flat_scratch + 1;
 }
 
 /// @brief The saved architectural state of one stopped wave.
@@ -211,10 +330,14 @@ struct CwsrWaveState {
   std::vector<uint8_t> lds;
 };
 
+/// @brief The runtime-owned displaced-stepping region in a CWSR header.
+struct CwsrDebugRegion {
+  uint32_t offset = 0;
+  uint32_t size = 0;
+};
+
 /// @brief The CWSR geometry chosen for a serialized wave save area.
-///
-/// @details Returned so callers (and tests) can locate the per-register offsets
-/// dbgapi will compute. All offsets are relative to the ctx-save base.
+/// @details All offsets are relative to the ctx-save base.
 struct CwsrLayout {
   uint32_t control_stack_offset = 0; ///< Offset to the first control-stack word.
   uint32_t control_stack_size = 0;   ///< Control-stack size in bytes.
@@ -228,15 +351,7 @@ struct CwsrLayout {
 
 /// @brief Serialize a queue's stopped waves into its CWSR area.
 ///
-/// @param ctx_base Context-save-restore GPU virtual address (from the queue).
-/// @param area_size Context-save-restore area size in bytes (from the queue).
-/// @param waves The stopped waves, in the order they should appear (the first
-///        owns the workgroup's LDS region at the top of the save area).
-/// @param write32 Callback that writes one dword to a GPU virtual address.
-/// @returns The chosen layout; @ref CwsrLayout::ok is false if the waves do not
-///          fit, in which case nothing is written.
-///
-/// The written layout satisfies rocm-dbgapi's architecture-specific invariants:
+/// @details The written layout satisfies rocm-dbgapi's architecture-specific invariants:
 /// a header at the base, a control stack contiguous with the wave save area,
 /// and per-wave register blocks at the offsets the selected architecture's
 /// cwsr_record_t computes. gfx9.4 uses one relaunch state word and saves
@@ -251,27 +366,45 @@ struct CwsrLayout {
 /// serializer writes payload before the header, but cross-thread/process
 /// exclusion and any required cache maintenance remain the caller's
 /// responsibility.
+///
+/// @param ctx_base Context-save-restore GPU virtual address (from the queue).
+/// @param area_size Context-save-restore area size in bytes (from the queue).
+/// @param waves The stopped waves, in the order they should appear (the first
+///        owns the workgroup's LDS region at the top of the save area).
+/// @param write32 Callback that writes one dword to a GPU virtual address.
+/// @param control_stack_capacity Runtime control-stack boundary; zero selects compact layout.
+/// @param runtime_debug_region Existing runtime-owned debugger region. When
+///        supplied, only the first four wave-state header words are published;
+///        DebugOffset, DebugSize and the runtime error channel are left untouched.
+///        Without it, the serializer initializes a standalone synthetic test header.
+/// @returns The chosen layout; @ref CwsrLayout::ok is false if the waves do not
+///          fit, in which case nothing is written.
 CwsrLayout serialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
                                 const std::vector<CwsrWaveState> &waves,
                                 const std::function<void(uint64_t, uint32_t)> &write32,
-                                rj_code_arch_t arch);
+                                rj_code_arch_t arch, uint32_t control_stack_capacity = 0,
+                                std::optional<CwsrDebugRegion> runtime_debug_region = {});
 
 /// @brief Serialize a queue using two block writes: payload first, then header.
 ///
 /// @details This is the production-oriented equivalent of
 /// @ref serialize_queue_cwsr. It constructs the same byte-exact image but
 /// publishes the contiguous control-stack/wave payload with one callback and
-/// the 40-byte ABI header with a second callback. Keeping the header write last
+/// the ABI header with a second callback (16 bytes when preserving runtime
+/// fields, otherwise 40 bytes). Keeping the header write last
 /// preserves the CWSR publication contract while avoiding a GPU page-table
 /// lookup and lock acquisition for every dword of every wave register.
 ///
 /// @param write_block Callback receiving a target address and contiguous bytes.
+/// @param control_stack_capacity Runtime control-stack boundary; zero selects compact layout.
+/// @param runtime_debug_region Existing runtime-owned region, preserved as in
+///        @ref serialize_queue_cwsr; omit only for a standalone synthetic test header.
 /// @returns The chosen layout; @ref CwsrLayout::ok is false and no callback is
 ///          made when the image is invalid or does not fit.
 CwsrLayout serialize_queue_cwsr_bulk(
     uint64_t ctx_base, uint32_t area_size, const std::vector<CwsrWaveState> &waves,
-    const std::function<void(uint64_t, std::span<const uint8_t>)> &write_block,
-    rj_code_arch_t arch);
+    const std::function<void(uint64_t, std::span<const uint8_t>)> &write_block, rj_code_arch_t arch,
+    uint32_t control_stack_capacity = 0, std::optional<CwsrDebugRegion> runtime_debug_region = {});
 
 /// @brief Read wave register state back from a serialized CWSR area.
 ///
@@ -284,16 +417,21 @@ CwsrLayout serialize_queue_cwsr_bulk(
 /// @param ctx_base Context-save-restore GPU virtual address (from the queue).
 /// @param area_size Context-save-restore area size in bytes (from the queue).
 /// @param waves In: each element supplies the wave geometry (@ref
-///        CwsrWaveState::num_sgprs / @ref CwsrWaveState::num_vgprs) and ordering
-///        used to reproduce the exact layout; Out: filled with the values
-///        currently stored in the area. The count and geometry must match the
-///        @ref serialize_queue_cwsr call that produced the area.
+///        CwsrWaveState::num_sgprs / @ref CwsrWaveState::num_vgprs), each
+///        leader's live @ref CwsrWaveState::lds length, @ref
+///        CwsrWaveState::is_first_in_group, and ordering used to reproduce the
+///        exact layout; Out: filled with the values currently stored in the
+///        area. The count and geometry must match the @ref serialize_queue_cwsr
+///        call that produced the area. LDS record padding is skipped, not
+///        returned as live data.
 /// @param read32 Callback that reads one dword from a GPU virtual address.
+/// @param control_stack_capacity Runtime control-stack boundary; zero selects compact layout.
 /// @returns True on success; false if the waves do not fit the area (in which
 ///          case @p waves is left unchanged).
 bool deserialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
                             std::vector<CwsrWaveState> &waves,
-                            const std::function<uint32_t(uint64_t)> &read32, rj_code_arch_t arch);
+                            const std::function<uint32_t(uint64_t)> &read32, rj_code_arch_t arch,
+                            uint32_t control_stack_capacity = 0);
 
 /// @brief Read and deserialize a queue CWSR image using block transfers.
 ///
@@ -301,9 +439,11 @@ bool deserialize_queue_cwsr(uint64_t ctx_base, uint32_t area_size,
 /// reads the contiguous control-stack/wave payload once, then applies the same
 /// decoder as @ref deserialize_queue_cwsr. The queue must remain suspended for
 /// the complete operation.
+/// @param control_stack_capacity Runtime control-stack boundary; zero selects compact layout.
 bool deserialize_queue_cwsr_bulk(
     uint64_t ctx_base, uint32_t area_size, std::vector<CwsrWaveState> &waves,
-    const std::function<void(uint64_t, std::span<uint8_t>)> &read_block, rj_code_arch_t arch);
+    const std::function<void(uint64_t, std::span<uint8_t>)> &read_block, rj_code_arch_t arch,
+    uint32_t control_stack_capacity = 0);
 
 } // namespace kmd
 } // namespace rocjitsu

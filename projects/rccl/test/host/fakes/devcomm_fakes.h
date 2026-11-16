@@ -29,6 +29,8 @@ ncclTeam_t DefaultNcclTeamLsa(ncclComm_t comm);
 // the definition in devcomm_fakes.cc.
 void DefaultNcclDevCommCopyLsaData(void* dst, void const* src);
 
+// ncclTeamRail lives in nccl_device_core_fakes.cc, with the other ncclTeam* accessors.
+
 void ResetDevcommFakes();
 
 #endif  // RCCL_TEST_HOST_DEVCOMM_FAKES_H_

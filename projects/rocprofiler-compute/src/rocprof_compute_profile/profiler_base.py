@@ -9,7 +9,7 @@ import sys
 import time
 from abc import abstractmethod
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from pc_sampling.pc_sampling_profile import PCSamplingProfile
 from rocprof_compute_soc.soc_base import OmniSoC_Base
@@ -30,6 +30,7 @@ from utils.utils_common import (
     get_job_rank_and_size,
     is_only_pc_sampling,
     print_status,
+    selects_roofline,
 )
 from utils.utils_exceptions import (
     ExecutableNotFoundError,
@@ -38,13 +39,6 @@ from utils.utils_exceptions import (
 )
 from utils.utils_profile import gen_sysinfo, run_prof
 from vendored import yaml
-
-# Maps each CLI flag to the backends it enables.
-_FLAG_TO_FRAMEWORKS: dict[str, tuple[str, ...]] = {
-    "torch_trace": ("torch",),
-    "triton_trace": ("triton",),
-    "ml_api_trace": KNOWN_ML_API_BACKENDS,
-}
 
 # Only the specs classes that can be power-gated carry a perf_level, so seeing
 # AUTO here is enough to warn.
@@ -56,7 +50,7 @@ _PMC_POWER_GATING_WARNING = (
 )
 
 
-def _partition_warning_messages(mspec: MachineSpecs) -> list[str]:
+def _partition_warning_messages(mspec: MachineSpecs) -> List[str]:
     """Return notices on how active partition modes shape analysis metrics."""
     if not MIGPUSpecs.is_partition_supported(
         getattr(mspec, "gpu_arch", None), getattr(mspec, "gpu_model", None)
@@ -78,16 +72,7 @@ def _partition_warning_messages(mspec: MachineSpecs) -> list[str]:
     return messages
 
 
-def _compute_selected_frameworks(args: argparse.Namespace) -> set[str]:
-    """Return the set of frameworks requested via CLI flags."""
-    selected: set[str] = set()
-    for flag, frameworks in _FLAG_TO_FRAMEWORKS.items():
-        if getattr(args, flag, False):
-            selected.update(frameworks)
-    return selected
-
-
-def _find_python_script_index(argv: list[str]) -> tuple[Optional[int], Optional[str]]:
+def _find_python_script_index(argv: List[str]) -> Tuple[Optional[int], Optional[str]]:
     """Locate the script argument in a Python command, skipping interpreter flags.
 
     Returns (script_index, skip_flag).  skip_flag is the flag string ("-c"/"-m")
@@ -110,13 +95,20 @@ def _find_python_script_index(argv: list[str]) -> tuple[Optional[int], Optional[
     return None, None
 
 
+def _frameworks_to_trace(trace_ml_api: Optional[List[str]]) -> Optional[List[str]]:
+    """Return the --trace-ml-api frameworks. With no values, it traces all of them."""
+    if trace_ml_api == []:
+        return list(KNOWN_ML_API_BACKENDS)
+    return trace_ml_api
+
+
 def _prepare_ml_api_trace_injection(
-    remaining: list[str],
+    remaining: List[str],
     resolved_exec_path: Path,
     is_python: bool,
     script_index: Optional[int],
     skip_flag: Optional[str],
-    frameworks: set[str],
+    frameworks: Set[str],
 ) -> None:
     """Insert the inject_roctx launcher into the workload command.
 
@@ -189,7 +181,7 @@ class RocProfCompute_Base:
     def get_args(self) -> argparse.Namespace:
         return self.__args
 
-    def get_profiler_options(self) -> Union[list[str], dict[str, Any]]:
+    def get_profiler_options(self) -> Union[List[str], Dict[str, Any]]:
         """Fetch any version specific arguments required by profiler"""
         # assume no SoC specific options and return empty list by default
         return []
@@ -223,6 +215,10 @@ class RocProfCompute_Base:
                         "--experimental --pc-sampling"
                     )
 
+        # --set replaces filter_blocks, which would drop the PC sampling block
+        if getattr(args, "pc_sampling", False) and args.set_selected:
+            console_error("--pc-sampling cannot be used with --set.")
+
         # When --pc-sampling is set, inject "21" into filter_blocks so the
         # profiling config yaml records it and downstream code is unchanged.
         if getattr(args, "pc_sampling", False):
@@ -241,41 +237,27 @@ class RocProfCompute_Base:
                 current.append("30")
                 args.filter_blocks = current
 
-        selected_frameworks = _compute_selected_frameworks(args)
-        if selected_frameworks and is_only_pc_sampling(args.filter_blocks):
+        frameworks = _frameworks_to_trace(args.trace_ml_api)
+        if frameworks and is_only_pc_sampling(args.filter_blocks):
             console_error(
-                "ML API tracing options (--torch-trace/--triton-trace/--ml-api-trace) "
-                "cannot be used with PC-sampling-only profiling, which does not "
-                "collect counters. Remove the tracing option(s) or add a counter block."
-            )
-        self._selected_frameworks: set[str] = selected_frameworks
-
-        if (
-            sum((
-                bool(args.filter_blocks),
-                bool(args.set_selected),
-                bool(args.roof_only),
-            ))
-            > 1
-        ):
-            console_error(
-                "--block, --set, and --roof-only are mutually exclusive options. "
-                "Please use only one of them."
+                "--trace-ml-api cannot be used with PC-sampling-only profiling, "
+                "which does not collect counters. Remove --trace-ml-api or add "
+                "a counter block."
             )
 
-        if args.no_native_tool and args.iteration_multiplexing is not None:
+        if args.no_native_tool and args.iteration_multiplexing:
             console_error(
                 "--no-native-tool cannot be used with --iteration-multiplexing. "
                 "Please remove one of these options."
             )
 
-        if args.attach_pid and args.iteration_multiplexing is not None:
+        if args.attach_pid and args.iteration_multiplexing:
             console_error(
                 "--attach-pid cannot be used with --iteration-multiplexing. "
                 "Please remove one of these options."
             )
 
-        if selected_frameworks:
+        if frameworks:
             if args.attach_pid:
                 console_error(
                     "ML API tracing cannot be used with --attach-pid. "
@@ -336,14 +318,14 @@ class RocProfCompute_Base:
                 if script_index is None and skip_flag is None:
                     raise NoScriptInCommandError(args.remaining)
 
-            if selected_frameworks:
+            if frameworks:
                 _prepare_ml_api_trace_injection(
                     args.remaining,
                     resolved_exec_path,
                     bool(is_python),
                     script_index,
                     skip_flag,
-                    selected_frameworks,
+                    set(frameworks),
                 )
             args.remaining = shlex.join(args.remaining)
         elif not args.attach_pid:
@@ -367,7 +349,7 @@ class RocProfCompute_Base:
             args.remaining = ""
 
         self._filter_blocks = self._soc.profiling_setup()
-        # --set and --roof-only resolve to block ids here, so store them back on
+        # --set resolves to block ids here, so store them back on
         # the args every later stage reads.
         self.__args.filter_blocks = self._filter_blocks
 
@@ -378,23 +360,15 @@ class RocProfCompute_Base:
             encoding="utf-8",
         ) as f:
             args_dict = dict(vars(self.__args))
-            args_dict["config_dir"] = str(args_dict["config_dir"])
             args_dict["format_rocprof_output"] = PROFILE_OUTPUT_FORMAT
+            args_dict["trace_ml_api"] = _frameworks_to_trace(args_dict["trace_ml_api"])
             yaml.dump(args_dict, f)
-
-        # verify soc compatibility
-        if self.__profiler not in self._soc.get_compatible_profilers():
-            console_error(
-                f"{self._soc.get_arch()} is not enabled in {self.__profiler}. "
-                f"Available profilers include: {self._soc.get_compatible_profilers()}"
-            )
 
         gen_sysinfo(
             workload_dir=args.output_directory,
             app_cmd=args.remaining,
-            skip_roof=args.no_roof,
+            skip_roof=args.no_roof or not selects_roofline(args.filter_blocks),
             mspec=self._soc._mspec,
-            soc=self._soc,
         )
 
         for message in _partition_warning_messages(self._soc._mspec):
@@ -406,8 +380,8 @@ class RocProfCompute_Base:
 
     def profile(
         self,
-        fnames: Union[list[Path], Path],
-        options: Union[list[str], dict[str, Any]],
+        fnames: Union[List[Path], Path],
+        options: Union[List[str], Dict[str, Any]],
         total_runs: int = 1,
     ) -> float:
         args = self.get_args()
@@ -423,42 +397,38 @@ class RocProfCompute_Base:
 
         start_time = time.time()
 
-        if self.__profiler == "rocprofv3" or self.__profiler == "rocprofiler-sdk":
-            # Only 1-run case is permitted for attach/detach
-            if (isinstance(options, list) and "--pid" in options) or (
-                isinstance(options, dict)
-                and (options.get("ROCPROF_ATTACH_PID") is not None)
-            ):
-                if total_runs > 1:
-                    console_error(
-                        f"Cannot attach process for profiling as the requested "
-                        f"performance counters exceed the collection capacity of "
-                        f"single pass counter collection. The current setup of "
-                        f"requested counter blocks needs {total_runs} number of "
-                        f'passes. Please use "--block" or "--set" '
-                        f"to adjust or reduce the requested performance metrics!"
-                    )
-            console_debug(f"Sending profiler options to run_prof: {options}")
+        # Only 1-run case is permitted for attach/detach
+        if (isinstance(options, list) and "--pid" in options) or (
+            isinstance(options, dict)
+            and (options.get("ROCPROF_ATTACH_PID") is not None)
+        ):
+            if total_runs > 1:
+                console_error(
+                    f"Cannot attach process for profiling as the requested "
+                    f"performance counters exceed the collection capacity of "
+                    f"single pass counter collection. The current setup of "
+                    f"requested counter blocks needs {total_runs} number of "
+                    f'passes. Please use "--block" or "--set" '
+                    f"to adjust or reduce the requested performance metrics!"
+                )
+        console_debug(f"Sending profiler options to run_prof: {options}")
 
-            run_prof(
-                fnames=str_fnames,
-                profiler_options=options,
-                workload_dir=args.output_directory,
-                ml_api_trace_enabled=bool(getattr(self, "_selected_frameworks", set())),
-                retain_rocpd_output=args.retain_rocpd_output,
-            )
+        run_prof(
+            fnames=str_fnames,
+            profiler_options=options,
+            workload_dir=args.output_directory,
+            ml_api_trace_enabled=args.trace_ml_api is not None,
+            retain_rocpd_output=args.retain_rocpd_output,
+        )
 
-            end_time = time.time()
-            duration = end_time - start_time
+        end_time = time.time()
+        duration = end_time - start_time
 
-            console_debug(
-                f"The time of run_prof of {str_fnames} is {int(duration / 60)} min"
-                f" {duration % 60} sec"
-            )
-            return duration
-        else:
-            console_error("Profiler not supported")
-            return 0.0
+        console_debug(
+            f"The time of run_prof of {str_fnames} is {int(duration / 60)} min"
+            f" {duration % 60} sec"
+        )
+        return duration
 
     @abstractmethod
     def run_profiling(self, version: str, prog: str) -> None:
@@ -496,9 +466,7 @@ class RocProfCompute_Base:
                 "No performance counters to collect -- PC sampling only mode",
             )
 
-        msg = "Collecting Performance Counters"
-        status_msg = f"{msg} (Roofline Only)" if self.__args.roof_only else msg
-        print_status(status_msg)
+        print_status("Collecting Performance Counters")
 
         if total_runs:
             # Warn once per profile run, not once per counter collection pass.
@@ -530,7 +498,7 @@ class RocProfCompute_Base:
             total_workload_runs > 1
             and total_ranks is not None
             and total_ranks >= 2
-            and args.iteration_multiplexing is None
+            and not args.iteration_multiplexing
         ):
             console_warning(
                 "Multi-rank application detected. Application replay mode "
@@ -545,32 +513,21 @@ class RocProfCompute_Base:
 
         total_profiling_time = 0.0
 
-        if args.iteration_multiplexing is not None:
+        if args.iteration_multiplexing:
             if native_tool_path is None:
                 console_error(
                     "Native tool is not supported which is required for "
                     "iteration multiplexing."
                 )
-            console_log(
-                "profiling", f"Iteration multiplexing: {args.iteration_multiplexing}"
+            console_log("profiling", "Iteration multiplexing: Enabled")
+            console_warning(
+                "profiling",
+                (
+                    "Each kernel should be called at least "
+                    f"{len(input_files)} times with the same launch parameters "
+                    "to collect all counters."
+                ),
             )
-            if args.iteration_multiplexing == "kernel":
-                console_warning(
-                    "profiling",
-                    (
-                        "Each kernel should be called atleast "
-                        f"{len(input_files)} times to collect all counters."
-                    ),
-                )
-            elif args.iteration_multiplexing == "kernel_launch_params":
-                console_warning(
-                    "profiling",
-                    (
-                        "Each kernel should be called atleast "
-                        f"{len(input_files)} times with the exact launch parameters "
-                        "to collect all counters."
-                    ),
-                )
 
             self.profile(input_files, options)
         else:

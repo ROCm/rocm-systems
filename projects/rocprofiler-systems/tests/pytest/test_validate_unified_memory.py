@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
 from rocprofsys.validators import ValidationResult, validate_unified_memory_outputs
 
 pytestmark = [pytest.mark.validation_usm]

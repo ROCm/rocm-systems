@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vdsdir.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/decode_factories.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
 #include <memory>
 

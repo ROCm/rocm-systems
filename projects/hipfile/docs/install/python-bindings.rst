@@ -20,7 +20,7 @@ The Python bindings require the following software:
 - Cython (installed into your virtual environment)
 - scikit-build-core (used as the build backend)
 - python-build (the ``build`` front-end, or ``pip`` for editable installs)
-- CMake (version 3.21 or later)
+- CMake (version 3.25.2 or later)
 - A C compiler (for building the Cython-generated C extension)
 - hipFile C library (``libhipfile.so``): built or installed before the Python bindings
 - hipFile C development header (``hipfile.h``)

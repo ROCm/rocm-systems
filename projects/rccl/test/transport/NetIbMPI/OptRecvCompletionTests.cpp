@@ -18,7 +18,7 @@ TEST_F(NetIbMPITest, OptRecvCompletionFlagEnabled) {
 
   ConnectionPair pair;
   NetConnectionGuard connGuard(net_);
-  ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
+  ASSERT_SETUP_CONNECTION(0, pair, connGuard);
 
   const int rank = MPIEnvironment::world_rank;
   void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
@@ -37,7 +37,7 @@ TEST_F(NetIbMPITest, OptRecvCompletionFlagDisabledByQpSched) {
 
   ConnectionPair pair;
   NetConnectionGuard connGuard(net_);
-  ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
+  ASSERT_SETUP_CONNECTION(0, pair, connGuard);
 
   const int rank = MPIEnvironment::world_rank;
   void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
@@ -59,7 +59,7 @@ TEST_F(NetIbMPITest, OptRecvCompletionDisabledKeepsRecvSize) {
 
   ConnectionPair pair;
   NetConnectionGuard connGuard(net_);
-  ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
+  ASSERT_SETUP_CONNECTION(0, pair, connGuard);
 
   const size_t bufferSize = kSmallBufferSize;
   const int tag = 78;
@@ -117,7 +117,7 @@ TEST_F(NetIbMPITest, OptRecvCompletionSkipWritePath) {
 
   ConnectionPair pair;
   NetConnectionGuard connGuard(net_);
-  ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
+  ASSERT_SETUP_CONNECTION(0, pair, connGuard);
 
   const size_t bufferSize = kSmallBufferSize;
   const int tag = 77;
@@ -167,14 +167,8 @@ TEST_F(NetIbMPITest, OptRecvCompletionSkipWritePath) {
   }
 }
 
-void NetIbMPITest::OptRecvCompletionRunMultiRecv(bool optRecvHint) {
-  net_ = &netIbCast;
-  AssertInitAndGetDevices(nullptr);
-
+void NetIbMPITest::OptRecvCompletionRunMultiRecv(bool optRecvHint, ConnectionPair& pair) {
   const int rank = MPIEnvironment::world_rank;
-  ConnectionPair pair;
-  NetConnectionGuard connGuard(net_);
-  ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
 
   constexpr int kN = 4;
   size_t sizes[kN] = {64, 1024, 4096, 65536};
@@ -251,14 +245,24 @@ void NetIbMPITest::OptRecvCompletionRunMultiRecv(bool optRecvHint) {
 TEST_F(NetIbMPITest, OptRecvCompletionMultiRecvNoHint) {
   SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses, false, kMinGpusPerNode, kNoNodeLimit);
   OPT_RECV_ENABLED_ENV_CHECK_OR_SKIP();
-  OptRecvCompletionRunMultiRecv(/*optRecvHint=*/false);
+  net_ = &netIbCast;
+  AssertInitAndGetDevices(nullptr);
+  ConnectionPair pair;
+  NetConnectionGuard connGuard(net_);
+  ASSERT_SETUP_CONNECTION(0, pair, connGuard);
+  OptRecvCompletionRunMultiRecv(/*optRecvHint=*/false, pair);
 }
 
 // n>1 with the hint still completes.
 TEST_F(NetIbMPITest, OptRecvCompletionMultiRecvWithHint) {
   SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses, false, kMinGpusPerNode, kNoNodeLimit);
   OPT_RECV_ENABLED_ENV_CHECK_OR_SKIP();
-  OptRecvCompletionRunMultiRecv(/*optRecvHint=*/true);
+  net_ = &netIbCast;
+  AssertInitAndGetDevices(nullptr);
+  ConnectionPair pair;
+  NetConnectionGuard connGuard(net_);
+  ASSERT_SETUP_CONNECTION(0, pair, connGuard);
+  OptRecvCompletionRunMultiRecv(/*optRecvHint=*/true, pair);
 }
 
 #endif // MPI_TESTS_ENABLED

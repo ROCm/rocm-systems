@@ -29,6 +29,9 @@
 
 namespace dda::common {
 
+// Grid-stride passes of the send buffer the LL one-shot prefetches per thread before its epoch barrier.
+constexpr int kDdaLLArPrefetchPasses = 4;
+
 // Packets one per-rank slot holds, derived from the scratch bank the host picked
 // rather than a fixed constant, so the tier's reach follows the allocation. A
 // packet is 16B and the slot is floored to a whole 16 of them, so the slot base
@@ -38,6 +41,43 @@ namespace dda::common {
 // admits is exactly the geometry the kernel addresses.
 constexpr size_t ddaLLArSlotPkts(size_t bankSize, int nRanks) {
   return ddaLLSlotPkts(bankSize, sizeof(LLPacket16) * (size_t)nRanks, 16);
+}
+
+// AllReduce one-shot only: folds packet pk of ranks 0..nRanks-1 in rank order, self from (s0, s1); false if aborted.
+template <typename T, int kB>
+__device__ __forceinline__ bool ddaLLFoldRanksInOrder(const LLPacket16* myBase, size_t slot, size_t pk, int nRanks,
+                                                      int selfRank, uint32_t s0, uint32_t s1, uint32_t flag,
+                                                      DdaKernelParams params, uint32_t& acc0, uint32_t& acc1) {
+  for (int base = 0; base < nRanks; base += kB) {
+    const uint32_t* line[kB];
+    uint32_t d0[kB], d1[kB];
+    uint32_t mask = 0;
+#pragma unroll
+    for (int i = 0; i < kB; ++i) {
+      const int peer = base + i;
+      const bool polled = peer < nRanks && peer != selfRank;
+      line[i] = polled ? reinterpret_cast<const uint32_t*>(myBase + (size_t)peer * slot + pk) : nullptr;
+      mask |= polled ? 1u << i : 0u;
+    }
+    if (!ddaLLWaitLineFlagsBatched(line, mask, flag, params, d0, d1)) {
+      return false;
+    }
+#pragma unroll
+    for (int i = 0; i < kB; ++i) {
+      const int peer = base + i;
+      if (peer < nRanks) {
+        const uint32_t e0 = peer == selfRank ? s0 : d0[i];
+        const uint32_t e1 = peer == selfRank ? s1 : d1[i];
+        if (peer == 0) {
+          acc0 = e0;
+          acc1 = e1;
+        } else {
+          ddaLLAddPayload<T>(acc0, acc1, e0, e1);
+        }
+      }
+    }
+  }
+  return true;
 }
 
 // LL flat all-reduce kernel. 1D grid over packets (8B payload each).
@@ -63,13 +103,17 @@ __launch_bounds__(512)
                                      int selfRank, int nRanksRt,
                                      uint32_t* __restrict__ epochDev,       // per-block LL epoch cells (shared AG+AR)
                                      int epochLen,                          // number of cells in epochDev
-                                     size_t bankSize) {                     // scratch bank size (from host)
+                                     size_t bankSize,                     // scratch bank size (from host)
+                                     DdaKernelParams params) {
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const size_t bytes = count * sizeof(T);
   const size_t nPk = bytes >> 3;           // 8 payload bytes per packet
   const size_t slot = ddaLLArSlotPkts(bankSize, nRanks);
 
+  // The grid strides over the whole message, so a thread's first passes are what it publishes right after the barrier.
+  ddaLLPrefetchSend(sendbuff, (size_t)blockIdx.x * blockDim.x + threadIdx.x, (size_t)gridDim.x * blockDim.x,
+                    kDdaLLArPrefetchPasses, nPk);
   const uint32_t flag = ddaGetLLEpochInc(epochDev, blockIdx.x, 1);
   const size_t bankOffsetPkts = (size_t)(flag & 1u) * (bankSize / sizeof(LLPacket16));
 
@@ -92,20 +136,17 @@ __launch_bounds__(512)
     }
   }
 
-  // Phase 2: poll my slots for the other ranks, reduce with my own data.
-  LLPacket16* myBase = reinterpret_cast<LLPacket16*>(peerScratch[selfRank]) + bankOffsetPkts;
+  // Phase 2: poll my slots for the other ranks and fold every rank's payload in
+  // rank order, so each rank rounds the same partial sums and all get the same
+  // result. My own payload comes straight from sendbuff.
+  // An abort leaves the loop rather than returning, so every thread reaches the epoch bump.
+  const LLPacket16* myBase = reinterpret_cast<const LLPacket16*>(peerScratch[selfRank]) + bankOffsetPkts;
+  constexpr int kB = ddaLLRecvBatch(NRANKS_CT);
   for (size_t pk = gtid; pk < nPk; pk += stride) {
-    uint32_t acc0 = in[2 * pk];
-    uint32_t acc1 = in[2 * pk + 1];
-    for (int r = 1; r < nRanks; ++r) {
-      const int peer = (selfRank + r) % nRanks;
-      volatile LLPacket16* src = myBase + (size_t)peer * slot;
-      uint32_t d0, f0, d1, f1;
-      do {
-        ddaLLLoadLineB128(reinterpret_cast<const uint32_t*>(const_cast<LLPacket16*>(&src[pk])), d0, f0, d1, f1);
-      } while (f0 != flag || f1 != flag);
-      acc0 = vecElementAdd<T>(acc0, d0);
-      acc1 = vecElementAdd<T>(acc1, d1);
+    uint32_t acc0 = 0, acc1 = 0;
+    if (!ddaLLFoldRanksInOrder<T, kB>(myBase, slot, pk, nRanks, selfRank, in[2 * pk], in[2 * pk + 1], flag, params,
+                                      acc0, acc1)) {
+      break;
     }
     out[2 * pk] = acc0;
     out[2 * pk + 1] = acc1;

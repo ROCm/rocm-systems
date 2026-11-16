@@ -1,0 +1,131 @@
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+"""rj-arith calls for decoded RDNA dense matrix instructions."""
+
+from __future__ import annotations
+
+import re
+
+from amdisa.isa_profile import MatrixLayout
+
+from . import ExecuteContext
+from .rj_arith_names import wave_api
+
+
+def gen_dense_wmma(ctx: ExecuteContext) -> str | None:
+    """Return a whole-wave call for a supported RDNA3/RDNA4 dense WMMA."""
+    if not ctx.profile.uses_rj_arith_matrix:
+        return None
+    match = re.fullmatch(
+        r'V_WMMA_(F32|F16|BF16|I32)_16X16X(16|32)_(F16|BF16|IU8|IU4|FP8_FP8|FP8_BF8|BF8_FP8|BF8_BF8)',
+        ctx.inst.name,
+    )
+    if match is None:
+        return None
+    result, depth, factors = match.groups()
+    depth = int(depth)
+    layout = ctx.profile.matrix_layout
+    if layout not in (MatrixLayout.WMMA_REPLICATED_HALFWAVE, MatrixLayout.WMMA_SPLIT_K):
+        raise ValueError(f'Unsupported rj-arith matrix layout: {layout}')
+    if (
+        layout == MatrixLayout.WMMA_SPLIT_K
+        and ctx.profile.wave_size == ctx.profile.wave_size_max
+    ):
+        return None
+    replicated_halfwave = layout == MatrixLayout.WMMA_REPLICATED_HALFWAVE
+    common_formats = {
+        ('F32', 'F16'),
+        ('F32', 'BF16'),
+        ('F16', 'F16'),
+        ('BF16', 'BF16'),
+        ('I32', 'IU8'),
+        ('I32', 'IU4'),
+    }
+    native_formats = {
+        ('F32', 'FP8_FP8'),
+        ('F32', 'FP8_BF8'),
+        ('F32', 'BF8_FP8'),
+        ('F32', 'BF8_BF8'),
+    }
+    if (result, factors) not in common_formats and (
+        replicated_halfwave or (result, factors) not in native_formats
+    ):
+        return None
+    if depth != 16 and (replicated_halfwave or result != 'I32' or factors != 'IU4'):
+        return None
+    bits = 16 if factors in ('F16', 'BF16') else 4 if factors == 'IU4' else 8
+    packed = result in ('F16', 'BF16')
+    api = (
+        'rj_arith_'
+        + ctx.inst.name.lower()
+        + ('_gfx12' if not replicated_halfwave else '')
+    )
+    dst = ctx.dst_ops[0]
+    src0_base, src1_base, s2 = ctx.src_ops[:3]
+    factor_count = (
+        str(bits // 2)
+        if replicated_halfwave
+        else f'({16 * depth * bits // 32} + lanes - 1) / lanes'
+    )
+    result_count = f'{128 if packed and not replicated_halfwave else 256} / lanes'
+    lines = [
+        '  const uint32_t lanes = wf.wf_size();',
+        '  const uint32_t vb = wf.vgpr_alloc().base;',
+    ]
+
+    def source_base(operand: str) -> str:
+        value = f'amdgpu::src_base(vb, {operand}.encoding_value_)'
+        if ctx.arch_name == 'rdna3_5':
+            return f'registers.gfx115_wmma_source_base({operand}, {value})'
+        return value
+
+    if ctx.arch_name == 'rdna3_5':
+        lines.append('  const amdgpu::RegisterAccess registers(wf);')
+    accumulator_type = 'uint32_t' if ctx.arch_name == 'rdna3_5' else 'const uint32_t'
+    lines += [
+        f'  const uint32_t dst = vb + {dst}.encoding_value_;',
+        f'  const uint32_t src0_base = {source_base(src0_base)};',
+        f'  const uint32_t src1_base = {source_base(src1_base)};',
+        '  uint32_t const_acc = 0;',
+        f'  {accumulator_type} s2 = {ctx.arch_name}::resolve_acc(vb, dst, {s2}.encoding_value_,',
+        f'      const_acc, [&] {{ return amdgpu::RegisterAccess(wf).read_scalar({s2}); }});',
+    ]
+    if ctx.arch_name == 'rdna3_5':
+        lines.append(f'  s2 = registers.gfx115_wmma_source_base({s2}, s2);')
+    lines += [
+        '  uint64_t flags = wf.cu().arithmetic_flags();',
+        '  if (wf.fp16_ovfl()) flags |= RJ_ARITH_FP16_OVFL;',
+    ]
+    if packed:
+        bf16 = str(factors == 'BF16').lower()
+        lines += [
+            f'  if ({s2}.encoding_value_ < 256)',
+            f'    const_acc = amdgpu::dot_packed16::inline_word<{bf16}>(const_acc, {s2}.encoding_value_);',
+        ]
+    if result == 'I32':
+        lines.append(
+            '  uint64_t modifiers = (inst_.neg & 3u) | (inst_.clamp ? RJ_ARITH_WMMA_CLAMP : 0u);'
+        )
+    elif bits == 8:
+        # Raw C sign aliases are ignored by the native matrix instruction.
+        lines.append('  uint64_t modifiers = 0;')
+    else:
+        lines.append(
+            '  uint64_t modifiers = inst_.neg | (uint64_t(inst_.neg_hi) << 3);'
+        )
+    if packed and replicated_halfwave:
+        lines += [
+            '  const bool high = (inst_.op_sel & 4u) != 0;',
+            '  if (high) modifiers |= RJ_ARITH_WMMA_HIGH_C_D;',
+        ]
+    extra_args = ', high ? 0xc : 0x3' if packed and replicated_halfwave else ''
+    if not replicated_halfwave and factors == 'IU4' and depth == 16:
+        extra_args = ', 0xf, 32'
+    lines += [
+        f'  amdgpu::arith::exec_wmma(wf, lanes == 32 ? {wave_api(api, 32)} : {wave_api(api, 64)},',
+        '      flags, modifiers, dst, src0_base, src1_base, s2,',
+        f'      {factor_count}, {result_count},',
+        f'      {s2}.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc) : std::nullopt{extra_args});',
+    ]
+    return '\n'.join(lines)

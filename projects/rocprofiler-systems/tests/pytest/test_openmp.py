@@ -6,9 +6,12 @@ Tests for OpenMP integration with rocprofiler-systems.
 """
 
 from __future__ import annotations
+
 import os
-import pytest
 from pathlib import Path
+from typing import ClassVar
+
+import pytest
 from conftest import RocprofsysTest, check_use_perfetto
 
 pytestmark = [
@@ -154,22 +157,20 @@ def ompt_base_env() -> dict[str, str]:
 @pytest.fixture
 def ompt_sampling_env(ompt_base_env: dict[str, str]) -> dict[str, str]:
     """Environment variables for sampling duration tests."""
-    env = ompt_base_env.copy()
-    env.update(
-        {
-            "ROCPROFSYS_USE_OMPT": "OFF",
-            "ROCPROFSYS_USE_SAMPLING": "ON",
-            "ROCPROFSYS_USE_PROCESS_SAMPLING": "OFF",
-            "ROCPROFSYS_SAMPLING_FREQ": "100",
-            "ROCPROFSYS_SAMPLING_DELAY": "0.1",
-            "ROCPROFSYS_SAMPLING_DURATION": "0.25",
-            "ROCPROFSYS_SAMPLING_CPUTIME": "ON",
-            "ROCPROFSYS_SAMPLING_REALTIME": "ON",
-            "ROCPROFSYS_SAMPLING_CPUTIME_FREQ": "1000",
-            "ROCPROFSYS_SAMPLING_REALTIME_FREQ": "500",
-            "ROCPROFSYS_MONOCHROME": "ON",
-        }
-    )
+    env = {
+        **ompt_base_env,
+        "ROCPROFSYS_USE_OMPT": "OFF",
+        "ROCPROFSYS_USE_SAMPLING": "ON",
+        "ROCPROFSYS_USE_PROCESS_SAMPLING": "OFF",
+        "ROCPROFSYS_SAMPLING_FREQ": "100",
+        "ROCPROFSYS_SAMPLING_DELAY": "0.1",
+        "ROCPROFSYS_SAMPLING_DURATION": "0.25",
+        "ROCPROFSYS_SAMPLING_CPUTIME": "ON",
+        "ROCPROFSYS_SAMPLING_REALTIME": "ON",
+        "ROCPROFSYS_SAMPLING_CPUTIME_FREQ": "1000",
+        "ROCPROFSYS_SAMPLING_REALTIME_FREQ": "500",
+        "ROCPROFSYS_MONOCHROME": "ON",
+    }
     return env
 
 
@@ -188,19 +189,17 @@ def ompt_target_env(ompt_base_env: dict[str, str]) -> dict[str, str]:
 @pytest.fixture
 def ompt_no_tmp_env(ompt_base_env: dict[str, str]) -> dict[str, str]:
     """Environment variables for no-tmp-files tests."""
-    env = ompt_base_env.copy()
-    env.update(
-        {
-            "ROCPROFSYS_USE_OMPT": "OFF",
-            "ROCPROFSYS_USE_SAMPLING": "ON",
-            "ROCPROFSYS_USE_PROCESS_SAMPLING": "OFF",
-            "ROCPROFSYS_SAMPLING_CPUTIME": "ON",
-            "ROCPROFSYS_SAMPLING_REALTIME": "OFF",
-            "ROCPROFSYS_SAMPLING_CPUTIME_FREQ": "700",
-            "ROCPROFSYS_USE_TEMPORARY_FILES": "OFF",
-            "ROCPROFSYS_MONOCHROME": "ON",
-        }
-    )
+    env = {
+        **ompt_base_env,
+        "ROCPROFSYS_USE_OMPT": "OFF",
+        "ROCPROFSYS_USE_SAMPLING": "ON",
+        "ROCPROFSYS_USE_PROCESS_SAMPLING": "OFF",
+        "ROCPROFSYS_SAMPLING_CPUTIME": "ON",
+        "ROCPROFSYS_SAMPLING_REALTIME": "OFF",
+        "ROCPROFSYS_SAMPLING_CPUTIME_FREQ": "700",
+        "ROCPROFSYS_USE_TEMPORARY_FILES": "OFF",
+        "ROCPROFSYS_MONOCHROME": "ON",
+    }
     return env
 
 
@@ -220,23 +219,23 @@ def openmp_target_rules(validation_rules_dir: Path) -> list[Path]:
 
 
 class TestOpenMPCG(RocprofsysTest):
-    BINARY_REWRITE_ARGS = ["-e", "-v", "2", "--instrument-loops"]
-    DURATION_SAMPLING_PASS_REGEX = [
+    DURATION_SAMPLING_PASS_REGEX = (
         r"Sampler for thread 0 will be triggered 1000\.0x per second of CPU-time",
         r"Sampler for thread 0 will be triggered 500\.0x per second of wall-time",
         r"sampling_percent\.(json|txt)",
         r"sampling_cpu_clock\.(json|txt)",
         r"sampling_wall_clock\.(json|txt)",
-    ]
-    NOTMP_SAMPLING_FILE_REGEX = [
+    )
+    NOTMP_SAMPLING_FILE_REGEX = (
         r"sampling_percent\.(json|txt)",
         r"sampling_cpu_clock\.(json|txt)",
         r"sampling_wall_clock\.(json|txt)",
-    ]
+    )
 
     @pytest.mark.timeout(180)
     @pytest.mark.parametrize("mode", ["sampling", "binary_rewrite"])
     def test(self, mode, ompt_base_env):
+        binary_rewrite_args = ["-e", "-v", "2", "--instrument-loops"]
         env = ompt_base_env.copy()
         env["ROCPROFSYS_USE_SAMPLING"] = "OFF"
         env["ROCPROFSYS_COUT_OUTPUT"] = "ON"
@@ -245,7 +244,7 @@ class TestOpenMPCG(RocprofsysTest):
             mode,
             "openmp-cg",
             env=env,
-            binary_rewrite_args=self.BINARY_REWRITE_ARGS,
+            binary_rewrite_args=binary_rewrite_args,
         )
         self.assert_regex(result)
 
@@ -276,25 +275,25 @@ class TestOpenMPCG(RocprofsysTest):
 
 
 class TestOpenMPLU(RocprofsysTest):
-    BINARY_REWRITE_ARGS = ["-e", "-v", "2", "--instrument-loops"]
-    BINARY_REWRITE_PASS_REGEX = ["\\|_omp_"]
-    BINARY_REWRITE_FAIL_REGEX = ["0 instrumented loops in procedure"]
-    DURATION_SAMPLING_PASS_REGEX = [
+    BINARY_REWRITE_PASS_REGEX = ("\\|_omp_",)
+    BINARY_REWRITE_FAIL_REGEX = ("0 instrumented loops in procedure",)
+    DURATION_SAMPLING_PASS_REGEX = (
         r"Sampler for thread 0 will be triggered 1000\.0x per second of CPU-time",
         r"Sampler for thread 0 will be triggered 500\.0x per second of wall-time",
         r"sampling_percent\.(json|txt)",
         r"sampling_cpu_clock\.(json|txt)",
         r"sampling_wall_clock\.(json|txt)",
-    ]
-    NOTMP_SAMPLING_FILE_REGEX = [
+    )
+    NOTMP_SAMPLING_FILE_REGEX = (
         r"sampling_percent\.(json|txt)",
         r"sampling_cpu_clock\.(json|txt)",
         r"sampling_wall_clock\.(json|txt)",
-    ]
+    )
 
     @pytest.mark.timeout(180)
     @pytest.mark.parametrize("mode", ["baseline", "sampling", "binary_rewrite"])
     def test(self, mode, ompt_base_env):
+        binary_rewrite_args = ["-e", "-v", "2", "--instrument-loops"]
         env = ompt_base_env.copy()
         env["ROCPROFSYS_USE_SAMPLING"] = "ON"
         env["ROCPROFSYS_SAMPLING_FREQ"] = "50"
@@ -304,7 +303,7 @@ class TestOpenMPLU(RocprofsysTest):
             mode,
             "openmp-lu",
             env=env,
-            binary_rewrite_args=self.BINARY_REWRITE_ARGS,
+            binary_rewrite_args=binary_rewrite_args,
         )
         self.assert_regex(
             result,
@@ -381,8 +380,16 @@ class TestOpenMPTarget(RocprofsysTest):
 @pytest.mark.class_name("openmp-fortran")
 class TestOpenMPFortran(RocprofsysTest):
 
-    BINARY_REWRITE_ARGS = ["-e", "-v", "2", "--instrument-loops"]
-    RUNTIME_INSTRUMENT_ARGS = ["-e", "-v", "2", "--label", "return", "args"]
+    BINARY_REWRITE_ARGS: ClassVar[list[str]] = ["-e", "-v", "2", "--instrument-loops"]
+    RUNTIME_INSTRUMENT_ARGS: ClassVar[list[str]] = [
+        "-e",
+        "-v",
+        "2",
+        "--label",
+        "return",
+        "args",
+    ]
+    WORKER_THREADS = 1
 
     @pytest.mark.parametrize(
         "mode",
@@ -390,7 +397,7 @@ class TestOpenMPFortran(RocprofsysTest):
     )
     def test_host(self, mode, ompt_base_env):
         env = ompt_base_env.copy()
-        env["ROCPROFSYS_COUT_OUTPUT"] = "ON"
+        env["OMP_NUM_THREADS"] = str(self.WORKER_THREADS + 1)
 
         result = self.run_test(
             mode,
@@ -399,13 +406,46 @@ class TestOpenMPFortran(RocprofsysTest):
             binary_rewrite_args=self.BINARY_REWRITE_ARGS,
             runtime_instrument_args=self.RUNTIME_INSTRUMENT_ARGS,
         )
-        self.assert_regex(
-            result,
-            mode,
-            binary_rewrite_pass_regex=["omp_parallel"],
-            runtime_instrument_pass_regex=["omp_parallel"],
-            sys_run_pass_regex=["omp_parallel"],
-        )
+        if mode == "baseline":
+            self.assert_regex(result)
+        else:
+            self.assert_regex(
+                result,
+                fail_regex=[r"on_ompt_finalize\(\) called while state is not Finalized"],
+            )
+
+        # Explicitly no runtime_instrument mode validation, as it does not work with perfetto
+        if mode != "baseline" and mode != "runtime_instrument":
+            # Each [incomplete] suffixed OMPT region occurs as the completion event
+            # is received after our tool finalizes
+
+            # Two implicit tasks (one per thread). The worker's will not complete
+            self.assert_perfetto(
+                result,
+                subtest_name="OMPT implicit_task validation",
+                categories=["rocm_ompt_api"],
+                labels=["omp_implicit_task", "omp_implicit_task [incomplete]"],
+                counts=[1, self.WORKER_THREADS],
+            )
+            # Four barriers (two per thread). One for "parallel" construct and the other
+            # for "do" construct. The worker's parallel barrier will not complete
+            self.assert_perfetto(
+                result,
+                subtest_name="OMPT sync_region validation",
+                categories=["rocm_ompt_api"],
+                labels=["omp_sync_region", "omp_sync_region [incomplete]"],
+                counts=[2 + self.WORKER_THREADS, self.WORKER_THREADS],
+            )
+            self.assert_perfetto(
+                result,
+                subtest_name="OMPT sync_region_wait validation",
+                categories=["rocm_ompt_api"],
+                labels=[
+                    "omp_sync_region_wait",
+                    "omp_sync_region_wait [incomplete]",
+                ],
+                counts=[2 + self.WORKER_THREADS, self.WORKER_THREADS],
+            )
 
     @pytest.mark.parametrize(
         "mode",

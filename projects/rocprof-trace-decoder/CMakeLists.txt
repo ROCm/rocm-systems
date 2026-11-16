@@ -57,7 +57,9 @@ add_subdirectory(source)
 
 # The marker producer lives in llvm-project/amd/sqtt-marker.  Keep the
 # decoder-side tools and format documentation in this package independently
-# of that plugin.
+# of that plugin.  The scripts are samples, not supported commands, so they go
+# to share/ in their own component rather than bin/.  They import sqtt_data.py
+# and must stay in the same directory.
 set(TTD_MARKER_SCRIPTS
     ${CMAKE_SOURCE_DIR}/scripts/sqtt_data.py ${CMAKE_SOURCE_DIR}/scripts/sqtt_decode_funcmap.py
     ${CMAKE_SOURCE_DIR}/scripts/sqtt_flamegraph.py ${CMAKE_SOURCE_DIR}/scripts/sqtt_memory_trace.py
@@ -65,8 +67,8 @@ set(TTD_MARKER_SCRIPTS
 
 install(
     PROGRAMS ${TTD_MARKER_SCRIPTS}
-    DESTINATION ${CMAKE_INSTALL_BINDIR}
-    COMPONENT runtime)
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/samples
+    COMPONENT samples)
 
 install(
     DIRECTORY ${CMAKE_SOURCE_DIR}/docs/markers/

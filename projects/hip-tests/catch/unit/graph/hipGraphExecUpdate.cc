@@ -25,16 +25,16 @@
 
 __global__ void GraphExecUpdateStore(int* output, int value) { output[0] = value; }
 
-__global__ void GraphExecUpdateDelay(unsigned long long cycles) {
-  const unsigned long long start = clock64();
-  while (clock64() - start < cycles) {
+__global__ void GraphExecUpdateDelayStore(int* output, int value, unsigned long long ticks) {
+#if HT_AMD
+  const unsigned long long start = wall_clock64();
+  while (wall_clock64() - start < ticks) {
   }
-}
-
-__global__ void GraphExecUpdateDelayStore(int* output, int value, unsigned long long cycles) {
+#else
   const unsigned long long start = clock64();
-  while (clock64() - start < cycles) {
+  while (clock64() - start < ticks) {
   }
+#endif
   output[0] = value;
 }
 
@@ -836,6 +836,10 @@ HIP_TEST_CASE(Unit_hipGraphExecUpdate_PacketRefresh) {
     HIP_CHECK(hipMemcpy(output_a.ptr(), &zero, sizeof(int), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(output_b.ptr(), &zero, sizeof(int), hipMemcpyHostToDevice));
 
+    int* release = nullptr;
+    HIP_CHECK(hipHostMalloc(&release, sizeof(int)));
+    *release = 0;
+
     hipStream_t stream = nullptr;
     hipGraph_t graph = nullptr;
     hipGraphExec_t exec = nullptr;
@@ -844,10 +848,12 @@ HIP_TEST_CASE(Unit_hipGraphExecUpdate_PacketRefresh) {
     HIP_CHECK(hipStreamCreate(&stream));
     HIP_CHECK(hipGraphCreate(&graph, 0));
 
-    unsigned long long cycles = 50000000;
-    void* delay_args[] = {&cycles};
+    constexpr int kWatchdogSeconds = 10;
+    long long timeout_ticks =
+        static_cast<long long>(kWatchdogSeconds) * 1000000 * SpinTicksPerUs();
+    void* delay_args[] = {&release, &timeout_ticks};
     hipKernelNodeParams delay_params{};
-    delay_params.func = reinterpret_cast<void*>(GraphExecUpdateDelay);
+    delay_params.func = reinterpret_cast<void*>(WaitForHostReleaseWithTimeout);
     delay_params.gridDim = dim3(1);
     delay_params.blockDim = dim3(1);
     delay_params.kernelParams = delay_args;
@@ -867,12 +873,14 @@ HIP_TEST_CASE(Unit_hipGraphExecUpdate_PacketRefresh) {
 
     output = output_b.ptr();
     value = 22;
-    HIP_CHECK(hipGraphKernelNodeSetParams(write_node, &write_params));
+    const hipError_t set_params = hipGraphKernelNodeSetParams(write_node, &write_params);
     hipGraphNode_t error_node = nullptr;
     hipGraphExecUpdateResult result = hipGraphExecUpdateError;
-    HIP_CHECK(hipGraphExecUpdate(exec, graph, &error_node, &result));
-    REQUIRE(result == hipGraphExecUpdateSuccess);
-    REQUIRE(hipStreamQuery(stream) == hipErrorNotReady);
+    const hipError_t update = hipGraphExecUpdate(exec, graph, &error_node, &result);
+    const hipError_t query = hipStreamQuery(stream);
+    *release = 1;
+    HIP_CHECK(set_params);
+    HIP_CHECK(update);
     HIP_CHECK(hipGraphLaunch(exec, stream));
     HIP_CHECK(hipStreamSynchronize(stream));
 
@@ -880,11 +888,14 @@ HIP_TEST_CASE(Unit_hipGraphExecUpdate_PacketRefresh) {
     int actual_b = 0;
     HIP_CHECK(hipMemcpy(&actual_a, output_a.ptr(), sizeof(int), hipMemcpyDeviceToHost));
     HIP_CHECK(hipMemcpy(&actual_b, output_b.ptr(), sizeof(int), hipMemcpyDeviceToHost));
+    REQUIRE(result == hipGraphExecUpdateSuccess);
+    REQUIRE(query == hipErrorNotReady);
     REQUIRE(actual_a == 11);
     REQUIRE(actual_b == 22);
     HIP_CHECK(hipGraphExecDestroy(exec));
     HIP_CHECK(hipGraphDestroy(graph));
     HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipHostFree(release));
   }
 
   SECTION("extra kernel params") {
@@ -1416,7 +1427,7 @@ HIP_TEST_CASE(Unit_hipGraphExecUpdate_CapturedMemcpyAndKernel) {
 HIP_TEST_CASE(Unit_hipGraphExecUpdate_RebuildWithDisabledNodeKeepsSync) {
   constexpr int kDiamonds = 3;
   constexpr int kProducerValue = 42;
-  constexpr unsigned long long kSpinCycles = 100000000ULL;
+  constexpr unsigned long long kSpinUs = 2000;  // 2 ms producer stall
   const int spin_branch = GENERATE(0, 1);
   LinearAllocGuard<int> output(LinearAllocs::hipMalloc, 8 * sizeof(int));
   LinearAllocGuard<int> copy_src(LinearAllocs::hipMalloc, sizeof(int));
@@ -1442,10 +1453,10 @@ HIP_TEST_CASE(Unit_hipGraphExecUpdate_RebuildWithDisabledNodeKeepsSync) {
     HIP_CHECK(hipGraphAddKernelNode(node, graph, deps, num_deps, &params));
   };
   int one = 1, two = 2, five = 5, producer_value = kProducerValue;
-  unsigned long long spin_cycles = kSpinCycles;
+  unsigned long long spin_ticks = kSpinUs * SpinTicksPerUs();
   void* a_args[] = {&out, &one};
   void* branch_args[] = {&branch_out, &two};
-  void* producer_args[] = {&x, &producer_value, &spin_cycles};
+  void* producer_args[] = {&x, &producer_value, &spin_ticks};
   void* join_args[] = {&y, &x};
   void* f_args[] = {&f_out, &five};
   hipGraphNode_t prev = nullptr, producer = nullptr, f = nullptr, e = nullptr;

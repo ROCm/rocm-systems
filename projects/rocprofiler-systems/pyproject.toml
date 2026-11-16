@@ -25,7 +25,22 @@ exclude = '''
     | .pytest_cache
     | build
     | build-release
-    | build-omnitrace
   )/
 )
 '''
+
+[tool.ruff]
+line-length = 90
+target-version = "py38"
+extend-exclude = [
+    "external",
+    "build",
+]
+
+[tool.ruff.lint]
+ignore = ["BLE001", "S110"]
+
+[tool.ruff.lint.per-file-ignores]
+# `profile` and `noprofile` are injected into builtins by rocprofsys/__main__.py
+"examples/python/builtin.py" = ["F821"]
+"examples/python/noprofile.py" = ["F821"]

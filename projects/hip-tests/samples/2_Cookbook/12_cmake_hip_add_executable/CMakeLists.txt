@@ -2,7 +2,8 @@
 #
 # SPDX-License-Identifier: MIT
 
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.21)
+
 if(UNIX)
   if(NOT DEFINED ROCM_PATH)
     if(DEFINED ENV{ROCM_PATH})
@@ -11,66 +12,44 @@ if(UNIX)
       set(ROCM_PATH "/opt/rocm" CACHE STRING "Default ROCM installation directory.")
     endif()
   endif()
+  # Search for rocm in common locations
+  list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
 endif()
 
-if(NOT DEFINED HIP_PATH)
-    if(NOT DEFINED ENV{HIP_PATH})
-        set(HIP_PATH ${ROCM_PATH} CACHE PATH "Path to which HIP has been installed")
-    else()
-        set(HIP_PATH $ENV{HIP_PATH} CACHE PATH "Path to which HIP has been installed")
-    endif()
-endif()
-# Search for rocm in common locations
-list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
-
-# On Windows, FindHIP.cmake is installed in <Install_Prefix>/cmake
-# On Linux, FindHIP.cmake is installed in <Install_Prefix>/lib/cmake/hip
-if(WIN32)
-    set(CMAKE_MODULE_PATH "${HIP_PATH}/cmake" ${CMAKE_MODULE_PATH})
-else()
-    set(CMAKE_MODULE_PATH "${HIP_PATH}/lib/cmake/hip/" ${CMAKE_MODULE_PATH})
-endif()
 set(CMAKE_HIP_ARCHITECTURES OFF)
 
-# Set RPATH for all executables built with hip_add_executable
+project(12_cmake_hip_add_executable LANGUAGES CXX)
+
+# FindHIP.cmake compatibility shim — exercises the legacy find_package(HIP MODULE)
+# path and HIP_ADD_EXECUTABLE macro, which internally delegate to
+# find_package(hip CONFIG) and add_executable() + hip::device.
+if(WIN32)
+  set(CMAKE_MODULE_PATH "${HIP_PATH}/cmake" ${CMAKE_MODULE_PATH})
+else()
+  set(CMAKE_MODULE_PATH "${ROCM_PATH}/lib/cmake/hip" ${CMAKE_MODULE_PATH})
+endif()
+
+find_package(HIP MODULE REQUIRED)
+message(STATUS "Found HIP: ${HIP_VERSION}")
+
+if(TARGET build_cookbook)
+  set(EXCLUDE_OPTION EXCLUDE_FROM_ALL)
+else()
+  set(EXCLUDE_OPTION)
+endif()
+
+hip_add_executable(MatrixTranspose1 ${EXCLUDE_OPTION} MatrixTranspose.cpp)
+
+target_include_directories(MatrixTranspose1 PRIVATE ../../common)
+
+# Set RPATH so executable can find HIP libraries at runtime
 if(UNIX)
-  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,-rpath,${ROCM_PATH}/lib")
-endif()
-
-project(12_cmake)
-
-set(HIP_CLANG_NUM_PARALLEL_JOBS 2)
-find_package(HIP QUIET)
-if(HIP_FOUND)
-    message(STATUS "Found HIP: " ${HIP_VERSION})
-else()
-    message(FATAL_ERROR "Could not find HIP. Ensure that HIP is either installed in ${ROCM_PATH}/hip or the variable HIP_PATH is set to point to the right location.")
-endif()
-
-set(MY_SOURCE_FILES MatrixTranspose.cpp)
-set(MY_TARGET_NAME MatrixTranspose1)
-set(MY_HIPCC_OPTIONS)
-set(MY_CLANG_OPTIONS)
-set(MY_NVCC_OPTIONS)
-
-set_source_files_properties(${MY_SOURCE_FILES} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
-if(TARGET build_cookbook)
-set(EXCLUDE_OPTION EXCLUDE_FROM_ALL)
-else()
-set(EXCLUDE_OPTION )
-endif()
-hip_add_executable(${MY_TARGET_NAME} ${EXCLUDE_OPTION} ${MY_SOURCE_FILES} HIPCC_OPTIONS ${MY_HIPCC_OPTIONS} CLANG_OPTIONS ${MY_CLANG_OPTIONS} NVCC_OPTIONS ${MY_NVCC_OPTIONS})
-
-target_include_directories(${MY_TARGET_NAME} PRIVATE ../../common)
-
-# Search for rocm in common locations
-list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/hip ${ROCM_PATH})
-find_package(hip QUIET CONFIG)
-if(TARGET hip::host)
-    message(STATUS "Found hip::host at ${hip_DIR}")
-    target_link_libraries(${MY_TARGET_NAME} hip::host)
+  set_target_properties(MatrixTranspose1 PROPERTIES
+    BUILD_RPATH "${ROCM_PATH}/lib"
+    INSTALL_RPATH "${ROCM_PATH}/lib"
+  )
 endif()
 
 if(TARGET build_cookbook)
-add_dependencies(build_cookbook ${MY_TARGET_NAME})
+  add_dependencies(build_cookbook MatrixTranspose1)
 endif()

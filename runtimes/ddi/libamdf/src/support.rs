@@ -60,7 +60,9 @@ pub(crate) unsafe fn object<'a, T>(p: *const T) -> Result<&'a T, u64> {
 
 pub(crate) unsafe fn exclusive<'a, T>(p: *mut T) -> Result<&'a mut T, u64> {
     output_pointer(p)?;
-    // SAFETY: Mutating operations require exclusive access in the C contract.
+    // SAFETY: Callers use this helper only for destruction after checking that
+    // no child can hold a shared borrow of this object. The C contract also
+    // excludes concurrent direct use of the public handle being destroyed.
     Ok(unsafe { &mut *p })
 }
 
@@ -89,15 +91,21 @@ pub(crate) fn output_array<T>(p: *mut T, count: u32) -> Result<(), u64> {
     Ok(())
 }
 
-#[repr(C)]
 /// Universal prefix read before a caller-provided extensible record is trusted.
+#[repr(C)]
 #[derive(Clone, Copy)]
 struct Prefix {
+    /// AMDF structure type discriminator.
     kind: u32,
+    /// Caller-reported byte extent of the record.
     size: u32,
 }
 
-unsafe fn validate<T>(p: *const T, kind: u32) -> Result<amdf_input_structure_t, u64> {
+unsafe fn validate_header<T>(
+    p: *const T,
+    kind: u32,
+    allow_next: bool,
+) -> Result<amdf_input_structure_t, u64> {
     output_pointer(p.cast_mut())?;
     // Only the universal eight-byte prefix is read until its extent is valid.
     // In particular, a short record can safely end at a guard page.
@@ -107,10 +115,14 @@ unsafe fn validate<T>(p: *const T, kind: u32) -> Result<amdf_input_structure_t, 
     }
     // SAFETY: Every typed record has this prefix, now covered by its size.
     let header = unsafe { p.cast::<amdf_input_structure_t>().read() };
-    if !header.next.is_null() {
+    if !allow_next && !header.next.is_null() {
         return Err(UNSUPPORTED);
     }
     Ok(header)
+}
+
+unsafe fn validate<T>(p: *const T, kind: u32) -> Result<amdf_input_structure_t, u64> {
+    unsafe { validate_header(p, kind, false) }
 }
 
 pub(crate) unsafe fn input<T: Copy>(p: *const T, kind: u32) -> Result<T, u64> {
@@ -125,7 +137,9 @@ pub(crate) unsafe fn input<T: Copy>(p: *const T, kind: u32) -> Result<T, u64> {
 /// this ABI's structure size. A retained record can publish its payload without
 /// copying the header or materializing a full temporary.
 pub(crate) struct Output<T> {
+    /// Validated caller-owned output record.
     pointer: *mut T,
+    /// Original extensible header preserved across publication.
     header: amdf_input_structure_t,
 }
 
@@ -134,6 +148,20 @@ pub(crate) unsafe fn output<T>(p: *mut T, kind: u32) -> Result<Output<T>, u64> {
         pointer: p,
         header: unsafe { validate(p, kind)? },
     })
+}
+
+/// Admits the single extension chain explicitly supported by the caller.
+pub(crate) unsafe fn output_with_next<T>(p: *mut T, kind: u32) -> Result<Output<T>, u64> {
+    Ok(Output {
+        pointer: p,
+        header: unsafe { validate_header(p, kind, true)? },
+    })
+}
+
+impl<T> Output<T> {
+    pub(crate) fn next(&self) -> *mut std::ffi::c_void {
+        self.header.next.cast_mut()
+    }
 }
 
 impl<T> Output<T> {
@@ -190,16 +218,60 @@ pub(crate) fn unregister(counter: &AtomicU64) {
 }
 
 pub(crate) fn native(error: &rocddi::Error) -> u64 {
-    if let Some(code) = error.native_error_code() {
-        return (u64::from(AMDF_STATUS_DOMAIN_ERRNO) << 32) | u64::from(code.unsigned_abs());
+    if let Some(status) = error.native_status() {
+        let domain = match status.domain {
+            rocddi::NativeStatusDomain::Errno => AMDF_STATUS_DOMAIN_ERRNO,
+            rocddi::NativeStatusDomain::Win32 => AMDF_STATUS_DOMAIN_WIN32,
+            rocddi::NativeStatusDomain::NtStatus => AMDF_STATUS_DOMAIN_NTSTATUS,
+            rocddi::NativeStatusDomain::Hresult => AMDF_STATUS_DOMAIN_HRESULT,
+            rocddi::NativeStatusDomain::Firmware => AMDF_STATUS_DOMAIN_FIRMWARE,
+        };
+        return (u64::from(domain) << 32) | u64::from(status.code);
     }
     match error.kind() {
         rocddi::ErrorKind::InvalidArgument => INVALID,
+        rocddi::ErrorKind::NotFound => NOT_FOUND,
         rocddi::ErrorKind::Unsupported => UNSUPPORTED,
         rocddi::ErrorKind::PermissionDenied => u64::from(AMDF_STATUS_CODE_PERMISSION_DENIED),
         rocddi::ErrorKind::ResourceExhausted => EXHAUSTED,
         rocddi::ErrorKind::Busy => BUSY,
         rocddi::ErrorKind::DeviceLost => LOST,
         _ => INTERNAL,
+    }
+}
+
+#[cfg(test)]
+mod native_status_tests {
+    use super::*;
+    use rocddi::{Error, ErrorKind, NativeStatus, NativeStatusDomain};
+
+    #[test]
+    fn amdf_preserves_native_namespaces_and_high_bits() {
+        for (domain, abi_domain) in [
+            (NativeStatusDomain::Errno, AMDF_STATUS_DOMAIN_ERRNO),
+            (NativeStatusDomain::Win32, AMDF_STATUS_DOMAIN_WIN32),
+            (NativeStatusDomain::NtStatus, AMDF_STATUS_DOMAIN_NTSTATUS),
+            (NativeStatusDomain::Hresult, AMDF_STATUS_DOMAIN_HRESULT),
+            (NativeStatusDomain::Firmware, AMDF_STATUS_DOMAIN_FIRMWARE),
+        ] {
+            for code in [5, 0x8007_0005, 0xc000_0022, u32::MAX] {
+                let error = Error::DriverOperation {
+                    kind: ErrorKind::PermissionDenied,
+                    operation: "native status test",
+                    status: NativeStatus { domain, code },
+                };
+                assert_eq!(
+                    native(&error),
+                    (u64::from(abi_domain) << 32) | u64::from(code)
+                );
+            }
+        }
+        assert_eq!(
+            native(&Error::Operation {
+                kind: ErrorKind::Unsupported,
+                detail: "missing service"
+            }),
+            UNSUPPORTED
+        );
     }
 }

@@ -66,6 +66,10 @@ __global__ void TeamAlltoallTest(int loop, int skip, long long int *start_time,
 
   rocshmem_wg_team_create_ctx(teams[wg_id], ctx_type, &ctx);
 
+  // Without an LDS-staged build (USE_LDS_STAGE/USE_TDM) this returns 0.
+  extern __shared__ uint8_t tdm_lds[];
+  rocshmem_set_lds_stage(tdm_lds, rocshmem_query_lds_stage_bytes());
+
   int n_pes = rocshmem_ctx_n_pes(ctx);
 
   source_buf += wg_id * n_pes * num_elems;
@@ -145,7 +149,7 @@ void TeamAlltoallTester<T1>::preLaunchKernel() {
 template <typename T1>
 void TeamAlltoallTester<T1>::launchKernel(dim3 gridSize, dim3 blockSize,
                                           int loop, size_t size) {
-  size_t shared_bytes = 0;
+  size_t shared_bytes = rocshmem_query_lds_stage_bytes();
 
   int num_elems = size / sizeof(T1);
 

@@ -32,6 +32,7 @@
 #pragma once
 
 #include <concepts>
+#include <type_traits>
 
 namespace Util::Concepts
 {
@@ -42,4 +43,12 @@ concept Character = std::same_as<std::remove_cv_t<CharT>, char> || std::same_as<
 /// Satisfied by any non-const type.
 template<typename T>
 concept NonConst = (std::is_const_v<T> == false);
+
+/// Satisfied by any enumeration.
+template<typename T>
+concept Enum = std::is_enum_v<T> == true;
+
+/// Satisfied by either an enumeration or an integral type.
+template<typename T>
+concept EnumOrIntegral = std::is_enum_v<T> || std::is_integral_v<T>;
 }

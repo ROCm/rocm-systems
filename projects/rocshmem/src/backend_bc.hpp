@@ -326,6 +326,14 @@ class Backend {
   int hip_dev_id{0};
 
   /**
+   * @brief Host-side copy of the auto-resolved LDS-staged copy tile size (bytes).
+   *
+   * Mirrors constmem_t::lds_stage_tile_bytes (GPU constant memory) so host
+   * code can query the resolved tile size without a device->host memcpy.
+   */
+  uint32_t lds_stage_resolved_tile_bytes{0};
+
+  /**
    * @brief Add ctx from the list of user-created ctxs
    */
   void track_ctx(Context* ctx);

@@ -36,6 +36,12 @@ namespace rocprofiler
 {
 namespace hip
 {
+struct tracing_table
+{};
+
+struct internal_table
+{};
+
 using hip_compiler_api_table_t = HipCompilerDispatchTable;
 using hip_runtime_api_table_t  = HipDispatchTable;
 
@@ -49,6 +55,9 @@ using hip_api_table_t = HipApiTable;
 
 hip_api_table_t&
 get_table();
+
+hip_api_table_t&
+get_tracing_table();
 
 template <size_t OpIdx>
 struct hip_table_lookup;
@@ -116,9 +125,10 @@ template <typename TableT>
 void
 copy_table(TableT* _orig, uint64_t _tbl_instance);
 
-// installs the wrapper functions for API tracing
+// makes a copy of the dispatch table functions invoked by the API tracing wrappers and installs
+// the wrapper functions for API tracing
 template <typename TableT>
 void
-update_table(TableT* _orig);
+update_table(TableT* _orig, uint64_t _tbl_instance);
 }  // namespace hip
 }  // namespace rocprofiler

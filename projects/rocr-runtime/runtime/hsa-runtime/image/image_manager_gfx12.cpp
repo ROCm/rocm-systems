@@ -250,7 +250,17 @@ hsa_status_t ImageManagerGfx12::CalculateImageSizeAndAlignment(
   }
 
   size_t rowPitch   = (out.bpp >> 3) * out.pitch;
-  size_t slicePitch = rowPitch * out.height;
+  // A gfx12 linear surface carries two pitches: 'pitch' is the 128-byte-aligned row pitch reported
+  // to clients, while slices are sized on the 256-byte-aligned 'pitchForSlice'. The two agree only
+  // where addrlib trims the slice padding, which it does for a non-3D surface holding a single
+  // slice (addrlib3's CanTrimLinearPadding) - anywhere else the stride between slices is addrlib's
+  // own sliceSize rather than rowPitch * height, so mirror that predicate to stay in step with it.
+  // In the trimmed case sliceSize is instead the data extent rounded up to the 256-byte block, and
+  // the HSA default slice pitch is rowPitch * height, so keep computing it that way there.
+  const bool slice_padding_trimmed =
+      (desc.geometry != HSA_EXT_IMAGE_GEOMETRY_3D) && (out.numSlices <= 1);
+  size_t slicePitch = slice_padding_trimmed ? rowPitch * out.height
+                                            : static_cast<size_t>(out.sliceSize);
   if (desc.geometry != HSA_EXT_IMAGE_GEOMETRY_1DB &&
       image_data_layout == HSA_EXT_IMAGE_DATA_LAYOUT_LINEAR &&
       ((image_data_row_pitch && (rowPitch != image_data_row_pitch)) ||
@@ -658,7 +668,7 @@ hsa_status_t ImageManagerGfx12::ModifyImageSrd(
 }
 
 hsa_status_t ImageManagerGfx12::PopulateSamplerSrd(Sampler& sampler) const {
-  const hsa_ext_sampler_descriptor_v2_t &sampler_descriptor = sampler.desc;
+  const hsa_ext_sampler_descriptor_v3_t &sampler_descriptor = sampler.desc;
 
   SQ_IMG_SAMP_WORD0 word0;
   SQ_IMG_SAMP_WORD1 word1;
@@ -672,16 +682,23 @@ hsa_status_t ImageManagerGfx12::PopulateSamplerSrd(Sampler& sampler) const {
   word0.bits.FORCE_UNNORMALIZED = (sampler_descriptor.coordinate_mode ==
                                   HSA_EXT_SAMPLER_COORDINATE_MODE_UNNORMALIZED);
 
+  word0.bits.MAX_ANISO_RATIO = encodeMaxAnisoRatio(sampler_descriptor.max_anisotropy);
+  word0.bits.ANISO_THRESHOLD = encodeAnisoThreshold(sampler_descriptor.max_anisotropy);
+  word0.bits.ANISO_BIAS = encodeAnisoBias(sampler_descriptor.max_anisotropy);
+
   word1.u32All = 0;
   word1.bits.MAX_LOD = 4095;
 
   word2.u32All = 0;
+  const bool aniso = useAnisoFilter(sampler_descriptor);
   switch (sampler_descriptor.filter_mode) {
     case HSA_EXT_SAMPLER_FILTER_MODE_NEAREST:
-      word2.bits.XY_MAG_FILTER = static_cast<int>(SQ_TEX_XY_FILTER_POINT);
+      word2.bits.XY_MAG_FILTER = static_cast<int>(
+          aniso ? SQ_TEX_XY_FILTER_ANISO_POINT : SQ_TEX_XY_FILTER_POINT);
       break;
     case HSA_EXT_SAMPLER_FILTER_MODE_LINEAR:
-      word2.bits.XY_MAG_FILTER = static_cast<int>(SQ_TEX_XY_FILTER_BILINEAR);
+      word2.bits.XY_MAG_FILTER = static_cast<int>(
+          aniso ? SQ_TEX_XY_FILTER_ANISO_BILINEAR : SQ_TEX_XY_FILTER_BILINEAR);
       break;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;

@@ -8,6 +8,7 @@
 #include "common/env_vars.hpp"
 #include "common/environment.hpp"
 #include "common/path.hpp"
+#include "common/string_utility.hpp"
 #include "core/mproc.hpp"
 #include "core/utility.hpp"
 
@@ -763,9 +764,10 @@ parse_args(int argc, char** argv, std::vector<std::string>& _env,
     if(_generate_configs)
     {
         auto _is_omni_cfg = [](std::string_view itr) {
-            return (itr.starts_with("ROCPROFSYS") && !itr.starts_with(env_vars::MODE) &&
+            return (itr.starts_with("ROCPROFSYS") &&
+                    !rocprofsys::utility::string::has_env_key(itr, env_vars::MODE) &&
                     !itr.starts_with("ROCPROFSYS_DEBUG_") &&
-                    itr.find('=') < itr.length());
+                    itr.find('=') != std::string::npos);
             // rocprof-sys has miscellaneous env options starting with ROCPROFSYS_DEBUG_
             // that are not official options
         };
@@ -775,10 +777,9 @@ parse_args(int argc, char** argv, std::vector<std::string>& _env,
         {
             if(_is_omni_cfg(itr))
             {
-                auto const _pos     = itr.find('=');
-                auto       _env_var = itr.substr(0, _pos);
-                auto       _env_val = itr.substr(_pos + 1);
-                _omni_env_m.emplace(std::move(_env_var), std::move(_env_val));
+                auto const parsed = *rocprofsys::utility::string::split_key_value(itr);
+                _omni_env_m.emplace(std::string{ parsed.key },
+                                    std::string{ parsed.value });
             }
         }
 
@@ -834,7 +835,8 @@ parse_args(int argc, char** argv, std::vector<std::string>& _env,
                 }
             };
 
-        const int nwidth = (std::log10(_causal_envs_tmp.size()) + 1);
+        const auto nwidth =
+            rocprofsys::utility::string::decimal_width(_causal_envs_tmp.size());
         for(size_t i = 0; i < _causal_envs_tmp.size(); ++i)
         {
             std::stringstream fname{};

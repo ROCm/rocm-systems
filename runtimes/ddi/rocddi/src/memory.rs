@@ -1,19 +1,32 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#![cfg_attr(
+    windows,
+    allow(
+        unused_imports,
+        unused_variables,
+        reason = "native provider routes are absent on this host target"
+    )
+)]
+
 //! Runtime storage, host backing, and device-accessible memory.
 //!
-//! [`storage`] allocates runtime records through the session's callback
-//! allocator. [`host`] owns host-only backing and cache operations without
-//! activating an endpoint. [`device`] owns memory and mappings whose access
+//! [`storage`] provides fallible storage for runtime ownership records.
+//! [`host`] owns host-only backing without activating an
+//! endpoint. [`device`] owns memory and mappings whose access
 //! has been qualified by an activated [`Device`](crate::device::Device). A CPU
 //! can use this interface when a driver exposes it as an activated endpoint.
 //! Rocddi-owned host backing can be registered independently with several
 //! drivers while each registration retains its pages. Ordinary caller-owned
 //! host memory remains outside rocddi ownership and uses the unsafe raw
 //! registration API.
+//! Qualified CPU cache maintenance lives in [`crate::host::cache`]; the mapping
+//! owner supplies its cache policy and full-range lifetime.
 //! Platform-specific sharing transports live under [`interop`].
 
+pub mod advice;
+pub mod constraints;
 pub mod device;
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
@@ -26,7 +39,8 @@ pub(crate) use device::{
     Allocation, AllocationDesc, AllocationInfo, AllocationLimits, DeviceAccess, DriverAllocation,
     DriverVirtualAddress, DriverVirtualDeviceMapping, DriverVirtualHostMapping,
     DriverVirtualMemory, HostCacheability, HostMappingPolicy, HostRegistration, MemoryKind,
-    VirtualAddressInfo, VirtualMapRequest, VirtualMemory, VirtualMemoryInfo, set_device_access_for,
+    VirtualAddressInfo, VirtualMapRequest, VirtualMemory, VirtualMemoryInfo, VirtualMemoryOptions,
+    set_device_access_for,
 };
 #[cfg(test)]
 pub(crate) use device::{DeviceIntervals, HostIntervals};

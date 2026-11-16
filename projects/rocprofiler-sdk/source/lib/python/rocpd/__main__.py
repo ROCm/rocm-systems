@@ -48,7 +48,7 @@ def main(argv=None, config=None):
     from . import summary
     from . import time_window
     from . import version_info
-    from .importer import RocpdImportData
+    from .importer import RocpdImportData, add_decode_args, get_decode_args
 
     convert_examples = """
 
@@ -243,6 +243,11 @@ Example usage:
     process_generate_summary_args.append(summary.add_args(generate_summary))
     process_generate_summary_args.append(time_window.add_args(generate_summary))
 
+    # ISA decode options apply to the subcommands that open/decode a database
+    add_decode_args(converter)
+    add_decode_args(query_reporter, query_profile=True)
+    add_decode_args(generate_summary)
+
     # parse the command line arguments
     args = parser.parse_args(argv)
 
@@ -266,11 +271,12 @@ Example usage:
             automerge_limit=getattr(
                 args, "automerge_limit", package.IDEAL_NUMBER_OF_DATABASE_FILES
             ),
+            **get_decode_args(args),
         )
 
         all_args = {}
         for pitr in process_converter_args:
-            all_args.update(pitr(input, args))
+            all_args.update(time_window.process_args_or_exit(pitr, input, args))
 
         # setup the config args
         config = (
@@ -325,12 +331,13 @@ Example usage:
             automerge_limit=getattr(
                 args, "automerge_limit", package.IDEAL_NUMBER_OF_DATABASE_FILES
             ),
+            **get_decode_args(args),
         )
 
         # query subparser args
         query_args = {}
         for pitr in process_query_reporter_args:
-            query_args.update(pitr(input, args))
+            query_args.update(time_window.process_args_or_exit(pitr, input, args))
 
         query.execute(
             input,
@@ -346,12 +353,13 @@ Example usage:
             automerge_limit=getattr(
                 args, "automerge_limit", package.IDEAL_NUMBER_OF_DATABASE_FILES
             ),
+            **get_decode_args(args),
         )
 
         # summary subparser args
         summary_args = {}
         for pitr in process_generate_summary_args:
-            summary_args.update(pitr(input, args))
+            summary_args.update(time_window.process_args_or_exit(pitr, input, args))
 
         summary.generate_all_summaries(input, **summary_args)
 

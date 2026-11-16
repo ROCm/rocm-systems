@@ -374,7 +374,8 @@ extern amd::Monitor listenerLock;
 static bool listenerTerminating = false;
 #ifdef USE_NEW_HOSTCALL_IMPL
 constexpr static uint32_t kYieldSpins = 128;
-constexpr static uint64_t kSignalTimeout = K * K;
+constexpr static uint64_t kSignalTimeoutFloor = K * K;
+constexpr static uint64_t kSignalTimeoutCeil = K * K * 16;
 #else  // !USE_NEW_HOSTCALL_IMPL
 constexpr static uint64_t kTimeoutFloor = K * K * 4;
 constexpr static uint64_t kTimeoutCeil = K * K * 16;
@@ -398,6 +399,7 @@ void HostcallListener::consumePackets() {
   uint64_t signal_value = SIGNAL_INIT;
   kHostThreadActive.state = Init::State::kInit;
   uint32_t yield_spins = 0;
+  uint64_t timeout = kSignalTimeoutFloor;
 
   while (true) {
     if (kHostThreadActive.state == Init::State::kDestroy) {
@@ -419,6 +421,7 @@ void HostcallListener::consumePackets() {
     }
 
     if (result != ProcessResult::kIdleFull) {
+      timeout = kSignalTimeoutFloor;
       if (++yield_spins >= kYieldSpins) {
         yield_spins = 0;
         amd::Os::yield();
@@ -428,9 +431,12 @@ void HostcallListener::consumePackets() {
 
     yield_spins = 0;
     uint64_t new_value =
-        doorbell_->Wait(signal_value, device::Signal::Condition::Ne, kSignalTimeout);
+        doorbell_->Wait(signal_value, device::Signal::Condition::Ne, timeout);
     if (new_value != signal_value) {
       signal_value = new_value;
+      timeout = kSignalTimeoutFloor;
+    } else {
+      timeout = std::min(kSignalTimeoutCeil, timeout << 1);
     }
     if (signal_value == SIGNAL_DONE) {
       return;

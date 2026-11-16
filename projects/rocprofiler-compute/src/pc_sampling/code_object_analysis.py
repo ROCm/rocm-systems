@@ -5,7 +5,7 @@
 
 Parse the per-process code-object info artifact emitted by the native PC
 sampling collector into a per-code-object instruction tree. The artifact holds
-the full disassembly of every loaded code object, including un-sampled ones.
+ISA for dispatched kernels only.
 
 Also maps a disassembled instruction to the execution pipeline that runs it.
 """
@@ -184,12 +184,7 @@ class InstructionPipelines:
     @staticmethod
     def load() -> dict[str, Any]:
         """Read the generated file, or nothing when it is not installed."""
-        path = (
-            config.rocprof_compute_home
-            / "rocprof_compute_soc"
-            / "analysis_configs"
-            / "instruction_pipelines.yaml"
-        )
+        path = config.analysis_configs_dir / "instruction_pipelines.yaml"
         if not path.is_file():
             return {}
         # The C loader is faster and ships with PyYAML wherever libyaml is.
