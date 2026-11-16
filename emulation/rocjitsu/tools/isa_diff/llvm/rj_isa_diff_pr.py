@@ -879,6 +879,22 @@ def escape_check(line):
 LLC_TIMEOUT = 300  # seconds per llc invocation
 
 
+def llc_error(stderr):
+    """The informative part of an llc failure: its error line (LLVM ERROR, error:,
+    Assertion) and the first other line that is neither a warning nor part of the stack
+    dump; the tail of stderr if there is neither."""
+    lines = [
+        l.strip()
+        for l in stderr.splitlines()
+        if l.strip()
+        and not l.lstrip().startswith("warning:")
+        and not re.match(r"\s*(#?\d+\s|\d+\.\s|Stack dump|PLEASE submit)", l)
+    ]
+    errors = [l for l in lines if re.search(r"LLVM ERROR|error:|Assertion", l)]
+    picked = errors[:1] + [l for l in lines if l not in errors][:1]
+    return " | ".join(picked)[:300] if picked else stderr[-300:]
+
+
 class LlcFailure(RuntimeError):
     """llc failed (or timed out) on a RUN line; @p sides = (before failed, after failed)."""
 
@@ -929,7 +945,7 @@ def llc_texts(text, path, llc_before, llc_after, targets):
                         text=True,
                         timeout=LLC_TIMEOUT,
                     )
-                    outs.append((res.returncode, res.stdout, res.stderr[-300:]))
+                    outs.append((res.returncode, res.stdout, llc_error(res.stderr)))
                 except subprocess.TimeoutExpired:
                     outs.append((None, "", f"timed out after {LLC_TIMEOUT} s"))
             failed = tuple(rc != 0 for rc, _, _ in outs)

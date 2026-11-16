@@ -1153,3 +1153,31 @@ regions (README "AGPRs and MFMA").
   - The Triton kernels stay inconclusive: per-function time budget (big GEMM loops), exit
     liveness that differs after rescheduling, `s_barrier` keeping the whole kernel out,
     and buffer addresses that fault. No mismatch.
+
+## Second review of e8777af1a1; PR 243123 re-validated (2026-11-16)
+
+Four findings, each reproduced with the reviewer's probes (`nod:/tmp/rj-review-20261116`,
+re-run in `nod:~/isadiff-check/review-rerun`) and fixed in a1ef2a022c:
+
+| finding | before | after |
+|---|---|---|
+| P1: one side exits, the other runs past the loop step limit | excluded like a both-sides step limit; an injected `s_sub_u32 s4, s4, 0` (no exit for s4 & 1 = 1) passed f0 on 213 valid cases, exit 0 | the looping side re-runs at 16x the limit; still looping is a possible non-termination: r0 and f0 `INCONCLUSIVE` (155 such cases in f0), exit 2 |
+| P1: analysis cache identity | a gfx1030 request got gfx950's cached analysis (words gfx1030 cannot decode were accepted); wave64 got wave32's | key v2 binds target, wave size, kernel range; a hit is checked against the request; gfx1030 now fails to decode as without the cache, wave64 is analysed at wave64 |
+| P2: poison triage on `shl i32 %x, (and %y, 31)` | llc drops the AND; excluding machine amounts >= 32 removed all 188 mismatches of an injected bug: `poison-only`, `INCOMPLETE` | a mismatch stays `mismatch` (exit 1); triage is a hint (`mismatch (poison-sensitive)`); `shift` is not triaged when every IR shift amount is provably below the width |
+| P2: llc failures in `--all-tests`/`--corpus` | counted only; one pass plus one failed compile was `PASS` | a skip with its scope (`INCOMPLETE`, also when nothing else was compared); one-sided failures counted; timeouts are failures; the reason shows the error line |
+
+The default number of random cases per region is now 1000 (was 5000).
+
+**PR 243123 re-run** (llc built at its base and head, 1000 cases):
+- 10 changed tests, 3603 unchanged tests, the 148 gfx950 Triton MFMA kernels (305 s):
+  56 changed functions, 3 pass, 53 inconclusive (7 tests, 46 Triton), 0 mismatch;
+  every verdict as in the AGPR run. No possible non-termination, no poison-sensitive
+  mismatch, no llc failure; 3 changed test files have no RUN line for a tested target.
+- The 600-file Triton cache sample at gfx942 and gfx950 (133 s): 10 changed functions,
+  3 pass, 7 inconclusive; `single_exit_copy` moved from inconclusive to pass (AGPR
+  support, e8777af1a1). The 7 llc failures that run had only counted are now skips
+  (`INCOMPLETE`), all on both builds (not from the PR), all IR that does not belong to
+  these targets or this LLVM: 4 intrinsics with an argument count from another LLVM
+  (`Expected 9, but got 10`, `Expected 6, but got 7`), 2 GFX12 waits (`Cannot select:
+  intrinsic llvm.amdgcn.s.wait.dscnt`), 1 gfx1250 TDM kernel (`llvm.amdgcn.tensor.load.to.lds
+  requires target feature 'tdm-insts'`).

@@ -464,6 +464,18 @@ def main():
                 failures.append(
                     f"overall_status(pass, {sk}, {stats_in}) = {got}, expected {want_status}"
                 )
+        stderr = (
+            "warning: codegen with no subarch in the target triple is deprecated\n"
+            "intrinsic has incorrect number of args. Expected 9, but got 10\n"
+            "LLVM ERROR: Broken module found, compilation aborted!\n"
+            "Stack dump:\n0.\tProgram arguments: llc\n #0 0x1 llvm::foo\n"
+        )
+        want = (
+            "LLVM ERROR: Broken module found, compilation aborted! | "
+            "intrinsic has incorrect number of args. Expected 9, but got 10"
+        )
+        if drv.llc_error(stderr) != want:
+            failures.append(f"llc_error: {drv.llc_error(stderr)!r}")
         # Nothing compared but a requested file failed to compile: incomplete, not
         # "nothing applicable".
         got = drv.overall_status(
