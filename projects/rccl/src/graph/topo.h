@@ -185,6 +185,7 @@ struct ncclTopoNode {
       hipDeviceArch_t arch;
       int cu;
       int mloPart; // MLOPart partition index, or NCCL_TOPO_UNDEF if not MLOPart
+      int integrated; // 1 for an integrated (APU) GPU, whose memory is system memory
       struct ncclTopoNode* parent; // parent DEV node
     } gpu;
     struct {
