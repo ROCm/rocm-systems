@@ -136,6 +136,9 @@ struct PendingEvent {
   // event's canonical vector position. Matching events join by minimum. Use the
   // wait-threshold width for arithmetic; only dense per-kind summaries are packed.
   uint32_t min_younger = 0;
+  // Guaranteed younger requests in this event's own typed EXPCNT FIFO.
+  // Other export types can overtake it and contribute no progress proof.
+  uint8_t min_younger_in_fifo = 0;
 
   bool operator==(const PendingEvent &) const = default;
 };

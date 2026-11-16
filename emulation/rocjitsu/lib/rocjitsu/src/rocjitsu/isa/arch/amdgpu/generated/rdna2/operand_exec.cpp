@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/lds_direct.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_resolve.h"
 #include "rocjitsu/isa/isa_operand_simd_inl.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -25,8 +26,7 @@ namespace {
 constexpr int kM0EncodingValue = 124;
 
 bool is_vgpr_only_type(OperandType t) {
-  return t == OperandType::OPR_VGPR || t == OperandType::OPR_VGPR_OR_LDS ||
-         t == OperandType::OPR_SRC_VGPR;
+  return t == OperandType::OPR_VGPR || t == OperandType::OPR_SRC_VGPR;
 }
 
 uint32_t vgpr_index(OperandType opr_type, int ev) {
@@ -57,7 +57,7 @@ std::optional<uint32_t> Isa::resolved_vgpr_offset(OperandType opr_type, int ev) 
 
 bool Isa::simd_capable_value(OperandType opr_type, int ev) {
   return resolved_vgpr_offset(opr_type, ev).has_value() || is_immediate_type(opr_type) ||
-         amdgpu::can_resolve_src_scalar(ev, kM0EncodingValue);
+         amdgpu::can_resolve_src_scalar(ev, ROCJITSU_CODE_ARCH_RDNA2);
 }
 
 bool Operand::simd_capable_exec() const {
@@ -152,6 +152,10 @@ uint32_t Operand::read_lane_exec(const amdgpu::Wavefront &wf, uint32_t lane) con
   if (!reads_value())
     return 0u;
   int ev = encoding_value_;
+  if (ev == OpSelSrc::OPR_SRC_SRC_LDS_DIRECT &&
+      (opr_type_ == OperandType::OPR_SRC || opr_type_ == OperandType::OPR_VGPR_OR_LDS ||
+       opr_type_ == OperandType::OPR_SSRC))
+    return amdgpu::read_lds_direct_src0(wf, lane);
   if (auto off = Isa::resolved_vgpr_offset(opr_type_, ev)) {
     uint32_t voff = amdgpu::apply_gpr_idx(wf, *off, vgpr_msb_role());
     return amdgpu::RegisterAccess(wf).read_vgpr(wf.vgpr_alloc().base + voff, lane);
@@ -200,6 +204,10 @@ uint64_t Operand::read_lane64_exec(const amdgpu::Wavefront &wf, uint32_t lane) c
   if (!reads_value())
     return 0;
   int ev = encoding_value_;
+  if (ev == OpSelSrc::OPR_SRC_SRC_LDS_DIRECT &&
+      (opr_type_ == OperandType::OPR_SRC || opr_type_ == OperandType::OPR_VGPR_OR_LDS ||
+       opr_type_ == OperandType::OPR_SSRC))
+    return amdgpu::read_lds_direct_src0(wf, lane);
   if (auto off = Isa::resolved_vgpr_offset(opr_type_, ev)) {
     uint32_t voff = amdgpu::apply_gpr_idx(wf, *off, vgpr_msb_role());
     uint32_t idx = wf.vgpr_alloc().base + voff;

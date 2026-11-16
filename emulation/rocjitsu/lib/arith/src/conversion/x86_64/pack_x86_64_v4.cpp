@@ -5,7 +5,7 @@
 // CPU-specific arithmetic stays here; public entry points select this backend.
 
 #include "conversion/pack.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_conversion.h"
 
 #include <immintrin.h>
 #include <stdint.h>
@@ -16,7 +16,7 @@ namespace rocjitsu::arith {
 // Requires the named CPU features and validated instruction controls.
 template <bool Saturate>
 void pack_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *d,
-                    const uint32_t *a, const uint32_t *b, bool quiet_nan) {
+                    const uint32_t *a, const uint32_t *b, bool quiet_nan, bool preserve_half) {
   for (int lane = 0; lane < 32; lane += 16) {
     auto x = _mm512_loadu_si512(reinterpret_cast<const __m512i *>(a + lane));
     __m512i result;
@@ -26,11 +26,14 @@ void pack_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t 
       lo = _mm512_min_epi32(_mm512_max_epi32(lo, _mm512_setzero_si512()), _mm512_set1_epi32(255));
       hi = _mm512_min_epi32(_mm512_max_epi32(hi, _mm512_setzero_si512()), _mm512_set1_epi32(255));
       auto packed = _mm512_or_si512(lo, _mm512_slli_epi32(hi, 8));
-      auto old = _mm512_loadu_si512(reinterpret_cast<const __m512i *>(d + lane));
-      unsigned shift = mode & RJ_ARITH_ALU_HIGH_D ? 16 : 0;
-      auto selected = _mm512_sll_epi32(packed, _mm_cvtsi32_si128(shift));
-      result = _mm512_or_si512(_mm512_andnot_si512(_mm512_set1_epi32(int(65535u << shift)), old),
-                               selected);
+      result = packed;
+      if (preserve_half || (mode & RJ_ARITH_ALU_HIGH_D)) {
+        auto old = _mm512_loadu_si512(reinterpret_cast<const __m512i *>(d + lane));
+        unsigned shift = mode & RJ_ARITH_ALU_HIGH_D ? 16 : 0;
+        auto selected = _mm512_sll_epi32(packed, _mm_cvtsi32_si128(shift));
+        result = _mm512_or_si512(_mm512_andnot_si512(_mm512_set1_epi32(int(65535u << shift)), old),
+                                 selected);
+      }
     } else {
       auto y = _mm512_loadu_si512(reinterpret_cast<const __m512i *>(b + lane));
       x = _mm512_srl_epi32(x, _mm_cvtsi32_si128(mode & RJ_ARITH_ALU_HIGH_A ? 16 : 0));
@@ -67,8 +70,8 @@ void pack_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t 
 }
 
 template void pack_x86_64_v4<true>(uint64_t, uint32_t, uint32_t, uint32_t *, const uint32_t *,
-                                   const uint32_t *, bool);
+                                   const uint32_t *, bool, bool);
 template void pack_x86_64_v4<false>(uint64_t, uint32_t, uint32_t, uint32_t *, const uint32_t *,
-                                    const uint32_t *, bool);
+                                    const uint32_t *, bool, bool);
 
 } // namespace rocjitsu::arith

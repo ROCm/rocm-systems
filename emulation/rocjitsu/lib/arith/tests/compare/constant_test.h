@@ -12,7 +12,7 @@
 #include "common/semantics.h"
 #include "common/wave.h"
 #include "compare/helpers.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <gtest/gtest.h>
 #include <stdint.h>
@@ -22,7 +22,7 @@
 namespace rocjitsu::arith::test {
 
 // Constant predicates ignore operands but retain EXEC/DPP filtering. Floating
-// forms cannot report RDNA3 FP status; compatibility resolves to no-status exact.
+// forms cannot report FP status; compatibility resolves to no-status exact.
 template <int Width, int Lanes, bool Floating, typename Call>
 void check_constant_compare(Call call, bool value) {
   using Mask = WaveMask<Lanes>;
@@ -37,7 +37,7 @@ void check_constant_compare(Call call, bool value) {
                                ? RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_ABS_B | RJ_ARITH_ALU_NEG_A |
                                      RJ_ARITH_ALU_NEG_B | RJ_ARITH_ALU_CLAMP |
                                      (Width == 16 ? RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_B : 0)
-                               : 0;
+                               : (Width == 16 ? RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_B : 0);
   expect_alu_invalid_flags<Width != 64>(
       [&](uint64_t flags, uint64_t mode) {
         Mask d = ~Mask(0);

@@ -11,6 +11,7 @@ Before writing a helper, search these locations and use what exists:
 | --- | --- |
 | Units: data size, frequency, power, generic quantity | `source/lib/common/units/` |
 | String split/join/trim, delimiting | `source/lib/common/string_utility.hpp`, `delimit.hpp`, `join.hpp` |
+| Parsing a number from text | `safe_from_chars`, `safe_stoi`, `safe_stol` in `source/lib/common/string_utility.hpp` |
 | Paths, environment, env vars | `source/lib/common/path.hpp`, `environment.hpp`, `env_vars.hpp` |
 | Version handling | `source/lib/common/version.hpp` |
 | Logging | `LOG_*` macros from `source/lib/logger/debug.hpp` |
@@ -90,12 +91,16 @@ To add a sample type, copy an existing one:
 
 1. Add a new value to `type_identifier_t`. Never renumber or reuse a value.
    `fragmented_space` is reserved.
-2. Write a struct that derives from `cacheable_t` and declares
+2. Write a default-constructible struct that declares
    `static constexpr type_identifier_t type_identifier`. Allowed field types:
-   trivially copyable values, `std::string_view`, `std::vector` or `std::span`
-   of trivially copyable values, and `std::optional` (not nested).
-3. Specialize `serialize`, `deserialize` and `get_size`. All three list the same
-   fields in the same order.
+   numbers, scoped enums, `std::string_view`, `std::optional` (not nested), a
+   nested struct that has its own `serialize`, and `std::array`, `std::vector`
+   or `std::span` of numbers or scoped enums. A plain-data struct without
+   padding or pointers can be a field or an element only after
+   `type_traits::explicitly_raw` is specialized for it next to the record.
+3. Add one member `template <typename Archive> void serialize(Archive& archive)`
+   that passes every field to `archive(...)`. The order is the byte layout. A
+   derived record declares its own `serialize` and calls the base one first.
 4. Add the type to `storage_parser_t` in `storage_parser_alias.hpp`. Add a
    `handle()` overload to `sample_processor_interface`, and implement it in
    every processor.
@@ -119,6 +124,44 @@ switch(kind)
 ```
 
 The same applies to any branch that the code's invariants say is impossible.
+
+## No silent acceptance
+
+- A lookup that finds nothing is an error. Never treat "not registered" or
+  "not found" as "valid".
+- Keep the type of an error across a boundary. Do not flatten a severity or
+  an error struct into a string.
+- Offer a value to the user only from an allow-list of what this application
+  handles, not from everything a library reports minus a deny-list.
+- Do not compare enum values by casting them to integers.
+
+## No fake or dead code in production
+
+Production code contains only code the program really uses. Never add a
+stand-in, a stub, or a second implementation to get past a wiring problem. For
+example, never implement a backend and inject it into a service only to make
+the service work. Fakes and mocks live only under `tests/`.
+
+- A service uses the same object, the same instance, that the rest of the
+  program uses. Share that instance instead of creating another one.
+- If sharing is impossible or too much work for the current change, do not
+  work around it. Mark it as something to fix in a separate PR before the work
+  continues.
+
+## Build only what a real caller uses
+
+- Every new field, enum value, parameter, and option has a reader in
+  production code in the same PR. If only a test or sample data sets it,
+  remove it.
+- A new module comes with its first production caller. Code that only tests
+  call is not finished.
+- One concept has one type and one way to express it. Before adding an enum
+  or struct, search for one with the same meaning. Never add a function that
+  maps one enum 1:1 onto another.
+- Do not add a fallback for a compiler or standard the project does not
+  support.
+- Name a thing for what it does. A policy is not an `option`; a check does not
+  `force`.
 
 ## Documentation
 

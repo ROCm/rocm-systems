@@ -1433,14 +1433,24 @@ DecodeResult decodeSBfeI64Sop2(const MachineInst *opcode, const DecodeErrorEmitt
 SCbranchGForkSop2::SCbranchGForkSop2(const MachineInst *inst)
     : Sop2("s_cbranch_g_fork", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCbranchGForkSop2)),
-      ssrc0(64, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
-      ssrc1(64, OperandType::OPR_SSRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
+      ssrc0(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc0),
+      ssrc1(64, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->ssrc1),
       pc(64, OperandType::OPR_PC, 0) {
   src_operands_[0] = &ssrc0;
   src_operands_[1] = &ssrc1;
   dst_operands_[0] = &pc;
   num_src_ = 2;
   num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
+    ssrc0 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::ZeroExtend);
+  if (reinterpret_cast<const OpEncoding *>(inst)->ssrc1 == 255)
+    ssrc1 = Operand::make_literal32(
+        64,
+        static_cast<uint32_t>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32),
+        Operand::Literal32Widening::ZeroExtend);
   pc.apply_fieldless_caps(false, false, false);
   flags_ |= INDIRECT_BRANCH;
   flags_ |= BRANCH_STACK;

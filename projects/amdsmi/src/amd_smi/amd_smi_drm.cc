@@ -11,6 +11,7 @@
 #include <memory>
 #include <regex>
 
+#include "amd_smi/impl/amd_smi_test_overrides.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "amd_smi/impl/xf86drm.h"
 #include "impl/scoped_fd.h"
@@ -100,8 +101,8 @@ amdsmi_status_t AMDSmiDrm::init() {
     drmDevicePtr device;
 
     const std::string regex("renderD([0-9]+)");
-    const std::string renderD_folder =
-        "/sys/class/drm/card" + std::to_string(rocm_smi_device->index()) + "/../";
+    const std::string renderD_folder = amd::smi::test_hooks::SysfsDrmRoot() + "/card" +
+                                       std::to_string(rocm_smi_device->index()) + "/../";
 
     // looking for /sys/class/drm/card0/../renderD*
     std::string render_name = find_file_in_folder(renderD_folder, regex);
@@ -162,7 +163,7 @@ amdsmi_status_t AMDSmiDrm::get_bdf_by_index(uint32_t gpu_index, amdsmi_bdf_t* bd
 amdsmi_status_t AMDSmiDrm::amdgpu_query_cpu_affinity(const std::string& device_path,
                                                      std::string& cpu_affinity) {
   std::string cpu_aff_file = "cpulistaffinity";
-  cpu_affinity = smi_brcm_get_value_string(device_path, cpu_aff_file);
+  cpu_affinity = smi_read_sysfs_string(device_path, cpu_aff_file);
 
   return AMDSMI_STATUS_SUCCESS;
 }

@@ -14,7 +14,7 @@
 #include "common/wave.h"
 #include "compare/floating_point.h"
 #include "compare/helpers.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <gtest/gtest.h>
 #include <stdint.h>
@@ -93,7 +93,9 @@ void check_float_compare(Call call, bool gfx12, bool (*predicate)(double, double
         uint64_t flags = cpu | semantics | RJ_ARITH_FP_IEEE_MODE |
                          RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS |
                          (flush ? RJ_ARITH_FP_FLUSH_INPUT_DENORMALS : 0);
-        bool reporting = semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL;
+        bool reporting =
+            semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL ||
+            (gfx12 && semantics == RJ_ARITH_SEMANTICS_COMPATIBILITY && (mode & RJ_ARITH_ALU_CLAMP));
         int error = reporting && !gfx12 ? RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS : RJ_ARITH_SUCCESS;
         SCOPED_TRACE(::testing::Message() << cpu << '/' << semantics << '/' << scenario);
         Mask expected = comparison_mask<Lanes>(mode, exec_mask, [&](int source, int lane) {
@@ -189,9 +191,68 @@ void check_float_compare(Call call, bool gfx12, bool (*predicate)(double, double
                            r.v + 2, &status),
                       RJ_ARITH_SUCCESS);
             EXPECT_EQ(status, 0x80000040U | (exceptional ? RJ_ARITH_EXCEPTION_INVALID : 0));
+            // The same routed sNaN enables the Compatibility signaling policy.
+            Mask compatible_mask = 0;
+            uint32_t compatible_status = 0x80000040U;
+            ASSERT_EQ(call(cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY, exec_mask,
+                           mode | RJ_ARITH_ALU_CLAMP, &compatible_mask, r.v, r.v + 2,
+                           &compatible_status),
+                      RJ_ARITH_SUCCESS);
+            EXPECT_EQ(compatible_mask, d);
+            EXPECT_EQ(compatible_status, status);
           }
         }
       }
+    }
+  }
+}
+
+// Preserve the inherited signaling switch across the entire wave, including a
+// denormal in one half whose reporting is enabled by a nonfinite in the other.
+template <int Width, int Lanes, typename Call> void check_compatibility_compare(Call call) {
+  using Mask = WaveMask<Lanes>;
+  Registers<4, Lanes> input{};
+  constexpr uint64_t high = Width == 16 ? RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_B : 0;
+  constexpr uint32_t initial = 0x80000040U;
+  // Low lane: a preserved subnormal compared to zero. Last lane: quiet NaN.
+  // FP16's unused low halves are sNaNs, to distinguish selected-half classification.
+  for (int reg = 0; reg < 4; ++reg) {
+    for (int lane = 0; lane < Lanes; ++lane) {
+      input.v[reg][lane] = 0;
+    }
+  }
+  for (int lane = 0; lane < Lanes; ++lane) {
+    if constexpr (Width == 16) {
+      input.v[0][lane] = input.v[2][lane] = 0x7c01;
+    }
+  }
+  write_compare_operand(input.v, 0, Width, 1, Width == 16);
+  write_compare_operand(input.v, Lanes - 1, Width, compare_class_value<Width>(1), Width == 16);
+  const Mask last = Mask(1) << (Lanes - 1);
+  struct Case {
+    Mask exec_mask;
+    uint64_t controls, modifiers;
+    uint32_t causes;
+  };
+  const Case cases[] = {
+      {Mask(1), 0, RJ_ARITH_ALU_CLAMP, 0}, // Finite-only signaling reports nothing.
+      {last, 0, RJ_ARITH_ALU_CLAMP, RJ_ARITH_EXCEPTION_INVALID},
+      {Mask(1) | last, 0, RJ_ARITH_ALU_CLAMP,
+       RJ_ARITH_EXCEPTION_INVALID | RJ_ARITH_EXCEPTION_INPUT_DENORM},
+      {Mask(1) | last, RJ_ARITH_FP_FLUSH_INPUT_DENORMALS, RJ_ARITH_ALU_CLAMP,
+       RJ_ARITH_EXCEPTION_INVALID},
+      {Mask(1) | last, 0, 0, 0}, // Quiet Compatibility does not report.
+      {Mask(0), 0, RJ_ARITH_ALU_CLAMP, 0},
+  };
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (const auto &test : cases) {
+      Mask result = ~Mask(0);
+      uint32_t status = initial;
+      ASSERT_EQ(call(cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY | test.controls, test.exec_mask,
+                     high | test.modifiers, &result, input.v, input.v + 2, &status),
+                RJ_ARITH_SUCCESS);
+      EXPECT_EQ(status, initial | test.causes);
+      EXPECT_EQ(result, test.controls ? test.exec_mask & Mask(1) : Mask(0));
     }
   }
 }

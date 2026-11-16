@@ -15,7 +15,7 @@ use rocddi::device::event::{
     DeviceEvent, DeviceEventOriginId, DeviceEventSourceId, DeviceEventSubscription,
     GpuHardwareException, subscribe,
 };
-use rocddi::device::gpu::event::linux::{SignalEventService, process_signal_event_available};
+use rocddi::device::gpu::event::{SignalEventService, signal_event_available};
 use rocddi::host::cache::{CacheMaintenance, CachePolicy};
 use rocddi::memory::storage::TryPush;
 use rocddi::memory::storage::{Allocator, Owned, OwnerVec, Shared, UninitOwned};
@@ -658,9 +658,9 @@ fn summary(endpoint: &topology::Endpoint) -> amdf_endpoint_summary_t {
 }
 
 pub(crate) fn family_count(endpoint: &topology::Endpoint) -> u32 {
-    endpoint.gpu().map_or(0, |gpu| {
-        u32::from(gpu.queues.aql) + u32::from(gpu.queues.sdma) + u32::from(gpu.queues.pm4)
-    })
+    endpoint
+        .gpu()
+        .map_or(0, |gpu| queue_families(gpu).map(|_| 1_u32).sum())
 }
 
 fn pm4_atomic_capabilities() -> amdf_atomic_capabilities_t {
@@ -714,27 +714,37 @@ pub(crate) fn family(
     endpoint: &topology::Endpoint,
     ordinal: u32,
 ) -> Result<amdf_queue_family_info_t, u64> {
-    let gpu = endpoint.gpu().ok_or(UNSUPPORTED)?;
+    gpu_family(endpoint.gpu().ok_or(UNSUPPORTED)?, ordinal)
+}
+
+fn queue_families(
+    gpu: &topology::GpuInfo,
+) -> impl Iterator<Item = (u32, Option<topology::GpuUserQueueCapabilities>, bool)> {
     let queues = gpu.queues;
-    if ordinal >= family_count(endpoint) {
-        return Err(RANGE);
-    }
-    let mut next = 0;
-    let command_type = if queues.aql && ordinal == next {
-        AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
-    } else {
-        next += u32::from(queues.aql);
-        if queues.sdma && ordinal == next {
-            AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA
-        } else {
-            next += u32::from(queues.sdma);
-            if queues.pm4 && ordinal == next {
-                AMDF_QUEUE_COMMAND_TYPE_GPU_PM4
-            } else {
-                return Err(RANGE);
-            }
-        }
-    };
+    [
+        (AMDF_QUEUE_COMMAND_TYPE_GPU_AQL, queues.aql, false),
+        (
+            AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA,
+            queues.sdma,
+            queues.kernel_sdma,
+        ),
+        (
+            AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
+            queues.pm4,
+            queues.kernel_pm4,
+        ),
+    ]
+    .into_iter()
+    .filter(|(_, direct, kernel)| direct.is_some() || *kernel)
+}
+
+#[allow(
+    clippy::too_many_lines,
+    reason = "one complete queue-family ABI projection"
+)]
+fn gpu_family(gpu: &topology::GpuInfo, ordinal: u32) -> Result<amdf_queue_family_info_t, u64> {
+    let queues = gpu.queues;
+    let (command_type, direct, kernel) = queue_families(gpu).nth(ordinal as usize).ok_or(RANGE)?;
     let aql = command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL;
     let sdma = command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA;
     let pm4 = command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_PM4;
@@ -748,12 +758,15 @@ pub(crate) fn family(
     Ok(amdf_queue_family_info_t {
         ordinal,
         command_type,
-        publication_modes: AMDF_QUEUE_PUBLICATION_MODE_USER
-            | if (pm4 && queues.kernel_pm4) || (sdma && queues.kernel_sdma) {
-                AMDF_QUEUE_PUBLICATION_MODE_KERNEL
-            } else {
-                0
-            },
+        publication_modes: if direct.is_some() {
+            AMDF_QUEUE_PUBLICATION_MODE_USER
+        } else {
+            0
+        } | if kernel {
+            AMDF_QUEUE_PUBLICATION_MODE_KERNEL
+        } else {
+            0
+        },
         format_version: if pm4 {
             AMDF_GPU_PM4_QUEUE_FORMAT_VERSION_1
         } else if sdma {
@@ -766,6 +779,7 @@ pub(crate) fn family(
         } else if pm4 {
             AMDF_GPU_PM4_FORMAT_FEATURE_ACQUIRE_MEM_GCR
                 | if gpu.target_profile.supports_pm4_dispatch_scratch()
+                    && direct.is_some_and(|controls| controls.dispatch_scratch)
                     && gpu.xcc_count == 1
                     && gpu.shader_engine_count_per_xcc != 0
                     && gpu.maximum_scratch_wave_count_per_compute_unit != 0
@@ -803,27 +817,37 @@ pub(crate) fn family(
         } else {
             amdf_atomic_capabilities_t::default()
         },
-        user_queue_capabilities: AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER
-            | if pm4 {
-                0
-            } else {
-                AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER
-            },
-        producer_modes: AMDF_QUEUE_PRODUCER_MODE_BIT_SINGLE
-            | if aql {
-                AMDF_QUEUE_PRODUCER_MODE_BIT_MULTI
-            } else {
-                0
-            },
+        user_queue_capabilities: direct.map_or(0, |controls| {
+            AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER
+                | if controls.device_producer {
+                    AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER
+                } else {
+                    0
+                }
+        }),
+        producer_modes: direct.map_or(0, |controls| {
+            AMDF_QUEUE_PRODUCER_MODE_BIT_SINGLE
+                | if controls.multiple_producers {
+                    AMDF_QUEUE_PRODUCER_MODE_BIT_MULTI
+                } else {
+                    0
+                }
+        }),
         priority_capabilities: AMDF_QUEUE_PRIORITY_CAPABILITY_NORMAL
-            | if aql {
-                AMDF_QUEUE_PRIORITY_CAPABILITY_LOW | AMDF_QUEUE_PRIORITY_CAPABILITY_HIGH
-            } else {
-                0
-            },
-        minimum_ring_byte_length: if pm4 { 4096 } else { 1024 },
-        maximum_ring_byte_length: if pm4 { 4096 } else { 1 << 31 },
-        ring_byte_length_alignment: if pm4 { 4096 } else { 1024 },
+            | direct.map_or(0, |controls| {
+                (if controls.low_priority {
+                    AMDF_QUEUE_PRIORITY_CAPABILITY_LOW
+                } else {
+                    0
+                }) | (if controls.high_priority {
+                    AMDF_QUEUE_PRIORITY_CAPABILITY_HIGH
+                } else {
+                    0
+                })
+            }),
+        minimum_ring_byte_length: direct.map_or(0, |controls| controls.minimum_ring_bytes),
+        maximum_ring_byte_length: direct.map_or(0, |controls| controls.maximum_ring_bytes),
+        ring_byte_length_alignment: direct.map_or(0, |controls| controls.ring_alignment),
         ..Default::default()
     })
 }
@@ -883,7 +907,8 @@ pub(crate) unsafe extern "C" fn create(
             session::DriverContextLifetime::Session
         };
         let native = session::Session::new(lifetime).map_err(|e| crate::support::native(&e))?;
-        let event_service = SignalEventService::new(&native);
+        let event_service =
+            SignalEventService::new(&native).map_err(|error| crate::support::native(&error))?;
         let host_page_size =
             native_memory::host::host_page_size().map_err(|e| crate::support::native(&e))?;
         let host_write_back_cache = CacheMaintenance::qualify(CachePolicy::WriteBack).ok();
@@ -1179,7 +1204,7 @@ pub(crate) unsafe extern "C" fn device_create(
         // Feature queries are metadata-only. Sample the process signal-page
         // state here so they never contend on its native-resource mutex.
         let native_events_available = if instance.process_lifetime() {
-            process_signal_event_available(&native).map_err(|error| {
+            signal_event_available(&native).map_err(|error| {
                 unregister(&endpoint.children);
                 crate::support::native(&error)
             })?
@@ -1530,5 +1555,65 @@ mod observer_tests {
         observer.record_event(reset(endpoint_id, false)).unwrap();
         observer.record_operation_loss(&epoch, None);
         assert_eq!(epoch.load(Ordering::Acquire), 3);
+    }
+}
+
+#[cfg(test)]
+mod family_tests {
+    use super::*;
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn kernel_only_families_have_dense_ordinals_without_direct_mapping_promises() {
+        let mut gpu = topology::GpuInfo::default();
+        gpu.queues.kernel_sdma = true;
+        gpu.queues.kernel_pm4 = true;
+        for (ordinal, command) in [
+            AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA,
+            AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let family = gpu_family(&gpu, u32::try_from(ordinal).unwrap()).unwrap();
+            assert_eq!(family.ordinal, u32::try_from(ordinal).unwrap());
+            assert_eq!(family.command_type, command);
+            assert_eq!(family.publication_modes, AMDF_QUEUE_PUBLICATION_MODE_KERNEL);
+            assert_eq!(family.user_queue_capabilities, 0);
+            assert_eq!(family.producer_modes, 0);
+            assert_eq!(family.minimum_ring_byte_length, 0);
+            assert_eq!(family.maximum_ring_byte_length, 0);
+            assert_eq!(family.ring_byte_length_alignment, 0);
+        }
+        assert_eq!(gpu_family(&gpu, 2).err(), Some(RANGE));
+        gpu.queues.sdma = Some(topology::GpuUserQueueCapabilities {
+            minimum_ring_bytes: 65536,
+            maximum_ring_bytes: 65536,
+            ring_alignment: 65536,
+            ..topology::GpuUserQueueCapabilities::default()
+        });
+        let family = gpu_family(&gpu, 0).unwrap();
+        assert_eq!(
+            family.publication_modes,
+            AMDF_QUEUE_PUBLICATION_MODE_USER | AMDF_QUEUE_PUBLICATION_MODE_KERNEL
+        );
+        assert_eq!(family.minimum_ring_byte_length, 65536);
+        assert_eq!(
+            family.user_queue_capabilities,
+            AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER
+        );
+        assert_eq!(
+            family.priority_capabilities,
+            AMDF_QUEUE_PRIORITY_CAPABILITY_NORMAL
+        );
+        gpu.queues.aql = Some(topology::GpuUserQueueCapabilities::default());
+        assert_eq!(
+            gpu_family(&gpu, 0).unwrap().command_type,
+            AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
+        );
+        assert_eq!(
+            gpu_family(&gpu, 1).unwrap().command_type,
+            AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA
+        );
     }
 }

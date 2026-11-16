@@ -12,7 +12,7 @@
 #include "common/wave.h"
 #include "common/word_test.h"
 #include "integer/carry_reference.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <cstring>
 #include <gtest/gtest.h>

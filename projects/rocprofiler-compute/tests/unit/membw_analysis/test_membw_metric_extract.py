@@ -21,7 +21,7 @@ class TestExtractMembwMetrics:
     def test_extracts_values_across_tables(self):
         dfs = {
             3001: make_table_df([("m_l1", 18.7)]),
-            3012: make_table_df([("m_l2", 5.0)]),
+            3002: make_table_df([("m_l2", 5.0)]),
         }
         keys = frozenset({"m_l1", "m_l2"})
         result = extract_membw_metrics(dfs, keys)

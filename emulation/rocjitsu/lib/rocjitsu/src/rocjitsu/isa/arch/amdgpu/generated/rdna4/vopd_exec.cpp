@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vopd.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna4/vopd_flags.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_vopd_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
@@ -81,6 +82,9 @@ void Vopd::execute_impl(amdgpu::Wavefront &wf) {
           flags = amdgpu::arith::float32_flags(wf, flags, false) & ~RJ_ARITH_FP_DX10_CLAMP_OFF;
           amdgpu::arith::VectorInput32 a(registers, wf, *slot.src0, wf.exec());
           amdgpu::arith::VectorInput32 b(registers, wf, *slot.src1, wf.exec());
+          if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY)
+            return amdgpu::arith::gfx12_compat_dual_mul(wf, flags, exec_mask, result, a.data,
+                                                        b.data, state);
           return rj_arith_v_dual_mul_f32_w32_gfx12(flags, exec_mask, 0, &result, &a.data, &b.data,
                                                    state);
         }

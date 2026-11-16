@@ -64,6 +64,7 @@ on:
           - llama-3.1-70b-pp4-training
           - gpt-oss-120b-training
           - llama-3.1-405b-maxtext
+          - deepseek-r1-sglang-disagg
         default: 'llama-3.1-70b-training'
       nodes:
         description: 'Number of SLURM nodes to allocate'
@@ -130,7 +131,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: "ROCm/TheRock"
-          ref: 7c309dbaf02d53ff108e401e5f723f00353e17e4 # 2026-11-10
+          ref: c0d2f4d21e7daffe3896b9be9ce9d1b2e0793827 # 2026-11-11
 
       - name: Checkout rocm-systems scripts
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -235,6 +236,8 @@ jobs:
           NCCL_DEBUG: WARN
           MAD_SECRETS_HFTOKEN: ${{ secrets.HF_TOKEN || '' }}
           JOB_TIMEOUT_MINUTES: ${{ inputs.job_timeout_minutes }}
+          # Nodes to keep out of the allocation, as a SLURM hostlist.
+          MADENGINE_SLURM_EXCLUDE: ${{ vars.RCCL_MADENGINE_SLURM_EXCLUDE || '' }}
           # Same reason as JOB_TIMEOUT_MINUTES below. The webhook also has a
           # second one: Actions echoes the expanded run block into the log,
           # and this value arrives as an input, not a secret, so nothing
@@ -342,6 +345,7 @@ jobs:
             ${{ env.WORK_DIR }}/ab/*/manifest.json
             ${{ env.WORK_DIR }}/ab/*/slurm_output/*.out
             ${{ env.WORK_DIR }}/ab/*/slurm_output/*.err
+            ${{ env.WORK_DIR }}/ab/*/slurm_output/server_logs/*.log
           retention-days: 30
 
       # What a rerun by hand needs once the cleanup below has deleted WORK_DIR:
