@@ -35,6 +35,10 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC"
   # fine and not a problem
   target_compile_options(clr_warnings INTERFACE /wd4324)
 
+  # Ingore C4702: "unreachable code". Every site is a defensive trailing return after
+  # a construct MSVC can prove already returns on all paths.
+  target_compile_options(clr_warnings INTERFACE /wd4702)
+
   # Ignore C4200: "nonstandard extension used: zero-sized array in struct/union".
   # rocglinterop.hpp's metadata_amd_ci_vi_t ends in a flexible array member
   # overlaid on a hardware descriptor.
