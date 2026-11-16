@@ -1476,6 +1476,15 @@ RunOutcome RegionRunner::run_inline_asm(size_t i) {
   return out;
 }
 
+size_t RegionRunner::step_limit(size_t budget) const {
+  constexpr size_t kLoopStepFactor = 64, kMaxLoopSteps = 1u << 16;
+  if (!back_edge_)
+    return budget;
+  return std::min(std::max<size_t>(budget, 1) * kLoopStepFactor,
+                  std::max<size_t>(budget, kMaxLoopSteps)) *
+         loop_scale_;
+}
+
 RunOutcome RegionRunner::run(size_t budget, std::vector<TraceStep> *trace) {
   RunOutcome out;
   amdgpu::Wavefront &wf = *wave_;
@@ -1483,11 +1492,8 @@ RunOutcome RegionRunner::run(size_t budget, std::vector<TraceStep> *trace) {
   if (trace)
     prev = capture();
   // Without a backward branch every instruction runs at most once; a loop gets a step
-  // limit, past which the case is excluded.
-  constexpr size_t kLoopStepFactor = 64, kMaxLoopSteps = 1u << 16;
-  const size_t limit = back_edge_ ? std::min(std::max<size_t>(budget, 1) * kLoopStepFactor,
-                                             std::max<size_t>(budget, kMaxLoopSteps))
-                                  : budget;
+  // limit (STEP_LIMIT past it; see step_limit()).
+  const size_t limit = step_limit(budget);
   exit_pc_ = 0;
   bool left = false;
   size_t next = 0;

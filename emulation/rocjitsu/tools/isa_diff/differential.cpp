@@ -40,6 +40,43 @@ bool is_unsupported_status(RunStatus s) {
 
 bool is_excluded_status(RunStatus s) { return s == RunStatus::StepLimit; }
 
+/// Loop step limit multiplier of a re-run past the step limit, and the number of
+/// divergences after which further one-sided step limits are counted without a re-run.
+constexpr size_t kStepLimitRerunScale = 16;
+constexpr uint64_t kStepLimitReruns = 4;
+
+/// One side exited and the other ran past the loop step limit: re-run the looping side
+/// with kStepLimitRerunScale times the limit, so a slower loop that terminates is compared
+/// like any case. The runner keeps the larger limit until the next case resets it.
+/// Returns whether a side was re-run.
+bool rerun_past_step_limit(RegionRunner &old_runner, RegionRunner &new_runner,
+                           const MachineState &init_old, const MachineState &init_new,
+                           size_t old_budget, size_t new_budget, RunOutcome &oo, RunOutcome &on,
+                           std::vector<TraceStep> *trace_old = nullptr,
+                           std::vector<TraceStep> *trace_new = nullptr) {
+  const bool lim_old = oo.status == RunStatus::StepLimit;
+  const bool lim_new = on.status == RunStatus::StepLimit;
+  if (lim_old == lim_new || (lim_old ? on : oo).status != RunStatus::Ok)
+    return false;
+  RegionRunner &runner = lim_old ? old_runner : new_runner;
+  if (runner.loop_scale() >= kStepLimitRerunScale)
+    return false;
+  runner.set_loop_scale(kStepLimitRerunScale);
+  runner.load(lim_old ? init_old : init_new);
+  std::vector<TraceStep> *trace = lim_old ? trace_old : trace_new;
+  if (trace)
+    trace->clear();
+  (lim_old ? oo : on) = runner.run(lim_old ? old_budget : new_budget, trace);
+  return true;
+}
+
+/// One side exited normally, the other ran past the loop step limit.
+bool one_sided_step_limit(const RunOutcome &oo, const RunOutcome &on) {
+  const bool lim_old = oo.status == RunStatus::StepLimit;
+  const bool lim_new = on.status == RunStatus::StepLimit;
+  return lim_old != lim_new && (lim_old ? on : oo).status == RunStatus::Ok;
+}
+
 bool is_harness_status(RunStatus s) {
   return s == RunStatus::HostException || s == RunStatus::ExecutionError ||
          s == RunStatus::InvalidRegisterAccess || s == RunStatus::BudgetExceeded ||
@@ -1156,6 +1193,8 @@ Json RegionResult::to_json() const {
   counts.set("valid_pairs", valid_pairs);
   counts.set("mismatches", mismatches);
   counts.set("harness_errors", harness_errors);
+  counts.set("step_limit_divergences", step_limit_divergences);
+  counts.set("step_limit_reruns", step_limit_reruns);
   counts.set("nan_tolerated", nan_tolerated);
   counts.set("undef_masked", undef_masked);
   counts.set("dont_care_masked", dont_care_masked);
@@ -1446,19 +1485,33 @@ RegionResult test_region(const RegionPair &region, const TestOptions &options,
     auto t1 = Clock::now();
     build_initial_states(region.contract, sample, frame, options.seed, case_index, init_old,
                          init_new);
+    old_runner->set_loop_scale(1);
+    new_runner->set_loop_scale(1);
     old_runner->load(init_old);
     new_runner->load(init_new);
     fb.load_ns = ns_since(t1);
     r.t.load_ns += fb.load_ns;
 
     auto t2 = Clock::now();
-    const RunOutcome out_old = old_runner->run(region.old_side.insts.size());
+    RunOutcome out_old = old_runner->run(region.old_side.insts.size());
     fb.old_ns = ns_since(t2);
     r.t.old_exec_ns += fb.old_ns;
     auto t3 = Clock::now();
-    const RunOutcome out_new = new_runner->run(region.new_side.insts.size());
+    RunOutcome out_new = new_runner->run(region.new_side.insts.size());
     fb.new_ns = ns_since(t3);
     r.t.new_exec_ns += fb.new_ns;
+    if (r.step_limit_divergences < kStepLimitReruns) {
+      // A slower loop rather than a hang: the looping side gets a larger limit.
+      auto tr = Clock::now();
+      if (rerun_past_step_limit(*old_runner, *new_runner, init_old, init_new,
+                                region.old_side.insts.size(), region.new_side.insts.size(), out_old,
+                                out_new)) {
+        ++r.step_limit_reruns;
+        const uint64_t ns = ns_since(tr);
+        (old_runner->loop_scale() > 1 ? fb.old_ns : fb.new_ns) += ns;
+        (old_runner->loop_scale() > 1 ? r.t.old_exec_ns : r.t.new_exec_ns) += ns;
+      }
+    }
     ++r.executed_pairs;
     r.old_insts_executed += out_old.executed;
     r.new_insts_executed += out_new.executed;
@@ -1474,6 +1527,7 @@ RegionResult test_region(const RegionPair &region, const TestOptions &options,
     m.out_old = out_old;
     m.out_new = out_new;
     std::string kind;
+    std::string excluded_as = "excluded";
     auto note_novelty = [&](const MachineState *fo, const MachineState *fn) {
       fb.bucket = novelty_bucket(region.contract, fb.category, fo, fn);
       fb.novel = buckets.insert(fb.bucket).second;
@@ -1515,13 +1569,27 @@ RegionResult test_region(const RegionPair &region, const TestOptions &options,
       } else if (fault_old && fault_new) {
         // An input outside the memory model's address domain: excluded, counted.
         ++r.rejections["memory fault on both sides (excluded input): " + out_old.detail];
+      } else if (one_sided_step_limit(out_old, out_new)) {
+        // One side exits, the other still loops past kStepLimitRerunScale times the limit:
+        // possibly a non-termination the change introduced or removed. Not a witness (the
+        // looping side might finish later), and never offset by other cases: the region
+        // is inconclusive.
+        ++r.step_limit_divergences;
+        if (r.step_limit_first.empty())
+          r.step_limit_first = "case " + std::to_string(case_index) + " (" + phase_name +
+                               "): old " + run_status_name(out_old.status) + " after " +
+                               std::to_string(out_old.executed) + " insts, new " +
+                               run_status_name(out_new.status) + " after " +
+                               std::to_string(out_new.executed) + " insts";
+        excluded_as = "step_limit_divergence";
       } else if (is_excluded_status(out_old.status) || is_excluded_status(out_new.status)) {
-        // A loop past the step limit: excluded, never read as non-termination.
+        // Both sides past the step limit: excluded (outside the declared scope, like
+        // inputs that fault on both sides), never read as non-termination.
         ++r.rejections["loop step limit (excluded input)"];
       }
       fb.compare_ns = ns_since(t4);
       r.t.compare_ns += fb.compare_ns;
-      fb.category = kind.empty() ? "excluded" : kind;
+      fb.category = kind.empty() ? excluded_as : kind;
       note_novelty(nullptr, nullptr);
       if (kind.empty())
         return;
@@ -1719,6 +1787,12 @@ RegionResult test_region(const RegionPair &region, const TestOptions &options,
   } else if (r.mismatches) {
     r.test_status = TestStatus::LocalMismatch;
     r.witness_scope = WitnessScope::LocalOnly;
+  } else if (r.step_limit_divergences) {
+    r.test_status = TestStatus::Inconclusive;
+    r.reason = "possible non-termination: in " + std::to_string(r.step_limit_divergences) +
+               " case(s) one side exited and the other ran past the loop step limit, also at " +
+               std::to_string(kStepLimitRerunScale) + "x the limit (first: " + r.step_limit_first +
+               ")";
   } else if (r.valid_pairs == 0) {
     if (!unsupported_exclusions.empty()) {
       r.test_status = TestStatus::Unsupported;
@@ -1735,8 +1809,9 @@ RegionResult test_region(const RegionPair &region, const TestOptions &options,
     r.test_status = TestStatus::NoMismatchFound;
   }
   if (r.valid_pairs > 0 && r.test_status != TestStatus::HarnessError)
-    r.coverage_scope =
-        r.boundary_truncated ? CoverageScope::Partial : CoverageScope::CompleteForDeclaredScope;
+    r.coverage_scope = r.boundary_truncated || r.step_limit_divergences
+                           ? CoverageScope::Partial
+                           : CoverageScope::CompleteForDeclaredScope;
   if (r.boundary_truncated) {
     if (!r.reason.empty())
       r.reason += "; ";
@@ -1779,13 +1854,17 @@ ReplayOutcome replay_counterexample(const Json &bundle, std::string &error) {
   const bool strict_nan = bundle["nan_policy"].as_string() == "strict";
   std::vector<TraceStep> trace_old, trace_new;
   old_runner->load(*init_old);
-  const RunOutcome oo = old_runner->run(region->old_side.insts.size(), &trace_old);
+  RunOutcome oo = old_runner->run(region->old_side.insts.size(), &trace_old);
   // The recorded NaN choice of the new side (a difference shown only under it).
   if (bundle["nan_choice"].is_object())
     new_runner->set_nan_choice(static_cast<unsigned>(bundle["nan_choice"]["alternative"].as_uint()),
                                json_u64(bundle["nan_choice"]["seed"]).value_or(0));
   new_runner->load(*init_new);
-  const RunOutcome on = new_runner->run(region->new_side.insts.size(), &trace_new);
+  RunOutcome on = new_runner->run(region->new_side.insts.size(), &trace_new);
+  // The test's re-run of a side past the loop step limit (a slower loop).
+  rerun_past_step_limit(*old_runner, *new_runner, *init_old, *init_new,
+                        region->old_side.insts.size(), region->new_side.insts.size(), oo, on,
+                        &trace_old, &trace_new);
   Mismatch m;
   m.out_old = oo;
   m.out_new = on;

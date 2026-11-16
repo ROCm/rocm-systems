@@ -317,7 +317,18 @@ std::optional<CaseData> analyze_cached(const Artifact &old_artifact, const Artif
   const std::string key = analysis_cache_key(old_artifact, new_artifact, options);
   const std::string dir = cache_dir + "/analysis/" + key;
   std::string ignored;
-  if (auto cached = read_case_dir(dir, ignored)) {
+  auto cached = read_case_dir(dir, ignored);
+  // The entry must describe this request: same input bytes, kernel, target and wave size
+  // on both sides (a stale or foreign entry is recomputed and replaced).
+  auto describes = [](const Json &aj, const Artifact &a) {
+    return aj["sha256"].as_string() == a.sha256 && aj["kernel"].as_string() == a.kernel_name &&
+           aj["target"].as_string() == a.target.name &&
+           aj["wave_size"].as_uint() == a.target.wave_size;
+  };
+  if (cached && !(describes(cached->artifacts["old"], old_artifact) &&
+                  describes(cached->artifacts["new"], new_artifact)))
+    cached.reset();
+  if (cached) {
     hit = true;
     // Same bytes, possibly another path: keep this run's labels.
     for (const auto *a : {&old_artifact, &new_artifact}) {
@@ -629,7 +640,8 @@ Json test_case(const CaseData &data, const TestOptions &options, const std::stri
                             " valid cases (fewer than " + std::to_string(kMinValid) +
                             "): not decisive"
                       : std::string("the whole function is ") + test_status_name(fr.test_status) +
-                            " (contract " + contract_status_name(fr.contract_status) + ")");
+                            " (contract " + contract_status_name(fr.contract_status) + ")" +
+                            (fr.reason.empty() ? "" : ": " + fr.reason));
       }
       resolved_by_function = pass || mismatch;
       if (resolved_by_function)

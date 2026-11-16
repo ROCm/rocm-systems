@@ -5,8 +5,10 @@
 /// @brief Result and analysis caches with conservative invalidation (handoff 11).
 ///
 /// @details Layers and what each key binds:
-///   - analysis: both artifacts' complete input hashes, the kernel names, every planning
-///     option, the tool/schema versions and the build fingerprint;
+///   - analysis: both artifacts' complete input hashes, targets (GPU, wave size), kernel
+///     names and ranges, every planning option, the tool/schema versions and the build
+///     fingerprint; a hit is also checked against the request (target, wave size, input
+///     hash, kernel) and recomputed if it differs;
 ///   - test result: the prepared region (both instruction streams with PCs, the complete
 ///     contract including observable/frame sets, mapping, constraints and exit mapping),
 ///     the prepared keys of its expansion variants, the policy, seed and every budget, the

@@ -315,6 +315,30 @@ def test_file(head):
                 "ret void",
             ],
         ),
+        # A shift by y & 31 (never poison in the IR; llc drops the AND, the hardware masks
+        # the amount). Head adds bit 5 of the amount: wrong for every y with bit 5 set. The
+        # shift filter must not explain this away: the IR has no poison shift.
+        function(
+            "void @masked_shift(i32 %x, i32 %y, ptr addrspace(1) inreg %p)",
+            "masked_shift",
+            (
+                [
+                    "v_lshlrev_b32_e32 v0, v1, v0",
+                    "v_lshrrev_b32_e32 v2, 5, v1",
+                    "v_and_b32_e32 v2, 1, v2",
+                    "v_xor_b32_e32 v0, v0, v2",
+                ]
+                if head
+                else ["v_lshlrev_b32_e32 v0, v1, v0"]
+            )
+            + store("v_mov_b32_e32 v0, v0")[1:],
+            [
+                "%n = and i32 %y, 31",
+                "%r = shl i32 %x, %n",
+                "store i32 %r, ptr addrspace(1) %p",
+                "ret void",
+            ],
+        ),
         # A real difference: add became sub.
         function(
             "void @real_bug(i32 %a, i32 %b, ptr addrspace(1) inreg %p)",
@@ -413,11 +437,46 @@ def main():
 
         code, rows, log = run(a.driver, repo, Path(tmp) / "out", a.tool, a.llvm_bin)
         drv = load_driver(a.driver)
+        for body, want_poison in (
+            ("%n = and i32 %y, 31\n%r = shl i32 %x, %n", False),
+            ("%r = lshr exact i64 %x, 63", False),
+            ("%n = and i32 %y, 32\n%r = ashr i32 %x, %n", True),
+            ("%r = shl i32 %x, %y", True),
+            ("%r = shl i32 %x, 32", True),
+            ("%r = shl <2 x i32> %x, splat (i32 1)", True),
+        ):
+            if drv.shift_may_be_poison(body) != want_poison:
+                failures.append(f"shift_may_be_poison({body!r}) != {want_poison}")
+        passing = [
+            {"status": "NO_MISMATCH_FOUND", "coverage": "COMPLETE_FOR_DECLARED_SCOPE"}
+        ]
+        for sk, stats_in, want_status in (
+            ([], {}, "PASS"),
+            ([], {"extra_llc_failed": 1}, "INCOMPLETE"),
+            (
+                [{"file": "x.ll", "reason": "llc failed: both llc builds"}],
+                {},
+                "INCOMPLETE",
+            ),
+        ):
+            got = drv.overall_status(passing, sk, stats_in)[0]
+            if got != want_status:
+                failures.append(
+                    f"overall_status(pass, {sk}, {stats_in}) = {got}, expected {want_status}"
+                )
+        # Nothing compared but a requested file failed to compile: incomplete, not
+        # "nothing applicable".
+        got = drv.overall_status(
+            [], [{"file": "x.ll", "reason": "llc failed: llc after only"}], {}
+        )[0]
+        if got != "INCOMPLETE":
+            failures.append(f"overall_status with only an llc failure = {got}")
         want = {
             "fadd_ab": "pass",
             "undef_elt": "pass",  # old stores the undefined value itself: exact
             "half_ret": "pass",
-            "nsw_add": "poison-only",
+            "nsw_add": "mismatch",  # poison triage is a hint, not a verdict
+            "masked_shift": "mismatch",
             "fadd_bits": "pass",
             "sgpr_undef": "pass-masked",
             "undef_and3": "pass-masked",
@@ -457,6 +516,18 @@ def main():
         if rows.get("nsw_add", {}).get("poison_triage", {}).get("kinds") != "nsw":
             failures.append(
                 f"nsw_add triage {rows.get('nsw_add', {}).get('poison_triage')}"
+            )
+        if not drv.poison_sensitive(rows.get("nsw_add", {})):
+            failures.append("nsw_add: the mismatch should be marked poison-sensitive")
+        if "poison_triage" in rows.get("masked_shift", {}):
+            failures.append(
+                f"masked_shift: triaged {rows['masked_shift']['poison_triage']}; its IR "
+                "shift amount is masked, never poison"
+            )
+        report_md = (Path(tmp) / "out" / "report.md").read_text()
+        if "poison-only" in report_md or "(poison-sensitive)" not in report_md:
+            failures.append(
+                "report: poison-sensitive mismatches are mismatches, marked"
             )
         for fn, wave in (("w32_fsel", 32), ("i8vec_ret", 32), ("w64_bug", 64)):
             r = rows.get(fn, {})
@@ -584,6 +655,54 @@ def main():
                     )
             if code != 0:
                 failures.append(f"two llc builds: exit {code}, expected 0")
+
+            # The "after" llc (commuting like the one above) fails on one corpus file:
+            # requested, not compared, and new in the after build. c_add still passes, but
+            # the run is INCOMPLETE (not PASS) and the failure one-sided.
+            after_fails = Path(tmp) / "llc_after_fails"
+            after_fails.write_text(
+                "#!/bin/sh\nin=$(cat)\n"
+                'case "$in" in *fail_here*) echo "LLVM ERROR: injected" >&2; exit 1;; esac\n'
+                f'printf \'%s\\n\' "$in" | "{llc}" "$@" | '
+                "sed -E 's/(v_add_u32_e32 v[0-9]+), (v[0-9]+), (v[0-9]+)/\\1, \\3, \\2/'\n"
+            )
+            after_fails.chmod(0o755)
+            (corpus / "bad.ll").write_text(add.format("fail_here"))
+            code, rows, _ = run(
+                a.driver,
+                repo,
+                Path(tmp) / "out_llc_fail",
+                a.tool,
+                a.llvm_bin,
+                "--llc-before",
+                str(before),
+                "--llc-after",
+                str(after_fails),
+                "--corpus",
+                str(corpus),
+                "--corpus-mcpu",
+                "gfx950",
+            )
+            summary = json.loads(
+                (Path(tmp) / "out_llc_fail" / "summary.json").read_text()
+            )
+            bad = [x for x in summary["skipped"] if x["file"].endswith("bad.ll")]
+            if code != 2 or summary["status"] != "INCOMPLETE":
+                failures.append(
+                    f"llc failure in the corpus: exit {code}, status {summary['status']}"
+                )
+            if (
+                not bad
+                or "llc after only" not in bad[0]["reason"]
+                or bad[0].get("scope") != "corpus"
+            ):
+                failures.append(f"llc failure in the corpus: skipped {bad}")
+            if summary["stats"].get("llc_one_sided_failures") != 1:
+                failures.append(f"one-sided llc failures: {summary['stats']}")
+            if drv.verdict(rows.get("c_add", {})) != "pass":
+                failures.append(
+                    f"c_add with a failing corpus neighbour: {rows.get('c_add')}"
+                )
 
     if failures:
         print("FAILED:\n  " + "\n  ".join(failures))

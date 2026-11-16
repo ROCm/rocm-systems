@@ -1721,6 +1721,47 @@ TEST(IsaDiffCache, AnalysisCacheIsKeyedByArtifactsAndPlanOptions) {
   std::filesystem::remove_all(cache);
 }
 
+TEST(IsaDiffCache, AnalysisCacheBindsTargetAndWaveSizeAndChecksAHit) {
+  const std::string cache = temp_dir("analysis_cache_target");
+  const Artifact a = artifact_from_words(k_shift_old, "old");
+  const Artifact b = artifact_from_words(k_shift_new, "new");
+  std::string error;
+  bool hit = true;
+  ASSERT_TRUE(analyze_cached(a, b, {}, cache, hit, error)) << error; // gfx950, stored
+  EXPECT_FALSE(hit);
+  // The same bytes for another GPU or wave size are another analysis.
+  Artifact a32 = a, b32 = b, a64 = a, b64 = b;
+  a32.target = b32.target = *target_by_name("gfx1030");
+  ASSERT_EQ(a32.target.wave_size, 32u);
+  a64.target = b64.target = *with_wave_size(*target_by_name("gfx1030"), 64);
+  const std::string k950 = analysis_cache_key(a, b, {});
+  const std::string k32 = analysis_cache_key(a32, b32, {});
+  const std::string k64 = analysis_cache_key(a64, b64, {});
+  EXPECT_NE(k950, k32);
+  EXPECT_NE(k950, k64);
+  EXPECT_NE(k32, k64);
+  // GFX9 words do not decode on gfx1030: the request is analysed (and fails), never
+  // answered with gfx950's plan.
+  auto d32 = analyze_cached(a32, b32, {}, cache, hit, error);
+  EXPECT_FALSE(hit);
+  if (d32) {
+    EXPECT_EQ(d32->artifacts["old"]["target"].as_string(), "gfx1030");
+  }
+  // An entry that does not describe the request (another target or wave size, e.g. from
+  // an older key layout) is not a hit.
+  std::filesystem::copy(cache + "/analysis/" + k950, cache + "/analysis/" + k64,
+                        std::filesystem::copy_options::recursive);
+  auto d64 = analyze_cached(a64, b64, {}, cache, hit, error);
+  EXPECT_FALSE(hit);
+  if (d64) {
+    EXPECT_EQ(d64->artifacts["old"]["wave_size"].as_uint(), 64u);
+  }
+  // The gfx950 entry itself still hits.
+  ASSERT_TRUE(analyze_cached(a, b, {}, cache, hit, error)) << error;
+  EXPECT_TRUE(hit);
+  std::filesystem::remove_all(cache);
+}
+
 TEST(IsaDiffDiagnostics, EntryPrefixRegionsRunOnlyWhenRequestedAndStayOutOfTheVerdict) {
   CaseData plain = analyze(k_shift_old, k_shift_new);
   EXPECT_TRUE(plain.diagnostics.empty());

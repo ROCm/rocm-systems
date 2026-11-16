@@ -75,7 +75,7 @@ rj_isa_diff llvm-pair --input k.ll --common-args "-O3" --old-args "" \
     --new-args "-combiner-disabled" --out case/   # + any analyze option
 
 # 2. Paired-input differential test of every READY region.
-rj_isa_diff test --case case/ --seed 1 [--cases 5000] [--region r0]
+rj_isa_diff test --case case/ --seed 1 [--cases 1000] [--region r0]
 #   the boundary/NaN/corner sweep always runs first; --cases adds random cases
 #   [--max-boundary-cases N]  safety cap (default 250000); hitting it => PARTIAL
 #   [--reduction-budget N | --no-reduce]  counterexample reduction (default 4096 runs)
@@ -93,7 +93,7 @@ rj_isa_diff replay --counterexample case/counterexamples/r0-case17.json [--case 
 rj_isa_diff inject --case case/ --region r0 --side new --inst 1 --xor 0x01000000 --out syn/
 
 # Mutation analysis: how strong is a pass? (synthetic; see "Mutation analysis")
-rj_isa_diff mutants --case case/ --out mutants.json [--max 48] [--cases 5000]
+rj_isa_diff mutants --case case/ --out mutants.json [--max 48] [--cases 1000]
 rj_isa_diff_mutants RESULTS_DIR... --out DIR [--jobs N]   # over rj_isa_diff_pr results
 ```
 
@@ -221,8 +221,16 @@ hunks: a changed condition, a retargeted branch):
   records the exit. Both sides must leave through corresponding exits, otherwise the
   case is an `exit_divergence` mismatch; then that exit's R_out is compared.
 - **Loops.** A backward branch inside the region runs up to 64 times the region length
-  (at least 65,536 steps). A case past the limit is excluded (`loop step limit`), never
-  read as non-termination and never a pass.
+  (at most max(length, 65,536) steps).
+  - Both sides past the limit: the case is excluded (`loop step limit`, outside the
+    declared scope like inputs that fault on both sides), never read as non-termination.
+  - One side exits and the other runs past the limit: the looping side re-runs at 16 times
+    the limit (a slower loop then completes and the case is compared like any other; the
+    larger limit holds for the rest of the case and for replay). If it still loops, the
+    case is a possible non-termination (`counts.step_limit_divergences`): the region is
+    `INCONCLUSIVE` with partial coverage, whatever its other cases show, and the whole
+    function cannot pass on it either. After four such cases further one-sided cases are
+    counted without a re-run. `counts.step_limit_reruns` counts the re-runs.
 - **Undefined values.** When old's exit changes under the undefined-value refills, old
   branches on an undefined value (undefined behaviour in LLVM): the case is excluded.
 - **Composition.** A region with control flow makes everything unknown downstream (as
@@ -625,6 +633,11 @@ run.
   - The compiles run in parallel (`--jobs`). Unchanged tests and corpus files without a
     RUN line for a tested target are not skips; the summary counts them
     (`extra_without_tested_run`).
+  - An llc failure (or a timeout, 300 s) on a requested file is a skip, so the run is
+    `INCOMPLETE`: changed tests, unchanged tests (`scope: unchanged test`) and the corpus
+    (`scope: corpus`) alike (`extra_llc_failed` counts the last two). Both builds run on
+    every RUN line first; a failure of one build where the other compiles is a new (or
+    fixed) llc failure, reported as such and counted in `llc_one_sided_failures`.
 - **ABI from the IR.**
   - `--return-vgprs` is the return type's size in dwords (`void` 0, `<3 x half>` 2,
     `iN`/`bN` ceil(N/32), `<N x i8>` N (one element per register), structs and arrays
@@ -644,9 +657,16 @@ run.
 - **Poison triage.** A function that mismatches is re-tested with the poison filters its
   IR calls for (`shl` → `shift`, `add nsw` → `nsw`, `fptosi` → `fptoint`, fast-math
   flags → `nnan`/`ninf`, ...).
-  - If the mismatch disappears, the verdict is `poison-only`: the difference needs inputs
-    that are poison in the IR. The report gives the number of inputs excluded.
-  - Otherwise it stays `mismatch`, noted as "persists outside poison inputs".
+  - The verdict stays `mismatch` either way. The filters match machine conditions, not
+    IR values: llc may rely on a mask or range the IR guarantees (`shl i32 %x, (and %y,
+    31)` becomes a bare `v_lshlrev_b32`, whose amount the hardware masks), so excluding
+    machine shift amounts >= 32 can hide a real bug. Without a mapping from IR to machine
+    values the triage cannot show that the inputs are poison in the IR.
+  - If the mismatch disappears, the table marks it `mismatch (poison-sensitive)` and the
+    details say so, with the number of inputs excluded: check the IR before dismissing
+    it. Otherwise it is noted as "persists outside those inputs".
+  - `shift` is called for only when some IR shift amount is not provably below the bit
+    width (a constant below it, or an `and` with such a constant, is not poison).
   - `--no-poison-triage` turns this off.
 - **Output.** `report.md` (the overall status, a verdict table, then details of every
   function that did not pass) and `summary.json` (`status` and every function). Each job
@@ -656,7 +676,7 @@ run.
   built under a private `.partial-*` name, with the tool running inside it on relative
   paths, and published by a rename when it is complete.
 - **Verdicts.** `pass`; `pass-masked` (equal only through the per-bit don't-care mask,
-  see "NaNs, undefined values and poison"); `poison-only`; `mismatch`; `inconclusive`
+  see "NaNs, undefined values and poison"); `mismatch`; `inconclusive`
   (including `UNSUPPORTED`); `error` (the tool failed, or reported `HARNESS_ERROR`).
 - **Overall status and exit code.**
 
@@ -664,7 +684,7 @@ run.
   |---|---|---|
   | 0 | `PASS` | every changed function was compared and passed; nothing skipped |
   | 1 | `MISMATCH` | a local mismatch |
-  | 2 | `INCOMPLETE` | something was not covered: `inconclusive`, `poison-only` or `pass-masked` functions, skipped functions or files (added tests, tests not autogenerated, changed RUN lines, changed IR), or changed functions on targets not executed |
+  | 2 | `INCOMPLETE` | something was not covered: `inconclusive` or `pass-masked` functions, skipped functions or files (added tests, tests not autogenerated, changed RUN lines, changed IR, llc failures), or changed functions on targets not executed |
   | 3 | `ERROR` | a harness error |
   | 4 | `NO_APPLICABLE_TESTS` | nothing was compared: no changed function this tool can run |
 - **IR identity.** A function is compared only when everything that decides its semantics
@@ -862,7 +882,7 @@ object, decoded by RocJITsu; re-assembled code is not presented as an original e
 
 | layer | key binds |
 |---|---|
-| analysis (`analyze`) | both artifacts' SHA-256, kernel names, every planning option |
+| analysis (`analyze`) | both artifacts' SHA-256, target (GPU, wave size), kernel names and ranges, every planning option |
 | result (`test`) | the prepared region (instructions, PCs, complete contract), the prepared keys of its expansion variants, policy, seed and every budget |
 
 Both keys also bind the tool and schema versions and a build fingerprint: a SHA-256 of
@@ -870,7 +890,11 @@ the running executable and every executable file it maps. Any rebuild therefore
 invalidates everything.
 
 - Identical region bytes under a different contract miss: a downstream liveness change
-  alters `observable`, and with it the key.
+  alters `observable`, and with it the key. The contract names the target and wave size.
+- The same bytes analysed for another GPU or wave size miss (raw words take the target
+  from `--target`). An analysis hit is also checked against the request (input hash,
+  kernel, target, wave size); an entry that does not describe it is recomputed and
+  replaced.
 - A hit carries `cache.hit` and points its counterexamples at copies kept in the cache
   entry, so it stays replayable.
 - Harness errors and time-limited analyses are never stored.
@@ -1111,8 +1135,9 @@ case parity. Learned policies are future work, and may only propose inputs.
   new fields are validated on real output.
 - `isa_diff_llvm.pr_driver` (`llvm/test_rj_isa_diff_pr.py`) runs `rj_isa_diff_pr` on a
   synthetic two-commit llvm-project history and checks every verdict: NaN equivalence, an
-  undefined element, a `half` return, poison triage (`poison-only`), and a real
-  difference.
+  undefined element, a `half` return, poison triage (a hint on a `mismatch`; none for a
+  masked shift amount), a real difference, and in two-llc mode an llc failure on one side
+  (`INCOMPLETE`).
 - `isa_diff.schema_and_cli` runs `validate_outputs.py` against the CLI and the committed
   samples. It is skipped when python3-jsonschema is missing.
 - `docs/samples/regen.sh` regenerates the samples (`codeobject`, `synthetic`,

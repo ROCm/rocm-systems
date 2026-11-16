@@ -124,6 +124,14 @@ public:
   /// Scratch base (FLAT_SCRATCH): canonical, far above the code and pointer inputs.
   static constexpr uint64_t kScratchBase = 0x0000'0080'0000'0000ull;
   RunOutcome run(size_t budget, std::vector<TraceStep> *trace = nullptr);
+  /// Multiplier of the loop step limit (1 by default). A case in which one side exits and
+  /// the other runs past the limit re-runs the looping side with a larger limit, kept for
+  /// the rest of the case (undefined-value refills, reduction, trace).
+  void set_loop_scale(size_t scale) { loop_scale_ = std::max<size_t>(scale, 1); }
+  [[nodiscard]] size_t loop_scale() const { return loop_scale_; }
+  /// Base loop step limit for @p budget instructions: 64 steps per instruction, at most
+  /// max(budget, 65536); times loop_scale().
+  [[nodiscard]] size_t step_limit(size_t budget) const;
   [[nodiscard]] MachineState capture() const;
 
   [[nodiscard]] size_t size() const { return pcs_.size(); }
@@ -171,8 +179,9 @@ private:
   Target target_;
   std::vector<bool> branch_;                      ///< Direct branch (followed by the runner).
   std::unordered_map<uint64_t, size_t> pc_index_; ///< Region instruction at each PC.
-  bool back_edge_ = false;                        ///< Some branch goes backwards (a loop).
-  uint64_t exit_pc_ = 0;                          ///< The last run's exit (see RunOutcome).
+  size_t loop_scale_ = 1;
+  bool back_edge_ = false; ///< Some branch goes backwards (a loop).
+  uint64_t exit_pc_ = 0;   ///< The last run's exit (see RunOutcome).
   /// Lanes of the wave: all 64 on wave64, the low 32 on wave32.
   uint64_t lane_mask_ = ~uint64_t{0};
   /// EXEC restricted to the wave's lanes.

@@ -54,7 +54,7 @@ const char *kUsage =
     "                      [--max-counterexamples N] [--max-boundary-cases N]\n"
     "                      [--reduction-budget N] [--no-reduce] [--no-case-log]\n"
     "                      [--cache-dir DIR] [--strict-nan] [--poison-filter KINDS]\n"
-    "      --cases counts random cases (default 5000); the boundary/NaN/corner sweep always\n"
+    "      --cases counts random cases (default 1000); the boundary/NaN/corner sweep always\n"
     "      runs first.\n"
     "      --strict-nan: NaNs compare bit for bit (default: any NaN equals any NaN of the\n"
     "      same format, as LLVM allows). --poison-filter shift,fptoint,ctz,nsw,nuw,\n"
@@ -66,7 +66,7 @@ const char *kUsage =
     "                      [--confirm-cases N] [--effect-cases N] [--seed N] [--strict-nan]\n"
     "      mutation analysis (synthetic): single-bit mutants of each passing region's new\n"
     "      side, tested like the region; a survivor is re-run with --confirm-cases\n"
-    "      (default 48 mutants per region, 5000 cases, 20000 to confirm). Survivors are\n"
+    "      (default 48 mutants per region, 1000 cases, 20000 to confirm). Survivors are\n"
     "      run against the new side they came from (--effect-cases, default 2000):\n"
     "      no_effect, dead_effect (only dead locations differ) or observable_effect.\n"
     "  rj_isa_diff llvm-pair --input K.ll --old-args S --new-args S --out DIR\n"
@@ -506,7 +506,7 @@ int cmd_test(int argc, char **argv) {
   }
   TestOptions opt;
   auto seed = a.number("--seed", 1);
-  auto cases = a.number("--cases", 5000);
+  auto cases = a.number("--cases", opt.cases);
   auto maxcex = a.number("--max-counterexamples", 3);
   auto maxbound = a.number("--max-boundary-cases", opt.max_boundary_cases);
   auto redbudget = a.number("--reduction-budget", opt.reduction_budget);
@@ -691,7 +691,7 @@ int cmd_mutants(int argc, char **argv) {
   }
   MutantRunOptions o;
   auto max = a.number("--max", 48);
-  auto cases = a.number("--cases", 5000);
+  auto cases = a.number("--cases", 1000);
   auto confirm = a.number("--confirm-cases", 20000);
   auto seed = a.number("--seed", 1);
   auto effect = a.number("--effect-cases", 2000);

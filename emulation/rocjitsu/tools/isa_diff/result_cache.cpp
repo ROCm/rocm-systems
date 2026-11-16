@@ -90,6 +90,7 @@ std::string result_cache_key(const RegionPair &region, const std::vector<RegionP
   k.set("max_counterexamples", static_cast<uint64_t>(options.max_counterexamples));
   k.set("reduce", options.reduce);
   k.set("strict_nan", options.strict_nan);
+  k.set("stop_at_first_mismatch", options.stop_at_first_mismatch);
   k.set("poison_filter", static_cast<uint64_t>(options.poison_filter));
   k.set("reduction_budget", static_cast<uint64_t>(options.reduction_budget));
   k.set("case_log", !options.case_log_dir.empty());
@@ -99,7 +100,7 @@ std::string result_cache_key(const RegionPair &region, const std::vector<RegionP
 std::string analysis_cache_key(const Artifact &old_artifact, const Artifact &new_artifact,
                                const PlanOptions &options) {
   Json k = Json::object();
-  k.set("layer", "rj_isa_diff.analysis_cache.v1");
+  k.set("layer", "rj_isa_diff.analysis_cache.v2");
   k.set("tool", kToolVersion);
   k.set("schema", kSchemaVersion);
   k.set("build", build_fingerprint());
@@ -107,7 +108,19 @@ std::string analysis_cache_key(const Artifact &old_artifact, const Artifact &new
     Json aj = Json::object();
     aj.set("sha256", a->sha256);
     aj.set("kind", a->kind);
+    // The bytes do not fix the target: raw words take it from the command line, and a
+    // code object's wave size can be overridden. Decoding and the plan depend on both.
+    Json tj = Json::object();
+    tj.set("name", a->target.name);
+    tj.set("arch", static_cast<uint64_t>(a->target.arch));
+    tj.set("wave_size", static_cast<uint64_t>(a->target.wave_size));
+    tj.set("major", static_cast<uint64_t>(a->target.major));
+    tj.set("unified_vgprs", a->target.unified_vgprs);
+    aj.set("target", std::move(tj));
     aj.set("kernel", a->kernel_name);
+    aj.set("kernel_begin", a->kernel_begin);
+    aj.set("kernel_end", a->kernel_end);
+    aj.set("metadata_sha256", a->metadata_sha256);
     aj.set("text_vaddr", a->text_vaddr);
     aj.set("callable", a->callable);
     aj.set("return_vgprs", static_cast<uint64_t>(a->return_vgprs));

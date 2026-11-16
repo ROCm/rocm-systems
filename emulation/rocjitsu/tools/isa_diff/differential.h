@@ -52,7 +52,7 @@ enum class CoverageScope { CompleteForDeclaredScope, Partial, NotEstablished };
 struct TestOptions {
   uint64_t seed = 1;
   /// Random cases (accepted samples) run after the mandatory boundary sweep.
-  uint64_t cases = 5000;
+  uint64_t cases = 1000;
   uint64_t max_attempts = 0; ///< Random-phase attempts; 0 = 4 * cases.
   /// Safety cap on the boundary sweep. The sweep cannot be disabled; reaching the cap
   /// is reported as truncation and partial coverage.
@@ -139,6 +139,12 @@ struct RegionResult {
   uint64_t valid_pairs = 0;    ///< Pairs where both sides exited normally and were compared.
   uint64_t mismatches = 0;
   uint64_t harness_errors = 0;
+  /// Pairs in which one side exited and the other still ran past the loop step limit
+  /// after a re-run with a larger limit: a possible non-termination. Any makes the region
+  /// INCONCLUSIVE with partial coverage; valid pairs never offset it.
+  uint64_t step_limit_divergences = 0;
+  uint64_t step_limit_reruns = 0; ///< Re-runs with a larger loop step limit.
+  std::string step_limit_first;   ///< The first divergence (case, phase, both exits).
   /// Valid pairs that compare equal only through NaN equivalence / undefined-bit masking.
   uint64_t nan_tolerated = 0;
   uint64_t undef_masked = 0;

@@ -562,8 +562,20 @@ std::string verdict_of(const std::string &dir, const std::string &fn, const std:
   return verdict_of(dir, fn, old_s, new_s, o);
 }
 
+Json report_of(const std::string &dir, const std::string &fn, const std::string &old_s,
+               const std::string &new_s, const PairOptions &o);
+
 std::string verdict_of(const std::string &dir, const std::string &fn, const std::string &old_s,
                        const std::string &new_s, const PairOptions &o) {
+  const Json report = report_of(dir, fn, old_s, new_s, o);
+  if (report.is_null())
+    return "error";
+  return report["overall"]["test_status"].as_string() + "/" +
+         report["overall"]["contract_status"].as_string();
+}
+
+Json report_of(const std::string &dir, const std::string &fn, const std::string &old_s,
+               const std::string &new_s, const PairOptions &o) {
   const auto tc = toolchain();
   Artifact a[2];
   for (int side = 0; side < 2; ++side) {
@@ -593,14 +605,22 @@ std::string verdict_of(const std::string &dir, const std::string &fn, const std:
   auto data = analyze_artifacts(a[0], a[1], {}, error);
   EXPECT_TRUE(data) << error;
   if (!data)
-    return "error";
+    return Json();
   TestOptions opt;
   opt.cases = 1000;
   opt.strict_nan = o.strict_nan;
   opt.poison_filter = o.poison_filter;
-  Json report = test_case(*data, opt, "", nullptr);
-  return report["overall"]["test_status"].as_string() + "/" +
-         report["overall"]["contract_status"].as_string();
+  return test_case(*data, opt, "", nullptr);
+}
+
+/// Sum of a region count over the regions and the whole function's result.
+uint64_t count_of(const Json &report, const std::string &key) {
+  uint64_t n = 0;
+  for (const Json &g : report["regions"].items())
+    n += g["counts"][key].as_uint();
+  if (report["whole_function"]["result"].is_object())
+    n += report["whole_function"]["result"]["counts"][key].as_uint();
+  return n;
 }
 
 TEST(IsaDiffLlvm, CallableFunctionWithInlineAsmIsTestedEndToEnd) {
@@ -1446,6 +1466,54 @@ TEST(IsaDiffControlFlow, LoopsRunInsideTheRegionUpToAStepLimit) {
   EXPECT_EQ(
       verdict_of(dir, "f", base, loop("s_add_u32 s5, s5, 3", "s_cmp_eq_u32", "s_cbranch_scc0"), o),
       "LOCAL_MISMATCH/ESTABLISHED");
+  std::filesystem::remove_all(dir);
+}
+
+TEST(IsaDiffControlFlow, OneSidedStepLimitIsInconclusiveWhateverTheOtherCases) {
+  const std::string dir = temp_dir("loop_hang");
+  PairOptions o;
+  // Count s4 & 1 down to zero; new subtracts 0, so it never exits for s4 & 1 == 1, while
+  // every s4 & 1 == 0 case passes. Old exits where new runs past the step limit (also at
+  // the re-run's larger limit): a possible non-termination, never offset by the passes.
+  auto loop = [](const std::string &dec) {
+    return store_fn({"s_and_b32 s4, s4, 1", "s_cmp_eq_u32 s4, 0", "s_cbranch_scc1 .LBB0_3",
+                     ".LBB0_2:", dec, "s_cmp_lg_u32 s4, 0", "s_cbranch_scc1 .LBB0_2",
+                     ".LBB0_3:", "v_mov_b32_e32 v0, s4"});
+  };
+  const Json report =
+      report_of(dir, "f", loop("s_sub_u32 s4, s4, 1"), loop("s_sub_u32 s4, s4, 0"), o);
+  ASSERT_TRUE(report.is_object());
+  EXPECT_EQ(report["overall"]["test_status"].as_string(), "INCONCLUSIVE");
+  EXPECT_NE(report["overall"]["coverage_scope"].as_string(), "COMPLETE_FOR_DECLARED_SCOPE");
+  EXPECT_GT(count_of(report, "step_limit_divergences"), 0u);
+  ASSERT_TRUE(report["whole_function"].is_object());
+  EXPECT_FALSE(report["whole_function"]["decides"].as_bool());
+  EXPECT_NE(report["whole_function"]["reason"].as_string().find("possible non-termination"),
+            std::string::npos)
+      << report["whole_function"]["reason"].as_string();
+  std::filesystem::remove_all(dir);
+}
+
+TEST(IsaDiffControlFlow, SlowerLoopThatTerminatesIsReRunAndCompared) {
+  const std::string dir = temp_dir("loop_slow");
+  PairOptions o;
+  // s5 = 2 * (s4 & 255). Old adds 2 per decrement; new adds 1 per iteration and decrements
+  // every other one (by s6, toggled), so it needs about 2.5x the steps: past the step
+  // limit where old is not. The looping side re-runs with a larger limit and the case is
+  // compared like any other.
+  const std::string old_s = store_fn(
+      {"s_and_b32 s4, s4, 0xff", "s_mov_b32 s5, 0", "s_mov_b32 s6, 0", "s_cmp_eq_u32 s4, 0",
+       "s_cbranch_scc1 .LBB0_3", ".LBB0_2:", "s_add_u32 s5, s5, 2", "s_sub_u32 s4, s4, 1",
+       "s_cmp_lg_u32 s4, 0", "s_cbranch_scc1 .LBB0_2", ".LBB0_3:", "v_mov_b32_e32 v0, s5"});
+  const std::string new_s =
+      store_fn({"s_and_b32 s4, s4, 0xff", "s_mov_b32 s5, 0", "s_mov_b32 s6, 0",
+                "s_cmp_eq_u32 s4, 0", "s_cbranch_scc1 .LBB0_3", ".LBB0_2:", "s_add_u32 s5, s5, 1",
+                "s_sub_u32 s4, s4, s6", "s_xor_b32 s6, s6, 1", "s_cmp_lg_u32 s4, 0",
+                "s_cbranch_scc1 .LBB0_2", ".LBB0_3:", "v_mov_b32_e32 v0, s5"});
+  const Json report = report_of(dir, "f", old_s, new_s, o);
+  ASSERT_TRUE(report.is_object());
+  EXPECT_EQ(report["overall"]["test_status"].as_string(), "NO_MISMATCH_FOUND") << report.dump();
+  EXPECT_GT(count_of(report, "step_limit_reruns"), 0u);
   std::filesystem::remove_all(dir);
 }
 

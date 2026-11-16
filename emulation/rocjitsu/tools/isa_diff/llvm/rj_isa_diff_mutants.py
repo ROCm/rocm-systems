@@ -131,7 +131,7 @@ def main():
     )
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 4)
     ap.add_argument("--max", type=int, default=48, help="mutants per region")
-    ap.add_argument("--cases", type=int, default=5000, help="random cases per mutant")
+    ap.add_argument("--cases", type=int, default=1000, help="random cases per mutant")
     ap.add_argument("--confirm-cases", type=int, default=20000)
     ap.add_argument(
         "--effect-cases",

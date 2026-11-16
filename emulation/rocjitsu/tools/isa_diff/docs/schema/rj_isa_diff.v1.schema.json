@@ -1499,6 +1499,12 @@
             "dont_care_masked": {
               "$ref": "#/$defs/count",
               "description": "Valid pairs equal only through the per-bit don't-care mask (undefined values or NaN choice), which loses relations between bits."
+            },
+            "step_limit_divergences": {
+              "$ref": "#/$defs/count"
+            },
+            "step_limit_reruns": {
+              "$ref": "#/$defs/count"
             }
           },
           "additionalProperties": false
