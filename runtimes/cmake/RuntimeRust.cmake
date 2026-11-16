@@ -216,7 +216,8 @@ function(runtime_rust_library target)
         )
         set_property(GLOBAL APPEND PROPERTY _runtime_byproducts "${_response}")
         # GNU response-file contents must follow the archive, not precede it as options.
-        target_link_libraries(${target} INTERFACE "-Wl,@${_response}")
+        # Pass one quoted linker argument, including when the path has spaces or commas.
+        target_link_libraries(${target} INTERFACE "-Xlinker \"@${_response}\"")
         set_property(
             TARGET ${target}
             APPEND
