@@ -108,6 +108,10 @@ inline hipMemcpy3DParms ihipLinearAsMemcpy3DParms(void* dst, const void* src, si
 inline hipError_t ihipGraphAddNode(hip::GraphNode* graphNode, hip::Graph* graph,
                                    hip::GraphNode* const* pDependencies, size_t numDependencies,
                                    bool capture, int devId) {
+  // a node added through a moved handle must land on the graph that adopted its nodes,
+  // not on the empty shell the caller still holds, where it would never run and would not
+  // even appear in hipGraphGetNodes of that same handle.
+  graph = graph->ResolveMoved();
   graph->AddNode(graphNode);
   std::unordered_set<hip::GraphNode*> DuplicateDep;
   for (size_t i = 0; i < numDependencies; i++) {
@@ -2146,7 +2150,10 @@ hipError_t hipGraphAddDependencies(hipGraph_t graph, const hipGraphNode_t* from,
   }
   hip::GraphNode* const* fromNode = reinterpret_cast<hip::GraphNode* const*>(from);
   hip::GraphNode* const* toNode = reinterpret_cast<hip::GraphNode* const*>(to);
-  hip::Graph* g = reinterpret_cast<hip::Graph*>(graph);
+  // A moved graph's nodes were re-parented to the graph that adopted them, so comparing
+  // their parent against the caller's empty shell would reject every node the caller still
+  // legitimately holds.
+  hip::Graph* g = ihipResolveGraphHandle(graph);
   for (size_t i = 0; i < numDependencies; i++) {
     // When the same node is specified for both fromNode and toNode
     if (fromNode[i] == nullptr || toNode[i] == nullptr || fromNode[i] == toNode[i] ||
@@ -2412,7 +2419,8 @@ hipError_t hipGraphRemoveDependencies(hipGraph_t graph, const hipGraphNode_t* fr
   }
   hip::GraphNode* const* fromNode = reinterpret_cast<hip::GraphNode* const*>(from);
   hip::GraphNode* const* toNode = reinterpret_cast<hip::GraphNode* const*>(to);
-  hip::Graph* g = reinterpret_cast<hip::Graph*>(graph);
+  // Resolved for the same reason as hipGraphAddDependencies.
+  hip::Graph* g = ihipResolveGraphHandle(graph);
   for (size_t i = 0; i < numDependencies; i++) {
     if (toNode[i]->GetParentGraph() != g || fromNode[i]->GetParentGraph() != g ||
         fromNode[i]->RemoveEdgeDep(toNode[i]) == false) {
@@ -3114,7 +3122,8 @@ hipError_t hipGraphAddMemAllocNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
   pNodeParams->dptr = nullptr;
   auto mem_alloc_node = new hip::GraphMemAllocNode(pNodeParams);
   hip::GraphNode* node = mem_alloc_node;
-  auto hgraph = reinterpret_cast<hip::Graph*>(graph);
+  // Resolved graph handle for moved child graphs
+  auto hgraph = ihipResolveGraphHandle(graph);
   auto status = ihipGraphAddNode(
       node, hgraph, reinterpret_cast<hip::GraphNode* const*>(pDependencies), numDependencies);
   // The address must be provided during the node creation time

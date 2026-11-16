@@ -938,6 +938,38 @@ HIP_TEST_CASE(Unit_hipGraphExecChildGraphNodeSetParams_MovedChildGraphOwnership)
     REQUIRE(numNodes == 3);
   }
 
+  SECTION("Nodes added through the moved graph are not lost") {
+    // The handle resolves to the graph that adopted the nodes, so an added node joins that
+    // graph. Adding to the empty shell instead would return success while the node stayed
+    // invisible to this very query and never ran as part of the parent.
+    size_t before = 0;
+    HIP_CHECK(hipGraphGetNodes(childGraph, nullptr, &before));
+    hipGraphNode_t addedNode = nullptr;
+    HIP_CHECK(hipGraphAddEmptyNode(&addedNode, childGraph, nullptr, 0));
+    REQUIRE(addedNode != nullptr);
+    size_t after = 0;
+    HIP_CHECK(hipGraphGetNodes(childGraph, nullptr, &after));
+    REQUIRE(after == before + 1);
+  }
+
+  SECTION("Dependencies can be edited through the moved graph") {
+    // The caller's node handles are now owned by the adopting graph, so the membership
+    // check in these APIs only passes if the handle is resolved first. childMemset and
+    // childMemcpy are siblings feeding childKernel, so no edge exists between them yet.
+    size_t before = 0;
+    HIP_CHECK(hipGraphGetEdges(childGraph, nullptr, nullptr, &before));
+
+    HIP_CHECK(hipGraphAddDependencies(childGraph, &childMemset, &childMemcpy, 1));
+    size_t afterAdd = 0;
+    HIP_CHECK(hipGraphGetEdges(childGraph, nullptr, nullptr, &afterAdd));
+    REQUIRE(afterAdd == before + 1);
+
+    HIP_CHECK(hipGraphRemoveDependencies(childGraph, &childMemset, &childMemcpy, 1));
+    size_t afterRemove = 0;
+    HIP_CHECK(hipGraphGetEdges(childGraph, nullptr, nullptr, &afterRemove));
+    REQUIRE(afterRemove == before);
+  }
+
   SECTION("Cloning the moved graph copies the adopted nodes") {
     // The handle resolves to the nodes the parent adopted, so the clone is a copy of them
     // rather than of the empty shell the caller is left holding.
