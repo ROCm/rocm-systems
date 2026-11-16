@@ -23,6 +23,9 @@
 
 # The range is three launches of rr_v3_step. Each --pmc group is one pass, so every
 # launch inside the range must show passes 0..N-1 and a SQ_WAVES value on each pass.
+# Unlike kernel replay, range replay runs a pass's launches as new dispatches with new
+# dispatch ids (packet replay re-submits them, host replay re-runs the code), so the
+# records are grouped by replay_pass rather than by dispatch_id.
 
 import collections
 
@@ -82,42 +85,36 @@ def _counter_id_to_name(sdk):
     return mapping
 
 
-def _range_dispatches(json_data):
+def _range_passes(json_data):
+    """replay pass -> {dispatch_id: counter names} for the range kernel's records."""
     sdk = _sdk(json_data)
     names = _kernel_id_to_name(sdk)
     counters = _counter_id_to_name(sdk)
     records = sdk.get("callback_records", {}).get("counter_collection")
     assert records, "no counter_collection records"
-    table = {}
+    table = collections.defaultdict(lambda: collections.defaultdict(set))
     for record in records:
         info = record["dispatch_data"]["dispatch_info"]
         name = names.get(int(info["kernel_id"]), "")
         if _KERNEL not in name:
             continue
-        did = int(info["dispatch_id"])
-        entry = table.setdefault(
-            did, {"passes": set(), "counters": collections.defaultdict(set)}
-        )
-        index = _pass_index(record)
-        entry["passes"].add(index)
+        launch = table[_pass_index(record)][int(info["dispatch_id"])]
         for sub in record.get("records", []):
             counter = counters.get(int(sub["counter_id"]["handle"]))
             if counter:
-                entry["counters"][index].add(counter)
+                launch.add(counter)
     return table
 
 
 def test_range_replays_each_dispatch(json_data, expected_passes, expected_dispatches):
-    table = _range_dispatches(json_data)
-    assert (
-        len(table) == expected_dispatches
-    ), f"expected {expected_dispatches} {_KERNEL} dispatches, found {len(table)}"
-    want = set(range(expected_passes))
-    for did, entry in table.items():
+    table = _range_passes(json_data)
+    want = list(range(expected_passes))
+    assert sorted(table) == want, f"{_KERNEL} passes {sorted(table)} != {want}"
+    for index, launches in sorted(table.items()):
         assert (
-            entry["passes"] == want
-        ), f"dispatch {did} passes {sorted(entry['passes'])} != {sorted(want)}"
-        for index in want:
+            len(launches) == expected_dispatches
+        ), f"pass {index}: expected {expected_dispatches} {_KERNEL} dispatches, found {len(launches)}"
+        for did, found in sorted(launches.items()):
             assert (
-                "SQ_WAVES" in entry["counters"][index]
-            ), f"dispatch {did} pass {index} has no SQ_WAVES ({sorted(entry['counters'][index])})"
+                "SQ_WAVES" in found
+            ), f"pass {index} dispatch {did} has no SQ_WAVES ({sorted(found)})"
