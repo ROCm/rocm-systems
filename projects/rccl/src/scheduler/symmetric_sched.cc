@@ -482,6 +482,10 @@ ncclResult_t ncclSymmetricTaskScheduler(struct ncclComm* comm,
 
   memcpy(&argsBuf->kcomm, &comm->symkState.kcomm, sizeof(comm->symkState.kcomm));
   plan->workBytes = totalCount * ncclTypeSize(headTask->datatype);
+  if (kernelId == ncclSymkKernelId_ReduceScatter_HierLsaLDST && curChannel > 0) {
+    // Every rank sees the same count and block count, so they all pick the same chunk size.
+    argsBuf->kcomm.rsHierChunkSize = ncclSymkRsHierLaunchChunkSize(comm, size_t(plan->workBytes) / curChannel);
+  }
   for (int c = 0; c < curChannel; c++) {
     plan->channelMask.masks[c / 64] |= (uint64_t(1) << (c % 64));
   }
