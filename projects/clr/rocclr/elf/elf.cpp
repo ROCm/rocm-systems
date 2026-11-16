@@ -821,7 +821,12 @@ uint64_t Elf::getElfSize(const void* emi, const size_t buf_size) {
 
   // end = off + sz, returns false on overflow.
   auto checked_end = [](uint64_t off, uint64_t sz, uint64_t& end) -> bool {
+#if defined(__has_builtin)
 #if __has_builtin(__builtin_add_overflow)
+#define CLR_HAS_BUILTIN_ADD_OVERFLOW 1
+#endif
+#endif
+#if defined(CLR_HAS_BUILTIN_ADD_OVERFLOW)
     return !__builtin_add_overflow(off, sz, &end);
 #else
     if (off > ~uint64_t(0) - sz) return false;
