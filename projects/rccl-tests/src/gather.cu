@@ -99,7 +99,7 @@ testResult_t GatherGetDevCommRequirements(int deviceImpl, ncclDevCommRequirement
   g_gatherLLMaxBytes = 0;
 #else
   g_gatherLLMaxBytes = gin_sdma_allgather::resolveGatherLLMaxBytesFromEnv(
-      gin_sdma_allgather::gatherArchLLMaxBytes(ginSdmaGcnArchName()));
+      gin_sdma_allgather::gatherArchLLMaxBytesForRanks(ginSdmaGcnArchName(), nRanks));
   g_gatherGroupMinBytes = gin_sdma_allgather::gatherArchGroupMinBytes(ginSdmaGcnArchName());
 #endif
   if (g_gatherLLMaxBytes > 0) {
@@ -154,8 +154,8 @@ static size_t GatherSdmaThreshold() {
 struct GatherD3Opts {
   ncclLLA2AHandle ll;     // LL tier scratch
   size_t llMaxBytes;      // LL tier cap per rank
-  ncclLLA2AHandle flags;  // LSA-tier done flags; off keeps the LSA exit barrier
-  int exitBarrier;        // keep the exit barrier in both tiers
+  ncclLLA2AHandle flags;  // ready and done flags; without them the LL and LSA tiers use LSA barriers
+  int exitBarrier;        // LSA barriers instead of flags, plus the SDMA tier's exit barrier
   int streamStores;       // system-scope 16-byte stores to the root
   int lightFence;         // publish streamed stores by waiting for them, not with a release fence
   int groupRanks;         // LSA tier: root flags senders ready this many ranks at a time; 0 = all at once
@@ -230,13 +230,31 @@ __device__ bool GatherLsaDirect(ncclWindow_t sendwin, size_t sendoffset, ncclWin
   return false;
 }
 
+// Ready flags on the done-flag session: a sender may write into the root (its recv
+// buffer or LL scratch) once the root has entered this launch, so the root's CTA flags
+// its same-index CTA on each sender as ready instead of all ranks meeting in an LSA
+// barrier. The flag also keeps a sender within one epoch of the root.
+__device__ void GatherRootReady(ncclLLA2ASession<ncclCoopCta>& done, const struct ncclDevComm& devComm,
+                                ncclTeam lsa, int root, int first, int last) {
+  for (int p = first + threadIdx.x; p < last; p += blockDim.x) {
+    if (p != root) done.send(lsa.rank + (p - devComm.rank), root, (uint64_t)1);
+  }
+}
+
+__device__ void GatherSenderWaitReady(ncclLLA2ASession<ncclCoopCta>& done, int root) {
+  if (threadIdx.x == 0) (void)done.recv<uint64_t>(root);
+  __syncthreads();
+}
+
 // LL tier, one CTA: each non-root sends its chunk as 8-byte LL elements (data and epoch
 // tag in one 16-byte store) into the root's scratch, and the root copies them into its
 // recv buffer, so no rank writes another rank's recv buffer. Only non-roots write, so,
-// as in Broadcast's LL tier, the entry barrier keeps a writer from running two epochs
-// ahead of the root and overwriting scratch the root has not read yet.
+// as in Broadcast's LL tier, a writer must not run two epochs ahead of the root and
+// overwrite scratch the root has not read yet. The root's ready flag ensures that,
+// or an entry barrier without done flags.
 __device__ void GatherLL(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset,
-                         size_t chunkBytes, int root, const struct ncclDevComm& devComm, ncclLLA2AHandle llHandle) {
+                         size_t chunkBytes, int root, const struct ncclDevComm& devComm, ncclLLA2AHandle llHandle,
+                         ncclLLA2AHandle flags) {
   ncclTeam lsa = ncclTeamLsa(devComm);
   const int rank = devComm.rank;
   const int nRanks = devComm.nRanks;
@@ -244,8 +262,15 @@ __device__ void GatherLL(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t r
 
   ncclLLA2ASession<ncclCoopCta> ll { ncclCoopCta(), devComm, lsa, llHandle, /*block=*/0,
                                      /*maxElts=*/(int)((size_t)nRanks * chunkU64) };
-  ncclLsaBarrierSession<ncclCoopCta> lsaBar { ncclCoopCta(), devComm, lsa, devComm.lsaBarrier, /*block=*/0 };
-  lsaBar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
+  if (flags.nSlots == 0) {
+    ncclLsaBarrierSession<ncclCoopCta> lsaBar { ncclCoopCta(), devComm, lsa, devComm.lsaBarrier, /*block=*/0 };
+    lsaBar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
+  } else {
+    ncclLLA2ASession<ncclCoopCta> ready { ncclCoopCta(), devComm, lsa, flags, /*block=*/0, nRanks };
+    if (rank == root) GatherRootReady(ready, devComm, lsa, root, 0, nRanks);
+    else GatherSenderWaitReady(ready, root);
+    ready.endEpoch(ncclCoopCta());
+  }
 
   const uint64_t* src = (const uint64_t*)ncclGetLocalPointer(sendwin, sendoffset);
   if (rank != root) {
@@ -295,27 +320,12 @@ __device__ __forceinline__ bool GatherLightFence(const GatherD3Opts& opts) {
   return RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS && opts.lightFence && opts.streamStores;
 }
 
-// LSA-tier flags, all on the `done` session: a sender may write into the root's recv
-// buffer once the root has entered this launch, so the root's CTA flags its same-index
-// CTA on each sender as ready instead of all ranks meeting in an LSA barrier. The sender
-// answers with a done flag once its stores are visible. The ready flag also keeps a
-// sender within one epoch of the root.
-__device__ void GatherRootReady(ncclLLA2ASession<ncclCoopCta>& done, const struct ncclDevComm& devComm,
-                                ncclTeam lsa, int root, int first, int last) {
-  for (int p = first + threadIdx.x; p < last; p += blockDim.x) {
-    if (p != root) done.send(lsa.rank + (p - devComm.rank), root, (uint64_t)1);
-  }
-}
-
+// LSA-tier done flags: the sender answers the root's ready flag (above) with a done flag
+// once its stores are visible.
 __device__ void GatherRootWaitDone(ncclLLA2ASession<ncclCoopCta>& done, int root, int first, int last) {
   for (int p = first + threadIdx.x; p < last; p += blockDim.x) {
     if (p != root) (void)done.recv<uint64_t>(p);
   }
-}
-
-__device__ void GatherSenderWaitReady(ncclLLA2ASession<ncclCoopCta>& done, int root) {
-  if (threadIdx.x == 0) (void)done.recv<uint64_t>(root);
-  __syncthreads();
 }
 
 __device__ void GatherSenderDone(ncclLLA2ASession<ncclCoopCta>& done, const struct ncclDevComm& devComm,
@@ -411,7 +421,10 @@ __device__ void ginGatherBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindo
 
 __global__ void GinHybridGatherKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t chunkBytes, int root, size_t sdmaThreshold, struct ncclDevComm devComm, GatherD3Opts opts) {
   if (gin_sdma_allgather::gatherUsesLLTier(chunkBytes, opts.llMaxBytes, opts.ll.nSlots, devComm.nRanks)) {
-    if (blockIdx.x == 0) GatherLL(sendwin, sendoffset, recvwin, recvoffset, chunkBytes, root, devComm, opts.ll);
+    if (blockIdx.x == 0) {
+      GatherLL(sendwin, sendoffset, recvwin, recvoffset, chunkBytes, root, devComm, opts.ll,
+               opts.exitBarrier ? ncclLLA2AHandle{} : opts.flags);
+    }
     return;
   }
   ginGatherBody(sendwin, sendoffset, recvwin, recvoffset, chunkBytes, root, sdmaThreshold, devComm, opts);

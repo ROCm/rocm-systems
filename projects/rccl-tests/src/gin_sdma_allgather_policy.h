@@ -329,6 +329,26 @@ inline size_t gatherArchLLMaxBytes(const char* gcnArchName) {
                            kGatherLLDefaultMaxBytes);
 }
 
+// The root's one LL CTA receives every rank's chunk, so with many ranks the LSA tier
+// wins below the per-rank cap. On 1 to 8 MI455X nodes (gfx1250, 4 to 32 ranks) LL wins
+// up to about 20 KiB gathered and the LSA tier from 32 KiB. Architectures not in the
+// table have no total cap.
+static constexpr size_t kGatherLLNoTotalCap = ~(size_t)0;
+static constexpr ArchSdmaThreshold kGatherLLMaxTotalBytesByArch[] = {
+  {"gfx1250", 24u << 10},
+};
+
+// The per-rank LL cap for nRanks: gatherArchLLMaxBytes, lowered so that nRanks chunks
+// fit the architecture's total cap, in whole 8-byte elements.
+inline size_t gatherArchLLMaxBytesForRanks(const char* gcnArchName, int nRanks) {
+  const size_t cap = gatherArchLLMaxBytes(gcnArchName);
+  const size_t total = archSdmaThreshold(gcnArchName, kGatherLLMaxTotalBytesByArch,
+                                         sizeof(kGatherLLMaxTotalBytesByArch) / sizeof(kGatherLLMaxTotalBytesByArch[0]),
+                                         kGatherLLNoTotalCap);
+  if (nRanks <= 0 || total / (size_t)nRanks >= cap) return cap;
+  return total / (size_t)nRanks / 8 * 8;
+}
+
 // Gather -D 3 LSA tier: once the gathered size (chunkBytes * nRanks) reaches the
 // architecture's threshold, the root flags senders ready kGatherGroupRanks at a time,
 // so fewer of them store into it at once. Each group adds a flag round trip to the

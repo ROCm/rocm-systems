@@ -617,6 +617,25 @@ TEST(GatherPolicyEnv, ResolveLLMaxBytesUsesTheArchDefault) {
   unsetenv(kGatherLLMaxBytesEnv);
 }
 
+TEST(GatherPolicyArch, LLCapForRanksHonorsTheTotalCap) {
+  // gfx1250: 4 KiB per rank, at most 24 KiB gathered.
+  EXPECT_EQ(gatherArchLLMaxBytesForRanks("gfx1250-strict", 4), 4096u);
+  EXPECT_EQ(gatherArchLLMaxBytesForRanks("gfx1250", 6), 4096u);
+  EXPECT_EQ(gatherArchLLMaxBytesForRanks("gfx1250", 8), 3072u);
+  EXPECT_EQ(gatherArchLLMaxBytesForRanks("gfx1250", 16), 1536u);
+  EXPECT_EQ(gatherArchLLMaxBytesForRanks("gfx1250", 20), 1224u);  // whole 8-byte elements
+  EXPECT_EQ(gatherArchLLMaxBytesForRanks("gfx1250", 32), 768u);
+  // No total cap elsewhere, and a non-positive rank count keeps the per-rank cap.
+  EXPECT_EQ(gatherArchLLMaxBytesForRanks("gfx942", 64), 2048u);
+  EXPECT_EQ(gatherArchLLMaxBytesForRanks("gfx9999", 64), kGatherLLDefaultMaxBytes);
+  EXPECT_EQ(gatherArchLLMaxBytesForRanks(nullptr, 64), kGatherLLDefaultMaxBytes);
+  EXPECT_EQ(gatherArchLLMaxBytesForRanks("gfx1250", 0), 4096u);
+  // The env value still wins.
+  setenv(kGatherLLMaxBytesEnv, "4K", 1);
+  EXPECT_EQ(resolveGatherLLMaxBytesFromEnv(gatherArchLLMaxBytesForRanks("gfx1250", 32)), 4096u);
+  unsetenv(kGatherLLMaxBytesEnv);
+}
+
 TEST(GatherPolicyArchTable, EveryLLCapFitsTheScratch) {
   for (const auto& row : kGatherLLMaxBytesByArch) {
     EXPECT_EQ(gatherArchLLMaxBytes(row.arch), row.threshold) << row.arch;
