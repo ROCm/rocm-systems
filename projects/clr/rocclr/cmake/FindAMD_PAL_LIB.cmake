@@ -23,4 +23,4 @@ find_package_handle_standard_args(AMD_PAL_LIB
   AMD_PAL_LIB_INCLUDE_DIR)
 mark_as_advanced(AMD_PAL_LIB_INCLUDE_DIR)
 
-add_subdirectory("${AMD_PAL_LIB_INCLUDE_DIR}/../.." ${CMAKE_CURRENT_BINARY_DIR}/pal)
+add_subdirectory("${AMD_PAL_LIB_INCLUDE_DIR}/../.." ${CMAKE_CURRENT_BINARY_DIR}/pal SYSTEM)
