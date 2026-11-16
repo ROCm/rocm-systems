@@ -122,7 +122,7 @@ sl1d.rd_req_16_dword:
   formula: SUM(SQC_DCACHE_REQ_READ_16) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
-    The total number of sL1D read requests made for a sixteen dwords of data (64B), per
+    The total number of sL1D read requests made for sixteen dwords of data (64B), per
     normalization unit.
 sl1d.rd_req_1_dword:
   name: sL1D Read Requests (1 DWord)
@@ -136,21 +136,21 @@ sl1d.rd_req_2_dword:
   formula: SUM(SQC_DCACHE_REQ_READ_2) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
-    The total number of sL1D read requests made for a two dwords of data (8B), per
+    The total number of sL1D read requests made for two dwords of data (8B), per
     normalization unit.
 sl1d.rd_req_4_dword:
   name: sL1D Read Requests (4 DWord)
   formula: SUM(SQC_DCACHE_REQ_READ_4) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
-    The total number of sL1D read requests made for a four dwords of data (16B), per
+    The total number of sL1D read requests made for four dwords of data (16B), per
     normalization unit.
 sl1d.rd_req_8_dword:
   name: sL1D Read Requests (8 DWord)
   formula: SUM(SQC_DCACHE_REQ_READ_8) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
-    The total number of sL1D read requests made for a eight dwords of data (32B), per
+    The total number of sL1D read requests made for eight dwords of data (32B), per
     normalization unit.
 sl1d.rd_req_total:
   name: sL1D Read Requests (Total)
