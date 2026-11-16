@@ -498,7 +498,7 @@ suites:
     evidence:
       - path: catch/contract/CMakeLists.txt
         claim: The graph and graph_* node domains plus capture/driver_graph_node are built under BUILD_CONTRACT_TESTS.
-    history: Some graph node paths (e.g. memory-free nodes) are guarded against known local segfaults; see TESTING_INCIDENTS.md when recorded.
+    history: Some graph node paths (e.g. memory-free nodes) are guarded against known local segfaults; see TESTING_INCIDENTS.md (TI-006).
     disposition: keep
     disposition_rationale: Graph contracts pin portable lifecycle and node invariants; functional graph behavior remains in unit-graph.
 
@@ -605,7 +605,7 @@ suites:
     evidence:
       - path: catch/contract/CMakeLists.txt
         claim: error_api and driver_error are built under BUILD_CONTRACT_TESTS.
-    history: Sticky-error cleanup is a recurring hazard; see TESTING_INCIDENTS.md when recorded.
+    history: Sticky-error cleanup is a recurring hazard; see TESTING_INCIDENTS.md (TI-002).
     disposition: keep
     disposition_rationale: Error contracts pin portable sticky/cleared semantics; functional error coverage remains in unit-error-handling.
 
@@ -640,7 +640,7 @@ suites:
     evidence:
       - path: catch/contract/CMakeLists.txt
         claim: graphics_interop, external_resource, and ipc are built under BUILD_CONTRACT_TESTS.
-    history: External-semaphore graph-node and some interop import paths are environment- or capability-gated; see TESTING_INCIDENTS.md when recorded.
+    history: External-semaphore graph-node and some interop import paths are environment- or capability-gated; see TESTING_INCIDENTS.md (TI-001).
     disposition: keep
     disposition_rationale: Interop/IPC contracts pin portable rejection and import invariants; richer interop behavior remains in unit-interop-graphics and integration-multiprocess.
 
@@ -1155,7 +1155,7 @@ suites:
     evidence:
       - path: catch/unit/CMakeLists.txt
         claim: vulkan_interop and gl_interop are built under BUILD_UNIT_TESTS only within an HIP_PLATFORM amd guard (gl_interop noted disabled on NVIDIA per EXSWHTEC-246).
-    history: gl_interop is AMD-gated because the NVIDIA header path pulls in GL/gl.h, which headless CUDA nodes lack; see TESTING_INCIDENTS.md when recorded.
+    history: gl_interop is AMD-gated because the NVIDIA header path pulls in GL/gl.h, which headless CUDA nodes lack; see TESTING_INCIDENTS.md (TI-006).
     disposition: review
     disposition_rationale: Graphics interop stays active and AMD-gated alongside contract-interop; environment-gated classification pending restructuring review.
     related_restructuring: TEST_RESTRUCTURING.md
@@ -1490,7 +1490,7 @@ suites:
         claim: The coverage checker is the enforced static gate.
       - path: catch/contract/uncovered_apis.txt
         claim: Intentionally uncovered public APIs are allowlisted with rationale.
-    history: The drift gate exists so new public HIP APIs cannot land without a contract test or an explicit allowlist rationale; see CONTRACT_COVERAGE.md and TESTING_INCIDENTS.md when recorded.
+    history: The drift gate exists so new public HIP APIs cannot land without a contract test or an explicit allowlist rationale; see CONTRACT_COVERAGE.md and TESTING_INCIDENTS.md (TI-004).
     disposition: keep
     disposition_rationale: The static coverage gate governs the contract tier and is enforced in-repo; retained.
 
