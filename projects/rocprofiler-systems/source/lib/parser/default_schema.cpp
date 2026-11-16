@@ -9,6 +9,7 @@
 #include <fmt/format.h>
 
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -30,10 +31,11 @@ require_added(bool added, std::string_view label)
 }
 
 schema_param
-text_param(std::string id, std::string description, std::string category, param_type type)
+text_param(std::string param_id, std::string description, std::string category,
+           param_type type)
 {
     auto param        = schema_param{};
-    param.id          = std::move(id);
+    param.id          = std::move(param_id);
     param.description = std::move(description);
     param.category    = std::move(category);
     param.type        = type;

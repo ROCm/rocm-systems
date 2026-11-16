@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "parser/configuration_parser.hpp"
+#include "parser/backend.hpp"
 #include "parser/cli_parser.hpp"
 #include "parser/config_store.hpp"
 #include "parser/default_parser.hpp"
@@ -19,8 +20,9 @@
 #include <nlohmann/json.hpp>
 #include <nlohmann/json_fwd.hpp>
 
+#include <stdlib.h>  // POSIX ::setenv
+
 #include <cstdint>
-#include <cstdlib>
 #include <exception>
 #include <memory>
 #include <optional>
@@ -241,7 +243,7 @@ add_backend_defaults(resolved_config& resolved, const schema& config_schema,
     for(const auto& param : config_schema.params())
     {
         const auto already_set =
-            param.default_value.has_value() || resolved.find(param.id) != resolved.end();
+            param.default_value.has_value() || resolved.contains(param.id);
         if(!param.backend || param.backend->empty() || already_set)
         {
             continue;
@@ -280,9 +282,26 @@ keeps_existing(const resolved_config& resolved, std::string_view target,
            static_cast<std::uint8_t>(source);
 }
 
-/// Assigns run for a parameter that is on and whose value won over the default. A
-/// target with a higher source is left alone. initialize() refused a catalog that
-/// assigns an unknown parameter or a value its target refuses.
+/// Write what @p param assigns, under @p source, to each target that does not have a
+/// higher source. initialize() refused a catalog that assigns an unknown parameter or
+/// a value its target refuses.
+void
+assign_targets(resolved_config& resolved, const schema& config_schema,
+               const schema_param& param, config_source source)
+{
+    for(const auto& [target_id, text] : param.assigns)
+    {
+        const auto* target = config_schema.find_param(target_id);
+        const auto parsed = target == nullptr ? std::nullopt : parse_value(*target, text);
+        if(parsed && !keeps_existing(resolved, target_id, source))
+        {
+            resolved.insert_or_assign(
+                target_id, resolved_value{ .value = *parsed, .source = source });
+        }
+    }
+}
+
+/// Assigns run for a parameter that is on and whose value won over the default.
 void
 apply_assigns(resolved_config& resolved, const schema& config_schema)
 {
@@ -297,21 +316,9 @@ apply_assigns(resolved_config& resolved, const schema& config_schema)
             origins.emplace_back(&param, found->second.source);
         }
     }
-
     for(const auto& [param, source] : origins)
     {
-        for(const auto& [target_id, text] : param->assigns)
-        {
-            const auto* target = config_schema.find_param(target_id);
-            const auto  parsed =
-                target == nullptr ? std::nullopt : parse_value(*target, text);
-            if(!parsed || keeps_existing(resolved, target_id, source))
-            {
-                continue;
-            }
-            resolved.insert_or_assign(
-                target_id, resolved_value{ .value = *parsed, .source = source });
-        }
+        assign_targets(resolved, config_schema, *param, source);
     }
 }
 

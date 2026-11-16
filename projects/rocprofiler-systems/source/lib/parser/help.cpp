@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "parser/help.hpp"
+#include "parser/backend.hpp"
 #include "parser/schema.hpp"
 
 #include <algorithm>
@@ -24,7 +25,7 @@ include_param(const schema_param& param, param_level max_level)
 bool
 already_listed(const std::vector<std::string>& names, std::string_view name)
 {
-    return std::find(names.begin(), names.end(), name) != names.end();
+    return std::ranges::find(names, name) != names.end();
 }
 
 std::vector<std::string>
@@ -128,6 +129,19 @@ append_param(std::ostream& out, const schema_param& param, param_level max_level
     append_usage(out, param);
     append_details(out, param, backends);
 }
+
+void
+append_uncategorized(std::ostream& out, const schema& config_schema,
+                     param_level max_level, const backend_registry* backends)
+{
+    for(const auto& param : config_schema.params())
+    {
+        if(param.category.empty())
+        {
+            append_param(out, param, max_level, backends);
+        }
+    }
+}
 }  // namespace
 
 std::string
@@ -151,15 +165,7 @@ format_help(const schema& config_schema, param_level max_level, std::string_view
     }
     if(topic.empty())
     {
-        for(const auto& param : config_schema.params())
-        {
-            if(!param.category.empty())
-            {
-                continue;
-            }
-            matched = true;
-            append_param(out, param, max_level, backends);
-        }
+        append_uncategorized(out, config_schema, max_level, backends);
     }
     if(!matched)
     {

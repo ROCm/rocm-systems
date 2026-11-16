@@ -1,19 +1,24 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "parser/backend.hpp"
+#include "parser/cli_parser.hpp"
 #include "parser/configuration_parser.hpp"
-#include "parser/help.hpp"
+#include "parser/env_parser.hpp"
+#include "parser/preset_parser.hpp"
 #include "parser/schema.hpp"
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 #include <nlohmann/json_fwd.hpp>
 
+#include <stdlib.h>  // POSIX ::getenv and ::unsetenv
+
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
-#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -35,9 +40,29 @@ constexpr std::size_t k_catalog_size = 7;
 bool
 contains_text(const std::vector<std::string>& errors, std::string_view text)
 {
-    return std::any_of(errors.begin(), errors.end(), [text](const std::string& item) {
+    return std::ranges::any_of(errors, [text](const std::string& item) {
         return item.find(text) != std::string::npos;
     });
+}
+
+/// An environment that sets only @p variable, to @p value.
+env_parser::lookup_t
+environment_with(std::string variable, std::string value)
+{
+    return [variable = std::move(variable), value = std::move(value)](
+               std::string_view name) -> std::optional<std::string> {
+        return name == variable ? std::optional{ value } : std::nullopt;
+    };
+}
+
+/// A preset registry that knows only the preset @p name.
+configuration_parser::preset_lookup_t
+preset_with(std::string name, preset_parser::settings_t settings)
+{
+    return
+        [name = std::move(name), settings = std::move(settings)](std::string_view asked) {
+            return asked == name ? settings : preset_parser::settings_t{};
+        };
 }
 
 configuration_parser
@@ -102,10 +127,10 @@ public:
 };
 
 schema_param
-named(std::string id, param_type type)
+named(std::string param_id, param_type type)
 {
     auto param = schema_param{};
-    param.id   = std::move(id);
+    param.id   = std::move(param_id);
     param.type = type;
     return param;
 }
@@ -131,6 +156,27 @@ letter_schema()
     trace.arg           = "--trace";
     add_param(value, std::move(letter));
     add_param(value, std::move(trace));
+    return value;
+}
+
+/// A basic "--mode" row and an advanced "--hidden" row.
+schema
+level_schema()
+{
+    schema value{};
+    auto   mode        = named("mode", param_type::enumeration);
+    mode.category      = "sampling";
+    mode.arg           = "--mode";
+    mode.description   = "Sampling mode";
+    mode.choices       = { "realtime", "cputime" };
+    auto hidden        = named("hidden", param_type::boolean);
+    hidden.category    = "sampling";
+    hidden.level       = param_level::advanced;
+    hidden.flag        = true;
+    hidden.arg         = "--hidden";
+    hidden.description = "Hidden option";
+    add_param(value, std::move(mode));
+    add_param(value, std::move(hidden));
     return value;
 }
 
@@ -199,8 +245,8 @@ TEST(parser_configuration, built_in_catalog_is_help_text)
     EXPECT_EQ(schema_ptr->params().size(), k_catalog_size);
     EXPECT_FALSE(schema_ptr->find_param("preset")->env.has_value());
     EXPECT_FALSE(schema_ptr->find_param("config_file")->env.has_value());
-    EXPECT_EQ(*schema_ptr->find_param("verbose")->env, "ROCPROFSYS_VERBOSE");
-    EXPECT_DOUBLE_EQ(*schema_ptr->find_param("verbose")->min, -1.0);
+    EXPECT_EQ(schema_ptr->find_param("verbose")->env.value_or(""), "ROCPROFSYS_VERBOSE");
+    EXPECT_DOUBLE_EQ(schema_ptr->find_param("verbose")->min.value_or(0.0), -1.0);
     EXPECT_EQ(schema_ptr->find_param("trace")->category, "tracing");
 
     const auto values = parser.parse({});
@@ -225,28 +271,22 @@ TEST(parser_configuration, command_line_overrides_lower_sources)
         "tracing": { "trace": true }
     })" };
     auto                   parser = make_parser();
-    parser.set_environment([](std::string_view name) -> std::optional<std::string> {
-        if(name == "ROCPROFSYS_VERBOSE")
-        {
-            return "1";
-        }
-        return std::nullopt;
-    });
-    parser.set_preset_lookup([](std::string_view name) {
-        EXPECT_EQ(name, "balanced");
-        return preset_parser::settings_t{ { "ROCPROFSYS_OUTPUT_PATH", "from-preset" },
-                                          { "ROCPROFSYS_PROFILE", "true" } };
-    });
+    parser.set_environment(environment_with("ROCPROFSYS_VERBOSE", "1"));
+    parser.set_preset_lookup(
+        preset_with("balanced", { { "ROCPROFSYS_OUTPUT_PATH", "from-preset" },
+                                  { "ROCPROFSYS_PROFILE", "true" } }));
 
     const auto values = parser.parse({ "--config", file.path(), "--preset", "balanced",
                                        "--verbose", "3", "--", "./app" });
-    EXPECT_TRUE(parser.errors().empty()) << parser.errors().front();
-    EXPECT_EQ(values.at("output_path"), "from-preset");
-    EXPECT_EQ(values.at("trace"), "true");
-    EXPECT_EQ(values.at("profile"), "true");
-    EXPECT_EQ(values.at("verbose"), "3");
-    ASSERT_EQ(parser.command().size(), 1U);
-    EXPECT_EQ(parser.command().front(), "./app");
+    EXPECT_TRUE(parser.errors().empty());
+    EXPECT_EQ(values, (value_map_t{ { "config_file", file.path() },
+                                    { "debug", "false" },
+                                    { "output_path", "from-preset" },
+                                    { "preset", "balanced" },
+                                    { "profile", "true" },
+                                    { "trace", "true" },
+                                    { "verbose", "3" } }));
+    EXPECT_EQ(parser.command(), std::vector<std::string>{ "./app" });
 }
 
 TEST(parser_configuration, cli_output_overrides_preset_and_file)
@@ -270,16 +310,9 @@ TEST(parser_configuration, preset_overrides_the_file_and_environment)
         R"({ "configuration": { "output_path": "from-file" } })"
     };
     auto parser = make_parser();
-    parser.set_environment([](std::string_view name) -> std::optional<std::string> {
-        if(name == "ROCPROFSYS_OUTPUT_PATH")
-        {
-            return "from-env";
-        }
-        return std::nullopt;
-    });
-    parser.set_preset_lookup([](std::string_view) {
-        return preset_parser::settings_t{ { "ROCPROFSYS_OUTPUT_PATH", "from-preset" } };
-    });
+    parser.set_environment(environment_with("ROCPROFSYS_OUTPUT_PATH", "from-env"));
+    parser.set_preset_lookup(
+        preset_with("balanced", { { "ROCPROFSYS_OUTPUT_PATH", "from-preset" } }));
     const auto values = parser.parse({ "--config", file.path(), "--preset", "balanced" });
     EXPECT_TRUE(parser.errors().empty());
     EXPECT_EQ(values.at("output_path"), "from-preset");
@@ -345,7 +378,7 @@ TEST(parser_configuration, backend_default_keeps_the_other_values)
     EXPECT_EQ(values.at("trace"), "false");
 }
 
-TEST(parser_configuration, reports_constraints_and_unknown_presets)
+TEST(parser_configuration, reports_conflicts_and_requirements)
 {
     configuration_parser parser;
     parser.set_environment([](std::string_view) { return std::optional<std::string>{}; });
@@ -356,22 +389,23 @@ TEST(parser_configuration, reports_constraints_and_unknown_presets)
 
     static_cast<void>(parser.parse({ "--flat-profile" }));
     EXPECT_TRUE(contains_text(parser.errors(), "requires"));
-
-    auto presets = make_parser();
-    static_cast<void>(presets.parse({ "--preset", "missing" }));
-    EXPECT_TRUE(contains_text(presets.errors(), "was not applied"));
-
-    presets.set_preset_lookup(
-        [](std::string_view) { return preset_parser::settings_t{}; });
-    static_cast<void>(presets.parse({ "--preset", "empty" }));
-    EXPECT_TRUE(contains_text(presets.errors(), "unknown preset"));
-
-    static_cast<void>(presets.parse({ "--preset=" }));
-    EXPECT_FALSE(contains_text(presets.errors(), "unknown preset"));
-    EXPECT_FALSE(contains_text(presets.errors(), "was not applied"));
 }
 
-TEST(parser_configuration, help_filters_by_level_and_topic)
+TEST(parser_configuration, reports_a_preset_that_is_not_applied_or_unknown)
+{
+    auto parser = make_parser();
+    static_cast<void>(parser.parse({ "--preset", "missing" }));
+    EXPECT_TRUE(contains_text(parser.errors(), "was not applied"));
+
+    parser.set_preset_lookup(preset_with("balanced", {}));
+    static_cast<void>(parser.parse({ "--preset", "empty" }));
+    EXPECT_TRUE(contains_text(parser.errors(), "unknown preset"));
+
+    static_cast<void>(parser.parse({ "--preset=" }));
+    EXPECT_TRUE(parser.errors().empty());
+}
+
+TEST(parser_configuration, help_can_show_one_topic)
 {
     auto       parser = make_parser();
     const auto basic  = parser.render_help();
@@ -385,66 +419,46 @@ TEST(parser_configuration, help_filters_by_level_and_topic)
 
     const auto missing = parser.render_help(param_level::basic, "missing");
     EXPECT_NE(missing.find("No parameters match topic"), std::string::npos);
-
-    schema catalog{};
-    auto   mode        = named("mode", param_type::enumeration);
-    mode.category      = "sampling";
-    mode.arg           = "--mode";
-    mode.description   = "Sampling mode";
-    mode.choices       = { "realtime", "cputime" };
-    auto hidden        = named("hidden", param_type::boolean);
-    hidden.category    = "sampling";
-    hidden.level       = param_level::advanced;
-    hidden.flag        = true;
-    hidden.arg         = "--hidden";
-    hidden.description = "Hidden option";
-    ASSERT_TRUE(catalog.add_param(std::move(mode)));
-    ASSERT_TRUE(catalog.add_param(std::move(hidden)));
-
-    configuration_parser levels;
-    levels.set_environment([](std::string_view) { return std::optional<std::string>{}; });
-    ASSERT_TRUE(levels.initialize(std::move(catalog)));
-    const auto short_help = levels.render_help();
-    const auto long_help  = levels.render_help(param_level::advanced);
-    EXPECT_NE(short_help.find("--mode"), std::string::npos);
-    EXPECT_NE(short_help.find("choices: realtime cputime"), std::string::npos);
-    EXPECT_EQ(short_help.find("--hidden"), std::string::npos);
-    EXPECT_EQ(short_help.find("type:"), std::string::npos);
-    EXPECT_NE(long_help.find("--hidden"), std::string::npos);
-    EXPECT_NE(long_help.find("choices: realtime cputime"), std::string::npos);
-    EXPECT_EQ(long_help.find("type:"), std::string::npos);
 }
 
-TEST(parser_configuration, exports_environment_and_json)
+TEST(parser_configuration, help_shows_an_advanced_row_only_at_the_advanced_level)
+{
+    configuration_parser parser;
+    ASSERT_TRUE(parser.initialize(level_schema())) << parser.failure();
+    const auto basic    = parser.render_help();
+    const auto advanced = parser.render_help(param_level::advanced);
+    EXPECT_NE(basic.find("--mode"), std::string::npos);
+    EXPECT_NE(basic.find("choices: realtime cputime"), std::string::npos);
+    EXPECT_EQ(basic.find("--hidden"), std::string::npos);
+    EXPECT_NE(advanced.find("--hidden"), std::string::npos);
+}
+
+TEST(parser_configuration, exports_only_values_that_are_not_defaults)
 {
     auto parser = make_parser();
-    parser.set_environment([](std::string_view name) -> std::optional<std::string> {
-        if(name == "ROCPROFSYS_TRACE")
-        {
-            return "Y";
-        }
-        return std::nullopt;
-    });
+    parser.set_environment(environment_with("ROCPROFSYS_TRACE", "Y"));
     static_cast<void>(parser.parse({ "--verbose", "4", "--output", "exported" }));
-    const auto exported = parser.export_as_environment();
-    EXPECT_EQ(exported.at("ROCPROFSYS_VERBOSE"), "4");
-    EXPECT_EQ(exported.at("ROCPROFSYS_OUTPUT_PATH"), "exported");
-    EXPECT_EQ(exported.at("ROCPROFSYS_TRACE"), "true");
-    EXPECT_EQ(exported.find("ROCPROFSYS_DEBUG"), exported.end());
-    EXPECT_EQ(exported.find("ROCPROFSYS_PROFILE"), exported.end());
 
-    const auto document = nlohmann::json::parse(parser.export_as_json());
-    EXPECT_EQ(document.at("configuration").at("output_path"), "exported");
-    EXPECT_EQ(document.at("logging").at("verbose"), 4);
-    EXPECT_EQ(document.at("tracing").at("trace"), true);
-    EXPECT_EQ(document.at("logging").find("debug"), document.at("logging").end());
+    EXPECT_EQ(parser.export_as_environment(),
+              (value_map_t{ { "ROCPROFSYS_OUTPUT_PATH", "exported" },
+                            { "ROCPROFSYS_TRACE", "true" },
+                            { "ROCPROFSYS_VERBOSE", "4" } }));
+    EXPECT_EQ(nlohmann::json::parse(parser.export_as_json()), nlohmann::json::parse(R"({
+        "configuration": { "output_path": "exported" },
+        "logging": { "verbose": 4 },
+        "tracing": { "trace": true }
+    })"));
+}
 
+TEST(parser_configuration, applies_the_export_to_the_process_environment)
+{
+    auto parser = make_parser();
+    static_cast<void>(parser.parse({ "--verbose", "4", "--output", "exported" }));
     parser.apply_to_environment();
     EXPECT_STREQ(::getenv("ROCPROFSYS_VERBOSE"), "4");
     EXPECT_STREQ(::getenv("ROCPROFSYS_OUTPUT_PATH"), "exported");
     ::unsetenv("ROCPROFSYS_VERBOSE");
     ::unsetenv("ROCPROFSYS_OUTPUT_PATH");
-    ::unsetenv("ROCPROFSYS_TRACE");
 }
 
 TEST(parser_configuration, exported_values_read_back_the_same)
@@ -519,27 +533,20 @@ TEST(parser_configuration, refuses_a_catalog_that_assigns_an_invalid_value)
 TEST(parser_configuration, assigns_run_after_precedence)
 {
     configuration_parser parser;
-    parser.set_environment([](std::string_view name) -> std::optional<std::string> {
-        if(name == "ROCPROFSYS_DEBUG")
-        {
-            return "true";
-        }
-        return std::nullopt;
-    });
+    parser.set_environment(environment_with("ROCPROFSYS_DEBUG", "true"));
     ASSERT_TRUE(parser.initialize(effect_schema())) << parser.failure();
 
-    const auto from_flag = parser.parse({ "--debug" });
+    EXPECT_EQ(parser.parse({ "--debug" }).at("log_level"), "debug");
     EXPECT_TRUE(parser.errors().empty());
-    EXPECT_EQ(from_flag.at("log_level"), "debug");
+    EXPECT_EQ(parser.parse({ "--log-level", "quiet" }).at("log_level"), "quiet");
+}
 
-    const auto kept = parser.parse({ "--log-level", "quiet" });
-    EXPECT_EQ(kept.at("log_level"), "quiet");
-
-    configuration_parser quiet;
-    quiet.set_environment([](std::string_view) { return std::optional<std::string>{}; });
-    ASSERT_TRUE(quiet.initialize(effect_schema())) << quiet.failure();
-    const auto defaults = quiet.parse({});
-    EXPECT_EQ(defaults.find("log_level"), defaults.end());
+TEST(parser_configuration, a_default_assigns_nothing)
+{
+    configuration_parser parser;
+    parser.set_environment([](std::string_view) { return std::optional<std::string>{}; });
+    ASSERT_TRUE(parser.initialize(effect_schema())) << parser.failure();
+    EXPECT_FALSE(parser.parse({}).contains("log_level"));
 }
 
 TEST(parser_configuration, assigns_need_the_option_on)

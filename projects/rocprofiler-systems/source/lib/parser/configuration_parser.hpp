@@ -7,7 +7,6 @@
 #include "parser/cli_parser.hpp"
 #include "parser/config_store.hpp"
 #include "parser/env_parser.hpp"
-#include "parser/help.hpp"
 #include "parser/preset_parser.hpp"
 #include "parser/schema.hpp"
 
