@@ -3830,8 +3830,8 @@ TEST_F(MemoryWaitOrderingTest, ModeledBvhAloneCannotForceAnEmptyExecGfx12FlatIss
 }
 
 TEST_F(MemoryWaitOrderingTest, DualCounterFlatRetiresTheOlderOppositeRoute) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4,
-                    ROCJITSU_CODE_ARCH_CDNA5})
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3,
+                    ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5})
     for (bool older_shared : {false, true})
       for (unsigned threshold : {3u, 4u}) {
         SCOPED_TRACE(testing::Message()
@@ -3850,6 +3850,20 @@ TEST_F(MemoryWaitOrderingTest, DualCounterFlatRetiresTheOlderOppositeRoute) {
         state.access({RegClass::VGPR, 2, 1}, 0xf, 0xf, false);
         EXPECT_EQ(cu->memory_wait_diagnostic_count(), threshold == 4);
       }
+}
+
+TEST_F(MemoryWaitOrderingTest, Gfx10FlatIssuesBothQueuePositionsWithEmptyExec) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+    SCOPED_TRACE(arch);
+    ASSERT_NO_FATAL_FAILURE(setup(arch));
+    wf->set_exec(0);
+    flat_load();
+    auto &state = wf->ensure_memory_wait_scoreboard();
+    EXPECT_EQ(state.outstanding(WaitCounterKind::Ds), 1u);
+    EXPECT_EQ(state.outstanding(WaitCounterKind::Load), 1u);
+    state.access({RegClass::VGPR, 2, 1}, 0xf, 0xf, false);
+    EXPECT_EQ(cu->memory_wait_diagnostic_count(), 0u);
+  }
 }
 
 TEST_F(MemoryWaitOrderingTest, Gfx11FlatWithOnlyDsPendingMaySkipWhenExecIsEmpty) {
