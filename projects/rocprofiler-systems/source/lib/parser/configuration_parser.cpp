@@ -192,37 +192,34 @@ struct parse_request
     std::vector<std::string>&                    errors;
 };
 
+/// Every source in order: the defaults, the environment, the command line, then the
+/// config file and the preset the command line names. Each source's values are checked
+/// against the backends as it is read, so a refused value leaves a lower source to win.
 collected_input
-read_primary(const parse_request& request)
+read_sources(const parse_request& request)
 {
+    const auto& catalog = request.config_schema;
+    const auto  checked = [&request](config_source source, parse_result parsed) {
+        reject_backend_values(request.config_schema, request.backends, source, parsed);
+        return parsed;
+    };
     collected_input collected;
-    collected.defaults    = default_parser{}.parse(request.config_schema);
-    collected.environment = make_env(request.environment).parse(request.config_schema);
+    collected.defaults =
+        checked(config_source::default_value, default_parser{}.parse(catalog));
+    collected.environment =
+        checked(config_source::environment, make_env(request.environment).parse(catalog));
     collected.command_line =
-        cli_parser{ request.arguments, request.unknown }.parse(request.config_schema);
-    reject_backend_values(request.config_schema, request.backends,
-                          config_source::default_value, collected.defaults);
-    reject_backend_values(request.config_schema, request.backends,
-                          config_source::environment, collected.environment);
-    reject_backend_values(request.config_schema, request.backends,
-                          config_source::command_line, collected.command_line);
-    return collected;
-}
-
-void
-read_indirect(const parse_request& request, collected_input& collected)
-{
+        checked(config_source::command_line,
+                cli_parser{ request.arguments, request.unknown }.parse(catalog));
     const auto& given = collected.command_line;
-    collected.file    = read_config_file(request.config_schema,
-                                         command_line_text(given, k_config_file_param));
-    reject_backend_values(request.config_schema, request.backends, config_source::file,
-                          collected.file);
-
+    collected.file =
+        checked(config_source::file,
+                read_config_file(catalog, command_line_text(given, k_config_file_param)));
     collected.preset =
-        read_preset(request.config_schema, command_line_text(given, k_preset_param),
-                    request.presets, request.errors);
-    reject_backend_values(request.config_schema, request.backends, config_source::preset,
-                          collected.preset);
+        checked(config_source::preset,
+                read_preset(catalog, command_line_text(given, k_preset_param),
+                            request.presets, request.errors));
+    return collected;
 }
 
 void
@@ -476,10 +473,9 @@ configuration_parser::parse(const std::vector<std::string>& arguments)
                                            .presets       = m_presets,
                                            .backends      = *m_backends,
                                            .errors        = m_errors };
-    auto       collected  = read_primary(request);
+    auto       collected  = read_sources(request);
     m_command             = std::move(collected.command_line.command);
     m_unparsed            = std::move(collected.command_line.unparsed);
-    read_indirect(request, collected);
     collect_errors(m_errors, collected);
 
     auto resolved = resolve_collected(collected);
