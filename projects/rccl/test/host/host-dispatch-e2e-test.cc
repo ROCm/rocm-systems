@@ -527,17 +527,30 @@ TEST(HostDispatchEndToEnd, AChildThatHangsIsKilledAtItsTimeoutAndReportedAsOne)
     EXPECT_LT(std::chrono::duration_cast<std::chrono::seconds>(elapsed).count(), 60);
 }
 
-TEST(HostDispatchEndToEnd, AStopMidRunStillReportsTheBinaryItKilledAndLeavesNothingBehind)
+TEST(HostDispatchEndToEnd, AStopReportsWhatItKilledLeavesNothingBehindAndSleepsThroughTheGrace)
 {
     // What a Ctrl-C, or the outer watchdog's SIGTERM, has to buy: the run ends promptly, the
     // report is still written and still names the binary that was cut short, the exit code says
-    // so, and no test binary outlives the dispatcher. Each of those is decided in a different
-    // place -- the handler, the scheduler's wind-down, classifyChild, main() -- and none of them
-    // is reachable from a unit test, because every scheduler test goes through FakeScheduler.
+    // so, no test binary outlives the dispatcher, and the wind-down costs no CPU. Each of those
+    // is decided in a different place -- the handler, the scheduler's wind-down, classifyChild,
+    // main() -- and none of them is reachable from a unit test, because every scheduler test
+    // goes through FakeScheduler.
     //
     // The fixture is told to ignore SIGTERM, so the wind-down has to go the whole way through
-    // its grace period and the SIGKILL that follows. That is the expensive path, and the one
-    // the test below measures.
+    // its grace period and the SIGKILL that follows. That is the expensive path, and the reason
+    // this case is the costliest in the file: it spends the whole of kTerminateGrace. It is one
+    // test rather than two because a second run of the identical scenario, differing only in
+    // what it asserted, cost another full grace period -- ~6 s on every host test run, since
+    // this binary is on the front door's critical path -- to buy one more EXPECT.
+    //
+    // The last assertion is the mutation-sensitive one. It is easy to make the wind-down cost a
+    // whole core and notice nothing, because every observable thing above still holds: a reap
+    // that reports a requested stop on every call turns the scheduler's loop into a spin for the
+    // whole of the grace -- measured at 5.03 s of CPU in 6.01 s of wall -- and the report, the
+    // exit code and the kills all come out the same. On a loaded CI machine that core is taken
+    // from the tests still running. So the assertion is on the RATIO, not on a wall-clock bound:
+    // the dispatcher may sit in the grace period as long as it likes, as long as it is asleep
+    // for it. wait4(2) hands back the dispatcher's own CPU, which is what makes it cheap to ask.
     FixtureTree tree;
     RCCL_REQUIRE_TREE(tree, kFirstBinary);
 
@@ -555,33 +568,9 @@ TEST(HostDispatchEndToEnd, AStopMidRunStillReportsTheBinaryItKilledAndLeavesNoth
     const std::vector<std::string> survivors =
         survivorsFrom(tree.path(), std::chrono::milliseconds{500});
     EXPECT_TRUE(survivors.empty()) << "left running after the stop:\n" << joined(survivors);
-}
 
-TEST(HostDispatchEndToEnd, AStopCostsNoMoreCpuThanWaitingForTheChildrenToDie)
-{
-    // The stop's wind-down is a WAIT, and a wait costs nothing. It is easy to make it cost a
-    // whole core instead and notice nothing, because every observable thing above still holds:
-    // a reap that reports a requested stop on every call turns the scheduler's loop into a spin
-    // for the whole of the teardown grace -- measured at 3.64 s of CPU in 4 s of wall -- and
-    // the report, the exit code and the kills all come out the same. On a loaded CI machine
-    // that core is taken from the tests still running.
-    //
-    // So the assertion is on the ratio, not on a wall-clock bound: the dispatcher may sit in
-    // the grace period for as long as it likes, as long as it is asleep for it. wait4(2) hands
-    // back the dispatcher's own CPU, which is what makes this cheap to ask for.
-    FixtureTree tree;
-    RCCL_REQUIRE_TREE(tree, kFirstBinary);
-
-    std::vector<EnvVar> environment = baseEnvironment(tree);
-    environment.push_back({"RCCL_FIXTURE_HANG", "1"});
-    environment.push_back({"RCCL_FIXTURE_IGNORE_TERM", "1"});
-
-    const DispatchRun run =
-        runFrontDoor(tree, {"--gtest_output=xml:" + tree.reportPath()}, environment,
-                     std::chrono::milliseconds{1000});
-
-    // The run has to have reached the wind-down for the measurement to mean anything: a stop
-    // the dispatcher took no time at all over has no grace period to have spun through.
+    // The run has to have reached the wind-down for the measurement below to mean anything: a
+    // stop the dispatcher took no time at all over has no grace period to have spun through.
     ASSERT_GT(run.wall.count(), 2.0) << "the stop did not reach the teardown grace\n"
                                      << run.console;
     // Generous by a long way against a spin, which charges most of the wall time to the CPU.
