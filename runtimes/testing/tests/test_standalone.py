@@ -157,6 +157,24 @@ class StandaloneTests(unittest.TestCase):
         self.assertNotIn(str(SOURCE), targets)
         self.assertNotIn(str(self.root), targets)
 
+    def test_vendored_headers_support_strict_cpp_consumers(self):
+        source = self.root / "strict header consumer"
+        source.mkdir()
+        (source / "CMakeLists.txt").write_text(f"""cmake_minimum_required(VERSION 3.25)
+project(StrictHeaderConsumer LANGUAGES CXX)
+add_subdirectory("{SOURCE / 'api-headers'}" runtime-api-headers)
+add_executable(consumer consumer.cpp)
+target_link_libraries(consumer PRIVATE rocm_runtime::runtime_headers)
+target_compile_features(consumer PRIVATE cxx_std_20)
+target_compile_options(consumer PRIVATE -Wall -Wextra -Wpedantic -Werror)
+""")
+        (source / "consumer.cpp").write_text(
+            "#include <hsa/hsa_ext_amd.h>\nint main() { return 0; }\n"
+        )
+        build = self.root / "strict header build"
+        self.configure(source, build)
+        self.command(CMAKE, "--build", build)
+
     def test_unknown_empty_and_unsupported_selections_fail(self):
         for index, settings in enumerate(
             [
