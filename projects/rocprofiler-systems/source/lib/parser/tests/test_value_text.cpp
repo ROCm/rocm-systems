@@ -114,6 +114,25 @@ TEST(parser_value_text, parse_value_ignores_surrounding_whitespace)
     EXPECT_EQ(parse_value(make_param(param_type::path), "  "), std::nullopt);
 }
 
+TEST(parser_value_text, a_backend_row_leaves_an_unlisted_name_to_the_backend)
+{
+    auto metrics    = make_param(param_type::enumeration_list);
+    metrics.backend = "amd-smi";
+    EXPECT_EQ(parse_value(metrics, " temp , power "),
+              (config_value_t{ std::vector<std::string>{ "temp", "power" } }));
+    EXPECT_EQ(parse_value(metrics, ""), config_value_t{ std::vector<std::string>{} });
+    EXPECT_FALSE(parse_value(metrics, "temp,,power").has_value());
+    EXPECT_FALSE(parse_value(metrics, ",").has_value());
+
+    auto metric    = make_param(param_type::enumeration);
+    metric.backend = "amd-smi";
+    EXPECT_EQ(parse_value(metric, "temp"), config_value_t{ std::string{ "temp" } });
+    EXPECT_FALSE(parse_value(metric, "").has_value());
+
+    metrics.backend.reset();
+    EXPECT_FALSE(parse_value(metrics, "temp").has_value());
+}
+
 TEST(parser_value_text, accepts_value_checks_the_type_and_the_rules)
 {
     auto bounded = make_param(param_type::integer);

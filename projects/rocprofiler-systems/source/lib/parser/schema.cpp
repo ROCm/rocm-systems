@@ -28,9 +28,8 @@ accepts_backend(const schema_param& param)
     {
         return false;
     }
-    const auto type = param.type;
-    return type == param_type::string || type == param_type::enumeration ||
-           type == param_type::enumeration_list;
+    return param.type == param_type::enumeration ||
+           param.type == param_type::enumeration_list;
 }
 
 /// arg and its aliases, or nullopt when a spelling is empty or repeated, or aliases

@@ -68,7 +68,9 @@ struct schema_param
     /// How many tokens follow the option. Unset means one, or none for a flag.
     std::optional<std::size_t> arg_min_count;
     std::optional<std::size_t> arg_max_count;
-    /// Name of the backend that lists the allowed values at run time.
+    /// Name of the backend that lists the allowed values at run time, for an
+    /// enumeration or enumeration_list. Parsing leaves a name that is not in choices
+    /// to that backend, so --amd-smi-metrics temp can name a metric only amd-smi lists.
     std::optional<std::string> backend;
     /// Parameters that cannot be set together with this one.
     std::vector<std::string> conflicts;
@@ -115,7 +117,7 @@ public:
      *         registered, the environment variable is already registered, a
      *         command-line spelling (arg or an alias) is already registered, repeated,
      *         or empty, aliases are given without arg, or backend is empty or set on a
-     *         type other than string, enumeration, or enumeration_list.
+     *         type other than enumeration or enumeration_list.
      */
     [[nodiscard]] bool add_param(schema_param param);
 

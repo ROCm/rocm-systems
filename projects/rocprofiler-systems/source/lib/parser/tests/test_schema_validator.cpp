@@ -231,6 +231,20 @@ TEST(parser_schema_validator, enumeration_list_values)
     EXPECT_TRUE(is_valid_value(param, "alpha,custom"));
 }
 
+TEST(parser_schema_validator,
+     leaves_a_backend_name_in_a_value_and_a_default_to_the_backend)
+{
+    auto metrics          = make_param(param_type::enumeration_list);
+    metrics.backend       = "amd-smi";
+    metrics.default_value = "temp";
+    EXPECT_TRUE(is_valid_value(metrics, "temp, power"));
+    EXPECT_FALSE(is_valid_value(metrics, "temp,,power"));
+
+    schema value{};
+    add_checked(value, std::move(metrics));
+    EXPECT_TRUE(validate_schema(value).empty());
+}
+
 TEST(parser_schema_validator, ignores_whitespace_around_a_value_and_a_default)
 {
     EXPECT_TRUE(is_valid_value(make_param(param_type::boolean), " true "));

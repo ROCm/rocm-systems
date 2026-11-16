@@ -224,7 +224,7 @@ TEST(parser_schema, rejects_an_empty_backend_or_a_backend_on_the_wrong_type)
     EXPECT_FALSE(value.add_param(std::move(empty)));
 
     for(const auto type : { param_type::boolean, param_type::integer, param_type::number,
-                            param_type::path })
+                            param_type::string, param_type::path })
     {
         auto param    = make_param("domains");
         param.type    = type;
@@ -233,8 +233,7 @@ TEST(parser_schema, rejects_an_empty_backend_or_a_backend_on_the_wrong_type)
     }
     EXPECT_EQ(value.find_param("domains"), nullptr);
 
-    for(const auto type :
-        { param_type::string, param_type::enumeration, param_type::enumeration_list })
+    for(const auto type : { param_type::enumeration, param_type::enumeration_list })
     {
         auto param =
             make_param(std::string{ "row_" } + std::to_string(static_cast<int>(type)));

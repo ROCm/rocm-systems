@@ -146,10 +146,13 @@ choice_listed(const schema_param& param, std::string_view value)
     return std::ranges::find(param.choices, value) != param.choices.end();
 }
 
+/// A name that is not listed is accepted when custom values are allowed, or when the
+/// row names a backend, which lists the names and checks it later.
 [[nodiscard]] bool
 choice_accepted(const schema_param& param, std::string_view value)
 {
-    return choice_listed(param, value) || (param.allow_custom && !value.empty());
+    return choice_listed(param, value) ||
+           ((param.allow_custom || param.backend.has_value()) && !value.empty());
 }
 
 [[nodiscard]] std::string
