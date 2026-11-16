@@ -2657,6 +2657,37 @@ TEST(WaitcheckTest, Gfx1250CounterParityMatchesXcnt) {
   EXPECT_EQ(report.counter_underaccounting_observed, 0u);
 }
 
+TEST(WaitcheckTest, Gfx1250CounterParityStopsReplayAtImplicitXcntDrains) {
+  for (const uint32_t intervening : {0xbf86c003u, 0xbfa00000u, 0xbf800000u}) {
+    for (const bool wait_for_load : {false, true}) {
+      SCOPED_TRACE(::testing::Message()
+                   << std::hex << intervening << " wait_for_load=" << wait_for_load);
+      std::vector<uint32_t> program = {0xee05007cu, 0, 10}; // global_load_b32 v0, v[10:11], off
+      append_inst(program, wait_for_load ? 0xbfc00000u : 0xbfc50000u);
+      // s_set_vgpr_msb 0xc003, s_branch to the next instruction, or s_nop.
+      append_inst(program, intervening);
+      append_inst(program, 0x8c7e007eu); // s_or_b32 exec_lo, exec_lo, s0
+      append_inst(program, 0xbfb00000u); // s_endpgm
+      WaitcheckOptions options;
+      options.check_counter_parity = true;
+      TestCodeObject obj(program);
+      const auto report = analyze_waitcnts(obj, ROCJITSU_CODE_ARCH_CDNA5, options);
+      ASSERT_TRUE(report.passed()) << diagnostic_summary(report);
+      const bool drains = intervening != 0xbf800000u;
+      EXPECT_EQ(report.counter_parity_exact, drains ? 0u : 1u);
+      EXPECT_EQ(report.counter_unmodeled_wait_observed, drains ? 1u : 0u);
+      if (wait_for_load && drains) {
+        program.pop_back();
+        append_inst(program, v_mov_b32(1, 0));
+        append_inst(program, 0xbfb00000u);
+        TestCodeObject use_result(program);
+        const auto actual = analyze_waitcnts(use_result, ROCJITSU_CODE_ARCH_CDNA5, options);
+        EXPECT_EQ(actual.counter_parity_exact, 1u) << diagnostic_summary(actual);
+      }
+    }
+  }
+}
+
 TEST(WaitcheckTest, Gfx1250CounterParityMatchesXcntBeforeImplicitCmpxExecDef) {
   std::vector<uint32_t> program;
   append_inst(program, global_load_b32(0));
@@ -3282,6 +3313,7 @@ TEST(WaitcheckTest, Gfx950CounterParityCatalogsStrongerFunctionPrologWaitAsUnmod
   program.push_back(
       build_s_swappc_b64(kReturnSreg, kTargetSreg, ROCJITSU_CODE_ARCH_CDNA4).value()); // 0x20.
   program.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4).value());                 // 0x24.
+  const size_t helper_entry = program.size();
   append_gfx950_s_waitcnt_vmcnt_0(program); // 0x28 helper.
   program.push_back(0x7E040300u);           // 0x2c: v_mov_b32_e32 v2, v0.
   program.push_back(build_sop1_encoding(ROCJITSU_CODE_ARCH_CDNA4, 0x1d, 0,
@@ -3304,6 +3336,17 @@ TEST(WaitcheckTest, Gfx950CounterParityCatalogsStrongerFunctionPrologWaitAsUnmod
   ASSERT_EQ(report.counter_underaccounting_diagnostics.size(), 1u);
   EXPECT_FALSE(report.counter_underaccounting_diagnostics[0].has_required_dependency);
   EXPECT_EQ(report.counter_underaccounting_diagnostics[0].required_count, 0x3fu);
+  // Putting the identical wait at an interior basic-block entry leaves its
+  // genuine VM count=1 dependency visible even within a callee.
+  program.insert(program.begin() + helper_entry, 0xbf820000u); // s_branch to next instruction
+  const auto interior_image =
+      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  AmdGpuCodeObject interior(interior_image.data(), interior_image.size());
+  const auto inner = analyze_waitcnts(interior, ROCJITSU_CODE_ARCH_CDNA4, options);
+  ASSERT_TRUE(inner.passed()) << diagnostic_summary(inner);
+  ASSERT_EQ(inner.counter_underaccounting_diagnostics.size(), 1u);
+  EXPECT_TRUE(inner.counter_underaccounting_diagnostics[0].has_required_dependency);
+  EXPECT_EQ(inner.counter_underaccounting_diagnostics[0].required_count, 1u);
 }
 
 TEST(WaitcheckTest, Gfx950CounterParityCatalogsStrongerFunctionReturnWaitAsUnmodeled) {

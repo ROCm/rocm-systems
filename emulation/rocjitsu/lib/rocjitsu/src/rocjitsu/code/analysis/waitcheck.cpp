@@ -689,18 +689,23 @@ struct Analyzer : private WaitcheckStateOps {
     relative_entry_proven_ = current_kernel_ && !missing_successor;
     for (size_t i = 0; i < analysis_blocks.size(); ++i) {
       current_cfg_view_index_ = i;
-      current_in_callee_context_ = !std::get<1>(analysis_node_keys[i]).empty();
-      current_call_return_sreg_ =
-          current_in_callee_context_
-              ? std::optional{std::get<1>(std::get<1>(analysis_node_keys[i]).back())}
-              : std::nullopt;
+      const auto &stack = std::get<1>(analysis_node_keys[i]);
+      current_function_entry_.reset();
+      current_call_return_sreg_.reset();
+      if (!stack.empty()) {
+        current_function_entry_ = blocks[std::get<2>(stack.back())]->start_offset();
+        current_call_return_sreg_ = std::get<1>(stack.back());
+      } else if (non_entry_function && !entry_offsets.empty()) {
+        current_function_entry_ = entry_offsets.front();
+        current_call_return_sreg_ = 30;
+      }
       (void)analyze_block(*analysis_blocks[i], in[i], section_name, file_offset_base, arch, true);
       if (should_stop_after_diagnostic())
         break;
     }
     cfg_outputs_ = {};
     current_cfg_view_index_.reset();
-    current_in_callee_context_ = false;
+    current_function_entry_.reset();
     current_call_return_sreg_.reset();
     clear_cfg_path_filter();
     if (missing_successor) {
@@ -1161,7 +1166,8 @@ private:
   void collect_counter_parity_requirements(
       const PendingWaitGroup &group, const Instruction &consumer, uint64_t consumer_section_offset,
       uint64_t consumer_file_offset, rj_code_arch_t arch,
-      std::array<std::optional<CounterParityRequirement>, kCounterCount> &requirements) {
+      std::array<std::optional<CounterParityRequirement>, kCounterCount> &requirements,
+      bool past_xcnt_drain = false) {
     const PendingState *requirement_state = &group.state_before;
     const InstDefUse du = inst_def_use_for_waitcheck(consumer, requirement_state->vgpr_msb, arch,
                                                      wavefront_size_, requirement_state->m0);
@@ -1183,6 +1189,11 @@ private:
         *requirement_state, consumer, du, current_events, arch,
         [&](const PendingEvent &event, RegisterRef reg, WaitcheckAccessKind access,
             uint32_t required_count) {
+          // A branch, bank update, or other implicit X wait retires replay
+          // sources before this instruction observes or changes registers.
+          if (event.counter == WaitCounterKind::X &&
+              (past_xcnt_drain || (arch == ROCJITSU_CODE_ARCH_CDNA5 && is_xcnt_drain(consumer))))
+            return;
           bool can_improve =
               !requirements[counter_index(event.counter)] ||
               required_count < requirements[counter_index(event.counter)]->required_count;
@@ -1401,34 +1412,42 @@ private:
       }
     }
 
-    using Position = std::pair<size_t, size_t>;
+    const bool may_track_xcnt =
+        arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+        !group.state_before.pending[counter_index(WaitCounterKind::X)].empty();
+    using Position = std::tuple<size_t, size_t, bool>;
     std::vector<Position> worklist{{
         *current_cfg_view_index_,
         static_cast<size_t>(std::distance(start_block.instructions.begin(), start_it)),
+        false,
     }};
     std::set<Position> visited;
-    std::set<const Instruction *> dependencies_checked;
+    std::set<std::pair<const Instruction *, bool>> dependencies_checked;
     std::optional<CounterParityRequirement> strongest;
     while (!worklist.empty() && visited.size() < max_lookahead_positions) {
-      const auto [block_index, instruction_index] = worklist.back();
+      const auto [block_index, instruction_index, past_xcnt_drain] = worklist.back();
       worklist.pop_back();
-      if (!visited.insert({block_index, instruction_index}).second)
+      if (!visited.insert({block_index, instruction_index, past_xcnt_drain}).second)
         continue;
 
       const CfgBlockView &block = cfg_views_[block_index];
       if (instruction_index >= block.instructions.size()) {
         for (size_t successor : block.successors)
-          worklist.emplace_back(successor, 0);
+          worklist.emplace_back(successor, 0, past_xcnt_drain);
         continue;
       }
 
       const CfgInstructionView &view = block.instructions[instruction_index];
       const Instruction &instruction = *view.instruction;
-      if (instruction_emits_counter_wait(instruction, counter, arch)) {
+      // The explicit wait separates the first looked-ahead bank change from
+      // MODE writes. Any later adjacent MODE write itself already drains X.
+      const bool xcnt_drained = past_xcnt_drain || (may_track_xcnt && is_xcnt_drain(instruction));
+      if ((counter == WaitCounterKind::X && xcnt_drained) ||
+          instruction_emits_counter_wait(instruction, counter, arch)) {
         continue;
       }
 
-      if (dependencies_checked.insert(&instruction).second) {
+      if (dependencies_checked.emplace(&instruction, xcnt_drained).second) {
         const InstDefUse du = inst_def_use_for_waitcheck(instruction, group.state_before.vgpr_msb,
                                                          arch, wavefront_size_);
         const bool may_depend_on_register =
@@ -1455,9 +1474,10 @@ private:
         if (may_depend_on_register || may_depend_on_special || may_depend_on_exec ||
             may_depend_on_order) {
           std::array<std::optional<CounterParityRequirement>, kCounterCount> requirements;
-          collect_counter_parity_requirements(
-              group, instruction, view.section_offset,
-              group.file_offset - group.section_offset + view.section_offset, arch, requirements);
+          collect_counter_parity_requirements(group, instruction, view.section_offset,
+                                              group.file_offset - group.section_offset +
+                                                  view.section_offset,
+                                              arch, requirements, xcnt_drained);
           if (const auto &requirement = requirements[counter_index(counter)]) {
             if (!strongest || requirement->required_count < strongest->required_count)
               strongest = requirement;
@@ -1473,7 +1493,7 @@ private:
       }
       if (is_program_end(instruction.mnemonic()))
         continue;
-      worklist.emplace_back(block_index, instruction_index + 1);
+      worklist.emplace_back(block_index, instruction_index + 1, xcnt_drained);
     }
     if (!worklist.empty())
       complete = false;
@@ -1599,7 +1619,9 @@ private:
       visit_dependencies(
           *dependency_state, instruction, du, current_events, arch,
           [&](const PendingEvent &event, RegisterRef reg, WaitcheckAccessKind access, uint32_t) {
-            if (event.counter == counter)
+            if (event.counter == counter &&
+                !(counter == WaitCounterKind::X && arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+                  is_xcnt_drain(instruction, state.vgpr_msb_setreg_hazard)))
               record_if_original(event, reg, access);
           });
 
@@ -1663,15 +1685,15 @@ private:
 
       ++report_.counter_parity_fields_checked;
       auto &requirement = strongest_requirements[counter_idx];
-      // LLVM inserts unconditional all-zero waits at both boundaries of every
-      // non-entry function. Do not walk the entire callee/caller continuation
-      // trying to rediscover a dependency for a boundary-policy field: on
-      // large outlined helpers that turns a linear audit into a scan of the
-      // same CFG once per counter. An immediately attributable dependency can
-      // still establish exact agreement; otherwise the field is deliberately
-      // retained as unmodeled policy below.
+      // LLVM inserts zero waits on legacy result counters at non-entry
+      // boundaries. Its split-counter ABI also excludes STORE, X, ASYNC and
+      // TENSOR. Only LLVM's actual entry and return fields get the short
+      // boundary search and policy attribution.
       const bool function_boundary_policy =
-          group.non_entry_function_prolog || is_non_entry_function_return(consumer);
+          emitted_count == 0 && counter != WaitCounterKind::Store &&
+          counter != WaitCounterKind::X && counter != WaitCounterKind::Async &&
+          counter != WaitCounterKind::Tensor &&
+          (group.non_entry_function_prolog || is_non_entry_function_return(consumer));
       bool boundary_policy_fallback = false;
       if (has_counter_parity_candidate(group.state_before, counter) &&
           (!requirement || requirement->required_count > emitted_count)) {
@@ -1888,11 +1910,7 @@ private:
   }
 
   [[nodiscard]] bool is_non_entry_function_prolog(uint64_t section_offset) const {
-    if (!current_in_callee_context_ || !current_cfg_view_index_ ||
-        *current_cfg_view_index_ >= cfg_views_.size()) {
-      return false;
-    }
-    return cfg_views_[*current_cfg_view_index_].block->start_offset() == section_offset;
+    return current_function_entry_ == section_offset;
   }
 
   [[nodiscard]] bool is_non_entry_function_return(const Instruction &instruction) const {
@@ -3907,7 +3925,7 @@ private:
   bool relative_load_disjoint_on_incoming_edges(const PendingEvent &event,
                                                 const Instruction &consumer,
                                                 rj_code_arch_t arch) {
-    if (!current_cfg_view_index_ || cfg_outputs_.empty() || current_in_callee_context_ ||
+    if (!current_cfg_view_index_ || cfg_outputs_.empty() || current_function_entry_.has_value() ||
         !relative_entry_proven_)
       return false;
     const auto &block = cfg_views_[*current_cfg_view_index_];
@@ -4575,7 +4593,7 @@ private:
   std::optional<size_t> current_cfg_view_index_;
   std::span<const PendingState> cfg_outputs_;
   bool relative_entry_proven_ = false;
-  bool current_in_callee_context_ = false;
+  std::optional<uint64_t> current_function_entry_;
   std::optional<uint16_t> current_call_return_sreg_;
   std::map<std::tuple<uint64_t, uint64_t, WaitCounterKind, bool, bool>, bool> feasible_path_cache_;
   std::map<size_t, SharedReachability> reverse_reachability_cache_;
