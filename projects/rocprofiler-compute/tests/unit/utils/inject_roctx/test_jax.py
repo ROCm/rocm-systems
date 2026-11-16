@@ -173,6 +173,20 @@ def test_jax_pmap_call_emits_pmap_marker(monkeypatch):
     assert pushes[0]["backend"] == "jax"
 
 
+def test_jax_pmap_method_binds_self(monkeypatch):
+    jax_mod, _compiled_type, _primitive_type = install_jax_backend(monkeypatch)
+    pushes = record_scopes(monkeypatch)
+
+    class Worker:
+        @jax_mod.pmap
+        def step(self, value):
+            return value
+
+    assert Worker().step(1) == 1
+    assert [item["marker"] for item in pushes] == ["jax.pmap.step"]
+    assert pushes[0]["backend"] == "jax"
+
+
 def test_jax_shard_map_call_emits_shard_map_marker(monkeypatch):
     jax_mod, _compiled_type, _primitive_type = install_jax_backend(monkeypatch)
     pushes = record_scopes(monkeypatch)

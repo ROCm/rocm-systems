@@ -10,6 +10,7 @@ factories, and Primitive.bind_with_trace with ROCTX ranges.
 
 import importlib.util
 import threading
+import types
 from pathlib import Path
 from typing import Any, Callable, List
 
@@ -306,6 +307,11 @@ class _RoctxMappedCallable:
         marker_prefix = object.__getattribute__(self, "_marker_prefix")
         marker = f"{marker_prefix}.{_compiled_function_name(compiled)}"
         return _run_with_jax_range(marker, compiled, *args, **kwargs)
+
+    def __get__(self, obj: object, objtype: object = None) -> object:
+        if obj is None:
+            return self
+        return types.MethodType(self, obj)
 
     def __getattr__(self, name: str) -> object:
         return getattr(self._compiled, name)
