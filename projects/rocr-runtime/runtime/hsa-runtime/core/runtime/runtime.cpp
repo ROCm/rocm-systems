@@ -2969,6 +2969,15 @@ hsa_status_t Runtime::Load() {
 
   flag_.Refresh();
 
+  if (flag_.device_mem_no_host_access()) {
+    fprintf(stderr,
+            "HSA_DEVICE_MEM_NO_HOST_ACCESS set: CPU access to GPU device memory will fault\n");
+    if (rocr::Flag::IsEnvVarTruthy("HSA_USE_UDMABUF"))
+      fprintf(stderr,
+              "HSA_DEVICE_MEM_NO_HOST_ACCESS set: HSA_USE_UDMABUF is ignored for device-local "
+              "memory\n");
+  }
+
   thunkLoader_ = new ThunkLoader();
   thunkLoader_->LoadThunkApiTable();
 

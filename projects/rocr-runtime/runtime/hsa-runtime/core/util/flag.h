@@ -233,6 +233,10 @@ class Flag {
     var = os::GetEnvVar("HSA_DISABLE_FRAGMENT_ALLOCATOR");
     disable_fragment_alloc_ = (var == "1") ? true : false;
 
+    // Opt-in debug switch: make GPU device-local memory (all pools) non-host-accessible so
+    // that CPU loads/stores fault instead of working through the implicit CPU mapping.
+    device_mem_no_host_access_ = IsEnvVarTruthy("HSA_DEVICE_MEM_NO_HOST_ACCESS");
+
     var = os::GetEnvVar("HSA_ENABLE_SDMA_HDP_FLUSH");
     enable_sdma_hdp_flush_ = (var == "0") ? false : true;
 
@@ -441,6 +445,8 @@ class Flag {
 
   bool disable_fragment_alloc() const { return disable_fragment_alloc_; }
 
+  bool device_mem_no_host_access() const { return device_mem_no_host_access_; }
+
   bool rev_copy_dir() const { return rev_copy_dir_; }
 
   bool fine_grain_pcie() const { return fine_grain_pcie_; }
@@ -627,6 +633,7 @@ class Flag {
   bool report_tool_register_failures_ = false;
   bool disable_tool_register_ = false;
   bool disable_fragment_alloc_;
+  bool device_mem_no_host_access_ = false;
   bool rev_copy_dir_;
   bool fine_grain_pcie_;
   bool no_scratch_reclaim_;
