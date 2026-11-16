@@ -178,6 +178,11 @@ ncclResult_t ncclGroupStart_impl() {
 
 ncclResult_t ncclGroupStartInternal() {
   ncclGroupDepth++;
+  // If a group API event has already started, update the profilerGroupDepth so that the depth
+  // updates correctly for nested ncclGroupStart[Internal] and ncclGroupEnd[Internal] calls
+  if (ncclProfilerApiState.profilerGroupDepth > 0) {
+    ncclProfilerApiState.profilerGroupDepth++;
+  }
   return ncclSuccess;
 }
 

@@ -5294,11 +5294,6 @@ ncclResult_t ncclEnqueueCheck(struct ncclInfo* info) {
     WARN("%s: communicator was revoked", info->opName);
     return ncclGroupErrCheck(ncclInvalidUsage);
   }
-  // Profiler - If a group API event has already started, update the profilerGroupDepth so that the depth
-  // updates correctly for implicit ncclGroupStartInternal and ncclGroupEndInternal calls
-  if (ncclProfilerApiState.profilerGroupDepth > 0) {
-    ncclProfilerApiState.profilerGroupDepth++;
-  }
   NCCLCHECK(ncclGroupStartInternal());
   ret = ncclSuccess;
   int devOld = -1;
