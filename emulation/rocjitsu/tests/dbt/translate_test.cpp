@@ -25,6 +25,7 @@
 #include "rocjitsu/code/dbt/virtual_lds.h"
 #include "rocjitsu/code/dbt/waitcnt_translator.h"
 #include "rocjitsu/code/kernel_descriptor_abi.h"
+#include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/code/patch/kernel_text_layout.h"
@@ -3791,6 +3792,37 @@ TEST(CodeObjectPatcher, SupportsRelative64AddendIntoText) {
   CodeObjectPatcher out_patcher(out_co);
   EXPECT_FALSE(out_patcher.has_unsupported_relocation_to_text())
       << "RELATIVE64 addend outside .text must be accepted";
+}
+
+TEST(BinaryTranslator, ExpandsWaitWithoutTextPadding) {
+  // The entire source .text is one CDNA4 wait for all counters and s_endpgm.
+  const auto image = make_minimal_amdgpu_elf_with_descriptor_after_text({0xbf8c0000, 0xbf810000});
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto result = translator.translate(source);
+  ASSERT_TRUE(result.dispatchable()) << result.diagnostics.front().message;
+  AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  const Section *text = find_section(translated, ".text");
+  ASSERT_NE(text, nullptr);
+  const auto descriptors =
+      scan_kernel_descriptors(result.elf_bytes, text->sectionOffset(), text->size());
+  ASSERT_EQ(descriptors.size(), 1u);
+  const uint64_t entry = descriptors.front().entry_text_offset;
+  ASSERT_EQ(entry % sizeof(uint32_t), 0u);
+  auto expected = encode_waitcnt_gfx12(decode_waitcnt_gfx9(0));
+  ASSERT_GT(expected.size(), 1u);
+  constexpr auto endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
+  static_assert(endpgm.succeeded());
+  expected.push_back(endpgm.value());
+  const std::span words(reinterpret_cast<const uint32_t *>(text->data()),
+                        text->size() / sizeof(uint32_t));
+  ASSERT_LE(entry / sizeof(uint32_t) + expected.size(), words.size());
+  EXPECT_TRUE(
+      std::ranges::equal(words.subspan(entry / sizeof(uint32_t), expected.size()), expected));
+  EXPECT_EQ(find_section(translated, ".rj_translations"), nullptr);
 }
 
 TEST(BinaryTranslator, InlineExpansionAvoidsCaveBranchOverflow) {
