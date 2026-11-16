@@ -264,10 +264,13 @@ amdsmi_status_t AMDSmiGPUDevice::get_compute_process_list_impl(
     // If we cannot get the info from sysfs, save the minimum info
     if (status_code != amdsmi_status_t::AMDSMI_STATUS_SUCCESS) {
       amdsmi_proc_info.pid = rsmi_proc_info.process_id;
-      // The memory sizes have no "not available" value: an unknown VRAM stays 0.
-      if (rsmi_proc_info.vram_usage != UINT64_MAX) {
-        amdsmi_proc_info.memory_usage.vram_mem = rsmi_proc_info.vram_usage;
-      }
+    }
+    // KFD counts allocations whether mapped or not, fdinfo the buffers every DRM
+    // client maps (graphics too): each can miss some, so VRAM is the larger. An
+    // unknown KFD size (all-ones) adds nothing.
+    if (rsmi_proc_info.vram_usage != UINT64_MAX) {
+      amdsmi_proc_info.memory_usage.vram_mem =
+          std::max(amdsmi_proc_info.memory_usage.vram_mem, rsmi_proc_info.vram_usage);
     }
 
     // Copy the kfd stats from rsmi_process_info_t to amdsmi_proc_info_t
@@ -275,11 +278,16 @@ amdsmi_status_t AMDSmiGPUDevice::get_compute_process_list_impl(
     amdsmi_proc_info.evicted_time = rsmi_proc_info.evicted_time;
     amdsmi_proc_info.sdma_usage = rsmi_proc_info.sdma_usage;
 
-    // A KFD process reports, as mem, the VRAM KFD holds for it on this GPU across all
-    // of its contexts; rocm_smi summed that into vram_usage (UINT64_MAX: unknown).
-    if (rsmi_proc_info.vram_usage > 0 && rsmi_proc_info.vram_usage != UINT64_MAX) {
-      amdsmi_proc_info.mem = rsmi_proc_info.vram_usage;
+    // mem is the sum of memory_usage on every path, so its meaning does not
+    // change with the sources the sizes came from. A sum that does not fit stops
+    // one below all-ones, as rocm_smi caps KFD's sizes, rather than wrap.
+    constexpr uint64_t kLargestSize = std::numeric_limits<uint64_t>::max() - 1;
+    const auto& usage = amdsmi_proc_info.memory_usage;
+    uint64_t mem = 0;
+    for (const uint64_t size : {usage.vram_mem, usage.gtt_mem, usage.cpu_mem}) {
+      mem = size > kLargestSize - mem ? kLargestSize : mem + size;
     }
+    amdsmi_proc_info.mem = mem;
 
     return status_code;
   };

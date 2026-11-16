@@ -241,6 +241,47 @@ TEST(GpuUnit, ProcessListFailsForARunningProcessThatCannotBePlaced) {
             AMDSMI_STATUS_UNEXPECTED_DATA);
 }
 
+TEST(GpuUnit, ProcessListVramIsTheLargerCountAndMemTheSum) {
+  ScopedAmdsmiInit smi_init;
+  MockProcessRoots roots;
+  // KFD places the processes on this GPU through a queue. For the first it
+  // reports less VRAM than its fdinfo does (7 bytes), for the second more (it
+  // also counts allocations its DRM client has not mapped), for the third the
+  // largest size it reports (all-ones reads as unknown), so that mem would wrap.
+  constexpr uint32_t kFdinfoMore = 4253;
+  constexpr uint32_t kKfdMore = 4254;
+  constexpr uint32_t kKfdLargest = 4255;
+  constexpr uint64_t kKfdVram = 8 * 1024 * 1024;
+  constexpr uint64_t kLargestVram = std::numeric_limits<uint64_t>::max() - 1;
+  for (const auto& [pid, kfd_vram] : {std::pair<uint32_t, uint64_t>{kFdinfoMore, 7},
+                                      std::pair<uint32_t, uint64_t>{kKfdMore, kKfdVram},
+                                      std::pair<uint32_t, uint64_t>{kKfdLargest, kLargestVram}}) {
+    const std::string dir = std::to_string(pid);
+    roots.kfd().WriteFile(dir + "/queues/0/gpuid", std::to_string(kKfdGpuId) + "\n");
+    AddKfdFilesForEveryGpu(&roots.kfd(), dir);
+    roots.kfd().WriteFile(dir + "/vram_" + std::to_string(kKfdGpuId), std::to_string(kfd_vram));
+    AddProcess(&roots.proc(), pid, kBdfText);
+  }
+
+  TestGpu gpu;
+  ScopedKfdNode kfd_node(kKfdGpuId, gpu.index());
+  WaitOutProcessListCache();
+  uint32_t num_processes = 4;
+  amdsmi_proc_info_t list[4] = {};
+  ASSERT_EQ(amdsmi_get_gpu_process_list(gpu.handle(), &num_processes, list), AMDSMI_STATUS_SUCCESS);
+  ASSERT_EQ(num_processes, 3U);
+  for (const amdsmi_proc_info_t& proc : {list[0], list[1], list[2]}) {
+    const uint64_t vram = proc.pid == kKfdLargest ? kLargestVram
+                          : proc.pid == kKfdMore  ? kKfdVram
+                                                  : kVram;
+    EXPECT_EQ(proc.memory_usage.vram_mem, vram) << "pid " << proc.pid;
+    EXPECT_EQ(proc.memory_usage.gtt_mem, kGtt) << "pid " << proc.pid;
+    // A sum that does not fit stops one below all-ones.
+    const uint64_t mem = proc.pid == kKfdLargest ? kLargestVram : vram + kGtt + kCpu;
+    EXPECT_EQ(proc.mem, mem) << "pid " << proc.pid;
+  }
+}
+
 TEST(GpuUnit, ProcessListFailsWhenAnFdinfoFileCannotBeRead) {
   ScopedAmdsmiInit smi_init;
   MockProcessRoots roots;

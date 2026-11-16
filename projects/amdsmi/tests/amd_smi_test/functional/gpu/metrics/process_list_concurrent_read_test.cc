@@ -56,6 +56,10 @@ const uint64_t kPageSize = static_cast<uint64_t>(sysconf(_SC_PAGESIZE));
 // VRAM the helper holds on GPU `gpu`: 2 MiB steps tell the GPUs apart, and
 // `tag` pages tell concurrent runs of this test apart.
 uint64_t HelperVram(size_t gpu, uint32_t tag) { return (gpu + 1) * (2ULL << 20) + tag * kPageSize; }
+// Of it, the helper leaves this much unmapped. KFD counts it and the helper's
+// DRM client does not, so in the initial PID namespace the VRAM each list
+// reports is the VRAM KFD reports for the helper on that GPU.
+constexpr uint64_t kUnmappedVram = 1ULL << 20;
 
 struct HelperGpu {
   uint32_t kfd_gpu_id;
@@ -63,8 +67,9 @@ struct HelperGpu {
 };
 
 // Runs in the forked helper, system calls only: allocates HelperVram(i, tag)
-// on GPU i through KFD and maps it there, so that its DRM client on GPU i
-// reports it too, writes {step, errno} to `fd`, then waits to be killed.
+// on GPU i through KFD and maps all but kUnmappedVram of it there, so that its
+// DRM client on GPU i reports that part, writes {step, errno} to `fd`, then
+// waits to be killed.
 [[noreturn]] void RunHelper(const std::vector<HelperGpu>& gpus, uint32_t tag, pid_t parent,
                             int fd) {
   // Never outlive the test, even if it crashes. The signal follows the forking
@@ -81,11 +86,14 @@ struct HelperGpu {
     vm.gpu_id = gpus[i].kfd_gpu_id;
     kfd_ioctl_alloc_memory_of_gpu_args mem{};
     mem.va_addr = (1ULL << 40) + (static_cast<uint64_t>(i) << 32);
-    mem.size = HelperVram(i, tag);
+    mem.size = HelperVram(i, tag) - kUnmappedVram;
     mem.gpu_id = gpus[i].kfd_gpu_id;
     mem.flags =
         static_cast<uint32_t>(KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE |
                               KFD_IOC_ALLOC_MEM_FLAGS_NO_SUBSTITUTE);
+    kfd_ioctl_alloc_memory_of_gpu_args unmapped = mem;
+    unmapped.va_addr = mem.va_addr + (1ULL << 31);
+    unmapped.size = kUnmappedVram;
     uint32_t map_gpu_id = gpus[i].kfd_gpu_id;
     kfd_ioctl_map_memory_to_gpu_args map{};
     map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&map_gpu_id);
@@ -94,7 +102,8 @@ struct HelperGpu {
       report.step = HelperReport::kOpenRenderNode;
     } else if (ioctl(kfd, kIocAcquireVm, &vm) != 0) {
       report.step = HelperReport::kAcquireVm;
-    } else if (ioctl(kfd, kIocAllocMemoryOfGpu, &mem) != 0) {
+    } else if (ioctl(kfd, kIocAllocMemoryOfGpu, &mem) != 0 ||
+               ioctl(kfd, kIocAllocMemoryOfGpu, &unmapped) != 0) {
       report.step = HelperReport::kAllocVram;
     } else {
       map.handle = mem.handle;
@@ -110,17 +119,12 @@ struct HelperGpu {
 
 enum Outcome { kRight, kWrongVram, kMissing, kEmpty, kError, kNumOutcomes };
 
-// The VRAM one GPU's list must report for the helper. In the initial PID
-// namespace, mem holds the VRAM KFD reports for it. In another, KFD's
-// statistics are not available, and vram_mem holds what its DRM client on that
-// GPU reports, the helper's VRAM there and the GPU's page tables for it.
-struct ExpectedVram {
-  bool from_kfd;
-  uint64_t bytes;
-};
-
-// Looks the helper up in one GPU's process list.
-Outcome QueryOnce(amdsmi_processor_handle gpu, pid_t pid, const ExpectedVram& vram,
+// Looks the helper up in one GPU's process list, which must report `vram` for
+// it: the larger of the VRAM KFD reports for it on that GPU and what its DRM
+// client there reports, the part it mapped and the GPU's page tables for it.
+// In a PID namespace other than the initial one, KFD's statistics are not
+// available.
+Outcome QueryOnce(amdsmi_processor_handle gpu, pid_t pid, uint64_t vram,
                   std::vector<amdsmi_proc_info_t>* procs) {
   uint32_t count = static_cast<uint32_t>(procs->size());
   amdsmi_status_t status = amdsmi_get_gpu_process_list(gpu, &count, procs->data());
@@ -134,8 +138,7 @@ Outcome QueryOnce(amdsmi_processor_handle gpu, pid_t pid, const ExpectedVram& vr
   for (uint32_t i = 0; i < count && i < procs->size(); ++i) {
     const amdsmi_proc_info_t& proc = (*procs)[i];
     if (proc.pid == static_cast<uint32_t>(pid)) {
-      return (vram.from_kfd ? proc.mem : proc.memory_usage.vram_mem) == vram.bytes ? kRight
-                                                                                   : kWrongVram;
+      return proc.memory_usage.vram_mem == vram ? kRight : kWrongVram;
     }
   }
   return kMissing;
@@ -255,14 +258,12 @@ void TestProcessListConcurrentRead::Run(void) {
   const pid_t kfd_pid = kfd_pids[0];
   stopper.kfd_pid = kfd_pid;
   const bool initial_pid_namespace = InInitialPidNamespace();
-  std::vector<ExpectedVram> vram(num_gpus);
+  std::vector<uint64_t> vram(num_gpus);
   for (size_t i = 0; i < num_gpus; ++i) {
-    if (initial_pid_namespace) {
-      vram[i] = {true, HelperVram(i, tag)};
-    } else {
-      vram[i] = {false, DrmVramBytes(helper, gpus[i].render_node)};
-      ASSERT_GE(vram[i].bytes, HelperVram(i, tag)) << "GPU " << i << "'s fdinfo misses the helper";
-    }
+    vram[i] = DrmVramBytes(helper, gpus[i].render_node);
+    ASSERT_GE(vram[i], HelperVram(i, tag) - kUnmappedVram)
+        << "GPU " << i << "'s fdinfo misses the helper";
+    if (initial_pid_namespace) vram[i] = std::max(vram[i], HelperVram(i, tag));
   }
 
   // Lists cached before the helper started are served for up to

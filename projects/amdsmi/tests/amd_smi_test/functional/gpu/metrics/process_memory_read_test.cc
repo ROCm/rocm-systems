@@ -12,6 +12,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <chrono>
 #include <cinttypes>
@@ -124,10 +125,10 @@ TestProcessMemoryRead::TestProcessMemoryRead() : TestBase() {
   set_description(
       "This test verifies that amdsmi_get_gpu_process_list reports a process's "
       "VRAM, GTT and CPU memory in bytes, counting its DRM client once however "
-      "many fds refer to it. In a PID namespace other than the initial one, "
-      "where KFD's statistics for the process are not available, it verifies "
-      "that they are reported so and that mem is the sum of the memory fdinfo "
-      "reports.");
+      "many fds refer to it, VRAM as the larger of KFD's and fdinfo's counts, "
+      "and mem as the sum of the three. In a PID namespace other than the "
+      "initial one, where KFD's statistics for the process are not available, "
+      "it verifies that they are reported so.");
 }
 
 TestProcessMemoryRead::~TestProcessMemoryRead(void) {}
@@ -249,22 +250,24 @@ void TestProcessMemoryRead::Run(void) {
   ASSERT_TRUE(now == expected) << "The helper's DRM memory changed during the query";
 
   // fdinfo sizes are KiB, and the helper's 1 + kDupFds fds all name one client.
-  EXPECT_EQ(found.memory_usage.vram_mem, expected.vram * 1024);
-  EXPECT_EQ(found.memory_usage.gtt_mem, expected.gtt * 1024);
-  EXPECT_EQ(found.memory_usage.cpu_mem, expected.cpu * 1024);
+  uint64_t expected_vram = expected.vram * 1024;
   if (InInitialPidNamespace()) {
-    // KFD names the helper by its PID and reports, as mem, the VRAM it holds
-    // for it.
+    // KFD names the helper by its PID and counts the VRAM it allocated, which
+    // its DRM client has not mapped, so VRAM is KFD's count.
     EXPECT_EQ(kfd_pid, helper);
-    EXPECT_EQ(found.mem, vram);
+    expected_vram = std::max<uint64_t>(expected_vram, vram);
   } else {
     // KFD's statistics for a process of another PID namespace are not
-    // available, so mem is the sum of the memory its fdinfo reports.
-    EXPECT_EQ(found.mem, (expected.vram + expected.gtt + expected.cpu) * 1024);
+    // available, so the sizes are those its fdinfo reports.
     EXPECT_EQ(found.cu_occupancy, kNotAvailable32);
     EXPECT_EQ(found.evicted_time, kNotAvailable32);
     EXPECT_EQ(found.sdma_usage, kNotAvailable64);
   }
+  EXPECT_EQ(found.memory_usage.vram_mem, expected_vram);
+  EXPECT_EQ(found.memory_usage.gtt_mem, expected.gtt * 1024);
+  EXPECT_EQ(found.memory_usage.cpu_mem, expected.cpu * 1024);
+  // mem is the sum of the three.
+  EXPECT_EQ(found.mem, expected_vram + (expected.gtt + expected.cpu) * 1024);
   IF_VERB(STANDARD) {
     std::cout << "\t**fdinfo KiB vram " << expected.vram << ", gtt " << expected.gtt << ", cpu "
               << expected.cpu << "; listed bytes vram " << found.memory_usage.vram_mem << ", gtt "
@@ -288,4 +291,8 @@ void TestProcessMemoryRead::Run(void) {
             AMDSMI_STATUS_INSUFFICIENT_SIZE);
   EXPECT_EQ(amdsmi_get_gpu_compute_process_gpus(helper, gpu_indices.data(), nullptr),
             AMDSMI_STATUS_INVAL);
+  // Without GTT or CPU memory, mem equals vram_mem whether or not it is the sum.
+  if (expected.gtt + expected.cpu == 0) {
+    GTEST_SKIP() << "fdinfo reports no GTT or CPU memory, so mem cannot be told from vram_mem";
+  }
 }
