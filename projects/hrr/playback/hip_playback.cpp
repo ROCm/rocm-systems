@@ -2542,7 +2542,7 @@ static int hrr_replay_fill_byte() {
 
 // Zero-initialise a host-synchronous replay allocation, ordered.
 //
-// ROCM-27985. hipMalloc is host-synchronous by contract, so the recorded
+// hipMalloc is host-synchronous by contract, so the recorded
 // program is free to use the returned pointer immediately from any stream
 // without establishing an ordering edge. The zero-init injected here must
 // therefore be complete before the allocation handler returns.
@@ -3268,7 +3268,7 @@ hipError_t playback_hipExtMallocWithFlags(PlaybackContext& ctx, const uint8_t* p
 // hipMallocAsync:  ret(4) dev_ptr(8) size(8) stream(8)
 // hipMallocFromPoolAsync: ret(4) dev_ptr(8) size(8) mem_pool(8) stream(8)
 //
-// These do not need hrr_zero_init_alloc()'s drain (ROCM-27985): the zero-init is
+// These do not need hrr_zero_init_alloc()'s drain: the zero-init is
 // enqueued on the allocating stream, and stream-ordered allocations are only
 // usable on that stream until the recorded program itself establishes an
 // ordering edge to another stream. Replaying that edge carries the zero-init
