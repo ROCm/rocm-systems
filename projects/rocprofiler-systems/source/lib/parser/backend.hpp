@@ -5,6 +5,7 @@
 
 #include "parser/schema.hpp"
 
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
@@ -23,15 +24,15 @@ namespace rocprofsys::parser
  * combine several sources, such as rocprofiler-sdk domains and the runtimes for
  * --traces. accepts() is the shared check.
  */
-class backend
+class backend_interface
 {
 public:
-    virtual ~backend() = default;
+    virtual ~backend_interface() = default;
 
-    backend(const backend&)            = delete;
-    backend& operator=(const backend&) = delete;
-    backend(backend&&)                 = delete;
-    backend& operator=(backend&&)      = delete;
+    backend_interface(const backend_interface&)            = delete;
+    backend_interface& operator=(const backend_interface&) = delete;
+    backend_interface(backend_interface&&)                 = delete;
+    backend_interface& operator=(backend_interface&&)      = delete;
 
     [[nodiscard]] virtual std::string_view name() const = 0;
 
@@ -51,7 +52,7 @@ public:
     [[nodiscard]] bool accepts(const schema_param& param, std::string_view value) const;
 
 protected:
-    backend() = default;
+    backend_interface() = default;
 };
 
 /// Named backends. add() rejects a missing or duplicate name.
@@ -67,13 +68,13 @@ public:
 
     /// @return false, leaving the registry unchanged, when @p item is null or its
     /// name is empty or already registered.
-    bool add(std::unique_ptr<backend> item);
+    bool add(std::unique_ptr<backend_interface> item);
 
-    [[nodiscard]] const backend* find(std::string_view name) const;
+    [[nodiscard]] const backend_interface* find(std::string_view name) const;
 
 private:
-    mutable std::shared_mutex                                    m_mutex;
-    std::map<std::string, std::unique_ptr<backend>, std::less<>> m_backends;
+    mutable std::shared_mutex                                              m_mutex;
+    std::map<std::string, std::unique_ptr<backend_interface>, std::less<>> m_backends;
 };
 
 }  // namespace rocprofsys::parser

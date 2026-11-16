@@ -18,7 +18,7 @@ using namespace rocprofsys::parser;
 
 namespace
 {
-class named_backend final : public backend
+class named_backend final : public backend_interface
 {
 public:
     explicit named_backend(std::string name)
@@ -42,7 +42,7 @@ private:
     std::string m_name;
 };
 
-class fixed_backend final : public backend
+class fixed_backend final : public backend_interface
 {
 public:
     [[nodiscard]] std::string_view name() const override { return "domains"; }

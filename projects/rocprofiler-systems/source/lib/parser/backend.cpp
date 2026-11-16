@@ -15,7 +15,7 @@
 namespace rocprofsys::parser
 {
 bool
-backend::accepts(const schema_param& param, std::string_view value) const
+backend_interface::accepts(const schema_param& param, std::string_view value) const
 {
     // Without the backend name, parse_value() checks every name against the list.
     auto       listed = param;
@@ -26,7 +26,7 @@ backend::accepts(const schema_param& param, std::string_view value) const
 }
 
 bool
-backend_registry::add(std::unique_ptr<backend> item)
+backend_registry::add(std::unique_ptr<backend_interface> item)
 {
     if(!item || item->name().empty())
     {
@@ -34,7 +34,7 @@ backend_registry::add(std::unique_ptr<backend> item)
     }
     const auto                                name = std::string{ item->name() };
     const std::unique_lock<std::shared_mutex> lock{ m_mutex };
-    if(m_backends.find(name) != m_backends.end())
+    if(m_backends.contains(name))
     {
         return false;
     }
@@ -42,7 +42,7 @@ backend_registry::add(std::unique_ptr<backend> item)
     return true;
 }
 
-const backend*
+const backend_interface*
 backend_registry::find(std::string_view name) const
 {
     const std::shared_lock<std::shared_mutex> lock{ m_mutex };
