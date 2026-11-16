@@ -1,13 +1,10 @@
 # What an HRR archive contains, and what replaying one means
 
 This page states what a capture archive can and cannot contain, and what a person who
-replays one is trusting. It is the customer-facing text of
-[AIRUNTIME-2733](https://amd-hub.atlassian.net/browse/AIRUNTIME-2733), the hardening of
-capture, and [AIRUNTIME-2865](https://amd-hub.atlassian.net/browse/AIRUNTIME-2865), the
-hardening of replay against a crafted archive.
+replays one is trusting.
 
-Every task under AIRUNTIME-2733 that changes what an archive holds updates this page in the
-same change. `tools/tests/test_privacy_doc.py`, run by the ctest `hrr-generator-rules`,
+Every change to capture that changes what an archive holds updates this page in the same
+change. `tools/tests/test_privacy_doc.py`, run by the ctest `hrr-generator-rules`,
 fails when the manifest fields written by capture and the table below disagree.
 
 ## Scope
@@ -104,15 +101,15 @@ not make.
 | Sequence of successful HIP calls, with sizes, flags, device addresses, handles, thread ids | `events.bin` | — kept, replay needs it |
 | Kernel names, mangled but read back with `c++filt`; they describe the model's architecture and precision | `events.bin` | — kept, triage names the failing kernel |
 | Event timestamps, from a monotonic clock (not the date or time of day) | `events.bin` | — kept |
-| Device properties passed to `hipChooseDevice`, the whole `hipDeviceProp_t` with the device and architecture names; its UUID, LUID and PCI ids are written as zeros | `events.bin` | [AIRUNTIME-2881](https://amd-hub.atlassian.net/browse/AIRUNTIME-2881): UUID, LUID and PCI ids blanked; the rest is kept, the call's answer depends on it |
+| Device properties passed to `hipChooseDevice`, the whole `hipDeviceProp_t` with the device and architecture names; its UUID, LUID and PCI ids are written as zeros | `events.bin` | UUID, LUID and PCI ids blanked; the rest is kept, the call's answer depends on it |
 | Other structures passed into a HIP call, copied whole, such as copy, memset, graph node, allocation, pool and launch-attribute parameters. Padding, reserved and unused union bytes are copied as the caller left them | `events.bin` | — kept, replay needs it |
 | Host buffers copied to or from the device, byte for byte, unencrypted. For a serving stack this includes prompts and generated output as token ids, which the model's public tokeniser reverses, and the model weights | `blobs/` | — kept |
 | Host memory registered with `hipHostRegister`: the whole range, byte for byte, as it was at registration, whether or not it is ever copied | `blobs/` | — kept |
 | Kernel argument bytes | `events.bin` | — kept |
 | Code objects the process loaded (the application's own GPU binary code) | `code_objects/`, `blobs/` | — kept |
 | Linker input buffers passed to `hipLinkAddData`, every byte, with their names, including inputs the call rejected and inputs never linked or loaded. A SPIR-V or LLVM bitcode input keeps its compiler identification and, built with `-g`, its source and build directories; capture does not scrub them | `blobs/` | — kept |
-| Whole fat binary bundles, including targets HIP never loads | `blobs/` | [AIRUNTIME-2858](https://amd-hub.atlassian.net/browse/AIRUNTIME-2858): only the code objects HIP loads |
-| Debug and comment sections of code objects: absolute build paths, source file names, the exact compiler build | `code_objects/`, `blobs/` | [AIRUNTIME-2881](https://amd-hub.atlassian.net/browse/AIRUNTIME-2881): zeroed in code objects and uncompressed fat binaries; kept in compressed (`CCOB`) fat binaries |
+| Whole fat binary bundles, including targets HIP never loads | `blobs/` | — kept |
+| Debug and comment sections of code objects: absolute build paths, source file names, the exact compiler build | `code_objects/`, `blobs/` | zeroed in code objects and uncompressed fat binaries; kept in compressed (`CCOB`) fat binaries |
 | Strings in the code the GPU loads, such as the absolute source path a device `assert()` prints | `code_objects/`, `blobs/` | — kept, the kernel uses them; `verify` counts code objects holding an absolute path |
 | Framework allocator layout, when a region producer ran beside capture | `regions/` | — kept, written only by an opt-in producer |
 | Marker that capture is running: the boot id and the process start time in clock ticks since boot. A normal exit removes it; a process that crashes or is killed leaves it | `active` | — kept, region producers read it |
@@ -128,7 +125,7 @@ The per-process `manifest.json` also holds `pid`, `parent_pid`, `complete`, `eve
 | `clock_rate_khz`, `memory_clock_rate_khz`, `memory_bus_width`, `l2_cache_size` | yes | — |
 | `integrated`, `managed_memory`, `memory_pools_supported`, `compute_mode` | yes | — |
 | `luid_device_node_mask`, a node mask rather than an identifier | yes | — |
-| `uuid`, `pci`, `luid`: identify the individual GPU and its slot | written blank | [AIRUNTIME-2881](https://amd-hub.atlassian.net/browse/AIRUNTIME-2881) |
+| `uuid`, `pci`, `luid`: identify the individual GPU and its slot | written blank | capture |
 
 This table covers `manifest.json` only. The copy of the device properties a
 `hipChooseDevice` call keeps in `events.bin` has the same identifiers blanked, as listed above.
@@ -163,8 +160,7 @@ archive leaves the machine.
 
 ## Consent
 
-Capture writes nothing until the user who runs the process has said yes
-([AIRUNTIME-2857](https://amd-hub.atlassian.net/browse/AIRUNTIME-2857)): once, with the
+Capture writes nothing until the user who runs the process has said yes: once, with the
 line `yes` in their own file `${XDG_CONFIG_HOME:-$HOME/.config}/hrr/capture-consent`, or with `HIP_HRR_CAPTURE_CONSENT=yes`, for
 CI and containers. The variable applies to every process that inherits the environment,
 child processes and MPI ranks included; the file applies to that user on every host that
@@ -182,9 +178,6 @@ The archive is readable only by the user who captured it. Capture creates the ou
 directory 0700, every directory under it 0700 and every file 0600. An output directory that
 already exists keeps its own mode, and missing parent directories above it are created with
 the default mode (0777 minus the umask).
-[AIRUNTIME-2847](https://amd-hub.atlassian.net/browse/AIRUNTIME-2847) makes every
-write inside `pid-<pid>/` go through the directory descriptors capture checked. The root
-`manifest.json`, `NOTICE.txt` and the first lookup of `pid-<pid>/` still go by path.
-[AIRUNTIME-2878](https://amd-hub.atlassian.net/browse/AIRUNTIME-2878), still open, is to keep
-the crash-time flush without displacing the application's own crash handler. None of these changes what an
-archive contains.
+Every write inside `pid-<pid>/` goes through the directory descriptors capture checked. The
+root `manifest.json`, `NOTICE.txt` and the first lookup of `pid-<pid>/` go by path. None of
+this changes what an archive contains.

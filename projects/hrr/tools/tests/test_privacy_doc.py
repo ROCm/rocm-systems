@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 """PRIVACY.md lists what capture writes into an archive.
 
-The page is the customer text for AIRUNTIME-2733. Its device table has to name
+The page is the customer text on what an archive holds. Its device table has to name
 exactly the fields hip_capture_metadata.cpp writes into a manifest, so a task
 that adds, removes or blanks one cannot land without updating the page. Its
 inventory has to list the active marker, the hipHostRegister snapshot, the
@@ -22,14 +22,6 @@ CAPTURE_SRC = HRR.parent / "clr" / "hipamd" / "src" / "hrr"
 METADATA_CPP = CAPTURE_SRC / "hip_capture_metadata.cpp"
 NOTICE_H = HRR / "include" / "hrr" / "hrr_archive_notice.h"
 
-# The tasks under AIRUNTIME-2733 that the page links, one per statement.
-EPIC_TASKS = (
-    "AIRUNTIME-2847",
-    "AIRUNTIME-2857",
-    "AIRUNTIME-2858",
-    "AIRUNTIME-2878",
-    "AIRUNTIME-2881",
-)
 
 
 def device_fields_written() -> set:
@@ -113,10 +105,11 @@ class PrivacyDocTest(unittest.TestCase):
         self.assertIn("untrusted executable input", text)
         self.assertIn("launches their kernels on the GPU", text)
 
-    def test_links_each_epic_task(self):
+    def test_links_no_internal_tracker(self):
+        # Customers cannot open AMD's Jira, so the page names no ticket.
         text = PRIVACY.read_text(encoding="utf-8")
-        for key in EPIC_TASKS:
-            self.assertIn(f"https://amd-hub.atlassian.net/browse/{key}", text)
+        self.assertNotIn("atlassian.net", text)
+        self.assertIsNone(re.search(r"\bAIRUNTIME-\d+", text))
 
     def test_sharing_section_links_the_notice_and_does_not_copy_it(self):
         header = NOTICE_H.read_text(encoding="utf-8")
