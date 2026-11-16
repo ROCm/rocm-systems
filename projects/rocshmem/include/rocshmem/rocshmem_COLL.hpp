@@ -43,8 +43,6 @@ namespace rocshmem {
  * @param[in] source       Source address. Must be an address on the symmetric
  *                         heap.
  * @param[in] nelems       Number of data blocks transferred per pair of PEs.
- *
- * @return void
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_float_alltoall_wg(
     rocshmem_ctx_t ctx, rocshmem_team_t team, float *dest,
@@ -235,8 +233,6 @@ __device__ ATTR_NO_INLINE void rocshmem_ptrdiff_alltoall_wg(
  * @param[in] source       Source address. Must be an address on the symmetric
  *                         heap.
  * @param[in] nelems       Number of data blocks transferred per pair of PEs.
- *
- * @return void
  */
 __device__ void rocshmem_ctx_alltoallmem_wg(rocshmem_ctx_t ctx,
     rocshmem_team_t team, void *dest, const void *source, int nelems);
@@ -491,8 +487,6 @@ __device__ int rocshmem_alltoallmem_wave(
  * @param[in] source        Source address. Must be an address on the symmetric heap.
  * @param[in] source_nelems Array containing number of elements to send from each participating PE
  * @param[in] source_displs Array of offsets into source buffer for each participating PE
- *
- * @return void
  */
 
 __device__ ATTR_NO_INLINE void rocshmem_float_alltoallv_wg(rocshmem_team_t team,
@@ -665,8 +659,6 @@ __device__ ATTR_NO_INLINE void rocshmem_ptrdiff_alltoallv_wg(rocshmem_team_t tea
  * @param[in] PE_size      Number PEs participating in the reduction.
  * @param[in] pSync        Temporary sync buffer provided to ROCSHMEM. Must
  *                         be of size at least ROCSHMEM_REDUCE_SYNC_SIZE.
- *
- * @return void
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_float_broadcast_wg(
     rocshmem_ctx_t ctx, rocshmem_team_t team, float *dest,
@@ -1059,8 +1051,6 @@ __device__ ATTR_NO_INLINE void rocshmem_ptrdiff_broadcast_wg(
  * @param[in] nelems       Size of buffer to participate in the broadcast.
  * @param[in] PE_root      Root PE (relative to team) from which to broadcast.
  *
- *
- * @return void
  */
 __device__ void rocshmem_ctx_broadcastmem_wg(rocshmem_ctx_t ctx, rocshmem_team_t team,
               void *dest, const void *source, int nelems, int PE_root);
@@ -1276,8 +1266,6 @@ __device__ int rocshmem_broadcastmem_wave(rocshmem_team_t team,
  * @param[in] source       Source address. Must be an address on the symmetric
  *                         heap.
  * @param[in] nelems       Number of data blocks in source array.
- *
- * @return void
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_float_fcollect_wg(
     rocshmem_ctx_t ctx, rocshmem_team_t team, float *dest,
@@ -1392,8 +1380,6 @@ __device__ ATTR_NO_INLINE void rocshmem_ctx_ptrdiff_fcollect_wg(
  * @param[in] source       Source address. Must be an address on the symmetric
  *                         heap.
  * @param[in] nelems       Number of bytes contributed by each PE.
- *
- * @return void
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_fcollectmem_wg(rocshmem_ctx_t ctx,
     rocshmem_team_t team, void *dest, const void *source, int nelems);
@@ -4547,8 +4533,6 @@ __device__ ATTR_NO_INLINE int rocshmem_ctx_bfloat16_prod_reduce_wave(
 /**
  * @brief kernel for performing a barrier synchronization.
  * Caller enqueues the kernel on given stream
- *
- * @return void
  */
 __global__ ATTR_NO_INLINE void rocshmem_barrier_all_kernel();
 
@@ -4557,16 +4541,12 @@ __global__ ATTR_NO_INLINE void rocshmem_barrier_all_kernel();
  * Caller enqueues the kernel on given stream.
  *
  * @param[in] team  The team participating in the barrier.
- *
- * @return void
  */
 __global__ ATTR_NO_INLINE void rocshmem_barrier_kernel(rocshmem_team_t team);
 
 /**
  * @brief kernel for performing a sync_all operation.
  * Caller enqueues the kernel on given stream
- *
- * @return void
  */
 __global__ ATTR_NO_INLINE void rocshmem_sync_all_kernel();
 
@@ -4575,8 +4555,6 @@ __global__ ATTR_NO_INLINE void rocshmem_sync_all_kernel();
  * Caller enqueues the kernel on given stream.
  *
  * @param[in] team  The team participating in the sync.
- *
- * @return void
  */
 __global__ ATTR_NO_INLINE void rocshmem_team_sync_kernel(rocshmem_team_t team);
 
@@ -4589,8 +4567,6 @@ __global__ ATTR_NO_INLINE void rocshmem_team_sync_kernel(rocshmem_team_t team);
  *                    heap.
  * @param[in] source  Source address. Must be an address on the symmetric heap.
  * @param[in] size    Number of bytes to transfer per pair of PEs.
- *
- * @return void
  */
 __global__ ATTR_NO_INLINE void rocshmem_alltoallmem_kernel(rocshmem_team_t team,
                                                            void *dest,
@@ -4605,8 +4581,6 @@ __global__ ATTR_NO_INLINE void rocshmem_alltoallmem_kernel(rocshmem_team_t team,
  *                     heap.
  * @param[in] source   Source address. Must be an address on the symmetric heap.
  * @param[in] nreduce  Number of elements to reduce.
- *
- * @return void
  */
 template <typename T, ROCSHMEM_OP Op>
 __global__ ATTR_NO_INLINE void rocshmem_reduce_on_stream_kernel(rocshmem_team_t team,
@@ -4624,8 +4598,6 @@ __global__ ATTR_NO_INLINE void rocshmem_reduce_on_stream_kernel(rocshmem_team_t 
  * @param[in] source  Source address. Must be an address on the symmetric heap.
  * @param[in] nelems  Number of bytes to broadcast.
  * @param[in] pe_root Root PE (relative to team) from which to broadcast.
- *
- * @return void
  */
 __global__ ATTR_NO_INLINE void rocshmem_broadcastmem_kernel(
     rocshmem_team_t team, void *dest, const void *source, size_t nelems,
@@ -4636,8 +4608,6 @@ __global__ ATTR_NO_INLINE void rocshmem_broadcastmem_kernel(
  * The caller is blocked until the barrier is resolved.
  *
  * This function must be invoked by a single thread within the PE.
- *
- * @return void
  */
 __device__ ATTR_NO_INLINE void rocshmem_barrier_all();
 
@@ -4646,8 +4616,6 @@ __device__ ATTR_NO_INLINE void rocshmem_barrier_all();
  * The caller is blocked until the barrier is resolved.
  *
  * This function must be called as a wave-front collective.
- *
- * @return void
  */
 __device__ ATTR_NO_INLINE void rocshmem_barrier_all_wave();
 
@@ -4656,8 +4624,6 @@ __device__ ATTR_NO_INLINE void rocshmem_barrier_all_wave();
  * The caller is blocked until the barrier is resolved.
  *
  * This function must be called as a work-group collective.
- *
- * @return void
  */
 __device__ ATTR_NO_INLINE void rocshmem_barrier_all_wg();
 
@@ -4667,11 +4633,9 @@ __device__ ATTR_NO_INLINE void rocshmem_barrier_all_wg();
  *
  * This function must be invoked by a single thread within the PE.
  *
- * @param[in] handle GPU side handle.
+ * @param[in] ctx    Context with which to perform this collective.
  *
  * @param[in] team The team on which to perform barrier synchronization
- *
- * @return void
  */
 __device__ void rocshmem_ctx_barrier(rocshmem_ctx_t ctx, rocshmem_team_t team);
 
@@ -4681,11 +4645,9 @@ __device__ void rocshmem_ctx_barrier(rocshmem_ctx_t ctx, rocshmem_team_t team);
  *
  * This function must be called as a wave-front collective.
  *
- * @param[in] handle GPU side handle.
+ * @param[in] ctx    Context with which to perform this collective.
  *
  * @param[in] team The team on which to perform barrier synchronization
- *
- * @return void
  */
 __device__ void rocshmem_ctx_barrier_wave(rocshmem_ctx_t ctx, rocshmem_team_t team);
 
@@ -4695,11 +4657,9 @@ __device__ void rocshmem_ctx_barrier_wave(rocshmem_ctx_t ctx, rocshmem_team_t te
  *
  * This function must be called as a work-group collective.
  *
- * @param[in] handle GPU side handle.
+ * @param[in] ctx    Context with which to perform this collective.
  *
  * @param[in] team The team on which to perform barrier synchronization
- *
- * @return void
  */
 __device__ void rocshmem_ctx_barrier_wg(rocshmem_ctx_t ctx, rocshmem_team_t team);
 
@@ -4708,8 +4668,6 @@ __device__ void rocshmem_ctx_barrier_wg(rocshmem_ctx_t ctx, rocshmem_team_t team
  * The caller is blocked until the barrier is resolved.
  *
  * This function must be invoked by a single thread within the PE.
- *
- * @return void
  */
 __device__ void rocshmem_barrier();
 
@@ -4718,8 +4676,6 @@ __device__ void rocshmem_barrier();
  * The caller is blocked until the barrier is resolved.
  *
  * This function must be called as a wave-front collective.
- *
- * @return void
  */
 __device__ void rocshmem_barrier_wave();
 
@@ -4728,8 +4684,6 @@ __device__ void rocshmem_barrier_wave();
  * The caller is blocked until the barrier is resolved.
  *
  * This function must be called as a work-group collective.
- *
- * @return void
  */
 __device__ void rocshmem_barrier_wg();
 
@@ -4742,8 +4696,6 @@ __device__ void rocshmem_barrier_wg();
  * ensure completion of remote memory updates issued via OpenSHMEM routines.
  *
  * This function must be invoked by a single thread within the PE.
- *
- * @return void
  */
 __device__ ATTR_NO_INLINE void rocshmem_sync_all();
 
@@ -4756,8 +4708,6 @@ __device__ ATTR_NO_INLINE void rocshmem_sync_all();
  * ensure completion of remote memory updates issued via OpenSHMEM routines.
  *
  * This function must be called as a wave-front collective.
- *
- * @return void
  */
 __device__ ATTR_NO_INLINE void rocshmem_sync_all_wave();
 
@@ -4770,8 +4720,6 @@ __device__ ATTR_NO_INLINE void rocshmem_sync_all_wave();
  * ensure completion of remote memory updates issued via OpenSHMEM routines.
  *
  * This function must be called as a work-group collective.
- *
- * @return void
  */
 __device__ ATTR_NO_INLINE void rocshmem_sync_all_wg();
 
@@ -4785,10 +4733,8 @@ __device__ ATTR_NO_INLINE void rocshmem_sync_all_wg();
  *
  * This function must be invoked by a single thread within the PE.
  *
- * @param[in] handle GPU side handle.
+ * @param[in] ctx    Context with which to perform this collective.
  * @param[in] team  Handle of the team being synchronized
- *
- * @return void
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_sync(
     rocshmem_ctx_t ctx, rocshmem_team_t team);
@@ -4803,10 +4749,8 @@ __device__ ATTR_NO_INLINE void rocshmem_ctx_sync(
  *
  * This function must be called as a wave-front collective.
  *
- * @param[in] handle GPU side handle.
+ * @param[in] ctx    Context with which to perform this collective.
  * @param[in] team  Handle of the team being synchronized
- *
- * @return void
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_sync_wave(
     rocshmem_ctx_t ctx, rocshmem_team_t team);
@@ -4821,10 +4765,8 @@ __device__ ATTR_NO_INLINE void rocshmem_ctx_sync_wave(
  *
  * This function must be called as a work-group collective.
  *
- * @param[in] handle GPU side handle.
+ * @param[in] ctx    Context with which to perform this collective.
  * @param[in] team  Handle of the team being synchronized
- *
- * @return void
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_sync_wg(
     rocshmem_ctx_t ctx, rocshmem_team_t team);

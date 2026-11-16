@@ -105,12 +105,11 @@ staged path's issue latency is not amortized at small sizes.
 ROCSHMEM_QUERY_LDS_STAGE_BYTES
 ------------------------------
 
-.. cpp:function:: __host__ size_t rocshmem_query_lds_stage_bytes()
-.. cpp:function:: __device__ size_t rocshmem_query_lds_stage_bytes()
+.. cpp:function:: __host__ __device__ size_t rocshmem_query_lds_stage_bytes()
 
-  :returns: Number of bytes of dynamic LDS the LDS-staged copy path requires,
-            or ``0`` if rocSHMEM was not built with ``USE_LDS_STAGE`` or
-            ``USE_TDM``.
+   :returns: Number of bytes of dynamic LDS the LDS-staged copy path requires,
+             or ``0`` if rocSHMEM was not built with ``USE_LDS_STAGE`` or
+             ``USE_TDM``.
 
 **Description:**
 Returns the dynamic LDS allocation that the staged copy fast path wants for
@@ -143,14 +142,17 @@ routine does nothing.
 Deprecated aliases
 ------------------
 
-The routines below are the original TDM-specific names. They are retained as
-thin forwarding wrappers and will be removed in a future release.
+The routines below are the original TDM-specific names, kept so that existing
+code continues to compile.
 
-.. cpp:function:: __host__ size_t rocshmem_query_tdm_lds_bytes()
-.. cpp:function:: __device__ size_t rocshmem_query_tdm_lds_bytes()
+.. cpp:function:: __host__ __device__ size_t rocshmem_query_tdm_lds_bytes()
 
-  .. deprecated:: Use :cpp:func:`rocshmem_query_lds_stage_bytes` instead.
+   .. deprecated:: 3.9.0
+      Use :cpp:func:`rocshmem_query_lds_stage_bytes` instead. This routine
+      forwards to it unchanged and will be removed in a future release.
 
 .. cpp:function:: __device__ void rocshmem_set_tdm_lds(void *lds, size_t lds_bytes)
 
-  .. deprecated:: Use :cpp:func:`rocshmem_set_lds_stage` instead.
+   .. deprecated:: 3.9.0
+      Use :cpp:func:`rocshmem_set_lds_stage` instead. This routine forwards to
+      it unchanged and will be removed in a future release.

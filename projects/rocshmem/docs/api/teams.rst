@@ -66,11 +66,10 @@ fields of ``rocshmem_team_config_t`` are honored:
 ROCSHMEM_TEAM_MY_PE
 -------------------
 
-.. cpp:function:: __host__ int rocshmem_team_my_pe(rocshmem_team_t team)
-.. cpp:function:: __device__ int rocshmem_team_my_pe(rocshmem_team_t team)
+.. cpp:function:: __host__ __device__ int rocshmem_team_my_pe(rocshmem_team_t team)
 
-  :param team: The team to query.
-  :returns: PE ID of the caller in the provided team.
+   :param team: The team to query.
+   :returns: PE ID of the caller in the provided team.
 
 **Description:**
 This routine queries the PE ID of the caller in a team.
@@ -78,11 +77,10 @@ This routine queries the PE ID of the caller in a team.
 ROCSHMEM_TEAM_N_PES
 -------------------
 
-.. cpp:function:: __host__ int rocshmem_team_n_pes(rocshmem_team_t team)
-.. cpp:function:: __device__ int rocshmem_team_n_pes(rocshmem_team_t team)
+.. cpp:function:: __host__ __device__ int rocshmem_team_n_pes(rocshmem_team_t team)
 
-  :param team: The team to query.
-  :returns: Number of PEs in the provided team.
+   :param team: The team to query.
+   :returns: Number of PEs in the provided team.
 
 **Description:**
 This routine queries the number of PEs in a team.
