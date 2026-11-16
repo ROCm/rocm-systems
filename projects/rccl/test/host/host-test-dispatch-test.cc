@@ -18,8 +18,10 @@
 //
 // The process plumbing (fork/exec, discovery, the coverage manifest) is not covered either:
 // those are thin wrappers over syscalls with no branching logic of their own, and exercising
-// them would test the kernel. Everything else that decides WHAT runs and WHAT is reported is
-// below.
+// them would test the kernel. The exception is where the plumbing carries behaviour of its own
+// -- the waits, and runShell's handling of a signal that lands while a command is in flight --
+// which is tested with real processes because nothing else demonstrates it. Everything else
+// that decides WHAT runs and WHAT is reported is below.
 
 #include <gtest/gtest.h>
 
@@ -1999,6 +2001,70 @@ TEST(HostDispatchCoverageMicrotest, OnlyTheBinariesWithProfilesAreCounted)
     EXPECT_NE(printed.find("exporting 1 binaries"), std::string::npos) << printed;
     EXPECT_NE(printed.find("[1/1] rccl-UnitTestsMicroInit"), std::string::npos) << printed;
     EXPECT_EQ(printed.find("NeverRan"), std::string::npos) << printed;
+}
+
+// ── runShell ────────────────────────────────────────────────────────
+
+// These run real commands. There is no seam under runShell -- it IS the seam the rest of the
+// export is tested through -- and what is under test is precisely how a signal lands while a
+// command is in flight, which no stand-in can demonstrate.
+
+TEST(HostDispatchShellMicrotest, ACommandsExitStatusIsWhatIsReported)
+{
+    EXPECT_EQ(runShell("exit 7"), 7);
+    EXPECT_EQ(runShell("true"), 0);
+}
+
+TEST(HostDispatchShellMicrotest, ACommandKilledBySignalIsReportedAsAFailure)
+{
+    // The caller only decides whether this binary's coverage survives into the tracefile, and a
+    // command that died on a signal produced nothing worth keeping either way.
+    EXPECT_NE(runShell("kill -TERM $$"), 0);
+}
+
+TEST(HostDispatchShellMicrotest, ASignalArrivingDuringACommandStillReachesTheStopHandler)
+{
+    // The defect this exists for. The export used to run its llvm calls through std::system(),
+    // which POSIX has set SIGINT to SIG_IGN in the CALLING process for as long as the shell
+    // runs -- and an ignored signal is discarded rather than left pending. An interactive
+    // Ctrl-C landing while an llvm-cov was in flight, which is where nearly all of an export's
+    // wall time goes, was therefore never seen by this process: the handler did not run, the
+    // stop flag stayed clear, and the export carried on into the next binary. Measured on the
+    // built dispatcher before the fix, a SIGINT one second into the export left all 92 binaries
+    // to export and the tracefile written; after it, the export is abandoned at the binary in
+    // flight.
+    const ScopedStopHandling handling;
+
+    const std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+    const int status = runShell(fmt::format("kill -INT {}; sleep 30", ::getpid()));
+    const std::chrono::milliseconds elapsed = since(start);
+
+    EXPECT_NE(g_stopRequested, 0) << "the signal never reached the handler";
+    EXPECT_NE(status, 0) << "a command ended by the stop did not finish its work";
+    // Generous for a loaded machine, and far below the 30 s the command would otherwise take:
+    // anything near that means the stop was noticed only once the command finished of its own
+    // accord.
+    EXPECT_LT(elapsed, std::chrono::seconds{5})
+        << "the stop took " << elapsed.count() << " ms to end a command in flight";
+}
+
+TEST(HostDispatchShellMicrotest, ACommandDoesNotOutliveTheRunThatWasStopped)
+{
+    // Noticing the stop is only half of it. The stop that matters in CI is a watchdog's SIGTERM
+    // addressed to this pid alone, which the command never gets a copy of, and the watchdog is
+    // counting the seconds to a SIGKILL that would leave an llvm-cov with minutes of work left
+    // running on the node with nobody to reap it. So the command is ended here rather than
+    // merely abandoned.
+    const ScopedStopHandling handling;
+    const ScopedDir dir("rccl-host-dispatch-shell");
+    const std::string marker = (std::filesystem::path(dir.path()) / "outlived").string();
+
+    runShell(fmt::format("kill -TERM {}; sleep 2; touch '{}'", ::getpid(), marker));
+
+    // Past when the command would have written the marker had it been left to run.
+    std::this_thread::sleep_for(std::chrono::seconds{3});
+    EXPECT_FALSE(std::filesystem::exists(marker))
+        << "the command outlived the stop and wrote " << marker;
 }
 
 // ── coverageExportRequested ──────────────────────────────────────────

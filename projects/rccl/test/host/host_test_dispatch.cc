@@ -1910,14 +1910,80 @@ std::string mergeLcovTracefiles(const std::vector<std::string> &contents)
 // a test without llvm-profdata and llvm-cov on the machine.
 using CommandFn = std::function<int(const std::string &)>;
 
+// Wait for the shell child *pid* and return the exit status to report for it, ending it early
+// if the run is asked to stop while it is still going.
+//
+// The stop is acted on here rather than left to the terminal. The child is in its own process
+// group -- see runShell -- so an interactive Ctrl-C does not reach it, and a watchdog's SIGTERM
+// is addressed to this pid alone and never did. Either way the handler sets g_stopRequested and
+// wakes this wait, which then ends the child the same way a test child's deadline does: SIGTERM
+// to the group first, SIGKILL after the grace, so an llvm-cov with minutes of work left does
+// not outlive the run that asked for it.
+int waitForShellChild(pid_t pid)
+{
+    bool termed = false;
+    std::optional<std::chrono::steady_clock::time_point> killAt;
+    for (;;) {
+        int status = 0;
+        const pid_t done = waitpid(pid, &status, WNOHANG);
+        if (done == pid) {
+            return WIFEXITED(status) ? WEXITSTATUS(status) : 1;
+        }
+        if (done < 0 && errno != EINTR) {
+            return 1;
+        }
+        const auto now = std::chrono::steady_clock::now();
+        if (g_stopRequested != 0 && !termed) {
+            signalChildGroup(pid, SIGTERM);
+            termed = true;
+            killAt = now + kTerminateGrace;
+        } else if (termed && killAt && now >= *killAt) {
+            signalChildGroup(pid, SIGKILL);
+            killAt.reset();
+        }
+        // Woken by the SIGCHLD this child's exit raises, or by a stop; bounded either way, so a
+        // missed wake costs latency rather than the wait.
+        waitForWake(killAt);
+    }
+}
+
 // Run *command* through /bin/sh and return its exit status.
+//
+// A hand-rolled fork/exec rather than std::system() because of what system() does to signals:
+// POSIX has it set SIGINT and SIGQUIT to SIG_IGN *in the calling process* for as long as the
+// shell runs. An ignored signal is discarded rather than left pending, so an interactive Ctrl-C
+// arriving while an llvm-cov is in flight -- which is where nearly all of a coverage export's
+// wall time goes -- was never seen by this process at all: the stop handler did not run, and the
+// export carried on into the next binary. Only a Ctrl-C landing in the microseconds between two
+// calls was caught. Forking ourselves leaves the handlers installed throughout.
 int runShell(const std::string &command)
 {
-    const int status = std::system(command.c_str());
-    if (status < 0) {
+    // Nothing buffered here should be written twice, once by each side of the fork.
+    std::fflush(nullptr);
+
+    const pid_t pid = fork();
+    if (pid < 0) {
+        fmt::print(stderr, "host-test-dispatch: fork failed: {}\n", std::strerror(errno));
         return 1;
     }
-    return WIFEXITED(status) ? WEXITSTATUS(status) : 1;
+    if (pid == 0) {
+        // The other half of system()'s behaviour, and the half that was wanted: the command
+        // itself dies on a signal rather than inheriting this process's handling of one.
+        struct sigaction dfl {};
+        dfl.sa_handler = SIG_DFL;
+        sigemptyset(&dfl.sa_mask);
+        sigaction(SIGINT, &dfl, nullptr);
+        sigaction(SIGTERM, &dfl, nullptr);
+        sigaction(SIGCHLD, &dfl, nullptr);
+        // Die with the dispatcher even if it is killed outright, and have a group of our own so
+        // the wait above can signal the whole tree -- the same reasoning as spawnChild.
+        prctl(PR_SET_PDEATHSIG, SIGKILL);
+        setpgid(0, 0);
+        execl("/bin/sh", "sh", "-c", command.c_str(), static_cast<char *>(nullptr));
+        _exit(127);
+    }
+    setpgid(pid, pid);
+    return waitForShellChild(pid);
 }
 
 // The llvm tool named *name*, preferring the ROCm toolchain's own.
