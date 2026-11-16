@@ -27,6 +27,7 @@
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/correlation_id.hpp"
+#include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tracing/fwd.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
@@ -56,6 +57,7 @@ template <typename DomainT, typename... Args>
 inline bool
 context_filter(const context::context* ctx, DomainT domain, Args... args)
 {
+    if(registration::fork_child_abandoned()) return false;
     if constexpr(std::is_same<DomainT, rocprofiler_buffer_tracing_kind_t>::value)
     {
         return (ctx->buffered_tracer && ctx->buffered_tracer->domains(domain, args...));
@@ -81,6 +83,8 @@ populate_contexts(rocprofiler_callback_tracing_kind_t callback_domain_idx,
                   external_correlation_id_map_t&      extern_corr_ids,
                   ClearContainersT = ClearContainersT{})
 {
+    if(registration::fork_child_abandoned()) return;
+
     if constexpr(ClearContainersT::value)
     {
         callback_contexts.clear();
@@ -123,6 +127,8 @@ populate_contexts(DomainIdx                       domain_idx,
                   external_correlation_id_map_t&  extern_corr_ids,
                   ClearContainersT = ClearContainersT{})
 {
+    if(registration::fork_child_abandoned()) return;
+
     if constexpr(ClearContainersT::value)
     {
         contexts.clear();
@@ -173,6 +179,8 @@ populate_contexts(rocprofiler_callback_tracing_kind_t callback_domain_idx,
                   external_correlation_id_map_t&      extern_corr_ids,
                   ClearContainersT = ClearContainersT{})
 {
+    if(registration::fork_child_abandoned()) return;
+
     if constexpr(ClearContainersT::value)
     {
         callback_contexts.clear();

@@ -32,6 +32,7 @@
 #include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_profiler.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
+#include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/core.hpp"
 
 #include <rocprofiler-sdk/buffer_tracing.h>
@@ -202,6 +203,7 @@ get_retired_contexts()
 context_snapshot_ptr_t
 current_registered_contexts()
 {
+    if(registration::fork_child_abandoned()) return {};
     auto* _pub = get_published_snapshot();
     if(!_pub) return {};
     return load_snapshot(*_pub);
@@ -258,6 +260,7 @@ get_registered_context_slot(uint64_t handle)
 context*
 lookup_registered_context(uint64_t handle)
 {
+    if(registration::fork_child_abandoned()) return nullptr;
     if(handle < get_contexts_offset()) return nullptr;
 
     auto _snapshot = current_registered_contexts();
@@ -384,6 +387,7 @@ context_array_t&
 get_active_contexts(context_array_t& data, context_filter_t filter)
 {
     data.clear();
+    if(registration::fork_child_abandoned()) return data;
     auto num_ctx = get_num_active_contexts().load(std::memory_order_acquire);
     if(num_ctx <= 0) return data;
 
@@ -420,6 +424,7 @@ get_active_contexts(context_filter_t filter)
 const context*
 get_active_context(rocprofiler_context_id_t id)
 {
+    if(registration::fork_child_abandoned()) return nullptr;
     if(get_num_active_contexts().load(std::memory_order_acquire) > 0)
     {
         for(auto& itr : get_active_contexts_impl())
@@ -456,6 +461,7 @@ pop_client(uint32_t value)
 std::optional<rocprofiler_context_id_t>
 allocate_context()
 {
+    if(registration::fork_child_abandoned()) return {};
     // ... allocate any internal space needed to handle another context ...
     auto _lk = std::unique_lock<std::mutex>{get_contexts_mutex()};
 
@@ -503,6 +509,7 @@ validate_context(const context* cfg)
 rocprofiler_status_t
 start_context(rocprofiler_context_id_t context_id)
 {
+    if(registration::fork_child_abandoned()) return ROCPROFILER_STATUS_ERROR_FINALIZED;
     if(context_id.handle < get_contexts_offset()) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
 
     // Held for the rest of the function: the service starts below run without the contexts mutex,
@@ -660,6 +667,7 @@ start_context(rocprofiler_context_id_t context_id)
 rocprofiler_status_t
 stop_context(rocprofiler_context_id_t idx)
 {
+    if(registration::fork_child_abandoned()) return ROCPROFILER_STATUS_ERROR_FINALIZED;
     std::atomic<const context*>* slot      = nullptr;
     const context*               _expected = nullptr;
     // Held for the rest of the function. The teardown below runs without the contexts mutex, so

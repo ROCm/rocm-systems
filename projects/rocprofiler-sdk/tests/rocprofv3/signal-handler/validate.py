@@ -53,7 +53,7 @@ def find_json_files(output_dir):
 
 def load_json(path):
     """Load and validate a JSON file. Raises on truncated/corrupt JSON."""
-    with open(path, "r") as f:
+    with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -85,7 +85,7 @@ def test_json_is_valid(output_dir):
     for path in files:
         try:
             load_json(path)
-        except json.JSONDecodeError as e:
+        except (UnicodeDecodeError, json.JSONDecodeError) as e:
             assert False, (
                 f"JSON file is truncated/corrupt: {path}\n"
                 f"Error: {e}\n"

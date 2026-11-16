@@ -25,6 +25,7 @@
 #include "lib/common/environment.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/static_object.hpp"
+#include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <rocprofiler-sdk/cxx/utility.hpp>
@@ -184,6 +185,7 @@ rocprofiler_sdk_shlib_ctor() ROCPROFILER_ATTRIBUTE(constructor(101));
 void
 rocprofiler_sdk_shlib_ctor()
 {
+    internal_threading::register_fork_handler();
     (void) shared_library::get_lifetime();
 }
 }  // namespace rocprofiler

@@ -83,6 +83,20 @@ using task_group_t = TaskGroup;
 bool
 fork_stale();
 
+// Register before client callbacks expose contexts or threads, not after their creation.
+void
+register_fork_handler();
+
+void
+prepare_fork_participants(bool sdk_admitted);
+void
+parent_fork_participants() noexcept;
+
+// Publish component hooks in parent execution; all abandonment precedes eligibility, and all
+// reconstruction completes before the tool restores handled signals in the child.
+bool
+register_fork_child_hooks(void (*begin_child)() noexcept, void (*rebuild)());
+
 void notify_pre_internal_thread_create(rocprofiler_runtime_library_t);
 void notify_post_internal_thread_create(rocprofiler_runtime_library_t);
 
