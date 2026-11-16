@@ -1,13 +1,10 @@
 # AMD SMI (amdsmitst) Test Categories Configuration
 # Aligned with Test Filter Standardization (quick/standard/comprehensive/full).
 #
-# ============================================================================
-# KEEP IN SYNC: the per-ASIC exclusions here and in amdsmitst.exclude are
-# maintained by hand and MUST be updated together until the two are
-# consolidated into a single source. If you change one file, change the other.
-#   - amdsmitst.exclude       (legacy detect_asic_filter.sh runtime path)
-#   - test_categories.yaml    (this file; ctest label path used by TheRock CI)
-# ============================================================================
+# Per-ASIC exclusions are not listed in this file. They live in
+# amdsmitst.exclude (FILTER[]). generate_exclude_gpu_yaml.py reads that file
+# and gpu_family_to_asic below, and writes the exclude_gpu_* blocks into the
+# build-tree YAML that parse_test_categories.py reads.
 #
 # The amdsmitst gtest suites follow the naming scheme
 # `<Component><Type>[<Operation>]` (see docs/conceptual/test-design.md):
@@ -84,87 +81,26 @@ test_categories:
       - "full"
       - "all"
 
-# GPU-arch-specific known failures, reconciled with amdsmitst.exclude and the
-# gfx-string -> ASIC map in detect_asic_filter.sh. Each entry lists every
-# category label it applies to plus an ex_gpu_<arch> label that test_runner.py
-# uses to scope the run to the current GPU. Read/write excludes are listed for
-# standard as well (harmless no-ops there, since standard omits *ReadWrite*).
+# ctest family label -> FILTER[] key in amdsmitst.exclude. 90401 and 90402
+# alias 90400 in that file, so gfx94X is the only MI300 family. A FILTER key
+# that has patterns and is not listed here, as an alias, or as virtualization
+# fails configure. gfx1100 and gfx115X have no FILTER entry after #14026, so
+# they get no exclude_gpu block and use the generic suite (-LE ex_gpu).
 #
-# NOTE: virtualization-only failures are not represented here. In an
-# unprivileged container, test_runner.py sets AMDSMI_NON_PRIVILEGED and
-# amdsmitst skips the read/write cases itself.
-exclude_gpu:
-  # gfx906 (Vega20): frequency / process-info reads unreliable.
-  exclude_gpu_gfx906:
-    test_patterns:
-      - "GpuFunctionalReadOnly.TestFrequenciesRead"
-      - "GpuFunctionalReadOnly.TestProcInfoRead"
-    labels:
-      - "quick"
-      - "standard"
-      - "comprehensive"
-      - "full"
-      - "ex_gpu_gfx906"
+# FILTER[virtualization] is intentionally absent. detect_asic_filter.sh appends
+# it only for SR-IOV or VF. Copying it onto a family would also drop those
+# tests on bare metal. Unprivileged containers skip read/write cases via
+# AMDSMI_NON_PRIVILEGED instead.
+gpu_family_to_asic:
+  gfx906: vega20
+  gfx908: arcturus
+  gfx90a: aldebaran
+  gfx94X: "90400"
+  gfx103X: sienna_cichlid
 
-  # gfx908 (Arcturus): + frequency read/write.
-  exclude_gpu_gfx908:
-    test_patterns:
-      - "GpuFunctionalReadOnly.TestFrequenciesRead"
-      - "GpuFunctionalReadOnly.TestProcInfoRead"
-      - "GpuFunctionalReadWrite.TestFrequenciesReadWrite"
-    labels:
-      - "quick"
-      - "standard"
-      - "comprehensive"
-      - "full"
-      - "ex_gpu_gfx908"
-
-  # gfx90a (MI200 / Aldebaran): fan, volt-curve, frequency, PCI, power.
-  exclude_gpu_gfx90a:
-    test_patterns:
-      - "GpuFunctionalReadOnly.FanRead"
-      - "GpuFunctionalReadOnly.TestVoltCurvRead"
-      - "GpuFunctionalReadOnly.TestFrequenciesRead"
-      - "GpuFunctionalReadWrite.FanReadWrite"
-      - "GpuFunctionalReadWrite.TestPciReadWrite"
-      - "GpuFunctionalReadWrite.TestPowerReadWrite"
-    labels:
-      - "quick"
-      - "standard"
-      - "comprehensive"
-      - "full"
-      - "ex_gpu_gfx90a"
-
-  # gfx94X (MI300, gfx_target_version 90400-90402): volt-curve read
-  # (amdsmitst.exclude 90400-90402 filter).
-  #
-  # NOTE: SR-IOV-only NO_PERM failures are not excluded by arch. Excluding
-  # them here would also drop them on bare-metal MI3x. Unprivileged containers
-  # skip the read/write cases via AMDSMI_NON_PRIVILEGED instead.
-  exclude_gpu_gfx94X:
-    test_patterns:
-      - "GpuFunctionalReadOnly.TestVoltCurvRead"
-    labels:
-      - "quick"
-      - "standard"
-      - "comprehensive"
-      - "full"
-      - "ex_gpu_gfx94X"
-
-  # gfx103X (RDNA2 / Sienna Cichlid): perf-level read/write.
-  exclude_gpu_gfx103X:
-    test_patterns:
-      - "GpuFunctionalReadWrite.TestPerfLevelReadWrite"
-    labels:
-      - "quick"
-      - "standard"
-      - "comprehensive"
-      - "full"
-      - "ex_gpu_gfx103X"
-
-  # gfx1100 and gfx115X have no exclude_gpu block. #14026 removed TempRead,
-  # TestFrequenciesRead, and TestFrequenciesReadWrite from amdsmitst.exclude,
-  # so those GPUs use the generic suite (-LE ex_gpu).
+filter_key_aliases:
+  "90401": "90400"
+  "90402": "90400"
 
 execution_settings:
   default_timeout: 300

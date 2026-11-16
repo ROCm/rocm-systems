@@ -269,10 +269,11 @@ require root, so they carry only `comprehensive`/`full` (and their aliases), plu
 the `requires_root` label. Run those categories with `sudo`; adding
 `-LE '^amdsmi_python$'` omits the Python runners.
 
-> **Keep in sync:** the per-ASIC exclusions are maintained by hand in **both**
-> `amd_smi_test/test_categories.yaml` (this ctest label path) and
-> `amd_smi_test/amdsmitst.exclude` (the `detect_asic_filter.sh` runtime path).
-> Update both together until they are consolidated into a single source.
+> **One exclusion list:** per-ASIC patterns live only in
+> `amd_smi_test/amdsmitst.exclude`. Configure runs
+> `generate_exclude_gpu_yaml.py`, which writes `exclude_gpu_*` into the
+> build-tree YAML from `FILTER[]` and `gpu_family_to_asic` in
+> `test_categories.yaml`. `FILTER[virtualization]` stays off those blocks.
 
 Each category has a generic suite and a suite per GPU arch with a known-issue
 list. A bare `-L <category>` runs all these copies, including filters for other

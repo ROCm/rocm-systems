@@ -254,6 +254,32 @@ if(EXISTS "${_AMDSMI_TEST_CATEGORIES_CMAKE}" AND EXISTS "${_AMDSMI_TEST_CATEGORI
     include("${_AMDSMI_TEST_CATEGORIES_CMAKE}")
     enable_testing()
 
+    # Hand-written test_categories.yaml has no exclude_gpu patterns. Fill them
+    # from FILTER[] so the parser still receives a YAML file.
+    set(_AMDSMI_GENERATED_CATEGORIES_YAML "${CMAKE_CURRENT_BINARY_DIR}/test_categories.generated.yaml")
+    set(_AMDSMI_EXCLUDE_GPU_ARCHS_FILE "${CMAKE_CURRENT_BINARY_DIR}/exclude_gpu_archs.txt")
+    if(Python3_FOUND)
+        execute_process(
+            COMMAND
+                ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/generate_exclude_gpu_yaml.py" --categories
+                "${_AMDSMI_TEST_CATEGORIES_YAML}" --exclude "${CMAKE_CURRENT_SOURCE_DIR}/amdsmitst.exclude" --output
+                "${_AMDSMI_GENERATED_CATEGORIES_YAML}" --archs "${_AMDSMI_EXCLUDE_GPU_ARCHS_FILE}"
+            RESULT_VARIABLE _AMDSMI_GEN_RESULT
+            ERROR_VARIABLE _AMDSMI_GEN_ERROR
+            OUTPUT_VARIABLE _AMDSMI_GEN_OUTPUT
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+        )
+        if(NOT _AMDSMI_GEN_RESULT EQUAL 0)
+            message(FATAL_ERROR "amdsmi: failed to generate exclude_gpu YAML: ${_AMDSMI_GEN_ERROR}")
+        endif()
+        message(STATUS "${_AMDSMI_GEN_OUTPUT}")
+        file(STRINGS "${_AMDSMI_EXCLUDE_GPU_ARCHS_FILE}" _AMDSMI_EXCLUDE_GPU_ARCHS)
+    else()
+        message(WARNING "amdsmi: Python3 not found, cannot generate exclude_gpu YAML")
+        set(_AMDSMI_GENERATED_CATEGORIES_YAML "${_AMDSMI_TEST_CATEGORIES_YAML}")
+        set(_AMDSMI_EXCLUDE_GPU_ARCHS "")
+    endif()
+
     message(STATUS "amdsmi: applying YAML-based CTest categories for amdsmitst")
 
     # Install-time CTestTestfile referencing amdsmitst by relative path.
@@ -268,7 +294,7 @@ if(EXISTS "${_AMDSMI_TEST_CATEGORIES_CMAKE}" AND EXISTS "${_AMDSMI_TEST_CATEGORI
 
     apply_test_category_labels(
         amdsmitst
-        "${_AMDSMI_TEST_CATEGORIES_YAML}"
+        "${_AMDSMI_GENERATED_CATEGORIES_YAML}"
         "${CMAKE_CURRENT_BINARY_DIR}"
         "${_AMDSMI_INSTALL_TEST_FILE}"
     )
@@ -279,9 +305,9 @@ if(EXISTS "${_AMDSMI_TEST_CATEGORIES_CMAKE}" AND EXISTS "${_AMDSMI_TEST_CATEGORI
     #
     # test_runner.py uses -L ex_gpu_<arch> for listed GPUs and -LE ex_gpu for
     # others. Separate registrations keep each runner in both selections.
-    # Keep the arch labels in sync with exclude_gpu in test_categories.yaml.
-    # These runners are comprehensive and above. The CLI sweep uses the same
-    # 1800s budget as the non-quick amdsmitst suites.
+    # Arch labels come from the generated exclude_gpu list, same families as
+    # the gtest suites. These runners are comprehensive and above. The CLI
+    # sweep uses the same 1800s budget as the non-quick amdsmitst suites.
     if(AMDSMI_CTEST_PYTHON_TESTS)
         set(_AMDSMI_PYTHON_CATEGORY_LABELS
             "comprehensive"
@@ -292,14 +318,10 @@ if(EXISTS "${_AMDSMI_TEST_CATEGORIES_CMAKE}" AND EXISTS "${_AMDSMI_TEST_CATEGORI
             "amdsmi_python"
             "requires_root"
         )
-        set(_AMDSMI_PYTHON_LABELS
-            ${_AMDSMI_PYTHON_CATEGORY_LABELS}
-            "ex_gpu_gfx906"
-            "ex_gpu_gfx908"
-            "ex_gpu_gfx90a"
-            "ex_gpu_gfx94X"
-            "ex_gpu_gfx103X"
-        )
+        set(_AMDSMI_PYTHON_LABELS ${_AMDSMI_PYTHON_CATEGORY_LABELS})
+        foreach(_arch IN LISTS _AMDSMI_EXCLUDE_GPU_ARCHS)
+            list(APPEND _AMDSMI_PYTHON_LABELS "ex_gpu_${_arch}")
+        endforeach()
         list(JOIN _AMDSMI_PYTHON_CATEGORY_LABELS ";" _AMDSMI_PYTHON_GENERIC_LABEL_STRING)
         list(JOIN _AMDSMI_PYTHON_LABELS ";" _AMDSMI_PYTHON_LABEL_STRING)
         # Pipe, not semicolon: CMake splits unescaped semicolons into list items.

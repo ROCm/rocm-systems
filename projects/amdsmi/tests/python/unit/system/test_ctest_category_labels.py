@@ -12,6 +12,7 @@ replays both selections against share/amd_smi/tests/ctest/CTestTestfile.cmake.
 
 import re
 import subprocess
+import sys
 import unittest
 from pathlib import Path
 
@@ -25,7 +26,9 @@ def _load_tests(text):
     labels = {
         name: set(value.split(";"))
         for name, value in re.findall(
-            r'^set_tests_properties\((\S+) PROPERTIES LABELS "([^"]*)"', text, re.MULTILINE
+            r'^set_tests_properties\((\S+) PROPERTIES LABELS "([^"]*)"',
+            text,
+            re.MULTILINE,
         )
     }
     return {name: (commands[name], labels.get(name, set())) for name in commands}
@@ -48,7 +51,9 @@ class CtestCategoryLabelsTest(unittest.TestCase):
     def _runner_counts(self, selected):
         return {
             runner: sum(
-                1 for name in selected if f"python_unittest/{runner}" in self.tests[name][0]
+                1
+                for name in selected
+                if f"python_unittest/{runner}" in self.tests[name][0]
             )
             for runner in _PYTHON_RUNNERS
         }
@@ -58,7 +63,9 @@ class CtestCategoryLabelsTest(unittest.TestCase):
         for category in _CATEGORIES:
             for arch in self.archs:
                 selected = [
-                    n for n, (_, labels) in self.tests.items() if {category, arch} <= labels
+                    n
+                    for n, (_, labels) in self.tests.items()
+                    if {category, arch} <= labels
                 ]
                 with self.subTest(category=category, arch=arch):
                     self.assertEqual(
@@ -73,7 +80,9 @@ class CtestCategoryLabelsTest(unittest.TestCase):
                 if category in labels and not any("ex_gpu" in label for label in labels)
             ]
             with self.subTest(category=category):
-                self.assertEqual(self._runner_counts(selected), dict.fromkeys(_PYTHON_RUNNERS, 1))
+                self.assertEqual(
+                    self._runner_counts(selected), dict.fromkeys(_PYTHON_RUNNERS, 1)
+                )
 
     def test_root_runners_do_not_have_unprivileged_labels(self):
         unprivileged = {"quick", "pre-commit", "smoke", "standard", "pr", "precheckin"}
@@ -114,3 +123,89 @@ class CtestCategoryLabelsTest(unittest.TestCase):
                     self.assertEqual(set(excluded.split(":")), expected)
         for dropped in ("ex_gpu_gfx110X", "ex_gpu_gfx1100", "ex_gpu_gfx115X"):
             self.assertNotIn(dropped, self.archs)
+
+
+_AMD_SMI_TEST = Path(__file__).resolve().parents[3] / "amd_smi_test"
+_GENERATOR = _AMD_SMI_TEST / "generate_exclude_gpu_yaml.py"
+
+
+class GenerateExcludeGpuYamlTest(unittest.TestCase):
+    """The build-tree YAML must match FILTER[] and omit the virtualization block."""
+
+    def setUp(self):
+        if not _GENERATOR.is_file():
+            self.skipTest(f"{_GENERATOR} is not in the source tree")
+        self.categories = _AMD_SMI_TEST / "test_categories.yaml"
+        self.exclude = _AMD_SMI_TEST / "amdsmitst.exclude"
+
+    def _generate(self, exclude_path, output_dir):
+        output = output_dir / "test_categories.generated.yaml"
+        archs = output_dir / "exclude_gpu_archs.txt"
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(_GENERATOR),
+                "--categories",
+                str(self.categories),
+                "--exclude",
+                str(exclude_path),
+                "--output",
+                str(output),
+                "--archs",
+                str(archs),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        return completed, output, archs
+
+    def test_generated_patterns_match_filter_and_skip_virtualization(self):
+        import tempfile
+
+        sys.path.insert(0, str(_AMD_SMI_TEST))
+        import generate_exclude_gpu_yaml as generator
+
+        filters = generator.load_filters(self.exclude)
+        with tempfile.TemporaryDirectory() as tmp:
+            completed, output, archs_path = self._generate(self.exclude, Path(tmp))
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            generated = yaml_load(output)
+            families = generated["gpu_family_to_asic"]
+            self.assertEqual(
+                [line for line in archs_path.read_text().splitlines() if line],
+                list(families),
+            )
+            virtualization = set(generator.patterns_of(filters["virtualization"]))
+            for family, asic in families.items():
+                block = generated["exclude_gpu"][f"exclude_gpu_{family}"]
+                self.assertEqual(
+                    block["test_patterns"], generator.patterns_of(filters[asic])
+                )
+                self.assertEqual(
+                    set(block["labels"]),
+                    {"quick", "standard", "comprehensive", "full", f"ex_gpu_{family}"},
+                )
+                self.assertTrue(virtualization - set(block["test_patterns"]))
+            self.assertNotIn("exclude_gpu_gfx1100", generated["exclude_gpu"])
+            self.assertNotIn("exclude_gpu_gfx115X", generated["exclude_gpu"])
+
+    def test_unmapped_filter_key_fails(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            extra = tmp_path / "amdsmitst.exclude"
+            extra.write_text(
+                self.exclude.read_text()
+                + '\nFILTER[brand_new]="GpuFunctionalReadOnly.TestBrandNew"\n'
+            )
+            completed, _, _ = self._generate(extra, tmp_path)
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("brand_new", completed.stderr)
+
+
+def yaml_load(path):
+    import yaml
+
+    with open(path, encoding="utf-8") as handle:
+        return yaml.safe_load(handle)
