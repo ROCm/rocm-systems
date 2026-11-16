@@ -413,12 +413,17 @@ rocprofiler_add_integration_validate_test(
     BUNDLE_TESTS
     ARGS validate.py::test_summary_markers_default
          validate.py::test_summary_by_rank_files
+         validate.py::test_summary_by_rank_no_mpi_rank
          --summary-markers-csv
          ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary-default/out_marker_summary.csv
          --summary-files-csv
          ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary/out_files.csv
          --summary-files-expected
          out
+         --summary-kernels-by-rank-csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary/out_kernels_summary_by_rank.csv
+         --summary-markers-by-rank-csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary/out_marker_summary_by_rank.csv
     TIMEOUT 60
     LABELS "integration-tests;rocpd"
     FIXTURES_REQUIRED rocprofv3-test-rocpd-generation)
@@ -432,11 +437,17 @@ rocprofiler_add_integration_validate_test(
     BUNDLE_TESTS
     ARGS validate.py::test_summary_by_rank_files
          validate.py::test_summary_by_rank_files_rank_order
+         validate.py::test_summary_by_rank_kernel_rank
+         validate.py::test_summary_by_rank_marker_rank
          --summary-files-csv
          ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-test/summary/out_mp_files.csv
          --summary-files-expected
          out_mp_0
          out_mp_1
+         --summary-kernels-by-rank-csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-test/summary/out_mp_kernels_summary_by_rank.csv
+         --summary-markers-by-rank-csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-test/summary/out_mp_marker_summary_by_rank.csv
     TIMEOUT 60
     LABELS "integration-tests;rocpd"
     FIXTURES_REQUIRED rocprofv3-test-rocpd-summary-generation-multiproc

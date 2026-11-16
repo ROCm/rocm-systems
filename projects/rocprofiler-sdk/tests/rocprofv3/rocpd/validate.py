@@ -500,12 +500,66 @@ def test_summary_mangled_kernels(csv_kernels_mangled, csv_kernels_full, json_dat
 
 
 def test_summary_markers_default(summary_markers_csv):
-    """Test that a default summary run includes the MARKERS summary."""
+    """Test that a default summary run includes the marker summary."""
     df = summary_markers_csv
-    assert len(df) > 0, "MARKERS summary is empty"
+    assert len(df) > 0, "marker summary is empty"
     assert "Name" in df.columns, f"Missing 'Name' column: {list(df.columns)}"
+    assert "Rank" not in df.columns, f"Rank column on a non-MPI summary:\n{df}"
     assert (df["Calls"] > 0).all(), f"Marker with zero calls:\n{df}"
     assert df["Name"].notna().all(), f"Marker with empty name:\n{df}"
+
+
+def _assert_mpi_ranks(df, label):
+    """Rank is present and covers ranks 0 and 1 from the 2-process MPI launch."""
+    assert len(df) > 0, f"{label} summary is empty"
+    assert (
+        df.columns[0] == "Rank"
+    ), f"{label} first column is not Rank: {list(df.columns)}"
+    assert (df["Calls"] > 0).all(), f"{label} row with zero calls:\n{df}"
+    assert df["Name"].notna().all(), f"{label} row with empty name:\n{df}"
+    ranks = sorted(df["Rank"].astype(int).unique().tolist())
+    assert ranks == [0, 1], f"{label} ranks {ranks} != [0, 1]:\n{df}"
+
+
+def test_summary_by_rank_kernel_rank(summary_kernels_by_rank_csv):
+    """MPI --summary-by-rank kernel summary has a Rank for each process.
+
+    The multiproc databases each contain 200 dispatches of
+    reproducible_dispatch_count (launch args: 200 iterations, 1 thread).
+    """
+    df = summary_kernels_by_rank_csv
+    _assert_mpi_ranks(df, "kernel")
+    assert (df["Name"].str.contains("reproducible_dispatch_count")).all(), df
+    counts = df.groupby(df["Rank"].astype(int))["Calls"].sum().to_dict()
+    assert counts == {0: 200, 1: 200}, f"Kernel calls by rank {counts}:\n{df}"
+
+
+def test_summary_by_rank_marker_rank(summary_markers_by_rank_csv):
+    """MPI --summary-by-rank marker summary has a Rank for each process.
+
+    Each multiproc database has MARKER_CORE_RANGE_API rows named "run" (1)
+    and "iteration" (200).
+    """
+    df = summary_markers_by_rank_csv
+    _assert_mpi_ranks(df, "marker")
+    expected = {"run": 1, "iteration": 200}
+    for rank, group in df.groupby(df["Rank"].astype(int)):
+        counts = dict(zip(group["Name"], group["Calls"].astype(int)))
+        assert counts == expected, f"rank {rank} marker counts {counts}:\n{df}"
+
+
+def test_summary_by_rank_no_mpi_rank(
+    summary_kernels_by_rank_csv, summary_markers_by_rank_csv
+):
+    """--summary-by-rank without MPI env vars omits the Rank column."""
+    for label, df in (
+        ("kernel", summary_kernels_by_rank_csv),
+        ("marker", summary_markers_by_rank_csv),
+    ):
+        assert len(df) > 0, f"{label} summary is empty"
+        assert "Rank" not in df.columns, f"{label} has Rank without MPI:\n{df}"
+        for column in ("Process_Id", "Hostname", "Name"):
+            assert column in df.columns, f"{label} missing {column}: {list(df.columns)}"
 
 
 def test_summary_by_rank_files(summary_files_csv, summary_files_expected):

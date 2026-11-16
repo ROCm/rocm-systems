@@ -127,6 +127,16 @@ def pytest_addoption(parser):
         nargs="+",
         help="Expected database base filenames listed in the files CSV.",
     )
+    parser.addoption(
+        "--summary-kernels-by-rank-csv",
+        action="store",
+        help="Path to a kernels summary CSV generated with --summary-by-rank.",
+    )
+    parser.addoption(
+        "--summary-markers-by-rank-csv",
+        action="store",
+        help="Path to a marker summary CSV generated with --summary-by-rank.",
+    )
 
     pd.set_option("display.width", 2000)
     # increase debug display of pandas dataframes
@@ -324,6 +334,18 @@ def summary_files_expected(request):
     if not expected:
         pytest.skip("--summary-files-expected not provided")
     return expected
+
+
+@pytest.fixture
+def summary_kernels_by_rank_csv(request):
+    """Load a kernels summary CSV generated with --summary-by-rank"""
+    return _read_required_csv(request, "--summary-kernels-by-rank-csv")
+
+
+@pytest.fixture
+def summary_markers_by_rank_csv(request):
+    """Load a marker summary CSV generated with --summary-by-rank"""
+    return _read_required_csv(request, "--summary-markers-by-rank-csv")
 
 
 @pytest.fixture
