@@ -14,7 +14,7 @@
 
 namespace dda::common {
 
-template <typename T, int NRANKS, bool hasAcc, bool kCopyInKernel = false>
+template <typename T, int NRANKS, bool hasAcc>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
 #endif
@@ -28,20 +28,8 @@ __launch_bounds__(512)
   const auto idxEnd = count;
   const auto idxStride = gridDim.x * blockDim.x * countPerThread;
 
-  // kCopyInKernel is the host's only staging decision (ddaReduceScatterIpcStaging).
-  // The per-shard loop is the same for a one-block message and a multi-block one,
-  // so there is no fused whole-buffer copy and no second size cutoff in here.
-  if constexpr (kCopyInKernel) {
-#pragma unroll NRANKS
-    for (int s = 0; s < NRANKS; ++s) {
-      const size_t off = static_cast<size_t>(s) * count;
-      copyFromSrcToDest<T>(sendbuff + off, ipcbuffs[selfRank] + off, idxStart, idxEnd, idxStride);
-    }
-    barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>(ddaAbort);
-  } else {
-    // Host enqueued cudaMemcpyAsync into ddaScratch before launch.
-    barrier.syncOnSameBlockIdx<false /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>(ddaAbort);
-  }
+  // Host enqueued cudaMemcpyAsync into ddaScratch before launch.
+  barrier.syncOnSameBlockIdx<false /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>(ddaAbort);
 
   reduceScatter<T, NRANKS, hasAcc>(ipcbuffs, recvbuff, nullptr, selfRank, NRANKS, idxStart, idxEnd, idxStride, 0);
 
