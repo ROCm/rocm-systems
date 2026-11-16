@@ -3,9 +3,11 @@
 
 #include "cli_test_support.h"
 #include "lds_fixture.h"
+#include "remaining_subword_fixture.h"
 #include "rocjitsu/code/file_io.h"
 #include "rocjitsu/code/patch/fault_injection/lds_wrong_address.h"
 #include "scoped_temp.h"
+#include "subword_fixture.h"
 #include "two_address_fixture.h"
 
 #include <gtest/gtest.h>
@@ -13,6 +15,7 @@
 #include <array>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <optional>
 #include <string>
 #include <sys/wait.h>
@@ -371,6 +374,134 @@ TEST_F(FaultLdsCli, TwoAddressExactOrdinalAndLibraryAgree) {
         EXPECT_NE(run(command), 0);
         EXPECT_FALSE(std::filesystem::exists(output_));
       }
+    }
+  }
+}
+
+TEST_F(FaultLdsCli, SubwordExactOrdinalAndLibraryAgree) {
+  for (const test::LdsFormCase &fixture : test::kSubwordCases) {
+    for (bool wave32 : {false, true}) {
+      if (fixture.arch != IsaFamily::Rdna4 && wave32)
+        continue;
+      SCOPED_TRACE(fixture.form);
+      SCOPED_TRACE(static_cast<int>(fixture.target));
+      SCOPED_TRACE(wave32);
+      const uint32_t boundary =
+          fixture.target == ROCJITSU_CODE_TARGET_GFX1250 ? 64u : (wave32 ? 32u : 16u);
+      const std::vector<uint8_t> image = test::make_lds_form_elf(fixture, false, wave32);
+      write_source(image);
+      const FaultMutationContext context(image);
+      FaultMutationError error;
+      const FailureOr<LdsInventory> inventory =
+          discover_lds_wrong_address(context, "test_kernel", error);
+      ASSERT_TRUE(inventory.succeeded()) << error.message;
+      ASSERT_EQ(inventory.value().sites().size(), 1u);
+      EXPECT_EQ(inventory.value().sites()[0].form, fixture.form);
+      const FailureOr<LdsSelection> selection =
+          select_lds_wrong_address(inventory.value(), {.exact = std::nullopt, .ordinal = 0}, error);
+      ASSERT_TRUE(selection.succeeded()) << error.message;
+      const FailureOr<LdsSelection> exact = select_lds_wrong_address(
+          inventory.value(),
+          {.exact = selection.value(), .ordinal = std::numeric_limits<size_t>::max()}, error);
+      ASSERT_TRUE(exact.succeeded()) << error.message;
+      for (uint32_t replacement : {6u, boundary - 1}) {
+        const FailureOr<LdsResult> result =
+            apply_lds_wrong_address(context, exact.value(), replacement, error);
+        ASSERT_TRUE(result.succeeded()) << error.message;
+        const FailureOr<LdsResult> by_ordinal =
+            apply_lds_wrong_address(context, selection.value(), replacement, error);
+        ASSERT_TRUE(by_ordinal.succeeded()) << error.message;
+        EXPECT_EQ(result.value().image, by_ordinal.value().image);
+        for (const std::vector<std::string> &selector :
+             {std::vector<std::string>{"--ordinal", "0"},
+              std::vector<std::string>{"--exact", "0", "--ordinal", "999"}}) {
+          std::vector<std::string> command = args();
+          command.insert(command.end(), {"--output", output_.string(), "--address-vgpr",
+                                         std::to_string(replacement)});
+          command.insert(command.end(), selector.begin(), selector.end());
+          ASSERT_EQ(run(command), 0);
+          const std::vector<uint8_t> emitted = read();
+          EXPECT_EQ(emitted, result.value().image);
+          EXPECT_TRUE(test::lds_form_output_matches(context, fixture, 0, replacement, emitted));
+          ASSERT_TRUE(std::filesystem::remove(output_));
+        }
+      }
+      for (const std::vector<std::string> &extra :
+           {std::vector<std::string>{"--exact", "4", "--ordinal", "0", "--address-vgpr", "6"},
+            std::vector<std::string>{}, std::vector<std::string>{"--address-vgpr", "2"},
+            std::vector<std::string>{"--address-vgpr", std::to_string(boundary)},
+            std::vector<std::string>{"--address-vgpr", "256"}}) {
+        std::vector<std::string> command = args();
+        command.insert(command.end(), {"--output", output_.string()});
+        command.insert(command.end(), extra.begin(), extra.end());
+        EXPECT_NE(run(command), 0);
+        EXPECT_FALSE(std::filesystem::exists(output_));
+      }
+      EXPECT_TRUE(std::ranges::equal(context.image(), image));
+    }
+  }
+}
+
+TEST_F(FaultLdsCli, RemainingSubwordExactOrdinalAndLibraryAgree) {
+  for (const test::LdsFormCase &fixture : test::kRemainingSubwordCases) {
+    for (bool wave32 : {false, true}) {
+      if (fixture.arch != IsaFamily::Rdna4 && wave32)
+        continue;
+      SCOPED_TRACE(fixture.form);
+      SCOPED_TRACE(static_cast<int>(fixture.target));
+      SCOPED_TRACE(wave32);
+      const uint32_t boundary =
+          fixture.target == ROCJITSU_CODE_TARGET_GFX1250 ? 64u : (wave32 ? 32u : 16u);
+      const std::vector<uint8_t> image = test::make_lds_form_elf(fixture, false, wave32);
+      write_source(image);
+      const FaultMutationContext context(image);
+      FaultMutationError error;
+      const FailureOr<LdsInventory> inventory =
+          discover_lds_wrong_address(context, "test_kernel", error);
+      ASSERT_TRUE(inventory.succeeded()) << error.message;
+      ASSERT_EQ(inventory.value().sites().size(), 1u);
+      EXPECT_EQ(inventory.value().sites()[0].form, fixture.form);
+      const FailureOr<LdsSelection> selection =
+          select_lds_wrong_address(inventory.value(), {.exact = std::nullopt, .ordinal = 0}, error);
+      ASSERT_TRUE(selection.succeeded()) << error.message;
+      const FailureOr<LdsSelection> exact = select_lds_wrong_address(
+          inventory.value(),
+          {.exact = selection.value(), .ordinal = std::numeric_limits<size_t>::max()}, error);
+      ASSERT_TRUE(exact.succeeded()) << error.message;
+      for (uint32_t replacement : {6u, boundary - 1}) {
+        const FailureOr<LdsResult> result =
+            apply_lds_wrong_address(context, exact.value(), replacement, error);
+        ASSERT_TRUE(result.succeeded()) << error.message;
+        const FailureOr<LdsResult> by_ordinal =
+            apply_lds_wrong_address(context, selection.value(), replacement, error);
+        ASSERT_TRUE(by_ordinal.succeeded()) << error.message;
+        EXPECT_EQ(result.value().image, by_ordinal.value().image);
+        for (const std::vector<std::string> &selector :
+             {std::vector<std::string>{"--ordinal", "0"},
+              std::vector<std::string>{"--exact", "0", "--ordinal", "999"}}) {
+          std::vector<std::string> command = args();
+          command.insert(command.end(), {"--output", output_.string(), "--address-vgpr",
+                                         std::to_string(replacement)});
+          command.insert(command.end(), selector.begin(), selector.end());
+          ASSERT_EQ(run(command), 0);
+          const std::vector<uint8_t> emitted = read();
+          EXPECT_EQ(emitted, result.value().image);
+          EXPECT_TRUE(test::lds_form_output_matches(context, fixture, 0, replacement, emitted));
+          ASSERT_TRUE(std::filesystem::remove(output_));
+        }
+      }
+      for (const std::vector<std::string> &extra :
+           {std::vector<std::string>{"--exact", "4", "--ordinal", "0", "--address-vgpr", "6"},
+            std::vector<std::string>{}, std::vector<std::string>{"--address-vgpr", "2"},
+            std::vector<std::string>{"--address-vgpr", std::to_string(boundary)},
+            std::vector<std::string>{"--address-vgpr", "256"}}) {
+        std::vector<std::string> command = args();
+        command.insert(command.end(), {"--output", output_.string()});
+        command.insert(command.end(), extra.begin(), extra.end());
+        EXPECT_NE(run(command), 0);
+        EXPECT_FALSE(std::filesystem::exists(output_));
+      }
+      EXPECT_TRUE(std::ranges::equal(context.image(), image));
     }
   }
 }

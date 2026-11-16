@@ -2,8 +2,11 @@
 // SPDX-License-Identifier: MIT
 
 #include "lds_fixture.h"
+#include "remaining_subword_fixture.h"
 #include "rocjitsu/code/patch/fault_injection/drop_barrier.h"
 #include "rocjitsu/code/patch/fault_injection/lds_wrong_address.h"
+#include "scalar_two_fixture.h"
+#include "subword_fixture.h"
 #include "two_address_fixture.h"
 
 #include <gtest/gtest.h>
@@ -11,7 +14,11 @@
 #include <algorithm>
 #include <array>
 #include <limits>
+#include <memory>
 #include <optional>
+#include <span>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu {
@@ -19,7 +26,7 @@ namespace {
 
 TEST(FaultLdsWrongAddress, Rdna4Wave32BasicFormsPreserveGuestAndAllocation) {
   const std::vector<LdsCapability> capabilities = lds_wrong_address_capabilities();
-  ASSERT_EQ(capabilities.size(), 104u);
+  ASSERT_EQ(capabilities.size(), 205u);
   for (uint32_t machine : {EF_AMDGPU_MACH_AMDGCN_GFX1200, EF_AMDGPU_MACH_AMDGCN_GFX1201}) {
     SCOPED_TRACE(machine);
     const std::vector<uint8_t> image = test::make_lds_load_elf(machine, true, 0);
@@ -822,6 +829,432 @@ TEST(FaultLdsWrongAddress, TwoAddressFormsAreSelectedAndMutated) {
       EXPECT_TRUE(apply_lds_wrong_address(long_context, long_selection.value(), 6, error).failed());
       EXPECT_TRUE(std::ranges::equal(long_context.image(), long_image));
     }
+  }
+}
+
+TEST(FaultLdsWrongAddress, SubwordAndTransposeFormsAreAdmittedAndPreserved) {
+  for (const test::LdsFormCase &fixture : test::kSubwordCases) {
+    for (bool wave32 : {false, true}) {
+      if (fixture.arch != IsaFamily::Rdna4 && wave32)
+        continue;
+      SCOPED_TRACE(wave32);
+      SCOPED_TRACE(fixture.form);
+      SCOPED_TRACE(static_cast<int>(fixture.target));
+      std::unique_ptr<Decoder> decoder =
+          Decoder::create(default_isa_target_registry(), fixture.target);
+      ASSERT_TRUE(decoder);
+      const DecodeResult decoded = decoder->decode_window(fixture.words);
+      if (decoded.failed() || decoded.value()->mnemonic() != fixture.form) {
+        ADD_FAILURE() << "concrete target failed to decode " << fixture.form;
+        continue;
+      }
+      const std::vector<uint8_t> image = test::make_lds_form_elf(fixture, false, wave32);
+      const FaultMutationContext context(image), foreign(image);
+      FaultMutationError error;
+      const FailureOr<LdsInventory> inventory =
+          discover_lds_wrong_address(context, "test_kernel", error);
+      if (inventory.failed() || inventory.value().sites().size() != 1) {
+        ADD_FAILURE() << "expected one admitted site: " << error.message;
+        continue;
+      }
+      EXPECT_EQ(inventory.value().sites()[0].form, fixture.form);
+      const FailureOr<LdsSelection> selection =
+          select_lds_wrong_address(inventory.value(), {}, error);
+      ASSERT_TRUE(selection.succeeded());
+      const FailureOr<LdsSelection> exact = select_lds_wrong_address(
+          inventory.value(),
+          {.exact = selection.value(), .ordinal = std::numeric_limits<size_t>::max()}, error);
+      ASSERT_TRUE(exact.succeeded());
+      EXPECT_TRUE(apply_lds_wrong_address(context, exact.value(), std::nullopt, error).failed());
+      EXPECT_TRUE(apply_lds_wrong_address(context, exact.value(), 2, error).failed());
+      EXPECT_TRUE(apply_lds_wrong_address(context, exact.value(), 256, error).failed());
+      const uint32_t boundary =
+          fixture.target == ROCJITSU_CODE_TARGET_GFX1250 ? 64u : (wave32 ? 32u : 16u);
+      EXPECT_TRUE(apply_lds_wrong_address(context, exact.value(), boundary, error).failed());
+      const FailureOr<LdsResult> last_allocated =
+          apply_lds_wrong_address(context, exact.value(), boundary - 1, error);
+      ASSERT_TRUE(last_allocated.succeeded()) << error.message;
+      EXPECT_TRUE(test::lds_form_output_matches(context, fixture, 0, boundary - 1,
+                                                last_allocated.value().image));
+      EXPECT_TRUE(apply_lds_wrong_address(foreign, exact.value(), 6, error).failed());
+      const FailureOr<LdsResult> mutant = apply_lds_wrong_address(context, exact.value(), 6, error);
+      ASSERT_TRUE(mutant.succeeded()) << error.message;
+      EXPECT_TRUE(test::lds_form_output_matches(context, fixture, 0, 6, mutant.value().image));
+      const FailureOr<LdsResult> by_ordinal =
+          apply_lds_wrong_address(context, selection.value(), 6, error);
+      ASSERT_TRUE(by_ordinal.succeeded()) << error.message;
+      EXPECT_EQ(by_ordinal.value().image, mutant.value().image);
+      std::vector<uint8_t> corrupted = mutant.value().image;
+      const AmdGpuCodeObject output(mutant.value().image.data(), mutant.value().image.size());
+      ASSERT_TRUE(output.is_valid());
+      const std::optional<uint64_t> guest =
+          test::lds_emitted_guest(*output.text_sections().front(), 0, fixture.target);
+      ASSERT_TRUE(guest);
+      for (uint64_t offset : std::array<uint64_t, 3>{0, *guest + 5, *guest + 8}) {
+        corrupted = mutant.value().image;
+        const uint64_t corrupted_offset = output.text_sections().front()->sectionOffset() + offset;
+        ASSERT_LT(corrupted_offset, corrupted.size());
+        corrupted[corrupted_offset] ^= 1;
+        EXPECT_FALSE(test::lds_form_output_matches(context, fixture, 0, 6, corrupted));
+      }
+      EXPECT_TRUE(std::ranges::equal(context.image(), image));
+      const FailureOr<LdsResult> repeated =
+          apply_lds_wrong_address(context, exact.value(), 6, error);
+      ASSERT_TRUE(repeated.succeeded());
+      EXPECT_EQ(mutant.value().image, repeated.value().image);
+      std::optional<LdsSelection> expired;
+      {
+        const FaultMutationContext temporary(image);
+        const FailureOr<LdsInventory> found =
+            discover_lds_wrong_address(temporary, "test_kernel", error);
+        ASSERT_TRUE(found.succeeded());
+        const FailureOr<LdsSelection> selected = select_lds_wrong_address(found.value(), {}, error);
+        ASSERT_TRUE(selected.succeeded());
+        expired = selected.value();
+      }
+      EXPECT_TRUE(apply_lds_wrong_address(context, *expired, 6, error).failed());
+      EXPECT_TRUE(select_lds_wrong_address(inventory.value(),
+                                           {.exact = LdsSelection{}, .ordinal = 0}, error)
+                      .failed());
+      if (fixture.target == ROCJITSU_CODE_TARGET_GFX1250) {
+        const FaultMutationContext banked(test::make_lds_form_elf(fixture, true));
+        const FailureOr<LdsInventory> bank_inventory =
+            discover_lds_wrong_address(banked, "test_kernel", error);
+        ASSERT_TRUE(bank_inventory.succeeded()) << error.message;
+        ASSERT_EQ(bank_inventory.value().sites().size(), 1u);
+        EXPECT_EQ(bank_inventory.value().sites()[0].address_bank, 1u);
+        const FailureOr<LdsSelection> bank_selection =
+            select_lds_wrong_address(bank_inventory.value(), {}, error);
+        ASSERT_TRUE(bank_selection.succeeded());
+        EXPECT_TRUE(apply_lds_wrong_address(banked, bank_selection.value(), 16, error).failed());
+        const FailureOr<LdsResult> bank_result =
+            apply_lds_wrong_address(banked, bank_selection.value(), 15, error);
+        ASSERT_TRUE(bank_result.succeeded()) << error.message;
+        EXPECT_TRUE(
+            test::lds_form_output_matches(banked, fixture, 4, 15, bank_result.value().image));
+      } else if (fixture.arch == IsaFamily::Cdna3 || fixture.arch == IsaFamily::Cdna4) {
+        std::vector<uint8_t> gds = test::make_amdgpu_kernel_elf(
+            {fixture.words[0] | 0x10000u, fixture.words[1], 0xbf810000u}, 0, 3, fixture.machine, 3,
+            3);
+        gds[EI_DATA] = ELFDATA2LSB;
+        gds[EI_ABIVERSION] = ELFABIVERSION_AMDGPU_HSA_V5;
+        const FaultMutationContext gds_context(gds);
+        const FailureOr<LdsInventory> gds_inventory =
+            discover_lds_wrong_address(gds_context, "test_kernel", error);
+        ASSERT_TRUE(gds_inventory.succeeded()) << error.message;
+        EXPECT_TRUE(gds_inventory.value().sites().empty());
+      }
+    }
+  }
+}
+
+TEST(FaultLdsWrongAddress, SubwordTruncatedExtentAndLateFailureRollBack) {
+  for (size_t index : {0u, 8u}) {
+    const test::LdsFormCase &fixture = test::kSubwordCases[index];
+    for (bool wave32 : {false, true}) {
+      if (fixture.arch != IsaFamily::Rdna4 && wave32)
+        continue;
+      SCOPED_TRACE(wave32);
+      SCOPED_TRACE(fixture.form);
+      std::vector<uint8_t> truncated = test::make_amdgpu_kernel_elf(
+          {fixture.words[0]}, 0, 3, fixture.machine, 3, 3, false, false, false, false, wave32);
+      truncated[EI_DATA] = ELFDATA2LSB;
+      truncated[EI_ABIVERSION] = ELFABIVERSION_AMDGPU_HSA_V5;
+      const FaultMutationContext incomplete(truncated);
+      FaultMutationError error;
+      EXPECT_TRUE(discover_lds_wrong_address(incomplete, "test_kernel", error).failed());
+      EXPECT_TRUE(std::ranges::equal(incomplete.image(), truncated));
+      std::vector<uint32_t> words = {fixture.words[0], fixture.words[1]};
+      words.insert(words.end(), 32769, 0xbf800000u);
+      words.push_back(fixture.target == ROCJITSU_CODE_TARGET_GFX1250 ? 0xbfb00000u : 0xbf810000u);
+      std::vector<uint8_t> image = test::make_amdgpu_kernel_elf(words, 0, 3, fixture.machine, 3, 3,
+                                                                false, false, false, false, wave32);
+      image[EI_DATA] = ELFDATA2LSB;
+      image[EI_ABIVERSION] = ELFABIVERSION_AMDGPU_HSA_V5;
+      const FaultMutationContext context(image);
+      const FailureOr<LdsInventory> inventory =
+          discover_lds_wrong_address(context, "test_kernel", error);
+      ASSERT_TRUE(inventory.succeeded()) << error.message;
+      const FailureOr<LdsSelection> selection =
+          select_lds_wrong_address(inventory.value(), {}, error);
+      ASSERT_TRUE(selection.succeeded());
+      EXPECT_TRUE(apply_lds_wrong_address(context, selection.value(), 6, error).failed());
+      EXPECT_TRUE(std::ranges::equal(context.image(), image));
+    }
+  }
+}
+
+TEST(FaultLdsWrongAddress, RemainingSubwordFormsPreserveGuestAndControls) {
+  for (const test::LdsFormCase &fixture : test::kRemainingSubwordCases) {
+    for (bool wave32 : {false, true}) {
+      if (fixture.arch != IsaFamily::Rdna4 && wave32)
+        continue;
+      SCOPED_TRACE(wave32);
+      SCOPED_TRACE(fixture.form);
+      SCOPED_TRACE(static_cast<int>(fixture.target));
+      std::unique_ptr<Decoder> decoder =
+          Decoder::create(default_isa_target_registry(), fixture.target);
+      ASSERT_TRUE(decoder);
+      const DecodeResult decoded = decoder->decode_window(fixture.words);
+      if (decoded.failed() || decoded.value()->mnemonic() != fixture.form) {
+        ADD_FAILURE() << "target decoder mismatch";
+        continue;
+      }
+      const std::vector<uint8_t> image = test::make_lds_form_elf(fixture, false, wave32);
+      const FaultMutationContext context(image), foreign(image);
+      FaultMutationError error;
+      const FailureOr<LdsInventory> inventory =
+          discover_lds_wrong_address(context, "test_kernel", error);
+      if (inventory.failed() || inventory.value().sites().size() != 1) {
+        ADD_FAILURE() << "expected one site: " << error.message;
+        continue;
+      }
+      EXPECT_EQ(inventory.value().sites()[0].form, fixture.form);
+      const FailureOr<LdsSelection> selection =
+          select_lds_wrong_address(inventory.value(), {}, error);
+      ASSERT_TRUE(selection.succeeded());
+      const FailureOr<LdsSelection> exact = select_lds_wrong_address(
+          inventory.value(),
+          {.exact = selection.value(), .ordinal = std::numeric_limits<size_t>::max()}, error);
+      ASSERT_TRUE(exact.succeeded());
+      EXPECT_TRUE(apply_lds_wrong_address(context, exact.value(), std::nullopt, error).failed());
+      EXPECT_TRUE(apply_lds_wrong_address(context, exact.value(), 2, error).failed());
+      EXPECT_TRUE(apply_lds_wrong_address(context, exact.value(), 256, error).failed());
+      EXPECT_TRUE(apply_lds_wrong_address(foreign, exact.value(), 6, error).failed());
+      const uint32_t boundary =
+          fixture.target == ROCJITSU_CODE_TARGET_GFX1250 ? 64u : (wave32 ? 32u : 16u);
+      EXPECT_TRUE(apply_lds_wrong_address(context, exact.value(), boundary, error).failed());
+      const FailureOr<LdsResult> last_allocated =
+          apply_lds_wrong_address(context, exact.value(), boundary - 1, error);
+      ASSERT_TRUE(last_allocated.succeeded()) << error.message;
+      EXPECT_TRUE(test::lds_form_output_matches(context, fixture, 0, boundary - 1,
+                                                last_allocated.value().image));
+      const FailureOr<LdsResult> mutant = apply_lds_wrong_address(context, exact.value(), 6, error);
+      ASSERT_TRUE(mutant.succeeded()) << error.message;
+      EXPECT_TRUE(test::lds_form_output_matches(context, fixture, 0, 6, mutant.value().image));
+      const FailureOr<LdsResult> by_ordinal =
+          apply_lds_wrong_address(context, selection.value(), 6, error);
+      ASSERT_TRUE(by_ordinal.succeeded()) << error.message;
+      EXPECT_EQ(by_ordinal.value().image, mutant.value().image);
+      std::vector<uint8_t> corrupted = mutant.value().image;
+      const AmdGpuCodeObject output(mutant.value().image.data(), mutant.value().image.size());
+      ASSERT_TRUE(output.is_valid());
+      const std::optional<uint64_t> guest =
+          test::lds_emitted_guest(*output.text_sections().front(), 0, fixture.target);
+      ASSERT_TRUE(guest);
+      for (uint64_t offset : std::array<uint64_t, 3>{0, *guest + 5, *guest + 8}) {
+        corrupted = mutant.value().image;
+        const uint64_t corrupted_offset = output.text_sections().front()->sectionOffset() + offset;
+        ASSERT_LT(corrupted_offset, corrupted.size());
+        corrupted[corrupted_offset] ^= 1;
+        EXPECT_FALSE(test::lds_form_output_matches(context, fixture, 0, 6, corrupted));
+      }
+      const FailureOr<LdsResult> repeated =
+          apply_lds_wrong_address(context, exact.value(), 6, error);
+      ASSERT_TRUE(repeated.succeeded());
+      EXPECT_EQ(mutant.value().image, repeated.value().image);
+      EXPECT_TRUE(std::ranges::equal(context.image(), image));
+      EXPECT_TRUE(select_lds_wrong_address(inventory.value(),
+                                           {.exact = LdsSelection{}, .ordinal = 0}, error)
+                      .failed());
+      std::optional<LdsSelection> expired;
+      {
+        const FaultMutationContext temporary(image);
+        const FailureOr<LdsInventory> found =
+            discover_lds_wrong_address(temporary, "test_kernel", error);
+        ASSERT_TRUE(found.succeeded());
+        const FailureOr<LdsSelection> selected = select_lds_wrong_address(found.value(), {}, error);
+        ASSERT_TRUE(selected.succeeded());
+        expired = selected.value();
+      }
+      EXPECT_TRUE(apply_lds_wrong_address(context, *expired, 6, error).failed());
+      if (fixture.target == ROCJITSU_CODE_TARGET_GFX1250) {
+        const FaultMutationContext banked(test::make_lds_form_elf(fixture, true));
+        const FailureOr<LdsInventory> bank_inventory =
+            discover_lds_wrong_address(banked, "test_kernel", error);
+        ASSERT_TRUE(bank_inventory.succeeded()) << error.message;
+        ASSERT_EQ(bank_inventory.value().sites().size(), 1u);
+        EXPECT_EQ(bank_inventory.value().sites()[0].address_bank, 1u);
+        const FailureOr<LdsSelection> bank_selection =
+            select_lds_wrong_address(bank_inventory.value(), {}, error);
+        ASSERT_TRUE(bank_selection.succeeded());
+        EXPECT_TRUE(apply_lds_wrong_address(banked, bank_selection.value(), 16, error).failed());
+        const FailureOr<LdsResult> bank_result =
+            apply_lds_wrong_address(banked, bank_selection.value(), 15, error);
+        ASSERT_TRUE(bank_result.succeeded()) << error.message;
+        EXPECT_TRUE(
+            test::lds_form_output_matches(banked, fixture, 4, 15, bank_result.value().image));
+      }
+      if (fixture.arch == IsaFamily::Cdna3 || fixture.arch == IsaFamily::Cdna4) {
+        std::vector<uint8_t> gds = test::make_amdgpu_kernel_elf(
+            {fixture.words[0] | 0x10000u, fixture.words[1], 0xbf810000u}, 0, 3, fixture.machine, 3,
+            3);
+        gds[EI_DATA] = ELFDATA2LSB;
+        gds[EI_ABIVERSION] = ELFABIVERSION_AMDGPU_HSA_V5;
+        const FaultMutationContext gds_context(gds);
+        const FailureOr<LdsInventory> gds_inventory =
+            discover_lds_wrong_address(gds_context, "test_kernel", error);
+        ASSERT_TRUE(gds_inventory.succeeded()) << error.message;
+        EXPECT_TRUE(gds_inventory.value().sites().empty());
+      }
+      if (fixture.form.find("_tr") == std::string_view::npos) {
+        test::LdsFormCase alias = fixture;
+        const bool load =
+            fixture.form.starts_with("ds_load_") || fixture.form.starts_with("ds_read_");
+        if (load)
+          alias.words[1] = (alias.words[1] & 0x00ffffffu) | 0x02000000u;
+        else
+          alias.words[1] = (alias.words[1] & 0xffff00ffu) | 0x00000200u;
+        const FaultMutationContext alias_context(test::make_lds_form_elf(alias, false, wave32));
+        const FailureOr<LdsInventory> alias_inventory =
+            discover_lds_wrong_address(alias_context, "test_kernel", error);
+        ASSERT_TRUE(alias_inventory.succeeded()) << error.message;
+        const FailureOr<LdsSelection> alias_selection =
+            select_lds_wrong_address(alias_inventory.value(), {}, error);
+        ASSERT_TRUE(alias_selection.succeeded());
+        const FailureOr<LdsResult> alias_result =
+            apply_lds_wrong_address(alias_context, alias_selection.value(), 6, error);
+        ASSERT_TRUE(alias_result.succeeded()) << error.message;
+        EXPECT_TRUE(
+            test::lds_form_output_matches(alias_context, alias, 0, 6, alias_result.value().image));
+      }
+    }
+  }
+}
+
+TEST(FaultLdsWrongAddress, RemainingSubwordTruncationAndLateFailureRollBack) {
+  for (size_t index : {0u, 14u, 28u, 36u, 50u}) {
+    const test::LdsFormCase &fixture = test::kRemainingSubwordCases[index];
+    for (bool wave32 : {false, true}) {
+      if (fixture.arch != IsaFamily::Rdna4 && wave32)
+        continue;
+      SCOPED_TRACE(wave32);
+      SCOPED_TRACE(fixture.form);
+      SCOPED_TRACE(static_cast<int>(fixture.target));
+      std::vector<uint8_t> truncated = test::make_amdgpu_kernel_elf(
+          {fixture.words[0]}, 0, 3, fixture.machine, 3, 3, false, false, false, false, wave32);
+      truncated[EI_DATA] = ELFDATA2LSB;
+      truncated[EI_ABIVERSION] = ELFABIVERSION_AMDGPU_HSA_V5;
+      const FaultMutationContext incomplete(truncated);
+      FaultMutationError error;
+      EXPECT_TRUE(discover_lds_wrong_address(incomplete, "test_kernel", error).failed());
+      EXPECT_TRUE(std::ranges::equal(incomplete.image(), truncated));
+      std::vector<uint32_t> words = {fixture.words[0], fixture.words[1]};
+      words.insert(words.end(), 32769, 0xbf800000u);
+      words.push_back(fixture.arch == IsaFamily::Cdna3 || fixture.arch == IsaFamily::Cdna4
+                          ? 0xbf810000u
+                          : 0xbfb00000u);
+      std::vector<uint8_t> image = test::make_amdgpu_kernel_elf(words, 0, 3, fixture.machine, 3, 3,
+                                                                false, false, false, false, wave32);
+      image[EI_DATA] = ELFDATA2LSB;
+      image[EI_ABIVERSION] = ELFABIVERSION_AMDGPU_HSA_V5;
+      const FaultMutationContext context(image);
+      const FailureOr<LdsInventory> inventory =
+          discover_lds_wrong_address(context, "test_kernel", error);
+      ASSERT_TRUE(inventory.succeeded()) << error.message;
+      const FailureOr<LdsSelection> selection =
+          select_lds_wrong_address(inventory.value(), {}, error);
+      ASSERT_TRUE(selection.succeeded());
+      EXPECT_TRUE(apply_lds_wrong_address(context, selection.value(), 6, error).failed());
+      EXPECT_TRUE(std::ranges::equal(context.image(), image));
+    }
+  }
+}
+
+TEST(FaultLdsWrongAddress, GenericDsFieldDoesNotAdmitNopOrAtomic) {
+  for (size_t index : {0u, 14u, 28u, 36u, 50u}) {
+    const test::LdsFormCase &fixture = test::kRemainingSubwordCases[index];
+    for (bool wave32 : {false, true}) {
+      if (fixture.arch != IsaFamily::Rdna4 && wave32)
+        continue;
+      SCOPED_TRACE(wave32);
+      SCOPED_TRACE(static_cast<int>(fixture.target));
+      const bool cdna = fixture.arch == IsaFamily::Cdna3 || fixture.arch == IsaFamily::Cdna4;
+      const uint32_t nop = cdna ? 0xd8280000u : 0xd8500000u;
+      const uint32_t end = cdna ? 0xbf810000u : 0xbfb00000u;
+      std::vector<uint8_t> image =
+          test::make_amdgpu_kernel_elf({nop, 0, 0xd8000004u, 0x00000402u, end}, 0, 3,
+                                       fixture.machine, 3, 3, false, false, false, false, wave32);
+      image[EI_DATA] = ELFDATA2LSB;
+      image[EI_ABIVERSION] = ELFABIVERSION_AMDGPU_HSA_V5;
+      const FaultMutationContext context(image);
+      FaultMutationError error;
+      const FailureOr<LdsInventory> inventory =
+          discover_lds_wrong_address(context, "test_kernel", error);
+      ASSERT_TRUE(inventory.succeeded()) << error.message;
+      EXPECT_TRUE(inventory.value().sites().empty());
+      EXPECT_TRUE(select_lds_wrong_address(inventory.value(), {}, error).failed());
+      EXPECT_TRUE(std::ranges::equal(context.image(), image));
+    }
+  }
+}
+
+TEST(FaultLdsWrongAddress, Rdna4Wave32AllFormsPreserveGuestAndAllocation) {
+  constexpr std::array<std::pair<std::string_view, std::array<uint32_t, 2>>, 6> base = {{
+      {"ds_load_b32", {0xd8d80004u, 0x05000002u}},
+      {"ds_store_b32", {0xd8340008u, 0x00000302u}},
+      {"ds_load_b96", {0xdbf80004u, 0x04000002u}},
+      {"ds_store_b96", {0xdb780004u, 0x00000402u}},
+      {"ds_load_2addr_b64", {0xd9dc0301u, 0x04000002u}},
+      {"ds_store_2addr_b32", {0xd8380502u, 0x00040302u}},
+  }};
+  std::vector<test::LdsFormCase> cases;
+  for (const std::pair<rj_code_target_id_t, uint32_t> &target :
+       std::array<std::pair<rj_code_target_id_t, uint32_t>, 2>{
+           {{ROCJITSU_CODE_TARGET_GFX1200, EF_AMDGPU_MACH_AMDGCN_GFX1200},
+            {ROCJITSU_CODE_TARGET_GFX1201, EF_AMDGPU_MACH_AMDGCN_GFX1201}}}) {
+    for (const std::pair<std::string_view, std::array<uint32_t, 2>> &item : base)
+      cases.push_back({.target = target.first,
+                       .machine = target.second,
+                       .arch = IsaFamily::Rdna4,
+                       .form = item.first,
+                       .words = item.second});
+  }
+  for (std::span<const test::LdsFormCase> fixtures :
+       {std::span<const test::LdsFormCase>(test::kScalarTwoCases),
+        std::span<const test::LdsFormCase>(test::kRemainingSubwordCases)})
+    for (const test::LdsFormCase &fixture : fixtures)
+      if (fixture.arch == IsaFamily::Rdna4)
+        cases.push_back(fixture);
+  ASSERT_EQ(cases.size(), 60u);
+  const std::vector<LdsCapability> capabilities = lds_wrong_address_capabilities();
+  for (const test::LdsFormCase &fixture : cases) {
+    EXPECT_TRUE(std::ranges::any_of(capabilities, [&](const LdsCapability &row) {
+      return row.target == fixture.target && row.wave_size == 32 && row.form == fixture.form;
+    })) << fixture.form;
+    SCOPED_TRACE(fixture.form);
+    SCOPED_TRACE(static_cast<int>(fixture.target));
+    const std::vector<uint32_t> words = {fixture.words[0], fixture.words[1], 0xbfb00000u};
+    std::vector<uint8_t> image = test::make_amdgpu_kernel_elf(words, 0, 3, fixture.machine, 0, 0,
+                                                              false, false, false, false, true);
+    image[EI_DATA] = ELFDATA2LSB;
+    image[EI_ABIVERSION] = ELFABIVERSION_AMDGPU_HSA_V5;
+    const FaultMutationContext source(image), foreign(image);
+    FaultMutationError error;
+    const FailureOr<LdsInventory> found = discover_lds_wrong_address(source, "test_kernel", error);
+    EXPECT_TRUE(found.succeeded()) << error.message;
+    if (found.failed())
+      continue;
+    ASSERT_EQ(found.value().sites().size(), 1u) << fixture.form;
+    EXPECT_EQ(found.value().sites()[0].form, fixture.form);
+    const FailureOr<LdsSelection> selected = select_lds_wrong_address(found.value(), {}, error);
+    ASSERT_TRUE(selected.succeeded());
+    const FailureOr<LdsSelection> exact = select_lds_wrong_address(
+        found.value(), {.exact = selected.value(), .ordinal = std::numeric_limits<size_t>::max()},
+        error);
+    ASSERT_TRUE(exact.succeeded());
+    EXPECT_TRUE(apply_lds_wrong_address(source, exact.value(), std::nullopt, error).failed());
+    EXPECT_TRUE(apply_lds_wrong_address(source, exact.value(), 256, error).failed());
+    EXPECT_TRUE(apply_lds_wrong_address(source, exact.value(), 8, error).failed());
+    EXPECT_TRUE(apply_lds_wrong_address(source, exact.value(), 2, error).failed());
+    EXPECT_TRUE(apply_lds_wrong_address(foreign, exact.value(), 7, error).failed());
+    const FailureOr<LdsResult> mutated = apply_lds_wrong_address(source, exact.value(), 7, error);
+    ASSERT_TRUE(mutated.succeeded()) << error.message;
+    EXPECT_TRUE(test::lds_form_output_matches(source, fixture, 0, 7, mutated.value().image));
+    const FailureOr<LdsResult> ordinal =
+        apply_lds_wrong_address(source, selected.value(), 7, error);
+    ASSERT_TRUE(ordinal.succeeded());
+    EXPECT_EQ(mutated.value().image, ordinal.value().image);
   }
 }
 
