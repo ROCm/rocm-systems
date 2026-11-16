@@ -28,11 +28,15 @@ for itself (workstreams WS-1 and WS-2):
     - every ``kind`` / ``disposition`` / ``gating`` value is within the
       vocabulary the inventory declares for itself (the ``vocabularies:`` block).
 
-  merge targets
-    - a suite whose ``disposition`` is ``merge_into`` must name a
-      ``disposition_target``; ``migrate`` / ``demote`` / ``retire`` may omit it.
-      Any target named by a move disposition must resolve to existing inventory
-      id(s); no move may name a missing or self target.
+  move / retire targets
+    - a suite whose ``disposition`` is ``merge_into`` or ``retire`` must name a
+      ``disposition_target`` (the destination record, or the replacement
+      inventory id(s) that preserve retired coverage); ``migrate`` / ``demote``
+      may omit it. Any target named by a move disposition must resolve to
+      existing inventory id(s); no move may name a missing or self target. A
+      ``retire`` suite must additionally carry a ``retirement`` mapping that
+      documents equivalent-or-stronger replacement coverage, the CI evidence that
+      the replacement runs, and owner approval.
 
   coverage refs
     - the coverage model carries its top-level identity block (``schema_version``,
@@ -161,12 +165,24 @@ REQUIRED_INCIDENT_LABELS = (
 # must resolve to an existing inventory id and never to the record itself.
 MOVE_DISPOSITIONS = frozenset({"merge_into", "migrate", "demote", "retire"})
 
-# Dispositions that MUST name a disposition_target. Only ``merge_into`` asserts a
-# concrete destination record that has to exist today; ``migrate`` / ``demote`` /
-# ``retire`` describe a lifecycle change whose destination may be external or not
+# Dispositions that MUST name a disposition_target. ``merge_into`` asserts a
+# concrete destination record that has to exist today; ``retire`` drops coverage
+# and must name the replacement inventory id(s) that preserve it. ``migrate`` /
+# ``demote`` describe a lifecycle change whose destination may be external or not
 # yet an inventory id, so a target is optional for them (but still validated when
 # one is given).
-REQUIRE_TARGET_DISPOSITIONS = frozenset({"merge_into"})
+REQUIRE_TARGET_DISPOSITIONS = frozenset({"merge_into", "retire"})
+
+# The disposition that drops a suite from the live set. Retiring coverage is only
+# safe when the dropped coverage is demonstrably preserved elsewhere, so a
+# retiring suite must carry a ``retirement`` mapping documenting three things, on
+# top of the replacement inventory id(s) it names via disposition_target: that the
+# replacement coverage is equivalent or stronger, the CI evidence that the
+# replacement actually runs, and the owner approval for the retire.
+RETIRE_DISPOSITION = "retire"
+REQUIRED_RETIREMENT_EVIDENCE = (
+    "coverage_equivalence", "ci_evidence", "owner_approval",
+)
 
 # A path value starting with this marker is a CI lane defined outside the repo
 # and is not existence-checked (TEST_RESTRUCTURING.md WS-1).
@@ -439,9 +455,11 @@ def check_inventory(inventory, component_dir):
         elif "metadata" in suite:
             errors.append("suite {!r} metadata is not a mapping".format(sid))
 
-        # Merge / move targets. Only merge_into must name a disposition_target;
-        # the other move dispositions may omit it, but any target they do name is
-        # still resolved against the inventory.
+        # Merge / move / retire targets. ``merge_into`` and ``retire`` must name a
+        # disposition_target (the destination record, or the replacement inventory
+        # id(s) that preserve retired coverage); ``migrate`` / ``demote`` may omit
+        # it. Any target a move disposition does name is resolved against the
+        # inventory and may not point at the record itself.
         if disp in MOVE_DISPOSITIONS:
             target = suite.get("disposition_target")
             if target is None:
@@ -456,6 +474,25 @@ def check_inventory(inventory, component_dir):
                     elif tid not in suite_ids:
                         errors.append(
                             "suite {!r} {} target {!r} is not an inventory id".format(sid, disp, tid))
+
+        # Retirement evidence. A retiring suite drops coverage, so beyond naming
+        # the replacement inventory id(s) via disposition_target (required and
+        # resolved above) it must carry a ``retirement`` mapping documenting that
+        # the replacement coverage is equivalent or stronger, the CI evidence that
+        # it runs, and the owner approval for the retire.
+        if disp == RETIRE_DISPOSITION:
+            retirement = suite.get("retirement")
+            if not isinstance(retirement, dict):
+                errors.append(
+                    "suite {!r} disposition 'retire' must carry a retirement mapping "
+                    "with {}".format(
+                        sid, ", ".join(REQUIRED_RETIREMENT_EVIDENCE)))
+            else:
+                for field in REQUIRED_RETIREMENT_EVIDENCE:
+                    if not _nonempty_str(retirement.get(field)):
+                        errors.append(
+                            "suite {!r} retirement is missing a non-empty {!r} field".format(
+                                sid, field))
 
         # Source paths: a suite must name at least one source path, and every
         # path must be a string that resolves on disk (or an external: marker).
@@ -481,8 +518,10 @@ def check_inventory(inventory, component_dir):
             errors.append("suite {!r} source is not a mapping".format(sid))
 
         # Evidence: each entry must be a mapping carrying both a path and a
-        # claim; the path must resolve on disk unless marked external.
-        for ev in suite.get("evidence", []) or []:
+        # claim; the path must resolve on disk unless marked external. A present
+        # but non-list evidence block is a schema error, not an iteration target.
+        suite_evidence = suite.get("evidence")
+        for ev in suite_evidence if isinstance(suite_evidence, list) else []:
             if not isinstance(ev, dict):
                 errors.append(
                     "suite {!r} evidence entry is not a mapping: {!r}".format(sid, ev))
@@ -547,7 +586,13 @@ def check_coverage_model(model, suite_ids, component_dir):
 
     declared_axes = set()
     declared_axis_ids = set()
-    for axis in cm.get("axes", []) or []:
+    axes = cm.get("axes")
+    if axes is None:
+        axes = []
+    elif not isinstance(axes, list):
+        errors.append("coverage model axes must be a list: {!r}".format(axes))
+        axes = []
+    for axis in axes:
         if not isinstance(axis, dict):
             errors.append("coverage model axis is not a mapping: {!r}".format(axis))
             continue
@@ -604,7 +649,12 @@ def check_coverage_model(model, suite_ids, component_dir):
                 refs_ok += 1
 
     seen_class_ids = set()
-    classes = cm.get("classes", []) or []
+    classes = cm.get("classes")
+    if classes is None:
+        classes = []
+    elif not isinstance(classes, list):
+        errors.append("coverage model classes must be a list: {!r}".format(classes))
+        classes = []
     for cls in classes:
         if not isinstance(cls, dict):
             errors.append("coverage class record is not a mapping: {!r}".format(cls))
@@ -634,7 +684,7 @@ def check_coverage_model(model, suite_ids, component_dir):
         evidence = cls.get("evidence")
         if "evidence" in cls and (not isinstance(evidence, list) or not evidence):
             errors.append("class {!r} evidence must be a non-empty list".format(cid))
-        for ev in evidence or []:
+        for ev in evidence if isinstance(evidence, list) else []:
             if not isinstance(ev, dict):
                 errors.append(
                     "class {!r} evidence entry is not a mapping: {!r}".format(cid, ev))
@@ -653,7 +703,14 @@ def check_coverage_model(model, suite_ids, component_dir):
         incident_refs.update(_collect_incident_refs(cls))
 
     seen_pair_ids = set()
-    for pc in cm.get("pairwise_checks", []) or []:
+    pairwise_checks = cm.get("pairwise_checks")
+    if pairwise_checks is None:
+        pairwise_checks = []
+    elif not isinstance(pairwise_checks, list):
+        errors.append(
+            "coverage model pairwise_checks must be a list: {!r}".format(pairwise_checks))
+        pairwise_checks = []
+    for pc in pairwise_checks:
         if not isinstance(pc, dict):
             errors.append("pairwise check record is not a mapping: {!r}".format(pc))
             continue
@@ -744,8 +801,15 @@ def _heading_anchors(md_path, cache):
     anchors = set()
     if resolved.exists():
         text = resolved.read_text(encoding="utf-8")
+        # GitHub disambiguates repeated heading slugs by appending ``-1``, ``-2``,
+        # ... to the second and later occurrences, so track how many times each
+        # base slug has been seen and register the suffixed anchor as well.
+        seen = {}
         for heading in _HEADING_RE.findall(text):
-            anchors.add(_slugify(heading))
+            slug = _slugify(heading)
+            count = seen.get(slug, 0)
+            anchors.add(slug if count == 0 else "{}-{}".format(slug, count))
+            seen[slug] = count + 1
     cache[resolved] = anchors
     return anchors
 

@@ -146,6 +146,58 @@ def _all_errors(results):
     return [err for errs in results.values() for err in errs]
 
 
+# A fully-formed retiring suite: it names its replacement inventory id via
+# disposition_target and documents equivalent-or-stronger coverage, CI evidence,
+# and owner approval in a retirement mapping. _with_retire appends it to the
+# valid inventory (whose disposition vocabulary it extends to allow ``retire``);
+# each negative test mutates exactly one line of this block.
+RETIRE_SUITE = """\
+  - id: suite-two
+    owner: Team Beta
+    name: Suite Two
+    kind: contract
+    domain: memory
+    purpose: Legacy coverage now superseded.
+    oracle: Return code.
+    source:
+      paths:
+        - "external: outside-this-repo"
+    metadata:
+      framework: Catch2
+    execution:
+      cadence: pr
+      gating: trusted
+      ctest_labels: [contract]
+      platforms: [linux]
+      backends: [amd]
+      prerequisites: [HIP runtime and device]
+      ci_lane:
+        external: documented elsewhere
+    evidence:
+      - path: "external: evidence-outside-repo"
+        claim: Built under BUILD_CONTRACT_TESTS.
+    disposition: retire
+    disposition_target: [suite-one]
+    disposition_rationale: Folded into suite-one.
+    retirement:
+      coverage_equivalence: suite-one pins the same invariants and adds OOB checks.
+      ci_evidence: Runs in the contract lane under BUILD_CONTRACT_TESTS.
+      owner_approval: Approved by Team Beta on 2026-11-10.
+"""
+
+
+def _with_retire(suite_block):
+    """Return the valid inventory extended with a ``retire`` suite block.
+
+    The disposition vocabulary is widened to allow ``retire`` and suite_block is
+    appended as a second suite so retirement enforcement can be exercised.
+    """
+    inventory = VALID_INVENTORY.replace(
+        "  disposition: [keep, merge_into]\n",
+        "  disposition: [keep, merge_into, retire]\n", 1)
+    return inventory + suite_block
+
+
 class CheckTestingDocsTest(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -351,6 +403,99 @@ class CheckTestingDocsTest(unittest.TestCase):
         _write_docs(self.root, {"test_inventory.yaml": broken})
         results, _ = checker.validate(root=str(self.root))
         self.assertEqual(results["inventory"], [], msg=results["inventory"])
+
+    def test_demote_does_not_require_disposition_target(self):
+        # demote, like migrate, describes a lifecycle change whose destination may
+        # be external, so omitting disposition_target is not an error.
+        broken = VALID_INVENTORY.replace(
+            "  disposition: [keep, merge_into]\n",
+            "  disposition: [keep, merge_into, demote]\n", 1).replace(
+            "    disposition: keep\n", "    disposition: demote\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertEqual(results["inventory"], [], msg=results["inventory"])
+
+    # -- retire disposition: replacement + evidence enforcement --------------
+
+    def test_valid_retire_suite_passes(self):
+        # A retiring suite that names its replacement id and documents coverage
+        # equivalence, CI evidence, and owner approval is consistent.
+        _write_docs(self.root, {"test_inventory.yaml": _with_retire(RETIRE_SUITE)})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertEqual(results["inventory"], [], msg=results["inventory"])
+
+    def test_retire_requires_disposition_target(self):
+        block = RETIRE_SUITE.replace(
+            "    disposition_target: [suite-one]\n", "", 1)
+        _write_docs(self.root, {"test_inventory.yaml": _with_retire(block)})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("must name disposition_target" in err and "retire" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_retire_target_must_resolve(self):
+        block = RETIRE_SUITE.replace(
+            "    disposition_target: [suite-one]\n",
+            "    disposition_target: [suite-missing]\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": _with_retire(block)})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("is not an inventory id" in err for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_retire_requires_retirement_mapping(self):
+        block = RETIRE_SUITE.replace(
+            "    retirement:\n"
+            "      coverage_equivalence: suite-one pins the same invariants and adds OOB checks.\n"
+            "      ci_evidence: Runs in the contract lane under BUILD_CONTRACT_TESTS.\n"
+            "      owner_approval: Approved by Team Beta on 2026-11-10.\n",
+            "", 1)
+        _write_docs(self.root, {"test_inventory.yaml": _with_retire(block)})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("must carry a retirement mapping" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_retire_missing_coverage_equivalence_is_reported(self):
+        block = RETIRE_SUITE.replace(
+            "      coverage_equivalence: suite-one pins the same invariants and adds OOB checks.\n",
+            "", 1)
+        _write_docs(self.root, {"test_inventory.yaml": _with_retire(block)})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("missing a non-empty 'coverage_equivalence' field" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_retire_missing_ci_evidence_is_reported(self):
+        block = RETIRE_SUITE.replace(
+            "      ci_evidence: Runs in the contract lane under BUILD_CONTRACT_TESTS.\n",
+            "", 1)
+        _write_docs(self.root, {"test_inventory.yaml": _with_retire(block)})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("missing a non-empty 'ci_evidence' field" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_retire_missing_owner_approval_is_reported(self):
+        block = RETIRE_SUITE.replace(
+            "      owner_approval: Approved by Team Beta on 2026-11-10.\n",
+            "", 1)
+        _write_docs(self.root, {"test_inventory.yaml": _with_retire(block)})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("missing a non-empty 'owner_approval' field" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
 
     # -- repository-path-bearing fields: stale values ------------------------
 
@@ -773,6 +918,59 @@ class CheckTestingDocsTest(unittest.TestCase):
         _write_docs(self.root)
         rc = checker.main(["--root", str(self.root)])
         self.assertEqual(rc, 0)
+
+    # -- coverage model collection-type guards (no TypeError) ----------------
+
+    def _coverage_model(self, **coverage_model):
+        return {"schema_version": 1, "component": "hip-tests",
+                "coverage_model": coverage_model}
+
+    def test_coverage_axes_not_a_list_is_reported(self):
+        model = self._coverage_model(axes=5, classes=[], pairwise_checks=[])
+        errors, _, _ = checker.check_coverage_model(model, set(), str(self.root))
+        self.assertTrue(
+            any("axes must be a list" in err for err in errors), msg=errors)
+
+    def test_coverage_classes_not_a_list_is_reported(self):
+        model = self._coverage_model(axes=[], classes=7, pairwise_checks=[])
+        errors, _, _ = checker.check_coverage_model(model, set(), str(self.root))
+        self.assertTrue(
+            any("classes must be a list" in err for err in errors), msg=errors)
+
+    def test_coverage_pairwise_checks_not_a_list_is_reported(self):
+        model = self._coverage_model(axes=[], classes=[], pairwise_checks=9)
+        errors, _, _ = checker.check_coverage_model(model, set(), str(self.root))
+        self.assertTrue(
+            any("pairwise_checks must be a list" in err for err in errors),
+            msg=errors)
+
+    def test_coverage_class_evidence_scalar_is_reported(self):
+        # A present but non-list (scalar) class evidence must be reported, not
+        # crash the per-entry iteration.
+        cls = {"id": "c1", "owner": "o", "axes": [], "risk": "low",
+               "intent": "i", "expected_test_kinds": [], "current_inventory": [],
+               "evidence": 5, "gap_status": "x"}
+        model = self._coverage_model(axes=[], classes=[cls], pairwise_checks=[])
+        errors, _, _ = checker.check_coverage_model(model, set(), str(self.root))
+        self.assertTrue(
+            any("evidence must be a non-empty list" in err for err in errors),
+            msg=errors)
+
+    # -- duplicate heading anchors (GitHub -N suffix) ------------------------
+
+    def test_duplicate_heading_anchor_suffix_resolves(self):
+        # GitHub disambiguates repeated heading slugs with a ``-1`` suffix on the
+        # second occurrence; a link to that suffixed anchor must resolve.
+        testing = (
+            "# Testing Strategy\n\n"
+            "See the [first](#section) and the [second](#section-1).\n\n"
+            "## Section\n\nFirst occurrence.\n\n"
+            "## Section\n\nSecond occurrence.\n"
+        )
+        _write_docs(self.root, {"TESTING.md": testing})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertEqual(
+            results["markdown_links"], [], msg=results["markdown_links"])
 
 
 if __name__ == "__main__":

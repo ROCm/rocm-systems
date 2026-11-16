@@ -29,6 +29,7 @@ on:
       - "projects/hip-tests/TESTING_INCIDENTS.md"
       - "projects/hip-tests/TEST_RESTRUCTURING.md"
       - "projects/hip-tests/tools/**"
+      - ".github/workflows/hip-testing-docs.yml"
 
 permissions:
   contents: read

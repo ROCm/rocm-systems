@@ -30,7 +30,7 @@ This document does not define testing strategy for ROCm math libraries, communic
 A few boundaries keep these documents honest and prevent over-claiming:
 
 - `catch/TEST_PLAN.md` is **generated** from the `@asserts:` annotations by `catch/tools/gen_test_plan.py`. It is not a hand-maintained duplicate inventory: cite it as evidence, never edit it by hand, and do not re-list its cases in this guide or in `test_inventory.yaml`.
-- CI lanes that run outside this repository — notably the TheRock build and HIP runtime test jobs — are **external** to hip-tests. The inventory marks them `external:` and links them to the evidence that does live here; only the static contract-coverage and test-plan gates in `.github/workflows/hip-contract-coverage.yml` run in-repo, and that workflow is **path-filtered**: its `paths:` filter restricts it to pull requests touching the HIP headers, the contract tier, or the contract tooling, so a docs-only change does not trigger it.
+- CI lanes that run outside this repository — notably the TheRock build and HIP runtime test jobs — are **external** to hip-tests. The inventory marks them `external:` and links them to the evidence that does live here. Two static, build-free gates run in-repo, and each is **path-filtered** rather than always-on: the contract-coverage and test-plan gates in `.github/workflows/hip-contract-coverage.yml` (scoped by their `paths:` filter to pull requests touching the HIP headers, the contract tier, or the contract tooling), and the testing-docs consistency gate in `.github/workflows/hip-testing-docs.yml` (scoped to pull requests touching this testing-documentation set — the inventory/coverage YAML, these Markdown docs, `tools/`, or the workflow file itself). A change outside a gate's filtered paths does not trigger it; in particular a code-only change does not trigger the testing-docs gate.
 - An unsupported-capability skip (`HIP_SKIP_TEST`, YAML `unsupported:`) is **signal-preserving behavior, not passing coverage**. A cleanly skipped case records that a path was not exercised here; it does not count as a validated contract.
 
 ## Development workflow
@@ -44,6 +44,7 @@ All tests are C++ built on Catch2 and discovered and run through CTest. Test exe
 | YAML tags, levels, or config generation | Config validation and a focused CTest label using the generated tags | Usually yes |
 | Build or test harness logic | Configure, build, and run a small representative label such as `contract` or the touched feature label | Usually yes |
 | Performance-sensitive runtime path | Relevant functional tests plus the matching performance scenario when available | Yes |
+| Testing-documentation set (these docs, `test_inventory.yaml`, `test_coverage_model.yaml`, `tools/`) | `python tools/check_testing_docs.py` plus its unit tests `python -m unittest tools/tests/test_check_testing_docs.py` — this is what the path-filtered testing-docs consistency gate runs | No |
 | Documentation-only change | Markdown/link checks and review against the current test framework | No |
 
 ## Testing strategy and layers
@@ -87,6 +88,7 @@ Stress tests live in `catch/stress/` and are OFF by default through `BUILD_STRES
 | TheRock build and HIP runtime test jobs | Trusted gate | Yes, when required by the PR policy | Builds ROCm packages and runs the configured HIP test set. |
 | Contract API coverage drift check | Trusted, path-filtered required gate | Yes, on PRs touching HIP headers, the contract tier, or the contract tooling | Path-filtered (workflow `paths:` filter), not always-on; a docs-only PR does not trigger it. Requires new public APIs to have a contract test or an explicit allowlist rationale. |
 | Generated test-plan staleness check | Trusted, path-filtered required gate | Yes, on the same contract/header/tooling paths | Path-filtered, not always-on. Keeps `catch/TEST_PLAN.md` synchronized with `@asserts:` annotations. |
+| Testing-docs consistency check | Trusted, path-filtered gate | Yes, on PRs touching the testing-documentation set or its tooling | Path-filtered (`.github/workflows/hip-testing-docs.yml` `paths:` filter covers the inventory/coverage YAML, these Markdown docs, `tools/`, and the workflow file), not always-on; a change outside those paths does not trigger it. Validates the hand-maintained testing documents as a connected set (schema, vocabularies, disposition/retirement targets, repository-path pointers, incident references, and Markdown links). |
 | Formatting and PR-description checks | Trusted gate | Yes, where configured | Maintains source and review hygiene. |
 | Performance and stress sweeps | Informational or scheduled gate, depending on workflow | Not universally on every PR | Used for longer-running validation and regression investigation. |
 | Flaky or quarantined cases | Unstable-flaky | No until fixed | Must have an owner, issue, and removal plan before becoming trusted signal. |
