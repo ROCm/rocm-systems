@@ -505,7 +505,8 @@ TEST(parser_configuration, a_directory_config_path_throws)
 {
     auto parser = make_parser();
     EXPECT_EQ(parser.parse({}).at("verbose"), "0");
-    EXPECT_THROW(parser.parse({ "--config", ::testing::TempDir() }), std::runtime_error);
+    EXPECT_THROW(static_cast<void>(parser.parse({ "--config", ::testing::TempDir() })),
+                 std::runtime_error);
     EXPECT_EQ(parser.get<std::int64_t>("verbose"), 0);
 }
 
