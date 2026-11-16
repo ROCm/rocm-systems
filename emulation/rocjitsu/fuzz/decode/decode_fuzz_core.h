@@ -4,6 +4,9 @@
 #ifndef ROCJITSU_FUZZ_DECODE_DECODE_FUZZ_CORE_H_
 #define ROCJITSU_FUZZ_DECODE_DECODE_FUZZ_CORE_H_
 
+#include "util/diagnostic.h"
+#include "util/result.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -32,8 +35,13 @@ struct DecodeRecord {
   std::vector<std::string> sources;
 };
 
-std::unique_ptr<Decoder> create_decoder(std::string_view target);
-DecodeRecord decode_window(Decoder &decoder, std::span<const uint8_t> bytes);
+/// @brief Return failure for an unsupported target, emitting its reason to diagnostic.
+util::FailureOr<std::unique_ptr<Decoder>> create_decoder(std::string_view target,
+                                                         util::DiagnosticEmitter diagnostic = {});
+/// @brief Return failure for an invalid window size; rejected guest encodings are records.
+/// @details Internal decoder invariant violations terminate the process, including under NDEBUG.
+util::FailureOr<DecodeRecord> decode_window(Decoder &decoder, std::span<const uint8_t> bytes,
+                                            util::DiagnosticEmitter diagnostic = {});
 std::string record_json(const DecodeRecord &record, std::span<const uint8_t> bytes,
                         std::string_view input_name = {});
 

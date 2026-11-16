@@ -97,20 +97,23 @@ function(copy_image_files_and_make_copies)
         file(COPY ${image_files} DESTINATION ${CMAKE_BINARY_DIR}/images)
         set(NUM_COPIES 20)
 
-        # Loop over each file and make additional copies
+        # Make additional copies of each image so the decode runs longer and the
+        # tests collect enough profiling data.
         foreach(file ${image_files})
-            get_filename_component(filename ${file} NAME)
+            get_filename_component(filename ${file} NAME_WE)
             foreach(i RANGE 1 ${NUM_COPIES})
-                file(
-                    COPY ${file}
-                    DESTINATION ${CMAKE_BINARY_DIR}/images/${filename}_copy${i}.jpg
+                configure_file(
+                    "${file}"
+                    "${CMAKE_BINARY_DIR}/images/${filename}_copy${i}.jpg"
+                    COPYONLY
                 )
             endforeach()
         endforeach()
     else()
         message(
             AUTHOR_WARNING
-            "Source directory ${rocjpeg_ROOT_DIR}/share/rocjpeg/images does not exist"
+            "Source directory ${rocjpeg_ROOT_DIR}/share/rocjpeg/images does not exist; "
+            "jpeg-decode tests will be skipped due to missing image data"
         )
     endif()
 endfunction()

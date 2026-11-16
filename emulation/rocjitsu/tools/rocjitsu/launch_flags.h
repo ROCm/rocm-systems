@@ -172,6 +172,11 @@ struct LaunchFlags {
                      ucli::ValueMode::Switch});
   std::shared_ptr<ucli::BoolFlag> attach = std::make_shared<ucli::BoolFlag>(ucli::FlagInfo{
       "--attach", {}, "Attach the application to a running daemon", ucli::ValueMode::Switch});
+  std::shared_ptr<ucli::BoolFlag> fabric_effect_trace = std::make_shared<ucli::BoolFlag>(
+      ucli::FlagInfo{"--fabric-effect-trace",
+                     {},
+                     "Capture bounded directed GPU fabric effects in daemon or VFIO server mode",
+                     ucli::ValueMode::Switch});
   std::shared_ptr<rjtools::StringListFlag> vfio_socket = std::make_shared<rjtools::StringListFlag>(
       ucli::FlagInfo{
           "--vfio-socket",
@@ -200,7 +205,10 @@ struct LaunchFlags {
                        {config, node, cpu_thread_budget, wait_checking, thread_budget_table},
                        diagnostic)
             .failed() ||
-        command.add_flags("Launch modes", {daemon, attach, vfio_socket, vfio_ready_fd}, diagnostic)
+        command
+            .add_flags("Launch modes",
+                       {daemon, attach, fabric_effect_trace, vfio_socket, vfio_ready_fd},
+                       diagnostic)
             .failed())
       return util::Result::failure();
     return command.add_flags("Information", {check_vfio_user, version, help}, diagnostic);

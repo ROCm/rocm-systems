@@ -497,19 +497,24 @@ ncclResult_t ncclGpuGdrSupport(struct ncclComm* comm, int* gdrSupport) {
     return ncclSuccess;
   }
 #endif
-  static int gdrSupportMatrix[32] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-                                     -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
-  if (gdrSupportMatrix[comm->cudaDev] == -1) {
+  // Keyed by plugin too: Socket's "no GDR" must not answer for a later IB comm on this GPU (ROCM-27737).
+  enum class GdrVerdict { Unprobed = 0, No, Yes };
+  static GdrVerdict gdrSupportMatrix[NCCL_NET_MAX_PLUGINS][NCCL_MAX_LOCAL_RANKS] = {};
+  GdrVerdict uncached = GdrVerdict::Unprobed;
+  GdrVerdict* cached = (comm->cudaDev >= 0 && comm->cudaDev < NCCL_MAX_LOCAL_RANKS)
+                           ? &gdrSupportMatrix[comm->netPluginIndex][comm->cudaDev]
+                           : &uncached;
+  if (*cached == GdrVerdict::Unprobed) {
     int netDevs;
+    GdrVerdict verdict = GdrVerdict::No;
     NCCLCHECK(comm->ncclNet->devices(&netDevs));
-    gdrSupportMatrix[comm->cudaDev] = 0;
     for (int dev = 0; dev < netDevs; dev++) {
       // Find a net device which is GDR-capable
       ncclNetProperties_t props;
       NCCLCHECK(comm->ncclNet->getProperties(dev, &props));
       if ((props.ptrSupport & NCCL_PTR_CUDA) == 0) continue;
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-      gdrSupportMatrix[comm->cudaDev] = 1;
+      verdict = GdrVerdict::Yes;
       break;
 #endif
 
@@ -544,7 +549,7 @@ ncclResult_t ncclGpuGdrSupport(struct ncclComm* comm, int* gdrSupport) {
         NCCLCHECKNOWARN(comm->ncclNet->deregMr(sComm, mHandle), NCCL_NET);
         NCCLCHECKNOWARN(comm->ncclNet->regMr(rComm, gpuPtr, GPU_BUF_SIZE, NCCL_PTR_CUDA, &mHandle), NCCL_NET);
         NCCLCHECKNOWARN(comm->ncclNet->deregMr(rComm, mHandle), NCCL_NET);
-        gdrSupportMatrix[comm->cudaDev] = 1;
+        verdict = GdrVerdict::Yes;
       }
       NCCLCHECK(ncclCudaFree(gpuPtr, comm->memManager));
     cleanup2:
@@ -554,7 +559,8 @@ ncclResult_t ncclGpuGdrSupport(struct ncclComm* comm, int* gdrSupport) {
     cleanup1:
       break;
     }
+    *cached = verdict;
   }
-  *gdrSupport = gdrSupportMatrix[comm->cudaDev];
+  *gdrSupport = (*cached == GdrVerdict::Yes) ? 1 : 0;
   return ncclSuccess;
 }

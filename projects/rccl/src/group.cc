@@ -229,21 +229,29 @@ struct ncclMgmtTaskJob {
 ncclResult_t ncclP2PPreconnectFunc(struct ncclAsyncJob* job_) {
   struct ncclPreconnectJob* job = (struct ncclPreconnectJob*)job_;
   struct ncclComm* comm = job->comm;
+  ncclResult_t ret = ncclSuccess;
   // Preconnect is not meant to be captured;
   // swap to relaxed mode so CUDA graph capture works correctly.
   cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
-  CUDACHECK(cudaSetDevice(comm->cudaDev));
+  CUDACHECKGOTO(cudaSetDevice(comm->cudaDev), ret, exit);
   if (!job_->isThreadMain && ncclOsCpuCount(comm->cpuAffinity)) ncclOsSetAffinity(comm->cpuAffinity);
-  NCCLCHECK(ncclTransportP2pSetup(comm, NULL, 1));
-  if (comm->p2pNet) NCCLCHECK(ncclTransportP2pSetup(comm, NULL, NCCL_CONN_IDX_P2P_NET));
-  if (mode != cudaStreamCaptureModeRelaxed) CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
-  INFO(
-    NCCL_INIT,
-    "rank %d/%d cudaDev %d nvmlDev %d busId %#llx commId 0x%016llx Send/Recv P2P transport setup complete (p2pNet=%d)",
-    comm->rank, comm->nRanks, comm->cudaDev, comm->nvmlDev, (unsigned long long)comm->busId,
-    (unsigned long long)comm->commHash, comm->p2pNet ? 1 : 0);
-  return ncclSuccess;
+  NCCLCHECKGOTO(ncclTransportP2pSetup(comm, NULL, 1), ret, exit);
+  if (ncclP2pUsesMemcpy()) NCCLCHECKGOTO(ncclTransportP2pSetup(comm, NULL, NCCL_CONN_IDX_P2P_CE), ret, exit);
+  if (comm->p2pNet) NCCLCHECKGOTO(ncclTransportP2pSetup(comm, NULL, NCCL_CONN_IDX_P2P_NET), ret, exit);
+
+exit:
+  if (mode != cudaStreamCaptureModeRelaxed) {
+    cudaError_t err = cudaThreadExchangeStreamCaptureMode(&mode);
+    if (ret == ncclSuccess && err != cudaSuccess) ret = rcclCudaErrorHandler(err);
+  }
+  if (ret == ncclSuccess)
+    INFO(NCCL_INIT,
+         "rank %d/%d cudaDev %d nvmlDev %d busId %#llx commId 0x%016llx Send/Recv P2P transport setup complete "
+         "(p2pNet=%d)",
+         comm->rank, comm->nRanks, comm->cudaDev, comm->nvmlDev, (unsigned long long)comm->busId,
+         (unsigned long long)comm->commHash, comm->p2pNet ? 1 : 0);
+  return ret;
 }
 
 ncclResult_t ncclCollPreconnect(struct ncclComm* comm, bool* algoNeedConnect) {
@@ -397,8 +405,9 @@ ncclResult_t ncclCommGroupArgsGlobalCheck(struct ncclAsyncJob* job_) {
   ncclResult_t ret = ncclSuccess;
   while (!ncclIntruQueueEmpty(&comm->argsInfoQueue)) {
     struct ncclArgsInfo* argsInfo = ncclIntruQueueDequeue(&comm->argsInfoQueue);
-    NCCLCHECKGOTO(ncclArgsGlobalCheck(argsInfo), ret, fail);
+    ncclResult_t checkRet = ncclArgsGlobalCheck(argsInfo);
     free(argsInfo);
+    NCCLCHECKGOTO(checkRet, ret, fail);
   }
 
 exit:
@@ -416,24 +425,26 @@ ncclResult_t ncclCommGroupRegisterSymmetric(struct ncclAsyncJob* job_) {
 
   while (!ncclIntruQueueEmpty(&comm->devrState.regTaskQueue)) {
     struct ncclDevrRegTask* task = ncclIntruQueueDequeue(&comm->devrState.regTaskQueue);
-    NCCLCHECKGOTO(ncclDevrWindowRegisterInGroup(comm, task->userPtr, task->userSize, task->winFlags, task->outWinDev),
-                  ret, fail);
+    ncclResult_t taskRet =
+      ncclDevrWindowRegisterInGroup(comm, task->userPtr, task->userSize, task->winFlags, task->outWinDev);
     free(task);
+    NCCLCHECKGOTO(taskRet, ret, fail);
   }
 
   while (!ncclIntruQueueEmpty(&comm->devrState.commCreateTaskQueue)) {
     struct ncclDevrCommCreateTask* task = ncclIntruQueueDequeue(&comm->devrState.commCreateTaskQueue);
-    NCCLCHECKGOTO(ncclDevrCommCreateInternal(comm, task->reqs, task->outDevComm, /*isInternal=*/false,
-                                             task->deviceCodeVersion),
-                  ret, fail);
+    ncclResult_t taskRet =
+      ncclDevrCommCreateInternal(comm, task->reqs, task->outDevComm, /*isInternal=*/false, task->deviceCodeVersion);
     freeDevCommRequirements(task->reqs); // free additional task memory for reqs
     free(task);
+    NCCLCHECKGOTO(taskRet, ret, fail);
   }
 
   while (!ncclIntruQueueEmpty(&comm->ceInitTaskQueue)) {
     struct ncclCeInitTask* task = ncclIntruQueueDequeue(&comm->ceInitTaskQueue);
-    NCCLCHECKGOTO(ncclCeInit(task->comm), ret, fail);
+    ncclResult_t taskRet = ncclCeInit(task->comm);
     free(task);
+    NCCLCHECKGOTO(taskRet, ret, fail);
   }
 
   if (comm->ceColl.stagingPending) {
@@ -443,8 +454,9 @@ ncclResult_t ncclCommGroupRegisterSymmetric(struct ncclAsyncJob* job_) {
 
   while (!ncclIntruQueueEmpty(&comm->rmaCeInitTaskQueue)) {
     struct ncclRmaCeInitTask* task = ncclIntruQueueDequeue(&comm->rmaCeInitTaskQueue);
-    NCCLCHECKGOTO(ncclRmaCeInit(task->comm), ret, fail);
+    ncclResult_t taskRet = ncclRmaCeInit(task->comm);
     free(task);
+    NCCLCHECKGOTO(taskRet, ret, fail);
   }
 
   while (!ncclIntruQueueEmpty(&comm->suspendTaskQueue)) {
@@ -464,6 +476,12 @@ ncclResult_t ncclCommGroupRegisterSymmetric(struct ncclAsyncJob* job_) {
 exit:
   return ret;
 fail:
+  // Unlike the other queues here, nothing drains commCreateTaskQueue at teardown.
+  while (!ncclIntruQueueEmpty(&comm->devrState.commCreateTaskQueue)) {
+    struct ncclDevrCommCreateTask* task = ncclIntruQueueDequeue(&comm->devrState.commCreateTaskQueue);
+    freeDevCommRequirements(task->reqs);
+    free(task);
+  }
   goto exit;
 }
 

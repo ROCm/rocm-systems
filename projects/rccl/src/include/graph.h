@@ -38,6 +38,25 @@ void ncclTopoFree(struct ncclTopoSystem* system);
 ncclResult_t ncclTopoTrimSystem(struct ncclTopoSystem* system, struct ncclComm* comm);
 ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm);
 ncclResult_t ncclTopoComputeP2pChannelsPerPeer(struct ncclComm* comm);
+int64_t rcclParamP2pCeChannelsPerPeer();
+int rcclP2pCeChannelsPerPeerCap(int current, int pool, bool isGfx1250, bool useMemcpy, int64_t configuredCap);
+inline bool rcclP2pUseCeForConnection(bool useMemcpy, int connIndex) {
+  return useMemcpy && connIndex == NCCL_CONN_IDX_P2P_CE;
+}
+// Copy Engine steps must keep the int step and buffer sizes of the connectors and the proxy, and the
+// planner's 32-step part bound, from overflowing.
+constexpr int64_t kRcclP2pCeMaxStepSize = 32 << 20;
+inline size_t rcclP2pCeStepSizePolicy(int cudaArch, bool useMemcpy, int64_t configured, size_t fallback) {
+  if (cudaArch != 1250 || !useMemcpy) return fallback;
+  size_t step = configured > (int64_t)fallback ? (size_t)configured : fallback;
+  return step < (size_t)kRcclP2pCeMaxStepSize ? step : (size_t)kRcclP2pCeMaxStepSize;
+}
+inline bool rcclP2pCeSharesProxyStream(int cudaArch) {
+  return cudaArch == 1250;
+}
+inline int rcclP2pConnectorStepSize(int p2pChunkSize, bool useCe, int connStepSize) {
+  return useCe && connStepSize > 0 ? connStepSize : p2pChunkSize;
+}
 // Resolved NCCL_MAX_P2P_NCHANNELS (MAXCHANNELS when unset, else clamped user value).
 int ncclMaxP2pNchannels();
 // Upper bound for p2pnChannels: 64, MAXCHANNELS on single-node gfx1250, or the

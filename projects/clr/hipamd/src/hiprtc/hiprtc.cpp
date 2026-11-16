@@ -284,7 +284,7 @@ hiprtcResult hiprtcLinkCreate(unsigned int num_options, hiprtcJIT_option* option
   }
 
   if (num_options != 0) {
-    for (int i = 0; i < num_options; i++) {
+    for (unsigned int i = 0; i < num_options; i++) {
       if (options_ptr == nullptr || options_vals_pptr == nullptr) {
         HIPRTC_RETURN(HIPRTC_ERROR_INVALID_INPUT);
       }

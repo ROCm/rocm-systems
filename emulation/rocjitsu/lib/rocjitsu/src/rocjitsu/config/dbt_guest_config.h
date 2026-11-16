@@ -152,8 +152,8 @@ load_dbt_guest_config_from_handoff(const DbtRuntimeConfigHandoff &handoff,
 /// full simulation topology builder. This helper parses the same JSON schema as
 /// the main config loader but copies only the DBT guest-GPU block.
 /// @returns A successful std::nullopt when no handoff is available or it contains
-/// no config path; failure with a diagnostic when loading its referenced config
-/// fails or its guest settings or resolved GPU ID are invalid.
+/// no config path; failure with a diagnostic when reading the handoff or loading
+/// its referenced config fails, or its guest settings or resolved GPU ID are invalid.
 util::FailureOr<std::optional<DbtGuestConfig>>
 load_dbt_guest_config_from_runtime_config(util::DiagnosticEmitter emit_error);
 
