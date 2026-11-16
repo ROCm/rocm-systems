@@ -222,6 +222,10 @@ void TestEvtNotifReadWrite::Run(void) {
       if (stat("/dev/dxg", &dxg_st) == 0) {
         ASSERT_EQ(ret, AMDSMI_STATUS_NOT_SUPPORTED)
             << "gpu " << dv_ind << ": KFD info should not be present in WSL environment.";
+      } else {
+        ADD_FAILURE() << "gpu " << dv_ind << ": amdsmi_get_gpu_kfd_info() failed with " << ret
+                      << ", so the events' node cannot be checked";
+        kfd_ids[processor_handles_[dv_ind]] = kUnknownKfdId;
       }
     } else {
       EXPECT_EQ(ret, AMDSMI_STATUS_SUCCESS)
