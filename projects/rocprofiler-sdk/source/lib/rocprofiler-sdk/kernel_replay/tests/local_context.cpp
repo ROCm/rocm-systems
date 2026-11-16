@@ -132,6 +132,36 @@ TEST(kernel_replay_local_context, override_cleared_after_loop)
     EXPECT_FALSE(lc::local_context_override({5}).has_value());
 }
 
+TEST(kernel_replay_local_context, nested_loop_inherits_and_restores_outer_routing)
+{
+    fake_active_contexts active{1, 2};
+    {
+        lc::scoped_local_context_control outer{active.array};
+        lc::set_toggles_armed(true);
+        ASSERT_EQ(lc::replay_local_disable_context({1}), ROCPROFILER_STATUS_SUCCESS);
+        {
+            lc::scoped_local_context_control inner{active.array};
+            EXPECT_TRUE(lc::local_context_has_overrides());
+            EXPECT_EQ(lc::local_context_override({1}), std::optional<bool>{false});
+            EXPECT_EQ(lc::replay_local_enable_context({1}), ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR)
+                << "the inner scope must open its own toggle window";
+            lc::set_toggles_armed(true);
+            EXPECT_EQ(lc::replay_local_enable_context({1}), ROCPROFILER_STATUS_SUCCESS);
+            EXPECT_EQ(lc::replay_local_disable_context({2}), ROCPROFILER_STATUS_SUCCESS);
+            lc::set_toggles_armed(false);
+            EXPECT_EQ(lc::local_context_override({1}), std::optional<bool>{true});
+            EXPECT_EQ(lc::local_context_override({2}), std::optional<bool>{false});
+        }
+        EXPECT_EQ(lc::local_context_override({1}), std::optional<bool>{false});
+        EXPECT_FALSE(lc::local_context_override({2}).has_value());
+        EXPECT_EQ(lc::replay_local_disable_context({2}), ROCPROFILER_STATUS_SUCCESS)
+            << "the outer toggle window is restored too";
+        lc::set_toggles_armed(false);
+    }
+    EXPECT_FALSE(lc::local_context_has_overrides());
+    EXPECT_FALSE(lc::local_context_override({1}).has_value());
+}
+
 // End-to-end narrative: stand in for the SDK's replay loop plus a tool that drives the toggles from
 // its PASS PHASE_ENTER callback, and a service that consults the override at dispatch. Mirrors the
 // real control flow -- loop scope -> per-pass arm window (tool decides) -> dispatch (service

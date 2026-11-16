@@ -77,18 +77,6 @@ ring_writer(const void* packets, uint64_t count)
         *tl_submit_queue, static_cast<const hsa::rocprofiler_packet*>(packets), count);
 }
 
-std::vector<void*>
-tracked_pointers(hsa_agent_t agent)
-{
-    auto inventory = kernel_replay::memory_tracker::snap_inventory(agent);
-    auto out       = std::vector<void*>{};
-    out.reserve(inventory.size());
-    for(const auto& [ptr, size] : inventory)
-        out.emplace_back(ptr);
-    std::sort(out.begin(), out.end());
-    return out;
-}
-
 // A kernarg block for one replay pass: every recorded dispatch's arguments, laid out back to back
 // with each kernel's alignment honored. The block is retained for the agent's next range when this
 // one finishes (see retained_kernarg.hpp).
@@ -192,6 +180,19 @@ elapsed_ms(phase_clock::duration elapsed)
 {
     return std::chrono::duration<double, std::milli>{elapsed}.count();
 }
+}  // namespace
+
+std::vector<void*>
+tracked_pointers(hsa_agent_t agent)
+{
+    auto inventory = kernel_replay::memory_tracker::snap_inventory(agent);
+    auto out       = std::vector<void*>{};
+    out.reserve(inventory.size());
+    for(const auto& [ptr, size] : inventory)
+        out.emplace_back(ptr);
+    std::sort(out.begin(), out.end());
+    return out;
+}
 
 size_t
 snapshot_bytes(const snapshot_t& snapshot)
@@ -201,7 +202,6 @@ snapshot_bytes(const snapshot_t& snapshot)
         total += block.host_copy.size();
     return total;
 }
-}  // namespace
 
 kernarg_placement_t
 plan_kernarg_layout(const std::vector<recorded_dispatch_t>& dispatches)
@@ -265,6 +265,7 @@ ensure_entry_snapshot(range_context_t&                      ctx,
                       const hsa::Queue&                     queue,
                       hsa_amd_queue_intercept_packet_writer writer)
 {
+    if(ctx.host.enabled) return;
     if(ctx.snapshot_taken || !ctx.record.eligible() || ctx.queue == nullptr) return;
     if(!ctx.plan.replay_requested) return;
 
@@ -486,5 +487,6 @@ execute_range(range_context_t& ctx, uint64_t& divergence_count)
 
     return ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED;
 }
+
 }  // namespace range_replay
 }  // namespace rocprofiler

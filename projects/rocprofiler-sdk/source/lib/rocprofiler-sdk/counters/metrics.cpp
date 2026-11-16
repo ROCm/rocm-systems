@@ -385,8 +385,28 @@ findViaInstallPath(const std::string& filename)
             lib_path = real_lib_path;
         }
 
-        return lib_path.parent_path().parent_path() /
-               fmt::format("share/rocprofiler-sdk/{}", filename);
+        // dladdr returns the image that defines rocprofiler_query_available_agents.
+        // The shared library lives at <prefix>/lib, so parent/parent is the prefix.
+        // Unit tests that link the static library resolve to the test executable.
+        // Installed unit tests are at
+        // <prefix>/share/rocprofiler-sdk/tests/unit-tests/bin, and parent/parent
+        // of that path is the test directory, not the prefix. Walk ancestors and
+        // use the closest share/rocprofiler-sdk directory that contains the file.
+        const auto relative = fs::path{"share"} / "rocprofiler-sdk" / filename;
+        for(auto dir = lib_path.parent_path(); !dir.empty() && dir != dir.parent_path();
+            dir      = dir.parent_path())
+        {
+            if(dir.filename() == "rocprofiler-sdk" && dir.parent_path().filename() == "share")
+            {
+                auto direct = dir / filename;
+                if(fs::exists(direct)) return direct.string();
+            }
+
+            auto nested = dir / relative;
+            if(fs::exists(nested)) return nested.string();
+        }
+
+        return (lib_path.parent_path().parent_path() / relative).string();
     }
     return filename;
 }

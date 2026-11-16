@@ -55,14 +55,22 @@ record_override(rocprofiler_context_id_t context_id, bool active)
 
 scoped_local_context_control::scoped_local_context_control(
     const context::context_array_t& active_contexts)
+: m_previous{tl_control}
+, m_previous_toggles_armed{tl_toggles_armed}
 {
+    if(m_previous != nullptr) m_control.overrides = m_previous->overrides;
     for(const auto* ctx : active_contexts)
         if(ctx != nullptr)
             m_control.pre_active.emplace(rocprofiler_context_id_t{.handle = ctx->context_idx});
-    tl_control = &m_control;
+    tl_control       = &m_control;
+    tl_toggles_armed = false;
 }
 
-scoped_local_context_control::~scoped_local_context_control() { tl_control = nullptr; }
+scoped_local_context_control::~scoped_local_context_control()
+{
+    tl_control       = m_previous;
+    tl_toggles_armed = m_previous_toggles_armed;
+}
 
 void
 set_toggles_armed(bool armed)

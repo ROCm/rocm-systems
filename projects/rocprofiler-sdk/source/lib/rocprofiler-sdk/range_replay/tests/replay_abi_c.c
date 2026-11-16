@@ -27,8 +27,15 @@
 // tool failed to build. Compiling this file is that check, and the offsets it reports let
 // the C++ side confirm both languages derive the same layout from the same header.
 
+// sigsetjmp and sigjmp_buf are POSIX, not ISO C; the host-begin macro documents that its callers
+// need them.
+#if !defined(_POSIX_C_SOURCE)
+#    define _POSIX_C_SOURCE 200809L
+#endif
+
 #include <rocprofiler-sdk/experimental/range_replay.h>
 
+#include <setjmp.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -116,6 +123,24 @@ size_t
 rocprofiler_test_c_range_offset_divergence_count(void)
 {
     return offsetof(range_data_c_t, divergence_count);
+}
+
+size_t
+rocprofiler_test_c_range_offset_host_replay(void)
+{
+    return offsetof(range_data_c_t, host_replay);
+}
+
+// The host-begin macro has to compile as a C statement: ISO C only allows sigsetjmp in a few
+// syntactic positions, and a macro that put it anywhere else would compile but be undefined
+// behaviour. Never called (the test does not link the SDK), and static inline so it is not
+// emitted; it exists for the compiler to check the expansion.
+static inline __attribute__((unused)) rocprofiler_status_t
+rocprofiler_test_c_range_host_begin_compiles(uint64_t range_id)
+{
+    rocprofiler_status_t status = ROCPROFILER_STATUS_SUCCESS;
+    ROCPROFILER_RANGE_REPLAY_HOST_BEGIN(range_id, status);
+    return status;
 }
 
 // Enum values as C sees them. An enum whose underlying type differs between the languages would

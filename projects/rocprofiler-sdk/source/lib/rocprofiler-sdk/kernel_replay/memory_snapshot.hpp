@@ -22,6 +22,8 @@
 
 #pragma once
 
+#include "lib/rocprofiler-sdk/kernel_replay/memory_tracker.hpp"
+
 #include <hsa/hsa.h>
 
 #include <cstddef>
@@ -79,6 +81,12 @@ snap(hsa_agent_t agent);
 // abort replay rather than submit another pass over corrupted device memory.
 bool
 restore(const device_snapshot_t& snapshot);
+
+// Restore without reacquiring the tracker lock. The caller must hold inventory()'s read lock
+// and validate all allocation identities before copying anything, keeping that lock through
+// restore.
+bool
+restore(const device_snapshot_t& snapshot, const memory_tracker::tracked_map_t& locked_inventory);
 }  // namespace memory_snapshot
 }  // namespace kernel_replay
 }  // namespace rocprofiler
