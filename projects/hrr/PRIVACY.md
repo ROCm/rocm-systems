@@ -1,7 +1,9 @@
 # What an HRR archive contains, and what replaying one means
 
 This page states what a capture archive can and cannot contain, and what a person who
-replays one is trusting.
+replays one is trusting. Every archive also carries its own notice, `NOTICE.txt` at its
+root, on what it holds and how it may be shared; its text is in
+[`include/hrr/hrr_archive_notice.h`](include/hrr/hrr_archive_notice.h).
 
 Every change to capture that changes what an archive holds updates this page in the same
 change. `tools/tests/test_privacy_doc.py`, run by the ctest `hrr-generator-rules`,
