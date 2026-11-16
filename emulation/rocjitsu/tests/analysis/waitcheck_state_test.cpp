@@ -26,6 +26,24 @@ PendingEvent load(uint16_t reg, uint32_t younger, uint64_t offset = 0) {
   return event;
 }
 
+TEST(WaitcheckState, Rdna1ScalarSourceLifetimeRequiresAZeroDependencyWait) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_RDNA1;
+  constexpr auto counter = WaitCounterKind::VmVsrc;
+  const size_t index = Ops::counter_index(counter);
+  PendingState state;
+  PendingEvent source;
+  source.counter = counter;
+  source.kind = WaitEventKind::Gfx10ScalarSource;
+  source.min_younger = 5;
+  state.pending[index].push_back(source);
+  EXPECT_EQ(Ops::dependency_required_count(state, source, arch).value(), 0u);
+  ASSERT_TRUE(Ops::apply_counter_wait(state, counter, 1, arch).succeeded());
+  ASSERT_TRUE(Ops::apply_memory_wait(state, WaitCounterKind::Load, 0, arch).succeeded());
+  EXPECT_EQ(state.pending[index].size(), 1u);
+  ASSERT_TRUE(Ops::apply_counter_wait(state, counter, 0, arch).succeeded());
+  EXPECT_TRUE(state.pending[index].empty());
+}
+
 TEST(WaitcheckState, PartialWaitRetiresOnlySufficientlyOldEvents) {
   PendingState state;
   state.pending[kLoad] = {load(0, 1), load(1, 0, 4)};

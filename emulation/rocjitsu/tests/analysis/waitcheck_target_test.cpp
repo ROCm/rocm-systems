@@ -38,6 +38,48 @@ std::unique_ptr<Instruction> decode(std::span<const uint32_t> words, rj_code_arc
   return std::move(result).value();
 }
 
+TEST(WaitcheckTarget, Rdna1VmemReadsAreProtectedFromScalarWritesInOrdinaryMode) {
+  const std::array<uint32_t, 2> load{0xdc308000, 0x02180000}; // global_load_dword v2, v0, s[24:25]
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+    auto producer = decode(load, arch);
+    ASSERT_NE(producer, nullptr);
+    const auto events = Target::classify_events(*producer, arch).value();
+    const auto source =
+        std::ranges::find(events, WaitEventKind::Gfx10ScalarSource, &ClassifiedEvent::kind);
+    if (arch == ROCJITSU_CODE_ARCH_RDNA2) {
+      EXPECT_EQ(source, events.end());
+      continue;
+    }
+    ASSERT_NE(source, events.end());
+    EXPECT_EQ(source->counter, WaitCounterKind::VmVsrc);
+    EXPECT_FALSE(source->requires_expert_scheduling());
+    EXPECT_FALSE(source->check_uses);
+    EXPECT_TRUE(source->check_defs);
+    EXPECT_TRUE(source->check_exec_defs);
+    EXPECT_EQ(source->registers, TrackedRegisterSource::Uses);
+    const std::array<uint32_t, 2> smem{0xf4000602, 0xfa000000}; // s_load_dword s24, s[4:5], 0
+    auto writer = decode(smem, arch);
+    ASSERT_NE(writer, nullptr);
+    EXPECT_TRUE(Target::checks_scalar_source(source->kind, *writer));
+  }
+}
+
+TEST(WaitcheckTarget, Rdna1VectorAluAndPackedWaitZeroReleaseScalarSources) {
+  for (auto [word, releases] : {std::pair{0x7e080280u, true},  // v_mov_b32 v4, 0
+                                std::pair{0xbf8c0000u, true},  // full S_WAITCNT
+                                std::pair{0xbf8c3f70u, false}, // vmcnt(0) alone
+                                std::pair{0xbe980387u, false}, // s_mov_b32 s24, 7
+                                std::pair{0xbf800000u, false}}) {
+    const std::array<uint32_t, 1> words{word};
+    auto inst = decode(words, ROCJITSU_CODE_ARCH_RDNA1);
+    ASSERT_NE(inst, nullptr);
+    EXPECT_EQ(Target::releases_gfx10_scalar_sources(*inst, ROCJITSU_CODE_ARCH_RDNA1), releases);
+    EXPECT_FALSE(Target::releases_gfx10_scalar_sources(*inst, ROCJITSU_CODE_ARCH_RDNA2));
+    // An implicit hardware separation does not add an encoded DEPCTR field.
+    EXPECT_FALSE(Target::embedded_wait_fields(*inst, ROCJITSU_CODE_ARCH_RDNA1).value());
+  }
+}
+
 TEST(WaitcheckTarget, SplitWaitCarriesOnlyItsActiveCounter) {
   const std::array<uint32_t, 1> words{0xbfc00003}; // s_wait_loadcnt 3.
   auto inst = decode(words, ROCJITSU_CODE_ARCH_RDNA4);

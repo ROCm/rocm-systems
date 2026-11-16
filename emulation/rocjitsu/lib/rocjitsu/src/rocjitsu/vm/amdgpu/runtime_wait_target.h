@@ -12,16 +12,14 @@
 
 namespace rocjitsu::waitcheck_detail {
 
-// These runtime-only event IDs extend the develop checker enum without changing
-// the checker files in the independently landable simulator change. The next
-// checker change assigns these same IDs to its named enum members.
+// Keep the runtime facade's event mapping aligned with the checker enum.
 static_assert(static_cast<unsigned>(WaitEventKind::ExportDualSourceBlend) == 25);
-static_assert(static_cast<unsigned>(WaitEventKind::Count) == 26);
-inline constexpr auto kGfx10ScalarSource = static_cast<WaitEventKind>(26);
-inline constexpr auto kValuCore = static_cast<WaitEventKind>(27);
-inline constexpr auto kValuDp = static_cast<WaitEventKind>(28);
-inline constexpr auto kValuMatrix = static_cast<WaitEventKind>(29);
-inline constexpr auto kValuTrans = static_cast<WaitEventKind>(30);
+static_assert(static_cast<unsigned>(WaitEventKind::Count) == 31);
+inline constexpr auto kGfx10ScalarSource = WaitEventKind::Gfx10ScalarSource;
+inline constexpr auto kValuCore = WaitEventKind::ValuCore;
+inline constexpr auto kValuDp = WaitEventKind::ValuDp;
+inline constexpr auto kValuMatrix = WaitEventKind::ValuMatrix;
+inline constexpr auto kValuTrans = WaitEventKind::ValuTrans;
 
 // Runtime completion tracking extends the develop ISA classifier. Keep its
 // base classification for ordinary instructions and override only the cache,

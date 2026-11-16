@@ -660,6 +660,9 @@ util::FailureOr<bool> WaitcheckStateOps::counter_out_of_order(const PendingState
 
 util::Result WaitcheckStateOps::apply_counter_wait(PendingState &state, WaitCounterKind counter,
                                                    uint32_t count, rj_code_arch_t arch) {
+  // The GFX10.1 scalar-write scheduling hazard has only a zero-wait proof.
+  if (arch == ROCJITSU_CODE_ARCH_RDNA1 && counter == WaitCounterKind::VmVsrc && count != 0)
+    return util::Result::success();
   const auto out_of_order = counter_out_of_order(state, counter, arch);
   if (out_of_order.failed())
     return util::Result::failure();
@@ -672,6 +675,8 @@ util::Result WaitcheckStateOps::apply_counter_wait(PendingState &state, WaitCoun
 util::FailureOr<uint32_t> WaitcheckStateOps::dependency_required_count(const PendingState &state,
                                                                        const PendingEvent &event,
                                                                        rj_code_arch_t arch) {
+  if (event.kind == WaitEventKind::Gfx10ScalarSource)
+    return 0;
   if (is_completion_counter(event.counter)) {
     if (amdgpu::waitcnt_model(arch).failed())
       return util::Result::failure();
@@ -846,6 +851,8 @@ util::Result WaitcheckStateOps::apply_wait_fields(PendingState &state, const Wai
 
 util::Result WaitcheckStateOps::apply_embedded_waitcnt(PendingState &state, const Instruction &inst,
                                                        rj_code_arch_t arch) {
+  if (releases_gfx10_scalar_sources(inst, arch))
+    apply_wait(state, WaitCounterKind::VmVsrc, 0);
   const auto fields = embedded_wait_fields(inst, arch);
   if (fields.failed())
     return util::Result::failure();
@@ -870,6 +877,8 @@ WaitcheckStateOps::resolved_wait_fields(const PendingState &state, const Instruc
 
 util::Result WaitcheckStateOps::apply_waitcnt(PendingState &state, const Instruction &inst,
                                               rj_code_arch_t arch) {
+  if (releases_gfx10_scalar_sources(inst, arch))
+    apply_wait(state, WaitCounterKind::VmVsrc, 0);
   const auto fields = resolved_wait_fields(state, inst, arch);
   if (fields.failed())
     return util::Result::failure();

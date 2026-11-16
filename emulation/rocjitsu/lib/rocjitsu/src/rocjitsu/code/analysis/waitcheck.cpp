@@ -805,11 +805,11 @@ private:
               path_mask_inputs_.insert(ref->index);
           }
         }
-        const bool neutral = !invalidates_exec && !invalidates_vcc && defs->second.empty() &&
-                             !predicate && !inst.is_branch() && !inst.is_waitcnt() &&
-                             !is_program_end(inst.mnemonic()) && !vinterp_wait_exp(inst) &&
-                             dsdir_wait_vm_vsrc(inst) != 0 && !invalidates_scc &&
-                             issued_counters == 0;
+        const bool neutral =
+            !invalidates_exec && !invalidates_vcc && defs->second.empty() && !predicate &&
+            !inst.is_branch() && !inst.is_waitcnt() && !is_program_end(inst.mnemonic()) &&
+            !releases_gfx10_scalar_sources(inst, arch) && !vinterp_wait_exp(inst) &&
+            dsdir_wait_vm_vsrc(inst) != 0 && !invalidates_scc && issued_counters == 0;
         const size_t index = view.instructions.size();
         view.instructions.push_back({section_offset, &inst, index + (neutral ? 1 : 0),
                                      predicate_index, issued_counters, invalidates_scc,
@@ -1009,6 +1009,8 @@ private:
                                                            WaitCounterKind counter,
                                                            rj_code_arch_t arch) {
     const size_t index = counter_index(counter);
+    if (counter == WaitCounterKind::VmVsrc && releases_gfx10_scalar_sources(inst, arch))
+      return true;
     if (const auto fields = explicit_wait_fields(inst, arch).value(); fields && (*fields)[index])
       return true;
     if (const auto fields = embedded_wait_fields(inst, arch).value(); fields && (*fields)[index])
@@ -1165,7 +1167,7 @@ private:
     auto current_events = classify_events(consumer, arch).value();
     if (!expert_waits_enabled(*requirement_state)) {
       std::erase_if(current_events, [](const ClassifiedEvent &event) {
-        return event.counter == WaitCounterKind::VmVsrc || event.counter == WaitCounterKind::VaVdst;
+        return event.requires_expert_scheduling();
       });
     }
     std::optional<PendingState> xcnt_adjusted_state;
@@ -1564,8 +1566,7 @@ private:
       auto current_events = classify_events(instruction, arch).value();
       if (!expert_waits_enabled(*dependency_state)) {
         std::erase_if(current_events, [](const ClassifiedEvent &event) {
-          return event.counter == WaitCounterKind::VmVsrc ||
-                 event.counter == WaitCounterKind::VaVdst;
+          return event.requires_expert_scheduling();
         });
       }
       std::optional<PendingState> xcnt_adjusted_state;
@@ -3172,7 +3173,8 @@ private:
     // Most path instructions cannot retire an event. Avoid constructing and
     // copying a full pending state merely to apply an identity transition.
     const auto wait_vm_vsrc = dsdir_wait_vm_vsrc(inst);
-    if (!inst.is_waitcnt() && !vinterp_wait_exp(inst) && (!wait_vm_vsrc || *wait_vm_vsrc != 0))
+    if (!inst.is_waitcnt() && !releases_gfx10_scalar_sources(inst, arch) &&
+        !vinterp_wait_exp(inst) && (!wait_vm_vsrc || *wait_vm_vsrc != 0))
       return;
 
     PendingEvent path_event = event;
@@ -3900,6 +3902,8 @@ private:
       const auto &events = state.pending[counter_idx];
       for (size_t i = 0; i < events.size(); ++i) {
         const PendingEvent &event = events[i];
+        if (!checks_scalar_source(event.kind, inst))
+          continue;
         std::optional<RegisterRef> reg;
         WaitcheckAccessKind access = WaitcheckAccessKind::Use;
         // An earlier value or a later synchronous write does not make a pending
@@ -3918,7 +3922,8 @@ private:
           if (event.check_uses && instruction_uses_special(inst, *event.special_reg)) {
             reg = event.special_reg;
             access = WaitcheckAccessKind::Use;
-          } else if (event.check_defs && instruction_defines_special(inst, *event.special_reg)) {
+          } else if (event.check_defs && (du.defs.contains(*event.special_reg) ||
+                                          instruction_defines_special(inst, *event.special_reg))) {
             reg = event.special_reg;
             access = WaitcheckAccessKind::Def;
           }
@@ -3964,7 +3969,7 @@ private:
       const auto &events = state.pending[counter_idx];
       for (size_t i = 0; i < events.size(); ++i) {
         const PendingEvent &event = events[i];
-        if (!event.check_exec_defs)
+        if (!event.check_exec_defs || !checks_scalar_source(event.kind, inst))
           continue;
         const auto required_count = dependency_required_count(state, event, arch).value();
         visit(event, RegisterRef{RegClass::EXEC, 0, 1}, WaitcheckAccessKind::Def, required_count);
@@ -4414,9 +4419,8 @@ private:
                                          section_offset, file_offset);
     }
     if (!expert_waits_enabled(state)) {
-      std::erase_if(events, [](const ClassifiedEvent &event) {
-        return event.counter == WaitCounterKind::VmVsrc || event.counter == WaitCounterKind::VaVdst;
-      });
+      std::erase_if(
+          events, [](const ClassifiedEvent &event) { return event.requires_expert_scheduling(); });
     }
     if (prefetch) {
       if (emit_report_diagnostics) {

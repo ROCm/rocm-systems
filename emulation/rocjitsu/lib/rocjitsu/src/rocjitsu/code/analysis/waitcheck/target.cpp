@@ -3,6 +3,7 @@
 
 #include "rocjitsu/code/analysis/waitcheck/target.h"
 
+#include "rocjitsu/isa/arch/amdgpu/shared/memory_issue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
@@ -14,6 +15,14 @@ std::optional<RegisterRef> WaitcheckTarget::register_operand(const Operand &oper
                                                              rj_code_arch_t arch) {
   if (const auto ref = operand.to_register_ref())
     return ref;
+  if (operand.has_register_selector()) {
+    const auto selector = static_cast<uint32_t>(operand.encoding_value());
+    if (selector == amdgpu::kVccSelectorFirst || selector == amdgpu::kVccSelectorLast) {
+      const auto half = static_cast<uint16_t>(selector - amdgpu::kVccSelectorFirst);
+      const uint8_t width = half == 0 && operand.size_bits() >= 64 ? 2 : 1;
+      return RegisterRef{RegClass::VCC, half, width};
+    }
+  }
   // Mesh exports read M0 through a fieldless input. Scalar instructions such
   // as S_SENDMSG_RTN_B32 can produce the same register through a selector.
   if ((amdgpu::has_typed_export_waits(arch) && operand.to_special_reg_class() == RegClass::M0) ||
@@ -21,6 +30,64 @@ std::optional<RegisterRef> WaitcheckTarget::register_operand(const Operand &oper
        static_cast<uint32_t>(operand.encoding_value()) == amdgpu::scalar_m0_selector(arch)))
     return RegisterRef{RegClass::M0, 0, 1};
   return std::nullopt;
+}
+
+std::optional<uint32_t> WaitcheckTarget::completion_order_kind(WaitCounterKind counter,
+                                                               WaitEventKind event_kind,
+                                                               rj_code_arch_t arch) {
+  const auto model = amdgpu::waitcnt_model(arch).value();
+  const bool legacy_flat =
+      model == WaitcntModel::LegacyNoVscnt &&
+      (event_kind == WaitEventKind::FlatLoad || event_kind == WaitEventKind::FlatStore);
+  if (legacy_flat || event_kind == WaitEventKind::Smem || event_kind == WaitEventKind::Gds ||
+      event_kind == WaitEventKind::Export || event_kind == WaitEventKind::SqMessage ||
+      event_kind == WaitEventKind::SccWrite ||
+      (event_kind == WaitEventKind::GlobalWb && counter == WaitCounterKind::Load &&
+       model != WaitcntModel::LegacyNoVscnt) ||
+      event_kind == WaitEventKind::Unknown)
+    return std::nullopt;
+  uint32_t kind = 0;
+  if (!(model == WaitcntModel::LegacyNoVscnt && counter == WaitCounterKind::Load))
+    if (auto normalized =
+            WaitcheckTarget::normalized_hardware_event_kind(counter, event_kind, model))
+      kind = uint32_t{1} << static_cast<unsigned>(*normalized);
+  // ASYNC loads and stores share a counter but return done out of order with
+  // respect to each other (CDNA5 ISA 10.8). Barrier arrive orders with loads.
+  if (counter == WaitCounterKind::Async)
+    kind = uint32_t{1} << static_cast<unsigned>(event_kind == WaitEventKind::AsyncLdsStore
+                                                    ? WaitEventKind::AsyncLdsStore
+                                                    : WaitEventKind::AsyncLdsLoad);
+  // Older RDNA samples and BVH operations share VMcnt, not a completion FIFO.
+  if (model == WaitcntModel::LegacyVscnt && counter == WaitCounterKind::Load &&
+      (event_kind == WaitEventKind::Sample || event_kind == WaitEventKind::Bvh))
+    kind = uint32_t{1} << static_cast<unsigned>(event_kind);
+  return kind;
+}
+
+bool WaitcheckTarget::flat_issues_both_counters(rj_code_arch_t arch) {
+  // Legacy generic FLAT issues both counters. GFX9's independent completions
+  // are unordered; completion_order_kind handles that.
+  return amdgpu::legacy_flat_issues_both_counter_domains(arch) ||
+         arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+}
+
+uint32_t WaitcheckTarget::issue_units(const Instruction &inst, const ClassifiedEvent &event,
+                                      rj_code_arch_t arch) {
+  // A scaled VOP3PX2 WMMA reserves two positions in the VA counter.
+  if (event.counter == WaitCounterKind::VaVdst && inst.mnemonic().starts_with("v_wmma_scale"))
+    return 2;
+  const auto model = amdgpu::waitcnt_model(arch).value();
+
+  if (const auto *info = inst.amdgpu_memory_issue_info())
+    for (const auto &obligation : info->counter_obligations())
+      if (amdgpu::canonical_wait_counter(obligation.wait_counter_type(), model) == event.counter)
+        return obligation.counter_increment();
+  // Inline message returns are outside the memory-pipeline metadata: one
+  // completion acknowledges the send, the other the returned register value.
+  if (event.kind == WaitEventKind::SqMessage && inst.mnemonic().starts_with("s_sendmsg_rtn_"))
+    return 2;
+  return 1;
 }
 
 bool WaitcheckTarget::vm_vsrc_event_implied_by_wait(WaitEventKind kind, WaitCounterKind counter) {
@@ -47,11 +114,13 @@ WaitcheckTarget::normalized_hardware_event_kind(WaitCounterKind counter, WaitEve
   switch (counter) {
   case WaitCounterKind::Load:
     // Generic FLAT and ordinary VMEM loads both raise VMEM_READ_ACCESS.
-    // GLOBAL_INV is explicitly ignored by LLVM's LOAD_CNT out-of-order
-    // test. Pre-gfx12 image event kinds share that same hardware event.
-    if (kind == WaitEventKind::GlobalInv)
+    // BUFFER_INV and legacy VMcnt BUFFER_WBL2 acknowledgments complete in
+    // issue order with VMEM reads. GFX12 GLOBAL_WB uses Storecnt instead.
+    if (kind == WaitEventKind::GlobalWb && model != WaitcntModel::LegacyNoVscnt)
       return std::nullopt;
-    if (kind == WaitEventKind::FlatLoad || kind == WaitEventKind::LdsDirect ||
+    if (kind == WaitEventKind::GlobalInv || kind == WaitEventKind::GlobalWb ||
+        kind == WaitEventKind::FlatLoad ||
+        kind == WaitEventKind::LdsDirect ||
         (amdgpu::uses_legacy_waitcnt(model) &&
          (kind == WaitEventKind::Sample || kind == WaitEventKind::Bvh))) {
       return WaitEventKind::VmemNoSamplerLoad;
@@ -72,7 +141,7 @@ WaitcheckTarget::normalized_hardware_event_kind(WaitCounterKind counter, WaitEve
     // load/store/image operation.
     if (kind == WaitEventKind::Smem)
       return WaitEventKind::Smem;
-    if (is_xcnt_vmem_kind(kind))
+    if (is_xcnt_vmem_kind(kind) || is_async_transfer_kind(kind))
       return WaitEventKind::VmemNoSamplerLoad;
     return kind;
   case WaitCounterKind::VmVsrc:
@@ -120,9 +189,26 @@ WaitcheckTarget::embedded_wait_fields(const Instruction &inst, rj_code_arch_t ar
   return has_wait ? std::optional{fields} : std::nullopt;
 }
 
+// LLVM GCNHazardRecognizer::fixVMEMtoScalarWriteHazards. A VALU or fully
+// drained packed S_WAITCNT separates GFX10.1 vector-memory issue from a
+// scalar overwrite. Neither is an emitted DEPCTR field for parity accounting.
+bool WaitcheckTarget::releases_gfx10_scalar_sources(const Instruction &inst, rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_RDNA1 &&
+         ((inst.flags() & VALU) || (inst.mnemonic() == "s_waitcnt" && inst.src_operand(0) &&
+                                    inst.src_operand(0)->encoding_value() == 0));
+}
+
+bool WaitcheckTarget::checks_scalar_source(WaitEventKind kind, const Instruction &inst) {
+  return kind != WaitEventKind::Gfx10ScalarSource || (inst.flags() & (SALU | SMEM));
+}
+
 bool WaitcheckTarget::is_xcnt_drain(const Instruction &inst) {
   return inst.flags() &
          (BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL | PROGRAM_TERMINATOR | XCNT_DRAIN);
+}
+
+bool WaitcheckTarget::is_async_transfer_kind(WaitEventKind kind) {
+  return kind == WaitEventKind::AsyncLdsLoad || kind == WaitEventKind::AsyncLdsStore;
 }
 
 [[nodiscard]] bool WaitcheckTarget::is_xcnt_vmem_kind(WaitEventKind kind) {
@@ -241,6 +327,114 @@ bool WaitcheckTarget::is_xcnt_drain(const Instruction &inst) {
   return mnemonic == "tensor_store_from_lds";
 }
 
+static void push_expert_delay_slot(ExpertValuDelayState &delay, const Instruction &inst,
+                                   WaitEventKind kind, ExpertValuDelayState::Slot selected,
+                                   rj_code_arch_t arch) {
+  const auto name = inst.mnemonic();
+  const bool trans = (kind == WaitEventKind::ValuTrans && name.find("f64") == name.npos) ||
+                     (arch == ROCJITSU_CODE_ARCH_CDNA5 && kind == WaitEventKind::ValuMatrix &&
+                      (name.starts_with("v_wmma_") || name.starts_with("v_swmmac_")));
+  auto &slots = delay.history[trans];
+  std::move_backward(slots.begin(), slots.end() - 1, slots.end());
+  slots.front() = selected;
+}
+
+void ExpertValuDelayState::issue(const Instruction &inst, WaitEventKind kind, uint8_t units,
+                                 rj_code_arch_t arch) {
+  if (!units)
+    return;
+  // A delay group and a VA FIFO can differ, e.g. DOT and XDL WMMA.
+  // Count later positions in the selected instruction's own VA FIFO even
+  // when they land in the other delay history.
+  for (auto &group : history)
+    for (auto &older : group)
+      if (older.kind == kind) {
+        if (older.units > UINT8_MAX - units)
+          older = {};
+        else
+          older.units += units;
+      }
+  push_expert_delay_slot(*this, inst, kind, {kind, 0}, arch);
+}
+
+std::array<ExpertValuDelayState::Slot, 2> ExpertValuDelayState::before(const Instruction &inst,
+                                                                       rj_code_arch_t arch) {
+  std::array<Slot, 2> result{};
+  // CDNA5 ISA 5.8 excludes these two instructions from the skip count.
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+      (inst.mnemonic() == "s_set_vgpr_msb" || inst.mnemonic() == "s_wait_alu"))
+    return result;
+  const uint16_t previous = std::exchange(pending, 0);
+  if (inst.mnemonic() == "s_delay_alu") {
+    if (auto *imm = inst.src_operand(0))
+      pending = static_cast<uint16_t>(imm->encoding_value());
+    return result;
+  }
+  const uint16_t skip = (previous >> 4) & 7;
+  // A new S_DELAY_ALU replaces both pending tags. Otherwise the second
+  // tag is relative to the history at its designated consuming instruction.
+  if (skip && skip <= 5)
+    pending = (previous & 0x780) | ((skip - 1) << 4);
+  if (!previous || !(inst.flags() & VALU))
+    return result;
+  const auto select = [&](uint16_t dep) -> Slot {
+    if (dep == 0 || dep > 7)
+      return {};
+    const bool trans = dep > 4;
+    const size_t distance = dep - (trans ? 5 : 1);
+    return history[trans][distance];
+  };
+  result[0] = select(previous & 0xf);
+  if (!(previous & 0x70)) // Both tags apply to this same instruction.
+    result[1] = select((previous >> 7) & 0xf);
+  return result;
+}
+
+uint8_t WaitcheckTarget::wmma_valu_wait_states(const Instruction &inst, rj_code_arch_t arch,
+                                               rj_code_target_id_t target) {
+  if (arch != ROCJITSU_CODE_ARCH_CDNA5)
+    return 0;
+  const auto name = inst.mnemonic();
+  // CDNA5 ISA 7.12.1 and LLVM GCNHazardRecognizer's VALUWaitStates:
+  // gfx1250's dense f16/bf16 WMMA needs four independent VALUs, gfx1251's
+  // version needs eight. A completed later VALU proves progress even when
+  // the receiving memory instruction can issue independently in expert mode.
+  if (name.starts_with("v_wmma_") &&
+      (name.ends_with("_16x16x32_f16") || name.ends_with("_16x16x32_bf16")))
+    return target == ROCJITSU_CODE_TARGET_GFX1250 ? 4 : 8;
+  return 0;
+}
+
+std::optional<WaitEventKind> WaitcheckTarget::expert_valu_kind(const Instruction &inst,
+                                                               rj_code_arch_t arch) {
+  if (!amdgpu::supports_expert_scheduling(arch) || !(inst.flags() & VALU) || inst.is_memory_op())
+    return std::nullopt;
+  const std::string_view op = inst.mnemonic();
+  // SIInstrInfo::isXDL includes DOT. The CDNA5 f32/f64 16x16x4
+  // matrix forms are normal VALU operations in LLVM's WMMAInstInfoTable.
+  const bool matrix = op.starts_with("v_wmma_") || op.starts_with("v_swmmac_");
+  const bool vector_matrix = arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+                             (op == "v_wmma_f32_16x16x4_f32" || op == "v_wmma_f64_16x16x4_f64");
+  if (op.starts_with("v_dot") || (matrix && !vector_matrix))
+    return WaitEventKind::ValuMatrix;
+  if (inst.is_transcendental())
+    return WaitEventKind::ValuTrans;
+  // LLVM AMDGPUHWEvents separates the double-precision MACC pipe from
+  // core/side VALUs. F64 conversions *from* 32-bit values are core operations.
+  static constexpr std::string_view dp[] = {
+      "v_add_f64",           "v_ashr_i64",       "v_ceil_f64",       "v_cvt_f32_f64",
+      "v_cvt_i32_f64",       "v_cvt_u32_f64",    "v_div_fixup_f64",  "v_div_fmas_f64",
+      "v_div_scale_f64",     "v_floor_f64",      "v_fma_f64",        "v_fract_f64",
+      "v_frexp_exp_i32_f64", "v_frexp_mant_f64", "v_ldexp_f64",      "v_lshl_b64",
+      "v_lshr_b64",          "v_maximum_f64",    "v_max_num_f64",    "v_minimum_f64",
+      "v_min_num_f64",       "v_mul_f64",        "v_rcp_f64",        "v_rndne_f64",
+      "v_rsq_f64",           "v_sqrt_f64",       "v_trig_preop_f64", "v_trunc_f64"};
+  const auto stem = op.substr(0, std::min({op.find("_e32"), op.find("_e64"), op.find("_dpp")}));
+  if (std::ranges::find(dp, stem) != std::end(dp))
+    return WaitEventKind::ValuDp;
+  return WaitEventKind::ValuCore;
+}
+
 [[nodiscard]] util::FailureOr<std::vector<ClassifiedEvent>>
 WaitcheckTarget::classify_events(const Instruction &inst, rj_code_arch_t arch) {
   std::vector<ClassifiedEvent> events;
@@ -249,9 +443,57 @@ WaitcheckTarget::classify_events(const Instruction &inst, rj_code_arch_t arch) {
   return events;
 }
 
+std::optional<ClassifiedEvent> WaitcheckTarget::gfx10_scalar_source(const Instruction &inst,
+                                                                    rj_code_arch_t arch) {
+  if (arch != ROCJITSU_CODE_ARCH_RDNA1 || !(inst.flags() & (VMEM | LDS)))
+    return std::nullopt;
+  const auto mnemonic = inst.mnemonic();
+  // GFX10.1 needs a zero VM_VSRC dependency wait even in ordinary scheduling
+  // mode. Vector-memory instructions read EXEC, in addition to their encoded
+  // scalar inputs. GDS and the address-bearing DS forms below also read M0.
+  const bool gds =
+      (inst.flags() & LDS) && inst.raw_encoding() && (inst.raw_encoding()[0] & (1u << 17)) != 0;
+  const bool uses_m0 = gds || mnemonic.find("_addtid_") != std::string_view::npos ||
+                       mnemonic == "ds_append" || mnemonic == "ds_consume" ||
+                       mnemonic == "ds_ordered_count" || mnemonic.starts_with("ds_gws_");
+  return ClassifiedEvent(WaitCounterKind::VmVsrc, WaitEventKind::Gfx10ScalarSource,
+                         TrackedRegisterSource::Uses, /*check_uses=*/false, /*check_defs=*/true,
+                         /*check_exec_defs=*/true,
+                         uses_m0 ? std::optional{RegisterRef{RegClass::M0, 0, 1}} : std::nullopt);
+}
+
 [[nodiscard]] util::Result
 WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t arch,
                                       std::vector<ClassifiedEvent> &events) {
+  if (classify_memory_events_into(inst, arch, events).failed())
+    return util::Result::failure();
+  if (auto source = gfx10_scalar_source(inst, arch))
+    events.push_back(*source);
+  return util::Result::success();
+}
+
+std::optional<ClassifiedEvent> WaitcheckTarget::gfx10_scalar_source(const Instruction &inst,
+                                                                    rj_code_arch_t arch) {
+  if (arch != ROCJITSU_CODE_ARCH_RDNA1 || !(inst.flags() & (VMEM | LDS)))
+    return std::nullopt;
+  const auto mnemonic = inst.mnemonic();
+  // GFX10.1 needs a zero VM_VSRC dependency wait even in ordinary scheduling
+  // mode. Vector-memory instructions read EXEC, in addition to their encoded
+  // scalar inputs. GDS and the address-bearing DS forms below also read M0.
+  const bool gds =
+      (inst.flags() & LDS) && inst.raw_encoding() && (inst.raw_encoding()[0] & (1u << 17)) != 0;
+  const bool uses_m0 = gds || mnemonic.find("_addtid_") != std::string_view::npos ||
+                       mnemonic == "ds_append" || mnemonic == "ds_consume" ||
+                       mnemonic == "ds_ordered_count" || mnemonic.starts_with("ds_gws_");
+  return ClassifiedEvent(WaitCounterKind::VmVsrc, WaitEventKind::Gfx10ScalarSource,
+                         TrackedRegisterSource::Uses, /*check_uses=*/false, /*check_defs=*/true,
+                         /*check_exec_defs=*/true,
+                         uses_m0 ? std::optional{RegisterRef{RegClass::M0, 0, 1}} : std::nullopt);
+}
+
+util::Result WaitcheckTarget::classify_memory_events_into(const Instruction &inst,
+                                                          rj_code_arch_t arch,
+                                                          std::vector<ClassifiedEvent> &events) {
   events.clear();
   const auto model = amdgpu::waitcnt_model(arch);
   if (model.failed())
@@ -274,21 +516,18 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
   if (is_async_lds_load(mnemonic) || is_async_lds_store(mnemonic)) {
     const bool is_load = is_async_lds_load(mnemonic);
     const WaitEventKind kind = is_load ? WaitEventKind::AsyncLdsLoad : WaitEventKind::AsyncLdsStore;
-    // These operations update both their ordinary VMEM counter and the
-    // independent async counter in LLVM's hardware-event model.
-    events.emplace_back(is_load ? WaitCounterKind::Load
-                                : amdgpu::vmem_store_wait_counter(model.value()),
-                        is_load ? WaitEventKind::VmemNoSamplerLoad : WaitEventKind::VmemStore,
-                        TrackedRegisterSource::None, /*check_uses=*/false,
-                        /*check_defs=*/false);
+    // CDNA5 10.8 assigns transfer completion to ASYNCcnt. LLVM omits the
+    // translation event, but the ISA gives direct async VMEM no replay exemption.
     events.emplace_back(WaitCounterKind::Async, kind, TrackedRegisterSource::None,
                         /*check_uses=*/false, /*check_defs=*/false,
                         /*check_exec_defs=*/false, std::nullopt, std::nullopt,
                         /*check_memory_order=*/true, /*check_program_end=*/false);
+    if (arch == ROCJITSU_CODE_ARCH_CDNA5)
+      events.emplace_back(WaitCounterKind::X, kind, TrackedRegisterSource::Uses,
+                          /*check_uses=*/false, /*check_defs=*/true, /*check_exec_defs=*/true);
     // LLVM excludes ASYNC_CNT/TENSOR_CNT from blanket function-boundary
     // waits. Their waits are derived from object-invisible ASYNCMARK pairs,
     // so conservatively check observable LDS consumers but not program end.
-    add_xcnt_event(is_load ? WaitEventKind::VmemNoSamplerLoad : WaitEventKind::VmemStore);
     return util::Result::success();
   }
 
@@ -345,11 +584,8 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
   }
 
   if (mnemonic == "global_inv" || mnemonic == "buffer_inv" || mnemonic == "buffer_wbl2") {
-    // LLVM tracks this in LOAD_CNT so it changes the wait threshold for an
-    // older load.  It has no result and does not by itself make the next
-    // memory instruction a wait consumer.
-    events.emplace_back(WaitCounterKind::Load, WaitEventKind::GlobalInv,
-                        TrackedRegisterSource::None, false, false);
+    const auto kind = mnemonic == "buffer_wbl2" ? WaitEventKind::GlobalWb : WaitEventKind::GlobalInv;
+    events.emplace_back(WaitCounterKind::Load, kind, TrackedRegisterSource::None, false, false);
     return util::Result::success();
   }
 
@@ -464,6 +700,13 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
   if (mnemonic == "ds_param_load" || mnemonic == "ds_direct_load" || mnemonic == "lds_param_load" ||
       mnemonic == "lds_direct_load") {
     events.push_back({WaitCounterKind::Exp, WaitEventKind::LdsDirect});
+    return util::Result::success();
+  }
+
+  // CDNA5 scalar prefetch reads an address through translation but never
+  // increments KMCNT (ISA, scalar prefetch instructions).
+  if (is_scalar_prefetch(mnemonic)) {
+    add_xcnt_event(WaitEventKind::Smem);
     return util::Result::success();
   }
 

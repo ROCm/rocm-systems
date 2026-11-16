@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/register_set.h"
 #include "util/result.h"
 
+#include <array>
 #include <cstdint>
 #include <limits>
 #include <optional>
@@ -93,11 +94,30 @@ enum class WaitEventKind {
   ExportPosition,
   ExportPrimitive,
   ExportDualSourceBlend,
+  Gfx10ScalarSource,
+  ValuCore,
+  ValuDp,
+  ValuMatrix,
+  ValuTrans,
   Count,
 };
 
 inline constexpr size_t kWaitEventKindCount = static_cast<size_t>(WaitEventKind::Count);
 inline constexpr uint8_t kNoPendingEventAge = std::numeric_limits<uint8_t>::max();
+
+// The immediately following VALU can be delayed until a particular earlier
+// instruction completes. The delay tag and the VA completion FIFO are distinct:
+// gfx1250 XDL WMMA shares the TRANS delay history with 16/32-bit TRANS.
+struct ExpertValuDelayState {
+  struct Slot {
+    WaitEventKind kind = WaitEventKind::Unknown;
+    uint8_t units = 0;
+  };
+  std::array<std::array<Slot, 4>, 2> history{};
+  uint16_t pending = 0;
+  void issue(const Instruction &inst, WaitEventKind kind, uint8_t units, rj_code_arch_t arch);
+  std::array<Slot, 2> before(const Instruction &inst, rj_code_arch_t arch);
+};
 
 enum class TrackedRegisterSource {
   None,
@@ -134,6 +154,11 @@ struct ClassifiedEvent {
   bool check_counter_parity_order = false;
   // May use ordinary VMEM writeback while keeping the sample's counter order.
   bool point_sample_accel = false;
+
+  [[nodiscard]] bool requires_expert_scheduling() const {
+    return (counter == WaitCounterKind::VmVsrc && kind != WaitEventKind::Gfx10ScalarSource) ||
+           counter == WaitCounterKind::VaVdst;
+  }
 };
 
 // ISA classification and wait-field decoding have no pending-state or CFG
@@ -147,13 +172,41 @@ struct WaitcheckTarget : WaitCounterPolicy {
   [[nodiscard]] static util::FailureOr<std::optional<WaitFields>>
   embedded_wait_fields(const Instruction &inst, rj_code_arch_t arch);
 
+  [[nodiscard]] static bool releases_gfx10_scalar_sources(const Instruction &inst,
+                                                          rj_code_arch_t arch);
+  [[nodiscard]] static std::optional<ClassifiedEvent> gfx10_scalar_source(const Instruction &inst,
+                                                                          rj_code_arch_t arch);
+  [[nodiscard]] static std::optional<WaitEventKind> expert_valu_kind(const Instruction &inst,
+                                                                     rj_code_arch_t arch);
+  // The longest documented WMMA-to-VALU overlap window across CDNA5 targets.
+  [[nodiscard]] static uint8_t
+  wmma_valu_wait_states(const Instruction &inst, rj_code_arch_t arch,
+                        rj_code_target_id_t target = ROCJITSU_CODE_TARGET_INVALID);
+  // A wait through this threshold completes more core positions than WMMA can
+  // overlap. Zero is always sufficient because it drains the matrix pipeline.
+  [[nodiscard]] static constexpr uint64_t wmma_core_wait_bound(uint64_t younger_core,
+                                                              uint8_t window) {
+    return window && younger_core > window ? younger_core - window - 1 : 0;
+  }
+  [[nodiscard]] static bool checks_scalar_source(WaitEventKind kind, const Instruction &inst);
+
   [[nodiscard]] static bool vm_vsrc_event_implied_by_wait(WaitEventKind kind,
                                                           WaitCounterKind counter);
 
   [[nodiscard]] static std::optional<WaitEventKind>
   normalized_hardware_event_kind(WaitCounterKind counter, WaitEventKind kind, WaitcntModel model);
 
+  // Completion order is independent from register writeback order.
+  [[nodiscard]] static std::optional<uint32_t>
+  completion_order_kind(WaitCounterKind counter, WaitEventKind kind, rj_code_arch_t arch);
+
+  [[nodiscard]] static bool flat_issues_both_counters(rj_code_arch_t arch);
+
+  [[nodiscard]] static uint32_t issue_units(const Instruction &inst, const ClassifiedEvent &event,
+                                            rj_code_arch_t arch);
+
   [[nodiscard]] static bool is_xcnt_vmem_kind(WaitEventKind kind);
+  [[nodiscard]] static bool is_async_transfer_kind(WaitEventKind kind);
 
   [[nodiscard]] static bool is_xcnt_drain(const Instruction &inst);
 
@@ -181,6 +234,10 @@ struct WaitcheckTarget : WaitCounterPolicy {
 
   [[nodiscard]] static bool uses_ds_wait_counter(std::string_view mnemonic);
 
+  [[nodiscard]] static bool is_scalar_prefetch(std::string_view mnemonic) {
+    return mnemonic.starts_with("s_prefetch_") || mnemonic.starts_with("s_buffer_prefetch_");
+  }
+
   [[nodiscard]] static bool is_async_lds_load(std::string_view mnemonic);
 
   [[nodiscard]] static bool is_async_lds_store(std::string_view mnemonic);
@@ -196,6 +253,10 @@ struct WaitcheckTarget : WaitCounterPolicy {
   [[nodiscard]] static util::Result classify_events_into(const Instruction &inst,
                                                          rj_code_arch_t arch,
                                                          std::vector<ClassifiedEvent> &events);
+
+private:
+  static util::Result classify_memory_events_into(const Instruction &inst, rj_code_arch_t arch,
+                                                  std::vector<ClassifiedEvent> &events);
 };
 
 } // namespace waitcheck_detail

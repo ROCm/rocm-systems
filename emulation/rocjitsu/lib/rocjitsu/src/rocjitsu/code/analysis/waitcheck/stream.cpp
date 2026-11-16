@@ -235,6 +235,8 @@ private:
                                   std::span<const ClassifiedEvent> current, uint64_t offset) {
     for (const auto &pending : state_.pending) {
       for (const auto &event : pending) {
+        if (!Ops::checks_scalar_source(event.kind, inst))
+          continue;
         std::optional<RegisterRef> reg;
         auto access = WaitcheckAccess::Read;
         if (event.check_uses)
@@ -276,6 +278,8 @@ private:
     event.check_defs = classification.check_defs;
     event.check_exec_defs = classification.check_exec_defs;
     event.special_reg = classification.special_reg;
+    if (event.special_reg)
+      event.regs.expand(*event.special_reg);
     event.section_offset = offset;
     event.instruction = inst.disassemble();
     const auto idx = Ops::counter_index(event.counter);
@@ -364,9 +368,8 @@ util::FailureOr<WaitcheckStreamReport> analyze_stream(std::span<const uint32_t> 
     }
     // Classification describes target capability; the driver applies the entry mode.
     if (!options.expert_scheduling) {
-      std::erase_if(events.value(), [](const auto &event) {
-        return event.counter == WaitCounterKind::VmVsrc || event.counter == WaitCounterKind::VaVdst;
-      });
+      std::erase_if(events.value(),
+                    [](const auto &event) { return event.requires_expert_scheduling(); });
     }
     if (analyzer.analyze(inst, events.value(), offset).failed())
       return emit_error.emit() << "waitcheck transfer failed at byte " << offset;
