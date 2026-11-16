@@ -854,9 +854,23 @@ util::Result WaitcheckStateOps::apply_embedded_waitcnt(PendingState &state, cons
   return util::Result::success();
 }
 
+util::FailureOr<std::optional<amdgpu::WaitFields>>
+WaitcheckStateOps::resolved_wait_fields(const PendingState &state, const Instruction &inst,
+                                        rj_code_arch_t arch) {
+  if (const auto *operand = relative_wait_operand(inst, arch)) {
+    const auto ref = operand->to_register_ref();
+    if (ref && ref->cls == RegClass::SGPR) {
+      const auto it = state.sgpr_offsets.find(ref->index);
+      if (it != state.sgpr_offsets.end())
+        return explicit_wait_fields(inst, arch, it->second.values());
+    }
+  }
+  return explicit_wait_fields(inst, arch);
+}
+
 util::Result WaitcheckStateOps::apply_waitcnt(PendingState &state, const Instruction &inst,
                                               rj_code_arch_t arch) {
-  const auto fields = explicit_wait_fields(inst, arch);
+  const auto fields = resolved_wait_fields(state, inst, arch);
   if (fields.failed())
     return util::Result::failure();
   if (!fields.value())

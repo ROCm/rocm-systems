@@ -402,6 +402,8 @@ struct WaitcheckStateOps : WaitcheckTarget {
   static util::Result apply_embedded_waitcnt(PendingState &state, const Instruction &inst,
                                              rj_code_arch_t arch);
 
+  [[nodiscard]] static util::FailureOr<std::optional<amdgpu::WaitFields>>
+  resolved_wait_fields(const PendingState &state, const Instruction &inst, rj_code_arch_t arch);
   static util::Result apply_waitcnt(PendingState &state, const Instruction &inst,
                                     rj_code_arch_t arch);
 

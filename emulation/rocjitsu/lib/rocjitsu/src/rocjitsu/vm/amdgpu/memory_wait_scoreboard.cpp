@@ -2373,6 +2373,18 @@ bool MemoryWaitScoreboard::issues_flat_counter(const Instruction &inst, Wavefron
           : outstanding(WaitCounterKind::Sample));
 }
 
+util::FailureOr<std::optional<WaitFields>>
+MemoryWaitScoreboard::explicit_wait_fields(const Instruction &inst, rj_code_arch_t arch,
+                                           Wavefront *wf) {
+  if (wf) {
+    if (const auto *source = WaitCounterPolicy::relative_wait_operand(inst, arch)) {
+      const uint32_t value = RegisterAccess(*wf).read_scalar(*source);
+      return WaitCounterPolicy::explicit_wait_fields(inst, arch, std::span(&value, 1));
+    }
+  }
+  return WaitCounterPolicy::explicit_wait_fields(inst, arch);
+}
+
 void MemoryWaitScoreboard::before(const Instruction &inst, rj_code_arch_t arch, Wavefront *wf) {
   using namespace waitcheck_detail;
   if (wf && disabled_scalar_prefetch(inst, *wf))

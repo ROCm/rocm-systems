@@ -547,9 +547,9 @@ struct Analyzer : private WaitcheckStateOps {
     for (const auto &block : blocks) {
       for (const Instruction &inst : block->instructions()) {
         instruction_by_offset.emplace(inst.src_loc(), &inst);
-        track_sgpr_offsets_ |= inst.mnemonic().starts_with("s_movrel") ||
-                               inst.mnemonic().starts_with("v_movrel") ||
-                               inst.mnemonic().starts_with("v_swaprel");
+        track_sgpr_offsets_ |=
+            relative_wait_operand(inst, arch) || inst.mnemonic().starts_with("s_movrel") ||
+            inst.mnemonic().starts_with("v_movrel") || inst.mnemonic().starts_with("v_swaprel");
       }
     }
 
@@ -1776,7 +1776,7 @@ private:
     if (!options_.check_counter_parity)
       return;
 
-    const auto emitted_fields = explicit_wait_fields(inst, arch).value();
+    const auto emitted_fields = resolved_wait_fields(state, inst, arch).value();
     if (emitted_fields) {
       const bool has_wait =
           std::ranges::any_of(*emitted_fields, [](const auto &value) { return value.has_value(); });
