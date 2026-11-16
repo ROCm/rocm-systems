@@ -167,6 +167,10 @@ class Memory : public device::Memory {
 
   void destroyInteropBuffer();
 
+  // True only for the device memory object that called hsa_amd_memory_lock.
+  // Sibling devices reuse that mapping and must not unlock it.
+  bool hostLockOwner_ = false;
+
   // Pointer to the device associated with this memory object.
   const roc::Device& dev_;
 
