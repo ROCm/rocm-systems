@@ -219,8 +219,9 @@ resolve_collected(const collected_input& collected)
 }
 
 /// Write what @p param assigns, under @p source, to each target that does not have a
-/// higher source. initialize() refused a catalog that assigns an unknown parameter or
-/// a value its target refuses.
+/// higher source: gpu set in a config file leaves --use-process-sampling=false alone.
+/// initialize() refused a catalog that assigns an unknown parameter or a value its
+/// target refuses.
 void
 assign_targets(resolved_config& resolved, const schema& config_schema,
                const schema_param& param, config_source source)
@@ -238,7 +239,7 @@ assign_targets(resolved_config& resolved, const schema& config_schema,
     }
 }
 
-/// Assigns run for a parameter that is on and whose value won over the default.
+/// Ex, --gpu sets use_amd_smi and use_process_sampling to true through its assigns.
 void
 apply_assigns(resolved_config& resolved, const schema& config_schema)
 {
@@ -259,6 +260,8 @@ apply_assigns(resolved_config& resolved, const schema& config_schema)
     }
 }
 
+/// Report conflicts and required, such as --profile with --flat-profile, for what the
+/// sources set.
 void
 append_violations(std::vector<std::string>& errors, const schema& config_schema,
                   const resolved_config& resolved)
