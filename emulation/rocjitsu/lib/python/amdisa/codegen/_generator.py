@@ -17002,6 +17002,8 @@ class CodeGenerator:
                     PACKED_TERNARY_SELECTION,
                     CDNA_TERNARY_SELECTION,
                     TERNARY_SELECTION_RDNA4,
+                    BINARY_ARITHMETIC_F16,
+                    FMA_F16,
                     SCALED_WIDEN_NAMES,
                     MIXED_BF16_NAMES,
                     DOT2_F32_NAMES,
@@ -17048,6 +17050,19 @@ class CodeGenerator:
                         | PACKED_TERNARY_SELECTION
                         | CDNA_TERNARY_SELECTION
                         | TERNARY_SELECTION_RDNA4
+                        | BINARY_ARITHMETIC_F16
+                        | FMA_F16
+                        | {
+                            'V_FREXP_EXP_I16_F16',
+                            'V_MAD_F16',
+                            'V_MAD_LEGACY_F16',
+                            'V_MADMK_F16',
+                            'V_MADAK_F16',
+                            'V_PK_FMAC_F16',
+                            'V_PK_ADD_F16',
+                            'V_PK_MUL_F16',
+                            'V_PK_FMA_F16',
+                        }
                     )
                 if self.isa_spec.arch_name in (
                     'rdna2',
@@ -17156,7 +17171,7 @@ class CodeGenerator:
                     supports_scalar(self.isa_spec.arch_name, i.name) for i in all_insts
                 )
                 if has_rj_arith_scalar:
-                    cpp_includes.append(('rj_arith/rj_arith.h', False))
+                    cpp_includes.append(('rj_arith/detail/rj_arith_scalar.h', False))
                 if self.isa_spec.arch_name in ('cdna3', 'cdna4', 'cdna5') and any(
                     i.name in CUBE_NAMES for i in all_insts
                 ):

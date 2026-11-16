@@ -88,8 +88,10 @@ void check_half_fma(Call entry_point, bool gfx12, const Cases &status_cases) {
     check_half_fma_directed_flush<Lanes>(call);
   }
   std::vector<uint64_t> simd_modes = {0};
-  if constexpr (!(Packed && Accumulate)) {
-    simd_modes.insert(simd_modes.end(), {RJ_ARITH_ALU_NEG_A, clamp});
+  simd_modes.insert(simd_modes.end(), {RJ_ARITH_ALU_NEG_A, clamp});
+  if constexpr (Packed && Accumulate) {
+    simd_modes.insert(simd_modes.end(),
+                      {RJ_ARITH_ALU_ABS_A, RJ_ARITH_ALU_ABS_B | RJ_ARITH_ALU_NEG_B});
   }
   if constexpr (Packed && !Accumulate) {
     simd_modes.insert(simd_modes.end(),
@@ -162,8 +164,10 @@ void check_half_fma(Call entry_point, bool gfx12, const Cases &status_cases) {
       });
 
   std::vector<uint64_t> instruction_flag_cases = {0};
-  if constexpr (!(Packed && Accumulate)) {
-    instruction_flag_cases.insert(instruction_flag_cases.end(), {RJ_ARITH_ALU_NEG_A, clamp});
+  instruction_flag_cases.insert(instruction_flag_cases.end(), {RJ_ARITH_ALU_NEG_A, clamp});
+  if constexpr (Packed && Accumulate) {
+    instruction_flag_cases.insert(instruction_flag_cases.end(),
+                                  {RJ_ARITH_ALU_ABS_A, RJ_ARITH_ALU_ABS_B | RJ_ARITH_ALU_NEG_B});
   }
   if constexpr (Packed && !Accumulate) {
     instruction_flag_cases.insert(instruction_flag_cases.end(),
@@ -174,7 +178,7 @@ void check_half_fma(Call entry_point, bool gfx12, const Cases &status_cases) {
   }
   if constexpr (Packed && Accumulate) {
     for (uint64_t invalid :
-         {RJ_ARITH_ALU_NEG_A, RJ_ARITH_ALU_ABS_A, RJ_ARITH_ALU_CLAMP, RJ_ARITH_ALU_OMOD_2}) {
+         {RJ_ARITH_ALU_NEG_C, RJ_ARITH_ALU_ABS_C, RJ_ARITH_ALU_HIGH_A, RJ_ARITH_ALU_OMOD_2}) {
       EXPECT_EQ(call(RJ_ARITH_SEMANTICS_LOOSE, Mask(1), invalid, nullptr, nullptr, nullptr, nullptr,
                      nullptr),
                 RJ_ARITH_ERROR_INVALID_FLAGS);
@@ -293,9 +297,7 @@ void check_half_fma(Call entry_point, bool gfx12, const Cases &status_cases) {
   }
   if (gfx12) {
     std::vector<uint64_t> status_modes = {0};
-    if constexpr (!(Packed && Accumulate)) {
-      status_modes.push_back(clamp);
-    }
+    status_modes.push_back(clamp);
     for (uint64_t cpu : cpu_levels) {
       for (const auto &test : status_cases) {
         for (uint64_t instruction_flags : status_modes) {

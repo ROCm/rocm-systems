@@ -185,7 +185,7 @@ BufferResource decode_buffer_resource(uint32_t srd0, uint32_t srd1, uint32_t srd
   resource.stride = resource.raw_stride * kStrideMultipliers[resource.stride_scale_encoding];
   resource.swizzle_enabled = ((srd3 >> 28) & 0x1u) != 0;
   resource.oob_select = ((srd3 >> 29) & 0x1u) != 0;
-  resource.type = static_cast<uint8_t>((srd3 >> 30) & 0x3u);
+  resource.type = amdgpu::addr_calc::cdna5_buffer_resource_type(srd3);
   return resource;
 }
 

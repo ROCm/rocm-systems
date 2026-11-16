@@ -36,7 +36,7 @@ class Settings : public device::Settings {
       uint barrier_value_packet_ : 1;  //!< Barrier value packet functionality
       uint dynamic_queues_ : 2;        //!< Dynamic queues: 0=off, 1=Depth, 2=1+dedicated null
       uint blocking_blit_ : 1;         //!< Blit ops can be blocking on CPU
-      uint queue_pipe_dist_ : 1;       //!< gfx94x queue pipe distribution
+      uint queue_pipe_dist_ : 1;       //!< Queue pipe distribution
       uint ext_dispatch_packet_ : 1;   //!< Uses new ext dispatch packet for all launches
       uint aql_barrier_opt_ : 1;       //!< Per-stream barrier-bit optimization
       uint reserved_ : 17;
@@ -73,7 +73,7 @@ class Settings : public device::Settings {
   //! (HSA_AMD_AGENT_INFO_AQL_EXTENSIONS); -1 if unknown (an offline device, or a runtime without
   //! the query), when the ISA decides
   bool create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, bool coop_groups = false,
-              bool isXgmi = false, bool isAPU = false, int aqlExtDispatch = -1);
+              bool pcieStoresNeedFlush = true, bool isAPU = false, int aqlExtDispatch = -1);
 
  private:
   //! Disable copy constructor
@@ -87,7 +87,7 @@ class Settings : public device::Settings {
 
   //! Determine how kernel arguments should be implemented given ASIC (host
   //! memory, device memory, device memory with memory ordering workaround)
-  void setKernelArgImpl(const amd::Isa& isa, bool isXgmi);
+  void setKernelArgImpl(const amd::Isa& isa, bool pcieStoresNeedFlush);
 };
 
 /*@}*/  // namespace amd::roc
