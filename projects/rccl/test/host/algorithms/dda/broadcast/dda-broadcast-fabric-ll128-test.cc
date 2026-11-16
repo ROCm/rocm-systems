@@ -260,15 +260,30 @@ TEST_F(DdaBroadcastFabricLL128Microtest, Eligible_UpToBroadcastLL128Threshold) {
 }
 
 TEST_F(DdaBroadcastFabricLL128Microtest, Eligible_SlicesMustFitBankAfterTokenRegion) {
-  // 256-word slices, 8 rank tokens pad to one slice; a 768-word bank leaves two.
+  // 256-word slices; 8 rank tokens pad to one slice, so a 528-word bank leaves one (two if unpadded).
   SetArch("gfx1250");
-  comm().ddaScratchBytes = 2 * 768 * 8;
-  EXPECT_TRUE(Eligible(2 * kGfx1250Slice));
-  EXPECT_FALSE(Eligible(2 * kGfx1250Slice + 16));
-  // 144 rank tokens pad to two slices, leaving one.
-  comm().nRanks = 144;
+  comm().ddaScratchBytes = 2 * 528 * 8;
   EXPECT_TRUE(Eligible(kGfx1250Slice));
   EXPECT_FALSE(Eligible(kGfx1250Slice + 16));
+  // 144 rank tokens pad to two slices: none left in a 528-word bank, one in a 768-word bank.
+  comm().nRanks = 144;
+  EXPECT_FALSE(Eligible(16));
+  comm().ddaScratchBytes = 2 * 768 * 8;
+  EXPECT_TRUE(Eligible(kGfx1250Slice));
+  EXPECT_FALSE(Eligible(kGfx1250Slice + 16));
+}
+
+TEST_F(DdaBroadcastFabricLL128Microtest, Eligible_TokenRegionKeepsDataSliceAndLineAligned) {
+  for (const char* arch : {"gfx1250", "gfx950"}) {
+    SetArch(arch);
+    const size_t sliceBytes = ddaLL128BcArch(mock_.get()).sliceWords * sizeof(uint64_t);
+    for (int nRanks = 2; nRanks <= 144; ++nRanks) {
+      const size_t offset = dda::common::ddaLL128BcTokenWords(nRanks, sliceBytes / sizeof(uint64_t)) * sizeof(uint64_t);
+      EXPECT_GE(offset, 16u * nRanks) << arch << " nRanks " << nRanks;
+      EXPECT_EQ(offset % 128, 0u) << arch << " nRanks " << nRanks;
+      EXPECT_EQ(offset % sliceBytes, 0u) << arch << " nRanks " << nRanks;
+    }
+  }
 }
 
 TEST_F(DdaBroadcastFabricLL128Microtest, Eligible_RootGridMustFitEpoch) {
