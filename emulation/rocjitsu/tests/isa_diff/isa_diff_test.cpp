@@ -28,6 +28,7 @@
 #include <filesystem>
 #include <memory>
 #include <random>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -319,7 +320,9 @@ TEST(IsaDiffAlign, ChangedBranchTargetIsControlFlow) {
       found = true;
     }
   ASSERT_TRUE(found);
-  CaseData d = analyze(k_rename_old, retarget);
+  PlanOptions regions_only;
+  regions_only.whole_function = false;
+  CaseData d = analyze(k_rename_old, retarget, regions_only);
   // The branch is a region of its own; its taken exit now goes elsewhere than old's, which
   // has no matched partner: a mapping inconclusive, never a pass.
   ASSERT_FALSE(d.regions.empty());
@@ -327,6 +330,11 @@ TEST(IsaDiffAlign, ChangedBranchTargetIsControlFlow) {
   EXPECT_NE(d.regions[0].reason.find("exit"), std::string::npos) << d.regions[0].reason;
   TestRun r = run(d);
   EXPECT_NE(r.overall(), "NO_MISMATCH_FOUND");
+  // The new target skips only the s_nop the old target starts with: the whole function
+  // runs both branches and finds them equivalent.
+  TestRun whole = run(analyze(k_rename_old, retarget));
+  EXPECT_EQ(whole.overall(), "NO_MISMATCH_FOUND");
+  EXPECT_EQ(whole.report["overall"]["resolved_by"].as_string(), "whole_function");
 }
 
 // ---------------------------------------------------------------------------
@@ -532,7 +540,9 @@ TEST(IsaDiffValidator, DerivedConstraintsComeOnlyFromCommonCode) {
 }
 
 TEST(IsaDiffValidator, ContradictoryConstraintsNeverPass) {
-  CaseData d = analyze(k_constraint_old, k_constraint_new);
+  PlanOptions regions_only; // the whole function does not carry the edited constraint
+  regions_only.whole_function = false;
+  CaseData d = analyze(k_constraint_old, k_constraint_new, regions_only);
   Constraint c;
   c.loc = 4;
   c.known_zero = 1;
@@ -554,6 +564,7 @@ TEST(IsaDiffValidator, DependentHunksMergeInsteadOfPassingIndependently) {
 
   PlanOptions no_merge;
   no_merge.merge_same_block = false;
+  no_merge.whole_function = false;
   CaseData split = analyze(k_twohunk_old, k_twohunk_new, no_merge);
   ASSERT_EQ(split.regions.size(), 2u);
   EXPECT_EQ(split.regions[1].contract.status, ContractStatus::Assumed);
@@ -574,21 +585,36 @@ TEST(IsaDiffValidator, DependentHunksMergeInsteadOfPassingIndependently) {
     listed |= u["what"].as_string().find("may be compensated by changed code downstream (r1)") !=
               std::string::npos;
   EXPECT_TRUE(listed);
+  // The whole function settles it: the downstream change does compensate.
+  no_merge.whole_function = true;
+  TestRun whole = run(analyze(k_twohunk_old, k_twohunk_new, no_merge));
+  EXPECT_EQ(whole.overall(), "NO_MISMATCH_FOUND");
+  EXPECT_EQ(whole.coverage(), "COMPLETE_FOR_DECLARED_SCOPE");
+  EXPECT_EQ(whole.report["overall"]["resolved_by"].as_string(), "whole_function");
 }
 
 TEST(IsaDiffValidator, RenamingWithoutValueMappingIsInconclusive) {
-  CaseData d = analyze(k_rename_old, k_rename_new);
+  PlanOptions regions_only;
+  regions_only.whole_function = false;
+  CaseData d = analyze(k_rename_old, k_rename_new, regions_only);
   ASSERT_GE(d.regions.size(), 2u);
   EXPECT_EQ(d.regions[0].status, RegionStatus::Inconclusive);
   EXPECT_NE(d.regions[0].reason.find("INCONCLUSIVE_MAPPING"), std::string::npos);
   TestRun r = run(d);
   EXPECT_EQ(r.overall(), "INCONCLUSIVE");
+  // Without a cut there is no mapping to justify: the whole function passes.
+  TestRun whole = run(analyze(k_rename_old, k_rename_new));
+  EXPECT_EQ(whole.overall(), "NO_MISMATCH_FOUND");
+  EXPECT_EQ(whole.report["overall"]["resolved_by"].as_string(), "whole_function");
 }
 
 TEST(IsaDiffValidator, UnknownSuccessorDescriptorAndUncoveredChangesKeepScopePartial) {
   CaseData setpc = analyze(k_setpc_old, k_setpc_new);
   ASSERT_EQ(setpc.regions.size(), 1u);
   EXPECT_EQ(setpc.regions[0].contract.status, ContractStatus::Assumed);
+  // The whole function is no better: unknown successors could enter it anywhere.
+  ASSERT_TRUE(setpc.whole_function);
+  EXPECT_EQ(setpc.whole_function->contract.status, ContractStatus::Assumed);
   TestRun r = run(setpc);
   EXPECT_EQ(r.results[0].test_status, TestStatus::NoMismatchFound);
   EXPECT_EQ(r.overall(), "INCONCLUSIVE");
@@ -802,6 +828,127 @@ TEST(IsaDiffValidator, InjectedErrorsAreDetectedReplayableAndSynthetic) {
     EXPECT_TRUE(replay.reproduced) << replay.summary;
   }
   std::filesystem::remove_all(dir);
+}
+
+TEST(IsaDiffMutants, ClassifiesWhatAFlipChanged) {
+  EXPECT_EQ(classify_mutation("s_lshl_b64 s[8:9], s[8:9], 1", "s_lshr_b64 s[8:9], s[8:9], 1"),
+            "opcode");
+  EXPECT_EQ(classify_mutation("s_lshl_b64 s[8:9], s[8:9], 1", "s_lshl_b64 s[8:9], s[6:7], 1"),
+            "register");
+  EXPECT_EQ(classify_mutation("s_lshl_b64 s[8:9], s[8:9], 1", "s_lshl_b64 s[8:9], s[8:9], 3"),
+            "constant");
+  EXPECT_EQ(classify_mutation("v_add_f32_e64 v0, v1, v2", "v_add_f32_e64 v0, -v1, v2"), "modifier");
+  EXPECT_EQ(classify_mutation("v_add_f32_e64 v0, v1, v2", "v_add_f32_e64 v0, v1, v2 clamp"),
+            "modifier");
+  EXPECT_EQ(classify_mutation("global_load_dword v0, v1, s[0:1] offset:4",
+                              "global_load_dword v0, v1, s[0:1] offset:12"),
+            "constant");
+  EXPECT_EQ(classify_mutation("v_mov_b32_e32 v0, v1", "v_mov_b32_e32 v0, 0.5"), "register");
+  EXPECT_EQ(classify_mutation("s_add_u32 s5, s10, 1", "s_add_u32 s5, s10, -1"), "constant");
+  EXPECT_EQ(classify_mutation("v_add_f32_e64 v0, v1, v2", "v_add_f32_e64 v0, |v1|, v2"),
+            "modifier");
+}
+
+TEST(IsaDiffMutants, MutantsOfAPassingRegionAreKilledAndClassified) {
+  CaseData d = analyze(k_shift_old, k_shift_new);
+  ASSERT_EQ(d.regions.size(), 1u);
+  const auto all = enumerate_mutants(d.regions[0]);
+  ASSERT_FALSE(all.empty());
+  std::set<std::string> texts, classes;
+  for (const Mutant &m : all) {
+    EXPECT_NE(m.original, m.mutated);
+    EXPECT_TRUE(texts.insert(std::to_string(m.spec.inst) + m.mutated).second) << m.mutated;
+    classes.insert(m.operator_class);
+  }
+  EXPECT_TRUE(classes.count("opcode"));
+  EXPECT_TRUE(classes.count("register"));
+  EXPECT_TRUE(classes.count("constant"));
+  // Sampling is deterministic and takes every class before repeating one.
+  const auto a = sample_mutants(all, classes.size(), 7), b = sample_mutants(all, classes.size(), 7);
+  ASSERT_EQ(a.size(), classes.size());
+  std::set<std::string> sampled;
+  for (size_t i = 0; i < a.size(); ++i) {
+    EXPECT_EQ(a[i].mutated, b[i].mutated);
+    sampled.insert(a[i].operator_class);
+  }
+  EXPECT_EQ(sampled, classes);
+
+  MutantRunOptions o;
+  o.test.cases = 300;
+  o.confirm_cases = 1000;
+  o.max_per_region = 12;
+  const Json report = run_mutants(d, o);
+  EXPECT_EQ(report["schema_version"].as_string(), "rj_isa_diff.mutants.v1");
+  ASSERT_EQ(report["regions"].size(), 1u);
+  const Json &r = report["regions"].items()[0];
+  EXPECT_EQ(r["baseline"].as_string(), "NO_MISMATCH_FOUND");
+  EXPECT_EQ(r["tested"].as_uint(), 12u);
+  uint64_t killed = 0;
+  for (const Json &m : r["mutants"].items()) {
+    const std::string v = m["verdict"].as_string();
+    EXPECT_TRUE(v == "killed" || v == "killed_late" || v == "survived" || v == "invalid") << v;
+    if (v == "killed") {
+      ++killed;
+      EXPECT_TRUE(m["phase"].as_string() == "boundary" || m["phase"].as_string() == "random");
+    }
+  }
+  // A shift by one rewritten as an add: nearly every flip changes the result.
+  EXPECT_GE(killed, 9u);
+  EXPECT_EQ(report["totals"]["killed"].as_uint(), killed);
+}
+
+TEST(IsaDiffMutants, KilledMutantsHaveAnObservableEffect) {
+  // survivor_effect runs a mutant against the new side it came from. A mutant the test
+  // kills must change a live-out value; one without any effect must never be killed.
+  CaseData d = analyze(k_shift_old, k_shift_new);
+  ASSERT_EQ(d.regions.size(), 1u);
+  const auto all = sample_mutants(enumerate_mutants(d.regions[0]), 16, 3);
+  ASSERT_FALSE(all.empty());
+  size_t killed = 0;
+  for (const Mutant &m : all) {
+    std::string error;
+    auto syn = make_synthetic_mutation(d.regions[0], m.spec, error);
+    ASSERT_TRUE(syn) << error;
+    BaselinePolicy policy(1);
+    TestOptions opt;
+    opt.cases = 300;
+    opt.reduce = false;
+    const RegionResult r = test_region(*syn, opt, policy);
+    const std::string effect = survivor_effect(d.regions[0], *syn, 1, 300);
+    if (r.test_status == TestStatus::LocalMismatch) {
+      ++killed;
+      EXPECT_EQ(effect, "observable_effect") << m.mutated;
+    }
+    if (effect == "no_effect" || effect == "dead_effect") {
+      EXPECT_NE(r.test_status, TestStatus::LocalMismatch) << m.mutated;
+    }
+  }
+  EXPECT_GT(killed, 0u);
+}
+
+TEST(IsaDiffMutants, WeakenedWaitIsAPendingConflict) {
+  // gfx950: global_load_dword v1, v4, s[2:3]; s_waitcnt vmcnt(N); v_add_u32 v0, v0, v1.
+  // The isolated run completes the load at once, so only the pending-memory analysis
+  // sees that vmcnt(1) lets the add read v1 before the load has written it.
+  auto side_with = [](uint32_t wait) {
+    RegionSide side;
+    uint64_t pc = 0x1000;
+    for (std::vector<uint32_t> words :
+         {std::vector<uint32_t>{0xdc508000u, 0x01020004u}, {wait}, {0x68000300u}}) {
+      RegionInst inst;
+      inst.pc = pc;
+      inst.words = words;
+      pc += 4 * words.size();
+      side.insts.push_back(std::move(inst));
+    }
+    return side;
+  };
+  const Target gfx950 = *target_by_name("gfx950");
+  const auto ok = region_pending_conflicts(side_with(0xbf8c0f70u), gfx950); // vmcnt(0)
+  EXPECT_TRUE(ok.first.none());
+  EXPECT_TRUE(ok.second.none());
+  const auto weak = region_pending_conflicts(side_with(0xbf8c0f71u), gfx950); // vmcnt(1)
+  EXPECT_TRUE(weak.second.test(1)) << format_vgprs(weak.second);
 }
 
 TEST(IsaDiffValidator, ReplayRejectsAnEditedBundle) {

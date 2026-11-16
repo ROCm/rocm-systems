@@ -133,6 +133,8 @@ std::string analysis_cache_key(const Artifact &old_artifact, const Artifact &new
   o.set("max_expansions", static_cast<uint64_t>(options.max_expansions));
   o.set("context_insts", static_cast<uint64_t>(options.context_insts));
   o.set("merge_same_block", options.merge_same_block);
+  o.set("whole_function", options.whole_function);
+  o.set("max_function_insts", static_cast<uint64_t>(options.max_function_insts));
   o.set("auto_expand", options.auto_expand);
   o.set("max_variants", static_cast<uint64_t>(options.max_variants));
   o.set("derive_constraints", options.derive_constraints);

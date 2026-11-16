@@ -1241,6 +1241,9 @@
             }
           },
           "additionalProperties": false
+        },
+        "whole_function": {
+          "$ref": "#/$defs/region"
         }
       },
       "additionalProperties": false
@@ -1769,6 +1772,9 @@
             },
             "note": {
               "type": "string"
+            },
+            "resolved_by": {
+              "const": "whole_function"
             }
           },
           "additionalProperties": false
@@ -1855,6 +1861,25 @@
             }
           },
           "additionalProperties": false
+        },
+        "whole_function": {
+          "type": "object",
+          "required": [
+            "decides",
+            "reason"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "decides": {
+              "type": "boolean"
+            },
+            "reason": {
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/region_result"
+            }
+          }
         }
       },
       "additionalProperties": false
@@ -2716,6 +2741,262 @@
           "$ref": "#/$defs/vgpr"
         }
       ]
+    },
+    "mutants": {
+      "description": "rj_isa_diff mutants: mutation analysis of a case (synthetic; never an LLVM finding).",
+      "type": "object",
+      "required": [
+        "schema_version",
+        "options",
+        "totals",
+        "by_class",
+        "by_unit",
+        "regions",
+        "survivor_effects"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "rj_isa_diff.mutants.v1"
+        },
+        "options": {
+          "type": "object",
+          "required": [
+            "seed",
+            "cases",
+            "confirm_cases",
+            "max_per_region",
+            "effect_cases"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "seed": {
+              "$ref": "#/$defs/count"
+            },
+            "cases": {
+              "$ref": "#/$defs/count"
+            },
+            "confirm_cases": {
+              "$ref": "#/$defs/count"
+            },
+            "max_per_region": {
+              "$ref": "#/$defs/count"
+            },
+            "effect_cases": {
+              "$ref": "#/$defs/count"
+            }
+          }
+        },
+        "totals": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "killed": {
+              "$ref": "#/$defs/count"
+            },
+            "killed_late": {
+              "$ref": "#/$defs/count"
+            },
+            "survived": {
+              "$ref": "#/$defs/count"
+            },
+            "invalid": {
+              "$ref": "#/$defs/count"
+            }
+          }
+        },
+        "by_class": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "killed": {
+                "$ref": "#/$defs/count"
+              },
+              "killed_late": {
+                "$ref": "#/$defs/count"
+              },
+              "survived": {
+                "$ref": "#/$defs/count"
+              },
+              "invalid": {
+                "$ref": "#/$defs/count"
+              }
+            }
+          }
+        },
+        "by_unit": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "killed": {
+                "$ref": "#/$defs/count"
+              },
+              "killed_late": {
+                "$ref": "#/$defs/count"
+              },
+              "survived": {
+                "$ref": "#/$defs/count"
+              },
+              "invalid": {
+                "$ref": "#/$defs/count"
+              }
+            }
+          }
+        },
+        "regions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "baseline",
+              "baseline_masked",
+              "tested",
+              "mutants"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "baseline": {
+                "$ref": "#/$defs/test_status"
+              },
+              "baseline_masked": {
+                "type": "boolean"
+              },
+              "candidates": {
+                "$ref": "#/$defs/count"
+              },
+              "tested": {
+                "$ref": "#/$defs/count"
+              },
+              "mutants": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "inst",
+                    "word",
+                    "xor",
+                    "class",
+                    "unit",
+                    "original",
+                    "mutated",
+                    "verdict",
+                    "valid"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "inst": {
+                      "$ref": "#/$defs/count"
+                    },
+                    "word": {
+                      "$ref": "#/$defs/count"
+                    },
+                    "xor": {
+                      "type": "string",
+                      "pattern": "^0x[0-9a-f]{8}$"
+                    },
+                    "class": {
+                      "enum": [
+                        "opcode",
+                        "register",
+                        "constant",
+                        "modifier",
+                        "other"
+                      ]
+                    },
+                    "unit": {
+                      "enum": [
+                        "salu",
+                        "valu",
+                        "memory"
+                      ]
+                    },
+                    "original": {
+                      "type": "string"
+                    },
+                    "mutated": {
+                      "type": "string"
+                    },
+                    "verdict": {
+                      "enum": [
+                        "killed",
+                        "killed_late",
+                        "survived",
+                        "invalid"
+                      ]
+                    },
+                    "valid": {
+                      "$ref": "#/$defs/count"
+                    },
+                    "phase": {
+                      "enum": [
+                        "boundary",
+                        "random",
+                        "static"
+                      ]
+                    },
+                    "case": {
+                      "$ref": "#/$defs/count"
+                    },
+                    "kind": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "masked": {
+                      "type": "boolean"
+                    },
+                    "effect": {
+                      "enum": [
+                        "no_effect",
+                        "dead_effect",
+                        "undefined_effect",
+                        "observable_effect",
+                        "unknown"
+                      ]
+                    },
+                    "effect_case": {
+                      "$ref": "#/$defs/count"
+                    },
+                    "effect_detail": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "survivor_effects": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "no_effect": {
+              "$ref": "#/$defs/count"
+            },
+            "dead_effect": {
+              "$ref": "#/$defs/count"
+            },
+            "undefined_effect": {
+              "$ref": "#/$defs/count"
+            },
+            "observable_effect": {
+              "$ref": "#/$defs/count"
+            },
+            "unknown": {
+              "$ref": "#/$defs/count"
+            }
+          }
+        }
+      }
     }
   }
 }

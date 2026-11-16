@@ -1287,6 +1287,10 @@ def run_job_in(job, d, tool, llvm_bin, cases, seed, strict_nan, triage):
     row["contract"] = o["contract_status"]
     row["coverage"] = o["coverage_scope"]
     row["dont_care_masked"] = o.get("dont_care_masked_cases", 0)
+    if o.get("resolved_by"):
+        row["resolved_by"] = o["resolved_by"]
+    if res.get("whole_function"):
+        row["whole_function"] = res["whole_function"]["reason"][:200]
     row["hunks"] = len(case.get("changes", []))
     row["unresolved"] = [f"{u['kind']}: {u['what']}" for u in res.get("unresolved", [])]
     row["regions"] = []

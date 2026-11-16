@@ -75,6 +75,8 @@ struct TestOptions {
   /// PoisonKind mask: cases whose region instructions meet one of these machine analogues
   /// of IR poison conditions, on either side, are excluded as poison inputs.
   uint32_t poison_filter = 0;
+  /// Stop after the first mismatch or harness error (mutation runs: a kill needs one).
+  bool stop_at_first_mismatch = false;
 };
 
 struct PhaseCounts {

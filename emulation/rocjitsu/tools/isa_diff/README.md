@@ -90,6 +90,10 @@ rj_isa_diff replay --counterexample case/counterexamples/r0-case17.json [--case 
 
 # Validator self-test: inject a wrong opcode/immediate/operand (labelled synthetic).
 rj_isa_diff inject --case case/ --region r0 --side new --inst 1 --xor 0x01000000 --out syn/
+
+# Mutation analysis: how strong is a pass? (synthetic; see "Mutation analysis")
+rj_isa_diff mutants --case case/ --out mutants.json [--max 48] [--cases 5000]
+rj_isa_diff_mutants RESULTS_DIR... --out DIR [--jobs N]   # over rj_isa_diff_pr results
 ```
 
 An input file is an ELF code object (detected by its magic), a `.s` or `.ll` source
@@ -224,6 +228,33 @@ hunks: a changed condition, a retargeted branch):
   an untested change does). Edges inside a READY region (a loop back to its entry) are
   run by the region: the common-prefix analyses (composition, known bits) take the
   entry state from the edges that come from outside.
+
+## Whole functions
+
+Regions cut a function at matched instructions, and a cut needs an entry relation
+(composition) and an exit relation (liveness that agrees on both sides). When those fail
+(a register renamed across blocks, an untested change upstream, a mismatch that changed
+code downstream may compensate), the regions alone leave the verdict open. The whole
+function has neither cut:
+
+- **Region `f0`.** `analyze` also builds the region from the function's entry to its
+  final return (or `s_endpgm`) on both sides (`whole_function` in `case.json`;
+  `--no-whole-function` turns it off; at most 4096 instructions per side). It needs
+  what any region needs: every instruction executable (the list at the top of this file),
+  direct branches only, one return at the end, and no change in the return itself.
+- **Contract.** Both sides start from the same call or dispatch state, so the entry
+  relation is established unless the kernel metadata differs or memory is outstanding;
+  entry values are arbitrary, which only widens the inputs. The exit is the return,
+  where liveness is the calling convention's.
+- **When it runs.** `test` runs `f0` only when the regions leave the verdict open
+  (`INCONCLUSIVE`, `UNSUPPORTED`, or a pass with partial coverage). A pass of `f0`
+  with complete coverage makes the function `NO_MISMATCH_FOUND` with complete
+  coverage, unless an unresolved item lies outside the function's code (metadata,
+  layout, relocations); a mismatch of `f0` is a `LOCAL_MISMATCH` verdict. Either way
+  `overall.resolved_by` is `whole_function`, `results.json` has `whole_function`
+  (`decides`, `reason`, `result`), and `f0` is listed with the regions.
+- **Not a replacement.** Regions stay the first step: they are small, so a mismatch
+  points at the change, and they work when other parts of the function cannot execute.
 
 ## Targets
 
@@ -812,6 +843,50 @@ Saved counterexamples are shrunk before they are traced and written:
 
 The bundle records `reduction` (runs, steps, the original initial state, and the non-zero
 reduced inputs). `replay` runs the reduced case. The program is never reduced.
+
+## Mutation analysis
+
+`NO_MISMATCH_FOUND` means no counterexample under the budget. Mutation analysis measures
+how much that says: it plants would-be miscompiles in passing regions and counts how
+many the same test finds.
+
+- **Mutants.** Every single-bit flip of each new-side instruction (not hints, branches
+  or inline asm) that still decodes to a region-executable instruction of the same size
+  with different text; one mutant per distinct text. Each is classed by what changed in
+  the disassembly: `opcode`, `register`, `constant` (inline constant, literal, offset),
+  `modifier` (neg, abs, op_sel, clamp, omod, cache bits) or `other`. Up to `--max` per
+  region (48) are sampled round-robin over the classes, in an order fixed by the seed.
+  The mutant's VGPR and SGPR writes are re-derived, so a mutant that writes another
+  register is compared, not rejected as an undeclared effect.
+- **Verdicts.** A mutant is tested like the region (same budget; reduction off; stops
+  at its first mismatch):
+  - `killed`: a mismatch, or a clobbered frame field. Phase `static` when the
+    pending-memory analysis already rejects it: a mutant that reads a load's
+    destination before a wait retires it (a weakened `s_waitcnt`) leaves the region's
+    context unresolved in the real pipeline, while the isolated run completes loads at
+    once;
+  - `killed_late`: found only by a re-run with `--confirm-cases` random cases (20000): the
+    budget is too small for it;
+  - `survived`: never found;
+  - `invalid`: the mutant left the model (no case runs on both sides); not counted.
+- **Survivors.** Each survivor is run against the new side it came from, on the same
+  inputs (`--effect-cases`, 2000): `no_effect` (identical final states: an ignored
+  integer modifier, an aliased shift amount, a cache-policy bit), `dead_effect` (only
+  locations not live at the exit differ: an extra write to a dead register),
+  `undefined_effect` (a live-out location that is undefined at the entry, and that the
+  original passes through, now holds another value: any value refines an undefined one)
+  or `observable_effect` (a live-out value differs where the test compares it: the
+  comparison with old tolerated it, for example a NaN payload, or the test is blind to
+  it). Narrow return values and active-lanes-only VGPRs are compared as the test
+  compares them. The first three are equivalent mutants, not miscompiles.
+- **Score.** `killed / (killed + killed_late + survived)`, and without equivalent mutants
+  `killed / (killed + killed_late + observable_effect survivors)`.
+- **Campaign.** `rj_isa_diff_mutants` runs `mutants` over every plain pass of
+  `rj_isa_diff_pr` results (`NO_MISMATCH_FOUND`, complete coverage, no don't-care
+  masking) and writes `report.md` and `summary.json`: totals, the phase of the first
+  kill, breakdowns by class, unit (SALU, VALU, memory) and target, survivors by effect,
+  and the survivors themselves, observable effects first.
+- Every mutant is synthetic: nothing here is an LLVM finding.
 
 ## Learning hooks
 

@@ -7,6 +7,7 @@
 #include "case_io.h"
 #include "kernel_model.h"
 #include "llvm_frontend.h"
+#include "mutation.h"
 
 #include <gtest/gtest.h>
 
@@ -998,7 +999,8 @@ TEST(IsaDiffTargets, SaluFloatAndModeWithoutIeeeOnGfx12) {
 
 /// Assemble two listings of function f (gfx950) and analyse them.
 std::optional<CaseData> analyze_pair(const std::string &dir, const std::string &old_s,
-                                     const std::string &new_s, int entry_vgprs) {
+                                     const std::string &new_s, int entry_vgprs,
+                                     const PlanOptions &plan = {}) {
   const auto tc = toolchain();
   Artifact a[2];
   for (int side = 0; side < 2; ++side) {
@@ -1012,7 +1014,7 @@ std::optional<CaseData> analyze_pair(const std::string &dir, const std::string &
     a[side].entry_vgprs = entry_vgprs;
   }
   std::string error;
-  auto data = analyze_artifacts(a[0], a[1], {}, error);
+  auto data = analyze_artifacts(a[0], a[1], plan, error);
   EXPECT_TRUE(data) << error;
   return data;
 }
@@ -1129,6 +1131,96 @@ TEST(IsaDiffReview, NanChoicesFollowTheOperationNotItsIndex) {
   const std::string c = store_fn({"s_nop 0", "v_mul_f32_e32 v3, v0, v1", "v_add_u32_e32 v3, 1, v3",
                                   "v_mul_lo_u32 v0, v3, v3"});
   EXPECT_EQ(verdict_of(dir, "f", a, c, o), "LOCAL_MISMATCH/ESTABLISHED");
+  std::filesystem::remove_all(dir);
+}
+
+TEST(IsaDiffReview, VgprMutantsAreComparedNotRejected) {
+  // A VALU mutant that writes another VGPR must be compared, not rejected as an
+  // undeclared effect: make_synthetic_mutation re-derives the VGPR writes too.
+  const std::string dir = temp_dir("vmutants");
+  auto data = analyze_pair(dir, store_fn({"v_add_u32_e32 v0, v0, v1"}),
+                           store_fn({"v_add_u32_e32 v0, v1, v0"}), 2);
+  ASSERT_TRUE(data);
+  ASSERT_EQ(data->regions.size(), 1u);
+  size_t valu = 0, killed = 0;
+  for (const Mutant &m : enumerate_mutants(data->regions[0])) {
+    if (m.unit != "valu" || m.operator_class != "register")
+      continue;
+    std::string error;
+    auto syn = make_synthetic_mutation(data->regions[0], m.spec, error);
+    ASSERT_TRUE(syn) << error;
+    BaselinePolicy policy(1);
+    TestOptions opt;
+    opt.cases = 200;
+    opt.reduce = false;
+    const RegionResult r = test_region(*syn, opt, policy);
+    EXPECT_EQ(r.mismatch_kinds.count("effect_model"), 0u) << m.mutated;
+    killed += r.test_status == TestStatus::LocalMismatch ? 1 : 0;
+    ++valu;
+  }
+  EXPECT_GT(valu, 0u);
+  EXPECT_GT(killed, 0u);
+  std::filesystem::remove_all(dir);
+}
+
+TEST(IsaDiffWholeFunction, RenamingAcrossBlocksIsSettledByTheWholeFunction) {
+  const std::string dir = temp_dir("wholefn");
+  // s4 renamed to s5 in three blocks: every cut sees different continuation liveness,
+  // so the regions alone are INCONCLUSIVE_MAPPING; the whole function has no cut.
+  auto body = [](const std::string &t, const std::string &add) {
+    return fn_listing({"s_add_u32 " + t + ", s0, 1", "s_cmp_eq_u32 s1, 0", "s_cbranch_scc1 .LBB0_2",
+                       "s_add_u32 " + t + ", " + t + ", " + add,
+                       ".LBB0_2:", "v_mov_b32_e32 v0, " + t, "v_mov_b32_e32 v4, 0",
+                       "global_store_dword v4, v0, s[2:3]", "s_waitcnt vmcnt(0)"});
+  };
+  TestOptions opt;
+  opt.cases = 500;
+  PlanOptions regions_only;
+  regions_only.whole_function = false;
+  auto data = analyze_pair(dir, body("s4", "2"), body("s5", "2"), 0, regions_only);
+  ASSERT_TRUE(data);
+  EXPECT_FALSE(data->whole_function);
+  EXPECT_EQ(test_case(*data, opt, "", nullptr)["overall"]["test_status"].as_string(),
+            "INCONCLUSIVE");
+
+  data = analyze_pair(dir, body("s4", "2"), body("s5", "2"), 0);
+  ASSERT_TRUE(data);
+  ASSERT_TRUE(data->whole_function);
+  EXPECT_EQ(data->whole_function->status, RegionStatus::Ready) << data->whole_function->reason;
+  EXPECT_EQ(data->whole_function->contract.status, ContractStatus::Established);
+  Json report = test_case(*data, opt, "", nullptr);
+  EXPECT_EQ(report["overall"]["test_status"].as_string(), "NO_MISMATCH_FOUND");
+  EXPECT_EQ(report["overall"]["coverage_scope"].as_string(), "COMPLETE_FOR_DECLARED_SCOPE");
+  EXPECT_EQ(report["overall"]["resolved_by"].as_string(), "whole_function");
+  EXPECT_TRUE(report["whole_function"]["decides"].as_bool());
+  // The case round-trips with its whole-function region.
+  std::string error;
+  auto again = CaseData::from_json(data->to_json(), error);
+  ASSERT_TRUE(again) << error;
+  ASSERT_TRUE(again->whole_function);
+  EXPECT_EQ(again->whole_function->prepared_key, data->whole_function->prepared_key);
+
+  // A real difference in the renamed code: the whole function makes it a verdict.
+  data = analyze_pair(dir, body("s4", "2"), body("s5", "3"), 0);
+  ASSERT_TRUE(data);
+  report = test_case(*data, opt, "", nullptr);
+  EXPECT_EQ(report["overall"]["test_status"].as_string(), "LOCAL_MISMATCH");
+  EXPECT_EQ(report["overall"]["resolved_by"].as_string(), "whole_function");
+  std::filesystem::remove_all(dir);
+}
+
+TEST(IsaDiffWholeFunction, PassingRegionsDoNotRunTheWholeFunction) {
+  const std::string dir = temp_dir("wholefn_pass");
+  auto data = analyze_pair(dir, store_fn({"v_add_u32_e32 v0, v0, v1"}),
+                           store_fn({"v_add_u32_e32 v0, v1, v0"}), 2);
+  ASSERT_TRUE(data);
+  ASSERT_TRUE(data->whole_function);
+  TestOptions opt;
+  opt.cases = 300;
+  const Json report = test_case(*data, opt, "", nullptr);
+  EXPECT_EQ(report["overall"]["test_status"].as_string(), "NO_MISMATCH_FOUND");
+  EXPECT_FALSE(report.has("whole_function"));
+  EXPECT_FALSE(report["overall"].has("resolved_by"));
   std::filesystem::remove_all(dir);
 }
 

@@ -132,6 +132,12 @@ struct BlockInfo {
 /// stripes v40-v47, v56-v63, ..., v248-v255.
 [[nodiscard]] VSet return_observable_vgprs(unsigned return_vgprs);
 
+/// @brief The pending state after @p ref: a counter wait caps the counters it names and
+/// retires what it waits for; a memory operation adds its destinations to the counters
+/// RocJITsu's memory-issue metadata says it increments.
+[[nodiscard]] PendingState pending_transfer(const InstRef &ref, PendingState s,
+                                            rj_code_arch_t arch);
+
 class KernelModel {
 public:
   /// @brief Decode and analyse one kernel. Returns nullptr and sets @p error on failure.

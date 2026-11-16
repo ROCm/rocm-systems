@@ -130,6 +130,8 @@ Json CaseData::to_json() const {
       dj.push(d.to_json());
     j.set("diagnostic_regions", std::move(dj));
   }
+  if (whole_function)
+    j.set("whole_function", whole_function->to_json());
   j.set("analysis", analysis);
   return j;
 }
@@ -176,6 +178,14 @@ std::optional<CaseData> CaseData::from_json(const Json &j, std::string &error) {
       !read_regions(j["expansion_variants"], d.variants) ||
       !read_regions(j["diagnostic_regions"], d.diagnostics))
     return std::nullopt;
+  if (j["whole_function"].is_object()) {
+    Json one = Json::array();
+    one.push(j["whole_function"]);
+    std::vector<RegionPair> f;
+    if (!read_regions(one, f))
+      return std::nullopt;
+    d.whole_function = std::move(f.front());
+  }
   d.analysis = j["analysis"];
   return d;
 }
@@ -259,6 +269,7 @@ std::optional<CaseData> analyze_artifacts(const Artifact &old_artifact,
   d.regions = std::move(plan.regions);
   d.variants = std::move(plan.variants);
   d.diagnostics = std::move(plan.diagnostics);
+  d.whole_function = std::move(plan.whole_function);
   d.analysis = Json::object();
   Json opts = Json::object();
   opts.set("max_region_insts", static_cast<uint64_t>(options.max_region_insts));
@@ -537,7 +548,61 @@ Json test_case(const CaseData &data, const TestOptions &options, const std::stri
   scoped.unresolved.insert(scoped.unresolved.end(), compensable.begin(), compensable.end());
   if (!region_filter.empty())
     scoped.unresolved.push_back({"scope", "region filter '" + region_filter + "' applied", ""});
-  const Aggregate agg = aggregate_results(scoped, results);
+  Aggregate agg = aggregate_results(scoped, results);
+  // The whole function settles what the regions leave open (composition, exit mapping,
+  // compensation, control flow): run it unless the regions already give a verdict.
+  // Unresolved items about the artifact (metadata, layout, relocations, unknown code) are
+  // outside it and keep a pass from being declared.
+  Json whole = Json::object();
+  bool resolved_by_function = false;
+  const bool open = agg.test_status == TestStatus::Inconclusive ||
+                    agg.test_status == TestStatus::Unsupported ||
+                    (agg.test_status == TestStatus::NoMismatchFound &&
+                     agg.coverage_scope != CoverageScope::CompleteForDeclaredScope);
+  if (data.whole_function && region_filter.empty() && open) {
+    const RegionPair &f = *data.whole_function;
+    std::string blocking;
+    for (const auto &u : scoped.unresolved)
+      if (u.kind != "region" && u.kind != "context" && u.kind != "instruction" &&
+          u.kind != "control_flow" && blocking.empty())
+        blocking = u.kind + ": " + u.what;
+    if (f.status != RegionStatus::Ready) {
+      whole.set("decides", false);
+      whole.set("reason", f.reason);
+    } else {
+      BaselinePolicy fpolicy(topt.seed);
+      const RegionResult fr = test_region(f, topt, fpolicy);
+      const bool established = fr.contract_status == ContractStatus::Established;
+      const bool pass = fr.test_status == TestStatus::NoMismatchFound && established &&
+                        fr.coverage_scope == CoverageScope::CompleteForDeclaredScope &&
+                        blocking.empty();
+      const bool mismatch = fr.test_status == TestStatus::LocalMismatch && established;
+      whole.set("result", fr.to_json());
+      whole.set("decides", pass || mismatch);
+      if (pass) {
+        agg.test_status = TestStatus::NoMismatchFound;
+        agg.coverage_scope = CoverageScope::CompleteForDeclaredScope;
+        agg.contract_status = contract_status_name(ContractStatus::Established);
+        whole.set("reason", "the whole function passes: it covers every change of the "
+                            "function from its entry to its return");
+      } else if (mismatch) {
+        agg.test_status = TestStatus::LocalMismatch;
+        agg.witness_scope = WitnessScope::LocalOnly;
+        agg.contract_status = contract_status_name(ContractStatus::Established);
+        whole.set("reason", "the whole function differs at its return, from an entry state "
+                            "both sides receive alike");
+      } else {
+        whole.set("reason", !blocking.empty()
+                                ? "the whole function cannot decide: " + blocking
+                                : std::string("the whole function is ") +
+                                      test_status_name(fr.test_status) + " (contract " +
+                                      contract_status_name(fr.contract_status) + ")");
+      }
+      resolved_by_function = pass || mismatch;
+      if (resolved_by_function)
+        results.push_back(fr);
+    }
+  }
   Json j = Json::object();
   j.set("schema_version", kSchemaVersion);
   j.set("identity", build_identity());
@@ -552,6 +617,8 @@ Json test_case(const CaseData &data, const TestOptions &options, const std::stri
   for (const auto &r : results)
     masked += r.to_json()["counts"]["dont_care_masked"].as_uint();
   overall.set("dont_care_masked_cases", masked);
+  if (resolved_by_function)
+    overall.set("resolved_by", "whole_function");
   overall.set("contract_status", agg.contract_status);
   overall.set("witness_scope", witness_scope_name(agg.witness_scope));
   overall.set("coverage_scope", coverage_scope_name(agg.coverage_scope));
@@ -578,6 +645,8 @@ Json test_case(const CaseData &data, const TestOptions &options, const std::stri
   for (const auto &r : results)
     rj.push(r.to_json());
   j.set("regions", std::move(rj));
+  if (whole.has("decides"))
+    j.set("whole_function", std::move(whole));
   if (!data.diagnostics.empty()) {
     j.set("diagnostics", std::move(diagnostics));
     j.set("diagnostics_note", "explicitly enabled diagnostic path (entry prefix executed with "

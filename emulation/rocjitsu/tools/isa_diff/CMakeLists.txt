@@ -55,6 +55,12 @@ configure_file(
     ${CMAKE_CURRENT_BINARY_DIR}/rj_isa_diff_pr
     COPYONLY
 )
+# Mutation analysis over its results: how strong a pass is (synthetic mutants).
+configure_file(
+    llvm/rj_isa_diff_mutants.py
+    ${CMAKE_CURRENT_BINARY_DIR}/rj_isa_diff_mutants
+    COPYONLY
+)
 
 if(BUILD_TESTING)
     include(GoogleTest)

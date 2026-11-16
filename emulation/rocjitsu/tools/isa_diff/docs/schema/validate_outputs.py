@@ -225,6 +225,8 @@ class Validator:
         schema = doc.get("schema_version") if isinstance(doc, dict) else None
         if schema == "rj_isa_diff.counterexample.v1":
             self.check(doc, "counterexample", path)
+        elif schema == "rj_isa_diff.mutants.v1":
+            self.check(doc, "mutants", path)
         elif schema == "rj_isa_diff.v1" and "overall" in doc:
             self.check(doc, "results", path)
         elif schema == "rj_isa_diff.v1":
@@ -402,10 +404,13 @@ def drive_cli(tool, work, v):
     # Two hunks in one block; expansion variants.
     analyze("twohunk", "twohunk_old", "twohunk_new")
     test("twohunk", {0, 1, 2})
-    # Renaming: automatic plan is inconclusive; a manual region shows the identity
-    # mismatch, and a register map reconciles it (still ASSUMED, scope partial).
+    # Renaming: the regions alone are inconclusive, the whole function passes; a manual
+    # region shows the identity mismatch, and a register map reconciles it (still
+    # ASSUMED, scope partial).
     analyze("rename", "rename_old", "rename_new")
-    test("rename", {2})
+    test("rename", {0})
+    analyze("rename_regions", "rename_old", "rename_new", "--no-whole-function")
+    test("rename_regions", {2})
     analyze(
         "rename_manual",
         "rename_old",
@@ -626,6 +631,26 @@ def drive_cli(tool, work, v):
             {0},
             f,
         )
+    # Mutation analysis of the passing shift region (synthetic).
+    run(
+        tool,
+        [
+            "mutants",
+            "--case",
+            path("shift"),
+            "--max",
+            "6",
+            "--cases",
+            "100",
+            "--confirm-cases",
+            "200",
+            "--out",
+            path("shift_mutants.json"),
+        ],
+        {0},
+        f,
+    )
+    v.check_file(path("shift_mutants.json"))
     # Malformed input is an error, not a result.
     run(
         tool,
@@ -648,6 +673,7 @@ def drive_cli(tool, work, v):
         "constraint",
         "twohunk",
         "rename",
+        "rename_regions",
         "rename_manual",
         "rename_map",
         "rename_entry_map",

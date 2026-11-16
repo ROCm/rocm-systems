@@ -53,6 +53,11 @@ struct PlanOptions {
   /// entry block, the region extended back to the kernel entry. `test` runs these
   /// separately; they never enter the verdict or the per-case hot path of other regions.
   bool diagnostic_entry_prefix = false;
+  /// Also build the whole-function region "f0": both functions from their entry to their
+  /// final return (or s_endpgm), with no cut, so no composition or exit mapping. `test`
+  /// runs it when the regions alone leave the verdict open (README "Whole functions").
+  bool whole_function = true;
+  size_t max_function_insts = 4096; ///< Per side, for f0 (max_region_insts for the others).
 };
 
 struct UnresolvedItem {
@@ -71,6 +76,8 @@ struct PlanResult {
   std::vector<std::string> skipped_for_time;
   /// Diagnostic entry-prefix regions (diagnostic_entry_prefix), parent = base region id.
   std::vector<RegionPair> diagnostics;
+  /// The whole-function region (whole_function), also when it cannot run (with its reason).
+  std::optional<RegionPair> whole_function;
 };
 
 [[nodiscard]] PlanResult plan_regions(const KernelModel &old_model, const KernelModel &new_model,

@@ -32,6 +32,8 @@ struct CaseData {
   std::vector<RegionPair> variants;
   /// Explicitly requested diagnostic regions (entry prefix); never part of the verdict.
   std::vector<RegionPair> diagnostics;
+  /// The whole-function region (PlanOptions::whole_function), when built.
+  std::optional<RegionPair> whole_function;
   Json analysis; ///< Kernel sizes, timings, plan options.
 
   [[nodiscard]] Json to_json() const;

@@ -990,3 +990,76 @@ non-zero input `s5=1`, seed-independent, REPRODUCED by replay.
   lacks `op_sel` (GlobalISel keeps it): the fold is a miscompile on gfx1250.
 - Counterexamples found under an alternative keep their cause ("new depends on ...")
   after reduction.
+
+## Mutation analysis (2026-11-16)
+
+How strong is a pass? `rj_isa_diff_mutants` over every plain pass of the final sweep
+(`final_jkl`: 120 upstream AMDGPU commits plus PRs 237629 and 242731), at the driver's
+budget (boundary sweep plus 5000 random cases), survivors re-run with 20000 and compared
+with their original on 2000 more:
+
+| | count |
+|---|---|
+| functions / regions (plain-pass baseline) | 1524 / 1321 of 1616 |
+| mutants tested | 21735 |
+| killed | 16773: 16608 by the boundary sweep, 37 by random cases, 128 statically (pending memory) |
+| killed only with 20000 random cases | 5 |
+| survived | 4918: 4289 no effect, 592 dead effect, 24 undefined-value effect, 13 observable |
+| invalid (no case runs on both sides) | 39 |
+| wall time (32 jobs) | 363 s |
+
+- **Score.** 77.3% of all mutants; 99.9% without equivalent mutants. The 13 observable
+  survivors were one artifact of mutation: a flipped bit turned `s_waitcnt` into
+  `s_cbranch_execz`, a branch the region's planned control flow does not know, so the
+  case left through an undeclared edge and was excluded. Such mutants are now rejected
+  (real code is planned from its own branches). Every remaining mutant with an effect the
+  test compares is caught.
+- **The boundary sweep does the work.** 99% of kills come from the mandatory sweep; the
+  random phase adds 0.2%, and 5 mutants (a constant or opcode change visible only on rare
+  values) needed more than 5000 random cases.
+- **Equivalent mutants.** `modifier` and `other` flips are almost all `no_effect`: omod,
+  clamp, neg/abs on integer operands, cache-policy bits (`glc`, `dlc`, `slc`), waitcnt
+  fields of counters with nothing outstanding. `dead_effect` mutants write a dead register
+  (`s_mov_b32` to `s_mov_b64`, a carry-out moved from `null` to an unused SGPR). The 24
+  `undefined_effect` mutants write a live SGPR that is undefined at the entry
+  (`flat-saddr-atomics.ll`, a gfx1250 carry-out into `s60`/`s92`): any value refines an
+  undefined one, so the test rightly accepts them.
+- **Waits.** 128 mutants weaken a wait (`vmcnt(0)` to `vmcnt(1)`, ...). The isolated run
+  completes loads at once and cannot see them; the pending-memory analysis does, and the
+  real pipeline would leave such a region's context unresolved. `mutants` applies the
+  same analysis to each mutant.
+- Results: `nod:~/isadiff-mutants/full2/{report.md,summary.json}`.
+
+## Whole functions (2026-11-16)
+
+`f0` runs a function from its entry to its return when the regions leave the verdict
+open (README "Whole functions").
+
+- **Tests.** Registers renamed across blocks (`k_rename`, and an `s4`/`s5` renaming in a
+  three-block gfx950 function): regions `INCONCLUSIVE_MAPPING`, `f0` passes; with a real
+  difference on top, `f0` makes it a `LOCAL_MISMATCH`. A branch retargeted past an
+  `s_nop` (regions: exit without partner) and two hunks verified separately (a
+  compensated mismatch) also pass through `f0`. A kernel with unknown successors keeps
+  `f0` `ASSUMED` and the verdict open.
+- **Sweep.** The final sweep's 120 commits again with items 1 and 4 (1507 functions, 171 s):
+
+| | before | after |
+|---|---|---|
+| pass | 1434 | 1436 |
+| pass-masked | (not reported then) | 12 |
+| inconclusive | 48 | 38 |
+| mismatch | 25 | 21 |
+
+  - 4 mismatches to pass and 10 inconclusive to pass come from hint hunks (the
+    `s_delay_alu` commit 03f0b3e3b28a: hint-only changes no longer make composition fail
+    upstream of `flat-saddr-atomics` regions).
+  - 12 passes are now `pass-masked`: the sweep predates the per-bit-mask verdict. In
+    `strict_fma.f16.ll:v_constained_fma_v4f16_fpexcept_strict` (gfx1010) new uses
+    `v_fma_f16 ... op_sel` where old shifts and uses `v_fmac_f16`; with strict NaNs the
+    two are bit-identical, but some lane produces a NaN in nearly every case and its
+    payload reaches the return through `v_perm_b32` (no floating-point tag), so the
+    alternative-NaN runs need the mask.
+  - `f0` decided none of the remaining 38: each of those functions contains instructions
+    regions cannot execute yet (LDS stores, buffer spills, AGPR moves, `s_setreg`), so the
+    whole function cannot run either. Memory in regions (LDS, buffer, scratch, atomics)
+    is what unlocks them.

@@ -1607,6 +1607,61 @@ PlanResult plan_regions(const KernelModel &old_model, const KernelModel &new_mod
       result.diagnostics.push_back(std::move(d));
     }
   }
+
+  // 9. The whole function, from its entry to its final return. There is no cut: both
+  // sides start from the same call or dispatch state, and the exit is the return, where
+  // liveness is the calling convention's on both sides.
+  const bool changed =
+      std::ranges::any_of(diff.hunks, [](const Hunk &h) { return h.kind != ChangeKind::Hint; });
+  if (options.whole_function && changed && !oi.empty() && !ni.empty()) {
+    Candidate c;
+    c.o = {0, oi.size() - 1, oi.size() - 1};
+    c.n = {0, ni.size() - 1, ni.size() - 1};
+    bool in_return = false;
+    for (size_t h = 0; h < diff.hunks.size(); ++h) {
+      const Hunk &hunk = diff.hunks[h];
+      if (hunk.kind == ChangeKind::Hint)
+        continue;
+      c.hunks.push_back(h);
+      in_return = in_return || hunk.old_end >= oi.size() || hunk.new_end >= ni.size();
+    }
+    PlanOptions fo = options;
+    fo.max_region_insts = options.max_function_insts;
+    RegionPair f = build_region(old_model, new_model, c, fo, "f0", {}, {}, &diff);
+    auto returns = [](const KernelModel &m) {
+      const InstRef &last = m.insts().back();
+      return last.fx.control_flow && !last.fx.branch;
+    };
+    if (!returns(old_model) || !returns(new_model)) {
+      f.status = RegionStatus::Unsupported;
+      f.reason = "whole function: the last instruction is not a return or s_endpgm";
+    } else if (in_return) {
+      f.status = RegionStatus::Unsupported;
+      f.reason = "whole function: the change reaches the final return itself";
+    }
+    RegionContract &k = f.contract;
+    k.composition = "NOT_CHECKED";
+    if (metadata_differs) {
+      k.status = ContractStatus::Unresolved;
+      k.sources.push_back({"entry relation not established: kernel metadata differs", "planner"});
+    } else if (k.pending_effects == "CONFLICT" || k.pending_effects == "UNKNOWN") {
+      k.status = ContractStatus::Unresolved;
+    } else if (!old_model.cfg_complete() || !new_model.cfg_complete()) {
+      k.status = ContractStatus::Assumed;
+      k.sources.push_back({"single entry assumed: unknown successors could enter the function "
+                           "anywhere",
+                           "user_assumption"});
+    } else {
+      k.status = ContractStatus::Established;
+      k.sources.push_back({"whole function: execution starts at the entry, where both sides "
+                           "receive the same state from the call or dispatch; entry values are "
+                           "arbitrary (the ABI's specific values are not modelled), which only "
+                           "widens the inputs",
+                           "whole_function"});
+    }
+    f.prepared_key = compute_prepared_key(f);
+    result.whole_function = std::move(f);
+  }
   return result;
 }
 

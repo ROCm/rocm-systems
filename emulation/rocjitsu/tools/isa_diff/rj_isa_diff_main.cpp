@@ -38,7 +38,7 @@ const char *kUsage =
     "                      [--no-derive-constraints] [--max-analysis-ms N]\n"
     "                      [--manual-region old:B-E,new:B-E [--map s4=s8,...]\n"
     "                       [--entry-map s4=s8,...] [--exit-map s4=s8,...]]\n"
-    "                      [--diagnostic-entry-prefix] [--cache-dir DIR]\n"
+    "                      [--diagnostic-entry-prefix] [--no-whole-function] [--cache-dir DIR]\n"
     "                      [--return-vgprs N] [--return-masks M,...] [--function-mode HEX]\n"
     "                      [--entry-vgprs N] [--entry-sgprs N]  (entry and return ABI)\n"
     "                      [--target NAME[:w32|w64]] [--wave-size 32|64] [--mattr FEATURES]\n"
@@ -62,6 +62,13 @@ const char *kUsage =
     "  rj_isa_diff replay  --counterexample FILE [--case DIR]\n"
     "  rj_isa_diff inject  --case DIR --region ID --xor MASK --out DIR [--side old|new]\n"
     "                      [--inst N] [--word N] [--label NAME]   (synthetic self-test)\n"
+    "  rj_isa_diff mutants --case DIR --out FILE [--region ID] [--max N] [--cases N]\n"
+    "                      [--confirm-cases N] [--effect-cases N] [--seed N] [--strict-nan]\n"
+    "      mutation analysis (synthetic): single-bit mutants of each passing region's new\n"
+    "      side, tested like the region; a survivor is re-run with --confirm-cases\n"
+    "      (default 48 mutants per region, 5000 cases, 20000 to confirm). Survivors are\n"
+    "      run against the new side they came from (--effect-cases, default 2000):\n"
+    "      no_effect, dead_effect (only dead locations differ) or observable_effect.\n"
     "  rj_isa_diff llvm-pair --input K.ll --old-args S --new-args S --out DIR\n"
     "                      [--common-args S] [--kernel NAME] [--llvm-bin DIR]  (LLVM plugin)\n"
     "FILE is a code object (CDNA1-4: gfx908/90a/940-942/950; RDNA1-4: gfx1010-1201;\n"
@@ -172,7 +179,7 @@ const std::vector<std::string> kPlanFlags = {
     "--mattr",        "--calling-convention", "--return-sgprs",   "--return-sgpr-masks",
     "--old-mattr",    "--new-mattr"};
 const std::vector<std::string> kPlanSwitches = {"--no-merge", "--no-derive-constraints",
-                                                "--diagnostic-entry-prefix"};
+                                                "--diagnostic-entry-prefix", "--no-whole-function"};
 
 std::optional<PlanOptions> parse_plan(const Args &a) {
   PlanOptions plan;
@@ -193,6 +200,7 @@ std::optional<PlanOptions> parse_plan(const Args &a) {
   plan.entry_map = a.get("--entry-map");
   plan.exit_map = a.get("--exit-map");
   plan.diagnostic_entry_prefix = a.is_switch("--diagnostic-entry-prefix");
+  plan.whole_function = !a.is_switch("--no-whole-function");
   return plan;
 }
 
@@ -666,6 +674,54 @@ int cmd_inject(int argc, char **argv) {
   return kExitPass;
 }
 
+int cmd_mutants(int argc, char **argv) {
+  Args a = parse(argc, argv, 2,
+                 {"--case", "--out", "--region", "--max", "--cases", "--confirm-cases", "--seed",
+                  "--effect-cases"},
+                 {"--strict-nan"});
+  if (!a.error.empty() || !a.has("--case") || !a.has("--out")) {
+    std::cerr << (a.error.empty() ? "mutants needs --case and --out" : a.error) << "\n" << kUsage;
+    return kExitError;
+  }
+  std::string error;
+  auto data = read_case_dir(a.get("--case"), error);
+  if (!data) {
+    std::cerr << error << "\n";
+    return kExitError;
+  }
+  MutantRunOptions o;
+  auto max = a.number("--max", 48);
+  auto cases = a.number("--cases", 5000);
+  auto confirm = a.number("--confirm-cases", 20000);
+  auto seed = a.number("--seed", 1);
+  auto effect = a.number("--effect-cases", 2000);
+  if (!max || !cases || !confirm || !seed || !effect) {
+    std::cerr << "bad --max/--cases/--confirm-cases/--seed/--effect-cases\n";
+    return kExitError;
+  }
+  o.max_per_region = *max;
+  o.test.cases = *cases;
+  o.test.seed = *seed;
+  o.test.strict_nan = a.has("--strict-nan");
+  o.confirm_cases = *confirm;
+  o.effect_cases = *effect;
+  o.region = a.get("--region");
+  const Json report = run_mutants(*data, o);
+  if (!write_text_file(a.get("--out"), report.dump())) {
+    std::cerr << "cannot write " << a.get("--out") << "\n";
+    return kExitError;
+  }
+  for (const Json &r : report["regions"].items())
+    std::cout << r["id"].as_string() << ": baseline " << r["baseline"].as_string() << ", "
+              << r["tested"].as_uint() << " of " << r["candidates"].as_uint()
+              << " mutants tested\n";
+  std::cout << "totals:";
+  for (const auto &[verdict, n] : report["totals"].members())
+    std::cout << " " << verdict << " " << n.as_uint();
+  std::cout << "\nwrote " << a.get("--out") << " (synthetic; not an LLVM finding)\n";
+  return kExitPass;
+}
+
 int cmd_replay(int argc, char **argv) {
   Args a = parse(argc, argv, 2, {"--counterexample", "--case"}, {});
   if (!a.error.empty() || !a.has("--counterexample")) {
@@ -723,6 +779,8 @@ int main(int argc, char **argv) {
     return cmd_replay(argc, argv);
   if (cmd == "inject")
     return cmd_inject(argc, argv);
+  if (cmd == "mutants")
+    return cmd_mutants(argc, argv);
   if (cmd == "llvm-pair")
     return cmd_llvm_pair(argc, argv);
   if (cmd == "--help" || cmd == "-h" || cmd == "help") {

@@ -727,6 +727,8 @@ producer_counters(const Instruction &inst, rj_code_arch_t arch, bool &in_order) 
   return c;
 }
 
+} // namespace
+
 PendingState pending_transfer(const InstRef &ref, PendingState s, rj_code_arch_t arch) {
   if (!ref.inst)
     return s; // inline asm: no memory operation
@@ -786,6 +788,8 @@ PendingState pending_transfer(const InstRef &ref, PendingState s, rj_code_arch_t
   }
   return s;
 }
+
+namespace {
 
 PendingState pending_join(const PendingState &a, const PendingState &b) {
   PendingState r;

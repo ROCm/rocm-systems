@@ -1629,7 +1629,12 @@ RegionResult test_region(const RegionPair &region, const TestOptions &options,
 
   // Phase 1: the boundary sweep always runs in full (exact values; never projected).
   uint64_t case_index = 0;
+  auto stopped = [&] {
+    return options.stop_at_first_mismatch && (r.mismatches || r.harness_errors);
+  };
   for (const SweepCase &c : sweep.cases) {
+    if (stopped())
+      break;
     auto t0 = Clock::now();
     const Sample sample = sweep.materialize(c);
     ++r.attempted;
@@ -1654,7 +1659,7 @@ RegionResult test_region(const RegionPair &region, const TestOptions &options,
 
   // Phase 2: random cases from the policy.
   const uint64_t max_attempts = options.max_attempts ? options.max_attempts : 4 * options.cases;
-  while (r.random.accepted < options.cases && r.random.cases < max_attempts) {
+  while (r.random.accepted < options.cases && r.random.cases < max_attempts && !stopped()) {
     auto t0 = Clock::now();
     Sample sample = policy.propose(features, region.contract, history, case_index);
     project_onto_constraints(sample, region.contract, options.seed ^ (case_index << 1));
