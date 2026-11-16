@@ -177,8 +177,8 @@ synchronize the stream (e.g., using ``hipStreamSynchronize``) to ensure completi
 
 ROCSHMEM_G
 ----------
-.. cpp:function:: __device__ float rocshmem_ctx_float_g(rocshmem_ctx_t ctx, const float *source, int pe)
-.. cpp:function:: __device__ float rocshmem_float_g(const float *source, int pe)
+.. cpp:function:: __device__ TYPE rocshmem_TYPENAME_g(const TYPE *source, int pe)
+.. cpp:function:: __device__ TYPE rocshmem_ctx_TYPENAME_g(rocshmem_ctx_t ctx, const TYPE *source, int pe)
 
     :param ctx:     Context with which to perform this operation.
     :param source:  Source address. Must be an address on the symmetric heap.
@@ -187,7 +187,10 @@ ROCSHMEM_G
     :returns:       The value read from source at ``pe``.
 
 **Description:**
-This routine reads and returns single value from source at ``pe``.
+This routine reads and returns a single value from ``source`` at ``pe``. It is
+the counterpart of ``rocshmem_TYPENAME_p``, which writes a single value.
+
+Valid ``TYPENAME`` and ``TYPE`` values can be found in RMA_TYPES_.
 
 Supported RMA data types
 ------------------------

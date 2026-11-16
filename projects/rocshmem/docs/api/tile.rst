@@ -31,6 +31,18 @@ Context variants (``rocshmem_ctx_tile_*``) accept an explicit ``rocshmem_ctx_t``
 non-context variants use the default context. All collective operations — context
 and non-context alike — take an explicit ``rocshmem_team_t`` parameter.
 
+Device code that uses the tile API must include ``rocshmem_device.hpp`` in
+addition to ``rocshmem.hpp``. This header provides the template wrappers that
+forward to the precompiled bitcode implementations, and it is only meaningful
+during device compilation:
+
+.. code-block:: cpp
+
+  #include <rocshmem/rocshmem.hpp>
+  #ifdef __HIP_DEVICE_COMPILE__
+  #include <rocshmem/rocshmem_device.hpp>
+  #endif
+
 All functions are templated on the tensor and coordinate types:
 
 - ``dst_tensor_t`` / ``src_tensor_t``: tensor descriptor types carrying element type,
@@ -213,3 +225,24 @@ ROCSHMEM_TILE_MIN_REDUCE
 **Description:**
 Performs an element-wise minimum reduction over the tile region ``[start_coord, boundary)``
 across all PEs in the team. The result is written to ``dst`` on every PE.
+
+-------------------------------
+Collective completion
+-------------------------------
+
+ROCSHMEM_TILE_COLLECTIVE_WAIT
+-----------------------------
+
+.. cpp:function:: __device__ int rocshmem_tile_collective_wait(rocshmem_team_t team, uint64_t flags)
+.. cpp:function:: __device__ int rocshmem_ctx_tile_collective_wait(rocshmem_ctx_t ctx, rocshmem_team_t team, uint64_t flags)
+
+  :param ctx:   Context with which to perform this operation.
+  :param team:  The team to wait on.
+  :param flags: Operation flags (reserved, pass 0).
+  :returns:     Zero on success, nonzero on failure.
+
+**Description:**
+Blocks until all outstanding tile collective operations issued on ``team`` have
+completed. Tile collectives may return before the data movement they describe
+has finished; call this routine before reading a destination tensor that a
+previous tile collective wrote.

@@ -37,6 +37,61 @@ This routine initializes device-side rocSHMEM resources.
 It must be called before any threads in this work-group invoke other rocSHMEM functions.
 It must be called collectively by all threads in the work-group.
 
+ROCSHMEM_HIPMODULE_INIT
+-----------------------
+
+.. cpp:function:: __host__ int rocshmem_hipmodule_init(hipModule_t module, hipStream_t stream = nullptr)
+
+  :param module: HIP module containing rocSHMEM device code.
+  :param stream: HIP stream on which to enqueue the initialization. If
+                 ``nullptr``, ``hipStreamPerThread`` is used.
+  :returns:      ``0`` on success, non-zero on failure.
+
+**Description:**
+Initializes the rocSHMEM device context for a specific HIP module. This routine
+queries the ``ROCSHMEM_CTX_DEFAULT`` symbol from ``module`` and initializes it
+with the host-side context using stream-ordered memory operations, which is
+what makes it safe to use during HIP graph capture.
+
+.. note::
+
+  This routine does not synchronize ``stream``. The caller is responsible for
+  synchronization if the context must be visible before the next host-side
+  step.
+
+This routine replaces the deprecated ``rocshmem_get_device_ctx``; see
+:ref:`rocshmem-api-ctx`.
+
+ROCSHMEM_QUERY_THREAD
+---------------------
+
+.. cpp:function:: __host__ void rocshmem_query_thread(int *provided)
+.. cpp:function:: __device__ void rocshmem_query_thread(int *provided)
+
+  :param provided: Receives the thread mode the runtime is operating in, one
+                   of the ``rocshmem_thread_ops`` values listed in
+                   :ref:`rocshmem-api-library-constants`.
+  :returns:        None.
+
+**Description:**
+Queries the thread support level that the runtime selected. The level the
+runtime provides may be lower than the level an application requested.
+
+.. WARNING::
+   Routines ``rocshmem_init_thread`` and ``rocshmem_wg_init_thread`` have been
+   deprecated. Use ``rocshmem_init``/``rocshmem_init_attr`` to initialize and
+   ``rocshmem_query_thread`` to query the resulting thread mode.
+
+.. cpp:function:: [[deprecated]] __host__ int rocshmem_init_thread(int requested, int *provided, MPI_Comm comm)
+.. cpp:function:: [[deprecated]] __device__ void rocshmem_wg_init_thread(int requested, int *provided)
+
+  :param requested: Requested thread mode from ``rocshmem_thread_ops``.
+  :param provided:  Thread mode selected by the runtime.
+  :param comm:      MPI communicator for rocSHMEM to use. If
+                    ``MPI_COMM_NULL``, ``MPI_COMM_WORLD`` is used. The host
+                    overload is only declared in builds with external MPI.
+  :returns:         ``0`` on success, non-zero otherwise (host overload).
+
 ROCSHMEM_FINALIZE
 -----------------
 .. cpp:function:: __host__ void rocshmem_finalize(void)
@@ -212,3 +267,58 @@ ROCSHMEM_PTR
 
 **Description:**
 This routine queries rocSHMEM remote symmetric heap pointer.
+
+ROCSHMEM_QUERY_BACKEND_TYPE
+---------------------------
+
+.. cpp:function:: BackendType rocshmem_query_backend_type()
+
+  :Parameters: None.
+  :returns:    The backend the runtime selected for this job: one of
+               ``BackendType::IPC_BACKEND``, ``BackendType::RO_BACKEND``, or
+               ``BackendType::GDA_BACKEND``.
+
+**Description:**
+Returns the conduit that the runtime chose at initialization. Because a single
+build can contain several backends, and because selection depends on the job
+layout and on environment variables such as ``ROCSHMEM_BACKEND``, this routine
+is the authoritative way for an application to discover what it is actually
+running on.
+
+ROCSHMEM_GLOBAL_EXIT
+--------------------
+
+.. cpp:function:: __host__ void rocshmem_global_exit(int status)
+
+  :param status: Exit status to report from the program.
+  :returns:      None.
+
+**Description:**
+Allows any PE to force the termination of the entire program. The routine does
+not return.
+
+ROCSHMEM_DUMP_STATS
+-------------------
+
+.. cpp:function:: __host__ void rocshmem_dump_stats()
+
+  :Parameters: None.
+  :returns:    None.
+
+**Description:**
+Dumps the runtime's internal statistics counters to ``stdout``. Counters are
+only collected when rocSHMEM is built with ``-DPROFILE=ON``; in other builds
+this routine produces no useful output. See :ref:`build-options-reference`.
+
+ROCSHMEM_RESET_STATS
+--------------------
+
+.. cpp:function:: __host__ void rocshmem_reset_stats()
+
+  :Parameters: None.
+  :returns:    None.
+
+**Description:**
+Resets all internal statistics counters, so that a subsequent
+``rocshmem_dump_stats()`` reports only the activity since this call. Use it to
+exclude warm-up iterations from a measurement.

@@ -90,6 +90,13 @@ control the behavior of rocSHMEM.
       - | ``0``: Use IPC when available.
         | ``1``: Force network conduit.
 
+    * - | ``ROCSHMEM_DISABLE_IPC``
+        | Deprecated synonym for ``ROCSHMEM_DISABLE_MIXED_IPC``. Prefer the
+        | latter in new configurations.
+      - ``0``
+      - | ``0``: Use IPC when available.
+        | ``1``: Force network conduit.
+
     * - | ``ROCSHMEM_USE_IB_HCA``
         | Forces the NIC that this PE uses. When this value is set NIC auto-detection and mapping is disabled, the NIC specified in the variable
         | will be selected. The default value is an empty string and rocSHMEM auto-detects the most appropriate NIC.
@@ -183,7 +190,7 @@ control the behavior of rocSHMEM.
       - Number of QPs per PE for each user context.
 
 
-    * - | ``ROCSHMEM_GDA_NUM_USER_BUFFERS``
+    * - | ``ROCSHMEM_GDA_MAX_NUM_USER_BUFFERS``
         | GDA supports ``rocshmem_buffer_register`` and ``rocshmem_buffer_unregister``
         | for user buffers. This variable sets the number of user buffers an
         | application may register when using the GDA backend.
@@ -191,6 +198,38 @@ control the behavior of rocSHMEM.
         | this variable, then the behavior is undefined.
       - ``4``
       - Maximum number of user buffer registrations for GDA
+
+    * - | ``ROCSHMEM_GDA_MERGE_NICS``
+        | Enables automatic topology-based NIC fusion, so a single PE can drive
+        | several NICs that are close to it in the PCIe topology (multi-NIC).
+      - ``0``
+      - | ``0``: Disabled.
+        | ``1``: Enabled.
+
+    * - | ``ROCSHMEM_GDA_NET_MERGE_LEVEL``
+        | Maximum PCIe path type considered when auto-merging NICs. NICs
+        | reachable only through a longer path than this are not merged.
+        | Only meaningful when ``ROCSHMEM_GDA_MERGE_NICS`` is enabled.
+      - ``PIX``
+      - | ``PIX``: Same PCIe switch (default).
+        | ``PXB``: Multiple PCIe switches.
+        | ``PHB``: Same PCIe host bridge.
+        | ``SYS``: Anywhere in the system.
+
+    * - | ``ROCSHMEM_GDA_NET_FORCE_MERGE``
+        | Force-merges specific NICs by name, bypassing topology detection.
+        | NIC names within a rank group are comma-separated; rank groups are
+        | semicolon-separated.
+      - `` ``
+      - | Example value: ``mlx5_0,mlx5_1;mlx5_2,mlx5_3``
+
+    * - | ``ROCSHMEM_GDA_NIC_POLICY``
+        | Controls how Queue Pairs (QPs) are bound to NICs when more than one
+        | NIC is in use.
+      - ``ROUND_ROBIN``
+      - | ``ROUND_ROBIN``: QPs within a context are spread across NICs.
+        | ``PER_CONTEXT``: All QPs in a context use one NIC; use multiple
+        | contexts to drive multiple NICs.
 
     * - | ``ROCSHMEM_MAX_SYMM_REGIONS``
         | rocSHMEM supports ``rocshmem_buffer_register_symmetric`` and
@@ -217,9 +256,32 @@ control the behavior of rocSHMEM.
       -
 
     * - | ``ROCSHMEM_BOOTSTRAP_SOCKET_FAMILY``
-        | Socket family for bootstrap (AF_UNSPEC, AF_INET, AF_INET6)
-      - ``types::socket_family::UNSPEC``
-      -
+        | Socket family for bootstrap.
+      - ``AF_UNSPEC``
+      - | ``AF_UNSPEC``: Let the runtime choose (default).
+        | ``AF_INET``: Force IPv4.
+        | ``AF_INET6``: Force IPv6.
+
+    * - | ``ROCSHMEM_RO_DISABLE_IPC``
+        | Deprecated synonym for ``ROCSHMEM_DISABLE_MIXED_IPC``, scoped to the
+        | reverse-offload (RO) backend.
+      - ``0``
+      - | ``0``: Use IPC when available.
+        | ``1``: Force network conduit.
+
+    * - | ``ROCSHMEM_RO_PROGRESS_DELAY``
+        | Delay of the RO backend's host-side progress engine, in microseconds.
+        | A larger delay reduces load on the memory subsystem at the cost of
+        | latency.
+      - ``3``
+      - Delay in microseconds.
+
+    * - | ``ROCSHMEM_RO_NET_CPU_QUEUE``
+        | Use a CPU-side queue for network operations in the reverse-offload
+        | backend.
+      - ``0``
+      - | ``0``: Disabled.
+        | ``1``: Enabled.
 
     * - | ``ROCSHMEM_SDMA_ENABLED``
         | Enable or disable the SDMA transport at runtime. (build option ``USE_SDMA=OFF`` disables this feature).

@@ -8,6 +8,14 @@
 Point-to-point synchronization routines
 -----------------------------------------
 
+.. note::
+
+   Every ``rocshmem_TYPENAME_wait_until*`` and ``rocshmem_TYPENAME_test``
+   routine on this page is declared with both a ``__device__`` and a
+   ``__host__`` overload with identical signatures. Only the ``__device__``
+   form is shown below; the ``__host__`` form blocks the calling host thread
+   instead of the calling wave.
+
 ROCSHMEM_WAIT_UNTIL
 -------------------
 
@@ -77,6 +85,76 @@ ROCSHMEM_WAIT_UNTIL_SOME
 
 **Description:**
 This routine blocks the caller until any of the conditions ``(ivars[i] cmp val)`` is true.
+
+Valid ``cmp`` values are listed in :ref:`CMP_VALUES`.
+
+Valid ``TYPENAME`` and ``TYPE`` values are listed in :ref:`STANDARD_AMO_TYPES`.
+
+ROCSHMEM_WAIT_UNTIL_ALL_VECTOR
+------------------------------
+
+.. cpp:function:: __device__ void rocshmem_TYPENAME_wait_until_all_vector(TYPE *ivars, size_t nelems, const int* status, int cmp, TYPE* vals)
+
+  :param ivars:  Pointer to memory on the symmetric heap to wait for.
+  :param nelems: Number of elements in the ``ivars`` array.
+  :param status: Array of length ``nelems`` to exclude elements from the wait.
+  :param cmp:    Operation for the comparison.
+  :param vals:   Array of length ``nelems``. Element ``i`` of ``ivars`` is
+                 compared against ``vals[i]``.
+  :returns:      None.
+
+**Description:**
+This routine blocks the caller until the condition ``(ivars[i] cmp vals[i])``
+is true for all elements in the wait set. It differs from
+``rocshmem_TYPENAME_wait_until_all`` in that each element is compared against
+its own value rather than against a single scalar.
+
+Valid ``cmp`` values are listed in :ref:`CMP_VALUES`.
+
+Valid ``TYPENAME`` and ``TYPE`` values are listed in :ref:`STANDARD_AMO_TYPES`.
+
+ROCSHMEM_WAIT_UNTIL_ANY_VECTOR
+------------------------------
+
+.. cpp:function:: __device__ size_t rocshmem_TYPENAME_wait_until_any_vector(TYPE *ivars, size_t nelems, const int* status, int cmp, TYPE* vals)
+
+  :param ivars:  Pointer to memory on the symmetric heap to wait for.
+  :param nelems: Number of elements in the ``ivars`` array.
+  :param status: Array of length ``nelems`` to exclude elements from the wait.
+  :param cmp:    Operation for the comparison.
+  :param vals:   Array of length ``nelems``. Element ``i`` of ``ivars`` is
+                 compared against ``vals[i]``.
+  :returns:      The index of an element in the ``ivars`` array that satisfies
+                 the wait condition. If the wait set is empty, this routine
+                 returns ``SIZE_MAX``.
+
+**Description:**
+This routine blocks the caller until the condition ``(ivars[i] cmp vals[i])``
+is true for at least one element in the wait set.
+
+Valid ``cmp`` values are listed in :ref:`CMP_VALUES`.
+
+Valid ``TYPENAME`` and ``TYPE`` values are listed in :ref:`STANDARD_AMO_TYPES`.
+
+ROCSHMEM_WAIT_UNTIL_SOME_VECTOR
+-------------------------------
+
+.. cpp:function:: __device__ size_t rocshmem_TYPENAME_wait_until_some_vector(TYPE *ivars, size_t nelems, size_t* indices, const int* status, int cmp, TYPE* vals)
+
+  :param ivars:   Pointer to memory on the symmetric heap to wait for.
+  :param nelems:  Number of elements in the ``ivars`` array.
+  :param indices: List of indices with a length of at least ``nelems``.
+  :param status:  Array of length ``nelems`` to exclude elements from the wait.
+  :param cmp:     Operation for the comparison.
+  :param vals:    Array of length ``nelems``. Element ``i`` of ``ivars`` is
+                  compared against ``vals[i]``.
+  :returns:       The number of indices returned in the ``indices`` array. If
+                  the wait set is empty, this routine returns ``0``.
+
+**Description:**
+This routine blocks the caller until the condition ``(ivars[i] cmp vals[i])``
+is true for at least one element in the wait set, then returns the indices of
+every element that currently satisfies it.
 
 Valid ``cmp`` values are listed in :ref:`CMP_VALUES`.
 

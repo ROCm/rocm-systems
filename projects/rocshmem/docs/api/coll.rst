@@ -36,6 +36,23 @@ across all PEs in the system. The operation is enqueued on the specified stream 
 asynchronously. The caller must synchronize the stream (e.g., using ``hipStreamSynchronize``)
 to ensure completion.
 
+ROCSHMEM_BARRIER_ON_STREAM
+--------------------------
+
+.. cpp:function:: __host__ void rocshmem_barrier_on_stream(rocshmem_team_t team, hipStream_t stream)
+
+  :param team:   Team participating in the barrier. Passing
+                 ``ROCSHMEM_TEAM_INVALID`` is a no-op.
+  :param stream: HIP stream on which to enqueue the operation.
+  :returns:      None.
+
+**Description:**
+Team-scoped form of ``rocshmem_barrier_all_on_stream``: enqueues a collective
+barrier across the PEs in ``team`` rather than across all PEs. The caller must
+synchronize the stream to ensure completion. For the weaker, store-visibility
+only variant, see ``rocshmem_team_sync_on_stream`` in
+:ref:`rocshmem-api-teams`.
+
 ROCSHMEM_CTX_BARRIER
 --------------------
 
@@ -184,6 +201,7 @@ ROCSHMEM_BROADCAST
 .. cpp:function:: __device__ int rocshmem_ctx_TYPENAME_broadcast_wave(rocshmem_ctx_t ctx, rocshmem_team_t team, TYPE *dest, const TYPE *source, int nelems, int pe_root)
 .. cpp:function:: __device__ void rocshmem_ctx_broadcastmem_wg(rocshmem_ctx_t ctx, rocshmem_team_t team, void *dest, const void *source, int nelems, int pe_root)
 .. cpp:function:: __device__ int rocshmem_ctx_broadcastmem_wave(rocshmem_ctx_t ctx, rocshmem_team_t team, void *dest, const void *source, int nelems, int pe_root)
+.. cpp:function:: __host__ void rocshmem_ctx_TYPENAME_broadcast(rocshmem_ctx_t ctx, rocshmem_team_t team, TYPE *dest, const TYPE *source, int nelems, int pe_root)
 
   :param ctx:     Context with which to perform this collective.
   :param team:    The team participating in the collective.
@@ -200,7 +218,8 @@ ROCSHMEM_BROADCAST
 This routine performs a broadcast across PEs in the team.
 The caller is blocked until the broadcast completes.
 The ``_wg`` variants must be called as a work-group collective; the ``_wave`` variants
-must be called as a wave-level collective. ``broadcastmem_wg`` and ``broadcastmem_wave``
+must be called as a wave-level collective. The undecorated ``__host__`` overload
+performs the broadcast from the host rather than from inside a kernel. ``broadcastmem_wg`` and ``broadcastmem_wave``
 operate on untyped bytes rather than a typed element count. The undecorated (non-``ctx``)
 variants operate on the default context.
 
@@ -234,6 +253,7 @@ ROCSHMEM_FCOLLECT
 .. cpp:function:: __device__ void rocshmem_ctx_TYPENAME_fcollect_wg(rocshmem_ctx_t ctx, rocshmem_team_t team, TYPE *dest, const TYPE *source, int nelems)
 .. cpp:function:: __device__ int rocshmem_ctx_TYPENAME_fcollect_wave(rocshmem_ctx_t ctx, rocshmem_team_t team, TYPE *dest, const TYPE *source, int nelems)
 .. cpp:function:: __device__ int rocshmem_ctx_fcollectmem_wave(rocshmem_ctx_t ctx, rocshmem_team_t team, void *dest, const void *source, int nelems)
+.. cpp:function:: __device__ void rocshmem_ctx_fcollectmem_wg(rocshmem_ctx_t ctx, rocshmem_team_t team, void *dest, const void *source, int nelems)
 
   :param ctx:    Context with which to perform this collective.
   :param team:   The team participating in the collective.
@@ -241,16 +261,17 @@ ROCSHMEM_FCOLLECT
                  symmetric heap.
   :param source: Source address. Must be an address on the symmetric
                  heap.
-  :param nelems: Number of data elements contributed by each PE (``_wg`` / ``_wave`` variants);
-                 number of bytes contributed by each PE (``fcollectmem_wave``).
-  :returns:      None (``_wg`` variant). Zero on successful local completion, nonzero otherwise (``_wave`` variants).
+  :param nelems: Number of data elements contributed by each PE (typed variants);
+                 number of bytes contributed by each PE (``fcollectmem_wg`` /
+                 ``fcollectmem_wave``).
+  :returns:      None (``_wg`` variants). Zero on successful local completion, nonzero otherwise (``_wave`` variants).
 
 **Description:**
 This routine concatenates blocks of data from multiple PEs to an array in every
 PE participating in the collective routine.
-The ``_wg`` variant must be called as a work-group collective; the ``_wave`` variants
-must be called as a wave-level collective. ``fcollectmem_wave`` operates on untyped
-bytes rather than a typed element count.
+The ``_wg`` variants must be called as a work-group collective; the ``_wave`` variants
+must be called as a wave-level collective. ``fcollectmem_wg`` and
+``fcollectmem_wave`` operate on untyped bytes rather than a typed element count.
 
 ROCSHMEM_REDUCE_SCATTER
 -----------------------
@@ -283,6 +304,7 @@ ROCSHMEM_REDUCTION
 ------------------
 .. cpp:function:: __device__ int rocshmem_ctx_TYPENAME_OPNAME_reduce_wg(rocshmem_ctx_t ctx, rocshmem_team_t team, TYPE *dest, const TYPE *source, int nreduce)
 .. cpp:function:: __device__ int rocshmem_ctx_TYPENAME_OPNAME_reduce_wave(rocshmem_ctx_t ctx, rocshmem_team_t team, TYPE *dest, const TYPE *source, int nreduce)
+.. cpp:function:: __host__ int rocshmem_ctx_TYPENAME_OPNAME_reduce(rocshmem_ctx_t ctx, rocshmem_team_t team, TYPE *dest, const TYPE *source, int nreduce)
 
   :param ctx:     Context with which to perform this collective.
   :param team:    The team participating in the collective.
@@ -296,7 +318,29 @@ ROCSHMEM_REDUCTION
 **Description:**
 This routine performs an allreduce operation across PEs in the team.
 The ``_wg`` variant must be called as a work-group collective; the ``_wave`` variant
-must be called as a wave-level collective.
+must be called as a wave-level collective; the undecorated variant is a
+host-side call.
+
+Valid ``TYPENAME``, ``TYPE``, and ``OPNAME`` values are listed in :ref:`REDUCE_TYPES`.
+
+ROCSHMEM_REDUCTION_ON_STREAM
+----------------------------
+.. cpp:function:: __host__ int rocshmem_ctx_TYPENAME_OPNAME_reduce_on_stream(rocshmem_ctx_t ctx, rocshmem_team_t team, TYPE *dest, const TYPE *source, int nreduce, hipStream_t stream)
+
+  :param ctx:     Context with which to perform this collective.
+  :param team:    The team participating in the collective.
+  :param dest:    Destination address. Must be an address on the
+                  symmetric heap.
+  :param source:  Source address. Must be an address on the symmetric
+                  heap.
+  :param nreduce: Number of elements to reduce.
+  :param stream:  HIP stream on which to enqueue the operation.
+  :returns:       Zero on successful enqueue. Nonzero otherwise.
+
+**Description:**
+Stream-ordered form of the allreduce. The reduction is enqueued on ``stream``
+and executes asynchronously; the caller must synchronize the stream (for
+example with ``hipStreamSynchronize``) before reading ``dest``.
 
 Valid ``TYPENAME``, ``TYPE``, and ``OPNAME`` values are listed in :ref:`REDUCE_TYPES`.
 
@@ -323,19 +367,19 @@ Supported reduction types and operations
       - No
     * - short
       - short
-      - max, min, sum, prod
+      - and, or, xor, max, min, sum, prod
       - Yes
     * - int
       - int
-      - max, min, sum, prod
+      - and, or, xor, max, min, sum, prod
       - Yes
     * - long
       - long
-      - max, min, sum, prod
+      - and, or, xor, max, min, sum, prod
       - Yes
     * - long long
       - longlong
-      - max, min, sum, prod
+      - and, or, xor, max, min, sum, prod
       - Yes
     * - ptrdiff_t
       - ptrdiff

@@ -43,10 +43,73 @@ ROCSHMEM_CTX_DESTROY
 This routine destroys an rocSHMEM context. It must be called collectively by all threads in the work-group.
 If ctx has the value ``ROCSHMEM_CTX_INVALID``, no operation is performed.
 
+ROCSHMEM_CTX_CREATE
+-------------------
+
+.. cpp:function:: __host__ int rocshmem_ctx_create(int64_t options, rocshmem_ctx_t *ctx)
+
+  :param options: Options for context creation. Ignored in the current design;
+                  use the value ``0``.
+  :param ctx:     A handle to the newly created context.
+  :returns:       Zero if the context was created successfully, non-zero
+                  otherwise.
+
+**Description:**
+Creates a host-side rocSHMEM context, for use with the host and
+stream-ordered APIs. The number of host contexts available is bounded by
+``ROCSHMEM_MAX_NUM_HOST_CONTEXTS``; see :ref:`rocshmem-api-env-variables`.
+
+ROCSHMEM_CTX_DESTROY
+--------------------
+
+.. cpp:function:: __host__ void rocshmem_ctx_destroy(rocshmem_ctx_t ctx)
+
+  :param ctx: Context handle.
+  :returns:   None.
+
+**Description:**
+Destroys a host-side rocSHMEM context previously created with
+``rocshmem_ctx_create``.
+
+Context options
+---------------
+
+The ``options`` argument of the context creation routines accepts a bitwise OR
+of the following constants:
+
+.. list-table:: Context creation options
+    :widths: 30 10 60
+    :header-rows: 1
+
+    * - Constant
+      - Value
+      - Description
+    * - ``ROCSHMEM_CTX_ZERO``
+      - ``0``
+      - No options requested. The portable default.
+    * - ``ROCSHMEM_CTX_NOSTORE``
+      - ``1``
+      - The context is not used for stores.
+    * - ``ROCSHMEM_CTX_SERIALIZED``
+      - ``2``
+      - The context is not accessed concurrently.
+    * - ``ROCSHMEM_CTX_WG_PRIVATE``
+      - ``4``
+      - The context is private to the creating work-group.
+    * - ``ROCSHMEM_CTX_SHARED``
+      - ``8``
+      - The context may be shared between work-groups. Requires a build with
+        ``-DUSE_SHARED_CTX=ON``.
+
 ROCSHMEM_GET_DEVICE_CTX
 -----------------------
 
-.. cpp:function:: __host__ void * rocshmem_get_device_ctx()
+.. WARNING::
+   Routine ``rocshmem_get_device_ctx`` has been deprecated. Use
+   ``rocshmem_hipmodule_init`` instead, which also works under HIP graph
+   capture. See :ref:`rocshmem-api-init`.
+
+.. cpp:function:: [[deprecated]] __host__ void * rocshmem_get_device_ctx()
 
   :param:    None.
 
