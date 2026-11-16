@@ -55,7 +55,7 @@ sl1d.req_bw:
   name: sL1D Load Bandwidth
   formula: 4 * SUM(SQC_SMEM_LOAD_DWORDS_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: Total Scalar Data Cache request bandwidth.
+  description: Bandwidth of scalar memory loads through the Scalar Data Cache.
 sl1d.req_bw_norm:
   name: sL1D Load Bytes
   formula: 4 * SUM(SQC_SMEM_LOAD_DWORDS_sum) / SUM($denom)
