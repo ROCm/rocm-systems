@@ -213,6 +213,9 @@ constexpr uint32_t RJ_ARITH_ALU_HIGH_D = 1U << 12;
 // exact value before rounding. Source selection and destination byte placement
 // remain separate from this arithmetic control.
 constexpr uint32_t RJ_ARITH_CVT_SDWA = 1U << 16;
+// CDNA FP16 binary SDWA scaling order in Compatibility. Only the gfx942
+// binary arithmetic entry points accept this encoding selector.
+constexpr uint32_t RJ_ARITH_ALU_SDWA = 1U << 16;
 
 // Mixed FMA source formats: unset means FP32; set means FP16 in the half
 // selected by RJ_ARITH_ALU_HIGH_A/B/C. Half selectors are ignored for FP32 sources.
