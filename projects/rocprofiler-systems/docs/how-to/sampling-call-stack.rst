@@ -396,8 +396,8 @@ Here is the full output from the previous
    [rocprof-sys][1785877][0][rocprofsys_finalize]
    [rocprof-sys][1785877][0][rocprofsys_finalize] Finalizing perfetto...
    [rocprof-sys][1785877][perfetto]> Outputting '/home/user/code/rocprofiler-systems/build-release/rocprofiler-systems-output/2024-07-15_16.21/parallel-overhead-locksperfetto-trace-1785877.pftrace' (39.12 KB / 0.04 MB / 0.00 GB)... Done
-   [rocprof-sys][1785877][wall_clock]> Outputting 'rocprof-sys-output/2024-07-15_16.21/parallel-overhead-lockswall_clock-1785877.json'
-   [rocprof-sys][1785877][wall_clock]> Outputting 'rocprof-sys-output/2024-07-15_16.21/parallel-overhead-lockswall_clock-1785877.txt'
+   [16:21:09.601][P:1785877 T:1785885][wall_clock_processor.cpp:74 write_file][info] wall_clock output written to: rocprof-sys-output/2024-07-15_16.21/wall_clock-1785877.json
+   [16:21:09.601][P:1785877 T:1785885][wall_clock_processor.cpp:74 write_file][info] wall_clock output written to: rocprof-sys-output/2024-07-15_16.21/wall_clock-1785877.txt
    [rocprof-sys][1785877][metadata]> Outputting 'rocprof-sys-output/2024-07-15_16.21/parallel-overhead-locksmetadata-1785877.json' and 'rocprof-sys-output/2024-07-15_16.21/parallel-overhead-locksfunctions-1785877.json'
    [rocprof-sys][1785877][0][rocprofsys_finalize] Finalized: 0.054582 sec wall_clock,    0.000 MB peak_rss,   -1.798 MB page_rss, 0.040000 sec cpu_clock,   73.3 % cpu_util
    [989.312]       perfetto.cc:60128 Tracing session 1 ended, total sessions:0

@@ -33,7 +33,6 @@
 #include "library/rocprofiler-sdk/domain_selection.hpp"
 #include "library/rocprofiler-sdk/domain_service.hpp"
 #include "library/rocprofiler-sdk/fwd.hpp"
-#include "library/thread_info.hpp"
 #include "library/tracing.hpp"
 #include "rocprofiler-sdk.hpp"
 

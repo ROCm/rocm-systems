@@ -2215,7 +2215,8 @@ configure_disabled_settings(const std::shared_ptr<settings>& _config)
         "FREQ|STACK_CLEARING|TARGET_PID|THROTTLE_(COUNT|VALUE)|(AUTO|FLAMEGRAPH)_"
         "OUTPUT|"
         "(ENABLE|DISABLE)_ALL_SIGNALS|ALLOW_SIGNAL_HANDLER|CTEST_NOTES|INSTRUCTION_"
-        "ROOFLINE|ADD_SECONDARY|MAX_THREAD_BOOKMARKS)$";
+        "ROOFLINE|ADD_SECONDARY|MAX_THREAD_BOOKMARKS|DIFF_OUTPUT|"
+        "INPUT_(PATH|PREFIX|EXTENSIONS))$";
 
     //  leading matches, e.g. ROCPROFSYS_MPI_[A-Z_]+
     const std::string _hidden_begin_re =

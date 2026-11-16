@@ -962,7 +962,7 @@ rocprofsys_init_tooling_hidden(void)
                 [](instrumentation_bundle_t& _bundle) {
                     _bundle.initialize<comp::user_global_bundle>();
                 };
-            tracing::has_timemory_components() = true;
+            tracing::enable_timemory_components();
         }
     }
 
@@ -1489,7 +1489,7 @@ rocprofsys_finalize_hidden(void)
         {
             auto const _components = config::get_setting_value<std::string>(
                                          std::string{ env_vars::TIMEMORY_COMPONENTS })
-                                         .value_or("wall_clock");
+                                         .value_or("");
 
             for(auto&& _comp_name : rocprofsys::delimit(_components, ",; "))
             {

@@ -94,7 +94,7 @@ pthread_create_gotcha::wrapper::operator()() const
         }
         return m_routine(m_arg);
     }
-    if(is_shutdown && *is_shutdown)
+    if(*is_shutdown)
     {
         if(m_config.promise)
         {

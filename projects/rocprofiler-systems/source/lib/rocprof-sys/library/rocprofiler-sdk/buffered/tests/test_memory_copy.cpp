@@ -19,7 +19,6 @@ namespace
 {
 
 using ::testing::Eq;
-using ::testing::Return;
 using ::testing::StrictMock;
 
 using test_support::externals;

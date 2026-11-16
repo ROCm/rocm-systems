@@ -42,15 +42,18 @@ constexpr wall_clock_nanoseconds k_launch_end   = k_ms;
 constexpr wall_clock_nanoseconds k_kernel_begin = 5 * k_ms;
 constexpr wall_clock_nanoseconds k_kernel_end   = 7 * k_ms;
 
-constexpr std::size_t k_columns_per_row = 12;
-constexpr std::size_t k_count_column    = 1;
-constexpr std::size_t k_depth_column    = 2;
-constexpr std::size_t k_units_column    = 4;
-constexpr std::size_t k_sum_column      = 5;
-constexpr std::size_t k_min_column      = 7;
-constexpr std::size_t k_max_column      = 8;
-constexpr std::size_t k_var_column      = 9;
-constexpr std::size_t k_self_column     = 11;
+constexpr std::string_view k_label_marker    = ">>> ";
+constexpr double           k_exact           = 1e-12;
+constexpr double           k_converted       = 1e-9;
+constexpr std::size_t      k_columns_per_row = 12;
+constexpr std::size_t      k_count_column    = 1;
+constexpr std::size_t      k_depth_column    = 2;
+constexpr std::size_t      k_units_column    = 4;
+constexpr std::size_t      k_sum_column      = 5;
+constexpr std::size_t      k_min_column      = 7;
+constexpr std::size_t      k_max_column      = 8;
+constexpr std::size_t      k_var_column      = 9;
+constexpr std::size_t      k_self_column     = 11;
 
 struct time_span
 {
@@ -75,7 +78,7 @@ interval(std::string name, time_span when, std::uint64_t correlation = 0,
              .end            = when.end };
 }
 
-struct report_row
+struct parsed_row
 {
     std::string   name;
     std::string   thread;  // "0" for the label prefix "|0>>>", empty when collapsed
@@ -99,14 +102,14 @@ trim(const std::string& text)
 }
 
 /// Parses one table row: "| <label> | COUNT | DEPTH | METRIC | UNITS | SUM | MEAN | MIN |
-/// MAX | VAR | STDDEV | % SELF |". Returns false for separators and the header.
-bool
-parse_row(const std::string& line, report_row& row)
+/// MAX | VAR | STDDEV | % SELF |". Returns nothing for separators and the header.
+[[nodiscard]] std::optional<parsed_row>
+parse_row(const std::string& line)
 {
     constexpr std::string_view k_separator = " | ";
     if(!line.starts_with("| |") && !line.starts_with("| >>> "))
     {
-        return false;
+        return std::nullopt;
     }
     auto const body = line.substr(2, line.size() - 4);  // drop leading "| " and " |"
 
@@ -123,13 +126,14 @@ parse_row(const std::string& line, report_row& row)
     }
     if(cells.size() != k_columns_per_row)
     {
-        return false;
+        return std::nullopt;
     }
 
+    parsed_row  row{};
     auto const& label  = cells.front();  // "[|<thread>]>>> [indent|_]<name>"
-    auto const  marker = label.find(">>> ");
+    auto const  marker = label.find(k_label_marker);
     row.thread         = label.starts_with('|') ? label.substr(1, marker - 1) : "";
-    row.name           = trim(label.substr(marker + std::string_view{ ">>> " }.size()));
+    row.name           = trim(label.substr(marker + k_label_marker.size()));
     if(row.name.starts_with("|_"))
     {
         row.name = row.name.substr(2);
@@ -142,7 +146,7 @@ parse_row(const std::string& line, report_row& row)
     row.max          = cells[k_max_column];
     row.var          = cells[k_var_column];
     row.self_percent = cells[k_self_column];
-    return true;
+    return row;
 }
 
 std::vector<std::string>
@@ -151,23 +155,33 @@ text_lines(const wall_clock_report& report)
     return rocprofsys::delimit(report.text(), "\n");
 }
 
-std::vector<report_row>
+std::vector<parsed_row>
 parse_rows(const wall_clock_report& report)
 {
-    std::vector<report_row> rows;
+    std::vector<parsed_row> rows;
     for(const auto& line : text_lines(report))
     {
-        report_row row{};
-        if(parse_row(line, row))
+        auto row = parse_row(line);
+        if(row.has_value())
         {
-            rows.push_back(std::move(row));
+            rows.push_back(std::move(*row));
         }
     }
     return rows;
 }
 
 void
-expect_node(const report_row& row, std::string_view name, std::uint64_t depth)
+expect_lines_of_equal_width(const std::vector<std::string>& lines)
+{
+    ASSERT_FALSE(lines.empty());
+    for(const auto& line : lines)
+    {
+        EXPECT_EQ(line.size(), lines.front().size()) << line;
+    }
+}
+
+void
+expect_node(const parsed_row& row, std::string_view name, std::uint64_t depth)
 {
     EXPECT_EQ(row.name, name);
     EXPECT_EQ(row.depth, depth);
@@ -442,10 +456,7 @@ TEST(wall_clock_report, has_timemory_table_layout)
     EXPECT_THAT(lines[1],
                 ::testing::HasSubstr("REAL-CLOCK TIMER (I.E. WALL-CLOCK TIMER)"));
     EXPECT_THAT(lines[3], ::testing::HasSubstr("| % SELF |"));
-    for(const auto& line : lines)
-    {
-        EXPECT_EQ(line.size(), lines.front().size()) << line;
-    }
+    expect_lines_of_equal_width(lines);
 }
 
 TEST(wall_clock_report, value_columns_grow_to_fit_long_values)
@@ -457,12 +468,7 @@ TEST(wall_clock_report, value_columns_grow_to_fit_long_values)
                          .gpu_activity = {}
     };
 
-    auto const lines = text_lines(make_report(input));
-    ASSERT_FALSE(lines.empty());
-    for(const auto& line : lines)
-    {
-        EXPECT_EQ(line.size(), lines.front().size()) << line;
-    }
+    expect_lines_of_equal_width(text_lines(make_report(input)));
     auto const rows = parse_rows(make_report(input));
     ASSERT_EQ(rows.size(), 2U);
     EXPECT_EQ(rows[0].sum, "12.000000");
@@ -519,12 +525,12 @@ TEST(wall_clock_report, json_stats_of_the_merged_calls)
 {
     auto const stats = merged_calls_row().at("stats");
     EXPECT_EQ(stats.at("count"), 3);
-    EXPECT_NEAR(stats.at("sum").get<double>(), 0.006, 1e-12);
-    EXPECT_NEAR(stats.at("min").get<double>(), 0.001, 1e-12);
-    EXPECT_NEAR(stats.at("max").get<double>(), 0.003, 1e-12);
-    EXPECT_NEAR(stats.at("mean").get<double>(), 0.002, 1e-12);
-    EXPECT_NEAR(stats.at("sqr").get<double>(), 14e-6, 1e-15);
-    EXPECT_NEAR(stats.at("stddev").get<double>(), 0.001, 1e-12);  // sample (n-1)
+    EXPECT_NEAR(stats.at("sum").get<double>(), 0.006, k_exact);
+    EXPECT_NEAR(stats.at("min").get<double>(), 0.001, k_exact);
+    EXPECT_NEAR(stats.at("max").get<double>(), 0.003, k_exact);
+    EXPECT_NEAR(stats.at("mean").get<double>(), 0.002, k_exact);
+    EXPECT_NEAR(stats.at("sqr").get<double>(), 14e-6, k_exact);
+    EXPECT_NEAR(stats.at("stddev").get<double>(), 0.001, k_exact);  // sample (n-1)
 }
 
 TEST(wall_clock_report, intervals_ending_before_they_begin_throw)
@@ -593,10 +599,10 @@ TEST(wall_clock_report, timing_units_scale_json_display_and_stats_but_not_raw_va
 {
     auto const row = merged_calls_row({ .unit = k_milliseconds });
     EXPECT_EQ(row.at("entry").at("value"), (6 * k_ms).count());
-    EXPECT_NEAR(row.at("entry").at("repr_data").get<double>(), 6.0, 1e-9);
-    EXPECT_NEAR(row.at("stats").at("sum").get<double>(), 6.0, 1e-9);
-    EXPECT_NEAR(row.at("stats").at("sqr").get<double>(), 14.0, 1e-9);
-    EXPECT_NEAR(row.at("stats").at("stddev").get<double>(), 1.0, 1e-9);
+    EXPECT_NEAR(row.at("entry").at("repr_data").get<double>(), 6.0, k_converted);
+    EXPECT_NEAR(row.at("stats").at("sum").get<double>(), 6.0, k_converted);
+    EXPECT_NEAR(row.at("stats").at("sqr").get<double>(), 14.0, k_converted);
+    EXPECT_NEAR(row.at("stats").at("stddev").get<double>(), 1.0, k_converted);
 
     auto const wall =
         wall_clock_json(make_report(merged_calls(), { .unit = k_milliseconds }));
@@ -654,4 +660,25 @@ TEST(wall_clock_report, timing_unit_lookup_rejects_names_timemory_rejects)
         SCOPED_TRACE(name);
         EXPECT_FALSE(find_wall_clock_unit(name).has_value());
     }
+}
+
+TEST(wall_clock_report, json_value_is_the_exact_nanosecond_total)
+{
+    constexpr wall_clock_nanoseconds k_odd_duration{ 123'456'789 };
+    intervals const input{ .regions = { interval("work", span(k_start, k_odd_duration)) },
+                           .gpu_activity = {} };
+
+    auto const entry = first_graph_row(make_report(input)).at("entry");
+    EXPECT_EQ(entry.at("value"), k_odd_duration.count());
+    EXPECT_EQ(entry.at("accum"), k_odd_duration.count());
+}
+
+TEST(wall_clock_report, max_depth_applies_to_the_json_graph)
+{
+    intervals const input{ .regions      = { interval("outer", span(k_start, 4 * k_ms)),
+                                             interval("inner", span(k_start, k_ms)) },
+                           .gpu_activity = {} };
+
+    auto const wall = wall_clock_json(make_report(input, { .max_depth = 1 }));
+    EXPECT_EQ(wall.at("ranks").at(0).at("graph_size"), 1);
 }

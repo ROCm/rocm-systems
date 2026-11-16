@@ -12,7 +12,6 @@
 #include <gtest/gtest.h>
 
 #include <memory>
-#include <string_view>
 
 namespace rocprofsys::domains::buffered
 {
@@ -20,7 +19,6 @@ namespace
 {
 
 using ::testing::Eq;
-using ::testing::Return;
 using ::testing::StrictMock;
 
 using test_support::externals;

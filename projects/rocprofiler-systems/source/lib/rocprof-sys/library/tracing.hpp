@@ -65,10 +65,6 @@ record_thread_start_time();
 void
 thread_init();
 
-template <typename CategoryT>
-auto&
-get_category_stack();
-
 ROCPROFSYS_INLINE auto
 now()
 {
@@ -95,25 +91,12 @@ pop_count()
     return _v;
 }
 
-struct category_stack
-{
-    std::int32_t profile = 0;  // use signed so compiler doesn't have to
-                               // account for underflow/overflow
-};
-
 template <typename CategoryT>
-auto&
-get_category_stack()
+bool&
+thread_has_pushed()
 {
-    static thread_local auto _v = category_stack{};
+    static thread_local bool _v = false;
     return _v;
-}
-
-template <typename CategoryT>
-auto&
-get_profile_stack()
-{
-    return get_category_stack<CategoryT>().profile;
 }
 
 template <typename CategoryT>
@@ -134,23 +117,28 @@ template <typename CategoryT>
 auto
 category_pop_disabled()
 {
-    return !trait::runtime_enabled<CategoryT>::get() &&
-           get_profile_stack<CategoryT>() <= 0;
+    return !trait::runtime_enabled<CategoryT>::get() && !thread_has_pushed<CategoryT>();
 }
 
 template <typename CategoryT>
 auto
 profile_pop_disabled()
 {
-    return !trait::runtime_enabled<CategoryT>::get() &&
-           get_profile_stack<CategoryT>() <= 0;
+    return !trait::runtime_enabled<CategoryT>::get() && !thread_has_pushed<CategoryT>();
 }
 
-inline std::atomic<bool>&
+inline std::atomic<bool> timemory_components_enabled{ false };
+
+inline bool
 has_timemory_components()
 {
-    static std::atomic<bool> s_value{ false };
-    return s_value;
+    return timemory_components_enabled.load(std::memory_order_acquire);
+}
+
+inline void
+enable_timemory_components()
+{
+    timemory_components_enabled.store(true, std::memory_order_release);
 }
 
 template <typename CategoryT, typename... Args>
@@ -163,8 +151,8 @@ push_timemory(CategoryT, std::string_view name, Args&&... args)
         return;
     }
 
-    ++get_profile_stack<CategoryT>();
-    if(!has_timemory_components().load(std::memory_order_relaxed))
+    thread_has_pushed<CategoryT>() = true;
+    if(!has_timemory_components())
     {
         return;
     }
@@ -256,8 +244,7 @@ pop_timemory(CategoryT, std::string_view name, Args&&... args)
 {
     // skip if no component records regions, or the category is disabled and not
     // pushed on this thread
-    if(!has_timemory_components().load(std::memory_order_relaxed) ||
-       profile_pop_disabled<CategoryT>())
+    if(!has_timemory_components() || profile_pop_disabled<CategoryT>())
     {
         return;
     }

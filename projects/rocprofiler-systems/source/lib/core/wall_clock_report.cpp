@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT
 
 #include "core/wall_clock_report.hpp"
-#include "common/delimit.hpp"
 #include "common/string_utility.hpp"
 
 #include <fmt/base.h>
@@ -15,10 +14,12 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <iterator>
 #include <limits>
 #include <list>
 #include <map>
+#include <numeric>
 #include <optional>
 #include <ranges>
 #include <ratio>
@@ -35,33 +36,42 @@ namespace rocprofsys
 {
 namespace
 {
+using wall_clock_detail::interval_store;
+using wall_clock_detail::stored_interval;
+
 constexpr std::size_t      k_indent_per_depth = 2;
 constexpr std::string_view k_metric           = "wall_clock";
-constexpr std::string_view k_title          = "REAL-CLOCK TIMER (I.E. WALL-CLOCK TIMER)";
-constexpr std::uint64_t    k_no_correlation = 0;
+constexpr std::string_view k_title = "REAL-CLOCK TIMER (I.E. WALL-CLOCK TIMER)";
 constexpr std::uint64_t    k_collapsed_thread    = 0;
 constexpr std::string_view k_collapsed_prefix    = ">>> ";
+constexpr std::string_view k_branch_marker       = "|_";
 constexpr std::size_t      k_narrow_column_width = 6;
 constexpr std::size_t      k_value_column_width  = 8;
-constexpr std::size_t      k_value_columns       = 6;
+constexpr std::size_t      k_frame_overhead      = 3;
 constexpr double           k_percent             = 100.0;
 // Wider labels are cut with an ellipsis, narrower ones without, as timemory does
 constexpr std::int32_t     k_min_width_with_ellipsis = 20;
 constexpr std::string_view k_ellipsis                = "...";
 
+constexpr std::array<std::string_view, 6> k_value_column_names{ "SUM", "MEAN", "MIN",
+                                                                "MAX", "VAR",  "STDDEV" };
+constexpr std::size_t                     k_value_columns = k_value_column_names.size();
+
 struct timing_stats
 {
-    std::uint64_t count = 0;
-    double        sum   = 0.0;
-    double        min   = std::numeric_limits<double>::max();
-    double        max   = 0.0;
-    double        mean  = 0.0;
-    double        m2    = 0.0;
+    std::uint64_t count    = 0;
+    std::uint64_t total_ns = 0;
+    double        sum      = 0.0;
+    double        min      = std::numeric_limits<double>::max();
+    double        max      = 0.0;
+    double        mean     = 0.0;
+    double        m2       = 0.0;
 
-    void add(std::chrono::duration<double> elapsed) noexcept
+    void add(wall_clock_nanoseconds elapsed) noexcept
     {
-        const auto seconds = elapsed.count();
+        const auto seconds = std::chrono::duration<double>{ elapsed }.count();
         ++count;
+        total_ns += elapsed.count();
         sum += seconds;
         min              = std::min(min, seconds);
         max              = std::max(max, seconds);
@@ -87,6 +97,12 @@ enum class call_kind
     gpu
 };
 
+enum class child_policy
+{
+    merge,
+    append
+};
+
 struct call_node
 {
     std::string          name;
@@ -94,12 +110,12 @@ struct call_node
     timing_stats         data = {};
     std::list<call_node> children;
 
-    /// Returns the child called `child_name`. With `merge`, an existing child is
-    /// reused (linear search: fan-out per node is small, so a map would only lose
-    /// first-seen ordering); otherwise a new one is always appended.
-    call_node& child(std::string_view child_name, call_kind child_kind, bool merge)
+    /// Linear search keeps first-seen order; it is cheap unless a flat or collapsed
+    /// layout puts many distinct names under one node.
+    call_node& child(std::string_view child_name, call_kind child_kind,
+                     child_policy policy)
     {
-        if(merge)
+        if(policy == child_policy::merge)
         {
             const auto existing =
                 std::ranges::find(children, child_name, &call_node::name);
@@ -120,11 +136,12 @@ struct call_node
         {
             return k_percent;
         }
-        auto cpu_children = 0.0;
-        for(const auto& kid : children)
-        {
-            cpu_children += kid.kind == call_kind::gpu ? 0.0 : kid.data.sum;
-        }
+        auto const cpu_children = std::accumulate(children.begin(), children.end(), 0.0,
+                                                  [](double total, const call_node& kid) {
+                                                      return kid.kind == call_kind::gpu
+                                                                 ? total
+                                                                 : total + kid.data.sum;
+                                                  });
         return k_percent * (data.sum - cpu_children) / data.sum;
     }
 };
@@ -134,6 +151,13 @@ struct thread_trees
     std::map<std::uint64_t, call_node> by_thread;
     std::size_t                        thread_count = 0;
 };
+
+[[nodiscard]] double
+scale_to_unit(const wall_clock_settings& settings)
+{
+    return std::chrono::duration<double>{ std::chrono::seconds{ 1 } } /
+           settings.unit.length;
+}
 
 void
 validate_interval(const wall_clock_interval& interval)
@@ -155,194 +179,138 @@ struct report_row
     std::size_t      depth;
 };
 
-void
-flatten_tree_into_rows(std::vector<report_row>& rows, std::string_view prefix,
-                       const call_node& parent, std::size_t depth)
+struct row_builder
 {
-    for(const auto& kid : parent.children)
+    std::vector<report_row> rows;
+    std::string_view        prefix;
+    std::size_t             max_depth;
+
+    void add_children(const call_node& parent, std::size_t depth)
     {
-        auto const label = depth == 0
-                               ? fmt::format("{}{}", prefix, kid.name)
-                               : fmt::format("{}{:{}}|_{}", prefix, "",
-                                             k_indent_per_depth * (depth - 1), kid.name);
-        rows.push_back({ .label = label, .entry = &kid, .depth = depth });
-        flatten_tree_into_rows(rows, prefix, kid, depth + 1);
+        if(depth >= max_depth)
+        {
+            return;
+        }
+        for(const auto& kid : parent.children)
+        {
+            auto const label = depth == 0 ? fmt::format("{}{}", prefix, kid.name)
+                                          : fmt::format("{}{:{}}{}{}", prefix, "",
+                                                        k_indent_per_depth * (depth - 1),
+                                                        k_branch_marker, kid.name);
+            rows.push_back({ .label = label, .entry = &kid, .depth = depth });
+            add_children(kid, depth + 1);
+        }
     }
-}
+};
 
 [[nodiscard]] std::vector<report_row>
 build_rows(const thread_trees& trees, const wall_clock_settings& settings)
 {
-    std::vector<report_row> rows;
-    std::size_t             thread_ordinal = 0;
+    row_builder rows{ .rows = {}, .prefix = {}, .max_depth = settings.max_depth };
+    std::size_t thread_ordinal = 0;
     for(const auto& [thread_id, root] : trees.by_thread)
     {
         auto const prefix = settings.collapse_threads
                                 ? std::string{ k_collapsed_prefix }
-                                : fmt::format("|{}>>> ", thread_ordinal++);
-        flatten_tree_into_rows(rows, prefix, root, 0);
+                                : fmt::format("|{}>>> ", thread_ordinal);
+        rows.prefix       = prefix;
+        rows.add_children(root, 0);
+        ++thread_ordinal;
     }
-    std::erase_if(rows, [&settings](const report_row& row) {
-        return row.depth >= settings.max_depth;
-    });
-    return rows;
+    return std::move(rows.rows);
 }
 
-[[nodiscard]] thread_trees
-build_thread_trees(const wall_clock_settings&              settings,
-                   const std::vector<wall_clock_interval>& regions,
-                   const std::vector<wall_clock_interval>& gpu_activity)
+struct tree_builder
 {
-    auto const merge = !settings.timeline;
+    const wall_clock_settings&                    settings;
+    const interval_store&                         intervals;
+    child_policy                                  policy;
+    thread_trees                                  trees                    = {};
+    std::set<std::uint64_t>                       threads                  = {};
+    std::unordered_map<std::uint64_t, call_node*> launch_by_correlation_id = {};
 
-    thread_trees                                  trees;
-    std::set<std::uint64_t>                       threads;
-    std::unordered_map<std::uint64_t, call_node*> launch_by_correlation_id;
-
-    auto const tree_of = [&](std::uint64_t thread_id) -> call_node& {
+    call_node& tree_of(std::uint64_t thread_id)
+    {
         threads.insert(thread_id);
         return trees
             .by_thread[settings.collapse_threads ? k_collapsed_thread : thread_id];
-    };
+    }
 
-    std::vector<const wall_clock_interval*> sorted;
-    sorted.reserve(regions.size());
-    std::ranges::transform(regions, std::back_inserter(sorted),
-                           [](const wall_clock_interval& region) { return &region; });
-    std::ranges::sort(sorted,
-                      [](const wall_clock_interval* lhs, const wall_clock_interval* rhs) {
-                          return std::tie(lhs->thread_id, lhs->begin, rhs->end) <
-                                 std::tie(rhs->thread_id, rhs->begin, lhs->end);
-                      });
-
-    std::vector<std::pair<call_node*, wall_clock_nanoseconds>> open_regions;
-    auto open_regions_thread = std::optional<std::uint64_t>{};
-    for(const auto* region : sorted)
+    void nest_regions()
     {
-        if(open_regions_thread != region->thread_id)
+        std::vector<const stored_interval*> sorted;
+        sorted.reserve(intervals.regions.size());
+        std::ranges::transform(intervals.regions, std::back_inserter(sorted),
+                               [](const stored_interval& region) { return &region; });
+        std::ranges::sort(sorted,
+                          [](const stored_interval* lhs, const stored_interval* rhs) {
+                              return std::tie(lhs->thread_id, lhs->begin, rhs->end) <
+                                     std::tie(rhs->thread_id, rhs->begin, lhs->end);
+                          });
+
+        std::vector<std::pair<call_node*, wall_clock_nanoseconds>> open_regions;
+        auto open_regions_thread = std::optional<std::uint64_t>{};
+        for(const auto* region : sorted)
         {
-            open_regions.clear();
-            open_regions_thread = region->thread_id;
+            if(open_regions_thread != region->thread_id)
+            {
+                open_regions.clear();
+                open_regions_thread = region->thread_id;
+            }
+
+            std::erase_if(open_regions,
+                          [&](const auto& open) { return region->begin >= open.second; });
+
+            auto const reversed  = open_regions | std::views::reverse;
+            auto const enclosing = std::ranges::find_if(
+                reversed, [&](const auto& open) { return open.second >= region->end; });
+            auto& parent = (settings.flat || enclosing == std::ranges::end(reversed))
+                               ? tree_of(region->thread_id)
+                               : *enclosing->first;
+            auto& entry =
+                parent.child(intervals.names.at(region->name), call_kind::cpu, policy);
+            entry.data.add(region->end - region->begin);
+            open_regions.emplace_back(&entry, region->end);
+            if(region->correlation_id != k_no_correlation)
+            {
+                launch_by_correlation_id[region->correlation_id] = &entry;
+            }
         }
+    }
 
-        std::erase_if(open_regions,
-                      [&](const auto& open) { return region->begin >= open.second; });
-
-        auto const enclosing = std::ranges::find_if(
-            open_regions | std::views::reverse,
-            [&](const auto& open) { return open.second >= region->end; });
-        auto& parent = (settings.flat ||
-                        enclosing == std::ranges::end(open_regions | std::views::reverse))
-                           ? tree_of(region->thread_id)
-                           : *enclosing->first;
-        auto& entry  = parent.child(region->name, call_kind::cpu, merge);
-        entry.data.add(region->end - region->begin);
-        open_regions.emplace_back(&entry, region->end);
-        if(region->correlation_id != k_no_correlation)
+    void attach_gpu_activity()
+    {
+        for(const auto& activity : intervals.gpu_activity)
         {
-            launch_by_correlation_id[region->correlation_id] = &entry;
+            auto const launch = launch_by_correlation_id.find(activity.correlation_id);
+            auto& parent = (launch != launch_by_correlation_id.end() && !settings.flat)
+                               ? *launch->second
+                               : tree_of(activity.thread_id);
+            parent.child(intervals.names.at(activity.name), call_kind::gpu, policy)
+                .data.add(activity.end - activity.begin);
         }
     }
+};
 
-    for(const auto& activity : gpu_activity)
-    {
-        auto const launch = launch_by_correlation_id.find(activity.correlation_id);
-        auto&      parent = (launch != launch_by_correlation_id.end() && !settings.flat)
-                                ? *launch->second
-                                : tree_of(activity.thread_id);
-        parent.child(activity.name, call_kind::gpu, merge)
-            .data.add(activity.end - activity.begin);
-    }
-    trees.thread_count = threads.size();
-    return trees;
-}
-
-}  // namespace
-
-std::optional<wall_clock_unit>
-find_wall_clock_unit(std::string_view name)
+[[nodiscard]] thread_trees
+build_thread_trees(const wall_clock_settings& settings, const interval_store& intervals)
 {
-    using namespace std::chrono_literals;
-    struct unit_spellings
-    {
-        wall_clock_unit  unit;
-        std::string_view spellings;
-    };
-    constexpr std::array k_units{
-        unit_spellings{ .unit      = { .name = "nsec", .length = 1ns },
-                        .spellings = "nsec ns nanosecond nanoseconds" },
-        unit_spellings{ .unit      = { .name = "usec", .length = 1us },
-                        .spellings = "usec us microsecond microseconds" },
-        unit_spellings{ .unit      = { .name = "msec", .length = 1ms },
-                        .spellings = "msec ms millisecond milliseconds" },
-        unit_spellings{
-            .unit      = { .name   = "csec",
-                           .length = std::chrono::duration<std::int64_t, std::centi>{ 1 } },
-            .spellings = "csec cs centisecond centiseconds" },
-        unit_spellings{
-            .unit      = { .name   = "dsec",
-                           .length = std::chrono::duration<std::int64_t, std::deci>{ 1 } },
-            .spellings = "dsec ds decisecond deciseconds" },
-        unit_spellings{ .unit      = k_wall_clock_seconds,
-                        .spellings = "sec s second seconds" },
-        unit_spellings{ .unit      = { .name = "min", .length = 1min },
-                        .spellings = "min minute minutes" },
-        unit_spellings{ .unit      = { .name = "hr", .length = 1h },
-                        .spellings = "hr hour hours" },
-    };
-    if(name.empty())
-    {
-        return k_wall_clock_seconds;
-    }
-    auto const is_spelling_of = [name](const unit_spellings& entry) {
-        return std::ranges::any_of(delimit(std::string{ entry.spellings }, " "),
-                                   [name](const std::string& spelling) {
-                                       return utility::string::equals_ignore_case(
-                                           spelling, name);
-                                   });
-    };
-    auto const found = std::ranges::find_if(k_units, is_spelling_of);
-    return found == k_units.end() ? std::nullopt : std::optional{ found->unit };
-}
-
-wall_clock_report::wall_clock_report(wall_clock_settings settings) noexcept
-: m_settings{ settings }
-{}
-
-void
-wall_clock_report::add_region(wall_clock_interval region)
-{
-    validate_interval(region);
-    m_regions.push_back(std::move(region));
+    tree_builder builder{ .settings  = settings,
+                          .intervals = intervals,
+                          .policy    = settings.timeline ? child_policy::append
+                                                         : child_policy::merge };
+    builder.nest_regions();
+    builder.attach_gpu_activity();
+    builder.trees.thread_count = builder.threads.size();
+    return std::move(builder.trees);
 }
 
 void
-wall_clock_report::add_gpu_activity(wall_clock_interval activity)
+truncate_labels(std::vector<report_row>& rows, std::int32_t max_width_setting)
 {
-    validate_interval(activity);
-    m_gpu_activity.push_back(std::move(activity));
-}
-
-bool
-wall_clock_report::empty() const noexcept
-{
-    return m_regions.empty() && m_gpu_activity.empty();
-}
-
-std::string
-wall_clock_report::text() const
-{
-    auto const trees = build_thread_trees(m_settings, m_regions, m_gpu_activity);
-    auto       rows  = build_rows(trees, m_settings);
-    if(rows.empty())
-    {
-        return {};
-    }
-
-    auto const max_width = static_cast<std::size_t>(std::max(m_settings.max_width, 0));
-    auto const ellipsis  = m_settings.max_width > k_min_width_with_ellipsis
-                               ? k_ellipsis
-                               : std::string_view{};
+    auto const max_width = static_cast<std::size_t>(std::max(max_width_setting, 0));
+    auto const ellipsis =
+        max_width_setting > k_min_width_with_ellipsis ? k_ellipsis : std::string_view{};
     for(auto& row : rows)
     {
         if(max_width > 0 && row.label.size() > max_width)
@@ -351,44 +319,178 @@ wall_clock_report::text() const
                 "{}{}", row.label.substr(0, max_width - ellipsis.size()), ellipsis);
         }
     }
+}
 
-    // SUM, MEAN, MIN, MAX, VAR and STDDEV of each row in the unit, VAR in the unit
-    // squared. Each value column is as wide as its widest cell.
-    auto const scale = std::chrono::duration<double>{ std::chrono::seconds{ 1 } } /
-                       m_settings.unit.length;
-    auto values = std::vector<std::array<double, k_value_columns>>{};
-    auto widths = std::array<std::size_t, k_value_columns>{};
+struct value_cells
+{
+    std::vector<std::array<double, k_value_columns>> values;
+    std::array<std::size_t, k_value_columns>         widths = {};
+};
+
+[[nodiscard]] value_cells
+compute_value_cells(const std::vector<report_row>& rows,
+                    const wall_clock_settings&     settings)
+{
+    auto const  scale = scale_to_unit(settings);
+    value_cells cells;
     for(const auto& row : rows)
     {
-        const auto& stats = row.entry->data;
-        values.push_back({ stats.sum * scale, stats.mean * scale, stats.min * scale,
-                           stats.max * scale, stats.variance() * scale * scale,
-                           std::sqrt(stats.variance()) * scale });
+        const auto&                               stats = row.entry->data;
+        std::array<double, k_value_columns> const values{
+            stats.sum * scale,
+            stats.mean * scale,
+            stats.min * scale,
+            stats.max * scale,
+            stats.variance() * scale * scale,
+            std::sqrt(stats.variance()) * scale
+        };
         for(std::size_t column = 0; column < k_value_columns; ++column)
         {
-            widths[column] =
-                std::max({ widths[column], k_value_column_width,
-                           fmt::formatted_size("{:.{}f}", values.back()[column],
-                                               m_settings.precision) });
+            cells.widths[column] = std::max(
+                { cells.widths[column], k_value_column_width,
+                  fmt::formatted_size("{:.{}f}", values[column], settings.precision) });
         }
+        cells.values.push_back(values);
+    }
+    return cells;
+}
+
+[[nodiscard]] std::string
+format_header(std::size_t                                     label_width,
+              const std::array<std::size_t, k_value_columns>& widths)
+{
+    auto header = fmt::format("| {:^{}} | {:^{}} | {:^{}} | {:^{}} | {:^{}} | ", "LABEL",
+                              label_width, "COUNT", k_narrow_column_width, "DEPTH",
+                              k_narrow_column_width, "METRIC", k_metric.size(), "UNITS",
+                              k_narrow_column_width);
+    for(std::size_t column = 0; column < k_value_columns; ++column)
+    {
+        // timemory left-aligns the last value heading
+        auto const last = column + 1 == k_value_columns;
+        fmt::format_to(std::back_inserter(header),
+                       fmt::runtime(last ? "{:<{}} | " : "{:^{}} | "),
+                       k_value_column_names[column], widths[column]);
+    }
+    fmt::format_to(std::back_inserter(header), "{:^{}} |\n", "% SELF",
+                   k_narrow_column_width);
+    return header;
+}
+
+[[nodiscard]] nlohmann::json
+row_to_json(const report_row& row, double scale)
+{
+    auto const& stats = row.entry->data;
+    return { { "prefix", row.label },
+             { "depth", row.depth },
+             { "entry",
+               { { "laps", stats.count },
+                 { "value", stats.total_ns },
+                 { "accum", stats.total_ns },
+                 { "repr_data", stats.sum * scale },
+                 { "repr_display", stats.sum * scale } } },
+             { "stats",
+               { { "sum", stats.sum * scale },
+                 { "count", stats.count },
+                 { "min", stats.min * scale },
+                 { "max", stats.max * scale },
+                 { "sqr", stats.sum_of_squares() * scale * scale },
+                 { "mean", stats.mean * scale },
+                 { "stddev", std::sqrt(stats.variance()) * scale } } } };
+}
+
+}  // namespace
+
+std::optional<wall_clock_unit>
+find_wall_clock_unit(std::string_view name)
+{
+    using namespace std::chrono_literals;
+    if(name.empty())
+    {
+        return k_wall_clock_seconds;
+    }
+    struct unit_spellings
+    {
+        wall_clock_unit                 unit;
+        std::array<std::string_view, 4> spellings;
+    };
+    constexpr std::array k_units{
+        unit_spellings{ .unit      = { .name = "nsec", .length = 1ns },
+                        .spellings = { "nsec", "ns", "nanosecond", "nanoseconds" } },
+        unit_spellings{ .unit      = { .name = "usec", .length = 1us },
+                        .spellings = { "usec", "us", "microsecond", "microseconds" } },
+        unit_spellings{ .unit      = { .name = "msec", .length = 1ms },
+                        .spellings = { "msec", "ms", "millisecond", "milliseconds" } },
+        unit_spellings{
+            .unit      = { .name   = "csec",
+                           .length = std::chrono::duration<std::int64_t, std::centi>{ 1 } },
+            .spellings = { "csec", "cs", "centisecond", "centiseconds" } },
+        unit_spellings{
+            .unit      = { .name   = "dsec",
+                           .length = std::chrono::duration<std::int64_t, std::deci>{ 1 } },
+            .spellings = { "dsec", "ds", "decisecond", "deciseconds" } },
+        unit_spellings{ .unit      = k_wall_clock_seconds,
+                        .spellings = { "sec", "s", "second", "seconds" } },
+        unit_spellings{ .unit      = { .name = "min", .length = 1min },
+                        .spellings = { "min", "minute", "minutes" } },
+        unit_spellings{ .unit      = { .name = "hr", .length = 1h },
+                        .spellings = { "hr", "hour", "hours" } },
+    };
+    auto const is_spelling_of = [name](const unit_spellings& entry) {
+        return std::ranges::any_of(entry.spellings, [name](std::string_view spelling) {
+            return utility::string::equals_ignore_case(spelling, name);
+        });
+    };
+    auto const found = std::ranges::find_if(k_units, is_spelling_of);
+    return found == k_units.end() ? std::nullopt : std::optional{ found->unit };
+}
+
+wall_clock_report::wall_clock_report(wall_clock_settings settings)
+: m_settings{ settings }
+{}
+
+void
+wall_clock_report::add_region(const wall_clock_interval& region)
+{
+    validate_interval(region);
+    m_intervals.regions.push_back(m_intervals.compact(region));
+}
+
+void
+wall_clock_report::add_gpu_activity(const wall_clock_interval& activity)
+{
+    validate_interval(activity);
+    m_intervals.gpu_activity.push_back(m_intervals.compact(activity));
+}
+
+bool
+wall_clock_report::empty() const noexcept
+{
+    return m_intervals.regions.empty() && m_intervals.gpu_activity.empty();
+}
+
+std::string
+wall_clock_report::text() const
+{
+    auto const trees = build_thread_trees(m_settings, m_intervals);
+    auto       rows  = build_rows(trees, m_settings);
+    if(rows.empty())
+    {
+        return {};
     }
 
+    truncate_labels(rows, m_settings.max_width);
+    auto const cells = compute_value_cells(rows, m_settings);
     auto const label_width =
         std::ranges::max(rows | std::views::transform([](const report_row& row) {
                              return row.label.size();
                          }));
-    auto const header = fmt::format(
-        "| {:^{}} | {:^{}} | {:^{}} | {:^{}} | {:^{}} | {:^{}} | {:^{}} | {:^{}} | "
-        "{:^{}} | {:^{}} | {:<{}} | {:^{}} |\n",
-        "LABEL", label_width, "COUNT", k_narrow_column_width, "DEPTH",
-        k_narrow_column_width, "METRIC", k_metric.size(), "UNITS", k_narrow_column_width,
-        "SUM", widths[0], "MEAN", widths[1], "MIN", widths[2], "MAX", widths[3], "VAR",
-        widths[4], "STDDEV", widths[5], "% SELF", k_narrow_column_width);
-    auto column_separator = header;
+    auto const header           = format_header(label_width, cells.widths);
+    auto       column_separator = header;
     std::ranges::replace_if(
         column_separator, [](char chr) { return chr != '|' && chr != '\n'; }, '-');
-    auto const banner = fmt::format("|{:-<{}}|\n", "", header.size() - 3);
-    auto const title  = fmt::format("|{:^{}}|\n", k_title, header.size() - 3);
+    auto const frame_width = header.size() - k_frame_overhead;
+    auto const banner      = fmt::format("|{:-<{}}|\n", "", frame_width);
+    auto const title       = fmt::format("|{:^{}}|\n", k_title, frame_width);
 
     auto table =
         fmt::format("{}{}{}{}{}", banner, title, banner, header, column_separator);
@@ -403,46 +505,29 @@ wall_clock_report::text() const
         for(std::size_t column = 0; column < k_value_columns; ++column)
         {
             fmt::format_to(std::back_inserter(table), "{:>{}.{}f} | ",
-                           values[index][column], widths[column], m_settings.precision);
+                           cells.values[index][column], cells.widths[column],
+                           m_settings.precision);
         }
         auto const self =
             depth + 1 < m_settings.max_depth ? entry->self_percent() : k_percent;
         fmt::format_to(std::back_inserter(table), "{:>{}.1f} |\n", self,
                        k_narrow_column_width);
     }
-    return table + banner;
+    table += banner;
+    return table;
 }
 
 std::string
 wall_clock_report::json() const
 {
     constexpr std::size_t k_single_process = 1;
-    auto const trees = build_thread_trees(m_settings, m_regions, m_gpu_activity);
-    auto const rows  = build_rows(trees, m_settings);
-    auto const scale = std::chrono::duration<double>{ std::chrono::seconds{ 1 } } /
-                       m_settings.unit.length;
-    auto graph = nlohmann::json::array();
-    for(const auto& [label, entry, depth] : rows)
+    auto const            trees            = build_thread_trees(m_settings, m_intervals);
+    auto const            rows             = build_rows(trees, m_settings);
+    auto const            scale            = scale_to_unit(m_settings);
+    auto                  graph            = nlohmann::json::array();
+    for(const auto& row : rows)
     {
-        auto const& stats  = entry->data;
-        auto const  sum_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::duration<double>{ stats.sum });
-        graph.push_back({ { "prefix", label },
-                          { "depth", depth },
-                          { "entry",
-                            { { "laps", stats.count },
-                              { "value", sum_ns.count() },
-                              { "accum", sum_ns.count() },
-                              { "repr_data", stats.sum * scale },
-                              { "repr_display", stats.sum * scale } } },
-                          { "stats",
-                            { { "sum", stats.sum * scale },
-                              { "count", stats.count },
-                              { "min", stats.min * scale },
-                              { "max", stats.max * scale },
-                              { "sqr", stats.sum_of_squares() * scale * scale },
-                              { "mean", stats.mean * scale },
-                              { "stddev", std::sqrt(stats.variance()) * scale } } } });
+        graph.push_back(row_to_json(row, scale));
     }
 
     return nlohmann::json{
