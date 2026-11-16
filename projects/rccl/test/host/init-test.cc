@@ -4486,13 +4486,15 @@ TEST_F(InitMicrotest, InitTransportsRank_Gfx1151_OverridesRingChannelsWithParam)
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_Gfx1151_UnsetParamFallsBackToSixChannels) {
-  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
-  ncclTopoSystem* topo = c.installTopo();
-  std::snprintf(topo->nodes[GPU].nodes[0].gpu.gcn, sizeof(topo->nodes[GPU].nodes[0].gpu.gcn), "gfx1151");
-  InstallTopoComputeSuccess(/*nChannels=*/5);  // INIT_CHANNELS defaults to -1, so the literal 6 wins
-  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
-  EXPECT_EQ(ncclTimeout, initTransportsRank(c.get(), nullptr, c.timers()));
-  EXPECT_EQ(6, c.get()->graphs[NCCL_ALGO_RING].nChannels);
+  for (const char* gcn : {"gfx1151", "gfx1170", "gfx1171"}) {
+    TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+    ncclTopoSystem* topo = c.installTopo();
+    std::snprintf(topo->nodes[GPU].nodes[0].gpu.gcn, sizeof(topo->nodes[GPU].nodes[0].gpu.gcn), "%s", gcn);
+    InstallTopoComputeSuccess(/*nChannels=*/5);  // INIT_CHANNELS defaults to -1, so the literal 6 wins
+    InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
+    EXPECT_EQ(ncclTimeout, initTransportsRank(c.get(), nullptr, c.timers())) << gcn;
+    EXPECT_EQ(6, c.get()->graphs[NCCL_ALGO_RING].nChannels) << gcn;
+  }
 }
 
 // Zero is the boundary the `> 0` test exists for: it means "not set", so the literal 6 still wins.
