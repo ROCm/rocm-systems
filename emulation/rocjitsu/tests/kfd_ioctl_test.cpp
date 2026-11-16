@@ -19215,6 +19215,9 @@ void KfdIoctlTest::check_software_queue_exception_event(uint32_t gpu_id, bool fo
   alignas(4096) Page exception_page{};
   auto process = driver_->find_process(driver_->local_process_id());
   ASSERT_NE(process, nullptr);
+  const auto packet_route =
+      rocjitsu::amdgpu::KfdInterruptTestAccess::isolate_cp_packet_interrupts(*driver_, gpu_id);
+  ASSERT_TRUE(packet_route);
   process->map_pages(kExceptionStatusAddress, exception_page.data(), exception_page.size());
 
   std::array<kfd_ioctl_create_event_args, 2> events{};
@@ -19263,71 +19266,67 @@ void KfdIoctlTest::check_software_queue_exception_event(uint32_t gpu_id, bool fo
   create.write_pointer_address = reinterpret_cast<uint64_t>(&queue_descriptor.write_dispatch_id);
   create.ctx_save_restore_address = reinterpret_cast<uint64_t>(cwsr.data());
   create.ctx_save_restore_size = static_cast<uint32_t>(cwsr.size());
-  auto *publisher = soc_->assign_queue_owner_cp(process->next_queue_id_ - 1);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create), 0);
+  auto *publisher = soc_->assign_queue_owner_cp(create.queue_id - 1);
   ASSERT_NE(publisher, nullptr);
-  // Hold the owner's queue lock from registration through the event check so
-  // its independent idle poll cannot wake either event during this witness.
-  publisher->with_queue_lock_for_test([&] {
-    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create), 0);
 
-    kfd_event_data runtime_event{};
-    runtime_event.event_id = events[0].event_id;
-    runtime_event.signal_event_data.last_event_age = 1;
-    kfd_ioctl_wait_events_args runtime_wait{};
-    runtime_wait.events_ptr = reinterpret_cast<uint64_t>(&runtime_event);
-    runtime_wait.num_events = 1;
-    runtime_wait.timeout = UINT32_MAX;
-    int runtime_result = -1;
-    uint64_t observed_status = 0;
-    std::thread runtime_handler([&] {
-      runtime_result = driver_->ioctl(AMDKFD_IOC_WAIT_EVENTS, &runtime_wait);
-      observed_status = vm_read64(kExceptionStatusAddress, process->process_id());
-    });
-    while (process->event_state_.waiter_count(events[0].event_id) != 1)
-      std::this_thread::yield();
-
-    if (forwarded) {
-      kfd_ioctl_dbg_trap_args forward{};
-      forward.pid = static_cast<uint32_t>(getpid());
-      forward.op = KFD_IOC_DBG_TRAP_SEND_RUNTIME_EVENT;
-      forward.send_runtime_event.gpu_id = gpu_id;
-      forward.send_runtime_event.queue_id = create.queue_id;
-      forward.send_runtime_event.exception_mask = kWaveAbort;
-      EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &forward), 0);
-    } else {
-      EXPECT_TRUE(publisher->signal_queue_exception(create.queue_id, process->process_id(),
-                                                    kWaveAbort, /*publish_interrupt=*/false));
-      EXPECT_TRUE(publisher->publish_queue_exception(create.queue_id, process->process_id(),
-                                                     kWaveAbort, /*wait_for_ack=*/false));
-    }
-    EXPECT_EQ(vm_read64(kExceptionStatusAddress, process->process_id()), kWaveAbort);
-    for (size_t index = 0; index < events.size(); ++index) {
-      kfd_event_data event{};
-      event.event_id = events[index].event_id;
-      event.signal_event_data.last_event_age = 1;
-      kfd_ioctl_wait_events_args wait{};
-      wait.events_ptr = reinterpret_cast<uint64_t>(&event);
-      wait.num_events = 1;
-      EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_WAIT_EVENTS, &wait), 0);
-      EXPECT_EQ(wait.wait_result,
-                index == 0 ? KFD_IOC_WAIT_RESULT_COMPLETE : KFD_IOC_WAIT_RESULT_TIMEOUT);
-      if (index == 0 && wait.wait_result != KFD_IOC_WAIT_RESULT_COMPLETE) {
-        // A failing publication must still release the parked test thread.
-        kfd_ioctl_destroy_event_args destroy_event{};
-        destroy_event.event_id = events[0].event_id;
-        EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_EVENT, &destroy_event), 0);
-        continue;
-      }
-      EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_WAIT_EVENTS, &wait), 0);
-      EXPECT_EQ(wait.wait_result, KFD_IOC_WAIT_RESULT_TIMEOUT);
-    }
-    runtime_handler.join();
-    EXPECT_EQ(runtime_result, 0);
-    EXPECT_EQ(runtime_wait.wait_result, KFD_IOC_WAIT_RESULT_COMPLETE);
-    EXPECT_EQ(observed_status, kWaveAbort);
-    EXPECT_EQ(mailboxes[events[0].event_slot_index], UINT64_MAX);
-    EXPECT_EQ(mailboxes[events[1].event_slot_index], events[1].event_id);
+  kfd_event_data runtime_event{};
+  runtime_event.event_id = events[0].event_id;
+  runtime_event.signal_event_data.last_event_age = 1;
+  kfd_ioctl_wait_events_args runtime_wait{};
+  runtime_wait.events_ptr = reinterpret_cast<uint64_t>(&runtime_event);
+  runtime_wait.num_events = 1;
+  runtime_wait.timeout = UINT32_MAX;
+  int runtime_result = -1;
+  uint64_t observed_status = 0;
+  std::thread runtime_handler([&] {
+    runtime_result = driver_->ioctl(AMDKFD_IOC_WAIT_EVENTS, &runtime_wait);
+    observed_status = vm_read64(kExceptionStatusAddress, process->process_id());
   });
+  while (process->event_state_.waiter_count(events[0].event_id) != 1)
+    std::this_thread::yield();
+
+  if (forwarded) {
+    kfd_ioctl_dbg_trap_args forward{};
+    forward.pid = static_cast<uint32_t>(getpid());
+    forward.op = KFD_IOC_DBG_TRAP_SEND_RUNTIME_EVENT;
+    forward.send_runtime_event.gpu_id = gpu_id;
+    forward.send_runtime_event.queue_id = create.queue_id;
+    forward.send_runtime_event.exception_mask = kWaveAbort;
+    EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &forward), 0);
+  } else {
+    EXPECT_TRUE(publisher->signal_queue_exception(create.queue_id, process->process_id(),
+                                                  kWaveAbort, /*publish_interrupt=*/false));
+    EXPECT_TRUE(publisher->publish_queue_exception(create.queue_id, process->process_id(),
+                                                   kWaveAbort, /*wait_for_ack=*/false));
+  }
+  EXPECT_EQ(vm_read64(kExceptionStatusAddress, process->process_id()), kWaveAbort);
+  for (size_t index = 0; index < events.size(); ++index) {
+    kfd_event_data event{};
+    event.event_id = events[index].event_id;
+    event.signal_event_data.last_event_age = 1;
+    kfd_ioctl_wait_events_args wait{};
+    wait.events_ptr = reinterpret_cast<uint64_t>(&event);
+    wait.num_events = 1;
+    EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_WAIT_EVENTS, &wait), 0);
+    EXPECT_EQ(wait.wait_result,
+              index == 0 ? KFD_IOC_WAIT_RESULT_COMPLETE : KFD_IOC_WAIT_RESULT_TIMEOUT);
+    if (index == 0 && wait.wait_result != KFD_IOC_WAIT_RESULT_COMPLETE) {
+      // A failing publication must still release the parked test thread.
+      kfd_ioctl_destroy_event_args destroy_event{};
+      destroy_event.event_id = events[0].event_id;
+      EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_EVENT, &destroy_event), 0);
+      continue;
+    }
+    EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_WAIT_EVENTS, &wait), 0);
+    EXPECT_EQ(wait.wait_result, KFD_IOC_WAIT_RESULT_TIMEOUT);
+  }
+  runtime_handler.join();
+  EXPECT_EQ(runtime_result, 0);
+  EXPECT_EQ(runtime_wait.wait_result, KFD_IOC_WAIT_RESULT_COMPLETE);
+  EXPECT_EQ(observed_status, kWaveAbort);
+  EXPECT_EQ(mailboxes[events[0].event_slot_index], UINT64_MAX);
+  EXPECT_EQ(mailboxes[events[1].event_slot_index], events[1].event_id);
 
   kfd_ioctl_destroy_queue_args destroy{};
   destroy.queue_id = create.queue_id;
