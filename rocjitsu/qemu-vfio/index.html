@@ -1846,205 +1846,6 @@
 
               
             
-              
-                
-  
-  
-  
-  
-    
-    
-    
-    
-      
-    
-    
-    <li class="md-nav__item md-nav__item--nested">
-      
-        
-        
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5_2" >
-        
-          
-          <label class="md-nav__link" for="__nav_5_2" id="__nav_5_2_label" tabindex="0">
-            
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Pod qualification
-  
-
-    
-  </span>
-  
-  
-
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_2_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5_2">
-            <span class="md-nav__icon md-icon"></span>
-            
-  
-    Pod qualification
-  
-
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../same-host-pod-rccl-result-20261014/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    RCCL result (2026-10-14)
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../same-host-pod-rccl-result-20261015/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    RCCL result (2026-10-15)
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../same-host-pod-rccl-result-20261019/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    RCCL result (2026-10-19)
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../stock-driver-hardware-path-20261014/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Stock-driver hardware path
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../unpatched-amdgpu-pod-ablation-20261015/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Unpatched AMDGPU ablation
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-              
-            
           </ul>
         </nav>
       
@@ -2480,8 +2281,7 @@ VFIO backend's guest-RAM atomic operations. The peer endpoint's AtomicOp
 completer bits stayed clear, and peer BAR atomics are rejected. This checks
 ordinary peer reads and writes on one host; it does not qualify peer atomics,
 cacheable coherence, or the four-guest same-host RCCL exit gate below. The
-exact local images, commands, hashes, and log paths are in
-<code>docs/stock-driver-hardware-path-20261014.md</code>.</p>
+<a href="https://github.com/ROCm/rocm-systems/blob/90ddc8aae52bd58adaff8bab6498a140bcb77747/emulation/rocjitsu/docs/stock-driver-hardware-path-20261014.md">original two-GPU record</a> includes the commands and hashes.</p>
 <h2 id="host-prerequisites">Host prerequisites<a class="headerlink" href="#host-prerequisites" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Linux on x86-64.</li>
@@ -2585,10 +2385,8 @@ workload failure rather than as a host-launch failure.</p>
 <strong>zero local driver patches</strong>. Earlier fault-injection and four-GPU controls
 used locally patched guest modules. Those patches are not included in this
 repository and their results are historical; they do not qualify the current
-stock-driver pod image. See the historical
-<a href="../stock-driver-hardware-path-20261014/">October 14 record</a> and
-<a href="../unpatched-amdgpu-pod-ablation-20261015/">zero-patch pod ablation</a>
-for the scope of those runs.</p>
+stock-driver pod image. See the <a href="https://github.com/ROCm/rocm-systems/blob/90ddc8aae52bd58adaff8bab6498a140bcb77747/emulation/rocjitsu/docs/stock-driver-hardware-path-20261014.md">two-GPU driver control</a> and
+the <a href="https://github.com/ROCm/rocm-systems/blob/90ddc8aae52bd58adaff8bab6498a140bcb77747/emulation/rocjitsu/docs/unpatched-amdgpu-pod-ablation-20261015.md">zero-patch driver ablation</a> for the scope of those runs.</p>
 <h2 id="gemm-qualification-contract">GEMM qualification contract<a class="headerlink" href="#gemm-qualification-contract" title="Permanent link">&para;</a></h2>
 <p>A useful qualification workload calls <code>rocblas_sgemm</code> and compares every
 output element against a CPU reference. The reference qualification used an
@@ -2960,15 +2758,8 @@ Require per-rank numerical references for all five collectives at small and
 large sizes with repeats, both channel types, directed committed fabric
 effects, bounded completion, and clean teardown. The two-host and cacheable
 peer-coherence qualifications follow this same-host gate.
-The <a href="../same-host-pod-rccl-result-20261019/">2026-10-19 local result</a>
-records both modes with <code>--fabric-effect-trace</code> selecting directed evidence,
-but its source capture does not qualify the current rebased tree.
-The <a href="../same-host-pod-rccl-result-20261015/">2026-10-15 result</a> passes this
-gate in both modes with zero local AMDGPU/AMDKFD patches and standard
-VFIO-user peer DMA maps. The earlier
-<a href="../same-host-pod-rccl-result-20261014/">2026-10-14 result</a> remains a
-historical control; its VFIO run used a removed nonstandard peer
-transport.</p>
+See the <a href="../same-host-pod-rccl-gate/#qualification-status">gate's qualification status</a>
+for historical results and the evidence required for a fresh run.</p>
 <h2 id="results-and-reruns">Results and reruns<a class="headerlink" href="#results-and-reruns" title="Permanent link">&para;</a></h2>
 <p>The launcher writes:</p>
 <div class="highlight"><pre><span></span><code>&lt;output&gt;/guest.log

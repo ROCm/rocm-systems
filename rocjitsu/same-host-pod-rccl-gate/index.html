@@ -640,6 +640,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Qualification status">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#historical-runs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Historical runs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
     </ul>
@@ -1619,205 +1636,6 @@
 
               
             
-              
-                
-  
-  
-  
-  
-    
-    
-    
-    
-      
-    
-    
-    <li class="md-nav__item md-nav__item--nested">
-      
-        
-        
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5_2" >
-        
-          
-          <label class="md-nav__link" for="__nav_5_2" id="__nav_5_2_label" tabindex="0">
-            
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Pod qualification
-  
-
-    
-  </span>
-  
-  
-
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_2_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5_2">
-            <span class="md-nav__icon md-icon"></span>
-            
-  
-    Pod qualification
-  
-
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../same-host-pod-rccl-result-20261014/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    RCCL result (2026-10-14)
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../same-host-pod-rccl-result-20261015/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    RCCL result (2026-10-15)
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../same-host-pod-rccl-result-20261019/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    RCCL result (2026-10-19)
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../stock-driver-hardware-path-20261014/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Stock-driver hardware path
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../unpatched-amdgpu-pod-ablation-20261015/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Unpatched AMDGPU ablation
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-              
-            
           </ul>
         </nav>
       
@@ -1910,6 +1728,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Qualification status">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#historical-runs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Historical runs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
     </ul>
@@ -1993,8 +1828,6 @@ emulated KFD mode from the same directory with the current binaries:</p>
 <span class="w">  </span>--rank-binary<span class="w"> </span>build-vfio/tests/hip_rccl_gfx1250_test<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--output<span class="w"> </span>/tmp/rocjitsu-pod-emulated<span class="w"> </span>--timeout<span class="w"> </span><span class="m">600</span>
 </code></pre></div>
-<p>The <a href="../same-host-pod-rccl-result-20261019/">2026-10-19 result</a> preserves
-historical commands and input hashes, not a current-build recipe.</p>
 <h3 id="capture-source-and-runtime-provenance">Capture source and runtime provenance<a class="headerlink" href="#capture-source-and-runtime-provenance" title="Permanent link">&para;</a></h3>
 <p>Immediately before building the binaries for a fresh run, save the source
 revision, tracked changes, and untracked rocJITsu source files. Run these
@@ -2087,29 +1920,40 @@ gates. The selected A0 peer PTE is UC, so this gate does not require a
 cacheable peer mapping. Do not mark it complete from topology enumeration,
 peer-map success, a NET-only RCCL run, or an earlier single-guest result.</p>
 <h2 id="qualification-status">Qualification status<a class="headerlink" href="#qualification-status" title="Permanent link">&para;</a></h2>
-<p>The 2026-10-19 <a href="../same-host-pod-rccl-result-20261019/">local result</a> records
-passing per-rank checks, local fabric effects, NET channels, and clean teardown
-in both modes for its saved binary. Its embedded revision identifies a reported
-checkout, but no build-time working-tree status or patch was saved. The result
-therefore does not qualify the current rebased source. Its
-<code>numerical_mismatches: 0</code> field is inferred from case success and the absence
-of nonzero mismatch diagnostics, not measured for every case and iteration.
-The saved logs identify the selected local GPU index, but do not record a
-runtime GPU identity or a mismatch count for every case and iteration.</p>
 <p>The gate remains open for the current tree. Run both modes again, capture the
 exact source revision and any working-tree patch, hash the executed binaries
 and loaded runtime libraries, and archive the commands, rank logs, and traces.</p>
-<p>The 2026-10-15 <a href="../same-host-pod-rccl-result-20261015/">qualification record</a>
-documents an earlier pass in both modes. Its QEMU/VFIO guests used a
-zero-local-patch AMDGPU/AMDKFD module and standard VFIO-user peer DMA maps,
-with only general QEMU PCIe and libvfio-user BAR bug fixes. All eight ranks
-passed the numerical, local P2P/IPC, cross-node NET, directed fabric-effect,
-bounded-completion, and teardown checks in both modes.</p>
-<p>The earlier <a href="../same-host-pod-rccl-result-20261014/">2026-10-14 record</a> and
-<a href="../unpatched-amdgpu-pod-ablation-20261015/">zero-patch driver ablation</a> are
-historical controls. Their VFIO runs used a removed nonstandard peer
-transport. This gate does not qualify native xGMI, default ROCr IPC mode,
-cacheable peer coherence, or the later two-host run.</p>
+<h3 id="historical-runs">Historical runs<a class="headerlink" href="#historical-runs" title="Permanent link">&para;</a></h3>
+<ul>
+<li><a href="https://github.com/ROCm/rocm-systems/blob/90ddc8aae52bd58adaff8bab6498a140bcb77747/emulation/rocjitsu/docs/same-host-pod-rccl-result-20261019.md">2026-10-19 rerun</a> passed the per-rank checks in both modes.
+  Both controllers enabled <code>--fabric-effect-trace</code> and recorded local
+  P2P/IPC, cross-node NET, and clean teardown. The saved binary reported a
+  revision, but the build-time working-tree changes were unrecorded, leaving
+  the source and VFIO aperture path unverified. The controller inferred
+  <code>numerical_mismatches: 0</code> from passing cases and the absence of nonzero
+  diagnostics. The logs record local GPU indices. Runtime GPU identities
+  and mismatch counts for every case and iteration remain unverified.</li>
+<li><a href="https://github.com/ROCm/rocm-systems/blob/90ddc8aae52bd58adaff8bab6498a140bcb77747/emulation/rocjitsu/docs/same-host-pod-rccl-result-20261015.md">2026-10-15 standard-transport run</a> passed in both modes.
+  The VFIO guests used a zero-local-patch AMDGPU/AMDKFD module and standard
+  VFIO-user peer DMA maps with general QEMU PCIe and libvfio-user BAR fixes.
+  All eight ranks passed the numerical checks, exercised local P2P/IPC and
+  cross-node NET channels, recorded directed fabric effects, and shut down
+  within the time bound. The checkout had uncommitted changes.</li>
+<li><a href="https://github.com/ROCm/rocm-systems/blob/90ddc8aae52bd58adaff8bab6498a140bcb77747/emulation/rocjitsu/docs/same-host-pod-rccl-result-20261014.md">2026-10-14 pod run</a> passed the original gate in both modes.
+  Its emulated KFD result stands for that run. The VFIO result and the
+  <a href="https://github.com/ROCm/rocm-systems/blob/90ddc8aae52bd58adaff8bab6498a140bcb77747/emulation/rocjitsu/docs/unpatched-amdgpu-pod-ablation-20261015.md">2026-10-15 zero-patch driver ablation</a> used a removed
+  nonstandard peer transport. The ablation exercised ordinary peer reads
+  and writes and ran the four-guest workload with a zero-local-patch driver.
+  The original driver error paths require separate coverage.</li>
+<li><a href="https://github.com/ROCm/rocm-systems/blob/90ddc8aae52bd58adaff8bab6498a140bcb77747/emulation/rocjitsu/docs/stock-driver-hardware-path-20261014.md">2026-10-14 two-GPU driver control</a> exercised ordinary
+  peer reads and writes with a locally patched guest driver. Root and switch
+  PCIe AtomicOp support was required for KFD initialization. The observed peer
+  mappings were UC, and the guest test left cacheable peer coherence open.</li>
+</ul>
+<p>Native xGMI, default ROCr IPC mode, cacheable peer coherence, and a two-host
+run remain outside this qualification. The original reports preserve the
+historical commands and hashes. Their raw logs and result JSON were recorded
+in local scratch directories.</p>
 
 
 
