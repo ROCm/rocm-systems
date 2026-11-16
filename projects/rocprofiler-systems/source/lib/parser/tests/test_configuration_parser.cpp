@@ -9,7 +9,7 @@
 #include "parser/schema.hpp"
 
 #include <gtest/gtest.h>
-#include <nlohmann/json.hpp>
+#include <nlohmann/json.hpp>  // NOLINT(misc-include-cleaner): json::parse
 #include <nlohmann/json_fwd.hpp>
 
 #include <stdlib.h>  // POSIX ::getenv and ::unsetenv
