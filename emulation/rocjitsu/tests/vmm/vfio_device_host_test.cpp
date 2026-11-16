@@ -169,6 +169,14 @@ constexpr simdojo::PciId kTestId = {.vendor = 0x1002,
 // Older Linux PCI headers lack this Link Capabilities 2 field mask.
 constexpr uint32_t kSupportedLinkSpeedsVectorMask = 0x000000feu;
 
+// Replies precede the serving loop's quiesce and BAR-publication epilogue.
+// A subsequent nonquiescing request fences that epilogue before direct access.
+bool finish_protocol_request(rocjitsu::test::VfioUserClient &client) {
+  uint32_t regions = 0;
+  uint32_t irqs = 0;
+  return client.device_info(regions, irqs);
+}
+
 bool program_peer_bar0(rocjitsu::test::VfioUserClient &owner, uint64_t base,
                        bool is_64bit = false) {
   const auto low = std::bit_cast<std::array<std::byte, 4>>(static_cast<uint32_t>(base) |
@@ -181,7 +189,8 @@ bool program_peer_bar0(rocjitsu::test::VfioUserClient &owner, uint64_t base,
     return false;
   std::array<std::byte, 4> observed{};
   return owner.region_read(VFU_PCI_DEV_CFG_REGION_IDX, 0x10, observed) &&
-         (std::to_integer<uint32_t>(observed[0]) & 0xf) == (is_64bit ? uint32_t{4} : uint32_t{0});
+         (std::to_integer<uint32_t>(observed[0]) & 0xf) == (is_64bit ? uint32_t{4} : uint32_t{0}) &&
+         finish_protocol_request(owner);
 }
 
 /// @brief A served device plus the client attached to it.
@@ -324,7 +333,9 @@ public:
 
   void dma_map(const simdojo::DmaRegion &) override {}
   void dma_unmap(const simdojo::DmaRegion &) override {}
-  void reset(simdojo::ResetKind) override {}
+  util::Result reset(simdojo::ResetKind, util::DiagnosticEmitter = {}) override {
+    return util::Result::success();
+  }
 
 private:
   ScopedFd backing_;
@@ -781,10 +792,7 @@ TEST(VfioTargetGrants, StandardDescriptorlessMapResolvesOwnerFromPciBar) {
   ASSERT_TRUE(connect(owner, pair.owner_socket()));
 
   constexpr uint32_t kBarBase = 0x30000000;
-  const auto bar = std::bit_cast<std::array<std::byte, 4>>(kBarBase);
-  const auto enable = std::bit_cast<std::array<std::byte, 2>>(uint16_t{0x0002});
-  ASSERT_TRUE(owner.region_write(VFU_PCI_DEV_CFG_REGION_IDX, 0x10, bar));
-  ASSERT_TRUE(owner.region_write(VFU_PCI_DEV_CFG_REGION_IDX, 0x04, enable));
+  ASSERT_TRUE(program_peer_bar0(owner, kBarBase));
 
   constexpr uint64_t kOwnerOffset = 0x1000;
   constexpr uint64_t kIova = kBarBase + kOwnerOffset;
@@ -794,6 +802,7 @@ TEST(VfioTargetGrants, StandardDescriptorlessMapResolvesOwnerFromPciBar) {
                                                   std::byte{0x21}};
   ASSERT_EQ(::pwrite(pair.owner().fd(), kInitial.data(), kInitial.size(), kOwnerOffset), 4);
   ASSERT_TRUE(requester.dma_map(kIova, 0x1000, -1, 0));
+  ASSERT_TRUE(finish_protocol_request(requester));
 
   std::array<std::byte, 4> read{};
   ASSERT_EQ(pair.requester_host().read_outcome(kIova, read), simdojo::DmaAccessOutcome::Complete);
@@ -803,6 +812,7 @@ TEST(VfioTargetGrants, StandardDescriptorlessMapResolvesOwnerFromPciBar) {
   ASSERT_EQ(::pread(pair.owner().fd(), read.data(), read.size(), kOwnerOffset), 4);
   EXPECT_EQ(read, kReplacement);
   ASSERT_TRUE(requester.dma_unmap(kIova, 0x1000));
+  ASSERT_TRUE(finish_protocol_request(requester));
   EXPECT_NE(pair.requester_host().read_outcome(kIova, read), simdojo::DmaAccessOutcome::Complete);
 }
 
@@ -840,6 +850,7 @@ TEST(VfioTargetGrants, StandardMapResolves64BitPeerBarAbove4GiB) {
                                               std::byte{0x78}};
   ASSERT_EQ(::pwrite(pair.owner().fd(), kInitial.data(), kInitial.size(), kOwnerOffset), 4);
   ASSERT_TRUE(requester.dma_map(kBarBase, MappedBarTestDevice::kBarSize, -1, 0));
+  ASSERT_TRUE(finish_protocol_request(requester));
   std::array<std::byte, 4> read{};
   EXPECT_EQ(pair.requester_host().read_outcome(kIova, read), simdojo::DmaAccessOutcome::Complete);
   EXPECT_EQ(read, kInitial);
@@ -859,6 +870,7 @@ TEST(VfioTargetGrants, StandardMapWithMissingFabricRouteLeavesPeerWindowUnreacha
   ASSERT_EQ(::pwrite(pair.owner().fd(), kOwnerBytes.data(), kOwnerBytes.size(), 0), 4);
   // The VFIO-user DMA_MAP completes, but no peer backing is published.
   ASSERT_TRUE(requester.dma_map(kIova, 0x1000, -1, 0));
+  ASSERT_TRUE(finish_protocol_request(requester));
   const auto session = pair.requester_host().target_session_snapshot();
   ASSERT_NE(session, nullptr);
   EXPECT_EQ(pair.grants().prepare_peer(0, session->generation(), kIova, 4, false).kind,
@@ -882,6 +894,7 @@ TEST(VfioTargetGrants, StandardMapWithMissingFabricRouteLeavesPeerWindowUnreacha
                                                     std::byte{8}};
   ASSERT_EQ(::pwrite(ordinary.get(), kOrdinaryBytes.data(), kOrdinaryBytes.size(), 0xffc), 4);
   ASSERT_TRUE(requester.dma_map(kIova - 0x1000, 0x1000, ordinary.get(), 0));
+  ASSERT_TRUE(finish_protocol_request(requester));
   std::array<std::byte, 8> mixed;
   mixed.fill(std::byte{0xee});
   const auto mixed_unchanged = mixed;
@@ -895,6 +908,7 @@ TEST(VfioTargetGrants, StandardMapWithMissingFabricRouteLeavesPeerWindowUnreacha
   ASSERT_EQ(::pread(pair.owner().fd(), bytes.data(), bytes.size(), 0), 4);
   EXPECT_EQ(bytes, kOwnerBytes);
   ASSERT_TRUE(requester.dma_unmap(kIova - 0x1000, 0x1000));
+  ASSERT_TRUE(finish_protocol_request(requester));
   EXPECT_TRUE(requester.dma_unmap(kIova, 0x1000));
   EXPECT_EQ(pair.grants().prepare_peer(0, session->generation(), kIova, 4, false).kind,
             rocjitsu::VfioTargetGrants::PeerKind::Rejected);
@@ -914,6 +928,7 @@ TEST(VfioTargetGrants, BarReprogramAndOwnerResetRevokeStandardPeerMaps) {
   constexpr uint32_t kValue = 0x13579bdf;
   ASSERT_EQ(::pwrite(pair.owner().fd(), &kValue, sizeof(kValue), kOffset), sizeof(kValue));
   ASSERT_TRUE(requester.dma_map(kOldIova, 0x1000, -1, 0));
+  ASSERT_TRUE(finish_protocol_request(requester));
   std::array<std::byte, 4> read{};
   EXPECT_EQ(pair.requester_host().read_outcome(kOldIova, read),
             simdojo::DmaAccessOutcome::Complete);
@@ -922,7 +937,9 @@ TEST(VfioTargetGrants, BarReprogramAndOwnerResetRevokeStandardPeerMaps) {
   EXPECT_NE(pair.requester_host().read_outcome(kOldIova, read),
             simdojo::DmaAccessOutcome::Complete);
   ASSERT_TRUE(requester.dma_unmap(kOldIova, 0x1000));
+  ASSERT_TRUE(finish_protocol_request(requester));
   ASSERT_TRUE(requester.dma_map(kNewIova, 0x1000, -1, 0));
+  ASSERT_TRUE(finish_protocol_request(requester));
   EXPECT_EQ(pair.requester_host().read_outcome(kNewIova, read),
             simdojo::DmaAccessOutcome::Complete);
   uint32_t observed = 0;
@@ -948,19 +965,23 @@ TEST(VfioTargetGrants, StandardPeerMapsValidateWholeMixedTransfer) {
   ASSERT_EQ(::pwrite(pair.owner().fd(), kValue.data(), 4, 0x1ffc), 4);
   ASSERT_EQ(::pwrite(pair.owner().fd(), kValue.data() + 4, 4, 0x2000), 4);
   ASSERT_TRUE(requester.dma_map(kFirstIova, 0x1000, -1, 0));
+  ASSERT_TRUE(finish_protocol_request(requester));
   ASSERT_TRUE(requester.dma_map(kSecondIova, 0x1000, -1, 0));
+  ASSERT_TRUE(finish_protocol_request(requester));
   std::array<std::byte, 8> read{};
   EXPECT_EQ(pair.requester_host().read_outcome(kSecondIova - 4, read),
             simdojo::DmaAccessOutcome::Complete);
   EXPECT_EQ(read, kValue);
 
   ASSERT_TRUE(requester.dma_unmap(kSecondIova, 0x1000));
+  ASSERT_TRUE(finish_protocol_request(requester));
   read.fill(std::byte{0xee});
   const auto unchanged = read;
   EXPECT_NE(pair.requester_host().read_outcome(kSecondIova - 4, read),
             simdojo::DmaAccessOutcome::Complete);
   EXPECT_EQ(read, unchanged);
   ASSERT_TRUE(requester.dma_map(kSecondIova, 0x1000, -1, 0, 0, /*writable=*/false));
+  ASSERT_TRUE(finish_protocol_request(requester));
   EXPECT_NE(pair.requester_host().write_outcome(kSecondIova - 4, kValue),
             simdojo::DmaAccessOutcome::Complete);
   std::array<std::byte, 4> owner_tail{};
@@ -996,6 +1017,7 @@ TEST(VfioTargetGrants, CopiesSealedBackingWithoutCallingFallibleBarAccess) {
   ASSERT_EQ(::pwrite(pair.owner().fd(), seeded.data(), seeded.size(), kOwnerOffset),
             static_cast<ssize_t>(seeded.size()));
   ASSERT_TRUE(requester.dma_map(kIova, kSize, -1, 0));
+  ASSERT_TRUE(finish_protocol_request(requester));
 
   std::array<std::byte, 11> copied{};
   EXPECT_EQ(pair.requester_host().read_outcome(kIova, copied), simdojo::DmaAccessOutcome::Complete);
@@ -1022,6 +1044,7 @@ TEST(VfioTargetGrants, RefusesPeerAtomicsWhileEndpointCompleterIsUnadvertised) {
   ASSERT_EQ(::pwrite(pair.owner().fd(), &kInitial, sizeof(kInitial), kOffset),
             static_cast<ssize_t>(sizeof(kInitial)));
   ASSERT_TRUE(requester.dma_map(kIova, 0x1000, -1, 0));
+  ASSERT_TRUE(finish_protocol_request(requester));
 
   std::array<std::byte, sizeof(kInitial)> bytes{};
   EXPECT_EQ(pair.requester_host().read_outcome(kIova, bytes), simdojo::DmaAccessOutcome::Complete);
@@ -1054,6 +1077,7 @@ TEST(VfioTargetGrants, ClassifiesOnePeerStepAndRetainsSameIovaTombstone) {
   constexpr uint64_t kSize = 0x1000;
   constexpr uint64_t kOffset = 0x100;
   ASSERT_TRUE(requester.dma_map(kIova, kSize, -1, 0, 0, /*writable=*/false));
+  ASSERT_TRUE(finish_protocol_request(requester));
   const auto session = pair.requester_host().target_session_snapshot();
   ASSERT_NE(session, nullptr);
   const uint64_t generation = session->generation();
@@ -1074,6 +1098,7 @@ TEST(VfioTargetGrants, ClassifiesOnePeerStepAndRetainsSameIovaTombstone) {
             rocjitsu::VfioTargetGrants::PeerKind::OrdinaryRam);
 
   ASSERT_TRUE(requester.dma_unmap(kIova, kSize));
+  ASSERT_TRUE(finish_protocol_request(requester));
   EXPECT_EQ(pair.grants().admit_peer(read.snapshot).outcome,
             rocjitsu::amdgpu::VmAccessOutcome::Revoked);
   EXPECT_EQ(pair.grants().prepare_peer(0, generation, kIova + 8, 16, false).kind,
@@ -1083,10 +1108,13 @@ TEST(VfioTargetGrants, ClassifiesOnePeerStepAndRetainsSameIovaTombstone) {
   ASSERT_GE(reused_ram.get(), 0);
   ASSERT_EQ(::ftruncate(reused_ram.get(), kSize), 0);
   ASSERT_TRUE(requester.dma_map(kIova, kSize, reused_ram.get(), 0));
+  ASSERT_TRUE(finish_protocol_request(requester));
   EXPECT_EQ(pair.grants().prepare_peer(0, generation, kIova + 8, 16, false).kind,
             rocjitsu::VfioTargetGrants::PeerKind::Rejected);
   ASSERT_TRUE(requester.dma_unmap(kIova, kSize));
+  ASSERT_TRUE(finish_protocol_request(requester));
   ASSERT_TRUE(requester.dma_map(kIova, kSize, -1, 0, 0, /*writable=*/false));
+  ASSERT_TRUE(finish_protocol_request(requester));
   auto replacement = pair.grants().prepare_peer(0, generation, kIova + 8, 16, false);
   ASSERT_EQ(replacement.kind, rocjitsu::VfioTargetGrants::PeerKind::Ready);
   EXPECT_EQ(replacement.snapshot.map_id, 2u);
@@ -1107,6 +1135,7 @@ TEST(VfioTargetGrants, RejectsPeerSnapshotWithChangedCanonicalBacking) {
 
   constexpr uint64_t kIova = 0x3000'0100;
   ASSERT_TRUE(requester.dma_map(kIova, 0x1000, -1, 0, 0, /*writable=*/false));
+  ASSERT_TRUE(finish_protocol_request(requester));
   const auto session = pair.requester_host().target_session_snapshot();
   ASSERT_NE(session, nullptr);
   auto peer = pair.grants().prepare_peer(0, session->generation(), kIova + 8, 16, false);
@@ -1140,7 +1169,9 @@ TEST(VfioTargetGrants, PinsOverlappingTargetMapsThroughPeerEffect) {
   constexpr uint64_t kIovaB = 0x3400'0120;
   constexpr uint64_t kMapSize = 0x1000;
   ASSERT_TRUE(requester_a.dma_map(kIovaA, kMapSize, -1, 0, 0, /*writable=*/false));
+  ASSERT_TRUE(finish_protocol_request(requester_a));
   ASSERT_TRUE(requester_b.dma_map(kIovaB, kMapSize, -1, 0, 0, /*writable=*/false));
+  ASSERT_TRUE(finish_protocol_request(requester_b));
   const auto session_a = trio.requester_a_host().target_session_snapshot();
   const auto session_b = trio.requester_b_host().target_session_snapshot();
   ASSERT_NE(session_a, nullptr);
@@ -1169,6 +1200,7 @@ TEST(VfioTargetGrants, PinsOverlappingTargetMapsThroughPeerEffect) {
   admitted_a.permit.reset();
   ASSERT_EQ(unmap_b.wait_for(std::chrono::seconds(5)), std::future_status::ready);
   EXPECT_TRUE(unmap_b.get());
+  ASSERT_TRUE(finish_protocol_request(requester_b));
 
   EXPECT_EQ(trio.grants().admit_peer(peer_b.snapshot).outcome,
             rocjitsu::amdgpu::VmAccessOutcome::Revoked);
@@ -1178,6 +1210,7 @@ TEST(VfioTargetGrants, PinsOverlappingTargetMapsThroughPeerEffect) {
 
   constexpr uint64_t kDisjointIova = 0x3400'2000;
   ASSERT_TRUE(requester_b.dma_map(kDisjointIova, kMapSize, -1, 0, 0, /*writable=*/false));
+  ASSERT_TRUE(finish_protocol_request(requester_b));
   auto disjoint =
       trio.grants().prepare_peer(1, session_b->generation(), kDisjointIova + 8, 16, false);
   ASSERT_EQ(disjoint.kind, rocjitsu::VfioTargetGrants::PeerKind::Ready);
@@ -1189,6 +1222,7 @@ TEST(VfioTargetGrants, PinsOverlappingTargetMapsThroughPeerEffect) {
   held_a.permit.reset();
   EXPECT_EQ(disjoint_result, std::future_status::ready);
   EXPECT_TRUE(unmap_disjoint.get());
+  ASSERT_TRUE(finish_protocol_request(requester_b));
 }
 
 TEST(VfioTargetGrants, QuiesceWaitsForAdmittedEffectAndResumesAfterUnrelatedMap) {
@@ -1202,6 +1236,7 @@ TEST(VfioTargetGrants, QuiesceWaitsForAdmittedEffectAndResumesAfterUnrelatedMap)
   constexpr uint64_t kIova = 0x3000'0100;
   constexpr uint64_t kSize = 0x1000;
   ASSERT_TRUE(requester.dma_map(kIova, kSize, -1, 0));
+  ASSERT_TRUE(finish_protocol_request(requester));
   const auto session = pair.requester_host().target_session_snapshot();
   ASSERT_NE(session, nullptr);
   auto peer = pair.grants().prepare_peer(0, session->generation(), kIova, 4, true);
@@ -1218,10 +1253,12 @@ TEST(VfioTargetGrants, QuiesceWaitsForAdmittedEffectAndResumesAfterUnrelatedMap)
   admitted.permit.reset();
   ASSERT_EQ(map.wait_for(std::chrono::seconds(5)), std::future_status::ready);
   ASSERT_TRUE(map.get());
+  ASSERT_TRUE(finish_protocol_request(requester));
   auto after_map = pair.grants().admit_peer(peer.snapshot);
   EXPECT_EQ(after_map.outcome, rocjitsu::amdgpu::VmAccessOutcome::Complete);
   after_map.permit.reset();
   ASSERT_TRUE(requester.dma_unmap(0x1200'0000, kSize));
+  ASSERT_TRUE(finish_protocol_request(requester));
 
   auto entered = pair.grants().admit_peer(peer.snapshot);
   ASSERT_EQ(entered.outcome, rocjitsu::amdgpu::VmAccessOutcome::Complete);
@@ -1230,6 +1267,7 @@ TEST(VfioTargetGrants, QuiesceWaitsForAdmittedEffectAndResumesAfterUnrelatedMap)
   entered.permit.reset();
   ASSERT_EQ(unmap.wait_for(std::chrono::seconds(5)), std::future_status::ready);
   EXPECT_TRUE(unmap.get());
+  ASSERT_TRUE(finish_protocol_request(requester));
   EXPECT_EQ(pair.grants().admit_peer(peer.snapshot).outcome,
             rocjitsu::amdgpu::VmAccessOutcome::Revoked);
 }
@@ -1248,6 +1286,7 @@ TEST(VfioTargetGrants, OwnerResetDrainsIncomingPeerEffectBeforeReply) {
   constexpr uint64_t kIova = 0x3000'0100;
   constexpr uint64_t kSize = 0x1000;
   ASSERT_TRUE(requester.dma_map(kIova, kSize, -1, 0, 0, /*writable=*/false));
+  ASSERT_TRUE(finish_protocol_request(requester));
   const auto session = pair.requester_host().target_session_snapshot();
   ASSERT_NE(session, nullptr);
   auto peer = pair.grants().prepare_peer(0, session->generation(), kIova, 4, false);
@@ -1276,6 +1315,9 @@ TEST(VfioTargetGrants, OwnerResetDrainsIncomingPeerEffectBeforeReply) {
   admitted.permit.reset();
   ASSERT_EQ(reset.wait_for(std::chrono::seconds(5)), std::future_status::ready);
   EXPECT_TRUE(reset.get());
+  EXPECT_NE(pair.grants().admit_peer(peer.snapshot).outcome,
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  ASSERT_TRUE(finish_protocol_request(owner));
   EXPECT_EQ(pair.grants().admit_peer(peer.snapshot).outcome,
             rocjitsu::amdgpu::VmAccessOutcome::Revoked);
   EXPECT_EQ(pair.grants().prepare_peer(0, session->generation(), kIova, 4, false).kind,
@@ -1293,6 +1335,7 @@ TEST(VfioTargetGrants, ConcurrentHostDetachDrainsSharedAdmittedEffect) {
   constexpr uint64_t kIova = 0x3000'0100;
   constexpr uint64_t kSize = 0x1000;
   ASSERT_TRUE(requester.dma_map(kIova, kSize, -1, 0, 0, /*writable=*/false));
+  ASSERT_TRUE(finish_protocol_request(requester));
   const auto session = pair.requester_host().target_session_snapshot();
   ASSERT_NE(session, nullptr);
   auto peer = pair.grants().prepare_peer(0, session->generation(), kIova, 4, false);
@@ -1374,12 +1417,14 @@ TEST(VfioTargetGrants, Gfx12GartPeerReadWriteUsesFabricWithStockPageTableWalks) 
                                               std::byte{0x44}};
   ASSERT_EQ(::pwrite(page_table.get(), ram_data.data(), ram_data.size(), 0x1000), 4);
   ASSERT_TRUE(requester.dma_map(kPageTableIova, 0x3000, page_table.get(), 0));
+  ASSERT_TRUE(finish_protocol_request(requester));
 
   constexpr std::array<std::byte, 4> peer_data{std::byte{0xa1}, std::byte{0xb2}, std::byte{0xc3},
                                                std::byte{0xd4}};
   ASSERT_EQ(
       ::pwrite(pair.owner().fd(), peer_data.data(), peer_data.size(), kFdOffset + kOwnerOffset), 4);
   ASSERT_TRUE(requester.dma_map(kPeerIova, 0x1000, -1, 0));
+  ASSERT_TRUE(finish_protocol_request(requester));
   const auto requester_session = pair.requester_host().target_session_snapshot();
   ASSERT_NE(requester_session, nullptr);
   EXPECT_EQ(
@@ -1498,6 +1543,7 @@ TEST(VfioTargetGrants, Gfx12GartPeerReadWriteUsesFabricWithStockPageTableWalks) 
   EXPECT_EQ(read, replacement);
   EXPECT_EQ(endpoint->diagnostics().effects, 3u);
   ASSERT_TRUE(requester.dma_unmap(kPeerIova, 0x1000));
+  ASSERT_TRUE(finish_protocol_request(requester));
   completed = 0;
   EXPECT_NE(process->read(kAperture, read, completed, token), VmAccessOutcome::Complete);
   EXPECT_EQ(completed, 0u);
@@ -1514,12 +1560,15 @@ TEST(VfioTargetGrants, RejectsUnsealedBackingWithoutLeavingAGrant) {
   constexpr uint64_t kIova = 0x3000'0123;
   constexpr uint64_t kSize = 0x1000;
   ASSERT_TRUE(requester.dma_map(kIova, kSize, -1, 0));
+  ASSERT_TRUE(finish_protocol_request(requester));
   std::array<std::byte, 4> copied{};
   EXPECT_NE(pair.requester_host().read_outcome(kIova, copied), simdojo::DmaAccessOutcome::Complete);
   ASSERT_TRUE(requester.dma_unmap(kIova, kSize));
+  ASSERT_TRUE(finish_protocol_request(requester));
 
   ASSERT_TRUE(pair.owner().seal());
   ASSERT_TRUE(requester.dma_map(kIova, kSize, -1, 0));
+  ASSERT_TRUE(finish_protocol_request(requester));
   EXPECT_EQ(pair.requester_host().read_outcome(kIova, copied), simdojo::DmaAccessOutcome::Complete);
   EXPECT_EQ(pair.owner().bar_calls(), 0u);
 }

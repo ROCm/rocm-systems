@@ -1073,7 +1073,7 @@ TEST_F(GpuDevice, PublishesStableVramBackingIdentityAcrossReset) {
   ASSERT_FALSE(initial.empty());
   const uint64_t backing_id = initial.front().backing_id;
   ASSERT_NE(backing_id, 0u);
-  device_.reset(simdojo::ResetKind::FunctionLevel);
+  ASSERT_TRUE(device_.reset(simdojo::ResetKind::FunctionLevel).succeeded());
   EXPECT_EQ(device_.bars().front().backing_id, backing_id);
 
   rocjitsu::GpuPciDevice other("other", configured_spec(), nullptr);
@@ -1647,7 +1647,7 @@ TEST_F(GpuDeviceMes, ResetDropsDoorbellsQueuedInTheSameTransportGeneration) {
 
 TEST_F(GpuDeviceMes, MesInitializationRewalksAfterReset) {
   const uint64_t before = device_.transport_session_generation();
-  device_.reset(simdojo::ResetKind::FunctionLevel);
+  ASSERT_TRUE(device_.reset(simdojo::ResetKind::FunctionLevel).succeeded());
   EXPECT_NE(device_.transport_session_generation(), before);
 
   configure_gart();
@@ -4449,7 +4449,7 @@ TEST(GpuDeviceShaderApertures, ProgramsGfx1250GuestRegistersByVmid) {
   EXPECT_EQ(mes_wave->private_aperture_base(), kPrivateBase);
   mes_wave->halt();
 
-  device.reset(simdojo::ResetKind::FunctionLevel);
+  ASSERT_TRUE(device.reset(simdojo::ResetKind::FunctionLevel).succeeded());
   EXPECT_FALSE(
       cu->resolve_shader_apertures(3, rocjitsu::amdgpu::ProcessIdentityKind::Vmid).has_value());
   EXPECT_FALSE(

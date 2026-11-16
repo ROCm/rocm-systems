@@ -1570,9 +1570,8 @@ util::Result GpuPciDevice::reset(simdojo::ResetKind kind, util::DiagnosticEmitte
       reopen_doorbell_admission_after_reset();
       return diag.emit() << "VMID-0 GART binding could not be cleared";
     }
-  }
-  if (soc_ != nullptr)
     soc_->clear_vmid_apertures();
+  }
   // Everything a client could have changed goes back to power-on state. Video
   // memory is not cleared here: a mapping already handed out cannot be taken
   // back, which is why a device that exports one is served to a single client.
