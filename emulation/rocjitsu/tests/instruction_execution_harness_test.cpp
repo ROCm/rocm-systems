@@ -8587,37 +8587,48 @@ TEST(Gfx1250CvtScaleTest, UnpackSelectsE8M0ScaleLaneAndByte) {
     EXPECT_EQ(cu->read_vgpr(vb + 16, 16), std::bit_cast<uint32_t>(test.high_result));
   }
 
-  // Compare the literal fast path against the per-lane register scale with
-  // overlapping source and destination tuples and inactive lanes.
-  wf->set_vgpr_msb_mode(0); // The comparison below initializes its scale in bank 0.
+  // Compare literal and register scales with overlapping and disjoint output
+  // tuples, preserving inactive lanes in both layouts.
+  wf->set_vgpr_msb_mode(0);
   const uint64_t mask = 0x55555555u;
   wf->set_exec(mask);
-  for (const auto opcode : {cdna5::kVCvtScalePk8F32Fp8Vop3, cdna5::kVCvtScalePk8F32Bf8Vop3}) {
-    // Block16 cases put unity in only one selected byte; the other half must not use the shortcut.
-    for (unsigned select : {0u, 1u, 2u, 3u, 8u, 10u}) {
-      const uint32_t first = (0x35u << 26) | (uint32_t{opcode} << 16) | (select << 11);
-      const unsigned byte = (select & 8u) ? (select & 2u) : select;
-      const uint32_t literal = 127u << (byte * 8);
-      const uint32_t constant_words[] = {first, 0x0201ff00u, literal};
-      const uint32_t register_words[] = {first | 16u, 0x02021500u};
-      std::unique_ptr<Instruction> constant(decode_valid(*decoder, constant_words));
-      std::unique_ptr<Instruction> reg(decode_valid(*decoder, register_words));
-      ASSERT_TRUE(constant && reg);
-      for (unsigned block = 0; block < 16; ++block) {
-        for (unsigned lane = 0; lane < 32; ++lane) {
-          const uint32_t word = (block * 16 + lane / 2) * 0x01010101u;
-          for (unsigned i = 0; i < 8; ++i) {
-            const uint32_t initial = i == 0 ? word ^ 0x00ff55aau : i == 1 ? ~word : 0xcafef00du;
-            cu->write_vgpr(vb + i, lane, initial);
-            cu->write_vgpr(vb + 16 + i, lane, initial);
+  for (unsigned destination : {0u, 32u}) {
+    SCOPED_TRACE(destination);
+    for (const auto opcode : {cdna5::kVCvtScalePk8F32Fp8Vop3, cdna5::kVCvtScalePk8F32Bf8Vop3}) {
+      SCOPED_TRACE(opcode);
+      for (unsigned select = 0; select < 12; ++select) {
+        SCOPED_TRACE(select);
+        const uint32_t first = (0x35u << 26) | (uint32_t{opcode} << 16) | (select << 11);
+        for (const uint32_t literal :
+             {0x0000007fu, 0x00007f00u, 0x007f0000u, 0x7f000000u, 0x00007f7fu, 0x7f7f0000u,
+              0x7f7f7f7fu, 0x80808080u, 0x807f807fu, 0x7f807f80u}) {
+          SCOPED_TRACE(literal);
+          const uint32_t constant_words[] = {first | destination, 0x0201ff00u, literal};
+          const uint32_t register_words[] = {first | 16u, 0x02021500u};
+          std::unique_ptr<Instruction> constant(decode_valid(*decoder, constant_words));
+          std::unique_ptr<Instruction> reg(decode_valid(*decoder, register_words));
+          ASSERT_TRUE(constant && reg);
+          for (unsigned block = 0; block < 16; ++block) {
+            SCOPED_TRACE(block);
+            for (unsigned lane = 0; lane < 32; ++lane) {
+              const uint32_t word = (block * 16 + lane / 2) * 0x01010101u;
+              for (unsigned i = 0; i < 8; ++i) {
+                const uint32_t initial = i == 0 ? word ^ 0x00ff55aau : i == 1 ? ~word : 0xcafef00du;
+                cu->write_vgpr(vb + i, lane, initial);
+                cu->write_vgpr(vb + 16 + i, lane, initial);
+                cu->write_vgpr(vb + destination + i, lane, initial);
+              }
+              cu->write_vgpr(vb + 10, lane, literal);
+            }
+            ASSERT_TRUE(cu->execute_instruction(reg.get(), *wf).succeeded());
+            ASSERT_TRUE(cu->execute_instruction(constant.get(), *wf).succeeded());
+            for (unsigned i = 0; i < 8; ++i)
+              for (unsigned lane = 0; lane < 32; ++lane)
+                ASSERT_EQ(cu->read_vgpr(vb + destination + i, lane),
+                          cu->read_vgpr(vb + 16 + i, lane))
+                    << "output " << i << ", lane " << lane;
           }
-          cu->write_vgpr(vb + 10, lane, literal);
         }
-        ASSERT_TRUE(cu->execute_instruction(reg.get(), *wf).succeeded());
-        ASSERT_TRUE(cu->execute_instruction(constant.get(), *wf).succeeded());
-        for (unsigned i = 0; i < 8; ++i)
-          for (unsigned lane = 0; lane < 32; ++lane)
-            EXPECT_EQ(cu->read_vgpr(vb + i, lane), cu->read_vgpr(vb + 16 + i, lane));
       }
     }
   }
