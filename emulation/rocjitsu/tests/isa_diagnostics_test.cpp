@@ -6,6 +6,8 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
@@ -31,6 +33,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cstdint>
 #include <format>
 #include <memory>
 #include <span>
@@ -268,10 +271,15 @@ TEST_P(IsaDiagnosticsTest, Gfx942MfmaBroadcastMatchesHardware) {
       for (uint32_t reg = 0; reg < 4; ++reg)
         wf->debug_write_vgpr(32 + reg, lane, 0xdeadbeef);
     }
-    execute(cdna4::build_vop3p_mfma(
-                cdna4::kVMfmaF324x4x116bF32Vop3pMfma,
-                {.vdst = 32, .cbsz = 2, .abid = 1, .src0 = 256, .src1 = 257, .src2 = 128}),
-            0, "v_mfma_f32_4x4x1");
+    const std::array<uint32_t, 2> instruction =
+        GetParam() == ROCJITSU_CODE_ARCH_CDNA3
+            ? cdna3::build_vop3p_mfma(
+                  cdna3::kVMfmaF324x4x116bF32Vop3pMfma,
+                  {.vdst = 32, .cbsz = 2, .abid = 1, .src0 = 256, .src1 = 257, .src2 = 128})
+            : cdna4::build_vop3p_mfma(
+                  cdna4::kVMfmaF324x4x116bF32Vop3pMfma,
+                  {.vdst = 32, .cbsz = 2, .abid = 1, .src0 = 256, .src1 = 257, .src2 = 128});
+    execute(instruction, 0, "v_mfma_f32_4x4x1");
     for (uint32_t lane = 0; lane < 64; ++lane) {
       for (uint32_t reg = 0; reg < 4; ++reg) {
         const uint32_t first =

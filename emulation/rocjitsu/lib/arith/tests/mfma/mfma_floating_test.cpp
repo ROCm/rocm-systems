@@ -12,6 +12,7 @@
 #include <array>
 #include <bit>
 #include <cmath>
+#include <cstdint>
 #include <gtest/gtest.h>
 #include <random>
 #include <vector>
@@ -49,7 +50,7 @@ void arithmetic(Entry entry, uint32_t factor_mask = UINT32_MAX) {
   const auto levels = supported_cpu_levels();
   std::vector<uint64_t> control_cases = {0, 1 | (1 << 3) | (3 << 7), 4 | (13 << 3) | (7 << 7), 7};
   if constexpr (Batch > 1) {
-    const auto legacy_controls = control_cases;
+    const std::vector<uint64_t> legacy_controls = control_cases;
     for (uint64_t controls : legacy_controls) {
       control_cases.push_back(controls | RJ_ARITH_MFMA_A_ADJACENT_BLOCKS);
     }
@@ -145,6 +146,11 @@ void arithmetic(Entry entry, uint32_t factor_mask = UINT32_MAX) {
   }
   EXPECT_EQ(entry(RJ_ARITH_SEMANTICS_LOOSE, 1ULL << 11, nullptr, nullptr, nullptr, nullptr),
             RJ_ARITH_ERROR_INVALID_FLAGS);
+  if constexpr (Batch == 1) {
+    EXPECT_EQ(entry(RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_MFMA_A_ADJACENT_BLOCKS, nullptr, nullptr,
+                    nullptr, nullptr),
+              RJ_ARITH_ERROR_INVALID_FLAGS);
+  }
 }
 
 TEST(MfmaF32, F32ClampsFiniteOverflowAndPreservesInfinities) {

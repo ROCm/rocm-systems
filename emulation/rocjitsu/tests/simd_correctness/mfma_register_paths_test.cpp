@@ -11,6 +11,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <format>
@@ -439,7 +440,7 @@ template <uint32_t M> void expect_batched_broadcast_paths() {
           for (uint32_t reg = 0; reg < M; ++reg)
             fixture.cu->write_vgpr(fixture.vbase + kDestination + reg, lane, 0xdeadbeef);
         }
-        auto &cu = *fixture.cu;
+        amdgpu::ComputeUnitCore &cu = *fixture.cu;
         const uint32_t dst = fixture.vbase + kDestination;
         const uint32_t a = fixture.vbase + kSourceA, b = fixture.vbase + kSourceB;
         if (format == Fmt::F32)
@@ -450,7 +451,7 @@ template <uint32_t M> void expect_batched_broadcast_paths() {
           amdgpu::exec_f32_mfma_bf16_spec<M, M, 4, 64 / M>(cu, dst, a, b, 0, 0, cbsz, 1, 0);
         else
           amdgpu::exec_i32_i8(cu, M, M, 4, 64 / M, dst, a, b, 0, 0, cbsz, 1, 0);
-        const auto result = fixture.snapshot(kDestination, M);
+        const std::vector<uint32_t> result = fixture.snapshot(kDestination, M);
         for (uint32_t lane = 0; lane < 64; ++lane) {
           for (uint32_t reg = 0; reg < M; ++reg) {
             const uint32_t batch = M == 4 ? lane / 4 : reg / (M * M / 64);

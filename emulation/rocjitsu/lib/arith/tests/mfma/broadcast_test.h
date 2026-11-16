@@ -7,6 +7,7 @@
 #include "rj_arith/detail/rj_arith_mfma.h"
 #include <array>
 #include <bit>
+#include <cstdint>
 #include <gtest/gtest.h>
 
 namespace rocjitsu::arith::test {
