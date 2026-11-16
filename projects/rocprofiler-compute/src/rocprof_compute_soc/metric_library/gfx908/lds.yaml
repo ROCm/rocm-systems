@@ -88,9 +88,9 @@ lds.theoretical_bw_util:
   formula: SUM((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4 * TO_INT($lds_banks_per_cu)) / (0.00128 * SUM((End_Timestamp - Start_Timestamp) * $max_sclk * $cu_per_gpu))
   unit: Percent
   description: >-
-    Indicates the maximum amount of bytes that could have been loaded from, stored to,
-    or atomically updated in the LDS divided as percentage of theoretical peak. Does not
-    take into account the execution mask of the wavefront when the instruction was
+    Percentage of the theoretical peak LDS bandwidth used by the maximum number of bytes
+    that could have been loaded from, stored to, or atomically updated in the LDS. Does
+    not take into account the execution mask of the wavefront when the instruction was
     executed.
 lds.unaligned_stall:
   name: LDS Unaligned Stall

@@ -17,12 +17,12 @@ vl1d.bw_util:
   formula: 100 * 64 * SUM(TCP_TOTAL_CACHE_ACCESSES_sum) / SUM(End_Timestamp - Start_Timestamp) / ($max_sclk / 1000 * 64 * $cu_per_gpu)
   unit: Percent
   description: >-
-    The number of bytes looked up in the vL1D cache as a result of VMEM instructions, as
-    a percent of the peak theoretical bandwidth achievable on the specific accelerator.
-    The number of bytes is calculated as the number of cache lines requested multiplied
-    by the cache line size. This value does not consider partial requests, so, for
-    example, if only a single value is requested in a cache line, the data movement will
-    still be counted as a full cache line.
+    Percentage of the peak theoretical vL1D cache bandwidth used by the bytes looked up
+    in the vL1D cache as a result of VMEM instructions. The number of bytes is
+    calculated as the number of cache lines requested multiplied by the cache line size.
+    This value does not consider partial requests, so, for example, if only a single
+    value is requested in a cache line, the data movement will still be counted as a
+    full cache line.
 vl1d.cache_accesses:
   name: vL1D Cache Accesses
   formula: SUM(TCP_TOTAL_CACHE_ACCESSES_sum) / SUM($denom)
