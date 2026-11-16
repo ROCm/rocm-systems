@@ -25,18 +25,27 @@ for itself (workstreams WS-1 and WS-2):
       ``owner`` (pairwise checks inherit ownership from the classes they
       reference and are not separately owner-stamped);
     - every inventory ``id`` is unique;
-    - every ``kind`` / ``disposition`` / ``gating`` value is within the
-      vocabulary the inventory declares for itself (the ``vocabularies:`` block).
+    - each required vocabulary (``kind`` / ``disposition`` / ``gating``) is a
+      non-empty list of non-empty scalar entries (an empty list is rejected
+      because it would vacuously pass every membership check);
+    - every suite ``kind`` / ``disposition`` and every ``execution.gating`` is a
+      non-empty scalar string that is within the vocabulary the inventory declares
+      for itself (the ``vocabularies:`` block); a non-scalar token is a schema
+      error rather than an unhashable set-membership crash;
+    - every suite carries a non-empty ``evidence`` list whose entries are mappings
+      with a non-empty path and claim (paths resolve on disk unless marked
+      ``external:``), matching the coverage-class evidence requirement.
 
   move / retire targets
     - a suite whose ``disposition`` is ``merge_into`` or ``retire`` must name a
       ``disposition_target`` (the destination record, or the replacement
       inventory id(s) that preserve retired coverage); ``migrate`` / ``demote``
-      may omit it. Any target named by a move disposition must resolve to
-      existing inventory id(s); no move may name a missing or self target. A
-      ``retire`` suite must additionally carry a ``retirement`` mapping that
-      documents equivalent-or-stronger replacement coverage, the CI evidence that
-      the replacement runs, and owner approval.
+      may omit it. A ``disposition_target``, when present, must be a non-empty
+      string or a non-empty list of non-empty inventory ids; any target a move
+      disposition names must resolve to existing inventory id(s); no move may name
+      a missing or self target. A ``retire`` suite must additionally carry a
+      ``retirement`` mapping that documents equivalent-or-stronger replacement
+      coverage, the CI evidence that the replacement runs, and owner approval.
 
   coverage refs
     - the coverage model carries its top-level identity block (``schema_version``,
@@ -364,8 +373,12 @@ def check_inventory(inventory, component_dir):
     for name in REQUIRED_VOCABULARIES:
         if name not in vocab:
             errors.append("vocabularies block is missing {!r}".format(name))
-        elif not isinstance(vocab.get(name), list):
-            errors.append("vocabularies {!r} must be a list".format(name))
+        elif not isinstance(vocab.get(name), list) or not vocab.get(name):
+            # A declared vocabulary must be a non-empty list: an empty list would
+            # silently disable the membership check for that category (every value
+            # would vacuously pass), so it is itself a schema error.
+            errors.append(
+                "vocabularies {!r} must be a non-empty list".format(name))
         else:
             # Each declared value must be a plain scalar; a nested list/mapping is
             # a schema error and would otherwise be an unhashable vocabulary entry.
@@ -412,12 +425,21 @@ def check_inventory(inventory, component_dir):
         if "owner" in suite and not _nonempty_str(suite.get("owner")):
             errors.append("suite {!r} owner must be a non-empty string".format(sid))
 
+        # ``kind`` and ``disposition`` are vocabulary tokens: each must be a
+        # non-empty scalar string before it can be compared against the declared
+        # vocabulary set. A list/mapping value is both a schema error and an
+        # unhashable set-membership crash, so it is guarded here and the vocabulary
+        # check is skipped for it.
         kind = suite.get("kind")
-        if kind is not None and kind_vocab and kind not in kind_vocab:
+        if kind is not None and not _nonempty_str(kind):
+            errors.append("suite {!r} kind must be a non-empty string: {!r}".format(sid, kind))
+        elif _nonempty_str(kind) and kind_vocab and kind not in kind_vocab:
             errors.append("suite {!r} kind {!r} not in declared vocabulary".format(sid, kind))
 
         disp = suite.get("disposition")
-        if disp is not None and disp_vocab and disp not in disp_vocab:
+        if disp is not None and not _nonempty_str(disp):
+            errors.append("suite {!r} disposition must be a non-empty string: {!r}".format(sid, disp))
+        elif _nonempty_str(disp) and disp_vocab and disp not in disp_vocab:
             errors.append("suite {!r} disposition {!r} not in declared vocabulary".format(sid, disp))
 
         execution = suite.get("execution")
@@ -425,8 +447,12 @@ def check_inventory(inventory, component_dir):
             exec_missing = REQUIRED_EXECUTION_KEYS - set(execution.keys())
             if exec_missing:
                 errors.append("suite {!r} execution missing keys: {}".format(sid, sorted(exec_missing)))
+            # ``gating`` is a vocabulary token with the same scalar-string
+            # requirement as kind/disposition; guard it before the membership check.
             gating = execution.get("gating")
-            if gating is not None and gating_vocab and gating not in gating_vocab:
+            if gating is not None and not _nonempty_str(gating):
+                errors.append("suite {!r} gating must be a non-empty string: {!r}".format(sid, gating))
+            elif _nonempty_str(gating) and gating_vocab and gating not in gating_vocab:
                 errors.append("suite {!r} gating {!r} not in declared vocabulary".format(sid, gating))
             # The in-repo CI lane names a workflow file (optionally followed by a
             # job/step qualifier); the path must resolve. An external: lane is a
@@ -460,16 +486,33 @@ def check_inventory(inventory, component_dir):
         # id(s) that preserve retired coverage); ``migrate`` / ``demote`` may omit
         # it. Any target a move disposition does name is resolved against the
         # inventory and may not point at the record itself.
-        if disp in MOVE_DISPOSITIONS:
+        if _nonempty_str(disp) and disp in MOVE_DISPOSITIONS:
             target = suite.get("disposition_target")
             if target is None:
                 if disp in REQUIRE_TARGET_DISPOSITIONS:
                     errors.append(
                         "suite {!r} disposition {!r} must name disposition_target".format(sid, disp))
             else:
-                targets = target if isinstance(target, list) else [target]
+                # A disposition_target is a single inventory id or a non-empty list
+                # of ids. Validate the container shape before resolving so a
+                # mapping, an empty value, or a non-string entry is reported as a
+                # schema error rather than crashing the unhashable set-membership
+                # test below.
+                if _nonempty_str(target):
+                    targets = [target]
+                elif isinstance(target, list) and target:
+                    targets = target
+                else:
+                    errors.append(
+                        "suite {!r} disposition_target must be a non-empty string or a "
+                        "non-empty list of inventory ids: {!r}".format(sid, target))
+                    targets = []
                 for tid in targets:
-                    if tid == sid:
+                    if not _nonempty_str(tid):
+                        errors.append(
+                            "suite {!r} disposition_target entry must be a non-empty "
+                            "inventory id: {!r}".format(sid, tid))
+                    elif tid == sid:
                         errors.append("suite {!r} {} target is itself".format(sid, disp))
                     elif tid not in suite_ids:
                         errors.append(
@@ -517,10 +560,14 @@ def check_inventory(inventory, component_dir):
         elif "source" in suite:
             errors.append("suite {!r} source is not a mapping".format(sid))
 
-        # Evidence: each entry must be a mapping carrying both a path and a
-        # claim; the path must resolve on disk unless marked external. A present
-        # but non-list evidence block is a schema error, not an iteration target.
+        # Evidence: the block must be a non-empty list, and each entry must be a
+        # mapping carrying both a path and a claim; the path must resolve on disk
+        # unless marked external. A present but empty or non-list evidence block is
+        # a schema error, not an iteration target. Validated equivalently to the
+        # coverage-model class evidence.
         suite_evidence = suite.get("evidence")
+        if "evidence" in suite and (not isinstance(suite_evidence, list) or not suite_evidence):
+            errors.append("suite {!r} evidence must be a non-empty list".format(sid))
         for ev in suite_evidence if isinstance(suite_evidence, list) else []:
             if not isinstance(ev, dict):
                 errors.append(

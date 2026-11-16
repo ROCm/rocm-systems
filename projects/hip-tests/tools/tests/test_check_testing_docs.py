@@ -339,7 +339,20 @@ class CheckTestingDocsTest(unittest.TestCase):
         _write_docs(self.root, {"test_inventory.yaml": broken})
         results, _ = checker.validate(root=str(self.root))
         self.assertTrue(
-            any("vocabularies 'kind' must be a list" in err
+            any("vocabularies 'kind' must be a non-empty list" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_vocabulary_category_empty_list_is_reported(self):
+        # An empty declared vocabulary would vacuously pass every membership
+        # check, so it is itself a schema error rather than silently disabling
+        # the vocabulary gate for that category.
+        broken = VALID_INVENTORY.replace("  kind: [contract]\n", "  kind: []\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("vocabularies 'kind' must be a non-empty list" in err
                 for err in results["inventory"]),
             msg=results["inventory"],
         )
@@ -619,6 +632,112 @@ class CheckTestingDocsTest(unittest.TestCase):
         results, _ = checker.validate(root=str(self.root))
         self.assertTrue(
             any("vocabularies 'kind' entry must be a non-empty scalar" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    # -- suite vocabulary tokens must be scalar strings (no TypeError) --------
+
+    def test_suite_kind_non_scalar_is_reported(self):
+        # A list-valued (unhashable) kind must be reported as a schema error and
+        # must not crash the vocabulary set-membership test.
+        broken = VALID_INVENTORY.replace(
+            "    kind: contract\n", "    kind: [contract]\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("kind must be a non-empty string" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_suite_disposition_non_scalar_is_reported(self):
+        # A list-valued disposition must be reported and must not crash the
+        # move-disposition set-membership test downstream.
+        broken = VALID_INVENTORY.replace(
+            "    disposition: keep\n", "    disposition: [keep]\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("disposition must be a non-empty string" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_suite_gating_non_scalar_is_reported(self):
+        # A list-valued execution.gating must be reported and must not crash the
+        # gating set-membership test.
+        broken = VALID_INVENTORY.replace(
+            "      gating: trusted\n", "      gating: [trusted]\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("gating must be a non-empty string" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    # -- disposition_target shape --------------------------------------------
+
+    def test_disposition_target_mapping_shape_is_reported(self):
+        # A mapping disposition_target is neither a string nor a list of ids; it
+        # must be reported as a shape error, not crash the id-membership test.
+        broken = VALID_INVENTORY.replace(
+            "    disposition: keep\n",
+            "    disposition: merge_into\n"
+            "    disposition_target:\n      dest: suite-one\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("disposition_target must be a non-empty string or a non-empty list"
+                in err for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_disposition_target_non_string_entry_is_reported(self):
+        # A list disposition_target whose entry is not a non-empty string is a
+        # schema error and must not crash the unhashable set-membership test.
+        broken = VALID_INVENTORY.replace(
+            "    disposition: keep\n",
+            "    disposition: merge_into\n    disposition_target: [123]\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("disposition_target entry must be a non-empty inventory id" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    # -- suite evidence must be a non-empty list -----------------------------
+
+    def test_suite_evidence_empty_list_is_reported(self):
+        # An empty suite evidence list is a schema error, mirroring the
+        # coverage-class evidence requirement.
+        broken = VALID_INVENTORY.replace(
+            '    evidence:\n'
+            '      - path: "external: evidence-outside-repo"\n'
+            "        claim: Built under BUILD_CONTRACT_TESTS.\n",
+            "    evidence: []\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("suite 'suite-one' evidence must be a non-empty list" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_suite_evidence_non_list_is_reported(self):
+        # A present but non-list (scalar) suite evidence block must be reported,
+        # not silently skip the per-entry validation.
+        broken = VALID_INVENTORY.replace(
+            '    evidence:\n'
+            '      - path: "external: evidence-outside-repo"\n'
+            "        claim: Built under BUILD_CONTRACT_TESTS.\n",
+            "    evidence: 5\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("suite 'suite-one' evidence must be a non-empty list" in err
                 for err in results["inventory"]),
             msg=results["inventory"],
         )
