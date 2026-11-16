@@ -18,6 +18,7 @@
 
 #include "compute_unit_test_util.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna3/sgpr_layout.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/builders.h"
@@ -634,6 +635,105 @@ TEST(RegisterAccessTest, SdwaStageSourceAppliesModifiersInSemanticFloatWidth) {
                      /*absolute=*/true, sdwa::SourceModifierFormat::NONE, storage, *fx.wf);
   ASSERT_TRUE(storage.has_value());
   EXPECT_EQ(RegisterAccess(*fx.wf).read_operand(*storage, 1).lane(0), 0x4000u);
+}
+
+TEST(RegisterAccessTest, UnobservedScalarReadReturnsStorageWithoutObservation) {
+  Fixture fx;
+  ASSERT_NE(fx.wf, nullptr);
+  fx.cu->write_sgpr(fx.sgpr_base() + 5, 0x1234'5678u);
+  fx.wf->set_ttmp(2, 0x9ABC'DEF0u);
+  fx.wf->set_vcc_raw(0x0BAD'F00D'0000'0001ull);
+
+  const RegisterAccess regs(*fx.wf);
+  const ScalarRegisterRange sgprs{ScalarRegisterStorage::SGPR, /*index=*/4, /*width=*/2};
+  const ScalarRegisterRange ttmp{ScalarRegisterStorage::TTMP, /*index=*/2, /*width=*/1};
+  const ScalarRegisterRange vcc{ScalarRegisterStorage::VCC, /*index=*/0, /*width=*/2};
+  EXPECT_EQ(regs.read_scalar_unobserved(sgprs, /*offset=*/1),
+            std::optional<uint32_t>{0x1234'5678u});
+  EXPECT_EQ(regs.read_scalar_unobserved(ttmp), std::optional<uint32_t>{0x9ABC'DEF0u});
+  EXPECT_EQ(regs.read_scalar_unobserved(vcc, /*offset=*/1), std::optional<uint32_t>{0x0BAD'F00Du});
+  EXPECT_EQ(regs.read_scalar_unobserved(ttmp, /*offset=*/1), std::nullopt);
+
+  EXPECT_TRUE(fx.plugin->sgpr_reads.empty());
+  EXPECT_TRUE(fx.plugin->scalar_reads.empty());
+}
+
+// VCC and FLAT_SCRATCH read the same through the unobserved path as through
+// the wave's accessors, whether they alias physical SGPRs (CDNA3, when inside
+// the wave's SGPR block) or are wave state (CDNA5, or past the block). M0 and
+// EXEC read from the wave.
+TEST(RegisterAccessTest, UnobservedScalarReadMatchesWaveScalarState) {
+  struct Case {
+    rj_code_arch_t arch;
+    uint32_t requested_sgprs;
+    bool vcc_backed;
+    bool scratch_backed;
+  };
+  // CDNA3 places VCC at alias_end - 2 and FLAT_SCRATCH at alias_end - 6. With
+  // 104 requested SGPRs, alias_end is 108, so VCC (s106) is past the 104-SGPR
+  // block and FLAT_SCRATCH (s102) is inside it.
+  for (const Case test : {Case{ROCJITSU_CODE_ARCH_CDNA3, 32, true, true},
+                          Case{ROCJITSU_CODE_ARCH_CDNA3, kSgprsPerWave, false, true},
+                          Case{ROCJITSU_CODE_ARCH_CDNA5, kSgprsPerWave, false, false}}) {
+    SCOPED_TRACE(test.arch);
+    SCOPED_TRACE(test.requested_sgprs);
+    Fixture fx(test.arch, test.requested_sgprs);
+    ASSERT_NE(fx.wf, nullptr);
+    constexpr uint64_t kVcc = 0x0BAD'F00D'1234'5678ull;
+    constexpr uint64_t kScratch = 0x0000'7FFF'9ABC'DEF0ull;
+    fx.wf->set_vcc_raw(kVcc);
+    fx.wf->set_scratch_base(kScratch);
+    fx.wf->set_m0(0x5555'AAAAu);
+    ASSERT_EQ(fx.wf->vcc(), kVcc);
+    ASSERT_EQ(fx.wf->scratch_base(), kScratch);
+    if (test.arch == ROCJITSU_CODE_ARCH_CDNA3) {
+      const uint32_t end = cdna3::sgpr_alias_end(test.requested_sgprs);
+      EXPECT_EQ(fx.cu->read_sgpr_storage(fx.sgpr_base() + cdna3::vcc_base(end)) == 0x1234'5678u,
+                test.vcc_backed);
+      EXPECT_EQ(fx.cu->read_sgpr_storage(fx.sgpr_base() + cdna3::flat_scratch_base(end)) ==
+                    0x9ABC'DEF0u,
+                test.scratch_backed);
+    }
+
+    const RegisterAccess regs(*fx.wf);
+    const ScalarRegisterRange vcc{ScalarRegisterStorage::VCC, /*index=*/0, /*width=*/2};
+    const ScalarRegisterRange scratch{ScalarRegisterStorage::FLAT_SCRATCH, /*index=*/0,
+                                      /*width=*/2};
+    const ScalarRegisterRange m0{ScalarRegisterStorage::M0, /*index=*/0, /*width=*/1};
+    const ScalarRegisterRange exec{ScalarRegisterStorage::EXEC, /*index=*/0, /*width=*/2};
+    EXPECT_EQ(regs.read_scalar_unobserved(vcc), std::optional<uint32_t>{0x1234'5678u});
+    EXPECT_EQ(regs.read_scalar_unobserved(vcc, /*offset=*/1),
+              std::optional<uint32_t>{0x0BAD'F00Du});
+    EXPECT_EQ(regs.read_scalar_unobserved(scratch), std::optional<uint32_t>{0x9ABC'DEF0u});
+    EXPECT_EQ(regs.read_scalar_unobserved(scratch, /*offset=*/1),
+              std::optional<uint32_t>{0x0000'7FFFu});
+    EXPECT_EQ(regs.read_scalar_unobserved(m0), std::optional<uint32_t>{0x5555'AAAAu});
+    EXPECT_EQ(regs.read_scalar_unobserved(exec),
+              std::optional<uint32_t>{static_cast<uint32_t>(fx.wf->exec_raw())});
+    EXPECT_EQ(regs.read_scalar_unobserved(exec, /*offset=*/1),
+              std::optional<uint32_t>{static_cast<uint32_t>(fx.wf->exec_raw() >> 32)});
+    EXPECT_TRUE(fx.plugin->sgpr_reads.empty());
+    EXPECT_TRUE(fx.plugin->scalar_reads.empty());
+  }
+}
+
+// An SGPR range the wave does not own is not read, as an unowned write is
+// dropped by write_scalar_unobserved(), even when the neighbouring wave holds a
+// nonzero value there.
+TEST(RegisterAccessTest, UnobservedScalarReadRejectsUnownedSgprs) {
+  Fixture fx(ROCJITSU_CODE_ARCH_CDNA4, kSgprsPerWave, /*wavefront_slots=*/2);
+  ASSERT_NE(fx.wf, nullptr);
+  auto *adjacent_wave = fx.cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0, kSgprsPerWave, kVgprsPerWave);
+  ASSERT_NE(adjacent_wave, nullptr);
+  constexpr uint32_t kAdjacentSentinel = 0x1234'5678u;
+  fx.cu->write_sgpr(adjacent_wave->sgpr_alloc().base, kAdjacentSentinel);
+
+  const RegisterAccess regs(*fx.wf);
+  const auto offset = static_cast<uint16_t>(adjacent_wave->sgpr_alloc().base - fx.sgpr_base());
+  const ScalarRegisterRange neighbour{ScalarRegisterStorage::SGPR, offset, /*width=*/1};
+  EXPECT_EQ(fx.cu->read_sgpr_storage(adjacent_wave->sgpr_alloc().base), kAdjacentSentinel);
+  EXPECT_EQ(regs.read_scalar_unobserved(neighbour), std::nullopt);
+  EXPECT_TRUE(fx.plugin->sgpr_reads.empty());
 }
 
 TEST(RegisterAccessTest, ReadRegionObservesAllRegistersAndReturnsLaneSpans) {
