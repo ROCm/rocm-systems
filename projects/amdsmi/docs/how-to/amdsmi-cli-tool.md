@@ -1687,7 +1687,7 @@ GPU: 0
             GTT_MEM: 128.0 MB
             CPU_MEM: 0.0 B
             VRAM_MEM: 4.0 GB
-        MEM: 4.13 GB
+        MEM_USAGE: 4.13 GB
         USAGE:
             GFX: 52345678 ns
             ENC: 0 ns

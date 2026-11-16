@@ -1437,7 +1437,7 @@ typedef uint32_t amdsmi_process_handle_t;
 typedef struct {
   char name[AMDSMI_MAX_STRING_LENGTH];
   amdsmi_process_handle_t pid;
-  uint64_t mem;  //!< In Bytes
+  uint64_t mem;  //!< In Bytes; on Linux, memory_usage's vram_mem + gtt_mem + cpu_mem
   struct engine_usage_ {
     uint64_t gfx;  //!< In nano-secs
     uint64_t enc;  //!< In nano-secs
@@ -1446,7 +1446,7 @@ typedef struct {
   struct memory_usage_ {
     uint64_t gtt_mem;   //!< In Bytes
     uint64_t cpu_mem;   //!< In Bytes
-    uint64_t vram_mem;  //!< In Bytes
+    uint64_t vram_mem;  //!< In Bytes; on Linux, the larger of KFD's and DRM fdinfo's counts
     uint32_t reserved[10];
   } memory_usage;  //!< In Bytes
   char container_name[AMDSMI_MAX_STRING_LENGTH];
@@ -1463,7 +1463,7 @@ typedef struct {
  */
 typedef struct {
   uint32_t gpu_index;  //!< GPU index
-  uint64_t mem;        //!< Total memory in bytes
+  uint64_t mem;        //!< Total memory in bytes: vram_mem + gtt_mem + cpu_mem
   struct {
     uint64_t gfx;  //!< GFX engine usage in nanoseconds
     uint64_t enc;  //!< ENC engine usage in nanoseconds
@@ -1472,7 +1472,7 @@ typedef struct {
   struct {
     uint64_t gtt_mem;   //!< GTT memory in bytes
     uint64_t cpu_mem;   //!< CPU memory in bytes
-    uint64_t vram_mem;  //!< VRAM memory in bytes
+    uint64_t vram_mem;  //!< VRAM in bytes: the larger of KFD's and DRM fdinfo's counts
     uint32_t reserved[10];
   } memory_usage;
   uint32_t cu_occupancy;  //!< Number of CUs utilized
@@ -8740,6 +8740,12 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
  *        The max_processes is always changed to reflect the actual size of
  *        list of processes running, so the caller knows where it is at.
  *
+ *  @note On Linux, memory_usage holds the memory a process uses on this GPU, in bytes:
+ *        gtt_mem and cpu_mem as its DRM fdinfo reports them, and vram_mem the larger of
+ *        the VRAM KFD reports for it (its allocations, mapped or not) and the VRAM its
+ *        fdinfo reports (the buffers its DRM clients map, graphics ones too). mem is the
+ *        sum of the three.
+ *
  *  @param[in]      processor_handle Device which to query
  *
  *  @param[in,out]  max_processes Reference to the size of the list buffer in
@@ -8773,15 +8779,18 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
  * not filled. Without KFD the list is empty. A process whose KFD statistics cannot be read is
  * still listed, with cu_occupancy, evicted_time and sdma_usage all-ones (not available) and memory
  * sizes from its fdinfo only (0 if unreadable). So is a running process whose GPUs cannot be read
- * from KFD, on each GPU that its DRM fdinfo shows.
+ * from KFD, if its DRM fdinfo shows this GPU. If its fdinfo cannot be read either, the listing
+ * fails with the error from KFD, unless that error is that the caller may not read which GPUs it
+ * uses (::AMDSMI_STATUS_NO_PERM from amdsmi_get_gpu_compute_process_gpus()): such a process is
+ * left out, as is one that exited.
  *
  *  @note In a PID namespace other than the host's, such as that of a container that does not
  *  share the host's, the list holds the processes of that namespace that have /dev/kfd open,
  *  by their PIDs there, on the GPUs amdsmi_get_gpu_compute_process_gpus() reports for them. It
  *  leaves out the processes whose open files the caller may not read, such as another user's
  *  when the caller lacks CAP_SYS_PTRACE. Their name, container_name, memory_usage and
- *  engine_usage come from their own files, mem is the sum of their memory_usage values, and
- *  cu_occupancy, evicted_time and sdma_usage are all-ones (not available).
+ *  engine_usage come from their own files, and cu_occupancy, evicted_time and sdma_usage are
+ *  all-ones (not available).
  */
 amdsmi_status_t amdsmi_get_gpu_process_list(amdsmi_processor_handle processor_handle,
                                             uint32_t* max_processes, amdsmi_proc_info_t* list);
@@ -8808,10 +8817,12 @@ amdsmi_status_t amdsmi_get_gpu_process_list(amdsmi_processor_handle processor_ha
  *                            | ::AMDSMI_STATUS_OUT_OF_RESOURCES if max_processes was too small,
  *                            | ::AMDSMI_STATUS_INVAL if processor_handles or max_processes is NULL,
  * or num_processors is 0,
- *                            | ::AMDSMI_STATUS_RETRY if processes kept starting while a GPU's
- * list was read; call again. Handles that do not resolve to a GPU are skipped. When a GPU's
- * processes cannot be listed, the error from that listing is returned, which can be any status, and
- * nothing is filled. Each GPU's processes are listed as amdsmi_get_gpu_process_list() lists them.
+ *                            | ::AMDSMI_STATUS_RETRY if processes kept starting while each GPU's
+ * list was read; call again. Handles that do not resolve to a GPU are skipped. Each GPU's processes
+ * are listed as amdsmi_get_gpu_process_list() lists them. A GPU whose processes cannot be listed is
+ * left out, and the result lacks its processes; amdsmi_get_gpu_process_list() returns the error for
+ * it. Only when every GPU's listing fails is an error returned, the first GPU's, which can be any
+ * status, and nothing is filled.
  */
 amdsmi_status_t amdsmi_get_gpu_process_list_by_pid(amdsmi_processor_handle* processor_handles,
                                                    uint32_t num_processors,

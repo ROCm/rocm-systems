@@ -1829,14 +1829,16 @@ Field | Description
 ---|---
 `name` | Name of process. If user does not have permission this will be "N/A"
 `pid` | Process ID
-`mem` | Total memory usage by GPU during process in Bytes (sum of the process memory is not expected to be the total memory usage.)
+`mem` | Memory the process uses on this GPU in Bytes: the sum of its `memory_usage` values (sum of the process memory is not expected to be the total memory usage.)
 `engine_usage` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`gfx`</td><td>GFX engine usage in ns</td></tr><tr><td>`enc`</td><td>Encode engine usage in ns</td></tr></tbody></table>
-`memory_usage` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`gtt_mem`</td><td>GTT memory usage in Bytes</td></tr><tr><td>`cpu_mem`</td><td>CPU memory usage in Bytes</td></tr><tr><td>`vram_mem`</td><td>Process VRAM memory usage in Bytes</td></tr> </tbody></table>
+`memory_usage` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`gtt_mem`</td><td>GTT memory usage in Bytes</td></tr><tr><td>`cpu_mem`</td><td>CPU memory usage in Bytes</td></tr><tr><td>`vram_mem`</td><td>VRAM the process uses in Bytes: the larger of the VRAM KFD reports for it (its allocations, mapped or not) and the VRAM its DRM fdinfo reports (the buffers its DRM clients map, graphics ones too)</td></tr> </tbody></table>
 `cu_occupancy` | Number of Compute Units utilized
 `evicted_time` | Time that queues are evicted on a GPU in milliseconds
 `sdma_usage`   | SDMA usage in microseconds
 
-note: In a PID namespace other than the host's, such as that of a container that does not share the host's, the list holds the processes of that namespace that have /dev/kfd open, by their PIDs there, on the GPUs `amdsmi_get_gpu_compute_process_gpus` reports for them. It leaves out the processes whose open files the caller may not read, such as another user's when the caller lacks CAP_SYS_PTRACE. Their `cu_occupancy`, `evicted_time` and `sdma_usage` are "N/A", and `mem` is the sum of their `memory_usage` values.
+note: In a PID namespace other than the host's, such as that of a container that does not share the host's, the list holds the processes of that namespace that have /dev/kfd open, by their PIDs there, on the GPUs `amdsmi_get_gpu_compute_process_gpus` reports for them. It leaves out the processes whose open files the caller may not read, such as another user's when the caller lacks CAP_SYS_PTRACE. Their `cu_occupancy`, `evicted_time` and `sdma_usage` are "N/A".
+
+note: A running process whose GPUs cannot be read from KFD is listed if its DRM fdinfo shows this GPU. If its fdinfo cannot be read either, the call raises the error from KFD, unless that error is `AMDSMI_STATUS_NO_PERM` (the caller may not read which GPUs the process uses): such a process is left out, as is one that exited.
 
 Exceptions that can be thrown by `amdsmi_get_gpu_process_list` function:
 
@@ -1851,6 +1853,8 @@ Exceptions that can be thrown by `amdsmi_get_gpu_process_list` function:
 - `AMDSMI_STATUS_INVAL` - Invalid parameters
 - `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
 - `AMDSMI_STATUS_NO_PERM` - Permission Denied
+- `AMDSMI_STATUS_RETRY` - Processes kept starting while the list was read; call again
+- `AMDSMI_STATUS_OUT_OF_RESOURCES` - More than 1024 processes use the GPU
 
 Example:
 
@@ -1877,7 +1881,7 @@ finally:
 
 ### amdsmi_get_gpu_process_list_by_pid
 
-Description: Returns the list of processes running across one or more GPUs, grouped by PID. Each entry aggregates the per-GPU usage for every GPU the process is active on; the calling process is omitted. Requires root level access to display root process names; otherwise the name is reported as "N/A".
+Description: Returns the list of processes running across one or more GPUs, grouped by PID. Each entry aggregates the per-GPU usage for every GPU the process is active on; the calling process is omitted. Requires root level access to display root process names; otherwise the name is reported as "N/A". A GPU whose processes cannot be listed is left out, and the result lacks its processes (`amdsmi_get_gpu_process_list` raises the error for it); the call raises only when no GPU's processes can be listed.
 
 Input parameters:
 
@@ -1890,12 +1894,19 @@ Field | Description
 `pid` | Process ID
 `name` | Name of process. If user does not have permission this will be "N/A"
 `container_name` | Identifier of the container the process runs in, or empty if it is not in a container. For Docker, containerd, CRI-O and Podman this is the full 64-character container ID; for LXC it is the container name
-`gpus` | <table><thead><tr><th>Subfield</th><th>Description</th></tr></thead><tbody><tr><td>`gpu_index`</td><td>GPU index the entry refers to</td></tr><tr><td>`mem`</td><td>Total memory usage on this GPU in Bytes</td></tr><tr><td>`engine_usage`</td><td>`gfx` and `enc` engine usage in ns</td></tr><tr><td>`memory_usage`</td><td>`gtt_mem`, `cpu_mem`, and `vram_mem` usage in Bytes</td></tr><tr><td>`cu_occupancy`</td><td>Number of Compute Units utilized</td></tr><tr><td>`sdma_usage`</td><td>SDMA usage in microseconds</td></tr><tr><td>`evicted_time`</td><td>Time queues are evicted on this GPU in milliseconds</td></tr></tbody></table>
+`gpus` | <table><thead><tr><th>Subfield</th><th>Description</th></tr></thead><tbody><tr><td>`gpu_index`</td><td>GPU index the entry refers to</td></tr><tr><td>`mem`</td><td>Memory the process uses on this GPU in Bytes: the sum of its `memory_usage` values</td></tr><tr><td>`engine_usage`</td><td>`gfx` and `enc` engine usage in ns</td></tr><tr><td>`memory_usage`</td><td>`gtt_mem`, `cpu_mem`, and `vram_mem` usage in Bytes</td></tr><tr><td>`cu_occupancy`</td><td>Number of Compute Units utilized</td></tr><tr><td>`sdma_usage`</td><td>SDMA usage in microseconds</td></tr><tr><td>`evicted_time`</td><td>Time queues are evicted on this GPU in milliseconds</td></tr></tbody></table>
 
 Exceptions that can be thrown by `amdsmi_get_gpu_process_list_by_pid` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_INVAL` - Invalid parameters, such as an empty list of handles
+- `AMDSMI_STATUS_RETRY` - Processes kept starting while each GPU's list was read; call again
+- `AMDSMI_STATUS_OUT_OF_RESOURCES` - More than 1024 processes use the GPUs
+- Any other status that `amdsmi_get_gpu_process_list` raises, for the first GPU, when no GPU's list can be read
 
 Example:
 
@@ -5316,6 +5327,7 @@ Exceptions that can be thrown by `amdsmi_get_gpu_compute_process_gpus` function:
 - `AMDSMI_STATUS_INVAL` - Invalid parameters
 - `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
 - `AMDSMI_STATUS_NO_PERM` - Permission Denied
+- `AMDSMI_STATUS_INSUFFICIENT_SIZE` - The process started using another GPU after each of three counts
 
 Example:
 
