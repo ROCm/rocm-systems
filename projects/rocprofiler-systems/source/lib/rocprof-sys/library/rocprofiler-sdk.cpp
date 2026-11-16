@@ -10,6 +10,7 @@
 #include "common/env_vars.hpp"
 #include "common/environment.hpp"
 #include "common/path.hpp"
+#include "common/string_utility.hpp"
 #include "core/agent.hpp"
 #include "core/agent_manager.hpp"
 #include "core/common.hpp"
@@ -552,18 +553,18 @@ create_agent_profile(rocprofiler_agent_id_t          agent_id,
             name_v              = itr.substr(0, pos);
             auto const dev_id_s = itr.substr(pos + device_qualifier.length());
 
-            if(dev_id_s.empty() ||
-               dev_id_s.find_first_not_of("0123456789") != std::string::npos)
+            auto const dev_id_parsed = rocprofsys::utility::string::safe_stoul(dev_id_s);
+            if(dev_id_parsed.is_error())
             {
                 LOG_CRITICAL("invalid device qualifier format (':device=N) "
-                             "where N is the GPU id: {}",
-                             itr);
+                             "where N is the GPU id: {} ({})",
+                             itr, dev_id_parsed.error());
                 ::rocprofsys::state::process::set(
                     ::rocprofsys::state::process::Finalized);
                 std::abort();
             }
 
-            auto dev_id_v = std::stoul(dev_id_s);
+            auto const dev_id_v = dev_id_parsed.value();
 
             LOG_DEBUG("tool agent device id={}, name={}, device_id={}",
                       agent_v.device_type_index, name_v, dev_id_v);
