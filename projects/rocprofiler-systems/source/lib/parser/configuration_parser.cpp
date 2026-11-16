@@ -12,21 +12,24 @@
 #include "parser/help.hpp"
 #include "parser/parse_result.hpp"
 #include "parser/precedence.hpp"
+#include "parser/preset_parser.hpp"
 #include "parser/schema.hpp"
 #include "parser/schema_validator.hpp"
 #include "parser/value_text.hpp"
 
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 #include <nlohmann/json.hpp>
 #include <nlohmann/json_fwd.hpp>
 
 #include <stdlib.h>  // POSIX ::setenv
 
 #include <algorithm>
-#include <cstdint>
 #include <exception>
+#include <iterator>
 #include <memory>
 #include <optional>
+#include <ranges>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -45,12 +48,6 @@ constexpr int              k_overwrite         = 1;
 
 using json = nlohmann::json;
 
-void
-append_errors(std::vector<std::string>& dest, const std::vector<std::string>& extra)
-{
-    dest.insert(dest.end(), extra.begin(), extra.end());
-}
-
 std::string_view
 source_label(config_source source)
 {
@@ -61,8 +58,10 @@ source_label(config_source source)
         case config_source::environment: return "environment";
         case config_source::preset: return "preset";
         case config_source::command_line: return "command line";
+        default:
+            throw std::logic_error(
+                fmt::format("config_source {} not handled", static_cast<int>(source)));
     }
-    return "value";
 }
 
 /// The part of a refused @p value to name: the first element of a list that @p backend
@@ -91,12 +90,9 @@ reject_backend_values(const schema& config_schema, const backend_registry& backe
 {
     for(auto itr = parsed.values.begin(); itr != parsed.values.end();)
     {
-        const auto*              param = config_schema.find_param(itr->first);
-        const backend_interface* found = nullptr;
-        if(param != nullptr && param->backend && !param->backend->empty())
-        {
-            found = backends.find(*param->backend);
-        }
+        const auto* param = config_schema.find_param(itr->first);
+        const auto* found =
+            param != nullptr && param->backend ? backends.find(*param->backend) : nullptr;
         const auto text = format_value(itr->second);
         if(found == nullptr || found->accepts(*param, text))
         {
@@ -122,52 +118,39 @@ std::optional<std::string>
 command_line_text(const parse_result& command_line, std::string_view param_id)
 {
     const auto found = command_line.values.find(param_id);
-    if(found == command_line.values.end())
-    {
-        return std::nullopt;
-    }
-    return format_value(found->second);
+    return found == command_line.values.end()
+               ? std::nullopt
+               : std::optional{ format_value(found->second) };
 }
 
 env_parser
 make_env(const env_parser::lookup_t& lookup)
 {
-    if(lookup)
-    {
-        return env_parser{ lookup };
-    }
-    return env_parser::from_process();
+    return lookup ? env_parser{ lookup } : env_parser::from_process();
 }
 
 parse_result
 read_config_file(const schema& config_schema, const std::optional<std::string>& path)
 {
-    if(!path)
-    {
-        return {};
-    }
-    return file_parser{}.parse_file(config_schema, *path);
+    return path ? file_parser{}.parse_file(config_schema, *path) : parse_result{};
 }
 
 parse_result
 read_preset(const schema& config_schema, const std::optional<std::string>& name,
-            const configuration_parser::preset_lookup_t& lookup,
-            std::vector<std::string>&                    errors)
+            const configuration_parser::preset_lookup_t& lookup)
 {
+    parse_result result;
     if(!name || name->empty())
     {
-        return {};
+        return result;
     }
-    if(!lookup)
-    {
-        errors.push_back(fmt::format("preset '{}' was not applied", *name));
-        return {};
-    }
-    const auto settings = lookup(*name);
+    const auto settings = lookup ? lookup(*name) : preset_parser::settings_t{};
     if(settings.empty())
     {
-        errors.push_back(fmt::format("unknown preset '{}'", *name));
-        return {};
+        result.errors.push_back(lookup
+                                    ? fmt::format("unknown preset '{}'", *name)
+                                    : fmt::format("preset '{}' was not applied", *name));
+        return result;
     }
     return preset_parser{}.parse(config_schema, settings);
 }
@@ -201,6 +184,8 @@ read_sources(const parse_request& request)
     const auto& catalog = request.config_schema;
     const auto  checked = [&request](config_source source, parse_result parsed) {
         reject_backend_values(request.config_schema, request.backends, source, parsed);
+        request.errors.insert(request.errors.end(), parsed.errors.begin(),
+                               parsed.errors.end());
         return parsed;
     };
     collected_input collected;
@@ -215,21 +200,10 @@ read_sources(const parse_request& request)
     collected.file =
         checked(config_source::file,
                 read_config_file(catalog, command_line_text(given, k_config_file_param)));
-    collected.preset =
-        checked(config_source::preset,
-                read_preset(catalog, command_line_text(given, k_preset_param),
-                            request.presets, request.errors));
+    collected.preset = checked(
+        config_source::preset,
+        read_preset(catalog, command_line_text(given, k_preset_param), request.presets));
     return collected;
-}
-
-void
-collect_errors(std::vector<std::string>& errors, const collected_input& collected)
-{
-    append_errors(errors, collected.defaults.errors);
-    append_errors(errors, collected.environment.errors);
-    append_errors(errors, collected.command_line.errors);
-    append_errors(errors, collected.file.errors);
-    append_errors(errors, collected.preset.errors);
 }
 
 resolved_config
@@ -250,44 +224,23 @@ add_backend_defaults(resolved_config& resolved, const schema& config_schema,
 {
     for(const auto& param : config_schema.params())
     {
-        const auto already_set =
-            param.default_value.has_value() || resolved.contains(param.id);
-        if(!param.backend || param.backend->empty() || already_set)
+        const auto* found =
+            param.backend && !param.default_value && !resolved.contains(param.id)
+                ? backends.find(*param.backend)
+                : nullptr;
+        const auto fallback =
+            found == nullptr ? std::nullopt : found->default_value(param);
+        if(!fallback || fallback->empty() || !found->accepts(param, *fallback))
         {
             continue;
         }
-        const auto* found = backends.find(*param.backend);
-        if(found == nullptr)
+        if(const auto parsed = parse_value(param, *fallback))
         {
-            continue;
+            resolved.emplace(param.id,
+                             resolved_value{ .value  = *parsed,
+                                             .source = config_source::default_value });
         }
-        const auto fallback = found->default_value(param).value_or("");
-        if(fallback.empty() || !found->accepts(param, fallback))
-        {
-            continue;
-        }
-        const auto parsed = parse_value(param, fallback);
-        if(!parsed)
-        {
-            continue;
-        }
-        resolved.emplace(
-            param.id,
-            resolved_value{ .value = *parsed, .source = config_source::default_value });
     }
-}
-
-bool
-keeps_existing(const resolved_config& resolved, std::string_view target,
-               config_source source)
-{
-    const auto found = resolved.find(target);
-    if(found == resolved.end())
-    {
-        return false;
-    }
-    return static_cast<std::uint8_t>(found->second.source) >
-           static_cast<std::uint8_t>(source);
 }
 
 /// Write what @p param assigns, under @p source, to each target that does not have a
@@ -301,7 +254,8 @@ assign_targets(resolved_config& resolved, const schema& config_schema,
     {
         const auto* target = config_schema.find_param(target_id);
         const auto parsed = target == nullptr ? std::nullopt : parse_value(*target, text);
-        if(parsed && !keeps_existing(resolved, target_id, source))
+        const auto existing = resolved.find(target_id);
+        if(parsed && (existing == resolved.end() || existing->second.source <= source))
         {
             resolved.insert_or_assign(
                 target_id, resolved_value{ .value = *parsed, .source = source });
@@ -337,31 +291,21 @@ append_violations(std::vector<std::string>& errors, const schema& config_schema,
     typed_values_t values;
     for(const auto& [param_id, item] : resolved)
     {
-        if(item.source == config_source::default_value)
+        if(item.source != config_source::default_value)
         {
-            continue;
+            values.emplace(param_id, item.value);
         }
-        values.emplace(param_id, item.value);
     }
-    for(const auto& item : validate_values(config_schema, values))
-    {
-        errors.push_back(item.message);
-    }
+    std::ranges::transform(validate_values(config_schema, values),
+                           std::back_inserter(errors), &violation::message);
 }
 
 std::string
 catalog_errors(const schema& catalog)
 {
-    std::string message;
-    for(const auto& item : validate_schema(catalog))
-    {
-        if(!message.empty())
-        {
-            message.append("; ");
-        }
-        message.append(item.message);
-    }
-    return message;
+    const auto problems = validate_schema(catalog);
+    return fmt::format(
+        "{}", fmt::join(problems | std::views::transform(&violation::message), "; "));
 }
 
 void
@@ -476,7 +420,6 @@ configuration_parser::parse(const std::vector<std::string>& arguments)
     auto       collected  = read_sources(request);
     m_command             = std::move(collected.command_line.command);
     m_unparsed            = std::move(collected.command_line.unparsed);
-    collect_errors(m_errors, collected);
 
     auto resolved = resolve_collected(collected);
     add_backend_defaults(resolved, request.config_schema, *m_backends);
@@ -508,14 +451,12 @@ configuration_parser::export_as_environment() const
         return exported;
     }
     const auto schema_ptr = m_store->config_schema();
-    for(const auto& [param_id, value] : m_store->values())
+    for(const auto& slot : m_store->slots())
     {
-        const auto* param = schema_ptr->find_param(param_id);
-        const auto  origin =
-            m_store->source_of(param_id).value_or(config_source::default_value);
-        if(param != nullptr && param->env && origin != config_source::default_value)
+        const auto* param = schema_ptr->find_param(slot.id);
+        if(param != nullptr && param->env && slot.source != config_source::default_value)
         {
-            exported.emplace(*param->env, value);
+            exported.emplace(*param->env, format_value(slot.value));
         }
     }
     return exported;
