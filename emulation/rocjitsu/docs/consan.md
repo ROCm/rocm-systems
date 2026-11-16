@@ -216,6 +216,9 @@ instructions can overwrite it.
 Barrier qualification recognizes an original LDS drain followed by a
 full-workgroup barrier: `s_barrier` on gfx942/gfx950/gfx1100, or a matching
 signal/wait pair on gfx1201/gfx1250. It requires at least two waves per workgroup.
+Split-barrier drains may use `s_wait_dscnt` or a combined load/DS or store/DS
+wait, provided the DS threshold is zero. The additional load/store threshold
+may be nonzero.
 In acyclic flow, every path to an exit must pass through each barrier group.
 A barrier loop may instead use one basic block with a conditional self-backedge
 and a forward exit, with all barrier groups inside that block. A preheader may

@@ -242,6 +242,70 @@ TEST_P(ConSanTargetStatic, OriginalDrainMustWaitForAllPriorLds) {
   }
 }
 
+TEST(ConSanBarrierStatic, CombinedDrainsRequireZeroDsThreshold) {
+  for (const test::TargetMode mode : {test::TargetMode{.target = "gfx1201", .wave_size = 32},
+                                      {.target = "gfx1201", .wave_size = 64},
+                                      {.target = "gfx1250", .wave_size = 32}}) {
+    SCOPED_TRACE(mode.target);
+    SCOPED_TRACE(mode.wave_size);
+    const TargetProfile &target = *target_profile(mode.target);
+    const bool rdna = target.arch == ROCJITSU_CODE_ARCH_RDNA4;
+    for (const char *fixture : {"native-15", "native-27"}) {
+      SCOPED_TRACE(fixture);
+      const std::vector<uint8_t> original =
+          test::read_fixture(test::target_fixture_path(mode, fixture));
+      ASSERT_FALSE(original.empty());
+      InputError error;
+      const FailureOr<InputProgram> input =
+          build_input_program(original, target, "lds_producer_consumer", error);
+      ASSERT_TRUE(input.succeeded()) << error.message;
+      for (const uint32_t opcode :
+           {rdna ? rdna4::kSWaitLoadcntDscntSopp : cdna5::kSWaitLoadcntDscntSopp,
+            rdna ? rdna4::kSWaitStorecntDscntSopp : cdna5::kSWaitStorecntDscntSopp}) {
+        SCOPED_TRACE(opcode);
+        for (const uint32_t other_threshold : {0u, 3u, 63u})
+          for (const uint32_t ds_threshold : {0u, 1u, 63u}) {
+            SCOPED_TRACE(other_threshold);
+            SCOPED_TRACE(ds_threshold);
+            std::vector<uint8_t> changed = original;
+            const FailureOr<uint32_t> drain =
+                build_sopp_encoding(target.arch, opcode, (other_threshold << 8) | ds_threshold);
+            ASSERT_TRUE(drain.succeeded());
+            for (const BarrierFacts &barrier : input.value().barriers)
+              ASSERT_TRUE(wire::write_u32(
+                  changed, input.value().text_file_offset + barrier.original_drain, drain.value()));
+            const FailureOr<InputProgram> qualified =
+                build_input_program(changed, target, "lds_producer_consumer", error);
+            if (ds_threshold != 0) {
+              EXPECT_TRUE(qualified.failed());
+              EXPECT_EQ(error.code, InputErrorCode::UnsupportedSynchronization) << error.message;
+              continue;
+            }
+            EXPECT_TRUE(qualified.succeeded()) << error.message;
+            if (qualified.failed())
+              continue;
+            EXPECT_EQ(qualified.value().repeated, input.value().repeated);
+            const FailureOr<PreparedArtifact> artifact =
+                prepare(changed, target, "lds_producer_consumer", error);
+            ASSERT_TRUE(artifact.succeeded()) << error.message;
+            EXPECT_TRUE(validate_prepared(changed, artifact.value(), error).succeeded())
+                << error.message;
+          }
+      }
+      std::vector<uint8_t> missing_ds = original;
+      const FailureOr<uint32_t> store_only = build_sopp_encoding(
+          target.arch, rdna ? rdna4::kSWaitStorecntSopp : cdna5::kSWaitStorecntSopp, 0);
+      ASSERT_TRUE(store_only.succeeded());
+      for (const BarrierFacts &barrier : input.value().barriers)
+        ASSERT_TRUE(wire::write_u32(missing_ds,
+                                    input.value().text_file_offset + barrier.original_drain,
+                                    store_only.value()));
+      EXPECT_TRUE(build_input_program(missing_ds, target, "lds_producer_consumer", error).failed());
+      EXPECT_EQ(error.code, InputErrorCode::UnsupportedSynchronization) << error.message;
+    }
+  }
+}
+
 TEST_P(ConSanTargetStatic, MaximumWorkgroupMustPermitTwoWavesBeforePreparation) {
   const test::TargetMode mode = GetParam();
   const TargetProfile &target = *target_profile(mode.target);
@@ -340,6 +404,44 @@ TEST(ConSanBarrierStatic, DiagnoseInterveningBarrierWithoutMemoryOperations) {
   EXPECT_NE(error.message.find("without intervening memory operations or barriers"),
             std::string::npos)
       << error.message;
+}
+
+TEST_P(ConSanTargetStatic, LoopLaneSelectorsAvoidScalarReadModifyReadHazards) {
+  const test::TargetMode mode = GetParam();
+  const TargetProfile &target = *target_profile(mode.target);
+  const std::unique_ptr<Decoder> decoder =
+      Decoder::create(default_isa_target_registry(), target.public_id);
+  ASSERT_TRUE(decoder);
+  for (const char *fixture : {"native-27", "native-32", "native-42"}) {
+    SCOPED_TRACE(fixture);
+    const std::vector<uint8_t> original =
+        test::read_fixture(test::target_fixture_path(mode, fixture));
+    ASSERT_FALSE(original.empty());
+    InputError error;
+    const FailureOr<InputProgram> input =
+        build_input_program(original, target, "lds_producer_consumer", error);
+    ASSERT_TRUE(input.succeeded()) << error.message;
+    const AmdGpuCodeObject object(original.data(), original.size());
+    const std::array entries{input.value().kernel.entry_text_offset};
+    const FailureOr<std::vector<std::unique_ptr<BasicBlock>>> blocks =
+        BasicBlock::build_reachable(object, *decoder, target.arch, entries);
+    ASSERT_TRUE(blocks.succeeded());
+    uint32_t vector_selectors = 0;
+    for (const std::unique_ptr<BasicBlock> &block : blocks.value())
+      for (const Instruction &instruction : block->instructions()) {
+        if (instruction.mnemonic() != "v_cmp_eq_u32_e32")
+          continue;
+        const Operand *selector = instruction.src_operand(0);
+        ASSERT_NE(selector, nullptr);
+        // RDNA4 requires an explicit wait when SALU rewrites an SGPR pair
+        // previously read by VALU. Keep both rotating selectors in VGPRs.
+        const std::optional<RegisterRef> source = selector->to_register_ref();
+        EXPECT_FALSE(source && source->cls == RegClass::SGPR);
+        if (selector->decoded_vgpr())
+          ++vector_selectors;
+      }
+    EXPECT_EQ(vector_selectors, 2u);
+  }
 }
 
 TEST_P(ConSanTargetStatic, PreserveRealLoopBackedgesAndRejectMultipleBlockCycles) {
