@@ -648,6 +648,32 @@ TEST_F(PathsGdrMicrotest, CheckGdr_RomeNeedsBothOnTheRootComplex) {
   EXPECT_EQ(ncclTopoGdrModeDisable, Gdr(0, 0));
 }
 
+// An integrated GPU on the root complex gets GDR up to PHB; a discrete GPU at the same distance does not.
+TEST_F(PathsGdrMicrotest, CheckGdr_IntegratedGpuAllowsPhb) {
+  std::string nic = NicPci(NicBus(0), Net("a", 0));
+  Use(BuildWithPaths(System(Cpu(0, GpuPci(GpuBus(0), 0, 0, "", "integrated=\"1\"", "gfx1170") + nic))));
+  EXPECT_EQ(PATH_PHB, system_->nodes[GPU].nodes[0].paths[NET][0].type);
+  EXPECT_EQ(ncclTopoGdrModeDefault, Gdr(0, 0));
+  EXPECT_EQ(ncclTopoGdrModeDefault, Gdr(0, 0, 1));
+
+  Use(BuildWithPaths(System(Cpu(0, GpuPci(GpuBus(0), 0, 0, "", "", "gfx1170") + nic))));
+  EXPECT_EQ(0, system_->nodes[GPU].nodes[0].gpu.integrated);
+  EXPECT_EQ(ncclTopoGdrModeDisable, Gdr(0, 0));
+}
+
+TEST_F(PathsGdrMicrotest, CheckGdr_IntegratedGpuStillStopsAtSysAndFollowsTheUserLevel) {
+  Use(BuildWithPaths(System(Cpu(0, GpuPci(GpuBus(0), 0, 0, "", "integrated=\"1\"", "gfx1170")) +
+                            Cpu(1, NicPci(NicBus(0), Net("a", 0))))));
+  EXPECT_EQ(PATH_SYS, system_->nodes[GPU].nodes[0].paths[NET][0].type);
+  EXPECT_EQ(ncclTopoGdrModeDisable, Gdr(0, 0));
+
+  Use(BuildWithPaths(
+    System(Cpu(0, GpuPci(GpuBus(0), 0, 0, "", "integrated=\"1\"", "gfx1170") + NicPci(NicBus(0), Net("a", 0))))));
+  RcclUnitTesting::ScopedEnv gdrLevel("NCCL_NET_GDR_LEVEL", "PXB");
+  ncclTopoUserGdrLevel = -1;
+  EXPECT_EQ(ncclTopoGdrModeDisable, Gdr(0, 0));
+}
+
 TEST_F(PathsGdrMicrotest, CheckGdr_MloPartFollowsTheParamAndTheFunctionZeroCarveOut) {
   std::string body = PartitionedSwitch("mlopart=\"0\"", "mlopart=\"1\"");
   Use(BuildWithPaths(System(Cpu(0, body))));

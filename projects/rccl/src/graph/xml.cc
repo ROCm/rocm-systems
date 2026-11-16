@@ -1062,6 +1062,14 @@ ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t hipDev,
   }
   NCCLCHECK(xmlGetAttrInt(gpuNode, "arch", &arch.value));
 
+  // Only set for integrated GPUs, so topology dumps of discrete GPUs are unchanged.
+  NCCLCHECK(xmlGetAttrIndex(gpuNode, "integrated", &index));
+  if (index == -1) {
+    int integrated = 0;
+    if (hipDeviceGetAttribute(&integrated, hipDeviceAttributeIntegrated, (int)hipDev) == hipSuccess && integrated)
+      NCCLCHECK(xmlSetAttrInt(gpuNode, "integrated", 1));
+  }
+
   struct ncclXmlNode* nvlNode = NULL;
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   NCCLCHECK(xmlGetSub(gpuNode, "xgmi", &nvlNode));

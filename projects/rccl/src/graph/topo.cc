@@ -646,6 +646,7 @@ ncclResult_t ncclTopoAddGpu(struct ncclXmlNode* xmlGpu, struct ncclTopoSystem* s
   NCCLCHECK(xmlGetAttrInt(xmlGpu, "dev", &gpu->gpu.dev));
   NCCLCHECK(xmlGetAttrInt(xmlGpu, "gdr", &gpu->gpu.gdrSupport));
   NCCLCHECK(xmlGetAttrIntDefault(xmlGpu, "mlopart", &gpu->gpu.mloPart, NCCL_TOPO_UNDEF));
+  NCCLCHECK(xmlGetAttrIntDefault(xmlGpu, "integrated", &gpu->gpu.integrated, 0));
   // Do not go any further, nvlinks will be added in a second pass
   return ncclSuccess;
 }

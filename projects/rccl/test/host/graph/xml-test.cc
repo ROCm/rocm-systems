@@ -1352,6 +1352,42 @@ TEST_F(XmlGpuMicrotest, FillGpu_BuildsThePciChainWithTheSmiIndexAsDev) {
   EXPECT_EQ(1, g_amdSmiInitCalls);
 }
 
+TEST_F(XmlGpuMicrotest, FillGpu_MarksOnlyIntegratedGpus) {
+  ncclXmlNode* top = nullptr;
+  ScopedHook ordinal(g_hipDeviceGetByPCIBusId, [](int* dev, const char*) {
+    *dev = 0;
+    return hipSuccess;
+  });
+  int integrated = 1;
+  ScopedHook attr(g_hipDeviceGetAttribute, [&integrated](int* v, hipDeviceAttribute_t a, int) {
+    *v = (a == hipDeviceAttributeIntegrated) ? integrated : 0;
+    return hipSuccess;
+  });
+
+  ASSERT_EQ(ncclSuccess, ncclTopoFillGpu(xml_.get(), "0000:50:00.0", &top));
+  ASSERT_NE(nullptr, top);
+  EXPECT_EQ("1", Attr(top, "integrated"));
+
+  xml_ = NewXml();
+  integrated = 0;
+  ASSERT_EQ(ncclSuccess, ncclTopoFillGpu(xml_.get(), "0000:50:00.0", &top));
+  EXPECT_EQ("<unset>", Attr(top, "integrated"));
+}
+
+// A failed attribute query leaves the GPU unmarked instead of failing the fill.
+TEST_F(XmlGpuMicrotest, FillGpu_IntegratedQueryFailureLeavesTheGpuDiscrete) {
+  ncclXmlNode* top = nullptr;
+  ScopedHook ordinal(g_hipDeviceGetByPCIBusId, [](int* dev, const char*) {
+    *dev = 0;
+    return hipSuccess;
+  });
+  ScopedHook attr(g_hipDeviceGetAttribute, [](int*, hipDeviceAttribute_t, int) { return hipErrorInvalidValue; });
+
+  ASSERT_EQ(ncclSuccess, ncclTopoFillGpu(xml_.get(), "0000:50:00.0", &top));
+  ASSERT_NE(nullptr, top);
+  EXPECT_EQ("<unset>", Attr(top, "integrated"));
+}
+
 // The static amdsmiInit guard is never set, so every call runs amd_smi_init again; a fix flips this pin.
 TEST_F(XmlGpuMicrotest, FillGpu_KnownBug_AmdSmiInitRunsOnEveryCall) {
   ncclXmlNode* top = nullptr;
