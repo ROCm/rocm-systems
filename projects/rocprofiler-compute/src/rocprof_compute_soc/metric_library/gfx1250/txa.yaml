@@ -136,18 +136,19 @@ txa.lds_bw_atomics:
   name: LDS Bandwidth - Atomics
   formula: SUM(TX_VCA_LDS_ATOMIC_BANDWIDTH_BYTES_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: Total LDS atomic bandwidth.
+  description: >-
+    Total read-modify-write bandwidth of LDS atomics between LDS and WGP registers.
 txa.lds_bw_load:
   name: LDS Bandwidth - Load
   formula: SUM(TX_VCA_LDS_LOAD_BANDWIDTH_BYTES_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: Total LDS read bandwidth.
+  description: Total LDS read bandwidth from LDS to WGP registers.
   peak: $max_sclk * $cu_per_gpu * 512 / 1000
 txa.lds_bw_store:
   name: LDS Bandwidth - Store
   formula: SUM(TX_VCA_LDS_STORE_BANDWIDTH_BYTES_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: Total LDS write bandwidth.
+  description: Total LDS write bandwidth from WGP registers to LDS.
   peak: $max_sclk * $cu_per_gpu * 256 / 1000
 txa.lds_insts:
   name: LDS Instructions
