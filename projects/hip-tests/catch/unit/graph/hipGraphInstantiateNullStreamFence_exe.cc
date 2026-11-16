@@ -39,8 +39,8 @@ void launchWriteKernel(hipStream_t stream, float* buffer) {
   CHECK(hipGetLastError());
 }
 
-// Complete and clean the command before probing so the scenarios differ only
-// by whether graph instantiation occurs.
+// Leave completed, system-fenced work on the null stream so both scenarios
+// start with clean, otherwise identical queue history.
 void primeNullStream(float* buffer) {
   launchWriteKernel(nullptr, buffer);
 
@@ -53,7 +53,7 @@ void primeNullStream(float* buffer) {
     status = hipEventQuery(event);
   }
   CHECK(status);
-  // The polled hipErrorNotReady results leave the sticky error set.
+
   static_cast<void>(hipGetLastError());
   CHECK(hipEventDestroy(event));
 }
@@ -76,6 +76,8 @@ void instantiateKernelGraph(float* buffer, hipGraph_t* graph, hipGraphExec_t* ex
   CHECK(hipGraphInstantiate(exec, *graph, nullptr, nullptr, 0));
 }
 
+// Isolate whether graph instantiation changes barriers on otherwise identical
+// eager kernel launches.
 void runFenceScenario(bool instantiate_graph) {
   float* buffer = nullptr;
   CHECK(hipMalloc(&buffer, sizeof(float)));
@@ -104,6 +106,8 @@ void runFenceScenario(bool instantiate_graph) {
   CHECK(hipFree(buffer));
 }
 
+// Verify capture preserves the system scope required by a non-coherent host
+// source.
 void runCapturedSystemScopeScenario() {
   // A non-coherent pinned source makes the captured blit request system scope.
   void* host = nullptr;
