@@ -62,11 +62,25 @@ expectSignalMemory(StrictMock<MHip> &mhip, uint64_t *storage)
     EXPECT_CALL(mhip, hipFree).Times(AnyNumber());
 }
 
+// The Stream constructor reads HIPFILE_FORCE_BLOCKING_ASYNC (an AIS_TESTING-only hook) for every
+// non-default stream. Default it to unset so StrictMock<MSys> fixtures don't trip on the call.
+static void
+expectNoForceBlocking(StrictMock<MSys> &msys)
+{
+    using ::testing::AnyNumber;
+    using ::testing::Return;
+    using ::testing::StrEq;
+    EXPECT_CALL(msys, getenv(StrEq("HIPFILE_FORCE_BLOCKING_ASYNC")))
+        .Times(AnyNumber())
+        .WillRepeatedly(Return(nullptr));
+}
+
 struct HipFileStream : public ::testing::Test {
     HipFileStream()
     {
         nonnull_stream = reinterpret_cast<hipStream_t>(1);
         expectSignalMemory(mhip, &signal_storage);
+        expectNoForceBlocking(msys);
     }
     StrictMock<MConfiguration> mconfig;
     StrictMock<MHip>           mhip;
@@ -171,6 +185,7 @@ TEST(HipFileStreamDestructor, destructor_with_streams_in_use_logs)
     uint64_t                 signal_storage{};
     std::shared_ptr<IStream> stream;
     expectSignalMemory(mhip, &signal_storage);
+    expectNoForceBlocking(msys);
     {
         StreamMap stream_map;
         EXPECT_CALL(mhip, hipStreamGetDevice);
@@ -185,6 +200,7 @@ struct HipFileStreamExternal : public HipFileOpened {
     {
         nonnull_stream = reinterpret_cast<hipStream_t>(1);
         expectSignalMemory(mhip, &signal_storage);
+        expectNoForceBlocking(msys);
     }
     StrictMock<MConfiguration> mconfig;
     StrictMock<MHip>           mhip;
@@ -221,14 +237,27 @@ TEST_F(HipFileStreamExternal, register_stream_at_reserved_priority_returns_inval
     ASSERT_EQ(hipFileStreamDeregister(nonnull_stream), HipFileOpError(hipFileInvalidValue));
 }
 
-TEST_F(HipFileStream, registered_stream_has_signal_slot)
+TEST_F(HipFileStream, registered_stream_allocates_signal_slot_on_first_use)
 {
     EXPECT_CALL(mhip, hipStreamGetDevice);
     stream_map.registerStream(nonnull_stream, 0);
     auto stream = stream_map.findStream(nonnull_stream);
     EXPECT_TRUE(stream->canUseStreamWaitValue());
-    EXPECT_NE(stream->signalSlot(), nullptr);
+    // Registration no longer allocates; the slot appears only on the first gated use.
+    EXPECT_EQ(stream->signalSlot(), nullptr);
     EXPECT_FALSE(stream->isRetired());
+    {
+        auto lock = stream->getLock();
+        stream->ensureSignalSlot();
+    }
+    auto *slot = stream->signalSlot();
+    EXPECT_NE(slot, nullptr);
+    // ensureSignalSlot allocates at most once: a second call keeps the same slot.
+    {
+        auto lock = stream->getLock();
+        stream->ensureSignalSlot();
+    }
+    EXPECT_EQ(stream->signalSlot(), slot);
 }
 
 TEST_F(HipFileStream, default_streams_have_no_signal_slot)
@@ -273,8 +302,10 @@ TEST_F(HipFileStream, drain_and_release_waits_for_reserved_targets)
     auto stream = stream_map.findStream(nonnull_stream);
     EXPECT_CALL(mhip, hipStreamSynchronize(nonnull_stream));
     {
-        // A reserved target that no stream wait covers, like an op whose wait failed to arm.
+        // A reserved target that no stream wait covers, like an op whose wait failed to arm. Allocate
+        // the slot first (as the first gated op would) so drain has something to spin on.
         auto lock = stream->getLock();
+        stream->ensureSignalSlot();
         stream->nextSignalTarget();
     }
 
@@ -327,7 +358,9 @@ TEST_F(HipFileStream, adopt_registers_implicit_stream)
 {
     EXPECT_CALL(mhip, hipStreamGetDevice);
     auto candidate = StreamMap::makeImplicitStream(nonnull_stream);
-    EXPECT_NE(candidate->signalSlot(), nullptr);
+    // A candidate allocates no signal slot; the winner allocates lazily on first use.
+    EXPECT_TRUE(candidate->canUseStreamWaitValue());
+    EXPECT_EQ(candidate->signalSlot(), nullptr);
     EXPECT_EQ(stream_map.adoptImplicitStream(nonnull_stream, candidate), candidate);
     EXPECT_EQ(stream_map.findStream(nonnull_stream), candidate);
 }
@@ -339,6 +372,32 @@ TEST_F(HipFileStream, adopt_keeps_existing_registration)
     auto registered = stream_map.findStream(nonnull_stream);
     auto candidate  = StreamMap::makeImplicitStream(nonnull_stream);
     EXPECT_EQ(stream_map.adoptImplicitStream(nonnull_stream, candidate), registered);
+}
+
+// Regression guard for the device-sync race: a candidate that loses implicit registration must
+// allocate and free nothing, so its destruction never runs the device-synchronizing hipFree.
+TEST(HipFileStreamLosingCandidate, allocates_and_frees_nothing)
+{
+    StrictMock<MHip> mhip;
+    StrictMock<MSys> msys;
+    expectNoForceBlocking(msys);
+    EXPECT_CALL(mhip, hipStreamGetDevice).Times(::testing::AnyNumber());
+    EXPECT_CALL(mhip, hipDeviceGetStreamPriorityRange)
+        .WillRepeatedly(::testing::Return(HipStreamPriorityRange{1, -1}));
+    EXPECT_CALL(mhip, hipStreamGetPriority).WillRepeatedly(::testing::Return(0));
+    EXPECT_CALL(mhip, hipDeviceGetAttribute).WillRepeatedly(::testing::Return(1));
+    // The candidate must never touch device memory, win or lose.
+    EXPECT_CALL(mhip, hipExtMallocWithFlags).Times(0);
+    EXPECT_CALL(mhip, hipFree).Times(0);
+
+    StreamMap stream_map;
+    auto      hip_stream = reinterpret_cast<hipStream_t>(1);
+    stream_map.registerStream(hip_stream, 0);
+    auto winner    = stream_map.findStream(hip_stream);
+    auto candidate = StreamMap::makeImplicitStream(hip_stream);
+    // The already-registered stream wins; the candidate is returned to the caller to drop.
+    EXPECT_EQ(stream_map.adoptImplicitStream(hip_stream, candidate), winner);
+    candidate.reset(); // Destroying the loser must not call hipFree.
 }
 
 TEST_F(HipFileStream, register_after_implicit_registration_applies_flags)
@@ -402,6 +461,7 @@ struct HipFileStreamImplicit : public HipFileOpened {
         ON_CALL(mhip, hipExtMallocWithFlags)
             .WillByDefault(::testing::Return(static_cast<void *>(&signal_storage)));
         ON_CALL(mconfig, host()).WillByDefault(::testing::Return(true));
+        expectNoForceBlocking(msys);
 
         hipFileDescr_t descr{};
         descr.handle.fd = 1234;
@@ -429,19 +489,21 @@ struct HipFileStreamImplicit : public HipFileOpened {
     ::testing::NiceMock<MHip>           mhip;
     StrictMock<MSys>                    msys;
     StrictMock<MLibMountHelper>         mlibmounthelper;
-    uint64_t                    signal_storage{};
-    hipFileHandle_t             fh{};
-    void                       *buf{reinterpret_cast<void *>(0x1)};
-    hipStream_t                 nonnull_stream{reinterpret_cast<hipStream_t>(1)};
+    uint64_t                            signal_storage{};
+    hipFileHandle_t                     fh{};
+    void                               *buf{reinterpret_cast<void *>(0x1)};
+    hipStream_t                         nonnull_stream{reinterpret_cast<hipStream_t>(1)};
 };
 
 TEST_F(HipFileStreamImplicit, first_async_lookup_registers_stream_implicitly)
 {
-    EXPECT_CALL(mhip, hipExtMallocWithFlags).Times(1);
+    // Lookup registers the stream but allocates no signal slot; that happens on the first gated op.
+    EXPECT_CALL(mhip, hipExtMallocWithFlags).Times(0);
     auto first  = lookup(nonnull_stream);
     auto second = lookup(nonnull_stream);
     ASSERT_NE(first.stream, nullptr);
-    EXPECT_NE(first.stream->signalSlot(), nullptr);
+    EXPECT_TRUE(first.stream->canUseStreamWaitValue());
+    EXPECT_EQ(first.stream->signalSlot(), nullptr);
     EXPECT_EQ(first.stream, second.stream);
 }
 

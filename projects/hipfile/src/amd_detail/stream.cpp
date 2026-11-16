@@ -61,10 +61,26 @@ Stream::Stream(const hipStream_t _hip_stream, uint32_t flags, const PassKey<Stre
 
     can_use_stream_wait_value =
         Context<Hip>::get()->hipDeviceGetAttribute(hipDeviceAttributeCanUseStreamWaitValue, device_id) != 0;
-    if (!can_use_stream_wait_value) {
+
+#ifdef AIS_TESTING
+    // Test hook: force the blocking (non-wait-value) async path even on capable hardware, so system
+    // tests can exercise it. Compiled out of consumer builds.
+    if (Context<Sys>::get()->getenv("HIPFILE_FORCE_BLOCKING_ASYNC") != nullptr) {
+        can_use_stream_wait_value = false;
+    }
+#endif
+
+    // The signal slot is allocated lazily by ensureSignalSlot() on first gated use, not here, so a
+    // throwaway candidate that loses implicit registration never touches the device.
+}
+
+void
+Stream::ensureSignalSlot()
+{
+    // The caller holds the lock. Allocates once; never for a default or non-wait-value stream.
+    if (signal_slot || !can_use_stream_wait_value) {
         return;
     }
-
     DeviceGuard guard{device_id};
     SignalSlot  slot{static_cast<uint64_t *>(
                         Context<Hip>::get()->hipExtMallocWithFlags(sizeof(uint64_t), hipMallocSignalMemory)),
