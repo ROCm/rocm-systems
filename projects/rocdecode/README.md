@@ -106,12 +106,13 @@ SDK, the following standalone rocDecode packages are also available:
 > (`/opt/rocm/share/rocdecode/cmake/`), the `utils/` utility sources, and the
 > `samples/` sources all ship with the development package
 > (`amdrocm-decode-dev` / `amdrocm-decode-devel`) and a standard ROCm Core SDK
-> install. These provide everything needed to build applications against
-> rocDecode and to build the samples (for example, when building rocAL).
+> install. These provide what you need to build applications against rocDecode
+> (for example, rocAL) and to build the samples.
 >
-> Only the bundled test media under `/opt/rocm/share/rocdecode/` (`video/` and
-> `frames/`) ships separately, in the `amdrocm-decode-test` package. Install it
-> if you run the CTests or run the samples against the bundled media:
+> The CTest project, test scripts, and bundled test media (`video/` and
+> `frames/` under `/opt/rocm/share/rocdecode/`) ship in the
+> `amdrocm-decode-test` package. Install it to run the CTests or to run the
+> samples against the bundled media:
 >
 >   ```shell
 >   # Debian / Ubuntu
