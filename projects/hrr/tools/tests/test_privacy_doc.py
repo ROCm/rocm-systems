@@ -3,8 +3,8 @@
 # SPDX-License-Identifier: MIT
 """PRIVACY.md lists what capture writes into an archive.
 
-The page is the customer text on what an archive holds. Its device table has to name
-exactly the fields hip_capture_metadata.cpp writes into a manifest, so a task
+The page is the customer text on what an archive holds. Its device table has
+to name exactly the fields hip_capture_metadata.cpp writes into a manifest, so a task
 that adds, removes or blanks one cannot land without updating the page. Its
 inventory has to list the active marker, the hipHostRegister snapshot, the
 hipLinkAddData inputs and the hipDeviceProp_t snapshots in events.bin.
@@ -21,7 +21,6 @@ PRIVACY = HRR / "PRIVACY.md"
 CAPTURE_SRC = HRR.parent / "clr" / "hipamd" / "src" / "hrr"
 METADATA_CPP = CAPTURE_SRC / "hip_capture_metadata.cpp"
 NOTICE_H = HRR / "include" / "hrr" / "hrr_archive_notice.h"
-
 
 
 def device_fields_written() -> set:
