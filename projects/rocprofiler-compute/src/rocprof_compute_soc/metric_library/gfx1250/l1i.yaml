@@ -34,8 +34,7 @@ l1i.icache_req_stall_rate:
   name: ICache Request Stall Rate
   formula: 100 * SUM(SQC_ICACHE_INPUT_VALID_READYB_sum) / SUM(SQ_BUSY_CYCLES_sum)
   unit: Percent
-  description: >-
-    Percentage of shader-busy cycles the instruction fetch unit is stalled.
+  description: Percentage of shader-busy cycles the instruction fetch unit is stalled.
 l1i.icache_util:
   name: ICache Utilization
   formula: 100 * SUM(SQC_ICACHE_BUSY_CYCLES_sum) / SUM(SQ_BUSY_CYCLES_sum)

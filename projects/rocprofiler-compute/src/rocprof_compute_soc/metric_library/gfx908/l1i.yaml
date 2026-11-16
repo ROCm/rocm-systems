@@ -15,8 +15,7 @@ l1i.fetch_lat:
   name: L1I Fetch Latency
   formula: SUM(SQ_IFETCH_LEVEL_ACCUM) / SUM(SQ_IFETCH)
   unit: Cycles
-  description: >-
-    The average number of cycles spent to fetch instructions to a CU.
+  description: The average number of cycles spent to fetch instructions to a CU.
 l1i.hit_rate_excl_dup:
   name: L1I Hit Rate (Excluding Duplicate Misses)
   formula: 100 * SUM(SQC_ICACHE_HITS) / SUM(SQC_ICACHE_HITS + SQC_ICACHE_MISSES)
@@ -54,15 +53,16 @@ l1i.l2_bw:
   formula: 64 * SUM(SQC_TC_INST_REQ) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    Total number of bytes transferred across L1I - L2 interface divided by total duration.
+    Total number of bytes transferred across L1I - L2 interface divided by total
+    duration.
 l1i.l2_bw_util:
   name: L1I-L2 Bandwidth Utilization
   formula: 100000 * SUM(SQC_TC_INST_REQ) / (2 * SUM($max_sclk * $sqc_per_gpu * (End_Timestamp - Start_Timestamp)))
   unit: Percent
   description: >-
     The percent of the peak theoretical L1I -> L2 cache request bandwidth achieved.
-    Calculated as the ratio of the total number of requests from the L1I to the L2
-    cache over the total L1I-L2 interface cycles.
+    Calculated as the ratio of the total number of requests from the L1I to the L2 cache
+    over the total L1I-L2 interface cycles.
 l1i.misses_duplicated:
   name: L1I Misses - Duplicated
   formula: SUM(SQC_ICACHE_MISSES_DUPLICATE) / SUM($denom)
@@ -81,5 +81,4 @@ l1i.req:
   name: L1I Requests
   formula: SUM(SQC_ICACHE_REQ) / SUM($denom)
   unit: (Requests + $normUnit)
-  description: >-
-    The total number of requests made to the L1I per normalization unit.
+  description: The total number of requests made to the L1I per normalization unit.

@@ -22,15 +22,15 @@ spi.insufficient_cu_barriers:
   formula: 400 * SUM(SPI_RA_BAR_CU_FULL_CSN) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
   unit: Percent
   description: >-
-    The percent of total CU cycles in the kernel where a workgroup could not be scheduled
-    to a CU due to lack of available barriers.
+    The percent of total CU cycles in the kernel where a workgroup could not be
+    scheduled to a CU due to lack of available barriers.
 spi.insufficient_cu_lds:
   name: Insufficient CU LDS
   formula: 400 * SUM(SPI_RA_LDS_CU_FULL_CSN) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
   unit: Percent
   description: >-
-    The percent of total CU cycles in the kernel where a workgroup could not be scheduled
-    to a CU due to lack of available LDS.
+    The percent of total CU cycles in the kernel where a workgroup could not be
+    scheduled to a CU due to lack of available LDS.
 spi.insufficient_simd_sgprs:
   name: Insufficient SIMD SGPRs
   formula: 100 * SUM(SPI_RA_SGPR_SIMD_FULL_CSN) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
@@ -57,41 +57,41 @@ spi.not_scheduled_rate_scheduler_pipe:
   formula: 100 * SUM(SPI_RA_REQ_NO_ALLOC) / SUM($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu)
   unit: Percent
   description: >-
-    The percent of total scheduler-pipe cycles in the kernel where a workgroup could
-    not be scheduled to a CU due to a bottleneck within the scheduler-pipes rather
-    than a lack of a CU or SIMD with sufficient resources.
+    The percent of total scheduler-pipe cycles in the kernel where a workgroup could not
+    be scheduled to a CU due to a bottleneck within the scheduler-pipes rather than a
+    lack of a CU or SIMD with sufficient resources.
 spi.not_scheduled_rate_workgroup_manager:
   name: Not-Scheduled Rate (Workgroup Manager)
   formula: 100 * SUM(SPI_RA_REQ_NO_ALLOC_CSN) / SUM($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu)
   unit: Percent
   description: >-
-    The percent of total scheduler-pipe cycles in the kernel where a workgroup could
-    not be scheduled to a CU due to a bottleneck within the workgroup manager rather
-    than a lack of a CU or SIMD with sufficient resources.
+    The percent of total scheduler-pipe cycles in the kernel where a workgroup could not
+    be scheduled to a CU due to a bottleneck within the workgroup manager rather than a
+    lack of a CU or SIMD with sufficient resources.
 spi.reached_cu_wavefront_limit:
   name: Reached CU Wavefront Limit
   formula: 400 * SUM(SPI_RA_WVLIM_STALL_CSN) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
   unit: Percent
   description: >-
-    The percent of total CU cycles in the kernel where a wavefront could not be scheduled
-    to a CU due to limits within the workgroup manager. This is expected to be always
-    be zero on CDNA2 or newer accelerators (and small for previous accelerators).
+    The percent of total CU cycles in the kernel where a wavefront could not be
+    scheduled to a CU due to limits within the workgroup manager. This is expected to be
+    always be zero on CDNA2 or newer accelerators (and small for previous accelerators).
 spi.reached_cu_workgroup_limit:
   name: Reached CU Workgroup Limit
   formula: 400 * SUM(SPI_RA_TGLIM_CU_FULL_CSN) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
   unit: Percent
   description: >-
-    The percent of total CU cycles in the kernel where a workgroup could not be scheduled
-    to a CU due to limits within the workgroup manager. This is expected to be always
-    be zero on CDNA2 or newer accelerators (and small for previous accelerators).
+    The percent of total CU cycles in the kernel where a workgroup could not be
+    scheduled to a CU due to limits within the workgroup manager. This is expected to be
+    always be zero on CDNA2 or newer accelerators (and small for previous accelerators).
 spi.scheduler_pipe_stall_rate:
   name: Scheduler-Pipe Stall Rate
   formula: 100 * SUM(SPI_RA_RES_STALL_CSN) / SUM($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu)
   unit: Percent
   description: >-
-    The percent of total scheduler-pipe cycles in the kernel where a workgroup could
-    not be scheduled to a CU due to occupancy limitations (like a lack of a CU or
-    SIMD with sufficient resources).
+    The percent of total scheduler-pipe cycles in the kernel where a workgroup could not
+    be scheduled to a CU due to occupancy limitations (like a lack of a CU or SIMD with
+    sufficient resources).
 spi.scheduler_pipe_util:
   name: Scheduler-Pipe Utilization
   formula: 100 * SUM(SPI_CSN_BUSY) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $pipes_per_gpu * $se_per_gpu)
@@ -104,23 +104,21 @@ spi.scratch_stall_rate:
   formula: 100 * SUM(SPI_RA_TMP_STALL_CSN) / SUM($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu)
   unit: Percent
   description: >-
-    The percent of total shader-engine cycles in the kernel where a workgroup could
-    not be scheduled to a CU due to lack of private (a.k.a., scratch) memory slots.
-    While this can reach up to 100%, note that the actual occupancy limitations on
-    a kernel using private memory are typically quite small (for example, less than
-    1% of the total number of waves that can be scheduled to an accelerator).
+    The percent of total shader-engine cycles in the kernel where a workgroup could not
+    be scheduled to a CU due to lack of private (a.k.a., scratch) memory slots. While
+    this can reach up to 100%, note that the actual occupancy limitations on a kernel
+    using private memory are typically quite small (for example, less than 1% of the
+    total number of waves that can be scheduled to an accelerator).
 spi.sgpr_writes:
   name: SGPR Writes
   formula: SUM(SPI_SWC_CSC_WR) / SUM(SPI_CSN_WAVE)
   unit: Cycles per Wavefront
-  description: >-
-    The average number of cycles spent initializing SGPRs at wave creation.
+  description: The average number of cycles spent initializing SGPRs at wave creation.
 spi.vgpr_writes:
   name: VGPR Writes
   formula: 4 * SUM(SPI_VWC_CSC_WR) / SUM(SPI_CSN_WAVE)
   unit: Cycles per Wavefront
-  description: >-
-    The average number of cycles spent initializing VGPRs at wave creation.
+  description: The average number of cycles spent initializing VGPRs at wave creation.
 spi.workgroup_manager_util:
   name: Workgroup Manager Utilization
   formula: 100 * SUM($GRBM_SPI_BUSY_PER_XCD) / SUM($GRBM_GUI_ACTIVE_PER_XCD)

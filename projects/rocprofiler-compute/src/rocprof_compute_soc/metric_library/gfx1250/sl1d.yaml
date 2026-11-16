@@ -23,8 +23,7 @@ sl1d.dcache_util:
   name: Dcache Utilization
   formula: 100 * SUM(SQC_DCACHE_BUSY_CYCLES_sum) / SUM(SQ_BUSY_CYCLES_sum)
   unit: Percent
-  description: >-
-    Percentage of WGP cycles the Scalar Data Cache is serving requests.
+  description: Percentage of WGP cycles the Scalar Data Cache is serving requests.
 sl1d.gl1_rd_bw:
   name: sL1D-GL1 Read Bandwidth
   formula: 128 * SUM(SQC_TC_DATA_READ_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)

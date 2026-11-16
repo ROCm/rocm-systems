@@ -2,14 +2,12 @@ compute.inst_cache_fetch_lat:
   name: Instruction Cache Fetch Latency
   formula: SUM(SQ_IFETCH_LEVEL_ACCUM) / SUM(SQ_IFETCH_REQS_sum)
   unit: Cycles
-  description: >-
-    Average latency to fetch instruction from GL1 to Instruction Cache.
+  description: Average latency to fetch instruction from GL1 to Instruction Cache.
 compute.insts_async_load:
   name: Instructions - Async Load
   formula: SUM(SQ_INSTS_ASYNC_LOAD_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: >-
-    Number of asynchronous memory load instructions (TDM async loads) issued.
+  description: Number of asynchronous memory load instructions (TDM async loads) issued.
 compute.insts_async_store:
   name: Instructions - Async Store
   formula: SUM(SQ_INSTS_ASYNC_STORE_sum) / SUM($denom)
@@ -173,8 +171,7 @@ compute.pipeline_util_xdl:
   name: Pipeline Utilization - XDL
   formula: 100 * SUM(SQ_INST_CYCLES_VALU_WMMA_sum) / SUM(SQ_BUSY_CYCLES_sum)
   unit: Percent
-  description: >-
-    Percentage of WGP-busy cycles the XDL (WMMA) pipeline is busy.
+  description: Percentage of WGP-busy cycles the XDL (WMMA) pipeline is busy.
 compute.tdm_issue_stall_rate:
   name: TDM Issue Stall Rate
   formula: 100 * SUM(SQ_INST_ISSUE_TDM_STALL_sum) / SUM(SQ_BUSY_CYCLES_sum)
@@ -185,8 +182,7 @@ compute.total_flops:
   name: Performance (GFLOPs)
   formula: $sp_flop_rate + $wmma_flop_rate
   unit: GFLOP/s
-  description: >-
-    Total achieved compute throughput combining all VALU and WMMA FLOPs.
+  description: Total achieved compute throughput combining all VALU and WMMA FLOPs.
 compute.total_insts:
   name: Total Instructions
   formula: SUM(SQ_INSTS_ALL_sum) / SUM($denom)
@@ -257,8 +253,8 @@ compute.valu_insts_smacc:
   formula: SUM(SQ_INSTS_VALU_SMACC_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Number of instructions issued that execute on the SMACC (side multiply-accumulate
-    / transcendental) pipeline.
+    Number of instructions issued that execute on the SMACC (side multiply-accumulate /
+    transcendental) pipeline.
 compute.valu_insts_wmma:
   name: VALU Instructions - WMMA
   formula: SUM(SQ_INSTS_VEC32_VALU_WMMA_sum) / SUM($denom)
@@ -269,8 +265,8 @@ compute.valu_insts_xdl:
   formula: SUM(SQ_INSTS_VALU_XDLMACC_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Number of instructions issued that execute on the XDL (eXtreme Deep Learning /
-    WMMA) pipeline.
+    Number of instructions issued that execute on the XDL (eXtreme Deep Learning / WMMA)
+    pipeline.
 compute.valu_integer_operations:
   name: VALU Integer Operations
   formula: SUM(SP_VALU_IOPS_sum) / SUM($denom)
