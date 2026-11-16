@@ -1181,16 +1181,18 @@ typedef struct hipFileStatsLevel1 {
 
     uint64_t read_bytes;             //!< Total bytes read
     uint64_t write_bytes;            //!< Total bytes written
-    uint64_t read_bw_bytes_per_sec;  //!< Read bandwidth (bytes/sec), derived from bytes and latency sum
-    uint64_t write_bw_bytes_per_sec; //!< Write bandwidth (bytes/sec), derived from bytes and latency sum
+    uint64_t read_bw_bytes_per_sec;  //!< Read bandwidth (bytes/sec): bytes / wall-clock busy time (union of
+                                     //!< overlapping IO intervals, not sum of per-IO latencies)
+    uint64_t write_bw_bytes_per_sec; //!< Write bandwidth (bytes/sec): bytes / wall-clock busy time (union of
+                                     //!< overlapping IO intervals, not sum of per-IO latencies)
     uint64_t read_lat_avg_us;        //!< Average read latency (us), derived from latency sum and op count
     uint64_t write_lat_avg_us;       //!< Average write latency (us), derived from latency sum and op count
 
     uint64_t read_ops_per_sec;  //!< Read operations per second (zero-filled)
     uint64_t write_ops_per_sec; //!< Write operations per second (zero-filled)
 
-    uint64_t read_lat_sum_us;  //!< Sum of read latencies (us)
-    uint64_t write_lat_sum_us; //!< Sum of write latencies (us)
+    uint64_t read_lat_sum_us;  //!< Sum of read latencies (us); used for latency averages, not bandwidth
+    uint64_t write_lat_sum_us; //!< Sum of write latencies (us); used for latency averages, not bandwidth
 
     hipFileOpCounter_t batch_submit_ops;          //!< Batch submit operation counters (zero-filled)
     hipFileOpCounter_t batch_complete_ops;        //!< Batch complete operation counters (zero-filled)
@@ -1247,30 +1249,34 @@ typedef struct hipFilePerGpuStats {
     char uuid[HIPFILE_GPU_UUID_LEN]; //!< Raw 16-byte GPU UUID; zero-filled if the device cannot report one
 
     uint64_t read_bytes;            //!< Total bytes read
-    uint64_t read_bw_bytes_per_sec; //!< Read bandwidth (bytes/sec), derived from bytes and duration
+    uint64_t read_bw_bytes_per_sec; //!< Read bandwidth (bytes/sec): bytes / per-GPU wall-clock busy time
+                                    //!< (union of overlapping IO intervals, not sum of per-IO durations)
     uint64_t read_utilization;      //!< Read utilization percentage (zero-filled)
-    uint64_t read_duration_us;      //!< Total read duration (us)
-    uint64_t n_total_reads;         //!< Total number of reads across all backends
-    uint64_t n_p2p_reads;           //!< Number of PCIe P2P DMA reads (zero-filled)
-    uint64_t n_nvfs_reads;          //!< Number of fastpath reads
-    uint64_t n_posix_reads;         //!< Number of fallback (POSIX) reads
-    uint64_t n_unaligned_reads;     //!< Number of unaligned reads
-    uint64_t n_dr_reads;            //!< Number of dynamic-routing reads (zero-filled)
-    uint64_t n_sparse_regions;      //!< Number of sparse regions (zero-filled)
-    uint64_t n_inline_regions;      //!< Number of inline regions (zero-filled)
-    uint64_t n_reads_err;           //!< Number of read errors
+    uint64_t
+        read_duration_us;   //!< Sum of per-IO read durations (us); used for latency averages, not bandwidth
+    uint64_t n_total_reads; //!< Total number of reads across all backends
+    uint64_t n_p2p_reads;   //!< Number of PCIe P2P DMA reads (zero-filled)
+    uint64_t n_nvfs_reads;  //!< Number of fastpath reads
+    uint64_t n_posix_reads; //!< Number of fallback (POSIX) reads
+    uint64_t n_unaligned_reads; //!< Number of unaligned reads
+    uint64_t n_dr_reads;        //!< Number of dynamic-routing reads (zero-filled)
+    uint64_t n_sparse_regions;  //!< Number of sparse regions (zero-filled)
+    uint64_t n_inline_regions;  //!< Number of inline regions (zero-filled)
+    uint64_t n_reads_err;       //!< Number of read errors
 
     uint64_t write_bytes;            //!< Total bytes written
-    uint64_t write_bw_bytes_per_sec; //!< Write bandwidth (bytes/sec), derived from bytes and duration
+    uint64_t write_bw_bytes_per_sec; //!< Write bandwidth (bytes/sec): bytes / per-GPU wall-clock busy time
+                                     //!< (union of overlapping IO intervals, not sum of per-IO durations)
     uint64_t write_utilization;      //!< Write utilization percentage (zero-filled)
-    uint64_t write_duration_us;      //!< Total write duration (us)
-    uint64_t n_total_writes;         //!< Total number of writes across all backends
-    uint64_t n_p2p_writes;           //!< Number of PCIe P2P DMA writes (zero-filled)
-    uint64_t n_nvfs_writes;          //!< Number of fastpath writes
-    uint64_t n_posix_writes;         //!< Number of fallback (POSIX) writes
-    uint64_t n_unaligned_writes;     //!< Number of unaligned writes
-    uint64_t n_dr_writes;            //!< Number of dynamic-routing writes (zero-filled)
-    uint64_t n_writes_err;           //!< Number of write errors
+    uint64_t
+        write_duration_us;   //!< Sum of per-IO write durations (us); used for latency averages, not bandwidth
+    uint64_t n_total_writes; //!< Total number of writes across all backends
+    uint64_t n_p2p_writes;   //!< Number of PCIe P2P DMA writes (zero-filled)
+    uint64_t n_nvfs_writes;  //!< Number of fastpath writes
+    uint64_t n_posix_writes; //!< Number of fallback (POSIX) writes
+    uint64_t n_unaligned_writes; //!< Number of unaligned writes
+    uint64_t n_dr_writes;        //!< Number of dynamic-routing writes (zero-filled)
+    uint64_t n_writes_err;       //!< Number of write errors
 
     uint64_t n_mmap;      //!< Number of buffer registrations (global counter, not per-GPU)
     uint64_t n_mmap_ok;   //!< Successful buffer registrations (same as n_mmap)

@@ -37,6 +37,8 @@ You can also launch an application with ``ais-stats``:
 
 The ``ais-stats`` report provides histogram data for I/O size, I/O latency, I/O time, and error count. Data is provided per GPU and per backend. Each metric is reported separately for read and write operations. Only GPUs that performed I/O operations appear in the report.
 
+The ``Average ... Bandwidth`` lines divide the total bytes transferred by the wall-clock time during which I/O was in flight (the union of the overlapping I/O intervals), so they report the aggregate throughput the system achieved even when several threads issue I/O concurrently. In contrast, the per-size-bucket ``IO Bandwidth Histogram`` is derived from the summed per-operation latency in each bucket, so it reflects the throughput of an individual I/O of that size rather than aggregate concurrency. These two bandwidth measurements can differ substantially under concurrent I/O.
+
 Histograms use logarithmic bucket boundaries:
 
 - Bucket 0: 0 to 4 KiB
