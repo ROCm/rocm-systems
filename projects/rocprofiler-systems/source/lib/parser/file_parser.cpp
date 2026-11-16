@@ -23,6 +23,7 @@
 #include <string_view>
 #include <system_error>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace rocprofsys::parser
@@ -174,7 +175,7 @@ category_order(const schema& config_schema)
     for(const auto& param : config_schema.params())
     {
         if(!param.category.empty() &&
-           std::find(order.begin(), order.end(), param.category) == order.end())
+           std::ranges::find(order, param.category) == order.end())
         {
             order.push_back(param.category);
         }

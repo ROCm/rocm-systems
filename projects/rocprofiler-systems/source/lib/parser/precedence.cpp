@@ -4,7 +4,6 @@
 #include "parser/precedence.hpp"
 #include "parser/config_store.hpp"
 #include "parser/schema.hpp"
-#include "parser/schema_validator.hpp"
 #include "parser/value_text.hpp"
 
 #include <fmt/format.h>

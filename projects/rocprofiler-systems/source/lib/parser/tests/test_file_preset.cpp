@@ -128,10 +128,10 @@ source_with(config_source source, typed_values_t values)
 void
 expect_mentions(const std::vector<std::string>& errors, std::string_view fragment)
 {
-    const auto found = std::any_of(errors.begin(), errors.end(),
-                                   [&fragment](const std::string& message) {
-                                       return message.find(fragment) != std::string::npos;
-                                   });
+    const auto found =
+        std::ranges::any_of(errors, [&fragment](const std::string& message) {
+            return message.find(fragment) != std::string::npos;
+        });
     EXPECT_TRUE(found) << fragment;
 }
 
