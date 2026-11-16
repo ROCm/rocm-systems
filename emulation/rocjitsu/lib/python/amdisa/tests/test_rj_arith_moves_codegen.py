@@ -46,15 +46,17 @@ def test_scalar_moves_preserve_conditional_observation(name):
         assert body.index('status != RJ_ARITH_SUCCESS') < body.index(
             'registers.write_scalar'
         )
-    assert gen_scalar(context('cdna5', name, ['d'], ['a'])) is None
+    assert gen_scalar(context('cdna2', name, ['d'], ['a'])) is None
 
 
-@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4', 'cdna5'])
 def test_vector_move_and_conditional_controls(arch):
     word = gen_vector32(context(arch, 'V_MOV_B32', ['d'], ['a'], is_vop3=True))
     assert 'rj_arith_v_mov_b32_w64' in word
     assert 'inst_.clamp' not in word
-    assert 'RJ_ARITH_ALU_NEG_A' in word and 'RJ_ARITH_ALU_ABS_A' in word
+    # gfx942/gfx950 MOV preserves bits; RDNA and gfx1250 apply sign modifiers.
+    for modifier in ('RJ_ARITH_ALU_NEG_A', 'RJ_ARITH_ALU_ABS_A'):
+        assert (modifier in word) == (arch.startswith('rdna') or arch == 'cdna5')
     half = gen_integer16(context(arch, 'V_MOV_B16', ['d'], ['a'], is_vop3=True))
     assert 'rj_arith_v_mov_b16_w64' in half
     assert 'RJ_ARITH_ALU_HIGH_A' in half and 'RJ_ARITH_ALU_HIGH_D' in half
@@ -101,3 +103,15 @@ def test_all_move_and_selection_encodings_route_to_rj_arith(arch):
             assert 'amdgpu::execute_v_' not in body
             count += 1
     assert count == 20  # Six scalar methods, eight MOV and six CNDMASK methods.
+
+
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4'])
+def test_accumulator_moves_reuse_raw_word_copy(arch):
+    from amdisa.codegen.execute.rj_arith_vector import ACCUMULATOR_MOVES
+
+    for name in ACCUMULATOR_MOVES:
+        body = gen_vector32(context(arch, name, ['acc_dst'], ['acc_src'], is_vop3=True))
+        assert 'execute_move32(*this, wf, acc_dst, acc_src)' in body
+        assert 'inst_.' not in body
+        assert gen_vector32(context('cdna2', name, ['d'], ['a'])) is None
+        assert gen_vector32(context('cdna2', name, ['d'], ['a'])) is None

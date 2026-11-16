@@ -755,6 +755,30 @@ bool Os::hasMovdir64b() {
   }();
   return supported;
 }
+
+bool Os::hasClflushopt() {
+  // CPUID leaf 7, sub-leaf 0: EBX bit 23 = CLFLUSHOPT.
+  static const bool supported = [] {
+    int regs[4];
+#ifdef _LP64
+    __asm__ __volatile__(
+        "movq %%rbx, %%rsi;"
+        "cpuid;"
+        "xchgq %%rbx, %%rsi;"
+        : "=a"(regs[0]), "=S"(regs[1]), "=c"(regs[2]), "=d"(regs[3])
+        : "a"(7), "c"(0));
+#else
+    __asm__ __volatile__(
+        "movl %%ebx, %%esi;"
+        "cpuid;"
+        "xchgl %%ebx, %%esi;"
+        : "=a"(regs[0]), "=S"(regs[1]), "=c"(regs[2]), "=d"(regs[3])
+        : "a"(7), "c"(0));
+#endif
+    return static_cast<bool>((regs[1] >> 23) & 1);
+  }();
+  return supported;
+}
 #endif  // ATI_ARCH_X86
 
 uint64_t Os::offsetToEpochNanos() {

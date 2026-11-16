@@ -854,6 +854,16 @@ public:
       for (uint32_t reg = 0; reg < reg_count_; ++reg) {
         // The byte-mask check above admits raw data for every register.
         const auto *values = reg_data(reg);
+        if (lane_mask == wave_lane_mask) {
+          auto *out = destination.data() + reg * sizeof(uint32_t);
+          if (reg_count_ == 1) {
+            std::memcpy(out, values, wf_size_ * sizeof(uint32_t));
+          } else {
+            for (uint32_t lane = 0; lane < wf_size_; ++lane)
+              std::memcpy(out + lane * lane_stride, values + lane, sizeof(uint32_t));
+          }
+          continue;
+        }
         uint64_t active_lanes = lane_mask;
         while (active_lanes) {
           const uint32_t lane = std::countr_zero(active_lanes);
@@ -1339,7 +1349,7 @@ public:
     if (auto base = op.simd_vgpr_base_mut(wf);
         base && !mutable_cu().valid_operand_vgpr_range(wf, *base, 1))
       return;
-    if (op.simd_vgpr_storage_mut(wf) && !(wf.vgpr_write_mask() & (uint64_t{1} << lane)))
+    if (!(wf.vgpr_write_mask() & (uint64_t{1} << lane)) && op.simd_vgpr_storage_mut(wf))
       return;
     op.write_lane(wf, lane, value);
   }
@@ -1356,7 +1366,7 @@ public:
     if (auto base = op.simd_vgpr_base_mut(wf);
         base && !mutable_cu().valid_operand_vgpr_range(wf, *base, 1))
       return;
-    if (op.simd_vgpr_storage_mut(wf) && !(wf.vgpr_write_mask() & (uint64_t{1} << lane)))
+    if (!(wf.vgpr_write_mask() & (uint64_t{1} << lane)) && op.simd_vgpr_storage_mut(wf))
       return;
     op.write_lane(wf, lane, value);
   }

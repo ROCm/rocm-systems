@@ -32,6 +32,37 @@ set the HSA environment variable as follows:
 This feature requires GPUs that support peer-to-peer access along with
 proper large BAR addressing support.
 
+AMD EPYC inter-socket bandwidth
+===============================
+
+On a multi-socket AMD EPYC host, RCCL models the CPU-to-CPU link from the
+CPUID family:
+
+.. list-table::
+   :header-rows: 1
+
+   * - Generation
+     - CPUID family
+     - Modeled bandwidth
+   * - Zen 1/2 (Naples, Rome)
+     - 23
+     - 16 GB/s
+   * - Zen 3/4 (Milan, Genoa, Bergamo)
+     - 25
+     - 24 GB/s
+   * - Zen 5 (Turin)
+     - 26
+     - 32 GB/s
+
+Graph search uses this weight when a path crosses sockets: PCIe GPUs on
+different sockets, or a GPU reaching a NIC on the other socket. The topology
+log shows the link itself (``SYS[16.0]``, ``SYS[24.0]``, or ``SYS[32.0]``).
+Search then picks the largest entry in its speed table that does not exceed
+the slowest hop, so a 32 GB/s Turin link can still produce a 24 GB/s graph
+speed. Intra-node GPU-to-GPU traffic that stays on xGMI does not cross
+that link, so its bandwidth is unchanged. ``NCCL_GRAPH_FILE``
+overrides the computed graph.
+
 Symmetric memory and ``NCCL_P2P_LEVEL``
 =======================================
 
