@@ -9,6 +9,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cctype>
 #include <chrono>
 #include <cstdlib>
@@ -198,6 +199,57 @@ std::optional<std::string> check_side_args(const std::vector<std::string> &args)
   return std::nullopt;
 }
 
+namespace {
+
+/// The first line of `tool --version` that names a version ("" if it cannot run).
+std::string version_line(const std::string &tool) {
+  const std::string tmp =
+      (std::filesystem::temp_directory_path() / ("rj_isa_diff_llvm_v" + std::to_string(getpid())))
+          .string();
+  std::string out;
+  if (run_tool({tool, "--version"}, tmp + ".out", tmp + ".err") == 0) {
+    std::istringstream in(read_text_file(tmp + ".out").value_or(""));
+    std::string line;
+    while (std::getline(in, line))
+      if (line.find("version") != std::string::npos) {
+        out = first_line(line);
+        break;
+      }
+  }
+  std::filesystem::remove(tmp + ".out");
+  std::filesystem::remove(tmp + ".err");
+  return out;
+}
+
+} // namespace
+
+bool Toolchain::overlay(const std::string &dir, std::string &error) {
+  const std::pair<const char *, std::string *> tools[] = {
+      {"llc", &llc}, {"llvm-mc", &llvm_mc}, {"ld.lld", &ld_lld}, {"llvm-objcopy", &llvm_objcopy}};
+  std::vector<std::string> found;
+  for (const auto &[name, field] : tools) {
+    const std::string path = dir + "/" + name;
+    if (is_executable(path)) {
+      *field = path;
+      found.emplace_back(name);
+    }
+  }
+  const auto has = [&](const char *name) {
+    return std::find(found.begin(), found.end(), name) != found.end();
+  };
+  if (!has("llc") && !has("llvm-mc")) {
+    error = "no llc or llvm-mc in " + dir;
+    return false;
+  }
+  if (has("llc"))
+    version = version_line(llc);
+  if (has("llvm-mc"))
+    mc_version = version_line(llvm_mc);
+  overlay_dir = dir;
+  overlaid = std::move(found);
+  return true;
+}
+
 std::optional<Toolchain> Toolchain::discover(const std::string &hint, std::string &error) {
   std::vector<std::string> candidates;
   if (!hint.empty())
@@ -245,6 +297,17 @@ Json Toolchain::to_json() const {
   j.set("version", version);
   if (!revision.empty())
     j.set("revision", revision);
+  if (!overlay_dir.empty()) {
+    Json o = Json::object();
+    o.set("dir", overlay_dir);
+    Json tools = Json::array();
+    for (const auto &t : overlaid)
+      tools.push(t);
+    o.set("tools", std::move(tools));
+    if (!mc_version.empty())
+      o.set("llvm_mc_version", mc_version);
+    j.set("overlay", std::move(o));
+  }
   return j;
 }
 

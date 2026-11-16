@@ -9,7 +9,10 @@ assembly of every test function, before the patch (base revision) and after it (
 revision). This driver reads both versions of each changed test from git, rebuilds the old
 and new assembly of every function whose body changed, and runs `rj_isa_diff analyze` and
 `rj_isa_diff test` on each pair. LLVM is neither built nor run; an assembler (llvm-mc and
-ld.lld, e.g. from ROCm) turns the listings into code objects.
+ld.lld, e.g. from ROCm) turns the listings into code objects. Each side should assemble with
+its own LLVM's llvm-mc: an installed one can reject a PR's new syntax or checks. Give
+--mc-before/--mc-after; with two llc builds the llvm-mc next to each llc is used (and
+--build-llc builds it); the linker stays --llvm-bin's.
 
     rj_isa_diff_pr --repo ~/llvm-project --base BASE --head HEAD --out DIR
     rj_isa_diff_pr --repo ~/llvm-project --pr 237629 --out DIR   # fetches the PR
@@ -28,7 +31,8 @@ lines carry no kernel descriptor).
 
 Overall status and exit code (summary.json "status"):
   PASS (0)                 every changed function was compared and passed, nothing skipped;
-  MISMATCH (1)             a local mismatch;
+  MISMATCH (1)             a local mismatch, or a listing of the change that the change's
+                           own llvm-mc rejects (verdict asm-rejected);
   INCOMPLETE (2)           something was not covered: inconclusive functions,
                            passes that needed the per-bit don't-care mask, skipped functions
                            or files, changed functions on targets not executed;
@@ -1348,6 +1352,9 @@ def job_dir(out, job):
 
 # Seconds one function's test may take (--job-timeout; None: unlimited).
 JOB_TIMEOUT = None
+# Per-side tool directories (old, new) holding the llvm-mc each side assembles with, passed
+# as --old-llvm-bin/--new-llvm-bin; None: --llvm-bin's.
+SIDE_LLVM_BIN = (None, None)
 
 
 def run_one(job, out, tool, llvm_bin, cases, seed, strict_nan=False, triage=True):
@@ -1430,6 +1437,9 @@ def run_job_in(job, d, tool, llvm_bin, cases, seed, strict_nan, triage):
         argv += ["--return-masks", ",".join(hex(m) for m in job["return_masks"])]
     if llvm_bin:
         argv += ["--llvm-bin", str(llvm_bin)]
+    for flag, side_bin in zip(("--old-llvm-bin", "--new-llvm-bin"), SIDE_LLVM_BIN):
+        if side_bin:
+            argv += [flag, side_bin]
     an = subprocess.run(argv, capture_output=True, text=True, cwd=d)
     (d / "analyze.log").write_text(an.stdout + an.stderr)
     row["analyze_exit"] = an.returncode
@@ -1442,6 +1452,11 @@ def run_job_in(job, d, tool, llvm_bin, cases, seed, strict_nan, triage):
         row["detail"] = (
             lines[0].split("error:", 1)[1].strip() if lines else text[-400:]
         )[:300]
+        # The old side assembled (analyze stops at the first side that fails) and the new
+        # LLVM's own assembler rejects the listing the new LLVM emitted: the change emits
+        # invalid assembly. With an installed assembler this could be version skew only.
+        if "new: llvm-mc failed" in text and SIDE_LLVM_BIN[1]:
+            row["asm_rejected"] = "new"
         return row
     try:
         te = subprocess.run(
@@ -1592,6 +1607,8 @@ def poison_sensitive(row):
 
 
 def verdict(row):
+    if row.get("asm_rejected") == "new":
+        return "asm-rejected"  # the change emits assembly its own llvm-mc rejects
     if row.get("status") in ("ERROR", "HARNESS_ERROR"):
         return "error"
     if row.get("status") == "LOCAL_MISMATCH":
@@ -1615,7 +1632,7 @@ def overall_status(rows, skipped, stats):
         counts[verdict(r)] = counts.get(verdict(r), 0) + 1
     if counts.get("error"):
         return "ERROR", 3
-    if counts.get("mismatch"):
+    if counts.get("mismatch") or counts.get("asm-rejected"):
         return "MISMATCH", 1
     # A requested file llc failed on might have had changed functions: not "nothing
     # applicable", but incomplete.
@@ -1659,6 +1676,9 @@ def report(out, meta, rows, skipped, stats):
         f"{stats['comment_only']}",
         f"- changed functions skipped: {sum(1 for s in skipped if 'function' in s)}; "
         f"files skipped: {sum(1 for s in skipped if 'function' not in s)}",
+        f"- assembler (llvm-mc): before {meta.get('assembler', {}).get('before', '?')}; "
+        f"after {meta.get('assembler', {}).get('after', '?')}"
+        + (f" ({meta['assembler_note']})" if meta.get("assembler_note") else ""),
         "- changed functions on targets not executed: "
         + (
             ", ".join(f"{t} {n}" for t, n in sorted(stats["untested_targets"].items()))
@@ -1779,13 +1799,39 @@ def build_llc(repo, rev, root, side, jobs):
         res = subprocess.run(cmd, capture_output=True, text=True)
         if res.returncode:
             raise RuntimeError(f"cmake for {side} failed: {res.stderr[-500:]}")
-    print(f"building llc ({side}, {rev[:12]}) in {build}", flush=True)
+    print(f"building llc and llvm-mc ({side}, {rev[:12]}) in {build}", flush=True)
     res = subprocess.run(
-        ["ninja", "-C", str(build), f"-j{jobs}", "llc"], capture_output=True, text=True
+        ["ninja", "-C", str(build), f"-j{jobs}", "llc", "llvm-mc"],
+        capture_output=True,
+        text=True,
     )
     if res.returncode:
-        raise RuntimeError(f"building llc ({side}) failed: {res.stdout[-800:]}")
+        raise RuntimeError(f"building llc/llvm-mc ({side}) failed: {res.stdout[-800:]}")
     return str(build / "bin" / "llc")
+
+
+def assemblers(mc_before, mc_after, llc_pair, ap):
+    """(old, new) llvm-mc paths (None: --llvm-bin's) and a note for the report. Explicit
+    --mc-before/--mc-after win; else the llvm-mc next to both llc builds; else neither (one
+    side's own assembler with the other's default would differ for no reason)."""
+    if bool(mc_before) != bool(mc_after):
+        ap.error("give both --mc-before and --mc-after")
+    note = ""
+    mcs = [mc_before, mc_after]
+    if not mc_before and llc_pair:
+        sib = [Path(l).resolve().parent / "llvm-mc" for l in llc_pair]
+        if all(os.access(m, os.X_OK) for m in sib):
+            mcs = [str(m) for m in sib]
+        else:
+            note = (
+                "the llc builds have no llvm-mc next to llc: both sides assemble with "
+                "--llvm-bin's, which can reject the change's own syntax (build llvm-mc "
+                "there, or pass --mc-before/--mc-after)"
+            )
+    for flag, m in zip(("--mc-before", "--mc-after"), mcs):
+        if m and (Path(m).name != "llvm-mc" or not os.access(m, os.X_OK)):
+            ap.error(f"{flag}: {m} is not an executable named llvm-mc")
+    return [str(Path(m).resolve()) if m else None for m in mcs], note
 
 
 def main(argv=None):
@@ -1845,10 +1891,22 @@ def main(argv=None):
     )
     ap.add_argument("--llc-after", help="llc built after the change (see --llc-before)")
     ap.add_argument(
+        "--mc-before",
+        metavar="LLVM_MC",
+        help="llvm-mc of the LLVM before the change: the old listings assemble with it "
+        "(default: the llvm-mc next to --llc-before, else --llvm-bin's)",
+    )
+    ap.add_argument(
+        "--mc-after",
+        metavar="LLVM_MC",
+        help="llvm-mc of the LLVM after the change (see --mc-before)",
+    )
+    ap.add_argument(
         "--build-llc",
         metavar="DIR",
-        help="build llc at --base and --head in DIR (a worktree and an incremental build "
-        "per side, reused across runs) and use them as --llc-before/--llc-after",
+        help="build llc and llvm-mc at --base and --head in DIR (a worktree and an "
+        "incremental build per side, reused across runs) and use them as "
+        "--llc-before/--llc-after and --mc-before/--mc-after",
     )
     ap.add_argument(
         "--all-tests",
@@ -1885,7 +1943,7 @@ def main(argv=None):
         "--list", action="store_true", help="only list what would be compared"
     )
     a = ap.parse_args(argv)
-    global JOB_TIMEOUT
+    global JOB_TIMEOUT, SIDE_LLVM_BIN
     JOB_TIMEOUT = a.job_timeout if a.job_timeout > 0 else None
     try:
         if a.pr:
@@ -1917,6 +1975,8 @@ def main(argv=None):
             a.llc_before = build_llc(a.repo, base, a.build_llc, "before", a.jobs)
             a.llc_after = build_llc(a.repo, head, a.build_llc, "after", a.jobs)
         llc_pair = (a.llc_before, a.llc_after) if a.llc_before else None
+        mcs, mc_note = assemblers(a.mc_before, a.mc_after, llc_pair, ap)
+        SIDE_LLVM_BIN = tuple(str(Path(m).parent) if m else None for m in mcs)
         if (a.all_tests or a.corpus) and not llc_pair:
             ap.error(
                 "--all-tests and --corpus need two llc builds (--llc-before/--llc-after "
@@ -1946,7 +2006,15 @@ def main(argv=None):
         "cases": a.cases,
         "seed": a.seed,
         "tool": a.tool,
+        "assembler": {
+            side: m
+            or f"{a.llvm_bin or os.environ.get('RJ_ISA_DIFF_LLVM_BIN') or '/opt/rocm/llvm/bin'}/llvm-mc"
+            for side, m in zip(("before", "after"), mcs)
+        },
     }
+    if mc_note:
+        meta["assembler_note"] = mc_note
+        print(f"note: {mc_note}", flush=True)
     print(
         f"{base[:12]}..{head[:12]}: {stats['changed_test_files']} changed AMDGPU tests"
         + (

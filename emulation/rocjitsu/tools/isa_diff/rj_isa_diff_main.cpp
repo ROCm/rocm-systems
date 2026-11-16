@@ -33,6 +33,7 @@ const char *kUsage =
     "usage:\n"
     "  rj_isa_diff analyze --old FILE --new FILE --out DIR [--kernel NAME]\n"
     "                      [--llvm-bin DIR] [--llc-args S] [--old-llc-args S] [--new-llc-args S]\n"
+    "                      [--old-llvm-bin DIR] [--new-llvm-bin DIR]  (per-side llc/llvm-mc)\n"
     "                      [--old-kernel NAME] [--new-kernel NAME] [--context N]\n"
     "                      [--max-region N] [--max-expansions N] [--no-merge]\n"
     "                      [--no-derive-constraints] [--max-analysis-ms N]\n"
@@ -73,7 +74,9 @@ const char *kUsage =
     "                      [--common-args S] [--kernel NAME] [--llvm-bin DIR]  (LLVM plugin)\n"
     "FILE is a code object (CDNA1-4: gfx908/90a/940-942/950; RDNA1-4: gfx1010-1201;\n"
     "gfx1250/1251), a raw instruction stream, or .s/.ll (LLVM plugin:\n"
-    "llc -> llvm-mc -> ld.lld from --llvm-bin, $RJ_ISA_DIFF_LLVM_BIN or /opt/rocm/llvm/bin).\n"
+    "llc -> llvm-mc -> ld.lld from --llvm-bin, $RJ_ISA_DIFF_LLVM_BIN or /opt/rocm/llvm/bin;\n"
+    "--old-llvm-bin/--new-llvm-bin replace whichever of llc, llvm-mc, ld.lld, llvm-objcopy\n"
+    "they hold for that side: an LLVM PR's listings need the PR's own assembler).\n"
     "exit: 0 no mismatch found with complete declared scope (no don't-care masking),\n"
     "      1 local mismatch, 2 inconclusive/unsupported/partial scope or a pass that needed\n"
     "      the per-bit don't-care mask, 3 error.\n";
@@ -247,7 +250,7 @@ bool apply_target(const TargetRequest &req, Artifact &a, std::string &error) {
 /// Load one side: a code object or raw words directly, `.s`/`.ll` through the LLVM plugin.
 bool load_side(const std::string &path, const std::string &kernel, const std::string &side,
                const std::string &out_dir, const std::string &llvm_bin,
-               const std::vector<std::string> &common_args,
+               const std::string &side_llvm_bin, const std::vector<std::string> &common_args,
                const std::vector<std::string> &side_args, const TargetRequest &req, Artifact &out,
                Json &provenance, std::string &error) {
   const bool is_ll = has_suffix(path, ".ll");
@@ -256,6 +259,9 @@ bool load_side(const std::string &path, const std::string &kernel, const std::st
     return load_artifact(path, kernel, out, error) && apply_target(req, out, error);
   auto tc = llvm::Toolchain::discover(llvm_bin, error);
   if (!tc)
+    return false;
+  // This side's own tools (an LLVM PR's build: its llc and llvm-mc) over the default.
+  if (!side_llvm_bin.empty() && !tc->overlay(side_llvm_bin, error))
     return false;
   std::error_code ec;
   std::filesystem::create_directories(out_dir + "/artifacts", ec);
@@ -318,12 +324,12 @@ int run_analyze(const std::string &old_path, const std::string &new_path, const 
   Artifact old_a, new_a;
   Json old_prov, new_prov;
   if (!load_side(old_path, a.get("--old-kernel", kernel), "old", out_dir, a.get("--llvm-bin"),
-                 common_args, old_args, old_req, old_a, old_prov, error)) {
+                 a.get("--old-llvm-bin"), common_args, old_args, old_req, old_a, old_prov, error)) {
     std::cerr << "old: " << error << "\n";
     return kExitError;
   }
   if (!load_side(new_path, a.get("--new-kernel", kernel), "new", out_dir, a.get("--llvm-bin"),
-                 common_args, new_args, new_req, new_a, new_prov, error)) {
+                 a.get("--new-llvm-bin"), common_args, new_args, new_req, new_a, new_prov, error)) {
     std::cerr << "new: " << error << "\n";
     return kExitError;
   }
@@ -455,9 +461,10 @@ int run_analyze(const std::string &old_path, const std::string &new_path, const 
 }
 
 int cmd_analyze(int argc, char **argv) {
-  std::vector<std::string> flags = {"--old",          "--new",         "--out",      "--kernel",
-                                    "--old-kernel",   "--new-kernel",  "--llvm-bin", "--llc-args",
-                                    "--old-llc-args", "--new-llc-args"};
+  std::vector<std::string> flags = {"--old",          "--new",          "--out",
+                                    "--kernel",       "--old-kernel",   "--new-kernel",
+                                    "--llvm-bin",     "--llc-args",     "--old-llc-args",
+                                    "--new-llc-args", "--old-llvm-bin", "--new-llvm-bin"};
   flags.insert(flags.end(), kPlanFlags.begin(), kPlanFlags.end());
   Args a = parse(argc, argv, 2, flags, kPlanSwitches);
   if (!a.error.empty() || !a.has("--old") || !a.has("--new") || !a.has("--out")) {
@@ -471,8 +478,9 @@ int cmd_analyze(int argc, char **argv) {
 }
 
 int cmd_llvm_pair(int argc, char **argv) {
-  std::vector<std::string> flags = {"--input",       "--out",      "--kernel",  "--llvm-bin",
-                                    "--common-args", "--old-args", "--new-args"};
+  std::vector<std::string> flags = {"--input",    "--out",          "--kernel",
+                                    "--llvm-bin", "--common-args",  "--old-args",
+                                    "--new-args", "--old-llvm-bin", "--new-llvm-bin"};
   flags.insert(flags.end(), kPlanFlags.begin(), kPlanFlags.end());
   Args a = parse(argc, argv, 2, flags, kPlanSwitches);
   if (!a.error.empty() || !a.has("--input") || !a.has("--out")) {

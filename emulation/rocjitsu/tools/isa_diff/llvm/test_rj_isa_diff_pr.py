@@ -716,6 +716,102 @@ def main():
                     f"c_add with a failing corpus neighbour: {rows.get('c_add')}"
                 )
 
+        # Each side assembles with the llvm-mc next to its llc (an LLVM PR's own build):
+        # wrappers record which one ran.
+        if llc and llc.exists():
+            mc = Path(a.llvm_bin) / "llvm-mc"
+            for side in ("before", "after"):
+                d = Path(tmp) / f"bin_{side}"
+                d.mkdir()
+                sed = (
+                    ""
+                    if side == "before"
+                    else " | sed -E 's/(v_add_u32_e32 v[0-9]+), (v[0-9]+), (v[0-9]+)/"
+                    "\\1, \\3, \\2/'"
+                )
+                (d / "llc").write_text(f'#!/bin/sh\n"{llc}" "$@"{sed}\n')
+                (d / "llvm-mc").write_text(
+                    f'#!/bin/sh\necho {side} >> "{d}/mc.log"\nexec "{mc}" "$@"\n'
+                )
+                for t in ("llc", "llvm-mc"):
+                    (d / t).chmod(0o755)
+            (corpus / "bad.ll").unlink()
+            code, rows, _ = run(
+                a.driver,
+                repo,
+                Path(tmp) / "out_mc",
+                a.tool,
+                a.llvm_bin,
+                "--llc-before",
+                str(Path(tmp) / "bin_before" / "llc"),
+                "--llc-after",
+                str(Path(tmp) / "bin_after" / "llc"),
+                "--corpus",
+                str(corpus),
+                "--corpus-mcpu",
+                "gfx950",
+            )
+            summary = json.loads((Path(tmp) / "out_mc" / "summary.json").read_text())
+            for side in ("before", "after"):
+                log = Path(tmp) / f"bin_{side}" / "mc.log"
+                if not log.exists() or set(log.read_text().split()) != {side}:
+                    failures.append(
+                        f"{side} listings not assembled by the {side} llvm-mc"
+                    )
+                want = str((Path(tmp) / f"bin_{side}" / "llvm-mc").resolve())
+                if summary["meta"].get("assembler", {}).get(side) != want:
+                    failures.append(
+                        f"assembler {side}: {summary['meta'].get('assembler')}"
+                    )
+            if drv.verdict(rows.get("c_add", {})) != "pass" or code != 0:
+                failures.append(
+                    f"own assemblers: exit {code}, c_add {rows.get('c_add')}"
+                )
+            report_mc = (Path(tmp) / "out_mc" / "report.md").read_text()
+            if (
+                "assembler (llvm-mc): before "
+                + str((Path(tmp) / "bin_before" / "llvm-mc").resolve())
+                not in report_mc
+            ):
+                failures.append("report: the assemblers are not named")
+
+            # The after LLVM's own llvm-mc rejects a listing the after llc emitted (as
+            # upstream llvm-mc rejects a bf16 inline constant without op_sel): the change
+            # emits invalid assembly. A defect (asm-rejected, MISMATCH), not UNSUPPORTED.
+            (Path(tmp) / "bin_after" / "llvm-mc").write_text(
+                "#!/bin/sh\n"
+                'for a in "$@"; do case "$a" in *.s) if grep -q reject_me "$a"; then '
+                'echo "$a:1:1: error: injected rejection" >&2; exit 1; fi;; esac; done\n'
+                f'exec "{mc}" "$@"\n'
+            )
+            (corpus / "reject.ll").write_text(add.format("reject_me"))
+            code, rows, _ = run(
+                a.driver,
+                repo,
+                Path(tmp) / "out_mc_reject",
+                a.tool,
+                a.llvm_bin,
+                "--llc-before",
+                str(Path(tmp) / "bin_before" / "llc"),
+                "--llc-after",
+                str(Path(tmp) / "bin_after" / "llc"),
+                "--corpus",
+                str(corpus),
+                "--corpus-mcpu",
+                "gfx950",
+            )
+            r = rows.get("reject_me", {})
+            if drv.verdict(r) != "asm-rejected" or code != 1:
+                failures.append(
+                    f"own assembler rejects the new listing: exit {code}, {r}"
+                )
+            if "injected rejection" not in r.get("detail", ""):
+                failures.append(f"asm-rejected detail: {r.get('detail')}")
+            if drv.verdict(rows.get("c_add", {})) != "pass":
+                failures.append(
+                    f"c_add next to a rejected listing: {rows.get('c_add')}"
+                )
+
     if failures:
         print("FAILED:\n  " + "\n  ".join(failures))
         print(log[-3000:])

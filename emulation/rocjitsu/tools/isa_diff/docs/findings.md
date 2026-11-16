@@ -1181,3 +1181,21 @@ The default number of random cases per region is now 1000 (was 5000).
   (`Expected 9, but got 10`, `Expected 6, but got 7`), 2 GFX12 waits (`Cannot select:
   intrinsic llvm.amdgcn.s.wait.dscnt`), 1 gfx1250 TDM kernel (`llvm.amdgcn.tensor.load.to.lds
   requires target feature 'tdm-insts'`).
+
+## Each side assembles with its own llvm-mc (2026-11-16)
+
+ROCm 7.2.3's llvm-mc rejected 7 listings of the commit sweep, which were therefore
+`UNSUPPORTED`. `rj_isa_diff_pr` now assembles each side with its own LLVM's llvm-mc
+(`--mc-before/--mc-after`, the llvm-mc next to each llc build, `--build-llc` builds it;
+`analyze --old-llvm-bin/--new-llvm-bin` underneath); the linker stays ROCm's.
+
+Re-run with the llvm-mc of the PR 243123 builds (upstream, 2026-11-15; 25 s to build):
+
+| commit | installed llvm-mc (ROCm) | own (upstream) llvm-mc |
+|---|---|---|
+| 03f0b3e3b28a | 1110 pass, 5 `UNSUPPORTED` (`src1 operands must use different VGPR banks` x4, `operands are not valid for this GPU or mode`) | 1115 pass |
+| 06f4a14f71ed | 9 pass, `uniform_fshr_i32` `UNSUPPORTED` | 10 pass |
+| 66cb135fa288 (#242952) | run 0 `LOCAL_MISMATCH` (ROCm encodes the low half), run 1 `UNSUPPORTED` (old rejected) | both runs `asm-rejected`: upstream llvm-mc rejects the new `v_rsq_bf16_e64 v0.l, 4.0` (`bf16 inline constant is read from the high half of the fp32 inline constant on this GPU; use the e64 encoding with op_sel:[1,0]`); status `MISMATCH` |
+
+PR 243123 with each build's own llvm-mc: 56 changed functions, 3 pass, 53 inconclusive,
+0 mismatch, every verdict as with ROCm's assembler (306 s).

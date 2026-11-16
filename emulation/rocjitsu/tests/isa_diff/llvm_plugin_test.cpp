@@ -115,6 +115,40 @@ TEST(IsaDiffLlvm, ToolchainIdentityAndArgumentChecks) {
   EXPECT_NE(llvm::run_tool({"/nonexistent/tool"}, "", ""), 0);
 }
 
+TEST(IsaDiffLlvm, OverlayTakesASidesOwnAssemblerAndKeepsTheLinker) {
+  const auto base = toolchain();
+  const std::string dir = temp_dir("overlay");
+  std::string error;
+  // A directory with neither llc nor llvm-mc is no overlay.
+  auto empty = base;
+  EXPECT_FALSE(empty.overlay(dir, error));
+  EXPECT_NE(error.find("no llc or llvm-mc"), std::string::npos) << error;
+  // An LLVM PR's build: llvm-mc (and llc), no lld.
+  std::filesystem::create_symlink(base.llvm_mc, dir + "/llvm-mc");
+  auto tc = base;
+  ASSERT_TRUE(tc.overlay(dir, error)) << error;
+  EXPECT_EQ(tc.llvm_mc, dir + "/llvm-mc");
+  EXPECT_EQ(tc.ld_lld, base.ld_lld);
+  EXPECT_EQ(tc.llc, base.llc);
+  EXPECT_NE(tc.mc_version.find("version"), std::string::npos) << tc.mc_version;
+  const Json j = tc.to_json();
+  EXPECT_EQ(j["overlay"]["dir"].as_string(), dir);
+  ASSERT_EQ(j["overlay"]["tools"].size(), 1u);
+  EXPECT_EQ(j["overlay"]["tools"].items()[0].as_string(), "llvm-mc");
+  // The overlaid assembler is the one that runs.
+  const std::string s = dir + "/f.s";
+  ASSERT_TRUE(write_text_file(s, "\t.text\n\t.globl\tf\n\t.p2align\t8\n\t.type\tf,@function\n"
+                                 "f:\n\tv_add_u32_e32 v0, v0, v1\n\ts_setpc_b64 s[30:31]\n"
+                                 ".Lfunc_end0:\n\t.size\tf, .Lfunc_end0-f\n"));
+  Artifact a;
+  llvm::Provenance p;
+  ASSERT_TRUE(llvm::assemble(tc, s, dir + "/f", "f", a, p, error)) << error;
+  ASSERT_FALSE(p.commands.empty());
+  EXPECT_EQ(p.commands.front().argv.front(), dir + "/llvm-mc");
+  EXPECT_EQ(p.to_json()["toolchain"]["overlay"]["dir"].as_string(), dir);
+  std::filesystem::remove_all(dir);
+}
+
 TEST(IsaDiffLlvm, AssemblesKernelSourceAndBareListings) {
   const auto tc = toolchain();
   const std::string dir = temp_dir("asm");

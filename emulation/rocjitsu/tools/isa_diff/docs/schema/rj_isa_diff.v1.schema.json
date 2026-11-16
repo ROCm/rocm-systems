@@ -456,6 +456,32 @@
             },
             "revision": {
               "type": "string"
+            },
+            "overlay": {
+              "type": "object",
+              "required": [
+                "dir",
+                "tools"
+              ],
+              "properties": {
+                "dir": {
+                  "type": "string"
+                },
+                "tools": {
+                  "type": "array",
+                  "items": {
+                    "enum": [
+                      "llc",
+                      "llvm-mc",
+                      "ld.lld",
+                      "llvm-objcopy"
+                    ]
+                  }
+                },
+                "llvm_mc_version": {
+                  "type": "string"
+                }
+              }
             }
           }
         },

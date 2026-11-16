@@ -30,9 +30,17 @@ struct Toolchain {
   std::string llc, llvm_mc, ld_lld, llvm_objcopy;
   std::string version;  ///< First line of `llc --version`.
   std::string revision; ///< `clang --version` source/revision line when available.
+  /// Set by overlay(): the directory, the tools taken from it, its llvm-mc's version.
+  std::string overlay_dir;
+  std::vector<std::string> overlaid;
+  std::string mc_version;
 
   /// @brief Locate the tools: @p hint, else $RJ_ISA_DIFF_LLVM_BIN, else /opt/rocm/llvm/bin.
   static std::optional<Toolchain> discover(const std::string &hint, std::string &error);
+  /// @brief Use the tools @p dir has (llc, llvm-mc, ld.lld, llvm-objcopy) instead of these.
+  /// An LLVM PR's listings need the PR's own assembler (new syntax, new checks); its build
+  /// usually lacks lld, so the linker stays. Fails when @p dir has neither llc nor llvm-mc.
+  bool overlay(const std::string &dir, std::string &error);
   [[nodiscard]] Json to_json() const;
 };
 
