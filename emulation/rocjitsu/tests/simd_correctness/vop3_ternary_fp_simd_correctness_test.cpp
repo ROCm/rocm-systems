@@ -91,9 +91,9 @@ const std::array<Case, 10> kCases = {{
     {"v_max3_f32_vop3", 467, Kind::F32},
     {"v_min3_f32_vop3", 464, Kind::F32},
     {"v_med3_f32_vop3", 470, Kind::F32},
-    {"v_max3_f16_vop3", 503, Kind::F16, amdgpu::SimdFastPath::VOP3_TERNARY_TRUE16_RAW_FP16},
-    {"v_min3_f16_vop3", 500, Kind::F16, amdgpu::SimdFastPath::VOP3_TERNARY_TRUE16_RAW_FP16},
-    {"v_med3_f16_vop3", 506, Kind::F16, amdgpu::SimdFastPath::VOP3_TERNARY_TRUE16_RAW_FP16},
+    {"v_max3_f16_vop3", 503, Kind::F16},
+    {"v_min3_f16_vop3", 500, Kind::F16},
+    {"v_med3_f16_vop3", 506, Kind::F16},
 }};
 
 // Finite-normal f32 sanitized inputs (avoid NaN/Inf for cleaner FMA bit-equality
@@ -598,8 +598,11 @@ TEST_P(Vop3F16TernaryOutputOrderTest, MatchesScalarOutputContractWithSimdEnabled
         if (force_scalar) {
           EXPECT_TRUE(tracker.no_tracked_path_executed())
               << test.name << ": forced-scalar execution used SIMD";
-        } else if (test.arch != ROCJITSU_CODE_ARCH_RDNA3) {
-          // RDNA3 uses rj-arith, whose SIMD paths do not use the legacy tracker.
+        } else if (test.arch != ROCJITSU_CODE_ARCH_RDNA3 &&
+                   !(test.arch == ROCJITSU_CODE_ARCH_CDNA4 &&
+                     (test.opcode == cdna4::kVMin3F16Vop3 || test.opcode == cdna4::kVMax3F16Vop3 ||
+                      test.opcode == cdna4::kVMed3F16Vop3))) {
+          // Migrated operations use rj-arith, whose SIMD paths do not use this tracker.
           EXPECT_TRUE(tracker.only_tracked_path_executed(test.expected_simd_path))
               << test.name << ": eligible execution did not use the ternary F16 SIMD path";
         }

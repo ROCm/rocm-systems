@@ -8589,12 +8589,15 @@ TEST(Gfx1250CvtScaleTest, UnpackSelectsE8M0ScaleLaneAndByte) {
 
   // Compare the literal fast path against the per-lane register scale with
   // overlapping source and destination tuples and inactive lanes.
+  wf->set_vgpr_msb_mode(0); // The comparison below initializes its scale in bank 0.
   const uint64_t mask = 0x55555555u;
   wf->set_exec(mask);
   for (const auto opcode : {cdna5::kVCvtScalePk8F32Fp8Vop3, cdna5::kVCvtScalePk8F32Bf8Vop3}) {
-    for (unsigned select = 0; select < 4; ++select) {
+    // Block16 cases put unity in only one selected byte; the other half must not use the shortcut.
+    for (unsigned select : {0u, 1u, 2u, 3u, 8u, 10u}) {
       const uint32_t first = (0x35u << 26) | (uint32_t{opcode} << 16) | (select << 11);
-      const uint32_t literal = 127u << (select * 8);
+      const unsigned byte = (select & 8u) ? (select & 2u) : select;
+      const uint32_t literal = 127u << (byte * 8);
       const uint32_t constant_words[] = {first, 0x0201ff00u, literal};
       const uint32_t register_words[] = {first | 16u, 0x02021500u};
       std::unique_ptr<Instruction> constant(decode_valid(*decoder, constant_words));

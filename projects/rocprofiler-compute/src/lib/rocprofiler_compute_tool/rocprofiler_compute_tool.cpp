@@ -72,16 +72,6 @@ static rocprofiler_context_id_t& get_client_ctx()
     return ctx;
 }
 
-iteration_multiplexing_mode_t iteration_multiplexing_mode(std::string_view mode)
-{
-    if (mode == "kernel")
-        return iteration_multiplexing_mode_t::KERNEL;
-    else if (mode == "kernel_launch_params")
-        return iteration_multiplexing_mode_t::LAUNCH;
-    else
-        return iteration_multiplexing_mode_t::DISABLED;
-}
-
 void dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                        rocprofiler_counter_config_id_t*             config,
                        rocprofiler_user_data_t* /*user_data*/,
@@ -262,8 +252,7 @@ std::unique_ptr<tool_data_t> create_tool_data(rocprofiler_client_id_t* /*id*/)
     // ROCPROF_COUNTERS env. var. is a string like "pmc: counter1 counter2 ..."
     tool_data->requested_counters = std::string{g_input_parameters->get_requested_counters()};
 
-    tool_data->iteration_multiplexing_mode = iteration_multiplexing_mode(
-        g_input_parameters->get_iteration_multiplexing_mode());
+    tool_data->iteration_multiplexing = g_input_parameters->get_iteration_multiplexing() == "1";
 
     // ROCPROF_KERNEL_FILTER_INCLUDE_REGEX env. var. is a regex string like
     // kernel_name_1|kernel_name_2|... Used to collect counters only for kernels

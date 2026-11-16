@@ -1,0 +1,12 @@
+vl1d.ai:
+  name: vL1D Arithmetic Intensity
+  formula: SUM($valu_f16_flops + $valu_f32_flops + $valu_f64_flops + $mfma_f16_flops + $mfma_bf16_flops + $mfma_f32_flops + $mfma_f64_flops) / SUM($l1_bytes)
+  unit: FLOPs/Byte
+  description: >-
+    The Arithmetic Intensity (AI) relative to the L1 Cache. It is the ratio of total
+    floating-point operations (FLOPs) to total bytes transferred between the L1 cache
+    and the processing units.
+vl1d.cache_bw:
+  peak_empirical: $L1Bw_empirical_peak
+vl1d.l2_bw:
+  peak_empirical: $L2Bw_empirical_peak
