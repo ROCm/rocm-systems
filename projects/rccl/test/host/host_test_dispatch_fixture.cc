@@ -17,7 +17,10 @@
 //   * it records the environment it was given (every GTEST_* variable, and LLVM_PROFILE_FILE)
 //     into RCCL_FIXTURE_RECORD_DIR, which is how the test sees what the dispatcher stripped and
 //     what it rewrote; and
-//   * it can be told to hang (RCCL_FIXTURE_HANG), so the child timeout has something to kill.
+//   * it can be told to hang (RCCL_FIXTURE_HANG), so the child timeout has something to kill,
+//     and to ignore SIGTERM while it hangs (RCCL_FIXTURE_IGNORE_TERM), so a stop has to go the
+//     whole way through its grace period and its SIGKILL rather than ending at the first
+//     signal.
 //
 // The case named Fails always fails. A test that wants a green run selects the others.
 
@@ -26,6 +29,7 @@
 #include <cstring>
 #include <fstream>
 #include <string>
+#include <csignal>
 #include <string_view>
 #include <unistd.h>
 #include <vector>
@@ -281,6 +285,13 @@ int main(int argc, char **argv)
     recordArguments(argc, argv);
 
     if (const char *hang = std::getenv("RCCL_FIXTURE_HANG"); hang != nullptr && *hang != '\0') {
+        // A child that dies on the first SIGTERM never makes the dispatcher wait, so the stop
+        // path's grace period -- where its cost is paid -- would go untested. Ignoring the
+        // signal here is what makes the dispatcher sit out the whole of it.
+        if (const char *deaf = std::getenv("RCCL_FIXTURE_IGNORE_TERM");
+            deaf != nullptr && *deaf != '\0') {
+            std::signal(SIGTERM, SIG_IGN);
+        }
         // Long enough that only a timeout or a stop ends it, short enough that a test which
         // somehow fails to kill this child does not wedge a CI run for ever.
         ::sleep(300);

@@ -24,16 +24,21 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
+#include <sys/resource.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -57,6 +62,12 @@ struct DispatchRun {
     int status = -1;             // exit status, or -1 when it did not exit normally
     std::string console;         // its stdout and stderr, interleaved as a caller sees them
     std::string report;          // the merged report, when the run was asked for one
+    // What it cost. The CPU time is the dispatcher's own, charged to it and to the children it
+    // reaped, as wait4(2) reports it; the wall time is what the caller waited. A dispatcher
+    // that is doing its job spends almost none of the first while a child runs, so the two
+    // together are what separates a wait from a spin.
+    std::chrono::duration<double> cpu{0};
+    std::chrono::duration<double> wall{0};
 };
 
 // The dispatcher, its fixture binaries and its manifest, in a directory of the test's own.
@@ -131,8 +142,12 @@ struct EnvVar {
 };
 
 // Run the dispatcher in *tree* with *args* and *environment*, and collect what it produced.
+//
+// *stopAfter*, when set, SIGTERMs the dispatcher that long into the run -- a caller's Ctrl-C or
+// an outer watchdog, arriving mid-run rather than between runs.
 DispatchRun runFrontDoor(const FixtureTree &tree, const std::vector<std::string> &args,
-                 const std::vector<EnvVar> &environment)
+                 const std::vector<EnvVar> &environment,
+                 std::optional<std::chrono::milliseconds> stopAfter = std::nullopt)
 {
     const std::string consolePath = (fs::path(tree.path()) / "console.txt").string();
 
@@ -160,10 +175,22 @@ DispatchRun runFrontDoor(const FixtureTree &tree, const std::vector<std::string>
     }
 
     DispatchRun run;
+    const auto started = std::chrono::steady_clock::now();
+    if (pid > 0 && stopAfter) {
+        std::this_thread::sleep_for(*stopAfter);
+        ::kill(pid, SIGTERM);
+    }
     int status = 0;
-    if (pid < 0 || ::waitpid(pid, &status, 0) != pid) {
+    struct rusage usage {};
+    if (pid < 0 || ::wait4(pid, &status, 0, &usage) != pid) {
         return run;
     }
+    run.wall = std::chrono::steady_clock::now() - started;
+    const auto seconds = [](const struct timeval &time) {
+        return std::chrono::duration<double>(static_cast<double>(time.tv_sec) +
+                                             static_cast<double>(time.tv_usec) / 1e6);
+    };
+    run.cpu = seconds(usage.ru_utime) + seconds(usage.ru_stime);
     run.status = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
     {
         std::ifstream console(consolePath);
@@ -269,6 +296,54 @@ std::vector<EnvVar> baseEnvironment(const FixtureTree &tree)
         }
     }
     return ::testing::AssertionSuccess();
+}
+
+// Every process still alive whose executable came out of *directory*, named as "pid: cmdline".
+//
+// Read from /proc rather than from the process tree, because the processes this looks for are
+// exactly the ones that are no longer in it: a child the dispatcher failed to kill outlives it,
+// is reparented to init, and so cannot be found by walking down from this test. They are
+// recognisable because each fixture binary is a copy the test itself put in its own directory.
+//
+// *settle* is allowed for ones that are on their way out of their own accord: a process the
+// dispatcher killed may not have been reaped by init by the time the dispatcher's own exit is
+// seen here. A genuinely abandoned fixture sleeps for minutes, so no settling time hides one.
+std::vector<std::string> survivorsFrom(const std::string &directory,
+                                       std::chrono::milliseconds settle)
+{
+    const auto deadline = std::chrono::steady_clock::now() + settle;
+    std::vector<std::string> survivors;
+    for (;;) {
+        survivors.clear();
+        std::error_code ec;
+        for (const fs::directory_entry &entry : fs::directory_iterator("/proc", ec)) {
+            const std::string pid = entry.path().filename().string();
+            if (pid.empty() || !std::all_of(pid.begin(), pid.end(), ::isdigit)) {
+                continue;
+            }
+            const fs::path executable = fs::read_symlink(entry.path() / "exe", ec);
+            if (ec) {
+                continue;   // gone, or not ours to look at
+            }
+            if (executable.string().rfind(directory, 0) == 0) {
+                survivors.push_back(pid + ": " + executable.string());
+            }
+        }
+        if (survivors.empty() || std::chrono::steady_clock::now() >= deadline) {
+            return survivors;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds{50});
+    }
+}
+
+// What *survivors* says, as one line for a failure message.
+std::string joined(const std::vector<std::string> &lines)
+{
+    std::string text;
+    for (const std::string &line : lines) {
+        text += line + "\n";
+    }
+    return text;
 }
 
 }  // namespace
@@ -450,6 +525,69 @@ TEST(HostDispatchEndToEnd, AChildThatHangsIsKilledAtItsTimeoutAndReportedAsOne)
     EXPECT_TRUE(contains(run.report, kFirstQualifier));
     // The fixture sleeps for minutes; the timeout plus its grace period is seconds.
     EXPECT_LT(std::chrono::duration_cast<std::chrono::seconds>(elapsed).count(), 60);
+}
+
+TEST(HostDispatchEndToEnd, AStopMidRunStillReportsTheBinaryItKilledAndLeavesNothingBehind)
+{
+    // What a Ctrl-C, or the outer watchdog's SIGTERM, has to buy: the run ends promptly, the
+    // report is still written and still names the binary that was cut short, the exit code says
+    // so, and no test binary outlives the dispatcher. Each of those is decided in a different
+    // place -- the handler, the scheduler's wind-down, classifyChild, main() -- and none of them
+    // is reachable from a unit test, because every scheduler test goes through FakeScheduler.
+    //
+    // The fixture is told to ignore SIGTERM, so the wind-down has to go the whole way through
+    // its grace period and the SIGKILL that follows. That is the expensive path, and the one
+    // the test below measures.
+    FixtureTree tree;
+    RCCL_REQUIRE_TREE(tree, kFirstBinary);
+
+    std::vector<EnvVar> environment = baseEnvironment(tree);
+    environment.push_back({"RCCL_FIXTURE_HANG", "1"});
+    environment.push_back({"RCCL_FIXTURE_IGNORE_TERM", "1"});
+
+    const DispatchRun run =
+        runFrontDoor(tree, {"--gtest_output=xml:" + tree.reportPath()}, environment,
+                     std::chrono::milliseconds{1000});
+
+    EXPECT_EQ(run.status, 1) << run.console;
+    EXPECT_TRUE(contains(run.report, kFirstQualifier));
+    EXPECT_TRUE(contains(run.report, "run was stopped"));
+    const std::vector<std::string> survivors =
+        survivorsFrom(tree.path(), std::chrono::milliseconds{500});
+    EXPECT_TRUE(survivors.empty()) << "left running after the stop:\n" << joined(survivors);
+}
+
+TEST(HostDispatchEndToEnd, AStopCostsNoMoreCpuThanWaitingForTheChildrenToDie)
+{
+    // The stop's wind-down is a WAIT, and a wait costs nothing. It is easy to make it cost a
+    // whole core instead and notice nothing, because every observable thing above still holds:
+    // a reap that reports a requested stop on every call turns the scheduler's loop into a spin
+    // for the whole of the teardown grace -- measured at 3.64 s of CPU in 4 s of wall -- and
+    // the report, the exit code and the kills all come out the same. On a loaded CI machine
+    // that core is taken from the tests still running.
+    //
+    // So the assertion is on the ratio, not on a wall-clock bound: the dispatcher may sit in
+    // the grace period for as long as it likes, as long as it is asleep for it. wait4(2) hands
+    // back the dispatcher's own CPU, which is what makes this cheap to ask for.
+    FixtureTree tree;
+    RCCL_REQUIRE_TREE(tree, kFirstBinary);
+
+    std::vector<EnvVar> environment = baseEnvironment(tree);
+    environment.push_back({"RCCL_FIXTURE_HANG", "1"});
+    environment.push_back({"RCCL_FIXTURE_IGNORE_TERM", "1"});
+
+    const DispatchRun run =
+        runFrontDoor(tree, {"--gtest_output=xml:" + tree.reportPath()}, environment,
+                     std::chrono::milliseconds{1000});
+
+    // The run has to have reached the wind-down for the measurement to mean anything: a stop
+    // the dispatcher took no time at all over has no grace period to have spun through.
+    ASSERT_GT(run.wall.count(), 2.0) << "the stop did not reach the teardown grace\n"
+                                     << run.console;
+    // Generous by a long way against a spin, which charges most of the wall time to the CPU.
+    EXPECT_LT(run.cpu.count(), 0.25 * run.wall.count())
+        << "the dispatcher spent " << run.cpu.count() << " s of CPU over " << run.wall.count()
+        << " s of wall after the stop";
 }
 
 TEST(HostDispatchEndToEnd, AManifestNamingABinaryThatIsNotThereFailsTheRun)
