@@ -64,6 +64,9 @@ test('with several develop attempts on the recorded base commit the latest finis
   const pick = (runs) => selectors.selectAutomaticReference({ ...data, runs }, candidate);
   expect(pick([finished, timedOutRetry])).toMatchObject({ reason: 'exact-base', run: { runId: 'finished-attempt' } });
   expect(pick([timedOutRetry])).toMatchObject({ reason: 'exact-base', run: { runId: 'timed-out-retry' } });
+  // Among finished attempts the one that finished last wins, even if another started later.
+  const startsLaterFinishesFirst = withTimes(base, 'starts-later', minutes(t0, -290), minutes(t0, -285));   // starts after finished-attempt (-300) but finishes before it (-280)
+  expect(pick([finished, startsLaterFinishesFirst])).toMatchObject({ reason: 'exact-base', run: { runId: 'finished-attempt' } });
 });
 
 test('automatic reference prefers the latest exact develop-base attempt and otherwise uses strictly earlier execution', () => {

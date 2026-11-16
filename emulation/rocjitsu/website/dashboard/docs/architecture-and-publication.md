@@ -162,7 +162,7 @@ finished when the candidate started: `finishedAt` at or before the candidate's
 start, latest finish first. A run with no finish record is a partial result and
 never qualifies, and neither does a run that finished after the candidate began.
 When a branch records an exact develop base and several runs share that commit,
-the latest finished one is used, and a checkpoint only when it is the only match.
+the one that finished last is used, and a checkpoint only when it is the only match.
 The dashboard does not otherwise display the checkpoint state: a run whose cases did
 not execute shows its unexecuted rows as `failed` ("run interrupted before
 completion") and an `× Fail` status, which is the only interrupted-run signal
