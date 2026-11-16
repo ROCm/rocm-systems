@@ -234,7 +234,7 @@ gl2.hit_rate:
   name: GL2 Cache Hit Rate
   formula: 100 * SUM(GL2C_HIT_sum) / SUM(GL2C_HIT_sum + GL2C_MISS_sum)
   unit: Percent
-  description: GL2 cache hit rate.
+  description: Percentage of GL2 cache requests that hit in the cache.
   peak: 100
 gl2.lat_fifo_full_stall:
   name: GL2 Latency FIFO Full Stall

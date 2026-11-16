@@ -3,10 +3,9 @@ lds.access_rate:
   formula: 200 * SUM(SQ_ACTIVE_INST_LDS) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
   unit: Percent
   description: >-
-    Indicates the percentage of SIMDs in the VALU actively issuing LDS instructions,
-    averaged over the lifetime of the kernel. Calculated as the ratio of the total
-    number of cycles spent by the scheduler issuing LDS instructions over the total CU
-    cycles.
+    Percentage of SIMDs in the VALU actively issuing LDS instructions, averaged over the
+    lifetime of the kernel. Calculated as the ratio of the total number of cycles spent
+    by the scheduler issuing LDS instructions over the total CU cycles.
 lds.addr_conflict:
   name: LDS Address Conflicts
   formula: SUM(SQ_LDS_ADDR_CONFLICT) / SUM($denom)
@@ -32,10 +31,10 @@ lds.bank_conflict_rate:
   formula: 3.125 * SUM(SQ_LDS_BANK_CONFLICT) / SUM(SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT)
   unit: Percent
   description: >-
-    Indicates the percentage of active LDS cycles that were spent servicing bank
-    conflicts. Calculated as the ratio of LDS cycles spent servicing bank conflicts over
-    the number of LDS cycles that would have been required to move the same amount of
-    data in an uncontended access.
+    Percentage of active LDS cycles that were spent servicing bank conflicts. Calculated
+    as the ratio of LDS cycles spent servicing bank conflicts over the number of LDS
+    cycles that would have been required to move the same amount of data in an
+    uncontended access.
 lds.bank_conflicts_access:
   name: LDS Bank Conflicts per Access
   formula: SUM(SQ_LDS_BANK_CONFLICT) / SUM(SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT)
@@ -105,7 +104,7 @@ lds.util:
   formula: 100 * SUM(SQ_LDS_IDX_ACTIVE) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
   unit: Percent
   description: >-
-    Indicates what percent of the total CU cycles the LDS was actively executing
-    instructions (including, but not limited to, load, store, atomic and HIP's __shfl
-    operations). Calculated as the ratio of the total number of cycles LDS was active
-    over the total CU cycles.
+    Percentage of the total CU cycles the LDS was actively executing instructions
+    (including, but not limited to, load, store, atomic and HIP's __shfl operations).
+    Calculated as the ratio of the total number of cycles LDS was active over the total
+    CU cycles.

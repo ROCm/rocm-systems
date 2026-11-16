@@ -73,25 +73,22 @@ vl1d.coalescing:
   formula: 100 * 64 * SUM(TA_TOTAL_WAVEFRONTS_sum) / (4 * SUM(TCP_TOTAL_ACCESSES_sum))
   unit: Percent
   description: >-
-    Indicates how well memory instructions were coalesced by the address processing
-    unit, ranging from uncoalesced (25%) to fully coalesced (100%). Calculated as the
-    average number of thread-requests generated per instruction divided by the ideal
-    number of thread-requests per instruction.
+    Percentage of ideal coalescing the address processing unit achieved for memory
+    instructions, ranging from uncoalesced (25%) to fully coalesced (100%). Calculated
+    as the average number of thread-requests generated per instruction divided by the
+    ideal number of thread-requests per instruction.
 vl1d.hit_rate:
   name: vL1D Cache Hit Rate
   formula: 100 - $vl1d_read_write_miss_rate - $vl1d_atomic_miss_rate
   unit: Percent
   description: >-
-    The ratio of the number of vL1D cache line requests that hit in vL1D cache over the
-    total number of cache line requests to the vL1D Cache RAM.
+    Percentage of cache line requests to the vL1D Cache RAM that hit in the vL1D cache.
   peak: 100
 vl1d.hit_ratio:
   name: UTCL1 Hit Ratio
   formula: 100 * SUM(TCP_UTCL1_TRANSLATION_HIT_sum) / SUM(TCP_UTCL1_REQUEST_sum)
   unit: Percent
-  description: >-
-    The ratio of the number of translation requests that hit in the UTCL1 divided by the
-    total number of translation requests made to the UTCL1.
+  description: Percentage of translation requests to the UTCL1 that hit in the UTCL1.
 vl1d.hits:
   name: UTCL1 Hits
   formula: SUM(TCP_UTCL1_TRANSLATION_HIT_sum) / SUM($denom)
@@ -240,41 +237,36 @@ vl1d.stalled_on_l2_data:
   formula: 100 * TCP_PENDING_STALL_CYCLES_sum / TCP_GATE_EN1_sum
   unit: Percent
   description: >-
-    The ratio of the number of cycles where the vL1D is stalled waiting for requested
-    data to return from the L2 cache divided by the number of cycles where the vL1D is
-    active.
+    Percentage of vL1D active cycles the vL1D was stalled waiting for requested data to
+    return from the L2 cache.
 vl1d.stalled_on_l2_req:
   name: vL1D Stalled on L2 Requests
   formula: 100 * TCP_TCR_TCP_STALL_CYCLES_sum / TCP_GATE_EN1_sum
   unit: Percent
   description: >-
-    The ratio of the number of cycles where the vL1D is stalled waiting to issue a
-    request for data to the L2 cache divided by the number of cycles where the vL1D is
-    active.
+    Percentage of vL1D active cycles the vL1D was stalled waiting to issue a request for
+    data to the L2 cache.
 vl1d.tag_ram_stall_atomic:
   name: vL1D Tag RAM Stall (Atomic)
   formula: 100 * TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES_sum / TCP_GATE_EN1_sum
   unit: Percent
   description: >-
-    The ratio of the number of cycles where the vL1D is stalled due to Atomic requests
-    with conflicting tags being looked up concurrently, divided by the number of cycles
-    where the vL1D is active.
+    Percentage of vL1D active cycles the vL1D was stalled because atomic requests with
+    conflicting tags were looked up concurrently.
 vl1d.tag_ram_stall_rd:
   name: vL1D Tag RAM Stall (Read)
   formula: 100 * TCP_READ_TAGCONFLICT_STALL_CYCLES_sum / TCP_GATE_EN1_sum
   unit: Percent
   description: >-
-    The ratio of the number of cycles where the vL1D is stalled due to Read requests
-    with conflicting tags being looked up concurrently, divided by the number of cycles
-    where the vL1D is active.
+    Percentage of vL1D active cycles the vL1D was stalled because read requests with
+    conflicting tags were looked up concurrently.
 vl1d.tag_ram_stall_wr:
   name: vL1D Tag RAM Stall (Write)
   formula: 100 * TCP_WRITE_TAGCONFLICT_STALL_CYCLES_sum / TCP_GATE_EN1_sum
   unit: Percent
   description: >-
-    The ratio of the number of cycles where the vL1D is stalled due to Write requests
-    with conflicting tags being looked up concurrently, divided by the number of cycles
-    where the vL1D is active.
+    Percentage of vL1D active cycles the vL1D was stalled because write requests with
+    conflicting tags were looked up concurrently.
 vl1d.total_req:
   name: vL1D Total Requests
   formula: SUM(TCP_TOTAL_ACCESSES_sum) / SUM($denom)
@@ -315,9 +307,8 @@ vl1d.util:
   formula: 100 * SUM(TCP_GATE_EN2_sum) / SUM(TCP_GATE_EN1_sum)
   unit: Percent
   description: >-
-    Indicates how busy the vL1D Cache RAM was during the kernel execution. The number of
-    cycles where the vL1D Cache RAM is actively processing any request divided by the
-    number of cycles where the vL1D is active.
+    Percentage of vL1D active cycles the vL1D Cache RAM was actively processing any
+    request. This indicates how busy the vL1D Cache RAM was during the kernel execution.
 vl1d.wr_req:
   name: vL1D Write Requests
   formula: SUM(TCP_TOTAL_WRITE_sum) / SUM($denom)

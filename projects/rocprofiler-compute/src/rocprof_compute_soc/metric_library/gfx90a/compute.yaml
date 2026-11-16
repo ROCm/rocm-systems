@@ -10,9 +10,9 @@ compute.branch_util:
   formula: 100 * SUM(SQ_ACTIVE_INST_MISC) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
   unit: Percent
   description: >-
-    Indicates what percent of the kernel's duration the branch unit was busy executing
-    instructions. Computed as the ratio of the total number of cycles spent by the
-    scheduler issuing branch instructions over the total CU cycles.
+    Percentage of the kernel's duration the branch unit was busy executing instructions.
+    Computed as the ratio of the total number of cycles spent by the scheduler issuing
+    branch instructions over the total CU cycles.
   peak: 100
 compute.f16_ops:
   name: F16 OPs
@@ -277,9 +277,9 @@ compute.mfma_util:
   formula: 100 * SUM(SQ_VALU_MFMA_BUSY_CYCLES) / (4 * SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
   unit: Percent
   description: >-
-    Indicates what percent of the kernel's duration the MFMA unit was busy executing
-    instructions. Computed as the ratio of the total number of cycles the MFMA was busy
-    over the total CU cycles.
+    Percentage of the kernel's duration the MFMA unit was busy executing instructions.
+    Computed as the ratio of the total number of cycles the MFMA was busy over the total
+    CU cycles.
   peak: 100
 compute.smem_lat:
   name: SMEM Latency
@@ -358,8 +358,8 @@ compute.vmem_util:
   formula: 100 * SUM(SQ_ACTIVE_INST_FLAT + SQ_ACTIVE_INST_VMEM) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
   unit: Percent
   description: >-
-    Indicates what percent of the kernel's duration the VMEM unit was busy executing
-    instructions, including both global/generic and spill/scratch operations. Does not
-    include VALU operations. Computed as the ratio of the total number of cycles spent
-    by the scheduler issuing VMEM instructions over the total CU cycles.
+    Percentage of the kernel's duration the VMEM unit was busy executing instructions,
+    including both global/generic and spill/scratch operations. Does not include VALU
+    operations. Computed as the ratio of the total number of cycles spent by the
+    scheduler issuing VMEM instructions over the total CU cycles.
   peak: 100
