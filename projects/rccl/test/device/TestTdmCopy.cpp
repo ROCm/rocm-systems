@@ -6,22 +6,23 @@
 
 // Tests for tdm/tdmCopy.h -- the HBM->LDS->HBM Tensor Data Mover copy library.
 //
-// tdmCopy.h exposes four device entry points plus a wait and a host/device
+// tdmCopy.h exposes five device entry points plus a wait and a host/device
 // capability query. This file exercises every one of them and the internal
-// [vector head][TDM chunks] partitioning of detail::issue():
+// [vector head][TDM chunks] partitioning of detail::issueTo():
 //
 //   * IsTdmCopySupported()  - host and device capability query
 //   * tdmCopy()             - blocking, block-collective (all warps)
 //   * tdmCopyAsync()+tdmWait- non-blocking, block-collective
 //   * tdmCopyByTeam()       - blocking, warp-specialized (a contiguous team)
 //   * tdmCopyAsyncByTeam()  - non-blocking, warp-specialized
+//   * tdmCopyDualByTeam()   - blocking, warp-specialized, two destinations
 //
 // The copy is byte-oriented (void* / size_t). Every test rounds a source buffer
 // through the copy into a distinct destination buffer and compares byte-for-byte,
 // and also checks sentinel padding around the destination window so an out-of-
 // bounds write is caught.
 //
-// Source and destination offsets are independent: detail::issue() aligns each
+// Source and destination offsets are independent: detail::issueTo() aligns each
 // chunk to the destination and absorbs the difference delta = (src - dst) % 256
 // in LDS, shifting the chunk in place when delta % 4 != 0. The destination sits
 // past a kGuard-byte pad, so matched offsets give delta 128.
@@ -111,6 +112,18 @@ __global__ void kTdmTwoTeamCopy([[maybe_unused]] uint8_t* dst0, [[maybe_unused]]
     tdm::tdmCopyByTeam(dst0, src0, n, lds,  ldsBytesPerTeam, 0u,    split);
     tdm::tdmCopyByTeam(dst1, src1, n, lds1, ldsBytesPerTeam, split, kTeamToEnd);
   }
+  __syncthreads();
+#endif
+}
+
+// Team copy of [0, n) to two destinations: dst0 <- src and dst1 <- src.
+__global__ void kTdmDualTeamCopy([[maybe_unused]] uint8_t* dst0, [[maybe_unused]] uint8_t* dst1,
+                                 [[maybe_unused]] const uint8_t* src, [[maybe_unused]] size_t n,
+                                 [[maybe_unused]] size_t ldsBytes, [[maybe_unused]] uint32_t start,
+                                 [[maybe_unused]] uint32_t stop) {
+#if TDM_SUPPORTED
+  extern __shared__ __align__(128) uint8_t lds[];
+  tdm::tdmCopyDualByTeam(dst0, dst1, src, n, lds, ldsBytes, start, stop);
   __syncthreads();
 #endif
 }
@@ -253,9 +266,8 @@ TEST_P(TdmBlockCopyTest, Async)     { run<true>(GetParam());  }
 // 256B boundary, so head 0 and delta 0); head plus chunks; copies under 256B;
 // head-only (head clamped by n); LDS that only feeds a subset of warps; fewer
 // 256B units than warps; single-warp blocks; and awkward remainders.
-INSTANTIATE_TEST_SUITE_P(
-  Gamut, TdmBlockCopyTest,
-  ::testing::Values(
+std::vector<BlockCase> gamutCases() {
+  return {
     BlockCase{4096,        4096, 0,   128, 64,  "aligned_bulk_2warp"},
     BlockCase{8192,        8192, 0,   128, 256, "aligned_bulk_8warp"},
     BlockCase{256,         1024, 0,   0,   32,  "exactly_one_row"},
@@ -289,7 +301,11 @@ INSTANTIATE_TEST_SUITE_P(
     BlockCase{(1 << 20) + 13, 65536, 1, 0, 256, "team_delta129"},
     BlockCase{(1 << 20) + 13, 65536, 2, 0, 256, "team_delta130"},
     BlockCase{(1 << 20) + 13, 65536, 3, 0, 256, "team_delta131"}
-  ),
+  };
+}
+
+INSTANTIATE_TEST_SUITE_P(
+  Gamut, TdmBlockCopyTest, ::testing::ValuesIn(gamutCases()),
   [](const ::testing::TestParamInfo<BlockCase>& i){ return i.param.name; });
 
 // Independent offsets across the slot layouts, on one warp so that the window is the whole budget: one slot (at
@@ -362,15 +378,18 @@ TEST_P(TdmTeamCopyTest, Async)     { run<true>(GetParam());  }
 
 // A single sub-team must still copy the ENTIRE buffer, regardless of where the
 // team starts, because work is partitioned by rank within the team.
-INSTANTIATE_TEST_SUITE_P(
-  Teams, TdmTeamCopyTest,
-  ::testing::Values(
+std::vector<TeamCase> teamCases() {
+  return {
     TeamCase{8192, 8192, 0,  256, 0, kTeamToEnd, "full_block_team"},
     TeamCase{4096, 1024, 0,  256, 0, 1,          "single_warp_team"},
     TeamCase{8192, 2048, 0,  256, 2, 5,          "interior_team_2_5"},
     TeamCase{6000, 2048, 64, 128, 1, kTeamToEnd, "tail_team_head_bulk_tail"},
     TeamCase{257,  1024, 0,  256, 3, 4,          "single_warp_team_small"}
-  ),
+  };
+}
+
+INSTANTIATE_TEST_SUITE_P(
+  Teams, TdmTeamCopyTest, ::testing::ValuesIn(teamCases()),
   [](const ::testing::TestParamInfo<TeamCase>& i){ return i.param.name; });
 
 // ===========================================================================
@@ -416,6 +435,77 @@ protected:
 
 TEST_F(TdmTwoTeamTest, Blocking) { run<false>(8192, 2048, 256); }
 TEST_F(TdmTwoTeamTest, Async)    { run<true>(8192, 2048, 256);  }
+
+// ===========================================================================
+//  Two-destination copies (tdmCopyDualByTeam)
+// ===========================================================================
+
+// dst1 sits this many bytes further into its buffer than dst0 does, so the two
+// windows differ by a multiple of DUAL_COPY_ALIGN without being at the same
+// offset of their allocations.
+constexpr int kDualShift = 3 * static_cast<int>(tdm::DUAL_COPY_ALIGN);
+
+class TdmDualCopyTest : public TdmCopyTest {
+protected:
+  void runDual(size_t n, size_t lds, int soff, int doff, int block, uint32_t start, uint32_t stop,
+               const std::string& name) {
+    if (!supported_) GTEST_SKIP() << "TDM not supported on this device";
+
+    const size_t srcTotal   = static_cast<size_t>(soff) + n;
+    const size_t copyStart0 = static_cast<size_t>(kGuard) + doff;
+    const size_t copyStart1 = copyStart0 + kDualShift;
+
+    auto h_src = makePattern(srcTotal, static_cast<uint32_t>(n ^ (soff * 131) ^ (doff * 17) ^ (start * 7) ^ block));
+    DeviceBuffer<uint8_t> d_src(srcTotal ? srcTotal : 1);
+    if (srcTotal) d_src.copyFrom(h_src);
+
+    std::vector<uint8_t> init0(copyStart0 + n + kGuard, kSentinel);
+    std::vector<uint8_t> init1(copyStart1 + n + kGuard, kSentinel);
+    DeviceBuffer<uint8_t> d_dst0(init0.size()), d_dst1(init1.size());
+    d_dst0.copyFrom(init0);
+    d_dst1.copyFrom(init1);
+
+    uint8_t* dst0 = d_dst0.ptr + copyStart0;
+    uint8_t* dst1 = d_dst1.ptr + copyStart1;
+    ASSERT_EQ((reinterpret_cast<uintptr_t>(dst0) - reinterpret_cast<uintptr_t>(dst1)) % tdm::DUAL_COPY_ALIGN, 0u)
+        << name << ": destinations must share an offset mod DUAL_COPY_ALIGN";
+    kTdmDualTeamCopy<<<1, block, lds>>>(dst0, dst1, d_src.ptr + soff, n, lds, start, stop);
+    syncAndCheck();
+
+    checkCopy(d_dst0.copyTo(), h_src, static_cast<size_t>(soff), copyStart0, n, name + "/dst0");
+    checkCopy(d_dst1.copyTo(), h_src, static_cast<size_t>(soff), copyStart1, n, name + "/dst1");
+  }
+};
+
+// The block-copy cases, run by a team that spans the whole block.
+class TdmDualBlockCopyTest : public TdmDualCopyTest,
+                             public ::testing::WithParamInterface<BlockCase> {};
+
+TEST_P(TdmDualBlockCopyTest, WholeBlockTeam) {
+  const BlockCase& c = GetParam();
+  runDual(c.n, c.lds, c.soff, c.doff, c.block, 0u, kTeamToEnd, c.name);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+  Gamut, TdmDualBlockCopyTest, ::testing::ValuesIn(gamutCases()),
+  [](const ::testing::TestParamInfo<BlockCase>& i){ return i.param.name; });
+
+INSTANTIATE_TEST_SUITE_P(
+  OffsetSlots, TdmDualBlockCopyTest, ::testing::ValuesIn(offsetSlotCases()),
+  [](const ::testing::TestParamInfo<BlockCase>& i){ return i.param.name; });
+
+// The team cases: a sub-team still copies the whole buffer to both destinations.
+class TdmDualTeamCopyTest : public TdmDualCopyTest,
+                            public ::testing::WithParamInterface<TeamCase> {};
+
+TEST_P(TdmDualTeamCopyTest, Team) {
+  const TeamCase& c = GetParam();
+  runDual(c.n, c.lds, c.off, c.off, c.block, c.start, c.stop, c.name);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+  Teams, TdmDualTeamCopyTest, ::testing::ValuesIn(teamCases()),
+  [](const ::testing::TestParamInfo<TeamCase>& i){ return i.param.name; });
 
 // ===========================================================================
 //  Non-default cache policy still copies correctly.
