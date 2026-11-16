@@ -135,7 +135,8 @@ rocjitsu --daemon --config configs/gfx950_mi350x_kmd.json
 # Attach to running daemon
 rocjitsu --attach -- ./app
 
-# Attach to a running daemon while validating an explicit config
+# Attach to a running daemon while validating an explicit config and handing
+# that config path to the exec'd client. This does not reconfigure the daemon.
 rocjitsu --attach --config configs/gfx950_mi350x_kmd.json -- ./app
 
 # Serve the gfx1250 PCI function to a VMM
@@ -150,6 +151,58 @@ rocjitsu --config tests/fixtures/fabric_node_projection.json --node tray7 \
 
 See [QEMU VFIO-user compute](qemu-vfio.md) for the supported guest contract and
 launcher.
+
+### Daemon lifecycle and process cleanup
+
+Daemon-only mode (`rocjitsu --daemon --config ...`) runs the daemon in the
+foreground process. It owns the simulation engine directly, handles `SIGINT` and
+`SIGTERM`, stops the daemon object, and exits. A service manager or test harness
+that starts this form should wait for that foreground process like any other
+server.
+
+Daemon launch mode (`rocjitsu --daemon --config ... -- ./app`) forks one daemon
+child, waits until the child reports that the socket is ready, and then `exec`s
+the application in the original process. If the daemon fails before it is ready,
+the launcher kills and `waitpid`s the child before returning an error. Once the
+application has been exec'd, the daemon child has `PR_SET_PDEATHSIG` set to
+`SIGTERM`, so the kernel terminates the daemon when the application process
+exits. If the daemon exits first, daemon-client disconnect handling terminates
+the interposed client process. In either direction, there is no persistent
+launcher-owned daemon left behind; a process may briefly pass through the normal
+kernel zombie state until its parent exits or reaps it, but it is not a
+long-lived orphaned daemon.
+
+The runtime files are separate from process lifetime. Launches that `exec` an
+application cannot run C++ cleanup after a successful `exec`, so rocJITsu writes
+per-invocation files under a PID-named runtime directory and later reclaims
+stale PID directories opportunistically. The reaper removes only numeric
+directories whose PID no longer exists and does not follow symlinks.
+
+### Attach mode and runtime state
+
+`rocjitsu --attach` does not create or reconfigure a daemon. It starts the
+application with the interposer and points it at the daemon socket in the
+selected runtime directory: `$ROCJITSU_RUNTIME_DIR/daemon.sock`, then
+`$XDG_RUNTIME_DIR/rocjitsu/daemon.sock`, then
+`/tmp/rocjitsu-<uid>/daemon.sock`. Use `rocjitsu paths` or
+`rocjitsu paths --json` to inspect the exact paths.
+
+The daemon has already built its machine from the config it was started with.
+For that reason, attach rejects launch-only settings that would otherwise mutate
+the machine being built, including `--profile`, `--node`,
+`--cpu-thread-budget`, and `--wait-checking`. `--attach --config <path>`
+validates the named config and writes the usual per-PID config handoff for the
+exec'd client, but it does not change the running daemon's config. Attach the
+client with the same config the daemon used when the client needs that metadata.
+
+The only shared state selected by attach is the runtime directory and its
+well-known daemon socket. To run independent daemons for the same user, give
+each session its own `ROCJITSU_RUNTIME_DIR`; otherwise attach intentionally
+targets the daemon already listening in the default runtime directory. Daemon
+launch mode passes the exact daemon PID to the exec'd client for ptrace
+authorization. Plain attach mode cannot know a launcher-owned daemon PID, so
+after the daemon handshake it trusts the same-user socket peer in the selected
+runtime directory.
 
 ## Architecture
 
