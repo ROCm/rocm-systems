@@ -17156,7 +17156,7 @@ class CodeGenerator:
                     supports_scalar(self.isa_spec.arch_name, i.name) for i in all_insts
                 )
                 if has_rj_arith_scalar:
-                    cpp_includes.append(('rj_arith/rj_arith.h', False))
+                    cpp_includes.append(('rj_arith/detail/rj_arith_scalar.h', False))
                 if self.isa_spec.arch_name in ('cdna3', 'cdna4', 'cdna5') and any(
                     i.name in CUBE_NAMES for i in all_insts
                 ):
