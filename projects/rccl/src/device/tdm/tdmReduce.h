@@ -62,7 +62,16 @@ __device__ __forceinline__ void tdmReduceCombine(RedFn redFn, BytePack<16>* acc,
   }
 }
 
-// Whole tiles of a reduction-shaped slice through the TDM mover: load, reduce in LDS, store to every destination.
+// A copy-shaped slice: one source and nothing to apply to it.
+template <typename RedFn, int PreOpSrcs>
+__device__ __forceinline__ bool tdmReduceIsCopy(int nSrcs, bool postOp) {
+  constexpr bool PreOpIsIdentity = PreOpSrcs == 0 || Apply_PreOp<RedFn, 1>::IsIdentity;
+  constexpr bool PostOpIsIdentity = Apply_PostOp<RedFn, 1>::IsIdentity;
+  return nSrcs == 1 && PreOpIsIdentity && (PostOpIsIdentity || !postOp);
+}
+
+// Whole tiles of a slice through the TDM mover: load, reduce in LDS, store to every destination. A copy-shaped slice
+// skips the reduce and ping-pongs the two tiles, loading the next while the current one drains to every destination.
 // Updates the cursors and rotates `thread` the same way reduceCopyPacks does, so the remainder can be handed to it.
 template <typename RedFn, typename T, int MaxSrcs, int MaxDsts, int PreOpSrcs, typename IntBytes, typename SrcPtrFn,
           typename DstPtrFn>
@@ -79,7 +88,26 @@ __device__ __forceinline__ void reduceCopyTdm(int nThreads, int& thread, uint64_
   nBytesAhead -= nTiles * kRcclTdmReduceTileBytes;
   IntBytes nTilesAhead = nTiles - warp;
 
-  if (0 < nTilesAhead) {
+  if (0 < nTilesAhead && tdmReduceIsCopy<RedFn, PreOpSrcs>(nSrcs, postOp)) {
+    BytePack<16>* tile = reinterpret_cast<BytePack<16>*>(ncclTdmStageForWarp(threadIdx.x / WARP_SIZE));
+    const uintptr_t src = cvta_to_global(srcPtrFn(0));
+    int slot = 0;
+    IntBytes prev = cursor;
+    tdmReduceLoadTile(tile, src + cursor);
+    for (;;) {
+      cursor += IntBytes(nWarps) * kRcclTdmReduceTileBytes;
+      nTilesAhead -= nWarps;
+      // Drains the load into `slot` and the stores out of the other tile, which the next load then refills.
+      tdmReduceWait();
+      if (0 < nTilesAhead) tdmReduceLoadTile(tile + (slot ^ 1) * kRcclTdmReduceTilePacks * WARP_SIZE, src + cursor);
+      for (int d = 0; d < MaxDsts && d < nDsts; d++)
+        tdmReduceStoreTile(cvta_to_global(dstPtrFn(d)) + prev, tile + slot * kRcclTdmReduceTilePacks * WARP_SIZE);
+      if (nTilesAhead <= 0) break;
+      slot ^= 1;
+      prev = cursor;
+    }
+    tdmReduceWait();
+  } else if (0 < nTilesAhead) {
     RedFn redFn(redArg);
     // Indexed by the hardware warp since several groups may run reduceCopy concurrently in one block.
     BytePack<16>* acc = reinterpret_cast<BytePack<16>*>(ncclTdmStageForWarp(threadIdx.x / WARP_SIZE));
@@ -115,12 +143,13 @@ template <typename RedFn, int PreOpSrcs, typename IntBytes, typename SrcPtrFn, t
 __device__ __forceinline__ bool canUseTdmReduce(int thread, int nThreads, bool postOp, int nSrcs,
                                                 SrcPtrFn const& srcPtrFn, int nDsts, DstPtrFn const& dstPtrFn,
                                                 IntBytes nBytes) {
-  if (!ncclShmem.comm.tdmSimpleReduceEnable) return false;
-
-  // Copy-shaped slices belong to tryTdmCopy; this path needs a reduction or a non-identity pre/post-op.
-  constexpr bool PreOpIsIdentity = PreOpSrcs == 0 || Apply_PreOp<RedFn, 1>::IsIdentity;
-  constexpr bool PostOpIsIdentity = Apply_PostOp<RedFn, 1>::IsIdentity;
-  if (nSrcs < 1 || (nSrcs == 1 && PreOpIsIdentity && (PostOpIsIdentity || !postOp))) return false;
+  if (nSrcs < 1) return false;
+  // Single-destination copies belong to tryTdmCopy. Multi-destination copies come here so each tile is read once.
+  if (tdmReduceIsCopy<RedFn, PreOpSrcs>(nSrcs, postOp)) {
+    if (!ncclShmem.comm.tdmSimpleEnable || nDsts < 2) return false;
+  } else if (!ncclShmem.comm.tdmSimpleReduceEnable) {
+    return false;
+  }
   if (nBytes < kRcclTdmReduceTileBytes) return false;
 
   // The tensor op needs a converged wave and the staging window belongs to the hardware warp.
