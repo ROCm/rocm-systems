@@ -301,6 +301,7 @@ std::unique_ptr<KernelModel> KernelModel::build(const Artifact &artifact, std::s
   model->decode_cfg_ns_ = static_cast<uint64_t>(
       std::chrono::duration_cast<std::chrono::nanoseconds>(t_dataflow - t_decode).count());
   model->compute_liveness();
+  model->compute_undefined();
   model->compute_taint();
   model->compute_pending();
   model->compute_reachability();
@@ -373,7 +374,20 @@ void KernelModel::compute_liveness() {
     }
   }
 
-  // VGPRs: the same backward dataflow; writes never kill (partial under EXEC).
+  // VGPRs: the same backward dataflow; writes never kill (partial under EXEC). A second
+  // pass leaves out the return VGPRs a partial return mask covers, so the planner can tell
+  // which VGPRs are observable only through such a narrow return value.
+  const VSet ret = return_observable_vgprs(artifact_.return_vgprs);
+  VSet partial;
+  for (size_t r = 0; r < artifact_.return_masks.size() && r < artifact_.return_vgprs; ++r)
+    if (artifact_.return_masks[r] != 0xffffffffu)
+      partial.set(r);
+  vlive_after_ = vgpr_liveness(ret);
+  vlive_after_strict_ = partial.any() ? vgpr_liveness(ret & ~partial) : vlive_after_;
+}
+
+std::vector<VSet> KernelModel::vgpr_liveness(const VSet &return_live) const {
+  const size_t nb = blocks_.size();
   std::vector<VSet> vin(nb), vout(nb);
   VSet vall;
   vall.set();
@@ -381,15 +395,16 @@ void KernelModel::compute_liveness() {
     if (blocks_[b].unknown_successor)
       return vall;
     if (blocks_[b].returns)
-      return return_observable_vgprs(artifact_.return_vgprs);
+      return return_live;
     VSet out;
     for (uint32_t s : blocks_[b].successors)
       out |= vin[s];
     return out;
   };
+  std::deque<uint32_t> work;
+  std::vector<bool> queued(nb, true);
   for (uint32_t b = static_cast<uint32_t>(nb); b-- > 0;)
     work.push_back(b);
-  std::fill(queued.begin(), queued.end(), true);
   while (!work.empty()) {
     const uint32_t b = work.front();
     work.pop_front();
@@ -407,12 +422,72 @@ void KernelModel::compute_liveness() {
         work.push_back(p);
       }
   }
-  vlive_after_.assign(insts_.size(), VSet{});
+  std::vector<VSet> after(insts_.size());
   for (uint32_t b = 0; b < nb; ++b) {
     VSet live = vblock_out(b);
     for (size_t i = blocks_[b].end; i-- > blocks_[b].first;) {
-      vlive_after_[i] = live;
+      after[i] = live;
       live = vlive_transfer(insts_[i].fx, live);
+    }
+  }
+  return after;
+}
+
+VSet KernelModel::vlive_before_strict(size_t i) const {
+  return vlive_transfer(insts_[i].fx, vlive_after_strict_[i]);
+}
+
+VSet KernelModel::vundef_before(size_t i) const {
+  return i < vwritten_before_.size() ? entry_vundef_ & ~vwritten_before_[i] : VSet{};
+}
+
+void KernelModel::compute_undefined() {
+  // VGPRs defined at the entry: the argument VGPRs, and for a callable function the
+  // workitem IDs (v31) and the callee-saved VGPRs (the caller's values). The rest hold
+  // whatever the caller or the previous wave left: LLVM undef until written.
+  if (artifact_.entry_vgprs < 0 || !cfg_complete_)
+    return; // all defined (raw words), or edges the analysis cannot see
+  VSet defined;
+  for (int r = 0; r < artifact_.entry_vgprs && r < static_cast<int>(kNumVgprs); ++r)
+    defined.set(static_cast<size_t>(r));
+  if (artifact_.callable) {
+    defined.set(31);
+    defined |= return_observable_vgprs(0); // callee-saved stripes
+  }
+  entry_vundef_ = ~defined;
+  // Forward may-analysis: VGPRs written on some path from the entry.
+  const size_t nb = blocks_.size();
+  std::vector<VSet> in(nb), out(nb);
+  auto block_writes = [&](uint32_t b, VSet w) {
+    for (size_t i = blocks_[b].first; i < blocks_[b].end; ++i) {
+      if (insts_[i].fx.unknown_effect)
+        w.set();
+      w |= insts_[i].fx.vwrites;
+    }
+    return w;
+  };
+  for (bool changed = true; changed;) { // union of writes: monotone, converges
+    changed = false;
+    for (uint32_t b = 0; b < nb; ++b) {
+      VSet i;
+      for (uint32_t p : blocks_[b].predecessors)
+        i |= out[p];
+      const VSet o = block_writes(b, i);
+      if (i != in[b] || o != out[b]) {
+        in[b] = i;
+        out[b] = o;
+        changed = true;
+      }
+    }
+  }
+  vwritten_before_.assign(insts_.size(), VSet{});
+  for (uint32_t b = 0; b < nb; ++b) {
+    VSet w = in[b];
+    for (size_t i = blocks_[b].first; i < blocks_[b].end; ++i) {
+      vwritten_before_[i] = w;
+      if (insts_[i].fx.unknown_effect)
+        w.set();
+      w |= insts_[i].fx.vwrites;
     }
   }
 }

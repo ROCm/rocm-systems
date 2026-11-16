@@ -4,7 +4,7 @@
     "tool": "rj_isa_diff",
     "tool_version": "0.1.0-p0",
     "schema_version": "rj_isa_diff.v1",
-    "rocjitsu_revision": "0e0e4a72d7df1455a0a3dd9edc6f44a749467b6f",
+    "rocjitsu_revision": "9eebb9d6297c8bf63bd403be5caeb00b7a477cbc",
     "rocjitsu_version": "0.3.0",
     "semantics": "RocJITsu ComputeUnitCore::execute_instruction, gfx950 (CDNA4) wave64, default arithmetic semantics",
     "compiler": "13.4.0"
@@ -23,7 +23,8 @@
       "reachable_insts": 21,
       "metadata_sha256": "37da1ec4a2b4278a98b7a56d882ae3cedbb349d40ec396de852d7d138ff08817",
       "text_relocations": 0,
-      "metadata_parsed": true
+      "metadata_parsed": true,
+      "entry_vgprs": 3
     },
     "new": {
       "label": "llvm/artifacts/new.hsaco",
@@ -38,7 +39,8 @@
       "reachable_insts": 22,
       "metadata_sha256": "37da1ec4a2b4278a98b7a56d882ae3cedbb349d40ec396de852d7d138ff08817",
       "text_relocations": 0,
-      "metadata_parsed": true
+      "metadata_parsed": true,
+      "entry_vgprs": 3
     }
   },
   "provenance": {
@@ -54,20 +56,20 @@
         {
           "argv": ["/opt/rocm/llvm/bin/llc", "-mtriple=amdgcn-amd-amdhsa", "-mcpu=gfx950", "-O3", "-filetype=asm", "-o", "llvm/artifacts/old.s", "k3.ll"],
           "exit_code": 0,
-          "elapsed_ns": 14314208
+          "elapsed_ns": 17532787
         },
         {
           "argv": ["/opt/rocm/llvm/bin/llvm-mc", "-triple=amdgcn-amd-amdhsa", "-mcpu=gfx950", "-filetype=obj", "-o", "llvm/artifacts/old.o", "llvm/artifacts/old.s"],
           "exit_code": 0,
-          "elapsed_ns": 2945701
+          "elapsed_ns": 3226166
         },
         {
           "argv": ["/opt/rocm/llvm/bin/ld.lld", "-shared", "--emit-relocs", "-o", "llvm/artifacts/old.hsaco", "llvm/artifacts/old.o"],
           "exit_code": 0,
-          "elapsed_ns": 7157799
+          "elapsed_ns": 7067281
         }
       ],
-      "compile_ns": 24417708,
+      "compile_ns": 27826234,
       "executed_object": "linked_code_object",
       "note": "executed bytes are the code object linked from the re-assembled source, decoded by RocJITsu; they are not necessarily an original binary emission",
       "toolchain": {
@@ -88,20 +90,20 @@
         {
           "argv": ["/opt/rocm/llvm/bin/llc", "-mtriple=amdgcn-amd-amdhsa", "-mcpu=gfx950", "-O3", "-combiner-disabled", "-filetype=asm", "-o", "llvm/artifacts/new.s", "k3.ll"],
           "exit_code": 0,
-          "elapsed_ns": 12923511
+          "elapsed_ns": 15836169
         },
         {
           "argv": ["/opt/rocm/llvm/bin/llvm-mc", "-triple=amdgcn-amd-amdhsa", "-mcpu=gfx950", "-filetype=obj", "-o", "llvm/artifacts/new.o", "llvm/artifacts/new.s"],
           "exit_code": 0,
-          "elapsed_ns": 3290938
+          "elapsed_ns": 3059535
         },
         {
           "argv": ["/opt/rocm/llvm/bin/ld.lld", "-shared", "--emit-relocs", "-o", "llvm/artifacts/new.hsaco", "llvm/artifacts/new.o"],
           "exit_code": 0,
-          "elapsed_ns": 7573654
+          "elapsed_ns": 7658102
         }
       ],
-      "compile_ns": 23788103,
+      "compile_ns": 26553806,
       "executed_object": "linked_code_object",
       "note": "executed bytes are the code object linked from the re-assembled source, decoded by RocJITsu; they are not necessarily an original binary emission",
       "toolchain": {
@@ -143,40 +145,46 @@
       "composition": "HOLDS",
       "policy": "baseline-v1",
       "seed": 1,
+      "comparison": {
+        "nan": "llvm",
+        "poison_filter": ""
+      },
       "counts": {
-        "attempted": 3169,
-        "accepted": 3169,
-        "executed_pairs": 3169,
-        "valid_pairs": 3169,
+        "attempted": 3283,
+        "accepted": 3283,
+        "executed_pairs": 3283,
+        "valid_pairs": 3283,
         "mismatches": 0,
         "harness_errors": 0,
+        "nan_tolerated": 0,
+        "undef_masked": 0,
         "rejections": {},
         "mismatch_kinds": {}
       },
       "boundary_sweep": {
-        "cases": 1169,
-        "accepted": 1169,
-        "valid": 1169,
+        "cases": 1283,
+        "accepted": 1283,
+        "valid": 1283,
         "mismatches": 0,
         "mandatory": true,
-        "generated": 1198,
+        "generated": 1312,
         "duplicates_dropped": 29,
         "truncated": false,
         "valid_by_family": {
-          "bf16": 27,
-          "bf16x2": 18,
+          "bf16": 45,
+          "bf16x2": 27,
           "bit": 99,
           "bits": 72,
           "constrel": 102,
           "edge": 117,
-          "f16": 72,
-          "f16x2": 45,
-          "f32": 126,
+          "f16": 90,
+          "f16x2": 63,
+          "f32": 153,
           "int": 84,
           "pair.cross": 230,
-          "pair.targeted": 53,
+          "pair.targeted": 67,
           "small": 45,
-          "uniform": 79
+          "uniform": 89
         }
       },
       "random_phase": {
@@ -193,16 +201,16 @@
       "execution": {
         "old_region_insts": 7,
         "new_region_insts": 8,
-        "old_insts_executed": 22183,
-        "new_insts_executed": 25352
+        "old_insts_executed": 22981,
+        "new_insts_executed": 26264
       },
       "timing": {
-        "setup_ns": 373440,
-        "propose_ns": 2037045,
-        "state_load_ns": 2658349,
-        "old_execute_ns": 1083797,
-        "new_execute_ns": 880035,
-        "compare_ns": 1481310,
+        "setup_ns": 539224,
+        "propose_ns": 1972493,
+        "state_load_ns": 2810626,
+        "old_execute_ns": 1219742,
+        "new_execute_ns": 978675,
+        "compare_ns": 2572472,
         "triage_ns": 0
       },
       "counterexamples": []

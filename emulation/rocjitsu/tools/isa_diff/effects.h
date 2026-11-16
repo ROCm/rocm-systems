@@ -91,6 +91,84 @@ struct InlineAsmEffect {
 /// EXEC (the lanes it observes). Opaque text has unknown effects; AGPR operands are untracked.
 [[nodiscard]] Effects classify_inline_asm(std::string_view text);
 
+/// Floating-point provenance of a 32-bit value (bit flags, one byte per VGPR lane): which
+/// parts of it a floating-point instruction produced, and in which format. LLVM leaves
+/// the payload, sign and quietness of a NaN such an instruction produces unspecified, so
+/// two NaNs with the same provenance on both sides compare equal (unless --strict-nan).
+enum FpTag : uint8_t {
+  kFpF16Lo = 1u << 0,
+  kFpF16Hi = 1u << 1,
+  kFpBF16Lo = 1u << 2,
+  kFpBF16Hi = 1u << 3,
+  kFpF32 = 1u << 4,
+  kFpF64Lo = 1u << 5, ///< Low dword of an f64 result (the high dword is the next register).
+  kFpF64Hi = 1u << 6,
+};
+
+[[nodiscard]] constexpr bool is_nan_f32(uint32_t v) {
+  return (v & 0x7f800000u) == 0x7f800000u && (v & 0x7fffffu) != 0;
+}
+[[nodiscard]] constexpr bool is_nan_f16(uint32_t h) {
+  return (h & 0x7c00u) == 0x7c00u && (h & 0x3ffu) != 0;
+}
+[[nodiscard]] constexpr bool is_nan_bf16(uint32_t h) {
+  return (h & 0x7f80u) == 0x7f80u && (h & 0x7fu) != 0;
+}
+[[nodiscard]] constexpr bool is_nan_f64(uint64_t v) {
+  return (v & 0x7ff0000000000000ull) == 0x7ff0000000000000ull && (v & 0xfffffffffffffull) != 0;
+}
+
+/// @brief Bits of a ^ b that remain after NaN equivalence: an f32, or an f16/bf16 half,
+/// that both tags mark as a floating-point result of that format and that is a NaN on both
+/// sides does not differ. f64 needs the register pair (see the comparison).
+[[nodiscard]] uint32_t nan_residual(uint32_t a, uint32_t b, uint8_t tag_a, uint8_t tag_b);
+
+/// How a VALU instruction's result relates to floating point.
+enum class FpResult : uint8_t {
+  None,   ///< Not a floating-point result (integer, bitwise, compare): tags cleared.
+  F32,    ///< f32 in every destination register.
+  F16Lo,  ///< f16 in the low half (high half untouched or zeroed).
+  F16Hi,  ///< f16 in the high half (op_sel / dst_sel:WORD_1).
+  F16x2,  ///< packed f16.
+  BF16Lo, ///< bf16 in the low half.
+  BF16Hi,
+  BF16x2,
+  F64,     ///< f64 in a register pair.
+  Move,    ///< v_mov_b32 / v_mov_b64: tags follow the source register.
+  CndMask, ///< v_cndmask_b32: tags follow the selected source, lane by lane.
+  PkMov,   ///< v_pk_mov_b32: each destination dword follows its op_sel-selected source dword.
+};
+
+/// @brief Classify a VALU instruction's result by mnemonic and disassembly (op_sel/dst_sel).
+[[nodiscard]] FpResult fp_result_kind(std::string_view mnemonic, std::string_view text);
+
+/// @brief Format of a floating-point instruction's sources (F32/F16x2/F64/...), None if it
+/// has none (integer and bitwise operations, conversions from integers).
+[[nodiscard]] FpResult fp_source_kind(std::string_view mnemonic);
+
+/// Machine analogues of LLVM IR poison/UB conditions (--poison-filter). The tool runs no
+/// IR; a filter is enabled when the function's IR contains the corresponding construct, and
+/// cases whose region instructions meet the condition are excluded as poison inputs.
+enum PoisonKind : uint32_t {
+  kPoisonShift = 1u << 0,    ///< shl/lshr/ashr: amount >= bit width
+  kPoisonFpToInt = 1u << 1,  ///< fptosi/fptoui: NaN, Inf, or out of the integer range
+  kPoisonCtz = 1u << 2,      ///< ctlz/cttz with is_zero_poison: zero input
+  kPoisonNsw = 1u << 3,      ///< add/sub/mul nsw: signed 32-bit overflow
+  kPoisonNuw = 1u << 4,      ///< add/sub/mul nuw: unsigned 32-bit overflow
+  kPoisonDisjoint = 1u << 5, ///< or disjoint: common set bits
+  kPoisonExact = 1u << 6,    ///< lshr/ashr exact: non-zero bits shifted out
+  kPoisonNnan = 1u << 7,     ///< nnan / nofpclass(nan): a NaN input or result
+  kPoisonNinf = 1u << 8,     ///< ninf / nofpclass(inf): an infinite input or result
+};
+
+/// @brief Parse "shift,fptoint,..." (or "all"); nullopt on an unknown name.
+[[nodiscard]] std::optional<uint32_t> parse_poison_kinds(std::string_view text);
+/// @brief Comma-separated names of a kind mask.
+[[nodiscard]] std::string format_poison_kinds(uint32_t kinds);
+
+/// @brief The poison condition a machine instruction can witness (0 for none).
+[[nodiscard]] uint32_t poison_check_kind(std::string_view mnemonic);
+
 /// @brief The block with each register operand reduced to its class and width
 /// ("; def v[0:1]" -> "def v2"): equal on both sides of a correctly matched block.
 [[nodiscard]] std::string inline_asm_shape(std::string_view text);

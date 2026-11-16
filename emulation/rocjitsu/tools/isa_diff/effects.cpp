@@ -796,4 +796,245 @@ std::string inline_asm_shape(std::string_view text) {
   return "use " + shape(e.uses) + ";def " + shape(e.defs) + (e.untracked ? ";agpr" : "");
 }
 
+// ---------------------------------------------------------------------------
+// Floating-point provenance and poison analogues.
+
+namespace {
+
+std::string_view strip_encoding(std::string_view m) {
+  for (std::string_view suffix : {"_e64_dpp", "_e32", "_e64", "_sdwa", "_dpp"})
+    if (m.size() > suffix.size() && m.substr(m.size() - suffix.size()) == suffix)
+      return m.substr(0, m.size() - suffix.size());
+  return m;
+}
+
+bool starts(std::string_view s, std::string_view p) { return s.substr(0, p.size()) == p; }
+bool ends(std::string_view s, std::string_view p) {
+  return s.size() >= p.size() && s.substr(s.size() - p.size()) == p;
+}
+
+/// The last element of "op_sel:[a,b,...]" (VOP3: the destination half), or -1.
+int op_sel_dst(std::string_view text) {
+  const size_t at = text.find("op_sel:[");
+  if (at == std::string_view::npos)
+    return -1;
+  const size_t close = text.find(']', at);
+  if (close == std::string_view::npos || close == 0)
+    return -1;
+  const char c = text[close - 1];
+  return c == '1' ? 1 : c == '0' ? 0 : -1;
+}
+
+FpResult half_result(std::string_view base, std::string_view text, bool bf16) {
+  const bool hi = text.find("dst_sel:WORD_1") != std::string_view::npos ||
+                  (!starts(base, "v_pk_") && op_sel_dst(text) == 1);
+  if (bf16)
+    return hi ? FpResult::BF16Hi : FpResult::BF16Lo;
+  return hi ? FpResult::F16Hi : FpResult::F16Lo;
+}
+
+FpResult format_suffix(std::string_view base, std::string_view text) {
+  if (ends(base, "_bf16"))
+    return half_result(base, text, true);
+  if (ends(base, "_f16"))
+    return half_result(base, text, false);
+  if (ends(base, "_f32"))
+    return FpResult::F32;
+  if (ends(base, "_f64"))
+    return FpResult::F64;
+  return FpResult::None;
+}
+
+} // namespace
+
+FpResult fp_result_kind(std::string_view mnemonic, std::string_view text) {
+  const std::string_view base = strip_encoding(mnemonic);
+  if (!starts(base, "v_"))
+    return FpResult::None;
+  const bool lane_shuffle = base != mnemonic && (ends(mnemonic, "_sdwa") || ends(mnemonic, "_dpp"));
+  if (base == "v_mov_b32" || base == "v_mov_b64")
+    return lane_shuffle || text.find("row_") != std::string_view::npos ? FpResult::None
+                                                                       : FpResult::Move;
+  if (base == "v_cndmask_b32")
+    return lane_shuffle ? FpResult::None : FpResult::CndMask;
+  if (base == "v_pk_mov_b32")
+    return FpResult::PkMov;
+  if (starts(base, "v_cmp") || starts(base, "v_frexp_exp") || base.find("mfma") != base.npos ||
+      base.find("smfmac") != base.npos)
+    return FpResult::None;
+  if (starts(base, "v_cvt_")) {
+    const std::string_view rest = base.substr(6);
+    if (starts(rest, "pkrtz_f16") || starts(rest, "pk_f16_f32"))
+      return FpResult::F16x2;
+    if (starts(rest, "pk_bf16_f32"))
+      return FpResult::BF16x2;
+    if (starts(rest, "f32_"))
+      return FpResult::F32;
+    if (starts(rest, "f64_"))
+      return FpResult::F64;
+    if (starts(rest, "f16_"))
+      return half_result(base, text, false);
+    if (starts(rest, "bf16_"))
+      return half_result(base, text, true);
+    return FpResult::None; // to integers, packed normalised/fp8 forms
+  }
+  if (starts(base, "v_pk_")) {
+    if (ends(base, "_bf16"))
+      return FpResult::BF16x2;
+    if (ends(base, "_f16"))
+      return FpResult::F16x2;
+    if (ends(base, "_f32"))
+      return FpResult::F32; // a pair of f32 results
+    return FpResult::None;
+  }
+  if (base == "v_fma_mix_f32" || base == "v_mad_mix_f32")
+    return FpResult::F32;
+  if (base == "v_fma_mixlo_f16" || base == "v_mad_mixlo_f16")
+    return FpResult::F16Lo;
+  if (base == "v_fma_mixhi_f16" || base == "v_mad_mixhi_f16")
+    return FpResult::F16Hi;
+  if (starts(base, "v_dot"))
+    return starts(base, "v_dot2_f32_") || starts(base, "v_dot2c_f32_") ? FpResult::F32
+                                                                       : FpResult::None;
+  return format_suffix(base, text);
+}
+
+FpResult fp_source_kind(std::string_view mnemonic) {
+  const std::string_view base = strip_encoding(mnemonic);
+  if (!starts(base, "v_") || base.find("mfma") != base.npos || starts(base, "v_fma_mix") ||
+      starts(base, "v_mad_mix"))
+    return FpResult::None;
+  if (starts(base, "v_cvt_")) {
+    if (starts(base, "v_cvt_pkrtz_f16_f32") || starts(base, "v_cvt_pk_f16_f32") ||
+        starts(base, "v_cvt_pk_bf16_f32"))
+      return FpResult::F32;
+    if (ends(base, "_f32"))
+      return FpResult::F32;
+    if (ends(base, "_f16"))
+      return FpResult::F16Lo;
+    if (ends(base, "_bf16"))
+      return FpResult::BF16Lo;
+    if (ends(base, "_f64"))
+      return FpResult::F64;
+    return FpResult::None;
+  }
+  if (starts(base, "v_pk_")) {
+    if (ends(base, "_bf16"))
+      return FpResult::BF16x2;
+    if (ends(base, "_f16"))
+      return FpResult::F16x2;
+    if (ends(base, "_f32"))
+      return FpResult::F32;
+    return FpResult::None;
+  }
+  if (starts(base, "v_dot2_f32_f16") || starts(base, "v_dot2c_f32_f16"))
+    return FpResult::F16x2;
+  if (starts(base, "v_dot2_f32_bf16") || starts(base, "v_dot2c_f32_bf16"))
+    return FpResult::BF16x2;
+  if (ends(base, "_bf16"))
+    return FpResult::BF16Lo;
+  if (ends(base, "_f16"))
+    return FpResult::F16Lo;
+  if (ends(base, "_f32"))
+    return FpResult::F32;
+  if (ends(base, "_f64"))
+    return FpResult::F64;
+  return FpResult::None;
+}
+
+namespace {
+
+constexpr std::pair<std::string_view, uint32_t> kPoisonNames[] = {
+    {"shift", kPoisonShift}, {"fptoint", kPoisonFpToInt}, {"ctz", kPoisonCtz},
+    {"nsw", kPoisonNsw},     {"nuw", kPoisonNuw},         {"disjoint", kPoisonDisjoint},
+    {"exact", kPoisonExact}, {"nnan", kPoisonNnan},       {"ninf", kPoisonNinf},
+};
+
+} // namespace
+
+std::optional<uint32_t> parse_poison_kinds(std::string_view text) {
+  uint32_t out = 0;
+  while (!text.empty()) {
+    const size_t comma = text.find(',');
+    const std::string_view name = trim(text.substr(0, comma));
+    text = comma == std::string_view::npos ? std::string_view{} : text.substr(comma + 1);
+    if (name.empty())
+      continue;
+    if (name == "all") {
+      for (const auto &[n, k] : kPoisonNames)
+        out |= k;
+      continue;
+    }
+    bool found = false;
+    for (const auto &[n, k] : kPoisonNames)
+      if (n == name) {
+        out |= k;
+        found = true;
+      }
+    if (!found)
+      return std::nullopt;
+  }
+  return out;
+}
+
+std::string format_poison_kinds(uint32_t kinds) {
+  std::string s;
+  for (const auto &[n, k] : kPoisonNames)
+    if (kinds & k)
+      s += (s.empty() ? "" : ",") + std::string(n);
+  return s;
+}
+
+uint32_t poison_check_kind(std::string_view mnemonic) {
+  const std::string_view b = strip_encoding(mnemonic);
+  for (std::string_view s : {"v_lshlrev_b32", "v_lshlrev_b64", "v_lshlrev_b16", "v_pk_lshlrev_b16",
+                             "s_lshl_b32", "s_lshl_b64"})
+    if (b == s)
+      return kPoisonShift;
+  for (std::string_view s :
+       {"v_lshrrev_b32", "v_ashrrev_i32", "v_lshrrev_b64", "v_ashrrev_i64", "v_lshrrev_b16",
+        "v_ashrrev_i16", "v_pk_lshrrev_b16", "v_pk_ashrrev_i16", "s_lshr_b32", "s_ashr_i32",
+        "s_lshr_b64", "s_ashr_i64"})
+    if (b == s)
+      return kPoisonShift | kPoisonExact;
+  for (std::string_view s :
+       {"v_cvt_i32_f32", "v_cvt_u32_f32", "v_cvt_i32_f64", "v_cvt_u32_f64", "v_cvt_i16_f16",
+        "v_cvt_u16_f16", "v_cvt_flr_i32_f32", "v_cvt_rpi_i32_f32"})
+    if (b == s)
+      return kPoisonFpToInt | kPoisonNnan | kPoisonNinf;
+  for (std::string_view s : {"v_ffbh_u32", "v_ffbl_b32", "s_flbit_i32_b32", "s_flbit_i32_b64",
+                             "s_ff1_i32_b32", "s_ff1_i32_b64"})
+    if (b == s)
+      return kPoisonCtz;
+  for (std::string_view s : {"v_add_u32", "v_sub_u32", "v_subrev_u32", "v_mul_lo_u32", "s_add_i32",
+                             "s_sub_i32", "s_mul_i32"})
+    if (b == s)
+      return kPoisonNsw | kPoisonNuw;
+  if (b == "v_or_b32" || b == "s_or_b32")
+    return kPoisonDisjoint;
+  if (fp_source_kind(mnemonic) != FpResult::None)
+    return kPoisonNnan | kPoisonNinf;
+  return 0;
+}
+
+uint32_t nan_residual(uint32_t a, uint32_t b, uint8_t tag_a, uint8_t tag_b) {
+  uint32_t diff = a ^ b;
+  const uint8_t t = tag_a & tag_b;
+  if (!diff || !t)
+    return diff;
+  if (t & kFpF32)
+    return is_nan_f32(a) && is_nan_f32(b) ? 0u : diff;
+  for (unsigned h = 0; h < 2; ++h) {
+    const uint32_t m = h ? 0xffff0000u : 0x0000ffffu;
+    if (!(diff & m))
+      continue;
+    const uint32_t ha = (a & m) >> (16 * h), hb = (b & m) >> (16 * h);
+    const uint8_t f16 = h ? kFpF16Hi : kFpF16Lo, bf16 = h ? kFpBF16Hi : kFpBF16Lo;
+    if (((t & f16) && is_nan_f16(ha) && is_nan_f16(hb)) ||
+        ((t & bf16) && is_nan_bf16(ha) && is_nan_bf16(hb)))
+      diff &= ~m;
+  }
+  return diff;
+}
+
 } // namespace rocjitsu::isa_diff

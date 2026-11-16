@@ -102,6 +102,11 @@ VSet vexit_live(const KernelModel &m, const Span &s) {
   return s.begin < s.end ? m.vlive_after(s.end - 1) : m.vlive_before(s.cut);
 }
 
+/// VGPR exit liveness without partial return slots (Artifact::return_masks).
+VSet vexit_live_strict(const KernelModel &m, const Span &s) {
+  return s.begin < s.end ? m.vlive_after_strict(s.end - 1) : m.vlive_before_strict(s.cut);
+}
+
 VSet union_vwrites(const KernelModel &m, const Span &s) {
   VSet w;
   for (size_t i = s.begin; i < s.end; ++i)
@@ -312,6 +317,16 @@ RegionPair build_region(const KernelModel &om, const KernelModel &nm, const Cand
     const VSet vout_old = vexit_live(om, c.o) & range;
     const VSet vout_new = vexit_live(nm, c.n) & range;
     k.vobservable = vout_old | vout_new;
+    // Undefined inputs (LLVM undef): live-in VGPRs written on no path from the entry and
+    // not defined at it.
+    k.vundef_old = ventry_live(om, c.o) & om.vundef_before(anchor_index(c.o)) & range;
+    k.vundef_new = ventry_live(nm, c.n) & nm.vundef_before(anchor_index(c.n)) & range;
+    // VGPRs observable only through a return value narrower than the register.
+    const VSet full = (vexit_live_strict(om, c.o) | vexit_live_strict(nm, c.n)) & range;
+    const auto &masks = om.artifact().return_masks;
+    for (unsigned r = 0; r < masks.size() && r < om.artifact().return_vgprs; ++r)
+      if (masks[r] != 0xffffffffu && k.vobservable.test(r) && !full.test(r))
+        k.vexit_masks.emplace_back(r, masks[r]);
     k.vwrites_old = union_vwrites(om, c.o);
     k.vwrites_new = union_vwrites(nm, c.n);
     k.vwide_reads = (union_vwide_reads(om, c.o) | union_vwide_reads(nm, c.n)) & range;
@@ -328,6 +343,12 @@ RegionPair build_region(const KernelModel &om, const KernelModel &nm, const Cand
                              "come from VGPR liveness, in which a write never kills (lanes "
                              "outside EXEC keep their value)",
                          "KernelModel backward VSet liveness"});
+    if (k.vundef_old.any() || k.vundef_new.any())
+      k.sources.push_back({"undefined inputs (old " + format_vgprs(k.vundef_old) + "; new " +
+                               format_vgprs(k.vundef_new) +
+                               "): never written since the entry and not defined there; old's "
+                               "outputs that depend on them are don't care",
+                           "KernelModel forward may-written VSet analysis"});
   }
   std::vector<int> asm_blocks[2];
   for (const auto *side : {&region.old_side, &region.new_side}) {

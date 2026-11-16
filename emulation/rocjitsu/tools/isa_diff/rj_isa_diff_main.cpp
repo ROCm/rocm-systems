@@ -8,6 +8,7 @@
 #include "llvm_frontend.h"
 #include "mutation.h"
 
+#include <algorithm>
 #include <charconv>
 #include <cstdio>
 #include <cstdlib>
@@ -38,14 +39,18 @@ const char *kUsage =
     "                      [--manual-region old:B-E,new:B-E [--map s4=s8,...]\n"
     "                       [--entry-map s4=s8,...] [--exit-map s4=s8,...]]\n"
     "                      [--diagnostic-entry-prefix] [--cache-dir DIR]\n"
-    "                      [--return-vgprs N] [--function-mode HEX]  (callable functions)\n"
+    "                      [--return-vgprs N] [--return-masks M,...] [--function-mode HEX]\n"
+    "                      [--entry-vgprs N]  (callable functions: return and argument ABI)\n"
     "      --manual-region: one hand-written region (instruction indices or 0x PCs, E\n"
     "      exclusive); --map: old=new register correspondence. Both stay ASSUMED.\n"
     "  rj_isa_diff test    --case DIR [--seed N] [--cases N] [--region ID]\n"
     "                      [--max-counterexamples N] [--max-boundary-cases N]\n"
     "                      [--reduction-budget N] [--no-reduce] [--no-case-log]\n"
-    "                      [--cache-dir DIR]\n"
+    "                      [--cache-dir DIR] [--strict-nan] [--poison-filter KINDS]\n"
     "      --cases counts random cases; the boundary/NaN/corner sweep always runs first.\n"
+    "      --strict-nan: NaNs compare bit for bit (default: any NaN equals any NaN of the\n"
+    "      same format, as LLVM allows). --poison-filter shift,fptoint,ctz,nsw,nuw,\n"
+    "      disjoint,exact,nnan,ninf|all: exclude inputs that are poison in the IR.\n"
     "  rj_isa_diff replay  --counterexample FILE [--case DIR]\n"
     "  rj_isa_diff inject  --case DIR --region ID --xor MASK --out DIR [--side old|new]\n"
     "                      [--inst N] [--word N] [--label NAME]   (synthetic self-test)\n"
@@ -148,9 +153,9 @@ int exit_code_for(const Json &overall) {
 }
 
 const std::vector<std::string> kPlanFlags = {
-    "--context",   "--max-region",   "--max-expansions", "--manual-region",
-    "--map",       "--entry-map",    "--exit-map",       "--max-analysis-ms",
-    "--cache-dir", "--return-vgprs", "--function-mode"};
+    "--context",       "--max-region",  "--max-expansions",  "--manual-region", "--map",
+    "--entry-map",     "--exit-map",    "--max-analysis-ms", "--cache-dir",     "--return-vgprs",
+    "--function-mode", "--entry-vgprs", "--return-masks"};
 const std::vector<std::string> kPlanSwitches = {"--no-merge", "--no-derive-constraints",
                                                 "--diagnostic-entry-prefix"};
 
@@ -246,9 +251,31 @@ int run_analyze(const std::string &old_path, const std::string &new_path, const 
     std::cerr << "--return-vgprs takes 0..32; --function-mode takes a MODE register value\n";
     return kExitError;
   }
+  std::vector<uint32_t> ret_masks;
+  for (const std::string &tok : llvm::split_args([&] {
+         std::string t = a.get("--return-masks");
+         std::replace(t.begin(), t.end(), ',', ' ');
+         return t;
+       }())) {
+    char *end = nullptr;
+    const unsigned long v = std::strtoul(tok.c_str(), &end, 0);
+    if (!end || *end != '\0' || v > 0xffffffffu) {
+      std::cerr << "--return-masks takes comma-separated 32-bit masks\n";
+      return kExitError;
+    }
+    ret_masks.push_back(static_cast<uint32_t>(v));
+  }
+  const auto entry_vgprs = a.number("--entry-vgprs", 0);
+  if (!entry_vgprs || *entry_vgprs > 256) {
+    std::cerr << "--entry-vgprs takes 0..256\n";
+    return kExitError;
+  }
   for (Artifact *art : {&old_a, &new_a}) {
     art->return_vgprs = static_cast<unsigned>(*ret_vgprs);
     art->function_mode = *fmode;
+    art->return_masks = ret_masks;
+    if (a.has("--entry-vgprs") && art->entry_vgprs >= 0)
+      art->entry_vgprs = static_cast<int>(*entry_vgprs);
   }
   bool cache_hit = false;
   auto data = analyze_cached(old_a, new_a, *plan, a.get("--cache-dir"), cache_hit, error);
@@ -350,8 +377,8 @@ int cmd_llvm_pair(int argc, char **argv) {
 int cmd_test(int argc, char **argv) {
   Args a = parse(argc, argv, 2,
                  {"--case", "--seed", "--cases", "--region", "--max-counterexamples",
-                  "--max-boundary-cases", "--reduction-budget", "--cache-dir"},
-                 {"--no-reduce", "--no-case-log"});
+                  "--max-boundary-cases", "--reduction-budget", "--cache-dir", "--poison-filter"},
+                 {"--no-reduce", "--no-case-log", "--strict-nan"});
   if (!a.error.empty() || !a.has("--case")) {
     std::cerr << (a.error.empty() ? "test needs --case" : a.error) << "\n" << kUsage;
     return kExitError;
@@ -372,6 +399,16 @@ int cmd_test(int argc, char **argv) {
   opt.max_boundary_cases = *maxbound;
   opt.reduction_budget = *redbudget;
   opt.reduce = !a.is_switch("--no-reduce");
+  opt.strict_nan = a.is_switch("--strict-nan");
+  if (a.has("--poison-filter")) {
+    const auto kinds = parse_poison_kinds(a.get("--poison-filter"));
+    if (!kinds) {
+      std::cerr << "--poison-filter takes shift,fptoint,ctz,nsw,nuw,disjoint,exact,nnan,ninf "
+                   "or all\n";
+      return kExitError;
+    }
+    opt.poison_filter = *kinds;
+  }
   const std::string dir = a.get("--case");
   opt.counterexample_dir = dir + "/counterexamples";
   if (!a.is_switch("--no-case-log"))

@@ -4,6 +4,7 @@
 #include "machine_state.h"
 
 #include <algorithm>
+#include <cstdlib>
 
 namespace rocjitsu::isa_diff {
 
@@ -66,10 +67,45 @@ Json MachineState::to_json() const {
       for (uint32_t v : u.values)
         vals.push(hex32(v));
       uj.set("values", std::move(vals));
+      if (std::ranges::any_of(u.fp, [](uint8_t t) { return t != 0; })) {
+        Json tags = Json::array();
+        for (uint8_t t : u.fp)
+          tags.push(static_cast<uint64_t>(t));
+        uj.set("fp", std::move(tags));
+      }
       uses.push(std::move(uj));
     }
     a.set("uses", std::move(uses));
     j.set("inline_asm", std::move(a));
+  }
+  // Floating-point provenance: per tagged VGPR, two hex digits (one FpTag) per lane.
+  if (std::ranges::any_of(vfp, [](uint8_t t) { return t != 0; }) || !mem_fp.empty()) {
+    Json f = Json::object();
+    Json regs = Json::object();
+    for (unsigned r = 0; r < vgpr_count; ++r) {
+      std::string lanes;
+      bool any = false;
+      for (unsigned lane = 0; lane < kWaveLanes; ++lane) {
+        const uint8_t t = fp_tag(r, lane);
+        any = any || t;
+        static constexpr char kHex[] = "0123456789abcdef";
+        lanes += kHex[t >> 4];
+        lanes += kHex[t & 15];
+      }
+      if (any)
+        regs.set("v" + std::to_string(r), lanes);
+    }
+    f.set("vgprs", std::move(regs));
+    Json units = Json::array();
+    for (const FpUnit &u : mem_fp) {
+      Json uj = Json::array();
+      uj.push(hex64(u.addr));
+      uj.push(static_cast<uint64_t>(u.size));
+      uj.push(static_cast<uint64_t>(u.format));
+      units.push(std::move(uj));
+    }
+    f.set("memory", std::move(units));
+    j.set("fp", std::move(f));
   }
   return j;
 }
@@ -140,6 +176,10 @@ std::optional<MachineState> MachineState::from_json(const Json &j, std::string &
         }
         u.values.push_back(static_cast<uint32_t>(*x));
       }
+      for (const Json &t : uj["fp"].items())
+        u.fp.push_back(static_cast<uint8_t>(t.as_uint()));
+      if (u.fp.empty())
+        u.fp.assign(u.values.size(), 0);
       s.asm_uses.push_back(std::move(u));
     }
   }
@@ -160,6 +200,31 @@ std::optional<MachineState> MachineState::from_json(const Json &j, std::string &
         }
         s.vset(r, lane, static_cast<uint32_t>(*x));
       }
+    }
+  }
+  const Json &fp = j["fp"];
+  if (fp.is_object()) {
+    s.vfp.assign(size_t{s.vgpr_count} * kWaveLanes, 0);
+    for (const auto &[name, lanes] : fp["vgprs"].members()) {
+      const unsigned r = static_cast<unsigned>(std::strtoul(name.c_str() + 1, nullptr, 10));
+      const std::string &hex = lanes.as_string();
+      if (name.empty() || name[0] != 'v' || r >= s.vgpr_count || hex.size() != 2 * kWaveLanes) {
+        error = "bad floating-point tags for " + name;
+        return std::nullopt;
+      }
+      for (unsigned lane = 0; lane < kWaveLanes; ++lane)
+        s.vfp[size_t{r} * kWaveLanes + lane] =
+            static_cast<uint8_t>(std::stoul(hex.substr(2 * lane, 2), nullptr, 16));
+    }
+    for (const Json &u : fp["memory"].items()) {
+      const auto &it = u.items();
+      auto a = it.size() == 3 ? json_u64(it[0]) : std::nullopt;
+      if (!a) {
+        error = "bad floating-point memory unit";
+        return std::nullopt;
+      }
+      s.mem_fp.push_back(
+          {*a, static_cast<uint8_t>(it[1].as_uint()), static_cast<uint8_t>(it[2].as_uint())});
     }
   }
   return s;

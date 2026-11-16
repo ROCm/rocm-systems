@@ -1892,4 +1892,57 @@ TEST(IsaDiffInlineAsm, RegionInstructionsKeepTheirBlockThroughJson) {
   EXPECT_NE(compute_prepared_key(r), compute_prepared_key(other));
 }
 
+// ---------------------------------------------------------------------------
+// NaN equivalence, poison analogues.
+
+TEST(IsaDiffNan, ResultKindsFollowTheDestinationFormat) {
+  EXPECT_EQ(fp_result_kind("v_add_f32_e32", "v_add_f32_e32 v0, v1, v2"), FpResult::F32);
+  EXPECT_EQ(fp_result_kind("v_fma_f64", "v_fma_f64 v[0:1], ..."), FpResult::F64);
+  EXPECT_EQ(fp_result_kind("v_add_f16_e32", "v_add_f16_e32 v0, v1, v2"), FpResult::F16Lo);
+  EXPECT_EQ(fp_result_kind("v_add_f16_e64", "v_add_f16_e64 v0, v1, v2 op_sel:[0,0,1]"),
+            FpResult::F16Hi);
+  EXPECT_EQ(fp_result_kind("v_pk_add_f16", "v_pk_add_f16 v0, v1, v2"), FpResult::F16x2);
+  EXPECT_EQ(fp_result_kind("v_pk_fma_f32", "v_pk_fma_f32 v[0:1], ..."), FpResult::F32);
+  EXPECT_EQ(fp_result_kind("v_cvt_f16_f32_e32", "v_cvt_f16_f32_e32 v0, v1"), FpResult::F16Lo);
+  EXPECT_EQ(fp_result_kind("v_cvt_i32_f32_e32", "v_cvt_i32_f32_e32 v0, v1"), FpResult::None);
+  EXPECT_EQ(fp_result_kind("v_cmp_lt_f32_e32", "v_cmp_lt_f32_e32 vcc, v0, v1"), FpResult::None);
+  EXPECT_EQ(fp_result_kind("v_xor_b32_e32", "v_xor_b32_e32 v0, v1, v2"), FpResult::None);
+  EXPECT_EQ(fp_result_kind("v_mov_b32_e32", "v_mov_b32_e32 v0, v1"), FpResult::Move);
+  EXPECT_EQ(fp_result_kind("v_mov_b32_dpp", "v_mov_b32_dpp v0, v1 row_shr:1"), FpResult::None);
+  EXPECT_EQ(fp_result_kind("v_cndmask_b32_e32", "v_cndmask_b32_e32 v0, v1, v2, vcc"),
+            FpResult::CndMask);
+  EXPECT_EQ(fp_source_kind("v_cvt_i32_f32_e32"), FpResult::F32);
+  EXPECT_EQ(fp_source_kind("v_and_b32_e32"), FpResult::None);
+}
+
+TEST(IsaDiffNan, ResidualKeepsEverythingButSameFormatNans) {
+  // f32: two different NaNs from floating-point results are equal; a NaN and a number not.
+  EXPECT_EQ(nan_residual(0x7fc00000u, 0xffc00001u, kFpF32, kFpF32), 0u);
+  EXPECT_NE(nan_residual(0x7fc00000u, 0x3f800000u, kFpF32, kFpF32), 0u);
+  // Only one side is a floating-point result: bitwise.
+  EXPECT_NE(nan_residual(0x7fc00000u, 0xffc00001u, kFpF32, 0), 0u);
+  // f16 halves: the low half differs only in NaN payload, the high half in value.
+  EXPECT_EQ(nan_residual(0x3c007e00u, 0x3c007d01u, kFpF16Lo | kFpF16Hi, kFpF16Lo | kFpF16Hi), 0u);
+  EXPECT_EQ(nan_residual(0x3c007e00u, 0x40007d01u, kFpF16Lo | kFpF16Hi, kFpF16Lo | kFpF16Hi),
+            0x7c000000u);
+  // bf16.
+  EXPECT_EQ(nan_residual(0x00007fc0u, 0x0000ffc1u, kFpBF16Lo, kFpBF16Lo), 0u);
+}
+
+TEST(IsaDiffPoison, KindsParseAndMapToInstructions) {
+  EXPECT_EQ(parse_poison_kinds("shift,nsw"), kPoisonShift | kPoisonNsw);
+  EXPECT_FALSE(parse_poison_kinds("shift,bogus"));
+  EXPECT_EQ(format_poison_kinds(*parse_poison_kinds("all")),
+            "shift,fptoint,ctz,nsw,nuw,disjoint,exact,nnan,ninf");
+  EXPECT_EQ(poison_check_kind("v_lshlrev_b32_e32"), kPoisonShift);
+  EXPECT_EQ(poison_check_kind("s_lshr_b32"), kPoisonShift | kPoisonExact);
+  EXPECT_TRUE(poison_check_kind("v_cvt_i32_f32_e32") & kPoisonFpToInt);
+  EXPECT_EQ(poison_check_kind("v_ffbh_u32_e32"), kPoisonCtz);
+  EXPECT_EQ(poison_check_kind("v_add_u32_e32"), kPoisonNsw | kPoisonNuw);
+  EXPECT_EQ(poison_check_kind("v_add_co_u32_e32"), 0u); // a carry chain: not an i32 add
+  EXPECT_EQ(poison_check_kind("v_or_b32_e32"), kPoisonDisjoint);
+  EXPECT_EQ(poison_check_kind("v_mul_f32_e32"), kPoisonNnan | kPoisonNinf);
+  EXPECT_EQ(poison_check_kind("v_mov_b32_e32"), 0u);
+}
+
 } // namespace

@@ -89,6 +89,8 @@ std::string result_cache_key(const RegionPair &region, const std::vector<RegionP
   k.set("max_boundary_cases", static_cast<uint64_t>(options.max_boundary_cases));
   k.set("max_counterexamples", static_cast<uint64_t>(options.max_counterexamples));
   k.set("reduce", options.reduce);
+  k.set("strict_nan", options.strict_nan);
+  k.set("poison_filter", static_cast<uint64_t>(options.poison_filter));
   k.set("reduction_budget", static_cast<uint64_t>(options.reduction_budget));
   k.set("case_log", !options.case_log_dir.empty());
   return sha256_hex(k.dump(-1));
@@ -110,6 +112,11 @@ std::string analysis_cache_key(const Artifact &old_artifact, const Artifact &new
     aj.set("callable", a->callable);
     aj.set("return_vgprs", static_cast<uint64_t>(a->return_vgprs));
     aj.set("function_mode", static_cast<uint64_t>(a->function_mode));
+    aj.set("entry_vgprs", static_cast<int64_t>(a->entry_vgprs));
+    Json masks = Json::array();
+    for (uint32_t m : a->return_masks)
+      masks.push(static_cast<uint64_t>(m));
+    aj.set("return_masks", std::move(masks));
     k.set(a == &old_artifact ? "old" : "new", std::move(aj));
   }
   Json o = Json::object();

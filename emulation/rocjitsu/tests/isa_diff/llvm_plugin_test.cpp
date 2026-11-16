@@ -538,8 +538,27 @@ std::string fill(std::string text, const std::vector<std::pair<std::string, std:
 }
 
 /// Assemble two listings of one function and run the whole pipeline.
+/// The ABI and comparison options of one end-to-end pair.
+struct PairOptions {
+  unsigned return_vgprs = 0;
+  int entry_vgprs = -2; ///< -2: the loader's default.
+  std::vector<uint32_t> return_masks;
+  bool strict_nan = false;
+  uint32_t poison_filter = 0;
+};
+
+std::string verdict_of(const std::string &dir, const std::string &fn, const std::string &old_s,
+                       const std::string &new_s, const PairOptions &o);
+
 std::string verdict_of(const std::string &dir, const std::string &fn, const std::string &old_s,
                        const std::string &new_s, unsigned return_vgprs) {
+  PairOptions o;
+  o.return_vgprs = return_vgprs;
+  return verdict_of(dir, fn, old_s, new_s, o);
+}
+
+std::string verdict_of(const std::string &dir, const std::string &fn, const std::string &old_s,
+                       const std::string &new_s, const PairOptions &o) {
   const auto tc = toolchain();
   Artifact a[2];
   for (int side = 0; side < 2; ++side) {
@@ -550,7 +569,10 @@ std::string verdict_of(const std::string &dir, const std::string &fn, const std:
     EXPECT_TRUE(llvm::assemble(tc, path, dir + (side ? "/new" : "/old"), fn, a[side], p, error))
         << error;
     EXPECT_TRUE(a[side].callable);
-    a[side].return_vgprs = return_vgprs;
+    a[side].return_vgprs = o.return_vgprs;
+    a[side].return_masks = o.return_masks;
+    if (o.entry_vgprs != -2)
+      a[side].entry_vgprs = o.entry_vgprs;
   }
   std::string error;
   auto data = analyze_artifacts(a[0], a[1], {}, error);
@@ -559,6 +581,8 @@ std::string verdict_of(const std::string &dir, const std::string &fn, const std:
     return "error";
   TestOptions opt;
   opt.cases = 1000;
+  opt.strict_nan = o.strict_nan;
+  opt.poison_filter = o.poison_filter;
   Json report = test_case(*data, opt, "", nullptr);
   return report["overall"]["test_status"].as_string() + "/" +
          report["overall"]["contract_status"].as_string();
@@ -628,6 +652,120 @@ TEST(IsaDiffLlvm, CallableFunctionWithInlineAsmIsTestedEndToEnd) {
           fill(kUseFn, {{"TMP_REG", "v2"}, {"USE_REG", "v2"}, {"EXTRA_INST", "s_mov_b32 s34, 0"}}),
           1),
       "LOCAL_MISMATCH/ESTABLISHED");
+  std::filesystem::remove_all(dir);
+}
+
+/// A void function f: @p body, then the return.
+std::string fn_listing(const std::vector<std::string> &body) {
+  std::string t = "\t.text\n\t.globl\tf\n\t.p2align\t8\n\t.type\tf,@function\nf:\n";
+  for (const auto &l : body)
+    t += "\t" + l + "\n";
+  return t + "\ts_setpc_b64 s[30:31]\n.Lfunc_end0:\n\t.size\tf, .Lfunc_end0-f\n";
+}
+
+/// Store v0 through the inreg pointer s[0:1] after @p ops.
+std::string store_fn(const std::vector<std::string> &ops) {
+  std::vector<std::string> body = {"v_mov_b32_e32 v4, 0"};
+  body.insert(body.end(), ops.begin(), ops.end());
+  body.push_back("global_store_dword v4, v0, s[0:1]");
+  body.push_back("s_waitcnt vmcnt(0)");
+  return fn_listing(body);
+}
+
+TEST(IsaDiffLlvm, NanResultsOfTheSameFormatCompareEqual) {
+  const std::string dir = temp_dir("nan");
+  PairOptions o;
+  o.entry_vgprs = 2;
+  // fadd is commutative; with two NaN inputs the hardware returns the first operand's NaN.
+  const std::string ab = store_fn({"v_add_f32_e32 v0, v0, v1"});
+  const std::string ba = store_fn({"v_add_f32_e32 v0, v1, v0"});
+  EXPECT_EQ(verdict_of(dir, "f", ab, ba, o), "NO_MISMATCH_FOUND/ESTABLISHED");
+  PairOptions strict = o;
+  strict.strict_nan = true;
+  EXPECT_EQ(verdict_of(dir, "f", ab, ba, strict), "LOCAL_MISMATCH/ESTABLISHED");
+  // Packed f16 halves are compared half by half.
+  EXPECT_EQ(verdict_of(dir, "f", store_fn({"v_pk_add_f16 v0, v0, v1"}),
+                       store_fn({"v_pk_add_f16 v0, v1, v0"}), o),
+            "NO_MISMATCH_FOUND/ESTABLISHED");
+  // fneg must keep the NaN's bits: a bitwise sign flip (old) and a multiplication by -1,
+  // which quiets a signalling NaN (new), differ. Only old's value is not a floating-point
+  // result, so no equivalence applies.
+  EXPECT_EQ(verdict_of(dir, "f", store_fn({"v_xor_b32_e32 v0, 0x80000000, v0"}),
+                       store_fn({"v_mul_f32_e32 v0, -1.0, v0"}), o),
+            "LOCAL_MISMATCH/ESTABLISHED");
+  std::filesystem::remove_all(dir);
+}
+
+TEST(IsaDiffLlvm, UndefinedValuesAreDontCare) {
+  const std::string dir = temp_dir("undef");
+  // The third stored element is undefined in the IR: old stores whatever v2 holds, new
+  // stores 0. v0 and v1 are the arguments.
+  const std::string old_s = fn_listing(
+      {"v_mov_b32_e32 v4, 0", "global_store_dwordx3 v4, v[0:2], s[0:1]", "s_waitcnt vmcnt(0)"});
+  const std::string new_s =
+      fn_listing({"v_mov_b32_e32 v4, 0", "v_mov_b32_e32 v2, 0",
+                  "global_store_dwordx3 v4, v[0:2], s[0:1]", "s_waitcnt vmcnt(0)"});
+  PairOptions o;
+  o.entry_vgprs = 2;
+  EXPECT_EQ(verdict_of(dir, "f", old_s, new_s, o), "NO_MISMATCH_FOUND/ESTABLISHED");
+  // Without the argument count v2 counts as defined, and the difference is a mismatch.
+  EXPECT_EQ(verdict_of(dir, "f", old_s, new_s, PairOptions{}), "LOCAL_MISMATCH/ESTABLISHED");
+  // An undefined value read from another register (an IMPLICIT_DEF allocated elsewhere).
+  PairOptions none;
+  none.entry_vgprs = 0;
+  EXPECT_EQ(verdict_of(dir, "f", store_fn({"v_mov_b32_e32 v0, v5"}),
+                       store_fn({"v_mov_b32_e32 v0, v7"}), none),
+            "NO_MISMATCH_FOUND/ESTABLISHED");
+  // New stores garbage where old stores the argument: a real bug.
+  PairOptions one;
+  one.entry_vgprs = 1;
+  EXPECT_EQ(verdict_of(dir, "f", store_fn({}), store_fn({"v_mov_b32_e32 v0, v7"}), one),
+            "LOCAL_MISMATCH/ESTABLISHED");
+  std::filesystem::remove_all(dir);
+}
+
+TEST(IsaDiffLlvm, NarrowReturnValuesCompareTheirBitsOnly) {
+  const std::string dir = temp_dir("retmask");
+  // A half returned in v0: the high half is undefined.
+  const std::string old_s = fn_listing({"v_cvt_f16_f32_e32 v0, v0"});
+  const std::string new_s =
+      fn_listing({"v_cvt_f16_f32_e32 v0, v0", "v_or_b32_e32 v0, 0x12340000, v0"});
+  PairOptions o;
+  o.return_vgprs = 1;
+  o.return_masks = {0xffff};
+  EXPECT_EQ(verdict_of(dir, "f", old_s, new_s, o), "NO_MISMATCH_FOUND/ESTABLISHED");
+  o.return_masks.clear();
+  EXPECT_EQ(verdict_of(dir, "f", old_s, new_s, o), "LOCAL_MISMATCH/ESTABLISHED");
+  // A wrong low half is still a mismatch under the mask.
+  o.return_masks = {0xffff};
+  EXPECT_EQ(verdict_of(dir, "f", old_s,
+                       fn_listing({"v_cvt_f16_f32_e32 v0, v0", "v_xor_b32_e32 v0, 1, v0"}), o),
+            "LOCAL_MISMATCH/ESTABLISHED");
+  std::filesystem::remove_all(dir);
+}
+
+TEST(IsaDiffLlvm, PoisonFilterExcludesInputsThatArePoisonInTheIR) {
+  const std::string dir = temp_dir("poison");
+  PairOptions o;
+  o.entry_vgprs = 2;
+  // shl by >= 32 is poison: a 64-bit shift (new) and a 32-bit one (old) agree below 32.
+  const std::string shl32 = store_fn({"v_lshlrev_b32_e32 v0, v1, v0"});
+  const std::string shl64 = store_fn({"v_mov_b32_e32 v3, 0", "v_mov_b32_e32 v2, v0",
+                                      "v_lshlrev_b64 v[2:3], v1, v[2:3]", "v_mov_b32_e32 v0, v2"});
+  EXPECT_EQ(verdict_of(dir, "f", shl32, shl64, o), "LOCAL_MISMATCH/ESTABLISHED");
+  PairOptions shift = o;
+  shift.poison_filter = kPoisonShift;
+  EXPECT_EQ(verdict_of(dir, "f", shl32, shl64, shift), "NO_MISMATCH_FOUND/ESTABLISHED");
+  // add nsw: a saturating add (new) agrees with the wrapping one (old) without overflow.
+  const std::string wrap = store_fn({"v_add_u32_e32 v0, v0, v1"});
+  const std::string sat = store_fn({"v_add_i32 v0, v0, v1 clamp"});
+  EXPECT_EQ(verdict_of(dir, "f", wrap, sat, o), "LOCAL_MISMATCH/ESTABLISHED");
+  PairOptions nsw = o;
+  nsw.poison_filter = kPoisonNsw;
+  EXPECT_EQ(verdict_of(dir, "f", wrap, sat, nsw), "NO_MISMATCH_FOUND/ESTABLISHED");
+  // The filter does not excuse a difference on ordinary inputs.
+  EXPECT_EQ(verdict_of(dir, "f", wrap, store_fn({"v_sub_u32_e32 v0, v0, v1"}), nsw),
+            "LOCAL_MISMATCH/ESTABLISHED");
   std::filesystem::remove_all(dir);
 }
 

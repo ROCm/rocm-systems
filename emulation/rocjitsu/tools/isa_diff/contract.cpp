@@ -147,6 +147,16 @@ Json RegionContract::to_json() const {
     j.set("vgpr_writes_old", format_vgprs(vwrites_old));
     j.set("vgpr_writes_new", format_vgprs(vwrites_new));
     j.set("vgpr_wide_reads", format_vgprs(vwide_reads));
+    if (vundef_old.any())
+      j.set("vgpr_undef_old", format_vgprs(vundef_old));
+    if (vundef_new.any())
+      j.set("vgpr_undef_new", format_vgprs(vundef_new));
+    if (!vexit_masks.empty()) {
+      Json em = Json::object();
+      for (const auto &[r, mask] : vexit_masks)
+        em.set("v" + std::to_string(r), hex32(mask));
+      j.set("vgpr_exit_masks", std::move(em));
+    }
   }
   if (memory_reads)
     j.set("memory_reads", true);
@@ -256,8 +266,18 @@ std::optional<RegionContract> RegionContract::from_json(const Json &j, std::stri
     };
     if (!vlocs("vgpr_entry_equal", c.ventry_equal) || !vlocs("vgpr_observable", c.vobservable) ||
         !vlocs("vgpr_writes_old", c.vwrites_old) || !vlocs("vgpr_writes_new", c.vwrites_new) ||
-        !vlocs("vgpr_wide_reads", c.vwide_reads))
+        !vlocs("vgpr_wide_reads", c.vwide_reads) || !vlocs("vgpr_undef_old", c.vundef_old) ||
+        !vlocs("vgpr_undef_new", c.vundef_new))
       return std::nullopt;
+    for (const auto &[name, mask] : j["vgpr_exit_masks"].members()) {
+      auto v = json_u64(mask);
+      const auto r = parse_vgprs(name);
+      if (!v || !r || r->count() != 1 || vgpr_extent(*r) > c.vgpr_count) {
+        error = "bad vgpr_exit_masks entry '" + name + "'";
+        return std::nullopt;
+      }
+      c.vexit_masks.emplace_back(vgpr_extent(*r) - 1, static_cast<uint32_t>(*v));
+    }
   }
   c.memory_reads = j["memory_reads"].as_bool();
   c.memory_writes = j["memory_writes"].as_bool();

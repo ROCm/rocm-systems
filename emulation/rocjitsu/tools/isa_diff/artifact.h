@@ -83,6 +83,13 @@ struct Artifact {
   unsigned return_vgprs = 32;
   /// Callable functions: MODE at entry, which the caller provides.
   uint32_t function_mode = kDefaultFunctionMode;
+  /// VGPRs v0..v{n-1} that hold defined values at the entry (arguments; for a kernel the
+  /// workitem IDs). Other VGPRs are undefined until written (LLVM undef). -1: all defined
+  /// (raw words). Loaded callable functions default to 32, kernels to 3.
+  int entry_vgprs = -1;
+  /// Callable functions: bits of each return VGPR the caller observes (index = VGPR);
+  /// missing entries are full. A half returned in v0 is {0x0000ffff}.
+  std::vector<uint32_t> return_masks;
   /// Comment-only inline-asm blocks inside the kernel/function range, in address order.
   std::vector<InlineAsmBlock> inline_asm;
 };

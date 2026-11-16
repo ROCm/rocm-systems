@@ -228,6 +228,13 @@
             },
             "entry_mode": {
               "$ref": "#/$defs/hex32"
+            },
+            "return_masks": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/hex32"
+              },
+              "description": "Observed bits of each return VGPR (narrow return types)."
             }
           },
           "additionalProperties": false
@@ -255,6 +262,12 @@
             },
             "additionalProperties": false
           }
+        },
+        "entry_vgprs": {
+          "type": "integer",
+          "minimum": -1,
+          "maximum": 256,
+          "description": "VGPRs v0..v{n-1} defined at the entry (arguments, workitem IDs); others are undefined until written. -1: all defined."
         }
       },
       "additionalProperties": false
@@ -711,6 +724,21 @@
         "inline_asm": {
           "type": "boolean",
           "description": "The region contains comment-only inline-asm blocks: a def block writes per-case values (lanes in EXEC), equal for the old and new block with the same index; what use blocks observe is compared. Absent when false."
+        },
+        "vgpr_undef_old": {
+          "type": "string",
+          "description": "Live-in VGPRs undefined on the old side (never written since the entry): old's outputs that depend on them are don't care."
+        },
+        "vgpr_undef_new": {
+          "type": "string",
+          "description": "Live-in VGPRs undefined on the new side: new may not depend on them beyond old's don't-care bits."
+        },
+        "vgpr_exit_masks": {
+          "type": "object",
+          "description": "VGPRs observable only through a narrow return value: the bits compared.",
+          "additionalProperties": {
+            "$ref": "#/$defs/hex32"
+          }
         }
       },
       "additionalProperties": false,
@@ -1319,6 +1347,14 @@
               "additionalProperties": {
                 "$ref": "#/$defs/count"
               }
+            },
+            "nan_tolerated": {
+              "$ref": "#/$defs/count",
+              "description": "Valid pairs equal only through NaN equivalence."
+            },
+            "undef_masked": {
+              "$ref": "#/$defs/count",
+              "description": "Valid pairs equal only through undefined-bit masking."
             }
           },
           "additionalProperties": false
@@ -1520,6 +1556,26 @@
         "memory_mismatch": {
           "type": "boolean",
           "description": "Some mismatch included a stored-byte difference."
+        },
+        "comparison": {
+          "type": "object",
+          "description": "NaN policy (llvm: NaNs of floating-point results compare equal by format; strict: bitwise) and the poison filter in effect.",
+          "required": [
+            "nan",
+            "poison_filter"
+          ],
+          "properties": {
+            "nan": {
+              "enum": [
+                "llvm",
+                "strict"
+              ]
+            },
+            "poison_filter": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -1826,9 +1882,39 @@
                     "items": {
                       "$ref": "#/$defs/hex32"
                     }
+                  },
+                  "fp": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 255
+                    }
                   }
                 },
                 "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "fp": {
+          "type": "object",
+          "description": "Floating-point provenance after a run: per VGPR, one FpTag per lane (two hex digits each); stored floating-point units [address, size, format].",
+          "properties": {
+            "vgprs": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{128}$"
+              }
+            },
+            "memory": {
+              "type": "array",
+              "items": {
+                "type": "array",
+                "minItems": 3,
+                "maxItems": 3
               }
             }
           },
@@ -2185,6 +2271,15 @@
             },
             "additionalProperties": false
           }
+        },
+        "nan_policy": {
+          "enum": [
+            "llvm",
+            "strict"
+          ]
+        },
+        "poison_filter": {
+          "type": "string"
         }
       },
       "additionalProperties": false

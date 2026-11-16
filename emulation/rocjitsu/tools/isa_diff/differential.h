@@ -67,6 +67,13 @@ struct TestOptions {
   Json artifact_info;
   /// Result cache directory (handoff 11); empty disables the cache.
   std::string cache_dir;
+  /// Compare NaNs bit for bit. By default a NaN produced by a floating-point instruction
+  /// equals any NaN of the same format produced on the other side (LLVM leaves payload,
+  /// sign and quietness unspecified).
+  bool strict_nan = false;
+  /// PoisonKind mask: cases whose region instructions meet one of these machine analogues
+  /// of IR poison conditions, on either side, are excluded as poison inputs.
+  uint32_t poison_filter = 0;
 };
 
 struct PhaseCounts {
@@ -93,6 +100,9 @@ struct Mismatch {
   /// Reduction record (null when not reduced): runs, accepted steps, whether the
   /// mismatch no longer depends on the seed-derived canaries, and the original state.
   Json reduction;
+  /// The comparison it was found under: NaN policy and poison filter (PoisonKind mask).
+  bool strict_nan = false;
+  uint32_t poison_filter = 0;
 };
 
 struct Timings {
@@ -121,6 +131,11 @@ struct RegionResult {
   uint64_t valid_pairs = 0;    ///< Pairs where both sides exited normally and were compared.
   uint64_t mismatches = 0;
   uint64_t harness_errors = 0;
+  /// Valid pairs that compare equal only through NaN equivalence / undefined-bit masking.
+  uint64_t nan_tolerated = 0;
+  uint64_t undef_masked = 0;
+  bool strict_nan = false;
+  uint32_t poison_filter = 0;
   PhaseCounts boundary; ///< Mandatory boundary sweep.
   PhaseCounts random;   ///< Policy-driven random phase.
   uint64_t boundary_generated = 0;

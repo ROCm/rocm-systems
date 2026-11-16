@@ -121,6 +121,14 @@ public:
   /// lanes outside EXEC keep their value.
   [[nodiscard]] VSet vlive_before(size_t i) const;
   [[nodiscard]] const VSet &vlive_after(size_t i) const { return vlive_after_[i]; }
+  /// VGPR liveness without the return VGPRs a partial return mask covers
+  /// (Artifact::return_masks): what is observable at full width.
+  [[nodiscard]] const VSet &vlive_after_strict(size_t i) const { return vlive_after_strict_[i]; }
+  [[nodiscard]] VSet vlive_before_strict(size_t i) const;
+  /// VGPRs holding no defined value immediately before instruction @p i: not defined at
+  /// the entry (Artifact::entry_vgprs, plus v31 and the callee-saved VGPRs of a callable
+  /// function) and written on no path from the entry. Empty when everything is defined.
+  [[nodiscard]] VSet vundef_before(size_t i) const;
   /// VGPRs that may hold a PC-derived value immediately before instruction @p i.
   [[nodiscard]] const VSet &pc_vtainted_before(size_t i) const { return vtaint_before_[i]; }
   /// Locations that may hold a PC-derived value immediately before instruction @p i.
@@ -150,6 +158,8 @@ public:
 private:
   KernelModel() = default;
   void compute_liveness();
+  void compute_undefined();
+  [[nodiscard]] std::vector<VSet> vgpr_liveness(const VSet &return_live) const;
   void compute_taint();
   void compute_pending();
   void compute_reachability();
@@ -162,6 +172,9 @@ private:
   std::vector<BlockInfo> blocks_;
   std::vector<LocSet> live_after_;
   std::vector<VSet> vlive_after_;
+  std::vector<VSet> vlive_after_strict_;
+  std::vector<VSet> vwritten_before_;
+  VSet entry_vundef_;
   std::vector<VSet> vtaint_before_;
   std::vector<LocSet> taint_before_;
   std::vector<PendingState> pending_before_;

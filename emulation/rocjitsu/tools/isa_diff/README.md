@@ -39,6 +39,7 @@ rj_isa_diff_pr --repo ~/llvm-project --base BASE --head HEAD --out report/
 #   --pr N             fetch GitHub PR N and test it against its merge base
 #   --head WORKTREE    test the checkout's uncommitted (regenerated) tests
 #   [--cases N] [--jobs N] [--tests GLOB] [--proxy-targets LIST] [--llvm-bin DIR] [--list]
+#   [--strict-nan] [--no-poison-triage]
 
 # 1. Decode, align, classify, plan regions and contracts.
 rj_isa_diff analyze --old old.hsaco --new new.hsaco --kernel my_kernel --out case/
@@ -54,6 +55,8 @@ rj_isa_diff analyze --old old.hsaco --new new.hsaco --kernel my_kernel --out cas
 #   [--cache-dir DIR]   reuse an identical earlier analysis
 #   [--old-kernel/--new-kernel NAME] when the symbol name differs
 #   callable functions: [--return-vgprs N] (0..32, default 32) [--function-mode HEX]
+#     [--return-masks M0,M1,...] (bits of each return VGPR)  [--entry-vgprs N] (defined
+#     argument VGPRs; others are undefined until written)
 #   .s/.ll inputs: [--llvm-bin DIR] [--llc-args S] [--old-llc-args S] [--new-llc-args S]
 
 # 1b. LLVM plugin: compile one .ll twice, with different llc options per side.
@@ -67,6 +70,8 @@ rj_isa_diff test --case case/ --seed 1 --cases 10000 [--region r0]
 #   [--reduction-budget N | --no-reduce]  counterexample reduction (default 4096 runs)
 #   [--no-case-log]  skip the per-case JSONL learning log (case/logs/<region>.jsonl)
 #   [--cache-dir DIR]  reuse results of identical prepared regions and budgets
+#   [--strict-nan]     compare NaNs bit for bit (default: same-format NaNs are equal)
+#   [--poison-filter shift,fptoint,ctz,nsw,nuw,disjoint,exact,nnan,ninf|all]
 #   after a local mismatch, precomputed larger regions (common context) are tried
 #   automatically
 
@@ -407,8 +412,20 @@ run.
   - `--return-vgprs` is the return type's size in dwords (`void` 0, `<3 x half>` 2,
     `iN`/`bN` ceil(N/32), structs and arrays summed). An unknown type gives the
     conservative 32, with a note.
+  - `--return-masks` covers narrow return types without `zeroext`/`signext`: `half`,
+    `bfloat` and `i16` give `0xffff`, `i1` gives `0x1`, `<3 x half>` gives
+    `[0xffffffff, 0xffff]`.
+  - `--entry-vgprs` is the dwords of the non-`inreg` arguments (3 for kernels). Other
+    VGPRs are undefined at the entry.
   - `--function-mode` comes from the denormal attributes (`denormal_fpenv(...)`,
     `"denormal-fp-math"`, `"denormal-fp-math-f32"`) and `"amdgpu-ieee"`.
+- **Poison triage.** A function that mismatches is re-tested with the poison filters its
+  IR calls for (`shl` → `shift`, `add nsw` → `nsw`, `fptosi` → `fptoint`, fast-math
+  flags → `nnan`/`ninf`, ...).
+  - If the mismatch disappears, the verdict is `poison-only`: the difference needs inputs
+    that are poison in the IR. The report gives the number of inputs excluded.
+  - Otherwise it stays `mismatch`, noted as "persists outside poison inputs".
+  - `--no-poison-triage` turns this off.
 - **Output.** `report.md` (a verdict table, then details of every function that did not
   pass) and `summary.json`. Each function's directory under `functions/` holds its
   listings, case, results and logs.
@@ -418,8 +435,74 @@ run.
   |---|---|
   | 0 | every compared function passed and nothing changed was skipped |
   | 1 | a local mismatch |
-  | 2 | inconclusive, unsupported or skipped functions |
+  | 2 | inconclusive, unsupported, poison-only or skipped functions |
   | 3 | harness error |
+
+## NaNs, undefined values and poison
+
+LLVM's semantics leave some results open. A bit-exact comparison flags those as
+differences, so equivalent compiles look like false mismatches. Each case below has a
+switch for the stricter reading.
+
+- **NaN results** (`test --strict-nan` turns this off).
+  - **Rule.** LLVM leaves the payload, sign and quietness of a NaN produced by a
+    floating-point operation unspecified, and commutative operations may swap operands.
+    `v_add_f32 v0, v0, v1` and `v_add_f32 v0, v1, v0` return different NaNs when both
+    inputs are NaN.
+  - **Tags.** The runner tags every value with its floating-point provenance (`FpTag`):
+    which f16/bf16 halves, f32, or f64 pair a floating-point instruction produced.
+    - Moves, `v_cndmask_b32` and `v_pk_mov_b32` carry the tags.
+    - Stores turn them into floating-point units in memory.
+    - Inline-asm uses record them.
+    - Integer, bitwise and lane-shuffling instructions clear them.
+  - **Comparison.** Two values that both sides tag as results of the same format, and
+    that are both NaN, compare equal. Everything else stays bit-exact.
+    - fneg/fabs/copysign done as bit operations must keep a NaN's bits. They produce no
+      tag, so a rewrite into a multiplication by -1 (which quiets a signalling NaN) is
+      still a mismatch.
+  - **Sweep.** The mandatory sweep adds pairs of different NaNs (quiet/signalling,
+    signs, payloads, mixed f16/bf16 halves) so this is exercised every run.
+- **Undefined values** (LLVM undef; `analyze --entry-vgprs N`).
+  - **Defined at entry:** the argument VGPRs `v0..v{N-1}`. A callable function also has
+    v31 (workitem IDs) and the callee-saved VGPRs defined. Kernels default to v0-v2;
+    callable functions default to 32; raw words treat everything as defined.
+  - **Analysis.** A forward may-written analysis finds the VGPRs a region reads that no
+    path from the entry has written. Contract fields: `vgpr_undef_old`,
+    `vgpr_undef_new`.
+  - **Test.** In each case, old re-runs with its undefined registers refilled three
+    times: all zeros, all ones, random.
+    - Output bits that change are don't care for that case.
+    - New re-runs with its own undefined registers refilled, and must still match old
+      under that mask. Otherwise it is a mismatch: "new reads an undefined value".
+  - **Effect.** A rewrite that materialises an undefined element as 0, or allocates an
+    `IMPLICIT_DEF` to another register, passes. Storing garbage where old stored an
+    argument does not.
+- **Narrow return values** (`analyze --return-masks M0,M1,...`). A VGPR that is observable
+  only through a return value narrower than the register compares only the returned
+  bits (`vgpr_exit_masks`). For example, `0x0000ffff` for a `half` in v0.
+- **Poison** (`test --poison-filter KINDS`). The tool runs no IR, so it cannot know when
+  an input is poison in the IR. The filter excludes cases in which a region instruction
+  meets the machine analogue of an IR poison condition, on either side; such inputs may
+  legally produce anything.
+
+  | kind | IR construct | machine condition |
+  |---|---|---|
+  | `shift` | `shl`, `lshr`, `ashr` | shift amount >= bit width |
+  | `exact` | `lshr`/`ashr exact` | non-zero bits shifted out |
+  | `fptoint` | `fptosi`, `fptoui` | NaN, infinity, or out of the integer range |
+  | `ctz` | `ctlz`/`cttz` with `i1 true` | zero input |
+  | `nsw`, `nuw` | `add`/`sub`/`mul nsw`/`nuw` | signed/unsigned 32-bit overflow of an add, sub or mul (not carry chains, not `clamp`) |
+  | `disjoint` | `or disjoint` | operands share bits |
+  | `nnan`, `ninf` | fast-math flags, `nofpclass`, `no-*-fp-math` | a NaN/infinite input or floating-point result |
+
+  Excluded cases are counted as rejections (`poison input (excluded): KIND`). The filter
+  is a triage tool: the machine condition approximates the IR one. `rj_isa_diff_pr` uses
+  it on mismatches.
+- **Reporting.** Results record `comparison.nan` (`llvm` or `strict`) and
+  `comparison.poison_filter`. `counts.nan_tolerated` and `counts.undef_masked` count the
+  valid pairs that compare equal only through these rules. Bundles carry `nan_policy`
+  and `poison_filter`, so replay applies the same comparison; it recomputes the undef
+  mask from the recorded seed and case.
 
 ## Manual regions and register maps
 
@@ -706,7 +789,13 @@ case parity. Learned policies are future work, and may only propose inputs.
   per-kernel metadata, inline-asm marking, and a callable function with inline asm end to
   end.
 - `validate_outputs.py` also drives a callable function with inline asm through the LLVM
-  plugin (`fn`, `fn_wrong`), so the new fields are validated on real output.
+  plugin (`fn`, `fn_wrong`), commuted NaN results (`nan`, `nan_strict` with replay), an
+  undefined value (`undef`), and the poison filter (`poison`, `poison_filtered`), so the
+  new fields are validated on real output.
+- `isa_diff_llvm.pr_driver` (`llvm/test_rj_isa_diff_pr.py`) runs `rj_isa_diff_pr` on a
+  synthetic two-commit llvm-project history and checks every verdict: NaN equivalence, an
+  undefined element, a `half` return, poison triage (`poison-only`), and a real
+  difference.
 - `isa_diff.schema_and_cli` runs `validate_outputs.py` against the CLI and the committed
   samples. It is skipped when python3-jsonschema is missing.
 - `docs/samples/regen.sh` regenerates the samples (`codeobject`, `synthetic`,

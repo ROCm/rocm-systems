@@ -247,6 +247,30 @@ FUNCTIONS = {
 }
 
 
+# Void functions storing v0 through the inreg pointer s[0:1] after BODY (one op per line).
+STORE_LISTING = """\t.text
+\t.globl\tf
+\t.p2align\t8
+\t.type\tf,@function
+f:
+BODY
+\tv_mov_b32_e32 v4, 0
+\tglobal_store_dword v4, v0, s[0:1]
+\ts_waitcnt vmcnt(0)
+\ts_setpc_b64 s[30:31]
+.Lfunc_end0:
+\t.size\tf, .Lfunc_end0-f
+"""
+STORE_FUNCTIONS = {
+    "nan_ab": "\tv_add_f32_e32 v0, v0, v1",
+    "nan_ba": "\tv_add_f32_e32 v0, v1, v0",  # commuted: NaN payloads may differ
+    "undef_old": "\tv_mov_b32_e32 v0, v5",  # v5, v7: never written, not arguments
+    "undef_new": "\tv_mov_b32_e32 v0, v7",
+    "nsw_wrap": "\tv_add_u32_e32 v0, v0, v1",
+    "nsw_sat": "\tv_add_i32 v0, v0, v1 clamp",  # differs only where add nsw overflows
+}
+
+
 def run(tool, args, expect, failures):
     proc = subprocess.run([tool] + args, capture_output=True, text=True)
     if proc.returncode not in expect:
@@ -433,6 +457,56 @@ def drive_cli(tool, work, v):
             f,
         )
         test(case, {code})
+    # NaN policy, undefined values, poison filter (callable functions, LLVM plugin).
+    for name, body in STORE_FUNCTIONS.items():
+        with open(path(name + ".s"), "w") as out:
+            out.write(STORE_LISTING.replace("BODY", body))
+
+    def analyze_fn(case, old, new, *extra):
+        run(
+            tool,
+            [
+                "analyze",
+                "--old",
+                path(old + ".s"),
+                "--new",
+                path(new + ".s"),
+                "--kernel",
+                "f",
+                "--return-vgprs",
+                "0",
+                "--out",
+                path(case),
+            ]
+            + list(extra),
+            {0},
+            f,
+        )
+
+    analyze_fn("nan", "nan_ab", "nan_ba", "--entry-vgprs", "2")
+    test("nan", {0})
+    analyze_fn("nan_strict", "nan_ab", "nan_ba", "--entry-vgprs", "2")
+    test("nan_strict", {1}, "--strict-nan")
+    nb = sorted(os.listdir(path("nan_strict", "counterexamples")))
+    if nb:
+        run(
+            tool,
+            [
+                "replay",
+                "--counterexample",
+                path("nan_strict", "counterexamples", nb[0]),
+            ],
+            {0},
+            f,
+        )
+    else:
+        f.append("strict-NaN case produced no counterexample bundle")
+    analyze_fn("undef", "undef_old", "undef_new", "--entry-vgprs", "0")
+    test("undef", {0})
+    analyze_fn("poison", "nsw_wrap", "nsw_sat", "--entry-vgprs", "2")
+    test("poison", {1})
+    analyze_fn("poison_filtered", "nsw_wrap", "nsw_sat", "--entry-vgprs", "2")
+    test("poison_filtered", {0}, "--poison-filter", "nsw")
     # Synthetic error injection, its counterexamples, and replay of one bundle.
     run(
         tool,
@@ -503,6 +577,11 @@ def drive_cli(tool, work, v):
         "memst_off",
         "fn",
         "fn_wrong",
+        "nan",
+        "nan_strict",
+        "undef",
+        "poison",
+        "poison_filtered",
         "shift_injected",
     ]:
         v.check_tree(path(case))

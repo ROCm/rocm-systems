@@ -10,7 +10,7 @@ f58b06dce1f9`). Every number here comes from that build and toolchain.
 | label | what |
 |---|---|
 | **implemented** | See the next section for the full list. |
-| **tested** | 75 isa_diff tests pass in Release. They are 64 validator cases (`rj_isa_diff_tests`) covering every row of handoff section 13, every feature below, VALU support, memory, callable functions and inline asm; 10 LLVM plugin cases (`rj_isa_diff_llvm_tests`) on real ROCm-LLVM output; and the schema/CLI test. All pass under ASan+UBSan+LSan with zero reports. Three real LLVM old/new pairs were run end to end, and the 55 functions of LLVM PR 242731's changed tests were run with before/after `llc` (see "VALU support and LLVM PR 242731" and "Memory in regions: PR 242731 re-evaluated"). The full tree was built and its full ctest run. |
+| **tested** | 83 isa_diff tests pass in Release. They are 67 validator cases (`rj_isa_diff_tests`) covering every row of handoff section 13, every feature below, VALU support, memory, callable functions, inline asm, NaN equivalence and poison kinds; 14 LLVM plugin cases (`rj_isa_diff_llvm_tests`) on real ROCm-LLVM output; the schema/CLI test; and the `rj_isa_diff_pr` end-to-end test. All pass under ASan+UBSan+LSan with zero reports. Three real LLVM old/new pairs were run end to end, and the 55 functions of LLVM PR 242731's changed tests were run with before/after `llc` (see "VALU support and LLVM PR 242731" and "Memory in regions: PR 242731 re-evaluated"). The full tree was built and its full ctest run. |
 | **not run** | SMT/SemaAST proofs (`proof_status` is always `NOT_RUN`). Reachability witnesses: the entry-prefix diagnostic path runs a prefix with arbitrary entry values, but no dispatch-ABI model exists. Learned input policies. Program (instruction) reduction of counterexamples. Multi-block, branching and loop regions (P1, designed in `p1_p2_design.md`). |
 | **unsupported** | Regions containing memory other than `global_load_*`/`global_store_*`/`s_load_dword*` (LDS, flat, buffer, scratch, atomics), MFMA, interpolation, indirect VGPR access, barriers, branches, hwreg access, indirect SGPR access, TTMP/FLAT_SCRATCH/XNACK operands, PC-derived inputs, or relocated bytes. Multi-block regions. Code objects with several `.text` sections or zero-size kernel symbols. |
 | **inconclusive** | Regions whose continuations read different locations (`INCONCLUSIVE_MAPPING`). Local mismatches that changed code downstream may compensate (`compensable_downstream`). Mismatches under an `UNRESOLVED` contract. Relocation-only differences. Zero-valid-case runs. No real pair or PR 242731 kernel is inconclusive any more. |
@@ -477,10 +477,66 @@ ceil(N/32) VGPRs.
   semantics.
 - gfx900-gfx90c listings are proxies (cache-policy names translated). A gfx900 listing
   that gfx950 cannot assemble (an odd-aligned VGPR pair, `v_mad_mix`) is UNSUPPORTED.
-- 16-bit return values compare whole VGPRs, including the undefined high half.
+- 16-bit return values: fixed in the next phase (`--return-masks`).
 - Inline-asm pairing assumes both compiles emit the blocks in the same order.
 - Per-lane VGPR addresses are unconstrained. Wrapping lanes are faults, so cases that
   contain one are rejected; `sitofp_i48_to_half` keeps 3,336 of about 7,700.
+
+## NaNs, undefined values and poison
+
+Before this phase, a NaN result, an undefined value or a poison input made equivalent
+compiles look different. Each fix was checked on a probe pair: a correct rewrite that must
+pass, and a wrong one that must not (README "NaNs, undefined values and poison").
+
+| probe (void function storing v0, unless noted) | before | now |
+|---|---|---|
+| `v_add_f32 v0, v0, v1` vs `v_add_f32 v0, v1, v0` | LOCAL_MISMATCH (NaN payload) | NO_MISMATCH_FOUND; 1,132 pairs equal only through NaN equivalence. `--strict-nan`: LOCAL_MISMATCH |
+| the same for `v_max_f32` | LOCAL_MISMATCH | NO_MISMATCH_FOUND (896 tolerated); strict: LOCAL_MISMATCH |
+| `v_xor_b32` sign flip vs `v_mul_f32 -1.0` (fneg must keep NaN bits) | LOCAL_MISMATCH | LOCAL_MISMATCH: only one side is a floating-point result |
+| undefined third element stored as-is vs set to 0 (`--entry-vgprs 2`) | LOCAL_MISMATCH | NO_MISMATCH_FOUND (2,090 masked); without the argument count, still LOCAL_MISMATCH |
+| an undefined value moved from v5 vs v7 (an `IMPLICIT_DEF` reallocated) | LOCAL_MISMATCH | NO_MISMATCH_FOUND |
+| new stores garbage where old stores an argument | LOCAL_MISMATCH | LOCAL_MISMATCH (a real bug) |
+| `half` return; new sets the high half (`--return-masks 0xffff`) | LOCAL_MISMATCH | NO_MISMATCH_FOUND; a wrong low half stays LOCAL_MISMATCH |
+| `add nsw`: wrapping vs saturating add | LOCAL_MISMATCH | LOCAL_MISMATCH; `--poison-filter nsw`: NO_MISMATCH_FOUND, 2,031 overflowing inputs excluded |
+| `shl` by a register: 32-bit vs 64-bit shift | LOCAL_MISMATCH | LOCAL_MISMATCH; `--poison-filter shift`: NO_MISMATCH_FOUND |
+
+**The first undef mask was too small.** It was built from two random refills, and a bit
+of an undefined value is only masked if the refills happen to differ in it. Run against
+the probes, about a quarter of an undefined value's bits stayed "defined", so the probes
+still mismatched. The refills are now all zeros, all ones, then random: every bit of a
+copied undefined value differs between the first two.
+
+**The driver.** `rj_isa_diff_pr` derives the ABI and the triage from the IR:
+- `--entry-vgprs` and `--return-masks` come from the signature;
+- the poison filters come from the IR constructs, and are tried on a mismatch.
+
+`isa_diff_llvm.pr_driver` checks every verdict on a synthetic history:
+- commuted `fadd`: pass, and mismatch with `--strict-nan`;
+- an undefined shuffle element: pass;
+- a `half` return: pass;
+- `add nsw` that became a saturating add: `poison-only`;
+- `add` that became `sub`: mismatch.
+
+**Real changes.** The rules never make a comparison stricter, so earlier passes stay
+passes:
+- PR 237629: 84 of 84 pass;
+- PR 242731: 6 of 6 pass;
+- the last 120 AMDGPU commits: 132 pass, 30 inconclusive, as before. In 27 valid pairs
+  the undef mask was what made them equal.
+
+Those changes do not reorder floating-point operands or rely on poison inputs, so NaN
+equivalence and poison triage did not trigger there.
+
+**Limits.**
+- NaN equivalence applies where both sides' values come straight from floating-point
+  instructions, through moves and stores. A NaN payload difference that flows through
+  integer operations before being observed is a mismatch: conservative.
+- Undefined values are VGPRs only (SGPR `IMPLICIT_DEF`s stay defined), and the mask is
+  sampled: three refills per case.
+- The poison filter matches machine conditions, not IR values. An `nsw` filter excludes
+  every overflowing 32-bit add in the region, which can remove far more inputs than the
+  IR's poison does (2,031 of 2,224 in the probe). The driver therefore reports
+  `poison-only` as its own verdict, never as a pass.
 
 ## Cost
 

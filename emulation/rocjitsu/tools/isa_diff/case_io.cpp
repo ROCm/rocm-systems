@@ -43,8 +43,15 @@ Json artifact_json(const Artifact &a, size_t num_insts) {
     f.set("return", "s_setpc_b64 s[30:31]");
     f.set("return_vgprs", static_cast<uint64_t>(a.return_vgprs));
     f.set("entry_mode", hex32(a.function_mode));
+    if (!a.return_masks.empty()) {
+      Json masks = Json::array();
+      for (uint32_t m : a.return_masks)
+        masks.push(hex32(m));
+      f.set("return_masks", std::move(masks));
+    }
     j.set("callable_function", std::move(f));
   }
+  j.set("entry_vgprs", static_cast<int64_t>(a.entry_vgprs));
   if (!a.inline_asm.empty()) {
     Json blocks = Json::array();
     for (const InlineAsmBlock &b : a.inline_asm) {

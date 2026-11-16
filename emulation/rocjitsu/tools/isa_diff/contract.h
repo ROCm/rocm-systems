@@ -65,8 +65,15 @@ struct RegionContract {
   /// The tracked range is v0..v{vgpr_count-1}; it is exactly the wave's allocation in the
   /// runner, so any access beyond it is an invalid register access, never silent.
   unsigned vgpr_count = 0;
-  VSet ventry_equal;             ///< Live-in VGPRs (either side): equal on every lane.
-  VSet vobservable;              ///< Live-out VGPRs (either side): compared on every lane.
+  VSet ventry_equal; ///< Live-in VGPRs (either side): equal on every lane.
+  VSet vobservable;  ///< Live-out VGPRs (either side): compared on every lane.
+  /// Live-in VGPRs that hold no defined value on that side (never written since the function
+  /// entry, not ABI-defined): LLVM undef. Old's outputs that depend on them are don't care,
+  /// and new may not depend on its own beyond that (README "Undefined values").
+  VSet vundef_old, vundef_new;
+  /// VGPRs observable only through a return value narrower than the register: just these
+  /// bits are compared (e.g. 0x0000ffff for a half returned in v0).
+  std::vector<std::pair<unsigned, uint32_t>> vexit_masks;
   VSet vwrites_old, vwrites_new; ///< Effect model for VGPRs.
   VSet vwide_reads;              ///< First register of 64-bit VGPR sources.
   /// MODE at the region entry on each side (FP rounding/denormals, DX10_CLAMP, IEEE),

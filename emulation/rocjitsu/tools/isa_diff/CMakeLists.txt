@@ -117,5 +117,19 @@ if(BUILD_TESTING)
             isa_diff.schema_and_cli
             PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300
         )
+        # rj_isa_diff_pr on a synthetic two-commit llvm-project history: NaN equivalence,
+        # undefined values, a narrow return, poison triage and a real difference.
+        if(RJ_ISA_DIFF_LLC)
+            add_test(
+                NAME isa_diff_llvm.pr_driver
+                COMMAND
+                    ${Python3_EXECUTABLE}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/llvm/test_rj_isa_diff_pr.py
+                    --tool $<TARGET_FILE:rj_isa_diff> --driver
+                    ${CMAKE_CURRENT_BINARY_DIR}/rj_isa_diff_pr --llvm-bin
+                    ${_rj_isa_diff_llvm_bin}
+            )
+            set_tests_properties(isa_diff_llvm.pr_driver PROPERTIES TIMEOUT 600)
+        endif()
     endif()
 endif()

@@ -20,6 +20,7 @@
 #include "machine_state.h"
 #include "region.h"
 
+#include <array>
 #include <memory>
 #include <optional>
 #include <string>
@@ -118,6 +119,12 @@ public:
   /// Test seam: drop an instruction's execution callback (simulates a model-only provider).
   void simulate_model_only_for_test(size_t index);
 
+  /// Poison filter (PoisonKind mask): instructions are checked for the machine analogues of
+  /// IR poison conditions before (inputs) and after (floating-point results) they execute.
+  void set_poison_filter(uint32_t kinds) { poison_filter_ = kinds; }
+  /// The first poison condition the last run met, or empty.
+  [[nodiscard]] const std::string &poison_hit() const { return poison_hit_; }
+
 private:
   RegionRunner();
 
@@ -156,6 +163,46 @@ private:
   std::vector<uint32_t> asm_block_;
   uint64_t asm_seed_ = 0;
   std::vector<AsmUse> asm_uses_;
+  /// A source operand: VGPR/SGPR registers (first register and count) or a constant.
+  struct OperandRef {
+    enum Kind : uint8_t { Constant, Vgpr, Scalar, Other } kind = Other;
+    unsigned reg = 0;   ///< First VGPR, or lowest Loc for scalars.
+    unsigned count = 0; ///< Registers (2 for a 64-bit operand).
+    uint32_t value = 0; ///< Constants.
+  };
+  /// Floating-point provenance plan of one instruction (see FpResult).
+  struct FpPlan {
+    FpResult kind = FpResult::None;
+    std::vector<unsigned> dsts;            ///< Destination VGPRs, ascending.
+    int mask_loc = -1;                     ///< v_cndmask: lowest Loc of the lane-select mask.
+    unsigned op_sel_lo = 0, op_sel_hi = 0; ///< v_pk_mov_b32 source dword selection.
+    bool store = false;                    ///< A vector store: data tags go to the memory model.
+    bool store_hi16 = false;               ///< `_d16_hi` store: the high half is stored.
+  };
+  std::vector<std::vector<OperandRef>> srcs_; ///< Non-fieldless sources per instruction.
+  std::vector<FpPlan> fp_plan_;
+  std::vector<uint32_t> poison_kind_;
+  std::vector<std::string> mnemonics_;
+  std::vector<uint8_t> vfp_; ///< FpTag per VGPR lane during a run.
+  uint32_t poison_filter_ = 0;
+  std::string poison_hit_;
+  [[nodiscard]] uint32_t read_loc(unsigned l) const;
+  [[nodiscard]] uint32_t read_vgpr(unsigned r, unsigned lane) const;
+  /// Value of a source operand in @p lane (64-bit when @p wide and the operand has two
+  /// registers); nullopt when it cannot be read (64-bit constants, other state).
+  [[nodiscard]] std::optional<uint64_t> operand_value(const OperandRef &op, unsigned lane,
+                                                      bool wide) const;
+  uint8_t &tag(unsigned r, unsigned lane) { return vfp_[size_t{r} * kWaveLanes + lane]; }
+  /// The tags instruction @p i will give its destinations (moves read their sources, so
+  /// this runs before execution), applied to the lanes in @p exec after it.
+  void plan_tags(size_t i, std::vector<std::array<uint8_t, kWaveLanes>> &out) const;
+  void apply_tags(size_t i, uint64_t exec,
+                  const std::vector<std::array<uint8_t, kWaveLanes>> &tags);
+  std::vector<std::array<uint8_t, kWaveLanes>> scratch_tags_;
+  /// First poison condition instruction @p i meets on its inputs (before) or its
+  /// floating-point results (after), or empty.
+  [[nodiscard]] std::string poison_before(size_t i) const;
+  [[nodiscard]] std::string poison_after(size_t i, uint64_t exec) const;
   /// Run inline-asm block @p i: record its uses, then write its defs.
   RunOutcome run_inline_asm(size_t i);
 };

@@ -46,7 +46,18 @@ struct Frame {
 struct AsmUse {
   uint32_t block = 0; ///< Inline-asm block index (pairs the old and new block).
   std::vector<uint32_t> values;
+  std::vector<uint8_t> fp; ///< FpTag of each value (floating-point provenance).
   bool operator==(const AsmUse &) const = default;
+};
+
+/// Bytes a store wrote from a floating-point result: [addr, addr + size) hold one value
+/// of the given format (FpTag kFpF16Lo, kFpBF16Lo, kFpF32 or kFpF64Lo).
+struct FpUnit {
+  uint64_t addr = 0;
+  uint8_t size = 0;
+  uint8_t format = 0;
+  bool operator==(const FpUnit &) const = default;
+  auto operator<=>(const FpUnit &) const = default;
 };
 
 struct MachineState {
@@ -67,6 +78,10 @@ struct MachineState {
   /// blocks observed during the run, in execution order.
   uint64_t asm_seed = 0;
   std::vector<AsmUse> asm_uses;
+  /// Floating-point provenance after a run: an FpTag per VGPR lane (empty when none is
+  /// tagged), and the stored byte ranges holding floating-point results (sorted).
+  std::vector<uint8_t> vfp;
+  std::vector<FpUnit> mem_fp;
 
   [[nodiscard]] uint32_t get(unsigned l) const { return loc[l]; }
   void set(unsigned l, uint32_t v) { loc[l] = v & loc_value_mask(l); }
@@ -74,6 +89,10 @@ struct MachineState {
     return vgpr[size_t{r} * kWaveLanes + lane];
   }
   void vset(unsigned r, unsigned lane, uint32_t v) { vgpr[size_t{r} * kWaveLanes + lane] = v; }
+  [[nodiscard]] uint8_t fp_tag(unsigned r, unsigned lane) const {
+    const size_t i = size_t{r} * kWaveLanes + lane;
+    return i < vfp.size() ? vfp[i] : 0;
+  }
   void resize_vgprs(unsigned n) {
     vgpr_count = n;
     vgpr.assign(size_t{n} * kWaveLanes, 0);

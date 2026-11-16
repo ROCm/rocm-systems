@@ -4,7 +4,7 @@
     "tool": "rj_isa_diff",
     "tool_version": "0.1.0-p0",
     "schema_version": "rj_isa_diff.v1",
-    "rocjitsu_revision": "0e0e4a72d7df1455a0a3dd9edc6f44a749467b6f",
+    "rocjitsu_revision": "9eebb9d6297c8bf63bd403be5caeb00b7a477cbc",
     "rocjitsu_version": "0.3.0",
     "semantics": "RocJITsu ComputeUnitCore::execute_instruction, gfx950 (CDNA4) wave64, default arithmetic semantics",
     "compiler": "13.4.0"
@@ -27,7 +27,8 @@
       "reachable_insts": 8,
       "metadata_sha256": "5df6e0e2761359d30a8275058e299fcc0381534545f55cf43e41983f5d4c9456",
       "text_relocations": 0,
-      "metadata_parsed": false
+      "metadata_parsed": false,
+      "entry_vgprs": 3
     },
     "new": {
       "label": "co/artifacts/new.hsaco",
@@ -42,7 +43,8 @@
       "reachable_insts": 9,
       "metadata_sha256": "5df6e0e2761359d30a8275058e299fcc0381534545f55cf43e41983f5d4c9456",
       "text_relocations": 0,
-      "metadata_parsed": false
+      "metadata_parsed": false,
+      "entry_vgprs": 3
     }
   },
   "provenance": {
@@ -58,15 +60,15 @@
         {
           "argv": ["/opt/rocm/llvm/bin/llvm-mc", "-triple=amdgcn-amd-amdhsa", "-mcpu=gfx950", "-filetype=obj", "-o", "co/artifacts/old.o", "co_old.s"],
           "exit_code": 0,
-          "elapsed_ns": 2603346
+          "elapsed_ns": 2974077
         },
         {
           "argv": ["/opt/rocm/llvm/bin/ld.lld", "-shared", "--emit-relocs", "-o", "co/artifacts/old.hsaco", "co/artifacts/old.o"],
           "exit_code": 0,
-          "elapsed_ns": 7086784
+          "elapsed_ns": 7147872
         }
       ],
-      "compile_ns": 9690130,
+      "compile_ns": 10121949,
       "executed_object": "linked_code_object",
       "note": "executed bytes are the code object linked from the re-assembled source, decoded by RocJITsu; they are not necessarily an original binary emission",
       "toolchain": {
@@ -87,15 +89,15 @@
         {
           "argv": ["/opt/rocm/llvm/bin/llvm-mc", "-triple=amdgcn-amd-amdhsa", "-mcpu=gfx950", "-filetype=obj", "-o", "co/artifacts/new.o", "co_new.s"],
           "exit_code": 0,
-          "elapsed_ns": 2198148
+          "elapsed_ns": 2256133
         },
         {
           "argv": ["/opt/rocm/llvm/bin/ld.lld", "-shared", "--emit-relocs", "-o", "co/artifacts/new.hsaco", "co/artifacts/new.o"],
           "exit_code": 0,
-          "elapsed_ns": 7648967
+          "elapsed_ns": 6052490
         }
       ],
-      "compile_ns": 9847115,
+      "compile_ns": 8308623,
       "executed_object": "linked_code_object",
       "note": "executed bytes are the code object linked from the re-assembled source, decoded by RocJITsu; they are not necessarily an original binary emission",
       "toolchain": {
@@ -235,13 +237,13 @@
     "alignment_complete": true,
     "layout_shift": true,
     "timing": {
-      "parse_ns": 87361,
-      "decode_cfg_ns": 142503,
-      "dataflow_ns": 6059,
-      "model_total_ns": 149204,
-      "align_classify_ns": 13090,
-      "plan_ns": 386560,
-      "compile_ns": 19537245
+      "parse_ns": 75204,
+      "decode_cfg_ns": 131800,
+      "dataflow_ns": 11536,
+      "model_total_ns": 148384,
+      "align_classify_ns": 10906,
+      "plan_ns": 362517,
+      "compile_ns": 18430572
     }
   }
 }

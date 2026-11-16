@@ -355,6 +355,99 @@ def signature(define):
     return cc, rest
 
 
+def split_top(text):
+    """Split on commas outside (), <>, [] and {}."""
+    parts, depth, cur = [], 0, ""
+    for ch in text:
+        if ch in "(<[{":
+            depth += 1
+        elif ch in ")>]}":
+            depth -= 1
+        if ch == "," and depth == 0:
+            parts.append(cur.strip())
+            cur = ""
+        else:
+            cur += ch
+    if cur.strip():
+        parts.append(cur.strip())
+    return parts
+
+
+ARG_ATTR = re.compile(
+    r"\b(noundef|signext|zeroext|nonnull|noalias|nocapture|readonly|readnone|writeonly|"
+    r"returned|immarg|captures\([^)]*\)|nofpclass\([^)]*\)|range\([^)]*\)|align \d+|"
+    r"dereferenceable(_or_null)?\(\d+\)|noundef)\s*"
+)
+
+
+def argument_vgprs(define):
+    """VGPRs the non-inreg arguments occupy (v0..), or None if a type is not sized."""
+    m = re.search(r"@[^(]+\((.*)\)[^)]*$", define)
+    if not m:
+        return None
+    total = 0
+    for arg in split_top(m.group(1)):
+        if not arg or arg == "...":
+            continue
+        if re.search(r"\binreg\b", arg):
+            continue  # SGPR argument
+        if re.search(r"\b(byval|byref|sret|preallocated)\b", arg):
+            return None
+        t = ARG_ATTR.sub("", arg)
+        t = re.sub(r"\s+%[\w.$-]+$", "", t).strip()
+        n = type_dwords(t)
+        if n is None:
+            return None
+        total += n
+    return min(total, 32)
+
+
+def return_masks(define, ret):
+    """Observed bits of each return VGPR when the return type is narrower than its
+    registers (no zeroext/signext): [] when every bit is defined."""
+    m = re.match(r"define\s+(.*?)@", define)
+    if m and re.search(r"\b(zeroext|signext)\b", m.group(1)):
+        return []
+    t = ret.strip()
+    n = re.fullmatch(r"[ib](\d+)", t)
+    if n and int(n.group(1)) % 32:
+        bits = int(n.group(1))
+        return [0xFFFFFFFF] * (bits // 32) + [(1 << (bits % 32)) - 1]
+    if t in ("half", "bfloat"):
+        return [0xFFFF]
+    v = re.fullmatch(r"<(\d+) x (i16|half|bfloat)>", t)
+    if v and int(v.group(1)) % 2:
+        return [0xFFFFFFFF] * (int(v.group(1)) // 2) + [0xFFFF]
+    return []
+
+
+# IR constructs whose poison/UB conditions --poison-filter can witness at machine level.
+POISON_PATTERNS = [
+    ("shift", r"=\s*(shl|lshr|ashr)\b"),
+    ("exact", r"\b(lshr|ashr)\s+exact\b"),
+    ("nsw", r"\bnsw\b"),
+    ("nuw", r"\bnuw\b"),
+    ("fptoint", r"=\s*fpto[su]i\b"),
+    ("ctz", r"@llvm\.(ctlz|cttz)\.[\w.]+\([^)]*,\s*i1\s+true\s*\)"),
+    ("disjoint", r"\bor\s+disjoint\b"),
+    ("nnan", r"\b(nnan|fast)\b|nofpclass\([^)]*nan|\"no-nans-fp-math\"=\"true\""),
+    ("ninf", r"\b(ninf|fast)\b|nofpclass\([^)]*inf|\"no-infs-fp-math\"=\"true\""),
+]
+
+
+def poison_kinds(text, name):
+    """Poison-filter kinds the function's IR calls for (its body, signature and attribute
+    groups)."""
+    fns = functions_ir(text)
+    if name not in fns:
+        return []
+    define, body = fns[name]
+    groups = attribute_groups(text)
+    attrs = " ".join(groups.get(g, "") for g in re.findall(r"#(\d+)", define))
+    blob = define + "\n" + body + "\n" + attrs
+    return [k for k, rx in POISON_PATTERNS if re.search(rx, blob)]
+
+
 def denorm_bits(mode):
     """MODE denormal field (bit0 inputs kept, bit1 outputs kept) for an LLVM mode string."""
     flush = ("preservesign", "preserve-sign", "positivezero", "positive-zero")
@@ -563,23 +656,29 @@ def collect(repo, base, head, tests_glob, targets):
                         {**entry, "reason": f"calling convention {cc} not modelled"}
                     )
                     continue
-                rv = 0 if cc == "amdgpu_kernel" else type_dwords(ret)
+                kernel = cc == "amdgpu_kernel"
+                rv = 0 if kernel else type_dwords(ret)
                 notes = []
                 if rv is None:
                     rv = 32
                     notes.append(
                         f"return type '{ret}' not sized: all 32 return VGPRs observed"
                     )
-                elif ret in SUBDWORD or re.search(r"x (i16|half|bfloat)>$", ret):
-                    notes.append(
-                        "16-bit return: the high halves of return VGPRs are compared"
-                    )
+                masks = [] if kernel else return_masks(define, ret)
+                # Defined VGPRs at the entry: kernels v0-v2 (workitem IDs), functions
+                # their VGPR arguments; the rest is undefined until written.
+                ev = 3 if kernel else argument_vgprs(define)
+                if ev is None:
+                    notes.append("argument types not sized: v0-v31 treated as defined")
                 jobs.append(
                     {
                         **entry,
                         "kind": "kernel" if cc == "amdgpu_kernel" else "function",
                         "return_type": ret,
                         "return_vgprs": rv,
+                        "return_masks": masks,
+                        "entry_vgprs": ev,
+                        "poison_kinds": poison_kinds(new, fn),
                         "mode": function_mode(define, attribute_groups(new)),
                         "notes": notes,
                         "old_body": ou,
@@ -600,7 +699,7 @@ def slug(s):
     )
 
 
-def run_one(job, out, tool, llvm_bin, cases, seed):
+def run_one(job, out, tool, llvm_bin, cases, seed, strict_nan=False, triage=True):
     d = (
         out
         / "functions"
@@ -634,6 +733,10 @@ def run_one(job, out, tool, llvm_bin, cases, seed):
         "--function-mode",
         hex(job["mode"]),
     ]
+    if job.get("entry_vgprs") is not None:
+        argv += ["--entry-vgprs", str(job["entry_vgprs"])]
+    if job.get("return_masks"):
+        argv += ["--return-masks", ",".join(hex(m) for m in job["return_masks"])]
     if llvm_bin:
         argv += ["--llvm-bin", str(llvm_bin)]
     an = subprocess.run(argv, capture_output=True, text=True)
@@ -660,7 +763,8 @@ def run_one(job, out, tool, llvm_bin, cases, seed):
             "--seed",
             str(seed),
             "--no-case-log",
-        ],
+        ]
+        + (["--strict-nan"] if strict_nan else []),
         capture_output=True,
         text=True,
     )
@@ -695,14 +799,79 @@ def run_one(job, out, tool, llvm_bin, cases, seed):
                 r["resolved_by"] = g["expansion"]["resolved_by"]
         if g.get("reason"):
             r["reason"] = g["reason"][:300]
+        counts = g.get("counts", {})
+        for key in ("nan_tolerated", "undef_masked"):
+            if counts.get(key):
+                r[key] = counts[key]
         row["regions"].append(r)
+    if triage and row["status"] == "LOCAL_MISMATCH" and job.get("poison_kinds"):
+        row["poison_triage"] = poison_triage(job, d, tool, cases, seed, strict_nan)
     return row
+
+
+def poison_triage(job, d, tool, cases, seed, strict_nan):
+    """Re-test a mismatching function with the poison filters its IR calls for: inputs that
+    are poison in the IR may legally produce anything. The result says whether the
+    mismatch persists on the remaining inputs."""
+    kinds = ",".join(job["poison_kinds"])
+    tri = d / "case_poison"
+    if tri.exists():
+        shutil.rmtree(tri)
+    shutil.copytree(
+        d / "case", tri, ignore=shutil.ignore_patterns("counterexamples", "logs")
+    )
+    for f in ("results.json",):
+        (tri / f).unlink(missing_ok=True)
+    te = subprocess.run(
+        [
+            str(tool),
+            "test",
+            "--case",
+            str(tri),
+            "--cases",
+            str(cases),
+            "--seed",
+            str(seed),
+            "--no-case-log",
+            "--poison-filter",
+            kinds,
+        ]
+        + (["--strict-nan"] if strict_nan else []),
+        capture_output=True,
+        text=True,
+    )
+    (d / "test_poison.log").write_text(te.stdout + te.stderr)
+    out = {"kinds": kinds}
+    try:
+        res = json.loads((tri / "results.json").read_text())
+    except (OSError, ValueError) as e:
+        out["status"] = "ERROR"
+        out["detail"] = str(e)
+        return out
+    o = res["overall"]
+    out["status"] = o["test_status"]
+    out["coverage"] = o["coverage_scope"]
+    excluded = 0
+    valid = 0
+    for g in res.get("regions", []):
+        valid += g.get("counts", {}).get("valid_pairs", 0)
+        for k, v in g.get("counts", {}).get("rejections", {}).items():
+            if k.startswith("poison input"):
+                excluded += v
+    out["excluded"] = excluded
+    out["valid"] = valid
+    return out
 
 
 def verdict(row):
     if row.get("status") == "ERROR":
         return "error"
     if row.get("status") == "LOCAL_MISMATCH":
+        t = row.get("poison_triage", {})
+        if t.get("status") in ("NO_MISMATCH_FOUND", "NO_SEMANTIC_DIFF") and t.get(
+            "valid"
+        ):
+            return "poison-only"  # the mismatch needs inputs that are poison in the IR
         return "mismatch"
     if (
         row.get("status") in ("NO_MISMATCH_FOUND", "NO_SEMANTIC_DIFF")
@@ -773,6 +942,18 @@ def report(out, meta, rows, skipped, stats):
                 lines.append(f"  - unresolved: {u[:240]}")
             if r.get("detail"):
                 lines.append(f"  - {r['detail'][:300]}")
+            t = r.get("poison_triage")
+            if t:
+                lines.append(
+                    f"  - poison triage ({t['kinds']}): {t.get('status')} with "
+                    f"{t.get('excluded', 0)} poison inputs excluded, {t.get('valid', 0)} "
+                    "valid cases left"
+                    + (
+                        " - the mismatch needs inputs that are poison in the IR"
+                        if verdict(r) == "poison-only"
+                        else " - the mismatch persists outside poison inputs"
+                    )
+                )
             for n in r.get("notes", []):
                 lines.append(f"  - note: {n}")
     if skipped:
@@ -824,6 +1005,17 @@ def main(argv=None):
         default=DEFAULT_PROXY_TARGETS,
         help="comma-separated llc targets whose listings are assembled and run as "
         "gfx950 (default %(default)s; empty: gfx950 only)",
+    )
+    ap.add_argument(
+        "--strict-nan",
+        action="store_true",
+        help="compare NaNs bit for bit (default: any NaN equals any NaN of the same "
+        "format, as LLVM allows)",
+    )
+    ap.add_argument(
+        "--no-poison-triage",
+        action="store_true",
+        help="do not re-test mismatches with the poison filters their IR calls for",
     )
     ap.add_argument(
         "--list", action="store_true", help="only list what would be compared"
@@ -884,7 +1076,17 @@ def main(argv=None):
     rows = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, a.jobs)) as pool:
         futs = {
-            pool.submit(run_one, j, out, a.tool, a.llvm_bin, a.cases, a.seed): j
+            pool.submit(
+                run_one,
+                j,
+                out,
+                a.tool,
+                a.llvm_bin,
+                a.cases,
+                a.seed,
+                a.strict_nan,
+                not a.no_poison_triage,
+            ): j
             for j in jobs
         }
         for f in concurrent.futures.as_completed(futs):
@@ -908,7 +1110,11 @@ def main(argv=None):
         return 3
     if counts.get("mismatch"):
         return 1
-    if counts.get("inconclusive") or any("function" in s for s in skipped):
+    if (
+        counts.get("inconclusive")
+        or counts.get("poison-only")
+        or any("function" in s for s in skipped)
+    ):
         return 2
     return 0
 

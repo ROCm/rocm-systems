@@ -4,7 +4,7 @@
     "tool": "rj_isa_diff",
     "tool_version": "0.1.0-p0",
     "schema_version": "rj_isa_diff.v1",
-    "rocjitsu_revision": "0e0e4a72d7df1455a0a3dd9edc6f44a749467b6f",
+    "rocjitsu_revision": "9eebb9d6297c8bf63bd403be5caeb00b7a477cbc",
     "rocjitsu_version": "0.3.0",
     "semantics": "RocJITsu ComputeUnitCore::execute_instruction, gfx950 (CDNA4) wave64, default arithmetic semantics",
     "compiler": "13.4.0"
@@ -23,7 +23,8 @@
       "reachable_insts": 8,
       "metadata_sha256": "5df6e0e2761359d30a8275058e299fcc0381534545f55cf43e41983f5d4c9456",
       "text_relocations": 0,
-      "metadata_parsed": false
+      "metadata_parsed": false,
+      "entry_vgprs": 3
     },
     "new": {
       "label": "co/artifacts/new.hsaco",
@@ -38,7 +39,8 @@
       "reachable_insts": 9,
       "metadata_sha256": "5df6e0e2761359d30a8275058e299fcc0381534545f55cf43e41983f5d4c9456",
       "text_relocations": 0,
-      "metadata_parsed": false
+      "metadata_parsed": false,
+      "entry_vgprs": 3
     }
   },
   "provenance": {
@@ -54,15 +56,15 @@
         {
           "argv": ["/opt/rocm/llvm/bin/llvm-mc", "-triple=amdgcn-amd-amdhsa", "-mcpu=gfx950", "-filetype=obj", "-o", "co/artifacts/old.o", "co_old.s"],
           "exit_code": 0,
-          "elapsed_ns": 2603346
+          "elapsed_ns": 2974077
         },
         {
           "argv": ["/opt/rocm/llvm/bin/ld.lld", "-shared", "--emit-relocs", "-o", "co/artifacts/old.hsaco", "co/artifacts/old.o"],
           "exit_code": 0,
-          "elapsed_ns": 7086784
+          "elapsed_ns": 7147872
         }
       ],
-      "compile_ns": 9690130,
+      "compile_ns": 10121949,
       "executed_object": "linked_code_object",
       "note": "executed bytes are the code object linked from the re-assembled source, decoded by RocJITsu; they are not necessarily an original binary emission",
       "toolchain": {
@@ -83,15 +85,15 @@
         {
           "argv": ["/opt/rocm/llvm/bin/llvm-mc", "-triple=amdgcn-amd-amdhsa", "-mcpu=gfx950", "-filetype=obj", "-o", "co/artifacts/new.o", "co_new.s"],
           "exit_code": 0,
-          "elapsed_ns": 2198148
+          "elapsed_ns": 2256133
         },
         {
           "argv": ["/opt/rocm/llvm/bin/ld.lld", "-shared", "--emit-relocs", "-o", "co/artifacts/new.hsaco", "co/artifacts/new.o"],
           "exit_code": 0,
-          "elapsed_ns": 7648967
+          "elapsed_ns": 6052490
         }
       ],
-      "compile_ns": 9847115,
+      "compile_ns": 8308623,
       "executed_object": "linked_code_object",
       "note": "executed bytes are the code object linked from the re-assembled source, decoded by RocJITsu; they are not necessarily an original binary emission",
       "toolchain": {
@@ -137,48 +139,54 @@
       },
       "policy": "baseline-v1",
       "seed": 1,
+      "comparison": {
+        "nan": "llvm",
+        "poison_filter": ""
+      },
       "counts": {
-        "attempted": 1559,
-        "accepted": 1559,
-        "executed_pairs": 1559,
-        "valid_pairs": 1559,
-        "mismatches": 1535,
+        "attempted": 1631,
+        "accepted": 1631,
+        "executed_pairs": 1631,
+        "valid_pairs": 1631,
+        "mismatches": 1599,
         "harness_errors": 0,
+        "nan_tolerated": 0,
+        "undef_masked": 0,
         "rejections": {},
         "mismatch_kinds": {
-          "observable": 1535
+          "observable": 1599
         }
       },
       "boundary_sweep": {
-        "cases": 559,
-        "accepted": 559,
-        "valid": 559,
-        "mismatches": 557,
+        "cases": 631,
+        "accepted": 631,
+        "valid": 631,
+        "mismatches": 629,
         "mandatory": true,
-        "generated": 637,
-        "duplicates_dropped": 78,
+        "generated": 713,
+        "duplicates_dropped": 82,
         "truncated": false,
         "valid_by_family": {
-          "bf16": 18,
-          "bf16x2": 12,
+          "bf16": 30,
+          "bf16x2": 18,
           "bit": 66,
           "bits": 48,
           "edge": 78,
-          "f16": 48,
-          "f16x2": 30,
-          "f32": 84,
-          "f64": 11,
+          "f16": 60,
+          "f16x2": 42,
+          "f32": 102,
+          "f64": 13,
           "int": 54,
           "int64": 1,
           "small": 30,
-          "uniform": 79
+          "uniform": 89
         }
       },
       "random_phase": {
         "cases": 1000,
         "accepted": 1000,
         "valid": 1000,
-        "mismatches": 978
+        "mismatches": 970
       },
       "novelty": {
         "distinct_buckets": 20,
@@ -189,17 +197,17 @@
       "execution": {
         "old_region_insts": 1,
         "new_region_insts": 2,
-        "old_insts_executed": 1559,
-        "new_insts_executed": 3118
+        "old_insts_executed": 1631,
+        "new_insts_executed": 3262
       },
       "timing": {
-        "setup_ns": 620030,
-        "propose_ns": 543335,
-        "state_load_ns": 1372889,
-        "old_execute_ns": 212137,
-        "new_execute_ns": 204717,
-        "compare_ns": 1111658,
-        "triage_ns": 1056256
+        "setup_ns": 569870,
+        "propose_ns": 612892,
+        "state_load_ns": 1515146,
+        "old_execute_ns": 259004,
+        "new_execute_ns": 238516,
+        "compare_ns": 1749863,
+        "triage_ns": 1025458
       },
       "mismatch_locations": "s8,s9",
       "vgpr_mismatch_locations": "",

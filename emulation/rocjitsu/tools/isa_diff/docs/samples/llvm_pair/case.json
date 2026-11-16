@@ -4,7 +4,7 @@
     "tool": "rj_isa_diff",
     "tool_version": "0.1.0-p0",
     "schema_version": "rj_isa_diff.v1",
-    "rocjitsu_revision": "0e0e4a72d7df1455a0a3dd9edc6f44a749467b6f",
+    "rocjitsu_revision": "9eebb9d6297c8bf63bd403be5caeb00b7a477cbc",
     "rocjitsu_version": "0.3.0",
     "semantics": "RocJITsu ComputeUnitCore::execute_instruction, gfx950 (CDNA4) wave64, default arithmetic semantics",
     "compiler": "13.4.0"
@@ -26,7 +26,8 @@
       "reachable_insts": 21,
       "metadata_sha256": "37da1ec4a2b4278a98b7a56d882ae3cedbb349d40ec396de852d7d138ff08817",
       "text_relocations": 0,
-      "metadata_parsed": true
+      "metadata_parsed": true,
+      "entry_vgprs": 3
     },
     "new": {
       "label": "llvm/artifacts/new.hsaco",
@@ -41,7 +42,8 @@
       "reachable_insts": 22,
       "metadata_sha256": "37da1ec4a2b4278a98b7a56d882ae3cedbb349d40ec396de852d7d138ff08817",
       "text_relocations": 0,
-      "metadata_parsed": true
+      "metadata_parsed": true,
+      "entry_vgprs": 3
     }
   },
   "provenance": {
@@ -57,20 +59,20 @@
         {
           "argv": ["/opt/rocm/llvm/bin/llc", "-mtriple=amdgcn-amd-amdhsa", "-mcpu=gfx950", "-O3", "-filetype=asm", "-o", "llvm/artifacts/old.s", "k3.ll"],
           "exit_code": 0,
-          "elapsed_ns": 14314208
+          "elapsed_ns": 17532787
         },
         {
           "argv": ["/opt/rocm/llvm/bin/llvm-mc", "-triple=amdgcn-amd-amdhsa", "-mcpu=gfx950", "-filetype=obj", "-o", "llvm/artifacts/old.o", "llvm/artifacts/old.s"],
           "exit_code": 0,
-          "elapsed_ns": 2945701
+          "elapsed_ns": 3226166
         },
         {
           "argv": ["/opt/rocm/llvm/bin/ld.lld", "-shared", "--emit-relocs", "-o", "llvm/artifacts/old.hsaco", "llvm/artifacts/old.o"],
           "exit_code": 0,
-          "elapsed_ns": 7157799
+          "elapsed_ns": 7067281
         }
       ],
-      "compile_ns": 24417708,
+      "compile_ns": 27826234,
       "executed_object": "linked_code_object",
       "note": "executed bytes are the code object linked from the re-assembled source, decoded by RocJITsu; they are not necessarily an original binary emission",
       "toolchain": {
@@ -91,20 +93,20 @@
         {
           "argv": ["/opt/rocm/llvm/bin/llc", "-mtriple=amdgcn-amd-amdhsa", "-mcpu=gfx950", "-O3", "-combiner-disabled", "-filetype=asm", "-o", "llvm/artifacts/new.s", "k3.ll"],
           "exit_code": 0,
-          "elapsed_ns": 12923511
+          "elapsed_ns": 15836169
         },
         {
           "argv": ["/opt/rocm/llvm/bin/llvm-mc", "-triple=amdgcn-amd-amdhsa", "-mcpu=gfx950", "-filetype=obj", "-o", "llvm/artifacts/new.o", "llvm/artifacts/new.s"],
           "exit_code": 0,
-          "elapsed_ns": 3290938
+          "elapsed_ns": 3059535
         },
         {
           "argv": ["/opt/rocm/llvm/bin/ld.lld", "-shared", "--emit-relocs", "-o", "llvm/artifacts/new.hsaco", "llvm/artifacts/new.o"],
           "exit_code": 0,
-          "elapsed_ns": 7573654
+          "elapsed_ns": 7658102
         }
       ],
-      "compile_ns": 23788103,
+      "compile_ns": 26553806,
       "executed_object": "linked_code_object",
       "note": "executed bytes are the code object linked from the re-assembled source, decoded by RocJITsu; they are not necessarily an original binary emission",
       "toolchain": {
@@ -1345,6 +1347,8 @@
         "vgpr_writes_old": "v2",
         "vgpr_writes_new": "v2",
         "vgpr_wide_reads": "",
+        "vgpr_undef_old": "v3",
+        "vgpr_undef_new": "v3",
         "mode_old": "0x000003f0",
         "mode_new": "0x000003f0",
         "constraints": [],
@@ -1358,6 +1362,10 @@
           {
             "what": "VGPRs v0..v7 are tracked on all 64 lanes; vgpr_entry_equal/vgpr_observable come from VGPR liveness, in which a write never kills (lanes outside EXEC keep their value)",
             "source": "KernelModel backward VSet liveness"
+          },
+          {
+            "what": "undefined inputs (old v3; new v3): never written since the entry and not defined there; old's outputs that depend on them are don't care",
+            "source": "KernelModel forward may-written VSet analysis"
           },
           {
             "what": "mode_old/mode_new = MODE at dispatch from each kernel descriptor's compute_pgm_rsrc1 (assembler defaults without a descriptor)",
@@ -1397,7 +1405,7 @@
           }
         ]
       },
-      "prepared_key": "611becc89a95ecc8c5f9dfbc1b1496691d9dbc0423b76587c408d64dcff02fc9"
+      "prepared_key": "18903497165bb29a385a01977302649065cacfa90f8fe937e6eaec82b5153dbf"
     },
     {
       "id": "r0.ctx-b2f2",
@@ -1970,6 +1978,8 @@
         "vgpr_writes_old": "v2,v3",
         "vgpr_writes_new": "v2,v3",
         "vgpr_wide_reads": "v2",
+        "vgpr_undef_old": "v3",
+        "vgpr_undef_new": "v3",
         "memory_writes": true,
         "mode_old": "0x000003f0",
         "mode_new": "0x000003f0",
@@ -1996,6 +2006,10 @@
           {
             "what": "VGPRs v0..v7 are tracked on all 64 lanes; vgpr_entry_equal/vgpr_observable come from VGPR liveness, in which a write never kills (lanes outside EXEC keep their value)",
             "source": "KernelModel backward VSet liveness"
+          },
+          {
+            "what": "undefined inputs (old v3; new v3): never written since the entry and not defined there; old's outputs that depend on them are don't care",
+            "source": "KernelModel forward may-written VSet analysis"
           },
           {
             "what": "memory: loads read one initial memory image shared by both sides (an input); the bytes either side stores are compared at the exit",
@@ -2039,7 +2053,7 @@
           }
         ]
       },
-      "prepared_key": "6907405f050cb60f5ac2067b0ce8ca796df8b5e037179c714b72e2ff746ebb65"
+      "prepared_key": "d8b943fc0aa730c966e3c16e1f7d965ba02f4c946a74515dbd455707941d926c"
     },
     {
       "id": "r0.ctx-b7f0",
@@ -2224,6 +2238,8 @@
         "vgpr_writes_old": "v0",
         "vgpr_writes_new": "v0",
         "vgpr_wide_reads": "",
+        "vgpr_undef_old": "v3",
+        "vgpr_undef_new": "v3",
         "memory_reads": true,
         "mode_old": "0x000003f0",
         "mode_new": "0x000003f0",
@@ -2250,6 +2266,10 @@
           {
             "what": "VGPRs v0..v7 are tracked on all 64 lanes; vgpr_entry_equal/vgpr_observable come from VGPR liveness, in which a write never kills (lanes outside EXEC keep their value)",
             "source": "KernelModel backward VSet liveness"
+          },
+          {
+            "what": "undefined inputs (old v3; new v3): never written since the entry and not defined there; old's outputs that depend on them are don't care",
+            "source": "KernelModel forward may-written VSet analysis"
           },
           {
             "what": "memory: loads read one initial memory image shared by both sides (an input); the bytes either side stores are compared at the exit",
@@ -2293,7 +2313,7 @@
           }
         ]
       },
-      "prepared_key": "9d70be170cb3098421a050557aa0a6c10cfe41729fc08a18859cb6c0ea5d9964"
+      "prepared_key": "10a518242650f9d13bab86428198e8a5f9d35c9d4be6b29ae60d1f339cc3159d"
     },
     {
       "id": "r0.ctx-b4f4",
@@ -2488,6 +2508,8 @@
         "vgpr_writes_old": "v2",
         "vgpr_writes_new": "v2",
         "vgpr_wide_reads": "",
+        "vgpr_undef_old": "v3",
+        "vgpr_undef_new": "v3",
         "mode_old": "0x000003f0",
         "mode_new": "0x000003f0",
         "constraints": [],
@@ -2501,6 +2523,10 @@
           {
             "what": "VGPRs v0..v7 are tracked on all 64 lanes; vgpr_entry_equal/vgpr_observable come from VGPR liveness, in which a write never kills (lanes outside EXEC keep their value)",
             "source": "KernelModel backward VSet liveness"
+          },
+          {
+            "what": "undefined inputs (old v3; new v3): never written since the entry and not defined there; old's outputs that depend on them are don't care",
+            "source": "KernelModel forward may-written VSet analysis"
           },
           {
             "what": "mode_old/mode_new = MODE at dispatch from each kernel descriptor's compute_pgm_rsrc1 (assembler defaults without a descriptor)",
@@ -2544,7 +2570,7 @@
           }
         ]
       },
-      "prepared_key": "47316618d9bb0fb00c0cec1b1ec43358765762ce9a88b8769eddb9eea7d4e00e"
+      "prepared_key": "702095c8feb96dbda19ea8da62fe7f92b7412635224daef372e897e5984a445b"
     },
     {
       "id": "r0.ctx-b7f6",
@@ -2789,6 +2815,8 @@
         "vgpr_writes_old": "v0,v2,v3",
         "vgpr_writes_new": "v0,v2,v3",
         "vgpr_wide_reads": "v2",
+        "vgpr_undef_old": "v3",
+        "vgpr_undef_new": "v3",
         "memory_reads": true,
         "memory_writes": true,
         "mode_old": "0x000003f0",
@@ -2816,6 +2844,10 @@
           {
             "what": "VGPRs v0..v7 are tracked on all 64 lanes; vgpr_entry_equal/vgpr_observable come from VGPR liveness, in which a write never kills (lanes outside EXEC keep their value)",
             "source": "KernelModel backward VSet liveness"
+          },
+          {
+            "what": "undefined inputs (old v3; new v3): never written since the entry and not defined there; old's outputs that depend on them are don't care",
+            "source": "KernelModel forward may-written VSet analysis"
           },
           {
             "what": "memory: loads read one initial memory image shared by both sides (an input); the bytes either side stores are compared at the exit",
@@ -2863,7 +2895,7 @@
           }
         ]
       },
-      "prepared_key": "d36c5a1a303e6f52cdbfa62725fdf7bbaccc0d430a67099d73967b231fe46b6f"
+      "prepared_key": "75e0f9ba770a71ad3821da4eb5824dc889295e69c44b34ca29755b338e5cf870"
     }
   ],
   "analysis": {
@@ -2879,13 +2911,13 @@
     "alignment_complete": true,
     "layout_shift": true,
     "timing": {
-      "parse_ns": 234572,
-      "decode_cfg_ns": 187281,
-      "dataflow_ns": 7982,
-      "model_total_ns": 199589,
-      "align_classify_ns": 42483,
-      "plan_ns": 740050,
-      "compile_ns": 48205811
+      "parse_ns": 200053,
+      "decode_cfg_ns": 191640,
+      "dataflow_ns": 13830,
+      "model_total_ns": 211109,
+      "align_classify_ns": 41372,
+      "plan_ns": 741800,
+      "compile_ns": 54380040
     }
   }
 }

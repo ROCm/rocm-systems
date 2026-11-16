@@ -412,6 +412,7 @@ bool artifact_from_code_object(std::span<const uint8_t> image, const std::string
   }
   out.kernel_name = name;
   out.callable = chosen == nullptr;
+  out.entry_vgprs = out.callable ? 32 : 3; // argument VGPRs v0-v31 / workitem IDs v0-v2
   if (chosen) {
     out.descriptor.resize(sizeof(chosen->descriptor));
     std::memcpy(out.descriptor.data(), &chosen->descriptor, sizeof(chosen->descriptor));

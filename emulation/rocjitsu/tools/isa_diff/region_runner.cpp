@@ -17,6 +17,9 @@
 #include "input_policy.h"
 
 #include <algorithm>
+#include <array>
+#include <bit>
+#include <cmath>
 #include <exception>
 #include <set>
 #include <unordered_set>
@@ -25,6 +28,30 @@ namespace rocjitsu::isa_diff {
 namespace {
 
 constexpr uint32_t kSgprsPerWave = 104;
+
+bool f32_nan(uint32_t v) { return (v & 0x7f800000u) == 0x7f800000u && (v & 0x7fffffu); }
+bool f32_inf(uint32_t v) { return (v & 0x7fffffffu) == 0x7f800000u; }
+bool f16_nan(uint32_t h) { return (h & 0x7c00u) == 0x7c00u && (h & 0x3ffu); }
+bool f16_inf(uint32_t h) { return (h & 0x7fffu) == 0x7c00u; }
+bool bf16_nan(uint32_t h) { return (h & 0x7f80u) == 0x7f80u && (h & 0x7fu); }
+bool bf16_inf(uint32_t h) { return (h & 0x7fffu) == 0x7f80u; }
+bool f64_nan(uint64_t v) {
+  return (v & 0x7ff0000000000000ull) == 0x7ff0000000000000ull && (v & 0xfffffffffffffull);
+}
+bool f64_inf(uint64_t v) { return (v & 0x7fffffffffffffffull) == 0x7ff0000000000000ull; }
+
+double f16_value(uint32_t h) {
+  const int e = static_cast<int>((h >> 10) & 0x1f);
+  const double m = static_cast<double>(h & 0x3ff);
+  const double mag = e == 0 ? std::ldexp(m, -24) : std::ldexp(1024.0 + m, e - 25);
+  return (h & 0x8000u) ? -mag : mag;
+}
+
+std::string hex_value(uint64_t v) {
+  char buf[24];
+  std::snprintf(buf, sizeof(buf), "0x%llx", static_cast<unsigned long long>(v));
+  return buf;
+}
 constexpr uint32_t kVgprFile = 256;   ///< Per-wave VGPR file the CU is configured with.
 constexpr uint32_t kMinVgprAlloc = 8; ///< Allocation for a region with no VGPR operand.
 constexpr uint32_t kWaveSize = 64;
@@ -153,6 +180,7 @@ public:
       } else {
         for (uint64_t b = base; b < base + bytes; ++b)
           stored_.insert(b);
+        record_fp_units(lane, base, bytes);
       }
     }
   }
@@ -167,6 +195,8 @@ public:
       mem_->write_block(b, std::span<const uint8_t>(kZero, 1));
     seeded_.clear();
     stored_.clear();
+    fp_units_.clear();
+    store_fp_ = false;
     seed_ = seed;
     unsupported_ = false;
     wraps_ = false;
@@ -174,6 +204,20 @@ public:
   [[nodiscard]] uint64_t seed() const { return seed_; }
   [[nodiscard]] bool unsupported() const { return unsupported_; }
   [[nodiscard]] bool wraps() const { return wraps_; }
+  /// Floating-point provenance of the next store's data: per lane, the FpTag of each data
+  /// dword; @p hi16 for a `_d16_hi` store. Off for every other access.
+  void set_store_fp(bool on, bool hi16,
+                    const std::array<std::array<uint8_t, 4>, kWaveLanes> &tags) {
+    store_fp_ = on;
+    store_hi16_ = hi16;
+    if (on)
+      store_tags_ = tags;
+  }
+  [[nodiscard]] std::vector<FpUnit> fp_units() const {
+    std::vector<FpUnit> out = fp_units_;
+    std::sort(out.begin(), out.end());
+    return out;
+  }
   [[nodiscard]] std::vector<std::pair<uint64_t, uint8_t>> written() const {
     std::vector<std::pair<uint64_t, uint8_t>> out;
     for (uint64_t b : std::set<uint64_t>(stored_.begin(), stored_.end())) {
@@ -191,6 +235,40 @@ public:
   }
 
 private:
+  /// A store replaces the floating-point units it overlaps, and adds those its data
+  /// carries: f32 dwords, f64 dword pairs, and f16/bf16 halves.
+  void record_fp_units(size_t lane, uint64_t base, uint64_t bytes) {
+    std::erase_if(fp_units_,
+                  [&](const FpUnit &u) { return u.addr < base + bytes && base < u.addr + u.size; });
+    if (!store_fp_ || lane >= kWaveLanes)
+      return;
+    const auto &t = store_tags_[lane];
+    auto half = [&](uint64_t addr, uint8_t tag, bool hi) {
+      const uint8_t f16 = hi ? kFpF16Hi : kFpF16Lo, bf16 = hi ? kFpBF16Hi : kFpBF16Lo;
+      if (tag & f16)
+        fp_units_.push_back({addr, 2, kFpF16Lo});
+      else if (tag & bf16)
+        fp_units_.push_back({addr, 2, kFpBF16Lo});
+    };
+    if (bytes == 2) {
+      half(base, t[0], store_hi16_);
+      return;
+    }
+    const uint64_t dwords = std::min<uint64_t>(bytes / 4, 4);
+    for (uint64_t k = 0; k < dwords; ++k) {
+      const uint64_t addr = base + 4 * k;
+      if (t[k] & kFpF32) {
+        fp_units_.push_back({addr, 4, kFpF32});
+      } else if ((t[k] & kFpF64Lo) && k + 1 < dwords && (t[k + 1] & kFpF64Hi)) {
+        fp_units_.push_back({addr, 8, kFpF64Lo});
+        ++k;
+      } else {
+        half(addr, t[k], false);
+        half(addr + 2, t[k], true);
+      }
+    }
+  }
+
   void seed_word(uint64_t w, int pointer_half) {
     if (!seeded_.insert(w).second)
       return;
@@ -213,6 +291,9 @@ private:
   bool wraps_ = false;
   std::unordered_set<uint64_t> seeded_; ///< 4-byte words seeded this run.
   std::unordered_set<uint64_t> stored_; ///< Bytes stored this run.
+  std::vector<FpUnit> fp_units_;        ///< Stored floating-point values this run.
+  bool store_fp_ = false, store_hi16_ = false;
+  std::array<std::array<uint8_t, 4>, kWaveLanes> store_tags_{};
 };
 
 const char *run_status_name(RunStatus s) {
@@ -360,6 +441,78 @@ std::unique_ptr<RegionRunner> RegionRunner::create(const std::vector<RegionInst>
     r->insts_.push_back(std::move(decoded).value());
     r->model_only_.push_back(false);
   }
+  // Per-instruction plans: source operands, floating-point provenance, poison checks.
+  r->srcs_.assign(insts.size(), {});
+  r->fp_plan_.assign(insts.size(), {});
+  r->poison_kind_.assign(insts.size(), 0);
+  r->mnemonics_.assign(insts.size(), {});
+  for (size_t i = 0; i < r->insts_.size(); ++i) {
+    const Instruction *inst = r->insts_[i].get();
+    if (!inst)
+      continue;
+    const std::string mn(inst->mnemonic());
+    r->mnemonics_[i] = mn;
+    const Effects fx = classify(*inst);
+    const std::vector<SourceOperand> so = source_operands(*inst);
+    for (const SourceOperand &o : so) {
+      if (o.fieldless)
+        continue;
+      OperandRef ref;
+      if (o.constant) {
+        ref.kind = OperandRef::Constant;
+        ref.value = *o.constant;
+      } else if (o.vlocs.any()) {
+        ref.kind = OperandRef::Vgpr;
+        ref.count = static_cast<unsigned>(o.vlocs.count());
+        for (unsigned v = 0; v < kNumVgprs; ++v)
+          if (o.vlocs.test(v)) {
+            ref.reg = v;
+            break;
+          }
+      } else if (o.locs.any()) {
+        ref.kind = OperandRef::Scalar;
+        ref.count = static_cast<unsigned>(o.locs.count());
+        for (unsigned l = 0; l < kNumLocs; ++l)
+          if (o.locs.test(l)) {
+            ref.reg = l;
+            break;
+          }
+      }
+      r->srcs_[i].push_back(ref);
+    }
+    FpPlan &plan = r->fp_plan_[i];
+    plan.kind = fp_result_kind(mn, insts[i].text);
+    for (unsigned v = 0; v < kNumVgprs; ++v)
+      if (fx.vwrites.test(v))
+        plan.dsts.push_back(v);
+    if (plan.kind == FpResult::CndMask) {
+      // The lane-select mask: VCC (fieldless, VOP2) or the last SGPR-pair source (VOP3).
+      for (const SourceOperand &o : so)
+        if (o.locs.count() == 2 && o.vlocs.none() && !o.constant)
+          for (unsigned l = 0; l < kNumLocs; ++l)
+            if (o.locs.test(l)) {
+              plan.mask_loc = static_cast<int>(l);
+              break;
+            }
+      if (plan.mask_loc < 0)
+        plan.kind = FpResult::None;
+    }
+    if (plan.kind == FpResult::PkMov) {
+      const std::string &t = insts[i].text;
+      const size_t at = t.find("op_sel:[");
+      if (at != std::string::npos && at + 11 <= t.size()) {
+        plan.op_sel_lo = t[at + 8] == '1';
+        plan.op_sel_hi = t[at + 10] == '1';
+      }
+    }
+    plan.store = r->is_mem_[i] && fx.mem_write;
+    plan.store_hi16 = mn.find("_d16_hi") != std::string::npos;
+    uint32_t pk = poison_check_kind(mn);
+    if (insts[i].text.find("clamp") != std::string::npos)
+      pk &= ~(kPoisonNsw | kPoisonNuw); // saturating: no overflow
+    r->poison_kind_[i] = pk;
+  }
+
   // Pointer dataflow (memory model): a scalar load whose destination later serves as a
   // memory base (directly or through SALU moves/adds) gets pointer-shaped content there.
   r->pointer_lo_.assign(insts.size(), 0);
@@ -481,6 +634,8 @@ void RegionRunner::load(const MachineState &s) {
   wf.pc = pcs_.empty() ? 0 : pcs_.front();
   asm_seed_ = s.asm_seed;
   asm_uses_.clear();
+  vfp_.assign(size_t{vgpr_count_} * kWaveLanes, 0); // inputs carry no provenance
+  poison_hit_.clear();
 }
 
 MachineState RegionRunner::capture() const {
@@ -522,7 +677,329 @@ MachineState RegionRunner::capture() const {
   }
   s.asm_seed = asm_seed_;
   s.asm_uses = asm_uses_;
+  if (std::ranges::any_of(vfp_, [](uint8_t t) { return t != 0; }))
+    s.vfp = vfp_;
+  if (mem_)
+    s.mem_fp = mem_->fp_units();
   return s;
+}
+
+uint32_t RegionRunner::read_loc(unsigned l) const {
+  const amdgpu::Wavefront &wf = *wave_;
+  if (l < kNumSgprs)
+    return cu_->read_sgpr_storage(wf.sgpr_alloc().base + l);
+  switch (l) {
+  case kLocVccLo:
+    return static_cast<uint32_t>(wf.vcc());
+  case kLocVccHi:
+    return static_cast<uint32_t>(wf.vcc() >> 32);
+  case kLocExecLo:
+    return static_cast<uint32_t>(wf.exec_raw());
+  case kLocExecHi:
+    return static_cast<uint32_t>(wf.exec_raw() >> 32);
+  case kLocM0:
+    return wf.m0();
+  default:
+    return wf.read_scc() ? 1u : 0u;
+  }
+}
+
+uint32_t RegionRunner::read_vgpr(unsigned r, unsigned lane) const {
+  return cu_->read_vgpr_storage(wave_->vgpr_alloc().base + r, lane);
+}
+
+std::optional<uint64_t> RegionRunner::operand_value(const OperandRef &op, unsigned lane,
+                                                    bool wide) const {
+  switch (op.kind) {
+  case OperandRef::Constant:
+    return wide ? std::nullopt : std::optional<uint64_t>(op.value);
+  case OperandRef::Vgpr:
+    if (op.reg + std::max(op.count, 1u) > vgpr_count_)
+      return std::nullopt;
+    if (!wide)
+      return read_vgpr(op.reg, lane);
+    if (op.count < 2)
+      return std::nullopt;
+    return uint64_t{read_vgpr(op.reg, lane)} | (uint64_t{read_vgpr(op.reg + 1, lane)} << 32);
+  case OperandRef::Scalar:
+    if (!wide)
+      return read_loc(op.reg);
+    if (op.count < 2)
+      return std::nullopt;
+    return uint64_t{read_loc(op.reg)} | (uint64_t{read_loc(op.reg + 1)} << 32);
+  default:
+    return std::nullopt;
+  }
+}
+
+void RegionRunner::plan_tags(size_t i, std::vector<std::array<uint8_t, kWaveLanes>> &out) const {
+  const FpPlan &p = fp_plan_[i];
+  out.resize(p.dsts.size());
+  const auto &src = srcs_[i];
+  auto src_tag = [&](size_t s, unsigned k, unsigned lane) -> uint8_t {
+    if (s >= src.size() || src[s].kind != OperandRef::Vgpr || src[s].reg + k >= vgpr_count_)
+      return 0;
+    return vfp_[size_t{src[s].reg + k} * kWaveLanes + lane];
+  };
+  uint64_t mask = 0;
+  if (p.kind == FpResult::CndMask)
+    mask = uint64_t{read_loc(static_cast<unsigned>(p.mask_loc))} |
+           (uint64_t{read_loc(static_cast<unsigned>(p.mask_loc) + 1)} << 32);
+  for (size_t k = 0; k < p.dsts.size(); ++k) {
+    const unsigned d = p.dsts[k];
+    for (unsigned lane = 0; lane < kWaveLanes; ++lane) {
+      const uint8_t cur = d < vgpr_count_ ? vfp_[size_t{d} * kWaveLanes + lane] : 0;
+      uint8_t t = 0;
+      switch (p.kind) {
+      case FpResult::None:
+        break;
+      case FpResult::F32:
+        t = kFpF32;
+        break;
+      case FpResult::F64:
+        t = k % 2 == 0 ? kFpF64Lo : kFpF64Hi;
+        break;
+      case FpResult::F16Lo:
+        t = (cur & (kFpF16Hi | kFpBF16Hi)) | kFpF16Lo;
+        break;
+      case FpResult::F16Hi:
+        t = (cur & (kFpF16Lo | kFpBF16Lo)) | kFpF16Hi;
+        break;
+      case FpResult::BF16Lo:
+        t = (cur & (kFpF16Hi | kFpBF16Hi)) | kFpBF16Lo;
+        break;
+      case FpResult::BF16Hi:
+        t = (cur & (kFpF16Lo | kFpBF16Lo)) | kFpBF16Hi;
+        break;
+      case FpResult::F16x2:
+        t = kFpF16Lo | kFpF16Hi;
+        break;
+      case FpResult::BF16x2:
+        t = kFpBF16Lo | kFpBF16Hi;
+        break;
+      case FpResult::Move:
+        t = src_tag(0, static_cast<unsigned>(k), lane);
+        break;
+      case FpResult::CndMask:
+        t = src_tag((mask >> lane) & 1u ? 1 : 0, 0, lane);
+        break;
+      case FpResult::PkMov:
+        t = k == 0 ? src_tag(0, p.op_sel_lo, lane) : src_tag(1, p.op_sel_hi, lane);
+        break;
+      }
+      out[k][lane] = t;
+    }
+  }
+}
+
+void RegionRunner::apply_tags(size_t i, uint64_t exec,
+                              const std::vector<std::array<uint8_t, kWaveLanes>> &tags) {
+  const FpPlan &p = fp_plan_[i];
+  for (size_t k = 0; k < p.dsts.size() && k < tags.size(); ++k) {
+    if (p.dsts[k] >= vgpr_count_)
+      continue;
+    for (unsigned lane = 0; lane < kWaveLanes; ++lane)
+      if ((exec >> lane) & 1u)
+        vfp_[size_t{p.dsts[k]} * kWaveLanes + lane] = tags[k][lane];
+  }
+}
+
+std::string RegionRunner::poison_before(size_t i) const {
+  const uint32_t kinds = poison_kind_[i] & poison_filter_;
+  if (!kinds)
+    return {};
+  const std::string &mn = mnemonics_[i];
+  std::string_view b = mn;
+  for (std::string_view suffix : {"_e32", "_e64"})
+    if (b.size() > suffix.size() && b.substr(b.size() - suffix.size()) == suffix)
+      b = b.substr(0, b.size() - suffix.size());
+  const auto &src = srcs_[i];
+  const bool scalar = b.substr(0, 2) == "s_";
+  const uint64_t exec = scalar ? 1u : wave_->exec_raw();
+  const bool b64 = b.find("b64") != b.npos || b.find("i64") != b.npos || b.find("_f64") != b.npos;
+  const unsigned width = b64 ? 64 : (b.find("b16") != b.npos || b.find("i16") != b.npos) ? 16 : 32;
+  auto hit = [&](const char *kind, const std::string &what, unsigned lane) {
+    return std::string(kind) + ": " + what + " at '" + texts_[i] + "'" +
+           (scalar ? std::string() : " lane " + std::to_string(lane));
+  };
+  for (unsigned lane = 0; lane < kWaveLanes; ++lane) {
+    if (!((exec >> lane) & 1u))
+      continue;
+    auto val = [&](size_t s, bool wide = false) -> std::optional<uint64_t> {
+      return s < src.size() ? operand_value(src[s], lane, wide) : std::nullopt;
+    };
+    if (kinds & (kPoisonShift | kPoisonExact)) {
+      const size_t amount_i = scalar ? 1 : 0, value_i = scalar ? 0 : 1;
+      const bool right = b.find("lshr") != b.npos || b.find("ashr") != b.npos;
+      const bool packed = b.substr(0, 5) == "v_pk_";
+      const auto amount = val(amount_i);
+      const auto value = val(value_i, width == 64);
+      if (amount) {
+        const unsigned parts = packed ? 2 : 1;
+        for (unsigned h = 0; h < parts; ++h) {
+          const uint64_t a = packed        ? (*amount >> (16 * h)) & 0xffffu
+                             : width == 16 ? *amount & 0xffffu
+                                           : *amount;
+          if ((kinds & kPoisonShift) && a >= width)
+            return hit("shift", "amount " + std::to_string(a) + " >= " + std::to_string(width),
+                       lane);
+          if ((kinds & kPoisonExact) && right && value && a > 0 && a < width) {
+            const uint64_t v = packed ? (*value >> (16 * h)) & 0xffffu : *value;
+            if (v & ((uint64_t{1} << a) - 1))
+              return hit("exact", "non-zero bits shifted out", lane);
+          }
+        }
+      }
+    }
+    if (kinds & kPoisonFpToInt) {
+      const bool f64 = b.find("_f64") != b.npos, f16 = b.find("_f16") != b.npos;
+      if (const auto v = val(0, f64)) {
+        double d = 0;
+        bool special = false;
+        if (f64) {
+          special = f64_nan(*v) || f64_inf(*v);
+          d = std::bit_cast<double>(*v);
+        } else if (f16) {
+          special = f16_nan(*v & 0xffffu) || f16_inf(*v & 0xffffu);
+          d = f16_value(*v & 0xffffu);
+        } else {
+          special = f32_nan(static_cast<uint32_t>(*v)) || f32_inf(static_cast<uint32_t>(*v));
+          d = static_cast<double>(std::bit_cast<float>(static_cast<uint32_t>(*v)));
+        }
+        if (special)
+          return hit("fptoint", "NaN or infinite input " + hex_value(*v), lane);
+        const double r = b.find("flr") != b.npos   ? std::floor(d)
+                         : b.find("rpi") != b.npos ? std::floor(d + 0.5)
+                                                   : std::trunc(d);
+        const bool is_unsigned = b.find("_u32_") != b.npos || b.find("_u16_") != b.npos;
+        const bool narrow = b.find("_i16_") != b.npos || b.find("_u16_") != b.npos;
+        const double lo = is_unsigned ? 0.0 : narrow ? -32768.0 : -2147483648.0;
+        const double hi =
+            is_unsigned ? (narrow ? 65535.0 : 4294967295.0) : (narrow ? 32767.0 : 2147483647.0);
+        if (r < lo || r > hi)
+          return hit("fptoint", "input " + hex_value(*v) + " out of the integer range", lane);
+      }
+    }
+    if (kinds & kPoisonCtz) {
+      if (const auto v = val(0, width == 64); v && *v == 0)
+        return hit("ctz", "zero input", lane);
+    }
+    if (kinds & (kPoisonNsw | kPoisonNuw | kPoisonDisjoint)) {
+      const auto x = val(0), y = val(1);
+      if (x && y) {
+        const uint32_t a = static_cast<uint32_t>(*x), c = static_cast<uint32_t>(*y);
+        if (kinds & kPoisonDisjoint) {
+          if (a & c)
+            return hit("disjoint", "operands share bits", lane);
+        } else {
+          const bool sub = b.find("sub") != b.npos, rev = b.find("subrev") != b.npos;
+          const bool mul = b.find("mul") != b.npos;
+          const int64_t sa = static_cast<int32_t>(a), sc = static_cast<int32_t>(c);
+          const int64_t sres = mul ? sa * sc : sub ? (rev ? sc - sa : sa - sc) : sa + sc;
+          const uint64_t ures = mul   ? uint64_t{a} * c
+                                : sub ? (rev ? uint64_t{c} - a : uint64_t{a} - c)
+                                      : uint64_t{a} + c;
+          const bool uoverflow = sub ? (rev ? c < a : a < c) : ures > 0xffffffffull;
+          if ((kinds & kPoisonNsw) && (sres < INT32_MIN || sres > INT32_MAX))
+            return hit("nsw", "signed overflow", lane);
+          if ((kinds & kPoisonNuw) && uoverflow)
+            return hit("nuw", "unsigned overflow", lane);
+        }
+      }
+    }
+    if (kinds & (kPoisonNnan | kPoisonNinf)) {
+      const FpResult f = fp_source_kind(mn);
+      for (size_t s = 0; s < src.size(); ++s) {
+        const bool wide = f == FpResult::F64;
+        const auto v = val(s, wide);
+        if (!v)
+          continue;
+        bool nan = false, inf = false;
+        const uint32_t w = static_cast<uint32_t>(*v);
+        switch (f) {
+        case FpResult::F64:
+          nan = f64_nan(*v);
+          inf = f64_inf(*v);
+          break;
+        case FpResult::F16Lo:
+          nan = f16_nan(w & 0xffffu);
+          inf = f16_inf(w & 0xffffu);
+          break;
+        case FpResult::F16x2:
+          nan = f16_nan(w & 0xffffu) || f16_nan(w >> 16);
+          inf = f16_inf(w & 0xffffu) || f16_inf(w >> 16);
+          break;
+        case FpResult::BF16Lo:
+          nan = bf16_nan(w & 0xffffu);
+          inf = bf16_inf(w & 0xffffu);
+          break;
+        case FpResult::BF16x2:
+          nan = bf16_nan(w & 0xffffu) || bf16_nan(w >> 16);
+          inf = bf16_inf(w & 0xffffu) || bf16_inf(w >> 16);
+          break;
+        default:
+          nan = f32_nan(w);
+          inf = f32_inf(w);
+          break;
+        }
+        if ((kinds & kPoisonNnan) && nan)
+          return hit("nnan", "NaN input " + hex_value(*v), lane);
+        if ((kinds & kPoisonNinf) && inf)
+          return hit("ninf", "infinite input " + hex_value(*v), lane);
+      }
+    }
+    if (scalar)
+      break;
+  }
+  return {};
+}
+
+std::string RegionRunner::poison_after(size_t i, uint64_t exec) const {
+  const uint32_t kinds = poison_kind_[i] & poison_filter_ & (kPoisonNnan | kPoisonNinf);
+  if (!kinds)
+    return {};
+  const FpPlan &p = fp_plan_[i];
+  for (unsigned d : p.dsts) {
+    if (d >= vgpr_count_)
+      continue;
+    for (unsigned lane = 0; lane < kWaveLanes; ++lane) {
+      if (!((exec >> lane) & 1u))
+        continue;
+      const uint8_t t = vfp_[size_t{d} * kWaveLanes + lane];
+      const uint32_t w = read_vgpr(d, lane);
+      bool nan = false, inf = false;
+      if (t & kFpF32) {
+        nan = f32_nan(w);
+        inf = f32_inf(w);
+      } else if ((t & kFpF64Lo) && d + 1 < vgpr_count_) {
+        const uint64_t v = uint64_t{w} | (uint64_t{read_vgpr(d + 1, lane)} << 32);
+        nan = f64_nan(v);
+        inf = f64_inf(v);
+      } else {
+        if (t & kFpF16Lo) {
+          nan = nan || f16_nan(w & 0xffffu);
+          inf = inf || f16_inf(w & 0xffffu);
+        }
+        if (t & kFpF16Hi) {
+          nan = nan || f16_nan(w >> 16);
+          inf = inf || f16_inf(w >> 16);
+        }
+        if (t & kFpBF16Lo) {
+          nan = nan || bf16_nan(w & 0xffffu);
+          inf = inf || bf16_inf(w & 0xffffu);
+        }
+        if (t & kFpBF16Hi) {
+          nan = nan || bf16_nan(w >> 16);
+          inf = inf || bf16_inf(w >> 16);
+        }
+      }
+      if ((kinds & kPoisonNnan) && nan)
+        return "nnan: NaN result at '" + texts_[i] + "' lane " + std::to_string(lane);
+      if ((kinds & kPoisonNinf) && inf)
+        return "ninf: infinite result at '" + texts_[i] + "' lane " + std::to_string(lane);
+    }
+  }
+  return {};
 }
 
 uint32_t inline_asm_word(uint64_t seed, uint32_t block, uint32_t slot, uint32_t lane) {
@@ -551,24 +1028,6 @@ RunOutcome RegionRunner::run_inline_asm(size_t i) {
         out.detail = "inline asm names v" + std::to_string(s.index) + " beyond the tracked VGPRs";
         return out;
       }
-  auto read_loc = [&](unsigned l) -> uint32_t {
-    if (l < kNumSgprs)
-      return cu_->read_sgpr_storage(sbase + l);
-    switch (l) {
-    case kLocVccLo:
-      return static_cast<uint32_t>(wf.vcc());
-    case kLocVccHi:
-      return static_cast<uint32_t>(wf.vcc() >> 32);
-    case kLocExecLo:
-      return static_cast<uint32_t>(wf.exec_raw());
-    case kLocExecHi:
-      return static_cast<uint32_t>(wf.exec_raw() >> 32);
-    case kLocM0:
-      return wf.m0();
-    default:
-      return wf.read_scc() ? 1u : 0u;
-    }
-  };
   auto write_loc = [&](unsigned l, uint32_t v) {
     if (l < kNumSgprs) {
       cu_->write_sgpr(sbase + l, v);
@@ -603,16 +1062,21 @@ RunOutcome RegionRunner::run_inline_asm(size_t i) {
     for (const AsmSlot &s : e.uses) {
       if (!s.vgpr) {
         u.values.push_back(read_loc(s.index));
+        u.fp.push_back(0);
         continue;
       }
       vector = true;
-      for (unsigned lane = 0; lane < kWaveLanes; ++lane)
-        u.values.push_back((exec >> lane) & 1u ? cu_->read_vgpr_storage(vbase + s.index, lane)
-                                               : 0u);
+      for (unsigned lane = 0; lane < kWaveLanes; ++lane) {
+        const bool on = (exec >> lane) & 1u;
+        u.values.push_back(on ? cu_->read_vgpr_storage(vbase + s.index, lane) : 0u);
+        u.fp.push_back(on ? vfp_[size_t{s.index} * kWaveLanes + lane] : 0);
+      }
     }
     if (vector) {
       u.values.push_back(static_cast<uint32_t>(exec));
       u.values.push_back(static_cast<uint32_t>(exec >> 32));
+      u.fp.push_back(0);
+      u.fp.push_back(0);
     }
     asm_uses_.push_back(std::move(u));
   }
@@ -624,8 +1088,10 @@ RunOutcome RegionRunner::run_inline_asm(size_t i) {
       // for a VALU def; LLVM may keep another thread's value in an inactive lane).
       const uint64_t exec = wf.exec_raw();
       for (unsigned lane = 0; lane < kWaveLanes; ++lane)
-        if ((exec >> lane) & 1u)
+        if ((exec >> lane) & 1u) {
           cu_->write_vgpr(vbase + s.index, lane, inline_asm_word(asm_seed_, block, slot, lane));
+          vfp_[size_t{s.index} * kWaveLanes + lane] = 0; // an opaque value
+        }
     } else {
       uint32_t v = inline_asm_word(asm_seed_, block, slot, 0);
       // Pointer-shaped where the region uses it as a memory base (see MemoryImage::word).
@@ -682,11 +1148,32 @@ RunOutcome RegionRunner::run(size_t budget, std::vector<TraceStep> *trace) {
       continue;
     }
     Instruction *inst = insts_[i].get();
+    const uint64_t exec_before = wf.exec_raw();
+    plan_tags(i, scratch_tags_);
     if (is_mem_[i] && inst && inst->execute && !model_only_[i]) {
       // The full issue path: fetch at the PC, execute, route, complete (functional).
       wf.pc = pcs_[i];
       if (mem_) {
         mem_->set_access(image_.get(), pointer_lo_[i], pointer_hi_[i]);
+        // A store's data carries its floating-point provenance into memory: the data
+        // operand is the second VGPR operand (after the address).
+        std::array<std::array<uint8_t, 4>, kWaveLanes> lane_tags{};
+        const FpPlan &plan = fp_plan_[i];
+        if (plan.store) {
+          const OperandRef *data = nullptr;
+          int vgprs_seen = 0;
+          for (const OperandRef &o : srcs_[i])
+            if (o.kind == OperandRef::Vgpr && ++vgprs_seen == 2) {
+              data = &o;
+              break;
+            }
+          if (data)
+            for (unsigned lane = 0; lane < kWaveLanes; ++lane)
+              for (unsigned k = 0; k < 4 && k < std::max(data->count, 1u); ++k)
+                if (data->reg + k < vgpr_count_)
+                  lane_tags[lane][k] = vfp_[size_t{data->reg + k} * kWaveLanes + lane];
+        }
+        mem_->set_store_fp(plan.store, plan.store_hi16, lane_tags);
         // Seeding writes backing memory when the access is observed (before the pipeline
         // reads it). Write back and drop every cached line first, so the access fills
         // its lines from the seeded memory instead of an earlier, partially seeded fill.
@@ -748,6 +1235,7 @@ RunOutcome RegionRunner::run(size_t budget, std::vector<TraceStep> *trace) {
         out.failed_index = i;
         return out;
       }
+      apply_tags(i, exec_before, scratch_tags_); // load destinations: no provenance
       if (trace) {
         MachineState now = capture();
         TraceStep step;
@@ -770,6 +1258,8 @@ RunOutcome RegionRunner::run(size_t budget, std::vector<TraceStep> *trace) {
       return out;
     }
     wf.pc = pcs_[i];
+    if (poison_filter_ && poison_hit_.empty())
+      poison_hit_ = poison_before(i);
     const uint64_t ub_before = cu_->isa_diagnostic_count();
     std::string detail;
     util::Result result = util::Result::failure();
@@ -810,6 +1300,9 @@ RunOutcome RegionRunner::run(size_t budget, std::vector<TraceStep> *trace) {
       out.failed_index = i;
       return out;
     }
+    apply_tags(i, exec_before, scratch_tags_);
+    if (poison_filter_ && poison_hit_.empty())
+      poison_hit_ = poison_after(i, exec_before);
     if (trace) {
       MachineState now = capture();
       TraceStep step;
