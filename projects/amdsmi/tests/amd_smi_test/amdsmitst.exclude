@@ -1,8 +1,10 @@
 # ============================================================================
-# KEEP IN SYNC: the per-ASIC exclusions here are mirrored in the ctest label
-# path at amd_smi_test/test_categories.yaml (used by TheRock CI). Until the two
-# are consolidated into a single source, any change here must be reflected there
-# (and vice versa).
+# FILTER[] is the only per-ASIC exclusion list. generate_exclude_gpu_yaml.py
+# copies these patterns into the ctest exclude_gpu_* blocks at configure time,
+# using gpu_family_to_asic in test_categories.yaml. A new key that has patterns
+# must be added to that map or to filter_key_aliases, or configure fails.
+# FILTER[virtualization] is not copied; detect_asic_filter.sh applies it only
+# for SR-IOV or VF.
 # ============================================================================
 
 declare -A FILTER
