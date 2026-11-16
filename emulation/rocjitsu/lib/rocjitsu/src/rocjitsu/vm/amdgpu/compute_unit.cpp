@@ -1725,14 +1725,14 @@ void ComputeUnitCore::report_memory_wait(void *context,
         "xcnt-wait: {} wg={} wave={} pc={:#x}: overwrite of {} before the replay source from "
         "pc={:#x} is known safe to reuse. XNACK replay may need the original value. "
         "s_wait_xcnt <= {} is required; set top-level wait_checking to \"off\" "
-        "(rocjitsu --wait-checking=off) to disable wait checking.",
+        "(rocjitsu --wait-checking=off) to disable XCNT checking.",
         cu.full_path(), wf.wg_id(), wf.wf_id(), hazard.consumer_pc, register_name,
         hazard.producer.pc, required));
   } else {
     util::Logger::warn(std::format(
         "memory-wait: {} wg={} wave={} pc={:#x}: {} of {} before memory result from pc={:#x} is "
         "known ready ({}). A wait threshold <= {} is required; set top-level wait_checking "
-        "to \"off\" (rocjitsu --wait-checking=off) to disable wait checking.",
+        "to \"off\" (rocjitsu --wait-checking=off) to disable these warnings.",
         cu.full_path(), wf.wg_id(), wf.wf_id(), hazard.consumer_pc,
         hazard.write ? "overwrite" : "read", register_name, hazard.producer.pc, counter_name,
         required));

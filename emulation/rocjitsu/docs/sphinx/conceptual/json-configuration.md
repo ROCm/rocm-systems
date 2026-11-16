@@ -79,9 +79,12 @@ for table examples and `rocjitsu --thread-budget-table`.
 `rocjitsu --cpu-thread-budget N` replaces JSON `cpu_thread_budget` for that launch.
 
 Ordinary memory wait warnings are enabled by default; gfx1250 XCNT replay-source
-checks are off. If warnings appear incorrect or checking slows a workload, use
-`rocjitsu --config <file> --wait-checking=off -- <command>` to disable both.
-`--wait-checking=on` enables ordinary checks only; `--wait-checking=all` also
+checks are off. Use `rocjitsu --config <file> --wait-checking=off -- <command>`
+to disable core wait warnings and XCNT checking. Ordinary register tracking remains
+active for register-hazard observers: the race detector still emits `RACE` records.
+To disable that tracking and its overhead as well, remove all register-hazard
+observers, including the race detector, from the plugin list.
+`--wait-checking=on` enables core ordinary warnings only; `--wait-checking=all` also
 enables XCNT. The flag overrides JSON settings on every CU and GPU for the launch,
 leaving the source file unchanged. Omitting it preserves JSON settings and defaults.
 `mirage run` accepts the same flag with profiles or `--config`, including alongside
