@@ -924,16 +924,19 @@ TEST_F(HipFileGetStatsL1, DerivesAverageLatency)
     EXPECT_EQ(out.write_lat_avg_us, 0u);
 }
 
-TEST_F(HipFileGetStatsL1, DerivesBandwidth)
+TEST_F(HipFileGetStatsL1, DerivesBandwidthFromBusyTimeNotLatency)
 {
-    // 1e6 bytes over 1e6 us -> 1e6 bytes/sec
+    // 1e6 bytes over 1e6 us of wall-clock busy time -> 1e6 bytes/sec. The summed
+    // latency is deliberately half the busy time (as if two IOs overlapped); using
+    // it would wrongly report 2e6 bytes/sec. Bandwidth must use the busy time.
     stats.getPerGpuStats(0, StatsBackend::Fastpath)
         ->ioSizeBytes[static_cast<size_t>(IoType::Read)]
         .buckets[0] = 1000000;
     stats.getPerGpuStats(0, StatsBackend::Fastpath)->ioCount[static_cast<size_t>(IoType::Read)].buckets[0] =
-        1;
+        2;
     stats.getPerGpuStats(0, StatsBackend::Fastpath)->ioTimeUs[static_cast<size_t>(IoType::Read)].buckets[0] =
-        1000000;
+        2000000;
+    stats.busyByType(IoType::Read)->busyUs = 1000000;
 
     hipFileStatsLevel1_t out{};
     ASSERT_EQ(hipFileGetStatsL1(&out), HIPFILE_SUCCESS);
@@ -1151,19 +1154,24 @@ TEST_F(HipFileGetStatsL3, PerGpuErrorCountsPopulated)
     EXPECT_EQ(out.per_gpu_stats[0].n_writes_err, 9u);
 }
 
-TEST_F(HipFileGetStatsL3, PerGpuBandwidthDerived)
+TEST_F(HipFileGetStatsL3, PerGpuBandwidthDerivedFromBusyTime)
 {
-    // 1e6 bytes over 1e6 us -> 1e6 bytes/sec
+    // 1e6 bytes over 1e6 us of this GPU's wall-clock busy time -> 1e6 bytes/sec.
+    // The summed latency is twice the busy time (overlapping IO); bandwidth must
+    // use the busy time, not the latency.
     stats.getPerGpuStats(0, StatsBackend::Fastpath)
         ->ioSizeBytes[static_cast<size_t>(IoType::Read)]
         .buckets[0] = 1000000;
     stats.getPerGpuStats(0, StatsBackend::Fastpath)->ioTimeUs[static_cast<size_t>(IoType::Read)].buckets[0] =
-        1000000;
+        2000000;
     stats.getPerGpuStats(0, StatsBackend::Fastpath)->inUse = 1;
+    stats.busyByGpuType(0, IoType::Read)->busyUs           = 1000000;
 
     hipFileStatsLevel3_t out{};
     ASSERT_EQ(hipFileGetStatsL3(&out), HIPFILE_SUCCESS);
     EXPECT_EQ(out.per_gpu_stats[0].read_bw_bytes_per_sec, 1000000u);
+    // The duration field keeps carrying the summed latency.
+    EXPECT_EQ(out.per_gpu_stats[0].read_duration_us, 2000000u);
 }
 
 TEST_F(HipFileGetStatsL3, InactiveGpuSlotIsZero)
