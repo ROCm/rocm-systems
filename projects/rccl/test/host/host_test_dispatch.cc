@@ -76,11 +76,15 @@ constexpr std::string_view kQualifierStrip = "rccl-UnitTests";
 // in one object-free, hash-agnostic file, so no consumer has to pair profiles with binaries.
 constexpr std::string_view kCoverageTracefile = "host-coverage.lcov";
 
-// Appended to the merged report's own name to form the directory the children's console output
-// is written into, one <Qualifier>.log per fronted binary.
-constexpr std::string_view kLogDirectorySuffix = ".logs";
-
-// Used when the caller asked for no report at all, so there is no name to derive one from.
+// The directory the children's console output is written into, one <Qualifier>.log per fronted
+// binary. Relative, so it lands under the working directory the caller chose.
+//
+// This used to be derived from the merged report's path ("<report-stem>.logs" beside it), which
+// made the logs' location a function of a caller's private choice of report path. Under the
+// python test runner that path is an mkstemp in /tmp, so the logs went to a directory whose name
+// was published the moment the report file appeared, and which another local user could
+// pre-create. The derivation is gone: a caller who wants the logs somewhere in particular says
+// so below, and that is the only thing that moves them.
 constexpr std::string_view kDefaultLogDirectory = "host-test-dispatch.logs";
 
 // Overrides that directory; "-" turns the redirection off and lets the children inherit this
@@ -1131,30 +1135,18 @@ Enumeration enumerate(const std::string &directory, const std::vector<std::strin
     return enumeration;
 }
 
-// The directory the children's logs belong in for a run whose merged report is *outputPath*.
-std::string childLogDirectory(std::string_view outputPath)
-{
-    if (outputPath.empty()) {
-        return std::string(kDefaultLogDirectory);
-    }
-    const fs::path report{std::string(outputPath)};
-    const fs::path parent = report.parent_path();
-    const std::string name = report.stem().string() + std::string(kLogDirectorySuffix);
-    return (parent.empty() ? fs::path(name) : parent / name).string();
-}
-
 // Where *qualifier*'s console output goes within *directory*.
 std::string childLogPath(std::string_view directory, std::string_view qualifier)
 {
     return (fs::path(std::string(directory)) / fmt::format("{}.log", qualifier)).string();
 }
 
-// The log directory this run should use, given the merged report at *outputPath* and the
-// environment. Empty when the caller asked for the children's output on the console instead.
-std::string resolveLogDirectory(std::string_view outputPath, const char *override_)
+// The log directory this run should use, given *override_* from the environment. Empty when the
+// caller asked for the children's output on the console instead.
+std::string resolveLogDirectory(const char *override_)
 {
     if (override_ == nullptr || *override_ == '\0') {
-        return childLogDirectory(outputPath);
+        return std::string(kDefaultLogDirectory);
     }
     return std::string_view(override_) == "-" ? std::string() : std::string(override_);
 }
@@ -2493,7 +2485,7 @@ int main(int argc, char **argv)
     // cannot be used is said once, here, rather than once per child; failing to make it turns
     // the redirection off, because a missing transcript must not cost a passing run.
     std::string logDir =
-        resolveLogDirectory(options.outputPath, std::getenv(std::string(kLogDirectoryEnv).c_str()));
+        resolveLogDirectory(std::getenv(std::string(kLogDirectoryEnv).c_str()));
     if (!logDir.empty()) {
         if (const std::optional<std::string> problem = prepareLogDirectory(logDir)) {
             fmt::print(stderr, "host-test-dispatch: cannot use {}: {} -- the binaries will"

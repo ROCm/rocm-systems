@@ -1214,26 +1214,6 @@ TEST(HostDispatchEnumerateMicrotest, AStopEndsTheEnumerationAndNamesWhatItNeverA
 
 // ── child logs ──────────────────────────────────────────────────────
 
-TEST(HostDispatchLogMicrotest, LogsLandBesideTheMergedReport)
-{
-    // The report is the artefact a harness uploads and a reader opens first, so the transcripts
-    // explaining it are kept in a directory named after it, in the same place.
-    EXPECT_EQ(childLogDirectory("/p/host_tests_micro.xml"), "/p/host_tests_micro.logs");
-    EXPECT_EQ(childLogDirectory("/p/host_tests_micro.json"), "/p/host_tests_micro.logs");
-}
-
-TEST(HostDispatchLogMicrotest, AReportInTheCurrentDirectoryKeepsItsLogsThere)
-{
-    EXPECT_EQ(childLogDirectory("host_tests_micro.xml"), "host_tests_micro.logs");
-}
-
-TEST(HostDispatchLogMicrotest, NoReportStillGetsLogs)
-{
-    // A caller that asked for no report still wants the binaries' output somewhere; there is no
-    // report name to derive a directory from, so the fixed one is used.
-    EXPECT_EQ(childLogDirectory(""), "host-test-dispatch.logs");
-}
-
 TEST(HostDispatchLogMicrotest, EachBinaryWritesItsOwnLog)
 {
     EXPECT_EQ(childLogPath("/p/host_tests_micro.logs", "MicroInit-uncached"),
@@ -1245,10 +1225,22 @@ TEST(HostDispatchLogMicrotest, TheEnvironmentCanMoveTheLogsOrTurnThemOff)
     // Unset and empty both mean "use the default"; a directory names where to put them instead;
     // "-" is the opt-out that leaves the children on this process's stdout, which is what
     // running one binary's cases by hand wants.
-    EXPECT_EQ(resolveLogDirectory("/p/report.xml", nullptr), "/p/report.logs");
-    EXPECT_EQ(resolveLogDirectory("/p/report.xml", ""), "/p/report.logs");
-    EXPECT_EQ(resolveLogDirectory("/p/report.xml", "/tmp/logs"), "/tmp/logs");
-    EXPECT_EQ(resolveLogDirectory("/p/report.xml", "-"), "");
+    EXPECT_EQ(resolveLogDirectory(nullptr), "host-test-dispatch.logs");
+    EXPECT_EQ(resolveLogDirectory(""), "host-test-dispatch.logs");
+    EXPECT_EQ(resolveLogDirectory("/tmp/logs"), "/tmp/logs");
+    EXPECT_EQ(resolveLogDirectory("-"), "");
+}
+
+TEST(HostDispatchLogMicrotest, TheReportPathDoesNotMoveTheLogs)
+{
+    // The default is fixed and relative, not derived from wherever the merged report happens to
+    // be written. A caller whose report path is a world-readable mkstemp in /tmp -- which is how
+    // the python test runner names it -- therefore does not thereby publish the name of a
+    // directory another local user could pre-create before the children open their logs in it.
+    // Only the environment moves the logs, and only when a caller deliberately sets it.
+    EXPECT_EQ(resolveLogDirectory(nullptr), std::string(kDefaultLogDirectory));
+    EXPECT_NE(std::string(kDefaultLogDirectory).find("host-test-dispatch"), std::string::npos);
+    EXPECT_FALSE(std::filesystem::path(std::string(kDefaultLogDirectory)).is_absolute());
 }
 
 // ── prepareLogDirectory ─────────────────────────────────────────────

@@ -167,12 +167,18 @@ do_host_tests() {
     name="${entry%%:*}"
     xml="${entry#*:}"; xml="${xml%%:*}"
     profdir="${entry##*:}"
+    # Keep each binary's transcripts beside the report they explain. The dispatcher no longer
+    # derives this from the report path -- a derived directory is named by whoever chose the
+    # report path, which on a shared node is a name another user can pre-create -- so this script
+    # names it, which is what it wanted all along. Harmless for rccl-HostUnitTests, which is a
+    # plain gtest binary and ignores the variable.
     xml_base="${xml##*/}"
     if [ "$xml_base" = "$xml" ]; then
       logs="${xml_base%.*}.logs"
     else
       logs="${xml%/*}/${xml_base%.*}.logs"
     fi
+    export RCCL_HOST_DISPATCH_LOG_DIR="$logs"
     exe="$BUILD_DIR/$name"
     if [ ! -x "$exe" ]; then
       echo "ERROR: expected binary not built: $exe" | tee -a "$LOG_FILE"

@@ -1510,9 +1510,9 @@ exactly as before, and with it the wait polls on a 5 ms interval.
 ### Where the children's output goes
 
 The children do **not** print to the dispatcher's console. Each one's stdout and
-stderr are redirected to `<report>.logs/<Qualifier>.log` — a run writing
-`host_tests_micro.xml` leaves `host_tests_micro.logs/MicroInit.log` beside it —
-and the dispatcher's own console keeps only the one banner line per binary,
+stderr are redirected to `<log-dir>/<Qualifier>.log`, where `<log-dir>` is
+`host-test-dispatch.logs` under the working directory unless the caller names
+one, and the dispatcher's own console keeps only the one banner line per binary,
 naming the log:
 
 ```
@@ -1535,14 +1535,31 @@ disk for reading one binary without scrolling. Appending after the fact, rather
 than letting the children share the console, is what keeps both readable: the
 output arrives grouped by binary instead of interleaved.
 
-The directory is derived from `--gtest_output` so a run's logs sit beside the
-artefact they explain, and two runs writing different reports into one directory
-cannot overwrite each other's logs. `RCCL_HOST_DISPATCH_LOG_DIR` puts them
-somewhere else; `RCCL_HOST_DISPATCH_LOG_DIR=-` turns the redirection off and
+`RCCL_HOST_DISPATCH_LOG_DIR` is the only thing that moves the directory;
+`RCCL_HOST_DISPATCH_LOG_DIR=-` turns the redirection off and
 lets the children inherit the console, which is what running one binary's cases
 by hand wants. A log directory that cannot be used is a warning, not a
 failure — a missing transcript must not cost a passing run — and the children
 fall back to the console.
+
+The directory used to be **derived** from `--gtest_output`, so that a run's logs
+sat beside the artefact they explain. That is gone, and a caller who wants them
+there says so: `run_host_tests.sh` sets `RCCL_HOST_DISPATCH_LOG_DIR` to the
+`.logs` directory beside each report it asks for, which is the same layout as
+before. Deriving it coupled the logs' location to a caller's private choice of
+report path, and one such caller picks that path badly: the python test runner
+names its report with `mkstemp` in `/tmp`, so the derived directory inherited a
+name that was world-readable the moment the report file appeared, and that
+another local user could create — with a mode of their choosing — in the window
+before the dispatcher got there. `prepareLogDirectory` refuses a directory it
+does not own, a symlink and a non-directory, and every log is opened
+`O_NOFOLLOW`, so the planted directory was detected rather than used; but a
+fixed relative default removes the question instead of answering it.
+
+**A caller on a shared node should name the log directory** — somewhere inside a
+workspace it owns — rather than letting it fall where the working directory
+happens to be. That is the one knob here, and it is the whole story: nothing
+else about the run can relocate the logs.
 
 ### What the children inherit
 
