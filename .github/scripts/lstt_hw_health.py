@@ -85,8 +85,12 @@ def check_bmc(report):
     def fail(msg):
         report.fail(f"- BMC: {msg}", msg)
 
-    if not any(os.path.exists(d) for d in ("/dev/ipmi0", "/dev/ipmi/0", "/dev/ipmidev/0")):
-        return fail("no IPMI device on the host (/dev/ipmi0), so it cannot reach its BMC in-band")
+    if not any(
+        os.path.exists(d) for d in ("/dev/ipmi0", "/dev/ipmi/0", "/dev/ipmidev/0")
+    ):
+        return fail(
+            "no IPMI device on the host (/dev/ipmi0), so it cannot reach its BMC in-band"
+        )
     try:
         proc = subprocess.run(
             ["sudo", "-n", "ipmitool", "mc", "info"],
@@ -97,7 +101,9 @@ def check_bmc(report):
     except FileNotFoundError:
         return fail("sudo or ipmitool is not installed on the host")
     except subprocess.TimeoutExpired:
-        return fail("ipmitool did not answer within 60 seconds: the BMC is not responding")
+        return fail(
+            "ipmitool did not answer within 60 seconds: the BMC is not responding"
+        )
     if proc.returncode != 0:
         return fail(
             f"`sudo -n ipmitool mc info` failed (exit {proc.returncode}): no passwordless "
@@ -111,15 +117,23 @@ def check_gpu(report, gfx, image):
         report.fail(f"- GPU: {msg}", msg)
 
     if not os.path.exists("/dev/kfd"):
-        return fail("/dev/kfd is missing on the host, so no container can reach the GPU")
+        return fail(
+            "/dev/kfd is missing on the host, so no container can reach the GPU"
+        )
     if not os.path.isdir("/dev/dri"):
         return fail("/dev/dri is missing on the host")
     try:
         proc = subprocess.run(
             [
-                "docker", "run", "--rm",
-                "--device=/dev/kfd", "--device=/dev/dri", "--group-add", "video",
-                image, "rocminfo",
+                "docker",
+                "run",
+                "--rm",
+                "--device=/dev/kfd",
+                "--device=/dev/dri",
+                "--group-add",
+                "video",
+                image,
+                "rocminfo",
             ],
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
@@ -129,22 +143,34 @@ def check_gpu(report, gfx, image):
         return fail("docker is not installed on the host")
     rc = proc.returncode
     if rc == 125:
-        return fail("docker could not start the container (daemon down, or the image could not be pulled)")
+        return fail(
+            "docker could not start the container (daemon down, or the image could not be pulled)"
+        )
     if rc in (126, 127):
         return fail(f"the container started but could not run rocminfo (exit {rc})")
     if rc != 0:
-        return fail(f"rocminfo failed inside the container (exit {rc}): a broken ROCm stack or driver")
+        return fail(
+            f"rocminfo failed inside the container (exit {rc}): a broken ROCm stack or driver"
+        )
     if gfx not in proc.stdout:
-        return fail(f"rocminfo ran but did not report {gfx}: a different ASIC, or the GPU is not visible")
+        return fail(
+            f"rocminfo ran but did not report {gfx}: a different ASIC, or the GPU is not visible"
+        )
     report.line(f"- GPU: {gfx} visible")
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    p.add_argument("--id", required=True, help="generic id of the host, used in the output")
+    p.add_argument(
+        "--id", required=True, help="generic id of the host, used in the output"
+    )
     p.add_argument("--gfx", required=True, help="expected GPU target, e.g. gfx1151")
-    p.add_argument("--image", default=DEFAULT_IMAGE, help="container image used to run rocminfo")
-    p.add_argument("--bmc", action="store_true", help="also check that the BMC answers over IPMI")
+    p.add_argument(
+        "--image", default=DEFAULT_IMAGE, help="container image used to run rocminfo"
+    )
+    p.add_argument(
+        "--bmc", action="store_true", help="also check that the BMC answers over IPMI"
+    )
     args = p.parse_args()
 
     report = Report()
