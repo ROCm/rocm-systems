@@ -264,9 +264,9 @@ constexpr size_t kDdaArLL128SplitMinBytes = 2 * 1024 * 1024;
 
 // Peer-split: a warp per (slice, peer) unit within `bound`, and no more blocks than slices (a block owns whole slices).
 static std::pair<dim3, dim3> ddaArLL128SplitGrid(const ncclComm* comm, size_t bytes, rcclDdaLaunchCap bound) {
-  const size_t n = (size_t)std::max(comm->nRanks, 2);
-  const size_t slices = ddaLL128Slices(bytes / n);
-  auto geom = ddaArFabricLLGrid(comm, slices * (n - 1), kDdaArLL128Threads, kDdaLL128Warp, bound);
+  const size_t nRanks = (size_t)std::max(comm->nRanks, 2);
+  const size_t slices = ddaLL128Slices(bytes / nRanks);
+  auto geom = ddaArFabricLLGrid(comm, slices * (nRanks - 1), kDdaArLL128Threads, kDdaLL128Warp, bound);
   geom.first.x = (unsigned)std::min<size_t>(geom.first.x, slices);
   return geom;
 }

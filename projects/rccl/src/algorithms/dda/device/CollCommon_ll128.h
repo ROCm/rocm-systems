@@ -215,9 +215,12 @@ __device__ __forceinline__ void ddaLL128LoadRegs(
     if (flag) regs[2 * g] = regs[2 * g - 1];
 }
 
-// Chunk pair g of lane wid loads without a branch; a flag lane's odd pair, whose data is unused, loads lane wid - 1's.
-__device__ __forceinline__ int ddaLL128LoadChunkIx(int g, int wid, bool flag) {
-  return ddaLL128ChunkIx(g, (flag && g % 2 == 1) ? wid - 1 : wid);
+// A lane's chunk: one 16B load or store, a register pair.
+constexpr int kDdaLL128ChunkBytes = 16;
+
+// Chunk `pair` of `lane` loads without a branch; a flag lane's odd pair, whose data is unused, loads lane - 1's.
+__device__ __forceinline__ int ddaLL128LoadChunkIx(int pair, int lane, bool flag) {
+  return ddaLL128ChunkIx(pair, (flag && pair % 2 == 1) ? lane - 1 : lane);
 }
 
 // ddaLL128LoadRegs without per-lane branches. Loads a lane does not need are in bounds and discarded.
@@ -253,36 +256,37 @@ __device__ __forceinline__ void ddaLL128ForEachWirePair(const uint64_t (&regs)[k
 
 // ddaLL128LoadRegsBatched in two steps, so loads stay in flight; chunks past eltN load chunk 0, RawToRegs zeroes them.
 struct DdaLL128Raw {
-  v4u v[kDdaLL128Pairs];
+  v4u chunks[kDdaLL128Pairs];
 };
 
 template <typename T>
-__device__ __forceinline__ void ddaLL128LoadRaw(DdaLL128Raw& raw, const T* src, int eltN, int wid, bool flag) {
-  constexpr int EltPer16B = 16 / sizeof(T);
+__device__ __forceinline__ void ddaLL128LoadRaw(DdaLL128Raw& raw, const T* src, int eltN, int lane, bool flag) {
+  constexpr int kEltPerChunk = kDdaLL128ChunkBytes / sizeof(T);
   // Compiler barrier: each call's loads issue here, so a look-ahead reload is not folded into an earlier load.
   asm volatile("" ::: "memory");
 #pragma unroll
-  for (int g = 0; g < kDdaLL128Pairs; g++) {
-    const int ix = ddaLL128LoadChunkIx(g, wid, flag);
-    ddaLL128Load16BRaw(raw.v[g], src + (ix * EltPer16B < eltN ? ix : 0) * EltPer16B);
+  for (int pair = 0; pair < kDdaLL128Pairs; pair++) {
+    const int chunk = ddaLL128LoadChunkIx(pair, lane, flag);
+    ddaLL128Load16BRaw(raw.chunks[pair], src + (chunk * kEltPerChunk < eltN ? chunk : 0) * kEltPerChunk);
   }
 }
 
 // ddaLL128LoadRegs's registers from a raw load.
 template <typename T>
 __device__ __forceinline__ void ddaLL128RawToRegs(const DdaLL128Raw& raw, uint64_t (&regs)[kDdaLL128WordsPerThread],
-                                                  int eltN, int wid, bool flag) {
-  constexpr int EltPer16B = 16 / sizeof(T);
+                                                  int eltN, int lane, bool flag) {
+  constexpr int kEltPerChunk = kDdaLL128ChunkBytes / sizeof(T);
 #pragma unroll
-  for (int g = 0; g < kDdaLL128Pairs; g++) {
-    const bool valid = ddaLL128LoadChunkIx(g, wid, flag) * EltPer16B < eltN;
-    regs[2 * g] = valid ? (uint64_t)raw.v[g][0] | ((uint64_t)raw.v[g][1] << 32) : 0;
-    regs[2 * g + 1] = valid ? (uint64_t)raw.v[g][2] | ((uint64_t)raw.v[g][3] << 32) : 0;
+  for (int pair = 0; pair < kDdaLL128Pairs; pair++) {
+    const v4u& chunk = raw.chunks[pair];
+    const bool valid = ddaLL128LoadChunkIx(pair, lane, flag) * kEltPerChunk < eltN;
+    regs[2 * pair] = valid ? (uint64_t)chunk[0] | ((uint64_t)chunk[1] << 32) : 0;
+    regs[2 * pair + 1] = valid ? (uint64_t)chunk[2] | ((uint64_t)chunk[3] << 32) : 0;
   }
 #pragma unroll
-  for (int g = 1; g < kDdaLL128Pairs; g += 2) {  // move flag-lane data out of odd regs
+  for (int pair = 1; pair < kDdaLL128Pairs; pair += 2) {  // move flag-lane data out of odd regs
     if (flag) {
-      regs[2 * g] = regs[2 * g - 1];
+      regs[2 * pair] = regs[2 * pair - 1];
     }
   }
 }
@@ -437,18 +441,18 @@ __device__ __forceinline__ bool ddaLL128PollWireBatched(const uint64_t* wire, ui
 }
 
 // ddaLL128PollWire on wire[i] for each bit i of the wave-uniform mask, loads before any flag test; false if aborted.
-template <int kN>
-__device__ __forceinline__ bool ddaLL128PollWireN(const uint64_t* const (&wire)[kN], uint32_t mask,
-                                                  uint64_t (&vr)[kN][kDdaLL128WordsPerThread], uint64_t flag, int wid,
-                                                  DdaKernelParams params) {
-  const bool flagLane = ddaLL128IsFlagLane(wid);
+template <int kWires>
+__device__ __forceinline__ bool ddaLL128PollWireN(const uint64_t* const (&wire)[kWires], uint32_t mask,
+                                                  uint64_t (&wireRegs)[kWires][kDdaLL128WordsPerThread], uint64_t flag,
+                                                  int lane, DdaKernelParams params) {
+  const bool flagLane = ddaLL128IsFlagLane(lane);
   auto loadAll = [&]() {
 #pragma unroll
-    for (int u = 0; u < kDdaLL128WordsPerThread; u += 2) {
+    for (int word = 0; word < kDdaLL128WordsPerThread; word += 2) {
 #pragma unroll
-      for (int i = 0; i < kN; ++i) {
+      for (int i = 0; i < kWires; ++i) {
         if ((mask >> i) & 1u) {
-          ddaLL128LoadAtomic16B(wire[i] + u * kDdaLL128Warp, vr[i][u], vr[i][u + 1]);
+          ddaLL128LoadAtomic16B(wire[i] + word * kDdaLL128Warp, wireRegs[i][word], wireRegs[i][word + 1]);
         }
       }
     }
@@ -462,11 +466,11 @@ __device__ __forceinline__ bool ddaLL128PollWireN(const uint64_t* const (&wire)[
     needReload = false;
     loadAll();
 #pragma unroll
-    for (int i = 0; i < kN; ++i) {
+    for (int i = 0; i < kWires; ++i) {
       if ((mask >> i) & 1u) {
 #pragma unroll
-        for (int u = 0; u < kDdaLL128WordsPerThread; u += 2) {
-          needReload |= flagLane && vr[i][u + 1] != flag;
+        for (int word = 0; word < kDdaLL128WordsPerThread; word += 2) {
+          needReload |= flagLane && wireRegs[i][word + 1] != flag;
         }
       }
     }
@@ -501,10 +505,10 @@ constexpr size_t ddaLL128Slices(size_t bytes) {
   return (bytes + kDdaLL128DataBytesPerSlice - 1) / kDdaLL128DataBytesPerSlice;
 }
 
-// Payload bytes of slice s of a `bytes`-long range: a whole slice, or what is left for the last one.
-constexpr int ddaLL128SliceBytes(size_t bytes, size_t s) {
-  const size_t rem = bytes - s * (size_t)kDdaLL128DataBytesPerSlice;
-  return rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
+// Payload bytes of slice `slice` of a `bytes`-long range: a whole slice, or what is left for the last one.
+constexpr int ddaLL128SliceBytes(size_t bytes, size_t slice) {
+  const size_t remaining = bytes - slice * (size_t)kDdaLL128DataBytesPerSlice;
+  return remaining < (size_t)kDdaLL128DataBytesPerSlice ? (int)remaining : kDdaLL128DataBytesPerSlice;
 }
 
 // Payload a slot of slotWords wire words carries, in whole slices.

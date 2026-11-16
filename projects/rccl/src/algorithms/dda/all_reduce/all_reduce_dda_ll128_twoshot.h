@@ -255,7 +255,7 @@ __launch_bounds__(kDdaLL128ArThreads)
 
 // Slices phases B and D poll per round trip (ddaLL128PollWireN): the slices' loads share each wait.
 constexpr int kDdaLL128SplitPollSlices = 2;
-static_assert(kDdaLL128SplitPollSlices == 2, "phase D polls unit u and the unit one warp stride on");
+static_assert(kDdaLL128SplitPollSlices == 2, "phase D polls a unit and the unit one warp stride on");
 
 // The peer scratch pointer table that follows the staged windows in dynamic LDS rounds up to 16 bytes.
 constexpr size_t kDdaLL128ArSplitPeerTblAlign = 16;
@@ -266,7 +266,8 @@ constexpr size_t ddaLL128ArSplitSharedBytes(unsigned threads, int nRanks) {
          (((size_t)nRanks * sizeof(void*) + kDdaLL128ArSplitPeerTblAlign - 1) & ~(kDdaLL128ArSplitPeerTblAlign - 1));
 }
 
-// A block's (slice, peer) units, slice major: unit k is slice s0 + k / (n - 1) to peer selfRank + 1 + k % (n - 1).
+// A block's (slice, peer) units, slice major: unit k is slice firstSlice + k / (n - 1)
+// to peer selfRank + 1 + k % (n - 1).
 struct DdaLL128SplitUnit {
   uint32_t unit;       // index in the block's units
   uint32_t slice;      // slice of the shard
@@ -295,11 +296,11 @@ __launch_bounds__(kDdaLL128ArThreads) __global__
   const uint32_t nwarps = blockDim.x / kDdaLL128Warp;
   const bool flagLane = ddaLL128IsFlagLane(lane);
 
-  // The peer table goes in before the epoch read, whose barrier publishes it.
-  extern __shared__ __attribute__((aligned(128))) uint8_t ddaLL128ArStageLds[];
+  // The peer table goes in before the epoch read, whose barrier publishes it. The staged windows start line aligned.
+  extern __shared__ __attribute__((aligned(kDdaLL128LineBytes))) uint8_t ddaLL128ArStageLds[];
   uint64_t** peerTbl = reinterpret_cast<uint64_t**>(ddaLL128ArStageLds + ddaLL128StageBytes(blockDim.x));
-  for (int r = threadIdx.x; r < nRanks; r += blockDim.x) {
-    peerTbl[r] = reinterpret_cast<uint64_t*>(peerScratch[r]);
+  for (int rank = threadIdx.x; rank < nRanks; rank += blockDim.x) {
+    peerTbl[rank] = reinterpret_cast<uint64_t*>(peerScratch[rank]);
   }
   const uint32_t flag32 = ddaGetLLEpochInc(epochDev, blockIdx.x, 1);
   const uint64_t flag = ((uint64_t)flag32 << 32) | (uint64_t)flag32;
@@ -312,7 +313,7 @@ __launch_bounds__(kDdaLL128ArThreads) __global__
   const uint32_t peers = (uint32_t)(nRanks - 1);
   const uint32_t perBlock = (uint32_t)slicesTotal / gridDim.x;
   const uint32_t extra = (uint32_t)slicesTotal % gridDim.x;
-  const uint32_t s0 = blockIdx.x * perBlock + (blockIdx.x < extra ? blockIdx.x : extra);
+  const uint32_t firstSlice = blockIdx.x * perBlock + (blockIdx.x < extra ? blockIdx.x : extra);
   const uint32_t nSlices = perBlock + (blockIdx.x < extra ? 1u : 0u);
   const uint32_t units = nSlices * peers;
 
@@ -320,89 +321,95 @@ __launch_bounds__(kDdaLL128ArThreads) __global__
   int8_t* dstBytes = reinterpret_cast<int8_t*>(recvbuff);
   uint64_t* selfBase = peerTbl[selfRank];
 
-  auto unitAt = [&](uint32_t u) { return DdaLL128SplitUnit{u, s0 + u / peers, u % peers}; };
+  auto unitAt = [&](uint32_t index) {
+    return DdaLL128SplitUnit{index, firstSlice + index / peers, index % peers};
+  };
   // One warp stride on, without a divide.
-  const uint32_t strideS = nwarps / peers;
-  const uint32_t stridePi = nwarps % peers;
-  auto next = [&](DdaLL128SplitUnit x) {
-    x.unit += nwarps;
-    x.slice += strideS;
-    x.peerIndex += stridePi;
-    if (x.peerIndex >= peers) {
-      x.peerIndex -= peers;
-      ++x.slice;
+  const uint32_t sliceStride = nwarps / peers;
+  const uint32_t peerIndexStride = nwarps % peers;
+  auto next = [&](DdaLL128SplitUnit item) {
+    item.unit += nwarps;
+    item.slice += sliceStride;
+    item.peerIndex += peerIndexStride;
+    if (item.peerIndex >= peers) {
+      item.peerIndex -= peers;
+      ++item.slice;
     }
-    return x;
+    return item;
   };
-  auto peerOf = [&](uint32_t pi) {
-    const int p = selfRank + 1 + (int)pi;
-    return p < nRanks ? p : p - nRanks;
+  auto peerOf = [&](uint32_t peerIndex) {
+    const int peer = selfRank + 1 + (int)peerIndex;
+    return peer < nRanks ? peer : peer - nRanks;
   };
-  auto eltIn = [&](uint32_t s) { return ddaLL128SliceBytes(shardBytes, s); };
-  auto shardAt = [&](auto* base, int rank, uint32_t s) {
-    return base + (size_t)rank * shardBytes + (size_t)s * (size_t)kDdaLL128DataBytesPerSlice;
+  auto eltIn = [&](uint32_t slice) { return ddaLL128SliceBytes(shardBytes, slice); };
+  auto shardAt = [&](auto* base, int rank, uint32_t slice) {
+    return base + (size_t)rank * shardBytes + (size_t)slice * (size_t)kDdaLL128DataBytesPerSlice;
   };
-  // Slice s of rank's slot in the staging area `area` words into the scratch at base.
-  auto slotAt = [&](uint64_t* base, uint64_t area, int rank, uint32_t s) {
-    return base + area + (uint64_t)rank * (uint64_t)slotWords + (uint64_t)s * (uint64_t)kDdaLL128WireWordsPerSlice;
+  // Slice `slice` of rank's slot in the staging area `area` words into the scratch at base.
+  auto slotAt = [&](uint64_t* base, uint64_t area, int rank, uint32_t slice) {
+    return base + area + (uint64_t)rank * (uint64_t)slotWords + (uint64_t)slice * (uint64_t)kDdaLL128WireWordsPerSlice;
   };
-  // This lane's words of slice s of rank's slot in my own scratch.
-  auto wireAt = [&](uint64_t area, int rank, uint32_t s) { return slotAt(selfBase, area, rank, s) + 2 * lane; };
+  // This lane's words of slice `slice` of rank's slot in my own scratch.
+  auto wireAt = [&](uint64_t area, int rank, uint32_t slice) {
+    return slotAt(selfBase, area, rank, slice) + 2 * lane;
+  };
   auto quit = [&]() {
     ddaLL128StageDrain<kWire>();
     ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag32);
   };
 
-  // A. scatter, units striding by warp, two loads ahead: send slice s of the peer's shard to its first area, slot[me].
-  auto load = [&](DdaLL128SplitUnit x, DdaLL128Raw& raw) {
-    ddaLL128LoadRaw<int8_t>(raw, shardAt(srcBytes, peerOf(x.peerIndex), x.slice), eltIn(x.slice), lane, flagLane);
+  // A. scatter, units striding by warp, two loads ahead: send each unit's slice of the peer's shard to its first area,
+  // slot[me].
+  auto load = [&](DdaLL128SplitUnit item, DdaLL128Raw& raw) {
+    ddaLL128LoadRaw<int8_t>(raw, shardAt(srcBytes, peerOf(item.peerIndex), item.slice), eltIn(item.slice), lane,
+                            flagLane);
   };
-  auto send = [&](DdaLL128SplitUnit x, const DdaLL128Raw& raw) {
+  auto send = [&](DdaLL128SplitUnit item, const DdaLL128Raw& raw) {
     uint64_t regs[kDdaLL128WordsPerThread];
-    ddaLL128RawToRegs<int8_t>(raw, regs, eltIn(x.slice), lane, flagLane);
+    ddaLL128RawToRegs<int8_t>(raw, regs, eltIn(item.slice), lane, flagLane);
     ddaLL128StageFill<kWire>(stage, regs, flag, flagLane, lane);
-    ddaLL128StagePush<kWire>(stage, slotAt(peerTbl[peerOf(x.peerIndex)], bankWords, selfRank, x.slice), regs, flag,
-                             flagLane, lane);
+    ddaLL128StagePush<kWire>(stage, slotAt(peerTbl[peerOf(item.peerIndex)], bankWords, selfRank, item.slice), regs,
+                             flag, flagLane, lane);
   };
   if (warp < units) {
     // Look-ahead loads past the last unit reload the one just sent, so every wait count stays exact.
-    DdaLL128SplitUnit a = unitAt(warp);
-    DdaLL128SplitUnit b = next(a);
-    DdaLL128Raw ra;
-    DdaLL128Raw rb;
-    load(a, ra);
-    load(b.unit < units ? b : a, rb);
+    DdaLL128SplitUnit first = unitAt(warp);
+    DdaLL128SplitUnit second = next(first);
+    DdaLL128Raw firstRaw;
+    DdaLL128Raw secondRaw;
+    load(first, firstRaw);
+    load(second.unit < units ? second : first, secondRaw);
 #pragma unroll 1
     for (;;) {
-      send(a, ra);
-      const DdaLL128SplitUnit a2 = next(b);
-      load(a2.unit < units ? a2 : a, ra);
-      if (b.unit >= units) {
+      send(first, firstRaw);
+      const DdaLL128SplitUnit nextFirst = next(second);
+      load(nextFirst.unit < units ? nextFirst : first, firstRaw);
+      if (second.unit >= units) {
         break;
       }
-      send(b, rb);
-      const DdaLL128SplitUnit b2 = next(a2);
-      load(b2.unit < units ? b2 : b, rb);
-      if (a2.unit >= units) {
+      send(second, secondRaw);
+      const DdaLL128SplitUnit nextSecond = next(nextFirst);
+      load(nextSecond.unit < units ? nextSecond : second, secondRaw);
+      if (nextFirst.unit >= units) {
         break;
       }
-      a = a2;
-      b = b2;
+      first = nextFirst;
+      second = nextSecond;
     }
   }
 
   // B. reduce my slices in peer order from me + 1, to recvbuff and to my own second area slot[me] (no peer writes it).
 #pragma unroll 1
-  for (uint32_t s = s0 + warp; s < s0 + nSlices; s += nwarps) {
+  for (uint32_t slice = firstSlice + warp; slice < firstSlice + nSlices; slice += nwarps) {
     uint64_t acc[kDdaLL128WordsPerThread] = {};
-    ddaLL128LoadRegs<int8_t>(acc, shardAt(srcBytes, selfRank, s), eltIn(s), lane, flagLane);
+    ddaLL128LoadRegs<int8_t>(acc, shardAt(srcBytes, selfRank, slice), eltIn(slice), lane, flagLane);
 #pragma unroll 1
-    for (uint32_t pi = 0; pi < peers; pi += kDdaLL128SplitPollSlices) {
-      const uint32_t mask = pi + 1 < peers ? kPairMask : 1u;
-      const uint64_t* at[kDdaLL128SplitPollSlices] = {wireAt(bankWords, peerOf(pi), s),
-                                                      wireAt(bankWords, peerOf(pi + 1), s)};
-      uint64_t v[kDdaLL128SplitPollSlices][kDdaLL128WordsPerThread];
-      if (!ddaLL128PollWireN(at, mask, v, flag, lane, params)) {
+    for (uint32_t peerIndex = 0; peerIndex < peers; peerIndex += kDdaLL128SplitPollSlices) {
+      const uint32_t mask = peerIndex + 1 < peers ? kPairMask : 1u;
+      const uint64_t* wires[kDdaLL128SplitPollSlices] = {wireAt(bankWords, peerOf(peerIndex), slice),
+                                                         wireAt(bankWords, peerOf(peerIndex + 1), slice)};
+      uint64_t polled[kDdaLL128SplitPollSlices][kDdaLL128WordsPerThread];
+      if (!ddaLL128PollWireN(wires, mask, polled, flag, lane, params)) {
         quit();
         return;
       }
@@ -411,27 +418,27 @@ __launch_bounds__(kDdaLL128ArThreads) __global__
         if ((mask >> i) & 1u) {
 #pragma unroll
           for (int k = 0; k < kDdaLL128WordsPerThread; ++k) {
-            acc[k] = ddaLL128AddWord<T>(acc[k], v[i][k]);
+            acc[k] = ddaLL128AddWord<T>(acc[k], polled[i][k]);
           }
         }
       }
     }
-    ddaLL128StoreWire(wireAt(bankWordsNext, selfRank, s), acc, flag, flagLane);
-    ddaLL128StoreRegs<int8_t>(shardAt(dstBytes, selfRank, s), acc, eltIn(s), lane, flagLane);
+    ddaLL128StoreWire(wireAt(bankWordsNext, selfRank, slice), acc, flag, flagLane);
+    ddaLL128StoreRegs<int8_t>(shardAt(dstBytes, selfRank, slice), acc, eltIn(slice), lane, flagLane);
   }
 
   // C. push my reduced slices to every peer, each warp an equal run of the units, polling and filling each slice once.
   const uint32_t runLen = units / nwarps;
   const uint32_t runExtra = units % nwarps;
-  const uint32_t lo = warp * runLen + (warp < runExtra ? warp : runExtra);
-  const uint32_t hi = lo + runLen + (warp < runExtra ? 1u : 0u);
-  if (lo < hi) {
-    DdaLL128SplitUnit x = unitAt(lo);
+  const uint32_t runBegin = warp * runLen + (warp < runExtra ? warp : runExtra);
+  const uint32_t runEnd = runBegin + runLen + (warp < runExtra ? 1u : 0u);
+  if (runBegin < runEnd) {
+    DdaLL128SplitUnit item = unitAt(runBegin);
     uint64_t cur[1][kDdaLL128WordsPerThread];
 #pragma unroll 1
-    for (; x.unit < hi; ++x.unit) {
-      if (x.unit == lo || x.peerIndex == 0) {
-        const uint64_t* mine[1] = {wireAt(bankWordsNext, selfRank, x.slice)};
+    for (; item.unit < runEnd; ++item.unit) {
+      if (item.unit == runBegin || item.peerIndex == 0) {
+        const uint64_t* mine[1] = {wireAt(bankWordsNext, selfRank, item.slice)};
         if (!ddaLL128PollWireN(mine, 1u, cur, flag, lane, params)) {
           quit();
           return;
@@ -440,11 +447,11 @@ __launch_bounds__(kDdaLL128ArThreads) __global__
         stage.lastOps = __builtin_amdgcn_readfirstlane(stage.lastOps);
         ddaLL128StageFill<kWire>(stage, cur[0], flag, flagLane, lane);
       }
-      ddaLL128StagePush<kWire>(stage, slotAt(peerTbl[peerOf(x.peerIndex)], bankWordsNext, selfRank, x.slice), cur[0],
-                               flag, flagLane, lane);
-      if (++x.peerIndex == peers) {
-        x.peerIndex = 0;
-        ++x.slice;
+      ddaLL128StagePush<kWire>(stage, slotAt(peerTbl[peerOf(item.peerIndex)], bankWordsNext, selfRank, item.slice),
+                               cur[0], flag, flagLane, lane);
+      if (++item.peerIndex == peers) {
+        item.peerIndex = 0;
+        ++item.slice;
       }
     }
   }
@@ -452,23 +459,23 @@ __launch_bounds__(kDdaLL128ArThreads) __global__
   // D. gather the peers' reduced slices, two units one warp stride apart per round trip.
   if (warp < units) {
 #pragma unroll 1
-    for (DdaLL128SplitUnit a = unitAt(warp); a.unit < units;) {
-      const DdaLL128SplitUnit b = next(a);
-      const uint32_t mask = b.unit < units ? kPairMask : 1u;
-      const uint64_t* at[kDdaLL128SplitPollSlices] = {wireAt(bankWordsNext, peerOf(a.peerIndex), a.slice),
-                                                      wireAt(bankWordsNext, peerOf(b.peerIndex), b.slice)};
-      uint64_t v[kDdaLL128SplitPollSlices][kDdaLL128WordsPerThread];
-      if (!ddaLL128PollWireN(at, mask, v, flag, lane, params)) {
+    for (DdaLL128SplitUnit first = unitAt(warp); first.unit < units;) {
+      const DdaLL128SplitUnit second = next(first);
+      const uint32_t mask = second.unit < units ? kPairMask : 1u;
+      const uint64_t* wires[kDdaLL128SplitPollSlices] = {wireAt(bankWordsNext, peerOf(first.peerIndex), first.slice),
+                                                         wireAt(bankWordsNext, peerOf(second.peerIndex), second.slice)};
+      uint64_t polled[kDdaLL128SplitPollSlices][kDdaLL128WordsPerThread];
+      if (!ddaLL128PollWireN(wires, mask, polled, flag, lane, params)) {
         quit();
         return;
       }
-      ddaLL128StoreRegs<int8_t>(shardAt(dstBytes, peerOf(a.peerIndex), a.slice), v[0], eltIn(a.slice), lane,
-                                flagLane);
+      ddaLL128StoreRegs<int8_t>(shardAt(dstBytes, peerOf(first.peerIndex), first.slice), polled[0], eltIn(first.slice),
+                                lane, flagLane);
       if ((mask >> 1) & 1u) {
-        ddaLL128StoreRegs<int8_t>(shardAt(dstBytes, peerOf(b.peerIndex), b.slice), v[1], eltIn(b.slice), lane,
-                                  flagLane);
+        ddaLL128StoreRegs<int8_t>(shardAt(dstBytes, peerOf(second.peerIndex), second.slice), polled[1],
+                                  eltIn(second.slice), lane, flagLane);
       }
-      a = next(b);
+      first = next(second);
     }
   }
 
