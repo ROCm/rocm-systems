@@ -44,6 +44,7 @@ vocabularies:
   kind: [contract]
   disposition: [keep, merge_into]
   gating: [trusted]
+  cadence: [pr]
 suites:
   - id: suite-one
     owner: Team Alpha
@@ -418,7 +419,8 @@ class CheckTestingDocsTest(unittest.TestCase):
             "vocabularies:\n"
             "  kind: [contract]\n"
             "  disposition: [keep, merge_into]\n"
-            "  gating: [trusted]\n",
+            "  gating: [trusted]\n"
+            "  cadence: [pr]\n",
             "vocabularies: []\n", 1)
         _write_docs(self.root, {"test_inventory.yaml": broken})
         results, _ = checker.validate(root=str(self.root))
@@ -1680,6 +1682,16 @@ class CheckTestingDocsTest(unittest.TestCase):
         results, _ = checker.validate(root=str(self.root))
         self.assertTrue(
             any("execution.cadence must be a non-empty string" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_suite_cadence_must_be_declared_in_vocabulary(self):
+        broken = VALID_INVENTORY.replace("      cadence: pr\n", "      cadence: build\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("execution.cadence 'build' not in declared vocabulary" in err
                 for err in results["inventory"]),
             msg=results["inventory"],
         )
@@ -4058,6 +4070,15 @@ class LiveConfigGovernanceInventoryTest(unittest.TestCase):
         rec = self._record_by_build_target("check_hip_tests_config")
         self.assertIsNotNone(rec)
         self.assertEqual(rec["execution"].get("gating"), "trusted")
+
+    def test_config_governance_checks_run_at_build_cadence(self):
+        # Both custom targets run as part of every enabled hip-tests build, not
+        # as PR workflow checks. Their records must therefore use the declared
+        # build cadence.
+        for target in ("check_hip_tests_config", "check_hip_tests_sources"):
+            rec = self._record_by_build_target(target)
+            self.assertIsNotNone(rec)
+            self.assertEqual(rec["execution"].get("cadence"), "build")
 
     def test_sources_check_gating_is_warning_by_default(self):
         # check_sources.py only warns by default (escalating to a hard failure

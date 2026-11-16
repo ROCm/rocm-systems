@@ -28,13 +28,14 @@ for itself (workstreams WS-1 and WS-2):
       ``owner`` (pairwise checks inherit ownership from the classes they
       reference and are not separately owner-stamped);
     - every inventory ``id`` is unique;
-    - each required vocabulary (``kind`` / ``disposition`` / ``gating``) is a
-      non-empty list of non-empty scalar entries (an empty list is rejected
-      because it would vacuously pass every membership check);
-    - every suite ``kind`` / ``disposition`` and every ``execution.gating`` is a
-      non-empty scalar string that is within the vocabulary the inventory declares
-      for itself (the ``vocabularies:`` block); a non-scalar token is a schema
-      error rather than an unhashable set-membership crash;
+    - each required vocabulary (``kind`` / ``disposition`` / ``gating`` /
+      ``cadence``) is a non-empty list of non-empty scalar entries (an empty list
+      is rejected because it would vacuously pass every membership check);
+    - every suite ``kind`` / ``disposition`` and every ``execution.gating`` /
+      ``execution.cadence`` is a non-empty scalar string that is within the
+      vocabulary the inventory declares for itself (the ``vocabularies:`` block);
+      a non-scalar token is a schema error rather than an unhashable
+      set-membership crash;
     - every suite carries a non-empty ``evidence`` list whose entries are mappings
       with a non-empty path and claim (paths resolve to a file on disk - not a
       directory - unless marked ``external:``), matching the coverage-class
@@ -279,7 +280,7 @@ SUPPORTED_COMPONENT = "hip-tests"
 
 # Vocabulary categories the inventory must declare for itself, each as a list of
 # allowed values.
-REQUIRED_VOCABULARIES = ("kind", "disposition", "gating")
+REQUIRED_VOCABULARIES = ("kind", "disposition", "gating", "cadence")
 
 # Required keys per record type. Derived from the documents as authored; a
 # missing key is a schema error.
@@ -1031,6 +1032,7 @@ def check_inventory(inventory, component_dir, repo_root=None):
     kind_vocab = _vocab_values(vocab, "kind")
     disp_vocab = _vocab_values(vocab, "disposition")
     gating_vocab = _vocab_values(vocab, "gating")
+    cadence_vocab = _vocab_values(vocab, "cadence")
 
     suites = inventory.get("suites")
     if not isinstance(suites, list) or not suites:
@@ -1096,10 +1098,17 @@ def check_inventory(inventory, component_dir, repo_root=None):
             exec_missing = REQUIRED_EXECUTION_KEYS - set(execution.keys())
             if exec_missing:
                 errors.append("suite {!r} execution missing keys: {}".format(sid, sorted(exec_missing)))
-            # ``cadence`` is a free-text scalar and must be a non-empty string.
-            if "cadence" in execution and not _nonempty_str(execution.get("cadence")):
+            # ``cadence`` is a vocabulary token and must be a non-empty scalar
+            # string before its membership can be checked.
+            cadence = execution.get("cadence")
+            if cadence is not None and not _nonempty_str(cadence):
                 errors.append(
-                    "suite {!r} execution.cadence must be a non-empty string".format(sid))
+                    "suite {!r} execution.cadence must be a non-empty string: {!r}".format(
+                        sid, cadence))
+            elif _nonempty_str(cadence) and cadence_vocab and cadence not in cadence_vocab:
+                errors.append(
+                    "suite {!r} execution.cadence {!r} not in declared vocabulary".format(
+                        sid, cadence))
             # platforms / backends / prerequisites enumerate where and how the
             # suite runs; each must be a non-empty list whose entries are each a
             # non-empty scalar string (a null, blank, or structured entry carries

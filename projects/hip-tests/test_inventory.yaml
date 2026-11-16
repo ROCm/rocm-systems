@@ -24,6 +24,7 @@ vocabularies:
   kind: [contract, unit, functional, integration, stress, performance]
   disposition: [keep, merge_into, migrate, demote, retire, new, review]
   gating: [trusted, informational, unstable, not_applicable]
+  cadence: [pr, build, on_demand]
 
 # How ctest labels referenced by records are produced. catch/config/parse_config.py
 # emits, per case: one [group] tag (the config file stem - e.g. contract,
@@ -1718,7 +1719,7 @@ suites:
       framework: python-static-analysis
       config: catch/config/configs/test_categories.yaml
     execution:
-      cadence: pr
+      cadence: build
       gating: trusted
       ctest_labels: []
       platforms: [linux, windows]
@@ -1755,7 +1756,7 @@ suites:
       framework: python-static-analysis
       config: catch/config/configs/test_categories.yaml
     execution:
-      cadence: pr
+      cadence: build
       gating: informational
       ctest_labels: []
       platforms: [linux, windows]
