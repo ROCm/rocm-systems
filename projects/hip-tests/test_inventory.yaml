@@ -350,7 +350,7 @@ suites:
     name: HIP contract kernel and launch tests
     kind: contract
     domain: kernel_launch
-    purpose: Kernel object attributes, call-config and function attributes, kernel launch, driver launch-ex, kernel name reference, and multi-device launch invariants.
+    purpose: Kernel object attributes, call-config and function attributes, kernel launch, driver launch-ex, and kernel name reference.
     oracle: Return code, launch/result observable, or accepted unsupported outcome.
     source:
       paths:
@@ -1300,7 +1300,6 @@ suites:
         - catch/unit/sanityTests
         - catch/unit/assertion
         - catch/unit/env
-        - catch/unit/library
         - catch/ABM
         - catch/TypeQualifiers
       build_option: BUILD_UNIT_TESTS
@@ -1319,7 +1318,7 @@ suites:
         external: TheRock build and HIP runtime test jobs run the device suite; see TESTING.md.
     evidence:
       - path: catch/unit/CMakeLists.txt
-        claim: sanityTests, assertion, env, and library are built under BUILD_UNIT_TESTS.
+        claim: sanityTests, assertion, and env are built under BUILD_UNIT_TESTS.
       - path: catch/CMakeLists.txt
         claim: ABM and TypeQualifiers are built under BUILD_UNIT_TESTS at the catch/ level.
     disposition: keep

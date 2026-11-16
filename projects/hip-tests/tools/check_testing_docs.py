@@ -17,8 +17,13 @@ The checks implement the acceptance criteria that TEST_RESTRUCTURING.md states
 for itself (workstreams WS-1 and WS-2):
 
   schema keys / vocabularies
+    - the inventory carries its top-level identity/provenance/vocabulary blocks
+      (``schema_version``, ``component``, ``source_of_truth``, ``vocabularies``,
+      ``suites``) with the required mapping/list shapes;
     - every inventory suite, coverage class, and pairwise check carries its
-      required keys (including an explicit ``owner``);
+      required keys; suites and coverage classes additionally carry an explicit
+      ``owner`` (pairwise checks inherit ownership from the classes they
+      reference and are not separately owner-stamped);
     - every inventory ``id`` is unique;
     - every ``kind`` / ``disposition`` / ``gating`` value is within the
       vocabulary the inventory declares for itself (the ``vocabularies:`` block).
@@ -82,6 +87,19 @@ COVERAGE_NAME = "test_coverage_model.yaml"
 TESTING_NAME = "TESTING.md"
 INCIDENTS_NAME = "TESTING_INCIDENTS.md"
 RESTRUCTURING_NAME = "TEST_RESTRUCTURING.md"
+
+# Required top-level inventory keys. The inventory is a connected schema whose
+# identity (schema_version, component), provenance (source_of_truth), and
+# self-declared vocabularies must be present with the right shape before any
+# per-suite check is meaningful; a missing or malformed block is a schema error
+# in its own right (TEST_RESTRUCTURING.md WS-1).
+REQUIRED_INVENTORY_TOP_KEYS = frozenset({
+    "schema_version", "component", "source_of_truth", "vocabularies", "suites",
+})
+
+# Vocabulary categories the inventory must declare for itself, each as a list of
+# allowed values.
+REQUIRED_VOCABULARIES = ("kind", "disposition", "gating")
 
 # Required keys per record type. Derived from the documents as authored; a
 # missing key is a schema error.
@@ -147,6 +165,26 @@ def _nonempty_str(value):
     return isinstance(value, str) and bool(value.strip())
 
 
+def _is_scalar(value):
+    """True for a present, non-container scalar value.
+
+    A number is accepted as-is; a string must be non-empty once stripped. Null
+    and mapping/list containers are rejected so that schema_version cannot be
+    silently omitted or given a structured value.
+    """
+    if value is None or isinstance(value, (dict, list)):
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    return True
+
+
+def _vocab_values(vocab, name):
+    """Return the declared vocabulary list for name as a set (empty if absent)."""
+    value = vocab.get(name)
+    return set(value) if isinstance(value, list) else set()
+
+
 def check_inventory(inventory, component_dir):
     """Validate the suite inventory.
 
@@ -162,13 +200,37 @@ def check_inventory(inventory, component_dir):
         return (["inventory did not parse into a mapping"], suite_ids,
                 incident_refs, {"records": 0, "refs": 0})
 
-    vocab = inventory.get("vocabularies") or {}
-    for name in ("kind", "disposition", "gating"):
+    # Top-level schema: identity, provenance, and vocabulary blocks must be
+    # present with the right shape before any per-suite check is meaningful.
+    missing_top = REQUIRED_INVENTORY_TOP_KEYS - set(inventory.keys())
+    if missing_top:
+        errors.append(
+            "inventory missing top-level keys: {}".format(sorted(missing_top)))
+
+    if "schema_version" in inventory and not _is_scalar(inventory.get("schema_version")):
+        errors.append("inventory schema_version must be a non-empty scalar")
+
+    if "component" in inventory and not _nonempty_str(inventory.get("component")):
+        errors.append("inventory component must be a non-empty string")
+
+    if "source_of_truth" in inventory:
+        sot = inventory.get("source_of_truth")
+        if not isinstance(sot, dict) or not sot:
+            errors.append("inventory source_of_truth must be a non-empty mapping")
+
+    vocab = inventory.get("vocabularies")
+    if "vocabularies" in inventory and not isinstance(vocab, dict):
+        errors.append("inventory vocabularies must be a mapping")
+    if not isinstance(vocab, dict):
+        vocab = {}
+    for name in REQUIRED_VOCABULARIES:
         if name not in vocab:
             errors.append("vocabularies block is missing {!r}".format(name))
-    kind_vocab = set(vocab.get("kind", []))
-    disp_vocab = set(vocab.get("disposition", []))
-    gating_vocab = set(vocab.get("gating", []))
+        elif not isinstance(vocab.get(name), list):
+            errors.append("vocabularies {!r} must be a list".format(name))
+    kind_vocab = _vocab_values(vocab, "kind")
+    disp_vocab = _vocab_values(vocab, "disposition")
+    gating_vocab = _vocab_values(vocab, "gating")
 
     suites = inventory.get("suites")
     if not isinstance(suites, list) or not suites:
@@ -230,23 +292,41 @@ def check_inventory(inventory, component_dir):
                         errors.append(
                             "suite {!r} {} target {!r} is not an inventory id".format(sid, disp, tid))
 
-        # Source paths.
+        # Source paths: a suite must name at least one source path, and every
+        # path must be a string that resolves on disk (or an external: marker).
         source = suite.get("source")
         if isinstance(source, dict):
-            for rel in source.get("paths", []) or []:
-                if isinstance(rel, str) and rel.startswith(EXTERNAL_MARKER):
-                    continue
-                if isinstance(rel, str):
+            paths = source.get("paths")
+            if not isinstance(paths, list) or not paths:
+                errors.append(
+                    "suite {!r} source.paths must be a non-empty list".format(sid))
+            else:
+                for rel in paths:
+                    if not isinstance(rel, str):
+                        errors.append(
+                            "suite {!r} source path is not a string: {!r}".format(sid, rel))
+                        continue
+                    if rel.startswith(EXTERNAL_MARKER):
+                        continue
                     if _path_exists(component_dir, rel):
                         refs_ok += 1
                     else:
                         errors.append("suite {!r} source path missing: {}".format(sid, rel))
+        elif "source" in suite:
+            errors.append("suite {!r} source is not a mapping".format(sid))
 
-        # Evidence paths.
+        # Evidence: each entry must be a mapping carrying both a path and a
+        # claim; the path must resolve on disk unless marked external.
         for ev in suite.get("evidence", []) or []:
             if not isinstance(ev, dict):
+                errors.append(
+                    "suite {!r} evidence entry is not a mapping: {!r}".format(sid, ev))
                 continue
             rel = ev.get("path")
+            if not _nonempty_str(rel):
+                errors.append("suite {!r} evidence entry missing a path".format(sid))
+            if not _nonempty_str(ev.get("claim")):
+                errors.append("suite {!r} evidence entry missing a claim".format(sid))
             if not isinstance(rel, str) or rel.startswith(EXTERNAL_MARKER):
                 continue
             if _path_exists(component_dir, rel):
@@ -290,6 +370,9 @@ def check_coverage_model(model, suite_ids, component_dir):
     declared_axes = set()
     declared_axis_ids = set()
     for axis in cm.get("axes", []) or []:
+        if not isinstance(axis, dict):
+            errors.append("coverage model axis is not a mapping: {!r}".format(axis))
+            continue
         axis_id = axis.get("id")
         declared_axis_ids.add(axis_id)
         for cls in axis.get("classes", []) or []:
@@ -315,6 +398,9 @@ def check_coverage_model(model, suite_ids, component_dir):
     seen_class_ids = set()
     classes = cm.get("classes", []) or []
     for cls in classes:
+        if not isinstance(cls, dict):
+            errors.append("coverage class record is not a mapping: {!r}".format(cls))
+            continue
         cid = cls.get("id", "<no-id>")
         if cid in seen_class_ids:
             errors.append("duplicate coverage class id: {!r}".format(cid))
@@ -340,6 +426,9 @@ def check_coverage_model(model, suite_ids, component_dir):
 
     seen_pair_ids = set()
     for pc in cm.get("pairwise_checks", []) or []:
+        if not isinstance(pc, dict):
+            errors.append("pairwise check record is not a mapping: {!r}".format(pc))
+            continue
         pid = pc.get("id", "<no-id>")
         if pid in seen_pair_ids:
             errors.append("duplicate pairwise check id: {!r}".format(pid))

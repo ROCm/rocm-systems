@@ -12,6 +12,7 @@ required, so the suite is a fast static gate.
 Run with:  python -m unittest projects/hip-tests/tools/tests/test_check_testing_docs.py
 """
 
+import os
 import sys
 import tempfile
 import unittest
@@ -30,6 +31,9 @@ import check_testing_docs as checker  # noqa: E402
 VALID_INVENTORY = """\
 schema_version: 1
 component: hip-tests
+source_of_truth:
+  suite_placement: catch/*/CMakeLists.txt
+  case_metadata: catch/config/configs/*.yaml
 vocabularies:
   kind: [contract]
   disposition: [keep, merge_into]
@@ -148,6 +152,12 @@ class CheckTestingDocsTest(unittest.TestCase):
         self.root = Path(self._tmp.name)
         self.addCleanup(self._tmp.cleanup)
 
+    def _chdir(self, path):
+        """Run the rest of the test from path, restoring cwd afterward."""
+        prev = os.getcwd()
+        os.chdir(str(path))
+        self.addCleanup(os.chdir, prev)
+
     # -- positive baseline ---------------------------------------------------
 
     def test_valid_set_passes_with_counts(self):
@@ -167,6 +177,144 @@ class CheckTestingDocsTest(unittest.TestCase):
         self.assertTrue(
             any("does not parse as YAML" in err for err in results["load"]),
             msg=results["load"],
+        )
+
+    # -- top-level inventory schema: missing keys ----------------------------
+
+    def test_missing_top_level_schema_version(self):
+        broken = VALID_INVENTORY.replace("schema_version: 1\n", "", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("missing top-level keys" in err and "schema_version" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_missing_top_level_component(self):
+        broken = VALID_INVENTORY.replace("component: hip-tests\n", "", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("missing top-level keys" in err and "component" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_missing_top_level_source_of_truth(self):
+        broken = VALID_INVENTORY.replace(
+            "source_of_truth:\n"
+            "  suite_placement: catch/*/CMakeLists.txt\n"
+            "  case_metadata: catch/config/configs/*.yaml\n",
+            "", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("missing top-level keys" in err and "source_of_truth" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_missing_top_level_vocabularies(self):
+        broken = VALID_INVENTORY.replace(
+            "vocabularies:\n"
+            "  kind: [contract]\n"
+            "  disposition: [keep, merge_into]\n"
+            "  gating: [trusted]\n",
+            "", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("missing top-level keys" in err and "vocabularies" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    # -- top-level inventory schema: malformed nested shapes -----------------
+
+    def test_component_not_a_string(self):
+        broken = VALID_INVENTORY.replace("component: hip-tests\n", "component: 5\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("component must be a non-empty string" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_schema_version_must_be_scalar(self):
+        broken = VALID_INVENTORY.replace(
+            "schema_version: 1\n", "schema_version: [1]\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("schema_version must be a non-empty scalar" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_source_of_truth_not_a_mapping(self):
+        broken = VALID_INVENTORY.replace(
+            "source_of_truth:\n"
+            "  suite_placement: catch/*/CMakeLists.txt\n"
+            "  case_metadata: catch/config/configs/*.yaml\n",
+            "source_of_truth: just-a-string\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("source_of_truth must be a non-empty mapping" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_vocabularies_not_a_mapping(self):
+        broken = VALID_INVENTORY.replace(
+            "vocabularies:\n"
+            "  kind: [contract]\n"
+            "  disposition: [keep, merge_into]\n"
+            "  gating: [trusted]\n",
+            "vocabularies: []\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("vocabularies must be a mapping" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_vocabulary_category_must_be_a_list(self):
+        broken = VALID_INVENTORY.replace("  kind: [contract]\n", "  kind: contract\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("vocabularies 'kind' must be a list" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    # -- inventory suite source / evidence shapes ----------------------------
+
+    def test_empty_source_paths_is_reported(self):
+        broken = VALID_INVENTORY.replace(
+            '      paths:\n        - "external: outside-this-repo"\n',
+            "      paths: []\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("source.paths must be a non-empty list" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_evidence_entry_missing_claim(self):
+        broken = VALID_INVENTORY.replace(
+            "        claim: Built under BUILD_CONTRACT_TESTS.\n", "", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("evidence entry missing a claim" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
         )
 
     # -- unknown inventory id in coverage ------------------------------------
@@ -191,6 +339,46 @@ class CheckTestingDocsTest(unittest.TestCase):
         results, _ = checker.validate(root=str(self.root))
         self.assertTrue(
             any("missing required axis 'integration_boundary'" in err
+                for err in results["coverage_model"]),
+            msg=results["coverage_model"],
+        )
+
+    # -- coverage model malformed record types (no AttributeError) -----------
+
+    def test_axis_record_not_a_mapping(self):
+        broken = VALID_COVERAGE.replace(
+            "    - id: integration_boundary\n      classes: [in_process]\n",
+            "    - id: integration_boundary\n      classes: [in_process]\n    - 42\n",
+            1)
+        _write_docs(self.root, {"test_coverage_model.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("axis is not a mapping" in err for err in results["coverage_model"]),
+            msg=results["coverage_model"],
+        )
+
+    def test_class_record_not_a_mapping(self):
+        broken = VALID_COVERAGE.replace(
+            "      gap_status: covered_dual_tier\n  pairwise_checks: []\n",
+            "      gap_status: covered_dual_tier\n    - not-a-mapping\n"
+            "  pairwise_checks: []\n",
+            1)
+        _write_docs(self.root, {"test_coverage_model.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("class record is not a mapping" in err
+                for err in results["coverage_model"]),
+            msg=results["coverage_model"],
+        )
+
+    def test_pairwise_record_not_a_mapping(self):
+        broken = VALID_COVERAGE.replace(
+            "  pairwise_checks: []\n",
+            "  pairwise_checks:\n    - not-a-mapping\n", 1)
+        _write_docs(self.root, {"test_coverage_model.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("pairwise check record is not a mapping" in err
                 for err in results["coverage_model"]),
             msg=results["coverage_model"],
         )
@@ -274,7 +462,9 @@ class CheckTestingDocsTest(unittest.TestCase):
     # -- negative --root paths -----------------------------------------------
 
     def test_empty_root_diagnoses_missing_docs(self):
-        # An empty root must diagnose missing documents, not crash.
+        # An empty root must diagnose missing documents, not crash. Run from an
+        # empty directory so the result does not depend on the caller's cwd.
+        self._chdir(self.root)
         results, _ = checker.validate(root="")
         self.assertTrue(
             any("file not found" in err for err in results["load"]),
@@ -284,6 +474,8 @@ class CheckTestingDocsTest(unittest.TestCase):
 
     def test_main_empty_root_returns_failure_without_argparse_error(self):
         # main("--root", "") must return exit code 1, not raise SystemExit(2).
+        # Run from an empty directory so the result is cwd-independent.
+        self._chdir(self.root)
         rc = checker.main(["--root", "", "--json"])
         self.assertEqual(rc, 1)
 
