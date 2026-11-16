@@ -294,9 +294,8 @@ compute.total_flops:
   unit: GFLOP/s
   description: >-
     The overall achieved performance, measured in GigaFLOPs per second (GFLOP/s). This
-    is calculated as the sum of all VALU and MFMA floating-point operations divided by
-    the total execution time. This value is used as the y-coordinate for the kernel's
-    point on the Roofline plot.
+    is calculated as the sum of all VALU and MFMA floating-point operations, per second.
+    This value is used as the y-coordinate for the kernel's point on the Roofline plot.
 compute.valu_active_threads:
   peak: 64
 compute.valu_flops:

@@ -2,7 +2,7 @@ l1i.bw:
   name: L1I Bandwidth
   formula: 64 * SUM(SQC_ICACHE_REQ) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: The number of bytes looked up in the L1I cache per unit time.
+  description: The number of bytes looked up in the L1I cache divided by total duration.
   peak: $max_sclk / 1000 * 64 * $sqc_per_gpu
 l1i.bw_util:
   name: L1I Bandwidth Utilization

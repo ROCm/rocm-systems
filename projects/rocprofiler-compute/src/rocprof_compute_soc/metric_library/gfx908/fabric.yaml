@@ -92,7 +92,8 @@ fabric.rd_bw:
   formula: SUM(TCC_EA_RDREQ_32B_sum * 32 + (TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum) * 64) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes read by the L2 over the Infinity Fabric interface per unit time.
+    The number of bytes read by the L2 over the Infinity Fabric interface, divided by
+    total duration.
   peak: $hbmBandwidth
 fabric.rd_bw_norm:
   name: L2-Fabric Read Bytes
@@ -190,7 +191,7 @@ fabric.wr_atomic_bw:
   unit: GB/s
   description: >-
     The number of bytes sent by the L2 over the Infinity Fabric interface by write and
-    atomic operations per unit time.
+    atomic operations, divided by total duration.
   peak: $hbmBandwidth
 fabric.wr_atomic_bw_norm:
   name: L2-Fabric Write and Atomic Bytes
