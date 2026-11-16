@@ -443,8 +443,9 @@ class VirtualGPU : public device::VirtualDevice {
     void NoteWaitsSubmitted() override;
     void NoteGpuWait(ProfilingSignal* signal) override;
 
-    //! Signals a set of GPU waits captured in one WaitingSignal call. Holding a reference keeps
-    //! the owner from rearming them while a waiter may still read the old use.
+    //! Signals a set of GPU waits captured in one WaitingSignal call outside a command (a command
+    //! pins its waits itself). Holding a reference keeps the owner from rearming them while a
+    //! waiter may still read the old use.
     struct PinnedWaits {
       std::vector<ProfilingSignal*> signals;
       uint64_t close_seq = 0;   //!< Uses below this sequence consume the waits
@@ -807,9 +808,6 @@ class VirtualGPU : public device::VirtualDevice {
    * @return bool true if Wait returned successfully, false otherwise
    */
   bool releaseGpuMemoryFence(bool skip_copy_wait = false);
-  //! An armed gate signal for a graph end marker (DEBUG_CLR_GRAPH_FAST_LAUNCH) from the device's
-  //! pool, nullptr if none
-  ProfilingSignal* AcquireGateSignal();
   //! Issues the pending fork wait (DEBUG_CLR_GRAPH_FAST_LAUNCH) as a barrier without signal
   void FlushPendingForkWait();
   //! Drops the pending fork wait and its reference
@@ -967,7 +965,8 @@ class VirtualGPU : public device::VirtualDevice {
   bool dispatchCounterAqlPacket(hsa_ext_amd_aql_pm4_packet_t* packet, const uint32_t gfxVersion,
                                 bool blocking, const hsa_ven_amd_aqlprofile_1_00_pfn_t* extApi);
   void dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal = false,
-                             hsa_signal_t signal = hsa_signal_t{0}, bool depSignalsSet = false);
+                             hsa_signal_t signal = hsa_signal_t{0}, bool depSignalsSet = false,
+                             bool skipTs = false);
   void dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveDepSignal = false,
                                   hsa_signal_t signal = hsa_signal_t{0},
                                   hsa_signal_value_t value = 0, hsa_signal_value_t mask = 0,

@@ -2850,7 +2850,7 @@ amd::Command* GraphExecSegmented::EnqueueSegmentedGraph(hip::Stream* launch_stre
   // no GraphExecBase pin.
   auto* graph_accumulate = new amd::AccumulateCommand(*launch_stream, {}, nullptr);
   // A launch whose segments all run on the launch stream (one segment, or collapsed to a single
-  // stream) has no side queue to gate (DEBUG_CLR_GRAPH_FAST_LAUNCH)
+  // stream) has no side queue waiting on its end marker (DEBUG_CLR_GRAPH_FAST_LAUNCH)
   graph_accumulate->setMultiStream(
       std::any_of(segments_.begin(), segments_.end(), [&](const Segment& seg) {
         return resolveSegmentStream(seg) != launch_stream;
