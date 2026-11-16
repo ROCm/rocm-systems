@@ -365,7 +365,9 @@ public:
   }
 
   [[nodiscard]] VmMtypeSnapshot snapshot_mtype(uint64_t address) const override {
-    auto guard = address_space_->acquire_page_table_request(vmid_);
+    // The binding retains its registration's request mutex. Acquiring it
+    // directly still revalidates the VMID before exposing page-table state.
+    auto guard = address_space_->acquire_page_table_request(vmid_, original_request_mutex_);
     if (!mutation_epoch_ || !guard.cacheable())
       return {.mtype = guard.owns_lock() ? address_space_->pte_mtype(address, guard)
                                          : query_mtype(address)};

@@ -25,11 +25,15 @@ add_library(
     conversion/conversion64.cpp
     conversion/fp8_conversion.cpp
     conversion/fp8_narrow.cpp
+    conversion/scaled_narrow.cpp
+    conversion/wide_scaled_narrow.cpp
     conversion/integer_conversion.cpp
     conversion/normalized.cpp
     conversion/pack.cpp
     conversion/nibble_pack.cpp
     conversion/packed_conversion.cpp
+    conversion/scaled_widen.cpp
+    conversion/wide_scaled_widen.cpp
     compare/class.cpp
     compare/constant_compare.cpp
     compare/float_compare.cpp

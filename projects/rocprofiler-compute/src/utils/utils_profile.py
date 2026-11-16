@@ -2,6 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 import csv
+import ctypes
 import fcntl
 import importlib
 import os
@@ -9,11 +10,11 @@ import pkgutil
 import re
 import shlex
 import shutil
+import tempfile
 import time
-from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Optional, Union, cast
+from typing import Any, Dict, Generator, List, Optional, Tuple, Union, cast
 
 import config
 import utils.utils_profile_csv as csv_ops
@@ -34,7 +35,7 @@ from utils.utils_common import (
     create_temp_rocprofiler_metrics_path,
     get_rocprof_cmd,
     parse_pmc_perf,
-    perform_attach_detach,
+    resolve_rocm_library_path,
 )
 from vendored import yaml
 
@@ -62,7 +63,9 @@ _OUTDATED_FIRMWARE_MESSAGE = (
     "GPU firmware on this machine is below the minimum rocprofiler-sdk requires."
 )
 
-ProfilerOptions = Union[list[str], dict[str, Union[str, list[str]]]]
+PROCFS_ROOT = Path("/proc")
+
+ProfilerOptions = Union[List[str], Dict[str, Union[str, List[str]]]]
 
 
 def is_live_attach(
@@ -78,6 +81,61 @@ def is_live_attach(
 def pc_sampling_unit(method: str) -> str:
     """Map a PC sampling method to its sampling unit."""
     return "time" if method == "host_trap" else "cycles"
+
+
+def perform_attach_detach(new_env: Dict[str, str], options: Dict[str, Any]) -> None:
+    """Attach to the process in ROCPROF_ATTACH_PID, profile it, and detach.
+
+    A process in a container cannot write to our output directory. For such a
+    process, the output goes to a folder in its own /tmp. After detach, the
+    folder is copied to our output directory and deleted.
+    """
+    pid = options["ROCPROF_ATTACH_PID"]
+    target_root = PROCFS_ROOT / str(pid) / "root"
+    if target_root.samefile("/"):
+        _attach_and_detach(new_env, options)
+        return
+    output_path = new_env["ROCPROF_OUTPUT_PATH"]
+    staging_path = Path(
+        tempfile.mkdtemp(
+            prefix=f"rocprof_compute_attach_{pid}_", dir=target_root / "tmp"
+        )
+    )
+    console_debug(
+        f"Process {pid} runs in a container. Its output goes to {staging_path}"
+    )
+    # The process sees the folder in its own /tmp.
+    new_env["ROCPROF_OUTPUT_PATH"] = f"/tmp/{staging_path.name}"
+    try:
+        _attach_and_detach(new_env, options)
+        if not staging_path.is_dir():
+            console_error(
+                f"Cannot copy the profiling output: process {pid} has exited."
+            )
+        shutil.copytree(staging_path, output_path, dirs_exist_ok=True)
+    finally:
+        shutil.rmtree(staging_path, ignore_errors=True)
+
+
+def find_attach_tool_library(pid: int) -> Optional[str]:
+    """Return the SDK tool library from the ROCm installation of process pid.
+
+    The path is inside the root directory of the process, so it also works for a
+    process in a container.
+    """
+    attach_library_dir = _find_mapped_library_directory(
+        _read_process_maps(pid), "librocprofiler-sdk-attach.so"
+    )
+    if attach_library_dir is None:
+        return None
+    tool_path = Path(
+        attach_library_dir, "rocprofiler-sdk", "librocprofiler-sdk-tool.so"
+    )
+    target_root = PROCFS_ROOT / str(pid) / "root"
+    resolved = resolve_rocm_library_path(str(target_root / tool_path.relative_to("/")))
+    if resolved is None or not Path(resolved).is_file():
+        return None
+    return str(tool_path.parent / Path(resolved).name)
 
 
 @contextmanager
@@ -100,7 +158,7 @@ def file_lock(
         yield
 
 
-def _open_shared_lock_fd(lock_path: Path) -> tuple[int, str]:
+def _open_shared_lock_fd(lock_path: Path) -> Tuple[int, str]:
     """Open a shared world-rw lock file, creating it if needed.
 
     flock advisory locks do not require write access, so a read-only fd is
@@ -174,7 +232,7 @@ def keep_native_artifacts(source_dir: Path, workload_dir: Path, fbase: str) -> N
 
 
 def run_prof(
-    fnames: Union[list[str], str],
+    fnames: Union[List[str], str],
     profiler_options: ProfilerOptions,
     workload_dir: str,
     ml_api_trace_enabled: bool = False,
@@ -205,7 +263,7 @@ def run_prof(
 
     # standard rocprof options
     if get_rocprof_cmd() == "rocprofiler-sdk":
-        options = cast(dict[str, Union[str, list[str]]], profiler_options).copy()
+        options = cast(Dict[str, Union[str, List[str]]], profiler_options).copy()
         if multiple_files:
             options["ROCPROF_COUNTERS"] = ", ".join([
                 f"pmc: {' '.join(parse_pmc_perf(fname))}" for fname in fnames
@@ -221,7 +279,7 @@ def run_prof(
             )
             return
         default_options = ["-i", fnames]
-        options = default_options + cast(list[str], profiler_options)
+        options = default_options + cast(List[str], profiler_options)
         options = ["-A", "absolute"] + options
 
     new_env = os.environ.copy()
@@ -246,10 +304,19 @@ def run_prof(
                 sdk_config["rocprofiler-sdk"]["counters"].extend(
                     yaml.safe_load(file)["rocprofiler-sdk"]["counters"]
                 )
-    # Set counter definitions
-    new_env["ROCPROFILER_METRICS_PATH"] = create_temp_rocprofiler_metrics_path(
-        sdk_config
+    # Set counter definitions. An attach target reads them from its own /tmp.
+    attach_pid = (
+        profiler_options.get("ROCPROF_ATTACH_PID")
+        if isinstance(profiler_options, dict)
+        else None
     )
+    metrics_parent = (
+        PROCFS_ROOT / str(attach_pid) / "root" / "tmp" if attach_pid else Path("/tmp")
+    )
+    metrics_path = Path(
+        create_temp_rocprofiler_metrics_path(sdk_config, metrics_parent)
+    )
+    new_env["ROCPROFILER_METRICS_PATH"] = f"/tmp/{metrics_path.name}"
     console_debug(
         "Adding env var for counter definitions: "
         f"ROCPROFILER_METRICS_PATH={new_env['ROCPROFILER_METRICS_PATH']}"
@@ -260,34 +327,39 @@ def run_prof(
     output_path = Path(workload_dir + "/out/pmc_1")
     output_path.mkdir(parents=True, exist_ok=True)
 
-    if get_rocprof_cmd() == "rocprofiler-sdk":
-        app_cmd = options.pop("APP_CMD") if "APP_CMD" in options else None
-        for key, value in options.items():
-            new_env[key] = value
-        # Log only the os.environ delta to avoid leaking secrets in shared logs.
-        env_delta = {k: v for k, v in new_env.items() if os.environ.get(k) != v}
-        console_debug(f"rocprof sdk env vars: {env_delta}")
+    try:
+        if get_rocprof_cmd() == "rocprofiler-sdk":
+            app_cmd = options.pop("APP_CMD") if "APP_CMD" in options else None
+            for key, value in options.items():
+                new_env[key] = value
+            # Log only the os.environ delta to avoid leaking secrets in shared logs.
+            env_delta = {k: v for k, v in new_env.items() if os.environ.get(k) != v}
+            console_debug(f"rocprof sdk env vars: {env_delta}")
 
-        if is_live_attach(profiler_options):
-            perform_attach_detach(new_env, options)
-        else:
-            if app_cmd is None:
-                console_error(
-                    "APP_CMD, the workload's executable must be provided "
-                    "when not in live attach mode"
+            if is_live_attach(profiler_options):
+                perform_attach_detach(new_env, options)
+            else:
+                if app_cmd is None:
+                    console_error(
+                        "APP_CMD, the workload's executable must be provided "
+                        "when not in live attach mode"
+                    )
+
+                console_debug(f"rocprof sdk user provided command: {app_cmd}")
+                success, output = capture_subprocess_output(
+                    app_cmd, new_env=new_env, profileMode=True
                 )
-
-            console_debug(f"rocprof sdk user provided command: {app_cmd}")
-            success, output = capture_subprocess_output(
-                app_cmd, new_env=new_env, profileMode=True
+        else:
+            # print in readable format using shlex
+            console_debug(
+                f"rocprof command: {shlex.join([get_rocprof_cmd()] + options)}"
             )
-    else:
-        # print in readable format using shlex
-        console_debug(f"rocprof command: {shlex.join([get_rocprof_cmd()] + options)}")
-        # profile the app
-        success, output = capture_subprocess_output(
-            [get_rocprof_cmd()] + options, new_env=new_env, profileMode=True
-        )
+            # profile the app
+            success, output = capture_subprocess_output(
+                [get_rocprof_cmd()] + options, new_env=new_env, profileMode=True
+            )
+    finally:
+        shutil.rmtree(metrics_path, ignore_errors=True)
 
     time_2 = time.time()
     console_debug(
@@ -303,10 +375,6 @@ def run_prof(
             shutil.copytree(
                 pass_1, Path(workload_dir) / "out" / "pmc_1", dirs_exist_ok=True
             )
-
-    # Delete counter definition temporary directory
-    if new_env.get("ROCPROFILER_METRICS_PATH"):
-        shutil.rmtree(new_env["ROCPROFILER_METRICS_PATH"], ignore_errors=True)
 
     if (not is_live_attach(profiler_options)) and (not success):
         for line in output.splitlines():
@@ -421,10 +489,6 @@ def run_prof(
         # path needs; copy it and the marker trace to the workload dir.
         save_ml_api_trace_inputs(workload_dir, fbase, results_csv)
     if retain_rocpd_output:
-        console_warning(
-            "--retain-rocpd-output is deprecated and will be removed in "
-            "a future release. .db files will be retained automatically."
-        )
         for db_path in db_paths:
             pid = db_path.stem.split("_")[0]
             dest = Path(workload_dir) / f"{fbase}_{pid}.db"
@@ -460,7 +524,7 @@ def gen_sysinfo(
         writer.writerow(data)
 
 
-def get_submodules(package_name: str) -> list[str]:
+def get_submodules(package_name: str) -> List[str]:
     """List all submodules for a target package"""
 
     submodules: list[str] = []
@@ -503,3 +567,123 @@ def save_ml_api_trace_inputs(
     )
     console_log("Counter Collection: ", str(dst_counter))
     console_log("Marker API Trace: ", str(dst_marker))
+
+
+@contextmanager
+def _temporary_env(env_vars: Dict[str, str]) -> Generator[None, None, None]:
+    """Temporarily change the environment variables of this application."""
+    original_env = os.environ.copy()
+    os.environ.update({k: str(v) for k, v in env_vars.items()})
+    try:
+        yield
+    finally:
+        os.environ.clear()
+        os.environ.update(original_env)
+
+
+def _attach_and_detach(new_env: Dict[str, str], options: Dict[str, Any]) -> None:
+    with _temporary_env(new_env):
+        libname = options["ROCPROF_ATTACH_LIBRARY"]
+
+        try:
+            c_lib = ctypes.CDLL(libname)
+            if c_lib is None:
+                console_error(f"Error opening {libname}")
+        except Exception as e:
+            console_error(f"Error loading {libname}: {e}")
+
+        # Set argument and return types for live attach functions
+        try:
+            # new live attach API
+            c_lib.rocattach_attach.restype = ctypes.c_int
+            c_lib.rocattach_attach.argtypes = [ctypes.c_int]
+            c_lib.rocattach_detach.restype = ctypes.c_int
+            c_lib.rocattach_detach.argtypes = [ctypes.c_int]
+        except Exception as e:
+            console_debug(
+                "Error setting new live attach API argument "
+                f"types: {e}, trying legacy live attach API"
+            )
+            try:
+                # old live attach API
+                c_lib.attach.restype = ctypes.c_int
+                c_lib.attach.argtypes = [ctypes.c_uint]
+                c_lib.detach.restype = ctypes.c_int
+                c_lib.detach.argtypes = [ctypes.c_uint]
+            except Exception as e:
+                console_error(f"Error setting live attach function argument types: {e}")
+
+        pid = options["ROCPROF_ATTACH_PID"]
+        if pid is None:
+            console_error("Live attach mode requires a process ID (ROCPROF_ATTACH_PID)")
+
+        try:
+            # new live attach API
+            attach_status = c_lib.rocattach_attach(int(pid))
+            if attach_status != 0:
+                console_error(
+                    f"Error attaching to process {pid}, "
+                    f"rocattach_attach returned {attach_status}"
+                )
+        except Exception as e:
+            console_debug(
+                "Error attaching with latest live attach "
+                f"API: {e}, trying legacy live attach API"
+            )
+            try:
+                # old live attach API
+                c_lib.attach(int(pid))
+            except Exception as e:
+                console_error(f"Error attaching to process {pid}: {e}")
+
+        duration = os.environ.get("ROCPROF_ATTACH_DURATION", None)
+        if duration is None:
+            console_log(
+                f"\033[93mAttach to process with ID {pid} is successful, "
+                "Press Enter to detach...\033[0m"
+            )
+            input()
+        else:
+            console_log(
+                f"\033[93mAttach to process with ID {pid} is successful, "
+                f"detach will happen in {duration} milliseconds...\033[0m"
+            )
+            time.sleep(int(duration) / 1000)
+
+        try:
+            # new live attach API
+            detach_status = c_lib.rocattach_detach(int(pid))
+            if detach_status != 0:
+                console_error(
+                    f"Error detaching from process {pid}, "
+                    f"rocattach_detach returned {detach_status}"
+                )
+        except Exception as e:
+            console_debug(
+                f"Error detaching with latest live attach API: {e}, "
+                "trying detach with legacy live attach API"
+            )
+            try:
+                # old live attach API
+                c_lib.detach(int(pid))
+            except Exception as e:
+                console_error(f"Error detaching from process {pid}: {e}")
+
+
+def _read_process_maps(pid: int) -> List[str]:
+    """Return the lines of /proc/<pid>/maps."""
+    try:
+        maps_path = PROCFS_ROOT / str(pid) / "maps"
+        return maps_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError as error:
+        console_error(f"Cannot read the memory map of process {pid}: {error}")
+
+
+def _find_mapped_library_directory(
+    maps_lines: List[str], library_name: str
+) -> Optional[str]:
+    """Return the directory of the first mapped file that matches library_name."""
+    for line in maps_lines:
+        if library_name in line and not line.endswith("(deleted)"):
+            return str(Path(line[line.index("/") :]).parent)
+    return None
