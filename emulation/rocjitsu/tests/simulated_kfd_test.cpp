@@ -2978,6 +2978,77 @@ TEST_F(SimulatedKfdTest, DispatchedWaitSurvivesAConcurrentFinalClose) {
       << "a failed wait must report -errno, not libc's -1";
 }
 
+TEST_F(SimulatedKfdTest, NativeCancellationReleasesSimulatorWaitBeforeDeferredClose) {
+  constexpr size_t kSlots = 64;
+  std::vector<uint64_t> page(kSlots, 0);
+  rj_vm_t *raw_vm = nullptr;
+  ASSERT_EQ(rj_vm_create(CONFIG_PATH.c_str(), RJ_VM_MODE_LOCAL, &raw_vm), ROCJITSU_STATUS_SUCCESS);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(raw_vm, &rj_vm_destroy);
+  ASSERT_NE(vm->vm, nullptr);
+  auto *execution_driver = vm->vm->driver();
+  ASSERT_NE(execution_driver, nullptr);
+
+  rocjitsu::config::DbtGuestConfig config;
+  config.enabled = true;
+  config.guest_isa = "gfx950";
+  config.host.isa = "gfx950";
+  config.host.gpu_id = execution_driver->gpu_id();
+  config.host.backend = rocjitsu::config::DbtExecutionBackend::Simulator;
+  config.guest_device = vm->loaded.device;
+  config.guest_device.gpu_id += 1;
+  config.guest_device.drm_render_minor += 1;
+
+  rocjitsu::GuestKfd guest(std::move(config), execution_driver);
+  ASSERT_TRUE(guest.prepare_for_discovery());
+  const int app_fd = guest.open();
+  ASSERT_GE(app_fd, 0);
+
+  auto proc = execution_driver->find_process(execution_driver->local_process_id());
+  ASSERT_NE(proc, nullptr);
+  proc->event_state_.adopt_page(page.data(), page.size() * sizeof(uint64_t));
+
+  kfd_ioctl_create_event_args create{};
+  ASSERT_EQ(guest.ioctl(AMDKFD_IOC_CREATE_EVENT, &create), 0);
+
+  kfd_event_data event{};
+  event.event_id = create.event_id;
+  kfd_ioctl_wait_events_args args{};
+  args.events_ptr = reinterpret_cast<uint64_t>(&event);
+  args.num_events = 1;
+  args.wait_for_all = 1;
+  args.timeout = 0xFFFFFFFFu;
+  std::thread waiter([&] { (void)guest.ioctl(AMDKFD_IOC_WAIT_EVENTS, &args); });
+
+  bool registered = false;
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  while (std::chrono::steady_clock::now() < deadline) {
+    if (proc->event_state_.waiter_count(create.event_id) == 1) {
+      registered = true;
+      break;
+    }
+    std::this_thread::yield();
+  }
+  if (!registered) {
+    guest.begin_local_shutdown();
+    waiter.join();
+    FAIL() << "the simulator waiter never registered";
+  }
+
+  EXPECT_EQ(::close(app_fd), 0);
+  EXPECT_EQ(guest.close(), 0);
+  EXPECT_EQ(execution_driver->local_open_ref_count(), 1u);
+  const int cancel_result = ::pthread_cancel(waiter.native_handle());
+  if (cancel_result != 0)
+    guest.begin_local_shutdown();
+  waiter.join();
+
+  ASSERT_EQ(cancel_result, 0);
+  EXPECT_EQ(proc->event_state_.waiter_count(create.event_id), 0u);
+  EXPECT_EQ(guest.local_open_ref_count(), 0u);
+  EXPECT_EQ(execution_driver->local_open_ref_count(), 0u);
+  EXPECT_TRUE(proc->event_state_.is_closing());
+}
+
 // A reopen that lands while a deferred close is still pending ADOPTS the connection.
 // Without cancelling the deferral the draining wait would then close a connection the
 // new epoch had already started using -- the deferral turning into the very revocation

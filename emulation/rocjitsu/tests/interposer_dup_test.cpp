@@ -3401,6 +3401,30 @@ TEST_F(InterposerPm4Test, UnsupportedGdsResetLeavesQueueUsable) {
   EXPECT_EQ(wait_output(monotonic_deadline_after(std::chrono::seconds(2))), 0);
 }
 
+TEST_F(InterposerPm4Test, BoHandleCountLimitFailsBeforeCopying) {
+  // Linux's AMDGPU_BO_LIST_MAX_ENTRIES is 128K, independently of the
+  // interposer's caller-array allocation budget.
+  constexpr uint32_t kMaxEntries = 128 * 1024;
+  for (uint32_t count : {kMaxEntries, kMaxEntries + 1, UINT32_MAX, uint32_t{1}}) {
+    SCOPED_TRACE(count);
+    drm_amdgpu_bo_list_in list{};
+    list.bo_number = count;
+    list.bo_info_size = sizeof(drm_amdgpu_bo_list_entry);
+    list.bo_info_ptr = 1;
+    drm_amdgpu_cs_chunk chunk{};
+    chunk.chunk_id = AMDGPU_CHUNK_ID_BO_HANDLES;
+    chunk.length_dw = sizeof(list) / 4;
+    chunk.chunk_data = reinterpret_cast<uint64_t>(&list);
+    uint64_t pointer = reinterpret_cast<uint64_t>(&chunk);
+    drm_amdgpu_cs cs{};
+    cs.in.ctx_id = context_;
+    cs.in.num_chunks = 1;
+    cs.in.chunks = reinterpret_cast<uint64_t>(&pointer);
+    EXPECT_EQ(ioctl(drm_, DRM_IOCTL_AMDGPU_CS, &cs), -1);
+    EXPECT_EQ(errno, count > kMaxEntries ? EINVAL : EFAULT);
+  }
+}
+
 TEST_F(InterposerPm4Test, KfdResidentVaRejectsGemMapAndReplace) {
   constexpr size_t kBytes = 4096;
   uint32_t gpu_id = 0;
@@ -6007,6 +6031,59 @@ TEST(InterposerSyncobjTest, WaitValidationMatchesDrm) {
   drm_syncobj_destroy destroy{};
   destroy.handle = create.handle;
   EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy), 0);
+  EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
+TEST(InterposerSyncobjTest, CallerArrayResourceLimitsFailBeforeCopying) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  ASSERT_TRUE(kfd_version_ok(kfd));
+  int drm = open_drm_render();
+  if (drm < 0)
+    GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+
+  // rocjitsu budgets 16 MiB per caller-sized DRM array. Waits also allocate
+  // shared-pointer scratch arrays, so their count limit can be lower.
+  constexpr uint32_t kArrayBytes = 16 * 1024 * 1024;
+  constexpr uint32_t kWaitLimit = kArrayBytes / sizeof(std::shared_ptr<void>);
+  constexpr uint32_t kPointLimit = kArrayBytes / sizeof(uint64_t);
+  for (uint32_t count : {kWaitLimit, kWaitLimit + 1, UINT32_MAX, uint32_t{1}}) {
+    SCOPED_TRACE(count);
+    const int expected = count > kWaitLimit ? ENOMEM : EFAULT;
+    drm_syncobj_wait binary{};
+    binary.handles = 1;
+    binary.count_handles = count;
+    EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_WAIT, &binary), -1);
+    EXPECT_EQ(errno, expected);
+
+    drm_syncobj_timeline_wait timeline{};
+    timeline.handles = 1;
+    timeline.points = 1;
+    timeline.count_handles = count;
+    EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &timeline), -1);
+    EXPECT_EQ(errno, expected);
+  }
+  for (uint32_t count : {kPointLimit, kPointLimit + 1, UINT32_MAX, uint32_t{1}}) {
+    SCOPED_TRACE(count);
+    const int expected = count > kPointLimit ? ENOMEM : EFAULT;
+    drm_syncobj_array binary{};
+    binary.handles = 1;
+    binary.count_handles = count;
+    for (unsigned long operation : {DRM_IOCTL_SYNCOBJ_SIGNAL, DRM_IOCTL_SYNCOBJ_RESET}) {
+      EXPECT_EQ(ioctl(drm, operation, &binary), -1);
+      EXPECT_EQ(errno, expected);
+    }
+
+    drm_syncobj_timeline_array timeline{};
+    timeline.handles = 1;
+    timeline.points = 1;
+    timeline.count_handles = count;
+    for (unsigned long operation : {DRM_IOCTL_SYNCOBJ_TIMELINE_SIGNAL, DRM_IOCTL_SYNCOBJ_QUERY}) {
+      EXPECT_EQ(ioctl(drm, operation, &timeline), -1);
+      EXPECT_EQ(errno, expected);
+    }
+  }
   EXPECT_EQ(close(drm), 0);
   EXPECT_EQ(close(kfd), 0);
 }

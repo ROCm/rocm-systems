@@ -1991,13 +1991,17 @@ public:
 
   int update_syncobjs(const DrmFileToken &file, uint64_t handles_address, uint64_t points_address,
                       uint32_t count, bool reset) {
+    if (!valid_user_array_count<uint64_t>(count))
+      return -ENOMEM;
     std::vector<uint32_t> handles;
-    std::vector<uint64_t> points(count, 0);
+    std::vector<uint64_t> points;
     if (int result = snapshot_user_array(handles_address, count, handles); result != 0)
       return result;
     if (points_address) {
       if (int result = snapshot_user_array(points_address, count, points); result != 0)
         return result;
+    } else {
+      points.resize(count, 0);
     }
     if (!file)
       return -EBADF;
@@ -2021,6 +2025,8 @@ public:
   int query_syncobjs(const DrmFileToken &file, const drm_syncobj_timeline_array &request) {
     if (request.flags & ~DRM_SYNCOBJ_QUERY_FLAGS_LAST_SUBMITTED)
       return -EINVAL;
+    if (!valid_user_array_count<uint64_t>(request.count_handles))
+      return -ENOMEM;
     std::vector<uint32_t> handles;
     if (int result = snapshot_user_array(request.handles, request.count_handles, handles);
         result != 0)
@@ -2244,9 +2250,20 @@ public:
     return true;
   }
 
+  // Bound each caller-sized DRM array, including scratch arrays, before any
+  // allocation. This is a rocjitsu resource budget, not a DRM UAPI count limit.
+  static constexpr size_t kMaxDrmArrayBytes = 16 * 1024 * 1024;
+
+  template <typename T> static bool valid_user_array_count(uint32_t count) {
+    // Division also checks byte-size overflow before the eventual multiplication.
+    return count <= kMaxDrmArrayBytes / sizeof(T);
+  }
+
   /// @brief Copy a caller-owned array without faulting inside the interposer.
   template <typename T>
   static int snapshot_user_array(uint64_t address, uint32_t count, std::vector<T> &snapshot) {
+    if (!valid_user_array_count<T>(count))
+      return -ENOMEM;
     snapshot.resize(count);
     const size_t bytes = static_cast<size_t>(count) * sizeof(T);
     iovec local{snapshot.data(), bytes};
@@ -2275,6 +2292,10 @@ public:
       return -EINVAL;
     if (request.count_handles == 0)
       return 0;
+    if (!valid_user_array_count<uint64_t>(request.count_handles) ||
+        !valid_user_array_count<std::shared_ptr<SyncobjEntry>>(request.count_handles) ||
+        !valid_user_array_count<std::shared_ptr<SyncobjFence>>(request.count_handles))
+      return -ENOMEM;
     std::vector<uint32_t> handles;
     std::vector<uint64_t> points;
     if (int rc = snapshot_user_array(request.handles, request.count_handles, handles); rc != 0)
@@ -2788,7 +2809,10 @@ public:
           return -EINVAL;
         drm_amdgpu_bo_list_in list;
         std::memcpy(&list, words.data(), sizeof(list));
-        if (list.bo_info_size != sizeof(drm_amdgpu_bo_list_entry))
+        // Match AMDGPU_BO_LIST_MAX_ENTRIES in Linux amdgpu_bo_list.c.
+        constexpr uint32_t kMaxBoListEntries = 128 * 1024;
+        if (list.bo_number > kMaxBoListEntries ||
+            list.bo_info_size != sizeof(drm_amdgpu_bo_list_entry))
           return -EINVAL;
         if (int rc = snapshot_user_array(list.bo_info_ptr, list.bo_number, buffers); rc)
           return rc;

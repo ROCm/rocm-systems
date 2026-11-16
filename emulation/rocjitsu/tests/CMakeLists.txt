@@ -2826,6 +2826,7 @@ rj_add_interposer_test_suite(
 )
 
 set(_rj_interposer_pm4_tests
+    BoHandleCountLimitFailsBeforeCopying
     UnsupportedGdsResetLeavesQueueUsable
     SparseReplacementPreservesResidentTail
     SubmissionFenceQueryPollsAndWaitsForCompletion
@@ -2984,6 +2985,7 @@ rj_add_interposer_test_suite(
 rj_add_interposer_test_suite(InterposerGemTest ${_rj_interposer_gem_tests})
 
 set(_rj_interposer_syncobj_tests
+    CallerArrayResourceLimitsFailBeforeCopying
     VmTimelineWaitObservesSynchronousMapAndUnmap
     VmDelayUpdateSuppressesTimelinePublication
     GemVaSignalsBinarySyncobjsAtPointZero

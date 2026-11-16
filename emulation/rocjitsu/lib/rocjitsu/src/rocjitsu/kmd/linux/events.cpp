@@ -16,6 +16,7 @@
 #include <cerrno>
 #include <chrono>
 #include <cstdint>
+#include <pthread.h>
 #include <unistd.h>
 
 namespace rocjitsu {
@@ -326,7 +327,7 @@ int EventState::wait_events(void *arg, uint32_t process_id) {
             ev.event_age != ed.signal_event_data.last_event_age);
   };
 
-  std::condition_variable my_cv;
+  std::optional<std::condition_variable> my_cv(std::in_place);
   std::vector<EventWaiter> waiters(args->num_events);
   std::unique_lock<std::mutex> lock(mutex_);
 
@@ -344,7 +345,7 @@ int EventState::wait_events(void *arg, uint32_t process_id) {
       continue;
     auto &ev = it->second;
     const bool activated = satisfied(ev, ev_data[i]);
-    waiters[i] = {&my_cv, activated, !activated,
+    waiters[i] = {&*my_cv, activated, !activated,
                   ev.event_type == KFD_IOC_EVENT_SIGNAL &&
                       ev_data[i].signal_event_data.last_event_age != 0};
     // Consume an already-pending auto-reset signal when this waiter takes it,
@@ -381,14 +382,26 @@ int EventState::wait_events(void *arg, uint32_t process_id) {
     return wait_all ? all_satisfied : any_satisfied;
   };
 
+  // Native cancellation reacquires mutex_ at the condition-variable wait.
+  // Explicitly release all wait-owned resources before the caller's driver lease,
+  // including when exceptions are disabled and stack destructors do not run.
+  auto cleanup = [&] {
+    unregister_waiters();
+    lock.unlock();
+    std::vector<EventWaiter>().swap(waiters);
+    my_cv.reset();
+  };
   bool is_poll = (args->timeout == 0);
+  pthread_cleanup_push(
+      +[](void *opaque) { (*static_cast<decltype(cleanup) *>(opaque))(); }, &cleanup);
   if (is_poll) {
     // Poll mode.
   } else if (args->timeout == kWaitEventsInfiniteMs) {
-    my_cv.wait(lock, is_ready);
+    my_cv->wait(lock, is_ready);
   } else {
-    my_cv.wait_for(lock, std::chrono::milliseconds(args->timeout), is_ready);
+    my_cv->wait_for(lock, std::chrono::milliseconds(args->timeout), is_ready);
   }
+  pthread_cleanup_pop(0);
 
   unregister_waiters();
 
