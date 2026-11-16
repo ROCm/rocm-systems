@@ -31,6 +31,7 @@
 #include "../cdna5_sim_test_common.h"
 #include "../dbi_test_util.h"
 #include "dbi_sim.h"
+#include "scalar_builders.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/analysis/exec_state.h"
@@ -555,6 +556,87 @@ TEST(DbiAfterInstSim, PreservesGuestValueReadByResolvedHelper) {
     ASSERT_NO_FATAL_FAILURE(sim.initialize("cdna4", 64));
     EXPECT_EQ(sim.run_and_read_vgpr(test::section_words(patched, ".text"), scratch, 2),
               std::vector<uint32_t>(64, 9));
+  }
+}
+
+TEST(DbiAfterInstSim, PreservesGuestValueReadAfterComputedReentry) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr util::FailureOr<uint32_t> nop = build_s_nop(0, kArch);
+  constexpr util::FailureOr<uint32_t> end = build_s_endpgm(kArch);
+  constexpr util::FailureOr<uint32_t> probe_ret = build_s_setpc_b64(30, kArch);
+  constexpr util::FailureOr<uint32_t> ret = build_s_setpc_b64(4, kArch);
+  constexpr util::FailureOr<uint32_t> call = build_s_call_b64(4, 1, kArch);
+  constexpr util::FailureOr<uint32_t> getpc = build_s_getpc_b64(4, kArch);
+  constexpr util::FailureOr<uint32_t> low = build_s_add_u32(4, 4, 255, kArch);
+  constexpr util::FailureOr<uint32_t> high = build_s_addc_u32(5, 5, 193, kArch);
+  constexpr util::FailureOr<uint32_t> reentry_check = build_s_cmp_lg_u32(6, 128, kArch);
+  constexpr util::FailureOr<uint32_t> direct = build_s_branch(-7, kArch);
+  static_assert(nop.succeeded() && end.succeeded() && probe_ret.succeeded() && ret.succeeded() &&
+                call.succeeded() && getpc.succeeded() && low.succeeded() && high.succeeded() &&
+                reentry_check.succeeded() && direct.succeeded());
+  const util::FailureOr<uint32_t> pass = test::build_v_readfirstlane_b32(6, 0, kArch);
+  const util::FailureOr<uint32_t> read = build_v_mov_b32_src(2, 256 + 7, kArch);
+  ASSERT_TRUE(pass.succeeded() && read.succeeded());
+  const std::vector<uint8_t> body = test::make_gfx1200_probe_elf(
+      "entry_live_in", {test::make_mov_vgpr_inline(7, 5), probe_ret.value()});
+  const AmdGpuCodeObject probe(body.data(), body.size());
+  struct Case {
+    const char *name;
+    uint64_t entry_offset;
+    std::vector<uint32_t> transfer;
+  };
+  const std::array<Case, 3> cases = {{
+      {.name = "direct", .entry_offset = 0, .transfer = {direct.value()}},
+      {.name = "adjusted_call",
+       .entry_offset = 0,
+       .transfer = {call.value(), end.value(), low.value(), static_cast<uint32_t>(-28),
+                    high.value(), ret.value()}},
+      {.name = "getpc",
+       .entry_offset = 4,
+       .transfer = {getpc.value(), low.value(), static_cast<uint32_t>(-28), high.value(),
+                    ret.value()}},
+  }};
+  for (const Case &test_case : cases) {
+    SCOPED_TRACE(test_case.name);
+    // Lane zero starts with workitem ID zero in v0. The first pass changes it
+    // to one, so re-entry reads v7 instead of initializing it again.
+    const util::FailureOr<uint32_t> reentered =
+        test::build_s_cbranch_scc(true, static_cast<int16_t>(3 + test_case.transfer.size()), kArch);
+    ASSERT_TRUE(reentered.succeeded());
+    std::vector<uint32_t> guest(test_case.entry_offset / sizeof(uint32_t), end.value());
+    guest.insert(guest.end(),
+                 {pass.value(), reentry_check.value(), reentered.value(),
+                  test::make_mov_vgpr_inline(7, 9), test::make_mov_vgpr_inline(0, 1), nop.value()});
+    guest.insert(guest.end(), test_case.transfer.begin(), test_case.transfer.end());
+    guest.insert(guest.end(), {read.value(), end.value()});
+    test::DbiSim baseline;
+    ASSERT_NO_FATAL_FAILURE(baseline.initialize("rdna4", 32));
+    baseline.set_wave32_dispatch();
+    baseline.set_entry_offset(test_case.entry_offset);
+    EXPECT_EQ(baseline.run_and_read_vgpr(guest, 64, 2), std::vector<uint32_t>(32, 9));
+
+    const std::vector<uint8_t> image = test::with_descriptor_metadata(
+        test::make_amdgpu_kernel_elf(guest, 64, 3, EF_AMDGPU_MACH_AMDGCN_GFX1200, 0, 0, false,
+                                     false, false, false, true, false, 0, test_case.entry_offset),
+        kArch);
+    const AmdGpuCodeObject object(image.data(), image.size());
+    Instrumentor instrumentor(object, kArch);
+    instrumentor.add_point({.anchor_offset = test_case.entry_offset + 20,
+                            .kind = InstrumentationKind::AfterInst,
+                            .probe_obj = &probe,
+                            .probe_symbol = "entry_live_in",
+                            .probe_args = {}});
+    const InstrumentedCodeObject result = instrumentor.patch();
+    ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+    const AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    const uint32_t scratch = test::patched_private_segment_size(patched);
+    EXPECT_GT(scratch, 64u) << "v7 must remain live across the jump back to the entry";
+    test::DbiSim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize("rdna4", 32));
+    sim.set_wave32_dispatch();
+    sim.set_entry_offset(test_case.entry_offset);
+    EXPECT_EQ(sim.run_and_read_vgpr(test::section_words(patched, ".text"), scratch, 2),
+              std::vector<uint32_t>(32, 9));
   }
 }
 

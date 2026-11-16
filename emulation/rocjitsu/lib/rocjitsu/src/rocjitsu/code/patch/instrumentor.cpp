@@ -173,18 +173,19 @@ bool callee_preserves_state(const BasicBlock::CallEdge &edge, std::span<const ui
 // Recognize a contiguous negative 64-bit PC adjustment with its carry intact.
 // Restrict hidden edges to dispatch roots so they cannot enter another helper
 // with a return-link context supplied only by that helper's own callers.
-bool adjusted_pc_returns_to_entry(const std::array<const Instruction *, 3> &tail, uint64_t base,
-                                  uint16_t link, std::span<const KernelDescriptorInfo> kernels) {
+std::optional<uint64_t> adjusted_pc_entry_target(const std::array<const Instruction *, 3> &tail,
+                                                 uint64_t base, uint16_t link,
+                                                 std::span<const KernelDescriptorInfo> kernels) {
   if (tail[0] == nullptr || tail[0]->src_loc() + tail[0]->size() != tail[1]->src_loc() ||
       tail[1]->src_loc() + tail[1]->size() != tail[2]->src_loc())
-    return false;
+    return std::nullopt;
   const std::string_view low_name = tail[0]->mnemonic();
   const std::string_view high_name = tail[1]->mnemonic();
   const std::string_view ret_name = tail[2]->mnemonic();
   if ((low_name != "s_add_u32" && low_name != "s_add_co_u32") ||
       (high_name != "s_addc_u32" && high_name != "s_add_co_ci_u32") ||
       (ret_name != "s_setpc_b64" && ret_name != "s_set_pc_i64"))
-    return false;
+    return std::nullopt;
   const auto is_link = [](const Operand *operand, uint16_t index, uint8_t width = 1) {
     return operand != nullptr &&
            operand->to_register_ref() == RegisterRef{RegClass::SGPR, index, width};
@@ -193,37 +194,38 @@ bool adjusted_pc_returns_to_entry(const std::array<const Instruction *, 3> &tail
   if (!is_link(tail[0]->dst_operand(0), link) || !is_link(tail[0]->src_operand(0), link) ||
       !is_link(tail[1]->dst_operand(0), high) || !is_link(tail[1]->src_operand(0), high) ||
       !is_link(tail[2]->src_operand(0), link, 2))
-    return false;
+    return std::nullopt;
   const Operand *low_value = tail[0]->src_operand(1);
   const Operand *high_value = tail[1]->src_operand(1);
   if (low_value == nullptr || high_value == nullptr)
-    return false;
+    return std::nullopt;
   const std::optional<uint64_t> low_constant = low_value->const_value();
   const std::optional<uint64_t> high_constant = high_value->const_value();
   if (!low_constant || !high_constant || static_cast<uint32_t>(*high_constant) != 0xffffffffu)
-    return false;
+    return std::nullopt;
   const int64_t delta = static_cast<int32_t>(static_cast<uint32_t>(*low_constant));
   if (delta >= 0 || base < static_cast<uint64_t>(-delta))
-    return false;
+    return std::nullopt;
   const uint64_t target = base - static_cast<uint64_t>(-delta);
   if (!std::ranges::any_of(kernels, [&](const KernelDescriptorInfo &kernel) {
         return kernel.entry_text_offset == target;
       }))
-    return false;
-  return true;
+    return std::nullopt;
+  return target;
 }
 
-bool callee_returns_to_entry(const BasicBlock::CallEdge &edge,
-                             std::span<const KernelDescriptorInfo> kernels) {
+std::optional<uint64_t> callee_reentry_target(const BasicBlock::CallEdge &edge,
+                                              std::span<const KernelDescriptorInfo> kernels) {
   if (edge.callee == nullptr || edge.continuation == nullptr ||
       !edge.callee->successors().empty() || !edge.callee->predecessors().empty())
-    return false;
+    return std::nullopt;
   std::array<const Instruction *, 3> tail = {};
   for (const Instruction &inst : edge.callee->instructions())
     tail = {tail[1], tail[2], &inst};
-  if (!adjusted_pc_returns_to_entry(tail, edge.continuation->start_offset(), edge.return_sreg,
-                                    kernels))
-    return false;
+  const std::optional<uint64_t> target =
+      adjusted_pc_entry_target(tail, edge.continuation->start_offset(), edge.return_sreg, kernels);
+  if (!target)
+    return std::nullopt;
   const uint16_t high = edge.return_sreg + 1;
   for (const Instruction &inst : edge.callee->instructions()) {
     if (&inst == tail[0])
@@ -232,27 +234,28 @@ bool callee_returns_to_entry(const BasicBlock::CallEdge &edge,
     if (inst.mnemonic().starts_with("s_movrel") ||
         effects.defs.contains({RegClass::SGPR, edge.return_sreg, 1}) ||
         effects.defs.contains({RegClass::SGPR, high, 1}))
-      return false;
+      return std::nullopt;
   }
-  return true;
+  return target;
 }
 
-bool static_pc_returns_to_entry(const BasicBlock &block,
-                                std::span<const KernelDescriptorInfo> kernels) {
+std::optional<uint64_t> static_pc_reentry_target(const BasicBlock &block,
+                                                 std::span<const KernelDescriptorInfo> kernels) {
   std::array<const Instruction *, 4> tail = {};
   for (const Instruction &inst : block.instructions())
     tail = {tail[1], tail[2], tail[3], &inst};
   if (tail[0] == nullptr ||
       (tail[0]->mnemonic() != "s_getpc_b64" && tail[0]->mnemonic() != "s_get_pc_i64") ||
       tail[0]->src_loc() + tail[0]->size() != tail[1]->src_loc())
-    return false;
+    return std::nullopt;
   const Operand *destination = tail[0]->dst_operand(0);
   if (destination == nullptr)
-    return false;
+    return std::nullopt;
   const std::optional<RegisterRef> pair = destination->to_register_ref();
-  return pair && pair->cls == RegClass::SGPR && pair->width == 2 &&
-         adjusted_pc_returns_to_entry({tail[1], tail[2], tail[3]},
-                                      tail[0]->src_loc() + tail[0]->size(), pair->index, kernels);
+  if (!pair || pair->cls != RegClass::SGPR || pair->width != 2)
+    return std::nullopt;
+  return adjusted_pc_entry_target({tail[1], tail[2], tail[3]}, tail[0]->src_loc() + tail[0]->size(),
+                                  pair->index, kernels);
 }
 
 // Hidden but bounded return edges preserve initial state if no instruction in
@@ -280,7 +283,7 @@ bool callable_state_is_preserved_in_closed_text(std::span<const std::unique_ptr<
                                 return kernel.entry_text_offset == edge.callee->start_offset();
                               }) ||
           (!callee_preserves_state(edge, text, arch, state) &&
-           !callee_returns_to_entry(edge, kernels)))
+           !callee_reentry_target(edge, kernels)))
         return false;
       known_returns.insert(edge.callee->terminator());
     }
@@ -291,7 +294,7 @@ bool callable_state_is_preserved_in_closed_text(std::span<const std::unique_ptr<
       continue;
     if (issue != BasicBlock::SuccessorIssue::IndirectControlFlow)
       return false;
-    if (known_returns.contains(block->terminator()) || static_pc_returns_to_entry(*block, kernels))
+    if (known_returns.contains(block->terminator()) || static_pc_reentry_target(*block, kernels))
       continue;
     const std::vector<IndirectCallFixup> &fixups = block->static_indirect_call_fixups();
     if (fixups.empty() || !std::ranges::all_of(fixups, [&](const IndirectCallFixup &fixup) {
@@ -1569,8 +1572,29 @@ bool Instrumentor::ensure_liveness_built(uint8_t wave_size,
       options.entry_block = block.get();
   }
   // Ordinary successors omit callees; their live-ins must reach the caller.
-  const std::vector<ScopedCfgEdge> edges =
+  std::vector<ScopedCfgEdge> edges =
       scoped_call_liveness_edges(KernelBlockScope(scope), options.text);
+  // State admission also recognizes computed re-entry. Preserve its actual
+  // destination; the call's continuation alone omits values read on re-entry.
+  const auto add_entry_edge = [&](BasicBlock *from, std::optional<uint64_t> target) {
+    if (!target)
+      return true;
+    const std::vector<BasicBlock *>::const_iterator entry =
+        std::ranges::find(scope, *target, &BasicBlock::start_offset);
+    if (entry == scope.end()) {
+      report(error_out, "computed kernel re-entry has no decoded entry block");
+      return false;
+    }
+    edges.push_back({.from = from, .to = *entry});
+    return true;
+  };
+  for (BasicBlock *block : scope) {
+    if (!add_entry_edge(block, static_pc_reentry_target(*block, kernels)))
+      return false;
+    for (const BasicBlock::CallEdge &call : block->call_edges())
+      if (!add_entry_edge(call.callee, callee_reentry_target(call, kernels)))
+        return false;
+  }
   liveness_ = std::make_unique<LivenessAnalysis>(KernelBlockScope(scope), wave_size, nullptr,
                                                  options, edges);
   return true;
