@@ -58,7 +58,7 @@ vl1d.cache_tcp_stalled_by_utcl2:
     Measures backpressure from UTCL2 to TCP. A high stall rate (>= 10%) indicates
     UTCL2 misses causing TLB latency.
 vl1d.inflight_req:
-  name: vL1D Inflight Requests
+  name: UTCL1 Inflight Requests
   formula: SUM(TCP_CLIENT_UTCL1_INFLIGHT_sum) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
@@ -89,7 +89,7 @@ vl1d.lat_fifo_stall:
     The number of cycles the UTCL1-to-UTCL2 latency-hiding FIFO was full, per normalization
     unit. This FIFO queues requests to the L2 translation cache (UTCL2).
 vl1d.misses_under_translation_miss:
-  name: vL1D Misses under Translation Miss
+  name: UTCL1 Misses under Translation Miss
   formula: SUM(TCP_UTCL1_TRANSLATION_MISS_UNDER_MISS_sum) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-

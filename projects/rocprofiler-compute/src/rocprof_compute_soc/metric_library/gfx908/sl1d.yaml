@@ -44,7 +44,7 @@ sl1d.hits:
     The total number of sL1D requests that hit on a previously loaded cache line,
     per normalization unit.
 sl1d.hits_per_req:
-  name: sL1D Hits per Request
+  name: sL1D Hit Rate
   formula: 100 * SUM(SQC_DCACHE_HITS) / SUM(SQC_DCACHE_REQ)
   unit: Percent
   description: >-

@@ -202,15 +202,15 @@ txa.tdm_async_cluster_load_insts:
   description: >-
     Number of TDM async cluster load instructions processed by TXA.
 txa.tdm_async_load_insts:
-  name: TDM Async Load Instructions
+  name: TDM Async Load Requests
   formula: SUM(TX_VCA_TENSOR_ASYNC_LOAD_DMA_REQUEST_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Total TDM load requests.
+  description: Number of TDM async load requests processed by TXA.
 txa.tdm_async_store_insts:
-  name: TDM Async Store Instructions
+  name: TDM Async Store Requests
   formula: SUM(TX_VCA_TENSOR_ASYNC_STORE_DMA_REQUEST_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Total TDM store requests.
+  description: Number of TDM async store requests processed by TXA.
 txa.tdm_insts:
   name: TDM Instructions
   formula: SUM(TX_VCA_TENSOR_DMA_WAVEFRONT_sum) / SUM($denom)
