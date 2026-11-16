@@ -6,13 +6,16 @@
 ///
 /// @details The summary is derived from the decoded operands only; no semantics are
 /// re-implemented. It exists because the in-tree InstDefUse does not surface SCC,
-/// VCC halves, or M0 on gfx950 (see docs/implementation_map.md). Every operand is
+/// VCC halves, or M0 (see docs/implementation_map.md). Operands are read for one target:
+/// its scalar selectors (M0 and NULL move between generations) and its wave size (a wave
+/// mask is one SGPR in wave32). Every operand is
 /// classified as a tracked location, state outside the tracked universe (VGPRs,
 /// TTMP, memory, ...), a constant, or unknown. Unknown operands make the whole
 /// instruction's effect unknown, which callers must treat conservatively.
 #pragma once
 
 #include "location.h"
+#include "target.h"
 
 #include <cstdint>
 #include <optional>
@@ -60,10 +63,13 @@ struct Effects {
   LocSet implicit_reads;
   /// Is a direct or indirect control-flow transfer or program terminator.
   bool control_flow = false;
+  /// A direct branch a region may contain (s_branch, s_cbranch_scc0/1, vccz/vccnz,
+  /// execz/execnz): the runner follows it; leaving the region is an exit.
+  bool branch = false;
 };
 
-/// @brief Classify one decoded instruction.
-[[nodiscard]] Effects classify(const Instruction &inst);
+/// @brief Classify one decoded instruction of @p target.
+[[nodiscard]] Effects classify(const Instruction &inst, const Target &target);
 
 /// One 32-bit piece of an inline-asm register operand: a tracked scalar location or a VGPR.
 struct AsmSlot {
@@ -133,14 +139,22 @@ enum class FpResult : uint8_t {
   BF16Lo, ///< bf16 in the low half.
   BF16Hi,
   BF16x2,
-  F64,     ///< f64 in a register pair.
-  Move,    ///< v_mov_b32 / v_mov_b64: tags follow the source register.
-  CndMask, ///< v_cndmask_b32: tags follow the selected source, lane by lane.
-  PkMov,   ///< v_pk_mov_b32: each destination dword follows its op_sel-selected source dword.
+  F64,           ///< f64 in a register pair.
+  Move,          ///< v_mov_b32 / v_mov_b64: tags follow the source register.
+  CndMask,       ///< v_cndmask_b32: tags follow the selected source, lane by lane.
+  PkMov,         ///< v_pk_mov_b32: each destination dword follows its op_sel-selected source dword.
+  Select,        ///< s_cselect: SCC picks the first or the second source's tags.
+  CMov,          ///< s_cmov: SCC picks the source's tags, else the destination keeps its own.
+  ReadFirstLane, ///< v_readfirstlane_b32: the first active lane's tag.
+  ReadLane,      ///< v_readlane_b32: the selected lane's tag.
 };
 
 /// @brief Classify a VALU instruction's result by mnemonic and disassembly (op_sel/dst_sel).
 [[nodiscard]] FpResult fp_result_kind(std::string_view mnemonic, std::string_view text);
+
+/// @brief How an instruction's scalar (SGPR/VCC/M0) results relate to floating point:
+/// SALU float (GFX11.5+) results, moves, selects and VGPR lane reads; None otherwise.
+[[nodiscard]] FpResult fp_scalar_result_kind(std::string_view mnemonic);
 
 /// @brief Format of a floating-point instruction's sources (F32/F16x2/F64/...), None if it
 /// has none (integer and bitwise operations, conversions from integers).
@@ -182,7 +196,8 @@ struct SourceOperand {
 };
 
 /// @brief Source operands in encoding order (src0, src1, ...).
-[[nodiscard]] std::vector<SourceOperand> source_operands(const Instruction &inst);
+[[nodiscard]] std::vector<SourceOperand> source_operands(const Instruction &inst,
+                                                         const Target &target);
 
 /// @brief True if the mnemonic is in the P0 allowlist (operands are checked separately).
 [[nodiscard]] bool is_p0_mnemonic(std::string_view mnemonic);
@@ -190,8 +205,15 @@ struct SourceOperand {
 /// indirect or exception-state access.
 [[nodiscard]] bool is_region_valu(std::string_view mnemonic, uint64_t flags);
 /// A memory instruction the region runner executes: global loads and stores (not LDS-DMA,
-/// transpose or atomic forms), scalar loads, and s_waitcnt. Memory is an input of the
-/// region (equal on both sides) and stored bytes are part of its output.
+/// transpose, block, addtid or atomic forms), scalar loads, and the counter waits of every
+/// generation (s_waitcnt*, s_wait_*cnt). Memory is an input of the region (equal on both
+/// sides) and stored bytes are part of its output.
 [[nodiscard]] bool is_region_memory(std::string_view mnemonic);
+/// A direct branch the region runner follows (taken edges inside the region continue
+/// there; others leave it).
+[[nodiscard]] bool is_region_branch(std::string_view mnemonic);
+/// An instruction without functional effect in a region: scheduling hints and dependency
+/// waits (s_nop, s_delay_alu, s_clause, s_wait_alu, s_waitcnt_depctr, prefetch hints).
+[[nodiscard]] bool is_region_noop(std::string_view mnemonic);
 
 } // namespace rocjitsu::isa_diff

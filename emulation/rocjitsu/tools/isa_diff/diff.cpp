@@ -5,6 +5,7 @@
 #include "json.h"
 
 #include "rocjitsu/code/kernel_descriptor_abi.h"
+#include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/isa/instruction.h"
 
 #include <algorithm>
@@ -74,11 +75,28 @@ unsigned vgpr_usage(const KernelModel &m) {
   return vgpr_extent(used);
 }
 
-/// Architectural VGPRs the descriptor allocates on gfx950 (unified file: ACCUM_OFFSET
-/// marks where AGPRs start), or 0 without a descriptor.
-unsigned vgpr_allocation(const std::vector<uint8_t> &descriptor) {
+/// VGPRs the descriptor's granulated count allocates (the granule depends on the target
+/// and wave size), or 0 without a descriptor.
+unsigned vgpr_total(const std::vector<uint8_t> &descriptor, const Target &target) {
   if (descriptor.size() < sizeof(amdhsa::kernel_descriptor_t))
     return 0;
+  amdhsa::kernel_descriptor_t kd{};
+  std::memcpy(&kd, descriptor.data(), sizeof(kd));
+  using namespace amdhsa;
+  return (RJ_AMDHSA_BITS_GET(kd.compute_pgm_rsrc1,
+                             COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT) +
+          1) *
+         descriptor_vgpr_granularity_for_wavefront(target.arch, target.wave_size);
+}
+
+/// Architectural VGPRs the descriptor allocates: below ACCUM_OFFSET on a unified register
+/// file (gfx90a and later CDNA, where AGPRs follow), the granulated count otherwise; 0
+/// without a descriptor.
+unsigned vgpr_allocation(const std::vector<uint8_t> &descriptor, const Target &target) {
+  if (descriptor.size() < sizeof(amdhsa::kernel_descriptor_t))
+    return 0;
+  if (!target.unified_vgprs)
+    return vgpr_total(descriptor, target);
   amdhsa::kernel_descriptor_t kd{};
   std::memcpy(&kd, descriptor.data(), sizeof(kd));
   using namespace amdhsa;
@@ -96,25 +114,26 @@ unsigned sgpr_usage(const KernelModel &m) {
 }
 
 /// The descriptor's register allocation covers what the kernel names: arch VGPRs within
-/// ACCUM_OFFSET and the granulated VGPR count, SGPRs plus the six extra ones (VCC,
-/// FLAT_SCRATCH, XNACK) within the gfx9 granule of 16.
+/// ACCUM_OFFSET and the granulated VGPR count; on GFX9, SGPRs plus the six extra ones (VCC,
+/// FLAT_SCRATCH, XNACK) within the granule of 16 (GFX10+ always gives a wave s0-s105).
 bool allocation_covers_usage(const KernelModel &m) {
   const auto &desc = m.artifact().descriptor;
+  const Target &target = m.artifact().target;
   if (desc.size() < sizeof(amdhsa::kernel_descriptor_t))
     return false;
   amdhsa::kernel_descriptor_t kd{};
   std::memcpy(&kd, desc.data(), sizeof(kd));
   using namespace amdhsa;
-  const unsigned vgpr_total =
-      (RJ_AMDHSA_BITS_GET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT) +
-       1) *
-      8;
+  const unsigned vused = vgpr_usage(m);
+  if (vused > vgpr_allocation(desc, target) || vused > vgpr_total(desc, target))
+    return false;
+  if (target.major >= 10)
+    return true;
   const unsigned sgpr_total =
       (RJ_AMDHSA_BITS_GET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT) +
        1) *
       16;
-  const unsigned vused = vgpr_usage(m);
-  return vused <= vgpr_allocation(desc) && vused <= vgpr_total && sgpr_usage(m) + 6 <= sgpr_total;
+  return sgpr_usage(m) + 6 <= sgpr_total;
 }
 
 /// The two descriptors differ only in register-allocation bits of compute_pgm_rsrc1
@@ -298,7 +317,7 @@ DiffResult diff_kernels(const KernelModel &old_model, const KernelModel &new_mod
   // allocation; a kernel naming VGPRs beyond its allocation is reported as semantic.
   bool counts_informational = semantic_fields.empty();
   for (const auto *m : {&old_model, &new_model}) {
-    const unsigned alloc = vgpr_allocation(m->artifact().descriptor);
+    const unsigned alloc = vgpr_allocation(m->artifact().descriptor, m->artifact().target);
     const unsigned used = vgpr_usage(*m);
     if (alloc == 0) {
       counts_informational = false;

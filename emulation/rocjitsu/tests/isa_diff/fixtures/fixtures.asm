@@ -507,6 +507,23 @@ s_mov_b64 exec, s[10:11]
 global_store_dword v4, v3, s[0:1]
 s_endpgm
 
+=== valuclobberlater_old
+v_mov_b32_e32 v3, v2
+global_store_dword v4, v3, s[0:1]
+s_mov_b64 exec, -1
+global_store_dword v4, v3, s[2:3]
+s_endpgm
+
+=== valuclobberlater_new
+s_mov_b64 s[10:11], exec
+s_mov_b64 exec, -1
+v_mov_b32_e32 v3, v2
+s_mov_b64 exec, s[10:11]
+global_store_dword v4, v3, s[0:1]
+s_mov_b64 exec, -1
+global_store_dword v4, v3, s[2:3]
+s_endpgm
+
 === valudead_old
 v_add_u32_e32 v5, v0, v1
 v_mov_b32_e32 v3, v5

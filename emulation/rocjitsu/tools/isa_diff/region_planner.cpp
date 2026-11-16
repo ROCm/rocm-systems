@@ -163,11 +163,12 @@ bool in_cycle(const KernelModel &m, uint32_t block) {
 // ---------------------------------------------------------------------------
 // Pending memory effects at the cutpoint (handoff 6.1).
 
-std::string describe_pending(const char *side, const PendingState &p) {
-  std::string s = std::string(side) + ": vmcnt<=" + std::to_string(p.count[PendingState::kVm]) +
-                  " lgkmcnt<=" + std::to_string(p.count[PendingState::kLgkm]) +
-                  " expcnt<=" + std::to_string(p.count[PendingState::kExp]) + ", destinations {" +
-                  format_locs(p.all_dests()) + "}";
+std::string describe_pending(const char *side, const PendingState &p, const Target &target) {
+  std::string s = std::string(side) + ":";
+  for (unsigned c = 0; c < PendingState::kNumCounters; ++c)
+    if (p.count[c])
+      s += " " + pending_counter_name(c, target) + "<=" + std::to_string(p.count[c]);
+  s += ", destinations {" + format_locs(p.all_dests()) + "}";
   if (p.example_pc)
     s += ", e.g. issued at " + hex64(p.example_pc);
   return s;
@@ -195,7 +196,8 @@ void check_pending(const KernelModel &om, const KernelModel &nm, const Candidate
       vconflict |= p.all_vdests() & (fx.vreads | fx.vwrites);
     }
   }
-  const std::string state = describe_pending("old", po) + "; " + describe_pending("new", pn);
+  const std::string state = describe_pending("old", po, om.artifact().target) + "; " +
+                            describe_pending("new", pn, nm.artifact().target);
   if (po.any_unknown() || pn.any_unknown()) {
     k.pending_effects = "UNKNOWN";
     k.sources.push_back({"context unresolved: a memory operation with unknown effects may be "
@@ -229,10 +231,63 @@ void check_pending(const KernelModel &om, const KernelModel &nm, const Candidate
 // ---------------------------------------------------------------------------
 // Region construction (shared by base regions and expansion variants).
 
+/// The control flow of instructions [b, e) on one side: one entry (b), direct branches
+/// only. Sets @p exits to the instruction indices control can leave to (e: falling off
+/// the end) and @p branches when there is a branch. Returns why it is not such a region.
+std::optional<std::string> region_flow(const KernelModel &m, size_t b, size_t e, const char *side,
+                                       std::vector<size_t> &exits, bool &branches) {
+  const auto &in = m.insts();
+  const auto &blocks = m.blocks();
+  exits.clear();
+  branches = false;
+  auto add = [&](size_t t) {
+    if (std::ranges::find(exits, t) == exits.end())
+      exits.push_back(t);
+  };
+  if (b >= e) {
+    add(e);
+    return std::nullopt;
+  }
+  bool falls = true;
+  for (size_t i = b; i < e; ++i) {
+    const InstRef &r = in[i];
+    if (!r.fx.control_flow)
+      continue;
+    if (!r.fx.branch || r.branch_target_index < 0)
+      return std::string(side) + " " + hex64(r.pc) + " '" + r.text +
+             "': only direct branches can be inside a region";
+    branches = true;
+    const auto t = static_cast<size_t>(r.branch_target_index);
+    if (t < b || t >= e)
+      add(t);
+    if (i + 1 == e)
+      falls = r.mnemonic != "s_branch";
+  }
+  if (falls) {
+    if (e >= in.size())
+      return std::string(side) + " region falls off the end of the kernel";
+    add(e);
+  }
+  // Single entry: a block starting inside the region is reached from inside only.
+  for (size_t i = b + 1; i < e; ++i) {
+    const BlockInfo &blk = blocks[in[i].block];
+    if (blk.first != i)
+      continue;
+    for (uint32_t pred : blk.predecessors) {
+      const size_t last = blocks[pred].end - 1;
+      if (last < b || last >= e)
+        return std::string(side) + " control enters the region at " + hex64(in[i].pc) +
+               " from outside it";
+    }
+  }
+  return std::nullopt;
+}
+
 RegionPair build_region(const KernelModel &om, const KernelModel &nm, const Candidate &c,
                         const PlanOptions &options, const std::string &id,
                         const std::vector<std::pair<unsigned, unsigned>> &entry_map = {},
-                        const std::vector<std::pair<unsigned, unsigned>> &exit_map = {}) {
+                        const std::vector<std::pair<unsigned, unsigned>> &exit_map = {},
+                        const DiffResult *diff = nullptr) {
   RegionPair region;
   region.id = id;
   region.hunks = c.hunks;
@@ -243,12 +298,40 @@ RegionPair build_region(const KernelModel &om, const KernelModel &nm, const Cand
   region.context_after = c.after;
 
   std::optional<std::string> reject;
-  if (!single_block(om, c.o.begin, c.o.end) || !single_block(nm, c.n.begin, c.n.end)) {
-    // Renamed registers across blocks typically land here: no checked value mapping
-    // exists, so the result is a mapping inconclusive rather than a guess.
+  // Control flow: each side's exits, paired through the instruction matching (falling off
+  // the end of both regions is the cut point, which is matched by construction).
+  std::vector<size_t> oexits, nexits;
+  bool obranch = false, nbranch = false;
+  std::vector<std::pair<size_t, size_t>> exit_pairs;
+  auto flow_reject = [&]() -> std::optional<std::string> {
+    if (auto bad = region_flow(om, c.o.begin, c.o.end, "old", oexits, obranch))
+      return bad;
+    if (auto bad = region_flow(nm, c.n.begin, c.n.end, "new", nexits, nbranch))
+      return bad;
+    for (size_t to : oexits) {
+      int64_t tn = -1;
+      if (to == c.o.end)
+        tn = static_cast<int64_t>(c.n.end);
+      else if (diff && to < diff->old_to_new.size())
+        tn = diff->old_to_new[to];
+      if (tn < 0 || std::ranges::find(nexits, static_cast<size_t>(tn)) == nexits.end())
+        return "INCONCLUSIVE_MAPPING: the old exit to " +
+               hex64(to < om.insts().size() ? om.insts()[to].pc : 0) +
+               " has no corresponding new exit";
+      exit_pairs.emplace_back(to, static_cast<size_t>(tn));
+    }
+    if (exit_pairs.size() != nexits.size())
+      return std::string("INCONCLUSIVE_MAPPING: a new exit has no corresponding old exit");
+    return std::nullopt;
+  };
+  const bool multi_block =
+      !single_block(om, c.o.begin, c.o.end) || !single_block(nm, c.n.begin, c.n.end);
+  if (auto bad = flow_reject()) {
     region.status = RegionStatus::Inconclusive;
-    reject = "INCONCLUSIVE_MAPPING: region spans basic blocks; P0 only maps state at a "
-             "common single-block cutpoint";
+    reject = bad->rfind("INCONCLUSIVE_MAPPING", 0) == 0 ? *bad : "INCONCLUSIVE_MAPPING: " + *bad;
+  } else if (multi_block && !obranch && !nbranch && exit_pairs.size() != 1) {
+    region.status = RegionStatus::Inconclusive;
+    reject = "INCONCLUSIVE_MAPPING: region spans basic blocks without a common exit";
   } else if (c.o.end - c.o.begin > options.max_region_insts ||
              c.n.end - c.n.begin > options.max_region_insts) {
     reject = "region exceeds max_region_insts";
@@ -272,6 +355,7 @@ RegionPair build_region(const KernelModel &om, const KernelModel &nm, const Cand
   }
 
   RegionContract &k = region.contract;
+  k.set_gpu(om.artifact().target);
   // Contract sets use old naming; with register maps the new side's sets are translated,
   // live-ins through the entry map and live-outs through the exit map.
   k.entry_map = entry_map;
@@ -294,13 +378,23 @@ RegionPair build_region(const KernelModel &om, const KernelModel &nm, const Cand
     k.undef_new = entry_live(nm, c.n) & nm.undef_before(anchor_index(c.n));
   }
   k.canary = ~k.entry_equal;
+  // EXEC is still the dispatch (or call) EXEC on every path here, on both sides: a wave
+  // runs with at least one lane, so EXEC 0 is not an input.
+  if (k.entry_equal.test(kLocExecLo) && om.exec_is_entry_before(anchor_index(c.o)) &&
+      nm.exec_is_entry_before(anchor_index(c.n))) {
+    k.exec_nonzero = true;
+    k.sources.push_back({"exec_nonzero: EXEC is the entry EXEC on every path to the region "
+                         "(a wave runs with at least one active lane)",
+                         "KernelModel forward may-written LocSet analysis"});
+  }
   const LocSet out_old = exit_live(om, c.o);
   const LocSet out_new = to_old(exit_live(nm, c.n), inv_out);
   k.observable = out_old | out_new;
   // The two continuations read different locations: they differ downstream (typically
   // a register renaming that crosses blocks), so equality on the same physical
   // locations at this exit is not a justified relation. Do not guess a mapping.
-  if (region.status == RegionStatus::Ready && out_old != out_new) {
+  const bool flow = obranch || nbranch || multi_block;
+  if (region.status == RegionStatus::Ready && out_old != out_new && !flow) {
     region.status = RegionStatus::Inconclusive;
     region.reason = "INCONCLUSIVE_MAPPING: continuation liveness differs at the region exit "
                     "(old-only: " +
@@ -333,10 +427,21 @@ RegionPair build_region(const KernelModel &om, const KernelModel &nm, const Cand
     for (unsigned r = 0; r < masks.size() && r < om.artifact().return_vgprs; ++r)
       if (masks[r] != 0xffffffffu && k.vobservable.test(r) && !full.test(r))
         k.vexit_masks.emplace_back(r, masks[r]);
+    // Inactive lanes at an exit after which EXEC never changes are never read again; a
+    // callable function's callee-saved VGPRs must still keep every lane.
+    auto stable = [](const KernelModel &m, const Span &s) {
+      return s.begin < s.end ? m.exec_stable_after(s.end - 1) : m.exec_stable_before(s.cut);
+    };
+    if (stable(om, c.o) && stable(nm, c.n)) {
+      const VSet csr =
+          om.artifact().callable || nm.artifact().callable ? return_observable_vgprs(0) : VSet{};
+      k.vactive_only = k.vobservable & ~csr;
+    }
     k.vwrites_old = union_vwrites(om, c.o);
     k.vwrites_new = union_vwrites(nm, c.n);
+    k.vrange = range;
     k.vwide_reads = (union_vwide_reads(om, c.o) | union_vwide_reads(nm, c.n)) & range;
-    if (region.status == RegionStatus::Ready && vout_old != vout_new) {
+    if (region.status == RegionStatus::Ready && vout_old != vout_new && !flow) {
       region.status = RegionStatus::Inconclusive;
       region.reason = "INCONCLUSIVE_MAPPING: VGPR continuation liveness differs at the region "
                       "exit (old-only: " +
@@ -391,7 +496,7 @@ RegionPair build_region(const KernelModel &om, const KernelModel &nm, const Cand
       for (size_t i = side->begin; i < side->end; ++i) {
         const InstRef &ref = m.insts()[i];
         if (ref.fx.mem_read || ref.fx.mem_write)
-          for (const SourceOperand &so : source_operands(*ref.inst))
+          for (const SourceOperand &so : source_operands(*ref.inst, m.artifact().target))
             if (so.locs.count() == 2) {
               if ((so.locs & written).none())
                 bases |= so.locs;
@@ -417,6 +522,45 @@ RegionPair build_region(const KernelModel &om, const KernelModel &nm, const Cand
       k.constraints.push_back(hi);
       ++l;
     }
+  }
+  // Regions with control flow: R_out per exit pair, from the liveness at each exit's
+  // target; observable/vobservable become their union.
+  if (!reject && (obranch || nbranch || multi_block)) {
+    const VSet csr =
+        om.artifact().callable || nm.artifact().callable ? return_observable_vgprs(0) : VSet{};
+    const VSet vrange = k.vrange;
+    LocSet obs_union;
+    VSet vobs_union;
+    for (const auto &[to, tn] : exit_pairs) {
+      RegionExit ex;
+      ex.old_pc = to == c.o.end ? 0 : om.insts()[to].pc;
+      ex.new_pc = tn == c.n.end ? 0 : nm.insts()[tn].pc;
+      const LocSet lo = om.live_before(to);
+      const LocSet ln = to_old(nm.live_before(tn), inv_out);
+      ex.observable = lo | ln;
+      const VSet vo = om.vlive_before(to) & vrange, vn = nm.vlive_before(tn) & vrange;
+      ex.vobservable = vo | vn;
+      if (om.exec_stable_before(to) && nm.exec_stable_before(tn))
+        ex.vactive_only = ex.vobservable & ~csr;
+      if (region.status == RegionStatus::Ready && (lo != ln || vo != vn)) {
+        region.status = RegionStatus::Inconclusive;
+        region.reason = "INCONCLUSIVE_MAPPING: continuation liveness differs at the exit to " +
+                        hex64(om.insts()[to].pc) + " (old-only: " + format_locs(lo & ~ln) +
+                        format_vgprs(vo & ~vn) + "; new-only: " + format_locs(ln & ~lo) +
+                        format_vgprs(vn & ~vo) + ")";
+      }
+      obs_union |= ex.observable;
+      vobs_union |= ex.vobservable;
+      k.exits.push_back(ex);
+    }
+    k.observable = obs_union;
+    k.vobservable = vobs_union;
+    k.vactive_only = VSet{};
+    k.sources.push_back({std::to_string(k.exits.size()) +
+                             " exit pair(s): the runner follows the region's branches; each exit "
+                             "is compared on the liveness at its target, and the two sides "
+                             "must leave through corresponding exits",
+                         "region control flow"});
   }
   k.mode_old = initial_mode(om.artifact());
   k.mode_new = initial_mode(nm.artifact());
@@ -598,7 +742,7 @@ AtomMap build_atoms(const KernelModel &om, const KernelModel &nm, const DiffResu
     a.boundary = reg.old_side.begin == reg.old_side.end && a.anchor > 0 && a.anchor < oi.size() &&
                  oi[a.anchor].leader && oi[a.anchor - 1].block != oi[a.anchor].block;
     const bool one_block = single_block(om, reg.old_side.begin, reg.old_side.end);
-    if (!one_block) {
+    if (!one_block || !reg.contract.exits.empty()) {
       a.kind = Atom::Diverge;
     } else if (reg.status == RegionStatus::Ready) {
       a.kind = Atom::ReadyRegion;
@@ -634,6 +778,17 @@ AtomMap build_atoms(const KernelModel &om, const KernelModel &nm, const DiffResu
     add_atom(std::move(a));
   }
   return map;
+}
+
+/// The edge from old instruction @p from to @p to lies inside one READY region with control
+/// flow: its runner executes it (a loop back to the region's entry).
+bool region_runs_edge(const PlanResult &plan, const AtomMap &map, size_t from, size_t to) {
+  const int64_t a = map.owner[from];
+  if (a < 0 || map.owner[to] != a)
+    return false;
+  const size_t r = map.atoms[static_cast<size_t>(a)].region;
+  return r < plan.regions.size() && plan.regions[r].status == RegionStatus::Ready &&
+         !plan.regions[r].contract.exits.empty();
 }
 
 struct CompositionResult {
@@ -738,12 +893,19 @@ CompositionResult analyse_composition(const KernelModel &om, const KernelModel &
   const EqState initial = metadata_differs ? eq_bottom() : eq_all();
   const size_t nb = blocks.size();
   std::vector<EqState> out(nb);
+  auto runs_edge = [&](uint32_t p, uint32_t b) {
+    return region_runs_edge(plan, map, blocks[p].end - 1, blocks[b].first);
+  };
   bool changed = true;
   for (unsigned round = 0; changed && round < 4096; ++round) {
     changed = false;
     for (uint32_t b = 0; b < nb; ++b) {
       EqState in = b == 0 ? initial : EqState{};
       for (uint32_t p : blocks[b].predecessors) {
+        // An edge inside a READY region with control flow (a loop back to its entry) is run
+        // by the region itself.
+        if (runs_edge(p, b))
+          continue;
         EqState po = out[p];
         if (!po.top && diverges(p, po))
           po = eq_bottom();
@@ -761,6 +923,8 @@ CompositionResult analyse_composition(const KernelModel &om, const KernelModel &
   for (uint32_t b = 0; b < nb; ++b) {
     EqState in = b == 0 ? initial : EqState{};
     for (uint32_t p : blocks[b].predecessors) {
+      if (runs_edge(p, b))
+        continue; // run inside one READY region
       EqState po = out[p];
       if (!po.top && diverges(p, po))
         po = eq_bottom();
@@ -815,7 +979,7 @@ uint32_t leading_known_zero(const Bits &b) { return static_cast<uint32_t>(std::c
 
 uint32_t top_mask(uint32_t n) { return n == 0 ? 0u : n >= 32 ? ~0u : ~0u << (32 - n); }
 
-std::optional<Bits> transfer_bits(const InstRef &ref, const BitsState &s) {
+std::optional<Bits> transfer_bits(const InstRef &ref, const BitsState &s, const Target &target) {
   const Effects &fx = ref.fx;
   if (!fx.p0 || !ref.inst || (ref.inst->flags() & PREDICATED_DEF))
     return std::nullopt;
@@ -823,7 +987,7 @@ std::optional<Bits> transfer_bits(const InstRef &ref, const BitsState &s) {
   dst.reset(kLocScc);
   if (dst.count() != 1)
     return std::nullopt;
-  std::vector<SourceOperand> src = source_operands(*ref.inst);
+  std::vector<SourceOperand> src = source_operands(*ref.inst, target);
   std::erase_if(src, [](const SourceOperand &o) { return o.fieldless; });
   auto bits_of = [&](size_t i) -> std::optional<Bits> {
     if (i >= src.size())
@@ -925,7 +1089,7 @@ KnownBitsResult analyse_known_bits(const KernelModel &om, const KernelModel &nm,
         s = bits_unknown();
         continue;
       }
-      const auto computed = transfer_bits(ref, s);
+      const auto computed = transfer_bits(ref, s, om.artifact().target);
       forget(s, ref.fx.writes);
       if (computed) {
         LocSet dst = ref.fx.writes;
@@ -940,13 +1104,18 @@ KnownBitsResult analyse_known_bits(const KernelModel &om, const KernelModel &nm,
   const BitsState initial = bits_unknown();
   const size_t nb = blocks.size();
   std::vector<BitsState> out(nb);
+  // An edge inside one region (a loop back to its entry) is run by the region itself.
+  auto inside_edge = [&](uint32_t p, uint32_t b) {
+    return region_runs_edge(plan, map, blocks[p].end - 1, blocks[b].first);
+  };
   bool changed = true;
   for (unsigned round = 0; changed && round < 4096; ++round) {
     changed = false;
     for (uint32_t b = 0; b < nb; ++b) {
       BitsState in = b == 0 ? initial : BitsState{};
       for (uint32_t p : blocks[b].predecessors)
-        in = bits_meet(in, out[p]);
+        if (!inside_edge(p, b))
+          in = bits_meet(in, out[p]);
       if (!om.cfg_complete() && b != 0)
         in = bits_meet(in, bits_unknown());
       const BitsState o = run_block(b, in, false);
@@ -959,7 +1128,8 @@ KnownBitsResult analyse_known_bits(const KernelModel &om, const KernelModel &nm,
   for (uint32_t b = 0; b < nb; ++b) {
     BitsState in = b == 0 ? initial : BitsState{};
     for (uint32_t p : blocks[b].predecessors)
-      in = bits_meet(in, out[p]);
+      if (!inside_edge(p, b))
+        in = bits_meet(in, out[p]);
     if (!om.cfg_complete() && b != 0)
       in = bits_meet(in, bits_unknown());
     run_block(b, in, true);
@@ -1044,7 +1214,8 @@ PlanResult plan_regions(const KernelModel &old_model, const KernelModel &new_mod
       metadata_differs = true;
   }
 
-  // 1. Seed candidates from instruction hunks; control-flow hunks are unresolved in P0.
+  // 1. Seed candidates from instruction and control-flow hunks (a region with branches must
+  // pass region_flow: one entry, direct branches, corresponding exits).
   std::vector<Candidate> candidates;
   std::vector<uint32_t> unresolved_blocks; // old blocks of control-flow changes
   for (size_t h = 0; h < diff.hunks.size(); ++h) {
@@ -1057,7 +1228,7 @@ PlanResult plan_regions(const KernelModel &old_model, const KernelModel &new_mod
       unresolved_blocks.push_back(oi.empty() ? 0 : oi.back().block);
       continue;
     }
-    if (hunk.kind != ChangeKind::Instruction) {
+    if (hunk.kind != ChangeKind::Instruction && hunk.kind != ChangeKind::ControlFlow) {
       result.unresolved.push_back(
           {change_kind_name(hunk.kind),
            "hunk " + std::to_string(h) + " at old " +
@@ -1107,8 +1278,8 @@ PlanResult plan_regions(const KernelModel &old_model, const KernelModel &new_mod
 
   // 4. Build base regions.
   for (size_t r = 0; r < merged.size(); ++r) {
-    RegionPair region =
-        build_region(old_model, new_model, merged[r], options, "r" + std::to_string(r));
+    RegionPair region = build_region(old_model, new_model, merged[r], options,
+                                     "r" + std::to_string(r), {}, {}, &diff);
     if (region.status != RegionStatus::Ready)
       result.unresolved.push_back({"region", region.reason, region.id});
     result.regions.push_back(std::move(region));
@@ -1164,7 +1335,8 @@ PlanResult plan_regions(const KernelModel &old_model, const KernelModel &new_mod
         RegionPair variant =
             build_region(old_model, new_model, v, options,
                          result.regions[r].id + ".ctx-b" + std::to_string(v.before) + "f" +
-                             std::to_string(v.after));
+                             std::to_string(v.after),
+                         {}, {}, &diff);
         variant.parent = result.regions[r].id;
         result.variants.push_back(std::move(variant));
         variant_base.push_back(r);
@@ -1299,7 +1471,15 @@ PlanResult plan_regions(const KernelModel &old_model, const KernelModel &new_mod
       if (upstream)
         k.depends_on.push_back(other.id);
     }
-    if (in_cycle(old_model, ob))
+    // A cycle through the entry block is a dependency on this region's own R_out, unless
+    // every edge back to it comes from inside the region (the runner executes that loop).
+    bool loop_inside = !base.contract.exits.empty();
+    for (uint32_t pred : old_model.blocks()[ob].predecessors) {
+      const size_t last = old_model.blocks()[pred].end - 1;
+      if (old_model.reaches(ob, pred) && (last < base.old_side.begin || last >= base.old_side.end))
+        loop_inside = false;
+    }
+    if (in_cycle(old_model, ob) && !loop_inside)
       k.depends_on.push_back(base.id + " (loop back-edge)");
     record_composition(
         region, entry_state,
@@ -1383,7 +1563,8 @@ PlanResult plan_regions(const KernelModel &old_model, const KernelModel &new_mod
       c.n = {0, base.new_side.end, base.new_side.cut};
       c.hunks = base.hunks;
       c.before = static_cast<uint32_t>(base.old_side.begin);
-      RegionPair d = build_region(old_model, new_model, c, options, base.id + ".diag-entry");
+      RegionPair d =
+          build_region(old_model, new_model, c, options, base.id + ".diag-entry", {}, {}, &diff);
       d.parent = base.id;
       const auto entry_block = [](const KernelModel &m, const RegionSide &s) {
         const size_t a = s.begin < s.end ? s.begin : s.cut;
@@ -1516,8 +1697,8 @@ PlanResult plan_manual_region(const KernelModel &old_model, const KernelModel &n
              std::to_string(hunk.new_begin) + "," + std::to_string(hunk.new_end) + "))",
          ""});
   }
-  RegionPair region =
-      build_region(old_model, new_model, c, options, "m0", manual.entry_map, manual.exit_map);
+  RegionPair region = build_region(old_model, new_model, c, options, "m0", manual.entry_map,
+                                   manual.exit_map, &diff);
   RegionContract &k = region.contract;
   k.composition = "NOT_CHECKED";
   k.sources.push_back(

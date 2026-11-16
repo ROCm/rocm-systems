@@ -29,6 +29,13 @@ and `ScalarSccTest.*:*Sop*:*Scalar*` passes 1162/1162 on the base.
 | need | real symbol | notes |
 |---|---|---|
 | gfx950 | `ROCJITSU_CODE_ARCH_CDNA4`, `ROCJITSU_CODE_TARGET_GFX950` | `isa/arch/amdgpu/cdna4/target_descriptor.h` |
+| every target | `rj_code_arch_t` per family (CDNA1-5, RDNA1-4); `target.h` maps GPU names and `EF_AMDGPU_MACH` values to it | `AmdGpuCodeObject::target_id()` knows 8 GPUs only, so the machine number is read from `e_flags` directly |
+| wave size | `kernel_wavefront_size(arch, desc)` (`code/kernel_descriptor_scan.h`), `dispatch_wf(..., wave_size)` | wave32 on RDNA when `ENABLE_WAVEFRONT_SIZE32`; gfx1250 wave32 only |
+| wave masks | `Operand::is_wave_mask()`, `wave_sized_register(op, ref, wave_size)` (`isa/operand.h`) | RDNA decoders size wave-mask SGPR operands for wave64; fieldless VCC/EXEC stay unmarked, so `effects.cpp` narrows those by the target's wave size |
+| user SGPRs | `kernel_descriptor_user_sgpr_count(arch, desc)` | gfx1250 has a 6-bit field |
+| VGPR granule | `descriptor_vgpr_granularity_for_wavefront(arch, wave)` | used by the descriptor allocation check |
+| waits | `WaitCounterPolicy::explicit_wait_fields(inst, arch)`, `waitcnt_model(arch)`, `canonical_wait_counter(type, model)`, `Instruction::amdgpu_memory_issue_info()->counter_obligations()` | `PendingState` keeps one counter per `WaitCounterKind` |
+| MODE per generation | `initial_mode_from_compute_pgm_rsrc1` (DX10/IEEE/DEBUG only before GFX12) | mirrored in `artifact.cpp` `initial_mode(descriptor, target)` |
 | decoder | `Decoder::create(rj_code_arch_t)`, `Decoder::decode_window(span<const uint32_t>, src_loc)` | `isa/decoder.h`; returns `FailureOr<unique_ptr<Instruction>>` |
 | execution backend | link `rocjitsu_amdgpu_isa_registry` (via `RJ_TOOL_OBJECT_LIBS`) | The model-only registry (`rocjitsu_amdgpu_isa_model_registry`) leaves `Instruction::execute == nullptr`. We check this per instruction and never infer it from a successful decode. |
 | per-instruction execution | `ComputeUnitCore::execute_instruction(Instruction*, Wavefront&, std::string*)` | `vm/amdgpu/compute_unit.h:1545`. Returns `util::Result`. Unimplemented stubs and register-access failures come back as a failure carrying `InstructionExecutionError`, and host exceptions can still escape. It does not advance PC. |

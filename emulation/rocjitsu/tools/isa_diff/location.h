@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 /// @file location.h
-/// @brief Architectural locations tracked by the gfx950 P0 SALU differential model.
+/// @brief Architectural scalar locations tracked by the differential model.
 ///
 /// @details One location is one independently writable 32-bit (or 1-bit) piece of
 /// scalar state. VCC and EXEC are split into their LO/HI halves because SALU code
@@ -19,9 +19,10 @@
 
 namespace rocjitsu::isa_diff {
 
-/// Addressable SGPRs on gfx950 (s0..s101). Selectors 102..105 name FLAT_SCRATCH
-/// and XNACK_MASK, which are not ordinary SGPRs and are outside P0.
-inline constexpr unsigned kNumSgprs = 102;
+/// SGPR locations s0..s105: the addressable SGPRs of GFX10 and later. GFX9 (CDNA) addresses
+/// s0..s101 (Target::sgprs()); its selectors 102..105 name FLAT_SCRATCH and XNACK_MASK, which
+/// are not ordinary SGPRs, so there s102..s105 are never named and keep their initial value.
+inline constexpr unsigned kNumSgprs = 106;
 
 enum Loc : unsigned {
   kLocVccLo = kNumSgprs,
@@ -36,7 +37,8 @@ enum Loc : unsigned {
 using LocSet = std::bitset<kNumLocs>;
 
 /// Vector registers v0..v255 (VALU support). A VGPR is one location for analysis
-/// (liveness, effects, contracts); its 64 lanes are separate values in MachineState.
+/// (liveness, effects, contracts); its lanes are separate values in MachineState, which
+/// always holds 64. A wave32 target uses lanes 0..31; the others stay zero.
 inline constexpr unsigned kNumVgprs = 256;
 inline constexpr unsigned kWaveLanes = 64;
 using VSet = std::bitset<kNumVgprs>;

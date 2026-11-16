@@ -55,12 +55,16 @@ enum class RunStatus {
   PcWritten,
   WaveStateChanged,
   BudgetExceeded,
+  /// A loop inside the region ran past the step limit: the case is excluded (never read as
+  /// non-termination, never a pass).
+  StepLimit,
 };
 [[nodiscard]] const char *run_status_name(RunStatus s);
 
 struct RunOutcome {
   RunStatus status = RunStatus::Ok;
   size_t executed = 0;     ///< Instructions executed this run.
+  uint64_t exit_pc = 0;    ///< 0: fell off the end; else the PC a branch left the region to.
   size_t failed_index = 0; ///< Region index of the failing instruction.
   std::string detail;
 };
@@ -98,9 +102,11 @@ public:
   /// @brief Build a runner. Decode failures do not fail creation; run() reports them.
   /// @param vgpr_count VGPRs v0..v{n-1} the wave allocates, loads and captures; any
   /// access beyond them is an invalid register access. 0: no VGPR state (SALU region).
+  /// @param target GPU and wave size: the compute unit's ISA, the decoder, the SGPRs the
+  /// wave allocates (s0-s103 on GFX9, s0-s105 from GFX10) and the lanes it runs.
   static std::unique_ptr<RegionRunner> create(const std::vector<RegionInst> &insts,
                                               const std::string &label, std::string &error,
-                                              unsigned vgpr_count = 0);
+                                              unsigned vgpr_count = 0, const Target &target = {});
   ~RegionRunner();
   RegionRunner(const RegionRunner &) = delete;
   RegionRunner &operator=(const RegionRunner &) = delete;
@@ -152,6 +158,15 @@ private:
   std::string decode_error_;
   Frame baseline_;
   unsigned vgpr_count_ = 0;
+  Target target_;
+  std::vector<bool> branch_;                      ///< Direct branch (followed by the runner).
+  std::unordered_map<uint64_t, size_t> pc_index_; ///< Region instruction at each PC.
+  bool back_edge_ = false;                        ///< Some branch goes backwards (a loop).
+  uint64_t exit_pc_ = 0;                          ///< The last run's exit (see RunOutcome).
+  /// Lanes of the wave: all 64 on wave64, the low 32 on wave32.
+  uint64_t lane_mask_ = ~uint64_t{0};
+  /// EXEC restricted to the wave's lanes.
+  [[nodiscard]] uint64_t exec_lanes() const;
   /// Memory model: memory instructions are issued through ComputeUnitCore::step() (the
   /// full fetch/execute/route path, synchronous in functional mode); a plugin seeds the
   /// bytes a load reads first from the initial content and records stored bytes.
@@ -187,13 +202,22 @@ private:
     int mask_loc = -1;                     ///< v_cndmask: lowest Loc of the lane-select mask.
     unsigned op_sel_lo = 0, op_sel_hi = 0; ///< v_pk_mov_b32 source dword selection.
     bool store = false;                    ///< A vector store: data tags go to the memory model.
+    FpResult skind = FpResult::None;       ///< Scalar results (fp_scalar_result_kind).
+    std::vector<unsigned> sdsts;           ///< Scalar destinations (not SCC), ascending.
     bool store_hi16 = false;               ///< `_d16_hi` store: the high half is stored.
   };
   std::vector<std::vector<OperandRef>> srcs_; ///< Non-fieldless sources per instruction.
   std::vector<FpPlan> fp_plan_;
   std::vector<uint32_t> poison_kind_;
   std::vector<std::string> mnemonics_;
-  std::vector<uint8_t> vfp_; ///< FpTag per VGPR lane during a run.
+  std::vector<uint8_t> vfp_;            ///< FpTag per VGPR lane during a run.
+  std::array<uint8_t, kNumLocs> sfp_{}; ///< FpTag per scalar location during a run.
+  std::vector<uint8_t> scratch_stags_;
+  /// Tags of instruction @p i's scalar results (computed before it runs).
+  [[nodiscard]] std::vector<uint8_t> plan_stags(size_t i) const;
+  void apply_stags(size_t i, const std::vector<uint8_t> &tags);
+  /// Write a scalar location (SGPR, VCC/EXEC half, M0).
+  void write_loc(unsigned l, uint32_t v);
   uint32_t poison_filter_ = 0;
   unsigned nan_choice_ = 0;
   uint64_t nan_seed_ = 0;

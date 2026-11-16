@@ -41,6 +41,10 @@ const char *kUsage =
     "                      [--diagnostic-entry-prefix] [--cache-dir DIR]\n"
     "                      [--return-vgprs N] [--return-masks M,...] [--function-mode HEX]\n"
     "                      [--entry-vgprs N] [--entry-sgprs N]  (entry and return ABI)\n"
+    "                      [--target NAME[:w32|w64]] [--wave-size 32|64] [--mattr FEATURES]\n"
+    "      --target: the GPU of raw words and .s/.ll inputs (code objects name their own;\n"
+    "      default gfx950). --wave-size: wave32/wave64 on GFX10+ (functions; a kernel's\n"
+    "      descriptor decides its own). --mattr: target features for llc/llvm-mc.\n"
     "      --manual-region: one hand-written region (instruction indices or 0x PCs, E\n"
     "      exclusive); --map: old=new register correspondence. Both stay ASSUMED.\n"
     "  rj_isa_diff test    --case DIR [--seed N] [--cases N] [--region ID]\n"
@@ -57,7 +61,8 @@ const char *kUsage =
     "                      [--inst N] [--word N] [--label NAME]   (synthetic self-test)\n"
     "  rj_isa_diff llvm-pair --input K.ll --old-args S --new-args S --out DIR\n"
     "                      [--common-args S] [--kernel NAME] [--llvm-bin DIR]  (LLVM plugin)\n"
-    "FILE is a gfx950 code object, a raw instruction stream, or .s/.ll (LLVM plugin:\n"
+    "FILE is a code object (CDNA1-4: gfx908/90a/940-942/950; RDNA1-4: gfx1010-1201;\n"
+    "gfx1250/1251), a raw instruction stream, or .s/.ll (LLVM plugin:\n"
     "llc -> llvm-mc -> ld.lld from --llvm-bin, $RJ_ISA_DIFF_LLVM_BIN or /opt/rocm/llvm/bin).\n"
     "exit: 0 no mismatch found with complete declared scope, 1 local mismatch,\n"
     "      2 inconclusive/unsupported/partial scope, 3 error.\n";
@@ -156,7 +161,8 @@ int exit_code_for(const Json &overall) {
 const std::vector<std::string> kPlanFlags = {
     "--context",       "--max-region",  "--max-expansions",  "--manual-region", "--map",
     "--entry-map",     "--exit-map",    "--max-analysis-ms", "--cache-dir",     "--return-vgprs",
-    "--function-mode", "--entry-vgprs", "--return-masks",    "--entry-sgprs"};
+    "--function-mode", "--entry-vgprs", "--return-masks",    "--entry-sgprs",   "--target",
+    "--wave-size",     "--mattr"};
 const std::vector<std::string> kPlanSwitches = {"--no-merge", "--no-derive-constraints",
                                                 "--diagnostic-entry-prefix"};
 
@@ -187,16 +193,51 @@ bool has_suffix(const std::string &s, const std::string &suffix) {
          s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
 }
 
+/// The target asked for on the command line: --target NAME[:w32|w64], --wave-size 32|64.
+struct TargetRequest {
+  std::optional<Target> target; ///< With its default wave size unless one was given.
+  unsigned wave_size = 0;       ///< Explicit wave size, 0 if none.
+  std::string mattr;            ///< Target features for the LLVM plugin.
+};
+
+/// Apply a request to a loaded artifact: raw words take the target; a code object must be
+/// for it; an explicit wave size sets a callable function's (a kernel's descriptor decides
+/// its own and must agree).
+bool apply_target(const TargetRequest &req, Artifact &a, std::string &error) {
+  if (req.target) {
+    if (a.kind == "raw_words") {
+      a.target = *req.target;
+    } else if (a.target.name != req.target->name) {
+      error = "the code object is for " + a.target.name + ", not " + req.target->name;
+      return false;
+    }
+  }
+  if (req.wave_size && req.wave_size != a.target.wave_size) {
+    if (a.kind == "code_object" && !a.callable) {
+      error = "the kernel descriptor asks for wave" + std::to_string(a.target.wave_size) +
+              ", not wave" + std::to_string(req.wave_size);
+      return false;
+    }
+    auto t = with_wave_size(a.target, req.wave_size);
+    if (!t) {
+      error = a.target.name + " cannot run wave" + std::to_string(req.wave_size);
+      return false;
+    }
+    a.target = *t;
+  }
+  return true;
+}
+
 /// Load one side: a code object or raw words directly, `.s`/`.ll` through the LLVM plugin.
 bool load_side(const std::string &path, const std::string &kernel, const std::string &side,
                const std::string &out_dir, const std::string &llvm_bin,
                const std::vector<std::string> &common_args,
-               const std::vector<std::string> &side_args, Artifact &out, Json &provenance,
-               std::string &error) {
+               const std::vector<std::string> &side_args, const TargetRequest &req, Artifact &out,
+               Json &provenance, std::string &error) {
   const bool is_ll = has_suffix(path, ".ll");
   const bool is_s = has_suffix(path, ".s");
   if (!is_ll && !is_s)
-    return load_artifact(path, kernel, out, error);
+    return load_artifact(path, kernel, out, error) && apply_target(req, out, error);
   auto tc = llvm::Toolchain::discover(llvm_bin, error);
   if (!tc)
     return false;
@@ -204,13 +245,17 @@ bool load_side(const std::string &path, const std::string &kernel, const std::st
   std::filesystem::create_directories(out_dir + "/artifacts", ec);
   const std::string prefix = out_dir + "/artifacts/" + side;
   llvm::Provenance prov;
+  if (req.target)
+    prov.mcpu = req.target->name;
+  prov.wave_size = req.wave_size;
+  prov.mattr = req.mattr;
   const bool ok =
       is_ll ? llvm::compile(*tc, path, common_args, side_args, prefix, kernel, out, prov, error)
             : llvm::assemble(*tc, path, prefix, kernel, out, prov, error);
   provenance = prov.to_json();
   if (!write_text_file(prefix + ".provenance.json", provenance.dump()))
     std::cerr << "warning: cannot write " << prefix << ".provenance.json\n";
-  return ok;
+  return ok && apply_target(req, out, error);
 }
 
 int run_analyze(const std::string &old_path, const std::string &new_path, const Args &a,
@@ -225,21 +270,49 @@ int run_analyze(const std::string &old_path, const std::string &new_path, const 
   const std::string out_dir = a.get("--out");
   const std::string kernel = a.get("--kernel");
   std::string error;
+  TargetRequest req;
+  if (a.has("--target")) {
+    req.target = parse_target(a.get("--target"));
+    if (!req.target) {
+      std::cerr << "--target takes NAME[:w32|w64] with NAME one of " << supported_targets() << "\n";
+      return kExitError;
+    }
+    if (a.get("--target").find(':') != std::string::npos)
+      req.wave_size = req.target->wave_size;
+  }
+  if (a.has("--wave-size")) {
+    const auto w = a.number("--wave-size", 0);
+    if (!w || (*w != 32 && *w != 64)) {
+      std::cerr << "--wave-size takes 32 or 64\n";
+      return kExitError;
+    }
+    req.wave_size = static_cast<unsigned>(*w);
+    if (req.target && !with_wave_size(*req.target, req.wave_size)) {
+      std::cerr << req.target->name << " cannot run wave" << req.wave_size << "\n";
+      return kExitError;
+    }
+  }
+  req.mattr = a.get("--mattr");
   Artifact old_a, new_a;
   Json old_prov, new_prov;
   if (!load_side(old_path, a.get("--old-kernel", kernel), "old", out_dir, a.get("--llvm-bin"),
-                 common_args, old_args, old_a, old_prov, error)) {
+                 common_args, old_args, req, old_a, old_prov, error)) {
     std::cerr << "old: " << error << "\n";
     return kExitError;
   }
   if (!load_side(new_path, a.get("--new-kernel", kernel), "new", out_dir, a.get("--llvm-bin"),
-                 common_args, new_args, new_a, new_prov, error)) {
+                 common_args, new_args, req, new_a, new_prov, error)) {
     std::cerr << "new: " << error << "\n";
+    return kExitError;
+  }
+  if (!(old_a.target == new_a.target)) {
+    std::cerr << "old and new run on different targets (" << old_a.target.label() << ", "
+              << new_a.target.label() << ")\n";
     return kExitError;
   }
   // Callable functions: the caller-visible part of the calling convention.
   const auto ret_vgprs = a.number("--return-vgprs", 32);
-  std::optional<uint32_t> fmode = kDefaultFunctionMode;
+  std::optional<uint32_t> fmode = default_function_mode(old_a.target);
   if (a.has("--function-mode")) {
     const std::string &s = a.get("--function-mode");
     char *end = nullptr;
@@ -269,7 +342,7 @@ int run_analyze(const std::string &old_path, const std::string &new_path, const 
   const auto entry_vgprs = a.number("--entry-vgprs", 0);
   const auto entry_sgprs = a.number("--entry-sgprs", 0);
   if (!entry_vgprs || *entry_vgprs > 256 || !entry_sgprs || *entry_sgprs > kNumSgprs) {
-    std::cerr << "--entry-vgprs takes 0..256, --entry-sgprs 0..102\n";
+    std::cerr << "--entry-vgprs takes 0..256, --entry-sgprs 0..106\n";
     return kExitError;
   }
   for (Artifact *art : {&old_a, &new_a}) {

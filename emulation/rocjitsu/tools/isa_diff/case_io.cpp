@@ -24,7 +24,8 @@ Json artifact_json(const Artifact &a, size_t num_insts) {
   j.set("label", a.label);
   j.set("kind", a.kind);
   j.set("sha256", a.sha256);
-  j.set("target", a.target);
+  j.set("target", a.target.name);
+  j.set("wave_size", static_cast<uint64_t>(a.target.wave_size));
   j.set("kernel", a.kernel_name);
   j.set("text_vaddr", hex64(a.text_vaddr));
   j.set("kernel_begin", hex64(a.kernel_begin));

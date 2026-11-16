@@ -62,12 +62,24 @@ int64_t direct_branch_offset(const Instruction &inst, uint64_t offset) {
 
 } // namespace
 
-LocSet return_observable_locs() {
+std::string pending_counter_name(unsigned c, const Target &target) {
+  if (target.major < 12) {
+    if (c == PendingState::kLoad)
+      return "vmcnt";
+    if (c == PendingState::kDs)
+      return "lgkmcnt";
+    if (c == static_cast<unsigned>(amdgpu::WaitCounterKind::Store))
+      return "vscnt";
+  }
+  return std::string(amdgpu::wait_counter_name(static_cast<amdgpu::WaitCounterKind>(c)));
+}
+
+LocSet return_observable_locs(const Target &target) {
   // CSR_AMDGPU_SGPRs (AMDGPUCallingConv.td): s30-s39, s48-s55, s64-s71, s80-s87, s96-s105;
-  // s102-s105 are not addressable here. The caller also expects its EXEC back.
+  // GFX9 addresses s0-s101. The caller also expects its EXEC back.
   LocSet l;
-  for (auto [lo, hi] : {std::pair{30u, 39u}, {48u, 55u}, {64u, 71u}, {80u, 87u}, {96u, 101u}})
-    for (unsigned s = lo; s <= hi; ++s)
+  for (auto [lo, hi] : {std::pair{30u, 39u}, {48u, 55u}, {64u, 71u}, {80u, 87u}, {96u, 105u}})
+    for (unsigned s = lo; s <= hi && s < target.sgprs(); ++s)
       l.set(s);
   l.set(kLocExecLo);
   l.set(kLocExecHi);
@@ -103,9 +115,10 @@ std::unique_ptr<KernelModel> KernelModel::build(const Artifact &artifact, std::s
   std::unique_ptr<KernelModel> model(new KernelModel());
   model->artifact_ = artifact;
   model->code_object_ = std::make_unique<TextCodeObject>(artifact.text, artifact.text_vaddr);
-  model->decoder_ = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  const Target &target = artifact.target;
+  model->decoder_ = Decoder::create(target.arch);
   if (!model->decoder_) {
-    error = "no gfx950 decoder linked";
+    error = "no " + target.name + " decoder linked";
     return nullptr;
   }
   if (artifact.kernel_end <= artifact.kernel_begin || artifact.kernel_end > artifact.text.size()) {
@@ -116,9 +129,8 @@ std::unique_ptr<KernelModel> KernelModel::build(const Artifact &artifact, std::s
   const BasicBlock::CodeRange ranges[] = {
       {artifact.kernel_begin, artifact.kernel_end - artifact.kernel_begin}};
   util::StringDiagnostic diag;
-  auto built =
-      BasicBlock::build_reachable(*model->code_object_, *model->decoder_, ROCJITSU_CODE_ARCH_CDNA4,
-                                  entries, diag.emitter(), ranges);
+  auto built = BasicBlock::build_reachable(*model->code_object_, *model->decoder_, target.arch,
+                                           entries, diag.emitter(), ranges);
   if (built.failed()) {
     error = "CFG construction failed: " + diag.message();
     return nullptr;
@@ -150,7 +162,9 @@ std::unique_ptr<KernelModel> KernelModel::build(const Artifact &artifact, std::s
     std::memcpy(ref.words.data(), artifact.text.data() + offset, nwords * 4);
     ref.mnemonic = std::string(inst->mnemonic());
     ref.text = inst->disassemble();
-    ref.fx = classify(*inst);
+    ref.fx = classify(*inst, target);
+    if (ref.mnemonic == "s_set_vgpr_msb")
+      model->vgpr_msb_ = true;
     for (const TextRelocation &rel : artifact.text_relocations)
       if (rel.offset >= offset && rel.offset < offset + nwords * 4)
         ref.relocations += (ref.relocations.empty() ? "" : "; ") + describe_relocation(rel);
@@ -247,8 +261,10 @@ std::unique_ptr<KernelModel> KernelModel::build(const Artifact &artifact, std::s
     const InstRef &last = insts[b.end - 1];
     if (last.fx.unknown_effect)
       b.unknown_successor = true;
-    // A callable function returns through the address it was called with.
-    if (artifact.callable && last.inst && last.mnemonic == "s_setpc_b64" &&
+    // A callable function returns through the address it was called with (s_set_pc_i64 is
+    // the GFX12.5 name).
+    if (artifact.callable && last.inst &&
+        (last.mnemonic == "s_setpc_b64" || last.mnemonic == "s_set_pc_i64") &&
         !last.fx.unknown_effect) {
       LocSet ra;
       ra.set(30);
@@ -297,9 +313,24 @@ std::unique_ptr<KernelModel> KernelModel::build(const Artifact &artifact, std::s
         model->uncovered_.end(), artifact.text.begin() + static_cast<std::ptrdiff_t>(cursor),
         artifact.text.begin() + static_cast<std::ptrdiff_t>(artifact.kernel_end));
 
+  // GFX12.5 s_set_vgpr_msb selects which 256-VGPR bank later operands name: decoded VGPR
+  // numbers are then not the registers accessed, so nothing that names a VGPR is modelled.
+  if (model->vgpr_msb_)
+    for (InstRef &ref : insts)
+      if (ref.inst &&
+          (ref.fx.vreads.any() || ref.fx.vwrites.any() || ref.mnemonic == "s_set_vgpr_msb")) {
+        ref.fx.unknown_effect = true;
+        ref.fx.p0 = false;
+        ref.fx.reject_reason = "VGPR bank selected by s_set_vgpr_msb (GFX12.5 VGPRs above "
+                               "v255): register numbers are dynamic";
+        ref.fx.implicit_reads = all_locs();
+        ref.fx.implicit_special_reads = true;
+      }
+
   const auto t_dataflow = std::chrono::steady_clock::now();
   model->decode_cfg_ns_ = static_cast<uint64_t>(
       std::chrono::duration_cast<std::chrono::nanoseconds>(t_dataflow - t_decode).count());
+  model->compute_exec_stability();
   model->compute_liveness();
   model->compute_undefined();
   model->compute_taint();
@@ -324,9 +355,17 @@ VSet KernelModel::vlive_transfer(const Effects &fx, const VSet &live_after) {
   return live_after | fx.vreads;
 }
 
-VSet KernelModel::vlive_before(size_t i) const {
-  return vlive_transfer(insts_[i].fx, vlive_after_[i]);
+VSet KernelModel::vlive_step(size_t i, const VSet &live_after) const {
+  const Effects &fx = insts_[i].fx;
+  if (fx.unknown_effect) {
+    VSet all;
+    all.set();
+    return all;
+  }
+  return (i < vkill_.size() ? live_after & ~vkill_[i] : live_after) | fx.vreads;
 }
+
+VSet KernelModel::vlive_before(size_t i) const { return vlive_step(i, vlive_after_[i]); }
 
 void KernelModel::compute_liveness() {
   const size_t nb = blocks_.size();
@@ -335,7 +374,7 @@ void KernelModel::compute_liveness() {
     if (blocks_[b].unknown_successor)
       return all_locs();
     if (blocks_[b].returns)
-      return return_observable_locs();
+      return return_observable_locs(artifact_.target);
     LocSet out;
     for (uint32_t s : blocks_[b].successors)
       out |= live_in[s];
@@ -412,7 +451,7 @@ std::vector<VSet> KernelModel::vgpr_liveness(const VSet &return_live) const {
     vout[b] = vblock_out(b);
     VSet in = vout[b];
     for (size_t i = blocks_[b].end; i-- > blocks_[b].first;)
-      in = vlive_transfer(insts_[i].fx, in);
+      in = vlive_step(i, in);
     if (in == vin[b])
       continue;
     vin[b] = in;
@@ -427,14 +466,14 @@ std::vector<VSet> KernelModel::vgpr_liveness(const VSet &return_live) const {
     VSet live = vblock_out(b);
     for (size_t i = blocks_[b].end; i-- > blocks_[b].first;) {
       after[i] = live;
-      live = vlive_transfer(insts_[i].fx, live);
+      live = vlive_step(i, live);
     }
   }
   return after;
 }
 
 VSet KernelModel::vlive_before_strict(size_t i) const {
-  return vlive_transfer(insts_[i].fx, vlive_after_strict_[i]);
+  return vlive_step(i, vlive_after_strict_[i]);
 }
 
 VSet KernelModel::vundef_before(size_t i) const {
@@ -454,10 +493,11 @@ void KernelModel::compute_undefined() {
   // Scalars: s{entry_sgprs}.. (but a callable function's callee-saved SGPRs), VCC, M0, SCC.
   if (artifact_.entry_sgprs >= 0) {
     LocSet sdef;
-    for (int l = 0; l < artifact_.entry_sgprs && l < static_cast<int>(kNumSgprs); ++l)
+    for (int l = 0; l < artifact_.entry_sgprs && l < static_cast<int>(artifact_.target.sgprs());
+         ++l)
       sdef.set(static_cast<size_t>(l));
     if (artifact_.callable)
-      sdef |= return_observable_locs(); // callee-saved SGPRs and EXEC
+      sdef |= return_observable_locs(artifact_.target); // callee-saved SGPRs and EXEC
     sdef.set(kLocExecLo);
     sdef.set(kLocExecHi);
     entry_undef_ = ~sdef;
@@ -599,62 +639,84 @@ void KernelModel::compute_taint() {
 
 namespace {
 
-/// Counters an issued memory operation increments on gfx9 (CDNA): SMEM and LDS/GDS use
-/// lgkmcnt, VMEM uses vmcnt, FLAT uses both; an unclassified producer is assumed to use all.
-std::array<bool, PendingState::kNumCounters> producer_counters(const Instruction &inst) {
-  const uint64_t f = inst.flags();
+static_assert(PendingState::kNumCounters == amdgpu::kWaitCounterCount);
+static_assert(PendingState::kDs == static_cast<unsigned>(amdgpu::WaitCounterKind::Ds));
+static_assert(PendingState::kLoad == static_cast<unsigned>(amdgpu::WaitCounterKind::Load));
+
+/// Wait-counter domains an issued memory operation increments, from RocJITsu's memory-issue
+/// metadata (SMEM, LDS, VMEM, FLAT on every generation). @p in_order is cleared when a Load
+/// obligation is outside the in-order vector class. A memory-flagged instruction without
+/// metadata is assumed to use every counter.
+std::array<bool, PendingState::kNumCounters>
+producer_counters(const Instruction &inst, rj_code_arch_t arch, bool &in_order) {
   std::array<bool, PendingState::kNumCounters> c{};
-  if (!(f & (MEMORY_OP | MEMORY_WAIT_PRODUCER | SMEM | VMEM | LDS)))
+  in_order = true;
+  const auto model = amdgpu::waitcnt_model(arch);
+  if (const auto *issue = inst.amdgpu_memory_issue_info(); issue && !model.failed()) {
+    for (const auto &ob : issue->counter_obligations()) {
+      const auto kind = amdgpu::canonical_wait_counter(ob.wait_counter_type(), model.value());
+      const size_t k = amdgpu::WaitCounterPolicy::counter_index(kind);
+      if (k >= PendingState::kNumCounters)
+        continue;
+      c[k] = true;
+      if (k == PendingState::kLoad && ob.completion_class() != amdgpu::MemoryCompletionClass::VMEM)
+        in_order = false;
+    }
     return c;
-  if (f & (SMEM | LDS))
-    c[PendingState::kLgkm] = true;
-  if (f & VMEM)
-    c[PendingState::kVm] = true;
-  if (!c[0] && !c[1] && !c[2])
-    c = {true, true, true};
+  }
+  const uint64_t f = inst.flags();
+  if (f & (MEMORY_OP | MEMORY_WAIT_PRODUCER | SMEM | VMEM | LDS))
+    c.fill(true);
   return c;
 }
 
-PendingState pending_transfer(const InstRef &ref, PendingState s) {
+PendingState pending_transfer(const InstRef &ref, PendingState s, rj_code_arch_t arch) {
   if (!ref.inst)
     return s; // inline asm: no memory operation
   const Instruction &inst = *ref.inst;
-  if (ref.mnemonic == "s_waitcnt" && inst.num_src_operands() >= 1) {
-    if (auto v = inst.src_operand(0)->const_value()) {
-      const auto f = amdgpu::decode_gfx9_waitcnt(static_cast<uint32_t>(*v));
-      const uint32_t limit[PendingState::kNumCounters] = {f.vmcnt, f.lgkmcnt, f.expcnt};
-      for (unsigned c = 0; c < PendingState::kNumCounters; ++c) {
-        s.count[c] = static_cast<uint8_t>(std::min<uint32_t>(s.count[c], limit[c]));
-        if (s.count[c] == 0) {
+  // A counter wait of any generation (s_waitcnt, s_waitcnt_vscnt, s_wait_loadcnt, ...): each
+  // field it names caps that counter. An undecodable wait changes nothing (conservative).
+  const auto waits = amdgpu::WaitCounterPolicy::explicit_wait_fields(inst, arch);
+  if (!waits.failed() && waits.value()) {
+    const amdgpu::WaitFields &fields = *waits.value();
+    for (unsigned c = 0; c < PendingState::kNumCounters; ++c) {
+      if (!fields[c])
+        continue;
+      const uint32_t limit = *fields[c];
+      s.count[c] = static_cast<uint8_t>(std::min<uint32_t>(s.count[c], limit));
+      if (s.count[c] == 0) {
+        s.dests[c].reset();
+        s.vdests[c].reset();
+        s.unknown[c] = false;
+        if (c == PendingState::kLoad) {
+          s.vm_ops.clear();
+          s.load_unordered = false;
+        }
+      } else if (c == PendingState::kLoad && !s.load_unordered && s.vm_ops.size() > limit) {
+        // In order: only the newest `limit` loads can still be outstanding.
+        s.vm_ops.erase(s.vm_ops.begin(), s.vm_ops.end() - static_cast<std::ptrdiff_t>(limit));
+        if (!s.unknown[c]) {
           s.dests[c].reset();
           s.vdests[c].reset();
-          s.unknown[c] = false;
-        }
-      }
-      // In-order vmcnt: only the newest vmcnt operations can still be outstanding.
-      if (s.vm_ops.size() > limit[PendingState::kVm]) {
-        s.vm_ops.erase(s.vm_ops.begin(),
-                       s.vm_ops.end() - static_cast<std::ptrdiff_t>(limit[PendingState::kVm]));
-        if (!s.unknown[PendingState::kVm]) {
-          s.dests[PendingState::kVm].reset();
-          s.vdests[PendingState::kVm].reset();
           for (const auto &[l, v] : s.vm_ops) {
-            s.dests[PendingState::kVm] |= l;
-            s.vdests[PendingState::kVm] |= v;
+            s.dests[c] |= l;
+            s.vdests[c] |= v;
           }
         }
       }
     }
     return s;
   }
-  const auto counters = producer_counters(inst);
+  bool in_order = true;
+  const auto counters = producer_counters(inst, arch, in_order);
   for (unsigned c = 0; c < PendingState::kNumCounters; ++c) {
     if (!counters[c])
       continue;
     s.count[c] = static_cast<uint8_t>(std::min<unsigned>(s.count[c] + 1u, 63u));
     s.dests[c] |= ref.fx.writes;
     s.vdests[c] |= ref.fx.vwrites;
-    if (c == PendingState::kVm) {
+    if (c == PendingState::kLoad) {
+      s.load_unordered = s.load_unordered || !in_order;
       s.vm_ops.emplace_back(ref.fx.writes, ref.fx.vwrites);
       if (s.vm_ops.size() > 63) { // saturate: fold the two oldest
         s.vm_ops[1].first |= s.vm_ops[0].first;
@@ -676,6 +738,7 @@ PendingState pending_join(const PendingState &a, const PendingState &b) {
     r.vdests[c] = a.vdests[c] | b.vdests[c];
     r.unknown[c] = a.unknown[c] || b.unknown[c];
   }
+  r.load_unordered = a.load_unordered || b.load_unordered;
   // Align the in-order VMEM queues at their newest end and join element-wise.
   const size_t n = std::max(a.vm_ops.size(), b.vm_ops.size());
   r.vm_ops.assign(n, {});
@@ -717,7 +780,7 @@ void KernelModel::compute_pending() {
         continue;
       PendingState t = s;
       for (size_t i = blocks_[b].first; i < blocks_[b].end; ++i)
-        t = pending_transfer(insts_[i], t);
+        t = pending_transfer(insts_[i], t, artifact_.target.arch);
       if (!visited[b] || !(s == in[b]) || !(t == out[b])) {
         in[b] = s;
         out[b] = t;
@@ -740,9 +803,97 @@ void KernelModel::compute_pending() {
     }
     for (size_t i = blocks_[b].first; i < blocks_[b].end; ++i) {
       pending_before_[i] = t;
-      t = pending_transfer(insts_[i], t);
+      t = pending_transfer(insts_[i], t, artifact_.target.arch);
     }
   }
+}
+
+namespace {
+
+/// Reads or writes lanes regardless of EXEC: lane reads/writes by index, DPP, permutes,
+/// LDS swizzles. Unknown and opaque instructions count as such.
+bool crosses_lanes(const InstRef &r) {
+  if (r.inline_asm >= 0)
+    return r.fx.unknown_effect;
+  if (!r.inst || r.fx.unknown_effect)
+    return true;
+  const std::string_view m = r.mnemonic;
+  auto starts = [&](std::string_view p) { return m.substr(0, p.size()) == p; };
+  if (starts("v_readlane") || starts("v_writelane") || starts("v_permlane") ||
+      starts("ds_swizzle") || starts("ds_bpermute") || starts("ds_permute") || starts("v_swap") ||
+      starts("v_movrel") || m.find("_dpp") != std::string_view::npos)
+    return true;
+  const std::string_view t = r.text;
+  return t.find("row_") != std::string_view::npos ||
+         t.find("quad_perm") != std::string_view::npos ||
+         t.find("dpp8") != std::string_view::npos || t.find("fi:") != std::string_view::npos;
+}
+
+/// Writes every bit of each destination VGPR on the active lanes: not a 16-bit result
+/// (which may keep the other half), SDWA/DPP/op_sel/true16 forms, d16 loads, mix
+/// instructions or lane writes.
+bool full_vgpr_write(const InstRef &r) {
+  if (!r.inst || r.fx.unknown_effect || r.fx.vwrites.none())
+    return false;
+  const std::string_view m = r.mnemonic;
+  for (std::string_view p : {"_sdwa", "_dpp", "d16", "v_writelane", "_mix", "_b16", "_i16", "_u16"})
+    if (m.find(p) != std::string_view::npos)
+      return false;
+  const std::string_view t = r.text;
+  if (t.find("op_sel") != std::string_view::npos || t.find(".h") != std::string_view::npos ||
+      t.find(".l") != std::string_view::npos)
+    return false;
+  switch (fp_result_kind(m, t)) {
+  case FpResult::F16Lo:
+  case FpResult::F16Hi:
+  case FpResult::BF16Lo:
+  case FpResult::BF16Hi:
+    return false;
+  default:
+    return true;
+  }
+}
+
+} // namespace
+
+void KernelModel::compute_exec_stability() {
+  const size_t n = insts_.size();
+  exec_stable_after_.assign(n, false);
+  exec_stable_before_.assign(n, false);
+  if (n == 0)
+    return;
+  LocSet exec;
+  exec.set(kLocExecLo);
+  exec.set(kLocExecHi);
+  // Greatest fixpoint: start from "stable" everywhere and remove what reaches a change.
+  std::vector<bool> block_in(blocks_.size(), true);
+  bool changed = true;
+  for (unsigned round = 0; changed && round < 4096; ++round) {
+    changed = false;
+    for (size_t bi = blocks_.size(); bi-- > 0;) {
+      const BlockInfo &b = blocks_[bi];
+      bool stable = !b.unknown_successor;
+      for (uint32_t s : b.successors)
+        stable = stable && block_in[s];
+      for (size_t i = b.end; i-- > b.first;) {
+        exec_stable_after_[i] = stable;
+        const InstRef &r = insts_[i];
+        stable = stable && !(r.fx.writes & exec).any() && !crosses_lanes(r);
+        exec_stable_before_[i] = stable;
+      }
+      if (block_in[bi] != stable) {
+        block_in[bi] = stable;
+        changed = true;
+      }
+    }
+  }
+  // Kills: full-width writes under an EXEC that stays (callable functions keep every lane
+  // of their callee-saved VGPRs for the caller).
+  const VSet keep = artifact_.callable ? return_observable_vgprs(0) : VSet{};
+  vkill_.assign(n, VSet{});
+  for (size_t i = 0; i < n; ++i)
+    if (exec_stable_before_[i] && full_vgpr_write(insts_[i]))
+      vkill_[i] = insts_[i].fx.vwrites & ~keep;
 }
 
 void KernelModel::compute_reachability() {

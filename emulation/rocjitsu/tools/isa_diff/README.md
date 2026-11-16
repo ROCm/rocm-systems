@@ -9,12 +9,19 @@ the region on paired inputs through RocJITsu's own instruction execution
 `ComputeUnitCore::step()`, against a modelled memory). Each case executes **only the
 region**; the whole kernel is decoded and analysed once.
 
-Scope: gfx950 (CDNA4), wave64, straight-line regions inside one basic block, made of:
-- integer SALU instructions (an explicit allowlist);
+Scope: every GPU RocJITsu executes (see "Targets": CDNA1-4, RDNA1-4, gfx1250/gfx1251), in
+wave64 or wave32, regions with one entry: straight-line code, or code with direct
+branches and loops whose exits correspond on both sides (see "Control flow"), made of:
+- SALU instructions on SGPRs, VCC, EXEC, M0 and SCC (an explicit allowlist with every
+  generation's names, SALU float of GFX11.5+ included);
 - plain VALU instructions, which exclude MFMA, interpolation, indirect VGPR access, and
   exception state;
-- global and scalar memory instructions: `global_load_*` (not the LDS or `_tr` forms),
-  `global_store_*`, `s_load_dword*`, and `s_waitcnt` (see "Memory").
+- global and scalar memory instructions: `global_load_*` (not the LDS, `_tr`, `block` or
+  `addtid` forms), `global_store_*`, `s_load_dword*`/`s_load_b*`, and every counter wait
+  (`s_waitcnt*`, `s_wait_*cnt`; see "Memory");
+- scheduling hints without a functional effect (`s_nop`, `s_delay_alu`, `s_clause`,
+  `s_wait_alu`, `s_waitcnt_depctr`, prefetch hints);
+- direct branches (`s_branch`, `s_cbranch_scc0/1`, `vccz/vccnz`, `execz/execnz`).
 
 LDS, flat, buffer, scratch and atomic accesses stay outside. The kernel around a region
 may contain anything; the region may not. Regions may also contain the comment-only
@@ -187,9 +194,85 @@ base result keeps its local mismatch, and `expansion.resolution` records the out
 
 `--context N` still adds manual backward context to every base region.
 
+## Control flow
+
+A region may contain direct branches and span basic blocks (including control-flow
+hunks: a changed condition, a retargeted branch):
+
+- **Shape.** One entry: every block that starts inside the region is reached from
+  inside it only. Calls, returns, `s_endpgm` and indirect jumps stay outside.
+- **Exits.** Each side's exits are the targets of branches that leave the region, and
+  falling off its end. They are paired through the instruction matching of the diff
+  (falling off the end corresponds on both sides). An exit without a partner is
+  `INCONCLUSIVE_MAPPING`.
+- **R_out per exit.** Each exit pair has its own observable set: the liveness at its
+  target (`exits[]` in the contract: `old_pc`/`new_pc`, 0 for falling off the end,
+  `observable`, `vgpr_observable`, `vgpr_active_lanes_only`). Liveness that differs
+  between the two targets is `INCONCLUSIVE_MAPPING`.
+- **Execution.** The runner follows the branches RocJITsu executes (taken or not) and
+  records the exit. Both sides must leave through corresponding exits, otherwise the
+  case is an `exit_divergence` mismatch; then that exit's R_out is compared.
+- **Loops.** A backward branch inside the region runs up to 64 times the region length
+  (at least 65,536 steps). A case past the limit is excluded (`loop step limit`), never
+  read as non-termination and never a pass.
+- **Undefined values.** When old's exit changes under the undefined-value refills, old
+  branches on an undefined value (undefined behaviour in LLVM): the case is excluded.
+- **Composition.** A region with control flow makes everything unknown downstream (as
+  an untested change does). Edges inside a READY region (a loop back to its entry) are
+  run by the region: the common-prefix analyses (composition, known bits) take the
+  entry state from the edges that come from outside.
+
+## Targets
+
+A target is a GPU and a wave size (`Target`, `target.h`). Code objects name theirs (the
+ELF machine number in `e_flags`; a kernel descriptor's `ENABLE_WAVEFRONT_SIZE32` sets the
+wave size); raw words and `.s`/`.ll` inputs take `analyze --target NAME[:w32|w64]`
+(default gfx950) and `--wave-size 32|64`, and `--mattr` passes target features to the
+LLVM plugin. Both sides must run on the same target.
+
+| family | targets | wave | ISA |
+|---|---|---|---|
+| CDNA1-4 | gfx908, gfx90a, gfx940-gfx942, gfx950 | 64 | GFX9 |
+| RDNA1/2 | gfx1010-gfx1013, gfx1030-gfx1036 | 32 (default) or 64 | GFX10 |
+| RDNA3/3.5 | gfx1100-gfx1103, gfx1150-gfx1153 | 32 (default) or 64 | GFX11 |
+| RDNA4 | gfx1200, gfx1201 | 32 (default) or 64 | GFX12 |
+| CDNA5 | gfx1250, gfx1251 | 32 | GFX12.5 |
+
+GCN before CDNA (SI/CI/VI, Vega gfx900-gfx906/909/90c) and GFX13 have no RocJITsu ISA.
+What depends on the target:
+
+- **Decoder, compute unit and wave.** The target's ISA family decodes and executes; the
+  wave is dispatched with the target's wave size and SGPRs (s0-s103 on GFX9, s0-s105
+  from GFX10).
+- **Scalar state.** SGPR locations are s0-s105; GFX9 addresses s0-s101 (its selectors
+  102-105 are FLAT_SCRATCH/XNACK_MASK), so there s102-s105 are never named and stay 0.
+  M0 is selector 124 before GFX11 and 125 from it; NULL (125 on GFX10, 124 from GFX11)
+  reads as 0 and discards writes.
+- **Wave32.** A wave mask is one SGPR: VCC and EXEC operands are `vcc_lo`/`exec_lo`,
+  VALU instructions read `exec_lo`, a wave-mask SGPR operand (`s_and_saveexec_b32`,
+  VOP3 carry/compare destinations) is one register. Lanes 32-63 do not exist: inputs
+  keep them 0 and the runner neither loads nor captures them. Boundary sweeps spread
+  their values over 32 lanes.
+- **Waits and pending memory.** Outstanding memory operations are tracked per
+  RocJITsu wait-counter domain (`WaitCounterPolicy`): vmcnt/lgkmcnt/expcnt on GFX9,
+  plus vscnt on GFX10-11, and loadcnt, storecnt, dscnt, kmcnt, samplecnt, bvhcnt,
+  expcnt (asynccnt, tensorcnt on gfx1250) on GFX12. Every wait form is decoded by
+  RocJITsu (`explicit_wait_fields`); producers count through their memory-issue
+  metadata.
+- **MODE.** GFX12 has no DX10_CLAMP, IEEE or DEBUG bit: the descriptor's bits are not
+  copied and the default function mode lacks them.
+- **Descriptors.** The VGPR granule comes from RocJITsu
+  (`descriptor_vgpr_granularity_for_wavefront`); ACCUM_OFFSET splits the register file
+  on gfx90a and later CDNA only; GFX10+ gives every wave s0-s105.
+- **Names.** Instruction names differ by generation (`s_andn2_b32`/`s_and_not1_b32`,
+  `s_add_u32`/`s_add_co_u32`, `s_ff1_i32_b32`/`s_ctz_i32_b32`, `global_load_dword`/
+  `global_load_b32`, `s_setpc_b64`/`s_set_pc_i64`); the allowlists hold all of them.
+- **GFX12.5 VGPR banks.** After `s_set_vgpr_msb` the VGPR an operand names depends on
+  dynamic state, so no instruction that names a VGPR is modelled in such a function.
+
 ## VALU support
 
-VGPRs are part of the state, with all 64 lanes of each one.
+VGPRs are part of the state, with all 64 lanes of each one (32 on wave32).
 
 - **Effects.** VGPR operands become `vreads`/`vwrites`. A VALU instruction also reads
   EXEC, the lanes it writes.
@@ -202,16 +285,25 @@ VGPRs are part of the state, with all 64 lanes of each one.
 
   Implicit uses reported by the decoder are translated: `global_store` names its SGPR
   base that way.
-- **Liveness.** VGPR liveness is a backward dataflow in which a write never kills,
-  because lanes outside EXEC keep their value.
+- **Liveness.** VGPR liveness is a backward dataflow. A write usually does not kill,
+  because lanes outside EXEC keep their value. It kills when EXEC never changes again:
+  from right before the write to every exit, no instruction writes EXEC or reads a lane
+  regardless of EXEC (`v_readlane`/`v_writelane`, DPP, permutes, LDS swizzles), no
+  effect or successor is unknown (`KernelModel::exec_stable_before`), and the write sets
+  every bit (not a 16-bit result, SDWA, op_sel, true16 half or d16 load). The lanes it
+  leaves alone are then never read again. A callable function's callee-saved VGPRs are
+  never killed: the caller sees all their lanes.
   - `vgpr_entry_equal` and `vgpr_observable` come from this liveness, restricted to
     the tracked range.
   - A renamed dead VGPR temporary is not observable.
 - **Tracked range.** The contract tracks `v0..v{vgpr_count-1}`: every VGPR either side
   names, rounded up to the allocation granule of 8. The runner allocates exactly that
   range, so an access beyond it is an invalid register access, never a silent write.
-- **Comparison.** Every lane of every observable VGPR is compared, active or not. A
-  rewrite that clobbers lanes outside EXEC is caught.
+- **Comparison.** Every lane of every observable VGPR is compared, active or not, so a
+  rewrite that clobbers lanes outside EXEC is caught, unless EXEC never changes after the
+  exit on both sides: then nothing reads an inactive lane again, and observable VGPRs
+  other than a callable function's callee-saved ones are compared on the lanes active in
+  EXEC (`vgpr_active_lanes_only`).
   - The effect model also covers VGPRs: each side may change only its
     `vgpr_writes_*`.
   - Counterexamples list the differing lanes.
@@ -320,7 +412,7 @@ it under `artifacts.*.callable_function`.
 - **Live at a return.** The caller observes:
   - the return VGPRs `v0..v{N-1}`, with N from `--return-vgprs` (default 32: every VGPR
     the convention can return in, which is conservative for a function returning less);
-  - the callee-saved SGPRs s30-s39, s48-s55, s64-s71, s80-s87, s96-s101 (with the return
+  - the callee-saved SGPRs s30-s39, s48-s55, s64-s71, s80-s87, s96-s105 (s96-s101 on GFX9; with the return
     address, stack and frame pointers);
   - the callee-saved VGPRs v40-v47, v56-v63, ..., v248-v255, on every lane;
   - EXEC.
@@ -398,7 +490,8 @@ run.
   comments (renumbered block names, spill notes) has the same code and is counted, not
   tested. Inline-asm blocks count as code. Within a changed function, only the regions
   around its hunks execute; the rest is analysed once. A function under a RUN line that
-  targets gfx950, or a proxy target, is compared when it is the same on both sides:
+  targets a RocJITsu target (see "Targets"), or a proxy target, is compared when it is
+  the same on both sides:
   - the test is autogenerated without `--filter`;
   - the RUN line is unchanged;
   - the function's IR is unchanged: body, attribute groups, referenced globals;
@@ -406,18 +499,21 @@ run.
   - its calling convention is the C one or `amdgpu_kernel`.
 
   Every other changed function is listed with the reason it was skipped.
-- **Proxy targets.** Listings of other GFX9 targets (gfx940-gfx942, and gfx900-gfx90c with
-  the vector-memory cache bits glc/slc/scc renamed sc0/nt/sc1, the same bits) are
-  assembled and executed as gfx950 and labelled `proxy`. A listing gfx950 cannot assemble
-  (a removed instruction, an odd-aligned VGPR pair) is `UNSUPPORTED`. Changed functions on
-  other targets are counted, not executed.
+- **Targets and wave size.** A listing runs on its RUN line's `-mcpu`, at the RUN line's
+  wave size (the last `+wavefrontsize32/64` in `-mattr`, else wave64 on GFX9 and wave32
+  from GFX10), and llvm-mc gets the RUN line's other `-mattr` features (`real-true16`,
+  ...). Vega listings (gfx900-gfx906, gfx909, gfx90c), which have no RocJITsu ISA, are
+  assembled and executed as gfx908, which shares their encodings and syntax, and
+  labelled `proxy`; a listing gfx908 cannot assemble is `UNSUPPORTED`. Changed functions
+  on other targets (SI/CI/VI, GFX13, RUN lines without `-mcpu`) are counted, not
+  executed.
 - **ABI from the IR.**
   - `--return-vgprs` is the return type's size in dwords (`void` 0, `<3 x half>` 2,
-    `iN`/`bN` ceil(N/32), structs and arrays summed). An unknown type gives the
-    conservative 32, with a note.
+    `iN`/`bN` ceil(N/32), `<N x i8>` N (one element per register), structs and arrays
+    summed). An unknown type gives the conservative 32, with a note.
   - `--return-masks` covers narrow return types without `zeroext`/`signext`: `half`,
     `bfloat` and `i16` give `0xffff`, `i1` gives `0x1`, `<3 x half>` gives
-    `[0xffffffff, 0xffff]`.
+    `[0xffffffff, 0xffff]`, `<N x i8>` gives `0xff` per register.
   - `--entry-vgprs` is the dwords of the non-`inreg` arguments (3 for kernels). Other
     VGPRs are undefined at the entry.
   - `--entry-sgprs` is the dwords of the `inreg` arguments.
@@ -460,6 +556,10 @@ switch for the stricter reading.
   - **Tags.** The runner tags every value with its floating-point provenance (`FpTag`):
     which f16/bf16 halves, f32, or f64 pair a floating-point instruction produced.
     - Moves, `v_cndmask_b32` and `v_pk_mov_b32` carry the tags.
+    - Scalar locations are tagged too: SALU float results (GFX11.5+), `s_mov`,
+      `s_cselect`/`s_cmov`, `v_readfirstlane_b32`/`v_readlane_b32`; a VALU instruction
+      reading an SGPR (`v_mov_b32 v0, s6`) picks up its tag. NaN choice and the
+      nnan/ninf poison checks cover them.
     - Stores turn them into floating-point units in memory.
     - Inline-asm uses record them.
     - Integer, bitwise and lane-shuffling instructions clear them.
@@ -558,7 +658,8 @@ The two ends need separate maps after a register-allocation change. In the real
   live-outs through the exit map.
 - Each map is completed to a permutation (`s4=s8` also sends old `s8` to new `s4`), so
   every location is still initialised exactly once.
-- Only `s0`..`s101` can be mapped, because EXEC/VCC/M0/SCC aliases must stay consistent.
+- Only SGPRs (`s0`..`s105`) can be mapped, because EXEC/VCC/M0/SCC aliases must stay
+  consistent.
 - `mapping` becomes `user_register_map`, with a `user_assumption` source. The status is
   at most `ASSUMED`.
 
@@ -571,7 +672,10 @@ liveness disagrees. It is never inferred from outputs.
 `--llvm-bin`, `$RJ_ISA_DIFF_LLVM_BIN`, or `/opt/rocm/llvm/bin`, and runs them with
 `posix_spawn` (no shell).
 
-- `.ll` goes through `llc -mtriple=amdgcn-amd-amdhsa -mcpu=gfx950 <common> <side>`.
+- `.ll` goes through `llc -mtriple=amdgcn-amd-amdhsa -mcpu=TARGET [-mattr=...] <common>
+  <side>` (`--target`, default gfx950; `--wave-size` adds `+wavefrontsize32/64` on
+  GFX10+, `--mattr` other features); `.s` through `llvm-mc` with the same `-mcpu` and
+  `-mattr`.
   Side arguments may not change the target (`-mcpu`, `-mattr`, `-mtriple`, `-march`,
   `-o` and `-filetype` are rejected).
 - `.s` goes through `llvm-mc`, then `ld.lld -shared --emit-relocs`. `--emit-relocs`
@@ -685,19 +789,20 @@ reduced inputs). `replay` runs the reduced case. The program is never reduced.
 A region is `UNSUPPORTED`, with a reason, if it contains any of:
 
 - opcodes outside the executable subset: memory other than `global_load_*`,
-  `global_store_*` and `s_load_dword*` (LDS, flat, buffer, scratch, atomics,
+  `global_store_*` and `s_load_*` (LDS, flat, buffer, scratch, atomics,
   `global_load_lds_*`, `_tr` loads), MFMA, `v_interp*`, `v_movrel*`, `v_clrexcp`,
-  barriers, branches, `s_getreg`/`s_setreg`, `s_movrel*`, messages/traps, and SALU
-  instructions not on the allowlist;
+  barriers, calls, returns, indirect jumps, `s_getreg`/`s_setreg`, `s_movrel*`,
+  messages/traps, and SALU instructions not on the allowlist;
 - operands outside the modelled state: TTMP, FLAT_SCRATCH, XNACK_MASK, apertures, AGPRs;
 - PC-derived inputs, tracked by forward taint from `s_getpc_b64`;
 - instructions whose bytes are patched by a relocation.
 
-A region is `INCONCLUSIVE` if it spans basic blocks or if R_out cannot be established.
+A region is `INCONCLUSIVE` if control enters it other than at its start, if an exit has
+no partner on the other side, or if R_out cannot be established.
 
 Kernel-level items keep coverage `PARTIAL`:
 
-- control-flow hunks;
+- control-flow hunks that no region covers;
 - descriptor fields or this kernel's metadata fields that differ (a change in
   `kernel_code_entry_byte_offset` alone is layout only, and a register-allocation-only
   change that both kernels fit is informational);

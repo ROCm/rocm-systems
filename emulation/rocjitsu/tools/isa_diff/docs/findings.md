@@ -607,6 +607,68 @@ Only changed code is tested:
 The 13 comment-only functions are the 13 that earlier sweeps ran and reported as
 `NO_SEMANTIC_DIFF`.
 
+## Every RocJITsu target (Phase J)
+
+The tool runs on every GPU RocJITsu executes: CDNA1-4 (gfx908, gfx90a, gfx940-gfx942,
+gfx950), RDNA1-4 (gfx1010-gfx1036, gfx1100-gfx1153, gfx1200/gfx1201) and gfx1250/gfx1251,
+at wave64 and wave32. `rj_isa_diff_pr` runs every listing whose RUN line names one of them
+natively, at the RUN line's wave size and features; Vega listings run as gfx908.
+
+| run (default budget, 5000) | result | valid cases | wall time |
+|---|---|---|---|
+| PR 237629 | 84 of 84 pass (18 through the gfx908 proxy) | 445,512 | 4.1 s |
+| PR 242731 | 10 of 10 pass (was 6: its GFX11 RUN lines now run) | 37,952 | 25.7 s |
+| last 120 AMDGPU commits | 855 functions (was 149): 791 pass, 39 inconclusive, 25 mismatch | 5,351,374 | 145 s |
+
+Functions of the sweep by target: gfx1100 wave32 492, gfx908 (Vega proxy) 110, gfx1200 99,
+gfx1030 wave32 45, gfx1010 wave32 35, gfx942 24, gfx1250 21, gfx950 13, gfx1030 wave64 12,
+gfx90a 2, gfx1010/gfx1100 wave64 1 each. Still not executed: RUN lines without `-mcpu`
+(3642 functions), GFX13 (gfx1310, 358), SI/CI/VI (310).
+
+The 25 mismatches:
+- **20 true positives**: commit fc40c9454b6d, "[AMDGPU][GISel] Fix stack pointer shift
+  direction in selectStackRestore" (gfx1030, wave32 and wave64). The old code shifted the
+  stack pointer the wrong way (`s32` 0x07ffffff vs 0xffffffe0); the change is a fix, and
+  the tool reports the behaviour change it makes.
+- **4 poison-only**: `v_exp2_v2bf16_fast` (gfx1200) differs only on inputs the IR's
+  `fast` flags make poison; the driver's triage reports `poison-only`.
+- **1 open question**: `rsq_bf16_constant_4` (gfx1250), commit 66cb135fa288 "AMDGPU: Fold
+  inline immediates in peephole-opt". Old `v_rsq_bf16_e64 v0.l, 4.0 op_sel:[1,0]` selects
+  the high half of the f32 inline constant (0x4080, bf16 4.0); new
+  `v_rsq_bf16_e64 v0.l, 4.0` assumes the constant is read as bf16 4.0. RocJITsu reads
+  the low half of the f32 constant (0) and returns +inf. Either the fold or RocJITsu's
+  bf16 inline-constant format for this encoding is wrong; it needs a hardware answer.
+
+Classes of false mismatch the sweep exposed, all fixed:
+- `s_delay_alu`'s immediate is not a constant operand to RocJITsu: hints now ignore
+  their operands (530 inconclusive functions in one GFX11 commit became 523 passes).
+- `<N x i8>` return values were unsized (all 32 return VGPRs observed): one VGPR per
+  element, low byte compared.
+- Inactive lanes: VGPR liveness never killed, so renamed temporaries compared on lanes
+  nothing reads again. A write now kills when EXEC never changes afterwards, and such
+  exits compare active lanes only.
+- EXEC = 0 inputs: on wave32 the 64-bit EXEC boundary patterns gave EXEC 0, under which
+  `v_readfirstlane` reads a canary. EXEC that is still the dispatch EXEC is never 0.
+- Wave32 refills wrote lanes 32-63; gfx1250 returns are `s_set_pc_i64`; SALU float NaN
+  payloads needed scalar provenance tags.
+
+Seeded bugs: an `add` turned into a `sub` in a kernel and in a function, on 14
+target/wave configurations, is caught in all 28; the PR 237629 mutants (4) are caught.
+
+## Control flow in regions (Phase K)
+
+Regions may contain direct branches and loops (README "Control flow").
+- An equivalent rewrite of a branch condition (`s_cmp_eq_u32`/`s_cbranch_scc1` ↔
+  `s_cmp_lg_u32`/`s_cbranch_scc0`) passes; the inverted condition is an
+  `exit_divergence` mismatch.
+- A counted loop whose body and back edge both change runs inside the region: 236 of 934
+  cases complete within the step limit and are compared (the rest are boundary values
+  outside the derived constraints, or counts past the limit), and a wrong body is caught.
+- On the 120-commit sweep the verdicts did not change: its control-flow changes are
+  entered from outside the changed range (2) or leave to targets without a partner (2).
+  One function (a WWM test) briefly reported a mismatch: composition skipped an edge
+  inside an untested region; only READY regions with control flow run their own edges.
+
 ## Cost
 
 **Analysis** (from `case.json` `analysis.timing`, both sides together):

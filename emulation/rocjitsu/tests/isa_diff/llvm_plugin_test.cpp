@@ -540,6 +540,9 @@ std::string fill(std::string text, const std::vector<std::pair<std::string, std:
 /// Assemble two listings of one function and run the whole pipeline.
 /// The ABI and comparison options of one end-to-end pair.
 struct PairOptions {
+  std::string mcpu = "gfx950";
+  unsigned wave_size = 0; ///< 0: the target's default.
+  std::string mattr;
   unsigned return_vgprs = 0;
   int entry_vgprs = -2; ///< -2: the loader's default.
   int entry_sgprs = -2;
@@ -566,10 +569,18 @@ std::string verdict_of(const std::string &dir, const std::string &fn, const std:
     const std::string path = dir + (side ? "/new.s" : "/old.s");
     EXPECT_TRUE(write_text_file(path, side ? new_s : old_s));
     llvm::Provenance p;
+    p.mcpu = o.mcpu;
+    p.wave_size = o.wave_size;
+    p.mattr = o.mattr;
     std::string error;
     EXPECT_TRUE(llvm::assemble(tc, path, dir + (side ? "/new" : "/old"), fn, a[side], p, error))
         << error;
     EXPECT_TRUE(a[side].callable);
+    EXPECT_EQ(a[side].target.name, o.mcpu);
+    if (o.wave_size)
+      if (auto w = with_wave_size(a[side].target, o.wave_size))
+        a[side].target = *w;
+    a[side].function_mode = default_function_mode(a[side].target);
     a[side].return_vgprs = o.return_vgprs;
     a[side].return_masks = o.return_masks;
     if (o.entry_vgprs != -2)
@@ -812,6 +823,212 @@ TEST(IsaDiffLlvm, UndefinedScalarsAreDontCare) {
   EXPECT_EQ(verdict_of(dir, "f", store_fn({"v_mov_b32_e32 v0, s34"}),
                        store_fn({"v_mov_b32_e32 v0, s35"}), o),
             "LOCAL_MISMATCH/ESTABLISHED");
+  std::filesystem::remove_all(dir);
+}
+
+/// A void function f for @p cpu: @p body, then the return of that generation.
+std::string target_fn(const std::string &cpu, const std::vector<std::string> &body) {
+  std::string t = "\t.text\n\t.globl\tf\n\t.p2align\t8\n\t.type\tf,@function\nf:\n";
+  for (const auto &l : body)
+    t += "\t" + l + "\n";
+  const std::string ret = cpu.rfind("gfx125", 0) == 0 ? "s_set_pc_i64" : "s_setpc_b64";
+  return t + "\t" + ret + " s[30:31]\n.Lfunc_end0:\n\t.size\tf, .Lfunc_end0-f\n";
+}
+
+/// Store v0 through s[0:1] after @p ops, in @p cpu's syntax.
+std::string target_store_fn(const std::string &cpu, const std::vector<std::string> &ops) {
+  const bool gfx9 = cpu.rfind("gfx9", 0) == 0;
+  const bool gfx10 = cpu.rfind("gfx10", 0) == 0;
+  const bool gfx12 = cpu.rfind("gfx12", 0) == 0;
+  std::vector<std::string> body = {"v_mov_b32_e32 v4, 0"};
+  body.insert(body.end(), ops.begin(), ops.end());
+  // GFX11 renamed the dword forms to b32; GFX10 counts stores with vscnt, GFX12 storecnt.
+  body.push_back(gfx9 || gfx10 ? "global_store_dword v4, v0, s[0:1]"
+                               : "global_store_b32 v4, v0, s[0:1]");
+  body.push_back(gfx12  ? "s_wait_storecnt 0x0"
+                 : gfx9 ? "s_waitcnt vmcnt(0)"
+                        : "s_waitcnt_vscnt null, 0x0");
+  return target_fn(cpu, body);
+}
+
+TEST(IsaDiffTargets, EveryTargetPassesEquivalentCodeAndCatchesABug) {
+  const std::string dir = temp_dir("targets");
+  struct Spec {
+    const char *cpu;
+    unsigned wave;
+  };
+  for (const Spec s :
+       {Spec{"gfx908", 64}, Spec{"gfx90a", 64}, Spec{"gfx942", 64}, Spec{"gfx1030", 32},
+        Spec{"gfx1030", 64}, Spec{"gfx1100", 32}, Spec{"gfx1100", 64}, Spec{"gfx1151", 32},
+        Spec{"gfx1200", 32}, Spec{"gfx1200", 64}, Spec{"gfx1250", 32}}) {
+    SCOPED_TRACE(std::string(s.cpu) + " wave" + std::to_string(s.wave));
+    PairOptions o;
+    o.mcpu = s.cpu;
+    o.wave_size = s.wave;
+    o.entry_vgprs = 2;
+    const bool gfx9 = std::string(s.cpu).rfind("gfx9", 0) == 0;
+    const std::string add = gfx9 ? "v_add_u32_e32" : "v_add_nc_u32_e32";
+    const std::string sub = gfx9 ? "v_sub_u32_e32" : "v_sub_nc_u32_e32";
+    // A compare into the wave's VCC and a select on it, then integer arithmetic.
+    const std::string vcc = s.wave == 32 ? "vcc_lo" : "vcc";
+    auto body = [&](const std::string &op, const std::string &a, const std::string &b) {
+      return target_store_fn(s.cpu,
+                             {"v_cmp_gt_u32_e32 " + vcc + ", v0, v1",
+                              "v_cndmask_b32_e32 v2, v1, v0, " + vcc, op + " v0, " + a + ", " + b});
+    };
+    const std::string base = body(add, "v2", "v1");
+    EXPECT_EQ(verdict_of(dir, "f", base, body(add, "v1", "v2"), o),
+              "NO_MISMATCH_FOUND/ESTABLISHED");
+    EXPECT_EQ(verdict_of(dir, "f", base, body(sub, "v2", "v1"), o), "LOCAL_MISMATCH/ESTABLISHED");
+  }
+  std::filesystem::remove_all(dir);
+}
+
+TEST(IsaDiffTargets, Wave32MasksAreOneSgprAndWave64MasksAPair) {
+  const std::string dir = temp_dir("wave32");
+  const auto tc = toolchain();
+  for (unsigned wave : {32u, 64u}) {
+    SCOPED_TRACE("wave" + std::to_string(wave));
+    const std::string vcc = wave == 32 ? "vcc_lo" : "vcc";
+    const std::string s4 = wave == 32 ? "s4" : "s[4:5]";
+    const std::string sx = wave == 32 ? "_b32" : "_b64";
+    const std::string text = target_fn("gfx1100", {"v_cmp_eq_u32_e32 " + vcc + ", v0, v1",
+                                                   "v_cndmask_b32_e32 v2, v1, v0, " + vcc,
+                                                   "s_and_saveexec" + sx + " " + s4 + ", " + vcc});
+    ASSERT_TRUE(write_text_file(dir + "/f.s", text));
+    Artifact a;
+    llvm::Provenance p;
+    p.mcpu = "gfx1100";
+    p.wave_size = wave;
+    std::string error;
+    ASSERT_TRUE(llvm::assemble(tc, dir + "/f.s", dir + "/f", "f", a, p, error)) << error;
+    a.target = *with_wave_size(a.target, wave);
+    auto model = KernelModel::build(a, error);
+    ASSERT_TRUE(model) << error;
+    const auto &in = model->insts();
+    ASSERT_GE(in.size(), 3u);
+    auto locs = [](std::initializer_list<unsigned> l) {
+      LocSet s;
+      for (unsigned x : l)
+        s.set(x);
+      return s;
+    };
+    if (wave == 32) {
+      EXPECT_EQ(format_locs(in[0].fx.writes), "vcc_lo");
+      EXPECT_EQ(in[1].fx.reads, locs({kLocVccLo, kLocExecLo}));
+      EXPECT_EQ(in[2].fx.writes, locs({4, kLocExecLo, kLocScc}));
+      EXPECT_EQ(in[2].fx.reads, locs({kLocVccLo, kLocExecLo}));
+    } else {
+      EXPECT_EQ(in[0].fx.writes, locs({kLocVccLo, kLocVccHi}));
+      EXPECT_EQ(in[1].fx.reads, locs({kLocVccLo, kLocVccHi, kLocExecLo, kLocExecHi}));
+      EXPECT_EQ(in[2].fx.writes, locs({4, 5, kLocExecLo, kLocExecHi, kLocScc}));
+    }
+    EXPECT_TRUE(in[0].fx.p0 && in[1].fx.p0 && in[2].fx.p0)
+        << in[0].fx.reject_reason << in[1].fx.reject_reason << in[2].fx.reject_reason;
+  }
+  std::filesystem::remove_all(dir);
+}
+
+TEST(IsaDiffTargets, NanProvenanceFollowsAWave32Select) {
+  const std::string dir = temp_dir("wave32nan");
+  PairOptions o;
+  o.mcpu = "gfx1100";
+  o.wave_size = 32;
+  o.entry_vgprs = 4;
+  auto body = [&](const std::string &add) {
+    return target_store_fn("gfx1100", {"v_cmp_lt_u32_e32 vcc_lo, v2, v3", add,
+                                       "v_cndmask_b32_e32 v0, v2, v0, vcc_lo"});
+  };
+  const std::string ab = body("v_add_f32_e32 v0, v0, v1");
+  const std::string ba = body("v_add_f32_e32 v0, v1, v0");
+  EXPECT_EQ(verdict_of(dir, "f", ab, ba, o), "NO_MISMATCH_FOUND/ESTABLISHED");
+  PairOptions strict = o;
+  strict.strict_nan = true;
+  EXPECT_EQ(verdict_of(dir, "f", ab, ba, strict), "LOCAL_MISMATCH/ESTABLISHED");
+  std::filesystem::remove_all(dir);
+}
+
+TEST(IsaDiffTargets, Gfx12SplitWaitsRetireTheirCounters) {
+  const std::string dir = temp_dir("gfx12wait");
+  const auto tc = toolchain();
+  const std::string text =
+      target_fn("gfx1200", {"global_load_b32 v1, v0, s[0:1]", "s_load_b32 s4, s[0:1], 0x0",
+                            "s_wait_loadcnt 0x0", "v_mov_b32_e32 v2, v1", "s_wait_kmcnt 0x0",
+                            "s_mov_b32 s5, s4"});
+  ASSERT_TRUE(write_text_file(dir + "/f.s", text));
+  Artifact a;
+  llvm::Provenance p;
+  p.mcpu = "gfx1200";
+  std::string error;
+  ASSERT_TRUE(llvm::assemble(tc, dir + "/f.s", dir + "/f", "f", a, p, error)) << error;
+  EXPECT_EQ(a.target.name, "gfx1200");
+  auto model = KernelModel::build(a, error);
+  ASSERT_TRUE(model) << error;
+  const auto &in = model->insts();
+  ASSERT_GE(in.size(), 6u);
+  // Before the load wait: the load (v1) and the scalar load (s4) are outstanding.
+  EXPECT_TRUE(model->pending_before(2).all_vdests().test(1));
+  EXPECT_TRUE(model->pending_before(2).all_dests().test(4));
+  // After s_wait_loadcnt 0: v1 has arrived, s4 may not have.
+  EXPECT_FALSE(model->pending_before(3).all_vdests().test(1));
+  EXPECT_TRUE(model->pending_before(3).all_dests().test(4));
+  // After s_wait_kmcnt 0: nothing is outstanding.
+  EXPECT_FALSE(model->pending_before(5).any());
+  for (size_t i : {2u, 4u})
+    EXPECT_TRUE(in[i].fx.p0) << in[i].text << ": " << in[i].fx.reject_reason;
+  std::filesystem::remove_all(dir);
+}
+
+TEST(IsaDiffTargets, SaluFloatAndModeWithoutIeeeOnGfx12) {
+  const std::string dir = temp_dir("salufloat");
+  PairOptions o;
+  o.mcpu = "gfx1200";
+  o.entry_sgprs = 8;
+  auto body = [&](const std::string &op) {
+    return target_store_fn("gfx1200", {op, "v_mov_b32_e32 v0, s6"});
+  };
+  // Commuted f32 multiply of the same operands: equal (NaN bits are unspecified).
+  EXPECT_EQ(verdict_of(dir, "f", body("s_mul_f32 s6, s2, s3"), body("s_mul_f32 s6, s3, s2"), o),
+            "NO_MISMATCH_FOUND/ESTABLISHED");
+  EXPECT_EQ(verdict_of(dir, "f", body("s_mul_f32 s6, s2, s3"), body("s_add_f32 s6, s2, s3"), o),
+            "LOCAL_MISMATCH/ESTABLISHED");
+  EXPECT_EQ(default_function_mode(*target_by_name("gfx1200")) & ((1u << 8) | (1u << 9)), 0u);
+  std::filesystem::remove_all(dir);
+}
+
+TEST(IsaDiffControlFlow, BranchConditionsAreFollowedAndExitsCompared) {
+  const std::string dir = temp_dir("cflow");
+  PairOptions o;
+  // if (s4 == 0) skip the increment; then store v0.
+  auto ifthen = [](const std::string &cmp, const std::string &br) {
+    return store_fn({cmp + " s4, 0", br + " .LBB0_2", "v_add_u32_e32 v0, 1, v0", ".LBB0_2:"});
+  };
+  const std::string base = ifthen("s_cmp_eq_u32", "s_cbranch_scc1");
+  // The same condition, written the other way round: equivalent.
+  EXPECT_EQ(verdict_of(dir, "f", base, ifthen("s_cmp_lg_u32", "s_cbranch_scc0"), o),
+            "NO_MISMATCH_FOUND/ESTABLISHED");
+  // The inverted condition takes the other exit.
+  EXPECT_EQ(verdict_of(dir, "f", base, ifthen("s_cmp_lg_u32", "s_cbranch_scc1"), o),
+            "LOCAL_MISMATCH/ESTABLISHED");
+  std::filesystem::remove_all(dir);
+}
+
+TEST(IsaDiffControlFlow, LoopsRunInsideTheRegionUpToAStepLimit) {
+  const std::string dir = temp_dir("loop");
+  PairOptions o;
+  // s5 = 2 * (s4 & 7) by a counted loop; the body and the back edge change together.
+  auto loop = [](const std::string &add, const std::string &cmp, const std::string &br) {
+    return store_fn({"s_and_b32 s4, s4, 7", "s_mov_b32 s5, 0", "s_cmp_eq_u32 s4, 0",
+                     "s_cbranch_scc1 .LBB0_3", ".LBB0_2:", add, "s_add_u32 s4, s4, -1",
+                     cmp + " s4, 0", br + " .LBB0_2", ".LBB0_3:", "v_mov_b32_e32 v0, s5"});
+  };
+  const std::string base = loop("s_add_u32 s5, s5, 2", "s_cmp_lg_u32", "s_cbranch_scc1");
+  EXPECT_EQ(
+      verdict_of(dir, "f", base, loop("s_add_u32 s5, 2, s5", "s_cmp_eq_u32", "s_cbranch_scc0"), o),
+      "NO_MISMATCH_FOUND/ESTABLISHED");
+  EXPECT_EQ(
+      verdict_of(dir, "f", base, loop("s_add_u32 s5, s5, 3", "s_cmp_eq_u32", "s_cbranch_scc0"), o),
+      "LOCAL_MISMATCH/ESTABLISHED");
   std::filesystem::remove_all(dir);
 }
 

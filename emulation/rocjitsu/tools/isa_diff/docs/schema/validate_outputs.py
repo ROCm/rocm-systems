@@ -150,6 +150,27 @@ FIXTURES = {
     "valu_new": [1745092865, 604374145, 604374657, 3698360320, 772, 3212902400],
     "valuwrong_new": [1745092865, 604374147, 3698360320, 772, 3212902400],
     "valuclobber_old": [2114323202, 3698360320, 772, 3212902400],
+    "valuclobberlater_old": [
+        0x7E060302,
+        0xDC708000,
+        0x00000304,
+        0xBEFE01C1,
+        0xDC708000,
+        0x00020304,
+        0xBF810000,
+    ],
+    "valuclobberlater_new": [
+        0xBE8A017E,
+        0xBEFE01C1,
+        0x7E060302,
+        0xBEFE010A,
+        0xDC708000,
+        0x00000304,
+        0xBEFE01C1,
+        0xDC708000,
+        0x00020304,
+        0xBF810000,
+    ],
     "valuclobber_new": [
         3196715390,
         3204317633,
@@ -244,6 +265,43 @@ FUNCTIONS = {
     "fn_old": {"TMP": "v2", "USE": "v2"},
     "fn_new": {"TMP": "v3", "USE": "v3"},  # renamed everywhere: equivalent
     "fn_wrong": {"TMP": "v2", "USE": "v0"},  # the use reads another register
+}
+
+
+# Functions for other targets: gfx1100 wave32 (a select on vcc_lo after an f32 add) and
+# gfx1200 (an SALU f32 multiply moved to v0), each storing v0 through s[0:1].
+def target_listing(body, store, wait):
+    return (
+        "\t.text\n\t.globl\tf\n\t.p2align\t8\n\t.type\tf,@function\nf:\n"
+        + "".join(f"\t{l}\n" for l in body)
+        + f"\tv_mov_b32_e32 v4, 0\n\t{store} v4, v0, s[0:1]\n\t{wait}\n"
+        + "\ts_setpc_b64 s[30:31]\n.Lfunc_end0:\n\t.size\tf, .Lfunc_end0-f\n"
+    )
+
+
+def w32_listing(add):
+    return target_listing(
+        [
+            "v_cmp_lt_u32_e32 vcc_lo, v2, v3",
+            add,
+            "v_cndmask_b32_e32 v0, v2, v0, vcc_lo",
+        ],
+        "global_store_b32",
+        "s_waitcnt_vscnt null, 0x0",
+    )
+
+
+def salu_listing(op):
+    return target_listing(
+        [op, "v_mov_b32_e32 v0, s6"], "global_store_b32", "s_wait_storecnt 0x0"
+    )
+
+
+TARGET_FUNCTIONS = {
+    "w32_ab": w32_listing("v_add_f32_e32 v0, v0, v1"),
+    "w32_ba": w32_listing("v_add_f32_e32 v0, v1, v0"),
+    "salu_ab": salu_listing("s_mul_f32 s6, s2, s3"),
+    "salu_ba": salu_listing("s_mul_f32 s6, s3, s2"),
 }
 
 
@@ -382,16 +440,16 @@ def drive_cli(tool, work, v):
     test("valu", {0})
     analyze("valu_wrong", "valu_old", "valuwrong_new")
     test("valu_wrong", {1})
-    # The clobbered inactive lanes die at s_endpgm: the base region is a local mismatch
-    # (no expansion), and the variant that runs the store resolves it by context.
+    # Clobbered inactive lanes that a later full-EXEC store observes: a local mismatch.
     analyze(
         "valu_clobber",
-        "valuclobber_old",
-        "valuclobber_new",
+        "valuclobberlater_old",
+        "valuclobberlater_new",
         "--max-expansions",
         "0",
     )
     test("valu_clobber", {1})
+    # At a kernel end nothing reads them again (EXEC never changes after the region).
     analyze("valu_clobber_ctx", "valuclobber_old", "valuclobber_new")
     test("valu_clobber_ctx", {0})
     vb = sorted(os.listdir(path("valu_wrong", "counterexamples")))
@@ -501,6 +559,31 @@ def drive_cli(tool, work, v):
         )
     else:
         f.append("strict-NaN case produced no counterexample bundle")
+    # Wave32 (gfx1100) and GFX12 SALU float: NaN provenance through a wave32 select and an
+    # SGPR, both equal by default and different with --strict-nan.
+    for name, text in TARGET_FUNCTIONS.items():
+        with open(path(name + ".s"), "w") as out:
+            out.write(text)
+    analyze_fn("w32", "w32_ab", "w32_ba", "--entry-vgprs", "4", "--target", "gfx1100")
+    test("w32", {0})
+    analyze_fn(
+        "w32_strict",
+        "w32_ab",
+        "w32_ba",
+        "--entry-vgprs",
+        "4",
+        "--target",
+        "gfx1100:w32",
+    )
+    test("w32_strict", {1}, "--strict-nan")
+    analyze_fn(
+        "salu", "salu_ab", "salu_ba", "--entry-sgprs", "8", "--target", "gfx1200"
+    )
+    test("salu", {0})
+    analyze_fn(
+        "salu_strict", "salu_ab", "salu_ba", "--entry-sgprs", "8", "--target", "gfx1200"
+    )
+    test("salu_strict", {1}, "--strict-nan")
     analyze_fn("undef", "undef_old", "undef_new", "--entry-vgprs", "0")
     test("undef", {0})
     analyze_fn("poison", "nsw_wrap", "nsw_sat", "--entry-vgprs", "2")
@@ -579,6 +662,10 @@ def drive_cli(tool, work, v):
         "fn_wrong",
         "nan",
         "nan_strict",
+        "w32",
+        "w32_strict",
+        "salu",
+        "salu_strict",
         "undef",
         "poison",
         "poison_filtered",

@@ -151,12 +151,29 @@ Json RegionContract::to_json() const {
       j.set("vgpr_undef_old", format_vgprs(vundef_old));
     if (vundef_new.any())
       j.set("vgpr_undef_new", format_vgprs(vundef_new));
+    if (vactive_only.any())
+      j.set("vgpr_active_lanes_only", format_vgprs(vactive_only));
     if (!vexit_masks.empty()) {
       Json em = Json::object();
       for (const auto &[r, mask] : vexit_masks)
         em.set("v" + std::to_string(r), hex32(mask));
       j.set("vgpr_exit_masks", std::move(em));
     }
+  }
+  if (exec_nonzero)
+    j.set("exec_nonzero", true);
+  if (!exits.empty()) {
+    Json ex = Json::array();
+    for (const RegionExit &e : exits) {
+      Json ej = Json::object();
+      ej.set("old_pc", hex64(e.old_pc));
+      ej.set("new_pc", hex64(e.new_pc));
+      ej.set("observable", format_locs(e.observable));
+      ej.set("vgpr_observable", format_vgprs(e.vobservable));
+      ej.set("vgpr_active_lanes_only", format_vgprs(e.vactive_only));
+      ex.push(std::move(ej));
+    }
+    j.set("exits", std::move(ex));
   }
   if (memory_reads)
     j.set("memory_reads", true);
@@ -225,6 +242,13 @@ Json RegionContract::to_json() const {
   return j;
 }
 
+std::optional<Target> RegionContract::gpu() const {
+  if (wave != "wave32" && wave != "wave64")
+    return std::nullopt;
+  auto t = target_by_name(target);
+  return t ? with_wave_size(*t, wave == "wave32" ? 32 : 64) : std::nullopt;
+}
+
 std::optional<RegionContract> RegionContract::from_json(const Json &j, std::string &error) {
   if (!j.is_object()) {
     error = "contract is not an object";
@@ -235,8 +259,9 @@ std::optional<RegionContract> RegionContract::from_json(const Json &j, std::stri
   c.wave = j["wave"].as_string();
   c.arithmetic = j["arithmetic"].as_string();
   c.mapping = j["mapping"].as_string();
-  if (c.target != "gfx950" || c.wave != "wave64") {
-    error = "contract target/wave is not gfx950/wave64";
+  if (!c.gpu()) {
+    error = "contract target/wave '" + c.target + "/" + c.wave +
+            "' is not a RocJITsu-executable target";
     return std::nullopt;
   }
   auto locs = [&](const char *key, LocSet &out) {
@@ -271,7 +296,7 @@ std::optional<RegionContract> RegionContract::from_json(const Json &j, std::stri
     if (!vlocs("vgpr_entry_equal", c.ventry_equal) || !vlocs("vgpr_observable", c.vobservable) ||
         !vlocs("vgpr_writes_old", c.vwrites_old) || !vlocs("vgpr_writes_new", c.vwrites_new) ||
         !vlocs("vgpr_wide_reads", c.vwide_reads) || !vlocs("vgpr_undef_old", c.vundef_old) ||
-        !vlocs("vgpr_undef_new", c.vundef_new))
+        !vlocs("vgpr_undef_new", c.vundef_new) || !vlocs("vgpr_active_lanes_only", c.vactive_only))
       return std::nullopt;
     for (const auto &[name, mask] : j["vgpr_exit_masks"].members()) {
       auto v = json_u64(mask);
@@ -282,6 +307,24 @@ std::optional<RegionContract> RegionContract::from_json(const Json &j, std::stri
       }
       c.vexit_masks.emplace_back(vgpr_extent(*r) - 1, static_cast<uint32_t>(*v));
     }
+  }
+  c.exec_nonzero = j["exec_nonzero"].as_bool();
+  for (const Json &ej : j["exits"].items()) {
+    RegionExit e;
+    const auto op = json_u64(ej["old_pc"]), np = json_u64(ej["new_pc"]);
+    const auto obs = parse_locs(ej["observable"].as_string());
+    const auto vobs = parse_vgprs(ej["vgpr_observable"].as_string());
+    const auto vact = parse_vgprs(ej["vgpr_active_lanes_only"].as_string());
+    if (!op || !np || !obs || !vobs || !vact) {
+      error = "bad exits entry";
+      return std::nullopt;
+    }
+    e.old_pc = *op;
+    e.new_pc = *np;
+    e.observable = *obs;
+    e.vobservable = *vobs;
+    e.vactive_only = *vact;
+    c.exits.push_back(e);
   }
   c.memory_reads = j["memory_reads"].as_bool();
   c.memory_writes = j["memory_writes"].as_bool();

@@ -61,24 +61,50 @@ struct InstRef {
   std::string asm_text; ///< The block's text (pseudo-instructions only).
 };
 
-/// Memory operations that may still be outstanding at a program point (gfx9 counters).
+/// Memory operations that may still be outstanding at a program point, per wait-counter
+/// domain of RocJITsu's WaitCounterPolicy (Load = vmcnt/loadcnt, Store = vscnt/storecnt,
+/// Ds = lgkmcnt/dscnt, Km = kmcnt, Exp, Sample, ...), so every generation's counters and
+/// wait encodings are covered.
 struct PendingState {
-  enum Counter : unsigned { kVm = 0, kLgkm = 1, kExp = 2, kNumCounters = 3 };
-  std::array<uint8_t, kNumCounters> count{}; ///< Upper bound of outstanding ops (saturating).
-  std::array<LocSet, kNumCounters> dests;    ///< Tracked locations outstanding ops will write.
-  std::array<VSet, kNumCounters> vdests;     ///< VGPRs outstanding ops will write.
-  /// Vector memory returns in issue order on gfx9 (vmcnt): the destinations of each
-  /// outstanding VMEM operation, oldest first, so s_waitcnt vmcnt(N) retires all but the
-  /// newest N. dests/vdests[kVm] are their union.
+  static constexpr unsigned kLoad = 0;         ///< WaitCounterKind::Load
+  static constexpr unsigned kDs = 2;           ///< WaitCounterKind::Ds (lgkmcnt before GFX12)
+  static constexpr unsigned kNumCounters = 13; ///< WaitCounterKind::Count
+  std::array<uint8_t, kNumCounters> count{};   ///< Upper bound of outstanding ops (saturating).
+  std::array<LocSet, kNumCounters> dests;      ///< Tracked locations outstanding ops will write.
+  std::array<VSet, kNumCounters> vdests;       ///< VGPRs outstanding ops will write.
+  /// Vector loads return in issue order (vmcnt/loadcnt): the destinations of each
+  /// outstanding one, oldest first, so a wait for N retires all but the newest N.
+  /// dests/vdests[kLoad] are their union.
   std::vector<std::pair<LocSet, VSet>> vm_ops;
+  /// A Load-counter operation outside the in-order vector class is outstanding: only a
+  /// wait for 0 retires Load destinations.
+  bool load_unordered = false;
   std::array<bool, kNumCounters> unknown{}; ///< An outstanding op has unknown effects.
   uint64_t example_pc = 0;                  ///< One outstanding producer (for messages).
 
-  [[nodiscard]] bool any() const { return count[0] || count[1] || count[2]; }
-  [[nodiscard]] LocSet all_dests() const { return dests[0] | dests[1] | dests[2]; }
-  [[nodiscard]] VSet all_vdests() const { return vdests[0] | vdests[1] | vdests[2]; }
+  [[nodiscard]] bool any() const {
+    for (uint8_t c : count)
+      if (c)
+        return true;
+    return false;
+  }
+  [[nodiscard]] LocSet all_dests() const {
+    LocSet l;
+    for (const LocSet &d : dests)
+      l |= d;
+    return l;
+  }
+  [[nodiscard]] VSet all_vdests() const {
+    VSet v;
+    for (const VSet &d : vdests)
+      v |= d;
+    return v;
+  }
   [[nodiscard]] bool any_unknown() const {
-    return (count[0] && unknown[0]) || (count[1] && unknown[1]) || (count[2] && unknown[2]);
+    for (unsigned c = 0; c < kNumCounters; ++c)
+      if (count[c] && unknown[c])
+        return true;
+    return false;
   }
   bool operator==(const PendingState &) const = default;
 };
@@ -94,10 +120,14 @@ struct BlockInfo {
   bool returns = false;
 };
 
+/// Name of pending counter @p c on @p target ("vmcnt"/"lgkmcnt" before GFX12, "loadcnt",
+/// "dscnt", "kmcnt", ... from GFX12).
+[[nodiscard]] std::string pending_counter_name(unsigned c, const Target &target);
+
 /// Locations a caller can observe after a callable function returns (AMDGPU C calling
-/// convention): callee-saved SGPRs s30-s39, s48-s55, s64-s71, s80-s87, s96-s101 (with the
-/// return address, stack and frame pointers) and EXEC.
-[[nodiscard]] LocSet return_observable_locs();
+/// convention): callee-saved SGPRs s30-s39, s48-s55, s64-s71, s80-s87, s96-s105 (with the
+/// return address, stack and frame pointers; GFX9 stops at s101) and EXEC.
+[[nodiscard]] LocSet return_observable_locs(const Target &target = {});
 /// VGPRs a caller can observe after a return: v0..v{return_vgprs-1} and the callee-saved
 /// stripes v40-v47, v56-v63, ..., v248-v255.
 [[nodiscard]] VSet return_observable_vgprs(unsigned return_vgprs);
@@ -117,8 +147,9 @@ public:
   /// Locations live immediately before / after instruction @p i.
   [[nodiscard]] LocSet live_before(size_t i) const;
   [[nodiscard]] const LocSet &live_after(size_t i) const { return live_after_[i]; }
-  /// VGPRs live immediately before / after instruction @p i. A VGPR write never kills:
-  /// lanes outside EXEC keep their value.
+  /// VGPRs live immediately before / after instruction @p i. A VGPR write kills only when
+  /// it writes every bit and EXEC never changes afterwards (lanes outside EXEC keep their
+  /// value, and are never read again then; see exec_stable_before).
   [[nodiscard]] VSet vlive_before(size_t i) const;
   [[nodiscard]] const VSet &vlive_after(size_t i) const { return vlive_after_[i]; }
   /// VGPR liveness without the return VGPRs a partial return mask covers
@@ -140,6 +171,20 @@ public:
   /// at the kernel entry; joins take the maximum count and the union of destinations; only
   /// an s_waitcnt field of 0 clears that counter's destinations.
   [[nodiscard]] const PendingState &pending_before(size_t i) const { return pending_before_[i]; }
+
+  /// EXEC keeps its value from right after instruction @p i to every exit of the kernel or
+  /// function, and nothing after it reads a lane outside EXEC (no EXEC write, no
+  /// lane-crossing access such as v_readlane, DPP or ds_bpermute, no unknown effect or
+  /// successor). Lanes inactive there are then never read again.
+  [[nodiscard]] bool exec_stable_after(size_t i) const { return exec_stable_after_[i]; }
+  /// The same from right before instruction @p i.
+  [[nodiscard]] bool exec_stable_before(size_t i) const { return exec_stable_before_[i]; }
+  /// EXEC right before instruction @p i is the entry EXEC on every path (written by no
+  /// instruction on any path from the entry; false when that is not analysed).
+  [[nodiscard]] bool exec_is_entry_before(size_t i) const {
+    return i < written_before_.size() && !written_before_[i].test(kLocExecLo) &&
+           !written_before_[i].test(kLocExecHi);
+  }
 
   /// True when no block has an unknown successor (liveness is then exact w.r.t. the CFG).
   [[nodiscard]] bool cfg_complete() const { return cfg_complete_; }
@@ -166,6 +211,7 @@ private:
   void compute_taint();
   void compute_pending();
   void compute_reachability();
+  void compute_exec_stability();
 
   Artifact artifact_;
   std::unique_ptr<CodeObject> code_object_;
@@ -183,10 +229,16 @@ private:
   std::vector<VSet> vtaint_before_;
   std::vector<LocSet> taint_before_;
   std::vector<PendingState> pending_before_;
+  std::vector<bool> exec_stable_after_, exec_stable_before_;
+  /// VGPRs instruction i overwrites on every lane anyone reads again: a full-width write
+  /// under an EXEC that never changes afterwards (callable functions: not callee-saved).
+  std::vector<VSet> vkill_;
+  [[nodiscard]] VSet vlive_step(size_t i, const VSet &live_after) const;
   std::vector<std::vector<bool>> reach_;
   std::vector<uint8_t> uncovered_;
   bool cfg_complete_ = true;
   bool reads_pc_ = false;
+  bool vgpr_msb_ = false; ///< Uses s_set_vgpr_msb (GFX12.5 high VGPR banks).
   uint64_t decode_cfg_ns_ = 0;
   uint64_t dataflow_ns_ = 0;
 };

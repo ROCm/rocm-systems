@@ -49,9 +49,9 @@ void mark(RegionRoles &r, const SourceOperand &s, uint32_t role) {
       r.roles[l] |= role;
 }
 
-void add_instruction(RegionRoles &r, const Instruction &inst) {
+void add_instruction(RegionRoles &r, const Instruction &inst, const Target &target) {
   const std::string m(inst.mnemonic());
-  std::vector<SourceOperand> src = source_operands(inst);
+  std::vector<SourceOperand> src = source_operands(inst, target);
   for (const auto &s : src) {
     r.read |= s.locs;
     r.vread |= s.vlocs;
@@ -132,12 +132,12 @@ void add_instruction(RegionRoles &r, const Instruction &inst) {
 
 RegionRoles infer_roles(const std::vector<RegionInst> &old_insts,
                         const std::vector<RegionInst> &new_insts,
-                        const std::array<unsigned, kNumLocs> *new_to_old) {
+                        const std::array<unsigned, kNumLocs> *new_to_old, const Target &target) {
   RegionRoles r;
   // New-side roles are collected separately and translated when a register map is given.
   RegionRoles mapped;
   r.decoded = true;
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  auto decoder = Decoder::create(target.arch);
   if (!decoder) {
     r.decoded = false;
     return r;
@@ -159,10 +159,10 @@ RegionRoles infer_roles(const std::vector<RegionInst> &old_insts,
         summary.push_back({ri.pc, "<undecodable>", ri.text, {}, {}, {}, {}});
         continue;
       }
-      const Effects fx = classify(*decoded.value());
+      const Effects fx = classify(*decoded.value(), target);
       summary.push_back({ri.pc, std::string(decoded.value()->mnemonic()), ri.text, fx.reads,
                          fx.writes, fx.vreads, fx.vwrites});
-      add_instruction(side == &old_insts || !new_to_old ? r : mapped, *decoded.value());
+      add_instruction(side == &old_insts || !new_to_old ? r : mapped, *decoded.value(), target);
     }
   }
   if (new_to_old) {

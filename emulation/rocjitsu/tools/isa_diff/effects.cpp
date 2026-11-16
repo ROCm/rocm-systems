@@ -15,8 +15,10 @@
 namespace rocjitsu::isa_diff {
 namespace {
 
-// Integer SALU instructions whose execution RocJITsu implements on gfx950 and whose
-// entire effect is on SGPRs, VCC, EXEC, M0 and SCC. Every operand is still checked;
+// SALU instructions whose execution RocJITsu implements and whose entire effect is on
+// SGPRs, VCC, EXEC, M0 and SCC (the float forms of GFX11.5+ also read MODE, which is
+// equal on both sides). Names of every generation: an instruction is only ever decoded
+// by its own target's decoder. Every operand is still checked;
 // membership here is necessary, not sufficient. Branches, PC access, hwreg access,
 // indirect SGPR access, waits, messages and traps are deliberately absent.
 constexpr std::array kP0Mnemonics = std::to_array<std::string_view>({
@@ -117,6 +119,93 @@ constexpr std::array kP0Mnemonics = std::to_array<std::string_view>({
     "s_andn1_wrexec_b64",
     "s_andn2_wrexec_b64",
     "s_bitreplicate_b64_b32",
+    // Wave32 exec-mask forms (GFX10+).
+    "s_and_saveexec_b32",
+    "s_or_saveexec_b32",
+    "s_xor_saveexec_b32",
+    "s_andn2_saveexec_b32",
+    "s_orn2_saveexec_b32",
+    "s_nand_saveexec_b32",
+    "s_nor_saveexec_b32",
+    "s_xnor_saveexec_b32",
+    "s_andn1_saveexec_b32",
+    "s_orn1_saveexec_b32",
+    "s_andn1_wrexec_b32",
+    "s_andn2_wrexec_b32",
+    // GFX11 names.
+    "s_and_not1_b32",
+    "s_and_not1_b64",
+    "s_or_not1_b32",
+    "s_or_not1_b64",
+    "s_and_not1_saveexec_b32",
+    "s_and_not1_saveexec_b64",
+    "s_or_not1_saveexec_b32",
+    "s_or_not1_saveexec_b64",
+    "s_and_not0_saveexec_b32",
+    "s_and_not0_saveexec_b64",
+    "s_or_not0_saveexec_b32",
+    "s_or_not0_saveexec_b64",
+    "s_and_not1_wrexec_b32",
+    "s_and_not1_wrexec_b64",
+    "s_and_not0_wrexec_b32",
+    "s_and_not0_wrexec_b64",
+    "s_ctz_i32_b32",
+    "s_ctz_i32_b64",
+    "s_clz_i32_u32",
+    "s_clz_i32_u64",
+    "s_cls_i32",
+    "s_cls_i32_i64",
+    "s_pack_hl_b32_b16",
+    // GFX12 names and GFX12.5 64-bit arithmetic.
+    "s_add_co_u32",
+    "s_add_co_i32",
+    "s_add_co_ci_u32",
+    "s_sub_co_u32",
+    "s_sub_co_i32",
+    "s_sub_co_ci_u32",
+    "s_addk_co_i32",
+    "s_add_nc_u64",
+    "s_sub_nc_u64",
+    "s_mul_u64",
+    // SALU floating point (GFX11.5+).
+    "s_add_f32",
+    "s_sub_f32",
+    "s_mul_f32",
+    "s_fmac_f32",
+    "s_fmaak_f32",
+    "s_fmamk_f32",
+    "s_min_f32",
+    "s_max_f32",
+    "s_min_num_f32",
+    "s_max_num_f32",
+    "s_minimum_f32",
+    "s_maximum_f32",
+    "s_add_f16",
+    "s_sub_f16",
+    "s_mul_f16",
+    "s_fmac_f16",
+    "s_min_f16",
+    "s_max_f16",
+    "s_min_num_f16",
+    "s_max_num_f16",
+    "s_minimum_f16",
+    "s_maximum_f16",
+    "s_ceil_f32",
+    "s_floor_f32",
+    "s_trunc_f32",
+    "s_rndne_f32",
+    "s_ceil_f16",
+    "s_floor_f16",
+    "s_trunc_f16",
+    "s_rndne_f16",
+    "s_cvt_f32_i32",
+    "s_cvt_f32_u32",
+    "s_cvt_i32_f32",
+    "s_cvt_u32_f32",
+    "s_cvt_f16_f32",
+    "s_cvt_f32_f16",
+    "s_cvt_hi_f32_f16",
+    "s_cvt_pk_rtz_f16_f32",
     // SOPC
     "s_cmp_eq_i32",
     "s_cmp_lg_i32",
@@ -136,6 +225,34 @@ constexpr std::array kP0Mnemonics = std::to_array<std::string_view>({
     "s_bitcmp1_b64",
     "s_cmp_eq_u64",
     "s_cmp_lg_u64",
+    "s_cmp_eq_f32",
+    "s_cmp_lg_f32",
+    "s_cmp_gt_f32",
+    "s_cmp_ge_f32",
+    "s_cmp_lt_f32",
+    "s_cmp_le_f32",
+    "s_cmp_o_f32",
+    "s_cmp_u_f32",
+    "s_cmp_neq_f32",
+    "s_cmp_nlg_f32",
+    "s_cmp_ngt_f32",
+    "s_cmp_nge_f32",
+    "s_cmp_nlt_f32",
+    "s_cmp_nle_f32",
+    "s_cmp_eq_f16",
+    "s_cmp_lg_f16",
+    "s_cmp_gt_f16",
+    "s_cmp_ge_f16",
+    "s_cmp_lt_f16",
+    "s_cmp_le_f16",
+    "s_cmp_o_f16",
+    "s_cmp_u_f16",
+    "s_cmp_neq_f16",
+    "s_cmp_nlg_f16",
+    "s_cmp_ngt_f16",
+    "s_cmp_nge_f16",
+    "s_cmp_nlt_f16",
+    "s_cmp_nle_f16",
     // SOPK
     "s_movk_i32",
     "s_cmovk_i32",
@@ -155,24 +272,72 @@ constexpr std::array kP0Mnemonics = std::to_array<std::string_view>({
     "s_mulk_i32",
     // SOPP with no architectural effect.
     "s_nop",
+    "s_version",
+});
+
+// Scheduling hints and dependency waits: no functional effect on an in-order wave.
+constexpr std::array kRegionNoops = std::to_array<std::string_view>({
+    "s_nop",
+    "s_delay_alu",
+    "s_clause",
+    "s_wait_alu",
+    "s_waitcnt_depctr",
+    "s_set_inst_prefetch_distance",
+    "s_inst_prefetch",
+    "s_version",
 });
 
 // SALU instructions outside P0 that read no tracked state beyond their classified
 // operands (the branch conditions SCC/VCC/EXEC are fieldless operands; see tests).
 constexpr std::array kNoImplicitReads = std::to_array<std::string_view>({
-    "s_endpgm", "s_waitcnt", "s_barrier", "s_branch", "s_cbranch_scc0", "s_cbranch_scc1",
-    "s_cbranch_vccz", "s_cbranch_vccnz", "s_cbranch_execz", "s_cbranch_execnz", "s_sleep",
+    "s_endpgm",
+    "s_waitcnt",
+    "s_barrier",
+    "s_branch",
+    "s_cbranch_scc0",
+    "s_cbranch_scc1",
+    "s_cbranch_vccz",
+    "s_cbranch_vccnz",
+    "s_cbranch_execz",
+    "s_cbranch_execnz",
+    "s_sleep",
     "s_setprio",
     "s_setpc_b64", // reads its target only; a return's live-out is the calling convention's
+    "s_set_pc_i64",
+    "s_delay_alu",
+    "s_clause",
+    "s_wait_alu",
+    "s_waitcnt_depctr",
+    "s_set_inst_prefetch_distance",
+    "s_inst_prefetch",
+    "s_version",
+    "s_nop",
+    "s_waitcnt_vscnt",
+    "s_waitcnt_vmcnt",
+    "s_waitcnt_lgkmcnt",
+    "s_waitcnt_expcnt",
+    "s_wait_loadcnt",
+    "s_wait_storecnt",
+    "s_wait_dscnt",
+    "s_wait_kmcnt",
+    "s_wait_samplecnt",
+    "s_wait_bvhcnt",
+    "s_wait_expcnt",
+    "s_wait_loadcnt_dscnt",
+    "s_wait_storecnt_dscnt",
+    "s_wait_asynccnt",
+    "s_wait_tensorcnt",
+    "s_wait_xcnt",
 });
 
-// Generic scalar operand selector values (gfx9 encoding of SSRC/SDST fields).
+// Scalar operand selector values (SSRC/SDST fields) shared by every generation. M0 and
+// NULL move (Target::m0_selector/null_selector); 102..105 are FLAT_SCRATCH/XNACK_MASK on
+// GFX9 and ordinary SGPRs from GFX10.
 constexpr int kSelFlatScratchLo = 102;
 constexpr int kSelXnackMaskHi = 105;
 constexpr int kSelVccLo = 106;
 constexpr int kSelVccHi = 107;
-constexpr int kSelM0 = 124;
-constexpr int kSelSharedBase = 235;        ///< src_shared_base (gfx9)
+constexpr int kSelSharedBase = 235;        ///< src_shared_base
 constexpr int kSelPopsExitingWaveId = 239; ///< src_pops_exiting_wave_id
 constexpr int kSelVccz = 251;
 constexpr int kSelExecz = 252;
@@ -200,19 +365,21 @@ void add_pair(LocSet &locs, unsigned lo, unsigned hi, int bits) {
     locs.set(hi);
 }
 
-OperandClass classify_special(RegClass cls, int bits) {
+OperandClass classify_special(RegClass cls, const Target &t) {
   OperandClass out;
   out.space = Space::Tracked;
+  // A fieldless VCC or EXEC operand is the wave-sized mask: the pair on wave64, the low
+  // half on wave32.
+  const int mask_bits = t.wave32() ? 32 : 64;
   switch (cls) {
   case RegClass::SCC:
     out.locs.set(kLocScc);
     return out;
   case RegClass::VCC:
-    // A fieldless VCC operand is the wave-sized mask; on wave64 that is the pair.
-    add_pair(out.locs, kLocVccLo, kLocVccHi, std::max(bits, 64));
+    add_pair(out.locs, kLocVccLo, kLocVccHi, mask_bits);
     return out;
   case RegClass::EXEC:
-    add_pair(out.locs, kLocExecLo, kLocExecHi, std::max(bits, 64));
+    add_pair(out.locs, kLocExecLo, kLocExecHi, mask_bits);
     return out;
   case RegClass::M0:
     out.locs.set(kLocM0);
@@ -228,21 +395,25 @@ OperandClass classify_special(RegClass cls, int bits) {
   }
 }
 
-OperandClass classify_operand(const Operand &op) {
+OperandClass classify_operand(const Operand &op, const Target &t) {
   OperandClass out;
   if (op.is_fieldless()) {
     if (auto cls = op.to_special_reg_class())
-      return classify_special(*cls, op.size_bits());
+      return classify_special(*cls, t);
     out.space = Space::Outside;
     out.what = "fieldless operand '" + op.name() + "'";
     return out;
   }
+  // A wave-mask operand is decoded at wave64 width; wave32 uses its first register.
+  const bool narrow = t.wave32() && op.is_wave_mask();
   if (auto ref = op.to_register_ref()) {
+    if (narrow)
+      ref->width = 1;
     switch (ref->cls) {
     case RegClass::SGPR:
-      if (ref->index + ref->width > kNumSgprs) {
+      if (ref->index + ref->width > t.sgprs()) {
         out.space = Space::Unknown;
-        out.what = "SGPR beyond s101";
+        out.what = "SGPR beyond s" + std::to_string(t.sgprs() - 1);
         return out;
       }
       out.space = Space::Tracked;
@@ -261,7 +432,7 @@ OperandClass classify_operand(const Operand &op) {
       return out;
     case RegClass::M0:
     case RegClass::SCC:
-      return classify_special(ref->cls, op.size_bits());
+      return classify_special(ref->cls, t);
     case RegClass::PC:
       out.space = Space::Pc;
       out.what = "pc";
@@ -292,8 +463,17 @@ OperandClass classify_operand(const Operand &op) {
   }
   if (op.has_register_selector()) {
     const int sel = op.encoding_value();
-    const int bits = op.size_bits();
+    const int bits = narrow ? 32 : op.size_bits();
     out.space = Space::Tracked;
+    if (sel == t.m0_selector()) {
+      out.locs.set(kLocM0);
+      return out;
+    }
+    if (sel == t.null_selector()) {
+      // NULL reads as zero and discards writes.
+      out.space = Space::Constant;
+      return out;
+    }
     switch (sel) {
     case kSelVccLo:
       add_pair(out.locs, kLocVccLo, kLocVccHi, bits);
@@ -301,24 +481,19 @@ OperandClass classify_operand(const Operand &op) {
     case kSelVccHi:
       out.locs.set(kLocVccHi);
       return out;
-    case kSelM0:
-      out.locs.set(kLocM0);
-      return out;
     case kSelScc:
       out.locs.set(kLocScc);
       return out;
     case kSelVccz:
-      out.locs.set(kLocVccLo);
-      out.locs.set(kLocVccHi);
+      add_pair(out.locs, kLocVccLo, kLocVccHi, static_cast<int>(t.wave_size));
       return out;
     case kSelExecz:
-      out.locs.set(kLocExecLo);
-      out.locs.set(kLocExecHi);
+      add_pair(out.locs, kLocExecLo, kLocExecHi, static_cast<int>(t.wave_size));
       return out;
     default:
       break;
     }
-    if (sel >= kSelFlatScratchLo && sel <= kSelXnackMaskHi) {
+    if (t.major == 9 && sel >= kSelFlatScratchLo && sel <= kSelXnackMaskHi) {
       out.space = Space::Outside;
       out.what = "flat_scratch/xnack_mask selector";
       return out;
@@ -360,13 +535,13 @@ bool has_mnemonic_prefix(std::string_view mnemonic, std::string_view prefix) {
 
 } // namespace
 
-std::vector<SourceOperand> source_operands(const Instruction &inst) {
+std::vector<SourceOperand> source_operands(const Instruction &inst, const Target &target) {
   std::vector<SourceOperand> out;
   for (int i = 0; i < inst.num_src_operands(); ++i) {
     const Operand &op = *inst.src_operand(i);
     SourceOperand s;
     s.fieldless = op.is_fieldless();
-    const OperandClass cls = classify_operand(op);
+    const OperandClass cls = classify_operand(op, target);
     if (cls.space == Space::Tracked)
       s.locs = cls.locs;
     else if (cls.space == Space::Vector)
@@ -385,11 +560,32 @@ bool is_p0_mnemonic(std::string_view mnemonic) {
 
 bool is_region_memory(std::string_view m) {
   auto starts = [&](std::string_view p) { return m.substr(0, p.size()) == p; };
-  if (m == "s_waitcnt")
+  auto has = [&](std::string_view p) { return m.find(p) != std::string_view::npos; };
+  // Counter waits: s_waitcnt (all), s_waitcnt_{vm,lgkm,exp,vs}cnt (GFX10-11) and the split
+  // s_wait_*cnt forms (GFX12). s_wait_alu/s_wait_idle/s_wait_event are not counter waits.
+  if (m == "s_waitcnt" || m == "s_waitcnt_vmcnt" || m == "s_waitcnt_lgkmcnt" ||
+      m == "s_waitcnt_expcnt" || m == "s_waitcnt_vscnt")
     return true;
+  if (starts("s_wait_") && (m.ends_with("cnt") || has("cnt_")))
+    return true; // s_wait_loadcnt, ..., s_wait_loadcnt_dscnt, s_wait_storecnt_dscnt
+  if (has("addtid") || has("block") || has("lds") || has("_tr"))
+    return false;
   if (starts("global_load_"))
-    return m.find("lds") == std::string_view::npos && m.find("_tr") == std::string_view::npos;
-  return starts("global_store_") || starts("s_load_dword");
+    return true;
+  return starts("global_store_") || starts("s_load_dword") || starts("s_load_b") ||
+         starts("s_load_u") || starts("s_load_i");
+}
+
+bool is_region_branch(std::string_view m) {
+  for (std::string_view b : {"s_branch", "s_cbranch_scc0", "s_cbranch_scc1", "s_cbranch_vccz",
+                             "s_cbranch_vccnz", "s_cbranch_execz", "s_cbranch_execnz"})
+    if (m == b)
+      return true;
+  return false;
+}
+
+bool is_region_noop(std::string_view m) {
+  return std::ranges::find(kRegionNoops, m) != kRegionNoops.end();
 }
 
 bool is_region_valu(std::string_view mnemonic, uint64_t flags) {
@@ -405,7 +601,7 @@ bool is_region_valu(std::string_view mnemonic, uint64_t flags) {
   return true;
 }
 
-Effects classify(const Instruction &inst) {
+Effects classify(const Instruction &inst, const Target &target) {
   Effects fx;
   const uint64_t flags = inst.flags();
   const std::string_view mnemonic = inst.mnemonic();
@@ -418,7 +614,7 @@ Effects classify(const Instruction &inst) {
   bool unknown = false;
   std::string unknown_what;
   auto absorb = [&](const Operand &op, bool is_dst) {
-    OperandClass cls = classify_operand(op);
+    OperandClass cls = classify_operand(op, target);
     switch (cls.space) {
     case Space::Tracked:
       (is_dst ? fx.writes : fx.reads) |= cls.locs;
@@ -488,7 +684,7 @@ Effects classify(const Instruction &inst) {
       case RegClass::SGPR:
         for (unsigned w = 0; w < std::max<unsigned>(r.width, 1); ++w) {
           const unsigned n = r.index + w;
-          if (n < kNumSgprs)
+          if (n < target.sgprs())
             into.set(n);
           else
             implicit_unmapped = true;
@@ -505,13 +701,11 @@ Effects classify(const Instruction &inst) {
         break;
       case RegClass::ACC_VGPR:
         break;
-      case RegClass::EXEC:
-        into.set(kLocExecLo);
-        into.set(kLocExecHi);
+      case RegClass::EXEC: // the wave-sized mask
+        add_pair(into, kLocExecLo, kLocExecHi, static_cast<int>(target.wave_size));
         break;
       case RegClass::VCC:
-        into.set(kLocVccLo);
-        into.set(kLocVccHi);
+        add_pair(into, kLocVccLo, kLocVccHi, static_cast<int>(target.wave_size));
         break;
       case RegClass::SCC:
         into.set(kLocScc);
@@ -548,23 +742,21 @@ Effects classify(const Instruction &inst) {
   // A VALU instruction reads EXEC (the lanes it writes). v_readlane/v_writelane ignore
   // it; counting it as read is conservative.
   fx.valu = (flags & VALU) != 0;
-  if (fx.valu) {
-    fx.reads.set(kLocExecLo);
-    fx.reads.set(kLocExecHi);
-  }
+  if (fx.valu)
+    add_pair(fx.reads, kLocExecLo, kLocExecHi, static_cast<int>(target.wave_size));
 
   // Region executability: the SALU allowlist, a plain VALU instruction, or a supported
   // memory instruction.
-  const bool salu_ok = is_p0_mnemonic(mnemonic);
+  const bool noop_ok = is_region_noop(mnemonic);
+  const bool branch_ok = is_region_branch(mnemonic);
+  const bool salu_ok = is_p0_mnemonic(mnemonic) || noop_ok || branch_ok;
   const bool valu_ok = is_region_valu(mnemonic, flags);
   const bool mem_ok = is_region_memory(mnemonic);
   if (mem_ok) {
     fx.mem_read = mnemonic.substr(0, 12) == "global_load_" || mnemonic.substr(0, 6) == "s_load";
     fx.mem_write = mnemonic.substr(0, 13) == "global_store_";
-    if ((flags & VMEM) != 0) { // vector memory moves the lanes in EXEC
-      fx.reads.set(kLocExecLo);
-      fx.reads.set(kLocExecHi);
-    }
+    if ((flags & VMEM) != 0) // vector memory moves the lanes in EXEC
+      add_pair(fx.reads, kLocExecLo, kLocExecHi, static_cast<int>(target.wave_size));
   }
   if (!salu_ok && !valu_ok && !mem_ok) {
     fx.reject_reason =
@@ -572,10 +764,10 @@ Effects classify(const Instruction &inst) {
         std::string(mnemonic);
   } else if (fx.unknown_effect) {
     fx.reject_reason = "unmodelled effect: " + unknown_what;
-  } else if (!first_outside.empty()) {
+  } else if (!first_outside.empty() && !noop_ok) { // a hint's operands are not state
     fx.reject_reason = first_outside;
-  } else if (fx.control_flow ||
-             (!mem_ok && (flags & (MEMORY_OP | WAITCNT | SMEM | VMEM | LDS)) != 0) ||
+  } else if ((fx.control_flow && !branch_ok) ||
+             (!mem_ok && !noop_ok && (flags & (MEMORY_OP | WAITCNT | SMEM | VMEM | LDS)) != 0) ||
              (flags & (BARRIER | SUSPENDS_WAVE | MFMA)) != 0 || (salu_ok && fx.valu)) {
     fx.reject_reason = "instruction class outside the executable region subset";
   } else if (inst.data() != nullptr) {
@@ -584,6 +776,7 @@ Effects classify(const Instruction &inst) {
     fx.reject_reason = "no execution callback (model-only provider)";
   } else {
     fx.p0 = true;
+    fx.branch = branch_ok;
   }
   if (!fx.p0) {
     const bool lds = (flags & LDS) != 0 || mnemonic.find("lds") != std::string_view::npos;
@@ -594,8 +787,7 @@ Effects classify(const Instruction &inst) {
     } else if ((flags & SMEM) != 0) {
       // Scalar memory: address and offset operands only.
     } else if ((flags & VMEM) != 0 || (flags & LDS) != 0) {
-      fx.implicit_reads.set(kLocExecLo);
-      fx.implicit_reads.set(kLocExecHi);
+      add_pair(fx.implicit_reads, kLocExecLo, kLocExecHi, static_cast<int>(target.wave_size));
       if (lds)
         fx.implicit_reads.set(kLocM0);
     } else {
@@ -825,9 +1017,21 @@ int op_sel_dst(std::string_view text) {
   return c == '1' ? 1 : c == '0' ? 0 : -1;
 }
 
+/// The destination is the high half of a true16 register ("v_add_f16 v0.h, ..." on GFX11+).
+bool true16_dst_hi(std::string_view text) {
+  const size_t sp = text.find(' ');
+  if (sp == std::string_view::npos)
+    return false;
+  std::string_view dst = text.substr(sp + 1);
+  dst = dst.substr(0, dst.find(','));
+  while (!dst.empty() && dst.back() == ' ')
+    dst.remove_suffix(1);
+  return dst.size() > 2 && dst.substr(dst.size() - 2) == ".h";
+}
+
 FpResult half_result(std::string_view base, std::string_view text, bool bf16) {
   const bool hi = text.find("dst_sel:WORD_1") != std::string_view::npos ||
-                  (!starts(base, "v_pk_") && op_sel_dst(text) == 1);
+                  (!starts(base, "v_pk_") && op_sel_dst(text) == 1) || true16_dst_hi(text);
   if (bf16)
     return hi ? FpResult::BF16Hi : FpResult::BF16Lo;
   return hi ? FpResult::F16Hi : FpResult::F16Lo;
@@ -899,8 +1103,50 @@ FpResult fp_result_kind(std::string_view mnemonic, std::string_view text) {
   return format_suffix(base, text);
 }
 
+FpResult fp_scalar_result_kind(std::string_view mnemonic) {
+  const std::string_view b = strip_encoding(mnemonic);
+  if (b == "s_mov_b32" || b == "s_mov_b64")
+    return FpResult::Move;
+  if (b == "s_cselect_b32" || b == "s_cselect_b64")
+    return FpResult::Select;
+  if (b == "s_cmov_b32" || b == "s_cmov_b64")
+    return FpResult::CMov;
+  if (b == "v_readfirstlane_b32")
+    return FpResult::ReadFirstLane;
+  if (b == "v_readlane_b32")
+    return FpResult::ReadLane;
+  if (!starts(b, "s_") || starts(b, "s_cmp"))
+    return FpResult::None;
+  if (b == "s_cvt_pk_rtz_f16_f32")
+    return FpResult::F16x2;
+  if (b == "s_cvt_f16_f32")
+    return FpResult::F16Lo;
+  if (starts(b, "s_cvt_"))
+    return starts(b, "s_cvt_f32_") || starts(b, "s_cvt_hi_f32_") ? FpResult::F32 : FpResult::None;
+  if (ends(b, "_f32"))
+    return FpResult::F32;
+  if (ends(b, "_f16"))
+    return FpResult::F16Lo;
+  return FpResult::None;
+}
+
 FpResult fp_source_kind(std::string_view mnemonic) {
   const std::string_view base = strip_encoding(mnemonic);
+  if (starts(base, "s_") && !starts(base, "s_cmp")) { // SALU float (GFX11.5+)
+    if (base == "s_cvt_f32_f16")
+      return FpResult::F16Lo;
+    if (base == "s_cvt_hi_f32_f16")
+      return FpResult::F16Hi;
+    if (starts(base, "s_cvt_"))
+      return ends(base, "_f32") ? FpResult::F32 : FpResult::None;
+    if (ends(base, "_f32"))
+      return FpResult::F32;
+    if (ends(base, "_f16"))
+      return FpResult::F16Lo;
+    return FpResult::None;
+  }
+  if (starts(base, "s_cmp_") && (ends(base, "_f32") || ends(base, "_f16")))
+    return ends(base, "_f32") ? FpResult::F32 : FpResult::F16Lo;
   if (!starts(base, "v_") || base.find("mfma") != base.npos || starts(base, "v_fma_mix") ||
       starts(base, "v_mad_mix"))
     return FpResult::None;
@@ -999,15 +1245,18 @@ uint32_t poison_check_kind(std::string_view mnemonic) {
       return kPoisonShift | kPoisonExact;
   for (std::string_view s :
        {"v_cvt_i32_f32", "v_cvt_u32_f32", "v_cvt_i32_f64", "v_cvt_u32_f64", "v_cvt_i16_f16",
-        "v_cvt_u16_f16", "v_cvt_flr_i32_f32", "v_cvt_rpi_i32_f32"})
+        "v_cvt_u16_f16", "v_cvt_flr_i32_f32", "v_cvt_rpi_i32_f32", "v_cvt_floor_i32_f32",
+        "v_cvt_nearest_i32_f32", "s_cvt_i32_f32", "s_cvt_u32_f32"})
     if (b == s)
       return kPoisonFpToInt | kPoisonNnan | kPoisonNinf;
   for (std::string_view s : {"v_ffbh_u32", "v_ffbl_b32", "s_flbit_i32_b32", "s_flbit_i32_b64",
-                             "s_ff1_i32_b32", "s_ff1_i32_b64"})
+                             "s_ff1_i32_b32", "s_ff1_i32_b64", "v_clz_i32_u32", "v_ctz_i32_b32",
+                             "s_clz_i32_u32", "s_clz_i32_u64", "s_ctz_i32_b32", "s_ctz_i32_b64"})
     if (b == s)
       return kPoisonCtz;
   for (std::string_view s : {"v_add_u32", "v_sub_u32", "v_subrev_u32", "v_mul_lo_u32", "s_add_i32",
-                             "s_sub_i32", "s_mul_i32"})
+                             "s_sub_i32", "s_mul_i32", "v_add_nc_u32", "v_sub_nc_u32",
+                             "v_subrev_nc_u32", "s_add_co_i32", "s_sub_co_i32"})
     if (b == s)
       return kPoisonNsw | kPoisonNuw;
   if (b == "v_or_b32" || b == "s_or_b32")

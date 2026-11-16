@@ -22,12 +22,12 @@
     },
     "loc": {
       "type": "string",
-      "pattern": "^(s([0-9]|[1-9][0-9]|10[01])|vcc_lo|vcc_hi|exec_lo|exec_hi|m0|scc)$"
+      "pattern": "^(s([0-9]|[1-9][0-9]|10[0-5])|vcc_lo|vcc_hi|exec_lo|exec_hi|m0|scc)$"
     },
     "locs": {
       "description": "Comma-separated location list in canonical order; empty for none.",
       "type": "string",
-      "pattern": "^((s([0-9]|[1-9][0-9]|10[01])|vcc_lo|vcc_hi|exec_lo|exec_hi|m0|scc)(,(s([0-9]|[1-9][0-9]|10[01])|vcc_lo|vcc_hi|exec_lo|exec_hi|m0|scc))*)?$"
+      "pattern": "^((s([0-9]|[1-9][0-9]|10[0-5])|vcc_lo|vcc_hi|exec_lo|exec_hi|m0|scc)(,(s([0-9]|[1-9][0-9]|10[0-5])|vcc_lo|vcc_hi|exec_lo|exec_hi|m0|scc))*)?$"
     },
     "register_map": {
       "type": "string",
@@ -86,7 +86,8 @@
         "observable",
         "effect_model",
         "frame_preservation",
-        "exit_status_divergence"
+        "exit_status_divergence",
+        "exit_divergence"
       ]
     },
     "run_status": {
@@ -104,6 +105,7 @@
         "PC_WRITTEN",
         "WAVE_STATE_CHANGED",
         "BUDGET_EXCEEDED",
+        "STEP_LIMIT",
         "MEMORY_FAULT"
       ]
     },
@@ -148,6 +150,40 @@
       },
       "additionalProperties": false
     },
+    "target": {
+      "description": "A GPU RocJITsu executes (CDNA1-4, RDNA1-4, gfx1250/gfx1251).",
+      "enum": [
+        "gfx908",
+        "gfx90a",
+        "gfx940",
+        "gfx941",
+        "gfx942",
+        "gfx950",
+        "gfx1010",
+        "gfx1011",
+        "gfx1012",
+        "gfx1013",
+        "gfx1030",
+        "gfx1031",
+        "gfx1032",
+        "gfx1033",
+        "gfx1034",
+        "gfx1035",
+        "gfx1036",
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153",
+        "gfx1200",
+        "gfx1201",
+        "gfx1250",
+        "gfx1251"
+      ]
+    },
     "artifact": {
       "type": "object",
       "required": [
@@ -176,7 +212,13 @@
           "$ref": "#/$defs/sha256"
         },
         "target": {
-          "const": "gfx950"
+          "$ref": "#/$defs/target"
+        },
+        "wave_size": {
+          "enum": [
+            32,
+            64
+          ]
         },
         "kernel": {
           "type": "string"
@@ -272,7 +314,7 @@
         "entry_sgprs": {
           "type": "integer",
           "minimum": -1,
-          "maximum": 102,
+          "maximum": 106,
           "description": "SGPRs s0..s{n-1} defined at the entry; above them (except a callable function's callee-saved SGPRs), VCC, M0 and SCC are undefined until written. -1: all defined."
         }
       },
@@ -327,7 +369,17 @@
           "const": "amdgcn-amd-amdhsa"
         },
         "mcpu": {
-          "const": "gfx950"
+          "$ref": "#/$defs/target"
+        },
+        "wave_size": {
+          "enum": [
+            32,
+            64
+          ]
+        },
+        "mattr": {
+          "type": "string",
+          "description": "Target features passed to llc and llvm-mc."
         },
         "common_args": {
           "type": "array",
@@ -581,10 +633,13 @@
       ],
       "properties": {
         "target": {
-          "const": "gfx950"
+          "$ref": "#/$defs/target"
         },
         "wave": {
-          "const": "wave64"
+          "enum": [
+            "wave32",
+            "wave64"
+          ]
         },
         "arithmetic": {
           "const": "default"
@@ -738,6 +793,46 @@
         "vgpr_undef_new": {
           "type": "string",
           "description": "Live-in VGPRs undefined on the new side: new may not depend on them beyond old's don't-care bits."
+        },
+        "exits": {
+          "type": "array",
+          "description": "Regions with control flow: one entry per exit pair (pc 0: falling off the end of the region) with its own R_out.",
+          "items": {
+            "type": "object",
+            "required": [
+              "old_pc",
+              "new_pc",
+              "observable",
+              "vgpr_observable",
+              "vgpr_active_lanes_only"
+            ],
+            "properties": {
+              "old_pc": {
+                "$ref": "#/$defs/hex"
+              },
+              "new_pc": {
+                "$ref": "#/$defs/hex"
+              },
+              "observable": {
+                "type": "string"
+              },
+              "vgpr_observable": {
+                "type": "string"
+              },
+              "vgpr_active_lanes_only": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "exec_nonzero": {
+          "type": "boolean",
+          "description": "EXEC at the entry is still the dispatch or call EXEC on every path, so it is not zero; inputs with EXEC 0 are invalid."
+        },
+        "vgpr_active_lanes_only": {
+          "type": "string",
+          "description": "Observable VGPRs compared on the lanes active in EXEC at the exit only: EXEC never changes after the exit, nothing reads an inactive lane again, and they are not callee-saved."
         },
         "vgpr_exit_masks": {
           "type": "object",
@@ -1758,7 +1853,11 @@
             "$ref": "#/$defs/hex32"
           },
           "minProperties": 108,
-          "maxProperties": 108
+          "maxProperties": 112
+        },
+        "exit_pc": {
+          "$ref": "#/$defs/hex",
+          "description": "Where the run left a region with control flow (absent: it fell off the end)."
         },
         "frame": {
           "type": "object",
@@ -1914,8 +2013,16 @@
         },
         "fp": {
           "type": "object",
-          "description": "Floating-point provenance after a run: per VGPR, one FpTag per lane (two hex digits each); stored floating-point units [address, size, format].",
+          "description": "Floating-point provenance after a run: per VGPR, one FpTag per lane (two hex digits each); per tagged scalar location, its FpTag; stored floating-point units [address, size, format].",
           "properties": {
+            "scalars": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 255
+              }
+            },
             "vgprs": {
               "type": "object",
               "additionalProperties": {

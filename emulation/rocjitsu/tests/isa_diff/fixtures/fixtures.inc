@@ -508,6 +508,23 @@ inline const std::vector<uint32_t> k_valuclobber_old = {0x7e060302, 0xdc708000, 
 // s_endpgm
 inline const std::vector<uint32_t> k_valuclobber_new = {0xbe8a017e, 0xbefe01c1, 0x7e060302, 0xbefe010a, 0xdc708000, 0x00000304, 0xbf810000};
 
+// v_mov_b32_e32 v3, v2
+// global_store_dword v4, v3, s[0:1]
+// s_mov_b64 exec, -1
+// global_store_dword v4, v3, s[2:3]
+// s_endpgm
+inline const std::vector<uint32_t> k_valuclobberlater_old = {0x7e060302, 0xdc708000, 0x00000304, 0xbefe01c1, 0xdc708000, 0x00020304, 0xbf810000};
+
+// s_mov_b64 s[10:11], exec
+// s_mov_b64 exec, -1
+// v_mov_b32_e32 v3, v2
+// s_mov_b64 exec, s[10:11]
+// global_store_dword v4, v3, s[0:1]
+// s_mov_b64 exec, -1
+// global_store_dword v4, v3, s[2:3]
+// s_endpgm
+inline const std::vector<uint32_t> k_valuclobberlater_new = {0xbe8a017e, 0xbefe01c1, 0x7e060302, 0xbefe010a, 0xdc708000, 0x00000304, 0xbefe01c1, 0xdc708000, 0x00020304, 0xbf810000};
+
 // v_add_u32_e32 v5, v0, v1
 // v_mov_b32_e32 v3, v5
 // global_store_dword v4, v3, s[0:1]

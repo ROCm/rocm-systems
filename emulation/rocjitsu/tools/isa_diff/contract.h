@@ -20,6 +20,7 @@
 
 #include "json.h"
 #include "location.h"
+#include "target.h"
 
 #include <array>
 #include <cstdint>
@@ -45,6 +46,16 @@ struct Constraint {
   std::string source = "user_assumption";
 };
 
+/// One way out of a region with control flow: the exit each side takes (0: falling off the
+/// end of the region, else the PC a branch leaves to) and what is compared there.
+struct RegionExit {
+  uint64_t old_pc = 0, new_pc = 0;
+  LocSet observable; ///< Live at the exit target (either side).
+  VSet vobservable;  ///< VGPRs live there.
+  VSet vactive_only; ///< Compared on active lanes only (see RegionContract::vactive_only).
+  bool operator==(const RegionExit &) const = default;
+};
+
 struct Assumption {
   std::string what;
   std::string source;
@@ -53,6 +64,12 @@ struct Assumption {
 struct RegionContract {
   std::string target = "gfx950";
   std::string wave = "wave64";
+  /// The GPU target and wave size these name (nullopt for an unsupported pair).
+  [[nodiscard]] std::optional<Target> gpu() const;
+  void set_gpu(const Target &t) {
+    target = t.name;
+    wave = "wave" + std::to_string(t.wave_size);
+  }
   std::string arithmetic = "default";
   std::string mapping = "identity_at_common_cutpoint";
   LocSet entry_equal;
@@ -76,7 +93,19 @@ struct RegionContract {
   /// VGPRs observable only through a return value narrower than the register: just these
   /// bits are compared (e.g. 0x0000ffff for a half returned in v0).
   std::vector<std::pair<unsigned, uint32_t>> vexit_masks;
+  /// Regions with branches: one entry per exit pair (empty: one fallthrough exit, whose
+  /// R_out is observable/vobservable/vactive_only). observable/vobservable then hold the
+  /// union over the exits.
+  std::vector<RegionExit> exits;
+  /// EXEC at the entry is not zero (its wave-sized mask): it is still the dispatch or call
+  /// EXEC, and a wave runs with at least one active lane. Inputs with EXEC 0 are invalid.
+  bool exec_nonzero = false;
+  /// Observable VGPRs compared on the lanes active in EXEC at the exit only: EXEC never
+  /// changes after the exit and nothing reads an inactive lane again (both sides), and the
+  /// callee need not preserve them (not callee-saved).
+  VSet vactive_only;
   VSet vwrites_old, vwrites_new; ///< Effect model for VGPRs.
+  VSet vrange;                   ///< v0..v{vgpr_count-1} (planner only; not serialised).
   VSet vwide_reads;              ///< First register of 64-bit VGPR sources.
   /// MODE at the region entry on each side (FP rounding/denormals, DX10_CLAMP, IEEE),
   /// from each kernel's descriptor. VALU float results depend on it.

@@ -27,8 +27,6 @@
 namespace rocjitsu::isa_diff {
 namespace {
 
-constexpr uint32_t kSgprsPerWave = 104;
-
 bool f32_nan(uint32_t v) { return (v & 0x7f800000u) == 0x7f800000u && (v & 0x7fffffu); }
 bool f32_inf(uint32_t v) { return (v & 0x7fffffffu) == 0x7f800000u; }
 bool f16_nan(uint32_t h) { return (h & 0x7c00u) == 0x7c00u && (h & 0x3ffu); }
@@ -54,7 +52,6 @@ std::string hex_value(uint64_t v) {
 }
 constexpr uint32_t kVgprFile = 256;   ///< Per-wave VGPR file the CU is configured with.
 constexpr uint32_t kMinVgprAlloc = 8; ///< Allocation for a region with no VGPR operand.
-constexpr uint32_t kWaveSize = 64;
 
 std::array<uint8_t, 9> pack_counters(const amdgpu::WaitCounters &c) {
   return {c.vmcnt, c.lgkmcnt,   c.expcnt,   c.vscnt,    c.dscnt,
@@ -324,6 +321,8 @@ const char *run_status_name(RunStatus s) {
     return "PC_WRITTEN";
   case RunStatus::WaveStateChanged:
     return "WAVE_STATE_CHANGED";
+  case RunStatus::StepLimit:
+    return "STEP_LIMIT";
   case RunStatus::BudgetExceeded:
     return "BUDGET_EXCEEDED";
   }
@@ -341,8 +340,10 @@ RegionRunner::~RegionRunner() {
 
 std::unique_ptr<RegionRunner> RegionRunner::create(const std::vector<RegionInst> &insts,
                                                    const std::string &label, std::string &error,
-                                                   unsigned vgpr_count) {
+                                                   unsigned vgpr_count, const Target &target) {
   std::unique_ptr<RegionRunner> r(new RegionRunner());
+  r->target_ = target;
+  r->lane_mask_ = target.wave32() ? uint64_t{0xffffffffu} : ~uint64_t{0};
   if (vgpr_count > kVgprFile) {
     error = "region needs more than 256 VGPRs";
     return nullptr;
@@ -359,9 +360,9 @@ std::unique_ptr<RegionRunner> RegionRunner::create(const std::vector<RegionInst>
   r->l2_ = std::make_unique<amdgpu::L2Cache>(label + "_l2");
   r->l2_->set_backing_memory(r->memory_.get()); // global accesses reach this memory
   amdgpu::ComputeUnitCore::Config config{};
-  config.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  config.arch = target.arch;
   config.num_wf_slots = 1;
-  config.sgprs_per_wf = kSgprsPerWave;
+  config.sgprs_per_wf = target.wave_sgprs();
   config.vgprs_per_wf = kVgprFile;
   config.lds_size_kb = 64;
   // Waits are modelled by the region planner (pending effects); a region replays the same
@@ -371,7 +372,7 @@ std::unique_ptr<RegionRunner> RegionRunner::create(const std::vector<RegionInst>
   r->cu_ = amdgpu::ComputeUnitCore::create(label, config, r->memory_.get(), r->l2_.get(),
                                            simdojo::ExecMode::FUNCTIONAL, diag.emitter());
   if (!r->cu_) {
-    error = "cannot create a gfx950 compute unit: " + diag.message();
+    error = "cannot create a " + target.name + " compute unit: " + diag.message();
     return nullptr;
   }
   const uint64_t entry = insts.empty() ? 0 : insts.front().pc;
@@ -398,18 +399,21 @@ std::unique_ptr<RegionRunner> RegionRunner::create(const std::vector<RegionInst>
   }
   r->entry_pc_ = entry;
   r->vgpr_alloc_ = vgpr_count ? vgpr_count : kMinVgprAlloc;
-  r->wave_ = r->cu_->dispatch_wf(0, entry, kSgprsPerWave, r->vgpr_alloc_, kWaveSize);
+  r->wave_ = r->cu_->dispatch_wf(0, entry, target.wave_sgprs(), r->vgpr_alloc_, target.wave_size);
   if (!r->wave_) {
-    error = "cannot dispatch a wave64";
+    error = "cannot dispatch a " + target.label() + " wave";
     return nullptr;
   }
-  r->decoder_ = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  r->decoder_ = Decoder::create(target.arch);
   if (!r->decoder_) {
-    error = "no gfx950 decoder";
+    error = "no " + target.name + " decoder";
     return nullptr;
   }
   r->asm_.assign(insts.size(), std::nullopt);
   r->asm_block_.assign(insts.size(), 0);
+  r->branch_.assign(insts.size(), false);
+  for (size_t i = 0; i < insts.size(); ++i)
+    r->pc_index_.emplace(insts[i].pc, i);
   for (size_t i = 0; i < insts.size(); ++i) {
     const RegionInst &ri = insts[i];
     r->pcs_.push_back(ri.pc);
@@ -452,8 +456,15 @@ std::unique_ptr<RegionRunner> RegionRunner::create(const std::vector<RegionInst>
       continue;
     const std::string mn(inst->mnemonic());
     r->mnemonics_[i] = mn;
-    const Effects fx = classify(*inst);
-    const std::vector<SourceOperand> so = source_operands(*inst);
+    const Effects fx = classify(*inst, target);
+    if (fx.branch) {
+      r->branch_[i] = true;
+      // SOPP simm16 (bits 15:0): the target is PC + 4 + 4 * simm16; a negative offset goes
+      // back (at or before the branch), so the region may loop.
+      if (static_cast<int16_t>(insts[i].words[0] & 0xffffu) < 0)
+        r->back_edge_ = true;
+    }
+    const std::vector<SourceOperand> so = source_operands(*inst, target);
     for (const SourceOperand &o : so) {
       if (o.fieldless)
         continue;
@@ -486,9 +497,12 @@ std::unique_ptr<RegionRunner> RegionRunner::create(const std::vector<RegionInst>
       if (fx.vwrites.test(v))
         plan.dsts.push_back(v);
     if (plan.kind == FpResult::CndMask) {
-      // The lane-select mask: VCC (fieldless, VOP2) or the last SGPR-pair source (VOP3).
+      // The lane-select mask: VCC (fieldless, VOP2) or the last wave-mask source (VOP3): an
+      // SGPR pair on wave64, one SGPR on wave32 (where a scalar data source is one SGPR too,
+      // so the last one wins).
+      const size_t mask_regs = target.wave32() ? 1 : 2;
       for (const SourceOperand &o : so)
-        if (o.locs.count() == 2 && o.vlocs.none() && !o.constant)
+        if (o.locs.count() == mask_regs && o.vlocs.none() && !o.constant)
           for (unsigned l = 0; l < kNumLocs; ++l)
             if (o.locs.test(l)) {
               plan.mask_loc = static_cast<int>(l);
@@ -506,6 +520,10 @@ std::unique_ptr<RegionRunner> RegionRunner::create(const std::vector<RegionInst>
       }
     }
     plan.store = r->is_mem_[i] && fx.mem_write;
+    plan.skind = fp_scalar_result_kind(mn);
+    for (unsigned l = 0; l < kNumLocs; ++l)
+      if (fx.writes.test(l) && l != kLocScc)
+        plan.sdsts.push_back(l);
     plan.store_hi16 = mn.find("_d16_hi") != std::string::npos;
     uint32_t pk = poison_check_kind(mn);
     if (insts[i].text.find("clamp") != std::string::npos)
@@ -534,8 +552,8 @@ std::unique_ptr<RegionRunner> RegionRunner::create(const std::vector<RegionInst>
       }
       if (!inst)
         break;
-      const Effects fx = classify(*inst);
-      const std::vector<SourceOperand> src = source_operands(*inst);
+      const Effects fx = classify(*inst, target);
+      const std::vector<SourceOperand> src = source_operands(*inst, target);
       std::vector<unsigned> writes;
       for (unsigned l = 0; l < kNumSgprs; ++l)
         if (fx.writes.test(l))
@@ -598,15 +616,17 @@ void RegionRunner::simulate_model_only_for_test(size_t index) {
 
 void RegionRunner::load(const MachineState &s) {
   if (wave_->state() != amdgpu::WfState::RUNNING) // a memory fault halted it: re-dispatch
-    wave_ = cu_->dispatch_wf(0, entry_pc_, kSgprsPerWave, vgpr_alloc_, kWaveSize);
+    wave_ = cu_->dispatch_wf(0, entry_pc_, target_.wave_sgprs(), vgpr_alloc_, target_.wave_size);
   if (has_memory_)
     image_->begin(s.mem_seed, s.mem_init);
   amdgpu::Wavefront &wf = *wave_;
   const uint32_t base = wf.sgpr_alloc().base;
-  for (unsigned i = 0; i < kNumSgprs; ++i)
+  for (unsigned i = 0; i < target_.sgprs(); ++i)
     cu_->write_sgpr(base + i, s.loc[i]);
-  cu_->write_sgpr(base + 102, s.frame.s102);
-  cu_->write_sgpr(base + 103, s.frame.s103);
+  if (target_.major == 9) { // the two allocated SGPRs above s101
+    cu_->write_sgpr(base + 102, s.frame.s102);
+    cu_->write_sgpr(base + 103, s.frame.s103);
+  }
   wf.set_vcc_raw(uint64_t{s.loc[kLocVccLo]} | (uint64_t{s.loc[kLocVccHi]} << 32));
   wf.set_exec_raw(uint64_t{s.loc[kLocExecLo]} | (uint64_t{s.loc[kLocExecHi]} << 32));
   wf.set_m0(s.loc[kLocM0]);
@@ -628,13 +648,14 @@ void RegionRunner::load(const MachineState &s) {
   }
   const uint32_t vbase = wf.vgpr_alloc().base;
   for (unsigned r = 0; r < vgpr_count_ && r < s.vgpr_count; ++r)
-    for (unsigned lane = 0; lane < kWaveLanes; ++lane)
+    for (unsigned lane = 0; lane < target_.wave_size; ++lane)
       cu_->write_vgpr(vbase + r, lane, s.vget(r, lane));
   wf.begin_instruction_execution();
   wf.pc = pcs_.empty() ? 0 : pcs_.front();
   asm_seed_ = s.asm_seed;
   asm_uses_.clear();
   vfp_.assign(size_t{vgpr_count_} * kWaveLanes, 0); // inputs carry no provenance
+  sfp_.fill(0);
   poison_hit_.clear();
   nan_produced_ = false;
 }
@@ -643,10 +664,12 @@ MachineState RegionRunner::capture() const {
   const amdgpu::Wavefront &wf = *wave_;
   MachineState s;
   const uint32_t base = wf.sgpr_alloc().base;
-  for (unsigned i = 0; i < kNumSgprs; ++i)
+  for (unsigned i = 0; i < target_.sgprs(); ++i)
     s.loc[i] = cu_->read_sgpr_storage(base + i);
-  s.frame.s102 = cu_->read_sgpr_storage(base + 102);
-  s.frame.s103 = cu_->read_sgpr_storage(base + 103);
+  if (target_.major == 9) {
+    s.frame.s102 = cu_->read_sgpr_storage(base + 102);
+    s.frame.s103 = cu_->read_sgpr_storage(base + 103);
+  }
   const uint64_t vcc = wf.vcc();
   const uint64_t exec = wf.exec_raw();
   s.loc[kLocVccLo] = static_cast<uint32_t>(vcc);
@@ -668,7 +691,7 @@ MachineState RegionRunner::capture() const {
   s.resize_vgprs(vgpr_count_);
   const uint32_t vbase = wf.vgpr_alloc().base;
   for (unsigned r = 0; r < vgpr_count_; ++r)
-    for (unsigned lane = 0; lane < kWaveLanes; ++lane)
+    for (unsigned lane = 0; lane < target_.wave_size; ++lane)
       s.vset(r, lane, cu_->read_vgpr_storage(vbase + r, lane));
   if (mem_) {
     cu_->flush_all(); // stores may still sit in the write-back L2
@@ -678,17 +701,22 @@ MachineState RegionRunner::capture() const {
   }
   s.asm_seed = asm_seed_;
   s.asm_uses = asm_uses_;
+  s.exit_pc = exit_pc_;
   if (std::ranges::any_of(vfp_, [](uint8_t t) { return t != 0; }))
     s.vfp = vfp_;
+  if (std::ranges::any_of(sfp_, [](uint8_t t) { return t != 0; }))
+    s.sfp.assign(sfp_.begin(), sfp_.end());
   if (mem_)
     s.mem_fp = mem_->fp_units();
   return s;
 }
 
+uint64_t RegionRunner::exec_lanes() const { return wave_->exec_raw() & lane_mask_; }
+
 uint32_t RegionRunner::read_loc(unsigned l) const {
   const amdgpu::Wavefront &wf = *wave_;
-  if (l < kNumSgprs)
-    return cu_->read_sgpr_storage(wf.sgpr_alloc().base + l);
+  if (l < kNumSgprs) // s102-s105 do not exist on GFX9
+    return l < target_.sgprs() ? cu_->read_sgpr_storage(wf.sgpr_alloc().base + l) : 0u;
   switch (l) {
   case kLocVccLo:
     return static_cast<uint32_t>(wf.vcc());
@@ -738,14 +766,18 @@ void RegionRunner::plan_tags(size_t i, std::vector<std::array<uint8_t, kWaveLane
   out.resize(p.dsts.size());
   const auto &src = srcs_[i];
   auto src_tag = [&](size_t s, unsigned k, unsigned lane) -> uint8_t {
-    if (s >= src.size() || src[s].kind != OperandRef::Vgpr || src[s].reg + k >= vgpr_count_)
+    if (s >= src.size())
+      return 0;
+    if (src[s].kind == OperandRef::Scalar) // an SGPR source: the same value in every lane
+      return src[s].reg + k < kNumLocs ? sfp_[src[s].reg + k] : 0;
+    if (src[s].kind != OperandRef::Vgpr || src[s].reg + k >= vgpr_count_)
       return 0;
     return vfp_[size_t{src[s].reg + k} * kWaveLanes + lane];
   };
   uint64_t mask = 0;
   if (p.kind == FpResult::CndMask)
     mask = uint64_t{read_loc(static_cast<unsigned>(p.mask_loc))} |
-           (uint64_t{read_loc(static_cast<unsigned>(p.mask_loc) + 1)} << 32);
+           (target_.wave32() ? 0 : uint64_t{read_loc(static_cast<unsigned>(p.mask_loc) + 1)} << 32);
   for (size_t k = 0; k < p.dsts.size(); ++k) {
     const unsigned d = p.dsts[k];
     for (unsigned lane = 0; lane < kWaveLanes; ++lane) {
@@ -787,9 +819,104 @@ void RegionRunner::plan_tags(size_t i, std::vector<std::array<uint8_t, kWaveLane
       case FpResult::PkMov:
         t = k == 0 ? src_tag(0, p.op_sel_lo, lane) : src_tag(1, p.op_sel_hi, lane);
         break;
+      case FpResult::Select:
+      case FpResult::CMov:
+      case FpResult::ReadFirstLane:
+      case FpResult::ReadLane:
+        break; // scalar-result kinds (plan_stags)
       }
       out[k][lane] = t;
     }
+  }
+}
+
+std::vector<uint8_t> RegionRunner::plan_stags(size_t i) const {
+  const FpPlan &p = fp_plan_[i];
+  std::vector<uint8_t> out(p.sdsts.size(), 0);
+  if (p.sdsts.empty() || p.skind == FpResult::None)
+    return out;
+  const auto &src = srcs_[i];
+  auto stag = [&](size_t s, unsigned k) -> uint8_t {
+    if (s >= src.size() || src[s].kind != OperandRef::Scalar || src[s].reg + k >= kNumLocs)
+      return 0;
+    return sfp_[src[s].reg + k];
+  };
+  auto lane_tag = [&](unsigned lane) -> uint8_t {
+    if (src.empty() || src[0].kind != OperandRef::Vgpr || src[0].reg >= vgpr_count_)
+      return 0;
+    return vfp_[size_t{src[0].reg} * kWaveLanes + (lane % kWaveLanes)];
+  };
+  const bool scc = read_loc(kLocScc) & 1u;
+  for (size_t k = 0; k < p.sdsts.size(); ++k) {
+    const auto kk = static_cast<unsigned>(k);
+    switch (p.skind) {
+    case FpResult::F32:
+      out[k] = kFpF32;
+      break;
+    case FpResult::F16Lo:
+      out[k] = kFpF16Lo;
+      break;
+    case FpResult::F16x2:
+      out[k] = kFpF16Lo | kFpF16Hi;
+      break;
+    case FpResult::Move:
+      out[k] = stag(0, kk);
+      break;
+    case FpResult::Select:
+      out[k] = scc ? stag(0, kk) : stag(1, kk);
+      break;
+    case FpResult::CMov:
+      out[k] = scc ? stag(0, kk) : sfp_[p.sdsts[k]];
+      break;
+    case FpResult::ReadFirstLane: {
+      const uint64_t exec = exec_lanes();
+      out[k] = lane_tag(exec ? static_cast<unsigned>(std::countr_zero(exec)) : 0u);
+      break;
+    }
+    case FpResult::ReadLane: {
+      const auto lane = src.size() > 1 ? operand_value(src[1], 0, false) : std::nullopt;
+      out[k] = lane ? lane_tag(static_cast<unsigned>(*lane) % target_.wave_size) : 0;
+      break;
+    }
+    default:
+      break;
+    }
+  }
+  return out;
+}
+
+void RegionRunner::apply_stags(size_t i, const std::vector<uint8_t> &tags) {
+  const FpPlan &p = fp_plan_[i];
+  for (size_t k = 0; k < p.sdsts.size() && k < tags.size(); ++k)
+    sfp_[p.sdsts[k]] = tags[k];
+}
+
+void RegionRunner::write_loc(unsigned l, uint32_t v) {
+  amdgpu::Wavefront &wf = *wave_;
+  if (l < kNumSgprs) {
+    if (l < target_.sgprs())
+      cu_->write_sgpr(wf.sgpr_alloc().base + l, v);
+    return;
+  }
+  switch (l) {
+  case kLocVccLo:
+    wf.set_vcc_raw((wf.vcc() & ~uint64_t{0xffffffffu}) | v);
+    break;
+  case kLocVccHi:
+    wf.set_vcc_raw((wf.vcc() & uint64_t{0xffffffffu}) | (uint64_t{v} << 32));
+    break;
+  case kLocExecLo:
+    wf.set_exec_raw((wf.exec_raw() & ~uint64_t{0xffffffffu}) | v);
+    break;
+  case kLocExecHi:
+    wf.set_exec_raw((wf.exec_raw() & uint64_t{0xffffffffu}) | (uint64_t{v} << 32));
+    break;
+  case kLocM0:
+    wf.set_m0(v);
+    break;
+  default:
+    wf.set_status_raw((wf.status_raw() & ~1u) | (v & 1u)); // SCC
+    break;
   }
 }
 
@@ -816,7 +943,7 @@ std::string RegionRunner::poison_before(size_t i) const {
       b = b.substr(0, b.size() - suffix.size());
   const auto &src = srcs_[i];
   const bool scalar = b.substr(0, 2) == "s_";
-  const uint64_t exec = scalar ? 1u : wave_->exec_raw();
+  const uint64_t exec = scalar ? 1u : exec_lanes();
   const bool b64 = b.find("b64") != b.npos || b.find("i64") != b.npos || b.find("_f64") != b.npos;
   const unsigned width = b64 ? 64 : (b.find("b16") != b.npos || b.find("i16") != b.npos) ? 16 : 32;
   auto hit = [&](const char *kind, const std::string &what, unsigned lane) {
@@ -957,11 +1084,48 @@ std::string RegionRunner::poison_before(size_t i) const {
 
 void RegionRunner::choose_nans(size_t i, uint64_t exec) {
   const FpPlan &p = fp_plan_[i];
+  if (p.skind == FpResult::F32 || p.skind == FpResult::F16Lo || p.skind == FpResult::F16x2) {
+    for (unsigned l : p.sdsts) {
+      const uint32_t w = read_loc(l);
+      const uint64_t r = splitmix64(nan_seed_ ^ (uint64_t{i} << 20) ^ (uint64_t{l} << 8) ^ 0xffu);
+      uint32_t out = w;
+      bool any = false;
+      if (p.skind == FpResult::F32) {
+        if (is_nan_f32(w)) {
+          any = true;
+          out = nan_choice_ == 1   ? 0x7fc00000u
+                : nan_choice_ == 2 ? 0xffffffffu
+                                   : static_cast<uint32_t>((r & 0x803fffffu) | 0x7fc00000u);
+        }
+      } else {
+        for (unsigned h = 0; h < (p.skind == FpResult::F16x2 ? 2u : 1u); ++h) {
+          const uint32_t half = (w >> (16 * h)) & 0xffffu;
+          if (!is_nan_f16(half))
+            continue;
+          any = true;
+          const uint32_t n = nan_choice_ == 1 ? 0x7e00u
+                             : nan_choice_ == 2
+                                 ? 0xffffu
+                                 : static_cast<uint32_t>(((r >> (16 * h)) & 0x81ffu) | 0x7e00u);
+          out = (out & ~(0xffffu << (16 * h))) | (n << (16 * h));
+        }
+      }
+      if (!any)
+        continue;
+      nan_produced_ = true;
+      if (nan_choice_)
+        write_loc(l, out);
+    }
+  }
   switch (p.kind) {
   case FpResult::None:
   case FpResult::Move:
   case FpResult::CndMask:
   case FpResult::PkMov:
+  case FpResult::Select:
+  case FpResult::CMov:
+  case FpResult::ReadFirstLane:
+  case FpResult::ReadLane:
     return; // not a floating-point operation: NaN bits pass through unchanged
   default:
     break;
@@ -1033,6 +1197,20 @@ std::string RegionRunner::poison_after(size_t i, uint64_t exec) const {
   if (!kinds)
     return {};
   const FpPlan &p = fp_plan_[i];
+  if (p.skind == FpResult::F32 || p.skind == FpResult::F16Lo || p.skind == FpResult::F16x2)
+    for (unsigned l : p.sdsts) {
+      const uint32_t w = read_loc(l);
+      const bool f32 = p.skind == FpResult::F32;
+      const bool nan =
+          f32 ? f32_nan(w)
+              : f16_nan(w & 0xffffu) || (p.skind == FpResult::F16x2 && f16_nan(w >> 16));
+      const bool inf =
+          f32 ? f32_inf(w)
+              : f16_inf(w & 0xffffu) || (p.skind == FpResult::F16x2 && f16_inf(w >> 16));
+      if ((nan && (kinds & kPoisonNnan)) || (inf && (kinds & kPoisonNinf)))
+        return std::string(nan ? "nnan" : "ninf") + ": a " + (nan ? "NaN" : "infinite") +
+               " result at '" + texts_[i] + "'";
+    }
   for (unsigned d : p.dsts) {
     if (d >= vgpr_count_)
       continue;
@@ -1086,7 +1264,6 @@ RunOutcome RegionRunner::run_inline_asm(size_t i) {
   const InlineAsmEffect &e = *asm_[i];
   const uint32_t block = asm_block_[i];
   amdgpu::Wavefront &wf = *wave_;
-  const uint32_t sbase = wf.sgpr_alloc().base;
   const uint32_t vbase = wf.vgpr_alloc().base;
   if (e.opaque || e.untracked) {
     out.status = RunStatus::UnsupportedOperand;
@@ -1102,41 +1279,15 @@ RunOutcome RegionRunner::run_inline_asm(size_t i) {
         out.detail = "inline asm names v" + std::to_string(s.index) + " beyond the tracked VGPRs";
         return out;
       }
-  auto write_loc = [&](unsigned l, uint32_t v) {
-    if (l < kNumSgprs) {
-      cu_->write_sgpr(sbase + l, v);
-      return;
-    }
-    switch (l) {
-    case kLocVccLo:
-      wf.set_vcc_raw((wf.vcc() & ~uint64_t{0xffffffffu}) | v);
-      break;
-    case kLocVccHi:
-      wf.set_vcc_raw((wf.vcc() & uint64_t{0xffffffffu}) | (uint64_t{v} << 32));
-      break;
-    case kLocExecLo:
-      wf.set_exec_raw((wf.exec_raw() & ~uint64_t{0xffffffffu}) | v);
-      break;
-    case kLocExecHi:
-      wf.set_exec_raw((wf.exec_raw() & uint64_t{0xffffffffu}) | (uint64_t{v} << 32));
-      break;
-    case kLocM0:
-      wf.set_m0(v);
-      break;
-    default:
-      wf.set_status_raw((wf.status_raw() & ~1u) | (v & 1u));
-      break;
-    }
-  };
   if (!e.uses.empty()) {
     AsmUse u;
     u.block = block;
-    const uint64_t exec = wf.exec_raw();
+    const uint64_t exec = exec_lanes();
     bool vector = false;
     for (const AsmSlot &s : e.uses) {
       if (!s.vgpr) {
         u.values.push_back(read_loc(s.index));
-        u.fp.push_back(0);
+        u.fp.push_back(s.index < kNumLocs ? sfp_[s.index] : 0);
         continue;
       }
       vector = true;
@@ -1160,7 +1311,7 @@ RunOutcome RegionRunner::run_inline_asm(size_t i) {
     if (s.vgpr) {
       // Per-thread semantics: the lanes in EXEC get the value, the others keep theirs (as
       // for a VALU def; LLVM may keep another thread's value in an inactive lane).
-      const uint64_t exec = wf.exec_raw();
+      const uint64_t exec = exec_lanes();
       for (unsigned lane = 0; lane < kWaveLanes; ++lane)
         if ((exec >> lane) & 1u) {
           cu_->write_vgpr(vbase + s.index, lane, inline_asm_word(asm_seed_, block, slot, lane));
@@ -1175,6 +1326,8 @@ RunOutcome RegionRunner::run_inline_asm(size_t i) {
       else if (j < 32 && ((pointer_hi_[i] >> j) & 1u))
         v = 0x10u + static_cast<uint32_t>((h >> 32) % 0x70u);
       write_loc(s.index, v & loc_value_mask(s.index));
+      if (s.index < kNumLocs)
+        sfp_[s.index] = 0; // an opaque value
     }
   }
   return out;
@@ -1186,9 +1339,19 @@ RunOutcome RegionRunner::run(size_t budget, std::vector<TraceStep> *trace) {
   MachineState prev;
   if (trace)
     prev = capture();
-  for (size_t i = 0; i < insts_.size(); ++i) {
-    if (out.executed >= budget) {
-      out.status = RunStatus::BudgetExceeded;
+  // Without a backward branch every instruction runs at most once; a loop gets a step
+  // limit, past which the case is excluded.
+  constexpr size_t kLoopStepFactor = 64, kMaxLoopSteps = 1u << 16;
+  const size_t limit = back_edge_ ? std::min(std::max<size_t>(budget, 1) * kLoopStepFactor,
+                                             std::max<size_t>(budget, kMaxLoopSteps))
+                                  : budget;
+  exit_pc_ = 0;
+  bool left = false;
+  size_t next = 0;
+  for (size_t i = 0; i < insts_.size() && !left; i = next) {
+    next = i + 1;
+    if (out.executed >= limit) {
+      out.status = back_edge_ ? RunStatus::StepLimit : RunStatus::BudgetExceeded;
       out.failed_index = i;
       return out;
     }
@@ -1222,8 +1385,9 @@ RunOutcome RegionRunner::run(size_t budget, std::vector<TraceStep> *trace) {
       continue;
     }
     Instruction *inst = insts_[i].get();
-    const uint64_t exec_before = wf.exec_raw();
+    const uint64_t exec_before = exec_lanes();
     plan_tags(i, scratch_tags_);
+    scratch_stags_ = plan_stags(i);
     if (is_mem_[i] && inst && inst->execute && !model_only_[i]) {
       // The full issue path: fetch at the PC, execute, route, complete (functional).
       wf.pc = pcs_[i];
@@ -1310,6 +1474,7 @@ RunOutcome RegionRunner::run(size_t budget, std::vector<TraceStep> *trace) {
         return out;
       }
       apply_tags(i, exec_before, scratch_tags_); // load destinations: no provenance
+      apply_stags(i, scratch_stags_);
       if (trace) {
         MachineState now = capture();
         TraceStep step;
@@ -1364,7 +1529,20 @@ RunOutcome RegionRunner::run(size_t budget, std::vector<TraceStep> *trace) {
       out.detail = "RocJITsu reported ISA undefined behaviour (see isa-undefined log)";
       return out;
     }
-    if (wf.pc != pcs_[i]) {
+    if (branch_[i]) {
+      // Taken: RocJITsu leaves PC at target - size; not taken: unchanged. Either way the
+      // next PC is PC + size. Falling through past the end, or into the region's own
+      // fallthrough PC, is the fallthrough exit (0).
+      const uint64_t to = wf.pc + static_cast<uint64_t>(inst->size());
+      wf.pc = pcs_[i];
+      const uint64_t end_pc = pcs_.back() + (insts_.back() ? insts_.back()->size() : 0);
+      if (auto it = pc_index_.find(to); it != pc_index_.end()) {
+        next = it->second;
+      } else {
+        exit_pc_ = to == end_pc ? 0 : to;
+        left = true;
+      }
+    } else if (wf.pc != pcs_[i]) {
       out.status = RunStatus::PcWritten;
       out.failed_index = i;
       return out;
@@ -1375,6 +1553,7 @@ RunOutcome RegionRunner::run(size_t budget, std::vector<TraceStep> *trace) {
       return out;
     }
     apply_tags(i, exec_before, scratch_tags_);
+    apply_stags(i, scratch_stags_);
     choose_nans(i, exec_before);
     if (poison_filter_ && poison_hit_.empty())
       poison_hit_ = poison_after(i, exec_before);
@@ -1392,6 +1571,7 @@ RunOutcome RegionRunner::run(size_t budget, std::vector<TraceStep> *trace) {
       prev = std::move(now);
     }
   }
+  out.exit_pc = exit_pc_;
   return out;
 }
 

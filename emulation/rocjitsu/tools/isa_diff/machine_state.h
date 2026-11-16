@@ -82,6 +82,11 @@ struct MachineState {
   /// tagged), and the stored byte ranges holding floating-point results (sorted).
   std::vector<uint8_t> vfp;
   std::vector<FpUnit> mem_fp;
+  /// FpTag per scalar location (empty when none is tagged).
+  std::vector<uint8_t> sfp;
+  /// Where the run left the region: 0 when it fell off the end, else the PC a branch
+  /// went to outside the region.
+  uint64_t exit_pc = 0;
 
   [[nodiscard]] uint32_t get(unsigned l) const { return loc[l]; }
   void set(unsigned l, uint32_t v) { loc[l] = v & loc_value_mask(l); }
@@ -89,6 +94,7 @@ struct MachineState {
     return vgpr[size_t{r} * kWaveLanes + lane];
   }
   void vset(unsigned r, unsigned lane, uint32_t v) { vgpr[size_t{r} * kWaveLanes + lane] = v; }
+  [[nodiscard]] uint8_t sfp_tag(unsigned l) const { return l < sfp.size() ? sfp[l] : 0; }
   [[nodiscard]] uint8_t fp_tag(unsigned r, unsigned lane) const {
     const size_t i = size_t{r} * kWaveLanes + lane;
     return i < vfp.size() ? vfp[i] : 0;

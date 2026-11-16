@@ -56,6 +56,8 @@ Json MachineState::to_json() const {
     m.set("written", std::move(w));
     j.set("memory", std::move(m));
   }
+  if (exit_pc)
+    j.set("exit_pc", hex64(exit_pc));
   if (asm_seed != 0 || !asm_uses.empty()) {
     Json a = Json::object();
     a.set("seed", hex64(asm_seed));
@@ -79,8 +81,16 @@ Json MachineState::to_json() const {
     j.set("inline_asm", std::move(a));
   }
   // Floating-point provenance: per tagged VGPR, two hex digits (one FpTag) per lane.
-  if (std::ranges::any_of(vfp, [](uint8_t t) { return t != 0; }) || !mem_fp.empty()) {
+  const bool stagged = std::ranges::any_of(sfp, [](uint8_t t) { return t != 0; });
+  if (std::ranges::any_of(vfp, [](uint8_t t) { return t != 0; }) || !mem_fp.empty() || stagged) {
     Json f = Json::object();
+    if (stagged) {
+      Json sc = Json::object();
+      for (unsigned l = 0; l < kNumLocs; ++l)
+        if (sfp_tag(l))
+          sc.set(loc_name(l), static_cast<uint64_t>(sfp_tag(l)));
+      f.set("scalars", std::move(sc));
+    }
     Json regs = Json::object();
     for (unsigned r = 0; r < vgpr_count; ++r) {
       std::string lanes;
@@ -115,12 +125,15 @@ std::optional<MachineState> MachineState::from_json(const Json &j, std::string &
   const Json &locs = j["locations"];
   for (unsigned l = 0; l < kNumLocs; ++l) {
     auto v = json_u64(locs[loc_name(l)]);
+    if (!v && l >= 102 && l < kNumSgprs)
+      v = 0; // s102-s105: absent from states written for GFX9 before they were tracked
     if (!v) {
       error = "state is missing location " + loc_name(l);
       return std::nullopt;
     }
     s.set(l, static_cast<uint32_t>(*v));
   }
+  s.exit_pc = json_u64(j["exit_pc"]).value_or(0);
   const Json &f = j["frame"];
   auto u32 = [&](const char *key) { return static_cast<uint32_t>(json_u64(f[key]).value_or(0)); };
   s.frame.status_except_scc = u32("status_except_scc");
@@ -204,6 +217,17 @@ std::optional<MachineState> MachineState::from_json(const Json &j, std::string &
   }
   const Json &fp = j["fp"];
   if (fp.is_object()) {
+    if (fp["scalars"].is_object()) {
+      s.sfp.assign(kNumLocs, 0);
+      for (const auto &[name, tag] : fp["scalars"].members()) {
+        const auto l = parse_loc(name);
+        if (!l) {
+          error = "bad floating-point scalar tag for " + name;
+          return std::nullopt;
+        }
+        s.sfp[*l] = static_cast<uint8_t>(tag.as_uint());
+      }
+    }
     s.vfp.assign(size_t{s.vgpr_count} * kWaveLanes, 0);
     for (const auto &[name, lanes] : fp["vgprs"].members()) {
       const unsigned r = static_cast<unsigned>(std::strtoul(name.c_str() + 1, nullptr, 10));

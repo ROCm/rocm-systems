@@ -48,13 +48,14 @@ uint32_t canary_value(uint64_t seed, uint64_t case_index, unsigned loc, bool new
 
 RegionFeatures make_region_features(const std::vector<RegionInst> &old_insts,
                                     const std::vector<RegionInst> &new_insts,
-                                    const std::array<unsigned, kNumLocs> *new_to_old) {
+                                    const std::array<unsigned, kNumLocs> *new_to_old,
+                                    const Target &target) {
   RegionFeatures f;
   for (const auto &i : old_insts)
     f.old_text.push_back(i.text);
   for (const auto &i : new_insts)
     f.new_text.push_back(i.text);
-  f.roles = infer_roles(old_insts, new_insts, new_to_old);
+  f.roles = infer_roles(old_insts, new_insts, new_to_old, target);
   for (unsigned l = 0; l < kNumLocs; ++l) {
     for (const auto &v : role_catalog(f.roles.roles[l]))
       f.role_values[l].push_back(v.value);
@@ -140,7 +141,7 @@ Sample BaselinePolicy::propose(const RegionFeatures &features, const RegionContr
   // cases compare all 64 results (inactive lanes are covered by the other half).
   fill_vgpr_lanes(s, contract.vgpr_count, contract.vwide_reads, seed_, case_index);
   if (contract.vgpr_count && contract.entry_equal.test(kLocExecLo) &&
-      contract.entry_equal.test(kLocExecHi) && pick(2) == 0) {
+      (contract.wave == "wave32" || contract.entry_equal.test(kLocExecHi)) && pick(2) == 0) {
     s.value[kLocExecLo] = s.value[kLocExecHi] = 0xffffffffu;
     s.events.push_back("exec:full");
   }
@@ -211,6 +212,9 @@ void project_onto_constraints(Sample &sample, const RegionContract &contract, ui
 }
 
 std::optional<std::string> validate_sample(const Sample &sample, const RegionContract &contract) {
+  if (contract.exec_nonzero &&
+      (sample.value[kLocExecLo] | (contract.wave == "wave32" ? 0u : sample.value[kLocExecHi])) == 0)
+    return "EXEC is zero (exec_nonzero)";
   for (const Constraint &c : contract.constraints) {
     const uint32_t v = sample.value[c.loc];
     const std::string name = loc_name(c.loc);

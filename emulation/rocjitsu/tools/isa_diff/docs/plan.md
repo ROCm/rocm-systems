@@ -310,8 +310,27 @@ Equivalent compiles that LLVM's semantics allow to differ were false mismatches.
 | I1 NaN choice | the runner replaces every NaN a floating-point instruction produces with an alternative (canonical, all ones, random quiet); when old produced a NaN, its re-runs give the don't-care mask; new re-runs with its own alternatives | `NanBitsThroughIntegerOperationsAreDontCare`, `isa_diff_llvm.pr_driver` (`fadd_bits`) |
 | I2 undefined scalars | `--entry-sgprs` (kernels from the descriptor); SGPRs above it but callee-saved, VCC, M0, SCC undefined; scalar may-written analysis; `undef_old/new`; refills cover them; the driver derives the count from the IR | `UndefinedScalarsAreDontCare`, `isa_diff_llvm.pr_driver` (`sgpr_undef`) |
 
+## Phase J: every RocJITsu target (2026-11-16, eighth goal)
+
+| task | content | tests |
+|---|---|---|
+| J1 target model | `Target` (`target.h`): 29 GPUs of CDNA1-5 and RDNA1-4 with ISA family, generation, default and allowed wave sizes, ELF machine numbers; artifacts from `e_flags` and the descriptor's wave32 bit; decoder, CFG, compute unit, wave dispatch, contracts (`target`/`wave`) and allocation rules per target; `analyze --target/--wave-size/--mattr`; the plugin's `-mcpu`/`-mattr` | `TableNamesEveryRocjitsuTargetWithItsWaveSizes`, `EveryTargetPassesEquivalentCodeAndCatchesABug` |
+| J2 GFX10+ and wave32 | s0-s105; M0/NULL selectors per generation; wave-mask operands narrowed on wave32 (fieldless VCC/EXEC, `is_wave_mask`, implicit defs, VALU EXEC reads); lanes 32-63 kept 0; boundary sweeps over 32 lanes; every generation's SALU names, SALU float, `s_load_b*`, split waits, scheduling hints; pending memory on RocJITsu's wait-counter domains; GFX12 MODE; `s_set_pc_i64` returns; true16 halves; `s_set_vgpr_msb` functions unmodelled; scalar NaN provenance (SALU float, moves, selects, readlane) | `Wave32MasksAreOneSgprAndWave64MasksAPair`, `NanProvenanceFollowsAWave32Select`, `Gfx12SplitWaitsRetireTheirCounters`, `SaluFloatAndModeWithoutIeeeOnGfx12`; validator `w32`, `w32_strict`, `salu`, `salu_strict` |
+| J3 driver | native = the RocJITsu targets; Vega proxied through gfx908; wave size and features from the RUN line; GFX12 function MODE; architected flat scratch on GFX11+; `<N x i8>` return sizes and masks | `isa_diff_llvm.pr_driver` (`w32_fsel`, `i8vec_ret`, `w64_bug`) |
+| J4 precision found by the sweep | hints ignore their operands; VGPR writes kill when EXEC never changes again (`exec_stable_before`), and such exits compare active lanes only (`vgpr_active_lanes_only`); `exec_nonzero` when EXEC is still the entry EXEC | `InactiveLaneClobberIsDetected` (both forms); validator `valu_clobber`, `valu_clobber_ctx` |
+
+## Phase K: control flow in regions (2026-11-16, eighth goal)
+
+| task | content | tests |
+|---|---|---|
+| K1 branches | direct branches are region instructions (`Effects::branch`); the runner follows taken/not-taken edges, records the exit (`exit_pc`), and limits loops (`STEP_LIMIT`, excluded) | `BranchConditionsAreFollowedAndExitsCompared` |
+| K2 multi-exit regions | `region_flow`: one entry, direct branches only; exits paired through the diff; `exits[]` with per-exit R_out; `exit_divergence`; control-flow hunks become candidates | `ChangedBranchTargetIsControlFlow`, `ManualRegionRejectsBadSpecsAndBlockCrossing` |
+| K3 loops | back edges inside a READY region are run by it: composition, known bits and the self-dependency check take the entry state from outside edges | `LoopsRunInsideTheRegionUpToAStepLimit` |
+| K4 undefined branches | old's exit varying under refills excludes the case (branch on undef) | (covered by the refill tests) |
+
 ## Not in P0 (design retained)
-P1 (scalar branches, multi-exit regions, loops, reachability witnesses, SemaAST/SMT proof) and
+P1 (reachability witnesses, SemaAST/SMT proof; branches, multi-exit regions and loops are
+Phase K) and
 the rest of P2 (MFMA, LDS/flat/buffer/scratch/atomic memory, completion-order modelling,
 learned input policies) are designed in `p1_p2_design.md`. VALU (Phase E), global and
 scalar memory (Phase F), and callable functions with inline asm (Phase G) are implemented.

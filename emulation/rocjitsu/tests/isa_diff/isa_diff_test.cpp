@@ -106,10 +106,59 @@ std::vector<std::unique_ptr<Instruction>> decode_all(const std::vector<uint32_t>
 // ---------------------------------------------------------------------------
 // Effect model
 
+TEST(IsaDiffTargets, TableNamesEveryRocjitsuTargetWithItsWaveSizes) {
+  const auto gfx1100 = target_by_name("gfx1100");
+  ASSERT_TRUE(gfx1100);
+  EXPECT_EQ(gfx1100->arch, ROCJITSU_CODE_ARCH_RDNA3);
+  EXPECT_EQ(gfx1100->wave_size, 32u);
+  EXPECT_EQ(gfx1100->major, 11u);
+  EXPECT_EQ(gfx1100->sgprs(), 106u);
+  EXPECT_EQ(gfx1100->m0_selector(), 125);
+  EXPECT_EQ(gfx1100->null_selector(), 124);
+  const auto gfx942 = target_by_elf_mach(0x4c);
+  ASSERT_TRUE(gfx942);
+  EXPECT_EQ(gfx942->name, "gfx942");
+  EXPECT_EQ(gfx942->arch, ROCJITSU_CODE_ARCH_CDNA3);
+  EXPECT_EQ(gfx942->wave_size, 64u);
+  EXPECT_EQ(gfx942->sgprs(), 102u);
+  EXPECT_EQ(gfx942->m0_selector(), 124);
+  EXPECT_EQ(target_by_name("gfx1030")->null_selector(), 125);
+  EXPECT_EQ(target_by_name("gfx908")->arch, ROCJITSU_CODE_ARCH_CDNA1);
+  EXPECT_FALSE(target_by_name("gfx908")->unified_vgprs);
+  EXPECT_TRUE(target_by_name("gfx90a")->unified_vgprs);
+  EXPECT_EQ(target_by_name("gfx1151")->arch, ROCJITSU_CODE_ARCH_RDNA3_5);
+  EXPECT_EQ(target_by_name("gfx1201")->arch, ROCJITSU_CODE_ARCH_RDNA4);
+  EXPECT_EQ(target_by_name("gfx1250")->arch, ROCJITSU_CODE_ARCH_CDNA5);
+  EXPECT_FALSE(target_by_name("gfx1250")->has_ieee_dx10());
+  EXPECT_TRUE(target_by_name("gfx1151")->has_ieee_dx10());
+  // No RocJITsu ISA: Vega, SI/CI/VI, GFX13.
+  for (const char *t : {"gfx900", "gfx906", "gfx803", "gfx600", "gfx1310"})
+    EXPECT_FALSE(target_by_name(t)) << t;
+  EXPECT_FALSE(target_by_elf_mach(0x2c)); // gfx900
+  // Wave sizes: GFX9 is wave64 only, gfx1250 wave32 only, RDNA both.
+  EXPECT_FALSE(with_wave_size(*gfx942, 32));
+  EXPECT_FALSE(with_wave_size(*target_by_name("gfx1250"), 64));
+  EXPECT_EQ(with_wave_size(*gfx1100, 64)->wave_size, 64u);
+  EXPECT_EQ(parse_target("gfx1030:w64")->wave_size, 64u);
+  EXPECT_EQ(parse_target("gfx1030:wave32")->wave_size, 32u);
+  EXPECT_FALSE(parse_target("gfx950:w32"));
+  EXPECT_FALSE(parse_target("gfx1030:w16"));
+  EXPECT_EQ(parse_target("gfx1100:w64")->label(), "gfx1100 wave64");
+  // A contract names its target; unsupported pairs are rejected.
+  RegionContract k;
+  k.set_gpu(*with_wave_size(*gfx1100, 64));
+  EXPECT_EQ(k.target, "gfx1100");
+  EXPECT_EQ(k.wave, "wave64");
+  EXPECT_EQ(k.gpu()->wave_size, 64u);
+  k.wave = "wave32";
+  k.target = "gfx950";
+  EXPECT_FALSE(k.gpu());
+}
+
 TEST(IsaDiffEffects, ClassifiesSaluOperandsPrecisely) {
   auto insts = decode_all(k_effects);
   ASSERT_EQ(insts.size(), 21u);
-  auto fx = [&](size_t i) { return classify(*insts[i]); };
+  auto fx = [&](size_t i) { return classify(*insts[i], Target{}); };
 
   Effects add = fx(0); // s_add_u32 s4, s2, s3
   EXPECT_TRUE(add.p0);
@@ -147,8 +196,9 @@ TEST(IsaDiffEffects, ClassifiesSaluOperandsPrecisely) {
   EXPECT_EQ(fx(9).writes, locs("s6,s7,scc")); // s_lshl_b64
   EXPECT_EQ(fx(9).wide_reads, locs("s4"));
 
-  for (size_t i : {10u, 11u, 12u}) { // s_cbranch_scc0 / execz / vccnz
-    EXPECT_FALSE(fx(i).p0);
+  for (size_t i : {10u, 11u, 12u}) { // s_cbranch_scc0 / execz / vccnz: regions follow them
+    EXPECT_TRUE(fx(i).p0);
+    EXPECT_TRUE(fx(i).branch);
     EXPECT_TRUE(fx(i).control_flow);
     EXPECT_FALSE(fx(i).implicit_special_reads) << i;
   }
@@ -227,7 +277,7 @@ TEST(IsaDiffKernelModel, ImplicitStoreBaseReadsKeepLivenessPrecise) {
   RegisterSet implicit;
   insts[5]->implicit_uses(implicit);
   EXPECT_FALSE(implicit.none()); // the decoder does report hidden uses here
-  const Effects fx = classify(*insts[5]);
+  const Effects fx = classify(*insts[5], Target{});
   EXPECT_FALSE(fx.unknown_effect);
   EXPECT_TRUE(fx.reads.test(6));
   EXPECT_TRUE(fx.reads.test(7));
@@ -270,11 +320,11 @@ TEST(IsaDiffAlign, ChangedBranchTargetIsControlFlow) {
     }
   ASSERT_TRUE(found);
   CaseData d = analyze(k_rename_old, retarget);
-  ASSERT_FALSE(d.unresolved.empty());
-  bool control = false;
-  for (const auto &u : d.unresolved)
-    control |= u.kind == "control_flow";
-  EXPECT_TRUE(control);
+  // The branch is a region of its own; its taken exit now goes elsewhere than old's, which
+  // has no matched partner: a mapping inconclusive, never a pass.
+  ASSERT_FALSE(d.regions.empty());
+  EXPECT_EQ(d.regions[0].status, RegionStatus::Inconclusive);
+  EXPECT_NE(d.regions[0].reason.find("exit"), std::string::npos) << d.regions[0].reason;
   TestRun r = run(d);
   EXPECT_NE(r.overall(), "NO_MISMATCH_FOUND");
 }
@@ -1028,7 +1078,7 @@ TEST(IsaDiffPending, DisjointWaitedAndPartiallyWaitedLoads) {
   auto model = KernelModel::build(artifact_from_words(k_pending_partial_old, "p"), error);
   ASSERT_TRUE(model) << error;
   const PendingState &p = model->pending_before(3); // s_add_u32 s5, s4, 1
-  EXPECT_EQ(p.count[PendingState::kLgkm], 1u);
+  EXPECT_EQ(p.count[PendingState::kDs], 1u);
   EXPECT_EQ(p.all_dests() & locs("s4,s10"), locs("s4,s10"));
   EXPECT_FALSE(model->pending_before(5).any()); // after s_waitcnt lgkmcnt(0)
 }
@@ -1599,10 +1649,20 @@ TEST(IsaDiffValu, WrongShiftIsCaughtOnLanesAndReplays) {
 
 TEST(IsaDiffValu, InactiveLaneClobberIsDetected) {
   // The new side writes v3 with EXEC forced to all lanes: identical results on active
-  // lanes, but lanes outside the original EXEC lose their value.
-  CaseData d = analyze(k_valuclobber_old, k_valuclobber_new);
+  // lanes, but lanes outside the original EXEC lose their value. At a kernel end nothing
+  // reads them again (the store writes active lanes only): not observable.
+  {
+    CaseData end = analyze(k_valuclobber_old, k_valuclobber_new);
+    ASSERT_EQ(end.regions.size(), 1u);
+    EXPECT_TRUE(end.regions[0].contract.vactive_only.test(3));
+    EXPECT_EQ(run(end, 300).results[0].test_status, TestStatus::NoMismatchFound);
+  }
+  // Here EXEC widens after the store and v3 is stored again on every lane: the inactive
+  // lanes are observed, so all lanes are compared.
+  CaseData d = analyze(k_valuclobberlater_old, k_valuclobberlater_new);
   ASSERT_EQ(d.regions.size(), 1u);
   ASSERT_EQ(d.regions[0].status, RegionStatus::Ready) << d.regions[0].reason;
+  EXPECT_FALSE(d.regions[0].contract.vactive_only.test(3));
   TestRun t = run(d, 300);
   ASSERT_EQ(t.results[0].test_status, TestStatus::LocalMismatch);
   const Mismatch &m = t.results[0].examples.at(0);

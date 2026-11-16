@@ -12,6 +12,8 @@
 /// boundaries, literals and PCs are kept verbatim.
 #pragma once
 
+#include "target.h"
+
 #include <cstdint>
 #include <map>
 #include <span>
@@ -41,6 +43,12 @@ inline constexpr std::string_view kInlineAsmSection = ".rj_isa_diff_inline_asm";
 /// MODE at entry of a callable function without other information: LLVM's default
 /// function mode (round to nearest, f32/f16/f64 denormals kept, DX10_CLAMP and IEEE on).
 inline constexpr uint32_t kDefaultFunctionMode = (3u << 4) | (3u << 6) | (1u << 8) | (1u << 9);
+/// MODE bits that exist only before GFX12: DX10_CLAMP, IEEE and DEBUG.
+inline constexpr uint32_t kModeGfx9To11Bits = (1u << 8) | (1u << 9) | (1u << 11);
+/// The default function mode of @p target (GFX12 has no DX10_CLAMP or IEEE bit).
+[[nodiscard]] inline uint32_t default_function_mode(const Target &target) {
+  return target.has_ieee_dx10() ? kDefaultFunctionMode : kDefaultFunctionMode & ~kModeGfx9To11Bits;
+}
 
 /// One relocation that patches bytes of .text (static .rela.text kept by --emit-relocs or
 /// a relocatable object, or a dynamic relocation whose target lies in .text).
@@ -57,7 +65,9 @@ struct Artifact {
   std::string label;  ///< Path or synthetic label.
   std::string kind;   ///< "code_object" or "raw_words".
   std::string sha256; ///< Of the complete input bytes.
-  std::string target = "gfx950";
+  /// The GPU: from the code object's ELF machine number (raw words: gfx950 unless the
+  /// caller says otherwise), with the kernel descriptor's wave size.
+  Target target;
   std::vector<uint8_t> text; ///< Whole .text section (raw words: the stream itself).
   uint64_t text_vaddr = 0;   ///< Address of text[0]; executed PC = text_vaddr + offset.
   uint64_t kernel_begin = 0; ///< Section-relative kernel entry.
@@ -115,13 +125,13 @@ struct Artifact {
                                              const std::string &label, const std::string &kernel,
                                              Artifact &out, std::string &error);
 
-/// @brief Lowercase hex SHA-256 of a byte span.
 /// MODE register at dispatch for this kernel, from its descriptor's compute_pgm_rsrc1
-/// (gfx9 layout: round [3:0], denorm [7:4], DX10_CLAMP 8, IEEE 9, DEBUG 11, FP16_OVFL 23),
+/// (round [3:0], denorm [7:4], DX10_CLAMP 8, IEEE 9, DEBUG 11 before GFX12, FP16_OVFL 23),
 /// as RocJITsu's command processor sets it. Without a descriptor (raw words) the
 /// assembler defaults are used: round-to-nearest, f32 denormals flushed, f16/f64
-/// denormals kept, DX10_CLAMP and IEEE on.
-[[nodiscard]] uint32_t initial_mode(const std::vector<uint8_t> &descriptor);
+/// denormals kept, DX10_CLAMP and IEEE on (before GFX12).
+[[nodiscard]] uint32_t initial_mode(const std::vector<uint8_t> &descriptor,
+                                    const Target &target = {});
 /// MODE at entry: the descriptor's for a kernel, function_mode for a callable function.
 [[nodiscard]] uint32_t initial_mode(const Artifact &artifact);
 

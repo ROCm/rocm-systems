@@ -255,6 +255,10 @@ Json Provenance::to_json() const {
   j.set("input_kind", input_kind);
   j.set("triple", triple);
   j.set("mcpu", mcpu);
+  if (wave_size)
+    j.set("wave_size", static_cast<uint64_t>(wave_size));
+  if (!mattr.empty())
+    j.set("mattr", mattr);
   Json common = Json::array();
   for (const auto &a : common_args)
     common.push(a);
@@ -289,6 +293,22 @@ Json Provenance::to_json() const {
   return j;
 }
 
+namespace {
+
+/// -mattr: the features asked for, then the wave size on a target that has both (GFX10+).
+std::optional<std::string> wave_attr(const Provenance &prov) {
+  std::string attr = prov.mattr;
+  const auto t = target_by_name(prov.mcpu);
+  if (prov.wave_size && t && t->major >= 10)
+    attr +=
+        (attr.empty() ? "" : ",") + std::string("+wavefrontsize") + std::to_string(prov.wave_size);
+  if (attr.empty())
+    return std::nullopt;
+  return attr;
+}
+
+} // namespace
+
 bool assemble(const Toolchain &tc, const std::string &s_path, const std::string &work_prefix,
               const std::string &kernel, Artifact &out, Provenance &prov, std::string &error) {
   auto text = read_text_file(s_path);
@@ -320,10 +340,11 @@ bool assemble(const Toolchain &tc, const std::string &s_path, const std::string 
     }
     prov.inline_asm_blocks = marked;
   }
-  if (record(prov,
-             {tc.llvm_mc, "-triple=" + prov.triple, "-mcpu=" + prov.mcpu, "-filetype=obj", "-o",
-              obj, mc_input},
-             "", err) != 0) {
+  std::vector<std::string> mc = {tc.llvm_mc, "-triple=" + prov.triple, "-mcpu=" + prov.mcpu};
+  if (auto attr = wave_attr(prov))
+    mc.push_back("-mattr=" + *attr);
+  mc.insert(mc.end(), {"-filetype=obj", "-o", obj, mc_input});
+  if (record(prov, mc, "", err) != 0) {
     error = "llvm-mc failed on " + s_path + ": " + prov.commands.back().stderr_tail;
     return false;
   }
@@ -351,6 +372,12 @@ bool assemble(const Toolchain &tc, const std::string &s_path, const std::string 
   }
   if (!load_artifact(bin, "", out, error))
     return false;
+  if (auto t = target_by_name(prov.mcpu)) { // raw words carry no target: the one assembled for
+    out.target = *t;
+    if (prov.wave_size)
+      if (auto w = with_wave_size(*t, prov.wave_size))
+        out.target = *w;
+  }
   prov.executed_object = "raw_text";
   if (prov.note.empty())
     prov.note = "raw .text of the re-assembled source (no kernel descriptor)";
@@ -384,6 +411,8 @@ bool compile(const Toolchain &tc, const std::string &ll_path,
   prov.toolchain = tc.to_json();
   const std::string s_path = work_prefix + ".s";
   std::vector<std::string> argv = {tc.llc, "-mtriple=" + prov.triple, "-mcpu=" + prov.mcpu};
+  if (auto attr = wave_attr(prov))
+    argv.push_back("-mattr=" + *attr);
   argv.insert(argv.end(), common_args.begin(), common_args.end());
   argv.insert(argv.end(), side_args.begin(), side_args.end());
   argv.insert(argv.end(), {"-filetype=asm", "-o", s_path, ll_path});

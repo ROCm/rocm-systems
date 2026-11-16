@@ -89,9 +89,11 @@ struct RegionRoles {
 /// @brief Infer roles from both sides' recorded instruction words.
 /// @param new_to_old Optional location translation for the new side (inverse of a contract
 /// register map), so roles, pairs and reads are keyed by the old (sample) naming.
+/// Instructions are decoded and classified for @p target.
 [[nodiscard]] RegionRoles infer_roles(const std::vector<RegionInst> &old_insts,
                                       const std::vector<RegionInst> &new_insts,
-                                      const std::array<unsigned, kNumLocs> *new_to_old = nullptr);
+                                      const std::array<unsigned, kNumLocs> *new_to_old = nullptr,
+                                      const Target &target = {});
 
 /// @brief Human-readable role names, e.g. "shift_amount,arith".
 [[nodiscard]] std::string role_names(uint32_t roles);

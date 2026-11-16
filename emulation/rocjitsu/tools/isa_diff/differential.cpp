@@ -38,6 +38,8 @@ bool is_unsupported_status(RunStatus s) {
          s == RunStatus::IllegalInstruction;
 }
 
+bool is_excluded_status(RunStatus s) { return s == RunStatus::StepLimit; }
+
 bool is_harness_status(RunStatus s) {
   return s == RunStatus::HostException || s == RunStatus::ExecutionError ||
          s == RunStatus::InvalidRegisterAccess || s == RunStatus::BudgetExceeded ||
@@ -122,6 +124,9 @@ uint8_t memory_byte(const MachineState &s, uint64_t x) {
 /// there is a valid refinement.
 struct UndefMask {
   bool any = false;
+  /// Old leaves the region through another exit under some refill or NaN choice: its
+  /// control flow depends on an undefined value (branching on undef is undefined in LLVM).
+  bool exit_varies = false;
   bool from_undef = false; ///< Built from refills of undefined registers.
   bool from_nan = false;   ///< Built from alternative NaN choices.
   std::array<uint32_t, kNumLocs> loc{};
@@ -231,6 +236,24 @@ std::string compare_pair(const RegionPair &region, const MachineState &init_old,
   const UndefMask *undef = cfg.undef && cfg.undef->any ? cfg.undef : nullptr;
   const RegionContract &k = region.contract;
   const auto fwd = k.exit_forward();
+  // Control flow: both sides must leave through corresponding exits; that exit's R_out
+  // is compared.
+  const RegionExit *exit = nullptr;
+  if (!k.exits.empty()) {
+    for (const RegionExit &e : k.exits)
+      if (e.old_pc == final_old.exit_pc)
+        exit = &e;
+    if (!exit || exit->new_pc != final_new.exit_pc) {
+      m.detail = std::string("the sides leave through different exits: old ") +
+                 (final_old.exit_pc ? hex64(final_old.exit_pc) : "end") + ", new " +
+                 (final_new.exit_pc ? hex64(final_new.exit_pc) : "end") +
+                 (exit ? "" : " (old's exit is not declared)");
+      return "exit_divergence";
+    }
+  }
+  const LocSet &observable = exit ? exit->observable : k.observable;
+  const VSet &vobservable = exit ? exit->vobservable : k.vobservable;
+  const VSet &vactive_only = exit ? exit->vactive_only : k.vactive_only;
   // Effect model: execution must not write anything the model did not declare.
   const LocSet extra_old = differing_locs(init_old, final_old) & ~k.declared_writes_old;
   const LocSet extra_new = differing_locs(init_new, final_new) & ~k.declared_writes_new;
@@ -261,13 +284,21 @@ std::string compare_pair(const RegionPair &region, const MachineState &init_old,
   // R_out: equality on the observable set (old naming; the new side is read at map(l)).
   LocSet diff;
   for (unsigned l = 0; l < kNumLocs; ++l) {
-    if (!k.observable.test(l))
+    if (!observable.test(l))
       continue;
     const uint32_t d = final_old.get(l) ^ final_new.get(fwd[l]);
     if (!d)
       continue;
     if (undef && !(d & ~undef->loc[l])) {
       note_mask(*undef, st);
+      continue;
+    }
+    // A NaN that a floating-point operation produced on both sides (SALU float, or one
+    // moved into an SGPR) has unspecified bits.
+    if (!cfg.strict_nan && !(nan_residual(final_old.get(l), final_new.get(fwd[l]),
+                                          final_old.sfp_tag(l), final_new.sfp_tag(fwd[l])) &
+                             (undef ? d & ~undef->loc[l] : d))) {
+      st.nan = true;
       continue;
     }
     diff.set(l);
@@ -277,7 +308,7 @@ std::string compare_pair(const RegionPair &region, const MachineState &init_old,
   std::map<unsigned, uint32_t> exit_mask(k.vexit_masks.begin(), k.vexit_masks.end());
   VSet vdiff;
   unsigned first_r = 0, first_lane = 0, first_count = 0;
-  const VSet vcand = differing_vgprs(final_old, final_new) & k.vobservable;
+  const VSet vcand = differing_vgprs(final_old, final_new) & vobservable;
   const unsigned nv = std::min(final_old.vgpr_count, final_new.vgpr_count);
   for (unsigned r = 0; r < kNumVgprs; ++r) {
     if (!vcand.test(r))
@@ -288,8 +319,16 @@ std::string compare_pair(const RegionPair &region, const MachineState &init_old,
     }
     const auto em = exit_mask.find(r);
     const uint32_t emask = em == exit_mask.end() ? 0xffffffffu : em->second;
+    // Lanes inactive at an exit after which EXEC never changes are not observable.
+    const uint64_t active = vactive_only.test(r) ? (uint64_t{final_old.get(kLocExecLo)} |
+                                                    uint64_t{final_old.get(kLocExecHi)} << 32 |
+                                                    uint64_t{final_new.get(fwd[kLocExecLo])} |
+                                                    uint64_t{final_new.get(fwd[kLocExecHi])} << 32)
+                                                 : ~uint64_t{0};
     unsigned lanes = 0, lane0 = 0;
     for (unsigned lane = 0; lane < kWaveLanes; ++lane) {
+      if (!((active >> lane) & 1u))
+        continue;
       const uint32_t a = final_old.vget(r, lane), b = final_new.vget(r, lane);
       uint32_t d = (a ^ b) & emask;
       if (!d)
@@ -405,17 +444,18 @@ std::string compare_pair(const RegionPair &region, const MachineState &init_old,
 /// random one also exposes bits of derived values (x + 1, x & m, ...).
 constexpr unsigned kUndefAlternatives = 3;
 
-/// Refill @p regs (all lanes) and @p locs with values of alternative @p alt (1-based).
+/// Refill @p regs (the wave's lanes) and @p locs with values of alternative @p alt
+/// (1-based). Lanes and SGPRs the target does not have stay as they are (zero).
 void refill_undef(MachineState &s, const VSet &regs, const LocSet &locs, uint64_t seed,
-                  uint64_t case_index, unsigned alt, bool new_side) {
+                  uint64_t case_index, unsigned alt, bool new_side, const Target &target) {
   for (unsigned l = 0; l < kNumLocs; ++l)
-    if (locs.test(l))
+    if (locs.test(l) && (l < target.sgprs() || l >= kNumSgprs))
       s.set(l, alt == 1   ? 0u
                : alt == 2 ? 0xffffffffu
                           : canary_value(seed ^ (0x756e646566ull * alt), case_index, l, new_side));
   for (unsigned r = 0; r < s.vgpr_count; ++r)
     if (regs.test(r))
-      for (unsigned lane = 0; lane < kWaveLanes; ++lane)
+      for (unsigned lane = 0; lane < target.wave_size; ++lane)
         s.vset(r, lane,
                alt == 1   ? 0u
                : alt == 2 ? 0xffffffffu
@@ -469,12 +509,16 @@ UndefMask compute_undef_mask(const RegionPair &region, RegionRunner &old_runner,
     return m;
   for (unsigned alt = 1; alt <= kUndefAlternatives; ++alt) {
     MachineState s = init_old;
-    refill_undef(s, k.vundef_old, k.undef_old, seed, case_index, alt, false);
+    refill_undef(s, k.vundef_old, k.undef_old, seed, case_index, alt, false,
+                 k.gpu().value_or(Target{}));
     old_runner.set_nan_choice(nan ? alt : 0, splitmix64(seed ^ (case_index << 2) ^ alt));
     old_runner.load(s);
     const bool ok = old_runner.run(region.old_side.insts.size()).status == RunStatus::Ok;
-    if (ok)
-      merge_undef(m, final_old, old_runner.capture());
+    if (ok) {
+      const MachineState alt = old_runner.capture();
+      m.exit_varies = m.exit_varies || alt.exit_pc != final_old.exit_pc;
+      merge_undef(m, final_old, alt);
+    }
   }
   old_runner.set_nan_choice(0, 0);
   m.from_undef = undef;
@@ -497,7 +541,8 @@ std::string check_new_undef(const RegionPair &region, RegionRunner &new_runner,
   std::string kind;
   for (unsigned alt = 1; alt <= kUndefAlternatives && kind.empty(); ++alt) {
     MachineState s = init_new;
-    refill_undef(s, k.vundef_new, k.undef_new, seed, case_index, alt, true);
+    refill_undef(s, k.vundef_new, k.undef_new, seed, case_index, alt, true,
+                 k.gpu().value_or(Target{}));
     new_runner.set_nan_choice(nan ? alt : 0, splitmix64(seed ^ (case_index << 2) ^ alt ^ 0x6e6577));
     new_runner.load(s);
     if (new_runner.run(region.new_side.insts.size()).status != RunStatus::Ok)
@@ -605,6 +650,8 @@ Json reduce_mismatch(const RegionPair &region, RegionRunner &old_runner, RegionR
     const MachineState fa = old_runner.capture(), fb = new_runner.capture();
     const UndefMask umask = compute_undef_mask(region, old_runner, a, fa, seed, m.case_index,
                                                !m.strict_nan && old_runner.nan_produced());
+    if (umask.exit_varies)
+      return false; // old's control flow depends on an undefined value
     Mismatch t;
     const std::string kind =
         compare_pair(region, a, b, fa, fb, t, CompareConfig{m.strict_nan, &umask});
@@ -627,14 +674,16 @@ Json reduce_mismatch(const RegionPair &region, RegionRunner &old_runner, RegionR
   // 1. Seed independence: replace the seed-derived canaries with fixed distinct values.
   {
     MachineState a = cur_o, b = cur_n;
+    const unsigned sgprs = k.gpu().value_or(Target{}).sgprs();
     for (unsigned l = 0; l < kNumLocs; ++l)
-      if (k.canary.test(l)) {
+      if (k.canary.test(l) && (l < sgprs || l >= kNumSgprs)) { // not s102-s105 on GFX9
         a.set(l, 0);
         b.set(fwd[l], l == kLocScc ? 1u : 0xffffffffu);
       }
+    const unsigned lanes = k.gpu().value_or(Target{}).wave_size;
     for (unsigned r = 0; r < k.vgpr_count; ++r)
       if (!k.ventry_equal.test(r))
-        for (unsigned lane = 0; lane < kWaveLanes; ++lane) {
+        for (unsigned lane = 0; lane < lanes; ++lane) {
           a.vset(r, lane, 0);
           b.vset(r, lane, 0xffffffffu);
         }
@@ -922,8 +971,8 @@ Json build_identity() {
   j.set("schema_version", kSchemaVersion);
   j.set("rocjitsu_revision", RJ_ISA_DIFF_RJ_REVISION);
   j.set("rocjitsu_version", RJ_ISA_DIFF_RJ_VERSION);
-  j.set("semantics", "RocJITsu ComputeUnitCore::execute_instruction, gfx950 (CDNA4) wave64, "
-                     "default arithmetic semantics");
+  j.set("semantics", "RocJITsu ComputeUnitCore::execute_instruction on the contract's target "
+                     "(ISA family, wave size), default arithmetic semantics");
 #if defined(__VERSION__)
   j.set("compiler", __VERSION__);
 #endif
@@ -981,6 +1030,17 @@ void build_initial_states(const RegionContract &contract, const Sample &sample, 
   // Each side starts in its own kernel's MODE (FP rounding/denormals, DX10_CLAMP, IEEE).
   old_state.frame.mode = contract.mode_old;
   new_state.frame.mode = contract.mode_new;
+  // What the target does not have stays zero: s102-s105 on GFX9, lanes 32-63 on wave32.
+  const Target t = contract.gpu().value_or(Target{});
+  for (unsigned l = t.sgprs(); l < kNumSgprs; ++l) {
+    old_state.set(l, 0);
+    new_state.set(l, 0);
+  }
+  for (unsigned r = 0; r < contract.vgpr_count; ++r)
+    for (unsigned lane = t.wave_size; lane < kWaveLanes; ++lane) {
+      old_state.vset(r, lane, 0);
+      new_state.vset(r, lane, 0);
+    }
 }
 
 Json RegionResult::to_json() const {
@@ -1226,10 +1286,17 @@ RegionResult test_region(const RegionPair &region, const TestOptions &options,
   auto setup_start = Clock::now();
   std::string error;
   const unsigned vgprs = region.contract.vgpr_count;
-  auto old_runner = RegionRunner::create(region.old_side.insts, region.id + "_old", error, vgprs);
-  auto new_runner =
-      old_runner ? RegionRunner::create(region.new_side.insts, region.id + "_new", error, vgprs)
-                 : nullptr;
+  const auto target = region.contract.gpu();
+  if (!target) {
+    r.test_status = TestStatus::HarnessError;
+    r.reason = "unsupported contract target " + region.contract.target + "/" + region.contract.wave;
+    return r;
+  }
+  auto old_runner =
+      RegionRunner::create(region.old_side.insts, region.id + "_old", error, vgprs, *target);
+  auto new_runner = old_runner ? RegionRunner::create(region.new_side.insts, region.id + "_new",
+                                                      error, vgprs, *target)
+                               : nullptr;
   if (old_runner && new_runner) {
     auto image = std::make_shared<MemoryImage>();
     old_runner->set_memory_image(image);
@@ -1255,7 +1322,7 @@ RegionResult test_region(const RegionPair &region, const TestOptions &options,
   const auto new_to_old = region.contract.entry_inverse();
   const RegionFeatures features =
       make_region_features(region.old_side.insts, region.new_side.insts,
-                           region.contract.entry_map.empty() ? nullptr : &new_to_old);
+                           region.contract.entry_map.empty() ? nullptr : &new_to_old, *target);
   auto sweep_start = Clock::now();
   const BoundarySweep sweep = build_boundary_sweep(features.roles, region.contract,
                                                    {options.seed, options.max_boundary_cases});
@@ -1367,6 +1434,9 @@ RegionResult test_region(const RegionPair &region, const TestOptions &options,
       } else if (fault_old && fault_new) {
         // An input outside the memory model's address domain: excluded, counted.
         ++r.rejections["memory fault on both sides (excluded input): " + out_old.detail];
+      } else if (is_excluded_status(out_old.status) || is_excluded_status(out_new.status)) {
+        // A loop past the step limit: excluded, never read as non-termination.
+        ++r.rejections["loop step limit (excluded input)"];
       }
       fb.compare_ns = ns_since(t4);
       r.t.compare_ns += fb.compare_ns;
@@ -1397,6 +1467,18 @@ RegionResult test_region(const RegionPair &region, const TestOptions &options,
       const bool nan_new = !options.strict_nan && new_runner->nan_produced();
       const UndefMask umask = compute_undef_mask(region, *old_runner, init_old, final_old,
                                                  options.seed, case_index, nan_old);
+      if (umask.exit_varies) {
+        // Old's branch depends on an undefined value (or a NaN's bits): undefined in LLVM,
+        // so any behaviour of new is allowed. Excluded, counted.
+        --r.valid_pairs;
+        --phase.valid;
+        ++r.rejections["branch on an undefined value (excluded input)"];
+        fb.compare_ns = ns_since(t4);
+        r.t.compare_ns += fb.compare_ns;
+        fb.category = "excluded";
+        note_novelty(nullptr, nullptr);
+        return;
+      }
       const CompareConfig cfg{options.strict_nan, &umask};
       CompareStats cst;
       kind = compare_pair(region, init_old, init_new, final_old, final_new, m, cfg, &cst);
@@ -1588,11 +1670,12 @@ ReplayOutcome replay_counterexample(const Json &bundle, std::string &error) {
   auto init_new = MachineState::from_json(bundle["initial_state"]["new"], error);
   if (!init_old || !init_new)
     return out;
+  const Target target = region->contract.gpu().value_or(Target{});
   auto old_runner = RegionRunner::create(region->old_side.insts, region->id + "_replay_old", error,
-                                         region->contract.vgpr_count);
+                                         region->contract.vgpr_count, target);
   auto new_runner = old_runner
                         ? RegionRunner::create(region->new_side.insts, region->id + "_replay_new",
-                                               error, region->contract.vgpr_count)
+                                               error, region->contract.vgpr_count, target)
                         : nullptr;
   if (!old_runner || !new_runner)
     return out;

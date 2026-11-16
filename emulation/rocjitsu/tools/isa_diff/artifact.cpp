@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
+#include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <iterator>
@@ -343,8 +344,16 @@ bool artifact_from_code_object(std::span<const uint8_t> image, const std::string
     error = "invalid AMDGPU code object";
     return false;
   }
-  if (co.target_id() != ROCJITSU_CODE_TARGET_GFX950) {
-    error = "code object target is not gfx950 (P0 target)";
+  // The target from the ELF machine number (EF_AMDGPU_MACH, e_flags bits 7:0).
+  uint32_t e_flags = 0;
+  if (image.size() >= sizeof(Elf64_Ehdr))
+    std::memcpy(&e_flags, image.data() + offsetof(Elf64_Ehdr, e_flags), sizeof(e_flags));
+  const auto target = target_by_elf_mach(e_flags & 0xffu);
+  if (!target) {
+    char mach[8];
+    std::snprintf(mach, sizeof(mach), "0x%02x", e_flags & 0xffu);
+    error = std::string("code object machine ") + mach + " is not a RocJITsu-executable target (" +
+            supported_targets() + ")";
     return false;
   }
   ElfText text;
@@ -411,6 +420,19 @@ bool artifact_from_code_object(std::span<const uint8_t> image, const std::string
     return false;
   }
   out.kernel_name = name;
+  out.target = *target;
+  out.function_mode = default_function_mode(out.target);
+  if (chosen) {
+    // The descriptor decides the wave size (ENABLE_WAVEFRONT_SIZE32 on RDNA).
+    const unsigned w = kernel_wavefront_size(target->arch, chosen->descriptor);
+    if (auto t = with_wave_size(*target, w)) {
+      out.target = *t;
+    } else {
+      error = "kernel descriptor asks for wave" + std::to_string(w) + ", which " + target->name +
+              " cannot run";
+      return false;
+    }
+  }
   out.callable = chosen == nullptr;
   out.entry_vgprs = out.callable ? 32 : 3; // argument VGPRs v0-v31 / workitem IDs v0-v2
   out.entry_sgprs = 30;                    // inreg arguments and special inputs: s0-s29
@@ -420,7 +442,7 @@ bool artifact_from_code_object(std::span<const uint8_t> image, const std::string
     using namespace amdhsa;
     const uint32_t r2 = chosen->descriptor.compute_pgm_rsrc2;
     out.entry_sgprs =
-        static_cast<int>(RJ_AMDHSA_BITS_GET(r2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT) +
+        static_cast<int>(kernel_descriptor_user_sgpr_count(target->arch, chosen->descriptor) +
                          RJ_AMDHSA_BITS_GET(r2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X) +
                          RJ_AMDHSA_BITS_GET(r2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y) +
                          RJ_AMDHSA_BITS_GET(r2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z) +
@@ -445,12 +467,13 @@ bool artifact_from_code_object(std::span<const uint8_t> image, const std::string
 }
 
 uint32_t initial_mode(const Artifact &artifact) {
-  return artifact.callable ? artifact.function_mode : initial_mode(artifact.descriptor);
+  return artifact.callable ? artifact.function_mode
+                           : initial_mode(artifact.descriptor, artifact.target);
 }
 
-uint32_t initial_mode(const std::vector<uint8_t> &descriptor) {
+uint32_t initial_mode(const std::vector<uint8_t> &descriptor, const Target &target) {
   if (descriptor.size() < sizeof(amdhsa::kernel_descriptor_t))
-    return kDefaultInitialMode;
+    return target.has_ieee_dx10() ? kDefaultInitialMode : kDefaultInitialMode & ~kModeGfx9To11Bits;
   amdhsa::kernel_descriptor_t kd{};
   std::memcpy(&kd, descriptor.data(), sizeof(kd));
   using namespace amdhsa;
@@ -460,9 +483,11 @@ uint32_t initial_mode(const std::vector<uint8_t> &descriptor) {
   mode |= RJ_AMDHSA_BITS_GET(rsrc1, COMPUTE_PGM_RSRC1_FLOAT_ROUND_MODE_16_64) << 2;
   mode |= RJ_AMDHSA_BITS_GET(rsrc1, COMPUTE_PGM_RSRC1_FLOAT_DENORM_MODE_32) << 4;
   mode |= RJ_AMDHSA_BITS_GET(rsrc1, COMPUTE_PGM_RSRC1_FLOAT_DENORM_MODE_16_64) << 6;
-  mode |= RJ_AMDHSA_BITS_GET(rsrc1, COMPUTE_PGM_RSRC1_ENABLE_DX10_CLAMP) << 8;
-  mode |= RJ_AMDHSA_BITS_GET(rsrc1, COMPUTE_PGM_RSRC1_ENABLE_IEEE_MODE) << 9;
-  mode |= RJ_AMDHSA_BITS_GET(rsrc1, COMPUTE_PGM_RSRC1_DEBUG_MODE) << 11;
+  if (target.has_ieee_dx10()) { // GFX12 reuses these descriptor bits for other fields
+    mode |= RJ_AMDHSA_BITS_GET(rsrc1, COMPUTE_PGM_RSRC1_ENABLE_DX10_CLAMP) << 8;
+    mode |= RJ_AMDHSA_BITS_GET(rsrc1, COMPUTE_PGM_RSRC1_ENABLE_IEEE_MODE) << 9;
+    mode |= RJ_AMDHSA_BITS_GET(rsrc1, COMPUTE_PGM_RSRC1_DEBUG_MODE) << 11;
+  }
   if (RJ_AMDHSA_BITS_GET(rsrc1, COMPUTE_PGM_RSRC1_FP16_OVFL))
     mode |= 1u << 23;
   return mode;

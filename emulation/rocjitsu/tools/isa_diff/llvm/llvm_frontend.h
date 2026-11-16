@@ -49,6 +49,11 @@ struct Provenance {
   std::string input_kind; ///< "ll" or "s".
   std::string triple = "amdgcn-amd-amdhsa";
   std::string mcpu = "gfx950";
+  /// Wave size asked for (0: the target's default). On GFX10+ it becomes
+  /// -mattr=+wavefrontsize32/64 for llc and llvm-mc; a raw .text fallback gets it too.
+  unsigned wave_size = 0;
+  /// Target features (-mattr) for llc and llvm-mc, e.g. "+real-true16" from a RUN line.
+  std::string mattr;
   std::vector<std::string> common_args;
   std::vector<std::string> side_args;
   std::vector<ToolCommand> commands;

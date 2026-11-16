@@ -399,8 +399,8 @@ Sample BoundarySweep::materialize(const SweepCase &c) const {
   fill_vgpr_lanes(s, vgpr_count, vwide, seed ^ 0x5357454550ull, c.fill);
   const auto &c64 = catalog64();
   for (const VOverride &o : c.voverrides) {
-    for (unsigned lane = 0; lane < kWaveLanes; ++lane) {
-      const uint64_t idx = uint64_t{o.chunk} * kWaveLanes + lane;
+    for (unsigned lane = 0; lane < lanes; ++lane) {
+      const uint64_t idx = uint64_t{o.chunk} * lanes + lane;
       auto put = [&](unsigned r, uint32_t v) {
         if (r < vgpr_count)
           s.vvalue[size_t{r} * kWaveLanes + lane] = v;
@@ -444,10 +444,13 @@ BoundarySweep build_boundary_sweep(const RegionRoles &roles, const RegionContrac
                                    const SweepOptions &options) {
   BoundarySweep sweep;
   const LocSet entry = contract.entry_equal;
+  const Target target = contract.gpu().value_or(Target{});
   sweep.vgpr_count = contract.vgpr_count;
+  sweep.lanes = target.wave_size;
   sweep.vwide = contract.vwide_reads;
   sweep.seed = options.seed;
-  sweep.exec_entry = entry.test(kLocExecLo) && entry.test(kLocExecHi);
+  // EXEC is the pair on wave64 and exec_lo on wave32.
+  sweep.exec_entry = entry.test(kLocExecLo) && (target.wave32() || entry.test(kLocExecHi));
   for (const NamedValue &v : catalog32())
     if (std::ranges::find(sweep.vcat, v.value) == sweep.vcat.end())
       sweep.vcat.push_back(v.value);
@@ -596,8 +599,8 @@ BoundarySweep build_boundary_sweep(const RegionRoles &roles, const RegionContrac
     const VSet vread = roles.decoded ? roles.vread : ventry;
     const uint32_t n32 = static_cast<uint32_t>(sweep.vcat.size());
     const uint32_t n64 = static_cast<uint32_t>(catalog64().size());
-    auto chunks = [](uint64_t n, uint64_t cap) {
-      return static_cast<uint32_t>(std::min<uint64_t>((n + kWaveLanes - 1) / kWaveLanes, cap));
+    auto chunks = [&](uint64_t n, uint64_t cap) {
+      return static_cast<uint32_t>(std::min<uint64_t>((n + sweep.lanes - 1) / sweep.lanes, cap));
     };
     auto vemit = [&](std::vector<VOverride> v, std::vector<std::pair<unsigned, uint32_t>> scalar,
                      int8_t exec, uint8_t base, const std::string &label,

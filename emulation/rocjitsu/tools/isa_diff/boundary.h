@@ -101,6 +101,7 @@ struct SweepCase {
 struct BoundarySweep {
   std::array<std::array<uint32_t, kNumLocs>, 3> bases{};
   unsigned vgpr_count = 0;
+  unsigned lanes = 64; ///< Lanes of the wave: vector phases spread values over these.
   VSet vwide;
   uint64_t seed = 0;
   bool exec_entry = false;

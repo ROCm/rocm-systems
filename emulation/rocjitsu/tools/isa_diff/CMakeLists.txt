@@ -25,6 +25,7 @@ add_library(
     region_runner.cpp
     result_cache.cpp
     roles.cpp
+    target.cpp
 )
 target_include_directories(rj_isa_diff_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 # The execution-capable ISA registry (via RJ_TOOL_OBJECT_LIBS) is required: the

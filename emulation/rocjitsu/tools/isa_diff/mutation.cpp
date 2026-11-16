@@ -25,9 +25,10 @@ std::optional<RegionPair> make_synthetic_mutation(const RegionPair &base, const 
   }
   side.insts[spec.inst].words[spec.word] ^= spec.xor_mask;
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  const Target target = r.contract.gpu().value_or(Target{});
+  auto decoder = Decoder::create(target.arch);
   if (!decoder) {
-    error = "no gfx950 decoder";
+    error = "no " + target.name + " decoder";
     return std::nullopt;
   }
   LocSet writes, wide;
@@ -50,7 +51,7 @@ std::optional<RegionPair> make_synthetic_mutation(const RegionPair &base, const 
       error = "mutation changes the instruction size";
       return std::nullopt;
     }
-    const Effects fx = classify(d);
+    const Effects fx = classify(d, target);
     if (!fx.p0) {
       error = "mutated instruction is outside P0: " + fx.reject_reason;
       return std::nullopt;
