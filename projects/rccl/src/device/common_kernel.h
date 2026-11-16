@@ -823,9 +823,14 @@ __device__ __forceinline__ bool tryTdmCopy(int thread, int nThreads, bool postOp
   // WARP_SIZE is a compile-time power of two, so these exact divisions compile to shifts.
   uint32_t w0 = (threadIdx.x - thread) / WARP_SIZE, w1 = w0 + nThreads / WARP_SIZE;
   size_t bytes = (size_t)nElts * sizeof(T);
-  for (int dst = 0; dst < nDsts; dst++) {
-    tdm::tdmCopyByTeam<kRcclTdmPolicy>(dstPtrs[dst], srcPtrs[0], bytes, ncclTdmStageForWarp(w0),
-                                       (size_t)(w1 - w0) * RCCL_TDM_STAGE_BYTES_PER_WARP, w0, w1);
+  size_t stageBytes = (size_t)(w1 - w0) * RCCL_TDM_STAGE_BYTES_PER_WARP;
+  if (nDsts == 2) {
+    // canUseTdm() aligned both destinations to RCCL_TDM_ALIGN, which meets the dual copy's precondition.
+    static_assert(RCCL_TDM_ALIGN % tdm::DUAL_COPY_ALIGN == 0, "TDM destinations must share an offset mod 256");
+    tdm::tdmCopyDualByTeam<kRcclTdmPolicy>(dstPtrs[0], dstPtrs[1], srcPtrs[0], bytes, ncclTdmStageForWarp(w0),
+                                           stageBytes, w0, w1);
+  } else {
+    tdm::tdmCopyByTeam<kRcclTdmPolicy>(dstPtrs[0], srcPtrs[0], bytes, ncclTdmStageForWarp(w0), stageBytes, w0, w1);
   }
   return true;
 #else
