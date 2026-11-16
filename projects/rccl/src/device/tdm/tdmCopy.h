@@ -38,6 +38,9 @@ THE SOFTWARE.
 /// - Participation: block-collective (all warps) vs. tdmCopyByTeam() (a
 ///   contiguous warp range, leaving the other warps free to compute).
 ///
+/// \par Two destinations
+/// tdmCopyDualByTeam() copies one source to two destinations, reading it once.
+///
 /// \par One-way transfers
 /// asyncLoadToLDS() / asyncStoreFromLDS() move a single leg (global -> LDS or
 /// LDS -> global) for one warp, for callers that want to keep or produce the
@@ -255,6 +258,23 @@ template <CachePolicy cp = DEFAULT_CACHE_POLICY>
 __device__ TDM_API void tdmCopyAsyncByTeam(void* dst, const void* src, size_t sizeBytes, void* ldsBuffer,
                                            size_t ldsBufferBytes, uint32_t startWarpId,
                                            uint32_t stopWarpId) TDM_DELETED;
+
+/// \brief tdmCopyDualByTeam() requires (dst0 - dst1) to be a multiple of this.
+constexpr uintptr_t DUAL_COPY_ALIGN = 256;
+
+/// \brief Blocking team copy of [0, sizeBytes) to two destinations, reading src
+///        once: dst0 <- src and dst1 <- src.
+///
+/// Each chunk is loaded into LDS once and stored to both destinations, so it
+/// costs one read where two tdmCopyByTeam() calls cost two.
+///
+/// \pre ((uintptr_t)dst0 - (uintptr_t)dst1) % DUAL_COPY_ALIGN == 0. Unchecked;
+///      both stores reuse the chunk as laid out in LDS for \p dst0.
+/// \see tdmCopyByTeam for the other parameters and team semantics (incl. \p cp).
+template <CachePolicy cp = DEFAULT_CACHE_POLICY>
+__device__ TDM_API void tdmCopyDualByTeam(void* dst0, void* dst1, const void* src, size_t sizeBytes,
+                                          void* ldsBuffer, size_t ldsBufferBytes, uint32_t startWarpId,
+                                          uint32_t stopWarpId) TDM_DELETED;
 
 /// \brief Drain the CALLING WARP's outstanding TDM ops (TENSORcnt -> 0).
 ///
@@ -781,6 +801,16 @@ __device__ inline void tdmCopyByTeam(void* dst, const void* src, size_t sizeByte
                                      size_t ldsBufferBytes, uint32_t startWarpId, uint32_t stopWarpId) {
   detail::issue<cp>(dst, src, sizeBytes, ldsBuffer, ldsBufferBytes, startWarpId, stopWarpId);
   tdmWait(); // no-op on any warp that issued nothing / is off-team
+}
+
+template <CachePolicy cp>
+__device__ inline void tdmCopyDualByTeam(void* dst0, void* dst1, const void* src, size_t sizeBytes,
+                                         void* ldsBuffer, size_t ldsBufferBytes, uint32_t startWarpId,
+                                         uint32_t stopWarpId) {
+  static_assert(DUAL_COPY_ALIGN == detail::ALIGN, "issueTo() destinations share an offset mod ALIGN");
+  void* const dsts[2] = {dst0, dst1};
+  detail::issueTo<cp, 2>(dsts, src, sizeBytes, ldsBuffer, ldsBufferBytes, startWarpId, stopWarpId);
+  tdmWait();
 }
 
 // The TDM descriptor holds the LDS side as a 32-bit address. A generic pointer
