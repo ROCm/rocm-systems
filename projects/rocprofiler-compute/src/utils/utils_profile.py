@@ -63,6 +63,12 @@ _OUTDATED_FIRMWARE_MESSAGE = (
     "GPU firmware on this machine is below the minimum rocprofiler-sdk requires."
 )
 
+_JAX_COMPILATION_CACHE_DIR = "JAX_COMPILATION_CACHE_DIR"
+_JAX_PERSISTENT_CACHE_MIN_COMPILE_TIME_SECS = (
+    "JAX_PERSISTENT_CACHE_MIN_COMPILE_TIME_SECS"
+)
+_JAX_PERSISTENT_CACHE_MIN_ENTRY_SIZE_BYTES = "JAX_PERSISTENT_CACHE_MIN_ENTRY_SIZE_BYTES"
+
 PROCFS_ROOT = Path("/proc")
 
 ProfilerOptions = Union[List[str], Dict[str, Union[str, List[str]]]]
@@ -231,12 +237,34 @@ def keep_native_artifacts(source_dir: Path, workload_dir: Path, fbase: str) -> N
             console_debug(f"Kept native profiling data: {destination}")
 
 
+def _apply_jax_compilation_cache_env(
+    env: Dict[str, str], output_directory: str
+) -> None:
+    """Point PMC child processes at one JAX compile and autotune cache.
+
+    Leave JAX_COMPILATION_CACHE_DIR and the persistent-cache size and compile-time
+    thresholds unchanged when the user already set them. Compile-time 0 stores
+    short jits that the 1s JAX default would skip.
+    """
+    cache_dir = env.get(_JAX_COMPILATION_CACHE_DIR)
+    if not cache_dir:
+        cache_dir = str(Path(output_directory).resolve() / "jax_compilation_cache")
+        Path(cache_dir).mkdir(parents=True, exist_ok=True)
+        env[_JAX_COMPILATION_CACHE_DIR] = cache_dir
+        console_debug(f"JAX compilation cache: {cache_dir}")
+    if not env.get(_JAX_PERSISTENT_CACHE_MIN_COMPILE_TIME_SECS):
+        env[_JAX_PERSISTENT_CACHE_MIN_COMPILE_TIME_SECS] = "0"
+    if not env.get(_JAX_PERSISTENT_CACHE_MIN_ENTRY_SIZE_BYTES):
+        env[_JAX_PERSISTENT_CACHE_MIN_ENTRY_SIZE_BYTES] = "-1"
+
+
 def run_prof(
     fnames: Union[List[str], str],
     profiler_options: ProfilerOptions,
     workload_dir: str,
     ml_api_trace_enabled: bool = False,
     retain_rocpd_output: bool = False,
+    share_jax_compilation_cache: bool = False,
 ) -> None:
     multiple_files = isinstance(fnames, list)
     if multiple_files and (
@@ -321,6 +349,8 @@ def run_prof(
         "Adding env var for counter definitions: "
         f"ROCPROFILER_METRICS_PATH={new_env['ROCPROFILER_METRICS_PATH']}"
     )
+    if share_jax_compilation_cache:
+        _apply_jax_compilation_cache_env(new_env, workload_dir)
 
     time_1 = time.time()
 
