@@ -175,3 +175,51 @@ TEST(IntegerMed3U32W64, Arithmetic) {
   rocjitsu::arith::test::check_select<64, 3>(rj_arith_v_med3_u32_w64,
                                              rocjitsu::arith::test::Select::Med3U32);
 }
+
+// Addition saturates before selection, including when CLAMP is clear.
+TEST(IntegerAddMinI32W32, Arithmetic) {
+  rocjitsu::arith::test::check_select<32, 3>(rj_arith_v_add_min_i32_w32,
+                                             rocjitsu::arith::test::Select::AddMinI32);
+}
+
+// Addition saturates before selection, including when CLAMP is clear.
+TEST(IntegerAddMinI32W64, Arithmetic) {
+  rocjitsu::arith::test::check_select<64, 3>(rj_arith_v_add_min_i32_w64,
+                                             rocjitsu::arith::test::Select::AddMinI32);
+}
+
+// Addition saturates before selection, including when CLAMP is clear.
+TEST(IntegerAddMinU32W32, Arithmetic) {
+  rocjitsu::arith::test::check_select<32, 3>(rj_arith_v_add_min_u32_w32,
+                                             rocjitsu::arith::test::Select::AddMinU32);
+}
+
+// Addition saturates before selection, including when CLAMP is clear.
+TEST(IntegerAddMinU32W64, Arithmetic) {
+  rocjitsu::arith::test::check_select<64, 3>(rj_arith_v_add_min_u32_w64,
+                                             rocjitsu::arith::test::Select::AddMinU32);
+}
+
+// Addition saturates before selection, including when CLAMP is clear.
+TEST(IntegerAddMaxI32W32, Arithmetic) {
+  rocjitsu::arith::test::check_select<32, 3>(rj_arith_v_add_max_i32_w32,
+                                             rocjitsu::arith::test::Select::AddMaxI32);
+}
+
+// Addition saturates before selection, including when CLAMP is clear.
+TEST(IntegerAddMaxI32W64, Arithmetic) {
+  rocjitsu::arith::test::check_select<64, 3>(rj_arith_v_add_max_i32_w64,
+                                             rocjitsu::arith::test::Select::AddMaxI32);
+}
+
+// Addition saturates before selection, including when CLAMP is clear.
+TEST(IntegerAddMaxU32W32, Arithmetic) {
+  rocjitsu::arith::test::check_select<32, 3>(rj_arith_v_add_max_u32_w32,
+                                             rocjitsu::arith::test::Select::AddMaxU32);
+}
+
+// Addition saturates before selection, including when CLAMP is clear.
+TEST(IntegerAddMaxU32W64, Arithmetic) {
+  rocjitsu::arith::test::check_select<64, 3>(rj_arith_v_add_max_u32_w64,
+                                             rocjitsu::arith::test::Select::AddMaxU32);
+}

@@ -240,9 +240,10 @@ namespace rocjitsu::test {
 
 class KfdCuAtomicTestAccess {
 public:
-  static amdgpu::VmAccessOutcome route(amdgpu::ComputeUnitCore &cu, Instruction *instruction,
+  static amdgpu::VmAccessOutcome route(amdgpu::ComputeUnitCore &cu,
+                                       std::unique_ptr<Instruction> &&instruction,
                                        amdgpu::Wavefront &wave) {
-    return cu.route_memory_inst(instruction, wave);
+    return cu.route_memory_inst(std::move(instruction), wave);
   }
 
   static void retry(amdgpu::ComputeUnitCore &cu) { cu.global_mem_pipeline_.tick(); }
@@ -871,6 +872,44 @@ TEST(GpuAliasIngressGateTest, MultiAliasAdmissionClosesAndDrainsOnOwnerContinuat
   EXPECT_TRUE(gate->discard_failed(abandoned));
   EXPECT_FALSE(gate->discard_failed(abandoned));
   EXPECT_FALSE(gate->closed(abandoned));
+  EXPECT_EQ(gate->tracked_generation_count(), 0u);
+}
+
+TEST(GpuAliasIngressGateTest, LocalPermitsJoinExactCloseAndCrossThreadRelease) {
+  using Gate = rocjitsu::GpuAliasIngressGate;
+  auto gate = std::make_shared<Gate>();
+  const Gate::Key first{1, 101, 0x1000, 7, 11};
+  const Gate::Key second{1, 202, 0x2000, 8, 12};
+  const Gate::Key other{2, 101, 0x1000, 7, 11};
+  const std::array keys{first, second};
+  auto a = gate->try_acquire_local(first);
+  auto b = std::async(std::launch::async, [&] { return gate->try_acquire_local(second); }).get();
+  ASSERT_TRUE(a);
+  ASSERT_TRUE(b);
+  EXPECT_EQ(gate->tracked_generation_count(), 2u);
+  EXPECT_FALSE(gate->try_freeze_for_effect(keys));
+  auto independent =
+      std::async(std::launch::async, [&] { return gate->try_acquire_local(other); }).get();
+  ASSERT_TRUE(independent);
+  std::function<void()> posted;
+  int drained = 0;
+  ASSERT_TRUE(
+      gate->close_batch(keys, [&](auto done) { posted = std::move(done); }, [&] { ++drained; }));
+  EXPECT_FALSE(gate->try_acquire_local(first));
+  EXPECT_TRUE(gate->try_acquire_local(other));
+  a.reset();
+  EXPECT_FALSE(posted);
+  b.reset();
+  ASSERT_TRUE(posted);
+  posted();
+  EXPECT_EQ(drained, 1);
+  ASSERT_TRUE(gate->reopen_batch(keys));
+  auto freeze = gate->try_freeze_for_effect(keys);
+  ASSERT_TRUE(freeze);
+  EXPECT_FALSE(gate->try_acquire_local(second));
+  freeze.reset();
+  EXPECT_TRUE(gate->try_acquire_local(second));
+  independent.reset();
   EXPECT_EQ(gate->tracked_generation_count(), 0u);
 }
 
@@ -12982,6 +13021,13 @@ TEST_F(KfdIoctlTest, KfdGpuMapGrantsGatePinnedVmAccess) {
     map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
     ASSERT_EQ(multi_gpu_driver.ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
     EXPECT_EQ(read(*first), VmAccessOutcome::Complete);
+    const auto first_grant = first->local_admission(allocation.va_addr, 1);
+    ASSERT_TRUE(first_grant);
+    const auto view = first->local_grant_view(allocation.va_addr, 1);
+    EXPECT_TRUE(view.covers(allocation.va_addr, host.size()));
+    EXPECT_FALSE(view.covers(allocation.va_addr, 0));
+    EXPECT_FALSE(view.covers(allocation.va_addr + host.size() - 1, 2));
+    EXPECT_FALSE(first->local_admission(allocation.va_addr + host.size() - 1, 2));
     EXPECT_EQ(value, std::byte{0x5a});
     EXPECT_EQ(read(*second), VmAccessOutcome::Faulted);
 
@@ -12996,6 +13042,9 @@ TEST_F(KfdIoctlTest, KfdGpuMapGrantsGatePinnedVmAccess) {
     unmap.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
     gpu_id = kGpuId;
     ASSERT_EQ(multi_gpu_driver.ioctl(AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), 0);
+    EXPECT_FALSE(view.covers(allocation.va_addr, 1));
+    EXPECT_FALSE(first->local_admission(allocation.va_addr, 1));
+    EXPECT_TRUE(second->local_admission(allocation.va_addr, 1));
     EXPECT_EQ(read(*first), VmAccessOutcome::Faulted);
     EXPECT_EQ(read(*second), VmAccessOutcome::Complete);
     gpu_id = kPeerGpuId;
@@ -16236,6 +16285,125 @@ TEST_F(KfdIoctlTest, LocalNoncanonicalClosePublishesDirtyOwnerL2BeforeBackingRel
   EXPECT_EQ(::close(retained_fd), 0);
 }
 
+TEST_F(KfdIoctlTest, FixedVramCpuViewSharesBytesWithIndependentGpuMapping) {
+  using namespace rocjitsu::amdgpu;
+  constexpr size_t kPage = 4096;
+  auto *cpu =
+      static_cast<uint8_t *>(::mmap(nullptr, kPage, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+  ASSERT_NE(cpu, MAP_FAILED);
+  kfd_ioctl_alloc_memory_of_gpu_args alloc{};
+  alloc.va_addr = reinterpret_cast<uint64_t>(cpu);
+  alloc.size = kPage;
+  alloc.gpu_id = kGpuId;
+  alloc.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC |
+                KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc), 0);
+  const auto map_cpu = [&] {
+    return driver_->mmap(cpu, kPage, PROT_READ | PROT_WRITE, MAP_FIXED | MAP_SHARED,
+                         static_cast<off_t>(alloc.mmap_offset));
+  };
+  ASSERT_EQ(map_cpu(), cpu);
+  uint32_t id = kGpuId;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = alloc.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&id);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  const auto process_id = driver_->local_process_id();
+  const auto access = soc_->gpu_vm().snapshot_vmid(process_id);
+  ASSERT_TRUE(access);
+  const auto check_views = [&] {
+    const std::array spans{MemoryIngressSpan{alloc.va_addr, 4, VmAccessKind::Write}};
+    ASSERT_EQ(::mprotect(cpu, kPage, PROT_READ), 0);
+    auto admitted = driver_->admit_gpu_alias_ingress(process_id, id, *access, spans);
+    ASSERT_EQ(admitted.outcome, VmAccessOutcome::Complete);
+    std::array value{std::byte{0x79}};
+    size_t progress = 0;
+    VmTransferToken token;
+    EXPECT_EQ(access->write(alloc.va_addr, value, progress, token), VmAccessOutcome::Complete);
+    EXPECT_EQ(cpu[0], 0x79u);
+    ASSERT_EQ(::mprotect(cpu, kPage, PROT_READ | PROT_WRITE), 0);
+    cpu[0] = 0x31;
+    std::array<std::byte, 1> observed{};
+    progress = 0;
+    EXPECT_EQ(access->read(alloc.va_addr, observed, progress, token), VmAccessOutcome::Complete);
+    EXPECT_EQ(observed[0], std::byte{0x31});
+  };
+  check_views();
+  ASSERT_EQ(map_cpu(), cpu);
+  check_views();
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = alloc.handle;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  EXPECT_EQ(::munmap(cpu, kPage), 0);
+}
+
+TEST_F(KfdIoctlTest, LocalAliasAdmissionRechecksBackingAfterProtectionAndPteChanges) {
+  using namespace rocjitsu::amdgpu;
+  constexpr size_t kPage = 4096;
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = 3 * kPage;
+  allocation.gpu_id = kGpuId;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  auto *host =
+      static_cast<uint8_t *>(driver_->mmap(nullptr, allocation.size, PROT_READ | PROT_WRITE,
+                                           MAP_SHARED, static_cast<off_t>(allocation.mmap_offset)));
+  ASSERT_NE(host, MAP_FAILED);
+  uint32_t gpu_id = kGpuId;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  const uint32_t process_id = driver_->local_process_id();
+  const auto process = driver_->find_process(process_id);
+  ASSERT_NE(process, nullptr);
+  const auto vmid = soc_->gpu_vm().find_vmid(process_id);
+  ASSERT_TRUE(vmid);
+  const auto access = soc_->gpu_vm().snapshot_pinned(*vmid);
+  ASSERT_TRUE(access);
+  const auto admit = [&](uint64_t offset, VmAccessKind kind) {
+    const std::array spans{MemoryIngressSpan{allocation.va_addr + offset, 4, kind}};
+    return driver_->admit_gpu_alias_ingress(process_id, kGpuId, *access, spans).outcome;
+  };
+  using Owner = LegacyHostExtentOwner;
+  ASSERT_EQ(process->unmap_pages(allocation.va_addr, allocation.size),
+            rocjitsu::KfdProcess::PageTableMutationResult::Applied);
+  ASSERT_EQ(
+      process->map_pages(allocation.va_addr, host, allocation.size, Mtype::RW, Owner::Application),
+      rocjitsu::KfdProcess::PageTableMutationResult::Applied);
+  EXPECT_EQ(access->query_access(allocation.va_addr, 64, VmAccessKind::Read),
+            VmAccessOutcome::Complete);
+  EXPECT_EQ(admit(0, VmAccessKind::Read), VmAccessOutcome::Complete);
+  EXPECT_EQ(admit(0, VmAccessKind::Write), VmAccessOutcome::Complete);
+  const std::array wide{
+      MemoryIngressSpan{allocation.va_addr, allocation.size, VmAccessKind::Write}};
+  const auto wide_write = [&] {
+    return driver_->admit_gpu_alias_ingress(process_id, kGpuId, *access, wide).outcome;
+  };
+  EXPECT_EQ(wide_write(), VmAccessOutcome::Complete);
+  ASSERT_EQ(::mprotect(host + kPage, kPage, PROT_READ), 0);
+  EXPECT_EQ(wide_write(), VmAccessOutcome::Unavailable);
+  EXPECT_EQ(admit(2 * kPage, VmAccessKind::Write), VmAccessOutcome::Complete);
+  ASSERT_EQ(::mprotect(host + kPage, kPage, PROT_READ | PROT_WRITE), 0);
+  EXPECT_EQ(wide_write(), VmAccessOutcome::Complete);
+  ASSERT_EQ(::mprotect(host, kPage, PROT_READ), 0);
+  EXPECT_EQ(admit(0, VmAccessKind::Write), VmAccessOutcome::Unavailable);
+  ASSERT_EQ(::mprotect(host, kPage, PROT_READ | PROT_WRITE), 0);
+  EXPECT_EQ(admit(0, VmAccessKind::Write), VmAccessOutcome::Complete);
+  ASSERT_EQ(process->unmap_pages(allocation.va_addr + 8, 4),
+            rocjitsu::KfdProcess::PageTableMutationResult::Applied);
+  EXPECT_EQ(access->query_access(allocation.va_addr, 64, VmAccessKind::Read),
+            VmAccessOutcome::Faulted);
+  EXPECT_EQ(admit(8, VmAccessKind::Read), VmAccessOutcome::Unavailable);
+  EXPECT_EQ(admit(12, VmAccessKind::Read), VmAccessOutcome::Complete);
+  ASSERT_EQ(process->map_pages(allocation.va_addr + 8, static_cast<uint8_t *>(host) + 8, 4,
+                               Mtype::RW, Owner::Application),
+            rocjitsu::KfdProcess::PageTableMutationResult::Applied);
+  EXPECT_EQ(admit(8, VmAccessKind::Read), VmAccessOutcome::Complete);
+}
+
 TEST_F(KfdIoctlTest, LocalCacheableVramSdmaWriteCompletesBeforeAliasRetirement) {
   using rocjitsu::amdgpu::MemoryIngressSpan;
   using rocjitsu::amdgpu::Mtype;
@@ -16756,7 +16924,7 @@ TEST(KfdCuAtomicTest, VmidZeroAtomicSurvivesKfdFrontendTeardown) {
   std::memcpy(atomic->store_data.data(), &kIncrement, sizeof(kIncrement));
 
   EXPECT_EQ(rocjitsu::test::KfdCuAtomicTestAccess::route(
-                *cu, new KfdCuAtomicInstruction(std::move(atomic)), *wave),
+                *cu, std::make_unique<KfdCuAtomicInstruction>(std::move(atomic)), *wave),
             VmAccessOutcome::Complete);
   EXPECT_EQ(soc->memory()->read32(kAddress), kInitial + kIncrement);
 }
@@ -16819,7 +16987,7 @@ TEST_P(KfdPreparedSdmaTest, CuVmidZeroAtomicRetainsKfdDirtyGrantBoundary) {
   std::memcpy(atomic->store_data.data(), &kIncrement, sizeof(kIncrement));
 
   EXPECT_EQ(rocjitsu::test::KfdCuAtomicTestAccess::route(
-                *cu, new KfdCuAtomicInstruction(std::move(atomic)), *wave),
+                *cu, std::make_unique<KfdCuAtomicInstruction>(std::move(atomic)), *wave),
             VmAccessOutcome::Complete);
   EXPECT_EQ(wave->state(), rocjitsu::amdgpu::WfState::VM_RETRY);
   EXPECT_EQ(soc_->memory()->read32(kAddress), kInitial);
@@ -16930,7 +17098,7 @@ TEST_P(KfdPreparedSdmaTest, CuAtomicRetriesClosedDirtyAliasBeforeAnyEffect) {
   const uint64_t epoch = l2->coherence_domain()->current_epoch();
   const uint64_t writes = l2->backing_write_transactions();
   EXPECT_EQ(rocjitsu::test::KfdCuAtomicTestAccess::route(
-                *cu, new KfdCuAtomicInstruction(std::move(atomic)), *wave),
+                *cu, std::make_unique<KfdCuAtomicInstruction>(std::move(atomic)), *wave),
             VmAccessOutcome::Complete);
   EXPECT_EQ(wave->state(), rocjitsu::amdgpu::WfState::VM_RETRY);
   uint32_t observed = 0;
@@ -17012,7 +17180,7 @@ TEST_P(KfdPreparedSdmaTest, CuAtomicRejectsStaleDirtyGenerationBeforeAnyEffect) 
   const uint64_t epoch = l2->coherence_domain()->current_epoch();
   const uint64_t writes = l2->backing_write_transactions();
   EXPECT_EQ(rocjitsu::test::KfdCuAtomicTestAccess::route(
-                *cu, new KfdCuAtomicInstruction(std::move(atomic)), *wave),
+                *cu, std::make_unique<KfdCuAtomicInstruction>(std::move(atomic)), *wave),
             VmAccessOutcome::Revoked);
   uint32_t observed = 0;
   std::memcpy(&observed, target.host, sizeof(observed));

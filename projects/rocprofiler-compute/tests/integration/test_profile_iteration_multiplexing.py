@@ -47,40 +47,6 @@ def test_iteration_multiplexing(binary_handler_profile_rocprof_compute):
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.iteration_multiplexing_1
-def test_iteration_multiplexing_kernel(binary_handler_profile_rocprof_compute):
-    options = ["--iteration-multiplexing", "kernel"]
-    workload_dir = common.get_output_dir()
-    _ = binary_handler_profile_rocprof_compute(
-        config, workload_dir, options, check_success=True, roof=False
-    )
-
-    file_dict = integration_common.check_csv_files(
-        workload_dir, num_devices, num_kernels
-    )
-    assert sorted(list(file_dict.keys())) == CSVS
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.iteration_multiplexing_1
-def test_iteration_multiplexing_kernel_launch_params(
-    binary_handler_profile_rocprof_compute,
-):
-    options = ["--iteration-multiplexing", "kernel_launch_params"]
-    workload_dir = common.get_output_dir()
-    _ = binary_handler_profile_rocprof_compute(
-        config, workload_dir, options, check_success=True, roof=False
-    )
-
-    file_dict = integration_common.check_csv_files(
-        workload_dir, num_devices, num_kernels
-    )
-    assert sorted(list(file_dict.keys())) == CSVS
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
 @pytest.mark.iteration_multiplexing_2
 @pytest.mark.xfail(
     reason="Multiple profiling workloads mapped to the same GPU corrupts the counters"
@@ -115,52 +81,30 @@ def test_iteration_multiplexing_deterministic_counter_accuracy(
             "7.2.2",
             "10.1",
             "--iteration-multiplexing",
-            "kernel",
         ]
-        workload_dir = common.get_output_dir(param_id="iter_mplx_kernel")
-        workload_dirs.append(workload_dir)
+        workload_dir_multiplexed = common.get_output_dir(param_id="iter_mplx")
+        workload_dirs.append(workload_dir_multiplexed)
         _ = binary_handler_profile_rocprof_compute(
             config,
-            workload_dir,
-            options,
-            check_success=True,
-            roof=False,
-            app_name="app_laplace_eqn_iter",
-        )
-        integration_common.check_csv_files(workload_dir, num_devices, num_kernels)
-        counters_kernel = integration_common.read_counter_results(workload_dir)
-
-        options = [
-            "--block",
-            "4",
-            "6.1.5",
-            "6.1.6",
-            "7.2.2",
-            "10.1",
-            "--iteration-multiplexing",
-            "kernel_launch_params",
-        ]
-        workload_dir_klp = common.get_output_dir(param_id="iter_mplx_params")
-        workload_dirs.append(workload_dir_klp)
-        _ = binary_handler_profile_rocprof_compute(
-            config,
-            workload_dir_klp,
+            workload_dir_multiplexed,
             options,
             check_success=True,
             roof=True,
             app_name="app_laplace_eqn_iter",
         )
-        integration_common.check_csv_files(workload_dir_klp, num_devices, num_kernels)
-        counters_kernel_launch_params = integration_common.read_counter_results(
-            workload_dir_klp
+        integration_common.check_csv_files(
+            workload_dir_multiplexed, num_devices, num_kernels
+        )
+        counters_multiplexed = integration_common.read_counter_results(
+            workload_dir_multiplexed
         )
 
         assert are_deterministic_counters_equal(
-            [counters_kernel, counters_kernel_launch_params], counters_no_multiplexing
+            [counters_multiplexed], counters_no_multiplexing
         )
 
-        assert os.path.exists(f"{workload_dir_klp}/roofline.csv")
-        roofline_df = pd.read_csv(f"{workload_dir_klp}/roofline.csv")
+        assert os.path.exists(f"{workload_dir_multiplexed}/roofline.csv")
+        roofline_df = pd.read_csv(f"{workload_dir_multiplexed}/roofline.csv")
         assert len(roofline_df) >= num_devices
     finally:
         for output_dir in workload_dirs:
@@ -200,50 +144,30 @@ def test_iteration_multiplexing_stochastic_counter_accuracy(
             "16.1",
             "16.3",
             "--iteration-multiplexing",
-            "kernel",
         ]
-        workload_dir = common.get_output_dir(param_id="iter_mplx_kernel")
-        workload_dirs.append(workload_dir)
+        workload_dir_multiplexed = common.get_output_dir(param_id="iter_mplx")
+        workload_dirs.append(workload_dir_multiplexed)
         _ = binary_handler_profile_rocprof_compute(
             config,
-            workload_dir,
-            options,
-            check_success=True,
-            roof=False,
-            app_name="app_laplace_eqn_iter",
-        )
-        integration_common.check_csv_files(workload_dir, num_devices, num_kernels)
-        counters_kernel = integration_common.read_counter_results(workload_dir)
-
-        options = [
-            "--block",
-            "4",
-            "16.1",
-            "16.3",
-            "--iteration-multiplexing",
-            "kernel_launch_params",
-        ]
-        workload_dir_klp = common.get_output_dir(param_id="iter_mplx_params")
-        workload_dirs.append(workload_dir_klp)
-        _ = binary_handler_profile_rocprof_compute(
-            config,
-            workload_dir_klp,
+            workload_dir_multiplexed,
             options,
             check_success=True,
             roof=True,
             app_name="app_laplace_eqn_iter",
         )
-        integration_common.check_csv_files(workload_dir_klp, num_devices, num_kernels)
-        counters_kernel_launch_params = integration_common.read_counter_results(
-            workload_dir_klp
+        integration_common.check_csv_files(
+            workload_dir_multiplexed, num_devices, num_kernels
+        )
+        counters_multiplexed = integration_common.read_counter_results(
+            workload_dir_multiplexed
         )
 
         assert are_stochastic_counters_similar(
-            [counters_kernel, counters_kernel_launch_params], counters_no_multiplexing
+            [counters_multiplexed], counters_no_multiplexing
         )
 
-        assert os.path.exists(f"{workload_dir_klp}/roofline.csv")
-        roofline_df = pd.read_csv(f"{workload_dir_klp}/roofline.csv")
+        assert os.path.exists(f"{workload_dir_multiplexed}/roofline.csv")
+        roofline_df = pd.read_csv(f"{workload_dir_multiplexed}/roofline.csv")
         assert len(roofline_df) >= num_devices
     finally:
         for output_dir in workload_dirs:
@@ -268,8 +192,8 @@ def test_iteration_multiplexing_all_counter_accuracy(
     counters_no_multiplexing = integration_common.read_counter_results(workload_dir)
     common.clean_output_dir(config["cleanup"], workload_dir)
 
-    options = ["--iteration-multiplexing", "kernel"]
-    workload_dir = common.get_output_dir(param_id="iter_mplx_kernel")
+    options = ["--iteration-multiplexing"]
+    workload_dir = common.get_output_dir(param_id="iter_mplx")
     _ = binary_handler_profile_rocprof_compute(
         config,
         workload_dir,
@@ -279,30 +203,14 @@ def test_iteration_multiplexing_all_counter_accuracy(
         app_name="app_laplace_eqn_iter",
     )
     integration_common.check_csv_files(workload_dir, num_devices, num_kernels)
-    counters_kernel = integration_common.read_counter_results(workload_dir)
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-    options = ["--iteration-multiplexing", "kernel_launch_params"]
-    workload_dir = common.get_output_dir(param_id="iter_mplx_params")
-    _ = binary_handler_profile_rocprof_compute(
-        config,
-        workload_dir,
-        options,
-        check_success=True,
-        roof=False,
-        app_name="app_laplace_eqn_iter",
-    )
-    integration_common.check_csv_files(workload_dir, num_devices, num_kernels)
-    counters_kernel_launch_params = integration_common.read_counter_results(
-        workload_dir
-    )
+    counters_multiplexed = integration_common.read_counter_results(workload_dir)
     common.clean_output_dir(config["cleanup"], workload_dir)
 
     assert are_deterministic_counters_equal(
-        [counters_kernel, counters_kernel_launch_params], counters_no_multiplexing
+        [counters_multiplexed], counters_no_multiplexing
     )
     assert are_stochastic_counters_similar(
-        [counters_kernel, counters_kernel_launch_params], counters_no_multiplexing
+        [counters_multiplexed], counters_no_multiplexing
     )
 
 
@@ -315,10 +223,7 @@ def test_iteration_multiplexing_insufficient_dispatches(
     """Verify graceful degradation when dispatches are too few for full
     counter coverage under iteration multiplexing.
     """
-    options = [
-        "--iteration-multiplexing",
-        "kernel_launch_params",
-    ]
+    options = ["--iteration-multiplexing"]
     workload_dir = common.get_output_dir(param_id="iter_mplx_insufficient")
     binary_handler_profile_rocprof_compute(
         config,
@@ -354,7 +259,6 @@ def test_iteration_multiplexing_roofline(
         "--block",
         "4",
         "--iteration-multiplexing",
-        "kernel_launch_params",
     ]
     workload_dir = common.get_output_dir(param_id="iter_mplx_roofline")
     binary_handler_profile_rocprof_compute(

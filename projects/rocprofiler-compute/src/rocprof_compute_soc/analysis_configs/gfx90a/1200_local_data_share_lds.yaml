@@ -23,7 +23,6 @@ Panel Config:
         Bank Conflict Rate:
           value: 3.125 * SUM(SQ_LDS_BANK_CONFLICT) / SUM(SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT)
           unit: Percent
-      comparable: false
       cli_style: simple_bar
   - metric_table:
       id: 1202

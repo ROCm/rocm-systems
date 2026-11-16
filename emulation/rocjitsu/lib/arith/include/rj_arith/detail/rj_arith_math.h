@@ -16,8 +16,8 @@ extern "C" {
 
 // Reciprocal with sticky integer divide-by-zero status. Supports ABS_A, NEG_A,
 // OMOD and CLAMP. Input/output subnormals always flush, independently of guest
-// flush flags. RDNA3 OMOD applies only when guest output flushing is enabled
-// and RJ_ARITH_FP_IEEE_MODE is clear; RDNA4 OMOD applies independently.
+// flush flags. RDNA3 OMOD applies only when RJ_ARITH_FP_IEEE_MODE is clear,
+// whatever the guest flush flags; RDNA4 OMOD applies independently.
 // RDNA3 supports RJ_ARITH_FP_DX10_CLAMP_OFF to preserve NaNs under CLAMP; RDNA4
 // rejects this flag. RDNA4 active zero/subnormal inputs generate INT_DIV0 unless clamped.
 // Existing excp_flag_user bits, including a pre-existing INT_DIV0, survive.
@@ -54,13 +54,13 @@ int rj_arith_v_rcp_iflag_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask,
 // one integer VGPR (only its low five bits select the segment), and D is an
 // FP64 VGPR pair. Only A's encoded exponent affects the lookup, including
 // for infinities and NaNs. ABS_A/NEG_A are accepted and have no effect.
-// Supports OMOD and CLAMP. Both architectures use the captured 1184-bit table. RDNA3 scales before
-// flushing the rounded result; RDNA4 OMOD flushes tiny results before and after scaling. RDNA3
-// disables OMOD when output denormals are preserved or IEEE mode is set. All three guest FP flags
-// are accepted; output flushing applies even without OMOD. Input flushing does not affect the
-// exponent lookup. APIs without _gfx12 use TRAPSTS; _gfx12 uses EXCP_FLAG_USER. Mode 3 reporting is
-// unsupported; loose calls leave FP status unchanged. Supports loose and empirical-exact semantics.
-// Never changes host FP controls. If destination VGPRs alias, the high word is written last.
+// Supports OMOD and CLAMP. Both architectures use the captured 1184-bit table, and OMOD flushes
+// tiny results before and after scaling. RDNA3 disables OMOD when output denormals are preserved
+// or IEEE mode is set. All three guest FP flags are accepted; output flushing applies even without
+// OMOD. Input flushing does not affect the exponent lookup. APIs without _gfx12 use TRAPSTS; _gfx12
+// uses EXCP_FLAG_USER. Mode 3 reporting is unsupported; loose calls leave FP status unchanged.
+// Supports loose and empirical-exact semantics. Never changes host FP controls. If destination
+// VGPRs alias, the high word is written last.
 int rj_arith_v_trig_preop_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
                                   const uint32_t *const *b, uint32_t *trapsts);

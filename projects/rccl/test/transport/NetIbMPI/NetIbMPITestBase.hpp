@@ -1049,49 +1049,65 @@ protected:
         // accept/connect failed" apart from "the peer's listen failed", instead
         // of both ranks reporting the same generic verdict.
         bool localOk = true;
+        ncclResult_t localResult = ncclSuccess;
         const char* localReason = "ok";
 
         if (rank == 0) {
-            localOk = (CreateListenComm(dev, &handle, listenComm) == ncclSuccess)
-                      && *listenComm != nullptr;
+            localResult = CreateListenComm(dev, &handle, listenComm);
+            localOk = (localResult == ncclSuccess) && *listenComm != nullptr;
             handshake.status = localOk ? 1 : 0;
-            if (!localOk) localReason = "listen failed";
+            if (!localOk) {
+                localReason = "listen failed";
+                if (localResult == ncclSuccess) localResult = ncclInternalError;
+            }
             if (localOk) memcpy(handshake.handle, handle, sizeof(handle));
             // Sent even on failure: the peer is waiting for this message.
             MPI_Send(&handshake, sizeof(handshake), MPI_BYTE, peer, 0, MPI_COMM_WORLD);
 
             for (int i = 0; localOk && i < maxAttempts
                             && *recvComm == nullptr; i++) {
-                if (AcceptConnection(*listenComm, recvComm) != ncclSuccess) {
+                localResult = AcceptConnection(*listenComm, recvComm);
+                if (localResult != ncclSuccess) {
                     localOk = false;
                     localReason = "accept failed";
                 }
                 if (localOk && *recvComm == nullptr) usleep(kPollIntervalUs);
             }
-            if (localOk && *recvComm == nullptr) { localOk = false; localReason = "accept timed out"; }
+            if (localOk && *recvComm == nullptr) {
+                localOk = false;
+                localResult = ncclInternalError;
+                localReason = "accept timed out";
+            }
         } else {
             MPI_Recv(&handshake, sizeof(handshake), MPI_BYTE, peer, 0, MPI_COMM_WORLD,
                      MPI_STATUS_IGNORE);
             if (handshake.status != 1) {
                 localOk = false;
+                localResult = ncclRemoteError;
                 localReason = "peer's listen failed";
             } else {
                 memcpy(handle, handshake.handle, sizeof(handle));
                 for (int i = 0; localOk && i < maxAttempts
                                 && *sendComm == nullptr; i++) {
-                    if (ConnectToRemote(dev, &handle, sendComm) != ncclSuccess) {
+                    localResult = ConnectToRemote(dev, &handle, sendComm);
+                    if (localResult != ncclSuccess) {
                         localOk = false;
                         localReason = "connect failed";
                     }
                     if (localOk && *sendComm == nullptr) usleep(kPollIntervalUs);
                 }
-                if (localOk && *sendComm == nullptr) { localOk = false; localReason = "connect timed out"; }
+                if (localOk && *sendComm == nullptr) {
+                    localOk = false;
+                    localResult = ncclInternalError;
+                    localReason = "connect timed out";
+                }
             }
         }
 
         // Test seam: deterministically exercises a post-connect failure propagated by the reduction.
         if (forceSetupFailureAfterConnect_ && localOk) {
             localOk = false;
+            localResult = ncclInternalError;
             localReason = "failure injected after this rank's setup succeeded";
         }
 
@@ -1106,7 +1122,7 @@ protected:
         // This rank is fine but the peer is not: say so rather than repeating "ok".
         if (localOk) localReason = "peer failed setup";
         if (why) *why = localReason;
-        return ncclRemoteError;
+        return localOk ? ncclRemoteError : localResult;
     }
 
     // Non-fatal, rank-agreed variant of SetupCastConnection.

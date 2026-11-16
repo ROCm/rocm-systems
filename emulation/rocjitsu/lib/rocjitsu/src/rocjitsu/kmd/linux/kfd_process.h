@@ -101,7 +101,7 @@ public:
   pid_t client_pid() const { return client_pid_; }
   void set_client_pid(pid_t pid) { client_pid_ = pid; }
 
-  uint32_t open_ref_count() const { return open_ref_count_.load(std::memory_order_relaxed); }
+  uint32_t open_ref_count() const { return open_ref_count_.load(std::memory_order_acquire); }
   void retain_open() { open_ref_count_.fetch_add(1, std::memory_order_relaxed); }
 
   /// @brief Drop one open reference; returns true when the last one is released.
@@ -390,6 +390,14 @@ public:
     return gpu_access_grant_impl(gpu_id, address, size, nullptr);
   }
 
+  /// Bounds of an isolated grant with uniform routing and permissions.
+  GpuGrantDecision gpu_access_grant_bounds(uint32_t gpu_id, uint64_t address, size_t size,
+                                           std::pair<uint64_t, uint64_t> &bounds) const {
+    return gpu_access_grant_impl(gpu_id, address, size, nullptr, false, &bounds);
+  }
+
+  const std::atomic<uint64_t> &gpu_grant_publication() const { return gpu_grant_publication_; }
+
   /// @brief Admit and retain a bounded peer backing for one GPU request.
   /// @details Ordinary CU/SDMA admission avoids owner reference traffic; only
   /// peer preparation asks the same live grant index for a retained backing.
@@ -409,9 +417,10 @@ public:
   }
 
 private:
-  [[nodiscard]] GpuGrantDecision gpu_access_grant_impl(uint32_t gpu_id, uint64_t address,
-                                                       size_t size, GpuBackingLease *backing,
-                                                       bool local_backing = false) const {
+  [[nodiscard]] GpuGrantDecision
+  gpu_access_grant_impl(uint32_t gpu_id, uint64_t address, size_t size, GpuBackingLease *backing,
+                        bool local_backing = false,
+                        std::pair<uint64_t, uint64_t> *bounds = nullptr) const {
     if (size == 0 || size - 1 > UINT64_MAX - address)
       return {};
     std::shared_lock lock(gpu_grants_mutex_);
@@ -456,6 +465,11 @@ private:
       // allocation that overlaps an otherwise valid first one.
       if (range.gpu_va > covered_end || (matched && range.gpu_va < previous_end))
         return decision;
+      if (bounds && !matched && grants->svm_denials.empty() &&
+          (index == 0 || grants->max_end_prefix[index - 1] <= range.gpu_va) &&
+          (index + 1 == grants->ranges.size() || grants->ranges[index + 1].gpu_va >= range_end) &&
+          address >= range.gpu_va && last_byte < range_end)
+        *bounds = {range.gpu_va, range_end};
       if (!matched) {
         decision.domain = range.domain;
         decision.owner_gpu_id = range.owner_gpu_id;
@@ -511,6 +525,13 @@ private:
     }
     if (matched && covered_end <= last_byte)
       return decision;
+    if (bounds && !matched && grants->svm_denials.empty()) {
+      // Queue rings and code can be outside allocated BOs. The gap between
+      // neighboring ranges has one local policy until the next publication.
+      const size_t index = static_cast<size_t>(first - grants->max_end_prefix.begin());
+      *bounds = {index ? grants->max_end_prefix[index - 1] : 0,
+                 index == grants->ranges.size() ? UINT64_MAX : grants->ranges[index].gpu_va};
+    }
     // Queue rings and driver-owned mappings can live outside allocations_.
     // A span crossing grants is valid architecturally, but cannot use one
     // generation to identify every cache line it touches.
@@ -1628,6 +1649,7 @@ public:
   // reference count and internal lock serialize CU readers. Keep the index
   // alive under distributed read ownership instead. This is an innermost
   // lock: readers inspect immutable state and never call back into the VM.
+  std::atomic<uint64_t> gpu_grant_publication_{1};
   mutable util::DistributedSharedMutex gpu_grants_mutex_;
   std::shared_ptr<const GpuGrantIndex> gpu_grants_ = std::make_shared<const GpuGrantIndex>();
   std::shared_ptr<const GpuGrantIndex> deny_all_gpu_grants_ = [] {
@@ -1907,6 +1929,9 @@ private:
   void replace_gpu_grants(std::shared_ptr<const GpuGrantIndex> next) {
     std::unique_lock lock(gpu_grants_mutex_);
     gpu_grants_.swap(next);
+    const uint64_t publication = gpu_grant_publication_.load(std::memory_order_relaxed);
+    if (publication != UINT64_MAX)
+      gpu_grant_publication_.store(publication + 1, std::memory_order_release);
     // The parameter releases the old index after the lock. Its last backing
     // owner can unmap memory and acquire locks outside grant publication.
   }
