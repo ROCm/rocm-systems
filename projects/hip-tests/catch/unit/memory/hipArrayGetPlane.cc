@@ -47,6 +47,8 @@ hipArray_t CreateOrdinaryArray() {
  *  - HIP_VERSION >= 7.1
  */
 TEST_CASE("Unit_hipArrayGetPlane_Negative_NotSupported") {
+  CHECK_IMAGE_SUPPORT;
+
   hipArray_t array = CreateOrdinaryArray();
   hipArray_t plane = nullptr;
 
@@ -68,6 +70,8 @@ TEST_CASE("Unit_hipArrayGetPlane_Negative_NotSupported") {
  *  - HIP_VERSION >= 7.1
  */
 TEST_CASE("Unit_hipArrayGetPlane_Negative_Parameters") {
+  CHECK_IMAGE_SUPPORT;
+
   hipArray_t array = CreateOrdinaryArray();
   hipArray_t plane = nullptr;
 
