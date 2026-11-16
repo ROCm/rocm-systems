@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/vop1.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/decode_factories.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include <memory>
@@ -1714,6 +1715,7 @@ VExpF32Vop1::VExpF32Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {
@@ -1778,6 +1780,7 @@ VLogF32Vop1::VLogF32Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {
@@ -1842,6 +1845,7 @@ VRcpF32Vop1::VRcpF32Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {
@@ -1907,6 +1911,7 @@ VRcpIflagF32Vop1::VRcpIflagF32Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {
@@ -1973,6 +1978,7 @@ VRsqF32Vop1::VRsqF32Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {
@@ -2010,6 +2016,7 @@ VRcpF64Vop1::VRcpF64Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {
@@ -2045,6 +2052,7 @@ VRsqF64Vop1::VRsqF64Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {
@@ -2107,6 +2115,7 @@ VSqrtF32Vop1::VSqrtF32Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {
@@ -2144,6 +2153,7 @@ VSqrtF64Vop1::VSqrtF64Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {
@@ -2206,6 +2216,7 @@ VSinF32Vop1::VSinF32Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {
@@ -2270,6 +2281,7 @@ VCosF32Vop1::VCosF32Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {
@@ -3344,6 +3356,7 @@ VRcpF16Vop1::VRcpF16Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {
@@ -3415,6 +3428,7 @@ VSqrtF16Vop1::VSqrtF16Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {
@@ -3486,6 +3500,7 @@ VRsqF16Vop1::VRsqF16Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {
@@ -3557,6 +3572,7 @@ VLogF16Vop1::VLogF16Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {
@@ -3628,6 +3644,7 @@ VExpF16Vop1::VExpF16Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {
@@ -4206,6 +4223,7 @@ VSinF16Vop1::VSinF16Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {
@@ -4277,6 +4295,7 @@ VCosF16Vop1::VCosF16Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {
@@ -4567,7 +4586,8 @@ VAccvgprMovB32Vop1::VAccvgprMovB32Vop1(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop1VopDppMachineInst *>(inst);
-    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    src0 = Operand(32, OperandType::OPR_SRC_ACCVGPR,
+                   OpSelSrcAccvgpr::OPR_SRC_ACCVGPR_ACC_MIN + dp->vsrc0);
     dpp_ctrl_ = dp->dpp_ctrl;
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
@@ -4575,7 +4595,8 @@ VAccvgprMovB32Vop1::VAccvgprMovB32Vop1(const MachineInst *inst)
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop1VopSdwaMachineInst *>(inst);
-    src0 = Operand(32, sw->s0 ? OperandType::OPR_SRC : OperandType::OPR_VGPR, sw->vsrc0);
+    src0 = Operand(32, OperandType::OPR_SRC_ACCVGPR,
+                   OpSelSrcAccvgpr::OPR_SRC_ACCVGPR_ACC_MIN + sw->vsrc0);
     sdwa_src0_sel_ = sw->src0_sel;
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_src0_neg_ = sw->src0_neg;
@@ -4608,11 +4629,17 @@ DecodeResult decodeVAccvgprMovB32Vop1(const MachineInst *opcode,
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  const auto acc_src = reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0;
+  if (acc_src < 256 && acc_src != amdgpu::SRC_DPP && acc_src != amdgpu::SRC_SDWA) [[unlikely]]
+    return emit_error.emit() << "V_ACCVGPR_MOV_B32 requires an accumulator source";
   if (reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop1VopDppMachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
       return emit_error.emit() << "v_accvgpr_mov_b32: reserved DPP control";
   }
+  if (reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA &&
+      reinterpret_cast<const Vop1VopSdwaMachineInst *>(inst)->s0) [[unlikely]]
+    return emit_error.emit() << "V_ACCVGPR_MOV_B32 requires an accumulator source";
   return std::make_unique<VAccvgprMovB32Vop1>(opcode);
 }
 } // namespace detail
@@ -4654,10 +4681,6 @@ VCvtF32Fp8Vop1::VCvtF32Fp8Vop1(const MachineInst *inst)
     sdwa_src1_abs_ = sw->src1_abs;
     sdwa_src0_operand_ = &src0;
     sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
-    sdwa_dst_sel_ = sw->dst_sel;
-    sdwa_dst_unused_ = sw->dst_unused;
-    sdwa_clamp_ = sw->clamp;
-    sdwa_omod_ = sw->omod;
   }
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -4720,10 +4743,6 @@ VCvtF32Bf8Vop1::VCvtF32Bf8Vop1(const MachineInst *inst)
     sdwa_src1_abs_ = sw->src1_abs;
     sdwa_src0_operand_ = &src0;
     sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
-    sdwa_dst_sel_ = sw->dst_sel;
-    sdwa_dst_unused_ = sw->dst_unused;
-    sdwa_clamp_ = sw->clamp;
-    sdwa_omod_ = sw->omod;
   }
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -4787,10 +4806,6 @@ VCvtPkF32Fp8Vop1::VCvtPkF32Fp8Vop1(const MachineInst *inst)
     sdwa_src1_abs_ = sw->src1_abs;
     sdwa_src0_operand_ = &src0;
     sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
-    sdwa_dst_sel_ = sw->dst_sel;
-    sdwa_dst_unused_ = sw->dst_unused;
-    sdwa_clamp_ = sw->clamp;
-    sdwa_omod_ = sw->omod;
   }
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -4854,10 +4869,6 @@ VCvtPkF32Bf8Vop1::VCvtPkF32Bf8Vop1(const MachineInst *inst)
     sdwa_src1_abs_ = sw->src1_abs;
     sdwa_src0_operand_ = &src0;
     sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
-    sdwa_dst_sel_ = sw->dst_sel;
-    sdwa_dst_unused_ = sw->dst_unused;
-    sdwa_clamp_ = sw->clamp;
-    sdwa_omod_ = sw->omod;
   }
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
@@ -4928,6 +4939,7 @@ VExpLegacyF32Vop1::VExpLegacyF32Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {
@@ -4995,6 +5007,7 @@ VLogLegacyF32Vop1::VLogLegacyF32Vop1(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {

@@ -117,8 +117,9 @@ test('grid point selection survives timeframe and scope changes without legacy m
   await expect(dialog.getByText('Simulator threads', { exact: true })).toHaveCount(0);
   await dialog.getByRole('button', { name: 'Close details', exact: true }).click();
   expect(await selectedRunIds(chart)).toEqual(['fictional-develop-23']);
-  await page.getByRole('button', { name: 'Trailing 7 days' }).click();
-  await expect(page.getByRole('button', { name: 'Trailing 7 days' })).toHaveAttribute('aria-pressed', 'true');
+  await page.getByTestId('benchmark-timeframe').getByRole('combobox').click();
+  await page.getByRole('option', { name: 'Trailing 30 days' }).click();
+  await expect(page.getByTestId('benchmark-timeframe').getByRole('combobox')).toContainText('Trailing 30 days');
   await page.getByRole('checkbox', { name: 'default', exact: true }).uncheck();
   expect(await selectedRunIds(chart)).toEqual(['fictional-develop-23']);
   const series = await readChart(chart, (instance) => {
@@ -139,7 +140,7 @@ test('grid point selection survives timeframe and scope changes without legacy m
 });
 
 test('keyboard result details distinguish positive completion, failed, timeout and unpublished configurations', async ({ page }) => {
-  await openDashboard(page, '/?view=benchmarks&range=ALL');
+  await openDashboard(page, '/?view=benchmarks&benchmarkRange=ALL');
   await page.getByRole('checkbox', { name: 'gfx950', exact: true }).check();
   await ensureGridBenchmark(page, gemm);
   await page.getByRole('button', { name: `Inspect ${gemm} results`, exact: true }).click();
@@ -157,7 +158,7 @@ test('keyboard result details distinguish positive completion, failed, timeout a
     const dialog = await inspectResult(page, name, runId, 'gfx1250', mode);
     await expect(dialog.getByText(status, { exact: true })).toBeVisible();
     await expect(dialog.getByText(runId, { exact: true })).toBeVisible();
-    await expect(dialog.getByText('Run Provenance', { exact: true })).toBeVisible();
+    await expect(dialog.getByText('Run provenance', { exact: true })).toBeVisible();
     await expect(dialog.getByText('Environment', { exact: true })).toBeVisible();
     await expect(dialog.getByText('auxiliary.sdk', { exact: true })).toBeVisible();
     await expect(dialog.getByText('Thread policy', { exact: true }).locator('..')).toContainText(mode);
@@ -176,5 +177,61 @@ test('keyboard result details distinguish positive completion, failed, timeout a
   await expect(page.getByRole('button', { name: 'Close details', exact: true })).toHaveCount(0);
   await expect(absent.getByRole('alert')).toContainText('Unavailable · gfx950 · default · fictional-develop-12');
   await expect(absent.getByRole('alert')).toContainText('not a failed or zero-duration measurement');
-  await expect(absent.getByText('Run Provenance', { exact: true })).toHaveCount(0);
+  await expect(absent.getByText('Run provenance', { exact: true })).toHaveCount(0);
 });
+
+// One commit tested twice: a completed run, then a rerun of the same commit that failed. The chart plots the last run
+// of each commit day (every run on 1W), and Inspect results must offer the runs the chart plots. A failed run is a gap
+// on the line, so the completed run is what shows whether the chart and the inspector agree.
+const COMPLETED = 'fictional-develop-23';
+const RERUN = 'fictional-same-day-rerun';
+
+function publicationWithSameDayRerun() {
+  const publication = createMaintainedPublication();
+  const source = publication.runs.find((entry) => entry.publication.id === COMPLETED);
+  const rerun = structuredClone(source);
+  rerun.publication.id = RERUN;
+  rerun.execution_summary.finished_at = '2026-10-04T09:00:00.000Z';
+  for (const result of rerun.benchmark_results.filter(({ id }) => id === 'a')) {
+    Object.assign(result, { status: 'failed', exit_code: 1, timing_results_s: [], error: 'Fictional rerun failure' });
+  }
+  publication.runs.push(rerun);
+  publication.index.runFiles.push(`runs/default-branch/${RERUN}.json`);
+  return publication;
+}
+
+function chartRunIds(chart) {
+  return readChart(chart, (instance) => [...new Set(instance.getOption().series
+    .filter((series) => series.type === 'line')
+    .flatMap((series) => series.data.flatMap((point) => point?.record ? [point.record.run.runId] : [])))]);
+}
+
+async function inspectorRunIds(page) {
+  await page.getByRole('button', { name: `Inspect ${gemm} results`, exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('combobox', { name: `${gemm} result`, exact: true }).fill('');
+  // The failed rerun is always offered, so waiting for it proves the list has rendered before it is read.
+  await expect(page.getByRole('option').filter({ hasText: RERUN }).first()).toBeVisible();
+  const labels = await page.getByRole('option').allTextContents();
+  await page.keyboard.press('Escape');
+  await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+  return [COMPLETED, RERUN].filter((id) => labels.some((label) => label.includes(id)));
+}
+
+for (const [range, label, completedShown] of [['ALL', 'All available history', false], ['1W', 'Trailing 7 days', true]]) {
+  test(`${label}: the earlier completed run of a same-day rerun is ${completedShown ? 'in both the chart and Inspect results' : 'in neither the chart nor Inspect results'}`, async ({ page }) => {
+    await installPublication(page, { publication: publicationWithSameDayRerun() });
+    await openDashboard(page, `/?view=benchmarks&benchmarkRange=${range}`);
+    await page.getByRole('checkbox', { name: 'gfx1250', exact: true }).check();
+    await ensureGridBenchmark(page, gemm);
+    const chart = card(page, gemm).getByRole('img', { name: `${gemm} duration history` });
+    // A run from the previous day is plotted on every range, so seeing it proves the chart has drawn its points; only
+    // then does the absence of the earlier same-day run mean something.
+    await expect.poll(async () => (await chartRunIds(chart)).includes('fictional-develop-22')).toBe(true);
+    expect((await chartRunIds(chart)).includes(COMPLETED)).toBe(completedShown);
+    const inspectable = await inspectorRunIds(page);
+    expect(inspectable.includes(COMPLETED)).toBe(completedShown);
+    // The failed rerun is always offered to the inspector: it is the day's last run on ALL and one of two on 1W.
+    expect(inspectable.includes(RERUN)).toBe(true);
+  });
+}

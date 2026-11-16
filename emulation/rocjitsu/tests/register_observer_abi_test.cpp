@@ -5,8 +5,8 @@
 #include <cstdio>
 #include <dlfcn.h>
 
-namespace rocjitsu::amdgpu {
-class Wavefront;
+namespace rocjitsu {
+class ThreadContext;
 }
 
 int main(int argc, char **argv) {
@@ -24,7 +24,7 @@ int main(int argc, char **argv) {
     std::fprintf(stderr, "register observer load failed: %s\n", ::dlerror());
     return 1;
   }
-  using Probe = void (*)(rocjitsu::amdgpu::Wavefront *, uint32_t, uint32_t);
+  using Probe = void (*)(rocjitsu::ThreadContext *, uint32_t, uint32_t);
   auto probe = reinterpret_cast<Probe>(::dlsym(observer, "rj_probe_register_observer"));
   if (!probe) {
     std::fprintf(stderr, "register observer entry point missing: %s\n", ::dlerror());

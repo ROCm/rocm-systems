@@ -131,10 +131,10 @@ protected:
     bool OpenSession(WqeLatSession& s, size_t size) {
         // A failed setup only returns from the helper (its ASSERTs cannot end
         // the test), leaving the comm NULL; registering on it would crash.
-        SetupConnectionWithGuard(0, s.pair, s.connGuard);
+        const ncclResult_t setupRet = SetupConnectionWithGuard(0, s.pair, s.connGuard);
         s.comm = (MPIEnvironment::world_rank == 0) ? s.pair.recvComm : s.pair.sendComm;
         EXPECT_NE(s.comm, nullptr) << "connection setup failed";
-        if (!AllRanksOk(s.comm != nullptr)) return false;
+        if (!AllRanksOk(setupRet == ncclSuccess && s.comm != nullptr)) return false;
         s.buf = malloc(size);
         s.bufGuard = makeHostBufferAutoGuard(s.buf);
         const bool ok =

@@ -9,12 +9,7 @@
 Panel Config:
   id: 200
   title: System Speed-of-Light
-  description: >-
-    Top-level performance summary across compute, memory, and cache subsystems
-    for gfx1250 GPUs.
-
   data source:
-
   - metric_table:
       id: 201
       title: System Speed-of-Light

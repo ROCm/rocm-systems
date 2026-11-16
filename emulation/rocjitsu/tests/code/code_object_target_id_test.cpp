@@ -9,7 +9,7 @@
 ///        basic_block_list_create) accepts each target by exercising the
 ///        provider-selected target registry in rj_code.cpp.
 ///
-/// Covers the only currently supported targets (gfx90a, gfx942, gfx950,
+/// Covers the only currently supported targets (gfx90a, gfx942, gfx950, gfx1100,
 /// gfx1200, gfx1201, gfx1250, gfx1251) plus an unknown-machine-flag case to
 /// guard the INVALID sentinel and prevent a future edit from silently aliasing
 /// one target onto another.
@@ -132,8 +132,10 @@ void expect_machine_flag_maps_to_target(uint32_t mach_flag, rj_code_target_id_t 
 void expect_c_api_accepts_target(uint32_t mach_flag, rj_code_target_id_t target) {
   auto image = make_minimal_amdgpu_elf(mach_flag);
 
-  test::ScopedTempFile file("rj-code-object-target-id-");
-  file.write(std::string_view(reinterpret_cast<const char *>(image.data()), image.size()));
+  test::ScopedTempFile file;
+  ASSERT_TRUE(file.initialize("rj-code-object-target-id-"));
+  ASSERT_TRUE(
+      file.write(std::string_view(reinterpret_cast<const char *>(image.data()), image.size())));
 
   rj_code_executable_t *exec = nullptr;
   ASSERT_EQ(rj_code_executable_create(file.path().c_str(), &exec), ROCJITSU_STATUS_SUCCESS);
@@ -186,21 +188,28 @@ void expect_c_api_accepts_target(uint32_t mach_flag, rj_code_target_id_t target)
   rj_code_object_release(obj);
 }
 
-rj_status_t c_api_instruction_list_status(uint32_t mach_flag, rj_code_target_id_t target,
-                                          std::array<uint32_t, 2> words) {
+[[nodiscard]] testing::AssertionResult
+c_api_instruction_list_status(rj_status_t &output, uint32_t mach_flag, rj_code_target_id_t target,
+                              std::array<uint32_t, 2> words) {
   const auto image = make_minimal_amdgpu_elf(mach_flag, words);
-  test::ScopedTempFile file("rj-code-object-target-cache-");
-  file.write(std::string_view(reinterpret_cast<const char *>(image.data()), image.size()));
+  test::ScopedTempFile file;
+  const testing::AssertionResult initialized = file.initialize("rj-code-object-target-cache-");
+  if (!initialized)
+    return initialized;
+  const testing::AssertionResult written =
+      file.write(std::string_view(reinterpret_cast<const char *>(image.data()), image.size()));
+  if (!written)
+    return written;
 
   rj_code_executable_t *exec = nullptr;
-  EXPECT_EQ(rj_code_executable_create(file.path().c_str(), &exec), ROCJITSU_STATUS_SUCCESS);
-  if (exec == nullptr)
-    return ROCJITSU_STATUS_ERROR;
+  const rj_status_t created = rj_code_executable_create(file.path().c_str(), &exec);
+  if (created != ROCJITSU_STATUS_SUCCESS || exec == nullptr)
+    return testing::AssertionFailure() << "Failed to create executable: " << created;
   rj_code_object_t *obj = nullptr;
-  EXPECT_EQ(rj_code_executable_get_code_object(exec, target, 0, &obj), ROCJITSU_STATUS_SUCCESS);
-  if (obj == nullptr) {
+  const rj_status_t loaded = rj_code_executable_get_code_object(exec, target, 0, &obj);
+  if (loaded != ROCJITSU_STATUS_SUCCESS || obj == nullptr) {
     rj_code_executable_destroy(exec);
-    return ROCJITSU_STATUS_ERROR;
+    return testing::AssertionFailure() << "Failed to get code object: " << loaded;
   }
   rj_code_executable_destroy(exec);
 
@@ -210,7 +219,8 @@ rj_status_t c_api_instruction_list_status(uint32_t mach_flag, rj_code_target_id_
     rj_code_inst_list_destroy(instructions);
   rj_code_object_destroy(obj);
   rj_code_object_release(obj);
-  return status;
+  output = status;
+  return testing::AssertionSuccess();
 }
 
 struct CApiListStatuses {
@@ -218,23 +228,29 @@ struct CApiListStatuses {
   rj_status_t basic_blocks;
 };
 
-CApiListStatuses c_api_list_statuses(uint32_t mach_flag, rj_code_target_id_t object_target,
-                                     rj_code_target_id_t decoder_target) {
+[[nodiscard]] testing::AssertionResult c_api_list_statuses(CApiListStatuses &output,
+                                                           uint32_t mach_flag,
+                                                           rj_code_target_id_t object_target,
+                                                           rj_code_target_id_t decoder_target) {
   const auto image = make_minimal_amdgpu_elf(mach_flag);
-  test::ScopedTempFile file("rj-code-object-target-mismatch-");
-  file.write(std::string_view(reinterpret_cast<const char *>(image.data()), image.size()));
+  test::ScopedTempFile file;
+  if (testing::AssertionResult result = file.initialize("rj-code-object-target-mismatch-"); !result)
+    return result;
+  if (testing::AssertionResult result =
+          file.write(std::string_view(reinterpret_cast<const char *>(image.data()), image.size()));
+      !result)
+    return result;
 
   rj_code_executable_t *exec = nullptr;
-  EXPECT_EQ(rj_code_executable_create(file.path().c_str(), &exec), ROCJITSU_STATUS_SUCCESS);
-  if (exec == nullptr)
-    return {ROCJITSU_STATUS_ERROR, ROCJITSU_STATUS_ERROR};
+  const rj_status_t created = rj_code_executable_create(file.path().c_str(), &exec);
+  if (created != ROCJITSU_STATUS_SUCCESS || exec == nullptr)
+    return testing::AssertionFailure() << "Failed to create executable: " << created;
 
   rj_code_object_t *obj = nullptr;
-  EXPECT_EQ(rj_code_executable_get_code_object(exec, object_target, 0, &obj),
-            ROCJITSU_STATUS_SUCCESS);
-  if (obj == nullptr) {
+  const rj_status_t loaded = rj_code_executable_get_code_object(exec, object_target, 0, &obj);
+  if (loaded != ROCJITSU_STATUS_SUCCESS || obj == nullptr) {
     rj_code_executable_destroy(exec);
-    return {ROCJITSU_STATUS_ERROR, ROCJITSU_STATUS_ERROR};
+    return testing::AssertionFailure() << "Failed to get code object: " << loaded;
   }
 
   rj_code_inst_list_t *instructions = nullptr;
@@ -251,7 +267,8 @@ CApiListStatuses c_api_list_statuses(uint32_t mach_flag, rj_code_target_id_t obj
   rj_code_object_destroy(obj);
   rj_code_object_release(obj);
   rj_code_executable_destroy(exec);
-  return {instruction_status, block_status};
+  output = {instruction_status, block_status};
+  return testing::AssertionSuccess();
 }
 
 //==============================================================================
@@ -284,6 +301,20 @@ TEST(GfxCodeObjectTargets, LoadsGfx1250FromMachineFlags) {
 
 TEST(GfxCodeObjectTargets, LoadsGfx1251FromMachineFlags) {
   expect_machine_flag_maps_to_target(EF_AMDGPU_MACH_AMDGCN_GFX1251, ROCJITSU_CODE_TARGET_GFX1251);
+}
+
+TEST(GfxCodeObjectTargets, LoadsGfx1100FromMachineFlags) {
+  expect_machine_flag_maps_to_target(EF_AMDGPU_MACH_AMDGCN_GFX1100, ROCJITSU_CODE_TARGET_GFX1100);
+}
+
+TEST(GfxCodeObjectTargets, LoadsGfx1100FromHipFatbinMetadata) {
+  const std::vector<uint8_t> image = make_minimal_amdgpu_elf(EF_AMDGPU_MACH_AMDGCN_GFX1100);
+  const AmdGpuCodeObject object(image.data(), image.size(), "hip", "gfx1100");
+  ASSERT_TRUE(object.is_valid());
+  EXPECT_EQ(object.target_id(), ROCJITSU_CODE_TARGET_GFX1100);
+
+  const AmdGpuCodeObject mismatched(image.data(), image.size(), "hip", "gfx1201");
+  EXPECT_FALSE(mismatched.is_valid());
 }
 
 TEST(GfxCodeObjectTargets, FatbinMetadataRequiresMatchingConcreteTargetIdentity) {
@@ -339,6 +370,10 @@ TEST(GfxCodeObjectTargets, CApiAcceptsGfx950ForBasicBlockList) {
   expect_c_api_accepts_target(EF_AMDGPU_MACH_AMDGCN_GFX950, ROCJITSU_CODE_TARGET_GFX950);
 }
 
+TEST(GfxCodeObjectTargets, CApiAcceptsGfx1100ForBasicBlockList) {
+  expect_c_api_accepts_target(EF_AMDGPU_MACH_AMDGCN_GFX1100, ROCJITSU_CODE_TARGET_GFX1100);
+}
+
 TEST(GfxCodeObjectTargets, CApiAcceptsGfx1200ForBasicBlockList) {
   expect_c_api_accepts_target(EF_AMDGPU_MACH_AMDGCN_GFX1200, ROCJITSU_CODE_TARGET_GFX1200);
 }
@@ -364,32 +399,38 @@ TEST(GfxCodeObjectTargets, CApiDecoderCacheKeepsGfx1250AndGfx1251Distinct) {
   // Populate the thread-local cache with gfx1251 first. A cache keyed only by
   // the shared CDNA5 descriptor would then incorrectly accept this encoding
   // for gfx1250.
-  EXPECT_EQ(c_api_instruction_list_status(EF_AMDGPU_MACH_AMDGCN_GFX1251,
-                                          ROCJITSU_CODE_TARGET_GFX1251, kGfx1251PackedAdd),
-            ROCJITSU_STATUS_SUCCESS);
-  EXPECT_EQ(c_api_instruction_list_status(EF_AMDGPU_MACH_AMDGCN_GFX1250,
-                                          ROCJITSU_CODE_TARGET_GFX1250, kGfx1251PackedAdd),
-            ROCJITSU_STATUS_ERROR);
+  rj_status_t status{};
+  ASSERT_TRUE(c_api_instruction_list_status(status, EF_AMDGPU_MACH_AMDGCN_GFX1251,
+                                            ROCJITSU_CODE_TARGET_GFX1251, kGfx1251PackedAdd));
+  EXPECT_EQ(status, ROCJITSU_STATUS_SUCCESS);
+  ASSERT_TRUE(c_api_instruction_list_status(status, EF_AMDGPU_MACH_AMDGCN_GFX1250,
+                                            ROCJITSU_CODE_TARGET_GFX1250, kGfx1251PackedAdd));
+  EXPECT_EQ(status, ROCJITSU_STATUS_ERROR);
 }
 
 TEST(GfxCodeObjectTargets, CApiRejectsConcreteTargetMismatchForBothListBuilders) {
-  const CApiListStatuses gfx1250_as_gfx1251 = c_api_list_statuses(
-      EF_AMDGPU_MACH_AMDGCN_GFX1250, ROCJITSU_CODE_TARGET_GFX1250, ROCJITSU_CODE_TARGET_GFX1251);
+  CApiListStatuses gfx1250_as_gfx1251{};
+  ASSERT_TRUE(c_api_list_statuses(gfx1250_as_gfx1251, EF_AMDGPU_MACH_AMDGCN_GFX1250,
+                                  ROCJITSU_CODE_TARGET_GFX1250, ROCJITSU_CODE_TARGET_GFX1251));
   EXPECT_EQ(gfx1250_as_gfx1251.instructions, ROCJITSU_STATUS_INVALID_ARGUMENT);
   EXPECT_EQ(gfx1250_as_gfx1251.basic_blocks, ROCJITSU_STATUS_INVALID_ARGUMENT);
 
-  const CApiListStatuses gfx1251_as_gfx1250 = c_api_list_statuses(
-      EF_AMDGPU_MACH_AMDGCN_GFX1251, ROCJITSU_CODE_TARGET_GFX1251, ROCJITSU_CODE_TARGET_GFX1250);
+  CApiListStatuses gfx1251_as_gfx1250{};
+  ASSERT_TRUE(c_api_list_statuses(gfx1251_as_gfx1250, EF_AMDGPU_MACH_AMDGCN_GFX1251,
+                                  ROCJITSU_CODE_TARGET_GFX1251, ROCJITSU_CODE_TARGET_GFX1250));
   EXPECT_EQ(gfx1251_as_gfx1250.instructions, ROCJITSU_STATUS_INVALID_ARGUMENT);
   EXPECT_EQ(gfx1251_as_gfx1250.basic_blocks, ROCJITSU_STATUS_INVALID_ARGUMENT);
 
-  const CApiListStatuses matching = c_api_list_statuses(
-      EF_AMDGPU_MACH_AMDGCN_GFX1251, ROCJITSU_CODE_TARGET_GFX1251, ROCJITSU_CODE_TARGET_GFX1251);
+  CApiListStatuses matching{};
+  ASSERT_TRUE(c_api_list_statuses(matching, EF_AMDGPU_MACH_AMDGCN_GFX1251,
+                                  ROCJITSU_CODE_TARGET_GFX1251, ROCJITSU_CODE_TARGET_GFX1251));
   EXPECT_EQ(matching.instructions, ROCJITSU_STATUS_SUCCESS);
   EXPECT_EQ(matching.basic_blocks, ROCJITSU_STATUS_SUCCESS);
 
-  const CApiListStatuses legacy_fallback = c_api_list_statuses(
-      /*mach_flag=*/0x1234, ROCJITSU_CODE_TARGET_INVALID, ROCJITSU_CODE_TARGET_GFX1250);
+  CApiListStatuses legacy_fallback{};
+  ASSERT_TRUE(c_api_list_statuses(legacy_fallback,
+                                  /*mach_flag=*/0x1234, ROCJITSU_CODE_TARGET_INVALID,
+                                  ROCJITSU_CODE_TARGET_GFX1250));
   EXPECT_EQ(legacy_fallback.instructions, ROCJITSU_STATUS_SUCCESS);
   EXPECT_EQ(legacy_fallback.basic_blocks, ROCJITSU_STATUS_SUCCESS);
 }
@@ -401,8 +442,10 @@ TEST(GfxCodeObjectTargets, CApiContainsInvalidInstructionFromListBuilders) {
   };
   auto image = make_minimal_amdgpu_elf(EF_AMDGPU_MACH_AMDGCN_GFX1250, invalid_vopd);
 
-  test::ScopedTempFile file("rj-code-object-invalid-inst-");
-  file.write(std::string_view(reinterpret_cast<const char *>(image.data()), image.size()));
+  test::ScopedTempFile file;
+  ASSERT_TRUE(file.initialize("rj-code-object-invalid-inst-"));
+  ASSERT_TRUE(
+      file.write(std::string_view(reinterpret_cast<const char *>(image.data()), image.size())));
 
   rj_code_executable_t *exec = nullptr;
   ASSERT_EQ(rj_code_executable_create(file.path().c_str(), &exec), ROCJITSU_STATUS_SUCCESS);

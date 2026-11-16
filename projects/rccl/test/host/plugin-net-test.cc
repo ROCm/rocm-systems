@@ -1018,10 +1018,9 @@ TEST_F(PluginNetGdrMicrotestIsolated, ADevicesFailureIsRetried) {
   });
 }
 
-// The slot is zeroed before the scan, so one getProperties failure caches "no GDR".
-// Pins AICOMRCCL-2985; a fix (#11701) flips this pin.
-TEST_F(PluginNetGdrMicrotestIsolated, KnownBug_GetPropertiesFailureCachesNoGdr) {
-  RUN_ISOLATED_TEST("PluginNetGdr_KnownBug_GetPropertiesFailureCachesNoGdr", [this]() {
+// A getProperties failure no longer caches "no GDR": the next call retries (AICOMRCCL-2985).
+TEST_F(PluginNetGdrMicrotestIsolated, AGetPropertiesFailureIsRetried) {
+  RUN_ISOLATED_TEST("PluginNetGdr_AGetPropertiesFailureIsRetried", [this]() {
     int gdr = -1;
     g_net[kIb].cudaDevMask = 0b1;
     g_net[kIb].propsResult = ncclRemoteError;
@@ -1029,8 +1028,31 @@ TEST_F(PluginNetGdrMicrotestIsolated, KnownBug_GetPropertiesFailureCachesNoGdr) 
 
     g_net[kIb].propsResult = ncclSuccess;
     ASSERT_EQ(ncclGpuGdrSupport(comm_.get(), &gdr), ncclSuccess);
+    EXPECT_EQ(gdr, 1);
+    EXPECT_EQ(g_net[kIb].devicesCalls, 2);
+  });
+}
+
+// ROCM-27737: a Socket comm's "no GDR" must not answer for a later IB comm on the same GPU.
+TEST_F(PluginNetGdrMicrotestIsolated, ASocketVerdictDoesNotAnswerForIb) {
+  RUN_ISOLATED_TEST("PluginNetGdr_ASocketVerdictDoesNotAnswerForIb", [this]() {
+    ncclNet_t socketNet = FakeNet<kSocket>::Make("Socket");
+    g_net[kSocket].ndev = 2;  // cudaDevMask stays 0: Socket offers NCCL_PTR_CUDA nowhere
+    g_net[kIb].ndev = 2;
+    g_net[kIb].cudaDevMask = 0b1;
+
+    int gdr = -1;
+    comm_->ncclNet = &socketNet;
+    comm_->netPluginIndex = 1;
+    ASSERT_EQ(ncclGpuGdrSupport(comm_.get(), &gdr), ncclSuccess);
     EXPECT_EQ(gdr, 0);
-    EXPECT_EQ(g_net[kIb].devicesCalls, 1);
+
+    // Same process, same GPU, different plugin -- what ncclCommSplit on a Socket parent produces.
+    comm_->ncclNet = &net_;
+    comm_->netPluginIndex = 0;
+    ASSERT_EQ(ncclGpuGdrSupport(comm_.get(), &gdr), ncclSuccess);
+    EXPECT_EQ(gdr, 1);
+    EXPECT_EQ(g_net[kIb].devicesCalls, 1) << "IB was answered from Socket's slot, not probed";
   });
 }
 

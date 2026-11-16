@@ -127,7 +127,7 @@ class TestMissingGroups:
 
 
 # ---------------------------------------------------------------------------
-# Daemon restart resilience (requires GPU)
+# Daemon restart resilience
 # ---------------------------------------------------------------------------
 class TestDaemonResilience:
     """Verify behavior around daemon stop/restart scenarios."""
@@ -141,7 +141,7 @@ class TestDaemonResilience:
                 return s.connect_ex(("localhost", port)) == 0
 
         port = 50099
-        env = os.environ.copy()
+        env = rdcd_server.env
 
         # Only one rdcd can run per host.
         rdcd_server.stop()

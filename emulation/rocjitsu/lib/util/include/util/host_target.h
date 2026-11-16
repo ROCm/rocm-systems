@@ -6,7 +6,9 @@
 
 #pragma once
 
+#ifndef __ASSEMBLER__
 #include <version>
+#endif
 
 /// @brief Architecture predicates retain the host spellings used by existing
 /// execution helpers, including the x86-wide MSVC spelling. All checks use #if
@@ -27,6 +29,15 @@
 #define RJ_HOST_ARCH_AARCH64 1
 #else
 #define RJ_HOST_ARCH_AARCH64 0
+#endif
+
+/// @brief Small-model x86-64 ELF uses raw function addresses and can resolve signed
+/// 32-bit code offsets at link time.
+#if RJ_HOST_ARCH_X86_64 && defined(__ELF__) && defined(__code_model_small__) &&                    \
+    defined(__LP64__) && (defined(__GNUC__) || defined(__clang__))
+#define RJ_HOST_HAS_X86_64_ELF_REL32 1
+#else
+#define RJ_HOST_HAS_X86_64_ELF_REL32 0
 #endif
 
 /// @brief Individual ISA features remain independent, so a partial target does

@@ -8,7 +8,7 @@ The Rocjitsu performance dashboard tracks **how quickly the simulator runs bench
 
 [**Rocjitsu / Simulation Performance Dashboard** :material-open-in-new:](https://rocm.github.io/rocm-systems/rocjitsu-dashboard/){ .dashboard-launch aria-label="Open Rocjitsu Simulation Performance Dashboard (external site)" }
 
-To benchmark a pull request, add the [`rocjitsu-presubmit-benchmarks`](https://github.com/ROCm/rocm-systems/labels/rocjitsu-presubmit-benchmarks) label; the results are published to this dashboard.
+To benchmark a same-repository pull request targeting `develop`, add the [`rocjitsu-presubmit-benchmarks`](https://github.com/ROCm/rocm-systems/labels/rocjitsu-presubmit-benchmarks) label. The PR must match the workflow's [path filters](https://github.com/ROCm/rocm-systems/blob/develop/.github/workflows/rocjitsu-benchmarks.yml); fork PRs are excluded. Results from eligible runs are published to this dashboard.
 
 ## What you can explore
 

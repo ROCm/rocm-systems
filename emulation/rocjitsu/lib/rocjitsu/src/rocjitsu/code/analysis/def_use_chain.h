@@ -37,6 +37,7 @@
 #include "rocjitsu/isa/register_set.h"
 
 #include <cstdint>
+#include <optional>
 
 namespace rocjitsu {
 
@@ -65,6 +66,8 @@ public:
 
   RegisterSet defs; ///< Registers written (ordinary lanes + special singletons).
   RegisterSet uses; ///< Registers read before defs (ordinary lanes + special singletons).
+  std::optional<RegisterRef>
+      conditional_vgpr_def; ///< May be written, but never an unconditional kill.
   bool has_exec_masked_vector_def =
       false; ///< True if the instruction doesn't ignore EXEC and has a vector def.
   bool has_predicated_def = false; ///< True if defs preserve old values on some paths.

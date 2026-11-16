@@ -7,6 +7,7 @@
 #include "NetIbMPITestBase.hpp"
 #include "NetIbCastInspect.hpp"
 #include "multiplane.h"
+#include <cstdlib>
 #include <initializer_list>
 #include <set>
 
@@ -42,7 +43,7 @@ TEST_F(NetIbMPITest, CastEqualWeightsTwoQPsTokenCounts) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(/*dev=*/0, &listenComm, &sendComm, &recvComm);
 
     constexpr size_t kMsgSize = 1024;
     char sendBuf[kMsgSize], recvBuf[kMsgSize];
@@ -103,7 +104,7 @@ TEST_F(NetIbMPITest, CastWeightsDistributionOneRound) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(0, &listenComm, &sendComm, &recvComm);
 
     constexpr int    kTotTokens = 100;
     constexpr size_t kMsgSz     = 64;
@@ -212,7 +213,7 @@ TEST_F(NetIbMPITest, CastTokenSumInvariantAfterConsumption) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(0, &listenComm, &sendComm, &recvComm);
 
     constexpr size_t kMsgSize = 128;
     constexpr int    kNMsgs   = 10;
@@ -265,7 +266,7 @@ TEST_F(NetIbMPITest, CastSingleQPBypassesWrr) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(0, &listenComm, &sendComm, &recvComm);
 
     constexpr size_t kMsgSize = 256;
     char sendBuf[kMsgSize], recvBuf[kMsgSize];
@@ -318,7 +319,7 @@ TEST_F(NetIbMPITest, CastSchedParmsReflectEnvVars) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(0, &listenComm, &sendComm, &recvComm);
 
     constexpr size_t kMsgSize = 64;
     char sendBuf[kMsgSize], recvBuf[kMsgSize];
@@ -364,7 +365,7 @@ TEST_F(NetIbMPITest, CastCursorWrapsAtNqpsBoundary) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(0, &listenComm, &sendComm, &recvComm);
 
     constexpr size_t kMsgSize = 128;
     char sendBuf[kMsgSize], recvBuf[kMsgSize];
@@ -423,7 +424,7 @@ TEST_F(NetIbMPITest, CastMaxQPCount128) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(0, &listenComm, &sendComm, &recvComm);
 
     constexpr size_t kMsgSz  = 32;
     constexpr size_t kBufSz  = (NCCL_IB_MAX_QPS + 1)  * kMsgSz;
@@ -497,7 +498,7 @@ TEST_F(NetIbMPITest, CastFourQPsMonotonicOrder) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(0, &listenComm, &sendComm, &recvComm);
 
     constexpr int    kNMsgs  = 100;
     constexpr size_t kMsgSz  = 32;
@@ -655,7 +656,7 @@ TEST_F(NetIbMPITest, CastSplitDataThresholdBoundary) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(0, &listenComm, &sendComm, &recvComm);
 
     void* comm = (rank == 0) ? recvComm : sendComm;
 
@@ -750,7 +751,7 @@ TEST_F(NetIbMPITest, CastAlternatingWrrNonWrr) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(0, &listenComm, &sendComm, &recvComm);
 
     constexpr int    kPhase  = 10;
     constexpr size_t kMsgSz  = 64;
@@ -880,7 +881,7 @@ TEST_F(NetIbMPITest, CastEnableDisableSplitData) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(0, &listenComm, &sendComm, &recvComm);
 
     void* comm = (rank == 0) ? recvComm : sendComm;
 
@@ -988,7 +989,7 @@ TEST_F(NetIbMPITest, CastEnableDisableSched) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(0, &listenComm, &sendComm, &recvComm);
 
     // Must be strictly below splitDataMin so dataPerQp < splitDataMin for any nqps,
     // ensuring messages take the WRR path (not the split path).
@@ -1167,7 +1168,7 @@ TEST_F(NetIbMPITest, CastSendRecvMultipleSizes) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(0, &listenComm, &sendComm, &recvComm);
 
     constexpr size_t kBufSz = 524288; // 512 KB — fits all test sizes
     std::vector<char> sendBuf(kBufSz);
@@ -1324,7 +1325,7 @@ TEST_F(NetIbMPITest, CastLargeTransfer) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(0, &listenComm, &sendComm, &recvComm);
 
     constexpr size_t kMsgSz = kLargeBufferSize; // 16 MB
     std::vector<char> sendBuf(kMsgSz);
@@ -1435,7 +1436,7 @@ TEST_F(NetIbMPITest, CastSendRecvZeroSize) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(0, &listenComm, &sendComm, &recvComm);
 
     constexpr size_t kRegSz = 64;
     char buf[kRegSz];
@@ -1686,13 +1687,11 @@ TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
         }
     });
 
-    // Wrapped, because the helper ends in a fatal assertion: without this a failed setup
-    // returns from the helper and not from here, and the loop would work through the
-    // remaining connections at up to 30 s each instead of reporting what went wrong.
-    for (int c = 0; c < kNConns; c++) {
-        ASSERT_NO_FATAL_FAILURE(
-            SetupCastConnection(/*dev=*/0, &listenComms[c], &sendComms[c], &recvComms[c]));
-    }
+    // The macro asserts on the returned status, so a failed setup returns from this body
+    // rather than from the helper: the loop stops at the connection that failed instead of
+    // working through the rest at up to 30 s each, and the guard above closes what exists.
+    for (int c = 0; c < kNConns; c++)
+        ASSERT_SETUP_CAST_CONNECTION(/*dev=*/0, &listenComms[c], &sendComms[c], &recvComms[c]);
 
     // Scale msgs per connection inversely with connection count so total work stays constant.
     constexpr int kNMsgsTotal = 10000;
@@ -1941,7 +1940,7 @@ TEST_F(NetIbMPITest, CastGrhSetOnRoceQp) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(0, &listenComm, &sendComm, &recvComm);
 
     constexpr size_t kMsgSize = 1024;
     char sendBuf[kMsgSize] = {}, recvBuf[kMsgSize] = {};
@@ -2024,7 +2023,7 @@ TEST_F(NetIbMPITest, CastSubnetAwareRoutingSameSubnet) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(0, &listenComm, &sendComm, &recvComm);
 
     constexpr size_t kMsgSize = 1024;
     char sendBuf[kMsgSize] = {}, recvBuf[kMsgSize] = {};
@@ -2087,7 +2086,7 @@ TEST_F(NetIbMPITest, CastMultiplaneConnectionSmoke) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(/*dev=*/0, &listenComm, &sendComm, &recvComm);
 
     // Data integrity: fill with a known pattern, verify after transfer.
     constexpr size_t kMsgSize = 4096;
@@ -2139,7 +2138,7 @@ TEST_F(NetIbMPITest, CastMultiplaneMultiSizeTransfer) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(/*dev=*/0, &listenComm, &sendComm, &recvComm);
 
     constexpr size_t kMaxSize = 4 * 1024 * 1024;  // 4 MB
     std::vector<char> sendBuf(kMaxSize);
@@ -2201,7 +2200,7 @@ TEST_F(NetIbMPITest, CastMultiplaneDisabledNoRegression) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(/*dev=*/0, &listenComm, &sendComm, &recvComm);
 
     constexpr size_t kMsgSize = 2048;
     char sendBuf[kMsgSize] = {}, recvBuf[kMsgSize] = {};
@@ -2303,7 +2302,7 @@ TEST_F(NetIbMPITest, CastRegistrationRejectsBadArguments) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm));
+    ASSERT_SETUP_CAST_CONNECTION(/*dev=*/0, &listenComm, &sendComm, &recvComm);
 
     const int rank = MPIEnvironment::world_rank;
     void* comm = (rank == 0) ? recvComm : sendComm;
@@ -2355,7 +2354,7 @@ TEST_F(NetIbMPITest, CastUdmaPinningVerify) {
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
 
-    SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm);
+    ASSERT_SETUP_CAST_CONNECTION(/*dev=*/0, &listenComm, &sendComm, &recvComm);
 
     // ── UDMA state readback (sender side only) ──
     // Rank 1 is the sender; rank 0 reads from recvComm (which also works, but
@@ -2505,7 +2504,7 @@ TEST_F(NetIbMPITest, CastUdmaPinningSharingVerify) {
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
-    SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm);
+    ASSERT_SETUP_CAST_CONNECTION(/*dev=*/0, &listenComm, &sendComm, &recvComm);
 
     // ── UDMA state readback ──
     void* myComm = (rank == 0) ? recvComm : sendComm;
@@ -2584,6 +2583,101 @@ TEST_F(NetIbMPITest, CastUdmaPinningSharingVerify) {
 
     MPI_Barrier(MPI_COMM_WORLD);
     TeardownConnection(recvComm, listenComm, sendComm, mhandle);
+}
+
+
+// A connect-side failure must produce a rank-agreed setup error without a hang.
+// =============================================================================
+TEST_F(NetIbMPITest, CastSetupUnilateralConnectFailureReported) {
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                            false, kMinGpusPerNode, kNoNodeLimit);
+
+    // Subnet-aware routing remaps the invalid device used by this test.
+    const char* subnetAware = getenv("NCCL_IB_SUBNET_AWARE_ROUTING");
+    int skip = (subnetAware && strtoll(subnetAware, nullptr, 0) != 0) ? 1 : 0;
+    MPI_Allreduce(MPI_IN_PLACE, &skip, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+    if (skip) {
+        GTEST_SKIP() << "NCCL_IB_SUBNET_AWARE_ROUTING remaps an out-of-range device onto a "
+                        "subnet-matched one, so the connect-side failure cannot be forced";
+    }
+
+    net_ = &netIbCast;
+    // Agree before setup because init may fail after device discovery succeeds.
+    const ncclResult_t initRet = InitNetIb();
+    EXPECT_EQ(initRet, ncclSuccess) << "InitNetIb failed";
+    int ndev = 0;
+    const ncclResult_t devRet = GetDeviceCount(&ndev);
+    EXPECT_EQ(devRet, ncclSuccess) << "GetDeviceCount failed";
+    int ready = (initRet == ncclSuccess && devRet == ncclSuccess && ndev > 0) ? 1 : 0;
+    MPI_Allreduce(MPI_IN_PLACE, &ready, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+    ASSERT_EQ(ready, 1) << "init or device discovery failed on at least one rank";
+
+    const int rank = MPIEnvironment::world_rank;
+    // Only rank 1 receives an out-of-range device.
+    const int dev = (rank == 0) ? 0 : ndev;
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    std::string why;
+    // A short timeout exercises the listener watchdog.
+    const ncclResult_t setupRet =
+        SetupCastConnection(dev, &listenComm, &sendComm, &recvComm, &why, /*timeoutMs=*/1000);
+
+    EXPECT_NE(setupRet, ncclSuccess)
+        << "setup with an out-of-range connect-side device must not report success";
+    EXPECT_EQ(why.empty(), false) << "a failed setup must explain itself";
+
+    EXPECT_EQ(listenComm, nullptr);
+    EXPECT_EQ(sendComm, nullptr);
+    EXPECT_EQ(recvComm, nullptr);
+
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
+// A post-connect failure on rank 1 must reach its otherwise healthy peer.
+// =============================================================================
+TEST_F(NetIbMPITest, CastSetupPeerFailurePropagates) {
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                            false, kMinGpusPerNode, kNoNodeLimit);
+
+    net_ = &netIbCast;
+    // Agree before setup because init may fail after device discovery succeeds.
+    const ncclResult_t initRet = InitNetIb();
+    EXPECT_EQ(initRet, ncclSuccess) << "InitNetIb failed";
+    int ndev = 0;
+    const ncclResult_t devRet = GetDeviceCount(&ndev);
+    EXPECT_EQ(devRet, ncclSuccess) << "GetDeviceCount failed";
+    int ready = (initRet == ncclSuccess && devRet == ncclSuccess && ndev > 0) ? 1 : 0;
+    MPI_Allreduce(MPI_IN_PLACE, &ready, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+    ASSERT_EQ(ready, 1) << "init or device discovery failed on at least one rank";
+
+    const int rank = MPIEnvironment::world_rank;
+    forceSetupFailureAfterConnect_ = (rank == 1);
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    std::string why;
+    const ncclResult_t setupRet =
+        SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm, &why);
+    forceSetupFailureAfterConnect_ = false;
+
+    EXPECT_NE(setupRet, ncclSuccess)
+        << "a failure on one rank must fail setup on both";
+
+    if (rank == 0) {
+        EXPECT_EQ(why, "peer failed setup")
+            << "the healthy rank should report the peer's failure, not one of its own";
+    } else {
+        EXPECT_EQ(why, "failure injected after this rank's setup succeeded");
+    }
+
+    EXPECT_EQ(listenComm, nullptr);
+    EXPECT_EQ(sendComm, nullptr);
+    EXPECT_EQ(recvComm, nullptr);
+
+    MPI_Barrier(MPI_COMM_WORLD);
 }
 
 #endif // MPI_TESTS_ENABLED

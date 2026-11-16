@@ -14,6 +14,15 @@
 
 namespace rocjitsu::amdgpu {
 
+/// @brief Owner-held progress for a ring fetch that may post one read event.
+struct CircularRingReadProgress {
+  std::size_t completed_bytes = 0;
+  std::size_t segment_begin = 0;
+  std::size_t segment_bytes = 0;
+  std::size_t segment_progress = 0;
+  VmTransferToken transfer_token;
+};
+
 /// @brief Reads a logical byte range through the wrap point of a GPU ring.
 /// @details The caller retains @p completed_bytes across Unavailable results.
 /// Progress advances only for physical reads that completed, preventing replay
@@ -26,6 +35,9 @@ public:
   [[nodiscard]] VmAccessOutcome read(const GpuVmAccess &access, uint64_t cursor,
                                      std::span<std::byte> bytes,
                                      std::size_t &completed_bytes) const;
+  [[nodiscard]] VmAccessOutcome read(const GpuVmAccess &access, uint64_t cursor,
+                                     std::span<std::byte> bytes, CircularRingReadProgress &progress,
+                                     const VmTransferIngress &ingress = {}) const;
   [[nodiscard]] VmAccessOutcome read(const GpuVmAccess &access, uint64_t cursor,
                                      std::span<std::byte> bytes) const;
 

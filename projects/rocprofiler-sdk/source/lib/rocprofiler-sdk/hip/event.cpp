@@ -1357,6 +1357,18 @@ update_table<::HipDispatchTable>(::HipDispatchTable* table)
 {
     if(table == nullptr) return;
 
+    // The wrappers only feed HIP event tracing and add work to every event record/wait.
+    auto needs_event_wrappers = []() {
+        for(const auto& itr : context::get_registered_contexts())
+        {
+            if(itr->is_tracing_one_of(ROCPROFILER_CALLBACK_TRACING_HIP_EVENT,
+                                      ROCPROFILER_BUFFER_TRACING_HIP_EVENT))
+                return true;
+        }
+        return false;
+    };
+    if(!needs_event_wrappers()) return;
+
     auto& saved = get_saved_table();
 
     // Access table fields only after confirming they exist within the runtime table's

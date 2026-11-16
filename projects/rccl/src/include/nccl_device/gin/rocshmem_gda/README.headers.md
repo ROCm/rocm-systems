@@ -40,7 +40,7 @@ during RCCL configuration and installation, from CMakeLists.txt.
 ### rocSHMEM internals / miscellaneous
 * `gda/endian.hpp`
 * `gda/gda_enums.hpp`
-* `rocshmem/rocshmem_config.h`
+* `gda_config.h` (rccl-generated; the copied headers' `rocshmem/rocshmem_config.h` include is rewritten to this)
 * `bit.hpp`
 * `constmem.hpp`
 * `constants.hpp`
