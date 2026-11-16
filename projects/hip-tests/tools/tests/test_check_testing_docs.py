@@ -652,14 +652,35 @@ class CheckTestingDocsTest(unittest.TestCase):
         )
 
     def test_ci_lane_in_repo_stale_value_is_reported(self):
+        # An in-root lane path that resolves nowhere is a stale pointer. The path
+        # stays within the supplied --root boundary so the failure is the missing
+        # file, not a traversal escape (escape is covered separately below).
         broken = VALID_INVENTORY.replace(
             "      ci_lane:\n        external: documented elsewhere\n",
             "      ci_lane:\n"
-            "        in_repo: ../../.github/workflows/does-not-exist.yml\n", 1)
+            "        in_repo: workflows/does-not-exist.yml\n", 1)
         _write_docs(self.root, {"test_inventory.yaml": broken})
         results, _ = checker.validate(root=str(self.root))
         self.assertTrue(
             any("execution.ci_lane.in_repo path missing" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_ci_lane_in_repo_escaping_supplied_root_is_rejected(self):
+        # With an explicit --root the supplied root is the boundary: an in_repo
+        # lane that traverses above it (the real-repo ``../../.github`` form, which
+        # is legitimate only when the component sits two levels under the repo
+        # root) escapes the temporary root and must be rejected, not silently
+        # resolved against some ancestor of the temp directory.
+        broken = VALID_INVENTORY.replace(
+            "      ci_lane:\n        external: documented elsewhere\n",
+            "      ci_lane:\n"
+            "        in_repo: ../../.github/workflows/hip.yml\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("execution.ci_lane.in_repo escapes repository root" in err
                 for err in results["inventory"]),
             msg=results["inventory"],
         )
@@ -1819,6 +1840,229 @@ class CheckTestingDocsTest(unittest.TestCase):
         _write_docs(self.root, {"test_inventory.yaml": broken})
         results, _ = checker.validate(root=str(self.root))
         self.assertEqual(_all_errors(results), [], msg=results)
+
+
+    # -- supplied --root is the path boundary (temporary-root escape) --------
+
+    def test_supplied_root_is_boundary_rejects_escape_to_existing_file(self):
+        # Regression: with an explicit --root the supplied root is the escape
+        # boundary. Place a real file in the PARENT of the supplied root and
+        # reference it with a traversal from a source path. The file genuinely
+        # exists, so under the old ``parents[1]`` boundary it would resolve and be
+        # silently accepted; a correct boundary rejects the escape even though the
+        # target is present.
+        component = self.root / "component"
+        component.mkdir()
+        (self.root / "escape_target.txt").write_text("x\n", encoding="utf-8")
+        broken = VALID_INVENTORY.replace(
+            '      paths:\n        - "external: outside-this-repo"\n',
+            "      paths:\n        - ../escape_target.txt\n", 1)
+        _write_docs(component, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(component))
+        self.assertTrue(
+            any("source path escapes repository root" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_default_boundary_allows_sibling_tree_but_root_does_not(self):
+        # Without an explicit root the boundary is two levels above the component
+        # directory, so a component at <root>/a/b may legitimately reference
+        # <root>/sibling via ``../../sibling`` (the real ``../../.github``
+        # pattern). Supplying that same component as --root makes it the boundary,
+        # which rejects the identical traversal.
+        comp = self.root / "a" / "b"
+        comp.mkdir(parents=True)
+        (self.root / "sibling").mkdir()
+        self.assertEqual(
+            checker._path_location_status(str(comp), "../../sibling"), "ok")
+        self.assertEqual(
+            checker._path_location_status(
+                str(comp), "../../sibling", repo_root=str(comp)),
+            "outside")
+
+    # -- related_restructuring: non-empty string + target path ---------------
+
+    def _with_related(self, value):
+        """Return the valid inventory with a related_restructuring line appended."""
+        return VALID_INVENTORY.replace(
+            "    disposition_rationale: Baseline contract coverage.\n",
+            "    disposition_rationale: Baseline contract coverage.\n"
+            "    related_restructuring: {}\n".format(value), 1)
+
+    def test_related_restructuring_valid_target_resolves(self):
+        # A present pointer that names a real in-root document resolves cleanly.
+        _write_docs(self.root,
+                    {"test_inventory.yaml": self._with_related("TEST_RESTRUCTURING.md")})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertEqual(results["inventory"], [], msg=results["inventory"])
+
+    def test_related_restructuring_empty_string_is_reported(self):
+        _write_docs(self.root, {"test_inventory.yaml": self._with_related('""')})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("related_restructuring must be a non-empty string" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_related_restructuring_non_string_scalar_is_reported(self):
+        _write_docs(self.root, {"test_inventory.yaml": self._with_related("5")})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("related_restructuring must be a non-empty string" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_related_restructuring_list_is_reported(self):
+        _write_docs(self.root,
+                    {"test_inventory.yaml": self._with_related("[a, b]")})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("related_restructuring must be a non-empty string" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_related_restructuring_mapping_is_reported(self):
+        # A mapping value is appended as a nested block under the key.
+        broken = VALID_INVENTORY.replace(
+            "    disposition_rationale: Baseline contract coverage.\n",
+            "    disposition_rationale: Baseline contract coverage.\n"
+            "    related_restructuring:\n      doc: TEST_RESTRUCTURING.md\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("related_restructuring must be a non-empty string" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_related_restructuring_missing_target_is_reported(self):
+        _write_docs(self.root,
+                    {"test_inventory.yaml": self._with_related("NO_SUCH_DOC.md")})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("related_restructuring missing" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_related_restructuring_absolute_path_is_reported(self):
+        _write_docs(self.root, {"test_inventory.yaml": self._with_related("/tmp")})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("related_restructuring must be repository-relative" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_related_restructuring_escaping_traversal_is_reported(self):
+        _write_docs(self.root,
+                    {"test_inventory.yaml": self._with_related("../../../../tmp")})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("related_restructuring escapes repository root" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    # -- execution list-element validation -----------------------------------
+
+    def test_platforms_entry_must_be_nonempty_string(self):
+        broken = VALID_INVENTORY.replace(
+            "      platforms: [linux]\n", "      platforms: ['']\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("execution.platforms entry must be a non-empty string" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_backends_entry_null_is_reported(self):
+        broken = VALID_INVENTORY.replace(
+            "      backends: [amd]\n", "      backends: [~]\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("execution.backends entry must be a non-empty string" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_prerequisites_entry_non_string_is_reported(self):
+        broken = VALID_INVENTORY.replace(
+            "      prerequisites: [HIP runtime and device]\n",
+            "      prerequisites: [5]\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("execution.prerequisites entry must be a non-empty string" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    def test_ctest_labels_entry_must_be_nonempty_string(self):
+        # ctest_labels may be empty, but a label it does carry must be a non-empty
+        # scalar string.
+        broken = VALID_INVENTORY.replace(
+            "      ctest_labels: [contract]\n", "      ctest_labels: ['']\n", 1)
+        _write_docs(self.root, {"test_inventory.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("execution.ctest_labels entry must be a non-empty string" in err
+                for err in results["inventory"]),
+            msg=results["inventory"],
+        )
+
+    # -- pairwise current_inventory: nonempty or explicit gap metadata -------
+
+    def test_pairwise_empty_current_inventory_without_gap_is_reported(self):
+        pc = {"id": "p1", "category": "api_x_behavior", "pair": ["a.b", "c.d"],
+              "status": "s", "priority": "low", "rationale": "r",
+              "current_inventory": [], "gap_status": "x"}
+        model = self._coverage_model(axes=[], classes=[], pairwise_checks=[pc])
+        errors, _, _ = checker.check_coverage_model(model, set(), str(self.root))
+        self.assertTrue(
+            any("must name a non-empty current_inventory or carry explicit gap"
+                in err for err in errors),
+            msg=errors)
+
+    def test_pairwise_empty_current_inventory_with_gap_metadata_passes(self):
+        # An explicit gap acknowledgement lets a check document a known uncovered
+        # interaction without silently claiming empty coverage.
+        pc = {"id": "p1", "category": "api_x_behavior", "pair": ["a.b", "c.d"],
+              "status": "s", "priority": "low", "rationale": "r",
+              "current_inventory": [], "gap_status": "x", "gap": True}
+        model = self._coverage_model(axes=[], classes=[], pairwise_checks=[pc])
+        errors, _, _ = checker.check_coverage_model(model, set(), str(self.root))
+        self.assertFalse(
+            any("must name a non-empty current_inventory" in err for err in errors),
+            msg=errors)
+
+    def test_pairwise_empty_current_inventory_in_full_model_is_reported(self):
+        # The same rule fires through the full validate() path: emptying one
+        # pairwise check's current_inventory (with no gap marker) is reported.
+        broken = VALID_COVERAGE.replace(
+            "      pair: [api_surface.memory, behavior.data_integrity]\n"
+            "      status: review_priority\n"
+            "      priority: high\n"
+            "      rationale: Round-trips preserve bytes, not only return success.\n"
+            "      current_inventory: [suite-one]\n",
+            "      pair: [api_surface.memory, behavior.data_integrity]\n"
+            "      status: review_priority\n"
+            "      priority: high\n"
+            "      rationale: Round-trips preserve bytes, not only return success.\n"
+            "      current_inventory: []\n", 1)
+        _write_docs(self.root, {"test_coverage_model.yaml": broken})
+        results, _ = checker.validate(root=str(self.root))
+        self.assertTrue(
+            any("must name a non-empty current_inventory or carry explicit gap"
+                in err for err in results["coverage_model"]),
+            msg=results["coverage_model"],
+        )
 
 
 if __name__ == "__main__":

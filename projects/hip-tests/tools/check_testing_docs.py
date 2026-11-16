@@ -54,8 +54,10 @@ for itself (workstreams WS-1 and WS-2):
       scalars (``name`` / ``domain`` / ``purpose`` / ``oracle`` /
       ``disposition_rationale``) are non-empty strings, ``execution.cadence`` is a
       non-empty string, and ``execution.platforms`` / ``backends`` /
-      ``prerequisites`` are non-empty lists (``ctest_labels`` may be an empty list
-      for a build-free static check, so it is only required to be a list);
+      ``prerequisites`` are non-empty lists of non-empty scalar strings
+      (``ctest_labels`` may be an empty list for a build-free static check, so it
+      is only required to be a list, but any label it does carry must likewise be
+      a non-empty scalar string);
       ``execution.ci_lane`` is a mapping that must name a lane - it carries a
       non-empty ``in_repo`` path or a non-empty ``external`` string (a ci_lane
       with neither points at no CI coverage and is a schema error).
@@ -86,7 +88,10 @@ for itself (workstreams WS-1 and WS-2):
       inventory suite id;
     - every coverage class declares a non-empty ``axes`` list and a non-empty
       ``current_inventory`` list, and every pairwise check's ``pair`` names exactly
-      two ``axis.class`` references;
+      two ``axis.class`` references; every pairwise check must likewise name a
+      non-empty ``current_inventory`` or explicitly acknowledge an uncovered
+      interaction via ``gap`` metadata (so an empty coverage claim is a documented
+      gap rather than a silent hole);
     - every coverage class carries its descriptive fields with a usable value:
       ``intent`` / ``gap_status`` are non-empty strings, ``expected_test_kinds`` is
       a non-empty list, and ``risk`` is within the documented high/medium/low
@@ -144,7 +149,10 @@ for itself (workstreams WS-1 and WS-2):
       reported;
     - every in-page ``#anchor`` and ``file.md#anchor`` fragment resolves to a
       heading in the target Markdown document;
-    - every ``related_restructuring`` pointer in the inventory resolves.
+    - every ``related_restructuring`` pointer in the inventory, when present, is a
+      non-empty string that resolves on disk within the boundary root (an empty or
+      non-string value, an absolute path, or a traversal outside the boundary root
+      is a schema error).
 
 This is a pure static consistency check: it needs only Python 3 and PyYAML, no
 ROCm, GPU, or build, so it is safe as a fast gate. Paths are taken as arguments
@@ -399,28 +407,49 @@ def _repository_root(component_dir):
     return Path(component_dir).resolve().parents[1]
 
 
-def _path_location_status(component_dir, rel_path):
-    """Classify a repository path as usable, absolute, or outside its repository."""
+def _boundary_root(component_dir, repo_root):
+    """Return the directory a repository path may not resolve outside of.
+
+    When the caller supplies an explicit ``repo_root`` (the ``--root`` it named),
+    that root is itself the boundary: an arbitrary temporary root is self-
+    contained, so a path may not traverse above it. When no root is supplied the
+    boundary defaults to the repository root two levels above the component
+    directory, which is what lets the real documents reference sibling trees such
+    as ``../../.github`` from ``projects/hip-tests``.
+    """
+    if repo_root is not None:
+        return Path(repo_root).resolve()
+    return _repository_root(component_dir)
+
+
+def _path_location_status(component_dir, rel_path, repo_root=None):
+    """Classify a repository path as usable, absolute, or outside its boundary.
+
+    The boundary is the supplied ``repo_root`` when given and otherwise the
+    repository root two levels above the component directory (see
+    ``_boundary_root``). An absolute path is rejected outright; a relative path
+    that resolves outside the boundary is ``outside``.
+    """
     path = Path(rel_path)
     if path.is_absolute():
         return "absolute"
     resolved = (Path(component_dir) / path).resolve()
     try:
-        resolved.relative_to(_repository_root(component_dir))
+        resolved.relative_to(_boundary_root(component_dir, repo_root))
     except ValueError:
         return "outside"
     return "ok"
 
 
-def _path_exists(component_dir, rel_path):
-    """True when rel_path resolves to an existing path within this repository."""
-    return (_path_location_status(component_dir, rel_path) == "ok"
+def _path_exists(component_dir, rel_path, repo_root=None):
+    """True when rel_path resolves to an existing path within the boundary root."""
+    return (_path_location_status(component_dir, rel_path, repo_root) == "ok"
             and (Path(component_dir) / rel_path).resolve().exists())
 
 
-def _path_is_file(component_dir, rel_path):
-    """True when rel_path resolves to an existing file within this repository."""
-    return (_path_location_status(component_dir, rel_path) == "ok"
+def _path_is_file(component_dir, rel_path, repo_root=None):
+    """True when rel_path resolves to an existing file within the boundary root."""
+    return (_path_location_status(component_dir, rel_path, repo_root) == "ok"
             and (Path(component_dir) / rel_path).resolve().is_file())
 
 
@@ -450,14 +479,16 @@ def _glob_matches(component_dir, pattern):
         return False
 
 
-def _resolve_repo_path(component_dir, value):
+def _resolve_repo_path(component_dir, value, repo_root=None):
     """Classify a repository-path-bearing field value.
 
     Returns one of ``external`` (an external: marker or URL, preserved and not
     checked), ``empty`` (no path token), ``ok`` (the leading path token resolves
     on disk, by literal existence or glob match), or ``missing``. A token carrying
     a glob metacharacter is resolved by recursive glob; otherwise it is
-    existence-checked relative to the component directory.
+    existence-checked relative to the component directory. The boundary the token
+    may not escape is the supplied ``repo_root`` when given (see
+    ``_path_location_status``).
     """
     stripped = value.strip()
     if _looks_external(stripped):
@@ -465,15 +496,15 @@ def _resolve_repo_path(component_dir, value):
     token = _path_token(stripped)
     if not token:
         return "empty"
-    location = _path_location_status(component_dir, token)
+    location = _path_location_status(component_dir, token, repo_root)
     if location != "ok":
         return location
     if any(ch in token for ch in _GLOB_CHARS):
         return "ok" if _glob_matches(component_dir, token) else "missing"
-    return "ok" if _path_exists(component_dir, token) else "missing"
+    return "ok" if _path_exists(component_dir, token, repo_root) else "missing"
 
 
-def _check_repo_path_field(component_dir, value, label, errors):
+def _check_repo_path_field(component_dir, value, label, errors, repo_root=None):
     """Validate one repository-path-bearing field value.
 
     Appends a deterministic error when the value is not a string, is empty, or
@@ -484,7 +515,7 @@ def _check_repo_path_field(component_dir, value, label, errors):
     if not isinstance(value, str):
         errors.append("{} must be a string path: {!r}".format(label, value))
         return 0
-    status = _resolve_repo_path(component_dir, value)
+    status = _resolve_repo_path(component_dir, value, repo_root)
     if status == "empty":
         errors.append("{} is empty".format(label))
         return 0
@@ -568,11 +599,14 @@ def _vocab_values(vocab, name):
     return {item for item in value if isinstance(item, (str, int, float, bool))}
 
 
-def check_inventory(inventory, component_dir):
+def check_inventory(inventory, component_dir, repo_root=None):
     """Validate the suite inventory.
 
     Returns (errors, suite_ids, incident_refs, counts) where counts is a dict
-    with 'records' and 'refs' (references successfully resolved).
+    with 'records' and 'refs' (references successfully resolved). ``repo_root``,
+    when given, is the boundary a repository path may not resolve outside of (see
+    ``_path_location_status``); it defaults to the repository root two levels
+    above the component directory.
     """
     errors = []
     suite_ids = set()
@@ -618,7 +652,7 @@ def check_inventory(inventory, component_dir):
             for key in sorted(sot):
                 refs_ok += _check_repo_path_field(
                     component_dir, sot.get(key),
-                    "source_of_truth {!r}".format(key), errors)
+                    "source_of_truth {!r}".format(key), errors, repo_root)
 
     vocab = inventory.get("vocabularies")
     if "vocabularies" in inventory and not isinstance(vocab, dict):
@@ -715,19 +749,36 @@ def check_inventory(inventory, component_dir):
                 errors.append(
                     "suite {!r} execution.cadence must be a non-empty string".format(sid))
             # platforms / backends / prerequisites enumerate where and how the
-            # suite runs; each must be a non-empty list. ctest_labels may legitimately
-            # be empty (a build-free static check registers no CTest labels), so it is
-            # only required to be a list.
+            # suite runs; each must be a non-empty list whose entries are each a
+            # non-empty scalar string (a null, blank, or structured entry carries
+            # no usable value and is a schema error). ctest_labels may legitimately
+            # be empty (a build-free static check registers no CTest labels), so it
+            # is only required to be a list, but any label it does carry must
+            # likewise be a non-empty scalar string.
             for field in ("platforms", "backends", "prerequisites"):
-                if field in execution and (
-                        not isinstance(execution.get(field), list)
-                        or not execution.get(field)):
+                if field in execution:
+                    value = execution.get(field)
+                    if not isinstance(value, list) or not value:
+                        errors.append(
+                            "suite {!r} execution.{} must be a non-empty list".format(
+                                sid, field))
+                    else:
+                        for entry in value:
+                            if not _nonempty_str(entry):
+                                errors.append(
+                                    "suite {!r} execution.{} entry must be a non-empty "
+                                    "string: {!r}".format(sid, field, entry))
+            if "ctest_labels" in execution:
+                labels = execution.get("ctest_labels")
+                if not isinstance(labels, list):
                     errors.append(
-                        "suite {!r} execution.{} must be a non-empty list".format(sid, field))
-            if "ctest_labels" in execution and not isinstance(
-                    execution.get("ctest_labels"), list):
-                errors.append(
-                    "suite {!r} execution.ctest_labels must be a list".format(sid))
+                        "suite {!r} execution.ctest_labels must be a list".format(sid))
+                else:
+                    for entry in labels:
+                        if not _nonempty_str(entry):
+                            errors.append(
+                                "suite {!r} execution.ctest_labels entry must be a "
+                                "non-empty string: {!r}".format(sid, entry))
             # ``gating`` is a vocabulary token with the same scalar-string
             # requirement as kind/disposition; guard it before the membership check.
             gating = execution.get("gating")
@@ -752,7 +803,8 @@ def check_inventory(inventory, component_dir):
                 if "in_repo" in ci_lane:
                     refs_ok += _check_repo_path_field(
                         component_dir, ci_lane.get("in_repo"),
-                        "suite {!r} execution.ci_lane.in_repo".format(sid), errors)
+                        "suite {!r} execution.ci_lane.in_repo".format(sid), errors,
+                        repo_root)
             elif "ci_lane" in execution:
                 errors.append("suite {!r} execution.ci_lane is not a mapping".format(sid))
         elif "execution" in suite:
@@ -767,7 +819,7 @@ def check_inventory(inventory, component_dir):
                 if key in metadata:
                     refs_ok += _check_repo_path_field(
                         component_dir, metadata.get(key),
-                        "suite {!r} metadata.{}".format(sid, key), errors)
+                        "suite {!r} metadata.{}".format(sid, key), errors, repo_root)
         elif "metadata" in suite:
             errors.append("suite {!r} metadata is not a mapping".format(sid))
 
@@ -843,7 +895,7 @@ def check_inventory(inventory, component_dir):
                         continue
                     if rel.startswith(EXTERNAL_MARKER):
                         continue
-                    location = _path_location_status(component_dir, rel)
+                    location = _path_location_status(component_dir, rel, repo_root)
                     if location == "absolute":
                         errors.append(
                             "suite {!r} source path must be repository-relative: {}".format(
@@ -852,7 +904,7 @@ def check_inventory(inventory, component_dir):
                         errors.append(
                             "suite {!r} source path escapes repository root: {}".format(
                                 sid, rel))
-                    elif _path_exists(component_dir, rel):
+                    elif _path_exists(component_dir, rel, repo_root):
                         refs_ok += 1
                     else:
                         errors.append("suite {!r} source path missing: {}".format(sid, rel))
@@ -879,16 +931,16 @@ def check_inventory(inventory, component_dir):
                 errors.append("suite {!r} evidence entry missing a claim".format(sid))
             if not isinstance(rel, str) or rel.startswith(EXTERNAL_MARKER):
                 continue
-            location = _path_location_status(component_dir, rel)
+            location = _path_location_status(component_dir, rel, repo_root)
             if location == "absolute":
                 errors.append(
                     "suite {!r} evidence path must be repository-relative: {}".format(sid, rel))
             elif location == "outside":
                 errors.append(
                     "suite {!r} evidence path escapes repository root: {}".format(sid, rel))
-            elif _path_is_file(component_dir, rel):
+            elif _path_is_file(component_dir, rel, repo_root):
                 refs_ok += 1
-            elif _path_exists(component_dir, rel):
+            elif _path_exists(component_dir, rel, repo_root):
                 errors.append(
                     "suite {!r} evidence path is a directory, not a file: {}".format(sid, rel))
             else:
@@ -939,13 +991,34 @@ def check_inventory(inventory, component_dir):
                     "suite {!r} must carry governing incidents or a history that "
                     "establishes real context".format(sid))
 
-        # related_restructuring is a structured local Markdown pointer.
-        rr = suite.get("related_restructuring")
-        if isinstance(rr, str):
-            if _path_exists(component_dir, rr):
-                refs_ok += 1
+        # related_restructuring is a structured local Markdown pointer. When a
+        # suite carries it, it must be a non-empty string that names a path which
+        # resolves on disk within the boundary root: a present-but-malformed value
+        # (an empty/blank string, a non-string scalar, or a list/mapping) is a
+        # schema error in its own right, and an absolute path or a traversal
+        # outside the boundary root is rejected exactly like any other repository
+        # path pointer rather than silently skipped.
+        if "related_restructuring" in suite:
+            rr = suite.get("related_restructuring")
+            if not _nonempty_str(rr):
+                errors.append(
+                    "suite {!r} related_restructuring must be a non-empty string: "
+                    "{!r}".format(sid, rr))
             else:
-                errors.append("suite {!r} related_restructuring missing: {}".format(sid, rr))
+                location = _path_location_status(component_dir, rr, repo_root)
+                if location == "absolute":
+                    errors.append(
+                        "suite {!r} related_restructuring must be repository-relative: "
+                        "{}".format(sid, rr))
+                elif location == "outside":
+                    errors.append(
+                        "suite {!r} related_restructuring escapes repository root: "
+                        "{}".format(sid, rr))
+                elif _path_exists(component_dir, rr, repo_root):
+                    refs_ok += 1
+                else:
+                    errors.append(
+                        "suite {!r} related_restructuring missing: {}".format(sid, rr))
 
         # Incident references anywhere in the suite record.
         incident_refs.update(_collect_incident_refs(suite))
@@ -953,11 +1026,36 @@ def check_inventory(inventory, component_dir):
     return errors, suite_ids, incident_refs, {"records": len(suites), "refs": refs_ok}
 
 
-def check_coverage_model(model, suite_ids, component_dir, inventory_kind_vocab=None):
+def _has_gap_metadata(pairwise):
+    """True when a pairwise check explicitly acknowledges an uncovered interaction.
+
+    A pairwise check normally claims coverage by naming the inventory suite(s)
+    that exercise the interaction (a non-empty ``current_inventory``). A check
+    that covers nothing yet must say so on purpose rather than silently leave the
+    list empty: it carries an explicit ``gap`` acknowledgement - a boolean ``true``
+    or a non-empty string/mapping/list documenting the known, deliberate gap. The
+    ``gap`` field is optional metadata the real model does not need (every real
+    pairwise names covering inventory), so this only matters for a check that
+    declares an empty ``current_inventory``.
+    """
+    gap = pairwise.get("gap")
+    if gap is True:
+        return True
+    if isinstance(gap, str):
+        return bool(gap.strip())
+    if isinstance(gap, (dict, list)):
+        return bool(gap)
+    return False
+
+
+def check_coverage_model(model, suite_ids, component_dir, inventory_kind_vocab=None,
+                         repo_root=None):
     """Validate the coverage model against the inventory.
 
     Returns (errors, incident_refs, counts) where counts has 'classes' and
-    'refs'.
+    'refs'. ``repo_root``, when given, is the boundary a repository path may not
+    resolve outside of (see ``_path_location_status``); it defaults to the
+    repository root two levels above the component directory.
     """
     errors = []
     incident_refs = set()
@@ -1200,16 +1298,16 @@ def check_coverage_model(model, suite_ids, component_dir, inventory_kind_vocab=N
                 errors.append("class {!r} evidence entry missing a claim".format(cid))
             if not isinstance(rel, str) or rel.startswith(EXTERNAL_MARKER):
                 continue
-            location = _path_location_status(component_dir, rel)
+            location = _path_location_status(component_dir, rel, repo_root)
             if location == "absolute":
                 errors.append(
                     "class {!r} evidence path must be repository-relative: {}".format(cid, rel))
             elif location == "outside":
                 errors.append(
                     "class {!r} evidence path escapes repository root: {}".format(cid, rel))
-            elif _path_is_file(component_dir, rel):
+            elif _path_is_file(component_dir, rel, repo_root):
                 refs_ok += 1
-            elif _path_exists(component_dir, rel):
+            elif _path_exists(component_dir, rel, repo_root):
                 errors.append(
                     "class {!r} evidence path is a directory, not a file: {}".format(cid, rel))
             else:
@@ -1281,6 +1379,17 @@ def check_coverage_model(model, suite_ids, component_dir, inventory_kind_vocab=N
                         "pairwise {!r} pair must reference distinct axes".format(pid))
         check_axis_refs("pairwise {!r}".format(pid), pc.get("pair"))
         check_inventory_refs("pairwise {!r}".format(pid), pc.get("current_inventory"))
+        # A pairwise check must either name the inventory that covers the
+        # interaction (a non-empty current_inventory) or explicitly acknowledge an
+        # uncovered one via gap metadata. An empty current_inventory with no gap
+        # acknowledgement is an undocumented coverage hole: the check claims a
+        # cross-axis audit it neither covers nor records as a known gap.
+        current_inventory = pc.get("current_inventory")
+        has_current = isinstance(current_inventory, list) and bool(current_inventory)
+        if not has_current and not _has_gap_metadata(pc):
+            errors.append(
+                "pairwise {!r} must name a non-empty current_inventory or carry "
+                "explicit gap metadata (a 'gap' acknowledgement)".format(pid))
         incident_refs.update(_collect_incident_refs(pc))
 
     # The pairwise block is the model's cross-axis audit; it must actually be
@@ -1555,6 +1664,14 @@ def validate(root=None, inventory_path=None, coverage_path=None,
     restructuring_path = restructuring_path or (base_root / RESTRUCTURING_NAME)
 
     component_dir = Path(inventory_path).resolve().parent
+    # Boundary a repository path may not resolve outside of. An explicitly
+    # supplied ``root`` is its own boundary (an arbitrary temporary root is self-
+    # contained, so a path may not traverse above it); the default real-repo run
+    # (root is None) keeps the repository root two levels above the component
+    # directory as the boundary, which is what permits the documents' legitimate
+    # ``../../.github`` references.
+    repo_root = Path(root).resolve() if root is not None else _repository_root(
+        component_dir)
     results = {}
     counts = {"inventory_records": 0, "coverage_classes": 0,
               "validated_references": 0}
@@ -1570,7 +1687,7 @@ def validate(root=None, inventory_path=None, coverage_path=None,
 
     if inventory is not None:
         inv_errors, suite_ids, inv_refs, inv_counts = check_inventory(
-            inventory, component_dir)
+            inventory, component_dir, repo_root)
         results["inventory"] = sorted(inv_errors)
         incident_refs |= inv_refs
         counts["inventory_records"] = inv_counts["records"]
@@ -1585,7 +1702,7 @@ def validate(root=None, inventory_path=None, coverage_path=None,
             inventory_kind_vocab = _vocab_values(
                 inventory["vocabularies"], "kind")
         cov_errors, cov_refs, cov_counts = check_coverage_model(
-            coverage, suite_ids, component_dir, inventory_kind_vocab)
+            coverage, suite_ids, component_dir, inventory_kind_vocab, repo_root)
         # The coverage model and the inventory are a connected set: cross-check
         # that they declare the same identity (schema_version, component).
         cov_errors.extend(check_identity_consistency(inventory, coverage))
