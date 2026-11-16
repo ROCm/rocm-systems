@@ -292,6 +292,24 @@ struct DeviceIdentityConfig {
   PciDeviceConfig pci;    ///< Bus shape for PCI-attached front ends.
 };
 
+/// @brief Owned metadata for one selected system node, without its components.
+struct NodeDeviceIdentityConfig {
+  std::string local_node_id; ///< Resolved node selection retained independently of the parser.
+  std::vector<KfdDeviceConfig> devices; ///< Device identities in stable node-local ordinal order.
+  PciDeviceConfig pci;                  ///< Bus shape of the node's GPU profile.
+  uint32_t num_xcc = 0;                 ///< XCD count per GPU from the declarative topology.
+  bool publish_peer_links = true; ///< Whether active KFD metadata advertises legacy peer links.
+};
+
+/// @brief Read selected-node GPU metadata without constructing the simulator.
+/// @details Uses the same identity expansion and node selection as VM creation.
+/// Parsing, selection, and topology-count failures emit a diagnostic and return
+/// failure. Allocation exceptions propagate to the caller. A missing device
+/// identity remains marked absent; this does not validate execution resources.
+util::FailureOr<NodeDeviceIdentityConfig>
+load_node_device_identity_from_string(const std::string &json, const std::string &schema_text,
+                                      std::string_view node_id, util::DiagnosticEmitter emit_error);
+
 /// @brief Read only a config's device identity and bus shape.
 /// @details Building the topology allocates the whole simulated machine, which
 /// for a large part is gigabytes of register files. A front end that only needs

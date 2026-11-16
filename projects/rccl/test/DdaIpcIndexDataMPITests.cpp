@@ -212,6 +212,13 @@ protected:
   }
 };
 
+// ncclDdaIpcCommInit allocates the LL epoch cells DDA Broadcast LL runs on.
+TEST_F(DdaIpcMPI_IndexData, InitSetsLLEpochCells) {
+  const ncclComm* comm = getActiveCommunicator();
+  ASSERT_MPI_TRUE(comm->ddaLLEpochDev != nullptr);
+  ASSERT_MPI_TRUE(comm->ddaLLEpochLen > 0);
+}
+
 // One-shot flat kernel: every rank reduces the whole buffer, so a wrong source offset hides behind constant data.
 TEST_F(DdaIpcMPI_IndexData, AllReduceFlat) {
   runAllReduce(

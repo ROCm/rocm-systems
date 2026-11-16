@@ -4,7 +4,7 @@
 // Tests for wide integer multiply-add and carry results.
 
 #include "integer/mad64_test.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_integer.h"
 
 #include <gtest/gtest.h>
 
@@ -46,4 +46,24 @@ TEST(IntegerMadCoU64U32W64, Arithmetic) {
 // Check 64-bit multiply-add, carry masks, and overlapping destination words.
 TEST(IntegerMadCoI64I32W64, Arithmetic) {
   rocjitsu::arith::test::check_mad64<64>(rj_arith_v_mad_co_i64_i32_w64, /*is_signed=*/true);
+}
+
+// Non-carry forms share the arithmetic and vector aliasing contract.
+TEST(IntegerMadNcU64U32W32, Arithmetic) {
+  rocjitsu::arith::test::check_mad64<32, false>(rj_arith_v_mad_nc_u64_u32_w32, /*is_signed=*/false);
+}
+
+// Non-carry forms share the arithmetic and vector aliasing contract.
+TEST(IntegerMadNcI64I32W32, Arithmetic) {
+  rocjitsu::arith::test::check_mad64<32, false>(rj_arith_v_mad_nc_i64_i32_w32, /*is_signed=*/true);
+}
+
+// Non-carry forms share the arithmetic and vector aliasing contract.
+TEST(IntegerMadNcU64U32W64, Arithmetic) {
+  rocjitsu::arith::test::check_mad64<64, false>(rj_arith_v_mad_nc_u64_u32_w64, /*is_signed=*/false);
+}
+
+// Non-carry forms share the arithmetic and vector aliasing contract.
+TEST(IntegerMadNcI64I32W64, Arithmetic) {
+  rocjitsu::arith::test::check_mad64<64, false>(rj_arith_v_mad_nc_i64_i32_w64, /*is_signed=*/true);
 }

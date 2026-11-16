@@ -196,17 +196,32 @@ where
     D::set_allocation_access(allocation.driver_state_mut(), states.as_slice())
 }
 
+/// Frontend-assigned identity of one live backing in a process-local namespace.
+/// This is not a native export handle or a cross-process physical identity.
+/// The frontend keeps namespace/object pairs unique while aliases may exist.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LocalBackingIdentity {
+    /// Frontend namespace (for example one instance's identity).
+    pub namespace: u64,
+    /// Nonzero identity of the backing within that namespace.
+    pub object: u64,
+}
+
 /// Owns one native allocation, its exact VM dependencies, and cleanup progress.
 /// Explicit free reports failures. If final Drop cannot complete cleanup, it
 /// retains potentially reachable native backing instead of recycling its VA.
 pub struct Allocation {
     /// Concrete owner and driver selected when the allocation was created.
     pub(crate) inner: driver::AllocationState,
+    local_identity: Option<LocalBackingIdentity>,
 }
 
 impl Allocation {
     pub(crate) fn new(inner: driver::AllocationState) -> Self {
-        Self { inner }
+        Self {
+            inner,
+            local_identity: None,
+        }
     }
 
     pub(crate) fn shares_driver_instance(&self, device: &Device) -> bool {
@@ -221,23 +236,51 @@ impl Allocation {
         self.inner.info()
     }
 
-    /// Returns the registered page base's offset within an existing physical
-    /// backing when this allocation reuses another mapped BO. Add the byte
-    /// offset returned by `register_host_range` for the exact caller pointer.
+    /// Offset of this allocation's logical base into an identified backing.
+    /// For a page-cover registration, add the returned caller-pointer offset.
+    /// Absence means that the provider has no external backing-offset metadata.
     #[must_use]
-    pub fn host_alias_source_offset(&self) -> Option<u64> {
-        self.inner.host_alias_source_offset()
+    pub fn backing_offset(&self) -> Option<u64> {
+        self.inner.backing_offset()
     }
 
-    /// Publishes an opaque frontend identity for later registrations of this
-    /// owned host-visible BO. This identity is used only when no native
-    /// DMA-BUF identity is available; callers must keep it unique among their
-    /// live physical backings in this process.
+    /// Returns the frontend identity bound before this owner was published.
+    #[must_use]
+    pub fn local_backing_identity(&self) -> Option<LocalBackingIdentity> {
+        self.local_identity
+    }
+
+    /// Binds frontend identity once, before exposing this allocation or aliases.
+    /// Providers may index it for registration reuse; providers without such a
+    /// registry need no special implementation. Native export identity is separate.
     ///
     /// # Errors
-    /// Rejects an allocation without a mapped BO or a conflicting identity.
-    pub fn set_host_alias_identity(&self, identity: [u64; 2]) -> Result<(), Error> {
-        self.inner.set_host_alias_identity(identity)
+    /// Rejects invalid/rebound identities, released backing, or provider indexing
+    /// failure. A failure leaves the common metadata unpublished.
+    pub fn bind_local_backing_identity(
+        &mut self,
+        identity: LocalBackingIdentity,
+    ) -> Result<(), Error> {
+        self.check()?;
+        if identity.namespace == 0 || identity.object == 0 {
+            return Err(Error::Operation {
+                kind: ErrorKind::InvalidArgument,
+                detail: "invalid local backing identity",
+            });
+        }
+        if let Some(current) = self.local_identity {
+            return if current == identity {
+                Ok(())
+            } else {
+                Err(Error::Operation {
+                    kind: ErrorKind::InvalidArgument,
+                    detail: "backing identity cannot be rebound",
+                })
+            };
+        }
+        self.inner.publish_local_backing_identity(identity)?;
+        self.local_identity = Some(identity);
+        Ok(())
     }
 
     /// Reports allocation-owned payload still tied to a native backing handle
@@ -324,6 +367,77 @@ impl Allocation {
 }
 
 impl Device {
+    /// Returns provider guarantees for a construction on this activated device.
+    ///
+    /// # Errors
+    /// Reports an unavailable construction or native lifetime failure.
+    pub fn memory_capabilities(
+        &self,
+        request: super::MemoryCapabilityRequest<'_>,
+    ) -> Result<super::DeviceMemoryCapabilities, Error> {
+        self.driver_state
+            .memory_capabilities(&self.endpoint, request)
+    }
+
+    fn validate_allocation(
+        &self,
+        kind: MemoryKind,
+        size: u64,
+        alignment: u64,
+        permissions: DeviceAccess,
+    ) -> Result<(), Error> {
+        let cap = self.memory_capabilities(super::MemoryCapabilityRequest::Allocation(kind))?;
+        if !cap
+            .native
+            .supports(crate::memory::constraints::AllocationDesc { size, alignment })
+            || alignment > cap.maximum_alignment
+            || !cap.supports_range(0, size, permissions)
+        {
+            return Err(Error::Operation {
+                kind: ErrorKind::Unsupported,
+                detail: "provider does not support allocation requirements",
+            });
+        }
+        Ok(())
+    }
+
+    pub(super) fn validate_registration(
+        &self,
+        peers: &[&Self],
+        address: usize,
+        policy: HostMappingPolicy,
+        size: u64,
+        alignment: u64,
+        permissions: DeviceAccess,
+    ) -> Result<(), Error> {
+        for device in std::iter::once(self).chain(peers.iter().copied()) {
+            let cap =
+                device.memory_capabilities(super::MemoryCapabilityRequest::Registration(policy))?;
+            if address == 0
+                || size == 0
+                || !alignment.is_power_of_two()
+                || !permissions.contains(cap.required_access)
+            {
+                return Err(Error::Operation {
+                    kind: ErrorKind::InvalidArgument,
+                    detail: "invalid host registration request",
+                });
+            }
+            if address == 0
+                || !cap.supports_range(address as u64, size, permissions)
+                || !alignment.is_power_of_two()
+                || alignment < cap.native.alignment
+                || alignment > cap.maximum_alignment
+            {
+                return Err(Error::Operation {
+                    kind: ErrorKind::Unsupported,
+                    detail: "provider does not support registration requirements",
+                });
+            }
+        }
+        Ok(())
+    }
+
     /// Registers an arbitrary host byte range, including an unaligned first
     /// byte. Returns the allocation for the complete page cover and the byte
     /// offset of `address` from its base. Add that offset to a device address
@@ -371,6 +485,7 @@ impl Device {
         alignment: u64,
         permissions: DeviceAccess,
     ) -> Result<(Allocation, u64), Error> {
+        self.validate_registration(peers, address, policy, size, alignment, permissions)?;
         let page = usize::try_from(host_page_size()?).map_err(|_| Error::Operation {
             kind: ErrorKind::InvalidArgument,
             detail: "host page size exceeds address width",
@@ -421,6 +536,7 @@ impl Device {
         alignment: u64,
         permissions: DeviceAccess,
     ) -> Result<Allocation, Error> {
+        self.validate_allocation(kind, size, alignment, permissions)?;
         self.driver_state
             .allocate_owned(kind, size, alignment, permissions)
     }
@@ -447,6 +563,7 @@ impl Device {
         alignment: u64,
         permissions: DeviceAccess,
     ) -> Result<Allocation, Error> {
+        self.validate_registration(&[], address, policy, size, alignment, permissions)?;
         // SAFETY: The caller owns the complete page cover through successful
         // free or process teardown, as required by this public raw contract.
         let request = HostRegistration {
@@ -484,6 +601,7 @@ impl Device {
         alignment: u64,
         permissions: DeviceAccess,
     ) -> Result<Allocation, Error> {
+        self.validate_allocation(kind, size, alignment, permissions)?;
         self.driver_state
             .allocate_with_peers(self, peers, kind, size, alignment, permissions)
     }
@@ -511,6 +629,7 @@ impl Device {
         alignment: u64,
         permissions: DeviceAccess,
     ) -> Result<Allocation, Error> {
+        self.validate_registration(peers, address, policy, size, alignment, permissions)?;
         let request = HostRegistration {
             address,
             policy,

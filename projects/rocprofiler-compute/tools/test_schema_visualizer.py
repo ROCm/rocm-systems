@@ -15,7 +15,7 @@ from sqlalchemy import Column, ForeignKey, Integer, MetaData, String, Table
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from schema_visualizer import (  # noqa: E402
+from schema_visualizer import (
     PREFIX,
     _view_source_tables,
     build_schema_dot,

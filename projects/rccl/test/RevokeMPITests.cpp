@@ -597,6 +597,8 @@ ncclResult_t ddaLaunch(ncclFunc_t func, const void* sendBuf, void* recvBuf, size
         return ncclReduceScatter(sendBuf, recvBuf, count, ncclFloat32, ncclSum, comm, stream);
     case ncclFuncAlltoAll:
         return ncclAlltoAll(sendBuf, recvBuf, count, ncclFloat32, comm, stream);
+    case ncclFuncBroadcast:
+        return ncclBroadcast(sendBuf, recvBuf, count, ncclFloat32, /*root=*/0, comm, stream);
     default: return ncclInvalidArgument;
     }
 }
@@ -930,6 +932,9 @@ protected:
 
     void runIncompleteDdaAbort(const DdaRevokeCase& tc)
     {
+        std::vector<std::unique_ptr<MPIHelpers::MpiEnvGuard>> envGuards;
+        for(const DdaEnvSetting& e : tc.overrides)
+            envGuards.push_back(std::make_unique<MPIHelpers::MpiEnvGuard>(e.name, e.value));
         // A non-default check mode sends the collective down the generic enqueue
         // path while rcclGetCollImplInfo still reports DDA.
         MPIHelpers::MpiEnvUnsetGuard checkModeGuard("NCCL_CHECK_MODE");
@@ -959,7 +964,18 @@ protected:
                       rcclGetCollImplInfo(comm, tc.func, tc.count, ncclFloat32, ncclSum, sendBuf,
                                           recvBuf, /*graphCapturing=*/0, &algo, &protocol,
                                           &maxChannels));
-        ASSERT_MPI_TRUE(algo == tc.expectedAlgo && protocol == tc.expectedProtocol);
+        const bool pathOk = algo == tc.expectedAlgo && protocol == tc.expectedProtocol;
+        if(!tc.overrides.empty())
+        {
+            std::string skipReason = mpiCoordinatedSkipReason(
+                !pathOk,
+                "RCCL_DDA_* override did not select the expected DDA tier (parameters are cached per "
+                "process); run this test on its own");
+            if(!skipReason.empty())
+                skipReason += " (algo=" + std::to_string(algo) + " protocol=" + std::to_string(protocol) + ")";
+            DDA_FABRIC_SKIP_OR_FAIL(skipReason);
+        }
+        ASSERT_MPI_TRUE(pathOk);
 
         ncclResult_t launchRes = ncclSuccess;
         if(rank != skipRank)
@@ -1005,6 +1021,13 @@ TEST_F(AbortDdaMPITest, IncompleteCollective_DdaReduceScatterLl)
 TEST_F(AbortDdaMPITest, IncompleteCollective_DdaAlltoAllLl)
 {
     runIncompleteDdaAbort({ncclFuncAlltoAll, 64, kDdaLL, NCCL_PROTO_LL, {}});
+}
+
+// Broadcast DDA is opt-in and has no table LL cap on gfx1250; root 0 launches, rank np-1 does not.
+TEST_F(AbortDdaMPITest, IncompleteCollective_DdaBroadcastLl)
+{
+    runIncompleteDdaAbort({ncclFuncBroadcast, 128, kDdaLL, NCCL_PROTO_LL,
+                           {{"RCCL_DDA_BC", "1"}, {"RCCL_DDA_LL_THRESHOLD", "262144"}}});
 }
 
 /** DDA IPC (gfx942/gfx950, one node, exactly 8 ranks): every collective waits in IpcGpuBarrier. */

@@ -134,4 +134,89 @@ if(NOT rerun_stdout MATCHES "\\\"inputs\\\":2")
 endif()
 assert_saved_failure("successful rerun")
 
+function(assert_cli_failure expected_diagnostic)
+    execute_process(
+        COMMAND "${FUZZ_EXECUTABLE}" ${ARGN}
+        RESULT_VARIABLE result
+        OUTPUT_VARIABLE stdout
+        ERROR_VARIABLE stderr
+    )
+    string(FIND "${stderr}" "${expected_diagnostic}" diagnostic_position)
+    if(NOT result EQUAL 2 OR diagnostic_position EQUAL -1)
+        message(
+            FATAL_ERROR
+            "expected exit 2 and '${expected_diagnostic}', got ${result}: ${stdout}${stderr}"
+        )
+    endif()
+endfunction()
+
+assert_cli_failure("expected an unsigned integer" --random 18446744073709551616)
+assert_cli_failure("expected an unsigned integer" --random 1tail)
+assert_cli_failure("threads must be positive" --random 1 --threads 0)
+assert_cli_failure("cannot open input: ${WORK_DIRECTORY}/missing++.bin" --input "${WORK_DIRECTORY}/missing++.bin")
+file(WRITE "${WORK_DIRECTORY}/empty.bin" "")
+execute_process(
+    COMMAND "${FUZZ_EXECUTABLE}" --input "${WORK_DIRECTORY}/empty.bin"
+    RESULT_VARIABLE empty_result
+    OUTPUT_VARIABLE empty_stdout
+    ERROR_VARIABLE empty_stderr
+)
+if(NOT empty_result EQUAL 0 OR NOT empty_stdout MATCHES "\\\"inputs\\\":1")
+    message(
+        FATAL_ERROR
+        "empty input failed (${empty_result}): ${empty_stdout}${empty_stderr}"
+    )
+endif()
+string(REPEAT "x" 1048577 oversized_bytes)
+file(WRITE "${WORK_DIRECTORY}/oversized.bin" "${oversized_bytes}")
+assert_cli_failure("input has an invalid size" --input "${WORK_DIRECTORY}/oversized.bin")
+
+set(flush_output "${WORK_DIRECTORY}/seed-flush-failure")
+execute_process(
+    COMMAND
+        "${PYTHON_EXECUTABLE}" -c
+        "import os, resource, signal, sys; signal.signal(signal.SIGXFSZ, signal.SIG_IGN); _, hard = resource.getrlimit(resource.RLIMIT_FSIZE); resource.setrlimit(resource.RLIMIT_FSIZE, (16, hard)); os.execv(sys.argv[1], sys.argv[1:])"
+        "${FUZZ_EXECUTABLE}" --random 1 --seed 58 --threads 1 --output
+        "${flush_output}"
+    RESULT_VARIABLE flush_result
+    OUTPUT_VARIABLE flush_stdout
+    ERROR_VARIABLE flush_stderr
+)
+if(
+    NOT flush_result EQUAL 1
+    OR NOT flush_stderr MATCHES "cannot update active fuzz seed"
+)
+    message(
+        FATAL_ERROR
+        "seed flush failure returned ${flush_result}: ${flush_stdout}${flush_stderr}"
+    )
+endif()
+file(READ "${flush_output}/failure.seed" flush_seed)
+file(READ "${flush_output}/failure.bin" flush_input HEX)
+file(READ "${WORK_DIRECTORY}/seeds/seed-0003.bin" expected_flush_input HEX)
+if(
+    NOT flush_seed STREQUAL "58\n"
+    OR NOT flush_input STREQUAL expected_flush_input
+)
+    message(
+        FATAL_ERROR
+        "seed flush failure did not preserve the seed and replay input"
+    )
+endif()
+execute_process(
+    COMMAND "${FUZZ_EXECUTABLE}" --input "${flush_output}/failure.bin"
+    RESULT_VARIABLE flush_replay_result
+    OUTPUT_VARIABLE flush_replay_stdout
+    ERROR_VARIABLE flush_replay_stderr
+)
+if(
+    NOT flush_replay_result EQUAL 0
+    OR NOT flush_replay_stdout MATCHES "\\\"inputs\\\":1"
+)
+    message(
+        FATAL_ERROR
+        "seed flush reproducer failed (${flush_replay_result}): ${flush_replay_stdout}${flush_replay_stderr}"
+    )
+endif()
+
 file(REMOVE_RECURSE "${WORK_DIRECTORY}")

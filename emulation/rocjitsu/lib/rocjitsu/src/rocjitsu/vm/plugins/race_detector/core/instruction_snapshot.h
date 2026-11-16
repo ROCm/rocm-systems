@@ -5,10 +5,10 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <span>
-#include <stdexcept>
 
 namespace rocjitsu::plugins::race_detector {
 
@@ -17,7 +17,7 @@ namespace rocjitsu::plugins::race_detector {
 /// @details The copy does not depend on code mappings or decoded-instruction
 /// lifetimes, so a report can disassemble it after the code is rewritten or
 /// unmapped. Every snapshot holds an encoding of 1 to kMaxWords words; the
-/// constructor rejects any other length, so encoding() is never empty.
+/// caller must validate this length before construction, so encoding() is never empty.
 class InstructionSnapshot {
 public:
   /// @brief Maximum encoding length in words, matching the CU decode
@@ -25,11 +25,10 @@ public:
   static constexpr size_t kMaxWords = 5;
 
   /// @brief Copy the complete encoding of the instruction at `pc`.
-  /// @throws std::logic_error if `encoding` is empty or longer than kMaxWords.
+  /// @pre `encoding` contains between one and kMaxWords words.
   constexpr InstructionSnapshot(uint64_t pc, std::span<const uint32_t> encoding)
       : pc_(pc), word_count_(static_cast<uint32_t>(encoding.size())) {
-    if (encoding.empty() || encoding.size() > kMaxWords)
-      throw std::logic_error("race detector instruction snapshot has an invalid word count");
+    assert(!encoding.empty() && encoding.size() <= kMaxWords);
     std::ranges::copy(encoding, words_.begin());
   }
 

@@ -20,11 +20,63 @@
 // host `long double` bytes. Host mode is unchanged.
 
 #include <hip/hip_runtime.h>
+#include <cstdlib>
+#include <map>
+#include <mutex>
 #include <type_traits>
 #include "PtrUnion.hpp"   // dtype enum + typedefs (hip_bfloat16, rccl_float8, rccl_bfloat8, __half)
 
 namespace RcclUnitTesting
 {
+  // ---- device code availability ----------------------------------------------
+  // Whether UT_DEVICE_DATA asks for the device kernels (on unless set to 0). Read once per process.
+  inline bool UtDeviceDataRequested()
+  {
+    static bool const requested = [] {
+      char const* e = getenv("UT_DEVICE_DATA");
+      return !(e && e[0] == '0');
+    }();
+    return requested;
+  }
+
+  // Whether the caller's kernels can load on the current GPU (a multi-arch package can lack this
+  // arch's code object). hipFuncGetAttributes checks without launching; cached per device.
+  class KernelLoadCache
+  {
+  public:
+    bool Loadable(void const* kernel, char const* what)
+    {
+      int dev = 0;
+      if (hipGetDevice(&dev) != hipSuccess)
+      {
+        (void)hipGetLastError();
+        return false;
+      }
+      std::lock_guard<std::mutex> lock(mutex_);
+      auto const it = loadable_.find(dev);
+      if (it != loadable_.end()) return it->second;
+
+      hipFuncAttributes attr;
+      hipError_t const err = hipFuncGetAttributes(&attr, kernel);
+      (void)hipGetLastError();
+      bool const ok = (err == hipSuccess);
+      if (!ok)
+      {
+        hipDeviceProp_t prop = {};
+        char const* arch = (hipGetDeviceProperties(&prop, dev) == hipSuccess) ? prop.gcnArchName : "unknown";
+        (void)hipGetLastError();
+        TEST_WARN("%s kernels cannot run on device %d (%s): %s. Using the host path.",
+                  what, dev, arch, hipGetErrorString(err));
+      }
+      loadable_[dev] = ok;
+      return ok;
+    }
+
+  private:
+    std::mutex          mutex_;
+    std::map<int, bool> loadable_;
+  };
+
   // ---- shared scalar pattern (host + device) --------------------------------
   __host__ __device__ inline int PatternValueI(bool fp8, int globalRank, size_t idx)
   {

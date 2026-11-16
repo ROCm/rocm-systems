@@ -4,14 +4,14 @@
 // Division-result fixup, special values, and optional guest exception causes.
 // Internal helpers shared by instruction implementations; not part of the public C API.
 
-// Adapted from rocjitsu shared/division.h; FP16 saturation and OMOD behavior
-// follow RX 9070 captures rather than the promoted-FP32 rocjitsu implementation.
+// Adapted from rocjitsu shared/division.h; FP16 saturation and OMOD behavior follow
+// RX 9070 and W7900 captures rather than the promoted-FP32 rocjitsu implementation.
 
 #pragma once
 
 #include "common/bits.h"
 #include "fp/float_output.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <stdint.h>
 
@@ -47,10 +47,9 @@ fixup_value(typename IeeeFormat<Width>::Bits p, typename IeeeFormat<Width>::Bits
   // An OMOD overflow follows the guest rounding mode unless FP16_OVFL saturates it, as on gfx1201.
   T overflow =
       Width == 16 && saturate ? F::infinity - 1 : division_overflow<Width>(sign != 0, rounding);
-  // gfx1100 preserves selected sNaNs with IEEE clear. FP16 active OMOD
-  // retains the inherited promoted-half behavior; it is not hardware-qualified.
-  const T quiet =
-      Rdna3 && !ieee && !(Width == 16 && (mode & RJ_ARITH_ALU_OMOD_MASK)) ? 0 : F::quiet;
+  // gfx1100 preserves selected sNaNs with IEEE clear, including under OMOD.
+  const bool quiet_snan = !Rdna3 || ieee;
+  const T quiet = quiet_snan ? F::quiet : 0;
   if (cm > F::infinity) {
     result = c | quiet;
   } else if (bm > F::infinity) {
@@ -68,35 +67,13 @@ fixup_value(typename IeeeFormat<Width>::Bits p, typename IeeeFormat<Width>::Bits
     // can retain one, and guest output flushing then removes it.
     result = sign | T(!flush_output && rounding == (sign ? 2U : 1U));
   } else {
-    // rocjitsu div_fixup_f16 selects infinity or max-half before promoted
-    // scaling and nearest-even narrowing. RDNA4 additionally saturates this
-    // provisional overflow, as established by the existing FP16_OVFL captures.
+    // rocjitsu div_fixup_f16 selects infinity or max-half before OMOD. FP16_OVFL
+    // saturates this provisional overflow on gfx1201 and gfx1100.
     T recovery = division_overflow<Width>(sign != 0, rounding);
-    if (Width == 16 && !Rdna3 && saturate) {
+    if (Width == 16 && saturate) {
       recovery = F::infinity - 1;
     }
     result = sign | (pm >= F::infinity ? recovery : pm);
-  }
-  if constexpr (Rdna3 && Width == 16) {
-    static_assert(Width == 16);
-
-    // Port the generated RDNA3 handler's promoted-F32 scale, half narrowing
-    // and finalize_omod_f16 stages using integer IEEE bits.
-    unsigned omod = (mode >> 6) & 3;
-    if (omod) {
-      bool finite = (result & (F::sign - 1)) < F::infinity;
-      result = division_scale_bits<16>(result, omod == 3 ? -1 : int(omod));
-      if (saturate && finite && (result & (F::sign - 1)) == F::infinity) {
-        result = (result & F::sign) | (F::infinity - 1);
-      }
-      if (!(result & F::infinity)) {
-        result = 0;
-      }
-    }
-    if (dx10_clamp_off && (result & (F::sign - 1)) > F::infinity) {
-      return result;
-    }
-    return float_output<16>(result, mode & RJ_ARITH_ALU_CLAMP);
   }
   if (dx10_clamp_off && (result & (F::sign - 1)) > F::infinity) {
     mode &= ~RJ_ARITH_ALU_CLAMP;

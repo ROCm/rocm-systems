@@ -905,7 +905,8 @@ fn runtime_enable_failure_prevents_queue_backing_acquisition() {
         )
         .err()
         .unwrap()
-        .native_error_code(),
+        .native_status()
+        .and_then(crate::NativeStatus::errno_code),
         Some(errno::EIO)
     );
     assert_eq!(allocations.load(Ordering::Relaxed), 0);

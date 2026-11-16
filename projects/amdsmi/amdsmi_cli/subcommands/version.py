@@ -96,8 +96,8 @@ class VersionCommands:
             self.logger.output["amd_hsmp_driver_version"] = cpu_version_str
 
         nic_version_str = "N/A"
-        if args.nic_version and not (
-            self.helpers.is_driver_loaded("ionic") or self.helpers.is_driver_loaded("bnxt_en")
+        if args.nic_version and not any(
+            self.helpers.is_driver_loaded(driver) for driver in ("ionic", "bnxt_en", "bng_en")
         ):
             nic_version_str = "not loaded"
             self.logger.output["nic_driver_version"] = nic_version_str
