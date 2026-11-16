@@ -61,7 +61,8 @@ GIN_FABRIC_LSA_HD inline void ginFabricLsaA2ALaunchConfig(int nRanks, size_t byt
   *chunkBytes = ginFabricLsaA2AAlignUp(ginFabricLsaA2ADivUp(bytesPerPeer, (size_t)chunks), kGinFabricLsaA2AVectorBytes);
 }
 
-GIN_FABRIC_LSA_HD inline int ginFabricLsaA2ALsaBarrierPool(int nRanks) {
+// LL flag blocks the lane needs, one per CTA index (ncclLLA2ACreateRequirement's nBlocks).
+GIN_FABRIC_LSA_HD inline int ginFabricLsaA2AFlagBlocks(int nRanks) {
   int pool = nRanks * kGinFabricLsaA2AMaxChunksPerPeer;
   if (pool > kGinFabricLsaA2AMaxCtas) pool = kGinFabricLsaA2AMaxCtas;
   return pool;

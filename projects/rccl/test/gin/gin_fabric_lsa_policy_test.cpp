@@ -10,7 +10,7 @@
 
 using gin::fabric::ginFabricLsaA2ACapablePredicate;
 using gin::fabric::ginFabricLsaA2ALaunchConfig;
-using gin::fabric::ginFabricLsaA2ALsaBarrierPool;
+using gin::fabric::ginFabricLsaA2AFlagBlocks;
 using gin::fabric::ginFabricLsaAlltoAllSizeOk;
 using gin::fabric::ginFabricA2ASelectAlgo;
 using gin::fabric::GinFabricA2AAlgo;
@@ -76,9 +76,9 @@ TEST(GinFabricLsaPolicy, LaunchConfigCapsChunksAtTheCtaPool) {
   EXPECT_EQ(chunks, 1);
 }
 
-TEST(GinFabricLsaPolicy, LsaBarrierPoolCapsAt64) {
-  EXPECT_EQ(ginFabricLsaA2ALsaBarrierPool(4), 32);
-  EXPECT_EQ(ginFabricLsaA2ALsaBarrierPool(16), 64);
+TEST(GinFabricLsaPolicy, FlagBlocksCapAt64) {
+  EXPECT_EQ(ginFabricLsaA2AFlagBlocks(4), 32);
+  EXPECT_EQ(ginFabricLsaA2AFlagBlocks(16), 64);
 }
 
 TEST(GinFabricLsaPolicy, ThresholdIsZeroUnlessOptedIn) {
