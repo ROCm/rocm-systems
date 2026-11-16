@@ -653,6 +653,44 @@ TEST(WaitcheckTarget, LegacyExportAndMessagesContributeEvents) {
   }
 }
 
+TEST(WaitcheckTarget, ShaderExportTargetsSelectSeparateCompletionFifos) {
+  for (auto arch :
+       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
+    SCOPED_TRACE(arch);
+    const auto depth =
+        arch == ROCJITSU_CODE_ARCH_RDNA4 ? WaitEventKind::ExportMrt : WaitEventKind::ExportZ;
+    const auto blend = arch == ROCJITSU_CODE_ARCH_RDNA4 ? WaitEventKind::ExportDualSourceBlend
+                                                        : WaitEventKind::ExportMrt;
+    for (const auto &[target, kind] : std::array{
+             std::pair{0u, WaitEventKind::ExportMrt}, std::pair{7u, WaitEventKind::ExportMrt},
+             std::pair{8u, depth}, std::pair{12u, WaitEventKind::ExportPosition},
+             std::pair{16u, WaitEventKind::ExportPosition},
+             std::pair{20u, WaitEventKind::ExportPrimitive}, std::pair{21u, blend},
+             std::pair{22u, blend}}) {
+      SCOPED_TRACE(target);
+      const auto words = arch == ROCJITSU_CODE_ARCH_RDNA4
+                             ? rdna4::build_vexport({.en = 15,
+                                                     .tgt = static_cast<uint8_t>(target),
+                                                     .done = 1,
+                                                     .vsrc1 = 1,
+                                                     .vsrc2 = 2,
+                                                     .vsrc3 = 3})
+                             : std::array<uint32_t, 2>{0xf800080fu | (target << 4), 0x03020100u};
+      auto inst = decode(words, arch);
+      ASSERT_NE(inst, nullptr);
+      auto events = Target::classify_events(*inst, arch);
+      ASSERT_TRUE(events.succeeded());
+      ASSERT_EQ(events.value().size(), 1u);
+      EXPECT_EQ(events.value().front().kind, kind);
+    }
+    NamedInstruction opaque("exp");
+    const auto events = Target::classify_events(opaque, arch);
+    ASSERT_TRUE(events.succeeded());
+    ASSERT_EQ(events.value().size(), 1u);
+    EXPECT_EQ(events.value().front().kind, WaitEventKind::Export);
+  }
+}
+
 TEST(WaitcheckTarget, FlatAndOrdinaryStoresUseTheSameHardwareCompletionEvent) {
   for (auto model : {WaitcntModel::LegacyVscnt, WaitcntModel::SplitGfx12}) {
     const auto ordinary = Target::normalized_hardware_event_kind(WaitCounterKind::Store,

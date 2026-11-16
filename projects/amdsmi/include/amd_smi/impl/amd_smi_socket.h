@@ -30,12 +30,6 @@ class AMDSmiSocket {
       case AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE:
         cpu_core_processors_.push_back(processor);
         break;
-      case AMDSMI_PROCESSOR_TYPE_BRCM_NIC:
-        nic_processors_.push_back(processor);
-        break;
-      case AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH:
-        switch_processors_.push_back(processor);
-        break;
       case AMDSMI_PROCESSOR_TYPE_AMD_NIC:
         ainic_processors_.push_back(processor);
         break;
@@ -55,9 +49,8 @@ class AMDSmiSocket {
       case AMDSMI_PROCESSOR_TYPE_AMD_NIC:
         return ainic_processors_;
       case AMDSMI_PROCESSOR_TYPE_BRCM_NIC:
-        return nic_processors_;
       case AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH:
-        return switch_processors_;
+        return deprecated_type_processors_;
       default:
         return processors_;
     }
@@ -73,8 +66,8 @@ class AMDSmiSocket {
   std::vector<AMDSmiProcessor*> cpu_processors_;
   std::vector<AMDSmiProcessor*> cpu_core_processors_;
   std::vector<AMDSmiProcessor*> ainic_processors_;
-  std::vector<AMDSmiProcessor*> nic_processors_;
-  std::vector<AMDSmiProcessor*> switch_processors_;
+  // Always empty: the deprecated Broadcom types must not fall through to the GPU list.
+  std::vector<AMDSmiProcessor*> deprecated_type_processors_;
 };
 
 }  // namespace amd::smi

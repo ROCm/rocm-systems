@@ -749,7 +749,9 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
   }
   std::optional<uint64_t> selection;
   if (name.starts_with("v_cndmask_") && lanes &&
-      (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3 || wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4)) {
+      (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3 || wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4 ||
+       wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA3 || wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA4 ||
+       wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5)) {
     // Check the condition dependency before using its current value to select sources.
     const auto *condition = inst.num_src_operands() > 2 ? inst.src_operand(2) : nullptr;
     if (!condition || condition->is_fieldless()) {
@@ -830,6 +832,16 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
     }
     if (!write && reg->cls == RegClass::VGPR && (inst.flags() & COMPACT_WAVE64_MEMORY_RESULT))
       accessed_lanes &= UINT32_MAX;
+    if (!write && modifiers.cvt_scale && op == inst.src_operand(1) && reg->cls == RegClass::VGPR) {
+      // Each data half-wave reads its selected byte, including from inactive lanes.
+      const CvtScaleSelection &scale = *modifiers.cvt_scale;
+      for (unsigned base = 0; base < wf.wf_size(); base += 16) {
+        const uint64_t consumers = (accessed_lanes >> base) & 0xffff;
+        if (consumers)
+          access(*reg, consumers << scale.lane(base), 1u << scale.byte(base), false);
+      }
+      return;
+    }
     // Interpolation coefficients are quad broadcasts, including inactive lanes.
     if (!write && reg->cls == RegClass::VGPR && name.starts_with("v_interp_") &&
         (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3 ||

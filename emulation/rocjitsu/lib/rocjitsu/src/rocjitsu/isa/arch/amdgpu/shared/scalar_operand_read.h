@@ -18,10 +18,6 @@
 namespace rocjitsu {
 namespace amdgpu {
 
-[[nodiscard]] inline uint32_t scalar_m0_selector(rj_code_arch_t arch) {
-  return scalar_selector_is_null(arch, kModernNullSelector) ? kModernM0Selector : kLegacyM0Selector;
-}
-
 [[nodiscard]] inline std::optional<ScalarRegisterRange>
 scalar_register_for_selector(const Wavefront &wf, uint32_t selector) {
   const rj_code_arch_t arch = wf.cu().arch();

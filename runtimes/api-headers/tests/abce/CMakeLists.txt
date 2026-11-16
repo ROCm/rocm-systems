@@ -47,6 +47,7 @@ endif()
 
 add_executable(abce_unit_tests
   unit/device_test.cpp
+  unit/hsa_test.cpp
   unit/orchestrator_test.cpp
   unit/packet_fields_test.cpp
   unit/profiling_test.cpp

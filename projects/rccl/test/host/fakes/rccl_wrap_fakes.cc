@@ -29,6 +29,7 @@ ASSERT_HOOK_MATCHES_PROD(g_rcclUseAllGatherDirect, rcclUseAllGatherDirect);
 ASSERT_HOOK_MATCHES_PROD(g_rcclUseReduceScatterDirect, rcclUseReduceScatterDirect);
 ASSERT_HOOK_MATCHES_PROD(g_rcclNetRegSegmentCount, rcclNetRegSegmentCount);
 ASSERT_HOOK_MATCHES_PROD(g_rcclNetGraphRegSegmentCount, rcclNetGraphRegSegmentCount);
+ASSERT_HOOK_MATCHES_PROD(g_rcclCeArNonRegCap, rcclCeArNonRegCap);
 #undef ASSERT_HOOK_MATCHES_PROD
 
 // ===========================================================================
@@ -208,6 +209,9 @@ int64_t g_rcclParamCeReduceScatter = 0;            // rccl_wrap.cc:70 RCCL_PARAM
 int64_t rcclParamCeReduceScatter() { return g_rcclParamCeReduceScatter; }
 int64_t g_rcclParamCeArStagingBytes = -1;          // rccl_wrap.cc:73 RCCL_PARAM default
 int64_t rcclParamCeArStagingBytes() { return g_rcclParamCeArStagingBytes; }
+static size_t DefaultCeArNonRegCap(const ncclComm*) { FailLoudUnfaked("rccl_wrap_fakes", "rcclCeArNonRegCap"); }
+std::function<size_t(const ncclComm*)> g_rcclCeArNonRegCap = DefaultCeArNonRegCap;
+size_t rcclCeArNonRegCap(const ncclComm* comm) { return g_rcclCeArNonRegCap(comm); }
 
 static ncclResult_t DefaultSelectAllReduce(struct ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t,
                                            hipStream_t, bool, bool, struct rcclCollDecision*) {
@@ -369,6 +373,7 @@ void ResetRcclWrapFakes() {
   g_rcclParamCeAllReduce = -1;
   g_rcclParamCeReduceScatter = 0;
   g_rcclParamCeArStagingBytes = -1;
+  g_rcclCeArNonRegCap = DefaultCeArNonRegCap;
   g_rcclUpdateCollectiveProtocolCalls = 0;
   g_rcclUpdateCollectiveAlgorithmCalls = 0;
   g_rcclUpdateCollectiveAlgorithmBeforeProtocol = false;
@@ -472,11 +477,7 @@ size_t rcclCeAr2ShotMax(const ncclComm*) {
 size_t rcclCeAr2ShotMin(const ncclComm*) {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclCeAr2ShotMin");
 }
-// taskAppend and ncclCeInit call this instead of rcclCeAr2ShotMax. No host
-// microtest reaches either site; the stub exists so those binaries link.
-size_t rcclCeArNonRegCap(const ncclComm*) {
-  FailLoudUnfaked("rccl_wrap_fakes", "rcclCeArNonRegCap");
-}
+// rcclCeArNonRegCap, which taskAppend and ncclCeInit call instead of rcclCeAr2ShotMax, is a seam above.
 bool rcclNcclAlgoEnvIsSet() {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclNcclAlgoEnvIsSet");
 }

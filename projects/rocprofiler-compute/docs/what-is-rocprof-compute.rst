@@ -36,7 +36,7 @@ How it works
 
 ROCm Compute Profiler is a Python-based tool that profiles an application in up to two
 stages: it first replays the application as many times as needed to collect the requested
-hardware counters per kernel dispatch, then, unless disabled with ``--no-roof``, runs a set
+hardware counters per kernel dispatch, then, unless the selected blocks leave out roofline, runs a set
 of accelerator-specific micro-benchmarks to establish the empirical roofline. The roofline
 model is not available on accelerators pre-MI200. See :ref:`profiling-routine` for the exact
 stage breakdown.
@@ -150,11 +150,11 @@ The following are key ``profile`` and ``analyze`` commands:
 
      $ rocprof-compute profile -n my_run -k vecCopy -- ./app
 
-* To profile only the 1st, 2nd, and 3rd dispatch of each kernel:
+* To profile only the 1st, 2nd, and 3rd iteration of each kernel:
 
   .. code-block:: shell-session
 
-     $ rocprof-compute profile -n my_run -d 1 2 3 -- ./app
+     $ rocprof-compute profile -n my_run --kernel-iteration-range 1:3 -- ./app
 
 * To profile only the counters needed for specific analysis report blocks, which speeds up the profiling run:
 
@@ -162,11 +162,11 @@ The following are key ``profile`` and ``analyze`` commands:
 
      $ rocprof-compute profile -n my_run -b 2 5 -- ./app
 
-* To run only the roofline micro-benchmarks, skipping standard counter collection:
+* To collect only roofline data, skipping other counter collection:
 
   .. code-block:: shell-session
 
-     $ rocprof-compute profile -n my_run --roof-only -- ./app
+     $ rocprof-compute profile -n my_run --roofline -- ./app
 
 * To analyze a profiled run in the terminal:
 

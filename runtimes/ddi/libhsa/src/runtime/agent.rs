@@ -106,7 +106,7 @@ pub(super) fn cpu_agents(
             Some(Cpu {
                 node: Some(node.id),
                 native_node,
-                name: host.name.clone().into_boxed_str(),
+                name: host.name.as_deref().unwrap_or("CPU").into(),
                 compute_units: cpu.core_count,
                 maximum_clock_mhz: cpu.maximum_clock_mhz.unwrap_or(0),
                 memory_bytes,
@@ -118,7 +118,7 @@ pub(super) fn cpu_agents(
         cpus.push(Cpu {
             node: None,
             native_node: 0,
-            name: host.name.clone().into_boxed_str(),
+            name: host.name.as_deref().unwrap_or("CPU").into(),
             compute_units: host.compute_units,
             maximum_clock_mhz: 0,
             memory_bytes: host_memory_bytes,
@@ -224,10 +224,16 @@ impl Gpu {
             .unwrap_or("AMD Radeon Graphics")
     }
 
-    /// Selects the populated DRM family when it is available.
+    /// Returns the provider-resolved family from the activated device.
+    #[allow(
+        clippy::expect_used,
+        reason = "Gpu is constructed only after confirming an activated GPU endpoint"
+    )]
     pub(crate) fn asic_family_id(&self) -> u32 {
-        let info = self.info();
-        info.drm_asic_family_id.unwrap_or(info.asic_family_id)
+        self.device
+            .gpu()
+            .expect("activated HSA GPU endpoint")
+            .asic_family_id()
     }
 
     /// Returns the optional native timestamp frequency as an HSA value.

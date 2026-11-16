@@ -398,6 +398,114 @@ TEST_F(CeCollMicrotest, EnsureStaging_AlreadySetUp_ReturnsWithoutRegistering) {
   EXPECT_EQ(0, alloc_.calls);
 }
 
+// ncclCeInit on 2 ranks with ncclMemAlloc returning stale 1s, the value the first UC sync waits for.
+class CeInitMicrotest : public ::testing::Test {
+ protected:
+  static constexpr uint32_t kStaleFlag = 1;
+  struct Allocation {
+    std::vector<uint32_t> words;
+    std::vector<uint32_t> atRegistration;  // after the registration's barrier, peers may signal into the window
+    ncclWindow_vidmem vidmem{};
+    ncclDevrWindow win{};
+  };
+  // A device fill lands when its stream is synchronized. hipMemset of device memory only queues on the null stream.
+  struct Fill {
+    hipStream_t stream;
+    void* dst;
+    int value;
+    size_t bytes;
+  };
+  Allocation allocs_[2];  // the signal buffer, then the ready/complete flag window
+  int nAllocs_ = 0;
+  std::vector<Fill> queued_;
+  std::unique_ptr<ncclComm> comm_ = std::make_unique<ncclComm>();
+  ScopedHook<ncclResult_t(void**, size_t)> alloc_{g_ncclMemAlloc, [this](void** ptr, size_t size) {
+    if (nAllocs_ == 2) return ncclInternalError;
+    Allocation& a = allocs_[nAllocs_++];
+    a.words.assign((size + sizeof(uint32_t) - 1) / sizeof(uint32_t), kStaleFlag);
+    *ptr = a.words.data();
+    return ncclSuccess;
+  }};
+  ScopedHook<ncclResult_t(ncclComm*, void*, size_t, int, ncclWindow_t*)> registration_{
+      g_devrWindowRegisterInGroup, [this](ncclComm*, void* ptr, size_t, int, ncclWindow_t* win) {
+        Allocation* a = Find(ptr);
+        if (a == nullptr) return ncclInvalidArgument;
+        a->atRegistration = a->words;
+        a->win.userPtr = ptr;
+        a->vidmem.winHost = &a->win;
+        *win = &a->vidmem;
+        return ncclSuccess;
+      }};
+  ScopedHook<ncclResult_t(ncclShadowPool*, void*, void**)> toHost_{
+      g_shadowPoolToHost, [](ncclShadowPool*, void* devObj, void** hostObj) {
+        *hostObj = devObj;
+        return ncclSuccess;
+      }};
+  ScopedHook<size_t(const ncclComm*)> nonRegCap_{g_rcclCeArNonRegCap, [](const ncclComm*) { return size_t{0}; }};
+  ScopedHook<hipError_t(void*, int, size_t)> memset_{g_hipMemset, [this](void* dst, int value, size_t bytes) {
+    queued_.push_back({nullptr, dst, value, bytes});
+    return hipSuccess;
+  }};
+  ScopedHook<hipError_t(void*, int, size_t, hipStream_t)> memsetAsync_{
+      g_hipMemsetAsync, [this](void* dst, int value, size_t bytes, hipStream_t stream) {
+        queued_.push_back({stream, dst, value, bytes});
+        return hipSuccess;
+      }};
+  ScopedHook<hipError_t(hipStream_t)> streamSync_{g_hipStreamSynchronize, [this](hipStream_t stream) {
+    Land(stream);
+    return hipSuccess;
+  }};
+
+  void SetUp() override {
+    comm_->nRanks = 2;
+    // The rest of ncclCeInit: its stream and event, and the seq-number buffer it fills through a side stream.
+    g_hipStreamCreateResult = hipSuccess;
+    g_hipEventCreateResult = hipSuccess;
+    g_hipAsyncOpsResult = hipSuccess;
+    g_hipDeviceGetPCIBusIdResult = hipSuccess;
+  }
+  void TearDown() override {
+    EXPECT_EQ(hipSuccess, hipFree(comm_->ceColl.d_barrierSync));
+    EXPECT_EQ(hipSuccess, hipFree(comm_->ceColl.ceSeqNumDev));
+    ResetHipFakes();
+  }
+  Allocation* Find(const void* ptr) {
+    for (Allocation& a : allocs_) {
+      if (!a.words.empty() && a.words.data() == ptr) return &a;
+    }
+    return nullptr;
+  }
+  void Land(hipStream_t stream) {
+    for (auto it = queued_.begin(); it != queued_.end();) {
+      if (it->stream != stream) {
+        ++it;
+        continue;
+      }
+      std::memset(it->dst, it->value, it->bytes);
+      it = queued_.erase(it);
+    }
+  }
+};
+
+TEST_F(CeInitMicrotest, StaleSyncFlags_ClearsThemBeforeRegisteringTheWindow) {
+  ASSERT_EQ(ncclSuccess, ncclCeInit(comm_.get()));
+
+  const Allocation* flags = Find(comm_->ceColl.ceSyncWin->userPtr);
+  ASSERT_NE(nullptr, flags);
+  EXPECT_EQ(std::vector<uint32_t>(flags->words.size(), 0), flags->atRegistration)
+      << "a stale " << kStaleFlag << " lets the first UC sync pass before its peer arrives";
+}
+
+TEST_F(CeInitMicrotest, StaleSignalBuffer_ClearsIt) {
+  ASSERT_EQ(ncclSuccess, ncclCeInit(comm_.get()));
+  Land(nullptr);
+
+  const Allocation* signal = Find(comm_->ceColl.signalBuffer);
+  ASSERT_NE(nullptr, signal);
+  EXPECT_EQ(std::vector<uint32_t>(signal->words.size(), 0), signal->words);
+  EXPECT_NE(nullptr, Find(comm_->ceColl.ceSyncWin->userPtr));
+}
+
 constexpr size_t kMiB = 1024 * 1024;
 constexpr uintptr_t kSendBase = 0x100000000000;
 constexpr uintptr_t kRecvBase = 0x200000000000;

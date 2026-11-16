@@ -47,6 +47,33 @@ table Gfx10CuResources {
   lds: [ubyte];
 }
 
+// A wave may still belong to an originally multiwave workgroup after every
+// other member retired. Preserve this separately from its live membership.
+table Gfx10WaveScheduling {
+  ready_cycle: uint64;
+  nop_ready_cycle: uint64;
+  sleep_cycles: uint32;
+  prefetch_lines: ubyte;
+  clause_remaining: ubyte;
+  clause_kind: ubyte;
+  clause_interval: ubyte;
+  clause_run: ubyte;
+  owns_clause: bool;
+  // Live KFD AQL and PM4 use the host clock in place of the simulation origin.
+  system_clock: bool;
+  at_barrier: bool;
+  registered_workgroup: bool;
+  multiwave_workgroup: bool;
+}
+
+table Gfx10CuScheduling {
+  cycle_count: uint64;
+  // S_INCPERFLEVEL and S_DECPERFLEVEL address 16 CU counters.
+  perf_levels: [uint32];
+  // Saved simulation-clock origin for S_MEMREALTIME.
+  model_realtime: uint64;
+}
+
 /// Byte range owned by a workgroup within its CU's LDS.
 struct LdsWindow {
   base: uint32;
@@ -121,9 +148,28 @@ table WavefrontState {
   // None, Export and Parameters preserve the readiness bits supplied by the frontend.
   graphics_wait: GraphicsWait = null;
   exceptions: WaveExceptionRegisters;
+  gfx10_scheduling: Gfx10WaveScheduling;
+  // Remaining delay, including the GFX12 wait-for-wakeup sentinel.
+  sleep_cycles: uint32;
+  sleep_wakeup: bool;
+  barrier_complete_mask: ubyte; // bit 0: workgroup, bit 1: trap
+  waiting_barrier: ubyte; // 0: none, 1: workgroup, 2: trap
+  // GFX11 user-visible prefetch and launch flags. Wave size is reconstructed at restore.
+  ib_sts2_gfx11: uint32;
+  // Distinguish direct memory from the standalone VM's identity mapping.
+  uses_internal_address_space: bool = null;
 }
 
 /// Serialized state of a compute unit.
+struct Rdna4CheckpointGroup {
+  dispatch_id: uint32;
+  wg_id: uint32;
+  live_members: uint32;
+  workgroup_signals: ubyte;
+  trap_signals: ubyte;
+  multiwave: bool;
+}
+
 table ComputeUnitState {
   name: string;
   wavefronts: [WavefrontState];
@@ -150,6 +196,12 @@ table ComputeUnitState {
   // records used its length as the bump allocator reservation.
   lds: [ubyte];
   lds_cursor: uint32 = null;
+  gfx10_scheduling: Gfx10CuScheduling;
+  cycle_count: uint64;
+  // Workgroups with resident waves, including single surviving members.
+  rdna4_workgroups: [Rdna4CheckpointGroup];
+  // Raw simulation ticks for the shader realtime clock. GFX10 stores these in gfx10_scheduling.
+  model_realtime: uint64 = null;
 }
 
 /// Serialized state of a command processor.

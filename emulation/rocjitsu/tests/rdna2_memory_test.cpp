@@ -480,5 +480,69 @@ TEST_F(Rdna2MemoryTest, AddressedPrivateAndFlatLdsElementsReportAtCompletion) {
   }
 }
 
+TEST(Rdna2MemoryDispatchTest, PrivateViolationSurvivesWaitAndClearsThroughTrapsts) {
+  constexpr uint64_t priv = 0x0002'0000'0000'0000;
+  constexpr uint16_t trapsts_mem_viol = 3 | (8 << 6);
+  for (uint32_t width : {32u, 64u}) {
+    SCOPED_TRACE(width);
+    test::execution_plugin::PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(1, "rdna2", width, 106));
+    f.cu()->set_apertures(0, 0, priv, priv + 0xffff);
+    std::vector<uint32_t> code;
+    const auto emit = [&](auto words) { code.insert(code.end(), words.begin(), words.end()); };
+    const auto mov = [&](uint8_t reg, uint32_t value) {
+      emit(rdna2::build_vop1(rdna2::kVMovB32Vop1, {.src0 = 255, .vdst = reg}));
+      code.push_back(value);
+    };
+    mov(1, priv >> 32);
+    mov(2, 0x4000);
+    mov(3, 0);
+    mov(4, 0x12345678);
+    unsigned result = 0;
+    const auto access = [&](unsigned offset, bool store) {
+      mov(0, offset);
+      emit(rdna2::build_flat(store ? rdna2::kFlatStoreDword : rdna2::kFlatLoadDword,
+                             {.addr = 0, .data = 4, .saddr = 125, .vdst = 8}));
+      code.push_back(0xbf8c0000); // s_waitcnt 0
+      emit(rdna2::build_sopk(rdna2::kSWaitcntVscnt, {.sdst = 125}));
+      emit(rdna2::build_sopk(rdna2::kSGetregB32, {.simm16 = trapsts_mem_viol, .sdst = 6}));
+      emit(rdna2::build_vop1(rdna2::kVMovB32Vop1, {.src0 = 6, .vdst = 9}));
+      emit(rdna2::build_flat(rdna2::kFlatStoreDword, {.offset = static_cast<uint16_t>(result++ * 4),
+                                                      .seg = 2,
+                                                      .addr = 2,
+                                                      .data = 9,
+                                                      .saddr = 125}));
+    };
+    access(0, true);
+    access(0, false);
+    emit(rdna2::build_flat(rdna2::kFlatStoreDword,
+                           {.offset = 20, .seg = 2, .addr = 2, .data = 8, .saddr = 125}));
+    // Offset 1024 is outside both the four-byte logical limit and the entire rounded wave slice.
+    access(1024, false);
+    emit(rdna2::build_flat(rdna2::kFlatStoreDword,
+                           {.offset = 24, .seg = 2, .addr = 2, .data = 8, .saddr = 125}));
+    access(0, false);
+    emit(rdna2::build_sopk(rdna2::kSSetregImm32B32, {.simm16 = trapsts_mem_viol}));
+    code.push_back(0);
+    access(0, false);
+    code.push_back(0xbf810000); // s_endpgm
+    const auto kernel = f.write_kernel(0x1000, code.data(), code.size());
+    using namespace amdhsa;
+    f.mem->write32(kernel + offsetof(kernel_descriptor_t, private_segment_fixed_size), 4);
+    auto props = f.mem->read32(kernel + offsetof(kernel_descriptor_t, kernel_code_properties));
+    RJ_AMDHSA_BITS_SET(props, KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, width == 32);
+    f.mem->write16(kernel + offsetof(kernel_descriptor_t, kernel_code_properties), props);
+    for (unsigned i = 0; i < 7; ++i)
+      f.mem->write32(0x4000 + 4 * i, 0xdeadbeef);
+    test::AqlQueue queue(f.mem, f.cp());
+    queue.dispatch(kernel, 1, width);
+    f.run_until_idle();
+    ASSERT_TRUE(f.cu()->is_idle());
+    constexpr std::array<unsigned, 7> expected{0, 0, 1, 1, 0, 0x12345678, 0};
+    for (unsigned i = 0; i < expected.size(); ++i)
+      EXPECT_EQ(f.mem->read32(0x4000 + 4 * i), expected[i]) << "output " << i;
+  }
+}
+
 } // namespace
 } // namespace rocjitsu
