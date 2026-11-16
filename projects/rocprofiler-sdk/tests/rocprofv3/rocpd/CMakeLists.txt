@@ -414,6 +414,7 @@ rocprofiler_add_integration_validate_test(
     ARGS validate.py::test_summary_markers_default
          validate.py::test_summary_by_rank_files
          validate.py::test_summary_by_rank_no_mpi_rank
+         validate.py::test_rank_env_var_rejects_malicious_name
          --summary-markers-csv
          ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary-default/out_marker_summary.csv
          --summary-files-csv

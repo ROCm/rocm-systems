@@ -562,6 +562,73 @@ def test_summary_by_rank_no_mpi_rank(
             assert column in df.columns, f"{label} missing {column}: {list(df.columns)}"
 
 
+def _reset_rank_env_cache():
+    from rocpd.summary import get_rank_env_variable_name
+
+    if hasattr(get_rank_env_variable_name, "_rank_env_name_cached"):
+        delattr(get_rank_env_variable_name, "_rank_env_name_cached")
+
+
+def _rank_name_for_env(env):
+    """Return the rank variable chosen from a one-row rocpd_info_process table."""
+    import json
+    import sqlite3
+
+    from rocpd.summary import generate_summary_query, get_rank_env_variable_name
+
+    _reset_rank_env_cache()
+    connection = sqlite3.connect(":memory:")
+    connection.execute("CREATE TABLE rocpd_info_process (environment TEXT)")
+    connection.execute(
+        "INSERT INTO rocpd_info_process (environment) VALUES (?)",
+        (json.dumps(env),),
+    )
+    try:
+        return get_rank_env_variable_name(connection), generate_summary_query
+    finally:
+        _reset_rank_env_cache()
+
+
+def test_rank_env_var_rejects_malicious_name():
+    """ROCPROF_MPI_RANK_VAR must be a plain identifier that exists in the environment.
+
+    A name with a quote would otherwise be interpolated into json_extract().
+    """
+    malicious = "X') OR 1=1 --"
+    chosen, generate_summary_query = _rank_name_for_env(
+        {
+            "ROCPROF_MPI_RANK_VAR": malicious,
+            malicious: "0",
+            "OMPI_COMM_WORLD_RANK": "0",
+        }
+    )
+    assert chosen == "OMPI_COMM_WORLD_RANK"
+    _, sql = generate_summary_query("kernels", by_rank=True, by_rank_env_var=chosen)
+    assert malicious not in sql
+    assert "OMPI_COMM_WORLD_RANK" in sql
+
+    # A well-formed name that was not actually set is ignored.
+    chosen, _ = _rank_name_for_env(
+        {
+            "ROCPROF_MPI_RANK_VAR": "NOT_A_REAL_VAR",
+            "OMPI_COMM_WORLD_RANK": "1",
+        }
+    )
+    assert chosen == "OMPI_COMM_WORLD_RANK"
+
+    # A custom variable wins when it is a plain name and a real environment key.
+    chosen, generate_summary_query = _rank_name_for_env(
+        {
+            "ROCPROF_MPI_RANK_VAR": "MY_RANK",
+            "MY_RANK": "3",
+            "OMPI_COMM_WORLD_RANK": "0",
+        }
+    )
+    assert chosen == "MY_RANK"
+    _, sql = generate_summary_query("kernels", by_rank=True, by_rank_env_var=chosen)
+    assert "$.MY_RANK" in sql
+
+
 def test_summary_by_rank_files(summary_files_csv, summary_files_expected):
     """Test that --summary-by-rank outputs the files table with original DB filenames."""
     df = summary_files_csv

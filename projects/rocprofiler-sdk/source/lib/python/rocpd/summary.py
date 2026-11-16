@@ -24,8 +24,10 @@
 ###############################################################################
 
 import argparse
-import os
+import json
 import math
+import os
+import re
 
 from typing import Any, List, Tuple
 from .importer import RocpdImportData, execute_statement
@@ -45,6 +47,18 @@ __all__ = [
 ]
 
 _MISSING = object()
+# POSIX environment-variable names. Rejects quotes and other characters that would
+# change the SQL text when the name is placed in a json_extract path literal.
+_RANK_ENV_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _usable_rank_env_name(name, env_data) -> bool:
+    """True when name is a plain identifier and a key in the process environment."""
+    return (
+        isinstance(name, str)
+        and _RANK_ENV_NAME_PATTERN.fullmatch(name) is not None
+        and name in env_data
+    )
 
 
 def check_function_availability(connection, function_name):
@@ -189,24 +203,20 @@ def get_rank_env_variable_name(connection: RocpdImportData) -> str:
     if not environment_vars:
         raise ValueError("No environment data found in rocpd_info_process table.")
 
-    for env in environment_vars:
-        import json
+    env_data = json.loads(environment_vars[0][0])
 
-        env_data = json.loads(env[0])
-        columns = env_data.keys()
-        break  # only need to check the first row
-
-    # ROCPROFV3 already cached the rank variable name, lets just use it
-    if "ROCPROF_MPI_RANK_VAR" in columns:
-        get_rank_env_variable_name._rank_env_name_cached = env_data[
-            "ROCPROF_MPI_RANK_VAR"
-        ]
-        return get_rank_env_variable_name._rank_env_name_cached
-
-    current_rank_column = None
-    for rank_column in possible_rank_columns:
-        if rank_column in columns:
-            current_rank_column = rank_column  # any subsequent matches will override previous ones, to get most specific
+    # rocprofv3 records the variable it used. Accept it only when it is a plain
+    # identifier and that variable is actually present in the environment.
+    requested = env_data.get("ROCPROF_MPI_RANK_VAR")
+    if _usable_rank_env_name(requested, env_data):
+        current_rank_column = requested
+    else:
+        current_rank_column = None
+        for rank_column in possible_rank_columns:
+            if rank_column in env_data:
+                current_rank_column = (
+                    rank_column  # later matches override, most specific wins
+                )
 
     get_rank_env_variable_name._rank_env_name_cached = current_rank_column
     return current_rank_column
