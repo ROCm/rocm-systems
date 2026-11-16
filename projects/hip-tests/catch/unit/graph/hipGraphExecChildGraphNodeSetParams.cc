@@ -952,6 +952,43 @@ HIP_TEST_CASE(Unit_hipGraphExecChildGraphNodeSetParams_MovedChildGraphOwnership)
     REQUIRE(after == before + 1);
   }
 
+  SECTION("Nodes added to the parent do not leak into the moved graph") {
+    // The mirror of the case above: resolving a moved handle must not make the parent and
+    // the child one graph. A node added to the parent is a sibling of the child node, not
+    // a member of it.
+    size_t childBefore = 0, parentBefore = 0;
+    HIP_CHECK(hipGraphGetNodes(childGraph, nullptr, &childBefore));
+    HIP_CHECK(hipGraphGetNodes(graph, nullptr, &parentBefore));
+
+    hipGraphNode_t siblingNode = nullptr;
+    HIP_CHECK(hipGraphAddEmptyNode(&siblingNode, graph, nullptr, 0));
+
+    size_t childAfter = 0, parentAfter = 0;
+    HIP_CHECK(hipGraphGetNodes(childGraph, nullptr, &childAfter));
+    HIP_CHECK(hipGraphGetNodes(graph, nullptr, &parentAfter));
+    REQUIRE(childAfter == childBefore);
+    REQUIRE(parentAfter == parentBefore + 1);
+  }
+
+  SECTION("A clone of the parent does not share ownership of the moved graph") {
+    // The clone takes a snapshot of the child's contents; it must not also inherit the
+    // owning pointer to the caller's moved graph object, or destroying the clone and the
+    // original would free that object twice.
+    hipGraph_t clonedParent = nullptr;
+    HIP_CHECK(hipGraphClone(&clonedParent, graph));
+    REQUIRE(clonedParent != nullptr);
+
+    size_t clonedNodes = 0;
+    HIP_CHECK(hipGraphGetNodes(clonedParent, nullptr, &clonedNodes));
+    REQUIRE(clonedNodes > 0);
+
+    // Destroying the clone must leave the original and its moved child intact; the
+    // original is torn down by this test's normal cleanup, which is the second free.
+    HIP_CHECK(hipGraphDestroy(clonedParent));
+    HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
+    HIP_CHECK(hipStreamSynchronize(streamForGraph));
+  }
+
   SECTION("Dependencies can be edited through the moved graph") {
     // The caller's node handles are now owned by the adopting graph, so the membership
     // check in these APIs only passes if the handle is resolved first. childMemset and
