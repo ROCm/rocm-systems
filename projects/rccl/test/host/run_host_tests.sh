@@ -229,12 +229,14 @@ do_poison_hip_atomics() {
   python3 "$RCCL_ROOT/src/include/test_poison_hip_atomics.py"
 }
 
-# Kernel ISA guard: compiles an LL peer-pointer probe for gfx942/gfx950/gfx1250
+# Kernel ISA guards: compiles an LL peer-pointer probe for gfx942/gfx950/gfx1250
 # against the hipified tree and counts in-loop vector loads and store-stalling
 # waits. Needs amdclang++ and the `hipify` phase; no GPU. Like the poison probe,
 # a missing compiler or tree fails (RCCL_ISA_TEST_ALLOW_SKIP=1 to opt out).
+# The gfx1250 TDM deep-loop guard skips with a reason on a ROCm without the TDM
+# header (RCCL_ISA_TDM_ROCM_PATH points it at one).
 do_symk_peer_pointer_isa() {
-  echo "==> Symmetric LL peer-pointer ISA guard (test/test_symk_peer_pointer_isa.py)"
+  echo "==> Symmetric peer-pointer ISA guards (test/test_symk_peer_pointer_isa.py)"
   RCCL_BUILD_DIR="$RCCL_BUILD_DIR" python3 "$RCCL_ROOT/test/test_symk_peer_pointer_isa.py" -v
 }
 
@@ -310,8 +312,8 @@ do_test_runner_guards() {
 
 # All CPU-only guards: makefile -MM scan, the device-table unittest, the
 # kernel-count and accl-reporter pytest suites, the tools/scripts/test_runner
-# unittests, the __hip_atomic_* poison compile probe, the LL peer-pointer ISA
-# guard, then the RcclReplayer host checks. Collected with `|| rc=1` rather than
+# unittests, the __hip_atomic_* poison compile probe, the peer-pointer ISA
+# guards, then the RcclReplayer host checks. Collected with `|| rc=1` rather than
 # run back to back so that under `set -e` an early failure still leaves the
 # later guards running and reported, instead of aborting the phase at the first
 # one. Same idiom as do_host_tests above.
