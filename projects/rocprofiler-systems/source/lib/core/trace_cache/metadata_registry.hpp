@@ -322,8 +322,6 @@ struct metadata_registry
     get_code_object_list() const;
     std::vector<rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t>
     get_kernel_symbol_list() const;
-    std::optional<rocprofiler_callback_tracing_code_object_load_data_t> get_code_object(
-        std::uint64_t code_object_id) const;
     std::optional<rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t>
     get_kernel_symbol(std::uint64_t kernel_id) const;
 

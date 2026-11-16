@@ -117,13 +117,6 @@ backtrace_metrics::description()
     return "Records sampling data";
 }
 
-std::vector<std::string>
-backtrace_metrics::get_hw_counter_labels(std::int64_t _tid)
-{
-    auto const& _v = get_papi_labels(_tid);
-    return _v ? *_v : std::vector<std::string>{};
-}
-
 void
 backtrace_metrics::start()
 {}

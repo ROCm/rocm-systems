@@ -67,45 +67,6 @@ struct gpu_metrics_capabilities_t
 };
 
 /**
- * @brief Serializes GPU metrics into a compact binary format
- *
- * Serialization format:
- * 1. Support flags byte (1 byte):
- *      - bit 0: vcn_is_device_level_only (device-level vs per-XCP)
- *      - bit 1: jpeg_is_device_level_only (device-level vs per-XCP)
- *      - bits 2-7: reserved
- * 2. Data element counts (6 bytes):
- *      - vcn_count (1 byte): total VCN values (flattened across all XCPs)
- *      - jpeg_count (1 byte): total JPEG values (flattened across all XCPs)
- *      - vcn_xcp_count (1 byte): number of XCPs with VCN data
- *      - jpeg_xcp_count (1 byte): number of XCPs with JPEG data
- *      - xgmi_read_count (1 byte): number of XGMI read data values
- *      - xgmi_write_count (1 byte): number of XGMI write data values
- * 3. Per-XCP size arrays (variable):
- *      - vcn_xcp_sizes[0..vcn_xcp_count-1]: size of each XCP's VCN data (1 byte each)
- *      - jpeg_xcp_sizes[0..jpeg_xcp_count-1]: size of each XCP's JPEG data (1 byte each)
- * 4. Flattened data arrays (conditionally serialized based on settings):
- *      - VCN data (if vcn_activity setting enabled): flattened uint16 values
- *      - JPEG data (if jpeg_activity setting enabled): flattened uint16 values
- *      - XGMI data (if xgmi setting enabled):
- *          link_width (uint16), link_speed (uint16)
- *          xgmi_read_data array (uint64[xgmi_read_count])
- *          xgmi_write_data array (uint64[xgmi_write_count])
- *      - PCIe data (if pcie setting enabled):
- *          link_width (uint16), link_speed (uint16)
- *          bandwidth_acc (uint64), bandwidth_inst (uint64)
- *
- * @param metrics GPU metrics to serialize
- * @param capabilities Capability flags (vcn/jpeg device-level status)
- * @param settings Controls which metrics to include in serialization
- * @return Binary serialized data
- */
-std::vector<std::uint8_t>
-serialize_gpu_metrics(const gpu_metrics_t&              metrics,
-                      const gpu_metrics_capabilities_t& capabilities,
-                      const gpu_metrics_settings_t&     settings);
-
-/**
  * @brief Deserializes GPU metrics from binary format
  *
  * @param serialized_data Binary data to deserialize

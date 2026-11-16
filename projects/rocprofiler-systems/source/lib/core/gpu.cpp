@@ -39,7 +39,6 @@
 #include <charconv>
 #include <cstddef>
 #include <exception>
-#include <mutex>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -342,15 +341,6 @@ initialize_amdsmi()
     return amdsmi_init();
 }
 
-bool
-reinitialize_amdsmi()
-{
-    static std::mutex                 mtx;
-    const std::lock_guard<std::mutex> lock(mtx);
-    amdsmi_initialized.store(false);
-    return amdsmi_init();
-}
-
 template <typename ArchiveT>
 void
 add_device_metadata(ArchiveT& ar)
@@ -605,12 +595,6 @@ std::uint32_t
 get_processor_count()
 {
     return processors::total_processor_count;
-}
-
-amdsmi_processor_handle
-get_handle_from_id(std::uint32_t dev_id)
-{
-    return processors::processors_list[dev_id];
 }
 
 }  // namespace rocprofsys::gpu
