@@ -247,6 +247,16 @@ HSAKMT_STATUS hsaKmtAllocMemoryAlignInternal(HSAuint32 PreferredNode,
   if (!MemFlags.ui32.CoarseGrain)
     create_info.mem_flags = Wkmi::kFineGrain;
 
+  /* Every vmem handle is forced to kLocal below, so mark them all Lockable to keep CpuMap()
+     working. VidMm only grants CPU access to GART: a Lockable heap order containing FB fails
+     the create outright, even with GART listed as a fallback. The descriptors passed to
+     hsa_amd_vmem_set_access are not visible this early, so host access cannot be detected
+     per-handle -- the cost is that vmem device memory lives in GART rather than FB. */
+#if defined(__linux__)  // WSL only: native Windows builds these same sources.
+  if (MemFlags.ui32.NoAddress)
+    create_info.mem_flags |= Wkmi::kHostAccess;
+#endif
+
   //In hsa-runtime, only kernarg region set Uncached.
   if (MemFlags.ui32.Uncached)
     create_info.mem_flags |= Wkmi::kKernarg;
@@ -1388,7 +1398,16 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryCpuMap(HsaMemoryObjectHandle Handle,
   *out_cpu_ptr = nullptr;
   if (gpu_mem->IsSysMemFd()) {
     *out_cpu_ptr = gpu_mem->CpuAddress();
+    return HSAKMT_STATUS_SUCCESS;
   }
+
+  // kLocal also excludes IPC imports, which copy mem_flags and need the null-pointer path.
+  if (!gpu_mem->IsLocal() || !gpu_mem->IsHostAccessible())
+    return HSAKMT_STATUS_SUCCESS;
+
+  if (gpu_mem->CpuMap(out_cpu_ptr) != ErrorCode::Success)
+    return HSAKMT_STATUS_ERROR;
+
   return HSAKMT_STATUS_SUCCESS;
 }
 
