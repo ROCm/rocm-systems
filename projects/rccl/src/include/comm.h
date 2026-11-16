@@ -1002,8 +1002,10 @@ struct ncclComm {
   // rcclTakeAddonStopEvent, which hands it out.
   hipEvent_t addonStopEvent;
   // Signal-memory completion for DDA-IPC. addonDoneWait is the seq the next stream must observe;
-  // 0 means the last completion was doneEvent instead.
-  rcclAddonDoneMem* addonDone;
+  // 0 means the last completion was doneEvent instead. HIP signal memory must be exactly 8 bytes, so
+  // the kernel's block counter lives in a separate device allocation.
+  uint64_t* addonDone;
+  unsigned* addonDoneGrid;
   uint64_t addonDoneSeq;
   uint64_t addonDoneWait;
   latency_profiler::CollTrace* ctrace;
@@ -1320,10 +1322,10 @@ static inline hipEvent_t rcclTakeAddonStopEvent(struct ncclComm* comm) {
 // Prepare a kernel-published completion. Empty when capturing, where the epilogue still records doneEvent.
 static inline DdaDoneMark rcclPrepareAddonDone(struct ncclComm* comm) {
   DdaDoneMark mark{nullptr, nullptr, 0};
-  if (comm->addonStopEvent == nullptr || comm->addonDone == nullptr) return mark;
+  if (comm->addonStopEvent == nullptr || comm->addonDone == nullptr || comm->addonDoneGrid == nullptr) return mark;
   comm->addonDoneSeq += 1;
-  mark.seq = &comm->addonDone->seq;
-  mark.grid = &comm->addonDone->grid;
+  mark.seq = comm->addonDone;
+  mark.grid = comm->addonDoneGrid;
   mark.value = comm->addonDoneSeq;
   return mark;
 }

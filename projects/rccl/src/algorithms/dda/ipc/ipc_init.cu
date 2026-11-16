@@ -222,7 +222,7 @@ ncclResult_t ncclDdaIpcCommClosePeerMappings(ncclComm* comm) {
       hipStream_t waitStream = nullptr;
       hipError_t waitErr = hipStreamCreateWithFlags(&waitStream, hipStreamNonBlocking);
       if (waitErr == hipSuccess) {
-        waitErr = hipStreamWaitValue64(waitStream, &comm->addonDone->seq, comm->addonDoneWait, hipStreamWaitValueGte,
+        waitErr = hipStreamWaitValue64(waitStream, comm->addonDone, comm->addonDoneWait, hipStreamWaitValueGte,
                                        ~0ull);
       }
       if (waitErr == hipSuccess) waitErr = hipStreamSynchronize(waitStream);

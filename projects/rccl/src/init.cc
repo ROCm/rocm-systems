@@ -636,6 +636,7 @@ static ncclResult_t commFree(ncclComm_t comm) {
 
   if (comm->doneEvent != NULL) CUDACHECK(hipEventDestroy(comm->doneEvent));
   if (comm->addonDone != nullptr) CUDACHECK(hipFree(comm->addonDone));
+  if (comm->addonDoneGrid != nullptr) CUDACHECK(hipFree(comm->addonDoneGrid));
 
   // GIN may use proxy. We need to finalize it before destroying the proxy.
   // closeColl and last-ref plugin-finalize errors are recorded here and returned
@@ -917,11 +918,15 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   comm->lastStreamTag = 0;
   comm->addonStopEvent = nullptr;
   comm->addonDone = nullptr;
+  comm->addonDoneGrid = nullptr;
   comm->addonDoneSeq = 0;
   comm->addonDoneWait = 0;
-  CUDACHECK(hipExtMallocWithFlags(reinterpret_cast<void**>(&comm->addonDone), sizeof(rcclAddonDoneMem),
-                                 hipMallocSignalMemory));
-  CUDACHECK(hipMemset(comm->addonDone, 0, sizeof(rcclAddonDoneMem)));
+  // Signal memory starts at 1, and waits are >=, so clear it before the first launch.
+  CUDACHECK(hipExtMallocWithFlags(reinterpret_cast<void**>(&comm->addonDone), sizeof(uint64_t), hipMallocSignalMemory));
+  CUDACHECK(hipMemset(comm->addonDone, 0, sizeof(uint64_t)));
+  CUDACHECK(hipExtMallocWithFlags(reinterpret_cast<void**>(&comm->addonDoneGrid), sizeof(unsigned),
+                                 hipDeviceMallocDefault));
+  CUDACHECK(hipMemset(comm->addonDoneGrid, 0, sizeof(unsigned)));
 
   // RCCL: acquire a scoped side stream for init-time allocations. It is
   // released once init completes (see ncclCommInitRankFunc) so it does not hold

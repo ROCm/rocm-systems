@@ -2402,7 +2402,7 @@ ncclResult_t rcclAddonLaunchBegin(struct ncclComm* comm, cudaStream_t stream, st
     // A DDA-IPC launch publishes a sequence into signal memory instead of recording doneEvent.
     // The wait is on this stream, never on the previous one, which may already have been destroyed.
     if (comm->addonDoneWait != 0 && comm->addonDone != nullptr) {
-      CUDACHECK(hipStreamWaitValue64(stream, &comm->addonDone->seq, comm->addonDoneWait, hipStreamWaitValueGte,
+      CUDACHECK(hipStreamWaitValue64(stream, comm->addonDone, comm->addonDoneWait, hipStreamWaitValueGte,
                                     ~0ull));
     } else {
       CUDACHECK(hipStreamWaitEvent(stream, comm->doneEvent, 0));

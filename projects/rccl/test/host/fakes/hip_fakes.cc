@@ -185,8 +185,10 @@ static hipError_t DefaultHipGetDeviceProperties(hipDeviceProp_t* prop, int)
 std::function<hipError_t(hipDeviceProp_t*, int)>
     g_hipGetDeviceProperties = DefaultHipGetDeviceProperties;
 
-static hipError_t DefaultHipExtMallocWithFlags(void** ptr, std::size_t size, unsigned)
+static hipError_t DefaultHipExtMallocWithFlags(void** ptr, std::size_t size, unsigned flags)
 {
+    // HIP rejects signal memory of any size other than 8 bytes.
+    if (flags == hipMallocSignalMemory && size != sizeof(std::uint64_t)) return hipErrorInvalidValue;
     if (ptr) {
         *ptr = std::malloc(size);
         return *ptr ? hipSuccess : hipErrorOutOfMemory;

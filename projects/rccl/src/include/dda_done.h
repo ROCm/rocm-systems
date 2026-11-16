@@ -11,9 +11,4 @@ struct DdaDoneMark {
   uint64_t value;
 };
 
-struct rcclAddonDoneMem {
-  uint64_t seq;
-  unsigned grid;
-};
-
 #endif
