@@ -139,8 +139,8 @@ If other GPUs run kernels longer than the range can usefully wait, a lower value
 into a quick decline, for example `ROCPROFILER_RANGE_REPLAY_HOST_FENCE_TIMEOUT_MS=1000`. A value
 that is not a whole number of milliseconds from 1 to 3600000 is ignored with a warning. A fence that
 times out leaves at most one barrier in a queue to retire later, and with it one HSA signal that the
-SDK does not reuse. Only host replay reads this setting. Kernel replay and packet range replay keep
-their 60-second wait and stop the application when it runs out.
+SDK does not reuse. Only host replay reads this setting. Kernel replay keeps its 60-second wait and
+stops the application when it runs out.
 
 A code object loaded during the application's own run of the range does not decline. HIP loads a
 module on the first launch of one of its kernels, so declining would refuse ordinary applications.
