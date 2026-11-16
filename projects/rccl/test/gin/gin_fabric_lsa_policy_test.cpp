@@ -15,7 +15,7 @@ using gin::fabric::ginFabricLsaAlltoAllSizeOk;
 using gin::fabric::ginFabricA2ASelectAlgo;
 using gin::fabric::GinFabricA2AAlgo;
 using gin::fabric::ginFabricLsaA2AThreshold;
-using gin::fabric::kGinFabricLsaA2ADefaultThreshold;
+using gin::fabric::ginFabricLsaA2ADefaultThreshold;
 
 TEST(GinFabricLsaPolicy, CapablePredicateRequiresFabricLsaTeam) {
   EXPECT_FALSE(ginFabricLsaA2ACapablePredicate(false, true, true, 4, 4, 4));
@@ -41,7 +41,7 @@ TEST(GinFabricLsaPolicy, SizeGateNeedsSixteenByteMultiples) {
   EXPECT_FALSE(ginFabricLsaAlltoAllSizeOk(4, 20, 64 * 1024));
   EXPECT_FALSE(ginFabricLsaAlltoAllSizeOk(4, 16 * 1024 + 8, 64 * 1024));
   EXPECT_TRUE(ginFabricLsaAlltoAllSizeOk(4, 32, 64 * 1024));
-  EXPECT_EQ(ginFabricA2ASelectAlgo(true, 1, 2, 20, kGinFabricLsaA2ADefaultThreshold), GinFabricA2AAlgo::Put);
+  EXPECT_EQ(ginFabricA2ASelectAlgo(true, 1, 2, 20, ginFabricLsaA2ADefaultThreshold(2)), GinFabricA2AAlgo::Put);
 }
 
 TEST(GinFabricLsaPolicy, LaunchConfigScalesChunksWithSize) {
@@ -84,26 +84,35 @@ TEST(GinFabricLsaPolicy, FlagBlocksCapAt64) {
 TEST(GinFabricLsaPolicy, ThresholdIsZeroUnlessOptedIn) {
   EXPECT_EQ(ginFabricLsaA2AThreshold(false, -1, 4), 0u);
   EXPECT_EQ(ginFabricLsaA2AThreshold(false, 65536, 4), 0u);
-  EXPECT_EQ(kGinFabricLsaA2ADefaultThreshold, 2u * 1024 * 1024);
-  // A total size, the same at every rank count.
-  EXPECT_EQ(ginFabricLsaA2AThreshold(true, -1, 4), kGinFabricLsaA2ADefaultThreshold);
-  EXPECT_EQ(ginFabricLsaA2AThreshold(true, -1, 16), kGinFabricLsaA2ADefaultThreshold);
+  // A total size of nRanks^2 MiB.
+  EXPECT_EQ(ginFabricLsaA2AThreshold(true, -1, 2), 4u * 1024 * 1024);
+  EXPECT_EQ(ginFabricLsaA2AThreshold(true, -1, 4), 16u * 1024 * 1024);
+  EXPECT_EQ(ginFabricLsaA2AThreshold(true, -1, 8), 64u * 1024 * 1024);
+  EXPECT_EQ(ginFabricLsaA2AThreshold(true, -1, 16), 256u * 1024 * 1024);
+  EXPECT_EQ(ginFabricLsaA2AThreshold(true, -1, 64), (size_t)4 * 1024 * 1024 * 1024);
   EXPECT_EQ(ginFabricLsaA2AThreshold(true, -1, 1), 0u);
   EXPECT_EQ(ginFabricLsaA2AThreshold(true, 65536, 4), 65536u);
   EXPECT_EQ(ginFabricLsaA2AThreshold(true, 0, 4), 0u);
 }
 
 TEST(GinFabricA2ASelect, LsaWhenOptedInAndUnderThresholdElsePut) {
-  const size_t lsaThr = kGinFabricLsaA2ADefaultThreshold;
+  const size_t lsaThr = ginFabricLsaA2ADefaultThreshold(4);
   // 32 KiB/peer * 4 = 128 KiB total: LSA
   EXPECT_EQ(ginFabricA2ASelectAlgo(true, 1, 4, 32 * 1024, lsaThr), GinFabricA2AAlgo::Lsa);
-  // 512 KiB/peer * 4 = 2 MiB total: still LSA, at the default threshold
-  EXPECT_EQ(ginFabricA2ASelectAlgo(true, 1, 4, 512 * 1024, lsaThr), GinFabricA2AAlgo::Lsa);
-  // 1 MiB/peer * 4 = 4 MiB total: gin.put
-  EXPECT_EQ(ginFabricA2ASelectAlgo(true, 1, 4, 1024 * 1024, lsaThr), GinFabricA2AAlgo::Put);
-  // 128 KiB/peer * 16 = 2 MiB total: LSA; 256 KiB/peer * 16 = 4 MiB: gin.put
-  EXPECT_EQ(ginFabricA2ASelectAlgo(true, 1, 16, 128 * 1024, lsaThr), GinFabricA2AAlgo::Lsa);
-  EXPECT_EQ(ginFabricA2ASelectAlgo(true, 1, 16, 256 * 1024, lsaThr), GinFabricA2AAlgo::Put);
+  // 4 MiB/peer * 4 = 16 MiB total: still LSA, at the default threshold
+  EXPECT_EQ(ginFabricA2ASelectAlgo(true, 1, 4, 4 * 1024 * 1024, lsaThr), GinFabricA2AAlgo::Lsa);
+  // One more vector per peer: gin.put
+  EXPECT_EQ(ginFabricA2ASelectAlgo(true, 1, 4, 4 * 1024 * 1024 + 16, lsaThr), GinFabricA2AAlgo::Put);
+  // 2 ranks: 2 MiB/peer (4 MiB total) is LSA, 4 MiB/peer gin.put
+  EXPECT_EQ(ginFabricA2ASelectAlgo(true, 1, 2, 2 * 1024 * 1024, ginFabricLsaA2ADefaultThreshold(2)),
+            GinFabricA2AAlgo::Lsa);
+  EXPECT_EQ(ginFabricA2ASelectAlgo(true, 1, 2, 4 * 1024 * 1024, ginFabricLsaA2ADefaultThreshold(2)),
+            GinFabricA2AAlgo::Put);
+  // 16 ranks: 16 MiB/peer (256 MiB total) is LSA, 32 MiB/peer gin.put
+  EXPECT_EQ(ginFabricA2ASelectAlgo(true, 1, 16, 16 * 1024 * 1024, ginFabricLsaA2ADefaultThreshold(16)),
+            GinFabricA2AAlgo::Lsa);
+  EXPECT_EQ(ginFabricA2ASelectAlgo(true, 1, 16, 32 * 1024 * 1024, ginFabricLsaA2ADefaultThreshold(16)),
+            GinFabricA2AAlgo::Put);
   // LSA not armed: put
   EXPECT_EQ(ginFabricA2ASelectAlgo(true, 0, 4, 32 * 1024, lsaThr), GinFabricA2AAlgo::Put);
   // Context failed its layout check: put

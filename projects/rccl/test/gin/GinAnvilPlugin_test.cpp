@@ -400,7 +400,8 @@ TEST_F(GinAnvilPluginTest, CreateContext_PublishesDeviceFabricLsaA2ALane) {
   ncclGinAnvilSdmaGPUContext hostCtx{};
   ASSERT_EQ(hipMemcpy(&hostCtx, devHandle->handle, sizeof(hostCtx), hipMemcpyDeviceToHost), hipSuccess);
   EXPECT_EQ(hostCtx.fabricA2ALsaEnabled, 1u);
-  EXPECT_EQ(hostCtx.fabricA2ALsaThreshold, 2u * 1024u * 1024u);
+  // The default is nRanks^2 MiB.
+  EXPECT_EQ(hostCtx.fabricA2ALsaThreshold, 16u * 1024u * 1024u);
 
   plugin_.destroyContext(ginCtx);
   plugin_.closeColl(coll);
@@ -469,7 +470,7 @@ TEST_F(GinAnvilPluginTest, CreateContext_LsaOptInWithoutCapabilityKeepsLaneOff) 
   plugin_.finalize(ictx);
 }
 
-// An explicit threshold replaces the 2 MiB default.
+// An explicit threshold replaces the nRanks^2 MiB default.
 TEST_F(GinAnvilPluginTest, CreateContext_LsaThresholdEnvOverridesDefault) {
   GinAnvilPluginStubs::SetFabricLsaOptIn(true);
   GinAnvilPluginStubs::SetFabricLsaThresholdEnv(256 * 1024);

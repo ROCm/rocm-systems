@@ -34,7 +34,7 @@ struct GinFabricLsaA2ABand {
 };
 
 // Geometry bands, after the gin_alltoall_sdma.cu LSA path. Every band uses 256
-// threads, the block size kGinFabricLsaA2ADefaultThreshold was measured with.
+// threads, the block size ginFabricLsaA2ADefaultThreshold was measured with.
 constexpr GinFabricLsaA2ABand kGinFabricLsaA2ABands[] = {
     {16 * 1024, 2, 256},
     {64 * 1024, 4, 256},
@@ -100,17 +100,22 @@ GIN_FABRIC_LSA_HD inline bool ginFabricLsaA2ACapablePredicate(bool fabricMemPath
   return true;
 }
 
-// Default total-size threshold of the lane. On MI450 the lane beats gin.put up to 2 MiB total and
-// loses from 4-8 MiB at 4, 8 and 16 ranks alike (1P4G, 2P8G and 4P16G pods), so the crossover is a
-// total size, not a per-peer one. Visible on the device pass: createContext calls this from a .cc
-// that HIP still parses for device when ENABLE_DEVICE_LINKER=OFF.
-constexpr size_t kGinFabricLsaA2ADefaultThreshold = (size_t)2 * 1024 * 1024;
+// Default total-size threshold of the lane: nRanks^2 MiB. On MI450 the lane's crossover with
+// gin.put grows with the rank count: between 4 and 8 MiB total at 2 ranks, 16 MiB at 4 (1P4G),
+// 64 MiB at 8 (2P8G), and past 512 MiB at 16 (4P16G), where the lane still wins 2.3x at the
+// 256 MiB default. Visible on the device pass: createContext calls this from a .cc that HIP still
+// parses for device when ENABLE_DEVICE_LINKER=OFF.
+constexpr size_t kGinFabricLsaA2ADefaultThresholdUnit = (size_t)1024 * 1024;
+
+GIN_FABRIC_LSA_HD inline size_t ginFabricLsaA2ADefaultThreshold(int nRanks) {
+  return (size_t)nRanks * (size_t)nRanks * kGinFabricLsaA2ADefaultThresholdUnit;
+}
 
 // This rank's lane threshold: envThreshold (RCCL_GIN_ANVIL_FABRIC_LSA_THRESHOLD_ALLTOALL,
 // negative when unset) or the default, and 0 when the rank did not opt in.
 GIN_FABRIC_LSA_HD inline size_t ginFabricLsaA2AThreshold(bool optIn, int64_t envThreshold, int nRanks) {
   if (!optIn || nRanks < 2) return 0;
-  return envThreshold >= 0 ? (size_t)envThreshold : kGinFabricLsaA2ADefaultThreshold;
+  return envThreshold >= 0 ? (size_t)envThreshold : ginFabricLsaA2ADefaultThreshold(nRanks);
 }
 
 }  // namespace fabric
