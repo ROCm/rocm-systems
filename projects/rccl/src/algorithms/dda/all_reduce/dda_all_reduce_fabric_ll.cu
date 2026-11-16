@@ -103,14 +103,7 @@ static inline unsigned ddaArLL128SliceThreads(const ncclComm* comm, bool peerPar
 // kDdaArLL128Threads, only while the group-per-block grid would pass the block cap.
 static inline unsigned ddaArLL128Threads(const ncclComm* comm, size_t slices, bool peerPar, rcclDdaLaunchCap cap) {
   if (!peerPar) {
-    // Temporary experiment knob: block size of the one-warp-per-slice kernels.
-    static const unsigned flatThreads = [] {
-      const char* e = getenv("RCCL_DDA_LL128_AR_FLAT_THREADS");
-      const int v = e ? atoi(e) : 0;
-      return v >= (int)kDdaLL128Warp && v <= (int)kDdaArLL128Threads && v % (int)kDdaLL128Warp == 0
-               ? (unsigned)v : kDdaArLL128Threads;
-    }();
-    return flatThreads;
+    return kDdaArLL128Threads;
   }
   const unsigned maxThreads = dda::common::ddaCapThreads(kDdaArLL128Threads, cap.threads);
   const unsigned groupThreads = ddaArLL128SliceThreads(comm, peerPar, cap);
