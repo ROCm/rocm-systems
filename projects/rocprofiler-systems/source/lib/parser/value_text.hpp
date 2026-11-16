@@ -55,6 +55,12 @@ using typed_values_t = std::map<std::string, config_value_t, std::less<>>;
 [[nodiscard]] bool
 accepts_value(const schema_param& param, const config_value_t& value);
 
+/// True when @p value turns its parameter on: a true boolean, a non-empty string or
+/// list, or any number. conflicts, required, and assigns apply only to a parameter that
+/// is on, so --debug=false neither conflicts with another option nor assigns one.
+[[nodiscard]] bool
+is_enabled(const config_value_t& value);
+
 /// Parse @p text once as @p param. Surrounding whitespace is ignored, so " 2 " is the
 /// integer 2 and text that is only whitespace reads as empty text. Returns nullopt
 /// when the text is not a value the parameter accepts.

@@ -133,6 +133,18 @@ TEST(parser_value_text, a_backend_row_leaves_an_unlisted_name_to_the_backend)
     EXPECT_FALSE(parse_value(metrics, "temp").has_value());
 }
 
+TEST(parser_value_text, is_enabled_is_false_only_for_false_and_empty_values)
+{
+    EXPECT_TRUE(is_enabled(config_value_t{ true }));
+    EXPECT_FALSE(is_enabled(config_value_t{ false }));
+    EXPECT_TRUE(is_enabled(config_value_t{ std::int64_t{ 0 } }));
+    EXPECT_TRUE(is_enabled(config_value_t{ 0.0 }));
+    EXPECT_TRUE(is_enabled(config_value_t{ std::string{ "out" } }));
+    EXPECT_FALSE(is_enabled(config_value_t{ std::string{} }));
+    EXPECT_TRUE(is_enabled(config_value_t{ std::vector<std::string>{ "hip" } }));
+    EXPECT_FALSE(is_enabled(config_value_t{ std::vector<std::string>{} }));
+}
+
 TEST(parser_value_text, accepts_value_checks_the_type_and_the_rules)
 {
     auto bounded = make_param(param_type::integer);

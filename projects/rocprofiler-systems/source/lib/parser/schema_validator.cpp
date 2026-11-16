@@ -12,7 +12,6 @@
 #include <string>
 #include <string_view>
 #include <utility>
-#include <variant>
 #include <vector>
 
 namespace rocprofsys::parser
@@ -39,31 +38,11 @@ public:
     }
 
 private:
-    [[nodiscard]] bool is_enabled(std::string_view param_id) const
+    [[nodiscard]] bool enabled(std::string_view param_id) const
     {
-        const auto* param = m_schema.find_param(param_id);
-        if(param == nullptr)
-        {
-            return false;
-        }
         const auto provided = m_values.find(param_id);
-        if(provided == m_values.end())
-        {
-            return false;
-        }
-        if(const auto* flag = std::get_if<bool>(&provided->second))
-        {
-            return *flag;
-        }
-        if(const auto* text = std::get_if<std::string>(&provided->second))
-        {
-            return !text->empty();
-        }
-        if(const auto* parts = std::get_if<std::vector<std::string>>(&provided->second))
-        {
-            return !parts->empty();
-        }
-        return true;
+        return m_schema.find_param(param_id) != nullptr && provided != m_values.end() &&
+               is_enabled(provided->second);
     }
 
     void report(std::string message, std::vector<std::string> params)
@@ -86,15 +65,14 @@ private:
 
     void check_exclusions(const schema_param& param)
     {
-        if(!is_enabled(param.id))
+        if(!enabled(param.id))
         {
             return;
         }
         for(const auto& other : param.conflicts)
         {
             auto key = std::minmax(param.id, other);
-            if(is_enabled(other) &&
-               m_reported_pairs.emplace(key.first, key.second).second)
+            if(enabled(other) && m_reported_pairs.emplace(key.first, key.second).second)
             {
                 report(fmt::format("parameters '{}' and '{}' are mutually exclusive",
                                    param.id, other),
@@ -105,13 +83,13 @@ private:
 
     void check_required(const schema_param& param)
     {
-        if(!is_enabled(param.id))
+        if(!enabled(param.id))
         {
             return;
         }
         for(const auto& requirement : param.required)
         {
-            if(!is_enabled(requirement))
+            if(!enabled(requirement))
             {
                 report(fmt::format("parameter '{}' requires '{}'", param.id, requirement),
                        { param.id, requirement });

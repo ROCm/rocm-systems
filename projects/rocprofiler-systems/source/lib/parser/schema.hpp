@@ -76,8 +76,8 @@ struct schema_param
     std::vector<std::string> conflicts;
     /// Parameters that must also be set when this one is.
     std::vector<std::string> required;
-    /// Parameter ids and the values they take when this one is set. For example,
-    /// "--gpu" uses it to set use_amd_smi and use_process_sampling to "true".
+    /// Parameter ids and the values they take when this one is on (is_enabled()). For
+    /// example, "--gpu" uses it to set use_amd_smi and use_process_sampling to "true".
     value_map_t assigns;
 };
 

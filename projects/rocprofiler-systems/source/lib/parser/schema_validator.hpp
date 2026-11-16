@@ -45,8 +45,8 @@ struct violation
  *
  * @p values are already parsed. Reports an unknown parameter id, then evaluates
  * inline constraints. It does not parse the values again. A parameter is enabled
- * when a value was provided for it: a true boolean, a non-empty string or list, or
- * any number.
+ * when the value provided for it is on, as is_enabled() decides: a true boolean, a
+ * non-empty string or list, or any number.
  */
 [[nodiscard]] std::vector<violation>
 validate_values(const schema& config_schema, const typed_values_t& values);

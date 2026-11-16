@@ -239,6 +239,24 @@ accepts_held(const schema_param& param, const std::vector<std::string>& parts)
 }  // namespace
 
 bool
+is_enabled(const config_value_t& value)
+{
+    if(const auto* flag = std::get_if<bool>(&value))
+    {
+        return *flag;
+    }
+    if(const auto* text = std::get_if<std::string>(&value))
+    {
+        return !text->empty();
+    }
+    if(const auto* parts = std::get_if<std::vector<std::string>>(&value))
+    {
+        return !parts->empty();
+    }
+    return true;
+}
+
+bool
 accepts_value(const schema_param& param, const config_value_t& value)
 {
     return std::visit([&param](const auto& held) { return accepts_held(param, held); },
