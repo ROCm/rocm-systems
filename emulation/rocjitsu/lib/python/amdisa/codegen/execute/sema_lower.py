@@ -30,7 +30,7 @@ from amdisa.codegen.execute import (
     vop3_modifiers,
 )
 from amdisa.codegen.execute.cube import CUBE_OPERATIONS, cube_expression, cube_omod
-from amdisa.codegen.execute.fp8_formats import fp8_helper_name, uses_shared_fp8
+from amdisa.codegen.execute.fp8_formats import fp8_helper_name, uses_shared_fp8_widening
 from amdisa.sema_derive import CONVERSION_CALL, FLOAT_COMPARE_CALL, FLOAT_MINMAX_CALL
 from amdisa.sema_ast import (
     ExecModel,
@@ -165,6 +165,7 @@ class LoweringContext:
     trans_f32: bool = False
     arithmetic_flush_output: str | None = None
     integer_saturation_dtype: str | None = None
+    mul_lo_u16_clamp: str | None = None
 
 
 _INFIX_OPS: dict[SemaNodeKind, str] = {
@@ -193,7 +194,7 @@ _CONTEXT_READS: dict[str, str] = {
     'VCC': 'wf.vcc_mask()',
     'EXEC': 'wf.exec()',
     'EXEC_RAW': 'wf.exec_raw()',
-    'EXEC_LO': 'static_cast<uint32_t>(wf.exec())',
+    'EXEC_LO': 'static_cast<uint32_t>(wf.exec_raw())',
     'M0': 'wf.m0()',
     'laneId': 'lane',
 }
@@ -203,6 +204,7 @@ _CONTEXT_WRITES: dict[str, str] = {
     'VCC': 'wf.write_vcc',
     'EXEC': 'wf.set_exec',
     'EXEC_RAW': 'wf.write_exec',
+    'EXEC_LO': 'wf.write_exec_lo',
 }
 
 _STD_MATH: dict[SemaNodeKind, str] = {
@@ -1753,6 +1755,7 @@ _INLINE_TERNARY_OPS: dict[str, str] = {
     'xor3': '({0} ^ {1} ^ {2})',
     'xad': '(({0} ^ {1}) + {2})',
     'lshl_add': '(::rocjitsu::amdgpu::lshl_masked({0}, {1}) + {2})',
+    'lshl_add_u64': '(::rocjitsu::amdgpu::lshl_for_add_u64({0}, {1}) + {2})',
     'lshl_or': '(::rocjitsu::amdgpu::lshl_masked({0}, {1}) | {2})',
     'add_lshl': '::rocjitsu::amdgpu::lshl_masked(({0} + {1}), {2})',
     'ashr_pk_i8_i32': '[&]() -> uint32_t {{'
@@ -1979,7 +1982,18 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
         args = [source]
     else:
         args = [_lower_expr(c, ctx) for c in node.children[1:]]
+    if callee in ('alignbit', 'alignbyte') and ctx.operand_map:
+        count = ctx.operand_map.src(2)
+        if count and count.bit_width == 8:
+            # GFX9/10 use OPSEL[1:0] as a byte index. Later encodings already
+            # lower their 16-bit S2 through the ordinary true16 reader.
+            args[2] = (
+                f'({args[2]} >> amdgpu::vop3_align_count_offset('
+                'amdgpu::vop3_opsel(inst_), 8))'
+            )
     args_str = ', '.join(args)
+    if callee == 'mul_lo_u16' and ctx.mul_lo_u16_clamp is not None:
+        return f'amdgpu::vop3_integer_mul<uint16_t, 16>({args_str}, {ctx.mul_lo_u16_clamp})'
     if callee == 'mul_legacy':
         if (arithmetic := _mode_arithmetic(node, ctx, 'MUL_LEGACY', args)) is not None:
             return arithmetic
@@ -1993,7 +2007,8 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
     if ctx.integer_saturation_dtype is not None and callee in add_minmax_calls:
         cpp_type, select_max = add_minmax_calls[callee]
         return (
-            f'amdgpu::vop3_integer_add_minmax<{cpp_type}, {select_max}>(' f'{args_str})'
+            f'amdgpu::vop3_integer_add_minmax<{cpp_type}, {select_max}>('
+            f'{args_str}, inst_.clamp)'
         )
 
     saturating_calls = {
@@ -2081,7 +2096,9 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
             arg = f'(({arg} >> (({ctx.fp8_byte_select}) * 8u)) & 0xFFu)'
         fp8_decode_fn = fp8_helper_name(ctx.arch_name, 'util::fp8_e4m3_to_f32')
         bf8_decode_fn = fp8_helper_name(ctx.arch_name, 'util::bf8_e5m2_to_f32')
-        if callee in ('cvt_f32_fp8', 'cvt_f32_bf8') and uses_shared_fp8(ctx.arch_name):
+        if callee in ('cvt_f32_fp8', 'cvt_f32_bf8') and uses_shared_fp8_widening(
+            ctx.arch_name
+        ):
             decoded = conversion.decode_fp8_expr(callee[-3:], arg)
             if ctx.fp8_decode_e5m3_select is not None and callee == 'cvt_f32_fp8':
                 e5m3 = f'util::fp8_e5m3_to_f32(static_cast<uint8_t>({arg}))'

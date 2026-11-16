@@ -1,0 +1,25 @@
+Panel Config:
+  id: 1100
+  alias: gl1
+  title: GL1 Cache (L1)
+  data source:
+  - metric_table:
+      id: 1103
+      title: GL1 Cache Request Statistics
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        Total Requests:
+          avg: SUM(GL1C_REQ_sum) / SUM($denom)
+          min: MIN(GL1C_REQ_sum / $denom)
+          max: MAX(GL1C_REQ_sum / $denom)
+          unit: (Count + $normUnit)
+  metrics_description:
+    Total Requests: >-
+      Total number of requests received by GL1 from all GL0 caches (TCP instances)
+      within the shader engine. This represents aggregated memory traffic from multiple
+      Workgroup Processors.

@@ -3,14 +3,15 @@
 `rj_fuzz` provides one broad entry point for the simulator's focused fuzz
 harnesses. Byte zero selects a registered harness; every remaining byte belongs
 to that harness. Selector IDs are stable: zero selects decode, one selects
-wavefront/CU execution, and two selects code-object loading. Unassigned values
-are ordinary no-op inputs, leaving room to add targets without reinterpreting
-saved corpora.
+wavefront/CU execution, two selects code-object loading, and three selects
+concurrent dispatch. Unassigned values are ordinary no-op inputs, leaving room
+to add targets without reinterpreting saved corpora.
 
 The decode route accepts the focused harness's exact 16-byte payload and uses
 gfx1250. The execution route accepts a nonempty execution-fuzzer input of at most
 1024 bytes, including its target and mode header. The code-object route accepts the
-remaining payload unchanged. Strip the selector byte to replay a finding with
+remaining payload unchanged. The concurrent-dispatch route accepts a nonempty
+input of at most 1024 bytes. Strip the selector byte to replay a finding with
 the corresponding focused binary:
 
 ```sh
@@ -18,11 +19,12 @@ tail -c +2 multiplexer-input.bin > focused-input.bin
 rj_decode_fuzz --input focused-input.bin --json --target gfx1250
 rj_execution_fuzz --input focused-input.bin
 rj_code_object_fuzz --input focused-input.bin
+rj_concurrent_dispatch_fuzz --input focused-input.bin
 ```
 
-The focused `rj_decode_fuzz`, `rj_execution_fuzz`, and `rj_code_object_fuzz`
-binaries remain the preferred entry points for dedicated campaigns and crash
-minimization.
+The focused `rj_decode_fuzz`, `rj_execution_fuzz`, `rj_code_object_fuzz`, and
+`rj_concurrent_dispatch_fuzz` binaries remain the preferred entry points for
+dedicated campaigns and crash minimization.
 
 The canonical [rocjitsu-fuzz workflow](../../../../.github/workflows/rocjitsu-fuzz.yml)
 runs this target after relevant updates land on `ROCm/rocm-systems`'s `develop`
@@ -66,7 +68,8 @@ build-multiplexer-afl/fuzz/multiplexer/rj_fuzz --emit-seeds multiplexer-seeds
 ```
 
 Keep every emitted seed and do not apply one multiplexer `-g`/`-G` size
-window: decode, execution, and code-object inputs have different useful sizes.
+window: decode, execution, code-object, and concurrent-dispatch inputs have
+different useful sizes.
 
 Set `AFL_LLVM_THREADSAFE_INST=1` while compiling every instrumented object.
 Execution inputs can select concurrent issuers, so AFL++'s ordinary counters
@@ -81,3 +84,5 @@ isolation.
 
 Replay a saved input with `rj_fuzz --input FILE`. The JSON result identifies
 the selected harness and reports target-specific work completed before return.
+For concurrent dispatch, work units are observed wave instructions rather than
+the number of work-items submitted from the input header.

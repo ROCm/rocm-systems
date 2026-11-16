@@ -6,11 +6,13 @@
 #include "rocjitsu/vm/plugins/race_detector/core/instruction_snapshot.h"
 #include "rocjitsu/vm/plugins/race_detector/core/interval_set.h"
 #include "rocjitsu/vm/plugins/race_detector/core/types.h"
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cstdint>
-#include <ranges>
+#include <optional>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu::plugins::race_detector {
@@ -51,6 +53,7 @@ class EventRegistry {
     uint64_t execMask;
     std::vector<uint32_t> registers;
     IntervalSet ldsIntervals;
+    LdsAccess ldsAccess;
   };
 
 public:
@@ -59,9 +62,11 @@ public:
               std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask,
               IntervalSet ldsIntervals,
               std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-              MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0) {
+              MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0,
+              LdsAccess ldsAccess = {}) {
     int id = base_offset_ + static_cast<int>(entries_.size());
-    assert(!counterObligations.empty());
+    assert(!counterObligations.empty() ||
+           (isFromLds(type) && registers.empty() && !ldsIntervals.empty()));
     assert(counterObligations.size() <= amdgpu::MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS);
     EventInfo event{waveId,
                     instruction,
@@ -70,12 +75,13 @@ public:
                     static_cast<uint8_t>(counterObligations.size()),
                     0,
                     memoryOrder,
-                    EventStatus::ACTIVE,
+                    counterObligations.empty() ? EventStatus::WAVE_COMPLETE : EventStatus::ACTIVE,
                     byteMask,
                     lastRegisterByteMask ? lastRegisterByteMask : byteMask,
                     execMask,
                     std::move(registers),
-                    std::move(ldsIntervals)};
+                    std::move(ldsIntervals),
+                    ldsAccess};
     std::ranges::copy(counterObligations, event.counterObligations.begin());
     entries_.push_back(std::move(event));
 
@@ -99,10 +105,6 @@ public:
   // -- Typed accessors (all inline) --
 
   MemoryEventType type(EventId id) const { return entries_[index(id)].type; }
-  std::span<const amdgpu::MemoryCounterObligation> counterObligations(EventId id) const {
-    const auto &event = entries_[index(id)];
-    return {event.counterObligations.data(), event.numCounterObligations};
-  }
   bool hasPendingWaitCounter(EventId id, amdgpu::WaitCounterType waitType) const {
     const auto &event = entries_[index(id)];
     for (uint8_t i = 0; i < event.numCounterObligations; ++i) {
@@ -145,14 +147,23 @@ public:
     return event.satisfiedCounterMask ==
            static_cast<uint8_t>((uint8_t{1} << event.numCounterObligations) - 1);
   }
+  bool atomicLdsElementMatches(EventId id, uint8_t bytes) const {
+    return bytes != 0 && entries_[index(id)].ldsAccess.aligned_atomic_bytes == bytes;
+  }
+  bool readsLds(EventId id) const {
+    const auto &event = entries_[index(id)];
+    return event.ldsAccess.read_modify_write || isFromLds(event.type);
+  }
+  bool writesLds(EventId id) const {
+    const auto &event = entries_[index(id)];
+    return event.ldsAccess.read_modify_write || isToLds(event.type);
+  }
   MemoryOrderClass memoryOrder(EventId id) const { return entries_[index(id)].memoryOrder; }
   EventStatus status(EventId id) const { return entries_[index(id)].status; }
   bool isTrimmable(EventId id) const { return isEntryTrimmable(entries_[index(id)]); }
-  uint64_t pc(EventId id) const { return instruction(id).pc(); }
   const InstructionSnapshot &instruction(EventId id) const {
     return entries_[index(id)].instruction;
   }
-  uint8_t byteMask(EventId id) const { return entries_[index(id)].byteMask; }
   /// Packed loads can write fewer bytes in the last destination without
   /// creating a second event or consuming another wait-counter increment.
   uint8_t registerByteMask(EventId id, uint32_t reg) const {
@@ -166,10 +177,6 @@ public:
   std::span<const uint32_t> registers(EventId id) const { return entries_[index(id)].registers; }
 
   const IntervalSet &ldsIntervals(EventId id) const { return entries_[index(id)].ldsIntervals; }
-
-  bool isActiveForLane(EventId id, int lane) const {
-    return (entries_[index(id)].execMask >> lane) & 1;
-  }
 
   // -- Test helpers --
 

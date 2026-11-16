@@ -687,7 +687,7 @@ hsa_status_t ImageRuntime::FillImage(
 
 hsa_status_t ImageRuntime::CreateSamplerHandle(
     hsa_agent_t component,
-    const hsa_ext_sampler_descriptor_v2_t& sampler_descriptor,
+    const hsa_ext_sampler_descriptor_v3_t& sampler_descriptor,
     hsa_ext_sampler_t& sampler_handle) {
   sampler_handle.handle = 0;
 
@@ -709,7 +709,11 @@ hsa_status_t ImageRuntime::CreateSamplerHandle(
   sampler->component = component;
   sampler->desc = sampler_descriptor;
 
-  image_manager(component)->PopulateSamplerSrd(*sampler);
+  status = image_manager(component)->PopulateSamplerSrd(*sampler);
+  if (status != HSA_STATUS_SUCCESS) {
+    Sampler::Destroy(sampler);
+    return status;
+  }
 
   sampler_handle.handle = sampler->Convert();
 

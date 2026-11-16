@@ -30,11 +30,27 @@ Instruction::ExecuteFn current_instruction_execute(size_t instruction_id) noexce
 /// @brief Return the ISA-defined operand backend active during decoding.
 const void *current_isa_operand_backend() noexcept;
 
+namespace detail {
+/// @brief The backend selected by the innermost scope on this thread.
+/// @details Declared here so the scope below is inline: generated executors
+/// enter it around every instruction, which otherwise took two out-of-line
+/// calls that each resolved this thread-local again.
+extern constinit thread_local const IsaExecutionBackend *active_isa_execution_backend;
+
+inline const void *current_isa_operand_backend_inline() noexcept {
+  const auto *backend = active_isa_execution_backend;
+  return backend == nullptr ? nullptr : backend->operand_backend;
+}
+} // namespace detail
+
 /// @brief Temporarily select one ISA backend for generated constructors.
 class ScopedIsaExecutionBackend final {
 public:
-  explicit ScopedIsaExecutionBackend(const IsaExecutionBackend *backend) noexcept;
-  ~ScopedIsaExecutionBackend();
+  explicit ScopedIsaExecutionBackend(const IsaExecutionBackend *backend) noexcept
+      : previous_(detail::active_isa_execution_backend) {
+    detail::active_isa_execution_backend = backend;
+  }
+  ~ScopedIsaExecutionBackend() { detail::active_isa_execution_backend = previous_; }
 
   ScopedIsaExecutionBackend(const ScopedIsaExecutionBackend &) = delete;
   ScopedIsaExecutionBackend &operator=(const ScopedIsaExecutionBackend &) = delete;

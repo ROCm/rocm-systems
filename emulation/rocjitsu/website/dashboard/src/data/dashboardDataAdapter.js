@@ -133,7 +133,7 @@ export function adaptPublishedDashboardData({ index, runs, runErrors = [], siteC
   const canonical = allRuns.filter(({ branch }) => branch === siteConfig.canonicalBranch);
   return { sourceData: { index, runs }, data: {
     ...siteConfig, schemaVersion: CURRENT_RUN_SCHEMA_VERSION, generatedAt: index.generatedAt,
-    allRuns, runs: canonical, targets: [...new Set(allRuns.flatMap(({ targets }) => targets))].sort(), suites: [...new Set([...definitions.values()].map(({ suite }) => suite))].sort(), modes: [...THREAD_POLICIES], testCatalog: [...definitions.values()], catalogs: Object.fromEntries(catalogs),
+    allRuns, runs: canonical, targets: [...new Set(allRuns.flatMap(({ targets }) => targets))].sort(), suites: [...new Set([...definitions.values()].map(({ suite }) => suite))].sort(), modes: THREAD_POLICIES.filter((policy) => allRuns.some((run) => run.modes.includes(policy))), testCatalog: [...definitions.values()], catalogs: Object.fromEntries(catalogs),
     latestRun: canonical.at(-1) ?? null, latestCommitRun: sortRunsByCommit(canonical).at(-1) ?? null, backfillRunIds: backfillRunIds(canonical),
   } };
 }

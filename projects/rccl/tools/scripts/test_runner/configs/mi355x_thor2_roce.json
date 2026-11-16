@@ -1433,6 +1433,11 @@
           "test_filter": "Register.ProcessIsolatedRegisterTests"
         },
         {
+          "name": "Register.P2pIpcSegmentReuse",
+          "description": "Verify a reused P2P IPC registration stays in bounds when the registered buffer spans multiple cuMem segments",
+          "test_filter": "Register.P2pIpcSegmentReuse"
+        },
+        {
           "name": "SendRecv.SinglePairs",
           "description": "SendRecv single pairs",
           "test_filter": "SendRecv.SinglePairs"
@@ -2861,8 +2866,8 @@
         },
         {
           "name": "Resiliency_GidChangeRefresh",
-          "description": "AICOMRCCL-2022: GID cache refresh on IBV_EVENT_GID_CHANGE and during port recovery (net_ib and net_ib_cast)",
-          "test_filter": "Transport/NetIbGidChangeTest.*"
+          "description": "AICOMRCCL-2022: GID cache refresh on IBV_EVENT_GID_CHANGE and during port recovery; excludes plain net_ib recovery until AICOMNET-433 adds its UC capability gate",
+          "test_filter": "Transport/NetIbGidChangeTest.*-Transport/NetIbGidChangeTest.PortRecoveryRefreshesStaleCommGid/NetIb"
         }
       ]
     },
@@ -5627,6 +5632,20 @@
           "test_filter": "SymmetricKernelCorruptionTest.GroupedAllGather_VaryingSizes"
         }
       ]
+    },
+    "net_ib_transfer_max_msg": {
+      "extends": "net_ib_transfer",
+      "description": "Same InfiniBand transfer tests with RCCL_IB_MAX_MSG_SIZE at 1 MiB, so the 16 MiB transfer is posted as several work requests.",
+      "env_variables": {
+        "RCCL_IB_MAX_MSG_SIZE": "1048576"
+      }
+    },
+    "gin_device_mpi_max_msg": {
+      "extends": "gin_device_mpi",
+      "description": "Same GIN proxy device tests with RCCL_IB_MAX_MSG_SIZE at 256 MiB.",
+      "env_variables": {
+        "RCCL_IB_MAX_MSG_SIZE": "268435456"
+      }
     }
   },
   "test_suites": [
@@ -6480,6 +6499,18 @@
       "name": "Symmetric Kernels (8-rank)",
       "description": "Symmetric ReduceScatter, AllReduce and AllGather partitioning and buffer-alignment correctness on 8 co-located ranks (NCCL_CUMEM_ENABLE=1)",
       "config": "symmetric_kernel_mpi_8rank",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Data Transfer (1 MiB post cap)",
+      "description": "InfiniBand transfer tests with RCCL_IB_MAX_MSG_SIZE=1 MiB",
+      "config": "net_ib_transfer_max_msg",
+      "enabled": true
+    },
+    {
+      "name": "GIN Device MPI - Proxy Tests (256 MiB post cap)",
+      "description": "GIN proxy device tests with RCCL_IB_MAX_MSG_SIZE=256 MiB",
+      "config": "gin_device_mpi_max_msg",
       "enabled": true
     }
   ]

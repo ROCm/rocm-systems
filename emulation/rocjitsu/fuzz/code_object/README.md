@@ -43,8 +43,11 @@ The final JSON reports how many inputs reached each parsing stage. While a case
 is running, every worker keeps `current.seed` in its output directory. Generated
 inputs are deterministic, so a sanitizer or fatal signal leaves a small set of
 exactly reproducible candidates without putting full-input writes in the hot
-path. A caught host exception is saved as `failure.bin` with its seed. Replay a
-caught exception with:
+path. An operational worker failure is saved as `failure.bin` with its seed.
+Loader invariant failures terminate the process and leave `current.seed` for
+replay. Standard-library failures, including worker thread creation failures,
+are fatal; checked input and setup errors return exit status 2, and recorded
+worker failures return exit status 1. Replay a saved worker failure with:
 
 ```sh
 rj_code_object_fuzz --input code-object-results/failure.bin

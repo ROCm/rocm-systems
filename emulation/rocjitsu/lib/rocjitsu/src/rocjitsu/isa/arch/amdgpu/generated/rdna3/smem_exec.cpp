@@ -26,7 +26,7 @@ namespace rocjitsu {
 namespace rdna3 {
 
 void SLoadB32Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto dst_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
+  auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 1u);
   if (!dst_register)
     return;
   auto d = std::make_unique<amdgpu::ScalarMemState>();
@@ -36,7 +36,7 @@ void SLoadB32Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->sign_extend = false;
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, false);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
@@ -45,7 +45,7 @@ void SLoadB32Smem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SLoadB64Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto dst_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
+  auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 2u);
   if (!dst_register)
     return;
   auto d = std::make_unique<amdgpu::ScalarMemState>();
@@ -55,7 +55,7 @@ void SLoadB64Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->sign_extend = false;
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, false);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
@@ -64,7 +64,7 @@ void SLoadB64Smem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SLoadB128Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto dst_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 4u);
+  auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 4u);
   if (!dst_register)
     return;
   auto d = std::make_unique<amdgpu::ScalarMemState>();
@@ -74,7 +74,7 @@ void SLoadB128Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->sign_extend = false;
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, false);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
@@ -83,7 +83,7 @@ void SLoadB128Smem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SLoadB256Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto dst_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 8u);
+  auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 8u);
   if (!dst_register)
     return;
   auto d = std::make_unique<amdgpu::ScalarMemState>();
@@ -93,7 +93,7 @@ void SLoadB256Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->sign_extend = false;
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, false);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
@@ -102,7 +102,7 @@ void SLoadB256Smem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SLoadB512Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto dst_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 16u);
+  auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 16u);
   if (!dst_register)
     return;
   auto d = std::make_unique<amdgpu::ScalarMemState>();
@@ -112,7 +112,7 @@ void SLoadB512Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->sign_extend = false;
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, false);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
@@ -121,7 +121,7 @@ void SLoadB512Smem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SBufferLoadB32Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto dst_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
+  auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 1u);
   if (!dst_register)
     return;
   auto d = std::make_unique<amdgpu::ScalarMemState>();
@@ -131,7 +131,7 @@ void SBufferLoadB32Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->sign_extend = false;
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, false);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
@@ -140,7 +140,7 @@ void SBufferLoadB32Smem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SBufferLoadB64Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto dst_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
+  auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 2u);
   if (!dst_register)
     return;
   auto d = std::make_unique<amdgpu::ScalarMemState>();
@@ -150,7 +150,7 @@ void SBufferLoadB64Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->sign_extend = false;
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, false);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
@@ -159,7 +159,7 @@ void SBufferLoadB64Smem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SBufferLoadB128Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto dst_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 4u);
+  auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 4u);
   if (!dst_register)
     return;
   auto d = std::make_unique<amdgpu::ScalarMemState>();
@@ -169,7 +169,7 @@ void SBufferLoadB128Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->sign_extend = false;
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, false);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
@@ -178,7 +178,7 @@ void SBufferLoadB128Smem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SBufferLoadB256Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto dst_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 8u);
+  auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 8u);
   if (!dst_register)
     return;
   auto d = std::make_unique<amdgpu::ScalarMemState>();
@@ -188,7 +188,7 @@ void SBufferLoadB256Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->sign_extend = false;
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, false);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
@@ -197,7 +197,7 @@ void SBufferLoadB256Smem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SBufferLoadB512Smem::execute_impl(amdgpu::Wavefront &wf) {
-  auto dst_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 16u);
+  auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, 16u);
   if (!dst_register)
     return;
   auto d = std::make_unique<amdgpu::ScalarMemState>();
@@ -207,7 +207,7 @@ void SBufferLoadB512Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->sign_extend = false;
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, false);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;

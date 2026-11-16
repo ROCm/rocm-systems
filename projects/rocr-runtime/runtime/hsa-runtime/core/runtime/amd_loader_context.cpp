@@ -406,11 +406,17 @@ bool RegionMemory::Freeze() {
       isGpuDevice && (external_ || isLargeBarDisabled || size_ > code_object_dmacopy_size);
 
   if (shouldDmaCopy) {
-      if (HSA_STATUS_SUCCESS != agent->DmaCopy(ptr_, host_ptr_, size_)) return false;
+    if (HSA_STATUS_SUCCESS != agent->DmaCopy(ptr_, host_ptr_, size_)) return false;
+  } else if (isGpuDevice) {
+    // Non-temporal stores keep the segment out of the cache of a host that maps device memory
+    // write-back (coherent xGMI). Otherwise every GPU fetch of its code, kernel descriptors and
+    // data would snoop the host. Both allocations are page-granular, so copying whole 16-byte
+    // chunks stays inside them.
+    nontemporal_copy(ptr_, host_ptr_, AlignUp(size_, 16));
+    store_fence();
+    if (is_code_) reinterpret_cast<AMD::GpuAgent*>(agent)->PcieWcFlush(ptr_, size_);
   } else {
-      memcpy(ptr_, host_ptr_, size_);
-      if (is_code_ && isGpuDevice)
-        reinterpret_cast<AMD::GpuAgent*>(agent)->PcieWcFlush(ptr_, size_);
+    memcpy(ptr_, host_ptr_, size_);
   }
 
   // Invalidate agent caches if needed
