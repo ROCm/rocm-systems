@@ -1698,6 +1698,52 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_BatchBoundary_ArgsSizeBudgetExh
   EXPECT_EQ(scene.comm->planner.nTasksColl, 5);  // 3 classification-- + 3 fallback++ round-trips to original
 }
 
+// The default workArgsBytes is 5 KB, but the symmetric kernels take a 4 KB argument: batches must still fit 4 KB.
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_BatchBoundary_WorkArgsAbove4K_CapsBatchesAt4KKernelArg) {
+  constexpr size_t kSymkArgBytes = sizeof(ncclSymkDevWorkArgs4K);
+  int maxWorksIn4K = 0;
+  while (symkMaxDevWorkArgsSize(MAXCHANNELS, maxWorksIn4K + 1, false) <= kSymkArgBytes) maxWorksIn4K++;
+  ASSERT_GT(maxWorksIn4K, 0);
+  const int nTasks = maxWorksIn4K + 13;
+
+  MakeSymmetricTaskList_Scene scene;
+  scene.comm->planner.nTasksColl = nTasks;
+  g_symRegType = ncclSymSendRegRecvReg;
+  scene.comm->workArgsBytes = 5 << 10;
+  // Without the 4 KB cap the first batch would take more works than the kernel argument holds.
+  ASSERT_LE(symkMaxDevWorkArgsSize(MAXCHANNELS, maxWorksIn4K + 1, false), scene.comm->workArgsBytes);
+
+  std::vector<ncclTaskColl> tasks(nTasks);
+  for (int i = 0; i < nTasks; ++i) {
+    tasks[i].func = ncclFuncAllReduce;
+    tasks[i].datatype = ncclFloat32;
+    tasks[i].opDev.op = ncclDevSum;
+    tasks[i].next = (i + 1 < nTasks) ? &tasks[i + 1] : nullptr;
+  }
+
+  ScopedHook tuningHook(g_tuningCompute, MakeSymmetricTaskList_TuningSucceeds());
+  struct ncclTaskColl* remainTasksHead = nullptr;
+  ASSERT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &tasks[0], nullptr, &remainTasksHead, &scene.needGenkDevComm), ncclSuccess);
+
+  // Remainder order follows the batch loop's processing order, so isSymLast delimits each batch.
+  std::vector<int> batchSizes;
+  int seen = 0, inBatch = 0;
+  for (ncclTaskColl* t = remainTasksHead; t != nullptr; t = t->next) {
+    seen++;
+    inBatch++;
+    if (t->isSymLast) {
+      batchSizes.push_back(inBatch);
+      inBatch = 0;
+    }
+  }
+  EXPECT_EQ(seen, nTasks);
+  EXPECT_EQ(inBatch, 0);
+  ASSERT_EQ(batchSizes.size(), 2u);
+  EXPECT_EQ(batchSizes[0], maxWorksIn4K);
+  EXPECT_EQ(batchSizes[1], nTasks - maxWorksIn4K);
+  for (int n : batchSizes) EXPECT_LE(symkMaxDevWorkArgsSize(MAXCHANNELS, n, false), kSymkArgBytes);
+}
+
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_BasicScalarFieldsWiring) {
   MakeSymmetricTaskList_Scene scene;
   ncclTaskColl task = MakeSymmetricTaskList_MakeTask(scene);

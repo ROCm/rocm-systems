@@ -102,6 +102,13 @@ static bool symBatchesAlone(const struct ncclTaskColl* t) {
   return t->aggIsolate || t->symkExtract == RCCL_SYMK_EXTRACT_ALLOW_TDM_ONLY;
 }
 
+// [RCCL] workArgsBytes can exceed 4 KB (ncclDevKernelArgs5K), but the symmetric and general kernels take a
+// 4 KB ncclSymkDevWorkArgs4K / ncclGenkDevWorkArgs4K argument, so a symmetric batch must still fit in 4 KB.
+static_assert(sizeof(ncclGenkDevWorkArgs4K) == sizeof(ncclSymkDevWorkArgs4K), "symkMaxArgsBytes assumes one size");
+static size_t symkMaxArgsBytes(struct ncclComm* comm) {
+  return std::min<size_t>(comm->workArgsBytes, sizeof(ncclSymkDevWorkArgs4K));
+}
+
 ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskColl* task,
                                        struct ncclIntruQueue<struct ncclTaskColl, &ncclTaskColl::next>* symTaskQueue,
                                        struct ncclTaskColl** remainTasksHead, bool* needGenkDevComm) {
@@ -179,8 +186,8 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
 
   // make sure kernel args space can hold at least a single work
   size_t const minArgsSize = symkMaxDevWorkArgsSize(MAXCHANNELS, 1, ncclProfilerPluginLoaded());
-  if (comm->workArgsBytes < minArgsSize) {
-    WARN("Symmetric kernel args size %u is smaller than minimum size %zu", comm->workArgsBytes, minArgsSize);
+  if (symkMaxArgsBytes(comm) < minArgsSize) {
+    WARN("Symmetric kernel args size %zu is smaller than minimum size %zu", symkMaxArgsBytes(comm), minArgsSize);
     return ncclInternalError;
   }
 
@@ -208,7 +215,7 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
         // (it is the head), or if the next task is one (so it starts its own batch).
         bool configBoundary = symBatchesAlone(task) || (task->next != nullptr && symBatchesAlone(task->next));
         if (headTask->func == ncclFuncAlltoAll ||
-            symkMaxDevWorkArgsSize(MAXCHANNELS, nWorks + 1, ncclProfilerPluginLoaded()) > comm->workArgsBytes ||
+            symkMaxDevWorkArgsSize(MAXCHANNELS, nWorks + 1, ncclProfilerPluginLoaded()) > symkMaxArgsBytes(comm) ||
             task->next == nullptr || configBoundary) {
           task->isSymLast = 1;
           break;
