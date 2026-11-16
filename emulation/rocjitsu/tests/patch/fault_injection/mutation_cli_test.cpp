@@ -218,6 +218,10 @@ TEST_P(FaultMutationCliFamily, ListsSelectsAndEmitsExactLibraryBytes) {
                       "18446744073709551615"});
     ASSERT_EQ(invoke(args(options)), 0) << stderr_;
     const std::vector<uint8_t> mutant = read(output_);
+    const std::string expected_stdout = std::format(
+        "kind=DropBarrier target={} exact={} logical_mutations=1 members={} output_bytes={}\n",
+        target, barrier.members.front().offset, barrier.members.size(), mutant.size());
+    EXPECT_EQ(stdout_, expected_stdout);
     const FailureOr<DropBarrierSelection> selection =
         select_drop_barrier(inventory.value(), {.exact = std::nullopt, .ordinal = ordinal}, error);
     ASSERT_TRUE(selection.succeeded());
@@ -246,6 +250,7 @@ TEST_P(FaultMutationCliFamily, ListsSelectsAndEmitsExactLibraryBytes) {
                                            inventory.value().barriers()[1 - ordinal]));
     std::filesystem::remove(output_);
     ASSERT_EQ(invoke(args(options)), 0) << stderr_;
+    EXPECT_EQ(stdout_, expected_stdout);
     EXPECT_EQ(read(output_), mutant);
     std::filesystem::remove(output_);
   }
