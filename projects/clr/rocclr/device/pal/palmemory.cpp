@@ -749,7 +749,7 @@ void Memory::decIndMapCount() {
 // Note - must be called by the device under the async lock, so no spinning
 // or long pauses allowed in this function.
 void* Memory::allocMapTarget(const amd::Coord3D& origin, const amd::Coord3D& region, uint mapFlags,
-                             size_t* rowPitch, size_t* slicePitch) {
+                             size_t* /*rowPitch*/, size_t* /*slicePitch*/) {
   // Sanity checks
   assert(owner() != nullptr);
 
@@ -870,7 +870,7 @@ void* Memory::allocMapTarget(const amd::Coord3D& origin, const amd::Coord3D& reg
   return mapAddress + offset;
 }
 
-bool Memory::pinSystemMemory(void* hostPtr, size_t size) {
+bool Memory::pinSystemMemory(void* /*hostPtr*/, size_t size) {
   bool result = false;
 
   // If memory has a direct access already, then skip the host memory pinning

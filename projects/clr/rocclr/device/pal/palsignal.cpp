@@ -101,7 +101,7 @@ uint64_t Signal::Wait(uint64_t value, device::Signal::Condition c, uint64_t time
         return [](auto ls, auto rs) { return ls >= rs; };
     };
     ShouldNotReachHere();
-    return [](auto ls, auto rs) { return false; };
+    return [](auto /*ls*/, auto /*rs*/) { return false; };
   }(c);
 
   if (ws_ == device::Signal::WaitState::Blocked) {
