@@ -39,7 +39,8 @@ enum class TestStatus {
   Inconclusive,
   Unsupported,
   HarnessError,
-  NoSemanticDiff, ///< Aggregate only: text and metadata identical, nothing to test.
+  NoSemanticDiff, ///< Aggregate only: nothing but hints differs (text and metadata), nothing to
+                  ///< test.
 };
 enum class WitnessScope { None, LocalOnly, ReachableAtCut, ObservableKernelDivergence };
 enum class CoverageScope { CompleteForDeclaredScope, Partial, NotEstablished };

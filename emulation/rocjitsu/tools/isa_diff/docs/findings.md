@@ -632,12 +632,11 @@ The 25 mismatches:
   the tool reports the behaviour change it makes.
 - **4 poison-only**: `v_exp2_v2bf16_fast` (gfx1200) differs only on inputs the IR's
   `fast` flags make poison; the driver's triage reports `poison-only`.
-- **1 open question**: `rsq_bf16_constant_4` (gfx1250), commit 66cb135fa288 "AMDGPU: Fold
-  inline immediates in peephole-opt". Old `v_rsq_bf16_e64 v0.l, 4.0 op_sel:[1,0]` selects
-  the high half of the f32 inline constant (0x4080, bf16 4.0); new
-  `v_rsq_bf16_e64 v0.l, 4.0` assumes the constant is read as bf16 4.0. RocJITsu reads
-  the low half of the f32 constant (0) and returns +inf. Either the fold or RocJITsu's
-  bf16 inline-constant format for this encoding is wrong; it needs a hardware answer.
+- **1 true positive** (settled 2026-11-16, see "Hint hunks and NaN choices"):
+  `rsq_bf16_constant_4` (gfx1250), commit 66cb135fa288 "AMDGPU: Fold inline immediates in
+  peephole-opt". Old `v_rsq_bf16_e64 v0.l, 4.0 op_sel:[1,0]` selects the high half of the
+  f32 inline constant (0x4080, bf16 4.0); new `v_rsq_bf16_e64 v0.l, 4.0` reads the low
+  half (0) and returns +inf, as RocJITsu computes.
 
 Classes of false mismatch the sweep exposed, all fixed:
 - `s_delay_alu`'s immediate is not a constant operand to RocJITsu: hints now ignore
@@ -958,3 +957,36 @@ non-zero input `s5=1`, seed-independent, REPRODUCED by replay.
 | test | observed |
 |---|---|
 | `PolicyGetsHistoryRichFeedbackAndEveryCaseIsLogged` | `observe()` sees every case of both phases. `propose()` sees the history grow from the sweep size and the window stays <= 32. Feedback carries exits, instruction counts, buckets and mismatching locations. Buckets: more than 1 and fewer than 64 for hundreds of cases. The log has a header, one line per case and a summary, all valid JSON |
+
+## Hint hunks and NaN choices (2026-11-16)
+
+- **Hint-only changes.** LLVM #230390 ("No s_delay_alu for VALU fast-forwarded
+  operands") moved `s_delay_alu` only, yet `v_exp2_v2bf16_fast` (gfx1200) mismatched in
+  4 runs. Two causes:
+  - Hints were aligned like any instruction, so moved hints made hunks and regions.
+    Alignment now matches the other instructions first and hints only in the gaps; a
+    hunk of hints alone has change kind `hint`, is not tested, and is reported as a
+    non-semantic note. A function whose only differences are hints is
+    `NO_SEMANTIC_DIFF`.
+  - The alternative-NaN check drew new's random NaNs from another seed and keyed them
+    by instruction index. Here the NaN of `v_exp_f32` goes through bf16 rounding in
+    integer code (`v_bfe_u32`, `v_add3_u32 ..., 0x7fff`), so the output depends on the
+    payload in a way no per-bit mask of old's alternatives covers. Both sides now use
+    the same seed, keyed by the producing instruction's position among the
+    floating-point instructions executed.
+  - Re-run of commit 03f0b3e3b28a (5000 cases): 1115 functions, 1110 pass, 0 mismatch,
+    5 inconclusive (VOPD bank syntax ROCm's llvm-mc rejects).
+  - Tests: `HintOnlyChangesAreNoSemanticDiff`, `NanChoicesFollowTheOperationNotItsIndex`
+    (an `s_nop` in front of a renamed `v_mul_f32` whose NaN is squared as an integer:
+    LOCAL_MISMATCH before, NO_MISMATCH_FOUND after; a real change on top is still
+    caught).
+- **The gfx1250 bf16 inline constant is a true positive.** LLVM's own assembler test
+  `llvm/test/MC/AMDGPU/gfx1250_asm_bf16_inline_const_err.s` (#223035) states that the
+  hardware puts a bf16 inline constant in the high half of the f32 inline constant and
+  that anything without `op_sel:[1,0]` "silently reads the wrong half". Upstream
+  llvm-mc rejects #242952's output `v_rsq_bf16_e64 v0.l, 4.0` with that diagnostic; ROCm's
+  older llvm-mc accepts it, and RocJITsu reads the low half (0), so rsq gives +inf
+  instead of 0.5. On origin/main 7864c0736a8a (2026-11-16) the SelectionDAG output still
+  lacks `op_sel` (GlobalISel keeps it): the fold is a miscompile on gfx1250.
+- Counterexamples found under an alternative keep their cause ("new depends on ...")
+  after reduction.

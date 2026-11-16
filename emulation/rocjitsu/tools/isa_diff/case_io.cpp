@@ -150,7 +150,7 @@ std::optional<CaseData> CaseData::from_json(const Json &j, std::string &error) {
   for (const Json &n : j["notes"].items()) {
     ChangeKind kind = ChangeKind::Unexplained;
     for (auto k : {ChangeKind::Instruction, ChangeKind::ControlFlow, ChangeKind::Layout,
-                   ChangeKind::Metadata, ChangeKind::Unexplained})
+                   ChangeKind::Metadata, ChangeKind::Unexplained, ChangeKind::Hint})
       if (n["kind"].as_string() == change_kind_name(k))
         kind = k;
     d.notes.push_back({kind, n["what"].as_string(), n["semantic"].as_bool()});
@@ -356,8 +356,11 @@ Aggregate aggregate_results(const CaseData &data, const std::vector<RegionResult
     if (r.valid_pairs > 0)
       worst = std::max(worst, contract_rank(contract));
   }
-  const bool no_changes =
-      data.regions.empty() && data.unresolved.empty() && data.changes.size() == 0;
+  // Hint hunks (scheduling hints, dependency waits) alone are no semantic difference.
+  bool only_hints = true;
+  for (const Json &c : data.changes.items())
+    only_hints = only_hints && c["kind"].as_string() == "hint";
+  const bool no_changes = data.regions.empty() && data.unresolved.empty() && only_hints;
   if (no_changes) {
     a.test_status = TestStatus::NoSemanticDiff;
     a.contract_status = "NOT_APPLICABLE";

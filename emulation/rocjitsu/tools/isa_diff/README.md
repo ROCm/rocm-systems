@@ -20,7 +20,10 @@ branches and loops whose exits correspond on both sides (see "Control flow"), ma
   `addtid` forms), `global_store_*`, `s_load_dword*`/`s_load_b*`, and every counter wait
   (`s_waitcnt*`, `s_wait_*cnt`; see "Memory");
 - scheduling hints without a functional effect (`s_nop`, `s_delay_alu`, `s_clause`,
-  `s_wait_alu`, `s_waitcnt_depctr`, prefetch hints);
+  `s_wait_alu`, `s_waitcnt_depctr`, prefetch hints). Alignment matches the other
+  instructions first and hints only in the gaps between them; a hunk of hints alone
+  (change kind `hint`) is not tested, and a function whose only differences are hints is
+  `NO_SEMANTIC_DIFF`. Hardware hazards these hints avoid are not modelled, so not checked;
 - direct branches (`s_branch`, `s_cbranch_scc0/1`, `vccz/vccnz`, `execz/execnz`).
 
 LDS, flat, buffer, scratch and atomic accesses stay outside. The kernel around a region
@@ -606,7 +609,11 @@ switch for the stricter reading.
       instruction produces replaced by an alternative: the canonical quiet NaN, then all
       ones, then a random quiet NaN.
     - Output bits that change depend on the NaN's choice and are don't care.
-    - New re-runs with its own alternative NaNs and must still match.
+    - New re-runs with its own alternative NaNs and must still match. Both sides draw a
+      random NaN from the same seed, keyed by the producing instruction's position among
+      the floating-point instructions executed: when new runs the same floating-point
+      operations as old, a moved hint, an extra move or a renamed register does not
+      change which NaN each one produces.
     - Moves, `v_cndmask` and `v_pk_mov` copy a NaN unchanged: only producing
       instructions choose.
     - A mismatch that new shows only under an alternative NaN records the choice

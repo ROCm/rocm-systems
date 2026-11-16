@@ -511,6 +511,13 @@ void merge_undef(UndefMask &m, const MachineState &a, const MachineState &b) {
           });
 }
 
+/// The seed of NaN choice @p alt in case @p case_index. Old and new use the same one: the
+/// runner keys each random NaN by the floating-point operation's position in execution
+/// order, so the same operation draws the same NaN on both sides.
+uint64_t nan_seed_for(uint64_t seed, uint64_t case_index, unsigned alt) {
+  return splitmix64(seed ^ (case_index << 2) ^ alt);
+}
+
 /// Old's don't-care bits for one case: old re-runs kUndefAlternatives times, with its
 /// undefined registers refilled and (when it produced a NaN, @p nan) every NaN a
 /// floating-point instruction produces replaced by an alternative one. Output bits that
@@ -544,7 +551,7 @@ UndefMask compute_undef_mask(const RegionPair &region, RegionRunner &old_runner,
     MachineState s = init_old;
     refill_undef(s, k.vundef_old, k.undef_old, seed, case_index, alt, false,
                  k.gpu().value_or(Target{}));
-    old_runner.set_nan_choice(nan ? alt : 0, splitmix64(seed ^ (case_index << 2) ^ alt));
+    old_runner.set_nan_choice(nan ? alt : 0, nan_seed_for(seed, case_index, alt));
     old_runner.load(s);
     const bool ok = old_runner.run(region.old_side.insts.size()).status == RunStatus::Ok;
     if (ok) {
@@ -565,8 +572,10 @@ UndefMask compute_undef_mask(const RegionPair &region, RegionRunner &old_runner,
 
 /// New must not depend on an undefined value or a NaN's bits where old does not: new
 /// re-runs with its own undefined registers refilled and alternative NaNs (@p nan), and
-/// each run must still match old under the mask. On a mismatch, @p alt_init /
-/// @p alt_final hold the new side's run.
+/// each run must still match old under the mask. Both sides draw alternative NaNs from the
+/// same seed, keyed by the operation's position in execution order: when new runs the same
+/// floating-point operations as old, it makes the same choices old's mask was built from.
+/// On a mismatch, @p alt_init / @p alt_final hold the new side's run.
 std::string check_new_undef(const RegionPair &region, RegionRunner &new_runner,
                             const MachineState &init_old, const MachineState &init_new,
                             const MachineState &final_old, const CompareConfig &cfg, uint64_t seed,
@@ -580,7 +589,8 @@ std::string check_new_undef(const RegionPair &region, RegionRunner &new_runner,
     MachineState s = init_new;
     refill_undef(s, k.vundef_new, k.undef_new, seed, case_index, alt, true,
                  k.gpu().value_or(Target{}));
-    new_runner.set_nan_choice(nan ? alt : 0, splitmix64(seed ^ (case_index << 2) ^ alt ^ 0x6e6577));
+    const uint64_t nan_seed = nan ? nan_seed_for(seed, case_index, alt) : 0;
+    new_runner.set_nan_choice(nan ? alt : 0, nan_seed);
     new_runner.load(s);
     if (new_runner.run(region.new_side.insts.size()).status != RunStatus::Ok)
       continue;
@@ -588,7 +598,7 @@ std::string check_new_undef(const RegionPair &region, RegionRunner &new_runner,
     kind = compare_pair(region, init_old, s, final_old, f, m, cfg, stats);
     if (!kind.empty()) {
       m.new_nan_choice = nan ? alt : 0;
-      m.new_nan_seed = nan ? splitmix64(seed ^ (case_index << 2) ^ alt ^ 0x6e6577) : 0;
+      m.new_nan_seed = nan_seed;
       m.detail = std::string("new depends on ") +
                  (nan ? "a NaN's unspecified bits or an undefined value"
                       : "an undefined value (" + format_vgprs(k.vundef_new) +
@@ -670,6 +680,10 @@ Json reduce_mismatch(const RegionPair &region, RegionRunner &old_runner, RegionR
   const RegionContract &k = region.contract;
   const auto fwd = k.entry_forward();
   const MachineState original_old = m.init_old, original_new = m.init_new;
+  // A difference found under an alternative ("new depends on ...: ") keeps that cause.
+  const size_t cause_end = m.detail.rfind("new depends on ", 0) == 0 ? m.detail.find(": ") : 0;
+  const std::string cause =
+      cause_end && cause_end != std::string::npos ? m.detail.substr(0, cause_end + 2) : "";
   const LocSet original_locs = m.locs;
   const VSet original_vlocs = m.vlocs;
   MachineState cur_o = m.init_old, cur_n = m.init_new;
@@ -706,7 +720,7 @@ Json reduce_mismatch(const RegionPair &region, RegionRunner &old_runner, RegionR
     m.vlocs = t.vlocs;
     m.memory = t.memory;
     m.mem_addrs = t.mem_addrs;
-    m.detail = t.detail;
+    m.detail = cause + t.detail;
     m.frame_fields = t.frame_fields;
     m.init_old = a;
     m.init_new = b;

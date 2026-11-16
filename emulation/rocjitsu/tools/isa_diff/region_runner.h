@@ -132,6 +132,10 @@ public:
   /// unspecified. Alternative @p alt (1 canonical quiet NaN, 2 all ones, 3 random quiet
   /// NaN from @p seed) replaces every NaN a floating-point instruction produces; 0 keeps
   /// the hardware's. Outputs that change with the choice depend on it (don't care).
+  /// A random NaN is drawn from (seed, k, destination component, lane) for the k-th
+  /// floating-point instruction executed: two programs that run the same floating-point
+  /// operations in the same order draw the same NaNs, whatever hints, moves or register
+  /// names lie between them.
   void set_nan_choice(unsigned alt, uint64_t seed) {
     nan_choice_ = alt;
     nan_seed_ = seed;
@@ -221,6 +225,7 @@ private:
   uint32_t poison_filter_ = 0;
   unsigned nan_choice_ = 0;
   uint64_t nan_seed_ = 0;
+  uint64_t fp_ordinal_ = 0; ///< Floating-point instructions executed in this run.
   bool nan_produced_ = false;
   /// Note NaN results of instruction @p i (lanes in @p exec) and apply the NaN choice.
   void choose_nans(size_t i, uint64_t exec);

@@ -78,7 +78,8 @@
         "control_flow",
         "layout",
         "metadata",
-        "unexplained"
+        "unexplained",
+        "hint"
       ]
     },
     "mismatch_kind": {

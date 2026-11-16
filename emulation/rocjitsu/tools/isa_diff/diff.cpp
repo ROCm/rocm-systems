@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "diff.h"
+#include "effects.h"
 #include "json.h"
 
 #include "rocjitsu/code/kernel_descriptor_abi.h"
@@ -62,6 +63,28 @@ bool lcs(const std::vector<std::string> &a, const std::vector<std::string> &b, s
   }
   return true;
 }
+
+/// Common prefix and suffix, then LCS of the middle of @p a and @p b; appends the matched
+/// pairs in order. Returns false if the middle was over budget (left unmatched).
+bool align(const std::vector<std::string> &a, const std::vector<std::string> &b, size_t max_cells,
+           std::vector<std::pair<size_t, size_t>> &out) {
+  size_t pre = 0;
+  while (pre < a.size() && pre < b.size() && a[pre] == b[pre])
+    ++pre;
+  size_t suf = 0;
+  while (suf < a.size() - pre && suf < b.size() - pre &&
+         a[a.size() - 1 - suf] == b[b.size() - 1 - suf])
+    ++suf;
+  for (size_t i = 0; i < pre; ++i)
+    out.emplace_back(i, i);
+  const bool ok = lcs(a, b, pre, a.size() - suf, pre, b.size() - suf, max_cells, out);
+  for (size_t k = suf; k-- > 0;)
+    out.emplace_back(a.size() - 1 - k, b.size() - 1 - k);
+  return ok;
+}
+
+/// A scheduling hint or dependency wait: no functional effect on an in-order wave.
+bool is_hint(const InstRef &ref) { return ref.inline_asm < 0 && is_region_noop(ref.mnemonic); }
 
 } // namespace
 
@@ -170,6 +193,8 @@ const char *change_kind_name(ChangeKind kind) {
     return "metadata";
   case ChangeKind::Unexplained:
     return "unexplained";
+  case ChangeKind::Hint:
+    return "hint";
   }
   return "?";
 }
@@ -185,24 +210,43 @@ DiffResult diff_kernels(const KernelModel &old_model, const KernelModel &new_mod
     nk[j] = key_of(ni[j]);
 
   DiffResult r;
-  // Common prefix and suffix, then LCS of the middle.
-  size_t pre = 0;
-  while (pre < oi.size() && pre < ni.size() && ok[pre] == nk[pre])
-    ++pre;
-  size_t suf = 0;
-  while (suf < oi.size() - pre && suf < ni.size() - pre &&
-         ok[oi.size() - 1 - suf] == nk[ni.size() - 1 - suf])
-    ++suf;
-  std::vector<std::pair<size_t, size_t>> matched;
-  for (size_t i = 0; i < pre; ++i)
-    matched.emplace_back(i, i);
-  if (!lcs(ok, nk, pre, oi.size() - suf, pre, ni.size() - suf, max_lcs_cells, matched)) {
+  // Instructions with an effect first (common prefix and suffix, then LCS of the middle);
+  // hints are left out, so a moved or re-encoded s_delay_alu cannot change which real
+  // instructions pair up.
+  std::vector<size_t> ox, nx;
+  std::vector<std::string> okx, nkx;
+  for (size_t i = 0; i < oi.size(); ++i)
+    if (!is_hint(oi[i])) {
+      ox.push_back(i);
+      okx.push_back(ok[i]);
+    }
+  for (size_t j = 0; j < ni.size(); ++j)
+    if (!is_hint(ni[j])) {
+      nx.push_back(j);
+      nkx.push_back(nk[j]);
+    }
+  std::vector<std::pair<size_t, size_t>> core;
+  if (!align(okx, nkx, max_lcs_cells, core)) {
     r.alignment_complete = false;
     r.notes.push_back(
         {ChangeKind::Unexplained, "alignment budget exceeded; middle treated as one hunk", true});
   }
-  for (size_t k = suf; k-- > 0;)
-    matched.emplace_back(oi.size() - 1 - k, ni.size() - 1 - k);
+  // Then the gaps between matched pairs: only hints can still match there (any other
+  // match would have lengthened the common subsequence above). A gap over budget leaves
+  // its hints unmatched, which only makes hint hunks.
+  std::vector<std::pair<size_t, size_t>> matched;
+  size_t gap_i = 0, gap_j = 0;
+  auto fill_gap = [&](size_t end_i, size_t end_j) {
+    if (gap_i < end_i && gap_j < end_j)
+      (void)lcs(ok, nk, gap_i, end_i, gap_j, end_j, max_lcs_cells, matched);
+  };
+  for (auto [x, y] : core) {
+    fill_gap(ox[x], nx[y]);
+    matched.emplace_back(ox[x], nx[y]);
+    gap_i = ox[x] + 1;
+    gap_j = nx[y] + 1;
+  }
+  fill_gap(oi.size(), ni.size());
 
   r.old_to_new.assign(oi.size(), -1);
   r.new_to_old.assign(ni.size(), -1);
@@ -251,14 +295,21 @@ DiffResult diff_kernels(const KernelModel &old_model, const KernelModel &new_mod
       ++j;
     h.old_end = i;
     h.new_end = j;
-    bool control = false;
-    for (size_t k = h.old_begin; k < h.old_end; ++k)
+    bool control = false, hint = true;
+    for (size_t k = h.old_begin; k < h.old_end; ++k) {
       control |= oi[k].fx.control_flow || branch_mismatch[k];
-    for (size_t k = h.new_begin; k < h.new_end; ++k)
+      hint &= is_hint(oi[k]);
+    }
+    for (size_t k = h.new_begin; k < h.new_end; ++k) {
       control |= ni[k].fx.control_flow;
-    h.kind = control ? ChangeKind::ControlFlow : ChangeKind::Instruction;
+      hint &= is_hint(ni[k]);
+    }
+    h.kind = control ? ChangeKind::ControlFlow : hint ? ChangeKind::Hint : ChangeKind::Instruction;
     if (control)
       h.note = "hunk contains a branch, terminator or a branch whose target changed";
+    else if (hint)
+      h.note = "scheduling hints or dependency waits only: no functional effect on an in-order "
+               "wave (hardware hazards are not checked)";
     if (h.old_begin == h.old_end && h.new_begin == h.new_end) {
       // Crossed matches (should not happen with LCS); avoid an infinite loop.
       if (i < oi.size())

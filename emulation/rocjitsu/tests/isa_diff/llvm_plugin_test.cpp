@@ -1069,6 +1069,69 @@ TEST(IsaDiffReview, AlternativeNanCounterexamplesReplay) {
   std::filesystem::remove_all(dir);
 }
 
+TEST(IsaDiffReview, HintOnlyChangesAreNoSemanticDiff) {
+  const std::string dir = temp_dir("hints");
+  PairOptions o;
+  o.mcpu = "gfx1100";
+  o.entry_vgprs = 2;
+  // A moved and re-encoded s_delay_alu and an added s_nop (LLVM #230390 changed only
+  // s_delay_alu): no functional effect on an in-order wave, so nothing is tested.
+  const std::string a =
+      target_store_fn("gfx1100", {"v_add_f32_e32 v0, v0, v1", "s_delay_alu instid0(VALU_DEP_1)",
+                                  "v_mul_lo_u32 v0, v0, v0"});
+  const std::string b =
+      target_store_fn("gfx1100", {"s_nop 0", "v_add_f32_e32 v0, v0, v1",
+                                  "s_delay_alu instid0(VALU_DEP_2)", "v_mul_lo_u32 v0, v0, v0"});
+  EXPECT_EQ(verdict_of(dir, "f", a, b, o), "NO_SEMANTIC_DIFF/NOT_APPLICABLE");
+  // A real change elsewhere is still tested; the hint hunk is a non-semantic note.
+  auto data = analyze_pair(dir, store_fn({"s_nop 1", "v_add_u32_e32 v0, v0, v1"}),
+                           store_fn({"v_add_u32_e32 v0, v1, v0"}), 2);
+  ASSERT_TRUE(data);
+  size_t hint_changes = 0;
+  for (const Json &c : data->changes.items())
+    hint_changes += c["kind"].as_string() == "hint" ? 1 : 0;
+  EXPECT_EQ(hint_changes, 0u); // the s_nop sits next to the real change: one hunk
+  // Separated from it by common code, the s_nop is a hunk of its own.
+  data = analyze_pair(
+      dir,
+      store_fn(
+          {"v_add_u32_e32 v0, v0, v1", "v_mov_b32_e32 v2, 0", "s_nop 1", "v_mov_b32_e32 v5, 0"}),
+      store_fn({"v_add_u32_e32 v0, v1, v0", "v_mov_b32_e32 v2, 0", "v_mov_b32_e32 v5, 0"}), 2);
+  ASSERT_TRUE(data);
+  hint_changes = 0;
+  for (const Json &c : data->changes.items())
+    hint_changes += c["kind"].as_string() == "hint" ? 1 : 0;
+  EXPECT_EQ(hint_changes, 1u);
+  ASSERT_EQ(data->regions.size(), 1u);
+  bool noted = false;
+  for (const auto &n : data->notes)
+    noted = noted || (n.kind == ChangeKind::Hint && !n.semantic);
+  EXPECT_TRUE(noted);
+  TestOptions opt;
+  opt.cases = 300;
+  EXPECT_EQ(test_case(*data, opt, "", nullptr)["overall"]["test_status"].as_string(),
+            "NO_MISMATCH_FOUND");
+  std::filesystem::remove_all(dir);
+}
+
+TEST(IsaDiffReview, NanChoicesFollowTheOperationNotItsIndex) {
+  const std::string dir = temp_dir("nanorder");
+  PairOptions o;
+  o.entry_vgprs = 2;
+  // The product's NaN bits go through an integer square, which no per-bit mask of old's
+  // alternatives covers. New renames the temporary and gains an s_nop in front, which
+  // shifts every instruction index; the same multiply must still draw the same NaN.
+  const std::string a = store_fn({"v_mul_f32_e32 v2, v0, v1", "v_mul_lo_u32 v0, v2, v2"});
+  const std::string b =
+      store_fn({"s_nop 0", "v_mul_f32_e32 v3, v0, v1", "v_mul_lo_u32 v0, v3, v3"});
+  EXPECT_EQ(verdict_of(dir, "f", a, b, o), "NO_MISMATCH_FOUND/ESTABLISHED");
+  // New squaring a different NaN-dependent value is still caught.
+  const std::string c = store_fn({"s_nop 0", "v_mul_f32_e32 v3, v0, v1", "v_add_u32_e32 v3, 1, v3",
+                                  "v_mul_lo_u32 v0, v3, v3"});
+  EXPECT_EQ(verdict_of(dir, "f", a, c, o), "LOCAL_MISMATCH/ESTABLISHED");
+  std::filesystem::remove_all(dir);
+}
+
 TEST(IsaDiffControlFlow, BranchConditionsAreFollowedAndExitsCompared) {
   const std::string dir = temp_dir("cflow");
   PairOptions o;

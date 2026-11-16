@@ -775,8 +775,8 @@ AtomMap build_atoms(const KernelModel &om, const KernelModel &nm, const DiffResu
     add_atom(std::move(a));
   }
   for (size_t h = 0; h < diff.hunks.size(); ++h) {
-    if (hunk_in_region[h])
-      continue;
+    if (hunk_in_region[h] || diff.hunks[h].kind == ChangeKind::Hint)
+      continue; // a hint hunk has no effect: its old instructions are common code
     const Hunk &hunk = diff.hunks[h];
     Atom a;
     a.kind = Atom::Diverge;
@@ -1226,8 +1226,13 @@ PlanResult plan_regions(const KernelModel &old_model, const KernelModel &new_mod
   // pass region_flow: one entry, direct branches, corresponding exits).
   std::vector<Candidate> candidates;
   std::vector<uint32_t> unresolved_blocks; // old blocks of control-flow changes
+  size_t hint_hunks = 0;
   for (size_t h = 0; h < diff.hunks.size(); ++h) {
     const Hunk &hunk = diff.hunks[h];
+    if (hunk.kind == ChangeKind::Hint) {
+      ++hint_hunks; // no functional effect: nothing to test, common code to composition
+      continue;
+    }
     if (hunk.old_end >= oi.size() || hunk.new_end >= ni.size()) {
       result.unresolved.push_back(
           {change_kind_name(ChangeKind::ControlFlow),
@@ -1252,6 +1257,14 @@ PlanResult plan_regions(const KernelModel &old_model, const KernelModel &new_mod
     c.hunks.push_back(h);
     candidates.push_back(std::move(c));
   }
+  if (hint_hunks)
+    result.notes.push_back(
+        {ChangeKind::Hint,
+         std::to_string(hint_hunks) +
+             " hunk(s) change only scheduling hints or dependency waits (s_delay_alu, s_nop, "
+             "s_wait_alu, ...): no functional effect on an in-order wave, not tested; hardware "
+             "hazards are not checked",
+         false});
 
   // 2. Merge hunks that share a block pair, with the common code between them.
   std::vector<Candidate> merged;
@@ -1698,6 +1711,8 @@ PlanResult plan_manual_region(const KernelModel &old_model, const KernelModel &n
       c.hunks.push_back(h);
       continue;
     }
+    if (hunk.kind == ChangeKind::Hint)
+      continue;
     result.unresolved.push_back(
         {change_kind_name(hunk.kind),
          "hunk " + std::to_string(h) + " is not covered by the manual region (old [" +

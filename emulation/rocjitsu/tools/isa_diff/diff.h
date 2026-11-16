@@ -10,6 +10,11 @@
 /// re-validated: its two targets must themselves be a matched pair, otherwise the
 /// branches are unmatched and fall into a control-flow hunk. A textual difference only
 /// proposes candidate change sites; region boundaries are decided by the planner.
+///
+/// Scheduling hints and dependency waits (is_region_noop: s_delay_alu, s_nop, s_wait_alu,
+/// ...) are aligned last: instructions with an effect are matched first and hints only
+/// fill the gaps between matched pairs, so a moved or re-encoded hint cannot pull the
+/// alignment off course. A hunk of hints alone has kind Hint.
 #pragma once
 
 #include "kernel_model.h"
@@ -20,7 +25,9 @@
 
 namespace rocjitsu::isa_diff {
 
-enum class ChangeKind { Instruction, ControlFlow, Layout, Metadata, Unexplained };
+/// Hint: a hunk of scheduling hints and dependency waits only, without functional effect on
+/// an in-order wave (hardware hazards are not modelled, so not checked).
+enum class ChangeKind { Instruction, ControlFlow, Layout, Metadata, Unexplained, Hint };
 
 [[nodiscard]] const char *change_kind_name(ChangeKind kind);
 

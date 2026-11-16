@@ -658,6 +658,7 @@ void RegionRunner::load(const MachineState &s) {
   sfp_.fill(0);
   poison_hit_.clear();
   nan_produced_ = false;
+  fp_ordinal_ = 0;
 }
 
 MachineState RegionRunner::capture() const {
@@ -1084,10 +1085,34 @@ std::string RegionRunner::poison_before(size_t i) const {
 
 void RegionRunner::choose_nans(size_t i, uint64_t exec) {
   const FpPlan &p = fp_plan_[i];
-  if (p.skind == FpResult::F32 || p.skind == FpResult::F16Lo || p.skind == FpResult::F16x2) {
-    for (unsigned l : p.sdsts) {
+  const bool scalar_fp =
+      p.skind == FpResult::F32 || p.skind == FpResult::F16Lo || p.skind == FpResult::F16x2;
+  bool vector_fp = true;
+  switch (p.kind) {
+  case FpResult::None:
+  case FpResult::Move:
+  case FpResult::CndMask:
+  case FpResult::PkMov:
+  case FpResult::Select:
+  case FpResult::CMov:
+  case FpResult::ReadFirstLane:
+  case FpResult::ReadLane:
+    vector_fp = false; // not a floating-point operation: NaN bits pass through unchanged
+    break;
+  default:
+    break;
+  }
+  if (!scalar_fp && !vector_fp)
+    return;
+  // Random NaNs are keyed by this instruction's position among the floating-point
+  // instructions executed, not by its index in the region: a moved hint or an extra move
+  // must not change which NaN the same operation produces on the other side.
+  const uint64_t key = nan_seed_ ^ (fp_ordinal_++ << 20);
+  if (scalar_fp) {
+    for (size_t c = 0; c < p.sdsts.size(); ++c) {
+      const unsigned l = p.sdsts[c];
       const uint32_t w = read_loc(l);
-      const uint64_t r = splitmix64(nan_seed_ ^ (uint64_t{i} << 20) ^ (uint64_t{l} << 8) ^ 0xffu);
+      const uint64_t r = splitmix64(key ^ (uint64_t{c} << 8) ^ 0xffu);
       uint32_t out = w;
       bool any = false;
       if (p.skind == FpResult::F32) {
@@ -1117,19 +1142,8 @@ void RegionRunner::choose_nans(size_t i, uint64_t exec) {
         write_loc(l, out);
     }
   }
-  switch (p.kind) {
-  case FpResult::None:
-  case FpResult::Move:
-  case FpResult::CndMask:
-  case FpResult::PkMov:
-  case FpResult::Select:
-  case FpResult::CMov:
-  case FpResult::ReadFirstLane:
-  case FpResult::ReadLane:
-    return; // not a floating-point operation: NaN bits pass through unchanged
-  default:
-    break;
-  }
+  if (!vector_fp)
+    return;
   const uint32_t vbase = wave_->vgpr_alloc().base;
   for (size_t k = 0; k < p.dsts.size(); ++k) {
     const unsigned d = p.dsts[k];
@@ -1140,7 +1154,7 @@ void RegionRunner::choose_nans(size_t i, uint64_t exec) {
         continue;
       const uint8_t t = vfp_[size_t{d} * kWaveLanes + lane];
       const uint32_t w = read_vgpr(d, lane);
-      const uint64_t r = splitmix64(nan_seed_ ^ (uint64_t{i} << 20) ^ (uint64_t{d} << 8) ^ lane);
+      const uint64_t r = splitmix64(key ^ (uint64_t{k} << 8) ^ lane);
       auto pick = [&](uint64_t canonical, uint64_t ones, uint64_t keep, uint64_t quiet) {
         return nan_choice_ == 1 ? canonical : nan_choice_ == 2 ? ones : ((r & keep) | quiet);
       };
