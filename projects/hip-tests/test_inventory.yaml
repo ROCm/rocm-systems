@@ -1692,6 +1692,89 @@ suites:
     disposition_rationale: The test-plan staleness check keeps the generated inventory honest and is defined in-repo; retained.
 
   # ---------------------------------------------------------------------------
+  # catch/config governance: two build-time static checks wired by
+  # catch/config/CMakeLists.txt under if(ENABLE_YAML_TAGS) (the option
+  # catch/CMakeLists.txt defaults ON). Both are ALL custom targets that run
+  # during any hip-tests build - they are not CI-workflow jobs - and are pulled
+  # in as dependencies of the hip_tests_config header-generation target. They
+  # govern the YAML case metadata the unit/group configs declare, not any device
+  # API, so they carry no GPU/backend dependency and emit no ctest labels.
+  # ---------------------------------------------------------------------------
+  - id: static-config-check
+    owner: HIP Runtime - Test Governance
+    name: HIP test YAML config governance check
+    kind: contract
+    domain: static_validation
+    purpose: Build-time governance (not a device test) - fails the build when any case in the catch/config YAML configs is missing a 'level', carries a 'disabled'/'unsupported' skip that is neither a list nor a {targets, reason} mapping, has a populated skip with no 'reason', or a 'reason' with no real Jira reference from a known project key.
+    oracle: catch/config/check_config.py exit code over the catch/config/configs YAML tree; a non-zero exit fails the build.
+    source:
+      paths:
+        - catch/config/check_config.py
+        - catch/config/common.py
+        - catch/config/CMakeLists.txt
+      build_option: ENABLE_YAML_TAGS
+      build_target: check_hip_tests_config
+    metadata:
+      framework: python-static-analysis
+      config: catch/config/configs/test_categories.yaml
+    execution:
+      cadence: pr
+      gating: trusted
+      ctest_labels: []
+      platforms: [linux, windows]
+      backends: [not_applicable]
+      prerequisites: [Python 3; PyYAML; CMake configure with ENABLE_YAML_TAGS=ON (default); no ROCm, GPU, or device required]
+      ci_lane:
+        external: Runs during any hip-tests build as the check_hip_tests_config ALL custom target wired by catch/config/CMakeLists.txt (ENABLE_YAML_TAGS defaults ON) and as a dependency of hip_tests_config; it is a build-time check, not a dedicated in-repo CI workflow. See TESTING.md "Pre-submit and CI gates".
+    evidence:
+      - path: catch/config/CMakeLists.txt
+        claim: Registers check_hip_tests_config as an ALL custom target under if(ENABLE_YAML_TAGS) that runs check_config.py over catch/config/configs, and adds it as a dependency of the hip_tests_config header-generation target.
+      - path: catch/config/check_config.py
+        claim: The static checker; it exits non-zero (failing the build) on any missing 'level', malformed skip field, populated skip with no 'reason', or 'reason' with no real Jira reference.
+      - path: catch/CMakeLists.txt
+        claim: Declares option(ENABLE_YAML_TAGS "Enable YAML tags for test cases" ON), so the check is active by default in a normal build.
+    history: Repository evidence records check_config.py as a build-time governance check wired through catch/config/CMakeLists.txt (the check_hip_tests_config ALL custom target, gated on ENABLE_YAML_TAGS which catch/CMakeLists.txt defaults ON); it guards the catch/config YAML case metadata rather than any device API.
+    disposition: keep
+    disposition_rationale: This is the only enforcement that every YAML-registered case declares a level and that every skip cites a tracked Jira reason; retained as a hard build-time gate.
+
+  - id: static-sources-check
+    owner: HIP Runtime - Test Governance
+    name: HIP test source/YAML config sync check
+    kind: contract
+    domain: static_validation
+    purpose: Build-time governance (not a device test) - surfaces Catch2 test cases found in the hip-tests source tree that have no corresponding entry in the catch/config YAML configs. It warns by default and only fails the build when the strict environment switch is set.
+    oracle: catch/config/check_sources.py diff of source-discovered case names against the YAML config case names; it prints a WARNING by default and exits non-zero (failing the build) only when THEROCK_REQUIRE_HIP_YAML_ENTRIES is truthy.
+    source:
+      paths:
+        - catch/config/check_sources.py
+        - catch/config/common.py
+        - catch/config/CMakeLists.txt
+      build_option: ENABLE_YAML_TAGS
+      build_target: check_hip_tests_sources
+    metadata:
+      framework: python-static-analysis
+      config: catch/config/configs/test_categories.yaml
+    execution:
+      cadence: pr
+      gating: informational
+      ctest_labels: []
+      platforms: [linux, windows]
+      backends: [not_applicable]
+      prerequisites: [Python 3; PyYAML; CMake configure with ENABLE_YAML_TAGS=ON (default); no ROCm, GPU, or device required]
+      ci_lane:
+        external: Runs during any hip-tests build as the check_hip_tests_sources ALL custom target wired by catch/config/CMakeLists.txt (ENABLE_YAML_TAGS defaults ON) and as a dependency of hip_tests_config; warning-only unless THEROCK_REQUIRE_HIP_YAML_ENTRIES is set, and not a dedicated in-repo CI workflow. See TESTING.md "Pre-submit and CI gates".
+    evidence:
+      - path: catch/config/CMakeLists.txt
+        claim: Registers check_hip_tests_sources as an ALL custom target under if(ENABLE_YAML_TAGS) that runs check_sources.py with the configs directory and CMAKE_SOURCE_DIR, and adds it as a dependency of the hip_tests_config header-generation target.
+      - path: catch/config/check_sources.py
+        claim: The static checker; it prints a WARNING by default and only escalates to a non-zero exit (failing the build) when THEROCK_REQUIRE_HIP_YAML_ENTRIES is truthy.
+      - path: catch/CMakeLists.txt
+        claim: Declares option(ENABLE_YAML_TAGS "Enable YAML tags for test cases" ON), so the check is active by default in a normal build.
+    history: Repository evidence records check_sources.py as a build-time governance check wired through catch/config/CMakeLists.txt (the check_hip_tests_sources ALL custom target, gated on ENABLE_YAML_TAGS which catch/CMakeLists.txt defaults ON); it reconciles source-discovered Catch2 cases against catch/config YAML entries, warning by default and failing only under THEROCK_REQUIRE_HIP_YAML_ENTRIES.
+    disposition: keep
+    disposition_rationale: This is the only signal that a newly added Catch2 case was registered without a YAML config entry; retained as a warning-by-default governance check that can be escalated to a hard gate via THEROCK_REQUIRE_HIP_YAML_ENTRIES.
+
+  # ---------------------------------------------------------------------------
   # Host/harness tier: the HipTestLevel* executables validate the test harness
   # itself (HIP_TEST_LEVEL selection and the abort-on-invalid-level guard) rather
   # than any HIP device API. They are registered through hip_add_host_test in

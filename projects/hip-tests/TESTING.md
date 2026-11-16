@@ -125,7 +125,8 @@ The tables below summarize the inventory and coverage model at a glance. Each ro
 | Integration (distributed) | `integration-multiprocess`, `unit-cooperative-multigpu`, `unit-interop-graphics` | Built via `BUILD_UNIT_TESTS`; no separate top-level tier today | PR or on-demand, platform/capability-gated |
 | Performance | `performance-api`, `performance-scenarios` | `BUILD_PERF_TESTS` (OFF) | On-demand / informational |
 | Stress | `stress-suite` | `BUILD_STRESS_TESTS` (OFF) | On-demand / informational |
-| Static governance | `static-contract-coverage`, `static-test-plan` | n/a (two Python checks in one workflow job, no GPU/build) | PR (path-filtered) / trusted, in-repo |
+| Static governance (workflow) | `static-contract-coverage`, `static-test-plan` | n/a (two Python checks in one workflow job, no GPU/build) | PR (path-filtered) / trusted, in-repo |
+| Static governance (build-time) | `static-config-check`, `static-sources-check` | `ENABLE_YAML_TAGS` (ON); `check_hip_tests_config` / `check_hip_tests_sources` custom targets | Runs during any build; config check gates (fails the build), sources check warns by default (fails only under `THEROCK_REQUIRE_HIP_YAML_ENTRIES`) |
 
 **Major behavioral domains**
 
@@ -143,7 +144,8 @@ The tables below summarize the inventory and coverage model at a glance. Each ro
 
 | Cadence / gating | Inventory records | Notes |
 |---|---|---|
-| PR, trusted | Contract tier, legacy unit/functional tier, `integration-multiprocess`, `static-contract-coverage`, `static-test-plan` | Device suites run through external TheRock jobs; the two static checks run in-repo as two checks in the single path-filtered `contract-coverage` workflow job (scoped to HIP-header, contract-tier, and contract-tooling changes, not docs-only PRs); merge-required status is governed by branch protection external to this repository |
+| PR, trusted | Contract tier, legacy unit/functional tier, `integration-multiprocess`, `static-contract-coverage`, `static-test-plan`, `static-config-check` | Device suites run through external TheRock jobs; the `static-contract-coverage`/`static-test-plan` checks run in-repo as two checks in the single path-filtered `contract-coverage` workflow job (scoped to HIP-header, contract-tier, and contract-tooling changes, not docs-only PRs); `static-config-check` is instead a build-time hard gate — the `check_hip_tests_config` `ENABLE_YAML_TAGS` custom target that fails any build with a malformed YAML config — not a workflow job; merge-required status for all of these is governed by branch protection external to this repository |
+| Build-time, informational | `static-sources-check` | The `check_hip_tests_sources` `ENABLE_YAML_TAGS` custom target runs on every build and only warns when a source Catch2 case has no YAML config entry; it escalates to a hard build failure solely when `THEROCK_REQUIRE_HIP_YAML_ENTRIES` is set, and is not a per-PR workflow gate |
 | On-demand, informational | `performance-api`, `performance-scenarios`, `stress-suite`, `unit-interop-graphics` | Opt-in build modes or environment-gated lanes, not per-PR gates |
 | Capability- or environment-gated | `contract-memory-pool-vmm`, `unit-vmm`, `contract-peer`, `unit-cooperative-multigpu`, `unit-interop-graphics` | Skip cleanly when the driver capability, device topology, or graphics environment is absent |
 

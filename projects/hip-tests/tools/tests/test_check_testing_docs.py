@@ -4001,5 +4001,104 @@ class CheckCadenceProseTest(unittest.TestCase):
         self.assertEqual(errs, [], msg=errs)
 
 
+class LiveConfigGovernanceInventoryTest(unittest.TestCase):
+    """Live guards: the real inventory records the catch/config governance checks.
+
+    The build-time governance checks wired by catch/config/CMakeLists.txt -
+    check_config.py (CMake target check_hip_tests_config) and check_sources.py
+    (CMake target check_hip_tests_sources) - must each carry a stable inventory
+    record so the two active governance checks are inventoried, not invisible.
+    These tests read the committed component documents and the CMakeLists
+    directly, so the record, its CMake target wiring, and its cadence/gating
+    semantics are checked against reality rather than a fixture.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        import yaml  # available transitively via the checker module
+
+        cls.component = checker.HIP_TESTS_DIR
+        cls.inventory = yaml.safe_load(
+            (cls.component / "test_inventory.yaml").read_text(encoding="utf-8"))
+        cls.config_cmake = (
+            cls.component / "catch" / "config" / "CMakeLists.txt"
+        ).read_text(encoding="utf-8")
+        cls.catch_cmake = (
+            cls.component / "catch" / "CMakeLists.txt"
+        ).read_text(encoding="utf-8")
+
+    def _record_by_build_target(self, target):
+        for suite in self.inventory.get("suites") or []:
+            if not isinstance(suite, dict):
+                continue
+            source = suite.get("source")
+            if isinstance(source, dict) and source.get("build_target") == target:
+                return suite
+        return None
+
+    def test_config_check_record_present_with_target_and_script(self):
+        rec = self._record_by_build_target("check_hip_tests_config")
+        self.assertIsNotNone(
+            rec, "no inventory record wires the check_hip_tests_config target")
+        source = rec["source"]
+        self.assertEqual(source.get("build_option"), "ENABLE_YAML_TAGS")
+        self.assertIn("catch/config/check_config.py", source.get("paths") or [])
+
+    def test_sources_check_record_present_with_target_and_script(self):
+        rec = self._record_by_build_target("check_hip_tests_sources")
+        self.assertIsNotNone(
+            rec, "no inventory record wires the check_hip_tests_sources target")
+        source = rec["source"]
+        self.assertEqual(source.get("build_option"), "ENABLE_YAML_TAGS")
+        self.assertIn("catch/config/check_sources.py", source.get("paths") or [])
+
+    def test_config_check_gating_is_strict(self):
+        # check_config.py exits non-zero on any violation, so its record must
+        # declare the hard-gating (trusted) semantics.
+        rec = self._record_by_build_target("check_hip_tests_config")
+        self.assertIsNotNone(rec)
+        self.assertEqual(rec["execution"].get("gating"), "trusted")
+
+    def test_sources_check_gating_is_warning_by_default(self):
+        # check_sources.py only warns by default (escalating to a hard failure
+        # under THEROCK_REQUIRE_HIP_YAML_ENTRIES), so its record must declare the
+        # informational (warning-by-default) semantics, not a hard gate.
+        rec = self._record_by_build_target("check_hip_tests_sources")
+        self.assertIsNotNone(rec)
+        self.assertEqual(rec["execution"].get("gating"), "informational")
+
+    def test_sources_check_documents_strict_env(self):
+        # The strict-env escalation is the governing semantic difference between
+        # the two checks; the record must name THEROCK_REQUIRE_HIP_YAML_ENTRIES
+        # somewhere in its prose so a reader learns how to make it blocking.
+        rec = self._record_by_build_target("check_hip_tests_sources")
+        self.assertIsNotNone(rec)
+        import yaml
+        blob = yaml.safe_dump(rec)
+        self.assertIn("THEROCK_REQUIRE_HIP_YAML_ENTRIES", blob)
+
+    def test_cmake_registers_both_targets_under_enable_yaml_tags(self):
+        # The records claim ENABLE_YAML_TAGS-gated ALL custom targets; confirm the
+        # CMakeLists actually registers both targets and the option defaults ON.
+        for target in ("check_hip_tests_config", "check_hip_tests_sources"):
+            self.assertRegex(
+                self.config_cmake,
+                r"add_custom_target\(\s*" + target + r"\s+ALL",
+                "catch/config/CMakeLists.txt does not register {} as an ALL "
+                "custom target".format(target))
+        self.assertIn("if(ENABLE_YAML_TAGS)", self.config_cmake)
+        self.assertRegex(
+            self.catch_cmake,
+            r'option\(ENABLE_YAML_TAGS\s+"[^"]*"\s+ON\)',
+            "catch/CMakeLists.txt does not default ENABLE_YAML_TAGS ON")
+
+    def test_both_records_pass_the_inventory_checker(self):
+        # The new records must be schema-valid: the full inventory still validates
+        # cleanly through the checker (no schema/path/vocabulary regressions).
+        errors, _ids, _refs, _counts = checker.check_inventory(
+            self.inventory, self.component)
+        self.assertEqual(errors, [], msg=errors)
+
+
 if __name__ == "__main__":
     unittest.main()
