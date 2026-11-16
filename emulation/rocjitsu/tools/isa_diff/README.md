@@ -645,6 +645,23 @@ run.
     files, or directories searched for `.ll` and `.llir`, e.g. a Triton cache), at one `llc -mtriple=amdgcn-amd-amdhsa -mcpu=CPU` RUN
     line per `--corpus-mcpu` CPU (default `gfx950`), with `--corpus-args` added (e.g.
     Triton's `-O3 -relocation-model=pic`).
+  - A corpus file that declares its target is compiled for that target only, and only
+    if it is in `--corpus-mcpu`. The declaration is, in order:
+    - the Triton cache metadata next to it, or next to the file a symlink points to (a
+      sample of a cache): `<kernel>.json`'s `target.arch`; `target.warp_size` 64 on
+      GFX10+ adds `-mattr=+wavefrontsize64`;
+    - its functions' `"target-cpu"`;
+    - its triple's subarch (`amdgpu9.50-amd-amdhsa` is gfx950).
+
+    A file for another target (or another Triton backend, or a non-AMDGPU triple) is not
+    applicable: the summary counts it per target (`corpus_other_target`). Compiling a
+    gfx1250 kernel for gfx950 fails ("Cannot select", "requires target feature"), which
+    used to make every run over a mixed Triton cache `INCOMPLETE`.
+  - Corpus IR that both builds reject as input (a parse error, or the IR verifier: IR
+    another LLVM wrote, e.g. an intrinsic whose arguments changed) cannot be compared by
+    any build. The report lists it, and the summary records it (`corpus_input_rejected`),
+    but it is not a coverage gap. A rejection by one build only, or a failure during code
+    generation, stays an llc failure (below).
   - The compiles run in parallel (`--jobs`). Unchanged tests and corpus files without a
     RUN line for a tested target are not skips; the summary counts them
     (`extra_without_tested_run`).

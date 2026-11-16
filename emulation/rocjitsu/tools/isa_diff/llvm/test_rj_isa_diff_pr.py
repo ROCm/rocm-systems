@@ -476,6 +476,102 @@ def main():
         )
         if drv.llc_error(stderr) != want:
             failures.append(f"llc_error: {drv.llc_error(stderr)!r}")
+        # llc rejecting its input (parser, verifier) vs failing in code generation.
+        for err, want_rej in (
+            (stderr, True),
+            ("llc: error: llc: <stdin>:2:11: error: use of undefined value '%u'", True),
+            (
+                "Intrinsic has incorrect argument type!\n"
+                "llc: error: '<stdin>': input module cannot be verified",
+                True,
+            ),
+            ("LLVM ERROR: Cannot select: intrinsic %llvm.amdgcn.s.wait.dscnt", False),
+            (
+                "error: k.py:173:5: in function @k void (): llvm.amdgcn.tensor.load.to.lds "
+                "requires target feature 'tdm-insts'",
+                False,
+            ),
+        ):
+            if drv.rejects_input(err) != want_rej:
+                failures.append(f"rejects_input({err[:60]!r}) != {want_rej}")
+        # The target a corpus file declares: Triton metadata, target-cpu, the triple.
+        decl = Path(tmp) / "decl"
+        decl.mkdir()
+        ir = "define void @k() {\n  ret void\n}\n"
+        for name, text, meta, want_cpus, want_name in (
+            (
+                "t950.llir",
+                ir,
+                {"target": {"backend": "hip", "arch": "gfx950", "warp_size": 64}},
+                ["gfx950"],
+                "gfx950",
+            ),
+            (
+                "evas.llir",
+                ir,
+                {
+                    "target": {"backend": "evas", "arch": "evas", "warp_size": 1},
+                    "arch": "evas",
+                },
+                [],
+                "evas",
+            ),
+            (
+                "cpu.ll",
+                ir.replace("()", "() #0")
+                + 'attributes #0 = { "target-cpu"="gfx942" }\n',
+                None,
+                ["gfx942"],
+                "gfx942",
+            ),
+            (
+                "sub.ll",
+                'target triple = "amdgpu12.50-amd-amdhsa"\n' + ir,
+                None,
+                ["gfx1250"],
+                "gfx1250",
+            ),
+            (
+                "x86.ll",
+                'target triple = "x86_64-unknown-linux-gnu"\n' + ir,
+                None,
+                [],
+                "x86_64",
+            ),
+            (
+                "plain.ll",
+                'target triple = "amdgcn-amd-amdhsa"\n' + ir,
+                None,
+                None,
+                None,
+            ),
+        ):
+            (decl / name).write_text(text)
+            if meta:
+                (decl / name).with_suffix(".json").write_text(json.dumps(meta))
+            got = drv.corpus_target(decl / name, text)
+            have = None if got is None else (got["cpus"], got["name"])
+            if have != (None if want_cpus is None else (want_cpus, want_name)):
+                failures.append(f"corpus_target({name}) = {got}")
+        _, d, cpus = drv.corpus_text(decl / "t950.llir", ["gfx950", "gfx1100"])
+        if cpus != ["gfx950"] or d["wave"] != 64:
+            failures.append(f"corpus_text(t950) cpus {cpus}, declared {d}")
+        # A sample of a cache made of symlinks: the metadata is next to the target.
+        (Path(tmp) / "sample").mkdir()
+        link = Path(tmp) / "sample" / "HASH-evas.llir"
+        link.symlink_to(decl / "evas.llir")
+        got = drv.corpus_target(link, ir)
+        if not got or got["name"] != "evas":
+            failures.append(f"corpus_target(symlink to evas.llir) = {got}")
+        (decl / "t1100.llir").write_text(ir)
+        (decl / "t1100.json").write_text(
+            json.dumps(
+                {"target": {"backend": "hip", "arch": "gfx1100", "warp_size": 64}}
+            )
+        )
+        text, _, cpus = drv.corpus_text(decl / "t1100.llir", ["gfx950", "gfx1100"])
+        if cpus != ["gfx1100"] or "-mcpu=gfx1100 -mattr=+wavefrontsize64" not in text:
+            failures.append(f"corpus_text(t1100, wave64): {cpus} {text[:160]!r}")
         # Nothing compared but a requested file failed to compile: incomplete, not
         # "nothing applicable".
         got = drv.overall_status(
@@ -715,6 +811,78 @@ def main():
                 failures.append(
                     f"c_add with a failing corpus neighbour: {rows.get('c_add')}"
                 )
+
+            # A corpus compiles each file only for the target it declares (Triton
+            # metadata here): a gfx1250 kernel and another Triton backend's kernel are not
+            # compiled for gfx950. IR both builds' verifier rejects (an intrinsic whose
+            # arguments differ, as in IR another LLVM wrote) is listed, not a coverage
+            # gap. The "after" llc keeps llc's exit status.
+            strict = Path(tmp) / "llc_after_strict"
+            strict.write_text(
+                f'#!/bin/sh\nout=$("{llc}" "$@") || exit $?\nprintf \'%s\\n\' "$out" | '
+                "sed -E 's/(v_add_u32_e32 v[0-9]+), (v[0-9]+), (v[0-9]+)/\\1, \\3, \\2/'\n"
+            )
+            strict.chmod(0o755)
+            tc = Path(tmp) / "corpus_targets"
+            tc.mkdir()
+            for stem, arch, backend in (
+                ("k950", "gfx950", "hip"),
+                ("k1250", "gfx1250", "hip"),
+                ("kevas", "evas", "evas"),
+            ):
+                (tc / f"{stem}.llir").write_text(add.format(f"t_{stem}"))
+                (tc / f"{stem}.json").write_text(
+                    json.dumps(
+                        {
+                            "target": {"backend": backend, "arch": arch},
+                            "arch": arch,
+                            "triton_version": "3.6.0",
+                        }
+                    )
+                )
+            (tc / "other_llvm.ll").write_text(
+                "declare i32 @llvm.amdgcn.workitem.id.x(i32)\n"
+                "define i32 @o() {\n  %r = call i32 @llvm.amdgcn.workitem.id.x(i32 1)\n"
+                "  ret i32 %r\n}\n"
+            )
+            code, rows, _ = run(
+                a.driver,
+                repo,
+                Path(tmp) / "out_corpus_targets",
+                a.tool,
+                a.llvm_bin,
+                "--llc-before",
+                str(before),
+                "--llc-after",
+                str(strict),
+                "--corpus",
+                str(tc),
+                "--corpus-mcpu",
+                "gfx950",
+            )
+            summary = json.loads(
+                (Path(tmp) / "out_corpus_targets" / "summary.json").read_text()
+            )
+            st = summary["stats"]
+            if code != 0 or summary["status"] != "PASS" or summary["skipped"]:
+                failures.append(
+                    f"corpus targets: exit {code}, status {summary['status']}, "
+                    f"skipped {summary['skipped']}"
+                )
+            if set(rows) != {"t_k950"} or drv.verdict(rows["t_k950"]) != "pass":
+                failures.append(f"corpus targets: compared {rows}")
+            if st.get("corpus_other_target") != {"gfx1250": 1, "evas": 1}:
+                failures.append(f"corpus other targets: {st}")
+            rej = st.get("corpus_input_rejected", [])
+            if len(rej) != 1 or not rej[0]["file"].endswith("other_llvm.ll"):
+                failures.append(f"corpus input rejected: {rej}")
+            report_t = (Path(tmp) / "out_corpus_targets" / "report.md").read_text()
+            if (
+                "corpus files not compared: 2 for other targets (evas 1, gfx1250 1); 1 "
+                not in report_t
+                or "other_llvm.ll: llc failed: both llc builds" not in report_t
+            ):
+                failures.append("report: corpus files not compared are not listed")
 
         # Each side assembles with the llvm-mc next to its llc (an LLVM PR's own build):
         # wrappers record which one ran.

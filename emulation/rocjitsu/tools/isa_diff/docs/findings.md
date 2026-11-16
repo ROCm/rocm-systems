@@ -1199,3 +1199,20 @@ Re-run with the llvm-mc of the PR 243123 builds (upstream, 2026-11-15; 25 s to b
 
 PR 243123 with each build's own llvm-mc: 56 changed functions, 3 pass, 53 inconclusive,
 0 mismatch, every verdict as with ROCm's assembler (306 s).
+
+## Corpus files compile for their own target (2026-11-16)
+
+The 7 llc failures of the 600-file Triton cache sample (every run `INCOMPLETE`) were no
+defect of either build: 3 gfx1250 kernels compiled for gfx942/gfx950, and 4 kernels whose
+IR a prototype LLVM wrote (MFMA intrinsics with an extra argument). `rj_isa_diff_pr` now
+compiles a corpus file only for the target it declares (Triton's `<kernel>.json`, also
+through a symlink; `"target-cpu"`; the triple's subarch), if that target is in
+`--corpus-mcpu`; other files are counted per target (`corpus_other_target`). IR both
+builds' parser or verifier rejects is listed (`corpus_input_rejected`), not a coverage gap.
+
+PR 243123 with the same sample, re-run: the 7 failures are gone (3 other target, 4 input
+rejected), every verdict as before, 153 s instead of 305 s. The sample was a poor corpus:
+592 of its 600 files are Triton `evas`-backend kernels (`warp_size` 1, no triple), which
+were compiled for AMDGPU only because they do not say otherwise in the IR; 1 is gfx90a;
+none of the rest compiled. The 148-file gfx950 set (`triton-gfx950/rj_llir`) is the corpus
+to use for gfx950.

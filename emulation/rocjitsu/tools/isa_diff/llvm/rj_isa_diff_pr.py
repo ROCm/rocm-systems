@@ -899,12 +899,27 @@ def llc_error(stderr):
     return " | ".join(picked)[:300] if picked else stderr[-300:]
 
 
-class LlcFailure(RuntimeError):
-    """llc failed (or timed out) on a RUN line; @p sides = (before failed, after failed)."""
+def rejects_input(stderr):
+    """llc rejected its input IR before code generation: a parse error (with a location in
+    the input) or the IR verifier (IR another LLVM wrote, e.g. an intrinsic whose arguments
+    changed)."""
+    return bool(
+        re.search(
+            r"(<stdin>|\.ll|\.llir):\d+:\d+: error:|input module cannot be verified|"
+            r"Broken module found|Invalid bitcode",
+            stderr,
+        )
+    )
 
-    def __init__(self, msg, sides):
+
+class LlcFailure(RuntimeError):
+    """llc failed (or timed out) on a RUN line; @p sides = (before failed, after failed).
+    @p input_rejected: both builds rejected the input IR itself (see rejects_input)."""
+
+    def __init__(self, msg, sides, input_rejected=False):
         super().__init__(msg)
         self.sides = sides
+        self.input_rejected = input_rejected
 
     @property
     def one_sided(self):
@@ -949,10 +964,17 @@ def llc_texts(text, path, llc_before, llc_after, targets):
                         text=True,
                         timeout=LLC_TIMEOUT,
                     )
-                    outs.append((res.returncode, res.stdout, llc_error(res.stderr)))
+                    outs.append(
+                        (
+                            res.returncode,
+                            res.stdout,
+                            llc_error(res.stderr),
+                            res.returncode != 0 and rejects_input(res.stderr),
+                        )
+                    )
                 except subprocess.TimeoutExpired:
-                    outs.append((None, "", f"timed out after {LLC_TIMEOUT} s"))
-            failed = tuple(rc != 0 for rc, _, _ in outs)
+                    outs.append((None, "", f"timed out after {LLC_TIMEOUT} s", False))
+            failed = tuple(rc != 0 for rc, _, _, _ in outs)
             if any(failed):
                 which = (
                     "both llc builds"
@@ -960,8 +982,12 @@ def llc_texts(text, path, llc_before, llc_after, targets):
                     else ("llc before" if failed[0] else "llc after")
                     + " only (the other compiled it)"
                 )
-                err = next(e for rc, _, e in outs if rc != 0)
-                raise LlcFailure(f"{which} failed on {path} RUN {i}: {err}", failed)
+                err = next(e for rc, _, e, _ in outs if rc != 0)
+                raise LlcFailure(
+                    f"{which} failed on {path} RUN {i}: {err}",
+                    failed,
+                    input_rejected=all(rej for _, _, _, rej in outs),
+                )
             for side in (0, 1):
                 heads[side].append(
                     f"; RUN: {llc} < %s | FileCheck -check-prefixes={prefix} %s"
@@ -995,15 +1021,74 @@ def corpus_files(paths):
     return out
 
 
+def corpus_target(path, text):
+    """The target a corpus file declares: {"cpus", "wave", "name", "source"}, from the
+    Triton cache metadata next to it (<kernel>.json: target.arch, target.warp_size), else
+    its functions' "target-cpu", else its triple's subarch (amdgpu9.50 -> gfx950). "cpus"
+    is [] for a target that is not an AMDGPU CPU ("name" says which, e.g. Triton's other
+    backends or another triple). None if the file does not say (amdgcn-amd-amdhsa). A
+    symlink (a sample of a cache) finds the metadata next to the file it points to."""
+    meta = None
+    for p in dict.fromkeys((Path(path), Path(path).resolve())):
+        try:
+            meta = json.loads(p.with_suffix(".json").read_text())
+            break
+        except (OSError, ValueError):
+            continue
+    if isinstance(meta, dict) and (
+        "arch" in meta or isinstance(meta.get("target"), dict)
+    ):
+        tgt = meta.get("target") if isinstance(meta.get("target"), dict) else {}
+        arch = str(tgt.get("arch") or meta.get("arch") or "")
+        cpu = arch.split(":")[0]
+        if re.match(r"^gfx[0-9a-f]+$", cpu):
+            wave = tgt.get("warp_size")
+            return {
+                "cpus": [cpu],
+                "wave": wave if wave in (32, 64) else None,
+                "name": cpu,
+                "source": "Triton metadata",
+            }
+        name = str(tgt.get("backend") or arch or "unknown")
+        return {"cpus": [], "wave": None, "name": name, "source": "Triton metadata"}
+    cpus = sorted(set(re.findall(r'"target-cpu"="(gfx[0-9a-f]+)"', text)))
+    if cpus:
+        return {
+            "cpus": cpus,
+            "wave": None,
+            "name": ",".join(cpus),
+            "source": "target-cpu",
+        }
+    m = re.search(r'^\s*target triple\s*=\s*"([^"]*)"', text, re.M)
+    if m:
+        sub = re.match(r"^amdgpu(\d+)\.(\w\w)-", m.group(1))
+        if sub:
+            cpu = f"gfx{sub.group(1)}{sub.group(2)}"
+            return {"cpus": [cpu], "wave": None, "name": cpu, "source": "triple"}
+        arch = m.group(1).split("-")[0]
+        if arch and arch != "amdgcn":
+            return {"cpus": [], "wave": None, "name": arch, "source": "triple"}
+    return None
+
+
 def corpus_text(path, mcpus, args=""):
-    """A corpus file's IR with one llc RUN line per CPU (its own RUN lines are kept);
-    @p args are extra llc options (e.g. Triton's -O3)."""
+    """(text, declared target, CPUs): a corpus file's IR with one llc RUN line per CPU of
+    @p mcpus it is for (all of them unless it declares its target, see corpus_target; at
+    the declared wave size), its own RUN lines kept; @p args are extra llc options (e.g.
+    Triton's -O3)."""
+    text = Path(path).read_text()
+    declared = corpus_target(path, text)
+    cpus = [c for c in mcpus if declared is None or c in declared["cpus"]]
     extra = f" {args.strip()}" if args.strip() else ""
-    runs = "".join(
-        f"; RUN: llc -mtriple=amdgcn-amd-amdhsa -mcpu={c}{extra} < %s | FileCheck %s\n"
-        for c in mcpus
-    )
-    return runs + Path(path).read_text()
+    runs = ""
+    for c in cpus:
+        wave64 = declared and declared["wave"] == 64 and generation(c) >= 10
+        mattr = " -mattr=+wavefrontsize64" if wave64 else ""
+        runs += (
+            f"; RUN: llc -mtriple=amdgcn-amd-amdhsa -mcpu={c}{mattr}{extra} "
+            "< %s | FileCheck %s\n"
+        )
+    return runs + text, declared, cpus
 
 
 def all_test_names(repo, head, tests_glob):
@@ -1063,7 +1148,12 @@ def collect(
         cfiles = corpus_files(corpus)
         stats["corpus_files"] = len(cfiles)
         for f in cfiles:
-            text = corpus_text(f, corpus_mcpus, corpus_args)
+            text, declared, cpus = corpus_text(f, corpus_mcpus, corpus_args)
+            if declared and not cpus and not any(map(parse_run, run_lines(text))):
+                # Written for a target not asked for (or not AMDGPU): not applicable.
+                other = stats.setdefault("corpus_other_target", {})
+                other[declared["name"]] = other.get(declared["name"], 0) + 1
+                continue
             sources.append((str(Path(f).resolve()), text, text))
             extra_paths.add(str(Path(f).resolve()))
             corpus_paths.add(str(Path(f).resolve()))
@@ -1084,6 +1174,17 @@ def collect(
     for path, old, new in sources:
         if llc_pair and new is not None:
             res = compiled.get(path)
+            if (
+                isinstance(res, LlcFailure)
+                and res.input_rejected
+                and path in corpus_paths
+            ):
+                # Both builds' parser or verifier reject the corpus IR (written by another
+                # LLVM): outside what can be compared, listed but not a coverage gap.
+                stats.setdefault("corpus_input_rejected", []).append(
+                    {"file": path, "reason": f"llc failed: {str(res)[:300]}"}
+                )
+                continue
             if isinstance(res, RuntimeError):
                 # Requested but not compared: a skip (INCOMPLETE), also for the unchanged
                 # tests and the corpus. One build failing where the other compiles is a
@@ -1693,6 +1794,23 @@ def report(out, meta, rows, skipped, stats):
             if any(s["reason"].startswith("llc failed") for s in skipped)
             else []
         ),
+        *(
+            [
+                f"- corpus files not compared: "
+                f"{sum(stats.get('corpus_other_target', {}).values())} for other targets ("
+                + (
+                    ", ".join(
+                        f"{t} {n}"
+                        for t, n in sorted(stats.get("corpus_other_target", {}).items())
+                    )
+                    or "none"
+                )
+                + f"); {len(stats.get('corpus_input_rejected', []))} whose IR both llc "
+                "builds reject (parser or verifier: IR another LLVM wrote)"
+            ]
+            if stats.get("corpus_other_target") or stats.get("corpus_input_rejected")
+            else []
+        ),
         "",
         "| verdict | test | run (target) | function | status | contract | regions (valid cases) |",
         "|---|---|---|---|---|---|---|",
@@ -1760,6 +1878,10 @@ def report(out, meta, rows, skipped, stats):
                 f" run {s['run']} {s['function']}" if "function" in s else ""
             )
             lines.append(f"- {where}: {s['reason']}")
+    if stats.get("corpus_input_rejected"):
+        lines += ["", "## Corpus IR both llc builds reject (not compared)", ""]
+        for s in stats["corpus_input_rejected"]:
+            lines.append(f"- {s['file']}: {s['reason']}")
     text = "\n".join(lines) + "\n"
     (out / "report.md").write_text(text)
     return text, counts
@@ -1925,7 +2047,9 @@ def main(argv=None):
     ap.add_argument(
         "--corpus-mcpu",
         default="gfx950",
-        help="comma-separated CPUs the corpus is compiled for (default %(default)s)",
+        help="comma-separated CPUs the corpus is compiled for (default %(default)s); "
+        "a file that declares its target (Triton metadata, target-cpu, the triple) "
+        "only for that one, and not at all if it is not listed",
     )
     ap.add_argument(
         "--corpus-args",
@@ -2019,7 +2143,9 @@ def main(argv=None):
         f"{base[:12]}..{head[:12]}: {stats['changed_test_files']} changed AMDGPU tests"
         + (
             f" (+{stats.get('unchanged_tests', 0)} unchanged tests, "
-            f"{stats.get('corpus_files', 0)} corpus files with both llc builds)"
+            f"{stats.get('corpus_files', 0)} corpus files with both llc builds, "
+            f"{sum(stats.get('corpus_other_target', {}).values())} of them for other "
+            "targets)"
             if llc_pair and (a.all_tests or a.corpus)
             else ""
         )
