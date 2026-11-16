@@ -58,8 +58,15 @@ Json trace_json(const std::vector<TraceStep> &trace) {
       if (step.changed.test(l))
         changed.set(loc_name(l), hex32(step.after.get(l)));
     s.set("changed", std::move(changed));
-    if (step.vchanged.any())
+    if (step.vchanged.any()) {
       s.set("vgprs_changed", format_vgprs(step.vchanged));
+      // Lane 0 of each changed vector register (the bundle's states hold every lane).
+      Json lane0 = Json::object();
+      for (unsigned r = 0; r < kNumVgprs; ++r)
+        if (step.vchanged.test(r) && r < step.after.vgpr_count)
+          lane0.set(vgpr_name(r), hex32(step.after.vget(r, 0)));
+      s.set("vgprs_lane0", std::move(lane0));
+    }
     if (!step.frame_changed.empty()) {
       Json f = Json::array();
       for (const auto &name : step.frame_changed)
@@ -433,7 +440,7 @@ std::string compare_pair(const RegionPair &region, const MachineState &init_old,
   if (diff.none() && vdiff.any()) {
     m.vlocs = vdiff;
     if (first_r < nv)
-      m.detail = "first observable difference v" + std::to_string(first_r) + " lane " +
+      m.detail = "first observable difference " + vgpr_name(first_r) + " lane " +
                  std::to_string(first_lane) + ": old " +
                  hex32(final_old.vget(first_r, first_lane)) + " new " +
                  hex32(final_new.vget(first_r, first_lane)) + " (" + std::to_string(first_count) +
@@ -876,8 +883,7 @@ Json reduce_mismatch(const RegionPair &region, RegionRunner &old_runner, RegionR
     if (k.ventry_equal.test(r))
       for (unsigned lane = 0; lane < kWaveLanes && listed < 64; ++lane)
         if (cur_o.vget(r, lane) != 0) {
-          nonzero.set("v" + std::to_string(r) + "[" + std::to_string(lane) + "]",
-                      hex32(cur_o.vget(r, lane)));
+          nonzero.set(vgpr_name(r) + "[" + std::to_string(lane) + "]", hex32(cur_o.vget(r, lane)));
           ++listed;
         }
   red.set("reduced_entry_values", std::move(nonzero));
@@ -1301,7 +1307,7 @@ Json counterexample_json(const RegionPair &region, const Mismatch &m, uint64_t s
       const unsigned lane = static_cast<unsigned>(std::countr_zero(lanes));
       lanes &= lanes - 1;
       Json d = Json::object();
-      d.set("loc", "v" + std::to_string(r));
+      d.set("loc", vgpr_name(r));
       d.set("lane", lane);
       d.set("old", hex32(m.final_old.vget(r, lane)));
       d.set("new", hex32(m.final_new.vget(r, lane)));

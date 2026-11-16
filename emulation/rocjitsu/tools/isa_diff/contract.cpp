@@ -156,13 +156,13 @@ Json RegionContract::to_json() const {
     if (!vexit_masks.empty()) {
       Json em = Json::object();
       for (const auto &[r, mask] : vexit_masks)
-        em.set("v" + std::to_string(r), hex32(mask));
+        em.set(vgpr_name(r), hex32(mask));
       j.set("vgpr_exit_masks", std::move(em));
     }
     if (!vinput_masks.empty()) {
       Json im = Json::object();
       for (const auto &[r, mask] : vinput_masks)
-        im.set("v" + std::to_string(r), hex32(mask));
+        im.set(vgpr_name(r), hex32(mask));
       j.set("vgpr_input_masks", std::move(im));
     }
   }

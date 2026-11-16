@@ -91,7 +91,7 @@ VSet return_observable_vgprs(unsigned return_vgprs) {
   VSet v;
   for (unsigned r = 0; r < std::min(return_vgprs, 32u); ++r)
     v.set(r);
-  for (unsigned base = 40; base + 8 <= kNumVgprs; base += 16)
+  for (unsigned base = 40; base + 8 <= kNumArchVgprs; base += 16)
     for (unsigned r = base; r < base + 8; ++r)
       v.set(r);
   return v;
@@ -116,14 +116,28 @@ LocSet KernelModel::return_live_locs() const {
   return l;
 }
 
+namespace {
+/// CSR_AMDGPU_AGPRs: a32..a255 are callee-saved on targets with gfx90a instructions (CDNA2
+/// and later); gfx908 saves none.
+VSet callee_saved_agprs(const Target &t) {
+  VSet v;
+  if (!t.unified_vgprs)
+    return v;
+  for (unsigned a = 32; a < kNumArchVgprs; ++a)
+    v.set(kAgprBase + a);
+  return v;
+}
+} // namespace
+
 VSet KernelModel::callee_saved_vgprs() const {
-  return artifact_.callable && artifact_.calling_convention != "shader" ? return_observable_vgprs(0)
-                                                                        : VSet{};
+  return artifact_.callable && artifact_.calling_convention != "shader"
+             ? return_observable_vgprs(0) | callee_saved_agprs(artifact_.target)
+             : VSet{};
 }
 
 VSet KernelModel::return_live_vgprs() const {
   if (artifact_.calling_convention != "shader")
-    return return_observable_vgprs(artifact_.return_vgprs);
+    return return_observable_vgprs(artifact_.return_vgprs) | callee_saved_agprs(artifact_.target);
   VSet v;
   for (unsigned r = 0; r < artifact_.return_vgprs && r < kNumVgprs; ++r)
     v.set(r);
@@ -880,9 +894,12 @@ bool crosses_lanes(const InstRef &r) {
     return true;
   const std::string_view m = r.mnemonic;
   auto starts = [&](std::string_view p) { return m.substr(0, p.size()) == p; };
+  // MFMA/SMFMAC multiply matrices spread over the wave: every lane's A, B and C feed the
+  // result, whatever EXEC holds.
   if (starts("v_readlane") || starts("v_writelane") || starts("v_permlane") ||
       starts("ds_swizzle") || starts("ds_bpermute") || starts("ds_permute") || starts("v_swap") ||
-      starts("v_movrel") || m.find("_dpp") != std::string_view::npos)
+      starts("v_movrel") || starts("v_mfma") || starts("v_smfmac") ||
+      m.find("_dpp") != std::string_view::npos)
     return true;
   const std::string_view t = r.text;
   return t.find("row_") != std::string_view::npos ||

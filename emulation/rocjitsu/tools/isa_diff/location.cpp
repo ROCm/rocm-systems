@@ -61,6 +61,21 @@ std::string format_locs(const LocSet &locs) {
   return out;
 }
 
+std::string vgpr_name(unsigned r) {
+  return r < kAgprBase ? "v" + std::to_string(r) : "a" + std::to_string(r - kAgprBase);
+}
+
+std::optional<unsigned> parse_vgpr_name(std::string_view name) {
+  if (name.size() < 2 || (name.front() != 'v' && name.front() != 'a'))
+    return std::nullopt;
+  unsigned index = 0;
+  const auto *end = name.data() + name.size();
+  auto [ptr, ec] = std::from_chars(name.data() + 1, end, index);
+  if (ec != std::errc{} || ptr != end || index >= kNumArchVgprs)
+    return std::nullopt;
+  return name.front() == 'a' ? kAgprBase + index : index;
+}
+
 std::string format_vgprs(const VSet &v) {
   std::string out;
   for (unsigned r = 0; r < kNumVgprs; ++r) {
@@ -68,7 +83,7 @@ std::string format_vgprs(const VSet &v) {
       continue;
     if (!out.empty())
       out += ',';
-    out += "v" + std::to_string(r);
+    out += vgpr_name(r);
   }
   return out;
 }
@@ -79,14 +94,10 @@ std::optional<VSet> parse_vgprs(std::string_view text) {
     const size_t comma = text.find(',');
     const std::string_view item = text.substr(0, comma);
     if (!item.empty()) {
-      unsigned index = 0;
-      const auto *end = item.data() + item.size();
-      if (item.size() < 2 || item.front() != 'v')
+      const auto index = parse_vgpr_name(item);
+      if (!index)
         return std::nullopt;
-      auto [ptr, ec] = std::from_chars(item.data() + 1, end, index);
-      if (ec != std::errc{} || ptr != end || index >= kNumVgprs)
-        return std::nullopt;
-      v.set(index);
+      v.set(*index);
     }
     if (comma == std::string_view::npos)
       break;

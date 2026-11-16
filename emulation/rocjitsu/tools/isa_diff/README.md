@@ -14,8 +14,8 @@ wave64 or wave32, regions with one entry: straight-line code, or code with direc
 branches and loops whose exits correspond on both sides (see "Control flow"), made of:
 - SALU instructions on SGPRs, VCC, EXEC, M0 and SCC (an explicit allowlist with every
   generation's names, SALU float of GFX11.5+ included);
-- plain VALU instructions, which exclude MFMA, interpolation, indirect VGPR access, and
-  exception state;
+- VALU instructions, including MFMA/SMFMAC and AGPR moves (`v_accvgpr_*`) on CDNA (see
+  "AGPRs and MFMA"); not interpolation, indirect VGPR access or exception state;
 - memory instructions (see "Memory"): loads, stores and atomics of global, flat,
   scratch and buffer memory and of LDS (`ds_read*`/`ds_load*`, `ds_write*`/`ds_store*`
   including the two-address forms, DS atomics), scalar loads, and every counter wait
@@ -378,6 +378,27 @@ cannot reach it, because the code in between is not common. Such a mismatch:
 The contract records the consumers in `downstream_changed`, `downstream_reads` and
 `vgpr_downstream_reads`.
 
+## AGPRs and MFMA
+
+- **Locations.** The accumulation registers a0..a255 of CDNA are vector locations 256..511
+  (named `a0`..`a255` in contracts, states and messages), RocJITsu's logical layout: acc
+  n is at the wave's VGPR base + 256 + n. Liveness, entry relations, undefined inputs,
+  input lanes, masks and comparison treat them like VGPRs.
+- **Instructions.** `v_accvgpr_read/write/mov`, MFMA and SMFMAC run in regions, as do
+  memory instructions with AGPR data (`buffer_store_dword a0, ...`, `ds_write_b128 v4,
+  a[0:3]`). MFMA results are compared bit for bit (they carry no floating-point tag);
+  the runner executes them functionally, so MFMA hazards (`s_nop` counts) are not checked.
+- **Lanes.** A matrix instruction reads every lane's A, B and C, whatever EXEC holds. So
+  MFMA/SMFMAC count as lane-crossing: a write before one never kills its register
+  (inactive lanes stay entry-equal), and a region that issues one under the entry EXEC
+  gets EXEC all ones (`mfma_full_exec` constraints; LLVM issues MFMA whole-wave).
+  Without these, inactive lanes holding per-side or undefined values fed the product and
+  made equivalent code differ.
+- **Calling convention.** From gfx90a on, a32..a255 are callee-saved (`CSR_AMDGPU_AGPRs`):
+  live at a callable function's return and defined at its entry. gfx908 saves no AGPR.
+- **Runner.** A region that names an AGPR dispatches 256 VGPRs, which gives both banks
+  (v0..v255, a0..a255) without ACCUM_OFFSET.
+
 ## Memory
 
 Memory instructions run inside regions. The runner writes the region's code bytes into
@@ -599,7 +620,8 @@ run.
     moved in tests whose CHECK lines were not updated (or do not exist).
   - `--corpus PATH...` also compiles LLVM IR from outside the repository (real kernels;
     files, or directories searched for `.ll` and `.llir`, e.g. a Triton cache), at one `llc -mtriple=amdgcn-amd-amdhsa -mcpu=CPU` RUN
-    line per `--corpus-mcpu` CPU (default `gfx950`).
+    line per `--corpus-mcpu` CPU (default `gfx950`), with `--corpus-args` added (e.g.
+    Triton's `-O3 -relocation-model=pic`).
   - The compiles run in parallel (`--jobs`). Unchanged tests and corpus files without a
     RUN line for a tested target are not skips; the summary counts them
     (`extra_without_tested_run`).

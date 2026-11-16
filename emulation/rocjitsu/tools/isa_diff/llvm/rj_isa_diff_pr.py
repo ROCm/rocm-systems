@@ -909,10 +909,12 @@ def corpus_files(paths):
     return out
 
 
-def corpus_text(path, mcpus):
-    """A corpus file's IR with one llc RUN line per CPU (its own RUN lines are kept)."""
+def corpus_text(path, mcpus, args=""):
+    """A corpus file's IR with one llc RUN line per CPU (its own RUN lines are kept);
+    @p args are extra llc options (e.g. Triton's -O3)."""
+    extra = f" {args.strip()}" if args.strip() else ""
     runs = "".join(
-        f"; RUN: llc -mtriple=amdgcn-amd-amdhsa -mcpu={c} < %s | FileCheck %s\n"
+        f"; RUN: llc -mtriple=amdgcn-amd-amdhsa -mcpu={c}{extra} < %s | FileCheck %s\n"
         for c in mcpus
     )
     return runs + Path(path).read_text()
@@ -938,6 +940,7 @@ def collect(
     all_tests=False,
     corpus=(),
     corpus_mcpus=(),
+    corpus_args="",
     jobs_n=8,
 ):
     """Changed functions (with their before/after bodies) and skipped ones (with reasons).
@@ -973,7 +976,7 @@ def collect(
         cfiles = corpus_files(corpus)
         stats["corpus_files"] = len(cfiles)
         for f in cfiles:
-            text = corpus_text(f, corpus_mcpus)
+            text = corpus_text(f, corpus_mcpus, corpus_args)
             sources.append((str(Path(f).resolve()), text, text))
             extra_paths.add(str(Path(f).resolve()))
     compiled = {}
@@ -1749,6 +1752,11 @@ def main(argv=None):
         help="comma-separated CPUs the corpus is compiled for (default %(default)s)",
     )
     ap.add_argument(
+        "--corpus-args",
+        default="",
+        help="extra llc options for the corpus (Triton: '-O3 -relocation-model=pic')",
+    )
+    ap.add_argument(
         "--job-timeout",
         type=float,
         default=300,
@@ -1806,6 +1814,7 @@ def main(argv=None):
             all_tests=a.all_tests,
             corpus=a.corpus,
             corpus_mcpus=[c for c in a.corpus_mcpu.split(",") if c],
+            corpus_args=a.corpus_args,
             jobs_n=a.jobs,
         )
     except RuntimeError as e:

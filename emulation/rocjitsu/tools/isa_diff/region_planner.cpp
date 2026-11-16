@@ -383,6 +383,32 @@ RegionPair build_region(const KernelModel &om, const KernelModel &nm, const Cand
   if (k.entry_equal.test(kLocExecLo) && om.exec_is_entry_before(anchor_index(c.o)) &&
       nm.exec_is_entry_before(anchor_index(c.n))) {
     k.exec_nonzero = true;
+    // A matrix instruction reads every lane's operands: run with inactive lanes, its result
+    // depends on whatever those lanes hold. LLVM issues MFMA with the whole wave active, so
+    // an entry EXEC that reaches one is all ones.
+    bool mfma = false;
+    for (const auto *side : {&c.o, &c.n}) {
+      const KernelModel &m = side == &c.o ? om : nm;
+      for (size_t i = side->begin; i < side->end; ++i)
+        mfma = mfma || m.insts()[i].mnemonic.rfind("v_mfma", 0) == 0 ||
+               m.insts()[i].mnemonic.rfind("v_smfmac", 0) == 0;
+    }
+    if (mfma) {
+      const unsigned lanes = om.artifact().target.wave_size;
+      for (unsigned l : {kLocExecLo, kLocExecHi}) {
+        const uint32_t ones = l == kLocExecLo || lanes == 64 ? 0xffffffffu : 0u;
+        Constraint full;
+        full.loc = l;
+        full.known_one = ones;
+        full.known_zero = ~ones;
+        full.source = "mfma_full_exec";
+        k.constraints.push_back(full);
+      }
+      k.sources.push_back({"mfma_full_exec: the region issues a matrix instruction under the "
+                           "entry EXEC, which LLVM keeps whole-wave: EXEC is all ones (inactive "
+                           "lanes would feed the matrix product)",
+                           "mfma_full_exec"});
+    }
     k.sources.push_back({"exec_nonzero: EXEC is the entry EXEC on every path to the region "
                          "(a wave runs with at least one active lane)",
                          "KernelModel forward may-written LocSet analysis"});
@@ -458,7 +484,7 @@ RegionPair build_region(const KernelModel &om, const KernelModel &nm, const Cand
                       "; new-only: " + format_vgprs(vout_new & ~vout_old) +
                       "); identity R_out is not justified";
     }
-    k.sources.push_back({"VGPRs v0..v" + std::to_string(k.vgpr_count - 1) +
+    k.sources.push_back({"vector registers v0.." + vgpr_name(k.vgpr_count - 1) +
                              " are tracked on all 64 lanes; vgpr_entry_equal/vgpr_observable "
                              "come from VGPR liveness, in which a write never kills (lanes "
                              "outside EXEC keep their value)",

@@ -614,7 +614,7 @@ BoundarySweep build_boundary_sweep(const RegionRoles &roles, const RegionContrac
     for (unsigned r = 0; r < sweep.vgpr_count; ++r) {
       if (!ventry.test(r) || !vread.test(r))
         continue;
-      const std::string name = "v" + std::to_string(r);
+      const std::string name = vgpr_name(r);
       for (uint32_t k = 0; k < chunks(n32, 64); ++k)
         for (uint8_t base : {uint8_t{0}, uint8_t{2}})
           vemit({{VOverride::Chunk32, static_cast<uint16_t>(r), 0, false, k, 0}}, {}, 0, base,
@@ -634,8 +634,8 @@ BoundarySweep build_boundary_sweep(const RegionRoles &roles, const RegionContrac
           vemit({{VOverride::Cross, static_cast<uint16_t>(p.a), static_cast<uint16_t>(p.b), p.wide,
                   k, 0}},
                 {}, 0, 2,
-                "vcross " + p.mnemonic + " v" + std::to_string(p.a) + ",v" + std::to_string(p.b) +
-                    " chunk " + std::to_string(k),
+                "vcross " + p.mnemonic + " " + vgpr_name(p.a) + "," + vgpr_name(p.b) + " chunk " +
+                    std::to_string(k),
                 "vector.cross");
       } else if (!p.wide) {
         // One scalar and one vector source: every scalar catalog value against every
@@ -648,8 +648,8 @@ BoundarySweep build_boundary_sweep(const RegionRoles &roles, const RegionContrac
           for (uint32_t k = 0; k < chunks(n32, 64); ++k)
             vemit({{VOverride::Chunk32, static_cast<uint16_t>(v), 0, false, k, 0}}, {{s, x.value}},
                   0, 2,
-                  "svcross " + p.mnemonic + " " + loc_name(s) + "=" + x.name + " v" +
-                      std::to_string(v) + " chunk " + std::to_string(k),
+                  "svcross " + p.mnemonic + " " + loc_name(s) + "=" + x.name + " " + vgpr_name(v) +
+                      " chunk " + std::to_string(k),
                   "vector.scalar_cross");
       }
     }

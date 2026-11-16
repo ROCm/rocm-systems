@@ -15,6 +15,7 @@
 
 #include "effects.h"
 #include "input_policy.h"
+#include "json.h"
 
 #include <algorithm>
 #include <array>
@@ -237,11 +238,17 @@ public:
   /// Undo the previous case (touched bytes back to 0, the unwritten state) and set the
   /// seed of the next one.
   void reset(uint64_t seed) {
-    static constexpr uint8_t kZero[4] = {};
+    // The region's own code stays: seeding skipped it, and the next case fetches it.
+    static constexpr uint8_t kZero[1] = {};
+    auto clear = [&](uint64_t b) {
+      if (b < code_lo_ || b >= code_hi_)
+        mem_->write_block(b, std::span<const uint8_t>(kZero, 1));
+    };
     for (uint64_t w : seeded_)
-      mem_->write_block(w << 2, std::span<const uint8_t>(kZero, 4));
+      for (unsigned k = 0; k < 4; ++k)
+        clear((w << 2) + k);
     for (uint64_t b : stored_)
-      mem_->write_block(b, std::span<const uint8_t>(kZero, 1));
+      clear(b);
     for (uint64_t w : lds_seeded_)
       for (unsigned k = 0; k < 4; ++k)
         lds_->write8(static_cast<uint32_t>((w << 2) + k), 0);
@@ -446,8 +453,8 @@ std::unique_ptr<RegionRunner> RegionRunner::create(const std::vector<RegionInst>
   std::unique_ptr<RegionRunner> r(new RegionRunner());
   r->target_ = target;
   r->lane_mask_ = target.wave32() ? uint64_t{0xffffffffu} : ~uint64_t{0};
-  if (vgpr_count > kVgprFile) {
-    error = "region needs more than 256 VGPRs";
+  if (vgpr_count > kNumVgprs) {
+    error = "region needs more than 256 VGPRs and 256 AGPRs";
     return nullptr;
   }
   r->vgpr_count_ = vgpr_count;
@@ -501,7 +508,11 @@ std::unique_ptr<RegionRunner> RegionRunner::create(const std::vector<RegionInst>
     r->plugin_group_ = group;
   }
   r->entry_pc_ = entry;
-  r->vgpr_alloc_ = vgpr_count ? vgpr_count : kMinVgprAlloc;
+  // AGPR locations (kAgprBase + n) are the second half of the wave's 512-register block;
+  // without ACCUM_OFFSET a dispatch of N <= 256 VGPRs gives v0..v{N-1} and a0..a{N-1}.
+  r->vgpr_alloc_ = vgpr_count == 0          ? kMinVgprAlloc
+                   : vgpr_count > kAgprBase ? kNumArchVgprs
+                                            : vgpr_count;
   r->wave_ = r->cu_->dispatch_wf(0, entry, target.wave_sgprs(), r->vgpr_alloc_, target.wave_size);
   if (!r->wave_) {
     error = "cannot dispatch a " + target.label() + " wave";
@@ -1552,6 +1563,7 @@ RunOutcome RegionRunner::run(size_t budget, std::vector<TraceStep> *trace) {
         cu_->flush_l1();
       }
       const uint64_t ub_before = cu_->isa_diagnostic_count();
+      const bool trap_before = wf.in_trap_handler();
       try {
         (void)cu_->step();
       } catch (const std::exception &e) {
@@ -1594,7 +1606,10 @@ RunOutcome RegionRunner::run(size_t budget, std::vector<TraceStep> *trace) {
         out.detail = "memory access wraps around the 64-bit address space at '" + texts_[i] + "'";
         return out;
       }
-      if (wf.state() == amdgpu::WfState::HALTED || wf.state() == amdgpu::WfState::MEMORY_TRAP) {
+      // An access the hardware traps on (misaligned, memory violation) enters the trap
+      // handler: a fault of the case, like a halt.
+      if (wf.state() == amdgpu::WfState::HALTED || wf.state() == amdgpu::WfState::MEMORY_TRAP ||
+          (wf.in_trap_handler() && !trap_before)) {
         out.status = RunStatus::MemoryFault;
         out.failed_index = i;
         out.detail = "memory access fault at '" + texts_[i] + "'";
@@ -1610,6 +1625,10 @@ RunOutcome RegionRunner::run(size_t budget, std::vector<TraceStep> *trace) {
       if (wf.pc != pcs_[i] + inst->size()) {
         out.status = RunStatus::PcWritten;
         out.failed_index = i;
+        out.detail = "PC " + hex64(wf.pc) + " after '" + texts_[i] + "', expected " +
+                     hex64(pcs_[i] + inst->size()) + " (wave state " +
+                     std::to_string(static_cast<unsigned>(wf.state())) + ", trapsts " +
+                     hex32(wf.trapsts()) + ")";
         return out;
       }
       apply_tags(i, exec_before, scratch_tags_); // load destinations: no provenance

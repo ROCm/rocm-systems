@@ -438,19 +438,19 @@ OperandClass classify_operand(const Operand &op, const Target &t) {
       out.what = "pc";
       return out;
     case RegClass::VGPR:
-      if (ref->index + std::max<unsigned>(ref->width, 1) > kNumVgprs) {
+    case RegClass::ACC_VGPR: {
+      // AGPRs are vector locations kAgprBase + n (RocJITsu's logical layout).
+      const bool acc = ref->cls == RegClass::ACC_VGPR;
+      if (ref->index + std::max<unsigned>(ref->width, 1) > kNumArchVgprs) {
         out.space = Space::Unknown;
-        out.what = "VGPR beyond v255";
+        out.what = acc ? "AGPR beyond a255" : "VGPR beyond v255";
         return out;
       }
       out.space = Space::Vector;
       for (unsigned i = 0; i < std::max<unsigned>(ref->width, 1); ++i)
-        out.vlocs.set(ref->index + i);
+        out.vlocs.set((acc ? kAgprBase : 0u) + ref->index + i);
       return out;
-    case RegClass::ACC_VGPR:
-      out.space = Space::Outside;
-      out.what = "accumulation register (AGPR)";
-      return out;
+    }
     case RegClass::TTMP:
       out.space = Space::Outside;
       out.what = "trap temporary";
@@ -664,12 +664,11 @@ bool is_region_noop(std::string_view m) {
 
 bool is_region_valu(std::string_view mnemonic, uint64_t flags) {
   if (!(flags & VALU) ||
-      (flags & (MFMA | MEMORY_OP | SMEM | VMEM | LDS | WAITCNT | BARRIER | SUSPENDS_WAVE)))
+      (flags & (MEMORY_OP | SMEM | VMEM | LDS | WAITCNT | BARRIER | SUSPENDS_WAVE)))
     return false;
-  // Interpolation (LDS parameters via M0), indirect VGPR access, MFMA-family and
-  // exception-state instructions stay outside.
-  for (std::string_view p :
-       {"v_interp", "v_movrel", "v_mfma", "v_smfmac", "v_clrexcp", "v_accvgpr", "v_swaprel"})
+  // MFMA/SMFMAC and AGPR moves run (AGPRs are vector locations); interpolation (LDS
+  // parameters via M0), indirect VGPR access and exception-state instructions stay outside.
+  for (std::string_view p : {"v_interp", "v_movrel", "v_clrexcp", "v_swaprel"})
     if (mnemonic.substr(0, p.size()) == p)
       return false;
   return true;
@@ -771,15 +770,14 @@ Effects classify(const Instruction &inst, const Target &target) {
         }
         break;
       case RegClass::VGPR:
+      case RegClass::ACC_VGPR:
         for (unsigned w = 0; w < std::max<unsigned>(r.width, 1); ++w) {
           const unsigned n = r.index + w;
-          if (n < kNumVgprs)
-            vinto.set(n);
+          if (n < kNumArchVgprs)
+            vinto.set((r.cls == RegClass::ACC_VGPR ? kAgprBase : 0u) + n);
           else
             implicit_unmapped = true;
         }
-        break;
-      case RegClass::ACC_VGPR:
         break;
       case RegClass::EXEC: // the wave-sized mask
         add_pair(into, kLocExecLo, kLocExecHi, static_cast<int>(target.wave_size));
@@ -851,7 +849,7 @@ Effects classify(const Instruction &inst, const Target &target) {
     fx.reject_reason = first_outside;
   } else if ((fx.control_flow && !branch_ok) ||
              (!mem_ok && !noop_ok && (flags & (MEMORY_OP | WAITCNT | SMEM | VMEM | LDS)) != 0) ||
-             (flags & (BARRIER | SUSPENDS_WAVE | MFMA)) != 0 || (salu_ok && fx.valu)) {
+             (flags & (BARRIER | SUSPENDS_WAVE)) != 0 || (salu_ok && fx.valu)) {
     fx.reject_reason = "instruction class outside the executable region subset";
   } else if (inst.data() != nullptr) {
     fx.reject_reason = "instruction carries dynamic state";

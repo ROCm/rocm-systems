@@ -36,10 +36,14 @@ enum Loc : unsigned {
 
 using LocSet = std::bitset<kNumLocs>;
 
-/// Vector registers v0..v255 (VALU support). A VGPR is one location for analysis
-/// (liveness, effects, contracts); its lanes are separate values in MachineState, which
-/// always holds 64. A wave32 target uses lanes 0..31; the others stay zero.
-inline constexpr unsigned kNumVgprs = 256;
+/// Vector registers: v0..v255, then the CDNA accumulation registers a0..a255 (AGPRs) as
+/// locations 256..511, RocJITsu's logical layout (acc n at the wave's VGPR base + 256 + n).
+/// A vector register is one location for analysis (liveness, effects, contracts); its lanes
+/// are separate values in MachineState, which always holds 64. A wave32 target uses lanes
+/// 0..31; the others stay zero.
+inline constexpr unsigned kNumArchVgprs = 256;
+inline constexpr unsigned kAgprBase = 256;
+inline constexpr unsigned kNumVgprs = 512;
 inline constexpr unsigned kWaveLanes = 64;
 using VSet = std::bitset<kNumVgprs>;
 
@@ -47,7 +51,11 @@ using VSet = std::bitset<kNumVgprs>;
 /// f32 denormals flushed, f16/f64 denormals kept, DX10_CLAMP and IEEE on.
 inline constexpr uint32_t kDefaultInitialMode = (3u << 6) | (1u << 8) | (1u << 9);
 
-/// "v0,v3" in register order; empty for none.
+/// "v3" for a VGPR, "a5" for AGPR location 261.
+[[nodiscard]] std::string vgpr_name(unsigned r);
+/// The location of "v3" or "a5"; nullopt for anything else.
+[[nodiscard]] std::optional<unsigned> parse_vgpr_name(std::string_view name);
+/// "v0,v3,a1" in register order; empty for none.
 [[nodiscard]] std::string format_vgprs(const VSet &v);
 [[nodiscard]] std::optional<VSet> parse_vgprs(std::string_view text);
 /// Highest set VGPR + 1, or 0 when none.

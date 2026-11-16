@@ -303,6 +303,21 @@ TEST(IsaDiffKernelModel, ImplicitStoreBaseReadsKeepLivenessPrecise) {
   EXPECT_EQ(t.overall(), "NO_MISMATCH_FOUND");
 }
 
+TEST(IsaDiffLocations, AgprsAreVectorLocationsAfterTheVgprs) {
+  EXPECT_EQ(vgpr_name(3), "v3");
+  EXPECT_EQ(vgpr_name(kAgprBase + 40), "a40");
+  EXPECT_EQ(parse_vgpr_name("a40"), kAgprBase + 40);
+  EXPECT_EQ(parse_vgpr_name("v255"), 255u);
+  EXPECT_FALSE(parse_vgpr_name("a256"));
+  EXPECT_FALSE(parse_vgpr_name("s1"));
+  VSet v;
+  v.set(1);
+  v.set(kAgprBase);
+  v.set(kAgprBase + 255);
+  EXPECT_EQ(format_vgprs(v), "v1,a0,a255");
+  EXPECT_EQ(parse_vgprs("v1,a0,a255"), v);
+}
+
 TEST(IsaDiffAlign, IdenticalKernelsHaveNoSemanticDiff) {
   CaseData d = analyze(k_shift_old, k_shift_old);
   EXPECT_EQ(d.changes.size(), 0u);

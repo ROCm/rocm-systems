@@ -39,7 +39,7 @@ Json MachineState::to_json() const {
       Json lanes = Json::array();
       for (unsigned lane = 0; lane < kWaveLanes; ++lane)
         lanes.push(hex32(vget(r, lane)));
-      v.set("v" + std::to_string(r), std::move(lanes));
+      v.set(vgpr_name(r), std::move(lanes));
     }
     j.set("vgprs", std::move(v));
   }
@@ -109,7 +109,7 @@ Json MachineState::to_json() const {
         lanes += kHex[t & 15];
       }
       if (any)
-        regs.set("v" + std::to_string(r), lanes);
+        regs.set(vgpr_name(r), lanes);
     }
     f.set("vgprs", std::move(regs));
     Json units = Json::array();
@@ -215,9 +215,9 @@ std::optional<MachineState> MachineState::from_json(const Json &j, std::string &
   if (v.is_object()) {
     s.resize_vgprs(static_cast<unsigned>(v.members().size()));
     for (unsigned r = 0; r < s.vgpr_count; ++r) {
-      const auto &lanes = v["v" + std::to_string(r)].items();
+      const auto &lanes = v[vgpr_name(r)].items();
       if (lanes.size() != kWaveLanes) {
-        error = "state VGPR v" + std::to_string(r) + " does not have 64 lanes";
+        error = "state register " + vgpr_name(r) + " does not have 64 lanes";
         return std::nullopt;
       }
       for (unsigned lane = 0; lane < kWaveLanes; ++lane) {
@@ -245,9 +245,10 @@ std::optional<MachineState> MachineState::from_json(const Json &j, std::string &
     }
     s.vfp.assign(size_t{s.vgpr_count} * kWaveLanes, 0);
     for (const auto &[name, lanes] : fp["vgprs"].members()) {
-      const unsigned r = static_cast<unsigned>(std::strtoul(name.c_str() + 1, nullptr, 10));
+      const auto parsed = parse_vgpr_name(name);
+      const unsigned r = parsed.value_or(kNumVgprs);
       const std::string &hex = lanes.as_string();
-      if (name.empty() || name[0] != 'v' || r >= s.vgpr_count || hex.size() != 2 * kWaveLanes) {
+      if (!parsed || r >= s.vgpr_count || hex.size() != 2 * kWaveLanes) {
         error = "bad floating-point tags for " + name;
         return std::nullopt;
       }

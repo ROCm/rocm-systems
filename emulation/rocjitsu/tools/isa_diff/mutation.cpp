@@ -418,7 +418,7 @@ std::string survivor_effect(const RegionPair &base, const RegionPair &mutant, ui
           undefined = true;
           break;
         }
-        why = "v" + std::to_string(r) + " lane " + std::to_string(lane);
+        why = vgpr_name(r) + " lane " + std::to_string(lane);
       }
     }
     if (!why.empty()) {

@@ -1339,6 +1339,80 @@ TEST(IsaDiffMemory, AtomicsReadAndWriteMemory) {
   std::filesystem::remove_all(dir);
 }
 
+TEST(IsaDiffAgpr, AgprMovesAndCalleeSavedAgprs) {
+  const std::string dir = temp_dir("agpr");
+  PairOptions o;
+  o.mcpu = "gfx90a";
+  o.return_vgprs = 1;
+  o.entry_vgprs = 1;
+  const std::string mov = target_fn("gfx90a", {"v_mov_b32_e32 v1, v0", "v_add_u32_e32 v0, v1, v1"});
+  // A round trip through a caller-saved AGPR (a0) is a move.
+  EXPECT_EQ(
+      verdict_of(dir, "f",
+                 target_fn("gfx90a", {"v_accvgpr_write_b32 a0, v0", "v_accvgpr_read_b32 v1, a0",
+                                      "v_add_u32_e32 v0, v1, v1"}),
+                 mov, o),
+      "NO_MISMATCH_FOUND/ESTABLISHED");
+  // a32-a255 are callee-saved from gfx90a on (CSR_AMDGPU_AGPRs): clobbering a40 is a bug.
+  const std::string clobber =
+      target_fn("gfx90a", {"v_accvgpr_write_b32 a40, v0", "v_mov_b32_e32 v1, v0",
+                           "v_add_u32_e32 v0, v1, v1"});
+  EXPECT_EQ(verdict_of(dir, "f", mov, clobber, o), "LOCAL_MISMATCH/ESTABLISHED");
+  // gfx908 saves no AGPR.
+  PairOptions o908 = o;
+  o908.mcpu = "gfx908";
+  EXPECT_EQ(verdict_of(dir, "f",
+                       target_fn("gfx908", {"v_mov_b32_e32 v1, v0", "v_add_u32_e32 v0, v1, v1"}),
+                       target_fn("gfx908", {"v_accvgpr_write_b32 a40, v0", "v_mov_b32_e32 v1, v0",
+                                            "v_add_u32_e32 v0, v1, v1"}),
+                       o908),
+            "NO_MISMATCH_FOUND/ESTABLISHED");
+  std::filesystem::remove_all(dir);
+}
+
+TEST(IsaDiffAgpr, MfmaRunsInRegions) {
+  const std::string dir = temp_dir("mfma");
+  PairOptions o;
+  o.mcpu = "gfx90a";
+  o.return_vgprs = 1;
+  o.entry_vgprs = 2;
+  auto mfma = [](const std::string &acc, const std::string &a, const std::string &b,
+                 const std::string &read) {
+    return target_fn("gfx90a", {"v_mfma_f32_4x4x1f32 " + acc + ", " + a + ", " + b + ", 0",
+                                "s_nop 3", "v_accvgpr_read_b32 v0, " + read});
+  };
+  const std::string base = mfma("a[0:3]", "v0", "v1", "a0");
+  // Other accumulation registers: equivalent.
+  EXPECT_EQ(verdict_of(dir, "f", base, mfma("a[4:7]", "v0", "v1", "a4"), o),
+            "NO_MISMATCH_FOUND/ESTABLISHED");
+  // A and B swapped: the 4x4 blocks are transposed.
+  EXPECT_EQ(verdict_of(dir, "f", base, mfma("a[0:3]", "v1", "v0", "a0"), o),
+            "LOCAL_MISMATCH/ESTABLISHED");
+  // gfx950: the result in VGPRs or in AGPRs.
+  PairOptions o950 = o;
+  o950.mcpu = "gfx950";
+  o950.entry_vgprs = 4;
+  EXPECT_EQ(verdict_of(dir, "f",
+                       target_fn("gfx950", {"v_mfma_f32_16x16x16_f16 v[4:7], v[0:1], v[2:3], 0",
+                                            "s_nop 7", "v_mov_b32_e32 v0, v5"}),
+                       target_fn("gfx950", {"v_mfma_f32_16x16x16_f16 a[0:3], v[0:1], v[2:3], 0",
+                                            "s_nop 7", "v_accvgpr_read_b32 v0, a1"}),
+                       o950),
+            "NO_MISMATCH_FOUND/ESTABLISHED");
+  // An AGPR write moved across unrelated code before the MFMA that reads it. The MFMA
+  // reads every lane, so inactive lanes must be entry-equal (no kill before it), and the
+  // entry EXEC that reaches it is all ones (mfma_full_exec).
+  o.entry_vgprs = 6;
+  const std::string early = target_fn(
+      "gfx90a", {"v_accvgpr_write_b32 a4, v0", "v_mov_b32_e32 v5, 0",
+                 "v_mfma_f32_4x4x1f32 a[0:3], a4, v1, 0", "s_nop 3", "v_accvgpr_read_b32 v0, a0"});
+  const std::string late = target_fn("gfx90a", {"v_mov_b32_e32 v5, 0", "v_accvgpr_write_b32 a4, v0",
+                                                "v_mfma_f32_4x4x1f32 a[0:3], a4, v1, 0", "s_nop 3",
+                                                "v_accvgpr_read_b32 v0, a0"});
+  EXPECT_EQ(verdict_of(dir, "f", early, late, o), "NO_MISMATCH_FOUND/ESTABLISHED");
+  std::filesystem::remove_all(dir);
+}
+
 TEST(IsaDiffControlFlow, BranchConditionsAreFollowedAndExitsCompared) {
   const std::string dir = temp_dir("cflow");
   PairOptions o;

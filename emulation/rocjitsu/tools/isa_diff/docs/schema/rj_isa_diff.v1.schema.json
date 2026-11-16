@@ -607,7 +607,8 @@
             "relation_summary",
             "reachability_witness",
             "user_assumption",
-            "memory_model"
+            "memory_model",
+            "mfma_full_exec"
           ]
         }
       },
@@ -2169,6 +2170,15 @@
           },
           "vgprs_changed": {
             "$ref": "#/$defs/vgprs"
+          },
+          "vgprs_lane0": {
+            "type": "object",
+            "propertyNames": {
+              "$ref": "#/$defs/vgpr"
+            },
+            "additionalProperties": {
+              "$ref": "#/$defs/hex32"
+            }
           }
         },
         "additionalProperties": false
@@ -2406,7 +2416,7 @@
                   },
                   {
                     "type": "string",
-                    "pattern": "^v([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\[([0-9]|[1-5][0-9]|6[0-3])\\]$"
+                    "pattern": "^[va]([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\[([0-9]|[1-5][0-9]|6[0-3])\\]$"
                   }
                 ]
               },
@@ -2744,12 +2754,12 @@
     },
     "vgpr": {
       "type": "string",
-      "pattern": "^v([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])$"
+      "pattern": "^[va]([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])$"
     },
     "vgprs": {
       "description": "Comma-separated VGPR list in register order; empty for none.",
       "type": "string",
-      "pattern": "^(v([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])(,v([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5]))*)?$"
+      "pattern": "^([va]([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])(,[va]([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5]))*)?$"
     },
     "loc_or_vgpr": {
       "anyOf": [

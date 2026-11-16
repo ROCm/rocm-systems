@@ -1121,3 +1121,35 @@ per side), and the compiles run in parallel.
   of earlier RUN lines (`%t`) are not run.
 - Self-test: wrapper llc pair whose "after" side commutes `v_add_u32` operands; an
   unchanged hand-written test and a RUN-less corpus file are both compared and pass.
+
+## AGPRs and MFMA; LLVM PR 243123 (2026-11-16)
+
+AGPRs are vector locations a0..a255 (256..511); MFMA, SMFMAC and `v_accvgpr_*` run in
+regions (README "AGPRs and MFMA").
+
+- **Probes/tests.** An AGPR round trip equals a move; clobbering a40 is a mismatch on
+  gfx90a (callee-saved) and allowed on gfx908; an MFMA into other accumulators passes, with
+  A and B swapped it is a mismatch; gfx950 MFMA results in VGPRs or AGPRs agree.
+- **Three false mismatches found and fixed on the first real kernels:**
+  - MFMA reads every lane: a write before it killed its register under a stable EXEC, so
+    inactive lanes held per-side canaries that fed the product. MFMA/SMFMAC now cross
+    lanes (no kill before them).
+  - Inputs with a partial entry EXEC fed undefined inactive lanes into the product: a
+    region that issues MFMA under the entry EXEC gets EXEC all ones (`mfma_full_exec`).
+  - The memory model's per-case reset zeroed seeded words inside the region's code range
+    (a random buffer address hit the code), so the next case fetched zeros: reset now
+    skips code bytes. `PC_WRITTEN` now reports the PC it found.
+- **PR 243123** ("Count AV register classes as VGPR pressure"), llc built at its base and
+  head (`~/llvm-pr243123-builds-20261116`):
+  - 148 gfx950 Triton MFMA GEMM kernels from mi350-bg (Triton 3.6 IR, `-O3
+    -relocation-model=pic`): code changes in 46; spill stores 275 -> 153 (2 kernels stop
+    spilling, 16 spill less, none more).
+  - Changed tests: `rewrite-mfma-single-exit-copy.ll:single_exit_copy` (gfx950) now passes
+    through the whole function (1692 valid cases; the MFMA loop with AGPR writes moved
+    into the loop); the memset functions pass; `tuple-allocation-failure.ll:kernel` stays
+    inconclusive (calls; the v43 copy rematerialised before each store, equivalent by
+    inspection); the AGPR-heavy `avgpr-banking.ll` and `coexec-rewrite-mfma.ll` functions
+    stay inconclusive on exit mapping.
+  - The Triton kernels stay inconclusive: per-function time budget (big GEMM loops), exit
+    liveness that differs after rescheduling, `s_barrier` keeping the whole kernel out,
+    and buffer addresses that fault. No mismatch.
