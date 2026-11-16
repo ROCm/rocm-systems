@@ -262,6 +262,22 @@ TEST(parser_schema, split_list_ignores_a_separator_at_either_end)
               (std::vector<std::string>{ "alpha", "", "beta" }));
 }
 
+TEST(parser_schema, join_list_skips_blank_items_and_does_not_double_a_separator)
+{
+    using items = std::vector<std::string>;
+    EXPECT_EQ(join_list(items{ "alpha", "beta" }, ","), "alpha,beta");
+    EXPECT_EQ(join_list(items{ " alpha ", " beta " }, ","), "alpha,beta");
+    EXPECT_EQ(join_list(items{ "", "alpha", " ", "beta", "" }, ","), "alpha,beta");
+    EXPECT_EQ(join_list(items{ "alpha,", "beta" }, ","), "alpha,beta");
+    EXPECT_EQ(join_list(items{ "alpha", ",beta" }, ","), "alpha,beta");
+    EXPECT_EQ(join_list(items{ "alpha", ",", "beta" }, ","), "alpha,beta");
+    EXPECT_EQ(join_list(items{ "alpha", ",", ",", "beta" }, ","), "alpha,,beta");
+    EXPECT_EQ(join_list(items{ "alpha,beta" }, ","), "alpha,beta");
+    EXPECT_EQ(join_list(items{ "," }, ","), ",");
+    EXPECT_EQ(join_list(items{ "" }, ","), "");
+    EXPECT_EQ(join_list(items{}, ","), "");
+}
+
 TEST(parser_schema, list_separator_is_a_comma)
 {
     const auto param = make_param("list", "ROCPROFSYS_LIST");

@@ -112,6 +112,26 @@ split_list(std::string_view value, std::string_view separator)
     return parts;
 }
 
+std::string
+join_list(const std::vector<std::string>& items, std::string_view separator)
+{
+    std::string text;
+    for(const auto& item : items)
+    {
+        const auto part = utility::string::trim(item);
+        if(part.empty())
+        {
+            continue;
+        }
+        if(!text.empty() && !text.ends_with(separator) && !part.starts_with(separator))
+        {
+            text.append(separator);
+        }
+        text.append(part);
+    }
+    return text;
+}
+
 void
 schema::set_version(std::string version)
 {

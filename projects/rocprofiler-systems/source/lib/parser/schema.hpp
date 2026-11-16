@@ -91,6 +91,14 @@ list_separator(const schema_param& param) noexcept;
 [[nodiscard]] std::optional<std::vector<std::string>>
 split_list(std::string_view value, std::string_view separator);
 
+/// Text of a list given as separate items, such as the tokens of one command-line
+/// option or the items of a JSON array. A blank item names nothing and is skipped, and
+/// a separator already at the boundary between two items is not doubled, so "a," "b"
+/// and "a" "," "b" are both "a,b". split_list() reads the result like any other text,
+/// so "," alone still names nothing.
+[[nodiscard]] std::string
+join_list(const std::vector<std::string>& items, std::string_view separator);
+
 /**
  * Parameters for one catalog.
  *
