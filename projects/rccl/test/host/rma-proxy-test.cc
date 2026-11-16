@@ -47,6 +47,7 @@
 #include <cstring>
 #include <memory>
 #include <set>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -455,6 +456,64 @@ TEST_F(RmaProxyAllocGraphTest, FlushBufferStaysCudaOnBothGdrArms) {
 // Whichever type is chosen, the proxy polls these signals from the host, so the
 // registration must keep NCCL_NET_MR_FLAG_FORCE_SO.
 // ---------------------------------------------------------------------------
+// allocMemCPUAccessible / freeMemCPUAccessible's host arm runs while a graph
+// capture may be active. Each hipHostMalloc and hipHostFree is bracketed by a
+// switch to relaxed capture mode and a restore of the mode the thread held on
+// entry. The thread starts in thread-local mode so a second request for
+// relaxed cannot be mistaken for that restore.
+TEST_F(RmaProxyAllocGraphTest, GdrCopyOff_RelaxesCaptureModeAroundHostAllocAndFree) {
+    ncclGdrCopy = NULL;
+    hipStreamCaptureMode threadMode = hipStreamCaptureModeThreadLocal;
+    std::vector<std::string> trace;
+
+    ScopedHook<hipError_t(hipStreamCaptureMode*)> exchange(
+        g_hipThreadExchangeStreamCaptureMode, [&](hipStreamCaptureMode* mode) {
+            trace.push_back("exchange:" + std::to_string(static_cast<int>(*mode)));
+            hipStreamCaptureMode previous = *mode;
+            *mode = threadMode;
+            threadMode = previous;
+            return hipSuccess;
+        });
+    // Shadows the fixture hook for this test. Keep hostAddrs_ in step so the
+    // registration provenance check still sees these pointers.
+    ScopedHook<hipError_t(void**, std::size_t, unsigned)> mallocTrace(
+        g_hipHostMalloc, [this, &trace](void** ptr, std::size_t size, unsigned) {
+            trace.push_back("hostMalloc");
+            void* p = std::malloc(size);
+            if (p == nullptr) return hipErrorOutOfMemory;
+            *ptr = p;
+            hostAddrs_.insert(p);
+            return hipSuccess;
+        });
+    ScopedHook<hipError_t(void*)> freeTrace(g_hipHostFree, [this, &trace](void* ptr) {
+        trace.push_back("hostFree");
+        hostAddrs_.erase(ptr);
+        std::free(ptr);
+        return hipSuccess;
+    });
+
+    ASSERT_EQ(ncclSuccess, CreateCtx());
+    DestroyCtx();
+
+    const std::string relaxed = "exchange:" + std::to_string(static_cast<int>(hipStreamCaptureModeRelaxed));
+    const std::string restored = "exchange:" + std::to_string(static_cast<int>(hipStreamCaptureModeThreadLocal));
+    ASSERT_FALSE(trace.empty());
+    ASSERT_EQ(0u, trace.size() % 3) << "a host alloc or free was not bracketed by two exchanges";
+    bool sawMalloc = false;
+    bool sawFree = false;
+    for (size_t i = 0; i < trace.size(); i += 3) {
+        EXPECT_EQ(relaxed, trace[i]) << i;
+        EXPECT_TRUE(trace[i + 1] == "hostMalloc" || trace[i + 1] == "hostFree") << trace[i + 1];
+        EXPECT_EQ(restored, trace[i + 2]) << i;
+        sawMalloc = sawMalloc || trace[i + 1] == "hostMalloc";
+        sawFree = sawFree || trace[i + 1] == "hostFree";
+    }
+    EXPECT_TRUE(sawMalloc);
+    EXPECT_TRUE(sawFree);
+    // The last restore put the thread back where the test started.
+    EXPECT_EQ(hipStreamCaptureModeThreadLocal, threadMode);
+}
+
 TEST_F(RmaProxyAllocGraphTest, ForceStrongOrderingPreservedOnBothGdrArms) {
     for (gdr_t gdr : {(gdr_t)NULL, kGdrEnabled}) {
         ASSERT_NO_FATAL_FAILURE(ReCreateCtxForArm(gdr));
