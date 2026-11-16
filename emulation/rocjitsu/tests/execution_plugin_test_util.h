@@ -125,10 +125,12 @@ inline constexpr uint64_t kPartialExecMask = 0xA5A5'F0F0'1234'8001ULL;
 
 class TestMemoryInstruction : public Instruction {
 public:
+  /// `mnemonic` must have static storage duration; a `flat_` prefix makes the
+  /// instruction a generic FLAT access to plugins.
   TestMemoryInstruction(std::unique_ptr<DynamicInstState> state,
                         std::initializer_list<amdgpu::MemoryCounterObligation> counter_obligations,
-                        bool exec_masked = true)
-      : Instruction("test_mem", nullptr) {
+                        bool exec_masked = true, std::string_view mnemonic = "test_mem")
+      : Instruction(mnemonic, nullptr) {
     size_ = sizeof(encoding_);
     raw_encoding_ = &encoding_;
     set_memory_issue_info(counter_obligations, exec_masked);

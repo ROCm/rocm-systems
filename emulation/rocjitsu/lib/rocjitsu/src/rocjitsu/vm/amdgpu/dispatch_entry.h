@@ -79,8 +79,12 @@ struct ComputeQueueConfig {
   QueueDoorbellMode doorbell_mode = QueueDoorbellMode::Explicit;
   bool uses_kfd_queue_abi = false;
   uint64_t queue_desc_va = 0;
+  /// GPU virtual address of the runtime queue exception status word.
   uint64_t exception_status_va = 0;
+  /// Runtime event ID for software queue exceptions.
   uint32_t exception_event_id = 0;
+  /// Software exception route, independent of packet mailbox interrupts.
+  InterruptSink exception_event_sink{};
   /// Spread each of this queue's dispatches over every XCD of the SoC, the way a
   /// multi-XCD part does when it runs as a single partition. Set by the queue
   /// creation path that models such a device; registering the queue replicates it
@@ -169,7 +173,7 @@ enum class QueueIdlePublicationPhase : uint8_t {
   ReadEventId,
   StoreMailbox,
   DeliverEventInterrupt,
-  DeliverGenericInterrupt,
+  NotifyIdle,
   Complete,
 };
 

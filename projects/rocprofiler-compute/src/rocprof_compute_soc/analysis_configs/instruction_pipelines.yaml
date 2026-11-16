@@ -24,14 +24,6 @@ arch_overrides:
     FLAT:
     - global_
     - scratch_
-  gfx940:
-    FLAT:
-    - global_
-    - scratch_
-  gfx941:
-    FLAT:
-    - global_
-    - scratch_
   gfx942:
     FLAT:
     - global_

@@ -1115,35 +1115,12 @@ int pidfd_is_exited(int pidfd) {
   return rc == 1 && (pfd.revents & (POLLIN | POLLHUP)) ? 1 : 0;
 }
 
-/// @brief Report whether the process behind @p procfd has exited but not been
-/// reaped.
-///
-/// @details A pidfd stays readable for a zombie, so pidfd_is_exited() cannot
-/// tell a live debuggee from one that has already run to completion. The state
-/// character in /proc/<pid>/stat can. It sits after the last ')' because the
-/// comm field is parenthesised and may itself contain spaces and parentheses.
-///
-/// @retval 1 The target is a zombie (Z) or dead (X).
-/// @retval 0 The target is still running.
-/// @retval <0 Negative errno; the state could not be determined.
 int procfd_is_zombie(int procfd) {
-  // Passthrough, not ::openat/::read/::close: these run inside driver ioctls that
-  // the interposer dispatched, so a bare ::close() here would re-enter the
-  // interposer's own close() hook mid-dispatch. See PassthroughFdTraits.
+  // Pin stat through the existing proc directory, never by a recycled PID.
   UniqueDriverFd stat_fd(libc_passthrough().openat(procfd, "stat", O_RDONLY | O_CLOEXEC, 0));
-  if (stat_fd.get() < 0)
-    return errno == ENOENT ? 1 : -errno;
-  char buffer[4096];
-  const ssize_t bytes = libc_passthrough().read(stat_fd.get(), buffer, sizeof(buffer) - 1);
-  const int read_error = errno;
-  stat_fd.reset();
-  if (bytes < 0)
-    return -read_error;
-  buffer[bytes] = '\0';
-  const char *name_end = std::strrchr(buffer, ')');
-  if (name_end == nullptr || name_end[1] != ' ' || name_end[2] == '\0')
-    return -EIO;
-  return name_end[2] == 'Z' || name_end[2] == 'X';
+  if (!stat_fd)
+    return errno == ENOENT || errno == ESRCH ? 1 : -errno;
+  return proc_stat_is_exited(stat_fd.get());
 }
 
 int pin_process_identity(pid_t pid, UniqueDriverFd &pidfd, UniqueDriverFd &procfd) {
@@ -2863,8 +2840,11 @@ SimulatedKfd::~SimulatedKfd() {
   }
   // CPs may outlive this frontend. Revoke callback admission and drain any
   // callback already executing before touching the state captured by them.
-  for (GpuDevice &gpu : gpus_)
+  for (GpuDevice &gpu : gpus_) {
     gpu.interrupt_subscription.reset();
+    gpu.cp_interrupt_subscription.reset();
+    gpu.exception_event_subscription.reset();
+  }
 
   debug_session_reaper_.request_stop();
   debug_session_reaper_.join();
@@ -3201,24 +3181,58 @@ void SimulatedKfd::init_command_processors_locked() {
     // SH_MEM_BASES bank through Wavefront::set_process_id.
     const kfd_process_device_apertures ap = gpu_apertures(static_cast<uint32_t>(i));
     g.soc->set_apertures(ap.lds_base, ap.lds_limit, ap.scratch_base, ap.scratch_limit);
-    g.interrupt_subscription =
+    const auto subscribe_interrupts = [this](bool signal_mailbox_updated) {
+      return amdgpu::InterruptSubscription(
+          [this, signal_mailbox_updated](uint32_t process_id, uint32_t event_id) {
+            if (const auto override = interrupt_override_for_testing_.sink()) {
+              override.deliver(process_id, event_id);
+              return;
+            }
+            std::lock_guard<std::mutex> ilk(interrupt_mutex_);
+            const std::unordered_map<uint32_t, EventState *>::iterator event =
+                event_dispatch_.find(process_id);
+            if (event != event_dispatch_.end()) {
+              util::Logger::cp("INTERRUPT_ROUTE: pid=", process_id, " event_id=", event_id,
+                               " found=true");
+              event->second->signal_interrupt(event_id, signal_mailbox_updated);
+            } else {
+              util::Logger::cp("INTERRUPT_ROUTE: pid=", process_id, " event_id=", event_id,
+                               " found=false");
+            }
+          },
+          {},
+          [this](uint32_t process_id) {
+            if (const auto override = interrupt_override_for_testing_.sink()) {
+              override.notify_idle(process_id);
+              return;
+            }
+            std::lock_guard<std::mutex> lock(interrupt_mutex_);
+            const auto event = event_dispatch_.find(process_id);
+            if (event != event_dispatch_.end())
+              event->second->notify_idle();
+          });
+    };
+    g.exception_event_subscription =
         amdgpu::InterruptSubscription([this](uint32_t process_id, uint32_t event_id) {
           if (const auto override = interrupt_override_for_testing_.sink()) {
             override.deliver(process_id, event_id);
             return;
           }
-          std::lock_guard<std::mutex> ilk(interrupt_mutex_);
-          const std::unordered_map<uint32_t, EventState *>::iterator event =
-              event_dispatch_.find(process_id);
+          std::lock_guard<std::mutex> lock(interrupt_mutex_);
+          const auto event = event_dispatch_.find(process_id);
           if (event != event_dispatch_.end()) {
-            util::Logger::cp("INTERRUPT_ROUTE: pid=", process_id, " event_id=", event_id,
-                             " found=true");
-            event->second->signal_interrupt(event_id);
-          } else {
-            util::Logger::cp("INTERRUPT_ROUTE: pid=", process_id, " event_id=", event_id,
-                             " found=false");
+            kfd_ioctl_set_event_args args{};
+            args.event_id = event_id;
+            static_cast<void>(event->second->set_event(&args));
           }
         });
+    // SDMA and SQ always require marked mailboxes. Only GC 12.1 CP completions
+    // can signal directly by ID, so compute queues retain a distinct route.
+    g.interrupt_subscription = subscribe_interrupts(true);
+    g.cp_interrupt_subscription =
+        subscribe_interrupts(i >= gpu_infos_.size() || kmd::gc_ip_version_for_gfx_target_version(
+                                                           gpu_infos_[i].gfx_target_version) !=
+                                                           kmd::make_gc_ip_version(12, 1, 0));
     g.soc->for_each_cp([this, i](amdgpu::CommandProcessor *cp) {
       // Tests register synthetic queues directly with these CPs without the
       // KFD queue ABI. Only those queues use these backing hooks;
@@ -7721,7 +7735,8 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
     }
 
     queue_request.identity = {.address_space = gs.address_space,
-                              .interrupt_sink = gpu->interrupt_subscription.sink(),
+                              .interrupt_sink = is_sdma ? gpu->interrupt_subscription.sink()
+                                                        : gpu->cp_interrupt_subscription.sink(),
                               .process_id = proc.process_id(),
                               .queue_id = queue_id};
     queue_request.ring = {.base_address = args->ring_base_address,
@@ -7846,6 +7861,7 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
                   sizeof(exception_event));
       queue_request.exception_status_address = exception_status;
       queue_request.exception_event_id = static_cast<uint32_t>(exception_event);
+      queue_request.exception_event_sink = gpu->exception_event_subscription.sink();
     }
     if (is_sdma && !daemon_mode_) {
       auto *wptr = reinterpret_cast<uint64_t *>(args->write_pointer_address);
@@ -8220,9 +8236,9 @@ int SimulatedKfd::destroy_queue_ioctl(KfdProcess &proc, void *arg) {
     (void)gpus_[queue->gpu_ordinal].soc->queue_registry().unregister_queue(
         queue->queue_handle, amdgpu::QueueCloseMode::ForceCancel);
   }
-  // Real CP sends EOP interrupt when queue is deactivated; KFD broadcasts to
-  // all type-0 events. This wakes ROCR's signal threads blocked on queue events.
-  proc.event_state_.signal_interrupt(0);
+  // Preserve the simulator's queue-deactivation wake without treating a
+  // hardware event context of zero as a broadcast.
+  proc.event_state_.notify_idle();
   return 0;
 }
 

@@ -238,10 +238,6 @@ Device::~Device() {
   // This guards OCL teardown; for HIP the drain already ran via RuntimeTearDown,
   // so this is a safe no-op in that path.
   WaitForHsaAsyncHandlersIdle();
-  for (ProfilingSignal* signal : gate_signals_) {
-    signal->release();
-  }
-  gate_signals_.clear();
 
   QuiesceHwEvents(graph_hw_events_);
   for (void* hw_event : graph_hw_events_) {
@@ -4349,63 +4345,6 @@ bool Device::CreateHwEvents(int count, bool batched, std::vector<void*>& hw_even
 }
 
 // ================================================================================================
-ProfilingSignal* Device::AcquireGateSignal() {
-  std::scoped_lock lock(gate_lock_);
-  ProfilingSignal* gate = nullptr;
-  // Gates come back about in the order they were taken, so the search starts after the last one
-  const size_t size = gate_signals_.size();
-  for (size_t i = 0; i < size; ++i) {
-    const size_t slot = (gate_next_ + i) % size;
-    // Only the pool holds it: the end marker it completed and every command that waited on it,
-    // which hold that command until their own completion, are gone
-    if (gate_signals_[slot]->referenceCount() == 1) {
-      // Pairs with the last holder's release, so its uses of the gate are complete here
-      std::atomic_thread_fence(std::memory_order_acquire);
-      gate = gate_signals_[slot];
-      gate_next_ = slot + 1;
-      break;
-    }
-  }
-  // A gate comes back once its end marker is destroyed, which the async handler thread drives.
-  // That thread can fall behind, e.g. while it destroys a large graph exec, and device-memory
-  // allocations are slow then. So the pool, shared by the device's queues, grows only while it is
-  // not exhausted: an end marker that finds no free gate goes the usual way, without one, and the
-  // next one that finds a free gate adds a batch for the next time
-  constexpr size_t kGateBatch = 64;
-  constexpr size_t kMaxGates = 4096;
-  const bool grow = gate_signals_.empty() || (gate_short_ && (gate != nullptr));
-  if (grow && (size < kMaxGates)) {
-    std::vector<hsa_signal_t> handles(kGateBatch);
-    bool in_device_memory = false;
-    // Created completed, so an unused one is destroyed without a wait
-    if (CreateSignals(kGateBatch, 0, HSA_AMD_SIGNAL_AMD_GPU_ONLY, /*batched=*/true,
-                      GraphDeviceSignals(), handles.data(), in_device_memory)) {
-      for (hsa_signal_t handle : handles) {
-        ProfilingSignal* signal = new ProfilingSignal(SignalHints());
-        signal->signal_ = handle;
-        signal->in_device_memory_ = in_device_memory;
-        gate_signals_.push_back(signal);
-      }
-      gate_short_ = false;
-      if (gate == nullptr) {
-        gate = gate_signals_[size];
-        gate_next_ = size + 1;
-      }
-    }
-  }
-  if (gate == nullptr) {
-    gate_short_ = true;
-    return nullptr;
-  }
-  // The checkout reference, taken before the lock is dropped: the pool's search skips the gate
-  // from here on, so it is armed and used by this caller only
-  gate->retain();
-  gate->binary_use_ = true;
-  ResetHwEvents({gate});
-  return gate;
-}
-
-// ================================================================================================
 bool Device::CreateSignals(uint32_t count, hsa_signal_value_t initial_value, uint64_t attributes,
                            bool batched, bool device_memory, hsa_signal_t* signals,
                            bool& in_device_memory) const {
@@ -4505,7 +4444,10 @@ void Device::ResetHwEvents(const std::vector<void*>& hw_events) const {
     if (hw_event != nullptr) {
       auto* ps = reinterpret_cast<ProfilingSignal*>(hw_event);
       if (ps->in_device_memory_) {
-        reinterpret_cast<amd_signal_t*>(ps->signal_.handle)->value = kInitSignalValueOne;
+        // A plain store would leave the line in the CPU cache of a host that maps device memory
+        // write-back, and the GPU's first access to the signal would have to probe it
+        amd::nontemporalStore64(&reinterpret_cast<amd_signal_t*>(ps->signal_.handle)->value,
+                                kInitSignalValueOne);
         last_stored = ps->signal_;
       } else {
         Hsa::signal_silent_store_relaxed(ps->signal_, 1);
@@ -4515,12 +4457,16 @@ void Device::ResetHwEvents(const std::vector<void*>& hw_events) const {
       ps->ResetCachedTiming();
     }
   }
-  // Bulk flush of HDP. The packets that wait on these signals go to rings of this device, and a
-  // device-memory ring receives them through the same BAR after these stores, in order. Every
-  // ring here comes from acquireQueue, which requests the placement AqlRingsInDeviceMemory()
-  // reports; ROCr fails that request rather than fall back to a system-memory ring.
-  if (last_stored.handle != 0 && !AqlRingsInDeviceMemory()) {
-    FlushSignalStores(last_stored, kInitSignalValueOne);
+  if (last_stored.handle != 0) {
+    // The set goes to another thread, which submits the packets that wait on these signals
+    amd::nontemporalStoreFence();
+    // Bulk flush of HDP. The packets go to rings of this device, and a device-memory ring
+    // receives them after these stores, over the same link. Every ring here comes from
+    // acquireQueue, which requests the placement AqlRingsInDeviceMemory() reports; ROCr fails
+    // that request rather than fall back to a system-memory ring.
+    if (!AqlRingsInDeviceMemory()) {
+      FlushSignalStores(last_stored, kInitSignalValueOne);
+    }
   }
 }
 

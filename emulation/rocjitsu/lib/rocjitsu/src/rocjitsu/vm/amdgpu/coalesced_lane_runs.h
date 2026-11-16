@@ -262,17 +262,14 @@ bool for_each_coalesced_lane_run(const uint64_t *addrs, uint64_t lane_mask, uint
   if (!lane_mask)
     return true;
   if constexpr (detail::kVectorizedStrideCheck) {
-    // Keep the SIMD precheck on full Wave32 accesses. Other masks and Wave64
-    // retain the existing scan; extending the policy needs separate qualification.
-    if (wf_size == 32 && lane_mask == UINT32_MAX) {
-      if (detail::is_strided_lane_addresses(addrs, 32, stride)) {
-        return fn(CoalescedLaneRun{.address = addrs[0],
-                                   .lane_mask = lane_mask,
-                                   .first_lane = 0,
-                                   .size = 32 * stride,
-                                   .lane_ordered = true});
-      }
-    }
+    const bool full_wave =
+        (wf_size == 32 && lane_mask == UINT32_MAX) || (wf_size == 64 && lane_mask == UINT64_MAX);
+    if (full_wave && detail::is_strided_lane_addresses(addrs, wf_size, stride))
+      return fn(CoalescedLaneRun{.address = addrs[0],
+                                 .lane_mask = lane_mask,
+                                 .first_lane = 0,
+                                 .size = wf_size * stride,
+                                 .lane_ordered = true});
   }
   const uint32_t first = std::countr_zero(lane_mask);
   uint32_t last = first;
