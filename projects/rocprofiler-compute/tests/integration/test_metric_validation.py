@@ -6,6 +6,10 @@ import pandas as pd
 
 from tests.integration import common as integration_common
 
+# sample/memcopy.cpp copies 268435456 doubles in each of 1000 measured dispatches.
+# Each direction transfers 2 GiB per dispatch; the warmup is excluded by -d.
+MEMCOPY_BYTES_PER_DIRECTION = 268_435_456 * 8 * 1000
+
 
 def get_hbm_data_transfer(analysis_workload_dir, data):
     bw_df = pd.read_csv(f"{analysis_workload_dir}/{data['bw_csv']}")
@@ -27,6 +31,30 @@ def get_hbm_bandwidth_peak(analysis_workload_dir, data):
         & (bw_df["value_name"] == data["bw_value_name"])
     ]
     return bw_rows["value"].values[0]
+
+
+def get_memcopy_fabric_metrics(soc, read_metric_id, write_metric_id):
+    """Validate directional fabric traffic using the existing roofline counters."""
+    return [
+        {
+            "name": name,
+            "profile_metric_id": [metric_id],
+            "expected_values": [MEMCOPY_BYTES_PER_DIRECTION],
+            "tolerance": 0.10,
+            "get_actual_data": {
+                "soc": soc,
+                "bw_csv": "workload_metric.csv",
+                "bw_metric_id": metric_id,
+                "bw_value_name": "Value",
+                "duration_csv": "kernel.csv",
+                "duration_column": "duration_ns_sum",
+            },
+        }
+        for name, metric_id in [
+            ("L2-Fabric Read Data Transfer (bytes)", read_metric_id),
+            ("L2-Fabric Write and Atomic Data Transfer (bytes)", write_metric_id),
+        ]
+    ]
 
 
 # workload -> gfx -> metric definition. CSV references point at the per-view
@@ -52,6 +80,7 @@ VALIDATE_METRICS = {
                     "duration_column": "duration_ns_sum",
                 },
             },
+            *get_memcopy_fabric_metrics("MI200", "3.1.26", "3.1.27"),
         ],
         "MI300": [
             {
@@ -67,6 +96,7 @@ VALIDATE_METRICS = {
                     "duration_column": "duration_ns_sum",
                 },
             },
+            *get_memcopy_fabric_metrics("MI300", "3.1.26", "3.1.27"),
         ],
         "MI350": [
             {
@@ -82,6 +112,7 @@ VALIDATE_METRICS = {
                     "duration_column": "duration_ns_sum",
                 },
             },
+            *get_memcopy_fabric_metrics("MI350", "3.1.29", "3.1.30"),
         ],
         # Ignore warmup dispatch
         # Collect roofline block
@@ -180,7 +211,7 @@ def test_validate_metrics(
                 ]
                 diffs = [(abs(actual - exp) / exp * 100) for exp in expected_values]
                 assert any(matches), (
-                    f"{VALIDATE_METRICS[workload]['name']}: "
+                    f"{metric.get('name', VALIDATE_METRICS[workload]['name'])}: "
                     f"actual={actual}, expected_values={expected_values}, "
                     f"diffs={diffs} (tolerance: {tolerance * 100}%)"
                 )

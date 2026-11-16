@@ -43,12 +43,12 @@ class IsaDiagnosticsTest : public ::testing::TestWithParam<rj_code_arch_t> {
 protected:
   void SetUp() override { ASSERT_NO_FATAL_FAILURE(create()); }
 
-  void create(uint32_t wave_size = 0, unsigned helpers = 0) {
+  void create(uint32_t wave_size = 0, unsigned helpers = 0, unsigned vgprs = 256) {
     ComputeUnitCore::Config config{};
     config.arch = GetParam();
     config.num_wf_slots = 1;
     config.sgprs_per_wf = 128;
-    config.vgprs_per_wf = 256;
+    config.vgprs_per_wf = vgprs;
     config.lds_size_kb = 64;
     config.async_resources = std::make_shared<matrix_coexecution::ExecutionResources>(helpers);
     wf = nullptr;
@@ -56,7 +56,7 @@ protected:
         rocjitsu::test::initialize_compute_unit(cu, "isa_test_cu", config, &memory, &l2));
     decoder = Decoder::create(GetParam());
     ASSERT_NE(decoder, nullptr);
-    wf = cu->dispatch_wf(7, 0x100000, 106, 256, wave_size);
+    wf = cu->dispatch_wf(7, 0x100000, 106, vgprs, wave_size);
     ASSERT_NE(wf, nullptr);
     wf->set_exec(~uint64_t{0});
     wf->debug_write_sgpr(0, 0x4000);
@@ -140,6 +140,33 @@ protected:
   std::unique_ptr<Decoder> decoder;
   Wavefront *wf = nullptr;
 };
+
+TEST_P(IsaDiagnosticsTest, PackedWideningScaleSelectorAndRegisterOverlap) {
+  if (GetParam() != ROCJITSU_CODE_ARCH_CDNA5)
+    GTEST_SKIP();
+  ASSERT_NO_FATAL_FAILURE(create(32, 0, 512));
+  for (uint16_t op : {cdna5::kVCvtScalePk8F32Fp8Vop3, cdna5::kVCvtScalePk8F32Bf8Vop3,
+                      cdna5::kVCvtScalePk8F32Fp4Vop3, cdna5::kVCvtScalePk16F32Fp6Vop3}) {
+    const bool fp8 = op == cdna5::kVCvtScalePk8F32Fp8Vop3 || op == cdna5::kVCvtScalePk8F32Bf8Vop3;
+    for (uint8_t sel = 0; sel < 16; ++sel)
+      execute(cdna5::build_vop3(op, {.vdst = 8, .opsel = sel, .src0 = 256, .src1 = 260}),
+              fp8 && sel >= 12, "v_cvt_scale_");
+  }
+  auto check = [&](uint8_t dst, uint16_t src, uint16_t scale, unsigned warnings) {
+    execute(cdna5::build_vop3(cdna5::kVCvtScalePk16F32Fp6Vop3,
+                              {.vdst = dst, .src0 = src, .src1 = scale}),
+            warnings, "v_cvt_scale_");
+  };
+  check(8, 256 + 6, 0, 1);        // End of the data tuple overlaps v8.
+  check(8, 256, 256 + 23, 1);     // Scale aliases the last destination.
+  check(8, 256 + 5, 256 + 24, 0); // Both sources are adjacent.
+  check(8, 256, 8, 0);            // s8 and v8 are distinct.
+  wf->set_vgpr_msb_mode(1u << 2); // SRC1 in bank 1.
+  check(8, 256, 256 + 8, 0);      // Same encoded index, different banks.
+  check(252, 256 + 16, 256, 1);   // v[252:267] overlaps v256.
+  wf->set_exec(0);
+  check(252, 256 + 16, 256, 0);
+}
 
 TEST_P(IsaDiagnosticsTest, ScalarLoadOffsetBoundaryAndCdna5Exception) {
   wf->debug_write_sgpr(4, 0);

@@ -5,7 +5,8 @@
 #include "common/internal.h"
 #include "mfma/backends.h"
 #include "mfma/f64.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
+#include "rj_arith/detail/rj_arith_mfma.h"
 namespace {
 // Validate the inherited approximate model before accessing operands.
 template <int M, int Batch>

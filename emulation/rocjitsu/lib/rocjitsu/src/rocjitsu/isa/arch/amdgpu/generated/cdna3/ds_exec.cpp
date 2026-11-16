@@ -9,6 +9,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx940_cache_flags.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx9_cache_flags.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_ds_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -1632,57 +1633,22 @@ void DsReadU16Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsSwizzleB32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint32_t offset = inst_.offset0 | (inst_.offset1 << 8);
-  ::rocjitsu::amdgpu::RegisterAccess regs(wf);
-  uint32_t tmp[64] = {};
-  for (unsigned lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (uint64_t{1} << lane)))
-      continue;
-    const unsigned source = amdgpu::ds_swizzle_lane(lane, offset);
-    if (exec & (uint64_t{1} << source))
-      tmp[lane] = regs.read_lane(addr, source);
-  }
-  for (unsigned lane = 0; lane < wf.wf_size(); ++lane)
-    if (exec & (uint64_t{1} << lane))
-      regs.write_lane(vdst, lane, tmp[lane]);
+  const uint16_t offset = inst_.offset0 | (inst_.offset1 << 8);
+  amdgpu::arith::execute_ds_swizzle(wf, wf.cu().arithmetic_flags(), vdst, addr, offset);
 }
 
 void DsPermuteB32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint32_t offset = inst_.offset0 | (inst_.offset1 << 8);
-  ::rocjitsu::amdgpu::RegisterAccess regs(wf);
-  const unsigned group_width = amdgpu::ds_permute_group_width(wf.cu().arch(), wf.wf_size());
-  uint32_t tmp[64] = {};
-  for (unsigned lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (uint64_t{1} << lane)))
-      continue;
-    const unsigned destination =
-        amdgpu::ds_permute_lane(lane, regs.read_lane(addr, lane), offset, group_width);
-    tmp[destination] = regs.read_lane(data0, lane);
-  }
-  for (unsigned lane = 0; lane < wf.wf_size(); ++lane)
-    if (exec & (uint64_t{1} << lane))
-      regs.write_lane(vdst, lane, tmp[lane]);
+  const uint16_t offset = inst_.offset0 | (inst_.offset1 << 8);
+  amdgpu::arith::execute_ds_permute<false, false>(
+      wf, rj_arith_ds_permute_b32_w32, rj_arith_ds_permute_b32_w64_gfx12,
+      wf.cu().arithmetic_flags(), vdst, addr, data0, offset);
 }
 
 void DsBpermuteB32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint32_t offset = inst_.offset0 | (inst_.offset1 << 8);
-  ::rocjitsu::amdgpu::RegisterAccess regs(wf);
-  const unsigned group_width = amdgpu::ds_permute_group_width(wf.cu().arch(), wf.wf_size());
-  uint32_t tmp[64] = {};
-  for (unsigned lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (uint64_t{1} << lane)))
-      continue;
-    const unsigned source =
-        amdgpu::ds_permute_lane(lane, regs.read_lane(addr, lane), offset, group_width);
-    if (exec & (uint64_t{1} << source))
-      tmp[lane] = regs.read_lane(data0, source);
-  }
-  for (unsigned lane = 0; lane < wf.wf_size(); ++lane)
-    if (exec & (uint64_t{1} << lane))
-      regs.write_lane(vdst, lane, tmp[lane]);
+  const uint16_t offset = inst_.offset0 | (inst_.offset1 << 8);
+  amdgpu::arith::execute_ds_permute<true, false>(
+      wf, rj_arith_ds_bpermute_b32_w32, rj_arith_ds_bpermute_b32_w64_gfx12,
+      wf.cu().arithmetic_flags(), vdst, addr, data0, offset);
 }
 
 void DsAddU64Ds::execute_impl(amdgpu::Wavefront &wf) {

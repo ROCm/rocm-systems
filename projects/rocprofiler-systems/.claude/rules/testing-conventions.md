@@ -48,6 +48,13 @@ commands are not interchangeable.
   constants when the real contract needs them. It does not include the
   concrete implementation it replaces.
 
+## A test checks what its name says
+
+- A test for a filter or a branch includes an input that the filter rejects
+  or that takes the other branch.
+- Call the function once, store the result, then assert on it.
+- Every new `.cpp` with logic has a test file.
+
 ## Coverage
 
 Configure and build the `coverage` preset, run the aggregated unit-test binary,

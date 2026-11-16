@@ -12,6 +12,7 @@
 /// required field names.
 
 #include "rocjitsu/isa/arch/amdgpu/shared/buffer_address.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_resolve.h"
 #include "rocjitsu/isa/isa_traits.h"
@@ -22,10 +23,12 @@
 #include "util/log.h"
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cassert>
 #include <cstdint>
 #include <optional>
+#include <span>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -41,6 +44,43 @@ inline bool buffer_resource_range_is_backed(const Wavefront &wf, uint32_t select
     return scalar_selector_range_is_backed(wf, selector, 2) &&
            scalar_selector_range_is_backed(wf, selector + 2, 2);
   return scalar_selector_range_is_backed(wf, selector, 4);
+}
+
+// Four ordinary SGPRs form one resource. Split SGPR/VCC descriptors and
+// special registers keep the selector-specific reads and observer callbacks.
+inline std::optional<std::array<uint32_t, 4>> read_buffer_resource(Wavefront &wf,
+                                                                   uint32_t selector) {
+  if (!buffer_resource_range_is_backed(wf, selector))
+    return std::nullopt;
+  if (selector + 3 < kFlatScratchSelectorFirst && !wf.cu().observes_register_access()) {
+    const auto words = RegisterAccess(wf).read_sgpr_region(wf.sgpr_alloc().base + selector, 4);
+    return std::array{words.dword(0), words.dword(1), words.dword(2), words.dword(3)};
+  }
+  return std::array{read_scalar_selector(wf, selector), read_scalar_selector(wf, selector + 1),
+                    read_scalar_selector(wf, selector + 2), read_scalar_selector(wf, selector + 3)};
+}
+
+/// @brief CDNA5 V# TYPE, SRD bits 127:126, from SRD word 3. Zero identifies a
+/// buffer.
+constexpr uint8_t cdna5_buffer_resource_type(uint32_t srd3) {
+  return static_cast<uint8_t>((srd3 >> 30) & 0x3u);
+}
+
+/// @brief Whether a gfx1250 VBUFFER instruction is ignored because its
+/// resource is not a buffer: an SRD TYPE other than 0 makes the instruction
+/// ignored (CDNA5 ISA 9.6). The SRD is read without a register-access
+/// observation. False when `modifiers` name no VBUFFER resource or its SRD is
+/// not backed by this wave.
+inline bool cdna5_ignores_buffer_resource(const RegisterModifiers &modifiers, const Wavefront &wf) {
+  if (wf.cu().arch() != ROCJITSU_CODE_ARCH_CDNA5 || !modifiers.buffer_resource ||
+      modifiers.scalar_buffer_words)
+    return false;
+  const uint32_t selector = modifiers.buffer_resource->encoding_value();
+  if (!buffer_resource_range_is_backed(wf, selector))
+    return false;
+  const auto range = resolve_scalar_register_range(wf, selector + 3, 1);
+  const auto word3 = range ? RegisterAccess(wf).read_scalar_unobserved(*range) : std::nullopt;
+  return word3 && cdna5_buffer_resource_type(*word3) != 0;
 }
 
 /// MUBUF/MTBUF SOFFSET accepts scalar registers and inline integer/float constants.
@@ -329,6 +369,26 @@ inline void gfx10_buffer_apply_swizzle(VectorMemState &d, uint32_t srd1, uint32_
   d.scratch_addr_base_offset = (base + soffset) % 4;
 }
 
+/// Address VGPRs selected by a buffer instruction. Read each register once for
+/// the active lanes before calculating their individual addresses.
+struct BufferAddressRegisters {
+  std::span<const uint32_t> indices;
+  std::span<const uint32_t> offsets;
+};
+
+inline BufferAddressRegisters read_buffer_address_registers(RegisterAccess &regs, uint32_t base,
+                                                            bool idxen, bool offen, uint64_t exec) {
+  BufferAddressRegisters result;
+  if (idxen || offen) {
+    const auto region = regs.read_vgpr_region(base, idxen && offen ? 2 : 1, exec);
+    if (idxen)
+      result.indices = region.lanes(0).value();
+    if (offen)
+      result.offsets = region.lanes(idxen ? 1 : 0).value();
+  }
+  return result;
+}
+
 /// @brief Compute per-lane addresses for MUBUF encoding.
 ///
 /// @details Populates d.per_lane_addr, d.lane_mask, d.exec_mask and, on GFX9/CDNA,
@@ -354,14 +414,12 @@ void mubuf_calculate_addresses(const MubufInst &inst, amdgpu::Wavefront &wf, Vec
   d.wg_id = wf.wg_id();
   d.wf_id = wf.wf_id();
   const uint32_t sb_sel = inst.srsrc * 4;
-  if (!buffer_resource_range_is_backed(wf, sb_sel)) {
+  const auto words = read_buffer_resource(wf, sb_sel);
+  if (!words) {
     reject_vector_memory_access(d);
     return;
   }
-  uint32_t srd0 = amdgpu::read_scalar_selector(wf, sb_sel);
-  uint32_t srd1 = amdgpu::read_scalar_selector(wf, sb_sel + 1);
-  uint32_t srd2 = amdgpu::read_scalar_selector(wf, sb_sel + 2);
-  uint32_t srd3 = amdgpu::read_scalar_selector(wf, sb_sel + 3);
+  const auto [srd0, srd1, srd2, srd3] = *words;
   if ((arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5) &&
       (srd3 >> 30) != 0) {
     // A resource type mismatch ignores the entire instruction, including load writeback.
@@ -430,24 +488,13 @@ void mubuf_calculate_addresses(const MubufInst &inst, amdgpu::Wavefront &wf, Vec
   else
     rdna_buffer_apply_swizzle(d, srd1, srd3, inst.idxen != 0, exec, base_addr, soffset_val);
   uint32_t vgpr_base = wf.vgpr_alloc().base + inst.vaddr;
-  std::optional<RegisterAccess::VgprReadRegion> vaddr_region;
-  if (inst.idxen || inst.offen) {
-    uint32_t reg_count = (inst.idxen && inst.offen) ? 2 : 1;
-    vaddr_region.emplace(regs.read_vgpr_region(vgpr_base, reg_count, exec));
-  }
+  const auto address_regs =
+      read_buffer_address_registers(regs, vgpr_base, inst.idxen, inst.offen, exec);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t index = 0;
-    uint32_t voffset = 0;
-    if (inst.idxen && inst.offen) {
-      index = vaddr_region->lane(0, lane);
-      voffset = vaddr_region->lane(1, lane);
-    } else if (inst.idxen) {
-      index = vaddr_region->lane(0, lane);
-    } else if (inst.offen) {
-      voffset = vaddr_region->lane(0, lane);
-    }
+    const uint32_t index = inst.idxen ? address_regs.indices[lane] : 0;
+    const uint32_t voffset = inst.offen ? address_regs.offsets[lane] : 0;
     uint32_t offset_part = buffer_offset_part(voffset, inst.offset);
     const auto rdna_addr = gfx10 ? gfx10_buffer_address(srd1, srd3, stride, inst.idxen != 0, index,
                                                         offset_part, soffset_val, lane)
@@ -524,14 +571,12 @@ void mtbuf_calculate_addresses(const MtbufInst &inst, amdgpu::Wavefront &wf, Vec
   d.wg_id = wf.wg_id();
   d.wf_id = wf.wf_id();
   const uint32_t sb_sel = inst.srsrc * 4;
-  if (!buffer_resource_range_is_backed(wf, sb_sel)) {
+  const auto words = read_buffer_resource(wf, sb_sel);
+  if (!words) {
     reject_vector_memory_access(d);
     return;
   }
-  uint32_t srd0 = amdgpu::read_scalar_selector(wf, sb_sel);
-  uint32_t srd1 = amdgpu::read_scalar_selector(wf, sb_sel + 1);
-  uint32_t srd2 = amdgpu::read_scalar_selector(wf, sb_sel + 2);
-  uint32_t srd3 = amdgpu::read_scalar_selector(wf, sb_sel + 3);
+  const auto [srd0, srd1, srd2, srd3] = *words;
   if ((arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5) &&
       (srd3 >> 30) != 0) {
     // A resource type mismatch ignores the entire instruction, including load writeback.
@@ -556,24 +601,13 @@ void mtbuf_calculate_addresses(const MtbufInst &inst, amdgpu::Wavefront &wf, Vec
   else
     rdna_buffer_apply_swizzle(d, srd1, srd3, inst.idxen != 0, exec, base_addr, soffset_val);
   uint32_t vgpr_base = wf.vgpr_alloc().base + inst.vaddr;
-  std::optional<RegisterAccess::VgprReadRegion> vaddr_region;
-  if (inst.idxen || inst.offen) {
-    uint32_t reg_count = (inst.idxen && inst.offen) ? 2 : 1;
-    vaddr_region.emplace(regs.read_vgpr_region(vgpr_base, reg_count, exec));
-  }
+  const auto address_regs =
+      read_buffer_address_registers(regs, vgpr_base, inst.idxen, inst.offen, exec);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t index = 0;
-    uint32_t voffset = 0;
-    if (inst.idxen && inst.offen) {
-      index = vaddr_region->lane(0, lane);
-      voffset = vaddr_region->lane(1, lane);
-    } else if (inst.idxen) {
-      index = vaddr_region->lane(0, lane);
-    } else if (inst.offen) {
-      voffset = vaddr_region->lane(0, lane);
-    }
+    const uint32_t index = inst.idxen ? address_regs.indices[lane] : 0;
+    const uint32_t voffset = inst.offen ? address_regs.offsets[lane] : 0;
     uint32_t offset_part = buffer_offset_part(voffset, inst.offset);
     const auto rdna_addr = gfx10 ? gfx10_buffer_address(srd1, srd3, stride, inst.idxen != 0, index,
                                                         offset_part, soffset_val, lane)

@@ -209,11 +209,22 @@ constexpr uint32_t RJ_ARITH_ALU_HIGH_B = 1U << 10;
 constexpr uint32_t RJ_ARITH_ALU_HIGH_C = 1U << 11;
 constexpr uint32_t RJ_ARITH_ALU_HIGH_D = 1U << 12;
 
+// gfx942/gfx950 conversions to FP16: use inherited SDWA arithmetic, scaling the
+// exact value before rounding. Source selection and destination byte placement
+// remain separate from this arithmetic control.
+constexpr uint32_t RJ_ARITH_CVT_SDWA = 1U << 16;
+
 // Mixed FMA source formats: unset means FP32; set means FP16 in the half
 // selected by RJ_ARITH_ALU_HIGH_A/B/C. Half selectors are ignored for FP32 sources.
 constexpr uint32_t RJ_ARITH_MIX_F16_A = 1U << 13;
 constexpr uint32_t RJ_ARITH_MIX_F16_B = 1U << 14;
 constexpr uint32_t RJ_ARITH_MIX_F16_C = 1U << 15;
+
+// Mixed BF16/FP32 FMA uses the same format-selector positions as mixed FP16.
+// These names apply to BF16 entry points; they select BF16 rather than FP32.
+constexpr uint32_t RJ_ARITH_MIX_BF16_A = 1U << 13;
+constexpr uint32_t RJ_ARITH_MIX_BF16_B = 1U << 14;
+constexpr uint32_t RJ_ARITH_MIX_BF16_C = 1U << 15;
 
 // Returns CPU capability flags for features usable on this machine, accounting
 // for CPU and operating-system support. All non-CPU flag bits are zero.

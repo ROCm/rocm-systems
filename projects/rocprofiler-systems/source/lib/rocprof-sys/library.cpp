@@ -11,6 +11,8 @@
 //  above should always be included first
 //
 #include "api.hpp"
+#include "backends/rocprofiler_sdk/backend.hpp"
+#include "backends/rocprofiler_sdk/wrapper.hpp"
 #include "common/clocks.hpp"
 #include "common/defines.h"
 #include "common/delimit.hpp"
@@ -31,6 +33,7 @@
 #include "core/control/waitable_clocks/steady.hpp"
 #include "core/cpu.hpp"
 #include "core/gpu.hpp"
+#include "core/library_checker.hpp"
 #include "core/locking.hpp"
 #include "core/node_info.hpp"
 #include "core/output/output_summary.hpp"
@@ -590,6 +593,10 @@ rocprofsys_init_library_hidden()
                      "or configure permissive mode with 'sudo setenforce 0'. Aborting.");
         std::exit(EXIT_FAILURE);
     }
+
+    library_checker::check_profiler_hub_version_mismatch();
+    library_checker::check_rocprofiler_sdk_version_mismatch<
+        backends::rocprofiler_sdk::backend<rocprofiler_sdk::wrapper>>();
 
     if(_debug_init)
     {

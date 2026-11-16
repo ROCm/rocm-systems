@@ -105,9 +105,12 @@ if(CMAKE_SCRIPT_MODE_FILE)
                 FATAL_ERROR "An error occurred during the collection of Python tests.")
         endif()
 
-        # Convert the collected output into a list of lines.
+        # Keep only the lines that are pytest test identifiers. Other output lines, for
+        # example log messages printed by libraries that the tests import, can contain
+        # unbalanced square brackets. CMake then no longer splits the list at ";" and the
+        # remaining lines end up in one element, which produces a garbled test name.
         string(REPLACE [[;]] [[\;]] _output_lines "${_output_lines}")
-        string(REPLACE "\n" ";" _output_lines "${_output_lines}")
+        string(REGEX MATCHALL "[^\n]*\\.py(::[^\n]+)+" _output_lines "${_output_lines}")
 
         # Regex pattern to identify pytest test identifiers.
         set(test_pattern "([^:]+)\.py(::([^:]+))?::([^:]+)")

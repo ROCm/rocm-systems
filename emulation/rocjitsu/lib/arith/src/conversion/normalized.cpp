@@ -51,11 +51,12 @@ uint16_t normalized(uint32_t raw, uint32_t mode, bool flush_input) {
 // changing outputs.
 template <bool Unsigned, rocjitsu::arith::NormalizedForm Form>
 int convert(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
-            const uint32_t *const *a, const uint32_t *const *b) {
+            const uint32_t *const *a, const uint32_t *const *b, bool preserve_half = true) {
   if (mode >> 32) {
     return rocjitsu::arith::execute_dpp(
         flags, exec_mask, mode, a, [&](uint32_t exec_mask, const uint32_t *const *source) {
-          return convert<Unsigned, Form>(flags, exec_mask, uint32_t(mode), d, source, b);
+          return convert<Unsigned, Form>(flags, exec_mask, uint32_t(mode), d, source, b,
+                                         preserve_half);
         });
   }
   constexpr bool unary = Form == rocjitsu::arith::NormalizedForm::Half;
@@ -82,15 +83,15 @@ int convert(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *
   const bool flush_input = half && (flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS);
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
   if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
-    rocjitsu::arith::normalized_x86_64_v4<Unsigned, Form>(exec_mask, mode, d[0], a[0],
-                                                          unary ? nullptr : b[0], flush_input);
+    rocjitsu::arith::normalized_x86_64_v4<Unsigned, Form>(
+        exec_mask, mode, d[0], a[0], unary ? nullptr : b[0], flush_input, preserve_half);
     return RJ_ARITH_SUCCESS;
   }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
-    rocjitsu::arith::normalized_x86_64_v3<Unsigned, Form>(exec_mask, mode, d[0], a[0],
-                                                          unary ? nullptr : b[0], flush_input);
+    rocjitsu::arith::normalized_x86_64_v3<Unsigned, Form>(
+        exec_mask, mode, d[0], a[0], unary ? nullptr : b[0], flush_input, preserve_half);
     return RJ_ARITH_SUCCESS;
   }
 #endif
@@ -100,7 +101,8 @@ int convert(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *
   for (int lane = 0; lane < 32; ++lane) {
     uint32_t low = normalized<Unsigned, half>(a[0][lane], mode, flush_input);
     if constexpr (unary) {
-      result[lane] = (d[0][lane] & ~(65535u << shift)) | (low << shift);
+      result[lane] =
+          preserve_half || shift ? (d[0][lane] & ~(65535u << shift)) | (low << shift) : low;
     } else {
       result[lane] =
           low | (uint32_t(normalized<Unsigned, half>(b[0][lane], mode >> 1, flush_input)) << 16);
@@ -118,9 +120,10 @@ int convert(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *
 // outputs.
 template <bool Unsigned, rocjitsu::arith::NormalizedForm Form>
 int convert_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *d,
-                   const uint32_t *const *a, const uint32_t *const *b) {
+                   const uint32_t *const *a, const uint32_t *const *b, bool preserve_half = true) {
   // Validate before either Wave64 half can modify outputs, even when EXEC is empty.
-  if (int error = convert<Unsigned, Form>(flags, 0, mode, nullptr, nullptr, nullptr)) {
+  if (int error =
+          convert<Unsigned, Form>(flags, 0, mode, nullptr, nullptr, nullptr, preserve_half)) {
     return error;
   }
   if (!exec_mask) {
@@ -134,7 +137,8 @@ int convert_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *
       source_b = b[0] + half * 32;
     }
     if (int error = convert<Unsigned, Form>(flags, uint32_t(exec_mask >> (half * 32)),
-                                            half_instruction_flags, &dest, &source_a, &source_b)) {
+                                            half_instruction_flags, &dest, &source_a, &source_b,
+                                            preserve_half)) {
       return error;
     }
   }
@@ -381,4 +385,52 @@ int rj_arith_v_cvt_pk_norm_u16_f16_w64(uint64_t flags, uint64_t exec_mask, uint6
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
   return rj_arith_v_cvt_pk_norm_u16_f16_w64_gfx12(flags, exec_mask, mode, d, a, b, nullptr);
+}
+
+// Convert with gfx942/gfx950 low-half zero-extension and high-half preservation.
+int rj_arith_v_cvt_norm_i16_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask,
+                                           uint64_t instruction_flags, uint32_t *const *d,
+                                           const uint32_t *const *a) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return convert<false, rocjitsu::arith::NormalizedForm::Half>(flags, exec_mask, instruction_flags,
+                                                               d, a, nullptr, false);
+}
+
+// Convert with gfx942/gfx950 low-half zero-extension and high-half preservation.
+int rj_arith_v_cvt_norm_i16_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+                                           uint64_t instruction_flags, uint32_t *const *d,
+                                           const uint32_t *const *a) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return convert_wave64<false, rocjitsu::arith::NormalizedForm::Half>(
+      flags, exec_mask, instruction_flags, d, a, nullptr, false);
+}
+
+// Convert with gfx942/gfx950 low-half zero-extension and high-half preservation.
+int rj_arith_v_cvt_norm_u16_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask,
+                                           uint64_t instruction_flags, uint32_t *const *d,
+                                           const uint32_t *const *a) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return convert<true, rocjitsu::arith::NormalizedForm::Half>(flags, exec_mask, instruction_flags,
+                                                              d, a, nullptr, false);
+}
+
+// Convert with gfx942/gfx950 low-half zero-extension and high-half preservation.
+int rj_arith_v_cvt_norm_u16_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+                                           uint64_t instruction_flags, uint32_t *const *d,
+                                           const uint32_t *const *a) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return convert_wave64<true, rocjitsu::arith::NormalizedForm::Half>(
+      flags, exec_mask, instruction_flags, d, a, nullptr, false);
 }

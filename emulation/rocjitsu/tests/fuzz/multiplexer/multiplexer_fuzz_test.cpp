@@ -46,7 +46,11 @@ uint64_t focused_work_units(FuzzTarget target, std::span<const uint8_t> payload)
     return stats.executed;
   }
   case FuzzTarget::CodeObject: {
-    const code_object_fuzz::RunStats stats = code_object_fuzz::run_input(payload);
+    const util::FailureOr<code_object_fuzz::RunStats> result = code_object_fuzz::run_input(payload);
+    EXPECT_TRUE(result.succeeded());
+    if (result.failed())
+      return 0;
+    const code_object_fuzz::RunStats &stats = result.value();
     return stats.code_objects_valid + stats.executables_valid;
   }
   case FuzzTarget::ConcurrentDispatch:

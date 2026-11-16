@@ -81,7 +81,10 @@ pub extern "C" fn hsa_ven_amd_pcs_iterate_configuration(
                 },
                 minimum_interval,
                 maximum_interval,
-                flags: configuration.flags,
+                flags: match configuration.restriction {
+                    rocddi::device::gpu::profiling::PcSamplingIntervalRestriction::Any => 0,
+                    rocddi::device::gpu::profiling::PcSamplingIntervalRestriction::PowerOfTwo => 1,
+                },
             };
             // SAFETY: The callback is synchronous and the record stays live
             // through its return. The caller retains callback_data.

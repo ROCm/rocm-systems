@@ -106,6 +106,9 @@ __global__ void TeamReduceScatterWaveTest(int loop, int skip,
     __syncthreads();
   }
 
+  uint8_t *tdm_lds = reinterpret_cast<uint8_t*>(&ctx_array[num_waves_per_wg]);
+  rocshmem_set_lds_stage(tdm_lds, rocshmem_query_lds_stage_bytes());
+
   int n_pes = rocshmem_ctx_n_pes(ctx_array[wf_id]);
 
   // Each wave uses its own buffer slice
@@ -195,7 +198,8 @@ void TeamReduceScatterWaveTester<T1, T2>::launchKernel(dim3 gridSize,
                                                         dim3 blockSize,
                                                         int loop,
                                                         uint64_t size) {
-  size_t shared_bytes = num_warps * sizeof(rocshmem_ctx_t);
+  size_t shared_bytes = num_warps * sizeof(rocshmem_ctx_t) +
+                        rocshmem_query_lds_stage_bytes();
 
   hipLaunchKernelGGL(HIP_KERNEL_NAME(TeamReduceScatterWaveTest<T1, T2>),
                      gridSize, blockSize, shared_bytes, stream, loop, args.skip,
