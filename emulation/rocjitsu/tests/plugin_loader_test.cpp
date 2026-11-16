@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/plugins/plugin_loader.h"
 #include "rocjitsu/vm/plugins/plugin_sink.h"
 #include "rocjitsu/vm/rj_vm.h"
@@ -321,6 +322,69 @@ TEST_F(PluginLoaderTest, RaceModuleUsesCoreRegisterChecking) {
   EXPECT_FALSE(group.value()->observes_scalar_register_writes());
   EXPECT_TRUE(group.value()->observes_memory_routing());
   EXPECT_TRUE(group.value()->observes_tensor_dma_issue());
+}
+
+TEST_F(PluginLoaderTest, CApiRequiresEffectiveWaitCheckingForRace) {
+  struct Case {
+    const char *global;
+    const char *second_cu;
+    bool accepted;
+  };
+  const Case cases[] = {{"", "warn", true},    {"on", "warn", true}, {"all", "warn", true},
+                        {"on", "off", true},   {"all", "off", true}, {"off", "warn", false},
+                        {"off", "off", false}, {"", "off", false}};
+  for (const Case &test : cases) {
+    SCOPED_TRACE(test.global);
+    SCOPED_TRACE(test.second_cu);
+    const std::string global =
+        *test.global ? std::string(R"("wait_checking":")") + test.global + R"(",)" : "";
+    const std::string config = "{" + global + R"(
+        "max_ticks":100,"num_threads":1,"cpu_dispatch_threads":1,
+        "vm":{"arch":"cdna5","gpu":{"pci":{"vram_aperture_bytes":2097152}}},
+        "topology":{"root":{"name":"soc","type":"soc","children":[
+          {"name":"vram","type":"gpu_memory"},
+          {"name":"xcd0","type":"xcd","children":[
+            {"name":"l2","type":"l2_cache"},
+            {"name":"cp","type":"command_processor"},
+            {"name":"se0","type":"shader_engine","children":[
+              {"name":"cu0","type":"compute_unit"},
+              {"name":"cu1","type":"compute_unit","config":[
+                {"key":"memory_wait_diagnostics","value":")" +
+                               test.second_cu + R"("}]}]}]}]}}})";
+    rj_vm_t *raw_vm = nullptr;
+    ASSERT_EQ(rj_vm_create_from_string(config.c_str(), RJ_VM_MODE_DEFAULT, &raw_vm),
+              ROCJITSU_STATUS_SUCCESS);
+    std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(raw_vm, rj_vm_destroy);
+    unsigned cu_count = 0;
+    vm->soc->for_each_cu([&](const rocjitsu::amdgpu::ComputeUnitCore *cu) {
+      ++cu_count;
+      EXPECT_EQ(cu->config().xcnt_checks_enabled(), std::string_view(test.global) == "all");
+    });
+    ASSERT_EQ(cu_count, 2u);
+
+    // Plugins without register findings remain usable when checking is off.
+    ASSERT_EQ(rj_vm_load_plugins(vm.get(), R"({"plugins":{"good":{}}})", PLUGIN_LOADER_FIXTURE_DIR),
+              ROCJITSU_STATUS_SUCCESS);
+    const auto *installed = &vm->soc->plugin_group();
+    const std::string before = trace();
+    // Separate plugin JSON cannot override the VM's effective CU settings.
+    const char *race = R"({"wait_checking":"on","plugins":{"race":{}}})";
+    testing::internal::CaptureStderr();
+    const auto status = rj_vm_load_plugins(vm.get(), race, PLUGIN_LOADER_RACE_DIR);
+    const std::string diagnostic = testing::internal::GetCapturedStderr();
+    EXPECT_TRUE(vm->plugin_group_active.load());
+    if (test.accepted) {
+      EXPECT_EQ(status, ROCJITSU_STATUS_SUCCESS) << diagnostic;
+      EXPECT_TRUE(vm->soc->plugin_group().observes_register_hazards());
+    } else {
+      EXPECT_EQ(status, ROCJITSU_STATUS_INVALID_ARGUMENT);
+      EXPECT_NE(diagnostic.find("require memory_wait_diagnostics=warn on every CU"),
+                std::string::npos)
+          << diagnostic;
+      EXPECT_EQ(&vm->soc->plugin_group(), installed);
+      EXPECT_EQ(trace(), before);
+    }
+  }
 }
 
 TEST_F(PluginLoaderTest, CApiEmptyInputRemovesInstalledPlugins) {

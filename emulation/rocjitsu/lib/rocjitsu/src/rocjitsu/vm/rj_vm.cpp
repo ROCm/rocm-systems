@@ -8,6 +8,7 @@
 #include "rocjitsu/kmd/linux/host_mapping_lock.h"
 #include "rocjitsu/kmd/linux/memory_backing.h"
 #include "rocjitsu/kmd/linux/simulated_kfd.h"
+#include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/partitioning.h"
 #include "rocjitsu/vm/gpu_info.h"
 #include "rocjitsu/vm/plugins/plugin_loader.h"
@@ -292,6 +293,20 @@ rj_status_t rj_vm_load_plugins(rj_vm_t *vm, const char *config_json, const char 
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   }
   std::shared_ptr<ExecutionPluginGroup> group = std::move(configured).value();
+  if (group->observes_register_hazards()) {
+    bool checking_disabled = false;
+    vm->soc->for_each_cu([&](const amdgpu::ComputeUnitCore *cu) {
+      checking_disabled |=
+          cu->config().memory_wait_diagnostics == amdgpu::MemoryWaitDiagnostics::Off;
+    });
+    if (checking_disabled) {
+      util::Logger::warn(
+          "rj_vm_load_plugins failed: register-hazard plugins (including race) require "
+          "memory_wait_diagnostics=warn on every CU; use --wait-checking=on or "
+          "--wait-checking=all");
+      return ROCJITSU_STATUS_INVALID_ARGUMENT;
+    }
+  }
   // rj_vm_load_plugins() is a pre-run operation, so replacing and initializing
   // the group cannot overlap simulation callbacks.
   shutdown_plugin_group(vm);

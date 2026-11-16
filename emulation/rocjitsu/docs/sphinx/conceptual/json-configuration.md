@@ -80,10 +80,9 @@ for table examples and `rocjitsu --thread-budget-table`.
 
 Ordinary memory wait warnings are enabled by default; gfx1250 XCNT replay-source
 checks are off. Use `rocjitsu --config <file> --wait-checking=off -- <command>`
-to disable core wait warnings and XCNT checking. Ordinary register tracking remains
-active for register-hazard observers: the race detector still emits `RACE` records.
-To disable that tracking and its overhead as well, remove all register-hazard
-observers, including the race detector, from the plugin list.
+to disable core wait warnings and XCNT checking when no register-hazard plugins
+are enabled. The race plugin requires ordinary wait checking; loading it with
+`off`, including an effective per-CU setting of `off`, is an error.
 `--wait-checking=on` enables core ordinary warnings only; `--wait-checking=all` also
 enables XCNT. The flag overrides JSON settings on every CU and GPU for the launch,
 leaving the source file unchanged. Omitting it preserves JSON settings and defaults.

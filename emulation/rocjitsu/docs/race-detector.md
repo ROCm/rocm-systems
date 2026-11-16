@@ -162,9 +162,10 @@ $BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- ./my_app
 
 ### Core-backed register reports
 
-Enabling `"race": {}` requests the core's issue-time register findings, including
-when stderr warnings are off. The core checks each instruction once for both
-warnings and plugin reports; the plugin does not subscribe to register-access
+Enabling `"race": {}` requests the core's issue-time register findings and requires
+ordinary wait checking. Loading the plugin with `--wait-checking=off`, or an
+effective per-CU `memory_wait_diagnostics=off`, is an error. The core checks each
+instruction once for both warnings and plugin reports; the plugin does not subscribe to register-access
 hooks or maintain another set of register dependencies. XCNT replay-source
 findings require XCNT checking to be explicitly enabled. See
 [memory wait diagnostics](memory-wait-diagnostics.md) for target coverage,

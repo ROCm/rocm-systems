@@ -443,7 +443,7 @@ Ordinary memory wait diagnostics are enabled by default; gfx1250 XCNT replay-sou
 checks are off. Compute units warn when an instruction reads or overwrites a pending
 memory result without a sufficient wait. Execution continues with eagerly computed values.
 
-To disable core wait warnings and XCNT checking for a launch:
+To disable core wait warnings and XCNT checking for a launch without the race plugin:
 
 ```sh
 rocjitsu --config /path/to/config.json --wait-checking=off -- <command>
@@ -457,10 +457,10 @@ rocjitsu --config /path/to/config.json --wait-checking=off -- <command>
 | `off` | Disabled | Disabled |
 | `all` | Enabled | Enabled |
 
-Ordinary register tracking also serves plugins that observe register hazards. With
-the race detector enabled, `off` silences the core warnings but the plugin still
-emits `RACE` records. To disable ordinary tracking and its overhead as well, remove
-all register-hazard observers, including the race detector, from the plugin list.
+The race plugin requires ordinary wait checking. Loading it with `off` is an error;
+use `on` (the default) or `all`. This requirement applies to any plugin that observes
+register hazards. Plugin loading checks the VM's effective settings, including
+per-CU configuration, before replacing any installed plugins. XCNT remains optional.
 
 The flag overrides both settings on every CU and GPU for this launch. It uses the
 same config-copy mechanism as `--cpu-thread-budget`, leaving the source file unchanged.

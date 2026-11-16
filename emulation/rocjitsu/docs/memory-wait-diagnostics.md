@@ -31,8 +31,8 @@ register checker.
 Registers in diagnostics use the scoreboard's physical numbering. On targets
 with an accumulator bank, `v256+n` names `aN` (for example, `v288` is `a32`).
 
-If warnings appear incorrect or checking slows a workload, disable the ordinary
-and XCNT warning settings for a launch without editing the config or rebuilding:
+For a launch without the race plugin, disable the ordinary and XCNT warning
+settings without editing the config or rebuilding:
 
 ```sh
 rocjitsu --config /path/to/config.json --wait-checking=off -- <command>
@@ -45,9 +45,10 @@ Use `--wait-checking=on` for ordinary checks only, or `--wait-checking=all` to i
 gfx1250 XCNT. These modes override both per-CU settings on every GPU. Omitting the
 flag preserves JSON settings and defaults. See [configuration](configuration.md#memory-wait-diagnostics)
 for persistent global overrides and launch-mode restrictions.
-An explicitly configured register-finding observer still requests ordinary
-register checking when warnings are off. To disable that checking too, remove
-register-finding observers, including the race plugin.
+The race plugin requires ordinary wait checking: loading it with `off` is an error.
+This also applies to other plugins that observe register findings. Plugin loading
+checks each CU's effective settings, so a per-CU `memory_wait_diagnostics=off`
+also rejects these plugins unless overridden by top-level `on` or `all`.
 
 Without a global override, memory-result diagnostics default to
 `memory_wait_diagnostics=warn`. To disable them per CU, add this entry to each
@@ -82,7 +83,9 @@ The accepted values are `warn` and `off`; invalid values reject the configuratio
 This setting has no effect on other architectures. It controls diagnostics, not
 hardware XNACK support. A global `wait_checking` override takes precedence over
 both per-CU keys. Without one, setting `memory_wait_diagnostics=off` leaves an
-explicitly enabled XCNT check active. Use `--wait-checking=off` to disable both.
+explicitly enabled XCNT check active. Use `--wait-checking=off` to disable both
+when no register-finding plugin is enabled. Use `--wait-checking=on` to disable
+XCNT while retaining ordinary checking and the race plugin.
 
 VMEM coverage is qualified for `MODE.REPLAY_MODE=1` (bit 25), the multi-group mode
 selected by LLVM at kernel entry. VMEM replay sources in single-group mode are
@@ -161,9 +164,8 @@ B only from lanes 0–15. The race plugin also reports this known false positive
 the correction is in [PR #15704](https://github.com/ROCm/rocm-systems/pull/15704).
 
 These are known limits, not an exhaustive list. Investigate warnings against the
-target's ordering rules; use `--wait-checking=off` to suppress both warning classes
-when needed. The race plugin reports these same register findings and separately
-checks LDS ordering and communication between waves. Its
+target's ordering rules. The race plugin reports these same register findings and
+separately checks LDS ordering and communication between waves. Its
 [LDS coverage limits](race-detector.md#limitations) are independent of register
 readiness.
 
