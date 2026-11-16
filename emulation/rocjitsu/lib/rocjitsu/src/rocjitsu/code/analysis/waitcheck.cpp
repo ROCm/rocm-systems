@@ -686,6 +686,7 @@ struct Analyzer : private WaitcheckStateOps {
 
     prepare_cfg_path_filter(analysis_blocks, cfg_predecessors, cfg_successors, arch);
     cfg_outputs_ = out;
+    relative_entry_proven_ = current_kernel_ && !missing_successor;
     for (size_t i = 0; i < analysis_blocks.size(); ++i) {
       current_cfg_view_index_ = i;
       current_in_callee_context_ = !std::get<1>(analysis_node_keys[i]).empty();
@@ -2252,9 +2253,6 @@ private:
         return true;
       }
     }
-    if (operand_index == 0 && starts_with(mnemonic, "scratch_") && op.encoding_value() == 0)
-      return true;
-
     if (operand_index == 0 && starts_with(mnemonic, "s_buffer_")) {
       if (auto ref = op.to_register_ref(); ref && ref->cls == RegClass::SGPR) {
         ref->width = 4;
@@ -2298,7 +2296,8 @@ private:
 
     std::optional<RegisterRef> dst;
     ScalarOffsetValues result;
-    if (inst.mnemonic() == "s_mov_b32") {
+    const bool add_literal = inst.mnemonic() == "s_add_i32" || inst.mnemonic() == "s_add_u32";
+    if (inst.mnemonic() == "s_mov_b32" || add_literal) {
       dst = register_operand(*inst.dst_operand(0), arch);
       const Operand &src = *inst.src_operand(0);
       if (const auto value = src.const_value()) {
@@ -2311,6 +2310,14 @@ private:
           if (known != state.sgpr_offsets.end())
             result = known->second;
         }
+      }
+      if (add_literal) {
+        const auto increment = inst.src_operand(1)->const_value();
+        if (!increment)
+          result = {};
+        else
+          for (unsigned n = 0; n < result.count; ++n)
+            result.literals[n] += static_cast<uint32_t>(*increment);
       }
     }
     if (writes_m0)
@@ -3894,6 +3901,51 @@ private:
            starts_with(mnemonic, "s_addc_") || starts_with(mnemonic, "s_subb_");
   }
 
+  // Loop backedges may lose an induction variable's precise value after the
+  // load has already drained. Recheck MOVREL on the incoming edges on which
+  // this specific load is still pending. Unknown offsets retain all aliases.
+  bool relative_load_disjoint_on_incoming_edges(const PendingEvent &event,
+                                                const Instruction &consumer,
+                                                rj_code_arch_t arch) {
+    if (!current_cfg_view_index_ || cfg_outputs_.empty() || current_in_callee_context_ ||
+        !relative_entry_proven_)
+      return false;
+    const auto &block = cfg_views_[*current_cfg_view_index_];
+    if (block.predecessors.size() < 2 || block.predecessors.size() > 8 ||
+        block.instructions.size() > 256 || (event.section_offset >= block.block->start_offset() &&
+         event.section_offset < block.block->end_offset()))
+      return false;
+    const auto position = std::ranges::find(block.instructions, &consumer,
+                                            &CfgInstructionView::instruction);
+    if (position == block.instructions.end())
+      return false;
+
+    bool reached = false;
+    for (const auto predecessor : block.predecessors) {
+      const auto &output = cfg_outputs_[predecessor];
+      const auto &pending = output.pending[counter_index(event.counter)];
+      if (!std::ranges::any_of(pending, [&](const PendingEvent &candidate) {
+            return same_event_identity(candidate, event);
+          }))
+        continue;
+      reached = true;
+      PendingState incoming = output;
+      for (auto it = block.instructions.begin(); it != position; ++it)
+        analyze_instruction(incoming, *it->instruction, event.section_name, it->section_offset,
+                            it->section_offset, arch, false);
+      if (incoming.m0.count == 0)
+        return false;
+      const auto operands = inst_def_use_for_waitcheck(consumer, incoming.vgpr_msb, arch,
+                                                       wavefront_size_, incoming.m0);
+      if ((event.check_uses && first_dependency_intersection(event, consumer, operands,
+                               WaitcheckAccessKind::Use, arch, incoming.m0)) ||
+          (event.check_defs && first_dependency_intersection(event, consumer, operands,
+                               WaitcheckAccessKind::Def, arch, incoming.m0)))
+        return false;
+    }
+    return reached;
+  }
+
   template <typename Visitor>
   void visit_dependencies(const PendingState &state, const Instruction &inst, const InstDefUse &du,
                           std::span<const ClassifiedEvent> current_events, rj_code_arch_t arch,
@@ -3918,6 +3970,10 @@ private:
                                               state.m0);
           access = WaitcheckAccessKind::Def;
         }
+        if (reg && reg->cls == RegClass::VGPR && state.m0.count == 0 &&
+            event.counter == WaitCounterKind::Load && inst.mnemonic().starts_with("v_movrel") &&
+            relative_load_disjoint_on_incoming_edges(event, inst, arch))
+          continue;
         if (!reg && event.special_reg) {
           if (event.check_uses && instruction_uses_special(inst, *event.special_reg)) {
             reg = event.special_reg;
@@ -4270,6 +4326,12 @@ private:
     if (instruction_waits_for_valu_sgpr_writes(inst))
       clear_valu_sgpr_hazards(state);
 
+    // SOPP VCC branches read the VALU result before either successor issues.
+    if (mask_branch_class(inst.mnemonic()) == RegClass::VCC) {
+      clear_valu_vcc_hazard(state);
+      return;
+    }
+
     const bool is_salu = is_scalar_alu(inst);
     const bool is_valu = is_vector_alu(inst);
     if (!is_salu && !is_valu)
@@ -4512,6 +4574,7 @@ private:
   std::vector<CfgBlockView> cfg_views_;
   std::optional<size_t> current_cfg_view_index_;
   std::span<const PendingState> cfg_outputs_;
+  bool relative_entry_proven_ = false;
   bool current_in_callee_context_ = false;
   std::optional<uint16_t> current_call_return_sreg_;
   std::map<std::tuple<uint64_t, uint64_t, WaitCounterKind, bool, bool>, bool> feasible_path_cache_;

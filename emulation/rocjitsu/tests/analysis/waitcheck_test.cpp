@@ -5346,6 +5346,26 @@ TEST(WaitcheckTest, SaluVccReadClearsValuVccHazard) {
   EXPECT_TRUE(report.diagnostics.empty());
 }
 
+TEST(WaitcheckTest, Gfx1201ScalarVccBranchesClearValuVccBeforeIndirectTransfer) {
+  for (const uint32_t branch : {33u, 34u, 35u, 36u, 37u, 38u}) {
+    SCOPED_TRACE(branch);
+    std::vector<uint32_t> program;
+    append_inst(program, v_cndmask_b32_e32(0, 128, 1));
+    append_inst(program, v_cmp_gt_u32_e32(5, 12));
+    append_inst(program, sopp(branch, 0));
+    program.push_back(build_s_setpc_b64(8, ROCJITSU_CODE_ARCH_RDNA4).value());
+    const auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4);
+    ASSERT_TRUE(report.supported) << report.analysis_error;
+    if (branch == 35u || branch == 36u) {
+      EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+    } else {
+      ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+      EXPECT_EQ(report.diagnostics.front().access, WaitcheckAccessKind::ControlTransfer);
+      EXPECT_NE(report.diagnostics.front().message.find("depctr_va_vcc(0)"), std::string::npos);
+    }
+  }
+}
+
 // Typed operand classification must retain both selector-encoded halves and
 // the fieldless VCC operands of VALU instructions, without confusing SGPRs.
 TEST(WaitcheckTest, VccSelectorHalvesPreserveSaluReadAndWriteHazards) {
@@ -7451,6 +7471,57 @@ TEST(WaitcheckTest, ObjectAnalysisReportsPathThatSkipsWaitAtJoin) {
   EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Load);
   EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Use);
   EXPECT_EQ(report.diagnostics[0].reg.index, 0u);
+}
+
+TEST(WaitcheckTest, ScratchVectorAddressZeroDependsOnEnableBit) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
+                    ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    const bool legacy = arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5;
+    for (bool enabled : {false, true}) {
+      SCOPED_TRACE(arch);
+      SCOPED_TRACE(enabled);
+      std::vector<uint32_t> words =
+          legacy ? std::vector<uint32_t>{0xdc510000, 0x007c0000, 0xdc550010,
+                                         enabled ? 0x10fc0000u : 0x107c0000u}
+                 : std::vector<uint32_t>{0xed05007c, 0x00000000, 0x00000000, 0xed05007c,
+                                         enabled ? 0x00020010u : 0x00000010u, 0x00001000};
+      const auto result = analyze_waitcnts(words, arch);
+      ASSERT_TRUE(result.supported) << result.analysis_error;
+      EXPECT_EQ(std::ranges::any_of(result.diagnostics, [](const WaitcheckDiagnostic &diagnostic) {
+                  return diagnostic.access == WaitcheckAccessKind::Use &&
+                         diagnostic.reg == (RegisterRef{RegClass::VGPR, 0, 1});
+                }), enabled) << diagnostic_summary(result);
+    }
+  }
+}
+
+TEST(WaitcheckTest, RelativeVgprUseRespectsPendingLoadOnLoopEntry) {
+  for (const bool drained : {false, true}) {
+    for (const bool known_offset : {false, true}) {
+      SCOPED_TRACE(drained);
+      SCOPED_TRACE(known_offset);
+      std::vector<uint32_t> program{
+          known_offset ? 0xbe810083u : 0xbe810002u, // s_mov_b32 s1, 3 or s2
+          0xdc520000u, 0x047c0000u,                // global_load_b32 v4, v[0:1], off
+          0xbfa00002u,                             // s_branch to the loop header
+          0x81018401u,                             // s_add_i32 s1, s1, 4
+          0xbfa00000u,                             // s_branch to the loop header
+          0x817dc301u,                             // s_add_i32 m0, s1, -3
+          0x7e0e8700u,                             // v_movrels_b32_e32 v7, v0
+          drained ? 0xbf8903f7u : 0xbf800000u,     // s_waitcnt vmcnt(0) or s_nop 0
+          0xbfa2fffau,                             // s_cbranch_scc1 to the backedge
+          0xbfb00000u,                             // s_endpgm
+      };
+      const auto image = rocjitsu::waitcheck_test::make_gfx_code_object(
+          program, EF_AMDGPU_MACH_AMDGCN_GFX1100, true);
+      AmdGpuCodeObject object(image.data(), image.size());
+      const auto result = analyze_waitcnts(object, ROCJITSU_CODE_ARCH_RDNA3);
+      ASSERT_TRUE(result.supported) << result.analysis_error;
+      EXPECT_EQ(std::ranges::any_of(result.diagnostics, [](const WaitcheckDiagnostic &diagnostic) {
+                  return diagnostic.instruction.starts_with("v_movrels");
+                }), !drained || !known_offset) << diagnostic_summary(result);
+    }
+  }
 }
 
 TEST(WaitcheckTest, ScalarMemoryProtectsEachVccDwordAndWholeWaveMaskUses) {
