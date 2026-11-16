@@ -53,6 +53,9 @@ using dda::common::ddaBankSize;
 using dda::common::ddaLL128ArSlotWords;
 using dda::common::ddaLL128ArTwoShotSlotWords;
 using dda::common::ddaLL128Slices;
+using dda::common::ddaLL128SlicesOf;
+using dda::common::kDdaLL128FlagBytesNarrow;
+using dda::common::kDdaLL128FlagBytesWide;
 using dda::common::kDdaLL128Warp;
 using dda::common::kDdaLL128WireWordsPerSlice;
 
@@ -262,12 +265,29 @@ static DdaArLL128Kernel<T> ddaArLL128TwoShotKernel(int nRanks, int wire) {
 // Smallest message the peer-split takes: below it the tiers it replaces are faster.
 constexpr size_t kDdaArLL128SplitMinBytes = 2 * 1024 * 1024;
 
-// Peer-split: a warp per (slice, peer) unit within `bound`, and no more blocks than slices (a block owns whole slices).
-static std::pair<dim3, dim3> ddaArLL128SplitGrid(const ncclComm* comm, size_t bytes, rcclDdaLaunchCap bound) {
+// Split launches whose 8 B flag grid has at most this many blocks keep the 8 B flag: the 4 B flag does not pay there.
+constexpr unsigned kDdaArSplitSmallGridBlocks = 8;
+
+// Whether a split launch on `blocks` blocks is a small grid.
+static bool ddaArSplitSmallGrid(unsigned blocks) {
+  return blocks <= kDdaArSplitSmallGridBlocks;
+}
+
+// Peer-split grid in `bound`: a warp per (slice, peer) unit, whole slices a block, and the flag bytes.
+// Ranks must agree on it: it sets the wire format.
+static std::pair<dim3, dim3> ddaArLL128SplitGrid(const ncclComm* comm, size_t bytes, rcclDdaLaunchCap bound,
+                                                 int* flagBytes = nullptr) {
   const size_t n = (size_t)std::max(comm->nRanks, 2);
   const size_t slices = ddaLL128Slices(bytes / n);
   auto geom = ddaArFabricLLGrid(comm, slices * (n - 1), kDdaArLL128Threads, kDdaLL128Warp, bound);
   geom.first.x = (unsigned)std::min<size_t>(geom.first.x, slices);
+  const bool narrow = !ddaArSplitSmallGrid(geom.first.x);
+  if (narrow) {
+    geom.first.x = (unsigned)std::min<size_t>(geom.first.x, ddaLL128SlicesOf<kDdaLL128FlagBytesNarrow>(bytes / n));
+  }
+  if (flagBytes != nullptr) {
+    *flagBytes = narrow ? kDdaLL128FlagBytesNarrow : kDdaLL128FlagBytesWide;
+  }
   return geom;
 }
 
@@ -333,17 +353,20 @@ static ncclResult_t ncclAllReduceDdaFabricLL128TwoShotTyped(const void* sendbuff
   const int nRanks = comm->nRanks;
   const size_t bytes = count * sizeof(T);
   const size_t shardBytes = bytes / (size_t)nRanks;
-  const size_t slices = ddaLL128Slices(shardBytes);
   const size_t bankSize = ddaBankSize(comm->ddaScratchBytes);
 
-  const auto geom = split ? ddaArLL128SplitGrid(comm, bytes, cap) : ddaArLL128TwoShotGeom(comm, bytes, cap);
+  int flagBytes = kDdaLL128FlagBytesWide;
+  const auto geom = split ? ddaArLL128SplitGrid(comm, bytes, cap, &flagBytes) : ddaArLL128TwoShotGeom(comm, bytes, cap);
+  const bool narrow = flagBytes == kDdaLL128FlagBytesNarrow;
+  const size_t slices = narrow ? ddaLL128SlicesOf<kDdaLL128FlagBytesNarrow>(shardBytes) : ddaLL128Slices(shardBytes);
   const dim3 grid = geom.first;
   const dim3 block = geom.second;
   const int wire = split ? dda::common::kDdaLL128WireAsync : ddaArLL128Wire(comm, bytes);
   const size_t lds =
     split ? dda::common::ddaLL128ArSplitSharedBytes(block.x, nRanks) : ddaArLL128SharedBytes(wire, block.x);
-  const DdaArLL128Kernel<T> kernel =
-    split ? &dda::common::ddaAllReduceTwoShotLL128Split<T> : ddaArLL128TwoShotKernel<T>(nRanks, wire);
+  const DdaArLL128Kernel<T> kernel = narrow ? &dda::common::ddaAllReduceTwoShotLL128Split<T, kDdaLL128FlagBytesNarrow> :
+                                     split  ? &dda::common::ddaAllReduceTwoShotLL128Split<T> :
+                                              ddaArLL128TwoShotKernel<T>(nRanks, wire);
 
   T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
   // Same epoch counter every other LL/LL128 tier uses.
@@ -352,9 +375,9 @@ static ncclResult_t ncclAllReduceDdaFabricLL128TwoShotTyped(const void* sendbuff
 
   INFO(NCCL_COLL,
        "DDA fabric AllReduce LL128 two-shot: nRanks=%d bytes=%zu shardBytes=%zu slices=%zu grid=%u block=%u wire=%d "
-       "lds=%zu (%s, bankSize=%zu)",
-       nRanks, bytes, shardBytes, slices, grid.x, block.x, wire, lds, split ? "peer-split" : "warp-per-slice",
-       bankSize);
+       "lds=%zu flag=%dB (%s, bankSize=%zu)",
+       nRanks, bytes, shardBytes, slices, grid.x, block.x, wire, lds, flagBytes,
+       split ? "peer-split" : "warp-per-slice", bankSize);
 
   const dda::common::DdaKernelParams params{comm->abortFlagDev};
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);

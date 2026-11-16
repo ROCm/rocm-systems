@@ -6,6 +6,7 @@
  * Line format (matches prims_ll128 NCCL_LL128_LINEELEMS/DATAELEMS):
  *   128B "line" = 16 x uint64. words 0..14 carry 120B of payload, word 15 is
  *   the epoch flag. Efficiency 120/128 = 93.75% (vs 50% for the 16B LL line).
+ *   The narrow 4 B flag (peer-split only) keeps 124B of payload and the flag in the last dword.
  *
  * We have two ll128 lane mappings. All-gather uses the register-packed one: a warp
  * works a 2 KiB slice, 16B per lane. The other collectives use the word-per-lane
@@ -114,7 +115,7 @@ constexpr size_t ddaLL128SlotWords(size_t bankSize, int nRanks, int nStagingArea
 
 // The last lane of each line's lane group owns that line's flag word: lanes
 // 7,15,23,31 for a 128-byte line
-__device__ __forceinline__ bool ddaLL128IsFlagLane(int wid) {
+__host__ __device__ constexpr bool ddaLL128IsFlagLane(int wid) {
   return (wid % (kDdaLL128LineElems / 2)) == (kDdaLL128LineElems / 2 - 1);
 }
 
@@ -124,6 +125,72 @@ __device__ __forceinline__ bool ddaLL128IsFlagLane(int wid) {
 __device__ __forceinline__ int ddaLL128ChunkIx(int g, int wid) {
   return g * kDdaLL128Warp - kDdaLL128LineSkip * (g / 2) + wid -
     (g % 2) * (wid / (kDdaLL128LineElems / 2));
+}
+
+// Narrow 4 B flag: a line carries 124 data bytes and the flag in its last dword; a flag lane's pair 3 holds its pairs
+// 0..2's top dwords.
+constexpr int kDdaLL128FlagBytesWide = 8;
+constexpr int kDdaLL128FlagBytesNarrow = 4;
+constexpr int kDdaLL128NarrowFullPairs = kDdaLL128Pairs - 1;  // pairs every lane fills with one user chunk
+constexpr uint64_t kDdaLL128NarrowFlagMask = 0xFFFFFFFF00000000ull;  // the flag's dword of a flag lane's hi word
+// Odd key: epoch xor key has the other parity than every stale epoch flag in a ddaBankSize bank.
+constexpr uint32_t kDdaLL128NarrowFlagKey = 0x7FF5A5A5u;
+static_assert((kDdaLL128NarrowFlagKey & 1u) != 0, "the narrow flag must flip the epoch's parity");
+static_assert(kDdaLL128Pairs == 4, "NarrowPack moves pairs 0..2's top dwords into pair 3");
+constexpr int kDdaLL128NarrowDataBytesPerSlice =
+  kDdaLL128WireBytesPerSlice - kDdaLL128FlagWordsPerSlice * kDdaLL128FlagBytesNarrow;  // 1984
+static_assert(kDdaLL128NarrowDataBytesPerSlice % 16 == 0, "a narrow slice must be whole 16 B chunks");
+
+// Payload bytes of one slice for a flag of kFlagBytes.
+template <int kFlagBytes>
+__host__ __device__ constexpr int ddaLL128DataBytesPerSliceOf() {
+  static_assert(kFlagBytes == kDdaLL128FlagBytesWide || kFlagBytes == kDdaLL128FlagBytesNarrow, "8 or 4 B flags");
+  return kFlagBytes == kDdaLL128FlagBytesNarrow ? kDdaLL128NarrowDataBytesPerSlice : kDdaLL128DataBytesPerSlice;
+}
+
+// User chunk of register pair g of lane wid in the narrow layout; a flag lane has no chunk of its own in pair 3.
+__host__ __device__ constexpr int ddaLL128NarrowChunkIx(int g, int wid) {
+  return g < kDdaLL128NarrowFullPairs ? g * kDdaLL128Warp + wid :
+                                        kDdaLL128NarrowFullPairs * kDdaLL128Warp + wid - wid / (kDdaLL128LineElems / 2);
+}
+
+// Chunk pair g of lane wid loads without a branch; a flag lane's pair 3 (rebuilt by NarrowPack) loads wid - 1's.
+__host__ __device__ constexpr int ddaLL128NarrowLoadChunkIx(int g, int wid, bool flagLane) {
+  return ddaLL128NarrowChunkIx(g, (flagLane && g == kDdaLL128NarrowFullPairs) ? wid - 1 : wid);
+}
+
+// User registers to the narrow register image: a flag lane copies the top dwords of pairs 0..2 into pair 3.
+__host__ __device__ __forceinline__ void ddaLL128NarrowPack(uint64_t (&regs)[kDdaLL128WordsPerThread], bool flagLane) {
+  if (flagLane) {
+    regs[6] = (regs[1] >> 32) | (regs[3] & kDdaLL128NarrowFlagMask);
+    regs[7] = regs[5] >> 32;
+  }
+}
+
+// The narrow register image back to user registers: a flag lane restores the top dwords of pairs 0..2 from pair 3.
+__host__ __device__ __forceinline__ void ddaLL128NarrowUnpack(uint64_t (&regs)[kDdaLL128WordsPerThread],
+                                                              bool flagLane) {
+  if (flagLane) {
+    regs[1] = (regs[1] & ~kDdaLL128NarrowFlagMask) | (regs[6] << 32);
+    regs[3] = (regs[3] & ~kDdaLL128NarrowFlagMask) | (regs[6] & kDdaLL128NarrowFlagMask);
+    regs[5] = (regs[5] & ~kDdaLL128NarrowFlagMask) | (regs[7] << 32);
+  }
+}
+
+// Narrow flag of the 8 B flag `flag`, in the top dword: its epoch xor the key, and 2^31 where that is 0 (zeroed lines).
+__host__ __device__ constexpr uint64_t ddaLL128NarrowFlagOf(uint64_t flag) {
+  const uint32_t f = (uint32_t)(flag >> 32) ^ kDdaLL128NarrowFlagKey;
+  return (uint64_t)(f != 0 ? f : 0x80000000u) << 32;
+}
+
+// Wire hi word of a pair: a flag lane's carries the narrow flag above its data dword.
+__host__ __device__ constexpr uint64_t ddaLL128NarrowWireHi(uint64_t hi, uint64_t flag, bool flagLane) {
+  return flagLane ? (hi & ~kDdaLL128NarrowFlagMask) | ddaLL128NarrowFlagOf(flag) : hi;
+}
+
+// Whether a flag lane's wire hi word carries this launch's narrow flag.
+__host__ __device__ constexpr bool ddaLL128NarrowFlagSeen(uint64_t hi, uint64_t flag) {
+  return (hi & kDdaLL128NarrowFlagMask) == ddaLL128NarrowFlagOf(flag);
 }
 
 // Plain 16B access, used for the user buffers and as the non-cooperative wire
@@ -197,10 +264,21 @@ __device__ __forceinline__ void ddaLL128LoadAtomic16B(const uint64_t* src, uint6
 }
 
 // load of slice's payload from `src` into registers
-template <typename T>
+template <typename T, int kFlagBytes = kDdaLL128FlagBytesWide>
 __device__ __forceinline__ void ddaLL128LoadRegs(
     uint64_t (&regs)[kDdaLL128WordsPerThread], const T* src, int eltN, int wid, bool flag) {
   constexpr int EltPer16B = 16 / sizeof(T);
+  if constexpr (kFlagBytes == kDdaLL128FlagBytesNarrow) {
+#pragma unroll
+    for (int g = 0; g < kDdaLL128Pairs; g++) {
+      const int ix = ddaLL128NarrowChunkIx(g, wid);
+      if ((!flag || g < kDdaLL128NarrowFullPairs) && ix * EltPer16B < eltN) {
+        ddaLL128Load16B(reinterpret_cast<const uint64_t*>(src + ix * EltPer16B), regs[2 * g], regs[2 * g + 1]);
+      }
+    }
+    ddaLL128NarrowPack(regs, flag);
+    return;
+  }
 #pragma unroll
   for (int g = 0; g < kDdaLL128Pairs; g++) {
     if (!flag || g % 2 == 0) {
@@ -241,13 +319,17 @@ __device__ __forceinline__ void ddaLL128LoadRegsBatched(
     if (flag) regs[2 * g] = regs[2 * g - 1];
 }
 
-// This lane's wire image of one slice: f(word, lo, hi) per 16B pair; the flag lane carries the flag in place of hi.
-template <typename F>
+// This lane's wire image of one slice: f(word, lo, hi) per 16B pair; the flag lane's hi is the flag (narrow: its top).
+template <int kFlagBytes = kDdaLL128FlagBytesWide, typename F>
 __device__ __forceinline__ void ddaLL128ForEachWirePair(const uint64_t (&regs)[kDdaLL128WordsPerThread], uint64_t flag,
                                                         bool flagLane, F&& f) {
 #pragma unroll
   for (int u = 0; u < kDdaLL128WordsPerThread; u += 2) {
-    f(u * kDdaLL128Warp, regs[u], flagLane ? flag : regs[u + 1]);
+    if constexpr (kFlagBytes == kDdaLL128FlagBytesNarrow) {
+      f(u * kDdaLL128Warp, regs[u], ddaLL128NarrowWireHi(regs[u + 1], flag, flagLane));
+    } else {
+      f(u * kDdaLL128Warp, regs[u], flagLane ? flag : regs[u + 1]);
+    }
   }
 }
 
@@ -256,28 +338,35 @@ struct DdaLL128Raw {
   v4u v[kDdaLL128Pairs];
 };
 
-template <typename T>
+template <typename T, int kFlagBytes = kDdaLL128FlagBytesWide>
 __device__ __forceinline__ void ddaLL128LoadRaw(DdaLL128Raw& raw, const T* src, int eltN, int wid, bool flag) {
   constexpr int EltPer16B = 16 / sizeof(T);
   // Compiler barrier: each call's loads issue here, so a look-ahead reload is not folded into an earlier load.
   asm volatile("" ::: "memory");
 #pragma unroll
   for (int g = 0; g < kDdaLL128Pairs; g++) {
-    const int ix = ddaLL128LoadChunkIx(g, wid, flag);
+    const int ix = kFlagBytes == kDdaLL128FlagBytesNarrow ? ddaLL128NarrowLoadChunkIx(g, wid, flag) :
+                                                            ddaLL128LoadChunkIx(g, wid, flag);
     ddaLL128Load16BRaw(raw.v[g], src + (ix * EltPer16B < eltN ? ix : 0) * EltPer16B);
   }
 }
 
 // ddaLL128LoadRegs's registers from a raw load.
-template <typename T>
+template <typename T, int kFlagBytes = kDdaLL128FlagBytesWide>
 __device__ __forceinline__ void ddaLL128RawToRegs(const DdaLL128Raw& raw, uint64_t (&regs)[kDdaLL128WordsPerThread],
                                                   int eltN, int wid, bool flag) {
   constexpr int EltPer16B = 16 / sizeof(T);
+  constexpr bool kNarrow = kFlagBytes == kDdaLL128FlagBytesNarrow;
 #pragma unroll
   for (int g = 0; g < kDdaLL128Pairs; g++) {
-    const bool valid = ddaLL128LoadChunkIx(g, wid, flag) * EltPer16B < eltN;
+    const int ix = kNarrow ? ddaLL128NarrowLoadChunkIx(g, wid, flag) : ddaLL128LoadChunkIx(g, wid, flag);
+    const bool valid = ix * EltPer16B < eltN;
     regs[2 * g] = valid ? (uint64_t)raw.v[g][0] | ((uint64_t)raw.v[g][1] << 32) : 0;
     regs[2 * g + 1] = valid ? (uint64_t)raw.v[g][2] | ((uint64_t)raw.v[g][3] << 32) : 0;
+  }
+  if constexpr (kNarrow) {
+    ddaLL128NarrowPack(regs, flag);
+    return;
   }
 #pragma unroll
   for (int g = 1; g < kDdaLL128Pairs; g += 2) {  // move flag-lane data out of odd regs
@@ -288,9 +377,10 @@ __device__ __forceinline__ void ddaLL128RawToRegs(const DdaLL128Raw& raw, uint64
 }
 
 // Store one slice to the wire with the flag word embedded on the flag lane
+template <int kFlagBytes = kDdaLL128FlagBytesWide>
 __device__ __forceinline__ void ddaLL128StoreWire(
   uint64_t* wire, const uint64_t (&regs)[kDdaLL128WordsPerThread], uint64_t flag, bool flagLane) {
-  ddaLL128ForEachWirePair(regs, flag, flagLane, [wire](int word, uint64_t lo, uint64_t hi) {
+  ddaLL128ForEachWirePair<kFlagBytes>(regs, flag, flagLane, [wire](int word, uint64_t lo, uint64_t hi) {
     ddaLL128StoreAtomic16B(wire + word, lo, hi);
   });
 }
@@ -342,7 +432,7 @@ __device__ __forceinline__ DdaLL128Stage ddaLL128StageInit(uint8_t* ldsBase, int
 }
 
 // Fill the next window with this lane's wire image, at the same word offsets as on the wire.
-template <int WIRE>
+template <int WIRE, int kFlagBytes = kDdaLL128FlagBytesWide>
 __device__ __forceinline__ void ddaLL128StageFill(DdaLL128Stage& st, const uint64_t (&regs)[kDdaLL128WordsPerThread],
                                                   uint64_t flag, bool flagLane, int lane) {
   if constexpr (!ddaLL128Staged<WIRE>()) {
@@ -352,7 +442,7 @@ __device__ __forceinline__ void ddaLL128StageFill(DdaLL128Stage& st, const uint6
   st.win ^= 1;
   st.lastOps = 0;
   uint8_t* slice = st.lds + (size_t)st.win * kDdaLL128WireBytesPerSlice + (size_t)lane * 16;
-  ddaLL128ForEachWirePair(regs, flag, flagLane, [slice](int word, uint64_t lo, uint64_t hi) {
+  ddaLL128ForEachWirePair<kFlagBytes>(regs, flag, flagLane, [slice](int word, uint64_t lo, uint64_t hi) {
     uint64_t* pair = reinterpret_cast<uint64_t*>(slice) + word;
     pair[0] = lo;
     pair[1] = hi;
@@ -364,12 +454,12 @@ __device__ __forceinline__ void ddaLL128StageFill(DdaLL128Stage& st, const uint6
 }
 
 // Store one wire slice (128B-aligned base): staged, from the last-filled window; else the cooperative stores of regs.
-template <int WIRE>
+template <int WIRE, int kFlagBytes = kDdaLL128FlagBytesWide>
 __device__ __forceinline__ void ddaLL128StagePush(DdaLL128Stage& st, uint64_t* wireSlice,
                                                   const uint64_t (&regs)[kDdaLL128WordsPerThread], uint64_t flag,
                                                   bool flagLane, int lane) {
   if constexpr (!ddaLL128Staged<WIRE>()) {
-    ddaLL128StoreWire(wireSlice + 2 * lane, regs, flag, flagLane);
+    ddaLL128StoreWire<kFlagBytes>(wireSlice + 2 * lane, regs, flag, flagLane);
     return;
   }
 #if ASYNC_COPY_SUPPORTED
@@ -437,7 +527,7 @@ __device__ __forceinline__ bool ddaLL128PollWireBatched(const uint64_t* wire, ui
 }
 
 // ddaLL128PollWire on wire[i] for each bit i of the wave-uniform mask, loads before any flag test; false if aborted.
-template <int kN>
+template <int kN, int kFlagBytes = kDdaLL128FlagBytesWide>
 __device__ __forceinline__ bool ddaLL128PollWireN(const uint64_t* const (&wire)[kN], uint32_t mask,
                                                   uint64_t (&vr)[kN][kDdaLL128WordsPerThread], uint64_t flag, int wid,
                                                   DdaKernelParams params) {
@@ -466,7 +556,11 @@ __device__ __forceinline__ bool ddaLL128PollWireN(const uint64_t* const (&wire)[
       if ((mask >> i) & 1u) {
 #pragma unroll
         for (int u = 0; u < kDdaLL128WordsPerThread; u += 2) {
-          needReload |= flagLane && vr[i][u + 1] != flag;
+          if constexpr (kFlagBytes == kDdaLL128FlagBytesNarrow) {
+            needReload |= flagLane && !ddaLL128NarrowFlagSeen(vr[i][u + 1], flag);
+          } else {
+            needReload |= flagLane && vr[i][u + 1] != flag;
+          }
         }
       }
     }
@@ -478,10 +572,21 @@ __device__ __forceinline__ bool ddaLL128PollWireN(const uint64_t* const (&wire)[
 }
 
 // Flag-lane un-shuffle then store of registers into `dst`
-template <typename T>
+template <typename T, int kFlagBytes = kDdaLL128FlagBytesWide>
 __device__ __forceinline__ void ddaLL128StoreRegs(
     T* dst, uint64_t (&regs)[kDdaLL128WordsPerThread], int eltN, int wid, bool flag) {
   constexpr int EltPer16B = 16 / sizeof(T);
+  if constexpr (kFlagBytes == kDdaLL128FlagBytesNarrow) {
+    ddaLL128NarrowUnpack(regs, flag);
+#pragma unroll
+    for (int g = 0; g < kDdaLL128Pairs; g++) {
+      const int ix = ddaLL128NarrowChunkIx(g, wid);
+      if ((!flag || g < kDdaLL128NarrowFullPairs) && ix * EltPer16B < eltN) {
+        ddaLL128Store16B(reinterpret_cast<uint64_t*>(dst + ix * EltPer16B), regs[2 * g], regs[2 * g + 1]);
+      }
+    }
+    return;
+  }
 #pragma unroll
   for (int g = 1; g < kDdaLL128Pairs; g += 2)  // reverse the load shuffle
     if (flag) regs[2 * g - 1] = regs[2 * g];
@@ -505,6 +610,19 @@ constexpr size_t ddaLL128Slices(size_t bytes) {
 constexpr int ddaLL128SliceBytes(size_t bytes, size_t s) {
   const size_t rem = bytes - s * (size_t)kDdaLL128DataBytesPerSlice;
   return rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
+}
+
+// ddaLL128Slices and ddaLL128SliceBytes for a flag of kFlagBytes: slices are sized by the data bytes they carry.
+template <int kFlagBytes>
+constexpr size_t ddaLL128SlicesOf(size_t bytes) {
+  constexpr size_t kData = (size_t)ddaLL128DataBytesPerSliceOf<kFlagBytes>();
+  return (bytes + kData - 1) / kData;
+}
+template <int kFlagBytes>
+constexpr int ddaLL128SliceBytesOf(size_t bytes, size_t s) {
+  constexpr size_t kData = (size_t)ddaLL128DataBytesPerSliceOf<kFlagBytes>();
+  const size_t rem = bytes - s * kData;
+  return rem < kData ? (int)rem : (int)kData;
 }
 
 // Payload a slot of slotWords wire words carries, in whole slices.
