@@ -329,7 +329,7 @@ class HostBlitManager : public device::BlitManager {
       const amd::Coord3D& size,                             //!< Size of the copy region
       bool entire = false,                                  //!< Entire buffer will be updated
       amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
-  ) const;
+  ) const override;
 
   //! Copies system memory to an image object
   virtual bool writeImage(
