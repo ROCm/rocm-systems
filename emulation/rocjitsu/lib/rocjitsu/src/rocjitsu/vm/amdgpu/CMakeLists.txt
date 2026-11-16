@@ -17,6 +17,7 @@ rj_add_object_library(rocjitsu_vm_amdgpu
     gpu_memory_access.cpp
     gpu_queue_registry.cpp
     gpu_vm.cpp
+    legacy_address_space.cpp
     gws_device.cpp
     hwreg.cpp
     image_addressing.cpp

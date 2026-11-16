@@ -10,6 +10,7 @@ rj_add_object_library(rocjitsu_vm
     canonical_line_freshness.cpp
     fabric_endpoint.cpp
     rj_vm.cpp
+    rj_vm_config.cpp
     amdgpu/partitioning.cpp
 )
 

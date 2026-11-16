@@ -6,32 +6,68 @@
 //! These records are captured at discovery without activating a device.
 //! Backend discovery decides which transports are qualified.
 
-/// Queue transports qualified for one AMD GPU endpoint.
-///
-/// Queue formats are GPU capabilities rather than properties shared by every
-/// endpoint kind. A `false` value means the current backend did not qualify the
-/// corresponding transport; it does not make claims about the hardware in a
-/// different operating-system or driver environment.
+/// Provider-selected execution path for the shared SDMA copy service.
+/// This qualifies copy operands and completion, beyond queue creation alone.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GpuCopyTransport {
+    /// Direct queue with device-visible fence and checked ring retirement.
+    User,
+    /// Driver-mediated command submission with checked retirement.
+    Kernel,
+}
+
+/// Provider-qualified direct queue controls, independent of packet encoding.
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "independent native queue controls"
+)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct GpuUserQueueCapabilities {
+    /// Device-side publication and peer producer mappings are supported.
+    pub device_producer: bool,
+    /// Concurrent host producers are supported.
+    pub multiple_producers: bool,
+    /// Low scheduling priority is supported in addition to normal.
+    pub low_priority: bool,
+    /// High scheduling priority is supported in addition to normal.
+    pub high_priority: bool,
+    /// Cooperative AQL queue lifecycle is supported; availability is not reserved.
+    pub cooperative: bool,
+    /// Provider resources support the dialect's dispatch scratch encoding.
+    pub dispatch_scratch: bool,
+    /// Smallest supported power-of-two ring byte length.
+    pub minimum_ring_bytes: u64,
+    /// Largest supported power-of-two ring byte length.
+    pub maximum_ring_bytes: u64,
+    /// Required ring byte-length multiple.
+    pub ring_alignment: u64,
+}
+
+/// Queue transports qualified by this provider for one AMD GPU endpoint.
+/// Absent direct profiles and false kernel flags make no hardware support claim.
 #[allow(
     clippy::struct_excessive_bools,
     reason = "each independently qualified GPU queue transport is an observable capability"
 )]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct GpuQueueCapabilities {
+    /// Copy path qualified by this provider for the advertised packet dialect.
+    /// Absence means that generic queue support alone does not qualify copies.
+    pub copy: Option<GpuCopyTransport>,
     /// Direct AQL transport is implemented for this endpoint.
-    pub aql: bool,
+    pub aql: Option<GpuUserQueueCapabilities>,
     /// System-memory release/acquire through AQL packet fence scopes is
     /// qualified for this endpoint and host architecture.
     pub aql_system_cache_control: bool,
     /// Direct native PM4 transport is implemented for this endpoint.
-    pub pm4: bool,
+    pub pm4: Option<GpuUserQueueCapabilities>,
     /// Bounded driver-mediated PM4 submission is qualified for this endpoint.
     pub kernel_pm4: bool,
     /// System-memory release/acquire through PM4 cache controls is qualified
     /// for this endpoint and host architecture.
     pub pm4_system_cache_control: bool,
     /// Direct monotonic-64-bit SDMA transport is implemented.
-    pub sdma: bool,
+    pub sdma: Option<GpuUserQueueCapabilities>,
     /// Bounded driver-mediated SDMA submission is qualified for this endpoint.
     pub kernel_sdma: bool,
     /// System-memory release/acquire through the selected SDMA protocol is
@@ -49,9 +85,9 @@ pub enum GpuTargetProfile {
     Other,
     /// Qualified wave64 GFX9 targets.
     Gfx9,
-    /// GFX10 targets with AQL transport support.
+    /// GFX10 encoding family.
     Gfx10,
-    /// GFX11 targets with AQL transport support.
+    /// GFX11 encoding family.
     Gfx11,
     /// GFX12.0.0 packet dialect.
     Gfx1200,
@@ -82,43 +118,6 @@ pub enum GpuSdmaDialect {
 }
 
 impl GpuTargetProfile {
-    /// Resolves a KFD target code once when the endpoint is discovered.
-    #[must_use]
-    pub const fn from_kfd_target(target: u32) -> Self {
-        match target {
-            90008 | 90010 | 90402 | 90500 => Self::Gfx9,
-            100_100..=109_999 => Self::Gfx10,
-            110_000..=119_999 => Self::Gfx11,
-            120_000 => Self::Gfx1200,
-            120_001 => Self::Gfx1201,
-            120_500 => Self::Gfx1250,
-            _ => Self::Other,
-        }
-    }
-
-    /// Whether the current backend qualifies an AQL queue transport.
-    #[must_use]
-    pub const fn supports_aql(self) -> bool {
-        match self {
-            Self::Other => false,
-            Self::Gfx9
-            | Self::Gfx10
-            | Self::Gfx11
-            | Self::Gfx1200
-            | Self::Gfx1201
-            | Self::Gfx1250 => true,
-        }
-    }
-
-    /// Whether the qualified DRM kernel command transport is available.
-    #[must_use]
-    pub const fn supports_kernel_submission(self) -> bool {
-        match self {
-            Self::Gfx1200 | Self::Gfx1201 | Self::Gfx1250 => true,
-            Self::Other | Self::Gfx9 | Self::Gfx10 | Self::Gfx11 => false,
-        }
-    }
-
     /// Returns the fixed scratch descriptor supported by this wavefront.
     #[must_use]
     pub const fn scratch_encoding(self, wavefront_size: u32) -> Option<GpuScratchEncoding> {
@@ -190,47 +189,10 @@ impl GpuTargetProfile {
     }
 }
 
-#[cfg(test)]
-mod target_profile_tests {
-    use super::{GpuScratchEncoding, GpuSdmaDialect, GpuTargetProfile as Profile};
-
-    #[test]
-    fn qualified_targets_keep_packet_and_scratch_dialects_together() {
-        for target in [90008, 90010, 90402, 90500] {
-            let profile = Profile::from_kfd_target(target);
-            assert_eq!(profile, Profile::Gfx9);
-            assert_eq!(profile.sdma_dialect(), Some(GpuSdmaDialect::Gfx9));
-            assert_eq!(profile.scratch_encoding(64), Some(GpuScratchEncoding::Gfx9));
-            assert_eq!(profile.scratch_encoding(32), None);
-        }
-        for (target, profile, dialect) in [
-            (120_000, Profile::Gfx1200, GpuSdmaDialect::Gfx1200),
-            (120_001, Profile::Gfx1201, GpuSdmaDialect::Gfx1200),
-            (120_500, Profile::Gfx1250, GpuSdmaDialect::Gfx1250),
-        ] {
-            assert_eq!(Profile::from_kfd_target(target), profile);
-            assert_eq!(profile.sdma_dialect(), Some(dialect));
-            assert_eq!(
-                profile.scratch_encoding(32),
-                Some(GpuScratchEncoding::Gfx12)
-            );
-            assert_eq!(profile.scratch_encoding(64), None);
-            assert!(profile.supports_kernel_submission());
-        }
-        for target in [90009, 120_002, 120_501] {
-            let profile = Profile::from_kfd_target(target);
-            assert_eq!(profile, Profile::Other);
-            assert!(!profile.supports_aql());
-            assert_eq!(profile.sdma_dialect(), None);
-            assert_eq!(profile.scratch_encoding(32), None);
-        }
-    }
-}
-
 /// GPU target and enabled compute geometry captured without activation.
 /// Required geometry fields must be complete and consistent before this record
 /// is published; opening an endpoint never substitutes guessed dimensions.
-/// Optional DRM facts may be populated later.
+/// Optional provider facts may be populated later.
 #[allow(
     clippy::struct_excessive_bools,
     reason = "GPU topology reports independent native capabilities as flags"
@@ -243,17 +205,16 @@ pub struct GpuInfo {
     pub gfx_minor: u32,
     /// Exact GFX stepping.
     pub gfx_stepping: u32,
-    /// Packet and scratch dialect resolved from the KFD target at discovery.
+    /// Packet and scratch dialect resolved from the native target at discovery.
     pub target_profile: GpuTargetProfile,
     /// Globally unique immutable GPU identifier when reported by the backend.
     pub unique_id: Option<u64>,
     /// AMD GPU hive identifier, or zero when the endpoint has no hive.
     pub hive_id: u64,
-    /// ASIC family identifier reported by KFD topology.
+    /// ASIC family identifier reported at discovery. The activated GPU view
+    /// exposes the family resolved by its provider for runtime use.
     pub asic_family_id: u32,
-    /// ASIC family reported by the matching DRM device, when available.
-    pub drm_asic_family_id: Option<u32>,
-    /// GPU timestamp frequency in hertz reported by DRM, when available.
+    /// GPU timestamp frequency in hertz reported by the provider, when available.
     pub counter_frequency_hz: Option<u64>,
     /// Target ASIC revision, not PCI configuration revision.
     pub asic_revision: u32,
