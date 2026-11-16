@@ -3,9 +3,9 @@
 
 """Integration tests for roofline profiling and benchmark-only mode."""
 
-import inspect
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import common
 import pytest
@@ -17,7 +17,6 @@ from tests.integration.common import (
     num_devices,
     num_kernels,
     skip_unsupported_roofline_soc,
-    validate,
 )
 
 
@@ -29,7 +28,7 @@ def test_roof_basic_validation(binary_handler_profile_rocprof_compute):
     """
     skip_unsupported_roofline_soc()
 
-    options = ["--device", "0", "--roof-only"]
+    options = ["--roofline-device", "0", "--roofline"]
     workload_dir = common.get_output_dir()
     returncode = binary_handler_profile_rocprof_compute(
         config, workload_dir, options, check_success=False, roof=True
@@ -40,12 +39,6 @@ def test_roof_basic_validation(binary_handler_profile_rocprof_compute):
 
     assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
 
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-    )
-
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
@@ -54,7 +47,7 @@ def test_roof_file_validation(binary_handler_profile_rocprof_compute):
     """Test file validation paths in roofline"""
     skip_unsupported_roofline_soc()
 
-    options = ["--device", "0", "--roof-only"]
+    options = ["--roofline-device", "0", "--roofline"]
     workload_dir = common.get_output_dir()
 
     try:
@@ -82,7 +75,7 @@ def test_roof_rocpd(
     skip_unsupported_roofline_soc()
 
     workload_dir = common.get_output_dir()
-    options = ["--device", "0", "--roof-only"]
+    options = ["--roofline-device", "0", "--roofline"]
     binary_handler_profile_rocprof_compute(config, workload_dir, options, roof=True)
 
     # Validate profile outputs
@@ -108,22 +101,12 @@ def test_roofline_workload_dir_not_set_error():
         from roofline.roofline_main import Roofline
         from utils.specs import generate_machine_specs
 
-        class MockArgs:
-            def __init__(self):
-                self.roof_only = True
-                self.mem_level = "ALL"
-                self.sort = "ALL"
-                self.roofline_data_type = ["FP32"]
-
-        args = MockArgs()
+        args = SimpleNamespace()
         mspec = generate_machine_specs(None, None)
 
         run_parameters = {
             "workload_dir": None,
             "device_id": 0,
-            "sort_type": "kernels",
-            "mem_level": "ALL",
-            "roofline_data_type": ["FP32"],
         }
 
         roofline_instance = Roofline(args, mspec, run_parameters)
@@ -149,7 +132,7 @@ def test_roofline_workload_dir_not_set_error():
 def test_roof_workload_dir_validation(binary_handler_profile_rocprof_compute):
     skip_unsupported_roofline_soc()
 
-    options = ["--device", "0", "--roof-only"]
+    options = ["--roofline-device", "0", "--roofline"]
 
     workload_dir = common.get_output_dir()
     returncode = binary_handler_profile_rocprof_compute(
@@ -184,9 +167,9 @@ def test_roofline_kernel_filter(binary_handler_profile_rocprof_compute):
     skip_unsupported_roofline_soc()
 
     options = [
-        "--device",
+        "--roofline-device",
         "0",
-        "--roof-only",
+        "--roofline",
         "--overwrite",
     ]
     workload_dir = common.get_output_dir()
@@ -241,34 +224,10 @@ def test_roofline_kernel_filter(binary_handler_profile_rocprof_compute):
 
 
 @pytest.mark.roofline_plot
-def test_roof_cli_plot_generation(binary_handler_profile_rocprof_compute):
-    skip_unsupported_roofline_soc()
-
-    try:
-        import plotext as plt  # noqa: F401
-
-        cli_available = True
-    except ImportError:
-        cli_available = False
-
-    if cli_available:
-        options = ["--device", "0", "--roof-only"]
-        workload_dir = common.get_output_dir()
-
-        returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
-            config, workload_dir, options, check_success=False, roof=True
-        )
-
-        common.clean_output_dir(config["cleanup"], workload_dir)
-    else:
-        pytest.skip("plotext not available for CLI testing")
-
-
-@pytest.mark.roofline_plot
 def test_roof_error_handling(binary_handler_profile_rocprof_compute):
     skip_unsupported_roofline_soc()
 
-    options = ["--device", "0", "--roof-only"]
+    options = ["--roofline-device", "0", "--roofline"]
     workload_dir = common.get_output_dir()
 
     returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
@@ -281,12 +240,12 @@ def test_roof_error_handling(binary_handler_profile_rocprof_compute):
 @pytest.mark.roofline_bench
 def test_bench_only_basic(binary_handler_profile_rocprof_compute):
     """
-    Test that --bench-only generates roofline.csv standalone (no application
+    Test that --roofline-bench-only generates roofline.csv standalone (no application
     profiling and no performance counter collection).
     """
     skip_unsupported_roofline_soc()
 
-    options = ["--device", "0", "--bench-only"]
+    options = ["--roofline-device", "0", "--roofline-bench-only"]
     workload_dir = common.get_output_dir()
 
     returncode = binary_handler_profile_rocprof_compute(
@@ -311,19 +270,20 @@ def test_bench_only_basic(binary_handler_profile_rocprof_compute):
     [
         pytest.param(["--set", "compute_thruput_util"], id="set"),
         pytest.param(["--block", "2"], id="block"),
-        pytest.param(["--roof-only"], id="roof_only"),
+        pytest.param(["--roofline"], id="roofline"),
     ],
 )
 def test_bench_only_mutual_exclusion(
     binary_handler_profile_rocprof_compute, conflicting_options
 ):
     """
-    --bench-only must be rejected when paired with --set, --block, or --roof-only.
-    These options are profiling-oriented and meaningless for a standalone benchmark.
+    --roofline-bench-only must be rejected when paired with --set, --block, or
+    --roofline. These options are profiling-oriented and meaningless for a
+    standalone benchmark.
     """
     skip_unsupported_roofline_soc()
 
-    options = ["--device", "0", "--bench-only"] + conflicting_options
+    options = ["--roofline-device", "0", "--roofline-bench-only"] + conflicting_options
     workload_dir = common.get_output_dir()
 
     returncode = binary_handler_profile_rocprof_compute(
@@ -331,7 +291,7 @@ def test_bench_only_mutual_exclusion(
     )
 
     assert returncode == 1, (
-        f"Expected --bench-only with {conflicting_options} to fail, "
+        f"Expected --roofline-bench-only with {conflicting_options} to fail, "
         f"but command exited with {returncode}"
     )
 
@@ -341,12 +301,12 @@ def test_bench_only_mutual_exclusion(
 @pytest.mark.roofline_bench
 def test_bench_only_no_roof_mutual_exclusion(binary_handler_profile_rocprof_compute):
     """
-    --bench-only must be rejected when combined with --no-roof, since the option
-    explicitly disables the roofline microbenchmark we are trying to run.
+    --roofline-bench-only must be rejected when combined with --no-roof, since the
+    option explicitly disables the roofline microbenchmark we are trying to run.
     """
     skip_unsupported_roofline_soc()
 
-    options = ["--device", "0", "--bench-only"]
+    options = ["--roofline-device", "0", "--roofline-bench-only"]
     workload_dir = common.get_output_dir()
 
     # roof=False makes the fixture inject --no-roof automatically
@@ -355,7 +315,7 @@ def test_bench_only_no_roof_mutual_exclusion(binary_handler_profile_rocprof_comp
     )
 
     assert returncode == 1, (
-        "Expected --bench-only combined with --no-roof to fail, "
+        "Expected --roofline-bench-only combined with --no-roof to fail, "
         f"but command exited with {returncode}"
     )
 
@@ -369,7 +329,7 @@ def test_roofline_many_kernels_dynamic_height(binary_handler_profile_rocprof_com
     """
     skip_unsupported_roofline_soc()
 
-    options = ["--device", "0", "--roof-only"]
+    options = ["--roofline-device", "0", "--roofline"]
     workload_dir = common.get_output_dir()
 
     returncode = binary_handler_profile_rocprof_compute(

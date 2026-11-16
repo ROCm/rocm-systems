@@ -16,26 +16,20 @@
 #include <vector>
 #include <sched.h>
 
+#include "fakes/fail_loud.h"
 #include "fakes/signature-drift.h"
 #include "graph.h"  // PATH_DIS
 #include "nccl.h"
 #include "os.h"   // ncclAffinity
 #include "plugin/nccl_tuner.h"  // NCCL_NUM_ALGORITHMS, the width of initTransportsRank's graphs[]
 
+#include "topo_net_stubs.h"
 #include "topo_stubs.h"
 
 // src/graph/topo.cc, AMD arm; test/host/CMakeLists.txt pins this line to it.
 const char* topoPathTypeStr[] = {"LOC", "XGMI", "NVB", "C2C", "PIX", "PXB", "P2C", "PXN", "PHB", "SYS", "NET", "DIS"};
 static_assert(std::size(topoPathTypeStr) == PATH_DIS + 1, "topoPathTypeStr must name every PATH_* type");
 
-// Controllable (was fail-loud). :1982; the value reaches the AllGather3 payload, so the default is deterministic.
-std::function<ncclResult_t(struct ncclComm*, bool*)> g_ncclTopoCheckNicFused =
-    [](struct ncclComm*, bool* fused) { *fused = false; return ncclSuccess; };
-ncclResult_t ncclTopoCheckNicFused(struct ncclComm* comm, bool* fused) { return g_ncclTopoCheckNicFused(comm, fused); }
-ncclResult_t ncclTopoCheckCrossNicSupport(bool* supported) {  // src/graph/search.cc
-  if (supported) *supported = false;
-  return ncclSuccess;
-}
 // src/graph/paths.cc. Single call site (:1501) -> a success default is safe; see MICROTEST_README.md
 // "Adding more controllable seams" for when to default a seam to failure instead.
 std::function<ncclResult_t(int*)> g_ncclGetUserP2pLevel =
@@ -45,19 +39,6 @@ ncclResult_t ncclGetUserP2pLevel(int* level) { return g_ncclGetUserP2pLevel(leve
 // four later call sites (:1673, :1690, :1692, :1702 -- the tree/CollNet/NVLS graphs) are driven by the
 // rung-3 tests. Records the graph pointer: without it, :1648 being handed treeGraph instead of
 // ringGraph is invisible, the same "a fake that drops an argument untests it" rule as nccl_stubs.cc:90.
-// A std::function rather than a result knob: rung 3 needs it to SUCCEED and write graph->nChannels,
-// which :1671-1672 then read to size the tree graph. Default still fails, so rung 2 is unchanged.
-std::function<ncclResult_t(struct ncclTopoSystem*, struct ncclTopoGraph*)> g_ncclTopoCompute =
-    [](struct ncclTopoSystem*, struct ncclTopoGraph*) { return ncclRemoteError; };  // rung-2 terminator
-int g_ncclTopoComputeCalls = 0;
-std::vector<struct ncclTopoGraph*> g_ncclTopoComputeGraphs;
-ncclResult_t ncclTopoCompute(struct ncclTopoSystem* system, struct ncclTopoGraph* graph) {
-  g_ncclTopoComputeCalls++;
-  g_ncclTopoComputeGraphs.push_back(graph);
-  return g_ncclTopoCompute(system, graph);
-}
-ncclResult_t g_ncclTopoComputeCommCPUResult = ncclSuccess;
-ncclResult_t ncclTopoComputeCommCPU(struct ncclComm* comm) { return g_ncclTopoComputeCommCPUResult; }
 ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) { ::abort(); }
 // Controllable (was fail-loud). Rung-3 terminator at :1774. Its sentinel is ncclTimeout rather than the
 // ncclRemoteError the earlier rungs share, so a rung-3 test proves it cleared the whole graph block
@@ -73,22 +54,6 @@ int g_ncclTopoComputePathsCalls = 0;
 int g_ncclTopoComputePathsFailAt = -1;  // -1 = never fail
 ncclResult_t ncclTopoComputePaths(struct ncclTopoSystem* system, struct ncclComm* comm) {
   return g_ncclTopoComputePathsCalls++ == g_ncclTopoComputePathsFailAt ? ncclSystemError : ncclSuccess;
-}
-// Controllable (was fail-loud). :1764, gated on comm->rank == NCCL_GRAPH_DUMP_FILE_RANK. Records ngraphs
-// because the call site hardcodes 5 -- a count that must track the five graphs actually computed above.
-ncclResult_t g_ncclTopoDumpGraphsResult = ncclSuccess;
-int g_ncclTopoDumpGraphsCalls = 0;
-int g_ncclTopoDumpGraphsNgraphs = -1;
-std::vector<struct ncclTopoGraph*> g_ncclTopoDumpGraphsArray;
-ncclResult_t ncclTopoDumpGraphs(struct ncclTopoSystem* system, int ngraphs, struct ncclTopoGraph** graphs) {
-  g_ncclTopoDumpGraphsCalls++;
-  g_ncclTopoDumpGraphsNgraphs = ngraphs;  // assert this, not the vector length, if :1764's 5 ever moves
-  // Clamp the read: the caller's array is dumpGraphs[kDumpGraphsCapacity] at :1757, so trusting a
-  // larger ngraphs would read off its stack rather than failing an assertion.
-  const int kDumpGraphsCapacity = 5;
-  const int n = ngraphs < kDumpGraphsCapacity ? ngraphs : kDumpGraphsCapacity;
-  g_ncclTopoDumpGraphsArray.assign(graphs, graphs + n);  // :1763 orders direct BEFORE chain
-  return g_ncclTopoDumpGraphsResult;
 }
 void ncclTopoFree(struct ncclTopoSystem* system) { ::abort(); }
 // Controllable (was fail-loud). A std::function: :1608-1610 branch on the WRITTEN mask, and exit::2404
@@ -127,6 +92,60 @@ ASSERT_HOOK_MATCHES_PROD(g_ncclTopoGetLocalNet, ncclTopoGetLocalNet);
 ncclResult_t ncclTopoGetLocalNet(struct ncclTopoSystem* system, int rank, int channelId, int64_t* id, int* dev) {
   return g_ncclTopoGetLocalNet(system, rank, channelId, id, dev);
 }
+// src/graph/topo.cc:2589. Reached only from gin_host.cc's ncclGinConnectOnce, so this stays a
+// fail-loud default: rccl-UnitTestsMicroGinHost is the only binary that compiles a caller, and it
+// installs the behaviour it needs. A seam rather than a plain abort because that test has to drive
+// both the device count (it sizes ginCommCount) and the failure arm.
+static ncclResult_t DefaultTopoGetLocalGinDevs(struct ncclComm*, int*, int*) { ::abort(); }
+std::function<ncclResult_t(struct ncclComm*, int*, int*)> g_ncclTopoGetLocalGinDevs =
+    DefaultTopoGetLocalGinDevs;
+ASSERT_HOOK_MATCHES_PROD(g_ncclTopoGetLocalGinDevs, ncclTopoGetLocalGinDevs);
+ncclResult_t ncclTopoGetLocalGinDevs(struct ncclComm* comm, int* localGinDevs, int* localGinCount) {
+  return g_ncclTopoGetLocalGinDevs(comm, localGinDevs, localGinCount);
+}
+
+static ncclResult_t DefaultTopoGetNetDev(struct ncclComm*, int, struct ncclTopoGraph*, int, int, int64_t*, int*,
+                                         int*) {
+  FailLoudUnfaked("topo_stubs", "ncclTopoGetNetDev");
+}
+std::function<ncclResult_t(struct ncclComm*, int, struct ncclTopoGraph*, int, int, int64_t*, int*, int*)>
+    g_ncclTopoGetNetDev = DefaultTopoGetNetDev;
+ASSERT_HOOK_MATCHES_PROD(g_ncclTopoGetNetDev, ncclTopoGetNetDev);
+ncclResult_t ncclTopoGetNetDev(struct ncclComm* comm, int rank, struct ncclTopoGraph* graph, int channelId,
+                               int peerRank, int64_t* id, int* dev, int* proxyRank) {
+  return g_ncclTopoGetNetDev(comm, rank, graph, channelId, peerRank, id, dev, proxyRank);
+}
+static ncclResult_t DefaultTopoGetIntraNetDev(struct ncclTopoSystem*, int, struct ncclTopoGraph*, int, int, int64_t*,
+                                              int*) {
+  FailLoudUnfaked("topo_stubs", "ncclTopoGetIntraNetDev");
+}
+std::function<ncclResult_t(struct ncclTopoSystem*, int, struct ncclTopoGraph*, int, int, int64_t*, int*)>
+    g_ncclTopoGetIntraNetDev = DefaultTopoGetIntraNetDev;
+ASSERT_HOOK_MATCHES_PROD(g_ncclTopoGetIntraNetDev, ncclTopoGetIntraNetDev);
+ncclResult_t ncclTopoGetIntraNetDev(struct ncclTopoSystem* system, int rank, struct ncclTopoGraph* graph,
+                                    int channelId, int type, int64_t* id, int* dev) {
+  return g_ncclTopoGetIntraNetDev(system, rank, graph, channelId, type, id, dev);
+}
+static ncclResult_t DefaultTopoCheckGdr(struct ncclTopoSystem*, int, int64_t, int, enum ncclTopoGdrMode*) {
+  FailLoudUnfaked("topo_stubs", "ncclTopoCheckGdr");
+}
+std::function<ncclResult_t(struct ncclTopoSystem*, int, int64_t, int, enum ncclTopoGdrMode*)> g_ncclTopoCheckGdr =
+    DefaultTopoCheckGdr;
+ASSERT_HOOK_MATCHES_PROD(g_ncclTopoCheckGdr, ncclTopoCheckGdr);
+ncclResult_t ncclTopoCheckGdr(struct ncclTopoSystem* topo, int rank, int64_t netId, int read,
+                              enum ncclTopoGdrMode* gdrMode) {
+  return g_ncclTopoCheckGdr(topo, rank, netId, read, gdrMode);
+}
+static ncclResult_t DefaultTopoNeedFlush(struct ncclComm*, int64_t, int, int, bool, enum ncclTopoFlushType*) {
+  FailLoudUnfaked("topo_stubs", "ncclTopoNeedFlush");
+}
+std::function<ncclResult_t(struct ncclComm*, int64_t, int, int, bool, enum ncclTopoFlushType*)> g_ncclTopoNeedFlush =
+    DefaultTopoNeedFlush;
+ASSERT_HOOK_MATCHES_PROD(g_ncclTopoNeedFlush, ncclTopoNeedFlush);
+ncclResult_t ncclTopoNeedFlush(struct ncclComm* comm, int64_t netId, int netDev, int rank, bool netManaged,
+                               enum ncclTopoFlushType* flush) {
+  return g_ncclTopoNeedFlush(comm, netId, netDev, rank, netManaged, flush);
+}
 ncclResult_t ncclTopoGetNvbGpus(struct ncclTopoSystem* system, int rank, int* nranks, int** ranks) { ::abort(); }
 ncclResult_t ncclTopoGetPxnRanks(struct ncclComm* comm, int** intermediateRanks, int* nranks) { ::abort(); }
 // Controllable (was fail-loud). This is the FIRST call after initTransportsRank's MNNVL/intra-proc block, so arming it
@@ -150,17 +169,6 @@ ncclResult_t ncclTopoPathAllNVLink(struct ncclTopoSystem* system, int* allNvLink
 }
 ncclResult_t g_ncclTopoPrintResult = ncclSuccess;
 ncclResult_t ncclTopoPrint(struct ncclTopoSystem* system) { return g_ncclTopoPrintResult; }
-// Controllable (was fail-loud). Five call sites (:1649, :1674, :1691, :1693, :1703), each paired with an
-// ncclTopoCompute. Records the graph so a swapped pair -- printing the tree graph after computing the
-// ring one -- is visible; a result-only seam would not see it.
-ncclResult_t g_ncclTopoPrintGraphResult = ncclSuccess;
-std::vector<struct ncclTopoGraph*> g_ncclTopoPrintGraphGraphs;
-ncclResult_t ncclTopoPrintGraph(struct ncclTopoSystem* system, struct ncclTopoGraph* graph) {
-  g_ncclTopoPrintGraphGraphs.push_back(graph);
-  return g_ncclTopoPrintGraphResult;
-}
-ncclResult_t g_ncclTopoSearchInitResult = ncclSuccess;
-ncclResult_t ncclTopoSearchInit(struct ncclTopoSystem* system) { return g_ncclTopoSearchInitResult; }
 ncclResult_t g_ncclTopoTrimSystemResult = ncclSuccess;
 ncclResult_t ncclTopoTrimSystem(struct ncclTopoSystem* system, struct ncclComm* comm) {
   return g_ncclTopoTrimSystemResult;
@@ -221,22 +229,10 @@ void ResetTopoStubs() {
   g_ncclTopoComputePathsCalls = 0;
   g_ncclTopoComputePathsFailAt = -1;
   g_ncclTopoTrimSystemResult = ncclSuccess;
-  g_ncclTopoSearchInitResult = ncclSuccess;
-  g_ncclTopoComputeCommCPUResult = ncclSuccess;
   g_ncclTopoPrintResult = ncclSuccess;
   g_ncclTopoGetCpuAffinity = [](struct ncclTopoSystem*, int, ncclAffinity* a) { CPU_ZERO(a); return ncclSuccess; };
   g_ncclTopoGetCpuAffinityLastRank = -1;
-  g_ncclTopoCompute = [](struct ncclTopoSystem*, struct ncclTopoGraph*) { return ncclRemoteError; };
-  g_ncclTopoComputeCalls = 0;
-  g_ncclTopoComputeGraphs.clear();
-  g_ncclTopoPrintGraphResult = ncclSuccess;
-  g_ncclTopoPrintGraphGraphs.clear();
-  g_ncclTopoDumpGraphsResult = ncclSuccess;
-  g_ncclTopoDumpGraphsCalls = 0;
-  g_ncclTopoDumpGraphsNgraphs = -1;
-  g_ncclTopoDumpGraphsArray.clear();
   g_ncclTopoComputeP2pChannelsPerPeerResult = ncclTimeout;
-  g_ncclTopoCheckNicFused = [](struct ncclComm*, bool* fused) { *fused = false; return ncclSuccess; };
   g_ncclTopoGetMinNetBw = [](struct ncclTopoSystem*, int, float* bw) { *bw = 0.0f; return ncclSuccess; };
   g_ncclTopoGetLocalNetCountByBw = [](struct ncclTopoSystem*, int, int* count, float* bw) {
     *count = 0;
@@ -244,6 +240,7 @@ void ResetTopoStubs() {
     return ncclSuccess;
   };
   g_ncclTopoGetLocalNet = DefaultTopoGetLocalNet;
+  g_ncclTopoGetLocalGinDevs = DefaultTopoGetLocalGinDevs;
   g_ncclTopoPathAllNVLink = [](struct ncclTopoSystem*, int* allNvLink) { *allNvLink = 0; return ncclSuccess; };
   g_ncclTopoPreset = [](struct ncclComm*, struct ncclTopoRanks*) { return ncclSuccess; };
   g_rcclCheckRomeTopoModelIdxConsensusResult = ncclSuccess;
@@ -258,4 +255,8 @@ void ResetTopoStubs() {
   g_ncclTopoPostsetCalls = 0;
   g_ncclTopoPostsetGraphs.clear();
   g_ncclTopoPostsetNc = -1;
+  g_ncclTopoGetNetDev = DefaultTopoGetNetDev;
+  g_ncclTopoGetIntraNetDev = DefaultTopoGetIntraNetDev;
+  g_ncclTopoCheckGdr = DefaultTopoCheckGdr;
+  g_ncclTopoNeedFlush = DefaultTopoNeedFlush;
 }

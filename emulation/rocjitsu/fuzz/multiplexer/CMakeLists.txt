@@ -8,7 +8,11 @@ target_include_directories(
 )
 target_link_libraries(
     rj_multiplexer_fuzz_core
-    PUBLIC rj_decode_fuzz_core rj_execution_fuzz_core rj_code_object_fuzz_core
+    PUBLIC
+        rj_decode_fuzz_core
+        rj_execution_fuzz_core
+        rj_code_object_fuzz_core
+        rj_concurrent_dispatch_fuzz_core
 )
 rj_configure_target(rj_multiplexer_fuzz_core PRIVATE_INCLUDES WARNINGS)
 

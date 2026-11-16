@@ -104,10 +104,16 @@ impl Allocator {
         CURRENT.with(Cell::get)
     }
 
-    /// Installs this allocator for owner allocations on the current thread.
-    /// Existing owners retain their own allocator for release.
-    #[must_use]
-    pub fn scope(self) -> AllocatorScope {
+    /// Uses this allocator for owner allocations made by `operation`.
+    /// Existing owners retain their own allocator for release. The scope is
+    /// restored even when `operation` unwinds, and its guard cannot be moved
+    /// or dropped out of nesting order by the caller.
+    pub fn with_scope<R>(self, operation: impl FnOnce() -> R) -> R {
+        let _scope = self.enter();
+        operation()
+    }
+
+    fn enter(self) -> AllocatorScope {
         AllocatorScope {
             previous: CURRENT.with(|current| current.replace(self)),
             _not_send: PhantomData,
@@ -241,7 +247,7 @@ thread_local! {
 }
 
 /// Restores the previous owner allocator when the current scope ends.
-pub struct AllocatorScope {
+pub(crate) struct AllocatorScope {
     /// Prior thread-local policy restored when this guard drops.
     previous: Allocator,
     /// Keeps the guard on the thread whose allocator slot it replaced.
@@ -261,7 +267,7 @@ pub(super) fn probe(layout: Layout) -> Result<(), AllocationError> {
 
 // Metadata storage has at least 16-byte alignment on supported targets.
 // Larger alignments required by T are preserved.
-fn normalized_layout(layout: Layout) -> Result<Layout, AllocationError> {
+pub(super) fn normalized_layout(layout: Layout) -> Result<Layout, AllocationError> {
     Layout::from_size_align(layout.size().max(1), layout.align().max(16))
         .map_err(|_| AllocationError)
 }

@@ -22,11 +22,8 @@
 // scale-out MPI tests assert on this exact text.
 #define RCCL_CE_HIER_SELECTED_TAG "[Hierarchical CE]"
 
-// Total payload capacity of one reusable CE AllReduce staging slot. Messages
-// larger than this are pipelined. ceArStagingBytes is the total across all ranks
-// for one slot; with NUM_SLOTS=2 the VMM reservation is 2 * 256 MiB = 512 MiB.
-// On gfx1250, CE-registered AllReduce is default-on, so this is allocated
-// unconditionally at init. Larger values risk late VA reservations on ROCm.
+// Total payload capacity of one reusable CE AllReduce/ReduceScatter staging slot.
+// Messages larger than this are pipelined.
 #define NCCL_CE_AR_STAGING_BYTES (256ull * 1024 * 1024)
 
 // Fallback 2-shot max cap for rcclCeNonRegMaxTab(table, ncclFuncAllReduce) when no arch table is present.
@@ -42,6 +39,16 @@
 #ifndef NCCL_CE_NUM_SLOTS
 #define NCCL_CE_NUM_SLOTS 2
 #endif
+
+// Block width of the CE local reduce kernel (ce_reduce_launcher.cpp.in, ce_reduce_impl.h.in).
+#ifndef NCCL_CE_REDUCE_THREADS
+#define NCCL_CE_REDUCE_THREADS 256
+#endif
+
+// AllReduce staging bytes ncclCeInit resolves: RCCL_CE_AR_STAGING_BYTES (`param`) when set, else the default.
+inline size_t ncclCeArStagingBytes(int64_t param) {
+  return param >= 0 ? (size_t)param : (size_t)NCCL_CE_AR_STAGING_BYTES;
+}
 
 // Per-rank staging capacity in ceARTmpBuf.
 inline size_t ncclCeAllReduceMaxChunkBytes(int nRanks, size_t stagingBytes) {
@@ -71,9 +78,32 @@ inline size_t ncclCeAllReduceChooseChunkBytes(size_t shardBytes, size_t slotChun
   return alignDown(targetChunkBytes, (size_t)16);
 }
 
+// Per-chunk bytes of ncclCeAllReduce and ncclCeReduceScatter: the shard if it fits a slot, else the pipelined chunk.
+inline size_t ncclCeAllReduceChunkBytes(size_t shardBytes, size_t slotChunkBytes) {
+  return (shardBytes <= slotChunkBytes) ? shardBytes : ncclCeAllReduceChooseChunkBytes(shardBytes, slotChunkBytes);
+}
+
+// CE ReduceScatter staging offsets, split out of ncclCeReduceScatter() for host testability;
+// ncclCeAllReduce() still open-codes these same three formulas.
+
+// Offset is keyed by senderRank, not dstRank: every peer reduces the same slot layout.
+inline size_t ncclCeReduceScatterDstSlotOffsetBytes(int slot, int senderRank, int nRanks, size_t slotChunkBytes) {
+  return ((size_t)slot * (size_t)nRanks + (size_t)senderRank) * slotChunkBytes;
+}
+
+// Offset of chunk `chunk` within dstRank's shard in sendbuff (shardBytes = recvcount * eltSize).
+inline size_t ncclCeReduceScatterSrcOffsetBytes(int dstRank, size_t shardBytes, int chunk, size_t chunkBytes) {
+  return (size_t)dstRank * shardBytes + (size_t)chunk * chunkBytes;
+}
+
+// [slot][rank] doorbell index; must match between the local array-index view and the peer byte-offset view.
+inline size_t ncclCeReduceScatterSignalIndex(int slot, int rank, int nRanks) {
+  return (size_t)slot * (size_t)nRanks + (size_t)rank;
+}
+
 // CE collectives that stage through ceARTmpBuf. Its setup is collective, so it runs in the group job, never at launch.
 inline bool ncclCeCollNeedsStaging(ncclFunc_t func) {
-  return func == ncclFuncAllReduce;
+  return func == ncclFuncAllReduce || func == ncclFuncReduceScatter;
 }
 
 enum ncclCeMethodId {
@@ -258,6 +288,13 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
                              ncclDataType_t datatype, ncclRedOp_t op, cudaStream_t stream,
                              struct ncclDevrWindow* recvWin = nullptr,
                              struct ncclCeCollArgs* profilerArgs = nullptr);
+
+// CE ReduceScatter: scatter → local-reduce into recvbuff (recvcount elements per rank).
+// Uses the same staging buffer as CE AllReduce (ncclCeEnsureAllReduceStaging).
+ncclResult_t ncclCeReduceScatter(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t recvcount,
+                                 ncclDataType_t datatype, ncclRedOp_t op, cudaStream_t stream,
+                                 struct ncclDevrWindow* recvWin = nullptr,
+                                 struct ncclCeCollArgs* profilerArgs = nullptr);
 
 // Reduce-kernel block count for a per-rank chunk of `chunkElems` elements
 // (chunkElems = count / nRanks). Mirrors the geometry ncclCeLaunchLocalReduce

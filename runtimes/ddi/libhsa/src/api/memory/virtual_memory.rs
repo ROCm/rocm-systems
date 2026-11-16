@@ -6,14 +6,15 @@
 use std::collections::HashMap;
 use std::ffi::c_void;
 
-use rocddi::memory::device::{MemoryKind, VirtualAddress, VirtualMemoryPlacement};
+use rocddi::memory::device::{
+    MemoryKind, VirtualAddress, VirtualMemoryOptions, VirtualMemoryPlacement,
+};
 
 use crate::ffi::*;
 use crate::memory::pool::*;
 use crate::memory::virtual_memory::*;
 use crate::memory::*;
-use crate::platform::fd::{AsFd, IntoRawFd};
-use crate::platform::memory as linux_interop;
+use crate::platform::memory as native_memory;
 use crate::runtime::{HsaState, boundary, initialized_mut, lock, map_error};
 
 #[cfg_attr(
@@ -28,12 +29,14 @@ pub unsafe extern "C" fn hsa_amd_vmem_address_reserve(
     requested: u64,
     flags: u64,
 ) -> Status {
-    // SAFETY: This entry point is the default-alignment form of the same ABI.
-    let page = match current_host_page() {
-        Ok(page) => page,
-        Err(status) => return status,
-    };
-    unsafe { hsa_amd_vmem_address_reserve_align(address, size, requested, page as u64, flags) }
+    boundary(|| {
+        // SAFETY: This entry point is the default-alignment form of the same ABI.
+        let page = match current_host_page() {
+            Ok(page) => page,
+            Err(status) => return status,
+        };
+        unsafe { hsa_amd_vmem_address_reserve_align(address, size, requested, page as u64, flags) }
+    })
 }
 
 #[cfg_attr(
@@ -216,8 +219,10 @@ pub unsafe extern "C" fn hsa_amd_vmem_handle_create(
         let memory = match runtime.gpus[device_index].device.create_virtual_memory(
             kind,
             size as u64,
-            memory_type == MEMORY_TYPE_PINNED,
-            uncached,
+            VirtualMemoryOptions {
+                pinned: memory_type == MEMORY_TYPE_PINNED,
+                uncached,
+            },
         ) {
             Ok(memory) => memory,
             Err(error) => return map_error(error),
@@ -639,13 +644,13 @@ pub unsafe extern "C" fn hsa_amd_vmem_export_shareable_handle(
         if flags & DMABUF_MAPPING_PCIE != 0 && !gpu_pcie_dmabuf_supported(runtime, index) {
             return NOT_SUPPORTED;
         }
-        let dma_buf = match linux_interop::export_virtual_memory(memory) {
+        let dma_buf = match native_memory::export_virtual_memory(memory) {
             Ok(dma_buf) => dma_buf,
             Err(error) => return map_error(error),
         };
         // SAFETY: The caller supplied writable output storage and ownership of
         // the descriptor is transferred only after export succeeds.
-        unsafe { descriptor.write(dma_buf.into_fd().into_raw_fd()) };
+        unsafe { descriptor.write(dma_buf.into_descriptor()) };
         SUCCESS
     })
 }
@@ -675,14 +680,14 @@ pub unsafe extern "C" fn hsa_amd_vmem_import_shareable_handle(
         if runtime.memory_state.vmem_handles.try_reserve(1).is_err() {
             return OUT_OF_RESOURCES;
         }
-        let descriptor = match linux_interop::duplicate_descriptor(descriptor) {
+        let descriptor = match native_memory::duplicate_descriptor(descriptor) {
             Ok(descriptor) => descriptor,
             Err(error) => return map_error(error),
         };
         let Some(session) = runtime.session() else {
             return ERROR;
         };
-        let memory = match linux_interop::import_virtual_memory(session, descriptor.as_fd()) {
+        let memory = match native_memory::import_virtual_memory(session, &descriptor) {
             Ok(memory) => memory,
             Err(error) => return map_error(error),
         };
@@ -691,7 +696,7 @@ pub unsafe extern "C" fn hsa_amd_vmem_import_shareable_handle(
             Some(VirtualMemoryPlacement::Device(id)) => runtime
                 .gpus
                 .iter()
-                .position(|gpu| gpu.info().native_gpu_id == id)
+                .position(|gpu| gpu.endpoint.id == id)
                 .map_or(HsaMemoryPool { handle: 0 }, |index| {
                     HsaState::gpu_pool(index, GpuPoolKind::Coarse)
                 }),
@@ -832,10 +837,7 @@ pub unsafe extern "C" fn hsa_amd_vmem_get_vmem_info(
                 let agent = match memory.info().placement {
                     Some(VirtualMemoryPlacement::System) => HsaAgent { handle: CPU_AGENT },
                     Some(VirtualMemoryPlacement::Device(id)) => {
-                        let Some(index) = runtime
-                            .gpus
-                            .iter()
-                            .position(|gpu| gpu.info().native_gpu_id == id)
+                        let Some(index) = runtime.gpus.iter().position(|gpu| gpu.endpoint.id == id)
                         else {
                             return INVALID_ALLOCATION;
                         };
@@ -895,12 +897,12 @@ pub unsafe extern "C" fn hsa_amd_vmem_export_fabric_handle(
         let Some(memory) = handle.owned_memory() else {
             return ERROR;
         };
-        match linux_interop::fabric_virtual_memory_ready(memory) {
+        match native_memory::fabric_virtual_memory_ready(memory) {
             Ok(true) => (),
             Ok(false) => return RESOURCE_NOT_READY,
             Err(error) => return map_error(error),
         }
-        let fabric = match linux_interop::export_fabric_virtual_memory(memory) {
+        let fabric = match native_memory::export_fabric_virtual_memory(memory) {
             Ok(fabric) => fabric,
             Err(error) if error.kind() == rocddi::ErrorKind::Busy => return RESOURCE_NOT_READY,
             Err(error) => return map_error(error),

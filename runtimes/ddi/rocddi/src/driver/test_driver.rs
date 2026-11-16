@@ -1,35 +1,194 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-//! Minimal non-GPU driver used to exercise heterogeneous session routing.
+//! Minimal driver used to exercise heterogeneous session, event, and GPU queue
+//! routing without relying on KFD hardware.
 
-use super::{AddressSpaceInfo, AllocationOperations, CachedInfo, Driver, EndpointSelector};
+use super::{
+    AddressSpaceInfo, AllocationOperations, CachedInfo, Driver, EndpointSelector, UserQueueResource,
+};
+use crate::device::event::DeviceEvent;
+use crate::device::gpu::queue::{
+    QueueAccessWidth, QueueParameters, QueuePriority, QueueRequest, QueueScratch, QueueTransport,
+};
 use crate::memory::host::HostBackingLease;
 use crate::memory::storage::Owned;
 use crate::memory::{AllocationInfo, DeviceAccess, HostRegistration, MemoryKind};
 use crate::session::DriverContextLifetime;
 use crate::topology::{Endpoint, EndpointKind};
 use crate::{Error, ErrorKind};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
 
-/// Test driver instance with only the common driver contract.
+/// Test-only event stream shared by activated endpoints of one driver.
+struct TestEvents {
+    /// Events and waiters protected by the same lock as publication.
+    state: Mutex<TestEventState>,
+    /// Wakes subscribers after a new record is published.
+    changed: Condvar,
+    /// Lets a test publisher wait until a subscriber has entered its wait.
+    wait_started: Condvar,
+}
+
+/// Mutable event records and waiter count for one test driver.
+struct TestEventState {
+    /// Records retained until delivery or as the latest of their kind.
+    records: Vec<(u64, DeviceEvent)>,
+    /// Last sequence assigned to a published event.
+    sequence: u64,
+    /// Independent positions of active subscribers.
+    cursors: Vec<Arc<AtomicU64>>,
+    /// Subscribers currently waiting for a new record.
+    waiters: usize,
+}
+
+impl TestEventState {
+    /// Mirrors KFD retention: undelivered records and the latest of each kind.
+    fn prune(&mut self) {
+        let delivered = self
+            .cursors
+            .iter()
+            .map(|cursor| cursor.load(Ordering::Acquire))
+            .min()
+            .unwrap_or(self.sequence);
+        let latest_memory = self.records.iter().rev().find_map(|(sequence, event)| {
+            matches!(event, DeviceEvent::GpuMemoryFault(_)).then_some(*sequence)
+        });
+        let latest_hardware = self.records.iter().rev().find_map(|(sequence, event)| {
+            matches!(event, DeviceEvent::GpuHardwareException(_)).then_some(*sequence)
+        });
+        self.records.retain(|(sequence, _)| {
+            *sequence > delivered
+                || Some(*sequence) == latest_memory
+                || Some(*sequence) == latest_hardware
+        });
+    }
+
+    fn has_next(&self, cursor: u64) -> bool {
+        self.records.iter().any(|(sequence, _)| *sequence > cursor)
+    }
+}
+
+/// One independent cursor over a test driver's event stream.
+pub(crate) struct TestEventSubscription {
+    /// Keeps the test event stream live after its device handle is dropped.
+    events: Arc<TestEvents>,
+    /// Last delivered sequence, shared with pruning.
+    cursor: Arc<AtomicU64>,
+}
+
+impl TestEventSubscription {
+    /// Reads one retained event for this subscriber.
+    pub(crate) fn poll(&mut self) -> Result<Option<DeviceEvent>, Error> {
+        let mut state = self.events.state.lock().map_err(|_| Error::Operation {
+            kind: ErrorKind::Internal,
+            detail: "test event stream lock poisoned",
+        })?;
+        let event = state
+            .records
+            .iter()
+            .find(|(sequence, _)| *sequence > self.cursor.load(Ordering::Acquire))
+            .copied();
+        if let Some((sequence, _)) = event {
+            self.cursor.store(sequence, Ordering::Release);
+        }
+        state.prune();
+        Ok(event.map(|(_, event)| event))
+    }
+
+    /// Waits until a new test record is ready or the timeout expires.
+    pub(crate) fn wait_native(&self, timeout: std::time::Duration) -> Result<(), Error> {
+        let mut state = self.events.state.lock().map_err(|_| Error::Operation {
+            kind: ErrorKind::Internal,
+            detail: "test event stream lock poisoned",
+        })?;
+        if state.has_next(self.cursor.load(Ordering::Acquire)) {
+            return Ok(());
+        }
+        state.waiters += 1;
+        self.events.wait_started.notify_all();
+        let (mut state, _) = self
+            .events
+            .changed
+            .wait_timeout_while(state, timeout, |state| {
+                !state.has_next(self.cursor.load(Ordering::Acquire))
+            })
+            .map_err(|_| Error::Operation {
+                kind: ErrorKind::Internal,
+                detail: "test event wait lock poisoned",
+            })?;
+        state.waiters -= 1;
+        Ok(())
+    }
+}
+
+impl Drop for TestEventSubscription {
+    fn drop(&mut self) {
+        let mut state = self
+            .events
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state
+            .cursors
+            .retain(|cursor| !Arc::ptr_eq(cursor, &self.cursor));
+        state.prune();
+    }
+}
+
+/// Test driver instance with common routing and a numeric-only GPU queue.
 pub(crate) struct TestDriver {
     instance: super::DriverInstanceId,
     id: [u8; 16],
     kind: EndpointKind,
     lifetime: DriverContextLifetime,
     host_registration: bool,
+    owned_allocation: bool,
+    pub(crate) advice_enabled: bool,
+    pub(crate) advice_prefetch_gate: Option<Arc<(std::sync::Barrier, std::sync::Barrier)>>,
+    pub(crate) advice_calls: AtomicUsize,
+    pub(crate) advice_results: Mutex<Vec<crate::memory::advice::AdviceValue>>,
+    pub(crate) advice_changes: Mutex<Vec<crate::memory::advice::AdviceChange>>,
     pub(crate) shutdowns: Arc<AtomicUsize>,
     pub(crate) fail_shutdown: Arc<AtomicBool>,
     pub(crate) enumerations: Arc<AtomicUsize>,
     pub(crate) opens: Arc<AtomicUsize>,
+    /// Injects one failed native queue retirement without consuming its owner.
+    pub(crate) fail_queue_destroy: Arc<AtomicBool>,
+    /// Counts conclusively retired native queues.
+    pub(crate) queue_destroys: Arc<AtomicUsize>,
+    /// Event stream available from every activated test endpoint.
+    events: Arc<TestEvents>,
 }
 
-/// Activated test endpoint. It intentionally has no GPU resource capabilities.
+/// Activated test endpoint. GPU queue transport is numeric-only and cannot be
+/// dereferenced or rung by a test producer.
 #[derive(Clone)]
 pub(crate) struct TestDevice {
     id: [u8; 16],
+    pub(crate) asic_family_id: u32,
+    events: Arc<TestEvents>,
+}
+
+impl TestDevice {
+    /// Subscribes to events emitted by the owning test driver.
+    pub(crate) fn subscribe_events(&self) -> TestEventSubscription {
+        let mut state = self
+            .events
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let first = state
+            .records
+            .first()
+            .map_or(state.sequence, |(sequence, _)| sequence - 1);
+        let cursor = Arc::new(AtomicU64::new(first));
+        state.cursors.push(cursor.clone());
+        TestEventSubscription {
+            events: self.events.clone(),
+            cursor,
+        }
+    }
 }
 
 /// Numeric-only allocation used to test backing lifetimes across drivers.
@@ -40,6 +199,100 @@ pub(crate) struct TestAllocation {
     size: u64,
     released: bool,
     backing: Option<HostBackingLease>,
+}
+
+/// Numeric-only transport used to test public queue routing and retirement.
+pub(crate) struct TestQueue {
+    id: [u8; 16],
+    info: QueueTransport,
+    fail_destroy: Arc<AtomicBool>,
+    destroys: Arc<AtomicUsize>,
+    released: bool,
+}
+
+impl CachedInfo for TestQueue {
+    type Info = QueueTransport;
+
+    fn cached_info(&self) -> QueueTransport {
+        self.info
+    }
+}
+
+#[allow(unsafe_code)]
+impl UserQueueResource for TestQueue {
+    type DeviceState = TestDevice;
+
+    fn check(&self) -> Result<(), Error> {
+        if self.released {
+            Err(Error::Operation {
+                kind: ErrorKind::Unsupported,
+                detail: "test queue has been retired",
+            })
+        } else {
+            Ok(())
+        }
+    }
+
+    fn progress(&self) -> Result<(u64, u64), Error> {
+        self.check()?;
+        Ok((0, 0))
+    }
+
+    fn inactivate(&mut self) -> Result<(), Error> {
+        self.check()
+    }
+
+    fn set_priority(&mut self, _: QueuePriority) -> Result<(), Error> {
+        self.check()
+    }
+
+    fn set_cu_mask(&mut self, _: &[u32]) -> Result<(), Error> {
+        self.check()
+    }
+
+    unsafe fn set_scratch(&mut self, _: QueueScratch) -> Result<(), Error> {
+        Err(Error::Operation {
+            kind: ErrorKind::Unsupported,
+            detail: "test queue has no scratch",
+        })
+    }
+
+    unsafe fn destroy(&mut self) -> Result<(), Error> {
+        self.check()?;
+        if self.fail_destroy.swap(false, Ordering::AcqRel) {
+            return Err(Error::Operation {
+                kind: ErrorKind::Driver,
+                detail: "injected test queue retirement failure",
+            });
+        }
+        self.released = true;
+        self.destroys.fetch_add(1, Ordering::Release);
+        Ok(())
+    }
+
+    unsafe fn destroy_with_retained_transport(
+        &mut self,
+        callback: &mut dyn FnMut(),
+    ) -> Result<(), Error> {
+        // SAFETY: The test queue has no native producer or external mapping.
+        unsafe { self.destroy()? };
+        callback();
+        Ok(())
+    }
+
+    fn map_device(&self, device: &TestDevice) -> Result<QueueTransport, Error> {
+        self.check()?;
+        if self.id != device.id {
+            return Err(Error::Operation {
+                kind: ErrorKind::Unsupported,
+                detail: "test queue has no mapping on this device",
+            });
+        }
+        Ok(QueueTransport {
+            doorbell_device_address: Some(0x8000),
+            ..self.info
+        })
+    }
 }
 
 impl CachedInfo for TestAllocation {
@@ -64,16 +317,124 @@ impl TestDriver {
             kind,
             lifetime,
             host_registration: false,
+            owned_allocation: false,
+            advice_enabled: false,
+            advice_prefetch_gate: None,
+            advice_calls: AtomicUsize::new(0),
+            advice_results: Mutex::new(Vec::new()),
+            advice_changes: Mutex::new(Vec::new()),
             shutdowns: Arc::new(AtomicUsize::new(0)),
             fail_shutdown: Arc::new(AtomicBool::new(false)),
             enumerations: Arc::new(AtomicUsize::new(0)),
             opens: Arc::new(AtomicUsize::new(0)),
+            fail_queue_destroy: Arc::new(AtomicBool::new(false)),
+            queue_destroys: Arc::new(AtomicUsize::new(0)),
+            events: Arc::new(TestEvents {
+                state: Mutex::new(TestEventState {
+                    records: Vec::new(),
+                    sequence: 0,
+                    cursors: Vec::new(),
+                    waiters: 0,
+                }),
+                changed: Condvar::new(),
+                wait_started: Condvar::new(),
+            }),
         }
+    }
+
+    /// Emits a device event to every active test subscription.
+    pub(crate) fn publish_event(&self, event: DeviceEvent) -> Result<(), Error> {
+        let mut state = self.events.state.lock().map_err(|_| Error::Operation {
+            kind: ErrorKind::Internal,
+            detail: "test event stream lock poisoned",
+        })?;
+        state.records.try_reserve(1).map_err(|_| Error::Capacity {
+            resource: "test event stream",
+        })?;
+        state.sequence = state.sequence.checked_add(1).ok_or(Error::Capacity {
+            resource: "test event sequence",
+        })?;
+        let sequence = state.sequence;
+        state.records.push((sequence, event));
+        state.prune();
+        drop(state);
+        self.events.changed.notify_all();
+        Ok(())
+    }
+
+    /// Waits until a subscriber is blocked in the test event wait path.
+    pub(crate) fn wait_for_subscriber(&self, timeout: std::time::Duration) -> Result<bool, Error> {
+        let state = self.events.state.lock().map_err(|_| Error::Operation {
+            kind: ErrorKind::Internal,
+            detail: "test event stream lock poisoned",
+        })?;
+        let (state, _) = self
+            .events
+            .wait_started
+            .wait_timeout_while(state, timeout, |state| state.waiters == 0)
+            .map_err(|_| Error::Operation {
+                kind: ErrorKind::Internal,
+                detail: "test event wait-start lock poisoned",
+            })?;
+        Ok(state.waiters != 0)
+    }
+
+    pub(crate) fn with_owned_allocation(mut self) -> Self {
+        self.owned_allocation = true;
+        self
     }
 
     pub(crate) fn with_host_registration(mut self) -> Self {
         self.host_registration = true;
         self
+    }
+
+    /// Creates a fake SDMA transport without publishing any accessible pages.
+    pub(crate) fn create_user_queue(
+        &self,
+        device: &TestDevice,
+        request: QueueRequest,
+    ) -> Result<Owned<TestQueue>, Error> {
+        if device.id != self.id || !matches!(self.kind, EndpointKind::Gpu { .. }) {
+            return Err(Error::Operation {
+                kind: ErrorKind::InvalidArgument,
+                detail: "test endpoint is not this driver's GPU",
+            });
+        }
+        if !matches!(request.parameters, QueueParameters::Sdma)
+            || request.ring_size_bytes < 4096
+            || !request.ring_size_bytes.is_power_of_two()
+        {
+            return Err(Error::Operation {
+                kind: ErrorKind::Unsupported,
+                detail: "test GPU only supports power-of-two SDMA queues",
+            });
+        }
+        Ok(Owned::new(TestQueue {
+            id: self.id,
+            info: QueueTransport {
+                ring_host_address: 0x1000,
+                ring_device_address: 0x2000,
+                ring_size_bytes: request.ring_size_bytes,
+                aql_control: None,
+                sdma_engine_id: None,
+                read_index_host_address: 0x3000,
+                read_index_device_address: 0x4000,
+                write_index_host_address: 0x5000,
+                write_index_device_address: 0x6000,
+                read_index_width: QueueAccessWidth::Bits64,
+                write_index_width: QueueAccessWidth::Bits64,
+                index_unit_bytes: 1,
+                read_index_wraps: false,
+                doorbell_host_address: 0x7000,
+                doorbell_device_address: request.device_producer.then_some(0x8000),
+                doorbell_width: QueueAccessWidth::Bits64,
+                host_publication: crate::device::gpu::queue::HostQueuePublication::Ordered64BitMmio,
+            },
+            fail_destroy: self.fail_queue_destroy.clone(),
+            destroys: self.queue_destroys.clone(),
+            released: false,
+        })?)
     }
 
     fn endpoint(&self) -> Endpoint {
@@ -165,7 +526,6 @@ impl Driver for TestDriver {
     fn populate_endpoint(&self, endpoint: &mut Endpoint) -> Result<(), Error> {
         endpoint.product_name = Some("Test endpoint".to_owned());
         if let EndpointKind::Gpu { info } = &mut endpoint.kind {
-            info.drm_asic_family_id = Some(42);
             info.counter_frequency_hz = Some(1_000_000);
         }
         Ok(())
@@ -178,12 +538,52 @@ impl Driver for TestDriver {
                 detail: "foreign test endpoint",
             });
         }
-        Ok(TestDevice { id: self.id })
+        Ok(TestDevice {
+            id: self.id,
+            asic_family_id: 42,
+            events: self.events.clone(),
+        })
     }
 }
 
 impl AllocationOperations for TestDriver {
     type Allocation = TestAllocation;
+
+    fn memory_capabilities(
+        &self,
+        endpoint: &Endpoint,
+        request: crate::memory::device::MemoryCapabilityRequest<'_>,
+    ) -> Result<crate::memory::device::DeviceMemoryCapabilities, Error> {
+        use crate::memory::device::{DeviceMemoryCapabilities, MemoryCapabilityRequest};
+        if endpoint.id != self.id || endpoint.driver_instance != self.instance {
+            return Err(super::instance::unsupported_test_gpu());
+        }
+        let registered = match request {
+            MemoryCapabilityRequest::Allocation(MemoryKind::System) if self.owned_allocation => {
+                false
+            }
+            MemoryCapabilityRequest::Registration(_) if self.host_registration => true,
+            _ => return Err(super::instance::unsupported_test_gpu()),
+        };
+        let page = crate::memory::host::host_page_size()?;
+        Ok(DeviceMemoryCapabilities {
+            native: crate::memory::constraints::AllocationLimits {
+                alignment: page,
+                granularity: page,
+                maximum_size: 1 << 30,
+            },
+            maximum_alignment: 1 << 20,
+            logical_alignment: if registered { 1 } else { page },
+            logical_size_granularity: 1,
+            required_access: DeviceAccess::READ,
+            supported_access: DeviceAccess::READ | DeviceAccess::WRITE,
+            host_visible: true,
+            host_cacheability: Some(crate::memory::HostCacheability::WriteBack),
+            host_writable: true,
+            host_coherent: false,
+            queue_storage: false,
+        })
+    }
 
     fn supports_host_registration(&self, _: &Endpoint) -> bool {
         self.host_registration
@@ -230,17 +630,30 @@ impl AllocationOperations for TestDriver {
 
     fn allocate_owned(
         &self,
-        _: &Self::DeviceState,
-        _: &[&Self::DeviceState],
-        _: MemoryKind,
-        _: u64,
-        _: u64,
-        _: DeviceAccess,
+        device: &Self::DeviceState,
+        peers: &[&Self::DeviceState],
+        kind: MemoryKind,
+        size: u64,
+        alignment: u64,
+        _permissions: DeviceAccess,
     ) -> Result<Owned<Self::Allocation>, Error> {
-        Err(Error::Operation {
-            kind: ErrorKind::Unsupported,
-            detail: "test driver has no owned allocation",
-        })
+        if !self.owned_allocation || kind != MemoryKind::System || !peers.is_empty() {
+            return Err(Error::Operation {
+                kind: ErrorKind::Unsupported,
+                detail: "unsupported test allocation",
+            });
+        }
+        let host = crate::memory::host::HostAllocation::allocate(size, alignment)?;
+        let info = host.info();
+        let backing = host.registration_lease()?;
+        Ok(Owned::new(TestAllocation {
+            id: device.id,
+            host_address: info.host_address,
+            device_address: info.host_address as u64,
+            size,
+            released: false,
+            backing: Some(backing),
+        })?)
     }
 
     /// # Safety
@@ -274,5 +687,74 @@ impl AllocationOperations for TestDriver {
             released: false,
             backing: request.backing,
         })?)
+    }
+}
+
+// A clock-only provider needs no PC sampling, SPM, or trap implementation.
+impl super::GpuClockOperations for TestDriver {
+    fn clock_counters(
+        &self,
+        _device: &TestDevice,
+    ) -> Result<crate::device::gpu::profiling::ClockCounters, Error> {
+        Ok(crate::device::gpu::profiling::ClockCounters {
+            gpu: 17,
+            host: 29,
+            system: None,
+            gpu_info: crate::host::clock::ClockInfo {
+                frequency_hz: 25_000_000,
+                counter_bit_count: 64,
+            },
+        })
+    }
+}
+
+impl super::MemoryAdviceOperations for TestDriver {
+    fn advice_capabilities(&self) -> Result<crate::memory::advice::AdviceCapabilities, Error> {
+        Ok(crate::memory::advice::AdviceCapabilities {
+            prefetch_completion: crate::memory::advice::PrefetchCompletion::Migration,
+            range_alignment: 4096,
+            minimum_migration_granularity: 4096,
+            maximum_migration_granularity: 1 << 30,
+        })
+    }
+    fn advice_set(
+        &self,
+        _address: u64,
+        _size: u64,
+        changes: &[crate::memory::advice::AdviceChange],
+    ) -> Result<(), Error> {
+        self.advice_calls.fetch_add(1, Ordering::Relaxed);
+        self.advice_changes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .extend_from_slice(changes);
+        Ok(())
+    }
+    fn advice_query(
+        &self,
+        _address: u64,
+        _size: u64,
+        _queries: &[crate::memory::advice::AdviceQuery],
+    ) -> Result<Vec<crate::memory::advice::AdviceValue>, Error> {
+        self.advice_calls.fetch_add(1, Ordering::Relaxed);
+        Ok(self
+            .advice_results
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone())
+    }
+    fn advice_prefetch(
+        &self,
+        _address: u64,
+        _size: u64,
+        _location: crate::memory::advice::AdviceLocation,
+        _completion: crate::memory::advice::PrefetchCompletion,
+    ) -> Result<(), Error> {
+        if let Some(gate) = &self.advice_prefetch_gate {
+            gate.0.wait();
+            gate.1.wait();
+        }
+        self.advice_calls.fetch_add(1, Ordering::Relaxed);
+        Ok(())
     }
 }

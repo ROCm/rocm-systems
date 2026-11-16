@@ -35,6 +35,8 @@ RdcRocrBase::RdcRocrBase(void) {
   kern_arg_pool_.handle = 0;
   main_queue_ = nullptr;
   kernarg_buffer_ = nullptr;
+  code_obj_rdr_.handle = 0;
+  executable_.handle = 0;
   kernel_object_ = 0;
   memset(&aql_, 0, sizeof(aql_));
   set_requires_profile(-1);

@@ -101,7 +101,8 @@ TEST(RelocationFunctionTableHip, TranslatesEightWayDeviceDispatch) {
   const auto blocks =
       rocjitsu::build_valid_blocks(*source, *decoder, ROCJITSU_CODE_ARCH_CDNA5, source_targets);
   const auto dispatches =
-      rocjitsu::analyze_relocation_pairs(blocks, source_tables, source->text_sections()[0]->vaddr())
+      rocjitsu::analyze_relocation_pairs(blocks, source_tables, source->text_sections()[0]->vaddr(),
+                                         /*wave_size=*/32)
           .dispatches;
   ASSERT_EQ(dispatches.size(), 1u);
   EXPECT_EQ(dispatches[0].table_index, 0u);

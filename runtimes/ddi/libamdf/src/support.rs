@@ -60,7 +60,9 @@ pub(crate) unsafe fn object<'a, T>(p: *const T) -> Result<&'a T, u64> {
 
 pub(crate) unsafe fn exclusive<'a, T>(p: *mut T) -> Result<&'a mut T, u64> {
     output_pointer(p)?;
-    // SAFETY: Mutating operations require exclusive access in the C contract.
+    // SAFETY: Callers use this helper only for destruction after checking that
+    // no child can hold a shared borrow of this object. The C contract also
+    // excludes concurrent direct use of the public handle being destroyed.
     Ok(unsafe { &mut *p })
 }
 
@@ -216,16 +218,60 @@ pub(crate) fn unregister(counter: &AtomicU64) {
 }
 
 pub(crate) fn native(error: &rocddi::Error) -> u64 {
-    if let Some(code) = error.native_error_code() {
-        return (u64::from(AMDF_STATUS_DOMAIN_ERRNO) << 32) | u64::from(code.unsigned_abs());
+    if let Some(status) = error.native_status() {
+        let domain = match status.domain {
+            rocddi::NativeStatusDomain::Errno => AMDF_STATUS_DOMAIN_ERRNO,
+            rocddi::NativeStatusDomain::Win32 => AMDF_STATUS_DOMAIN_WIN32,
+            rocddi::NativeStatusDomain::NtStatus => AMDF_STATUS_DOMAIN_NTSTATUS,
+            rocddi::NativeStatusDomain::Hresult => AMDF_STATUS_DOMAIN_HRESULT,
+            rocddi::NativeStatusDomain::Firmware => AMDF_STATUS_DOMAIN_FIRMWARE,
+        };
+        return (u64::from(domain) << 32) | u64::from(status.code);
     }
     match error.kind() {
         rocddi::ErrorKind::InvalidArgument => INVALID,
+        rocddi::ErrorKind::NotFound => NOT_FOUND,
         rocddi::ErrorKind::Unsupported => UNSUPPORTED,
         rocddi::ErrorKind::PermissionDenied => u64::from(AMDF_STATUS_CODE_PERMISSION_DENIED),
         rocddi::ErrorKind::ResourceExhausted => EXHAUSTED,
         rocddi::ErrorKind::Busy => BUSY,
         rocddi::ErrorKind::DeviceLost => LOST,
         _ => INTERNAL,
+    }
+}
+
+#[cfg(test)]
+mod native_status_tests {
+    use super::*;
+    use rocddi::{Error, ErrorKind, NativeStatus, NativeStatusDomain};
+
+    #[test]
+    fn amdf_preserves_native_namespaces_and_high_bits() {
+        for (domain, abi_domain) in [
+            (NativeStatusDomain::Errno, AMDF_STATUS_DOMAIN_ERRNO),
+            (NativeStatusDomain::Win32, AMDF_STATUS_DOMAIN_WIN32),
+            (NativeStatusDomain::NtStatus, AMDF_STATUS_DOMAIN_NTSTATUS),
+            (NativeStatusDomain::Hresult, AMDF_STATUS_DOMAIN_HRESULT),
+            (NativeStatusDomain::Firmware, AMDF_STATUS_DOMAIN_FIRMWARE),
+        ] {
+            for code in [5, 0x8007_0005, 0xc000_0022, u32::MAX] {
+                let error = Error::DriverOperation {
+                    kind: ErrorKind::PermissionDenied,
+                    operation: "native status test",
+                    status: NativeStatus { domain, code },
+                };
+                assert_eq!(
+                    native(&error),
+                    (u64::from(abi_domain) << 32) | u64::from(code)
+                );
+            }
+        }
+        assert_eq!(
+            native(&Error::Operation {
+                kind: ErrorKind::Unsupported,
+                detail: "missing service"
+            }),
+            UNSUPPORTED
+        );
     }
 }

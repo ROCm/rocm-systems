@@ -43,9 +43,13 @@ The following rules are enforced on all files in `src/` (see `pyproject.toml` fo
 
 ### Type Annotations
 
+Write annotations in the form Python 3.8 accepts, as
+[Python 3.8 Compatible Syntax](../../PYTHON_CODING_STYLE.md#python-38-compatible-syntax)
+describes.
+
 ```python
 # Correct
-def process_data(name: str, values: list[float]) -> dict[str, Any]:
+def process_data(name: str, values: List[float]) -> Dict[str, Any]:
     ...
 
 # Flagged by Ruff (ANN)

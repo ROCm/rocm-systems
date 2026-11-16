@@ -3,6 +3,7 @@
 
 #include "common/env_vars.hpp"
 #include "common/path.hpp"
+#include "common/string_utility.hpp"
 #include "logger/debug.hpp"
 
 #include <fmt/format.h>
@@ -13,11 +14,13 @@
 #include <cstdlib>
 #include <cstring>
 #include <exception>
+#include <filesystem>
 #include <iostream>
 #include <limits>
 #include <optional>
 #include <sstream>
 #include <string>
+#include <system_error>
 #include <thread>
 #include <vector>
 
@@ -130,9 +133,22 @@ setup_output_env(const std::string& output_path)
         return;
     }
 
-    const auto* const pwd = getenv("PWD");
-    const auto        output =
-        output_path.empty() ? fmt::format("{}/rocprof-sys-output", pwd) : output_path;
+    auto output = output_path;
+    if(output.empty())
+    {
+        // error_code overload: current_path() throws if the cwd was deleted or is not
+        // accessible, and nothing in main() would catch it.
+        std::error_code cwd_error;
+        const auto      cwd = std::filesystem::current_path(cwd_error);
+        if(cwd_error)
+        {
+            LOG_ERROR("Unable to determine the current directory for the default "
+                      "output path: {}",
+                      cwd_error.message());
+            std::exit(EXIT_FAILURE);
+        }
+        output = (cwd / "rocprof-sys-output").string();
+    }
 
     setenv(rocprofsys::env_vars::OUTPUT_PATH, output.c_str(), 1);
     LOG_INFO("Output path: {}", output);
@@ -182,37 +198,35 @@ consume_arg(int& i, int argc, char* argv[], const char* opt_name)
 void
 parse_pid(attach_options& opts, const char* arg)
 {
-    try
+    auto const pid = rocprofsys::utility::string::safe_stoi(arg);
+    if(pid.is_error())
     {
-        opts.pid = std::stoi(arg);
-        if(opts.pid <= 0)
-        {
-            LOG_ERROR("PID must be a positive integer.");
-            std::exit(EXIT_FAILURE);
-        }
-    } catch(const std::exception&)
-    {
-        LOG_ERROR("Invalid PID '{}'.", arg);
+        LOG_ERROR("Invalid PID '{}': {}.", arg, pid.error());
         std::exit(EXIT_FAILURE);
     }
+    if(pid.value() <= 0)
+    {
+        LOG_ERROR("PID must be a positive integer.");
+        std::exit(EXIT_FAILURE);
+    }
+    opts.pid = pid.value();
 }
 
 void
 parse_detach_after(attach_options& opts, const char* arg)
 {
-    try
+    auto const detach_after = rocprofsys::utility::string::safe_stoi(arg);
+    if(detach_after.is_error())
     {
-        opts.detach_after = std::stoi(arg);
-        if(opts.detach_after < 0)
-        {
-            LOG_ERROR("--detach-after must be non-negative.");
-            std::exit(EXIT_FAILURE);
-        }
-    } catch(const std::exception&)
-    {
-        LOG_ERROR("Invalid --detach-after value '{}'.", arg);
+        LOG_ERROR("Invalid --detach-after value '{}': {}.", arg, detach_after.error());
         std::exit(EXIT_FAILURE);
     }
+    if(detach_after.value() < 0)
+    {
+        LOG_ERROR("--detach-after must be non-negative.");
+        std::exit(EXIT_FAILURE);
+    }
+    opts.detach_after = detach_after.value();
 }
 
 void

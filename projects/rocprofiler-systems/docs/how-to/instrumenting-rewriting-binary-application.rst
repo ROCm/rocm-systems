@@ -11,6 +11,11 @@ There are two ways to perform instrumentation with the ``rocprof-sys-instrument`
 * Runtime instrumentation
 * Binary rewrite
 
+.. note::
+
+   The experimental ``rocsys`` command exposes these two modes as
+   ``rocsys instrument`` and ``rocsys rewrite``. See :doc:`using-rocsys`.
+
 Here is a comparison of the two modes:
 
 * Runtime instrumentation of the application using the ``rocprof-sys-instrument`` executable

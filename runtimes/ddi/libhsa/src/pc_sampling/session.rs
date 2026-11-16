@@ -177,6 +177,8 @@ pub(super) struct Resources {
     lost: usize,
     /// Whether sampling is currently started.
     active: bool,
+    /// Final callback delivery has completed before legacy tool unload.
+    callbacks_quiesced: bool,
     /// Keeps backing alive when a handler update may have taken effect.
     trap_may_be_installed: bool,
 }
@@ -353,6 +355,7 @@ impl Resources {
             pending: VecDeque::new(),
             lost: 0,
             active: false,
+            callbacks_quiesced: false,
             trap_may_be_installed: false,
         })
     }
@@ -373,7 +376,12 @@ impl Resources {
     /// Registers the trap handler and sampling trace with the GPU.
     fn activate(&mut self) -> Status {
         let trace = self.device.gpu().and_then(|gpu| match self.trace_id {
-            Some(id) => gpu.adopt_pc_sampling(self.request, id),
+            Some(id) => {
+                // SAFETY: The admitted HSA create-from-ID call transfers sole
+                // control of the stopped matching trace. Resources retains
+                // trap/sample backing through use and uncertain teardown.
+                unsafe { crate::platform::profiling::adopt(&gpu, self.request, id) }
+            }
             None => gpu.create_pc_sampling(self.request),
         });
         let trace = match trace {
@@ -440,9 +448,11 @@ impl Resources {
 
     /// Stops sampling and retires the native trace and handler.
     fn destroy(&mut self) -> Status {
-        let status = self.stop();
-        if status != SUCCESS {
-            return status;
+        if !self.callbacks_quiesced {
+            let status = self.stop();
+            if status != SUCCESS {
+                return status;
+            }
         }
         if self.trap_may_be_installed {
             if let Err(status) = self.set_handler(0, 0) {
@@ -540,6 +550,9 @@ impl Resources {
 
     /// Delivers accumulated samples when the threshold or force flag is met.
     fn deliver(&mut self, force: bool) {
+        if self.callbacks_quiesced {
+            return;
+        }
         deliver_pending(
             &mut self.pending,
             &mut self.lost,
@@ -749,7 +762,7 @@ impl SessionHandle {
     pub(super) fn create(
         resources: Resources,
         agent: HsaAgent,
-        quarantine: &AtomicBool,
+        quarantine: &crate::runtime::GenerationHealth,
     ) -> Result<Arc<Self>, Status> {
         let session = Arc::new(Self {
             agent,
@@ -793,7 +806,7 @@ impl SessionHandle {
         };
         if status != SUCCESS {
             if trap_may_be_installed {
-                quarantine.store(true, Ordering::Release);
+                quarantine.quarantine();
             }
             session.quarantine();
             return Err(status);
@@ -803,6 +816,9 @@ impl SessionHandle {
 
     /// Starts this session.
     pub(crate) fn start(&self) -> Status {
+        if self.stop_worker.load(Ordering::Acquire) {
+            return INVALID_RUNTIME_STATE;
+        }
         self.resources
             .lock()
             .map_or(ERROR, |mut resources| resources.start())
@@ -810,6 +826,9 @@ impl SessionHandle {
 
     /// Stops this session.
     pub(crate) fn stop(&self) -> Status {
+        if self.stop_worker.load(Ordering::Acquire) {
+            return INVALID_RUNTIME_STATE;
+        }
         self.resources
             .lock()
             .map_or(ERROR, |mut resources| resources.stop())
@@ -817,9 +836,35 @@ impl SessionHandle {
 
     /// Flushes pending samples through the synchronized session.
     pub(crate) fn flush(&self) -> Status {
+        if self.stop_worker.load(Ordering::Acquire) {
+            return INVALID_RUNTIME_STATE;
+        }
         self.resources
             .lock()
             .map_or(ERROR, |mut resources| resources.flush())
+    }
+
+    /// Stops callback delivery while native resources and public handles remain
+    /// available to a legacy tool's `OnUnload` callback.
+    pub(crate) fn quiesce_for_tool_unload(&self) -> Status {
+        self.stop_worker.store(true, Ordering::Release);
+        let worker = match self.worker.lock() {
+            Ok(mut worker) => worker.take(),
+            Err(_) => return ERROR,
+        };
+        if let Some(worker) = worker {
+            if worker.join().is_err() {
+                return ERROR;
+            }
+        }
+        let Ok(mut resources) = self.resources.lock() else {
+            return ERROR;
+        };
+        let status = resources.stop();
+        if status == SUCCESS {
+            resources.callbacks_quiesced = true;
+        }
+        status
     }
 
     /// Destroys the session and returns assets requiring deferred release.

@@ -161,8 +161,9 @@ endmacro()
 
 # Helper macro: report a decode test as skipped, not failed, when the GPU's VCN doesn't support the
 # stream's codec (e.g. AV1 on gfx90a). videoDecodeRaw and videoDecode print this message and exit
-# with 77 in that case. ctest --build-and-test reports any non-zero test exit code as 1, so match
-# the message instead of setting SKIP_RETURN_CODE.
+# with 77 in that case, and videoDecodeBatch does so when the GPU supports none of the input files.
+# ctest --build-and-test reports any non-zero test exit code as 1, so match the message instead of
+# setting SKIP_RETURN_CODE.
 macro(set_codec_skip TEST_NAME)
   set_property(TEST ${TEST_NAME} PROPERTY SKIP_REGULAR_EXPRESSION "Codec not supported on GPU, skipping!")
 endmacro()
@@ -375,6 +376,7 @@ if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
             -i ${ROCM_PATH}/share/rocdecode/video/ -t 2
   )
   set_test_env(video_decodeBatch)
+  set_codec_skip(video_decodeBatch)
 
   # 14 - videoDecodeRGB
   add_test(

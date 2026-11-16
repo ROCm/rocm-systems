@@ -8,6 +8,7 @@
 #define SYMMETRIC_KERNEL_LOG_HPP
 
 #include <cctype>
+#include <istream>
 #include <string>
 
 namespace RcclUnitTesting
@@ -38,6 +39,21 @@ namespace RcclUnitTesting
   {
     const size_t tag = line.find(func + " [Symmetric]:");
     return tag == std::string::npos ? "" : TokenAfter(line.substr(tag), "Kernel ");
+  }
+
+  // Kernel named by the last "<func> [Symmetric]" line in log, or "" if none. Only rank 0 logs it.
+  inline std::string LastSymmetricKernel(std::istream& log, const std::string& func)
+  {
+    std::string line, kernel;
+    while (std::getline(log, line))
+    {
+      const std::string onLine = SymmetricKernelOnLine(line, func);
+      if (!onLine.empty())
+      {
+        kernel = onLine;
+      }
+    }
+    return kernel;
   }
 
   // Tensor Data Mover kernels (AllGather_TmaST, ...) are the ones reported as SymTDM.

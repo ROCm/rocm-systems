@@ -6,6 +6,7 @@
 use std::ffi::c_void;
 use std::ptr;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use crate::callback_arg::CallbackArg;
 use crate::ffi::*;
@@ -57,6 +58,12 @@ pub unsafe extern "C" fn hsa_amd_queue_intercept_create(
         let created = (|| -> Result<Arc<InterceptQueue>, Status> {
             let mut guard = lock()?;
             let runtime = initialized_mut(&mut guard)?;
+            // Lower queue creation has released its admission token. Closing
+            // this second phase under the lifecycle lock keeps every proxy
+            // worker in the shutdown callback snapshot.
+            if runtime.stop_workers.load(Ordering::Acquire) {
+                return Err(INVALID_RUNTIME_STATE);
+            }
             let index = runtime.gpu_index(agent).ok_or(INVALID_AGENT)?;
             runtime
                 .queue_state

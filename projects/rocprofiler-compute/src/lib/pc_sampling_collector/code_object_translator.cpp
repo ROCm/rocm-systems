@@ -66,7 +66,8 @@ std::vector<symbol_t> code_object_translator_impl_t::get_symbols(size_t object_i
 
 instruction_t code_object_translator_impl_t::get_instruction(size_t object_id, uint64_t virtual_address) const
 {
-    const auto& inst = m_translator->get(virtual_address);
+    const auto& load_address = m_obj_id_to_load_addr.at(object_id);
+    const auto& inst         = m_translator->get(object_id, virtual_address - load_address);
     if (inst)
     {
         return {inst->inst, inst->comment, virtual_address, inst->faddr, inst->size};

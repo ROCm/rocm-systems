@@ -13,8 +13,8 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 
 | Tier | Cases | Tagged | Missing `@asserts` |
 |---|---:|---:|---:|
-| `contract` | 630 | 630 | 0 |
-| **total** | **630** | **630** | **0** |
+| `contract` | 635 | 635 | 0 |
+| **total** | **635** | **635** | **0** |
 
 ## Tier: `contract`
 
@@ -789,10 +789,11 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_MemAdviseV2_HipMemAdviseV2_SetReadMostly_IsAcceptedOrUnsupported` | hipMemAdvise_v2 | the location-based set-read-mostly hint on managed memory is accepted or reported unsupported |
 | `Contract_MemAdviseV2_HipMemPrefetchAsyncV2_PrefetchAsync_IsAcceptedOrUnsupported` | hipMemPrefetchAsync_v2 | a location-based prefetch either completes after stream sync or is reported unsupported |
 
-### `mem_batch_copy` (3 cases)
+### `mem_batch_copy` (4 cases)
 
 | Case | API | Asserts |
 |---|---|---|
+| `Contract_MemBatchCopy_HipExtMemcpyBatchAsync_TwoOps_RoundTripBytes` | hipExtMemcpyBatchAsync | a two-op batch with all extended parameters null (no asymmetric swap or wait/signal) and default attributes delivers each source to its destination after synchronize (or reports unsupported) |
 | `Contract_MemBatchCopy_HipMemcpyBatchAsync_NullDestination_IsRejected` | hipMemcpyBatchAsync | a batch with a null destination never returns hipSuccess (or reports unsupported) |
 | `Contract_MemBatchCopy_HipMemcpyBatchAsync_TwoOps_RoundTripBytes` | hipMemcpyBatchAsync | a two-op batch delivers each source to its matching destination after synchronize (or reports unsupported) |
 | `Contract_MemBatchCopy_HipMemcpyBatchAsync_WithAttributes_RoundTripBytes` | hipMemcpyBatchAsync | a per-copy attribute (access order, location hints) does not change the copied bytes (or reports unsupported) |
@@ -817,6 +818,15 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_MemBatchDiscard_HipMemDiscardBatchAsync_NullPointer_IsRejectedOrUnsupported` | hipMemDiscardBatchAsync | a batch with a null range never returns hipSuccess (rejected, or reported unsupported) |
 | `Contract_MemBatchDiscard_HipMemPrefetchBatchAsync_NvidiaPrefetchBatchUnsupported_IsSkipped` | hipMemPrefetchBatchAsync | NVIDIA CUDA versions before 13.0 do not expose the batch prefetch API; the contract is skipped until backend parity exists |
 | `Contract_MemBatchDiscard_HipMemPrefetchBatchAsync_PrefetchBatch_IsAcceptedOrUnsupported` | hipMemPrefetchBatchAsync | prefetching a batch of managed ranges to the current device is accepted or reported unsupported |
+
+### `mem_copy_with_attributes` (4 cases)
+
+| Case | API | Asserts |
+|---|---|---|
+| `Contract_MemCopyWithAttributes_HipMemcpy3DWithAttributesAsync_HostDeviceHostRoundTrip_IsVisibleAfterSync` | hipMemcpy3DWithAttributesAsync | a single stream-ordered pointer copy round-trips bytes after stream sync |
+| `Contract_MemCopyWithAttributes_HipMemcpy3DWithAttributesAsync_NullOpAndReservedFlags_ReturnInvalidValue` | hipMemcpy3DWithAttributesAsync | a null operation pointer and a reserved nonzero flags value are rejected with hipErrorInvalidValue |
+| `Contract_MemCopyWithAttributes_HipMemcpyWithAttributesAsync_HostDeviceHostRoundTrip_IsVisibleAfterSync` | hipMemcpyWithAttributesAsync | a stream-ordered host->device->host copy round-trips bytes after stream sync |
+| `Contract_MemCopyWithAttributes_HipMemcpyWithAttributesAsync_NullAttributes_ReturnsInvalidValue` | hipMemcpyWithAttributesAsync | a null attributes pointer is rejected with hipErrorInvalidValue |
 
 ### `mem_location_pool` (4 cases)
 

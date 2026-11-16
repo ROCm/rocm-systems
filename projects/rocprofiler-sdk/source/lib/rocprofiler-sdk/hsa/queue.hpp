@@ -135,11 +135,16 @@ public:
           hsa_queue_t**      queue);
 
     // Used when creating a Queue from a previously created intercept queue.
+    //
+    // A non-participant is a Queue the profiling machinery does not manage. It submits no
+    // profiler-enable packet into the ring, is never registered with the serializer, and
+    // owns its ready_signal. Not counter-capable.
     Queue(const AgentCache&       agent,
           CoreApiTable            core_api,
           AmdExtTable             ext_api,
           hsa_queue_t*            queue,
-          set_write_interceptor_t set_write_interceptor);
+          set_write_interceptor_t set_write_interceptor,
+          bool                    profiling_participant = true);
     virtual ~Queue();
 
     const hsa_queue_t*        intercept_queue() const { return _intercept_queue; };
@@ -206,6 +211,7 @@ private:
     queue_state                          _state           = queue_state::normal;
     std::mutex                           _lock_queue      = {};
     hsa_signal_t                         _active_kernels  = {.handle = 0};
+    bool                                 _tracked_queue   = true;
 };
 
 inline rocprofiler_queue_id_t

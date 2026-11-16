@@ -357,6 +357,21 @@ contract:
   Contract_MemBatchCopy_HipMemcpyBatchAsync_NullDestination_IsRejected:
     <<: *level_0
     tags: [mem_batch_copy, P0]
+  Contract_MemBatchCopy_HipExtMemcpyBatchAsync_TwoOps_RoundTripBytes:
+    <<: *level_0
+    tags: [mem_batch_copy, P0]
+  Contract_MemCopyWithAttributes_HipMemcpyWithAttributesAsync_HostDeviceHostRoundTrip_IsVisibleAfterSync:
+    <<: *level_0
+    tags: [mem_copy_with_attributes, P0]
+  Contract_MemCopyWithAttributes_HipMemcpyWithAttributesAsync_NullAttributes_ReturnsInvalidValue:
+    <<: *level_0
+    tags: [mem_copy_with_attributes, P0]
+  Contract_MemCopyWithAttributes_HipMemcpy3DWithAttributesAsync_HostDeviceHostRoundTrip_IsVisibleAfterSync:
+    <<: *level_0
+    tags: [mem_copy_with_attributes, P0]
+  Contract_MemCopyWithAttributes_HipMemcpy3DWithAttributesAsync_NullOpAndReservedFlags_ReturnInvalidValue:
+    <<: *level_0
+    tags: [mem_copy_with_attributes, P0]
   Contract_MemBatchCopy3D_HipMemcpy3DBatchAsync_HostDeviceHostRoundTrip_IsVisibleAfterSync:
     <<: *level_0
     tags: [mem_batch_copy_3d, P0]

@@ -29,12 +29,15 @@ namespace rocjitsu {
 
 /// @brief RPC operation codes.
 enum RpcOpcode : uint16_t {
-  RPC_HANDSHAKE, ///< Initial handshake — response carries topology path.
-  RPC_OPEN,      ///< Open the KFD device.
-  RPC_CLOSE,     ///< Close the client connection.
-  RPC_MMAP,      ///< Map GPU memory — payload is RpcMmapRequest.
-  RPC_MUNMAP,    ///< Unmap GPU memory — payload is RpcMunmapRequest.
-  RPC_IOCTL,     ///< KFD ioctl passthrough — payload is RpcIoctlRequest + args.
+  RPC_HANDSHAKE,         ///< Initial handshake — response carries topology path.
+  RPC_OPEN,              ///< Open the KFD device.
+  RPC_CLOSE,             ///< Close the client connection.
+  RPC_MMAP,              ///< Map GPU memory — payload is RpcMmapRequest.
+  RPC_MUNMAP,            ///< Unmap GPU memory — payload is RpcMunmapRequest.
+  RPC_IOCTL,             ///< KFD ioctl passthrough — payload is RpcIoctlRequest + args.
+  RPC_HOST_VMA_REPLACED, ///< Update SVM policy and USERPTR VMA lifetime.
+  RPC_GEM_VA,            ///< Update a client process's DRM GEM GPU mappings.
+  RPC_QUERY_MTYPE,       ///< Inspect this client's PTE policy for a test assertion.
 };
 
 /// @brief Unified RPC message header (16 bytes, fixed size).
@@ -49,7 +52,7 @@ struct RpcHeader {
 };
 
 /// @brief RPC protocol version. Increment when making breaking changes.
-inline constexpr uint32_t kRpcProtocolVersion = 6;
+inline constexpr uint32_t kRpcProtocolVersion = 8;
 
 /// @brief Largest payload the daemon accepts after an RpcHeader.
 /// @details The daemon rejects — and disconnects — any client whose header
@@ -94,10 +97,52 @@ struct RpcMmapResponse {
   uint64_t mapped_addr; ///< Address the daemon mapped at (informational).
 };
 
-/// @brief munmap request payload (when opcode == RPC_MUNMAP).
+/// @brief munmap request payload.
 struct RpcMunmapRequest {
   uint64_t addr;   ///< Address of the mapping to unmap.
   uint64_t length; ///< Length in bytes to unmap.
+};
+
+/// @brief Retire daemon policy for client host VMA bytes changed by a syscall.
+/// @details Successful destructive MAP_FIXED, munmap, and mremap operations
+/// report ranges that may carry daemon policy; KFD mappings and USERPTR
+/// promotion also report their replaced bytes. The daemon clears per-GPU SVM
+/// access, host-backed tombstones, and stale USERPTR VMA spans, preserving the
+/// promoted USERPTR handle when requested. The client orders the syscall and
+/// this notification with SVM and USERPTR ioctls under its RPC lock; the host
+/// mapping lock covers only the syscall. Both peers must implement this
+/// notification so the daemon cannot retain policy for reused host VAs.
+struct RpcHostVmaReplacedRequest {
+  uint64_t addr;
+  uint64_t length;
+  // USERPTR promotion replaces its source VMA with this allocation's shared
+  // view. Keep only that handle's lifetime tracking while clearing old policy.
+  uint64_t preserve_userptr_handle;
+};
+
+enum RpcGemVaOperation : uint32_t {
+  RPC_GEM_VA_PREFLIGHT,
+  RPC_GEM_VA_MAP,
+  RPC_GEM_VA_UNMAP,
+  RPC_GEM_VA_REPLACE,
+};
+
+/// @brief One GEM page-table operation for the process owning the connection.
+/// @details MAP and REPLACE carry the backing descriptor in SCM_RIGHTS. REPLACE
+/// installs the new backing before retiring overlapping mappings of the same
+/// DRM file. The daemon keeps its own mapping alive until UNMAP or client close;
+/// offsets refer to that backing, never to a client virtual address.
+struct RpcGemVaRequest {
+  uint32_t operation;
+  uint32_t alloc_flags;
+  uint64_t drm_file_id;
+  uint64_t va_address;
+  uint64_t map_size;
+  uint64_t offset_in_bo;
+};
+
+struct RpcQueryMtypeRequest {
+  uint64_t va_address;
 };
 
 static_assert(sizeof(RpcHeader) == 16);
@@ -107,6 +152,9 @@ static_assert(sizeof(RpcIoctlRequest) == 8);
 static_assert(sizeof(RpcMmapRequest) == 32);
 static_assert(sizeof(RpcMmapResponse) == 8);
 static_assert(sizeof(RpcMunmapRequest) == 16);
+static_assert(sizeof(RpcHostVmaReplacedRequest) == 24);
+static_assert(sizeof(RpcGemVaRequest) == 40);
+static_assert(sizeof(RpcQueryMtypeRequest) == 8);
 
 /// @brief Send a message with optional ancillary file descriptors.
 /// @param sock Connected Unix domain socket fd.
@@ -209,7 +257,7 @@ inline ssize_t rpc_recv_msg(int sock, void *data, size_t data_len, int *fds = nu
 /// @param buffer Buffer to read into.
 /// @param total_bytes Number of bytes to read.
 /// @retval true All bytes were read successfully.
-/// @retval false Connection closed or recv(2) returned an error (errno is set).
+/// @retval false Connection closed or recvmsg(2) returned an error (errno is set).
 /// @note Deliberately reports no byte count, unlike rpc_send_exact(). A sender
 /// needs the zero-versus-partial distinction because a frame that never started
 /// leaves the stream aligned; a receiver does not, because by the time a reply
@@ -220,7 +268,11 @@ inline bool rpc_recv_exact(int sock, void *buffer, size_t total_bytes) {
   auto *cursor = static_cast<uint8_t *>(buffer);
   size_t remaining = total_bytes;
   while (remaining > 0) {
-    ssize_t bytes_read = recv(sock, cursor, remaining, 0);
+    iovec iov{cursor, remaining};
+    msghdr msg{};
+    msg.msg_iov = &iov;
+    msg.msg_iovlen = 1;
+    ssize_t bytes_read = recvmsg(sock, &msg, 0);
     if (bytes_read < 0 && errno == EINTR)
       continue;
     if (bytes_read <= 0)
@@ -241,7 +293,9 @@ inline bool rpc_recv_exact(int sock, void *buffer, size_t total_bytes) {
 /// parseable needs this: a failure at zero bytes puts nothing on the wire, any
 /// other failure leaves the peer parsing a truncated frame.
 /// @retval true All bytes were sent successfully.
-/// @retval false Connection closed or send(2) returned an error (errno is set).
+/// @retval false Connection closed or sendmsg(2) returned an error (errno is set).
+/// @note Uses the same syscall as descriptor-bearing frames so a transport that
+/// permits SCM_RIGHTS traffic does not also require send(2) or sendto(2).
 inline bool rpc_send_exact(int sock, const void *buffer, size_t total_bytes,
                            size_t *bytes_sent_out = nullptr) {
   auto *cursor = static_cast<const uint8_t *>(buffer);
@@ -252,7 +306,7 @@ inline bool rpc_send_exact(int sock, const void *buffer, size_t total_bytes,
     return complete;
   };
   while (remaining > 0) {
-    ssize_t bytes_sent = send(sock, cursor, remaining, MSG_NOSIGNAL);
+    ssize_t bytes_sent = rpc_send_msg(sock, cursor, remaining);
     if (bytes_sent < 0 && errno == EINTR)
       continue;
     if (bytes_sent <= 0)

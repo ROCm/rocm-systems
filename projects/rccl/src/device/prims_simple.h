@@ -833,20 +833,15 @@ public:
 
     if (tid < NCCL_PAT_NDIMS && ((1UL << tid) < nNodes)) {
       int node = ncclShmem.comm.node;
-      uint32_t mask = 1 << tid;
       int denseLocalRank = localRanks > 1 ? channel->nvls.headRank : 0;
-      int prevDensePeer = ((node + nNodes - mask) % nNodes) * localRanks + denseLocalRank;
-      int nextDensePeer = ((node + mask) % nNodes) * localRanks + denseLocalRank;
-      int prevPeer = prevDensePeer;
-      int nextPeer = nextDensePeer;
+      const bool mirrored = ncclShmem.comm.patSharedQps == 0 && mode == primsModePatAg;
+      int recvPeer = patRecvPeer(node, nNodes, tid, mirrored) * localRanks + denseLocalRank;
+      int sendPeer = patSendPeer(node, nNodes, tid, mirrored) * localRanks + denseLocalRank;
       if (localRanks > 1) {
         int* denseToUserRank = ncclShmem.comm.denseToUserRank;
-        prevPeer = denseToUserRank[prevDensePeer];
-        nextPeer = denseToUserRank[nextDensePeer];
+        recvPeer = denseToUserRank[recvPeer];
+        sendPeer = denseToUserRank[sendPeer];
       }
-      const bool shared = ncclShmem.comm.patSharedQps != 0;
-      int recvPeer = (shared || mode == primsModePatRs) ? prevPeer : nextPeer;
-      int sendPeer = (!shared && mode == primsModePatAg) ? prevPeer : nextPeer;
 
       // Load recv peer
       struct ncclPatPeer* peer = recvDims + tid;
@@ -894,13 +889,9 @@ public:
       patBarrier</*isHierarchical=*/false>();
     }
   }
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-  skip_fence = !ncclShmem.comm.cheapPostSendFenceOff;
-#else
-    // The cheap post-peer fence is only safe with global DWORDX4 builtins
-    // (system-scope cache-bypassing stores); otherwise always use the full fence.
-    skip_fence = false;
-#endif
+  // No DWORDX4 builtins: only unregistered collectives (stores to the uncached FIFO) take the cheap fence.
+  skip_fence = RCCL_USE_CHEAP_POST_SEND_FENCE(
+    ncclShmem.comm.cheapPostSendFenceOff, rcclSimplePostSendRegisteredOrP2p(collWork));
 }
 
 __forceinline__ __device__ ~Primitives() {

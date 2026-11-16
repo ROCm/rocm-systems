@@ -5,8 +5,8 @@
 
 use super::*;
 use crate::isa::gfx_target_name;
-use rocddi::topology::host::{HostCaches, HostTopologySnapshot};
-use rocddi::topology::{MemoryBankKind, NativeNodeId, NodeKind, TopologySnapshot};
+use rocddi::topology::host::{HostCaches, HostTopologyGraphSnapshot};
+use rocddi::topology::{MemoryBankKind, NodeKind, TopologyGraphSnapshot};
 
 /// A transient native query failure leaves support undecided so public calls
 /// can retry after the underlying condition clears.
@@ -57,7 +57,7 @@ pub(super) fn decode_cache_handle(cache: HsaCache, cache_count: usize) -> Option
 
 /// Selects OS cache records only when a CPU node can identify their domain.
 pub(super) fn host_caches_for_cpu(
-    topology: &HostTopologySnapshot,
+    topology: &HostTopologyGraphSnapshot,
     core_id_base: Option<u32>,
     cpu_count: usize,
 ) -> Option<&HostCaches> {
@@ -87,7 +87,7 @@ pub(crate) struct Cpu {
 
 /// Builds one CPU agent per KFD node that actually reports CPU cores.
 pub(super) fn cpu_agents(
-    topology: &TopologySnapshot,
+    topology: &TopologyGraphSnapshot,
     host: &rocddi::topology::host::CpuInfo,
     host_memory_bytes: usize,
 ) -> Vec<Cpu> {
@@ -96,9 +96,7 @@ pub(super) fn cpu_agents(
         .iter()
         .filter_map(|node| {
             let cpu = node.cpu?;
-            let NativeNodeId::LinuxKfd(native_node) = node.native_id else {
-                return None;
-            };
+            let native_node = crate::platform::native_cpu_node_ordinal(node)?;
             let memory_bytes = topology
                 .banks_for_node(node.id)
                 .find(|bank| bank.kind == MemoryBankKind::System && bank.capacity_bytes != 0)
@@ -108,11 +106,11 @@ pub(super) fn cpu_agents(
             Some(Cpu {
                 node: Some(node.id),
                 native_node,
-                name: host.name.clone().into_boxed_str(),
+                name: host.name.as_deref().unwrap_or("CPU").into(),
                 compute_units: cpu.core_count,
                 maximum_clock_mhz: cpu.maximum_clock_mhz.unwrap_or(0),
                 memory_bytes,
-                apu: node.kind == NodeKind::KfdGpu,
+                apu: node.kind == NodeKind::Gpu,
             })
         })
         .collect::<Vec<_>>();
@@ -120,7 +118,7 @@ pub(super) fn cpu_agents(
         cpus.push(Cpu {
             node: None,
             native_node: 0,
-            name: host.name.clone().into_boxed_str(),
+            name: host.name.as_deref().unwrap_or("CPU").into(),
             compute_units: host.compute_units,
             maximum_clock_mhz: 0,
             memory_bytes: host_memory_bytes,
@@ -226,10 +224,16 @@ impl Gpu {
             .unwrap_or("AMD Radeon Graphics")
     }
 
-    /// Selects the populated DRM family when it is available.
+    /// Returns the provider-resolved family from the activated device.
+    #[allow(
+        clippy::expect_used,
+        reason = "Gpu is constructed only after confirming an activated GPU endpoint"
+    )]
     pub(crate) fn asic_family_id(&self) -> u32 {
-        let info = self.info();
-        info.drm_asic_family_id.unwrap_or(info.asic_family_id)
+        self.device
+            .gpu()
+            .expect("activated HSA GPU endpoint")
+            .asic_family_id()
     }
 
     /// Returns the optional native timestamp frequency as an HSA value.

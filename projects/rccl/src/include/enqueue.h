@@ -31,6 +31,9 @@ int64_t ncclParamAllgathervEnable();
 int64_t ncclParamP2pLLThreshold();
 int64_t ncclParamChunkSize();
 int64_t ncclParamLaunchOrderImplicit();
+bool rcclP2pDirectApi(ncclFunc_t collAPI);
+bool rcclP2pTaskUsesCe(struct ncclComm* comm, ncclFunc_t collAPI, int peer);
+int rcclP2pTaskConnIndex(struct ncclComm* comm, ncclFunc_t collAPI, int peer);
 
 ncclResult_t ncclGroupJobLaunch(struct ncclIntruQueue<struct ncclAsyncJob, &ncclAsyncJob::next>* asyncJobsMain,
                                 volatile bool* groupAbortFlag);
@@ -48,6 +51,15 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
 ncclResult_t ncclLaunchKernelAfter_NoCuda(struct ncclComm* comm, struct ncclKernelPlan* plan);
 ncclResult_t ncclLaunchFinish(struct ncclComm* comm);
 ncclResult_t ncclValidateCollConfigLaunchCompletionEvents(struct ncclComm* comm);
+
+// Threads per block of a collective kernel plan on HIP: `nWarps` warps of comm->WarpSize, at least three warps.
+static inline int rcclPlanThreadsPerBlock(const struct ncclComm* comm, int nWarps) {
+  return std::max(nWarps, 3) * comm->WarpSize;
+}
+
+// Biased so the default stream (nullptr) tags as 1, leaving 0 free as the "no launch yet"
+// sentinel. See ncclComm::lastStreamTag.
+static inline uintptr_t ncclStreamTag(cudaStream_t s) { return (uintptr_t)s + 1; }
 
 // Addon backends launch onto the user's stream themselves instead of going through doLaunches, which is what
 // makes comm->cudaDev current and installs the cross-stream dependency. Bracket such a launch with these.

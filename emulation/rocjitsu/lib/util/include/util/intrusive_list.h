@@ -71,26 +71,27 @@ public:
   // Standard C++ iterator types.
   using difference_type = std::ptrdiff_t;
   using iterator_category = std::bidirectional_iterator_tag;
-  using value_type = T;
+  using value_type = std::remove_const_t<T>;
   using pointer = T *;
   using reference = T &;
   // Custom iterator types.
-  using ConstPointer = const T *;
-  using ConstReference = const T &;
-  using NodePointer = IListNode<T, Options...> *;
-  using ConstNodePointer = const IListNode<T, Options...> *;
-  using NodeReference = IListNode<T, Options...> &;
-  using ConstNodeReference = const IListNode<T, Options...> &;
+  using NodeT = IListNode<std::remove_const_t<T>, Options...>;
+  using NodePointer = std::conditional_t<std::is_const_v<T>, const NodeT *, NodeT *>;
+  using ConstNodePointer = const NodeT *;
+  using NodeReference = std::conditional_t<std::is_const_v<T>, const NodeT &, NodeT &>;
 
   IListIterator() = default;
-  explicit IListIterator(pointer node_ptr) : node_ptr_(static_cast<pointer>(node_ptr)) {}
+  explicit IListIterator(pointer node_ptr) : node_ptr_(static_cast<NodePointer>(node_ptr)) {}
   explicit IListIterator(reference node_ref) : node_ptr_(static_cast<NodePointer>(&node_ref)) {}
   explicit IListIterator(NodeReference node_ref) : node_ptr_(&node_ref) {}
+  template <typename U>
+    requires(std::is_const_v<T> && std::same_as<U, std::remove_const_t<T>>)
+  IListIterator(const IListIterator<U, Options...> &other) : node_ptr_(other.node_pointer()) {}
 
   NodePointer node_pointer() { return node_ptr_; }
   ConstNodePointer node_pointer() const { return node_ptr_; }
 
-  ConstReference operator*() const { return *static_cast<ConstPointer>(node_pointer()); }
+  reference operator*() const { return *static_cast<pointer>(node_ptr_); }
 
   friend bool operator==(const IListIterator &lhs, const IListIterator &rhs) {
     return lhs.node_ptr_ == rhs.node_ptr_;
@@ -173,11 +174,15 @@ public:
   /// @brief Return an iterator to the beginning of the list.
   /// @returns Iterator pointing to the first element in the list.
   Iterator begin() { return ++Iterator(sentinel_); }
+  ConstIterator begin() const { return ++ConstIterator(sentinel_); }
   /// @brief Return an iterator past the end of the list.
   /// @details The iterator returned is the sentinel which is pointed to by the next pointer in the
   /// last element in the list. This iterator should not be dereferenced.
   /// @returns The iterator pointing to the sentinel.
   Iterator end() { return Iterator(sentinel_); }
+  ConstIterator end() const { return ConstIterator(sentinel_); }
+  ConstIterator cbegin() const { return begin(); }
+  ConstIterator cend() const { return end(); }
   /// @brief Checks if the list is empty.
   /// @returns Bool indicating if the list is empty or not.
   bool empty() const { return sentinel_.next_ == &sentinel_; }

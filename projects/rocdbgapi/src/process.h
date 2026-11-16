@@ -117,6 +117,8 @@ private:
 
   bool m_supports_precise_alu_exceptions{ false };
 
+  bool m_supports_lds_exception{ false };
+
   os_process_flags_t m_process_flags{};
 
   bool m_forward_progress_needed{ true };
@@ -288,6 +290,8 @@ public:
   void set_precise_memory (bool enabled);
 
   void set_precise_alu_exceptions (bool enabled);
+
+  void set_reporting_lds_exceptions (bool enabled);
 
   /* Suspend/resume a list of queues.  Queues may become invalid as a result of
      suspension/resumption, but not destroyed.  Queues made invalid will

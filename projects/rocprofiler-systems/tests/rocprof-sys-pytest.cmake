@@ -137,6 +137,7 @@ set(PYTEST_GENERATE_DEPENDENCIES
 # Changes done in this file are used during the CTest generate step to append the
 # appropriate labels to the tests.
 list(APPEND PYTEST_GENERATE_DEPENDENCIES "${CMAKE_CURRENT_LIST_DIR}/test_categories.yaml")
+list(APPEND PYTEST_GENERATE_DEPENDENCIES "${CMAKE_CURRENT_LIST_DIR}/pytest-generate.ini")
 
 # The pytest CTest generation must wait for the base executables to exist,
 # but relinking them should not invalidate the generated CTest file.
@@ -146,6 +147,7 @@ set(PYTEST_TARGET_DEPENDENCIES
     rocprofiler-systems-run
     rocprofiler-systems-causal
     rocprofiler-systems-avail
+    rocprofiler-systems-exe
 )
 # Versioned python tests require a matching version of libpyrocprofsys
 if(TARGET libpyrocprofsys)
@@ -160,8 +162,14 @@ set(ROCPROFSYS_PYTEST_BUILD_DIR
     ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests/pytest
 )
 
+# -c and --rootdir pin pytest's configuration, so ancestor pytest.ini/pyproject.toml
+# files do not affect test collection (see pytest-generate.ini).
 set(_generate_args
     "${PYTEST_EXECUTABLE}"
+    "${ROCPROFSYS_PYTEST_BUILD_DIR}"
+    -c
+    "${CMAKE_CURRENT_LIST_DIR}/pytest-generate.ini"
+    --rootdir
     "${ROCPROFSYS_PYTEST_BUILD_DIR}"
     --ctest-mode=generate
     --ctest-output-path

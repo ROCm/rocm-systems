@@ -17,7 +17,7 @@
  * what keeps the Catch2 tests and the matrix reporter from drifting into
  * disagreeing about what an API is supposed to do at replay.
  *
- * Generated from 558 HIP APIs.
+ * Generated from 559 HIP APIs.
  */
 
 #pragma once
@@ -170,9 +170,9 @@ inline constexpr HrrApiExpectation kHrrApiMatrix[] = {
     {"hipGraphMemcpyNodeSetParams1D", "T2", 0, false, true, false, false},
     {"hipGraphMemsetNodeSetParams", "T2", 0, false, true, false, false},
     {"hipGraphNodeSetParams", "T2", 1, false, true, false, false},
-    {"hipHostAlloc", "T2", 1, false, true, false, false},
+    {"hipHostAlloc", "T2", 0, false, true, false, false},
     {"hipMallocHost", "T2", 0, false, true, false, false},
-    {"hipMemAllocHost", "T2", 1, false, true, false, false},
+    {"hipMemAllocHost", "T2", 0, false, true, false, false},
     {"hipMemcpyFromSymbol", "T2", 1, false, true, false, false},
     {"hipMemcpyFromSymbolAsync", "T2", 1, false, true, false, false},
     {"hipMemcpyToSymbol", "T2", 1, false, true, false, false},
@@ -291,6 +291,7 @@ inline constexpr HrrApiExpectation kHrrApiMatrix[] = {
     {"hipExtHostAlloc", "T4", 1, false, true, false, false},
     {"hipExtLaunchMultiKernelMultiDevice", "T4", 5, false, true, false, false},
     {"hipExtMallocWithFlags", "T4", 0, false, true, false, false},
+    {"hipExtMemcpyBatchAsync", "T4", 0, false, true, false, false},
     {"hipExtSetLoggingParams", "T4", 0, false, true, false, false},
     {"hipExtStreamCreateWithCUMask", "T4", 1, false, true, false, false},
     {"hipExtStreamGetCUMask", "T4", 1, false, true, false, false},

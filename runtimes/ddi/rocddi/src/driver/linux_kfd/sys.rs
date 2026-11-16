@@ -28,11 +28,11 @@ use std::sync::{Mutex, MutexGuard};
 
 use super::errno;
 use super::uapi;
+use crate::os::ProcessIdentity;
 use crate::os::linux::{
     file::{close_descriptor, close_file},
     invalid_data,
     memory::{Reservation, page_size},
-    process_identity::check_process,
 };
 use crate::session::DriverContextLifetime;
 
@@ -81,6 +81,7 @@ pub(super) enum Call<'a> {
     ResetEvent(&'a mut uapi::ResetEvent),
     Wait(&'a mut uapi::WaitEvents, &'a mut uapi::EventData),
     WaitSignal(&'a mut uapi::WaitEvents, &'a mut [uapi::EventData; 3]),
+    WaitExceptions(&'a mut uapi::WaitEvents, &'a mut [uapi::EventData; 2]),
     SetScratchBackingVa(&'a mut uapi::SetScratchBackingVa),
     SetTrapHandler(&'a mut uapi::SetTrapHandler),
     CreateQueue(&'a mut uapi::CreateQueue),
@@ -111,7 +112,7 @@ pub(super) struct Kfd {
     /// Exact native descriptor used for this context.
     file: Option<File>,
     /// Creating process identity checked before native calls.
-    process: u32,
+    process: ProcessIdentity,
     /// Serialized context selection and runtime enablement.
     runtime: Mutex<RuntimeControl>,
     /// Optional unit-test replacement for native ioctls.
@@ -152,10 +153,10 @@ pub(super) struct RuntimeGuard<'a> {
 }
 
 impl Kfd {
-    pub(super) fn new(file: File) -> Self {
+    pub(super) fn new(file: File, process: ProcessIdentity) -> Self {
         Self {
             file: Some(file),
-            process: std::process::id(),
+            process,
             runtime: Mutex::new(RuntimeControl {
                 context: ContextState::Primary,
                 enable: RuntimeState::Disabled,
@@ -166,10 +167,11 @@ impl Kfd {
     }
 
     #[cfg(test)]
+    #[allow(clippy::expect_used)]
     pub(super) fn with_hook(file: File, hook: IoctlHook) -> Self {
         Self {
             file: Some(file),
-            process: std::process::id(),
+            process: ProcessIdentity::capture().expect("test process identity"),
             runtime: Mutex::new(RuntimeControl {
                 context: ContextState::Primary,
                 enable: RuntimeState::Disabled,
@@ -185,7 +187,7 @@ impl Kfd {
     }
 
     pub(super) fn check_process(&self) -> io::Result<()> {
-        check_process(self.process)
+        self.process.check()
     }
 
     fn call(&self, call: Call<'_>) -> io::Result<()> {
@@ -279,6 +281,10 @@ impl Kfd {
             Call::SetEvent(args) => (uapi::SET_EVENT, ptr::from_mut(*args).cast()),
             Call::ResetEvent(args) => (uapi::RESET_EVENT, ptr::from_mut(*args).cast()),
             Call::WaitSignal(args, events) => {
+                args.events = events.as_mut_ptr() as u64;
+                (uapi::WAIT_EVENTS, ptr::from_mut(*args).cast())
+            }
+            Call::WaitExceptions(args, events) => {
                 args.events = events.as_mut_ptr() as u64;
                 (uapi::WAIT_EVENTS, ptr::from_mut(*args).cast())
             }
@@ -903,7 +909,7 @@ impl Kfd {
         // KFD encodes the mapping type in bits 63:62. This is an opaque mmap
         // token, not a nonnegative render-file position. Preserve all bits when
         // passing it through the signed off_t parameter in the libc ABI.
-        mapping.map_file_read_write(
+        mapping.map_kfd_file_in_place(
             self.file
                 .as_ref()
                 .ok_or_else(|| io::Error::from(io::ErrorKind::NotConnected))?,
@@ -914,7 +920,7 @@ impl Kfd {
 
     pub(super) fn map_mmio(&self, mapping: &mut Reservation, offset: u64) -> io::Result<()> {
         self.check_process()?;
-        mapping.map_file_read_write(
+        mapping.map_kfd_file_in_place(
             self.file
                 .as_ref()
                 .ok_or_else(|| io::Error::from(io::ErrorKind::NotConnected))?,
@@ -1049,6 +1055,38 @@ impl Kfd {
             ))),
             uapi::WAIT_TIMEOUT => Ok(None),
             _ => Err(invalid_data("KFD signal wait returned an unknown result")),
+        }
+    }
+
+    /// Blocks until either persistent GPU exception event is signaled.
+    pub(super) fn wait_exception_events(
+        &self,
+        hardware_event_id: u32,
+        memory_event_id: u32,
+        timeout_ms: u32,
+    ) -> io::Result<bool> {
+        let mut events = [
+            uapi::EventData {
+                event_id: hardware_event_id,
+                ..uapi::EventData::default()
+            },
+            uapi::EventData {
+                event_id: memory_event_id,
+                ..uapi::EventData::default()
+            },
+        ];
+        let mut args = uapi::WaitEvents {
+            count: 2,
+            timeout: timeout_ms,
+            ..uapi::WaitEvents::default()
+        };
+        self.call(Call::WaitExceptions(&mut args, &mut events))?;
+        match args.result {
+            uapi::WAIT_COMPLETE => Ok(true),
+            uapi::WAIT_TIMEOUT => Ok(false),
+            _ => Err(invalid_data(
+                "KFD exception wait returned an unknown result",
+            )),
         }
     }
 

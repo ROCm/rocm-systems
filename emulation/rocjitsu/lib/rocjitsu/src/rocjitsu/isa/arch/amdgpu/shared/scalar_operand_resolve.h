@@ -4,6 +4,7 @@
 #ifndef ROCJITSU_ISA_AMDGPU_SHARED_SCALAR_OPERAND_RESOLVE_H_
 #define ROCJITSU_ISA_AMDGPU_SHARED_SCALAR_OPERAND_RESOLVE_H_
 
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_static_resolve.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -14,6 +15,12 @@
 
 namespace rocjitsu {
 namespace amdgpu {
+
+// GFX9 SALU redirects an unallocated source tuple to s[0:width) and discards its destination.
+inline bool scalar_gpr_out_of_range(const Wavefront &wf, uint32_t selector, uint32_t width) {
+  return (selector < kFlatScratchSelectorFirst || wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA4) &&
+         wf.exceeds_rounded_sgpr_allocation(selector, width);
+}
 
 inline bool scalar_pair_crosses_register_region(const Wavefront &wf, int ev) {
   if (ev == static_cast<int>(kScalarSgprSelectorLast) || ev == static_cast<int>(kVccSelectorLast) ||
@@ -44,7 +51,7 @@ inline uint32_t resolve_src_scalar_value(const Wavefront &wf, int ev, int m0_ev)
       ev == static_cast<int>(kFlatScratchSelectorLast))
     return static_cast<uint32_t>(wf.scratch_base() >> 32);
   if (ev <= static_cast<int>(kScalarSgprSelectorLast))
-    return ReadSgpr(wf, static_cast<uint32_t>(ev));
+    return ReadSgpr(wf, scalar_gpr_out_of_range(wf, ev, 1) ? 0u : static_cast<uint32_t>(ev));
   if (ev == static_cast<int>(kVccSelectorFirst))
     return static_cast<uint32_t>(wf.vcc());
   if (ev == static_cast<int>(kVccSelectorLast))
@@ -55,8 +62,10 @@ inline uint32_t resolve_src_scalar_value(const Wavefront &wf, int ev, int m0_ev)
   // of the CWSR area, and a shader that never enters a trap must not be able to
   // clobber them through an SGPR write.
   if (ev >= static_cast<int>(kTtmpSelectorFirst) && ev <= static_cast<int>(kTtmpSelectorLast))
-    return ReadTtmp(wf, static_cast<uint32_t>(ev) - kTtmpSelectorFirst);
-  if (m0_ev == static_cast<int>(kModernM0Selector) && ev == static_cast<int>(kModernNullSelector))
+    return wf.shader_can_access_ttmp()
+               ? ReadTtmp(wf, static_cast<uint32_t>(ev) - kTtmpSelectorFirst)
+               : 0u;
+  if (scalar_selector_is_null(wf.cu().arch(), static_cast<uint32_t>(ev)))
     return 0u; // NULL
   if (ev == m0_ev)
     return wf.m0();
@@ -90,16 +99,22 @@ inline uint32_t resolve_src_scalar_value(const Wavefront &wf, int ev, int m0_ev)
     return 0xC0800000u; // -4.0f
   if (ev == 248)
     return 0x3E22F983u; // 1/(2*pi)
+  // On gfx10.3 these operands contain 64-bit addresses. B32 reads the low
+  // dword; software that needs the aperture tag uses the upper half of a B64 move.
+  const auto aperture_word = [&](uint64_t address) {
+    return static_cast<uint32_t>(wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA2 ? address
+                                                                            : address >> 32);
+  };
   if (ev == 235)
-    return static_cast<uint32_t>(wf.shared_aperture_base() >> 32); // SRC_SHARED_BASE
+    return aperture_word(wf.shared_aperture_base()); // SRC_SHARED_BASE
   if (ev == 236)
-    return static_cast<uint32_t>(wf.shared_aperture_limit() >> 32); // SRC_SHARED_LIMIT
+    return aperture_word(wf.shared_aperture_limit()); // SRC_SHARED_LIMIT
   if (ev == 237)
-    return static_cast<uint32_t>(wf.private_aperture_base() >> 32); // SRC_PRIVATE_BASE
+    return aperture_word(wf.private_aperture_base()); // SRC_PRIVATE_BASE
   if (ev == 238)
-    return static_cast<uint32_t>(wf.private_aperture_limit() >> 32); // SRC_PRIVATE_LIMIT
-  if (ev == 249)
-    return 0u; // SRC_POPS_EXITING_WAVE_ID (not used in compute)
+    return aperture_word(wf.private_aperture_limit()); // SRC_PRIVATE_LIMIT
+  if (ev == 239)
+    return 0u; // No ordered pixel waves in a compute dispatch.
   if (ev == 250)
     return 0u; // NULL
   if (ev == 251)
@@ -113,6 +128,7 @@ inline uint32_t resolve_src_scalar_value(const Wavefront &wf, int ev, int m0_ev)
 }
 
 inline uint32_t resolve_src_scalar(const Wavefront &wf, int ev, int m0_ev) {
+  observe_scalar_selector_alias(wf, ev, 1, false);
   return resolve_src_scalar_value<[](const Wavefront &wave, uint32_t reg) {
     return RegisterAccess(wave).read_sgpr(wave.sgpr_alloc().base + reg);
   },
@@ -121,45 +137,43 @@ inline uint32_t resolve_src_scalar(const Wavefront &wf, int ev, int m0_ev) {
                                   }>(wf, ev, m0_ev);
 }
 
-// 16-bit reads of the inline float constants use the half-precision bit
-// patterns rather than the single-precision ones; every other encoding value
-// resolves identically to the 32-bit path.
-inline uint32_t resolve_src_scalar16(const Wavefront &wf, int ev, int m0_ev) {
-  switch (ev) {
-  case 240:
-    return 0x3800u; // 0.5h
-  case 241:
-    return 0xB800u; // -0.5h
-  case 242:
-    return 0x3C00u; // 1.0h
-  case 243:
-    return 0xBC00u; // -1.0h
-  case 244:
-    return 0x4000u; // 2.0h
-  case 245:
-    return 0xC000u; // -2.0h
-  case 246:
-    return 0x4400u; // 4.0h
-  case 247:
-    return 0xC400u; // -4.0h
-  case 248:
-    return 0x3118u; // f16 1/(2*pi)
-  default:
-    return resolve_src_scalar(wf, ev, m0_ev);
+inline std::optional<uint32_t>
+resolve_lane_inline_float_statically(int ev, Operand::LaneInlineFloatFormat format) {
+  switch (format) {
+  case Operand::LaneInlineFloatFormat::F16:
+    return resolve_inline_float16_statically(ev);
+  case Operand::LaneInlineFloatFormat::BF16:
+    return resolve_inline_bfloat16_statically(ev);
+  case Operand::LaneInlineFloatFormat::F32:
+    if (is_inline_float_src(ev))
+      return static_cast<uint32_t>(*resolve_src_scalar_statically(ev));
+    return std::nullopt;
   }
+  return std::nullopt;
+}
+
+// Only floating inline selectors depend on the lane's numeric format.
+// Registers, integer inlines and literals retain their raw carriers.
+inline uint32_t resolve_src_scalar16(const Wavefront &wf, int ev, int m0_ev,
+                                     Operand::LaneInlineFloatFormat format) {
+  if (auto value = resolve_lane_inline_float_statically(ev, format))
+    return *value;
+  return resolve_src_scalar(wf, ev, m0_ev);
 }
 
 // Must stay in sync with resolve_src_scalar above. This returns true for exactly
 // the encoding values that resolve without reporting UnsupportedOperandValue.
 // Isa::simd_capable_value() uses it to keep the SIMD fast path off operands whose
 // scalar broadcast would report a guest execution failure.
-inline bool can_resolve_src_scalar(int ev, int m0_ev) {
+inline bool can_resolve_src_scalar(int ev, rj_code_arch_t arch) {
+  const int m0_ev = static_cast<int>(scalar_m0_selector(arch));
   bool ok =
       (ev >= 0 && ev <= static_cast<int>(kVccSelectorLast)) ||
       (ev >= static_cast<int>(kTtmpSelectorFirst) && ev <= static_cast<int>(kTtmpSelectorLast)) ||
       ev == static_cast<int>(kLegacyM0Selector) ||
       (ev >= static_cast<int>(kExecSelectorFirst) && ev <= static_cast<int>(kExecSelectorLast)) ||
-      (ev >= 128 && ev <= 208) || (ev >= 235 && ev <= 238) || (ev >= 240 && ev <= 253);
+      (ev >= 128 && ev <= 208) || (ev >= 235 && ev <= 248) || (ev >= 250 && ev <= 253) ||
+      scalar_selector_is_null(arch, static_cast<uint32_t>(ev));
   if (m0_ev == static_cast<int>(kModernM0Selector))
     ok = ok || ev == static_cast<int>(kModernM0Selector) ||
          ev == static_cast<int>(kFlatScratchBaseSelectorFirst) ||
@@ -168,6 +182,7 @@ inline bool can_resolve_src_scalar(int ev, int m0_ev) {
 }
 
 inline uint64_t resolve_src_scalar64(const Wavefront &wf, int ev, int m0_ev) {
+  observe_scalar_selector_alias(wf, ev, 2, false);
   if (scalar_pair_crosses_register_region(wf, ev)) {
     wf.report_undefined_behavior("64-bit scalar source crosses a register region");
     return 0u;
@@ -177,7 +192,9 @@ inline uint64_t resolve_src_scalar64(const Wavefront &wf, int ev, int m0_ev) {
         ev == static_cast<int>(kFlatScratchSelectorFirst))
       return wf.scratch_base();
     if (ev <= static_cast<int>(kScalarSgprSelectorLast))
-      return RegisterAccess(wf).read_sgpr64(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));
+      return RegisterAccess(wf).read_sgpr64(
+          wf.sgpr_alloc().base +
+          (scalar_gpr_out_of_range(wf, ev, 2) ? 0u : static_cast<uint32_t>(ev)));
     if (ev == static_cast<int>(kVccSelectorFirst))
       return wf.vcc();
     if (ev >= static_cast<int>(kTtmpSelectorFirst) &&
@@ -191,7 +208,7 @@ inline uint64_t resolve_src_scalar64(const Wavefront &wf, int ev, int m0_ev) {
     wf.report_instruction_execution_error(InstructionExecutionError::InvalidInstructionEncoding);
     return 0u;
   }
-  if (m0_ev == static_cast<int>(kModernM0Selector) && ev == static_cast<int>(kModernNullSelector))
+  if (scalar_selector_is_null(wf.cu().arch(), static_cast<uint32_t>(ev)))
     return 0u; // NULL
   if (ev == m0_ev)
     return wf.m0();
@@ -227,13 +244,14 @@ inline uint64_t resolve_src_scalar64(const Wavefront &wf, int ev, int m0_ev) {
     return wf.private_aperture_base(); // SRC_PRIVATE_BASE
   if (ev == 238)
     return wf.private_aperture_limit(); // SRC_PRIVATE_LIMIT
-  if (ev == 253)
-    return wf.read_scc() ? 1u : 0u; // SCC
+  if (ev == 239 || (ev >= 251 && ev <= 253))
+    return resolve_src_scalar(wf, ev, m0_ev);
   wf.report_instruction_execution_error(InstructionExecutionError::InvalidInstructionEncoding);
   return 0u;
 }
 
 inline void resolve_dst_write(Wavefront &wf, int ev, uint32_t val, int m0_ev) {
+  observe_scalar_selector_alias(wf, ev, 1, true);
   if (arch_uses_legacy_flat_scratch_sgprs(wf.cu().arch()) &&
       ev == static_cast<int>(kFlatScratchSelectorFirst)) {
     uint64_t sb = wf.scratch_base();
@@ -247,7 +265,12 @@ inline void resolve_dst_write(Wavefront &wf, int ev, uint32_t val, int m0_ev) {
     return;
   }
   if (ev <= static_cast<int>(kScalarSgprSelectorLast)) {
-    RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), val);
+    if (scalar_gpr_out_of_range(wf, ev, 1))
+      return;
+    if (RegisterAccess(wf)
+            .write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), val)
+            .failed())
+      return;
     return;
   }
   if (ev == static_cast<int>(kVccSelectorFirst)) {
@@ -263,24 +286,25 @@ inline void resolve_dst_write(Wavefront &wf, int ev, uint32_t val, int m0_ev) {
     RegisterAccess(wf).write_ttmp(static_cast<uint32_t>(ev) - kTtmpSelectorFirst, val);
     return;
   }
-  if (m0_ev == static_cast<int>(kModernM0Selector) && ev == static_cast<int>(kModernNullSelector))
+  if (scalar_selector_is_null(wf.cu().arch(), static_cast<uint32_t>(ev)))
     return; // NULL
   if (ev == m0_ev) {
     wf.set_m0(val);
     return;
   }
   if (ev == static_cast<int>(kExecSelectorFirst)) {
-    wf.set_exec_raw((wf.exec_raw() & 0xFFFFFFFF00000000ULL) | val);
+    wf.write_exec_lo(val);
     return;
   }
   if (ev == static_cast<int>(kExecSelectorLast)) {
-    wf.set_exec_raw((wf.exec_raw() & 0x00000000FFFFFFFFULL) | (static_cast<uint64_t>(val) << 32));
+    wf.write_exec_hi(val);
     return;
   }
   wf.report_instruction_execution_error(InstructionExecutionError::InvalidInstructionEncoding);
 }
 
 inline void resolve_dst_write64(Wavefront &wf, int ev, uint64_t val) {
+  observe_scalar_selector_alias(wf, ev, 2, true);
   if (scalar_pair_crosses_register_region(wf, ev)) {
     wf.report_undefined_behavior("64-bit scalar destination crosses a register region");
     return;
@@ -291,7 +315,12 @@ inline void resolve_dst_write64(Wavefront &wf, int ev, uint64_t val) {
     return;
   }
   if (ev <= static_cast<int>(kScalarSgprSelectorLast)) {
-    RegisterAccess(wf).write_sgpr64(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), val);
+    if (scalar_gpr_out_of_range(wf, ev, 2))
+      return;
+    if (RegisterAccess(wf)
+            .write_sgpr64(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), val)
+            .failed())
+      return;
     return;
   }
   if (ev == static_cast<int>(kVccSelectorFirst)) {
@@ -303,10 +332,10 @@ inline void resolve_dst_write64(Wavefront &wf, int ev, uint64_t val) {
     RegisterAccess(wf).write_ttmp64(static_cast<uint32_t>(ev) - kTtmpSelectorFirst, val);
     return;
   }
-  if (ev == static_cast<int>(kModernNullSelector))
+  if (scalar_selector_is_null(wf.cu().arch(), static_cast<uint32_t>(ev)))
     return;
   if (ev == static_cast<int>(kExecSelectorFirst)) {
-    wf.set_exec_raw(val);
+    wf.write_exec(val);
     return;
   }
   wf.report_instruction_execution_error(InstructionExecutionError::InvalidInstructionEncoding);

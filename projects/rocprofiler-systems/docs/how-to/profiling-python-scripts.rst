@@ -62,7 +62,7 @@ Running ROCm Systems Profiler on a Python script
 
 ROCm Systems Profiler provides an ``rocprof-sys-python`` helper bash script which
 ensures ``PYTHONPATH`` is properly set and the correct Python interpreter is used.
-This means the following commands are effectively equivalent:
+The helper and the module entry point below are effectively equivalent:
 
 .. code-block:: shell
 
@@ -79,7 +79,8 @@ and
 
    ``rocprof-sys-python`` and ``python -m rocprofsys`` use the same command-line syntax
    as the other ``rocprof-sys`` executables (``rocprof-sys-python <ROCPROFSYS_ARGS> -- <SCRIPT> <SCRIPT_ARGS>``)
-   and has similar options.
+   and has similar options. The experimental command ``rocsys python`` forwards
+   to this helper. See :doc:`using-rocsys`.
 
 Command line options
 -----------------------------------
