@@ -3160,6 +3160,12 @@ extern "C" ncclResult_t ncclReshard(ncclM2nHandle_t handle, ncclComm_t comm, con
 
   if (copyAlgo == RESHARD_COPY_ALGO_DIRECT) {
     NCCL_M2N_CHECK(stagingEnsureDirectDevParams(staging, world_rank));
+    /* directParams is pageable, so this copy blocks the host until workStream
+     * drains, including a previous DIRECT kernel that waits in a world barrier
+     * for the other local ranks' kernels. Holding the API lock here would keep
+     * those ranks from launching them. The staging entry belongs to this
+     * rank's comm and is not evicted during the epoch. */
+    M2nApiUnlock apiUnlock;
     NCCL_M2N_CUDACHECK(cudaMemcpyAsync(staging->devParams, directParams.get(), sizeof(*directParams),
                                        cudaMemcpyHostToDevice, workStream));
   }
