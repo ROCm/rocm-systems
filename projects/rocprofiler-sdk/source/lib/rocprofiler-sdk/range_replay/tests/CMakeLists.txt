@@ -7,13 +7,14 @@ project(rocprofiler-sdk-range-replay-tests LANGUAGES C CXX)
 include(GoogleTest)
 
 # Range eligibility bookkeeping, divergence checking, the queue hook's early-return paths,
-# the kernarg block retention policy, the configuration path (rocprofiler_force_configure,
-# the domain's name/operation tables, the range API's no-service error returns), the
-# pass-loop decisions and CONFIG/PASS/CLOSE user_data lifecycle, and the executor's
-# pre-GPU decisions are pure host logic with no GPU or HSA runtime dependency, so these
-# are plain CXX unit tests that run unconditionally. The replay window's drain accounting
-# and the host fences run against queues whose signals are plain counters
-# (fake_queue.hpp), so they need no runtime either.
+# the kernarg block retention policy, host_run's pass loop (with no GPU agent, its fences
+# and device restores are empty), the configuration path (rocprofiler_force_configure, the
+# domain's name/operation tables, the range API's no-service error returns), the pass-loop
+# decisions and CONFIG/PASS/CLOSE user_data lifecycle, and the executor's pre-GPU
+# decisions are pure host logic with no GPU or HSA runtime dependency, so these are plain
+# CXX unit tests that run unconditionally. The replay window's drain accounting and the
+# host fences run against queues whose signals are plain counters (fake_queue.hpp), so
+# they need no runtime either.
 #
 # They share one executable: every executable that links the static library carries its
 # own copy of the SDK's debug info (about 250 MB in RelWithDebInfo) into the tests
@@ -24,6 +25,7 @@ set(RANGE_REPLAY_TEST_SOURCES
     queue_hooks.cpp
     retained_kernarg.cpp
     host_replay.cpp
+    host_run.cpp
     replay_window.cpp
     replay_configure.cpp
     replay_phases.cpp

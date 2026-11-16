@@ -45,6 +45,7 @@
 #include <optional>
 #include <random>
 #include <shared_mutex>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
@@ -173,6 +174,81 @@ TEST(range_replay_host, rejected_nested_begin_preserves_active_jump_target)
     }
 
     EXPECT_TRUE(reentered);
+    EXPECT_EQ(close_status(), ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED);
+}
+
+namespace
+{
+struct unprofiled_body_t
+{
+    int                   value  = 1;
+    bool                  fail   = false;
+    std::vector<uint64_t> passes = {};
+};
+
+void
+unprofiled_body(uint64_t pass, void* user_data)
+{
+    auto& body = *static_cast<unprofiled_body_t*>(user_data);
+    body.passes.emplace_back(pass);
+    EXPECT_EQ(rocprofiler_range_replay_host_track_memory(&body.value, sizeof(body.value)),
+              ROCPROFILER_STATUS_SUCCESS);
+    if(body.fail) throw std::runtime_error{"unprofiled body failed"};
+}
+}  // namespace
+
+TEST(range_replay_host, host_run_without_a_context_runs_the_body_once)
+{
+    auto body = unprofiled_body_t{};
+    EXPECT_EQ(rocprofiler_range_replay_host_run(1, unprofiled_body, &body),
+              ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND);
+    EXPECT_EQ(body.passes, (std::vector<uint64_t>{0}));
+    EXPECT_EQ(range_replay::current_range(), nullptr);
+    EXPECT_TRUE(range_replay::take_pending_host_regions().empty())
+        << "a region the body registered must not be captured by a later range";
+
+    body      = unprofiled_body_t{};
+    body.fail = true;
+    EXPECT_THROW(rocprofiler_range_replay_host_run(1, unprofiled_body, &body), std::runtime_error);
+    EXPECT_EQ(body.passes, (std::vector<uint64_t>{0}));
+    EXPECT_TRUE(range_replay::take_pending_host_regions().empty());
+}
+
+TEST(range_replay_host, host_run_rejects_a_null_body_before_consuming_any_state)
+{
+    auto value = 7;
+    ASSERT_EQ(rocprofiler_range_replay_host_track_memory(&value, sizeof(value)),
+              ROCPROFILER_STATUS_SUCCESS);
+    range_replay::host_jmpbuf();
+
+    EXPECT_EQ(rocprofiler_range_replay_host_run(1, nullptr, nullptr),
+              ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT);
+    EXPECT_TRUE(range_replay::take_host_jmp_armed());
+    EXPECT_EQ(range_replay::take_pending_host_regions().size(), 1U);
+}
+
+TEST(range_replay_host, host_run_inside_a_range_runs_its_body_as_that_ranges_pass)
+{
+    auto* ctx = open_host_range(1);
+    ASSERT_NE(ctx, nullptr);
+    ctx->host.pass = 2;
+
+    auto body = unprofiled_body_t{};
+    EXPECT_NE(rocprofiler_range_replay_host_run(2, unprofiled_body, &body),
+              ROCPROFILER_STATUS_SUCCESS);
+    EXPECT_EQ(body.passes, (std::vector<uint64_t>{2}));
+    EXPECT_EQ(range_replay::current_range(), ctx);
+    EXPECT_EQ(close_status(), ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED);
+}
+
+TEST(range_replay_host, end_leaves_a_host_run_range_open)
+{
+    auto* ctx = open_host_range(1);
+    ASSERT_NE(ctx, nullptr);
+    ctx->opened_by_host_run = true;
+
+    EXPECT_EQ(rocprofiler_range_replay_end(), ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT);
+    EXPECT_EQ(range_replay::current_range(), ctx);
     EXPECT_EQ(close_status(), ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED);
 }
 
@@ -739,6 +815,31 @@ TEST(range_replay_host, gpu_work_a_continuation_callback_leaves_running_declines
         queue.async_complete();
         controller.destroy_queue(&hsa_queue);
     }
+}
+
+TEST(range_replay_host, gpu_work_that_outlasts_an_abandoned_pass_keeps_body_exception)
+{
+    auto  agent      = rrt::test_agent_t{agent_a};
+    auto& controller = *hsa::get_queue_controller();
+    auto  hsa_queue  = hsa_queue_t{};
+    hsa_queue.id     = 3;
+    auto& queue      = rrt::add_test_queue(controller, hsa_queue, agent);
+    // GPU work from the pass whose body threw, still running when host_run abandons the pass.
+    queue.async_started();
+
+    auto ctx = range_replay::range_context_t{};
+    ctx.record.decline(ROCPROFILER_RANGE_REPLAY_STATUS_BODY_EXCEPTION);
+    ctx.host.pass           = 1;
+    ctx.host.snapshot_taken = true;
+    ctx.host.fence_budget   = fence_timeout_budget;
+    ctx.host.agents.emplace_back(host_agent(agent_a));
+
+    range_replay::host::abandon_pass(ctx);
+    EXPECT_EQ(ctx.record.status(), ROCPROFILER_RANGE_REPLAY_STATUS_BODY_EXCEPTION)
+        << "the fence's timeout must not replace the reason the range was abandoned for";
+
+    queue.async_complete();
+    controller.destroy_queue(&hsa_queue);
 }
 
 namespace
