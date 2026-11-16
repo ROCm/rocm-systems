@@ -10,7 +10,8 @@ fails when the manifest fields written by capture and the table below disagree.
 ## Scope
 
 This page, and the security review it supports, cover HRR on Linux. Windows capture and
-replay, and archive signing, are not covered; each will be added in its own change. The
+replay are not covered and will be added in their own change. Archive signing is not
+planned: consent and the archive notice are the controls instead. The
 environment HRR is tested on is listed in the README under
 [Tested environment](README.md#tested-environment).
 
