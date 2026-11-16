@@ -12833,7 +12833,9 @@ class CodeGenerator:
                                 else 0
                             )
                             access_conditions.append(
-                                'modifiers.mfma = {inst_.cbsz, inst_.abid, inst_.blgp, '
+                                'modifiers.mfma = {static_cast<uint8_t>(inst_.cbsz), '
+                                'static_cast<uint8_t>(inst_.abid), '
+                                'static_cast<uint8_t>(inst_.blgp), '
                                 f'{a_block_lanes}'
                                 '};'
                             )

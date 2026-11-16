@@ -9918,8 +9918,10 @@ def test_mfma_broadcast_metadata_excludes_fields_with_other_meanings(
                     else 0
                 )
                 assert (
-                    '{inst_.cbsz, inst_.abid, inst_.blgp, ' + str(a_block_lanes) + '}'
-                ) in body
+                    '{static_cast<uint8_t>(inst_.cbsz), '
+                    'static_cast<uint8_t>(inst_.abid), '
+                    'static_cast<uint8_t>(inst_.blgp), ' + str(a_block_lanes) + '}'
+                ) in ' '.join(body.split())
     assert broadcast_forms > 80
 
 
