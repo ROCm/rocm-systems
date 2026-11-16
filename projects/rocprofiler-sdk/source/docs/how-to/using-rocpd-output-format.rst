@@ -2037,8 +2037,9 @@ up that recorded ID, and ``get_agent()`` supplies the GPU target version and
 ROCpd node ID. This does not require ``--kernel-trace``. The load metadata is
 retained when the object unloads; the unload callback flushes pending data
 rather than deleting the mapping. FILE and MEMORY storage types use the same
-mapping path. A ``memory://`` URI can prevent later ISA decoding, but does not
-by itself prevent agent attribution.
+mapping path. A ``memory://`` URI without a snapshot (see
+:ref:`Memory-only code objects <memory-only-code-objects>`) can prevent later
+ISA decoding, but does not by itself prevent agent attribution.
 
 The mapping is not unconditional for every sample:
 
@@ -2198,9 +2199,9 @@ only those that resolved to an instruction.
    - Only program counters that a query actually decodes are cached: the query
      must project the ``instruction`` or ``instruction_comment`` columns, the
      program counter must not already be stored, it must decode successfully,
-     and its code object must match its recorded content hash. Memory-resident
-     code objects that cannot be decoded (see the note below) are therefore not
-     cached.
+     and its code object must match its recorded content hash. Memory-only
+     code objects that cannot be decoded (see :ref:`Memory-only code objects
+     <memory-only-code-objects>`) are therefore not cached.
    - It is skipped silently when the database cannot be written (a read-only
      file or filesystem, lock contention, a database deleted or replaced after
     it was opened, or a pre-3.1.0 database without the
@@ -2260,34 +2261,89 @@ controls whether *new* decodes are persisted:
   Lazy decoding requires accessible code-object bytes through a local
   ``file://`` URI. Both ``storage_type = FILE`` and ``storage_type = MEMORY``
   objects can be decoded when such a URI resolves to matching bytes; MEMORY
-  objects must also match the recorded ``memory_size``. PC sampling does not
-  snapshot purely memory-resident objects to disk. Objects available only
-  through a ``memory://`` URI therefore cannot be decoded after the profiled
-  process exits, and the view reports ``Decode unavailable``. To retain their
-  disassembly, pass ``--complete-isa-decode`` at collection time; it decodes
-  the live bytes in-process and persists the text into the database.
+  objects must also match the recorded ``memory_size``.
+
+.. _memory-only-code-objects:
+
+Memory-only code objects
+########################
+
+Some code objects exist only in process memory, for example modules loaded
+with ``hipModuleLoadData`` from runtime-compiled (``hiprtc``) code. They are
+recorded with ``storage_type = MEMORY`` and a ``memory://`` URI, and their
+bytes are gone once the profiled process exits. When PC sampling writes ROCpd
+output, ``rocprofv3`` therefore copies each such code object to a snapshot file
+as soon as it is loaded, and records the snapshot's location as
+``snapshot_uri`` in ``rocpd_info_code_object.extdata``. The original ``uri``
+and ``storage_type`` are kept unchanged. Lazy decoding reads the snapshot
+instead of the unreachable ``memory://`` URI, so ``--complete-isa-decode`` is
+no longer needed to disassemble these objects. Memory-backed code objects whose
+``uri`` already refers to a file (such as code objects embedded in an
+executable or shared library) are read back from that file and are not
+snapshotted.
+
+- **Location:** snapshots are written next to the database, in a
+  ``code_objects`` directory named with the same output prefix, for example
+  ``<output-directory>/<hostname>/<pid>_code_objects/<pid>_code_object_<id>.hsaco``
+  for ``<output-directory>/<hostname>/<pid>_results.db``. An existing file is
+  never overwritten; a numbered name is used instead.
+- **Retention:** keep the snapshot files for as long as the database is
+  post-processed lazily. Deleting them does not affect the rest of the data,
+  but the affected program counters are then reported as
+  ``Decode unavailable``. Instruction text that was already persisted to
+  ``rocpd_disassembly_data`` (by ``--complete-isa-decode`` or the disassembly
+  write-back cache) does not need the snapshots.
+- **Relocation:** ``snapshot_uri`` records an absolute path. When the
+  database and its snapshot directory are moved or copied to another location
+  or machine, map the recorded directory to the new one with
+  ``--codeobj-path-prefix-map`` (or ``codeobj_path_prefix_map`` via the API),
+  as described in :ref:`Moving a recording to another machine
+  <moving-a-recording>`. Merging or packaging databases does not copy snapshot
+  files.
+- **Disk usage:** each memory-only code object loaded during profiling is
+  written once per process, whether or not it is sampled, so disk usage grows
+  with the size and number of runtime-loaded code objects and with the number
+  of profiled processes. Snapshots are named by process ID, so rerunning with
+  the same output file name replaces the database but leaves the previous
+  run's snapshots in place; remove them when they are no longer needed.
+
+Program counters in a memory-only code object are still reported as
+``Decode unavailable`` when its snapshot could not be written (a warning is
+logged at collection time), when the snapshot is missing or its bytes do not
+match the recorded ``memory_size`` and ``content_hash``, when a single code
+object exceeds the 512 MiB lazy-decoding limit, or for databases recorded
+before snapshots were introduced. To retain the disassembly in those cases,
+pass ``--complete-isa-decode`` at collection time; it decodes the live bytes
+in-process and persists the text into the database.
+
+.. _moving-a-recording:
 
 Moving a recording to another machine
 ++++++++++++++++++++++++++++++++++++++
 
 The database stores code-object metadata (URI, load information, and optional
-content hash), not complete code-object binaries. ROCpd capture and database
-merge/package operations do not automatically bundle the referenced binaries.
-Copying the whole ``.rocprofv3`` directory is therefore not a guarantee that all
-code objects are present: a ``file://`` URI can point to the application's
-executable or a shared library elsewhere, including a byte range within that
-file.
+content hash), not complete code-object binaries. The only binaries ROCpd
+capture writes are the snapshots of memory-only code objects (see
+:ref:`Memory-only code objects <memory-only-code-objects>`), which are placed
+in the output directory next to the database. Database merge/package
+operations do not bundle any binaries, snapshots included. Copying the whole
+``.rocprofv3`` directory is therefore not a guarantee that all code objects are
+present: a ``file://`` URI can point to the application's executable or a
+shared library elsewhere, including a byte range within that file.
 
-For lazy decoding on another machine, copy the database and the exact binary
-files referenced by its sampled code objects. Keep any URI offset/size fragment
+For lazy decoding on another machine, copy the database, its
+``*_code_objects`` snapshot directory (if any), and the exact binary files
+referenced by its sampled code objects. Keep any URI offset/size fragment
 valid, and pass ``--codeobj-path-prefix-map`` to map the recorded directory
-prefixes to their new locations. The decoder still checks the captured content
-hash; a rebuilt library is not an equivalent replacement. The referenced objects
-can be listed without decoding instructions:
+prefixes, including the snapshot directory, to their new locations. The
+decoder still checks the captured content hash; a rebuilt library is not an
+equivalent replacement. The referenced objects and snapshots can be listed
+without decoding instructions:
 
 .. code-block:: sql
 
-   SELECT DISTINCT C.guid, C.id, C.storage_type, C.uri
+   SELECT DISTINCT C.guid, C.id, C.storage_type, C.uri,
+          JSON_EXTRACT(C.extdata, '$.snapshot_uri') AS snapshot_uri
    FROM rocpd_info_code_object C
    JOIN rocpd_gpu_pc_sample S
      ON S.guid = C.guid AND S.code_object_id = C.id
@@ -2296,10 +2352,11 @@ can be listed without decoding instructions:
 Instructions already persisted by ``--complete-isa-decode`` or a verified lazy
 decode remain readable from the copied database without the original binaries.
 This covers only successfully decoded sampled PCs, not the whole code object.
-Pure ``memory://`` objects have no file to copy in the current implementation;
-preserving their loaded bytes requires a separate capture-time snapshot feature.
-``storage_type = MEMORY`` alone does not imply this limitation: an object can
-still have a usable ``file://`` URI.
+A pure ``memory://`` object can be decoded only through its snapshot; one
+without a ``snapshot_uri`` (for example, from a database recorded before
+snapshots were introduced) has no file to copy. ``storage_type = MEMORY`` alone
+does not mean a snapshot is needed: an object can still have a usable
+``file://`` URI.
 
 Querying PC sampling data
 ++++++++++++++++++++++++++

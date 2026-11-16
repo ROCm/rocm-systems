@@ -35,6 +35,11 @@
  * - is_shutdown flag (now atomic)
  * - end_notified/beg_notified flags (now atomic)
  * - executable_destroy serialization (now protected with mutex)
+ *
+ * With --pc-sampling it instead runs a single-threaded, deterministic workload for PC-sampling
+ * tests: one hiprtc-compiled module is loaded from memory and a long-running kernel from it is
+ * launched, with no fallback to the statically linked kernels. Every sample therefore lands in a
+ * code object that exists only in process memory.
  */
 
 #include <hip/hip_runtime.h>
@@ -45,6 +50,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -77,6 +83,48 @@ extern "C" __global__ void dynamic_kernel_c(int* data, int n) {
     if(idx < n) data[idx] = idx * idx;
 }
 )";
+
+// Long-running kernel for --pc-sampling mode, so samples are taken while it executes
+static const char* spin_kernel_code = R"(
+extern "C" __global__ void dynamic_kernel_spin(float* data, int n, int iterations) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if(idx >= n) return;
+    float value = data[idx];
+    for(int i = 0; i < iterations; ++i)
+        value = value * 0.999f + 1.0f;
+    data[idx] = value;
+}
+)";
+
+// Compiles `source` with hiprtc; returns an empty code object on failure
+std::vector<char>
+compile_module(const char* source, const char* name)
+{
+    hiprtcProgram prog{};
+    if(hiprtcCreateProgram(&prog, source, name, 0, nullptr, nullptr) != HIPRTC_SUCCESS) return {};
+
+    auto code = std::vector<char>{};
+    if(hiprtcCompileProgram(prog, 0, nullptr) == HIPRTC_SUCCESS)
+    {
+        size_t code_size{0};
+        hiprtcGetCodeSize(prog, &code_size);
+        code.resize(code_size);
+        hiprtcGetCode(prog, code.data());
+    }
+    else
+    {
+        size_t log_size{0};
+        hiprtcGetProgramLogSize(prog, &log_size);
+        if(log_size > 1)
+        {
+            auto log = std::vector<char>(log_size);
+            hiprtcGetProgramLog(prog, log.data());
+            std::cerr << "Compilation failed:\n" << log.data() << "\n";
+        }
+    }
+    hiprtcDestroyProgram(&prog);
+    return code;
+}
 
 // Static kernels as fallback
 __global__ void
@@ -114,41 +162,11 @@ gpu_worker(int gpu_id, int iterations)
     {
         // Use hiprtc to compile kernel source at runtime, then load the compiled module
         // This triggers parallel module loading across threads
-        hiprtcProgram prog{};
-        hiprtcResult  rtc_result =
-            hiprtcCreateProgram(&prog, kernel_code, "dynamic_kernels.cu", 0, nullptr, nullptr);
-
-        bool use_dynamic_loading = (rtc_result == HIPRTC_SUCCESS);
+        auto code                = compile_module(kernel_code, "dynamic_kernels.cu");
+        bool use_dynamic_loading = !code.empty();
 
         if(use_dynamic_loading)
         {
-            // Compile the program
-            rtc_result = hiprtcCompileProgram(prog, 0, nullptr);
-
-            if(rtc_result != HIPRTC_SUCCESS)
-            {
-                size_t log_size{0};
-                hiprtcGetProgramLogSize(prog, &log_size);
-                if(log_size > 1)
-                {
-                    auto log = std::vector<char>(log_size);
-                    hiprtcGetProgramLog(prog, log.data());
-                    std::cerr << "Compilation failed:\n" << log.data() << "\n";
-                }
-                use_dynamic_loading = false;
-            }
-        }
-
-        if(use_dynamic_loading)
-        {
-            // Get the compiled code
-            size_t code_size{0};
-            hiprtcGetCodeSize(prog, &code_size);
-
-            std::vector<char> code(code_size);
-            hiprtcGetCode(prog, code.data());
-            hiprtcDestroyProgram(&prog);
-
             // Load the compiled module - THIS is what triggers the parallel code object loading
             hipModule_t module;
             hipError_t  err = hipModuleLoadData(&module, code.data());
@@ -208,8 +226,52 @@ gpu_worker(int gpu_id, int iterations)
 }
 
 int
-main()
+run_pc_sampling_mode()
 {
+    std::cout << "Memory Code Object PC Sampling Workload\n";
+
+    auto code = compile_module(spin_kernel_code, "spin_kernel.cu");
+    if(code.empty())
+    {
+        std::cerr << "hiprtc compilation failed; cannot load a code object from memory\n";
+        return EXIT_FAILURE;
+    }
+
+    hipModule_t   module;
+    hipFunction_t func;
+    HIP_CHECK(hipModuleLoadData(&module, code.data()));
+    HIP_CHECK(hipModuleGetFunction(&func, module, "dynamic_kernel_spin"));
+
+    constexpr int n          = 1 << 20;
+    constexpr int iterations = 1 << 16;
+    constexpr int launches   = 4;
+
+    float* d_data{nullptr};
+    HIP_CHECK(hipMalloc(&d_data, n * sizeof(float)));
+    HIP_CHECK(hipMemset(d_data, 0, n * sizeof(float)));
+
+    int   n_arg          = n;
+    int   iterations_arg = iterations;
+    void* args[]         = {&d_data, &n_arg, &iterations_arg};
+    for(int i = 0; i < launches; ++i)
+    {
+        HIP_CHECK(
+            hipModuleLaunchKernel(func, (n + 255) / 256, 1, 1, 256, 1, 1, 0, 0, args, nullptr));
+    }
+    HIP_CHECK(hipDeviceSynchronize());
+
+    HIP_CHECK(hipFree(d_data));
+    HIP_CHECK(hipModuleUnload(module));
+
+    std::cout << "Workload completed successfully\n";
+    return EXIT_SUCCESS;
+}
+
+int
+main(int argc, char** argv)
+{
+    if(argc > 1 && std::string_view{argv[1]} == "--pc-sampling") return run_pc_sampling_mode();
+
     std::cout << "Multi-Threaded Code Object Loading Test\n";
 
     int num_gpus = 0;

@@ -22,6 +22,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+import os
 import sys
 
 import pytest
@@ -250,6 +251,35 @@ def test_rocpd_code_object_content_hashes(rocpd_connection):
         ), f"Missing content hash for code object {code_object_id} in {guid}"
         assert content_hash.startswith("fnv1a64:") and len(content_hash) == 24
         assert all(character in "0123456789abcdef" for character in content_hash[8:])
+
+
+def test_rocpd_code_object_snapshot_selection(rocpd_connection):
+    # Only code objects whose bytes are unreachable after exit are snapshotted:
+    # memory-backed objects with a file:// URI (kernels embedded in the
+    # workload's executable) are read back from that file instead, while
+    # memory-only objects (memory:// URI) must have a snapshot on disk.
+    from urllib.parse import unquote, urlparse
+
+    objects = rocpd_connection.execute(
+        "SELECT C.id, C.uri, json_extract(C.extdata, '$.memory_size'), "
+        "json_extract(C.extdata, '$.snapshot_uri'), "
+        "EXISTS (SELECT 1 FROM rocpd_gpu_pc_sample S "
+        "WHERE S.guid = C.guid AND S.code_object_id = C.id) "
+        "FROM rocpd_info_code_object C WHERE C.storage_type = 'MEMORY'"
+    ).fetchall()
+    file_backed = [row for row in objects if row[1].startswith("file://")]
+    assert any(
+        sampled for *_, sampled in file_backed
+    ), "Expected samples in a file-backed code object embedded in the workload"
+    for code_object_id, uri, memory_size, snapshot_uri, _ in objects:
+        if uri.startswith("file://"):
+            assert (
+                snapshot_uri is None
+            ), f"file-backed code object {code_object_id} was snapshotted"
+        else:
+            assert snapshot_uri, f"memory-only code object {code_object_id} ({uri})"
+            path = unquote(urlparse(snapshot_uri).path)
+            assert os.path.getsize(path) == memory_size, snapshot_uri
 
 
 def test_rocpd_sample_count_matches_json(rocpd_connection, json_data):
@@ -736,6 +766,81 @@ def test_rocpd_persisted_disassembly(rocpd_disasm_connection):
         WHERE v.instruction IS NOT d.instruction
         """).fetchone()[0]
     assert mismatched == 0, "decoded view did not serve the persisted disassembly text"
+
+
+def _sampled_memory_code_objects(conn):
+    """Sampled code objects that existed only in process memory (no file:// URI)."""
+    return conn.execute(
+        "SELECT C.guid, C.id, C.uri, "
+        "json_extract(C.extdata, '$.memory_size'), "
+        "json_extract(C.extdata, '$.content_hash'), "
+        "json_extract(C.extdata, '$.snapshot_uri') "
+        "FROM rocpd_info_code_object C "
+        "WHERE C.storage_type = 'MEMORY' AND C.uri NOT LIKE 'file://%' "
+        "AND EXISTS (SELECT 1 FROM rocpd_gpu_pc_sample S "
+        "WHERE S.guid = C.guid AND S.code_object_id = C.id)"
+    ).fetchall()
+
+
+def test_rocpd_memory_code_object_snapshots(rocpd_memory_connection):
+    # rocprofv3 snapshots code objects that exist only in process memory to files
+    # so their samples remain decodable after the process exits.  The original
+    # memory:// URI is kept, and the snapshot must hold exactly the recorded bytes.
+    from urllib.parse import unquote, urlparse
+
+    from rocpd import libpyrocpd
+
+    objects = _sampled_memory_code_objects(rocpd_memory_connection)
+    assert objects, "Expected samples in a memory-only code object"
+    for _, code_object_id, uri, memory_size, content_hash, snapshot_uri in objects:
+        assert uri.startswith("memory://"), uri
+        assert snapshot_uri, f"code object {code_object_id} was not snapshotted"
+        parsed = urlparse(snapshot_uri)
+        assert parsed.scheme == "file" and not parsed.netloc, snapshot_uri
+        with open(unquote(parsed.path), "rb") as ifs:
+            data = ifs.read()
+        assert len(data) == memory_size
+        assert libpyrocpd.code_object_content_hash(data) == content_hash
+
+
+def test_rocpd_memory_code_object_decode_matches_json(rocpd_memory_connection, json_data):
+    # Every sample in a memory-only code object must decode lazily from its
+    # snapshot -- the process has exited and no disassembly was stored -- to the
+    # instruction rocprofv3 decoded in-process from live memory for the JSON output.
+    conn = rocpd_memory_connection
+    assert _count_rows(conn, "rocpd_disassembly_data") == 0
+    memory_objects = {
+        (str(guid), code_object_id)
+        for guid, code_object_id, *_ in _sampled_memory_code_objects(conn)
+    }
+    assert memory_objects
+
+    instructions = _tool(json_data)["strings"]["pc_sample_instructions"]
+    records = _json_records(json_data, "pc_sample_stochastic") + _json_records(
+        json_data, "pc_sample_host_trap"
+    )
+    rows = conn.execute(
+        "SELECT guid, code_object_id, code_object_offset, instruction "
+        "FROM rocpd_gpu_pc_sample_decoded ORDER BY id ASC"
+    ).fetchall()
+    assert len(rows) == len(records)
+
+    checked = 0
+    for index, (sample, row) in enumerate(zip(records, rows)):
+        guid, code_object_id, code_object_offset, instruction = row
+        pc = sample["record"]["pc"]
+        assert (code_object_id, code_object_offset) == (
+            pc["code_object_id"],
+            pc["code_object_offset"],
+        ), f"sample {index}: DB and JSON records are misaligned"
+        if (str(guid), code_object_id) not in memory_objects:
+            continue
+        expected = instructions[sample["inst_index"]]
+        assert (
+            instruction == expected
+        ), f"sample {index}: decoded {instruction!r}, collected {expected!r}"
+        checked += 1
+    assert checked > 0
 
 
 if __name__ == "__main__":

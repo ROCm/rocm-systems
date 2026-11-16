@@ -8,6 +8,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 - rocJPEG API tracing for `rocJpegDecodeAsync`, `rocJpegDecodeSync`, `rocJpegDecodeBatchedAsync`, `rocJpegDecodeBatchedSync`, and `rocJpegGetDecoderCaps`. The rocJPEG dispatch table the SDK expects is now step version 3.
   - New `ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeAsync`, `ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeSync`, `ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeBatchedAsync`, `ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeBatchedSync`, and `ROCPROFILER_ROCJPEG_API_ID_rocJpegGetDecoderCaps` operation IDs, and matching entries in `rocprofiler_rocjpeg_api_args_t`.
+- PC sampling with rocpd output now snapshots code objects that exist only in process memory (for example, modules loaded with `hipModuleLoadData` from hiprtc or other JIT compilers) to `<output-prefix>_code_objects/` when they are loaded, and records each copy as `snapshot_uri` in `rocpd_info_code_object.extdata`. rocpd decodes samples in these code objects lazily from the snapshots after the process exits, so `--complete-isa-decode` is no longer needed for them. Code objects with a `file://` URI are not copied.
 
 ### Changed
 
