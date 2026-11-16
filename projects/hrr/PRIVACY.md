@@ -91,7 +91,7 @@ needs no GPU.
 Capture is disabled by default on AMD platforms at present (see the [README](README.md)).
 Where it is built in, it is armed by `HIP_HRR_CAPTURE_OUTPUT` and records only with the
 consent of the user who runs the process (see [Consent](#consent)). Capture records everything
-in the tables below ([AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880)).
+in the tables below.
 
 ## What an archive contains
 
@@ -183,7 +183,8 @@ directory 0700, every directory under it 0700 and every file 0600. An output dir
 already exists keeps its own mode, and missing parent directories above it are created with
 the default mode (0777 minus the umask).
 [AIRUNTIME-2847](https://amd-hub.atlassian.net/browse/AIRUNTIME-2847) makes every
-write go through the directory descriptors capture checked.
+write inside `pid-<pid>/` go through the directory descriptors capture checked. The root
+`manifest.json`, `NOTICE.txt` and the first lookup of `pid-<pid>/` still go by path.
 [AIRUNTIME-2878](https://amd-hub.atlassian.net/browse/AIRUNTIME-2878), still open, is to keep
 the crash-time flush without displacing the application's own crash handler. None of these changes what an
 archive contains.
