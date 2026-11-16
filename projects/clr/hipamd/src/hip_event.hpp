@@ -160,10 +160,10 @@ class Event {
   void SetNodesPrevToRecorded(const std::vector<hip::GraphNode*>& graphNode) {
     nodesPrevToRecorded_ = graphNode;
   }
-  virtual hipError_t GetHandle(ihipIpcEventHandle_t* handle) {
+  virtual hipError_t GetHandle(ihipIpcEventHandle_t* /*handle*/) {
     return hipErrorInvalidConfiguration;
   }
-  virtual hipError_t OpenHandle(ihipIpcEventHandle_t* handle) {
+  virtual hipError_t OpenHandle(ihipIpcEventHandle_t* /*handle*/) {
     return hipErrorInvalidConfiguration;
   }
   virtual bool awaitEventCompletion();
