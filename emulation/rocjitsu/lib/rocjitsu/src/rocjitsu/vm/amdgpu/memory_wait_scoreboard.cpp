@@ -844,7 +844,9 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
       return;
     }
     if (matrix && !write && reg->cls == RegClass::VGPR) {
-      if (op == inst.src_operand(0))
+      // Only CDNA2 uses the adjacent A block mapping. Keep the other targets
+      // conservative while the full-wave and adjacent-block descriptions disagree.
+      if (op == inst.src_operand(0) && modifiers.mfma.a_block_lanes != 0)
         accessed_lanes &= mfma_a_lane_mask(modifiers.mfma.cbsz, modifiers.mfma.abid,
                                            modifiers.mfma.a_block_lanes);
       else if (op == inst.src_operand(1))
