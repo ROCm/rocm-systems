@@ -29,6 +29,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
@@ -3378,6 +3379,47 @@ TEST(ExecutionPluginTest, MfmaReadObservationUsesLaneMasks) {
                        {S0 + 0, S0 + 1, S0 + 2, S0 + 3, S1 + 0, S1 + 1, S1 + 2, S1 + 3, ACC + 0,
                         ACC + 1, ACC + 2, ACC + 3},
                        ~uint64_t{0});
+}
+
+TEST(ExecutionPluginTest, Gfx942MfmaBroadcastReadObservationMatchesHardware) {
+  PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/1, "cdna3"));
+  OrderingPlugin *plugin = fixture.attach_ordering_plugin();
+  amdgpu::ComputeUnitCore *cu = fixture.cu();
+  amdgpu::Wavefront *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 64u);
+  const uint32_t vb = wf->vgpr_alloc().base;
+  for (uint32_t lane = 0; lane < 64; ++lane) {
+    wf->debug_write_vgpr(0, lane, 0x3f80'0000u);
+    wf->debug_write_vgpr(1, lane, 0x3f80'0000u);
+  }
+
+  std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  // CBSZ=2, ABID=1 selects A lanes 4-7, 20-23, 36-39 and 52-55 on MI300X.
+  constexpr uint64_t a_lanes = 0x00f0'00f0'00f0'00f0;
+  for (uint16_t opcode :
+       {cdna3::kVMfmaF324x4x116bF32Vop3pMfma, cdna3::kVMfmaI324x4x416bI8Vop3pMfma}) {
+    for (uint64_t exec : {~uint64_t{0}, uint64_t{1}, uint64_t{0}}) {
+      SCOPED_TRACE(std::format("opcode={} exec={:#x}", opcode, exec));
+      wf->set_exec(exec);
+      const std::array<uint32_t, 2> words = cdna3::build_vop3p_mfma(
+          opcode, {.vdst = 32, .cbsz = 2, .abid = 1, .src0 = 256, .src1 = 257, .src2 = 128});
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+      ASSERT_NE(inst, nullptr);
+      plugin->events.clear();
+      ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+
+      const std::vector<HookEvent> reads = vgpr_read_events(*plugin);
+      ASSERT_EQ(reads.size(), 2u);
+      EXPECT_NE(reads[0].physical_reg, reads[1].physical_reg);
+      for (const HookEvent &read : reads) {
+        ASSERT_TRUE(read.physical_reg == vb || read.physical_reg == vb + 1);
+        EXPECT_EQ(read.lane_mask, read.physical_reg == vb ? a_lanes : ~uint64_t{0});
+        EXPECT_EQ(read.byte_mask, ExecutionPlugin::kFullByteMask);
+      }
+    }
+  }
 }
 
 TEST(ExecutionPluginTest, MfmaReadObservationSkipsConstantAccumulator) {
