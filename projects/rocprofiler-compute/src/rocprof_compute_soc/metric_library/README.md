@@ -67,8 +67,8 @@ A description says what the metric counts, following these rules:
    indicate compute-intensive kernels."
 3. **One description per id.** An id has the same description on every arch where its
    formula means the same.
-4. **Rates.** Byte rates say "divided by total duration"; FLOP and IOP rates say "per
-   second".
+4. **Rates.** Measured byte rates say "divided by total duration"; FLOP and IOP rates
+   say "per second". A peak bandwidth says which peak it gives.
 5. **Normalization.** A normalized metric, whose unit is `(<Quantity> + $normUnit)`, does
    not name the normalization; the unit shows it, for example "Bytes per kernel".
 6. **Percentages.** A percentage starts with "Percentage of".
