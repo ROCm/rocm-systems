@@ -53,6 +53,26 @@ constexpr uint64_t RJ_ARITH_MFMA_CBSZ_MASK = 7ULL;
 constexpr uint64_t RJ_ARITH_MFMA_ABID_SHIFT = 3ULL;
 constexpr uint64_t RJ_ARITH_MFMA_BLGP_SHIFT = 7ULL;
 
+// Batched gfx942 F32/F16/BF16/I8 forms broadcast within adjacent M-lane blocks.
+// Set this control for those forms; zero retains the existing full-wave mapping.
+constexpr uint64_t RJ_ARITH_MFMA_A_ADJACENT_BLOCKS = 1ULL << 10;
+
+// Arithmetic and register reads share this mapping. A nonzero block width
+// selects adjacent matrix-block groups; zero selects a full-wave group.
+static inline uint32_t rj_arith_mfma_a_source_lane(uint32_t lane, uint32_t cbsz, uint32_t abid,
+                                                   uint32_t matrix_block_lanes) {
+  if (cbsz == 0 || cbsz > 4) {
+    return lane;
+  }
+  const uint32_t blocks = 1u << cbsz;
+  const uint32_t width = matrix_block_lanes ? matrix_block_lanes : 64u / blocks;
+  if (width > 64u / blocks) {
+    return lane;
+  }
+  const uint32_t group_size = width * blocks;
+  return (lane / group_size) * group_size + (abid % blocks) * width + (lane % width);
+}
+
 // FP32 factors use M*K*batch/64 VGPRs each; outputs use M*M*batch/64.
 // Controls, semantics and overlap follow the dense MFMA contract below.
 int rj_arith_v_mfma_f32_32x32x1_2b_f32_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,

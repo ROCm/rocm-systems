@@ -4,6 +4,7 @@
 // GFX9 dense matrix register layout and MFMA source-lane controls.
 #pragma once
 #include "common/bits.h"
+#include "rj_arith/detail/rj_arith_mfma.h"
 #include <stdint.h>
 
 namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
@@ -30,16 +31,10 @@ constexpr int mfma_input_index(int index, int k, int batch) {
   return (local / PerWord * 64 + lane) * PerWord + local % PerWord;
 }
 
-// MI300 §7.1.5.1 and CDNA4 §7.1.6.1 give this full-wave A-lane formula.
-// Their §13.3.6.1 ABID tables describe adjacent block groups instead. The
-// reduction follows the formula pending a distinguishing hardware capture.
-inline int mfma_a_lane(int lane, uint64_t controls) {
-  int cbsz = int(controls & 7);
-  if (!cbsz || cbsz > 4) {
-    return lane;
-  }
-  int blocks = 1 << cbsz;
-  return lane % (64 / blocks) + (64 / blocks) * (int(controls >> 3 & 15) % blocks);
+inline int mfma_a_lane(int lane, uint64_t controls, int matrix_rows) {
+  const uint32_t block_lanes = controls & RJ_ARITH_MFMA_A_ADJACENT_BLOCKS ? matrix_rows : 0;
+  return int(rj_arith_mfma_a_source_lane(uint32_t(lane), uint32_t(controls & 7),
+                                         uint32_t(controls >> 3 & 15), block_lanes));
 }
 
 // Apply the eight encoded B lane permutations, keeping the lane inside Wave64.
@@ -58,9 +53,9 @@ inline int mfma_b_lane(int lane, uint64_t controls) {
 }
 
 // Apply lane controls without changing the element position inside its source word.
-template <int PerWord> inline int mfma_permute_input(int index, uint64_t controls, bool a) {
+template <int PerWord, int M> inline int mfma_permute_input(int index, uint64_t controls, bool a) {
   int lane = index / PerWord % 64;
-  int mapped = a ? mfma_a_lane(lane, controls) : mfma_b_lane(lane, controls);
+  int mapped = a ? mfma_a_lane(lane, controls, M) : mfma_b_lane(lane, controls);
   return index + PerWord * (mapped - lane);
 }
 
@@ -72,9 +67,9 @@ inline float mfma_clamp_overflow(float result, float initial, const float *a, co
     return result;
   }
   for (int k = 0; k < K; ++k) {
-    const int ai = mfma_permute_input<PerWord>(
+    const int ai = mfma_permute_input<PerWord, M>(
         mfma_input_index<M, K, Batch, PerWord>(row, k, batch), controls, true);
-    const int bi = mfma_permute_input<PerWord>(
+    const int bi = mfma_permute_input<PerWord, M>(
         mfma_input_index<M, K, Batch, PerWord>(col, k, batch), controls, false);
     if (!__builtin_isfinite(a[ai]) || !__builtin_isfinite(b[bi])) {
       return result;

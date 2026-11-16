@@ -4,6 +4,7 @@
 // Dense integer MFMA/WMMA: signedness, lane controls, wrap/saturation and overlap.
 #include "common/cpu.h"
 #include "common/semantics.h"
+#include "mfma/broadcast_test.h"
 #include "rj_arith/detail/rj_arith_common.h"
 #include "rj_arith/detail/rj_arith_mfma.h"
 #include "rj_arith/detail/rj_arith_wmma.h"
@@ -187,3 +188,10 @@ TEST(DenseIntegerMatrix, wmma_i32_16x16x64_iu8_w32) {
   arithmetic<16, 64, 1, true>(rj_arith_v_wmma_i32_16x16x64_iu8_w32);
 }
 } // namespace
+
+TEST(MfmaBroadcast, Gfx942I8HardwareCapture) {
+  const auto encode = [](int value) { return uint32_t(value) * 0x01010101u; };
+  expect_gfx942_broadcast<4, 4, 8, true>(rj_arith_v_mfma_i32_4x4x4_16b_i8_w64, encode);
+  expect_gfx942_broadcast<16, 4, 8, true>(rj_arith_v_mfma_i32_16x16x4_4b_i8_w64, encode);
+  expect_gfx942_broadcast<32, 4, 8, true>(rj_arith_v_mfma_i32_32x32x4_2b_i8_w64, encode);
+}

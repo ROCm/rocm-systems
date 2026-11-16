@@ -409,4 +409,71 @@ TEST(MfmaRegisterPathsTest, I8SingleRegisterShapesMatchScalarWithLanePermutation
       }
 }
 
+template <uint32_t M> void expect_batched_broadcast_paths() {
+  constexpr uint32_t cbsz = M == 4 ? 2 : 1;
+  ForceScalarGuard guard;
+  for (rj_code_arch_t arch :
+       {ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    ExactFixture fixture(arch, WF_SIZE);
+    ASSERT_NE(fixture.wf, nullptr);
+    for (bool scalar : {false, true}) {
+      util::set_force_scalar_for_testing(scalar);
+      for (Fmt format : {Fmt::F32, Fmt::F16, Fmt::BF16, Fmt::I8}) {
+        SCOPED_TRACE(
+            std::format("M={} arch={} scalar={} format={}", M, int(arch), scalar, int(format)));
+        const uint32_t k = format == Fmt::F32 ? 1 : 4;
+        const auto encode = [=](uint32_t value) {
+          if (format == Fmt::F32)
+            return std::bit_cast<uint32_t>(float(value));
+          if (format == Fmt::F16)
+            return uint32_t(std::bit_cast<uint16_t>(_Float16(value))) * 0x10001u;
+          if (format == Fmt::BF16)
+            return (std::bit_cast<uint32_t>(float(value)) >> 16) * 0x10001u;
+          return value * 0x01010101u;
+        };
+        for (uint32_t lane = 0; lane < 64; ++lane) {
+          for (uint32_t reg = 0; reg < k * fmt_bits(format) / 32; ++reg) {
+            fixture.cu->write_vgpr(fixture.vbase + kSourceA + reg, lane, encode(lane + 1));
+            fixture.cu->write_vgpr(fixture.vbase + kSourceB + reg, lane, encode(1));
+          }
+          for (uint32_t reg = 0; reg < M; ++reg)
+            fixture.cu->write_vgpr(fixture.vbase + kDestination + reg, lane, 0xdeadbeef);
+        }
+        auto &cu = *fixture.cu;
+        const uint32_t dst = fixture.vbase + kDestination;
+        const uint32_t a = fixture.vbase + kSourceA, b = fixture.vbase + kSourceB;
+        if (format == Fmt::F32)
+          amdgpu::exec_f32_mfma_f32_spec<M, M, 1, 64 / M>(cu, dst, a, b, 0, 0, cbsz, 1, 0);
+        else if (format == Fmt::F16)
+          amdgpu::exec_f32_mfma_f16_spec<M, M, 4, 64 / M>(cu, dst, a, b, 0, 0, cbsz, 1, 0);
+        else if (format == Fmt::BF16)
+          amdgpu::exec_f32_mfma_bf16_spec<M, M, 4, 64 / M>(cu, dst, a, b, 0, 0, cbsz, 1, 0);
+        else
+          amdgpu::exec_i32_i8(cu, M, M, 4, 64 / M, dst, a, b, 0, 0, cbsz, 1, 0);
+        const auto result = fixture.snapshot(kDestination, M);
+        for (uint32_t lane = 0; lane < 64; ++lane) {
+          for (uint32_t reg = 0; reg < M; ++reg) {
+            const uint32_t batch = M == 4 ? lane / 4 : reg / (M * M / 64);
+            const uint32_t row =
+                M == 4 ? reg : (reg % (M * M / 64) / 4) * (256 / M) + 4 * (lane / M) + reg % 4;
+            const uint32_t source = arch == ROCJITSU_CODE_ARCH_CDNA4
+                                        ? (batch * M + row) % (64 >> cbsz) + (64 >> cbsz)
+                                        : ((batch >> cbsz << cbsz) + 1) * M + row;
+            const uint32_t value = k * (source + 1);
+            ASSERT_EQ(result[reg * 64 + lane],
+                      format == Fmt::I8 ? value : std::bit_cast<uint32_t>(float(value)))
+                << "reg=" << reg << " lane=" << lane;
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(MfmaRegisterPathsTest, BatchedBroadcastPathsMatchGfx942Capture) {
+  expect_batched_broadcast_paths<4>();
+  expect_batched_broadcast_paths<16>();
+  expect_batched_broadcast_paths<32>();
+}
+
 } // namespace

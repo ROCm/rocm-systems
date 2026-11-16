@@ -47,12 +47,12 @@ void mfma_reduce_simd(uint64_t controls, uint32_t *const *d, const float *left, 
     for (int i = 0; i < M; ++i) {
       for (int k = 0; k < K; ++k) {
         int index = mfma_input_index<M, K, Batch, PerWord>(i, k, batch);
-        if (!controls) {
+        if (!(controls & ~RJ_ARITH_MFMA_A_ADJACENT_BLOCKS)) {
           rows[i][k] = left[index];
           columns[k][i] = right[index];
         } else {
-          rows[i][k] = left[mfma_permute_input<PerWord>(index, controls, true)];
-          columns[k][i] = right[mfma_permute_input<PerWord>(index, controls, false)];
+          rows[i][k] = left[mfma_permute_input<PerWord, M>(index, controls, true)];
+          columns[k][i] = right[mfma_permute_input<PerWord, M>(index, controls, false)];
         }
       }
     }

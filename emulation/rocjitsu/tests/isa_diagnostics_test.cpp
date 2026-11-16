@@ -30,6 +30,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <format>
 #include <memory>
 #include <span>
@@ -250,6 +251,34 @@ TEST_P(IsaDiagnosticsTest, MfmaBroadcastBlockBoundary) {
     const auto words = cdna4::build_vop3p_mfma(
         opcode, {.vdst = 32, .cbsz = 1, .abid = 2, .src0 = 256, .src1 = 257, .src2 = 128});
     execute(words, true, "v_mfma_");
+  }
+}
+
+TEST_P(IsaDiagnosticsTest, Gfx942MfmaBroadcastMatchesHardware) {
+  if (GetParam() != ROCJITSU_CODE_ARCH_CDNA3 && GetParam() != ROCJITSU_CODE_ARCH_CDNA4)
+    GTEST_SKIP();
+  // CBSZ=2, ABID=1 on gfx942 selects A lanes 4-7, 20-23, 36-39 and 52-55.
+  constexpr std::array<uint32_t, 16> first_rows = {5,  5,  5,  5,  21, 21, 21, 21,
+                                                   37, 37, 37, 37, 53, 53, 53, 53};
+  for (uint64_t exec : {~uint64_t{0}, uint64_t{1}, uint64_t{0}}) {
+    wf->set_exec(exec);
+    for (uint32_t lane = 0; lane < 64; ++lane) {
+      wf->debug_write_vgpr(0, lane, std::bit_cast<uint32_t>(float(lane + 1)));
+      wf->debug_write_vgpr(1, lane, std::bit_cast<uint32_t>(1.0f));
+      for (uint32_t reg = 0; reg < 4; ++reg)
+        wf->debug_write_vgpr(32 + reg, lane, 0xdeadbeef);
+    }
+    execute(cdna4::build_vop3p_mfma(
+                cdna4::kVMfmaF324x4x116bF32Vop3pMfma,
+                {.vdst = 32, .cbsz = 2, .abid = 1, .src0 = 256, .src1 = 257, .src2 = 128}),
+            0, "v_mfma_f32_4x4x1");
+    for (uint32_t lane = 0; lane < 64; ++lane) {
+      for (uint32_t reg = 0; reg < 4; ++reg) {
+        const uint32_t first =
+            GetParam() == ROCJITSU_CODE_ARCH_CDNA3 ? first_rows[lane / 4] : 17 + 4 * (lane / 4 % 4);
+        EXPECT_EQ(wf->debug_read_vgpr(32 + reg, lane), std::bit_cast<uint32_t>(float(first + reg)));
+      }
+    }
   }
 }
 

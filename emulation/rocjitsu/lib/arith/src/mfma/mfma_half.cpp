@@ -19,7 +19,8 @@ int mfma(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d, const u
          const uint32_t *const *b, const uint32_t *const *c) {
   using namespace rocjitsu::arith;
   flags = resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
-  if (int error = validate(flags, instruction_flags & ~0x3ffULL,
+  constexpr uint64_t allowed = 0x3ffULL | (Batch > 1 ? RJ_ARITH_MFMA_A_ADJACENT_BLOCKS : 0);
+  if (int error = validate(flags, instruction_flags & ~allowed,
                            kMatrixIgnoredFpFlags | RJ_ARITH_FP_DX10_CLAMP_OFF)) {
     return error;
   }

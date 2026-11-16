@@ -21,9 +21,9 @@ void mfma_reduce_scalar(uint64_t instruction_flags, uint32_t *const *d, const fl
         auto out = mfma_output<M, Batch>(row, col, batch);
         float acc = as_float(c[out.reg][out.lane]);
         for (int k = 0; k < K; ++k) {
-          int ai = mfma_permute_input<PerWord>(
+          int ai = mfma_permute_input<PerWord, M>(
               mfma_input_index<M, K, Batch, PerWord>(row, k, batch), instruction_flags, true);
-          int bi = mfma_permute_input<PerWord>(
+          int bi = mfma_permute_input<PerWord, M>(
               mfma_input_index<M, K, Batch, PerWord>(col, k, batch), instruction_flags, false);
           // Preserve fused BF16 and full-width FP32/XF32 cancellation when a
           // separate product would overflow.

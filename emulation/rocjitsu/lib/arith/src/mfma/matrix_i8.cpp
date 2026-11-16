@@ -16,7 +16,8 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
   using namespace rocjitsu::arith;
   flags = resolve_compatibility(flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL);
   constexpr uint64_t allowed =
-      Wmma ? RJ_ARITH_WMMA_SIGNED_A | RJ_ARITH_WMMA_SIGNED_B | RJ_ARITH_WMMA_CLAMP : 0x3ffULL;
+      Wmma ? RJ_ARITH_WMMA_SIGNED_A | RJ_ARITH_WMMA_SIGNED_B | RJ_ARITH_WMMA_CLAMP
+           : 0x3ffULL | (Batch > 1 ? RJ_ARITH_MFMA_A_ADJACENT_BLOCKS : 0);
   if (int error = validate(flags, controls & ~allowed,
                            kMatrixIgnoredFpFlags | RJ_ARITH_FP_DX10_CLAMP_OFF)) {
     return error;

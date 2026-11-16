@@ -24,6 +24,7 @@
 ///   - Input A[row][k]: use input_loc(dim=M, K, B, i=row, k, b, bits).
 ///     Input B[col][k]: use input_loc(dim=N, K, B, i=col, k, b, bits).
 
+#include "rj_arith/detail/rj_arith_mfma.h"
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
@@ -772,22 +773,15 @@ template <uint32_t N, uint32_t K>
 // Lane permutation for cbsz/abid (A broadcast) and blgp (B permutation)
 // ---------------------------------------------------------------------------
 
-/// AMD's matrix calculator at 2ef91896 applies adjacent M-lane block groups
-/// to gfx908, gfx90a and gfx942. CDNA2 follows that mapping. MI100 and MI200
-/// describe the same fields. The gfx908 model retains full-wave broadcast
-/// pending a hardware comparison. The gfx942/gfx950 model follows the
-/// full-wave formula in MI300 §7.1.5.1 and CDNA4 §7.1.6.1. Both guides'
-/// §13.3.6.1 ABID tables describe adjacent groups.
 inline uint32_t permute_a_lane(uint32_t lane, uint32_t cbsz, uint32_t abid,
                                uint32_t matrix_block_lanes = 0) {
-  if (cbsz == 0 || cbsz > 4)
-    return lane;
-  const uint32_t blocks = 1u << cbsz;
-  const uint32_t width = matrix_block_lanes ? matrix_block_lanes : 64u / blocks;
-  if (width > 64u / blocks)
-    return lane;
-  const uint32_t group_size = width * blocks;
-  return (lane / group_size) * group_size + (abid % blocks) * width + (lane % width);
+  return rj_arith_mfma_a_source_lane(lane, cbsz, abid, matrix_block_lanes);
+}
+
+inline uint32_t mfma_a_block_lanes(rj_code_arch_t arch, uint32_t matrix_rows, uint32_t batches) {
+  return arch == ROCJITSU_CODE_ARCH_CDNA2 || (arch == ROCJITSU_CODE_ARCH_CDNA3 && batches > 1)
+             ? matrix_rows
+             : 0;
 }
 
 /// @brief Permute the B-matrix lane based on the blgp field.
@@ -1558,7 +1552,7 @@ bool try_exec_mfma_snapshot(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32
       return false;
     const uint32_t stride = ((N + W - 1) / W) * W;
     const uint32_t d_regs = mfma_dense_reg_count(uint64_t{M} * N * B, sizeof(T) * 8, 64);
-    const uint32_t a_block_lanes = cu.arch() == ROCJITSU_CODE_ARCH_CDNA2 ? M : 0u;
+    const uint32_t a_block_lanes = mfma_a_block_lanes(cu.arch(), M, B);
     // cbsz/abid and blgp can broadcast part of each register.
     const uint64_t a_lanes =
         cbsz == 0 ? mfma_full_lane_mask(64) : mfma_permuted_lane_mask([&](uint32_t lane) {
@@ -1739,7 +1733,7 @@ RJ_NOINLINE void exec_f32_mixed_generic(auto &cu, uint32_t a_bits, uint32_t b_bi
                                         ExtractB eb, uint32_t const_acc, uint32_t cbsz,
                                         uint32_t abid, uint32_t blgp, MfmaF32Denorm denorm) {
   static_assert(M > 0 && N > 0 && K > 0);
-  const uint32_t a_block_lanes = cu.arch() == ROCJITSU_CODE_ARCH_CDNA2 ? M : 0u;
+  const uint32_t a_block_lanes = mfma_a_block_lanes(cu.arch(), M, B);
   const uint32_t wf = cu.wf_size();
   struct Result {
     uint32_t reg;
@@ -2094,7 +2088,7 @@ RJ_NOINLINE inline void exec_i32_i8_generic(auto &cu, uint32_t M, uint32_t N, ui
                                             uint32_t B, uint32_t dst, uint32_t s0, uint32_t s1,
                                             uint32_t s2, uint32_t const_acc, uint32_t cbsz,
                                             uint32_t abid, uint32_t blgp) {
-  const uint32_t a_block_lanes = cu.arch() == ROCJITSU_CODE_ARCH_CDNA2 ? M : 0u;
+  const uint32_t a_block_lanes = mfma_a_block_lanes(cu.arch(), M, B);
   const uint32_t wf = cu.wf_size();
   struct Result {
     uint32_t reg;

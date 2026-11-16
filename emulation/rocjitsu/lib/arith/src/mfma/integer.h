@@ -45,7 +45,7 @@ int matrix_i8_index(int index, int k, int batch, uint64_t controls, bool a) {
   } else {
     constexpr int per_lane = K / (64 / (M * Batch));
     int lane = batch * M + k / per_lane * M * Batch + index;
-    lane = a ? mfma_a_lane(lane, controls) : mfma_b_lane(lane, controls);
+    lane = a ? mfma_a_lane(lane, controls, M) : mfma_b_lane(lane, controls);
     int local = k % per_lane;
     return (local / 4 * 64 + lane) * 4 + local % 4;
   }
