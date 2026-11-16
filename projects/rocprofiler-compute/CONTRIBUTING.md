@@ -341,7 +341,8 @@ implementation is [`tools/format_yaml.py`](tools/format_yaml.py).
 
 Template files (`*_template.yaml`) and build artifacts are excluded. In the panel
 and metric library files, only values under these keys are equations: `value`,
-`avg`, `min`, `max`, `peak`, `formula`, `peak_empirical`. In the panel
+`avg`, `min`, `max`, `std dev`, `expr`, `peak`, `formula`, `peak_empirical`.
+Table headers use the same keys for column titles and are not checked. In the panel
 collectables files, every top-level value is an equation.
 
 **Rules.**
