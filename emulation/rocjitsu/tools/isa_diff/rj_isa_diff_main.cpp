@@ -67,8 +67,9 @@ const char *kUsage =
     "FILE is a code object (CDNA1-4: gfx908/90a/940-942/950; RDNA1-4: gfx1010-1201;\n"
     "gfx1250/1251), a raw instruction stream, or .s/.ll (LLVM plugin:\n"
     "llc -> llvm-mc -> ld.lld from --llvm-bin, $RJ_ISA_DIFF_LLVM_BIN or /opt/rocm/llvm/bin).\n"
-    "exit: 0 no mismatch found with complete declared scope, 1 local mismatch,\n"
-    "      2 inconclusive/unsupported/partial scope, 3 error.\n";
+    "exit: 0 no mismatch found with complete declared scope (no don't-care masking),\n"
+    "      1 local mismatch, 2 inconclusive/unsupported/partial scope or a pass that needed\n"
+    "      the per-bit don't-care mask, 3 error.\n";
 
 struct Args {
   std::map<std::string, std::string> values;
@@ -155,8 +156,10 @@ int exit_code_for(const Json &overall) {
     return kExitMismatch;
   if (status == "HARNESS_ERROR")
     return kExitError;
+  // A pass that needed the per-bit don't-care mask is not a plain pass: per-bit masking
+  // can accept values old cannot produce.
   if ((status == "NO_MISMATCH_FOUND" || status == "NO_SEMANTIC_DIFF") &&
-      coverage == "COMPLETE_FOR_DECLARED_SCOPE")
+      coverage == "COMPLETE_FOR_DECLARED_SCOPE" && overall["dont_care_masked_cases"].as_uint() == 0)
     return kExitPass;
   return kExitInconclusive;
 }

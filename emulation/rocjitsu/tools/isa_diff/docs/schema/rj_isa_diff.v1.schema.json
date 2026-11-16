@@ -1477,6 +1477,10 @@
             "undef_masked": {
               "$ref": "#/$defs/count",
               "description": "Valid pairs equal only through undefined-bit masking."
+            },
+            "dont_care_masked": {
+              "$ref": "#/$defs/count",
+              "description": "Valid pairs equal only through the per-bit don't-care mask (undefined values or NaN choice), which loses relations between bits."
             }
           },
           "additionalProperties": false
@@ -1757,6 +1761,10 @@
             },
             "proof_status": {
               "const": "NOT_RUN"
+            },
+            "dont_care_masked_cases": {
+              "$ref": "#/$defs/count",
+              "description": "Valid pairs (all regions) equal only through the per-bit don't-care mask; a pass with any is not a plain pass (test exits 2)."
             },
             "note": {
               "type": "string"
@@ -2411,6 +2419,29 @@
             "llvm",
             "strict"
           ]
+        },
+        "nan_choice": {
+          "type": "object",
+          "description": "The new side showed the difference under this alternative NaN choice; replay runs it the same way.",
+          "required": [
+            "side",
+            "alternative",
+            "seed"
+          ],
+          "properties": {
+            "side": {
+              "const": "new"
+            },
+            "alternative": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3
+            },
+            "seed": {
+              "$ref": "#/$defs/hex"
+            }
+          },
+          "additionalProperties": false
         },
         "poison_filter": {
           "type": "string"

@@ -26,8 +26,14 @@ the reason it was skipped. Callable functions get their return size and entry MO
 the IR (`--return-vgprs`, `--function-mode`); kernels are tested as their body (the CHECK
 lines carry no kernel descriptor).
 
-Exit status: 0 every compared function passed and nothing changed was skipped; 1 a local
-mismatch; 2 inconclusive, partial or skipped functions; 3 harness error.
+Overall status and exit code (summary.json "status"):
+  PASS (0)                 every changed function was compared and passed, nothing skipped;
+  MISMATCH (1)             a local mismatch;
+  INCOMPLETE (2)           something was not covered: inconclusive or poison-only functions,
+                           passes that needed the per-bit don't-care mask, skipped functions
+                           or files, changed functions on targets not executed;
+  ERROR (3)                a harness error (the tool failed, or reported HARNESS_ERROR);
+  NO_APPLICABLE_TESTS (4)  nothing was compared (no changed function this tool can run).
 """
 
 import argparse
@@ -40,6 +46,7 @@ import shlex
 import shutil
 import subprocess
 import tempfile
+import uuid
 import sys
 from pathlib import Path
 
@@ -340,16 +347,50 @@ def referenced_globals(text, body):
     return defs
 
 
+META_DEF = re.compile(r"^!([A-Za-z_.][\w.$-]*|\d+)\s*=.*$", re.M)
+META_REF = re.compile(r"!([A-Za-z_.][\w.$-]*|\d+)")
+
+
+def metadata_closure(text, seeds):
+    """Definitions of the metadata @p seeds reference, transitively (names without a
+    definition, such as attachment kinds like !range, become '!name = ?')."""
+    defs = {m.group(1): m.group(0) for m in META_DEF.finditer(text)}
+    todo, seen, out = list(META_REF.findall(seeds)), set(), []
+    while todo:
+        n = todo.pop()
+        if n in seen:
+            continue
+        seen.add(n)
+        line = defs.get(n)
+        out.append(line if line is not None else f"!{n} = ?")
+        if line is not None:
+            todo += META_REF.findall(line.split("=", 1)[1])
+    return sorted(out)
+
+
 def ir_identity(text, name):
+    """Everything that decides a function's semantics: its text, the attribute groups it
+    and its callees use (call-site attributes included), the globals and declarations it
+    references, the metadata they reference (transitively), and module-level information
+    (datalayout, triple, named metadata such as module flags, module asm)."""
     fns = functions_ir(text)
     if name not in fns:
         return None
     define, body = fns[name]
+    refs = referenced_globals(text, define + "\n" + body)
+    used = define + "\n" + body + "\n" + "\n".join(refs)
     groups = attribute_groups(text)
-    attrs = [f"#{g} = {groups.get(g, '?')}" for g in re.findall(r"#(\d+)", define)]
-    return "\n".join(
-        [define, body, *attrs, *referenced_globals(text, define + "\n" + body)]
-    )
+    attrs = [
+        f"#{g} = {groups.get(g, '?')}" for g in sorted(set(re.findall(r"#(\d+)", used)))
+    ]
+    module = [
+        l
+        for l in text.splitlines()
+        if re.match(r"^(target (datalayout|triple)|module asm|source_filename)\b", l)
+    ]
+    named = [m.group(0) for m in META_DEF.finditer(text) if not m.group(1)[0].isdigit()]
+    meta = metadata_closure(text, used + "\n" + "\n".join(named))
+    return "\n".join([define, body, *attrs, *refs, *module, *meta])
 
 
 SCALAR_DWORDS = {
@@ -1102,16 +1143,46 @@ def slug(s):
     )
 
 
-def run_one(job, out, tool, llvm_bin, cases, seed, strict_nan=False, triage=True):
-    d = (
+def job_dir(out, job):
+    """A directory no other job uses: the test's full path, then the RUN index, a hash of
+    the path, RUN line(s) and function, and the function name."""
+    rel = (
+        job["file"][len(TEST_DIR) + 1 :]
+        if job["file"].startswith(TEST_DIR + "/")
+        else job["file"]
+    )
+    key = "\n".join(
+        [job["file"], job.get("run_line", ""), job.get("old_llc", ""), job["function"]]
+    )
+    h = hashlib.sha1(key.encode()).hexdigest()[:10]
+    return (
         out
         / "functions"
-        / slug(Path(job["file"]).stem)
-        / f"run{job['run']}-{slug(job['function'])}"
+        / slug(re.sub(r"\.ll$", "", rel))
+        / f"run{job['run']}-{h}-{slug(job['function'])}"
     )
-    if d.exists():
-        shutil.rmtree(d)
-    d.mkdir(parents=True)
+
+
+def run_one(job, out, tool, llvm_bin, cases, seed, strict_nan=False, triage=True):
+    """Build the job under a private name, with paths relative to it, then publish it at
+    job_dir() by a rename."""
+    final = job_dir(out, job)
+    work = final.with_name(final.name + ".partial-" + uuid.uuid4().hex[:8])
+    work.mkdir(parents=True)
+    try:
+        row = run_job_in(job, work, tool, llvm_bin, cases, seed, strict_nan, triage)
+    except BaseException:
+        shutil.rmtree(work, ignore_errors=True)
+        raise
+    if final.exists():
+        shutil.rmtree(final)
+    os.replace(work, final)
+    row["dir"] = str(final)
+    return row
+
+
+def run_job_in(job, d, tool, llvm_bin, cases, seed, strict_nan, triage):
+    """Run one job in directory @p d (the tool runs there, with relative paths)."""
     old_body, new_body = job["old_body"], job["new_body"]
     run_as = job.get("run_as", job["target"])
     if job["target"] in GFX9_OLD_CACHE_SYNTAX and run_as in CDNA3_SYNTAX:
@@ -1131,18 +1202,17 @@ def run_one(job, out, tool, llvm_bin, cases, seed, strict_nan=False, triage=True
     (d / "before.s").write_text(synthesize(job["function"], old_body))
     (d / "after.s").write_text(synthesize(job["function"], new_body))
     row = {k: v for k, v in job.items() if k not in ("old_body", "new_body")}
-    row["dir"] = str(d)
     argv = [
         str(tool),
         "analyze",
         "--old",
-        str(d / "before.s"),
+        "before.s",
         "--new",
-        str(d / "after.s"),
+        "after.s",
         "--kernel",
         job["function"],
         "--out",
-        str(d / "case"),
+        "case",
         "--return-vgprs",
         str(job["return_vgprs"]),
         "--function-mode",
@@ -1173,7 +1243,7 @@ def run_one(job, out, tool, llvm_bin, cases, seed, strict_nan=False, triage=True
         argv += ["--return-masks", ",".join(hex(m) for m in job["return_masks"])]
     if llvm_bin:
         argv += ["--llvm-bin", str(llvm_bin)]
-    an = subprocess.run(argv, capture_output=True, text=True)
+    an = subprocess.run(argv, capture_output=True, text=True, cwd=d)
     (d / "analyze.log").write_text(an.stdout + an.stderr)
     row["analyze_exit"] = an.returncode
     if an.returncode:
@@ -1191,7 +1261,7 @@ def run_one(job, out, tool, llvm_bin, cases, seed, strict_nan=False, triage=True
             str(tool),
             "test",
             "--case",
-            str(d / "case"),
+            "case",
             "--cases",
             str(cases),
             "--seed",
@@ -1201,6 +1271,7 @@ def run_one(job, out, tool, llvm_bin, cases, seed, strict_nan=False, triage=True
         + (["--strict-nan"] if strict_nan else []),
         capture_output=True,
         text=True,
+        cwd=d,
     )
     (d / "test.log").write_text(te.stdout + te.stderr)
     row["test_exit"] = te.returncode
@@ -1215,6 +1286,7 @@ def run_one(job, out, tool, llvm_bin, cases, seed, strict_nan=False, triage=True
     row["status"] = o["test_status"]
     row["contract"] = o["contract_status"]
     row["coverage"] = o["coverage_scope"]
+    row["dont_care_masked"] = o.get("dont_care_masked_cases", 0)
     row["hunks"] = len(case.get("changes", []))
     row["unresolved"] = [f"{u['kind']}: {u['what']}" for u in res.get("unresolved", [])]
     row["regions"] = []
@@ -1261,7 +1333,7 @@ def poison_triage(job, d, tool, cases, seed, strict_nan):
             str(tool),
             "test",
             "--case",
-            str(tri),
+            "case_poison",
             "--cases",
             str(cases),
             "--seed",
@@ -1273,6 +1345,7 @@ def poison_triage(job, d, tool, cases, seed, strict_nan):
         + (["--strict-nan"] if strict_nan else []),
         capture_output=True,
         text=True,
+        cwd=d,
     )
     (d / "test_poison.log").write_text(te.stdout + te.stderr)
     out = {"kinds": kinds}
@@ -1298,7 +1371,7 @@ def poison_triage(job, d, tool, cases, seed, strict_nan):
 
 
 def verdict(row):
-    if row.get("status") == "ERROR":
+    if row.get("status") in ("ERROR", "HARNESS_ERROR"):
         return "error"
     if row.get("status") == "LOCAL_MISMATCH":
         t = row.get("poison_triage", {})
@@ -1311,8 +1384,32 @@ def verdict(row):
         row.get("status") in ("NO_MISMATCH_FOUND", "NO_SEMANTIC_DIFF")
         and row.get("coverage") == "COMPLETE_FOR_DECLARED_SCOPE"
     ):
-        return "pass"
+        # Equal only through the per-bit don't-care mask (undefined values, NaN choice):
+        # per-bit masking loses the relation between bits, so not a plain pass.
+        return "pass-masked" if row.get("dont_care_masked") else "pass"
     return "inconclusive"
+
+
+def overall_status(rows, skipped, stats):
+    """(status, exit code) of a run; see the module docstring."""
+    counts = {}
+    for r in rows:
+        counts[verdict(r)] = counts.get(verdict(r), 0) + 1
+    if counts.get("error"):
+        return "ERROR", 3
+    if counts.get("mismatch"):
+        return "MISMATCH", 1
+    if not rows and not stats.get("comment_only"):
+        return "NO_APPLICABLE_TESTS", 4
+    if (
+        counts.get("inconclusive")
+        or counts.get("poison-only")
+        or counts.get("pass-masked")
+        or skipped
+        or stats.get("untested_targets")
+    ):
+        return "INCOMPLETE", 2
+    return "PASS", 0
 
 
 def report(out, meta, rows, skipped, stats):
@@ -1322,6 +1419,7 @@ def report(out, meta, rows, skipped, stats):
     lines = [
         f"# rj_isa_diff_pr: {meta['repo']} {meta['base'][:12]}..{meta['head'][:12]}",
         "",
+        f"- status: {meta.get('status', '?')}",
         f"- changed test files under {TEST_DIR}: {stats['changed_test_files']} "
         f"({stats['autogenerated']} autogenerated by update_llc_test_checks, "
         f"{stats['with_target_run']} with a tested RUN line: "
@@ -1481,8 +1579,12 @@ def main(argv=None):
             )
         else:
             ap.error("give --base and --head, or --pr")
-        out = Path(a.out)
+        out = Path(a.out).resolve()
         out.mkdir(parents=True, exist_ok=True)
+        # Jobs run the tool from their own directory: absolute tool and assembler paths.
+        a.tool = str(Path(a.tool).resolve())
+        if a.llvm_bin:
+            a.llvm_bin = str(Path(a.llvm_bin).resolve())
         targets = {t: "native" for t in NATIVE_TARGETS}
         targets.update(
             {t: "proxy" for t in a.proxy_targets.split(",") if t and t not in targets}
@@ -1549,26 +1651,24 @@ def main(argv=None):
                 f"{r.get('status')} {r.get('contract', '')}",
                 flush=True,
             )
+    status, code = overall_status(rows, skipped, stats)
+    meta["status"] = status
     (out / "summary.json").write_text(
         json.dumps(
-            {"meta": meta, "stats": stats, "functions": rows, "skipped": skipped},
+            {
+                "status": status,
+                "meta": meta,
+                "stats": stats,
+                "functions": rows,
+                "skipped": skipped,
+            },
             indent=1,
         )
     )
     text, counts = report(out, meta, rows, skipped, stats)
     print(text)
-    print(f"wrote {out / 'report.md'} and {out / 'summary.json'}")
-    if counts.get("error"):
-        return 3
-    if counts.get("mismatch"):
-        return 1
-    if (
-        counts.get("inconclusive")
-        or counts.get("poison-only")
-        or any("function" in s for s in skipped)
-    ):
-        return 2
-    return 0
+    print(f"status {status}; wrote {out / 'report.md'} and {out / 'summary.json'}")
+    return code
 
 
 if __name__ == "__main__":

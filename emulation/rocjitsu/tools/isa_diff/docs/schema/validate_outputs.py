@@ -585,7 +585,7 @@ def drive_cli(tool, work, v):
     )
     test("salu_strict", {1}, "--strict-nan")
     analyze_fn("undef", "undef_old", "undef_new", "--entry-vgprs", "0")
-    test("undef", {0})
+    test("undef", {2})  # equal only through the don't-care mask: not a plain pass
     analyze_fn("poison", "nsw_wrap", "nsw_sat", "--entry-vgprs", "2")
     test("poison", {1})
     analyze_fn("poison_filtered", "nsw_wrap", "nsw_sat", "--entry-vgprs", "2")

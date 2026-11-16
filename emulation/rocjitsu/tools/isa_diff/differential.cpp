@@ -133,6 +133,10 @@ struct UndefMask {
   std::vector<uint32_t> vgpr; ///< Register-major lanes, as MachineState::vgpr.
   std::map<uint64_t, uint8_t> mem;
   std::vector<std::vector<uint32_t>> asm_uses;
+  /// Undefined inputs old passes through unchanged (its output is the input, in the base
+  /// run and every refill): any value there is exact, not a per-bit approximation.
+  LocSet passthrough;
+  VSet vpassthrough;
 };
 
 struct CompareConfig {
@@ -141,14 +145,18 @@ struct CompareConfig {
 };
 
 struct CompareStats {
-  bool nan = false;   ///< A difference vanished through NaN equivalence.
-  bool undef = false; ///< A difference vanished through undefined-bit masking.
+  bool nan = false;    ///< A difference vanished through NaN equivalence.
+  bool undef = false;  ///< A difference vanished through undefined-bit masking.
+  bool masked = false; ///< A difference vanished under the per-bit don't-care mask.
 };
 
-/// A difference vanished under the mask: credit the mask's sources.
-void note_mask(const UndefMask &m, CompareStats &st) {
+/// A difference vanished under the mask: credit the mask's sources. @p exact: the location
+/// is an undefined input old passes through (any value is right), not a per-bit
+/// approximation.
+void note_mask(const UndefMask &m, CompareStats &st, bool exact = false) {
   st.undef = st.undef || m.from_undef;
   st.nan = st.nan || m.from_nan;
+  st.masked = st.masked || !exact;
 }
 
 /// The stored floating-point unit containing byte @p x, if any.
@@ -200,14 +208,6 @@ std::string asm_use_difference(const MachineState &a, const MachineState &b,
       uint32_t d = ua.values[k] ^ ub.values[k];
       if (!d)
         continue;
-      if (cfg.undef && i < cfg.undef->asm_uses.size() && k < cfg.undef->asm_uses[i].size() &&
-          (d & cfg.undef->asm_uses[i][k])) {
-        d &= ~cfg.undef->asm_uses[i][k];
-        if (!d) {
-          note_mask(*cfg.undef, st);
-          continue;
-        }
-      }
       if (!cfg.strict_nan) {
         const uint8_t ta = k < ua.fp.size() ? ua.fp[k] : 0, tb = k < ub.fp.size() ? ub.fp[k] : 0;
         const uint32_t nd = nan_residual(ua.values[k], ub.values[k], ta, tb) & d;
@@ -216,6 +216,14 @@ std::string asm_use_difference(const MachineState &a, const MachineState &b,
           continue;
         }
         d = nd;
+      }
+      if (cfg.undef && i < cfg.undef->asm_uses.size() && k < cfg.undef->asm_uses[i].size() &&
+          (d & cfg.undef->asm_uses[i][k])) {
+        d &= ~cfg.undef->asm_uses[i][k];
+        if (!d) {
+          note_mask(*cfg.undef, st);
+          continue;
+        }
       }
       return "inline asm block " + std::to_string(ua.block) + " use differs at value " +
              std::to_string(k) + ": old " + hex32(ua.values[k]) + " new " + hex32(ub.values[k]);
@@ -291,19 +299,23 @@ std::string compare_pair(const RegionPair &region, const MachineState &init_old,
   for (unsigned l = 0; l < kNumLocs; ++l) {
     if (!observable.test(l))
       continue;
-    const uint32_t d = (final_old.get(l) ^ final_new.get(fwd[l])) & smask[l];
+    uint32_t d = (final_old.get(l) ^ final_new.get(fwd[l])) & smask[l];
     if (!d)
       continue;
-    if (undef && !(d & ~undef->loc[l])) {
-      note_mask(*undef, st);
-      continue;
+    // Exact rule first: a NaN that a floating-point operation produced on both sides
+    // (SALU float, or one moved into an SGPR) has unspecified bits.
+    if (!cfg.strict_nan) {
+      d &= nan_residual(final_old.get(l), final_new.get(fwd[l]), final_old.sfp_tag(l),
+                        final_new.sfp_tag(fwd[l]));
+      if (!d) {
+        st.nan = true;
+        continue;
+      }
     }
-    // A NaN that a floating-point operation produced on both sides (SALU float, or one
-    // moved into an SGPR) has unspecified bits.
-    if (!cfg.strict_nan && !(nan_residual(final_old.get(l), final_new.get(fwd[l]),
-                                          final_old.sfp_tag(l), final_new.sfp_tag(fwd[l])) &
-                             (undef ? d & ~undef->loc[l] : d))) {
-      st.nan = true;
+    // Then the per-bit don't-care mask (heuristic, unless old passes the undefined input
+    // through; marks the result).
+    if (undef && !(d & ~undef->loc[l])) {
+      note_mask(*undef, st, undef->passthrough.test(l));
       continue;
     }
     diff.set(l);
@@ -338,14 +350,6 @@ std::string compare_pair(const RegionPair &region, const MachineState &init_old,
       uint32_t d = (a ^ b) & emask;
       if (!d)
         continue;
-      if (undef && r * kWaveLanes + lane < undef->vgpr.size()) {
-        const uint32_t ud = d & ~undef->vgpr[size_t{r} * kWaveLanes + lane];
-        if (!ud) {
-          note_mask(*undef, st);
-          continue;
-        }
-        d = ud;
-      }
       if (!cfg.strict_nan) {
         const uint8_t ta = final_old.fp_tag(r, lane), tb = final_new.fp_tag(r, lane);
         uint32_t nd = d;
@@ -368,6 +372,13 @@ std::string compare_pair(const RegionPair &region, const MachineState &init_old,
           st.nan = true;
           continue;
         }
+        d = nd;
+      }
+      // Then the per-bit don't-care mask (heuristic; marks the result).
+      if (undef && r * kWaveLanes + lane < undef->vgpr.size() &&
+          !(d & ~undef->vgpr[size_t{r} * kWaveLanes + lane])) {
+        note_mask(*undef, st, undef->vpassthrough.test(r));
+        continue;
       }
       if (!lanes)
         lane0 = lane;
@@ -386,16 +397,16 @@ std::string compare_pair(const RegionPair &region, const MachineState &init_old,
   std::vector<uint64_t> mdiff;
   for (uint64_t x : differing_memory(final_old, final_new)) {
     uint8_t d = memory_byte(final_old, x) ^ memory_byte(final_new, x);
+    if (!cfg.strict_nan && nan_unit_equal(final_old, final_new, x)) {
+      st.nan = true;
+      continue;
+    }
     if (undef) {
       const auto it = undef->mem.find(x);
       if (it != undef->mem.end() && !(d & ~it->second)) {
         note_mask(*undef, st);
         continue;
       }
-    }
-    if (!cfg.strict_nan && nan_unit_equal(final_old, final_new, x)) {
-      st.nan = true;
-      continue;
     }
     mdiff.push_back(x);
   }
@@ -512,6 +523,23 @@ UndefMask compute_undef_mask(const RegionPair &region, RegionRunner &old_runner,
   const bool undef = k.vundef_old.any() || k.undef_old.any();
   if (!undef && !nan)
     return m;
+  // Pass-through candidates: undefined inputs whose output equals the input.
+  auto unchanged = [](const MachineState &in, const MachineState &out, LocSet &locs, VSet &regs) {
+    for (unsigned l = 0; l < kNumLocs; ++l)
+      if (locs.test(l) && in.get(l) != out.get(l))
+        locs.reset(l);
+    for (unsigned r = 0; r < kNumVgprs; ++r)
+      if (regs.test(r)) {
+        bool same = r < in.vgpr_count && r < out.vgpr_count;
+        for (unsigned lane = 0; same && lane < kWaveLanes; ++lane)
+          same = in.vget(r, lane) == out.vget(r, lane);
+        if (!same)
+          regs.reset(r);
+      }
+  };
+  m.passthrough = k.undef_old;
+  m.vpassthrough = k.vundef_old;
+  unchanged(init_old, final_old, m.passthrough, m.vpassthrough);
   for (unsigned alt = 1; alt <= kUndefAlternatives; ++alt) {
     MachineState s = init_old;
     refill_undef(s, k.vundef_old, k.undef_old, seed, case_index, alt, false,
@@ -523,6 +551,10 @@ UndefMask compute_undef_mask(const RegionPair &region, RegionRunner &old_runner,
       const MachineState alt = old_runner.capture();
       m.exit_varies = m.exit_varies || alt.exit_pc != final_old.exit_pc;
       merge_undef(m, final_old, alt);
+      unchanged(s, alt, m.passthrough, m.vpassthrough);
+    } else {
+      m.passthrough.reset();
+      m.vpassthrough.reset();
     }
   }
   old_runner.set_nan_choice(0, 0);
@@ -539,7 +571,7 @@ std::string check_new_undef(const RegionPair &region, RegionRunner &new_runner,
                             const MachineState &init_old, const MachineState &init_new,
                             const MachineState &final_old, const CompareConfig &cfg, uint64_t seed,
                             uint64_t case_index, bool nan, Mismatch &m, MachineState &alt_init,
-                            MachineState &alt_final) {
+                            MachineState &alt_final, CompareStats *stats = nullptr) {
   const RegionContract &k = region.contract;
   if (k.vundef_new.none() && k.undef_new.none() && !nan)
     return {};
@@ -553,8 +585,10 @@ std::string check_new_undef(const RegionPair &region, RegionRunner &new_runner,
     if (new_runner.run(region.new_side.insts.size()).status != RunStatus::Ok)
       continue;
     MachineState f = new_runner.capture();
-    kind = compare_pair(region, init_old, s, final_old, f, m, cfg);
+    kind = compare_pair(region, init_old, s, final_old, f, m, cfg, stats);
     if (!kind.empty()) {
+      m.new_nan_choice = nan ? alt : 0;
+      m.new_nan_seed = nan ? splitmix64(seed ^ (case_index << 2) ^ alt ^ 0x6e6577) : 0;
       m.detail = std::string("new depends on ") +
                  (nan ? "a NaN's unspecified bits or an undefined value"
                       : "an undefined value (" + format_vgprs(k.vundef_new) +
@@ -627,6 +661,12 @@ bool simpler(uint32_t candidate, uint32_t current) {
 
 Json reduce_mismatch(const RegionPair &region, RegionRunner &old_runner, RegionRunner &new_runner,
                      Mismatch &m, size_t budget, uint64_t seed) {
+  // The new side runs as it did when it showed the difference.
+  new_runner.set_nan_choice(m.new_nan_choice, m.new_nan_seed);
+  struct ResetNan {
+    RegionRunner &r;
+    ~ResetNan() { r.set_nan_choice(0, 0); }
+  } reset_nan{new_runner};
   const RegionContract &k = region.contract;
   const auto fwd = k.entry_forward();
   const MachineState original_old = m.init_old, original_new = m.init_new;
@@ -1092,6 +1132,7 @@ Json RegionResult::to_json() const {
   counts.set("harness_errors", harness_errors);
   counts.set("nan_tolerated", nan_tolerated);
   counts.set("undef_masked", undef_masked);
+  counts.set("dont_care_masked", dont_care_masked);
   Json rej = Json::object();
   for (const auto &[k, v] : rejections)
     rej.set(k, v);
@@ -1190,6 +1231,13 @@ Json counterexample_json(const RegionPair &region, const Mismatch &m, uint64_t s
   j.set("phase", m.phase);
   j.set("kind", m.kind);
   j.set("nan_policy", m.strict_nan ? "strict" : "llvm");
+  if (m.new_nan_choice) {
+    Json nc = Json::object();
+    nc.set("side", "new");
+    nc.set("alternative", static_cast<uint64_t>(m.new_nan_choice));
+    nc.set("seed", hex64(m.new_nan_seed));
+    j.set("nan_choice", std::move(nc));
+  }
   if (m.poison_filter)
     j.set("poison_filter", format_poison_kinds(m.poison_filter));
   j.set("locations", format_locs(m.locs));
@@ -1490,7 +1538,7 @@ RegionResult test_region(const RegionPair &region, const TestOptions &options,
       if (kind.empty()) {
         MachineState alt_init, alt_final;
         kind = check_new_undef(region, *new_runner, init_old, init_new, final_old, cfg,
-                               options.seed, case_index, nan_new, m, alt_init, alt_final);
+                               options.seed, case_index, nan_new, m, alt_init, alt_final, &cst);
         if (!kind.empty()) {
           init_new = std::move(alt_init);
           final_new = std::move(alt_final);
@@ -1499,6 +1547,7 @@ RegionResult test_region(const RegionPair &region, const TestOptions &options,
       if (kind.empty()) {
         r.nan_tolerated += cst.nan;
         r.undef_masked += cst.undef;
+        r.dont_care_masked += cst.masked;
       }
       fb.compare_ns = ns_since(t4);
       r.t.compare_ns += fb.compare_ns;
@@ -1543,8 +1592,10 @@ RegionResult test_region(const RegionPair &region, const TestOptions &options,
         std::vector<TraceStep> trace_old, trace_new;
         old_runner->load(m.init_old);
         old_runner->run(region.old_side.insts.size(), &trace_old);
+        new_runner->set_nan_choice(m.new_nan_choice, m.new_nan_seed);
         new_runner->load(m.init_new);
         new_runner->run(region.new_side.insts.size(), &trace_new);
+        new_runner->set_nan_choice(0, 0);
         Json bundle =
             counterexample_json(region, m, options.seed, policy.name(), trace_old, trace_new);
         if (options.artifact_info.has("artifacts"))
@@ -1694,6 +1745,10 @@ ReplayOutcome replay_counterexample(const Json &bundle, std::string &error) {
   std::vector<TraceStep> trace_old, trace_new;
   old_runner->load(*init_old);
   const RunOutcome oo = old_runner->run(region->old_side.insts.size(), &trace_old);
+  // The recorded NaN choice of the new side (a difference shown only under it).
+  if (bundle["nan_choice"].is_object())
+    new_runner->set_nan_choice(static_cast<unsigned>(bundle["nan_choice"]["alternative"].as_uint()),
+                               json_u64(bundle["nan_choice"]["seed"]).value_or(0));
   new_runner->load(*init_new);
   const RunOutcome on = new_runner->run(region->new_side.insts.size(), &trace_new);
   Mismatch m;

@@ -543,6 +543,12 @@ Json test_case(const CaseData &data, const TestOptions &options, const std::stri
     j.set("provenance", data.provenance);
   Json overall = Json::object();
   overall.set("test_status", test_status_name(agg.test_status));
+  // Passes that needed the per-bit don't-care mask are not plain passes (README "NaNs,
+  // undefined values and poison").
+  uint64_t masked = 0;
+  for (const auto &r : results)
+    masked += r.to_json()["counts"]["dont_care_masked"].as_uint();
+  overall.set("dont_care_masked_cases", masked);
   overall.set("contract_status", agg.contract_status);
   overall.set("witness_scope", witness_scope_name(agg.witness_scope));
   overall.set("coverage_scope", coverage_scope_name(agg.coverage_scope));

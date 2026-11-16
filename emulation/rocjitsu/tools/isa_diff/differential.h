@@ -103,6 +103,11 @@ struct Mismatch {
   /// The comparison it was found under: NaN policy and poison filter (PoisonKind mask).
   bool strict_nan = false;
   uint32_t poison_filter = 0;
+  /// The new side ran with an alternative NaN choice (RegionRunner::set_nan_choice) when
+  /// it showed the difference: 0 for none, else the alternative and its seed. Reduction,
+  /// the bundle trace and replay run the new side with it.
+  unsigned new_nan_choice = 0;
+  uint64_t new_nan_seed = 0;
 };
 
 struct Timings {
@@ -134,6 +139,11 @@ struct RegionResult {
   /// Valid pairs that compare equal only through NaN equivalence / undefined-bit masking.
   uint64_t nan_tolerated = 0;
   uint64_t undef_masked = 0;
+  /// Valid pairs equal only through the per-bit don't-care mask (bits that changed across
+  /// old's re-runs with undefined values refilled or NaNs replaced). Per-bit masking loses
+  /// the relation between bits (old `(u & 1) * 3` is 0 or 3; masking both bits accepts 1),
+  /// so a region that needed it is not a plain pass.
+  uint64_t dont_care_masked = 0;
   bool strict_nan = false;
   uint32_t poison_filter = 0;
   PhaseCounts boundary; ///< Mandatory boundary sweep.

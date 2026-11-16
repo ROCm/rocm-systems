@@ -996,6 +996,79 @@ TEST(IsaDiffTargets, SaluFloatAndModeWithoutIeeeOnGfx12) {
   std::filesystem::remove_all(dir);
 }
 
+/// Assemble two listings of function f (gfx950) and analyse them.
+std::optional<CaseData> analyze_pair(const std::string &dir, const std::string &old_s,
+                                     const std::string &new_s, int entry_vgprs) {
+  const auto tc = toolchain();
+  Artifact a[2];
+  for (int side = 0; side < 2; ++side) {
+    const std::string path = dir + (side ? "/new.s" : "/old.s");
+    EXPECT_TRUE(write_text_file(path, side ? new_s : old_s));
+    llvm::Provenance p;
+    std::string error;
+    EXPECT_TRUE(llvm::assemble(tc, path, dir + (side ? "/new" : "/old"), "f", a[side], p, error))
+        << error;
+    a[side].return_vgprs = 0;
+    a[side].entry_vgprs = entry_vgprs;
+  }
+  std::string error;
+  auto data = analyze_artifacts(a[0], a[1], {}, error);
+  EXPECT_TRUE(data) << error;
+  return data;
+}
+
+TEST(IsaDiffReview, PerBitMaskPassIsNotAPlainPass) {
+  const std::string dir = temp_dir("maskpass");
+  // u is undefined (no entry VGPRs): old stores (u & 1) * 3, which is 0 or 3; new stores
+  // 1, which old can never produce. Masking the two bits that vary accepts it, so the
+  // result is marked as relying on the mask, not a plain pass.
+  auto data =
+      analyze_pair(dir, store_fn({"v_and_b32_e32 v0, 1, v0", "v_mul_u32_u24_e32 v0, 3, v0"}),
+                   store_fn({"v_mov_b32_e32 v0, 1"}), 0);
+  ASSERT_TRUE(data);
+  TestOptions opt;
+  opt.cases = 300;
+  const Json report = test_case(*data, opt, "", nullptr);
+  EXPECT_EQ(report["overall"]["test_status"].as_string(), "NO_MISMATCH_FOUND");
+  EXPECT_GT(report["overall"]["dont_care_masked_cases"].as_uint(), 0u);
+  std::filesystem::remove_all(dir);
+}
+
+TEST(IsaDiffReview, AlternativeNanCounterexamplesReplay) {
+  const std::string dir = temp_dir("nanreplay");
+  // inf + -inf: the hardware's NaN is canonical (bit 0 clear), so both sides agree; under
+  // the all-ones NaN choice new's bit 0 leaks into its output. The bundle records the
+  // choice and replay reproduces it.
+  // The producer differs too (another temporary), so it is inside the region.
+  const std::vector<std::string> base = {"v_mov_b32_e32 v2, 0xff800000",
+                                         "v_add_f32_e32 v2, 0x7f800000, v2",
+                                         "v_and_b32_e32 v0, 0x7fc00000, v2"};
+  const std::vector<std::string> leak = {
+      "v_mov_b32_e32 v5, 0xff800000", "v_add_f32_e32 v2, 0x7f800000, v5",
+      "v_and_b32_e32 v0, 0x7fc00000, v2", "v_and_b32_e32 v3, 1, v2", "v_or_b32_e32 v0, v0, v3"};
+  auto data = analyze_pair(dir, store_fn(base), store_fn(leak), 0);
+  ASSERT_TRUE(data);
+  TestOptions opt;
+  opt.cases = 50;
+  opt.counterexample_dir = dir + "/cex";
+  const Json report = test_case(*data, opt, "", nullptr);
+  ASSERT_EQ(report["overall"]["test_status"].as_string(), "LOCAL_MISMATCH");
+  size_t replayed = 0;
+  for (const auto &e : std::filesystem::directory_iterator(dir + "/cex")) {
+    const auto text = read_text_file(e.path().string());
+    ASSERT_TRUE(text);
+    const auto bundle = Json::parse(*text);
+    ASSERT_TRUE(bundle);
+    EXPECT_TRUE((*bundle)["nan_choice"].is_object()) << e.path();
+    std::string error;
+    const ReplayOutcome out = replay_counterexample(*bundle, error);
+    EXPECT_TRUE(out.reproduced) << error << " " << out.summary;
+    ++replayed;
+  }
+  EXPECT_GT(replayed, 0u);
+  std::filesystem::remove_all(dir);
+}
+
 TEST(IsaDiffControlFlow, BranchConditionsAreFollowedAndExitsCompared) {
   const std::string dir = temp_dir("cflow");
   PairOptions o;
