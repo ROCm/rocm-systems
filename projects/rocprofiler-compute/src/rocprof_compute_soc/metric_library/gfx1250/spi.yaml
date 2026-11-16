@@ -76,10 +76,7 @@ spi.dispatched_wavefronts:
   # SPI_ALL_WAVE_sum, not SPI_CSN_WAVE_sum: the CS-pipe counter reads zero for gfx1250 compute dispatches.
   formula: AVG(SPI_ALL_WAVE_sum)
   unit: Wavefronts
-  description: >-
-    The total number of wavefronts, summed over all workgroups, forming this kernel
-    launch. On AMD Instinct MI100 to MI350 series accelerators, a wavefront has 64
-    work-items, so this should equal the ceiling of the grid size divided by 64.
+  description: Total wavefronts dispatched.
 spi.dispatched_workgroups:
   name: Dispatched Workgroups
   formula: AVG(SPI_RA_REQ_ALLOC_sum)
