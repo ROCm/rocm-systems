@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <map>
 #include <string>
+#include <vector>
 
 #include "../common/DdaFabricTestHelpers.hpp"
 #include "algorithms/dda/DdaCollSeams.h"
@@ -82,7 +83,7 @@ class DdaReduceScatterFabricLL128Microtest : public ::testing::Test {
   template <typename T>
   void ExpectLaunchOf(const DdaLaunch& launch, size_t recvcount) {
     EXPECT_EQ(launch.kernel, (Kernel<T, 8>()));
-    ASSERT_EQ(launch.args.size(), 10u);
+    ASSERT_EQ(launch.args.size(), 11u);
     EXPECT_EQ(launch.Arg<T**>(0), comm().ddaPeerPtrsDev);
     EXPECT_EQ(launch.Arg<T*>(1), kRecvbuff);
     EXPECT_EQ(launch.Arg<const T*>(2), kSendbuff);
@@ -92,7 +93,8 @@ class DdaReduceScatterFabricLL128Microtest : public ::testing::Test {
     EXPECT_EQ(launch.Arg<uint32_t*>(6), comm().ddaLLEpochDev);
     EXPECT_EQ(launch.Arg<int>(7), comm().ddaLLEpochLen);
     EXPECT_EQ(launch.Arg<size_t>(8), (recvcount * sizeof(T) + 1919) / 1920);
-    EXPECT_EQ(launch.Arg<size_t>(9), (comm().ddaScratchBytes / 2) / 16 * 16);
+    EXPECT_EQ(launch.Arg<size_t>(9), (comm().ddaScratchBytes / 2) / 128 * 128);
+    EXPECT_EQ(launch.Arg<dda::common::DdaKernelParams>(10).flag, comm().abortFlagDev);
   }
 
   DdaFabricMockComm mock_;
@@ -273,6 +275,56 @@ TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_GridFollowsShardSlicesWithin
 TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_LaunchErrorIsReported) {
   g_hipGetLastError = [] { return hipErrorLaunchFailure; };
   EXPECT_EQ(Run(4), ncclUnhandledCudaError);
+}
+
+// Walks phase 2's poll batches as the kernel does; returns the valid peers in order and counts invalid entries.
+template <int kBatch>
+std::vector<int> WalkPollBatches(int selfRank, int nRanks, int& invalid, int& invalidNotSelf) {
+  std::vector<int> visited;
+  int peer = dda::common::ddaLL128RsNextRank(selfRank, nRanks);
+  for (int base = 1; base < nRanks; base += kBatch) {
+    int peers[kBatch];
+    bool valid[kBatch];
+    peer = dda::common::ddaLL128RsBatchPeers(peer, base, nRanks, peers, valid);
+    for (int k = 0; k < kBatch; ++k) {
+      if (valid[k]) {
+        visited.push_back(peers[k]);
+      } else {
+        ++invalid;
+        invalidNotSelf += peers[k] != selfRank;
+      }
+    }
+  }
+  return visited;
+}
+
+template <int kBatch>
+void ExpectPollWalkCoversPeersInRankOrder() {
+  for (int nRanks = 2; nRanks <= 144; ++nRanks) {
+    for (int self = 0; self < nRanks; ++self) {
+      std::vector<int> expected;
+      for (int r = 1; r < nRanks; ++r) {
+        expected.push_back((self + r) % nRanks);
+      }
+      int invalid = 0;
+      int invalidNotSelf = 0;
+      ASSERT_EQ(WalkPollBatches<kBatch>(self, nRanks, invalid, invalidNotSelf), expected)
+        << "batch " << kBatch << " nRanks " << nRanks << " self " << self;
+      ASSERT_EQ(invalid, (kBatch - (nRanks - 1) % kBatch) % kBatch) << "batch " << kBatch << " nRanks " << nRanks;
+      ASSERT_EQ(invalidNotSelf, 0) << "batch " << kBatch << " nRanks " << nRanks << " self " << self;
+    }
+  }
+}
+
+// Every peer is polled once in rank order after self; a past-the-end entry names self, whose own slot is never written.
+TEST_F(DdaReduceScatterFabricLL128Microtest, PollBatch_WalkVisitsEveryPeerOnceInRankOrder) {
+  static_assert(dda::common::kDdaLL128RsPollBatch<float> == 3);
+  static_assert(dda::common::kDdaLL128RsPollBatch<half> == 3);
+  static_assert(dda::common::kDdaLL128RsPollBatch<bf16> == 3);
+  static_assert(dda::common::kDdaLL128RsPollBatch<dda::common::fp8e4m3> == 2);
+  static_assert(dda::common::kDdaLL128RsPollBatch<dda::common::fp8e5m2> == 2);
+  ExpectPollWalkCoversPeersInRankOrder<dda::common::kDdaLL128RsPollBatch<float>>();
+  ExpectPollWalkCoversPeersInRankOrder<dda::common::kDdaLL128RsPollBatch<dda::common::fp8e4m3>>();
 }
 
 }  // namespace

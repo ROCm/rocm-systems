@@ -46,13 +46,16 @@ typedef enum rj_vm_mode_t {
   /// a host runtime (e.g., ROCR) can issue ioctls through the interposer.
   RJ_VM_MODE_LOCAL = 1,
   /// @brief Multi-process serving (daemon). Same as LOCAL, plus all GPU
-  /// allocations are backed by memfds for cross-process sharing via
-  /// SCM_RIGHTS. Used by the rocjitsu CLI in daemon mode to host the
+  /// allocations have shareable backing handles (memfds or opaque tokens)
+  /// transferable via SCM_RIGHTS. Map them with rj_vm_map_shared_mem.
+  /// Used by the rocjitsu CLI in daemon mode to host the
   /// simulator on behalf of remote client processes.
   RJ_VM_MODE_DAEMON = 2,
 } rj_vm_mode_t;
 
 /// @brief Device command descriptor for rj_vm_execute.
+/// @details Map shared_handle with rj_vm_map_shared_mem; it may be an opaque
+/// token rather than a memfd. The VM owns the handle; the caller must not close it.
 typedef struct rj_vm_cmd_t {
   uint32_t cmd;               ///< Platform-specific command number.
   void *buf;                  ///< Command arguments buffer (with inlined arrays).
@@ -66,9 +69,11 @@ typedef struct rj_vm_cmd_t {
 
 /// @brief Device memory mapping descriptor.
 typedef struct rj_vm_map_t {
-  uint64_t addr;        ///< Requested mapping address.
-  uint64_t length;      ///< Length in bytes to map.
-  int64_t offset;       ///< Platform-specific offset encoding.
+  uint64_t addr;   ///< Requested mapping address.
+  uint64_t length; ///< Length in bytes to map.
+  /// Platform/KFD-encoded offset for rj_vm_device_map{,_as}; page-aligned byte
+  /// offset within the backing for rj_vm_map_shared_mem.
+  int64_t offset;
   uint32_t prot;        ///< Memory protection flags.
   uint32_t flags;       ///< Mapping flags.
   uint64_t mapped_addr; ///< [out] Address the mapping was placed at.
@@ -109,6 +114,9 @@ typedef struct rj_vm_gpu_info_t {
   uint32_t max_slots_scratch_cu;
 
   uint64_t local_mem_size;
+  uint64_t visible_vram_size;
+  uint32_t control_stack_size;
+  uint32_t context_save_size;
   uint32_t vram_type;
   uint32_t lds_size_kb;
   uint32_t mem_width;
@@ -151,6 +159,13 @@ typedef struct rj_vm_gpu_info_t {
 /// @retval ROCJITSU_STATUS_ERROR The loaded configuration does not contain a SoC.
 RJ_API_EXPORT rj_status_t rj_vm_create(const char *json_path, rj_vm_mode_t mode, rj_vm_t **vm);
 
+/// @brief Create a VM from only one named system node in a JSON file.
+/// @details The node must exist and must agree with `local_node` in the file,
+/// when present. A NULL or empty node uses JSON `local_node`; if neither
+/// selects a node, the graph must contain exactly one node.
+RJ_API_EXPORT rj_status_t rj_vm_create_for_node(const char *json_path, const char *node_id,
+                                                rj_vm_mode_t mode, rj_vm_t **vm);
+
 /// @brief Create a VM from a JSON configuration string.
 ///
 /// @param[in] json JSON configuration string.
@@ -163,32 +178,48 @@ RJ_API_EXPORT rj_status_t rj_vm_create(const char *json_path, rj_vm_mode_t mode,
 RJ_API_EXPORT rj_status_t rj_vm_create_from_string(const char *json, rj_vm_mode_t mode,
                                                    rj_vm_t **vm);
 
+/// @brief Create a VM from one named system node in a JSON string.
+RJ_API_EXPORT rj_status_t rj_vm_create_from_string_for_node(const char *json, const char *node_id,
+                                                            rj_vm_mode_t mode, rj_vm_t **vm);
+
 /// @brief Load and attach the execution plugins declared in a config to a VM.
 ///
 /// @details Parses the `plugins` and `sinks` sections of the
 /// config and attaches the resulting plugin group to the VM's SoC. This is the
 /// C-API equivalent of what the LD_PRELOAD interposer and the rocjitsu CLI do
 /// through the C++ PluginLoader, so a C-API host (e.g. the mirage daemon) can
-/// enable plugins without linking the simulator's C++ ABI. Call once after
-/// rj_vm_create / rj_vm_create_from_string and before rj_vm_run. A config with
+/// enable plugins without linking the simulator's C++ ABI. Call after
+/// rj_vm_create / rj_vm_create_from_string; repeated calls are allowed before
+/// the first rj_vm_step or rj_vm_run. A config with
 /// no `plugins` attaches an empty group (near-zero overhead). Plugin load
 /// failures are best-effort unless the config sets the top-level
 /// `require_all_plugins` boolean to true. This function must complete before the
 /// first rj_vm_step or rj_vm_run call and must not overlap either call; that
 /// ordering keeps plugin initialization and replacement outside the
-/// simulation-callback interval.
+/// simulation-callback interval. Admission failures preserve the installed group
+/// and its active state. Exceptions during shutdown, replacement, or initialization
+/// are translated to errors without a state-preservation guarantee. To reconfigure
+/// a single-instance plugin such as Perfsim, first pass an empty string to remove
+/// the installed group, then load the new config. This removes the old group
+/// before the replacement is validated; a rejected replacement leaves no plugins.
 /// @param[in] vm VM handle from rj_vm_create / rj_vm_create_from_string.
-/// @param[in] config_json The full config-file JSON (same text used to create
-///            the VM). Never NULL.
+/// @param[in] config_json The full config-file JSON containing the plugin
+///            configuration; it may differ from the text used to create the VM.
+///            Never NULL. An empty string removes all installed plugins; a non-empty
+///            config must be a JSON object.
 /// @param[in] plugin_dir Trusted directory to load plugin shared objects from
 ///            by explicit path — required in daemon mode, where the process is
 ///            not re-exec'd and cannot rely on a launcher-populated
 ///            LD_LIBRARY_PATH. NULL or empty resolves plugins by soname via the
 ///            dynamic-linker search path (the interposer/local path).
 /// @retval ROCJITSU_STATUS_SUCCESS Plugins were configured (or none declared).
-/// @retval ROCJITSU_STATUS_INVALID_ARGUMENT A required argument is NULL.
-/// @retval ROCJITSU_STATUS_ERROR The VM has no SoC, configuration failed, or a
-///                               required plugin could not be loaded.
+/// @retval ROCJITSU_STATUS_INVALID_ARGUMENT A required argument is NULL, or plugin
+///            admission rejected the config (invalid JSON/object/options or a
+///            required plugin could not be loaded). The installed group and its
+///            active state are unchanged.
+/// @retval ROCJITSU_STATUS_ERROR The VM has no SoC, or an exception occurred during
+///            configuration, replacement, or initialization. The installed group
+///            and active state may have changed.
 RJ_API_EXPORT rj_status_t rj_vm_load_plugins(rj_vm_t *vm, const char *config_json,
                                              const char *plugin_dir);
 
@@ -206,13 +237,27 @@ RJ_API_EXPORT void rj_vm_retain(rj_vm_t *vm);
 /// @param[in] vm VM handle (may be NULL, in which case this is a no-op).
 RJ_API_EXPORT void rj_vm_release(rj_vm_t *vm);
 
-/// @brief Mark a VM for destruction.
+/// @brief Close all processes and mark a VM for destruction only on success.
+///
+/// @details The host must first stop and join an asynchronous rj_vm_run call.
+/// If a final process writeback fails, the VM, plugins, and reference-count
+/// state remain intact. The caller retains the same handle and may retry.
+/// @param[in] vm VM to destroy (may be NULL).
+/// @retval ROCJITSU_STATUS_SUCCESS All process closes completed and the VM was
+/// marked for destruction.
+/// @retval ROCJITSU_STATUS_ERROR A process close failed; errno holds the driver
+/// error and the handle remains valid for retry.
+RJ_API_EXPORT rj_status_t rj_vm_destroy_checked(rj_vm_t *vm);
+
+/// @brief Compatibility wrapper for rj_vm_destroy_checked.
 ///
 /// @details If the reference count is already 0, frees immediately. Otherwise,
 /// the VM is freed when the last rj_vm_release drops the reference count to 0.
 /// No rj_vm_step or rj_vm_run call may be active. An asynchronous host must call
 /// rj_vm_request_exit and wait for rj_vm_run to return before destroying the VM;
-/// this ensures plugin shutdown cannot overlap simulation callbacks.
+/// this ensures plugin shutdown cannot overlap simulation callbacks. If final
+/// process close fails, this void wrapper retains the VM and logs a diagnostic;
+/// callers that need completion or retry must use rj_vm_destroy_checked.
 /// @param[in] vm VM to destroy (may be NULL).
 RJ_API_EXPORT void rj_vm_destroy(rj_vm_t *vm);
 
@@ -231,12 +276,14 @@ RJ_API_EXPORT void rj_vm_destroy(rj_vm_t *vm);
 /// @retval ROCJITSU_STATUS_UNSUPPORTED The VM has multiple engine partitions.
 RJ_API_EXPORT rj_status_t rj_vm_step(rj_vm_t *vm, int *active);
 
-/// @brief Run the VM to completion or until max_ticks is reached.
+/// @brief Run the VM to completion or until its finite horizon stops it.
 ///
 /// @details Runs the simulation to completion. Terminates when all primary
 /// components signal completion, the tick limit from the configuration is
-/// reached, or quiescence is detected. This call must not overlap
-/// rj_vm_load_plugins or rj_vm_destroy.
+/// reached, or quiescence is detected. A finite run also terminates at the last
+/// processed tick when a primary remains active but no work is queued; an
+/// unlimited run continues waiting for future async work. This call must not
+/// overlap rj_vm_load_plugins or rj_vm_destroy.
 /// @param[in] vm VM handle.
 /// @param[out] ticks_executed Number of ticks actually executed (may be NULL).
 /// @retval ROCJITSU_STATUS_SUCCESS Simulation completed successfully.
@@ -249,6 +296,7 @@ RJ_API_EXPORT rj_status_t rj_vm_run(rj_vm_t *vm, uint64_t *ticks_executed);
 /// @param[in] tick Simulation tick to record as the checkpoint timestamp.
 /// @retval ROCJITSU_STATUS_SUCCESS Checkpoint saved successfully.
 /// @retval ROCJITSU_STATUS_INVALID_ARGUMENT @p vm or @p path is NULL.
+/// @retval ROCJITSU_STATUS_UNSUPPORTED The VM has multiple GPUs.
 /// @retval ROCJITSU_STATUS_ERROR Serialization or I/O failed.
 RJ_API_EXPORT rj_status_t rj_vm_save_checkpoint(const rj_vm_t *vm, const char *path, uint64_t tick);
 
@@ -257,8 +305,9 @@ RJ_API_EXPORT rj_status_t rj_vm_save_checkpoint(const rj_vm_t *vm, const char *p
 /// @param[out] vm The restored VM handle.
 /// @retval ROCJITSU_STATUS_SUCCESS VM restored successfully.
 /// @retval ROCJITSU_STATUS_INVALID_ARGUMENT A required argument is NULL.
-/// @retval ROCJITSU_STATUS_INVALID_FILE The checkpoint file could not be opened.
-/// @retval ROCJITSU_STATUS_ERROR Deserialization failed.
+/// @retval ROCJITSU_STATUS_INVALID_FILE The checkpoint file could not be opened, read, or
+/// deserialized, or contains invalid execution-thread allocation metadata.
+/// @retval ROCJITSU_STATUS_ERROR The restored configuration does not contain a SoC.
 RJ_API_EXPORT rj_status_t rj_vm_restore_checkpoint(const char *path, rj_vm_t **vm);
 
 /// @brief Execute a device command (local mode — uses the local process).
@@ -293,12 +342,19 @@ RJ_API_EXPORT rj_status_t rj_vm_device_open(rj_vm_t *vm, rj_client_pid_t client_
 /// @brief Close a specific KFD process by ID.
 /// @param[in] vm VM handle.
 /// @param[in] process_id The process ID to close (0 closes the local process).
+/// @return ROCJITSU_STATUS_SUCCESS on completion, or ROCJITSU_STATUS_ERROR with
+/// errno set to the driver's failure code. A failed final close remains retryable
+/// with the same process ID while the VM remains alive.
 RJ_API_EXPORT rj_status_t rj_vm_device_close(rj_vm_t *vm, uint32_t process_id);
 
 /// @brief Close every registered KFD process, waking any parked event waiters.
 /// @details Daemon-teardown helper: closes all live processes so client threads
-/// blocked in an infinite-timeout WAIT_EVENTS unblock and can be joined.
+/// blocked in an infinite-timeout WAIT_EVENTS unblock and can be joined. It also
+/// retries pending final closes and reports the first failure after visiting all
+/// processes.
 /// @param[in] vm VM handle.
+/// @return ROCJITSU_STATUS_SUCCESS when all closes complete, or
+/// ROCJITSU_STATUS_ERROR with errno set to the first driver's failure code.
 RJ_API_EXPORT rj_status_t rj_vm_close_all_devices(rj_vm_t *vm);
 
 /// @brief Map device memory (local mode).
@@ -312,9 +368,13 @@ RJ_API_EXPORT rj_status_t rj_vm_device_map_as(rj_vm_t *vm, uint32_t process_id, 
 /// @brief Unmap device memory (local mode).
 /// @param[in] vm VM handle.
 /// @param[in] unmap Unmapping descriptor.
+/// @return ROCJITSU_STATUS_SUCCESS on completion, or ROCJITSU_STATUS_ERROR with
+/// errno from the driver when unmapping fails.
 RJ_API_EXPORT rj_status_t rj_vm_device_unmap(rj_vm_t *vm, rj_vm_unmap_t *unmap);
 
 /// @brief Unmap device memory for a specific process (daemon mode).
+/// @return ROCJITSU_STATUS_SUCCESS on completion, or ROCJITSU_STATUS_ERROR with
+/// errno from the driver when unmapping fails.
 RJ_API_EXPORT rj_status_t rj_vm_device_unmap_as(rj_vm_t *vm, uint32_t process_id,
                                                 rj_vm_unmap_t *unmap);
 
@@ -338,13 +398,53 @@ RJ_API_EXPORT rj_status_t rj_vm_drm_path(rj_vm_t *vm, const char **path);
 /// @param[out] info Simulated GPU metadata.
 RJ_API_EXPORT rj_status_t rj_vm_gpu_info(rj_vm_t *vm, rj_vm_gpu_info_t *info);
 
+/// @brief Get the number of node-local GPUs published by this VM.
+RJ_API_EXPORT rj_status_t rj_vm_gpu_count(rj_vm_t *vm, uint32_t *count);
+
+/// @brief Get metadata for one node-local GPU ordinal.
+RJ_API_EXPORT rj_status_t rj_vm_gpu_info_at(rj_vm_t *vm, uint32_t ordinal, rj_vm_gpu_info_t *info);
+
 /// @brief Get the borrowed backing memory handle (local mode).
 /// @details The VM retains ownership; the caller must not close the handle.
+/// The handle may be an opaque token; use rj_vm_map_shared_mem rather than
+/// assuming it supports host mmap or file I/O. Returns -1 when no backing exists.
 RJ_API_EXPORT rj_status_t rj_vm_get_shared_mem(rj_vm_t *vm, int64_t offset, rj_handle_t *handle);
 
 /// @brief Get the borrowed backing memory handle for a specific process (daemon mode).
 /// @details The VM retains ownership; the caller must not close the handle.
+/// Mapping and lifetime rules are the same as for rj_vm_get_shared_mem.
 RJ_API_EXPORT rj_status_t rj_vm_get_shared_mem_as(rj_vm_t *vm, uint32_t process_id, int64_t offset,
+                                                  rj_handle_t *handle);
+
+/// @brief Map a shared backing handle into the calling process without preloading.
+/// @details Accepts handles from rj_vm_get_shared_mem{,_as}, rj_vm_cmd_t::shared_handle,
+/// or their dup/SCM_RIGHTS aliases. The handle is borrowed and is not closed.
+/// Retain the allocation size separately and transfer it alongside the descriptor
+/// with SCM_RIGHTS. Non-preloaded host fstat/lseek cannot query a token's backing
+/// size; map->length comes from that retained size and the requested view.
+/// map->offset is a byte offset within the backing, not a KFD mmap offset.
+/// Use MAP_SHARED, a nonnegative page-aligned offset, and a nonempty range
+/// within the allocation. Supported flags are MAP_SHARED with optional MAP_FIXED,
+/// MAP_FIXED_NOREPLACE, and MAP_32BIT where available. All other flags (including
+/// MAP_PRIVATE, MAP_ANONYMOUS, and MAP_LOCKED) and invalid ranges fail with EINVAL
+/// for both backing forms. Opaque tokens do not support file I/O.
+/// Token mappings require a live creating keeper, the same IPC namespace, and current System V IPC
+/// permissions; failures report ESTALE, EXDEV, or EACCES respectively.
+/// On success the caller owns the view and may use host munmap/mprotect.
+/// Views outlive handles, but the caller must stop simulator access before
+/// unmapping or changing protections. Keep librocjitsu loaded while using this API.
+/// @param[in] handle Backing descriptor, valid for the duration of this call.
+/// @param[in,out] map Host mapping parameters and result.
+/// @retval ROCJITSU_STATUS_SUCCESS Mapping succeeded; map_errno is zero.
+/// @retval ROCJITSU_STATUS_ERROR Mapping failed; mapped_addr is MAP_FAILED and
+/// map_errno contains the host error.
+/// @retval ROCJITSU_STATUS_INVALID_ARGUMENT map is NULL.
+RJ_API_EXPORT rj_status_t rj_vm_map_shared_mem(rj_handle_t handle, rj_vm_map_t *map);
+/// @brief Duplicate a process backing handle for transfer to another process.
+/// @details The caller owns and must close a nonnegative handle. Returns
+/// ROCJITSU_STATUS_SUCCESS with -1 in @p handle when no backing exists, or
+/// ROCJITSU_STATUS_ERROR with -1 when duplication fails.
+RJ_API_EXPORT rj_status_t rj_vm_dup_shared_mem_as(rj_vm_t *vm, uint32_t process_id, int64_t offset,
                                                   rj_handle_t *handle);
 
 /// @brief Request the simulation engine to stop.

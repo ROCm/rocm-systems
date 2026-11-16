@@ -31,6 +31,7 @@ public:
   int numProgramHeaders() const override { return static_cast<int>(ehdr_.e_phnum); }
   uint64_t sectionHeaderOff() const override { return ehdr_.e_shoff; }
   int numSectionHeaders() const override { return static_cast<int>(ehdr_.e_shnum); }
+  uint64_t sectionHeaderEntrySize() const override { return ehdr_.e_shentsize; }
   int sectionHeaderStrIdx() const override { return static_cast<int>(ehdr_.e_shstrndx); }
   uint32_t flags() const override { return ehdr_.e_flags; }
 
@@ -85,15 +86,17 @@ AmdGpuCodeObject::AmdGpuCodeObject(AmdGpuCodeObject &&other) noexcept
   executable_nobits_sections_ = std::move(other.executable_nobits_sections_);
   allocated_executable_sections_ = std::move(other.allocated_executable_sections_);
   rodata_sections_ = std::move(other.rodata_sections_);
+  program_headers_ = std::move(other.program_headers_);
+  kd_offsets_ = std::move(other.kd_offsets_);
 }
 
 AmdGpuCodeObject::AmdGpuCodeObject(const std::string &elf_path) {
-  try {
-    image_ = detail::read_file_bytes(elf_path);
-  } catch (const std::exception &) {
+  util::FailureOr<std::vector<char>> maybeImage = detail::read_file_bytes(elf_path);
+  if (maybeImage.failed()) {
     is_valid_ = false;
     return;
   }
+  image_ = std::move(maybeImage.value());
 
   if (image_.size() < sizeof(Elf64_Ehdr)) {
     is_valid_ = false;
@@ -110,6 +113,10 @@ AmdGpuCodeObject::AmdGpuCodeObject(const std::string &elf_path) {
   }
 
   header_ = std::make_unique<HsaHeader>(ehdr);
+  if (!load_program_headers(ehdr)) {
+    is_valid_ = false;
+    return;
+  }
   load_sections();
   if (!is_valid_)
     return;
@@ -117,7 +124,7 @@ AmdGpuCodeObject::AmdGpuCodeObject(const std::string &elf_path) {
 }
 
 AmdGpuCodeObject::AmdGpuCodeObject(const uint8_t *elf_bytes, size_t elf_size) {
-  if (elf_size < sizeof(Elf64_Ehdr)) {
+  if (elf_bytes == nullptr || elf_size < sizeof(Elf64_Ehdr)) {
     is_valid_ = false;
     return;
   }
@@ -135,6 +142,10 @@ AmdGpuCodeObject::AmdGpuCodeObject(const uint8_t *elf_bytes, size_t elf_size) {
   }
 
   header_ = std::make_unique<HsaHeader>(ehdr);
+  if (!load_program_headers(ehdr)) {
+    is_valid_ = false;
+    return;
+  }
   load_sections();
   if (!is_valid_)
     return;
@@ -144,7 +155,7 @@ AmdGpuCodeObject::AmdGpuCodeObject(const uint8_t *elf_bytes, size_t elf_size) {
 AmdGpuCodeObject::AmdGpuCodeObject(const uint8_t *elf_bytes, size_t elf_size,
                                    std::string offload_kind, std::string target_triple)
     : offload_kind_(std::move(offload_kind)), target_triple_(std::move(target_triple)) {
-  if (elf_size < sizeof(Elf64_Ehdr)) {
+  if (elf_bytes == nullptr || elf_size < sizeof(Elf64_Ehdr)) {
     is_valid_ = false;
     return;
   }
@@ -162,6 +173,10 @@ AmdGpuCodeObject::AmdGpuCodeObject(const uint8_t *elf_bytes, size_t elf_size,
   }
 
   header_ = std::make_unique<HsaHeader>(ehdr);
+  if (!load_program_headers(ehdr)) {
+    is_valid_ = false;
+    return;
+  }
   load_sections();
   if (!is_valid_)
     return;
@@ -183,34 +198,62 @@ AmdGpuCodeObject::AmdGpuCodeObject(const uint8_t *elf_bytes, size_t elf_size,
 AmdGpuCodeObject::~AmdGpuCodeObject() = default;
 
 void AmdGpuCodeObject::load_sections() {
-  const auto shoff = header_->sectionHeaderOff();
+  const uint64_t shoff = header_->sectionHeaderOff();
   const int num_shdrs = header_->numSectionHeaders();
-  if (num_shdrs < 0 || !fits_in_bounds(shoff, static_cast<uint64_t>(num_shdrs) * sizeof(Elf64_Shdr),
-                                       image_.size())) {
+  // Keep accepted code objects compatible with the patcher's fixed-size
+  // section-header rewrites. A larger stride can carry extension bytes that
+  // the patcher cannot preserve.
+  if (num_shdrs < 0 || header_->sectionHeaderEntrySize() != sizeof(Elf64_Shdr)) {
     is_valid_ = false;
     return;
   }
-
-  std::vector<Elf64_Shdr> section_hdrs(static_cast<size_t>(num_shdrs));
-  std::memcpy(section_hdrs.data(), image_.data() + shoff, section_hdrs.size() * sizeof(Elf64_Shdr));
+  const std::span image(reinterpret_cast<const uint8_t *>(image_.data()), image_.size());
+  std::optional<std::vector<Elf64_Shdr>> section_hdrs = read_elf_table<Elf64_Shdr>(
+      image, shoff, static_cast<uint64_t>(num_shdrs), header_->sectionHeaderEntrySize());
+  if (!section_hdrs) {
+    is_valid_ = false;
+    return;
+  }
 
   int shstrndx = header_->sectionHeaderStrIdx();
-  if (shstrndx < 0 || static_cast<size_t>(shstrndx) >= section_hdrs.size()) {
+  if (shstrndx < 0 || static_cast<size_t>(shstrndx) >= section_hdrs->size()) {
     is_valid_ = false;
     return;
   }
 
-  auto &shstrtab = section_hdrs[shstrndx];
+  const Elf64_Shdr &shstrtab = (*section_hdrs)[shstrndx];
   if (!fits_in_bounds(shstrtab.sh_offset, shstrtab.sh_size, image_.size())) {
     is_valid_ = false;
     return;
   }
   const char *shstrtab_data = image_.data() + shstrtab.sh_offset;
 
-  for (size_t section_index = 0; section_index < section_hdrs.size(); ++section_index) {
-    const Elf64_Shdr &shdr = section_hdrs[section_index];
+  for (size_t section_index = 0; section_index < section_hdrs->size(); ++section_index) {
+    const Elf64_Shdr &shdr = (*section_hdrs)[section_index];
     if (shdr.sh_type == SHT_NULL)
       continue;
+    // Symbol relocation and descriptor updates in the patcher require fixed
+    // records too; accepting extensions here would silently skip those updates.
+    if ((shdr.sh_type == SHT_SYMTAB || shdr.sh_type == SHT_DYNSYM) &&
+        shdr.sh_entsize != sizeof(Elf64_Sym)) {
+      is_valid_ = false;
+      return;
+    }
+    const uint64_t relocation_record_size = shdr.sh_type == SHT_RELA  ? sizeof(Elf64_Rela)
+                                            : shdr.sh_type == SHT_REL ? sizeof(Elf64_Rel)
+                                                                      : 0;
+    // Explicit nonallocated relocation targets are ignored by the loader and
+    // translator. Other relocation tables can affect moved code/data, so the
+    // patcher must understand their complete records.
+    const bool nonallocated_relocation_target =
+        shdr.sh_info != SHN_UNDEF && shdr.sh_info < section_hdrs->size() &&
+        (*section_hdrs)[shdr.sh_info].sh_type != SHT_NULL &&
+        ((*section_hdrs)[shdr.sh_info].sh_flags & SHF_ALLOC) == 0;
+    if (relocation_record_size != 0 && shdr.sh_entsize != relocation_record_size &&
+        !nonallocated_relocation_target) {
+      is_valid_ = false;
+      return;
+    }
     const bool allocated_executable =
         (shdr.sh_flags & (SHF_ALLOC | SHF_EXECINSTR)) == (SHF_ALLOC | SHF_EXECINSTR);
     if (shdr.sh_type == SHT_NOBITS && !allocated_executable)
@@ -235,7 +278,8 @@ void AmdGpuCodeObject::load_sections() {
     std::unique_ptr<char[]> sec_data;
     if (shdr.sh_type != SHT_NOBITS) {
       sec_data = std::make_unique<char[]>(shdr.sh_size);
-      std::memcpy(sec_data.get(), image_.data() + shdr.sh_offset, shdr.sh_size);
+      if (shdr.sh_size != 0)
+        std::memcpy(sec_data.get(), image_.data() + shdr.sh_offset, shdr.sh_size);
     }
     // SHT_NOBITS has no executable bytes to decode. Retain allocated executable
     // metadata above so the translator's sole-PROGBITS-.text gate rejects the
@@ -261,21 +305,18 @@ void AmdGpuCodeObject::load_sections() {
   // Parse symbol table for kernel descriptor offsets.
   // Scan both SHT_SYMTAB and SHT_DYNSYM — stripped code objects may
   // only have the latter.
-  for (size_t i = 0; i < section_hdrs.size(); ++i) {
-    if (section_hdrs[i].sh_type != SHT_SYMTAB && section_hdrs[i].sh_type != SHT_DYNSYM)
+  for (size_t section_index = 0; section_index < section_hdrs->size(); ++section_index) {
+    if ((*section_hdrs)[section_index].sh_type != SHT_SYMTAB &&
+        (*section_hdrs)[section_index].sh_type != SHT_DYNSYM)
       continue;
-    auto &symtab_shdr = section_hdrs[i];
-    if (symtab_shdr.sh_entsize == 0)
-      continue;
-    if (symtab_shdr.sh_entsize < sizeof(Elf64_Sym))
-      continue;
+    const Elf64_Shdr &symtab_shdr = (*section_hdrs)[section_index];
     if (!fits_in_bounds(symtab_shdr.sh_offset, symtab_shdr.sh_size, image_.size()))
       continue;
 
     // Read the string table linked to this symtab.
-    if (symtab_shdr.sh_link >= section_hdrs.size())
+    if (symtab_shdr.sh_link >= section_hdrs->size())
       continue;
-    auto &strtab_shdr = section_hdrs[symtab_shdr.sh_link];
+    const Elf64_Shdr &strtab_shdr = (*section_hdrs)[symtab_shdr.sh_link];
     if (!fits_in_bounds(strtab_shdr.sh_offset, strtab_shdr.sh_size, image_.size()))
       continue;
     const char *sym_strtab = image_.data() + strtab_shdr.sh_offset;

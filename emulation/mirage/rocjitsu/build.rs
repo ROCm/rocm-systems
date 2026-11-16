@@ -15,12 +15,12 @@ fn main() {
     for stem in [
         "gfx90a_mi210_kmd",
         "gfx942_cdna3",
-        "gfx950_mi355x",
+        "gfx950_mi350x",
         "gfx1100_w7900",
         "gfx1151",
         "gfx1201_r9700",
         "gfx1250_mi455x",
-        "gfx950_mi355x_kmd_2gpu",
+        "gfx950_mi350x_kmd_2gpu",
         "gfx1250_mi455x_kmd_4gpu",
     ] {
         let path = configs.join(format!("{stem}.json"));

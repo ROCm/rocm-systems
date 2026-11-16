@@ -9,25 +9,27 @@
 
 // Controllable seams for the libc socket / stdio / process / heap surface.
 //
-// For units whose external dependencies are libc rather than HIP or nccl --
-// src/ras/client.cc, src/ras/client_support.cc, src/graph/rccl_graph_gen.cc
-// (heap), and diagnostics/ib_write_bw.cc (which uses only gethostname/access;
-// prefer these over libc_interposers.cc's process-wide one) use this surface
-// today; misc/socket.cc and bootstrap.cc are the obvious next candidates. A
-// libc-only unit needs no HIP runtime and no nccl fakes at all.
-//
 // fakes/libc_seam.h macro-renames each call in the unit under test to the
 // matching micro_* trampoline, which dispatches through the std::function slot
 // declared here. Install per-test behaviour with ScopedHook; ResetLibcFakes()
 // restores every default and clears every record.
 //
 // Add a symbol here when a unit under test reaches it -- with a working
-// default and a reset, never as a hardcoded always-succeed. poll remains
-// deliberately absent until a caller needs a shared recording surface.
+// default and a reset, never as a hardcoded always-succeed. poll and the other
+// OS slots call straight through and record nothing; add a record when a
+// caller needs one.
 
+#include <dirent.h>
+#include <ifaddrs.h>
 #include <netdb.h>
+#include <poll.h>
+#include <sched.h>
+#include <signal.h>
+#include <sys/resource.h>
 #include <sys/socket.h>
+#include <pthread.h>
 #include <sys/time.h>
+#include <time.h>
 #include <sys/types.h>
 
 #include <cstddef>
@@ -82,7 +84,7 @@ struct MicroReadStep {
 ssize_t DeliverReadStep(const MicroReadStep& step, void* buf, size_t count);
 
 // ---------------------------------------------------------------------------
-// Seams. Each defaults to the success behaviour described in the .cc.
+// Seams. Each default is defined in the .cc.
 // ---------------------------------------------------------------------------
 extern std::function<ssize_t(int, const void*, size_t)> g_write;
 extern std::function<ssize_t(int, void*, size_t)> g_read;
@@ -106,12 +108,46 @@ extern std::function<void(const char*)> g_perror;
 extern std::function<void(int)> g_exit;
 extern std::function<int(char*, size_t)> g_gethostname;
 extern std::function<int(const char*, int)> g_access;
+extern std::function<int(const char*, int, mode_t)> g_open;
 
 // Fail an allocation for one case with a hook returning nullptr; g_freedPointers
 // then shows whether the unit released what it had already taken on the way out.
 extern std::function<void*(size_t)> g_malloc;
 extern std::function<void*(size_t, size_t)> g_calloc;
 extern std::function<void(void*)> g_free;
+extern std::function<FILE*(const char*, const char*)> g_fopen;
+extern std::function<DIR*(const char*)> g_opendir;
+extern std::function<struct dirent*(DIR*)> g_readdir;
+extern std::function<int(DIR*)> g_closedir;
+extern std::function<ssize_t(const char*, char*, size_t)> g_readlink;
+extern std::function<int(int, unsigned long, void*)> g_ioctl;
+extern std::function<int(void (*)(void))> g_atexit;
+extern std::function<int(clockid_t, struct timespec*)> g_clockGettime;
+extern std::function<int(void**, size_t, size_t)> g_posixMemalign;
+extern std::function<int(pthread_t*, const pthread_attr_t*, void* (*)(void*), void*)> g_pthreadCreate;
+extern std::function<int(const struct timespec*, struct timespec*)> g_nanosleep;
+
+// The OS surface os/linux*.cc and misc/{socket,signals}.cc reach. Each defaults to the real call
+// and records nothing; a test makes one fail or vary with ScopedHook.
+extern std::function<int(struct pollfd*, nfds_t, int)> g_poll;
+extern std::function<int(int, int, int, void*, socklen_t*)> g_getsockopt;
+extern std::function<int(int, struct sockaddr*, socklen_t*)> g_getsockname;
+extern std::function<int(int, int)> g_shutdown;
+extern std::function<ssize_t(int, struct msghdr*, int)> g_recvmsg;
+extern std::function<ssize_t(int, const struct msghdr*, int)> g_sendmsg;
+extern std::function<int(int*)> g_pipe;
+extern std::function<int(struct ifaddrs**)> g_getifaddrs;
+extern std::function<void(struct ifaddrs*)> g_freeifaddrs;
+extern std::function<int(int, struct rlimit*)> g_getrlimit;
+extern std::function<int(int, const struct rlimit*)> g_setrlimit;
+extern std::function<int(pid_t, size_t, cpu_set_t*)> g_schedGetaffinity;
+extern std::function<char*(const char*, char*)> g_realpath;
+extern std::function<int(char*)> g_mkstemp;
+extern std::function<int(int, int, off_t, off_t)> g_fallocate;
+extern std::function<void*(void*, size_t, int, int, int, off_t)> g_mmap;
+extern std::function<int(void*, size_t)> g_munmap;
+extern std::function<int(const char*)> g_unlink;
+extern std::function<sighandler_t(int, sighandler_t)> g_signal;
 
 // ---------------------------------------------------------------------------
 // Observation points fed by the default seams. A test that installs its own
@@ -124,6 +160,7 @@ extern std::vector<MicroPerrorCall> g_perrorCalls;  // every perror(), in order;
 extern std::vector<int> g_closedFds;    // fds passed to close(), in order
 // Pointers passed to free(), in order, nullptrs included.
 extern std::vector<void*> g_freedPointers;
+extern std::vector<void (*)(void)> g_atexitFns;  // handlers the default atexit recorded instead of registering
 // FILE* argument of every fprintf() the unit made, in order. Never the formatted text: fprintf always forwards to
 // the real vfprintf, so this only proves whether and where a diagnostic was printed, not what it said.
 extern std::vector<FILE*> g_fprintfCalls;
@@ -182,5 +219,9 @@ void ScriptRecvData(std::string data);
 
 // Restores every seam to its default and clears every record above.
 void ResetLibcFakes();
+
+// ResetLibcFakes, then points every seam above at the real call, recording nothing: for units tested
+// on real sockets and files, whose production threads would race on the records.
+void UseRealLibc();
 
 #endif  // RCCL_TEST_HOST_FAKES_LIBC_FAKES_H_

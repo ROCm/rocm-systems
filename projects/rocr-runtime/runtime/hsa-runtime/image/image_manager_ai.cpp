@@ -454,7 +454,7 @@ hsa_status_t ImageManagerAi::ModifyImageSrd(
 }
 
 hsa_status_t ImageManagerAi::PopulateSamplerSrd(Sampler& sampler) const {
-  const hsa_ext_sampler_descriptor_v2_t &sampler_descriptor = sampler.desc;
+  const hsa_ext_sampler_descriptor_v3_t &sampler_descriptor = sampler.desc;
 
   SQ_IMG_SAMP_WORD0 word0;
   SQ_IMG_SAMP_WORD1 word1;

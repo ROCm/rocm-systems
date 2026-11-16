@@ -12,10 +12,22 @@
  * LL128 before communicator creation, so every case exercises a multi-block
  * SIMPLE kernel. Each test checks both output data and the COLL log so a
  * correct fallback cannot hide a DDA regression.
+ *
+ * AllToAll is the exception: AllToAllOutOfPlace, RepeatedAllToAll, the AllToAll
+ * step of AlternatingCollectivesOnSameCommunicator and the AllToAll barrier
+ * stress run its LL tier. The AllToAll SIMPLE kernel tests need the DDA SIMPLE
+ * tier to cover their payload: the gfx1250 DPX table enables it up to 256 MiB,
+ * while the SPX table leaves it off, so there they skip unless
+ * RCCL_DDA_THRESHOLD covers it. Their kernel is chosen by RCCL_DDA_A2A_PUSH,
+ * RCCL_DDA_A2A_PUSH_PEER and RCCL_DDA_A2A_TDM, which are cached per process, so
+ * the peer-major vector push, all-peer TDM push and pull tests also skip unless
+ * the binary is launched with RCCL_DDA_A2A_TDM=0, RCCL_DDA_A2A_PUSH_PEER=0 or
+ * RCCL_DDA_A2A_PUSH=0.
  */
 
 #ifdef MPI_TESTS_ENABLED
 
+#include "DdaMPITestHelpers.hpp"
 #include "DeviceBufferHelpers.hpp"
 #include "MPIHelpers.hpp"
 #include "MPITestBase.hpp"
@@ -36,19 +48,23 @@ using namespace MPITestConstants;
 using namespace RCCLTestGuards;
 using namespace RCCLTestHelpers;
 
+RCCL_PARAM_DECLARE(DdaA2APush);
+RCCL_PARAM_DECLARE(DdaA2APushPeer);
+RCCL_PARAM_DECLARE(DdaA2ATdm);
+
 namespace
 {
 constexpr size_t kAllReduceCount     = 8 * 1024 * 1024 + 1;
 constexpr size_t kReduceScatterCount = 32 * 1024;       // 1 MiB input at 8 ranks
-constexpr size_t kAllToAllCount      = 32 * 1024;       // 1 MiB input at 8 ranks
+constexpr int    kAllToAllAlternatingRounds = 10;
 constexpr int    kRepeatedIterations = 10;
 
 // AllReduce exceeds its 16 MiB LL two-shot threshold; the fixture pins LL128 off.
 constexpr size_t kAllReduceBarrierStressCount = kAllReduceCount;
 
 // A shard just above the 512 KiB LL128 hard cap remains small enough to expose
-// publication races in ReduceScatter. AllToAll is additionally capped by its
-// 4 MiB total-message DDA threshold.
+// publication races in ReduceScatter. AllToAll payloads are capped at 4 MiB in
+// total.
 constexpr size_t kBarrierStressCount      = 128 * 1024 + 4;
 constexpr int    kBarrierStressIterations = 100;
 constexpr size_t kAllToAllMaxTotalBytes   = 4 * 1024 * 1024;
@@ -59,15 +75,18 @@ constexpr char kAllGatherNeedle[] =
     "DDA fabric AllGather: launching kernel";
 constexpr char kReduceScatterNeedle[] =
     "DDA fabric ReduceScatter: launching kernel";
-constexpr char kAllToAllNeedle[] =
+constexpr char kAllToAllPullNeedle[] =
     "DDA fabric AllToAll: launching kernel";
-
-bool isGfx1250Device()
-{
-    hipDeviceProp_t props{};
-    return hipGetDeviceProperties(&props, 0) == hipSuccess
-        && std::string(props.gcnArchName).find("gfx1250") != std::string::npos;
-}
+constexpr char kAllToAllPushNeedle[] =
+    "DDA fabric AllToAll: launching push kernel";
+constexpr char kAllToAllPeerPushNeedle[] =
+    "DDA fabric AllToAll: launching peer-major push kernel";
+constexpr char kAllToAllTdmPushNeedle[] =
+    "DDA fabric AllToAll: launching TDM push kernel";
+constexpr char kAllToAllPeerTdmPushNeedle[] =
+    "DDA fabric AllToAll: launching peer-major TDM push kernel";
+constexpr char kAllToAllLLNeedle[] =
+    "DDA fabric AllToAll LL:";
 } // namespace
 
 class DdaFabricSimpleMPITest : public MPITestBase
@@ -101,7 +120,7 @@ protected:
 
         if(!validateTestPrerequisites(kMinProcessesForMPI))
             GTEST_SKIP() << "Need at least 2 MPI ranks";
-        if(!isGfx1250Device())
+        if(!DdaMPITestHelpers::isGfx1250Device())
             GTEST_SKIP() << "DDA fabric SIMPLE requires gfx1250";
         if(rcclParamDdaLL128() != 0)
             GTEST_SKIP() << "RCCL_DDA_LL128 was cached as enabled before this fixture; "
@@ -144,6 +163,21 @@ protected:
             kAllToAllMaxTotalBytes / (static_cast<size_t>(nRanks_) * sizeof(float));
         const size_t alignedMaxCount = maxCount - maxCount % (16 / sizeof(float));
         return desired < alignedMaxCount ? desired : alignedMaxCount;
+    }
+
+    // The largest count under kAllToAllMaxTotalBytes: above the AllToAll LL tier on SPX (64 KiB) and DPX (2 MiB), so
+    // the SIMPLE kernels run.
+    size_t simpleAllToAllCount() const
+    {
+        return allToAllCount(static_cast<size_t>(-1));
+    }
+
+    // The largest count in the AllToAll LL tier, or 0 when the tier is off.
+    size_t llAllToAllCount()
+    {
+        const size_t count = rcclDdaLLThreshold(getActiveCommunicator(), ncclFuncAlltoAll)
+                             / (static_cast<size_t>(nRanks_) * sizeof(float));
+        return allToAllCount(count - count % (16 / sizeof(float)));
     }
 
     void runAllReduce(bool inPlace, int iterations = 1)
@@ -296,9 +330,56 @@ protected:
         expectLog(kReduceScatterNeedle);
     }
 
-    void runAllToAll(int iterations = 1)
+    // Why this process cannot run the AllToAll kernel a test needs, or empty if it can: the
+    // AllToAll DDA SIMPLE tier must cover simpleAllToAllCount(), and the cached AllToAll CVARs
+    // must match (-1 accepts any value).
+    std::string allToAllSkipReason(int64_t push, int64_t pushPeer, int64_t tdm)
     {
-        const size_t countPerPeer = allToAllCount(kAllToAllCount);
+        const size_t bytes =
+            simpleAllToAllCount() * static_cast<size_t>(nRanks_) * sizeof(float);
+        if(rcclDdaVmmThreshold(getActiveCommunicator(), ncclFuncAlltoAll) < bytes)
+            return "the AllToAll DDA SIMPLE tier does not cover the payload; launch with "
+                   "RCCL_DDA_THRESHOLD >= "
+                   + std::to_string(bytes);
+        auto unmet = [](const char* name, int64_t want, int64_t have) {
+            return want >= 0 && want != have
+                       ? std::string(" RCCL_DDA_A2A_") + name + "=" + std::to_string(want)
+                       : std::string();
+        };
+        const std::string env = unmet("PUSH", push, rcclParamDdaA2APush())
+                                + unmet("PUSH_PEER", pushPeer, rcclParamDdaA2APushPeer())
+                                + unmet("TDM", tdm, rcclParamDdaA2ATdm());
+        return env.empty() ? env : "AllToAll CVARs are cached per process; launch with" + env;
+    }
+
+    // Encoding must stay within float32 exact integer range (2^24 = 16.7M).
+    // With 144 ranks: rank*10000 + dest*100 + idx%97 gives max ~1.44M.
+    hipError_t fillAllToAllSend(void* buf, size_t countPerPeer)
+    {
+        return initializeBufferWithPattern<float>(
+            buf, countPerPeer * static_cast<size_t>(nRanks_), [this, countPerPeer](size_t i) {
+                const size_t dest = i / countPerPeer;
+                const size_t idx = i % countPerPeer;
+                return static_cast<float>(
+                    rank_ * 10000 + static_cast<int>(dest) * 100 + idx % 97);
+            });
+    }
+
+    bool checkAllToAllRecv(void* buf, size_t countPerPeer)
+    {
+        return verifyBufferData<float>(
+            buf, countPerPeer * static_cast<size_t>(nRanks_), [this, countPerPeer](size_t i) {
+                const size_t src = i / countPerPeer;
+                const size_t idx = i % countPerPeer;
+                return static_cast<float>(
+                    static_cast<int>(src) * 10000 + rank_ * 100 + idx % 97);
+            });
+    }
+
+    // In place runs once: a second in-place AllToAll would transpose the data back.
+    void runAllToAll(int iterations, bool inPlace, size_t desiredCount, const char* needle)
+    {
+        const size_t countPerPeer = allToAllCount(desiredCount);
         ASSERT_GT(countPerPeer, 0u);
         const size_t totalCount = countPerPeer * static_cast<size_t>(nRanks_);
         const size_t bytes = totalCount * sizeof(float);
@@ -307,19 +388,21 @@ protected:
         void* recvBuf = nullptr;
         ASSERT_MPI_EQ(hipSuccess, hipMalloc(&sendBuf, bytes));
         DeviceBufferAutoGuard sendGuard(sendBuf);
-        ASSERT_MPI_EQ(hipSuccess, hipMalloc(&recvBuf, bytes));
-        DeviceBufferAutoGuard recvGuard(recvBuf);
+        if(inPlace)
+        {
+            recvBuf = sendBuf;
+        }
+        else
+        {
+            ASSERT_MPI_EQ(hipSuccess, hipMalloc(&recvBuf, bytes));
+        }
+        DeviceBufferAutoGuard recvGuard(inPlace ? nullptr : recvBuf);
 
-        // Encoding must stay within float32 exact integer range (2^24 = 16.7M).
-        // With 144 ranks: rank*10000 + dest*100 + idx%97 gives max ~1.44M.
-        ASSERT_MPI_EQ(hipSuccess, initializeBufferWithPattern<float>(
-            sendBuf, totalCount, [this, countPerPeer](size_t i) {
-                const size_t dest = i / countPerPeer;
-                const size_t idx = i % countPerPeer;
-                return static_cast<float>(
-                    rank_ * 10000 + static_cast<int>(dest) * 100 + idx % 97);
-            }));
-        ASSERT_MPI_EQ(hipSuccess, hipMemset(recvBuf, 0, bytes));
+        ASSERT_MPI_EQ(hipSuccess, fillAllToAllSend(sendBuf, countPerPeer));
+        if(!inPlace)
+        {
+            ASSERT_MPI_EQ(hipSuccess, hipMemset(recvBuf, 0, bytes));
+        }
 
         for(int i = 0; i < iterations; ++i)
         {
@@ -333,14 +416,60 @@ protected:
         }
 
         ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
-        ASSERT_MPI_TRUE(verifyBufferData<float>(
-            recvBuf, totalCount, [this, countPerPeer](size_t i) {
-                const size_t src = i / countPerPeer;
-                const size_t idx = i % countPerPeer;
-                return static_cast<float>(
-                    static_cast<int>(src) * 10000 + rank_ * 100 + idx % 97);
-            }));
-        expectLog(kAllToAllNeedle);
+        ASSERT_MPI_TRUE(checkAllToAllRecv(recvBuf, countPerPeer));
+        expectLog(needle);
+    }
+
+    // AllToAll on its LL tier; skips when the tier is off.
+    void runLLAllToAll(int iterations)
+    {
+        const size_t count = llAllToAllCount();
+        if(count == 0)
+            GTEST_SKIP() << "the AllToAll DDA LL tier is off";
+        runAllToAll(iterations, /*inPlace=*/false, count, kAllToAllLLNeedle);
+    }
+
+    // Enqueues an LL AllToAll and a SIMPLE AllToAll back to back for `rounds` rounds without syncing, so an LL kernel
+    // can start on one rank while another is still in the SIMPLE kernel; both share the DDA scratch.
+    void runAllToAllAlternatingWithLL(int rounds, const char* simpleNeedle)
+    {
+        const size_t counts[2] = {llAllToAllCount(), simpleAllToAllCount()};
+        ASSERT_GT(counts[1], counts[0]);
+        void* sendBufs[2] = {};
+        void* recvBufs[2] = {};
+        std::vector<std::unique_ptr<DeviceBufferAutoGuard>> guards;
+        for(int b = 0; b < 2; ++b)
+        {
+            const size_t bytes = counts[b] * static_cast<size_t>(nRanks_) * sizeof(float);
+            ASSERT_MPI_EQ(hipSuccess, hipMalloc(&sendBufs[b], bytes));
+            guards.push_back(std::make_unique<DeviceBufferAutoGuard>(sendBufs[b]));
+            ASSERT_MPI_EQ(hipSuccess, hipMalloc(&recvBufs[b], bytes));
+            guards.push_back(std::make_unique<DeviceBufferAutoGuard>(recvBufs[b]));
+            ASSERT_MPI_EQ(hipSuccess, fillAllToAllSend(sendBufs[b], counts[b]));
+            ASSERT_MPI_EQ(hipSuccess, hipMemset(recvBufs[b], 0, bytes));
+        }
+
+        for(int r = 0; r < rounds; ++r)
+        {
+            for(int b = 0; b < 2; ++b)
+            {
+                ASSERT_MPI_EQ(ncclSuccess,
+                              ncclAllToAll(sendBufs[b],
+                                           recvBufs[b],
+                                           counts[b],
+                                           ncclFloat32,
+                                           getActiveCommunicator(),
+                                           getActiveStream()));
+            }
+        }
+
+        ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+        for(int b = 0; b < 2; ++b)
+        {
+            ASSERT_MPI_TRUE(checkAllToAllRecv(recvBufs[b], counts[b]));
+        }
+        expectLog(kAllToAllLLNeedle);
+        expectLog(simpleNeedle);
     }
 };
 
@@ -396,7 +525,7 @@ TEST_F(DdaFabricSimple, ReduceScatterInPlace)
 
 TEST_F(DdaFabricSimple, AllToAllOutOfPlace)
 {
-    runAllToAll();
+    runLLAllToAll(1);
 }
 
 TEST_F(DdaFabricSimple, RepeatedAllReduce)
@@ -411,7 +540,57 @@ TEST_F(DdaFabricSimple, RepeatedReduceScatter)
 
 TEST_F(DdaFabricSimple, RepeatedAllToAll)
 {
-    runAllToAll(kRepeatedIterations);
+    runLLAllToAll(kRepeatedIterations);
+}
+
+// In place, every push setting takes the all-peer vector push.
+TEST_F(DdaFabricSimple, AllToAllInPlace)
+{
+    if(const std::string why = allToAllSkipReason(1, -1, -1); !why.empty())
+        GTEST_SKIP() << why;
+    runAllToAll(1, /*inPlace=*/true, simpleAllToAllCount(), kAllToAllPushNeedle);
+}
+
+// The push kernels sync all ranks at exit, so LL / LL128 cannot reuse the scratch while a peer still drains it.
+TEST_F(DdaFabricSimple, AllToAllPeerTdmPushAlternatingWithLL)
+{
+    if(const std::string why = allToAllSkipReason(1, 1, 1); !why.empty())
+        GTEST_SKIP() << why;
+    if(llAllToAllCount() == 0)
+        GTEST_SKIP() << "the AllToAll DDA LL tier is off";
+    runAllToAllAlternatingWithLL(kAllToAllAlternatingRounds, kAllToAllPeerTdmPushNeedle);
+}
+
+TEST_F(DdaFabricSimple, AllToAllTdmPushUnalignedChunks)
+{
+    if(const std::string why = allToAllSkipReason(1, -1, 1); !why.empty())
+        GTEST_SKIP() << why;
+    // 16 B short of the largest count per peer, so a peer's chunk is not a multiple of 256 B.
+    runAllToAll(kRepeatedIterations,
+                /*inPlace=*/false,
+                simpleAllToAllCount() - 4,
+                rcclParamDdaA2APushPeer() ? kAllToAllPeerTdmPushNeedle : kAllToAllTdmPushNeedle);
+}
+
+TEST_F(DdaFabricSimple, AllToAllPeerVectorPush)
+{
+    if(const std::string why = allToAllSkipReason(1, 1, 0); !why.empty())
+        GTEST_SKIP() << why;
+    runAllToAll(kRepeatedIterations, /*inPlace=*/false, simpleAllToAllCount(), kAllToAllPeerPushNeedle);
+}
+
+TEST_F(DdaFabricSimple, AllToAllAllPeerTdmPush)
+{
+    if(const std::string why = allToAllSkipReason(1, 0, 1); !why.empty())
+        GTEST_SKIP() << why;
+    runAllToAll(kRepeatedIterations, /*inPlace=*/false, simpleAllToAllCount(), kAllToAllTdmPushNeedle);
+}
+
+TEST_F(DdaFabricSimple, AllToAllPull)
+{
+    if(const std::string why = allToAllSkipReason(0, -1, -1); !why.empty())
+        GTEST_SKIP() << why;
+    runAllToAll(kRepeatedIterations, /*inPlace=*/false, simpleAllToAllCount(), kAllToAllPullNeedle);
 }
 
 TEST_F(DdaFabricSimple, AlternatingCollectivesOnSameCommunicator)
@@ -425,13 +604,13 @@ TEST_F(DdaFabricSimple, AlternatingCollectivesOnSameCommunicator)
     runReduceScatter(false);
     if(HasFatalFailure() || IsSkipped())
         return;
-    runAllToAll();
+    runLLAllToAll(1);
 }
 
 // ---------------------------------------------------------------------------
 // Barrier stress tests repeatedly exercise the SIMPLE synchronization path.
 // AllReduce uses a payload above its LL range while the fixture disables LL128;
-// ReduceScatter and AllToAll can use smaller 512 KiB shards/chunks.
+// ReduceScatter can use smaller 512 KiB shards; AllToAll runs its LL tier.
 // ---------------------------------------------------------------------------
 
 class DdaFabricBarrierStress : public DdaFabricSimpleMPITest
@@ -599,8 +778,9 @@ protected:
 
     void runBarrierStressAllToAll()
     {
-        const size_t countPerPeer = allToAllCount(kBarrierStressCount);
-        ASSERT_GT(countPerPeer, 0u);
+        const size_t countPerPeer = llAllToAllCount();
+        if(countPerPeer == 0)
+            GTEST_SKIP() << "the AllToAll DDA LL tier is off";
         const size_t totalCount = countPerPeer * static_cast<size_t>(nRanks_);
         const size_t bytes = totalCount * sizeof(float);
 
@@ -666,7 +846,7 @@ protected:
                 << " data corruption errors.";
         }
 
-        expectLog(kAllToAllNeedle);
+        expectLog(kAllToAllLLNeedle);
     }
 };
 

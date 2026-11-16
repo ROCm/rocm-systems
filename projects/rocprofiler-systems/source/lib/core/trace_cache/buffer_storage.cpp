@@ -73,7 +73,7 @@ flush_worker_t::start(const pid_t& current_pid)
             // heap-backed condition-variable state. Polling at the existing
             // 10 ms flush interval bounds shutdown latency without that
             // callback lifetime race.
-            wait_condition.wait_for(wait_lock, CACHE_FILE_FLUSH_TIMEOUT,
+            wait_condition.wait_for(wait_lock, k_cache_file_flush_timeout,
                                     [&]() { return stoken.stop_requested(); });
         }
 

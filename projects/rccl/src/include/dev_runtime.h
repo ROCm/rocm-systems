@@ -69,7 +69,12 @@ struct ncclDevrNonSymExchangeEntry {
 };
 #endif
 
-struct ncclDevrWindowSorted;
+// winSorted[] entry, ordered by userAddr for ncclDevrFindWindow.
+struct ncclDevrWindowSorted {
+  uintptr_t userAddr;
+  size_t size;
+  struct ncclDevrWindow* win;
+};
 struct ncclDevrTeam;
 
 struct ncclDevrRegTask {
@@ -159,6 +164,13 @@ void freeDevCommRequirements(struct ncclDevCommRequirements* reqs);
 
 bool ncclDevrWindowIsMultiSegment(struct ncclDevrWindow* win);
 bool ncclDevrWindowHasSysmemSegment(struct ncclDevrWindow* win);
+// RCCL: smallest registered size across this window's LSA team. Falls back to the
+// local size for host-only test windows that do not carry runtime memory state.
+size_t ncclDevrWindowLsaMinSize(struct ncclDevrWindow const* win);
+// RCCL: bytes from userPtr that fit in this window and in every LSA peer allocation.
+// lsaMinSize starts at the allocation base, so a window at memOffset only owns
+// the tail of that minimum.
+size_t ncclDevrWindowPeerSafeSize(struct ncclDevrWindow const* win);
 
 // Get the corresponding pointer in another lsa rank's symmetric memory window
 ncclResult_t ncclDevrGetLsaRankPtr(struct ncclComm* comm, struct ncclDevrWindow* winHost, size_t offset, int lsaRank,

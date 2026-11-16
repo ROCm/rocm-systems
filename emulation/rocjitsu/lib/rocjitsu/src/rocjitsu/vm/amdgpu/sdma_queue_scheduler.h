@@ -110,22 +110,30 @@ public:
   /// @brief Force-cancel and detach during reset or frontend teardown.
   [[nodiscard]] bool detach(Handle handle) noexcept;
 
+  /// @brief Fail the next worker startup with a thread-creation error.
+  void fail_next_worker_start_for_testing() {
+    std::lock_guard lock(mutex_);
+    fail_next_worker_start_for_testing_ = true;
+  }
+
   /// @brief Update host doorbell mappings and exclude concurrent scans.
   void set_process_doorbell_base(uint32_t process_id, void *base);
   /// @brief Service one host-polled queue through a captured doorbell for tests.
   /// @details Scans the doorbell immediately, wakes the scheduler, and blocks on
-  /// the scheduler condition until the captured producer cursor is consumed or
-  /// the queue can no longer make progress. This gives tests a deterministic
-  /// completion boundary without imposing a host-time timeout on SDMA work.
-  [[nodiscard]] bool synchronize_host_queue_for_test(uint32_t process_id, uint32_t queue_id);
+  /// the scheduler condition until the captured producer cursor is consumed,
+  /// the queue becomes invalid, or @p timeout expires.
+  [[nodiscard]] bool
+  synchronize_host_queue_for_test(uint32_t process_id, uint32_t queue_id,
+                                  std::chrono::milliseconds timeout = std::chrono::seconds(5));
   /// @brief Drive one explicitly notified queue to its captured producer cursor.
   /// @details Runs @p service_dependencies between scheduler turns so a
   /// topology-free frontend test can apply callbacks that the worker marshals
-  /// onto its owner thread. The queue must describe work expected to complete;
-  /// a deliberately unsatisfied packet has no completion boundary.
+  /// onto its owner thread. Returns false if the captured cursor does not
+  /// complete within @p timeout, so a broken packet fails the calling test.
   [[nodiscard]] bool
   synchronize_queue_for_test(uint32_t process_id, uint32_t queue_id,
-                             const std::function<void()> &service_dependencies = {});
+                             const std::function<void()> &service_dependencies = {},
+                             std::chrono::milliseconds timeout = std::chrono::seconds(5));
   /// @brief Wait until a queue retains a packet that cannot yet retire.
   /// @details Samples scheduler-owned state only between service turns, giving
   /// tests a race-free boundary for exercising management of a busy queue.
@@ -146,6 +154,7 @@ public:
   const std::shared_ptr<DeviceCacheCoherence> &cache_coherence() const { return coherence_; }
 
 private:
+  friend class SdmaQueueSchedulerTestAccess;
   class QueueRecord;
 
   class Slot {
@@ -178,6 +187,7 @@ private:
   SdmaPacketDialect dialect_;
   std::size_t next_slot_ = 0;
   bool shutting_down_ = false;
+  bool fail_next_worker_start_for_testing_ = false;
 };
 
 } // namespace rocjitsu::amdgpu

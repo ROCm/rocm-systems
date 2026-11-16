@@ -25,10 +25,29 @@ FLUSH_NEAREST_F32_OPS = frozenset(
     }
 )
 
-# F16 results rounded before SDWA OMOD, which the SDWA store applies, as VOP3
-# does. gfx1030 SDWA matches VOP3 for both bit for bit. sema_lower rejects a
-# rounded F16 FRACT/LDEXP destination whose instruction is missing here.
-SDWA_ROUNDED_F16_OPS = frozenset({'V_FRACT_F16', 'V_LDEXP_F16'})
+# F16 results already represented as half bits before SDWA OMOD. The store
+# applies scaling, as VOP3 does. gfx1030 FRACT/LDEXP match VOP3 bit for bit;
+# MIN/MAX select an input half. sema_lower rejects unlisted F16 producers.
+SDWA_ROUNDED_F16_OPS = frozenset(
+    {'V_FRACT_F16', 'V_LDEXP_F16', 'V_MIN_F16', 'V_MAX_F16'}
+)
+
+
+# F32 TRANS results ignore MODE.FP_ROUND, so their OMOD overflow rounds to
+# nearest even (infinity); other F32 results round OMOD overflow by MODE.
+#
+# Scope: VOP3 OMOD overflow rounding only, on both the scalar lowering and the
+# unary SIMD route, which take the rounding from this set. It does not select
+# denormal flushing; FLUSH_NEAREST_F32_OPS does that, and the two sets differ by
+# SIN and RCP_IFLAG. SDWA keys its output policy off FLUSH_NEAREST_F32_OPS alone,
+# so SIN and RCP_IFLAG round OMOD overflow by MODE through SDWA and to nearest
+# even through VOP3. On RDNA2 with IEEE=0, MODE=0x003, source 0x00800000 and
+# mul:4, RCP_IFLAG gives 0x7f800000 through VOP3 and 0x7f7fffff through SDWA.
+# Only the VOP3 rounding is capture-backed, on gfx1100 and gfx1201; migrating
+# SDWA needs its own hardware validation and must select overflow rounding
+# separately from flushing, since adding these two to FLUSH_NEAREST_F32_OPS would
+# also change their flush policy.
+TRANS_F32_OPS = FLUSH_NEAREST_F32_OPS | frozenset({'V_SIN_F32', 'V_RCP_IFLAG_F32'})
 
 
 @dataclass(frozen=True)

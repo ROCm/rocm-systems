@@ -1482,7 +1482,7 @@ int KFDNode::get_cache_info(rsmi_gpu_cache_info_t* info) {
 int read_node_properties(uint32_t node, std::string property_name, uint64_t* val) {
   std::ostringstream ss;
   std::string propertiesFullPath =
-      "/sys/class/kfd/kfd/topology/nodes/" + std::to_string(node) + "/properties";
+      std::string(KFDNodesPathRoot()) + "/" + std::to_string(node) + "/properties";
   int retVal = EINVAL;
   if (property_name.empty() || val == nullptr) {
     ss << __PRETTY_FUNCTION__ << " | File: " << propertiesFullPath
@@ -1516,7 +1516,7 @@ int read_node_properties(uint32_t node, std::string property_name, uint64_t* val
 int get_gpu_id(uint32_t node, uint64_t* gpu_id) {
   std::ostringstream ss;
   std::string gpu_id_FullPath =
-      "/sys/class/kfd/kfd/topology/nodes/" + std::to_string(node) + "/gpu_id";
+      std::string(KFDNodesPathRoot()) + "/" + std::to_string(node) + "/gpu_id";
   int retVal = EINVAL;
   if (gpu_id == nullptr) {
     ss << __PRETTY_FUNCTION__ << " | File: " << gpu_id_FullPath << " | Issue: Could not read node #"
@@ -1548,7 +1548,7 @@ int get_gpu_id(uint32_t node, uint64_t* gpu_id) {
 int KFDNode::get_gfx_target_version(uint64_t* gfx_target_version) {
   std::ostringstream ss;
   std::string properties_path =
-      "/sys/class/kfd/kfd/topology/nodes/" + std::to_string(this->node_indx_) + "/properties";
+      std::string(KFDNodesPathRoot()) + "/" + std::to_string(this->node_indx_) + "/properties";
   uint64_t gfx_version = 0;
   int ret = read_node_properties(this->node_indx_, "gfx_target_version", &gfx_version);
   *gfx_target_version = gfx_version;
@@ -1561,7 +1561,7 @@ int KFDNode::get_gfx_target_version(uint64_t* gfx_target_version) {
 }
 
 int32_t KFDNode::get_simd_per_cu(uint64_t* simd_per_cu) const {
-  const std::string properties_path("/sys/class/kfd/kfd/topology/nodes/" +
+  const std::string properties_path(std::string(KFDNodesPathRoot()) + "/" +
                                     std::to_string(this->node_indx_) + "/properties");
 
   auto tmp_simd_per_cu = uint64_t(0);
@@ -1571,7 +1571,7 @@ int32_t KFDNode::get_simd_per_cu(uint64_t* simd_per_cu) const {
 }
 
 int32_t KFDNode::get_simd_count(uint64_t* simd_count) const {
-  const std::string properties_path("/sys/class/kfd/kfd/topology/nodes/" +
+  const std::string properties_path(std::string(KFDNodesPathRoot()) + "/" +
                                     std::to_string(this->node_indx_) + "/properties");
 
   auto tmp_simd_count = uint64_t(0);
@@ -1585,7 +1585,7 @@ int32_t KFDNode::get_simd_count(uint64_t* simd_count) const {
 int KFDNode::get_gpu_id(uint64_t* gpu_id) {
   std::ostringstream ss;
   std::string gpuid_path =
-      "/sys/class/kfd/kfd/topology/nodes/" + std::to_string(this->node_indx_) + "/gpu_id";
+      std::string(KFDNodesPathRoot()) + "/" + std::to_string(this->node_indx_) + "/gpu_id";
   const uint64_t undefined_gpu_id = std::numeric_limits<uint64_t>::max();
   std::string gpu_id_string = "";
   *gpu_id = undefined_gpu_id;
@@ -1616,7 +1616,8 @@ int KFDNode::get_gpu_id(uint64_t* gpu_id) {
 int KFDNode::get_node_id(uint32_t* node_id) {
   std::ostringstream ss;
   int ret = 0;
-  std::string nodeid_path = "/sys/class/kfd/kfd/topology/nodes/" + std::to_string(this->node_indx_);
+  std::string nodeid_path =
+      std::string(KFDNodesPathRoot()) + "/" + std::to_string(this->node_indx_);
   *node_id = this->node_indx_;
   ss << __PRETTY_FUNCTION__ << " | File: " << nodeid_path
      << " | Read node #: " << std::to_string(this->node_indx_)

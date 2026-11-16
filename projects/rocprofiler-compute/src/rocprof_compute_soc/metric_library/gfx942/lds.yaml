@@ -1,0 +1,2 @@
+lds.ai:
+  formula: SUM($valu_f16_flops + $valu_f32_flops + $valu_f64_flops + $mfma_f16_flops + $mfma_bf16_flops + $mfma_f32_flops + $mfma_f64_flops + $mfma_f8_flops) / SUM($lds_bytes)

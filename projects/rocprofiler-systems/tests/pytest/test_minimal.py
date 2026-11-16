@@ -6,9 +6,12 @@ These tests exercise minimal examples to verify targeted behavior of the profile
 """
 
 from __future__ import annotations
+
 import os
-import pytest
 from pathlib import Path
+from typing import ClassVar
+
+import pytest
 from conftest import RocprofsysTest, check_use_perfetto
 
 pytestmark = [pytest.mark.minimal]
@@ -234,6 +237,70 @@ def _assert_overflow_samples_after_resume(result) -> None:
 
 
 # =============================================================================
+# System info validation
+# =============================================================================
+
+_SYSTEM_INFO_QUERY = """
+    SELECT name, str_value
+    FROM metadata
+    WHERE name IN ('system_name', 'system_release', 'system_version', 'system_machine')
+"""
+
+
+def _query_system_info(perfetto_file: Path) -> dict[str, str]:
+    """Return the system_* metadata rows Trace Processor derives from system_info."""
+    try:
+        from perfetto.common.exceptions import PerfettoException
+        from perfetto.trace_processor import TraceProcessor, TraceProcessorConfig
+    except ImportError as exc:
+        pytest.skip(f"Perfetto trace processor bindings unavailable: {exc}")
+
+    trace_processor_path = os.environ.get("ROCPROFSYS_TRACE_PROC_SHELL")
+    config = None
+    if trace_processor_path and Path(trace_processor_path).is_file():
+        config = TraceProcessorConfig(bin_path=trace_processor_path)
+
+    try:
+        trace_processor = (
+            TraceProcessor(trace=str(perfetto_file), config=config)
+            if config is not None
+            else TraceProcessor(trace=str(perfetto_file))
+        )
+    except PerfettoException as exc:
+        pytest.skip(f"Perfetto trace processor unavailable on this system: {exc}")
+
+    try:
+        return {
+            row.name: row.str_value for row in trace_processor.query(_SYSTEM_INFO_QUERY)
+        }
+    finally:
+        close = getattr(trace_processor, "close", None)
+        if close is not None:
+            close()
+
+
+def _assert_system_info(result) -> None:
+    """Assert the trace carries the utsname of the host that produced it."""
+    if not check_use_perfetto():
+        pytest.skip("Perfetto is disabled")
+
+    perfetto_file = result.perfetto_file
+    if perfetto_file is None or not perfetto_file.exists():
+        pytest.fail("No Perfetto trace file was produced by the run")
+
+    uts = os.uname()
+    expected = {
+        "system_name": uts.sysname,
+        "system_release": uts.release,
+        "system_version": uts.version,
+        "system_machine": uts.machine,
+    }
+    actual = _query_system_info(perfetto_file)
+    if actual != expected:
+        pytest.fail(f"system_info mismatch: expected {expected}, found {actual}")
+
+
+# =============================================================================
 # Fixtures
 # =============================================================================
 
@@ -353,16 +420,15 @@ class TestMinimal(RocprofsysTest):
         )
 
     SLEEP_ITERATIONS = 60
-    SAMPLING_ENV = {
-        "ROCPROFSYS_USE_SAMPLING": "ON",
-        "ROCPROFSYS_SAMPLING_REALTIME": "ON",
-        "ROCPROFSYS_SAMPLING_REALTIME_FREQ": "1000",
-        "ROCPROFSYS_SAMPLING_CPUTIME": "OFF",
-    }
 
     def _run_sleep_interrupts(self, env_overrides: dict[str, str]):
-        env = dict(self.SAMPLING_ENV)
-        env.update(env_overrides)
+        env = {
+            "ROCPROFSYS_USE_SAMPLING": "ON",
+            "ROCPROFSYS_SAMPLING_REALTIME": "ON",
+            "ROCPROFSYS_SAMPLING_REALTIME_FREQ": "1000",
+            "ROCPROFSYS_SAMPLING_CPUTIME": "OFF",
+            **env_overrides,
+        }
         return self.run_test(
             "sys_run",
             "minimal-sleep-interrupts",
@@ -410,7 +476,7 @@ class TestMinimal(RocprofsysTest):
 
     # <nfib> <nthreads> <nitr>. Long enough that a thread accrues far more CPU
     # time than the delay below, so the CPU-time timer is guaranteed to fire.
-    CPU_WORKLOAD_ARGS = ["20", "2", "100000"]
+    CPU_WORKLOAD_ARGS: ClassVar[list[str]] = ["20", "2", "100000"]
 
     def test_cputime_sampling_survives_pause_resume(self):
         """
@@ -503,3 +569,16 @@ class TestMinimal(RocprofsysTest):
             run_args=self.CPU_WORKLOAD_ARGS,
         )
         _assert_overflow_samples_after_resume(result)
+
+    def test_system_info(self):
+        """
+        The Perfetto trace carries a system_info packet whose utsname matches
+        the host, so trace readers can show system name, kernel release,
+        kernel version and machine.
+        """
+        result = self.run_test(
+            "sys_run",
+            "minimal-recursion",
+            run_args=[str(self.RECURSION_DEPTH)],
+        )
+        _assert_system_info(result)

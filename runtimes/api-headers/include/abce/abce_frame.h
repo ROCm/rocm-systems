@@ -66,6 +66,13 @@ typedef struct abce_signal_ref_t {
   // protocol drains the word back to zero (the coordinator subtracts the gate,
   // each frame decrements the count), so a completed plan leaves no residue.
   void* coordination_scratch;
+  // The signal lives where a host store crosses a BAR (device memory on a
+  // discrete GPU) and can reach it after the engines read it, even fenced. Submit
+  // then reads back what it stored into the signal before the doorbell; the read
+  // cannot pass the store. An HSA client sets it for a signal in the agent's
+  // memory from HSA_AMD_AGENT_INFO_PCIE_STORES_NEED_FLUSH; host-memory signals
+  // leave it false.
+  bool host_store_readback;
 } abce_signal_ref_t;
 
 static inline abce_signal_ref_t abce_signal_ref_make(void* value, uint64_t completion_value,
@@ -78,6 +85,7 @@ static inline abce_signal_ref_t abce_signal_ref_make(void* value, uint64_t compl
   ref.event_mailbox = event_mailbox;
   ref.event_id = event_id;
   ref.coordination_scratch = coordination_scratch;
+  ref.host_store_readback = false;
   return ref;
 }
 
@@ -288,8 +296,9 @@ typedef struct abce_engine_op_t {
 // `coordination_word`: when ordering work requires it, non-coordinator frames
 // wait for the start gate (bit 62) to clear before their first body. Every
 // participating frame without a start gate, or every non-coordinator frame with
-// one, decrements the word after its last body, and the coordinator waits for
-// that count to drain.
+// one, decrements the word, and the coordinator waits for that count to drain:
+// once per fused chunk when every body on the frame is fused, otherwise once
+// after its last body (see abce_body_sync_for()).
 typedef struct abce_frame_job_t {
   const abce_engine_op_t* ops;  // all ops in the batch (filtered by `engine`).
   uint32_t num_ops;             // total ops in `ops`.
@@ -297,6 +306,7 @@ typedef struct abce_frame_job_t {
 
   uint32_t engine;         // this frame's engine / ring index.
   uint32_t frame_num_ops;  // ops on THIS frame (for the last-body signal).
+  bool frame_all_fused;    // every op on THIS frame is a fused packet.
   bool coordinator;        // carries the prologue + epilogue.
   bool multi;              // batch fans out across engines.
   // Whether non-coordinator frames must wait for the coordinator to release the
@@ -372,28 +382,15 @@ static inline void abce_frame_composer_initialize(const abce_builder_t* builder,
 typedef struct abce_body_sync_t {
   bool wait;
   bool signal;
+  // Signal from the fused packet itself, on every chunk; otherwise one
+  // standalone atomic after the body.
+  bool inline_signal;
   void* wait_addr;
+  // The wait proceeds once (*wait_addr & wait_mask) == wait_reference.
+  uint64_t wait_reference;
+  uint64_t wait_mask;
   void* signal_addr;
 } abce_body_sync_t;
-
-static inline abce_body_sync_t abce_body_sync_for(const abce_frame_job_t* job, uint32_t body_idx) {
-  const bool wait_for_start = job->multi && job->start_gate_required && !job->coordinator;
-  const bool signals_completion_directly = !job->multi && !job->epilogue_required;
-  const bool contributes_to_fan_in =
-      job->multi && (!job->coordinator || !job->start_gate_required);
-  abce_body_sync_t sync;
-  sync.wait_addr = NULL;
-  sync.signal_addr = NULL;
-  sync.wait = wait_for_start && (body_idx == 0);
-  sync.signal = (signals_completion_directly || contributes_to_fan_in) &&
-                (body_idx == job->frame_num_ops - 1);
-  // Both roles read the same word for a given plan: abce_frame_job_t's
-  // coordination_word already resolves to the scratch or to the signal value
-  // depending on whether anything drains the count.
-  if (sync.wait) sync.wait_addr = job->coordination_word;
-  if (sync.signal) sync.signal_addr = job->coordination_word;
-  return sync;
-}
 
 static inline bool abce_frame_should_emit_gcr(const abce_frame_composer_t* composer) {
   return abce_builder_requires_gcr(composer->builder) && !composer->caps.driver_manages_gcr;
@@ -403,6 +400,66 @@ static inline uint32_t abce_frame_gcr_bytes(const abce_frame_composer_t* compose
   if (!abce_frame_should_emit_gcr(composer)) return 0;
   return composer->is_gfx125plus ? (uint32_t)sizeof(SDMA_PKT_GCR_GFX125PLUS)
                                  : (uint32_t)sizeof(SDMA_PKT_GCR);
+}
+
+// gfx125+ fused packets carry a WAIT block, so a single-frame batch whose
+// prologue would only wait on dependencies hands the first pending one to its
+// first body's WAIT, as ROCr's fused copy does, and polls only for the rest.
+// Timestamps, HDP flushes and GCRs must follow the dependency, so a prologue with
+// any of them keeps every wait. Returns the folded dependency's index, or
+// UINT32_MAX when none is folded.
+static inline uint32_t abce_frame_folded_dep(const abce_frame_composer_t* composer,
+                                             const abce_frame_job_t* job) {
+  const abce_copy_metadata_t* metadata = job->metadata;
+  if (!composer->is_gfx125plus || job->multi) return UINT32_MAX;
+  if (abce_timestamp_surface_enabled(&metadata->timestamps) ||
+      (composer->caps.emit_hdp_flush && metadata->coherency.flags.emit_hdp_flush) ||
+      (metadata->coherency.flags.emit_gcr && abce_frame_should_emit_gcr(composer)))
+    return UINT32_MAX;
+  // Every op of a single-frame batch is on its one engine, so ops[0] is the first body.
+  if (!job->ops[0].fused) return UINT32_MAX;
+  for (uint32_t dep_idx = 0; dep_idx < metadata->num_deps; ++dep_idx) {
+    if (metadata->deps[dep_idx].observed_value != metadata->deps[dep_idx].reference_value)
+      return dep_idx;
+  }
+  return UINT32_MAX;
+}
+
+// gfx125+ engines overlap copies, and a fused signal covers only its own packet,
+// so an all-fused frame signals on every chunk of every body. Any other frame
+// signals once, with a standalone atomic after its last body, which waits for
+// everything before it.
+static inline abce_body_sync_t abce_body_sync_for(const abce_frame_composer_t* composer,
+                                                  const abce_frame_job_t* job, uint32_t body_idx) {
+  const bool wait_for_start = job->multi && job->start_gate_required && !job->coordinator;
+  const bool signals_completion_directly = !job->multi && !job->epilogue_required;
+  const bool contributes_to_fan_in =
+      job->multi && (!job->coordinator || !job->start_gate_required);
+  abce_body_sync_t sync;
+  sync.wait_addr = NULL;
+  sync.wait_reference = 0;
+  sync.wait_mask = ABCE_FAN_OUT_START_GATE;
+  sync.signal_addr = NULL;
+  sync.wait = wait_for_start && (body_idx == 0);
+  sync.inline_signal = job->frame_all_fused;
+  sync.signal = (signals_completion_directly || contributes_to_fan_in) &&
+                (sync.inline_signal || body_idx == job->frame_num_ops - 1);
+  // Both roles read the same word for a given plan: abce_frame_job_t's
+  // coordination_word already resolves to the scratch or to the signal value
+  // depending on whether anything drains the count.
+  if (sync.wait) sync.wait_addr = job->coordination_word;
+  if (sync.signal) sync.signal_addr = job->coordination_word;
+  if (body_idx == 0) {
+    const uint32_t folded_dep = abce_frame_folded_dep(composer, job);
+    if (folded_dep != UINT32_MAX) {
+      const abce_dep_signal_t* dep = &job->metadata->deps[folded_dep];
+      sync.wait = true;
+      sync.wait_addr = dep->value;
+      sync.wait_reference = dep->reference_value;
+      sync.wait_mask = UINT64_MAX;
+    }
+  }
+  return sync;
 }
 
 static inline uint32_t abce_frame_poll_bytes(const abce_frame_composer_t* composer) {
@@ -426,10 +483,12 @@ static inline size_t abce_engine_op_size2(const abce_engine_op_t* op) {
 //===----------------------------------------------------------------------===//
 
 static inline size_t abce_frame_dep_waits_bytes(const abce_frame_composer_t* composer,
-                                                const abce_dep_signal_t* deps, uint32_t num_deps) {
+                                                const abce_dep_signal_t* deps, uint32_t num_deps,
+                                                uint32_t folded_dep) {
   size_t bytes = 0;
   for (uint32_t dep_idx = 0; dep_idx < num_deps; ++dep_idx) {
-    if (deps[dep_idx].observed_value == deps[dep_idx].reference_value) continue;
+    if (dep_idx == folded_dep || deps[dep_idx].observed_value == deps[dep_idx].reference_value)
+      continue;
     bytes += composer->is_gfx125plus ? ABCE_FRAME_POLL64_BYTES : ABCE_FRAME_POLL32_BYTES;
     if (!composer->is_gfx125plus &&
         (deps[dep_idx].observed_value >> 32) != (deps[dep_idx].reference_value >> 32))
@@ -473,47 +532,61 @@ static inline size_t abce_frame_payload_bytes(const abce_frame_composer_t* compo
   return 0;
 }
 
+// Fused packets (chunks) a fused op emits, each carrying its own signal.
+static inline uint64_t abce_frame_fused_packets(const abce_frame_composer_t* composer,
+                                                const abce_engine_op_t* op) {
+  const abce_builder_t* builder = composer->builder;
+  switch (op->kind) {
+    case ABCE_OP_KIND_LINEAR:
+      return abce_builder_num_copy_packets(builder, op->size);
+    case ABCE_OP_KIND_SWAP:
+      return abce_builder_num_wait_signal_swap_packets(builder, op->size, abce_engine_op_size2(op));
+    case ABCE_OP_KIND_MULTICAST:
+      return abce_builder_num_multicast_packets(builder, op->size);
+    default:
+      return 1;
+  }
+}
+
+// Compacted fused packets: header + body per chunk, the wait on the first
+// chunk, and when |signal| a signal on every chunk.
 static inline size_t abce_frame_fused_bytes(const abce_frame_composer_t* composer,
                                             const abce_engine_op_t* op, bool wait, bool signal) {
-  const abce_builder_t* builder = composer->builder;
-  const uint32_t wait_dwords = wait ? 7u : 0u;
-  const uint32_t signal_dwords = signal ? 5u : 0u;
-  if (op->kind == ABCE_OP_KIND_INDIRECT)
-    return (size_t)(1u + wait_dwords + 6u + signal_dwords) * sizeof(uint32_t);
-
-  if (op->kind == ABCE_OP_KIND_LINEAR || op->kind == ABCE_OP_KIND_SWAP) {
-    const uint64_t num_packets =
-        op->kind == ABCE_OP_KIND_SWAP
-            ? abce_builder_num_wait_signal_swap_packets(builder, op->size, abce_engine_op_size2(op))
-            : abce_builder_num_copy_packets(builder, op->size);
-    const uint64_t total_dwords = num_packets * (1u + 6u) + wait_dwords + signal_dwords;
-    return (size_t)total_dwords * sizeof(uint32_t);
+  const uint64_t num_packets = abce_frame_fused_packets(composer, op);
+  const uint64_t wait_dwords = wait ? 7u : 0u;
+  const uint64_t signal_dwords = signal ? 5u * num_packets : 0u;
+  uint64_t body_dwords = 0;
+  if (op->kind == ABCE_OP_KIND_INDIRECT || op->kind == ABCE_OP_KIND_LINEAR ||
+      op->kind == ABCE_OP_KIND_SWAP) {
+    body_dwords = 6u;
+  } else if (op->kind == ABCE_OP_KIND_MULTICAST) {
+    body_dwords = 4u + 2u * (uint64_t)op->num_dsts;
+  } else {
+    return 0;
   }
-  if (op->kind == ABCE_OP_KIND_MULTICAST) {
-    const uint64_t packet_core_dwords = 1u + 4u + 2u * (uint64_t)op->num_dsts;
-    const uint64_t total_dwords =
-        abce_builder_num_multicast_packets(builder, op->size) * packet_core_dwords + wait_dwords +
-        signal_dwords;
-    return (size_t)total_dwords * sizeof(uint32_t);
-  }
-  return 0;
+  return (size_t)((num_packets * (1u + body_dwords) + wait_dwords + signal_dwords) *
+                  sizeof(uint32_t));
 }
 
 static inline size_t abce_frame_body_bytes(const abce_frame_composer_t* composer,
-                                           const abce_engine_op_t* op, bool wait_here,
-                                           bool signal_here) {
-  if (op->fused) return abce_frame_fused_bytes(composer, op, wait_here, signal_here);
+                                           const abce_engine_op_t* op,
+                                           const abce_body_sync_t* sync) {
+  const bool standalone_signal = sync->signal && !sync->inline_signal;
+  if (op->fused)
+    return abce_frame_fused_bytes(composer, op, sync->wait, sync->signal && sync->inline_signal) +
+           (standalone_signal ? ABCE_FRAME_ATOMIC_BYTES : 0);
   size_t bytes = 0;
-  if (wait_here) bytes += abce_frame_poll_bytes(composer);
+  if (sync->wait) bytes += abce_frame_poll_bytes(composer);
   bytes += abce_frame_payload_bytes(composer, op);
-  if (signal_here) bytes += ABCE_FRAME_ATOMIC_BYTES;
+  if (sync->signal) bytes += ABCE_FRAME_ATOMIC_BYTES;
   return bytes;
 }
 
 static inline size_t abce_frame_prologue_bytes(const abce_frame_composer_t* composer,
                                                const abce_copy_metadata_t* metadata, bool multi,
-                                               bool start_gate_required) {
-  size_t bytes = abce_frame_dep_waits_bytes(composer, metadata->deps, metadata->num_deps);
+                                               bool start_gate_required, uint32_t folded_dep) {
+  size_t bytes =
+      abce_frame_dep_waits_bytes(composer, metadata->deps, metadata->num_deps, folded_dep);
   if (abce_timestamp_surface_enabled(&metadata->timestamps)) bytes += ABCE_FRAME_TIMESTAMP_BYTES;
   if (composer->caps.emit_hdp_flush && metadata->coherency.flags.emit_hdp_flush)
     bytes += ABCE_FRAME_FLUSH_BYTES;
@@ -555,12 +628,13 @@ static inline size_t abce_frame_composer_frame_bytes(const abce_frame_composer_t
   const abce_copy_metadata_t* metadata = job->metadata;
   size_t bytes = 0;
   if (job->coordinator)
-    bytes += abce_frame_prologue_bytes(composer, metadata, job->multi, job->start_gate_required);
+    bytes += abce_frame_prologue_bytes(composer, metadata, job->multi, job->start_gate_required,
+                                       abce_frame_folded_dep(composer, job));
   uint32_t body_idx = 0;
   for (uint32_t op_idx = 0; op_idx < job->num_ops; ++op_idx) {
     if (job->ops[op_idx].engine != job->engine) continue;
-    const abce_body_sync_t sync = abce_body_sync_for(job, body_idx);
-    bytes += abce_frame_body_bytes(composer, &job->ops[op_idx], sync.wait, sync.signal);
+    const abce_body_sync_t sync = abce_body_sync_for(composer, job, body_idx);
+    bytes += abce_frame_body_bytes(composer, &job->ops[op_idx], &sync);
     body_idx++;
   }
   if (job->coordinator && job->epilogue_required)
@@ -568,15 +642,32 @@ static inline size_t abce_frame_composer_frame_bytes(const abce_frame_composer_t
   return bytes;
 }
 
+// Signal updates this frame makes to its coordination word.
+static inline uint64_t abce_frame_composer_signal_count(const abce_frame_composer_t* composer,
+                                                        const abce_frame_job_t* job) {
+  uint64_t num_signals = 0;
+  uint32_t body_idx = 0;
+  for (uint32_t op_idx = 0; op_idx < job->num_ops; ++op_idx) {
+    if (job->ops[op_idx].engine != job->engine) continue;
+    const abce_body_sync_t sync = abce_body_sync_for(composer, job, body_idx);
+    if (sync.signal)
+      num_signals += sync.inline_signal ? abce_frame_fused_packets(composer, &job->ops[op_idx]) : 1;
+    body_idx++;
+  }
+  return num_signals;
+}
+
 //===----------------------------------------------------------------------===//
 // Emission
 //===----------------------------------------------------------------------===//
 
 static inline size_t abce_frame_emit_dep_waits(const abce_frame_composer_t* composer, char* out,
-                                               const abce_dep_signal_t* deps, uint32_t num_deps) {
+                                               const abce_dep_signal_t* deps, uint32_t num_deps,
+                                               uint32_t folded_dep) {
   char* cursor = out;
   for (uint32_t dep_idx = 0; dep_idx < num_deps; ++dep_idx) {
-    if (deps[dep_idx].observed_value == deps[dep_idx].reference_value) continue;
+    if (dep_idx == folded_dep || deps[dep_idx].observed_value == deps[dep_idx].reference_value)
+      continue;
     if (composer->is_gfx125plus) {
       abce_builder_build_poll_64b(composer->builder, cursor, deps[dep_idx].value,
                                   deps[dep_idx].reference_value, UINT64_MAX);
@@ -598,9 +689,11 @@ static inline size_t abce_frame_emit_dep_waits(const abce_frame_composer_t* comp
 
 static inline size_t abce_frame_emit_prologue(const abce_frame_composer_t* composer, char* out,
                                               const abce_copy_metadata_t* metadata, bool multi,
-                                              bool start_gate_required, void* coordination_word) {
+                                              bool start_gate_required, void* coordination_word,
+                                              uint32_t folded_dep) {
   char* cursor = out;
-  cursor += abce_frame_emit_dep_waits(composer, cursor, metadata->deps, metadata->num_deps);
+  cursor +=
+      abce_frame_emit_dep_waits(composer, cursor, metadata->deps, metadata->num_deps, folded_dep);
   if (abce_timestamp_surface_enabled(&metadata->timestamps)) {
     abce_builder_build_get_global_timestamp(composer->builder, cursor,
                                             metadata->timestamps.start_value);
@@ -656,28 +749,32 @@ static inline size_t abce_frame_emit_body(const abce_frame_composer_t* composer,
   const abce_builder_t* builder = composer->builder;
 
   if (op->fused) {
+    const bool inline_signal = sync->signal && sync->inline_signal;
     abce_wait_signal_params_t params = abce_wait_signal_none();
     params.wait_addr = sync->wait_addr;
-    params.signal_addr = sync->signal_addr;
-    params.wait_reference = 0;
-    params.wait_mask = ABCE_FAN_OUT_START_GATE;
+    params.signal_addr = inline_signal ? sync->signal_addr : NULL;
+    params.wait_reference = sync->wait_reference;
+    params.wait_mask = sync->wait_mask;
+    params.wait_first_chunk_only = true;
 
     if (op->kind == ABCE_OP_KIND_INDIRECT) {
       abce_builder_build_wait_signal_indirect_copy(builder, cursor, op->dst, op->src, op->size,
                                                    op->indirect_src, op->indirect_dst, &params);
     } else if (op->kind == ABCE_OP_KIND_LINEAR) {
-      params.boundary_wait_signal = true;
       abce_builder_build_wait_signal_copy(builder, cursor, op->dst, op->src, op->size, &params);
     } else if (op->kind == ABCE_OP_KIND_SWAP) {
-      params.boundary_wait_signal = true;
       abce_builder_build_wait_signal_swap(builder, cursor, op->dst, (void*)(uintptr_t)op->src,
                                           op->size, abce_engine_op_size2(op), &params);
     } else if (op->kind == ABCE_OP_KIND_MULTICAST) {
-      params.boundary_wait_signal = true;
       abce_builder_build_multicast_wait_signal_copy(builder, cursor, op->dsts, op->num_dsts,
                                                     op->src, op->size, &params);
     }
-    return abce_frame_fused_bytes(composer, op, sync->wait, sync->signal);
+    cursor += abce_frame_fused_bytes(composer, op, sync->wait, inline_signal);
+    if (sync->signal && !inline_signal) {
+      abce_builder_build_atomic_decrement(builder, cursor, sync->signal_addr);
+      cursor += ABCE_FRAME_ATOMIC_BYTES;
+    }
+    return (size_t)(cursor - out);
   }
 
   if (sync->wait) cursor += abce_frame_write_start_gate_poll(composer, cursor, sync->wait_addr);
@@ -795,12 +892,13 @@ static inline size_t abce_frame_composer_emit_frame(const abce_frame_composer_t*
 
   if (job->coordinator)
     cursor += abce_frame_emit_prologue(composer, cursor, metadata, job->multi,
-                                       job->start_gate_required, job->coordination_word);
+                                       job->start_gate_required, job->coordination_word,
+                                       abce_frame_folded_dep(composer, job));
 
   uint32_t body_idx = 0;
   for (uint32_t op_idx = 0; op_idx < job->num_ops; ++op_idx) {
     if (job->ops[op_idx].engine != job->engine) continue;
-    const abce_body_sync_t sync = abce_body_sync_for(job, body_idx);
+    const abce_body_sync_t sync = abce_body_sync_for(composer, job, body_idx);
     cursor += abce_frame_emit_body(composer, cursor, &job->ops[op_idx], &sync);
     body_idx++;
   }

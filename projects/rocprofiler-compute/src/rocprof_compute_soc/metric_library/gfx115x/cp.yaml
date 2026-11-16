@@ -1,0 +1,127 @@
+cp.cpc_busy:
+  name: CPC Busy
+  formula: 100 * SUM(CPC_STAT_BUSY) / SUM(CPC_ALWAYS_COUNT)
+  unit: Percent
+  description: >-
+    Percentage of time the Command Processor Compute is actively processing commands.
+    High busy percentage indicates efficient command stream processing. Low values
+    may indicate gaps in workload submission or dispatch bottlenecks.
+cp.cpc_idle:
+  name: CPC Idle
+  formula: 100 * SUM(CPC_STAT_IDLE) / SUM(CPC_ALWAYS_COUNT)
+  unit: Percent
+  description: >-
+    Percentage of time the Command Processor Compute has no work to process. High
+    idle time indicates underutilization, often due to gaps between kernel dispatches
+    or insufficient workload to keep the GPU busy.
+cp.cpc_stalled:
+  name: CPC Stalled
+  formula: 100 * SUM(CPC_STAT_STALL) / SUM(CPC_ALWAYS_COUNT)
+  unit: Percent
+  description: >-
+    Percentage of time the Command Processor Compute is stalled waiting for resources.
+    High stall rates may indicate memory bottlenecks, synchronization issues, or contention
+    for internal command processor resources.
+cp.gcriu_busy:
+  name: GCRIU Busy
+  formula: 100 * SUM(CPC_GCRIU_BUSY) / SUM(CPC_ALWAYS_COUNT)
+  unit: Percent
+  description: >-
+    Percentage of time the Graphics Cache Rinse Interface Unit is busy. This unit
+    handles cache coherency operations. High utilization may indicate frequent cache
+    flushes or synchronization points.
+cp.gus_rd_req:
+  name: GUS Read Requests
+  formula: SUM(CPC_GUS_READ_REQUEST_SENT_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: >-
+    Number of read requests to the Global Unified Shader memory interface. This path
+    handles direct memory access for command processor operations.
+cp.gus_wr_req:
+  name: GUS Write Requests
+  formula: SUM(CPC_GUS_WRITE_REQUEST_SENT_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: >-
+    Number of write requests to the Global Unified Shader memory interface. High write
+    counts may indicate frequent state updates or completion notifications.
+cp.inst_cache_hit_rate:
+  name: Instruction Cache Hit Rate
+  formula: 100 * SUM(CPC_MEC_INSTR_CACHE_HIT_sum) / SUM(CPC_MEC_INSTR_CACHE_HIT_sum + CPC_MEC_INSTR_CACHE_MISS_sum)
+  unit: Percent
+  description: >-
+    Percentage of Micro Engine instruction fetches that hit in cache. High hit rates
+    are essential for efficient command processing. Low rates may indicate complex
+    or large command processing routines.
+cp.inst_cache_hits:
+  name: Instruction Cache Hits
+  formula: SUM(CPC_MEC_INSTR_CACHE_HIT_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: >-
+    Number of Micro Engine instruction fetches serviced from the instruction cache.
+    Higher hit counts indicate good instruction locality in command processing code.
+cp.inst_cache_misses:
+  name: Instruction Cache Misses
+  formula: SUM(CPC_MEC_INSTR_CACHE_MISS_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: >-
+    Number of Micro Engine instruction fetches that missed in the instruction cache.
+    High miss counts increase command processing latency due to memory fetches.
+cp.me1_stall_on_memory_rd:
+  name: ME1 Stall on Memory Read
+  formula: SUM(CPC_ME1_STALL_WAIT_ON_MEM_READ) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: >-
+    Cycles the Micro Engine is stalled waiting for memory read operations to complete.
+    High stall counts indicate memory latency is impacting command processing throughput.
+cp.me1_stall_on_memory_wr:
+  name: ME1 Stall on Memory Write
+  formula: SUM(CPC_ME1_STALL_WAIT_ON_MEM_WRITE) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: >-
+    Cycles the Micro Engine is stalled waiting for memory write operations to complete.
+    High stall counts may indicate memory bandwidth saturation or write queue pressure.
+cp.me1_stall_on_rciu_ready:
+  name: ME1 Stall on RCIU Ready
+  formula: SUM(CPC_ME1_STALL_WAIT_ON_RCIU_READY) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: >-
+    Cycles the Micro Engine is stalled waiting for the Register Cache Interface Unit.
+    High stall counts may indicate register allocation bottlenecks or excessive register
+    pressure during command processing.
+cp.me1_stall_on_roq_data:
+  name: ME1 Stall on ROQ Data
+  formula: SUM(CPC_ME1_STALL_ON_DATA_FROM_ROQ) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: >-
+    Cycles the Micro Engine is stalled waiting for data from the Ring Output Queue.
+    High stall counts may indicate command stream processing bottlenecks.
+cp.tciu_busy:
+  name: TCIU Busy
+  formula: 100 * SUM(CPC_TCIU_BUSY) / SUM(CPC_ALWAYS_COUNT)
+  unit: Percent
+  description: >-
+    Percentage of time the Texture Cache Interface Unit is busy handling command processor
+    memory requests. High utilization indicates significant memory traffic from command
+    processing activities.
+cp.tciu_rd_req:
+  name: TCIU Read Requests
+  formula: SUM(CPC_TCIU_READ_REQUEST_SENT_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: >-
+    Number of read requests issued by the command processor through the texture cache
+    interface. These requests fetch command buffer data and kernel arguments.
+cp.tciu_wr_req:
+  name: TCIU Write Requests
+  formula: SUM(CPC_TCIU_WRITE_REQUEST_SENT_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: >-
+    Number of write requests issued by the command processor through the texture cache
+    interface. These handle completion signals and status updates.
+cp.utcl2_busy:
+  name: UTCL2 Busy
+  formula: 100 * SUM(CPC_UTCL2IU_BUSY) / SUM(CPC_ALWAYS_COUNT)
+  unit: Percent
+  description: >-
+    Percentage of time the Unified Translation Cache L2 interface is busy handling
+    address translation requests. High utilization may indicate heavy virtual memory
+    activity or TLB pressure.

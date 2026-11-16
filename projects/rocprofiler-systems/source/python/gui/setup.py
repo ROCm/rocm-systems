@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
@@ -13,7 +12,7 @@ def get_project_version():
     with open(os.path.join(_cwd, "source", "VERSION"), "r") as f:
         data = f.read().replace("\n", "")
     # make sure is string
-    if isinstance(data, list) or isinstance(data, tuple):
+    if isinstance(data, (list, tuple)):
         return data[0]
     else:
         return data
@@ -22,7 +21,8 @@ def get_project_version():
 def get_long_description():
     long_descript = ""
     try:
-        long_descript = open("README.md").read()
+        with open("README.md") as f:
+            long_descript = f.read()
     except Exception:
         long_descript = ""
     return long_descript

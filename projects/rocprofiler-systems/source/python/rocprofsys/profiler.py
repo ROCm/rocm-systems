@@ -1,8 +1,6 @@
-#!/usr/bin/env python@_VERSION@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-from __future__ import absolute_import
 
 __author__ = "AMD ROCm"
 __copyright__ = "Copyright 2024, Advanced Micro Devices, Inc."
@@ -11,32 +9,28 @@ __version__ = "@PROJECT_VERSION@"
 __maintainer__ = "AMD ROCm"
 __status__ = "Development"
 
-import os
 import sys
 import threading
 from functools import wraps
 
-from .common import exec_
-from .common import _initialize
-from .common import _file
-
 from . import libpyrocprofsys
+from .common import _file, _initialize, exec_
+from .libpyrocprofsys.profiler import config as _profiler_config
+from .libpyrocprofsys.profiler import profiler_finalize as _profiler_fini
 from .libpyrocprofsys.profiler import (
     profiler_function as _profiler_function,
 )
-from .libpyrocprofsys.profiler import config as _profiler_config
 from .libpyrocprofsys.profiler import profiler_init as _profiler_init
-from .libpyrocprofsys.profiler import profiler_finalize as _profiler_fini
 from .libpyrocprofsys.profiler import profiler_pause as _profiler_pause
 from .libpyrocprofsys.profiler import profiler_resume as _profiler_resume
 
 __all__ = [
-    "profile",
-    "noprofile",
-    "config",
-    "Profiler",
-    "FakeProfiler",
     "Config",
+    "FakeProfiler",
+    "Profiler",
+    "config",
+    "noprofile",
+    "profile",
 ]
 
 config = _profiler_config
@@ -49,8 +43,6 @@ def _default_functor():
 
 class Profiler:
     """Provides decorators and context-manager for the rocprof-sys profilers"""
-
-    global _default_functor
 
     # static variable
     _conditional_functor = _default_functor
@@ -71,8 +63,6 @@ class Profiler:
         return False
 
     def __init__(self, **kwargs):
-        """ """
-
         self._original_function = (
             sys.getprofile() if sys.getprofile() != _profiler_function else None
         )
@@ -83,7 +73,7 @@ class Profiler:
             and not libpyrocprofsys.is_finalized()
         )
         self._file = _file()
-        self.debug = kwargs["debug"] if "debug" in kwargs else False
+        self.debug = kwargs.get("debug", False)
 
     def __del__(self):
         """Make sure the profiler stops"""

@@ -93,6 +93,7 @@ if(HIP_PLATFORM MATCHES "amd")
       hipMemPtrGetInfo.cc
       hipPointerGetAttributes.cc
       hipExtMallocWithFlags.cc
+      hipExtMemcpyBatchAsync.cc
       hipMallocMngdMultiThread.cc
       hipMemVmm.cc
       hipArray.cc
@@ -175,6 +176,7 @@ set(TEST_SRC
     hipMalloc3D.cc
     hipMalloc3DArray.cc
     hipArray3DCreate.cc
+    hipArrayMaxExtentCopy.cc
     hipDrvMemcpy3D.cc
     hipDrvMemcpy3D_old.cc
     hipDrvMemcpy3DAsync.cc

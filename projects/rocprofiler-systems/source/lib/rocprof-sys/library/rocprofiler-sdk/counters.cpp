@@ -5,11 +5,13 @@
 #include "core/agent_manager.hpp"
 #include "core/demangler.hpp"
 #include "core/trace_cache/cache_manager.hpp"
+#include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "library/rocprofiler-sdk/fwd.hpp"
 #include <cstdint>
 
 #include <memory>
+#include <optional>
 #include <timemory/utility/types.hpp>
 
 #include "logger/debug.hpp"
@@ -28,8 +30,7 @@ metadata_initialize_counter_category()
 void
 metadata_initialize_counter_track(const char* name)
 {
-    trace_cache::get_metadata_registry().add_track(
-        { .track_name = name, .thread_id = std::nullopt, .extdata = "{}" });
+    trace_cache::get_metadata_registry().ensure_track(name, std::nullopt);
 }
 
 void
@@ -56,7 +57,7 @@ metadata_initialize_counters_pmc(size_t dev_id, const std::string& name,
           .long_description = long_description,
           .component        = component,
           .units            = "Unit Count",
-          .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+          .value_type       = rocprofsys::trace_cache::k_absolute,
           .block            = block,
           .expression       = expression,
           .is_constant      = 0,

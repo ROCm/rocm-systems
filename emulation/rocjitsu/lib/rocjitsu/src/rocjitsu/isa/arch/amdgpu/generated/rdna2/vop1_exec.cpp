@@ -8,6 +8,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/vop1.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -1239,9 +1240,7 @@ RJ_NOINLINE void VFrexpMantF32Vop1::execute_modifier_impl(amdgpu::Wavefront &wf)
   dpp_write_mask_scope_.restore();
 }
 
-void VClrexcpVop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_clrexcp_vop1(*this, wf);
-}
+void VClrexcpVop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 void VMovreldB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0) ||
@@ -1253,9 +1252,9 @@ void VMovreldB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
       Isa::resolved_vgpr_offset(vdst.opr_type_, vdst.encoding_value_);
   uint64_t rel_dst_index =
       rel_dst_base ? static_cast<uint64_t>(*rel_dst_base) + wf.m0() : UINT64_MAX;
-  bool rel_dst_valid =
-      amdgpu::relative_vgpr_index(rel_dst_base, wf.m0(), vdst.vgpr_count(), wf.vgpr_alloc().count)
-          .has_value();
+  bool rel_dst_valid = amdgpu::relative_vgpr_index(rel_dst_base, wf.m0(), vdst.vgpr_count(),
+                                                   wf.vgpr_alloc().count, wf.cu().arch())
+                           .has_value();
   if (!rel_dst_valid)
     return;
   Operand rel_dst(vdst.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_dst_index));
@@ -1292,9 +1291,9 @@ RJ_NOINLINE void VMovreldB32Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
       Isa::resolved_vgpr_offset(vdst.opr_type_, vdst.encoding_value_);
   uint64_t rel_dst_index =
       rel_dst_base ? static_cast<uint64_t>(*rel_dst_base) + wf.m0() : UINT64_MAX;
-  bool rel_dst_valid =
-      amdgpu::relative_vgpr_index(rel_dst_base, wf.m0(), vdst.vgpr_count(), wf.vgpr_alloc().count)
-          .has_value();
+  bool rel_dst_valid = amdgpu::relative_vgpr_index(rel_dst_base, wf.m0(), vdst.vgpr_count(),
+                                                   wf.vgpr_alloc().count, wf.cu().arch())
+                           .has_value();
   if (!rel_dst_valid)
     return;
   Operand rel_dst(vdst.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_dst_index));
@@ -1318,9 +1317,9 @@ void VMovrelsB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
       Isa::resolved_vgpr_offset(src0.opr_type_, src0.encoding_value_);
   uint64_t rel_src_index =
       rel_src_base ? static_cast<uint64_t>(*rel_src_base) + wf.m0() : UINT64_MAX;
-  bool rel_src_valid =
-      amdgpu::relative_vgpr_index(rel_src_base, wf.m0(), src0.vgpr_count(), wf.vgpr_alloc().count)
-          .has_value();
+  bool rel_src_valid = amdgpu::relative_vgpr_index(rel_src_base, wf.m0(), src0.vgpr_count(),
+                                                   wf.vgpr_alloc().count, wf.cu().arch())
+                           .has_value();
   Operand rel_src(src0.size_bits(), OperandType::OPR_VGPR,
                   static_cast<int>(rel_src_valid ? rel_src_index : 0u));
   std::optional<StagedOperand> rel_staged_src;
@@ -1362,9 +1361,9 @@ RJ_NOINLINE void VMovrelsB32Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
       Isa::resolved_vgpr_offset(src0.opr_type_, src0.encoding_value_);
   uint64_t rel_src_index =
       rel_src_base ? static_cast<uint64_t>(*rel_src_base) + wf.m0() : UINT64_MAX;
-  bool rel_src_valid =
-      amdgpu::relative_vgpr_index(rel_src_base, wf.m0(), src0.vgpr_count(), wf.vgpr_alloc().count)
-          .has_value();
+  bool rel_src_valid = amdgpu::relative_vgpr_index(rel_src_base, wf.m0(), src0.vgpr_count(),
+                                                   wf.vgpr_alloc().count, wf.cu().arch())
+                           .has_value();
   Operand rel_src(src0.size_bits(), OperandType::OPR_VGPR,
                   static_cast<int>(rel_src_valid ? rel_src_index : 0u));
   std::optional<StagedOperand> rel_staged_src;
@@ -1410,10 +1409,10 @@ void VMovrelsdB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t rel_dst_index =
       rel_dst_base ? static_cast<uint64_t>(*rel_dst_base) + rel_dst_offset : UINT64_MAX;
   bool rel_src_valid = amdgpu::relative_vgpr_index(rel_src_base, rel_src_offset, src0.vgpr_count(),
-                                                   wf.vgpr_alloc().count)
+                                                   wf.vgpr_alloc().count, wf.cu().arch())
                            .has_value();
   bool rel_dst_valid = amdgpu::relative_vgpr_index(rel_dst_base, rel_dst_offset, vdst.vgpr_count(),
-                                                   wf.vgpr_alloc().count)
+                                                   wf.vgpr_alloc().count, wf.cu().arch())
                            .has_value();
   if (!rel_dst_valid)
     return;
@@ -1466,10 +1465,10 @@ RJ_NOINLINE void VMovrelsdB32Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) 
   uint64_t rel_dst_index =
       rel_dst_base ? static_cast<uint64_t>(*rel_dst_base) + rel_dst_offset : UINT64_MAX;
   bool rel_src_valid = amdgpu::relative_vgpr_index(rel_src_base, rel_src_offset, src0.vgpr_count(),
-                                                   wf.vgpr_alloc().count)
+                                                   wf.vgpr_alloc().count, wf.cu().arch())
                            .has_value();
   bool rel_dst_valid = amdgpu::relative_vgpr_index(rel_dst_base, rel_dst_offset, vdst.vgpr_count(),
-                                                   wf.vgpr_alloc().count)
+                                                   wf.vgpr_alloc().count, wf.cu().arch())
                            .has_value();
   if (!rel_dst_valid)
     return;
@@ -1519,10 +1518,10 @@ void VMovrelsd2B32Vop1::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t rel_dst_index =
       rel_dst_base ? static_cast<uint64_t>(*rel_dst_base) + rel_dst_offset : UINT64_MAX;
   bool rel_src_valid = amdgpu::relative_vgpr_index(rel_src_base, rel_src_offset, src0.vgpr_count(),
-                                                   wf.vgpr_alloc().count)
+                                                   wf.vgpr_alloc().count, wf.cu().arch())
                            .has_value();
   bool rel_dst_valid = amdgpu::relative_vgpr_index(rel_dst_base, rel_dst_offset, vdst.vgpr_count(),
-                                                   wf.vgpr_alloc().count)
+                                                   wf.vgpr_alloc().count, wf.cu().arch())
                            .has_value();
   if (!rel_dst_valid)
     return;
@@ -1575,10 +1574,10 @@ RJ_NOINLINE void VMovrelsd2B32Vop1::execute_modifier_impl(amdgpu::Wavefront &wf)
   uint64_t rel_dst_index =
       rel_dst_base ? static_cast<uint64_t>(*rel_dst_base) + rel_dst_offset : UINT64_MAX;
   bool rel_src_valid = amdgpu::relative_vgpr_index(rel_src_base, rel_src_offset, src0.vgpr_count(),
-                                                   wf.vgpr_alloc().count)
+                                                   wf.vgpr_alloc().count, wf.cu().arch())
                            .has_value();
   bool rel_dst_valid = amdgpu::relative_vgpr_index(rel_dst_base, rel_dst_offset, vdst.vgpr_count(),
-                                                   wf.vgpr_alloc().count)
+                                                   wf.vgpr_alloc().count, wf.cu().arch())
                            .has_value();
   if (!rel_dst_valid)
     return;
@@ -2346,10 +2345,10 @@ void VSwaprelB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t rel_dst_index =
       rel_dst_base ? static_cast<uint64_t>(*rel_dst_base) + rel_dst_offset : UINT64_MAX;
   if (!amdgpu::relative_vgpr_index(rel_src_base, rel_src_offset, src0.vgpr_count(),
-                                   wf.vgpr_alloc().count))
+                                   wf.vgpr_alloc().count, wf.cu().arch()))
     return;
   if (!amdgpu::relative_vgpr_index(rel_dst_base, rel_dst_offset, vdst.vgpr_count(),
-                                   wf.vgpr_alloc().count))
+                                   wf.vgpr_alloc().count, wf.cu().arch()))
     return;
   Operand rel_src(src0.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_src_index));
   Operand rel_dst(vdst.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_dst_index));

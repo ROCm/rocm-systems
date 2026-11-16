@@ -15,8 +15,9 @@ python3 ddi/libamdf/tests/abi/check_layout.py
 
 The ABI probe compares independently compiled C and Rust layouts against the
 vendored AMDF headers. The headers are based on
-`hrx-system@bd24215e6a5d1e12570c892356fd5b343ac38a6d` with local pre-beta
-API changes; the upstream CTS is pinned to that commit.
+`hrx-system@8bdaeca172e5cbcbcd83edb5284c4407e7e02ee8` with a local
+native-event clarification. The upstream CTS is not run by the Cargo test
+suite.
 
 On a Linux x86-64 host with an accessible GFX1201 GPU, run the opt-in
 [cross-frontend queue fault probes](../../rocddi/tests/gpu/README.md):

@@ -9,7 +9,7 @@ use crate::support::{boundary, native, output_pointer};
 pub(crate) unsafe extern "C" fn host_clock_info(out: *mut amdf_observation_clock_info_t) -> u64 {
     boundary(|| {
         output_pointer(out)?;
-        let info = rocddi::observation::host_clock_info();
+        let info = rocddi::host::clock::info();
         // SAFETY: The caller supplied a writable clock-info record.
         unsafe {
             out.write(amdf_observation_clock_info_t {
@@ -25,7 +25,7 @@ pub(crate) unsafe extern "C" fn host_clock_info(out: *mut amdf_observation_clock
 pub(crate) unsafe extern "C" fn host_clock(out: *mut u64) -> u64 {
     boundary(|| {
         output_pointer(out)?;
-        let value = rocddi::observation::host_clock().map_err(|error| native(&error))?;
+        let value = rocddi::host::clock::read().map_err(|error| native(&error))?;
         // SAFETY: The caller supplied a writable timestamp slot.
         unsafe { out.write(value) };
         Ok(())

@@ -77,15 +77,28 @@ def run_membw_analysis(
     gpu_arch: str,
 ) -> Optional[MemBwAnalysisResult]:
     """Run the full membw pipeline: extract metrics, evaluate tree, return result."""
-    membw_dfs = {tid: dfs[tid] for tid in MEMBW_TABLE_IDS if tid in dfs}
-    if not membw_dfs:
+    spec = load_membw_spec(gpu_arch)
+    if spec is None:
         return None
+    return evaluate_membw_dfs(dfs, spec, gpu_arch)
 
+
+def load_membw_spec(gpu_arch: str) -> Optional[TreeSpec]:
+    """Load the architecture's tree spec, warning when it is unavailable."""
     if not tree_spec_path(gpu_arch).exists():
         console_warning("membw", f"No tree spec for {gpu_arch}, skipping")
         return None
 
-    spec = load_tree_spec(gpu_arch)
+    return load_tree_spec(gpu_arch)
+
+
+def evaluate_membw_dfs(
+    dfs: dict[int, pd.DataFrame], spec: TreeSpec, gpu_arch: str
+) -> Optional[MemBwAnalysisResult]:
+    """Extract memory bandwidth metrics and evaluate them against a tree spec."""
+    membw_dfs = {tid: dfs[tid] for tid in MEMBW_TABLE_IDS if tid in dfs}
+    if not membw_dfs:
+        return None
 
     metric_keys = collect_metric_keys(spec)
     extraction = extract_membw_metrics(membw_dfs, metric_keys)

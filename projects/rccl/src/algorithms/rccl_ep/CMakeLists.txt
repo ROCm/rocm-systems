@@ -52,9 +52,8 @@ find_path(RCCL_EP_RCCL_INCLUDE_DIR
 
 find_package(hip REQUIRED)
 
-# <nccl_device.h> is version-gated and degrades silently when ROCM_VERSION is
-# undefined: coop.h:124 and :154 fall back from __syncwarp() to __syncthreads()
-# in ncclCoopTile::sync() and ncclCoopLanes::sync(), and hip_compat.h:63 defines
+# <nccl_device.h> is version-gated on ROCM_VERSION: without it, coop.h takes its
+# warp-sync gate from HIP_VERSION_MAJOR instead, and hip_compat.h:63 defines
 # CU_MEM_LOCATION_TYPE_HOST_NUMA that a ROCm >= 7.12 build already provides.
 # RCCL's own build passes -DROCM_VERSION for this exact file
 # (cmake/DeviceLinker.cmake:772), so the standalone artifact has to agree or the

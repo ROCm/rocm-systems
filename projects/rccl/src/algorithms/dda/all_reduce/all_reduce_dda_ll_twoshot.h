@@ -45,11 +45,6 @@ constexpr size_t ddaLLArTwoShotSlotPkts(size_t bankSize, int nRanks) {
   return ddaLLSlotPkts(bankSize, sizeof(LLPacket16) * (size_t)nRanks * 2, 16);
 }
 
-// Fixed-width peer staging for phase 1: a runtime-sized array, or a runtime index
-// into one, is placed in scratch. 8 covers rank counts 4 and 8 in a single pass.
-// TODO: should this be moved to common place so other kernels can do the same
-constexpr int kDdaLLArTwoShotPeerBatch = 8;
-
 // LL two-shot all-reduce kernel. 1D grid over one shard's packets (8B payload
 // each), so the launcher sizes the grid on count/nRanks, not on count.
 //
@@ -80,7 +75,8 @@ __launch_bounds__(1024)
                                         int selfRank, int nRanksRt,
                                         uint32_t* __restrict__ epochDev,    // per-block LL epoch cells (shared AG+AR)
                                         int epochLen,                       // number of cells in epochDev
-                                        size_t bankSize) {                  // scratch bank size (from host)
+                                        size_t bankSize,                  // scratch bank size (from host)
+                                        DdaKernelParams params) {
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const size_t bytes = count * sizeof(T);
@@ -104,10 +100,10 @@ __launch_bounds__(1024)
   // fixed trip count with the rank test as a predicate is what unrolls both loops
   // and keeps d0/d1 in registers rather than scratch.
   for (size_t pk = gtid; pk < nPk_rank; pk += stride) {
-    for (int base = 1; base < nRanks; base += kDdaLLArTwoShotPeerBatch) {
-      uint32_t d0[kDdaLLArTwoShotPeerBatch], d1[kDdaLLArTwoShotPeerBatch];
+    for (int base = 1; base < nRanks; base += kDdaLLPeerBatch) {
+      uint32_t d0[kDdaLLPeerBatch], d1[kDdaLLPeerBatch];
 #pragma unroll
-      for (int i = 0; i < kDdaLLArTwoShotPeerBatch; ++i) {
+      for (int i = 0; i < kDdaLLPeerBatch; ++i) {
         const int r = base + i;
         if (r < nRanks) {
           const int peer = (selfRank + r) % nRanks;
@@ -117,7 +113,7 @@ __launch_bounds__(1024)
         }
       }
 #pragma unroll
-      for (int i = 0; i < kDdaLLArTwoShotPeerBatch; ++i) {
+      for (int i = 0; i < kDdaLLPeerBatch; ++i) {
         const int r = base + i;
         if (r < nRanks) {
           const int peer = (selfRank + r) % nRanks;
@@ -130,6 +126,10 @@ __launch_bounds__(1024)
 
   // Phase 2: poll my slots for the other ranks, reduce with my own data, then
   // publish the reduced shard to every peer's second stage.
+  // A sticky abort, not an early return: an exit per unrolled wait nearly doubles
+  // the NRANKS_CT == 8 kernel. Once aborted, the remaining waits are skipped and
+  // the kernel still reaches the epoch bump at the end.
+  bool aborted = false;
   LLPacket16* myBase = reinterpret_cast<LLPacket16*>(peerScratch[selfRank]) + bankOffsetPkts;
   for (size_t pk = gtid; pk < nPk_rank; pk += stride) {
     uint32_t acc0 = in[2 * pk];
@@ -137,15 +137,16 @@ __launch_bounds__(1024)
     for (int r = 1; r < nRanks; ++r) {
       const int peer = (selfRank + r) % nRanks;
       volatile LLPacket16* src = myBase + (size_t)peer * slot;
-      uint32_t d0, f0, d1, f1;
-      do {
-        ddaLLLoadLineB128(reinterpret_cast<const uint32_t*>(const_cast<LLPacket16*>(&src[pk])), d0, f0, d1, f1);
-      } while (f0 != flag || f1 != flag);
+      uint32_t d0 = 0, f0, d1 = 0, f1;
+      if (!aborted) aborted = !ddaLLWaitLineFlags(&src[pk], flag, params, d0, f0, d1, f1);
       ddaLLAddPayload<T>(acc0, acc1, d0, d1);
     }
     out[2 * pk] = acc0;
     out[2 * pk + 1] = acc1;
 
+    // After an abort acc0/acc1 are partial sums; publishing them under this
+    // epoch's flag would let a peer that has not aborted accept them as final.
+    if (aborted) continue;
     #pragma unroll
     for (int r = 1; r < nRanks; ++r) {
       const int peer = (selfRank + r) % nRanks;
@@ -162,10 +163,8 @@ __launch_bounds__(1024)
       const int peer = (selfRank + r) % nRanks;
       uint32_t *peer_out = reinterpret_cast<uint32_t*>(recvbuff) + peer * nPk_rank * 2;
       volatile LLPacket16* src = myBase + (size_t)peer * slot;
-      uint32_t d0, f0, d1, f1;
-      do {
-        ddaLLLoadLineB128(reinterpret_cast<const uint32_t*>(const_cast<LLPacket16*>(&src[pk])), d0, f0, d1, f1);
-      } while (f0 != flag || f1 != flag);
+      uint32_t d0 = 0, f0, d1 = 0, f1;
+      if (!aborted) aborted = !ddaLLWaitLineFlags(&src[pk], flag, params, d0, f0, d1, f1);
       peer_out[2 * pk] = d0;
       peer_out[2 * pk + 1] = d1;
     }

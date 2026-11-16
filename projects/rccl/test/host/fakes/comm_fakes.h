@@ -34,6 +34,17 @@ extern ncclResult_t g_commEnsureReadyResult;
 // ncclGetEnvCtaPolicy (init.cc:231): NCCL_CONFIG_UNDEF_INT means no override, so comm policy stands.
 extern int g_envCtaPolicy;  // UNDRIVEN
 
+// ncclCommCount / ncclCommUserRank. Default to the comm's own nRanks / rank.
+extern std::function<ncclResult_t(const ncclComm_t, int*)> g_commCount;
+extern std::function<ncclResult_t(const ncclComm_t, int*)> g_commUserRank;
+
+// ncclProfilerStart/StopCeCollEvent. Default succeed without a profiler.
+struct ncclCeCollArgs;
+extern std::function<ncclResult_t(struct ncclComm*, struct ncclCeCollArgs*, hipStream_t)>
+    g_profilerStartCeCollEvent;
+extern std::function<ncclResult_t(struct ncclComm*, struct ncclCeCollArgs*, hipStream_t)>
+    g_profilerStopCeCollEvent;
+
 // Restore every comm_fakes seam to its default. Call from a fixture TearDown.
 void ResetCommFakes();
 

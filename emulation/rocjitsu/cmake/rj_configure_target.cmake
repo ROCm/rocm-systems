@@ -15,12 +15,14 @@
 #     SCHEMAS           - add dependency on flatbuffers_schemas target
 #     WARNINGS          - add warning flags (-Wall/-Wextra/-Werror on GCC/Clang, /W4/WX on MSVC)
 #     HIDDEN            - add -fvisibility=hidden (GCC/Clang only; MSVC hides by default)
-#     CONFIG_DIRS       - add SCHEMA_DIR and CONFIG_DIR definitions
+#     CONFIG_DIRS       - add a cache-independent CONFIG_DIR runtime path
 #
 # Shorthand presets:
 #     LIB     = PRIVATE_INCLUDES GENERATED WARNINGS HIDDEN SCHEMAS
 #     TEST    = PRIVATE_INCLUDES GENERATED WARNINGS SCHEMAS CONFIG_DIRS DEVICE_KERNELS
 #     TOOL    = PRIVATE_INCLUDES GENERATED WARNINGS SCHEMAS
+include(rj_add_test_path)
+
 function(rj_configure_target target)
     set(options
         PRIVATE_INCLUDES
@@ -100,14 +102,9 @@ function(rj_configure_target target)
         # MSVC hides all symbols by default; no flag needed.
     endif()
 
-    # Definitions.
+    # Configuration fixture path.
     if(ARG_CONFIG_DIRS)
-        target_compile_definitions(
-            ${target}
-            PRIVATE
-                SCHEMA_DIR="${CMAKE_SOURCE_DIR}/schemas"
-                CONFIG_DIR="${CMAKE_SOURCE_DIR}/configs"
-        )
+        rj_add_test_path(${target} CONFIG_DIR "${CMAKE_SOURCE_DIR}/configs")
     endif()
 
     # Schema dependency.
@@ -117,10 +114,8 @@ function(rj_configure_target target)
 
     # Device kernel support.
     if(ARG_DEVICE_KERNELS AND HAS_DEVICE_KERNELS)
-        target_compile_definitions(
-            ${target}
-            PRIVATE HAS_DEVICE_KERNELS=1 KERNEL_DIR="${KERNEL_OUTPUT_DIR}"
-        )
+        target_compile_definitions(${target} PRIVATE HAS_DEVICE_KERNELS=1)
+        rj_add_test_path(${target} KERNEL_DIR "${KERNEL_OUTPUT_DIR}")
         add_dependencies(${target} device_kernels)
     endif()
 endfunction()

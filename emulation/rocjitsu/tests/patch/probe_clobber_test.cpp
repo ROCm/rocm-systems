@@ -33,6 +33,8 @@ constexpr uint32_t kGfx12GlobalLoadW0 = 0xee050002; // global_load_b32 v1, v0, s
 constexpr uint32_t kGfx12GlobalLoadW1 = 0x00000001; // ... (word 1)
 constexpr uint32_t kGfx12GlobalLoadW2 = 0x00000000; // ... (word 2)
 constexpr uint32_t kGfx12SSetpcS30S31 = 0xbe80481e; // s_setpc_b64 s[30:31]
+constexpr uint32_t kGfx12VCmpS2W0 = 0xd44a0002;     // v_cmp_eq_u32_e64 s2, 0, 0 (word 0)
+constexpr uint32_t kGfx12VCmpS2W1 = 0x02010080;     // ... (word 1)
 
 // Explicit special-state writes. to_register_ref() currently returns nullopt
 // for these operand forms, so the summary must recognize them via the operand
@@ -69,7 +71,7 @@ bool has_sgpr(const RegisterSet &set, uint16_t index) {
 TEST(ProbeClobber, NopProbeSummaryIsEmpty) {
   const auto callable = make_callable({kSWaitcnt0, kSSetpcS30S31});
   std::string err;
-  const auto summary = build_probe_clobber_summary(callable, &err);
+  const auto summary = build_probe_clobber_summary(callable, /*wave_size=*/64, &err);
   ASSERT_TRUE(summary.has_value()) << err;
   EXPECT_TRUE(summary->ordinary_clobbers.none());
   EXPECT_FALSE(summary->touches_exec);
@@ -83,7 +85,7 @@ TEST(ProbeClobber, NopProbeSummaryIsEmpty) {
 TEST(ProbeClobber, ReportsRejectedEncodingAndWordOffset) {
   const auto callable = make_callable({0xffffffffu, kSSetpcS30S31});
   std::string err;
-  EXPECT_FALSE(build_probe_clobber_summary(callable, &err).has_value());
+  EXPECT_FALSE(build_probe_clobber_summary(callable, /*wave_size=*/64, &err).has_value());
   EXPECT_NE(err.find("word 0"), std::string::npos) << err;
   EXPECT_NE(err.find("Invalid instruction opcode"), std::string::npos) << err;
 }
@@ -93,7 +95,7 @@ TEST(ProbeClobber, ReportsRejectedEncodingAndWordOffset) {
 TEST(ProbeClobber, DerivesOrdinaryClobberFromBody) {
   const auto callable = make_callable({kSMovS5_0, kSSetpcS30S31});
   std::string err;
-  const auto summary = build_probe_clobber_summary(callable, &err);
+  const auto summary = build_probe_clobber_summary(callable, /*wave_size=*/64, &err);
   ASSERT_TRUE(summary.has_value()) << err;
   EXPECT_TRUE(has_sgpr(summary->ordinary_clobbers, 5));
   EXPECT_FALSE(has_sgpr(summary->ordinary_clobbers, 6));
@@ -106,11 +108,25 @@ TEST(ProbeClobber, DerivesClobberFromATwelveByteInstruction) {
       {kGfx12GlobalLoadW0, kGfx12GlobalLoadW1, kGfx12GlobalLoadW2, kGfx12SSetpcS30S31});
   callable.arch = ROCJITSU_CODE_ARCH_RDNA4;
   std::string err;
-  const auto summary = build_probe_clobber_summary(callable, &err);
+  const auto summary = build_probe_clobber_summary(callable, /*wave_size=*/64, &err);
   ASSERT_TRUE(summary.has_value()) << err;
   EXPECT_TRUE(summary->ordinary_clobbers.contains(RegisterRef{RegClass::VGPR, 1, 1}));
   EXPECT_FALSE(summary->ordinary_clobbers.contains(RegisterRef{RegClass::VGPR, 0, 1}));
   EXPECT_FALSE(has_sgpr(summary->ordinary_clobbers, 2));
+}
+
+// The compare's encoding names s[2:3], but a Wave32 probe writes only s2.
+TEST(ProbeClobber, Rdna4CompareClobbersTheSgprAboveOnlyAtWave64) {
+  ProbeCallable callable = make_callable({kGfx12VCmpS2W0, kGfx12VCmpS2W1, kGfx12SSetpcS30S31});
+  callable.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  for (const uint8_t wave_size : {uint8_t{32}, uint8_t{64}}) {
+    SCOPED_TRACE(static_cast<int>(wave_size));
+    std::string err;
+    const auto summary = build_probe_clobber_summary(callable, wave_size, &err);
+    ASSERT_TRUE(summary.has_value()) << err;
+    EXPECT_TRUE(has_sgpr(summary->ordinary_clobbers, 2));
+    EXPECT_EQ(has_sgpr(summary->ordinary_clobbers, 3), wave_size == 64);
+  }
 }
 
 // The body ends one word into a 12-byte load. The summary decodes independently
@@ -119,7 +135,7 @@ TEST(ProbeClobber, RejectsAnInstructionRunningPastTheBody) {
   ProbeCallable callable = make_callable({kGfx12GlobalLoadW0});
   callable.arch = ROCJITSU_CODE_ARCH_RDNA4;
   std::string err;
-  EXPECT_FALSE(build_probe_clobber_summary(callable, &err).has_value());
+  EXPECT_FALSE(build_probe_clobber_summary(callable, /*wave_size=*/64, &err).has_value());
   EXPECT_NE(err.find("word 0"), std::string::npos) << err;
   EXPECT_NE(err.find("truncated"), std::string::npos) << err;
 }
@@ -130,7 +146,7 @@ TEST(ProbeClobber, RejectsAnInstructionRunningPastTheBody) {
 TEST(ProbeClobber, ReturnLinkIsNotAProbeClobber) {
   const auto callable = make_callable({kSNop0, kSSetpcS30S31});
   std::string err;
-  const auto summary = build_probe_clobber_summary(callable, &err);
+  const auto summary = build_probe_clobber_summary(callable, /*wave_size=*/64, &err);
   ASSERT_TRUE(summary.has_value()) << err;
   EXPECT_FALSE(has_sgpr(summary->ordinary_clobbers, 30));
   EXPECT_FALSE(has_sgpr(summary->ordinary_clobbers, 31));
@@ -143,7 +159,7 @@ TEST(ProbeClobber, ReturnLinkIsNotAProbeClobber) {
 TEST(ProbeClobber, DetectsExplicitExecWrite) {
   const auto callable = make_callable({kSMovExecLo_0, kSSetpcS30S31});
   std::string err;
-  const auto summary = build_probe_clobber_summary(callable, &err);
+  const auto summary = build_probe_clobber_summary(callable, /*wave_size=*/64, &err);
   ASSERT_TRUE(summary.has_value()) << err;
   EXPECT_TRUE(summary->touches_exec);
   EXPECT_FALSE(summary->touches_vcc);
@@ -155,7 +171,7 @@ TEST(ProbeClobber, DetectsExplicitExecWrite) {
 TEST(ProbeClobber, DetectsExplicitM0Write) {
   const auto callable = make_callable({kSMovM0_0, kSSetpcS30S31});
   std::string err;
-  const auto summary = build_probe_clobber_summary(callable, &err);
+  const auto summary = build_probe_clobber_summary(callable, /*wave_size=*/64, &err);
   ASSERT_TRUE(summary.has_value()) << err;
   EXPECT_TRUE(summary->touches_m0);
   EXPECT_FALSE(summary->touches_exec);
@@ -167,7 +183,7 @@ TEST(ProbeClobber, DetectsExplicitM0Write) {
 TEST(ProbeClobber, DetectsExplicitVccWrite) {
   const auto callable = make_callable({kSMovVccLo_0, kSSetpcS30S31});
   std::string err;
-  const auto summary = build_probe_clobber_summary(callable, &err);
+  const auto summary = build_probe_clobber_summary(callable, /*wave_size=*/64, &err);
   ASSERT_TRUE(summary.has_value()) << err;
   EXPECT_TRUE(summary->touches_vcc);
   EXPECT_FALSE(summary->touches_exec);
@@ -183,7 +199,7 @@ TEST(ProbeClobber, DetectsExplicitVccWrite) {
 TEST(ProbeClobber, VccWriteFromCompareIsDetected) {
   const auto callable = make_callable({kVCmpEqU32, kSSetpcS30S31});
   std::string err;
-  const auto summary = build_probe_clobber_summary(callable, &err);
+  const auto summary = build_probe_clobber_summary(callable, /*wave_size=*/64, &err);
   ASSERT_TRUE(summary.has_value()) << err;
   EXPECT_TRUE(summary->touches_vcc) << "v_cmp's VCC def is exposed as a named 'vcc' operand";
 }
@@ -191,7 +207,7 @@ TEST(ProbeClobber, VccWriteFromCompareIsDetected) {
 TEST(ProbeClobber, ExecWriteFromCmpxIsDetected) {
   const auto callable = make_callable({kVCmpxEqU32, kSSetpcS30S31});
   std::string err;
-  const auto summary = build_probe_clobber_summary(callable, &err);
+  const auto summary = build_probe_clobber_summary(callable, /*wave_size=*/64, &err);
   ASSERT_TRUE(summary.has_value()) << err;
   EXPECT_TRUE(summary->touches_exec) << "v_cmpx's EXEC def is exposed as a named 'exec' operand";
 }
@@ -201,7 +217,7 @@ TEST(ProbeClobber, ExecWriteFromCmpxIsDetected) {
 TEST(ProbeClobber, DetectsExplicitFlatScratchWrite) {
   const auto callable = make_callable({kSMovFlatScrLo_0, kSSetpcS30S31});
   std::string err;
-  const auto summary = build_probe_clobber_summary(callable, &err);
+  const auto summary = build_probe_clobber_summary(callable, /*wave_size=*/64, &err);
   ASSERT_TRUE(summary.has_value()) << err;
   EXPECT_TRUE(summary->touches_flat_scratch);
   EXPECT_FALSE(summary->touches_exec);
@@ -217,7 +233,7 @@ TEST(ProbeClobber, DetectsExplicitFlatScratchWrite) {
 TEST(ProbeClobber, SpecialWritesDoNotLeakIntoOrdinaryClobbers) {
   const auto callable = make_callable({kSMovS5_0, kSMovExecLo_0, kSSetpcS30S31});
   std::string err;
-  const auto summary = build_probe_clobber_summary(callable, &err);
+  const auto summary = build_probe_clobber_summary(callable, /*wave_size=*/64, &err);
   ASSERT_TRUE(summary.has_value()) << err;
   EXPECT_TRUE(has_sgpr(summary->ordinary_clobbers, 5));
   EXPECT_FALSE(summary->ordinary_clobbers.has_specials());

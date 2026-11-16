@@ -6,6 +6,7 @@
 #include "core/categories.hpp"
 #include "core/concepts.hpp"
 #include "core/demangler.hpp"
+#include "core/node_info.hpp"
 #include "core/perfetto/category_registry.hpp"
 #include "core/perfetto/engine.hpp"
 #include "core/utility.hpp"
@@ -52,6 +53,11 @@ get_active_process_track();
 
 void
 ensure_synthetic_process_track_emitted(int pid);
+
+/// @brief Writes a TracePacket carrying system_info.utsname (sysname, release,
+/// version, machine) to the sink bound to the calling thread's emitting pid.
+void
+emit_system_info_packet(const node_info& info);
 
 template <typename T>
     requires std::is_const_v<T>

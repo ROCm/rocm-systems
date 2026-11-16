@@ -25,7 +25,7 @@ namespace {
                                                    ProcessorRevision input_revision,
                                                    ProcessorRevision output_revision) {
   if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA4)
-    return {semantic_expand_rules_cdna4_to_rdna4(), {}};
+    return {semantic_expand_rules_cdna4_to_rdna4(), cdna4_reverse_shift_rules_for_rdna(host)};
   if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_CDNA3)
     return {semantic_expand_rules_cdna4_to_cdna3(), {}};
   // gfx1250 A0 and B0 share one architectural target ID. Select the B0-to-A0
@@ -35,7 +35,7 @@ namespace {
       output_revision == ProcessorRevision::Gfx1250A0)
     return rewrite_registry_gfx1250_b0_to_a0();
   if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA3)
-    return {semantic_expand_rules_cdna4_to_rdna3(), {}};
+    return {semantic_expand_rules_cdna4_to_rdna3(), cdna4_reverse_shift_rules_for_rdna(host)};
   return {};
 }
 

@@ -50,7 +50,7 @@ inline bool isCeRuntimeDriverSupported()
 //   4. NCCL_LOCAL_REGISTER=0      (explicit buffer registration only).
 //   5. NCCL_CUMEM_ENABLE=1        (VMM-backed symmetric memory; default is 0).
 //      Without this, comm->symmetricSupport is false and CE is never dispatched.
-//      RCCL can still leave it false (no cuMem, e.g. kernel < 6.8), so once a
+//      RCCL can still leave it false (cuMem runtime check failed), so once a
 //      communicator exists, gate on the overload that takes it.
 //
 // Use this single check wherever a test needs to decide between asserting the

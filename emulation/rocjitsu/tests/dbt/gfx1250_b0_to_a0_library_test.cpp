@@ -4,6 +4,7 @@
 /// @file gfx1250_b0_to_a0_library_test.cpp
 /// @brief Tests the fixed-profile gfx1250 B0-to-A0 shared-library API.
 
+#include "../test_paths.h"
 #include "rocjitsu/code/dbt/gfx1250_b0_to_a0_diagnostics.h"
 #include "rocjitsu/code/rj_gfx1250_b0_to_a0.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
@@ -43,7 +44,7 @@ void capture_diagnostic(const rj_gfx1250_b0_to_a0_diagnostic_t *diagnostic, void
        diagnostic->message != nullptr ? diagnostic->message : "", diagnostic->required_work != 0});
 }
 
-#ifdef GFX1250_B0_TO_A0_FIXTURE
+#ifdef KERNEL_DIR
 uint64_t source_identity(const std::vector<uint8_t> &bytes) {
   constexpr uint64_t kOffsetBasis = 14695981039346656037ULL;
   constexpr uint64_t kPrime = 1099511628211ULL;
@@ -55,6 +56,24 @@ uint64_t source_identity(const std::vector<uint8_t> &bytes) {
   return identity;
 }
 #endif
+
+TEST(Gfx1250B0ToA0Library, InternalErrorsTakePrecedenceOverInputRejection) {
+  rocjitsu::TranslationDiagnostic internal;
+  internal.severity = rocjitsu::DiagnosticSeverity::Error;
+  internal.kind = rocjitsu::DiagnosticKind::InternalError;
+  rocjitsu::TranslationDiagnostic skipped;
+  skipped.kind = rocjitsu::DiagnosticKind::KernelSkipped;
+  rocjitsu::TranslationDiagnostic rejected;
+  rejected.severity = rocjitsu::DiagnosticSeverity::Error;
+  rejected.kind = rocjitsu::DiagnosticKind::ExpandFailed;
+  for (const std::vector<rocjitsu::TranslationDiagnostic> &diagnostics :
+       {std::vector{internal}, std::vector{internal, skipped}, std::vector{skipped, internal}}) {
+    EXPECT_EQ(rocjitsu::gfx1250_b0_to_a0_translation_status(diagnostics, true, false),
+              ROCJITSU_STATUS_ERROR);
+  }
+  EXPECT_EQ(rocjitsu::gfx1250_b0_to_a0_translation_status({rejected}, true, false),
+            ROCJITSU_STATUS_INVALID_CODE_OBJECT);
+}
 
 TEST(Gfx1250B0ToA0Library, RejectsInvalidArgumentsAndClearsOutputs) {
   auto *output = reinterpret_cast<uint8_t *>(0x1);
@@ -196,6 +215,26 @@ TEST(Gfx1250B0ToA0Library, ReportsTranslatorExpandFailedAndRequiredWork) {
   EXPECT_NE(required->message.find("different barrier id"), std::string::npos);
 }
 
+TEST(Gfx1250B0ToA0Library, PreservesLivenessContractDiagnostic) {
+  const std::vector<rocjitsu::TranslationDiagnostic> source = {{
+      .severity = rocjitsu::DiagnosticSeverity::Error,
+      .kind = rocjitsu::DiagnosticKind::InternalError,
+      .guest_offset = std::nullopt,
+      .output_offset = std::nullopt,
+      .mnemonic = "",
+      .message = "liveness query from a rule marked liveness-free",
+      .required_work = {},
+  }};
+  std::vector<CapturedDiagnostic> captured;
+
+  rocjitsu::emit_gfx1250_b0_to_a0_diagnostics(capture_diagnostic, &captured, source);
+
+  ASSERT_EQ(captured.size(), 1u);
+  EXPECT_EQ(captured[0].severity, "error");
+  EXPECT_EQ(captured[0].kind, "translation-exception");
+  EXPECT_EQ(captured[0].message, source[0].message);
+}
+
 TEST(Gfx1250B0ToA0Library, FansOutRequiredWorkAsCallbackViews) {
   const std::vector<rocjitsu::TranslationDiagnostic> source = {{
       .severity = rocjitsu::DiagnosticSeverity::Error,
@@ -263,10 +302,11 @@ TEST(Gfx1250B0ToA0Library, ReportsDeferredFamilyDiagnosticOnSuccessfulTranslatio
   EXPECT_EQ(count, 1);
 }
 
-#ifdef GFX1250_B0_TO_A0_FIXTURE
+#ifdef KERNEL_DIR
 TEST(Gfx1250B0ToA0Library, TranslatesRealGfx1250CodeObject) {
-  std::ifstream input(GFX1250_B0_TO_A0_FIXTURE, std::ios::binary);
-  ASSERT_TRUE(input) << GFX1250_B0_TO_A0_FIXTURE;
+  const auto path = rocjitsu::test::kernel_hsaco_path("relocation_function_table_dispatch_gfx1250");
+  std::ifstream input(path, std::ios::binary);
+  ASSERT_TRUE(input) << path;
   const std::vector<uint8_t> source((std::istreambuf_iterator<char>(input)),
                                     std::istreambuf_iterator<char>());
   ASSERT_GE(source.size(), 4u);

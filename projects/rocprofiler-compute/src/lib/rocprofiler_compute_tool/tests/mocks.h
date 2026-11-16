@@ -16,6 +16,7 @@
 #include <set>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 class MockInputParameters : public rocprofiler_compute_tool::InputParameters
@@ -23,21 +24,21 @@ class MockInputParameters : public rocprofiler_compute_tool::InputParameters
 public:
     std::string_view get_output_path() override;
     std::string_view get_requested_counters() override;
-    std::string_view get_iteration_multiplexing_mode() override;
+    std::string_view get_iteration_multiplexing() override;
     std::string_view get_kernel_filter_include_regex() override;
     std::string_view get_kernel_filter_range() override;
     std::string_view get_pc_sampling_method() override;
 
     void set_output_path(const std::string& output_path);
     void set_requested_counters(const std::string& counters);
-    void set_iteration_multiplexing_mode(const std::string& mode);
+    void set_iteration_multiplexing(const std::string& value);
     void set_kernel_filter_include_regex(const std::string& regex);
     void set_kernel_filter_range(const std::string& range);
     void set_pc_sampling_method(const std::string& method);
 
     void unset_output_path();
     void unset_requested_counters();
-    void unset_iteration_multiplexing_mode();
+    void unset_iteration_multiplexing();
     void unset_kernel_filter_include_regex();
     void unset_kernel_filter_range();
 
@@ -45,14 +46,14 @@ private:
     const char* m_non_empty_str               = "non empty string";
     std::string m_output_path                 = m_non_empty_str;
     std::string m_requested_counters          = m_non_empty_str;
-    std::string m_iteration_multiplexing_mode = m_non_empty_str;
+    std::string m_iteration_multiplexing      = m_non_empty_str;
     std::string m_kernel_filter_include_regex = m_non_empty_str;
     std::string m_kernel_filter_range         = m_non_empty_str;
     std::string m_pc_sampling_method;
 
     bool m_output_path_set                 = true;
     bool m_requested_counters_set          = true;
-    bool m_iteration_multiplexing_mode_set = true;
+    bool m_iteration_multiplexing_set      = true;
     bool m_kernel_filter_include_regex_set = true;
     bool m_kernel_filter_range_set         = true;
 };
@@ -67,6 +68,13 @@ public:
         void*    dispatch_callback_args = nullptr;
         void*    record_callback        = nullptr;
         void*    record_callback_args   = nullptr;
+    };
+
+    struct callback_tracing_service_info
+    {
+        rocprofiler_callback_tracing_kind_t          kind = ROCPROFILER_CALLBACK_TRACING_NONE;
+        std::vector<rocprofiler_tracing_operation_t> operations;
+        void*                                        callback_args = nullptr;
     };
 
     struct create_counter_config_info
@@ -111,6 +119,8 @@ public:
     void at_intercept_table_registration_hsa(rocprofiler_intercept_library_cb_t callback,
                                              void*                              user_data) override;
 
+    void query_available_agents(rocprofiler_query_available_agents_cb_t callback, void* user_data) override;
+
     struct hsa_intercept_registration_info
     {
         rocprofiler_intercept_library_cb_t callback  = nullptr;
@@ -119,9 +129,12 @@ public:
 
     // Test functions
     void set_available_counters(const std::vector<std::string>& counter_names);
+    void set_available_agents(const std::vector<rocprofiler_agent_t>& agents);
+    void set_query_available_agents_fails(bool fails);
     const std::vector<uint64_t>&                        get_created_contexts() const;
     const std::vector<uint64_t>&                        get_started_contexts() const;
     const std::vector<dispatch_counting_service_info>&  get_dispatch_counting_service_info() const;
+    const std::vector<callback_tracing_service_info>&   get_callback_tracing_service_info() const;
     const std::vector<create_counter_config_info>&      get_create_counter_config_info() const;
     const std::vector<query_counter_record_info>&       get_query_counter_record_info() const;
     const std::vector<hsa_intercept_registration_info>& get_hsa_intercept_registration_info() const;
@@ -132,10 +145,13 @@ private:
     std::vector<uint64_t>                        m_created_contexts;
     std::vector<uint64_t>                        m_started_contexts;
     std::vector<dispatch_counting_service_info>  m_dispatch_counting_service_info;
+    std::vector<callback_tracing_service_info>   m_callback_tracing_service_info;
     std ::vector<create_counter_config_info>     m_create_counter_config_info;
     std::vector<query_counter_record_info>       m_query_counter_record_info;
     std::vector<std::string>                     m_counter_names;
     std::vector<hsa_intercept_registration_info> m_hsa_intercept_registration_info;
+    std::vector<rocprofiler_agent_t>             m_available_agents;
+    bool                                         m_query_available_agents_fails = false;
 };
 
 class MockCountersWriter : public rocprofiler_compute_tool::CountersWriter
@@ -179,14 +195,16 @@ class MockPcSamplingCollector : public rocprofiler_compute_tool::pc_sampling_col
 {
 public:
     void on_code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& info) override;
-    void finalize(rocprofiler_compute_tool::code_object_writer_t& writer) override;
+    void finalize(rocprofiler_compute_tool::code_object_writer_t&   writer,
+                  const std::set<std::pair<uint64_t, std::string>>& dispatched_symbols) override;
     const std::set<std::filesystem::path>& get_source_paths() const override;
 
     void set_has_code_objects(bool has_code_objects);
     void set_source_paths(const std::set<std::filesystem::path>& source_paths);
 
-    int load_count     = 0;
-    int finalize_count = 0;
+    std::set<std::pair<uint64_t, std::string>> last_dispatched_symbols;
+    int                                        load_count     = 0;
+    int                                        finalize_count = 0;
 
 private:
     bool                            m_has_code_objects = false;

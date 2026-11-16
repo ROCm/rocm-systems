@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/mtbuf.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna1/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx10_cache_flags.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/gfx10_memory_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/buffer_format.h"
@@ -40,6 +41,8 @@ void TbufferLoadFormatXMtbuf::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (prepared.value())
     mtbuf_calculate_addresses(inst_, wf, *d);
+  if (inst_.tfe)
+    amdgpu::prepare_buffer_tfe(wf, *d);
   set_data(std::move(d));
 }
 
@@ -58,6 +61,8 @@ void TbufferLoadFormatXyMtbuf::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (prepared.value())
     mtbuf_calculate_addresses(inst_, wf, *d);
+  if (inst_.tfe)
+    amdgpu::prepare_buffer_tfe(wf, *d);
   set_data(std::move(d));
 }
 
@@ -76,6 +81,8 @@ void TbufferLoadFormatXyzMtbuf::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (prepared.value())
     mtbuf_calculate_addresses(inst_, wf, *d);
+  if (inst_.tfe)
+    amdgpu::prepare_buffer_tfe(wf, *d);
   set_data(std::move(d));
 }
 
@@ -94,6 +101,8 @@ void TbufferLoadFormatXyzwMtbuf::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (prepared.value())
     mtbuf_calculate_addresses(inst_, wf, *d);
+  if (inst_.tfe)
+    amdgpu::prepare_buffer_tfe(wf, *d);
   set_data(std::move(d));
 }
 
@@ -186,6 +195,8 @@ void TbufferLoadFormatD16XMtbuf::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (prepared.value())
     mtbuf_calculate_addresses(inst_, wf, *d);
+  if (inst_.tfe)
+    amdgpu::prepare_buffer_tfe(wf, *d);
   set_data(std::move(d));
 }
 
@@ -206,6 +217,8 @@ void TbufferLoadFormatD16XyMtbuf::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (prepared.value())
     mtbuf_calculate_addresses(inst_, wf, *d);
+  if (inst_.tfe)
+    amdgpu::prepare_buffer_tfe(wf, *d);
   set_data(std::move(d));
 }
 
@@ -226,6 +239,8 @@ void TbufferLoadFormatD16XyzMtbuf::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (prepared.value())
     mtbuf_calculate_addresses(inst_, wf, *d);
+  if (inst_.tfe)
+    amdgpu::prepare_buffer_tfe(wf, *d);
   set_data(std::move(d));
 }
 
@@ -246,6 +261,8 @@ void TbufferLoadFormatD16XyzwMtbuf::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (prepared.value())
     mtbuf_calculate_addresses(inst_, wf, *d);
+  if (inst_.tfe)
+    amdgpu::prepare_buffer_tfe(wf, *d);
   set_data(std::move(d));
 }
 

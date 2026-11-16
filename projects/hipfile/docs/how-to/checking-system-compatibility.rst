@@ -12,7 +12,7 @@ instead.
 
 ``ais-check`` is located under ``tools/ais-check`` in the hipFile source tree and is installed in the ``bin`` directory of your ROCm installation unless hipFile was built with ``HIPFILE_INSTALL_TOOLS=OFF``.
 
-``ais-check`` must be run as root to produce accurate information. 
+``ais-check`` must be run as root to produce accurate information.
 
 .. code:: shell
 
@@ -23,7 +23,7 @@ Optional flags:
 | ``-v`` or ``--verbose``: Lists discovered HIP runtime libraries and whether each exports AIS symbols.
 | ``-q`` or ``--quiet``: Suppresses output and returns only an exit code.
 
-``ais-check`` exits with ``0`` when at least one volume is fastpath capable. It exits with a non-zero code otherwise. It will also output a short report that includes a table of mounted volumes and a summary block. 
+``ais-check`` exits with ``0`` when at least one volume is fastpath capable. It exits with a non-zero code otherwise. It will also output a short report that includes a table of mounted volumes and a summary block.
 
 When run with the verbose option, a list of discovered HIP runtime libraries is also included in the output.
 
@@ -78,11 +78,18 @@ present: kernel P2PDMA, a HIP runtime with AIS symbols, the amdgpu driver hook, 
            amdgpu                  : True
            hipFile-capable volume  : True
 
-| ``Kernel P2PDMA support``: Peer-to-peer DMA between the GPU and storage is available.
+| ``Kernel P2PDMA support``: Peer-to-peer DMA between the GPU and storage is available. On recent ``amdgpu`` DKMS builds, ``ais-check`` reads the AIS capability bit exposed by the KFD topology. On older builds, or when the driver version can't be determined, ``ais-check`` looks for ``CONFIG_PCI_P2PDMA=y`` in the running kernel's configuration.
 | ``HIP runtime``: A discovered HIP runtime library exports  ``hipAmdFileRead()`` and ``hipAmdFileWrite()``.
 | ``amdgpu``: The loaded amdgpu kernel driver exposes ``kfd_ais_rw_file`` in ``/proc/kallsyms``.
 | ``hipFile-capable volume``: At least one row in the mounted volumes table has ``HIPFILE`` set to ``yes``.
 
+``Kernel P2PDMA support : False`` most often means the distribution's kernel was
+built without ``CONFIG_PCI_P2PDMA``. For example, the Ubuntu 22.04 LTS default
+5.15 kernel is not built with ``CONFIG_PCI_P2PDMA``. For that case, including how
+to boot a kernel that has the option, see :ref:`hipfile-ubuntu-2204-fastpath`. To
+check the running kernel on another distribution, see
+:ref:`hipfile-check-p2pdma`. For the list of tested distribution kernels, see
+:doc:`/reference/hipFile-kernel-p2pdma-support`.
 
 .. note::
 

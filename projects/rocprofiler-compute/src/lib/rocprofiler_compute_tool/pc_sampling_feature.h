@@ -2,19 +2,24 @@
 // SPDX-License-Identifier:  MIT
 #pragma once
 #include "code_object_writer.h"
+#include "output_registry.h"
 #include "pc_sampling_collector.h"
 #include "source_snapshotter.h"
 
 #include <filesystem>
+#include <set>
 #include <string>
+#include <utility>
 
 namespace rocprofiler_compute_tool
 {
 PcSamplingMode parse_pc_sampling_mode(const std::string& mode);
 
-class pc_sampling_feature_t
+class pc_sampling_feature_t : public OutputWriter
 {
 public:
+    using ptr = std::shared_ptr<pc_sampling_feature_t>;
+
     pc_sampling_feature_t() = default;
     pc_sampling_feature_t(PcSamplingMode        mode,
                           std::filesystem::path code_object_info_path,
@@ -40,9 +45,16 @@ public:
     const std::filesystem::path& source_snapshot_path() const { return m_source_snapshot_path; }
 
     void on_code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& info);
-    void finalize();
+
+    /// Writes the code object info, limited to dispatched kernels, and the
+    /// source snapshot. Disabled PC sampling writes nothing.
+    void write(tool_data_t& tool_data) override;
+
+    std::string_view name() const override { return "pc_sampling"; }
 
 private:
+    void finalize(const std::set<std::pair<uint64_t, std::string>>& dispatched_symbols);
+
     bool                         m_enabled = false;
     PcSamplingMode               m_mode    = PcSamplingMode::Disabled;
     std::filesystem::path        m_code_object_info_path;

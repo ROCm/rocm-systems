@@ -7,7 +7,8 @@ Helpers for building a normalized PC sampling dataframe from a parsed
 ``rocprofiler-sdk-tool[0]`` dict.
 """
 
-from typing import Any, NamedTuple, Optional
+from collections import Counter
+from typing import Any, Callable, Dict, List, NamedTuple, Optional
 
 import numpy as np
 import pandas as pd
@@ -81,6 +82,18 @@ class CodeObjectRecord(NamedTuple):
     instruction_lines: list[InstructionLineRecord]
 
 
+class SampleCountsRecord(NamedTuple):
+    """The PC sampling counts of a group of instruction lines, such as one source
+    line or one kernel."""
+
+    total_count: int
+    issue_count: Optional[int]
+    stall_count: Optional[int]
+    stall_reasons: Dict[str, int]
+    active_thread_percent: Optional[float]
+    wave_occupancy_percent: Optional[float]
+
+
 def detect_pc_sampling_method(tool_data: dict[str, Any]) -> Optional[str]:
     """Detect the PC sampling method from the populated buffer record array.
 
@@ -128,7 +141,12 @@ def load_pc_sample_records(tool_data: dict[str, Any]) -> pd.DataFrame:
             "wave_issued": record.get("wave_issued"),
             "exec_mask": record.get("exec_mask"),
             "wave_cnt": record.get("wave_cnt"),
-            "stall_reason": record.get("snapshot", {}).get("stall_reason"),
+            # The SDK stall reason is only valid when the wave did not issue.
+            "stall_reason": (
+                None
+                if record.get("wave_issued")
+                else record.get("snapshot", {}).get("stall_reason")
+            ),
             "inst_type": record.get("inst_type"),
         })
 
@@ -160,8 +178,8 @@ def aggregate_pc_sample_records(
             columns=[
                 *group_by,
                 "count",
-                "count_issued",
-                "count_stalled",
+                "issue_count",
+                "stall_count",
                 "stall_reason",
                 "inst_type",
                 "active_thread_percent",
@@ -175,8 +193,8 @@ def aggregate_pc_sample_records(
     )
     aggregations = {
         "count": ("inst_index", "size"),
-        "count_issued": ("wave_issued", _aggregate_count_issued),
-        "count_stalled": ("wave_issued", _aggregate_count_stalled),
+        "issue_count": ("wave_issued", _aggregate_issue_count),
+        "stall_count": ("wave_issued", _aggregate_stall_count),
         "stall_reason": ("stall_reason", _aggregate_stall_reason),
         "inst_type": ("inst_type", _aggregate_inst_type),
         # mean skips missing values, so a sample without the field does not
@@ -310,6 +328,56 @@ def load_aggregated_pc_sampling(
     return records
 
 
+def aggregate_instruction_lines(
+    instruction_records: List[InstructionLineRecord],
+) -> SampleCountsRecord:
+    """Aggregate the counts of a group of instruction lines.
+
+    Counts and stall reasons are summed. Each percentage is averaged, weighted
+    by the sample count of each instruction line. An instruction line without
+    the percentage adds no weight.
+    """
+    stall_reasons = Counter()
+    for instruction_record in instruction_records:
+        stall_reasons.update(instruction_record.stall_reasons)
+
+    return SampleCountsRecord(
+        total_count=sum(record.total_count for record in instruction_records),
+        issue_count=_sum_known([record.issue_count for record in instruction_records]),
+        stall_count=_sum_known([record.stall_count for record in instruction_records]),
+        stall_reasons=dict(stall_reasons),
+        active_thread_percent=_sample_weighted_average(
+            instruction_records, lambda record: record.active_thread_percent
+        ),
+        wave_occupancy_percent=_sample_weighted_average(
+            instruction_records, lambda record: record.wave_occupancy_percent
+        ),
+    )
+
+
+def _sum_known(counts: List[Optional[int]]) -> Optional[int]:
+    """Return the sum of the known counts, or None when no count is known."""
+    known_counts = [count for count in counts if count is not None]
+    return sum(known_counts) if known_counts else None
+
+
+def _sample_weighted_average(
+    instruction_records: List[InstructionLineRecord],
+    percent_of: Callable[[InstructionLineRecord], Optional[float]],
+) -> Optional[float]:
+    """Average one percentage of instruction lines, weighted by sample count."""
+    weighted_percents = [
+        (percent_of(record), record.total_count)
+        for record in instruction_records
+        if percent_of(record) is not None
+    ]
+    if not weighted_percents:
+        return None
+    return sum(percent * count for percent, count in weighted_percents) / sum(
+        count for _, count in weighted_percents
+    )
+
+
 def _to_instruction_line_record(row: Any) -> InstructionLineRecord:  # noqa: ANN401
     """Convert one aggregated dataframe row into an InstructionLineRecord."""
     return InstructionLineRecord(
@@ -318,8 +386,8 @@ def _to_instruction_line_record(row: Any) -> InstructionLineRecord:  # noqa: ANN
         instruction=row.instruction,
         source=row.source_line,
         total_count=int(row.count),
-        issue_count=None if pd.isna(row.count_issued) else int(row.count_issued),
-        stall_count=None if pd.isna(row.count_stalled) else int(row.count_stalled),
+        issue_count=None if pd.isna(row.issue_count) else int(row.issue_count),
+        stall_count=None if pd.isna(row.stall_count) else int(row.stall_count),
         stall_reasons={} if pd.isna(row.stall_reason) else row.stall_reason,
         inst_types={} if pd.isna(row.inst_type) else row.inst_type,
         active_thread_percent=(
@@ -347,14 +415,14 @@ def _count_set_bits(exec_masks: pd.Series) -> pd.Series:
     return set_bits
 
 
-def _aggregate_count_issued(wave_issued: pd.Series) -> Optional[int]:
+def _aggregate_issue_count(wave_issued: pd.Series) -> Optional[int]:
     """Sum issued waves; None when no wave_issued info exists (host_trap)."""
     if wave_issued.isnull().all():
         return None
     return int(wave_issued.sum())
 
 
-def _aggregate_count_stalled(wave_issued: pd.Series) -> Optional[int]:
+def _aggregate_stall_count(wave_issued: pd.Series) -> Optional[int]:
     """Count not-issued waves; None when no wave_issued info exists (host_trap)."""
     if wave_issued.isnull().all():
         return None

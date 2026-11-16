@@ -218,6 +218,12 @@ Nightly builds of the ROCm Core SDK (including AMD SMI) are published by
    Set this after activating the target virtual environment; a `PYTHONPATH`
    pointing at another ROCm installation would override its Python package.
 
+   This wrapper never loads a system `libamd_smi.so`. It finds
+   `lib/libamd_smi.so.<MAJOR>` in the `_rocm_sdk_core` package through
+   `sys.path`, so a copy of the `amdsmi` directory placed elsewhere in the
+   environment also loads it. It refuses a library newer than itself; see
+   [Packaging and install paths](../packaging.md).
+
 ## Optional and advanced installation
 
 Use these optional procedures for CLI autocompletion and advanced setups, such
@@ -298,20 +304,19 @@ removing packages that other ROCm tools depend on.
    load their native library relative to their ROCm tree. Wrappers shipped
    with ROCm 7.1 and earlier use the legacy loader: for those, set
    `ROCM_PATH=<root>` with `ROCM_HOME` unset for the Python command only, for
-   example `env -u ROCM_HOME ROCM_PATH=<root> python3 my_script.py`. Exporting
-   `ROCM_PATH` would also redirect `amd-smi` in that shell. Check that
+   example `env -u ROCM_HOME ROCM_PATH=<root> python3 my_script.py`. Check that
    `AMDSMI_LIB_OVERRIDE` is unset unless you deliberately want another library.
 
-The CLI selects `$ROCM_PATH/share/amd_smi` (or `$ROCM_HOME` when `ROCM_PATH`
-is unset) before its own installation's wrapper. Unset stale overrides when
-you want `amd-smi` to use its own copy.
+`amd-smi` prefers the wrapper in its own installation's `share/amd_smi` and
+otherwise uses the normal Python import path. `ROCM_PATH` and `ROCM_HOME` are
+not consulted for that selection.
 
 :::{warning}
 The community-built `amdsmi` PyPI releases through 7.0.2 bundle no native
 library and require the corresponding older ROCm library. They cannot be
 used with arbitrary newer ROCm releases; import can fail with missing
 symbols, or changed data layouts can produce incorrect results. Their
-legacy loader checks `ROCM_HOME` before `ROCM_PATH`, unlike the CLI, and
+legacy loader checks `ROCM_HOME` before `ROCM_PATH` and
 does not implement `AMDSMI_LIB_OVERRIDE`. Prefer the wrapper shipped with
 your ROCm installation.
 :::
