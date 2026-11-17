@@ -18307,6 +18307,8 @@ class CodeGenerator:
                     HALF_CONDITIONAL_ARCHITECTURES,
                     ROUTING_ARCHITECTURES,
                     WORD_ROUTING_NAMES,
+                    ACCUMULATOR_ARCHITECTURES,
+                    ACCUMULATOR_MOVES,
                     CARRY32_NAMES,
                     WIDE_INTEGER_NAMES,
                     INTEGER16_NAMES,
@@ -18479,6 +18481,10 @@ class CodeGenerator:
                 uses_vector_arith |= (
                     self.isa_spec.arch_name in SCREEN_PARTITION_ARCHITECTURES
                     and any(i.name == 'V_SCREEN_PARTITION_4SE_B32' for i in all_insts)
+                )
+                uses_vector_arith |= (
+                    self.isa_spec.arch_name in ACCUMULATOR_ARCHITECTURES
+                    and any(i.name in ACCUMULATOR_MOVES for i in all_insts)
                 )
                 uses_vector_arith |= self.isa_spec.arch_name in (
                     'cdna1',
