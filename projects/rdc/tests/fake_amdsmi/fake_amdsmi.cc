@@ -26,34 +26,10 @@ THE SOFTWARE.
 // in embedded mode, and every amdsmi_* call RDC makes is answered for simulated GPUs instead
 // of reaching the driver. The readings come from fake_values.inc, differ per GPU and per
 // sensor, and are read by the Python tests too. RDC_FAKE_* environment variables reproduce
-// lower-layer behavior that has caused RDC defects: failing calls, output buffers left
-// unwritten, "not available" sentinels, partitions, split XGMI hives, stale handles and counter
-// resets. Where RDC must not trust its library blindly, they also break amd-smi's output contract
-// on purpose. README.md in this directory lists the knobs and handle rules.
-//
-//   RDC_FAKE_GPUS=N              GPUs (sockets) to simulate, 1..128 (default 4)
-//   RDC_FAKE_PARTITIONS=P        compute partitions per GPU, 1..8 (default: not partitionable)
-//   RDC_FAKE_HIVES=H             XGMI hives; GPU g belongs to hive g % H (default 1)
-//   RDC_FAKE_FAIL=rule,...       rule = api[@gpu][=status]: the call returns status (a number
-//                                or an AMDSMI_STATUS_* name, default
-//                                AMDSMI_STATUS_UNKNOWN_ERROR). api "*" matches every call
-//                                that takes a GPU. Calls without a GPU argument, such as
-//                                amdsmi_init, match only rules without @gpu.
-//   RDC_FAKE_POISON=1            a failing call first fills its outputs with 0xA5 bytes, which
-//                                is what a caller that ignores the status reads from a dirty
-//                                stack
-//   RDC_FAKE_SENTINEL=api[@gpu],...  the call succeeds but reports what amd-smi reports for a
-//                                value it cannot read: all bits set in amdsmi_get_power_info,
-//                                amdsmi_get_gpu_metrics_info, amdsmi_get_violation_status and
-//                                amdsmi_get_gpu_busy_percent; 0xFFFF activities in
-//                                amdsmi_get_gpu_activity; clk = UINT32_MAX in
-//                                amdsmi_get_clock_info; current = UINT32_MAX in
-//                                amdsmi_get_clk_freq
-//   RDC_FAKE_ARM=path            FAIL and SENTINEL rules apply only once path exists, so a
-//                                test can set RDC up first
-//   RDC_FAKE_EVENT_WAIT_MS=ms    upper bound for the event-notification wait (default 100)
-//   RDC_FAKE_LOG=path            append "api gpu" for every call (gpu -1 for calls without a
-//                                GPU), plus " !" when a rule failed the call
+// lower-layer behavior that has caused RDC defects (failing calls, output buffers left
+// unwritten, "not available" sentinels, partitions, split XGMI hives, stale handles, counter
+// resets) and, where RDC must not trust its library blindly, break amd-smi's output contract
+// on purpose. README.md in this directory lists them and the handle rules.
 //
 // Only the amdsmi_* functions RDC calls are implemented. The definitions are checked against
 // amd_smi/amdsmi.h at compile time, so an API change breaks the build instead of the tests.
@@ -770,7 +746,6 @@ amdsmi_status_t amdsmi_get_gpu_busy_percent(amdsmi_processor_handle processor_ha
   const FakeProc* p;
   if (auto st = enter(__func__, processor_handle, &p, gpu_busy_percent)) return done(st);
   if (gpu_busy_percent == nullptr) return AMDSMI_STATUS_INVAL;
-  if (sentinel(__func__, p)) return fill_sentinel(gpu_busy_percent);
   *gpu_busy_percent = V(kGFX_ACTIVITY_PCT, p->gpu);
   return AMDSMI_STATUS_SUCCESS;
 }
