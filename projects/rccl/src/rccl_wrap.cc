@@ -111,8 +111,8 @@ RCCL_PARAM(DdaLL128OneShotThreshold, "DDA_LL128_ONESHOT_THRESHOLD", (size_t)(4) 
 RCCL_PARAM(DdaLL128TwoShotThreshold, "DDA_LL128_TWOSHOT_THRESHOLD", (size_t)(64) * 1024 * 1024); // 64 MiB
 // Opt in to the LDS-staged LL128 two-shot AllReduce writer on gfx1250 wave32 from 2 MiB shards.
 RCCL_PARAM(DdaLL128AsyncWire, "DDA_LL128_ASYNC_WIRE", 0);
-// LL128 one-shot AllReduce spreads each slice's peer loop over a warp group (all_reduce_dda_ll128_peerpar.h);
-// 0 keeps the one-warp-per-slice kernel.
+// LL128 one-shot and cooperative two-shot AllReduce spread each slice's peer loop over a warp group
+// (all_reduce_dda_ll128_peerpar.h); 0 keeps the one-warp-per-slice kernels.
 RCCL_PARAM(DdaLL128ArPeerParallel, "DDA_LL128_AR_PEER_PARALLEL", 1);
 RCCL_PARAM(DdaLL128, "DDA_LL128", kDdaThresholdUnset);
 RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", kDdaThresholdUnset);
@@ -1388,6 +1388,21 @@ inline size_t rcclDdaLL128TwoShotThresholdTab(const rcclArchThresholds* table, i
 }
 size_t rcclDdaLL128TwoShotThreshold(const ncclComm* comm) {
   return rcclDdaLL128TwoShotThresholdTab(extAlgoArchTable(comm), comm != nullptr ? comm->nRanks : 0);
+}
+
+// One-shot moves (nRanks - 1) x the message per rank against two-shot's ~2x, so
+// with the peer-parallel two-shot its crossover falls as nRanks grows: 1M / 512K /
+// 256K at 4 / 8 / 16 ranks on gfx1250 fabric, i.e. this over nRanks.
+constexpr size_t kDdaLL128ArOneShotRankBytes = (size_t)4 * 1024 * 1024;
+
+size_t rcclDdaLL128OneShotThreshold(const ncclComm* comm) {
+  static const bool envSet = rcclEnvIsSet("RCCL_DDA_LL128_ONESHOT_THRESHOLD");
+  const size_t cap = (size_t)rcclParamDdaLL128OneShotThreshold();
+  if (envSet || rcclParamDdaLL128ArPeerParallel() == 0 || comm == nullptr || comm->nRanks < 2) {
+    return cap;
+  }
+  const size_t nRanks = (size_t)comm->nRanks;
+  return std::min(cap, kDdaLL128ArOneShotRankBytes / nRanks);
 }
 
 inline size_t rcclDdaVmmThresholdTab(const rcclArchThresholds* table, ncclFunc_t func, int nRanks) {

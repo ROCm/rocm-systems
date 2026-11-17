@@ -389,6 +389,10 @@ size_t rcclDdaVmmThreshold(const ncclComm* comm, ncclFunc_t func);
 // when set, else the AllReduce LL128 tier cap where the arch table has that tier,
 // else the env var's default.
 size_t rcclDdaLL128TwoShotThreshold(const ncclComm* comm);
+// Ceiling for the DDA LL128 one-shot AllReduce: RCCL_DDA_LL128_ONESHOT_THRESHOLD
+// when set; with the peer-parallel kernels, the env var's default scaled down by
+// nRanks; else the env var's default.
+size_t rcclDdaLL128OneShotThreshold(const ncclComm* comm);
 // Ceiling for the DDA LL two-shot AllReduce: RCCL_DDA_LL_TWOSHOT_THRESHOLD when
 // set; on rank-scaled comms the AllReduce LL tier cap; else the env var's default.
 size_t rcclDdaLLTwoShotThreshold(const ncclComm* comm);
