@@ -21,6 +21,7 @@ struct LdsSite {
   uint32_t address_vgpr = 0; // Encoded low selector.
   uint32_t address_bank = 0; // Proven address-source bank.
   std::string_view form;     // Static admitted instruction form.
+  std::vector<FaultMutationOwner> affected_owners;
 };
 struct LdsCapability {
   rj_code_target_id_t target;
@@ -47,6 +48,7 @@ class LdsSelection {
 public:
   FaultMutationKind kind() const { return FaultMutationKind::LdsWrongAddress; }
   const LdsSite &site() const { return site_; }
+  const FaultMutationOwner *owner() const;
 
 private:
   LdsSite site_;
@@ -68,8 +70,10 @@ struct LdsResult {
   std::vector<uint8_t> image;
   uint32_t logical_mutation_count = 1;
 };
-/// @brief Discover supported LDS forms in independently owned direct CFGs.
-/// @details Clause members and incomplete instructions are not advertised.
+/// @brief Discover supported LDS forms with complete affected-owner facts.
+/// @details Clause members and incomplete instructions are not advertised. Successful
+/// discovery does not guarantee apply: the shared replacement pipeline may reject
+/// text growth that cannot preserve retained PC-relative references.
 [[nodiscard]] FailureOr<LdsInventory>
 discover_lds_wrong_address(const FaultMutationContext &, std::string_view, FaultMutationError &);
 /// @brief Select an exact handle or a zero-based source-order ordinal.

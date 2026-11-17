@@ -1098,6 +1098,7 @@ if(RJ_BUILD_FAULT_INJECTION)
         patch/fault_injection/b96_lds_test.cpp
         patch/fault_injection/scalar_two_lds_test.cpp
         patch/fault_injection/lds_wrong_address_test.cpp
+        patch/fault_injection/lds_ownership_test.cpp
         patch/fault_injection/cdna_lds_wrong_address_test.cpp
     )
     target_include_directories(

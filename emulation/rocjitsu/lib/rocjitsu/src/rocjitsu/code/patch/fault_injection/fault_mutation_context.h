@@ -22,6 +22,7 @@ class AmdGpuCodeObject;
 class BasicBlock;
 class InstructionBoundaries;
 class Instrumentor;
+class KernelOwnership;
 
 enum class FaultMutationKind { DropBarrier, LdsWrongAddress };
 enum class FaultMutationErrorCode {
@@ -79,7 +80,9 @@ class LdsSelection;
 /// changing the caller's input buffer does not change this snapshot. The context
 /// caches the fixed all-entry direct-ownership profile and retains an Instrumentor
 /// seed whose full-text facts are shared by independent replacement batches.
-/// It does not support alternate roots/ranges/options or helper/indirect-analysis profiles.
+/// LDS discovery can additionally borrow complete execution ownership for shared helpers
+/// and hardware roots. Replacement still uses the same default Instrumentor pipeline;
+/// successful discovery does not guarantee that a requested edit can be emitted.
 /// The caller/session should retain one context per immutable input across discovery,
 /// selection and apply, until all related operations finish. Repeated applies produce
 /// independent mutants of that original snapshot. To analyze a mutant, create a new
@@ -108,6 +111,8 @@ public:
 private:
   class State;
   Result analyze() const;
+  [[nodiscard]] FailureOr<const KernelOwnership *>
+  execution_ownership(FaultMutationError &error) const;
   void qualify_drop() const;
   // This context is the sole persistent strong source owner. The shared control block
   // lets records/selections observe expiry via weak_ptr, including after address reuse.
