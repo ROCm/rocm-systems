@@ -8,7 +8,7 @@
 // Just run the program. It takes no special arguments. Many threads hammer the
 // public async API on a small pool of shared streams, buffers, and files:
 // concurrent read/write submissions, register/deregister churn that drains
-// in-flight work, and first-use submissions that race implicit registration.
+// in-flight work, and submissions on unregistered streams that run transiently.
 // It checks for crashes, deadlocks, and lock errors; it does not verify data.
 
 #include "hipfile.h"
@@ -47,7 +47,7 @@ constexpr size_t IO_SIZE    = 64 << 10; // Bytes moved per op (64 KiB)
 constexpr size_t N_FILES         = 8;
 constexpr size_t N_BUFFERS       = 8;
 constexpr size_t N_REG_STREAMS   = 6;   // Pre-registered; threads churn registration on these
-constexpr size_t N_IMPL_STREAMS  = 6;   // Never pre-registered; threads race implicit registration
+constexpr size_t N_IMPL_STREAMS  = 6;   // Never registered; threads submit on them transiently
 constexpr size_t MAX_OUTSTANDING = 256; // Reap a thread's op records once this many are in flight
 
 // Guards all writes to cout/cerr from worker threads. Worker threads share
@@ -213,7 +213,7 @@ thread_function(int id, const SharedPools &pools)
                     submit(pools.reg_streams[reg_dist(gen)], true);
                     break;
 
-                // Case 3: Async read/write on an implicit stream, racing first-use registration
+                // Case 3: Async read/write on an unregistered stream, which runs the transfer transiently
                 case 3:
                     submit(pools.impl_streams[impl_dist(gen)], (gen() & 1u) != 0);
                     break;
@@ -313,7 +313,7 @@ main()
     }
 
     // Start the registered subset registered; threads churn it from there. The
-    // implicit subset stays unregistered so first-use submissions race.
+    // implicit subset stays unregistered so submissions on it run transiently.
     for (auto stream : pools.reg_streams) {
         if (!ok(hipFileStreamRegister(stream, 0))) {
             fatal("hipFileStreamRegister() failed");
