@@ -38,6 +38,7 @@ use rocddi::topology::{
 };
 
 use crate::callback_arg::CallbackArg;
+use crate::debugger::PendingDebugger;
 use crate::ffi::*;
 use crate::image_abi::ImageState;
 use crate::isa::isa_name;
@@ -52,6 +53,7 @@ use crate::signal::SignalState;
 mod admission;
 mod agent;
 mod clock;
+mod config;
 mod events;
 pub(crate) use agent::{Cache, Cpu, Gpu, cache_handles_in_level_order};
 use agent::{
@@ -69,12 +71,17 @@ use clock::best_clock_sample;
 pub(crate) use clock::{
     clock_counters, enable_high_precision_timestamps, translate_gpu_interval, translate_gpu_tick,
 };
+#[cfg(all(hsa_tool_dispatch, not(test)))]
+pub(crate) use lifecycle::{
+    begin_tool_preparation, enter_delegated_tool_cleanup, enter_tool_cleanup,
+};
 mod logging;
 mod status;
 #[cfg(test)]
 pub(crate) use admission::install_test_public_raw_gate;
 pub(crate) use admission::{
-    ApiLeaseScope, InFlightToken, InFlightTracker, enter_public_raw_handle, process_admission,
+    ApiLeaseScope, InFlightToken, InFlightTracker, enter_public_raw_handle, enter_runtime_service,
+    process_admission,
 };
 pub(crate) use lifecycle::{
     GenerationHealth, InFlightGeneration, LIFECYCLE_CONDVAR, LifecycleCallScope,
@@ -86,11 +93,6 @@ pub(crate) use lifecycle::{HsaLifecycle, LIFECYCLE};
 use logging::logging_flag_enabled;
 pub(crate) use logging::{LogOutput, LogWork, LogWriteScope};
 pub(crate) use status::{boundary, map_error, plain_boundary};
-
-// KFD retains a primary process VM after its last descriptor closes. Later
-// HSA generations therefore need a private context to acquire a fresh VM.
-/// Records whether KFD’s process-primary VM has already been used.
-static PRIMARY_CONTEXT_USED: AtomicBool = AtomicBool::new(false);
 
 /// Initialization error with evidence that native rollback also failed.
 pub(crate) struct InitFailure {
@@ -125,6 +127,8 @@ impl RetireSession for Session {
 
 /// Holds startup resources until publication or rollback finishes.
 struct PendingInit<S: RetireSession = Session, G = Gpu> {
+    /// Trap publication owners retained through startup rollback.
+    debugger: Option<PendingDebugger>,
     /// Session released after all activated GPU owners.
     session: Option<S>,
     /// Activated GPUs that must be dropped before their session.
@@ -134,6 +138,9 @@ struct PendingInit<S: RetireSession = Session, G = Gpu> {
 impl<S: RetireSession, G> PendingInit<S, G> {
     /// Drops activated GPUs before retiring the pending native session.
     fn cleanup(&mut self) -> bool {
+        // Normal traps remain in the process context for other runtime clients.
+        // Uncertain publication queues retain their own session dependencies.
+        self.debugger = None;
         // Device and MMIO owners must release their session borrows first.
         self.gpus.clear();
         let Some(session) = self.session.take() else {
@@ -163,7 +170,17 @@ impl<S: RetireSession, G> Drop for PendingInit<S, G> {
 /// to an owner in this structure. Removing an entry transfers that owner to the
 /// entry point performing destruction, allowing callbacks, blocking cleanup,
 /// and worker joins to happen after the global mutex is released.
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "generation configuration and lifecycle flags are independent"
+)]
 pub(crate) struct HsaState {
+    /// Native trap owners released after queues and before GPU devices.
+    pub(crate) debugger: Option<PendingDebugger>,
+    /// Generation-wide copy-engine configuration.
+    pub(crate) sdma_enabled: bool,
+    /// Generation-wide peer-copy engine configuration.
+    pub(crate) peer_sdma_enabled: bool,
     /// Process logging sink retained by work outside the registry lock.
     pub(crate) logging: Arc<LogOutput>,
     /// Next opaque HSA handle value.
@@ -200,6 +217,8 @@ pub(crate) struct HsaState {
     pub(crate) system_event_failed: Arc<AtomicBool>,
     /// Shared stop request observed by those workers.
     pub(crate) stop_workers: Arc<AtomicBool>,
+    /// Cancels ordinary waits and native work while cleanup services stay live.
+    cancel_work: Arc<AtomicBool>,
     /// Counts native work that must finish before session release.
     pub(crate) inflight: Arc<InFlightTracker>,
     /// Sticky native cleanup uncertainty for this HSA generation.
@@ -362,7 +381,33 @@ impl HsaState {
 
     /// Requests all runtime workers to stop before teardown.
     pub(crate) fn request_stop(&self) {
+        self.cancel_work.store(true, Ordering::Release);
         publish_stop_request(&self.stop_workers, &self.inflight);
+    }
+
+    /// Closes public admission without stopping callbacks needed by tooling.
+    pub(crate) fn request_shutdown(&self) {
+        self.cancel_work.store(true, Ordering::Release);
+        self.inflight.close();
+    }
+
+    /// Cleanup stop packets must still complete after ordinary work cancels.
+    pub(crate) fn operation_stop(&self) -> Arc<AtomicBool> {
+        if ApiLeaseScope::cleanup() {
+            self.stop_workers.clone()
+        } else {
+            self.cancel_work.clone()
+        }
+    }
+
+    /// Keeps a cleanup task's nested HSA calls admitted when it moves to an
+    /// asynchronous worker. Ordinary tasks use cancellation and worker joins.
+    pub(crate) fn inherit_cleanup(&self) -> Result<Option<InFlightToken>, Status> {
+        if ApiLeaseScope::cleanup() {
+            self.inflight.enter().map(Some).ok_or(INVALID_RUNTIME_STATE)
+        } else {
+            Ok(None)
+        }
     }
 
     /// Detaches callback workers under the lifecycle lock. Their joins and
@@ -390,16 +435,26 @@ impl HsaState {
         if host_page_size < 4096 || !host_page_size.is_power_of_two() {
             return Err(ERROR.into());
         }
-        // The HSA lifecycle gate admits one initialization at a time. A first
-        // GPU activation attempt may retain the primary KFD VM even if it
-        // fails, so later generations must select a secondary context.
-        let lifetime = if PRIMARY_CONTEXT_USED.load(Ordering::Acquire) {
-            DriverContextLifetime::Session
-        } else {
-            DriverContextLifetime::Process
-        };
+        // Clean HSA generations rejoin the exact retained native process VM.
+        // Native process ownership validates identity, loss and prior disable;
+        // the HSA lifecycle gate prevents rejoining an uncertain generation.
+        let mut session = Session::new(DriverContextLifetime::Process).map_err(map_error)?;
+        #[cfg(target_os = "linux")]
+        if let Ok(value) = std::env::var("HSA_XNACK") {
+            let requested = match value.as_str() {
+                "0" => Some(false),
+                "1" => Some(true),
+                _ => None,
+            };
+            if let Some(enabled) = requested {
+                session
+                    .request_xnack_mode(rocddi::session::XnackModeRequest::Prefer(enabled))
+                    .map_err(map_error)?;
+            }
+        }
         let mut pending = PendingInit {
-            session: Some(Session::new(lifetime).map_err(map_error)?),
+            debugger: None,
+            session: Some(session),
             gpus: Vec::new(),
         };
         let topology = match pending
@@ -441,7 +496,6 @@ impl HsaState {
             host_memory_bytes,
             &host,
             topology,
-            lifetime,
         ) {
             Ok(runtime) => Ok(runtime),
             Err(status) => Err(InitFailure {
@@ -458,20 +512,37 @@ impl HsaState {
         host_memory_bytes: usize,
         host: &CpuInfo,
         topology: TopologyGraphSnapshot,
-        lifetime: DriverContextLifetime,
     ) -> Result<Self, Status> {
+        pending.debugger = Some(PendingDebugger::new(
+            pending.session.as_mut().ok_or(ERROR)?,
+        )?);
         let session = pending.session.as_ref().ok_or(ERROR)?;
-        let endpoints = topology
+        let discovered = topology
             .endpoints
             .iter()
-            .filter(|endpoint| endpoint.gpu().is_some_and(|gpu| gpu.queues.aql.is_some()))
-            .cloned()
+            .filter(|endpoint| endpoint.gpu().is_some())
             .collect::<Vec<_>>();
-        if endpoints.is_empty() {
+        let ids = discovered
+            .iter()
+            .map(|endpoint| endpoint.gpu().and_then(|gpu| gpu.unique_id))
+            .collect::<Vec<_>>();
+        let selection = std::env::var_os("ROCR_VISIBLE_DEVICES");
+        let selection = selection.as_ref().map(|value| value.to_string_lossy());
+        let endpoints = config::visible_gpu_indices(&ids, selection.as_deref())
+            .into_iter()
+            .filter_map(|index| {
+                let endpoint = discovered[index];
+                endpoint
+                    .gpu()
+                    .is_some_and(config::supports_execution)
+                    .then(|| endpoint.clone())
+            })
+            .collect::<Vec<_>>();
+        if endpoints.is_empty() && selection.is_none() {
             return Err(OUT_OF_RESOURCES);
         }
-        let full_profile =
-            full_profile_platform(endpoints.iter().map(|endpoint| endpoint.local_memory_bytes));
+        let full_profile = endpoints.is_empty()
+            || full_profile_platform(endpoints.iter().map(|endpoint| endpoint.local_memory_bytes));
         let cpus = cpu_agents(&topology, host, host_memory_bytes);
         let system_alloc_max_bytes = cpus
             .iter()
@@ -528,6 +599,7 @@ impl HsaState {
             .gpus
             .try_reserve(endpoints.len())
             .map_err(|_| OUT_OF_RESOURCES)?;
+        let scratch_options = crate::queue::ScratchOptions::from_env();
         for mut endpoint in endpoints {
             if endpoint.gpu().is_none() {
                 continue;
@@ -551,20 +623,21 @@ impl HsaState {
                     u32::try_from(cache.size_bytes).unwrap_or(u32::MAX),
                 ));
             }
-            if lifetime == DriverContextLifetime::Process {
-                // Activation may retain a primary VM even when it returns an
-                // error. A later generation must use a private context.
-                PRIMARY_CONTEXT_USED.store(true, Ordering::Release);
-            }
             let device = session.activate(&endpoint).map_err(map_error)?;
-            let xnack_enabled = if info.gfx_major == 9 {
-                device
-                    .gpu()
-                    .and_then(|gpu| gpu.xnack_enabled())
-                    .map_err(map_error)?
-            } else {
-                false
-            };
+            pending
+                .debugger
+                .as_mut()
+                .ok_or(ERROR)?
+                .install(&device, &AtomicBool::new(false))?;
+            let xnack_enabled =
+                if info.gfx_major == 9 || (info.gfx_major == 10 && info.gfx_minor == 1) {
+                    device
+                        .gpu()
+                        .and_then(|gpu| gpu.xnack_enabled())
+                        .map_err(map_error)?
+                } else {
+                    false
+                };
             let mmio_remap = device.gpu().and_then(|gpu| gpu.map_mmio_remap()).ok();
             let hdp_flush = hdp_flush_pointers(
                 mmio_remap
@@ -573,11 +646,14 @@ impl HsaState {
             );
             let fine_grain_pool = info.hive_id != 0
                 || std::env::var_os("HSA_FORCE_FINE_GRAIN_PCIE").is_some_and(|value| value == "1");
-            let pc_sampling_supported = crate::pc_sampling::session::supported_gpu(info)
+            let pc_sampling_supported = crate::pc_sampling::session::supported_gpu(&info)
                 && pc_sampling_supported_by_query(device.gpu().and_then(|gpu| {
                     gpu.pc_sampling_configurations(PcSamplingConfigurationSet::Supported)
                 }));
             pending.gpus.push(Gpu {
+                scratch: Arc::new(scratch_options.for_gpu(&info)),
+                global_cu_mask: None,
+                cp_caps: Arc::new(Mutex::new(None)),
                 endpoint,
                 xnack_enabled,
                 device,
@@ -590,11 +666,26 @@ impl HsaState {
                 persisting_l2_cache_size: Arc::new(Mutex::new(0)),
             });
         }
+        let counts = pending
+            .gpus
+            .iter()
+            .map(|gpu| gpu.info().compute_unit_count)
+            .collect::<Vec<_>>();
+        let masks =
+            config::cu_mask::parse(&std::env::var("HSA_CU_MASK").unwrap_or_default(), &counts);
+        for (gpu, mask) in pending.gpus.iter_mut().zip(masks) {
+            gpu.global_cu_mask = mask;
+        }
         let gpus = std::mem::take(&mut pending.gpus);
         let signal_state = SignalState::new(pending.session.as_ref().ok_or(ERROR)?)?;
         let session = pending.session.take().ok_or(ERROR)?;
         let health = Arc::new(GenerationHealth::new());
         Ok(Self {
+            debugger: pending.debugger.take(),
+            sdma_enabled: config::sdma_enabled(std::env::var("HSA_ENABLE_SDMA").ok().as_deref()),
+            peer_sdma_enabled: config::sdma_enabled(
+                std::env::var("HSA_ENABLE_PEER_SDMA").ok().as_deref(),
+            ),
             logging: Arc::new(LogOutput::new()),
             next_handle: 0x4853_4101_0000_0000,
             queue_state: QueueState::new(),
@@ -613,6 +704,7 @@ impl HsaState {
             system_event_worker: None,
             system_event_failed: Arc::new(AtomicBool::new(false)),
             stop_workers: Arc::new(AtomicBool::new(false)),
+            cancel_work: Arc::new(AtomicBool::new(false)),
             inflight: process_admission().clone(),
             health: health.clone(),
             pc_sampling_state: PcSamplingState::new(health),
@@ -898,12 +990,21 @@ impl HsaState {
                 state,
             };
         }
+        // HSA queues are stopped; foreign queues may still execute the shared
+        // normal trap. Release only HSA handles, leaving its native owner live.
+        state.debugger = None;
         let signal_status = state.signal_state.destroy_events();
         if signal_status != SUCCESS {
             // A failed native event destroy can still retain its KFD context.
             // Do not discard the session that owns the remaining driver state.
             return ShutdownOutcome::RetainedGeneration {
                 status: signal_status,
+                state,
+            };
+        }
+        if !state.loader.can_release() {
+            return ShutdownOutcome::RetainedGeneration {
+                status: INVALID_RUNTIME_STATE,
                 state,
             };
         }

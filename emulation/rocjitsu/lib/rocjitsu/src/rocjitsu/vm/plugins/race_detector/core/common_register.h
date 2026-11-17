@@ -34,13 +34,13 @@ enum class MemoryEventType {
   GLOBAL_TO_TTMP,   ///< Scalar load to a TTMP; the event stores its counter family separately.
   SCALAR_TO_GLOBAL, ///< Scalar store; retained to preserve partial-wait ordering.
 
-  /// LDS-to-global transfer, such as a tensor DMA store: reads LDS and writes
-  /// global memory, with no VGPR registers -- only LDS intervals. The reverse
-  /// direction is GLOBAL_TO_LDS.
+  /// LDS-to-global transfer, such as a tensor DMA store or a gfx1250 async
+  /// store: reads LDS and writes global memory, with no VGPR registers -- only
+  /// LDS intervals. The reverse direction is GLOBAL_TO_LDS.
   ///
-  /// The event records its counter family and completion order separately.
-  /// defaultWaitCounterType and defaultMemoryOrder return those of a tensor DMA
-  /// store (TENSORCNT, TENSOR).
+  /// The event records its counter family and completion order separately: an
+  /// async store carries ASYNCCNT and ASYNC_STORE. defaultWaitCounterType and
+  /// defaultMemoryOrder return those of a tensor DMA store (TENSORCNT, TENSOR).
   LDS_TO_GLOBAL,
 
   /// A synchronous VALU operand read visible to peers until a barrier.

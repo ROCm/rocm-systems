@@ -176,10 +176,12 @@ TEST_F(NetIbCastGinInitMicrotest, RmaProxyInit_DeviceDiscoveryFails_Fails) {
 }
 
 TEST_F(NetIbCastGinMicrotest, GinProperties_AdvertiseStrongAndVaSignals) {
-  ncclGinProperties_v14_t props{};
+  ncclGinProperties_t props{};
+  props.barrierOptions = (ncclGinBarrierOptions_t)-1;
   ASSERT_EQ(IbCastGinIbGetGinProperties(&props), ncclSuccess);
   EXPECT_TRUE(props.supportsStrongSignals);
   EXPECT_TRUE(props.supportsVASignals);
+  EXPECT_EQ(props.barrierOptions, NCCL_GIN_BARRIER_DEFAULT);
 }
 
 TEST_F(NetIbCastGinMicrotest, RmaProperties_DoNotClaimSignalsFlushPuts) {
@@ -243,7 +245,7 @@ TEST_F(NetIbCastGinMicrotestIsolated, GdrSupport_NeitherPeermemNorDmaBuf_Refuses
     EXPECT_FALSE(gdr);
     EXPECT_EQ(IbCastGinIbGdrGpuSupport(false), ncclInvalidUsage);
     void* collComm = nullptr;
-    EXPECT_EQ(IbCastRmaIbProxyConnect(nullptr, nullptr, 2, 0, nullptr, &collComm), ncclInvalidUsage);
+    EXPECT_EQ(IbCastRmaIbProxyConnect(nullptr, nullptr, 2, 0, nullptr, &collComm, nullptr), ncclInvalidUsage);
   });
 }
 
@@ -395,6 +397,24 @@ TEST_F(NetIbCastGinRingMicrotest, AllGather_AnyFailure_ReleasesWhatWasRegistered
   }
 }
 
+// A set abort flag ends the ring even though the peers never complete.
+TEST_F(NetIbCastGinRingMicrotest, AllGather_Aborted_StopsPollingAndReleasesWhatWasRegistered) {
+  char out[3 * 4];
+  base_ = out;
+  int deregs = 0;
+  ScopedHook dereg(g_ibvDeregMr, [&](struct ibv_mr*) {
+    deregs++;
+    return ncclSuccess;
+  });
+  volatile uint32_t abortFlag = 1;
+  cComm_.abortFlag = &abortFlag;
+  pendingTests_ = 1000;  // stands in for peers that never answer
+  EXPECT_EQ(IbCastGinIbAllGather(&cComm_, out, out, 4), ncclInternalError);
+  EXPECT_EQ(sends_.size(), 1u);
+  EXPECT_EQ(test_.calls, 2);
+  EXPECT_EQ(deregs, 2);
+}
+
 // allGather stand-in for AllToAll: rank r's row j is the chunk r sends to rank j, "rj".
 ncclResult_t ScriptedAllGather(struct CastIbGinCollComm* cComm, void* src, void* recv, size_t len) {
   for (int r = 0; r < cComm->nranks; r++) {
@@ -459,7 +479,7 @@ TEST_F(NetIbCastGinConnectMicrotest, Connect_RetriesUntilBothSidesAreUpAndFillsT
   int h0, h1;
   void* handles[2] = {&h0, &h1};
   void* collComm = nullptr;
-  ASSERT_EQ(IbCastRmaIbProxy.connect(&netConfig_, handles, 2, 1, &lComm_, &collComm), ncclSuccess);
+  ASSERT_EQ(IbCastRmaIbProxy.connect(&netConfig_, handles, 2, 1, &lComm_, &collComm, nullptr), ncclSuccess);
   auto* c = static_cast<struct CastIbGinCollComm*>(collComm);
   ASSERT_NE(c, nullptr);
   EXPECT_EQ(c->rank, 1);
@@ -489,42 +509,62 @@ TEST_F(NetIbCastGinConnectMicrotest, Connect_RetriesUntilBothSidesAreUpAndFillsT
   EXPECT_EQ(closeSend.calls, 1);
 }
 
+// ncclCommAbort during connect: the loop gives up instead of waiting for a peer that never comes, and closes the
+// side it already connected.
+TEST_F(NetIbCastGinConnectMicrotest, Connect_Aborted_StopsWaitingAndClosesWhatItOpened) {
+  acceptRefusals_ = 1000;  // stands in for a peer that never connects back
+  volatile uint32_t abortFlag = 1;
+  int h0, h1;
+  void* handles[2] = {&h0, &h1};
+  void* collComm = nullptr;
+  ScopedHook closeSend(g_ibCastCloseSend, [&](void* comm) {
+    EXPECT_EQ(comm, send_.get());
+    return ncclSuccess;
+  });
+  EXPECT_EQ(IbCastRmaIbProxy.connect(&netConfig_, handles, 2, 1, &lComm_, &collComm, &abortFlag), ncclInternalError);
+  EXPECT_EQ(collComm, nullptr);
+  EXPECT_EQ(accept_.calls, 1);
+  EXPECT_EQ(closeSend.calls, 1);
+}
+
 TEST_F(NetIbCastGinConnectMicrotest, Connect_GinTrafficClassWinsOverTheIbOne) {
   void* handles[2] = {nullptr, nullptr};
   void* collComm = nullptr;
   params_.Set("IB_TC", 40);
-  ASSERT_EQ(IbCastGinIbConnect(&netConfig_, handles, 2, 0, &lComm_, &collComm), ncclSuccess);
+  ASSERT_EQ(IbCastGinIbConnect(&netConfig_, handles, 2, 0, &lComm_, &collComm, nullptr), ncclSuccess);
   free(collComm);
   params_.Set("GIN_IB_TC", 104);
-  ASSERT_EQ(IbCastGinIbConnect(&netConfig_, handles, 2, 0, &lComm_, &collComm), ncclSuccess);
+  ASSERT_EQ(IbCastGinIbConnect(&netConfig_, handles, 2, 0, &lComm_, &collComm, nullptr), ncclSuccess);
   free(collComm);
   EXPECT_EQ(connectTcs_, (std::vector<int>{40, 104}));
 }
 
 TEST_F(NetIbCastGinConnectMicrotest, Connect_ConnectOrAcceptFails_ReturnsTheError) {
-  if (kAsan) GTEST_SKIP() << "the failed connect leaks the coll comm";
   void* handles[2] = {nullptr, nullptr};
   void* collComm = reinterpret_cast<void*>(0x1);
   {
     ScopedHook fails(g_ibCastConnectImpl, [](void*, int, void*, void**, ncclNetDeviceHandle_t**, int) {
       return ncclRemoteError;
     });
-    EXPECT_EQ(IbCastGinIbConnect(&netConfig_, handles, 2, 0, &lComm_, &collComm), ncclRemoteError);
+    EXPECT_EQ(IbCastGinIbConnect(&netConfig_, handles, 2, 0, &lComm_, &collComm, nullptr), ncclRemoteError);
     EXPECT_EQ(collComm, nullptr);
   }
 }
 
-// The coll comm and the send comm already connected are left behind when accept fails.
-// Pins AICOMRCCL-3094; a fix flips this pin.
-TEST_F(NetIbCastGinConnectMicrotest, Connect_KnownBug_AcceptFailureLeavesTheSendCommOpen) {
-  if (kAsan) GTEST_SKIP() << "the failed connect leaks the coll comm";
+// An accept failure goes through fail:, which closes the send comm already connected and frees the coll comm, as
+// upstream net_ib/gin.cc does (AICOMRCCL-3094).
+TEST_F(NetIbCastGinConnectMicrotest, Connect_AcceptFailure_ClosesTheSendComm) {
   void* handles[2] = {nullptr, nullptr};
   void* collComm = nullptr;
   ScopedHook fails(g_ibCastAccept, [](void*, void**, ncclNetDeviceHandle_t**) { return ncclSystemError; });
-  ScopedHook closeSend(g_ibCastCloseSend, [](void*) { return ncclSuccess; });
-  EXPECT_EQ(IbCastGinIbConnect(&netConfig_, handles, 2, 0, &lComm_, &collComm), ncclSystemError);
+  ScopedHook closeSend(g_ibCastCloseSend, [&](void* comm) {
+    EXPECT_EQ(comm, send_.get());
+    return ncclSuccess;
+  });
+  EXPECT_EQ(IbCastGinIbConnect(&netConfig_, handles, 2, 0, &lComm_, &collComm, nullptr), ncclSystemError);
+  EXPECT_EQ(collComm, nullptr);
   EXPECT_EQ(connect_.calls, 1);
-  EXPECT_EQ(closeSend.calls, 0);
+  EXPECT_EQ(closeSend.calls, 1);
 }
 
 TEST_F(NetIbCastGinMicrotest, CloseColl_NullIsANoOpAndCloseErrorsArePassedUp) {
@@ -575,16 +615,19 @@ class NetIbCastGinContextMicrotest : public NetIbCastGinRingMicrotest {
     }
     NetIbCastGinRingMicrotest::TearDown();
   }
-  ncclResult_t Create(int nContexts, int rankStride, void** ctx) {
+  // RMA v17: the peers to connect to arrive as a sorted peerArray (empty means none but self).
+  ncclResult_t Create(int nContexts, std::vector<int> peers, void** ctx) {
     ncclRmaConfig_t config{};
     config.nContexts = nContexts;
     config.trafficClass = 72;
-    config.rankStride = rankStride;
+    config.peerArray = peers.empty() ? nullptr : peers.data();
+    config.peerArrayCount = (int)peers.size();
     ncclResult_t res = IbCastRmaIbProxy.createContext(&cComm_, &config, ctx);
     if (res == ncclSuccess) contexts_.push_back(static_cast<struct IbCastRmaIbProxyCtx*>(*ctx));
     return res;
   }
 
+  const std::vector<int> kAllPeers{0, 1, 2, 3};
   std::vector<struct IbCastRmaIbProxyCtx*> contexts_;
   std::vector<int> connectPeers_, acceptPeers_;
   std::deque<ZeroedPtr<ncclIbSendComm>> peerSends_;
@@ -639,7 +682,7 @@ TEST_F(NetIbCastGinContextMicrotest, CreateContext_ConnectsToEveryPeerInEachCont
   char ring[4 * sizeof(int)];
   base_ = ring;
   void* ctx = nullptr;
-  ASSERT_EQ(Create(2, 1, &ctx), ncclSuccess);
+  ASSERT_EQ(Create(2, kAllPeers, &ctx), ncclSuccess);
   auto* gc = static_cast<struct IbCastRmaIbProxyCtx*>(ctx);
   EXPECT_EQ(gc[0].nContexts, 2);
   EXPECT_EQ(gc[0].nranks, 4);
@@ -658,31 +701,43 @@ TEST_F(NetIbCastGinContextMicrotest, CreateContext_ConnectsToEveryPeerInEachCont
   EXPECT_EQ(sends_.size(), 8u * 3);  // 8 barriers of nranks - 1 steps
 }
 
-TEST_F(NetIbCastGinContextMicrotest, CreateContext_RankStride_ConnectsOnlyToThatStride) {
+TEST_F(NetIbCastGinContextMicrotest, CreateContext_PeerArray_ConnectsOnlyToListedPeers) {
+  // {1, 3} is what ncclRmaProxyCreateContext hands rank 1 at a rank stride of 2.
   cComm_.allGather = HandleAllGather;
   char ring[4 * sizeof(int)];
   base_ = ring;
   void* ctx = nullptr;
-  ASSERT_EQ(Create(1, 2, &ctx), ncclSuccess);
+  ASSERT_EQ(Create(1, {1, 3}, &ctx), ncclSuccess);
   EXPECT_EQ(connectPeers_, (std::vector<int>{1, 3}));
   auto* gc = static_cast<struct IbCastRmaIbProxyCtx*>(ctx);
   EXPECT_EQ(gc[0].fullSendComm[0], nullptr);
   EXPECT_EQ(gc[0].fullRecvComm[2], nullptr);
+  EXPECT_EQ(sends_.size(), 4u * 3);  // still a barrier on every one of the nranks rounds
 }
 
-TEST_F(NetIbCastGinContextMicrotest, CreateContext_NoRankStride_MeansEveryRank) {
+TEST_F(NetIbCastGinContextMicrotest, CreateContext_EmptyPeerArray_ConnectsOnlyToSelf) {
   cComm_.allGather = HandleAllGather;
   char ring[4 * sizeof(int)];
   base_ = ring;
   void* ctx = nullptr;
-  ASSERT_EQ(Create(1, 0, &ctx), ncclSuccess);
-  EXPECT_EQ(connectPeers_, (std::vector<int>{1, 2, 3, 0}));
+  ASSERT_EQ(Create(1, {}, &ctx), ncclSuccess);
+  EXPECT_EQ(connectPeers_, (std::vector<int>{1}));
+  EXPECT_EQ(accept_.calls, 1);
+  auto* gc = static_cast<struct IbCastRmaIbProxyCtx*>(ctx);
+  EXPECT_NE(gc[0].fullSendComm[1], nullptr);
+  EXPECT_NE(gc[0].fullRecvComm[1], nullptr);
 }
 
-TEST_F(NetIbCastGinContextMicrotest, CreateContext_StrideThatDoesNotDivideTheRanks_IsRejected) {
-  void* ctx = reinterpret_cast<void*>(0x1);
-  EXPECT_EQ(Create(1, 3, &ctx), ncclInternalError);
-  EXPECT_EQ(listen_.calls, 0);
+TEST_F(NetIbCastGinContextMicrotest, CreateContext_PeerArrayWithoutSelf_StillConnectsSelf) {
+  // Neither divides the ranks nor names this rank: no stride validation remains, and the self
+  // QP that iFlush uses is always built.
+  cComm_.allGather = HandleAllGather;
+  char ring[4 * sizeof(int)];
+  base_ = ring;
+  void* ctx = nullptr;
+  ASSERT_EQ(Create(1, {3}, &ctx), ncclSuccess);
+  EXPECT_EQ(connectPeers_, (std::vector<int>{1, 3}));
+  EXPECT_EQ(accept_.calls, 2);
 }
 
 TEST_F(NetIbCastGinContextMicrotest, CreateContext_AnyStepFails_ReturnsNoContextAndClosesTheListener) {
@@ -692,12 +747,12 @@ TEST_F(NetIbCastGinContextMicrotest, CreateContext_AnyStepFails_ReturnsNoContext
   void* ctx = reinterpret_cast<void*>(0x1);
   {
     ScopedHook listen(g_ibCastListen, [](void*, int, void*, void**) { return ncclSystemError; });
-    EXPECT_EQ(Create(1, 1, &ctx), ncclSystemError);
+    EXPECT_EQ(Create(1, kAllPeers, &ctx), ncclSystemError);
     EXPECT_EQ(ctx, nullptr);
     EXPECT_EQ(closeListen_.calls, 0);
   }
   cComm_.allGather = FailingAllGather;
-  EXPECT_EQ(Create(1, 1, &ctx), ncclRemoteError);
+  EXPECT_EQ(Create(1, kAllPeers, &ctx), ncclRemoteError);
   EXPECT_EQ(closeListen_.calls, 1);
   if (kAsan) GTEST_SKIP() << "a failure past the peer-comm arrays leaks them";
   cComm_.allGather = HandleAllGather;
@@ -705,15 +760,15 @@ TEST_F(NetIbCastGinContextMicrotest, CreateContext_AnyStepFails_ReturnsNoContext
     ScopedHook fails(g_ibCastConnectImpl, [](void*, int, void*, void**, ncclNetDeviceHandle_t**, int) {
       return ncclSystemError;
     });
-    EXPECT_EQ(Create(1, 1, &ctx), ncclSystemError);
+    EXPECT_EQ(Create(1, kAllPeers, &ctx), ncclSystemError);
   }
   {
     ScopedHook fails(g_ibCastAccept, [](void*, void**, ncclNetDeviceHandle_t**) { return ncclSystemError; });
-    EXPECT_EQ(Create(1, 1, &ctx), ncclSystemError);
+    EXPECT_EQ(Create(1, kAllPeers, &ctx), ncclSystemError);
   }
   {
     ScopedHook fails(g_ibCastIsend, [](void*, void*, size_t, int, void*, void*, void**) { return ncclSystemError; });
-    EXPECT_EQ(Create(1, 1, &ctx), ncclSystemError);  // the barrier
+    EXPECT_EQ(Create(1, kAllPeers, &ctx), ncclSystemError);  // the barrier
   }
   EXPECT_EQ(ctx, nullptr);
 }
@@ -734,10 +789,32 @@ TEST_F(NetIbCastGinContextMicrotest, CreateContext_KnownBug_FailureLeavesConnect
   ScopedHook closeSend(g_ibCastCloseSend, [](void*) { return ncclSuccess; });
   ScopedHook closeRecv(g_ibCastCloseRecv, [](void*) { return ncclSuccess; });
   void* ctx = nullptr;
-  EXPECT_EQ(Create(1, 1, &ctx), ncclSystemError);
+  EXPECT_EQ(Create(1, kAllPeers, &ctx), ncclSystemError);
   EXPECT_EQ(accept_.calls, 1);
   EXPECT_EQ(closeSend.calls, 0);
   EXPECT_EQ(closeRecv.calls, 0);
+}
+
+// ncclCommAbort while connecting the per-peer comms: the context build gives up and closes the listener.
+TEST_F(NetIbCastGinContextMicrotest, CreateContext_Aborted_StopsWaitingForAPeer) {
+  if (kAsan) GTEST_SKIP() << "a failure past the peer-comm arrays leaks them";
+  cComm_.allGather = HandleAllGather;
+  char ring[4 * sizeof(int)];
+  base_ = ring;
+  int accepts = 0;
+  ScopedHook acceptLate(g_ibCastAccept, [&](void*, void** recvComm, ncclNetDeviceHandle_t**) {
+    // stands in for a peer that never connects back; the abort flag is already set, so one try is all it gets
+    ++accepts;
+    *recvComm = nullptr;
+    return ncclSuccess;
+  });
+  volatile uint32_t abortFlag = 1;
+  cComm_.abortFlag = &abortFlag;
+  void* ctx = reinterpret_cast<void*>(0x1);
+  EXPECT_EQ(Create(1, kAllPeers, &ctx), ncclInternalError);
+  EXPECT_EQ(ctx, nullptr);
+  EXPECT_EQ(accepts, 1);
+  EXPECT_EQ(closeListen_.calls, 1);
 }
 
 TEST_F(NetIbCastGinContextMicrotest, DestroyContext_ClosesEveryPeerCommOfEveryContext) {
@@ -745,7 +822,7 @@ TEST_F(NetIbCastGinContextMicrotest, DestroyContext_ClosesEveryPeerCommOfEveryCo
   char ring[4 * sizeof(int)];
   base_ = ring;
   void* ctx = nullptr;
-  ASSERT_EQ(Create(2, 1, &ctx), ncclSuccess);
+  ASSERT_EQ(Create(2, kAllPeers, &ctx), ncclSuccess);
   ScopedHook closeRecv(g_ibCastCloseRecv, [](void*) { return ncclSuccess; });
   ScopedHook closeSend(g_ibCastCloseSend, [](void*) { return ncclSuccess; });
   ASSERT_EQ(IbCastRmaIbProxy.destroyContext(ctx), ncclSuccess);
@@ -761,7 +838,7 @@ TEST_F(NetIbCastGinContextMicrotest, DestroyContext_CloseFails_ReturnsTheError) 
   char ring[4 * sizeof(int)];
   base_ = ring;
   void* ctx = nullptr;
-  ASSERT_EQ(Create(1, 1, &ctx), ncclSuccess);
+  ASSERT_EQ(Create(1, kAllPeers, &ctx), ncclSuccess);
   {
     ScopedHook closeRecv(g_ibCastCloseRecv, [](void*) { return ncclSystemError; });
     EXPECT_EQ(IbCastRmaIbProxyDestroyContext(ctx), ncclSystemError);

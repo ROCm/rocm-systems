@@ -43,7 +43,8 @@ pub(crate) use linux_kfd::{KfdEventSubscription, notification as kfd_notificatio
     any(target_arch = "x86_64", target_arch = "aarch64")
 ))]
 pub(crate) use linux_kfd::{
-    KfdKernelQueue, KfdPcSampling, KfdQueue, KfdSignalEvent, LinuxKfdDriver as KfdDriver,
+    KfdKernelQueue, KfdPcSampling, KfdProcessTrap, KfdQueue, KfdSignalEvent,
+    LinuxKfdDriver as KfdDriver,
 };
 pub(crate) use resources::{
     AllocationState, KernelQueueState, PcSamplingState, QueueState, VirtualAddressState,
@@ -373,7 +374,21 @@ pub(crate) trait UserQueueResource: CachedInfo<Info = QueueTransport> {
     /// scratch backing until a later successful replacement or driver
     /// destruction.
     #[allow(unsafe_code)]
-    unsafe fn set_scratch(&mut self, scratch: QueueScratch) -> Result<(), Error>;
+    unsafe fn set_scratch(&mut self, scratch: Option<QueueScratch>) -> Result<(), Error>;
+    /// Enables V2 scratch bookkeeping before any producer is admitted.
+    fn enable_async_scratch(&mut self) -> Result<(), Error> {
+        Err(Error::Operation {
+            kind: crate::ErrorKind::Unsupported,
+            detail: "asynchronous scratch bookkeeping is unavailable",
+        })
+    }
+    /// Proves the current scratch allocation cannot be used by later packets.
+    fn reclaim_scratch(&mut self, _cancel: &std::sync::atomic::AtomicBool) -> Result<(), Error> {
+        Err(Error::Operation {
+            kind: crate::ErrorKind::Unsupported,
+            detail: "asynchronous scratch reclamation is unavailable",
+        })
+    }
     /// Destroys the native queue and releases its transport.
     ///
     /// # Safety
