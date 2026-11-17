@@ -618,7 +618,7 @@ TEST_F(SdmaQueueSchedulerTest, RetriesUnavailableProducerPointerWithoutAnotherDo
   EXPECT_TRUE(scheduler_.detach(queue));
 }
 
-TEST_F(SdmaQueueSchedulerTest, ThrowingProducerIngressFailsQueueAndWorkerServicesNextQueue) {
+TEST_F(SdmaQueueSchedulerTest, FaultedProducerIngressFailsQueueAndWorkerServicesNextQueue) {
   memory_->store<uint32_t>(kRing, 0);
   memory_->store<uint64_t>(kWritePointer, sizeof(uint32_t));
   alignas(8) uint64_t doorbell = 0;
@@ -631,7 +631,7 @@ TEST_F(SdmaQueueSchedulerTest, ThrowingProducerIngressFailsQueueAndWorkerService
       [&](const GpuVmAccess &, std::span<const MemoryIngressSpan> spans) -> MemoryIngressAdmission {
     if (spans.size() == 1 && spans.front().address == kWritePointer)
       ++admissions;
-    throw std::runtime_error("injected producer ingress failure");
+    return {.outcome = VmAccessOutcome::Faulted, .permit = {}};
   };
   const SdmaQueueScheduler::Handle queue = scheduler_.attach(info, std::move(callbacks));
   ASSERT_TRUE(queue);

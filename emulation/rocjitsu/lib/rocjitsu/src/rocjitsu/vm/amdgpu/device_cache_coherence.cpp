@@ -24,6 +24,13 @@ namespace rocjitsu {
 namespace amdgpu {
 namespace {
 
+// Keep operational backing refusals distinct from broken cache invariants while
+// the legacy group API still reports failures with exceptions.
+class CacheMaintenanceFailure final : public util::Exception {
+public:
+  explicit CacheMaintenanceFailure(std::string_view message) : util::Exception(message) {}
+};
+
 template <typename T> void unregister_cache(std::vector<T *> &caches, T *cache) {
   typename std::vector<T *>::iterator position = std::ranges::find(caches, cache);
   assert(position != caches.end());
@@ -427,6 +434,17 @@ std::vector<DeviceCacheMaintenanceLease> DeviceCacheCoherence::acquire_cache_mai
     std::span<const DeviceCacheDomain> domains, DeviceCacheOperation operation,
     const PreparedWritebackResolver &resolve_writeback) {
   return acquire_prepared_cache_maintenance_group(domains, operation, resolve_writeback, {}, false);
+}
+
+util::FailureOr<std::vector<DeviceCacheMaintenanceLease>>
+DeviceCacheCoherence::acquire_cache_maintenance_group(
+    std::span<const DeviceCacheDomain> domains, DeviceCacheOperation operation,
+    const PreparedWritebackResolver &resolve_writeback, util::DiagnosticEmitter emit_error) {
+  try {
+    return acquire_cache_maintenance_group(domains, operation, resolve_writeback);
+  } catch (const CacheMaintenanceFailure &error) {
+    return emit_error.emit() << error.what();
+  }
 }
 
 std::vector<DeviceCacheMaintenanceLease> DeviceCacheCoherence::acquire_prepared_atomic_boundary(
@@ -932,10 +950,9 @@ DeviceCacheCoherence::acquire_prepared_cache_maintenance_group(
       if (candidate_outcome == VmAccessOutcome::Unavailable)
         throw CacheMaintenanceUnavailable("prepared cache writeback is unavailable");
       if (candidate_outcome != VmAccessOutcome::Complete)
-        throw util::Exception(std::string_view("prepared cache writeback was rejected"));
+        throw CacheMaintenanceFailure("prepared cache writeback was rejected");
       if (!backing)
-        throw util::Exception(
-            std::string_view("prepared cache writeback does not cover dirty line"));
+        throw CacheMaintenanceFailure("prepared cache writeback does not cover dirty line");
       if (resolve_witness && line.selected) {
         const auto matching =
             std::ranges::find_if(aliases, [&](const DeviceCacheAliasScope &scope) {
@@ -948,7 +965,7 @@ DeviceCacheCoherence::acquire_prepared_cache_maintenance_group(
         if (matching == aliases.end() || backing->backing_id != matching->backing_id ||
             backing->backing_offset !=
                 matching->backing_offset + (line.address - matching->address))
-          throw util::Exception(std::string_view("selected dirty line changed canonical backing"));
+          throw CacheMaintenanceFailure("selected dirty line changed canonical backing");
       }
       prepared_lines.push_back({index, std::move(*backing)});
       prepared->push_back(std::move(candidate));
@@ -965,8 +982,7 @@ DeviceCacheCoherence::acquire_prepared_cache_maintenance_group(
         std::ranges::any_of(prepared_lines, [&before](const PreparedLine &line) {
           return before.dirty[line.snapshot_index].selected && line.backing.direct_bytes.empty();
         }))
-      throw util::Exception(
-          std::string_view("multiple dirty writes require direct canonical backing"));
+      throw CacheMaintenanceFailure("multiple dirty writes require direct canonical backing");
 
     // Compare full canonical lines, including aliases at different GPU VAs.
     // A single domain may overlay its L2 bytes on its own MSC line only when
@@ -1005,8 +1021,8 @@ DeviceCacheCoherence::acquire_prepared_cache_maintenance_group(
             left_line.tag.admission_generation == right_line.tag.admission_generation &&
             left.backing.backing_offset == right.backing.backing_offset;
         if (!ordered_overlay)
-          throw util::Exception(
-              std::string_view("group maintenance has overlapping canonical backing lines"));
+          throw CacheMaintenanceFailure(
+              "group maintenance has overlapping canonical backing lines");
       }
     }
 
@@ -1108,7 +1124,7 @@ DeviceCacheCoherence::acquire_prepared_cache_maintenance_group(
       } else {
         fallible = backing.backing.subview(backing.backing_offset + begin, size);
         if (!fallible)
-          throw util::Exception(std::string_view("prepared cache writeback run is unavailable"));
+          throw CacheMaintenanceFailure("prepared cache writeback run is unavailable");
       }
       writes.push_back({line.source + begin, destination, std::move(fallible), size,
                         line.snapshot->l2, address});
@@ -1154,7 +1170,7 @@ DeviceCacheCoherence::acquire_prepared_cache_maintenance_group(
     for (const std::shared_ptr<VmTransferEffectGate> &gate : effect_gates) {
       std::optional<VmTransferEffectGate::Permit> permit = gate->try_acquire();
       if (!permit)
-        throw util::Exception(std::string_view("prepared cache writeback VM gate was revoked"));
+        throw CacheMaintenanceFailure("prepared cache writeback VM gate was revoked");
       gate_permits.push_back(std::move(*permit));
     }
 
@@ -1166,7 +1182,7 @@ DeviceCacheCoherence::acquire_prepared_cache_maintenance_group(
         std::memcpy(write.direct_destination, write.source, write.size);
       } else if (!write.fallible_destination.write(
                      std::as_bytes(std::span<const uint8_t>(write.source, write.size)))) {
-        throw util::Exception(std::string_view("prepared cache writeback failed"));
+        throw CacheMaintenanceFailure("prepared cache writeback failed");
       }
     }
     for (const WriteOp &write : writes)

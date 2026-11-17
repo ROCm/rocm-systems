@@ -255,6 +255,15 @@ public:
   acquire_cache_maintenance_group(std::span<const DeviceCacheDomain> domains,
                                   DeviceCacheOperation operation,
                                   const PreparedWritebackResolver &resolve_writeback);
+  /// @brief Return expected prepared backing failures without throwing.
+  /// @details Still throws CacheMaintenanceUnavailable to request a retry.
+  /// Configuration errors and internal cache invariant failures retain their
+  /// legacy exceptions.
+  [[nodiscard]] static util::FailureOr<std::vector<DeviceCacheMaintenanceLease>>
+  acquire_cache_maintenance_group(std::span<const DeviceCacheDomain> domains,
+                                  DeviceCacheOperation operation,
+                                  const PreparedWritebackResolver &resolve_writeback,
+                                  util::DiagnosticEmitter emit_error);
   /// @brief Publish dirty state and the data epoch before a CU atomic's first lane.
   /// @details The returned leases retain all cache locks and prepared grants
   /// through every lane. Release publishes only the instruction epoch, so one
