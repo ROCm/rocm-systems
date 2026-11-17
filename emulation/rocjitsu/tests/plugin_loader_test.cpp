@@ -129,6 +129,17 @@ TEST_F(PluginLoaderTest, RequiredNamedPluginReportsFailedName) {
   EXPECT_EQ(diagnostic.message(), "required plugin 'missing' failed to load");
 }
 
+TEST_F(PluginLoaderTest, RequiredPluginsRejectsObject) {
+  util::StringDiagnostic diagnostic;
+  util::FailureOr<std::shared_ptr<rocjitsu::ExecutionPluginGroup>> group =
+      rocjitsu::PluginLoader::configure_plugin_group(
+          R"({"required_plugins":{"site-tracer":"race"},"plugins":{"race":{}}})",
+          PLUGIN_LOADER_FIXTURE_DIR, diagnostic.emitter());
+
+  EXPECT_TRUE(group.failed());
+  EXPECT_EQ(diagnostic.message(), "top-level 'required_plugins' must be an array");
+}
+
 TEST_F(PluginLoaderTest, RequiringAllPluginsAllowsNoPlugins) {
   util::FailureOr<std::shared_ptr<rocjitsu::ExecutionPluginGroup>> group =
       rocjitsu::PluginLoader::configure_plugin_group(R"({"require_all_plugins":true})",
