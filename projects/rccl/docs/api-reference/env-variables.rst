@@ -896,6 +896,20 @@ in the following table.
         | Values ``> MAXCHANNELS`` set through ``ncclConfig_t`` are rejected
         | with ``ncclInvalidArgument`` at communicator initialization.
 
+    * - | ``RCCL_SATURATE_P2P_NCHANNELS``
+        | Tiles the P2P channel pool across the peers in one round.
+        | The per-peer count becomes the largest power of two that does not
+        | exceed the channel pool divided by the configured peer limit
+        | (``ncclConfig_t::maxP2pPeers`` when set, otherwise the communicator
+        | size).
+        | Unset is on for gfx1250 and off elsewhere. ``0`` leaves the tuned
+        | count. Any other value, including ``-1``, turns tiling on.
+        | On multi-node gfx942, a value other than unset or ``0`` also skips
+        | the remote ``ncclAlltoAll`` cap of 2 channels per peer. Unset and
+        | ``0`` still apply that cap.
+      - | Integer.
+        | Default: unset (``-2``), on for gfx1250 and off elsewhere.
+
     * - | ``NCCL_P2P_MAX_PEERS``
         | Sets the maximum number of peers a rank communicates with concurrently
         | over P2P. This overrides the value of the ``maxP2pPeers`` field in
