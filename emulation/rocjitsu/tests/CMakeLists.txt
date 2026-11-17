@@ -586,6 +586,7 @@ add_executable(
     sdma_ring_consumer_test.cpp
     cdna5_tensor_dma_test.cpp
     ds_address_encoded_fields_test.cpp
+    ds_offset_encoded_fields_test.cpp
     gfx1100_ds_address_test.cpp
     gfx1251_ds_address_test.cpp
     ds_memory_snapshot_test.cpp
@@ -620,6 +621,7 @@ add_executable(
     rdna4_dot_dpp_test.cpp
     rdna1_valu_test.cpp
     rdna4_memory_test.cpp
+    memory_displacement_encoded_fields_test.cpp
     rdna4_encoded_fields_test.cpp
     readlane_selector_test.cpp
     pc_extension_test.cpp
