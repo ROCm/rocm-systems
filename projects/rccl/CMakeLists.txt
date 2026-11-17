@@ -127,7 +127,7 @@ option(GENERATE_SYM_KERNELS                    "Generate symmetric memory kernel
 option(ENABLE_TDM_SIMPLE                       "Build the experimental gfx1250 TDM SIMPLE copy and reduce paths" OFF)
 option(ENABLE_TDM_PRIM_LL128                   "Build the experimental gfx1250 TDM LL128 user-buffer path" OFF)
 option(ENABLE_TDM_NAN                          "Build the gfx1250 TDM path of the NaN-flag protocol" OFF)
-option(ENABLE_STORE_FREE_STEP_BARRIER          "gfx1250 LL and LL128 step barriers skip waiting for remote stores" ON)
+option(ENABLE_STORE_FREE_STEP_BARRIER          "gfx1250 LL/LL128/NaN step barriers skip waiting for remote stores" ON)
 option(INSTALL_DEPENDENCIES                    "Force install dependencies"                    OFF)
 option(REPORT_KERNEL_RESOURCE_USE              "Append -Rpass-analysis=kernel to CXX flags"    OFF)
 option(ROCTX                                   "Enable ROCTX"                                  ${RCCL_DEFAULT_ROCTX})
