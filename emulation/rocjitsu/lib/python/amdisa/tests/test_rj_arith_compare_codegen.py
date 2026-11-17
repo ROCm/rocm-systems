@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 from types import SimpleNamespace
+from amdisa.__main__ import _PROFILES
 from amdisa.codegen.execute import ExecuteContext
 
 
@@ -26,7 +27,7 @@ def context(arch, name, dst, src, *, is_vop3=False, result_writer=None):
     return ExecuteContext(
         inst=SimpleNamespace(name=name),
         sem=None,
-        profile=None,
+        profile=_PROFILES[arch.replace('_', '.')](),
         arch_name=arch,
         dst_ops=dst,
         src_ops=src,
@@ -213,7 +214,8 @@ def test_class_comparisons_use_one_word_class_masks_without_optional_state(name)
         assert 'arithmetic_reports_fp_status' not in body
         assert 'false, commit_result' in body
     assert (
-        gen_class_compare(context('cdna2', name, [], ['a', 'b'], is_vop3=False)) is None
+        gen_class_compare(context('cdna2', name, [], ['a', 'b'], is_vop3=False))
+        is not None
     )
 
 
@@ -301,3 +303,21 @@ def test_tru_alias_is_cdna_only(prefix):
             context(arch, prefix + '_TRU_F32', ['d'], ['a', 'b'], is_vop3=True)
         )
         assert (body is None) == (arch == 'rdna2')
+
+
+@pytest.mark.parametrize('arch', ('cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5'))
+@pytest.mark.parametrize('bits', (16, 32, 64))
+@pytest.mark.parametrize('cmpx', (False, True))
+def test_older_class_compare_profile_contract(arch, bits, cmpx):
+    name = ('V_CMPX' if cmpx else 'V_CMP') + f'_CLASS_F{bits}'
+    body = gen_class_compare(context(arch, name, ['dst'], ['a', 'b'], is_vop3=True))
+    assert f'execute_compare<{bits}, {min(bits, 32)}>' in body
+    assert ('wf.set_exec(result)' in body) == cmpx
+    profile = _PROFILES[arch.replace('_', '.')]()
+    assert ('write_wave_mask_scalar(dst' in body) == (
+        not cmpx or profile.cmpx_writes_vcc
+    )
+    assert ('RJ_ARITH_ALU_HIGH_A' in body) == (
+        bits == 16 and profile.uses_true16_vop3_opsel
+    )
+    assert 'excp_flag_user' not in body and 'trapsts' not in body
