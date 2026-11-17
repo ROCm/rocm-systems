@@ -238,7 +238,7 @@ TEST(RjWaitcheck, ReportsMissingWait) {
   EXPECT_TRUE(stderr_text.empty()) << stderr_text;
 
   const std::array<std::string_view, 4> expected = {
-      "rj_waitcheck:", "diagnostics=1", "missing s_wait_loadcnt <= 0", "consumer .text+"};
+      "rj_waitcheck:", "diagnostics=1", "missing s_wait_loadcnt 0", "consumer .text+"};
   for (const std::string_view needle : expected) {
     EXPECT_TRUE(contains(stdout_text, needle))
         << "missing expected output fragment: " << needle << "\noutput:\n"
@@ -1030,7 +1030,7 @@ TEST(RjWaitcheck, BatchSkipsUnsupportedInputs) {
       "missing_wait_gfx1200.co:gfx1200[0]: instructions=2 memory-events=1 diagnostics=1",
       "correct_wait_gfx1200.co:gfx1200[0]: instructions=3 memory-events=1 diagnostics=0",
       "unsupported.txt: skipped: failed to parse input executable or code object",
-      "missing s_wait_loadcnt <= 0",
+      "missing s_wait_loadcnt 0",
       "rj_waitcheck: scanned inputs=3 skipped=1 code-objects=2 diagnostics=1"};
   for (const std::string_view needle : expected) {
     EXPECT_TRUE(contains(stdout_text, needle))
@@ -1324,7 +1324,7 @@ TEST(RjWaitcheck, RecursiveDirectorySweepScansNestedCorpusFiles) {
       "correct_wait_gfx1200.co:gfx1200[0]: instructions=3 memory-events=1 diagnostics=0",
       "missing_wait_gfx1200.co:gfx1200[0]: instructions=2 memory-events=1 diagnostics=1",
       "unsupported.txt: skipped: failed to parse input executable or code object",
-      "missing s_wait_loadcnt <= 0",
+      "missing s_wait_loadcnt 0",
       "rj_waitcheck: scanned inputs=3 skipped=1 code-objects=2 diagnostics=1"};
   for (const std::string_view needle : expected) {
     EXPECT_TRUE(contains(stdout_text, needle))
