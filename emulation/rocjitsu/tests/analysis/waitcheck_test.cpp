@@ -4408,6 +4408,33 @@ TEST(WaitcheckTest, Gfx11EmptyExecFlatCannotAgeAnIsolatedLdsResult) {
     }
 }
 
+TEST(WaitcheckTest, Gfx11ModeledVmPositionDoesNotProveEmptyExecFlatDsIssue) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5})
+    for (bool active : {false, true}) {
+      SCOPED_TRACE(testing::Message() << arch << " active " << active);
+      const std::vector<uint32_t> words{0xd8d80000,
+                                        0x02000001, // ds_load_b32 v2,v1
+                                        0xdc520000,
+                                        0x080a0009, // global_load_b32 v8,v9,s[10:11]
+                                        active ? 0xbefe0081u : 0xbefe0080u, // EXEC_LO=1 or 0
+                                        0xdc680000,
+                                        0x007c0503, // flat_store_b32 v[3:4],v5
+                                        0xbefe00c1, // EXEC_LO=-1
+                                        0xbf89fc17, // s_waitcnt lgkmcnt(1)
+                                        0x7e0c0302,
+                                        0xbfb00000}; // v_mov_b32 v6,v2; s_endpgm
+      const auto report = analyze_waitcnts(TestCodeObject(words), arch);
+      ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+      const auto source = std::ranges::find_if(report.diagnostics, [](const auto &diagnostic) {
+        return diagnostic.reg == RegisterRef{RegClass::VGPR, 2, 1} &&
+               diagnostic.counter == WaitCounterKind::Ds;
+      });
+      EXPECT_EQ(source != report.diagnostics.end(), !active) << diagnostic_summary(report);
+      if (source != report.diagnostics.end())
+        EXPECT_EQ(source->required_count, 0u);
+    }
+}
+
 TEST(WaitcheckTest, Gfx11SkippedFlatDoesNotForceLdsAdmission) {
   for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5})
     for (bool active : {false, true}) {
