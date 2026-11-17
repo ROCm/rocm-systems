@@ -5373,12 +5373,8 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
         return MAP_FAILED;
       }
       ptr = client_mapping.get();
-      if (flags & MAP_FIXED) {
-        clear_host_svm_policy_after_change_locked(proc, reinterpret_cast<uint64_t>(ptr), length,
-                                                  &va_transaction);
-        if (on_host_vma_change)
-          on_host_vma_change();
-      }
+      if ((flags & MAP_FIXED) && on_host_vma_change)
+        on_host_vma_change();
       if (ranges_overlap(ptr, length, monitor_ptr, length)) {
         discard_new_fd();
         errno = EINVAL;
@@ -5411,16 +5407,23 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
           errno = EINVAL;
           return MAP_FAILED;
         }
-        // Successful direct mappings own their VA, including holes in an old
-        // BO's surviving CPU views. Keep the prior denials if publication fails.
+        // Retire the replaced host view and claim the new doorbell in one
+        // publication. A failed mmap keeps the prior denials and retry state.
+        // Live allocation CPU views were excluded before the host replacement.
         auto previous_retired_ranges = proc.retired_gpu_ranges_;
+        auto previous_retired_views = proc.retired_identity_views_;
         auto previous_svm_denials = proc.svm_denied_ranges_;
         auto previous_svm_access = proc.svm_access_ranges_;
         try {
+          if (flags & MAP_FIXED) {
+            const auto range = *rounded_host_vma_range(reinterpret_cast<uint64_t>(ptr), length);
+            (void)proc.clear_host_svm_policy_locked(range.first, range.second);
+          }
           proc.claim_gpu_range_locked(reinterpret_cast<uint64_t>(ptr), length);
           proc.publish_gpu_grants_locked(va_transaction);
         } catch (...) {
           proc.retired_gpu_ranges_.swap(previous_retired_ranges);
+          proc.retired_identity_views_.swap(previous_retired_views);
           proc.svm_denied_ranges_.swap(previous_svm_denials);
           proc.svm_access_ranges_.swap(previous_svm_access);
           throw;
