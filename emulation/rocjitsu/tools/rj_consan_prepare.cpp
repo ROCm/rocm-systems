@@ -24,22 +24,33 @@ bool write(const std::filesystem::path &path, std::span<const uint8_t> bytes) {
 int run(int argc, char **argv) {
   std::vector<std::string_view> entries;
   std::filesystem::path destination;
+  rocjitsu::consan::ScopeKind scope = rocjitsu::consan::ScopeKind::NativeLdsNoSynchronization;
+  bool profile_seen = false;
   if (argc == 5) {
     entries.push_back(argv[3]);
     destination = argv[4];
   } else if (argc >= 6 && (argc % 2) == 0) {
     destination = argv[3];
     for (int index = 4; index < argc; index += 2) {
-      if (std::string_view(argv[index]) != "--entry") {
-        std::cerr << "Expected --entry NAME\n";
+      const std::string_view option(argv[index]);
+      const std::string_view value(argv[index + 1]);
+      if (option == "--profile" && !profile_seen &&
+          (value == "lds" || value == "execution-trace")) {
+        profile_seen = true;
+        scope = value == "execution-trace"
+                    ? rocjitsu::consan::ScopeKind::ExecutionTrace
+                    : rocjitsu::consan::ScopeKind::NativeLdsNoSynchronization;
+      } else if (option == "--entry") {
+        entries.push_back(value);
+      } else {
+        std::cerr << "Expected --entry NAME or one --profile lds|execution-trace\n";
         return 2;
       }
-      entries.push_back(argv[index + 1]);
     }
   } else {
-    std::cerr
-        << "Usage: rj_consan_prepare ORIGINAL TARGET NEW-DIRECTORY --entry NAME [--entry NAME]\n"
-           "   or: rj_consan_prepare ORIGINAL TARGET ENTRY NEW-DIRECTORY\n";
+    std::cerr << "Usage: rj_consan_prepare ORIGINAL TARGET NEW-DIRECTORY [--profile "
+                 "lds|execution-trace] --entry NAME [--entry NAME]\n"
+                 "   or: rj_consan_prepare ORIGINAL TARGET ENTRY NEW-DIRECTORY\n";
     return 2;
   }
   const rocjitsu::consan::TargetProfile *target = rocjitsu::consan::target_profile(argv[2]);
@@ -65,7 +76,7 @@ int run(int argc, char **argv) {
   }
   rocjitsu::consan::InputError error;
   const rocjitsu::FailureOr<rocjitsu::consan::PreparedImageArtifact> artifact =
-      rocjitsu::consan::prepare_image(original, *target, entries, error);
+      rocjitsu::consan::prepare_image(original, *target, entries, error, scope);
   if (artifact.failed()) {
     std::cerr << "Preparation rejected input: " << error.message << '\n';
     return 2;
@@ -104,6 +115,7 @@ int run(int argc, char **argv) {
     }
     const rocjitsu::consan::Manifest &manifest = *entry.selected;
     std::cout << "prepared_bytes=" << manifest.prepared.bytes << " sites=" << manifest.sites.size()
+              << " boundaries=" << manifest.boundaries.size()
               << " entry_offset=" << manifest.entry.prepared_entry_offset
               << " sgprs=" << manifest.entry.prepared_sgprs
               << " vgprs=" << manifest.entry.prepared_vgprs << '\n';

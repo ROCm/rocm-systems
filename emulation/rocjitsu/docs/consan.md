@@ -168,7 +168,7 @@ status. A failed finish does not promise recovery from work still in flight.
 Unexpected C++ exceptions terminate the process and do not promise recovery,
 cleanup or completion of outstanding work.
 
-#### Native application infrastructure profile
+#### Application infrastructure profile
 
 `RJ_CONSAN_APPLICATION_PROFILE=1` enables the bounded application adapter.
 `RJ_CONSAN_NATIVE_IMAGES` is a colon-separated list of exact original code-object
@@ -190,8 +190,9 @@ nonzero private segments, and descriptor register allocations larger than their
 metadata requirement.
 Selected-entry qualification retains its stricter register and ISA requirements.
 
-The native packet profile accepts individual standard dispatches and AMD extended
-format 3 dispatches with original completion signal zero. Hardware workgroup
+The native packet profile accepts standard dispatches and AMD extended format 3
+dispatches with original completion signal zero. ROCR callback batches are split
+in their original order, up to the shared 1024-execution budget. Hardware workgroup
 limits and required workgroup shapes are checked; the metadata flat bound is
 retained as inventory rather than imposing the selected detector's launch bound
 on native packets. Only the null completion field changes, to a fresh runtime-owned
@@ -230,12 +231,95 @@ variants use `NODELETE` to keep hook code mapped when ROCR closes the tool insid
 that call; Runtime resources are still released, but the DSO mapping remains for
 the process lifetime.
 
+#### Execution trace for application transport
+
+Use an explicit profile to instrument entry and terminal boundaries without
+performing LDS analysis:
+
+```bash
+"$consan_prepare" original.hsaco gfx1250 new-artifact-directory \
+  --profile execution-trace --entry kernel_a --entry kernel_b
+export RJ_CONSAN_APPLICATION_PROFILE=1
+export RJ_CONSAN_ARTIFACT_DIR=/absolute/path/to/new-artifact-directory
+export RJ_CONSAN_SELECTION_PROFILE=<printed-selection-profile>
+export RJ_CONSAN_NATIVE_IMAGES=/absolute/path/to/exact-runtime-helper.hsaco
+```
+
+Keep the selected original image out of `RJ_CONSAN_NATIVE_IMAGES`: exact native
+matches deliberately remain native. The new profile has a distinct options and
+selection digest. Existing artifacts/captures must be regenerated after a producer
+contract change; runtime and offline decoding reject mismatched contracts.
+
+This profile admits gfx1250 wave32 selected entries with zero private segment,
+a closed direct CFG, recognizable terminal instructions, an enabled original
+workgroup-X input, and the shared SBI preservation/resource checks. Natural
+loops and zero LDS are supported. Calls, indirect control flow, guest PC
+introspection and VGPR deallocation remain outside this profile. Entry/exit boundary mappings are
+separate from LDS access sites; a trace manifest has no LDS sites.
+
+Selected dispatches require complete 1D workgroups, up to 512 groups, and retain
+the original required workgroup shape and metadata flat bound. Extended-format-3
+selected packets require unit cluster sizes in every dimension: TTMP9 supplies
+a cluster coordinate for nonunit clusters and cannot identify a unique report
+row. Native dispatches retain support for nonunit clusters. A GPU probe uses
+snapshots of original VGPR0 lane zero and TTMP9 to identify local wave and
+workgroup. Every expected row must contain its own serial, entry, flattened row,
+workgroup, local wave and exactly one entry plus one exit observation. The host
+initializes these counters to zero; it does not synthesize probe execution.
+
+Application trace accepts original kernargs only when pointer-info proves a
+known HSA allocation, a nonnull equal host/agent base, and the full argument
+extent. CPU-mapped coarse allocations are allowed for this pre-publication copy;
+unknown, locked, inaccessible or aliased pointers are rejected. The runtime-owned
+wrapper, context and report still use a fine-grained CPU pool. Original arguments
+and the original guest pointer are saved before forwarding the dispatch, so
+completion never requires rereading application-owned kernargs.
+
+Selected packets retain their representation, dependency signal, cluster
+geometry, performance hints and barrier bit. They replace kernargs/completion and
+strengthen acquire/release fences to SYSTEM for report visibility. ConSan adds
+no barrier packet, dependency edge or per-dispatch host wait. This visibility
+requirement and instrumentation overhead mean timing equivalence is not claimed.
+The initial application profile requires null dispatch completions; no nonexistent
+application signal is forwarded. Saved completion evidence certifies visibility,
+without claiming signal forwarding or single-queue/nonoverlap restrictions.
+
+The observer copies each completed report into independent owning host bytes
+before permitting storage reuse. A serial-keyed queue lets observation and copy
+continue while the writer emits captures in submission order. Application report
+slots are bounded by the execution and cumulative capture-byte budgets; legacy
+LDS admission retains its 16-slot limit. Queue/executable teardown waits through
+its launches' independent copy, and finish waits for the submitted prefix and
+successful End/close/publication.
+
+`rj_consan_analyze` dispatches trace captures to a separate transport analyzer.
+Its JSON says `scope: execution_trace` and `lds_analysis: not_performed`, with
+expected/completed rows, validated entry/exit event counts, per-execution gaps and
+native-uncovered entries. It emits no LDS verdict or race counters. Trace exit
+codes are 0 for complete observed transport, 1 for transport gaps, 2 for invalid
+input, and 3 for output failure; `--examples` remains an LDS-only option and does
+not change trace diagnostics. An empty execution list cannot certify transport.
+
+Registered `ConSanExecutionTraceSim.Groups1`, `.Groups16` and `.Groups512` controls
+execute the original whole A/B/C/A fixture with original CPU output oracles and
+native mixing, then replay in a fresh process after removing test artifacts.
+Their application's following completion barrier is part of the fixture; the
+ConSan interceptor adds none. These controls exercise simulator execution,
+including TTMP workgroup attribution, and do not establish physical-GPU coverage.
+
 ### Offline diagnosis
 
 The analyzer validates the closed capture, joins GPU observations to static
 instruction facts, runs the checks, and emits JSON findings and coverage. The
 capture owns the evidence needed for replay; analysis needs neither the
 original code-object files nor live HSA state.
+
+A prepared image's selected entries share one qualified scope; native entries
+have no analysis facts. Mixed selected LDS/trace scopes and mixed barrier/loop
+scopes are rejected before publication. The shared contract retains LDS scopes
+1 (no synchronization), 2 (workgroup barrier), and 3 (bounded barrier loop), with
+execution trace assigned scope 4. Readers interpret each scope's row fields
+independently; trace counters are never barrier completion evidence.
 
 ## Available analysis
 

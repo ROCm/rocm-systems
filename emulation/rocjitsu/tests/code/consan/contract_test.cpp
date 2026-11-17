@@ -321,6 +321,94 @@ TEST(ConSanBoundedLaunch, ProbeRowOffsetsCannotWrapWhenSoftwareBudgetsAreRaised)
   EXPECT_EQ(error.message(), "report or wrapper extent exceeds budget");
 }
 
+Manifest trace_example() {
+  Manifest manifest = example();
+  manifest.scope = ScopeKind::ExecutionTrace;
+  manifest.options = profile_options_digest(manifest.scope);
+  manifest.target = 1250;
+  manifest.entry.workgroup_id_scalar = kWorkgroupIdTtmp9Selector;
+  manifest.entry.original_group_bytes = manifest.entry.prepared_group_bytes = 0;
+  manifest.sites.clear();
+  manifest.boundaries = {{.kind = BoundaryKind::Entry,
+                          .original_offset = 0,
+                          .prepared_guest_offset = 512,
+                          .prepared_guest_size = 0,
+                          .probe_offset = 64,
+                          .probe_size = 64},
+                         {.kind = BoundaryKind::Exit,
+                          .original_offset = 64,
+                          .prepared_guest_offset = 640,
+                          .prepared_guest_size = 4,
+                          .probe_offset = 288,
+                          .probe_size = 64}};
+  return manifest;
+}
+
+TEST(ConSanExecutionTraceContract, OwnsBoundaryFactsAndPlansEveryWorkgroupRow) {
+  const Manifest manifest = trace_example();
+  EXPECT_NE(manifest.options, mvp_options_digest());
+  const FailureOr<std::vector<uint8_t>> encoded = encode_manifest(manifest);
+  ASSERT_TRUE(encoded.succeeded());
+  const FailureOr<Manifest> decoded = decode_manifest(encoded.value());
+  ASSERT_TRUE(decoded.succeeded());
+  EXPECT_EQ(decoded.value(), manifest);
+  const LaunchDimensions dimensions = {.grid = {512, 1, 1}, .workgroup = {32, 1, 1}};
+  const FailureOr<LaunchLayout> layout = plan_launch(manifest, dimensions, 0, 0);
+  ASSERT_TRUE(layout.succeeded());
+  EXPECT_EQ(layout.value().wave_count, 16u);
+  EXPECT_EQ(layout.value().row_stride, kRowHeaderBytes);
+  EXPECT_EQ(layout.value().report_bytes, kReportHeaderBytes + 16u * kRowHeaderBytes);
+  const FailureOr<TransportImage> transport =
+      initialize_transport(manifest, dimensions, 0, 0, 17, 0x10000);
+  ASSERT_TRUE(transport.succeeded());
+  for (uint32_t row = 0; row < 16; ++row) {
+    const size_t offset = kReportHeaderBytes + row * kRowHeaderBytes;
+    EXPECT_EQ(wire::read_u32(transport.value().report, offset + wire::kRowStatus), 0u);
+    EXPECT_EQ(wire::read_u32(transport.value().report, offset + wire::kTraceRowEntries), 0u);
+    EXPECT_EQ(wire::read_u32(transport.value().report, offset + wire::kTraceRowExits), 0u);
+  }
+}
+
+TEST(ConSanExecutionTraceContract, ProfilesAndBoundaryMappingsCannotBeInterchanged) {
+  Manifest manifest = trace_example();
+  manifest.options = mvp_options_digest();
+  EXPECT_TRUE(validate_manifest(manifest).failed());
+  manifest = trace_example();
+  manifest.sites = example().sites;
+  EXPECT_TRUE(validate_manifest(manifest).failed());
+  manifest = trace_example();
+  manifest.boundaries.erase(manifest.boundaries.begin());
+  EXPECT_TRUE(validate_manifest(manifest).failed());
+  manifest = trace_example();
+  manifest.boundaries.push_back(manifest.boundaries.back());
+  EXPECT_TRUE(validate_manifest(manifest).failed());
+  manifest = trace_example();
+  manifest.boundaries.back().probe_offset = manifest.prepared_text_bytes;
+  EXPECT_TRUE(validate_manifest(manifest).failed());
+  manifest = example();
+  manifest.boundaries = trace_example().boundaries;
+  EXPECT_TRUE(validate_manifest(manifest).failed());
+}
+
+TEST(ConSanExecutionTraceContract, BoundsCompleteWorkgroupsAndTheExactReportBudget) {
+  const Manifest manifest = trace_example();
+  const LaunchDimensions largest = {.grid = {512 * 64, 1, 1}, .workgroup = {64, 1, 1}};
+  const FailureOr<LaunchLayout> layout = plan_launch(manifest, largest, 0, 0);
+  ASSERT_TRUE(layout.succeeded());
+  EXPECT_EQ(layout.value().wave_count, 1024u);
+  EXPECT_EQ(layout.value().report_bytes, 65600u);
+  ContractLimits limits;
+  limits.report_bytes = layout.value().report_bytes;
+  EXPECT_TRUE(plan_launch(manifest, largest, 0, 0, {}, limits).succeeded());
+  --limits.report_bytes;
+  EXPECT_TRUE(plan_launch(manifest, largest, 0, 0, {}, limits).failed());
+  for (const LaunchDimensions dimensions :
+       {LaunchDimensions{{513 * 64, 1, 1}, {64, 1, 1}}, LaunchDimensions{{65, 1, 1}, {64, 1, 1}},
+        LaunchDimensions{{32, 2, 1}, {32, 2, 1}}, LaunchDimensions{}})
+    EXPECT_TRUE(plan_launch(manifest, dimensions, 0, 0).failed());
+  EXPECT_TRUE(plan_launch(example(), largest, 8, 0).failed());
+}
+
 class ConSanContract : public ::testing::Test {
 protected:
   void SetUp() override {
@@ -376,7 +464,7 @@ TEST_F(ConSanContract, OwningFactsRoundTripIsCanonicalAndLittleEndian) {
   const FailureOr<std::vector<uint8_t>> reencoded = encode_manifest(decoded.value());
   ASSERT_TRUE(reencoded.succeeded());
   EXPECT_EQ(reencoded.value(), bytes_);
-  EXPECT_EQ(bytes_.size(), 64u + 144u + 92u + original.entry.name.size() + 4u + 2u * 68u + 4u);
+  EXPECT_EQ(bytes_.size(), 64u + 144u + 92u + original.entry.name.size() + 4u + 2u * 68u + 4u + 4u);
   // gfx1100 is encoded as the integer 1100, after the two image identities
   // and the options digest. This also pins the independently specified layout.
   EXPECT_EQ(bytes_[64 + 112], 0x4c);
@@ -467,7 +555,7 @@ TEST_F(ConSanContract, CountAndStringLengthsCannotCauseUnboundedAllocation) {
   put32(count_offset(), 1);
   rehash();
   EXPECT_TRUE(decode_manifest(bytes_, error_.emitter()).failed());
-  EXPECT_EQ(error_.message(), "barrier count disagrees with extent");
+  EXPECT_EQ(error_.message(), "boundary count disagrees with extent");
   put32(kEntry + 4, std::numeric_limits<uint32_t>::max());
   rehash();
   EXPECT_TRUE(decode_manifest(bytes_, error_.emitter()).failed());
@@ -593,7 +681,7 @@ TEST_F(ConSanContract, RejectsBarrierFormMismatchesInTypedAndRehashedEncodedFact
         EXPECT_EQ(error_.message(), "invalid fixed barrier qualification or mapping");
         bytes_ = encoded.value();
         constexpr size_t kBarrierBytes = 6 * sizeof(uint64_t) + 2 * sizeof(uint32_t);
-        const size_t offset = bytes_.size() - kBarrierBytes;
+        const size_t offset = bytes_.size() - kBarrierBytes - sizeof(uint32_t);
         const std::array<uint64_t, 6> fields = {barrier.original_drain, barrier.original_signal,
                                                 barrier.original_wait,  barrier.prepared_signal,
                                                 barrier.prepared_wait,  barrier.completion_probe};
@@ -649,7 +737,7 @@ TEST_F(ConSanContract, LegacyBarrierAliasDoesNotPermitOverlappingPreparedGroups)
         EXPECT_EQ(encode_manifest(changed, error_.emitter()).failed(), overlaps);
         bytes_ = encoded.value();
         constexpr size_t kBarrierBytes = 6 * sizeof(uint64_t) + 2 * sizeof(uint32_t);
-        const size_t offset = bytes_.size() - kBarrierBytes;
+        const size_t offset = bytes_.size() - kBarrierBytes - sizeof(uint32_t);
         ASSERT_TRUE(wire::write_u64(bytes_, offset + 24, wait));
         ASSERT_TRUE(wire::write_u64(bytes_, offset + 32, wait));
         ASSERT_TRUE(wire::write_u64(bytes_, offset + 40, wait + 4));
@@ -716,7 +804,7 @@ TEST_F(ConSanContract, RejectsOverlappingPreparedBarrierMappings) {
     // a missing decoder check. Keep framing and checksum valid.
     bytes_ = encoded.value();
     constexpr size_t kBarrierBytes = 6 * sizeof(uint64_t) + 2 * sizeof(uint32_t);
-    const size_t barrier = bytes_.size() - kBarrierBytes;
+    const size_t barrier = bytes_.size() - kBarrierBytes - sizeof(uint32_t);
     wire::write_u64(bytes_, barrier + 24, overlap.signal);
     wire::write_u64(bytes_, barrier + 32, overlap.wait);
     wire::write_u64(bytes_, barrier + 40, overlap.wait + 4);
@@ -766,7 +854,7 @@ TEST_F(ConSanContract, RejectsBarrierCallbacksOverlappingAccessEnvelopes) {
     // Independently exercise decoding with valid framing and checksum.
     bytes_ = encoded.value();
     constexpr size_t kBarrierBytes = 6 * sizeof(uint64_t) + 2 * sizeof(uint32_t);
-    const size_t barrier = bytes_.size() - kBarrierBytes;
+    const size_t barrier = bytes_.size() - kBarrierBytes - sizeof(uint32_t);
     ASSERT_TRUE(wire::write_u64(bytes_, barrier + 32, mapping.wait));
     ASSERT_TRUE(wire::write_u64(bytes_, barrier + 40, mapping.wait + 4));
     put32(barrier + 48, mapping.probe_size);
@@ -861,9 +949,9 @@ TEST_F(ConSanContract, BarrierJournalCapacityIsInclusiveForTypedAndEncodedFacts)
   // an extent or checksum error must not mask the decoder's capacity guard.
   bytes_ = encoded.value();
   constexpr size_t kBarrierBytes = 6 * sizeof(uint64_t) + 2 * sizeof(uint32_t);
-  const size_t count = bytes_.size() - kSyncCapacity * kBarrierBytes - sizeof(uint32_t);
-  const size_t tail = bytes_.size();
-  bytes_.resize(tail + kBarrierBytes);
+  const size_t count = bytes_.size() - kSyncCapacity * kBarrierBytes - 2 * sizeof(uint32_t);
+  const size_t tail = bytes_.size() - sizeof(uint32_t);
+  bytes_.insert(bytes_.end() - sizeof(uint32_t), kBarrierBytes, 0);
   put32(count, kSyncCapacity + 1);
   const std::array<uint64_t, 6> offsets = {extra.original_drain, extra.original_signal,
                                            extra.original_wait,  extra.prepared_signal,

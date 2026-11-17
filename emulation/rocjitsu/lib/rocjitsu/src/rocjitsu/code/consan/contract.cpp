@@ -73,9 +73,11 @@ constexpr std::array<uint8_t, 8> kFactsMagic = {'R', 'J', 'C', 'S', 'F', 'A', 'C
 constexpr size_t kEnvelopeBytes = 8 + 16 + 8 + 32;
 constexpr size_t kSiteWireBytes = 68;
 constexpr size_t kBarrierWireBytes = 56;
+constexpr size_t kBoundaryWireBytes = 36;
 // Manifest prefix (144), entry fields including the name length (92), and site
-// count (4). Name bytes and per-site records are accounted for separately.
-constexpr size_t kFixedPayloadBytes = 144 + 92 + 4;
+// and boundary counts (4 each). Barrier count and variable records are
+// accounted for separately.
+constexpr size_t kFixedPayloadBytes = 144 + 92 + 4 + 4;
 
 void encode_site(wire::Encoder &encoder, const SiteFacts &site) {
   encoder.u32(site.id);
@@ -118,6 +120,26 @@ bool decode_site(wire::Decoder &decoder, SiteFacts &site) {
   return true;
 }
 
+void encode_boundary(wire::Encoder &encoder, const BoundaryFacts &boundary) {
+  encoder.u32(static_cast<uint32_t>(boundary.kind));
+  encoder.u64(boundary.original_offset);
+  encoder.u64(boundary.prepared_guest_offset);
+  encoder.u32(boundary.prepared_guest_size);
+  encoder.u64(boundary.probe_offset);
+  encoder.u32(boundary.probe_size);
+}
+
+bool decode_boundary(wire::Decoder &decoder, BoundaryFacts &boundary) {
+  uint32_t kind = 0;
+  if (!decoder.u32(kind) || !decoder.u64(boundary.original_offset) ||
+      !decoder.u64(boundary.prepared_guest_offset) || !decoder.u32(boundary.prepared_guest_size) ||
+      !decoder.u64(boundary.probe_offset) || !decoder.u32(boundary.probe_size)) {
+    return false;
+  }
+  boundary.kind = static_cast<BoundaryKind>(kind);
+  return true;
+}
+
 } // namespace
 
 bool valid_workgroup_requirement(const std::array<uint32_t, 3> &shape, uint32_t maximum) {
@@ -139,8 +161,20 @@ Digest digest(std::span<const uint8_t> bytes) {
 }
 
 Digest mvp_options_digest() {
+  return profile_options_digest(ScopeKind::NativeLdsNoSynchronization);
+}
+
+Digest profile_options_digest(ScopeKind scope) {
   util::Sha256 hash;
-  hash.update(kMvpOptions);
+  if (scope == ScopeKind::NativeLdsNoSynchronization ||
+      scope == ScopeKind::NativeLdsWorkgroupBarrier ||
+      scope == ScopeKind::NativeLdsWorkgroupBarrierLoop) {
+    hash.update(kMvpOptions);
+  } else if (scope == ScopeKind::ExecutionTrace) {
+    hash.update(kExecutionTraceOptions);
+  } else {
+    return {};
+  }
   return hash.finish();
 }
 
@@ -149,18 +183,20 @@ Result validate_manifest(const Manifest &manifest, util::DiagnosticEmitter diagn
   if (manifest.original.bytes > limits.image_bytes ||
       manifest.prepared.bytes > limits.image_bytes || manifest.sites.size() > limits.sites ||
       manifest.entry.name.size() > limits.string_bytes ||
-      manifest.barriers.size() > kSyncCapacity) {
+      manifest.barriers.size() > kSyncCapacity || manifest.boundaries.size() > limits.sites) {
     return diagnostic.emit() << "image, site or name budget exceeded";
   }
 
   const uint64_t encoded_bytes = kEnvelopeBytes + kFixedPayloadBytes + manifest.entry.name.size() +
                                  uint64_t{manifest.sites.size()} * kSiteWireBytes +
-                                 (4 + manifest.barriers.size() * kBarrierWireBytes);
+                                 (4 + manifest.barriers.size() * kBarrierWireBytes) +
+                                 uint64_t{manifest.boundaries.size()} * kBoundaryWireBytes;
   if (encoded_bytes > limits.metadata_bytes) {
     return diagnostic.emit() << "static facts exceed metadata budget";
   }
 
-  // Older capture profiles share this wire layout. Only admit facts their producer supported.
+  // Historical LDS options profiles remain admissible within this producer
+  // contract. Only admit facts supported by their options profile.
   constexpr Digest kPriorWidths = {
       0x8e, 0x4e, 0x17, 0xc7, 0x9d, 0x00, 0x15, 0x6a, 0x93, 0x8a, 0xeb,
       0xa2, 0x32, 0x06, 0x3d, 0xb0, 0xa7, 0x24, 0x2c, 0x81, 0x8f, 0xe1,
@@ -180,12 +216,15 @@ Result validate_manifest(const Manifest &manifest, util::DiagnosticEmitter diagn
   const bool admits_bytes = admits_atomics || manifest.options == kOrdinaryLds;
   const bool admits_b96 = admits_bytes || manifest.options == kB96Widths;
   const TargetProfile *target = target_profile(manifest.target);
+  const bool trace = manifest.scope == ScopeKind::ExecutionTrace;
   if (manifest.original.bytes == 0 || manifest.prepared.bytes == 0 || target == nullptr ||
       !supports_wave(*target, manifest.wave_size) || manifest.code_object_abi != 5 ||
       (manifest.scope != ScopeKind::NativeLdsNoSynchronization &&
        manifest.scope != ScopeKind::NativeLdsWorkgroupBarrier &&
-       manifest.scope != ScopeKind::NativeLdsWorkgroupBarrierLoop) ||
-      (!admits_b96 && manifest.options != kPriorWidths)) {
+       manifest.scope != ScopeKind::NativeLdsWorkgroupBarrierLoop && !trace) ||
+      (trace && (manifest.target != 1250 || manifest.wave_size != 32)) ||
+      (trace ? manifest.options != profile_options_digest(manifest.scope)
+             : (!admits_b96 && manifest.options != kPriorWidths))) {
     return diagnostic.emit() << "empty image or unsupported target, ABI, scope or options";
   }
 
@@ -197,11 +236,11 @@ Result validate_manifest(const Manifest &manifest, util::DiagnosticEmitter diagn
       !std::has_single_bit(entry.kernarg_alignment) || entry.kernarg_alignment < 8 ||
       entry.original_kernarg_bytes == 0 || entry.original_private_bytes != 0 ||
       entry.prepared_private_bytes != 0 ||
-      entry.prepared_group_bytes < entry.original_group_bytes || entry.prepared_group_bytes < 4 ||
-      entry.prepared_group_bytes > 65536 || entry.prepared_sgprs == 0 ||
-      entry.prepared_sgprs > 106 || entry.prepared_vgprs == 0 || entry.prepared_vgprs > 256 ||
-      (entry.prepared_vgprs % 4) != 0 || entry.maximum_workgroup_size == 0 ||
-      entry.maximum_workgroup_size > 1024 ||
+      entry.prepared_group_bytes < entry.original_group_bytes ||
+      (!trace && entry.prepared_group_bytes < 4) || entry.prepared_group_bytes > 65536 ||
+      entry.prepared_sgprs == 0 || entry.prepared_sgprs > 106 || entry.prepared_vgprs == 0 ||
+      entry.prepared_vgprs > 256 || (entry.prepared_vgprs % 4) != 0 ||
+      entry.maximum_workgroup_size == 0 || entry.maximum_workgroup_size > 1024 ||
       !valid_workgroup_requirement(entry.required_workgroup_size, entry.maximum_workgroup_size) ||
       (entry.workgroup_id_scalar != UINT32_MAX &&
        (isa_properties(target->arch).uses_ttmp_workgroup_ids
@@ -218,11 +257,14 @@ Result validate_manifest(const Manifest &manifest, util::DiagnosticEmitter diagn
       !util::is_range_in_bounds(entry.original_entry_offset, 4, manifest.original_text_bytes) ||
       !util::is_range_in_bounds(entry.prepared_entry_offset, 4, manifest.prepared_text_bytes) ||
       (entry.original_entry_offset % 4) != 0 || (entry.prepared_entry_offset % 4) != 0 ||
-      manifest.sites.empty()) {
+      (trace ? (!manifest.sites.empty() || manifest.boundaries.size() < 2)
+             : (manifest.sites.empty() || !manifest.boundaries.empty()))) {
     return diagnostic.emit() << "entry mapping or text extent is missing";
   }
 
-  if ((manifest.scope != ScopeKind::NativeLdsNoSynchronization) != !manifest.barriers.empty()) {
+  const bool barrier_scope = manifest.scope == ScopeKind::NativeLdsWorkgroupBarrier ||
+                             manifest.scope == ScopeKind::NativeLdsWorkgroupBarrierLoop;
+  if (barrier_scope != !manifest.barriers.empty()) {
     return diagnostic.emit() << "barrier scope and facts disagree";
   }
   if (!manifest.barriers.empty() && entry.maximum_workgroup_size <= manifest.wave_size) {
@@ -230,7 +272,8 @@ Result validate_manifest(const Manifest &manifest, util::DiagnosticEmitter diagn
            << "barrier profile requires a maximum workgroup size permitting two waves";
   }
   std::vector<std::pair<uint64_t, uint64_t>> prepared_ranges;
-  prepared_ranges.reserve(2 * manifest.sites.size() + 2 * manifest.barriers.size());
+  prepared_ranges.reserve(
+      2 * (manifest.sites.size() + manifest.barriers.size() + manifest.boundaries.size()));
   uint64_t previous_barrier_end = 0;
   const bool split_barrier = uses_split_workgroup_barrier(target->arch);
   for (const BarrierFacts &barrier : manifest.barriers) {
@@ -267,6 +310,35 @@ Result validate_manifest(const Manifest &manifest, util::DiagnosticEmitter diagn
     }
     prepared_ranges.emplace_back(barrier.prepared_wait,
                                  barrier.completion_probe + barrier.probe_size);
+  }
+
+  uint64_t previous_exit = 0;
+  for (size_t index = 0; index < manifest.boundaries.size(); ++index) {
+    const BoundaryFacts &boundary = manifest.boundaries[index];
+    const bool entry_boundary = index == 0;
+    if (boundary.kind != (entry_boundary ? BoundaryKind::Entry : BoundaryKind::Exit) ||
+        (entry_boundary && boundary.original_offset != entry.original_entry_offset) ||
+        (!entry_boundary && index > 1 && boundary.original_offset <= previous_exit) ||
+        boundary.prepared_guest_size != (entry_boundary ? 0u : 4u) || boundary.probe_size == 0 ||
+        boundary.probe_size % 4 != 0 || boundary.original_offset % 4 != 0 ||
+        boundary.prepared_guest_offset % 4 != 0 || boundary.probe_offset % 4 != 0 ||
+        !util::is_range_in_bounds(boundary.original_offset, 4, manifest.original_text_bytes) ||
+        boundary.prepared_guest_offset >= manifest.prepared_text_bytes ||
+        !util::is_range_in_bounds(boundary.prepared_guest_offset, boundary.prepared_guest_size,
+                                  manifest.prepared_text_bytes) ||
+        !util::is_range_in_bounds(boundary.probe_offset, boundary.probe_size,
+                                  manifest.prepared_text_bytes)) {
+      return diagnostic.emit() << "invalid entry/exit boundary mapping";
+    }
+    if (boundary.prepared_guest_size != 0) {
+      prepared_ranges.emplace_back(boundary.prepared_guest_offset,
+                                   boundary.prepared_guest_offset + boundary.prepared_guest_size);
+    }
+    prepared_ranges.emplace_back(boundary.probe_offset,
+                                 boundary.probe_offset + boundary.probe_size);
+    if (!entry_boundary) {
+      previous_exit = boundary.original_offset;
+    }
   }
 
   uint64_t previous_original_end = 0;
@@ -369,6 +441,10 @@ FailureOr<std::vector<uint8_t>> encode_manifest(const Manifest &manifest,
     payload.u32(barrier.probe_size);
     payload.u32(barrier.identity);
   }
+  payload.u32(static_cast<uint32_t>(manifest.boundaries.size()));
+  for (const BoundaryFacts &boundary : manifest.boundaries) {
+    encode_boundary(payload, boundary);
+  }
   const std::vector<uint8_t> contents = payload.take();
 
   wire::Encoder envelope;
@@ -419,7 +495,7 @@ FailureOr<Manifest> decode_manifest(std::span<const uint8_t> bytes,
   if (count > limits.sites) {
     return diagnostic.emit() << "site count exceeds budget";
   }
-  if (uint64_t{count} * kSiteWireBytes + 4 > decoder.remaining()) {
+  if (uint64_t{count} * kSiteWireBytes + 8 > decoder.remaining()) {
     return diagnostic.emit() << "site count disagrees with extent";
   }
   manifest.sites.resize(count);
@@ -430,7 +506,7 @@ FailureOr<Manifest> decode_manifest(std::span<const uint8_t> bytes,
   }
   uint32_t groups = 0;
   if (!decoder.u32(groups) || groups > kSyncCapacity ||
-      uint64_t{groups} * kBarrierWireBytes != decoder.remaining()) {
+      uint64_t{groups} * kBarrierWireBytes + 4 > decoder.remaining()) {
     return diagnostic.emit() << "barrier count disagrees with extent";
   }
   for (uint32_t group = 0; group < groups; ++group) {
@@ -442,6 +518,16 @@ FailureOr<Manifest> decode_manifest(std::span<const uint8_t> bytes,
       return diagnostic.emit() << "truncated barrier facts";
     }
     manifest.barriers.push_back(barrier);
+  }
+  if (!decoder.u32(count) || count > limits.sites ||
+      uint64_t{count} * kBoundaryWireBytes != decoder.remaining()) {
+    return diagnostic.emit() << "boundary count disagrees with extent";
+  }
+  manifest.boundaries.resize(count);
+  for (BoundaryFacts &boundary : manifest.boundaries) {
+    if (!decode_boundary(decoder, boundary)) {
+      return diagnostic.emit() << "truncated boundary mapping";
+    }
   }
   if (validate_manifest(manifest, diagnostic, limits).failed()) {
     return Result::failure();
@@ -456,6 +542,7 @@ FailureOr<LaunchLayout> plan_launch(const Manifest &manifest, const LaunchDimens
   if (validate_manifest(manifest, diagnostic, limits).failed()) {
     return Result::failure();
   }
+  const bool trace = manifest.scope == ScopeKind::ExecutionTrace;
   if (dimensions.workgroup[0] == 0 || dimensions.grid[0] == 0 ||
       dimensions.workgroup[0] > manifest.entry.maximum_workgroup_size ||
       dimensions.workgroup[1] != 1 || dimensions.workgroup[2] != 1 || dimensions.grid[1] != 1 ||
@@ -469,10 +556,12 @@ FailureOr<LaunchLayout> plan_launch(const Manifest &manifest, const LaunchDimens
     return diagnostic.emit() << "launch differs from original required workgroup shape";
   }
   const uint32_t workgroups = dimensions.grid[0] / dimensions.workgroup[0];
-  if (workgroups > kWorkgroupCapacity ||
+  if ((!trace && workgroups > kWorkgroupCapacity) || (trace && workgroups > kTraceMaxWorkgroups) ||
       (workgroups > 1 && manifest.entry.workgroup_id_scalar == UINT32_MAX)) {
-    return diagnostic.emit() << "multi-workgroup profile requires at most 16 groups and original "
-                                "workgroup-X input";
+    return diagnostic.emit()
+           << (trace ? "trace profile requires at most 512 groups and original workgroup-X input"
+                     : "multi-workgroup profile requires at most 16 groups and original "
+                       "workgroup-X input");
   }
   const uint64_t row_stride = report_row_bytes(manifest.sites.size(), !manifest.barriers.empty());
   const uint32_t waves_per_group =
@@ -547,9 +636,14 @@ FailureOr<TransportImage> initialize_transport(const Manifest &manifest,
     const size_t row = kReportHeaderBytes + size_t{wave} * layout.value().row_stride;
     wire::write_u64(image.report, row + wire::kRowSerial, serial);
     wire::write_u32(image.report, row + wire::kRowEntry, manifest.entry.id);
-    wire::write_u32(image.report, row + wire::kRowWave, wave % layout.value().waves_per_workgroup);
-    wire::write_u32(image.report, row + wire::kRowWorkgroupX,
-                    wave / layout.value().waves_per_workgroup);
+    wire::write_u32(image.report, row + wire::kRowWave,
+                    manifest.scope == ScopeKind::ExecutionTrace
+                        ? wave
+                        : wave % layout.value().waves_per_workgroup);
+    if (manifest.scope != ScopeKind::ExecutionTrace) {
+      wire::write_u32(image.report, row + wire::kRowWorkgroupX,
+                      wave / layout.value().waves_per_workgroup);
+    }
   }
   return image;
 }

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/consan/analysis/analyze.h"
+#include "rocjitsu/code/consan/analysis/execution_trace.h"
 #include "util/diagnostic.h"
 
 #include <charconv>
@@ -61,6 +62,19 @@ int main(int argc, char **argv) {
   if (capture.failed()) {
     std::cerr << "capture input error: " << diagnostic.message() << '\n';
     return kExitInputError;
+  }
+  if (selected_scope(capture.value().header.image) == ScopeKind::ExecutionTrace) {
+    const rocjitsu::FailureOr<ExecutionTraceResult> trace =
+        analyze_execution_trace_capture(capture.value(), diagnostic.emitter());
+    if (trace.failed()) {
+      std::cerr << "analysis input error: " << diagnostic.message() << '\n';
+      return kExitInputError;
+    }
+    std::cout << render_execution_trace(trace.value());
+    std::cout.flush();
+    if (!std::cout)
+      return kExitOutputFailure;
+    return trace.value().transport_complete ? kExitNoObservedFindings : kExitFindings;
   }
   const rocjitsu::FailureOr<LdsRaceResult> result =
       analyze_capture(capture.value(), options, diagnostic.emitter());

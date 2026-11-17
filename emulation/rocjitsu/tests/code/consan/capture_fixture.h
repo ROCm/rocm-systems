@@ -80,6 +80,32 @@ inline void refresh_image(CaptureHeader &header) {
   header.image.selection_profile = selection_profile_digest(keys, first.scope, first.options);
 }
 
+inline CaptureHeader trace_capture_header() {
+  CaptureHeader header = capture_header();
+  Manifest &facts = manifest(header);
+  facts.scope = ScopeKind::ExecutionTrace;
+  facts.options = profile_options_digest(facts.scope);
+  facts.target = 1250;
+  facts.entry.workgroup_id_scalar = kWorkgroupIdTtmp9Selector;
+  facts.entry.original_group_bytes = facts.entry.prepared_group_bytes = 0;
+  facts.sites.clear();
+  facts.boundaries = {{.kind = BoundaryKind::Entry,
+                       .original_offset = 0,
+                       .prepared_guest_offset = 512,
+                       .prepared_guest_size = 0,
+                       .probe_offset = 64,
+                       .probe_size = 64},
+                      {.kind = BoundaryKind::Exit,
+                       .original_offset = 64,
+                       .prepared_guest_offset = 640,
+                       .prepared_guest_size = 4,
+                       .probe_offset = 192,
+                       .probe_size = 64}};
+  refresh_image(header);
+  header.execution_conditions = capture_execution_conditions(header.image);
+  return header;
+}
+
 inline CaptureHeader multi_entry_header() {
   CaptureHeader header = capture_header();
   const Manifest first = manifest(header);
@@ -114,6 +140,7 @@ inline CapturedExecution execution(const Manifest &manifest, uint64_t serial,
   execution.entry_key = manifest.entry.original_descriptor_offset;
   execution.dimensions = dimensions;
   execution.group_bytes = manifest.entry.prepared_group_bytes;
+  execution.completion = completion_evidence(manifest.scope);
   execution.storage_slot = 1;
   execution.storage_generation = generation;
   execution.arguments.resize(manifest.entry.original_kernarg_bytes);

@@ -123,13 +123,14 @@ void rehash(std::vector<uint8_t> &bytes) {
 
 TEST(ConSanImageFacts, EncodingPreservesKnownWireIdentity) {
   // Pin the image envelope, selected manifests and native entry for the
-  // current producer contract, including its token in each nested manifest.
-  const Digest expected = {0x84, 0x43, 0x22, 0x84, 0x4a, 0x13, 0xbf, 0xac, 0x13, 0xfd, 0xdb,
-                           0xb6, 0xc9, 0x62, 0xef, 0x10, 0x3b, 0x5e, 0x4c, 0x5a, 0x84, 0xc6,
-                           0x73, 0x94, 0x03, 0xe7, 0x5a, 0x4c, 0x7f, 0xfb, 0xa5, 0x3d};
+  // current producer contract and a historical options profile, including
+  // its token and empty boundary count in each nested LDS manifest.
+  const Digest expected = {0x06, 0xeb, 0x18, 0x63, 0x69, 0xb5, 0x72, 0x49, 0x8f, 0xe7, 0xb7,
+                           0xb1, 0x74, 0xb6, 0x01, 0xe0, 0x61, 0xf4, 0x19, 0x09, 0x68, 0x11,
+                           0x04, 0x91, 0x57, 0xf4, 0x86, 0x31, 0xf0, 0x1d, 0x6c, 0x6b};
   const FailureOr<std::vector<uint8_t>> encoded = encode_image_facts(example_image(kPriorOptions));
   ASSERT_TRUE(encoded.succeeded());
-  EXPECT_EQ(encoded.value().size(), 1391u);
+  EXPECT_EQ(encoded.value().size(), 1399u);
   EXPECT_EQ(digest(encoded.value()), expected);
 }
 
@@ -689,6 +690,71 @@ TEST(ConSanImageFacts, NativePrivateSegmentsArePreservedWhileSelectedPrivateSegm
   image.entries.front().binding.prepared_private_bytes = 68;
   image.entries.front().selected->entry = image.entries.front().binding;
   EXPECT_TRUE(validate_image_facts(image).failed());
+}
+
+TEST(ConSanImageFacts, TraceScopeKeepsBoundaryBudgetAndSelectionSeparateFromQLds) {
+  ImageFacts image = example_image();
+  for (ImageEntryFacts &entry : image.entries) {
+    if (!entry.selected) {
+      continue;
+    }
+    entry.binding.workgroup_id_scalar = kWorkgroupIdTtmp9Selector;
+    entry.binding.original_group_bytes = entry.binding.prepared_group_bytes = 0;
+    Manifest &manifest = *entry.selected;
+    manifest.entry = entry.binding;
+    manifest.scope = ScopeKind::ExecutionTrace;
+    manifest.options = profile_options_digest(manifest.scope);
+    manifest.sites.clear();
+    const uint64_t probe = 2048 + 256 * ((entry.key - 2048) / 64);
+    manifest.boundaries = {{.kind = BoundaryKind::Entry,
+                            .original_offset = entry.binding.original_entry_offset,
+                            .prepared_guest_offset = entry.binding.prepared_entry_offset,
+                            .prepared_guest_size = 0,
+                            .probe_offset = probe,
+                            .probe_size = 16},
+                           {.kind = BoundaryKind::Exit,
+                            .original_offset = entry.binding.original_entry_offset + 64,
+                            .prepared_guest_offset = probe + 64,
+                            .prepared_guest_size = 4,
+                            .probe_offset = probe + 32,
+                            .probe_size = 16}};
+  }
+  const std::array<EntryKey, 2> keys = {2048, 2112};
+  image.selection_profile = selection_profile_digest(keys, ScopeKind::ExecutionTrace);
+  EXPECT_NE(image.selection_profile,
+            selection_profile_digest(keys, ScopeKind::NativeLdsWorkgroupBarrier));
+  const FailureOr<std::vector<uint8_t>> encoded = encode_image_facts(image);
+  ASSERT_TRUE(encoded.succeeded());
+  const FailureOr<ImageFacts> decoded = decode_image_facts(encoded.value());
+  ASSERT_TRUE(decoded.succeeded());
+  EXPECT_EQ(decoded.value(), image);
+  ContractLimits limits;
+  limits.metadata_bytes = encoded.value().size();
+  EXPECT_TRUE(encode_image_facts(image, {}, limits).succeeded());
+  --limits.metadata_bytes;
+  util::StringDiagnostic error;
+  EXPECT_TRUE(encode_image_facts(image, error.emitter(), limits).failed());
+  EXPECT_EQ(error.message(), "native code ranges exceed metadata budget");
+  limits = {};
+  limits.sites = 3;
+  EXPECT_TRUE(encode_image_facts(image, error.emitter(), limits).failed());
+  EXPECT_EQ(error.message(), "aggregate image facts exceed budget");
+  ImageFacts mixed = image;
+  mixed.entries[1] = example_image().entries[1];
+  ASSERT_TRUE(validate_manifest(*mixed.entries[1].selected).succeeded());
+  EXPECT_TRUE(validate_image_facts(mixed, error.emitter()).failed());
+  EXPECT_EQ(error.message(), "selected entries must share one options profile");
+  // A selected entry cannot reuse another entry's original or prepared boundary.
+  ImageFacts aliased = image;
+  aliased.entries[1].selected->boundaries.back().original_offset =
+      aliased.entries[0].selected->boundaries.back().original_offset;
+  ASSERT_TRUE(validate_manifest(*aliased.entries[1].selected).succeeded());
+  EXPECT_TRUE(validate_image_facts(aliased).failed());
+  aliased = image;
+  aliased.entries[1].selected->boundaries.front().probe_offset =
+      aliased.entries[0].selected->boundaries.front().probe_offset;
+  ASSERT_TRUE(validate_manifest(*aliased.entries[1].selected).succeeded());
+  EXPECT_TRUE(validate_image_facts(aliased).failed());
 }
 
 } // namespace

@@ -63,6 +63,7 @@ protected:
     const std::filesystem::path parent = root ? root : std::filesystem::temp_directory_path();
     std::filesystem::create_directories(parent);
     std::string test_name = ::testing::UnitTest::GetInstance()->current_test_info()->name();
+    // Parameterized labels must not create subdirectories.
     std::ranges::replace(test_name, '/', '-');
     std::string pattern = (parent / ("fake-hsa-" + test_name + "-XXXXXX")).string();
     std::vector<char> temporary(pattern.begin(), pattern.end());
@@ -559,7 +560,27 @@ protected:
     info->type = HSA_EXT_POINTER_TYPE_HSA;
     info->agentBaseAddress = info->hostBaseAddress = current_->arguments_.data();
     info->sizeInBytes = current_->argument_extent_;
-    info->global_flags = 3;
+    info->global_flags = current_->pointer_global_flags_;
+    switch (current_->pointer_case_) {
+    case 1:
+      info->type = HSA_EXT_POINTER_TYPE_UNKNOWN;
+      break;
+    case 2:
+      info->hostBaseAddress = nullptr;
+      break;
+    case 3:
+      info->agentBaseAddress = current_->arguments_.data() + 1;
+      break;
+    case 4:
+      info->size = offsetof(hsa_amd_pointer_info_t, global_flags);
+      break;
+    case 5:
+      info->sizeInBytes = current_->facts_.entry.original_kernarg_bytes - 1;
+      break;
+    case 6:
+      info->global_flags = 0;
+      break;
+    }
     return HSA_STATUS_SUCCESS;
   }
   static hsa_status_t create_signal(hsa_signal_value_t value, uint32_t, const hsa_agent_t *,
@@ -668,11 +689,19 @@ protected:
       }
       return;
     }
+    inspect_selected(state.published_, entry);
+    if (state.auto_complete_)
+      store_signal(state.published_.completion_signal, 0);
+  }
+
+  static void inspect_selected(const hsa_kernel_dispatch_packet_t &packet,
+                               const ImageEntryFacts &entry) {
+    ConSanHsaPlugin &state = *current_;
     const std::optional<KernargExtensionLayout> layout = make_kernarg_extension_layout(
         entry.binding.original_kernarg_bytes, kContextPointerPayloads);
     ASSERT_TRUE(layout.has_value());
-    const auto wrapper = std::span(static_cast<const uint8_t *>(state.published_.kernarg_address),
-                                   layout->wrapper_size);
+    const auto wrapper =
+        std::span(static_cast<const uint8_t *>(packet.kernarg_address), layout->wrapper_size);
     EXPECT_EQ(*wire::read_u64(wrapper, layout->original_kernarg_pointer_offset),
               reinterpret_cast<uint64_t>(state.arguments_.data()));
     EXPECT_TRUE(std::equal(wrapper.begin(), wrapper.begin() + entry.binding.original_kernarg_bytes,
@@ -687,9 +716,6 @@ protected:
     // bytes without diagnosing them. No ISA executes in this fake-API unit test.
     wire::write_u32(std::span(state.report_, state.report_bytes_),
                     kReportHeaderBytes + wire::kRowStatus, state.row_status_);
-    if (state.auto_complete_) {
-      store_signal(state.published_.completion_signal, 0);
-    }
   }
 
   std::vector<uint8_t> read_capture() {
@@ -758,6 +784,9 @@ protected:
   uint32_t allocation_calls_ = 0, fail_allocation_ = 0, published_packets_ = 0,
            forwarding_calls_ = 0;
   uint32_t row_status_ = UINT32_MAX;
+  unsigned pointer_case_ = 0;
+  uint32_t pointer_global_flags_ =
+      HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT | HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED;
   hsa_status_t amd_signal_status_ = HSA_STATUS_SUCCESS;
   hsa_status_t freeze_status_ = HSA_STATUS_SUCCESS;
   uint32_t freeze_calls_ = 0;
@@ -838,6 +867,16 @@ protected:
     hsa_amd_ext_kernel_dispatch_packet_t packet = {};
     std::memcpy(&packet, packets, sizeof(packet));
     state.application_completions_.push_back(packet.completion_signal);
+    if (packet.kernel_object >= 0x123400) {
+      const size_t index = (packet.kernel_object - 0x123400) / 0x100;
+      if (index < state.image_facts_.entries.size() && state.image_facts_.entries[index].selected) {
+        hsa_kernel_dispatch_packet_t normalized = {};
+        normalized.kernel_object = packet.kernel_object;
+        normalized.kernarg_address = packet.kernarg_address;
+        inspect_selected(normalized, state.image_facts_.entries[index]);
+        state.application_reports_.push_back(std::span(state.report_, state.report_bytes_));
+      }
+    }
     if (state.auto_complete_ && packet.completion_signal.handle != 0)
       store_signal(packet.completion_signal, 0);
   }
@@ -927,7 +966,309 @@ protected:
   }
   std::vector<std::array<uint8_t, 64>> application_packets_;
   std::vector<hsa_signal_t> application_completions_;
+  std::vector<std::span<uint8_t>> application_reports_;
 };
+
+#if defined(CONSAN_MULTI_TRACE_ARTIFACT_FIXTURE)
+class ConSanTraceHsaPlugin : public ConSanApplicationHsaPlugin {
+protected:
+  const char *original_fixture() const override { return CONSAN_MULTI_ORIGINAL_FIXTURE; }
+  const char *artifact_fixture() const override { return CONSAN_MULTI_TRACE_ARTIFACT_FIXTURE; }
+  hsa_amd_ext_kernel_dispatch_packet_t trace_packet(size_t index = 0) {
+    hsa_amd_ext_kernel_dispatch_packet_t packet = extended_packet();
+    packet.setup = 1;
+    packet.workgroup_size_x = 32;
+    packet.workgroup_size_y = 1;
+    packet.cluster_count_x = 16;
+    packet.kernel_object += index * 0x100;
+    packet.group_segment_size = image_facts_.entries[index].binding.original_group_bytes;
+    return packet;
+  }
+  bool wait_for_copied(uint64_t count) {
+    const std::chrono::steady_clock::time_point deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (statistics_().copied < count) {
+      if (std::chrono::steady_clock::now() >= deadline)
+        return false;
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return true;
+  }
+};
+
+TEST_F(ConSanTraceHsaPlugin, RejectedDispatchNotifiesFollowingBarrierWaiters) {
+  ASSERT_TRUE(bind());
+  ASSERT_TRUE(create_queue_and_signal());
+  fail_allocation_ = 1;
+  submit_application(trace_packet());
+  for (const bool batch : {false, true}) {
+    std::array<hsa_barrier_and_packet_t, 2> barriers = {};
+    barriers[0].header = HSA_PACKET_TYPE_BARRIER_AND;
+    barriers[1].header = HSA_PACKET_TYPE_BARRIER_OR;
+    for (hsa_barrier_and_packet_t &barrier : barriers) {
+      ASSERT_EQ(core_.hsa_signal_create_fn(1, 0, nullptr, &barrier.completion_signal),
+                HSA_STATUS_SUCCESS);
+      barrier.dep_signal[0] = signal_;
+    }
+    if (batch)
+      handler_(barriers.data(), barriers.size(), 0, handler_context_, application_writer);
+    else
+      for (const hsa_barrier_and_packet_t &barrier : barriers)
+        handler_(&barrier, 1, 0, handler_context_, application_writer);
+    for (const hsa_barrier_and_packet_t &barrier : barriers)
+      EXPECT_EQ(load_signal(barrier.completion_signal), -1);
+  }
+  EXPECT_EQ(load_signal(signal_), 1);
+  EXPECT_TRUE(application_packets_.empty());
+  EXPECT_EQ(statistics_().submitted, 0u);
+  EXPECT_NE(finish_(), 0);
+  EXPECT_FALSE(std::filesystem::exists(capture_));
+}
+
+TEST_F(ConSanTraceHsaPlugin, RejectedBarrierRetainsPendingSelectedWorkUntilCompletion) {
+  ASSERT_TRUE(bind());
+  ASSERT_TRUE(create_queue_and_signal());
+  auto_complete_ = false;
+  submit_application(trace_packet());
+  ASSERT_EQ(application_completions_.size(), 1u);
+  const hsa_signal_t proxy = application_completions_[0];
+  fail_allocation_ = allocation_calls_ + 1;
+  submit_application(trace_packet(1));
+  hsa_barrier_and_packet_t barrier = {};
+  barrier.header = HSA_PACKET_TYPE_BARRIER_AND;
+  barrier.completion_signal = signal_;
+  barrier.dep_signal[0] = proxy;
+  handler_(&barrier, 1, 0, handler_context_, application_writer);
+  EXPECT_EQ(load_signal(signal_), -1);
+  EXPECT_EQ(load_signal(proxy), 1);
+  EXPECT_EQ(application_packets_.size(), 1u);
+  EXPECT_EQ(statistics_().submitted, 1u);
+  EXPECT_EQ(statistics_().copied, 0u);
+  std::future<int> finishing = std::async(std::launch::async, [&] { return finish_(); });
+  EXPECT_EQ(finishing.wait_for(std::chrono::milliseconds(30)), std::future_status::timeout);
+  store_signal(proxy, 0);
+  EXPECT_NE(finishing.get(), 0);
+  EXPECT_TRUE(allocations_.empty());
+  EXPECT_FALSE(std::filesystem::exists(capture_));
+}
+
+TEST_F(ConSanTraceHsaPlugin, RejectedBarriersLeaveUntrackedAndNullCompletionsAlone) {
+  ASSERT_TRUE(bind());
+  ASSERT_TRUE(create_queue_and_signal());
+  hsa_signal_t untracked = {};
+  ASSERT_EQ(create_signal(1, 0, nullptr, &untracked), HSA_STATUS_SUCCESS);
+  fail_allocation_ = 1;
+  submit_application(trace_packet());
+  for (const hsa_signal_t completion : {untracked, hsa_signal_t{0}}) {
+    hsa_barrier_and_packet_t barrier = {};
+    barrier.header = HSA_PACKET_TYPE_BARRIER_OR;
+    barrier.completion_signal = completion;
+    handler_(&barrier, 1, 0, handler_context_, application_writer);
+  }
+  EXPECT_EQ(load_signal(untracked), 1);
+  EXPECT_TRUE(application_packets_.empty());
+  EXPECT_NE(finish_(), 0);
+}
+
+TEST_F(ConSanTraceHsaPlugin, RejectsSelectedNonunitClusterBeforeAllocatingOrSubmitting) {
+  ASSERT_TRUE(bind());
+  ASSERT_TRUE(create_queue_and_signal());
+  hsa_amd_ext_kernel_dispatch_packet_t packet = trace_packet();
+  packet.cluster_size_x = 2;
+  submit_application(packet);
+  EXPECT_TRUE(application_packets_.empty());
+  EXPECT_EQ(allocation_calls_, 0u);
+  EXPECT_EQ(statistics_().submitted, 0u);
+  EXPECT_NE(finish_(), 0);
+  EXPECT_FALSE(std::filesystem::exists(capture_));
+}
+
+TEST_F(ConSanTraceHsaPlugin, NativeNonunitClusterRetainsPacketAndCompletionOwnership) {
+  ASSERT_TRUE(bind());
+  ASSERT_TRUE(create_queue_and_signal());
+  auto_complete_ = false;
+  hsa_amd_ext_kernel_dispatch_packet_t packet = trace_packet(2);
+  packet.cluster_size_x = 2;
+  packet.dep_signal = signal_;
+  submit_application(packet);
+  ASSERT_EQ(application_packets_.size(), 1u);
+  const hsa_signal_t proxy = application_completions_[0];
+  EXPECT_NE(proxy.handle, 0u);
+  packet.completion_signal = proxy;
+  EXPECT_EQ(std::memcmp(application_packets_[0].data(), &packet, sizeof(packet)), 0);
+  EXPECT_EQ(load_signal(signal_), 1);
+  store_signal(proxy, 0);
+  EXPECT_EQ(drain_(), 0);
+  EXPECT_EQ(statistics_().native_completed, 1u);
+  EXPECT_EQ(finish_(), 0);
+}
+
+TEST_F(ConSanTraceHsaPlugin, NullCompletionPreservesExtendedDependenciesAndArguments) {
+  pointer_global_flags_ = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED;
+  ASSERT_TRUE(bind());
+  ASSERT_TRUE(create_queue_and_signal());
+  auto_complete_ = false;
+  hsa_amd_ext_kernel_dispatch_packet_t packet = trace_packet();
+  packet.dep_signal = signal_;
+  submit_application(packet);
+  ASSERT_EQ(application_packets_.size(), 1u);
+  ASSERT_EQ(application_reports_.size(), 1u);
+  const std::vector<uint8_t> expected_report(application_reports_[0].begin(),
+                                             application_reports_[0].end());
+  hsa_amd_ext_kernel_dispatch_packet_t published = {};
+  std::memcpy(&published, application_packets_[0].data(), sizeof(published));
+  EXPECT_NE(published.kernarg_address, packet.kernarg_address);
+  EXPECT_NE(published.completion_signal.handle, 0u);
+  EXPECT_NE(published.completion_signal.handle, signal_.handle);
+  packet.kernarg_address = published.kernarg_address;
+  packet.completion_signal = published.completion_signal;
+  constexpr uint16_t fences = (3u << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
+                              (3u << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+  packet.header = (packet.header & ~fences) |
+                  (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
+                  (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+  std::array<uint8_t, 64> expected = {};
+  std::memcpy(expected.data(), &packet, sizeof(packet));
+  EXPECT_EQ(application_packets_[0], expected);
+  store_signal(published.completion_signal, 0);
+  ASSERT_EQ(drain_(), 0);
+  EXPECT_EQ(forwarding_calls_, 0u);
+  EXPECT_EQ(statistics_().forwarded, 0u);
+  EXPECT_EQ(load_signal(signal_), 1);
+  EXPECT_EQ(finish_(), 0);
+  const FailureOr<Capture> capture = decode_capture(read_capture());
+  ASSERT_TRUE(capture.succeeded());
+  ASSERT_EQ(capture.value().executions.size(), 1u);
+  EXPECT_EQ(capture.value().header.execution_conditions, kApplicationTraceExecutionConditions);
+  EXPECT_EQ(capture.value().executions[0].completion, kCompletionVisible);
+  EXPECT_EQ(capture.value().executions[0].dimensions.grid[0], 512u);
+  EXPECT_EQ(capture.value().executions[0].report, expected_report);
+  EXPECT_TRUE(published_barriers_.empty());
+}
+
+TEST_F(ConSanTraceHsaPlugin, ReverseCompletionCopiesBeforeSerialOrderedWritingAndSlotReuse) {
+  ASSERT_TRUE(bind());
+  ASSERT_TRUE(create_queue_and_signal());
+  auto_complete_ = false;
+  submit_application(trace_packet());
+  arguments_[0] = 23;
+  submit_application(trace_packet(1));
+  ASSERT_EQ(application_reports_.size(), 2u);
+  const std::vector<uint8_t> first(application_reports_[0].begin(), application_reports_[0].end());
+  const std::vector<uint8_t> second(application_reports_[1].begin(), application_reports_[1].end());
+  store_signal(application_completions_[1], 0);
+  ASSERT_TRUE(wait_for_copied(1));
+  EXPECT_EQ(statistics_().written, 0u);
+  std::fill(application_reports_[1].begin(), application_reports_[1].end(), 0xa5);
+  arguments_[0] = 41;
+  submit_application(trace_packet());
+  ASSERT_EQ(application_reports_.size(), 3u);
+  EXPECT_EQ(application_reports_[1].data(), application_reports_[2].data());
+  const std::vector<uint8_t> third(application_reports_[2].begin(), application_reports_[2].end());
+  store_signal(application_completions_[2], 0);
+  ASSERT_TRUE(wait_for_copied(2));
+  std::future<int> draining = std::async(std::launch::async, [&] { return drain_(); });
+  EXPECT_EQ(draining.wait_for(std::chrono::milliseconds(30)), std::future_status::timeout);
+  store_signal(application_completions_[0], 0);
+  ASSERT_EQ(draining.get(), 0);
+  ASSERT_EQ(finish_(), 0);
+  const FailureOr<Capture> capture = decode_capture(read_capture());
+  ASSERT_TRUE(capture.succeeded());
+  ASSERT_EQ(capture.value().executions.size(), 3u);
+  const std::array<uint8_t, 3> inputs = {7, 23, 41};
+  const std::array<size_t, 3> entries = {0, 1, 0};
+  const std::array<std::vector<uint8_t>, 3> reports = {first, second, third};
+  for (size_t index = 0; index < 3; ++index) {
+    const CapturedExecution &saved = capture.value().executions[index];
+    EXPECT_EQ(saved.serial, index + 1);
+    EXPECT_EQ(saved.entry_key, image_facts_.entries[entries[index]].key);
+    EXPECT_EQ(saved.arguments[0], inputs[index]);
+    EXPECT_EQ(saved.report, reports[index]);
+  }
+  EXPECT_EQ(statistics_().copied, 3u);
+  EXPECT_EQ(statistics_().written, 3u);
+  EXPECT_EQ(statistics_().forwarded, 0u);
+  EXPECT_EQ(statistics_().reused, 1u);
+}
+TEST_F(ConSanTraceHsaPlugin, MoreThanSixteenPendingDispatchesRetainIndependentStorage) {
+  ASSERT_TRUE(bind());
+  ASSERT_TRUE(create_queue_and_signal());
+  auto_complete_ = false;
+  for (unsigned index = 0; index < 17; ++index)
+    submit_application(trace_packet());
+  ASSERT_EQ(application_completions_.size(), 17u);
+  EXPECT_EQ(statistics_().submitted, 17u);
+  EXPECT_EQ(statistics_().copied, 0u);
+  for (const hsa_signal_t proxy : application_completions_)
+    store_signal(proxy, 0);
+  EXPECT_EQ(drain_(), 0);
+  EXPECT_EQ(finish_(), 0);
+  const FailureOr<Capture> captured = decode_capture(read_capture());
+  ASSERT_TRUE(captured.succeeded());
+  EXPECT_EQ(captured.value().executions.size(), 17u);
+}
+
+TEST_F(ConSanTraceHsaPlugin, QueueDestroyWaitsForSelectedObservationAndIndependentCopy) {
+  ASSERT_TRUE(bind());
+  ASSERT_TRUE(create_queue_and_signal());
+  auto_complete_ = false;
+  submit_application(trace_packet());
+  ASSERT_EQ(application_completions_.size(), 1u);
+  std::future<hsa_status_t> destroying =
+      std::async(std::launch::async, [&] { return core_.hsa_queue_destroy_fn(&queue_); });
+  EXPECT_EQ(destroying.wait_for(std::chrono::milliseconds(30)), std::future_status::timeout);
+  store_signal(application_completions_[0], 0);
+  EXPECT_EQ(destroying.get(), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(statistics_().copied, 1u);
+  EXPECT_EQ(finish_(), 0);
+}
+
+TEST_F(ConSanTraceHsaPlugin, ExecutableDestroyRetainsFactsThroughSelectedCopyAndWriting) {
+  ASSERT_TRUE(bind());
+  ASSERT_TRUE(create_queue_and_signal());
+  auto_complete_ = false;
+  submit_application(trace_packet());
+  ASSERT_EQ(application_completions_.size(), 1u);
+  std::future<hsa_status_t> destroying =
+      std::async(std::launch::async, [&] { return core_.hsa_executable_destroy_fn({7}); });
+  EXPECT_EQ(destroying.wait_for(std::chrono::milliseconds(30)), std::future_status::timeout);
+  store_signal(application_completions_[0], 0);
+  EXPECT_EQ(destroying.get(), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(finish_(), 0);
+  EXPECT_TRUE(decode_capture(read_capture()).succeeded());
+}
+
+class ConSanTracePointerAdmission : public ConSanTraceHsaPlugin,
+                                    public ::testing::WithParamInterface<unsigned> {};
+
+TEST_P(ConSanTracePointerAdmission, RejectUnprovenHostReadBeforePublishing) {
+  ASSERT_TRUE(bind());
+  ASSERT_TRUE(create_queue_and_signal());
+  pointer_global_flags_ = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED;
+  pointer_case_ = GetParam();
+  submit_application(trace_packet());
+  EXPECT_TRUE(application_packets_.empty());
+  EXPECT_EQ(statistics_().submitted, 0u);
+  EXPECT_NE(finish_(), 0);
+  EXPECT_FALSE(std::filesystem::exists(capture_));
+}
+
+INSTANTIATE_TEST_SUITE_P(InvalidOriginalArguments, ConSanTracePointerAdmission,
+                         ::testing::Range(1u, 7u));
+#endif
+
+TEST_F(ConSanApplicationHsaPlugin, LdsSelectedDispatchCannotSilentlySucceedInApplicationProfile) {
+  ASSERT_TRUE(bind());
+  ASSERT_TRUE(create_queue_and_signal());
+  hsa_amd_ext_kernel_dispatch_packet_t packet = extended_packet();
+  packet.setup = 1;
+  packet.workgroup_size_y = 1;
+  packet.cluster_count_x = 1;
+  submit_application(packet);
+  EXPECT_TRUE(application_packets_.empty());
+  EXPECT_NE(finish_(), 0);
+  EXPECT_FALSE(std::filesystem::exists(capture_));
+}
 
 TEST_F(ConSanApplicationHsaPlugin, NativeQueueBeforeImageLoadInstallsThePacketInterceptor) {
   hsa_amd_queue_create_desc_t desc = native_descriptor();
@@ -2006,6 +2347,17 @@ TEST_F(ConSanHsaPluginDeathTest, FinishDuringFreezePreventsWorkerStartupAndUnloa
 
 TEST_F(ConSanHsaPluginDeathTest, DestroyDuringFreezeInvalidatesTheAdmittedModule) {
   expect_interrupted_freeze(false);
+}
+
+TEST_F(ConSanHsaPlugin, LegacyProfileStillRejectsCoarseOriginalArguments) {
+  ASSERT_TRUE(bind());
+  ASSERT_TRUE(create_queue_and_signal());
+  pointer_global_flags_ = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED;
+  submit();
+  EXPECT_EQ(published_packets_, 0u);
+  EXPECT_EQ(statistics_().submitted, 0u);
+  EXPECT_NE(finish_(), 0);
+  EXPECT_FALSE(std::filesystem::exists(capture_));
 }
 
 TEST_F(ConSanHsaPlugin, RuntimeConfigurationRequiresPathsAndIndependentProfile) {

@@ -224,6 +224,10 @@ FailureOr<InspectedImage> inspect_image(const ImageFacts &facts, std::span<const
       return diagnostic.emit() << "artifact entry/symbol does not match facts";
     }
     const KernelDescriptorInfo &kernel = *found;
+    if (row.selected && row.selected->scope == ScopeKind::ExecutionTrace &&
+        RJ_AMDHSA_BITS_GET(kernel.descriptor.compute_pgm_rsrc2,
+                           amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X) == 0)
+      return diagnostic.emit() << "trace descriptor lacks its original workgroup-X input";
     uint32_t kernarg = entry.original_kernarg_bytes;
     if (prepared && row.disposition == EntryDisposition::Selected) {
       const std::optional<KernargExtensionLayout> wrapper =

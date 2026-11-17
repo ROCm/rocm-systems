@@ -43,6 +43,171 @@ protected:
   InputError error_;
 };
 
+TEST_F(ConSanPrepareImage, ExecutionTraceOwnsBoundariesAndADistinctSelectionIdentity) {
+  const std::array<std::string_view, 2> selected = {"mk_a", "mk_b"};
+  const FailureOr<PreparedImageArtifact> trace = prepare_image(
+      original_, *target_profile("gfx1250"), selected, error_, ScopeKind::ExecutionTrace);
+  ASSERT_TRUE(trace.succeeded()) << error_.message;
+  const FailureOr<PreparedImageArtifact> lds =
+      prepare_image(original_, *target_profile("gfx1250"), selected, error_);
+  ASSERT_TRUE(lds.succeeded()) << error_.message;
+  EXPECT_NE(trace.value().facts.selection_profile, lds.value().facts.selection_profile);
+  EXPECT_EQ(trace.value().facts.entries.size(), lds.value().facts.entries.size());
+  for (const ImageEntryFacts &entry : trace.value().facts.entries) {
+    if (!entry.selected)
+      continue;
+    const Manifest &manifest = *entry.selected;
+    EXPECT_EQ(manifest.scope, ScopeKind::ExecutionTrace);
+    EXPECT_EQ(manifest.options, profile_options_digest(ScopeKind::ExecutionTrace));
+    EXPECT_EQ(manifest.entry.workgroup_id_scalar, kWorkgroupIdTtmp9Selector);
+    EXPECT_TRUE(manifest.sites.empty());
+    EXPECT_TRUE(manifest.barriers.empty());
+    ASSERT_EQ(manifest.boundaries.size(), 2u);
+    EXPECT_EQ(manifest.boundaries.front().kind, BoundaryKind::Entry);
+    EXPECT_EQ(manifest.boundaries.back().kind, BoundaryKind::Exit);
+    const FailureOr<LaunchLayout> layout =
+        plan_launch(manifest, {{512, 1, 1}, {32, 1, 1}}, manifest.entry.original_group_bytes, 0);
+    ASSERT_TRUE(layout.succeeded());
+    EXPECT_EQ(layout.value().wave_count, 16u);
+    EXPECT_EQ(layout.value().row_stride, kRowHeaderBytes);
+    const FailureOr<LaunchLayout> maximum = plan_launch(manifest, {{512 * 32, 1, 1}, {32, 1, 1}},
+                                                        manifest.entry.original_group_bytes, 0);
+    ASSERT_TRUE(maximum.succeeded());
+    EXPECT_EQ(maximum.value().workgroup_count, 512u);
+    EXPECT_EQ(maximum.value().wave_count, 512u);
+    EXPECT_TRUE(plan_launch(manifest, {{513 * 32, 1, 1}, {32, 1, 1}},
+                            manifest.entry.original_group_bytes, 0)
+                    .failed());
+    const Manifest *lds_manifest = selected_manifest(lds.value().facts, entry.key);
+    ASSERT_NE(lds_manifest, nullptr);
+    EXPECT_TRUE(plan_launch(*lds_manifest, {{17 * 32, 1, 1}, {32, 1, 1}},
+                            lds_manifest->entry.original_group_bytes, 0)
+                    .failed());
+  }
+  const FailureOr<std::vector<uint8_t>> encoded = encode_image_facts(trace.value().facts);
+  ASSERT_TRUE(encoded.succeeded());
+  const FailureOr<ImageFacts> decoded = decode_image_facts(encoded.value());
+  ASSERT_TRUE(decoded.succeeded());
+  EXPECT_EQ(decoded.value(), trace.value().facts);
+}
+
+TEST_F(ConSanPrepareImage, ExecutionTraceAdmitsAnEntryWithoutLdsSites) {
+  const TargetProfile &target = *target_profile("gfx1250");
+  const FailureOr<InputProgram> source =
+      build_image_entry_program(original_, target, "mk_a", error_);
+  ASSERT_TRUE(source.succeeded()) << error_.message;
+  ASSERT_FALSE(source.value().accesses.empty());
+  constexpr util::FailureOr<uint32_t> nop = build_s_nop(0, IsaFamily::Cdna5);
+  static_assert(nop.succeeded());
+  for (const NativeLdsAccess &access : source.value().accesses) {
+    const size_t offset = source.value().text_file_offset + access.original_offset;
+    ASSERT_LE(offset + 2 * sizeof(uint32_t), original_.size());
+    std::memcpy(original_.data() + offset, &nop.value(), sizeof(uint32_t));
+    std::memcpy(original_.data() + offset + sizeof(uint32_t), &nop.value(), sizeof(uint32_t));
+  }
+  EXPECT_TRUE(build_image_entry_program(original_, target, "mk_a", error_).failed());
+  EXPECT_EQ(error_.code, InputErrorCode::UnsupportedAccess);
+  const std::array<std::string_view, 1> selected = {"mk_a"};
+  const FailureOr<PreparedImageArtifact> trace =
+      prepare_image(original_, target, selected, error_, ScopeKind::ExecutionTrace);
+  ASSERT_TRUE(trace.succeeded()) << error_.message;
+  const Manifest *manifest =
+      selected_manifest(trace.value().facts, source.value().kernel.descriptor_file_offset);
+  ASSERT_NE(manifest, nullptr);
+  EXPECT_TRUE(manifest->sites.empty());
+  EXPECT_TRUE(manifest->barriers.empty());
+  EXPECT_EQ(manifest->boundaries.size(), 2u);
+}
+
+struct TraceBodyHazard {
+  uint32_t word;
+  bool at_epilogue;
+  bool native_allowed;
+  const char *mnemonic;
+  const char *diagnostic;
+};
+
+class ConSanTraceBodyQualification : public ConSanPrepareImage,
+                                     public ::testing::WithParamInterface<TraceBodyHazard> {};
+
+TEST_P(ConSanTraceBodyQualification, RejectsSelectedHazardAndAppliesNativeSiblingQualification) {
+  const TargetProfile &target = *target_profile("gfx1250");
+  const FailureOr<InputProgram> baseline =
+      build_image_entry_program(original_, target, "mk_a", error_, {}, ScopeKind::ExecutionTrace);
+  ASSERT_TRUE(baseline.succeeded()) << error_.message;
+  ASSERT_EQ(baseline.value().exit_offsets.size(), 1u);
+  const uint64_t begin = baseline.value().kernel.entry_text_offset;
+  const uint64_t end = baseline.value().exit_offsets.front();
+  const TraceBodyHazard hazard = GetParam();
+  const uint64_t offset = hazard.at_epilogue ? end - 4 : begin + 0x10;
+  ASSERT_GT(offset, begin);
+  ASSERT_LT(offset, end);
+  const size_t file_offset = baseline.value().text_file_offset + offset;
+  std::memcpy(original_.data() + file_offset, &hazard.word, sizeof(hazard.word));
+  std::unique_ptr<Decoder> decoder =
+      Decoder::create(default_isa_target_registry(), target.public_id);
+  ASSERT_NE(decoder, nullptr);
+  const std::array<uint32_t, 1> words = {hazard.word};
+  const DecodeResult decoded = decoder->decode_window(words);
+  ASSERT_TRUE(decoded.succeeded());
+  EXPECT_EQ(decoded.value()->mnemonic(), hazard.mnemonic);
+  if (hazard.at_epilogue) {
+    EXPECT_EQ(decoded.value()->raw_encoding()[0] & 0x7f, 3u);
+    // This is the valid release/endpgm epilogue, not an arbitrary body release.
+    uint32_t actual_exit = 0;
+    std::memcpy(&actual_exit, original_.data() + baseline.value().text_file_offset + end, 4);
+    const std::array<uint32_t, 1> actual_words = {actual_exit};
+    const DecodeResult exit = decoder->decode_window(actual_words);
+    ASSERT_TRUE(exit.succeeded());
+    EXPECT_EQ(exit.value()->mnemonic(), "s_endpgm");
+  }
+  EXPECT_TRUE(
+      build_image_entry_program(original_, target, "mk_a", error_, {}, ScopeKind::ExecutionTrace)
+          .failed());
+  EXPECT_EQ(error_.code, InputErrorCode::UnsupportedFlow);
+  EXPECT_EQ(error_.text_offset, offset);
+  EXPECT_EQ(error_.message, hazard.diagnostic);
+  const std::array<std::string_view, 1> selected = {"mk_a"};
+  EXPECT_TRUE(
+      prepare_image(original_, target, selected, error_, ScopeKind::ExecutionTrace).failed());
+  EXPECT_EQ(error_.code, InputErrorCode::UnsupportedFlow);
+  EXPECT_EQ(error_.text_offset, offset);
+
+  const std::array<std::string_view, 1> sibling = {"mk_b"};
+  const FailureOr<PreparedImageArtifact> artifact =
+      prepare_image(original_, target, sibling, error_, ScopeKind::ExecutionTrace);
+  if (!hazard.native_allowed) {
+    ASSERT_TRUE(artifact.failed());
+    EXPECT_EQ(error_.code, InputErrorCode::UnsupportedInstruction);
+    EXPECT_EQ(error_.text_offset, offset);
+    EXPECT_EQ(error_.message,
+              "native entry 'mk_a' reads PC; PC-relative data references are not preserved");
+    return;
+  }
+  ASSERT_TRUE(artifact.succeeded()) << error_.message;
+  AmdGpuCodeObject object(artifact.value().image.data(), artifact.value().image.size());
+  bool checked_text = false;
+  for (const std::unique_ptr<Section> &section : object.all_sections()) {
+    if (section->name() != ".text")
+      continue;
+    ASSERT_GE(section->size(), end + 4);
+    EXPECT_EQ(std::memcmp(section->data() + begin,
+                          original_.data() + baseline.value().text_file_offset + begin,
+                          end + 4 - begin),
+              0);
+    checked_text = true;
+  }
+  EXPECT_TRUE(checked_text);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    OriginalBody, ConSanTraceBodyQualification,
+    ::testing::Values(
+        TraceBodyHazard{0xbe8a4700u, false, false, "s_get_pc_i64",
+                        "execution tracing does not admit guest code-address introspection"},
+        TraceBodyHazard{0xbfb60003u, true, true, "s_sendmsg",
+                        "execution tracing does not admit guest VGPR deallocation"}));
+
 TEST_F(ConSanPrepareImage, WholeImageHasIndependentEntryPlansAndNativeSibling) {
   const std::array<std::string_view, 2> entries = {"mk_a", "mk_b"};
   const FailureOr<PreparedImageArtifact> artifact =
@@ -733,6 +898,53 @@ TEST(ConSanPrepareImagePcReads, AllowsUnreachableNativePcRead) {
                                      diagnostic.emitter())
                   .succeeded())
       << diagnostic.message();
+}
+#endif
+
+#if defined(CONSAN_MULTI_ENTRY_BARRIER_FIXTURE) || defined(CONSAN_MULTI_ENTRY_LOOP_FIXTURE) ||     \
+    defined(CONSAN_MULTI_ENTRY_MIXED_FIXTURE)
+TEST(ConSanPrepareTrace, BarrierLoopAndMixedBodiesUseOnlyBoundaryFacts) {
+  const TargetProfile &target = *target_profile("gfx1250");
+  const std::array<std::string_view, 2> selected = {"mk_a", "mk_b"};
+  for (const char *fixture : {
+#ifdef CONSAN_MULTI_ENTRY_BARRIER_FIXTURE
+           CONSAN_MULTI_ENTRY_BARRIER_FIXTURE,
+#endif
+#ifdef CONSAN_MULTI_ENTRY_LOOP_FIXTURE
+           CONSAN_MULTI_ENTRY_LOOP_FIXTURE,
+#endif
+#ifdef CONSAN_MULTI_ENTRY_MIXED_FIXTURE
+           CONSAN_MULTI_ENTRY_MIXED_FIXTURE,
+#endif
+       }) {
+    SCOPED_TRACE(fixture);
+    const std::vector<uint8_t> original = test::read_fixture(fixture);
+    ASSERT_FALSE(original.empty());
+    InputError error;
+    const FailureOr<PreparedImageArtifact> artifact =
+        prepare_image(original, target, selected, error, ScopeKind::ExecutionTrace);
+    ASSERT_TRUE(artifact.succeeded()) << error.message;
+    EXPECT_EQ(selected_scope(artifact.value().facts), ScopeKind::ExecutionTrace);
+    size_t selected_count = 0;
+    for (const ImageEntryFacts &entry : artifact.value().facts.entries) {
+      if (!entry.selected)
+        continue;
+      ++selected_count;
+      EXPECT_EQ(entry.selected->scope, ScopeKind::ExecutionTrace);
+      EXPECT_EQ(entry.selected->entry.workgroup_id_scalar, kWorkgroupIdTtmp9Selector);
+      EXPECT_TRUE(entry.selected->sites.empty());
+      EXPECT_TRUE(entry.selected->barriers.empty());
+      ASSERT_EQ(entry.selected->boundaries.size(), 2u);
+      EXPECT_EQ(entry.selected->boundaries.front().kind, BoundaryKind::Entry);
+      EXPECT_EQ(entry.selected->boundaries.back().kind, BoundaryKind::Exit);
+    }
+    EXPECT_EQ(selected_count, 2u);
+    util::StringDiagnostic contract_error;
+    EXPECT_TRUE(verify_artifact_images(artifact.value().facts, original, artifact.value().image,
+                                       contract_error.emitter())
+                    .succeeded())
+        << contract_error.message();
+  }
 }
 #endif
 

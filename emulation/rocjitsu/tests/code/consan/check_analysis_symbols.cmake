@@ -16,6 +16,8 @@ string(REGEX REPLACE "\\[abi:[a-zA-Z0-9_]+\\]" "" _symbols "${_symbols}")
 foreach(
     _required
     "rocjitsu::consan::analyze_capture("
+    "rocjitsu::consan::analyze_execution_trace_capture("
+    "rocjitsu::consan::render_execution_trace("
     "rocjitsu::consan::has_findings("
     "rocjitsu::consan::render_analysis("
     "rocjitsu::consan::render_lds_race_analysis("

@@ -106,13 +106,42 @@ struct Entry {
 };
 
 int run(int argc, char **argv) {
-  if (argc != 3 ||
+  if ((argc < 3 || argc > 5) ||
       (std::string_view(argv[2]) != "baseline" && std::string_view(argv[2]) != "instrumented" &&
        std::string_view(argv[2]) != "native-application")) {
     return 3;
   }
   const bool instrumented = std::string_view(argv[2]) == "instrumented";
   const bool native_application = std::string_view(argv[2]) == "native-application";
+  const bool trace = argc >= 4;
+  if (native_application && trace)
+    return 3;
+  uint32_t cluster_size = 0;
+  uint32_t workgroups = 1;
+  if (trace) {
+    const std::string_view option(argv[3]);
+    constexpr std::string_view prefix = "--trace-workgroups=";
+    if (!option.starts_with(prefix))
+      return 3;
+    const std::string_view count = option.substr(prefix.size());
+    const std::from_chars_result parsed =
+        std::from_chars(count.data(), count.data() + count.size(), workgroups);
+    if (parsed.ec != std::errc{} || parsed.ptr != count.data() + count.size() || workgroups == 0 ||
+        workgroups > 512)
+      return 3;
+  }
+  if (argc == 5) {
+    const std::string_view option(argv[4]);
+    constexpr std::string_view prefix = "--cluster-size=";
+    if (!option.starts_with(prefix))
+      return 3;
+    const std::string_view count = option.substr(prefix.size());
+    const std::from_chars_result parsed =
+        std::from_chars(count.data(), count.data() + count.size(), cluster_size);
+    if (parsed.ec != std::errc{} || parsed.ptr != count.data() + count.size() ||
+        (cluster_size != 1 && cluster_size != 2) || workgroups % cluster_size != 0)
+      return 3;
+  }
   if (hsa_init() != HSA_STATUS_SUCCESS) {
     return 20;
   }
@@ -305,19 +334,49 @@ int run(int argc, char **argv) {
                    (write_index & (queue->size - 1));
     std::memset(packet, 0, sizeof(*packet));
     packet->setup = 1;
-    packet->workgroup_size_x = packet->grid_size_x = 64;
+    packet->workgroup_size_x = 64;
+    packet->grid_size_x = 64 * workgroups;
     packet->workgroup_size_y = packet->workgroup_size_z = 1;
     packet->grid_size_y = packet->grid_size_z = 1;
     packet->group_segment_size = entry.group_bytes;
     packet->kernel_object = entry.kernel;
     packet->kernarg_address = arguments;
-    packet->completion_signal = signal;
-    const uint16_t header = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE) |
-                            (1u << HSA_PACKET_HEADER_BARRIER) |
-                            (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
-                            (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+    packet->completion_signal = trace ? hsa_signal_t{} : signal;
+    uint16_t header = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE) |
+                      (1u << HSA_PACKET_HEADER_BARRIER) |
+                      (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
+                      (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+    if (cluster_size != 0) {
+      hsa_amd_ext_kernel_dispatch_packet_t extended = {};
+      extended.amd_format = HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH;
+      extended.setup = packet->setup;
+      extended.workgroup_size_x = packet->workgroup_size_x;
+      extended.workgroup_size_y = extended.workgroup_size_z = 1;
+      extended.cluster_count_x = workgroups / cluster_size;
+      extended.cluster_count_y = extended.cluster_count_z = 1;
+      extended.cluster_size_x = cluster_size;
+      extended.cluster_size_y = extended.cluster_size_z = 1;
+      extended.group_segment_size = packet->group_segment_size;
+      extended.kernel_object = packet->kernel_object;
+      extended.kernarg_address = packet->kernarg_address;
+      extended.completion_signal = packet->completion_signal;
+      std::memcpy(packet, &extended, sizeof(extended));
+      header = (header & ~uint16_t{0xff}) | HSA_PACKET_TYPE_VENDOR_SPECIFIC;
+    }
     __atomic_store_n(&packet->header, header, __ATOMIC_RELEASE);
-    hsa_signal_store_screlease(queue->doorbell_signal, write_index);
+    uint64_t published_index = write_index;
+    if (trace) {
+      // The fixture application waits through its own following barrier. ConSan
+      // sees the original null-completion dispatch and adds no dependency packet.
+      published_index = hsa_queue_add_write_index_relaxed(queue, 1);
+      auto *barrier = static_cast<hsa_barrier_and_packet_t *>(queue->base_address) +
+                      (published_index & (queue->size - 1));
+      std::memset(barrier, 0, sizeof(*barrier));
+      barrier->completion_signal = signal;
+      const uint16_t barrier_header = (header & ~uint16_t{0xff}) | HSA_PACKET_TYPE_BARRIER_AND;
+      __atomic_store_n(&barrier->header, barrier_header, __ATOMIC_RELEASE);
+    }
+    hsa_signal_store_screlease(queue->doorbell_signal, published_index);
     hsa_signal_value_t value = native_application ? 0 : 1;
     if (native_application && drain() != 0) {
       std::cerr << "native drain failed; retaining live dispatch resources\n";

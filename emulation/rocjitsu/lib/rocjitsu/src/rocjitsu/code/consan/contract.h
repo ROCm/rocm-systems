@@ -27,7 +27,7 @@ using Digest = std::array<uint8_t, 32>;
 // and internal API changes alone do not require a new token; no negotiation is
 // performed between producers and consumers.
 inline constexpr std::array<uint8_t, 16> kProducerContract = {
-    0x3b, 0x46, 0x97, 0xdc, 0xc7, 0xfc, 0x4d, 0xa5, 0x9e, 0xad, 0xb0, 0xd7, 0xb8, 0x36, 0x25, 0xfe};
+    0x0c, 0x59, 0xb6, 0x12, 0xa5, 0x35, 0x42, 0x9e, 0x91, 0xc4, 0x97, 0xb6, 0x69, 0x02, 0x99, 0xfc};
 // Canonical hash input for the manifest's options identity. Changing any byte
 // changes the identity required by artifact and capture admission.
 inline constexpr std::string_view kMvpOptions =
@@ -35,6 +35,10 @@ inline constexpr std::string_view kMvpOptions =
     "loop-lane-bank=ctz-mod4;sync-"
     "quota=16;workgroup-id=entry-scalar;workgroups-1d=1..16;mask64;address-groups-per-"
     "site=4;collision=on;relaxed-lds-atomic=single-range-access";
+inline constexpr std::string_view kExecutionTraceOptions =
+    "execution-trace;entry-exit;complete-workgroups-1d;max-workgroups=512;lds-analysis=not-"
+    "performed";
+inline constexpr uint32_t kTraceMaxWorkgroups = 512;
 // Software record slots for distinct effective LDS address groups per wave/site.
 // Acyclic accesses fill sequential slots; lanes beyond four groups cause loss.
 // Repeated accesses instead claim immutable lane-based banks, where a collision
@@ -65,8 +69,10 @@ enum class AccessKind : uint32_t { Read = 1, Write = 2, Atomic = 3 };
 enum class ScopeKind : uint32_t {
   NativeLdsNoSynchronization = 1,
   NativeLdsWorkgroupBarrier = 2,
-  NativeLdsWorkgroupBarrierLoop = 3
+  NativeLdsWorkgroupBarrierLoop = 3,
+  ExecutionTrace = 4
 };
+enum class BoundaryKind : uint32_t { Entry = 1, Exit = 2 };
 
 /// @brief GPU wire offsets; consumers never serialize native C++ struct layout.
 namespace wire {
@@ -101,6 +107,13 @@ inline constexpr uint32_t kRowReservedBegin = 48;
 inline constexpr uint32_t kRowEntered = 1;
 inline constexpr uint32_t kRowExited = 2;
 inline constexpr uint32_t kRowExhausted = 4;
+// ExecutionTrace interprets words28..40 as boundary identity/counts and
+// reserves44..63. Q LDS rows retain phase/loss words28..40 and workgroup-X44.
+inline constexpr uint32_t kTraceRowWorkgroup = 28;
+inline constexpr uint32_t kTraceRowLocalWave = 32;
+inline constexpr uint32_t kTraceRowEntries = 36;
+inline constexpr uint32_t kTraceRowExits = 40;
+inline constexpr uint32_t kTraceRowReservedBegin = 44;
 
 // Acyclic groups retain slot=group, occurrence=1, phase=slot+1. Repeated
 // groups retain the first sixteen completion ordinals: group=slot%groups,
@@ -240,6 +253,16 @@ public:
   bool operator==(const EntryFacts &) const = default;
 };
 
+struct BoundaryFacts {
+  BoundaryKind kind = BoundaryKind::Entry;
+  uint64_t original_offset = 0;
+  uint64_t prepared_guest_offset = 0;
+  uint32_t prepared_guest_size = 0;
+  uint64_t probe_offset = 0;
+  uint32_t probe_size = 0;
+  bool operator==(const BoundaryFacts &) const = default;
+};
+
 /// @brief Check an optional required shape without overflowing its flat size.
 [[nodiscard]] bool valid_workgroup_requirement(const std::array<uint32_t, 3> &shape,
                                                uint32_t maximum);
@@ -283,6 +306,7 @@ public:
   EntryFacts entry;
   std::vector<SiteFacts> sites;
   std::vector<BarrierFacts> barriers;
+  std::vector<BoundaryFacts> boundaries;
   bool operator==(const Manifest &) const = default;
 };
 
@@ -320,6 +344,7 @@ initialize_transport(const Manifest &manifest, const LaunchDimensions &dimension
 
 [[nodiscard]] Digest digest(std::span<const uint8_t> bytes);
 [[nodiscard]] Digest mvp_options_digest();
+[[nodiscard]] Digest profile_options_digest(ScopeKind scope);
 
 [[nodiscard]] Result validate_manifest(const Manifest &manifest,
                                        util::DiagnosticEmitter diagnostic = {},

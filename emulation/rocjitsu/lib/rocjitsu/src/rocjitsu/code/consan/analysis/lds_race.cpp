@@ -600,6 +600,10 @@ LdsRaceExecutionResult analyze_lds_race_execution(const Manifest &facts,
                                    .collision_examples = {},
                                    .ordered_examples = {},
                                    .unresolved_examples = {}};
+  if (facts.scope == ScopeKind::ExecutionTrace) {
+    issue(result, UINT32_MAX, UINT32_MAX, "LDS analysis requires LDS scope");
+    return result;
+  }
   const FailureOr<LaunchLayout> layout =
       plan_launch(facts, execution.dimensions, execution.group_bytes, execution.private_bytes);
   const std::span<const uint8_t> report = std::span(execution.report);

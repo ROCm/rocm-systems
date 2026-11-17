@@ -34,6 +34,8 @@ foreach(
         "rocjitsu::consan::prepare("
         "rocjitsu::consan::analyze_original("
         "rocjitsu::consan::analyze_capture("
+        "rocjitsu::consan::analyze_execution_trace_capture("
+        "rocjitsu::consan::render_execution_trace("
     )
         string(FIND "${_symbols}" "${_forbidden}" _match)
         if(NOT _match EQUAL -1)

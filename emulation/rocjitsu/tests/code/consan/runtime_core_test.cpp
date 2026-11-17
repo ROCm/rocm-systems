@@ -498,6 +498,9 @@ TEST_F(ConSanRuntimeCore, BarrierScopesKeepPerEntryMultiWorkgroupSnapshotsAndFac
     util::StringDiagnostic error;
     ASSERT_TRUE(validate_image_facts(header_.image, error.emitter()).succeeded())
         << error.message();
+    header_.execution_conditions = capture_execution_conditions(header_.image);
+    EXPECT_EQ(header_.execution_conditions, kSupportedExecutionConditions);
+    EXPECT_EQ(completion_evidence(scope), kCompletionVisibleForwarded);
     const LaunchDimensions dimensions = {.grid = {128, 1, 1}, .workgroup = {64, 1, 1}};
     output_.clear();
     SnapshotWriter writer;

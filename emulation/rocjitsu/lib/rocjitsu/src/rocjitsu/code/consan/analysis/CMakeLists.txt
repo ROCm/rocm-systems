@@ -5,6 +5,7 @@ add_library(
     rocjitsu_consan_analysis
     STATIC
     analyze.cpp
+    execution_trace.cpp
     render.cpp
     lds_race.cpp
     lds_race_render.cpp
