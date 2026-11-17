@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "atomic_cdna_exchange_fixture.h"
+#include "atomic_ds_fixture.h"
 #include "atomic_fixture.h"
 #include "atomic_native_inventory_fixture.h"
 #include "cli_test_support.h"
@@ -226,6 +227,68 @@ TEST_F(FaultAtomicCli, BufferCas64RejectsMisalignedDeltaWithoutPublishing) {
   }
 }
 
+TEST_F(FaultAtomicCli, NativeCdnaDsExchangesMatchExactOrdinalLibraryAndFullGuestOracle) {
+  for (const test::AtomicTargetCase &target : test::kNativeCdnaExchangeCases) {
+    SCOPED_TRACE(target.name);
+    for (bool modifiers : {false, true}) {
+      SCOPED_TRACE(modifiers);
+      const std::vector<uint8_t> image =
+          test::make_mixed_native_cdna_exchange_elf(target, modifiers);
+      ASSERT_NO_FATAL_FAILURE(write(input_, image));
+      const FaultMutationContext source(image);
+      FaultMutationError error;
+      const FailureOr<AtomicInventory> inventory =
+          discover_atomic_wrong_address(source, "test_kernel", error);
+      ASSERT_TRUE(inventory.succeeded()) << error.message;
+      ASSERT_EQ(inventory.value().sites().size(), 5u);
+      std::vector<std::string> list = args();
+      list.push_back("--list");
+      ASSERT_EQ(run(list), 0) << stderr_;
+      EXPECT_NE(stdout_.find("ordinal=0 exact=0 size=8 byte_offset=8 address_supported=0"),
+                std::string::npos);
+      EXPECT_NE(stdout_.find("ordinal=1 exact=8 size=8 byte_offset=4 address_supported=0"),
+                std::string::npos);
+      EXPECT_NE(stdout_.find("ordinal=2 exact=16 size=8 byte_offset=4 address_supported=1"),
+                std::string::npos);
+      for (size_t ordinal = 0; ordinal < 5; ++ordinal) {
+        SCOPED_TRACE(ordinal);
+        const FailureOr<AtomicSelection> selected = select_atomic_wrong_address(
+            inventory.value(), {.exact = std::nullopt, .ordinal = ordinal}, error);
+        ASSERT_TRUE(selected.succeeded()) << error.message;
+        if (ordinal < 2) {
+          for (const std::vector<std::string> &selector :
+               {std::vector<std::string>{"--ordinal", std::to_string(ordinal)},
+                std::vector<std::string>{"--exact", std::to_string(ordinal * 8), "--ordinal",
+                                         "999"}}) {
+            EXPECT_NE(run(mutation_args(selector)), 0);
+            EXPECT_NE(stderr_.find("UnsupportedForm"), std::string::npos) << stderr_;
+            EXPECT_FALSE(std::filesystem::exists(output_));
+          }
+          continue;
+        }
+        const FailureOr<AtomicResult> expected =
+            apply_atomic_wrong_address(source, selected.value(), 8, error);
+        ASSERT_TRUE(expected.succeeded()) << error.message;
+        for (const std::vector<std::string> &selector :
+             {std::vector<std::string>{"--ordinal", std::to_string(ordinal)},
+              std::vector<std::string>{"--exact", std::to_string(ordinal * 8), "--ordinal",
+                                       "999"}}) {
+          ASSERT_EQ(run(mutation_args(selector)), 0) << stderr_;
+          const std::vector<uint8_t> actual = read(output_);
+          EXPECT_EQ(actual, expected.value().image);
+          EXPECT_TRUE(test::atomic_ds_output_matches(source, ordinal * 8, 8, actual));
+          EXPECT_EQ(read(input_), image);
+          ASSERT_TRUE(std::filesystem::remove(output_));
+        }
+      }
+      EXPECT_NE(run(mutation_args({"--exact", "4", "--ordinal", "2"})), 0);
+      EXPECT_NE(stderr_.find("InvalidParameters"), std::string::npos);
+      EXPECT_FALSE(std::filesystem::exists(output_));
+      EXPECT_EQ(read(input_), image);
+    }
+  }
+}
+
 TEST_F(FaultAtomicCli, NegativeBufferSourceKeepsOrdinalAndNeverPublishes) {
   for (const test::AtomicTargetCase &target : test::kAtomicTargetCases) {
     SCOPED_TRACE(target.name);
@@ -276,7 +339,48 @@ TEST_F(FaultAtomicCli, NegativeBufferSourceKeepsOrdinalAndNeverPublishes) {
   }
 }
 
-TEST_F(FaultAtomicCli, UnsupportedAtomicFormsRemainInOrdinalInventory) {
+TEST_F(FaultAtomicCli, SevenTargetDsExactOrdinalAndLibraryAgree) {
+  for (const test::AtomicTargetCase &target : test::kAtomicDsTargetCases) {
+    SCOPED_TRACE(target.name);
+    const std::vector<uint8_t> image =
+        test::make_atomic_ds_elf(target, test::AtomicDsForm::AddReturning, 4, 2, true);
+    ASSERT_NO_FATAL_FAILURE(write(input_, image));
+    const FaultMutationContext context(image);
+    FaultMutationError error;
+    const FailureOr<AtomicInventory> inventory =
+        discover_atomic_wrong_address(context, "test_kernel", error);
+    ASSERT_TRUE(inventory.succeeded()) << error.message;
+    ASSERT_EQ(inventory.value().sites().size(), 1u);
+    const FailureOr<AtomicSelection> selected =
+        select_atomic_wrong_address(inventory.value(), {}, error);
+    ASSERT_TRUE(selected.succeeded()) << error.message;
+    const FailureOr<AtomicResult> expected =
+        apply_atomic_wrong_address(context, selected.value(), 8, error);
+    ASSERT_TRUE(expected.succeeded()) << error.message;
+    for (const std::vector<std::string> &selector :
+         {std::vector<std::string>{"--ordinal", "0"},
+          std::vector<std::string>{"--exact", "0x0", "--ordinal", "999"}}) {
+      ASSERT_EQ(run(mutation_args(selector)), 0) << stderr_;
+      const std::vector<uint8_t> actual = read(output_);
+      EXPECT_EQ(actual, expected.value().image);
+      EXPECT_TRUE(test::atomic_ds_output_matches(context, 0, 8, actual));
+      EXPECT_EQ(read(input_), image);
+      ASSERT_TRUE(std::filesystem::remove(output_));
+    }
+    const std::vector<uint8_t> wide = test::make_atomic_ds_elf(target, test::AtomicDsForm::WideAdd);
+    ASSERT_NO_FATAL_FAILURE(write(input_, wide));
+    for (const std::vector<std::string> &selector :
+         {std::vector<std::string>{"--ordinal", "0"},
+          std::vector<std::string>{"--exact", "0x0", "--ordinal", "999"}}) {
+      EXPECT_NE(run(mutation_args(selector)), 0);
+      EXPECT_NE(stderr_.find("UnsupportedForm"), std::string::npos);
+      EXPECT_FALSE(std::filesystem::exists(output_));
+      EXPECT_EQ(read(input_), wide);
+    }
+  }
+}
+
+TEST_F(FaultAtomicCli, DsAdmissionKeepsTheMixedAtomicSourceOrder) {
   const test::AtomicTargetCase &target = test::kAtomicTargetCases.front();
   const std::vector<uint8_t> image = test::make_mixed_atomic_elf(target);
   ASSERT_NO_FATAL_FAILURE(write(input_, image));
@@ -300,26 +404,25 @@ TEST_F(FaultAtomicCli, UnsupportedAtomicFormsRemainInOrdinalInventory) {
   ASSERT_NE(flat, std::string::npos);
   EXPECT_LT(buffer, ds);
   EXPECT_LT(ds, flat);
-  for (const char *ordinal : {"1"}) {
-    EXPECT_NE(run(mutation_args({"--ordinal", ordinal})), 0);
-    EXPECT_NE(stderr_.find("UnsupportedForm"), std::string::npos);
-    EXPECT_FALSE(std::filesystem::exists(output_));
-  }
-  const FailureOr<AtomicSelection> selected =
-      select_atomic_wrong_address(inventory.value(), {.exact = std::nullopt, .ordinal = 2}, error);
-  ASSERT_TRUE(selected.succeeded()) << error.message;
-  const FailureOr<AtomicResult> expected =
-      apply_atomic_wrong_address(context, selected.value(), 8, error);
-  ASSERT_TRUE(expected.succeeded()) << error.message;
-  for (const std::vector<std::string> &selector :
-       {std::vector<std::string>{"--ordinal", "2"},
-        std::vector<std::string>{"--exact", "0x14", "--ordinal", "999"}}) {
-    ASSERT_EQ(run(mutation_args(selector)), 0) << stderr_;
-    const std::vector<uint8_t> actual = read(output_);
-    EXPECT_EQ(actual, expected.value().image);
-    EXPECT_TRUE(test::atomic_output_matches(context, 20, 8, actual));
-    EXPECT_EQ(read(input_), image);
-    ASSERT_TRUE(std::filesystem::remove(output_));
+  for (size_t ordinal : {size_t{1}, size_t{2}}) {
+    const FailureOr<AtomicSelection> selected = select_atomic_wrong_address(
+        inventory.value(), {.exact = std::nullopt, .ordinal = ordinal}, error);
+    ASSERT_TRUE(selected.succeeded()) << error.message;
+    const FailureOr<AtomicResult> expected =
+        apply_atomic_wrong_address(context, selected.value(), 8, error);
+    ASSERT_TRUE(expected.succeeded()) << error.message;
+    for (const std::vector<std::string> &selector :
+         {std::vector<std::string>{"--ordinal", std::to_string(ordinal)},
+          std::vector<std::string>{"--exact", std::to_string(selected.value().site().offset),
+                                   "--ordinal", "999"}}) {
+      ASSERT_EQ(run(mutation_args(selector)), 0) << stderr_;
+      const std::vector<uint8_t> actual = read(output_);
+      EXPECT_EQ(actual, expected.value().image);
+      EXPECT_TRUE(ordinal == 1 ? test::atomic_ds_output_matches(context, 12, 8, actual)
+                               : test::atomic_output_matches(context, 20, 8, actual));
+      EXPECT_EQ(read(input_), image);
+      ASSERT_TRUE(std::filesystem::remove(output_));
+    }
   }
   EXPECT_NE(run(mutation_args({"--exact", "4", "--ordinal", "2"})), 0);
   EXPECT_FALSE(std::filesystem::exists(output_));
@@ -566,7 +669,7 @@ TEST_F(FaultAtomicCli, HelpAndCapabilitiesMatchEnabledProfiles) {
        (position = stdout_.find("kind=AtomicWrongAddress ", position)) != std::string::npos;
        ++position)
     ++atomic_lines;
-  EXPECT_EQ(atomic_lines, 18u);
+  EXPECT_EQ(atomic_lines, 28u);
   for (const test::AtomicTargetCase &target : test::kAtomicTargetCases) {
     const IsaTargetBinding *description = default_isa_target_registry().find_target(target.target);
     ASSERT_NE(description, nullptr);
@@ -575,7 +678,7 @@ TEST_F(FaultAtomicCli, HelpAndCapabilitiesMatchEnabledProfiles) {
     EXPECT_NE(stdout_.find(prefix + "flat_atomic"), std::string::npos);
     EXPECT_NE(stdout_.find(prefix + "global_atomic"), std::string::npos);
     EXPECT_NE(stdout_.find(prefix + "buffer_atomic"), std::string::npos);
-    EXPECT_EQ(stdout_.find(prefix + "ds_atomic"), std::string::npos);
+    EXPECT_NE(stdout_.find(prefix + "ds_atomic"), std::string::npos);
   }
 }
 
