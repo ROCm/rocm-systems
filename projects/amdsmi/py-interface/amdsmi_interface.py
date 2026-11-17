@@ -3952,7 +3952,7 @@ def amdsmi_get_gpu_cper_entries(
 
     if isinstance(device_handle, Path):
         if not os.path.isfile(device_handle):
-            raise AmdSmiParameterException(device_handle, str)
+            raise AmdSmiLibraryException(amdsmi_wrapper.AMDSMI_STATUS_FILE_NOT_FOUND)
         device_handle = ctypes.c_char_p(str(device_handle).encode("utf-8"))
     elif not isinstance(device_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(device_handle, amdsmi_wrapper.amdsmi_processor_handle)
@@ -4174,6 +4174,117 @@ def amdsmi_get_fabric_cper_entries(
         offset += entry_ptr.contents.record_length
 
     return entries, cur.value, cper_data, ret
+
+
+def amdsmi_get_ainic_cper_entries(
+    processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
+    severity_mask: int,
+    buffer_size: int = 4 * 1048576,
+    cursor: int = 0,
+) -> Tuple[Dict[int, Dict[str, Any]], int, List[Dict[str, Any]], int]:
+    """
+    Retrieve CPER entries from an AI-NIC device via the pds_core debugfs ring.
+
+    Delegates to the C library amdsmi_get_nic_cper_entries, which resolves the
+    pds_core management function BDF from the NIC bridge BDF at call time.
+
+    Args:
+        processor_handle: AI-NIC processor handle (AMDSMI_PROCESSOR_TYPE_AMD_NIC)
+        severity_mask: Bitmask of severity levels (1 << AMDSMI_CPER_SEV_*)
+        buffer_size: Size of the read buffer in bytes (default 4 MB)
+        cursor: Record index from the previous call (0 for first call)
+
+    Returns:
+        Tuple of (entries_dict, new_cursor, cper_data_list, status_code)
+
+    Raises:
+        AmdSmiParameterException: processor_handle is not valid
+        AmdSmiLibraryException: Underlying API failure (file not found, etc.)
+    """
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    buf = ctypes.create_string_buffer(buffer_size)
+    buf_size = ctypes.c_uint64(buffer_size)
+    num_cper_hdrs = 20
+    entry_count = ctypes.c_uint64(num_cper_hdrs)
+    cur = ctypes.c_uint64(cursor)
+
+    cper_hdrs_array = (ctypes.POINTER(amdsmi_wrapper.amdsmi_cper_hdr_t) * num_cper_hdrs)()
+    cper_hdrs = ctypes.cast(
+        cper_hdrs_array, ctypes.POINTER(ctypes.POINTER(amdsmi_wrapper.amdsmi_cper_hdr_t))
+    )
+
+    status_code = amdsmi_wrapper.amdsmi_get_nic_cper_entries(
+        processor_handle,
+        ctypes.c_uint32(severity_mask),
+        buf,
+        ctypes.byref(buf_size),
+        cper_hdrs,
+        ctypes.byref(entry_count),
+        ctypes.byref(cur),
+    )
+    if status_code not in {
+        amdsmi_wrapper.AMDSMI_STATUS_SUCCESS,
+        amdsmi_wrapper.AMDSMI_STATUS_MORE_DATA,
+    }:
+        raise AmdSmiLibraryException(status_code)
+
+    entries = {}
+    cper_data = []
+    offset = 0
+
+    for i in range(entry_count.value):
+        entry_address = ctypes.addressof(buf) + offset
+        entry_ptr = ctypes.cast(entry_address, POINTER(amdsmi_wrapper.amdsmi_cper_hdr_t))
+
+        cper_data.append(
+            {
+                "bytes": list(
+                    (entry_ptr.contents.record_length * ctypes.c_byte).from_address(entry_address)
+                ),
+                "size": entry_ptr.contents.record_length,
+            }
+        )
+
+        year = entry_ptr.contents.timestamp.year
+        if year < 100:
+            year += 2000
+        formatted_timestamp = (
+            f"{year:04d}/"
+            f"{entry_ptr.contents.timestamp.month:02d}/"
+            f"{entry_ptr.contents.timestamp.day:02d} "
+            f"{entry_ptr.contents.timestamp.hours:02d}:"
+            f"{entry_ptr.contents.timestamp.minutes:02d}:"
+            f"{entry_ptr.contents.timestamp.seconds:02d}"
+        )
+
+        cper_entry = {
+            "error_severity": amdsmi_wrapper.amdsmi_cper_sev_t__enumvalues.get(
+                entry_ptr.contents.error_severity, "AMDSMI_CPER_SEV_UNUSED"
+            )
+            .replace("AMDSMI_CPER_SEV_", "")
+            .lower(),
+            "notify_type": _notifyTypeToString(entry_ptr.contents.notify_type.b),
+            "timestamp": formatted_timestamp,
+            "signature": entry_ptr.contents.signature,
+            "revision": entry_ptr.contents.revision,
+            "signature_end": hex(entry_ptr.contents.signature_end),
+            "sec_cnt": entry_ptr.contents.sec_cnt,
+            "record_length": entry_ptr.contents.record_length,
+            "serial_number": "",
+            "platform_id": entry_ptr.contents.platform_id,
+            "creator_id": entry_ptr.contents.creator_id,
+            "record_id": entry_ptr.contents.record_id,
+            "flags": entry_ptr.contents.flags,
+            "persistence_info": entry_ptr.contents.persistence_info,
+            "source": "ainic",
+        }
+
+        entries[i] = cper_entry.copy()
+        offset += entry_ptr.contents.record_length
+
+    return entries, cur.value, cper_data, status_code
 
 
 def amdsmi_get_afids_from_cper(

@@ -4472,6 +4472,12 @@ try:
 except AttributeError:
     pass
 try:
+    amdsmi_get_nic_cper_entries = _libraries['libamd_smi.so'].amdsmi_get_nic_cper_entries
+    amdsmi_get_nic_cper_entries.restype = amdsmi_status_t
+    amdsmi_get_nic_cper_entries.argtypes = [amdsmi_processor_handle, uint32_t, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(ctypes.POINTER(struct_amdsmi_cper_hdr_t)), ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(ctypes.c_uint64)]
+except AttributeError:
+    pass
+try:
     amdsmi_get_gpu_ecc_status = _libraries['libamd_smi.so'].amdsmi_get_gpu_ecc_status
     amdsmi_get_gpu_ecc_status.restype = amdsmi_status_t
     amdsmi_get_gpu_ecc_status.argtypes = [amdsmi_processor_handle, amdsmi_gpu_block_t, ctypes.POINTER(amdsmi_ras_err_state_t)]
@@ -6064,11 +6070,11 @@ __all__ = \
     'amdsmi_get_link_topology_nearest',
     'amdsmi_get_minmax_bandwidth_between_processors',
     'amdsmi_get_nic_asic_info', 'amdsmi_get_nic_bus_info',
-    'amdsmi_get_nic_capability', 'amdsmi_get_nic_device_bdf',
-    'amdsmi_get_nic_driver_info', 'amdsmi_get_nic_fw_info',
-    'amdsmi_get_nic_hwmon_sensors', 'amdsmi_get_nic_numa_info',
-    'amdsmi_get_nic_port_ifindex', 'amdsmi_get_nic_port_info',
-    'amdsmi_get_nic_port_statistics',
+    'amdsmi_get_nic_capability', 'amdsmi_get_nic_cper_entries',
+    'amdsmi_get_nic_device_bdf', 'amdsmi_get_nic_driver_info',
+    'amdsmi_get_nic_fw_info', 'amdsmi_get_nic_hwmon_sensors',
+    'amdsmi_get_nic_numa_info', 'amdsmi_get_nic_port_ifindex',
+    'amdsmi_get_nic_port_info', 'amdsmi_get_nic_port_statistics',
     'amdsmi_get_nic_processor_handles',
     'amdsmi_get_nic_rdma_dev_info',
     'amdsmi_get_nic_rdma_port_statistics', 'amdsmi_get_nic_telemetry',
