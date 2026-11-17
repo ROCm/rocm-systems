@@ -886,11 +886,15 @@ TEST_F(GinAnvilPluginTest, RegMrSym_FabricRefcountAndExchangeFail) {
   };
 
   // A failed exchange publishes nothing, and FabricSetupGuard deletes the
-  // handler it allocated.
+  // handler it allocated. The rank still joins the publish vote, so the
+  // allgathers are the fabric vote, the setup vote, and that one check.
   GinAnvilPluginStubs::SetFabricExchangeFail(true);
   void* mhFail = nullptr;
   void* ghFail = nullptr;
+  const int gathersBeforeFail = GinAnvilPluginStubs::GetBootstrapAllGatherCalls();
   EXPECT_NE(plugin_.regMrSym(coll, data, 4096, 0, 0, &mhFail, &ghFail), ncclSuccess);
+  EXPECT_EQ(GinAnvilPluginStubs::GetBootstrapAllGatherCalls() - gathersBeforeFail, 3);
+  EXPECT_EQ(GinAnvilPluginStubs::GetFabricExchangeCalls(), 1);
   GinAnvilPluginStubs::SetFabricExchangeFail(false);
   {
     SCOPED_TRACE("after failed exchange");
@@ -901,7 +905,11 @@ TEST_F(GinAnvilPluginTest, RegMrSym_FabricRefcountAndExchangeFail) {
   void* gh1 = nullptr;
   void* mh2 = nullptr;
   void* gh2 = nullptr;
+  // First registration: fabric vote, setup vote, then one vote after publish.
+  // There is no separate vote between exchange and publish.
+  const int gathersBeforeFirst = GinAnvilPluginStubs::GetBootstrapAllGatherCalls();
   ASSERT_EQ(plugin_.regMrSym(coll, data, 4096, 0, 0, &mh1, &gh1), ncclSuccess);
+  EXPECT_EQ(GinAnvilPluginStubs::GetBootstrapAllGatherCalls() - gathersBeforeFirst, 3);
   {
     SCOPED_TRACE("after first registration");
     expectFabric(1, 1, 1);
@@ -915,8 +923,13 @@ TEST_F(GinAnvilPluginTest, RegMrSym_FabricRefcountAndExchangeFail) {
     EXPECT_EQ(peers[0], reinterpret_cast<uintptr_t>(data));
     EXPECT_EQ(peers[1], peerBase + peerStride + offset);
   }
-  // The second registration of the same buffer reuses the published handler.
+  // The second registration of the same buffer reuses the published handler:
+  // the fabric vote plus the publish vote, and no exchange.
+  const int gathersBeforeSecond = GinAnvilPluginStubs::GetBootstrapAllGatherCalls();
+  const int exchangesBeforeSecond = GinAnvilPluginStubs::GetFabricExchangeCalls();
   ASSERT_EQ(plugin_.regMrSym(coll, data, 4096, 0, 0, &mh2, &gh2), ncclSuccess);
+  EXPECT_EQ(GinAnvilPluginStubs::GetBootstrapAllGatherCalls() - gathersBeforeSecond, 2);
+  EXPECT_EQ(GinAnvilPluginStubs::GetFabricExchangeCalls(), exchangesBeforeSecond);
   EXPECT_NE(mh1, mh2);
   {
     SCOPED_TRACE("after second registration");
@@ -969,6 +982,87 @@ TEST_F(GinAnvilPluginTest, RegMrSym_FabricLocalFailureStillVotes) {
 
   GinAnvilPluginStubs::SetFabricAddSelfFail(true);
   expectVoteThenFail("addSelf", 2);
+
+  plugin_.closeColl(coll);
+  plugin_.finalize(ictx);
+}
+
+// A peer that fails setup must keep this rank out of exchangeMemPtrs. The
+// scripted vote is the setup vote; returning before it would desynchronize
+// the collective inside the exchange.
+TEST_F(GinAnvilPluginTest, RegMrSym_FabricPeerSetupFailureSkipsExchange) {
+  GinAnvilPluginStubs::SetUseFabricMem(true);
+  GinAnvilPluginStubs::SetFabricVmmQueryOk(true);
+  GinAnvilPluginStubs::SetFabricRetainOk(true);
+  setupFabricComm(2);
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll, 2);
+
+  const int setupVote[2] = {1, 0};
+  GinAnvilPluginStubs::SetBootstrapIntResult(setupVote, 2);
+  const int gathersBefore = GinAnvilPluginStubs::GetBootstrapAllGatherCalls();
+  void* data = reinterpret_cast<void*>(0x80001000ULL);
+  void* mh = nullptr;
+  void* gh = nullptr;
+  EXPECT_NE(plugin_.regMrSym(coll, data, 4096, 0, 0, &mh, &gh), ncclSuccess);
+  EXPECT_EQ(GinAnvilPluginStubs::GetBootstrapAllGatherCalls() - gathersBefore, 2);
+  EXPECT_EQ(GinAnvilPluginStubs::GetFabricExchangeCalls(), 0);
+  EXPECT_EQ(GinAnvilPluginStubs::LiveFabricHandlers(), 0);
+
+  plugin_.closeColl(coll);
+  plugin_.finalize(ictx);
+}
+
+// This rank publishes, then the publish vote reports a peer failure. The
+// buffer and the device allocations from the partial publish are dropped here;
+// the peer is responsible for its own rollback.
+TEST_F(GinAnvilPluginTest, RegMrSym_FabricPeerRejectsAfterPublish_RollsBack) {
+  GinAnvilPluginStubs::SetUseFabricMem(true);
+  GinAnvilPluginStubs::SetFabricVmmQueryOk(true);
+  GinAnvilPluginStubs::SetFabricRetainOk(true);
+  GinAnvilPluginStubs::SetFabricPeerBase(reinterpret_cast<void*>(0x80000000ULL));
+  setupFabricComm(2);
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll, 2);
+
+  const int setupYes[2] = {1, 1};
+  const int peerNo[2] = {1, 0};
+  GinAnvilPluginStubs::SetBootstrapIntResult(setupYes, 2);
+  GinAnvilPluginStubs::SetBootstrapIntResult(peerNo, 2);
+
+  void* data = reinterpret_cast<void*>(0x80001000ULL);
+  const int hipBefore = GinAnvilPluginStubs::GetLiveHipAllocationCount();
+  const int gathersBefore = GinAnvilPluginStubs::GetBootstrapAllGatherCalls();
+  void* mh = nullptr;
+  void* gh = nullptr;
+  EXPECT_NE(plugin_.regMrSym(coll, data, 4096, 0, 0, &mh, &gh), ncclSuccess);
+  EXPECT_EQ(GinAnvilPluginStubs::GetBootstrapAllGatherCalls() - gathersBefore, 3);
+  EXPECT_EQ(GinAnvilPluginStubs::GetFabricExchangeCalls(), 1);
+  EXPECT_EQ(GinAnvilPluginStubs::GetLiveHipAllocationCount(), hipBefore);
+  {
+    ncclGinAnvilFabricTestState st{};
+    ncclGinAnvilPluginTestFabricState(coll, data, &st);
+    EXPECT_EQ(st.entries, 0u);
+    EXPECT_EQ(st.refcount, 0);
+  }
+  EXPECT_EQ(GinAnvilPluginStubs::LiveFabricHandlers(), 0);
+
+  // The rollback left the rank able to register the same buffer.
+  void* mhOk = nullptr;
+  void* ghOk = nullptr;
+  ASSERT_EQ(plugin_.regMrSym(coll, data, 4096, 0, 0, &mhOk, &ghOk), ncclSuccess);
+  {
+    ncclGinAnvilFabricTestState st{};
+    ncclGinAnvilPluginTestFabricState(coll, data, &st);
+    EXPECT_EQ(st.entries, 1u);
+    EXPECT_EQ(st.refcount, 1);
+  }
+  EXPECT_EQ(plugin_.deregMrSym(coll, mhOk), ncclSuccess);
+  EXPECT_EQ(GinAnvilPluginStubs::LiveFabricHandlers(), 0);
 
   plugin_.closeColl(coll);
   plugin_.finalize(ictx);

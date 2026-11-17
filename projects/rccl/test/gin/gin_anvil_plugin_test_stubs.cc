@@ -59,6 +59,7 @@ struct State {
   bool fabricMemCapable = false;
   bool fabricAddSelfFail = false;
   bool fabricExchangeFail = false;
+  int fabricExchangeCalls = 0;
   void* fabricPeerBase = reinterpret_cast<void*>(0x80000000ULL);
   size_t fabricPeerStride = 0x1000;
   bool fabricVmmQueryOk = true;
@@ -99,6 +100,7 @@ void SetUseFabricMem(bool use) { g.useFabricMem = use; }
 void SetFabricMemCapable(bool capable) { g.fabricMemCapable = capable; }
 void SetFabricAddSelfFail(bool fail) { g.fabricAddSelfFail = fail; }
 void SetFabricExchangeFail(bool fail) { g.fabricExchangeFail = fail; }
+int GetFabricExchangeCalls() { return g.fabricExchangeCalls; }
 void SetFabricPeerBase(void* ptr) { g.fabricPeerBase = ptr; }
 void SetFabricPeerStride(size_t stride) { g.fabricPeerStride = stride; }
 void SetFabricVmmQueryOk(bool ok) { g.fabricVmmQueryOk = ok; }
@@ -428,6 +430,7 @@ ncclResult_t ncclFabricMemHandler::addSelfDeviceMem(void* deviceMemPtr, hipMemGe
 }
 
 ncclResult_t ncclFabricMemHandler::exchangeMemPtrs() {
+  ++GinAnvilPluginStubs::g.fabricExchangeCalls;
   if (GinAnvilPluginStubs::g.fabricExchangeFail) return ncclSystemError;
   exchanged_ = true;
   return ncclSuccess;
