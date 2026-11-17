@@ -10,6 +10,11 @@ hipFile requires a Linux kernel built with ``CONFIG_PCI_P2PDMA=y``. On a kernel
 without peer-to-peer DMA support, hipFile always goes to fallback mode,
 regardless of the storage configuration. See :ref:`hipfile-kernel-p2pdma`.
 
+hipFile doesn't support the fastpath on Windows Subsystem for Linux (WSL2). On
+WSL2, the ROCm runtime accesses the GPU through the DirectX graphics kernel
+driver (``/dev/dxg``) instead of the amdgpu driver, and that path doesn't
+implement AMD Infinity Storage.
+
 hipFile also requires a direct path from the GPU to the storage device. The
 filesystem must be backed by a local NVMe device that either resides on the
 device's partition or is stacked on it through LVM or MD software RAID. Any

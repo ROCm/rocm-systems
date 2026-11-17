@@ -1,6 +1,6 @@
 # Dashboard build and test
 
-Run commands from `emulation/rocjitsu/website/dashboard`. The React/Vite app does not need a native Rocjitsu build, a GPU, a ROCm install, or a benchmark service. Node must satisfy `package.json`: `^20.19.0 || ^22.13.0 || >=24.0.0`.
+Run commands from `emulation/rocjitsu/website/dashboard`. The React/Vite app does not need a native rocjitsu build, a GPU, a ROCm install, or a benchmark service. Node must satisfy `package.json`: `^20.19.0 || ^22.13.0 || >=24.0.0`.
 
 ```bash
 npm ci

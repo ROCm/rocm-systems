@@ -17,7 +17,11 @@
 
 #include "NetIbMPITestBase.hpp"
 #include "NetIbFaultInject.hpp"
+#include "NetIbCastInspect.hpp"
+#include "net_ib_wqe_lat_inspect.h"
 #include "rocmwrap.h"
+
+#include <strings.h>
 
 #include <hsa/hsa_ext_amd.h>
 #include <string>
@@ -26,8 +30,28 @@
 
 namespace {
 
+// Preserve fatal failures raised by helpers inside the burst.
+#define ASSERT_RECV_FLUSH_BURST(iterations, verifyData, lastFlush)                   \
+    do {                                                                             \
+        std::string _burstWhy;                                                       \
+        ncclResult_t _burstRet = RunRecvFlushBurst((iterations), (verifyData),       \
+                                                  (lastFlush), &_burstWhy);          \
+        ASSERT_EQ(_burstRet, ncclSuccess)                                            \
+            << "GDR recv+flush burst setup failed on at least one rank (this rank: " \
+            << _burstWhy << ")";                                                     \
+        if (::testing::Test::HasFatalFailure()) return;                              \
+    } while (0)
+
 class GdrFlushTest : public NetIbMPITest {
 protected:
+    void SetUp() override {
+        NetIbMPITest::SetUp();
+        // GetPlugin() uses strcmp against the plugin name "IB-CAST", so
+        // NCCL_NET=ib-cast would otherwise keep running ncclNetIb.
+        const char* env = getenv("NCCL_NET");
+        if (env != nullptr && strcasecmp(env, netIbCast.name) == 0) net_ = &netIbCast;
+    }
+
     // NCCL_CUMEM_ENABLE=1 makes the flush scratchpad dma-buf-backed (the path
     // that used to fault). Absent/0 selects the legacy peermem reg_mr path.
     static bool cuMemEnabledEnv() {
@@ -85,23 +109,18 @@ protected:
         return res;
     }
 
-    // Runs `iterations` of GPU recv + flush across 2 ranks on device 0.
-    // rank 0 = receiver + flush, rank 1 = sender. Returns rank 0's last flush
-    // completion result via `rank0LastFlush` (may be null).
-    //
-    // The data buffer is plain hipMalloc, registered through RegisterGdrMemory. The
-    // exercised scratchpad is the recv comm's INTERNAL gpuFlush, which becomes
-    // dma-buf-backed purely from NCCL_CUMEM_ENABLE=1 - independent of how the data
-    // buffer is allocated or registered.
-    void RunRecvFlushBurst(int iterations, bool verifyData,
-                           ncclResult_t* rank0LastFlush) {
+    // Returns rank-agreed setup status; rank-local transfer checks remain non-fatal.
+    [[nodiscard]] ncclResult_t RunRecvFlushBurst(int iterations, bool verifyData,
+                                                ncclResult_t* rank0LastFlush,
+                                                std::string* setupWhy = nullptr) {
         const int rank = MPIEnvironment::world_rank;
 
         AssertInitAndGetDevices(nullptr);
 
         ConnectionPair pair;
         NetConnectionGuard connGuard(net_);
-        ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
+        const ncclResult_t setup = SetupConnectionWithGuard(0, pair, connGuard, setupWhy);
+        if (setup != ncclSuccess) return setup;
 
         const size_t bufferSize = kSmallBufferSize;
         void* buffer = nullptr;
@@ -161,6 +180,91 @@ protected:
         }
 
         if (rank == 0 && rank0LastFlush) *rank0LastFlush = lastFlush;
+        return ncclSuccess;
+    }
+
+    // One recv+flush. The flush SGE is one byte, so the GPU scratchpad receives
+    // only the sentinel's low byte; a flush that posts only the read leaves that
+    // byte zero and copies the zero back over the host sentinel. Rank 0's checks
+    // stay non-fatal so a failure still reaches the barrier rank 1 waits on.
+    void ExpectScratchpadSentinelRoundTrip() {
+        const int rank = MPIEnvironment::world_rank;
+
+        AssertInitAndGetDevices(nullptr);
+
+        ConnectionPair pair;
+        NetConnectionGuard connGuard(net_);
+        ASSERT_SETUP_CONNECTION(0, pair, connGuard);
+
+        int skip = 0;
+        int* hostMem = nullptr;
+        int* gpuMem = nullptr;
+        if (rank == 0) {
+            ncclResult_t got = (net_ == &netIbCast)
+                                   ? ncclIbCastGdrFlushGetScratch(pair.recvComm, 0, &hostMem, &gpuMem)
+                                   : ncclIbGdrFlushGetScratch(pair.recvComm, 0, &hostMem, &gpuMem);
+            if (got != ncclSuccess || hostMem == nullptr || gpuMem == nullptr) skip = 1;
+        }
+        MPI_Bcast(&skip, 1, MPI_INT, 0, MPI_COMM_WORLD);
+        if (skip) {
+            if (rank == 0) ADD_FAILURE() << "recv comm has no GDR flush scratchpad";
+            return;
+        }
+
+        constexpr int kSentinel = 0x5a5a5a5a;
+        if (rank == 0) {
+            *hostMem = kSentinel;
+            EXPECT_EQ(hipMemset(gpuMem, 0, sizeof(*gpuMem)), hipSuccess);
+        }
+
+        const size_t bufferSize = kSmallBufferSize;
+        void* buffer = nullptr;
+        EXPECT_EQ(hipMalloc(&buffer, bufferSize), hipSuccess);
+        auto bufGuard = makeDeviceBufferAutoGuard(buffer);
+
+        void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+        void* mhandle = nullptr;
+        EXPECT_EQ(RegisterGdrMemory(comm, buffer, bufferSize, &mhandle), ncclSuccess);
+        NetMHandleGuard mhandleGuard(mhandle, NetMHandleDeleter(net_, comm));
+
+        const int tag = 790;
+        const int seed = 1234;
+        void* request = nullptr;
+        if (rank == 0) {
+            EXPECT_EQ(hipMemset(buffer, 0, bufferSize), hipSuccess);
+            void* rb[1] = {buffer};
+            size_t rs[1] = {bufferSize};
+            int rt[1] = {tag};
+            void* rh[1] = {mhandle};
+            EXPECT_EQ(PostRecv(pair.recvComm, 1, rb, rs, rt, rh, &request), ncclSuccess);
+        } else {
+            EXPECT_EQ(initializeBufferWithPattern<uint8_t>(buffer, bufferSize, makeBytePattern(seed)), hipSuccess);
+            PostSendWithRetry(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
+        }
+
+        MPI_Barrier(MPI_COMM_WORLD);
+        int sizes[1] = {0};
+        EXPECT_EQ(WaitForCompletion(request, sizes), ncclSuccess);
+
+        if (rank == 0) {
+            void* fb[1] = {buffer};
+            int fs[1] = {static_cast<int>(bufferSize)};
+            void* fh[1] = {mhandle};
+            void* flushReq = nullptr;
+            ncclResult_t r = FlushRecv(pair.recvComm, 1, fb, fs, fh, &flushReq);
+            EXPECT_EQ(r, ncclSuccess);
+            if (r == ncclSuccess) EXPECT_NE(flushReq, nullptr);
+            if (r == ncclSuccess && flushReq != nullptr) {
+                EXPECT_EQ(WaitForCompletion(flushReq, nullptr), ncclSuccess);
+                EXPECT_EQ(*hostMem, kSentinel) << "scratchpad read did not return the sentinel";
+                int gpuVal = 0;
+                EXPECT_EQ(hipMemcpy(&gpuVal, gpuMem, sizeof(gpuVal), hipMemcpyDeviceToHost), hipSuccess);
+                // sge.length is 1, so the write moves only the low byte.
+                EXPECT_EQ(gpuVal, kSentinel & 0xff) << "scratchpad write did not land";
+            }
+        }
+
+        MPI_Barrier(MPI_COMM_WORLD);
     }
 };
 
@@ -177,8 +281,7 @@ TEST_F(GdrFlushTest, CuMemDmaBuf_GpuRecvFlush_NoAsyncFatal) {
     if (!why.empty()) GTEST_SKIP() << why;
 
     ncclResult_t flush = ncclSuccess;
-    ASSERT_NO_FATAL_FAILURE(RunRecvFlushBurst(/*iterations=*/4, /*verifyData=*/true,
-                                              &flush));
+    ASSERT_RECV_FLUSH_BURST(/*iterations=*/4, /*verifyData=*/true, &flush);
     if (MPIEnvironment::world_rank == 0)
         EXPECT_EQ(flush, ncclSuccess) << "write+read flush over dma-buf scratchpad must not fault";
 }
@@ -197,8 +300,7 @@ TEST_F(GdrFlushTest, Peermem_GpuRecvFlush_NoAsyncFatal) {
     if (!why.empty()) GTEST_SKIP() << why;
 
     ncclResult_t flush = ncclSuccess;
-    ASSERT_NO_FATAL_FAILURE(RunRecvFlushBurst(/*iterations=*/4, /*verifyData=*/true,
-                                              &flush));
+    ASSERT_RECV_FLUSH_BURST(/*iterations=*/4, /*verifyData=*/true, &flush);
     if (MPIEnvironment::world_rank == 0)
         EXPECT_EQ(flush, ncclSuccess) << "peermem RO=0 scratchpad flush must succeed";
 }
@@ -217,10 +319,24 @@ TEST_F(GdrFlushTest, FeatureDisabled_FallbackReadRecvBuffer) {
     if (!why.empty()) GTEST_SKIP() << why;
 
     ncclResult_t flush = ncclSuccess;
-    ASSERT_NO_FATAL_FAILURE(RunRecvFlushBurst(/*iterations=*/4, /*verifyData=*/true,
-                                              &flush));
+    ASSERT_RECV_FLUSH_BURST(/*iterations=*/4, /*verifyData=*/true, &flush);
     if (MPIEnvironment::world_rank == 0)
         EXPECT_EQ(flush, ncclSuccess) << "fallback flush (read recv buffer) must succeed";
+}
+
+// The chained flush posts an unsignaled scratchpad write and a signaled read.
+// Zero the scratchpad and put a sentinel in the host payload. The write moves
+// one byte, so the scratchpad's low byte is the sentinel, and the host value
+// stays intact only if that write ran before the read.
+TEST_F(GdrFlushTest, ScratchpadWrite_RoundTripsSentinel) {
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                          false, kMinGpusPerNode, kNoNodeLimit);
+    if (!scratchpadFlushEnabled())
+        GTEST_SKIP() << "Requires the RO=0 scratchpad flush (RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING!=0)";
+    AssertInitAndGetDevices(nullptr);
+    if (!gdrPtrSupport()) GTEST_SKIP() << "no GDR backend (neither peermem nor dma-buf) on this device";
+
+    ASSERT_NO_FATAL_FAILURE(ExpectScratchpadSentinelRoundTrip());
 }
 
 // Repeated-flush burst. An intermittent async-fatal would surface as a
@@ -234,8 +350,7 @@ TEST_F(GdrFlushTest, RepeatedFlush_NoFaultBurst) {
     if (!why.empty()) GTEST_SKIP() << why;
 
     ncclResult_t flush = ncclSuccess;
-    ASSERT_NO_FATAL_FAILURE(RunRecvFlushBurst(/*iterations=*/50, /*verifyData=*/false,
-                                              &flush));
+    ASSERT_RECV_FLUSH_BURST(/*iterations=*/50, /*verifyData=*/false, &flush);
     if (MPIEnvironment::world_rank == 0)
         EXPECT_EQ(flush, ncclSuccess) << "no flush in the burst may raise a QP async-fatal";
 }

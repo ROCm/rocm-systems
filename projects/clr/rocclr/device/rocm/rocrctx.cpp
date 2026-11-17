@@ -141,7 +141,7 @@ bool Hsa::LoadLib() {
   GET_ROCR_SYMBOL(hsa_ext_image_import)
   GET_ROCR_SYMBOL(hsa_ext_image_export)
   GET_ROCR_SYMBOL(hsa_ext_image_destroy_v2)
-  GET_ROCR_SYMBOL(hsa_ext_sampler_create_v2)
+  GET_ROCR_SYMBOL(hsa_ext_sampler_create_v3)
   GET_ROCR_SYMBOL(hsa_ext_sampler_destroy)
   GET_ROCR_SYMBOL(hsa_ext_image_create_with_layout)
   GET_ROCR_SYMBOL(hsa_ext_image_mipmap_array_get_level)

@@ -241,7 +241,7 @@ runs:
           -DCMAKE_CXX_COMPILER=${{ inputs.rocm-path }}/lib/llvm/bin/amdclang++ \
           -DCMAKE_C_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
           -DCMAKE_CXX_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
-          ${GITHUB_WORKSPACE}/rocDecode
+          ${GITHUB_WORKSPACE}/projects/rocdecode
         cmake --build build-rocdecode --target all --parallel ${{ inputs.build-jobs }}
         cmake --build build-rocdecode --target install
         echo "✅ ROCDecode Installation complete!"
@@ -258,7 +258,7 @@ runs:
           -DCMAKE_CXX_COMPILER=${{ inputs.rocm-path }}/lib/llvm/bin/amdclang++ \
           -DCMAKE_C_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
           -DCMAKE_CXX_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
-          ${GITHUB_WORKSPACE}/rocJPEG
+          ${GITHUB_WORKSPACE}/projects/rocjpeg
         cmake --build build-rocjpeg --target all --parallel ${{ inputs.build-jobs }}
         cmake --build build-rocjpeg --target install
         echo "✅ ROCJPEG Installation complete!"

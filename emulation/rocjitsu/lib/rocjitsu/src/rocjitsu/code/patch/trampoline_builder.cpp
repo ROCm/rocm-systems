@@ -299,6 +299,9 @@ util::FailureOr<SpillBracket> build_spill_bracket(const std::vector<SpillSlot> &
 
 std::optional<TrampolineBytes> TrampolineBuilder::build(const TrampolinePlan &plan,
                                                         std::string *error_out) {
+  OptionalStringDiagnosticSink record_error(error_out);
+  const util::DiagnosticEmitter error(record_error);
+
   if (!check_size_and_words(plan, error_out))
     return std::nullopt;
 
@@ -321,6 +324,7 @@ std::optional<TrampolineBytes> TrampolineBuilder::build(const TrampolinePlan &pl
   const uint32_t original_offset = body.size() * sizeof(uint32_t);
   if (plan.emit_original)
     body.insert(body.end(), plan.original_words.begin(), plan.original_words.end());
+  const uint32_t after_items_byte_offset = body.size() * sizeof(uint32_t);
   for (const InlineAsmItem &item : plan.after_items)
     body.insert(body.end(), item.words.begin(), item.words.end());
 
@@ -334,15 +338,33 @@ std::optional<TrampolineBytes> TrampolineBuilder::build(const TrampolinePlan &pl
   TrampolineBytes out;
   if (plan.patch_anchor) {
     out.patched_anchor_bytes.reserve(plan.original_size);
-    append_word(out.patched_anchor_bytes, build_s_branch(*fwd, plan.arch));
-    if (plan.original_size == 8)
-      append_word(out.patched_anchor_bytes, build_s_nop(0, plan.arch));
+    util::FailureOr<uint32_t> forward = build_s_branch(*fwd, plan.arch, &error);
+    if (forward.failed())
+      return std::nullopt;
+    append_word(out.patched_anchor_bytes, forward.value());
+    if (plan.original_size == 8) {
+      util::FailureOr<uint32_t> nop = build_s_nop(0, plan.arch, &error);
+      if (nop.failed())
+        return std::nullopt;
+      append_word(out.patched_anchor_bytes, nop.value());
+    }
   }
 
   out.trampoline_words = std::move(body);
   out.original_byte_offset = original_offset;
-  if (plan.returns_to_kernel)
-    out.trampoline_words.push_back(build_s_branch(*ret, plan.arch));
+  if (plan.is_probe_call) {
+    const bool after_original = plan.probe_after_original && plan.emit_original;
+    out.call_envelope_byte_offset = after_original ? after_items_byte_offset : 0;
+    out.call_envelope_byte_size =
+        after_original ? out.trampoline_words.size() * sizeof(uint32_t) - after_items_byte_offset
+                       : original_offset;
+  }
+  if (plan.returns_to_kernel) {
+    util::FailureOr<uint32_t> backward = build_s_branch(*ret, plan.arch, &error);
+    if (backward.failed())
+      return std::nullopt;
+    out.trampoline_words.push_back(backward.value());
+  }
   return out;
 }
 
@@ -350,6 +372,9 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
                                         const RegisterSet &live_at_anchor,
                                         const RegisterSet &probe_body_clobbers,
                                         std::string *error_out) {
+  OptionalStringDiagnosticSink record_error(error_out, "probe-call resource planning: ");
+  const util::DiagnosticEmitter error(record_error);
+
   // The link pair is whatever the probe's calling convention returns through,
   // so the call site and the probe body agree on one pair. An ABI that could
   // not have come from derive_probe_abi() names no pair worth trusting.
@@ -513,10 +538,12 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
   // additionally requires EXEC. Shared reserve path so EXEC, VCC, and M0 differ
   // only by their row below, not by a branch each.
   std::vector<SpecialStateSlot> special_saves;
-  auto reserve_special = [&](bool requested, uint16_t operand, uint8_t width,
+  auto reserve_special = [&](bool requested, util::FailureOr<uint16_t> operand, uint8_t width,
                              const char *name) -> bool {
     if (!requested)
       return true;
+    if (operand.failed())
+      return false;
     const std::optional<uint16_t> temp = width == 2 ? find_free_sgpr_pair(reserved, sgpr_bound)
                                                     : find_free_sgpr(reserved, sgpr_bound);
     if (!temp) {
@@ -527,7 +554,7 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
       return false;
     }
     reserved.expand(RegisterRef{RegClass::SGPR, *temp, width});
-    special_saves.push_back(SpecialStateSlot{operand, *temp, width});
+    special_saves.push_back(SpecialStateSlot{operand.value(), *temp, width});
     return true;
   };
   // A spilled register is live at the anchor and clobbered by the probe or by
@@ -557,20 +584,27 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
   // on. EXEC also rides this path whenever that window is needed, since the
   // anchor mask has to be restored from somewhere.
   const bool save_exec = plan.preserve_exec || needs_full_mask;
-  if (!reserve_special(save_exec, save_exec ? scalar_operand_exec_lo(plan.arch) : 0, 2, "EXEC") ||
-      !reserve_special(plan.preserve_vcc, plan.preserve_vcc ? scalar_operand_vcc_lo(plan.arch) : 0,
+  if (!reserve_special(save_exec,
+                       save_exec ? scalar_operand_exec_lo(plan.arch, &error)
+                                 : util::FailureOr<uint16_t>(0),
+                       2, "EXEC") ||
+      !reserve_special(plan.preserve_vcc,
+                       plan.preserve_vcc ? scalar_operand_vcc_lo(plan.arch, &error)
+                                         : util::FailureOr<uint16_t>(0),
                        2, "VCC") ||
-      !reserve_special(plan.preserve_m0, plan.preserve_m0 ? scalar_operand_m0(plan.arch) : 0, 1,
-                       "M0"))
+      !reserve_special(plan.preserve_m0,
+                       plan.preserve_m0 ? scalar_operand_m0(plan.arch, &error)
+                                        : util::FailureOr<uint16_t>(0),
+                       1, "M0"))
     return false;
 
   // Word count is derived from the resource decisions, not a fixed envelope size.
   // Each add/addc uses the 32-bit literal form (instruction + literal word) so the
   // count is independent of the (layout-dependent) addend values.
-  uint32_t before_words = 0;
-  before_words += 1;     // s_getpc_b64
-  before_words += 2 + 2; // s_add_u32 + literal, s_addc_u32 + literal
-  before_words += 1;     // s_swappc_b64
+  uint32_t envelope_words = 0;
+  envelope_words += 1;     // s_getpc_b64
+  envelope_words += 2 + 2; // s_add_u32 + literal, s_addc_u32 + literal
+  envelope_words += 1;     // s_swappc_b64
   // Each argument is one v_mov_b32; an immediate adds the literal word its src0
   // field names, a register source does not.
   for (const ProbeArgValue &arg : plan.probe_args) {
@@ -578,42 +612,42 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
     case ProbeArgSource::AnchorVgpr:
       break; // Parallel copies are counted together, including cycle breaks.
     case ProbeArgSource::Immediate:
-      before_words += 2;
+      envelope_words += 2;
       break;
     case ProbeArgSource::AnchorExecLo:
     case ProbeArgSource::AnchorExecHi:
     case ProbeArgSource::LogBufferPtrLo:
     case ProbeArgSource::LogBufferPtrHi:
     case ProbeArgSource::EntryVgprLane0:
-      before_words += 1;
+      envelope_words += 1;
       break;
     }
   }
-  before_words += argument_moves.size();
-  before_words += 2 * plan.register_saves.size();
+  envelope_words += argument_moves.size();
+  envelope_words += 2 * plan.register_saves.size();
   if (plan.preserve_scc)
-    before_words += 2; // s_cselect_b32 (save) + s_cmp_lg_u32 (restore)
+    envelope_words += 2; // s_cselect_b32 (save) + s_cmp_lg_u32 (restore)
   // Each special-state register adds one s_mov save + one s_mov restore.
-  before_words += static_cast<uint32_t>(special_saves.size()) * 2;
+  envelope_words += static_cast<uint32_t>(special_saves.size()) * 2;
   // The full-mask window's EXEC toggles, counted one per s_mov so this mirrors
   // emit_probe_call's three conditionals in the same order. A count that does not
   // match what the emitter produces trips the drift guard there.
   if (needs_full_mask) {
-    before_words += 1; // Widen ahead of the spill stores and the argument writes.
-    // Restore the anchor mask so the probe runs under it. A force_full_exec site
+    envelope_words += 1; // Widen ahead of the spill stores and the argument writes.
+    // Restore the guest mask observed at envelope entry. A force_full_exec site
     // skips this; leaving the window open across the call is the whole policy.
     if (!plan.force_full_exec)
-      before_words += 1;
+      envelope_words += 1;
     // Re-widen for the spill loads. Emitted even when the epilogue is empty (an
     // argument site that spills nothing), and on a force_full_exec site too,
     // since the probe may have narrowed EXEC while it ran.
-    before_words += 1;
+    envelope_words += 1;
   }
 
   if (plan.arch == ROCJITSU_CODE_ARCH_RDNA4) {
-    before_words += 2; // getpc -> add, and add/addc -> swappc.
+    envelope_words += 2; // getpc -> add, and add/addc -> swappc.
     if (needs_rdna4_save_guard(plan.arch, special_saves, plan.register_saves))
-      before_words += 1;
+      envelope_words += 1;
   }
 
   plan.is_probe_call = true;
@@ -623,7 +657,7 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
   if (scc_temp)
     plan.scc_temp = *scc_temp;
   plan.special_state_saves = std::move(special_saves);
-  plan.before_word_count = before_words;
+  plan.planned_envelope_word_count = envelope_words;
   plan.argument_moves = std::move(argument_moves);
   plan.argument_copy_temp = argument_copy_temp;
 
@@ -639,6 +673,9 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
 
 std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const TrampolinePlan &plan,
                                                                   std::string *error_out) {
+  OptionalStringDiagnosticSink record_error(error_out, "probe-call emission: ");
+  const util::DiagnosticEmitter error(record_error);
+
   if (!plan.is_probe_call) {
     report(error_out, "emit_probe_call: plan is not a probe call (run plan_probe_call first)");
     return std::nullopt;
@@ -650,10 +687,8 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   // Literal-constant scalar source code; the 32-bit literal follows the word.
   constexpr uint16_t kLiteralConstant = 0xFF;
 
-  auto report_spill_error = [error_out](std::string_view message) {
-    if (error_out != nullptr)
-      *error_out = "probe-call emission: spill bracket: " + std::string(message);
-  };
+  OptionalStringDiagnosticSink report_spill_error(error_out,
+                                                  "probe-call emission: spill bracket: ");
   const util::DiagnosticEmitter spill_error(report_spill_error);
   const util::FailureOr<SpillBracket> maybe_spill =
       build_spill_bracket(plan.vgpr_spills, plan.sgpr_spills, plan.acc_spills,
@@ -669,10 +704,8 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   // likewise return with an outstanding load that would escape the call boundary.
   // Emitted at the very top of the envelope (before any special-state/target/link
   // write) and again immediately after the call returns (before any restoration).
-  auto report_boundary_error = [error_out](std::string_view message) {
-    if (error_out != nullptr)
-      *error_out = "probe-call emission: boundary drain: " + std::string(message);
-  };
+  OptionalStringDiagnosticSink report_boundary_error(error_out,
+                                                     "probe-call emission: boundary drain: ");
   const util::DiagnosticEmitter boundary_error(report_boundary_error);
   util::FailureOr<std::vector<uint32_t>> maybe_boundary_drain =
       build_wait_all_loads_complete(plan.arch, &boundary_error);
@@ -682,13 +715,26 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   if (plan.arch == ROCJITSU_CODE_ARCH_RDNA4)
     boundary_drain.push_back(build_sopp_encoding(plan.arch, rdna4::kSWaitAluSopp, 0xf1fc).value());
 
+  util::FailureOr<uint16_t> maybe_exec_operand = scalar_operand_exec_lo(plan.arch, &error);
+  if (maybe_exec_operand.failed())
+    return std::nullopt;
+  const uint16_t exec_operand = maybe_exec_operand.value();
+  util::FailureOr<uint16_t> m0_operand = scalar_operand_m0(plan.arch, &error);
+  if (m0_operand.failed())
+    return std::nullopt;
+  util::FailureOr<uint16_t> maybe_minus_one = scalar_inline_neg_one(plan.arch, &error);
+  if (maybe_minus_one.failed())
+    return std::nullopt;
+  const uint16_t minus_one = maybe_minus_one.value();
+
   std::vector<uint32_t> env;
-  env.insert(env.end(), boundary_drain.begin(), boundary_drain.end());
-  auto record_move_error = [error_out](std::string_view message) {
-    if (error_out != nullptr)
-      error_out->assign(message);
+  auto append_scalar = [&](util::FailureOr<uint32_t> word) {
+    if (word.failed())
+      return false;
+    env.push_back(word.value());
+    return true;
   };
-  const util::DiagnosticEmitter move_error(record_move_error);
+  env.insert(env.end(), boundary_drain.begin(), boundary_drain.end());
 
   // The full-mask window: needed to spill, and to define the argument VGPRs in
   // every lane rather than only the ones active at the anchor. Mirrors
@@ -705,7 +751,7 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   uint16_t exec_temp = 0;
   bool exec_temp_found = false;
   for (const SpecialStateSlot &s : plan.special_state_saves)
-    if (s.operand == scalar_operand_exec_lo(plan.arch)) {
+    if (s.operand == exec_operand) {
       exec_temp = s.temp_base;
       exec_temp_found = true;
     }
@@ -732,14 +778,14 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   // Special-state saves: copy each preserved EXEC/VCC/M0 into its dead temp. Before
   // the stores so EXEC is captured before we force it to -1. Plain s_mov, SCC-safe.
   for (const SpecialStateSlot &s : plan.special_state_saves)
-    env.push_back(s.width == 2 ? build_s_mov_b64(s.temp_base, s.operand, plan.arch)
-                               : build_s_mov_b32(s.temp_base, s.operand, plan.arch));
+    if (!append_scalar(s.width == 2 ? build_s_mov_b64(s.temp_base, s.operand, plan.arch, &error)
+                                    : build_s_mov_b32(s.temp_base, s.operand, plan.arch, &error)))
+      return std::nullopt;
 
   // Full-mask the spill store so a probe that widens EXEC cannot leave inactive-
   // lane copies unsaved. EXEC was just saved and is restored after the loads.
-  if (full_mask_exec)
-    env.push_back(build_s_mov_b64(scalar_operand_exec_lo(plan.arch),
-                                  scalar_inline_neg_one(plan.arch), plan.arch));
+  if (full_mask_exec && !append_scalar(build_s_mov_b64(exec_operand, minus_one, plan.arch, &error)))
+    return std::nullopt;
 
   // Spill saves: store each live+clobbered register before the call.
   env.insert(env.end(), spill.prologue.begin(), spill.prologue.end());
@@ -770,10 +816,11 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
     return std::nullopt;
   for (const RegisterSave &save : plan.register_saves) {
     if (save.cls == RegClass::SGPR) {
-      env.push_back(build_s_mov_b32(save.destination, save.source, plan.arch));
+      if (!append_scalar(build_s_mov_b32(save.destination, save.source, plan.arch, &error)))
+        return std::nullopt;
     } else {
       const util::FailureOr<uint32_t> word =
-          build_v_mov_b32_src(save.destination, 256 + save.source, plan.arch, &move_error);
+          build_v_mov_b32_src(save.destination, 256 + save.source, plan.arch, &error);
       if (word.failed())
         return std::nullopt;
       env.push_back(word.value());
@@ -795,7 +842,7 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   }
   for (const ProbeArgumentMove &move : plan.argument_moves) {
     const util::FailureOr<uint32_t> word =
-        build_v_mov_b32_src(move.destination, 256 + move.source, plan.arch, &move_error);
+        build_v_mov_b32_src(move.destination, 256 + move.source, plan.arch, &error);
     if (word.failed())
       return std::nullopt;
     env.push_back(word.value());
@@ -925,19 +972,19 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
     }
   }
 
-  // Restore the anchor EXEC before the call so the probe runs under the anchor mask,
-  // not the full mask used to bracket the stores and argument writes. The loads are
-  // re-widened after. Skipped under force_full_exec, which is what leaves the probe
+  // Restore the guest EXEC observed at envelope entry before the call. The loads
+  // are re-widened after. Skipped under force_full_exec, which leaves the probe
   // running with every lane enabled.
-  if (full_mask_exec && !plan.force_full_exec)
-    env.push_back(build_s_mov_b64(scalar_operand_exec_lo(plan.arch), exec_temp, plan.arch));
+  if (full_mask_exec && !plan.force_full_exec &&
+      !append_scalar(build_s_mov_b64(exec_operand, exec_temp, plan.arch, &error)))
+    return std::nullopt;
 
-  // SCC save (prologue): capture SCC into the temp without disturbing it. The
-  // matching restore is emitted after the call but still before the relocated
-  // original.
-  if (plan.preserve_scc)
-    env.push_back(build_s_cselect_b32(plan.scc_temp, scalar_positive_inline_u32(1),
-                                      scalar_positive_inline_u32(0), plan.arch));
+  // Capture the SCC observed at envelope entry before the call-address adds
+  // overwrite it; restore that same value after the callback.
+  if (plan.preserve_scc &&
+      !append_scalar(build_s_cselect_b32(plan.scc_temp, scalar_positive_inline_u32(1),
+                                         scalar_positive_inline_u32(0), plan.arch, &error)))
+    return std::nullopt;
 
   // Target-address materialization. s_getpc_b64 writes the runtime VA of the
   // *next* instruction (the RDNA4 guard or s_add_u32 below) into the target pair; the
@@ -945,20 +992,27 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   // chain (s_add_u32 sets carry -> SCC, s_addc_u32 consumes it). Both sides are
   // .text-relative and share the load base, so the delta is a pure layout
   // distance. The adds always use the literal form so the word count is
-  // independent of the (layout-dependent) delta value (see before_word_count).
+  // independent of the layout-dependent delta (see planned_envelope_word_count).
   const size_t getpc_index = env.size();
-  env.push_back(build_s_getpc_b64(target_lo, plan.arch));
+  if (!append_scalar(build_s_getpc_b64(target_lo, plan.arch, &error)))
+    return std::nullopt;
   // The probe may have VALU-read this pair. Its new getpc value must be ready
   // before either scalar add reads it, independently of boundary waits.
   if (plan.arch == ROCJITSU_CODE_ARCH_RDNA4)
     env.push_back(build_sopp_encoding(plan.arch, rdna4::kSWaitAluSopp, 0xfffe).value());
-  const uint64_t va_after_getpc =
-      plan.trampoline_offset + static_cast<uint64_t>(getpc_index + 1) * sizeof(uint32_t);
+  // getpc_index is relative to the envelope. Include the original's prefix only
+  // when it is emitted; dispatch-only plans can retain a snapshot without it.
+  const bool after_original = plan.probe_after_original && plan.emit_original;
+  const uint64_t va_after_getpc = plan.trampoline_offset +
+                                  (after_original ? plan.original_size : 0) +
+                                  static_cast<uint64_t>(getpc_index + 1) * sizeof(uint32_t);
   const uint64_t delta = static_cast<uint64_t>(static_cast<int64_t>(plan.probe_target_offset) -
                                                static_cast<int64_t>(va_after_getpc));
-  env.push_back(build_s_add_u32(target_lo, target_lo, kLiteralConstant, plan.arch));
+  if (!append_scalar(build_s_add_u32(target_lo, target_lo, kLiteralConstant, plan.arch, &error)))
+    return std::nullopt;
   env.push_back(static_cast<uint32_t>(delta & 0xFFFFFFFFu));
-  env.push_back(build_s_addc_u32(target_hi, target_hi, kLiteralConstant, plan.arch));
+  if (!append_scalar(build_s_addc_u32(target_hi, target_hi, kLiteralConstant, plan.arch, &error)))
+    return std::nullopt;
   env.push_back(static_cast<uint32_t>(delta >> 32));
   // Both halves are now written; complete them before the indirect call reads
   // the address. Neither add reads the other half's newly written value.
@@ -967,34 +1021,35 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
 
   // The call: writes the return PC into the cc-derived link pair, jumps to the
   // materialized target. The probe returns here via s_setpc_b64 of the same pair.
-  env.push_back(build_s_swappc_b64(link, target_lo, plan.arch));
+  if (!append_scalar(build_s_swappc_b64(link, target_lo, plan.arch, &error)))
+    return std::nullopt;
 
-  // Drain the probe's in-flight loads immediately on return, before any restoration
-  // (SCC/EXEC, spill fills, special-state) or the relocated host code -- a probe may
-  // return with an unwaited load still targeting a register we are about to restore
-  // or that the host reads. Mirrors the boundary drain at the envelope top.
+  // Drain the probe's in-flight loads before restoration or resuming the guest:
+  // a probe may return with an unwaited load targeting a register we restore or
+  // the guest reads next. Mirrors the boundary drain at envelope entry.
   env.insert(env.end(), boundary_drain.begin(), boundary_drain.end());
 
-  // SCC restore (epilogue): set SCC from the saved temp before the relocated
-  // original runs.
-  if (plan.preserve_scc)
-    env.push_back(build_s_cmp_lg_u32(plan.scc_temp, scalar_positive_inline_u32(0), plan.arch));
+  // Restore the observed SCC before resuming guest execution, whether the
+  // relocated anchor precedes or follows this envelope.
+  if (plan.preserve_scc && !append_scalar(build_s_cmp_lg_u32(
+                               plan.scc_temp, scalar_positive_inline_u32(0), plan.arch, &error)))
+    return std::nullopt;
 
   // Full-mask the spill load to match the store (the probe may have changed EXEC).
   // Emitted on a force_full_exec site too: it entered the call at -1, but the probe
   // may have narrowed EXEC while running, which is the case this guards against.
-  if (full_mask_exec)
-    env.push_back(build_s_mov_b64(scalar_operand_exec_lo(plan.arch),
-                                  scalar_inline_neg_one(plan.arch), plan.arch));
+  if (full_mask_exec && !append_scalar(build_s_mov_b64(exec_operand, minus_one, plan.arch, &error)))
+    return std::nullopt;
 
   // Spill fills: reload each saved register after the call and wait for the loads.
   env.insert(env.end(), spill.epilogue.begin(), spill.epilogue.end());
   for (const RegisterSave &save : plan.register_saves) {
     if (save.cls == RegClass::SGPR) {
-      env.push_back(build_s_mov_b32(save.source, save.destination, plan.arch));
+      if (!append_scalar(build_s_mov_b32(save.source, save.destination, plan.arch, &error)))
+        return std::nullopt;
     } else {
       const util::FailureOr<uint32_t> word =
-          build_v_mov_b32_src(save.source, 256 + save.destination, plan.arch, &move_error);
+          build_v_mov_b32_src(save.source, 256 + save.destination, plan.arch, &error);
       if (word.failed())
         return std::nullopt;
       env.push_back(word.value());
@@ -1002,14 +1057,15 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   }
 
   // Special-state restores: copy each temp back into its register. After the spill
-  // loads so EXEC is restored to its anchor mask only once the full-mask loads are
-  // done; all run before the relocated original.
+  // loads so EXEC is restored to its observed mask only once the full-mask loads
+  // are done, before resuming guest execution.
   for (const SpecialStateSlot &s : plan.special_state_saves)
-    env.push_back(s.width == 2 ? build_s_mov_b64(s.operand, s.temp_base, plan.arch)
-                               : build_s_mov_b32(s.operand, s.temp_base, plan.arch));
+    if (!append_scalar(s.width == 2 ? build_s_mov_b64(s.operand, s.temp_base, plan.arch, &error)
+                                    : build_s_mov_b32(s.operand, s.temp_base, plan.arch, &error)))
+      return std::nullopt;
 
-  // GFX9 wait states the restores still owe the relocated original, topped up with
-  // one s_nop covering the larger shortfall. Counted rather than fixed, so a site
+  // GFX9 wait states the restores still owe guest resumption, topped up with one
+  // s_nop covering the larger shortfall. Counted rather than fixed, so a site
   // whose reloads and restores already fill the gap pays nothing. The guest code
   // the return branch reaches is further away still, so it is covered too.
   uint32_t owed_wait_states = 0;
@@ -1025,35 +1081,41 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
     // is only over-padded.
     const bool restores_m0 =
         std::ranges::any_of(plan.special_state_saves, [&](const SpecialStateSlot &s) {
-          return s.operand == scalar_operand_m0(plan.arch);
+          return s.operand == m0_operand.value();
         });
     if (restores_m0)
       owed_wait_states = std::max(owed_wait_states, kM0RestoreWaitStates);
   }
   const size_t wait_state_pad_words = owed_wait_states > 0 ? 1 : 0;
-  if (owed_wait_states > 0)
-    env.push_back(build_s_nop(static_cast<uint16_t>(owed_wait_states - 1), plan.arch));
+  if (owed_wait_states > 0 &&
+      !append_scalar(build_s_nop(static_cast<uint16_t>(owed_wait_states - 1), plan.arch, &error)))
+    return std::nullopt;
   const size_t restore_drain_words = plan.arch == ROCJITSU_CODE_ARCH_RDNA4 ? 1 : 0;
   if (restore_drain_words)
     env.push_back(build_sopp_encoding(plan.arch, rdna4::kSWaitAluSopp, 0xf1fc).value());
 
   // Plan/emit drift guard: the planner committed to this many envelope words and
   // the orchestrator sized the layout around it. A mismatch means the two
-  // disagree about the envelope shape. before_word_count includes internal
-  // RDNA4 guards; the spill bracket, the two boundary drains and the wait-state pad
-  // are accounted separately since their sizes are arch- and site-specific.
-  if (env.size() != plan.before_word_count + spill.prologue.size() + spill.epilogue.size() +
-                        2 * boundary_drain.size() + wait_state_pad_words + restore_drain_words) {
+  // disagree about the envelope shape. planned_envelope_word_count includes
+  // internal RDNA4 guards; the spill bracket, the two boundary drains and the
+  // wait-state pad are accounted separately since their sizes depend on the arch
+  // and site.
+  if (env.size() != plan.planned_envelope_word_count + spill.prologue.size() +
+                        spill.epilogue.size() + 2 * boundary_drain.size() + wait_state_pad_words +
+                        restore_drain_words) {
     report(error_out, "emit_probe_call: synthesized envelope word count does not match the planned "
-                      "before_word_count");
+                      "planned_envelope_word_count");
     return std::nullopt;
   }
 
   // Hand the synthesized envelope to build() for layout and branch math so the
   // SOPP range checks are shared with the inline path.
   TrampolinePlan emit_plan = plan;
-  emit_plan.before_items.assign(1, InlineAsmItem{std::move(env)});
+  emit_plan.before_items.clear();
   emit_plan.after_items.clear();
+  std::vector<InlineAsmItem> &items =
+      after_original ? emit_plan.after_items : emit_plan.before_items;
+  items.push_back(InlineAsmItem{.words = std::move(env)});
   return build(emit_plan, error_out);
 }
 

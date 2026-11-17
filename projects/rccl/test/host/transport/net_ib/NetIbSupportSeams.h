@@ -11,8 +11,8 @@
 
 #include "nccl.h"
 
-// src/transport/net_ib/gdr.cc's capability probes, for the net_ib units that call them. gdr-test.cc compiles the
-// real gdr.cc into the same binary, so a unit under test renames its calls onto these hooks before it is included:
+// src/transport/net_ib/gdr.cc's capability probes, for the net_ib units that call them. A binary may also compile
+// the real gdr.cc, so a unit under test renames its calls onto these hooks before it is included:
 //   #define ncclIbGdrSupport NetIbTestGdrSupport
 //   #define ncclIbPeerMemSupport NetIbTestPeerMemSupport
 //   #define ncclIbDmaBufSupport NetIbTestDmaBufSupport

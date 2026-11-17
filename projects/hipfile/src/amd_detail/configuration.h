@@ -24,8 +24,9 @@ public:
 
     /// @brief Override fastpath backend enablement.
     ///
-    /// If hipAmdFileRead/hipAmdFileWrite are not available fastpath() will
-    /// return false even if fastpath(true) is called.
+    /// If hipAmdFileRead/hipAmdFileWrite are not available, or ROCr is running
+    /// on WSL2 (/dev/dxg), fastpath() will return false even if fastpath(true)
+    /// is called.
     virtual void fastpath(bool enabled) noexcept;
 
     /// @brief Checks if the fallback backend is enabled
@@ -54,6 +55,10 @@ public:
 
     /// @brief Override host backend enablement
     virtual void host(bool enabled) noexcept;
+
+    /// @brief Gets the size of the device stream pool
+    /// @return the size of the device stream pool in bytes
+    virtual size_t deviceStreamPoolSize() const noexcept;
 };
 
 }

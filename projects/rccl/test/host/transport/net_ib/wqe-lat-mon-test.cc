@@ -47,38 +47,9 @@ int TestWqeClockGettime(clockid_t clockId, struct timespec* ts) {
 
 }  // namespace
 
-#define ncclParamIbWqeLatencyThresholdNs NetIbWqeLatencyThresholdNs
-#define ncclParamIbWqeLatencyReport NetIbWqeLatencyReport
-#define ncclIbWqeLatEnabled NetIbWqeLatEnabled
-#define ncclIbWqeLatThresholdNs NetIbWqeLatThresholdNs
-#define ncclIbWqeLatReportEnabled NetIbWqeLatReportEnabled
-#define ncclIbWqeLatMonNowNs NetIbWqeLatMonNowNs
-#define ncclIbWqeLatMonInit NetIbWqeLatMonInit
-#define ncclIbWqeLatMonStampSend NetIbWqeLatMonStampSend
-#define ncclIbWqeLatMonOnComplete NetIbWqeLatMonOnComplete
-#define ncclIbWqeLatMonCheckStall NetIbWqeLatMonCheckStall
-#define ncclIbWqeLatMonSnapshot NetIbWqeLatMonSnapshot
-#define ncclIbWqeLatHandleCompletion NetIbWqeLatHandleCompletion
-#define ncclIbWqeLatScanStalls NetIbWqeLatScanStalls
-#define ncclIbWqeLatReportQpSummary NetIbWqeLatReportQpSummary
 #include "fakes/libc_seam.h"
 #include NET_IB_WQE_LAT_MON_CC_PATH
 #include "fakes/libc_seam_undef.h"
-#undef ncclIbWqeLatReportQpSummary
-#undef ncclIbWqeLatScanStalls
-#undef ncclIbWqeLatHandleCompletion
-#undef ncclIbWqeLatMonSnapshot
-#undef ncclIbWqeLatMonCheckStall
-#undef ncclIbWqeLatMonOnComplete
-#undef ncclIbWqeLatMonStampSend
-#undef ncclIbWqeLatMonInit
-#undef ncclIbWqeLatMonNowNs
-#undef ncclIbWqeLatReportEnabled
-#undef ncclIbWqeLatThresholdNs
-#undef ncclIbWqeLatEnabled
-#undef ncclParamIbWqeLatencyReport
-#undef ncclParamIbWqeLatencyThresholdNs
-
 namespace {
 
 constexpr uint64_t kSecondNs = 1000000000ULL;
@@ -119,7 +90,7 @@ void ArmTracking(struct ncclIbWqeLatMon* monitor, uint64_t postNs, uint32_t infl
 bool RecordSample(struct ncclIbWqeLatMon* monitor, uint64_t postNs, uint64_t deltaNs,
                   struct ncclIbWqeLatStats* stats = nullptr) {
   ArmTracking(monitor, postNs, monitor->inflight + 1);
-  return NetIbWqeLatMonOnComplete(monitor, postNs + deltaNs, nullptr, nullptr, stats);
+  return ncclIbWqeLatMonOnComplete(monitor, postNs + deltaNs, nullptr, nullptr, stats);
 }
 
 // Two devices with their QPs interleaved across them: QP i belongs to device i % 2.
@@ -161,9 +132,9 @@ class NetIbWqeLatMonMicrotest : public ::testing::Test {
     g_wqeClockValues.clear();
     g_wqeClockCalls = 0;
     g_wqeClockResult = 0;
-    NetIbWqeLatEnabled = false;
-    NetIbWqeLatThresholdNs = 0;
-    NetIbWqeLatReportEnabled = false;
+    ncclIbWqeLatEnabled = false;
+    ncclIbWqeLatThresholdNs = 0;
+    ncclIbWqeLatReportEnabled = false;
     ResetLibcFakes();
     ResetSocketFakes();
     ResetNcclFakes();
@@ -185,9 +156,9 @@ TEST_F(NetIbWqeLatMonMicrotest, Init_ClearsStateAndSeedsQuantileTargets) {
         };
         ncclIbWqeLatMon monitor;
         std::memset(&monitor, 0xa5, sizeof(monitor));
-        NetIbWqeLatMonInit(&monitor);
-        if (!NetIbWqeLatEnabled || NetIbWqeLatThresholdNs != 123) std::exit(1);
-        if (NetIbWqeLatReportEnabled != (report != 0)) std::exit(2);
+        ncclIbWqeLatMonInit(&monitor);
+        if (!ncclIbWqeLatEnabled || ncclIbWqeLatThresholdNs != 123) std::exit(1);
+        if (ncclIbWqeLatReportEnabled != (report != 0)) std::exit(2);
         if (monitor.tracking || monitor.inflight != 0 || monitor.pendingBefore != 0 || monitor.trackedPostNs != 0 ||
             monitor.lastWarnNs != 0 || monitor.lastStallWarnNs != 0 || monitor.count != 0 || monitor.slowCount != 0) {
           std::exit(3);
@@ -197,7 +168,7 @@ TEST_F(NetIbWqeLatMonMicrotest, Init_ClearsStateAndSeedsQuantileTargets) {
         }
         ncclIbWqeLatStats stats;
         std::memset(&stats, 0xa5, sizeof(stats));
-        NetIbWqeLatMonSnapshot(&monitor, &stats);
+        ncclIbWqeLatMonSnapshot(&monitor, &stats);
         if (stats.count != 0 || stats.slowCount != 0 || stats.meanNs != 0.0 || stats.stddevNs != 0.0 ||
             stats.maxNs != 0 || stats.p50Ns != 0 || stats.p999Ns != 0) {
           std::exit(5);
@@ -211,17 +182,17 @@ TEST_F(NetIbWqeLatMonMicrotest, Init_ClearsStateAndSeedsQuantileTargets) {
 TEST_F(NetIbWqeLatMonMicrotest, Init_NonPositiveThresholdLeavesMonitoringDisabled) {
   EXPECT_EXIT(
     {
-      NetIbWqeLatEnabled = false;
-      NetIbWqeLatThresholdNs = 0;
-      NetIbWqeLatReportEnabled = false;
+      ncclIbWqeLatEnabled = false;
+      ncclIbWqeLatThresholdNs = 0;
+      ncclIbWqeLatReportEnabled = false;
       g_loadParam = [](const char* name, int64_t fallback) {
         if (std::strcmp(name, "IB_WQE_LATENCY_THRESHOLD_NS") == 0) return int64_t{0};
         if (std::strcmp(name, "IB_WQE_LATENCY_REPORT") == 0) return int64_t{1};
         return fallback;
       };
       ncclIbWqeLatMon monitor{};
-      NetIbWqeLatMonInit(&monitor);
-      if (NetIbWqeLatEnabled || NetIbWqeLatThresholdNs != 0 || NetIbWqeLatReportEnabled) std::exit(1);
+      ncclIbWqeLatMonInit(&monitor);
+      if (ncclIbWqeLatEnabled || ncclIbWqeLatThresholdNs != 0 || ncclIbWqeLatReportEnabled) std::exit(1);
       std::exit(0);
     },
     ::testing::ExitedWithCode(0), "");
@@ -230,7 +201,7 @@ TEST_F(NetIbWqeLatMonMicrotest, Init_NonPositiveThresholdLeavesMonitoringDisable
 TEST_F(NetIbWqeLatMonMicrotest, NowNs_ConvertsMonotonicTimespec) {
   g_wqeClockValues.push_back(3 * kSecondNs + 47);
 
-  EXPECT_EQ(NetIbWqeLatMonNowNs(), 3 * kSecondNs + 47);
+  EXPECT_EQ(ncclIbWqeLatMonNowNs(), 3 * kSecondNs + 47);
   EXPECT_EQ(g_wqeClockCalls, 1);
 }
 
@@ -239,8 +210,8 @@ TEST_F(NetIbWqeLatMonMicrotest, StampSend_NullAndUnsignaledChainsDoNotReadClock)
   InitMonitor(&qp.latMon);
   auto wrs = MakeWrChain({false, false});
 
-  NetIbWqeLatMonStampSend(&qp, nullptr);
-  NetIbWqeLatMonStampSend(&qp, wrs.data());
+  ncclIbWqeLatMonStampSend(&qp, nullptr);
+  ncclIbWqeLatMonStampSend(&qp, wrs.data());
 
   EXPECT_EQ(g_wqeClockCalls, 0);
   EXPECT_FALSE(qp.latMon.tracking);
@@ -253,7 +224,7 @@ TEST_F(NetIbWqeLatMonMicrotest, StampSend_IdleTracksFirstSignaledAndCountsAllSig
   auto wrs = MakeWrChain({false, true, false, true});
   g_wqeClockValues.push_back(kBaseNs);
 
-  NetIbWqeLatMonStampSend(&qp, wrs.data());
+  ncclIbWqeLatMonStampSend(&qp, wrs.data());
 
   EXPECT_EQ(g_wqeClockCalls, 1);
   EXPECT_TRUE(qp.latMon.tracking);
@@ -262,13 +233,13 @@ TEST_F(NetIbWqeLatMonMicrotest, StampSend_IdleTracksFirstSignaledAndCountsAllSig
   EXPECT_EQ(qp.latMon.inflight, 2u);
 
   // The first CQE closes the sample; the second only drains inflight.
-  NetIbWqeLatThresholdNs = UINT64_MAX;
+  ncclIbWqeLatThresholdNs = UINT64_MAX;
   uint64_t delta = 0;
-  EXPECT_FALSE(NetIbWqeLatMonOnComplete(&qp.latMon, kBaseNs + 42, &delta, nullptr, nullptr));
+  EXPECT_FALSE(ncclIbWqeLatMonOnComplete(&qp.latMon, kBaseNs + 42, &delta, nullptr, nullptr));
   EXPECT_EQ(delta, 42u);
   EXPECT_FALSE(qp.latMon.tracking);
   EXPECT_EQ(qp.latMon.inflight, 1u);
-  EXPECT_FALSE(NetIbWqeLatMonOnComplete(&qp.latMon, kBaseNs + 50, nullptr, nullptr, nullptr));
+  EXPECT_FALSE(ncclIbWqeLatMonOnComplete(&qp.latMon, kBaseNs + 50, nullptr, nullptr, nullptr));
   EXPECT_EQ(qp.latMon.inflight, 0u);
   EXPECT_EQ(qp.latMon.count, 1u);
 }
@@ -280,7 +251,7 @@ TEST_F(NetIbWqeLatMonMicrotest, StampSend_WhileTrackingPreservesWindowAndOnlyAdd
   auto wrs = MakeWrChain({true, true});
   g_wqeClockValues.push_back(kBaseNs + 10);
 
-  NetIbWqeLatMonStampSend(&qp, wrs.data());
+  ncclIbWqeLatMonStampSend(&qp, wrs.data());
 
   EXPECT_EQ(qp.latMon.trackedPostNs, kBaseNs);
   EXPECT_EQ(qp.latMon.inflight, 4u);
@@ -294,7 +265,7 @@ TEST_F(NetIbWqeLatMonMicrotest, StampSend_BackloggedQpCountsOlderCompletionsAhea
   auto wrs = MakeWrChain({true});
   g_wqeClockValues.push_back(kBaseNs);
 
-  NetIbWqeLatMonStampSend(&qp, wrs.data());
+  ncclIbWqeLatMonStampSend(&qp, wrs.data());
 
   ASSERT_TRUE(qp.latMon.tracking);
   EXPECT_EQ(qp.latMon.pendingBefore, 2u);
@@ -306,30 +277,30 @@ TEST_F(NetIbWqeLatMonMicrotest, StampSend_BackloggedQpCountsOlderCompletionsAhea
 TEST_F(NetIbWqeLatMonMicrotest, StampSend_PipelinedPostsSampleOncePerTrackingWindow) {
   ncclIbQp qp{};
   InitMonitor(&qp.latMon);
-  NetIbWqeLatThresholdNs = UINT64_MAX;
+  ncclIbWqeLatThresholdNs = UINT64_MAX;
   auto a = MakeWrChain({true});
   auto b = MakeWrChain({true});
   auto c = MakeWrChain({true});
   g_wqeClockValues = {kBaseNs, kBaseNs + 5, kBaseNs + 20};
 
-  NetIbWqeLatMonStampSend(&qp, a.data());
-  NetIbWqeLatMonStampSend(&qp, b.data());
+  ncclIbWqeLatMonStampSend(&qp, a.data());
+  ncclIbWqeLatMonStampSend(&qp, b.data());
   EXPECT_EQ(qp.latMon.trackedPostNs, kBaseNs);
   EXPECT_EQ(qp.latMon.inflight, 2u);
-  NetIbWqeLatMonOnComplete(&qp.latMon, kBaseNs + 10, nullptr, nullptr, nullptr);
+  ncclIbWqeLatMonOnComplete(&qp.latMon, kBaseNs + 10, nullptr, nullptr, nullptr);
   EXPECT_FALSE(qp.latMon.tracking);
   EXPECT_EQ(qp.latMon.inflight, 1u);
   EXPECT_EQ(qp.latMon.count, 1u);
 
-  NetIbWqeLatMonStampSend(&qp, c.data());
+  ncclIbWqeLatMonStampSend(&qp, c.data());
   EXPECT_TRUE(qp.latMon.tracking);
   EXPECT_EQ(qp.latMon.trackedPostNs, kBaseNs + 20);
   EXPECT_EQ(qp.latMon.pendingBefore, 1u);
   EXPECT_EQ(qp.latMon.inflight, 2u);
-  NetIbWqeLatMonOnComplete(&qp.latMon, kBaseNs + 30, nullptr, nullptr, nullptr);
+  ncclIbWqeLatMonOnComplete(&qp.latMon, kBaseNs + 30, nullptr, nullptr, nullptr);
   EXPECT_TRUE(qp.latMon.tracking);
   EXPECT_EQ(qp.latMon.count, 1u);
-  NetIbWqeLatMonOnComplete(&qp.latMon, kBaseNs + 50, nullptr, nullptr, nullptr);
+  ncclIbWqeLatMonOnComplete(&qp.latMon, kBaseNs + 50, nullptr, nullptr, nullptr);
   EXPECT_FALSE(qp.latMon.tracking);
   EXPECT_EQ(qp.latMon.inflight, 0u);
   EXPECT_EQ(qp.latMon.count, 2u);
@@ -345,24 +316,24 @@ TEST_F(NetIbWqeLatMonMicrotest, OnComplete_UntrackedCompletionOnlyDrainsInflight
   ncclIbWqeLatStats stats;
   std::memset(&stats, 0xa5, sizeof(stats));
 
-  EXPECT_FALSE(NetIbWqeLatMonOnComplete(&monitor, kBaseNs, &delta, &post, &stats));
+  EXPECT_FALSE(ncclIbWqeLatMonOnComplete(&monitor, kBaseNs, &delta, &post, &stats));
   EXPECT_EQ(monitor.inflight, 0u);
   EXPECT_EQ(delta, 0u);
   EXPECT_EQ(post, 0u);
   EXPECT_EQ(stats.count, 0u);
   EXPECT_EQ(stats.maxNs, 0u);
-  EXPECT_FALSE(NetIbWqeLatMonOnComplete(&monitor, kBaseNs, nullptr, nullptr, nullptr));
+  EXPECT_FALSE(ncclIbWqeLatMonOnComplete(&monitor, kBaseNs, nullptr, nullptr, nullptr));
   EXPECT_EQ(monitor.inflight, 0u);
 }
 
 TEST_F(NetIbWqeLatMonMicrotest, OnComplete_PendingBeforeSkipsOlderCompletions) {
   ncclIbWqeLatMon monitor{};
   InitMonitor(&monitor);
-  NetIbWqeLatThresholdNs = UINT64_MAX;
+  ncclIbWqeLatThresholdNs = UINT64_MAX;
   ArmTracking(&monitor, kBaseNs, 3, /*pendingBefore=*/2);
 
-  EXPECT_FALSE(NetIbWqeLatMonOnComplete(&monitor, kBaseNs + 10, nullptr, nullptr, nullptr));
-  EXPECT_FALSE(NetIbWqeLatMonOnComplete(&monitor, kBaseNs + 20, nullptr, nullptr, nullptr));
+  EXPECT_FALSE(ncclIbWqeLatMonOnComplete(&monitor, kBaseNs + 10, nullptr, nullptr, nullptr));
+  EXPECT_FALSE(ncclIbWqeLatMonOnComplete(&monitor, kBaseNs + 20, nullptr, nullptr, nullptr));
   EXPECT_TRUE(monitor.tracking);
   EXPECT_EQ(monitor.pendingBefore, 0u);
   EXPECT_EQ(monitor.count, 0u);
@@ -370,7 +341,7 @@ TEST_F(NetIbWqeLatMonMicrotest, OnComplete_PendingBeforeSkipsOlderCompletions) {
   uint64_t delta = 0;
   uint64_t post = 0;
   ncclIbWqeLatStats stats{};
-  EXPECT_FALSE(NetIbWqeLatMonOnComplete(&monitor, kBaseNs + 30, &delta, &post, &stats));
+  EXPECT_FALSE(ncclIbWqeLatMonOnComplete(&monitor, kBaseNs + 30, &delta, &post, &stats));
   EXPECT_FALSE(monitor.tracking);
   EXPECT_EQ(monitor.inflight, 0u);
   EXPECT_EQ(delta, 30u);
@@ -385,7 +356,7 @@ TEST_F(NetIbWqeLatMonMicrotest, OnComplete_PollBeforePostClampsSampleToZero) {
   ArmTracking(&monitor, kBaseNs, 1);
   uint64_t delta = 1;
 
-  EXPECT_FALSE(NetIbWqeLatMonOnComplete(&monitor, kBaseNs - 1, &delta, nullptr, nullptr));
+  EXPECT_FALSE(ncclIbWqeLatMonOnComplete(&monitor, kBaseNs - 1, &delta, nullptr, nullptr));
   EXPECT_EQ(delta, 0u);
   EXPECT_EQ(monitor.count, 1u);
   EXPECT_EQ(monitor.maxNs, 0u);
@@ -395,7 +366,7 @@ TEST_F(NetIbWqeLatMonMicrotest, OnComplete_PollBeforePostClampsSampleToZero) {
 TEST_F(NetIbWqeLatMonMicrotest, OnComplete_StrictThresholdAndOneSecondLimiterCountEverySlowSample) {
   ncclIbWqeLatMon monitor{};
   InitMonitor(&monitor);
-  NetIbWqeLatThresholdNs = 100;
+  ncclIbWqeLatThresholdNs = 100;
 
   EXPECT_FALSE(RecordSample(&monitor, kBaseNs, 100));
   EXPECT_TRUE(RecordSample(&monitor, kBaseNs + kSecondNs, 101));
@@ -414,17 +385,17 @@ TEST_F(NetIbWqeLatMonMicrotest, CheckStall_StrictThresholdAndIndependentLimiter)
   ncclIbWqeLatMon monitor{};
   InitMonitor(&monitor);
   ArmTracking(&monitor, kBaseNs, 3);
-  NetIbWqeLatThresholdNs = 50;
+  ncclIbWqeLatThresholdNs = 50;
   uint64_t age = 0;
   uint32_t inflight = 0;
 
-  EXPECT_FALSE(NetIbWqeLatMonCheckStall(&monitor, kBaseNs + 50, &age, &inflight));
+  EXPECT_FALSE(ncclIbWqeLatMonCheckStall(&monitor, kBaseNs + 50, &age, &inflight));
   EXPECT_EQ(age, 50u);
   EXPECT_EQ(inflight, 3u);
-  EXPECT_TRUE(NetIbWqeLatMonCheckStall(&monitor, kBaseNs + 51, &age, &inflight));
+  EXPECT_TRUE(ncclIbWqeLatMonCheckStall(&monitor, kBaseNs + 51, &age, &inflight));
   uint64_t firstWarn = monitor.lastStallWarnNs;
-  EXPECT_FALSE(NetIbWqeLatMonCheckStall(&monitor, firstWarn + kSecondNs - 1, nullptr, nullptr));
-  EXPECT_TRUE(NetIbWqeLatMonCheckStall(&monitor, firstWarn + kSecondNs, nullptr, nullptr));
+  EXPECT_FALSE(ncclIbWqeLatMonCheckStall(&monitor, firstWarn + kSecondNs - 1, nullptr, nullptr));
+  EXPECT_TRUE(ncclIbWqeLatMonCheckStall(&monitor, firstWarn + kSecondNs, nullptr, nullptr));
   EXPECT_EQ(monitor.count, 0u);
   EXPECT_EQ(monitor.slowCount, 0u);
   EXPECT_EQ(monitor.lastWarnNs, 0u);
@@ -436,32 +407,32 @@ TEST_F(NetIbWqeLatMonMicrotest, CheckStall_UntrackedOrNonForwardTimeClearsOutput
   uint64_t age = 9;
   uint32_t inflight = 9;
 
-  EXPECT_FALSE(NetIbWqeLatMonCheckStall(&monitor, kBaseNs, &age, &inflight));
+  EXPECT_FALSE(ncclIbWqeLatMonCheckStall(&monitor, kBaseNs, &age, &inflight));
   EXPECT_EQ(age, 0u);
   EXPECT_EQ(inflight, 0u);
 
   ArmTracking(&monitor, kBaseNs, 2);
   age = 9;
   inflight = 9;
-  EXPECT_FALSE(NetIbWqeLatMonCheckStall(&monitor, kBaseNs, &age, &inflight));
+  EXPECT_FALSE(ncclIbWqeLatMonCheckStall(&monitor, kBaseNs, &age, &inflight));
   EXPECT_EQ(age, 0u);
   EXPECT_EQ(inflight, 0u);
-  EXPECT_FALSE(NetIbWqeLatMonCheckStall(&monitor, kBaseNs - 1, &age, &inflight));
+  EXPECT_FALSE(ncclIbWqeLatMonCheckStall(&monitor, kBaseNs - 1, &age, &inflight));
   EXPECT_EQ(monitor.lastStallWarnNs, 0u);
 }
 
 TEST_F(NetIbWqeLatMonMicrotest, Snapshot_EmptyAndSingleSampleReportExactStatistics) {
   ncclIbWqeLatMon monitor{};
   InitMonitor(&monitor);
-  NetIbWqeLatThresholdNs = UINT64_MAX;
+  ncclIbWqeLatThresholdNs = UINT64_MAX;
   ncclIbWqeLatStats stats{};
 
-  NetIbWqeLatMonSnapshot(&monitor, &stats);
+  ncclIbWqeLatMonSnapshot(&monitor, &stats);
   EXPECT_EQ(stats.count, 0u);
   EXPECT_EQ(stats.p50Ns, 0u);
 
   RecordSample(&monitor, kBaseNs, 123);
-  NetIbWqeLatMonSnapshot(&monitor, &stats);
+  ncclIbWqeLatMonSnapshot(&monitor, &stats);
   EXPECT_EQ(stats.count, 1u);
   EXPECT_DOUBLE_EQ(stats.meanNs, 123.0);
   EXPECT_DOUBLE_EQ(stats.stddevNs, 0.0);
@@ -475,13 +446,13 @@ TEST_F(NetIbWqeLatMonMicrotest, Snapshot_EmptyAndSingleSampleReportExactStatisti
 TEST_F(NetIbWqeLatMonMicrotest, Snapshot_FewerThanFiveSamplesReportExactPercentiles) {
   ncclIbWqeLatMon monitor{};
   InitMonitor(&monitor);
-  NetIbWqeLatThresholdNs = UINT64_MAX;
+  ncclIbWqeLatThresholdNs = UINT64_MAX;
   for (uint64_t delta : {400, 100, 300, 200}) {
     RecordSample(&monitor, kBaseNs + monitor.count * (kSecondNs + 1000), delta);
   }
   ncclIbWqeLatStats stats{};
 
-  NetIbWqeLatMonSnapshot(&monitor, &stats);
+  ncclIbWqeLatMonSnapshot(&monitor, &stats);
 
   EXPECT_EQ(stats.count, 4u);
   EXPECT_EQ(stats.maxNs, 400u);
@@ -495,13 +466,13 @@ TEST_F(NetIbWqeLatMonMicrotest, Snapshot_FewerThanFiveSamplesReportExactPercenti
 TEST_F(NetIbWqeLatMonMicrotest, Snapshot_FiveSamplesReportWelfordStatisticsAndMiddleMarker) {
   ncclIbWqeLatMon monitor{};
   InitMonitor(&monitor);
-  NetIbWqeLatThresholdNs = UINT64_MAX;
+  ncclIbWqeLatThresholdNs = UINT64_MAX;
   for (uint64_t delta : {300, 100, 500, 200, 400}) {
     RecordSample(&monitor, kBaseNs + monitor.count * (kSecondNs + 1000), delta);
   }
   ncclIbWqeLatStats stats{};
 
-  NetIbWqeLatMonSnapshot(&monitor, &stats);
+  ncclIbWqeLatMonSnapshot(&monitor, &stats);
 
   EXPECT_EQ(stats.count, 5u);
   EXPECT_NEAR(stats.meanNs, 300.0, 1e-9);
@@ -514,7 +485,7 @@ TEST_F(NetIbWqeLatMonMicrotest, Snapshot_FiveSamplesReportWelfordStatisticsAndMi
 }
 
 TEST_F(NetIbWqeLatMonMicrotest, Snapshot_MonotoneSamplesProduceBoundedOrderedPercentiles) {
-  NetIbWqeLatThresholdNs = UINT64_MAX;
+  ncclIbWqeLatThresholdNs = UINT64_MAX;
   for (bool ascending : {true, false}) {
     SCOPED_TRACE(ascending ? "ascending" : "descending");
     ncclIbWqeLatMon monitor{};
@@ -524,7 +495,7 @@ TEST_F(NetIbWqeLatMonMicrotest, Snapshot_MonotoneSamplesProduceBoundedOrderedPer
     }
     ncclIbWqeLatStats stats{};
 
-    NetIbWqeLatMonSnapshot(&monitor, &stats);
+    ncclIbWqeLatMonSnapshot(&monitor, &stats);
 
     EXPECT_EQ(stats.count, 30u);
     EXPECT_EQ(stats.maxNs, 30u);
@@ -541,7 +512,7 @@ TEST_F(NetIbWqeLatMonMicrotest, Snapshot_MonotoneSamplesProduceBoundedOrderedPer
 TEST_F(NetIbWqeLatMonMicrotest, Snapshot_MixedUniformSamplesSeparateMedianAndTailPercentiles) {
   ncclIbWqeLatMon monitor{};
   InitMonitor(&monitor);
-  NetIbWqeLatThresholdNs = UINT64_MAX;
+  ncclIbWqeLatThresholdNs = UINT64_MAX;
   std::vector<uint64_t> values;
   for (uint64_t value = 1; value <= 50; ++value) {
     values.push_back(value);
@@ -552,7 +523,7 @@ TEST_F(NetIbWqeLatMonMicrotest, Snapshot_MixedUniformSamplesSeparateMedianAndTai
   }
   ncclIbWqeLatStats stats{};
 
-  NetIbWqeLatMonSnapshot(&monitor, &stats);
+  ncclIbWqeLatMonSnapshot(&monitor, &stats);
 
   EXPECT_EQ(stats.count, 100u);
   EXPECT_EQ(stats.maxNs, 100u);
@@ -567,7 +538,7 @@ TEST_F(NetIbWqeLatMonMicrotest, Snapshot_MixedUniformSamplesSeparateMedianAndTai
 TEST_F(NetIbWqeLatMonMicrotest, Snapshot_TenThousandUniformSamplesTrackTrueQuantiles) {
   ncclIbWqeLatMon monitor{};
   InitMonitor(&monitor);
-  NetIbWqeLatThresholdNs = UINT64_MAX;
+  ncclIbWqeLatThresholdNs = UINT64_MAX;
   constexpr uint64_t kN = 10000;
   std::vector<uint64_t> values(kN);
   for (uint64_t i = 0; i < kN; ++i) values[i] = i + 1;
@@ -575,7 +546,7 @@ TEST_F(NetIbWqeLatMonMicrotest, Snapshot_TenThousandUniformSamplesTrackTrueQuant
   for (size_t i = 0; i < values.size(); ++i) RecordSample(&monitor, kBaseNs + i * (kSecondNs + 1), values[i]);
   ncclIbWqeLatStats stats{};
 
-  NetIbWqeLatMonSnapshot(&monitor, &stats);
+  ncclIbWqeLatMonSnapshot(&monitor, &stats);
 
   EXPECT_EQ(stats.count, kN);
   EXPECT_EQ(stats.maxNs, kN);
@@ -595,7 +566,7 @@ TEST_F(NetIbWqeLatMonMicrotest, Snapshot_TenThousandUniformSamplesTrackTrueQuant
 TEST_F(NetIbWqeLatMonMicrotest, Snapshot_BimodalTailSeparatesFastModeFromSlowMax) {
   ncclIbWqeLatMon monitor{};
   InitMonitor(&monitor);
-  NetIbWqeLatThresholdNs = UINT64_MAX;
+  ncclIbWqeLatThresholdNs = UINT64_MAX;
   std::vector<uint64_t> values;
   for (uint64_t i = 0; i < 9900; ++i) values.push_back(1000 + i % 100);
   for (uint64_t i = 0; i < 100; ++i) values.push_back(1000000 + i);
@@ -603,7 +574,7 @@ TEST_F(NetIbWqeLatMonMicrotest, Snapshot_BimodalTailSeparatesFastModeFromSlowMax
   for (size_t i = 0; i < values.size(); ++i) RecordSample(&monitor, kBaseNs + i * (kSecondNs + 1), values[i]);
   ncclIbWqeLatStats stats{};
 
-  NetIbWqeLatMonSnapshot(&monitor, &stats);
+  ncclIbWqeLatMonSnapshot(&monitor, &stats);
 
   EXPECT_EQ(stats.count, 10000u);
   EXPECT_EQ(stats.maxNs, 1000099u);
@@ -624,11 +595,11 @@ TEST_F(NetIbWqeLatMonMicrotest, HandleCompletion_IgnoresRecvAndUnknownQpWithoutR
 
   for (ibv_wc_opcode opcode : {IBV_WC_RECV, IBV_WC_RECV_RDMA_WITH_IMM}) {
     completion.opcode = opcode;
-    NetIbWqeLatHandleCompletion(&scene.send.base, 0, &completion, &pollNs, &pollNsValid);
+    ncclIbWqeLatHandleCompletion(&scene.send.base, 0, &completion, &pollNs, &pollNsValid);
   }
   completion.opcode = IBV_WC_SEND;
   completion.qp_num = 999;
-  NetIbWqeLatHandleCompletion(&scene.send.base, 0, &completion, &pollNs, &pollNsValid);
+  ncclIbWqeLatHandleCompletion(&scene.send.base, 0, &completion, &pollNs, &pollNsValid);
 
   EXPECT_EQ(g_wqeClockCalls, 0);
   EXPECT_FALSE(pollNsValid);
@@ -640,7 +611,7 @@ TEST_F(NetIbWqeLatMonMicrotest, HandleCompletion_SendOpcodesShareOnePollTimestam
   WqeCompletionScene scene;
   scene.send.base.vProps.ndevs = 1;
   scene.send.base.qps[1].devIndex = 0;
-  NetIbWqeLatThresholdNs = UINT64_MAX;
+  ncclIbWqeLatThresholdNs = UINT64_MAX;
   for (int i = 0; i < 2; ++i) ArmTracking(&scene.send.base.qps[i].latMon, kBaseNs, 1);
   g_wqeClockValues.push_back(kBaseNs + 42);
   uint64_t pollNs = 0;
@@ -652,8 +623,8 @@ TEST_F(NetIbWqeLatMonMicrotest, HandleCompletion_SendOpcodesShareOnePollTimestam
   second.opcode = IBV_WC_RDMA_READ;
   second.qp_num = scene.verbsQps[1].qp_num;
 
-  NetIbWqeLatHandleCompletion(&scene.send.base, 0, &first, &pollNs, &pollNsValid);
-  NetIbWqeLatHandleCompletion(&scene.send.base, 0, &second, &pollNs, &pollNsValid);
+  ncclIbWqeLatHandleCompletion(&scene.send.base, 0, &first, &pollNs, &pollNsValid);
+  ncclIbWqeLatHandleCompletion(&scene.send.base, 0, &second, &pollNs, &pollNsValid);
 
   EXPECT_TRUE(pollNsValid);
   EXPECT_EQ(pollNs, kBaseNs + 42);
@@ -666,7 +637,7 @@ TEST_F(NetIbWqeLatMonMicrotest, HandleCompletion_SlowSendRecordsSampleAndEmitsRe
   WqeCompletionScene scene;
   auto& monitor = scene.send.base.qps[0].latMon;
   ArmTracking(&monitor, kBaseNs, 1);
-  NetIbWqeLatThresholdNs = 1;
+  ncclIbWqeLatThresholdNs = 1;
   g_wqeClockValues.push_back(kBaseNs + 10);
   ScopedHook reports(g_ncclSocketGetAddr, NoPeerAddress);
   uint64_t pollNs = 0;
@@ -675,7 +646,7 @@ TEST_F(NetIbWqeLatMonMicrotest, HandleCompletion_SlowSendRecordsSampleAndEmitsRe
   completion.opcode = IBV_WC_SEND;
   completion.qp_num = scene.verbsQps[0].qp_num;
 
-  NetIbWqeLatHandleCompletion(&scene.send.base, 0, &completion, &pollNs, &pollNsValid);
+  ncclIbWqeLatHandleCompletion(&scene.send.base, 0, &completion, &pollNs, &pollNsValid);
 
   EXPECT_EQ(monitor.count, 1u);
   EXPECT_EQ(monitor.slowCount, 1u);
@@ -687,11 +658,11 @@ TEST_F(NetIbWqeLatMonMicrotest, HandleCompletion_SlowSendRecordsSampleAndEmitsRe
 TEST_F(NetIbWqeLatMonMicrotest, ScanStalls_VisitsOnlyRequestedInterleavedDevice) {
   WqeCompletionScene scene(/*nqps=*/4);
   for (auto& qp : scene.send.base.qps) ArmTracking(&qp.latMon, kBaseNs, 1);
-  NetIbWqeLatThresholdNs = 1;
+  ncclIbWqeLatThresholdNs = 1;
   g_wqeClockValues.push_back(kBaseNs + 10);
   ScopedHook reports(g_ncclSocketGetAddr, NoPeerAddress);
 
-  NetIbWqeLatScanStalls(&scene.send.base, 1);
+  ncclIbWqeLatScanStalls(&scene.send.base, 1);
 
   EXPECT_EQ(g_wqeClockCalls, 1);
   EXPECT_EQ(scene.send.base.qps[0].latMon.lastStallWarnNs, 0u);
@@ -705,9 +676,9 @@ TEST_F(NetIbWqeLatMonMicrotest, ScanStalls_NoDevicesReadsNoClock) {
   WqeCompletionScene scene;
   scene.send.base.vProps.ndevs = 0;
   ArmTracking(&scene.send.base.qps[0].latMon, kBaseNs, 1);
-  NetIbWqeLatThresholdNs = 1;
+  ncclIbWqeLatThresholdNs = 1;
 
-  NetIbWqeLatScanStalls(&scene.send.base, 0);
+  ncclIbWqeLatScanStalls(&scene.send.base, 0);
 
   EXPECT_EQ(g_wqeClockCalls, 0);
   EXPECT_EQ(scene.send.base.qps[0].latMon.lastStallWarnNs, 0u);
@@ -731,11 +702,11 @@ TEST_F(NetIbWqeLatMonMicrotest, DISABLED_ScanStalls_ReplacedQpDoesNotReportStale
   InitMonitor(&send.base.qps[0].latMon);
   InitMonitor(&replacement.latMon);
   ArmTracking(&send.base.qps[0].latMon, kBaseNs, 1);
-  NetIbWqeLatThresholdNs = 1;
+  ncclIbWqeLatThresholdNs = 1;
   g_wqeClockValues.push_back(kBaseNs + 10);
   g_ncclSocketGetAddr = [](ncclSocket*, ncclSocketAddress*) { return ncclSystemError; };
 
-  NetIbWqeLatScanStalls(&send.base, 0);
+  ncclIbWqeLatScanStalls(&send.base, 0);
 
   EXPECT_EQ(send.base.qps[0].latMon.lastStallWarnNs, 0u);
   EXPECT_EQ(replacement.latMon.lastStallWarnNs, 0u);
@@ -745,16 +716,16 @@ TEST_F(NetIbWqeLatMonMicrotest, ReportSummary_EitherGlobalGateDisabledEmitsNothi
   WqeCompletionScene scene;
   auto& monitor = scene.send.base.qps[0].latMon;
   InitMonitor(&monitor);
-  NetIbWqeLatThresholdNs = UINT64_MAX;
+  ncclIbWqeLatThresholdNs = UINT64_MAX;
   RecordSample(&monitor, kBaseNs, 25);
   ScopedHook reports(g_ncclSocketGetAddr, NoPeerAddress);
 
-  NetIbWqeLatReportEnabled = true;
-  NetIbWqeLatEnabled = false;
-  NetIbWqeLatReportQpSummary(&scene.send.base, 0, &scene.send.base.qps[0]);
-  NetIbWqeLatEnabled = true;
-  NetIbWqeLatReportEnabled = false;
-  NetIbWqeLatReportQpSummary(&scene.send.base, 0, &scene.send.base.qps[0]);
+  ncclIbWqeLatReportEnabled = true;
+  ncclIbWqeLatEnabled = false;
+  ncclIbWqeLatReportQpSummary(&scene.send.base, 0, &scene.send.base.qps[0]);
+  ncclIbWqeLatEnabled = true;
+  ncclIbWqeLatReportEnabled = false;
+  ncclIbWqeLatReportQpSummary(&scene.send.base, 0, &scene.send.base.qps[0]);
 
   EXPECT_EQ(reports.calls, 0);
 }
@@ -764,13 +735,13 @@ TEST_F(NetIbWqeLatMonMicrotest, ReportSummary_NullVerbsOrEmptyQpEmitsNothing) {
   ncclIbQp nullVerbsQp{};
   InitMonitor(&nullVerbsQp.latMon);
   nullVerbsQp.latMon.count = 1;
-  NetIbWqeLatEnabled = true;
-  NetIbWqeLatReportEnabled = true;
+  ncclIbWqeLatEnabled = true;
+  ncclIbWqeLatReportEnabled = true;
   ScopedHook reports(g_ncclSocketGetAddr, NoPeerAddress);
 
-  NetIbWqeLatReportQpSummary(&scene.send.base, 0, nullptr);
-  NetIbWqeLatReportQpSummary(&scene.send.base, 0, &nullVerbsQp);
-  NetIbWqeLatReportQpSummary(&scene.send.base, 0, &scene.send.base.qps[0]);
+  ncclIbWqeLatReportQpSummary(&scene.send.base, 0, nullptr);
+  ncclIbWqeLatReportQpSummary(&scene.send.base, 0, &nullVerbsQp);
+  ncclIbWqeLatReportQpSummary(&scene.send.base, 0, &scene.send.base.qps[0]);
 
   EXPECT_EQ(reports.calls, 0);
 }
@@ -779,15 +750,15 @@ TEST_F(NetIbWqeLatMonMicrotest, ReportSummary_EnabledSampleEmitsStatistics) {
   WqeCompletionScene scene;
   auto& monitor = scene.send.base.qps[0].latMon;
   InitMonitor(&monitor);
-  NetIbWqeLatThresholdNs = UINT64_MAX;
+  ncclIbWqeLatThresholdNs = UINT64_MAX;
   RecordSample(&monitor, kBaseNs, 25);
-  NetIbWqeLatEnabled = true;
-  NetIbWqeLatReportEnabled = true;
+  ncclIbWqeLatEnabled = true;
+  ncclIbWqeLatReportEnabled = true;
   g_ncclSocketGetAddr = [](ncclSocket*, ncclSocketAddress*) { return ncclSystemError; };
 
   RcclUnitTesting::ScopedDebugLogging logging(NCCL_LOG_INFO, NCCL_ALL);
   std::string log = RcclUnitTesting::CaptureLog(
-    [&] { NetIbWqeLatReportQpSummary(&scene.send.base, 0, &scene.send.base.qps[0]); });
+    [&] { ncclIbWqeLatReportQpSummary(&scene.send.base, 0, &scene.send.base.qps[0]); });
 
   EXPECT_TRUE(RcclUnitTesting::LogHas(log, "WQE latency summary [send"));
   EXPECT_TRUE(RcclUnitTesting::LogHas(log, "]: n=1 slow=0 "));
@@ -803,7 +774,7 @@ TEST_F(NetIbWqeLatMonMicrotest, DISABLED_StampSend_ClockFailureDoesNotStartTrack
   g_wqeClockValues.push_back(kBaseNs);
   g_wqeClockResult = EIO;
 
-  NetIbWqeLatMonStampSend(&qp, wrs.data());
+  ncclIbWqeLatMonStampSend(&qp, wrs.data());
 
   EXPECT_FALSE(qp.latMon.tracking);
   EXPECT_EQ(qp.latMon.inflight, 0u);
@@ -814,7 +785,7 @@ TEST_F(NetIbWqeLatMonMicrotest, DISABLED_StampSend_ClockFailureDoesNotStartTrack
 TEST_F(NetIbWqeLatMonMicrotest, DISABLED_OnComplete_SlowSampleReturnsPostClassificationStatistics) {
   ncclIbWqeLatMon monitor{};
   InitMonitor(&monitor);
-  NetIbWqeLatThresholdNs = 1;
+  ncclIbWqeLatThresholdNs = 1;
   ncclIbWqeLatStats stats{};
 
   EXPECT_TRUE(RecordSample(&monitor, kBaseNs, 2, &stats));

@@ -17,6 +17,7 @@
 
 namespace rocjitsu {
 class Instruction;
+class Operand;
 
 namespace waitcheck_detail {
 using amdgpu::WaitcntModel;
@@ -87,6 +88,11 @@ enum class WaitEventKind {
   AsyncBarrier,
   TensorLdsLoad,
   TensorLdsStore,
+  ExportMrt,
+  ExportZ,
+  ExportPosition,
+  ExportPrimitive,
+  ExportDualSourceBlend,
   Count,
 };
 
@@ -133,6 +139,9 @@ struct ClassifiedEvent {
 // Each fallible entry point independently rejects unsupported architectures.
 // Successful empty optionals/vectors represent absent counters, waits, or events.
 struct WaitcheckTarget : WaitCounterPolicy {
+  [[nodiscard]] static std::optional<RegisterRef> register_operand(const Operand &operand,
+                                                                   rj_code_arch_t arch);
+
   [[nodiscard]] static util::FailureOr<std::optional<WaitFields>>
   embedded_wait_fields(const Instruction &inst, rj_code_arch_t arch);
 
