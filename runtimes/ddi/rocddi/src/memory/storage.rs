@@ -18,7 +18,7 @@ mod owners;
 mod vector;
 
 pub use allocator::AllocationError;
-pub use allocator::{AllocateFn, Allocator, AllocatorScope, FreeFn, InvalidAllocator, ResizeFn};
+pub use allocator::{AllocateFn, Allocator, FreeFn, InvalidAllocator, ResizeFn};
 pub use owners::{Owned, Shared, UninitOwned, UninitShared};
 pub use vector::OwnerVec;
 

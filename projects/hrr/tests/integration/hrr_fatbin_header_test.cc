@@ -27,6 +27,10 @@
  * Every code object capture stores, in a fat binary or under code_objects/,
  * has its .comment and .debug* sections zeroed: they hold the compiler build
  * and the build paths, and the GPU never loads them.
+ *
+ * A fat binary is stored whatever its size, HIP_HRR_CAPTURE_MAX_BLOB_MB
+ * notwithstanding: replay loads it to run its kernels and resolve its device
+ * globals.
  */
 
 #include "hrr_test_common.hh"
@@ -176,6 +180,9 @@ constexpr char     kPreInitValidMarker[]    = "HRR fatbin pre-init valid";
 constexpr char     kPreInitLongIdMarker[]   = "HRR fatbin pre-init long id";
 constexpr char     kPreInitOverflowMarker[] = "HRR fatbin pre-init overflow";
 constexpr uint64_t kPreInitCompressedTag    = 0x4852524650524531ull;
+constexpr char     kPreInitPaddedMarker[]   = "HRR fatbin pre-init padded";
+// Takes a bundle past the 1 MiB HIP_HRR_CAPTURE_MAX_BLOB_MB its driver sets.
+constexpr size_t   kBundlePad               = 2u << 20;
 // And the ones after, that HIP refuses.
 constexpr char     kLiveForeignMarker[]     = "HRR fatbin live foreign";
 constexpr uint64_t kLiveCompressedTag       = 0x485252464C495631ull;
@@ -185,6 +192,16 @@ std::vector<uint8_t> preinit_compressed() { return short_compressed_bundle(kPreI
 std::vector<uint8_t> preinit_long_id()    { return long_id_bundle(kPreInitLongIdMarker); }
 std::vector<uint8_t> preinit_overflow() {
   return host_overflow_bundle(kForeignId, marker_payload(kPreInitOverflowMarker));
+}
+// foreign_bundle() with kBundlePad bytes in its host entry, which HIP never loads.
+std::vector<uint8_t> preinit_padded() {
+  const std::vector<uint8_t> payload = marker_payload(kPreInitPaddedMarker);
+  const size_t pad_at = kPayloadOffset + payload.size();
+  auto b = uncompressed_bundle({{pad_at, kBundlePad, kHostId},
+                                {kPayloadOffset, payload.size(), kForeignId}},
+                               pad_at + kBundlePad);
+  std::memcpy(b.data() + kPayloadOffset, payload.data(), payload.size());
+  return b;
 }
 std::vector<uint8_t> live_foreign()       { return foreign_bundle(kLiveForeignMarker); }
 std::vector<uint8_t> live_compressed()    { return short_compressed_bundle(kLiveCompressedTag); }
@@ -250,6 +267,7 @@ TEST_CASE("Unit_HRR_FatBinHeader_Direct", "[.][hrr-direct]") {
   REQUIRE(register_fat_binary(pin(preinit_compressed())) != nullptr);
   REQUIRE(register_fat_binary(pin(preinit_long_id())) != nullptr);
   REQUIRE(register_fat_binary(pin(preinit_overflow())) != nullptr);
+  REQUIRE(register_fat_binary(pin(preinit_padded())) != nullptr);
 
   // Initialises HIP, and with it capture.
   HRR_HIP_CHECK(hipSetDevice(0));
@@ -298,6 +316,7 @@ HRR_TEST_CASE(Unit_HRR_FatBinHeaderChecks) {
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
     // The refusals are reported as warnings.
     proc.setEnv("AMD_LOG_LEVEL", "2");
+    proc.setEnv("HIP_HRR_CAPTURE_MAX_BLOB_MB", "1");
     set_proc_search_path(proc);
     int ret = proc.run("\"Unit_HRR_FatBinHeader_Direct\"");
     out = proc.getOutput();
@@ -333,6 +352,15 @@ HRR_TEST_CASE(Unit_HRR_FatBinHeaderChecks) {
     }
   }
   CHECK(pre_valid_hits == 1);
+
+  // A bundle over HIP_HRR_CAPTURE_MAX_BLOB_MB is stored whole too, and leaves
+  // the archive complete.
+  const auto pre_padded = preinit_padded();
+  size_t pre_padded_hits = 0;
+  for (const auto& r : recorded)
+    if (r.ret == 0 && r.has_blob && r.blob == pre_padded) ++pre_padded_hits;
+  CHECK(pre_padded_hits == 1);
+  CHECK(arc.complete);
 
   // Registered after HIP initialised and loaded by it (a real handle): the
   // valid bundle is stored whole, the one with the wrapping host entry not at

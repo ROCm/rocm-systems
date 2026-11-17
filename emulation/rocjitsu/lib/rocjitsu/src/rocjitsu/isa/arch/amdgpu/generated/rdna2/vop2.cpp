@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/vop2.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/decode_factories.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include <memory>
@@ -61,9 +62,9 @@ VCndmaskB32Vop2::VCndmaskB32Vop2(const MachineInst *inst)
     sdwa_src1_neg_ = sw->src1_neg;
     sdwa_src1_abs_ = sw->src1_abs;
     sdwa_src0_operand_ = &src0;
-    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src0_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_src1_operand_ = &vsrc1;
-    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::NONE;
+    sdwa_src1_format_ = amdgpu::sdwa::SourceModifierFormat::F32;
     sdwa_dst_sel_ = sw->dst_sel;
     sdwa_dst_unused_ = sw->dst_unused;
     sdwa_clamp_ = sw->clamp;
@@ -88,7 +89,7 @@ DecodeResult decodeVCndmaskB32Vop2(const MachineInst *opcode,
     return Result::failure();
   if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
       return emit_error.emit() << "v_cndmask_b32: reserved DPP control";
   }
   return std::make_unique<VCndmaskB32Vop2>(opcode);
@@ -140,7 +141,7 @@ DecodeResult decodeVDot2cF32F16Vop2(const MachineInst *opcode,
     return Result::failure();
   if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
       return emit_error.emit() << "v_dot2c_f32_f16: reserved DPP control";
   }
   if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
@@ -219,7 +220,7 @@ DecodeResult decodeVAddF32Vop2(const MachineInst *opcode, const DecodeErrorEmitt
     return Result::failure();
   if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
       return emit_error.emit() << "v_add_f32: reserved DPP control";
   }
   return std::make_unique<VAddF32Vop2>(opcode);
@@ -296,7 +297,7 @@ DecodeResult decodeVSubF32Vop2(const MachineInst *opcode, const DecodeErrorEmitt
     return Result::failure();
   if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
       return emit_error.emit() << "v_sub_f32: reserved DPP control";
   }
   return std::make_unique<VSubF32Vop2>(opcode);
@@ -375,7 +376,7 @@ DecodeResult decodeVSubrevF32Vop2(const MachineInst *opcode, const DecodeErrorEm
     return Result::failure();
   if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
       return emit_error.emit() << "v_subrev_f32: reserved DPP control";
   }
   return std::make_unique<VSubrevF32Vop2>(opcode);
@@ -491,7 +492,7 @@ DecodeResult decodeVMulLegacyF32Vop2(const MachineInst *opcode,
     return Result::failure();
   if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
       return emit_error.emit() << "v_mul_legacy_f32: reserved DPP control";
   }
   return std::make_unique<VMulLegacyF32Vop2>(opcode);
@@ -568,7 +569,7 @@ DecodeResult decodeVMulF32Vop2(const MachineInst *opcode, const DecodeErrorEmitt
     return Result::failure();
   if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
       return emit_error.emit() << "v_mul_f32: reserved DPP control";
   }
   return std::make_unique<VMulF32Vop2>(opcode);
@@ -647,7 +648,7 @@ DecodeResult decodeVMulI32I24Vop2(const MachineInst *opcode, const DecodeErrorEm
     return Result::failure();
   if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
       return emit_error.emit() << "v_mul_i32_i24: reserved DPP control";
   }
   return std::make_unique<VMulI32I24Vop2>(opcode);
@@ -727,7 +728,7 @@ DecodeResult decodeVMulHiI32I24Vop2(const MachineInst *opcode,
     return Result::failure();
   if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
       return emit_error.emit() << "v_mul_hi_i32_i24: reserved DPP control";
   }
   return std::make_unique<VMulHiI32I24Vop2>(opcode);
@@ -806,7 +807,7 @@ DecodeResult decodeVMulU32U24Vop2(const MachineInst *opcode, const DecodeErrorEm
     return Result::failure();
   if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
       return emit_error.emit() << "v_mul_u32_u24: reserved DPP control";
   }
   return std::make_unique<VMulU32U24Vop2>(opcode);
@@ -886,7 +887,7 @@ DecodeResult decodeVMulHiU32U24Vop2(const MachineInst *opcode,
     return Result::failure();
   if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
       return emit_error.emit() << "v_mul_hi_u32_u24: reserved DPP control";
   }
   return std::make_unique<VMulHiU32U24Vop2>(opcode);
@@ -938,7 +939,7 @@ DecodeResult decodeVDot4cI32I8Vop2(const MachineInst *opcode,
     return Result::failure();
   if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
       return emit_error.emit() << "v_dot4c_i32_i8: reserved DPP control";
   }
   if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
@@ -1017,7 +1018,7 @@ DecodeResult decodeVMinF32Vop2(const MachineInst *opcode, const DecodeErrorEmitt
     return Result::failure();
   if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
       return emit_error.emit() << "v_min_f32: reserved DPP control";
   }
   return std::make_unique<VMinF32Vop2>(opcode);
@@ -1094,7 +1095,7 @@ DecodeResult decodeVMaxF32Vop2(const MachineInst *opcode, const DecodeErrorEmitt
     return Result::failure();
   if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
       return emit_error.emit() << "v_max_f32: reserved DPP control";
   }
   return std::make_unique<VMaxF32Vop2>(opcode);
@@ -1171,7 +1172,7 @@ DecodeResult decodeVMinI32Vop2(const MachineInst *opcode, const DecodeErrorEmitt
     return Result::failure();
   if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
       return emit_error.emit() << "v_min_i32: reserved DPP control";
   }
   return std::make_unique<VMinI32Vop2>(opcode);
@@ -1248,7 +1249,7 @@ DecodeResult decodeVMaxI32Vop2(const MachineInst *opcode, const DecodeErrorEmitt
     return Result::failure();
   if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
       return emit_error.emit() << "v_max_i32: reserved DPP control";
   }
   return std::make_unique<VMaxI32Vop2>(opcode);
@@ -1325,7 +1326,7 @@ DecodeResult decodeVMinU32Vop2(const MachineInst *opcode, const DecodeErrorEmitt
     return Result::failure();
   if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
       return emit_error.emit() << "v_min_u32: reserved DPP control";
   }
   return std::make_unique<VMinU32Vop2>(opcode);
@@ -1402,7 +1403,7 @@ DecodeResult decodeVMaxU32Vop2(const MachineInst *opcode, const DecodeErrorEmitt
     return Result::failure();
   if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
       return emit_error.emit() << "v_max_u32: reserved DPP control";
   }
   return std::make_unique<VMaxU32Vop2>(opcode);
@@ -1482,7 +1483,7 @@ DecodeResult decodeVLshrrevB32Vop2(const MachineInst *opcode,
     return Result::failure();
   if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
       return emit_error.emit() << "v_lshrrev_b32: reserved DPP control";
   }
   return std::make_unique<VLshrrevB32Vop2>(opcode);
@@ -1562,7 +1563,7 @@ DecodeResult decodeVAshrrevI32Vop2(const MachineInst *opcode,
     return Result::failure();
   if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
       return emit_error.emit() << "v_ashrrev_i32: reserved DPP control";
   }
   return std::make_unique<VAshrrevI32Vop2>(opcode);
@@ -1642,7 +1643,7 @@ DecodeResult decodeVLshlrevB32Vop2(const MachineInst *opcode,
     return Result::failure();
   if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
       return emit_error.emit() << "v_lshlrev_b32: reserved DPP control";
   }
   return std::make_unique<VLshlrevB32Vop2>(opcode);
@@ -1719,7 +1720,7 @@ DecodeResult decodeVAndB32Vop2(const MachineInst *opcode, const DecodeErrorEmitt
     return Result::failure();
   if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
       return emit_error.emit() << "v_and_b32: reserved DPP control";
   }
   return std::make_unique<VAndB32Vop2>(opcode);
@@ -1796,7 +1797,7 @@ DecodeResult decodeVOrB32Vop2(const MachineInst *opcode, const DecodeErrorEmitte
     return Result::failure();
   if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
       return emit_error.emit() << "v_or_b32: reserved DPP control";
   }
   return std::make_unique<VOrB32Vop2>(opcode);
@@ -1873,7 +1874,7 @@ DecodeResult decodeVXorB32Vop2(const MachineInst *opcode, const DecodeErrorEmitt
     return Result::failure();
   if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
       return emit_error.emit() << "v_xor_b32: reserved DPP control";
   }
   return std::make_unique<VXorB32Vop2>(opcode);
@@ -1950,7 +1951,7 @@ DecodeResult decodeVXnorB32Vop2(const MachineInst *opcode, const DecodeErrorEmit
     return Result::failure();
   if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
       return emit_error.emit() << "v_xnor_b32: reserved DPP control";
   }
   return std::make_unique<VXnorB32Vop2>(opcode);
@@ -2029,7 +2030,7 @@ DecodeResult decodeVAddNcU32Vop2(const MachineInst *opcode, const DecodeErrorEmi
     return Result::failure();
   if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
       return emit_error.emit() << "v_add_nc_u32: reserved DPP control";
   }
   return std::make_unique<VAddNcU32Vop2>(opcode);
@@ -2108,7 +2109,7 @@ DecodeResult decodeVSubNcU32Vop2(const MachineInst *opcode, const DecodeErrorEmi
     return Result::failure();
   if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
       return emit_error.emit() << "v_sub_nc_u32: reserved DPP control";
   }
   return std::make_unique<VSubNcU32Vop2>(opcode);
@@ -2188,7 +2189,7 @@ DecodeResult decodeVSubrevNcU32Vop2(const MachineInst *opcode,
     return Result::failure();
   if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
       return emit_error.emit() << "v_subrev_nc_u32: reserved DPP control";
   }
   return std::make_unique<VSubrevNcU32Vop2>(opcode);
@@ -2274,7 +2275,7 @@ DecodeResult decodeVAddCoCiU32Vop2(const MachineInst *opcode,
     return Result::failure();
   if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
       return emit_error.emit() << "v_add_co_ci_u32: reserved DPP control";
   }
   return std::make_unique<VAddCoCiU32Vop2>(opcode);
@@ -2360,7 +2361,7 @@ DecodeResult decodeVSubCoCiU32Vop2(const MachineInst *opcode,
     return Result::failure();
   if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
       return emit_error.emit() << "v_sub_co_ci_u32: reserved DPP control";
   }
   return std::make_unique<VSubCoCiU32Vop2>(opcode);
@@ -2446,7 +2447,7 @@ DecodeResult decodeVSubrevCoCiU32Vop2(const MachineInst *opcode,
     return Result::failure();
   if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
       return emit_error.emit() << "v_subrev_co_ci_u32: reserved DPP control";
   }
   return std::make_unique<VSubrevCoCiU32Vop2>(opcode);
@@ -2498,7 +2499,7 @@ DecodeResult decodeVFmacF32Vop2(const MachineInst *opcode, const DecodeErrorEmit
     return Result::failure();
   if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
       return emit_error.emit() << "v_fmac_f32: reserved DPP control";
   }
   if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
@@ -2655,7 +2656,7 @@ DecodeResult decodeVCvtPkrtzF16F32Vop2(const MachineInst *opcode,
     return Result::failure();
   if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
       return emit_error.emit() << "v_cvt_pkrtz_f16_f32: reserved DPP control";
   }
   return std::make_unique<VCvtPkrtzF16F32Vop2>(opcode);
@@ -2719,6 +2720,14 @@ VAddF16Vop2::VAddF16Vop2(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 != amdgpu::SRC_SDWA) {
+    vdst.set_register_byte_mask(0x3);
+    vdst.set_preserve_unwritten_bytes();
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2733,7 +2742,7 @@ DecodeResult decodeVAddF16Vop2(const MachineInst *opcode, const DecodeErrorEmitt
     return Result::failure();
   if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
       return emit_error.emit() << "v_add_f16: reserved DPP control";
   }
   return std::make_unique<VAddF16Vop2>(opcode);
@@ -2803,6 +2812,14 @@ VSubF16Vop2::VSubF16Vop2(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 != amdgpu::SRC_SDWA) {
+    vdst.set_register_byte_mask(0x3);
+    vdst.set_preserve_unwritten_bytes();
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2817,7 +2834,7 @@ DecodeResult decodeVSubF16Vop2(const MachineInst *opcode, const DecodeErrorEmitt
     return Result::failure();
   if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
       return emit_error.emit() << "v_sub_f16: reserved DPP control";
   }
   return std::make_unique<VSubF16Vop2>(opcode);
@@ -2888,6 +2905,14 @@ VSubrevF16Vop2::VSubrevF16Vop2(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 != amdgpu::SRC_SDWA) {
+    vdst.set_register_byte_mask(0x3);
+    vdst.set_preserve_unwritten_bytes();
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2903,7 +2928,7 @@ DecodeResult decodeVSubrevF16Vop2(const MachineInst *opcode, const DecodeErrorEm
     return Result::failure();
   if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
       return emit_error.emit() << "v_subrev_f16: reserved DPP control";
   }
   return std::make_unique<VSubrevF16Vop2>(opcode);
@@ -2973,6 +2998,14 @@ VMulF16Vop2::VMulF16Vop2(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (vsrc1.is_vgpr())
+    vsrc1.set_register_byte_mask(0x3);
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 != amdgpu::SRC_SDWA) {
+    vdst.set_register_byte_mask(0x3);
+    vdst.set_preserve_unwritten_bytes();
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2987,7 +3020,7 @@ DecodeResult decodeVMulF16Vop2(const MachineInst *opcode, const DecodeErrorEmitt
     return Result::failure();
   if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
       return emit_error.emit() << "v_mul_f16: reserved DPP control";
   }
   return std::make_unique<VMulF16Vop2>(opcode);
@@ -3034,6 +3067,8 @@ VFmacF16Vop2::VFmacF16Vop2(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_register_byte_mask(0x3);
+  vdst.set_preserve_unwritten_bytes();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -3046,7 +3081,7 @@ DecodeResult decodeVFmacF16Vop2(const MachineInst *opcode, const DecodeErrorEmit
     return Result::failure();
   if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
       return emit_error.emit() << "v_fmac_f16: reserved DPP control";
   }
   if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
@@ -3083,6 +3118,8 @@ VFmamkF16Vop2::VFmamkF16Vop2(const MachineInst *inst)
       Operand(16, OperandType::OPR_SIMM32,
               static_cast<int>(
                   (reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  vdst.set_register_byte_mask(0x3);
+  vdst.set_preserve_unwritten_bytes();
 }
 
 namespace detail {
@@ -3129,6 +3166,8 @@ VFmaakF16Vop2::VFmaakF16Vop2(const MachineInst *inst)
       Operand(16, OperandType::OPR_SIMM32,
               static_cast<int>(
                   (reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  vdst.set_register_byte_mask(0x3);
+  vdst.set_preserve_unwritten_bytes();
 }
 
 namespace detail {
@@ -3210,6 +3249,10 @@ VMaxF16Vop2::VMaxF16Vop2(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 != amdgpu::SRC_SDWA) {
+    vdst.set_register_byte_mask(0x3);
+    vdst.set_preserve_unwritten_bytes();
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -3224,7 +3267,7 @@ DecodeResult decodeVMaxF16Vop2(const MachineInst *opcode, const DecodeErrorEmitt
     return Result::failure();
   if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
       return emit_error.emit() << "v_max_f16: reserved DPP control";
   }
   return std::make_unique<VMaxF16Vop2>(opcode);
@@ -3294,6 +3337,10 @@ VMinF16Vop2::VMinF16Vop2(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 != amdgpu::SRC_SDWA) {
+    vdst.set_register_byte_mask(0x3);
+    vdst.set_preserve_unwritten_bytes();
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -3308,7 +3355,7 @@ DecodeResult decodeVMinF16Vop2(const MachineInst *opcode, const DecodeErrorEmitt
     return Result::failure();
   if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
       return emit_error.emit() << "v_min_f16: reserved DPP control";
   }
   return std::make_unique<VMinF16Vop2>(opcode);
@@ -3378,6 +3425,10 @@ VLdexpF16Vop2::VLdexpF16Vop2(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 != amdgpu::SRC_SDWA) {
+    vdst.set_register_byte_mask(0x3);
+    vdst.set_preserve_unwritten_bytes();
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -3393,7 +3444,7 @@ DecodeResult decodeVLdexpF16Vop2(const MachineInst *opcode, const DecodeErrorEmi
     return Result::failure();
   if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
       return emit_error.emit() << "v_ldexp_f16: reserved DPP control";
   }
   return std::make_unique<VLdexpF16Vop2>(opcode);
@@ -3450,7 +3501,7 @@ DecodeResult decodeVPkFmacF16Vop2(const MachineInst *opcode, const DecodeErrorEm
     return Result::failure();
   if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
       return emit_error.emit() << "v_pk_fmac_f16: reserved DPP control";
   }
   if (reinterpret_cast<const Vop2::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]

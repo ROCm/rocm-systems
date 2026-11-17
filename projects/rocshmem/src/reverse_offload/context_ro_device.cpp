@@ -117,9 +117,7 @@ __device__ void ROContext::putmem_nbi(void *dest, const void *source,
     if (!must_send_message) {
       return;
     }
-    build_queue_element(RO_NET_PUT_NBI, dest, const_cast<void *>(source),
-                        nelems, pe, 0, 0, 0, nullptr, nullptr, NULL,
-                        ro_net_win_id, block_handle, false);
+    post_network_nbi(RO_NET_PUT_NBI, dest, source, nelems, pe);
   }
 }
 
@@ -136,31 +134,55 @@ __device__ void ROContext::getmem_nbi(void *dest, const void *source,
     if (!must_send_message) {
       return;
     }
-    build_queue_element(RO_NET_GET_NBI, dest, const_cast<void *>(source),
-                        nelems, pe, 0, 0, 0, nullptr, nullptr, NULL,
-                        ro_net_win_id, block_handle, false);
+    post_network_nbi(RO_NET_GET_NBI, dest, source, nelems, pe);
   }
 }
 
+__device__ void ROContext::post_network_nbi(ro_net_cmds cmd, void *dest, const void *source, size_t nelems,
+                                            int pe) {
+  build_queue_element(cmd, dest, const_cast<void *>(source), nelems, pe, 0, 0, 0, nullptr, nullptr, NULL,
+                      ro_net_win_id, block_handle, false);
+  // Each lane's element is already published by build_queue_element, so one release bump covers the wave.
+  if (elect_queue_lane()) {
+    atomic::fetch_add<atomic::memory_scope::device, atomic::memory_order::release>(
+        &block_handle->nbi_posted, uint64_t{1});
+  }
+}
+
+__device__ bool ROContext::elect_queue_lane() {
+  uint64_t active{__ballot(1)};
+  int leader{static_cast<int>(lowerID())};
+  uint64_t handle{reinterpret_cast<uint64_t>(block_handle)};
+  // One lane acts for the wave when every active lane shares the leader's queue; otherwise each lane acts alone.
+  bool shared_queue{__ballot(handle == __shfl(handle, leader)) == active};
+  return !shared_queue || static_cast<int>(__lane_id()) == leader;
+}
+
 __device__ void ROContext::fence() {
-  build_queue_element(RO_NET_FENCE, nullptr, nullptr, 0, 0, 0, 0, 0, nullptr,
-                      nullptr, NULL, ro_net_win_id, block_handle,
-                      true, get_status_flag(), is_default_ctx);
+  // Blocking proxy ops complete before returning; skip the proxy when every counted NBI op is already fenced.
+  // Relaxed is enough: the wave's own earlier bump is visible here, and the nbi_fenced acquire orders the skip.
+  uint64_t posted{atomic::load<atomic::memory_scope::device, atomic::memory_order::relaxed>(
+      &block_handle->nbi_posted)};
+  uint64_t fenced{atomic::load<atomic::memory_scope::device, atomic::memory_order::acquire>(
+      &block_handle->nbi_fenced)};
+  if (posted > fenced) {
+    proxy_fence();
+  }
   ipcImpl_.ipcFence();
 }
 
 __device__ void ROContext::fence([[maybe_unused]] int pe) {
   // TODO(khamidou): need to check if per pe has any special handling
-  build_queue_element(RO_NET_FENCE, nullptr, nullptr, 0, 0, 0, 0, 0, nullptr,
-                      nullptr, NULL, ro_net_win_id, block_handle,
-                      true, get_status_flag(), is_default_ctx);
-  ipcImpl_.ipcFence();
+  fence();
 }
 
 __device__ void ROContext::quiet() {
+  uint64_t posted{atomic::load<atomic::memory_scope::device, atomic::memory_order::acquire>(
+      &block_handle->nbi_posted)};
   build_queue_element(RO_NET_QUIET, nullptr, nullptr, 0, 0, 0, 0, 0, nullptr,
                       nullptr, NULL, ro_net_win_id, block_handle,
                       true, get_status_flag(), is_default_ctx);
+  record_nbi_fenced(posted);
   ipcImpl_.ipcQuiet();
 }
 
@@ -327,9 +349,7 @@ __device__ void ROContext::putmem_nbi_wg(void *dest, const void *source,
                         const_cast<void *>(source), nelems, local_pe);
   } else {
     if (is_thread_zero_in_block()) {
-      build_queue_element(RO_NET_PUT_NBI, dest, const_cast<void *>(source),
-                          nelems, pe, 0, 0, 0, nullptr, nullptr, NULL,
-                          ro_net_win_id, block_handle, false);
+      post_network_nbi(RO_NET_PUT_NBI, dest, source, nelems, pe);
     }
   }
   __syncthreads();
@@ -345,9 +365,7 @@ __device__ void ROContext::getmem_nbi_wg(void *dest, const void *source,
     ipcImpl_.ipcCopy_wg<MemcpyKind::Get>(dest, ipcImpl_.ipc_bases[local_pe] + L_offset, nelems, local_pe);
   } else {
     if (is_thread_zero_in_block()) {
-      build_queue_element(RO_NET_GET_NBI, dest, const_cast<void *>(source),
-                          nelems, pe, 0, 0, 0, nullptr, nullptr, NULL,
-                          ro_net_win_id, block_handle, false);
+      post_network_nbi(RO_NET_GET_NBI, dest, source, nelems, pe);
     }
   }
   __syncthreads();
@@ -400,9 +418,7 @@ __device__ void ROContext::putmem_nbi_wave(void *dest, const void *source,
                           const_cast<void *>(source), nelems, local_pe);
   } else {
     if (is_thread_zero_in_wave()) {
-      build_queue_element(RO_NET_PUT_NBI, dest, const_cast<void *>(source),
-                          nelems, pe, 0, 0, 0, nullptr, nullptr, NULL,
-                          ro_net_win_id, block_handle, false);
+      post_network_nbi(RO_NET_PUT_NBI, dest, source, nelems, pe);
     }
   }
 }
@@ -418,9 +434,7 @@ __device__ void ROContext::getmem_nbi_wave(void *dest, const void *source,
                           nelems, local_pe);
   } else {
     if (is_thread_zero_in_wave()) {
-      build_queue_element(RO_NET_GET_NBI, dest, const_cast<void *>(source),
-                          nelems, pe, 0, 0, 0, nullptr, nullptr, NULL,
-                          ro_net_win_id, block_handle, false);
+      post_network_nbi(RO_NET_GET_NBI, dest, source, nelems, pe);
     }
   }
 }
@@ -567,6 +581,25 @@ __device__ uint64_t broadcast_shfl_up(uint64_t value) {
 
 __device__ uint64_t broadcast(bool lowest_active, uint64_t value) {
   return broadcast_lds(lowest_active, value);
+}
+
+__device__ void ROContext::proxy_fence() {
+  // The host fence drains the whole queue, so one lane can fence for every active lane that shares the queue.
+  if (elect_queue_lane()) {
+    // Read before posting: the fence then covers every NBI element counted in this value.
+    uint64_t posted{atomic::load<atomic::memory_scope::device, atomic::memory_order::acquire>(
+        &block_handle->nbi_posted)};
+    build_queue_element(RO_NET_FENCE, nullptr, nullptr, 0, 0, 0, 0, 0, nullptr,
+                        nullptr, NULL, ro_net_win_id, block_handle,
+                        true, get_status_flag(), is_default_ctx);
+    record_nbi_fenced(posted);
+  }
+}
+
+__device__ void ROContext::record_nbi_fenced(uint64_t posted) {
+  // Called only after a blocking fence or quiet has completed, so every NBI element counted in posted is done.
+  atomic::fetch_max<atomic::memory_scope::device, atomic::memory_order::release>(
+      &block_handle->nbi_fenced, posted);
 }
 
 __device__ int ROContext::broadcastmem_wave([[maybe_unused]] rocshmem_team_t team,
@@ -728,12 +761,14 @@ __device__ void build_queue_element(
 
   // Blocking requires the CPU to complete the operation.
   if (blocking) {
+    // Poll the caller's flag, not queue_element->status: the host frees the
+    // slot on read, so another lane may reuse it.
     int network_status{0};
     do {
-      refresh_volatile_sbyte(&network_status, queue_element->status);
+      refresh_volatile_sbyte(&network_status, status);
     } while (network_status == 0);
 
-    *(queue_element->status) = 0;
+    *status = 0;
     __threadfence();
   }
   if (default_ctx) {

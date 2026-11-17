@@ -3,8 +3,9 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-import rocprofsys
 import argparse
+
+import rocprofsys
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

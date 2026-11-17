@@ -1,33 +1,25 @@
-import {
-  AppBar,
-  Box,
-  Button,
-  Chip,
-  IconButton,
-  Stack,
-  Toolbar,
-  Tooltip,
-  Typography,
-} from '@mui/material';
+import { fontSizes, fontWeights, textStyles } from '../../theme/typography';
+import { Box, IconButton, Stack, Typography } from '@mui/material';
+import SurfaceButton from '../shared/SurfaceButton';
+import HoverTooltip from '../shared/HoverTooltip';
+import { shapeTokens } from '../../theme/tokens';
 import DarkModeRoundedIcon from '@mui/icons-material/DarkModeRounded';
 import LightModeRoundedIcon from '@mui/icons-material/LightModeRounded';
 import DownloadRoundedIcon from '@mui/icons-material/DownloadRounded';
 import CloudSyncRoundedIcon from '@mui/icons-material/CloudSyncRounded';
-import OpenInNewRoundedIcon from '@mui/icons-material/OpenInNewRounded';
-import FiberManualRecordRoundedIcon from '@mui/icons-material/FiberManualRecordRounded';
-import { formatFullDate, formatRelativeTime } from '../../utils/formatters';
+import GitHubIcon from '@mui/icons-material/GitHub';
+import { formatPublicationTime } from '../../utils/formatters';
+import { repositoryLink as buildRepositoryLink } from '../../utils/repositoryLink';
+import { dashboardPageLabels } from '../../config/dashboardPages';
 
-export default function DashboardHeader({
-  data,
-  dataError = null,
-  downloadData,
-  loading = false,
-  mode,
-  onReloadData,
-  onToggleMode,
-}) {
+// Top-right actions: circular icon buttons and a pill link, one 40px height.
+const actionStyles = { width: { xs: 44, sm: 40 }, height: { xs: 44, sm: 40 }, border: 1, borderColor: 'dashboard.controlBorder', borderRadius: '50%', color: 'text.secondary', '&:hover': { bgcolor: 'action.hover' }, '& svg': { fontSize: 22 } };
+
+export default function DashboardHeader({ data, dataError = null, downloadData, loading = false, mode, onReloadData, onToggleMode, tab = 'overview' }) {
+  const publicationLabel = formatPublicationTime(data?.generatedAt);
+  const repositoryLink = buildRepositoryLink(data?.repository, data?.canonicalBranch);
   const downloadJson = () => {
-    if (!downloadData) return;
+    if (loading || !downloadData) return;
     const blob = new Blob([JSON.stringify(downloadData, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
@@ -36,126 +28,24 @@ export default function DashboardHeader({
     anchor.click();
     URL.revokeObjectURL(url);
   };
-
   return (
-    <AppBar
-      position="sticky"
-      color="inherit"
-      elevation={0}
-      sx={{
-        borderBottom: 1,
-        borderColor: 'divider',
-        backgroundColor: (theme) => theme.palette.mode === 'dark' ? 'rgba(21,28,43,.92)' : 'rgba(255,255,255,.9)',
-        backdropFilter: 'blur(16px)',
-        '&::after': {
-          content: '""',
-          position: 'absolute',
-          inset: 'auto 0 -1px 0',
-          height: 2,
-          background: 'linear-gradient(90deg, #5566E9, #8A5DE8 42%, #12A594 78%, transparent)',
-        },
-      }}
-    >
-      <Toolbar sx={{ width: '100%', maxWidth: 1600, mx: 'auto', minHeight: { xs: 68, md: 76 }, px: { xs: 2, sm: 3, xl: 4 } }}>
-        <Stack direction="row" sx={{ alignItems: 'center', gap: 1.4, minWidth: 0, flex: 1 }}>
-          <Box sx={{ minWidth: 0 }}>
-            <Stack direction="row" sx={{ alignItems: 'center', gap: 0.8, flexWrap: 'wrap' }}>
-              <Typography sx={{ fontSize: { xs: 16, sm: 19 }, fontWeight: 780, letterSpacing: '-.025em', lineHeight: 1.15 }}>
-                Rocjitsu <Box component="span" sx={{ color: 'text.disabled', fontWeight: 400, mx: 0.45 }}>/</Box>{' '}
-                <Box component="span" sx={{ color: 'text.secondary', fontWeight: 580 }}>Simulation Performance Dashboard</Box>
-              </Typography>
-              {data?.isBeta && (
-                <Chip size="small" label="Beta" color="warning" sx={{ height: 19, fontSize: 9, fontWeight: 800, textTransform: 'uppercase' }} />
-              )}
-            </Stack>
-            <Stack direction="row" sx={{ alignItems: 'center', gap: 0.6, mt: 0.45, color: 'text.secondary' }}>
-              <FiberManualRecordRoundedIcon
-                color={loading ? 'primary' : 'success'}
-                sx={loading ? {
-                  fontSize: 9,
-                  animation: 'dataLoadingPulse 1.25s ease-in-out infinite',
-                  '@keyframes dataLoadingPulse': {
-                    '0%, 100%': { opacity: 0.35, transform: 'scale(.8)' },
-                    '50%': { opacity: 1, transform: 'scale(1.25)' },
-                  },
-                } : { fontSize: 9 }}
-              />
-              {loading ? (
-                <Typography variant="caption">Loading run data…</Typography>
-              ) : data?.generatedAt ? (
-                <Tooltip title={formatFullDate(data.generatedAt)}>
-                  <Typography variant="caption">Updated {formatRelativeTime(data.generatedAt)}</Typography>
-                </Tooltip>
-              ) : (
-                <Typography variant="caption">Data unavailable</Typography>
-              )}
-              {data?.repository && (
-                <>
-                  <Typography variant="caption" sx={{ color: 'text.disabled' }}>·</Typography>
-                  <Typography
-                    component="a"
-                    href={`${data.repository}/tree/develop/emulation/rocjitsu`}
-                    target="_blank"
-                    rel="noreferrer"
-                    variant="caption"
-                    sx={{ color: 'primary.main', textDecoration: 'none', display: { xs: 'none', sm: 'inline-flex' }, alignItems: 'center', gap: 0.4 }}
-                  >
-                    ROCm/rocm-systems <OpenInNewRoundedIcon sx={{ fontSize: 11 }} />
-                  </Typography>
-                </>
-              )}
-            </Stack>
-          </Box>
+    <Box component="header" sx={{ borderBottom: 1, borderColor: 'dashboard.border', bgcolor: 'background.paper', px: { xs: 2, md: 3 }, py: shapeTokens.headerPadding }}>
+      <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
+        <Box sx={{ minWidth: 0 }}>
+          <Typography sx={{ ...textStyles.captionCompact, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.06em' }}>rocjitsu / {dashboardPageLabels[tab]}</Typography>
+          <Typography component="h1" variant="h1" sx={{ mt: '2px' }}>{dashboardPageLabels[tab]}</Typography>
+            <Typography variant="caption" color="text.muted" sx={{ display: 'block', mt: '4px' }}>
+              {loading ? 'Loading run data…' : dataError ? 'Data unavailable' : publicationLabel ? <>Data as of <Box component="strong" sx={{ fontWeight: fontWeights.emphasized, color: 'text.primary' }}><time dateTime={data.generatedAt}>{publicationLabel}</time></Box></> : 'Data unavailable'}
+            </Typography>
+        </Box>
+        <Stack direction="row" sx={{ gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+          {repositoryLink && <SurfaceButton component="a" href={repositoryLink.href} target="_blank" rel="noreferrer"
+            startIcon={<GitHubIcon />} sx={{ height: { xs: 44, sm: 40 }, px: '16px', borderRadius: '999px', borderColor: 'dashboard.controlBorder', fontSize: fontSizes.body }}>{repositoryLink.label}</SurfaceButton>}
+          <HoverTooltip title="Reload all data (bypass cached files)"><IconButton aria-label="Reload all data" color={dataError ? 'primary' : 'default'} disabled={loading} onClick={onReloadData} sx={actionStyles}><CloudSyncRoundedIcon /></IconButton></HoverTooltip>
+          <HoverTooltip title="Download JSON"><IconButton aria-label="Download JSON" disabled={loading || !downloadData} onClick={downloadJson} sx={actionStyles}><DownloadRoundedIcon /></IconButton></HoverTooltip>
+          <HoverTooltip title={`Use ${mode === 'dark' ? 'light' : 'dark'} theme`}><IconButton aria-label={`Use ${mode === 'dark' ? 'light' : 'dark'} theme`} onClick={onToggleMode} sx={actionStyles}>{mode === 'dark' ? <LightModeRoundedIcon /> : <DarkModeRoundedIcon />}</IconButton></HoverTooltip>
         </Stack>
-        <Stack direction="row" sx={{ gap: 0.75, ml: 1 }}>
-          <Tooltip title="Use when dashboard data still appears stale or incorrect after refreshing the page. If the problem continues, clear this site's cached data in your browser settings.">
-            <span>
-              <Button
-                aria-label="Reload all data"
-                color={dataError ? 'primary' : 'inherit'}
-                disabled={loading}
-                onClick={onReloadData}
-                startIcon={<CloudSyncRoundedIcon />}
-                variant="outlined"
-                sx={{
-                  height: 40,
-                  minWidth: { xs: 40, md: 'auto' },
-                  px: { xs: 1, md: 1.5 },
-                  borderColor: dataError ? 'primary.main' : 'divider',
-                  color: dataError ? 'primary.main' : 'inherit',
-                  '&:hover': {
-                    borderColor: 'primary.main',
-                    color: 'primary.main',
-                  },
-                }}
-              >
-                <Box component="span" sx={{ display: { xs: 'none', md: 'inline' } }}>
-                  Reload all data
-                </Box>
-              </Button>
-            </span>
-          </Tooltip>
-          <Button
-            variant="outlined"
-            color="inherit"
-            startIcon={<DownloadRoundedIcon />}
-            disabled={!downloadData}
-            onClick={downloadJson}
-            sx={{
-              display: { xs: 'none', sm: 'inline-flex' },
-              height: 40,
-              borderColor: 'divider',
-            }}
-          >
-            Download JSON
-          </Button>
-          <Tooltip title={`Use ${mode === 'dark' ? 'light' : 'dark'} theme`}>
-            <IconButton aria-label={`Use ${mode === 'dark' ? 'light' : 'dark'} theme`} onClick={onToggleMode} sx={{ border: 1, borderColor: 'divider', borderRadius: 2.2 }}>
-              {mode === 'dark' ? <LightModeRoundedIcon /> : <DarkModeRoundedIcon />}
-            </IconButton>
-          </Tooltip>
-        </Stack>
-      </Toolbar>
-    </AppBar>
+      </Stack>
+    </Box>
   );
 }

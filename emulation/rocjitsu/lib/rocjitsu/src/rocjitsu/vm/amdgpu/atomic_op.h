@@ -7,6 +7,7 @@
 #ifndef ROCJITSU_VM_AMDGPU_ATOMIC_OP_H_
 #define ROCJITSU_VM_AMDGPU_ATOMIC_OP_H_
 
+#include "util/result.h"
 #include <algorithm>
 #include <cstdint>
 #include <type_traits>
@@ -45,10 +46,19 @@ enum class AtomicOp : uint8_t {
   APPEND,         ///< LDS append counter.
   CONSUME,        ///< LDS consume counter.
   BARRIER_ARRIVE, ///< LDS barrier-arrive state update.
+  ORDERED_ADD,    ///< Conditionally advance the streamout ID and add to its value.
 };
 
+/// @brief Whether each lane supplies a second operand after its source (data[1]).
+constexpr bool atomic_uses_two_sources(AtomicOp op) {
+  return op == AtomicOp::CMPSWAP || op == AtomicOp::FCMPSWAP || op == AtomicOp::MSKOR ||
+         op == AtomicOp::WRAP;
+}
+
 /// @brief Apply an integer atomic RMW operation (32-bit or 64-bit).
-template <typename T> T apply_int_atomic(AtomicOp op, T old_val, T src_val, T cmp_val = 0) {
+/// @details Returns failure for operations outside the supported integer set.
+template <typename T>
+util::FailureOr<T> apply_int_atomic(AtomicOp op, T old_val, T src_val, T cmp_val = 0) {
   using S = std::make_signed_t<T>;
   switch (op) {
   case AtomicOp::SWAP:
@@ -68,6 +78,18 @@ template <typename T> T apply_int_atomic(AtomicOp op, T old_val, T src_val, T cm
     return (old_val == cmp_val) ? src_val : old_val;
   case AtomicOp::MSKOR:
     return (old_val & ~src_val) | cmp_val;
+  case AtomicOp::ORDERED_ADD: {
+    if constexpr (sizeof(T) == sizeof(uint64_t)) {
+      const auto id = static_cast<uint32_t>(old_val);
+      if (id != static_cast<uint32_t>(src_val))
+        return old_val;
+      // The compute queue on gfx1201 uses the full 12-bit ordered wave ID.
+      const uint32_t value =
+          static_cast<uint32_t>(old_val >> 32) + static_cast<uint32_t>(src_val >> 32);
+      return (T{value} << 32) | ((id + 1u) & 0xfffu);
+    }
+    return util::Result::failure();
+  }
   case AtomicOp::ADD:
     return old_val + src_val;
   case AtomicOp::SUB:
@@ -99,7 +121,7 @@ template <typename T> T apply_int_atomic(AtomicOp op, T old_val, T src_val, T cm
   case AtomicOp::DEC:
     return (old_val == 0 || old_val > src_val) ? src_val : old_val - 1;
   default:
-    return old_val;
+    return util::Result::failure();
   }
 }
 

@@ -55,9 +55,9 @@ DEFERRED_CRASHES: dict = {}
 # amdsmi_* calls RDC links that this module does not reach, with the reason.
 # The coverage test fails once one of them is reached, so the list stays true.
 UNREACHED_APIS = {
-    "amdsmi_get_afids_from_cper": "needs CPER records; the fake reports none",
+    "amdsmi_get_afids_from_cper": "needs CPER records; the fake reports none by default",
     "amdsmi_get_gpu_accelerator_partition_profile_config": "partition profile query",
-    "amdsmi_get_gpu_compute_process_gpus": "needs processes; the fake reports none",
+    "amdsmi_get_gpu_compute_process_gpus": "needs processes; the fake reports none by default",
     "amdsmi_get_lib_version": "component version query, not exposed by rdci",
     "amdsmi_get_power_cap_info": "rdci config has no --host option",
     "amdsmi_set_power_cap": "rdci config has no --host option",
@@ -166,6 +166,7 @@ class Rdcd:
         self.env.update(
             LD_PRELOAD=self.fake,
             RDC_FAKE_GPUS=str(gpus),
+            RDC_DISABLE_ROCP="yes",
             RDC_FAKE_LOG=str(self.call_log),
             RDC_FAKE_ARM=str(self.armed),
             RDC_FAKE_EVENT_WAIT_MS="100",
@@ -368,6 +369,21 @@ def test_discovery_lists_each_partition(tools, tmp_path):
     assert code == 0, f"rdcd exited with {code}\n{d.output()}"
 
 
+@pytest.mark.parametrize("parts,xcc,decoder", [(2, 4, "2"), (3, 2, "1"), (4, 2, "1"), (8, 1, "*1")])
+def test_discovery_shows_each_partitions_resources(tools, tmp_path, parts, xcc, decoder):
+    # The fake GPU's 8 XCCs and 4 decoders, split by the partition mode (3 partitions,
+    # which no MI300X mode has, are a mode of their own). Past four partitions, two
+    # share a decoder, which rdci marks with "*".
+    d = Rdcd(tools, tmp_path, gpus=1, RDC_FAKE_PARTITIONS=parts).start()
+    try:
+        out = d.ok("discovery", "-i")
+        rows = re.findall(r"^\s+g0\.(\d+)\s+(\d+)\s*(\*?\d+)\s*$", out, re.M)
+        assert rows == [(str(p), str(xcc), decoder) for p in range(parts)], out
+    finally:
+        code = d.stop()
+    assert code == 0, f"rdcd exited with {code}\n{d.output()}"
+
+
 def test_dmon_reports_each_gpus_own_values(rdcd):
     names = _field_names(rdcd)
     gpus = ",".join(str(g) for g in range(NUM_GPUS))
@@ -518,7 +534,7 @@ def test_embedded_start_read_stop(tools):
     bootstrap = _first_file(os.path.join(PREFIX, "lib", "librdc_bootstrap.so"))
     if bootstrap is None:
         _missing("librdc_bootstrap.so")
-    env = dict(os.environ, LD_PRELOAD=tools[2], RDC_FAKE_GPUS=str(NUM_GPUS))
+    env = dict(os.environ, LD_PRELOAD=tools[2], RDC_FAKE_GPUS=str(NUM_GPUS), RDC_DISABLE_ROCP="yes")
     try:
         r = subprocess.run(
             [sys.executable, "-c", _EMBEDDED, bootstrap],
@@ -724,3 +740,20 @@ def test_runtime_files_do_not_contain_the_fake():
     for path in binaries:
         with open(path, "rb") as f:
             assert b"RDC_FAKE_" not in f.read(), f"{path} references the fake"
+
+
+# ---------------------------------------------------------------------------
+# Stress: long loops, run only with RDC_TEST_STRESS=1
+# ---------------------------------------------------------------------------
+@pytest.mark.stress
+def test_rdcd_start_watch_stop_loop(tools, tmp_path):
+    """rdcd starts, serves a watch and stops cleanly 50 times in a row."""
+    for i in range(50):
+        run = tmp_path / f"run{i}"
+        run.mkdir()
+        d = Rdcd(tools, run).start()
+        try:
+            d.ok("dmon", "-e", ",".join(str(f) for f in DMON_FIELDS), "-i", "0", "-c", "1")
+        finally:
+            code = d.stop()
+        assert code == 0, f"run {i}: rdcd exited with {code}\n{d.output()}"

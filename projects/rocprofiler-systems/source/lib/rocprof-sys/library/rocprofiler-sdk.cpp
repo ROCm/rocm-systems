@@ -10,6 +10,7 @@
 #include "common/env_vars.hpp"
 #include "common/environment.hpp"
 #include "common/path.hpp"
+#include "common/string_utility.hpp"
 #include "core/agent.hpp"
 #include "core/agent_manager.hpp"
 #include "core/common.hpp"
@@ -232,6 +233,12 @@ struct external_dependencies
                ::rocprofsys::state::process::Active;
     }
 
+    static bool is_finalized()
+    {
+        return ::rocprofsys::state::process::get() ==
+               ::rocprofsys::state::process::Finalized;
+    }
+
     static bool get_use_timemory() { return ::rocprofsys::get_use_timemory(); }
 
     template <typename CategoryT>
@@ -446,7 +453,7 @@ struct external_dependencies
 
     // Single source of truth is core/trace_cache/cacheable.hpp's ABSOLUTE constant;
     // kfd_events.hpp never includes that header, so the value is surfaced here.
-    static constexpr std::string_view k_pmc_value_type_absolute = trace_cache::ABSOLUTE;
+    static constexpr std::string_view k_pmc_value_type_absolute = trace_cache::k_absolute;
 
     // Single source of truth for these strings is core/categories.hpp's
     // trait::name<category::X>; kfd_events.hpp itself never includes
@@ -546,18 +553,18 @@ create_agent_profile(rocprofiler_agent_id_t          agent_id,
             name_v              = itr.substr(0, pos);
             auto const dev_id_s = itr.substr(pos + device_qualifier.length());
 
-            if(dev_id_s.empty() ||
-               dev_id_s.find_first_not_of("0123456789") != std::string::npos)
+            auto const dev_id_parsed = rocprofsys::utility::string::safe_stoul(dev_id_s);
+            if(dev_id_parsed.is_error())
             {
                 LOG_CRITICAL("invalid device qualifier format (':device=N) "
-                             "where N is the GPU id: {}",
-                             itr);
+                             "where N is the GPU id: {} ({})",
+                             itr, dev_id_parsed.error());
                 ::rocprofsys::state::process::set(
                     ::rocprofsys::state::process::Finalized);
                 std::abort();
             }
 
-            auto dev_id_v = std::stoul(dev_id_s);
+            auto const dev_id_v = dev_id_parsed.value();
 
             LOG_DEBUG("tool agent device id={}, name={}, device_id={}",
                       agent_v.device_type_index, name_v, dev_id_v);
@@ -934,8 +941,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 
     using sdk_backend_t    = backends::rocprofiler_sdk::backend<wrapper>;
     using tracing_config_t = tracing_config<sdk_backend_t, default_externals>;
-
-    sdk_backend_t::check_version_compatibility();
 
     auto const _callback_domains = tracing_config_t::get_callback_domains();
     auto const _buffered_domain  = tracing_config_t::get_buffered_domains();
@@ -1347,13 +1352,14 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 void
 finalize_sdk_common()
 {
+    flush();
+    stop();
+
+    // After stop() so no callback can add open regions while finalize drains them.
     if(g_domain_service)
     {
         g_domain_service->finalize();
     }
-
-    flush();
-    stop();
 
     if(get_counter_storage())
     {
