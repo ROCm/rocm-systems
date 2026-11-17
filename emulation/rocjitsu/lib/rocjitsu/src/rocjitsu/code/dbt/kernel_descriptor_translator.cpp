@@ -289,12 +289,7 @@ descriptor_vgpr_granularity_for_wavefront(rj_code_arch_t arch, uint32_t wavefron
   if (!uses_gfx90a_accum_offset(guest_arch) || !arch_has_accvgpr(guest_arch))
     return 0;
 
-  const uint32_t encoded =
-      RJ_AMDHSA_BITS_GET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET);
-  // The descriptor encoding is one less than the actual first AccVGPR offset:
-  // field value 0 means acc0 starts at unified VGPR index 4, value 1 means 8,
-  // and so on in groups of four registers.
-  return static_cast<uint16_t>((encoded + 1) * 4);
+  return static_cast<uint16_t>(kd::gfx90a_accum_vgpr_base(desc.compute_pgm_rsrc3));
 }
 
 [[nodiscard]] uint16_t ttmp_scalar_operand(uint16_t ttmp) {

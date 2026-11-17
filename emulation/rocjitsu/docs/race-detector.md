@@ -13,7 +13,8 @@ instructions.
 The race detector supports gfx942 (GFX9/CDNA3), gfx950 (GFX9/CDNA4) and
 gfx1151 (GFX11.5/RDNA3.5), with end-to-end tests for each. Support for gfx1250
 (CDNA5) is limited and under active development; end-to-end tests currently
-cover its tensor DMA races (see Tensor DMA races below).
+cover its tensor DMA races (see Tensor DMA races below) and its counter-capacity
+backpressure.
 
 ## Quick start
 
@@ -202,24 +203,58 @@ races. Some examples:
 - **Tensor DMA races** (gfx1250): `tensor_load_to_lds` writes and
   `tensor_store_from_lds` reads are LDS events on `tensorcnt`. Any wave,
   including the issuing one, that reads a load's destination or overwrites a
-  store's source before `s_wait_tensorcnt` is reported; other waves also need an
-  `s_barrier`. A load covers every element of its tile, including elements
-  outside the tensor, which it zero-fills; padding bytes are excluded. A store
-  covers only the elements inside the tensor. Either way, only bytes inside the
-  wave's LDS allocation are tracked, because bytes past it are not transferred:
-  an i32 at offset 254 of a 256-byte allocation contributes only bytes 254 and
-  255. Transfers from one wave complete
-  on `tensorcnt` in issue order (CDNA5 ISA 10.11.1), so a partial
-  `s_wait_tensorcnt` retires the oldest. The ISA does not specify the relative
-  timing of their LDS reads and writes, so as a conservative rule the detector
-  reports a tensor load and a tensor store from the same wave that touch the
-  same LDS byte, in either order, until `s_wait_tensorcnt` retires the earlier
-  one. Two stores of the same tile only read it, which is safe; two loads over
-  the same bytes are an LDS write/write conflict, which the detector does not
-  check (see Limitations). Each instruction is registered when it issues, as
-  other memory instructions are, so an instruction that moves no data still
-  occupies its `tensorcnt` slot, and a transfer that waits for memory is pending
-  from the moment it issues.
+  store's source before the transfer completes, through `s_wait_tensorcnt` or a
+  full `tensorcnt`, is reported; other waves also need an `s_barrier`. A load
+  covers every element of its tile, including elements outside the tensor, which
+  it zero-fills; padding bytes are excluded. A store covers only the elements
+  inside the tensor. Either way, only bytes inside the wave's LDS allocation are
+  tracked, because bytes past it are not transferred: an i32 at offset 254 of a
+  256-byte allocation contributes only bytes 254 and 255. Transfers from one
+  wave complete on `tensorcnt` in issue order (CDNA5 ISA 10.11.1), so a partial
+  `s_wait_tensorcnt` or a full `tensorcnt` retires the oldest. The ISA does not
+  specify the relative timing of their LDS reads and writes, so as a
+  conservative rule the detector reports a tensor load and a tensor store from
+  the same wave that touch the same LDS byte, in either order, until
+  `s_wait_tensorcnt` or a full `tensorcnt` retires the earlier one. Two stores
+  of the same tile only read it, which is safe; two loads over the same bytes
+  are an LDS write/write conflict, which the detector does not check (see
+  Limitations). Each instruction is registered when it issues, as other memory
+  instructions are, so an instruction that moves no data still occupies its
+  `tensorcnt` slot, and a transfer that waits for memory is pending from the
+  moment it issues.
+- **Async copy races** (gfx1250): `global_load_async_to_lds_*` and
+  `cluster_load_async_to_lds_*` writes and `global_store_async_from_lds_*` reads
+  are LDS events on `asynccnt`, one per instruction, with each lane's bytes at
+  its LDS address. Any wave, including the issuing one, that reads a load's
+  destination or overwrites a store's source before `s_wait_asynccnt` is
+  reported; other waves also need an `s_barrier`. Synchronizing other waves
+  through an LDS barrier cell instead is not modeled (see False positives with
+  LDS barrier synchronization). Async copies may access LDS out of order with
+  each other (CDNA5 ISA 10.8), so a store is also reported when it reads bytes
+  of the same wave's pending async load, and an async load when it overwrites
+  the source of the same wave's pending async store. The ISA does not
+  establish the LDS access order of an async copy relative to DS instructions
+  or tensor DMA, so as a conservative rule the detector also
+  reports a store that reads bytes of the same wave's pending DS write or tensor
+  load, until a DS or tensor wait completes it. Compilers can emit such a pair
+  without a DS wait (on gfx1250, Clang places no `s_wait_dscnt` between the
+  `ds_store_b32` of a shared-memory assignment and a following
+  `global_store_async_from_lds_b32` builtin that reads the same bytes), and the
+  detector reports it. Async loads complete in issue order with other async
+  loads and async stores with other async stores, but loads and stores
+  complete out of order with each other, so a partial `s_wait_asynccnt`
+  retires the oldest of each kind only when the count guarantees it: after a
+  load and then a store, `s_wait_asynccnt 1` retires neither. `ds_atomic_async_barrier_arrive_b64` also completes on `asynccnt`, in
+  order with async loads (10.8), so partial waits count it with the loads. The
+  ISA specifies out-of-range LDS behavior for async loads only: their LDS write
+  is dropped (CDNA5 ISA 3.3.3). As modeling choices, a load lane with any byte
+  past the wave's LDS allocation writes nothing and is not tracked, while a
+  store lane reads, and is tracked for, the bytes of its source inside the
+  allocation, and zeros past it, so every byte a store may read is tracked. A
+  copy with no active lanes touches no LDS but issues and counts on
+  `asynccnt`; the hardware may skip it only when no load, store, async or
+  tensor operation is pending (3.2.2.1), and counting it then retires no later
+  copy early. Either way, the instruction occupies its `asynccnt` slot.
 
 Detection is at byte granularity: D16 (half-register) loads only flag races on
 the affected bytes, and LDS races are tracked per byte.
@@ -236,14 +271,23 @@ following lifecycle:
    wait for `vmcnt` before reading the destination bytes. Tensor DMA transfers
    complete in issue order, but as a conservative rule an active tensor load or
    store still conflicts with a later, overlapping transfer in the other
-   direction from the same wave (see Tensor DMA races above).
+   direction from the same wave (see Tensor DMA races above). An active async
+   store's LDS source likewise conflicts with any later, overlapping LDS write
+   from the same wave (see Async copy races above).
 1. **WAVE_COMPLETE** — waits have satisfied every counter obligation for the
    event. This means the event is no longer in flight from the perspective of
    the wave that issued the operation, but is still in flight from the
    perspective of other waves in the same workgroup.
 1. **RETIRED** — `s_barrier` has synchronized all waves. The event is fully
    retired and, from the perspective of all threads in all wavefronts, the
-   operation is complete.
+   operation is complete. A workgroup with a single wave has no other wave to
+   race with, so its LDS events are retired as soon as they are wave-complete,
+   without a barrier. They then leave the LDS lists that race checks scan, so
+   those checks do not slow down as completed events add up in long
+   single-wave kernels. Retired events stay in the event registry until it
+   trims them, and it trims only from the oldest event: an older event that is
+   still pending, such as a global load waiting on `loadcnt`, keeps every
+   later retired event in the registry.
 
 Generic `FLAT_*` instructions select counter domains from their resolved memory
 requests. Global and scratch requests use the vector-memory counter; LDS
@@ -268,11 +312,15 @@ obligations used by the requests. Generated VMEM/FLAT stores and atomics do not
 carry an EXP completion obligation. In particular, CDNA4 FLAT completion stays
 unordered; a nonzero wait cannot prove a result ready.
 
-Functional counter acquisition and both runtime checkers use the selected memory
-domains. FLAT capacity constraints are applied after addresses are resolved.
-Before reading the address operands, neither domain is guaranteed to need a
-counter slot. A full LDS counter followed by a global-only FLAT therefore cannot
-prove an older LDS result complete.
+Functional counter acquisition and the core memory-wait checker use the selected
+memory domains. So does the race detector on the pre-GFX12 capacity targets
+(CDNA1 through CDNA4 and GFX11): it applies FLAT capacity constraints after
+addresses are resolved, because before the address operands are read, neither
+domain is guaranteed to need a counter slot. On those targets, a full LDS
+counter followed by a global-only FLAT therefore cannot prove an older LDS
+result complete. On gfx1250, every FLAT instruction increments both DScnt and
+LOADcnt or STOREcnt when it issues (CDNA5 ISA 5.7.1.3), and the race detector
+counts it on both; see the gfx1250 capacity model below.
 
 A mixture of global and scratch lanes uses the same VMEM domain. Mixed LDS/global
 observations still attach both obligations to the whole race-plugin event, so a
@@ -308,12 +356,20 @@ that does not identify a completed event remains conservatively pending. VMCNT
 is handled the same way for its 63-entry ordered non-FLAT VMEM class.
 
 The detector's persistent counter accounting is limited to operations routed
-through rocJITsu's memory pipelines. A narrow `s_sendmsg*` fallback applies one
-token of issue-time LGKMCNT pressure, but message occupancy and returning
-message results are not retained as pending events. Timestamp-query operations
-such as `s_memtime` and `s_memrealtime` are not accounted for. These operations
-therefore remain unsupported rather than being treated as complete message or
-timestamp modeling.
+through rocJITsu's memory pipelines. A narrow `s_sendmsg*` fallback applies
+issue-time pressure: one LGKMCNT token on the pre-GFX12 capacity targets (CDNA1
+through CDNA4 and GFX11), and on gfx1250 one KMcnt token, or two for
+`s_sendmsg_rtn_*`, which also counts its returned data (CDNA5 ISA 5.4). On
+gfx1250 that pressure cannot complete anything, because the only events the
+detector registers on KMcnt are scalar loads, which complete out of order.
+Message occupancy and returning message results are not retained as pending
+events. Timestamp-query operations such as `s_memtime` and `s_memrealtime` are
+not accounted for, nor are the gfx1250 barrier instructions that use KMcnt:
+`s_barrier_signal_isfirst`, `s_get_barrier_state` and `s_barrier_leave` (CDNA5
+ISA 5.6.3). These operations therefore remain unsupported rather than being
+treated as complete message, timestamp or barrier modeling. Leaving out a
+counter's operations only makes its capacity model conservative: the detector
+can miss a completion, never retire too much.
 
 For example, CDNA cannot issue the final scalar load below while all 15 earlier
 LGKM tokens remain outstanding:
@@ -344,9 +400,54 @@ s_waitcnt_lgkmcnt null, 0      ; standalone LGKMCNT form
 Counter-capacity backpressure is modeled for the VMCNT and LGKMCNT domains on
 CDNA1 through CDNA4 and GFX11. CDNA uses a four-bit LGKMCNT and six-bit VMCNT;
 GFX11 uses six-bit fields for both. GFX11 vector stores use the separate VSCNT
-domain and therefore do not create VMCNT pressure. Generic FLAT contributes to
-both modeled domains, so both capacity constraints are applied before operand
-reads.
+domain and therefore do not create VMCNT pressure. Generic FLAT applies the
+capacity constraints of the domains its addresses resolve to, once they are
+resolved.
+
+On gfx1250 it is modeled for each split counter: LOADcnt, STOREcnt, DScnt,
+ASYNCcnt and TENSORcnt are 6-bit counters and KMcnt is a 5-bit counter (the
+counter table in CDNA5 ISA 5.7.1), so each holds 63 tokens, or 31 for KMcnt.
+These are the capacities the core memory-wait checker uses. Each counter
+constrains only its own events: STOREcnt pressure does not complete a pending
+load, and a scalar load does not complete a pending DS operation. Async loads
+and async stores share ASYNCcnt but complete in order only within their own type
+(CDNA5 ISA 10.8), so a full ASYNCcnt completes the oldest async load only when
+async loads alone fill it, and likewise for stores. Scalar loads complete out of
+order (CDNA5 ISA 5.7.1.1), so a full KMcnt never completes one. A memory
+instruction issued with wave EXEC zero counts unless the counters its encoding
+names are all zero (CDNA5 ISA 3.2.2.1): LOADcnt, STOREcnt, ASYNCcnt and
+TENSORcnt for VMEM, DScnt for LDS, and all of them for FLAT. On those counters
+it applies backpressure and keeps its slot, recorded as an event with no
+registers or LDS bytes, so later capacity checks and partial waits count it.
+That is safe even if the instruction was skipped: those counters were then zero,
+so the earlier operations on them had completed. Its other counters are left
+out: `ds_atomic_async_barrier_arrive_b64` is an LDS instruction that counts on
+ASYNCcnt, so with EXEC zero it may be skipped while async loads are pending, and
+it proves none of them complete. An access whose lanes are all cleared while
+EXEC is active keeps no slot. A VBUFFER instruction whose resource descriptor
+TYPE is not a buffer is ignored (CDNA5 ISA 9.6), so it applies no backpressure
+and keeps no slot, whether EXEC is active or zero. If hardware still counted it,
+leaving it out only keeps older operations pending longer. `global_inv` counts on
+LOADcnt, and `global_wb` and `global_wbinv` on STOREcnt (CDNA5 ISA 5.7.1.2), and
+none of them is skipped for EXEC zero (CDNA5 ISA 3.2.2.1), so each applies
+backpressure on its counter when it issues. Each then keeps its slot, recorded
+as an event with no registers, in order with the VMEM operations on its
+counter, so later capacity checks and partial waits count it. The LDS lane
+permutes (`ds_permute_b32`, `ds_bpermute_b32`, `ds_bpermute_fi_b32`) and
+`ds_swizzle_b32` use the LDS hardware without LDS memory (CDNA5 ISA 11.2.3),
+and LDS operations count on DScnt and are kept in order (CDNA5 ISA 5.7.1.4), so
+each applies DScnt backpressure when it issues and keeps its slot in order with
+LDS operations. `ds_nop` does the same, following the core memory-wait
+checker's model, since the ISA describes it only as "Do nothing". Tensor
+DMA instructions apply TENSORcnt backpressure when they issue, before their LDS
+bytes are checked, so the oldest transfer a full TENSORcnt completes does not
+conflict with the new one. Every generic FLAT applies backpressure to both DScnt
+and LOADcnt or STOREcnt when it issues, whichever memory its addresses resolve
+to, because it increments both (CDNA5 ISA 5.7.1.3). The slot it takes in a
+domain its addresses did not use is recorded as an event with no registers or
+LDS bytes, in order with that domain's other operations, so later capacity
+checks and partial waits count it as hardware does. The FLAT's own result still
+depends only on the domains its addresses used.
 
 The same completion-order distinction is used for nonzero partial waits; a
 zero wait still completes every event on the selected counter. The detector
@@ -376,6 +477,10 @@ wave can bypass the interval scan because those operations are ordered. A
 mixed chunk uses the scan until its count drains. The history remains available
 for checks by other waves until a barrier retires it. Direct-to-LDS and unordered
 memory operations still require their own completion checks.
+For a DS or FLAT instruction, the plugin first merges the active lanes' byte
+ranges into intervals and checks the chunk counts under them. When no chunk can
+hold a conflict, it skips the per-lane checks. The same intervals become the
+instruction's event.
 
 **VGPR race detection** tracks events per register, using the stored exec mask
 to determine which lanes are affected. Tracking is at byte granularity within
@@ -445,9 +550,8 @@ race_detector/
     ├── event_registry.h      append-only event store with prefix trimming
     ├── interval_set.h        half-open byte range tracking for LDS
     ├── types.h               core enum types and structs
-    ├── common_register.h     SGPR/VGPR classification helpers
-    ├── dim3d.h               3D coordinate helpers
-    └── profiler_interface.h  optional hook profiling
+    ├── common_register.h     memory event types and ordering
+    └── dim3d.h               3D coordinate helpers
 ```
 
 Explicit wait decoding is shared with the core checker in
@@ -460,16 +564,18 @@ Tests are part of the rocjitsu test suite (`emulation/rocjitsu/tests/`):
 - `race_detector_tests.cpp` — drives `RaceDetector` and `WaveRaceState` directly
   via `race_test_builder.h`, covering VGPR, SGPR, LDS, D16, DTL, exec mask,
   multi-workgroup, and mixed counter scenarios.
+- `race_detector_counter_capacity_tests.cpp` — counter-capacity backpressure,
+  for the combined counters before GFX12 and the gfx1250 split counters.
 - `interval_set_tests.cpp` — unit tests for `IntervalSet`.
 - `execution_plugin_race_test.cpp` — drives the plugin's hooks, including
-  tensor DMA transfers on gfx1250.
+  tensor DMA transfers and async copies on gfx1250.
 - `wait_hazard_test.cpp` — wait/readiness tests shared with the core checker.
 - The `race` suite in
   [ROCm/rocjitsu-test-corpus](https://github.com/ROCm/rocjitsu-test-corpus)
   owns the gfx942, gfx950, gfx1151 and gfx1250 end-to-end HIP programs; the
-  gfx1250 program covers tensor DMA. The `rocjitsu-test-corpus` workflow builds
-  them with the corpus HIP toolchain and runs each case under the emulator with
-  the `race` plugin enabled.
+  gfx1250 program covers tensor DMA and counter capacity. The
+  `rocjitsu-test-corpus` workflow builds them with the corpus HIP toolchain and
+  runs each case under the emulator with the `race` plugin enabled.
 
 ```bash
 # Core detection tests
@@ -518,37 +624,36 @@ this source tree. The original
 - **Tensor DMA scope**: only the LDS side of a transfer is tracked. Its global
   memory accesses are not checked.
 
-- **Async stores from LDS** (gfx1250): `global_store_async_from_lds_*` is
-  tracked only as a global store; its LDS read is neither checked nor
-  registered. An async store reading a pending tensor load's destination, and
-  a tensor load, DS write or direct-to-LDS write over a pending async store's
-  source, are therefore not reported in either issue order, even with no
-  `s_wait_asynccnt` between them.
+- **Async copy scope**: only the LDS side of an async copy is tracked. Its
+  global memory accesses are not checked.
 
-- **False positives with LDS barrier synchronization**: a tensor load can
-  request an arrival on an LDS barrier cell when it completes, and a consumer
-  wave can wait for that barrier's phase and then read the tile, without the
-  producer waiting on `s_wait_tensorcnt` or the workgroup passing `s_barrier`.
-  The detector does not observe this synchronization: it retires a transfer
-  only through wait-counter instructions and `s_barrier`. A consumer that is
-  correctly synchronized through the barrier cell is therefore reported as
-  racing with the tensor load. These reports are false positives, not missing
-  coverage.
+- **Async copy LDS alignment**: async copies use their LDS addresses as
+  computed. DS instructions have their LDS address aligned in every alignment
+  mode except unaligned (CDNA5 ISA 3.3.4.1), but the ISA does not say whether
+  async copies follow that rule, so neither the emulator nor the detector
+  applies it to them.
 
-- **NULL tensor descriptors**: like the emulator, the detector counts a NULL
-  descriptor (`count = 0`) on `tensorcnt`. That is an emulator assumption:
-  hardware behavior for this encoding is not established. If hardware does not
-  count it, a nonzero `s_wait_tensorcnt` that the detector accepts can leave an
-  earlier transfer pending, so a real race would go unreported.
+- **False positives with LDS barrier synchronization**: a producer can hand LDS
+  data to another wave through an LDS barrier cell instead of a wait and
+  `s_barrier`. A tensor load can request an arrival on a barrier cell when it
+  completes, and `ds_atomic_async_barrier_arrive_b64` advances a barrier only
+  after the producer's earlier async loads complete (CDNA5 ISA 11.2.2). A
+  consumer wave can then wait for the barrier's phase and read the tile, or copy
+  it out with an async store, without the producer waiting on `s_wait_tensorcnt`
+  or `s_wait_asynccnt` or the workgroup passing `s_barrier`. The detector does
+  not observe this synchronization: it retires a transfer only through
+  wait-counter instructions, counter capacity and `s_barrier`. A consumer that
+  is correctly synchronized through the barrier cell is therefore reported as
+  racing with the tensor or async load. These reports are false positives, not
+  missing coverage.
 
-- **No counter-capacity backpressure on gfx1250**: hardware stalls issue when a
-  wait counter is full, which proves the oldest pending entry complete without
-  an explicit wait. The detector models this only on CDNA1 through CDNA4 and
-  GFX11. On gfx1250, code that relies on a full counter instead of a wait
-  gets false positives: a wave that issues 64 tensor transfers has completed
-  its first, because the 6-bit `tensorcnt` holds at most 63, but the detector
-  still reports a read of the first transfer's LDS bytes as a race. Explicit
-  `s_wait_*` waits are handled correctly.
+- **NULL tensor descriptors and NOP tiles**: like the emulator, the detector
+  counts a NULL descriptor (`count = 0`) and a NOP tile (`tile_dim0 = 0`) on
+  `tensorcnt`. That is an emulator assumption: hardware behavior for these
+  encodings is not established. If hardware does not count them, a nonzero
+  `s_wait_tensorcnt` that the detector accepts, or a `tensorcnt` the detector
+  considers full, can leave an earlier transfer pending, so a real race would
+  go unreported.
 
 - **Conservative DPP/SDWA write masks**: WAW precision depends on the execution
   plugin's instruction-write lane and byte masks. DPP destinations can currently

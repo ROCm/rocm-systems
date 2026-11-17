@@ -64,6 +64,11 @@ rccl_assert_source_line("${_rccl_src_root}/enqueue/enqueue.cc"
 rccl_assert_source_line("${_rccl_src_root}/enqueue/enqueue.cc"
   "NCCL_PARAM(GraphRegister, \"GRAPH_REGISTER\", 0)"
   "fakes/enqueue_fakes.cc: ncclParamGraphRegister()")
+# cost-model-test.cc defines ncclFuncStr itself and parseList() indexes it as its prefix table,
+# so a rename in production must not leave the test parsing NCCL_ALGO against stale names.
+rccl_assert_source_line("${_rccl_src_root}/init.cc"
+  "const char* ncclFuncStr[NCCL_NUM_FUNCTIONS + 4] = {\"Broadcast\", \"Reduce\", \"AllGather\", \"ReduceScatter\", \"AllReduce\","
+  "cost-model-test.cc: ncclFuncStr")
 # Real NCCL_PARAM lives in enqueue.cc; init.cc only has the extern. MicroInit
 # does not compile enqueue.cc, so init_fakes.cc supplies the body.
 rccl_assert_source_line("${_rccl_src_root}/enqueue/enqueue.cc"
@@ -77,9 +82,10 @@ rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/init_fakes.cc"
   "int64_t ncclParamTreeCompact() { return g_loadParam(\"TREE_COMPACT\", 0); }"
   "the TreeCompact fake default")
 rccl_assert_source_line("${_rccl_src_root}/transport/net_ib/connect.cc"
-  "NCCL_PARAM(IbQpsPerConn, \"IB_QPS_PER_CONNECTION\", 1)" "fakes/transport_net_ib_fakes.cc: ncclParamIbQpsPerConn()")
+  "DEFINE_NCCL_PARAM(ncclParamIbQpsPerConn, int32_t, NCCL_IB_QPS_PER_CONNECTION, 1,"
+  "fakes/transport_net_ib_fakes.cc: ncclParamIbQpsPerConn")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/transport_net_ib_fakes.cc"
-  "int64_t ncclParamIbQpsPerConn() { return g_loadParam(\"IB_QPS_PER_CONNECTION\", 1); }"
+  "DEFINE_NCCL_PARAM(ncclParamIbQpsPerConn, int32_t, NCCL_IB_QPS_PER_CONNECTION, 1, NCCL_PARAM_FLAG_NONE,"
   "the IbQpsPerConn fake default")
 # The net_ib_cast connect / qp_sharing fakes repeat these params; both copies must agree.
 foreach(_param
@@ -108,6 +114,44 @@ foreach(_param
 endforeach()
 # The net_ib, net_ib_cast and socket fakes copy these lines from production; pin both ends ("<SEMI>" stands for a semicolon).
 set(_rccl_cast_pins
+  "transport/net_ib_cast/common.cc" "NCCL_PARAM(IbCastSplitDataOnQps, \"IB_SPLIT_DATA_ON_QPS\", 0)<SEMI>"
+    "net_ib_cast_common_fakes.cc" "return g_loadParam(\"IB_SPLIT_DATA_ON_QPS\", 0)<SEMI> }"
+  "transport/net_ib_cast/common.cc" "NCCL_PARAM(IbCastPrepostReceiveWorkRequests, \"IB_PREPOST_RECEIVE_WORK_REQUESTS\", -2)<SEMI>"
+    "net_ib_cast_common_fakes.cc" "return g_loadParam(\"IB_PREPOST_RECEIVE_WORK_REQUESTS\", -2)<SEMI> }"
+  "transport/net_ib_cast/common.cc" "NCCL_PARAM(IbCastAsyncEvents, \"IB_RETURN_ASYNC_EVENTS\", 1)<SEMI>"
+    "net_ib_cast_common_fakes.cc" "return g_loadParam(\"IB_RETURN_ASYNC_EVENTS\", 1)<SEMI> }"
+  "transport/net_ib_cast/common.cc" "RCCL_PARAM(IbCastOptionalRecvCompletion, \"IB_OPTIONAL_RECV_COMPLETION\", 0)<SEMI>"
+    "net_ib_cast_common_fakes.cc" "return g_loadParam(\"RCCL_IB_OPTIONAL_RECV_COMPLETION\", 0)<SEMI> }"
+  "transport/net_ib_cast/common.cc" "int IbCastNMergedDevs = -1<SEMI>"
+    "net_ib_cast_common_fakes.cc" "int IbCastNMergedDevs = -1<SEMI>"
+  "transport/net_ib_cast/common.cc" "int IbCastNDevs = -1<SEMI>"
+    "net_ib_cast_common_fakes.cc" "int IbCastNDevs = -1<SEMI>"
+  "transport/net_ib_cast/common.cc" "int IbCastRelaxedOrderingEnabled = 0<SEMI>"
+    "net_ib_cast_common_fakes.cc" "int IbCastRelaxedOrderingEnabled = 0<SEMI>"
+  "transport/net_ib_cast/common.cc" "if (ncclParamIbCastAsyncEvents() && COMPILER_ATOMIC_LOAD(&stat->fatalErrorCount, std::memory_order_relaxed)) {"
+    "net_ib_cast_common_fakes.cc" "if (ncclParamIbCastAsyncEvents() && COMPILER_ATOMIC_LOAD(&stat->fatalErrorCount, std::memory_order_relaxed)) {"
+  "transport/net_ib_cast/common.cc" "return &sComm->devs[devIndex].base<SEMI>"
+    "net_ib_cast_common_fakes.cc" "if (base->isSend) return &((struct ncclIbSendComm*)base)->devs[devIndex].base<SEMI>"
+  "transport/net_ib_cast/common.cc" "return &rComm->devs[devIndex].base<SEMI>"
+    "net_ib_cast_common_fakes.cc" "return &((struct ncclIbRecvComm*)base)->devs[devIndex].base<SEMI>"
+  "transport/net_ib_cast/init.cc" "RCCL_PARAM(IbCastQpsPerP2p, \"IB_QPS_PER_P2P\", 0)<SEMI>"
+    "net_ib_cast_init_fakes.cc" "return g_loadParam(\"RCCL_IB_QPS_PER_P2P\", 0)<SEMI> }"
+  "transport/net_ib_cast/init.cc" "RCCL_PARAM(IbCastP2pDisableCts, \"IB_P2P_DISABLE_CTS\", 1)<SEMI>"
+    "net_ib_cast_init_fakes.cc" "return g_loadParam(\"RCCL_IB_P2P_DISABLE_CTS\", 1)<SEMI> }"
+  "transport/net_ib_cast/init.cc" "NCCL_PARAM(IbCastOooRq, \"IB_OOO_RQ\", 0)"
+    "net_ib_cast_init_fakes.cc" "return g_loadParam(\"IB_OOO_RQ\", 0)<SEMI> }"
+  "transport/net_ib_cast/init.cc" "bool IbCastAinicRoce = 0<SEMI>"
+    "net_ib_cast_init_fakes.cc" "bool IbCastAinicRoce = 0<SEMI>"
+  "transport/net_ib_cast/init.cc" "bool IbCastMultiplaneEnable = false<SEMI>"
+    "net_ib_cast_init_fakes.cc" "bool IbCastMultiplaneEnable = false<SEMI>"
+  "transport/net_ib_cast/init.cc" "bool IbCastOffloadEnabled = 0<SEMI>"
+    "net_ib_cast_init_fakes.cc" "bool IbCastOffloadEnabled = 0<SEMI>"
+  "transport/net_ib_cast/init.cc" "bool IbCastUseInline = 0<SEMI>"
+    "net_ib_cast_init_fakes.cc" "bool IbCastUseInline = 0<SEMI>"
+  "transport/net_ib_cast/init.cc" "bool IbCastAinicCtsInlineData = 0<SEMI>"
+    "net_ib_cast_init_fakes.cc" "bool IbCastAinicCtsInlineData = 0<SEMI>"
+  "transport/net_ib_cast/init.cc" "int IbCastGdrFlushDisable = 0<SEMI>"
+    "net_ib_cast_init_fakes.cc" "int IbCastGdrFlushDisable = 0<SEMI>"
   "transport/net_ib/p2p.cc" "NCCL_PARAM(IbArThreshold, \"IB_AR_THRESHOLD\", -2)<SEMI>"
     "transport_net_ib_p2p_fakes.cc" "return g_loadParam(\"IB_AR_THRESHOLD\", -2)<SEMI> }"
   "transport/net_ib/p2p.cc" "int64_t ncclIbArThreshold = 8192<SEMI>"
@@ -151,6 +195,11 @@ rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/tuning_fakes.cc"
   "int64_t g_paramMaxNchannels = -2;" "the MaxNchannels fake default")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/wrap_fakes.cc"
   "static int64_t DefaultParamForceCe() { return 1; }" "the ForceCe fake default")
+rccl_assert_source_line("${_rccl_src_root}/init.cc"
+  "NCCL_PARAM(SetCpuStackSize, \"SET_CPU_STACK_SIZE\", 1)" "fakes/linux_fakes.cc: ncclParamSetCpuStackSize()")
+rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/linux_fakes.cc"
+  "int64_t ncclParamSetCpuStackSize() { return g_loadParam(\"SET_CPU_STACK_SIZE\", 1); }"
+  "the SetCpuStackSize fake default")
 # RasDiagnosticsTests.cpp (rccl-UnitTests) classifies report lines by kRasFailureMarkers and kRasHealthMarkers;
 # each marker must stay both in those lists and in every source file that emits it (comma-separated).
 set(_rccl_ras_tests "${CMAKE_CURRENT_LIST_DIR}/../RasDiagnosticsTests.cpp")
@@ -293,6 +342,40 @@ rccl_assert_source_line("${_rccl_src_root}/transport/net.cc"
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/transport_stubs.cc"
   "int64_t ncclParamNetOptionalRecvCompletion() { return g_loadParam(\"NET_OPTIONAL_RECV_COMPLETION\", 1); }"
   "the NetOptionalRecvCompletion fake default")
+# DiagnosticsTests.cpp (rccl-UnitTests) finds failed checks by kDiagFailureMarkers; each marker must stay
+# both in that list and in the report line it marks. Since NCCL 2.32.6 only the core lines are DIAG_PRINT lines on
+# stdout; p2p.cc logs the per-edge details as INFO(NCCL_DIAG, "P2P %s ...", issue, ...) and the rest as
+# INFO(NCCL_DIAG, "P2P ...").
+set(_rccl_diag_tests "${CMAKE_CURRENT_LIST_DIR}/../DiagnosticsTests.cpp")
+set(_rccl_diag_core_markers "transport detect returned" "p2p: check returned")
+set(_rccl_diag_issue_markers
+  "destination buffer unavailable" "peer-memory import failed" "write mismatch" "read mismatch"
+  "topology check failed" "launch/check failed")
+set(_rccl_diag_info_markers "setup failed" "resource cleanup failed")
+foreach(_marker IN LISTS _rccl_diag_core_markers)
+  rccl_assert_source_line("${_rccl_src_root}/diagnostics.cc"
+    "NCCL DIAG [INFO] ${_marker}" "kDiagFailureMarkers in test/DiagnosticsTests.cpp")
+  rccl_assert_source_line("${_rccl_diag_tests}" "\"${_marker}\"," "the report line it marks in src/diagnostics.cc")
+endforeach()
+foreach(_marker IN LISTS _rccl_diag_issue_markers)
+  rccl_assert_source_line("${_rccl_src_root}/diagnostics/p2p.cc"
+    "issue = \"${_marker}\"" "kDiagFailureMarkers in test/DiagnosticsTests.cpp")
+endforeach()
+foreach(_marker IN LISTS _rccl_diag_info_markers)
+  rccl_assert_source_line("${_rccl_src_root}/diagnostics/p2p.cc"
+    "\"P2P ${_marker}" "kDiagFailureMarkers in test/DiagnosticsTests.cpp")
+endforeach()
+# The local setup issue is assembled from NCCL_DIAG_P2P_RUNTIME; Report_EachReasonHasItsOwnLine in
+# diag-p2p-test.cc checks its printed form.
+rccl_assert_source_line("${_rccl_src_root}/diagnostics/p2p.cc"
+  "issue = \"local \" NCCL_DIAG_P2P_RUNTIME \" setup failed\"" "kDiagFailureMarkers in test/DiagnosticsTests.cpp")
+foreach(_marker IN LISTS _rccl_diag_issue_markers _rccl_diag_info_markers ITEMS "local HIP setup failed")
+  rccl_assert_source_line("${_rccl_diag_tests}" "\"P2P ${_marker}\"," "the report line it marks in src/diagnostics")
+endforeach()
+unset(_rccl_diag_tests)
+unset(_rccl_diag_core_markers)
+unset(_rccl_diag_issue_markers)
+unset(_rccl_diag_info_markers)
 unset(_rccl_src_root)
 
 # Define the per-target micro-test source lists shared by BOTH build paths.
@@ -307,15 +390,19 @@ function(rccl_define_micro_source_lists)
     rma-ce-test.cc
     ras-test.cc
     ras-diagnostics-common-test.cc       # src/ras/diagnostics_checks_common.cc
+    ras-diagnostics-paths-test.cc       # src/ras/diagnostics_paths.cc
     ras-collectives-test.cc              # src/ras/collectives.cc
     ras-diagnostics-test.cc              # src/ras/diagnostics.cc
     rasnet-test.cc                       # src/ras/rasnet.cc
     ras-diagnostics-gpu-test.cc              # src/ras/diagnostics_gpu.cc
     ras-peers-test.cc                    # src/ras/peers.cc
     ras-diagnostics-env-test.cc          # src/ras/diagnostics_env.cc
+    ras-diagnostics-pci-test.cc
+    ras-diagnostics-net-test.cc          # src/ras/diagnostics_net.cc
     ras-param-test.cc                    # src/ras/ras_param.cc
     tuning-test.cc                       # src/tuning/tuning.cc
     tuning-general-test.cc
+    cost-model-test.cc                   # src/tuning/cost_model.cc modelMap + dispatch
     csv-tuner-test.cc                    # src/plugin/tuner/csv_tuner.cc
     param-utils-test.cc                  # src/include/param/utils.h, src/include/param/parser_common.h
     param-parsers-test.cc                # src/include/param/parser_{default,enum,bitset,list}.h
@@ -344,9 +431,12 @@ function(rccl_define_micro_source_lists)
     fakes/channel_fakes.cc
     fakes/argcheck_fakes.cc
     fakes/dev_runtime_micro_fakes.cc
+    fakes/diagnostics_fakes.cc
+    fakes/mgmt_task_enq_fakes.cc         # src/enqueue/mgmt_task_enq.cc
     fakes/nccl_device_core_fakes.cc      # src/nccl_device/core.cc ncclTeam* accessors
     fakes/ibvwrap_fakes.cc               # src/misc/ibvwrap.cc PD / MR registration seams
     fakes/nccl_fakes.cc
+    fakes/search_fakes.cc
     fakes/libc_fakes.cc
     fakes/ras_fakes.cc
     fakes/ras_net_fakes.cc
@@ -403,6 +493,7 @@ function(rccl_define_micro_source_lists)
     fakes/enqueue_fakes.cc
     fakes/bootstrap_stubs.cc
     fakes/topo_stubs.cc
+    fakes/search_fakes.cc
     fakes/transport_stubs.cc
     fakes/nccl_stubs.cc
     fakes/channel_fakes.cc
@@ -484,6 +575,7 @@ function(rccl_define_micro_source_lists)
     fakes/transport_net_ib_fakes.cc      # src/transport/net_ib/connect.cc GDR flush flag seams
     fakes/bootstrap_stubs.cc
     fakes/topo_stubs.cc
+    fakes/search_fakes.cc
     fakes/transport_stubs.cc
     fakes/nccl_stubs.cc
     fakes/channel_fakes.cc
@@ -573,7 +665,7 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
-  # src/algorithms/dda/{all_gather,all_reduce,alltoall,reduce_scatter}/dda_*.cu launchers. Own binary:
+  # src/algorithms/dda/{all_gather,all_reduce,alltoall,broadcast,reduce_scatter}/dda_*.cu launchers. Own binary:
   # rccl-UnitTestsMicro links fakes/dda_fakes.cc, which defines the same DDA entry points.
   set(TEST_MICRO_DDA_COLL_SOURCE_FILES
     algorithms/dda/all_gather/dda-all-gather-fabric-test.cc
@@ -587,6 +679,7 @@ function(rccl_define_micro_source_lists)
     algorithms/dda/alltoall/dda-alltoall-fabric-ll-test.cc
     algorithms/dda/alltoall/dda-alltoall-fabric-ll128-test.cc
     algorithms/dda/alltoall/dda-alltoall-ipc-test.cc
+    algorithms/dda/broadcast/dda-broadcast-fabric-ll-test.cc
     algorithms/dda/reduce_scatter/dda-reduce-scatter-fabric-test.cc
     algorithms/dda/reduce_scatter/dda-reduce-scatter-fabric-ll-test.cc
     algorithms/dda/reduce_scatter/dda-reduce-scatter-fabric-ll128-test.cc
@@ -605,6 +698,7 @@ function(rccl_define_micro_source_lists)
     fakes/enqueue_test_deps.cc
     fakes/bootstrap_stubs.cc
     fakes/topo_stubs.cc
+    fakes/search_fakes.cc
     fakes/transport_stubs.cc
     fakes/nccl_stubs.cc
     fakes/channel_fakes.cc
@@ -681,6 +775,7 @@ function(rccl_define_micro_source_lists)
     fakes/allocator_fakes.cc             # src/allocator.cc
     fakes/bootstrap_stubs.cc
     fakes/topo_stubs.cc
+    fakes/search_fakes.cc
     fakes/transport_stubs.cc
     fakes/nccl_stubs.cc
     fakes/channel_fakes.cc
@@ -728,8 +823,29 @@ function(rccl_define_micro_source_lists)
     fakes/libc_fakes.cc
     fakes/ras_fakes.cc
     fakes/ras_param_fakes.cc
-    fakes/nccl_fakes.cc                  # ncclDebugLog/ncclDebugMask (checks.h logging macros)
-    fakes/collectives_fakes.cc           # ncclFuncToString
+    fakes/nccl_fakes.cc
+    fakes/search_fakes.cc
+    fakes/collectives_fakes.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroLinux -- src/os/linux*.cc, misc/{socket,shmutils,signals}.cc. Own binary:
+  # fakes/os_fakes.cc, which most targets link, defines ncclOs* symbols that os/linux.cc defines.
+  set(TEST_MICRO_LINUX_SOURCE_FILES
+    linux-test.cc
+    linux-ipcsocket-test.cc
+    linux-socket-pair-test.cc
+    socket-test.cc
+    shmutils-test.cc
+    signals-test.cc
+    fakes/dl_fakes.cc
+    fakes/env_fakes.cc
+    fakes/hip_fakes.cc
+    fakes/libc_fakes.cc
+    fakes/linux_fakes.cc
+    fakes/nccl_fakes.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/crypt.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
@@ -740,6 +856,7 @@ function(rccl_define_micro_source_lists)
     fakes/hip_fakes.cc
     fakes/hsa_fakes.cc
     fakes/nccl_fakes.cc
+    fakes/search_fakes.cc
     fakes/os_fakes.cc
     fakes/rma_fakes.cc
     fakes/rocmwrap_fakes.cc
@@ -795,6 +912,7 @@ function(rccl_define_micro_source_lists)
     sym-model-test.cc
     fakes/bootstrap_stubs.cc
     fakes/topo_stubs.cc
+    fakes/search_fakes.cc
     fakes/transport_stubs.cc
     fakes/nccl_stubs.cc
     fakes/channel_fakes.cc
@@ -890,6 +1008,7 @@ function(rccl_define_micro_source_lists)
     task-sched-test.cc
     fakes/bootstrap_stubs.cc
     fakes/topo_stubs.cc
+    fakes/search_fakes.cc
     fakes/transport_stubs.cc
     fakes/nccl_stubs.cc
     fakes/channel_fakes.cc
@@ -985,6 +1104,7 @@ function(rccl_define_micro_source_lists)
   set(TEST_MICRO_GIN_HOST_SOURCE_FILES
     gin-host-test.cc
     fakes/nccl_fakes.cc
+    fakes/search_fakes.cc
     fakes/hip_fakes.cc
     fakes/env_fakes.cc
     fakes/bootstrap_stubs.cc             # src/bootstrap.cc AllGather seam
@@ -994,7 +1114,7 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
-  # rccl-UnitTestsMicroProfiler -- src/plugin/profiler.cc and its profiler_v1..v7.cc adapters. Own binary: the
+  # rccl-UnitTestsMicroProfiler -- src/plugin/profiler.cc and its profiler_v1..v8.cc adapters. Own binary: the
   # tests define the logging, env, plugin-open and dlsym seams the shared fakes also define.
   set(TEST_MICRO_PROFILER_SOURCE_FILES
     profiler-test.cc
@@ -1005,6 +1125,7 @@ function(rccl_define_micro_source_lists)
     profiler-v5-test.cc
     profiler-v6-test.cc
     profiler-v7-test.cc
+    profiler-v8-test.cc
     fakes/utils_fakes.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
@@ -1036,7 +1157,28 @@ function(rccl_define_micro_source_lists)
     fakes/hip_fakes.cc
     fakes/env_fakes.cc
     fakes/topo_stubs.cc
+    fakes/search_fakes.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroSearch -- src/graph/search.cc on its own, both the
+  # ring/tree channel search and the NCCL_GRAPH_FILE XML-graph import path.
+  # Own binary so search.cc is the only unit under test here; the rest of
+  # src/graph (xml/topo/paths/rome_models) is linked real because the search
+  # runs over a system those files build, and every other microtest target
+  # takes search.cc's own entry points from fakes/search_fakes.cc instead.
+  set(TEST_MICRO_SEARCH_SOURCE_FILES
+    search-test.cc
+    topo_include.cc              # topo.cc, included (not compiled) for TopoSetNetDevsPolicy
+    fakes/graph_fakes.cc
+    fakes/amdsmi_fakes.cc
+    fakes/hip_fakes.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/graph/xml.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/graph/paths.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/graph/rome_models.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
@@ -1079,11 +1221,13 @@ function(rccl_define_micro_source_lists)
     fakes/diagnostics_p2p_device_fakes.cc  # src/diagnostics/device/p2p.cu
     fakes/hip_fakes.cc
     fakes/libc_fakes.cc
+    fakes/mgmt_task_enq_fakes.cc         # src/enqueue/mgmt_task_enq.cc
     fakes/nccl_device_core_fakes.cc      # src/nccl_device/core.cc ncclTeam* accessors
     fakes/nccl_fakes.cc
     fakes/topo_stubs.cc
-    fakes/transport_net_ib_fakes.cc      # src/transport/net_ib/connect.cc params
-    fakes/transport_p2p_fakes.cc         # src/transport/p2p.cc shareable buffers
+    fakes/search_fakes.cc
+    fakes/transport_net_ib_fakes.cc
+    fakes/transport_p2p_fakes.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
@@ -1102,14 +1246,13 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
-  # rccl-UnitTestsMicroTopo -- src/graph/{xml,topo,paths,search,rome_models,connect,rings,trees}.cc, one
-  # test TU each. Own binary: rccl-UnitTestsMicroGraph links tuning_fakes.cc, which defines connect.cc's params,
+  # rccl-UnitTestsMicroTopo -- the src/graph units listed below, one test TU each.
+  # Own binary: rccl-UnitTestsMicroGraph links tuning_fakes.cc, which defines connect.cc's params,
   # and os_fakes.cc, whose CPU and sysfs seams these tests cannot drive.
   set(TEST_MICRO_TOPO_SOURCE_FILES
     xml-test.cc
     topo-test.cc
     paths-test.cc
-    search-test.cc
     graph-rome-models-test.cc
     graph-connect-test.cc
     rings-test.cc
@@ -1117,6 +1260,10 @@ function(rccl_define_micro_source_lists)
     fakes/graph_fakes.cc
     fakes/amdsmi_fakes.cc
     fakes/hip_fakes.cc
+    # search.cc is tested by rccl-UnitTestsMicroSearch, but paths.cc calls into it
+    # (ncclTopoGetNetDev, ncclTopoGetLinkType), so it is linked real here rather
+    # than faked -- a collaborator, not a unit under test.
+    ${RCCL_HOST_HIPIFY_DIR}/src/graph/search.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
     ../common/main_altrsmi.cpp
@@ -1127,6 +1274,7 @@ function(rccl_define_micro_source_lists)
     algorithms/dda/fabric/fabric-gpu-barrier-test.cc
     algorithms/dda/fabric/fabric-init-test.cc
     algorithms/dda/fabric/fabric-mem-handler-test.cc
+    algorithms/dda/ipc/ipc-init-test.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/device/device_buffer.cc  # real DeviceBuffer
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc  # real IsArchMatch
     fakes/bootstrap_stubs.cc             # bootstrapAllGather
@@ -1155,6 +1303,46 @@ function(rccl_define_micro_source_lists)
     fakes/net_ib_cast_p2p_fakes.cc
     fakes/net_ib_cast_qp_sharing_fakes.cc
     fakes/os_fakes.cc                    # ncclOsGetPageSize for ncclIbMalloc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroNetIbCastQpSharing -- src/transport/net_ib_cast/qp_sharing.cc. Own binary: it
+  # needs the net_ib_cast fakes and include directories that no shared binary links.
+  set(TEST_MICRO_NET_IB_CAST_QP_SHARING_SOURCE_FILES
+    net-ib-cast-qp-sharing-test.cc
+    fakes/env_fakes.cc
+    fakes/hip_fakes.cc
+    fakes/ibvwrap_fakes.cc
+    fakes/nccl_fakes.cc
+    fakes/net_ib_cast_common_fakes.cc    # IbCastDevs
+    fakes/os_fakes.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc     # real getHostHash/getPidHash
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroNetIbCastConnect -- src/transport/net_ib_cast/connect.cc with the real
+  # qp_sharing.cc. Own binary: no shared binary links the net_ib_cast or socket fakes it needs.
+  set(TEST_MICRO_NET_IB_CAST_CONNECT_SOURCE_FILES
+    net-ib-cast-connect-test.cc
+    fakes/env_fakes.cc
+    fakes/hip_fakes.cc
+    fakes/hsa_fakes.cc
+    fakes/ibvwrap_fakes.cc
+    fakes/ionicdvwrap_fakes.cc
+    fakes/libc_fakes.cc
+    fakes/mlx5dvwrap_fakes.cc
+    fakes/nccl_fakes.cc
+    fakes/net_ib_cast_common_fakes.cc
+    fakes/net_ib_cast_gdr_fakes.cc
+    fakes/net_ib_cast_init_fakes.cc
+    fakes/net_ib_cast_multiplane_fakes.cc
+    fakes/net_ib_cast_p2p_fakes.cc
+    fakes/net_ib_cast_p2p_resiliency_fakes.cc
+    fakes/os_fakes.cc
+    fakes/rocmwrap_fakes.cc
+    fakes/socket_fakes.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc     # real getHostHash/getPidHash
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_telemetry.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
@@ -1188,6 +1376,10 @@ function(rccl_define_micro_source_lists)
     fakes/utils_fakes.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/device/device_buffer.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+  set(TEST_MICRO_DEVCOMM_V23000_SOURCE_FILES
+    devcomm-v23000-test.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 endfunction()
@@ -1721,6 +1913,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     ${_MICRO_MODE_DEFS}
     RAS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/ras.cc"
     RAS_DIAGNOSTICS_COMMON_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_checks_common.cc"
+    RAS_DIAGNOSTICS_PATHS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_paths.cc"
     # collectives_tmp.cc, not collectives.cc: src/CMakeLists.txt lists src/collectives.cc first,
     # so add_file_unique() renames this one. Re-check after any source-list reorder.
     COLLECTIVES_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/collectives_tmp.cc"
@@ -1729,15 +1922,21 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     RAS_DIAGNOSTICS_GPU_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_gpu.cc"
     RAS_PEERS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/peers.cc"
     RAS_DIAGNOSTICS_ENV_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_env.cc"
+    RAS_DIAGNOSTICS_PCI_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_pci.cc"
+    RAS_DIAGNOSTICS_NET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_net.cc"
     RAS_PARAM_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/ras_param.cc"
     COMM_DUMP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/commDump.cc"
     # graph/tuning.cc keeps the basename, so add_file_unique() renames this one.
     TUNING_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/tuning_tmp.cc"
     TUNING_GENERAL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/tuning_general.cc"
+    COST_MODEL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/cost_model.cc"
+    ALGORITHM_REGISTRY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/config/algorithm_registry.cc"
     CSV_TUNER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/tuner/csv_tuner.cc"
     # Source tuner/ dir, so a test can check the generator embedded the CSVs verbatim.
     RCCL_TUNER_CSV_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../tuner"
-    RING_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/ring.cc"
+    # ring_tmp.cc, not ring.cc: tuning/pipeline_model/ring.cc keeps the basename, so add_file_unique()
+    # renames this one.
+    RING_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/ring_tmp.cc"
     RAS_CLIENT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/client.cc"
     RMA_PROXY_LAUNCH_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_proxy_launch.cc"
     RMA_PROXY_PROGRESS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_proxy_progress.cc"
@@ -1751,6 +1950,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     GROUP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/group.cc"
     DEVCOMM_V22902_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v22902.cc"
     DEVCOMM_V22907_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v22907.cc"
+    DEVCOMM_V23204_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v23204.cc"
     WRAP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rccl_wrap.cc"
     REGISTER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/register/register.cc"
     COLL_REG_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/register/coll_reg.cc"
@@ -1775,6 +1975,9 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
 # wrap-test.cc includes rccl_wrap.cc. Production librccl always compiles the LL128
 # arm; without this the broadcast protocol tests exercise the compiled-out fallback.
 set_source_files_properties(wrap-test.cc PROPERTIES COMPILE_DEFINITIONS ENABLE_LL128)
+# channel_fakes.cc compiles the real channel-layout arithmetic from src/channel.cc (see the comment there).
+set_source_files_properties(fakes/channel_fakes.cc PROPERTIES
+  COMPILE_DEFINITIONS CHANNEL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/channel.cc")
 
 # Fake ibverbs provider dv libraries for dv_symbols_test.cc; the SONAME is what the builders' dlopen matches.
 # The test finds them beside its own executable, in the build tree and in an install.
@@ -1941,6 +2144,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroDdaColl
     DDA_ALLTOALL_FABRIC_LL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/alltoall/dda_alltoall_fabric_ll.cu.cpp"
     DDA_ALLTOALL_FABRIC_LL128_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/alltoall/dda_alltoall_fabric_ll128.cu.cpp"
     DDA_ALLTOALL_IPC_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/alltoall/dda_alltoall_ipc.cu.cpp"
+    DDA_BROADCAST_FABRIC_LL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/broadcast/dda_broadcast_fabric_ll.cu.cpp"
     DDA_REDUCE_SCATTER_FABRIC_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric.cu.cpp"
     DDA_REDUCE_SCATTER_FABRIC_LL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric_ll.cu.cpp"
     DDA_REDUCE_SCATTER_FABRIC_LL128_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric_ll128.cu.cpp"
@@ -1963,6 +2167,8 @@ rccl_add_micro_binary(rccl-UnitTestsMicroRmaProxy
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
     RMA_PROXY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_proxy.cc"
+    # rma_proxy.cc defines ncclRmaProxyWorldToPeer itself.
+    RCCL_RMA_FAKES_OMIT_ncclRmaProxyWorldToPeer
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_rma_proxy.yaml")
 
 # ---------------------------------------------------------------------------
@@ -2080,6 +2286,23 @@ foreach(_variant "" "-uncached" "-faultinj")
 endforeach()
 
 # ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroLinux
+# ---------------------------------------------------------------------------
+rccl_mark_oracle_tus_generated(${RCCL_HOST_HIPIFY_DIR} crypt)
+rccl_add_micro_binary(rccl-UnitTestsMicroLinux
+  SOURCES ${TEST_MICRO_LINUX_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    RCCL_NCCL_FAKES_OMIT_IPC_FD_CLOSE
+    LINUX_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/os/linux.cc"
+    LINUX_IPCSOCKET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/os/linux_ipcsocket.cc"
+    LINUX_SOCKET_PAIR_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/os/linux_socket_pair.cc"
+    SOCKET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/socket.cc"
+    SHMUTILS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/shmutils.cc"
+    SIGNALS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/signals.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_linux.yaml")
+
+# ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroConnect -- ncclTopoPreset / ncclTopoPostset unstubbed.
 # ---------------------------------------------------------------------------
 set_source_files_properties(
@@ -2139,16 +2362,21 @@ rccl_add_micro_binary(rccl-UnitTestsMicroAlloc
 # ---------------------------------------------------------------------------
 set(_enq_common_args
   SOURCES ${TEST_MICRO_ENQUEUE_SOURCE_FILES}
+  REMOVE_DEFS ENABLE_WARP_SPEED
   EXTRA_INCLUDES
     ${RCCL_HOST_HIPIFY_DIR}/src/device               # device/common.h (neutered)
     ${RCCL_HOST_HIPIFY_DIR}/src/include/nccl_device
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
     ${_MICRO_AMDSMI_DEF}
+    RCCL_TEST_ENQUEUE_HOOKS
     # Per-symbol omissions from the shared nccl_stubs.cc; enqueue.cc itself
     # supplies both, so neither needs a replacement definition.
     RCCL_STUBS_OMIT_ncclInitKernelsForDevice
     RCCL_STUBS_OMIT_ncclParamGraphStreamOrdering
+    # enqueue-test.cc provides these launch-prepare floors directly.
+    RCCL_ENQUEUE_TEST_DEPS_OMIT_scheduleRmaTasksToPlan
+    RCCL_HIP_FAKES_OMIT_hipLaunchHostFunc
     # Production librccl always builds this arm (CMakeLists.txt LL128_ENABLED=ON).
     # Standalone host CI otherwise compiles enqueue.cc without it, so addP2pToPlan's
     # gfx1250 ENABLE=1 window is unreachable there.
@@ -2157,6 +2385,8 @@ set(_enq_common_args
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_enqueue.yaml")
 
 rccl_add_micro_binary(rccl-UnitTestsMicroEnqueue ${_enq_common_args})
+rccl_add_micro_binary(rccl-UnitTestsMicroEnqueue-warpspeed ${_enq_common_args})
+target_compile_definitions(rccl-UnitTestsMicroEnqueue-warpspeed PRIVATE ENABLE_WARP_SPEED)
 if(_ENQ_BUILD_DEVLINKER)
   rccl_add_micro_binary(rccl-UnitTestsMicroEnqueue-devlinker ${_enq_common_args})
   target_compile_definitions(rccl-UnitTestsMicroEnqueue-devlinker PRIVATE RCCL_DEVICE_LINKER)
@@ -2305,6 +2535,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroProfiler
     PROFILER_V5_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/profiler/profiler_v5.cc"
     PROFILER_V6_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/profiler/profiler_v6.cc"
     PROFILER_V7_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/profiler/profiler_v7.cc"
+    PROFILER_V8_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/profiler/profiler_v8.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_profiler.yaml")
 
 # ---------------------------------------------------------------------------
@@ -2440,13 +2671,30 @@ rccl_add_micro_binary(rccl-UnitTestsMicroTopo
     XML_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/xml.cc"
     TOPO_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/topo.cc"
     PATHS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/paths.cc"
-    SEARCH_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/search.cc"
     ROME_MODELS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/rome_models.cc"
     CONNECT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/connect.cc"
     RINGS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/rings.cc"
     TREES_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/trees.cc"
     TOPO_EXPL_MODELS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../tools/topo_expl/models"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_topo.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroSearch
+# ---------------------------------------------------------------------------
+set_source_files_properties(
+  ${RCCL_HOST_HIPIFY_DIR}/src/graph/paths.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/graph/rome_models.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/graph/search.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/graph/xml.cc
+  PROPERTIES GENERATED TRUE)
+rccl_add_micro_binary(rccl-UnitTestsMicroSearch
+  SOURCES ${TEST_MICRO_SEARCH_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    ${_MICRO_AMDSMI_DEF}
+    SEARCH_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/search.cc"
+    TOPO_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/topo.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_search.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroDiagnostics
@@ -2491,6 +2739,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroDda
     # hipify renames .cu to .cu.cpp
     FABRIC_GPU_BARRIER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/fabric/fabric_gpu_barrier.cu.cpp"
     FABRIC_INIT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/fabric/fabric_init.cu.cpp"
+    IPC_INIT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/ipc/ipc_init.cu.cpp"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_dda.yaml")
 
 # ---------------------------------------------------------------------------
@@ -2598,6 +2847,35 @@ set(_MICRO_TRANSPORT_DEFS
   RMA_SOCKET_MEM_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/rma_socket_mem.cc"
   RMA_SOCKET_PROGRESS_RECVER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/rma_socket_progress_recver.cc"
   RMA_SOCKET_SETUP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/rma_socket_setup.cc")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroNetIbCastQpSharing
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroNetIbCastQpSharing
+  SOURCES ${TEST_MICRO_NET_IB_CAST_QP_SHARING_SOURCE_FILES}
+  EXTRA_INCLUDES
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast  # common_cast.h, qp_sharing.h
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport              # net_ib_limits.h
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    NET_IB_CAST_QP_SHARING_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/qp_sharing.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_net_ib_cast_qp_sharing.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroNetIbCastConnect
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroNetIbCastConnect
+  SOURCES ${TEST_MICRO_NET_IB_CAST_CONNECT_SOURCE_FILES}
+  EXTRA_INCLUDES
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast  # common_cast.h, connect_cast.h
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport              # net_ib_limits.h
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    # connect_tmp.cc, not connect.cc: graph/connect.cc is listed first in src/CMakeLists.txt, so
+    # add_file_unique() renames this one. Re-check after any source-list reorder.
+    NET_IB_CAST_CONNECT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/connect_tmp.cc"
+    NET_IB_CAST_QP_SHARING_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/qp_sharing.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_net_ib_cast_connect.yaml")
 
 # One src/transport/ test file per binary. SOURCES lists the fakes and the real sibling units the test file
 # reaches; a sibling unit is compiled real or faked, never both. PROCESS_ISOLATED links the forking runner.
@@ -2978,6 +3256,7 @@ rccl_add_transport_micro_binary(rccl-UnitTestsMicroTransportNetIbCastCommon net_
     fakes/rocmwrap_fakes.cc
     fakes/socket_fakes.cc
     fakes/transport_stubs.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/capability.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/gdr_tmp.cc
@@ -3008,6 +3287,7 @@ rccl_add_transport_micro_binary(rccl-UnitTestsMicroTransportNetIbCastGdr net_ib_
     fakes/rocmwrap_fakes.cc
     fakes/socket_fakes.cc
     fakes/transport_stubs.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/capability.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/init_tmp.cc
@@ -3046,6 +3326,7 @@ rccl_add_transport_micro_binary(rccl-UnitTestsMicroTransportNetIbCastGin net_ib_
     fakes/rocmwrap_fakes.cc
     fakes/socket_fakes.cc
     fakes/transport_stubs.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/capability.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/common_tmp.cc
@@ -3074,6 +3355,7 @@ rccl_add_transport_micro_binary(rccl-UnitTestsMicroTransportNetIbCastInit net_ib
     fakes/rocmwrap_fakes.cc
     fakes/socket_fakes.cc
     fakes/transport_stubs.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/capability.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/common_tmp.cc
@@ -3152,6 +3434,7 @@ rccl_add_transport_micro_binary(rccl-UnitTestsMicroTransportP2p p2p-test.cc
     fakes/hip_fakes.cc
     fakes/nccl_fakes.cc
     fakes/os_fakes.cc
+    fakes/search_fakes.cc          # src/graph/search.cc ncclTopoGetLinkType seam
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc)
 
@@ -3183,6 +3466,7 @@ rccl_add_transport_micro_binary(rccl-UnitTestsMicroTransportRmaSocketSetup rma-s
     fakes/comm_fakes.cc
     fakes/env_fakes.cc
     fakes/hip_fakes.cc
+    fakes/libc_fakes.cc
     fakes/nccl_fakes.cc
     fakes/os_fakes.cc
     fakes/socket_fakes.cc
@@ -3242,6 +3526,16 @@ rccl_add_micro_binary(rccl-UnitTestsMicroDdaIpcLifecycle
     DDA_IPC_MEM_HANDLER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/ipc/ipc_mem_handler.cc"
     DDA_IPC_GPU_BARRIER_CU_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/ipc/ipc_gpu_barrier.cu.cpp"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_dda_ipc_lifecycle.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroDevcommV23000
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroDevcommV23000
+  SOURCES ${TEST_MICRO_DEVCOMM_V23000_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    DEVCOMM_V23000_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v23000.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_devcomm_v23000.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsHostAll

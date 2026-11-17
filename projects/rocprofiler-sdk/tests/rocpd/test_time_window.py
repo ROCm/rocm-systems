@@ -202,6 +202,22 @@ def test_bounds_include_timestamp_only_tables(intervals):
     assert time_window.get_min_max_time(intervals) == (100, 250)
 
 
+def test_pc_sample_only_bounds_and_filtering(import_data):
+    import_data.supported_features = ["pc_sampling"]
+    import_data.add_timed_view(
+        "rocpd_gpu_pc_sample", ("timestamp",), ((100,), (200,), (300,))
+    )
+
+    assert time_window.get_min_max_time(import_data) == (100, 300)
+
+    time_window.apply_time_window(import_data, start="25%", end="75%")
+
+    assert import_data.execute(
+        "SELECT timestamp FROM rocpd_gpu_pc_sample"
+    ).fetchall() == [(200,)]
+    assert time_window.get_min_max_time(import_data) == (200, 200)
+
+
 def test_native_sqlite_uses_event_bounds_not_process_envelope():
     connection = sqlite3.connect(":memory:")
     connection.execute("CREATE TABLE intervals (start INTEGER, end INTEGER)")
@@ -227,7 +243,8 @@ def test_native_sqlite_uses_event_bounds_not_process_envelope():
 
 
 def test_bounds_query_aggregates_each_table_before_union(intervals, monkeypatch):
-    intervals.add_timed_view("samples", ("timestamp",), ((250,),))
+    intervals.supported_features = ["pc_sampling"]
+    intervals.add_timed_view("rocpd_gpu_pc_sample", ("timestamp",), ((250,),))
     statements = []
     original_execute = time_window.execute_statement
 
@@ -240,6 +257,8 @@ def test_bounds_query_aggregates_each_table_before_union(intervals, monkeypatch)
     assert time_window.get_min_max_time(intervals) == (100, 250)
     assert "SELECT MIN(start)" in statements[-1]
     assert "SELECT MIN(timestamp)" in statements[-1]
+    assert statements[-1].count('FROM "rocpd_gpu_pc_sample"') == 1
+    assert "SELECT timestamp as min_time" not in statements[-1]
 
 
 def test_timestamp_only_events_are_not_out_of_range(intervals):

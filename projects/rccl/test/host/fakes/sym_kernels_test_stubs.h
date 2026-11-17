@@ -65,6 +65,7 @@
 // elsewhere they are simply unreferenced and --gc-sections drops them.
 #define RCCL_SYMK_TEST_TMA_KERNEL_IDS(X) \
   X(ncclSymkDevKernel_AllGather_TmaST) \
+  X(ncclSymkDevKernel_AllGather_HierLsaTmaST) \
   X(ncclSymkDevKernel_AllReduce_RSxTmaLD_AGxTmaST_sum_f32) \
   X(ncclSymkDevKernel_AllReduce_RSxTmaLD_AGxTmaST_sum_f16) \
   X(ncclSymkDevKernel_AllReduce_RSxTmaLD_AGxTmaST_sum_bf16) \

@@ -13,10 +13,10 @@ use crate::signal::wait::{
 };
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_signal_wait_scacquire")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Waits for one signal with the HSA SC-acquire completion contract.
 pub unsafe extern "C" fn hsa_signal_wait_scacquire(
     signal: HsaSignal,
@@ -39,10 +39,10 @@ pub unsafe extern "C" fn hsa_signal_wait_scacquire(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_signal_wait_relaxed")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Waits for one signal without acquire synchronization.
 pub unsafe extern "C" fn hsa_signal_wait_relaxed(
     signal: HsaSignal,
@@ -65,10 +65,10 @@ pub unsafe extern "C" fn hsa_signal_wait_relaxed(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_signal_wait_acquire")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Uses the deprecated acquire spelling for a single-signal wait.
 pub unsafe extern "C" fn hsa_signal_wait_acquire(
     signal: HsaSignal,
@@ -91,10 +91,10 @@ pub unsafe extern "C" fn hsa_signal_wait_acquire(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_signal_group_create")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Creates a group that retains the listed signals for waits.
 pub unsafe extern "C" fn hsa_signal_group_create(
     signal_count: u32,
@@ -152,10 +152,10 @@ pub unsafe extern "C" fn hsa_signal_group_create(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_signal_group_destroy")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Releases a signal group and its retained signal references.
 pub extern "C" fn hsa_signal_group_destroy(group: HsaSignalGroup) -> Status {
     boundary(|| {
@@ -176,10 +176,10 @@ pub extern "C" fn hsa_signal_group_destroy(group: HsaSignalGroup) -> Status {
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_signal_group_wait_any_relaxed")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Returns when any group member satisfies its condition, without acquire.
 pub unsafe extern "C" fn hsa_signal_group_wait_any_relaxed(
     group: HsaSignalGroup,
@@ -205,10 +205,10 @@ pub unsafe extern "C" fn hsa_signal_group_wait_any_relaxed(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_signal_group_wait_any_scacquire")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Returns when any group member satisfies its SC-acquire condition.
 pub unsafe extern "C" fn hsa_signal_group_wait_any_scacquire(
     group: HsaSignalGroup,
@@ -238,10 +238,10 @@ pub unsafe extern "C" fn hsa_signal_group_wait_any_scacquire(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_signal_wait_any")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Returns the first satisfied signal and its original input index.
 pub unsafe extern "C" fn hsa_amd_signal_wait_any(
     signal_count: u32,
@@ -289,10 +289,10 @@ pub unsafe extern "C" fn hsa_amd_signal_wait_any(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_signal_wait_all")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Waits until every signal condition holds or the timeout expires.
 pub unsafe extern "C" fn hsa_amd_signal_wait_all(
     signal_count: u32,

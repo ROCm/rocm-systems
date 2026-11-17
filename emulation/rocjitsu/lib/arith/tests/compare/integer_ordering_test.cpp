@@ -4,7 +4,7 @@
 // Tests for signed and unsigned integer ordering predicates.
 
 #include "compare/integer_test.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_compare.h"
 
 #include <gtest/gtest.h>
 #include <stdint.h>

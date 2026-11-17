@@ -222,6 +222,7 @@ bool Sop2::has_encoded_literal32() const {
   case 38:
   case 39:
   case 40:
+  case 41:
   case 42:
   case 43:
   case 44:
@@ -918,7 +919,7 @@ Mimg::Mimg(std::string_view mnemonic, const MimgMachineInst *inst, ExecuteFn exe
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
-  opcode_ = inst_.op;
+  opcode_ = inst_.op | (inst_.opm << 7);
   flags_ |= VSKIP_AFFECTED;
 }
 

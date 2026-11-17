@@ -4,6 +4,7 @@
 // AVX2 scalar and packed sums of absolute differences with integer accumulators.
 // CPU-specific arithmetic stays here; public entry points select this backend.
 
+#include "common/compiler.h"
 #include "integer/sad_impl.h"
 
 #include <immintrin.h>
@@ -56,6 +57,7 @@ void sad_x86_64_v3(uint32_t exec_mask, bool clamp, uint32_t *const *d, const uin
     auto x = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(a[0] + lane));
     auto y = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(b + lane));
     __m256i accumulators[outputs], result[outputs];
+    RJ_ARITH_UNROLL(4)
     for (int reg = 0; reg < outputs; ++reg) {
       accumulators[reg] = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(c[reg] + lane));
     }
@@ -65,9 +67,11 @@ void sad_x86_64_v3(uint32_t exec_mask, bool clamp, uint32_t *const *d, const uin
                            _mm256_or_si256(_mm256_srli_epi32(x, 16), _mm256_slli_epi32(hi, 16)),
                            _mm256_or_si256(_mm256_srli_epi32(x, 24), _mm256_slli_epi32(hi, 8))};
       __m256i sums[4];
+      RJ_ARITH_UNROLL(4)
       for (int window = 0; window < 4; ++window) {
         sums[window] = difference<8, sad_masked(Op)>(windows[window], y);
       }
+      RJ_ARITH_UNROLL(4)
       for (int reg = 0; reg < outputs; ++reg) {
         if constexpr (sad_packed(Op)) {
           auto packed = _mm256_or_si256(sums[2 * reg], _mm256_slli_epi32(sums[2 * reg + 1], 16));
@@ -88,6 +92,7 @@ void sad_x86_64_v3(uint32_t exec_mask, bool clamp, uint32_t *const *d, const uin
     // cross-register aliases and repeated destination addresses.
     auto lane_exec_mask = _mm256_sllv_epi32(_mm256_set1_epi32(int(exec_mask >> lane)),
                                             _mm256_setr_epi32(31, 30, 29, 28, 27, 26, 25, 24));
+    RJ_ARITH_UNROLL(4)
     for (int reg = 0; reg < outputs; ++reg) {
       _mm256_maskstore_epi32(reinterpret_cast<int *>(d[reg] + lane), lane_exec_mask, result[reg]);
     }

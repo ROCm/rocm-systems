@@ -221,6 +221,23 @@ load_acquire(const volatile uint64_t* ptr)
     return __atomic_load_n(ptr, __ATOMIC_ACQUIRE);
 }
 
+// KFD destroys a queue only after its read pointer catches the write pointer.
+// Give a copy that already retired its fence a moment to get there, and let the
+// caller skip DESTROY_QUEUE when the engine is still fetching.
+bool
+read_pointer_caught_up(const volatile uint64_t*  rptr,
+                       uint64_t                  posted,
+                       std::chrono::milliseconds budget)
+{
+    const auto deadline = std::chrono::steady_clock::now() + budget;
+    while(rptr != nullptr && load_acquire(rptr) < posted)
+    {
+        if(std::chrono::steady_clock::now() >= deadline) return false;
+        std::this_thread::sleep_for(std::chrono::microseconds(50));
+    }
+    return true;
+}
+
 void
 store_release(volatile uint64_t* ptr, uint64_t value)  // NOLINT(readability-non-const-parameter)
 {
@@ -866,6 +883,10 @@ struct direct_queue_t
         memory->deallocate(ring);
     }
 
+    // Drop the queue without DESTROY_QUEUE. Used when the engine is still
+    // fetching: the ioctl waits out KFD's preemption timeout and hangs the GPU.
+    void abandon() { created = false; }
+
     bool close()
     {
         if(!created) return true;
@@ -983,6 +1004,13 @@ bool
 kfd_aql_queue_t::close()
 {
     auto lock = std::unique_lock{_impl->mutex};
+    if(!read_pointer_caught_up(_impl->queue.rptr, _impl->write_index, std::chrono::seconds{8}))
+    {
+        ROCP_WARNING << "Leaving KFD AQL queue undestroyed: the read pointer has not "
+                        "reached the write pointer. DESTROY_QUEUE would time out and hang the GPU.";
+        _impl->queue.abandon();
+        return false;
+    }
     return _impl->queue.close();
 }
 
@@ -1035,6 +1063,15 @@ struct sdma_queue_t
     bool close()
     {
         auto lock = std::unique_lock{mutex};
+        if(!read_pointer_caught_up(queue.rptr, write_index, std::chrono::seconds{8}))
+        {
+            ROCP_WARNING << "Leaving KFD SDMA queue undestroyed: read pointer "
+                         << (queue.rptr != nullptr ? load_acquire(queue.rptr) : 0)
+                         << " has not reached write pointer " << write_index
+                         << ". DESTROY_QUEUE would time out and hang the GPU.";
+            queue.abandon();
+            return false;
+        }
         return queue.close();
     }
 
@@ -1046,16 +1083,20 @@ struct sdma_queue_t
             const size_t padding = queue.ring_size - offset;
             queue.wait_for_space(write_index + padding);
             std::memset(static_cast<char*>(queue.ring) + offset, 0, padding);
+            // Leave the NOP tail unpublished. Doorbelling it now lets the engine
+            // wrap and re-execute the previous packets at offset 0 before this
+            // command is written, which retires the fence while the copy is
+            // still running. Queue destroy then times out and hangs the GPU.
             write_index += padding;
-            store_release(queue.wptr, write_index);
-            *queue.doorbell = write_index;
-            offset          = 0;
+            offset = 0;
         }
         queue.wait_for_space(write_index + bytes);
         std::memcpy(static_cast<char*>(queue.ring) + offset, data, bytes);
         write_index += bytes;
         store_release(queue.wptr, write_index);
-        *queue.doorbell = write_index;
+        // Release-store the doorbell so the ring writes and the write pointer
+        // are visible before the engine is woken.
+        __atomic_store_n(const_cast<uint64_t*>(queue.doorbell), write_index, __ATOMIC_RELEASE);
     }
 
     bool copy(void* dst, const void* src, size_t size)
@@ -1083,6 +1124,15 @@ struct sdma_queue_t
         completion->reset();
         publish(builder.data(), builder.size_bytes());
         completion->wait();
+        // The fence can retire while the engine is still fetching this submission
+        // (a wrapped ring re-executes the previous fence). Destroying the queue
+        // then times out. Wait until the read pointer catches this write.
+        if(!read_pointer_caught_up(queue.rptr, write_index, std::chrono::seconds{8}))
+        {
+            ROCP_ERROR << "SDMA copy fence retired before the read pointer caught the write "
+                          "pointer";
+            return false;
+        }
         return true;
     }
 

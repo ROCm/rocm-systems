@@ -38,6 +38,14 @@ the perfmon clock is gated off, which prevents performance counters from functio
 This is a hardware feature enablement requirement. Without it, PMC profiling on these GPUs produces no meaningful counter
 data in some GPU hardware blocks.
 
+.. note::
+
+  This manual step is only needed on older Linux kernels. Starting with KFD profiler interface version
+  2, the kernel driver forces the perfmon clock on for the duration of the device lock held during PMC
+  profiling, and releases it when the lock is released or the process exits. On a kernel that reports
+  this version or newer, ``rocprofv3`` skips the ``power_dpm_force_performance_level`` check entirely
+  and no manual configuration is required.
+
 There are two ways to configure the GPU performance level:
 
 **Option 1: Using the** ``power_dpm_force_performance_level`` **sysfs entry**

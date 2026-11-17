@@ -12,6 +12,8 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   instrumenting binaries are now installed in `share/rocprofiler-systems/skills`. Run the
   bundled `install-skills.sh --agent <claude|codex|cursor>` to copy them into your AI coding
   agent's personal skills folder.
+- `rocprof-sys-attach` re-attaches now use the output format selected for that attach (`-F`),
+  so a process can be profiled to rocpd in one session and to Perfetto in the next.
 
 ### Resolved issues
 
@@ -27,6 +29,9 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - Fixed the default `ROCPROFSYS_AMD_SMI_METRICS` value (`busy, temp, power, mem_usage`) failing
   validation because of the spaces after the commas, which enabled all 17 GPU metrics instead of
   the four defaults. Whitespace around `,` and `;` separators is now accepted.
+- The `profiler-hub` version is shown in the `rocprof-sys-*` version output. The tool now
+  aborts at startup with an error if the loaded `libprofiler-hub` version differs from the
+  version it was built against.
 
 ## ROCm Systems Profiler 1.10.0 for ROCm 10.2 (unreleased)
 
