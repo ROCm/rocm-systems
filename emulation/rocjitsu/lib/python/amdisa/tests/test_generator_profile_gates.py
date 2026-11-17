@@ -3661,21 +3661,6 @@ def test_cdna_generated_vop3_b16_i16_u16_paths_use_selected_halves(
         assert 'RJ_ARITH_ALU_HIGH_D' in body
 
 
-def test_generated_classified_alu_latches_trapsts_before_simd_return(
-    execute_shared_path: Path,
-):
-    execute_shared = execute_shared_path.read_text()
-    body = _generated_function_body(
-        execute_shared, 'inline void execute_v_mul_f32_vop3'
-    )
-
-    classify_pos = body.index('uint32_t alu_causes = classify_mul_f32_vop3')
-    trapsts_pos = body.index('wf.set_trapsts(wf.trapsts() | alu_causes);')
-    simd_pos = body.index('ROCJITSU_TRY_SIMD_VOP3_BINARY_FP')
-    assert classify_pos < trapsts_pos < simd_pos
-    assert body.count('wf.set_trapsts(wf.trapsts() | alu_causes);') == 1
-
-
 @pytest.mark.parametrize('arch', ['cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5'])
 def test_older_f32_to_f64_conversion_uses_arithmetic(arch, amdgpu_generated_root: Path):
     text = (amdgpu_generated_root / arch / 'vop3_exec.cpp').read_text()
@@ -3698,7 +3683,7 @@ def test_generated_vop3_f16_alu_paths_split_shared_generic_from_true16(
         gfx1250_generated_root / 'vop3_exec_ternary.cpp'
     ).read_text()
 
-    # Migrated unary forms use library arithmetic with each profile's operand adapters.
+    # Older generic unary forms now use the library; packed and gfx1250 users remain legacy.
     assert 'inline void execute_v_ceil_f16_vop3' not in execute_shared
     unary = _generated_function_body(
         (amdgpu_generated_root / 'rdna2' / 'vop3_exec.cpp').read_text(),
@@ -3716,8 +3701,8 @@ def test_generated_vop3_f16_alu_paths_split_shared_generic_from_true16(
         binary = _generated_function_body(source, 'void VAddF16Vop3::execute_impl')
         assert f'rj_arith_v_add_f16_w32_{suffix}' in binary
         assert 'const uint32_t opsel = 0;' in binary
-    assert 'read_vop3_true16_src' not in binary
-    assert 'write_vop3_true16_dst' not in binary
+        assert 'read_vop3_true16_src' not in binary
+        assert 'write_vop3_true16_dst' not in binary
 
     rdna2_vop3 = (amdgpu_generated_root / 'rdna2' / 'vop3_exec.cpp').read_text()
     ternary = _generated_function_body(rdna2_vop3, 'void VFmaF16Vop3::execute_impl')
@@ -3732,9 +3717,10 @@ def test_generated_vop3_f16_alu_paths_split_shared_generic_from_true16(
     )
     assert 'rj_arith_v_ceil_f16_w32_gfx12' in true16_unary
     assert 'execute_cdna_integral_unary<true, false>' in true16_unary
-    for operand in ('A', 'D'):
-        assert 'RJ_ARITH_ALU_HIGH_' + operand in true16_unary
+    assert 'RJ_ARITH_ALU_HIGH_A' in true16_unary
+    assert 'RJ_ARITH_ALU_HIGH_D' in true16_unary
     assert 'ROCJITSU_TRY_SIMD' not in true16_unary
+    assert 'read_vop3_true16_src' not in true16_unary
 
     true16_binary = _generated_method_body(
         gfx1250_vop3_alu, 'VAddF16Vop3', 'VSubF16Vop3'
@@ -6235,9 +6221,7 @@ def test_generated_modifier_storage_is_out_of_ordinary_vop_frames(
         assert 'DppPlan' in modified
         assert 'ScopedOperandDelegate' in modified
         assert 'ScopedVgprWriteMask' in modified
-        execute_prefix = (
-            'amdgpu::arith::execute_' if arch == 'rdna4' else 'amdgpu::execute_'
-        )
+        execute_prefix = 'amdgpu::arith::execute_'
         assert execute_prefix in ordinary
         assert execute_prefix in modified
 
@@ -8173,11 +8157,13 @@ def test_vopd_execution_failure_stops_before_either_slot_commits(
     codegen.gen_vopd()
     cpp = (tmp_path / arch_name / 'vopd_exec.cpp').read_text()
     assert 'throw ' not in cpp
-    if arch_name in ('rdna3', 'rdna4', 'cdna5'):
+    if arch_name in ('rdna3', 'rdna3_5', 'rdna4', 'cdna5'):
         # rj-arith evaluates both slots into temporaries and commits only on success.
         wave_check, invoke = cpp.split('amdgpu::arith::execute_dual_pair', 1)
         assert 'if (wf.wf_size() != 32)' in wave_check
-        assert ('InvalidInstructionEncoding' in wave_check) == (arch_name != 'rdna3')
+        assert ('InvalidInstructionEncoding' in wave_check) == (
+            arch_name not in ('rdna3', 'rdna3_5')
+        )
         assert 'return;' in wave_check
         assert 'amdgpu::InstructionExecutionError::UnimplementedInstruction' in invoke
         assert 'return RJ_ARITH_ERROR_INVALID_FLAGS;' in invoke

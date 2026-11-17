@@ -714,6 +714,7 @@ add_executable(
     cube_instruction_test.cpp
     older_graphics_test.cpp
     division_test.cpp
+    gfx1150_dual_test.cpp
     division_macro_test.cpp
     valu_floating_policy_test.cpp
     gfx11_dot2_test.cpp

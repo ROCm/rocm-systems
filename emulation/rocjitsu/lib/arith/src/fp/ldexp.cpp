@@ -69,41 +69,48 @@ ldexp_bits(typename rocjitsu::arith::IeeeFormat<Width>::Bits bits, int32_t adjus
   return sign | kept;
 }
 
+// Apply source controls, inherited LDEXP rounding and output controls to one lane.
+template <int Width>
+auto ldexp_value(typename rocjitsu::arith::IeeeFormat<Width>::Bits input, int32_t adjustment,
+                 uint64_t flags, uint32_t instruction_flags, bool quiet_snan) {
+  using F = rocjitsu::arith::IeeeFormat<Width>;
+  using T = typename F::Bits;
+  if (instruction_flags & RJ_ARITH_ALU_ABS_A) {
+    input &= F::sign - 1;
+  }
+  if (instruction_flags & RJ_ARITH_ALU_NEG_A) {
+    input ^= F::sign;
+  }
+  // Tininess is tested before rounding; active OMOD also flushes that domain.
+  T value = ldexp_bits<Width>(
+      input, adjustment,
+      flags |
+          ((instruction_flags & RJ_ARITH_ALU_OMOD_HALF) ? RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS : 0),
+      quiet_snan);
+  const unsigned rounding = unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24);
+  const bool outward = rounding == (value & F::sign ? 2u : 1u);
+  const T overflow = rounding == 0 || outward ? F::infinity : F::infinity - 1;
+  const bool preserve_nan =
+      (flags & RJ_ARITH_FP_DX10_CLAMP_OFF) && (value & (F::sign - 1)) > F::infinity;
+  return rocjitsu::arith::float_output<Width>(
+      value, preserve_nan ? instruction_flags & ~RJ_ARITH_ALU_CLAMP : instruction_flags, overflow);
+}
+
 // Scale floating-point encodings by powers of two with guest rounding and output modifiers.
 template <bool Fp64>
 int ldexp_rounded(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags,
                   uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
                   bool quiet_snan) {
   constexpr unsigned width = Fp64 ? 64 : 32;
-  using F = rocjitsu::arith::IeeeFormat<width>;
-  using T = typename F::Bits;
+  using T = typename rocjitsu::arith::IeeeFormat<width>::Bits;
   uint32_t result[Fp64 ? 2 : 1][32];
-  const unsigned rounding = unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24);
   for (int lane = 0; lane < 32; ++lane) {
     T input = a[0][lane];
     if constexpr (Fp64) {
       input |= T(a[1][lane]) << 32;
     }
-    if (instruction_flags & RJ_ARITH_ALU_ABS_A) {
-      input &= F::sign - 1;
-    }
-    if (instruction_flags & RJ_ARITH_ALU_NEG_A) {
-      input ^= F::sign;
-    }
-    int32_t adjustment = rocjitsu::arith::bit_cast<int32_t>(b[0][lane]);
-    // Tininess is tested before rounding; active OMOD also flushes that domain.
-    T value = ldexp_bits<width>(
-        input, adjustment,
-        flags |
-            ((instruction_flags & RJ_ARITH_ALU_OMOD_HALF) ? RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS : 0),
-        quiet_snan);
-    const bool outward = rounding == (value & F::sign ? 2u : 1u);
-    const T overflow = rounding == 0 || outward ? F::infinity : F::infinity - 1;
-    const bool preserve_nan =
-        (flags & RJ_ARITH_FP_DX10_CLAMP_OFF) && (value & (F::sign - 1)) > F::infinity;
-    value = rocjitsu::arith::float_output<width>(
-        value, preserve_nan ? instruction_flags & ~RJ_ARITH_ALU_CLAMP : instruction_flags,
-        overflow);
+    const int32_t adjustment = rocjitsu::arith::bit_cast<int32_t>(b[0][lane]);
+    const T value = ldexp_value<width>(input, adjustment, flags, instruction_flags, quiet_snan);
     result[0][lane] = uint32_t(value);
     if constexpr (Fp64) {
       result[1][lane] = uint32_t(value >> 32);
@@ -150,6 +157,22 @@ int ldexp(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32
     // gfx11 exact semantics keep signaling NaNs when IEEE is clear.
     const bool quiet_snan =
         Cdna || !Rdna3 || (flags & RJ_ARITH_FP_IEEE_MODE) || !rocjitsu::arith::is_exact(flags);
+    if constexpr (!Fp64) {
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+      if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+        rocjitsu::arith::ldexp_f32_exact_x86_64_v4(flags, exec_mask, instruction_flags, d[0], a[0],
+                                                   b[0], quiet_snan);
+        return RJ_ARITH_SUCCESS;
+      }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+      if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+        rocjitsu::arith::ldexp_f32_exact_x86_64_v3(flags, exec_mask, instruction_flags, d[0], a[0],
+                                                   b[0], quiet_snan);
+        return RJ_ARITH_SUCCESS;
+      }
+#endif
+    }
     return ldexp_rounded<Fp64>(flags, exec_mask, instruction_flags, d, a, b, quiet_snan);
   }
   if constexpr (!GuestDenormals) {
@@ -296,6 +319,13 @@ int ldexp_wave64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
 }
 
 } // namespace
+
+// The inherited scalar model is shared without compiling its definition for SIMD ISAs.
+[[gnu::noinline]] uint32_t
+rocjitsu::arith::ldexp_f32_value_baseline(uint32_t input, int32_t adjustment, uint64_t flags,
+                                          uint32_t instruction_flags, bool quiet_snan) {
+  return ldexp_value<32>(input, adjustment, flags, instruction_flags, quiet_snan);
+}
 
 // Scale A by a power of two specified by B for selected lanes.
 // Return errors before changing outputs. FP status is accumulated only when resolved semantics

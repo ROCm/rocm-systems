@@ -16,6 +16,8 @@
 
 #include <cmath>
 #include <gtest/gtest.h>
+#include <stdint.h>
+#include <type_traits>
 
 // Check integer exponent results, operand selection, and inactive-lane preservation.
 TEST(FpFrexpExpI16F16W32Gfx12, Arithmetic) {
@@ -523,4 +525,84 @@ TEST(FpLdexpCdna, Qualification) {
       }
     }
   }
+}
+
+namespace {
+
+// Compare SIMD with the established scalar model over normal waves and raw
+// encodings, including signaling NaNs, boundary scales, aliases and sparse EXEC.
+template <int Lanes, bool Older, typename Call> void check_ldexp_cpu_agreement(Call call) {
+  using Mask = std::conditional_t<Lanes == 32, uint32_t, uint64_t>;
+  const auto cpus = rocjitsu::arith::test::supported_cpu_levels();
+  std::minstd_rand random;
+  uint32_t a[Lanes], b[Lanes], expected[Lanes], actual[Lanes];
+  const uint32_t *bp = b;
+  for (int batch = 0; batch < 8; ++batch) {
+    for (int lane = 0; lane < Lanes; ++lane) {
+      const uint32_t first = uint32_t(random());
+      const uint32_t second = uint32_t(random());
+      // Keep high bits for normal inputs; raw waves cover the entire encoding.
+      a[lane] = batch < 4
+                    ? ((first & 0x40000000U) << 1) | ((first >> 7) & 0x007fffffU) | 0x3f000000U
+                    : (first << 1) | (second >> 30);
+      b[lane] = uint32_t(int(random() >> 20) % (batch < 4 ? 9 : 601) - (batch < 4 ? 4 : 300));
+    }
+    a[7] = 0x7f812345U;
+    a[8] = 0xff800000U;
+    a[9] = 0x80000000U;
+    a[10] = 0x00ffffffU;
+    b[10] = uint32_t(-1);
+    a[11] = 0x7f7fffffU;
+    b[11] = 1;
+    a[12] = 1;
+    b[12] = 24;
+    a[13] = 0x80000001U;
+    b[13] = 0x80000000U;
+    for (uint64_t denorm :
+         {uint64_t(0), RJ_ARITH_FP_FLUSH_INPUT_DENORMALS, RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
+          RJ_ARITH_FP_FLUSH_INPUT_DENORMALS | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS}) {
+      for (uint64_t rounding :
+           {uint64_t(0), RJ_ARITH_FP_ROUND_UP, RJ_ARITH_FP_ROUND_DOWN, RJ_ARITH_FP_ROUND_ZERO}) {
+        for (uint64_t mode : {uint64_t(0), uint64_t(RJ_ARITH_ALU_NEG_A | RJ_ARITH_ALU_CLAMP),
+                              uint64_t(RJ_ARITH_ALU_OMOD_2),
+                              uint64_t(RJ_ARITH_ALU_OMOD_HALF | RJ_ARITH_ALU_NEG_A)}) {
+          const uint64_t flags = RJ_ARITH_SEMANTICS_COMPATIBILITY | denorm | rounding |
+                                 (batch & 1 ? RJ_ARITH_FP_IEEE_MODE : 0) |
+                                 (Older && (batch & 2) ? RJ_ARITH_FP_DX10_CLAMP_OFF : 0);
+          for (Mask exec_mask : {Mask(-1), Mask(0x8000000180000001ULL)}) {
+            std::copy_n(a, Lanes, expected);
+            const uint32_t *source = expected;
+            uint32_t *dest = expected;
+            uint32_t status = 0x12345678U;
+            ASSERT_EQ(call(flags, exec_mask, mode, &dest, &source, &bp, &status), RJ_ARITH_SUCCESS);
+            for (uint64_t cpu : cpus) {
+              SCOPED_TRACE(::testing::Message() << Lanes << '/' << batch << '/' << cpu << '/'
+                                                << flags << '/' << mode << '/' << exec_mask);
+              std::copy_n(a, Lanes, actual);
+              source = actual;
+              dest = actual;
+              ASSERT_EQ(call(flags | cpu, exec_mask, mode, &dest, &source, &bp, &status),
+                        RJ_ARITH_SUCCESS);
+              EXPECT_EQ(status, 0x12345678U);
+              for (int lane = 0; lane < Lanes; ++lane) {
+                EXPECT_EQ(actual[lane], expected[lane]) << lane;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+} // namespace
+
+// Keep the three existing NaN/output-policy variants on the same SIMD arithmetic.
+TEST(FpLdexpF32, ScalarAndSimdAgree) {
+  check_ldexp_cpu_agreement<32, true>(rj_arith_v_ldexp_f32_w32);
+  check_ldexp_cpu_agreement<64, true>(rj_arith_v_ldexp_f32_w64);
+  check_ldexp_cpu_agreement<32, false>(rj_arith_v_ldexp_f32_w32_gfx12);
+  check_ldexp_cpu_agreement<64, false>(rj_arith_v_ldexp_f32_w64_gfx12);
+  check_ldexp_cpu_agreement<32, true>(rj_arith_v_ldexp_f32_w32_gfx942);
+  check_ldexp_cpu_agreement<64, true>(rj_arith_v_ldexp_f32_w64_gfx942);
 }

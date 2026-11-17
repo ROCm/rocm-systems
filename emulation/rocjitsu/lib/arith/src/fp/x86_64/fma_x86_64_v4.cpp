@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// AVX-512 loose FP32 FMA with source modifiers, OMOD, CLAMP, and masked stores.
+// AVX-512 FMA and separately rounded MAD with shared modifiers and masked stores.
 // CPU-specific arithmetic stays here; public entry points select this backend.
 
 #include "common/simd.h"
@@ -15,9 +15,50 @@
 namespace rocjitsu::arith {
 namespace {
 
-// Evaluate FP32 fused multiply-add for the selected lanes. Requires validated controls;
+// Apply guest rounding independently to the multiply and add, without
+// touching host controls. Keep the inherited first-NaN priority at each step.
+template <int Round> __m512 mad_value(__m512 a, __m512 b, __m512 c) {
+  auto quiet = _mm512_castsi512_ps(_mm512_set1_epi32(0x00400000));
+  auto product = _mm512_mul_round_ps(a, b, Round | _MM_FROUND_NO_EXC);
+  product =
+      _mm512_mask_mov_ps(product, _mm512_cmp_ps_mask(a, a, _CMP_UNORD_Q), _mm512_or_ps(a, quiet));
+  product = flush_denorm_f32(product);
+  auto value = _mm512_add_round_ps(product, c, Round | _MM_FROUND_NO_EXC);
+  return _mm512_mask_mov_ps(value, _mm512_cmp_ps_mask(product, product, _CMP_UNORD_Q),
+                            _mm512_or_ps(product, quiet));
+}
+
+// Select the instruction-local rounding immediate required by guest MODE.
+__m512 mad_value(__m512 a, __m512 b, __m512 c, unsigned rounding) {
+  switch (rounding) {
+  case 1:
+    return mad_value<_MM_FROUND_TO_POS_INF>(a, b, c);
+  case 2:
+    return mad_value<_MM_FROUND_TO_NEG_INF>(a, b, c);
+  case 3:
+    return mad_value<_MM_FROUND_TO_ZERO>(a, b, c);
+  default:
+    return mad_value<_MM_FROUND_TO_NEAREST_INT>(a, b, c);
+  }
+}
+
+// Round output scaling with the same guest direction as both MAD operations.
+__m512 mad_scale(__m512 value, __m512 scale, unsigned rounding) {
+  switch (rounding) {
+  case 1:
+    return _mm512_mul_round_ps(value, scale, _MM_FROUND_TO_POS_INF | _MM_FROUND_NO_EXC);
+  case 2:
+    return _mm512_mul_round_ps(value, scale, _MM_FROUND_TO_NEG_INF | _MM_FROUND_NO_EXC);
+  case 3:
+    return _mm512_mul_round_ps(value, scale, _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
+  default:
+    return _mm512_mul_round_ps(value, scale, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
+  }
+}
+
+// Evaluate FP32 multiply/add, fused unless Separate is selected. Requires validated controls;
 // preserve inactive destination lanes.
-template <bool Dx9Zero, FmaOperands Operands = FmaOperands::Registers>
+template <bool Dx9Zero, FmaOperands Operands = FmaOperands::Registers, bool Separate = false>
 void run(uint32_t exec_mask, uint32_t instruction_flags, uint32_t *d, const uint32_t *a,
          const uint32_t *b, const uint32_t *c, uint32_t literal = 0, uint64_t flags = 0) {
   const __m512i keep_a =
@@ -50,6 +91,13 @@ void run(uint32_t exec_mask, uint32_t instruction_flags, uint32_t *d, const uint
       vc = _mm512_castsi512_ps(
           _mm512_xor_si512(_mm512_and_si512(_mm512_loadu_si512(c + i), keep_c), flip_c));
     }
+    auto evaluate = [&] {
+      if constexpr (Separate) {
+        return mad_value(va, vb, vc, unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24));
+      } else {
+        return _mm512_fmadd_ps(va, vb, vc);
+      }
+    };
     __m512 result;
     if constexpr (Dx9Zero) {
       auto magnitude = [](__m512 v) {
@@ -69,21 +117,25 @@ void run(uint32_t exec_mask, uint32_t instruction_flags, uint32_t *d, const uint
       if (subnormal(vc)) {
         vc = flush_denorm_f32(vc);
       }
-      result = flush_denorm_f32(_mm512_fmadd_ps(va, vb, vc));
+      result = flush_denorm_f32(evaluate());
     } else {
       if (flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS) {
         va = flush_denorm_f32(va);
         vb = flush_denorm_f32(vb);
         vc = flush_denorm_f32(vc);
       }
-      result = _mm512_fmadd_ps(va, vb, vc);
+      result = evaluate();
       if (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) {
         result = flush_denorm_f32(result);
       }
     }
     if (omod) {
       result = prepare_omod_f32(result, instruction_flags);
-      result = _mm512_mul_ps(result, scale);
+      if constexpr (Separate) {
+        result = mad_scale(result, scale, unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24));
+      } else {
+        result = _mm512_mul_ps(result, scale);
+      }
     }
     if (instruction_flags & RJ_ARITH_ALU_CLAMP) {
       result = clamp_f32(result, flags & RJ_ARITH_FP_DX10_CLAMP_OFF);
@@ -94,6 +146,17 @@ void run(uint32_t exec_mask, uint32_t instruction_flags, uint32_t *d, const uint
 }
 
 } // namespace
+
+// Evaluate two separately rounded FP32 operations, preserving inactive lanes.
+// Requires validated controls and the named ISA; flushing is forced by the caller.
+void mad_f32_x86_64_v4(bool legacy, uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags,
+                       uint32_t *d, const uint32_t *a, const uint32_t *b, const uint32_t *c) {
+  if (legacy) {
+    run<true, FmaOperands::Registers, true>(exec_mask, instruction_flags, d, a, b, c, 0, flags);
+  } else {
+    run<false, FmaOperands::Registers, true>(exec_mask, instruction_flags, d, a, b, c, 0, flags);
+  }
+}
 
 // Evaluate FP32 fused multiply-add. Preserve destination lanes outside exec_mask.
 // Requires the named CPU features and validated instruction controls.

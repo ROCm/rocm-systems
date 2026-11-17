@@ -98,8 +98,6 @@ def _register_handlers() -> None:
     from amdisa.codegen.execute.packed import (
         gen_pk_binop,
         gen_pk_ternary,
-        gen_pk_binop_f32,
-        gen_pk_ternary_f32,
         gen_pk_ternary_f64,
         gen_pk_binop_u64,
         gen_pk_binop_f64,
@@ -235,21 +233,10 @@ def _register_handlers() -> None:
         op_sel_hi_2_expr=c.op_sel_hi_2_expr,
         opsel_exprs=c.opsel_exprs,
     )
-    DISPATCH['pk_binop_f32'] = lambda c: gen_pk_binop_f32(
-        c.dst_ops,
-        c.src_ops,
-        c.op,
-        opsel_exprs=c.opsel_exprs,
-        use_cdna5_helpers=c.arch_name == 'cdna5',
-    )
-    DISPATCH['pk_ternary_f32'] = lambda c: gen_pk_ternary_f32(
-        c.dst_ops,
-        c.src_ops,
-        c.op,
-        op_sel_hi_2_expr=c.op_sel_hi_2_expr,
-        opsel_exprs=c.opsel_exprs,
-        use_cdna5_helpers=c.arch_name == 'cdna5',
-    )
+    from amdisa.codegen.execute.rj_arith_packed_f32 import gen_packed_f32
+
+    DISPATCH['pk_binop_f32'] = gen_packed_f32
+    DISPATCH['pk_ternary_f32'] = gen_packed_f32
     DISPATCH['pk_binop_u64'] = lambda c: gen_pk_binop_u64(c.dst_ops, c.src_ops, c.op)
     DISPATCH['pk_binop_f64'] = lambda c: gen_pk_binop_f64(c.dst_ops, c.src_ops, c.op)
     DISPATCH['pk_ternary_f64'] = lambda c: gen_pk_ternary_f64(

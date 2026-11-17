@@ -343,3 +343,48 @@ Compatibility's CLAMP-only INVALID policy. F/T predicates retain strict
 FP-status support for this simple classification; other predicates still reject
 that mode. Loose skips reporting. Scalar, AVX2 and AVX-512 paths remain wide.
 FP16 migration is separate; its existing VM-side signaling path remains live.
+
+## gfx12 dual MUL FP status
+
+Gfx12 dual MUL Compatibility classification is library-owned and retains the
+legacy FMA-style guest-policy model, including input-denormal causes beside
+NaNs. Other dual operations retain their existing Compatibility policy. This
+ownership change does not expand strict empirical qualification.
+
+## Older ordinary FP32 binary arithmetic
+
+ADD, SUB, SUBREV and MUL on gfx90a/gfx1010/gfx1030 use the existing numerical
+models and scalar/AVX2 backends; Compatibility also uses the existing AVX-512
+paths where eligible. Loose retains the AVX2 arithmetic path. Compatibility retains
+the inherited MUL exception classifier; its qualification is separate from explicit FP-status
+semantics. SDWA retains output scaling, clamp and destination-byte placement.
+DPP can suppress all stores while Compatibility MUL still accumulates its
+execution-participating causes. Gfx908 ADD/MUL and gfx1150 arithmetic have
+additional status policies and remain separate migrations.
+
+## Older native FP32 FMA
+
+Native FMA and FMAC on gfx908/gfx90a/gfx1010/gfx1030 use the existing FP32
+FMA implementation, as do gfx1010/gfx1030 FMAMK/FMAAK literal forms. These
+bindings preserve the inherited Compatibility model and provide Loose paths,
+using scalar, AVX2 and AVX-512-v4 arithmetic. Reusing the model does not establish
+new hardware qualification. Separately rounded MAC/MAD and gfx1150's additional
+FP-status policy remain separate migrations.
+
+## Older Legacy/DX9 arithmetic
+
+Legacy FP32 MUL on gfx908/gfx90a/gfx1010/gfx1030 and DX9 MUL on gfx1150
+share the inherited multiply model: guest denormal preparation, positive-zero
+products and unconditional NaN quieting. Both wave APIs support Loose, allow-Loose and Compatibility, with scalar,
+AVX2 and AVX-512 paths; strict exact modes are unsupported. gfx1150 DX9 FMA/FMAC reuse the existing
+DX9 FMA APIs, retaining forced denormal flushing and IEEE-dependent NaN quieting.
+Legal SDWA MUL forms retain their selected destination placement.
+
+## Older FP32 power-of-two scaling
+
+FP32 LDEXP on gfx908/gfx90a/gfx1010/gfx1030/gfx1150 reuses the gfx942 API's
+inherited always-quiet NaN, guest rounding and older output-modifier policy.
+Scalar, AVX2 and AVX-512 paths support arbitrary encodings; SIMD repairs only
+subnormal/boundary lanes. Compatibility and allow-Loose use the inherited model;
+explicit exact modes remain unqualified.
+The integer exponent does not receive floating-point source modifiers.

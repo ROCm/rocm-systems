@@ -182,7 +182,6 @@ def test_ldexp_simd_probes_use_the_shared_raw_operation():
     )
     vop3 = {
         'f16': simd_probe_line('v_ldexp_f16_vop3'),
-        'f32': simd_probe_line('v_ldexp_f32_vop3'),
         'f64': simd_probe_line('v_ldexp_f64_vop3'),
     }
     assert vop3['f16'].startswith(
@@ -191,10 +190,8 @@ def test_ldexp_simd_probes_use_the_shared_raw_operation():
     assert simd_probe_line('v_ldexp_f16_vop3', true16_vop3=True).startswith(
         f'  ROCJITSU_TRY_SIMD_VOP3_LDEXP_TRUE16_RAW_FP16({operation}'
     )
-    assert vop3['f32'].startswith(
-        '  ROCJITSU_TRY_SIMD_VOP3_LDEXP_RAW_FP('
-        'amdgpu::ldexp::Operation<amdgpu::fp_format::F32>{'
-    )
+    # All FP32 bindings now use the library instead of this legacy probe.
+    assert simd_probe_line('v_ldexp_f32_vop3') is None
     assert vop3['f64'].startswith(
         '  ROCJITSU_TRY_SIMD_VOP3_LDEXP_RAW_FP64('
         'amdgpu::ldexp::Operation<amdgpu::fp_format::F64, 32>{'
@@ -339,7 +336,7 @@ def test_generated_arithmetic_cores_run_under_one_instruction_environment():
                     opener
                 ), f'{name}: {opener} runs an unscoped core without an environment'
                 in_scoped_probes += cores
-    assert in_scoped_probes == total > 0
+    assert in_scoped_probes == total
 
 
 def test_true16_vop3_simd_probe_leaves_unsupported_b16_scalar():

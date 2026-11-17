@@ -241,6 +241,19 @@ for _arch in ('cdna3', 'cdna4', 'cdna5'):
     BINARY_F64[_arch] = {'V_ADD_F64', 'V_MUL_F64'}
 
 CDNA_FP64_ARITHMETIC = {'V_ADD_F64', 'V_MUL_F64', 'V_FMA_F64', 'V_LDEXP_F64'}
+OLDER_LDEXP_F32 = {'cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5'}
+
+# These older spellings share the inherited CDNA Legacy-MUL arithmetic model.
+OLDER_LEGACY_MULTIPLY_F32 = {
+    **{arch: 'V_MUL_LEGACY_F32' for arch in ('cdna1', 'cdna2', 'rdna1', 'rdna2')},
+    'rdna3_5': 'V_MUL_DX9_ZERO_F32',
+}
+DX9_FMA_F32 = {'V_FMA_DX9_ZERO_F32', 'V_FMAC_DX9_ZERO_F32'}
+
+# These profiles share ordinary binary arithmetic and the inherited MUL causes.
+# gfx908 ADD and gfx1150 arithmetic have additional status policies.
+OLDER_BINARY_F32 = ('cdna2', 'rdna1', 'rdna2')
+ORDINARY_BINARY_F32 = {'V_ADD_F32', 'V_SUB_F32', 'V_SUBREV_F32', 'V_MUL_F32'}
 
 BINARY_ARITHMETIC_F32 = {
     'V_LDEXP_F32',
@@ -285,6 +298,10 @@ CDNA_BINARY_SELECTION = (
     | SELECTION_F64['rdna3']
     | SELECTION_F64['rdna4']
 )
+
+# These older profiles share native FMA's inherited NaN/rounding model.
+# gfx1150 additionally needs its separate FP-status policy.
+OLDER_NATIVE_FMA = ('cdna1', 'cdna2', 'rdna1', 'rdna2')
 
 FMA_F32 = {
     'V_FMA_F32',
@@ -1839,30 +1856,64 @@ def gen_float64_word(ctx: ExecuteContext) -> str | None:
 # MUL carries its inherited nearest-even exception classifier into rj-arith.
 
 
+def gen_older_ldexp32(ctx: ExecuteContext) -> str | None:
+    """Scale a floating source by an unmodified signed integer exponent."""
+    if (
+        ctx.arch_name not in OLDER_LDEXP_F32
+        or ctx.inst.name != 'V_LDEXP_F32'
+        or not ctx.is_vop3
+        or len(ctx.dst_ops) != 1
+        or len(ctx.src_ops) != 2
+    ):
+        return None
+    # The inherited LDEXP operation ignores source modifiers on its integer exponent.
+    return '\n'.join(
+        [
+            '  const uint64_t modifiers = ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) |',
+            '      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |',
+            '      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) |',
+            '      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);',
+            '  amdgpu::arith::execute_float_binary32(wf, rj_arith_v_ldexp_f32_w32_gfx942,',
+            '      rj_arith_v_ldexp_f32_w64_gfx942, wf.cu().arithmetic_flags(), modifiers,',
+            f'      {ctx.dst_ops[0]}, {ctx.src_ops[0]}, {ctx.src_ops[1]},',
+            '      /*rdna3=*/true, /*compatibility_mul=*/false);',
+        ]
+    )
+
+
 def gen_float_binary32(ctx: ExecuteContext) -> str | None:
     arch = ctx.arch_name
     mnemonic = ctx.inst.name
     dst = ctx.dst_ops
     src = ctx.src_ops
     is_vop3 = ctx.is_vop3
-    legacy_mul = (arch in ('cdna3', 'cdna4') and mnemonic == 'V_MUL_LEGACY_F32') or (
-        arch == 'cdna5' and mnemonic == 'V_MUL_DX9_ZERO_F32'
-    )
-    if not legacy_mul and (arch not in SELECTION_F32 or mnemonic not in BINARY_F32):
+    older_legacy_mul = mnemonic == OLDER_LEGACY_MULTIPLY_F32.get(arch)
+    # gfx90a's Legacy MUL has only the VOP3 encoding.
+    if older_legacy_mul and arch == 'cdna2' and not is_vop3:
         return None
-    if (
-        not legacy_mul
-        and arch.startswith('cdna')
-        and mnemonic not in CDNA_FP32_ARITHMETIC | SELECTION_F32.get(arch, set())
-    ):
+    legacy_mul = (
+        older_legacy_mul
+        or (arch in ('cdna3', 'cdna4') and mnemonic == 'V_MUL_LEGACY_F32')
+        or (arch == 'cdna5' and mnemonic == 'V_MUL_DX9_ZERO_F32')
+    )
+    ordinary = {'V_ADD_F32', 'V_SUB_F32', 'V_SUBREV_F32', 'V_MUL_F32'}
+    gfx1150 = arch == 'rdna3_5' and mnemonic in ordinary
+    gfx908 = arch == 'cdna1' and mnemonic in ordinary
+    cdna_binary = (
+        arch in ('cdna3', 'cdna4', 'cdna5') and mnemonic in CDNA_FP32_ARITHMETIC
+    )
+    if not legacy_mul and mnemonic not in BINARY_F32:
+        return None
+    allowed = SELECTION_F32.get(arch, set())
+    if arch in ('rdna3', 'rdna4'):
+        allowed = allowed | BINARY_ARITHMETIC_F32
+    elif arch in ('cdna3', 'cdna4', 'cdna5'):
+        allowed = allowed | CDNA_FP32_ARITHMETIC
+    if arch in OLDER_BINARY_F32 or gfx1150 or gfx908:
+        allowed = allowed | ordinary
+    if not legacy_mul and mnemonic not in allowed:
         return None
     if len(dst) != 1 or len(src) != 2:
-        return None
-    if not legacy_mul and mnemonic not in BINARY_ARITHMETIC_F32 | SELECTION_F32.get(
-        arch, set()
-    ):
-        return None
-    if arch in OLDER_SELECTION_ARCHS and mnemonic not in SELECTION_F32[arch]:
         return None
     arithmetic = mnemonic in BINARY_ARITHMETIC_F32
     api = (
@@ -1874,9 +1925,15 @@ def gen_float_binary32(ctx: ExecuteContext) -> str | None:
             else '_gfx12' if arch in ('rdna4', 'cdna5') and arithmetic else ''
         )
     )
+    if gfx1150:
+        api += '_gfx1150'
+    if gfx908 and mnemonic in ('V_ADD_F32', 'V_MUL_F32'):
+        api += '_gfx908'
+    if older_legacy_mul:
+        api = 'rj_arith_v_mul_legacy_f32'
     if arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4') and mnemonic in SELECTION_F32[arch]:
         api += '_gfx942'
-    if arch == 'cdna5' and mnemonic in SELECTION_F32[arch]:
+    if arch == 'cdna5' and mnemonic in SELECTION_F32.get(arch, set()):
         api += '_gfx1250'
     if arch == 'cdna5' and mnemonic in {
         'V_ADD_F32',
@@ -1918,7 +1975,15 @@ def gen_float_binary32(ctx: ExecuteContext) -> str | None:
             '      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);',
         ]
         modifiers = 'modifiers'
-    controls = f'/*rdna3=*/{str(arch not in ("rdna4", "cdna5")).lower()}, /*compatibility_mul=*/{str(mnemonic == "V_MUL_F32").lower()}'
+    if older_legacy_mul:
+        return '\n'.join(
+            lines
+            + [
+                f'  amdgpu::arith::execute_legacy_multiply32(*this, wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
+                f'      wf.cu().arithmetic_flags(), {modifiers}, {dst[0]}, {src[0]}, {src[1]});',
+            ]
+        )
+    controls = f'/*rdna3=*/{str(arch in ("rdna3", "rdna3_5", "cdna1", "cdna3", "cdna4", *OLDER_BINARY_F32)).lower()}, /*compatibility_mul=*/{str(mnemonic == "V_MUL_F32" and not (gfx1150 or gfx908)).lower()}'
     helper, receiver = 'execute_float_binary32', 'wf'
     if arch in ('cdna3', 'cdna4') and not is_vop3:
         helper, receiver = 'execute_cdna_binary32', '*this, wf'
@@ -1928,11 +1993,66 @@ def gen_float_binary32(ctx: ExecuteContext) -> str | None:
         and mnemonic in SELECTION_F32[arch]
     ):
         helper, receiver = 'execute_sdwa_selection<32>', '*this, wf'
+    if gfx908 and not is_vop3:
+        helper, receiver = 'execute_cdna1_binary32', '*this, wf'
+    if (
+        (arch in OLDER_BINARY_F32 or cdna_binary and arch != 'cdna5')
+        and not is_vop3
+        and mnemonic in ordinary
+    ):
+        helper, receiver = 'execute_sdwa_binary32', '*this, wf'
     lines += [
         f'  amdgpu::arith::{helper}({receiver}, {wave_api(api, 32)}, {wave_api(api, 64)},',
         f'      wf.cu().arithmetic_flags(), {modifiers},',
         f'      {dst[0]}, {src[0]}, {src[1]},',
         f'      {controls});',
+    ]
+    return '\n'.join(lines)
+
+
+def gen_float_mad32(ctx: ExecuteContext) -> str | None:
+    """Bind separately rounded older MAD forms, keeping implicit/literal roles."""
+    if ctx.arch_name not in ('cdna1', 'cdna2', 'rdna1'):
+        return None
+    name = ctx.inst.name
+    if name not in {
+        'V_MAC_F32',
+        'V_MAC_LEGACY_F32',
+        'V_MAD_F32',
+        'V_MAD_LEGACY_F32',
+        'V_MADMK_F32',
+        'V_MADAK_F32',
+    }:
+        return None
+    second = 'src1' if ctx.is_vop3 else 'vsrc1'
+    a, b, c = 'src0', second, 'src2'
+    accumulate = name.startswith('V_MAC')
+    if accumulate:
+        c = 'vdst'
+    elif name == 'V_MADMK_F32':
+        b, c = 'simm32', second
+    elif name == 'V_MADAK_F32':
+        c = 'simm32'
+    api = 'rj_arith_v_mad' + ('_legacy' if 'LEGACY' in name else '') + '_f32'
+    lines = ['  if (!wf.exec()) return;'] + unqualified_half_guard()
+    modifiers = '0'
+    if ctx.is_vop3:
+        terms = []
+        for index, operand in enumerate('AB' if accumulate else 'ABC'):
+            terms += [
+                f'((inst_.abs & {1 << index}) ? RJ_ARITH_ALU_ABS_{operand} : 0u)',
+                f'((inst_.neg & {1 << index}) ? RJ_ARITH_ALU_NEG_{operand} : 0u)',
+            ]
+        terms += [
+            '(uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2)',
+            '(inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u)',
+        ]
+        lines.append('  const uint64_t modifiers = ' + ' |\n      '.join(terms) + ';')
+        modifiers = 'modifiers'
+    lines += [
+        '  amdgpu::arith::execute_float_fma32<false>(wf,',
+        f'      {wave_api(api, 32)},',
+        f'      {wave_api(api, 64)}, wf.cu().arithmetic_flags(), {modifiers}, vdst, {a}, {b}, {c}, true);',
     ]
     return '\n'.join(lines)
 
@@ -1944,15 +2064,24 @@ def gen_float_fma32(ctx: ExecuteContext) -> str | None:
     dst = ctx.dst_ops
     src = ctx.src_ops
     is_vop3 = ctx.is_vop3
+    gfx1150 = arch == 'rdna3_5' and mnemonic in {
+        'V_FMA_F32',
+        'V_FMAC_F32',
+        'V_FMAMK_F32',
+        'V_FMAAK_F32',
+    }
+    older_dx9 = arch == "rdna3_5" and mnemonic in DX9_FMA_F32
     cdna_dx9 = arch == "cdna5" and mnemonic == "V_FMA_DX9_ZERO_F32"
     if (
-        not cdna_dx9
+        not (gfx1150 or cdna_dx9 or older_dx9)
         and not (arch == 'rdna2' and mnemonic in GFX10_LEGACY_FMA)
         and (
-            arch not in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5')
+            arch not in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5', *OLDER_NATIVE_FMA)
             or mnemonic not in FMA_F32
         )
     ):
+        return None
+    if arch in OLDER_NATIVE_FMA and 'DX9_ZERO' in mnemonic:
         return None
     if arch in ('rdna4', 'cdna5') and mnemonic == 'V_FMAC_DX9_ZERO_F32':
         return None
@@ -1972,7 +2101,13 @@ def gen_float_fma32(ctx: ExecuteContext) -> str | None:
     api = 'rj_arith_v_fma' + ('_dx9_zero' if dx9 else '') + '_f32'
     if arch in ('rdna4', 'cdna5'):
         api += '_gfx12'
-    lines = cdna_qualification_guard(arch)
+    if gfx1150 and mnemonic == 'V_FMA_F32':
+        api += '_gfx1150'
+    lines = (
+        ['  if (!wf.exec()) return;'] + unqualified_half_guard()
+        if arch in OLDER_NATIVE_FMA
+        else cdna_qualification_guard(arch)
+    )
     modifiers = '0'
     if is_vop3:
         lines += [
@@ -1997,7 +2132,7 @@ def gen_float_fma32(ctx: ExecuteContext) -> str | None:
         f'      {wave_api(api, 64)},',
         f'      wf.cu().arithmetic_flags(), {modifiers},',
         f'      {dst[0]}, {", ".join(inputs)},',
-        f'      {str(arch in ("rdna2", "rdna3", "cdna3", "cdna4")).lower()});',
+        f'      {str((arch in OLDER_NATIVE_FMA and not older_dx9) or arch in ("rdna2", "rdna3", "rdna3_5", "cdna3", "cdna4")).lower()});',
     ]
     return '\n'.join(lines)
 
