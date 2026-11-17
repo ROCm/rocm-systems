@@ -3010,16 +3010,20 @@ TEST_F(AllocAndPopulateSegmentWindowsTest, GinEnabled_PopulatesEachSegmentPerBac
 // Branch: GIN on, so window (b, s) gets backend b's ginDevWins slice of segment s, never ginHostWins.
 TEST_F(AllocAndPopulateSegmentWindowsTest, GinEnabled_CopiesEachBackendsDeviceWindows) {
   comm->devrState.ginEnabled = true;
+  static_assert(NCCL_GIN_MAX_CONNECTIONS <= 16, "Connection tokens must fit within each backend's stride");
+  static_assert(NCCL_GIN_MAX_ACTIVE_BACKENDS <= 16, "Backend tokens must fit within each segment's stride");
   auto devToken = [](int seg, int backend, int conn) {
     return reinterpret_cast<ncclGinWindow_t>(uintptr_t{0x10000} + seg * 0x1000 + backend * 0x100 + conn * 0x10);
+  };
+  auto hostToken = [](int seg, int backend, int conn) {
+    return reinterpret_cast<void*>(uintptr_t{0x900000} + seg * 0x1000 + backend * 0x100 + conn * 0x10);
   };
   for (int s = 0; s < mem.numGinSegments; s++) {
     for (int b = 0; b < NCCL_GIN_MAX_ACTIVE_BACKENDS; b++) {
       for (int i = 0; i < NCCL_GIN_MAX_CONNECTIONS; i++) {
         ginInfos[s].ginDevWins[b * NCCL_GIN_MAX_CONNECTIONS + i] = devToken(s, b, i);
         // Host handles get distinct values so copying the wrong array shows up.
-        ginInfos[s].ginHostWins[b * NCCL_GIN_MAX_CONNECTIONS + i] =
-            reinterpret_cast<void*>(uintptr_t{0x900000} + s * 0x1000 + b * 0x100 + i * 0x10);
+        ginInfos[s].ginHostWins[b * NCCL_GIN_MAX_CONNECTIONS + i] = hostToken(s, b, i);
       }
     }
   }
