@@ -123,7 +123,8 @@ static ncclResult_t ginBackendCloseConnections(struct ncclGinBackendState* backe
   return ret;
 }
 
-// ginInstance[] was initialized on the sharedRes owner, and the plugins keep its
+// ginInstance[] was initialized on the sharedRes owner and copied into each
+// splitShare child by ncclGinInitFromParent; the plugins keep the owner's
 // bootstrap and rank numbering.
 static bool ginCommMatchesOwnerRanks(const struct ncclComm* comm) {
   const struct ncclSharedResources* sharedRes = comm->sharedRes;
@@ -139,11 +140,11 @@ static bool ginCommMatchesOwnerRanks(const struct ncclComm* comm) {
 // splitShare child that does not span the owner's ranks in order would wait
 // alone in regMrSym. The child's own topology is not enough: a 1-rank child
 // returns before MNNVL is set, then registers through the owner's context.
-// anvilFabricMem is the owner's vote, so every rank that connected agrees.
+// ginAnvilFabricMem is the owner's vote, so every rank that connected agrees.
 static bool ginSplitShareChildBlocked(struct ncclComm* comm) {
   if (ginCommMatchesOwnerRanks(comm)) return false;
-  struct ncclGinState* ginState = &comm->sharedRes->ginState;
-  if (!ginAnvilFabricMemCapable(comm) && !ginState->anvilFabricMem) return false;
+  struct ncclGinState* ginState = &comm->ginState;
+  if (!ginAnvilFabricMemCapable(comm) && !comm->sharedRes->ginAnvilFabricMem) return false;
   for (int i = 0; i < ginState->numActiveBackends; i++) {
     if (ginState->backends[i].ginType == NCCL_GIN_TYPE_ANVIL_SDMA) return true;
   }

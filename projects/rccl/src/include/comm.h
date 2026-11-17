@@ -177,6 +177,12 @@ struct ncclSharedResources {
 
   /* proxy related shared res */
   struct ncclProxyState* proxyState;
+
+  // Set by a successful Anvil-SDMA connect when every rank voted fabric
+  // registration on. A splitShare child copies the parent's GIN backends at
+  // init, possibly before that connect, and can miss MNNVL on its own topology
+  // (a 1-rank child returns before it is set), so the vote lives here.
+  bool ginAnvilFabricMem;
 };
 
  /**
