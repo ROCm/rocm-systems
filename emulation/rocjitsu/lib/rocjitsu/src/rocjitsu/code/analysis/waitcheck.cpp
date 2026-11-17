@@ -492,6 +492,7 @@ struct Analyzer : private WaitcheckStateOps {
                       std::string section_name, uint64_t file_offset_base) {
     current_kernel_ = nullptr;
     source_allocation_may_change_ = false;
+    wmma_arb_stall_may_be_disabled_ = false;
     stream_words_ = words;
     track_sgpr_offsets_ = true;
     wavefront_size_ = options_.fallback_wavefront_size.value_or(64);
@@ -525,6 +526,7 @@ struct Analyzer : private WaitcheckStateOps {
       const auto section_offset = static_cast<uint64_t>(word_index * sizeof(uint32_t));
       const auto file_offset = file_offset_base + section_offset;
       source_allocation_may_change_ |= inst->mnemonic() == "s_alloc_vgpr";
+      wmma_arb_stall_may_be_disabled_ |= wmma_arb_stall_disable_write(*inst, arch);
       update_counter_parity_group(pending_wait_group, state, *inst, section_name, section_offset,
                                   file_offset, arch);
       analyze_instruction(state, *inst, section_name, section_offset, file_offset, arch, true);
@@ -1005,6 +1007,15 @@ struct Analyzer : private WaitcheckStateOps {
              return inst.mnemonic() == "s_alloc_vgpr";
            });
          }));
+    // A mode switch on any reachable path can remove the arbiter stall while
+    // a preceding WMMA is outstanding. Do not infer completion from younger
+    // core VALUs for any WMMA in such a kernel.
+    wmma_arb_stall_may_be_disabled_ =
+        std::ranges::any_of(analysis_blocks, [arch](const BasicBlock *block) {
+          return std::ranges::any_of(block->instructions(), [arch](const Instruction &inst) {
+            return wmma_arb_stall_disable_write(inst, arch);
+          });
+        });
 
     // On a guarded edge the instruction itself tests EXEC. No scalar register
     // or pending operand can substitute for that test at a CFG merge.
@@ -4937,6 +4948,28 @@ private:
     return ExpertSchedulingState{.enabled = (inst.raw_encoding()[1] & 0x3u) == kSchedModeValue};
   }
 
+  static bool wmma_arb_stall_disable_write(const Instruction &inst, rj_code_arch_t arch) {
+    if (arch != ROCJITSU_CODE_ARCH_CDNA5 ||
+        (inst.mnemonic() != "s_setreg_imm32_b32" && inst.mnemonic() != "s_setreg_b32"))
+      return false;
+    const Operand *hwreg = inst.dst_operand(0);
+    if (!hwreg)
+      return false;
+    const uint32_t value = static_cast<uint32_t>(hwreg->encoding_value());
+    const uint32_t reg_id = value & 0x3fu;
+    const uint32_t offset = (value >> 6u) & 0x1fu;
+    const uint32_t size = ((value >> 11u) & 0x1fu) + 1u;
+    constexpr uint32_t kHwRegWaveSchedMode = 26;
+    constexpr uint32_t kDisableArbStallBit = 2;
+    if (reg_id != kHwRegWaveSchedMode || offset > kDisableArbStallBit ||
+        offset + size <= kDisableArbStallBit)
+      return false;
+    if (inst.mnemonic() == "s_setreg_imm32_b32" && inst.raw_encoding() &&
+        inst.size() >= 2 * static_cast<int>(sizeof(uint32_t)))
+      return (inst.raw_encoding()[1] & (1u << (kDisableArbStallBit - offset))) != 0;
+    return true;
+  }
+
   [[nodiscard]] static bool is_exec_masked_def(RegisterRef ref) {
     return ref.cls == RegClass::VGPR || ref.cls == RegClass::ACC_VGPR;
   }
@@ -4960,6 +4993,41 @@ private:
 
     ref.index = static_cast<uint16_t>(ref.index + state.for_role(op.vgpr_msb_role()) * 256u);
     regs.expand(ref);
+  }
+
+  void add_source_use(RegisterSet &uses, RegisterRef ref, const Operand &op,
+                      const VgprMsbState &banks, rj_code_arch_t arch) const {
+    if (ref.cls != RegClass::VGPR || !current_kernel_) {
+      expand_vgpr_msb_ref(uses, ref, op, banks, arch);
+      return;
+    }
+    // An out-of-range vector source reads VGPR0. Use each physical component
+    // after VGPR-MSB selection: a wide operand can straddle the allocation.
+    // Different descriptor aliases, or S_ALLOC_VGPR, may leave both the
+    // encoded component and VGPR0 possible.
+    const uint32_t guaranteed =
+        source_allocation_may_change_ ? 0 : current_kernel_->min_vgprs;
+    const auto add_at = [&](uint32_t base) {
+      if (base + ref.width <= guaranteed) {
+        uses.expand({RegClass::VGPR, static_cast<uint16_t>(base), ref.width});
+        return;
+      }
+      for (uint32_t index = base; index < base + ref.width; ++index) {
+        const RegisterRef component{RegClass::VGPR, static_cast<uint16_t>(index), 1};
+        uses.expand(component);
+        if (index >= guaranteed)
+          uses.expand({RegClass::VGPR, 0, 1});
+      }
+    };
+    if (arch != ROCJITSU_CODE_ARCH_CDNA5 ||
+        op.vgpr_msb_role() == amdgpu::VgprMsbRole::None) {
+      add_at(ref.index);
+    } else if (banks.known) {
+      add_at(ref.index + banks.for_role(op.vgpr_msb_role()) * 256u);
+    } else {
+      for (uint32_t bank = 0; bank < 4; ++bank)
+        add_at(ref.index + bank * 256u);
+    }
   }
 
   static void add_def(InstDefUse &du, RegisterRef ref, const Operand &op, const VgprMsbState &state,
@@ -5353,7 +5421,7 @@ private:
       if (add_adjusted_source_use(du, inst, *op, i, wavefront_size))
         continue;
       if (auto ref = register_operand(*op, arch))
-        expand_vgpr_msb_ref(du.uses, *ref, *op, state, arch);
+        add_source_use(du.uses, *ref, *op, state, arch);
     }
     RegisterSet implicit_uses;
     inst.implicit_uses(implicit_uses);
@@ -5368,7 +5436,7 @@ private:
         if (op == nullptr)
           continue;
         if (auto ref = op->to_register_ref(); ref && ref->cls == RegClass::VGPR)
-          expand_vgpr_msb_ref(implicit_uses, *ref, *op, state, arch);
+          add_source_use(implicit_uses, *ref, *op, state, arch);
       }
     }
     // D16 memory loads preserve the opposite half for liveness, but the two
@@ -10540,7 +10608,9 @@ private:
     event.counter = classification.counter;
     event.kind = classification.kind;
     if (event.kind == WaitEventKind::ValuMatrix)
-      event.wmma_wait_states = WaitcheckTarget::wmma_valu_wait_states(inst, arch, target_);
+      event.wmma_wait_states = wmma_arb_stall_may_be_disabled_
+                                   ? 0
+                                   : WaitcheckTarget::wmma_valu_wait_states(inst, arch, target_);
     event.regs = registers_for_event(inst, du, classification, state.vgpr_msb, arch);
     if (classification.registers == TrackedRegisterSource::Defs ||
         classification.registers == TrackedRegisterSource::Uses) {
@@ -10714,6 +10784,12 @@ private:
       state.expert_scheduling = *mode;
       if (!mode->enabled)
         clear_expert_wait_state(state);
+    }
+    if (wmma_arb_stall_disable_write(inst, arch)) {
+      wmma_arb_stall_may_be_disabled_ = true;
+      for (auto &event : state.pending[counter_index(WaitCounterKind::VaVdst)])
+        if (event.kind == WaitEventKind::ValuMatrix)
+          event.wmma_wait_states = 0;
     }
     clear_matching_barrier_scc_write(state, inst);
     // LLVM's AMDGPUWaitSGPRHazards pass models this RDNA4 hardware hazard
@@ -10901,6 +10977,7 @@ private:
   bool cfg_has_salu_exec_write_ = false;
   std::bitset<128> source_save_destinations_;
   bool source_allocation_may_change_ = false;
+  bool wmma_arb_stall_may_be_disabled_ = false;
   bool cfg_has_saved_source_exec_ = false;
   std::bitset<128> valu_source_mask_writes_;
   bool cfg_has_scalar_prefetch_ = false;

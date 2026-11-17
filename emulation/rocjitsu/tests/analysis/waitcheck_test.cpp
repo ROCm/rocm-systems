@@ -5777,12 +5777,10 @@ TEST(WaitcheckTest, Gfx1150CounterParityMatchesPartialLoopCarriedDsDependency) {
   program.push_back(0x00000204u);
   program.push_back(0xBFA0FFF9u); // 0x18: s_branch to loop header.
 
-  const auto image =
-      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX1150);
-  AmdGpuCodeObject code_object(image.data(), image.size());
   WaitcheckOptions options;
   options.check_counter_parity = true;
-  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA3_5, options);
+  const auto report = analyze_gfx12_with_vgpr_allocation(
+      program, EF_AMDGPU_MACH_AMDGCN_GFX1150, ROCJITSU_CODE_ARCH_RDNA3_5, false, 32, options);
 
   ASSERT_TRUE(report.supported) << report.analysis_error;
   EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
@@ -5811,12 +5809,10 @@ TEST(WaitcheckTest, Gfx1150CounterParityCapturesConservativeScratchClauseWait) {
       0xBF810000u,              // s_endpgm.
   };
 
-  const auto image =
-      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX1150);
-  AmdGpuCodeObject code_object(image.data(), image.size());
   WaitcheckOptions options;
   options.check_counter_parity = true;
-  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA3_5, options);
+  const auto report = analyze_gfx12_with_vgpr_allocation(
+      program, EF_AMDGPU_MACH_AMDGCN_GFX1150, ROCJITSU_CODE_ARCH_RDNA3_5, false, 32, options);
 
   ASSERT_TRUE(report.supported) << report.analysis_error;
   EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
@@ -6096,12 +6092,10 @@ TEST(WaitcheckTest, Gfx1150CounterParityRetainsStrongerCyclicWaitDependency) {
   program.push_back(0x00000204u);
   program.push_back(0xBFA0FFF9u); // 0x18: s_branch to loop header.
 
-  const auto image =
-      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX1150);
-  AmdGpuCodeObject code_object(image.data(), image.size());
   WaitcheckOptions options;
   options.check_counter_parity = true;
-  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA3_5, options);
+  const auto report = analyze_gfx12_with_vgpr_allocation(
+      program, EF_AMDGPU_MACH_AMDGCN_GFX1150, ROCJITSU_CODE_ARCH_RDNA3_5, false, 32, options);
 
   ASSERT_TRUE(report.supported) << report.analysis_error;
   EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
@@ -8427,6 +8421,53 @@ TEST(WaitcheckTest, Gfx12OutOfRangeDsResultsNullifyAddressAndPayloadReads) {
                   }),
                   !out_of_range)
             << diagnostic_summary(report);
+      }
+    }
+  }
+}
+
+TEST(WaitcheckTest, OutOfRangeVectorSourcesReadVgprZero) {
+  enum class Consumer { DsAddress, DsData, GlobalAddress, ValuSource };
+  for (const auto [arch, machine, allocation] :
+       {std::tuple{ROCJITSU_CODE_ARCH_RDNA4, EF_AMDGPU_MACH_AMDGCN_GFX1201, 8u},
+        std::tuple{ROCJITSU_CODE_ARCH_CDNA5, EF_AMDGPU_MACH_AMDGCN_GFX1250, 16u}}) {
+    for (const auto consumer_kind : {Consumer::DsAddress, Consumer::DsData,
+                                     Consumer::GlobalAddress, Consumer::ValuSource}) {
+      for (bool out_of_range : {false, true}) {
+        for (bool waited : {false, true}) {
+          SCOPED_TRACE(testing::Message() << machine << '/' << static_cast<int>(consumer_kind)
+                                          << '/' << out_of_range << '/' << waited);
+          std::vector<uint32_t> program;
+          append_inst(program, global_load_b32(0, 2));
+          if (waited)
+            append_inst(program, sopp(64, 0)); // s_wait_loadcnt 0
+          const uint64_t consumer = program.size() * sizeof(uint32_t);
+          const uint32_t source = out_of_range ? 32 : 0;
+          switch (consumer_kind) {
+          case Consumer::DsAddress:
+            append_inst(program, ds_store_b32(source, 2));
+            break;
+          case Consumer::DsData:
+            append_inst(program, ds_store_b32(2, source));
+            break;
+          case Consumer::GlobalAddress:
+            append_inst(program, global_load_b32(4, source));
+            break;
+          case Consumer::ValuSource:
+            append_inst(program, v_mov_b32(4, source));
+            break;
+          }
+          append_inst(program, sopp(64, 0));
+          append_inst(program, s_endpgm());
+          const auto report =
+              analyze_gfx12_with_vgpr_allocation(program, machine, arch, true, allocation);
+          ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+          const bool warning = std::ranges::any_of(report.diagnostics, [&](const auto &d) {
+            return d.counter == WaitCounterKind::Load && d.producer_section_offset == 0 &&
+                   d.section_offset == consumer && d.reg.cls == RegClass::VGPR && d.reg.index == 0;
+          });
+          EXPECT_EQ(warning, !waited) << diagnostic_summary(report);
+        }
       }
     }
   }
@@ -10761,6 +10802,36 @@ TEST(WaitcheckTest, Gfx1250KernelPathUsesWmmaProgressAtEachPhysicalWait) {
                   prior != 0 && final > 6 && consumer_mask != 0)
             << diagnostic_summary(report);
       }
+    }
+  }
+}
+
+TEST(WaitcheckTest, Gfx1250DisabledWmmaArbStallCannotProvePartialVaWait) {
+  for (unsigned mode : {2u, 6u}) {
+    for (bool write_after_matrix : {false, true}) {
+      SCOPED_TRACE(testing::Message() << mode << '/' << write_after_matrix);
+      std::vector<uint32_t> code;
+      append_inst(code, s_setreg_imm32_b32(hwreg(26, 0, 3), 2));
+      if (!write_after_matrix && mode == 6)
+        append_inst(code, s_setreg_imm32_b32(hwreg(26, 0, 3), 6));
+      const auto producer = code.size() * sizeof(uint32_t);
+      code.insert(code.end(), {0xcc600000, 0x1c02e528}); // WMMA reads v42.
+      if (write_after_matrix && mode == 6)
+        append_inst(code, s_setreg_imm32_b32(hwreg(26, 0, 3), 6));
+      for (unsigned i = 0; i < 6; ++i)
+        append_inst(code, v_mov_b32(12, 11));
+      append_inst(code, sopp(8, 0x1f9f)); // depctr_va_vdst(1)
+      const auto consumer = code.size() * sizeof(uint32_t);
+      append_inst(code, global_load_b32(42, 8));
+      append_inst(code, s_endpgm());
+      const auto report = analyze_gfx12_with_vgpr_allocation(
+          code, EF_AMDGPU_MACH_AMDGCN_GFX1250, ROCJITSU_CODE_ARCH_CDNA5, true, 128);
+      ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+      const bool warning = std::ranges::any_of(report.diagnostics, [&](const auto &d) {
+        return d.counter == WaitCounterKind::VaVdst && d.producer_section_offset == producer &&
+               d.section_offset == consumer && d.reg.index == 42;
+      });
+      EXPECT_EQ(warning, mode == 6) << diagnostic_summary(report);
     }
   }
 }
@@ -15598,10 +15669,8 @@ TEST(WaitcheckTest, CorrelatedBranchesRequireBothFlatSourceRoutes) {
     append_inst(program, sopp(wait_for_ds ? 72 : 64, 0));
     append_inst(program, v_mov_b32(8, 7));
     append_inst(program, s_endpgm());
-    const auto image = rocjitsu::waitcheck_test::make_gfx_multi_kernel_code_object(
-        {{"flat_source", program}}, EF_AMDGPU_MACH_AMDGCN_GFX1201);
-    AmdGpuCodeObject object(image.data(), image.size());
-    const auto report = analyze_waitcnts(object, ROCJITSU_CODE_ARCH_RDNA4);
+    const auto report = analyze_gfx12_with_vgpr_allocation(
+        program, EF_AMDGPU_MACH_AMDGCN_GFX1201, ROCJITSU_CODE_ARCH_RDNA4, true, 16);
     ASSERT_TRUE(report.complete) << report.analysis_error;
     EXPECT_EQ(report.diagnostics_observed, wait_for_ds ? 0u : 1u);
   }
@@ -15779,6 +15848,8 @@ TEST(WaitcheckTest, ObjectAnalysisConvergesWithRepeatedRegisterLoadsAroundLoop) 
       kernel.entry_offset = 0;
       kernel.code_size = program.size() * sizeof(uint32_t);
       kernel.wavefront_size = 64;
+      kernel.min_vgprs = 16;
+      kernel.max_vgprs = 16;
       auto report = analyze_waitcnts_for_kernel(code_object, arch, kernel);
 
       ASSERT_TRUE(report.supported) << report.analysis_error;
@@ -16939,10 +17010,8 @@ TEST(WaitcheckTest, Gfx1250Wave32VopcDoesNotClobberAdjacentSwappcTarget) {
                 .size(),
             1u);
 
-  const auto image =
-      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX1250, true);
-  AmdGpuCodeObject code_object(image.data(), image.size());
-  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5);
+  auto report = analyze_gfx12_with_vgpr_allocation(
+      program, EF_AMDGPU_MACH_AMDGCN_GFX1250, ROCJITSU_CODE_ARCH_CDNA5, true, 128);
 
   EXPECT_TRUE(report.supported) << report.analysis_error;
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
