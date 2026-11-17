@@ -1,7 +1,9 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "atomic_cdna_exchange_fixture.h"
 #include "atomic_fixture.h"
+#include "atomic_native_inventory_fixture.h"
 #include "cli_test_support.h"
 #include "rocjitsu/code/file_io.h"
 #include "rocjitsu/code/patch/fault_injection/atomic_wrong_address.h"
@@ -284,6 +286,104 @@ TEST_F(FaultAtomicCli, SharedExactSiteRemainsBoundToRequestedOwner) {
   EXPECT_NE(run(mutation_args({"--exact", "512", "--ordinal", "0"}, "test_kernel1")), 0);
   EXPECT_FALSE(std::filesystem::exists(output_));
   EXPECT_EQ(read(input_), unshared);
+}
+
+TEST_F(FaultAtomicCli, NativeCdnaExchangeInventoryKeepsUnsupportedExactAndOrdinalSites) {
+  for (const test::AtomicTargetCase &target : test::kNativeCdnaExchangeCases) {
+    SCOPED_TRACE(target.name);
+    const std::vector<uint8_t> image = test::make_native_cdna_exchange_inventory_elf(target);
+    ASSERT_NO_FATAL_FAILURE(write(input_, image));
+    std::vector<std::string> list = args();
+    list.push_back("--list");
+    ASSERT_EQ(run(list), 0) << stderr_;
+    for (size_t ordinal = 0; ordinal < test::kNativeCdnaExchangeInventoryForms.size(); ++ordinal) {
+      const std::string identity =
+          "ordinal=" + std::to_string(ordinal) + " exact=" + std::to_string(ordinal * 8) + " ";
+      const size_t position = stdout_.find(identity);
+      ASSERT_NE(position, std::string::npos) << stdout_;
+      const size_t end = stdout_.find('\n', position);
+      ASSERT_NE(end, std::string::npos);
+      const std::string_view line(stdout_.data() + position, end - position);
+      EXPECT_NE(line.find(test::native_cdna_exchange_mnemonic(
+                    test::kNativeCdnaExchangeInventoryForms[ordinal])),
+                std::string::npos);
+    }
+    for (size_t ordinal : {0u, 3u, 4u, 5u, 6u}) {
+      for (const std::vector<std::string> &selector :
+           {std::vector<std::string>{"--ordinal", std::to_string(ordinal)},
+            std::vector<std::string>{"--exact", std::to_string(ordinal * 8), "--ordinal", "999"}}) {
+        EXPECT_NE(run(mutation_args(selector)), 0);
+        EXPECT_NE(stderr_.find("UnsupportedForm"), std::string::npos) << stderr_;
+        EXPECT_FALSE(std::filesystem::exists(output_));
+        EXPECT_EQ(read(input_), image);
+      }
+    }
+    EXPECT_NE(run(mutation_args({"--exact", "4", "--ordinal", "6"})), 0);
+    EXPECT_NE(stderr_.find("InvalidParameters"), std::string::npos);
+    EXPECT_FALSE(std::filesystem::exists(output_));
+    EXPECT_NE(run(mutation_args({"--ordinal", "7"})), 0);
+    EXPECT_NE(stderr_.find("OrdinalOutOfRange"), std::string::npos);
+    EXPECT_FALSE(std::filesystem::exists(output_));
+    EXPECT_EQ(read(input_), image);
+  }
+}
+
+TEST_F(FaultAtomicCli, NativeSemanticInventoryKeepsUnsupportedOrdinalsBeforeFlat) {
+  for (const test::AtomicTargetCase &target : test::kNativeAtomicInventoryCases) {
+    SCOPED_TRACE(target.name);
+    const std::vector<test::NativeAtomicInventorySample> samples =
+        test::native_atomic_inventory_samples(target);
+    const std::vector<uint8_t> image = test::make_native_atomic_inventory_elf(target);
+    ASSERT_NO_FATAL_FAILURE(write(input_, image));
+    std::vector<std::string> list = args();
+    list.push_back("--list");
+    ASSERT_EQ(run(list), 0) << stderr_;
+    uint64_t offset = 0;
+    for (size_t ordinal = 0; ordinal < samples.size(); ++ordinal) {
+      const std::string identity =
+          "ordinal=" + std::to_string(ordinal) + " exact=" + std::to_string(offset) + " ";
+      const size_t position = stdout_.find(identity);
+      ASSERT_NE(position, std::string::npos) << stdout_;
+      const size_t end = stdout_.find('\n', position);
+      ASSERT_NE(end, std::string::npos);
+      const std::string_view line(stdout_.data() + position, end - position);
+      EXPECT_NE(line.find(samples[ordinal].form), std::string::npos);
+      EXPECT_NE(line.find("address_supported=0"), std::string::npos);
+      offset += samples[ordinal].words.size() * sizeof(uint32_t);
+    }
+    for (const std::vector<std::string> &selector :
+         {std::vector<std::string>{"--ordinal", "0"},
+          std::vector<std::string>{"--exact", "0", "--ordinal", "999"}}) {
+      EXPECT_NE(run(mutation_args(selector)), 0);
+      EXPECT_NE(stderr_.find("UnsupportedForm"), std::string::npos) << stderr_;
+      EXPECT_FALSE(std::filesystem::exists(output_));
+      EXPECT_EQ(read(input_), image);
+    }
+    if (!test::native_atomic_inventory_has_flat(target))
+      continue;
+    const uint64_t flat_offset = offset + sizeof(uint32_t);
+    const FaultMutationContext source(image);
+    FaultMutationError error;
+    const FailureOr<AtomicInventory> inventory =
+        discover_atomic_wrong_address(source, "test_kernel", error);
+    ASSERT_TRUE(inventory.succeeded()) << error.message;
+    const FailureOr<AtomicSelection> selected = select_atomic_wrong_address(
+        inventory.value(), {.exact = std::nullopt, .ordinal = samples.size()}, error);
+    ASSERT_TRUE(selected.succeeded()) << error.message;
+    const FailureOr<AtomicResult> expected =
+        apply_atomic_wrong_address(source, selected.value(), 8, error);
+    ASSERT_TRUE(expected.succeeded()) << error.message;
+    for (const std::vector<std::string> &selector :
+         {std::vector<std::string>{"--ordinal", std::to_string(samples.size())},
+          std::vector<std::string>{"--exact", std::to_string(flat_offset), "--ordinal", "999"}}) {
+      ASSERT_EQ(run(mutation_args(selector)), 0) << stderr_;
+      const std::vector<uint8_t> actual = read(output_);
+      EXPECT_EQ(actual, expected.value().image);
+      EXPECT_TRUE(test::atomic_output_matches(source, flat_offset, 8, actual));
+      EXPECT_EQ(read(input_), image);
+      ASSERT_TRUE(std::filesystem::remove(output_));
+    }
+  }
 }
 
 TEST_F(FaultAtomicCli, HelpAndCapabilitiesMatchEnabledProfiles) {

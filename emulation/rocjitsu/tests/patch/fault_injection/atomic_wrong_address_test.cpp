@@ -1,7 +1,9 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "atomic_cdna_exchange_fixture.h"
 #include "atomic_fixture.h"
+#include "atomic_native_inventory_fixture.h"
 #include "rocjitsu/code/patch/fault_injection/atomic_wrong_address.h"
 
 #include <gtest/gtest.h>
@@ -13,6 +15,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -20,6 +23,37 @@ namespace rocjitsu {
 namespace {
 
 class FaultAtomicWrongAddress : public ::testing::TestWithParam<test::AtomicTargetCase> {};
+
+TEST(FaultAtomicWrongAddressLifetime, LegacyMnemonicMetadataSurvivesContextDestruction) {
+  std::optional<AtomicInventory> inventory;
+  std::optional<AtomicSelection> selection;
+  std::optional<AtomicSite> site;
+  FaultMutationError error;
+  {
+    std::vector<uint8_t> image = test::make_amdgpu_kernel_elf(
+        {0xdd098000u, 0x002e0100u, build_s_endpgm(IsaFamily::Cdna4).value()}, 0, 3,
+        EF_AMDGPU_MACH_AMDGCN_GFX950);
+    image[EI_DATA] = ELFDATA2LSB;
+    image[EI_ABIVERSION] = ELFABIVERSION_AMDGPU_HSA_V5;
+    const FaultMutationContext context(image);
+    const FailureOr<AtomicInventory> found =
+        discover_atomic_wrong_address(context, "test_kernel", error);
+    ASSERT_TRUE(found.succeeded()) << error.message;
+    ASSERT_EQ(found.value().sites().size(), 1u);
+    EXPECT_EQ(found.value().sites().front().form, "global_atomic_add");
+    const FailureOr<AtomicSelection> selected =
+        select_atomic_wrong_address(found.value(), {}, error);
+    ASSERT_TRUE(selected.succeeded()) << error.message;
+    inventory = found.value();
+    selection = selected.value();
+    site = selected.value().site();
+  }
+  EXPECT_EQ(inventory->sites().front().form, "global_atomic_add");
+  EXPECT_EQ(selection->site().form, "global_atomic_add");
+  EXPECT_EQ(site->form, "global_atomic_add");
+  EXPECT_TRUE(select_atomic_wrong_address(*inventory, {}, error).failed());
+  EXPECT_EQ(error.code, FaultMutationErrorCode::BadIdentity);
+}
 
 TEST_P(FaultAtomicWrongAddress, FlatGlobalReturningAndCasPreserveGuestFields) {
   const test::AtomicTargetCase &fixture = GetParam();
@@ -327,6 +361,147 @@ TEST(FaultAtomicWrongAddressOwners, DirectMutationAndRecoveredSelectionKeepExact
                   .failed());
   EXPECT_EQ(error.code, FaultMutationErrorCode::BadIdentity);
 }
+
+class FaultNativeCdnaAtomicInventory : public ::testing::TestWithParam<test::AtomicTargetCase> {};
+
+TEST_P(FaultNativeCdnaAtomicInventory,
+       NativeExchangesKeepExactAndSourceOrderBeforeAddressAdmission) {
+  const test::AtomicTargetCase &target = GetParam();
+  const std::vector<uint8_t> image = test::make_native_cdna_exchange_inventory_elf(target);
+  const FaultMutationContext source(image);
+  std::unique_ptr<Decoder> decoder = Decoder::create(default_isa_target_registry(), target.target);
+  ASSERT_NE(decoder, nullptr);
+  for (test::NativeCdnaExchangeForm form : test::kNativeCdnaExchangeInventoryForms) {
+    const std::array<uint32_t, 2> words = test::native_cdna_exchange_words(target, form);
+    const DecodeResult decoded = decoder->decode_window(words, 0);
+    ASSERT_TRUE(decoded.succeeded());
+    EXPECT_EQ(decoded.value()->mnemonic(), test::native_cdna_exchange_mnemonic(form));
+    EXPECT_EQ(decoded.value()->size(), 8);
+  }
+  FaultMutationError error;
+  const FailureOr<AtomicInventory> inventory =
+      discover_atomic_wrong_address(source, "test_kernel", error);
+  ASSERT_TRUE(inventory.succeeded()) << error.message;
+  ASSERT_EQ(inventory.value().sites().size(), test::kNativeCdnaExchangeInventoryForms.size());
+  for (size_t ordinal = 0; ordinal < test::kNativeCdnaExchangeInventoryForms.size(); ++ordinal) {
+    const test::NativeCdnaExchangeForm form = test::kNativeCdnaExchangeInventoryForms[ordinal];
+    SCOPED_TRACE(test::native_cdna_exchange_mnemonic(form));
+    const AtomicSite &site = inventory.value().sites()[ordinal];
+    EXPECT_EQ(site.offset, ordinal * 8);
+    EXPECT_EQ(site.instruction_size, 8u);
+    EXPECT_EQ(site.form, test::native_cdna_exchange_mnemonic(form));
+    const FailureOr<AtomicSelection> selected = select_atomic_wrong_address(
+        inventory.value(), {.exact = std::nullopt, .ordinal = ordinal}, error);
+    ASSERT_TRUE(selected.succeeded()) << error.message;
+    const FailureOr<AtomicSelection> exact = select_atomic_wrong_address(
+        inventory.value(), {.exact = selected.value(), .ordinal = SIZE_MAX}, error);
+    ASSERT_TRUE(exact.succeeded()) << error.message;
+    EXPECT_EQ(exact.value().site(), site);
+    // These controls remain valid after later slices admit 32-bit DS address recipes.
+    if (form != test::NativeCdnaExchangeForm::ExchangeB32 &&
+        form != test::NativeCdnaExchangeForm::Exchange2B32) {
+      EXPECT_FALSE(site.address_supported);
+      EXPECT_TRUE(apply_atomic_wrong_address(source, exact.value(), 8, error).failed());
+      EXPECT_EQ(error.code, FaultMutationErrorCode::UnsupportedForm);
+    }
+  }
+  const FailureOr<AtomicSelection> first =
+      select_atomic_wrong_address(inventory.value(), {}, error);
+  ASSERT_TRUE(first.succeeded()) << error.message;
+  EXPECT_EQ(first.value().site().offset, 0u);
+  EXPECT_TRUE(apply_atomic_wrong_address(source, first.value(), 8, error).failed());
+  EXPECT_EQ(error.code, FaultMutationErrorCode::UnsupportedForm);
+  EXPECT_TRUE(select_atomic_wrong_address(inventory.value(),
+                                          {.exact = AtomicSelection{}, .ordinal = 6}, error)
+                  .failed());
+  EXPECT_EQ(error.code, FaultMutationErrorCode::BadIdentity);
+  EXPECT_TRUE(
+      select_atomic_wrong_address(inventory.value(), {.exact = std::nullopt, .ordinal = 7}, error)
+          .failed());
+  EXPECT_EQ(error.code, FaultMutationErrorCode::OrdinalOutOfRange);
+  EXPECT_TRUE(std::ranges::equal(source.image(), image));
+}
+
+INSTANTIATE_TEST_SUITE_P(Targets, FaultNativeCdnaAtomicInventory,
+                         ::testing::ValuesIn(test::kNativeCdnaExchangeCases),
+                         [](const ::testing::TestParamInfo<test::AtomicTargetCase> &info) {
+                           return info.param.name;
+                         });
+
+class FaultNativeAtomicInventory : public ::testing::TestWithParam<test::AtomicTargetCase> {};
+
+TEST_P(FaultNativeAtomicInventory, SemanticAtomicsAndLegacyPrefixesPrecedeAddressAdmission) {
+  const test::AtomicTargetCase &target = GetParam();
+  const std::vector<test::NativeAtomicInventorySample> samples =
+      test::native_atomic_inventory_samples(target);
+  const std::vector<uint8_t> image = test::make_native_atomic_inventory_elf(target);
+  const FaultMutationContext source(image);
+  std::unique_ptr<Decoder> decoder = Decoder::create(default_isa_target_registry(), target.target);
+  ASSERT_NE(decoder, nullptr);
+  uint64_t flat_offset = 0;
+  for (const test::NativeAtomicInventorySample &sample : samples) {
+    SCOPED_TRACE(sample.form);
+    const DecodeResult decoded = decoder->decode_window(sample.words, flat_offset);
+    ASSERT_TRUE(decoded.succeeded());
+    EXPECT_EQ(decoded.value()->mnemonic(), sample.form);
+    EXPECT_EQ(decoded.value()->size(), sample.words.size() * sizeof(uint32_t));
+    EXPECT_EQ(decoded.value()->amdgpu_memory_kind(), sample.memory_kind);
+    flat_offset += sample.words.size() * sizeof(uint32_t);
+  }
+  flat_offset += sizeof(uint32_t); // The non-atomic nop is absent from the inventory.
+  const bool has_flat = test::native_atomic_inventory_has_flat(target);
+  FaultMutationError error;
+  const FailureOr<AtomicInventory> inventory =
+      discover_atomic_wrong_address(source, "test_kernel", error);
+  ASSERT_TRUE(inventory.succeeded()) << error.message;
+  ASSERT_EQ(inventory.value().sites().size(), samples.size() + static_cast<size_t>(has_flat));
+  uint64_t offset = 0;
+  for (size_t ordinal = 0; ordinal < samples.size(); ++ordinal) {
+    SCOPED_TRACE(samples[ordinal].form);
+    const AtomicSite &site = inventory.value().sites()[ordinal];
+    EXPECT_EQ(site.offset, offset);
+    EXPECT_EQ(site.instruction_size, samples[ordinal].words.size() * sizeof(uint32_t));
+    EXPECT_EQ(site.form, samples[ordinal].form);
+    EXPECT_FALSE(site.address_supported);
+    const FailureOr<AtomicSelection> selected = select_atomic_wrong_address(
+        inventory.value(), {.exact = std::nullopt, .ordinal = ordinal}, error);
+    ASSERT_TRUE(selected.succeeded()) << error.message;
+    const FailureOr<AtomicSelection> exact = select_atomic_wrong_address(
+        inventory.value(), {.exact = selected.value(), .ordinal = SIZE_MAX}, error);
+    ASSERT_TRUE(exact.succeeded()) << error.message;
+    EXPECT_EQ(exact.value().site(), site);
+    EXPECT_TRUE(apply_atomic_wrong_address(source, exact.value(), 8, error).failed());
+    EXPECT_EQ(error.code, FaultMutationErrorCode::UnsupportedForm);
+    offset += samples[ordinal].words.size() * sizeof(uint32_t);
+  }
+  if (has_flat) {
+    const FailureOr<AtomicSelection> selected = select_atomic_wrong_address(
+        inventory.value(), {.exact = std::nullopt, .ordinal = samples.size()}, error);
+    ASSERT_TRUE(selected.succeeded()) << error.message;
+    EXPECT_EQ(selected.value().site().offset, flat_offset);
+    EXPECT_TRUE(selected.value().site().address_supported);
+    const FailureOr<AtomicResult> mutant =
+        apply_atomic_wrong_address(source, selected.value(), 8, error);
+    ASSERT_TRUE(mutant.succeeded()) << error.message;
+    EXPECT_TRUE(test::atomic_output_matches(source, flat_offset, 8, mutant.value().image));
+  }
+  EXPECT_TRUE(select_atomic_wrong_address(inventory.value(),
+                                          {.exact = AtomicSelection{}, .ordinal = 0}, error)
+                  .failed());
+  EXPECT_EQ(error.code, FaultMutationErrorCode::BadIdentity);
+  EXPECT_TRUE(select_atomic_wrong_address(
+                  inventory.value(),
+                  {.exact = std::nullopt, .ordinal = inventory.value().sites().size()}, error)
+                  .failed());
+  EXPECT_EQ(error.code, FaultMutationErrorCode::OrdinalOutOfRange);
+  EXPECT_TRUE(std::ranges::equal(source.image(), image));
+}
+
+INSTANTIATE_TEST_SUITE_P(Targets, FaultNativeAtomicInventory,
+                         ::testing::ValuesIn(test::kNativeAtomicInventoryCases),
+                         [](const ::testing::TestParamInfo<test::AtomicTargetCase> &info) {
+                           return info.param.name;
+                         });
 
 INSTANTIATE_TEST_SUITE_P(Targets, FaultAtomicWrongAddress,
                          ::testing::ValuesIn(test::kAtomicTargetCases),
