@@ -27,27 +27,33 @@ if(EXISTS "${_default_socket}")
     return()
 endif()
 
-file(MAKE_DIRECTORY "${TEST_PARENT_RUNTIME_DIR}" "${_default_runtime_dir}")
+file(MAKE_DIRECTORY "${TEST_PARENT_RUNTIME_DIR}")
 file(WRITE "${TEST_PARENT_RUNTIME_DIR}/daemon.sock" "")
-file(WRITE "${_default_socket}" "")
 
 execute_process(
     COMMAND
         "${CMAKE_COMMAND}" -E env
         "ROCJITSU_RUNTIME_DIR=${TEST_PARENT_RUNTIME_DIR}" "XDG_RUNTIME_DIR="
-        "RJ_EXPECTED_INVOCATION_DIR=${_default_runtime_dir}"
-        "${TEST_EXECUTABLE}" --attach --env "ROCJITSU_RUNTIME_DIR=" -- /bin/sh
-        -c [=[test "$ROCJITSU_INVOCATION_DIR" = "$RJ_EXPECTED_INVOCATION_DIR"]=]
+        "${TEST_EXECUTABLE}" --attach --env "ROCJITSU_RUNTIME_DIR=" -- /bin/true
     RESULT_VARIABLE _result
     OUTPUT_VARIABLE _stdout
     ERROR_VARIABLE _stderr
 )
 
-file(REMOVE "${_default_socket}" "${TEST_PARENT_RUNTIME_DIR}/daemon.sock")
+file(REMOVE "${TEST_PARENT_RUNTIME_DIR}/daemon.sock")
 
-if(NOT _result EQUAL 0)
+if(_result EQUAL 0)
+    message(FATAL_ERROR "empty runtime override unexpectedly launched app")
+endif()
+
+string(
+    FIND "${_stderr}"
+    "rocjitsu: no daemon socket at ${_default_socket}"
+    _diagnostic
+)
+if(_diagnostic EQUAL -1)
     message(
         FATAL_ERROR
-        "empty runtime override failed with ${_result}\nstdout:\n${_stdout}\nstderr:\n${_stderr}"
+        "empty runtime override did not diagnose the default socket\nstdout:\n${_stdout}\nstderr:\n${_stderr}"
     )
 endif()
