@@ -3709,25 +3709,22 @@ def test_generated_special_vop3_true16_paths_use_selected_halves(
 ):
     execute_shared = execute_shared_path.read_text()
 
-    mad_u32 = _shared_execute_body(execute_shared, 'v_mad_u32_u16_vop3')
-    assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_SRC01' in mad_u32
-    assert 'read_vop3_true16_src(inst.src0, wf, lane, opsel, 0)' in mad_u32
-    assert 'read_vop3_true16_src(inst.src1, wf, lane, opsel, 1)' in mad_u32
-    assert 'read_vop3_true16_src(inst.src2' not in mad_u32
-    assert (
-        'uint32_t s2 = amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane);'
-        in mad_u32
-    )
-
-    mad_i32 = _shared_execute_body(execute_shared, 'v_mad_i32_i16_vop3')
-    assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_SRC01' in mad_i32
-    assert 'read_vop3_true16_src(inst.src0, wf, lane, opsel, 0)' in mad_i32
-    assert 'read_vop3_true16_src(inst.src1, wf, lane, opsel, 1)' in mad_i32
-    assert 'read_vop3_true16_src(inst.src2' not in mad_i32
-    assert (
-        'int32_t s2 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane));'
-        in mad_i32
-    )
+    for arch in ('cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5'):
+        vop3 = (amdgpu_generated_root / arch / 'vop3_exec.cpp').read_text()
+        for kind in ('U', 'I'):
+            body = _generated_function_body(
+                vop3, f'void VMad{kind}32{kind}16Vop3::execute_impl'
+            )
+            assert 'execute_ternary32' in body
+            assert f'rj_arith_v_mad_{kind.lower()}32_{kind.lower()}16_w64' in body
+            assert 'RJ_ARITH_ALU_HIGH_A' in body
+            assert 'RJ_ARITH_ALU_HIGH_B' in body
+            assert 'RJ_ARITH_ALU_HIGH_C' not in body
+            assert 'src0, src1, src2' in body
+            assert (
+                f'execute_v_mad_{kind.lower()}32_{kind.lower()}16_vop3'
+                not in execute_shared
+            )
 
     rdna2_vop3 = (amdgpu_generated_root / 'rdna2' / 'vop3_exec.cpp').read_text()
     div_fixup = _generated_function_body(

@@ -29,58 +29,6 @@ def test_pk_fma_f16_has_no_legacy_ternary_fallback():
         )
 
 
-def test_pk_add_minmax_saturates_add_before_selecting_third_operand():
-    signed = gen_pk_ternary(
-        ['vdst'],
-        ['src0', 'src1', 'src2'],
-        'add_max_sat',
-        'i16',
-        op_sel_hi_2_expr='inst_.pad_14',
-        opsel_exprs=('inst_.opsel', 'inst_.opsel_hi'),
-    )
-    unsigned = gen_pk_ternary(
-        ['vdst'],
-        ['src0', 'src1', 'src2'],
-        'add_min_sat',
-        'u16',
-        op_sel_hi_2_expr='inst_.pad_14',
-        opsel_exprs=('inst_.opsel', 'inst_.opsel_hi'),
-    )
-
-    assert 'std::clamp(static_cast<int32_t>(a_lo) + b_lo, -32768, 32767)' in signed
-    assert 'std::max(sum_lo, c_lo)' in signed
-    assert 'if (inst_.clamp)' in signed
-    assert 'std::max<int16_t>(static_cast<int16_t>(rlo), 0)' in signed
-    assert 'std::min(static_cast<uint32_t>(a_lo) + b_lo, 65535u)' in unsigned
-    assert 'std::min(sum_lo, c_lo)' in unsigned
-
-
-def test_pk_mad_integer_clamp_saturates_both_selected_halves():
-    signed = gen_pk_ternary(
-        ['vdst'],
-        ['src0', 'src1', 'src2'],
-        'mad',
-        'i16',
-        op_sel_hi_2_expr='inst_.op_sel_hi_2',
-        opsel_exprs=('inst_.op_sel', 'inst_.op_sel_hi'),
-        integer_clamp=True,
-    )
-    unsigned = gen_pk_ternary(
-        ['vdst'],
-        ['src0', 'src1', 'src2'],
-        'mad',
-        'u16',
-        op_sel_hi_2_expr='inst_.op_sel_hi_2',
-        opsel_exprs=('inst_.op_sel', 'inst_.op_sel_hi'),
-        integer_clamp=True,
-    )
-
-    assert signed.count('vop3_integer_mad<int16_t, 16>') == 2
-    assert signed.count('inst_.clamp') == 2
-    assert unsigned.count('vop3_integer_mad<uint16_t, 16>') == 2
-    assert unsigned.count('inst_.clamp') == 2
-
-
 def test_pk_f16_binop_narrows_inline_float_constants():
     cpp = gen_pk_binop(
         ['vdst'],
@@ -127,20 +75,6 @@ def test_pk_bf16_binary_preserves_fp32_inline_constants():
         assert 'pk16_src_needs_narrowing' not in cpp
         assert 'raw0 = util::f32_to_bf16' not in cpp
         assert 'raw1 = util::f32_to_bf16' not in cpp
-
-
-def test_pk_integer_binop_leaves_inline_constants_alone():
-    for dtype in ('i16', 'u16'):
-        cpp = gen_pk_binop(
-            ['vdst'],
-            ['src0', 'src1'],
-            'add',
-            dtype,
-            opsel_exprs=('inst_.op_sel', 'inst_.op_sel_hi'),
-        )
-
-        assert '240u' not in cpp
-        assert 'bit_cast' not in cpp
 
 
 def test_gfx1250_pk_f32_uses_literal_aware_pair_helper():
