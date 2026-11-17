@@ -180,7 +180,7 @@ the parent that exited cleanly needs no repair. A sub-archive is skipped when
 payloads, finds it complete in the sense `load_archive` uses. `--info` on a
 root applies the same check before it shows a process as complete.
 
-### Archive Format (v13)
+### Archive Format (v15)
 ```
 capture.hrr/
   manifest.json      { version, capture_mode, owner_pid, processes[] }
@@ -298,7 +298,7 @@ projects/hrr/                     — standalone HRR project (portable layer)
                                     Not used by capture — it is the format an
                                     out-of-tree producer writes and playback reads
   playback/
-    hrr_reader.h/.cpp             — archive loader, v13 format; record framing
+    hrr_reader.h/.cpp             — archive loader, v15 format; record framing
                                     (read_raw_record / open_record_stream) shared
                                     with the region sidecars
     hrr_region_map.h/.cpp         — region timeline: merge, cursor, live block set,
@@ -383,13 +383,13 @@ The generator classifies each API:
 Generated capture shims for manual APIs are pass-throughs (no `write_event()`).
 When adding HIP API support, update this script to classify the API in the appropriate capture and playback policy sets. APIs requiring non-trivial serialization or replay belong in `MANUAL_CAPTURE_APIS` and/or `MANUAL_PLAYBACK_APIS`; intentionally unsupported replay APIs belong in `NOOP_PLAYBACK_APIS`.
 
-## Archive Format (v13)
+## Archive Format (v15)
 
 Single-authority definition in `hrr_api_args.h` (auto-generated):
 
 ```
 HRR_MAGIC   = 0x52524845  ("HRRE")
-HRR_VERSION = 13
+HRR_VERSION = 15
 ```
 
 Version history, so an archive written by an older runtime can be placed:
@@ -438,12 +438,19 @@ Version history, so an archive written by an older runtime can be placed:
 - **v13** puts pinned host snapshot records after the fixed fields of a
   `hipGraphLaunch` or `hipGraphLaunch_spt` event. A v12 reader would launch the graph without restoring them.
   A record names one chunk of an allocation, at a non-zero offset after the first.
+- **v14** records `hipMemcpyWithAttributesAsync`, `hipMemcpy3DWithAttributesAsync`,
+  and `hipArrayGetSparseProperties`, appended to `HipDispatchTable`, which shift
+  the compiler API IDs up by three. A v13 reader would decode those events as the
+  wrong APIs.
+- **v15** records the four graph ID queries appended to `HipDispatchTable`, which
+  shift the compiler API IDs up by four. A v14 reader would decode those events
+  as the wrong APIs.
 
 ```
 <output_dir>/
   manifest.json      { version, capture_mode, owner_pid, processes[] }
                      (version here is the manifest schema = 1, distinct from the
-                      events.bin HRR_VERSION = 13)
+                      events.bin HRR_VERSION = 15)
   pid-<pid>/
     manifest.json      { pid, parent_pid, complete, event_count, blob_count }
     active             one line naming the process instance (boot id and

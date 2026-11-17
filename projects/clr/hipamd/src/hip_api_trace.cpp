@@ -961,6 +961,10 @@ hipError_t hipKernelSetAttributeForDevice(hipKernel_t kernel, hipFuncAttribute a
 hipError_t hipKernelSetCacheConfig(hipKernel_t kernel, hipFuncCache_t config, hipDevice_t dev);
 hipError_t hipArrayGetSparseProperties(hipArraySparseProperties* sparseProperties,
                                        hipArray_t array);
+hipError_t hipGraphNodeGetLocalId(hipGraphNode_t node, unsigned int* nodeId);
+hipError_t hipGraphNodeGetToolsId(hipGraphNode_t node, unsigned long long* toolsId);
+hipError_t hipGraphGetId(hipGraph_t graph, unsigned int* graphId);
+hipError_t hipGraphExecGetId(hipGraphExec_t graphExec, unsigned int* graphId);
 }  // namespace hip
 
 namespace hip {
@@ -1138,6 +1142,7 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipGraphExecEventRecordNodeSetEvent_fn =
       hip::hipGraphExecEventRecordNodeSetEvent;
   ptrDispatchTable->hipGraphExecEventWaitNodeSetEvent_fn = hip::hipGraphExecEventWaitNodeSetEvent;
+  ptrDispatchTable->hipGraphExecGetId_fn = hip::hipGraphExecGetId;
   ptrDispatchTable->hipGraphExecHostNodeSetParams_fn = hip::hipGraphExecHostNodeSetParams;
   ptrDispatchTable->hipGraphExecKernelNodeSetParams_fn = hip::hipGraphExecKernelNodeSetParams;
   ptrDispatchTable->hipGraphExecMemcpyNodeSetParams_fn = hip::hipGraphExecMemcpyNodeSetParams;
@@ -1149,6 +1154,7 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipGraphExecMemsetNodeSetParams_fn = hip::hipGraphExecMemsetNodeSetParams;
   ptrDispatchTable->hipGraphExecUpdate_fn = hip::hipGraphExecUpdate;
   ptrDispatchTable->hipGraphGetEdges_fn = hip::hipGraphGetEdges;
+  ptrDispatchTable->hipGraphGetId_fn = hip::hipGraphGetId;
   ptrDispatchTable->hipGraphGetNodes_fn = hip::hipGraphGetNodes;
   ptrDispatchTable->hipGraphGetRootNodes_fn = hip::hipGraphGetRootNodes;
   ptrDispatchTable->hipGraphHostNodeGetParams_fn = hip::hipGraphHostNodeGetParams;
@@ -1177,6 +1183,8 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipGraphNodeGetDependencies_fn = hip::hipGraphNodeGetDependencies;
   ptrDispatchTable->hipGraphNodeGetDependentNodes_fn = hip::hipGraphNodeGetDependentNodes;
   ptrDispatchTable->hipGraphNodeGetEnabled_fn = hip::hipGraphNodeGetEnabled;
+  ptrDispatchTable->hipGraphNodeGetLocalId_fn = hip::hipGraphNodeGetLocalId;
+  ptrDispatchTable->hipGraphNodeGetToolsId_fn = hip::hipGraphNodeGetToolsId;
   ptrDispatchTable->hipGraphNodeGetType_fn = hip::hipGraphNodeGetType;
   ptrDispatchTable->hipGraphNodeSetEnabled_fn = hip::hipGraphNodeSetEnabled;
   ptrDispatchTable->hipGraphReleaseUserObject_fn = hip::hipGraphReleaseUserObject;
@@ -2327,6 +2335,11 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipMemcpyWithAttributesAsync_fn, 550);
 HIP_ENFORCE_ABI(HipDispatchTable, hipMemcpy3DWithAttributesAsync_fn, 551);
 // HIP_RUNTIME_API_TABLE_STEP_VERSION == 41
 HIP_ENFORCE_ABI(HipDispatchTable, hipArrayGetSparseProperties_fn, 552);
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 42
+HIP_ENFORCE_ABI(HipDispatchTable, hipGraphNodeGetLocalId_fn, 553);
+HIP_ENFORCE_ABI(HipDispatchTable, hipGraphNodeGetToolsId_fn, 554);
+HIP_ENFORCE_ABI(HipDispatchTable, hipGraphGetId_fn, 555);
+HIP_ENFORCE_ABI(HipDispatchTable, hipGraphExecGetId_fn, 556);
 
 // if HIP_ENFORCE_ABI entries are added for each new function pointer in the table, the number below
 // will be +1 of the number in the last HIP_ENFORCE_ABI line. E.g.:
@@ -2334,9 +2347,9 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipArrayGetSparseProperties_fn, 552);
 //  HIP_ENFORCE_ABI(<table>, <functor>, 8)
 //
 //  HIP_ENFORCE_ABI_VERSIONING(<table>, 9) <- 8 + 1 = 9
-HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 553)
+HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 557)
 
-static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 41,
+static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 42,
               "If you get this error, add new HIP_ENFORCE_ABI(...) code for the new function "
               "pointers and then update this check so it is true");
 #endif

@@ -6,6 +6,11 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 ### Added
 * New HIP APIs
+    - Graph Management: added graph and graph-node identifier queries.
+      * `hipGraphNodeGetLocalId` returns a node's graph-local ID.
+      * `hipGraphNodeGetToolsId` returns the node ID used by profiling tools.
+      * `hipGraphGetId` returns a graph ID.
+      * `hipGraphExecGetId` returns an executable graph ID.
     - Memory Management: support for API parity with corresponding CUDA API.
       * `hipMemcpyWithAttributesAsync` performs a single asynchronous 1D copy with the attributes
         described by a `hipMemcpyAttributes` structure, without requiring the caller to build the
