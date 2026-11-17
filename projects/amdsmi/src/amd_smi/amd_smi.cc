@@ -6319,7 +6319,8 @@ amdsmi_status_t amdsmi_get_gpu_process_list_by_pid(amdsmi_processor_handle* proc
   // Collect processes from all GPUs, grouped by PID. Handles that are not GPUs
   // are skipped. A GPU whose list cannot be read, such as one that processes kept
   // starting on (AMDSMI_STATUS_RETRY), is left out rather than hiding the other
-  // GPUs' processes; its error is returned only if no GPU's list is read.
+  // GPUs' processes. The first such error is returned only if no GPU's list is
+  // read.
   std::map<uint32_t, amdsmi_proc_info_by_pid_t> pid_map;
   auto first_error = AMDSMI_STATUS_SUCCESS;
   bool any_read = false;

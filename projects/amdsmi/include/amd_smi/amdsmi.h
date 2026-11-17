@@ -7167,7 +7167,8 @@ amdsmi_status_t amdsmi_get_gpu_compute_process_info_by_pid(uint32_t pid,
  *  uint32_t's @p dv_indices of length *@p num_devices, this function will
  *  write up to *@p num_devices device indices to the memory pointed to by
  *  @p dv_indices. If @p dv_indices is not NULL, @p num_devices will be
- *  updated with the number of gpu's currently being used by process @p pid.
+ *  updated with the number of indices written (unchanged on
+ *  ::AMDSMI_STATUS_INSUFFICIENT_SIZE).
  *  If @p dv_indices is NULL, @p num_devices will be updated with the number of
  *  gpus currently being used by @p pid. Calling this function with @p
  *  dv_indices being NULL is a way to determine how much memory is required
@@ -8749,8 +8750,13 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
  *        allocates as VRAM in GTT, as on an APU with less VRAM than GTT, KFD's count
  *        replaces gtt_mem when larger instead. mem is the sum of the three. VRAM that amdgpu
  *        has moved to GTT for a while (evicted) can count in both. If the caller may not
- *        read the process's fdinfo (another user's, without root), only KFD's count is
- *        known: the other sizes are 0.
+ *        read the process's fdinfo (such as another user's, when the caller lacks
+ *        CAP_SYS_PTRACE), only KFD's count is known: the other sizes are 0. On a GPU split
+ *        into partitions, DRM fdinfo names only the GPU's PCI device. Where amd-smi shows the
+ *        partitions with their ID in the PCI function, only the first partition's list matches
+ *        it and covers every partition's fdinfo sizes and engine_usage, while the others hold
+ *        only KFD's count (nothing, in a PID namespace other than the host's); otherwise every
+ *        partition's list matches it and covers them all.
  *
  *  @param[in]      processor_handle Device which to query
  *
@@ -8785,7 +8791,9 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
  * not filled. Without KFD the list is empty. A process whose KFD statistics cannot be read is
  * still listed, with cu_occupancy, evicted_time and sdma_usage all-ones (not available) and memory
  * sizes from its fdinfo only (0 if unreadable). So is a running process whose GPUs cannot be read
- * from KFD, if its DRM fdinfo shows this GPU. If its fdinfo cannot be read either, the listing
+ * from KFD, if its DRM fdinfo shows a DRM node of this GPU's PCI device open, which the ROCm
+ * runtime does for every GPU it can see (for a GPU split into partitions, see the note on
+ * memory_usage above). If its fdinfo cannot be read either, the listing
  * fails with the error from KFD, unless that error is that the caller may not read which GPUs it
  * uses (::AMDSMI_STATUS_NO_PERM from amdsmi_get_gpu_compute_process_gpus()): such a process is
  * left out, as is one that exited.
@@ -8816,8 +8824,10 @@ amdsmi_status_t amdsmi_get_gpu_process_list(amdsmi_processor_handle processor_ha
  *  @param[in]  num_processors     Number of handles in processor_handles
  *  @param[out] procs              Caller-allocated buffer of amdsmi_proc_info_by_pid_t.
  *                                 Pass NULL to query the required size via max_processes.
- *  @param[in,out] max_processes   On input: capacity of procs. On output: number of
- *                                 unique PIDs written (or required if procs is NULL).
+ *  @param[in,out] max_processes   On input: capacity of procs. On output: the number of
+ *                                 unique PIDs found; procs holds the first of them, up to
+ *                                 its capacity (none if procs is NULL or the capacity is 0,
+ *                                 which only returns the count, with ::AMDSMI_STATUS_SUCCESS).
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
  *                            | ::AMDSMI_STATUS_OUT_OF_RESOURCES if max_processes was too small,

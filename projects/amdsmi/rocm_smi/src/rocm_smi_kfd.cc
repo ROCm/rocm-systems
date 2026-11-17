@@ -43,6 +43,7 @@ namespace amd::smi {
 
 static bool is_number(const std::string& s);
 static const char kDefaultKFDProcPathRoot[] = "/sys/class/kfd/kfd/proc";
+static const char kDefaultProcPathRoot[] = "/proc";
 // Set only by SetKFDProcPathRootForTesting() and SetProcPathRootForTesting();
 // production never writes them.
 static std::atomic<const char*> g_kfd_proc_path_root_override{nullptr};
@@ -57,7 +58,7 @@ const char* KFDProcPathRoot() {
 // are read from.
 static const char* ProcPathRoot() {
   const char* path = g_proc_path_root_override.load();
-  return path != nullptr ? path : "/proc";
+  return path != nullptr ? path : kDefaultProcPathRoot;
 }
 static const char* kKFDVramPrefix = "vram_";
 
