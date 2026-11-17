@@ -211,6 +211,8 @@ constexpr EncodingTable init() {
       .HasInf = true,
   };
 
+  // FNUZ: no Inf, 0x7f/0xff are +-57344. Not reachable from any public __amd_cvt_* entry point
+  // (only E4M3 and E5M2 interpretations exist), so it has no host test.
   a[(size_t)Encoding::E5M2Nanoo] = {
       .ExpBias = 16,
       .ExpBits = 5,
@@ -221,7 +223,7 @@ constexpr EncodingTable init() {
       .MinExp = -15,
       .MxScale = false,
       .HasNaN = true,
-      .HasInf = true,
+      .HasInf = false,
   };
 
   a[(size_t)Encoding::E5M10] = {
@@ -365,8 +367,16 @@ template <Encoding E, bool sat> __OCP_FP_HOST_DEVICE_STATIC__ __hip_uint32_t inf
       return nan<E, sat>(sign);
     case Encoding::E4M3:
     case Encoding::E4M3Mx:
+      // 0x7f is the NaN encoding; the largest finite value is 0x7e (448).
+      if constexpr (sat) {
+        sign <<= enc.ExpBits + enc.ManBits;
+        return sign | 0b01111110;
+      }
+
+      return nan<E, sat>(sign);
     case Encoding::E4M3Nanoo:
     case Encoding::E5M2Nanoo:
+      // FNUZ: 0x7f is the largest finite value.
       if constexpr (sat) {
         sign <<= enc.ExpBits + enc.ManBits;
         return sign | 0b01111111;
@@ -408,7 +418,10 @@ template <Encoding E, bool sat> __OCP_FP_HOST_DEVICE_STATIC__ bool isinf(__hip_u
   const auto& enc = encodings[(size_t)E];
   if (!enc.HasInf) return false;
 
-  if constexpr (E == Encoding::E5M10 || E == Encoding::E8M7) {
+  // Infinity is a property of the bit pattern; inf<E, sat>() is the overflow result of a
+  // conversion and for sat == true it is the largest finite value, not Infinity.
+  if constexpr (E == Encoding::E5M10 || E == Encoding::E8M7 || E == Encoding::E5M2 ||
+                E == Encoding::E5M2Mx) {
     return exponentbits<E, sat>(val) == enc.ExpMask && mantissa<E, sat>(val) == 0;
   }
 
@@ -528,6 +541,13 @@ __OCP_FP_HOST_DEVICE_STATIC__ T to_float(__hip_uint32_t u32, __hip_int8_t scale_
 
   auto sign = signbit<E, sat>(u32) << (dstEnc.ExpBits + dstEnc.ManBits);
 
+  // Without a scale, E5M2 subnormals (and E5M2Nanoo normals/subnormals) lie below the binary16
+  // minimum normal. dstExp is < 1 here (and may have wrapped around): encode as a subnormal.
+  if (!enc.MxScale && (__hip_int32_t)dstExp < 1) {
+    dstMan = (dstMan | ((__hip_uint32_t)1 << dstEnc.ManBits)) >> (1 - (__hip_int32_t)dstExp);
+    dstExp = 0;
+  }
+
   if (enc.MxScale) {
     __hip_int32_t exp = dstExp - dstEnc.ExpBias;
     __hip_int32_t tmp = exp + (__hip_int32_t)scale_exp;
@@ -612,19 +632,19 @@ __OCP_FP_HOST_DEVICE_STATIC__ __hip_uint32_t from_float_sr(T f, __hip_uint32_t s
 
   auto srcMan = mantissa<srcE, false>(srcU32);
   auto srcExp = exponent<srcE, false>(srcU32);
-  if (enc.MxScale) {
-    if (issubnorm<srcE, false>(srcU32)) {
-      auto leadbit = (__hip_uint32_t)1 << srcEnc.ManBits;
-      while ((srcMan & leadbit) == 0) {
-        srcMan <<= 1;
-        srcExp -= 1;
-      }
-
-      srcMan &= srcEnc.ManMask;
+  // exponent() reports a subnormal source as 1 - bias, but its mantissa has no implicit leading 1.
+  // Normalize it for every destination: fp16 subnormals are in the range of E5M2's normals.
+  if (issubnorm<srcE, false>(srcU32)) {
+    auto leadbit = (__hip_uint32_t)1 << srcEnc.ManBits;
+    while ((srcMan & leadbit) == 0) {
+      srcMan <<= 1;
+      srcExp -= 1;
     }
 
-    srcExp -= scale_exp;
+    srcMan &= srcEnc.ManMask;
   }
+
+  if (enc.MxScale) srcExp -= scale_exp;
 
   auto exp = srcExp;
   auto man = srcMan;
@@ -721,19 +741,19 @@ __OCP_FP_HOST_DEVICE_STATIC__ __hip_uint32_t from_float(T f, __hip_int8_t scale_
 
   auto srcMan = mantissa<srcE, false>(srcU32);
   auto srcExp = exponent<srcE, false>(srcU32);
-  if (enc.MxScale) {
-    if (issubnorm<srcE, false>(srcU32)) {
-      auto leadbit = (__hip_uint32_t)1 << srcEnc.ManBits;
-      while ((srcMan & leadbit) == 0) {
-        srcMan <<= 1;
-        srcExp -= 1;
-      }
-
-      srcMan &= srcEnc.ManMask;
+  // exponent() reports a subnormal source as 1 - bias, but its mantissa has no implicit leading 1.
+  // Normalize it for every destination: fp16 subnormals are in the range of E5M2's normals.
+  if (issubnorm<srcE, false>(srcU32)) {
+    auto leadbit = (__hip_uint32_t)1 << srcEnc.ManBits;
+    while ((srcMan & leadbit) == 0) {
+      srcMan <<= 1;
+      srcExp -= 1;
     }
 
-    srcExp -= scale_exp;
+    srcMan &= srcEnc.ManMask;
   }
+
+  if (enc.MxScale) srcExp -= scale_exp;
 
   auto exp = srcExp;
   auto man = srcMan;
