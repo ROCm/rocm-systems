@@ -511,9 +511,10 @@ After a successful load, the hook compares the loader's selected image with
 the reader it checked. If another loader layer substitutes an image, or the
 selected bytes cannot be obtained, it discards the pending dispatch mapping
 and reports that checking is unavailable. With `ROCJITSU_WAITCHECK_FAIL=1`,
-the load returns an error before freeze. Eager mode can conservatively reject
-a hazardous caller reader before a later loader layer substitutes it; that
-diagnostic describes the caller reader, not the selected image.
+the load returns an error before freeze. Eager mode and dispatch mode with an
+active cooperative queue can conservatively reject a hazardous caller reader
+before a later loader layer substitutes it; that diagnostic describes the
+caller reader, not the selected image.
 
 Descriptor queues requesting device-memory placement keep their original queue
 and cannot be intercepted by dispatch mode. With `ROCJITSU_WAITCHECK_FAIL=1`,
