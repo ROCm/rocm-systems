@@ -13,8 +13,12 @@
 #include "debug.h"
 #include "algorithms/dda/dda_init_detail.h"
 #include "algorithms/dda/ipc/ipc_mem_handler.h"
+#include "dda_done.h"
 
 #include <cuda_runtime.h>
+#include <hip/hip_runtime_api.h>
+
+#include <new>
 
 using nccl_dda_detail::DdaIpcBarrierState;
 using nccl_dda_detail::ddaMaxNBlocksForScratch;
@@ -42,6 +46,30 @@ bool ddaIpcCommEligible(const ncclComm* comm) {
 }
 
 } // namespace
+
+// Signal memory starts at 1, and waits are >=, so clear it before the first launch. A failure leaves
+// ddaDone null and the host-staged launches keep the fused stop event.
+static void rcclDdaDoneAlloc(ncclComm* comm) {
+  auto* state = new (std::nothrow) rcclDdaDoneState();
+  if (state == nullptr) {
+    WARN("ncclDdaIpcCommInit: OOM allocating DDA completion state");
+    return;
+  }
+  hipError_t err = hipExtMallocWithFlags(reinterpret_cast<void**>(&state->seq), sizeof(uint64_t), hipMallocSignalMemory);
+  if (err == hipSuccess) err = hipMemset(state->seq, 0, sizeof(uint64_t));
+  if (err == hipSuccess) {
+    err = hipExtMallocWithFlags(reinterpret_cast<void**>(&state->grid), sizeof(unsigned), hipDeviceMallocDefault);
+  }
+  if (err == hipSuccess) err = hipMemset(state->grid, 0, sizeof(unsigned));
+  if (err != hipSuccess) {
+    WARN("ncclDdaIpcCommInit: DDA completion signal allocation failed (%s)", hipGetErrorString(err));
+    if (state->seq != nullptr) hipFree(state->seq);
+    if (state->grid != nullptr) hipFree(state->grid);
+    delete state;
+    return;
+  }
+  comm->ddaDone = state;
+}
 
 ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   // Skip DDA if:
@@ -200,6 +228,7 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   comm->ddaScratchBytes = bytes;
   comm->ddaPeerPtrsDev = peerDev;
   comm->ddaIpcBarrierState = barrierState;
+  rcclDdaDoneAlloc(comm);
   INFO(NCCL_INIT, "ncclDdaIpcCommInit: scratch %zu bytes, IpcGpuBarrier nBlocks=%d, peer IPC table on device", bytes,
        nBlocksMax);
   return ncclSuccess;
@@ -213,15 +242,28 @@ ncclResult_t ncclDdaIpcCommClosePeerMappings(ncclComm* comm) {
   auto* barrierState = comm->ddaIpcBarrierState;
   const bool hasBarrierMappings = barrierState != nullptr && barrierState->resources != nullptr &&
                                   barrierState->resources->ipcMemHandler != nullptr;
-  if ((hasBarrierMappings || comm->ddaIpcMemHandler != nullptr) && comm->doneEvent != nullptr) {
-    // DDA kernels and CE-scratch copies run on the user stream, which the
-    // hostStream/deviceStream syncs in commDestroySync do not cover. doneEvent
-    // is recorded after every kernel and CE launch, so waiting on it keeps
-    // in-flight work off unmapped peers.
-    cudaError_t syncErr = cudaEventSynchronize(comm->doneEvent);
-    if (syncErr != cudaSuccess) {
-      WARN("ncclDdaIpcCommClosePeerMappings: doneEvent sync failed (%s); continuing cleanup",
-           cudaGetErrorString(syncErr));
+  if (hasBarrierMappings || comm->ddaIpcMemHandler != nullptr) {
+    // User-stream DDA work is not covered by the hostStream sync in commDestroySync. The last
+    // host-staged launch left ddaDone->wait set; any other launch recorded doneEvent.
+    rcclDdaDoneState* state = comm->ddaDone;
+    if (state != nullptr && state->wait != 0 && state->seq != nullptr) {
+      hipStream_t waitStream = nullptr;
+      hipError_t waitErr = hipStreamCreateWithFlags(&waitStream, hipStreamNonBlocking);
+      if (waitErr == hipSuccess) {
+        waitErr = hipStreamWaitValue64(waitStream, state->seq, state->wait, hipStreamWaitValueGte, ~0ull);
+      }
+      if (waitErr == hipSuccess) waitErr = hipStreamSynchronize(waitStream);
+      if (waitStream != nullptr) hipStreamDestroy(waitStream);
+      if (waitErr != hipSuccess) {
+        WARN("ncclDdaIpcCommClosePeerMappings: addon completion wait failed (%s); continuing cleanup",
+             hipGetErrorString(waitErr));
+      }
+    } else if (comm->doneEvent != nullptr) {
+      cudaError_t syncErr = cudaEventSynchronize(comm->doneEvent);
+      if (syncErr != cudaSuccess) {
+        WARN("ncclDdaIpcCommClosePeerMappings: doneEvent sync failed (%s); continuing cleanup",
+             cudaGetErrorString(syncErr));
+      }
     }
   }
   if (hasBarrierMappings) {
@@ -268,5 +310,11 @@ ncclResult_t ncclDdaIpcCommFini(ncclComm* comm) {
   CUDACHECKIGNORE(cudaFree(comm->ddaScratch));
   comm->ddaScratch = nullptr;
   comm->ddaScratchBytes = 0;
+  if (comm->ddaDone != nullptr) {
+    CUDACHECKIGNORE(cudaFree(comm->ddaDone->seq));
+    CUDACHECKIGNORE(cudaFree(comm->ddaDone->grid));
+    delete comm->ddaDone;
+    comm->ddaDone = nullptr;
+  }
   return ncclSuccess;
 }

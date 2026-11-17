@@ -2502,6 +2502,20 @@ TEST_F(InitMicrotest, CommAlloc_HappyPath_ReturnsSuccessAndSetsIdentity) {
   EXPECT_NE(nullptr, comm->sharedRes);          // parent==NULL -> owns sharedRes
 }
 
+TEST_F(InitMicrotest, CommAlloc_DoesNotAllocateTheDdaSignal) {
+  InstallCommAllocSuccess();
+  std::vector<size_t> signalBytes;
+  ScopedHook allocation(g_hipExtMallocWithFlags, [&](void** ptr, size_t bytes, unsigned flags) {
+    if (flags == hipMallocSignalMemory) signalBytes.push_back(bytes);
+    *ptr = std::malloc(bytes);
+    return *ptr == nullptr ? hipErrorOutOfMemory : hipSuccess;
+  });
+  auto comm = FreshComm();
+  ASSERT_EQ(ncclSuccess, commAlloc(comm.get(), nullptr, /*ndev=*/8, /*rank=*/0));
+  EXPECT_TRUE(signalBytes.empty());
+  EXPECT_EQ(nullptr, comm->ddaDone);
+}
+
 TEST_F(InitMicrotest, CommAlloc_NetInitFails_ReturnsError) {
   InstallCommAllocSuccess();
   g_ncclNetInitResult = ncclSystemError;

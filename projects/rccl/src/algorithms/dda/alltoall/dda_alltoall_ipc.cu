@@ -12,6 +12,7 @@
 #include "comm.h"
 #include "debug.h"
 #include "algorithms/dda/ipc/ipc_gpu_barrier.h"
+#include "algorithms/dda/ipc/dda_order.h"
 #include "algorithms/dda/dda_init_detail.h"
 
 #include <cuda_runtime.h>
@@ -61,16 +62,23 @@ static ncclResult_t ncclAllToAllDdaIpcTyped(const void* sendbuff, void* recvbuff
   void* peerPtrsDev = comm->ddaPeerPtrsDev;
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
 
-  const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
   if (dda::common::ddaAlltoAllSingleBlockGrid(count, sizeof(T))) {
+    const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
     hipExtLaunchKernelGGL((dda::common::ddaAllToAllIpc<T, kDdaNranks, false, true>), grid, block, 0, stream,
                           /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff), count,
                           static_cast<const T*>(sendbuff), comm->rank, barrierHost);
   } else {
+    // The host copy puts the fused stop event behind another dispatch. Publish the 8-byte signal instead.
+    const DdaDoneMark done = rcclPrepareAddonDone(comm);
+    if (done.seq != nullptr) barrierHost.setDone(done);
+    const hipEvent_t stopEvent = done.seq != nullptr ? nullptr : rcclTakeAddonStopEvent(comm);
     CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, totalBytes, cudaMemcpyDeviceToDevice, stream));
     hipExtLaunchKernelGGL((dda::common::ddaAllToAllIpc<T, kDdaNranks, false, false>), grid, block, 0, stream,
                           /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff), count,
                           static_cast<const T*>(sendbuff), comm->rank, barrierHost);
+    CUDACHECK(cudaGetLastError());
+    rcclCommitAddonDone(comm, done);
+    return ncclSuccess;
   }
   CUDACHECK(cudaGetLastError());
 

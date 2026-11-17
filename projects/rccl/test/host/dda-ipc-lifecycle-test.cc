@@ -398,6 +398,24 @@ TEST_F(DdaIpcLifecycleMicrotest, ClosePeerMappingsWaitsForInFlightDdaKernelsBefo
   EXPECT_TRUE(liveAllocations_.empty());
 }
 
+TEST_F(DdaIpcLifecycleMicrotest, InitAllocatesOneSignalWordPerRank) {
+  initializeDdaIpcForAllRanks();
+  for (int rank = 0; rank < kRanks; ++rank) {
+    ASSERT_EQ(ncclSuccess, initResults_[rank]) << "rank " << rank;
+    rcclDdaDoneState* state = comms_[rank]->ddaDone;
+    ASSERT_NE(nullptr, state) << "rank " << rank;
+    ASSERT_NE(nullptr, state->seq) << "rank " << rank;
+    ASSERT_NE(nullptr, state->grid) << "rank " << rank;
+    EXPECT_EQ(0u, state->wait) << "rank " << rank;
+    EXPECT_FALSE(state->signaled) << "rank " << rank;
+  }
+  finalizeDdaIpcSerially();
+  for (int rank = 0; rank < kRanks; ++rank) {
+    EXPECT_EQ(nullptr, comms_[rank]->ddaDone) << "rank " << rank;
+  }
+  EXPECT_TRUE(liveAllocations_.empty());
+}
+
 TEST_F(DdaIpcLifecycleMicrotest, FiniWithoutPriorCloseStaysLocalAndClosesPeerMappings) {
   initializeDdaIpcForAllRanks();
   abortFlags_[0] = 1;

@@ -13,6 +13,7 @@
 #include <hip/hip_runtime.h>
 #include <hip/hip_cooperative_groups.h>
 #include <hip/hip_ext.h>
+#include "algorithms/dda/ipc/dda_order.h"
 #include "gdrwrap.h"
 #include "bootstrap.h"
 #include <cstring>
@@ -2399,7 +2400,8 @@ ncclResult_t rcclAddonLaunchBegin(struct ncclComm* comm, cudaStream_t stream, st
     // doneEvent may carry a node from another capture or from outside one, and waiting on such an
     // event inside a capture breaks capture isolation, so a captured stream gets no edge here and is
     // ordered through deviceStream below instead, as native captured launches are.
-    CUDACHECK(hipStreamWaitEvent(stream, comm->doneEvent, 0));
+    // A host-staged launch publishes a sequence. The wait is on this stream, never the previous one.
+    NCCLCHECK(rcclDdaWaitPrevious(comm, stream));
   }
 
   // Capture never binds a fused stopEvent, so under capture nothing is offered and the epilogue
@@ -2417,8 +2419,8 @@ ncclResult_t rcclAddonLaunchBegin(struct ncclComm* comm, cudaStream_t stream, st
 ncclResult_t rcclAddonLaunchEnd(struct ncclComm* comm, cudaStream_t stream,
                                 const struct rcclAddonLaunchState& state, ncclResult_t launchRes) {
   ncclResult_t result = launchRes;
-  // A cleared field after an offer is the only sign that a kernel took the event and will record
-  // it. Anything else, capture included, still owes the record.
+  // A cleared field after an offer means a fused stop event will record doneEvent, or a host-staged
+  // launch published its signal and rcclCommitAddonDone consumed the event. Anything else still owes a record.
   const bool taken = state.eventOffered && comm->addonStopEvent == nullptr;
   comm->addonStopEvent = nullptr;
 
@@ -2426,6 +2428,7 @@ ncclResult_t rcclAddonLaunchEnd(struct ncclComm* comm, cudaStream_t stream,
     if (!taken) {
       CUDACHECKGOTO(hipEventRecord(comm->doneEvent, stream), result, release);
     }
+    rcclDdaCoverWait(comm, state.capturing, taken);
     // The tag advances however the event was recorded: it is what tells the next collective on
     // another stream that an edge is needed.
     comm->lastStreamTag = ncclStreamTag(stream);
@@ -2435,6 +2438,7 @@ ncclResult_t rcclAddonLaunchEnd(struct ncclComm* comm, cudaStream_t stream,
   }
 
 release:
+  rcclDdaClearSignaled(comm);
   if (state.deviceStreamAcquired) {
     ncclResult_t releaseRes = ncclStrongStreamRelease(state.graph, &comm->sharedRes->deviceStream,
                                                       /*concurrent=*/false);
@@ -2613,10 +2617,8 @@ ncclResult_t ncclLaunchPrepare(struct ncclComm* comm) {
       }
     } else if (comm->lastStreamTag != 0 &&
                comm->lastStreamTag != ncclStreamTag(launchStream)) {
-      // Stream changed. Wait on doneEvent, recorded by ncclLaunchKernel on the previous launch
-      // stream; deviceStream is stale here because the fast path skips the Finish-side advance.
-      // Don't record it here — that stream may already be destroyed (ROCM-29677).
-      CUDACHECKGOTO(hipStreamWaitEvent(launchStream, comm->doneEvent, 0), result, failure);
+      // Stream changed. Wait on this stream. Don't record onto the previous one; the app may have destroyed it.
+      NCCLCHECKGOTO(rcclDdaWaitPrevious(comm, launchStream), result, failure);
     }
 
     enum ncclImplicitOrder implicitOrder;
@@ -2757,6 +2759,7 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
     CUDACHECKGOTO(cudaEventRecord(comm->doneEvent, launchStream), ret, do_return);
 #endif
     comm->lastStreamTag = ncclStreamTag(launchStream);
+    rcclDdaCoverWait(comm, /*capturing=*/false, /*eventTaken=*/false);
     latency_profiler::collTraceRecordEndEvent(comm, plan, launchStream, std::move(event));
     return ncclSuccess;
   }
@@ -2879,6 +2882,7 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
   CUDACHECKGOTO(cudaEventRecord(comm->doneEvent, launchStream), ret, do_return);
 #endif
   comm->lastStreamTag = ncclStreamTag(launchStream);
+  rcclDdaCoverWait(comm, plan->persistent, /*eventTaken=*/false);
 
 do_return:
   NCCLCHECK(ncclProfilerStopKernelLaunchEvent(plan));

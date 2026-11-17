@@ -2429,6 +2429,59 @@ TEST_F(EnqueueMicrotest, AddonLaunch_KernelTookTheEvent_EpilogueSkipsTheRecord) 
   EXPECT_EQ(ncclStreamTag(kAddonStream), ac.c()->lastStreamTag);
 }
 
+TEST_F(EnqueueMicrotest, AddonLaunch_ReduceScatterSignal_NextStreamWaitsOnItUntilALaterRecord) {
+  AddonComm ac;
+  uint64_t seq = 0;
+  unsigned grid = 0;
+  rcclDdaDoneState state{};
+  state.seq = &seq;
+  state.grid = &grid;
+  ac.c()->ddaDone = &state;
+  hipStream_t const other = reinterpret_cast<hipStream_t>(0x57B);
+  ScopedHook notCapturing(g_cudaGetCapturingGraph,
+                          [](struct ncclCudaGraph* graph, hipStream_t, int mode) {
+                            if (graph) *graph = ncclCudaGraphNone(mode);
+                            return ncclSuccess;
+                          });
+  ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipSuccess; });
+  int signalWaits = 0;
+  int eventWaits = 0;
+  ScopedHook signalWait(g_hipStreamWaitValue64,
+                        [&](hipStream_t stream, void* ptr, uint64_t value, unsigned flags, uint64_t mask) {
+                          EXPECT_EQ(other, stream);
+                          EXPECT_EQ(&seq, ptr);
+                          EXPECT_EQ(1u, value);
+                          EXPECT_EQ(static_cast<unsigned>(hipStreamWaitValueGte), flags);
+                          EXPECT_EQ(~0ull, mask);
+                          ++signalWaits;
+                          return hipSuccess;
+                        });
+  ScopedHook eventWait(g_hipStreamWaitEvent, [&](hipStream_t, hipEvent_t event, unsigned) {
+    EXPECT_EQ(kAddonDoneEvent, event);
+    ++eventWaits;
+    return hipSuccess;
+  });
+
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [&] {
+    rcclCommitAddonDone(ac.c(), rcclPrepareAddonDone(ac.c()));
+    return ncclSuccess;
+  }));
+  EXPECT_EQ(0, signalWaits);
+  EXPECT_EQ(state.wait, 1u);
+
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), other, [&] {
+    EXPECT_EQ(kAddonDoneEvent, rcclTakeAddonStopEvent(ac.c()));
+    return ncclSuccess;
+  }));
+  EXPECT_EQ(1, signalWaits);
+  EXPECT_EQ(0, eventWaits);
+  EXPECT_EQ(0u, state.wait);
+
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [] { return ncclSuccess; }));
+  EXPECT_EQ(1, signalWaits);
+  EXPECT_EQ(1, eventWaits);
+}
+
 TEST_F(EnqueueMicrotest, AddonLaunch_LaunchFailed_RecordsNothingAndLeavesTheTag) {
   AddonComm ac;
   ScopedHook notCapturing(g_cudaGetCapturingGraph,

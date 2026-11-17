@@ -171,6 +171,32 @@ TEST_F(DdaAlltoallIpcMicrotest, Launch_LargerPayloadIsStagedIntoScratchBeforeThe
   EXPECT_EQ(copies_[0].launchesBefore, 0u);
 }
 
+TEST_F(DdaAlltoallIpcMicrotest, Launch_HostStagedPayloadPublishesTheCompletionWord) {
+  uint64_t seq = 0;
+  unsigned grid = 0;
+  rcclDdaDoneState state{};
+  state.seq = &seq;
+  state.grid = &grid;
+  comm().ddaDone = &state;
+  ASSERT_EQ(Run(kSingleBlockFloats), ncclSuccess);
+  ASSERT_EQ(g_ddaLaunches.size(), 1u);
+  EXPECT_EQ(g_ddaLaunches[0].stopEvent, nullptr);
+  EXPECT_EQ(comm().addonStopEvent, nullptr);
+  const DdaDoneMark done = g_ddaLaunches[0].Arg<IpcGpuBarrier>(5).done();
+  EXPECT_EQ(done.seq, &seq);
+  EXPECT_EQ(done.value, 1u);
+  EXPECT_EQ(state.wait, 1u);
+  EXPECT_TRUE(state.signaled);
+
+  g_ddaLaunches.clear();
+  comm().addonStopEvent = kStopEvent;
+  ASSERT_EQ(Run(kSingleBlockFloats - 4), ncclSuccess);
+  ASSERT_EQ(g_ddaLaunches.size(), 1u);
+  EXPECT_EQ(g_ddaLaunches[0].stopEvent, kStopEvent);
+  EXPECT_TRUE(SameBarrier(g_ddaLaunches[0].Arg<IpcGpuBarrier>(5), barrier_->barrierHost));
+  EXPECT_EQ(state.seqValue, 1u);
+}
+
 TEST_F(DdaAlltoallIpcMicrotest, Launch_StagingCopyErrorIsReportedWithoutLaunching) {
   g_hipMemcpyAsync = [](void*, const void*, size_t, hipMemcpyKind, hipStream_t) { return hipErrorInvalidValue; };
   EXPECT_EQ(Run(kSingleBlockFloats), ncclUnhandledCudaError);

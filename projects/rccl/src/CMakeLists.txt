@@ -188,6 +188,7 @@ set(SRC_FILES
   include/collectives.h
   include/comm.h
   include/compiler.h
+  include/dda_done.h
   include/compiler/gcc.h
   include/compiler/msvc.h
   include/config/algorithm_parser.h
@@ -243,6 +244,7 @@ set(SRC_FILES
   include/ionic/ionicdvsymbols.h
   include/ionic/ionicdvwrap.h
   algorithms/dda/ipc/ipc_gpu_barrier.h
+  algorithms/dda/ipc/dda_order.h
   algorithms/dda/ipc/ipc_init.h
   algorithms/dda/ipc/ipc_mem_handler.h
   include/ipcsocket.h

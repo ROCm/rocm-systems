@@ -57,6 +57,7 @@ __launch_bounds__(512)
 
   // barrier to ensure remote ranks won't free their buffers until I'm done
   barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>(ddaAbort);
+  ddaPublishDone(barrier.done());
 }
 
 } // namespace dda::common

@@ -133,9 +133,9 @@ TEST_F(DdaReduceScatterIpcMicrotest, Eligible_PerRankBytesMustBeMultipleOf16) {
   EXPECT_TRUE(Eligible(16, ncclBfloat16));
 }
 
-TEST_F(DdaReduceScatterIpcMicrotest, Eligible_BuffersMustBe16ByteAligned) {
+TEST_F(DdaReduceScatterIpcMicrotest, Eligible_RecvMustBe16ByteAligned) {
   void* const misaligned = reinterpret_cast<void*>(0x1008);
-  EXPECT_FALSE(ncclReduceScatterDdaIpcEligible(mock_.get(), misaligned, kRecvbuff, 4, ncclFloat32, ncclSum));
+  EXPECT_TRUE(ncclReduceScatterDdaIpcEligible(mock_.get(), misaligned, kRecvbuff, 4, ncclFloat32, ncclSum));
   EXPECT_FALSE(ncclReduceScatterDdaIpcEligible(mock_.get(), kSendbuff, misaligned, 4, ncclFloat32, ncclSum));
 }
 
@@ -203,6 +203,28 @@ TEST_F(DdaReduceScatterIpcMicrotest, Launch_HostStagesTheSendBufferBeforeTheKern
   EXPECT_EQ(comm().addonStopEvent, nullptr);
   EXPECT_EQ(launch.sharedMemBytes, 0u);
   EXPECT_EQ(launch.flags, 0u);
+}
+
+TEST_F(DdaReduceScatterIpcMicrotest, Launch_PublishesTheCompletionWordInsteadOfTheStopEvent) {
+  uint64_t seqStorage = 0;
+  unsigned gridStorage = 0;
+  rcclDdaDoneState state{};
+  state.seq = &seqStorage;
+  state.grid = &gridStorage;
+  state.seqValue = 4;
+  comm().ddaDone = &state;
+  ASSERT_EQ(Run(16), ncclSuccess);
+  ASSERT_EQ(g_ddaLaunches.size(), 1u);
+  const DdaLaunch& launch = g_ddaLaunches[0];
+  EXPECT_EQ(launch.stopEvent, nullptr);
+  EXPECT_EQ(comm().addonStopEvent, nullptr);
+  EXPECT_EQ(state.seqValue, 5u);
+  EXPECT_EQ(state.wait, 5u);
+  EXPECT_TRUE(state.signaled);
+  const DdaDoneMark done = launch.Arg<IpcGpuBarrier>(5).done();
+  EXPECT_EQ(done.seq, &seqStorage);
+  EXPECT_EQ(done.grid, &gridStorage);
+  EXPECT_EQ(done.value, 5u);
 }
 
 // The stop event is taken before the staging copy, so a failed copy still consumes it.

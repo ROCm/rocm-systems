@@ -306,6 +306,38 @@ TEST_F(DdaAllReduceIpcDispatchTest, LargeTreePayloadIsCopiedToScratchBeforeLaunc
   EXPECT_EQ(kStream, launches_[0].stream);
 }
 
+TEST_F(DdaAllReduceIpcDispatchTest, FlatKeepsTheStopEventWhenSignalMemoryIsPresent) {
+  uint64_t seq = 0;
+  unsigned grid = 0;
+  rcclDdaDoneState state{};
+  state.seq = &seq;
+  state.grid = &grid;
+  mock_.comm.ddaDone = &state;
+  ASSERT_EQ(ncclSuccess, Run(64, ncclFloat32));
+  ASSERT_EQ(1u, launches_.size());
+  EXPECT_EQ(Flat<float>(), launches_[0].kernel);
+  EXPECT_EQ(kStopEvent, launches_[0].stopEvent);
+  EXPECT_EQ(0u, state.seqValue);
+  EXPECT_EQ(nullptr, mock_.comm.addonStopEvent);
+}
+
+TEST_F(DdaAllReduceIpcDispatchTest, TreePublishesTheCompletionWordInsteadOfTheStopEvent) {
+  uint64_t seq = 0;
+  unsigned grid = 0;
+  rcclDdaDoneState state{};
+  state.seq = &seq;
+  state.grid = &grid;
+  mock_.comm.ddaDone = &state;
+  ASSERT_EQ(ncclSuccess, Run(kFp32CountCopiedBeforeTree, ncclFloat32));
+  ASSERT_EQ(1u, launches_.size());
+  EXPECT_EQ(Tree<float>(), launches_[0].kernel);
+  EXPECT_EQ(nullptr, launches_[0].stopEvent);
+  EXPECT_EQ(nullptr, mock_.comm.addonStopEvent);
+  EXPECT_EQ(1u, state.seqValue);
+  EXPECT_EQ(1u, state.wait);
+  EXPECT_TRUE(state.signaled);
+}
+
 TEST_F(DdaAllReduceIpcDispatchTest, ScratchCopyErrorIsReportedWithoutLaunching) {
   g_hipMemcpyAsync = [](void*, const void*, size_t, hipMemcpyKind, hipStream_t) { return hipErrorInvalidValue; };
   EXPECT_EQ(ncclUnhandledCudaError, Run(kFp32CountCopiedBeforeTree, ncclFloat32));

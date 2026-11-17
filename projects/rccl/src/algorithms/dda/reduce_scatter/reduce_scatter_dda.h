@@ -34,6 +34,7 @@ __launch_bounds__(512)
   reduceScatter<T, NRANKS, hasAcc>(ipcbuffs, recvbuff, nullptr, selfRank, NRANKS, idxStart, idxEnd, idxStride, 0);
 
   barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>(ddaAbort);
+  ddaPublishDone(barrier.done());
 }
 
 } // namespace dda::common

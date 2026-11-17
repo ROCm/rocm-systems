@@ -679,6 +679,8 @@ typedef enum ncclCheckMode {
   ncclCheckModeDebugGlobal = 2,
 } ncclCheckMode_t;
 
+struct rcclDdaDoneState;
+
 struct ncclComm {
   uint64_t startMagic;
   struct ncclMemoryStack memPermanent, memScoped;
@@ -1000,6 +1002,9 @@ struct ncclComm {
   // record. Non-null only between rcclAddonLaunchBegin, which sets it to doneEvent, and
   // rcclTakeAddonStopEvent, which hands it out.
   hipEvent_t addonStopEvent;
+  // Host-staged DDA completion. Null keeps the fused stop event. The next stream waits on
+  // ddaDone->wait; 0 means the last completion was doneEvent.
+  struct rcclDdaDoneState* ddaDone;
   latency_profiler::CollTrace* ctrace;
 
 #ifdef ENABLE_WARP_SPEED

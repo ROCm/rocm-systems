@@ -14,6 +14,7 @@
 #include <memory>
 
 #include "algorithms/dda/device/dda_kernel_params.h"
+#include "dda_done.h"
 #include "algorithms/dda/device/device_buffer.h"
 #include "algorithms/dda/ipc/ipc_mem_handler.h"
 
@@ -104,6 +105,10 @@ public:
   static __host__ std::pair<std::unique_ptr<IpcGpuBarrierResources>, IpcGpuBarrier> mallocAndInit(
     int nRanks, int nBlocks, int selfRank, void* bootstrap, DdaKernelParams params);
 
+  // Host-staged launches fill this on the local copy. The kernel only reads it.
+  __host__ void setDone(DdaDoneMark mark) { done_ = mark; }
+  __host__ __device__ __forceinline__ DdaDoneMark done() const { return done_; }
+
   // `aborted` is the kernel's own sticky flag, not a member: a store to this by-value
   // argument spills the mailbox pointers to scratch and the flag CAS becomes a flat atomic.
   template <bool hasPreviousMemAccess, bool hasSubsequentMemAccess>
@@ -153,6 +158,7 @@ private:
   int selfRank_{-1};
   std::array<DeviceMailbox, NRANKS> allMailboxes_;
   DdaKernelParams params_{};
+  DdaDoneMark done_{};
 
   __host__ IpcGpuBarrier(int nRanks, int nBlocks, int selfRank, const std::array<DeviceMailbox, NRANKS>& allMailboxes,
                          DdaKernelParams params);

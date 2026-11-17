@@ -64,6 +64,7 @@ __launch_bounds__(512)
   allGather<T, NRANKS>(ipcbuffs, recvbuff, selfRank, NRANKS, idxStart, idxEnd, idxStride, true);
 
   barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>(ddaAbort);
+  ddaPublishDone(barrier.done());
 }
 
 } // namespace dda::common

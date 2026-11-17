@@ -12,6 +12,7 @@
 #include "comm.h"
 #include "debug.h"
 #include "algorithms/dda/ipc/ipc_gpu_barrier.h"
+#include "algorithms/dda/ipc/dda_order.h"
 #include "algorithms/dda/dda_init_detail.h"
 
 #include <cuda_runtime.h>
@@ -71,19 +72,25 @@ static ncclResult_t ncclAllReduceDdaIpcTyped(const void* sendbuff, void* recvbuf
   void* peerPtrsDev = comm->ddaPeerPtrsDev;
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
 
-  const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
+  DdaDoneMark done{};
   if (treeOk) {
+    // The host copy puts the fused stop event behind another dispatch. Publish the 8-byte signal instead.
+    done = rcclPrepareAddonDone(comm);
+    if (done.seq != nullptr) barrierHost.setDone(done);
+    const hipEvent_t stopEvent = done.seq != nullptr ? nullptr : rcclTakeAddonStopEvent(comm);
     CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, count * sizeof(T), cudaMemcpyDeviceToDevice, stream));
     hipExtLaunchKernelGGL((dda::common::ddaAllReduceTreeIpc<T, kDdaNranks, false>), grid, block, 0, stream,
                           /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff), count,
                           static_cast<const T*>(sendbuff), comm->rank, barrierHost, nullptr);
   } else {
+    const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
     hipExtLaunchKernelGGL((dda::common::ddaAllReduceFlatIpc<T, kDdaNranks, false>), grid, block, 0, stream,
                           /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff), count,
                           static_cast<const T*>(sendbuff), comm->rank, barrierHost, nullptr);
   }
 
   CUDACHECK(cudaGetLastError());
+  rcclCommitAddonDone(comm, done);
 
   return ncclSuccess;
 }

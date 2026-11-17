@@ -50,6 +50,7 @@ struct BarrierImage {
   int selfRank;
   std::array<DeviceMailbox, kRanks> mailboxes;
   DdaKernelParams params;
+  DdaDoneMark done;
 };
 static_assert(sizeof(MailboxImage) == sizeof(DeviceMailbox), "DeviceMailbox layout changed");
 static_assert(sizeof(BarrierImage) == sizeof(IpcGpuBarrier), "IpcGpuBarrier layout changed");
