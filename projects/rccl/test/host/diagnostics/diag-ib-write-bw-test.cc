@@ -27,7 +27,7 @@
 
 #include <unistd.h>
 
-#include "../common/LogCapture.hpp"
+#include "../../common/LogCapture.hpp"
 #include "ScopedHook.h"
 #include "alloc.h"
 #include "bootstrap.h"
