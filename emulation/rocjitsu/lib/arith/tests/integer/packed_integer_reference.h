@@ -24,13 +24,15 @@ enum class HalfBinary {
   MulLoU16,
   Lshl,
   Lshr,
-  Ashr
+  Ashr,
+  MulLoU16Clamp
 };
 
 // Compute both 16-bit integer results using their independent source selectors.
 inline uint32_t packed_integer_reference(HalfBinary operation, uint32_t a, uint32_t b,
                                          uint32_t mode) {
-  int op = int(operation);
+  const bool clamp_product = operation == HalfBinary::MulLoU16Clamp;
+  int op = int(clamp_product ? HalfBinary::MulLoU16 : operation);
   uint32_t result = 0;
   for (int half = 0; half < 2; ++half) {
     bool high_a = half ? !(mode & RJ_ARITH_PK_HI_A_LOW) : bool(mode & RJ_ARITH_PK_LO_A_HIGH);
@@ -58,7 +60,7 @@ inline uint32_t packed_integer_reference(HalfBinary operation, uint32_t a, uint3
       // Arithmetic right shift rounds negative quotients down, unlike C++ division.
       value = op == 9 ? y * power : (y >= 0 ? y / power : -((-y + power - 1) / power));
     }
-    if (op < 4 && (mode & RJ_ARITH_PK_CLAMP)) {
+    if ((op < 4 || clamp_product) && (mode & RJ_ARITH_PK_CLAMP)) {
       int64_t low = sign ? -32768 : 0, high = sign ? 32767 : 65535;
       if (value < low) {
         value = low;

@@ -28,6 +28,20 @@ pub(crate) const CLUSTER_MAX_DIM: HsaAmdDim3 = HsaAmdDim3 { x: 1, y: 1, z: 1 };
 pub(crate) const KERNEL_CLUSTER_MAX_SIZE: u64 =
     KERNEL_CLUSTER_MAX_DIM.x * KERNEL_CLUSTER_MAX_DIM.y * KERNEL_CLUSTER_MAX_DIM.z;
 
+/// Cluster geometry of the native extended-dispatch packet. Firmware-emulated
+/// extended dispatch on older GPUs supports only a single workgroup.
+fn cluster_max_dim(gpu: Option<&rocddi::topology::GpuInfo>) -> HsaAmdDim3 {
+    let Some(gpu) = gpu.filter(|gpu| gpu.gfx_major == 12 && gpu.gfx_minor == 5) else {
+        return CLUSTER_MAX_DIM;
+    };
+    let units = gpu.maximum_compute_units_per_shader_engine.max(1);
+    HsaAmdDim3 {
+        x: u64::from(units),
+        y: u64::from(units),
+        z: u64::from(units),
+    }
+}
+
 /// Formats the UUID advertised for a GPU or host agent.
 pub(crate) fn agent_uuid(gpu: Option<&rocddi::topology::GpuInfo>) -> String {
     match gpu {
@@ -62,7 +76,6 @@ pub(crate) fn cpu_rejects_amd_agent_info(attribute: u32) -> bool {
             | AMD_AGENT_INFO_MAX_PERSISTING_L2_CACHE_SIZE
             | AMD_AGENT_INFO_PCIE_STORES_NEED_FLUSH
             | AMD_AGENT_INFO_HOST_ATOMICS_SUPPORTED
-            | AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED
     )
 }
 
@@ -70,10 +83,10 @@ pub(crate) fn cpu_rejects_amd_agent_info(attribute: u32) -> bool {
 /// The callback must be callable with the C ABI; `data` must remain valid for
 /// any access the callback performs during this call.
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_iterate_agents")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_iterate_agents(callback: AgentCallback, data: *mut c_void) -> Status {
     boundary(|| {
         let Some(callback) = callback else {
@@ -125,10 +138,10 @@ pub unsafe extern "C" fn hsa_iterate_agents(callback: AgentCallback, data: *mut 
 /// Any non-null `value` must address aligned, writable storage for the type
 /// selected by `attribute`.
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_agent_get_info")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_agent_get_info(
     agent: HsaAgent,
     attribute: u32,
@@ -137,6 +150,35 @@ pub unsafe extern "C" fn hsa_agent_get_info(
     boundary(|| {
         if value.is_null() {
             return INVALID_ARGUMENT;
+        }
+        if attribute == AMD_AGENT_INFO_SCRATCH_LIMIT_CURRENT {
+            let guard = match lock() {
+                Ok(guard) => guard,
+                Err(status) => return status,
+            };
+            let Some(runtime) = guard.as_ref() else {
+                return NOT_INITIALIZED;
+            };
+            let Some(index) = runtime.gpu_index(agent) else {
+                return INVALID_AGENT;
+            };
+            let policy = &runtime.gpus[index].scratch;
+            let limit = if policy.asynchronous {
+                policy
+                    .async_limit
+                    .load(std::sync::atomic::Ordering::Acquire)
+            } else {
+                0
+            };
+            // SAFETY: The attribute requires writable uint64_t storage.
+            return unsafe { write_value(value, limit) };
+        }
+        if attribute == AMD_AGENT_INFO_AQL_EXTENSIONS {
+            return match crate::queue::aql_extensions(agent) {
+                // SAFETY: The attribute requires writable eight-byte storage.
+                Ok(bits) => unsafe { write_value(value, bits) },
+                Err(status) => status,
+            };
         }
         let (
             gpu_index,
@@ -263,6 +305,10 @@ pub unsafe extern "C" fn hsa_agent_get_info(
         let gpu = endpoint.as_ref().and_then(|endpoint| endpoint.gpu());
         let gpu_only = gpu.is_some();
         let image_gpu = gpu.is_some_and(image_gfx12::supported_gpu);
+        // SAFETY: The caller supplies the storage selected by the attribute.
+        if let Some(status) = unsafe { write_image_2d_limit(attribute, image_gpu, value) } {
+            return status;
+        }
         if !gpu_only && cpu_rejects_amd_agent_info(attribute) {
             return INVALID_ARGUMENT;
         }
@@ -449,17 +495,31 @@ pub unsafe extern "C" fn hsa_agent_get_info(
                 AMD_AGENT_INFO_DRIVER_UID => {
                     write_value(value, platform::driver_uid(endpoint.as_ref()))
                 }
-                AMD_AGENT_INFO_MAX_DATA_PREFETCH_REGIONS => write_value(value, 0_u32),
+                AMD_AGENT_INFO_MAX_DATA_PREFETCH_REGIONS => write_value(
+                    value,
+                    if gpu.is_some_and(|info| info.gfx_major == 12 && info.gfx_minor == 5) {
+                        2_u32
+                    } else {
+                        0_u32
+                    },
+                ),
                 AMD_AGENT_INFO_NUM_XCC => write_value(value, gpu.map_or(0, |info| info.xcc_count)),
                 AMD_AGENT_INFO_NEAREST_CPU => write_value(value, nearest_cpu),
-                AMD_AGENT_INFO_MEMORY_PROPERTIES | AMD_AGENT_INFO_AQL_EXTENSIONS => {
-                    write_value(value, [0_u8; 8])
+                AMD_AGENT_INFO_MEMORY_PROPERTIES => {
+                    let mut bits = [0_u8; 8];
+                    // The public property has value 1 and is a bit index.
+                    if endpoint
+                        .as_ref()
+                        .is_some_and(|endpoint| endpoint.local_memory_bytes == 0)
+                    {
+                        bits[0] |= 1 << 1;
+                    }
+                    write_value(value, bits)
                 }
                 AMD_AGENT_INFO_SCRATCH_LIMIT_MAX => write_value(
                     value,
                     gpu.map_or(0, rocddi::topology::GpuInfo::maximum_scratch_aperture_bytes),
                 ),
-                AMD_AGENT_INFO_SCRATCH_LIMIT_CURRENT => write_value(value, 0_u64),
                 AMD_AGENT_INFO_CLOCK_COUNTERS => {
                     if gpu.is_some() {
                         let Some(clock_counters) = clock_counters else {
@@ -514,7 +574,6 @@ pub unsafe extern "C" fn hsa_agent_get_info(
                     write_value(value, gpu_only && !host_xgmi_atomics)
                 }
                 AMD_AGENT_INFO_HOST_ATOMICS_SUPPORTED => write_value(value, host_xgmi_atomics),
-                AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED => write_value(value, false),
                 AMD_AGENT_INFO_HAS_EXPERT_SCHED_MODE => match expert_scheduling {
                     Some(Ok(supported)) => write_value(value, supported),
                     Some(Err(error)) => map_error(error),
@@ -531,9 +590,11 @@ pub unsafe extern "C" fn hsa_agent_get_info(
                 {
                     write_value(value, KERNEL_CLUSTER_MAX_SIZE)
                 }
-                AMD_AGENT_INFO_CLUSTER_MAX_DIM if gpu_only => write_value(value, CLUSTER_MAX_DIM),
+                AMD_AGENT_INFO_CLUSTER_MAX_DIM if gpu_only => {
+                    write_value(value, cluster_max_dim(gpu))
+                }
                 AMD_AGENT_INFO_CLUSTER_MAX_SIZE if gpu_only => {
-                    write_value(value, CLUSTER_MAX_DIM.x)
+                    write_value(value, cluster_max_dim(gpu).x)
                 }
                 EXT_AGENT_INFO_IMAGE_1D_MAX_ELEMENTS | EXT_AGENT_INFO_IMAGE_1DA_MAX_ELEMENTS => {
                     write_value(value, if image_gpu { 16_384_u32 } else { 0 })
@@ -546,11 +607,6 @@ pub unsafe extern "C" fn hsa_agent_get_info(
                         0
                     },
                 ),
-                EXT_AGENT_INFO_IMAGE_2D_MAX_ELEMENTS | EXT_AGENT_INFO_IMAGE_2DA_MAX_ELEMENTS => {
-                    write_value(value, if image_gpu { [16_384_u32; 2] } else { [0; 2] })
-                }
-                EXT_AGENT_INFO_IMAGE_2DDEPTH_MAX_ELEMENTS
-                | EXT_AGENT_INFO_IMAGE_2DADEPTH_MAX_ELEMENTS => write_value(value, [0_u32; 2]),
                 EXT_AGENT_INFO_IMAGE_3D_MAX_ELEMENTS => write_value(
                     value,
                     if image_gpu {
@@ -586,13 +642,39 @@ pub unsafe extern "C" fn hsa_agent_get_info(
     })
 }
 
+/// Writes the common 2D geometry limits using the public `size_t[2]` ABI.
+///
+/// # Safety
+/// For a recognized attribute, `value` must address two writable `size_t` values.
+unsafe fn write_image_2d_limit(
+    attribute: u32,
+    image_gpu: bool,
+    value: *mut c_void,
+) -> Option<Status> {
+    let limits = match attribute {
+        EXT_AGENT_INFO_IMAGE_2D_MAX_ELEMENTS
+        | EXT_AGENT_INFO_IMAGE_2DA_MAX_ELEMENTS
+        | EXT_AGENT_INFO_IMAGE_2DDEPTH_MAX_ELEMENTS
+        | EXT_AGENT_INFO_IMAGE_2DADEPTH_MAX_ELEMENTS => {
+            if image_gpu {
+                [16_384_usize; 2]
+            } else {
+                [0; 2]
+            }
+        }
+        _ => return None,
+    };
+    // SAFETY: The selected attribute's caller supplies its writable output.
+    Some(unsafe { write_value(value, limits) })
+}
+
 /// # Safety
 /// A non-null `value` must point to readable, aligned `size_t` storage.
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_agent_set_attribute")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_agent_set_attribute(
     agent: HsaAgent,
     attribute: u32,
@@ -658,10 +740,10 @@ pub unsafe extern "C" fn hsa_amd_agent_set_attribute(
 /// # Safety
 /// Any non-null `mask` must address writable `u16` storage.
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_agent_get_exception_policies")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_agent_get_exception_policies(
     agent: HsaAgent,
     profile: u32,
@@ -690,10 +772,10 @@ pub unsafe extern "C" fn hsa_agent_get_exception_policies(
 /// # Safety
 /// Any non-null `result` must address writable `bool` storage.
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_agent_extension_supported")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_agent_extension_supported(
     extension: u16,
     agent: HsaAgent,
@@ -739,10 +821,10 @@ pub unsafe extern "C" fn hsa_agent_extension_supported(
 /// Any non-null `version_minor` and `result` must address writable `u16` and
 /// `bool` storage.
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_agent_major_extension_supported")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_agent_major_extension_supported(
     extension: u16,
     agent: HsaAgent,
@@ -785,4 +867,68 @@ pub unsafe extern "C" fn hsa_agent_major_extension_supported(
         }
         SUCCESS
     })
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn image_2d_limits_match_the_abi_and_supported_depth_extents() {
+        for (attribute, geometry) in [
+            (EXT_AGENT_INFO_IMAGE_2D_MAX_ELEMENTS, 1),
+            (EXT_AGENT_INFO_IMAGE_2DA_MAX_ELEMENTS, 4),
+            (EXT_AGENT_INFO_IMAGE_2DDEPTH_MAX_ELEMENTS, 6),
+            (EXT_AGENT_INFO_IMAGE_2DADEPTH_MAX_ELEMENTS, 7),
+        ] {
+            for supported in [false, true] {
+                let mut storage = [usize::MAX; 4];
+                // SAFETY: The middle two entries have the public output type.
+                assert_eq!(
+                    unsafe {
+                        write_image_2d_limit(attribute, supported, storage[1..].as_mut_ptr().cast())
+                    },
+                    Some(SUCCESS)
+                );
+                let expected = if supported { 16_384 } else { 0 };
+                assert_eq!(storage, [usize::MAX, expected, expected, usize::MAX]);
+                if !supported || geometry < 6 {
+                    continue;
+                }
+                for channel_type in [3, 15] {
+                    let image_format = HsaExtImageFormat {
+                        channel_order: 18,
+                        channel_type,
+                    };
+                    assert_eq!(image_gfx12::access_capabilities(geometry, image_format), 3);
+                    let format = image_gfx12::format(image_format).unwrap();
+                    let descriptor = HsaExtImageDescriptor {
+                        geometry,
+                        width: storage[1],
+                        height: storage[2],
+                        depth: 0,
+                        array_size: usize::from(geometry == 7),
+                        format: image_format,
+                    };
+                    assert!(image_gfx12::layout(descriptor, format, 0, 0).is_ok());
+                    for oversized in [
+                        HsaExtImageDescriptor {
+                            width: descriptor.width + 1,
+                            ..descriptor
+                        },
+                        HsaExtImageDescriptor {
+                            height: descriptor.height + 1,
+                            ..descriptor
+                        },
+                    ] {
+                        assert!(matches!(
+                            image_gfx12::layout(oversized, format, 0, 0),
+                            Err(IMAGE_SIZE_UNSUPPORTED)
+                        ));
+                    }
+                }
+            }
+        }
+    }
 }

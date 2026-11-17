@@ -816,8 +816,11 @@ static rsmi_status_t get_id(uint32_t dv_ind, amd::smi::DevInfoTypes typ, uint16_
     return ret;
   }
 
+  // amdgpu prints xgmi_physical_id in decimal ("%u\n"); every other id read here is hex.
+  const int base = (typ == amd::smi::kDevXGMIPhysicalID) ? 10 : 16;
+
   errno = 0;
-  val_u64 = strtoul(val_str.c_str(), nullptr, 16);
+  val_u64 = strtoul(val_str.c_str(), nullptr, base);
   assert(errno == 0);
   if (errno != 0) {
     return amd::smi::ErrnoToRsmiStatus(errno);

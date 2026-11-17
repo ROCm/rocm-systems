@@ -126,6 +126,7 @@ namespace core {
 bool g_use_interrupt_wait;
 bool g_use_mwaitx;
 bool g_use_yielding_poll;
+bool g_use_clflushopt;
 Runtime* Runtime::runtime_singleton_ = NULL;
 
 hsa_status_t Runtime::Acquire() {
@@ -2948,6 +2949,7 @@ Runtime::Runtime()
   g_use_interrupt_wait = true;
   g_use_mwaitx = true;
   g_use_yielding_poll = false;
+  g_use_clflushopt = false;
   ::_amdgpu_r_debug = {11, nullptr, reinterpret_cast<uintptr_t>(&_loader_debug_state),
                        r_debug::RT_CONSISTENT, 0};
   log_file = stderr;
@@ -2983,6 +2985,7 @@ hsa_status_t Runtime::Load() {
   g_use_interrupt_wait = flag_.enable_interrupt();
   g_use_mwaitx = flag_.check_mwaitx(cpuinfo.mwaitx);
   g_use_yielding_poll = flag_.enable_yielding_poll();
+  g_use_clflushopt = cpuinfo.clflushopt;
 
   if (!AMD::Load()) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
