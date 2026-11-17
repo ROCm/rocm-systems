@@ -1099,25 +1099,6 @@ SIMD_VOP3_DIV_FMAS_FP64: set[str] = {
     'v_div_fmas_f64_vop3',
 }
 
-# VOP3P fma_mix / mad_mix family. FMA uses the fused, mode-aware path:
-#  - F32     -> v_fma_mix_f32_vop3p (RDNA), v_mad_mix_f32_vop3p (CDNA1-4)
-#  - F16_LO  -> v_fma_mixlo_f16_vop3p, v_mad_mixlo_f16_vop3p
-#  - F16_HI  -> v_fma_mixhi_f16_vop3p, v_mad_mixhi_f16_vop3p
-# Per-source op_sel_hi gates the f16<->f32 widening shape; op_sel picks the f16
-# half. neg flips the sign bit and neg_hi applies ABS. No OMOD.
-SIMD_VOP3P_FMA_MIX_F32: set[str] = {
-    'v_fma_mix_f32_vop3p',
-    'v_mad_mix_f32_vop3p',
-}
-SIMD_VOP3P_FMA_MIX_F16_LO: set[str] = {
-    'v_fma_mixlo_f16_vop3p',
-    'v_mad_mixlo_f16_vop3p',
-}
-SIMD_VOP3P_FMA_MIX_F16_HI: set[str] = {
-    'v_fma_mixhi_f16_vop3p',
-    'v_mad_mixhi_f16_vop3p',
-}
-
 # VOP3P packed-16 integer binary family. The glue applies half selectors
 # before the functor and retains scalar execution for integer CLAMP.
 # Functors receive packed u32 lanes and mask each result half before packing.
@@ -1685,7 +1666,7 @@ SIMD_VOPC_VOP3_FLOAT: dict[str, tuple[str, str]] = _build_simd_vopc_vop3_float()
 # (src0, src1, src2) with no modifiers and no widening: routed through
 # try_execute_ternary_vop3_simd<T>. Functor sig: `(native<T> a, native<T> b,
 # native<T> c) -> native<T>`. Excluded from this table: the float ternary
-# family (fma/mad/mad_mix — needs modifier glue), med3/min3/max3 (NaN /
+# family (fma/mad — needs modifier glue), med3/min3/max3 (NaN /
 # signed-integer-vs-fmin semantics — see project_pr6470_review_findings), the
 # bfe ops (branchy mask), the byte-permute ops (perm/alignbyte/lerp/sad/msad —
 # byte-wise / table-driven), and 64-bit-lane ternary (would need a 64-bit
@@ -2534,6 +2515,8 @@ for _fmt in ('f16', 'bf16'):
         'minimum': 'MINIMUM',
         'maximum': 'MAXIMUM',
     }.items():
+        if _fmt == 'f16' and _op == 'FMA':
+            continue
         SIMD_PACKED_FLOAT[f'v_pk_{_mnemonic}_{_fmt}_vop3p'] = (_op, _fmt == 'bf16')
 
 
@@ -2555,9 +2538,6 @@ def _guard_mode_arithmetic_probe(template_name: str, probe: str | None) -> str |
         # The helper requires guest RNE and handles denormal MODE explicitly.
         # Its instruction wrapper installs host RNE once and restores the
         # caller's FP state; the F16 evaluator inside it is unscoped.
-        return probe
-    if template_name == 'v_fma_mix_f32_vop3p':
-        # The fused MIX helper establishes MODE and applies denormal controls.
         return probe
     arithmetic_ops = (
         'add',
@@ -2888,19 +2868,6 @@ def _simd_probe_line(
     specdotcf16 = SIMD_DOTC_F16.get(template_name)
     if specdotcf16 is not None:
         return f'  ROCJITSU_TRY_SIMD_DOTC_F16({specdotcf16});'
-    # VOP3P fma_mix / mad_mix: select fused arithmetic and destination shape.
-    if template_name == 'v_fma_mix_f32_vop3p':
-        return '  ROCJITSU_TRY_SIMD_FUSED_MIX(F32);'
-    if template_name in SIMD_VOP3P_FMA_MIX_F32:
-        return '  ROCJITSU_TRY_SIMD_VOP3P_FMA_MIX_F32();'
-    if template_name == 'v_fma_mixlo_f16_vop3p':
-        return '  ROCJITSU_TRY_SIMD_FUSED_MIX(F16_LO);'
-    if template_name == 'v_fma_mixhi_f16_vop3p':
-        return '  ROCJITSU_TRY_SIMD_FUSED_MIX(F16_HI);'
-    if template_name in SIMD_VOP3P_FMA_MIX_F16_LO:
-        return '  ROCJITSU_TRY_SIMD_VOP3P_FMA_MIX_F16_LO();'
-    if template_name in SIMD_VOP3P_FMA_MIX_F16_HI:
-        return '  ROCJITSU_TRY_SIMD_VOP3P_FMA_MIX_F16_HI();'
     # VOP3 dst-accumulate FMA/MAC (vdst is the third operand). Per-isa class
     # has no src2; the accumulate glue reads vdst instead.
     specfmacf32 = SIMD_VOP3_FMAC_FP32.get(template_name)
@@ -3254,10 +3221,6 @@ def _local_coverage_probe(
                 f'inst, wf, {functor}, {recipe.round_mode})) return;'
             )
         return f'  if (amdgpu::try_execute_words_simd<{args}>(inst, wf, {functor})) return;'
-
-    if template_name in ('v_pk_fmac_f16_vop2', 'v_pk_fmac_f16_vop3'):
-        v3 = str(template_name.endswith('_vop3')).lower()
-        return f'  if (amdgpu::try_execute_packed_fmac_simd<{v3}>(inst, wf)) return;'
 
     if template_name.startswith('v_cmpx_'):
         ordinary = template_name.replace('v_cmpx_', 'v_cmp_', 1)

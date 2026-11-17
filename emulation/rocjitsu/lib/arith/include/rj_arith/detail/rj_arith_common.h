@@ -84,6 +84,14 @@ constexpr uint64_t RJ_ARITH_FP_INPUT_DENORMALS_F16_MASK = 3ULL << 26;
 constexpr uint64_t RJ_ARITH_FP_FLUSH_INPUT_DENORMALS_F16 = 1ULL << 26;
 constexpr uint64_t RJ_ARITH_FP_PRESERVE_INPUT_DENORMALS_F16 = 2ULL << 26;
 
+// FP32 intermediate rounding for mixed instructions that round again to FP16.
+// Uses the same enumeration as FP_ROUND_MASK, which controls the final result.
+// Availability is instruction-specific; no host FP controls are changed.
+constexpr uint64_t RJ_ARITH_FP_ROUND_INTERMEDIATE_F32_MASK = 3ULL << 28;
+constexpr uint64_t RJ_ARITH_FP_ROUND_INTERMEDIATE_F32_UP = 1ULL << 28;
+constexpr uint64_t RJ_ARITH_FP_ROUND_INTERMEDIATE_F32_DOWN = 2ULL << 28;
+constexpr uint64_t RJ_ARITH_FP_ROUND_INTERMEDIATE_F32_ZERO = 3ULL << 28;
+
 // Status codes returned by instruction emulation functions.
 constexpr int RJ_ARITH_SUCCESS = 0;
 constexpr int RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS = 1;
