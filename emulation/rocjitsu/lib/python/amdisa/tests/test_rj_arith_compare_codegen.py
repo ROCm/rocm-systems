@@ -342,10 +342,10 @@ def test_gfx908_float_comparisons_have_no_legacy_status_bypass(name):
     [
         n
         for n, (b, _) in FLOAT_COMPARISONS.items()
-        if b in (32, 64) and '_TRU_' not in n
+        if b in (16, 32, 64) and '_TRU_' not in n
     ],
 )
-def test_gfx10_native_float_comparisons_use_library_status(arch, name):
+def test_gfx10_float_comparisons_use_library_status(arch, name):
     bits, constant = FLOAT_COMPARISONS[name]
     for vop3 in (False, True):
         body = gen_float_compare(
@@ -400,5 +400,33 @@ def test_gfx10_native_float_ownership_per_method(arch, encoding, count):
                 'ROCJITSU_TRY_SIMD',
             )
         ), match[1]
+        checked += 1
+    assert checked == count
+
+
+@pytest.mark.parametrize('arch', ['rdna1', 'rdna2'])
+@pytest.mark.parametrize('encoding,count', [('vopc', 64), ('vop3', 32)])
+def test_gfx10_half_float_ownership_per_method(arch, encoding, count):
+    root = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+    )
+    source = (root / arch / f'{encoding}_exec.cpp').read_text()
+    checked = 0
+    for match in re.finditer(
+        r'void (VCmpx?\w+F16Vop\w*)::execute(?:_modifier)?_impl\([^)]*\)\s*\{', source
+    ):
+        if 'Class' in match[1]:
+            continue
+        end, depth = match.end(), 1
+        while depth:
+            depth += (source[end] == '{') - (source[end] == '}')
+            end += 1
+        body = source[match.end() : end - 1]
+        assert '_gfx10,' in body, match[1]
+        assert 'execute_float_compare<16>' in body, match[1]
+        assert 'execute_compare_with_exceptions' not in body, match[1]
+        assert 'CapturedArithmeticSource' not in body, match[1]
+        assert 'RJ_ARITH_ALU_HIGH' not in body, match[1]
         checked += 1
     assert checked == count

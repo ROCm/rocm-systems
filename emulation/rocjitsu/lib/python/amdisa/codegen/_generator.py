@@ -17084,24 +17084,6 @@ class CodeGenerator:
                         )
 
                         if (
-                            self.isa_spec.arch_name in ('rdna1', 'rdna2')
-                            and _enc_upper == 'ENC_VOP3'
-                            and not _rj_arith_arithmetic
-                            and inst.name.replace('_TRU_', '_T_') in FLOAT_COMPARISONS
-                        ):
-                            _, _, predicate, dtype = inst.name.split('_')
-                            relation = 'T' if predicate == 'TRU' else predicate.title()
-                            # On GFX10, VOPC opcodes using VOP3 cannot select halves with OPSEL.
-                            compare = (
-                                f'  if (inst_.clamp) {{\n'
-                                f'    amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::{dtype}, '
-                                f'amdgpu::comparison::{relation}>(wf, src0, src1, 0, '
-                                'inst_.abs, inst_.neg, wf.exec(), true, true, commit_result);\n'
-                                '    return;\n  }\n'
-                            )
-                            _ordinary_result_commit_setup += compare
-                            _result_commit_setup += compare
-                        if (
                             self.isa_spec.arch_name in ('cdna1', 'rdna3_5')
                             and inst.name == 'V_ADD_F32'
                         ) or (
@@ -17142,12 +17124,11 @@ class CodeGenerator:
                                     '    return;\n'
                                 )
                             _result_commit_setup += capture
-                        gfx10_half_predicate = FLOAT_COMPARISONS.get(inst.name)
                         integer_half = INTEGER_COMPARISONS.get(inst.name) == (16, False)
                         arch = self.isa_spec.arch_name
                         gfx10_half = (
                             arch in ('rdna1', 'rdna2')
-                            and (integer_half or gfx10_half_predicate == (16, False))
+                            and integer_half
                             and (
                                 _enc_upper == 'ENC_VOPC'
                                 or (

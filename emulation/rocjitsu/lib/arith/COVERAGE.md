@@ -165,3 +165,8 @@ Compatibility's CLAMP-only INVALID policy. F/T predicates retain strict
 FP-status support for this simple classification; other predicates still reject
 that mode. Loose skips reporting. Scalar, AVX2 and AVX-512 paths remain wide.
 FP16 migration is separate; its existing VM-side signaling path remains live.
+
+Gfx1010/gfx1030 FP16 relational comparisons now use the same shared CLAMP-only
+Compatibility status composition as native precisions, on both wave sizes.
+The VM preserves ignored VOP3 OPSEL and normalized SDWA source halves; strict
+FP-status mode remains unsupported. Gfx1150 retains its separate signaling policy.
