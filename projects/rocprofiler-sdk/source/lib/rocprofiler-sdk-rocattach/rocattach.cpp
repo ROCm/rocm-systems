@@ -540,6 +540,11 @@ teardown(int pid)
         // continue to detach anyways
     }
 
+    const auto tool_status =
+        (status != ROCATTACH_STATUS_SUCCESS)
+            ? status
+            : (retval == 0 ? ROCATTACH_STATUS_SUCCESS : ROCATTACH_STATUS_ERROR);
+
     ROCP_TRACE << "[rocprofiler-sdk-rocattach] Attempting detachment to pid " << pid;
     status = session->detach();
     if(status != ROCATTACH_STATUS_SUCCESS)
@@ -554,7 +559,7 @@ teardown(int pid)
         sessions->erase(pid);
     }
 
-    return ROCATTACH_STATUS_SUCCESS;
+    return tool_status;
 }
 
 }  // namespace

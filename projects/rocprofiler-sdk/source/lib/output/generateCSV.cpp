@@ -110,6 +110,7 @@ write_stats(tool::csv_output_file&& ofs, const stats_entry_vec_t& data_v)
                                                                               value.get_stddev());
         ofs << _row.str() << std::flush;
     }
+    ofs.close();
 }
 }  // namespace
 
@@ -248,6 +249,7 @@ generate_csv(const output_config& cfg,
                                                                   itr.model_name);
         ofs << row_ss.str();
     }
+    ofs.close();
 }
 
 void
@@ -327,6 +329,7 @@ generate_csv(const output_config&                                               
             ofs << row_ss.str();
         }
     }
+    ofs.close();
 }
 
 void
@@ -368,6 +371,7 @@ generate_csv(const output_config&                                       cfg,
             ofs << row_ss.str();
         }
     }
+    ofs.close();
 }
 
 void
@@ -410,6 +414,7 @@ generate_csv(const output_config&                                          cfg,
             ofs << row_ss.str();
         }
     }
+    ofs.close();
 }
 
 void
@@ -457,6 +462,7 @@ generate_csv(const output_config&                                           cfg,
             ofs << row_ss.str();
         }
     }
+    ofs.close();
 }
 
 void
@@ -511,6 +517,7 @@ generate_csv(const output_config&                                               
             ofs << row_ss.str();
         }
     }
+    ofs.close();
 }
 
 void
@@ -572,6 +579,7 @@ generate_csv(const output_config&                                             cf
             ofs << row_ss.str();
         }
     }
+    ofs.close();
 }
 
 void
@@ -667,6 +675,7 @@ generate_csv(const output_config&                    cfg,
             ofs << row_ss.str();
         }
     }
+    ofs.close();
 }
 
 void
@@ -718,6 +727,7 @@ generate_csv(const output_config&                                               
             ofs << row_ss.str();
         }
     }
+    ofs.close();
 }
 
 void
@@ -760,6 +770,7 @@ generate_csv(const output_config&                                           cfg,
             ofs << row_ss.str();
         }
     }
+    ofs.close();
 }
 
 // NOTE: OMPT and rocSHMEM are not emitted to CSV directly. Both are written to the rocpd
@@ -806,6 +817,7 @@ generate_csv(const output_config&                                               
             ofs << row_ss.str();
         }
     }
+    ofs.close();
 }
 
 void
@@ -848,6 +860,7 @@ generate_csv(const output_config&                                              c
             ofs << row_ss.str();
         }
     }
+    ofs.close();
 }
 
 void
@@ -907,6 +920,7 @@ generate_csv(const output_config&                                              c
             }
         }
     }
+    ofs.close();
 }
 
 void
@@ -980,6 +994,7 @@ generate_csv(const output_config&                                               
             ofs << row_ss.str();
         }
     }
+    ofs.close();
 }
 
 // CSV output for HIP graph launch summary records is deprecated; consume via rocpd/JSON.

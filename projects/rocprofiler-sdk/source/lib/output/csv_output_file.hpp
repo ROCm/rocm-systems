@@ -69,6 +69,8 @@ struct csv_output_file
         return ((m_os.stream) ? *m_os.stream : std::cerr) << std::forward<T>(value) << std::flush;
     }
 
+    void close() { m_os.close_checked(); }
+
     operator bool() const { return m_os.stream != nullptr; }
 
 private:
@@ -90,6 +92,9 @@ csv_output_file::csv_output_file(const output_config&              cfg,
         ROCP_FATAL_IF(itr.empty())
             << "CSV file for " << m_name << " was not provided the correct number of headers";
     }
+
+    // CSV writes are synchronous; exceptions are caught by the output-generation caller.
+    if(m_os.writes_to_file()) m_os.stream->exceptions(std::ios::badbit | std::ios::failbit);
 
     // write the csv header
     if(m_os.stream) encoder.write_row(*m_os.stream, header);

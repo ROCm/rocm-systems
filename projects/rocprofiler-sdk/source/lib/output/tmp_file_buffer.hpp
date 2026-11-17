@@ -34,6 +34,7 @@
 
 #include <deque>
 #include <mutex>
+#include <stdexcept>
 #include <string>
 #include <tuple>
 #include <type_traits>
@@ -74,6 +75,7 @@ struct file_buffer
 
     domain_type       domain = {};
     uint64_t          nbytes = 0;
+    bool              io_failed = false;
     ring_buffer_t<Tp> buffer = {};
     tmp_file          file;
 };
@@ -87,6 +89,10 @@ file_buffer<Tp>::reset()
     file.remove();  // Delete old file
     file.file_pos.clear();
     nbytes = 0;
+    io_failed = false;
+    file.stream.clear();
+    // Resolve a fresh path on the next session's first offload, after config refresh.
+    file.filename.clear();
     buffer.clear();
 }
 
@@ -119,20 +125,29 @@ offload_buffer(domain_type type)
     }
 
     auto                  _lk      = std::lock_guard<std::mutex>(filebuf->file.file_mutex);
-    [[maybe_unused]] auto _success = filebuf->file.open();
-    auto&                 _fs      = filebuf->file.stream;
-
-    ROCP_CI_LOG_IF(WARNING, _fs.tellg() != _fs.tellp())  // this should always be true
-        << "tellg=" << _fs.tellg() << ", tellp=" << _fs.tellp();
-
-    auto _nbytes = (filebuf->buffer.count() * filebuf->buffer.data_size());
-
-    ROCP_TRACE << fmt::format(
-        "offloading {} B from {} buffer to tmp file", _nbytes, get_domain_column_name(type));
-
-    filebuf->file.file_pos.emplace(_fs.tellp());
-    filebuf->nbytes += _nbytes;
-    filebuf->buffer.save(_fs);
+    if(!filebuf->io_failed)
+    {
+        try
+        {
+            if(filebuf->file.filename.empty())
+                filebuf->file.filename = get_tmp_file_name_callback()(type);
+            if(!filebuf->file.open())
+                throw std::runtime_error{"Cannot open profiling temporary file"};
+            auto&      stream   = filebuf->file.stream;
+            const auto position = stream.tellp();
+            const auto nbytes   = filebuf->buffer.count() * filebuf->buffer.data_size();
+            filebuf->buffer.save(stream);
+            stream.flush();
+            if(!stream) throw std::runtime_error{"Cannot write profiling temporary file"};
+            filebuf->file.file_pos.emplace(position);
+            filebuf->nbytes += nbytes;
+        } catch(const std::exception& e)
+        {
+            // Recording callbacks must not unwind into the application's thread.
+            filebuf->io_failed = true;
+            ROCP_ERROR << e.what() << ": '" << filebuf->file.filename << "'";
+        }
+    }
     filebuf->buffer.clear();
 
     ROCP_CI_LOG_IF(ERROR, !filebuf->buffer.is_empty())
@@ -228,11 +243,16 @@ read_tmp_file(domain_type type)
     }
 
     auto _lk = std::lock_guard<std::mutex>{filebuf->file.file_mutex};
+    // Only the output-generation path raises; recording callbacks retain a sticky error.
+    if(filebuf->io_failed)
+        throw std::runtime_error{"Profiling temporary-file I/O failed: " + filebuf->file.filename};
     if(filebuf->file.exists())
     {
         auto& _fs = filebuf->file.stream;
         if(_fs.is_open()) _fs.close();
-        filebuf->file.open(std::ios::binary | std::ios::in);
+        if(!filebuf->file.open(std::ios::binary | std::ios::in))
+            throw std::runtime_error{"Cannot read profiling temporary file: " +
+                                     filebuf->file.filename};
     }
 }
 }  // namespace tool

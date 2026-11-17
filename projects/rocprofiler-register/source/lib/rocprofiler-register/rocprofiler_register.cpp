@@ -1257,8 +1257,9 @@ rocprofiler_register_detach()
     if(existing_scanned_data.detach_fn)
     {
         LOG(INFO) << "rocprofiler-sdk detach starting...";
-        existing_scanned_data.detach_fn();
+        const auto status = existing_scanned_data.detach_fn();
         LOG(INFO) << "rocprofiler-sdk detach completed.";
+        return (status == 0) ? ROCP_REG_SUCCESS : ROCP_REG_ROCPROFILER_ERROR;
     }
     else
     {

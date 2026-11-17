@@ -467,6 +467,7 @@ generate_stats(const output_config& cfg,
     }
 
     if(cfg.stats_summary) generate_stats(cfg, _os, "SUMMARY", data_v, _indent);
+    _os.close_checked();
 }
 
 stats_entry_t

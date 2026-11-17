@@ -27,6 +27,8 @@
 
 #include <fmt/format.h>
 
+#include <memory>
+#include <stdexcept>
 #include <string_view>
 #include <unordered_set>
 
@@ -41,6 +43,12 @@ namespace
 const auto stdout_names = std::unordered_set<std::string_view>{"stdout", "STDOUT"};
 const auto stderr_names = std::unordered_set<std::string_view>{"stderr", "STDERR"};
 }  // namespace
+
+bool
+is_standard_stream(std::string_view name)
+{
+    return name.empty() || stdout_names.count(name) > 0 || stderr_names.count(name) > 0;
+}
 
 std::string
 get_output_filename(const output_config& cfg, std::string_view fname, std::string_view ext)
@@ -58,9 +66,9 @@ get_output_filename(const output_config& cfg, std::string_view fname, std::strin
 
     if(fs::exists(output_path) && !fs::is_directory(fs::status(output_path)))
     {
-        ROCP_FATAL << fmt::format(
-            "ROCPROFILER_OUTPUT_PATH ({}) already exists and is not a directory",
-            output_path.string());
+        throw std::runtime_error{
+            fmt::format("ROCPROFILER_OUTPUT_PATH ({}) already exists and is not a directory",
+                        output_path.string())};
     }
     else if(!fs::exists(output_path))
     {
@@ -77,9 +85,9 @@ get_output_filename(const output_config& cfg, std::string_view fname, std::strin
     }
     else if(fs::exists(_ofname_path) && !fs::is_directory(fs::status(_ofname_path)))
     {
-        ROCP_FATAL << fmt::format(
-            "ROCPROFILER_OUTPUT_PATH ({}) already exists and is not a directory",
-            output_path.string());
+        throw std::runtime_error{
+            fmt::format("ROCPROFILER_OUTPUT_PATH ({}) already exists and is not a directory",
+                        output_path.string())};
     }
 
     return _ofname;
@@ -101,15 +109,12 @@ get_output_stream(const output_config& cfg,
         return {&std::clog, [](auto*&) {}};
 
     auto  output_file = get_output_filename(cfg, fname, ext);
-    auto* _ofs        = new(std::nothrow) std::ofstream{output_file, mode};
-
-    LOG_IF(FATAL, !_ofs) << fmt::format("Failed to allocate ofstream for output file '{}'",
-                                        output_file);
-    LOG_IF(FATAL, _ofs && !*_ofs) << fmt::format("Failed to open '{}' for output", output_file);
+    auto  _ofs        = std::make_unique<std::ofstream>(output_file, mode);
+    if(!*_ofs) throw std::runtime_error{fmt::format("Failed to open '{}' for output", output_file)};
 
     ROCP_ERROR << "Opened result file: " << output_file;
 
-    return {_ofs, [](std::ostream*& v) {
+    return {_ofs.release(), [](std::ostream*& v) {
                 if(v) dynamic_cast<std::ofstream*>(v)->close();
                 delete v;
                 v = nullptr;

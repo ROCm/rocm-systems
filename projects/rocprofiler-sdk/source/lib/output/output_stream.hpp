@@ -78,10 +78,31 @@ struct output_stream
         return ((stream) ? *stream : std::cerr) << std::forward<Tp>(value) << std::flush;
     }
 
-    void close()
+    // Explicit completion can report I/O failure; destruction remains non-throwing.
+    void close_checked()
     {
-        if(stream) (*stream) << std::flush;
+        if(!stream) return;
+        if(writes_to_file()) stream->exceptions(std::ios::goodbit);
+        stream->flush();
+        if(auto* file = dynamic_cast<std::ofstream*>(stream)) file->close();
+        const bool failed = stream->fail();
+        close();
+        if(failed) throw std::runtime_error{"Failed to write or close profiling output"};
+    }
+
+    void close() noexcept
+    {
+        if(!stream) return;
+        // Owned file streams throw while writing, but destruction must never terminate a target.
+        if(writes_to_file()) stream->exceptions(std::ios::goodbit);
+        try
+        {
+            (*stream) << std::flush;
+        } catch(...)
+        {}
         if(dtor) dtor(stream);
+        stream = nullptr;
+        dtor   = nullptr;
     }
 
     bool writes_to_file() const { return (dynamic_cast<std::ofstream*>(stream) != nullptr); }
@@ -89,6 +110,9 @@ struct output_stream
     std::ostream*  stream = nullptr;
     ostream_dtor_t dtor   = nullptr;
 };
+
+bool
+is_standard_stream(std::string_view name);
 
 std::string
 get_output_filename(const output_config& cfg, std::string_view fname, std::string_view ext);

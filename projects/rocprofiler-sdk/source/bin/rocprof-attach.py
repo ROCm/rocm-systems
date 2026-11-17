@@ -176,7 +176,8 @@ def attach(
             else:
                 detach_status = c_lib.rocattach_detach(int(pid))
         except Exception as e:
-            print(f"Exception during detachment: {e}")
+            print(f"Exception during detachment: {e}", file=sys.stderr)
+            return 1
 
         if detach_status != 0:
             print(
@@ -185,10 +186,11 @@ def attach(
         else:
             print(f"Detaching from PID {pid} using library {attach_library} :: success")
 
+        return detach_status
+
     def signal_handler(sig, frame):
         print("\nCaught signal SIGINT")
-        detach()
-        sys.exit(0)
+        sys.exit(detach())
 
     signal.signal(signal.SIGINT, signal_handler)
 
@@ -201,20 +203,19 @@ def attach(
         sys.stdout.flush()
         time.sleep(int(attach_duration_msec) / 1000)
 
-    detach()
+    return detach()
 
 
 def main(cmd_args=None):
     args = parse_arguments(cmd_args)
 
-    attach(
+    return attach(
         pid=args.pid,
         attach_tool_library=args.attach_tool_library,
         attach_duration_msec=args.attach_duration_msec,
         attach_library=args.attach_library,
         attach_children=args.attach_children,
     )
-    return 0
 
 
 if __name__ == "__main__":

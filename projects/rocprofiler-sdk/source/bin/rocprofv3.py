@@ -1195,7 +1195,7 @@ For attachment profiling of running processes:
     add_parser_bool_argument(
         advanced_options,
         "--attach-sync-output",
-        help="[Attach mode only] Generate output files synchronously during detachment (default: async). Use this option when scripts need to access output files immediately after rocprofv3 exits",
+        help="[Attach mode only] Generate output on the detachment thread instead of a background worker. Both modes wait for output completion and report failures before rocprofv3 exits",
     )
 
     if args is None:

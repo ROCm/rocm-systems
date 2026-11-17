@@ -95,3 +95,41 @@ def test_default_attach_library_uses_runtime_soname(
 
 if __name__ == "__main__":
     sys.exit(pytest.main(["-x", __file__] + sys.argv[1:]))
+
+@pytest.mark.parametrize("status", [0, 6, "exception"])
+@pytest.mark.parametrize("interrupt", [False, True])
+@pytest.mark.parametrize("children", [False, True])
+def test_detach_status_reaches_exit(rocprof_attach, monkeypatch, tmp_path,
+                                   status, interrupt, children):
+    tool_library = tmp_path / "tool.so"
+    tool_library.touch()
+    library = _FakeAttachLibrary()
+
+    def detach(_pid):
+        if status == "exception":
+            raise RuntimeError("detach failed")
+        return status
+
+    library.rocattach_detach = detach
+    library.rocattach_detach_tree = detach
+    handlers = {}
+    monkeypatch.setattr(rocprof_attach.ctypes, "CDLL", lambda _: library)
+    monkeypatch.setattr(rocprof_attach.signal, "signal",
+                        lambda sig, handler: handlers.update({sig: handler}))
+    monkeypatch.setenv("ROCPROF_ATTACH_TOOL_LIBRARY", "restore-after-test")
+
+    def sleep(_):
+        if interrupt:
+            handlers[rocprof_attach.signal.SIGINT](rocprof_attach.signal.SIGINT, None)
+
+    monkeypatch.setattr(rocprof_attach.time, "sleep", sleep)
+    args = ["--attach", "123", "--attach-tool-library", str(tool_library),
+            "--attach-duration-msec", "0",
+            "--attach-children=" + str(children).lower()]
+    expected = 1 if status == "exception" else status
+    if interrupt:
+        with pytest.raises(SystemExit) as exc:
+            rocprof_attach.main(args)
+        assert exc.value.code == expected
+    else:
+        assert rocprof_attach.main(args) == expected

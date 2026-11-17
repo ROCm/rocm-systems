@@ -367,6 +367,7 @@ struct client_library
     rocprofiler_tool_configure_attach_result_t* configure_attach_result = nullptr;
     rocprofiler_client_id_t                     internal_client_id      = {};
     rocprofiler_client_id_t                     mutable_client_id       = {};
+    bool                                        attached                = false;
 
     std::string_view get_name() const
     {
@@ -869,91 +870,104 @@ invoke_client_finalizers()
 }
 
 rocprofiler_status_t
+detach_client(client_library& client)
+{
+    context::stop_client_contexts(client.internal_client_id);
+    hsa::async_copy_sync();
+    hsa::queue_controller_sync();
+    // Reuse the normal detach fence before releasing callback machinery.
+    // This may abandon and disable signal-less completion process-wide on timeout.
+    kfd::signal_less_fence_completions();
+    pc_sampling::service_sync(client.internal_client_id);
+
+    const auto fini_status = get_fini_status();
+    if(fini_status == 0) set_fini_status(-1);
+    auto cleanup = common::scope_destructor{[&]() {
+        if(fini_status == 0) set_fini_status(fini_status);
+        context::deactivate_client_contexts(client.internal_client_id);
+        client.attached = false;
+    }};
+    try
+    {
+        if(client.configure_attach_result && client.configure_attach_result->tool_detach)
+            client.configure_attach_result->tool_detach(client.configure_attach_result->tool_data);
+        return ROCPROFILER_STATUS_SUCCESS;
+    } catch(const std::exception& e)
+    {
+        ROCP_ERROR << "Client " << client.name << " detach failed: " << e.what();
+    } catch(...)
+    {
+        ROCP_ERROR << "Client " << client.name << " detach failed with an unknown exception";
+    }
+    return ROCPROFILER_STATUS_ERROR;
+}
+
+rocprofiler_status_t
 invoke_client_attaches()
 {
     ROCP_INFO << "Calling tool_attach for all registered clients. # of clients: "
               << get_num_clients();
-
-    if(!get_clients())
-    {
-        ROCP_INFO << "No registered clients to attach";
-        return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
-    }
-
+    if(!get_clients()) return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
     auto ret = ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+    const bool was_attached =
+        get_attach_status() && get_attach_status()->is_attached.load(std::memory_order_acquire);
+    std::vector<client_library*> attempted;
     for(auto& itr : *get_clients())
     {
-        if(itr && itr->configure_attach_result && itr->configure_attach_result->tool_attach)
+        if(!itr || !itr->configure_attach_result || !itr->configure_attach_result->tool_attach)
+            continue;
+        if(itr->attached)
         {
-            auto _contexts = context::get_client_contexts(itr->internal_client_id);
-
-            ROCP_INFO << fmt::format(
-                "Client {} is attaching... Number of contexts: {}", itr->name, _contexts.size());
-
-            itr->configure_attach_result->tool_attach(nullptr,
-                                                      _contexts.data(),
-                                                      _contexts.size(),
-                                                      itr->configure_attach_result->tool_data);
-
             ret = ROCPROFILER_STATUS_SUCCESS;
+            continue;
         }
-        else if(itr)
+        auto contexts = context::get_client_contexts(itr->internal_client_id);
+        attempted.emplace_back(&*itr);
+        int status = -1;
+        try
         {
-            ROCP_INFO << "Client " << itr->name << " does not have tool_attach function";
+            status = itr->configure_attach_result->tool_attach(
+                nullptr, contexts.data(), contexts.size(), itr->configure_attach_result->tool_data);
+        } catch(const std::exception& e)
+        {
+            ROCP_ERROR << "Client " << itr->name << " attach failed: " << e.what();
+        } catch(...)
+        {
+            ROCP_ERROR << "Client " << itr->name << " attach failed with an unknown exception";
         }
+        if(status != 0)
+        {
+            ROCP_ERROR << "Client " << itr->name << " refused attachment: " << status;
+            // Undo only clients entered by this invocation, in reverse acquisition order.
+            for(auto pos = attempted.rbegin(); pos != attempted.rend(); ++pos)
+                detach_client(**pos);
+            if(get_attach_status())
+                get_attach_status()->is_attached.store(was_attached, std::memory_order_release);
+            return ROCPROFILER_STATUS_ERROR;
+        }
+        itr->attached = true;
+        ret           = ROCPROFILER_STATUS_SUCCESS;
     }
-
     if(ret == ROCPROFILER_STATUS_SUCCESS && get_attach_status())
         get_attach_status()->is_attached.store(true, std::memory_order_release);
-
     return ret;
 }
 
 rocprofiler_status_t
 invoke_client_detaches()
 {
-    ROCP_INFO << "Calling tool_detach for all registered clients. # of clients: "
-              << get_num_clients();
-
-    if(!get_clients())
-    {
-        ROCP_INFO << "No registered clients to detach";
-        return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
-    }
-
+    ROCP_INFO << "Calling tool_detach for attached clients. # of clients: " << get_num_clients();
+    if(!get_clients()) return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
     auto ret = ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
     for(auto& itr : *get_clients())
     {
-        if(itr && itr->configure_attach_result && itr->configure_attach_result->tool_detach)
-        {
-            context::stop_client_contexts(itr->internal_client_id);
-
-            hsa::async_copy_sync();
-            hsa::queue_controller_sync();
-            // Terminal fail-closed fence: client detach frees the tool's callback
-            // and buffer machinery next, so no callback-capable signal-less completion
-            // may survive. On timeout this abandons+disables signal-less process-wide
-            // (correct here -- the client is going away). No-op with the feature off.
-            kfd::signal_less_fence_completions();
-            pc_sampling::service_sync(itr->internal_client_id);
-
-            auto _fini_status = get_fini_status();
-            if(_fini_status == 0) set_fini_status(-1);
-            itr->configure_attach_result->tool_detach(itr->configure_attach_result->tool_data);
-            if(_fini_status == 0) set_fini_status(_fini_status);
-            context::deactivate_client_contexts(itr->internal_client_id);
-
-            ret = ROCPROFILER_STATUS_SUCCESS;
-        }
-        else if(itr)
-        {
-            ROCP_INFO << "Client " << itr->name << " does not have tool_detach function";
-        }
+        if(!itr || !itr->attached) continue;
+        auto status = detach_client(*itr);
+        if(status != ROCPROFILER_STATUS_SUCCESS || ret == ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED)
+            ret = status;
     }
-
     if(get_attach_status())
         get_attach_status()->is_attached.store(false, std::memory_order_release);
-
     return ret;
 }
 
