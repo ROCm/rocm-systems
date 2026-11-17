@@ -105,6 +105,17 @@ rj_waitcheck /path/to/site-packages/torch \
 | `--extract-code-object PATH` | Write the selected AMDGPU ELF to `PATH` and exit. |
 | `--extract-code-objects DIR` | Parse one input once, write each selected AMDGPU ELF to `DIR`, and emit its target, index, and path as JSONL. Existing files are reused only when their bytes match. |
 
+## Programmatic C API
+
+Kernel generators with a final HSA ELF image can include
+`<rocjitsu/analysis/rj_waitcheck.h>` and link `librocjitsu_waitcheck`.
+Initialize `rj_waitcheck_options_t` and `rj_waitcheck_result_t` with their
+`_init` functions, then call `rj_waitcheck_analyze` with the image bytes. The
+function returns a status; on success, `result.passed` reports whether the
+analyzed code has a wait hazard. It does not abort the process. To check one
+entry, call `rj_waitcheck_analyze_kernel` with its byte offset within `.text`.
+See `docs/waitcheck/README.md` and the public header for a complete example.
+
 ## Supported architectures
 
 waitcheck supports the following targets:
@@ -165,6 +176,36 @@ When `--summary-only` is used, only final batch totals are printed. For `--exhau
 | `1` | Command-line usage error. |
 | `2` | Input selection, parsing, or analysis error, including an incomplete `--exhaustive` sweep. |
 | `4` | One or more hazards were found. |
+
+## Runtime HSA tool
+
+`librocjitsu_waitcheck_hooks.so` checks the final code-object reader passed to the ROCR runtime loader via HSA tools.
+
+``` shell
+HSA_TOOLS_DISABLE_REGISTER=1 \
+HSA_TOOLS_LIB="build/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_waitcheck_hooks.so" \
+  DEBUG_CLR_AQL_DEV_QUEUE=0 \
+  ROCJITSU_WAITCHECK_FAIL=1 \
+  ./app
+```
+
+`HSA_TOOLS_DISABLE_REGISTER=1` selects the environment-driven HSA tools path on ROCR builds that also support rocprofiler registration.
+
+### Environment variables
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `ROCJITSU_WAITCHECK` | `1` | Set to `0` to disable checking while leaving the HSA tool loaded. |
+| `ROCJITSU_WAITCHECK_MODE` | `dispatch` | `dispatch` checks a kernel immediately before its first AQL dispatch and caches the result. `eager` exhaustively checks every kernel when its code object is loaded. |
+| `ROCJITSU_WAITCHECK_FAIL` | `0` | Set to `1` to stop on a missing wait. Dispatch mode aborts before submitting a bad packet; eager mode and dispatch mode with a cooperative queue reject a hazardous load. A device-memory descriptor queue cannot be intercepted, so dispatch mode rejects its creation with `HSA_STATUS_ERROR_INVALID_QUEUE_CREATION`. Use eager mode for device-memory rings. |
+| `ROCJITSU_WAITCHECK_SUMMARY` | `0` | Set to `1` to print load, dispatch, check, cache, pass, and hazard counters at shutdown or process exit. |
+
+In dispatch mode, descriptors are indexed at code-object load, mapped to runtime `kernel_object` values after executable freeze, and not decoded or analyzed until the kernel is actually submitted. This avoids whole-library analysis costs for large code objects. Use `ROCJITSU_WAITCHECK_MODE=eager` for load-only validation or when the application does not create an interceptable HSA queue.
+
+The HSA tool discovers ordinary AMDHSA kernel descriptors. It does not
+automatically discover metadata-only variants or descriptorless entrypoints.
+For a known descriptorless entrypoint, use the offline command with
+`--kernel-entry` and `--wave-size`.
 
 ## Known limitations
 

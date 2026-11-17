@@ -105,6 +105,44 @@ set_target_properties(
 
 rj_configure_target(rocjitsu_waitcheck_internal PRIVATE_INCLUDES WARNINGS HIDDEN)
 
+add_library(
+    rocjitsu_waitcheck_api
+    OBJECT
+    src/rocjitsu/code/analysis/rj_waitcheck.cpp
+)
+set_target_properties(
+    rocjitsu_waitcheck_api
+    PROPERTIES POSITION_INDEPENDENT_CODE ON
+)
+target_link_libraries(
+    rocjitsu_waitcheck_api
+    PRIVATE rocjitsu_waitcheck_internal
+)
+rj_configure_target(rocjitsu_waitcheck_api PRIVATE_INCLUDES WARNINGS HIDDEN)
+add_library(rocjitsu_waitcheck SHARED $<TARGET_OBJECTS:rocjitsu_waitcheck_api>)
+target_link_libraries(
+    rocjitsu_waitcheck
+    PRIVATE rocjitsu_waitcheck_internal rocjitsu_amdgpu_isa_model_registry
+)
+set_target_properties(rocjitsu_waitcheck PROPERTIES VERSION 1.0.0 SOVERSION 1)
+rj_configure_target(rocjitsu_waitcheck PRIVATE_INCLUDES WARNINGS HIDDEN)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(_waitcheck_map
+        ${ROCJITSU_SRC_DIR}/rocjitsu/code/analysis/rocjitsu_waitcheck.map
+    )
+    set_property(
+        TARGET rocjitsu_waitcheck
+        APPEND
+        PROPERTY LINK_DEPENDS ${_waitcheck_map}
+    )
+    target_link_options(
+        rocjitsu_waitcheck
+        PRIVATE
+            "LINKER:--exclude-libs,ALL"
+            "LINKER:--version-script=${_waitcheck_map}"
+    )
+endif()
+
 # Private base archive for code-object translation frontends. Architecture
 # models and decoder factories are supplied by each frontend, so this target
 # does not pull in the simulator implementation or the all-ISA registry.

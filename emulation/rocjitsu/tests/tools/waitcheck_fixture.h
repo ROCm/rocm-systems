@@ -405,6 +405,14 @@ make_gfx1250_code_object(const std::vector<uint32_t> &text_words) {
   return make_gfx1200_code_object(text_words);
 }
 
+[[nodiscard]] inline std::vector<uint8_t> make_gfx1200_incomplete_missing_wait_code_object() {
+  std::vector<uint32_t> text_words;
+  append_inst(text_words, global_load_b32(0));
+  append_inst(text_words, v_mov_b32(1, 0));
+  text_words.push_back(s_setpc_b64_word(8));
+  return make_gfx1200_code_object(text_words);
+}
+
 [[nodiscard]] inline std::vector<uint8_t> make_gfx1200_correct_wait_code_object() {
   std::vector<uint32_t> text_words;
   append_inst(text_words, global_load_b32(0));

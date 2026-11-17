@@ -83,3 +83,14 @@ if(FAIL_ON_SKIP AND _run_output MATCHES "\\[  SKIPPED \\]")
         "requires it to run"
     )
 endif()
+
+if(
+    REQUIRED_OUTPUT
+    AND NOT _run_output MATCHES "${REQUIRED_OUTPUT}"
+    AND NOT _run_errors MATCHES "${REQUIRED_OUTPUT}"
+)
+    message(
+        FATAL_ERROR
+        "Filtered test '${TEST_FILTER}' did not emit '${REQUIRED_OUTPUT}'"
+    )
+endif()

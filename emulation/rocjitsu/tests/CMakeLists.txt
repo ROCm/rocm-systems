@@ -1376,6 +1376,89 @@ target_link_libraries(
 rj_configure_target(waitcheck_target_test WARNINGS)
 rj_add_gtest_tests(waitcheck_target_test)
 
+add_executable(waitcheck_c_header_test analysis/waitcheck_c_header_test.c)
+target_link_libraries(waitcheck_c_header_test PRIVATE rocjitsu_waitcheck)
+# The SDK may bundle its own librocjitsu.so. This ABI test must load the
+# library it was linked against, before CMake's inferred SDK search paths.
+set_property(
+    TARGET waitcheck_c_header_test
+    PROPERTY BUILD_RPATH "$<TARGET_FILE_DIR:rocjitsu_waitcheck>"
+)
+rj_configure_target(waitcheck_c_header_test PRIVATE_INCLUDES WARNINGS)
+rj_add_test(NAME RjWaitcheck.CHeader COMMAND waitcheck_c_header_test LABELS waitcheck)
+set_tests_properties(
+    RjWaitcheck.CHeader
+    PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "LD_LIBRARY_PATH=path_list_prepend:$<TARGET_FILE_DIR:rocjitsu_waitcheck>"
+)
+
+add_executable(waitcheck_main_c_header_test analysis/waitcheck_c_header_test.c)
+target_link_libraries(waitcheck_main_c_header_test PRIVATE rocjitsu_shared)
+rj_configure_target(waitcheck_main_c_header_test PRIVATE_INCLUDES WARNINGS)
+rj_add_test(NAME RjWaitcheck.MainCHeader COMMAND waitcheck_main_c_header_test LABELS waitcheck)
+set_tests_properties(
+    RjWaitcheck.MainCHeader
+    PROPERTIES ENVIRONMENT_MODIFICATION
+        "LD_LIBRARY_PATH=path_list_prepend:$<TARGET_FILE_DIR:rocjitsu_shared>"
+)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(waitcheck_dlopen_test analysis/waitcheck_dlopen_test.cpp)
+    target_link_libraries(
+        waitcheck_dlopen_test
+        PRIVATE ${CMAKE_DL_LIBS} Threads::Threads GTest::gtest_main
+    )
+    target_compile_definitions(
+        waitcheck_dlopen_test
+        PRIVATE
+            ROCJITSU_WAITCHECK_LIBRARY_PATH="$<TARGET_FILE:rocjitsu_waitcheck>"
+    )
+    add_dependencies(waitcheck_dlopen_test rocjitsu_waitcheck)
+    rj_configure_target(waitcheck_dlopen_test PRIVATE_INCLUDES WARNINGS)
+    rj_add_test(
+        NAME RjWaitcheck.DlopenUnload
+        COMMAND waitcheck_dlopen_test
+        ENVIRONMENT
+            "ASAN_OPTIONS=detect_leaks=1:halt_on_error=1"
+            "LSAN_OPTIONS=exitcode=23"
+        LABELS waitcheck
+    )
+endif()
+add_executable(waitcheck_c_api_test analysis/waitcheck_c_api_test.cpp)
+target_link_libraries(
+    waitcheck_c_api_test
+    PRIVATE rocjitsu_waitcheck util simdojo_headers GTest::gtest_main
+)
+rj_configure_target(waitcheck_c_api_test PRIVATE_INCLUDES WARNINGS)
+rj_add_gtest_tests(waitcheck_c_api_test)
+if(RJ_INSTALL_TESTS)
+    file(APPEND "${RJ_INSTALL_CTEST_FILE}" "include(\"waitcheck_c_api_test.cmake\")\n")
+    file(RELATIVE_PATH _waitcheck_test_libdir
+        "${CMAKE_INSTALL_FULL_DATADIR}/rocjitsu/tests/bin" "${CMAKE_INSTALL_FULL_LIBDIR}")
+    set_target_properties(waitcheck_c_api_test PROPERTIES INSTALL_RPATH "$ORIGIN/${_waitcheck_test_libdir}")
+endif()
+
+
+add_executable(waitcheck_hooks_unit_test tools/waitcheck_hooks_unit_test.cpp)
+target_link_libraries(
+    waitcheck_hooks_unit_test
+    PRIVATE
+        rocjitsu_waitcheck_hooks
+        rocjitsu_waitcheck_internal
+        rocjitsu_amdgpu_isa_model_registry
+        rocjitsu_hsa_tools_headers
+        GTest::gtest_main
+)
+rj_configure_target(waitcheck_hooks_unit_test PRIVATE_INCLUDES WARNINGS)
+rj_add_gtest_tests(waitcheck_hooks_unit_test)
+if(RJ_INSTALL_TESTS)
+    file(APPEND "${RJ_INSTALL_CTEST_FILE}" "include(\"waitcheck_hooks_unit_test.cmake\")\n")
+    file(RELATIVE_PATH _waitcheck_hooks_test_libdir
+        "${CMAKE_INSTALL_FULL_DATADIR}/rocjitsu/tests/bin" "${CMAKE_INSTALL_FULL_LIBDIR}")
+    set_target_properties(waitcheck_hooks_unit_test PROPERTIES
+        INSTALL_RPATH "$ORIGIN/${_waitcheck_hooks_test_libdir}")
+endif()
 add_executable(rj_waitcheck_smoke_test tools/rj_waitcheck_smoke_test.cpp)
 add_test(
     NAME RjWaitcheck.SampleRejectsAliases
@@ -4574,7 +4657,7 @@ if(RJ_ENABLE_HIP_TESTS)
         cmake_parse_arguments(
             ARG
             ""
-            "CONFIG;INSTALL_CONFIG;NAME;TIMEOUT"
+            "CONFIG;INSTALL_CONFIG;NAME;TIMEOUT;REQUIRED_OUTPUT"
             "ENVIRONMENT"
             ${ARGN}
         )
@@ -4653,6 +4736,15 @@ if(RJ_ENABLE_HIP_TESTS)
                 else()
                     list(APPEND _install_env "${_env_entry}")
                 endif()
+            elseif(
+                _env_entry
+                    STREQUAL
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_waitcheck_hooks>"
+            )
+                list(
+                    APPEND _install_env
+                    "HSA_TOOLS_LIB=\${RJ_INSTALLED_LIBDIR}/${CMAKE_SHARED_LIBRARY_PREFIX}rocjitsu_waitcheck_hooks${CMAKE_SHARED_LIBRARY_SUFFIX}"
+                )
             elseif(_env_entry STREQUAL "${RJ_HIP_TSAN_ENV}")
                 list(APPEND _install_env "${RJ_HIP_TSAN_INSTALL_ENV}")
             else()
@@ -4666,6 +4758,7 @@ if(RJ_ENABLE_HIP_TESTS)
             ${CMAKE_COMMAND}
             "-DTEST_EXECUTABLE=${CMAKE_CURRENT_BINARY_DIR}/${TEST_BIN}"
             "-DTEST_FILTER=${TEST_CASE}"
+            "-DREQUIRED_OUTPUT=${ARG_REQUIRED_OUTPUT}"
             "-DTEST_LAUNCHER=${RJ_CLI}"
             "-DTEST_CONFIG=${ARG_CONFIG}"
             -P
@@ -4674,6 +4767,7 @@ if(RJ_ENABLE_HIP_TESTS)
             "${CMAKE_COMMAND}"
             "-DTEST_EXECUTABLE=bin/${TEST_BIN}"
             "-DTEST_FILTER=${TEST_CASE}"
+            "-DREQUIRED_OUTPUT=${ARG_REQUIRED_OUTPUT}"
             "-DTEST_LAUNCHER=\${RJ_INSTALLED_BINDIR}/rocjitsu"
             "-DTEST_CONFIG=${_install_config}"
             "-P"
@@ -4745,6 +4839,60 @@ if(RJ_ENABLE_HIP_TESTS)
             CONFIG ${RJ_HIP_TEST_CONFIG}
         )
         if(RJ_HIP_TEST_ARCH MATCHES "^(gfx942|gfx950)$")
+            set(_waitcheck_env
+                "HSA_TOOLS_DISABLE_REGISTER=1"
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_waitcheck_hooks>"
+                "ROCJITSU_WAITCHECK=1"
+                "ROCJITSU_WAITCHECK_FAIL=1"
+                "ROCJITSU_WAITCHECK_SUMMARY=1"
+            )
+            set(_waitcheck_dispatch_env ${_waitcheck_env} "DEBUG_CLR_AQL_DEV_QUEUE=0")
+            add_dependencies(
+                hip_vector_add_test_target
+                rocjitsu_waitcheck_hooks
+            )
+            rj_add_hip_test_case(
+                hip_vector_add_test "HipVectorAddTest.CorrectResult"
+                NAME WaitcheckHsaToolsHipTest.CleanVectorAdd
+                CONFIG ${RJ_HIP_TEST_CONFIG}
+                ENVIRONMENT ${_waitcheck_dispatch_env}
+                REQUIRED_OUTPUT "summary loads=[1-9][0-9]* dispatches=[1-9][0-9]* checked=[1-9][0-9]*"
+            )
+            rj_add_hip_test_case(
+                hip_vector_add_test "HipVectorAddTest.CorrectResult"
+                NAME WaitcheckHsaToolsHipTest.DirectDoorbellVectorAdd
+                CONFIG ${RJ_HIP_TEST_CONFIG}
+                ENVIRONMENT ${_waitcheck_dispatch_env} "DEBUG_CLR_DIRECT_DOORBELL=1"
+                REQUIRED_OUTPUT "summary loads=[1-9][0-9]* dispatches=[1-9][0-9]* checked=[1-9][0-9]*"
+            )
+            set(_waitcheck_disabled_env ${_waitcheck_env})
+            list(REMOVE_ITEM _waitcheck_disabled_env "ROCJITSU_WAITCHECK=1")
+            list(APPEND _waitcheck_disabled_env "ROCJITSU_WAITCHECK=0")
+            rj_add_hip_test_case(
+                hip_vector_add_test "HipVectorAddTest.CorrectResult"
+                NAME WaitcheckHsaToolsHipTest.DisabledDirectDoorbellVectorAdd
+                CONFIG ${RJ_HIP_TEST_CONFIG}
+                ENVIRONMENT ${_waitcheck_disabled_env} "DEBUG_CLR_DIRECT_DOORBELL=1"
+                REQUIRED_OUTPUT "summary loads=[1-9][0-9]* dispatches=0 checked=0"
+            )
+            rj_add_hip_test(hip_waitcheck_hazard_test ARCH ${RJ_HIP_TEST_ARCH})
+            add_dependencies(
+                hip_waitcheck_hazard_test_target
+                rocjitsu_waitcheck_hooks
+            )
+            rj_add_hip_test_case(
+                hip_waitcheck_hazard_test "HipWaitcheckHazardTest.FailClosedRejectsKernelCodeObject"
+                NAME WaitcheckHsaToolsHipTest.FailClosedRejectsHazard
+                CONFIG ${RJ_HIP_TEST_CONFIG}
+                ENVIRONMENT ${_waitcheck_env} "ROCJITSU_WAITCHECK_MODE=eager"
+                REQUIRED_OUTPUT "summary loads=[1-9][0-9]* dispatches=0 checked=[1-9][0-9]* cache_hits=0 passed=[0-9]+ hazards=[1-9][0-9]*"
+            )
+            rj_add_hip_test_case(
+                hip_waitcheck_hazard_test "HipWaitcheckHazardTest.DispatchRejectsBeforeSubmission"
+                NAME WaitcheckHsaToolsHipTest.DispatchRejectsBeforeSubmission
+                CONFIG ${RJ_HIP_TEST_CONFIG}
+                ENVIRONMENT ${_waitcheck_dispatch_env}
+            )
             rj_add_hip_test(
                 hip_instruction_failure_test
                 ARCH ${RJ_HIP_TEST_ARCH}

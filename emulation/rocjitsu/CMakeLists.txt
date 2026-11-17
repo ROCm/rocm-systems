@@ -465,6 +465,8 @@ endfunction()
 add_library(rocjitsu_shared SHARED)
 set_target_properties(rocjitsu_shared PROPERTIES OUTPUT_NAME rocjitsu)
 rj_configure_shared_interposer(rocjitsu_shared)
+target_sources(rocjitsu_shared PRIVATE $<TARGET_OBJECTS:rocjitsu_waitcheck_api>)
+target_link_libraries(rocjitsu_shared PRIVATE rocjitsu_waitcheck_internal)
 
 if(BUILD_TESTING AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_library(rocjitsu_test_interposer SHARED)
@@ -505,7 +507,11 @@ install(
 
 # Libraries: lib/
 install(
-    TARGETS rocjitsu_shared rocjitsu_hooks
+    TARGETS
+        rocjitsu_shared
+        rocjitsu_hooks
+        rocjitsu_waitcheck
+        rocjitsu_waitcheck_hooks
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")

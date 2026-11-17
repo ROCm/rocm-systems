@@ -91,6 +91,24 @@ function(rj_set_hooks_exports target export_map)
     endif()
 endfunction()
 
+add_library(
+    rocjitsu_waitcheck_hooks
+    SHARED
+    rj_hsa_waitcheck_hooks.cpp
+    hsa_code_object_file_snapshot.cpp
+    hsa_tool_lifetime.cpp
+)
+target_link_libraries(
+    rocjitsu_waitcheck_hooks
+    PRIVATE
+        rocjitsu_hsa_tools_headers
+        rocjitsu_waitcheck_internal
+        rocjitsu_amdgpu_isa_model_registry
+        ${CMAKE_DL_LIBS}
+)
+rj_configure_target(rocjitsu_waitcheck_hooks PRIVATE_INCLUDES WARNINGS HIDDEN)
+rj_set_hooks_exports(rocjitsu_waitcheck_hooks rocjitsu_hooks.map)
+
 # Production hook: exports the HSA tool entry points only.
 add_library(rocjitsu_hooks SHARED)
 set_target_properties(rocjitsu_hooks PROPERTIES OUTPUT_NAME rocjitsu_hooks)

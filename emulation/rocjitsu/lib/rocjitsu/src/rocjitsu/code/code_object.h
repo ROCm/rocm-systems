@@ -139,6 +139,18 @@ public:
   /// @brief Raw ELF image size in bytes.
   std::size_t image_size() const { return image_.size(); }
 
+  /// @brief File-backed bytes in one loadable segment, including unsectioned data.
+  std::span<const char> loaded_bytes(uint64_t vaddr, size_t length) const {
+    for (const auto &segment : program_headers_) {
+      if (segment.p_type != PT_LOAD || vaddr < segment.p_vaddr)
+        continue;
+      const uint64_t offset = vaddr - segment.p_vaddr;
+      if (offset <= segment.p_filesz && length <= segment.p_filesz - offset)
+        return {image_.data() + segment.p_offset + offset, length};
+    }
+    return {};
+  }
+
   /// @brief Memory size required to load the ELF at its virtual addresses.
   /// @returns The highest VA + size across all LOAD segments.
   std::size_t mem_size() const {
