@@ -5,7 +5,7 @@
 
 Parse the per-process code-object info artifact emitted by the native PC
 sampling collector into a per-code-object instruction tree. The artifact holds
-ISA for dispatched kernels only.
+the full disassembly of every loaded code object, including un-sampled ones.
 
 Also maps a disassembled instruction to the execution pipeline that runs it.
 """

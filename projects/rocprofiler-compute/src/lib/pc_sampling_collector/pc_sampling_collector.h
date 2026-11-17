@@ -10,9 +10,7 @@
 #include <filesystem>
 #include <memory>
 #include <set>
-#include <string>
 #include <string_view>
-#include <utility>
 
 namespace rocprofiler_compute_tool
 {
@@ -32,10 +30,8 @@ public:
 
     virtual ~pc_sampling_collector_t() = default;
     virtual void on_code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& info) = 0;
-    /** Writes only symbols whose (code object ID, mangled name) key is dispatched. */
-    virtual void finalize(code_object_writer_t&                             writer,
-                          const std::set<std::pair<uint64_t, std::string>>& dispatched_symbols) = 0;
-    virtual const std::set<std::filesystem::path>& get_source_paths() const                     = 0;
+    virtual void                                   finalize(code_object_writer_t& writer) = 0;
+    virtual const std::set<std::filesystem::path>& get_source_paths() const               = 0;
 };
 
 class pc_sampling_collector_impl_t : public pc_sampling_collector_t
@@ -44,8 +40,7 @@ public:
     pc_sampling_collector_impl_t(code_object_translator_t::ptr translator);
     pc_sampling_collector_impl_t(code_object_translator_t::ptr translator, sdk_wrapper_t::ptr sdk_wrapper);
     void on_code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& info) override;
-    void finalize(code_object_writer_t&                             writer,
-                  const std::set<std::pair<uint64_t, std::string>>& dispatched_symbols) override;
+    void                                   finalize(code_object_writer_t& writer) override;
     const std::set<std::filesystem::path>& get_source_paths() const override;
 
 private:
