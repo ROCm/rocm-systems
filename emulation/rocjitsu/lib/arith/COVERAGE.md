@@ -156,3 +156,12 @@ Compatibility's CLAMP-only INVALID classification, including quiet NaNs and
 constant predicates. Loose and numeric-only modes leave status untouched;
 mode 3 remains unsupported. This carries the existing emulator model without
 claiming new empirical qualification. Other older profiles migrate separately.
+
+### gfx10 native floating comparisons
+
+FP32/FP64 relational CMP/CMPX, including F/TRU, use the library on gfx1010
+and gfx1030 for both waves. Shared gfx908/gfx10 status composition preserves
+Compatibility's CLAMP-only INVALID policy. F/T predicates retain strict
+FP-status support for this simple classification; other predicates still reject
+that mode. Loose skips reporting. Scalar, AVX2 and AVX-512 paths remain wide.
+FP16 migration is separate; its existing VM-side signaling path remains live.
