@@ -2278,4 +2278,77 @@ TEST(Gfx1250ExecutionTest, Vopd3CndmaskAppliesB32NegModifiers) {
   EXPECT_EQ(cu->read_vgpr(vb + 5, 1), 0x40400000u);
 }
 
+// Independent mixed-width slots obey guest rounding and preserve inactive lanes.
+TEST(Gfx1250ExecutionTest, Vopd3MixedWidthGuestRounding) {
+  const auto words = make_vopd3_pair(
+      {.op = VopdOp::AddF64, .src0 = vopd_src0_vgpr(0), .src1 = 4, .src2 = 0, .dst = 2},
+      {.op = VopdOp::AddF32, .src0 = vopd_src0_vgpr(6), .src1 = 7, .src2 = 0, .dst = 9});
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto *wf = sim.dispatch_scratch_wf();
+  ASSERT_NE(wf, nullptr);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
+  ASSERT_NE(instruction, nullptr);
+  const uint32_t base = wf->vgpr_alloc().base;
+  for (uint32_t rounding : {0u, 1u}) {
+    wf->set_mode_raw(0xf0u | (rounding << 2));
+    wf->set_exec(0x80000001u);
+    for (uint32_t lane = 0; lane < 32; ++lane) {
+      sim.cu()->write_vgpr(base, lane, 0);
+      sim.cu()->write_vgpr(base + 1, lane, 0x3ff00000u); // FP64 1.
+      sim.cu()->write_vgpr(base + 4, lane, 0);
+      sim.cu()->write_vgpr(base + 5, lane, 0x3ca00000u); // Half an ULP at 1.
+      sim.cu()->write_vgpr(base + 2, lane, 0x40000000u); // Inactive X destination.
+      sim.cu()->write_vgpr(base + 6, lane, 0x40000000u); // Disjoint Y input: FP32 2.
+      sim.cu()->write_vgpr(base + 3, lane, 0xdeadbeefu);
+      sim.cu()->write_vgpr(base + 7, lane, 0x3f800000u);
+      sim.cu()->write_vgpr(base + 9, lane, 0xdeadbeefu);
+    }
+    ASSERT_TRUE(sim.cu()->execute_instruction(instruction.get(), *wf).succeeded());
+    for (uint32_t lane = 0; lane < 32; ++lane) {
+      const bool active = lane == 0 || lane == 31;
+      EXPECT_EQ(sim.cu()->read_vgpr(base + 2, lane), active ? rounding : 0x40000000u);
+      EXPECT_EQ(sim.cu()->read_vgpr(base + 3, lane), active ? 0x3ff00000u : 0xdeadbeefu);
+      EXPECT_EQ(sim.cu()->read_vgpr(base + 9, lane), active ? 0x40400000u : 0xdeadbeefu);
+    }
+  }
+}
+
+// Dual FP64 selection applies guest input flushing but retains selected subnormal outputs.
+TEST(Gfx1250ExecutionTest, Vopd3MinMaxInputDenormals) {
+  for (bool maximum : {false, true}) {
+    for (bool flush : {false, true}) {
+      SCOPED_TRACE(::testing::Message() << maximum << ':' << flush);
+      Gfx1250Sim sim;
+      ASSERT_NO_FATAL_FAILURE(sim.initialize());
+      auto *wf = sim.dispatch_scratch_wf();
+      ASSERT_NE(wf, nullptr);
+      wf->set_exec(1);
+      wf->set_mode_raw(flush ? 0x80 : 0x40);
+      const uint32_t base = wf->vgpr_alloc().base;
+      sim.cu()->write_vgpr(base, 0, 1);
+      sim.cu()->write_vgpr(base + 1, 0, maximum ? 0 : 0x80000000U);
+      sim.cu()->write_vgpr(base + 4, 0, 0);
+      sim.cu()->write_vgpr(base + 5, 0, 0);
+      sim.cu()->write_vgpr(base + 6, 0, 0x12345678U);
+      const auto words = make_vopd3_pair(
+          {.op = maximum ? VopdOp::MaxNumF64 : VopdOp::MinNumF64,
+           .src0 = vopd_src0_vgpr(0),
+           .src1 = 4,
+           .src2 = 0,
+           .dst = 2},
+          {.op = VopdOp::MovB32, .src0 = vopd_src0_vgpr(6), .src1 = 0, .src2 = 0, .dst = 9});
+      auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+      std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
+      ASSERT_NE(instruction, nullptr);
+      ASSERT_EQ(instruction->flags() & INVALID_VOPD_OPERANDS, 0U);
+      ASSERT_TRUE(sim.cu()->execute_instruction(instruction.get(), *wf).succeeded());
+      EXPECT_EQ(sim.cu()->read_vgpr(base + 2, 0), flush ? 0U : 1U);
+      EXPECT_EQ(sim.cu()->read_vgpr(base + 3, 0), maximum ? 0U : 0x80000000U);
+      EXPECT_EQ(sim.cu()->read_vgpr(base + 9, 0), 0x12345678U);
+    }
+  }
+}
+
 } // namespace
