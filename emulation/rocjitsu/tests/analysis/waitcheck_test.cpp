@@ -8939,24 +8939,28 @@ TEST(WaitcheckTest, Gfx1250DoesNotInventAsynccntBeforeProgramEnd) {
 }
 
 TEST(WaitcheckTest, Gfx1250AsyncArriveNeedsGuaranteedIssueToAgeAnOlderLoad) {
-  for (uint32_t exec : {0u, 1u}) {
-    for (uint32_t wait : {0u, 1u}) {
-      SCOPED_TRACE(testing::Message() << exec << '/' << wait);
-      std::vector<uint32_t> words;
-      append_global_load_async_to_lds_b32(words);
-      append_inst(words, s_wait_xcnt(0));  // Release EXEC without completing the LDS transfer.
-      words.push_back(0xbefe0080u | exec); // s_mov_b32 exec_lo, 0 or 1
-      append_inst(words, s_wait_alu_vm_vsrc_0());
-      append_ds_atomic_async_barrier_arrive_b64(words);
-      append_inst(words, s_wait_alu_vm_vsrc_0());
-      words.push_back(0xbefe00c1); // s_mov_b32 exec_lo, -1
-      append_inst(words, s_wait_asynccnt(wait));
-      append_inst(words, ds_load_b32(4, 12));
-      const auto report = analyze_gfx1250_normal(words);
-      ASSERT_TRUE(report.supported) << report.analysis_error;
-      ASSERT_EQ(report.diagnostics.size(), !exec && wait) << diagnostic_summary(report);
-      if (!report.diagnostics.empty())
-        EXPECT_EQ(report.diagnostics.front().producer_section_offset, 0u);
+  for (bool modeled_ds_pending : {false, true}) {
+    for (uint32_t exec : {0u, 1u}) {
+      for (uint32_t wait : {0u, 1u}) {
+        SCOPED_TRACE(testing::Message() << modeled_ds_pending << '/' << exec << '/' << wait);
+        std::vector<uint32_t> words;
+        append_global_load_async_to_lds_b32(words);
+        append_inst(words, s_wait_xcnt(0)); // Release EXEC without completing the LDS transfer.
+        if (modeled_ds_pending)
+          append_inst(words, ds_load_b32(14, 12)); // May physically finish before the arrive.
+        words.push_back(0xbefe0080u | exec);       // s_mov_b32 exec_lo, 0 or 1
+        append_inst(words, s_wait_alu_vm_vsrc_0());
+        append_ds_atomic_async_barrier_arrive_b64(words);
+        append_inst(words, s_wait_alu_vm_vsrc_0());
+        words.push_back(0xbefe00c1); // s_mov_b32 exec_lo, -1
+        append_inst(words, s_wait_asynccnt(wait));
+        append_inst(words, ds_load_b32(4, 12));
+        const auto report = analyze_gfx1250_normal(words);
+        ASSERT_TRUE(report.supported) << report.analysis_error;
+        ASSERT_EQ(report.diagnostics.size(), !exec && wait) << diagnostic_summary(report);
+        if (!report.diagnostics.empty())
+          EXPECT_EQ(report.diagnostics.front().producer_section_offset, 0u);
+      }
     }
   }
 }
