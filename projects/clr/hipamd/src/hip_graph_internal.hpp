@@ -1386,7 +1386,21 @@ class GraphExecSegmented : public GraphExecBase {
     // it has no remaining dependency, or its first kernel carries the one dependency in its
     // ext-dispatch dep_signal. Later packets keep the barrier bit.
     bool firstPacketUnordered = false;
+    // A patch_list entry whose packet is in dispatchPackets or is fallbackDepBarrier, and the
+    // last known index of that packet in dispatchPackets (kNoSlot when it has none). The patch
+    // functions below only touch these entries.
+    struct OwnedPatch {
+      size_t patch;
+      size_t slot;
+    };
+    static constexpr size_t kNoSlot = ~size_t{0};
+    std::vector<OwnedPatch> ownedPatches;
     PacketBatch() {}
+    // Index in dispatchPackets of |owned|'s packet. Uses the cached slot when it still holds
+    // the packet; otherwise searches the batch and re-caches. Callers handle fallbackDepBarrier,
+    // which has no slot. A packet that is not in the batch is a broken patch, and the search
+    // asserts.
+    size_t findAndCachePacketSlot(OwnedPatch& owned, const uint8_t* packet);
     // O(1) enable/disable operations - just update state
     void setEnabled(GraphNode* node, bool enabled);
     // Rebuild cached filtered lists if cache is stale.
