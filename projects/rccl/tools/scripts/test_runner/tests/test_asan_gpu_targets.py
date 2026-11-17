@@ -122,7 +122,7 @@ class AsanGpuTargetsTest(unittest.TestCase):
         result, _ = self.adjust([
             "gfx906", "gfx908", "gfx90a", "gfx942", "gfx950",
             "gfx1030", "gfx1100", "gfx1101", "gfx1102", "gfx1151",
-            "gfx1200", "gfx1201", "gfx1250"])
+            "gfx1170", "gfx1171", "gfx1200", "gfx1201", "gfx1250"])
 
         self.assertEqual(result, [
             "gfx906:xnack+", "gfx908:xnack+", "gfx90a:xnack+",

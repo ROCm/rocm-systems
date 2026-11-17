@@ -48,6 +48,7 @@ typedef struct
       (!__HIP_DEVICE_COMPILE__ || \
        defined(__gfx942__)  || defined(__gfx950__)  || \
        defined(__gfx1100__) || defined(__gfx1101__) || \
+       defined(__gfx1170__) || defined(__gfx1171__) || \
        defined(__gfx1200__) || defined(__gfx1201__) || \
        defined(__gfx1250__) || defined(__gfx1250_strict__))
 

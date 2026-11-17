@@ -3979,26 +3979,28 @@ TEST(WrapMicrotest, OverrideChannels_ChannelCountAboveMaxNchannelsLeavesNcUntouc
   DeleteCommWithArch(comm);
 }
 
-// gfx1151 is the one arch where the "single GPU per node" skip is
-// deliberately NOT applied (the `!IsArchMatch(...,"gfx1151")` conjunct);
+// gfx1151 and gfx117x are the archs where the "single GPU per node" skip is
+// deliberately NOT applied (the `!rcclIsGfx1151Gfx117x(...)` conjunct);
 // every prior single-GPU-per-node test used gfx942, so this conjunct's own
 // false side (gfx1151 present) had never fired. Same threshold setup as
 // MatchedThresholdWithinBoundsOverridesNc above, just with nRanks==nNodes
-// and gfx1151 -- proving the guard doesn't early-return here.
+// and the gfx1151 family -- proving the guard doesn't early-return here.
 TEST(WrapMicrotest, OverrideChannels_Gfx1151SingleGpuPerNodeStillAppliesTuning) {
-  ncclComm* comm = MakeCommWithArch("gfx1151");
-  comm->nNodes = 8;
-  comm->nRanks = 8; // one GPU per node -- would skip on any other arch
-  comm->nChannels = 32;
-  comm->config.minCTAs = 1;
-  comm->config.maxCTAs = 64;
-  comm->minMaxChannelThresholds[RCCL_AR_TUNABLE][0][0] = 1;
-  comm->minMaxChannelThresholds[RCCL_AR_TUNABLE][0][1] = 2048;
-  comm->minMaxChannelThresholds[RCCL_AR_TUNABLE][0][2] = 8;
-  int nc = -100;
-  EXPECT_EQ(ncclSuccess, rcclOverrideChannels(comm, ncclFuncAllReduce, /*nBytes=*/16384, nc));
-  EXPECT_EQ(8, nc); // tuning applied -- proves the single-GPU-per-node skip didn't fire
-  DeleteCommWithArch(comm);
+  for (const char* arch : {"gfx1151", "gfx1170", "gfx1171"}) {
+    ncclComm* comm = MakeCommWithArch(arch);
+    comm->nNodes = 8;
+    comm->nRanks = 8; // one GPU per node -- would skip on any other arch
+    comm->nChannels = 32;
+    comm->config.minCTAs = 1;
+    comm->config.maxCTAs = 64;
+    comm->minMaxChannelThresholds[RCCL_AR_TUNABLE][0][0] = 1;
+    comm->minMaxChannelThresholds[RCCL_AR_TUNABLE][0][1] = 2048;
+    comm->minMaxChannelThresholds[RCCL_AR_TUNABLE][0][2] = 8;
+    int nc = -100;
+    EXPECT_EQ(ncclSuccess, rcclOverrideChannels(comm, ncclFuncAllReduce, /*nBytes=*/16384, nc)) << arch;
+    EXPECT_EQ(8, nc) << arch; // tuning applied -- proves the single-GPU-per-node skip didn't fire
+    DeleteCommWithArch(comm);
+  }
 }
 
 // The undefined-threshold `||` has two disjuncts; every prior test only

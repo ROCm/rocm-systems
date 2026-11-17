@@ -37,6 +37,12 @@ int GetGcnArchName(int deviceId, char* out);
 double GetDeviceWallClockRateInKhz(int deviceId);
 bool IsArchMatch(char const* arch, char const* target);
 
+/* Host Code: gfx117x, like gfx1151, is an APU deployed one GPU per node; it has no host
+ * policies of its own yet and takes gfx1151's. */
+inline bool rcclIsGfx1151Gfx117x(char const* arch) {
+  return IsArchMatch(arch, "gfx1151") || IsArchMatch(arch, "gfx117");
+}
+
 /* Host Code: Must match NCCL_LL128_LINESIZE / NCCL_LL128_LINEELEMS in device
  * code for the same arch. */
 inline int rcclLL128LineElemsFromArch(char const* arch) {

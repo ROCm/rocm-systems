@@ -611,6 +611,11 @@ ncclResult_t ncclTopoCheckGdr(struct ncclTopoSystem* system, int rank, int64_t n
     if (gpu->gpu.mloPart == NCCL_TOPO_UNDEF || gdrSupport) netGdrLevel = PATH_P2C;
 #endif
   }
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  // An integrated GPU sits on the root complex and its memory is system memory, so every NIC is at least PHB away
+  // and there is no peer PCIe traffic for the PXB limit to avoid.
+  if (gpu->gpu.integrated) netGdrLevel = std::max(netGdrLevel, (int)PATH_PHB);
+#endif
   if (system->netGdrLevel != -2) netGdrLevel = system->netGdrLevel;
   NCCLCHECK(ncclGetLevel(&ncclTopoUserGdrLevel, NULL, "NCCL_NET_GDR_LEVEL"));
   if (ncclTopoUserGdrLevel != -2) netGdrLevel = ncclTopoUserGdrLevel;

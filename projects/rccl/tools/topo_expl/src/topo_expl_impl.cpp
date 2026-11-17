@@ -843,6 +843,8 @@ ncclResult_t initTransportsRank_1(struct ncclComm* comm, struct allGatherInfo *a
 
   // Topo detection / System graph creation
   //NCCLCHECKGOTO(ncclTopoGetSystem(comm, &comm->topo), ret, fail);
+  comm->topo->tuning = rcclGetTuningIndexForArch(comm->topo->nodes[GPU].nodes[0].gpu.gcn);
+  INFO(NCCL_INIT, "Tuning index set to: %d", comm->topo->tuning);
   // save nRanks to ncclTopoSystem as indicator of multi-node
   comm->topo->nRanks = comm->nRanks;
   // init netGdrLevel
