@@ -14908,23 +14908,39 @@ TEST(ArithBridgeTest, CdnaTernaryMedianPolicy) {
 }
 
 TEST(ArithBridgeTest, CdnaSelectionSdwaDestinationAndClamp) {
+  struct Case {
+    uint32_t a, b, mode, omod, destination, expected, clamped;
+  };
+  const Case cases[] = {
+      {0x40000000U, 0x40400000U, 0xf0, 0, 6, 0x0000beefU, 0x3f800000U},
+      {0x80000000U, 0x80000000U, 0x10, 1, 0, 0, 0},
+      {0x7f7fffffU, 0x7f7fffffU, 0x10, 1, 0, 0x7f800000U, 0x3f800000U},
+  };
   for (auto arch : {rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4}) {
     BridgeFixture fixture(arch, 64);
     fixture.wave->set_exec(1);
-    fixture.wave->set_mode_raw(0xf0);
-    for (bool clamp : {false, true}) {
-      fixture.cu->write_vgpr(fixture.base(), 0, clamp ? 0x40000000U : 0x3f800000U);
-      fixture.cu->write_vgpr(fixture.base() + 1, 0, clamp ? 0x40400000U : 0x40000000U);
-      fixture.cu->write_vgpr(fixture.base() + 6, 0, 0xdeadbeef);
-      // DWORD source selection; either WORD_1/PRESERVE or DWORD/CLAMP destination.
-      const uint32_t control = 0x06060000U | (clamp ? 0x2600U : 0x1500U);
-      const auto encoded =
-          cdna3::build_vop2(cdna3::kVMinF32Vop2, {.src0 = 249, .vsrc1 = 1, .vdst = 6});
-      const std::array words{encoded[0], control};
-      auto inst = fixture.decoder->decode_window(words);
-      ASSERT_TRUE(inst.succeeded());
-      ASSERT_TRUE(fixture.cu->execute_instruction(inst.value().get(), *fixture.wave).succeeded());
-      EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 6, 0), clamp ? 0x3f800000U : 0x0000beefU);
+    for (const Case &sample : cases) {
+      fixture.wave->set_mode_raw(sample.mode);
+      for (bool clamp : {false, true}) {
+        fixture.cu->write_vgpr(fixture.base(), 0, sample.a);
+        fixture.cu->write_vgpr(fixture.base() + 1, 0, sample.b);
+        if (sample.destination != 0) {
+          fixture.cu->write_vgpr(fixture.base() + sample.destination, 0, 0xdeadbeefU);
+        }
+        // Keep the original WORD_1/PRESERVE witness; scaled cases alias the full A word.
+        const uint32_t placement = sample.omod ? 0x600U : (clamp ? 0x2600U : 0x1500U);
+        const uint32_t control =
+            0x06060000U | placement | (sample.omod << 14) | (clamp ? 1U << 13 : 0U);
+        const auto encoded =
+            cdna3::build_vop2(cdna3::kVMinF32Vop2,
+                              {.src0 = SRC_SDWA, .vsrc1 = 1, .vdst = uint8_t(sample.destination)});
+        const std::array words{encoded[0], control};
+        auto inst = fixture.decoder->decode_window(words);
+        ASSERT_TRUE(inst.succeeded());
+        ASSERT_TRUE(fixture.cu->execute_instruction(inst.value().get(), *fixture.wave).succeeded());
+        EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + sample.destination, 0),
+                  clamp ? sample.clamped : sample.expected);
+      }
     }
   }
 }

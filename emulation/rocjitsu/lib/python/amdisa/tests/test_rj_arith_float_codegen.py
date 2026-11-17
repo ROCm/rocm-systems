@@ -727,12 +727,20 @@ def test_ternary_selection_routes_all_encodings_and_modifiers(arch, count):
                 assert 'RJ_ARITH_ALU_HIGH_' + letter in body
         else:
             assert 'RJ_ARITH_ALU_HIGH' not in body
-        assert (
-            gen_float_ternary_selection(
-                context('cdna2', name, ['d'], ['a', 'b', 'c'], is_vop3=True)
-            )
-            is None
+        cdna2 = gen_float_ternary_selection(
+            context('cdna2', name, ['d'], ['a', 'b', 'c'], is_vop3=True)
         )
+        if name in {
+            'V_MIN3_F16',
+            'V_MAX3_F16',
+            'V_MED3_F16',
+            'V_MIN3_F32',
+            'V_MAX3_F32',
+            'V_MED3_F32',
+        }:
+            assert '_gfx942' in cdna2
+        else:
+            assert cdna2 is None
     source = (root / 'vop3_exec.cpp').read_text()
     seen = 0
     for match in re.finditer(
@@ -796,12 +804,6 @@ def test_fp64_selection_pair_adapter(arch):
         assert 'arithmetic_flags()' in body
         for modifier in ('ABS_A', 'ABS_B', 'NEG_A', 'NEG_B', 'OMOD_2', 'CLAMP'):
             assert 'RJ_ARITH_ALU_' + modifier in body
-        assert (
-            gen_float_binary64(
-                context('cdna2', name, ['dst'], ['a', 'b'], is_vop3=True)
-            )
-            is None
-        )
         assert (
             gen_float_binary64(context(arch, name, ['dst'], ['a'], is_vop3=True))
             is None
@@ -2051,7 +2053,7 @@ def test_gfx1250_mul_encodings_use_target_status_policy(vop3):
             assert f'rj_arith_v_mul_f32_w{wave}_gfx1250,' in body
 
 
-@pytest.mark.parametrize('arch', ['cdna3', 'cdna4', 'cdna5'])
+@pytest.mark.parametrize('arch', ['cdna1', 'cdna2', 'cdna3', 'cdna4', 'cdna5'])
 def test_cdna_binary_selection_policy_mapping(arch):
     from amdisa.codegen.execute.rj_arith_float import (
         SELECTION_F32,
@@ -2236,9 +2238,9 @@ def test_cdna_half_arithmetic_modes_and_destination(arch):
         assert (', true, true);' in body) == (arch != 'cdna5')
         assert ('execute_float_binary16_sdwa' in body) == (arch != 'cdna5')
     selection = gen_float_binary16(context(arch, 'V_MIN_F16', ['d'], ['a', 'b']))
-    assert (selection is not None) == (arch in ('cdna3', 'cdna4'))
+    assert (selection is not None) == (arch != 'cdna5')
     if selection:
-        assert 'execute_cdna_selection<16>' in selection
+        assert 'execute_sdwa_selection<16>' in selection
         assert 'execute_float_binary16_sdwa' not in selection
 
 
@@ -3451,3 +3453,125 @@ def test_generated_gfx10_half_has_no_legacy_arithmetic_or_status(arch):
             assert 'HalfBinaryOperation' not in body
             checked += 1
     assert checked == 15
+
+
+@pytest.mark.parametrize('arch', ['cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5'])
+def test_older_selection_routes_each_method_without_enabling_arithmetic(arch):
+    from amdisa.codegen.execute.rj_arith_float import (
+        OLDER_SELECTION_NAMES,
+        gen_float_binary64,
+        gen_float_ternary_selection,
+    )
+
+    root = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+        / arch
+    )
+    suffix = '_gfx942' if arch.startswith('cdna') else ''
+    found = set()
+    for source in root.glob('vop*_exec.cpp'):
+        for match in re.finditer(
+            r'void (\w+)::execute(?:_modifier)?_impl\([^)]*\)\s*\{', source.read_text()
+        ):
+            text = source.read_text()
+            end, depth = match.end(), 1
+            while depth:
+                depth += (text[end] == '{') - (text[end] == '}')
+                end += 1
+            body = text[match.end() : end - 1]
+            for name in OLDER_SELECTION_NAMES:
+                instruction = ''.join(
+                    part.capitalize() for part in name.lower().split('_')
+                )
+                if not match[1].startswith(instruction + 'Vop'):
+                    continue
+                found.add(name)
+                for wave in (32, 64):
+                    assert f'rj_arith_{name.lower()}_w{wave}{suffix},' in body, match[1]
+                assert 'amdgpu::execute_v_' not in body, match[1]
+                assert 'arithmetic_flags()' in body
+    assert found == OLDER_SELECTION_NAMES
+    for name in ('V_ADD_F32', 'V_MUL_F32', 'V_ADD_F64', 'V_MUL_F64'):
+        emitter = gen_float_binary64 if name.endswith('F64') else gen_float_binary32
+        assert emitter(context(arch, name, ['d'], ['a', 'b'], is_vop3=True)) is None
+    for name in ('V_MIN3_F32', 'V_MAX3_F32', 'V_MED3_F32'):
+        body = gen_float_ternary_selection(
+            context(arch, name, ['d'], ['a', 'b', 'c'], is_vop3=True)
+        )
+        assert 'RJ_ARITH_ALU_NEG_C' in body
+
+
+@pytest.mark.parametrize('arch', ['cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5'])
+def test_older_half_selection_model_and_production_routes(arch):
+    from amdisa.codegen.execute.rj_arith_float import (
+        gen_float_binary16,
+        gen_float_ternary_selection,
+    )
+
+    root = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+        / arch
+    )
+    for name in (
+        'MIN',
+        'MAX',
+        'MIN3',
+        'MAX3',
+        'MED3',
+        *(['MINMAX', 'MAXMIN'] if arch == 'rdna3_5' else []),
+    ):
+        binary = name in ('MIN', 'MAX')
+        mnemonic = f'V_{name}_F16'
+        emitter = gen_float_binary16 if binary else gen_float_ternary_selection
+        for encoding in (('vop2', 'vop3') if binary else ('vop3',)):
+            body = emitter(
+                context(
+                    arch,
+                    mnemonic,
+                    ['d'],
+                    ['a', 'b'] if binary else ['a', 'b', 'c'],
+                    is_vop3=encoding == 'vop3',
+                )
+            )
+            api = f'rj_arith_v_{name.lower()}_f16_w64' + (
+                '_gfx942' if arch.startswith('cdna') else ''
+            )
+            assert api in body
+            assert 'SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS' in body
+            assert 'UnsupportedOperandValue' in body
+            source = (root / f'{encoding}_exec.cpp').read_text()
+            class_name = 'V' + name.title() + 'F16' + encoding.title()
+            production = source.split(f'void {class_name}::execute_impl', 1)[1].split(
+                'void ', 1
+            )[0]
+            assert api in production
+            assert 'ROCJITSU_TRY_SIMD_' not in production
+            if binary and arch in ('rdna1', 'rdna2') and encoding == 'vop3':
+                assert 'const uint32_t opsel = 0;' in body
+    # Shared evaluators lose their final production callers on this migration.
+    shared = (root.parent / 'shared/execute_shared.h').read_text()
+    for name in ('min', 'max', 'min3', 'max3', 'med3'):
+        assert f'execute_v_{name}_f16_' not in shared
+
+
+@pytest.mark.parametrize('arch', ['cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5'])
+def test_older_selection_rejects_unqualified_strict_requests(arch):
+    from amdisa.codegen.execute.rj_arith_float import (
+        gen_float_binary64,
+        gen_float_ternary_selection,
+    )
+
+    for name, emitter, sources in (
+        ('V_MIN_F32', gen_float_binary32, ['a', 'b']),
+        ('V_MIN_F64', gen_float_binary64, ['a', 'b']),
+        ('V_MIN3_F32', gen_float_ternary_selection, ['a', 'b', 'c']),
+    ):
+        for vop3 in (True, False) if name == 'V_MIN_F32' else (True,):
+            body = emitter(context(arch, name, ['d'], sources, is_vop3=vop3))
+            assert body.index('!wf.exec()') < body.index('UnsupportedOperandValue')
+            assert 'SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS' in body
+            assert body.index('UnsupportedOperandValue') < body.index(
+                'amdgpu::arith::execute_'
+            )

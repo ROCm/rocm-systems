@@ -15616,6 +15616,12 @@ class CodeGenerator:
                     vop3_opsel_dst = enc.enc_name.upper() == 'ENC_VOP3' and (
                         inst.name in _PRESERVING_VOP3_OPSEL
                         or inst.name in _LEGACY_F16_VOP3_OPSEL
+                        # The legacy GFX10 selection executor writes OPSEL's half
+                        # directly; rj-arith publication uses this operand mask.
+                        or (
+                            self.isa_spec.arch_name in ('rdna1', 'rdna2')
+                            and inst.name in ('V_MIN3_F16', 'V_MAX3_F16', 'V_MED3_F16')
+                        )
                     )
                     if (
                         (
@@ -18049,6 +18055,8 @@ class CodeGenerator:
                     )
                 from amdisa.codegen.execute.rj_arith_float import (
                     FLOAT_NAMES,
+                    OLDER_SELECTION_ARCHS,
+                    OLDER_SELECTION_NAMES,
                     GFX10_LEGACY_FMA,
                     FP8_NARROW_NAMES,
                     FP8_WIDEN_NAMES,
@@ -18180,8 +18188,44 @@ class CodeGenerator:
                             'V_PK_FMA_F16',
                         }
                     )
-                if self.isa_spec.arch_name == 'cdna1' and any(
-                    i.name in MAD_F16 for i in all_insts
+                if (
+                    self.isa_spec.arch_name in OLDER_SELECTION_ARCHS
+                    and self.isa_spec.arch_name != 'rdna2'
+                ):
+                    float_names = OLDER_SELECTION_NAMES
+                if any(i.name in float_names for i in all_insts):
+                    cpp_includes.append(
+                        ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h', False)
+                    )
+                from amdisa.codegen.execute.rj_arith_float import (
+                    OLDER_HALF_SELECTION_TARGETS,
+                    LEGACY_HALF_BINARY_SELECTION,
+                    LEGACY_HALF_TERNARY_SELECTION,
+                )
+
+                if (
+                    (
+                        self.isa_spec.arch_name in OLDER_HALF_SELECTION_TARGETS
+                        and any(
+                            i.name
+                            in LEGACY_HALF_BINARY_SELECTION
+                            | LEGACY_HALF_TERNARY_SELECTION
+                            for i in all_insts
+                        )
+                    )
+                    or self.isa_spec.arch_name
+                    in (
+                        'cdna1',
+                        'cdna2',
+                        'cdna3',
+                        'cdna4',
+                        'rdna1',
+                        'rdna2',
+                    )
+                    and any(
+                        i.name in {'V_MIN_F16', 'V_MAX_F16', 'V_MIN_F32', 'V_MAX_F32'}
+                        for i in all_insts
+                    )
                 ):
                     cpp_includes.append(
                         ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h', False)
@@ -18189,32 +18233,14 @@ class CodeGenerator:
                 if self.isa_spec.arch_name in (
                     'cdna1',
                     'cdna2',
-                    'rdna1',
-                    'rdna2',
-                    'rdna3_5',
-                ) and any(i.name in FMA_F16 for i in all_insts):
-                    cpp_includes.append(
-                        ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h', False)
-                    )
-                if self.isa_spec.arch_name in (
-                    'rdna2',
-                    'rdna3',
-                    'rdna4',
                     'cdna3',
                     'cdna4',
-                    'cdna5',
-                ) and any(i.name in float_names for i in all_insts):
-                    cpp_includes.append(
-                        ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h', False)
-                    )
-                if self.isa_spec.arch_name in (
-                    'cdna1',
-                    'cdna2',
                     'rdna1',
-                    'rdna3_5',
+                    'rdna2',
                 ) and any(
                     i.name
                     in BINARY_ARITHMETIC_F16
+                    | {'V_MIN_F16', 'V_MAX_F16', 'V_MIN_F32', 'V_MAX_F32'}
                     | {'V_PK_ADD_F16', 'V_PK_MUL_F16', 'V_PK_MIN_F16', 'V_PK_MAX_F16'}
                     for i in all_insts
                 ):
@@ -18264,12 +18290,20 @@ class CodeGenerator:
                     cpp_includes.append(
                         ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h', False)
                     )
-                if self.isa_spec.arch_name in ('cdna3', 'cdna4') and any(
-                    i.name in {'V_MIN_F16', 'V_MAX_F16'} for i in all_insts
+                if self.isa_spec.arch_name in (
+                    'cdna1',
+                    'cdna2',
+                    'cdna3',
+                    'cdna4',
+                    'rdna1',
+                    'rdna2',
+                ) and any(
+                    i.name in {'V_MIN_F16', 'V_MAX_F16', 'V_MIN_F32', 'V_MAX_F32'}
+                    for i in all_insts
                 ):
                     cpp_includes.append(
                         (
-                            'rocjitsu/isa/arch/amdgpu/shared/rj_arith_cdna_selection_exec.h',
+                            'rocjitsu/isa/arch/amdgpu/shared/rj_arith_sdwa_selection_exec.h',
                             False,
                         )
                     )
@@ -18743,6 +18777,53 @@ class CodeGenerator:
                         for impl in class_func_impls.execution
                     ):
                         cpp_includes.append(('rocjitsu/base/rj_compiler.h', False))
+                if self.isa_spec.arch_name in (
+                    'cdna1',
+                    'cdna2',
+                    'rdna1',
+                    'rdna2',
+                    'rdna3_5',
+                ) and any(
+                    i.name
+                    in {
+                        'V_PK_FMA_F16',
+                        'V_PK_FMAC_F16',
+                        'V_MAD_MIX_F32',
+                        'V_MAD_MIXLO_F16',
+                        'V_MAD_MIXHI_F16',
+                        'V_FMA_MIX_F32',
+                        'V_FMA_MIXLO_F16',
+                        'V_FMA_MIXHI_F16',
+                    }
+                    for i in all_insts
+                ):
+                    cpp_includes.append(
+                        ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h', False)
+                    )
+                if self.isa_spec.arch_name in (
+                    'cdna1',
+                    'cdna2',
+                    'rdna1',
+                    'rdna2',
+                    'rdna3_5',
+                ) and any(
+                    i.name
+                    in {
+                        'V_MAD_F16',
+                        'V_MAD_LEGACY_F16',
+                        'V_MAC_F16',
+                        'V_MADMK_F16',
+                        'V_MADAK_F16',
+                        'V_FMA_F16',
+                        'V_FMAC_F16',
+                        'V_FMAAK_F16',
+                        'V_FMAMK_F16',
+                    }
+                    for i in all_insts
+                ):
+                    cpp_includes.append(
+                        ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h', False)
+                    )
                 if uses_register_access:
                     cpp_includes.append(('rocjitsu/vm/amdgpu/register_access.h', False))
                 has_tensor_dma = any(

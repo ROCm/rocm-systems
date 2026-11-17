@@ -19,6 +19,7 @@ add_library(
     wmma/swmmac_gfx1250_float.cpp
     common/cpu.cpp
     common/cpu_decode.cpp
+    common/sdwa_dispatch.cpp
     conversion/float16_conversion.cpp
     conversion/byte_conversion.cpp
     conversion/conversion16.cpp

@@ -682,3 +682,27 @@ def test_byte_and_halfword_packing_reject_retired_fallbacks(cls, sources):
     for name in ('v_cvt_pk_u8_f32_vop3', 'v_pack_b32_f16_vop3'):
         assert simd_probe_line(name) is None
         assert local_coverage_probe(name) is None
+
+
+@pytest.mark.parametrize(
+    'mnemonic',
+    [
+        'min',
+        'max',
+        'min3',
+        'max3',
+        'med3',
+        'minmax',
+        'maxmin',
+        'min_num',
+        'max_num',
+        'minimum',
+        'maximum',
+    ],
+)
+@pytest.mark.parametrize('true16', [False, True])
+def test_half_selection_has_no_legacy_simd_probe(mnemonic, true16):
+    for encoding in ('vop2', 'vop3'):
+        assert (
+            simd_probe_line(f'v_{mnemonic}_f16_{encoding}', true16_vop3=true16) is None
+        )

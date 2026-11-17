@@ -13,6 +13,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/builders.h"
@@ -27,6 +28,8 @@
 #include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/simd_test_hooks.h"
+#include <algorithm>
+#include <iterator>
 
 #include <gtest/gtest.h>
 
@@ -1454,6 +1457,146 @@ TEST_P(OlderPackedHalf, StrictQualificationAndEmptyExec) {
       EXPECT_EQ(cu_->execute_instruction(instruction.get(), *wave_).failed(), reject);
       EXPECT_EQ(cu_->read_vgpr_storage(wave_->vgpr_alloc().base + 4, 0),
                 exec_mask && !reject ? 0x42004200U : 0xdeadbeefU);
+    }
+  }
+}
+
+class OlderHalfSelection : public NumericEncodingRegression {};
+
+INSTANTIATE_TEST_SUITE_P(
+    OlderProfiles, OlderHalfSelection,
+    testing::Combine(testing::Values(rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2,
+                                     rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2,
+                                     rocjitsu::IsaFamily::Rdna3_5),
+                     testing::Bool()));
+
+TEST_P(OlderHalfSelection, SelectionAndHalfWrites) {
+  struct Target {
+    rocjitsu::IsaFamily arch;
+    uint16_t vop2[2], vop3[7]; // MIN/MAX, then MIN3/MAX3/MED3/MINMAX/MAXMIN.
+  };
+  const Target targets[] = {
+      {rocjitsu::IsaFamily::Cdna1,
+       {cdna1::kVMinF16Vop2, cdna1::kVMaxF16Vop2},
+       {cdna1::kVMinF16Vop3, cdna1::kVMaxF16Vop3, cdna1::kVMin3F16Vop3, cdna1::kVMax3F16Vop3,
+        cdna1::kVMed3F16Vop3, 0, 0}},
+      {rocjitsu::IsaFamily::Cdna2,
+       {cdna2::kVMinF16Vop2, cdna2::kVMaxF16Vop2},
+       {cdna2::kVMinF16Vop3, cdna2::kVMaxF16Vop3, cdna2::kVMin3F16Vop3, cdna2::kVMax3F16Vop3,
+        cdna2::kVMed3F16Vop3, 0, 0}},
+      {rocjitsu::IsaFamily::Rdna1,
+       {rdna1::kVMinF16Vop2, rdna1::kVMaxF16Vop2},
+       {rdna1::kVMinF16Vop3, rdna1::kVMaxF16Vop3, rdna1::kVMin3F16Vop3, rdna1::kVMax3F16Vop3,
+        rdna1::kVMed3F16Vop3, 0, 0}},
+      {rocjitsu::IsaFamily::Rdna2,
+       {rdna2::kVMinF16Vop2, rdna2::kVMaxF16Vop2},
+       {rdna2::kVMinF16Vop3, rdna2::kVMaxF16Vop3, rdna2::kVMin3F16Vop3, rdna2::kVMax3F16Vop3,
+        rdna2::kVMed3F16Vop3, 0, 0}},
+      {rocjitsu::IsaFamily::Rdna3_5,
+       {rdna3_5::kVMinF16Vop2, rdna3_5::kVMaxF16Vop2},
+       {rdna3_5::kVMinF16Vop3, rdna3_5::kVMaxF16Vop3, rdna3_5::kVMin3F16Vop3,
+        rdna3_5::kVMax3F16Vop3, rdna3_5::kVMed3F16Vop3, rdna3_5::kVMinmaxF16Vop3,
+        rdna3_5::kVMaxminF16Vop3}},
+  };
+  const auto arch = std::get<0>(GetParam());
+  const auto &target = *std::find_if(std::begin(targets), std::end(targets),
+                                     [&](const auto &t) { return t.arch == arch; });
+  const bool cdna = arch == rocjitsu::IsaFamily::Cdna1 || arch == rocjitsu::IsaFamily::Cdna2;
+  const bool gfx10 = arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2;
+  const uint32_t prefix = cdna ? 0xd0000000U : 0xd4000000U;
+  constexpr uint16_t finite[] = {0x3c00, 0x4000, 0x3c00, 0x4200, 0x4000, 0x4200, 0x4000};
+  for (uint32_t width : {32U, 64U}) {
+    if (cdna && width == 32) {
+      continue;
+    }
+    wave_->halt();
+    wave_ = cu_->dispatch_wf(0, 0, 106, 256, width);
+    ASSERT_NE(wave_, nullptr);
+    wave_->set_exec(1ULL | (1ULL << (width - 1)));
+    wave_->set_mode_raw(0xf0);
+    for (bool nan : {false, true}) {
+      for (int operation = 0; operation < 7; ++operation) {
+        if (!target.vop3[operation]) {
+          continue;
+        }
+        for (bool high : {false, true}) {
+          if (high && gfx10 && operation < 2) {
+            continue; // Promoted gfx10 binary encodings use low halves.
+          }
+          const uint16_t a = nan ? 0x7e01 : 0x3c00;
+          put(0, nan ? 0x7e017e01 : 0x3c003c00);
+          put(1, nan ? 0x7e027e02 : 0x40004000);
+          put(2, nan ? 0x7e037e03 : 0x42004200);
+          const uint32_t old_d = uint32_t(a) | (uint32_t(a) << 16);
+          const uint32_t result =
+              nan ? (cdna ? (operation < 2 ? 0x7e02 : 0x7e03) : 0x7e01) : finite[operation];
+          // Alias A with D. Inactive lanes and the unselected destination half stay intact.
+          const uint32_t opsel = high ? (operation < 2 ? 11 : 15) : 0;
+          const auto expected =
+              high ? (result << 16) | a : (cdna ? 0U : old_d & 0xffff0000U) | result;
+          wave_->set_trapsts(0x80);
+          check({prefix | (uint32_t(target.vop3[operation]) << 16) | (opsel << 11) | 4,
+                 260U | (257U << 9) | (operation < 2 ? 0U : 258U << 18)},
+                expected, old_d);
+          EXPECT_EQ(wave_->trapsts(), 0x80U);
+          if (operation < 2 && !high) {
+            const uint32_t word =
+                (uint32_t(target.vop2[operation]) << 25) | (4U << 17) | (1U << 9) | 260U;
+            check({word, 0}, expected, old_d);
+            if (cdna || gfx10) {
+              // SDWA scales the rounded selection, then places its high destination word.
+              wave_->set_mode_raw(0x40); // Preserve half inputs; flush outputs enables OMOD.
+              const uint32_t control = 4U | (uint32_t(amdgpu::sdwa::WORD_1) << 8) |
+                                       (uint32_t(amdgpu::sdwa::UNUSED_PRESERVE) << 11) |
+                                       (1U << 14) | (uint32_t(amdgpu::sdwa::WORD_0) << 16) |
+                                       (uint32_t(amdgpu::sdwa::WORD_0) << 24);
+              const uint32_t scaled = nan ? result : (operation == 0 ? 0x4000U : 0x4400U);
+              check({(word & ~0x1ffU) | amdgpu::SRC_SDWA, control}, (scaled << 16) | a, old_d);
+              EXPECT_EQ(wave_->trapsts(), 0x80U);
+              wave_->set_mode_raw(0xf0);
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST_P(OlderHalfSelection, QualificationAndInactiveExec) {
+  const auto arch = std::get<0>(GetParam());
+  const bool cdna = arch == rocjitsu::IsaFamily::Cdna1 || arch == rocjitsu::IsaFamily::Cdna2;
+  const uint32_t opcode = cdna                                 ? cdna1::kVMinF16Vop2
+                          : arch == rocjitsu::IsaFamily::Rdna1 ? rdna1::kVMinF16Vop2
+                          : arch == rocjitsu::IsaFamily::Rdna2 ? rdna2::kVMinF16Vop2
+                                                               : rdna3_5::kVMinF16Vop2;
+  using amdgpu::ArithmeticSemantics;
+  for (auto semantics :
+       {ArithmeticSemantics::Loose, ArithmeticSemantics::BitExactEmpiricalAllowLoose,
+        ArithmeticSemantics::BitExactEmpiricalNoFpStatus, ArithmeticSemantics::BitExactEmpirical,
+        ArithmeticSemantics::Compatibility}) {
+    wave_->halt();
+    cu_->restore_arithmetic_policy({semantics});
+    wave_ = cu_->dispatch_wf(0, 0, 106, 256, 64);
+    ASSERT_NE(wave_, nullptr);
+    put(0, 0x3c00);
+    put(1, 0x4000);
+    for (bool suppressed : {false, true}) {
+      const std::array words{(opcode << 25) | (4U << 17) | (1U << 9) |
+                                 (suppressed ? uint32_t(amdgpu::SRC_DPP) : 256U),
+                             suppressed ? 0x0f014000U : 0U}; // Row mask zero.
+      for (uint64_t exec_mask : {0ULL, 1ULL}) {
+        wave_->set_exec(exec_mask);
+        put(4, 0xdeadbeef);
+        std::unique_ptr<Instruction> instruction(decode_valid(*decoder_, words.data()));
+        ASSERT_NE(instruction, nullptr);
+        const bool rejected =
+            exec_mask && (semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus ||
+                          semantics == ArithmeticSemantics::BitExactEmpirical);
+        EXPECT_EQ(cu_->execute_instruction(instruction.get(), *wave_).failed(), rejected);
+        EXPECT_EQ(cu_->read_vgpr(wave_->vgpr_alloc().base + 4, 0),
+                  exec_mask && !rejected && !suppressed ? (cdna ? 0x3c00U : 0xdead3c00U)
+                                                        : 0xdeadbeefU);
+      }
     }
   }
 }
