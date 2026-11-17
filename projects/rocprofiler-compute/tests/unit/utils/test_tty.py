@@ -210,11 +210,11 @@ def test_format_table_output_suppresses_empty_column() -> None:
 
 
 def test_format_table_output_keeps_pc_sampling_table_21_1() -> None:
-    """PC sampling table 21.1 is shown even with an all-'N/A' percentage column."""
+    """PC sampling table 21.1 is shown even with an all-'N/A' source column."""
     df = pd.DataFrame({
-        "Kernel_Name": ["vecCopy", "vecAdd"],
+        "source_line": ["N/A", "N/A"],
+        "instruction": ["v_mov", "v_add"],
         "count": [3, 1],
-        "wave_occupancy_percent": ["N/A", "N/A"],
     })
     content = format_table_output(
         make_args(),
@@ -224,8 +224,8 @@ def test_format_table_output_keeps_pc_sampling_table_21_1() -> None:
         runs={"only": object()},
     )
     assert content != ""
-    assert "vecCopy" in content
-    assert content.index("Stall reason definitions:") < content.index("vecCopy")
+    assert "v_mov" in content
+    assert content.index("Stall reason definitions:") < content.index("v_mov")
 
 
 def test_format_table_output_scales_bytes_per_second() -> None:

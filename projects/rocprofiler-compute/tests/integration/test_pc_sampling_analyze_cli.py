@@ -10,6 +10,7 @@ from pathlib import Path
 
 import common
 import pandas as pd
+import pytest
 
 from tests.integration import common as integration_common
 
@@ -76,6 +77,33 @@ def test_pc_sampling_analyze_kernel_filter(
     common.clean_output_dir(True, workload_dir)
 
 
+@pytest.mark.parametrize("sorting_type", ["offset", "count"])
+def test_pc_sampling_analyze_sorting_type(
+    binary_handler_analyze_rocprof_compute,
+    capsys,
+    sorting_type,
+) -> None:
+    """Run analyze with each --pc-sampling-sorting-type and verify exit code 0."""
+    workload_dir = integration_common.setup_workload_dir(
+        PC_SAMPLING_WORKLOAD, param_id=sorting_type
+    )
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--path",
+        workload_dir,
+        "--block",
+        "21",
+        "--pc-sampling-sorting-type",
+        sorting_type,
+    ])
+    assert code == 0
+    captured = capsys.readouterr()
+    assert "0.1 Top Kernels" in captured.out
+    assert "0.2 Dispatch List" in captured.out
+
+    common.clean_output_dir(True, workload_dir)
+
+
 def test_pc_sampling_analyze_database_output(
     binary_handler_analyze_rocprof_compute,
     monkeypatch,
@@ -136,14 +164,14 @@ def test_pc_sampling_analyze_database_output(
                 "JOIN compute_kernel k ON ks.kernel_uuid = k.kernel_uuid"
             ).fetchone()[0]
             db_pc_sampling = pd.read_sql_query(
-                "SELECT kernel_name, count, "
+                "SELECT kernel_name, offset, instruction, instruction_type, "
+                "source, count, "
                 "issue_count, stall_count, "
                 "wave_occupancy_percent, active_thread_percent, stall_reason "
                 "FROM compute_pc_sampling_summary_view "
-                "ORDER BY kernel_name",
+                "ORDER BY kernel_name, offset",
                 conn,
             )
-            db_isa = integration_common.read_per_kernel_isa_rows(conn)
             # Derived wave metrics live on the state table; the summary view
             # does not carry them.
             db_wave_metrics = pd.read_sql_query(
@@ -189,13 +217,11 @@ def test_pc_sampling_analyze_database_output(
         # inst_type is a per-sample class, so its counts sum to the sample total.
         assert state_total == 857
         assert inst_sample_total == state_total
-        assert len(db_pc_sampling) == 1
+        assert len(db_pc_sampling) == 19
         assert db_pc_sampling["count"].sum() == 857
         # The static type is filled from the disassembly, so every sampled line
         # of a real workload carries one.
-        sampled_isa = db_isa[db_isa["count"].notna()]
-        assert len(sampled_isa) == state_count
-        assert sampled_isa["instruction_type"].notna().all()
+        assert db_pc_sampling["instruction_type"].notna().all()
         assert len(db_wave_metrics) == state_count
         # Every sample in this workload carries a full wave64 mask
         # (0xFFFFFFFFFFFFFFFF) against sysinfo wave_size 64, so each line is
@@ -214,12 +240,12 @@ def test_pc_sampling_analyze_database_output(
         assert db_code_object_process_ids == [(698961,)]
         # The chain is rebuilt innermost first.
         assert (
-            db_isa.loc[db_isa["offset"] == 8192, "source"].item()
+            db_pc_sampling.loc[db_pc_sampling["offset"] == 8192, "source"].item()
             == f"{HIP_RUNTIME_SOURCE}:258 -> {HIP_RUNTIME_SOURCE}:317 "
             f"-> {VCOPY_SOURCE}:36"
         )
         assert (
-            db_isa.loc[db_isa["offset"] == 8256, "source"].item()
+            db_pc_sampling.loc[db_pc_sampling["offset"] == 8256, "source"].item()
             == f"{HIP_RUNTIME_SOURCE}:? -> {HIP_RUNTIME_SOURCE}:308 "
             f"-> {VCOPY_SOURCE}:36"
         )
@@ -288,8 +314,9 @@ def test_pc_sampling_analyze_csv_output(
         assert summary_csv.is_file()
         csv_pc_sampling = pd.read_csv(summary_csv)
         csv_kernel = pd.read_csv(csv_dir / "kernel.csv")
-        assert len(csv_pc_sampling) == 1
+        assert len(csv_pc_sampling) == 19
         assert csv_pc_sampling["count"].sum() == 857
+        assert set(csv_pc_sampling["pid"]) == {698961}
         assert csv_pc_sampling["active_thread_percent"].eq(100.0).all()
         assert csv_pc_sampling["wave_occupancy_percent"].gt(0).all()
         assert csv_pc_sampling["wave_occupancy_percent"].le(100).all()
