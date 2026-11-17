@@ -807,6 +807,32 @@ TEST(WaitcheckTarget, FlatStoresKeepTheirIdentityOnBothCounters) {
   EXPECT_EQ(events[1].kind, WaitEventKind::FlatStore);
 }
 
+TEST(WaitcheckTarget, LegacyUnknownFlatRouteKeepsBothResultWaitObligations) {
+  // Offline analysis has no lane address, so it cannot infer that a private
+  // address is out of range and suppress either possible completion route.
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_RDNA1,
+                    ROCJITSU_CODE_ARCH_RDNA2}) {
+    SCOPED_TRACE(arch);
+    // LLVM MC's GFX9 and GFX10 flat_load_dword encodings.
+    const std::array<uint32_t, 2> words =
+        arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2
+            ? std::array<uint32_t, 2>{0xDC300000u, 0x007D0000u}
+            : std::array<uint32_t, 2>{0xDC500000u, 0x08000002u};
+    auto load = decode(words, arch);
+    ASSERT_NE(load, nullptr);
+    const auto result = Target::classify_events(*load, arch);
+    ASSERT_TRUE(result.succeeded());
+    for (auto counter : {WaitCounterKind::Load, WaitCounterKind::Ds}) {
+      const auto &events = result.value();
+      const auto event = std::ranges::find_if(events, [&](const ClassifiedEvent &item) {
+        return item.counter == counter && item.kind == WaitEventKind::FlatLoad &&
+               item.registers == TrackedRegisterSource::Defs && item.check_uses;
+      });
+      EXPECT_NE(event, events.end());
+    }
+  }
+}
+
 TEST(WaitcheckTarget, DirectToLdsIsNotAVgprResultOnBothCdnaTargets) {
   for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
     // CDNA3 supports buffer_load_dword lds. CDNA4 also supports buffer_load_dwordx4 lds.

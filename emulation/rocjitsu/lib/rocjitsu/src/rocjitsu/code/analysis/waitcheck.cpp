@@ -17,6 +17,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
@@ -8353,19 +8354,97 @@ private:
     };
     const auto operands_a = compare_operands(*cmp_a);
     const auto operands_b = compare_operands(*cmp_b);
-    if (!operands_a || !operands_b || operands_a->first != operands_b->first)
+    if (!operands_a || !operands_b)
       return false;
     const auto bound_a = unique_writer(operands_a->first, *cmp_a);
     const auto bound_b = unique_writer(operands_b->first, *cmp_b);
-    if (!bound_a || !bound_b || bound_a->view->instruction != bound_b->view->instruction)
+    if (!bound_a || !bound_b)
       return false;
 
-    // A scalar load can complete between compares without an instruction
-    // definition. Require a full KMCNT drain on every writer-to-compare path.
-    if (bound_a->inst().is_memory_op()) {
-      if (!bound_a->inst().mnemonic().starts_with("s_load"))
+    // Two decoded loads can supply the same bound when they read identical
+    // immutable kernarg bytes through the descriptor's unchanged ABI pointer.
+    // A register name alone does not establish this equality across a reload.
+    auto same_kernarg_bound = [&] {
+      if (!current_kernel_->kernarg_sgpr || !current_kernel_->alias_descriptor_vaddrs.empty() ||
+          image_.size() < sizeof(Elf64_Ehdr) || image_[EI_OSABI] != ELFOSABI_AMDGPU_HSA)
         return false;
-      std::vector<std::pair<size_t, size_t>> work{{bound_a->block, bound_a->index + 1}};
+      const RegisterRef base{RegClass::SGPR, *current_kernel_->kernarg_sgpr, 2};
+      auto read = [&](const Location &where, RegisterRef bound) -> std::optional<ByteInterval> {
+        const auto &inst = where.inst();
+        if (inst.mnemonic() != "s_load_b64" || inst.size() != sizeof(cdna5::SmemMachineInst) ||
+            !inst.raw_encoding() || inst.num_dst_operands() != 1 || bound.cls != RegClass::SGPR ||
+            bound.width != 1)
+          return std::nullopt;
+        cdna5::SmemMachineInst encoding{};
+        std::memcpy(&encoding, inst.raw_encoding(), sizeof(encoding));
+        const auto destination = inst.dst_operand(0)->to_register_ref();
+        if (!destination || destination->cls != RegClass::SGPR || destination->width != 2 ||
+            destination->index != bound.index || encoding.sdata != bound.index ||
+            destination->index + destination->width > current_kernel_->min_sgprs ||
+            encoding.sbase * 2u != base.index || encoding.soffset != cdna5::OPR_SMEM_OFFSET_NULL ||
+            encoding.scale_offset || encoding.ioffset >= (1u << 23))
+          return std::nullopt;
+        return ByteInterval{encoding.ioffset, encoding.ioffset + 8u};
+      };
+      const auto earlier = read(*bound_a, operands_a->first);
+      const auto later = read(*bound_b, operands_b->first);
+      if (!earlier || !later || compare_intervals(*earlier, *later) != IntervalRelation::Identical)
+        return false;
+      if (!metadata_sizes_)
+        metadata_sizes_ = metadata_kernarg_sizes(image_);
+      uint32_t extent = current_kernel_->kernarg_size;
+      const auto metadata = metadata_sizes_->find(current_kernel_->name);
+      if (metadata != metadata_sizes_->end())
+        extent = extent ? std::min(extent, metadata->second) : metadata->second;
+      if (!extent || earlier->end > extent)
+        return false;
+
+      // Follow every predecessor back to the ABI entry, including backedges.
+      // Unknown predecessor roots or a write to either pointer SGPR fail closed.
+      auto base_unchanged = [&](const Location &load) {
+        std::vector<std::pair<size_t, size_t>> work{{load.block, load.index}};
+        std::set<std::pair<size_t, size_t>> seen;
+        bool reached_entry = false;
+        while (!work.empty()) {
+          if (seen.size() >= kMaxInstructions)
+            return false;
+          const auto [block, index] = work.back();
+          work.pop_back();
+          if (!seen.emplace(block, index).second)
+            continue;
+          if (index != 0) {
+            const Location previous{block, index - 1, &cfg_views_[block].instructions[index - 1]};
+            const auto name = previous.inst().mnemonic();
+            if (defs(previous).intersects(base) || name.starts_with("s_swap_pc") ||
+                name.starts_with("s_call") || name.starts_with("s_setpc") ||
+                name.starts_with("s_movrel"))
+              return false;
+            work.emplace_back(block, index - 1);
+            continue;
+          }
+          if (cfg_views_[block].predecessors.empty()) {
+            if (cfg_views_[block].block->start_offset() != current_kernel_->entry_offset)
+              return false;
+            reached_entry = true;
+          }
+          for (size_t predecessor : cfg_views_[block].predecessors)
+            work.emplace_back(predecessor, cfg_views_[predecessor].instructions.size());
+        }
+        return reached_entry;
+      };
+      return base_unchanged(*bound_a) && base_unchanged(*bound_b);
+    };
+    if (bound_a->view->instruction != bound_b->view->instruction && !same_kernarg_bound())
+      return false;
+
+    // A scalar load can complete after its instruction definition. Require a
+    // full KMCNT drain on every path from each load to its own comparison.
+    auto bound_completed = [&](const Location &writer, const Location &compare) {
+      if (!writer.inst().is_memory_op())
+        return true;
+      if (!writer.inst().mnemonic().starts_with("s_load"))
+        return false;
+      std::vector<std::pair<size_t, size_t>> work{{writer.block, writer.index + 1}};
       std::set<std::pair<size_t, size_t>> seen;
       bool crossed_drain = false;
       while (!work.empty()) {
@@ -8381,7 +8460,7 @@ private:
           continue;
         }
         const auto &view = cfg_views_[block].instructions[index];
-        if (view.instruction == cmp_a->view->instruction)
+        if (view.instruction == compare.view->instruction)
           return false;
         const auto fields = view.instruction->is_waitcnt()
                                 ? cfg_explicit_wait_fields(block, *view.instruction, arch)
@@ -8392,9 +8471,10 @@ private:
         }
         work.emplace_back(block, index + 1);
       }
-      if (!crossed_drain)
-        return false;
-    }
+      return crossed_drain;
+    };
+    if (!bound_completed(*bound_a, *cmp_a) || !bound_completed(*bound_b, *cmp_b))
+      return false;
 
     auto or_index = [&](const Location &compare, RegisterRef index)
         -> std::optional<std::pair<Location, std::pair<uint32_t, RegisterRef>>> {

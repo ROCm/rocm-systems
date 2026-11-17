@@ -1353,6 +1353,13 @@ TEST(WaitcheckTest, ReportsUnsupportedArchitectures) {
   EXPECT_TRUE(report.diagnostics.empty());
 }
 
+TEST(WaitcheckTest, Gfx90aPublicTargetIdIsNotWaitcheckAdmission) {
+  // The code API knows this target, but the public waitcheck frontend has not
+  // qualified it; the explicit-architecture qualification adapter is separate.
+  EXPECT_EQ(waitcheck_arch_for_target(ROCJITSU_CODE_TARGET_GFX90A),
+            ROCJITSU_CODE_ARCH_INVALID);
+}
+
 TEST(WaitcheckTest, MapsGfx942TargetToCdna3) {
   EXPECT_EQ(waitcheck_arch_for_target(ROCJITSU_CODE_TARGET_GFX942), ROCJITSU_CODE_ARCH_CDNA3);
 }
@@ -10300,6 +10307,15 @@ TEST(WaitcheckTest, Gfx1250OrderedSignedMaskGuardsProveEarlierVaDrain) {
     AmbiguousBank,
     BoundLoadWait,
     BoundLoadNoWait,
+    RepeatedKernargSameReg,
+    RepeatedKernargDifferentReg,
+    RepeatedKernargDifferentBytes,
+    RepeatedKernargChangedBase,
+    RepeatedKernargAlternateBase,
+    RepeatedKernargNoFirstDrain,
+    RepeatedKernargNoSecondDrain,
+    RepeatedKernargNoAbi,
+    RepeatedKernargShortExtent,
     CommonLoadWait,
     CommonLoadNoWait,
     Backedge,
@@ -10312,9 +10328,23 @@ TEST(WaitcheckTest, Gfx1250OrderedSignedMaskGuardsProveEarlierVaDrain) {
     YoungerProducer,
   };
   const auto check = [](Variation variation) {
+    const bool repeated_kernarg = variation >= Variation::RepeatedKernargSameReg &&
+                                  variation <= Variation::RepeatedKernargShortExtent;
     std::vector<uint32_t> code;
+    const auto append_kernarg_bound = [&](uint32_t destination, uint32_t offset) {
+      const std::array<uint32_t, 2> original{0xf4102200u, 0xf8000110u};
+      cdna5::SmemMachineInst load{};
+      std::memcpy(&load, original.data(), sizeof(load));
+      load.sdata = destination;
+      load.ioffset = offset;
+      append_inst(code, load);
+    };
     append_inst(code, s_setreg_imm32_b32(hwreg(26, 0, 2), 2));
-    if (variation == Variation::BoundLoadWait || variation == Variation::BoundLoadNoWait) {
+    if (repeated_kernarg) {
+      append_kernarg_bound(68, 0x110);
+      if (variation != Variation::RepeatedKernargNoFirstDrain)
+        append_inst(code, sopp(71, 0));
+    } else if (variation == Variation::BoundLoadWait || variation == Variation::BoundLoadNoWait) {
       append_inst(code, s_load_b32(68, 0));
       if (variation == Variation::BoundLoadWait)
         append_inst(code, sopp(71, 0)); // full KMCNT before either compare
@@ -10347,7 +10377,23 @@ TEST(WaitcheckTest, Gfx1250OrderedSignedMaskGuardsProveEarlierVaDrain) {
     if (variation == Variation::ChangedBase)
       code.push_back(0x36240290u); // v18 = v1 & 16 before the later index
     code.push_back(variation == Variation::Reversed ? 0x38282481u : 0x38282482u);
-    code.insert(code.end(), {0xd4440004u, 0x02022844u}); // s4 = s68 > v20
+    if (repeated_kernarg) {
+      if (variation == Variation::RepeatedKernargAlternateBase)
+        append_inst(code, sopp(33, 1)); // One path skips the kernarg pointer write.
+      if (variation == Variation::RepeatedKernargChangedBase)
+        append_inst(code, s_mov_b32(0, 128)); // the second address is no longer kernarg
+      if (variation == Variation::RepeatedKernargAlternateBase)
+        append_inst(code, s_mov_b32(0, 128));
+      const bool different_register = variation == Variation::RepeatedKernargDifferentReg;
+      const uint32_t second_offset =
+          variation == Variation::RepeatedKernargDifferentBytes ? 0x118 : 0x110;
+      append_kernarg_bound(different_register ? 70 : 68, second_offset);
+      if (variation != Variation::RepeatedKernargNoSecondDrain)
+        append_inst(code, sopp(71, 0));
+      code.insert(code.end(), {0xd4440004u, different_register ? 0x02022846u : 0x02022844u});
+    } else {
+      code.insert(code.end(), {0xd4440004u, 0x02022844u}); // s4 = s68 > v20
+    }
     const bool common_load =
         variation == Variation::CommonLoadWait || variation == Variation::CommonLoadNoWait;
     const size_t loop_entry = code.size();
@@ -10410,8 +10456,25 @@ TEST(WaitcheckTest, Gfx1250OrderedSignedMaskGuardsProveEarlierVaDrain) {
       code.push_back(0xbfa20000u | static_cast<uint16_t>(displacement));
     }
     append_inst(code, s_endpgm());
-    const auto image =
-        waitcheck_test::make_gfx_code_object(code, EF_AMDGPU_MACH_AMDGCN_GFX1250, true);
+    auto image = waitcheck_test::make_gfx_code_object(code, EF_AMDGPU_MACH_AMDGCN_GFX1250, true,
+                                                      !repeated_kernarg);
+    if (repeated_kernarg) {
+      Elf64_Ehdr header{};
+      std::memcpy(&header, image.data(), sizeof(header));
+      Elf64_Shdr rodata{};
+      std::memcpy(&rodata, image.data() + header.e_shoff + 2 * sizeof(rodata), sizeof(rodata));
+      const size_t kd = rodata.sh_offset;
+      const uint32_t extent = variation == Variation::RepeatedKernargShortExtent ? 0x110 : 0x120;
+      const uint32_t full_vgprs = 63;
+      const uint16_t properties =
+          variation == Variation::RepeatedKernargNoAbi ? 1u << 10 : (1u << 10) | 8u;
+      std::memcpy(image.data() + kd + offsetof(amdhsa::kernel_descriptor_t, kernarg_size), &extent,
+                  sizeof(extent));
+      std::memcpy(image.data() + kd + offsetof(amdhsa::kernel_descriptor_t, compute_pgm_rsrc1),
+                  &full_vgprs, sizeof(full_vgprs));
+      std::memcpy(image.data() + kd + offsetof(amdhsa::kernel_descriptor_t, kernel_code_properties),
+                  &properties, sizeof(properties));
+    }
     AmdGpuCodeObject object(image.data(), image.size());
     const auto report = analyze_waitcnts(object, ROCJITSU_CODE_ARCH_CDNA5);
     EXPECT_TRUE(report.supported && report.complete) << report.analysis_error;
@@ -10420,10 +10483,12 @@ TEST(WaitcheckTest, Gfx1250OrderedSignedMaskGuardsProveEarlierVaDrain) {
              row.producer_section_offset == expected_producer && row.section_offset == consumer &&
              row.reg == RegisterRef{RegClass::VGPR, 8, 1};
     });
-    EXPECT_EQ(hazard == report.diagnostics.end(), variation == Variation::Ordered ||
-                                                      variation == Variation::BoundLoadWait ||
-                                                      variation == Variation::CommonLoadWait ||
-                                                      variation == Variation::LoopBeforeProducer)
+    EXPECT_EQ(hazard == report.diagnostics.end(),
+              variation == Variation::Ordered || variation == Variation::BoundLoadWait ||
+                  variation == Variation::RepeatedKernargSameReg ||
+                  variation == Variation::RepeatedKernargDifferentReg ||
+                  variation == Variation::CommonLoadWait ||
+                  variation == Variation::LoopBeforeProducer)
         << diagnostic_summary(report);
   };
   for (const auto variation : {Variation::Ordered,
@@ -10436,6 +10501,15 @@ TEST(WaitcheckTest, Gfx1250OrderedSignedMaskGuardsProveEarlierVaDrain) {
                                Variation::AmbiguousBank,
                                Variation::BoundLoadWait,
                                Variation::BoundLoadNoWait,
+                               Variation::RepeatedKernargSameReg,
+                               Variation::RepeatedKernargDifferentReg,
+                               Variation::RepeatedKernargDifferentBytes,
+                               Variation::RepeatedKernargChangedBase,
+                               Variation::RepeatedKernargAlternateBase,
+                               Variation::RepeatedKernargNoFirstDrain,
+                               Variation::RepeatedKernargNoSecondDrain,
+                               Variation::RepeatedKernargNoAbi,
+                               Variation::RepeatedKernargShortExtent,
                                Variation::CommonLoadWait,
                                Variation::CommonLoadNoWait,
                                Variation::Backedge,
