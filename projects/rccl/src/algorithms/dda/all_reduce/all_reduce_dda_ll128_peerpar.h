@@ -45,17 +45,30 @@ constexpr int kDdaLL128ArPeerMaxThreads = 512;
 constexpr int kDdaLL128ArPeerMaxWarps = kDdaLL128ArPeerMaxThreads / kDdaLL128Warp;
 // Blocks come in 64-thread granules and nRanks >= 2, so a group is at least two warps.
 constexpr int kDdaLL128ArPeerMaxGroups = kDdaLL128ArPeerMaxWarps / 2;
-// Wire words of a slice one thread of a group folds, at the two-warp minimum group.
-constexpr int kDdaLL128ArPeerFoldWords = kDdaLL128WireWordsPerSlice / (2 * kDdaLL128Warp);
+// One 16B wire pair (lo, hi), the unit a lane moves in phases 1 and 3; 16B-aligned so LDS accesses are 16B wide.
+struct alignas(16) DdaLL128Pair {
+  uint64_t lo;
+  uint64_t hi;
+};
+// 16B pairs of one slice.
+constexpr int kDdaLL128PairsPerSlice = kDdaLL128WireWordsPerSlice / 2;
+// Pairs of a slice one thread of a group folds, at the two-warp minimum group.
+constexpr int kDdaLL128ArPeerFoldPairs = kDdaLL128PairsPerSlice / (2 * kDdaLL128Warp);
 
 // Warps per slice group: one per rank, up to the whole block.
 __host__ __device__ constexpr int ddaLL128ArPeerWarps(int nRanks, int nwarps) {
   return nRanks < nwarps ? nRanks : nwarps;
 }
 
-// Wire word of register u on lane `lane`: the 16B-pair layout ddaLL128PollWire reads.
-__device__ __forceinline__ int ddaLL128ArWireWord(int u, int lane) {
-  return (u & ~1) * kDdaLL128Warp + 2 * lane + (u & 1);
+// Wire pair of register pair g on lane `lane`: the 16B-pair layout ddaLL128PollWire reads.
+__device__ __forceinline__ int ddaLL128ArWirePair(int g, int lane) {
+  return g * kDdaLL128Warp + lane;
+}
+
+// Packed add of two 16B pairs, word by word.
+template <typename T>
+__device__ __forceinline__ DdaLL128Pair ddaLL128ArAddPair(const DdaLL128Pair& a, const DdaLL128Pair& b) {
+  return {ddaLL128AddWord<T>(a.lo, b.lo), ddaLL128AddWord<T>(a.hi, b.hi)};
 }
 
 // Poll one slice. With cooperative loads, all of the slice's loads issue before any flag is checked and the payload
@@ -71,8 +84,8 @@ __device__ __forceinline__ bool ddaLL128ArPeerPoll(const uint64_t* wire, uint64_
 
 // Per-block LDS: one wire slice per warp for the copies it polled, one per group for the folded result.
 struct DdaLL128ArPeerLds {
-  uint64_t in[kDdaLL128ArPeerMaxWarps][kDdaLL128WireWordsPerSlice];
-  uint64_t red[kDdaLL128ArPeerMaxGroups][kDdaLL128WireWordsPerSlice];
+  DdaLL128Pair in[kDdaLL128ArPeerMaxWarps][kDdaLL128PairsPerSlice];
+  DdaLL128Pair red[kDdaLL128ArPeerMaxGroups][kDdaLL128PairsPerSlice];
   int aborted;
 };
 
@@ -114,7 +127,7 @@ __device__ __forceinline__ DdaLL128ArPeerPos ddaLL128ArPeerPos(int nRanks) {
 //
 // Rounds of P ranks: warp pw loads rank base + pw (its own payload from `self`,
 // a peer's by polling that peer's slot under `gather`) into lds.in, and after a
-// barrier the group's threads fold their words of the parked copies in rank
+// barrier the group's threads fold their 16B pairs of the parked copies in rank
 // order. The last round leaves the sum in lds.red[group], readable on return.
 //
 // The barriers are block-wide, so every warp of the block calls this once per
@@ -128,7 +141,7 @@ __device__ __forceinline__ bool ddaLL128ArPeerFold(DdaLL128ArPeerLds& lds, const
                                                    DdaKernelParams params) {
   const int gt = p.pw * kDdaLL128Warp + p.lane;
   const int gThreads = p.P * kDdaLL128Warp;
-  uint64_t acc[kDdaLL128ArPeerFoldWords] = {};
+  DdaLL128Pair acc[kDdaLL128ArPeerFoldPairs] = {};
 
   for (int base = 0; base < nRanks; base += p.P) {
     const int rank = base + p.pw;
@@ -141,8 +154,8 @@ __device__ __forceinline__ bool ddaLL128ArPeerFold(DdaLL128ArPeerLds& lds, const
         lds.aborted = 1;
       }
 #pragma unroll
-      for (int u = 0; u < kDdaLL128WordsPerThread; ++u) {
-        lds.in[p.warp][ddaLL128ArWireWord(u, p.lane)] = vr[u];
+      for (int g = 0; g < kDdaLL128Pairs; ++g) {
+        lds.in[p.warp][ddaLL128ArWirePair(g, p.lane)] = {vr[2 * g], vr[2 * g + 1]};
       }
     }
     __syncthreads();
@@ -153,14 +166,14 @@ __device__ __forceinline__ bool ddaLL128ArPeerFold(DdaLL128ArPeerLds& lds, const
       const int nIn = nRanks - base < p.P ? nRanks - base : p.P;
       const bool last = base + p.P >= nRanks;
 #pragma unroll
-      for (int k = 0; k < kDdaLL128ArPeerFoldWords; ++k) {
-        const int w = gt + k * gThreads;
-        if (w < kDdaLL128WireWordsPerSlice) {
-          // On a flag lane's odd words the copies hold flags, not payload; that sum
+      for (int k = 0; k < kDdaLL128ArPeerFoldPairs; ++k) {
+        const int q = gt + k * gThreads;
+        if (q < kDdaLL128PairsPerSlice) {
+          // On a flag lane the copies hold a flag in each pair's hi word, not payload; that sum
           // is never stored, since ddaLL128StoreRegs re-derives those slots.
           const auto fold = [&](int j) {
-            const uint64_t v = lds.in[p.group * p.P + j][w];
-            acc[k] = (base == 0 && j == 0) ? v : ddaLL128AddWord<T>(acc[k], v);
+            const DdaLL128Pair v = lds.in[p.group * p.P + j][q];
+            acc[k] = (base == 0 && j == 0) ? v : ddaLL128ArAddPair<T>(acc[k], v);
           };
           if constexpr (NRANKS_CT != 0) {
             constexpr int kRoundMax = NRANKS_CT < kDdaLL128ArPeerMaxWarps ? NRANKS_CT : kDdaLL128ArPeerMaxWarps;
@@ -176,7 +189,7 @@ __device__ __forceinline__ bool ddaLL128ArPeerFold(DdaLL128ArPeerLds& lds, const
             }
           }
           if (last) {
-            lds.red[p.group][w] = acc[k];
+            lds.red[p.group][q] = acc[k];
           }
         }
       }
@@ -191,8 +204,10 @@ __device__ __forceinline__ bool ddaLL128ArPeerFold(DdaLL128ArPeerLds& lds, const
 __device__ __forceinline__ void ddaLL128ArPeerLoadRed(const DdaLL128ArPeerLds& lds, const DdaLL128ArPeerPos& p,
                                                       uint64_t (&acc)[kDdaLL128WordsPerThread]) {
 #pragma unroll
-  for (int u = 0; u < kDdaLL128WordsPerThread; ++u) {
-    acc[u] = lds.red[p.group][ddaLL128ArWireWord(u, p.lane)];
+  for (int g = 0; g < kDdaLL128Pairs; ++g) {
+    const DdaLL128Pair v = lds.red[p.group][ddaLL128ArWirePair(g, p.lane)];
+    acc[2 * g] = v.lo;
+    acc[2 * g + 1] = v.hi;
   }
 }
 
