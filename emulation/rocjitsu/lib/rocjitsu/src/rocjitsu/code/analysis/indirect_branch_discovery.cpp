@@ -872,8 +872,8 @@ void invalidate_written_sgprs(AnalysisContext &ctx, size_t index, BlockState &st
   return (inst.flags() & INDIRECT_BRANCH) != 0;
 }
 
-[[nodiscard]] bool is_block_terminator(const Instruction &inst) {
-  return is_program_path_terminator(inst) ||
+[[nodiscard]] bool is_block_terminator(const Instruction &inst, rj_code_arch_t arch) {
+  return is_program_path_terminator(inst, arch) ||
          (inst.flags() & (BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL));
 }
 
@@ -887,12 +887,12 @@ void invalidate_written_sgprs(AnalysisContext &ctx, size_t index, BlockState &st
   return is_indirect_branch(inst) || ((inst.flags() & INDIRECT_CALL) != 0 && !is_direct_call(inst));
 }
 
-[[nodiscard]] bool has_no_direct_successor(const Instruction &inst) {
+[[nodiscard]] bool has_no_direct_successor(const Instruction &inst, rj_code_arch_t arch) {
   // Indirect branches have no known target until this analysis recovers one.
   // Indirect calls still expose their ordinary fallthrough/return continuation
   // in the direct CFG, which is required for liveness and for callers that do
   // not care about the callee body. Forks and joins also keep their fallthrough.
-  return is_program_path_terminator(inst) ||
+  return is_program_path_terminator(inst, arch) ||
          (is_indirect_branch(inst) && !indirect_branch_falls_through(inst));
 }
 
@@ -917,7 +917,8 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
 /// truth for both the temporary CFG skeleton and the block-local lane-stash
 /// scan, so the two agree on where a block begins.
 [[nodiscard]] std::vector<uint8_t> compute_block_leaders(std::span<const Instruction *const> insts,
-                                                         std::span<const uint64_t> extra_leaders) {
+                                                         std::span<const uint64_t> extra_leaders,
+                                                         rj_code_arch_t arch) {
   std::vector<uint8_t> leaders(insts.size(), 0);
   if (insts.empty())
     return leaders;
@@ -939,7 +940,7 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
     // new block.
     if (i + 1 < insts.size() && insts[i + 1]->src_loc() != next_offset)
       leaders[i + 1] = 1;
-    if (is_block_terminator(inst) && next_offset < section_end && i + 1 < insts.size() &&
+    if (is_block_terminator(inst, arch) && next_offset < section_end && i + 1 < insts.size() &&
         insts[i + 1]->src_loc() == next_offset)
       leaders[i + 1] = 1;
 
@@ -1398,7 +1399,7 @@ build_analysis_blocks(const AnalysisContext &ctx, std::span<const uint64_t> extr
   // each setpc/swappc the last instruction in its analysis block, so the block
   // transfer summarizes the state at the control-transfer boundary rather than
   // after unrelated fallthrough instructions.
-  const std::vector<uint8_t> leaders = compute_block_leaders(ctx.insts, extra_leaders);
+  const std::vector<uint8_t> leaders = compute_block_leaders(ctx.insts, extra_leaders, ctx.arch);
 
   std::vector<AnalysisBlock> blocks;
   blocks.reserve(std::ranges::count(leaders, uint8_t{1}));
@@ -1439,7 +1440,8 @@ build_analysis_blocks(const AnalysisContext &ctx, std::span<const uint64_t> extr
       }
     }
 
-    if (has_no_direct_successor(term) || (is_unconditional_branch(term) && !is_direct_call(term)))
+    if (has_no_direct_successor(term, ctx.arch) ||
+        (is_unconditional_branch(term) && !is_direct_call(term)))
       continue;
 
     if (auto it = block_by_offset.find(next_offset); it != block_by_offset.end()) {
@@ -2857,7 +2859,7 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
           continue;
         }
         if (block.successors.empty()) {
-          if (!is_program_path_terminator(term))
+          if (!is_program_path_terminator(term, ctx.arch))
             unsupported = true;
           continue;
         }

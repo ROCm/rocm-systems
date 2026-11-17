@@ -13477,15 +13477,52 @@ TEST(WaitcheckTest, AcceptsEndpgmAfterPendingVmemStore) {
 }
 
 TEST(WaitcheckTest, EndpgmClearsPendingStateBeforeNextEntry) {
+  for (uint32_t terminator :
+       {build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4).value(),
+        build_s_trap(ROCJITSU_CODE_ARCH_RDNA4, 2).value()}) {
+    std::vector<uint32_t> program;
+    append_inst(program, global_load_b32(0));
+    program.push_back(terminator);
+    append_inst(program, v_mov_b32(1, 0));
+
+    const auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4);
+    EXPECT_TRUE(report.supported) << report.analysis_error;
+    EXPECT_TRUE(report.complete) << report.analysis_error;
+    EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+  }
+}
+
+TEST(WaitcheckTest, Gfx1100TrapTwoRetainsReachableLoadConsumer) {
   std::vector<uint32_t> program;
-  append_inst(program, global_load_b32(0));
-  append_inst(program, s_endpgm());
-  append_inst(program, v_mov_b32(1, 0));
+  append_gfx1100_global_load_b32_v0_v8_s0(program);
+  program.push_back(build_s_trap(ROCJITSU_CODE_ARCH_RDNA3, 2).value());
+  append_gfx1100_v_mov_b32_v1_v0(program);
+  program.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA3).value());
 
-  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto report = analyze_waitcnts(TestCodeObject(program), ROCJITSU_CODE_ARCH_RDNA3);
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_TRUE(report.complete) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics.front().counter, WaitCounterKind::Load);
+  EXPECT_EQ(report.diagnostics.front().section_offset, 12u);
 
-  EXPECT_TRUE(report.supported);
-  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+  program.insert(program.begin() + 3, 0xbf8903f7u); // s_waitcnt vmcnt(0).
+  const auto protected_report =
+      analyze_waitcnts(TestCodeObject(program), ROCJITSU_CODE_ARCH_RDNA3);
+  EXPECT_TRUE(protected_report.supported) << protected_report.analysis_error;
+  EXPECT_TRUE(protected_report.complete) << protected_report.analysis_error;
+  EXPECT_TRUE(protected_report.diagnostics.empty()) << diagnostic_summary(protected_report);
+}
+
+TEST(WaitcheckTest, Gfx1100TrapTwoRawSpanDoesNotClaimCleanFallthrough) {
+  std::vector<uint32_t> program;
+  append_gfx1100_global_load_b32_v0_v8_s0(program);
+  program.push_back(build_s_trap(ROCJITSU_CODE_ARCH_RDNA3, 2).value());
+  append_gfx1100_v_mov_b32_v1_v0(program);
+
+  const auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA3);
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_FALSE(report.complete);
 }
 
 TEST(WaitcheckTest, AcceptsStorecntBeforeEndpgmAfterVmemStore) {
@@ -14307,7 +14344,7 @@ TEST(WaitcheckTest, Wave32ExecDerivedSccGuardProvesOnlyFeasibleWaitPaths) {
   check(overwritten_scc, true);
 
   check({load, load_args, 0xbfa10002, full_wait, 0xbfa00001, 0xbf900002, overwrite, end},
-        false); // Both branch arms drain or terminate.
+        true); // GFX11.0 privileged trap 2 can fall through without draining.
 
   auto vcc_guard = guarded;
   vcc_guard[2] = 0xbe880080; // s_mov_b32 s8,0

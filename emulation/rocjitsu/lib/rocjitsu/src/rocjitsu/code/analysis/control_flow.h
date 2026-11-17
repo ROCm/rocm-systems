@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/instruction.h"
 
 #include <cstdint>
@@ -14,16 +15,18 @@ namespace rocjitsu {
 
 /// @brief Whether an instruction ends the current program path.
 ///
-/// @details ROCr reserves trap ID 2 for assertion/abort handling. Unlike other
-/// S_TRAP IDs, that path does not resume at the following instruction, so every
-/// CFG construction pass must treat it like an ordinary PROGRAM_TERMINATOR.
-[[nodiscard]] inline bool is_program_path_terminator(const Instruction &inst) {
+/// @details ROCr reserves trap ID 2 for assertion/abort handling. GFX11.0 has
+/// a privileged-mode trap-2 NOP behavior, so its fallthrough remains reachable.
+/// Elsewhere the assertion/abort path does not resume at the next instruction.
+[[nodiscard]] inline bool is_program_path_terminator(const Instruction &inst,
+                                                     rj_code_arch_t arch) {
   if ((inst.flags() & PROGRAM_TERMINATOR) != 0)
     return true;
   if ((inst.flags() & SOFTWARE_TRAP) == 0 || inst.size() != sizeof(uint32_t))
     return false;
   const uint32_t *raw = inst.raw_encoding();
-  return raw != nullptr && static_cast<uint16_t>(raw[0]) == 2;
+  return raw != nullptr && static_cast<uint16_t>(raw[0]) == 2 &&
+         arch != ROCJITSU_CODE_ARCH_RDNA3;
 }
 
 /// @brief Whether an indirect branch can also continue at the next instruction.

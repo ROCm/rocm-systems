@@ -500,7 +500,7 @@ struct Analyzer : private WaitcheckStateOps {
                                   file_offset, arch);
       analyze_instruction(state, *inst, section_name, section_offset, file_offset, arch, true);
       ++report_.instructions_analyzed;
-      if (is_control_flow_transfer(*inst) && !is_program_path_terminator(*inst)) {
+      if (is_control_flow_transfer(*inst) && !is_program_path_terminator(*inst, arch)) {
         // A raw word span has no CFG. Following the next encoded instruction
         // could skip a wait on the taken path and claim a false pass.
         report_.complete = false;
@@ -10295,7 +10295,7 @@ private:
       update_va_vdst_hazards(state.va_vdst_hazards, inst, du, section_name, section_offset,
                              file_offset);
 
-    if (is_program_end(inst.mnemonic())) {
+    if (is_program_end(inst.mnemonic()) || is_program_path_terminator(inst, arch)) {
       state = {};
       return;
     }

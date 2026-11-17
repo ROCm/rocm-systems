@@ -28,16 +28,16 @@ namespace rocjitsu {
 
 namespace {
 
-bool is_block_terminator(const Instruction &inst) {
-  return is_program_path_terminator(inst) ||
+bool is_block_terminator(const Instruction &inst, rj_code_arch_t arch) {
+  return is_program_path_terminator(inst, arch) ||
          (inst.flags() & (BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL));
 }
 
-bool has_no_static_successor(const Instruction &inst) {
+bool has_no_static_successor(const Instruction &inst, rj_code_arch_t arch) {
   // Indirect calls return to the fallthrough block; indirect branches do not
   // expose a statically-known successor in this local CFG, except for the
   // fallthrough of a fork or join.
-  return is_program_path_terminator(inst) ||
+  return is_program_path_terminator(inst, arch) ||
          ((inst.flags() & INDIRECT_BRANCH) && !indirect_branch_falls_through(inst));
 }
 
@@ -105,9 +105,9 @@ struct BasicBlock::DecodedSection {
 
 BasicBlock::BasicBlock(uint64_t start_offset) : start_offset_(start_offset) {}
 
-void BasicBlock::add_instruction(std::unique_ptr<Instruction> inst) {
+void BasicBlock::add_instruction(std::unique_ptr<Instruction> inst, bool terminates) {
   size_ += static_cast<uint32_t>(inst->size());
-  has_terminator_ = is_block_terminator(*inst);
+  has_terminator_ = terminates;
   ++num_instructions_;
   inst->parent_ = this;
   instructions_.push_back(*inst);
@@ -219,7 +219,8 @@ FailureOr<std::vector<std::unique_ptr<BasicBlock>>> BasicBlock::build_impl(
             // A noreturn call can end a function. Check its targets after
             // indirect discovery and call/return classification.
             calls_before_alignment.insert(previous.src_loc());
-          } else if (!has_no_static_successor(previous) && !is_unconditional_branch(previous)) {
+          } else if (!has_no_static_successor(previous, arch) &&
+                     !is_unconditional_branch(previous)) {
             return emit_error.emit() << "fallthrough into alignment at byte " << byte_offset;
           }
           byte_offset += sizeof(uint32_t);
@@ -305,7 +306,7 @@ FailureOr<std::vector<std::unique_ptr<BasicBlock>>> BasicBlock::build_impl(
       if (i + 1 < decoded.size() && decoded[i + 1]->src_loc() != next_offset)
         leaders.insert(decoded[i + 1]->src_loc());
 
-      if (is_block_terminator(inst) && next_offset < section_end)
+      if (is_block_terminator(inst, arch) && next_offset < section_end)
         leaders.insert(next_offset);
 
       auto branch_delta = inst.branch_offset_bytes();
@@ -328,15 +329,15 @@ FailureOr<std::vector<std::unique_ptr<BasicBlock>>> BasicBlock::build_impl(
       while (i < decoded.size()) {
         const uint64_t inst_offset = decoded[i]->src_loc();
         const uint64_t next_offset = inst_offset + static_cast<uint64_t>(decoded[i]->size());
-        const bool terminates = is_block_terminator(*decoded[i]);
-        current->add_instruction(std::move(decoded[i]));
+        const bool terminates = is_block_terminator(*decoded[i], arch);
+        current->add_instruction(std::move(decoded[i]), terminates);
         ++i;
 
         const bool decode_gap =
             i >= decoded.size() ? next_offset < section_end : decoded[i]->src_loc() != next_offset;
         const Instruction &last = *current->terminator();
         const bool can_fall_through =
-            !is_program_path_terminator(last) && !is_unconditional_branch(last) &&
+            !is_program_path_terminator(last, arch) && !is_unconditional_branch(last) &&
             ((last.flags() & INDIRECT_BRANCH) == 0 || indirect_branch_falls_through(last));
         // Range bounds are not evidence that a callee ends here. Apply this
         // distinction before call/return classification can prune continuations.
@@ -471,7 +472,7 @@ FailureOr<std::vector<std::unique_ptr<BasicBlock>>> BasicBlock::build_impl(
         continue;
       if ((term->flags() & (INDIRECT_BRANCH | INDIRECT_CALL)) && !term->branch_offset_bytes())
         block.note_successor_issue(SuccessorIssue::IndirectControlFlow);
-      if (has_no_static_successor(*term))
+      if (has_no_static_successor(*term, arch))
         continue;
 
       auto branch_delta = term->branch_offset_bytes();
@@ -620,7 +621,7 @@ FailureOr<std::vector<std::unique_ptr<BasicBlock>>> BasicBlock::build_impl(
         const bool has_branch_exit = term->branch_offset_bytes().has_value() ||
                                      (flags & (INDIRECT_BRANCH | INDIRECT_CALL)) != 0;
         const bool is_program_exit = (block->has_implicit_terminator() && !has_branch_exit) ||
-                                     is_program_path_terminator(*term);
+                                     is_program_path_terminator(*term, arch);
         if ((flags & (INDIRECT_BRANCH | INDIRECT_CALL)) != 0) {
           const auto &fixups = block->static_indirect_call_fixups();
           if (fixups.empty() || std::ranges::any_of(fixups, &IndirectCallFixup::source_incomplete))
@@ -912,8 +913,8 @@ BasicBlock::build_cfg(const CodeObject &co, Decoder &decoder, rj_code_arch_t arc
           if (target >= 0)
             enqueue(static_cast<uint64_t>(target), true);
         }
-        if (is_block_terminator(inst)) {
-          if (!has_no_static_successor(inst) && !is_unconditional_branch(inst))
+        if (is_block_terminator(inst, arch)) {
+          if (!has_no_static_successor(inst, arch) && !is_unconditional_branch(inst))
             enqueue(next_offset, false);
           break;
         }

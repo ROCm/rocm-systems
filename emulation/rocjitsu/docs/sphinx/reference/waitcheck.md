@@ -70,7 +70,7 @@ rj_waitcheck /path/to/site-packages/torch \
 | --- | --- |
 | `--target gfx942\|gfx950\|gfx1100\|gfx1150\|gfx1151\|gfx1200\|gfx1201\|gfx1250\|gfx1251` | Select one supported target from an executable input. |
 | `--code-object-index N` | Select the Nth code object for the selected target. |
-| `--kernel-entry OFFSET` | Analyze every descriptor and wavefront mode whose `.text` entry byte offset matches `OFFSET`. Offline callers iterating `waitcheck_kernels()` should pass each `WaitcheckKernelInfo` to the core overload to avoid repeating shared-entry groups. |
+| `--kernel-entry OFFSET` | Analyze each merged entry/wave group at this `.text` offset. Same-wave descriptors are conservatively merged, including register allocation. Dispatch checks should pass exact descriptor information through the API. Offline callers iterating `waitcheck_kernels()` should pass each `WaitcheckKernelInfo` to the core overload to avoid repeating shared-entry groups. |
 | `--all-code-objects` | Analyze all supported code objects in each input. |
 | `--recursive` | Expand directory inputs into recursive file sweeps. |
 | `--exhaustive` | Strict target-specific recursive sweep with code-object and kernel completeness totals. Requires `--target`. Implies `--recursive --all-code-objects`. |

@@ -136,7 +136,7 @@ std::optional<std::string_view> deferred_reason(const Instruction &inst, rj_code
         op->size_bits() > 0 && (!ref || ref->cls != RegClass::SGPR))
       return "scalar-memory destination is not represented by register tracking";
   }
-  if (is_control_flow_transfer(inst) && !is_program_path_terminator(inst))
+  if (is_control_flow_transfer(inst) && !is_program_path_terminator(inst, arch))
     return "control flow requires CFG analysis";
   if (name == "s_alloc_vgpr")
     return "dynamic VGPR allocation requires dispatch state";
@@ -170,7 +170,7 @@ std::optional<std::string_view> deferred_reason(const Instruction &inst, rj_code
   if (inst.is_memory_op() && events.empty())
     return "memory instruction has no event policy";
   if (name.starts_with("s_") && events.empty() && !inst.is_waitcnt() &&
-      !is_program_path_terminator(inst) && name != "s_nop" && name != "s_delay_alu" &&
+      !is_program_path_terminator(inst, arch) && name != "s_nop" && name != "s_delay_alu" &&
       inst.num_src_operands() == 0 && inst.num_dst_operands() == 0)
     return "unmodeled scalar control instruction";
   return std::nullopt;
@@ -421,7 +421,7 @@ util::FailureOr<WaitcheckStreamReport> analyze_stream(std::span<const uint32_t> 
       return emit_error.emit() << "waitcheck transfer failed at byte " << offset;
     ++report.instructions_analyzed;
     index += static_cast<size_t>(inst.size()) / sizeof(uint32_t);
-    if (is_program_path_terminator(inst))
+    if (is_program_path_terminator(inst, arch))
       break;
   }
   return report;

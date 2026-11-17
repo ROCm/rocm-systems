@@ -1219,6 +1219,14 @@ TEST(WaitcheckStream, AbortTrapBoundsAnalysisButReturningTrapIsIncomplete) {
     ASSERT_TRUE(returning.incomplete);
     EXPECT_EQ(returning.instructions_analyzed, 0u);
   }
+  const auto gfx1100 = analyze({0xbf900002u, 0xbfc00000u}, ROCJITSU_CODE_ARCH_RDNA3);
+  ASSERT_TRUE(gfx1100.incomplete);
+  EXPECT_EQ(gfx1100.incomplete->offset, 0u);
+  EXPECT_EQ(gfx1100.instructions_analyzed, 0u);
+
+  const auto gfx1150 = analyze({0xbf900002u, 0xffffffffu}, ROCJITSU_CODE_ARCH_RDNA3_5);
+  EXPECT_FALSE(gfx1150.incomplete);
+  EXPECT_EQ(gfx1150.instructions_analyzed, 1u);
 }
 
 TEST(WaitcheckStream, ControlFlowStopsBeforeAFallthroughWait) {

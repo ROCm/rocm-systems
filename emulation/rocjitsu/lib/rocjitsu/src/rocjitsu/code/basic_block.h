@@ -333,7 +333,7 @@ private:
       successor_issue_ = issue;
   }
 
-  void add_instruction(std::unique_ptr<Instruction> inst);
+  void add_instruction(std::unique_ptr<Instruction> inst, bool terminates);
   void add_successor(BasicBlock &successor);
   /// Remove one proven-dead edge while preserving the inverse predecessor list.
   [[nodiscard]] bool remove_successor(BasicBlock &successor);
