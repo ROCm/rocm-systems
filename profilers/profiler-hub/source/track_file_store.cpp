@@ -988,28 +988,13 @@ track_file_store::release_samples(ph_sample_t* samples)
 }
 
 stored_histogram_t
-track_file_store::histogram(uint64_t origin,
+track_file_store::histogram(uint64_t /*origin*/,
                             uint64_t bucket_size,
                             uint64_t bucket_count) const
 {
-    const bool same_grid = origin == m_hist_origin && bucket_size == m_hist_bucket_size &&
-                           bucket_count == m_hist_bucket_count;
-    if(!same_grid)
-    {
-        return rebuild_histogram(origin, bucket_size, bucket_count);
-    }
-
-    stored_histogram_t result;
-    result.origin_ts    = m_hist_origin;
-    result.bucket_size  = m_hist_bucket_size;
-    result.bucket_count = m_hist_bucket_count;
-    for(const track_entry_t& entry : m_tracks)
-    {
-        if(entry.buckets.empty()) continue;
-        result.tracks.push_back(
-            stored_histogram_t::track_t{ entry.global_id, entry.buckets });
-    }
-    return result;
+    // Stored buckets were placed on one absolute grid. Rebuild so bucket 0 is
+    // each source's own start and the indexes match the controller.
+    return rebuild_histogram(0, bucket_size, bucket_count);
 }
 
 const track_file_store::track_entry_t*
@@ -1263,18 +1248,29 @@ track_file_store::read_samples(uint32_t global_id,
 }
 
 stored_histogram_t
-track_file_store::rebuild_histogram(uint64_t origin,
+track_file_store::rebuild_histogram(uint64_t /*origin*/,
                                     uint64_t bucket_size,
                                     uint64_t bucket_count) const
 {
     stored_histogram_t result;
-    result.origin_ts    = origin;
+    result.origin_ts    = 0;
     result.bucket_size  = bucket_size;
     result.bucket_count = bucket_count;
     if(bucket_count == 0 || bucket_size == 0) return result;
 
+    std::unordered_map<uint32_t, uint64_t> source_origin;
     for(const track_entry_t& entry : m_tracks)
     {
+        const auto found = source_origin.find(entry.source_index);
+        if(found == source_origin.end() || entry.start_ts < found->second)
+        {
+            source_origin[entry.source_index] = entry.start_ts;
+        }
+    }
+
+    for(const track_entry_t& entry : m_tracks)
+    {
+        const uint64_t track_origin = source_origin[entry.source_index];
         if(entry.kind == payload_t::events)
         {
             std::vector<overlap_bucket_t> buckets(static_cast<size_t>(bucket_count));
@@ -1285,7 +1281,7 @@ track_file_store::rebuild_histogram(uint64_t origin,
             for(uint64_t index = 0; index < header.record_count; ++index)
             {
                 const event_record_t record = in.record<event_record_t>();
-                add_overlap(buckets, record.start, record.end, origin, bucket_size);
+                add_overlap(buckets, record.start, record.end, track_origin, bucket_size);
             }
             auto sparse = sparse_overlaps(buckets);
             if(!sparse.empty())
@@ -1308,7 +1304,8 @@ track_file_store::rebuild_histogram(uint64_t origin,
                 samples.push_back(
                     ph_sample_t{ .timestamp = record.timestamp, .value = record.value });
             }
-            auto sparse = sample_histogram(samples, origin, bucket_size, bucket_count);
+            auto sparse =
+                sample_histogram(samples, track_origin, bucket_size, bucket_count);
             if(!sparse.empty())
             {
                 result.tracks.push_back(

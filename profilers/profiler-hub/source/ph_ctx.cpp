@@ -1448,10 +1448,19 @@ ph_ctx::build_histogram(uint32_t max_buckets, ph_histogram_t& output)
     parts.reserve(m_sources.size());
     for(const std::unique_ptr<trace_source_t>& held : m_sources)
     {
+        using profiler_hub::reader_types::timestamp_ns_t;
+        bool           source_any = false;
+        timestamp_ns_t origin     = 0;
+        for(const auto& track : held->catalog->tracks)
+        {
+            if(!track || track->event_count == 0) continue;
+            if(!source_any || track->start_ts < origin) origin = track->start_ts;
+            source_any = true;
+        }
         parts.push_back(held->pool->with_connection(
-            [&grid](profiler_hub::common::connection& connection) {
+            [origin, &grid](profiler_hub::common::connection& connection) {
                 return connection.reader().get_histogram(
-                    grid.origin, grid.bucket_size, grid.bucket_count);
+                    origin, grid.bucket_size, grid.bucket_count);
             }));
     }
 
@@ -1595,20 +1604,30 @@ profiler_hub::histogram_grid_t
 ph_ctx::histogram_grid(size_t max_buckets) const
 {
     using profiler_hub::reader_types::timestamp_ns_t;
-    bool           any    = false;
-    timestamp_ns_t origin = 0;
-    timestamp_ns_t end    = 0;
+    bool           any     = false;
+    timestamp_ns_t longest = 0;
     for(const std::unique_ptr<trace_source_t>& source : m_sources)
     {
+        bool           source_any = false;
+        timestamp_ns_t origin     = 0;
+        timestamp_ns_t end        = 0;
         for(const auto& track : source->catalog->tracks)
         {
             if(!track || track->event_count == 0) continue;
-            if(!any || track->start_ts < origin) origin = track->start_ts;
-            if(!any || track->end_ts > end) end = track->end_ts;
-            any = true;
+            if(!source_any || track->start_ts < origin) origin = track->start_ts;
+            if(!source_any || track->end_ts > end) end = track->end_ts;
+            source_any = true;
         }
+        if(!source_any || end < origin) continue;
+        const timestamp_ns_t span = end - origin;
+        if(!any || span > longest) longest = span;
+        any = true;
     }
-    return profiler_hub::make_histogram_grid(origin, end, any, max_buckets);
+    // Bucket 0 is each source's own start. The width is the longest source,
+    // which is the span the legacy histogram calls trace_duration. One grid
+    // from the earliest timestamp to the latest makes a multi-node clock gap
+    // the bucket width, and every source then occupies a single bucket.
+    return profiler_hub::make_histogram_grid(0, longest, any, max_buckets);
 }
 
 void
