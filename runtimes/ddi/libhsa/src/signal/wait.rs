@@ -371,7 +371,7 @@ pub(crate) unsafe fn prepare_multi_wait(
     Some(WaitRegistration {
         entries,
         _token: token,
-        stop: runtime.stop_workers.clone(),
+        stop: runtime.operation_stop(),
     })
 }
 

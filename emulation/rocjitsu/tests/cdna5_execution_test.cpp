@@ -2052,6 +2052,15 @@ TEST(Gfx1250ExecutionTest, VMovB16HighVdstMergesIntoLowPhysicalVgpr) {
 
   EXPECT_EQ(cu->read_vgpr(vgpr_base + 1, kLane), 0x00005555u);
   EXPECT_EQ(cu->read_vgpr(vgpr_base + 129, kLane), 0xDEADBEEFu);
+
+  // Copy the high half of v1 to its own low half under partial EXEC.
+  cu->write_vgpr(vgpr_base + 1, 0, 0xCAFE1234u);
+  cu->write_vgpr(vgpr_base + 1, 1, 0xFACE5678u);
+  const std::array<uint32_t, 1> alias_words = {0x7E023981u}; // v_mov_b16_e32 v1.l, v1.h
+  cdna5::VMovB16Vop1 alias_mov(alias_words.data());
+  alias_mov.execute_impl(*wf);
+  EXPECT_EQ(cu->read_vgpr(vgpr_base + 1, 0), 0xCAFECAFEu);
+  EXPECT_EQ(cu->read_vgpr(vgpr_base + 1, 1), 0xFACE5678u);
 }
 
 TEST(Gfx1250ExecutionTest, VNotB16HighVdstMergesIntoLowPhysicalVgpr) {
