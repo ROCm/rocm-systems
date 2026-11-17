@@ -4,6 +4,7 @@
 // Tests for fractional-part and mantissa decomposition.
 
 #include "fp/captured_gfx11_test.h"
+#include "math/older_half_unary_test.h"
 #include "math/unary_test.h"
 #include "rj_arith/detail/rj_arith_math.h"
 
@@ -63,6 +64,7 @@ TEST(MathFrexpMantF16W32Gfx11, Arithmetic) {
 // Check unary math results and semantics/status support across CPU levels.
 TEST(MathFractF16W32Gfx12, Arithmetic) {
   rocjitsu::arith::test::check_unary<32, true, true>(rj_arith_v_fract_f16_w32_gfx12, 9);
+  rocjitsu::arith::test::check_half_fract_rounding<32>(rj_arith_v_fract_f16_w32_gfx12);
 }
 
 // Check unary math results and semantics/status support across CPU levels.
@@ -232,4 +234,18 @@ TEST(MathFractGfx11, CapturedOmodRoundingAndNans) {
   check_captured_gfx11_exact<64, 32>(rj_arith_v_fract_f32_w64, fract_f32_gfx11_lanes);
   check_captured_gfx11_exact<32, 16>(rj_arith_v_fract_f16_w32, fract_f16_gfx11_lanes);
   check_captured_gfx11_exact<64, 16>(rj_arith_v_fract_f16_w64, fract_f16_gfx11_lanes);
+}
+
+// Inherited mantissa mapping retains payload quieting, overlap and unsupported strict modes.
+TEST(MathOlderHalfFrexp, Arithmetic) {
+  rocjitsu::arith::test::check_older_half_unary<32>(rj_arith_v_frexp_mant_f16_w32_gfx908, 4);
+  rocjitsu::arith::test::check_older_half_unary<64>(rj_arith_v_frexp_mant_f16_w64_gfx908, 4);
+}
+
+// Fractional decomposition keeps the inherited special-value and aliasing contract.
+TEST(MathOlderHalfFract, Arithmetic) {
+  rocjitsu::arith::test::check_older_half_unary<32>(rj_arith_v_fract_f16_w32_gfx908, 5);
+  rocjitsu::arith::test::check_half_fract_rounding<32>(rj_arith_v_fract_f16_w32_gfx908);
+  rocjitsu::arith::test::check_older_half_unary<64>(rj_arith_v_fract_f16_w64_gfx908, 5);
+  rocjitsu::arith::test::check_half_fract_rounding<64>(rj_arith_v_fract_f16_w64_gfx908);
 }

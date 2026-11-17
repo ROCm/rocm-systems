@@ -812,6 +812,60 @@ int rj_arith_v_cos_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t i
 int rj_arith_v_cos_f16_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,
                                    uint32_t *excp_flag_user);
+// Older-profile integral rounding always quiets NaNs, preserves selected halves,
+// and accepts DX10_CLAMP_OFF. OMOD requires IEEE=0 and output-denormal flushing;
+// its overflow follows guest rounding and FP16_OVFL. Compatibility and fallback
+// semantics reuse the inherited model; strict exact modes are unqualified.
+// FP status is not produced. Source and destination may overlap.
+int rj_arith_v_trunc_f16_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts);
+
+int rj_arith_v_ceil_f16_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+
+int rj_arith_v_rndne_f16_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts);
+
+int rj_arith_v_floor_f16_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts);
+
+int rj_arith_v_trunc_f16_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts);
+
+int rj_arith_v_ceil_f16_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+
+int rj_arith_v_rndne_f16_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts);
+
+int rj_arith_v_floor_f16_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts);
+
+// Older-profile FREXP mantissas use the same NaN/OMOD/CLAMP policy as the
+// _gfx908 integral operations above. Input-denormal flushing precedes normalization;
+// signed zeros and infinities are preserved. Strict exact modes are unqualified.
+int rj_arith_v_frexp_mant_f16_w32_gfx908(uint64_t flags, uint32_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_frexp_mant_f16_w64_gfx908(uint64_t flags, uint64_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a, uint32_t *trapsts);
+
+// Older-profile fractional parts round under guest MODE before OMOD/CLAMP.
+// NaNs are quieted, infinities produce negative quiet NaN, integer inputs +0.
+// Compatibility inherits the existing model without new strict qualification.
+int rj_arith_v_fract_f16_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts);
+int rj_arith_v_fract_f16_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts);
 
 #ifdef __cplusplus
 } // extern "C"

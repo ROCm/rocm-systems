@@ -562,6 +562,7 @@ add_executable(
     numeric_encoding_regression_test.cpp
     older_conversion32_test.cpp
     older_conversion64_test.cpp
+    older_half_unary_test.cpp
     cdna5_gfx1251_simulation_test.cpp
     cdna5_instruction_test.cpp
     cdna5_sdma_test.cpp

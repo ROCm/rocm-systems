@@ -3723,11 +3723,15 @@ def test_generated_vop3_f16_alu_paths_split_shared_generic_from_true16(
         gfx1250_generated_root / 'vop3_exec_ternary.cpp'
     ).read_text()
 
-    unary = _shared_execute_body(execute_shared, 'v_ceil_f16_vop3', 'v_ceil_f32_vop1')
-    assert 'ROCJITSU_TRY_SIMD_VOP3_UNARY_FP16' in unary
-    assert 'ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16' not in unary
-    assert 'read_vop3_true16_src' not in unary
-    assert 'write_vop3_true16_dst' not in unary
+    # Migrated unary forms use library arithmetic with each profile's operand adapters.
+    assert 'inline void execute_v_ceil_f16_vop3' not in execute_shared
+    unary = _generated_function_body(
+        (amdgpu_generated_root / 'rdna2' / 'vop3_exec.cpp').read_text(),
+        'void VCeilF16Vop3::execute_impl',
+    )
+    assert 'rj_arith_v_ceil_f16_w32_gfx908' in unary
+    assert 'RJ_ARITH_ALU_HIGH_A' not in unary
+    assert 'execute_float_unary16' in unary
 
     binary = _shared_execute_body(execute_shared, 'v_add_f16_vop3', 'v_add_f32_vop2')
     assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(false,' in binary
@@ -4201,6 +4205,15 @@ def test_generated_f16_sdwa_selects_producer_helper(
     """GFX10 arithmetic scales its rounded half at the SDWA store."""
     route, output = generated_f16_sdwa_consumers
     encoding = 'vop2' if instruction == 'V_ADD_F16' else 'vop1'
+    if instruction in {'V_CEIL_F16', 'V_FLOOR_F16'}:
+        source = (output / 'rdna2' / 'vop1_exec.cpp').read_text()
+        class_name = ''.join(word.title() for word in instruction.split('_'))
+        body = _generated_function_body(
+            source, f'void {class_name}Vop1::execute_modifier_impl('
+        )
+        assert 'execute_half_unary_sdwa' in body
+        assert 'rj_arith_v_' + instruction.lower()[2:] + '_w32_gfx908' in body
+        return
     if route == 'shared':
         source = (output / 'shared' / 'execute_shared.h').read_text()
         signature = f'inline void execute_{instruction.lower()}_{encoding}('
@@ -4234,8 +4247,16 @@ def test_generated_f16_sdwa_selects_producer_helper(
 def test_generated_f16_sdwa_rounds_before_omod(
     generated_f16_sdwa_consumers, instruction, encoding
 ):
-    """FRACT/LDEXP round and MIN/MAX select; the SDWA store applies OMOD."""
+    """The rounded half reaches OMOD either in rj-arith or at the SDWA store."""
     route, output = generated_f16_sdwa_consumers
+    if instruction == 'V_FRACT_F16':
+        source = (output / 'rdna2' / 'vop1_exec.cpp').read_text()
+        body = _generated_function_body(
+            source, 'void VFractF16Vop1::execute_modifier_impl('
+        )
+        assert 'execute_half_unary_sdwa' in body
+        assert 'rj_arith_v_fract_f16_w32_gfx908' in body
+        return
     if route == 'shared':
         source = (output / 'shared' / 'execute_shared.h').read_text()
         signature = f'inline void execute_{instruction.lower()}_{encoding}('

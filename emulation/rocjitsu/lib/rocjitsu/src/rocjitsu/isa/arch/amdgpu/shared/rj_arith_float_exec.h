@@ -61,6 +61,19 @@ inline void execute_pseudo_scalar(Wavefront &wave, PseudoScalarFunction function
   wave.raise_alu_causes(causes);
 }
 
+// Forward encoded SDWA modifiers; rj-arith resolves the architecture's numerical policy.
+// Profiles without SDWA instantiate the surrounding generated branch with zero controls.
+template <typename Inst> inline uint64_t sdwa_float_modifiers(const Inst &inst) {
+  if constexpr (requires {
+                  inst.sdwa_omod_;
+                  inst.sdwa_clamp_;
+                }) {
+    return uint64_t(inst.sdwa_omod_) * RJ_ARITH_ALU_OMOD_2 |
+           (inst.sdwa_clamp_ ? RJ_ARITH_ALU_CLAMP : 0u);
+  }
+  return 0;
+}
+
 // Widen the staged SDWA byte before applying the inherited integer destination
 // placement. Capture every source lane before writing an overlapping destination.
 template <typename Inst>
@@ -1074,6 +1087,41 @@ inline uint32_t gfx10_half_binary_causes(const Wavefront &wf, const uint32_t *a,
     }
   }
   return causes;
+}
+
+// Round a staged SDWA half input before applying its output scaling and placement.
+// Integral/mantissa scaling commutes with rounding; FRACT explicitly rounds before scaling.
+// The API applies the effective modifiers; only destination placement remains. D may alias A.
+template <typename Inst>
+inline void execute_half_unary_sdwa(Inst &inst, Wavefront &wave, FloatUnary32Function wave32,
+                                    FloatUnary64Function wave64, uint64_t flags,
+                                    const Operand &destination, const Operand &source) {
+  if (!wave.exec()) {
+    return;
+  }
+  const uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
+  flags = float16_flags(wave, flags, true);
+  RegisterAccess registers(wave);
+  VectorInput32 a(registers, wave, source, wave.exec(), 0x3);
+  if (wave.instruction_execution_failed()) {
+    return;
+  }
+  uint32_t result[64]{};
+  uint32_t *d = result;
+  uint32_t causes = 0;
+  const uint64_t modifiers = sdwa_float_modifiers(inst);
+  const int status = wave.wf_size() == 32
+                         ? wave32(flags, uint32_t(exec_mask), modifiers, &d, &a.data, &causes)
+                         : wave64(flags, exec_mask, modifiers, &d, &a.data, &causes);
+  if (status != RJ_ARITH_SUCCESS) {
+    wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
+    if ((exec_mask >> lane) & 1) {
+      sdwa::write_lane<sdwa::ResultFormat::NONE>(inst, wave, destination, lane, result[lane]);
+    }
+  }
 }
 
 // Extract exponents from staged SDWA sources and apply integer destination placement.
