@@ -3,6 +3,7 @@
 
 #include "rocjitsu/code/consan/image/artifact.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/consan/contract_internal.h"
 #include "rocjitsu/code/consan/image/metadata.h"
 #include "rocjitsu/code/consan/target.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
