@@ -842,6 +842,29 @@ TEST(ArithBridgeTest, FloatFrexpExponentIgnoresGuestRounding) {
 }
 
 // Compatibility uses the legacy classifier even outside mode 3's reporting domain.
+// Suppressed MUL lanes contribute range causes, but not gfx12 INVALID causes.
+TEST(ArithBridgeTest, CompatibilityMulDppSuppressesInvalid) {
+  for (uint32_t input : {0U, 0x7f800123U}) {
+    BridgeFixture f(false, 32);
+    f.wave->set_exec(0x10001);
+    f.wave->set_mode_raw(0xf0);
+    f.wave->set_trapsts(0x40);
+    f.cu->write_vgpr(f.base(), 0, input);
+    f.cu->write_vgpr(f.base() + 1, 0, 0x7f800000U);
+    f.cu->write_vgpr(f.base(), 16, 0x3f800000U);
+    f.cu->write_vgpr(f.base() + 1, 16, 0x3f800000U);
+    f.cu->write_vgpr(f.base() + 2, 0, 0xdeadbeefU);
+    const std::array<uint32_t, 2> words{0x100402fa, 0x2f00e400U};
+    auto instruction = f.decoder->decode_window(words);
+    ASSERT_TRUE(instruction.succeeded());
+    ASSERT_TRUE(f.cu->execute_instruction(instruction.value().get(), *f.wave).succeeded());
+    EXPECT_EQ(f.cu->read_vgpr(f.base() + 2, 0), 0xdeadbeefU);
+    EXPECT_EQ(f.cu->read_vgpr(f.base() + 2, 16), 0x3f800000U);
+    EXPECT_EQ(f.wave->trapsts(), 0x40U);
+    EXPECT_EQ(f.wave->pending_alu_causes(), 0U);
+  }
+}
+
 TEST(ArithBridgeTest, CompatibilityMulDppStatusIncludesWriteSuppressedLanes) {
   // v_mul_f32 v2, v0, v1 with DPP row_mask:2. Lane 0 overflows but cannot
   // write.

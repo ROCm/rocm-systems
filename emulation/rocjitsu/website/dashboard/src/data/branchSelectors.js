@@ -1,13 +1,20 @@
 import { compareRunExecution, commitShaFor } from './runOrdering.js';
 import { selectRunComparison } from './selectors.js';
 
+const finishTime = (run) => Date.parse(run.finishedAt);
+const compareFinish = (left, right) => finishTime(left) - finishTime(right) || String(left.runId).localeCompare(String(right.runId));
+
 export function selectAutomaticReference(data, candidate) {
   const develop = (data.runs ?? []).filter((run) => run.branch === (data.canonicalBranch ?? 'develop'));
   if (candidate?.sourceBase?.branch === (data.canonicalBranch ?? 'develop')) {
-    const exact = develop.filter((run) => commitShaFor(run) === candidate.sourceBase.commit).sort(compareRunExecution).at(-1);
+    const matches = develop.filter((run) => commitShaFor(run) === candidate.sourceBase.commit);
+    // Several attempts can share the recorded base commit: use the one that finished last, and a checkpoint (latest start) only when it is the only kind.
+    const exact = matches.filter((run) => run.finishedAt != null).sort(compareFinish).at(-1) ?? matches.sort(compareRunExecution).at(-1);
     if (exact) return { run: exact, reason: 'exact-base', description: `Exact develop base ${commitShaFor(exact)} · attempt ${exact.runId}` };
   }
-  const earlier = candidate ? develop.filter((run) => Date.parse(run.timestamp) < Date.parse(candidate.timestamp)).sort(compareRunExecution).at(-1) : null;
+  // The baseline is the latest develop result that existed when the candidate started: finished at or before the candidate's start.
+  // A run with no finish record (killed harness, checkpoint) is a partial result and never qualifies.
+  const earlier = candidate ? develop.filter((run) => run.finishedAt != null && finishTime(run) <= Date.parse(candidate.timestamp)).sort(compareFinish).at(-1) : null;
   return earlier ? { run: earlier, reason: 'earlier-develop', description: `Latest develop execution completed before this candidate · attempt ${earlier.runId}` }
     : { run: null, reason: 'unavailable', description: 'No published develop reference is available for this candidate.' };
 }
