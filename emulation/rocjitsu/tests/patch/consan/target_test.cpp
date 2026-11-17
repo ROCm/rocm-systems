@@ -12,6 +12,7 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/target_registry.h"
+#include "util/diagnostic.h"
 
 #include <gtest/gtest.h>
 
@@ -140,12 +141,12 @@ TEST_P(ConSanTargetStatic, QualifiedBarriersPreserveOriginalOperations) {
               std::string_view(fixture) == "native-24" ? 3u : 2u);
     EXPECT_EQ(artifact.value().manifest.barriers.size(),
               std::string_view(fixture) == "native-24" ? 2u : 1u);
-    ContractError contract_error;
+    util::StringDiagnostic contract_error;
     const FailureOr<std::vector<uint8_t>> encoded =
-        encode_manifest(artifact.value().manifest, &contract_error);
-    ASSERT_TRUE(encoded.succeeded()) << contract_error.message;
-    const FailureOr<Manifest> decoded = decode_manifest(encoded.value(), &contract_error);
-    ASSERT_TRUE(decoded.succeeded()) << contract_error.message;
+        encode_manifest(artifact.value().manifest, contract_error.emitter());
+    ASSERT_TRUE(encoded.succeeded()) << contract_error.message();
+    const FailureOr<Manifest> decoded = decode_manifest(encoded.value(), contract_error.emitter());
+    ASSERT_TRUE(decoded.succeeded()) << contract_error.message();
     EXPECT_EQ(decoded.value(), artifact.value().manifest);
     for (const BarrierFacts &barrier : artifact.value().manifest.barriers) {
       EXPECT_EQ(barrier.completion_probe, barrier.prepared_wait + 4);
@@ -176,11 +177,11 @@ TEST_P(ConSanTargetStatic, BarrierFactsRequireQualifiedMappingsScopeAndLaunch) {
       prepare(original, target, "lds_producer_consumer", error);
   ASSERT_TRUE(artifact.succeeded()) << error.message;
   const Manifest &manifest = artifact.value().manifest;
-  ContractError contract_error;
+  util::StringDiagnostic contract_error;
   EXPECT_TRUE(plan_launch(manifest, {{mode.wave_size, 1, 1}, {mode.wave_size, 1, 1}}, 128, 0,
-                          &contract_error)
+                          contract_error.emitter())
                   .failed());
-  EXPECT_EQ(contract_error.code, ContractErrorCode::UnsupportedLaunch);
+  EXPECT_EQ(contract_error.message(), "barrier profile requires at least two waves per workgroup");
   Manifest invalid = manifest;
   invalid.barriers.front().original_signal += 4;
   EXPECT_TRUE(validate_manifest(invalid).failed());
@@ -518,11 +519,11 @@ TEST_P(ConSanTargetStatic, EquivalentMetadataEnvironmentsPreserveTargetAndAbiVal
     const FailureOr<PreparedArtifact> prepared =
         prepare(original, target, "lds_producer_consumer", error);
     ASSERT_TRUE(prepared.succeeded()) << error.message;
-    ContractError image_error;
+    util::StringDiagnostic image_error;
     ASSERT_TRUE(verify_artifact_images(prepared.value().manifest, original, prepared.value().image,
-                                       &image_error)
+                                       image_error.emitter())
                     .succeeded())
-        << image_error.message;
+        << image_error.message();
     if (fixture == "native-1")
       continue;
 
@@ -564,7 +565,8 @@ TEST_P(ConSanTargetStatic, EquivalentMetadataEnvironmentsPreserveTargetAndAbiVal
           Manifest manifest = prepared.value().manifest;
           manifest.prepared.sha256 = digest(image);
           ASSERT_TRUE(match_images(manifest, original, image).succeeded());
-          EXPECT_TRUE(verify_artifact_images(manifest, original, image, &image_error).failed());
+          EXPECT_TRUE(
+              verify_artifact_images(manifest, original, image, image_error.emitter()).failed());
         } else {
           EXPECT_TRUE(build_input_program(image, target, "lds_producer_consumer", error).failed());
           EXPECT_NE(error.message.find("metadata"), std::string::npos);
@@ -597,12 +599,13 @@ TEST_P(ConSanTargetStatic, PreparedCdnaDescriptorMustAllocateItsDeclaredOrdinary
                        granules - 1);
     ASSERT_TRUE(wire::write_u32(artifact.image, offset, changed));
     artifact.manifest.prepared.sha256 = digest(artifact.image);
-    ContractError image_error;
+    util::StringDiagnostic image_error;
     ASSERT_TRUE(match_images(artifact.manifest, original, artifact.image).succeeded());
-    EXPECT_EQ(verify_artifact_images(artifact.manifest, original, artifact.image, &image_error)
-                  .succeeded(),
-              granules * 8 >= required + 6) // Six ABI special-register tail slots.
-        << "granules=" << granules << ": " << image_error.message;
+    EXPECT_EQ(
+        verify_artifact_images(artifact.manifest, original, artifact.image, image_error.emitter())
+            .succeeded(),
+        granules * 8 >= required + 6) // Six ABI special-register tail slots.
+        << "granules=" << granules << ": " << image_error.message();
   }
 }
 
@@ -647,11 +650,11 @@ TEST_P(ConSanTargetStatic, AssemblyLoweringPreservesConcreteIdentityAndLoadableI
     ASSERT_TRUE(prepared.succeeded()) << error.message;
     EXPECT_EQ(prepared.value().manifest.target, target->id);
     EXPECT_EQ(prepared.value().manifest.wave_size, mode.wave_size);
-    ContractError image_error;
+    util::StringDiagnostic image_error;
     EXPECT_TRUE(verify_artifact_images(prepared.value().manifest, original, prepared.value().image,
-                                       &image_error)
+                                       image_error.emitter())
                     .succeeded())
-        << image_error.message;
+        << image_error.message();
     const FailureOr<std::vector<uint8_t>> encoded = encode_manifest(prepared.value().manifest);
     ASSERT_TRUE(encoded.succeeded());
     const FailureOr<Manifest> decoded = decode_manifest(encoded.value());
@@ -703,9 +706,10 @@ TEST_P(ConSanTargetStatic, GdsAndAccumulatorAliasingAreRejectedAtTheirActualBoun
   std::memcpy(artifact.image.data() + kernels[0].descriptor_file_offset, &descriptor,
               sizeof(descriptor));
   artifact.manifest.prepared.sha256 = digest(artifact.image);
-  ContractError image_error;
+  util::StringDiagnostic image_error;
   EXPECT_TRUE(
-      verify_artifact_images(artifact.manifest, original, artifact.image, &image_error).failed());
+      verify_artifact_images(artifact.manifest, original, artifact.image, image_error.emitter())
+          .failed());
 }
 
 TEST_P(ConSanTargetStatic, HipWorkloadsMustContainQualifiedNativeLdsSites) {
@@ -759,7 +763,7 @@ TEST(ConSanBoundedStatic, BindOriginalWorkgroupInputAndRejectForgedIdentityFacts
       const uint32_t selector = ttmp ? 117u : 15u;
       EXPECT_EQ(artifact.value().manifest.entry.workgroup_id_scalar,
                 identity ? selector : UINT32_MAX);
-      ContractError contract_error;
+      util::StringDiagnostic contract_error;
       const uint32_t threads = 2 * mode.wave_size + 1;
       EXPECT_EQ(plan_launch(artifact.value().manifest, {{4 * threads, 1, 1}, {threads, 1, 1}}, 8, 0)
                     .succeeded(),
@@ -769,9 +773,11 @@ TEST(ConSanBoundedStatic, BindOriginalWorkgroupInputAndRejectForgedIdentityFacts
       Manifest forged = artifact.value().manifest;
       forged.entry.workgroup_id_scalar = identity ? UINT32_MAX : selector;
       ASSERT_TRUE(match_images(forged, original, artifact.value().image).succeeded());
-      EXPECT_TRUE(verify_artifact_images(forged, original, artifact.value().image, &contract_error)
-                      .failed());
-      EXPECT_EQ(contract_error.code, ContractErrorCode::IdentityMismatch);
+      EXPECT_TRUE(
+          verify_artifact_images(forged, original, artifact.value().image, contract_error.emitter())
+              .failed());
+      EXPECT_EQ(contract_error.message(),
+                "artifact workgroup-X input differs from its binding facts");
     }
 }
 
