@@ -13,6 +13,9 @@
 #include "rings.h"
 #include "topo.h"
 #include "bootstrap.h"
+#if !defined(TOPO_EXPL)
+#include "bootstrap_agree.h"
+#endif
 #include "rccl_graph_gen.h"
 
 #include <stdio.h>      // For NULL and
@@ -30,14 +33,9 @@ ncclResult_t ncclTopoReconcileGrowChannels(struct ncclComm* comm, int* value) {
   (void)value;
   return ncclSuccess;
 #else
-  int* perRank = NULL;
-  NCCLCHECK(ncclCalloc(&perRank, comm->nRanks));
-  perRank[comm->rank] = *value;
-  ncclResult_t ret = bootstrapAllGather(comm->bootstrap, perRank, sizeof(int));
-  if (ret == ncclSuccess)
-    for (int r = 0; r < comm->nRanks; r++) *value = std::min(*value, perRank[r]);
-  free(perRank);
-  return ret;
+  return ncclBootstrapAgree(comm, *value, [&](int const* perRank, int nRanks) {
+    for (int r = 0; r < nRanks; r++) *value = std::min(*value, perRank[r]);
+  });
 #endif
 }
 

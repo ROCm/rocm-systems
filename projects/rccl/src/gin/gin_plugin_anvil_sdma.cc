@@ -13,7 +13,7 @@
  */
 
 #include "gin/gin_host_anvil_sdma.h"
-#include "gin/gin_bootstrap_agree.h"
+#include "bootstrap_agree.h"
 #include "algorithms/dda/fabric/fabric_mem_handler.h"
 #include "alloc.h"
 #include "gin/gin_anvil_conn_check.h"
@@ -110,11 +110,11 @@ static void ginAnvilFabricRefDropLocked(GinAnvilFabricKey const& key) {
 // "Did every rank succeed?" over comm->bootstrap. ncclSystemError means the
 // allgather ran and at least one rank voted no; any other non-success return is
 // the allgather's own failure. Buffer sizing/indexing lives in
-// ncclGinBootstrapAgree: GIN rail teams can have cctx->nranks != comm->nRanks,
+// ncclBootstrapAgree: GIN rail teams can have cctx->nranks != comm->nRanks,
 // and bootstrapAllGather always indexes by comm->rank.
 static ncclResult_t ginAnvilAllgatherOk(struct ncclComm* comm, int localOk) {
   int allOk = 1;
-  NCCLCHECK(ncclGinBootstrapAgreeAll(comm, localOk, &allOk));
+  NCCLCHECK(ncclBootstrapAgreeAll(comm, localOk, &allOk));
   return allOk ? ncclSuccess : ncclSystemError;
 }
 
@@ -132,24 +132,23 @@ static ncclResult_t ginAnvilAllgatherFabricVote(struct ncclComm* comm, GinAnvilF
                                                 int* allPublished) {
   int allOk = 1;
   int published = 1;
-  ncclResult_t ret =
-      ncclGinBootstrapAgree(comm, local, [&allOk, &published](GinAnvilFabricVote const* votes, int n) {
-        for (int i = 0; i < n; i++) {
-          if (!votes[i].ok) allOk = 0;
-        }
-        if (!allOk) return;
-        for (int i = 1; i < n; i++) {
-          if (votes[i].offset != votes[0].offset) {
-            WARN("GIN anvil-sdma fabric: VMM offset mismatch (rank0=%llu rank%d=%llu)",
-                 (unsigned long long)votes[0].offset, i, (unsigned long long)votes[i].offset);
-            allOk = 0;
-            return;
-          }
-        }
-        for (int i = 0; i < n; i++) {
-          if (!votes[i].published) published = 0;
-        }
-      });
+  ncclResult_t ret = ncclBootstrapAgree(comm, local, [&allOk, &published](GinAnvilFabricVote const* votes, int n) {
+    for (int i = 0; i < n; i++) {
+      if (!votes[i].ok) allOk = 0;
+    }
+    if (!allOk) return;
+    for (int i = 1; i < n; i++) {
+      if (votes[i].offset != votes[0].offset) {
+        WARN("GIN anvil-sdma fabric: VMM offset mismatch (rank0=%llu rank%d=%llu)", (unsigned long long)votes[0].offset,
+             i, (unsigned long long)votes[i].offset);
+        allOk = 0;
+        return;
+      }
+    }
+    for (int i = 0; i < n; i++) {
+      if (!votes[i].published) published = 0;
+    }
+  });
   if (allPublished) *allPublished = (ret == ncclSuccess) ? published : 0;
   if (ret != ncclSuccess) return ret;
   return allOk ? ncclSuccess : ncclSystemError;
@@ -443,7 +442,7 @@ static ncclResult_t ginAnvilConnect(void* ctx, void* handles[], int nranks, int 
   if (ginAnvilFabricMemCapable(cctx->comm)) {
     const int localFabricMem = ginAnvilUseFabricMem(cctx->comm) ? 1 : 0;
     int allFabricMem = 0;
-    if (ncclGinBootstrapAgreeAll(cctx->comm, localFabricMem, &allFabricMem) != ncclSuccess) {
+    if (ncclBootstrapAgreeAll(cctx->comm, localFabricMem, &allFabricMem) != ncclSuccess) {
       WARN("GIN anvil-sdma: fabric registration vote failed");
       delete cctx;
       return ncclSystemError;

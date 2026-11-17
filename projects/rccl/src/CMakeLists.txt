@@ -197,6 +197,7 @@ set(SRC_FILES
   include/argcheck.h
   include/bitops.h
   include/bootstrap.h
+  include/bootstrap_agree.h
   include/ce_coll.h
   include/ce_fault_inject.h
   include/channel.h
@@ -248,7 +249,6 @@ set(SRC_FILES
   include/gin/gin_host_rocshmem_gda.h
   include/gin/gin_rocshmem_gda_factory.h
   include/gin/gin_type_env.h
-  include/gin/gin_bootstrap_agree.h
   include/dv_dlopen.h
   include/gin/gin_anvil_sdma_factory.h
   include/git_version.h

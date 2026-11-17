@@ -4,12 +4,17 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// One bootstrap all-gather + caller-supplied reduction, shared by the GIN
-// Anvil-SDMA setup paths that have to agree a decision across every rank.
-// Internal header: not installed, not part of any public surface.
+// One bootstrap all-gather plus a caller-supplied reduction. Sits next to
+// bootstrapAllGather. Internal header: not installed, not part of any public
+// surface.
+//
+// Callers that used to open-code this: channel-count grow
+// (ncclTopoReconcileGrowChannels), the GIN connection count in gin_host.cc,
+// the RMA connection count in rma_proxy.cc, and the Anvil-SDMA fabric
+// registration votes.
 
-#ifndef NCCL_GIN_BOOTSTRAP_AGREE_H_
-#define NCCL_GIN_BOOTSTRAP_AGREE_H_
+#ifndef NCCL_BOOTSTRAP_AGREE_H_
+#define NCCL_BOOTSTRAP_AGREE_H_
 
 #ifdef __cplusplus
 
@@ -31,7 +36,7 @@
 // succeeded, so a caller that reduces into an out-param must treat a non-
 // ncclSuccess return as "no decision", not as a negative vote.
 template <typename T, typename ReduceFn>
-static inline ncclResult_t ncclGinBootstrapAgree(struct ncclComm* comm, T const& local, ReduceFn reduce) {
+static inline ncclResult_t ncclBootstrapAgree(struct ncclComm* comm, T const& local, ReduceFn reduce) {
   if (comm == nullptr || comm->nRanks < 1) return ncclInternalError;
   const int nRanks = comm->nRanks;
   const int rank = comm->rank;
@@ -47,9 +52,9 @@ static inline ncclResult_t ncclGinBootstrapAgree(struct ncclComm* comm, T const&
 }
 
 // AND-reduces one int flag per rank. *allOk is written only on ncclSuccess.
-static inline ncclResult_t ncclGinBootstrapAgreeAll(struct ncclComm* comm, int localOk, int* allOk) {
+static inline ncclResult_t ncclBootstrapAgreeAll(struct ncclComm* comm, int localOk, int* allOk) {
   int agreed = 1;
-  ncclResult_t ret = ncclGinBootstrapAgree(comm, localOk ? 1 : 0, [&agreed](int const* votes, int n) {
+  ncclResult_t ret = ncclBootstrapAgree(comm, localOk ? 1 : 0, [&agreed](int const* votes, int n) {
     for (int i = 0; i < n; i++) {
       if (!votes[i]) agreed = 0;
     }
@@ -61,4 +66,4 @@ static inline ncclResult_t ncclGinBootstrapAgreeAll(struct ncclComm* comm, int l
 
 #endif // __cplusplus
 
-#endif // NCCL_GIN_BOOTSTRAP_AGREE_H_
+#endif // NCCL_BOOTSTRAP_AGREE_H_
