@@ -149,9 +149,6 @@ class TestSet(TestCliBase):
                     continue
                 if sensor["min_power_limit"] == "N/A" or sensor["max_power_limit"] == "N/A":
                     continue
-                current = sensor["socket_power_limit"]
-                if isinstance(current, dict) and current["value"] == 0:
-                    continue
                 has_power_cap = True
             cmds.append(
                 (

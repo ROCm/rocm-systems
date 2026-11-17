@@ -121,13 +121,13 @@ class TestCliSetRestore(unittest.TestCase):
 
     def test_supported_power_cap_rejects_not_supported_reset(self) -> None:
         limits = self.sweep.static_data["gpu_data"][0]["limit"]
-        for power_type in ("ppt0", "ppt1"):
-            with self.subTest(power_type=power_type):
+        for power_type, current in (("ppt0", 291), ("ppt1", 291), ("ppt0", 0)):
+            with self.subTest(power_type=power_type, current=current):
                 limits.update(ppt0="N/A", ppt1="N/A")
                 limits[power_type] = {
                     "min_power_limit": {"value": 261, "unit": "W"},
                     "max_power_limit": {"value": 350, "unit": "W"},
-                    "socket_power_limit": {"value": 291, "unit": "W"},
+                    "socket_power_limit": {"value": current, "unit": "W"},
                 }
                 self.sweep.static_data["gpu_data"][0]["limit"] = limits
                 self._restore(self._remaining_commands())
@@ -139,15 +139,7 @@ class TestCliSetRestore(unittest.TestCase):
                     self._run_restore()
 
     def test_unsettable_power_cap_allows_not_supported_reset(self) -> None:
-        for sensor in (
-            "N/A",
-            {"min_power_limit": "N/A", "max_power_limit": "N/A"},
-            {
-                "min_power_limit": {"value": 100},
-                "max_power_limit": {"value": 300},
-                "socket_power_limit": {"value": 0},
-            },
-        ):
+        for sensor in ("N/A", {"min_power_limit": "N/A", "max_power_limit": "N/A"}):
             with self.subTest(sensor=sensor):
                 self.sweep.static_data["gpu_data"][0]["limit"]["ppt0"] = sensor
                 self._mock_commands(
