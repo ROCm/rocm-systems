@@ -6899,6 +6899,10 @@ private:
     const bool track_masks = requires_active_lane || weakened || track_async_issue ||
                              cyclic_guard || expert ||
                              scratch_guard ||
+                             // GFX10 memory sources issue even with empty EXEC. Track branch
+                             // masks to reject infeasible paths without requiring active lanes.
+                             (event.kind == WaitEventKind::Gfx10ScalarSource &&
+                              current_kernel_ && wavefront_size_ == 32 && cfg_has_exec_guards_) ||
                              (!before_target && event.kind == WaitEventKind::Smem &&
                               event.counter != WaitCounterKind::X && current_kernel_ &&
                               wavefront_size_ == 32 && cfg_has_mask_branches_);
