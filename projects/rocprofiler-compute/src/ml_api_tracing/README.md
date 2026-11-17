@@ -17,6 +17,10 @@ GPU kernels they launch, and for the analyze options that read the result.
   - `pass_matching.py` joins markers and dispatches and matches operator calls
     across profiling passes.
   - `call_tree.py` nests the markers into call trees and adds up kernel stats.
+  - `selection.py` finds the operators that match `--operator` and the
+    dispatches they launched.
+  - `output.py` prints the operator call tree, the matched-operator report and
+    the operator summary table.
   - `operator_patterns.py` matches `--list-operators` and `--operator` to the
     frameworks a workload traced.
 

@@ -19,6 +19,8 @@ and leaves call-tree construction to analysis.
 | [trace_csv.py](../../src/ml_api_tracing/analyze/trace_csv.py) | Marker and counter file discovery and CSV loading |
 | [pass_matching.py](../../src/ml_api_tracing/analyze/pass_matching.py) | Joining passes, parsing markers, and matching operator calls across passes |
 | [call_tree.py](../../src/ml_api_tracing/analyze/call_tree.py) | Nesting, launcher attachment, traversal, and statistical rollup |
+| [output.py](../../src/ml_api_tracing/analyze/output.py) | Operator listing and matched-operator reports, summary table and terminal formatting |
+| [selection.py](../../src/ml_api_tracing/analyze/selection.py) | Matches `--operator` patterns to operators and maps their kernels to dispatches |
 | [torch_trace_collector.cpp](../../src/lib/torch_trace_collector/torch_trace_collector.cpp) | Process-wide callback installation, range lifetime, and launcher debug info |
 | [argument_capture.cpp](../../src/lib/torch_trace_collector/argument_capture.cpp) | Bounded input rendering and schema-name lookup |
 | [wire_format.h](../../src/lib/torch_trace_collector/wire_format.h) | Native marker serialization |
@@ -180,6 +182,14 @@ disagreement across passes. Coverage issues warn during join and attach, and
 the forest continues: unmatched dispatches, attach failures, and unlocated
 roots in `KNOWN_ML_API_BACKENDS` with no launcher thread. Plain analyze
 without those flags does not join and does not report those conditions.
+
+Analyze matches the `--list-operators` and `--operator` patterns against the
+frameworks each workload recorded in its `trace_ml_api` setting. Listing takes
+precedence over filtering. A bare `--list-operators` lists every operator. When
+a framework matches, the report keeps that framework's kernels below the match
+and the operators above it, without the kernels of those parent operators. When
+a user region matches, the report keeps everything below it. The kernel ids in
+the reports are the row numbers of the top-kernel table.
 
 ## Plain-C interface
 

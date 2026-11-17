@@ -90,7 +90,7 @@ exit during parse.
 
 ## Analysis path
 
-Profile copies marker CSVs unchanged. `--list-*-operators` / `--*-operator`
+Profile copies marker CSVs unchanged. `--list-operators` / `--operator`
 rename on-disk `Correlation_Id` to `Correlation_ID` and join each pass on
 `Correlation_ID` and `GUID`, parse Function, then nest marker intervals
 per `Thread_Id`.
