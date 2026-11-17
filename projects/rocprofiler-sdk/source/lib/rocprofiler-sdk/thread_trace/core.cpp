@@ -829,6 +829,19 @@ finalize()
     ROCP_TRACE << "Finalize called";
     for(auto& ctx : context::get_registered_contexts())
     {
+        // A forked child inherits the tracers but not their producer/consumer threads, queues or
+        // signals. Stopping them would join threads that only exist in the parent, or wait on a
+        // stop packet that never runs, and hang the child at exit. Leak them, as the other
+        // services do (see internal_threading::fork_stale()).
+        if(internal_threading::fork_stale())
+        {
+            auto* mctx = context::get_mutable_registered_context(
+                rocprofiler_context_id_t{.handle = ctx->context_idx});
+            if(mctx) (void) mctx->device_thread_trace.release();
+            if(mctx) (void) mctx->dispatch_thread_trace.release();
+            continue;
+        }
+
         if(ctx->device_thread_trace) ctx->device_thread_trace->resource_deinit();
         if(ctx->dispatch_thread_trace) ctx->dispatch_thread_trace->resource_deinit();
     }

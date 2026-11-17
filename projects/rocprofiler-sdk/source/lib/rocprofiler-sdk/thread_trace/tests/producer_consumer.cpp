@@ -723,10 +723,18 @@ TEST(thread_trace, gpu_full_disables_queue)
     test_init();
 
     // Overflow before any GPU payload is copied, then after one chunk reaches
-    // CPU memory. Pending CPU data must still be delivered.
-    auto fetch_cb = [](rocprofiler_thread_trace_shader_data_t shader_data,
+    // CPU memory. Pending CPU data must still be delivered, followed by an
+    // empty END chunk flagged with the overflow.
+    static std::atomic<int> ends{0};
+    auto                    fetch_cb = [](rocprofiler_thread_trace_shader_data_t shader_data,
                        rocprofiler_user_data_t                userdata) {
-        EXPECT_FALSE(shader_data.flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END);
+        if(shader_data.flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END)
+        {
+            EXPECT_TRUE(shader_data.flags &
+                        ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_GPU_BUFFER_FULL);
+            EXPECT_EQ(shader_data.data_size, 0);
+            ++ends;
+        }
         static_cast<std::atomic<size_t>*>(userdata.ptr)->fetch_add(shader_data.data_size);
     };
 
@@ -740,6 +748,7 @@ TEST(thread_trace, gpu_full_disables_queue)
     {
         SCOPED_TRACE(copied_buffers);
         submissions       = 0;
+        ends              = 0;
         auto received     = std::atomic<size_t>{0};
         auto queries      = 0;
         auto input_buffer = std::vector<char>(MOCK_BUFFER_SIZE);
@@ -759,6 +768,7 @@ TEST(thread_trace, gpu_full_disables_queue)
         // Queries and successful swaps only: no final stop or restart.
         EXPECT_EQ(submissions.load(), 2 * copied_buffers + 1);
         EXPECT_EQ(received.load(), 32 + copied_buffers * MOCK_BUFFER_SIZE);  // Header + CPU data.
+        EXPECT_EQ(ends.load(), 1);
         EXPECT_FALSE(att_queue_enabled(*threads.mock_queue));
 
         // Later markers/restarts must not reach the backend or leave an unsignaled wait.

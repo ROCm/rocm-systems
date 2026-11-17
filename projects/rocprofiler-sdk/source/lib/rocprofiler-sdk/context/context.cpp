@@ -78,6 +78,15 @@ using context_snapshot_ptr_t = std::shared_ptr<const registered_context_storage>
 
 constexpr auto invalid_client_idx = std::numeric_limits<uint32_t>::max();
 
+// Agents whose SQTT hardware a context programs, for either dispatch or device thread trace.
+std::unordered_set<rocprofiler_agent_id_t>
+get_thread_trace_agents(const context& ctx)
+{
+    if(ctx.dispatch_thread_trace) return ctx.dispatch_thread_trace->configured_agents();
+    if(ctx.device_thread_trace) return ctx.device_thread_trace->configured_agents();
+    return {};
+}
+
 uint64_t
 get_contexts_offset()
 {
@@ -537,6 +546,14 @@ start_context(rocprofiler_context_id_t context_id)
         // its way out, or hand back a slot that the stop is about to clear.
         wait_for_stopping_contexts(_lk);
 
+        const auto att_agents       = get_thread_trace_agents(*cfg);
+        auto       att_agents_clash = [&att_agents](const context& other) {
+            if(att_agents.empty()) return false;
+            for(auto agent_id : get_thread_trace_agents(other))
+                if(att_agents.count(agent_id) > 0) return true;
+            return false;
+        };
+
         auto current_contexts = context_array_t{};
         for(const auto* itr : get_active_contexts(current_contexts))
         {
@@ -561,12 +578,11 @@ start_context(rocprofiler_context_id_t context_id)
                 // sets of GPU agents. A context with no agent restriction claims every agent.
                 return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
             }
-            else if(cfg->dispatch_thread_trace && itr->dispatch_thread_trace &&
-                    cfg->dispatch_thread_trace->intersects(*itr->dispatch_thread_trace))
+            else if(att_agents_clash(*itr))
             {
-                // Two dispatch ATT contexts can run concurrently as long as they target disjoint
-                // sets of GPU agents. Overlapping agent sets would cross-talk in
-                // post_kernel_call.
+                // Two thread trace contexts (dispatch or device) can run concurrently as long as
+                // they target disjoint sets of GPU agents. Both program the same per-agent SQTT
+                // hardware, so overlapping agent sets would corrupt each other's traces.
                 return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
             }
         }

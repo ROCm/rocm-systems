@@ -209,24 +209,36 @@ ToolData::get(pcinfo_t _pc)
             for(auto addr = addr_range.addr; addr < addr_range.addr + addr_range.size;)
             {
                 pcinfo_t info{.address = addr, .code_object_id = addr_range.id};
-                auto& cline = *(isa_map.emplace(info, std::make_unique<CodeLine>()).first->second);
+                auto [it, inserted] = isa_map.emplace(info, std::make_unique<CodeLine>());
+                auto& cline         = *it->second;
 
-                cline.line_number         = isa_map.size() + cfile->kernel_names.size() - 1;
-                cfile->line_numbers[info] = cline.line_number;
+                // Lines kept from an earlier, partial disassembly keep their number.
+                if(inserted)
+                {
+                    cline.line_number         = isa_map.size() + cfile->kernel_names.size() - 1;
+                    cfile->line_numbers[info] = cline.line_number;
+                }
 
                 cline.code_line = cfile->table->get(addr_range.id, addr);
+                if(!cline.code_line || cline.code_line->size == 0u)
+                    throw std::invalid_argument("Missing or empty instruction!");
                 addr += cline.code_line->size;
-                if(cline.code_line->size == 0u) throw std::invalid_argument("Line has 0 bytes!");
             }
 
             if(isa_map.find(_pc) != isa_map.end()) return *isa_map.at(_pc);
         } catch(std::exception& e)
         {}
 
-    auto& cline = *(isa_map.emplace(_pc, std::make_unique<CodeLine>()).first->second);
+    // _pc may already be in the map from a partial disassembly above.
+    auto [it, inserted] = isa_map.emplace(_pc, std::make_unique<CodeLine>());
+    auto& cline         = *it->second;
 
-    cline.line_number        = isa_map.size();
-    cfile->line_numbers[_pc] = cline.line_number;
+    // Same numbering as above, so fallback lines never collide with kernel lines.
+    if(inserted)
+    {
+        cline.line_number        = isa_map.size() + cfile->kernel_names.size() - 1;
+        cfile->line_numbers[_pc] = cline.line_number;
+    }
 
     cline.code_line = cfile->table->get(_pc.code_object_id, _pc.address);
 

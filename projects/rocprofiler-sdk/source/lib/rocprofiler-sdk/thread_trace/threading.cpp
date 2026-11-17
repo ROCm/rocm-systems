@@ -220,9 +220,18 @@ producer_loop(
         buffer.end_timestamp   = end_ts;
 
         if(!isHeader)
-            parameters.copy_data_fn(queue, buffer.memory, src, size);
+        {
+            if(!parameters.copy_data_fn(queue, buffer.memory, src, size))
+            {
+                ROCP_CI_LOG(ERROR) << "Discarding ATT chunk " << buffer.chunk_index << ": copy of "
+                                   << size << " bytes failed";
+                buffer.size = 0;
+            }
+        }
         else
+        {
             std::memcpy(buffer.memory, src, size);
+        }
 
         auto copy_time = (std::chrono::system_clock::now() - t0).count() * 1E-9f;
         ROCP_TRACE << "Copy: " << copy_time << " s. BW: " << size / copy_time;
@@ -249,11 +258,21 @@ producer_loop(
         return true;
     };
 
+    // Consumers rely on every trace segment ending with an END chunk. Early exits that did not
+    // drain send an empty one on the way out (see `finish`).
+    // TODO: multi-SE triple buffering (users/gbaraldi/multiplese) rewrites this loop with one
+    // buffering packet and chunk sequence per SE. When it lands, segment_ended must become per SE
+    // and `finish` must send an empty END (plus GPU_BUFFER_FULL after an overflow) to every SE
+    // that did not drain. The copy-failure check in send_to_consumer must also be kept.
+    bool segment_ended = false;
+    int  exit_flags    = ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END;
+
     // Drain remaining ATT data after a stop; waits for a free slot to land it in.
     auto iterate_trace = [&]() {
-        size_t idx   = wait_for_free_slot();
-        auto   wptr  = iterate_data(buffer_packet);
-        auto   clock = buffer_packet.get_gpu_clock();
+        segment_ended = true;
+        size_t idx    = wait_for_free_slot();
+        auto   wptr   = iterate_data(buffer_packet);
+        auto   clock  = buffer_packet.get_gpu_clock();
         if(current_ts.gpu_clock == 0) current_ts = convert_timestamp(queue.agent_id, clock.start);
         auto end_ts = convert_timestamp(queue.agent_id, clock.latest);
         buffer_packet.reset_current_buffer();
@@ -279,6 +298,7 @@ producer_loop(
 
     auto send_header = [&] {
         ROCP_INFO << "Restarting the trace!";
+        segment_ended = false;
         if(buffer_packet.header == 0) return;
 
         size_t hidx = wait_for_free_slot();
@@ -292,6 +312,9 @@ producer_loop(
     send_header();
 
     auto finish = common::scope_destructor{[&] {
+        if(!segment_ended)
+            send_to_consumer(nullptr, 0, exit_flags, wait_for_free_slot(), false, 0, current_ts);
+
         // Wake consumers on every exit; they drain filled slots before returning.
         parameters.shared->stopping.store(true);
         for(size_t i = 0; i < num_buffers; i++)
@@ -332,6 +355,7 @@ producer_loop(
                               "packets on this queue, including stop/restart. Tracing will not "
                               "resume on this queue; already-copied CPU data will still be "
                               "delivered.";
+                exit_flags |= ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_GPU_BUFFER_FULL;
                 return;
             }
 
