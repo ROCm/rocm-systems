@@ -864,9 +864,9 @@ void hipFileBatchIODestroy(hipFileBatchHandle_t batch_idp);
  *       holds the number of bytes read, or a negative value if the read failed.
  *       Keep `size_p`, `file_offset_p`, `buffer_offset_p`, and `bytes_read_p`
  *       valid until then. If the call returns an error, nothing was queued.
- * @note `hipStreamPerThread` is synchronous too. Any other stream that isn't
- *       registered is registered implicitly, with no flags; deregister it before
- *       destroying it.
+ * @note `hipStreamPerThread` is synchronous too. Async I/O on any other
+ *       unregistered stream runs without registering it; registering a stream with
+ *       `hipFileStreamRegister()` is optional and only improves performance.
  * @note hipFile reserves the device's greatest stream priority for its fallback
  *       I/O. A stream created at that priority returns `hipFileAsyncNotSupported`,
  *       unless the device has only one priority level.
@@ -896,9 +896,9 @@ hipFileError_t hipFileReadAsync(hipFileHandle_t fh, void *buffer_base, size_t *s
  *       holds the number of bytes written, or a negative value if the write failed.
  *       Keep `size_p`, `file_offset_p`, `buffer_offset_p`, and `bytes_written_p`
  *       valid until then. If the call returns an error, nothing was queued.
- * @note `hipStreamPerThread` is synchronous too. Any other stream that isn't
- *       registered is registered implicitly, with no flags; deregister it before
- *       destroying it.
+ * @note `hipStreamPerThread` is synchronous too. Async I/O on any other
+ *       unregistered stream runs without registering it; registering a stream with
+ *       `hipFileStreamRegister()` is optional and only improves performance.
  * @note hipFile reserves the device's greatest stream priority for its fallback
  *       I/O. A stream created at that priority returns `hipFileAsyncNotSupported`,
  *       unless the device has only one priority level.
@@ -917,11 +917,10 @@ hipFileError_t hipFileWriteAsync(hipFileHandle_t fh, void *buffer_base, size_t *
  * @param [in] flags Flags that can optimize stream processing if parameters
  *                   are known/are aligned at time of request submission
  *
- * @note Registration is optional: asynchronous I/O registers an unregistered
- *       stream implicitly, with no flags. Registering a stream that was registered
- *       implicitly applies `flags` to later requests. Registering the default
- *       stream (a NULL handle or `hipStreamPerThread`) does nothing and returns
- *       success.
+ * @note Registration is an optional optimization: asynchronous I/O on an
+ *       unregistered stream runs without registering it, on a slower path.
+ *       Registering the default stream (a NULL handle or `hipStreamPerThread`)
+ *       does nothing and returns success.
  * @note hipFile reserves the device's greatest stream priority for its fallback
  *       I/O. Registering a stream created at that priority returns
  *       `hipFileInvalidValue`, unless the device has only one priority level.
@@ -937,12 +936,12 @@ hipFileError_t hipFileStreamRegister(hipStream_t stream, unsigned flags);
  *
  * @param [in] stream \hipstream_param
  *
- * @note Deregister every stream used for asynchronous I/O, including one that was
- *       registered implicitly, before destroying it. Deregistering synchronizes the
- *       stream, so the call waits for all work queued on it, including asynchronous
- *       I/O in flight. Don't submit I/O to a stream while it is being deregistered.
- *       Deregistering the default stream (a NULL handle or `hipStreamPerThread`)
- *       does nothing and returns success.
+ * @note Deregister every stream you registered with `hipFileStreamRegister()`
+ *       before destroying it. Deregistering synchronizes the stream, so the call
+ *       waits for all work queued on it, including asynchronous I/O in flight.
+ *       Don't submit I/O to a stream while it is being deregistered. Deregistering
+ *       the default stream (a NULL handle or `hipStreamPerThread`) does nothing and
+ *       returns success.
  *
  * @return \hipfile_error_return
  */
