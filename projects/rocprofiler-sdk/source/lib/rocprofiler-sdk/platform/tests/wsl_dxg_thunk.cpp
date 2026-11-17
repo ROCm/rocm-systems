@@ -28,6 +28,15 @@
 // opened the thunk must close it, every path that acquired a snapshot must
 // release it, and a thunk that does not export everything the read needs must
 // be refused before any of it is called.
+//
+// FakeThunk and FakeLoader are deterministic models, not stand-ins for the
+// real libraries. FakeThunk returns whatever status each test configures; it
+// does not model the real KMT ABI or librocdxg's reference counting.
+// FakeLoader is keyed by the exact string passed to dlopen, so it pins
+// candidate order and handle balance only. It does not model the real glibc
+// search, SONAME or file identity, RTLD_NOLOAD aliasing, NODELETE, or how
+// librocdxg is packaged. wsl_dxg_loader.cpp covers that behavior against real
+// ELF objects in subprocesses.
 
 #include "lib/rocprofiler-sdk/platform/wsl/dxg_thunk.hpp"
 
@@ -245,11 +254,14 @@ operator<<(std::ostream& os, const OpenCall& call)
     return os << (call.noload ? "noload:" : "load:") << call.name;
 }
 
-// A fake dynamic loader. `resident` is what RTLD_NOLOAD finds and `loadable`
-// is what a real open finds, both keyed by the exact name passed to dlopen, so
-// the candidate order can be pinned. `hsa_dirs` is where libhsa-runtime64 is
-// mapped from. Records every symbol asked for so the resolved set can be
-// pinned exactly, and counts closes.
+// A string-keyed model of the dynamic loader. `resident` is the set of names
+// for which an RTLD_NOLOAD open returns a handle and `loadable` the set for
+// which a plain open does, both matched against the exact string passed to
+// dlopen, so the candidate order can be pinned. `hsa_dirs` is what the
+// libhsa-runtime64 directory query returns. Records every symbol asked for so
+// the resolved set can be pinned exactly, and counts closes. Nothing here
+// resolves paths, reads SONAMEs or aliases one name to another; see
+// wsl_dxg_loader.cpp for that behavior against the real loader.
 struct FakeLoader
 {
     std::vector<OpenCall>    opens;
@@ -314,9 +326,9 @@ const std::vector<std::string> kResolvedSymbols = {"hsaKmtOpenKFD",
                                                    "hsaKmtCloseKFD",
                                                    "DxgAbiCheck"};
 
-// Every open a cold process makes when no candidate loads: the resident probe
-// for each name, then each name bare and, if `beside_hsa`, beside the one
-// mapped libhsa-runtime64.
+// Every open the lookup makes when the model has nothing resident and no
+// candidate loads: the RTLD_NOLOAD probe for each name, then each name bare
+// and, if `beside_hsa`, beside the one reported libhsa-runtime64 directory.
 std::vector<OpenCall>
 every_cold_open(bool beside_hsa)
 {
@@ -338,7 +350,9 @@ every_cold_open(bool beside_hsa)
 
 // --- the happy path --------------------------------------------------------
 
-TEST(wsl_dxg_thunk, constructor_ordered_enumeration_calls_the_thunk_and_leaves_it_balanced)
+// With the late-attach marker absent the read is admitted, and the modeled
+// thunk sees open, acquire, one query per node, release, close.
+TEST(wsl_dxg_thunk, admitted_enumeration_calls_the_thunk_in_order_and_leaves_it_balanced)
 {
     auto mode = ToolAttachedEnv{false};
     auto fake = FakeThunk{};
@@ -379,9 +393,10 @@ TEST(wsl_dxg_thunk, explicit_late_attach_never_loads_or_calls_the_thunk)
         << "late attach must not call ABI/open/acquire/get/release/close";
 }
 
-// KERNEL_ALREADY_OPENED means another consumer - normally the HSA runtime -
-// had the thunk open and we took an additional reference. It is a success and
-// it still owes a close.
+// The branch where hsaKmtOpenKFD() answers KERNEL_ALREADY_OPENED, the status
+// for a thunk another consumer already holds open. The read treats it as a
+// success that still owes a close; the fake only returns the status and does
+// not model the reference it stands for.
 TEST(wsl_dxg_thunk, an_already_open_thunk_is_used_and_still_closed)
 {
     auto fake              = FakeThunk{};
@@ -398,24 +413,17 @@ TEST(wsl_dxg_thunk, an_already_open_thunk_is_used_and_still_closed)
 
 // --- the snapshot lifetime prerequisite ------------------------------------
 //
-// Released external thunks do not refcount the snapshot pair:
-// hsaKmtReleaseSystemProperties() drops their one global snapshot and deletes
-// every WDDMDevice with it, for all consumers. read_dxg_gpu_topology() is safe
-// with one of those packages only because rocprofv3 runs it from a library
-// constructor, before hsa_init(). The prerequisite in-tree runtime refcounts
-// the snapshot, but does not expose a run-time capability bit for that behavior.
-//
-// Late attach is gated above by ROCPROFILER_REGISTER_TOOL_ATTACHED, which
-// rocprofiler-register sets explicitly before tool initialization. The two
-// tests below pin why inferred thunk state must never replace that marker.
-// Once constructor-ordered enumeration has been admitted, the sequence stays
-// balanced and unconditional with either ownership model.
+// The design this section guards: external librocdxg packages are not relied
+// on to refcount the snapshot pair, so the read is admitted only when it runs
+// from a library constructor, before hsa_init(), and late attach is gated above
+// by ROCPROFILER_REGISTER_TOOL_ATTACHED, which rocprofiler-register sets before
+// tool initialization. The fake thunk models neither ownership model; the two
+// tests below only pin that, once admitted, the modeled call sequence does not
+// branch on thunk-reported state that could be mistaken for that marker.
 
-// hsaKmtOpenKFD() reports whether its open count was already non-zero, not
-// whether a snapshot already exists - any second consumer of the thunk produces
-// KERNEL_ALREADY_OPENED, and hsaKmtAcquireSystemProperties() answers SUCCESS
-// whether it took a fresh snapshot or handed back the live one. So the status
-// cannot select a different teardown, and the sequence does not branch on it.
+// The read does not branch on the open status: the modeled sequence for
+// SUCCESS and for KERNEL_ALREADY_OPENED is identical and ends in a close. The
+// status is not treated as evidence of whether a snapshot already exists.
 TEST(wsl_dxg_thunk, the_open_status_does_not_select_a_different_teardown)
 {
     auto observe = [](HSAKMT_STATUS open_status) {
@@ -434,13 +442,12 @@ TEST(wsl_dxg_thunk, the_open_status_does_not_select_a_different_teardown)
     EXPECT_EQ(already.back(), "close_kfd");
 }
 
-// DxgAbiCheck negotiates sizeof(HsaNodeProperties) and nothing else, and which
-// thunks export it runs the wrong way round to stand in for a snapshot-lifetime
-// capability: the released librocdxg packages do export it, while a thunk built
-// from the in-tree sources does not. Gating on it would mark exactly the shipped
-// thunks as capable. Whether it is present must therefore change nothing about
-// the open/acquire/release/close sequence.
-TEST(wsl_dxg_thunk, the_abi_handshake_is_not_a_snapshot_lifetime_capability_bit)
+// DxgAbiCheck is used only to negotiate sizeof(HsaNodeProperties); the read
+// does not treat its presence as a snapshot-lifetime capability. This pins the
+// modeled branch: with and without the handshake exported, the
+// open/acquire/release/close sequence is the same apart from the handshake
+// call itself. Which real librocdxg builds export it is not modeled here.
+TEST(wsl_dxg_thunk, abi_handshake_presence_does_not_change_the_kmt_call_sequence)
 {
     auto observe = [](bool exports_handshake) {
         auto fake = FakeThunk{};
@@ -597,6 +604,13 @@ TEST(wsl_dxg_thunk, a_thunk_agreeing_on_the_record_size_is_read)
 }
 
 // --- the loader ------------------------------------------------------------
+//
+// These drive the lookup through FakeLoader, so they pin the order in which
+// candidate strings are tried and that each handle obtained is closed once.
+// What "resident" or "loadable" means in a real process - SONAME matching,
+// RTLD_NOLOAD aliasing, NODELETE, the glibc search path, packaging - is not
+// modeled; wsl_dxg_loader.cpp runs the lookup against real ELF objects in
+// subprocesses for that.
 
 // The versioned name is the one the HSA runtime asks for first, and it carries
 // the major of the hsakmt rocdxg_version.h this build compiled against.
@@ -610,10 +624,10 @@ TEST(wsl_dxg_thunk, the_versioned_name_comes_from_rocdxg_version_h)
 #endif
 }
 
-// The normal case during a profiling run: the HSA runtime already loaded the
-// thunk under its versioned soname, RTLD_NOLOAD finds it, and the reference
-// taken is given back.
-TEST(wsl_dxg_thunk, a_resident_versioned_library_is_reused_and_released)
+// The modeled branch where the RTLD_NOLOAD probe for the versioned name
+// returns a handle: that handle is used, nothing else is opened, and it is
+// closed once.
+TEST(wsl_dxg_thunk, a_noload_hit_on_the_versioned_name_is_used_and_closed_once)
 {
     if(kVersioned.empty()) GTEST_SKIP() << "built against headers without rocdxg_version.h";
 
@@ -629,10 +643,12 @@ TEST(wsl_dxg_thunk, a_resident_versioned_library_is_reused_and_released)
     EXPECT_EQ(loader.close_count, 1);
 }
 
-// A development install where the HSA runtime fell back to the unversioned
-// name. That copy is reused, and nothing is loaded - in particular not a
-// versioned copy that would be a second, different librocdxg in the process.
-TEST(wsl_dxg_thunk, a_resident_unversioned_library_is_reused_before_anything_is_loaded)
+// The modeled branch where only the RTLD_NOLOAD probe for the unversioned name
+// returns a handle. It represents a resident object whose DT_SONAME is
+// unversioned or absent; a normal versioned librocdxg may instead satisfy the
+// versioned probe first, which this model does not decide. The handle is used
+// and no plain open is attempted, even though versioned names are loadable.
+TEST(wsl_dxg_thunk, a_noload_hit_on_the_unversioned_name_stops_before_any_load)
 {
     auto fake       = FakeThunk{};
     auto loader     = FakeLoader{};
@@ -649,10 +665,9 @@ TEST(wsl_dxg_thunk, a_resident_unversioned_library_is_reused_before_anything_is_
     EXPECT_EQ(loader.close_count, 1);
 }
 
-// A pre-HSA consumer - rocprofv3-avail, tool initialization - is the first to
-// touch the library, so RTLD_NOLOAD misses and the versioned name is loaded
-// through the ordinary search, before anything else is tried.
-TEST(wsl_dxg_thunk, a_cold_process_loads_the_versioned_name_first)
+// The modeled branch where both RTLD_NOLOAD probes miss: the first plain open
+// is the bare versioned name, and when it succeeds nothing after it is tried.
+TEST(wsl_dxg_thunk, with_nothing_resident_the_bare_versioned_name_is_tried_first)
 {
     if(kVersioned.empty()) GTEST_SKIP() << "built against headers without rocdxg_version.h";
 
@@ -671,10 +686,10 @@ TEST(wsl_dxg_thunk, a_cold_process_loads_the_versioned_name_first)
     EXPECT_EQ(loader.close_count, 1);
 }
 
-// The packaged layout: only librocdxg.so.<major> is shipped, beside
-// libhsa-runtime64, in a directory the ordinary search does not cover. It is
-// found there, as the HSA runtime finds it, and before the unversioned name.
-TEST(wsl_dxg_thunk, a_versioned_only_package_is_found_beside_libhsa_runtime64)
+// The modeled branch where only the versioned name beside the reported
+// libhsa-runtime64 directory opens: that path is tried right after the bare
+// versioned name and before any unversioned plain open.
+TEST(wsl_dxg_thunk, the_versioned_name_beside_libhsa_runtime64_follows_the_bare_name)
 {
     if(kVersioned.empty()) GTEST_SKIP() << "built against headers without rocdxg_version.h";
 
