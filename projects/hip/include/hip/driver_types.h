@@ -440,7 +440,11 @@ typedef enum hipMemLocationType {
   hipMemLocationTypeHost = 2,      ///< Host location, id is ignored
   hipMemLocationTypeHostNuma = 3,  ///< Host NUMA node location, id is host NUMA node id
   hipMemLocationTypeHostNumaCurrent =
-      4  ///< Host NUMA node closest to current thread’s CPU, id is ignored
+      4,  ///< Host NUMA node closest to current thread’s CPU, id is ignored
+  ///< NOTE: value 5 is intentionally skipped - CUDA uses it for
+  ///< CU_MEM_LOCATION_TYPE_INVISIBLE, which HIP has not adopted.
+  hipMemLocationTypeDeviceLocalityDomain =
+      6  ///< A portion of device memory, identified by the locality domain id
 } hipMemLocationType;
 /**
  * Specifies a memory location.
@@ -449,7 +453,14 @@ typedef enum hipMemLocationType {
  */
 typedef struct hipMemLocation {
   hipMemLocationType type;  ///< Specifies the location type, which describes the meaning of id
-  int id;                   ///< Identifier for the provided location type @p hipMemLocationType
+  union {
+    int id;  ///< Identifier for @p hipMemLocationTypeDevice, @p hipMemLocationTypeHost or
+             ///< @p hipMemLocationTypeHostNuma
+    struct {
+      unsigned char deviceId;          ///< Device ordinal
+      unsigned char localityDomainId;  ///< Locality domain ordinal within the device
+    } localized;  ///< Identifier for @p hipMemLocationTypeDeviceLocalityDomain
+  };
 } hipMemLocation;
 
 /**
@@ -730,9 +741,13 @@ typedef enum hipPointer_attribute {
                                                      ///< in HIP
   HIP_POINTER_ATTRIBUTE_ACCESS_FLAGS,   ///< Returns the access flags the device associated with
                                         ///< for the corresponding memory referenced by the ptr
-  HIP_POINTER_ATTRIBUTE_MEMPOOL_HANDLE  ///< Returns the mempool handle for the allocation if
-                                        ///< it was allocated from a mempool
-                                        ///< @warning This attribute is not supported in HIP
+  HIP_POINTER_ATTRIBUTE_MEMPOOL_HANDLE,  ///< Returns the mempool handle for the allocation if
+                                         ///< it was allocated from a mempool
+                                         ///< @warning This attribute is not supported in HIP
+  ///< NOTE: pinned to 22 to match CUDA. Values 18-21 are CUDA attributes HIP has not
+  ///< adopted, so this must not be appended implicitly.
+  HIP_POINTER_ATTRIBUTE_LOCALITY_DOMAIN_ORDINAL = 22  ///< Locality domain ordinal of the
+                                                      ///< allocation, or -1 if not localized
 } hipPointer_attribute;
 
 // doxygen end DriverTypes
