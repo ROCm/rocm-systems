@@ -946,6 +946,7 @@ Device::Device()
   memset(static_cast<void*>(&info_), '\0', sizeof(info_));
   // By default consider just 1 xcc per device
   info_.numberOfXccs_ = 1;
+  info_.numberOfAids_ = 1;
 }
 
 Device::~Device() {

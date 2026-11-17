@@ -719,6 +719,7 @@ struct Info : public amd::EmbeddedObject {
   size_t scratchLimitMax;  //! Maximum size of scratch limit of this device memory in bytes.
 
   uint32_t numberOfXccs_;  //! The number of XCC(s) on the device
+  uint32_t numberOfAids_;  //! The number of AID(s) on the device
 
   bool fabric_handle_; //!< fabric handle support flag
   bool hasExpertSchedMode_;  //! Device supports expert scheduling mode

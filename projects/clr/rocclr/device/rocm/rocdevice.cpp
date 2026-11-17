@@ -1868,6 +1868,12 @@ bool Device::populateOCLDeviceConstants() {
   }
 
   if (HSA_STATUS_SUCCESS !=
+      Hsa::agent_get_info(bkendDevice_, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_AID),
+                          &info_.numberOfAids_)) {
+    LogError("HSA_AMD_AGENT_INFO_NUM_AID query failed.");
+  }
+
+  if (HSA_STATUS_SUCCESS !=
       Hsa::agent_get_info(bkendDevice_,
                           static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_PM4_EMULATION),
                           &pm4_emulation_)) {
