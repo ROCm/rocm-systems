@@ -181,19 +181,29 @@ def gen_vector32(ctx: ExecuteContext) -> str | None:
         return None
     if mnemonic == 'V_PRNG_B32' and arch not in ('cdna4', 'cdna5'):
         return None
+    older_saturation = (
+        arch in ('cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5')
+        and mnemonic == 'V_SAT_PK_U8_I16'
+    )
     architectures = (
         HALF_INTEGER_ARCHITECTURES
         if mnemonic in WIDEN16_NAMES
         else INTEGER32_ARCHITECTURES
     )
-    if arch not in architectures or mnemonic not in VECTOR32_NAMES:
+    if (
+        arch not in architectures and not older_saturation
+    ) or mnemonic not in VECTOR32_NAMES:
         return None
     if (
         mnemonic in CONDITIONAL_NAMES | {'V_MOV_B32'}
         and arch not in ROUTING_ARCHITECTURES
     ):
         return None
-    if mnemonic in SATURATE_NAMES and arch not in ROUTING_ARCHITECTURES:
+    if (
+        mnemonic in SATURATE_NAMES
+        and arch not in ROUTING_ARCHITECTURES
+        and not older_saturation
+    ):
         return None
     if mnemonic in WIDEN16_NAMES and arch not in ('rdna3', 'rdna3_5', 'rdna4', 'cdna5'):
         return None
@@ -224,7 +234,7 @@ def gen_vector32(ctx: ExecuteContext) -> str | None:
         return None
     api = 'rj_arith_' + mnemonic.lower()
     if mnemonic in SATURATE_NAMES:
-        if arch in ('cdna3', 'cdna4'):
+        if arch in ('cdna1', 'cdna2', 'rdna1', 'rdna2', 'cdna3', 'cdna4'):
             api += '_gfx942'
             sdwa = (
                 ''
@@ -236,9 +246,10 @@ def gen_vector32(ctx: ExecuteContext) -> str | None:
                     '  }\n'
                 )
             )
+            # Legacy GFX10 publishes a whole word and ignores OPSEL in both encodings.
             modifiers = (
                 '(amdgpu::vop3_opsel(inst_) & 8) ? RJ_ARITH_ALU_HIGH_D : 0u'
-                if is_vop3
+                if is_vop3 and arch not in ('rdna1', 'rdna2')
                 else '0u'
             )
             return sdwa + (

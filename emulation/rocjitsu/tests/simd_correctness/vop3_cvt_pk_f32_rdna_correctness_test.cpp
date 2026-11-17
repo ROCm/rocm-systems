@@ -256,10 +256,6 @@ TEST(Vop3CvtPkF32RdnaCorrectness, U16_PartialExec) {
 }
 
 TEST(Vop3CvtPkF32RdnaCorrectness, PackedIntegerSaturationHelpers) {
-  const float nan = std::numeric_limits<float>::quiet_NaN();
-  EXPECT_EQ(amdgpu::cvt_u8_f32(nan), 0u);
-  EXPECT_EQ(amdgpu::cvt_u8_f32(-1.0f), 0u);
-  EXPECT_EQ(amdgpu::cvt_u8_f32(256.0f), 255u);
   EXPECT_EQ(amdgpu::cvt_u16_f32(65536.0f), 65535u);
   EXPECT_EQ(amdgpu::cvt_i16_f32(-32769.0f), 0x8000u);
 }

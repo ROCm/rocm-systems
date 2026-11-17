@@ -474,19 +474,6 @@ inline uint32_t cvt_u16_f32(float32_t value) {
   return static_cast<uint16_t>(value);
 }
 
-/// @brief Convert f32 to a zero-extended packed u8 lane.
-/// @details NaN and negative inputs convert to zero; values above the u8 range
-/// saturate to UINT8_MAX.
-inline uint32_t cvt_u8_f32(float32_t value) {
-  if (std::isnan(value) || value < 0.0f) {
-    return uint32_t{0};
-  }
-  if (value >= 256.0f) {
-    return static_cast<uint32_t>(std::numeric_limits<uint8_t>::max());
-  }
-  return static_cast<uint32_t>(static_cast<uint8_t>(value));
-}
-
 inline util::native<uint32_t> simd_cvt_i16_f32_to_u32(util::native<float32_t> s) {
   return util::map_native_convert_scalar<uint32_t>(s, cvt_i16_f32);
 }
@@ -864,20 +851,6 @@ inline conversion::ToFloat<From, fp_format::F16> sdwa_conversion_to_f16(const In
 
 /// @brief Resolve V_CVT_FLOOR_I32_F32 or V_CVT_NEAREST_I32_F32 (conversion::FloorI32,
 /// conversion::NearestI32) from the F32 input-denormal control and ABS/NEG.
-
-/// @brief Resolve V_CVT_PK_U8_F32, which rounds in the F32 MODE.FP_ROUND field.
-inline conversion::PackU8 conversion_pk_u8(const Wavefront &wf, uint32_t abs = 0,
-                                           uint32_t neg = 0) {
-  return {abs, neg, input_denormal_policy<fp_format::F32>(wf),
-          conversion::mode_rounding(wf.fp_round_mode_f32())};
-}
-
-/// @brief Resolve V_PACK_B32_F16 from MODE and the target's NaN quieting.
-inline conversion::PackB32F16 conversion_pack_b32_f16(const Wavefront &wf, uint32_t abs = 0,
-                                                      uint32_t neg = 0) {
-  return {abs, neg, input_denormal_policy<fp_format::F16>(wf),
-          fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode())};
-}
 
 /// @brief Resolve an F32-to-FP8/BF8 conversion; FP16_OVFL saturates finite overflow.
 template <typename Fmt>
