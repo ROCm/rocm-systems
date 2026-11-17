@@ -3,9 +3,8 @@
 GPU allocations, doorbells, event pages, and GEM objects use the backing adapters
 in `memory_backing.h`.
 The private `rocjitsu-memory` helper creates fixed-size memfds within its own
-inherited hard file limit, raising only its own soft limit. If that limit
-cannot accommodate an allocation, it uses
-System V shared RAM instead. Ordinary allocations stay on native memfds even
+inherited hard file limit, raising only its own soft limit. If the limit is too
+low or the host lacks `memfd_create`, it uses System V shared RAM. Ordinary allocations stay on native memfds even
 when shmem lacks user xattrs. On export, an unsupported policy xattr causes the
 keeper to wrap that memfd in a token carrying the policy. The token retains the
 same file bytes and device/inode identity across descriptor transfers.
@@ -127,7 +126,16 @@ unmapping or changing their protections.
 
 The helper execs with an independent address space, detaches from application
 job control, and watches its owner's pidfd and an open-file-description lock
-on an empty memfd. A private `PROT_NONE` mapping retains the owner's locked
+on an empty memfd. When `memfd_create` returns `ENOSYS`, the lease, synthetic
+DRM descriptors, and proc snapshots use unnamed files on `/dev/shm`. When
+`pidfd_open` returns `ENOSYS`, the owner opens `/proc/self/stat` and sends the
+file descriptor to the helper over their private startup socket. This pins the
+owner even when the mounted procfs belongs to an ancestor PID namespace. The
+helper polls that descriptor for exit and checks it before accepting private
+connections.
+These fallbacks cover in-process simulation. Daemon mode still requires
+`memfd_create` for its debugger-visible KFD mapping.
+A private `PROT_NONE` mapping retains the owner's locked
 file description after its descriptor closes; the empty file is never sized or
 accessed. `MADV_DONTFORK` keeps that mapping out of forked children, and exec
 removes it. The helper waits for the lock through an independently opened file
@@ -144,7 +152,8 @@ then-current hard limits.
 Generated topology files and proc-maps snapshots are sized there. Topology
 files with small payloads travel with the sizing request and are written by the helper
 with positional I/O. Larger topology files and proc-maps snapshots are
-populated through shared mappings.
+populated through shared mappings. The keeper reserves the snapshot pages first
+so opening proc maps on a full tmpfs returns `ENOSPC`.
 Both paths preserve the caller's file offset. Metadata files must fit the
 helper's hard file limit. Topology population
 failures emit a warning identifying the file. Application writes, including

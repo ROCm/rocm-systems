@@ -79,11 +79,11 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `GroupApiWrapperTest.*`, `ArgsGlobalCheckTest.*`, `GroupJobUnlinkCommsTest.*`,
     `JobFreeCallbacksTest.*`, `MgmtTaskJobFuncTest.*`,
     `GroupRegisterSymmetricCeInitTest.*`, `GroupRegisterSymmetricTest.*`,
+    `GroupRegisterSymmetricDevCommTest.*`,
     `GroupCleanupTest.*`, `AsyncJobLaunchDirectTest.*`.
   - `devcomm/devcomm_v22902.cc` + `devcomm/devcomm_v22907.cc`
     (`DEVCOMM_V22902_CC_PATH` / `DEVCOMM_V22907_CC_PATH`, both from
-    `devcomm-test.cc`); suites `Devcomm*`. `devcomm/devcomm_v23000.cc` is not
-    covered yet.
+    `devcomm-test.cc`); suites `Devcomm*`.
   - `dev_runtime.cc` and `dev_runtime_segments.cc` (`DEV_RUNTIME_CC_PATH`,
     `DEV_RUNTIME_SEGMENTS_CC_PATH`, from `dev-runtime-test.cc`);
     suites `Alloc*`, `Comm*`, `Compute*`, `DeepCopy*`, `Dev*`, `Gin*`, `Nccl*`,
@@ -121,6 +121,13 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `#ifdef ENABLE_WARP_SPEED` cluster (~10 functions) is compiled out of
     this binary entirely, so no seam can reach it without changing the
     binary's own build configuration.
+  - `ras/diagnostics_pci.cc` (`RAS_DIAGNOSTICS_PCI_CC_PATH`, from
+    `ras-diagnostics-pci-test.cc`); suites `RasDiagnosticsPciMicrotest.*` and
+    `RasDiagnosticsPciIsolatedTest.*`. The conclusive-tool collector case runs in
+    its own process to keep the once-only tool cache independent of fallback tests.
+    Covers RDMA tool classification, selected GPU/NIC pairs, IOMMU sysfs reads,
+    ATS parsing, collection and report validation through shared diagnostic,
+    topology and libc hooks. No external tools or host PCI devices are accessed.
   - `ras/ras.cc` (`RAS_CC_PATH`, from `ras-test.cc`); suite
     `RasMicrotest.*`. The suite covers every executable line and function in
     `ras.cc`: communicator setup and cleanup, local notifications, message
@@ -131,6 +138,10 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     integration-test territory. Since this binary uses section GC, validate
     completeness by checking that the linked coverage report still contains
     the same `ras.cc` function inventory as the compiled source.
+  - `ras/diagnostics_paths.cc` (`RAS_DIAGNOSTICS_PATHS_CC_PATH`, from
+    `ras-diagnostics-paths-test.cc`); suite `RasDiagnosticsPathsMicrotest.*`.
+    Covers topology readiness, rank-to-path classification, communicator filtering,
+    grouped reports and allocation/reporter failures using the shared RAS fixtures.
   - `ras/diagnostics_checks_common.cc` (`RAS_DIAGNOSTICS_COMMON_CC_PATH`, from
     `ras-diagnostics-common-test.cc`); suite
     `RasDiagnosticsCommonMicrotest.*`. Covers communicator snapshots and
@@ -253,6 +264,10 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     tables, prime strides, Walecki, Walecki+greedy) and the load-balanced cut
     selection in `findRingCutIndices`. `greedyRingGen`'s out-of-memory arm is
     driven through the heap half of `fakes/libc_seam.h`.
+- **`rccl-UnitTestsMicroDevcommV23000`**: `src/devcomm/devcomm_v23000.cc`
+  (via `DEVCOMM_V23000_CC_PATH`, suites `DevcommV23000*`), covering requirement
+  filtering and both ABI-copy directions. Its own binary avoids the compatibility
+  table stub in `dev_runtime_micro_fakes.cc`. See `test_categories_micro_devcomm_v23000.yaml`.
 - **`rccl-UnitTestsMicroBootstrap`**: `bootstrap.cc` (via `BOOTSTRAP_CC_PATH`, from
   `bootstrap-test.cc`); suites `Bootstrap*Microtest.*`. Ranks run as threads over the
   in-memory socket layer and net plugin in `fakes/bootstrap_micro_fakes.cc`. Its own binary

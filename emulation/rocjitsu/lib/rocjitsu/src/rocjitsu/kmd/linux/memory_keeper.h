@@ -58,6 +58,7 @@ enum class KeeperOperation : uint32_t {
   GetAllocationFlags,
   WrapFile,
   OpenFile,
+  ReserveFile,
 };
 
 // Keep inline metadata in one small seqpacket. Map larger files instead.
@@ -100,7 +101,9 @@ static_assert(sizeof(KeeperFileResults) == 36);
 
 // The original helper sent only its PID. A distinct ready packet rejects a
 // mismatched private protocol before either side waits for an allocation reply.
-inline constexpr uint32_t kKeeperProtocolVersion = 5;
+inline constexpr uint32_t kKeeperProtocolVersion = 6;
+// An interim startup packet requests the owner's pinned proc stat on pidfd-less hosts.
+inline constexpr uint32_t kKeeperRequestOwnerStat = 0x524a5354;
 using KeeperCookie = std::array<uint64_t, 2>;
 /// @brief Private startup result and identity for subsequent owner connections.
 struct KeeperStartupReply {

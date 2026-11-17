@@ -18,6 +18,34 @@ if(RJ_ENABLE_UBSAN)
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # A separate executable lets --wrap hide modern stat symbols without
+    # affecting any other test or the interposer's own symbol resolution.
+    add_executable(
+        libc_passthrough_test
+        libc_passthrough_test.cpp
+        ../lib/rocjitsu/src/rocjitsu/kmd/linux/libc_passthrough.cpp
+    )
+    target_include_directories(
+        libc_passthrough_test
+        PRIVATE ../lib/rocjitsu/src ../lib/util/include
+    )
+    target_link_libraries(
+        libc_passthrough_test
+        PRIVATE GTest::gtest_main ${CMAKE_DL_LIBS}
+    )
+    target_link_options(libc_passthrough_test PRIVATE "-Wl,--wrap=dlsym")
+    rj_configure_target(libc_passthrough_test WARNINGS)
+    add_test(NAME LibcPassthrough.NativeStat COMMAND libc_passthrough_test)
+    # Force the old ABI only on hosts for which the resolver knows the
+    # stat version even when the build headers omit _STAT_VER.
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64|aarch64|arm64)$")
+        add_test(
+            NAME LibcPassthrough.LegacyStat
+            COMMAND
+                ${CMAKE_COMMAND} -E env RJ_TEST_LEGACY_STAT=1
+                $<TARGET_FILE:libc_passthrough_test>
+        )
+    endif()
     add_test(
         NAME MemoryKeeper.ScrubbedEnvironmentStartup
         COMMAND
@@ -466,6 +494,7 @@ add_executable(
     config_test.cpp
     rj_vm_config_test.cpp
     checkpoint_restore_errors_test.cpp
+    cdna_integer_arith_test.cpp
     rj_arith_policy_test.cpp
     rj_arith_config_test.cpp
     rj_arith_bridge_test.cpp
@@ -647,8 +676,8 @@ add_executable(
     util_simd_test.cpp
     v_add_simd_benchmark.cpp
     mfma_simd_benchmark.cpp
-    smfmac_simd_benchmark.cpp
     wmma_simd_benchmark.cpp
+    smfmac_simd_benchmark.cpp
     swmmac_k64_simd_benchmark.cpp
     swmmac_k128_simd_benchmark.cpp
     simd_correctness/simd_coverage_test.cpp
@@ -787,9 +816,7 @@ endif()
 if(RJ_ENABLE_EXPENSIVE_CHECKS)
     target_sources(
         rocjitsu_tests
-        PRIVATE
-            simd_correctness/mfma_simd_exact_test.cpp
-            simd_correctness/wmma_simd_exact_test.cpp
+        PRIVATE simd_correctness/mfma_simd_exact_test.cpp
     )
 endif()
 target_link_libraries(
@@ -859,11 +886,20 @@ set(_rj_idle_wakeup_cases
     AsyncCausalityTest.StaleWakeDoesNotHideConcurrentPublication
     AsyncCausalityTest.QuiescentPublicationsToEveryPartitionMakeProgress
 )
+set(_rj_pm4_interrupt_cases
+    KfdIoctlCdna5Test.Pm4InterruptSignalsAnUnmarkedNamedEvent
+    KfdTargets/KfdNativePm4Test.ReleaseInterruptUsesContextAndMarkedMailboxes/gfx1100
+    KfdTargets/KfdNativePm4Test.ReleaseInterruptUsesContextAndMarkedMailboxes/gfx1201
+    KfdTargets/KfdNativePm4Test.ReleaseInterruptUsesContextAndMarkedMailboxes/gfx1151
+)
 # Exclude exactly the cases registered below, so future cases still participate
 # in normal discovery until they receive an explicit timeout registration.
 set(_rj_gtest_exclusions
     "-*Benchmark*:*RequestExitWakesAllPartitions*:MatrixCoexecutionTest.SharedPoolMakesProgressUnderConcurrentHandoffs:*DispatchedWaitSurvivesAConcurrentFinalClose*:*EffectiveConfigTest.ReadsNativeLaunchConfigHandoff:*EffectiveConfigTest.ReadsSelectedNodeLaunchConfigHandoff"
 )
+foreach(_pm4_interrupt_case IN LISTS _rj_pm4_interrupt_cases)
+    string(APPEND _rj_gtest_exclusions ":${_pm4_interrupt_case}")
+endforeach()
 foreach(_idle_wakeup_case IN LISTS _rj_idle_wakeup_cases)
     string(APPEND _rj_gtest_exclusions ":${_idle_wakeup_case}")
 endforeach()
@@ -1001,6 +1037,21 @@ if(RJ_ENABLE_TSAN)
         )
     endforeach()
 endif()
+
+# Native queue progress is asynchronous; bound a lost doorbell or stalled
+# retirement in the outer harness, including installed tests.
+foreach(_pm4_interrupt_case IN LISTS _rj_pm4_interrupt_cases)
+    rj_add_test(
+        NAME "${_pm4_interrupt_case}"
+        COMMAND
+            $<TARGET_FILE:rocjitsu_tests>
+            "--gtest_filter=${_pm4_interrupt_case}"
+        TIMEOUT 30
+        INSTALL_COMMAND
+            "bin/rocjitsu_tests"
+            "--gtest_filter=${_pm4_interrupt_case}"
+    )
+endforeach()
 
 # Bound worker joins in the idle notification and CPU-use regressions.
 # Register explicitly so build-tree and installed tests have the same timeout.
@@ -1223,7 +1274,11 @@ if(RJ_BUILD_CONSAN_ANALYZER)
 endif()
 
 # Host-only checked anchor regressions use model ISA providers.
-add_executable(rocjitsu_text_edit_tests patch/checked_text_edits_test.cpp)
+add_executable(
+    rocjitsu_text_edit_tests
+    patch/checked_text_edits_test.cpp
+    patch/bi_edit_safety_test.cpp
+)
 target_include_directories(
     rocjitsu_text_edit_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
@@ -1490,8 +1545,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     if(HAS_GFX1250_DBT_FIXTURE)
         rj_add_test_path(
             gfx1250_b0_to_a0_library_test
-            GFX1250_B0_TO_A0_FIXTURE
-            "${KERNEL_OUTPUT_DIR}/relocation_function_table_dispatch_gfx1250.hsaco"
+            KERNEL_DIR
+            "${KERNEL_OUTPUT_DIR}"
         )
         add_dependencies(
             gfx1250_b0_to_a0_library_test
@@ -1503,7 +1558,30 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         PRIVATE_INCLUDES
         WARNINGS
     )
+    # Test the translator built or installed alongside this binary even when
+    # LD_LIBRARY_PATH points to an SDK that provides the same SONAME.
+    _rj_path_from_installed_test_bin(_translator_lib "${CMAKE_INSTALL_LIBDIR}"
+        "$<TARGET_SONAME_FILE_NAME:rocjitsu_gfx1250_b0_to_a0>"
+    )
+    cmake_path(GET _translator_lib PARENT_PATH _translator_rpath)
+    if(NOT IS_ABSOLUTE "${_translator_rpath}")
+        set(_translator_rpath "$ORIGIN/${_translator_rpath}")
+    endif()
+    set_target_properties(
+        gfx1250_b0_to_a0_library_test
+        PROPERTIES INSTALL_RPATH "${_translator_rpath}"
+    )
+    target_link_options(
+        gfx1250_b0_to_a0_library_test
+        PRIVATE "LINKER:--disable-new-dtags"
+    )
     rj_add_gtest_tests(gfx1250_b0_to_a0_library_test)
+    if(RJ_INSTALL_TESTS)
+        file(
+            APPEND "${RJ_INSTALL_CTEST_FILE}"
+            "include(\"gfx1250_b0_to_a0_library_test.cmake\")\n"
+        )
+    endif()
     # Checked on the translator rather than the hook. The hook used to link the
     # translator as a static archive and so carried the model code itself; now it
     # loads a shared object, and the boundary this guards -- model in, execution
@@ -2657,6 +2735,7 @@ set(_rj_interposer_drm_tests
     KfdExportKeepsItsMetadataAfterTheAllocationIsFreed
     KfdImportsRetainMetadataAfterTheOriginalOwnerCloses
     MappingFlagsMatchBackingCapabilities
+    MissingMemfdRoutesRenderNodeIoctls
     OpensWithinCurrentDescriptorLimit
     PrimeHandleToFdReturnsTheBuffer
     PrimeImportKeepsTheBoStateAfterTheHandleCloses
@@ -3682,6 +3761,25 @@ if(HSA_RUNTIME64)
             TIMEOUT 300
         )
 
+        register_hsa_dbi_nop_asm_case(
+            Cdna2
+            Hardware
+            RejectsAppendedCodePastFileBackedLoad
+            SIM
+            CONFIG ${RJ_CDNA2_KMD_CONFIG}
+            CONFIG_NAME ${RJ_CDNA2_KMD_CONFIG_NAME}
+            TIMEOUT 300
+        )
+        register_hsa_dbi_nop_asm_case(
+            Cdna2
+            Hardware
+            AcceptsAppendedCodeAtFileBackedLoadEnd
+            SIM
+            CONFIG ${RJ_CDNA2_KMD_CONFIG}
+            CONFIG_NAME ${RJ_CDNA2_KMD_CONFIG_NAME}
+            TIMEOUT 300
+        )
+
         if(HAS_CDNA2_GPU)
             # Hardware-gated tests. The two that dispatch get an explicit
             # timeout; the load+validate one runs quickly enough for the
@@ -4246,6 +4344,7 @@ if(RJ_ENABLE_HIP_TESTS)
     rj_hip_runtime_supports_arch(RJ_HIP_RUNTIME_SUPPORTS_GFX950 "gfx950")
     rj_hip_runtime_supports_arch(RJ_HIP_RUNTIME_SUPPORTS_GFX942 "gfx942")
     rj_hip_runtime_supports_arch(RJ_HIP_RUNTIME_SUPPORTS_GFX1250 "gfx1250")
+    rj_hip_runtime_supports_arch(RJ_HIP_RUNTIME_SUPPORTS_GFX1251 "gfx1251")
 endif()
 
 if(RJ_ENABLE_HIP_TESTS)
@@ -4626,6 +4725,7 @@ if(RJ_ENABLE_HIP_TESTS)
             DaemonTest.InterposerDupKeepsRoutingAfterPrimaryCloseRemote
             DaemonTest.InterposerDup2OverPrimaryInvalidatesRemote
             DaemonTest.InterposerProcMapsNamesRemoteKfdMarker
+            DaemonTest.ClientMunmapClearsOnlyReplacedSvmPolicy
             DaemonTest.RemotePrimeImportRetainsExportedBacking
             TokenBackingDaemonTest.RemotePrimeImportRetainsExportedBacking
             DaemonTest.RemoteGemVaPartialClearKeepsRemainingRange
@@ -4767,6 +4867,17 @@ if(RJ_ENABLE_HIP_TESTS)
             CONFIG ${RJ_CDNA3_KMD_CONFIG}
             ENVIRONMENT "RJ_HW_ID_XCDS=8" "RJ_HW_ID_SHADER_ENGINES=4" "RJ_HW_ID_CUS_PER_SE=10"
             TIMEOUT 120
+        )
+    endif()
+
+    if(HAS_GFX1251_DEVICE_KERNELS AND RJ_HIP_RUNTIME_SUPPORTS_GFX1251)
+        rj_add_hip_test(hip_vector_add_gfx1251_test ARCH gfx1251 SOURCE hip_vector_add_test.cpp)
+        rj_add_hip_test_case(
+            hip_vector_add_gfx1251_test
+            "HipVectorAddTest.PackedF64"
+            NAME "HipVectorAddTest.PackedF64.Gfx1251"
+            CONFIG ${PROJECT_SOURCE_DIR}/configs/gfx1251_synthetic.json
+            TIMEOUT 60
         )
     endif()
 

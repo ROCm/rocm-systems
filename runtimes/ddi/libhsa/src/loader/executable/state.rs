@@ -24,6 +24,29 @@ pub(crate) unsafe fn load_executable_code_object(
     program: bool,
     loaded: *mut HsaLoadedCodeObject,
 ) -> Status {
+    // SAFETY: Ordinary loads do not borrow an application destination.
+    unsafe {
+        load_executable_code_object_at(
+            runtime, executable, agent, bytes, storage, program, None, loaded,
+        )
+    }
+}
+
+/// Loads an ordinary image or retains an application-owned destination.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the loader adapter preserves the C entry point arguments and adds optional destination ownership"
+)]
+pub(crate) unsafe fn load_executable_code_object_at(
+    runtime: &mut HsaState,
+    executable: HsaExecutable,
+    agent: HsaAgent,
+    bytes: Arc<[u8]>,
+    storage: ReaderStorage,
+    program: bool,
+    destination: Option<(u64, usize)>,
+    loaded: *mut HsaLoadedCodeObject,
+) -> Status {
     let Some(executable_record) = runtime.loader.executables.get(&executable.handle) else {
         return INVALID_EXECUTABLE;
     };
@@ -31,7 +54,9 @@ pub(crate) unsafe fn load_executable_code_object(
         return map_loader_error(error);
     }
     let (mut object, symbols) =
-        match parse_and_load(runtime, executable, agent, bytes, storage, program) {
+        // SAFETY: The caller retains any supplied destination through the
+        // executable's lifetime and uncertain native publication.
+        match unsafe { parse_and_load(runtime, executable, agent, bytes, storage, program, destination) } {
             Ok(result) => result,
             Err(status) => return status,
         };
