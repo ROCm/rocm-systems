@@ -38,6 +38,7 @@ const SCRATCH_ALIGNMENT: u64 = 256;
 const GFX9_SCRATCH_ALIGNMENT: u64 = 1024;
 const GFX9_SCRATCH_RESOURCE_WORD3: u32 =
     4 | (5 << 3) | (6 << 6) | (7 << 9) | (4 << 12) | (4 << 15) | (1 << 19) | (3 << 21) | (1 << 23);
+const GFX10_SCRATCH_RESOURCE_WORD3: u32 = GFX12_SCRATCH_RESOURCE_WORD3 | (1 << 24);
 const GFX12_SCRATCH_RESOURCE_WORD3: u32 =
     4 | (5 << 3) | (6 << 6) | (7 << 9) | (0x14 << 12) | (1 << 23) | (2 << 28);
 /// A progress query cannot wait indefinitely for a busy producer to pause.
@@ -71,7 +72,7 @@ const AQL_WRITE_OFFSET: usize = offset_of!(AqlControlLayout, write_dispatch_id);
 const AQL_READ_OFFSET: usize = offset_of!(AqlControlLayout, read_dispatch_id);
 
 const _: () = assert!(size_of::<AqlQueueHeader>() == 40);
-const _: () = assert!(AQL_CONTROL_SIZE == 256);
+const _: () = assert!(AQL_CONTROL_SIZE == 2304);
 const _: () = assert!(AQL_WRITE_OFFSET == 56);
 const _: () = assert!(AQL_READ_OFFSET == 128);
 
@@ -610,6 +611,8 @@ struct ComputeStorage {
 
 /// Fully validated native queue request used by the acquisition path.
 struct Request {
+    /// Requested placement of the descriptor and index words.
+    control_memory: QueueRingMemory,
     /// Validated ring byte size.
     ring_size: u32,
     /// Requested host or device ring placement.
@@ -915,6 +918,10 @@ fn validate_sdma(properties: sysfs::KfdQueueProperties, desc: QueueRequest) -> R
 }
 
 impl Request {
+    #[allow(
+        clippy::too_many_lines,
+        reason = "validate all queue options before acquiring native resources"
+    )]
     fn validate(native: &sysfs::KfdNode, desc: QueueRequest) -> Result<Self, Error> {
         let properties = native.queues;
         // These generations share eight-byte doorbells and the pointer
@@ -991,8 +998,7 @@ impl Request {
             QueueParameters::Pm4 | QueueParameters::Sdma => QueueRingMemory::System,
         };
         if ring_memory == QueueRingMemory::HostVisibleLocal
-            && (properties.target_profile != GpuTargetProfile::Gfx1201
-                || native.public_memory_bytes < u64::from(ring_size).div_ceil(page) * page)
+            && native.public_memory_bytes < u64::from(ring_size).div_ceil(page) * page
         {
             return Err(error(
                 ErrorKind::Unsupported,
@@ -1000,6 +1006,17 @@ impl Request {
             ));
         }
         Ok(Self {
+            control_memory: if desc.control_memory == QueueRingMemory::HostVisibleLocal {
+                if !native.host_atomics || native.public_memory_bytes < page {
+                    return Err(error(
+                        ErrorKind::Unsupported,
+                        "local queue controls require coherent host atomic access",
+                    ));
+                }
+                desc.control_memory
+            } else {
+                QueueRingMemory::System
+            },
             ring_size,
             ring_memory,
             queue_type,
@@ -1050,20 +1067,46 @@ fn validate_scratch(
     let Some(scratch) = scratch else {
         return Ok(None);
     };
-    let (alignment, wave_size_limit, waves_per_engine) = match properties
+    let encoding = properties
         .target_profile
-        .scratch_encoding(properties.wavefront_size)
-    {
-        Some(GpuScratchEncoding::Gfx9) => (GFX9_SCRATCH_ALIGNMENT, 0x1fff, false),
-        Some(GpuScratchEncoding::Gfx12) => (SCRATCH_ALIGNMENT, 0x3_ffff, true),
+        .scratch_encoding(properties.wavefront_size);
+    let (alignment, wave_size_limit, waves_per_engine, swizzle, resource_word3) = match encoding {
+        Some(GpuScratchEncoding::Gfx9) => (
+            GFX9_SCRATCH_ALIGNMENT,
+            0x1fff,
+            false,
+            1 << 31,
+            GFX9_SCRATCH_RESOURCE_WORD3,
+        ),
+        Some(GpuScratchEncoding::Gfx10) => (
+            GFX9_SCRATCH_ALIGNMENT,
+            0x1fff,
+            false,
+            1 << 31,
+            GFX10_SCRATCH_RESOURCE_WORD3,
+        ),
+        Some(GpuScratchEncoding::Gfx11) => (
+            SCRATCH_ALIGNMENT,
+            0x7fff,
+            true,
+            1 << 30,
+            GFX12_SCRATCH_RESOURCE_WORD3,
+        ),
+        Some(GpuScratchEncoding::Gfx12) => (
+            SCRATCH_ALIGNMENT,
+            0x3_ffff,
+            true,
+            1 << 30,
+            GFX12_SCRATCH_RESOURCE_WORD3,
+        ),
         None => {
             return Err(error(
                 ErrorKind::Unsupported,
-                "fixed AQL scratch requires a qualified GFX9 or GFX12 target",
+                "fixed AQL scratch requires an implemented target encoding",
             ));
         }
     };
-    if !waves_per_engine && scratch.lanes_per_wave != 64 {
+    if encoding == Some(GpuScratchEncoding::Gfx9) && scratch.lanes_per_wave != 64 {
         return Err(error(
             ErrorKind::InvalidArgument,
             "GFX9 scratch requires wave64 execution",
@@ -1161,13 +1204,9 @@ fn validate_scratch(
         tmpring_size: encoded_waves | (wave_units << 12),
         resource: [
             address_low,
-            (address_high & 0xffff) | if waves_per_engine { 1 << 30 } else { 1 << 31 },
+            (address_high & 0xffff) | swizzle,
             backing_size,
-            if waves_per_engine {
-                GFX12_SCRATCH_RESOURCE_WORD3
-            } else {
-                GFX9_SCRATCH_RESOURCE_WORD3
-            },
+            resource_word3,
         ],
         backing_address: scratch.device_address,
         wave64_lane_bytes,
@@ -1189,11 +1228,18 @@ fn put_aql_scratch(bytes: &mut [u8], profile: GpuTargetProfile, scratch: Option<
             put_u32(bytes, resource + 4, 1 << 31);
             put_u32(bytes, resource + 12, GFX9_SCRATCH_RESOURCE_WORD3);
         }
-        GpuTargetProfile::Gfx1200 | GpuTargetProfile::Gfx1201 | GpuTargetProfile::Gfx1250 => {
+        GpuTargetProfile::Gfx10 => {
+            put_u32(bytes, resource + 4, 1 << 31);
+            put_u32(bytes, resource + 12, GFX10_SCRATCH_RESOURCE_WORD3);
+        }
+        GpuTargetProfile::Gfx11
+        | GpuTargetProfile::Gfx1200
+        | GpuTargetProfile::Gfx1201
+        | GpuTargetProfile::Gfx1250 => {
             put_u32(bytes, resource + 4, 1 << 30);
             put_u32(bytes, resource + 12, GFX12_SCRATCH_RESOURCE_WORD3);
         }
-        GpuTargetProfile::Other | GpuTargetProfile::Gfx10 | GpuTargetProfile::Gfx11 => {}
+        GpuTargetProfile::Other => {}
     }
     if let Some(scratch) = scratch {
         put_u32(
@@ -1364,7 +1410,7 @@ fn compute_storage(properties: sysfs::KfdQueueProperties) -> Result<ComputeStora
 
 fn pm4_control(native: &sysfs::KfdNode) -> Option<Pm4Control> {
     let properties = native.queues;
-    if !cfg!(target_arch = "x86_64")
+    if !cfg!(any(target_arch = "x86_64", target_arch = "aarch64"))
         || !matches!(
             properties.target_profile,
             GpuTargetProfile::Gfx1200 | GpuTargetProfile::Gfx1201 | GpuTargetProfile::Gfx1250
@@ -1661,7 +1707,17 @@ impl KfdQueue {
         }
         let mut pointers = allocate(
             page,
-            BufferKind::Gtt,
+            if request.control_memory == QueueRingMemory::HostVisibleLocal {
+                BufferKind::Vram {
+                    public: true,
+                    coherent: true,
+                    extended_coherent: true,
+                    uncached: false,
+                    contiguous: false,
+                }
+            } else {
+                BufferKind::Gtt
+            },
             DeviceAccess::READ | DeviceAccess::WRITE,
         )?;
         pointers.zero()?;
@@ -1908,15 +1964,158 @@ impl KfdQueue {
         }
     }
 
-    pub(crate) fn set_scratch(&mut self, scratch: QueueScratch) -> Result<(), Error> {
+    /// Disconnects or reconnects while preserving ring identity and scheduling priority.
+    fn scratch_scheduling(&mut self, percentage: u32) -> Result<(), Error> {
+        let id = self
+            .id
+            .ok_or_else(|| error(ErrorKind::Unsupported, "queue has no native identifier"))?;
+        let ring_size = u32::try_from(self.info.ring_size_bytes).map_err(|_| {
+            error(
+                ErrorKind::InvalidData,
+                "queue ring size exceeds native field",
+            )
+        })?;
+        let result = self.vm.kfd().update_queue(&mut uapi::UpdateQueue {
+            ring_address: self.info.ring_device_address,
+            queue_id: id,
+            ring_size,
+            percentage,
+            priority: self.priority,
+        });
+        if let Err(source) = result {
+            // UPDATE may have disconnected the queue before failing. Do not
+            // let teardown or a later caller infer that old scratch retired.
+            self.uncertain = true;
+            return Err(native_error("scratch AMDKFD_IOC_UPDATE_QUEUE", source));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn enable_async_scratch(&mut self) -> Result<(), Error> {
         self.check()?;
+        if !self.active || self.aql.is_none() || self.progress()? != (0, 0) {
+            return Err(error(
+                ErrorKind::Busy,
+                "scratch bookkeeping requires an unpublished AQL queue",
+            ));
+        }
+        self.scratch_scheduling(0)?;
+        let result = self.backing[1]
+            .as_mut()
+            .ok_or_else(|| error(ErrorKind::Internal, "AQL control backing is missing"))?
+            .write_bytes(
+                offset_of!(AqlControlLayout, caps),
+                &(1_u32 << 1).to_ne_bytes(),
+            );
+        // Reconnect on a failed CPU update too; backing remains retained.
+        self.scratch_scheduling(100)?;
+        result
+    }
+
+    #[allow(unsafe_code)]
+    pub(crate) fn reclaim_scratch(
+        &mut self,
+        cancel: &std::sync::atomic::AtomicBool,
+    ) -> Result<(), Error> {
+        self.check()?;
+        if !self.active {
+            return Err(error(ErrorKind::Busy, "scratch queue is inactive"));
+        }
+        let aql = self
+            .aql
+            .as_ref()
+            .ok_or_else(|| error(ErrorKind::Unsupported, "scratch reclaim requires AQL"))?;
+        let xcc = aql.properties.xcc_count as usize;
+        if xcc == 0 || xcc > 128 {
+            return Err(error(ErrorKind::InvalidData, "invalid scratch XCC count"));
+        }
+        let control = self
+            .info
+            .aql_control
+            .ok_or_else(|| error(ErrorKind::Internal, "AQL control mapping is missing"))?;
+        let layout = control.host_base() as *const AqlControlLayout;
+        // SAFETY: The queue retains the complete V2 native control allocation.
+        let caps = unsafe { std::ptr::addr_of!((*layout).caps).read_volatile() };
+        if caps & 3 != 3 {
+            return Err(error(
+                ErrorKind::Unsupported,
+                "CP has not confirmed asynchronous scratch",
+            ));
+        }
+        if aql.scratch.is_none() {
+            return Ok(());
+        }
+        // A prior attempt may already have bounded CP's cached descriptor.
+        // Resume its retirement without repeatedly disconnecting a busy queue.
+        let mut last =
+            unsafe { std::ptr::addr_of!((*layout).scratch_max_use_index).read_volatile() };
+        if last == u64::MAX {
+            self.scratch_scheduling(0)?;
+            // KFD's synchronous disconnect fence publishes CP's per-XCC
+            // last-use indices before the acquire and reads below.
+            std::sync::atomic::fence(Ordering::Acquire);
+            last = 0;
+            for index in 0..xcc {
+                // SAFETY: xcc is bounded by the native V2 array extent.
+                last = last.max(unsafe {
+                    std::ptr::addr_of!((*layout).scratch_last_used_index[index][0]).read_volatile()
+                });
+            }
+            let result = self.backing[1]
+                .as_mut()
+                .ok_or_else(|| error(ErrorKind::Internal, "AQL control backing is missing"))?
+                .write_bytes(
+                    offset_of!(AqlControlLayout, scratch_max_use_index),
+                    &last.to_ne_bytes(),
+                );
+            self.scratch_scheduling(100)?;
+            result?;
+        }
+        let (read, _) = self.progress()?;
+        if read <= last || cancel.load(Ordering::Acquire) {
+            // The owner keeps backing and retries from its worker. This call
+            // never polls while the frontend's registry lock is held.
+            return Err(error(ErrorKind::Busy, "scratch last use has not retired"));
+        }
+        // Clear the visible descriptor but preserve max_use_index. CP's cached
+        // descriptor may name the old backing until its next scratch fault;
+        // the retained index bound prevents it from using that backing again.
+        self.backing[1]
+            .as_mut()
+            .ok_or_else(|| error(ErrorKind::Internal, "AQL control backing is missing"))?
+            .write_bytes(offset_of!(AqlControlLayout, compute_tmpring_size), &[0; 40])?;
+        if let Some(aql) = self.aql.as_mut() {
+            aql.scratch = None;
+        }
+        Ok(())
+    }
+
+    #[allow(unsafe_code)]
+    pub(crate) fn set_scratch(&mut self, scratch: Option<QueueScratch>) -> Result<(), Error> {
+        self.check()?;
+        if self.active && self.aql.as_ref().is_some_and(|aql| aql.scratch.is_some()) {
+            let control = self
+                .info
+                .aql_control
+                .ok_or_else(|| error(ErrorKind::Internal, "AQL control mapping is missing"))?;
+            let layout = control.host_base() as *const AqlControlLayout;
+            // SAFETY: The queue retains its complete aligned control mapping.
+            let last =
+                unsafe { std::ptr::addr_of!((*layout).scratch_max_use_index).read_volatile() };
+            if last != u64::MAX && self.progress()?.0 <= last {
+                return Err(error(
+                    ErrorKind::Busy,
+                    "previous scratch lifetime is still retiring",
+                ));
+            }
+        }
         let aql = self.aql.as_mut().ok_or_else(|| {
             error(
                 ErrorKind::Unsupported,
                 "scratch backing requires an AQL compute queue",
             )
         })?;
-        let control = validate_scratch(aql.properties, Some(scratch))?;
+        let control = validate_scratch(aql.properties, scratch)?;
         let pointers = self.backing[1]
             .as_mut()
             .ok_or_else(|| error(ErrorKind::Internal, "queue pointer backing is missing"))?;
@@ -2071,6 +2270,15 @@ impl KfdQueue {
 
     pub(crate) fn set_priority(&mut self, priority: QueuePriority) -> Result<(), Error> {
         self.check()?;
+        // KFD's SDMA MQD builders do not consume queue_properties::priority.
+        // Updating the ioctl field would otherwise claim scheduling behavior
+        // that only the compute MQD builders implement.
+        if self.info.index_unit_bytes == 1 && priority != QueuePriority::Normal {
+            return Err(error(
+                ErrorKind::Unsupported,
+                "KFD SDMA does not implement this scheduling priority",
+            ));
+        }
         if !self.active {
             return Err(error(ErrorKind::Unsupported, "queue is inactive"));
         }

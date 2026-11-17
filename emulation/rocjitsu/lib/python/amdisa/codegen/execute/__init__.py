@@ -108,9 +108,7 @@ def _register_handlers() -> None:
         gen_vector_permlane_family,
         gen_vector_permlane_idx_gen,
         gen_vector_cvt_pk,
-        gen_vector_cvt_scale,
         gen_cvt_fp8,
-        gen_cvt_scalef32,
     )
     from amdisa.codegen.execute.packed import (
         gen_pk_binop,
@@ -197,15 +195,17 @@ def _register_handlers() -> None:
         c.supports_dpp8,
         c.supports_sdwa,
         c.profile.dpp_bound_ctrl_applies_to_inactive_sources,
-        use_rj_arith=c.arch_name in ('rdna3', 'rdna4'),
+        use_rj_arith=c.arch_name in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5'),
         is_vop3=c.is_vop3,
         stage_after_destination=c.arch_name == 'rdna3_5',
+        # Preserve legacy CDNA bit-move modifiers; RDNA treats signs as FP32.
+        apply_dpp_source_modifiers=c.arch_name in ('rdna3', 'rdna4'),
     )
     DISPATCH['vector_swaprel'] = lambda c: gen_vector_swaprel(
         c.dst_ops,
         c.src_ops,
         c.profile.uses_vgpr_msb_indexing,
-        use_rj_arith=c.arch_name in ('rdna3', 'rdna4'),
+        use_rj_arith=c.arch_name in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5'),
     )
     DISPATCH['vector_sat_pack'] = lambda c: gen_vector_sat_pack(
         c.dst_ops,
@@ -314,11 +314,7 @@ def _register_handlers() -> None:
         ),
         arch_name=c.arch_name,
     )
-    DISPATCH['vector_cvt_scale'] = lambda c: gen_vector_cvt_scale(
-        c.dst_ops, c.src_ops, c.cls, c.op, c.arch_name
-    )
     DISPATCH['cvt_fp8'] = lambda c: gen_cvt_fp8(c)
-    DISPATCH['cvt_scalef32'] = lambda c: gen_cvt_scalef32(c)
 
     # Packed
     DISPATCH['pk_binop'] = lambda c: gen_pk_binop(

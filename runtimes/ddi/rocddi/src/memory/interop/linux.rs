@@ -379,13 +379,14 @@ pub fn supports_system_dma_buf_import(device: &Device) -> bool {
         .is_ok_and(|(_, state)| crate::driver::KfdDriver::supports_system_dma_buf_import(state))
 }
 
-/// Imports a qualified SYSTEM DMA-BUF into one native GPU address domain.
+/// Imports a qualified SYSTEM DMA-BUF into a common address in every requested VM.
 ///
 /// The raw descriptor is borrowed and may be invalid. The native owner first
 /// duplicates it, then establishes an independent host view plus exact GPU
 /// access before this function returns.
-/// Repeated device wrappers sharing one VM receive the same address; distinct
-/// GPU VMs are currently unsupported by this qualified profile.
+/// Repeated wrappers sharing one VM reuse its mapping. Distinct compatible
+/// GPU VMs acquire their own GEM imports and page-table mappings, retaining
+/// independent cleanup state. The first device identifies the backing's origin.
 ///
 /// # Errors
 /// Rejects unqualified placement, cache policy, source ranges, permissions, or
