@@ -389,10 +389,10 @@ TEST(kernel_replay_snapshot, releasing_the_kept_gpu_arena_frees_it)
         ASSERT_TRUE(snapshot.complete());
         ASSERT_EQ(snapshot.storage(), msnp::storage_kind::gpu_local);
     }
-    EXPECT_GT(msnp::kept_arena_bytes(ctx->gpu_pool), 0U);
+    EXPECT_GT(msnp::kept_arena_bytes(ctx->gpu_pool, agent), 0U);
 
-    msnp::release_kept_arena(ctx->gpu_pool);
-    EXPECT_EQ(msnp::kept_arena_bytes(ctx->gpu_pool), 0U);
+    msnp::release_kept_arena(ctx->gpu_pool, agent);
+    EXPECT_EQ(msnp::kept_arena_bytes(ctx->gpu_pool, agent), 0U);
 
     unrecord_for_snapshot_test(buffer);
     ASSERT_EQ(hipFree(buffer), hipSuccess);
@@ -425,26 +425,63 @@ TEST(kernel_replay_snapshot, forced_snapshots_keep_no_arena_once_they_end)
         ASSERT_TRUE(kept.complete());
         ASSERT_EQ(kept.storage(), msnp::storage_kind::gpu_local);
     }
-    ASSERT_GT(msnp::kept_arena_bytes(automatic->gpu_pool), 0U);
+    ASSERT_GT(msnp::kept_arena_bytes(automatic->gpu_pool, agent), 0U);
     {
         auto snapshot = msnp::snap(*device_only);
         ASSERT_TRUE(snapshot.complete());
         EXPECT_EQ(snapshot.storage(), msnp::storage_kind::gpu_local);
     }
-    EXPECT_EQ(msnp::kept_arena_bytes(device_only->gpu_pool), 0U);
+    EXPECT_EQ(msnp::kept_arena_bytes(device_only->gpu_pool, agent), 0U);
 
     {
         auto kept = msnp::snap(*automatic, msnp::storage_budgets_t{0, room});
         ASSERT_TRUE(kept.complete());
         ASSERT_EQ(kept.storage(), msnp::storage_kind::pinned_host);
     }
-    ASSERT_GT(msnp::kept_arena_bytes(automatic->pinned_pool), 0U);
+    ASSERT_GT(msnp::kept_arena_bytes(automatic->pinned_pool, agent), 0U);
     {
         auto snapshot = msnp::snap(*host_only);
         ASSERT_TRUE(snapshot.complete());
         EXPECT_EQ(snapshot.storage(), msnp::storage_kind::pinned_host);
     }
-    EXPECT_EQ(msnp::kept_arena_bytes(host_only->pinned_pool), 0U);
+    EXPECT_EQ(msnp::kept_arena_bytes(host_only->pinned_pool, agent), 0U);
+
+    unrecord_for_snapshot_test(buffer);
+    ASSERT_EQ(hipFree(buffer), hipSuccess);
+}
+
+// GPUs share the host pool, so an arena kept there belongs to the agent that allocated it, and only
+// it: another agent's key sees none of it and cannot free it.
+TEST(kernel_replay_snapshot, kept_arenas_belong_to_one_agent)
+{
+    if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
+
+    constexpr int n      = 4096;
+    float*        buffer = nullptr;
+    ASSERT_EQ(hipMalloc(&buffer, n * sizeof(float)), hipSuccess);
+    const auto allocation = mt::query_alloc(buffer);
+    ASSERT_TRUE(allocation.trackable);
+    const auto agent = allocation.agent;
+    ASSERT_NE(agent.handle, 0U);
+    const auto ctx = capture_context(agent, msnp::capture_mode::automatic);
+    ASSERT_TRUE(ctx.has_value());
+    // With one GPU visible, the CPU agent stands in for another agent of the shared host pool.
+    const auto other = ctx->cpu_agent;
+    ASSERT_NE(other.handle, agent.handle);
+    record_for_snapshot_test(buffer, n * sizeof(float), agent);
+    launch_fill(buffer, 7.0f, n);
+
+    {
+        auto snapshot = msnp::snap(*ctx, msnp::storage_budgets_t{0, 512U * 1024U * 1024U});
+        ASSERT_TRUE(snapshot.complete());
+        ASSERT_EQ(snapshot.storage(), msnp::storage_kind::pinned_host);
+    }
+    const auto kept = msnp::kept_arena_bytes(ctx->pinned_pool, agent);
+    EXPECT_GT(kept, 0U);
+    EXPECT_EQ(msnp::kept_arena_bytes(ctx->pinned_pool, other), 0U);
+
+    msnp::release_kept_arena(ctx->pinned_pool, other);
+    EXPECT_EQ(msnp::kept_arena_bytes(ctx->pinned_pool, agent), kept);
 
     unrecord_for_snapshot_test(buffer);
     ASSERT_EQ(hipFree(buffer), hipSuccess);
