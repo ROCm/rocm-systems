@@ -10,6 +10,7 @@
 #include "nccl.h"
 #include <cmath>
 #include <hip/hip_runtime.h>
+#include <hip/hip_fp16.h>
 
 // hip_bfloat16 type handling based on ROCm version
 // Note: Do NOT define _HIP_INCLUDE_HIP_AMD_DETAIL_HIP_BFLOAT16_H_ or _HIP_BFLOAT16_H_ guards here
@@ -83,6 +84,7 @@ DEFINE_NCCL_TYPE_TRAIT(uint32_t, ncclUint32);
 DEFINE_NCCL_TYPE_TRAIT(int64_t,  ncclInt64);
 DEFINE_NCCL_TYPE_TRAIT(uint64_t, ncclUint64);
 DEFINE_NCCL_TYPE_TRAIT(hip_bfloat16, ncclBfloat16);
+DEFINE_NCCL_TYPE_TRAIT(__half,   ncclFloat16);
 
 // Undefine macro to avoid polluting namespace
 #undef DEFINE_NCCL_TYPE_TRAIT

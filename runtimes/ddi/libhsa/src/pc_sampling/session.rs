@@ -22,27 +22,33 @@ use rocddi::topology::GpuInfo;
 
 use super::sampling_error;
 use crate::callback_arg::CallbackArg;
+use crate::debugger::TrapRestore;
 use crate::ffi::*;
 use crate::runtime::{CallbackScope, map_error};
 use crate::signal::AmdSignal;
 
+/// Sample size in bytes.
 const SAMPLE_BYTES: usize = 64;
+/// Metadata size in bytes.
 const METADATA_BYTES: usize = 64;
+/// Signal size in bytes.
 const SIGNAL_BYTES: usize = 64;
+/// Max half buffer size in bytes.
 const MAX_HALF_BUFFER_BYTES: usize = 4 * 1024 * 1024;
+/// Delay between polls of a sample-buffer notification.
 const POLL_INTERVAL: Duration = Duration::from_millis(1);
+/// Maximum wait for a trap buffer handoff.
 const WRITE_TIMEOUT: Duration = Duration::from_millis(100);
 
 // Opaque callback tokens are never reused, even when a later callback runs
 // with its context at the same stack address.
+/// Monotonic token source for PC sampling copy callbacks.
 static NEXT_COPY_TOKEN: AtomicUsize = AtomicUsize::new(1);
 
 thread_local! {
+    /// Active callback context for one PC sampling copy invocation.
     static ACTIVE_COPY: RefCell<Option<CopyContext>> = const { RefCell::new(None) };
 }
-
-const TRAP_GFX1200: &[u8] = include_bytes!("trap_gfx1200.bin");
-const TRAP_GFX1250: &[u8] = include_bytes!("trap_gfx1250.bin");
 
 /// Trap-visible control record for one double-buffered XCC sample stream.
 #[repr(C, align(64))]
@@ -51,6 +57,7 @@ struct SampleMetadata {
     ticket: AtomicU64,
     /// Capacity of each sample half in records.
     capacity: u32,
+    /// Reserved storage retained for the native layout.
     reserved0: u32,
     /// Number of records written into the first half.
     written0: AtomicU32,
@@ -64,6 +71,7 @@ struct SampleMetadata {
     watermark1: u32,
     /// GPU address of the second-half notification signal.
     signal1: u64,
+    /// Reserved storage retained for the native layout.
     reserved1: [u8; 16],
 }
 
@@ -76,6 +84,7 @@ struct TrapMemory {
     stochastic_buffers: u64,
     /// Bytes between corresponding buffers for adjacent XCCs.
     per_xcc_stride: u64,
+    /// Reserved storage retained for the native layout.
     reserved: u64,
 }
 
@@ -115,19 +124,33 @@ struct XccBuffer {
 }
 
 impl XccBuffer {
+    /// Returns the mapped trap metadata for this XCC buffer.
     fn metadata(&self) -> &SampleMetadata {
         // SAFETY: The allocation is mapped and retained by the session.
         unsafe { &*(self.host as *const SampleMetadata) }
     }
 
+    /// Returns the notification signal value for one buffer half.
     fn signal(&self, index: usize) -> &AtomicI64 {
         // SAFETY: Each signal is initialized within the retained allocation.
         &unsafe { &*(self.signals[index] as *const AmdSignal) }.value
     }
 
+    /// Returns the address of one half of the sample storage.
     fn samples(&self, index: usize) -> usize {
         self.host + METADATA_BYTES + index * self.half_bytes
     }
+}
+
+/// Retirement state of the command publishing trap instructions.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CodePublication {
+    /// No successful native instruction-cache invalidation has completed.
+    Pending,
+    /// The instruction-cache invalidation completed and retired.
+    Complete,
+    /// Native command retirement could not be confirmed.
+    Uncertain,
 }
 
 /// Native registration, trap backing, and delivery state for one session.
@@ -161,39 +184,49 @@ pub(super) struct Resources {
     lost: usize,
     /// Whether sampling is currently started.
     active: bool,
+    /// Final callback delivery has completed before legacy tool unload.
+    callbacks_quiesced: bool,
     /// Keeps backing alive when a handler update may have taken effect.
     trap_may_be_installed: bool,
+    /// A cache-command failure with uncertain retirement requires quarantine.
+    publication: CodePublication,
+    /// Retains the runtime's original trap while this sampling trap overrides it.
+    restore: Option<TrapRestore>,
 }
 
+/// Rounds a size up to the required alignment, checking overflow.
 fn align_up(value: usize, alignment: usize) -> Option<usize> {
     value
         .checked_add(alignment - 1)
         .map(|n| n & !(alignment - 1))
 }
 
-fn trap_code(info: GpuInfo) -> Option<&'static [u8]> {
+/// Selects the embedded trap code for a supported GPU generation.
+fn trap_code(info: &GpuInfo) -> Option<&'static [u8]> {
     match (info.gfx_major, info.gfx_minor, info.gfx_stepping) {
-        (12, 0, 0 | 1) => Some(TRAP_GFX1200),
-        (12, 5, 0) => Some(TRAP_GFX1250),
+        (12, 0, 0 | 1) | (12, 5, 0) => crate::debugger::trap_bytes(info),
         _ => None,
     }
 }
 
-pub(crate) fn supported_gpu(info: GpuInfo) -> bool {
+/// Checks whether embedded trap code exists for this GPU revision.
+pub(crate) fn supported_gpu(info: &GpuInfo) -> bool {
     trap_code(info).is_some()
 }
 
 impl Resources {
     #[allow(unsafe_code, clippy::too_many_arguments)]
+    /// Allocates trap backing and validates a sampling request.
     pub(super) fn prepare(
         device: Device,
-        info: GpuInfo,
+        info: &GpuInfo,
         request: PcSamplingRequest,
         trace_id: Option<NonZeroU32>,
         buffer_size: usize,
         page_size: usize,
         callback: PcSamplingDataReadyCallback,
         callback_data: CallbackArg,
+        restore: TrapRestore,
     ) -> Result<Self, Status> {
         let code = trap_code(info).ok_or(NOT_SUPPORTED)?;
         let callback = callback.ok_or(INVALID_ARGUMENT)?;
@@ -333,11 +366,15 @@ impl Resources {
             pending: VecDeque::new(),
             lost: 0,
             active: false,
+            callbacks_quiesced: false,
             trap_may_be_installed: false,
+            publication: CodePublication::Pending,
+            restore: Some(restore),
         })
     }
 
     #[allow(unsafe_code)]
+    /// Sets handler for this resources.
     fn set_handler(&self, code: u64, tma: u64) -> Result<(), Status> {
         // SAFETY: `self.allocations` retains code and TMA through successful
         // removal and the runtime retains retired allocations through teardown.
@@ -349,9 +386,29 @@ impl Resources {
         .map_err(sampling_error)
     }
 
+    /// Registers the trap handler and sampling trace with the GPU.
     fn activate(&mut self) -> Status {
+        let cache = self.device.gpu().map_err(sampling_error).and_then(|gpu| {
+            let size = self.allocations.first().ok_or(ERROR)?.info().size;
+            gpu.invalidate_code_cache(self.code_address, size, &AtomicBool::new(false))
+                .map_err(|failure| {
+                    if failure.operands_may_be_live {
+                        self.publication = CodePublication::Uncertain;
+                    }
+                    sampling_error(failure.error)
+                })
+        });
+        if let Err(status) = cache {
+            return status;
+        }
+        self.publication = CodePublication::Complete;
         let trace = self.device.gpu().and_then(|gpu| match self.trace_id {
-            Some(id) => gpu.adopt_pc_sampling(self.request, id),
+            Some(id) => {
+                // SAFETY: The admitted HSA create-from-ID call transfers sole
+                // control of the stopped matching trace. Resources retains
+                // trap/sample backing through use and uncertain teardown.
+                unsafe { crate::platform::profiling::adopt(&gpu, self.request, id) }
+            }
             None => gpu.create_pc_sampling(self.request),
         });
         let trace = match trace {
@@ -377,6 +434,7 @@ impl Resources {
         SUCCESS
     }
 
+    /// Starts this session.
     fn start(&mut self) -> Status {
         let Some(trace) = self.trace.as_mut() else {
             return INVALID_RUNTIME_STATE;
@@ -390,6 +448,7 @@ impl Resources {
         trace.start().map_or_else(sampling_error, |()| SUCCESS)
     }
 
+    /// Stops this session.
     fn stop(&mut self) -> Status {
         let Some(trace) = self.trace.as_mut() else {
             return INVALID_RUNTIME_STATE;
@@ -405,6 +464,7 @@ impl Resources {
         status
     }
 
+    /// Flushes sampled records and delivers any pending callback batch.
     fn flush(&mut self) -> Status {
         let status = self.drain_remaining();
         if status == SUCCESS {
@@ -413,13 +473,28 @@ impl Resources {
         status
     }
 
+    /// Stops sampling and retires the native trace and handler.
     fn destroy(&mut self) -> Status {
-        let status = self.stop();
-        if status != SUCCESS {
-            return status;
+        if self.publication == CodePublication::Uncertain {
+            return ERROR;
+        }
+        if !self.callbacks_quiesced {
+            let status = self.stop();
+            if status != SUCCESS {
+                return status;
+            }
         }
         if self.trap_may_be_installed {
-            if let Err(status) = self.set_handler(0, 0) {
+            let address = match self
+                .restore
+                .as_ref()
+                .ok_or(ERROR)
+                .and_then(|restore| restore.address(&self.device))
+            {
+                Ok(address) => address,
+                Err(status) => return status,
+            };
+            if let Err(status) = self.set_handler(address, 0) {
                 return status;
             }
             self.trap_may_be_installed = false;
@@ -434,6 +509,7 @@ impl Resources {
         SUCCESS
     }
 
+    /// Drains all.
     fn drain_all(&mut self) -> Status {
         for index in 0..self.xcc.len() {
             let status = self.drain_xcc(index);
@@ -444,6 +520,7 @@ impl Resources {
         SUCCESS
     }
 
+    /// Drains remaining.
     fn drain_remaining(&mut self) -> Status {
         // An earlier timed-out swap can leave the other half selected.
         // Completing two rounds also drains writes that arrived during the
@@ -456,6 +533,7 @@ impl Resources {
     }
 
     #[allow(unsafe_code)]
+    /// Drains XCC.
     fn drain_xcc(&mut self, index: usize) -> Status {
         let xcc = &mut self.xcc[index];
         let (old, count) = if let Some(swap) = xcc.pending_swap {
@@ -509,7 +587,11 @@ impl Resources {
         SUCCESS
     }
 
+    /// Delivers accumulated samples when the threshold or force flag is met.
     fn deliver(&mut self, force: bool) {
+        if self.callbacks_quiesced {
+            return;
+        }
         deliver_pending(
             &mut self.pending,
             &mut self.lost,
@@ -520,7 +602,9 @@ impl Resources {
         );
     }
 
+    /// Moves native allocations into a retired owner for safe later release.
     fn retire(&mut self) -> RetiredAssets {
+        self.restore = None;
         RetiredAssets {
             _allocations: std::mem::take(&mut self.allocations),
         }
@@ -528,8 +612,9 @@ impl Resources {
 }
 
 impl Drop for Resources {
+    /// Retains uncertain trap backing if native handler removal could fail.
     fn drop(&mut self) {
-        if self.trap_may_be_installed {
+        if self.trap_may_be_installed || self.publication == CodePublication::Uncertain {
             // Native failure may have published these addresses to a GPU.
             std::mem::forget(std::mem::take(&mut self.allocations));
         }
@@ -552,11 +637,14 @@ struct CopyContext {
 
 /// Restores the previous thread-local copy context when a callback returns.
 struct CopyScope {
+    /// Unique callback identity that is never reused.
     token: NonZeroUsize,
+    /// Optional previous retained by this copy scope.
     previous: Option<CopyContext>,
 }
 
 impl CopyScope {
+    /// Installs a temporary callback context for a copy request.
     fn enter(bytes: *const u8, size: usize) -> Option<Self> {
         let token = NEXT_COPY_TOKEN
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |next| {
@@ -578,10 +666,12 @@ impl CopyScope {
         Some(Self { token, previous })
     }
 
+    /// Returns a unique opaque token for the active copy callback.
     fn opaque_token(&self) -> *mut c_void {
         std::ptr::without_provenance_mut(self.token.get())
     }
 
+    /// Returns copy progress and whether the callback completed.
     fn progress(&self) -> Option<(usize, bool)> {
         ACTIVE_COPY
             .try_with(|slot| {
@@ -597,6 +687,7 @@ impl CopyScope {
 }
 
 impl Drop for CopyScope {
+    /// Restores the previous thread-local PC sampling copy context.
     fn drop(&mut self) {
         let _ = ACTIVE_COPY.try_with(|slot| {
             slot.replace(self.previous.take());
@@ -605,6 +696,7 @@ impl Drop for CopyScope {
 }
 
 #[allow(unsafe_code)]
+/// Delivers pending sample bytes through the caller’s copy callback.
 fn deliver_pending(
     pending: &mut VecDeque<u8>,
     lost: &mut usize,
@@ -651,6 +743,7 @@ fn deliver_pending(
 }
 
 #[allow(unsafe_code)]
+/// Copies samples after validating its source and destination.
 unsafe extern "C" fn copy_samples(
     context: *mut c_void,
     size: usize,
@@ -705,10 +798,11 @@ pub(crate) struct SessionHandle {
 }
 
 impl SessionHandle {
+    /// Creates a synchronized PC sampling session owner.
     pub(super) fn create(
         resources: Resources,
         agent: HsaAgent,
-        quarantine: &AtomicBool,
+        quarantine: &crate::runtime::GenerationHealth,
     ) -> Result<Arc<Self>, Status> {
         let session = Arc::new(Self {
             agent,
@@ -728,6 +822,9 @@ impl SessionHandle {
                     if session.stop_worker.load(Ordering::Acquire) {
                         break;
                     }
+                    let Some(_lease) = crate::runtime::enter_runtime_service() else {
+                        continue;
+                    };
                     let Ok(mut resources) = session.resources.lock() else {
                         break;
                     };
@@ -746,13 +843,17 @@ impl SessionHandle {
         let (status, trap_may_be_installed) = match session.resources.lock() {
             Ok(mut resources) => {
                 let status = resources.activate();
-                (status, resources.trap_may_be_installed)
+                (
+                    status,
+                    resources.trap_may_be_installed
+                        || resources.publication == CodePublication::Uncertain,
+                )
             }
             Err(_) => (ERROR, true),
         };
         if status != SUCCESS {
             if trap_may_be_installed {
-                quarantine.store(true, Ordering::Release);
+                quarantine.quarantine();
             }
             session.quarantine();
             return Err(status);
@@ -760,24 +861,60 @@ impl SessionHandle {
         Ok(session)
     }
 
-    pub(super) fn start(&self) -> Status {
+    /// Starts this session.
+    pub(crate) fn start(&self) -> Status {
+        if self.stop_worker.load(Ordering::Acquire) {
+            return INVALID_RUNTIME_STATE;
+        }
         self.resources
             .lock()
             .map_or(ERROR, |mut resources| resources.start())
     }
 
-    pub(super) fn stop(&self) -> Status {
+    /// Stops this session.
+    pub(crate) fn stop(&self) -> Status {
+        if self.stop_worker.load(Ordering::Acquire) {
+            return INVALID_RUNTIME_STATE;
+        }
         self.resources
             .lock()
             .map_or(ERROR, |mut resources| resources.stop())
     }
 
-    pub(super) fn flush(&self) -> Status {
+    /// Flushes pending samples through the synchronized session.
+    pub(crate) fn flush(&self) -> Status {
+        if self.stop_worker.load(Ordering::Acquire) {
+            return INVALID_RUNTIME_STATE;
+        }
         self.resources
             .lock()
             .map_or(ERROR, |mut resources| resources.flush())
     }
 
+    /// Stops callback delivery while native resources and public handles remain
+    /// available to a legacy tool's `OnUnload` callback.
+    pub(crate) fn quiesce_for_tool_unload(&self) -> Status {
+        self.stop_worker.store(true, Ordering::Release);
+        let worker = match self.worker.lock() {
+            Ok(mut worker) => worker.take(),
+            Err(_) => return ERROR,
+        };
+        if let Some(worker) = worker {
+            if worker.join().is_err() {
+                return ERROR;
+            }
+        }
+        let Ok(mut resources) = self.resources.lock() else {
+            return ERROR;
+        };
+        let status = resources.stop();
+        if status == SUCCESS {
+            resources.callbacks_quiesced = true;
+        }
+        status
+    }
+
+    /// Destroys the session and returns assets requiring deferred release.
     pub(crate) fn destroy(&self) -> Result<RetiredAssets, Status> {
         let mut resources = self.resources.lock().map_err(|_| ERROR)?;
         if resources.trace.is_none() && resources.allocations.is_empty() {
@@ -799,6 +936,7 @@ impl SessionHandle {
         Ok(resources.retire())
     }
 
+    /// Marks resources as retained because native teardown is uncertain.
     pub(crate) fn quarantine(&self) {
         self.stop_worker.store(true, Ordering::Release);
         let worker = self

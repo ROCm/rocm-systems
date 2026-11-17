@@ -9,6 +9,8 @@
 #pragma once
 
 #include <string>
+#include <string_view>
+#include <utility>
 
 namespace rocjitsu {
 
@@ -23,5 +25,24 @@ inline void report(std::string *out, const char *msg) {
   if (out)
     *out = msg;
 }
+
+/// @brief Diagnostic sink that replaces an optional caller-owned error string.
+/// @details The sink owns its optional prefix and prepends it on every replacement
+/// of the output string; messages do not accumulate. Keep this callable alive as
+/// long as a DiagnosticEmitter borrows it.
+class OptionalStringDiagnosticSink {
+public:
+  explicit OptionalStringDiagnosticSink(std::string *out, std::string prefix = {})
+      : out_(out), prefix_(std::move(prefix)) {}
+
+  void operator()(std::string_view message) const {
+    if (out_ != nullptr)
+      *out_ = prefix_ + std::string(message);
+  }
+
+private:
+  std::string *out_;
+  std::string prefix_;
+};
 
 } // namespace rocjitsu

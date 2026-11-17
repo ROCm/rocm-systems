@@ -8,7 +8,6 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_static_resolve.h"
 #include <format>
 #include <optional>
-#include <stdexcept>
 #include <string>
 
 namespace rocjitsu {
@@ -26,7 +25,8 @@ std::string reg_name(const char *prefix, int reg_num, int size_bits) {
 
 Operand::Operand(int size_bits, OperandType opr_type, int encoding_value)
     : IsaOperand<Isa>(size_bits, opr_type, encoding_value),
-      execution_backend_(static_cast<const ExecutionBackend *>(current_isa_operand_backend())) {
+      execution_backend_(
+          static_cast<const ExecutionBackend *>(detail::current_isa_operand_backend_inline())) {
   switch (opr_type) {
   case OperandType::OPR_ATTR:
     if (!((encoding_value >= 0 && encoding_value <= 32)))
@@ -192,7 +192,8 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value,
 
 Operand::Operand(int size_bits, OperandType opr_type, uint64_t literal64_value, bool is_literal64)
     : IsaOperand<Isa>(size_bits, opr_type, static_cast<int>(literal64_value)),
-      execution_backend_(static_cast<const ExecutionBackend *>(current_isa_operand_backend())),
+      execution_backend_(
+          static_cast<const ExecutionBackend *>(detail::current_isa_operand_backend_inline())),
       literal64_value_(literal64_value), has_literal64_(is_literal64) {
   is_vgpr_ = is_vgpr_operand_type(opr_type);
 }
@@ -1310,6 +1311,13 @@ bool Operand::has_register_selector() const {
   }
 }
 
+bool Operand::execution_backend_available() const {
+  // Captured tables are the immutable full table or null; no
+  // independently populated/partial tables are supported.
+  return execution_backend_ != nullptr &&
+         (!delegate() || delegate()->execution_backend_available());
+}
+
 bool Operand::simd_capable() const {
   decltype(ExecutionBackend::simd_capable) callback =
       execution_backend_ ? execution_backend_->simd_capable : nullptr;
@@ -1320,8 +1328,10 @@ void Operand::read_lane_chunk(const amdgpu::Wavefront &wf, uint32_t lane_base, u
                               uint32_t *out) const {
   decltype(ExecutionBackend::read_lane_chunk) callback =
       execution_backend_ ? execution_backend_->read_lane_chunk : nullptr;
-  if (!callback)
-    throw std::logic_error("operand execution backend is not linked");
+  if (!callback) {
+    report_missing_execution_backend(wf);
+    return;
+  }
   (this->*callback)(wf, lane_base, count, out);
 }
 
@@ -1329,72 +1339,90 @@ void Operand::write_lane_chunk(amdgpu::Wavefront &wf, uint32_t lane_base, uint32
                                const uint32_t *vals, uint64_t mask) const {
   decltype(ExecutionBackend::write_lane_chunk) callback =
       execution_backend_ ? execution_backend_->write_lane_chunk : nullptr;
-  if (!callback)
-    throw std::logic_error("operand execution backend is not linked");
+  if (!callback) {
+    report_missing_execution_backend(wf);
+    return;
+  }
   (this->*callback)(wf, lane_base, count, vals, mask);
 }
 
 uint32_t Operand::read_scalar(const amdgpu::Wavefront &wf) const {
   decltype(ExecutionBackend::read_scalar) callback =
       execution_backend_ ? execution_backend_->read_scalar : nullptr;
-  if (!callback)
-    throw std::logic_error("operand execution backend is not linked");
+  if (!callback) {
+    report_missing_execution_backend(wf);
+    return 0;
+  }
   return (this->*callback)(wf);
 }
 
 uint32_t Operand::read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const {
   decltype(ExecutionBackend::read_lane) callback =
       execution_backend_ ? execution_backend_->read_lane : nullptr;
-  if (!callback)
-    throw std::logic_error("operand execution backend is not linked");
+  if (!callback) {
+    report_missing_execution_backend(wf);
+    return 0;
+  }
   return (this->*callback)(wf, lane);
 }
 
 void Operand::write_scalar(amdgpu::Wavefront &wf, uint32_t val) const {
   decltype(ExecutionBackend::write_scalar) callback =
       execution_backend_ ? execution_backend_->write_scalar : nullptr;
-  if (!callback)
-    throw std::logic_error("operand execution backend is not linked");
+  if (!callback) {
+    report_missing_execution_backend(wf);
+    return;
+  }
   (this->*callback)(wf, val);
 }
 
 void Operand::write_lane(amdgpu::Wavefront &wf, uint32_t lane, uint32_t val) const {
   decltype(ExecutionBackend::write_lane) callback =
       execution_backend_ ? execution_backend_->write_lane : nullptr;
-  if (!callback)
-    throw std::logic_error("operand execution backend is not linked");
+  if (!callback) {
+    report_missing_execution_backend(wf);
+    return;
+  }
   (this->*callback)(wf, lane, val);
 }
 
 uint64_t Operand::read_lane64(const amdgpu::Wavefront &wf, uint32_t lane) const {
   decltype(ExecutionBackend::read_lane64) callback =
       execution_backend_ ? execution_backend_->read_lane64 : nullptr;
-  if (!callback)
-    throw std::logic_error("operand execution backend is not linked");
+  if (!callback) {
+    report_missing_execution_backend(wf);
+    return 0;
+  }
   return (this->*callback)(wf, lane);
 }
 
 void Operand::write_lane64(amdgpu::Wavefront &wf, uint32_t lane, uint64_t val) const {
   decltype(ExecutionBackend::write_lane64) callback =
       execution_backend_ ? execution_backend_->write_lane64 : nullptr;
-  if (!callback)
-    throw std::logic_error("operand execution backend is not linked");
+  if (!callback) {
+    report_missing_execution_backend(wf);
+    return;
+  }
   (this->*callback)(wf, lane, val);
 }
 
 uint64_t Operand::read_scalar64(const amdgpu::Wavefront &wf) const {
   decltype(ExecutionBackend::read_scalar64) callback =
       execution_backend_ ? execution_backend_->read_scalar64 : nullptr;
-  if (!callback)
-    throw std::logic_error("operand execution backend is not linked");
+  if (!callback) {
+    report_missing_execution_backend(wf);
+    return 0;
+  }
   return (this->*callback)(wf);
 }
 
 void Operand::write_scalar64(amdgpu::Wavefront &wf, uint64_t val) const {
   decltype(ExecutionBackend::write_scalar64) callback =
       execution_backend_ ? execution_backend_->write_scalar64 : nullptr;
-  if (!callback)
-    throw std::logic_error("operand execution backend is not linked");
+  if (!callback) {
+    report_missing_execution_backend(wf);
+    return;
+  }
   (this->*callback)(wf, val);
 }
 

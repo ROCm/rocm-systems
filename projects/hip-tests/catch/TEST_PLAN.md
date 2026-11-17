@@ -13,8 +13,8 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 
 | Tier | Cases | Tagged | Missing `@asserts` |
 |---|---:|---:|---:|
-| `contract` | 627 | 627 | 0 |
-| **total** | **627** | **627** | **0** |
+| `contract` | 644 | 644 | 0 |
+| **total** | **644** | **644** | **0** |
 
 ## Tier: `contract`
 
@@ -151,15 +151,16 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_Device_HipGetDeviceProperties_WarpSize_IsPositive` | hipGetDeviceProperties | reported warp size is positive |
 | `Contract_Device_HipGetDevice_CurrentOrdinal_IsWithinDeviceCount` | hipGetDevice | the current device ordinal is in range [0, device_count) |
 
-### `device_config` (6 cases)
+### `device_config` (7 cases)
 
 | Case | API | Asserts |
 |---|---|---|
 | `Contract_DeviceConfig_HipDeviceGetCacheConfig_Default_ReturnsEnumValue` | hipDeviceGetCacheConfig | the queried cache preference is one of the documented hipFuncCache_t enumerators |
-| `Contract_DeviceConfig_HipDeviceGetLimit_Default_ReportsStackAndHeapAndRejectsInvalid` | hipDeviceGetLimit | stack and heap limits resolve or report unsupported, and an out-of-range limit is not accepted |
+| `Contract_DeviceConfig_HipDeviceGetLimit_Default_ReportsStackAndHeapAndRejectsInvalid` | hipDeviceGetLimit | stack, heap, and persisting L2 limits resolve or report unsupported, and an out-of-range limit is not accepted |
 | `Contract_DeviceConfig_HipDeviceGetSharedMemConfig_Default_ReturnsEnumValue` | hipDeviceGetSharedMemConfig | when supported, reports one of the documented hipSharedMemConfig enumerators |
 | `Contract_DeviceConfig_HipDeviceSetCacheConfig_Default_IsAcceptedOrUnsupported` | hipDeviceSetCacheConfig | setting the cache preference either succeeds or reports NotSupported |
 | `Contract_DeviceConfig_HipDeviceSetLimit_Default_RoundTripsOrIsUnsupported` | hipDeviceSetLimit | setting the heap limit back to its current value succeeds or reports unsupported |
+| `Contract_DeviceConfig_HipDeviceSetLimit_PersistingL2_RoundTripsAndRejectsOverMax` | hipDeviceSetLimit | persisting L2 cache set/get round-trips, and exceeding the max is rejected |
 | `Contract_DeviceConfig_HipGetDeviceFlags_AndStreamPriorityRange_AreConsistent` | hipGetDeviceFlags | the schedule subfield is a documented mode and greatest stream priority <= least |
 
 ### `device_identity` (9 cases)
@@ -474,6 +475,19 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_GraphHost_HipGraphHostNodeGetParams_Default_RoundTripsFnAndUserData` | hipGraphHostNodeGetParams | retrieved host-node params round-trip the callback fn and userData pointers |
 | `Contract_GraphHost_HipGraphNodeGetType_NodeType_ReportsHost` | hipGraphNodeGetType | a node added via hipGraphAddHostNode reports type hipGraphNodeTypeHost |
 
+### `graph_id` (8 cases)
+
+| Case | API | Asserts |
+|---|---|---|
+| `Contract_GraphId_HipGraphExecGetId_NullArguments_ReturnInvalidValue` | hipGraphExecGetId | returns hipErrorInvalidValue when either argument is null |
+| `Contract_GraphId_HipGraphExecGetId_SameExecSameId_OtherExecOtherId` | hipGraphExecGetId | repeated calls return the same ID and different executable graphs have different IDs |
+| `Contract_GraphId_HipGraphGetId_NullArguments_ReturnInvalidValue` | hipGraphGetId | returns hipErrorInvalidValue when either argument is null |
+| `Contract_GraphId_HipGraphGetId_SameGraphSameId_OtherGraphOtherId` | hipGraphGetId | repeated calls return the same ID and different graphs have different IDs |
+| `Contract_GraphId_HipGraphNodeGetLocalId_NullArguments_ReturnInvalidValue` | hipGraphNodeGetLocalId | returns hipErrorInvalidValue when either argument is null |
+| `Contract_GraphId_HipGraphNodeGetLocalId_SameNodeSameId_OtherNodeOtherId` | hipGraphNodeGetLocalId | repeated calls return the same ID and different nodes have different IDs |
+| `Contract_GraphId_HipGraphNodeGetToolsId_NullArguments_ReturnInvalidValue` | hipGraphNodeGetToolsId | returns hipErrorInvalidValue when either argument is null |
+| `Contract_GraphId_HipGraphNodeGetToolsId_SameNodeSameId_OtherNodeOtherId` | hipGraphNodeGetToolsId | repeated calls return the same ID and different nodes have different IDs |
+
 ### `graph_instantiate_params` (2 cases)
 
 | Case | API | Asserts |
@@ -704,7 +718,7 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_KernelNameRef_HipKernelNameRef_ByFunction_NamesResolvedKernel` | hipKernelNameRef | resolves a hipFunction_t (from hipGetFuncBySymbol) to a non-empty name mentioning the kernel identifier |
 | `Contract_KernelNameRef_HipKernelNameRef_NvidiaUnsupported_IsSkipped` | hipKernelNameRef | NVIDIA backend does not expose this API family; the contract is skipped until backend parity exists |
 
-### `kernel_object_attributes` (5 cases)
+### `kernel_object_attributes` (7 cases)
 
 | Case | API | Asserts |
 |---|---|---|
@@ -713,6 +727,8 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_KernelObjectAttributes_HipKernelSetAttributeForDevice_NonCurrentDevice_PreservesCurrentAndReadsBack` | hipKernelSetAttributeForDevice | preserves current device and target value |
 | `Contract_KernelObjectAttributes_HipKernelSetAttributeForDevice_NvidiaPre128Unsupported_IsSkipped` | hipKernelSetAttributeForDevice | unavailable before CUDA 12.8 |
 | `Contract_KernelObjectAttributes_HipKernelSetAttribute_SetMaxDynamicSharedMemory_IsAcceptedOrUnsupported` | hipKernelSetAttribute | setting max dynamic shared memory to zero is either accepted or reported as unsupported, never another error |
+| `Contract_KernelObjectAttributes_HipKernelSetCacheConfig_NvidiaPre120Unsupported_IsSkipped` | hipKernelSetCacheConfig | unavailable before CUDA 12.0 |
+| `Contract_KernelObjectAttributes_HipKernelSetCacheConfig_Values_AreSupported` | hipKernelSetCacheConfig | all hipFuncCache_t values are supported and kernel |
 
 ### `library` (21 cases)
 
@@ -786,10 +802,11 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_MemAdviseV2_HipMemAdviseV2_SetReadMostly_IsAcceptedOrUnsupported` | hipMemAdvise_v2 | the location-based set-read-mostly hint on managed memory is accepted or reported unsupported |
 | `Contract_MemAdviseV2_HipMemPrefetchAsyncV2_PrefetchAsync_IsAcceptedOrUnsupported` | hipMemPrefetchAsync_v2 | a location-based prefetch either completes after stream sync or is reported unsupported |
 
-### `mem_batch_copy` (3 cases)
+### `mem_batch_copy` (4 cases)
 
 | Case | API | Asserts |
 |---|---|---|
+| `Contract_MemBatchCopy_HipExtMemcpyBatchAsync_TwoOps_RoundTripBytes` | hipExtMemcpyBatchAsync | a two-op batch with all extended parameters null (no asymmetric swap or wait/signal) and default attributes delivers each source to its destination after synchronize (or reports unsupported) |
 | `Contract_MemBatchCopy_HipMemcpyBatchAsync_NullDestination_IsRejected` | hipMemcpyBatchAsync | a batch with a null destination never returns hipSuccess (or reports unsupported) |
 | `Contract_MemBatchCopy_HipMemcpyBatchAsync_TwoOps_RoundTripBytes` | hipMemcpyBatchAsync | a two-op batch delivers each source to its matching destination after synchronize (or reports unsupported) |
 | `Contract_MemBatchCopy_HipMemcpyBatchAsync_WithAttributes_RoundTripBytes` | hipMemcpyBatchAsync | a per-copy attribute (access order, location hints) does not change the copied bytes (or reports unsupported) |
@@ -815,6 +832,15 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_MemBatchDiscard_HipMemPrefetchBatchAsync_NvidiaPrefetchBatchUnsupported_IsSkipped` | hipMemPrefetchBatchAsync | NVIDIA CUDA versions before 13.0 do not expose the batch prefetch API; the contract is skipped until backend parity exists |
 | `Contract_MemBatchDiscard_HipMemPrefetchBatchAsync_PrefetchBatch_IsAcceptedOrUnsupported` | hipMemPrefetchBatchAsync | prefetching a batch of managed ranges to the current device is accepted or reported unsupported |
 
+### `mem_copy_with_attributes` (4 cases)
+
+| Case | API | Asserts |
+|---|---|---|
+| `Contract_MemCopyWithAttributes_HipMemcpy3DWithAttributesAsync_HostDeviceHostRoundTrip_IsVisibleAfterSync` | hipMemcpy3DWithAttributesAsync | a single stream-ordered pointer copy round-trips bytes after stream sync |
+| `Contract_MemCopyWithAttributes_HipMemcpy3DWithAttributesAsync_NullOpAndReservedFlags_ReturnInvalidValue` | hipMemcpy3DWithAttributesAsync | a null operation pointer and a reserved nonzero flags value are rejected with hipErrorInvalidValue |
+| `Contract_MemCopyWithAttributes_HipMemcpyWithAttributesAsync_HostDeviceHostRoundTrip_IsVisibleAfterSync` | hipMemcpyWithAttributesAsync | a stream-ordered host->device->host copy round-trips bytes after stream sync |
+| `Contract_MemCopyWithAttributes_HipMemcpyWithAttributesAsync_NullAttributes_ReturnsInvalidValue` | hipMemcpyWithAttributesAsync | a null attributes pointer is rejected with hipErrorInvalidValue |
+
 ### `mem_location_pool` (4 cases)
 
 | Case | API | Asserts |
@@ -824,10 +850,11 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_MemLocationPool_HipMemGetMemPool_Default_ReturnsPoolForDeviceLocation` | hipMemGetMemPool | a location-based pool query returns a non-null pool for a valid device location |
 | `Contract_MemLocationPool_HipMemSetMemPool_Default_RoundTripsThroughGetMemPool` | hipMemSetMemPool | a pool set for a location round-trips through a subsequent hipMemGetMemPool query |
 
-### `mem_map_array` (2 cases)
+### `mem_map_array` (3 cases)
 
 | Case | API | Asserts |
 |---|---|---|
+| `Contract_MemMapArray_HipArrayGetSparseProperties_InvalidArgs_AreRejected` | hipArrayGetSparseProperties | rejects a null properties-out pointer, a null array handle, or a non-sparse array with a non-success status |
 | `Contract_MemMapArray_HipMemMapArrayAsync_NullMapList_IsRejected` | hipMemMapArrayAsync | rejects a null map-info list with a non-success status |
 | `Contract_MemMapArray_HipMemMapArrayAsync_ZeroCount_IsRejected` | hipMemMapArrayAsync | rejects a zero operation count with a non-success status |
 

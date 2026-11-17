@@ -406,6 +406,8 @@ class PathsCommMicrotest : public PathsMicrotest {
     comm_->pxnDisable = RCCL_VALUE_UNSET;
     comm_->config.nChannelsPerNetPeer = NCCL_CONFIG_UNDEF_INT;
     comm_->config.maxP2pPeers = NCCL_CONFIG_UNDEF_INT;
+    // ncclParseCommConfig's default. NCCL 2.32.6 caps p2pnChannels at pow2Down(config.maxCTAs).
+    comm_->config.maxCTAs = MAXCHANNELS;
     AllowP2pBetweenEveryGpu();
   }
 
@@ -546,6 +548,15 @@ TEST_F(PathsMnnvlMicrotest, CheckP2p_CliquePeerOnAnotherHostIsP2p) {
   EXPECT_EQ(1, cudaP2p);
   peers_[1].fabricInfo.cliqueId = 4;
   EXPECT_EQ(0, P2p(0, 1, nullptr, nullptr, nullptr, comm_.get()));
+}
+
+TEST_F(PathsMnnvlMicrotest, CheckP2p_CliquePeerBypassesTheUserDisable) {
+  RcclUnitTesting::ScopedEnv p2pDisable("NCCL_P2P_DISABLE", "1");
+  ncclTopoUserP2pLevel = -1;
+
+  EXPECT_EQ(1, P2p(0, 1, nullptr, nullptr, nullptr, comm_.get()));
+  peers_[1].hostHash = 1;
+  EXPECT_EQ(0, P2p(0, 1, nullptr, nullptr, nullptr, comm_.get()));  // same-host peers still honor it
 }
 
 TEST_F(PathsMnnvlMicrotest, CheckP2p_CrossCliqueUsesTheFabricUnlessTheUserLevelIsBelowNvl) {
@@ -706,22 +717,6 @@ TEST_F(PathsGdrMicrotest, CheckGdr_UnknownNetOrRankFails) {
   EXPECT_EQ(ncclInternalError, ncclTopoCheckGdr(system_.get(), 5, system_->nodes[NET].nodes[0].id, 0, &mode));
 }
 
-TEST_F(PathsGdrMicrotest, IsGdrAvail_AnyNicWithGdrInEitherDirection) {
-  Use(BuildWithPaths(XgmiSystem(2, 2, true)));
-  bool avail = false;
-
-  ASSERT_EQ(ncclSuccess, ncclTopoIsGdrAvail(system_.get(), 1, &avail));
-  EXPECT_TRUE(avail);
-
-  g_params["NET_GDR_READ"] = 0;
-  ASSERT_EQ(ncclSuccess, ncclTopoIsGdrAvail(system_.get(), 1, &avail));
-  EXPECT_TRUE(avail);
-
-  for (int n = 0; n < 2; n++) system_->nodes[NET].nodes[n].net.gdrSupport = 0;
-  ASSERT_EQ(ncclSuccess, ncclTopoIsGdrAvail(system_.get(), 1, &avail));
-  EXPECT_FALSE(avail);
-}
-
 // --- Network flush and intra-node net
 
 int g_forceFlush = 0;
@@ -765,7 +760,7 @@ TEST_F(PathsMicrotest, CheckNet_OnlyWhenBothGpusReachFasterNicsAndIntraNetIsAllo
 
   g_params["NET_DISABLE_INTRA"] = 0;
   ASSERT_EQ(ncclSuccess, ncclTopoCheckNet(pcie.get(), 0, 1, &net));
-  EXPECT_EQ(1, net);  // 48 GB/s to a NIC beats the 16 GB/s inter-socket path
+  EXPECT_EQ(1, net);  // 48 GB/s to a NIC beats the 32 GB/s Turin inter-socket path
   ASSERT_EQ(ncclSuccess, ncclTopoCheckNet(pcie.get(), 0, 9, &net));
   EXPECT_EQ(1, net);
 
@@ -1145,6 +1140,16 @@ TEST_F(PathsP2pChannelsMicrotest, P2pChannels_AinicRestoresTwoChannelsPerPeerBel
   Setup(BuildWithPaths(XgmiSystem(1, 1, true)), 16, 16, 8);
   Compute();
   EXPECT_EQ(1, comm_->p2pnChannelsPerPeer);  // at scale: one per peer
+}
+
+// NCCL 2.32.6: rounding p2pnChannels up to a power of two may exceed maxCTAs, so it is rounded down to honor it.
+TEST_F(PathsP2pChannelsMicrotest, P2pChannels_MaxCtasCapsTheRoundedCount) {
+  Setup(BuildWithPaths(XgmiSystem(4, 1, false, "gfx1250")), 4, 1, MAXCHANNELS);
+  comm_->config.maxCTAs = 100;
+
+  Compute();
+
+  EXPECT_EQ(64, comm_->p2pnChannels);  // the uncapped CU-bound pool is 256; pow2Down(100) = 64
 }
 
 TEST_F(PathsP2pChannelsMicrotest, P2pChannels_InitChannelFailureIsReturned) {
