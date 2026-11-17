@@ -675,6 +675,10 @@ class IsaProfile(ABC):
         """Whether image dimensions come from T# rather than instruction DIM."""
         return False
 
+    def mimg_r128_resource(self, name: str) -> bool:
+        """Whether R128 selects a four-DWORD resource for this MIMG opcode."""
+        return False
+
     @property
     def mimg_max_nsa_words(self) -> int:
         """Maximum DWORD count of a MIMG NSA extension."""
@@ -2374,6 +2378,11 @@ class Cdna2Profile(CdnaProfile):
                 EncodingModifier('scc'),
                 EncodingModifier('lds'),
             ]
+        if upper == 'ENC_MIMG':
+            return [
+                EncodingModifier(flag)
+                for flag in ('unorm', 'glc', 'slc', 'scc', 'a16', 'lwe', 'da', 'd16')
+            ]
         return []
 
     @property
@@ -2407,6 +2416,9 @@ class Rdna1Profile(_AmdgpuProfileBase):
     coincident_ds_ignores_data1 = True
 
     models_nop_issue_delay = True
+
+    def mimg_r128_resource(self, name: str) -> bool:
+        return not name.startswith('IMAGE_BVH')
 
     @property
     def mimg_max_nsa_words(self) -> int:
@@ -2610,12 +2622,39 @@ class Rdna3Profile(_AmdgpuProfileBase):
     flat_saddr_null_aliases = ('127',)
 
     @property
+    def renders_gfx11_image_syntax(self) -> bool:
+        return True
+
+    @property
     def has_gfx11_image_address_extension(self) -> bool:
         return True
+
+    def mimg_r128_resource(self, name: str) -> bool:
+        return name not in self.gfx11_mimg_fixed_vaddr_words
 
     @property
     def mimg_max_nsa_words(self) -> int:
         return 1
+
+    @property
+    def gfx11_mimg_nsa_group_words(
+        self,
+    ) -> dict[str, tuple[tuple[int, ...], tuple[int, ...]]]:
+        return {
+            'IMAGE_BVH_INTERSECT_RAY': ((1, 1, 3, 3, 3), (1, 1, 3, 3)),
+            'IMAGE_BVH64_INTERSECT_RAY': ((2, 1, 3, 3, 3), (2, 1, 3, 3)),
+        }
+
+    @property
+    def gfx11_mimg_gather_style_instructions(self) -> frozenset[str]:
+        return frozenset({'IMAGE_MSAA_LOAD'})
+
+    @property
+    def gfx11_mimg_fixed_vdata_words(self) -> dict[str, int]:
+        return {
+            'IMAGE_BVH_INTERSECT_RAY': 4,
+            'IMAGE_BVH64_INTERSECT_RAY': 4,
+        }
 
     @property
     def gfx11_mimg_fixed_vaddr_words(self) -> dict[str, tuple[int, int]]:
@@ -2873,36 +2912,12 @@ class Rdna3_5Profile(Rdna3Profile):
         return ((192, 192),)
 
     @property
-    def renders_gfx11_image_syntax(self) -> bool:
-        return True
-
-    @property
     def split_ds_2addr_offsets(self) -> bool:
         return True
 
     @property
     def vop3p_absolute_source_instructions(self) -> frozenset[str]:
         return frozenset({'V_FMA_MIX_F32', 'V_FMA_MIXLO_F16', 'V_FMA_MIXHI_F16'})
-
-    @property
-    def gfx11_mimg_gather_style_instructions(self) -> frozenset[str]:
-        return frozenset({'IMAGE_MSAA_LOAD'})
-
-    @property
-    def gfx11_mimg_fixed_vdata_words(self) -> dict[str, int]:
-        return {
-            'IMAGE_BVH_INTERSECT_RAY': 4,
-            'IMAGE_BVH64_INTERSECT_RAY': 4,
-        }
-
-    @property
-    def gfx11_mimg_nsa_group_words(
-        self,
-    ) -> dict[str, tuple[tuple[int, ...], tuple[int, ...]]]:
-        return {
-            'IMAGE_BVH_INTERSECT_RAY': ((1, 1, 3, 3, 3), (1, 1, 3, 3)),
-            'IMAGE_BVH64_INTERSECT_RAY': ((2, 1, 3, 3, 3), (2, 1, 3, 3)),
-        }
 
     @property
     def sendmsg_return_symbolic(self) -> bool:
