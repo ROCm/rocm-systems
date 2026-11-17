@@ -1017,8 +1017,8 @@ TEST(BinaryTranslatorE2E, LegacyAtomicMinMaxRequiresSemanticExpansion) {
 }
 
 TEST(BinaryTranslatorE2E, LegacyCacheAtomicAddRequiresSemanticExpansion) {
-  // Input denormals flush on CDNA4 and survive on RDNA4. A direct opcode
-  // substitution changes 0x00000001 + 0x00000001 from zero to 0x00000002.
+  // CDNA4 and RDNA4 L2 F32 ADD both keep input denormals, but their FLAT-to-LDS
+  // denormal policies still differ, so the instruction needs an expansion.
   const std::array<uint32_t, 2> atomic =
       cdna4::build_flat(cdna4::kFlatAtomicAddF32Flat,
                         {.seg = 2, .sc0 = 1, .addr = 4, .data = 0, .saddr = 4, .vdst = 6});
@@ -1028,6 +1028,29 @@ TEST(BinaryTranslatorE2E, LegacyCacheAtomicAddRequiresSemanticExpansion) {
   AmdGpuCodeObject source(image.data(), image.size());
   ASSERT_TRUE(source.is_valid());
   BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
+  const TranslatedCodeObject result = translator.translate(source);
+  std::string diagnostics;
+  for (const TranslationDiagnostic &diagnostic : result.diagnostics)
+    diagnostics += diagnostic.message + "\n";
+  EXPECT_FALSE(result.ok());
+  EXPECT_EQ(result.elf_bytes, image);
+  EXPECT_TRUE(has_error_containing(result, DiagnosticKind::ExpandMissing,
+                                   "no expansion rule is implemented"))
+      << diagnostics;
+}
+
+TEST(BinaryTranslatorE2E, Gfx950CacheAtomicAddToGfx1100RequiresSemanticExpansion) {
+  // MI350X L2 F32 ADD keeps input denormals (0x00000001 + 0x00000001 = 0x00000002);
+  // the RDNA3 L2 F32 ADD policy flushes them to zero, so direct substitution is refused.
+  const std::array<uint32_t, 2> atomic =
+      cdna4::build_flat(cdna4::kFlatAtomicAddF32Flat,
+                        {.seg = 2, .sc0 = 1, .addr = 4, .data = 0, .saddr = 4, .vdst = 6});
+  const std::array<uint32_t, 3> words = {atomic[0], atomic[1], 0xbf810000u};
+  const std::vector<uint8_t> image =
+      make_minimal_amdgpu_elf_with_descriptor_after_text({words[0], words[1], words[2]});
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3);
   const TranslatedCodeObject result = translator.translate(source);
   std::string diagnostics;
   for (const TranslationDiagnostic &diagnostic : result.diagnostics)
@@ -4308,6 +4331,38 @@ TEST(BinaryTranslatorE2E, IncompleteIndirectConsumerTranslatesWhenScopeHasNoStal
   EXPECT_NE(std::ranges::find(target_words, target_words + word_count, pack_sop1(0x1d, 0, kPcSreg)),
             target_words + word_count)
       << "an incomplete consumer must keep its dynamic transfer, not become a direct window";
+}
+
+TEST(BinaryTranslatorE2E, PreservesInstructionsBetweenRdna4PcBuilderHalves) {
+  // LLVM sign-extends GETPC before adding the displacement on RDNA4. The
+  // unrelated write between its low and high adds must survive translation.
+  const std::vector<uint32_t> words = {
+      pack_sop1(0x47, 8, 0), // s_getpc_b64 s[8:9]
+      pack_sop1(0x0f, 9, 9), // s_sext_i32_i16 s9, s9
+      pack_sop2(0, 8, 8, 255),
+      28,         // s_add_co_u32 s8, s8, 28
+      0x7e040283, // v_mov_b32 v2, 3
+      pack_sop2(4, 9, 9, 255),
+      0,                     // s_add_co_ci_u32 s9, s9, lit(0)
+      pack_sop1(0x48, 0, 8), // s_setpc_b64 s[8:9]
+      build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4).value(),
+  };
+  auto image = make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  auto header = read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+  header.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX1201;
+  write_elf_struct_for_test(image, 0, header);
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_RDNA4,
+                              EF_AMDGPU_MACH_AMDGCN_GFX1201);
+  const auto result = translator.translate(source);
+  EXPECT_FALSE(result.ok());
+  EXPECT_TRUE(std::ranges::any_of(result.diagnostics, [](const auto &diagnostic) {
+    return diagnostic.message.find("PC builder containing unrelated instructions") !=
+           std::string::npos;
+  }));
+  EXPECT_EQ(result.elf_bytes, image);
 }
 
 TEST(BinaryTranslatorE2E, IncompleteIndirectConsumerFailsClosedOnNonContiguousBuilderRange) {

@@ -607,7 +607,8 @@ void VMinNumF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  amdgpu::arith::execute_float_binary32(wf, rj_arith_v_min_num_f32_w32, rj_arith_v_min_num_f32_w64,
+  amdgpu::arith::execute_float_binary32(wf, rj_arith_v_min_num_f32_w32_gfx1250,
+                                        rj_arith_v_min_num_f32_w64_gfx1250,
                                         wf.cu().arithmetic_flags(), 0, vdst, src0, vsrc1,
                                         /*rdna3=*/false, /*compatibility_mul=*/false);
 }
@@ -632,7 +633,8 @@ RJ_NOINLINE void VMinNumF32Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  amdgpu::arith::execute_float_binary32(wf, rj_arith_v_min_num_f32_w32, rj_arith_v_min_num_f32_w64,
+  amdgpu::arith::execute_float_binary32(wf, rj_arith_v_min_num_f32_w32_gfx1250,
+                                        rj_arith_v_min_num_f32_w64_gfx1250,
                                         wf.cu().arithmetic_flags(), 0, vdst, src0, vsrc1,
                                         /*rdna3=*/false, /*compatibility_mul=*/false);
   dpp_write_mask_scope_.restore();
@@ -643,7 +645,8 @@ void VMaxNumF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  amdgpu::arith::execute_float_binary32(wf, rj_arith_v_max_num_f32_w32, rj_arith_v_max_num_f32_w64,
+  amdgpu::arith::execute_float_binary32(wf, rj_arith_v_max_num_f32_w32_gfx1250,
+                                        rj_arith_v_max_num_f32_w64_gfx1250,
                                         wf.cu().arithmetic_flags(), 0, vdst, src0, vsrc1,
                                         /*rdna3=*/false, /*compatibility_mul=*/false);
 }
@@ -668,7 +671,8 @@ RJ_NOINLINE void VMaxNumF32Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  amdgpu::arith::execute_float_binary32(wf, rj_arith_v_max_num_f32_w32, rj_arith_v_max_num_f32_w64,
+  amdgpu::arith::execute_float_binary32(wf, rj_arith_v_max_num_f32_w32_gfx1250,
+                                        rj_arith_v_max_num_f32_w64_gfx1250,
                                         wf.cu().arithmetic_flags(), 0, vdst, src0, vsrc1,
                                         /*rdna3=*/false, /*compatibility_mul=*/false);
   dpp_write_mask_scope_.restore();
