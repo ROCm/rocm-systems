@@ -163,63 +163,159 @@ protected:
     std::ifstream file(CONSAN_ORIGINAL_FIXTURE, std::ios::binary);
     original_ = {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
     ASSERT_FALSE(original_.empty());
+    std::ifstream facts_file(std::filesystem::path(CONSAN_ARTIFACT_FIXTURE) / "facts.bin",
+                             std::ios::binary);
+    const std::vector<uint8_t> facts_bytes = {std::istreambuf_iterator<char>(facts_file),
+                                              std::istreambuf_iterator<char>()};
+    const FailureOr<ImageFacts> facts = decode_image_facts(facts_bytes, error_.emitter());
+    ASSERT_TRUE(facts.succeeded()) << error_.message();
+    profile_ = facts.value().selection_profile;
     FailureOr<LoadedArtifact> loaded =
-        load_artifact(CONSAN_ARTIFACT_FIXTURE, original_, "gfx1100", error_.emitter());
+        load_artifact(CONSAN_ARTIFACT_FIXTURE, original_, "gfx1100", profile_, error_.emitter());
     ASSERT_TRUE(loaded.succeeded()) << error_.message();
     artifact_ = std::move(loaded.value());
   }
-  void rehash() { artifact_.manifest.prepared.sha256 = digest(artifact_.prepared); }
+  Manifest &manifest() { return *artifact_.facts.entries.front().selected; }
+  void rehash() {
+    manifest().prepared.sha256 = digest(artifact_.prepared);
+    artifact_.facts.prepared = manifest().prepared;
+  }
   std::vector<uint8_t> original_;
   LoadedArtifact artifact_;
   util::StringDiagnostic error_;
+  Digest profile_{};
 };
 
 TEST_F(ConSanArtifact, SeparatePreparationProcessProducesLoadableOwningFactsAndImages) {
-  EXPECT_TRUE(
-      verify_artifact_images(artifact_.manifest, original_, artifact_.prepared, error_.emitter())
-          .succeeded())
+  EXPECT_TRUE(verify_artifact_images(manifest(), original_, artifact_.prepared, error_.emitter())
+                  .succeeded())
       << error_.message();
-  EXPECT_EQ(artifact_.manifest.original.sha256, digest(original_));
-  EXPECT_EQ(artifact_.manifest.prepared.sha256, digest(artifact_.prepared));
-  EXPECT_EQ(artifact_.manifest.sites.size(), 2u);
-  EXPECT_GT(artifact_.manifest.entry.prepared_sgprs, 0u);
-  EXPECT_LE(artifact_.manifest.entry.prepared_sgprs, REGISTER_SET_ALLOCATABLE_SGPRS);
-  EXPECT_GT(artifact_.manifest.entry.prepared_vgprs, 0u);
-  EXPECT_LE(artifact_.manifest.entry.prepared_vgprs, 256u);
+  EXPECT_EQ(manifest().original.sha256, digest(original_));
+  EXPECT_EQ(manifest().prepared.sha256, digest(artifact_.prepared));
+  EXPECT_EQ(manifest().sites.size(), 2u);
+  EXPECT_GT(manifest().entry.prepared_sgprs, 0u);
+  EXPECT_LE(manifest().entry.prepared_sgprs, REGISTER_SET_ALLOCATABLE_SGPRS);
+  EXPECT_GT(manifest().entry.prepared_vgprs, 0u);
+  EXPECT_LE(manifest().entry.prepared_vgprs, 256u);
+}
+
+TEST_F(ConSanArtifact, ReboundWorkgroupInputCannotBypassWholeImageDescriptorVerification) {
+  ImageEntryFacts &entry = artifact_.facts.entries.front();
+  entry.binding.workgroup_id_scalar =
+      entry.binding.workgroup_id_scalar == UINT32_MAX ? 15 : UINT32_MAX;
+  entry.selected->entry = entry.binding;
+  ASSERT_TRUE(validate_image_facts(artifact_.facts, error_.emitter()).succeeded())
+      << error_.message();
+  EXPECT_TRUE(
+      verify_artifact_images(artifact_.facts, original_, artifact_.prepared, error_.emitter())
+          .failed());
+  EXPECT_NE(error_.message().find("workgroup-X input"), std::string::npos);
 }
 
 TEST_F(ConSanArtifact, MismatchedOriginalAndAgentFailWithoutACompilerFallback) {
   EXPECT_TRUE(
-      load_artifact(CONSAN_ARTIFACT_FIXTURE, original_, "gfx1201", error_.emitter()).failed());
+      load_artifact(CONSAN_ARTIFACT_FIXTURE, original_, "gfx1201", profile_, error_.emitter())
+          .failed());
   EXPECT_NE(error_.message().find("concrete agent differs"), std::string::npos);
   original_.back() ^= 1;
   EXPECT_TRUE(
-      load_artifact(CONSAN_ARTIFACT_FIXTURE, original_, "gfx1100", error_.emitter()).failed());
-  EXPECT_EQ(error_.message(), "exact code-object identity mismatch");
+      load_artifact(CONSAN_ARTIFACT_FIXTURE, original_, "gfx1100", profile_, error_.emitter())
+          .failed());
+  EXPECT_EQ(error_.message(), "image or configured selection identity mismatch");
   EXPECT_TRUE(load_artifact(std::filesystem::path(CONSAN_ARTIFACT_FIXTURE) / "missing", original_,
-                            "gfx1100", error_.emitter())
+                            "gfx1100", profile_, error_.emitter())
                   .failed());
 }
 
-TEST_F(ConSanArtifact, ChecksummedArtifactCannotLieAboutItsMetadataResources) {
-  ++artifact_.manifest.entry.prepared_sgprs;
-  ASSERT_TRUE(match_images(artifact_.manifest, original_, artifact_.prepared).succeeded());
+TEST_F(ConSanArtifact, IndependentlyConfiguredWrongSelectionIsRejected) {
+  Digest wrong = profile_;
+  wrong[0] ^= 1;
+  EXPECT_TRUE(load_artifact(CONSAN_ARTIFACT_FIXTURE, original_, "gfx1100", wrong, error_.emitter())
+                  .failed());
+  EXPECT_EQ(error_.message(), "configured selection profile differs from artifact");
+  EXPECT_NE(error_.message().find("selection profile"), std::string::npos);
+}
+
+TEST_F(ConSanArtifact, WholeImageFactsCannotRebindAnEntryOrHideTheInventory) {
+  const ImageFacts saved = artifact_.facts;
+  artifact_.facts.entries.front().binding.name = "rebound";
   EXPECT_TRUE(
-      verify_artifact_images(artifact_.manifest, original_, artifact_.prepared, error_.emitter())
+      verify_artifact_images(artifact_.facts, original_, artifact_.prepared, error_.emitter())
           .failed());
+  artifact_.facts = saved;
+  artifact_.facts.entries.clear();
+  EXPECT_TRUE(
+      verify_artifact_images(artifact_.facts, original_, artifact_.prepared, error_.emitter())
+          .failed());
+}
+
+TEST_F(ConSanArtifact, DescriptorDiscoveryDeduplicationCannotHideAnExtraAlias) {
+  std::vector<uint8_t> &image = artifact_.prepared;
+  Elf64_Ehdr header = {};
+  std::memcpy(&header, image.data(), sizeof(header));
+  std::optional<std::vector<Elf64_Shdr>> sections =
+      read_elf_table<Elf64_Shdr>(image, header.e_shoff, header.e_shnum, header.e_shentsize);
+  ASSERT_TRUE(sections);
+  bool added = false;
+  for (Elf64_Shdr &section : *sections) {
+    if (section.sh_type != SHT_SYMTAB)
+      continue;
+    std::optional<std::vector<Elf64_Sym>> symbols = read_elf_table<Elf64_Sym>(
+        image, section.sh_offset, section.sh_size / sizeof(Elf64_Sym), section.sh_entsize);
+    ASSERT_TRUE(symbols);
+    Elf64_Shdr &strings = (*sections)[section.sh_link];
+    const std::vector<uint8_t> saved_strings(image.begin() + strings.sh_offset,
+                                             image.begin() + strings.sh_offset + strings.sh_size);
+    Elf64_Sym alias = {};
+    for (const Elf64_Sym &symbol : *symbols)
+      if (symbol.st_size == 64 && elf_symbol_type(symbol.st_info) == kElfSymbolTypeObject &&
+          elf_symbol_bind(symbol.st_info) == kElfSymbolBindGlobal)
+        alias = symbol;
+    ASSERT_EQ(alias.st_size, 64u);
+    alias.st_name = saved_strings.size();
+    constexpr std::string_view kAlias = "unexpected_alias.kd";
+    strings.sh_offset = image.size();
+    image.insert(image.end(), saved_strings.begin(), saved_strings.end());
+    image.insert(image.end(), kAlias.begin(), kAlias.end());
+    image.push_back(0);
+    strings.sh_size = saved_strings.size() + kAlias.size() + 1;
+    symbols->push_back(alias);
+    section.sh_offset = image.size();
+    section.sh_size = symbols->size() * sizeof(Elf64_Sym);
+    image.resize(image.size() + section.sh_size);
+    std::memcpy(image.data() + section.sh_offset, symbols->data(), section.sh_size);
+    added = true;
+    break;
+  }
+  ASSERT_TRUE(added);
+  header.e_shoff = image.size();
+  image.resize(image.size() + sections->size() * sizeof(Elf64_Shdr));
+  std::memcpy(image.data() + header.e_shoff, sections->data(),
+              sections->size() * sizeof(Elf64_Shdr));
+  std::memcpy(image.data(), &header, sizeof(header));
+  manifest().prepared.bytes = image.size();
+  rehash();
+  EXPECT_TRUE(verify_artifact_images(manifest(), original_, image, error_.emitter()).failed());
+  EXPECT_NE(error_.message().find("alias"), std::string::npos);
+}
+
+TEST_F(ConSanArtifact, ChecksummedArtifactCannotLieAboutItsMetadataResources) {
+  ++manifest().entry.prepared_sgprs;
+  ASSERT_TRUE(match_images(manifest(), original_, artifact_.prepared).succeeded());
+  EXPECT_TRUE(
+      verify_artifact_images(manifest(), original_, artifact_.prepared, error_.emitter()).failed());
   EXPECT_NE(error_.message().find("metadata resources"), std::string::npos);
 }
 
 TEST_F(ConSanArtifact, RecomputedImageDigestCannotHideAnInvalidDescriptorOrElfExtent) {
   std::vector<uint8_t> &image = artifact_.prepared;
-  const size_t descriptor = artifact_.manifest.entry.prepared_descriptor_offset;
+  const size_t descriptor = manifest().entry.prepared_descriptor_offset;
   // The first descriptor dword is the LDS extent. A valid hash cannot make
   // this disagree with its owning facts, even before HSA sees the image.
   image[descriptor] ^= 16;
   rehash();
-  ASSERT_TRUE(match_images(artifact_.manifest, original_, image).succeeded());
-  EXPECT_TRUE(
-      verify_artifact_images(artifact_.manifest, original_, image, error_.emitter()).failed());
+  ASSERT_TRUE(match_images(manifest(), original_, image).succeeded());
+  EXPECT_TRUE(verify_artifact_images(manifest(), original_, image, error_.emitter()).failed());
   EXPECT_NE(error_.message().find("descriptor"), std::string::npos);
   image[descriptor] ^= 16;
   Elf64_Ehdr header{};
@@ -227,8 +323,7 @@ TEST_F(ConSanArtifact, RecomputedImageDigestCannotHideAnInvalidDescriptorOrElfEx
   header.e_phoff = UINT64_MAX;
   std::memcpy(image.data(), &header, sizeof(header));
   rehash();
-  EXPECT_TRUE(
-      verify_artifact_images(artifact_.manifest, original_, image, error_.emitter()).failed());
+  EXPECT_TRUE(verify_artifact_images(manifest(), original_, image, error_.emitter()).failed());
   EXPECT_NE(error_.message().find("tables"), std::string::npos);
 }
 
@@ -253,10 +348,9 @@ TEST_F(ConSanArtifact, UnalignedElfTablesRemainReadableWithoutRelaxingEntrySizes
   std::memcpy(image.data() + header.e_phoff, segments->data(),
               segments->size() * sizeof(Elf64_Phdr));
   std::memcpy(image.data(), &header, sizeof(header));
-  artifact_.manifest.prepared.bytes = image.size();
+  manifest().prepared.bytes = image.size();
   rehash();
-  ASSERT_TRUE(
-      verify_artifact_images(artifact_.manifest, original_, image, error_.emitter()).succeeded())
+  ASSERT_TRUE(verify_artifact_images(manifest(), original_, image, error_.emitter()).succeeded())
       << error_.message();
   for (const bool section_table : {true, false}) {
     Elf64_Ehdr invalid = header;
@@ -266,8 +360,7 @@ TEST_F(ConSanArtifact, UnalignedElfTablesRemainReadableWithoutRelaxingEntrySizes
       invalid.e_phentsize += 8;
     std::memcpy(image.data(), &invalid, sizeof(invalid));
     rehash();
-    EXPECT_TRUE(
-        verify_artifact_images(artifact_.manifest, original_, image, error_.emitter()).failed());
+    EXPECT_TRUE(verify_artifact_images(manifest(), original_, image, error_.emitter()).failed());
     EXPECT_EQ(error_.message(), "artifact ELF target, ABI or tables are inconsistent");
   }
 }
@@ -286,7 +379,7 @@ TEST_F(ConSanArtifact, ChecksummedEntryCoverageCannotSubstituteForTheWholeExecut
       std::memcpy(&segment, image.data() + offset, sizeof(segment));
       if (segment.p_type != PT_LOAD || (segment.p_flags & PF_X) == 0)
         continue;
-      segment.p_filesz = artifact_.manifest.entry.prepared_entry_offset + retained_after_entry;
+      segment.p_filesz = manifest().entry.prepared_entry_offset + retained_after_entry;
       ASSERT_LT(segment.p_filesz, segment.p_memsz);
       // Keep the remaining memory extent: zero-filled executable memory is
       // not a substitute for the required instruction bytes in the file.
@@ -295,9 +388,8 @@ TEST_F(ConSanArtifact, ChecksummedEntryCoverageCannotSubstituteForTheWholeExecut
     }
     ASSERT_TRUE(shortened);
     rehash();
-    ASSERT_TRUE(match_images(artifact_.manifest, original_, image).succeeded());
-    EXPECT_TRUE(
-        verify_artifact_images(artifact_.manifest, original_, image, error_.emitter()).failed())
+    ASSERT_TRUE(match_images(manifest(), original_, image).succeeded());
+    EXPECT_TRUE(verify_artifact_images(manifest(), original_, image, error_.emitter()).failed())
         << "accepted only " << retained_after_entry << " bytes after entry";
     EXPECT_NE(error_.message().find("executable .text"), std::string::npos);
   }

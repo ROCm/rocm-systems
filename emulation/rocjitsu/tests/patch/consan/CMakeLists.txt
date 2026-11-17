@@ -193,6 +193,24 @@ if(TARGET consan_original_fixtures)
         VERBATIM
     )
     add_custom_target(consan_artifact_fixture DEPENDS ${_artifact}/facts.bin)
+    set(_multi_artifact ${CMAKE_CURRENT_BINARY_DIR}/prepared/multi-entry)
+    add_custom_command(
+        OUTPUT ${_multi_artifact}/facts.bin
+        BYPRODUCTS ${_multi_artifact}/prepared.hsaco ${_multi_artifact}/ready
+        COMMAND
+            ${CMAKE_COMMAND} -E make_directory
+            ${CMAKE_CURRENT_BINARY_DIR}/prepared
+        COMMAND ${CMAKE_COMMAND} -E rm -rf ${_multi_artifact}
+        COMMAND
+            $<TARGET_FILE:rj_consan_prepare> ${_fixture_dir}/multi-entry.hsaco
+            gfx1250 ${_multi_artifact} --entry mk_a --entry mk_b
+        DEPENDS rj_consan_prepare ${_fixture_dir}/multi-entry.hsaco
+        VERBATIM
+    )
+    add_custom_target(
+        consan_multi_artifact_fixture
+        DEPENDS ${_multi_artifact}/facts.bin
+    )
     add_executable(
         consan_image_test
         ${PROJECT_SOURCE_DIR}/tests/code/consan/artifact_test.cpp
@@ -239,6 +257,7 @@ if(RJ_BUILD_CONSAN_RUNTIME AND TARGET consan_original_fixtures)
         consan_hsa_plugin_test
         hsa_consan_testable
         consan_artifact_fixture
+        consan_multi_artifact_fixture
     )
     target_compile_definitions(
         consan_hsa_plugin_test
@@ -246,6 +265,8 @@ if(RJ_BUILD_CONSAN_RUNTIME AND TARGET consan_original_fixtures)
             CONSAN_PLUGIN_FIXTURE="$<TARGET_FILE:hsa_consan_testable>"
             CONSAN_ORIGINAL_FIXTURE="${_fixture_dir}/race.hsaco"
             CONSAN_ARTIFACT_FIXTURE="${_artifact}"
+            CONSAN_MULTI_ORIGINAL_FIXTURE="${_fixture_dir}/multi-entry.hsaco"
+            CONSAN_MULTI_ARTIFACT_FIXTURE="${_multi_artifact}"
     )
     rj_add_gtest_tests(consan_hsa_plugin_test)
 endif()

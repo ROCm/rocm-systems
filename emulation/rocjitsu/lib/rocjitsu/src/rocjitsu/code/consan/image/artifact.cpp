@@ -332,6 +332,7 @@ Result verify_artifact_images(const Manifest &manifest, std::span<const uint8_t>
 FailureOr<LoadedArtifact> load_artifact(const std::filesystem::path &directory,
                                         std::span<const uint8_t> original,
                                         std::string_view concrete_target,
+                                        const Digest &expected_selection_profile,
                                         util::DiagnosticEmitter diagnostic) {
   const TargetProfile *target = target_profile(concrete_target);
   if (target == nullptr)
@@ -347,17 +348,18 @@ FailureOr<LoadedArtifact> load_artifact(const std::filesystem::path &directory,
       read(directory / "facts.bin", limits.metadata_bytes, diagnostic);
   if (bytes.failed())
     return Result::failure();
-  FailureOr<Manifest> manifest = decode_manifest(bytes.value(), diagnostic);
-  if (manifest.failed())
+  FailureOr<ImageFacts> facts = decode_image_facts(bytes.value(), diagnostic);
+  if (facts.failed())
     return Result::failure();
-  if (manifest.value().target != target->id)
+  if (facts.value().target != target->id)
     return diagnostic.emit() << "concrete agent differs from artifact target";
+  if (facts.value().selection_profile != expected_selection_profile)
+    return diagnostic.emit() << "configured selection profile differs from artifact";
   FailureOr<std::vector<uint8_t>> image =
       read(directory / "prepared.hsaco", limits.image_bytes, diagnostic);
   if (image.failed() ||
-      verify_artifact_images(manifest.value(), original, image.value(), diagnostic).failed())
+      verify_artifact_images(facts.value(), original, image.value(), diagnostic).failed())
     return Result::failure();
-  return LoadedArtifact{std::move(manifest.value()), std::move(image.value())};
+  return LoadedArtifact{.facts = std::move(facts.value()), .prepared = std::move(image.value())};
 }
-
 } // namespace rocjitsu::consan
