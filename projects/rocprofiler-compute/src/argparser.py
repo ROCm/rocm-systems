@@ -53,6 +53,7 @@ def non_negative_int(value: str) -> int:
 
 def add_general_group(
     parser: argparse.ArgumentParser,
+    rocprof_compute_home: Path,
     supported_archs: Dict[str, str],
     rocprof_compute_version: Dict[str, Optional[str]],
 ) -> None:
@@ -100,6 +101,16 @@ def add_general_group(
             "List available blocks and their aliases for specified GPU <arch>.\n"
             "Values: %(choices)s"
         ),
+    )
+    general_group.add_argument(
+        "--config-dir",
+        dest="config_dir",
+        metavar="<dir>",
+        help=(
+            "Specify the directory of customized report section configs "
+            "(Default: built-in configs)."
+        ),
+        default=rocprof_compute_home / "rocprof_compute_soc/analysis_configs/",
     )
     general_group.add_argument(
         "-s", "--specs", action="store_true", help="Print system specs and exit."
@@ -176,6 +187,7 @@ def _omniarg_parser(
     ## ----------------------------
     add_general_group(
         parser,
+        rocprof_compute_home,
         supported_archs,
         rocprof_compute_version,
     )
@@ -220,6 +232,7 @@ Examples:
 
     add_general_group(
         profile_parser,
+        rocprof_compute_home,
         supported_archs,
         rocprof_compute_version,
     )
@@ -615,6 +628,7 @@ Examples:
 
     add_general_group(
         analyze_parser,
+        rocprof_compute_home,
         supported_archs,
         rocprof_compute_version,
     )
