@@ -187,7 +187,7 @@ TEST(AllGatherPolicyArchThreshold, UnknownOrMissingNameFallsBack) {
 
 TEST(GatherPolicyArchTable, ThresholdPerArch) {
   EXPECT_EQ(gatherArchSdmaThreshold("gfx942:sramecc+:xnack-"), 128u << 20);  // MI300X
-  EXPECT_EQ(gatherArchSdmaThreshold("gfx950:sramecc+:xnack-"), 32u << 20);   // MI350X
+  EXPECT_EQ(gatherArchSdmaThreshold("gfx950:sramecc+:xnack-"), 8u << 20);    // MI350X
   EXPECT_EQ(gatherArchSdmaThreshold("gfx1250"), kGatherSdmaNever);           // MI455X
   EXPECT_EQ(gatherArchSdmaThreshold("gfx1250-strict"), kGatherSdmaNever);
   EXPECT_TRUE(chunkUsesLsaTier(size_t(1) << 40, gatherArchSdmaThreshold("gfx1250")));
@@ -228,7 +228,7 @@ TEST(GatherPolicyArchTable, LadderGfx950) {
   EXPECT_EQ(gatherCtasFor(a, 0), 2);
   EXPECT_EQ(gatherCtasFor(a, 16u << 10), 2);
   EXPECT_EQ(gatherCtasFor(a, (16u << 10) + 1), 16);
-  EXPECT_EQ(gatherCtasFor(a, 32u << 20), 16);
+  EXPECT_EQ(gatherCtasFor(a, 8u << 20), 16);
 }
 
 TEST(GatherPolicyArchTable, LadderGfx1250) {

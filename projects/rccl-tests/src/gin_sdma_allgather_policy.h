@@ -200,7 +200,9 @@ inline const ArchLsaCtaLadder* archLsaCtaLadder(const char* gcnArchName,
 }
 
 // Gather -D 3 LSA<->SDMA crossover in bytes per rank, per architecture.
-// Architectures not in the table use kGatherSdmaThresholdDefault. On 4x MI455X
+// Architectures not in the table use kGatherSdmaThresholdDefault. On 8x MI350X
+// (gfx950) the SDMA put wins above 8 MiB per rank: a 128 MiB gather takes 297 us
+// against 308 us on the LSA tier, and 256 MiB takes 571 against 597 us. On 4x MI455X
 // (gfx1250) 96 LSA-tier CTAs match the SDMA put's bandwidth, so the LSA tier is used
 // at every size (kGatherSdmaNever).
 static constexpr size_t kGatherSdmaThresholdDefault = 1u << 20;
@@ -208,7 +210,7 @@ static constexpr size_t kGatherSdmaThresholdDefault = 1u << 20;
 static constexpr size_t kGatherSdmaNever = ~(size_t)0 >> 1;
 static constexpr ArchSdmaThreshold kGatherSdmaThresholdByArch[] = {
   {"gfx942", 128u << 20},
-  {"gfx950", 32u << 20},
+  {"gfx950", 8u << 20},
   {"gfx1250", kGatherSdmaNever},
 };
 
