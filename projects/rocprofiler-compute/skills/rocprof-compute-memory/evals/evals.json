@@ -13,7 +13,7 @@
       "unexpected_behavior": [
         "recommends an optimization without citing a metric from the report"
       ],
-      "logs_contain": ["--memory-chart"]
+      "logs_contain": ["-b memchart"]
     },
     {
       "id": "mem-cache-hit-rates-gfx115x",

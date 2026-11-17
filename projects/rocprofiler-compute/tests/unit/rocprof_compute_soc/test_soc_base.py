@@ -121,6 +121,7 @@ def offline_soc(
         config_dir=config_dir,
         filter_blocks=filter_blocks,
         membw_analysis=membw_analysis,
+        roof_only=False,
         set_selected=set_selected,
     )
     machine_specs = SimpleNamespace(
