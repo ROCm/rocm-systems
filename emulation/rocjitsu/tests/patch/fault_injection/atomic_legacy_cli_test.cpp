@@ -9,6 +9,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -210,6 +211,35 @@ TEST_P(FaultLegacyAtomicCli, SharedHelperExactBindsEveryActualOwner) {
   EXPECT_NE(run(args({"--exact", "512"}, "test_kernel1")), 0);
   EXPECT_FALSE(std::filesystem::exists(output_));
   EXPECT_EQ(read(input_), isolated);
+}
+
+TEST_P(FaultLegacyAtomicCli, FlatPaddingPreservesUnsignedDeltaAndOverflowLeavesNoOutput) {
+  const test::LegacyAtomicTargetCase &target = GetParam();
+  for (test::LegacyAtomicForm form :
+       {test::LegacyAtomicForm::FlatAdd, test::LegacyAtomicForm::FlatCas}) {
+    for (int32_t offset : {4, 4092}) {
+      SCOPED_TRACE(offset);
+      std::array<uint32_t, 2> words = test::legacy_atomic_words(target, form, offset);
+      words[0] |= 0x1000u;
+      const std::vector<uint8_t> image =
+          test::make_legacy_atomic_sequence_elf(target, {words[0], words[1]});
+      ASSERT_NO_FATAL_FAILURE(write(input_, image));
+      const FaultMutationContext source(image);
+      for (const std::vector<std::string> &selector :
+           {std::vector<std::string>{"--ordinal", "0"},
+            std::vector<std::string>{"--exact", "0", "--ordinal", "999"}}) {
+        if (offset == 4092) {
+          EXPECT_NE(run(args(selector)), 0);
+          EXPECT_FALSE(std::filesystem::exists(output_));
+        } else {
+          ASSERT_EQ(run(args(selector)), 0);
+          EXPECT_TRUE(test::legacy_atomic_output_matches(source, 0, 8, read(output_)));
+          ASSERT_TRUE(std::filesystem::remove(output_));
+        }
+        EXPECT_EQ(read(input_), image);
+      }
+    }
+  }
 }
 
 INSTANTIATE_TEST_SUITE_P(Targets, FaultLegacyAtomicCli,
