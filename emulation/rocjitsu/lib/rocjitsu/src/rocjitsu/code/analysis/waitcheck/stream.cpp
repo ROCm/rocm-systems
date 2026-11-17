@@ -231,10 +231,11 @@ public:
       return Ops::apply_waitcnt(state_, inst, arch_);
     if (Ops::apply_embedded_waitcnt(state_, inst, arch_).failed())
       return util::Result::failure();
-    Ops::apply_admission(state_, inst, events, arch_);
+    Ops::apply_admission(state_, inst, events, arch_, false);
     apply_translation_ordering(effects, events);
     if (check_dependencies(inst, effects, events, offset).failed())
       return util::Result::failure();
+    Ops::apply_admission(state_, inst, events, arch_, true);
     for (const auto &event : events) {
       if (add_event(event, effects, inst, offset).failed())
         return util::Result::failure();

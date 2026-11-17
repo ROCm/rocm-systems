@@ -3335,7 +3335,7 @@ private:
         });
       }
       if (mode != StagedWait::OmitField)
-        apply_admission(state, instruction, current_events, arch);
+        apply_admission(state, instruction, current_events, arch, false);
       const bool prefetch =
           arch == ROCJITSU_CODE_ARCH_CDNA5 && is_scalar_prefetch(instruction.mnemonic());
       if (prefetch && state.prefetch_enabled == false) {
@@ -9921,7 +9921,7 @@ private:
     InstDefUse du =
         inst_def_use_for_waitcheck(inst, state.vgpr_msb, arch, wavefront_size_, state.m0);
     auto events = classify_events(inst, arch).value();
-    apply_admission(state, inst, events, arch);
+    apply_admission(state, inst, events, arch, false);
     const bool is_async_barrier =
         arch == ROCJITSU_CODE_ARCH_CDNA5 && inst.mnemonic() == "ds_atomic_async_barrier_arrive_b64";
     if (is_async_barrier && !previous_vm_vsrc_zero_wait && emit_report_diagnostics) {
@@ -9956,6 +9956,7 @@ private:
       if (expert_waits_enabled(state))
         check_va_vdst_hazard(state.va_vdst_hazards, inst, du, section_offset, file_offset);
     }
+    apply_admission(state, inst, events, arch, true);
     if (arch == ROCJITSU_CODE_ARCH_RDNA3) {
       if (emit_report_diagnostics) {
         if (auto hazard = trans_use_requirement(state.trans_use_hazards, inst, du, section_offset,

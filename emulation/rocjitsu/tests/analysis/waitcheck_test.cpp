@@ -10323,6 +10323,66 @@ TEST(WaitcheckTest, AcceptsGfx942FlatToScratchOverwriteAfterLgkmcntWaitLikeLlvm)
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
 }
 
+TEST(WaitcheckTest, Cdna3And4ActiveFlatLoadsCreditBothPartialWaitCounters) {
+  // Both generic FLAT loads issue VM and LGKM credits, even though each
+  // lane's result completes on only one route. LLVM MC encodes the same
+  // instructions on gfx942 and gfx950.
+  const std::vector<uint32_t> prefix{
+      0xDC500000u, 0x0000000Cu, // flat_load_dword v0, v[12:13]
+      0xDC500000u, 0x0100000Eu, // flat_load_dword v1, v[14:15]
+  };
+  const auto check = [&](rj_code_arch_t arch, uint32_t wait) {
+    auto program = prefix;
+    program.insert(program.end(), {wait, 0x7E040300u, 0xBF810000u}); // v_mov v2,v0; end
+    return analyze_waitcnts(program, arch);
+  };
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    SCOPED_TRACE(arch);
+    const auto both = check(arch, 0xBF8C0070u); // vmcnt(0) lgkmcnt(0)
+    ASSERT_TRUE(both.supported && both.complete) << both.analysis_error;
+    EXPECT_TRUE(both.diagnostics.empty()) << diagnostic_summary(both);
+
+    const auto weak_vm = check(arch, 0xBF8C0071u); // vmcnt(1) lgkmcnt(0)
+    ASSERT_TRUE(weak_vm.supported && weak_vm.complete) << weak_vm.analysis_error;
+    ASSERT_EQ(weak_vm.diagnostics.size(), 1u) << diagnostic_summary(weak_vm);
+    EXPECT_EQ(weak_vm.diagnostics.front().counter, WaitCounterKind::Load);
+
+    const auto weak_ds = check(arch, 0xBF8C0170u); // vmcnt(0) lgkmcnt(1)
+    ASSERT_TRUE(weak_ds.supported && weak_ds.complete) << weak_ds.analysis_error;
+    ASSERT_EQ(weak_ds.diagnostics.size(), 1u) << diagnostic_summary(weak_ds);
+    EXPECT_EQ(weak_ds.diagnostics.front().counter, WaitCounterKind::Ds);
+  }
+}
+
+TEST(WaitcheckTest, PreGfx12FlatReadsItsAddressBeforeCounterCapacityRetirement) {
+  // A full VMcnt queue cannot retire the oldest load before the incoming
+  // generic FLAT reads that load's address result.
+  std::vector<uint32_t> program{
+      0xBEFE01C1u,              // s_mov_b64 exec, -1
+      0xDC548000u, 0x0C7F0002u, // global_load_dwordx2 v[12:13], v[2:3], off
+  };
+  for (uint32_t dest = 16; dest < 78; ++dest) {
+    program.push_back(0xDC508000u);                // global_load_dword
+    program.push_back((dest << 24) | 0x007F0002u); // v{dest}, v[2:3], off
+  }
+  const auto flat_offset = program.size() * sizeof(uint32_t);
+  program.insert(program.end(), {0xDC500000u, 0x0000000Cu}); // flat_load_dword v0, v[12:13]
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    SCOPED_TRACE(arch);
+    const auto report = analyze_waitcnts(program, arch);
+    ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+    ASSERT_FALSE(report.diagnostics.empty()) << diagnostic_summary(report);
+    EXPECT_EQ(report.diagnostics.front().counter, WaitCounterKind::Load);
+    EXPECT_EQ(report.diagnostics.front().access, WaitcheckAccessKind::Use);
+    EXPECT_EQ(report.diagnostics.front().section_offset, flat_offset);
+    auto waited = program;
+    waited.insert(waited.end() - 2, 0xBF8C0070u); // vmcnt(0) lgkmcnt(0)
+    const auto safe = analyze_waitcnts(waited, arch);
+    ASSERT_TRUE(safe.supported && safe.complete) << safe.analysis_error;
+    EXPECT_TRUE(safe.diagnostics.empty()) << diagnostic_summary(safe);
+  }
+}
+
 TEST(WaitcheckTest, ReportsFlatToDsLoadOverwriteOnBothPossibleFlatCounters) {
   std::vector<uint32_t> program;
   append_inst(program, flat_load_b32(0));

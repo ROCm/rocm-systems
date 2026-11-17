@@ -78,6 +78,12 @@ bool gfx11_flat_ds(WaitCounterKind counter, WaitEventKind kind, rj_code_arch_t a
 
 bool has_conditional_issue(WaitCounterKind counter, WaitEventKind kind, rj_code_arch_t arch,
                            bool exec_nonzero) {
+  // CDNA3/4 charge both legacy counters for an active FLAT request, but the
+  // shared target policy does not guarantee an issue with empty EXEC.
+  if (has_conditional_route(kind) && !exec_nonzero &&
+      amdgpu::legacy_flat_issues_both_counter_domains(arch) &&
+      !amdgpu::legacy_flat_issues_with_empty_exec(arch))
+    return true;
   // A live VMcnt/VScnt position forces issue on GFX11. A live LGKM position
   // alone does not. Queue summaries are upper bounds, so a different VMEM
   // instruction may already have completed.
@@ -95,7 +101,8 @@ std::optional<uint32_t> WaitcheckStateOps::guaranteed_issue_order(WaitCounterKin
                                                                   WaitEventKind kind,
                                                                   rj_code_arch_t arch,
                                                                   bool exec_nonzero) {
-  // GFX11 and GFX12 issue both queue positions regardless of the lanes in each route.
+  // An admitted FLAT request can age either queue position independently of
+  // the lanes' completion route.
   if (has_conditional_issue(counter, kind, arch, exec_nonzero))
     return std::nullopt;
   return completion_order_kind(counter, kind, arch);
@@ -126,8 +133,15 @@ bool WaitcheckStateOps::ordered_waw(const PendingEvent &event,
 
 void WaitcheckStateOps::apply_admission(PendingState &state, const Instruction &inst,
                                         std::span<const ClassifiedEvent> events,
-                                        rj_code_arch_t arch) {
+                                        rj_code_arch_t arch, bool after_source_reads) {
   for (const auto &event : events) {
+    // Before GFX12, FLAT reads its address before routing can admit the
+    // request. Its capacity stall must not clear a pending address result.
+    const bool post_source_flat = has_conditional_route(event.kind) &&
+                                  arch != ROCJITSU_CODE_ARCH_CDNA5 &&
+                                  arch != ROCJITSU_CODE_ARCH_RDNA4;
+    if (post_source_flat != after_source_reads)
+      continue;
     const bool translation = event.counter == WaitCounterKind::X;
     if (translation) {
       // A definite CDNA5 VMEM translation reserves one of 63 ordered X positions.

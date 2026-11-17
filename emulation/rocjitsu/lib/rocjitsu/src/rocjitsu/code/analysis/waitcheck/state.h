@@ -356,7 +356,8 @@ struct WaitcheckStateOps : WaitcheckTarget {
                                                                       rj_code_arch_t arch,
                                                                       bool exec_nonzero);
   static void apply_admission(PendingState &state, const Instruction &inst,
-                              std::span<const ClassifiedEvent> events, rj_code_arch_t arch);
+                              std::span<const ClassifiedEvent> events, rj_code_arch_t arch,
+                              bool after_source_reads);
   [[nodiscard]] static bool ordered_waw(const PendingEvent &event,
                                         std::span<const ClassifiedEvent> incoming,
                                         rj_code_arch_t arch);

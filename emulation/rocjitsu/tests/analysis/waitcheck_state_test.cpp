@@ -772,6 +772,64 @@ TEST(WaitcheckState, FlatSourceRetirementRequiresBothCounterOnlyFacets) {
       }
 }
 
+TEST(WaitcheckState, Cdna3And4FlatAdmissionNeedsAnActiveRequest) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    auto nop = decode_wait(0xbf800000u, arch);
+    ASSERT_TRUE(nop);
+    for (auto kind : {WaitEventKind::FlatLoad, WaitEventKind::FlatStore})
+      for (auto counter : {WaitCounterKind::Load, WaitCounterKind::Ds}) {
+        SCOPED_TRACE(arch);
+        SCOPED_TRACE(static_cast<int>(counter));
+        SCOPED_TRACE(static_cast<int>(kind));
+        const auto maximum = Ops::maximum_dependency_wait(arch, counter);
+        ASSERT_TRUE(maximum.succeeded());
+        PendingState initial;
+        auto older = load(8, maximum.value());
+        older.counter = counter;
+        older.kind = counter == WaitCounterKind::Ds ? WaitEventKind::Ds
+                                                    : WaitEventKind::VmemNoSamplerLoad;
+        const auto index = Ops::counter_index(counter);
+        initial.pending[index] = {older};
+        const std::array issued{ClassifiedEvent{counter, kind}};
+        auto active = initial;
+        active.exec_nonzero = true;
+        Ops::apply_admission(active, *nop, issued, arch, false);
+        EXPECT_EQ(active.pending[index], (std::vector<PendingEvent>{older}));
+        Ops::apply_admission(active, *nop, issued, arch, true);
+        EXPECT_TRUE(active.pending[index].empty());
+        auto empty = initial;
+        empty.exec_nonzero = false;
+        Ops::apply_admission(empty, *nop, issued, arch, false);
+        Ops::apply_admission(empty, *nop, issued, arch, true);
+        EXPECT_EQ(empty.pending[index], (std::vector<PendingEvent>{older}));
+      }
+  }
+}
+
+TEST(WaitcheckState, Gfx12FlatAdmissionPrecedesSourceReads) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    auto nop = decode_wait(0xbf800000u, arch);
+    ASSERT_TRUE(nop);
+    for (auto counter : {WaitCounterKind::Load, WaitCounterKind::Ds}) {
+      SCOPED_TRACE(arch);
+      SCOPED_TRACE(static_cast<int>(counter));
+      const auto maximum = Ops::maximum_dependency_wait(arch, counter);
+      ASSERT_TRUE(maximum.succeeded());
+      PendingState state;
+      auto older = load(8, maximum.value());
+      older.counter = counter;
+      older.kind = counter == WaitCounterKind::Ds ? WaitEventKind::Ds
+                                                  : WaitEventKind::VmemNoSamplerLoad;
+      const auto index = Ops::counter_index(counter);
+      state.pending[index] = {older};
+      state.exec_nonzero = true;
+      const std::array issued{ClassifiedEvent{counter, WaitEventKind::FlatLoad}};
+      Ops::apply_admission(state, *nop, issued, arch, false);
+      EXPECT_TRUE(state.pending[index].empty());
+    }
+  }
+}
+
 TEST(WaitcheckState, JoinedFlatSourceNeedsCompletionOnEveryPath) {
   for (bool store : {false, true}) {
     SCOPED_TRACE(store);
