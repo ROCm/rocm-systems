@@ -97,7 +97,7 @@ fn batch_fixture(count: usize) -> (SignalState, HsaAmdSignalBatch, Vec<HsaSignal
         .collect::<Vec<_>>();
     let batch = HsaAmdSignalBatch { handle: 42 };
     let session = rocddi::session::Session::new(DriverContextLifetime::Process).unwrap();
-    let mut state = SignalState::new(&session);
+    let mut state = SignalState::new(&session).unwrap();
     for signal in &signals {
         state
             .batch_members
@@ -106,7 +106,7 @@ fn batch_fixture(count: usize) -> (SignalState, HsaAmdSignalBatch, Vec<HsaSignal
     state.batches.insert(
         batch.handle,
         SignalBatchStorage {
-            _backing: SignalBatchBacking::Test(slots),
+            _backing: SignalBacking::Test(slots),
             remaining: count,
             handle_live: true,
             host_atomics_supported: true,

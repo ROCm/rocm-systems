@@ -4,7 +4,8 @@
 // FP64 ADD/MUL/FMA using AVX-512 instruction-local guest rounding, without MXCSR changes.
 // Operand preparation and masked stores preserve the public split-VGPR layout.
 #include "fp/fp64_impl.h"
-#include "rj_arith/rj_arith.h"
+#include "fp/fp64_round.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 
 #include <immintrin.h>
 #include <stdint.h>
@@ -81,6 +82,33 @@ __m512d output(__m512d value, uint32_t instruction_flags, uint64_t flags, unsign
   return value;
 }
 
+// Re-evaluate the selected lanes with the integer model. Kept out of line so that the
+// common case carries no stack frame for it.
+[[gnu::cold, gnu::noinline]] __m512d flush_tiny_lanes(__m512d value, __m512d x, __m512d y,
+                                                      __m512d z, unsigned lanes,
+                                                      unsigned rounding) {
+  uint64_t result[8], a[8], b[8], c[8];
+  _mm512_storeu_pd(result, value);
+  _mm512_storeu_pd(a, x);
+  _mm512_storeu_pd(b, y);
+  _mm512_storeu_pd(c, z);
+  for (; lanes; lanes &= lanes - 1) {
+    int i = __builtin_ctz(lanes);
+    result[i] = fma_flush_tiny_f64(result[i], a[i], b[i], c[i], rounding);
+  }
+  return _mm512_loadu_pd(result);
+}
+
+// A product rounded to the smallest normal may still be tiny after rounding. Such lanes are
+// rare, so only they leave the SIMD path.
+inline __m512d flush_tiny_products(__m512d value, __m512d x, __m512d y, __m512d z,
+                                   unsigned rounding) {
+  auto magnitude = _mm512_and_si512(_mm512_castpd_si512(value), _mm512_set1_epi64(INT64_MAX));
+  unsigned boundary = _mm512_cmpeq_epi64_mask(magnitude, _mm512_set1_epi64(0x0010000000000000LL));
+  return __builtin_expect(boundary != 0, 0) ? flush_tiny_lanes(value, x, y, z, boundary, rounding)
+                                            : value;
+}
+
 // Use embedded rounding for the selected arithmetic operation, with exceptions masked.
 template <int Rounding> __m512d arithmetic(Fp64 op, __m512d x, __m512d y, __m512d z) {
   if (op == Fp64::Add) {
@@ -93,8 +121,8 @@ template <int Rounding> __m512d arithmetic(Fp64 op, __m512d x, __m512d y, __m512
 }
 
 // Apply fp64_nan_priority to eight lanes.
-__m512d nan_priority(Fp64 op, __m512d value, __m512d x, __m512d y, __m512d z) {
-  auto quiet = _mm512_set1_epi64(INT64_C(0x0008000000000000));
+__m512d nan_priority(Fp64 op, __m512d value, __m512d x, __m512d y, __m512d z, bool quiet_snan) {
+  auto quiet = _mm512_set1_epi64(quiet_snan ? INT64_C(0x0008000000000000) : 0);
   auto pick = [&](__m512d result, __m512d source) {
     return _mm512_mask_mov_pd(
         result, _mm512_cmp_pd_mask(source, source, _CMP_UNORD_Q),
@@ -117,7 +145,8 @@ __m512d nan_priority(Fp64 op, __m512d value, __m512d x, __m512d y, __m512d z) {
 // and the return value tells whether any lane produced a NaN.
 template <bool NanPriority>
 bool evaluate(Fp64 op, uint64_t flags, uint32_t instruction_flags, const uint32_t *const *a,
-              const uint32_t *const *b, const uint32_t *const *c, uint32_t (&result)[2][32]) {
+              const uint32_t *const *b, const uint32_t *const *c, uint32_t (&result)[2][32],
+              bool quiet_snan) {
   const unsigned rounding = unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24);
   const bool flush = flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
   __mmask8 nan = 0;
@@ -137,8 +166,13 @@ bool evaluate(Fp64 op, uint64_t flags, uint32_t instruction_flags, const uint32_
       value = arithmetic<_MM_FROUND_TO_ZERO>(op, x, y, z);
       break;
     }
+    // Products judge tininess after rounding; ADD results are exact on the subnormal grid.
+    if ((op == Fp64::Mul || op == Fp64::Fma) && ((flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) ||
+                                                 (instruction_flags & RJ_ARITH_ALU_OMOD_MASK))) {
+      value = flush_tiny_products(value, x, y, z, rounding);
+    }
     if constexpr (NanPriority) {
-      value = nan_priority(op, value, x, y, z);
+      value = nan_priority(op, value, x, y, z, quiet_snan);
     } else {
       nan |= _mm512_cmp_pd_mask(value, value, _CMP_UNORD_Q);
     }
@@ -155,12 +189,12 @@ bool evaluate(Fp64 op, uint64_t flags, uint32_t instruction_flags, const uint32_
 void fp64_directed_x86_64_v4(Fp64 op, uint64_t flags, uint32_t exec_mask,
                              uint32_t instruction_flags, uint32_t *const *d,
                              const uint32_t *const *a, const uint32_t *const *b,
-                             const uint32_t *const *c, bool rdna3) {
+                             const uint32_t *const *c, bool quiet_snan) {
   uint32_t result[2][32];
-  // A NaN source or an invalid operation always yields a NaN. Such results are rare, so gfx12
+  // A NaN source or an invalid operation always yields a NaN. Such results are rare, so this
   // re-evaluates with NaN priority only when the host produced one.
-  if (evaluate<false>(op, flags, instruction_flags, a, b, c, result) && !rdna3) {
-    evaluate<true>(op, flags, instruction_flags, a, b, c, result);
+  if (evaluate<false>(op, flags, instruction_flags, a, b, c, result, quiet_snan)) {
+    evaluate<true>(op, flags, instruction_flags, a, b, c, result, quiet_snan);
   }
   // Delay writes until every input has been consumed, including cross-half aliases.
   for (int reg = 0; reg < 2; ++reg) {

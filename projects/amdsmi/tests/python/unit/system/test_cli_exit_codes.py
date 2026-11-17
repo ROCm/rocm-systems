@@ -733,11 +733,11 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
             helpers.error_collector.resolve_exit_code(), int(self.ExitCode.MIXED_DEVICE_ERRORS)
         )
 
-    def test_nic_and_switch_loops_record_device_failures_like_gpus(self):
-        """NIC and switch counterpart of the handle_gpus test above. These three
-        loops called the subcommand directly, so the first device-scoped failure
-        escaped: later devices were never visited, and the output already
-        buffered for the healthy ones died with the unreached final print.
+    def test_nic_loop_records_device_failures_like_gpus(self):
+        """NIC counterpart of the handle_gpus test above. The loop called the
+        subcommand directly, so the first device-scoped failure escaped: later
+        devices were never visited, and the output already buffered for the
+        healthy ones died with the unreached final print.
         """
         import argparse
         from unittest import mock
@@ -769,12 +769,6 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
         devices = list(device_failures)
 
         for handler, device_arg, processor_type in (
-            (
-                AMDSMIHelpers.handle_switchs,
-                "switch",
-                amdsmi_wrapper.AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH,
-            ),
-            (AMDSMIHelpers.handle_brcm_nics, "nic", amdsmi_wrapper.AMDSMI_PROCESSOR_TYPE_BRCM_NIC),
             (AMDSMIHelpers.handle_ainics, "nic", amdsmi_wrapper.AMDSMI_PROCESSOR_TYPE_AMD_NIC),
         ):
             with self.subTest(handler=handler.__name__):

@@ -20,14 +20,16 @@
 #include "bootstrap.h"
 #include "nccl_device/gin/rocshmem_gda/gin_rocshmem_device_host_common_gda.h"
 #include "gin/gin_rocshmem_gda_factory.h"
+#include "gin/gin_type_env.h"
 #include "common_cast.h"  // IbCastInitDevices/IbCastDevs/IbCastGetPhysProperties
 #include <hip/hip_runtime.h>
 #include <mutex>
 #include <string.h>
 
-// RCCL env-var parameters for traffic class (defined in transport/net_ib/)
+// RCCL env-var parameters for traffic class (defined in transport/net_ib/). NCCL_IB_TC is an
+// ncclParam<int32_t> object since 2.32.6; NCCL_PARAM_VAL_AUTO (-1) is its unset value.
 extern int64_t ncclParamGinIbTc();
-extern int64_t ncclParamIbTc();
+USE_NCCL_PARAM(ncclParamIbTc, int32_t);
 
 // collComm: per-connection state, returned by connect()
 struct ginRocshmemGdaCollCtx {
@@ -129,8 +131,7 @@ static int ginRocshmemGdaBuildDevTable() {
 }
 
 static ncclResult_t ginRocshmemGdaInit(void** ctx, uint64_t commId, ncclDebugLogger_t logFunction) {
-  const char* gin_type = getenv("NCCL_GIN_TYPE");
-  if (!gin_type || atoi(gin_type) != NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA) return ncclInternalError;
+  if (!ncclGinTypeEnabled(NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA, /*enabledByDefault=*/false)) return ncclInternalError;
   if (rocshmem_gin_probe_devices() <= 0) return ncclInternalError;
   // Populate the IB-CAST device table, then build the GIN-capable subset.
   if (IbCastInitDevices(logFunction, nullptr) != ncclSuccess) return ncclInternalError;
@@ -156,6 +157,7 @@ static ncclResult_t ginRocshmemGdaDevices(int* ndev) {
 static ncclResult_t ginRocshmemGdaGetGinProperties(ncclGinProperties_t* ginProps) {
   ginProps->supportsStrongSignals = true;
   ginProps->supportsVASignals = true;
+  ginProps->barrierOptions = NCCL_GIN_BARRIER_DEFAULT;
   return ncclSuccess;
 }
 
@@ -191,7 +193,7 @@ static ncclResult_t ginRocshmemGdaListen(void* ctx, int dev, void* handle, void*
 }
 
 static ncclResult_t ginRocshmemGdaConnect(void* ctx, void* handles[], int nranks, int rank, void* listenComm,
-                                          void** collComm) {
+                                          void** collComm, volatile uint32_t* /*abortFlag*/) {
   struct ginRocshmemInitCtx* ictx = (struct ginRocshmemInitCtx*)ctx;
   auto* cctx = new ginRocshmemGdaCollCtx{};
   cctx->nranks = nranks;

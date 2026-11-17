@@ -380,7 +380,7 @@ TEST(RcclCeAllReduceEligibility, RcclUseCeAllReduce_Isolated)
                     CeAllReduceMockComm mock;
                     mock.reset(tc.archName.empty() ? nullptr : tc.archName.c_str());
                     mock.comm.nRanks           = tc.nRanks;
-                    mock.comm.devrState.lsaSize = tc.lsaSize ? tc.lsaSize : tc.nRanks;
+                    mock.comm.devrState.lsaTeamSize = tc.lsaSize ? tc.lsaSize : tc.nRanks;
                     mock.comm.nNodes           = tc.nNodes;
                     mock.comm.symmetricSupport = tc.symmetricSupport;
                     mock.comm.config.CTAPolicy = tc.ctaPolicy;
@@ -467,7 +467,7 @@ TEST(RcclCeAllReduceEligibility, SelectAllReduce_ForceUnregisteredOverStagingSel
             {
                 CeAllReduceMockComm mock;
                 mock.comm.nRanks = 8;
-                mock.comm.devrState.lsaSize = mock.comm.nRanks;
+                mock.comm.devrState.lsaTeamSize = mock.comm.nRanks;
                 mock.comm.nNodes = 1;
                 mock.comm.symmetricSupport = true;
                 mock.comm.config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
@@ -516,7 +516,7 @@ TEST(RcclCeAllReduceEligibility, SelectAllReduce_MessageTooLargeDeclinesCe_Isola
             {
                 CeAllReduceMockComm mock;
                 mock.comm.nRanks = 4;
-                mock.comm.devrState.lsaSize = mock.comm.nRanks;
+                mock.comm.devrState.lsaTeamSize = mock.comm.nRanks;
                 mock.comm.nNodes = 1;
                 mock.comm.symmetricSupport = true;
                 mock.comm.config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
@@ -563,7 +563,7 @@ TEST(RcclCeAllReduceEligibility, SelectAllReduce_ZeroPolicyNoForce_TakesCe_Isola
             {
                 CeAllReduceMockComm mock;
                 mock.comm.nRanks = 8;
-                mock.comm.devrState.lsaSize = mock.comm.nRanks;
+                mock.comm.devrState.lsaTeamSize = mock.comm.nRanks;
                 mock.comm.nNodes = 1;
                 mock.comm.symmetricSupport = true;
                 mock.comm.config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
@@ -610,7 +610,7 @@ TEST(RcclCeAllReduceEligibility, SelectAllReduce_ZeroPolicyForceOff_NoCe_Isolate
             {
                 CeAllReduceMockComm mock;
                 mock.comm.nRanks = 8;
-                mock.comm.devrState.lsaSize = mock.comm.nRanks;
+                mock.comm.devrState.lsaTeamSize = mock.comm.nRanks;
                 mock.comm.nNodes = 1;
                 mock.comm.symmetricSupport = true;
                 mock.comm.config.CTAPolicy = NCCL_CTA_POLICY_ZERO;

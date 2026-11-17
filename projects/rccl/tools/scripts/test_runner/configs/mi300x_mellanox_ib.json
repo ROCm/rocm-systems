@@ -1084,6 +1084,11 @@
           "test_filter": "P2pMaxNchannels*"
         },
         {
+          "name": "P2pCeChannelCap",
+          "description": "Copy Engine P2P channel, connection, step-size, and shared-stream policies",
+          "test_filter": "P2pCeChannelCapTests.*"
+        },
+        {
           "name": "RcclAlltoAllDecision",
           "description": "AlltoAll dispatch decision unit tests (DDA, CE, pivot selection)",
           "test_filter": "RcclAlltoAllDecision.*"
@@ -1716,6 +1721,27 @@
           "name": "ImplicitLaunchOrder_MultiCommunicatorChain",
           "description": "Test NCCL_LAUNCH_ORDER_IMPLICIT serialization across multiple communicators",
           "test_filter": "ImplicitLaunchOrderMPITest.MultiCommunicatorChain"
+        }
+      ]
+    },
+    "net_ll128_post_send_fence": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 8,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 300,
+      "description": "LL128 Ring AllReduce with every ring hop on NET/IB with GPU Direct RDMA. NCCL_P2P_DISABLE and NCCL_SHM_DISABLE are cached per process, so they are set before launch.",
+      "env_variables": {
+        "NCCL_P2P_DISABLE": "1",
+        "NCCL_SHM_DISABLE": "1"
+      },
+      "tests": [
+        {
+          "name": "NetLl128_RingAllReduceEveryHopOnNet",
+          "description": "Regression test for the LL128 post-send fence: without the full fence the NIC could send stale 128-byte lines and the receiver hung",
+          "test_filter": "NetLl128MPITest.RingAllReduceCompletesWithEveryHopOnNet"
         }
       ]
     },

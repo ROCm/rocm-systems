@@ -130,14 +130,19 @@ ncclResult_t ncclProfilerStartCeCollEvent(struct ncclComm* comm, struct ncclCeCo
 ncclResult_t ncclProfilerStopCeCollEvent(struct ncclComm* comm, struct ncclCeCollArgs* args, hipStream_t stream) {
   return g_profilerStopCeCollEvent(comm, args, stream);
 }
-ncclResult_t ncclProfilerStartCeSyncEvent(struct ncclComm*, struct ncclCeCollArgs*, hipStream_t, void** handle) {
-  *handle = nullptr;
+ncclResult_t ncclProfilerStartCeSyncEvent(struct ncclComm*, struct ncclCeCollArgs*, hipStream_t,
+                                          struct ncclProfilerEventRef* handle) {
+  *handle = ncclProfilerEventRef{};
   return ncclSuccess;
 }
-ncclResult_t ncclProfilerStopCeSyncEvent(struct ncclComm*, void*, hipStream_t) { return ncclSuccess; }
+ncclResult_t ncclProfilerStopCeSyncEvent(struct ncclComm*, struct ncclProfilerEventRef*, hipStream_t) {
+  return ncclSuccess;
+}
 ncclResult_t ncclProfilerStartCeBatchEvent(struct ncclComm*, struct ncclCeCollArgs*, struct ncclCeBatchOpsParams*,
-                                           hipStream_t, void** handle) {
-  *handle = nullptr;
+                                           hipStream_t, struct ncclProfilerEventRef* handle) {
+  *handle = ncclProfilerEventRef{};
   return ncclSuccess;
 }
-ncclResult_t ncclProfilerStopCeBatchEvent(struct ncclComm*, void*, hipStream_t) { return ncclSuccess; }
+ncclResult_t ncclProfilerStopCeBatchEvent(struct ncclComm*, struct ncclProfilerEventRef*, hipStream_t) {
+  return ncclSuccess;
+}

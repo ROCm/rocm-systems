@@ -42,6 +42,7 @@ THE SOFTWARE.
 #include "algorithms/gin/gin_all_reduce.h"
 #endif
 #include "algorithms/dda/alltoall/dda_alltoall.h"
+#include "algorithms/dda/broadcast/dda_broadcast.h"
 #include "algorithms/gin/gin_alltoall.h"
 #include "group.h"
 #include "sym_kernels.h"
@@ -112,6 +113,10 @@ RCCL_PARAM(DdaLL128TwoShotThreshold, "DDA_LL128_TWOSHOT_THRESHOLD", (size_t)(64)
 RCCL_PARAM(DdaLL128AsyncWire, "DDA_LL128_ASYNC_WIRE", 0);
 RCCL_PARAM(DdaLL128, "DDA_LL128", kDdaThresholdUnset);
 RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", kDdaThresholdUnset);
+// Broadcast DDA: unset follows the arch table (any Broadcast DDA tier), 0 off, >0 on.
+RCCL_PARAM(DdaBc, "DDA_BC", kDdaThresholdUnset);
+// Development only: lets Broadcast LL run on the single-node IPC DDA path (e.g. gfx950).
+RCCL_PARAM(DdaBcAllowIpc, "DDA_BC_ALLOW_IPC", 0);
 // When set, bypass the per-arch tuning table entirely and use base-commit
 // env-var defaults for all thresholds (DDA, CE, symMaxR2).  Useful for
 // isolating arch-table effects without rebuilding.
@@ -853,6 +858,19 @@ ncclResult_t rcclGetCollImplInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_
     *protocol = decision.protocol;
     *maxChannels = decision.nMaxChannels;
     return ncclSuccess;
+  }
+
+  // Broadcast: report DDA when picked, else the generic query below. Check-mode, suspended and
+  // revoked comms always enqueue, so they skip the selector like ncclBroadcast_impl does.
+  if (coll == ncclFuncBroadcast && !rcclCollectiveMustUseEnqueuePath(comm)) {
+    struct rcclCollDecision decision;
+    NCCLCHECK(rcclSelectBroadcast(comm, (size_t)count, dataType, /*root=*/0, /*query=*/true, &decision));
+    if (decision.algo >= NCCL_NUM_ALGORITHMS) {
+      *algo = decision.algo;
+      *protocol = decision.protocol;
+      *maxChannels = decision.nMaxChannels;
+      return ncclSuccess;
+    }
   }
 
   // Other collectives: fall back to the size/algo query until they are migrated
@@ -2375,7 +2393,8 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
           decision->protocol = NCCL_PROTO_SIMPLE;
           decision->nMaxChannels = interComm->p2pnChannels;
         } else {
-          struct ncclTaskColl task;
+          // Zero-initialized: getAlgoInfo now reads task.algMask/forceAlgSelection.
+          struct ncclTaskColl task = {};
           task.func = ncclFuncAllGather;
           task.count = sendcount;
           task.datatype = datatype;
@@ -2390,7 +2409,8 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
           intraProto = NCCL_PROTO_SIMPLE;
           intraChan = intraComm->p2pnChannels;
         } else {
-          struct ncclTaskColl task;
+          // Zero-initialized: getAlgoInfo now reads task.algMask/forceAlgSelection.
+          struct ncclTaskColl task = {};
           task.func = ncclFuncAllGather;
           task.count = intraCount;
           task.datatype = datatype;
@@ -2490,6 +2510,53 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
   }
 
   return rcclRingFallback(comm, sendbuff, recvbuff, ncclFuncAllGather, sendcount, datatype, query, decision);
+}
+
+// Broadcast DDA gate: RCCL_DDA_BC when set, else whether the table has a Broadcast LL/LL128 tier,
+// so a global DDA threshold set for another collective does not turn Broadcast on.
+static bool rcclDdaBcEnabled(const rcclArchThresholds* table, int nRanks) {
+  const int64_t param = rcclParamDdaBc();
+  if (param != kDdaThresholdUnset) return param > 0;
+  return table != nullptr &&
+         (ddaTierCapFromTable(table, table->ddaLLMax, table->ddaLLMaxPerRank, ncclFuncBroadcast, nRanks) != 0 ||
+          ddaTierCapFromTable(table, table->ddaLL128Max, table->ddaLL128MaxPerRank, ncclFuncBroadcast, nRanks) != 0);
+}
+
+ncclResult_t rcclSelectBroadcast(struct ncclComm* comm, size_t count, ncclDataType_t datatype, int root, bool query,
+                                 struct rcclCollDecision* decision) {
+  if (comm == nullptr) return ncclInvalidArgument;
+  memset(decision, 0, sizeof(*decision));
+  decision->algo = NCCL_ALGO_RING;
+  decision->protocol = NCCL_PROTO_SIMPLE;
+  decision->nMaxChannels = 0;
+
+  if (rcclNcclAlgoEnvIsSet()) return ncclSuccess;
+  // DDA skips ArgsCheck; let the enqueue path report a bad root.
+  if (!query && (root < 0 || root >= comm->nRanks)) return ncclSuccess;
+
+  const size_t bytes = count * ncclTypeSize(datatype);
+  const rcclArchThresholds* const archTable = extAlgoArchTable(comm);
+  if (!rcclDdaBcEnabled(archTable, comm->nRanks)) return ncclSuccess;
+  const size_t entryMax = rcclDdaEntryThresholdTab(archTable, ncclFuncBroadcast, comm->nRanks);
+  if (!rcclDdaEnabled(comm, bytes, entryMax, query, "BC")) return ncclSuccess;
+  const bool fabric = IsArchMatch(comm->archName, "gfx1250");
+  if (!fabric && !(rcclParamDdaBcAllowIpc() && comm->ddaIpcMemHandler != nullptr)) return ncclSuccess;
+
+  const size_t llMax = rcclDdaLLThresholdTab(archTable, ncclFuncBroadcast, comm->nRanks);
+  const size_t ll128Max = rcclDdaLL128ThresholdTab(archTable, ncclFuncBroadcast, comm->nRanks);
+  if (llMax > 0 && bytes <= llMax && ncclBroadcastDdaFabricLLEligible(comm, count, datatype)) {
+    decision->algo = RCCL_DDA_FABRIC_LL;
+    decision->protocol = NCCL_PROTO_LL;
+    decision->nMaxChannels = ncclBroadcastDdaFabricLLBlocks(comm, count, datatype);
+    return rcclSelectDone("BC", query, decision);
+  }
+  if (fabric && ll128Max > 0 && bytes <= ll128Max && ncclBroadcastDdaFabricLL128Eligible(comm, count, datatype)) {
+    decision->algo = RCCL_DDA_FABRIC_LL128;
+    decision->protocol = NCCL_PROTO_LL128;
+    decision->nMaxChannels = ncclBroadcastDdaFabricLL128Blocks(comm, count, datatype);
+    return rcclSelectDone("BC", query, decision);
+  }
+  return ncclSuccess;
 }
 
 // See the header comment. Consolidates the backend picking formerly inlined in
@@ -2892,6 +2959,8 @@ bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize) {
   // - 2 nodes: enable for 128KiB .. 2MiB
   // - 4 nodes: enable up to 4MiB
   // - 8 and 16 nodes: enable up to 8MiB
+  // rawTaskAppend does not lower useDirect, so under NCCL_ENQUEUE_REARCH_ENABLE nothing would stage tempBuff.
+  if (ncclParamEnqueueRearchEnable()) return false;
   static int userDirectReduceScatterInput = rcclParamDirectReduceScatterDisable();
   if (userDirectReduceScatterInput != 0) {
     INFO(NCCL_INIT, "RCCL DIRECT REDUCE-SCATTER has been disabled by environment variable.");
@@ -3098,11 +3167,6 @@ bool rcclWarpSpeedSupported(struct ncclComm* comm, struct ncclKernelPlan* plan,
     if (nCollTasks > 0) nCollTasks--;
   }
   return !hasP2p && !hasBcast && nCollTasks <= 0;
-}
-
-bool rcclWarpSpeedSupported(struct ncclComm* comm, struct ncclKernelPlan* plan) {
-  return rcclWarpSpeedSupported(comm, plan, ncclIntruQueueHead(&plan->collTaskQueue),
-                                /*nCollTasks=*/-1);
 }
 
 bool rcclIsAboveWarpSpeedThreshold(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes) {
