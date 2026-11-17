@@ -666,6 +666,7 @@ int rj_arith_v_pk_fmac_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 // strict empirical modes are unsupported. It additionally supports RJ_ARITH_ALU_OMOD_*;
 // scaling is disabled by IEEE mode or output-denormal preservation.
 // Compatibility retains the inherited packed rounding and NaN behavior.
+// ALU_SDWA additionally canonicalizes tiny/zero rounded halves before output CLAMP.
 int rj_arith_v_pk_fmac_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a, const uint32_t *const *b,
@@ -2378,12 +2379,100 @@ int rj_arith_v_pk_maximum_f16_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
                                           const uint32_t *const *a, const uint32_t *const *b,
                                           uint32_t *excp_flag_user);
 
-// CDNA Compatibility binary FP16 arithmetic flushes after destination rounding.
-// gfx942 ordinary forms also accept RJ_ARITH_ALU_SDWA to scale before rounding,
+// gfx1010/gfx1030 preserve their inherited FP16 arithmetic policies. gfx1010
+// quiets input NaNs and judges output tininess after destination rounding;
+// gfx1030 retains the gfx11 numeric model. Guest rounding/denormal controls,
+// FP16 overflow, ABS/NEG, OMOD/CLAMP, DPP and overlap are supported. Operands
+// occupy low halves of one VGPR each; the upper destination half is preserved.
+// Loose and allow-Loose leave trapsts unused. Compatibility accumulates legacy
+// TRAPSTS causes for gfx1010 ADD and all four gfx1030 operations; those calls
+// require a valid trapsts pointer. gfx1010 SUB/SUBREV/MUL leave it unused.
+// Strict numeric mode 2 and strict FP-status mode 3 remain unsupported.
+int rj_arith_v_add_f16_w32_gfx1010(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_add_f16_w64_gfx1010(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_sub_f16_w32_gfx1010(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_sub_f16_w64_gfx1010(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_subrev_f16_w32_gfx1010(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_subrev_f16_w64_gfx1010(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_mul_f16_w32_gfx1010(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_mul_f16_w64_gfx1010(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_add_f16_w32_gfx1030(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_add_f16_w64_gfx1030(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_sub_f16_w32_gfx1030(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_sub_f16_w64_gfx1030(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_subrev_f16_w32_gfx1030(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_subrev_f16_w64_gfx1030(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_mul_f16_w32_gfx1030(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_mul_f16_w64_gfx1030(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, uint32_t *trapsts);
+
+// The inherited CDNA/gfx1150 Compatibility FP16 model flushes after destination rounding.
+// gfx908/gfx942 ordinary forms also accept RJ_ARITH_ALU_SDWA to scale before rounding,
 // retaining the inherited SDWA order. Other forms retain ordinary OMOD ordering.
 // Loose uses the shared approximation; strict empirical semantics are unsupported.
 // Operands are one VGPR each; EXEC and selected destination halves are preserved.
-// FP status pointers are unused.
+// gfx908 and gfx1250 status pointers are unused.
+int rj_arith_v_add_f16_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_add_f16_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_sub_f16_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_sub_f16_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_subrev_f16_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_subrev_f16_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_mul_f16_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_mul_f16_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, uint32_t *trapsts);
+// gfx942 adds the inherited CDNA3 arithmetic-step causes in Compatibility.
+// Supply valid trapsts storage in that mode; Loose/allow-Loose do not access it.
 int rj_arith_v_add_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
                                   const uint32_t *const *b, uint32_t *trapsts);
@@ -2408,6 +2497,7 @@ int rj_arith_v_mul_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t i
 int rj_arith_v_mul_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
                                   const uint32_t *const *b, uint32_t *trapsts);
+// Packed forms retain the same numerical policy without FP status reporting.
 int rj_arith_v_pk_mul_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *const *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *trapsts);

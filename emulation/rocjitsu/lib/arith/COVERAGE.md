@@ -252,3 +252,24 @@ raw ordering, guest input flushing and the existing absence of FP-status
 reporting; CLAMP does not add a classifier on this target. Mode 3 remains
 unsupported. The VM owns explicit SGPR/VCC and EXEC commits, including both
 mask writes for CMPX. This migration does not newly qualify a numerical model.
+
+## Older-target FP16 arithmetic
+
+gfx908/gfx90a and gfx1150 ADD/SUB/SUBREV/MUL/LDEXP use the shared CDNA
+half-arithmetic backends. Compatibility retains destination-rounding tininess,
+unconditional signaling-NaN quieting and guest rounding/denormal/overflow
+controls. gfx908/gfx90a SDWA scales before rounding; ordinary forms round
+before OMOD. These targets introduce no FP-status reporting for these operations.
+
+gfx1010/gfx1030 ADD/SUB/SUBREV/MUL use explicit model variants; LDEXP reuses
+the gfx942 variant. gfx1010 retains encoded-result tininess and quiets input
+signaling NaNs; gfx1030 retains the gfx11 numeric model. Compatibility reports
+the inherited TRAPSTS causes for gfx1010 ADD and all four gfx1030 binary
+operations. Those calls require a valid status pointer; Loose leaves it unused.
+
+All these migrations include VOP2/VOP3, DPP/SDWA, selected halves, destination
+preservation and aliases where supported. Scalar, AVX2 and AVX-512 numeric
+paths are shared. Loose keeps its established arithmetic freedoms. Strict modes
+remain unsupported: model reuse adds no empirical qualification. Operand staging
+and destination-byte placement remain in the VM; retired VM classifiers and
+SDWA arithmetic adapters are removed, while helpers with remaining users stay.

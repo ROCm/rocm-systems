@@ -106,6 +106,7 @@ foreach(
     IN
     ITEMS
         v_add_sub
+        v_gfx10_half_binary
         v_round_f64
         v_div_fixup
         v_div_fmas

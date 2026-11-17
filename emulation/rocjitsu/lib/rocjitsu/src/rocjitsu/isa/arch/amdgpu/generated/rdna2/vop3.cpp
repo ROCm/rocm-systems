@@ -4167,6 +4167,12 @@ VLdexpF16Vop3::VLdexpF16Vop3(const MachineInst *inst)
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
   }
+  if (src0.is_vgpr()) {
+    src0.set_register_byte_mask(0x3);
+  }
+  if (src1.is_vgpr()) {
+    src1.set_register_byte_mask(0x3);
+  }
   vdst.set_register_byte_mask(0x3);
   vdst.set_preserve_unwritten_bytes();
   flags_ |= DIRECT_REGISTER_ACCESSES;

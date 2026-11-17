@@ -1518,7 +1518,7 @@ for _fmt in ('f16', 'bf16'):
         'minimum': 'MINIMUM',
         'maximum': 'MAXIMUM',
     }.items():
-        if _fmt == 'f16' and _op == 'FMA':
+        if _fmt == 'f16':
             continue
         SIMD_PACKED_FLOAT[f'v_pk_{_mnemonic}_{_fmt}_vop3p'] = (_op, _fmt == 'bf16')
 

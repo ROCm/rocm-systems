@@ -3592,12 +3592,6 @@ inline U packed_float_half_simd(U a_bits, U b_bits, U c_bits, Wavefront &wf, boo
       util::stdx::where(order(b_bits) > order(a_bits), selected) = b_bits;
     }
     result = D([&](auto i) { return widen(selected[i]); });
-  } else if constexpr (!Bf16 && Op != PackedFloatOp::FMA) {
-    if constexpr (Op == PackedFloatOp::ADD) {
-      result = a + b;
-    } else if constexpr (Op == PackedFloatOp::MUL) {
-      result = a * b;
-    }
   } else {
     D product = Op == PackedFloatOp::ADD ? a : a * b;
     D addend = Op == PackedFloatOp::ADD ? b : c;

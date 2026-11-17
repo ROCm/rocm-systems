@@ -2683,11 +2683,11 @@ def test_cdna3_real_spec_mfma_destination_uses_acc_cd(generated_cdna3_isa):
     assert 'amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd)' in body
 
     # Per-target generation owns its compact, DPP/SDWA and extended numerical
-    # bodies locally. All three routes must collect the same wave status.
+    # bodies locally. All three routes use the library's inherited status policy.
     vop2 = (generated_cdna3_isa / 'vop2_exec.cpp').read_text()
     vop3 = (generated_cdna3_isa / 'vop3_exec.cpp').read_text()
     for cls in ('Add', 'Sub', 'Subrev', 'Mul'):
-        status = f'cdna3::execute_half_with_status<cdna3::HalfOp::{cls}>'
+        status = f'rj_arith_v_{cls.lower()}_f16_w64_gfx942'
         compact = vop2.split(f'void V{cls}F16Vop2::execute_impl(', 1)[1].split(
             '\n}', 1
         )[0]
@@ -3708,8 +3708,14 @@ def test_generated_vop3_f16_alu_paths_split_shared_generic_from_true16(
     assert 'RJ_ARITH_ALU_HIGH_A' not in unary
     assert 'execute_float_unary16' in unary
 
-    binary = _shared_execute_body(execute_shared, 'v_add_f16_vop3', 'v_add_f32_vop2')
-    assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(false,' in binary
+    # No shared ADD VOP3 caller remains: gfx10 owns its status in the library,
+    # while the CDNA and gfx11/12 executors bind their own numerical policies.
+    assert 'inline void execute_v_add_f16_vop3(' not in execute_shared
+    for arch, suffix in [('rdna1', 'gfx1010'), ('rdna2', 'gfx1030')]:
+        source = (amdgpu_generated_root / arch / 'vop3_exec.cpp').read_text()
+        binary = _generated_function_body(source, 'void VAddF16Vop3::execute_impl')
+        assert f'rj_arith_v_add_f16_w32_{suffix}' in binary
+        assert 'const uint32_t opsel = 0;' in binary
     assert 'read_vop3_true16_src' not in binary
     assert 'write_vop3_true16_dst' not in binary
 
@@ -4125,27 +4131,6 @@ def test_generated_scalar_f16_arithmetic_delegates_overflow_policy(
     assert 'util::f32_to_f16' not in body
 
 
-def test_generated_vector_f16_arithmetic_consumes_fp16_ovfl(
-    execute_shared_path: Path,
-):
-    execute_shared = execute_shared_path.read_text()
-    vop2 = _shared_execute_body(execute_shared, 'v_add_f16_vop2', 'v_add_f16_vop3')
-    vop3 = _shared_execute_body(execute_shared, 'v_add_f16_vop3', 'v_add_f32_vop2')
-
-    # Both encodings delegate FP16_OVFL narrowing to the shared arithmetic helper,
-    # so neither selects a narrowing helper by branching on the bit. VOP2 takes the
-    # unscoped core under one per-instruction environment rather than one per chunk.
-    assert 'binary_f16_simd_unscoped<amdgpu::fp_mode::Arithmetic::ADD>' in vop2
-    assert 'ROCJITSU_TRY_SIMD_VOP2_BINARY_SCOPED(' in vop2
-    assert 'if (wf.fp16_ovfl())' not in vop2
-    assert 'f32_to_f16_ovfl_simd' not in vop2
-    assert 'sdwa::finish_arithmetic_f16' in vop2
-    assert 'wf.fp16_ovfl()' in vop2
-    assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(false,' in vop3
-    assert 'sdwa::finish_arithmetic_f16' in vop3
-    assert 'wf.fp16_ovfl()' in vop3
-
-
 @pytest.fixture(scope='module', params=['local', 'shared'])
 def generated_f16_sdwa_consumers(request, tmp_path_factory):
     output = tmp_path_factory.mktemp(f'f16_sdwa_{request.param}')
@@ -4177,7 +4162,7 @@ def generated_f16_sdwa_consumers(request, tmp_path_factory):
 def test_generated_f16_sdwa_selects_producer_helper(
     generated_f16_sdwa_consumers, instruction, helper
 ):
-    """GFX10 arithmetic scales its rounded half at the SDWA store."""
+    """GFX10 arithmetic rounds to half before SDWA output scaling."""
     route, output = generated_f16_sdwa_consumers
     encoding = 'vop2' if instruction == 'V_ADD_F16' else 'vop1'
     if instruction in {'V_CEIL_F16', 'V_FLOOR_F16'}:
@@ -4189,7 +4174,12 @@ def test_generated_f16_sdwa_selects_producer_helper(
         assert 'execute_half_unary_sdwa' in body
         assert 'rj_arith_v_' + instruction.lower()[2:] + '_w32_gfx908' in body
         return
-    if route == 'shared':
+    if instruction in ('V_ADD_F16', 'V_LDEXP_F16'):
+        arch = 'rdna1' if route == 'shared' else 'rdna2'
+        source = (output / arch / f'{encoding}_exec.cpp').read_text()
+        class_name = ''.join(word.title() for word in instruction.split('_'))
+        signature = f'void {class_name}{encoding.title()}::execute_modifier_impl('
+    elif route == 'shared':
         source = (output / 'shared' / 'execute_shared.h').read_text()
         signature = f'inline void execute_{instruction.lower()}_{encoding}('
     else:
@@ -4197,8 +4187,11 @@ def test_generated_f16_sdwa_selects_producer_helper(
         class_name = ''.join(word.title() for word in instruction.split('_'))
         signature = f'void {class_name}{encoding.title()}::execute_modifier_impl('
     body = _generated_function_body(source, signature)
-    if instruction == 'V_ADD_F16' and route == 'local':
-        assert 'execute_sdwa_float_binary16' in body
+    if instruction == 'V_ADD_F16':
+        assert 'execute_float_binary16_sdwa' in body
+        assert (
+            'rj_arith_v_add_f16_w32_' + ('gfx1010' if route == 'shared' else 'gfx1030')
+        ) in body
         assert 'finish_arithmetic_f16(' not in body
         return
     assert f'amdgpu::sdwa::{helper}(' in body
@@ -4232,7 +4225,12 @@ def test_generated_f16_sdwa_rounds_before_omod(
         assert 'execute_half_unary_sdwa' in body
         assert 'rj_arith_v_fract_f16_w32_gfx908' in body
         return
-    if route == 'shared':
+    if instruction in ('V_ADD_F16', 'V_LDEXP_F16'):
+        arch = 'rdna1' if route == 'shared' else 'rdna2'
+        source = (output / arch / f'{encoding}_exec.cpp').read_text()
+        class_name = ''.join(word.title() for word in instruction.split('_'))
+        signature = f'void {class_name}{encoding.title()}::execute_modifier_impl('
+    elif route == 'shared':
         source = (output / 'shared' / 'execute_shared.h').read_text()
         signature = f'inline void execute_{instruction.lower()}_{encoding}('
     else:
@@ -4240,8 +4238,13 @@ def test_generated_f16_sdwa_rounds_before_omod(
         class_name = ''.join(word.title() for word in instruction.split('_'))
         signature = f'void {class_name}{encoding.title()}::execute_modifier_impl('
     body = _generated_function_body(source, signature)
+    if instruction == 'V_LDEXP_F16':
+        assert 'execute_float_binary16_sdwa' in body
+        assert 'rj_arith_v_ldexp_f16_w32_gfx942' in body
+        assert 'finish_arithmetic_f16(' not in body
+        return
     assert 'ResultFormat::F16, amdgpu::sdwa::OutputPolicy::ROUNDED>' in body
-    # The body applies no OMOD; LDEXP reads it only to flush tiny results.
+    # These unmigrated unary/selection paths scale at the SDWA store.
     assert 'floating_operation::apply' not in body
     assert ('amdgpu::sdwa::output_modifier<' in body) == (instruction == 'V_LDEXP_F16')
     for helper in ('finish_rounded_f16', 'round_f16_result', 'finish_arithmetic_f16'):

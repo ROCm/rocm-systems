@@ -331,7 +331,6 @@ BINARY_ARITHMETIC_F16 = {
     'V_LDEXP_F16',
 }
 
-GFX10_BINARY_F16 = BINARY_ARITHMETIC_F16 - {'V_LDEXP_F16'}
 
 BINARY_SELECTION_F16 = {
     'V_MIN_F16',
@@ -1953,7 +1952,7 @@ def gen_packed_fma16(ctx: ExecuteContext) -> str | None:
             omod = (
                 'inst_.omod'
                 if 'VOP3' in enc_name
-                else 'amdgpu::sdwa::output_modifier<amdgpu::sdwa::ResultFormat::PK_F16>(*this, wf)'
+                else '(inst_.src0 == amdgpu::SRC_SDWA ? sdwa_omod_ : 0u)'
             )
             terms.append(f'(uint64_t({omod}) * RJ_ARITH_ALU_OMOD_2)')
     else:
@@ -2036,8 +2035,10 @@ def gen_packed_binary16(ctx: ExecuteContext) -> str | None:
     src = ctx.src_ops
     enc_name = ctx.enc_name
     opsel_exprs = ctx.opsel_exprs
+    older = arch in ('cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5')
     if (
-        arch not in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5')
+        not older
+        and arch not in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5')
         or mnemonic not in PACKED_BINARY16_NAMES
     ):
         return None
@@ -2051,7 +2052,7 @@ def gen_packed_binary16(ctx: ExecuteContext) -> str | None:
         return None
     legacy = mnemonic in ('V_PK_MIN_F16', 'V_PK_MAX_F16')
     arithmetic = mnemonic in ('V_PK_ADD_F16', 'V_PK_MUL_F16')
-    if not arithmetic and legacy != (arch in ('rdna3', 'cdna3', 'cdna4')):
+    if not arithmetic and legacy != (older or arch in ('rdna3', 'cdna3', 'cdna4')):
         return None
     low, high = opsel_exprs
     terms = ['(inst_.clamp ? RJ_ARITH_PK_CLAMP : 0u)']
@@ -2071,21 +2072,32 @@ def gen_packed_binary16(ctx: ExecuteContext) -> str | None:
         + mnemonic.lower()
         + ('_gfx12' if arch in ('rdna4', 'cdna5') and arithmetic else '')
     )
-    if not arithmetic and arch in ('cdna3', 'cdna4'):
+    if not arithmetic and arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4'):
         api += '_gfx942'
     if arch == 'cdna5' and mnemonic in ('V_PK_MINIMUM_F16', 'V_PK_MAXIMUM_F16'):
         api += '_gfx1250'
-    if arch in ('cdna3', 'cdna4') and mnemonic == 'V_PK_ADD_F16':
+    if (older or arch in ('cdna3', 'cdna4')) and mnemonic == 'V_PK_ADD_F16':
         api = 'rj_arith_v_pk_add_f16_gfx942'
-    if arch.startswith('cdna') and mnemonic == 'V_PK_MUL_F16':
+    if (older or arch.startswith('cdna')) and mnemonic == 'V_PK_MUL_F16':
         api = 'rj_arith_v_pk_mul_f16_' + ('gfx1250' if arch == 'cdna5' else 'gfx942')
     lines = [
         '  const uint64_t modifiers = ' + ' |\n      '.join(terms) + ';',
         '  const unsigned narrow_sources = ' + ' | '.join(narrow) + ';',
         f'  amdgpu::arith::execute_packed_binary16(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
         '      wf.cu().arithmetic_flags(), modifiers,',
-        f'      {dst[0]}, {src[0]}, {src[1]}, {str(arch in ("cdna2", "rdna3", "cdna3", "cdna4")).lower()}, narrow_sources);',
+        f'      {dst[0]}, {src[0]}, {src[1]}, {str(older or arch in ("rdna3", "cdna3", "cdna4")).lower()}, narrow_sources);',
     ]
+    if older:
+        # Reuse preserves the inherited model; it does not qualify older targets.
+        lines = (
+            [
+                '  if (!wf.exec()) {',
+                '    return;',
+                '  }',
+            ]
+            + inherited_half_qualification_guard('cdna1')
+            + lines
+        )
     if arch == 'cdna5' and mnemonic == 'V_PK_ADD_F16':
         lines = inherited_half_qualification_guard(arch) + lines
     return '\n'.join(lines)
@@ -2266,12 +2278,16 @@ def gen_half_dot(ctx: ExecuteContext) -> str | None:
 
 
 def gen_float_binary16(ctx: ExecuteContext) -> str | None:
+    """Route half arithmetic and selection with each profile's output policy."""
     arch = ctx.arch_name
     mnemonic = ctx.inst.name
     dst = ctx.dst_ops
     src = ctx.src_ops
     is_vop3 = ctx.is_vop3
-    if not (arch == 'rdna2' and mnemonic in GFX10_BINARY_F16) and (
+    if not (
+        arch in ('cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5')
+        and mnemonic in BINARY_ARITHMETIC_F16
+    ) and (
         arch not in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5')
         or mnemonic not in BINARY_F16
     ):
@@ -2300,11 +2316,15 @@ def gen_float_binary16(ctx: ExecuteContext) -> str | None:
         # both accept bit-exact semantics. CDNA3/CDNA4, gfx1250 and RDNA2 call loose-only entries
         # until their captures are reviewed per instruction.
         api += {
-            'rdna2': '_gfx10',
+            'rdna1': '_gfx1010',
+            'rdna2': '_gfx1030',
+            'rdna3_5': '_gfx908',
+            'cdna1': '_gfx908',
+            'cdna2': '_gfx908',
             'rdna3': '',
             'rdna4': '_gfx12',
             'cdna3': '_gfx942',
-            'cdna4': '_gfx942',
+            'cdna4': '_gfx908',
             'cdna5': '_gfx1250',
         }[arch]
     elif mnemonic == 'V_LDEXP_F16':
@@ -2313,6 +2333,8 @@ def gen_float_binary16(ctx: ExecuteContext) -> str | None:
             if arch in ('rdna4', 'cdna5')
             else '_gfx942' if arch.startswith('cdna') else ''
         )
+    if arch in ('rdna1', 'rdna2', 'rdna3_5') and mnemonic == 'V_LDEXP_F16':
+        api = 'rj_arith_v_ldexp_f16_gfx942'
     lines = (
         inherited_half_qualification_guard(arch)
         if arch == 'cdna5' and mnemonic == 'V_LDEXP_F16'
@@ -2321,11 +2343,15 @@ def gen_float_binary16(ctx: ExecuteContext) -> str | None:
     if arch in ('cdna3', 'cdna4') and mnemonic in CDNA_HALF_SELECTION:
         api += '_gfx942'
     modifiers = '0'
-    if arch in ('cdna3', 'cdna4') and not is_vop3 and mnemonic in BINARY_ARITHMETIC_F16:
+    if (
+        arch in ('cdna1', 'cdna2', 'rdna1', 'rdna2', 'cdna3', 'cdna4')
+        and not is_vop3
+        and mnemonic in BINARY_ARITHMETIC_F16
+    ):
         lines += [
             '  if (inst_.src0 == amdgpu::SRC_SDWA) {',
             f'    amdgpu::arith::execute_float_binary16_sdwa(*this, wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
-            f'        wf.cu().arithmetic_flags(), {dst[0]}, {src[0]}, {src[1]}, {str(mnemonic != "V_LDEXP_F16").lower()});',
+            f'        wf.cu().arithmetic_flags(), {dst[0]}, {src[0]}, {src[1]}, {str(arch in ("cdna1", "cdna2", "cdna3", "cdna4") and mnemonic != "V_LDEXP_F16").lower()});',
             '    return;',
             '  }',
         ]
@@ -2333,7 +2359,7 @@ def gen_float_binary16(ctx: ExecuteContext) -> str | None:
         lines += [
             (
                 '  const uint32_t opsel = 0;'
-                if arch == 'rdna2'
+                if arch in ('rdna1', 'rdna2')
                 else '  const uint32_t opsel = amdgpu::vop3_opsel(inst_);'
             ),
             '  const uint64_t modifiers = ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) |',
@@ -2359,28 +2385,16 @@ def gen_float_binary16(ctx: ExecuteContext) -> str | None:
             '      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);',
         ]
         modifiers = 'modifiers'
-    status_operation = ''
-    if arch == 'rdna2':
-        operation = mnemonic.split('_')[1].title()
-        status_operation = f'<amdgpu::arith::HalfBinaryOperation::{operation}>'
-    if arch == 'rdna2' and not is_vop3:
-        lines += [
-            '  if (inst_.src0 == amdgpu::SRC_SDWA) {',
-            f'    amdgpu::arith::execute_sdwa_float_binary16{status_operation}(*this, wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
-            f'        {dst[0]}, {src[0]}, {src[1]});',
-            '    return;',
-            '  }',
-        ]
     helper = 'execute_float_binary16'
     receiver = 'wf'
     if arch in ('cdna3', 'cdna4') and not is_vop3 and mnemonic in CDNA_HALF_SELECTION:
         helper = 'execute_cdna_selection<16>'
         receiver = '*this, wf'
     lines += [
-        f'  amdgpu::arith::{helper}{status_operation}({receiver}, {wave_api(api, 32)}, {wave_api(api, 64)},',
+        f'  amdgpu::arith::{helper}({receiver}, {wave_api(api, 32)}, {wave_api(api, 64)},',
         f'      wf.cu().arithmetic_flags(), {modifiers},',
-        f'      {dst[0]}, {src[0]}, {src[1]}, {str(arch in ("rdna2", "rdna3", "cdna3", "cdna4")).lower()}'
-        + (', true' if arch in ('cdna3', 'cdna4') else '')
+        f'      {dst[0]}, {src[0]}, {src[1]}, {str(arch in ("rdna1", "rdna2", "rdna3", "rdna3_5", "cdna1", "cdna2", "cdna3", "cdna4")).lower()}'
+        + (', true' if arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4') else '')
         + ');',
     ]
     return '\n'.join(lines)

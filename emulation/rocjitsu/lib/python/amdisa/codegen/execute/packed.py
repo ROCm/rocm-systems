@@ -89,7 +89,9 @@ def gen_pk_binop(
     dtype: str | None,
     opsel_exprs: tuple[str, str] = ('', ''),
 ) -> str:
-    """Generate packed FP16/BF16 binary arithmetic."""
+    """Generate the remaining BF16 packed binary fallback bodies."""
+    if dtype != 'bf16':
+        raise ValueError(f'packed binary fallback does not support {dtype}')
     d, s0, s1 = dst[0], src[0], src[1]
     L = []
     L.append('  uint64_t exec = wf.exec();')
@@ -105,25 +107,7 @@ def gen_pk_binop(
     L.append(f'    bool sel0_hi = ({opsel_hi} >> 0) & 1;')
     L.append(f'    bool sel1_hi = ({opsel_hi} >> 1) & 1;')
 
-    if dtype == 'f16':
-        for half, neg in (('lo', 'neg'), ('hi', 'neg_hi')):
-            for name, raw, selector, bit in (
-                ('a', 'raw0', f'sel0_{half}', 0),
-                ('b', 'raw1', f'sel1_{half}', 1),
-            ):
-                L.append(
-                    f'    uint16_t {name}_{half} = static_cast<uint16_t>({selector} ? ({raw} >> 16) : {raw});'
-                )
-                L.append(
-                    f'    if (inst_.{neg} & {1 << bit}u) {name}_{half} ^= 0x8000u;'
-                )
-            L.append(
-                f'    const uint16_t r{half} = amdgpu::fp_mode::packed_binary_f16(amdgpu::fp_mode::PackedBinaryOp::{op.upper()}, a_{half}, b_{half}, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), inst_.clamp, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf), wf.cu().arch(), wf.ieee_mode());'
-            )
-        L.append(
-            f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, rlo | (static_cast<uint32_t>(rhi) << 16));'
-        )
-    elif dtype == 'bf16':
+    if dtype == 'bf16':
         L.append(
             '    float a_lo = util::bf16_to_f32(static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0));'
         )

@@ -6298,7 +6298,7 @@ void add_vop3_dpp16_footprint_case(std::vector<std::vector<uint32_t>> &cases, co
   cases.emplace_back(words.begin(), words.end());
 }
 
-TEST(MemoryWaitFootprintTest, Gfx1030HalfArithmeticReadsOnlySelectedBytes) {
+TEST(MemoryWaitFootprintTest, Gfx10HalfArithmeticReadsOnlySelectedBytes) {
   std::vector<std::vector<uint32_t>> cases;
   for (unsigned opcode : {50u, 51u, 52u, 53u}) {
     const uint32_t compact = (opcode << 25) | (2u << 17) | (4u << 9);
@@ -6307,8 +6307,10 @@ TEST(MemoryWaitFootprintTest, Gfx1030HalfArithmeticReadsOnlySelectedBytes) {
     cases.push_back({compact | 250u, 0xff00e403u}); // DPP16
     cases.push_back({compact | 249u, 0x06050603u}); // SDWA SRC0 WORD_1
   }
-  for (unsigned wave_size : {32u, 64u}) {
-    check_vector_footprints(rocjitsu::IsaFamily::Rdna2, wave_size, 16, cases);
+  for (const auto arch : {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2}) {
+    for (unsigned wave_size : {32u, 64u}) {
+      check_vector_footprints(arch, wave_size, 16, cases);
+    }
   }
 }
 
