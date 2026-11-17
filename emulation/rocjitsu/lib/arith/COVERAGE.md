@@ -147,3 +147,15 @@ Loose uses FP32-intermediate MAD. Guest rounding, forced intermediate flushing,
 IEEE NaN quieting, FP16_OVFL and final output modifiers are retained. This is
 software-model reuse, not new empirical qualification; strict modes reject and
 FP status is unchanged. The native half FMA migration is independent.
+
+## BF16 SDWA widening
+
+BF16-to-FP32 widening accepts `CVT_SDWA` for inherited output scaling and
+clamp, including normalization of tiny inputs before scaling. Scalar, AVX2 and
+AVX-512 share this model. Compatibility, Loose and allow-Loose support it; strict
+empirical modes reject this unqualified encoding policy. Ordinary widening
+retains its existing qualification. The VM stages inputs and places output bytes.
+
+Unsuffixed packed RTZ conversion also accepts `CVT_SDWA`. It finalizes already-
+rounded halves and applies inherited clamp without multiplying again; scalar,
+AVX2 and AVX-512 share the finalizer. The gfx12 API keeps rejecting this selector.

@@ -776,7 +776,21 @@ def test_fp64_binary_arithmetic_adapter(arch):
             assert 'arithmetic_flags()' in body
 
 
-@pytest.mark.parametrize('arch', ['rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5'])
+@pytest.mark.parametrize(
+    'arch',
+    [
+        'cdna1',
+        'cdna2',
+        'rdna1',
+        'rdna2',
+        'rdna3_5',
+        'rdna3',
+        'rdna4',
+        'cdna3',
+        'cdna4',
+        'cdna5',
+    ],
+)
 def test_byte_conversion_policy_and_selected_read_byte(arch):
     from amdisa.codegen.execute.rj_arith_float import gen_byte_nibble_conversion
 
@@ -798,7 +812,8 @@ def test_byte_conversion_policy_and_selected_read_byte(arch):
             assert ('inst_.omod' in body) == vop3
             assert 'inst_.abs' not in body and 'inst_.neg' not in body
             assert ('execute_byte_conversion_sdwa' in body) == (
-                arch in ('cdna3', 'cdna4') and not vop3
+                arch in ('cdna1', 'cdna2', 'rdna1', 'rdna2', 'cdna3', 'cdna4')
+                and not vop3
             )
 
 
@@ -937,7 +952,7 @@ def test_conversion32_modifiers_and_state_policy(arch):
         assert gen_conversion32(context(arch, name, ['dst'], [], is_vop3=True)) is None
 
 
-@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+@pytest.mark.parametrize('arch', ['rdna3_5', 'rdna3', 'rdna4'])
 def test_conversion16_halves_and_guest_modes(arch):
     from amdisa.codegen.execute.rj_arith_float import (
         CONVERSION16_NAMES,
@@ -956,7 +971,7 @@ def test_conversion16_halves_and_guest_modes(arch):
             assert 'arithmetic_reports_fp_status' not in body
             assert ('RJ_ARITH_FP16_OVFL' in body) == (output == 'F16')
             assert ('RJ_ARITH_FP_DX10_CLAMP_OFF' in body) == (
-                arch == 'rdna3' and output.startswith('F')
+                arch != 'rdna4' and output.startswith('F')
             )
             if output.startswith('F'):
                 rounding = (
@@ -1679,8 +1694,10 @@ def test_float16_conversion_architectures_and_layouts(arch):
             )
 
 
-@pytest.mark.parametrize('arch', ['cdna3', 'cdna4', 'cdna5'])
-def test_cdna_half_conversion_layout_and_sdwa(arch):
+@pytest.mark.parametrize(
+    'arch', ['cdna1', 'cdna2', 'rdna1', 'rdna2', 'cdna3', 'cdna4', 'cdna5']
+)
+def test_legacy_half_conversion_layout_and_sdwa(arch):
     from amdisa.codegen.execute.rj_arith_float import (
         CONVERSION16_NAMES,
         gen_conversion16,
@@ -1691,13 +1708,21 @@ def test_cdna_half_conversion_layout_and_sdwa(arch):
         for vop3 in (False, True):
             body = gen_conversion16(context(arch, name, ['dst'], ['src'], is_vop3=vop3))
             suffix = (
-                '_gfx12' if arch == 'cdna5' else '_gfx942' if output != 'F32' else ''
+                '_gfx12'
+                if arch == 'cdna5'
+                else (
+                    '_gfx942'
+                    if arch not in ('rdna1', 'rdna2') and output != 'F32'
+                    else ''
+                )
             )
             assert 'rj_arith_' + name.lower() + '_w64' + suffix in body
             assert ('execute_conversion16_sdwa' in body) == (
                 arch != 'cdna5' and not vop3
             )
-            if arch != 'cdna5' and output != 'F32':
+            if arch != 'cdna5' and not vop3 and output != 'F32':
+                assert 'rj_arith_' + name.lower() + '_w64_gfx942, flags' in body
+            if arch not in ('cdna5', 'rdna1', 'rdna2') and output != 'F32':
                 assert 'RJ_ARITH_ALU_HIGH_D) ? 0xC : 0xF' in body
 
 
@@ -2633,3 +2658,21 @@ def test_cdna2_half_mad_has_no_retired_evaluator():
         assert 'execute_cdna2_mad_f16' not in text
         assert 'MadVop2::Accumulate, true' not in text
     assert 'cdna2_mad_f16' not in (generated / 'shared/simd_glue.h').read_text()
+
+
+@pytest.mark.parametrize('arch', ['cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5'])
+def test_older_packed_rtz_routes_existing_kernels_and_sdwa(arch):
+    from amdisa.codegen.execute.rj_arith_float import gen_packed_conversion
+
+    for vop3 in (False, True):
+        body = gen_packed_conversion(
+            context(arch, 'V_CVT_PKRTZ_F16_F32', ['dst'], ['a', 'b'], is_vop3=vop3)
+        )
+        assert 'rj_arith_v_cvt_pk_rtz_f16_f32_w64' in body
+        assert 'RJ_ARITH_FP16_OVFL' in body
+        assert 'RJ_ARITH_FP_FLUSH_INPUT_DENORMALS' in body
+        assert 'RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS' in body
+        assert ('execute_packed_rtz_sdwa' in body) == (
+            arch in ('rdna1', 'rdna2') and not vop3
+        )
+        assert ('RJ_ARITH_ALU_ABS_B' in body) == vop3

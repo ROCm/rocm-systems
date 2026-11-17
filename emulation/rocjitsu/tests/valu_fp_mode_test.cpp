@@ -5421,11 +5421,6 @@ SimdPathExpectation simd_expectation_for_run(const ArithmeticCase &test, bool fo
 void expect_arithmetic_case(const ArithmeticCase &test, SimdPathExpectation simd = {},
                             bool uses_arith = false, amdgpu::ArithmeticPolicy policy = {}) {
   uses_arith = test.arith_host_contract || (uses_arith && uses_default_host_controls(test.arch));
-  const int host_rounding = test.host_rounding;
-  if (uses_arith) {
-    ASSERT_EQ(host_rounding, FE_TONEAREST) << test.name;
-    ASSERT_EQ(test.mxcsr_bits & test.mxcsr_mask & ~0x3fu, 0x1f80u & test.mxcsr_mask) << test.name;
-  }
   amdgpu::GpuMemory memory("mode_memory");
   amdgpu::L2Cache cache("mode_cache");
   cache.set_backing_memory(&memory);
@@ -5445,6 +5440,22 @@ void expect_arithmetic_case(const ArithmeticCase &test, SimdPathExpectation simd
   DecodeResult decoded = decoder->decode(test.words.data());
   ASSERT_FALSE(decoded.failed());
   std::unique_ptr<Instruction> instruction = std::move(decoded).value();
+  auto mnemonic = instruction->mnemonic();
+  if (mnemonic.ends_with("_e32") || mnemonic.ends_with("_e64")) {
+    mnemonic.remove_suffix(4);
+  }
+  if (mnemonic.ends_with("_sdwa")) {
+    mnemonic.remove_suffix(5);
+  }
+  if (mnemonic == "v_cvt_f16_i16" || mnemonic == "v_cvt_f16_u16" || mnemonic == "v_cvt_i16_f16" ||
+      mnemonic == "v_cvt_u16_f16" || mnemonic == "v_cvt_f16_f32" || mnemonic == "v_cvt_f32_f16") {
+    // These conversions use rj-arith on every profile, outside the legacy tracker.
+    uses_arith = true;
+    simd = {};
+  }
+
+  // Apply the default-host contract after classifying the migrated instruction.
+  const int host_rounding = uses_arith ? FE_TONEAREST : test.host_rounding;
   const uint32_t base = wave->vgpr_alloc().base;
   const uint64_t full_exec = wave->wf_size() == 64 ? ~uint64_t{0} : 0xffffffffu;
   for (uint64_t exec : {uint64_t{1}, full_exec}) {

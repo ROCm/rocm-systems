@@ -324,10 +324,6 @@ SIMD_VOP2_BINARY: dict[str, tuple[str, str]] = {
     # float_minmax.simd_probe routes the other IEEE-2019 forms, VOP3 included.
     'v_max_num_f16_vop2': ('uint32_t', float_minmax.simd_functor('f16', 'max_num')),
     'v_min_num_f16_vop2': ('uint32_t', float_minmax.simd_functor('f16', 'min_num')),
-    # v_cvt_pkrtz_f16_f32 (both spellings): two F32 sources rounded toward
-    # zero into packed halves by the shared/conversion.h stages.
-    'v_cvt_pkrtz_f16_f32_vop2': ('uint32_t', conversion.STAGES),
-    'v_cvt_pk_rtz_f16_f32_vop2': ('uint32_t', conversion.STAGES),
     # --- f16 binary (low 16 bits f16, result zero-extended). These share the
     # MODE-aware arithmetic helper the VOP3 forms use, so source flushing,
     # FP16_OVFL narrowing and NaN selection have one implementation. The probe
@@ -570,29 +566,6 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
     # --- ubyte -> f32 (extract byte N, exact int->float) -----------------------
     # dst = float(byte_N(src0)); byte value is 0..255 so the int->float cast is
     # exact and bit-identical to the scalar static_cast<float>.
-    'v_cvt_f32_ubyte0_vop1': (
-        'uint32_t',
-        'float32_t',
-        '[](auto a) { return util::stdx::static_simd_cast<util::native<float32_t>>(a & 0xFFu); }',
-    ),
-    'v_cvt_f32_ubyte1_vop1': (
-        'uint32_t',
-        'float32_t',
-        '[](auto a) {'
-        ' return util::stdx::static_simd_cast<util::native<float32_t>>((a >> 8) & 0xFFu); }',
-    ),
-    'v_cvt_f32_ubyte2_vop1': (
-        'uint32_t',
-        'float32_t',
-        '[](auto a) {'
-        ' return util::stdx::static_simd_cast<util::native<float32_t>>((a >> 16) & 0xFFu); }',
-    ),
-    'v_cvt_f32_ubyte3_vop1': (
-        'uint32_t',
-        'float32_t',
-        '[](auto a) {'
-        ' return util::stdx::static_simd_cast<util::native<float32_t>>((a >> 24) & 0xFFu); }',
-    ),
     # --- float rounding (bit-identical to std::* on host) ---
     'v_floor_f32_vop1': (
         'float32_t',
@@ -765,26 +738,6 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
             'wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(), '
             'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))); }',
         ),
-    ),
-    # --- f16 <-> f32 / int16 conversions ---
-    'v_cvt_f32_f16_vop1': (
-        'uint32_t',
-        'float32_t',
-        '[&wf](auto a) { return ::rocjitsu::amdgpu::cvt_f32_f16_mode_simd(a, wf); }',
-    ),
-    'v_cvt_i16_f16_vop1': (
-        'uint32_t',
-        'uint32_t',
-        '[](auto a) {'
-        ' auto s = util::f16_to_f32_simd(a);'
-        ' return ::rocjitsu::amdgpu::simd_cvt_i16_f32_to_u32(s); }',
-    ),
-    'v_cvt_u16_f16_vop1': (
-        'uint32_t',
-        'uint32_t',
-        '[](auto a) {'
-        ' auto s = util::f16_to_f32_simd(a);'
-        ' return ::rocjitsu::amdgpu::simd_cvt_u16_f32_to_u32(s); }',
     ),
 }
 
@@ -2420,9 +2373,6 @@ _PACKED_NORMALIZED_VOP3 = (
 )
 
 
-_PACKED_RTZ_VOP3 = ('v_cvt_pkrtz_f16_f32_vop3', 'v_cvt_pk_rtz_f16_f32_vop3')
-
-
 def _modified_conversion_op(cpp_op: str, *, bits: int, arity: int = 2) -> str:
     """Apply floating source signs before a raw-word SIMD conversion."""
     operands = ('a', 'b')[:arity]
@@ -2920,8 +2870,6 @@ def _simd_probe_line(
         spec2v3 = SIMD_VOP2_BINARY.get(base + '_vop2')
         if spec2v3 is not None:
             cpp_t, cpp_op = spec2v3
-            if template_name in _PACKED_RTZ_VOP3:
-                return f'  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT({cpp_t}, {conversion.STAGES});'
             if cpp_t == 'float32_t':
                 if base in ('v_add_f32', 'v_mul_f32', 'v_sub_f32', 'v_subrev_f32'):
                     cpp_op = _binary_f32_op(base.split('_')[1], modifiers=True)
@@ -2958,13 +2906,6 @@ def _simd_probe_line(
         spec1v3 = SIMD_VOP1_UNARY.get(base + '_vop1')
         if spec1v3 is not None:
             cpp_tin, cpp_tout, cpp_op = spec1v3
-            if base == 'v_cvt_f32_f16':
-                macro = (
-                    'ROCJITSU_TRY_SIMD_CVT_F32_F16_VOP3_TRUE16'
-                    if true16_vop3
-                    else 'ROCJITSU_TRY_SIMD_CVT_F32_F16_VOP3'
-                )
-                return f'  {macro}();'
             if true16_vop3:
                 return None
             if base in _VOP3_UNARY_SKIP:
@@ -2992,14 +2933,6 @@ def _simd_probe_line(
                 # The VOP1 shortcut does not apply floating source modifiers.
                 # Modified F32 inputs use the scalar conversion body.
                 return f'  if (!inst.inst_.abs && !inst.inst_.neg) {{\n{probe}\n  }}'
-            if base in (
-                'v_cvt_f32_ubyte0',
-                'v_cvt_f32_ubyte1',
-                'v_cvt_f32_ubyte2',
-                'v_cvt_f32_ubyte3',
-            ):
-                # The VOP1 shortcut has no output scaling or saturation.
-                return f'  if (!inst.inst_.omod && !inst.inst_.clamp) {{\n{probe}\n  }}'
             if _probe_uses_fp16_ovfl_f16_result_narrow(cpp_op):
                 ovfl_probe = f'  ROCJITSU_TRY_SIMD_VOP1_UNARY({cpp_tin}, {cpp_tout}, {_fp16_ovfl_cpp_op(cpp_op)});'
                 return _mode_aware_f16_result_simd_probe(probe, ovfl_probe)
@@ -3213,10 +3146,7 @@ def _local_coverage_probe(
     if template_name in (
         'v_cvt_pk_f16_f32_vop3',
         'v_cvt_pk_bf16_f32_vop3',
-        'v_cvt_pkrtz_f16_f32_vop3',
     ):
-        if template_name == 'v_cvt_pkrtz_f16_f32_vop3':
-            return call(2, False, 0, conversion.STAGES)
         if 'bf16' in template_name:
             convert = 'util::pack_bf16_simd({x}, wf.fp16_ovfl())'
         else:
