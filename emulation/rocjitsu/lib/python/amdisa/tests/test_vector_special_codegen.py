@@ -291,7 +291,6 @@ def test_ldexp_simd_probes_use_the_shared_raw_operation():
     )
     vop3 = {
         'f16': simd_probe_line('v_ldexp_f16_vop3'),
-        'f32': simd_probe_line('v_ldexp_f32_vop3'),
         'f64': simd_probe_line('v_ldexp_f64_vop3'),
     }
     assert vop3['f16'].startswith(
@@ -300,10 +299,8 @@ def test_ldexp_simd_probes_use_the_shared_raw_operation():
     assert simd_probe_line('v_ldexp_f16_vop3', true16_vop3=True).startswith(
         f'  ROCJITSU_TRY_SIMD_VOP3_LDEXP_TRUE16_RAW_FP16({operation}'
     )
-    assert vop3['f32'].startswith(
-        '  ROCJITSU_TRY_SIMD_VOP3_LDEXP_RAW_FP('
-        'amdgpu::ldexp::Operation<amdgpu::fp_format::F32>{'
-    )
+    # All FP32 bindings now use the library instead of this legacy probe.
+    assert simd_probe_line('v_ldexp_f32_vop3') is None
     assert vop3['f64'].startswith(
         '  ROCJITSU_TRY_SIMD_VOP3_LDEXP_RAW_FP64('
         'amdgpu::ldexp::Operation<amdgpu::fp_format::F64, 32>{'

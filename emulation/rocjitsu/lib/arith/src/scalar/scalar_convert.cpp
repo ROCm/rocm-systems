@@ -131,7 +131,7 @@ template <Convert Op> uint32_t conversion_causes(uint64_t flags, uint32_t a, uin
     return 0;
   } else if constexpr (Op == Convert::SignedToFloat || Op == Convert::UnsignedToFloat) {
     const double exact = Op == Convert::SignedToFloat ? double(int32_t(a)) : double(a);
-    return scalar_result_causes<false>(exact, result, rounding);
+    return compatibility_result_causes<false>(exact, result, rounding);
   } else {
     constexpr bool half = Op == Convert::HalfToFloat || Op == Convert::HighHalfToFloat;
     constexpr uint32_t normal = half ? 0x400 : 0x800000;
@@ -144,7 +144,7 @@ template <Convert Op> uint32_t conversion_causes(uint64_t flags, uint32_t a, uin
     if ((flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS) && (a & (sign - 1)) < normal) {
       a &= sign;
     }
-    const double exact = scalar_fp_value<half>(a);
+    const double exact = compatibility_fp_value<half>(a);
     if constexpr (Op == Convert::FloatToSigned || Op == Convert::FloatToUnsigned) {
       constexpr double low = Op == Convert::FloatToSigned ? -0x1p31 : 0;
       constexpr double high = Op == Convert::FloatToSigned ? 0x1p31 - 1 : 0x1p32 - 1;
@@ -152,7 +152,7 @@ template <Convert Op> uint32_t conversion_causes(uint64_t flags, uint32_t a, uin
         return RJ_ARITH_EXCEPTION_INVALID;
       }
     } else if (__builtin_isfinite(exact)) {
-      causes |= scalar_result_causes<!half>(exact, result, rounding);
+      causes |= compatibility_result_causes<!half>(exact, result, rounding);
     }
     return causes;
   }

@@ -84,6 +84,19 @@ inline void execute_fp8_widen_sdwa(Inst &inst, Wavefront &wave, Unary32Function 
   }
 }
 
+// Forward encoded SDWA modifiers; rj-arith resolves the architecture's numerical policy.
+// Profiles without SDWA instantiate the surrounding generated branch with zero controls.
+template <typename Inst> inline uint64_t sdwa_float_modifiers(const Inst &inst) {
+  if constexpr (requires {
+                  inst.sdwa_omod_;
+                  inst.sdwa_clamp_;
+                }) {
+    return uint64_t(inst.sdwa_omod_) * RJ_ARITH_ALU_OMOD_2 |
+           (inst.sdwa_clamp_ ? RJ_ARITH_ALU_CLAMP : 0u);
+  }
+  return 0;
+}
+
 // Convert the already selected SDWA source, then apply floating output modifiers
 // and byte placement exactly once. Validate arithmetic before any destination write.
 template <typename Inst>

@@ -114,10 +114,10 @@ void VAddF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
-  amdgpu::arith::execute_float_binary32(wf, rj_arith_v_add_f32_w32_gfx1250,
-                                        rj_arith_v_add_f32_w64_gfx1250, wf.cu().arithmetic_flags(),
-                                        0, vdst, src0, vsrc1,
-                                        /*rdna3=*/false, /*compatibility_mul=*/false);
+  amdgpu::arith::execute_sdwa_binary32(*this, wf, rj_arith_v_add_f32_w32_gfx1250,
+                                       rj_arith_v_add_f32_w64_gfx1250, wf.cu().arithmetic_flags(),
+                                       0, vdst, src0, vsrc1,
+                                       /*rdna3=*/false, /*compatibility_mul=*/false);
 }
 
 RJ_NOINLINE void VAddF32Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -150,10 +150,10 @@ RJ_NOINLINE void VAddF32Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
-  amdgpu::arith::execute_float_binary32(wf, rj_arith_v_add_f32_w32_gfx1250,
-                                        rj_arith_v_add_f32_w64_gfx1250, wf.cu().arithmetic_flags(),
-                                        0, vdst, src0, vsrc1,
-                                        /*rdna3=*/false, /*compatibility_mul=*/false);
+  amdgpu::arith::execute_sdwa_binary32(*this, wf, rj_arith_v_add_f32_w32_gfx1250,
+                                       rj_arith_v_add_f32_w64_gfx1250, wf.cu().arithmetic_flags(),
+                                       0, vdst, src0, vsrc1,
+                                       /*rdna3=*/false, /*compatibility_mul=*/false);
   dpp_write_mask_scope_.restore();
 }
 
@@ -172,10 +172,10 @@ void VSubF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
-  amdgpu::arith::execute_float_binary32(wf, rj_arith_v_sub_f32_w32_gfx1250,
-                                        rj_arith_v_sub_f32_w64_gfx1250, wf.cu().arithmetic_flags(),
-                                        0, vdst, src0, vsrc1,
-                                        /*rdna3=*/false, /*compatibility_mul=*/false);
+  amdgpu::arith::execute_sdwa_binary32(*this, wf, rj_arith_v_sub_f32_w32_gfx1250,
+                                       rj_arith_v_sub_f32_w64_gfx1250, wf.cu().arithmetic_flags(),
+                                       0, vdst, src0, vsrc1,
+                                       /*rdna3=*/false, /*compatibility_mul=*/false);
 }
 
 RJ_NOINLINE void VSubF32Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -208,10 +208,10 @@ RJ_NOINLINE void VSubF32Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
-  amdgpu::arith::execute_float_binary32(wf, rj_arith_v_sub_f32_w32_gfx1250,
-                                        rj_arith_v_sub_f32_w64_gfx1250, wf.cu().arithmetic_flags(),
-                                        0, vdst, src0, vsrc1,
-                                        /*rdna3=*/false, /*compatibility_mul=*/false);
+  amdgpu::arith::execute_sdwa_binary32(*this, wf, rj_arith_v_sub_f32_w32_gfx1250,
+                                       rj_arith_v_sub_f32_w64_gfx1250, wf.cu().arithmetic_flags(),
+                                       0, vdst, src0, vsrc1,
+                                       /*rdna3=*/false, /*compatibility_mul=*/false);
   dpp_write_mask_scope_.restore();
 }
 
@@ -230,10 +230,10 @@ void VSubrevF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
-  amdgpu::arith::execute_float_binary32(wf, rj_arith_v_subrev_f32_w32_gfx1250,
-                                        rj_arith_v_subrev_f32_w64_gfx1250,
-                                        wf.cu().arithmetic_flags(), 0, vdst, src0, vsrc1,
-                                        /*rdna3=*/false, /*compatibility_mul=*/false);
+  amdgpu::arith::execute_sdwa_binary32(*this, wf, rj_arith_v_subrev_f32_w32_gfx1250,
+                                       rj_arith_v_subrev_f32_w64_gfx1250,
+                                       wf.cu().arithmetic_flags(), 0, vdst, src0, vsrc1,
+                                       /*rdna3=*/false, /*compatibility_mul=*/false);
 }
 
 RJ_NOINLINE void VSubrevF32Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -266,10 +266,10 @@ RJ_NOINLINE void VSubrevF32Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
-  amdgpu::arith::execute_float_binary32(wf, rj_arith_v_subrev_f32_w32_gfx1250,
-                                        rj_arith_v_subrev_f32_w64_gfx1250,
-                                        wf.cu().arithmetic_flags(), 0, vdst, src0, vsrc1,
-                                        /*rdna3=*/false, /*compatibility_mul=*/false);
+  amdgpu::arith::execute_sdwa_binary32(*this, wf, rj_arith_v_subrev_f32_w32_gfx1250,
+                                       rj_arith_v_subrev_f32_w64_gfx1250,
+                                       wf.cu().arithmetic_flags(), 0, vdst, src0, vsrc1,
+                                       /*rdna3=*/false, /*compatibility_mul=*/false);
   dpp_write_mask_scope_.restore();
 }
 
@@ -364,10 +364,10 @@ void VMulF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
-  amdgpu::arith::execute_float_binary32(wf, rj_arith_v_mul_f32_w32_gfx1250,
-                                        rj_arith_v_mul_f32_w64_gfx1250, wf.cu().arithmetic_flags(),
-                                        0, vdst, src0, vsrc1,
-                                        /*rdna3=*/false, /*compatibility_mul=*/true);
+  amdgpu::arith::execute_sdwa_binary32(*this, wf, rj_arith_v_mul_f32_w32_gfx1250,
+                                       rj_arith_v_mul_f32_w64_gfx1250, wf.cu().arithmetic_flags(),
+                                       0, vdst, src0, vsrc1,
+                                       /*rdna3=*/false, /*compatibility_mul=*/true);
 }
 
 RJ_NOINLINE void VMulF32Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -400,10 +400,10 @@ RJ_NOINLINE void VMulF32Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
-  amdgpu::arith::execute_float_binary32(wf, rj_arith_v_mul_f32_w32_gfx1250,
-                                        rj_arith_v_mul_f32_w64_gfx1250, wf.cu().arithmetic_flags(),
-                                        0, vdst, src0, vsrc1,
-                                        /*rdna3=*/false, /*compatibility_mul=*/true);
+  amdgpu::arith::execute_sdwa_binary32(*this, wf, rj_arith_v_mul_f32_w32_gfx1250,
+                                       rj_arith_v_mul_f32_w64_gfx1250, wf.cu().arithmetic_flags(),
+                                       0, vdst, src0, vsrc1,
+                                       /*rdna3=*/false, /*compatibility_mul=*/true);
   dpp_write_mask_scope_.restore();
 }
 

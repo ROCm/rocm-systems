@@ -9,7 +9,7 @@ from . import ExecuteContext
 def gen_packed_f32(ctx: ExecuteContext) -> str | None:
     """Map the paired arithmetic operands and independent low/high modifiers."""
     if (
-        ctx.arch_name not in ('cdna3', 'cdna4', 'cdna5')
+        ctx.arch_name not in ('cdna2', 'cdna3', 'cdna4', 'cdna5')
         or ctx.inst.name not in ('V_PK_FMA_F32', 'V_PK_ADD_F32', 'V_PK_MUL_F32')
         or ctx.enc_name != 'ENC_VOP3P'
         or len(ctx.dst_ops) != 1

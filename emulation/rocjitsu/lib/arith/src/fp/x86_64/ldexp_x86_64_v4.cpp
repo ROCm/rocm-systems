@@ -1,9 +1,11 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// AVX-512 FP32 scaling by powers of two with guest rounding and denormal policies.
+// AVX-512 FP32/FP64 scaling by powers of two with guest rounding and denormal policies.
 // CPU-specific arithmetic stays here; public entry points select this backend.
 
+#include "common/bits.h"
+#include "common/compiler.h"
 #include "common/x86_64/alu_x86_64_v4.h"
 #include "fp/ldexp.h"
 #include "rj_arith/detail/rj_arith_fp.h"
@@ -147,6 +149,71 @@ void ldexp_guest_x86_64_v4(bool fp64, uint64_t flags, uint32_t exec_mask,
     run<true, true>(flags, exec_mask, instruction_flags, d, a, b);
   } else {
     run<false, true>(flags, exec_mask, instruction_flags, d, a, b);
+  }
+}
+
+// AVX-512 exact scaling shares the baseline model only for boundary/subnormal
+// lanes. Source aliases are safe because publication follows every repair.
+void ldexp_f32_exact_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags,
+                               uint32_t *d, const uint32_t *a, const uint32_t *b, bool quiet_snan) {
+  uint32_t result[32];
+  uint32_t repairs = 0;
+  const unsigned omod = (instruction_flags >> 6) & 3;
+  const auto delta = _mm512_set1_epi32(omod == 3 ? -1 : int(omod));
+  const auto zero = _mm512_setzero_si512(), infinity = _mm512_set1_epi32(0x7f800000);
+  RJ_ARITH_UNROLL(2)
+  for (int lane = 0; lane < 32; lane += 16) {
+    auto raw = _mm512_loadu_si512(a + lane);
+    if (instruction_flags & RJ_ARITH_ALU_ABS_A) {
+      raw = _mm512_and_si512(raw, _mm512_set1_epi32(INT32_MAX));
+    }
+    if (instruction_flags & RJ_ARITH_ALU_NEG_A) {
+      raw = _mm512_xor_si512(raw, _mm512_set1_epi32(INT32_MIN));
+    }
+    if (flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS) {
+      raw = _mm512_castps_si512(flush_denorm_f32(_mm512_castsi512_ps(raw)));
+    }
+    const auto magnitude = _mm512_and_si512(raw, _mm512_set1_epi32(INT32_MAX));
+    const auto exponent = _mm512_srli_epi32(magnitude, 23);
+    auto adjustment = _mm512_loadu_si512(b + lane);
+    adjustment = _mm512_min_epi32(_mm512_max_epi32(adjustment, _mm512_set1_epi32(-4096)),
+                                  _mm512_set1_epi32(4096));
+    const auto scaled = _mm512_add_epi32(exponent, adjustment);
+    const auto final_exponent = _mm512_add_epi32(scaled, delta);
+    // Keep original and OMOD ranges separate, preserving intermediate flushing.
+    const __mmask16 normal = _mm512_cmpgt_epi32_mask(exponent, zero) &
+                             _mm512_cmplt_epi32_mask(exponent, _mm512_set1_epi32(255)) &
+                             _mm512_cmpgt_epi32_mask(scaled, zero) &
+                             _mm512_cmplt_epi32_mask(scaled, _mm512_set1_epi32(255)) &
+                             _mm512_cmpgt_epi32_mask(final_exponent, zero) &
+                             _mm512_cmplt_epi32_mask(final_exponent, _mm512_set1_epi32(255));
+    const __mmask16 zeros = _mm512_cmpeq_epi32_mask(magnitude, zero);
+    const __mmask16 special = zeros | _mm512_cmpge_epi32_mask(magnitude, infinity);
+    const __mmask16 nan = _mm512_cmpgt_epi32_mask(magnitude, infinity);
+    auto special_value =
+        _mm512_mask_or_epi32(raw, nan, raw, _mm512_set1_epi32(quiet_snan ? 0x00400000 : 0));
+    if (omod) {
+      special_value = _mm512_mask_mov_epi32(special_value, zeros, zero);
+    }
+    auto value = _mm512_or_si512(_mm512_and_si512(raw, _mm512_set1_epi32(INT32_MIN | 0x7fffff)),
+                                 _mm512_slli_epi32(final_exponent, 23));
+    value = _mm512_mask_mov_epi32(value, special, special_value);
+    if (instruction_flags & RJ_ARITH_ALU_CLAMP) {
+      value = _mm512_castps_si512(
+          clamp_f32(_mm512_castsi512_ps(value), flags & RJ_ARITH_FP_DX10_CLAMP_OFF));
+    }
+    _mm512_storeu_si512(result + lane, value);
+    repairs |= uint32_t(uint16_t(~(normal | special))) << lane;
+  }
+  while (repairs) {
+    const int lane = int(bit_count_zero<true>(repairs));
+    repairs &= repairs - 1;
+    result[lane] = ldexp_f32_value_baseline(a[lane], bit_cast<int32_t>(b[lane]), flags,
+                                            instruction_flags, quiet_snan);
+  }
+  for (int lane = 0; lane < 32; lane += 16) {
+    _mm512_mask_storeu_epi32(d + lane, __mmask16(exec_mask >> lane),
+                             _mm512_loadu_si512(result + lane));
   }
 }
 

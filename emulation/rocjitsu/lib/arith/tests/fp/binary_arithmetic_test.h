@@ -44,7 +44,8 @@ void check_binary64_rounding(Call call, uint64_t a, uint64_t b, const uint64_t (
 // FP32 and packed FP16 have exact numeric support on these inputs; other FP16/FP64
 // and packed arithmetic support Loose/Compatibility but reject explicit exact modes. Reporting is
 // supported only by FP32 MUL, whose
-// named tests also exercise its literal exception cases separately.
+// named tests also exercise its literal exception cases separately. Compatibility
+// classifiers likewise get instruction-specific cause witnesses at the call site.
 template <int Width, int Lanes, bool Packed = false, typename Call, typename Reference>
 void check_binary_arithmetic(Call call, Reference reference, bool gfx12,
                              bool fp_status_supported = false, bool compatibility_status = false) {

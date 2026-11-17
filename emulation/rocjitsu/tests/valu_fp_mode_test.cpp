@@ -1347,6 +1347,9 @@ std::vector<ArithmeticCase> host_mxcsr_cases() {
                          FE_TONEAREST,
                          kControlMask,
                          uses_default_host_controls(arch) ? (0x1f80u & kControlMask) : daz});
+        if (arch == ROCJITSU_CODE_ARCH_RDNA3_5) {
+          use_arith_host_contract(cases.back());
+        }
       };
       add("Preserve", 0x00000001u, 0x4b000000u, 0x00800000u, 0xf0u);
       add("PreserveNegative", 0x80000001u, 0x4b000000u, 0x80800000u, 0xf0u);
