@@ -1,9 +1,10 @@
 # ---------------------------------------------------------------------------
-# AMD-SMI ASAN CI.
+# AMD-SMI sanitizer CI (ASAN and UBSan).
 #
 # Builds AMD-SMI with AddressSanitizer (ASAN, including LeakSanitizer) and
-# runs its tests, so memory errors fail CI. AMD-SMI has no GPU kernels, so
-# host ASAN covers all of it.
+# runs its tests, so memory errors fail CI, and builds it again with
+# UndefinedBehaviorSanitizer (UBSan) to report undefined behavior. AMD-SMI has
+# no GPU kernels, so host sanitizers cover all of it.
 #
 #   unit: hardware-free unit tests on a GitHub-hosted runner.
 #   gpu:  full test suite on a self-hosted GPU runner, under ASAN (plus
@@ -144,12 +145,12 @@ jobs:
       image: ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3 # noble, 2026-09-11
       options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -u root
     env:
-      # Skip the tests that change GPU settings: an ASAN abort mid-test would
+      # Skip the tests that change GPU settings: a sanitizer abort mid-test would
       # leave them changed on this shared runner. amdsmi-build.yml runs them.
       AMDSMI_NON_PRIVILEGED: 1
       AMDSMI_PREFIX: /opt/amdsmi-asan
       SANITIZER: ${{ matrix.sanitizer }}
-      # Only the UBSan leg reads this. The first report aborts the test.
+      # Only the UBSan leg reads this. The first report ends the whole amdsmitst run.
       UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
 
     steps:
@@ -207,6 +208,23 @@ jobs:
         run: |
           cmake --install "$BUILD_DIR" --prefix "$AMDSMI_PREFIX"
           echo "$AMDSMI_PREFIX/bin" >> "$GITHUB_PATH"
+
+      # A build that lost the UBSan flags would run the suite with no sanitizer
+      # and pass, so check that the installed library calls the UBSan runtime.
+      # Not piped into grep -q: under pipefail nm would fail when grep closes
+      # the pipe early.
+      - name: Check that UBSan is active
+        if: ${{ !cancelled() && matrix.sanitizer == 'undefined' && steps.install.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RESULTS_DIR"
+          lib="$(find -L "$AMDSMI_PREFIX" -name 'libamd_smi.so*' -type f -print -quit)"
+          [ -n "$lib" ] || { echo "::error::libamd_smi.so not found under $AMDSMI_PREFIX"; exit 1; }
+          nm -D --undefined-only "$lib" > "$RESULTS_DIR/ubsan_symbols.txt"
+          grep -qF __ubsan_handle_ "$RESULTS_DIR/ubsan_symbols.txt" || {
+            echo "::error::libamd_smi.so has no UBSan runtime calls: the build is not instrumented"
+            exit 1
+          }
 
       - name: Run full test suite under ${{ matrix.sanitizer == 'address' && 'ASAN' || 'UBSan' }}
         run: |
