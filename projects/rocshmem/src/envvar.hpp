@@ -529,6 +529,12 @@ namespace envvar {
     extern const var<std::string> hca_list;
 
     /**
+     * @brief Selects the transport for the host-initiated API. Empty (default)
+     * keeps the MPI-window host path; "verbs" uses the native host-verbs stack.
+     */
+    extern const var<std::string> host_transport;
+
+    /**
      * @brief Maximum number of symmetric user buffers that can be registered
      * with rocshmem_buffer_register_symmetric.
      *
