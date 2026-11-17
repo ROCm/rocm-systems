@@ -340,8 +340,11 @@ class VirtualGPU : public device::VirtualDevice {
     //! Keeps a submitted signal from being rearmed until ReleaseHeldSignals
     virtual void HoldSignal(ProfilingSignal* /*signal*/) {}
 
-    //! Drops the HoldSignal references once the waits on them have been captured
-    virtual void ReleaseHeldSignals() {}
+    //! Mark for ReleaseHeldSignals: number of signals currently held
+    virtual size_t HeldSignalCount() const { return 0; }
+
+    //! Drops the HoldSignal references taken since mark once their waits have been captured
+    virtual void ReleaseHeldSignals(size_t /*mark*/ = 0) {}
 
     //! Most signals a caller may acquire before submitting the ops that use them
     virtual size_t MaxUnsubmittedSignals() const { return std::numeric_limits<size_t>::max(); }
@@ -511,7 +514,8 @@ class VirtualGPU : public device::VirtualDevice {
     void ResetCurrentSignal() override;
     size_t MaxUnsubmittedSignals() const override { return ROC_SIGNAL_POOL_SIZE; }
     void HoldSignal(ProfilingSignal* signal) override;
-    void ReleaseHeldSignals() override;
+    size_t HeldSignalCount() const override { return held_signals_.size(); }
+    void ReleaseHeldSignals(size_t mark = 0) override;
 
    private:
     void PreparePooledSignals(const std::vector<ProfilingSignal*>& signals) override;

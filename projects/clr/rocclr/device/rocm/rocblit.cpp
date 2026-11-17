@@ -826,6 +826,8 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
     return true;
   }
 
+  // Holds taken by this call; earlier ones belong to the caller
+  const size_t heldMark = gpu().Barriers().HeldSignalCount();
   hsa_agent_t cpuAgent = dev().getCpuAgent();
 
   // Group ops by engine type so each engine group gets its own completion signal.
@@ -1145,12 +1147,11 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
           gpu().Barriers().ResetCurrentSignal();
         }
         LogPrintfError("HSA batch copy failed with code %d for engine %d", status, engine);
-        // Nothing joins the submitted ops after a failure, so drain them here
-        for (size_t s = 0; s < groupSignals.size() - (last - first); ++s) {
-          WaitForSignal(groupSignals[s]->signal_, gpu().ActiveWait(), /*yield=*/false,
-                        groupSignals[s]->in_device_memory_);
+        // The next dispatch waits on the submitted chunks on the GPU; holds stay until then
+        groupSignals.resize(groupSignals.size() - (last - first));
+        for (auto* sig : groupSignals) {
+          gpu().Barriers().AddExternalSignal(sig);
         }
-        gpu().Barriers().ReleaseHeldSignals();
         return false;
       }
       // Later acquisitions must not rearm these before the final barrier waits on them.
@@ -1168,7 +1169,7 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
     }
   } else {
     // No caller joins the earlier signals, so the holds only had to cover the submission
-    gpu().Barriers().ReleaseHeldSignals();
+    gpu().Barriers().ReleaseHeldSignals(heldMark);
   }
 
   gpu().addSystemScope();
@@ -3189,6 +3190,7 @@ bool KernelBlitManager::WriteBufferBatch(
     }
   }
 
+  const size_t held_mark = gpu().Barriers().HeldSignalCount();
   if (!pinned_copy_ops.empty()) {
     constexpr bool kSkipCpuWait = true;
     gpu().releaseGpuMemoryFence(kSkipCpuWait);
@@ -3215,10 +3217,13 @@ bool KernelBlitManager::WriteBufferBatch(
     if (!ShaderCopyBufferBatchRaw(staging_copy_ops)) {
       release_pinned_buffers();
       gpu().releaseGpuMemoryFence();
+      gpu().Barriers().ReleaseHeldSignals(held_mark);
       gpu().command()->ReleasePinnedMemory();
       return false;
     }
   }
+  // The shader fallback has waited on any SDMA chunks submitted before the failure
+  gpu().Barriers().ReleaseHeldSignals(held_mark);
 
   release_pinned_buffers();
   return true;
@@ -3309,6 +3314,7 @@ bool KernelBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp
     }
   }
 
+  const size_t held_mark = gpu().Barriers().HeldSignalCount();
   if (!pinned_copy_ops.empty()) {
     constexpr bool kSkipCpuWait = true;
     gpu().releaseGpuMemoryFence(kSkipCpuWait);
@@ -3335,6 +3341,7 @@ bool KernelBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp
     if (!ShaderCopyBufferBatchRaw(staging_copy_ops)) {
       release_pinned_buffers();
       gpu().releaseGpuMemoryFence();
+      gpu().Barriers().ReleaseHeldSignals(held_mark);
       gpu().command()->ReleasePinnedMemory();
       return false;
     }
@@ -3348,6 +3355,8 @@ bool KernelBlitManager::ReadBufferBatch(const std::vector<amd::BatchReadMemoryOp
       }
     }
   }
+  // The shader fallback has waited on any SDMA chunks submitted before the failure
+  gpu().Barriers().ReleaseHeldSignals(held_mark);
 
   release_pinned_buffers();
   return true;

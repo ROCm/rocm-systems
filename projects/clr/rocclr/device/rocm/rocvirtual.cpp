@@ -1807,11 +1807,11 @@ void VirtualGPU::RetiringSignalTracker::HoldSignal(ProfilingSignal* signal) {
 }
 
 // ================================================================================================
-void VirtualGPU::RetiringSignalTracker::ReleaseHeldSignals() {
-  for (ProfilingSignal* signal : held_signals_) {
-    signal->release();
+void VirtualGPU::RetiringSignalTracker::ReleaseHeldSignals(size_t mark) {
+  for (size_t i = mark; i < held_signals_.size(); ++i) {
+    held_signals_[i]->release();
   }
-  held_signals_.clear();
+  held_signals_.resize(std::min(mark, held_signals_.size()));
 }
 
 // ================================================================================================
@@ -4914,7 +4914,7 @@ void VirtualGPU::submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) {
   // When there are no extra signals (e.g. a pure P2P/D2D batch that collapses to one
   // engine-group op), the sole completion signal already represents the whole batch and
   // the next op waits on it through the engine switch, so the barrier is pure overhead.
-  if (result && !Barriers().IsExternalSignalListEmpty()) {
+  if (!Barriers().IsExternalSignalListEmpty()) {
     dispatchBarrierPacket(kNopPacketHeader);
   }
   // The barrier pinned the batch signals it waits on
