@@ -89,7 +89,8 @@ TEST_F(TreeMicrotest, InitRejectsNonAlgoProtoIds) {
   EXPECT_EQ(ncclInvalidUsage, ncclTuningTreeModelInit(comm_.get(), -1, enabled_, &state_));
   EXPECT_EQ(ncclInvalidUsage, ncclTuningTreeModelInit(comm_.get(), NCCL_TUNING_COUNT, enabled_, &state_));
   // The first symmetric-kernel id.
-  EXPECT_EQ(ncclInvalidUsage, ncclTuningTreeModelInit(comm_.get(), NCCL_NUM_ALGORITHMS * NCCL_NUM_PROTOCOLS, enabled_, &state_));
+  EXPECT_EQ(ncclInvalidUsage,
+            ncclTuningTreeModelInit(comm_.get(), NCCL_NUM_ALGORITHMS * NCCL_NUM_PROTOCOLS, enabled_, &state_));
 }
 
 TEST_F(TreeMicrotest, InitDisablesEveryCollectiveButAllReduce) {
