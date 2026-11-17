@@ -96,8 +96,11 @@ Initialization constants
 
 .. c:macro:: ROCSHMEM_UNIQUE_ID_BYTES
 
-  Size in bytes of a ``rocshmem_uniqueid_t``, the byte array that uniquely
-  identifies a process during unique-ID bootstrap. Value ``128``.
+  Size in bytes of a ``rocshmem_uniqueid_t``, the byte array identifying a
+  *group* of processes during unique-ID bootstrap. One rank generates the ID
+  and broadcasts it; every rank joining the job must pass the same ID to
+  ``rocshmem_set_attr_uniqueid_args``. Generating a different ID per rank hangs
+  initialization. Value ``128``.
 
 Thread support levels
 ---------------------

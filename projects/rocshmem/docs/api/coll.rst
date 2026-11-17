@@ -219,7 +219,10 @@ This routine performs a broadcast across PEs in the team.
 The caller is blocked until the broadcast completes.
 The ``_wg`` variants must be called as a work-group collective; the ``_wave`` variants
 must be called as a wave-level collective. The undecorated ``__host__`` overload
-performs the broadcast from the host rather than from inside a kernel. ``broadcastmem_wg`` and ``broadcastmem_wave``
+performs the broadcast from the host and requires an MPI-backed team
+communicator; the host reductions below have the same requirement. These host
+collectives are unsupported with MPI-free IPC or GDA initialization.
+``broadcastmem_wg`` and ``broadcastmem_wave``
 operate on untyped bytes rather than a typed element count. The undecorated (non-``ctx``)
 variants operate on the default context.
 
@@ -319,7 +322,8 @@ ROCSHMEM_REDUCTION
 This routine performs an allreduce operation across PEs in the team.
 The ``_wg`` variant must be called as a work-group collective; the ``_wave`` variant
 must be called as a wave-level collective; the undecorated variant is a
-host-side call.
+host-side call and requires an MPI-backed team communicator, so it is
+unsupported with MPI-free IPC or GDA initialization.
 
 Valid ``TYPENAME``, ``TYPE``, and ``OPNAME`` values are listed in :ref:`REDUCE_TYPES`.
 

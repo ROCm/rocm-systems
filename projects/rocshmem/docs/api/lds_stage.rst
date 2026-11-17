@@ -53,8 +53,12 @@ are three steps:
                             int pe) {
     __shared__ rocshmem_ctx_t ctx;
     rocshmem_wg_ctx_create(ROCSHMEM_CTX_WG_PRIVATE, &ctx);
+    if (ctx == ROCSHMEM_CTX_INVALID) {
+      return;
+    }
 
-    // Opt into the LDS-staged copy path. Returns 0 (and is a no-op) on
+    // Register after creating the context: rocshmem_wg_ctx_create() clears
+    // any previous registration. Opt into the LDS-staged copy path. Returns 0 (and is a no-op) on
     // builds without USE_LDS_STAGE/USE_TDM.
     extern __shared__ uint8_t lds_stage[];
     rocshmem_set_lds_stage(lds_stage, rocshmem_query_lds_stage_bytes());
@@ -124,20 +128,34 @@ ROCSHMEM_SET_LDS_STAGE
 .. cpp:function:: __device__ void rocshmem_set_lds_stage(void *lds, size_t lds_bytes)
 
   :param lds:       Pointer to a work-group-local LDS buffer of at least
-                    ``lds_bytes`` bytes, typically the ``extern __shared__``
-                    array of the kernel.
+                    ``lds_bytes`` bytes, aligned to at least 8 bytes (256 bytes
+                    recommended), typically the kernel's ``extern __shared__``
+                    array.
   :param lds_bytes: Size of the buffer in bytes. Pass
                     ``rocshmem_query_lds_stage_bytes()``. A value of ``0``
                     disables the staged path for this work-group.
   :returns:         None.
 
 **Description:**
-Registers an LDS staging buffer for the calling work-group, opting it into the
-LDS-staged copy path for subsequent ``_wg`` and ``_wave`` ``put``/``get``
-calls. The registration is per work-group and lasts for the remainder of the
-kernel. Work-groups that never call this routine, or that pass ``0``, use the
-ordinary copy path. On builds without ``USE_LDS_STAGE`` or ``USE_TDM`` this
-routine does nothing.
+All threads in the work-group must call this routine collectively; it executes
+a work-group barrier when staging is enabled, so calling it from a single
+thread or a single wave can hang the kernel.
+
+It registers an LDS staging buffer for subsequent ``_wg`` and ``_wave``
+``put``/``get`` calls. The registration is per work-group and lasts for the
+remainder of the kernel, but ``rocshmem_wg_ctx_create()`` clears it — register
+the buffer *after* each context creation, or staging is silently disabled.
+
+.. important::
+
+   On builds with ``USE_LDS_STAGE`` or ``USE_TDM``, initialize the registration
+   before issuing any ``_wg`` or ``_wave`` transfer: either register a buffer,
+   or call ``rocshmem_set_lds_stage(nullptr, 0)`` to disable staging explicitly.
+   A work-group that uses only the default context and never calls either leaves
+   the registration uninitialized, so the ordinary copy path is not a guaranteed
+   fallback.
+
+On builds without ``USE_LDS_STAGE`` or ``USE_TDM`` this routine does nothing.
 
 Deprecated aliases
 ------------------

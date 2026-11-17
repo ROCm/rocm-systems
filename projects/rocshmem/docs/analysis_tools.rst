@@ -22,9 +22,10 @@ Runtime statistics and tracing
 Before reaching for the scripts, two in-library facilities are often enough:
 
 * **Statistics counters.** Build with ``-DPROFILE=ON`` and call
-  ``rocshmem_dump_stats()`` to print the runtime's internal counters, or
-  ``rocshmem_reset_stats()`` to exclude warm-up iterations from a measurement.
-  See :ref:`rocshmem-api-init`.
+  ``rocshmem_dump_stats()`` to print the runtime's internal counters.
+  ``rocshmem_reset_stats()`` clears only the counters its backend supports — it
+  does not clear user-created host contexts, so it cannot be relied on to
+  exclude all warm-up activity. See :ref:`rocshmem-api-init`.
 * **Tracing with rocprofiler-sdk.** With the default
   ``-DUSE_ROCPROFILER_REGISTER=ON``, rocSHMEM's host-stream APIs are visible to
   tools such as ``rocprofv3``. See the "Profiling and tracing support" section

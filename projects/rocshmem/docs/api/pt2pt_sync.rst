@@ -13,8 +13,18 @@ Point-to-point synchronization routines
    Every ``rocshmem_TYPENAME_wait_until*`` and ``rocshmem_TYPENAME_test``
    routine on this page is declared with both a ``__device__`` and a
    ``__host__`` overload with identical signatures. Only the ``__device__``
-   form is shown below; the ``__host__`` form blocks the calling host thread
-   instead of the calling wave.
+   form is shown below.
+
+   The ``wait_until`` routines block: the host form blocks the calling host
+   thread, and the device form blocks the calling device thread — these are
+   per-thread operations, not wave collectives. The ``test`` routines do not
+   block; both forms return immediately with the result of the comparison.
+
+.. WARNING::
+
+   The GDA host overloads require MPI-backed initialization. Under MPI-free
+   initialization the host interface has no MPI window and aborts the process,
+   so a host wait terminates the job rather than waiting.
 
 ROCSHMEM_WAIT_UNTIL
 -------------------
@@ -97,7 +107,11 @@ ROCSHMEM_WAIT_UNTIL_ALL_VECTOR
 
   :param ivars:  Pointer to memory on the symmetric heap to wait for.
   :param nelems: Number of elements in the ``ivars`` array.
-  :param status: Array of length ``nelems`` to exclude elements from the wait.
+  :param status: Pass ``nullptr``. Non-null status arrays are not handled
+                 correctly by the device vector waits: an all-zero array (every
+                 element included) returns without waiting, and an all-excluded
+                 array makes the ``any`` and ``some`` variants spin forever.
+                 The restriction applies to all three ``*_vector`` variants.
   :param cmp:    Operation for the comparison.
   :param vals:   Array of length ``nelems``. Element ``i`` of ``ivars`` is
                  compared against ``vals[i]``.
@@ -120,7 +134,11 @@ ROCSHMEM_WAIT_UNTIL_ANY_VECTOR
 
   :param ivars:  Pointer to memory on the symmetric heap to wait for.
   :param nelems: Number of elements in the ``ivars`` array.
-  :param status: Array of length ``nelems`` to exclude elements from the wait.
+  :param status: Pass ``nullptr``. Non-null status arrays are not handled
+                 correctly by the device vector waits: an all-zero array (every
+                 element included) returns without waiting, and an all-excluded
+                 array makes the ``any`` and ``some`` variants spin forever.
+                 The restriction applies to all three ``*_vector`` variants.
   :param cmp:    Operation for the comparison.
   :param vals:   Array of length ``nelems``. Element ``i`` of ``ivars`` is
                  compared against ``vals[i]``.
@@ -144,7 +162,9 @@ ROCSHMEM_WAIT_UNTIL_SOME_VECTOR
   :param ivars:   Pointer to memory on the symmetric heap to wait for.
   :param nelems:  Number of elements in the ``ivars`` array.
   :param indices: List of indices with a length of at least ``nelems``.
-  :param status:  Array of length ``nelems`` to exclude elements from the wait.
+  :param status:  Pass ``nullptr``. Non-null status arrays are not handled
+                  correctly by the device vector waits; see the note on
+                  ``wait_until_all_vector`` above.
   :param cmp:     Operation for the comparison.
   :param vals:    Array of length ``nelems``. Element ``i`` of ``ivars`` is
                   compared against ``vals[i]``.

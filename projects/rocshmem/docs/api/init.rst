@@ -288,12 +288,16 @@ ROCSHMEM_GLOBAL_EXIT
 
 .. cpp:function:: __host__ void rocshmem_global_exit(int status)
 
-  :param status: Exit status to report from the program.
+  :param status: Exit status passed to MPI when a backend communicator exists;
+                 ignored by the non-MPI fallback.
   :returns:      None.
 
 **Description:**
-Allows any PE to force the termination of the entire program. The routine does
-not return.
+Allows any PE to force termination of the job. When a backend communicator
+exists, this terminates the job through ``MPI_Abort``. Under unique-ID
+initialization without MPI, the IPC and GDA backends instead call ``abort()``
+on the calling process only and ignore ``status``; terminating the remaining
+PEs then depends on the launcher. The routine does not return.
 
 ROCSHMEM_DUMP_STATS
 -------------------
@@ -317,6 +321,8 @@ ROCSHMEM_RESET_STATS
   :returns:    None.
 
 **Description:**
-Resets all internal statistics counters, so that a subsequent
-``rocshmem_dump_stats()`` reports only the activity since this call. Use it to
-exclude warm-up iterations from a measurement.
+Resets the counters supported by the selected backend. Counters on user-created
+host contexts are not cleared, and the RO backend resets its profiler rather
+than the host and device context counters that ``rocshmem_dump_stats()``
+accumulates. A subsequent dump can therefore still include activity from before
+this call; do not rely on it to exclude all warm-up activity.

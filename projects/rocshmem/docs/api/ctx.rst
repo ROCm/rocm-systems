@@ -51,13 +51,21 @@ ROCSHMEM_CTX_CREATE
   :param options: Options for context creation. Ignored in the current design;
                   use the value ``0``.
   :param ctx:     A handle to the newly created context.
-  :returns:       Zero if the context was created successfully, non-zero
-                  otherwise.
+  :returns:       Always zero. Pool exhaustion is **not** reported through the
+                  return value.
 
 **Description:**
-Creates a host-side rocSHMEM context, for use with the host and
-stream-ordered APIs. The number of host contexts available is bounded by
-``ROCSHMEM_MAX_NUM_HOST_CONTEXTS``; see :ref:`rocshmem-api-env-variables`.
+Creates a host-side rocSHMEM context, for use with the host and stream-ordered
+APIs.
+
+.. WARNING::
+
+   The context pool is bounded by ``ROCSHMEM_MAX_NUM_HOST_CONTEXTS`` and the
+   default context already occupies one slot, so at least two slots are needed
+   for one additional context. With the default value of ``1``, the first call
+   to this routine exhausts the pool: it trips an assertion in a debug build,
+   and indexes out of bounds when assertions are compiled out. See
+   :ref:`rocshmem-api-env-variables`.
 
 ROCSHMEM_CTX_DESTROY
 --------------------
@@ -98,8 +106,9 @@ of the following constants:
       - The context is private to the creating work-group.
     * - ``ROCSHMEM_CTX_SHARED``
       - ``8``
-      - The context may be shared between work-groups. Requires a build with
-        ``-DUSE_SHARED_CTX=ON``.
+      - Reserved for shared contexts. Context creation currently ignores this
+        option on every backend, and it does not make a work-group context safe
+        to share between work-groups.
 
 ROCSHMEM_GET_DEVICE_CTX
 -----------------------

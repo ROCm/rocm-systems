@@ -242,7 +242,9 @@ ROCSHMEM_TILE_COLLECTIVE_WAIT
   :returns:     Zero on success, nonzero on failure.
 
 **Description:**
-Blocks until all outstanding tile collective operations issued on ``team`` have
-completed. Tile collectives may return before the data movement they describe
-has finished; call this routine before reading a destination tensor that a
-previous tile collective wrote.
+
+.. WARNING::
+
+   This routine is currently unimplemented on the IPC, GDA, and RO backends.
+   Every backend logs a warning and returns ``ROCSHMEM_ERROR`` immediately
+   without waiting, so it must not be relied on for completion.
