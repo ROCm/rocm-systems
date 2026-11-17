@@ -331,8 +331,18 @@ public:
   /// allocation base; per-lane destination offsets are carried in
   /// per_lane_lds_addr.
   uint32_t lds_base = 0;
-  bool lds_per_lane_addr = false; ///< Per-lane LDS endpoints of a load or store.
+  /// Read the store payload from LDS rather than VGPRs, as gfx1250 async stores
+  /// do. per_lane_lds_addr then holds each lane's LDS source address, or
+  /// kInvalidLdsAddress for a lane that reads no LDS bytes.
+  bool lds_src = false;
+  /// Per-lane LDS endpoints of a load or store: per_lane_lds_addr holds the LDS
+  /// destination (lds_dst) or source (lds_src) addresses.
+  bool lds_per_lane_addr = false;
   std::array<uint32_t, 64> per_lane_lds_addr = {};
+  /// For lds_src, the leading LDS bytes each lane reads from per_lane_lds_addr:
+  /// the bytes of its source inside the allocation. Bytes past them read zero.
+  /// Zero for lanes that read no LDS.
+  std::array<uint8_t, 64> per_lane_lds_src_bytes = {};
   bool cluster_multicast = false;  ///< Cluster async-to-LDS load: multicast LDS writes by M0 mask.
   uint32_t cluster_mcast_mask = 0; ///< Cluster workgroup destination mask captured at issue time.
   uint64_t issue_pc = 0;           ///< PC at which the instruction was issued (debug).

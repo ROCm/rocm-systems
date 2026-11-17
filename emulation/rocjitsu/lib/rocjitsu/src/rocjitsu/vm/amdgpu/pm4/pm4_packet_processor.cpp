@@ -213,8 +213,8 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
       case Pm4Opcode::PredExec: {
         if (require(1).failed())
           return util::Result::failure();
-        if ((context.arch != ROCJITSU_CODE_ARCH_CDNA3 &&
-             context.arch != ROCJITSU_CODE_ARCH_CDNA4) ||
+        if ((context.arch != ROCJITSU_CODE_ARCH_CDNA3 && context.arch != ROCJITSU_CODE_ARCH_CDNA4 &&
+             context.arch != ROCJITSU_CODE_ARCH_CDNA5) ||
             (words[0] & 0x00ffc000) || context.xcc_id >= 8)
           return fail("unsupported PRED_EXEC control or target");
         const uint32_t skip = words[0] & 0x3fff;
@@ -362,6 +362,9 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
       case Pm4Opcode::ReleaseMem: {
         if (require(7).failed())
           return util::Result::failure();
+        const uint32_t interrupt = (words[1] >> 24) & 7;
+        if (interrupt > 4)
+          return fail("unsupported RELEASE_MEM conditional interrupt");
         if (flush_caches().failed())
           return util::Result::failure();
         const uint32_t selection = words[1] >> 29;
@@ -374,6 +377,9 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
         if (bytes && access->write(address(2), {reinterpret_cast<const std::byte *>(&value),
                                                 bytes}) != VmAccessOutcome::Complete)
           return fail("PM4 RELEASE_MEM failed");
+        // Publish before waking the host; later packets may wait for its reply.
+        if (interrupt == 1 || interrupt == 2 || interrupt == 4)
+          queue.interrupt_sink.deliver(queue.process_id, words[6]);
         break;
       }
       case Pm4Opcode::CopyData: {
