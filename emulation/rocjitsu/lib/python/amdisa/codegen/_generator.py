@@ -18183,10 +18183,21 @@ class CodeGenerator:
                     MIXED_BF16_NAMES,
                     DOT2_F32_NAMES,
                     HALF_DOT_NAMES,
+                    OLDER_HALF_ROUNDING_TARGETS,
+                    HALF_ROUNDING_NAMES,
+                    OLDER_HALF_FREXP_NAMES,
                 )
                 from amdisa.codegen.execute.rj_arith_packed_bf16 import (
                     PACKED_BF16_NAMES,
                 )
+
+                if self.isa_spec.arch_name in OLDER_HALF_ROUNDING_TARGETS and any(
+                    i.name in HALF_ROUNDING_NAMES | OLDER_HALF_FREXP_NAMES
+                    for i in all_insts
+                ):
+                    cpp_includes.append(
+                        ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h', False)
+                    )
 
                 float_names = FLOAT_NAMES | GFX10_LEGACY_FMA
                 if self.isa_spec.arch_name.startswith('cdna'):
