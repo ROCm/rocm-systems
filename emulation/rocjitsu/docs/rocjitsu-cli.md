@@ -108,7 +108,7 @@ Usage: rocjitsu [options] -- <app> [args...]
 | `--check-vfio-user` | Exit successfully only when this binary was built with VFIO-user support. |
 | `--help`, `-h` | Print usage and exit. |
 | `--version`, `-v` | Print version, Git revision, commit date, and commit title, then exit. |
-| `paths [--json]` | Print config/runtime search paths, the daemon socket, and `config_handoff_path`, the runtime file containing the config path opened by the interposer. `--json` must follow `paths`, as in `rocjitsu paths --json`. |
+| `paths [--json]` | Print config/runtime search paths, the daemon socket, and `config_handoff_path`, the process-independent fallback config handoff opened by the interposer when no invocation directory is set. A launch writes its own handoff under `$ROCJITSU_INVOCATION_DIR/config_path` inside the exec'd app. `--json` must follow `paths`, as in `rocjitsu paths --json`. |
 | `--` | Separator between rocjitsu options and the target application command line. |
 
 ### Usage Examples
@@ -166,11 +166,13 @@ the application in the original process. If the daemon fails before it is ready,
 the launcher kills and `waitpid`s the child before returning an error. Once the
 application has been exec'd, the daemon child has `PR_SET_PDEATHSIG` set to
 `SIGTERM`, so the kernel terminates the daemon when the application process
-exits. If the daemon exits first, daemon-client disconnect handling terminates
-the interposed client process. In either direction, there is no persistent
-launcher-owned daemon left behind; a process may briefly pass through the normal
-kernel zombie state until its parent exits or reaps it, but it is not a
-long-lived orphaned daemon.
+exits. The daemon's exit status is then collected by whichever process adopts
+it, usually PID 1 or a supervising child subreaper. A supervisor that runs
+repeated launches and adopts rocJITsu daemon children must reap them with
+`waitpid`; otherwise an exited daemon can remain visible as a zombie until that
+supervisor collects it. If the daemon exits first, daemon-client disconnect
+handling terminates the interposed client process. In either direction,
+rocJITsu does not leave a live launcher-owned daemon behind.
 
 The runtime files are separate from process lifetime. Launches that `exec` an
 application cannot run C++ cleanup after a successful `exec`, so rocJITsu writes
