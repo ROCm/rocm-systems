@@ -955,11 +955,14 @@ in the following table.
       - | Positive integer. Default: ``1`` (generic), ``8`` (AWS).
 
     * - | ``NCCL_SOCKET_POLL_TIMEOUT_MSEC``
-        | Sets a timeout in milliseconds for socket polling during bootstrap.
-          When non-zero, RCCL polls for the specified number of milliseconds
-          before retrying.
-      - | ``0``: No polling, continuous retry (default).
-        | Non-zero: Poll for N milliseconds between retries.
+        | Sets a timeout in milliseconds for socket polling during bootstrap,
+          to reduce CPU usage. Polling between retry attempts lowers CPU load
+          during bootstrap, freeing resources for tasks that help the operation
+          finish sooner.
+      - | ``0`` (default): No polling. RCCL continuously tries to progress
+          socket operations without pausing.
+        | Non-zero: Poll for N milliseconds before attempting to progress the
+          operation again.
 
     * - | ``NCCL_SOCKET_RETRY_CNT``
         | Specifies how many times RCCL retries establishing a socket connection
@@ -998,8 +1001,15 @@ in the following table.
           communication when ``NCCL_OOB_NET_ENABLE`` is active. See
           ``ibv_devinfo -l`` for available interfaces.
       - | Comma-separated interface list. Use ``:`` to specify ports.
-          Prefix with ``^`` to exclude; use ``=`` for exact matches.
-        | Default: unset (uses device 0).
+          Prefix the whole list with ``^`` to exclude matching interfaces; use
+          ``=`` to require exact interface-name matches. Otherwise each token is
+          treated as a prefix match.
+        | When multiple interfaces match, the first matching device is selected.
+        | Default: unset or empty (uses OOB net device 0).
+        | Examples: ``=rdma0`` selects exactly ``rdma0``; ``rdma`` selects the
+          first of ``rdma0``, ``rdma1``, ...; ``=rdma3:1`` selects device
+          ``rdma3`` port 1; ``^=rdma0`` selects the first interface that is not
+          ``rdma0``.
 
     * - | ``NCCL_IGNORE_NET_MISMATCH``
         | Controls what happens when ranks report a different number of local
@@ -1190,13 +1200,23 @@ in the following table.
     * - | ``RCCL_DISABLE_RAIL_TREES``
         | Skips rail-optimized tree strings (``treeRail``) defined by preset
           topology models during BALANCED_TREE graph search, so RCCL falls
-          back to ``treeBase`` and then to trees derived from ``ringBase``.
+          back to ``treeBase`` and then to trees derived from ``ringBase``,
+          and clears ``useRailOptimizedTrees`` so ``ncclTopoPostset`` uses the
+          generic tree connector. Has no effect if the matched model defines no
+          ``treeRail``, or if preset matching is off.
       - | ``0``: Use rail trees when defined (default).
         | Non-zero: Disable.
 
     * - | ``RCCL_DUMP_ROME_MODEL_FILE``
         | Writes the detected topology as a C ``rcclRomeModel`` initializer
-          for adding or debugging preset models.
+          (GPU and NIC IDs, NUMA assignment, XGMI connectivity matrix, GDR path
+          types, pattern string) for adding or debugging preset models. Emitted
+          from ``parseRomeSystem``, which runs inside five different matchers,
+          so the file is truncated and rewritten on each attempt and ends up
+          holding the last one. Nothing is written if preset matching is
+          disabled or bypassed by ``NCCL_GRAPH_FILE``, ``NCCL_RINGS``, or
+          ``RCCL_TREES``. A path that cannot be opened produces a warning and is
+          otherwise ignored.
       - | Writable file path.
         | Default: unset (no dump).
 
@@ -1342,8 +1362,13 @@ collected in the following table.
 
     * - | ``NCCL_ALLOC_P2P_NET_LL_BUFFERS``
         | Controls whether communicators allocate dedicated LL/LL128 buffers
-          for all P2P network connections. Allocating for all P2P connections
-          with high numbers of ranks results in high memory overhead.
+          for all P2P network connections. When enabled, the applicable
+          threshold (``NCCL_P2P_LL128_THRESHOLD`` on gfx942/MI300X and
+          gfx950/MI350X-MI355X with LL128 enabled, otherwise
+          ``NCCL_P2P_LL_THRESHOLD``) determines whether the latency protocol or
+          SIMPLE is used. Intra-node P2P already allocates dedicated LL buffers.
+          Allocating for all P2P connections with high numbers of ranks, such as
+          all-to-all workloads, results in high scaling memory overhead.
       - | ``0``: Disable LL/LL128 buffer allocation for P2P connections (default).
         | ``1``: Enable.
 
@@ -1427,10 +1452,14 @@ the following table.
 
     * - | ``RCCL_DIRECT_ALLGATHER_THRESHOLD``
         | Maximum message size in bytes for Direct AllGather. Setting this
-          variable suppresses per-architecture auto-tuning. ``-1`` disables
-          Direct AllGather.
-      - | Integer bytes. Default: ``75497472`` (72 MiB).
-        | ``-1``: Disable.
+          variable at all suppresses the per-architecture auto-tuning (gfx950
+          single-node 8 MiB, gfx950 under 64 nodes nNodes x 2 MiB, gfx942
+          4 MiB) and also suppresses the CE AllGather conflict check. ``-1``
+          disables Direct AllGather.
+      - | Integer bytes; ``-1`` to disable.
+        | Default: ``75497472`` (72 MiB), which is only reachable on gfx950 at
+          64 or more nodes, since every other supported configuration overwrites
+          it with an auto-tuned value.
 
     * - | ``RCCL_DIRECT_REDUCE_SCATTER_DISABLE``
         | Disables Direct ReduceScatter. Requires ``gfx950``, PXN enabled,
@@ -1534,18 +1563,23 @@ environment variables have no effect unless RCCL is built with
           operation when all prerequisites hold: ``gfx950`` GPU, single-node
           communicator, more than 128 CUs (SPX mode), Ring algorithm for
           ``AllReduce``, ``AllGather``, or ``ReduceScatter``, and message size
-          at or above the matching threshold. Set to ``0`` as the documented
-          workaround when RCCL warns that the communicator exceeds the
-          WarpSpeed channel limit.
-      - | ``0``: Disable auto selection.
+          at or above the matching ``RCCL_WARP_SPEED_{AR,AG,RS}_THRESHOLD``.
+          Auto mode is also skipped for communicators created by splitting a
+          parent (non-grow splits). Set to ``0`` as the documented workaround
+          when RCCL warns that the communicator exceeds the WarpSpeed channel
+          limit.
+      - | ``0``: Disable the automatic path only. ``RCCL_WARP_SPEED_FORCE_ENABLE``
+          still turns WarpSpeed on.
         | Non-zero: Auto mode enabled (default: ``1``).
 
     * - | ``RCCL_WARP_SPEED_FORCE_ENABLE``
         | Forces WarpSpeed on unconditionally, bypassing every auto-mode
           precondition and all message-size thresholds. Forces the algorithm to
           RING and the unroll factor to 2 unless ``RCCL_UNROLL_FACTOR`` is set.
-          Returns ``ncclInvalidArgument`` when the communicator exceeds the
-          supported channel count.
+          Intended for debugging and performance experiments, not production:
+          unlike auto mode, which silently declines when the communicator
+          exceeds the supported channel count, force mode returns
+          ``ncclInvalidArgument`` in that case.
       - | ``0``: Leave selection to auto mode (default).
         | Any value > 0: Force WarpSpeed on.
 
@@ -1556,8 +1590,11 @@ environment variables have no effect unless RCCL is built with
 
     * - | ``RCCL_WARP_SPEED_RS_THRESHOLD``
         | Minimum ``ReduceScatter`` message size, in bytes, for WarpSpeed to
-          engage in auto mode. The size tested is the total message size, not
-          the per-rank share.
+          engage in auto mode. The size tested is the total message size passed
+          to the collective, not the per-rank share. Below this threshold the
+          operation runs the normal Ring path and RCCL logs the reason under
+          ``NCCL_DEBUG_SUBSYS=TUNING``. Ignored when
+          ``RCCL_WARP_SPEED_FORCE_ENABLE`` is set, which skips all thresholds.
       - | Integer bytes. Default: ``2147483648`` (2 GiB).
 
     * - | ``RCCL_WARP_SPEED_CU_COUNT``
