@@ -51,7 +51,6 @@
 #include <hsa/hsa_api_trace.h>
 
 #include <atomic>
-#include <bitset>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -232,13 +231,7 @@ ThreadTracerAgent::~ThreadTracerAgent()
 std::unique_ptr<hsa::TraceControlAQLPacket>
 ThreadTracerAgent::get_control(bool bStart)
 {
-    return get_control(*control_packet, bStart);
-}
-
-std::unique_ptr<hsa::TraceControlAQLPacket>
-ThreadTracerAgent::get_control(const hsa::TraceControlAQLPacket& source, bool bStart)
-{
-    auto active_resources = std::make_unique<hsa::TraceControlAQLPacket>(source);
+    auto active_resources = std::make_unique<hsa::TraceControlAQLPacket>(*control_packet);
     // Clone the control packet so callers can safely mutate state without
     // racing with concurrent dispatches.
     active_resources->clear();
@@ -254,40 +247,6 @@ ThreadTracerAgent::get_start_packet()
     auto lock = std::unique_lock{trace_resources_mut};
     if(!control_packet) return nullptr;
     return get_control(true);
-}
-
-std::unique_ptr<hsa::TraceControlAQLPacket>
-ThreadTracerAgent::get_start_packet(const dispatch_target_t& target)
-{
-    auto lock = std::unique_lock{trace_resources_mut};
-    if(!control_packet) return nullptr;
-    if(target == params.get_target()) return get_control(true);
-
-    auto& packet = target_packets[target];
-    if(!packet)
-    {
-        auto target_params               = params;
-        target_params.target_cu          = static_cast<uint8_t>(target.target_cu);
-        target_params.simd_select        = static_cast<uint8_t>(target.simd_select);
-        target_params.shader_engine_mask = target.shader_engine_mask;
-
-        try
-        {
-            auto target_factory = aql::ThreadTraceAQLPacketFactory{
-                agent_id, target_params, queue->kfd_memory, queue->kfd_copy_queue};
-            packet = target_factory.construct_control_packet(*control_packet);
-        } catch(const std::exception& e)
-        {
-            target_packets.erase(target);
-            ROCP_ERROR << "Unable to build thread-trace packets for agent " << agent_id.handle
-                       << " (target_cu=" << target.target_cu
-                       << ", simd_select=" << target.simd_select << ", shader_engine_mask=0x"
-                       << std::hex << target.shader_engine_mask << std::dec << "): " << e.what();
-            return nullptr;
-        }
-        packet->copy_codeobj_markers(*control_packet);
-    }
-    return get_control(*packet, true);
 }
 
 void
@@ -344,8 +303,6 @@ ThreadTracerAgent::load_codeobj(code_object_id_t id, uint64_t addr, uint64_t siz
     }
 
     control_packet->add_codeobj(id, addr, size);
-    for(auto& [_, packet] : target_packets)
-        packet->copy_codeobj_markers(*control_packet);
     // Keep shader metadata in sync while traces are live so symbol resolution
     // remains accurate in the emitted stream.
 
@@ -373,8 +330,6 @@ ThreadTracerAgent::unload_codeobj(code_object_id_t id)
     auto lk = std::unique_lock{trace_resources_mut};
 
     if(!control_packet || !control_packet->remove_codeobj(id)) return;
-    for(auto& [_, packet] : target_packets)
-        packet->copy_codeobj_markers(*control_packet);
     // Tear down metadata when code objects disappear to avoid dangling
     // references in the trace stream.
     if(!queue || active_traces.load() < 1) return;
@@ -640,10 +595,7 @@ DispatchThreadTracer::pre_kernel_call(const hsa::Queue&              queue,
     if(control_flags == ROCPROFILER_THREAD_TRACE_CONTROL_NONE)
         return {nullptr, parameters.bSerialize};
 
-    // A replay pass may trace a different part of the GPU than the context was configured for.
-    // No-op outside a replay loop. See kernel_replay/local_context.hpp.
-    auto target = kernel_replay::local_thread_trace_target(parameters.context_id);
-    auto packet = target ? agent.get_start_packet(*target) : agent.get_start_packet();
+    auto packet = agent.get_start_packet();
     if(!packet) return {nullptr, parameters.bSerialize};
     packet->SetOwner(tracer_id);
     post_move_data.fetch_add(1);
@@ -712,80 +664,6 @@ DispatchThreadTracer::intersects(const DispatchThreadTracer& rhs) const
         if(rhs.params.count(agent_id) > 0) return true;
     }
     return false;
-}
-
-rocprofiler_status_t
-DispatchThreadTracer::resolve_target(rocprofiler_agent_id_t                      agent_id,
-                                     const rocprofiler_thread_trace_parameter_t* parameters,
-                                     size_t                                      num_parameters,
-                                     dispatch_target_t&                          target) const
-{
-    if(num_parameters > 0 && parameters == nullptr)
-        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
-
-    auto pack = thread_trace_parameter_pack{};
-    {
-        auto lk  = std::shared_lock<std::shared_mutex>{agents_map_mut};
-        auto itr = params.find(agent_id);
-        if(itr == params.end()) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
-        pack = itr->second;
-    }
-
-    bool mask_requested = false;
-    for(size_t i = 0; i < num_parameters; ++i)
-    {
-        const auto& param = parameters[i];
-        switch(param.type)
-        {
-            case ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU:
-                if(param.value > 0xF) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
-                pack.target_cu = static_cast<uint8_t>(param.value);
-                break;
-            case ROCPROFILER_THREAD_TRACE_PARAMETER_SIMD_SELECT:
-                if(param.value > 0xF) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
-                pack.simd_select = static_cast<uint8_t>(param.value);
-                break;
-            case ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK:
-                pack.shader_engine_mask = param.value;
-                mask_requested          = true;
-                break;
-            default: return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
-        }
-    }
-
-    if(!pack.are_params_valid()) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
-
-    // aqlprofile drops mask bits for shader engines the agent does not have, so a requested bit
-    // without an engine behind it would silently trace less than asked for.
-    const auto* rocp_agent = agent::get_agent(agent_id);
-    auto        selected   = pack.shader_engine_mask;
-    const auto  num_se =
-        (rocp_agent != nullptr) ? uint64_t{rocp_agent->num_shader_banks} : uint64_t{0};
-    if(num_se > 0 && num_se < 64)
-    {
-        const uint64_t present = (uint64_t{1} << num_se) - 1;
-        if(mask_requested && (selected & ~present) != 0)
-            return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
-        selected &= present;
-    }
-    if(selected == 0) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
-
-    // Mirrors SqttBuilder::GetBaseStep: aqlprofile keeps one 4 KiB page for each of the 64
-    // possible shader engines that is not traced and splits the rest of the buffer evenly between
-    // the traced ones. It refuses fewer than 128 KiB per engine, and more than 16 GiB (512 MiB on
-    // gfx11) per engine.
-    constexpr uint64_t page_size  = 0x1000;
-    const uint64_t     num_traced = std::bitset<64>{selected}.count();
-    const uint64_t     reserved   = (64 - num_traced) * page_size;
-    if(pack.buffer_size <= reserved) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
-    const uint64_t per_engine = ((pack.buffer_size - reserved) / num_traced) & ~(page_size - 1);
-    const bool     is_gfx11 = rocp_agent != nullptr && rocp_agent->gfx_target_version / 10000 == 11;
-    const uint64_t max_per_engine = is_gfx11 ? (uint64_t{1} << 29) : (uint64_t{1} << 34);
-    if(per_engine < (uint64_t{1} << 17) || per_engine >= max_per_engine)
-        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
-
-    target = pack.get_target();
-    return ROCPROFILER_STATUS_SUCCESS;
 }
 
 void

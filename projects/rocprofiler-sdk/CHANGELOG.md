@@ -8,10 +8,6 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 **API:**
 
-  - Per-pass thread trace targets for kernel replay (beta):
-    - New `replay_set_thread_trace_parameters` member of `rocprofiler_callback_tracing_kernel_replay_data_t` (typedef `rocprofiler_kernel_replay_thread_trace_params_cb_t`), appended after `replay_stop_context`. During PASS `PHASE_ENTER` a tool selects the `TARGET_CU`, `SIMD_SELECT` and `SHADER_ENGINE_MASK` a dispatch thread trace context traces on that pass, so one application run can trace several SIMDs or WGPs of the same dispatch from identical inputs.
-    - The selection is validated before it is recorded, is sticky across passes, and is dropped when the replay loop ends; the context's configured parameters never change. The packets for each target are built once and share the context's trace buffer.
-    - New sample `samples/kernel_replay/att_targets_client.cpp` traces each SIMD of one WGP on its own pass.
   - Dispatch replacement for kernel replay (beta):
     - New `app_dispatch` and `replay_set_dispatch` members of `rocprofiler_callback_tracing_kernel_replay_data_t`, with the new `rocprofiler_kernel_replay_dispatch_t` struct and `rocprofiler_kernel_replay_dispatch_cb_t` typedef. `app_dispatch` describes the dispatch the application submitted, including its kernel argument address. During PASS `PHASE_ENTER`, `replay_set_dispatch` makes the current pass submit a different kernel object, kernel argument buffer, grid, workgroup, cluster and segment sizes.
     - The pass's packet keeps the application's packet type, header and fences, including gfx1250 cluster dispatches. Snapshot and restore, injected profiling packets, the dispatch id and the deferred completion are unchanged.

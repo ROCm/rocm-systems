@@ -113,7 +113,6 @@ add_kernel_replay_sample(kernel-replay-counters counters_client.cpp)
 add_kernel_replay_sample(kernel-replay-counters-then-pc-sampling
                          counters_then_pc_sampling_client.cpp PC_SAMPLING)
 add_kernel_replay_sample(kernel-replay-att att_client.cpp ATT)
-add_kernel_replay_sample(kernel-replay-att-targets att_targets_client.cpp ATT)
 add_kernel_replay_sample(kernel-replay-spm spm_client.cpp SPM)
 
 # This replay sample aborts during KFD acquisition on gfx120x CI runners. Tracking issue:

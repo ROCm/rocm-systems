@@ -113,11 +113,6 @@ add_kr_lc_test(test-kernel-replay-local-context-att-stop-from-start ENVIRONMENT
 add_kr_lc_test(test-kernel-replay-local-context-att-stop-after-0 ENVIRONMENT
                "KR_LC_SERVICES=att;KR_LC_PASSES=4;KR_LC_STOP_PASS=1")
 
-# ATT: a different shader engine per pass through replay_set_thread_trace_parameters →
-# each pass's shader data comes from the engine that pass selected.
-add_kr_lc_test(test-kernel-replay-local-context-att-target-per-pass ENVIRONMENT
-               "KR_LC_SERVICES=att;KR_LC_PASSES=4;KR_LC_STOP_PASS=-1;KR_LC_ATT_TARGETS=1")
-
 # SPM: same dispatch-scoped contract as counters. These two replay tests abort during KFD
 # acquisition on gfx120x CI runners and are also disabled on gfx942. Tracking issue:
 # https://github.com/ROCm/rocm-systems/issues/13606

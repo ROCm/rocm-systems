@@ -200,14 +200,6 @@ struct TraceMemoryPool
     std::shared_ptr<kfd::kfd_memory_pool_t> kfd_memory{};
     std::shared_ptr<kfd::kfd_copy_queue_t>  kfd_copy_queue{};
 
-    /// First device-only allocation made through this pool: the trace output buffer.
-    void*  output_buffer{nullptr};
-    size_t output_size{0};
-    /// When set, device-only allocations return this buffer instead of allocating, and Free
-    /// leaves it alone. It belongs to another pool that outlives this one.
-    void*  shared_output_buffer{nullptr};
-    size_t shared_output_size{0};
-
     aqlprofile_handle_t handle{};
     ~TraceMemoryPool() { aqlprofile_att_delete_packets(this->handle); };
 
@@ -278,25 +270,6 @@ public:
             std::make_shared<CodeobjMarkerAQLPacket>(*tracepool, id, addr, size, true, false);
     }
     bool remove_codeobj(code_object_id_t id) { return loaded_codeobj.erase(id) != 0; }
-    /// Code-object markers do not depend on the trace target, so packets built for other
-    /// targets reuse the configured packet's markers.
-    void copy_codeobj_markers(const TraceControlAQLPacket& other)
-    {
-        loaded_codeobj = other.loaded_codeobj;
-    }
-    size_t num_codeobj_markers() const { return loaded_codeobj.size(); }
-
-    /// The device buffer this packet's trace is written into.
-    void* GetOutputBuffer() const
-    {
-        return tracepool->shared_output_buffer ? tracepool->shared_output_buffer
-                                               : tracepool->output_buffer;
-    }
-    size_t GetOutputSize() const
-    {
-        return tracepool->shared_output_buffer ? tracepool->shared_output_size
-                                               : tracepool->output_size;
-    }
 
 protected:
     std::shared_ptr<TraceMemoryPool>     tracepool;

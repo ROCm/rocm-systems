@@ -54,14 +54,12 @@ record_override(rocprofiler_context_id_t context_id, bool active)
 }  // namespace
 
 scoped_local_context_control::scoped_local_context_control(
-    const context::context_array_t& active_contexts,
-    rocprofiler_agent_id_t          replay_agent)
+    const context::context_array_t& active_contexts)
 {
     for(const auto* ctx : active_contexts)
         if(ctx != nullptr)
-            m_control.pre_active.emplace(rocprofiler_context_id_t{.handle = ctx->context_idx}, ctx);
-    m_control.replay_agent = replay_agent;
-    tl_control             = &m_control;
+            m_control.pre_active.emplace(rocprofiler_context_id_t{.handle = ctx->context_idx});
+    tl_control = &m_control;
 }
 
 scoped_local_context_control::~scoped_local_context_control() { tl_control = nullptr; }
@@ -84,36 +82,6 @@ replay_local_disable_context(rocprofiler_context_id_t context_id)
     return record_override(context_id, false);
 }
 
-rocprofiler_status_t
-replay_local_set_thread_trace_parameters(rocprofiler_context_id_t                    context_id,
-                                         const rocprofiler_thread_trace_parameter_t* parameters,
-                                         size_t                                      num_parameters)
-{
-    if(tl_control == nullptr || !tl_toggles_armed) return ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR;
-
-    auto itr = tl_control->pre_active.find(context_id);
-    if(itr == tl_control->pre_active.end()) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_STARTED;
-
-    const auto* ctx = itr->second;
-    if(ctx == nullptr || !ctx->dispatch_thread_trace ||
-       !ctx->dispatch_thread_trace->collects_on(tl_control->replay_agent))
-        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
-
-    if(num_parameters == 0)
-    {
-        tl_control->thread_trace_targets.erase(context_id);
-        return ROCPROFILER_STATUS_SUCCESS;
-    }
-
-    auto target = thread_trace::dispatch_target_t{};
-    auto status = ctx->dispatch_thread_trace->resolve_target(
-        tl_control->replay_agent, parameters, num_parameters, target);
-    if(status != ROCPROFILER_STATUS_SUCCESS) return status;
-
-    tl_control->thread_trace_targets[context_id] = target;
-    return ROCPROFILER_STATUS_SUCCESS;
-}
-
 bool
 local_context_has_overrides()
 {
@@ -126,15 +94,6 @@ local_context_override(rocprofiler_context_id_t context_id)
     if(tl_control == nullptr) return std::nullopt;
     auto itr = tl_control->overrides.find(context_id);
     if(itr == tl_control->overrides.end()) return std::nullopt;
-    return itr->second;
-}
-
-std::optional<thread_trace::dispatch_target_t>
-local_thread_trace_target(rocprofiler_context_id_t context_id)
-{
-    if(tl_control == nullptr) return std::nullopt;
-    auto itr = tl_control->thread_trace_targets.find(context_id);
-    if(itr == tl_control->thread_trace_targets.end()) return std::nullopt;
     return itr->second;
 }
 }  // namespace kernel_replay

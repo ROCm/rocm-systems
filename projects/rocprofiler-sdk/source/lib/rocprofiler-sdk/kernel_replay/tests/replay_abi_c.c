@@ -101,12 +101,6 @@ rocprofiler_test_c_replay_offset_replay_stop_context(void)
 }
 
 size_t
-rocprofiler_test_c_replay_offset_replay_set_thread_trace_parameters(void)
-{
-    return offsetof(replay_data_c_t, replay_set_thread_trace_parameters);
-}
-
-size_t
 rocprofiler_test_c_replay_offset_app_dispatch(void)
 {
     return offsetof(replay_data_c_t, app_dispatch);

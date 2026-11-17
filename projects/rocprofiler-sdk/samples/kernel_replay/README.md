@@ -31,7 +31,6 @@ service (same idea as `samples/counter_collection/`).
 | `kernel-replay-counters` | 3 | Dispatch counters; each pass selects a different counter configuration. |
 | `kernel-replay-counters-then-pc-sampling` | — | **Disabled in ctest:** PC sampling ignores localized pass overrides (see API docs). |
 | `kernel-replay-att` | 2 | Counters on pass 0, ATT on pass 1. |
-| `kernel-replay-att-targets` | 4 | ATT on every pass; pass *i* traces SIMD *i* of the same WGP through `replay_set_thread_trace_parameters`. |
 | `kernel-replay-spm` | 2 | Counters on pass 0, SPM on pass 1. |
 | `kernel-replay-opt-out` | 3 / 1 | Replays the `bump` kernel (`block.x == 67`); leaves `nudge` unreplayed. |
 | `kernel-replay-early-exit` | 4 / 2 | Sets `replay_continue` to stop after pass 1 even though `replay_pass_count` returns 4. |

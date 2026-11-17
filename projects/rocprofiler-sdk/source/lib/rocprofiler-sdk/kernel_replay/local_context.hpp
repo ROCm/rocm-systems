@@ -28,9 +28,7 @@
 // recorded in a thread-local override that lives only for the loop and is never written to global
 // context state, so only the replaying thread's dispatches (this agent, serialized by the per-agent
 // replay lock) observe them. Service consumers query local_context_override() at dispatch time to
-// honor it. The tool may likewise choose, per pass, which part of the GPU a dispatch thread trace
-// context traces (replay_local_set_thread_trace_parameters); thread trace queries
-// local_thread_trace_target() when it builds a dispatch's trace packets.
+// honor it.
 //
 // Two thread-local scopes are involved, both managed by the SDK (never by the tool):
 //  - loop scope (scoped_local_context_control): the override map is live for the whole replay loop,
@@ -43,14 +41,13 @@
 
 #include "lib/rocprofiler-sdk/context/context.hpp"
 
-#include "lib/rocprofiler-sdk/thread_trace/core.hpp"
-
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/cxx/hash.hpp>
 #include <rocprofiler-sdk/cxx/operators.hpp>
 
 #include <optional>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace rocprofiler
 {
@@ -66,15 +63,7 @@ struct local_context_control_t
     // The contexts globally active when the replay loop began. A local start/stop is honored only
     // for these; toggling any other context is rejected, so a local start cannot promote a
     // globally-stopped context.
-    std::unordered_map<rocprofiler_context_id_t, const context::context*> pre_active{};
-
-    // context -> the thread trace target selected for this loop's passes. An absent entry means
-    // "trace the target the context was configured with".
-    std::unordered_map<rocprofiler_context_id_t, thread_trace::dispatch_target_t>
-        thread_trace_targets{};
-
-    // The agent whose dispatch this loop replays; thread trace targets are validated against it.
-    rocprofiler_agent_id_t replay_agent{.handle = 0};
+    std::unordered_set<rocprofiler_context_id_t> pre_active{};
 };
 
 // RAII: owns this replay loop's override map and installs it as the thread's active routing for the
@@ -87,10 +76,8 @@ class scoped_local_context_control
 public:
     // active_contexts = the contexts globally active when the replay loop begins (typically
     // context::get_active_contexts()). These become the pre-active mask: a local start/stop is only
-    // honored for one of these (see local_context_control_t::pre_active). replay_agent is the
-    // agent whose dispatch the loop replays.
-    explicit scoped_local_context_control(const context::context_array_t& active_contexts,
-                                          rocprofiler_agent_id_t replay_agent = {.handle = 0});
+    // honored for one of these (see local_context_control_t::pre_active).
+    explicit scoped_local_context_control(const context::context_array_t& active_contexts);
     ~scoped_local_context_control();
 
     scoped_local_context_control(const scoped_local_context_control&) = delete;
@@ -120,19 +107,6 @@ replay_local_enable_context(rocprofiler_context_id_t context_id);
 rocprofiler_status_t
 replay_local_disable_context(rocprofiler_context_id_t context_id);
 
-// Tool-facing callback selecting the thread trace target of a dispatch thread trace context for
-// this loop
-// (rocprofiler_callback_tracing_kernel_replay_data_t::replay_set_thread_trace_parameters). Same arm
-// window and pre-active rule as the toggles. The context must have dispatch thread trace configured
-// on the replayed agent, and the selection is validated by
-// thread_trace::DispatchThreadTracer::resolve_target before it is recorded; both failures return
-// ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT and keep the previous selection. num_parameters == 0
-// drops the selection, so later passes trace the configured target again.
-rocprofiler_status_t
-replay_local_set_thread_trace_parameters(rocprofiler_context_id_t                    context_id,
-                                         const rocprofiler_thread_trace_parameter_t* parameters,
-                                         size_t num_parameters);
-
 // Cheap fast-path gate: true only while a replay loop on this thread has recorded at least one
 // override. Per-dispatch consumers check this first so normal dispatches (and replay passes with no
 // toggles) pay a single thread-local read instead of a per-context scan.
@@ -144,11 +118,5 @@ local_context_has_overrides();
 // false = forced inactive. Callers fall back to the global/default active check on nullopt.
 std::optional<bool>
 local_context_override(rocprofiler_context_id_t context_id);
-
-// Consumer query: the thread trace target this thread's replay loop selected for `context_id`, or
-// std::nullopt when there is no active replay loop on this thread or none was selected. Callers
-// trace the configured target on nullopt.
-std::optional<thread_trace::dispatch_target_t>
-local_thread_trace_target(rocprofiler_context_id_t context_id);
 }  // namespace kernel_replay
 }  // namespace rocprofiler

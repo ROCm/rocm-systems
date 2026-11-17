@@ -123,11 +123,7 @@ public:
                                 std::shared_ptr<kfd::kfd_memory_pool_t> kfd_memory = {},
                                 std::shared_ptr<kfd::kfd_copy_queue_t>  copy_queue = {});
 
-    std::unique_ptr<hsa::TraceControlAQLPacket> construct_control_packet();
-    /// Build a control packet that writes into `buffer_owner`'s trace output buffer instead of
-    /// allocating one. `buffer_owner` must outlive the returned packet and every copy of it.
-    std::unique_ptr<hsa::TraceControlAQLPacket> construct_control_packet(
-        const hsa::TraceControlAQLPacket& buffer_owner);
+    std::unique_ptr<hsa::TraceControlAQLPacket>  construct_control_packet();
     std::unique_ptr<hsa::CodeobjMarkerAQLPacket> construct_load_marker_packet(uint64_t id,
                                                                               uint64_t addr,
                                                                               uint64_t size);

@@ -226,24 +226,6 @@ ThreadTraceAQLPacketFactory::construct_control_packet()
     return packet;
 }
 
-std::unique_ptr<hsa::TraceControlAQLPacket>
-ThreadTraceAQLPacketFactory::construct_control_packet(
-    const hsa::TraceControlAQLPacket& buffer_owner)
-{
-    if(buffer_owner.GetOutputBuffer() == nullptr)
-        throw std::runtime_error{"thread trace packet has no output buffer to share"};
-
-    auto shared_pool                 = this->tracepool;
-    shared_pool.shared_output_buffer = buffer_owner.GetOutputBuffer();
-    shared_pool.shared_output_size   = buffer_owner.GetOutputSize();
-
-    auto num_params = static_cast<uint32_t>(aql_params.size());
-    auto profile = aqlprofile_att_profile_t{shared_pool.aql_agent, aql_params.data(), num_params};
-    auto packet  = std::make_unique<hsa::TraceControlAQLPacket>(shared_pool, profile);
-    packet->clear();
-    return packet;
-}
-
 std::unique_ptr<hsa::CodeobjMarkerAQLPacket>
 ThreadTraceAQLPacketFactory::construct_load_marker_packet(uint64_t id, uint64_t addr, uint64_t size)
 {

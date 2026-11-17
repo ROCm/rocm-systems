@@ -65,8 +65,6 @@ rocprofiler_test_c_replay_offset_replay_start_context(void);
 size_t
 rocprofiler_test_c_replay_offset_replay_stop_context(void);
 size_t
-rocprofiler_test_c_replay_offset_replay_set_thread_trace_parameters(void);
-size_t
 rocprofiler_test_c_replay_offset_app_dispatch(void);
 size_t
 rocprofiler_test_c_replay_offset_replay_set_dispatch(void);
@@ -138,10 +136,7 @@ TEST(kernel_replay_abi, members_are_in_declaration_order)
               offsetof(replay_data_t, replay_start_context));
     EXPECT_LT(offsetof(replay_data_t, replay_start_context),
               offsetof(replay_data_t, replay_stop_context));
-    EXPECT_LT(offsetof(replay_data_t, replay_stop_context),
-              offsetof(replay_data_t, replay_set_thread_trace_parameters));
-    EXPECT_LT(offsetof(replay_data_t, replay_set_thread_trace_parameters),
-              offsetof(replay_data_t, app_dispatch));
+    EXPECT_LT(offsetof(replay_data_t, replay_stop_context), offsetof(replay_data_t, app_dispatch));
     EXPECT_LT(offsetof(replay_data_t, app_dispatch), offsetof(replay_data_t, replay_set_dispatch));
     EXPECT_LT(offsetof(replay_data_t, replay_set_dispatch), sizeof(replay_data_t));
 }
@@ -167,11 +162,8 @@ TEST(kernel_replay_abi, members_do_not_overlap_and_fit)
               offsetof(replay_data_t, replay_start_context) +
                   sizeof(replay_data_t{}.replay_start_context));
     EXPECT_GE(
-        offsetof(replay_data_t, replay_set_thread_trace_parameters),
+        offsetof(replay_data_t, app_dispatch),
         offsetof(replay_data_t, replay_stop_context) + sizeof(replay_data_t{}.replay_stop_context));
-    EXPECT_GE(offsetof(replay_data_t, app_dispatch),
-              offsetof(replay_data_t, replay_set_thread_trace_parameters) +
-                  sizeof(replay_data_t{}.replay_set_thread_trace_parameters));
     EXPECT_GE(offsetof(replay_data_t, replay_set_dispatch),
               offsetof(replay_data_t, app_dispatch) + sizeof(replay_data_t{}.app_dispatch));
     EXPECT_GE(
@@ -219,17 +211,13 @@ TEST(kernel_replay_abi, callback_signatures_are_pinned)
     using pass_count_fn = uint64_t (*)(rocprofiler_kernel_dispatch_info_t, rocprofiler_user_data_t);
     using continue_fn =
         int (*)(rocprofiler_kernel_dispatch_info_t, uint64_t, uint64_t, rocprofiler_user_data_t);
-    using toggle_fn              = rocprofiler_status_t (*)(rocprofiler_context_id_t);
-    using thread_trace_params_fn = rocprofiler_status_t (*)(
-        rocprofiler_context_id_t, const rocprofiler_thread_trace_parameter_t*, size_t);
+    using toggle_fn   = rocprofiler_status_t (*)(rocprofiler_context_id_t);
     using dispatch_fn = rocprofiler_status_t (*)(const rocprofiler_kernel_replay_dispatch_t*);
 
     EXPECT_TRUE((std::is_same<decltype(replay_data_t{}.replay_pass_count), pass_count_fn>::value));
     EXPECT_TRUE((std::is_same<decltype(replay_data_t{}.replay_continue), continue_fn>::value));
     EXPECT_TRUE((std::is_same<decltype(replay_data_t{}.replay_start_context), toggle_fn>::value));
     EXPECT_TRUE((std::is_same<decltype(replay_data_t{}.replay_stop_context), toggle_fn>::value));
-    EXPECT_TRUE((std::is_same<decltype(replay_data_t{}.replay_set_thread_trace_parameters),
-                              thread_trace_params_fn>::value));
     EXPECT_TRUE((std::is_same<decltype(replay_data_t{}.replay_set_dispatch), dispatch_fn>::value));
     EXPECT_TRUE((std::is_same<decltype(replay_data_t{}.app_dispatch),
                               const rocprofiler_kernel_replay_dispatch_t*>::value));
@@ -245,7 +233,6 @@ TEST(kernel_replay_abi, zero_initialized_record_opts_out_of_replay)
     EXPECT_EQ(rec.replay_continue, nullptr);
     EXPECT_EQ(rec.replay_start_context, nullptr);
     EXPECT_EQ(rec.replay_stop_context, nullptr);
-    EXPECT_EQ(rec.replay_set_thread_trace_parameters, nullptr);
     EXPECT_EQ(rec.app_dispatch, nullptr);
     EXPECT_EQ(rec.replay_set_dispatch, nullptr);
     EXPECT_EQ(rec.current_pass, 0u);
@@ -264,15 +251,15 @@ TEST(kernel_replay_abi, size_member_carries_the_layout_prefix)
     EXPECT_GT(rec.size, offsetof(replay_data_t, replay_set_dispatch));
 }
 
-// replay_set_thread_trace_parameters was appended after replay_stop_context. A record from an SDK
-// that predates it ends at replay_stop_context, so a tool must be able to tell the two apart from
-// size alone before it calls the pointer.
-TEST(kernel_replay_abi, size_gates_the_thread_trace_parameters_member)
+// app_dispatch and replay_set_dispatch were appended after replay_stop_context. A record from an
+// SDK that predates them ends at replay_stop_context, so a tool must be able to tell the two apart
+// from size alone before it reads or calls them.
+TEST(kernel_replay_abi, size_gates_the_dispatch_members)
 {
     const size_t old_size =
         offsetof(replay_data_t, replay_stop_context) + sizeof(replay_data_t{}.replay_stop_context);
-    const size_t needed = offsetof(replay_data_t, replay_set_thread_trace_parameters) +
-                          sizeof(replay_data_t{}.replay_set_thread_trace_parameters);
+    const size_t needed =
+        offsetof(replay_data_t, replay_set_dispatch) + sizeof(replay_data_t{}.replay_set_dispatch);
 
     EXPECT_LT(old_size, needed);
     EXPECT_LE(needed, sizeof(replay_data_t));
@@ -438,8 +425,6 @@ TEST(kernel_replay_abi, c_and_cxx_agree_on_every_field_offset)
               offsetof(replay_data_t, replay_start_context));
     EXPECT_EQ(rocprofiler_test_c_replay_offset_replay_stop_context(),
               offsetof(replay_data_t, replay_stop_context));
-    EXPECT_EQ(rocprofiler_test_c_replay_offset_replay_set_thread_trace_parameters(),
-              offsetof(replay_data_t, replay_set_thread_trace_parameters));
     EXPECT_EQ(rocprofiler_test_c_replay_offset_app_dispatch(),
               offsetof(replay_data_t, app_dispatch));
     EXPECT_EQ(rocprofiler_test_c_replay_offset_replay_set_dispatch(),
@@ -472,7 +457,6 @@ TEST(kernel_replay_abi, record_written_by_c_reads_back_in_cxx)
     EXPECT_EQ(rec.replay_continue, nullptr);
     EXPECT_EQ(rec.replay_start_context, nullptr);
     EXPECT_EQ(rec.replay_stop_context, nullptr);
-    EXPECT_EQ(rec.replay_set_thread_trace_parameters, nullptr);
     EXPECT_EQ(rec.app_dispatch, nullptr);
     EXPECT_EQ(rec.replay_set_dispatch, nullptr);
 }

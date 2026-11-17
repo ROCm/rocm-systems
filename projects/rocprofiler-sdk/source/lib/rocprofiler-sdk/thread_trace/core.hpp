@@ -57,27 +57,6 @@ class AQLPacket;
 
 namespace thread_trace
 {
-/// The part of the GPU a dispatch thread trace covers. A kernel replay pass may select a different
-/// one than the context was configured with (see kernel_replay/local_context.hpp).
-struct dispatch_target_t
-{
-    uint64_t target_cu          = 0;
-    uint64_t simd_select        = 0;
-    uint64_t shader_engine_mask = 0;
-
-    friend bool operator==(const dispatch_target_t& lhs, const dispatch_target_t& rhs)
-    {
-        return std::tie(lhs.target_cu, lhs.simd_select, lhs.shader_engine_mask) ==
-               std::tie(rhs.target_cu, rhs.simd_select, rhs.shader_engine_mask);
-    }
-
-    friend bool operator<(const dispatch_target_t& lhs, const dispatch_target_t& rhs)
-    {
-        return std::tie(lhs.target_cu, lhs.simd_select, lhs.shader_engine_mask) <
-               std::tie(rhs.target_cu, rhs.simd_select, rhs.shader_engine_mask);
-    }
-};
-
 /// Collection of user-provided knobs that steer an ATT capture session.
 /// The struct mirrors the public C API parameters and is validated before any
 /// hardware programming happens.
@@ -116,11 +95,6 @@ struct thread_trace_parameter_pack
 
     /// Ensures the provided parameters match the hardware contract and public API.
     bool are_params_valid() const;
-
-    dispatch_target_t get_target() const
-    {
-        return dispatch_target_t{target_cu, simd_select, shader_engine_mask};
-    }
 };
 
 class ThreadTracerAgent
@@ -139,10 +113,6 @@ public:
 
     /// Acquire a copy of the control packet bundle for a dispatch boundary.
     std::unique_ptr<hsa::TraceControlAQLPacket> get_start_packet();
-    /// Same as above, for a dispatch traced on `target` instead of the configured target. The
-    /// packets for each target are built on first use and share the configured packet's trace
-    /// buffer, which is safe because traced dispatches never overlap.
-    std::unique_ptr<hsa::TraceControlAQLPacket> get_start_packet(const dispatch_target_t& target);
     /// Relay data buffers produced by the ATT to the user-mode callback.
     void iterate_data(aqlprofile_handle_t handle, rocprofiler_user_data_t data);
     /// Same as above but for device mode, using the internal data structures
@@ -166,21 +136,14 @@ private:
 
     /// Acquire a copy of the control packet, with optional increment to active_traces
     std::unique_ptr<hsa::TraceControlAQLPacket> get_control(bool bStart = false);
-    /// Acquire a copy of `source`, which is control_packet or one of target_packets
-    std::unique_ptr<hsa::TraceControlAQLPacket> get_control(
-        const hsa::TraceControlAQLPacket& source,
-        bool                              bStart);
 
     att_queue_ptr_t queue{};
 
     std::atomic<int> active_traces{0};
     std::mutex       trace_resources_mut{};
 
-    std::unique_ptr<hsa::TraceControlAQLPacket> control_packet{nullptr};
-    /// Control packets for targets other than the configured one. Declared after control_packet
-    /// so they are destroyed first: they borrow its trace buffer.
-    std::map<dispatch_target_t, std::unique_ptr<hsa::TraceControlAQLPacket>> target_packets{};
-    std::unique_ptr<code_object::CodeobjCallbackRegistry>                    codeobj_reg{nullptr};
+    std::unique_ptr<hsa::TraceControlAQLPacket>           control_packet{nullptr};
+    std::unique_ptr<code_object::CodeobjCallbackRegistry> codeobj_reg{nullptr};
 
     std::vector<std::thread>          consumers{};
     std::thread                       producer{};
@@ -205,14 +168,6 @@ public:
 
     bool collects_on(rocprofiler_agent_id_t agent_id) const;
     bool intersects(const DispatchThreadTracer& rhs) const;
-
-    /// Validate a kernel replay pass's target selection against the parameters configured for
-    /// `agent_id`. Parameters left out keep their configured value. Only TARGET_CU, SIMD_SELECT
-    /// and SHADER_ENGINE_MASK are accepted.
-    rocprofiler_status_t resolve_target(rocprofiler_agent_id_t                      agent_id,
-                                        const rocprofiler_thread_trace_parameter_t* parameters,
-                                        size_t                                      num_parameters,
-                                        dispatch_target_t&                          target) const;
 
     void add_agent(rocprofiler_agent_id_t agent, thread_trace_parameter_pack pack)
     {

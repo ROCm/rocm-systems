@@ -155,25 +155,11 @@ TraceMemoryPool::Alloc(void** ptr, size_t size, desc_t flags, void* data)
     if(!data) return HSA_STATUS_ERROR;
     auto& pool = *reinterpret_cast<TraceMemoryPool*>(data);
 
-    if(!flags.host_access && pool.shared_output_buffer)
-    {
-        if(size > pool.shared_output_size) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-        *ptr = pool.shared_output_buffer;
-        return HSA_STATUS_SUCCESS;
-    }
-
-    const auto record_output = [&pool, size, flags](void* allocated) {
-        if(flags.host_access || allocated == nullptr || pool.output_buffer != nullptr) return;
-        pool.output_buffer = allocated;
-        pool.output_size   = size;
-    };
-
     if(pool.kfd_memory)
     {
         *ptr = pool.kfd_memory->allocate(
             size,
             flags.host_access ? kfd::kfd_memory_kind_t::host : kfd::kfd_memory_kind_t::device);
-        record_output(*ptr);
         return (*ptr || size == 0) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_OUT_OF_RESOURCES;
     }
 
@@ -192,7 +178,6 @@ TraceMemoryPool::Alloc(void** ptr, size_t size, desc_t flags, void* data)
             pool.gpu_pool_, size + 0x2000, hsa_amd_memory_pool_executable_flag, ptr);
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
         *ptr = reinterpret_cast<void*>((reinterpret_cast<uintptr_t>(*ptr) + 0xFFF) & ~0xFFFul);
-        if(status == HSA_STATUS_SUCCESS) record_output(*ptr);
     }
     return status;
 }
@@ -202,8 +187,6 @@ TraceMemoryPool::Free(void* ptr, void* data)
 {
     assert(data);
     auto& pool = *reinterpret_cast<TraceMemoryPool*>(data);
-
-    if(ptr != nullptr && ptr == pool.shared_output_buffer) return;
 
     if(pool.kfd_memory)
         pool.kfd_memory->deallocate(ptr);

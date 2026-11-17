@@ -1210,8 +1210,8 @@ WriteInterceptor(const void* packets,
             // active now (loop start) as the toggle mask, so a tool may only enable/disable one of
             // those and a local start cannot promote a globally-stopped context
             // (local_context.hpp).
-            auto local_ctx_tls_guard = kernel_replay::scoped_local_context_control{
-                context::get_active_contexts(), queue.get_agent().get_rocp_agent()->id};
+            auto local_ctx_tls_guard =
+                kernel_replay::scoped_local_context_control{context::get_active_contexts()};
 
             // Per-pass loop: PASS enter -> submit -> drain the async handler -> PASS exit -> ask
             // the tool whether to continue -> restore device memory before the next pass.

@@ -13,7 +13,6 @@ Kernel replay is tested at four levels, and they differ mainly in what they need
 | Public ABI and header contract | `source/lib/rocprofiler-sdk/kernel_replay/tests/replay_abi.cpp`, `replay_abi_c.c` | nothing |
 | Pure logic (context overrides, configuration) | `.../tests/local_context.cpp`, `replay_configure.cpp` | nothing |
 | Snapshot and tracker behaviour | `.../tests/snap_restore.cpp`, `snap_bandwidth.cpp` | a GPU |
-| Per-pass thread trace targets | `source/lib/rocprofiler-sdk/thread_trace/tests/replay_target_test.cpp`, `tests/kernel-replay-local-context/` (`att-target-per-pass`) | a GPU |
 | End-to-end through `rocprofv3` | `tests/rocprofv3/kernel-replay/` | a GPU, except the CLI tests |
 | Performance regressions | `tests/kernel-replay-perf/`, `tests/queue-hooks-perf/` | a GPU |
 | Performance harness helpers | `tests/perf-common/test_perf_stats.py` | nothing |

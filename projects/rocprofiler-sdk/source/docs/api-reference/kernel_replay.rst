@@ -85,7 +85,6 @@ Cast ``record.payload`` to ``rocprofiler_callback_tracing_kernel_replay_data_t*`
      - ``PHASE_ENTER``
      - Read ``current_pass`` / ``total_passes``. Optionally call
        ``replay_start_context`` / ``replay_stop_context``, and
-       ``replay_set_thread_trace_parameters`` to choose the pass's thread trace target, and
        ``replay_set_dispatch`` to submit a different dispatch on this pass.
    * - ``ROCPROFILER_KERNEL_REPLAY_PASS``
      - ``PHASE_EXIT``
@@ -109,8 +108,8 @@ After CONFIG ``PHASE_ENTER`` returns, the SDK calls ``replay_pass_count`` if it 
   which is deferred until after the loop, is never fired.
 
 ``rocprofv3`` returns the number of ``--pmc`` groups collectable on
-``dispatch_info.agent_id``, or with ``--att`` the number of thread trace targets. A custom tool can
-return any of the cases above and may set ``replay_continue`` for early exit or an indefinite loop.
+``dispatch_info.agent_id``. A custom tool can return any of the cases above and may set
+``replay_continue`` for early exit or an indefinite loop.
 
 Using replay with dispatch counting
 -----------------------------------
@@ -142,32 +141,6 @@ collecting them together hits the documented clock-gating conflict. ``rocprofv3`
 SPM or PC sampling together with kernel replay — that requires a custom tool. Do not call the global
 ``rocprofiler_start_context`` / ``rocprofiler_stop_context`` from inside the replay loop: that would
 leak into non-replayed dispatches.
-
-Tracing a different target on each pass
----------------------------------------
-
-Dispatch thread trace covers one target CU (or WGP) per shader engine, and a SIMD selection, per
-dispatch. To trace several targets of the same dispatch with identical inputs, call
-``replay_set_thread_trace_parameters`` during PASS ``PHASE_ENTER``:
-
-.. code-block:: cpp
-
-    // pass i traces SIMD i (gfx10 and later; gfx9 takes a SIMD bitmask)
-    const rocprofiler_thread_trace_parameter_t simd = {
-        ROCPROFILER_THREAD_TRACE_PARAMETER_SIMD_SELECT, {payload->current_pass}};
-    payload->replay_set_thread_trace_parameters(att_ctx, &simd, 1);
-
-* Only ``TARGET_CU``, ``SIMD_SELECT`` and ``SHADER_ENGINE_MASK`` are accepted; parameters left out
-  keep their configured value, and an empty list returns to the configured target.
-* The selection is validated before it is recorded. An invalid selection returns
-  ``ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT`` and keeps the previous one.
-* Like the context toggles, the selection is sticky across passes, scoped to the replay loop, and
-  only legal during PASS ``PHASE_ENTER``.
-* Every target writes into the context's one trace buffer; the packets for each target are built
-  once, on first use.
-* The member was appended to the payload; check that ``size`` covers it before calling it.
-
-``samples/kernel_replay/att_targets_client.cpp`` traces each SIMD of one WGP on its own pass.
 
 Replacing a pass's dispatch
 ---------------------------

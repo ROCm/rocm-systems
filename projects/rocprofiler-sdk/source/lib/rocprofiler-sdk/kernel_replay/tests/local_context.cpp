@@ -25,16 +25,13 @@
 // unconditionally.
 
 #include "lib/rocprofiler-sdk/kernel_replay/local_context.hpp"
-#include "lib/rocprofiler-sdk/thread_trace/core.hpp"
 
-#include <rocprofiler-sdk/experimental/thread_trace.h>
 #include <rocprofiler-sdk/fwd.h>
 
 #include <gtest/gtest.h>
 
 #include <deque>
 #include <initializer_list>
-#include <memory>
 #include <vector>
 
 namespace lc = rocprofiler::kernel_replay;
@@ -274,64 +271,6 @@ TEST(kernel_replay_local_context, simulated_service_consumers)
     EXPECT_EQ(att_ran, (std::vector<bool>{true, false, false, false}));
     EXPECT_EQ(spm_ran, (std::vector<bool>{true, false, false, false}));
     EXPECT_EQ(pcs_ran, (std::vector<bool>{true, true, true, true}));
-}
-
-// The thread trace target setter follows the toggles' rules: only inside a loop, only in the arm
-// window, only for a context active when the loop began. It additionally needs a dispatch thread
-// trace service configured on the replayed agent, and nothing is recorded when a call fails.
-TEST(kernel_replay_local_context, thread_trace_target_rejections)
-{
-    const rocprofiler_agent_id_t replay_agent{.handle = 5};
-    const rocprofiler_agent_id_t other_agent{.handle = 6};
-
-    EXPECT_EQ(lc::replay_local_set_thread_trace_parameters({1}, nullptr, 0),
-              ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR);
-    EXPECT_FALSE(lc::local_thread_trace_target({1}).has_value());
-
-    fake_active_contexts active{1, 2, 3};
-    // 1 has no thread trace at all; 2 traces another agent; 3 traces the replayed agent.
-    auto pack = rocprofiler::thread_trace::thread_trace_parameter_pack{};
-    active.storage[1].dispatch_thread_trace =
-        std::make_unique<rocprofiler::thread_trace::DispatchThreadTracer>();
-    active.storage[1].dispatch_thread_trace->add_agent(other_agent, pack);
-    active.storage[2].dispatch_thread_trace =
-        std::make_unique<rocprofiler::thread_trace::DispatchThreadTracer>();
-    active.storage[2].dispatch_thread_trace->add_agent(replay_agent, pack);
-
-    lc::scoped_local_context_control loop{active.array, replay_agent};
-
-    EXPECT_EQ(lc::replay_local_set_thread_trace_parameters({3}, nullptr, 0),
-              ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR)
-        << "outside the arm window";
-
-    lc::set_toggles_armed(true);
-    EXPECT_EQ(lc::replay_local_set_thread_trace_parameters({9}, nullptr, 0),
-              ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_STARTED);
-    EXPECT_EQ(lc::replay_local_set_thread_trace_parameters({1}, nullptr, 0),
-              ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT)
-        << "a context without dispatch thread trace has no target to select";
-    EXPECT_EQ(lc::replay_local_set_thread_trace_parameters({2}, nullptr, 0),
-              ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT)
-        << "the context does not trace the agent being replayed";
-
-    const rocprofiler_thread_trace_parameter_t buffer_size{
-        ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, {0x1000000}};
-    EXPECT_EQ(lc::replay_local_set_thread_trace_parameters({3}, &buffer_size, 1),
-              ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT)
-        << "only the target parameters may change per pass";
-    EXPECT_EQ(lc::replay_local_set_thread_trace_parameters({3}, nullptr, 1),
-              ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT);
-
-    EXPECT_EQ(lc::replay_local_set_thread_trace_parameters({3}, nullptr, 0),
-              ROCPROFILER_STATUS_SUCCESS)
-        << "resetting to the configured target is always allowed";
-    lc::set_toggles_armed(false);
-
-    for(uint64_t handle : {1, 2, 3, 9})
-        EXPECT_FALSE(lc::local_thread_trace_target({handle}).has_value()) << handle;
-
-    // Selecting a target records nothing in the enable/disable map.
-    EXPECT_FALSE(lc::local_context_has_overrides());
 }
 
 // Local start must not resurrect a globally-stopped dispatch service: the override is ANDed with

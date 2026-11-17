@@ -166,12 +166,6 @@ never nests on a thread and only the replaying thread's dispatches observe the o
 consumers query `local_context_override()` at dispatch time, fronted by
 `local_context_has_overrides()` so an ordinary dispatch pays a single thread-local read.
 
-Per-pass thread trace targets live in the same loop-scoped block, keyed by context, and are
-validated against the agent the loop replays. The packets built for each target are cached in the
-agent's thread tracer and outlive the loop; they share the configured packet's trace buffer, which
-is safe because the replay lock and the per-pass drain keep one traced dispatch in flight per agent,
-and thread trace serializes traced dispatches outside replay as well.
-
 See [Callback API](kernel_replay_callback_api.md#localized-context-control) for the tool-facing
 contract.
 
@@ -190,5 +184,4 @@ All paths are relative to `projects/rocprofiler-sdk/`.
 | One drain slice | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `Queue::sync()` |
 | Agent-scoped inventory | `source/lib/rocprofiler-sdk/kernel_replay/memory_tracker.cpp` | `snap_inventory()` |
 | Localized context scopes | `source/lib/rocprofiler-sdk/kernel_replay/local_context.hpp` | `scoped_local_context_control`, `set_toggles_armed()` |
-| Per-pass thread trace target | `source/lib/rocprofiler-sdk/kernel_replay/local_context.hpp` | `local_thread_trace_target()` |
 | Localized context consumer | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `local_context_has_overrides()` call in `process_packet_batch` |

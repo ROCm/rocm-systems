@@ -58,19 +58,6 @@ typedef int (*rocprofiler_kernel_replay_continue_cb_t)(
 typedef rocprofiler_status_t (*rocprofiler_kernel_replay_context_cb_t)(
     rocprofiler_context_id_t context_id);
 
-/// Defined in `rocprofiler-sdk/experimental/thread-trace/core.h`; include
-/// `rocprofiler-sdk/experimental/thread_trace.h` to build a parameter list.
-struct rocprofiler_thread_trace_parameter_t;
-
-/**
- * @brief SDK-provided callback selecting the thread trace target of a dispatch thread trace
- * context for the current replay loop.
- */
-typedef rocprofiler_status_t (*rocprofiler_kernel_replay_thread_trace_params_cb_t)(
-    rocprofiler_context_id_t                           context_id,
-    const struct rocprofiler_thread_trace_parameter_t* parameters,
-    size_t                                             num_parameters);
-
 /**
  * @brief A kernel dispatch as a kernel replay pass submits it.
  *
@@ -165,9 +152,8 @@ typedef struct rocprofiler_callback_tracing_kernel_replay_data_t
     rocprofiler_kernel_replay_continue_cb_t   replay_continue;
     rocprofiler_kernel_replay_context_cb_t    replay_start_context;
     rocprofiler_kernel_replay_context_cb_t    replay_stop_context;
-    rocprofiler_kernel_replay_thread_trace_params_cb_t replay_set_thread_trace_parameters;
-    const rocprofiler_kernel_replay_dispatch_t*        app_dispatch;
-    rocprofiler_kernel_replay_dispatch_cb_t            replay_set_dispatch;
+    const rocprofiler_kernel_replay_dispatch_t* app_dispatch;
+    rocprofiler_kernel_replay_dispatch_cb_t     replay_set_dispatch;
 
     /// @var replay_pass_count
     /// @brief [CONFIG] Tool-provided callback returning the number of replay passes.
@@ -227,37 +213,6 @@ typedef struct rocprofiler_callback_tracing_kernel_replay_data_t
     ///    promote a globally stopped context). PC sampling is agent-wide and device counting
     ///    is not dispatch-scoped, so neither consults the override at all -- a call naming
     ///    such a context reports success but has no effect.
-    ///
-    /// @var replay_set_thread_trace_parameters
-    /// @brief [PASS] Per-pass thread trace target. The SDK populates this function pointer
-    /// before each PASS @ref ROCPROFILER_CALLBACK_PHASE_ENTER; the tool calls it to choose which
-    /// part of the GPU a dispatch thread trace context traces for the current replay loop, so
-    /// successive passes of the same dispatch can trace, for example, a different SIMD each.
-    /// Like the context toggles it records a thread-scoped override and never changes the
-    /// parameters the context was configured with. Semantics:
-    ///  - Only valid to call during PASS @ref ROCPROFILER_CALLBACK_PHASE_ENTER; otherwise it
-    ///    returns @ref ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR.
-    ///  - @p context_id must name a context that was active when the replay loop began
-    ///    (@ref ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_STARTED otherwise) and that has a dispatch
-    ///    thread trace service configured on the replayed agent
-    ///    (@ref ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT otherwise).
-    ///  - Accepts only @ref ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU,
-    ///    @ref ROCPROFILER_THREAD_TRACE_PARAMETER_SIMD_SELECT and
-    ///    @ref ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK. Any other parameter type
-    ///    returns @ref ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT. Parameters left out keep the
-    ///    value the context was configured with; @p num_parameters == 0 resets all three.
-    ///  - The values are validated before anything is recorded: the same limits as
-    ///    @ref rocprofiler_configure_dispatch_thread_trace_service, a shader engine mask that
-    ///    selects at least one of the agent's shader engines and none it lacks, and at least
-    ///    128 KiB of the configured buffer per selected shader engine. A rejected call returns
-    ///    @ref ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT and leaves the previous selection.
-    ///  - Sticky across passes and scoped to the replay loop, like the context toggles: the
-    ///    selection stays in effect until changed within the same loop and is dropped when the
-    ///    loop completes.
-    ///  - The SDK builds the trace packets for each distinct selection once, on first use, and
-    ///    every selection shares the context's trace buffer.
-    ///  - A tool built against an older header ignores this member; a tool must check that
-    ///    @c size covers it before calling it.
     ///
     /// @var app_dispatch
     /// @brief [CONFIG/PASS] The dispatch the application submitted, read-only, populated by the

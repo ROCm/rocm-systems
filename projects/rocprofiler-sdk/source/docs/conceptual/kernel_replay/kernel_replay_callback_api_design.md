@@ -48,15 +48,8 @@ deliberate:
   toggles only mask which of those already-active contexts participate in each pass. A toggle
   cannot promote a context that is globally stopped, and a context the tool never masks stays
   active on every pass.
-- **Per-pass thread trace targets as one more PASS function pointer**
-  (`replay_set_thread_trace_parameters`), with the same arm window, stickiness and loop scope as
-  the toggles. Thread trace programs its target CU, SIMD and shader engine mask into the start
-  packet, and only one dispatch thread trace context may run per agent, so toggling between several
-  preconfigured contexts cannot vary the target. The selection is an override of the configured
-  parameters, not a reconfiguration: packets for each distinct target are built on first use and
-  share the configured packet's trace buffer.
 - **No pass-count environment variable.** A tool derives N itself — `rocprofv3`, for example, from
-  its `--pmc` groups per agent, or from its `--att` target lists.
+  its `--pmc` groups per agent.
 
 `ROCPROFILER_KERNEL_REPLAY_SNAPSHOT` and `ROCPROFILER_KERNEL_REPLAY_RESTORE` are TODOs in
 `fwd.h` for tool visibility into those phases; they are not implemented.
@@ -78,10 +71,6 @@ parameter proves cleaner, the signature may gain one — that is the one shape d
 Counter collection, SPM, and ATT consult the override at dispatch time. Kernel dispatch tracing
 drops disabled contexts from the pass's tracing data. PC sampling and device counting are agent-wide
 and currently ignore localized overrides.
-
-`replay_set_thread_trace_parameters` records into the same loop-scoped control block. Dispatch
-thread trace reads the selection (`local_thread_trace_target()`) when it builds a pass's packets, so
-a pass that the dispatch callback chooses to trace gets its selected target.
 
 Kernel replay is **not** gated on removing the queue callback registration mechanism. That removal
 would make per-pass enable/disable cleaner and is a planned improvement, but the feature works

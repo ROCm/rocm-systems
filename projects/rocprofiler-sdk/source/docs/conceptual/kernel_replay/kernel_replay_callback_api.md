@@ -14,11 +14,10 @@ narrower slice of it through its own command-line option.
 
 Decoupling replay from counter collection is the point of the design: a tool can use replay for
 hardware counters, kernel timing statistics, PC sampling, thread trace, SPM, or anything else, and
-it decides per pass which of its services are active, and for dispatch thread trace which part of
-the GPU each pass traces. ``rocprofv3`` wires replay to dispatch counter collection, and, with
-``--att-remap``, to the remapper's per-pass dispatch and thread trace target; SPM, PC sampling, and
-mixing services across passes require a custom tool (see :ref:`kernel-replay-sdk-api` and the
-``samples/kernel_replay/`` examples).
+it decides per pass which of its services are active. ``rocprofv3`` wires replay to dispatch counter
+collection, and, with ``--att-remap``, to the remapper's per-pass dispatch and thread trace; SPM, PC
+sampling, and mixing services across passes require a custom tool (see
+:ref:`kernel-replay-sdk-api` and the ``samples/kernel_replay/`` examples).
 
 Replay is **not** a dedicated counting service mutually exclusive with ordinary dispatch counting.
 There is no `rocprofiler_configure_kernel_replay_counting_service()`, no pass-count environment
@@ -73,7 +72,6 @@ typedef struct rocprofiler_callback_tracing_kernel_replay_data_t
     // [PASS] SDK-provided; the tool calls these during PASS PHASE_ENTER
     rocprofiler_kernel_replay_context_cb_t replay_start_context;
     rocprofiler_kernel_replay_context_cb_t replay_stop_context;
-    rocprofiler_kernel_replay_thread_trace_params_cb_t replay_set_thread_trace_parameters;
 
     // [CONFIG/PASS] read-only, populated by the SDK: the dispatch the application submitted
     const rocprofiler_kernel_replay_dispatch_t* app_dispatch;
@@ -81,10 +79,6 @@ typedef struct rocprofiler_callback_tracing_kernel_replay_data_t
     rocprofiler_kernel_replay_dispatch_cb_t     replay_set_dispatch;
 } rocprofiler_callback_tracing_kernel_replay_data_t;
 ```
-
-`replay_set_thread_trace_parameters` was appended after the first release of the payload. A tool
-checks that `size` covers it before calling it; see
-[Per-pass thread trace targets](#per-pass-thread-trace-targets).
 
 During `CONFIG`, the pass-info fields are zero. During `PASS`, the config callback pointers are
 zero and must not be modified.
@@ -206,45 +200,6 @@ counter collection with PC sampling under replay until PC sampling honors locali
 See
 [Concurrency and isolation](kernel_replay_concurrency_and_isolation.md#localized-context-control-and-thread-scope)
 for how the override map is scoped.
-
-### Per-pass thread trace targets
-
-Thread trace on one dispatch covers one target CU (or WGP) per shader engine, and on some
-architectures one SIMD per run. Tracing every SIMD of a WGP, or several WGPs, therefore takes one
-run per target. Under replay those runs are passes of the same dispatch from identical starting
-memory, so their traces describe the same work. The tool selects each pass's target with the
-`replay_set_thread_trace_parameters` callback delivered in the `PASS` payload:
-
-```c
-const rocprofiler_thread_trace_parameter_t simd = {
-    ROCPROFILER_THREAD_TRACE_PARAMETER_SIMD_SELECT, {payload->current_pass}};
-payload->replay_set_thread_trace_parameters(my_att_ctx, &simd, 1);
-```
-
-Semantics, matching the localized context toggles:
-
-- **Only legal during `PASS` `PHASE_ENTER`**, for a context active when the loop began
-  (`ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR` and `ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_STARTED`
-  otherwise). The context must have dispatch thread trace configured on the replayed agent.
-- **Only the target parameters.** `ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU`,
-  `ROCPROFILER_THREAD_TRACE_PARAMETER_SIMD_SELECT` and
-  `ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK`. Parameters a call leaves out keep the
-  value the context was configured with, and a call with no parameters returns to the configured
-  target.
-- **Validated up front.** A value outside the configuration limits, a shader engine mask naming an
-  engine the agent does not have, or a mask that leaves less than 128 KiB of the trace buffer per
-  traced engine returns `ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT` and keeps the previous
-  selection.
-- **Sticky across passes, scoped to the loop.** The selection holds until changed within the loop
-  and is dropped when the loop completes. The configured parameters never change.
-- **One trace buffer.** The SDK builds the start and stop packets for each distinct target on first
-  use and reuses them for later passes and dispatches; every target writes into the context's one
-  trace buffer, which is safe because traced dispatches never overlap.
-
-The thread trace dispatch callback still runs on every pass and decides whether that pass is traced,
-and it can tag the trace with the pass through its `userdata_shader` output so the shader data
-callback can attribute each pass's data. `samples/kernel_replay/att_targets_client.cpp` traces the
-four SIMDs of one WGP over four passes.
 
 ### Correlation IDs across passes
 
@@ -387,9 +342,11 @@ rocprofv3 --att --att-remap --replay-mode kernel --kernel-replay-beta-enabled --
 - The tool library creates the kernel replay context when the flag is given, and not otherwise.
 - There is no pass-count knob. With `--pmc` the tool derives the pass count from the number of
   counter groups collectable on the dispatch's agent. With `--att-remap` the remapper runs an
-  indefinite loop: at every `PASS` `PHASE_ENTER` the tool applies its plan through
-  `replay_set_dispatch` and `replay_set_thread_trace_parameters`, and `replay_continue` follows it.
-  Only dispatches thread trace will capture are remapped.
+  indefinite loop: at every `PASS` `PHASE_ENTER` the tool submits the plan's dispatch through
+  `replay_set_dispatch`, and `replay_continue` follows the plan. A traced pass runs between the
+  start and stop of a device thread trace context configured for its SIMD: the tool starts it at
+  `PASS` `PHASE_ENTER` and stops it at `PASS` `PHASE_EXIT`. Only dispatches the thread trace
+  kernel filters select are remapped.
 - With `--pmc` the flag does not wire `replay_continue` or the localized start/stop context
   callbacks.
 - Without the flag, multiple `--pmc` groups continue to use application replay, where the whole
@@ -415,12 +372,11 @@ All paths are relative to `projects/rocprofiler-sdk/`.
 | Continue decision | `source/lib/rocprofiler-sdk/kernel_replay/replay_callbacks.cpp` | `should_continue_replay()` |
 | Dispatch info population | `source/lib/rocprofiler-sdk/kernel_replay/replay_callbacks.cpp` | `make_dispatch_info()` |
 | Operation name/id queries | `source/lib/rocprofiler-sdk/kernel_replay/kernel_replay.cpp` | `name_by_id()`, `id_by_name()` |
-| Localized context callbacks | `source/lib/rocprofiler-sdk/kernel_replay/local_context.cpp` | `replay_local_enable_context()`, `replay_local_disable_context()`, `replay_local_set_thread_trace_parameters()` |
+| Localized context callbacks | `source/lib/rocprofiler-sdk/kernel_replay/local_context.cpp` | `replay_local_enable_context()`, `replay_local_disable_context()` |
 | Dispatch replacement | `source/lib/rocprofiler-sdk/kernel_replay/dispatch_override.cpp` | `describe_dispatch()`, `build_dispatch_packet()`; setter `replay_set_dispatch()` in `replay_callbacks.cpp` |
-| Per-pass thread trace packets | `source/lib/rocprofiler-sdk/thread_trace/core.cpp` | `DispatchThreadTracer::resolve_target()`, `ThreadTracerAgent::get_start_packet()` |
+
 | Replay loop and dispatch-id reservation | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `WriteInterceptor` |
 | Tool-side subscription | `source/lib/rocprofiler-sdk-tool/tool.cpp` | `kernel_replay_callback()`, `kernel_replay_pass_count_callback()` |
 | Tool-side flag | `source/lib/rocprofiler-sdk-tool/config.hpp` | `kernel_replay` |
 | CLI flags | `source/bin/rocprofv3.py` | `--replay-mode kernel`, `--kernel-replay-beta-enabled` |
 | Tests | `source/lib/rocprofiler-sdk/kernel_replay/tests/` | `local_context.cpp` |
-| Thread trace target tests | `source/lib/rocprofiler-sdk/thread_trace/tests/` | `replay_target_test.cpp` |

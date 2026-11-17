@@ -174,30 +174,6 @@ not currently honor these callbacks, so it cannot be isolated to one replay pass
 Overrides are sticky across passes and scoped to the replay loop. See
 :ref:`kernel-replay-callback-api` for the contract.
 
-Per-pass thread trace targets
-=============================
-
-The ``PASS`` payload also carries ``replay_set_thread_trace_parameters``. Call it during ``PASS``
-``PHASE_ENTER`` to choose which target CU (or WGP), SIMD and shader engines a dispatch thread trace
-context traces on that pass. On architectures that trace one SIMD per run, this collects every SIMD
-of a WGP in one application run, and every pass starts from the same device memory:
-
-.. code-block:: cpp
-
-    if(record.operation == ROCPROFILER_KERNEL_REPLAY_PASS &&
-       record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
-    {
-        const rocprofiler_thread_trace_parameter_t simd = {
-            ROCPROFILER_THREAD_TRACE_PARAMETER_SIMD_SELECT, {payload->current_pass}};
-        payload->replay_set_thread_trace_parameters(att_ctx, &simd, 1);
-    }
-
-Configure the thread trace context with the target CU and shader engine mask the passes share, and
-return one pass per target from ``replay_pass_count``. The thread trace dispatch callback can tag
-each trace with its pass through ``userdata_shader``, because shader data may be delivered on
-another thread. Only the target parameters can change per pass, and the selection follows the same
-arm window, stickiness and loop scope as the context toggles.
-
 Replacing a pass's dispatch
 ===========================
 
@@ -223,7 +199,6 @@ In-tree examples
 
 * ``samples/kernel_replay/basic_client_with_user_data.cpp`` — threads mutable tool state through
   ``user_data.ptr`` without a dispatch-id side table.
-* ``samples/kernel_replay/att_targets_client.cpp`` — traces each SIMD of one WGP on its own pass.
 * ``tests/kernel-replay-dispatch/`` — custom client that loads a substitute kernel through HSA and
   replaces one pass's dispatch with its own kernel arguments and a doubled grid.
 * ``tests/kernel-replay-concurrency/`` — custom client that replays one kernel and opts another
