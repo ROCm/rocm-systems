@@ -152,7 +152,9 @@ template <typename T> void append_inst(std::vector<uint32_t> &words, const T &in
 
 [[nodiscard]] WaitcheckReport analyze_gfx1250_normal(const std::vector<uint32_t> &program) {
   TestCodeObject code_object(program);
-  return analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5);
+  WaitcheckOptions options;
+  options.concrete_gpu_target = ROCJITSU_CODE_TARGET_GFX1250;
+  return analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5, options);
 }
 
 constexpr std::array<uint32_t, 4> kGfx1250ScaledWmma{
@@ -7846,6 +7848,15 @@ TEST(WaitcheckTest, CodeObjectSelectsConcreteDecoderFromCallerRegistry) {
 
   // Raw input uses the registry's architecture default. Only gfx1251 decodes the FMA.
   EXPECT_FALSE(analyze_waitcnts(program, arch).supported);
+  WaitcheckOptions concrete;
+  concrete.concrete_gpu_target = ROCJITSU_CODE_TARGET_GFX1251;
+  EXPECT_TRUE(analyze_waitcnts(program, arch, concrete).passed());
+  concrete.concrete_gpu_target = ROCJITSU_CODE_TARGET_GFX1250;
+  const auto conflict = analyze_waitcnts(object, arch, concrete);
+  EXPECT_FALSE(conflict.supported);
+  EXPECT_NE(conflict.analysis_error.find("conflicts with ELF machine"), std::string::npos);
+  concrete.concrete_gpu_target = ROCJITSU_CODE_TARGET_GFX1100;
+  EXPECT_FALSE(analyze_waitcnts(program, arch, concrete).supported);
   const auto *cdna5 = default_isa_target_registry().find(arch);
   ASSERT_NE(cdna5, nullptr);
   auto descriptor = *cdna5;
@@ -7860,6 +7871,36 @@ TEST(WaitcheckTest, CodeObjectSelectsConcreteDecoderFromCallerRegistry) {
   const IsaTargetRegistry empty_registry(no_targets);
   options.registry = empty_registry;
   EXPECT_FALSE(analyze_waitcnts(object, arch, options).supported);
+}
+
+TEST(WaitcheckTest, TargetlessCdna5ModeBankWriteIsIncomplete) {
+  std::vector<uint32_t> program;
+  append_inst(program, s_setreg_imm32_b32(hwreg(1, 24, 1), 0x1001));
+  for (uint32_t word : {0xed0680fcu, 0u, 0x0002a800u, // scratch_store_b32 off,v0,off
+                        0xd7610000u, 0x02010205u,     // v_writelane_b32 v0,s5,1
+                        0xbfb00000u})                 // s_endpgm
+    program.push_back(word);
+
+  const auto targetless = analyze_waitcnts(TestCodeObject(program), ROCJITSU_CODE_ARCH_CDNA5);
+  EXPECT_TRUE(targetless.supported) << targetless.analysis_error;
+  EXPECT_FALSE(targetless.complete);
+  EXPECT_NE(targetless.analysis_error.find("concrete GPU target"), std::string::npos);
+  const auto raw_targetless =
+      analyze_waitcnts(std::span<const uint32_t>(program), ROCJITSU_CODE_ARCH_CDNA5);
+  EXPECT_TRUE(raw_targetless.supported) << raw_targetless.analysis_error;
+  EXPECT_FALSE(raw_targetless.complete);
+
+  WaitcheckOptions options;
+  options.concrete_gpu_target = ROCJITSU_CODE_TARGET_GFX1250;
+  const auto gfx1250 = analyze_waitcnts(TestCodeObject(program), ROCJITSU_CODE_ARCH_CDNA5, options);
+  EXPECT_TRUE(gfx1250.supported && gfx1250.complete) << gfx1250.analysis_error;
+  EXPECT_TRUE(gfx1250.diagnostics.empty()) << diagnostic_summary(gfx1250);
+
+  options.concrete_gpu_target = ROCJITSU_CODE_TARGET_GFX1251;
+  const auto gfx1251 = analyze_waitcnts(TestCodeObject(program), ROCJITSU_CODE_ARCH_CDNA5, options);
+  EXPECT_TRUE(gfx1251.supported && gfx1251.complete) << gfx1251.analysis_error;
+  ASSERT_EQ(gfx1251.diagnostics.size(), 1u) << diagnostic_summary(gfx1251);
+  EXPECT_EQ(gfx1251.diagnostics.front().counter, WaitCounterKind::X);
 }
 
 TEST(WaitcheckTest, Gfx1250NopMakesSetVgprMsbAfterModeSetregEffective) {
@@ -8813,6 +8854,7 @@ TEST(WaitcheckTest, Gfx1250PrefetchUsesTheOutstandingTranslationAfterCompanionWa
 
 TEST(WaitcheckTest, Gfx1250PrefetchPartialCompanionLeavesTheYoungerTranslationForX) {
   WaitcheckOptions options;
+  options.concrete_gpu_target = ROCJITSU_CODE_TARGET_GFX1250;
   options.check_counter_parity = true;
   for (bool x_wait : {false, true}) {
     for (unsigned load_count : {0u, 1u, 2u}) {
@@ -9852,11 +9894,17 @@ TEST(WaitcheckTest, TargetlessCdna5UsesConservativeWmmaCompletionWindow) {
       return row.counter == WaitCounterKind::VaVdst && row.reg.index == 42;
     });
   };
-  EXPECT_TRUE(has_hazard(analyze_waitcnts(std::span<const uint32_t>(code),
-                                          ROCJITSU_CODE_ARCH_CDNA5)));
+  EXPECT_TRUE(
+      has_hazard(analyze_waitcnts(std::span<const uint32_t>(code), ROCJITSU_CODE_ARCH_CDNA5)));
   for (const auto [machine, expected] :
        {std::pair{EF_AMDGPU_MACH_AMDGCN_GFX1250, false},
         std::pair{EF_AMDGPU_MACH_AMDGCN_GFX1251, true}}) {
+    WaitcheckOptions options;
+    options.concrete_gpu_target =
+        expected ? ROCJITSU_CODE_TARGET_GFX1251 : ROCJITSU_CODE_TARGET_GFX1250;
+    EXPECT_EQ(has_hazard(analyze_waitcnts(std::span<const uint32_t>(code), ROCJITSU_CODE_ARCH_CDNA5,
+                                          options)),
+              expected);
     const auto image = waitcheck_test::make_gfx_code_object(code, machine, true);
     const AmdGpuCodeObject object(image.data(), image.size());
     EXPECT_EQ(has_hazard(analyze_waitcnts(object, ROCJITSU_CODE_ARCH_CDNA5)), expected);
@@ -10309,6 +10357,7 @@ TEST(WaitcheckTest, Gfx1250OrderedSignedMaskGuardsProveEarlierVaDrain) {
     BoundLoadNoWait,
     RepeatedKernargSameReg,
     RepeatedKernargDifferentReg,
+    SameLoadDifferentBoundWord,
     RepeatedKernargDifferentBytes,
     RepeatedKernargChangedBase,
     RepeatedKernargAlternateBase,
@@ -10387,10 +10436,15 @@ TEST(WaitcheckTest, Gfx1250OrderedSignedMaskGuardsProveEarlierVaDrain) {
       const bool different_register = variation == Variation::RepeatedKernargDifferentReg;
       const uint32_t second_offset =
           variation == Variation::RepeatedKernargDifferentBytes ? 0x118 : 0x110;
-      append_kernarg_bound(different_register ? 70 : 68, second_offset);
-      if (variation != Variation::RepeatedKernargNoSecondDrain)
-        append_inst(code, sopp(71, 0));
-      code.insert(code.end(), {0xd4440004u, different_register ? 0x02022846u : 0x02022844u});
+      if (variation != Variation::SameLoadDifferentBoundWord) {
+        append_kernarg_bound(different_register ? 70 : 68, second_offset);
+        if (variation != Variation::RepeatedKernargNoSecondDrain)
+          append_inst(code, sopp(71, 0));
+      }
+      uint32_t compare_word = different_register ? 0x02022846u : 0x02022844u;
+      if (variation == Variation::SameLoadDifferentBoundWord)
+        compare_word = 0x02022845u;
+      code.insert(code.end(), {0xd4440004u, compare_word});
     } else {
       code.insert(code.end(), {0xd4440004u, 0x02022844u}); // s4 = s68 > v20
     }
@@ -10503,6 +10557,7 @@ TEST(WaitcheckTest, Gfx1250OrderedSignedMaskGuardsProveEarlierVaDrain) {
                                Variation::BoundLoadNoWait,
                                Variation::RepeatedKernargSameReg,
                                Variation::RepeatedKernargDifferentReg,
+                               Variation::SameLoadDifferentBoundWord,
                                Variation::RepeatedKernargDifferentBytes,
                                Variation::RepeatedKernargChangedBase,
                                Variation::RepeatedKernargAlternateBase,

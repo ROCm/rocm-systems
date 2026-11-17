@@ -446,12 +446,34 @@ struct Analyzer : private WaitcheckStateOps {
     if (const auto *arch = registry.find(report.arch)) {
       const auto bound = std::ranges::find(arch->gpu_targets, elf_flags & EF_AMDGPU_MACH,
                                            &IsaGpuTargetDescription::elf_machine);
-      const auto *gpu_target =
-          bound != arch->gpu_targets.end() ? &*bound : registry.find_default_gpu_target(*arch);
+      const auto selected = options.concrete_gpu_target
+                                ? std::ranges::find(arch->gpu_targets, *options.concrete_gpu_target,
+                                                    &IsaGpuTargetDescription::public_id)
+                                : arch->gpu_targets.end();
+      if (options.concrete_gpu_target && selected == arch->gpu_targets.end()) {
+        report_.supported = false;
+        report_.analysis_error = "concrete GPU target does not match waitcheck architecture";
+        return;
+      }
+      if (selected != arch->gpu_targets.end() && (elf_flags & EF_AMDGPU_MACH) != 0 &&
+          selected->elf_machine != (elf_flags & EF_AMDGPU_MACH)) {
+        report_.supported = false;
+        report_.analysis_error = "concrete GPU target conflicts with ELF machine";
+        return;
+      }
+      const IsaGpuTargetDescription *gpu_target = nullptr;
+      if (bound != arch->gpu_targets.end())
+        gpu_target = &*bound;
+      else if (selected != arch->gpu_targets.end())
+        gpu_target = &*selected;
+      else
+        gpu_target = registry.find_default_gpu_target(*arch);
       // A default target can supply a decoder, but its faster completion
       // windows are not evidence for a target-less input.
-      target_ = bound != arch->gpu_targets.end() ? bound->public_id : ROCJITSU_CODE_TARGET_INVALID;
-      setreg_vgpr_msb_fixup_ = gpu_target && gpu_target->capabilities.setreg_vgpr_msb_fixup;
+      if (bound != arch->gpu_targets.end() || selected != arch->gpu_targets.end())
+        target_ = gpu_target->public_id;
+      setreg_vgpr_msb_fixup_ = target_ != ROCJITSU_CODE_TARGET_INVALID && gpu_target &&
+                               gpu_target->capabilities.setreg_vgpr_msb_fixup;
       decoder_ = gpu_target ? Decoder::create(registry, gpu_target->public_id)
                             : Decoder::create(registry, report.arch);
     }
@@ -4821,6 +4843,12 @@ private:
     if ((static_cast<uint32_t>(hwreg->encoding_value()) & 0x3fu) != kHwRegMode)
       return false;
 
+    if (arch == ROCJITSU_CODE_ARCH_CDNA5 && target_ == ROCJITSU_CODE_TARGET_INVALID) {
+      report_.complete = false;
+      if (report_.analysis_error.empty())
+        report_.analysis_error = "CDNA5 MODE bank writes need a concrete GPU target";
+    }
+
     const bool immediate = mnemonic == "s_setreg_imm32_b32" && inst.raw_encoding() &&
                            inst.size() >= 2 * static_cast<int>(sizeof(uint32_t));
     const auto value = immediate ? std::optional{inst.raw_encoding()[1]} : std::nullopt;
@@ -8434,8 +8462,14 @@ private:
       };
       return base_unchanged(*bound_a) && base_unchanged(*bound_b);
     };
-    if (bound_a->view->instruction != bound_b->view->instruction && !same_kernarg_bound())
+    // One wide scalar load writes independent dwords. Matching writer PCs do
+    // not make its low and high result words equal.
+    if (bound_a->view->instruction == bound_b->view->instruction) {
+      if (operands_a->first != operands_b->first)
+        return false;
+    } else if (!same_kernarg_bound()) {
       return false;
+    }
 
     // A scalar load can complete after its instruction definition. Require a
     // full KMCNT drain on every path from each load to its own comparison.

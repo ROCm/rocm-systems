@@ -105,6 +105,13 @@ struct WaitcheckCounterUnderaccountingDiagnostic {
 
 /// @brief Controls for waitcheck analysis.
 struct WaitcheckOptions {
+  /// @brief Concrete GPU for raw words or code objects without an ELF machine.
+  ///
+  /// @details A known ELF machine must agree with this target. Without a
+  /// concrete CDNA5 target, MODE bank writes make the result incomplete because
+  /// gfx1250 and gfx1251 handle those writes differently. A default decoder
+  /// does not establish a concrete target.
+  std::optional<rj_code_target_id_t> concrete_gpu_target = std::nullopt;
   /// @brief Wavefront size when no AMDHSA descriptor supplies one.
   ///
   /// @details Raw streams default to wave64, matching WaitcheckStreamOptions.
@@ -249,7 +256,9 @@ waitcheck_kernels_exact(const AmdGpuCodeObject &code_object);
 ///
 /// @details The stream has no descriptor; options.fallback_wavefront_size selects
 /// wave32 or wave64 and defaults to wave64. Unsupported architectures or wave
-/// sizes return a report with supported=false.
+/// sizes return a report with supported=false. Set options.concrete_gpu_target
+/// for target-specific decoding and completion rules. CDNA5 MODE bank writes
+/// without one leave the result incomplete.
 [[nodiscard]] WaitcheckReport analyze_waitcnts(std::span<const uint32_t> words, rj_code_arch_t arch,
                                                WaitcheckOptions options = {});
 
