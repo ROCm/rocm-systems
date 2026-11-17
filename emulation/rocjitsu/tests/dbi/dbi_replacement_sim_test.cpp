@@ -87,6 +87,14 @@ std::vector<uint8_t> instruction_bytes(std::span<const uint32_t> words) {
 
 class DbiReplacementSim : public ::testing::TestWithParam<ReplacementSimTarget> {
 protected:
+  enum class LoggerOutput { PerLane, Shared };
+  enum class ObservationDefinition { Full, Partial, Unknown, Absent };
+  struct ObservationProgram {
+    std::vector<uint8_t> image;
+    uint64_t early_offset = 0;
+    uint64_t observer_offset = 0;
+  };
+
   void SetUp() override {
     const ReplacementSimTarget &target = GetParam();
     const util::FailureOr<uint32_t> from_v1 = build_v_mov_b32_src(3, 257, target.arch);
@@ -115,6 +123,65 @@ protected:
     ASSERT_TRUE(clobber.succeeded());
     probe_words_.assign(clobber.value().begin(), clobber.value().end());
     probe_words_.push_back(probe_return.value());
+  }
+
+  void make_probe_images(LoggerOutput output, std::vector<uint8_t> &logger_image,
+                         std::vector<uint8_t> &clobber_image) const {
+    const rj_code_arch_t arch = GetParam().arch;
+    const util::FailureOr<uint32_t> address_low = build_s_mov_b32(2, 255, arch);
+    const util::FailureOr<uint32_t> address_high = build_s_mov_b32(3, 128, arch);
+    const util::FailureOr<uint32_t> ret = build_s_setpc_b64(30, arch);
+    ASSERT_TRUE(address_low.succeeded());
+    ASSERT_TRUE(address_high.succeeded());
+    ASSERT_TRUE(ret.succeeded());
+    std::vector<uint32_t> words = {address_low.value(), static_cast<uint32_t>(kOutputAddress),
+                                   address_high.value()};
+    if (output == LoggerOutput::Shared) {
+      // One v1 -> v0 argument avoids a cycle or a v1 clobber at the observer.
+      const util::FailureOr<uint32_t> zero_offset =
+          build_v_mov_b32_src(2, scalar_positive_inline_u32(0), arch);
+      ASSERT_TRUE(zero_offset.succeeded());
+      words.push_back(zero_offset.value());
+    }
+    const util::FailureOr<std::vector<uint32_t>> store =
+        test::build_global_store_dword(0, output == LoggerOutput::PerLane ? 1 : 2, 2, 0, arch);
+    ASSERT_TRUE(store.succeeded());
+    words.insert(words.end(), store.value().begin(), store.value().end());
+    words.push_back(ret.value());
+    logger_image = test::make_amdgpu_probe_elf("replacement_probe", words, GetParam().machine);
+    clobber_image =
+        test::make_amdgpu_probe_elf("replacement_probe", probe_words_, GetParam().machine);
+  }
+
+  void make_observation_program(ObservationDefinition definition, uint32_t private_bytes,
+                                ObservationProgram &program, bool interior_entry = false) const {
+    const rj_code_arch_t arch = GetParam().arch;
+    const util::FailureOr<uint32_t> nop = build_s_nop(0, arch);
+    const util::FailureOr<uint32_t> end = build_s_endpgm(arch);
+    ASSERT_TRUE(nop.succeeded());
+    ASSERT_TRUE(end.succeeded());
+    std::vector<uint32_t> words = setup_;
+    program.early_offset = words.size() * sizeof(uint32_t);
+    words.push_back(nop.value());
+    if (definition == ObservationDefinition::Full || definition == ObservationDefinition::Partial) {
+      const util::FailureOr<uint16_t> exec = scalar_operand_exec_lo(arch);
+      const util::FailureOr<uint16_t> all_ones = scalar_inline_neg_one(arch);
+      ASSERT_TRUE(exec.succeeded());
+      ASSERT_TRUE(all_ones.succeeded());
+      const util::FailureOr<uint32_t> set_exec =
+          build_s_mov_b64(exec.value(),
+                          definition == ObservationDefinition::Full ? all_ones.value()
+                                                                    : scalar_positive_inline_u32(1),
+                          arch);
+      ASSERT_TRUE(set_exec.succeeded());
+      words.push_back(set_exec.value());
+    }
+    if (definition != ObservationDefinition::Absent)
+      words.push_back(test::make_mov_vgpr_inline(1, kReplacementInput));
+    program.observer_offset = words.size() * sizeof(uint32_t);
+    words.push_back(nop.value());
+    words.push_back(end.value());
+    make_image(words, program.image, private_bytes, interior_entry ? program.early_offset : 0);
   }
 
   void finish_kernel(std::vector<uint32_t> &words) const {
@@ -179,17 +246,30 @@ protected:
     }
   }
 
-  void without_v1_restore(std::vector<uint32_t> &words) const {
-    const util::FailureOr<std::vector<uint32_t>> load =
-        build_scratch_load_dword(1, kInitialPrivateBytes, GetParam().arch);
-    ASSERT_TRUE(load.succeeded());
-    const std::vector<uint32_t>::iterator restore =
-        std::ranges::search(words, load.value()).begin();
-    ASSERT_NE(restore, words.end()) << "replacement-only input v1 was not preserved";
-    const util::FailureOr<uint32_t> nop = build_s_nop(0, GetParam().arch);
-    ASSERT_TRUE(nop.succeeded());
-    for (size_t index = 0; index < load.value().size(); ++index)
-      *(restore + static_cast<std::ptrdiff_t>(index)) = nop.value();
+  void without_v1_restore(std::span<uint32_t> words,
+                          uint32_t private_bytes = kInitialPrivateBytes + sizeof(uint32_t),
+                          bool verify_store = false) const {
+    for (uint32_t offset = kInitialPrivateBytes; offset < private_bytes;
+         offset += sizeof(uint32_t)) {
+      const util::FailureOr<std::vector<uint32_t>> load =
+          build_scratch_load_dword(1, offset, GetParam().arch);
+      ASSERT_TRUE(load.succeeded());
+      const std::span<uint32_t>::iterator restore =
+          std::ranges::search(words, load.value()).begin();
+      if (restore == words.end())
+        continue;
+      if (verify_store) {
+        const util::FailureOr<std::vector<uint32_t>> store =
+            build_scratch_store_dword(1, offset, GetParam().arch);
+        ASSERT_TRUE(store.succeeded());
+        ASSERT_NE(std::ranges::search(words, store.value()).begin(), words.end());
+      }
+      const util::FailureOr<uint32_t> nop = build_s_nop(0, GetParam().arch);
+      ASSERT_TRUE(nop.succeeded());
+      std::fill_n(restore, load.value().size(), nop.value());
+      return;
+    }
+    FAIL() << "v1 scratch preservation was not found in the selected instruction range";
   }
 
   void without_site_v1_restore(std::vector<uint32_t> &words, const InstrumentedSite &site,
@@ -199,26 +279,8 @@ protected:
     const size_t begin = site.instrumentation_offset / sizeof(uint32_t);
     const size_t size = site.instrumentation_size / sizeof(uint32_t);
     ASSERT_LE(begin + size, words.size());
-    std::span<uint32_t> envelope(words.data() + begin, size);
-    for (uint32_t offset = kInitialPrivateBytes; offset < private_bytes;
-         offset += sizeof(uint32_t)) {
-      const util::FailureOr<std::vector<uint32_t>> load =
-          build_scratch_load_dword(1, offset, GetParam().arch);
-      const util::FailureOr<std::vector<uint32_t>> store =
-          build_scratch_store_dword(1, offset, GetParam().arch);
-      ASSERT_TRUE(load.succeeded());
-      ASSERT_TRUE(store.succeeded());
-      const std::span<uint32_t>::iterator restore =
-          std::ranges::search(envelope, load.value()).begin();
-      if (restore == envelope.end())
-        continue;
-      ASSERT_NE(std::ranges::search(envelope, store.value()).begin(), envelope.end());
-      const util::FailureOr<uint32_t> nop = build_s_nop(0, GetParam().arch);
-      ASSERT_TRUE(nop.succeeded());
-      std::fill_n(restore, load.value().size(), nop.value());
-      return;
-    }
-    FAIL() << "the early probe did not preserve its later observer's v1";
+    ASSERT_NO_FATAL_FAILURE(
+        without_v1_restore(std::span(words).subspan(begin, size), private_bytes, true));
   }
 
   std::vector<uint32_t> setup_;
@@ -324,29 +386,15 @@ TEST_P(DbiReplacementSim, LaterProbeArgumentsSurviveDeletingTheirOnlyGuestRead) 
   const ReplacementSimTarget &target = GetParam();
   const util::FailureOr<uint32_t> nop = build_s_nop(0, target.arch);
   const util::FailureOr<uint32_t> end = build_s_endpgm(target.arch);
-  const util::FailureOr<uint32_t> ret = build_s_setpc_b64(30, target.arch);
-  const util::FailureOr<uint32_t> address_low = build_s_mov_b32(2, 255, target.arch);
-  const util::FailureOr<uint32_t> address_high = build_s_mov_b32(3, 128, target.arch);
   const util::FailureOr<uint32_t> read_offset = build_v_mov_b32_src(3, 256, target.arch);
-  const util::FailureOr<std::vector<uint32_t>> store =
-      test::build_global_store_dword(0, 1, 2, 0, target.arch);
   ASSERT_TRUE(nop.succeeded());
   ASSERT_TRUE(end.succeeded());
-  ASSERT_TRUE(ret.succeeded());
-  ASSERT_TRUE(address_low.succeeded());
-  ASSERT_TRUE(address_high.succeeded());
   ASSERT_TRUE(read_offset.succeeded());
-  ASSERT_TRUE(store.succeeded());
   // The observer receives the value in v0 and the lane's byte offset in v1.
   // Only the probe writes output, so guest execution cannot hide a bad capture.
-  std::vector<uint32_t> logger_words = {address_low.value(), static_cast<uint32_t>(kOutputAddress),
-                                        address_high.value()};
-  logger_words.insert(logger_words.end(), store.value().begin(), store.value().end());
-  logger_words.push_back(ret.value());
-  const std::vector<uint8_t> logger_image =
-      test::make_amdgpu_probe_elf("replacement_probe", logger_words, target.machine);
-  const std::vector<uint8_t> clobber_image =
-      test::make_amdgpu_probe_elf("replacement_probe", probe_words_, target.machine);
+  std::vector<uint8_t> logger_image;
+  std::vector<uint8_t> clobber_image;
+  ASSERT_NO_FATAL_FAILURE(make_probe_images(LoggerOutput::PerLane, logger_image, clobber_image));
   const AmdGpuCodeObject logger(logger_image.data(), logger_image.size());
   const AmdGpuCodeObject clobber(clobber_image.data(), clobber_image.size());
   ASSERT_TRUE(logger.is_valid());
@@ -402,7 +450,7 @@ TEST_P(DbiReplacementSim, LaterProbeArgumentsSurviveDeletingTheirOnlyGuestRead) 
     ASSERT_EQ(result.sites.size(), 2u);
     ASSERT_EQ(result.patches.size(), 2u);
     EXPECT_TRUE(std::ranges::all_of(result.patches, &InstrumentationPatch::is_probe_call));
-    EXPECT_EQ(image, pristine);
+    ASSERT_EQ(source.image_size(), pristine.size());
     EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
     const AmdGpuCodeObject candidate(result.elf_bytes.data(), result.elf_bytes.size());
     ASSERT_TRUE(candidate.is_valid());
@@ -421,106 +469,44 @@ TEST_P(DbiReplacementSim, LaterProbeArgumentsSurviveDeletingTheirOnlyGuestRead) 
   }
 }
 
-TEST_P(DbiReplacementSim, FullLaneRedefinitionKeepsObservationOnlyBatchesScratchFree) {
-  const ReplacementSimTarget &target = GetParam();
-  const util::FailureOr<uint16_t> exec = scalar_operand_exec_lo(target.arch);
-  const util::FailureOr<uint16_t> all_ones = scalar_inline_neg_one(target.arch);
-  ASSERT_TRUE(exec.succeeded());
-  ASSERT_TRUE(all_ones.succeeded());
-  const util::FailureOr<uint32_t> full_exec =
-      build_s_mov_b64(exec.value(), all_ones.value(), target.arch);
-  const util::FailureOr<uint32_t> partial_exec =
-      build_s_mov_b64(exec.value(), scalar_positive_inline_u32(1), target.arch);
-  const util::FailureOr<uint32_t> nop = build_s_nop(0, target.arch);
-  const util::FailureOr<uint32_t> end = build_s_endpgm(target.arch);
-  const util::FailureOr<uint32_t> ret = build_s_setpc_b64(30, target.arch);
-  const util::FailureOr<uint32_t> address_low = build_s_mov_b32(2, 255, target.arch);
-  const util::FailureOr<uint32_t> address_high = build_s_mov_b32(3, 128, target.arch);
-  const util::FailureOr<uint32_t> zero_offset =
-      build_v_mov_b32_src(2, scalar_positive_inline_u32(0), target.arch);
-  const util::FailureOr<std::vector<uint32_t>> store =
-      test::build_global_store_dword(0, 2, 2, 0, target.arch);
-  ASSERT_TRUE(full_exec.succeeded());
-  ASSERT_TRUE(partial_exec.succeeded());
-  ASSERT_TRUE(nop.succeeded());
-  ASSERT_TRUE(end.succeeded());
-  ASSERT_TRUE(ret.succeeded());
-  ASSERT_TRUE(address_low.succeeded());
-  ASSERT_TRUE(address_high.succeeded());
-  ASSERT_TRUE(zero_offset.succeeded());
-  ASSERT_TRUE(store.succeeded());
-  // One source v1 -> argument v0 needs no copy cycle or preservation at the
-  // observer itself. All lanes store the same value to this probe-owned dword.
-  std::vector<uint32_t> logger_words = {address_low.value(), static_cast<uint32_t>(kOutputAddress),
-                                        address_high.value(), zero_offset.value()};
-  logger_words.insert(logger_words.end(), store.value().begin(), store.value().end());
-  logger_words.push_back(ret.value());
-  const std::vector<uint8_t> logger_image =
-      test::make_amdgpu_probe_elf("replacement_probe", logger_words, target.machine);
-  const std::vector<uint8_t> clobber_image =
-      test::make_amdgpu_probe_elf("replacement_probe", probe_words_, target.machine);
+TEST_P(DbiReplacementSim, ObservationLivenessRespectsDefinitionMasksAndScratchAvailability) {
+  std::vector<uint8_t> logger_image;
+  std::vector<uint8_t> clobber_image;
+  ASSERT_NO_FATAL_FAILURE(make_probe_images(LoggerOutput::Shared, logger_image, clobber_image));
   const AmdGpuCodeObject logger(logger_image.data(), logger_image.size());
   const AmdGpuCodeObject clobber(clobber_image.data(), clobber_image.size());
   ASSERT_TRUE(logger.is_valid());
   ASSERT_TRUE(clobber.is_valid());
-  enum class DefinitionMask { Full, Partial, Unknown };
   struct Case {
-    DefinitionMask mask;
+    ObservationDefinition definition;
     uint32_t private_bytes;
-    bool warm_liveness = false;
-    bool interior_entry = false;
   };
-  constexpr std::array<Case, 6> cases = {
-      Case{.mask = DefinitionMask::Full, .private_bytes = 0},
-      Case{.mask = DefinitionMask::Full, .private_bytes = kInitialPrivateBytes},
-      Case{.mask = DefinitionMask::Partial, .private_bytes = 0},
-      Case{.mask = DefinitionMask::Unknown, .private_bytes = 0},
-      Case{.mask = DefinitionMask::Unknown,
-           .private_bytes = kInitialPrivateBytes,
-           .warm_liveness = true},
-      Case{.mask = DefinitionMask::Full, .private_bytes = 0, .interior_entry = true}};
+  constexpr std::array<Case, 4> cases = {
+      Case{.definition = ObservationDefinition::Full, .private_bytes = 0},
+      Case{.definition = ObservationDefinition::Full, .private_bytes = kInitialPrivateBytes},
+      Case{.definition = ObservationDefinition::Partial, .private_bytes = 0},
+      Case{.definition = ObservationDefinition::Unknown, .private_bytes = 0}};
   for (const Case &test_case : cases) {
-    SCOPED_TRACE(static_cast<int>(test_case.mask));
+    SCOPED_TRACE(static_cast<int>(test_case.definition));
     SCOPED_TRACE(test_case.private_bytes);
-    SCOPED_TRACE(test_case.warm_liveness);
-    SCOPED_TRACE(test_case.interior_entry);
-    std::vector<uint32_t> words = setup_;
-    const uint64_t early_offset = words.size() * sizeof(uint32_t);
-    words.push_back(nop.value());
-    if (test_case.mask != DefinitionMask::Unknown)
-      words.push_back(test_case.mask == DefinitionMask::Full ? full_exec.value()
-                                                             : partial_exec.value());
-    if (!test_case.warm_liveness)
-      words.push_back(test::make_mov_vgpr_inline(1, kReplacementInput));
-    const uint64_t observer_offset = words.size() * sizeof(uint32_t);
-    words.push_back(nop.value());
-    words.push_back(end.value());
-    std::vector<uint8_t> image;
-    ASSERT_NO_FATAL_FAILURE(make_image(words, image, test_case.private_bytes,
-                                       test_case.interior_entry ? early_offset : 0));
-    const std::vector<uint8_t> pristine = image;
-    const AmdGpuCodeObject source(image.data(), image.size());
+    ObservationProgram program;
+    ASSERT_NO_FATAL_FAILURE(
+        make_observation_program(test_case.definition, test_case.private_bytes, program));
+    const std::vector<uint8_t> pristine = program.image;
+    const AmdGpuCodeObject source(program.image.data(), program.image.size());
     ASSERT_TRUE(source.is_valid());
-    Instrumentor instrumentor(source, target.arch);
-    instrumentor.add_point(probe_at(early_offset, clobber));
-    if (test_case.warm_liveness) {
-      // No guest read or replacement can hide a stale cache here. The later
-      // observation must invalidate analysis computed for this sole probe.
-      const Instrumentor::ValidationResult warmed = instrumentor.validate_points();
-      ASSERT_TRUE(warmed.errors.empty()) << warmed.errors.front();
-      ASSERT_EQ(warmed.sites.size(), 1u);
-    }
-    InstrumentationPoint observer = probe_at(observer_offset, logger);
+    Instrumentor instrumentor(source, GetParam().arch);
+    instrumentor.add_point(probe_at(program.early_offset, clobber));
+    InstrumentationPoint observer = probe_at(program.observer_offset, logger);
     observer.probe_args = {probe_arg_vgpr(1)};
     instrumentor.add_point(std::move(observer));
     const Instrumentor::ValidationResult validated = instrumentor.validate_points();
     ASSERT_TRUE(validated.errors.empty()) << validated.errors.front();
     ASSERT_EQ(validated.sites.size(), 2u);
     const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
-    EXPECT_EQ(image, pristine);
+    ASSERT_EQ(source.image_size(), pristine.size());
     EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
-    if ((test_case.mask != DefinitionMask::Full && !test_case.warm_liveness) ||
-        test_case.interior_entry) {
+    if (test_case.definition != ObservationDefinition::Full) {
       ASSERT_FALSE(result.errors.empty());
       EXPECT_TRUE(std::ranges::any_of(result.errors, [](const std::string &error) {
         return error.find("fixed scratch to spill into") != std::string::npos;
@@ -538,21 +524,91 @@ TEST_P(DbiReplacementSim, FullLaneRedefinitionKeepsObservationOnlyBatchesScratch
     const AmdGpuCodeObject candidate(result.elf_bytes.data(), result.elf_bytes.size());
     ASSERT_TRUE(candidate.is_valid());
     const uint32_t scratch = test::patched_private_segment_size(candidate);
-    const std::vector<uint32_t> patched = test::section_words(candidate, ".text");
-    if (test_case.warm_liveness)
-      EXPECT_GT(scratch, test_case.private_bytes);
-    else
-      EXPECT_EQ(scratch, test_case.private_bytes);
-    ASSERT_NO_FATAL_FAILURE(expect_memory(patched, scratch, kReplacementInput, 1));
-    if (test_case.warm_liveness) {
-      const std::vector<InstrumentedSite>::const_iterator early_site =
-          std::ranges::find(result.sites, early_offset, &InstrumentedSite::original_offset);
-      ASSERT_NE(early_site, result.sites.end());
-      std::vector<uint32_t> missing_restore = patched;
-      ASSERT_NO_FATAL_FAILURE(without_site_v1_restore(missing_restore, *early_site, scratch));
-      ASSERT_NO_FATAL_FAILURE(expect_memory(missing_restore, scratch, kProbeClobber, 1));
-    }
+    EXPECT_EQ(scratch, test_case.private_bytes);
+    ASSERT_NO_FATAL_FAILURE(
+        expect_memory(test::section_words(candidate, ".text"), scratch, kReplacementInput, 1));
   }
+}
+
+TEST_P(DbiReplacementSim, AddingALaterObserverInvalidatesCachedLiveness) {
+  ObservationProgram program;
+  ASSERT_NO_FATAL_FAILURE(
+      make_observation_program(ObservationDefinition::Absent, kInitialPrivateBytes, program));
+  const std::vector<uint8_t> pristine = program.image;
+  const AmdGpuCodeObject source(program.image.data(), program.image.size());
+  std::vector<uint8_t> logger_image;
+  std::vector<uint8_t> clobber_image;
+  ASSERT_NO_FATAL_FAILURE(make_probe_images(LoggerOutput::Shared, logger_image, clobber_image));
+  const AmdGpuCodeObject logger(logger_image.data(), logger_image.size());
+  const AmdGpuCodeObject clobber(clobber_image.data(), clobber_image.size());
+  ASSERT_TRUE(source.is_valid());
+  ASSERT_TRUE(logger.is_valid());
+  ASSERT_TRUE(clobber.is_valid());
+  Instrumentor instrumentor(source, GetParam().arch);
+  instrumentor.add_point(probe_at(program.early_offset, clobber));
+  // No replacement or later guest definition can hide a stale analysis cache.
+  const Instrumentor::ValidationResult warmed = instrumentor.validate_points();
+  ASSERT_TRUE(warmed.errors.empty()) << warmed.errors.front();
+  ASSERT_EQ(warmed.sites.size(), 1u);
+  InstrumentationPoint observer = probe_at(program.observer_offset, logger);
+  observer.probe_args = {probe_arg_vgpr(1)};
+  instrumentor.add_point(std::move(observer));
+  const Instrumentor::ValidationResult validated = instrumentor.validate_points();
+  ASSERT_TRUE(validated.errors.empty()) << validated.errors.front();
+  ASSERT_EQ(validated.sites.size(), 2u);
+  const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
+  ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+  ASSERT_EQ(result.sites.size(), 2u);
+  ASSERT_EQ(result.patches.size(), 2u);
+  EXPECT_TRUE(std::ranges::all_of(result.sites, [](const InstrumentedSite &site) {
+    return site.kind == InstrumentationKind::BeforeInst;
+  }));
+  ASSERT_EQ(source.image_size(), pristine.size());
+  EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
+  const AmdGpuCodeObject candidate(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(candidate.is_valid());
+  const uint32_t scratch = test::patched_private_segment_size(candidate);
+  EXPECT_GT(scratch, kInitialPrivateBytes);
+  const std::vector<uint32_t> patched = test::section_words(candidate, ".text");
+  ASSERT_NO_FATAL_FAILURE(expect_memory(patched, scratch, kReplacementInput, 1));
+  const std::vector<InstrumentedSite>::const_iterator early_site =
+      std::ranges::find(result.sites, program.early_offset, &InstrumentedSite::original_offset);
+  ASSERT_NE(early_site, result.sites.end());
+  std::vector<uint32_t> missing_restore = patched;
+  ASSERT_NO_FATAL_FAILURE(without_site_v1_restore(missing_restore, *early_site, scratch));
+  ASSERT_NO_FATAL_FAILURE(expect_memory(missing_restore, scratch, kProbeClobber, 1));
+}
+
+TEST_P(DbiReplacementSim, InteriorDescriptorEntryKeepsObservationExecAnalysisConservative) {
+  ObservationProgram program;
+  ASSERT_NO_FATAL_FAILURE(make_observation_program(ObservationDefinition::Full, 0, program, true));
+  const std::vector<uint8_t> pristine = program.image;
+  const AmdGpuCodeObject source(program.image.data(), program.image.size());
+  std::vector<uint8_t> logger_image;
+  std::vector<uint8_t> clobber_image;
+  ASSERT_NO_FATAL_FAILURE(make_probe_images(LoggerOutput::Shared, logger_image, clobber_image));
+  const AmdGpuCodeObject logger(logger_image.data(), logger_image.size());
+  const AmdGpuCodeObject clobber(clobber_image.data(), clobber_image.size());
+  ASSERT_TRUE(source.is_valid());
+  ASSERT_TRUE(logger.is_valid());
+  ASSERT_TRUE(clobber.is_valid());
+  Instrumentor instrumentor(source, GetParam().arch);
+  instrumentor.add_point(probe_at(program.early_offset, clobber));
+  InstrumentationPoint observer = probe_at(program.observer_offset, logger);
+  observer.probe_args = {probe_arg_vgpr(1)};
+  instrumentor.add_point(std::move(observer));
+  const Instrumentor::ValidationResult validated = instrumentor.validate_points();
+  ASSERT_TRUE(validated.errors.empty()) << validated.errors.front();
+  ASSERT_EQ(validated.sites.size(), 2u);
+  const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_TRUE(std::ranges::any_of(result.errors, [](const std::string &error) {
+    return error.find("fixed scratch to spill into") != std::string::npos;
+  }));
+  EXPECT_TRUE(result.elf_bytes.empty());
+  EXPECT_TRUE(result.sites.empty());
+  ASSERT_EQ(source.image_size(), pristine.size());
+  EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
 }
 
 TEST_P(DbiReplacementSim, EmptyReplacementRemovesTheOriginalEffect) {
