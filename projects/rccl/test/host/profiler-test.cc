@@ -2266,17 +2266,39 @@ TEST_F(ProfilerThreadMicrotest, PostPlanWork_P2pOutsideAPair_BumpsPerTask) {
   EXPECT_EQ(OpsOn(comm_.get(), 0), 5u);
 }
 
-// Only channels below 64 are asserted: the post loop runs to MAXCHANNELS but shifts a 64-bit mask, which is
-// undefined for channels >= 64.
-TEST_F(ProfilerThreadMicrotest, PostPlanWork_P2pOnChannels0And63_BumpsExactlyThose) {
+// The 64-bit mask must not alias onto channels 64 and up (MAXCHANNELS is 256 or 512).
+TEST_F(ProfilerThreadMicrotest, PostPlanWork_P2pOnChannels0And63_BumpsExactlyThoseOfAllChannels) {
+  static_assert(MAXCHANNELS > 64, "the aliasing channels must exist");
   Load(ncclProfileKernelCh);
   CreateThread(comm_.get());
   ncclTaskP2p* t = AddP2p(ncclProfileKernelCh);
   t->channelMask = 0x1 | (1ull << 63);
   ASSERT_EQ(ncclSuccess, ncclProfilerPostPlanWork(comm_.get(), plan_.get()));
-  for (int c = 0; c < 64; c++) EXPECT_EQ(comm_->profiler.workCounter[c], c == 0 || c == 63 ? 1u : 0u) << c;
+  for (int c = 0; c < MAXCHANNELS; c++)
+    EXPECT_EQ(comm_->profiler.workCounter[c], c == 0 || c == 63 ? 1u : 0u) << c;
+  EXPECT_EQ(Inflight(comm_.get()), 2u);
   EXPECT_EQ(OpsOn(comm_.get(), 0), 1u);
   EXPECT_EQ(OpsOn(comm_.get(), 63), 1u);
+}
+
+TEST_F(ProfilerThreadMicrotest, PostPlanWork_P2pPairOnAll64MaskChannels_PostsNothingPastThem) {
+  Load(ncclProfileKernelCh);
+  CreateThread(comm_.get());
+  ncclTaskP2p* send = AddP2p(ncclProfileKernelCh);
+  send->p2pPairId = 1;
+  send->channelMask = 0x5555555555555555ull;
+  ncclTaskP2p* recv = AddP2p(ncclProfileKernelCh);
+  recv->p2pPairId = 1;
+  recv->channelMask = ~0ull;
+  ASSERT_EQ(ncclSuccess, ncclProfilerPostPlanWork(comm_.get(), plan_.get()));
+  for (int c = 0; c < MAXCHANNELS; c++) EXPECT_EQ(comm_->profiler.workCounter[c], c < 64 ? 1u : 0u) << c;
+  EXPECT_EQ(Inflight(comm_.get()), 96u);
+  std::vector<size_t> opsPerChannel(MAXCHANNELS);
+  WithIdleThread(comm_.get(), [&](ncclProfilerThread* pt) {
+    for (ncclProfilerWorkOp* l : {pt->pending, pt->active})
+      for (ncclProfilerWorkOp* op = l; op; op = op->next) opsPerChannel[op->channelId]++;
+  });
+  for (int c = 0; c < MAXCHANNELS; c++) EXPECT_EQ(opsPerChannel[c], c >= 64 ? 0u : c % 2 ? 1u : 2u) << c;
 }
 
 TEST_F(ProfilerThreadMicrotest, ReserveSymCounters_WritesTheNextSymCounterPerPlanChannel) {
