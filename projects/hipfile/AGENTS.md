@@ -624,7 +624,7 @@ Shell scripts are bash, not POSIX sh: start them with `#!/usr/bin/env bash`
   CI: [hipfile-cmakelint.yml](../../.github/workflows/hipfile-cmakelint.yml),
   when a CMake file, `.cmakelintrc`, or the workflow file changes.
 - Use modern, target-based CMake, and keep to the minimum CMake version in
-  the top-level `CMakeLists.txt` (3.21); hipFile hasn't moved to CMake 4.
+  the top-level `CMakeLists.txt` (3.25.2); hipFile hasn't moved to CMake 4.
 
 ### Python
 

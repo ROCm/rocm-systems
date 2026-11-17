@@ -203,6 +203,172 @@ void insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
   return file_offset <= limit && size <= limit - file_offset;
 }
 
+bool load_mappings_preserve_text(std::span<const Elf64_Phdr> segments, size_t image_size,
+                                 uint64_t text_offset, uint64_t text_vaddr, uint64_t text_size) {
+  if (!image_contains_range(image_size, text_offset, text_size) ||
+      text_size > std::numeric_limits<uint64_t>::max() - text_vaddr)
+    return false;
+  const uint64_t text_end = text_vaddr + text_size;
+  bool has_load = false;
+  bool has_full_backing = false;
+  for (const Elf64_Phdr &segment : segments) {
+    if (segment.p_type != PT_LOAD)
+      continue;
+    has_load = true;
+    if ((segment.p_filesz != 0 &&
+         !image_contains_range(image_size, segment.p_offset, segment.p_filesz)) ||
+        segment.p_filesz > segment.p_memsz ||
+        segment.p_memsz > std::numeric_limits<uint64_t>::max() - segment.p_vaddr)
+      return false;
+    const uint64_t overlap_begin = std::max(text_vaddr, segment.p_vaddr);
+    const uint64_t overlap_end = std::min(text_end, segment.p_vaddr + segment.p_memsz);
+    if (overlap_begin >= overlap_end)
+      continue;
+    // A distinct backing or zero-fill range must not acquire executable bytes.
+    if (!elf_load_maps_file_range(segment, text_offset + (overlap_begin - text_vaddr),
+                                  overlap_begin, overlap_end - overlap_begin))
+      return false;
+    has_full_backing |= overlap_begin == text_vaddr && overlap_end == text_end;
+  }
+  // Every LOAD owning the insertion grows by the complete padded delta, so a
+  // valid owner supplies the entire appended range. Preserve section-only use.
+  return !has_load || has_full_backing;
+}
+
+bool load_extent_is_valid(const Elf64_Phdr &segment, size_t image_size) {
+  return (segment.p_filesz == 0 ||
+          image_contains_range(image_size, segment.p_offset, segment.p_filesz)) &&
+         segment.p_filesz <= segment.p_memsz &&
+         segment.p_memsz <= std::numeric_limits<uint64_t>::max() - segment.p_vaddr;
+}
+
+bool rocr_load_extents_fit_allocation(std::span<const Elf64_Phdr> segments, size_t image_size) {
+  const Elf64_Phdr *first = nullptr;
+  const Elf64_Phdr *last = nullptr;
+  for (const Elf64_Phdr &segment : segments) {
+    if (segment.p_type != PT_LOAD)
+      continue;
+    if (!load_extent_is_valid(segment, image_size))
+      return false;
+    if (first == nullptr)
+      first = &segment;
+    last = &segment;
+  }
+  if (first == nullptr)
+    return true;
+  // ROCr LoadSizeV2 uses the last LOAD's end, not the maximum segment end.
+  // LoadSegmentV2 bounds each memory extent relative to the first LOAD's VA.
+  const uint64_t allocation_size = last->p_vaddr + last->p_memsz;
+  for (const Elf64_Phdr &segment : segments) {
+    if (segment.p_type != PT_LOAD)
+      continue;
+    if (segment.p_vaddr < first->p_vaddr)
+      return false;
+    const uint64_t offset = segment.p_vaddr - first->p_vaddr;
+    if (offset > allocation_size || segment.p_memsz > allocation_size - offset)
+      return false;
+  }
+  return true;
+}
+
+bool section_load_backing_is_preserved(std::span<const Elf64_Shdr> original_sections,
+                                       std::span<const Elf64_Shdr> sections,
+                                       std::span<const Elf64_Phdr> original_segments,
+                                       std::span<const Elf64_Phdr> segments,
+                                       size_t original_image_size, size_t image_size,
+                                       size_t text_index) {
+  if (original_sections.size() != sections.size() || original_segments.size() != segments.size())
+    return false;
+  for (size_t index = 0; index < segments.size(); ++index) {
+    if (original_segments[index].p_type == PT_LOAD &&
+        (segments[index].p_type != PT_LOAD ||
+         !load_extent_is_valid(original_segments[index], original_image_size) ||
+         !load_extent_is_valid(segments[index], image_size)))
+      return false;
+  }
+  for (size_t index = 0; index < original_sections.size(); ++index) {
+    const Elf64_Shdr &original = original_sections[index];
+    const Elf64_Shdr &section = sections[index];
+    if (index == text_index || original.sh_type == SHT_NULL ||
+        (original.sh_flags & SHF_ALLOC) == 0 || original.sh_size == 0)
+      continue;
+    const bool zero_fill = original.sh_type == SHT_NOBITS;
+    if (section.sh_size != original.sh_size ||
+        original.sh_size > std::numeric_limits<uint64_t>::max() - original.sh_addr ||
+        section.sh_size > std::numeric_limits<uint64_t>::max() - section.sh_addr ||
+        (!zero_fill &&
+         (!image_contains_range(original_image_size, original.sh_offset, original.sh_size) ||
+          !image_contains_range(image_size, section.sh_offset, section.sh_size))))
+      return false;
+    for (size_t segment_index = 0; segment_index < original_segments.size(); ++segment_index) {
+      const Elf64_Phdr &old_load = original_segments[segment_index];
+      if (old_load.p_type != PT_LOAD)
+        continue;
+      const uint64_t load_begin = old_load.p_vaddr + (zero_fill ? old_load.p_filesz : 0);
+      const uint64_t load_end =
+          old_load.p_vaddr + (zero_fill ? old_load.p_memsz : old_load.p_filesz);
+      const uint64_t begin = std::max(original.sh_addr, load_begin);
+      const uint64_t end = std::min(original.sh_addr + original.sh_size, load_end);
+      if (begin >= end)
+        continue;
+      const uint64_t section_offset = begin - original.sh_addr;
+      const uint64_t size = end - begin;
+      if (!zero_fill &&
+          !elf_load_maps_file_range(old_load, original.sh_offset + section_offset, begin, size))
+        return false;
+      const Elf64_Phdr &new_load = segments[segment_index];
+      const uint64_t target = section.sh_addr + section_offset;
+      if (zero_fill) {
+        if (target < new_load.p_vaddr)
+          return false;
+        const uint64_t offset = target - new_load.p_vaddr;
+        if (offset < new_load.p_filesz || offset > new_load.p_memsz ||
+            size > new_load.p_memsz - offset)
+          return false;
+        for (const Elf64_Phdr &other : segments) {
+          if (other.p_type == PT_LOAD && other.p_filesz != 0 &&
+              target < other.p_vaddr + other.p_filesz && other.p_vaddr < target + size)
+            return false;
+        }
+      } else if (!elf_load_maps_file_range(new_load, section.sh_offset + section_offset, target,
+                                           size) ||
+                 !elf_load_file_mappings_match_range(segments, section.sh_offset + section_offset,
+                                                     target, size)) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+bool has_dynamic_write_within_text(std::span<const uint8_t> image, const Elf64_Ehdr &header,
+                                   std::span<const Elf64_Shdr> sections, uint64_t text_vaddr,
+                                   uint64_t text_size) {
+  for (const Elf64_Shdr &relocs : sections) {
+    if (classify_rocr_relocation_section(header, sections, relocs) !=
+            RocrRelocationSectionMode::Dynamic ||
+        relocs.sh_entsize != sizeof(Elf64_Rela) ||
+        !image_contains_range(image.size(), relocs.sh_offset, relocs.sh_size))
+      continue;
+    const size_t count = relocs.sh_size / sizeof(Elf64_Rela);
+    for (size_t index = 0; index < count; ++index) {
+      Elf64_Rela relocation = {};
+      std::memcpy(&relocation, image.data() + relocs.sh_offset + index * sizeof(relocation),
+                  sizeof(relocation));
+      const std::optional<uint64_t> write_size =
+          rocr_dynamic_relocation_write_size(elf_reloc_type(relocation.r_info));
+      if (!write_size)
+        continue;
+      const uint64_t place = relocation.r_offset;
+      if (*write_size > std::numeric_limits<uint64_t>::max() - place ||
+          (place >= text_vaddr && place - text_vaddr < text_size) ||
+          (place < text_vaddr && text_vaddr - place < *write_size))
+        return true;
+    }
+  }
+  return false;
+}
+
 /// @brief Read a kernel descriptor struct out of the in-memory image.
 ///
 /// @returns nullopt if the descriptor does not fit within the image. Shared by
@@ -1081,17 +1247,18 @@ bool CodeObjectPatcher::has_relocations_within_text() const {
   if (image_.size() < sizeof(Elf64_Ehdr))
     return false;
 
-  auto header = *reinterpret_cast<const Elf64_Ehdr *>(image_.data());
-  const auto shdrs = read_section_headers(image_, header);
-  const auto text_index =
+  Elf64_Ehdr header = {};
+  std::memcpy(&header, image_.data(), sizeof(header));
+  const std::vector<Elf64_Shdr> shdrs = read_section_headers(image_, header);
+  const std::optional<size_t> text_index =
       validated_text_section(shdrs, text_section_index_, text_offset_, text_size_);
   if (!text_index)
     return false;
 
   // A relocation's place (r_offset) is interpreted differently by ELF type:
   //   - ET_DYN/ET_EXEC: r_offset is a virtual address. An in-.text place is one
-  //     inside [text.sh_addr, text.sh_addr + size). The reloc section applies
-  //     across the whole image, so every record must be range-checked.
+  //     inside [text.sh_addr, text.sh_addr + size). A supported ROCr dynamic
+  //     write can also start before that interval and extend into it.
   //   - ET_REL: r_offset is relative to the section the reloc section applies to,
   //     named by the reloc section's sh_info. Only records whose sh_info is the
   //     text section can land in .text, and there any r_offset < text.sh_size is
@@ -1131,12 +1298,12 @@ bool CodeObjectPatcher::has_relocations_within_text() const {
         continue;
       const bool in_text = is_rel_object
                                ? r_offset < text_size_
-                               : (r_offset >= text.sh_addr && r_offset < text.sh_addr + text_size_);
+                               : (r_offset >= text.sh_addr && r_offset - text.sh_addr < text_size_);
       if (in_text)
         return true;
     }
   }
-  return false;
+  return has_dynamic_write_within_text(image_, header, shdrs, text.sh_addr, text_size_);
 }
 
 bool CodeObjectPatcher::has_rocr_rejected_none_relocation() const {
@@ -1366,6 +1533,8 @@ bool CodeObjectPatcher::replace_text(
   }
 
   const auto text_header = shdrs[*text_index];
+  if (new_text.size() > std::numeric_limits<uint64_t>::max() - text_header.sh_addr)
+    return false;
   struct ResolvedDataRelocation {
     PcRelativeDataRelocation relocation;
     size_t target_section = 0;
@@ -1395,6 +1564,25 @@ bool CodeObjectPatcher::replace_text(
   const uint64_t growth = new_text.size() - text_size_;
 
   if (growth != 0) {
+    const std::vector<Elf64_Shdr> original_sections = shdrs;
+    const std::vector<Elf64_Phdr> original_segments = phdrs;
+    const size_t original_image_size = image_.size();
+    // insert_file_bytes() extends every LOAD containing the insertion point,
+    // including a segment ending there. A divergent mapping would expose cave
+    // bytes at another address, potentially replacing its original zero fill.
+    for (const Elf64_Phdr &segment : phdrs) {
+      if (segment.p_type != PT_LOAD || segment.p_offset >= old_text_end_file)
+        continue;
+      const uint64_t insertion_offset = old_text_end_file - segment.p_offset;
+      if (insertion_offset > segment.p_filesz)
+        continue;
+      if (!image_contains_range(image_.size(), segment.p_offset, segment.p_filesz) ||
+          segment.p_filesz > segment.p_memsz ||
+          segment.p_memsz > std::numeric_limits<uint64_t>::max() - segment.p_vaddr ||
+          segment.p_vaddr + insertion_offset != old_text_end_vaddr)
+        return false;
+    }
+
     // Growing .text can shift later LOAD segments. Pad the inserted file range
     // so every shifted LOAD keeps p_offset % p_align congruent with p_vaddr %
     // p_align. The padding is executable segment filler, not part of .text.
@@ -1449,7 +1637,22 @@ bool CodeObjectPatcher::replace_text(
               phdrs[i].p_offset % phdrs[i].p_align == phdrs[i].p_vaddr % phdrs[i].p_align) &&
              "shifted LOAD lost file/virtual address congruence");
     }
+    if (!section_load_backing_is_preserved(original_sections, shdrs, original_segments, phdrs,
+                                           original_image_size, image_.size(), *text_index) ||
+        (header.e_type == ET_DYN && !rocr_load_extents_fit_allocation(phdrs, image_.size())))
+      return false;
   }
+
+  // File order and address order can differ. Even a LOAD whose file range
+  // precedes the insertion can remain over the newly appended executable bytes.
+  if (growth != 0 && !load_mappings_preserve_text(phdrs, image_.size(), old_text_end_file,
+                                                  old_text_end_vaddr, growth))
+    return false;
+
+  // Destinations in moved sections have their final addresses now. Unsectioned
+  // places remain fixed and must not overlap the newly appended executable text.
+  if (has_dynamic_write_within_text(image_, header, shdrs, text_header.sh_addr, new_text.size()))
+    return false;
 
   std::memcpy(image_.data() + text_offset_, new_text.data(), new_text.size());
   for (const ResolvedDataRelocation &resolved : resolved_data_relocations) {
