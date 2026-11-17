@@ -115,6 +115,12 @@ char* create_hex_string(uint64_t value, int width) {
   return hex_str;
 }
 
+// Packs four bytes into a 32-bit word, most significant first. Each byte is
+// widened to uint32_t before shifting: a byte >= 0x80 shifted by 24 overflows int.
+static uint32_t make_u32(uint8_t b3, uint8_t b2, uint8_t b1, uint8_t b0) {
+  return ((uint32_t)b3 << 24) | ((uint32_t)b2 << 16) | ((uint32_t)b1 << 8) | (uint32_t)b0;
+}
+
 // Version 0 decoder implementations
 JsonValue* decode_hbm_training_v0(OamBootMsg* msg) {
   if (!msg) return NULL;
@@ -457,7 +463,7 @@ JsonValue* decode_boot_controller_generic_v1(OamBootMsg* msg) {
   uint8_t byte7 = extract_byte(msg->value, 7);
 
   char* boot_step_str = create_hex_string(byte4, 2);
-  uint32_t boot_status = ((uint32_t)byte7 << 24) | (byte6 << 16) | (byte5 << 8) | byte0;
+  uint32_t boot_status = make_u32(byte7, byte6, byte5, byte0);
   char* boot_status_str = create_hex_string(boot_status, 8);
 
   json_object_set(result, "error_type",
@@ -488,7 +494,7 @@ JsonValue* decode_data_abort_v1(OamBootMsg* msg) {
   uint8_t byte7 = extract_byte(msg->value, 7);
 
   char* boot_step_str = create_hex_string(byte3, 2);
-  uint32_t exception_addr = ((uint32_t)byte7 << 24) | (byte6 << 16) | (byte5 << 8) | byte4;
+  uint32_t exception_addr = make_u32(byte7, byte6, byte5, byte4);
   char* exception_addr_str = create_hex_string(exception_addr, 8);
 
   json_object_set(result, "error_type",
@@ -518,7 +524,7 @@ JsonValue* decode_boot_success_v1(OamBootMsg* msg) {
   uint8_t byte7 = extract_byte(msg->value, 7);
 
   char* boot_step_str = create_hex_string(byte4, 2);
-  uint32_t boot_status = ((uint32_t)byte7 << 24) | (byte6 << 16) | (byte5 << 8) | byte0;
+  uint32_t boot_status = make_u32(byte7, byte6, byte5, byte0);
   char* boot_status_str = create_hex_string(boot_status, 8);
 
   json_object_set(result, "error_type", json_create_string(RAS_DECODE_ERROR_TYPE_BOOT_SUCCESS));
@@ -556,7 +562,7 @@ JsonValue* decode_unhandled_error_v1(OamBootMsg* msg) {
   uint8_t byte7 = extract_byte(msg->value, 7);
 
   char* boot_step_str = create_hex_string(byte4, 2);
-  uint32_t boot_status = ((uint32_t)byte7 << 24) | (byte6 << 16) | (byte5 << 8) | byte0;
+  uint32_t boot_status = make_u32(byte7, byte6, byte5, byte0);
   char* boot_status_str = create_hex_string(boot_status, 8);
 
   json_object_set(result, "error_type", json_create_string(RAS_DECODE_ERROR_TYPE_UNHANDLED));
