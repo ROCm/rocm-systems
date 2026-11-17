@@ -28,8 +28,9 @@ __m256i compute_half(__m256i a, __m256i b, __m256i c, uint64_t flags, uint32_t m
     y = flush_denorm_f16(y);
     z = flush_denorm_f16(z);
   }
-  return half_fma_value(x, y, z, flags & RJ_ARITH_FP16_OVFL, mode & RJ_ARITH_ALU_CLAMP,
-                        flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS);
+  return half_fma_value(x, y, z, flags & RJ_ARITH_FP16_OVFL, mode,
+                        flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
+                        flags & RJ_ARITH_FP_DX10_CLAMP_OFF);
 }
 
 } // namespace
@@ -41,7 +42,7 @@ void packed_fma_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t mode, uin
                           const uint32_t *a, const uint32_t *b, const uint32_t *c) {
   uint32_t low_mode, high_mode;
   if constexpr (Accumulate) {
-    low_mode = 0;
+    low_mode = mode;
     high_mode = low_mode | RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_B | RJ_ARITH_ALU_HIGH_C;
   } else {
     low_mode = packed_half_instruction_flags(mode, false);

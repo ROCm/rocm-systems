@@ -294,9 +294,11 @@ TEST_F(TopoMicrotest, GetSystemFromXml_CpuNicGinRmaAndDisabledNets) {
                     "<rma name=\"r\" dev=\"3\" speed=\"200000\" rail=\"0\" plane=\"0\"/><other/></nic>";
   SystemPtr system = BuildSystem(System(Cpu(0, nic + "<nic>" + Net("c", 4) + "</nic>")));
 
-  ASSERT_EQ(1, system->nodes[NIC].count);
+  // NCCL 2.32.6 indexes the busid-less <nic>s under a <cpu>, so the two are distinct NIC nodes.
+  ASSERT_EQ(2, system->nodes[NIC].count);
   ncclTopoNode* nicNode = system->nodes[NIC].nodes;
   EXPECT_EQ(NCCL_TOPO_ID(0, NCCL_TOPO_LOCAL_NIC_ID(0, 0)), nicNode->id);
+  EXPECT_EQ(NCCL_TOPO_ID(0, NCCL_TOPO_LOCAL_NIC_ID(0, 1)), system->nodes[NIC].nodes[1].id);
   EXPECT_FLOAT_EQ(LOC_BW, Link(nicNode, system->nodes[CPU].nodes)->bw);
   ASSERT_EQ(2, system->nodes[NET].count);
   EXPECT_EQ(0, system->nodes[NET].nodes[0].net.dev);
@@ -1776,7 +1778,8 @@ TEST_F(TopoProcessNetMicrotest, ProcessNet_StampsPluginPropertiesOnPhysicalNics)
   EXPECT_EQ("1", Attr(a0, "port"));
   EXPECT_EQ("0x11", Attr(a0, "guid"));
   EXPECT_EQ(std::to_string(NCCL_TOPO_UNDEF_BIT | 0), Attr(a0, "rail"));  // derived from the guid
-  EXPECT_EQ(std::to_string(NCCL_TOPO_UNDEF_BIT | 1), Attr(a0, "plane"));  // derived from the port
+  // NCCL 2.32.6: an undefined plane is a0's index among its NIC's nets (it is the first), no longer the port.
+  EXPECT_EQ(std::to_string(NCCL_TOPO_UNDEF_BIT | 0), Attr(a0, "plane"));
   EXPECT_EQ("64", Attr(a0, "maxconn"));
   EXPECT_EQ("1", Attr(a0, "gdr"));
   EXPECT_EQ("1", Attr(a0, "net"));
@@ -2061,19 +2064,17 @@ TEST_F(TopoMicrotest, XmlInitAttr_OnlySetsMissingValues) {
 
   ASSERT_EQ(ncclSuccess, xmlInitAttrInt(node, "i", 3));
   ASSERT_EQ(ncclSuccess, xmlInitAttrInt(node, "i", 4));
-  ASSERT_EQ(ncclSuccess, xmlInitAttrUint64(node, "u", 0x1f));
   ASSERT_EQ(ncclSuccess, xmlInitAttrFloat(node, "f", 1.5f));
   ASSERT_EQ(ncclSuccess, xmlInitAttrFloat(node, "g", 1.5f));
 
+  // NCCL 2.32.6 removed xmlInitAttrUint64, so "g" now lands in slot 2.
   EXPECT_STREQ("3", node->attrs[1].value);
-  EXPECT_STREQ("0x1f", node->attrs[2].value);
   EXPECT_STREQ("keep", node->attrs[0].value);
-  EXPECT_STREQ("1.500000", node->attrs[3].value);
+  EXPECT_STREQ("1.500000", node->attrs[2].value);
   for (int a = node->nAttrs; a < MAX_ATTR_COUNT; a++) {
     ASSERT_EQ(ncclSuccess, xmlSetAttrInt(node, std::to_string(a).c_str(), a));
   }
   EXPECT_EQ(ncclInternalError, xmlInitAttrInt(node, "x", 1));
-  EXPECT_EQ(ncclInternalError, xmlInitAttrUint64(node, "x", 1));
   EXPECT_EQ(ncclInternalError, xmlInitAttrFloat(node, "x", 1));
 }
 
@@ -2412,8 +2413,8 @@ TEST_F(TopoGetSystemMicrotest, GetSystem_ImportsGinRmaAndCollNetDevices) {
   gin.name = "gin";
   gin.devices = FakeDevices;
   gin.getProperties = FakeGetProperties;
-  shared_->ginState.supported = true;
-  shared_->ginState.backends[0].ncclGin = &gin;
+  comm_->ginState.supported = true;
+  comm_->ginState.backends[0].ncclGin = &gin;
   ncclRma_t rma{};
   rma.name = "rma";
   rma.devices = FakeDevices;

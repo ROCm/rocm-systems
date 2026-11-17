@@ -55,8 +55,8 @@ TEST_F(CoreMicrotest, TeamWorldAndRankToWorld_IgnoreAFailingInitOnce) {
 }
 
 TEST_F(CoreMicrotest, TeamLsa_SuccessPath_ReadsLsaSizeAndSelfFromDevrState) {
-  comm->devrState.lsaSize = 8;
-  comm->devrState.lsaSelf = 3;
+  comm->devrState.lsaTeamSize = 8;
+  comm->devrState.lsaTeamSelf = 3;
   ncclTeam_t team = ncclTeamLsa(comm);
   EXPECT_EQ(team.nRanks, 8);
   EXPECT_EQ(team.rank, 3);
@@ -65,8 +65,8 @@ TEST_F(CoreMicrotest, TeamLsa_SuccessPath_ReadsLsaSizeAndSelfFromDevrState) {
 
 TEST_F(CoreMicrotest, TeamLsa_InitOnceFails_ReturnsZeroedTeamWithoutReadingDevrState) {
   // Poisoned, so reading them despite the failure shows up below.
-  comm->devrState.lsaSize = 99;
-  comm->devrState.lsaSelf = 99;
+  comm->devrState.lsaTeamSize = 99;
+  comm->devrState.lsaTeamSelf = 99;
   g_devrInitOnce = [](ncclComm*) { return ncclSystemError; };
   ncclTeam_t team = ncclTeamLsa(comm);
   EXPECT_EQ(team.nRanks, 0);
@@ -97,18 +97,18 @@ TEST_F(CoreMicrotest, TeamRail_SuccessPath_DividesCommNRanksAndRankByLsaSize) {
   // 24/4 = 6 and 9/4 = 2 differ from the `%` results ncclTeamInnerFactor would give.
   comm->nRanks = 24;
   comm->rank = 9;
-  comm->devrState.lsaSize = 4;
+  comm->devrState.lsaTeamSize = 4;
   ncclTeam_t team = ncclTeamRail(comm);
   EXPECT_EQ(team.nRanks, 6);  // 24 / 4
   EXPECT_EQ(team.rank, 2);    // 9 / 4
-  EXPECT_EQ(team.stride, 4);  // == lsaSize
+  EXPECT_EQ(team.stride, 4);  // == lsaTeamSize
 }
 
 TEST_F(CoreMicrotest, TeamRail_InitOnceFails_ReturnsZeroedTeamWithoutDividingByLsaSize) {
   // If the failure branch were missing, this would divide by zero instead.
   comm->nRanks = 16;
   comm->rank = 10;
-  comm->devrState.lsaSize = 0;
+  comm->devrState.lsaTeamSize = 0;
   g_devrInitOnce = [](ncclComm*) { return ncclSystemError; };
   ncclTeam_t team = ncclTeamRail(comm);
   EXPECT_EQ(team.nRanks, 0);
@@ -126,11 +126,11 @@ TEST_F(CoreMicrotest, TeamCft_FlatMode_ReturnsFlatTeamFromCftSizeAndSelf) {
 }
 
 TEST_F(CoreMicrotest, TeamCft_HierMultimemMode_OuterFactorsTheFlatTeamByCftMcSize) {
-  // lsaSize is a distinct non-zero value, so swapped mode arms give a wrong answer, not a crash.
+  // lsaTeamSize is a distinct non-zero value, so swapped mode arms give a wrong answer, not a crash.
   comm->devrState.cftSize = 12;
   comm->devrState.cftSelf = 7;
   comm->devrState.cftMcSize = 3;
-  comm->devrState.lsaSize = 2;
+  comm->devrState.lsaTeamSize = 2;
   ncclTeam_t team = ncclTeamCft(comm, NCCL_CFT_TEAM_HIER_MULTIMEM);
   EXPECT_EQ(team.nRanks, 4);  // 12 / 3
   EXPECT_EQ(team.rank, 2);    // 7 / 3
@@ -141,7 +141,7 @@ TEST_F(CoreMicrotest, TeamCft_HierLsaMode_OuterFactorsTheFlatTeamByLsaSize) {
   // cftMcSize is distinct for the same reason.
   comm->devrState.cftSize = 20;
   comm->devrState.cftSelf = 9;
-  comm->devrState.lsaSize = 5;
+  comm->devrState.lsaTeamSize = 5;
   comm->devrState.cftMcSize = 3;
   ncclTeam_t team = ncclTeamCft(comm, NCCL_CFT_TEAM_HIER_LSA);
   EXPECT_EQ(team.nRanks, 4);  // 20 / 5
@@ -181,16 +181,16 @@ TEST_F(CoreMicrotest, TeamRankToWorld_MapsATeamLocalRankBackToItsWorldRankViaStr
 }
 
 TEST_F(CoreMicrotest, TeamRankToLsa_SuccessPath_MapsATeamLocalRankToAnLsaRankViaLsaSelf) {
-  comm->devrState.lsaSelf = 5;
+  comm->devrState.lsaTeamSelf = 5;
   ncclTeam_t team{/*nRanks=*/4, /*rank=*/2, /*stride=*/3};
-  // devrState.lsaSelf + (rank - team.rank) * team.stride
+  // devrState.lsaTeamSelf + (rank - team.rank) * team.stride
   EXPECT_EQ(ncclTeamRankToLsa(comm, team, team.rank), 5);
   EXPECT_EQ(ncclTeamRankToLsa(comm, team, team.rank + 1), 8);
   EXPECT_EQ(ncclTeamRankToLsa(comm, team, team.rank - 1), 2);  // 5 + (-1)*3
 }
 
 TEST_F(CoreMicrotest, TeamRankToLsa_InitOnceFails_ReturnsNegativeOneWithoutReadingLsaSelf) {
-  comm->devrState.lsaSelf = 99;
+  comm->devrState.lsaTeamSelf = 99;
   g_devrInitOnce = [](ncclComm*) { return ncclSystemError; };
   ncclTeam_t team{/*nRanks=*/4, /*rank=*/2, /*stride=*/3};
   EXPECT_EQ(ncclTeamRankToLsa(comm, team, team.rank), -1);

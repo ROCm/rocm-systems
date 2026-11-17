@@ -106,7 +106,7 @@ fn batch_fixture(count: usize) -> (SignalState, HsaAmdSignalBatch, Vec<HsaSignal
     state.batches.insert(
         batch.handle,
         SignalBatchStorage {
-            _backing: SignalBatchBacking::Test(slots),
+            _backing: SignalBacking::Test(slots),
             remaining: count,
             handle_live: true,
             host_atomics_supported: true,
