@@ -424,6 +424,10 @@ int rj_arith_v_cvt_pk_rtz_f16_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask,
                                              uint64_t instruction_flags, uint32_t *const *d,
                                              const uint32_t *const *a, const uint32_t *const *b,
                                              uint32_t *trapsts) {
+  if (instruction_flags & RJ_ARITH_CVT_SDWA) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+
   if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
     return error;
   }
@@ -436,6 +440,10 @@ int rj_arith_v_cvt_pk_rtz_f16_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask,
                                              uint64_t instruction_flags, uint32_t *const *d,
                                              const uint32_t *const *a, const uint32_t *const *b,
                                              uint32_t *trapsts) {
+  if (instruction_flags & RJ_ARITH_CVT_SDWA) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+
   if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
     return error;
   }

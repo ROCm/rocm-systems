@@ -672,6 +672,7 @@ add_executable(
     simd_correctness/mfma_register_paths_test.cpp
     vgpr_redispatch_test.cpp
     instruction_execution_harness_test.cpp
+    gfx908_compare_test.cpp
     vop3_conversion_modifiers_test.cpp
     cube_instruction_test.cpp
     division_test.cpp
