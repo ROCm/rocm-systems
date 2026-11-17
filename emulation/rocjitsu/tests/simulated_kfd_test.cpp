@@ -1964,7 +1964,16 @@ TEST_F(SimulatedKfdTest, ContainingDoorbellUnmapRejectsAdjacentEventPage) {
     kfd_ioctl_set_event_args signal{};
     signal.event_id = event.event_id;
     ASSERT_EQ(driver->ioctl(AMDKFD_IOC_SET_EVENT, &signal), 0);
-    EXPECT_EQ(static_cast<uint64_t *>(events)[event.event_id], 2u);
+    EXPECT_EQ(static_cast<uint64_t *>(events)[event.event_id], UINT64_MAX);
+    kfd_event_data observed{};
+    observed.event_id = event.event_id;
+    observed.signal_event_data.last_event_age = 1;
+    kfd_ioctl_wait_events_args wait{};
+    wait.events_ptr = reinterpret_cast<uint64_t>(&observed);
+    wait.num_events = 1;
+    ASSERT_EQ(driver->ioctl(AMDKFD_IOC_WAIT_EVENTS, &wait), 0);
+    EXPECT_EQ(wait.wait_result, KFD_IOC_WAIT_RESULT_COMPLETE);
+    EXPECT_EQ(observed.signal_event_data.last_event_age, 2u);
     EXPECT_EQ(driver->close(), 0);
     EXPECT_EQ(static_cast<uint64_t *>(events)[event.event_id], KFD_SIGNAL_EVENT_LIMIT);
     EXPECT_EQ(::munmap(region, 2 * page_size), 0);

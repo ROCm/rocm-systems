@@ -71,9 +71,12 @@ struct FakeRmaVtable {
   void* listenHandle = nullptr;
   void* connectListenComm = nullptr;
   int connectNranks = -1, connectRank = -1;
+  volatile uint32_t* connectAbortFlag = nullptr;
   int getPropertiesDev = -1;
   std::vector<void*> closedListens, closedColls, destroyedContexts, progressed, queried, tested;
   ncclRmaConfig_t createConfig{};
+  // createConfig.peerArray is freed once createContext returns; this is its copy.
+  std::vector<int> createPeers;
   std::vector<MrReg> regs;
   std::vector<std::pair<void*, void*>> deregs;
   std::vector<Op> ops;
@@ -117,8 +120,10 @@ struct FakeRmaVtable {
     *listenComm = kListenComm;
     return ncclSuccess;
   }
-  static ncclResult_t Connect(void*, void**, int nranks, int rank, void* listenComm, void** collComm) {
+  static ncclResult_t Connect(void*, void**, int nranks, int rank, void* listenComm, void** collComm,
+                              volatile uint32_t* abortFlag) {
     FakeRmaVtable& f = current();
+    f.connectAbortFlag = abortFlag;
     f.connectNranks = nranks;
     f.connectRank = rank;
     f.connectListenComm = listenComm;
@@ -130,6 +135,7 @@ struct FakeRmaVtable {
     FakeRmaVtable& f = current();
     if (collComm != kCollComm) return ncclInternalError;
     f.createConfig = *config;
+    f.createPeers.assign(config->peerArray, config->peerArray + (config->peerArray ? config->peerArrayCount : 0));
     if (f.createContextResult != ncclSuccess) return f.createContextResult;
     *rmaCtx = kRmaCtx;
     return ncclSuccess;

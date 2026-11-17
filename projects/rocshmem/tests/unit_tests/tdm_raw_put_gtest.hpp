@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: MIT
  *****************************************************************************/
 
-// Phase 1: raw byte-array put tests exercising memcpy_wg_tdm via ipcCopy_wg.
+// Phase 1: raw byte-array put tests exercising memcpy_wg_lds_stage via ipcCopy_wg.
 // Requires 2 MPI ranks: PE 0 sends to PE 1.
 //
 // Build: cmake -DUSE_TDM=ON -DUSE_IPC=ON -DAMDGPU_TARGETS=gfx1250 ...
@@ -64,13 +64,13 @@ void tdm_raw_validator(bool* error, const uint8_t* golden, const uint8_t* dest,
   }
 }
 
-// PE 0 sender: calls the real library path (memcpy_wg_tdm via ipcCopy_wg).
+// PE 0 sender: calls the real library path (memcpy_wg_lds_stage via ipcCopy_wg).
 template <typename IpcImplT>
 __global__
 void tdm_raw_put_kernel(IpcImplT* ipc_impl, const uint8_t* src,
                         uint8_t* remote_dst, size_t bytes) {
   extern __shared__ uint8_t tdm_lds[];
-  rocshmem_set_tdm_lds(tdm_lds, rocshmem_query_tdm_lds_bytes());
+  rocshmem_set_lds_stage(tdm_lds, rocshmem_query_lds_stage_bytes());
 
   ipc_impl->template ipcCopy_wg<MemcpyKind::PutBlocking>(
       remote_dst, const_cast<uint8_t*>(src), bytes, /*local_pe=*/0);
@@ -103,7 +103,7 @@ class TdmRawPutFixture : public ::testing::TestWithParam<size_t> {
     // Force a known tile size so the parameterized sizes land where intended.
     uint32_t tile_bytes = TEST_TDM_TILE_BYTES;
     CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(constmem), &tile_bytes, sizeof(tile_bytes),
-                                offsetof(constmem_t, tdm_tile_bytes)));
+                                offsetof(constmem_t, lds_stage_tile_bytes)));
     // Force SDMA off: this fixture never sets up an SDMA channel.
     size_t sdma_threshold = SDMA_THRESHOLD_DISABLED;
     CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(constmem), &sdma_threshold, sizeof(sdma_threshold),
@@ -111,7 +111,7 @@ class TdmRawPutFixture : public ::testing::TestWithParam<size_t> {
     // Force a known put threshold so the parameterized sizes land where intended.
     size_t put_threshold = TEST_TDM_PUT_THRESHOLD;
     CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(constmem), &put_threshold, sizeof(put_threshold),
-                                offsetof(constmem_t, tdm_put_threshold)));
+                                offsetof(constmem_t, lds_stage_put_threshold)));
     hip_allocator_->allocate((void**)&ipc_impl_dptr_, sizeof(IpcImplT));
     CHECK_HIP(hipMemcpy(ipc_impl_dptr_, &ipc_impl_, sizeof(IpcImplT),
                         hipMemcpyHostToDevice));
@@ -155,7 +155,7 @@ class TdmRawPutFixture : public ::testing::TestWithParam<size_t> {
     // Block size: full wavefront for TDM to have at least 1 wave.
     const dim3 block(WF_SIZE);
     // Backend-free: compute LDS size from the forced tile size directly.
-    const size_t smem = tdm::lds_bytes_for_tile(TEST_TDM_TILE_BYTES);
+    const size_t smem = lds_stage::lds_bytes_for_tile(TEST_TDM_TILE_BYTES);
 
     if (my_pe == 0) {
       auto* src  = reinterpret_cast<const uint8_t*>(ipc_impl_.ipc_bases[0]);
