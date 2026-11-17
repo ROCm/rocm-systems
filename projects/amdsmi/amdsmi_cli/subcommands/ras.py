@@ -288,7 +288,7 @@ class RasCommands:
         # Shared 1-indexed counter for generated CPER filenames across all GPUs
         # and follow iterations within this invocation.
         cper_counter = [0]
-        is_json = self.logger.is_json_format()
+        is_structured = self.logger.is_json_format() or self.logger.is_csv_format()
         while True:
             all_json_rows = []
             for idx, device_handle in enumerate(args.gpu):
@@ -297,11 +297,26 @@ class RasCommands:
                     device_handle,
                     self.logger,
                     idx,
-                    emit_inline=not is_json,
+                    emit_inline=not is_structured,
                     cper_counter=cper_counter,
                 )
                 all_json_rows.extend(rows)
-            if is_json and (all_json_rows or not args.follow):
+            nic_filter = getattr(args, "nic", None)
+            for idx, ainic_handle in enumerate(self.device_handles_ainics):
+                if nic_filter is not None and not any(
+                    ainic_handle.value == h.value for h in nic_filter
+                ):
+                    continue
+                rows = self.helpers.ras_cper_ainic(
+                    args,
+                    ainic_handle,
+                    self.logger,
+                    idx,
+                    emit_inline=not is_structured,
+                    cper_counter=cper_counter,
+                )
+                all_json_rows.extend(rows)
+            if is_structured and (all_json_rows or not args.follow):
                 self.logger.multiple_device_output = all_json_rows
                 self.logger.print_output(multiple_device_enabled=True, emit_empty=True)
             if not args.follow:

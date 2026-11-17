@@ -2389,7 +2389,7 @@ class AMDSMIHelpers:
         return "UNKNOWN"
 
     def display_cper_files_generated(
-        self, entries, device_handle, logger: Optional["AMDSMILogger"] = None
+        self, entries, device_handle, logger: Optional["AMDSMILogger"] = None, device_label=None
     ):
         """Print one human-readable summary line per CPER entry.
 
@@ -2401,22 +2401,23 @@ class AMDSMIHelpers:
             list: Always returns ``[]`` (kept for symmetry with
             ``dump_cper_entries``).
         """
-        if logger is not None and logger.is_json_format():
+        if logger is not None and (logger.is_json_format() or logger.is_csv_format()):
             return []
 
         for entry in entries.values():
             timestamp = entry.get("timestamp", "unknown")
-            gpu_id = "-"
+            type_col = device_label if device_label is not None else "-"
             output = ""
-            if not isinstance(device_handle, Path):
-                gpu_id = self.get_gpu_id_from_device_handle(device_handle)
+            if not isinstance(device_handle, Path) or device_label is not None:
+                if device_label is None:
+                    type_col = f"GPU {self.get_gpu_id_from_device_handle(device_handle)}"
                 prefix = self._severity_as_string(
                     entry.get("error_severity", "Unknown"),
                     entry.get("notify_type", "Unknown"),
                     False,
                     entry.get("source"),
                 )
-                output = f"{timestamp:<20} {gpu_id:<7} {prefix:<20}"
+                output = f"{timestamp:<20} {type_col:<8} {prefix:<20}"
 
             self.cper_print(output, logger)
         return []
@@ -2436,12 +2437,12 @@ class AMDSMIHelpers:
 
     def _print_header(self, folder, logger: Optional["AMDSMILogger"] = None):
         """Print the CPER column header line (skipped for JSON output)."""
-        if logger is not None and logger.is_json_format():
+        if logger is not None and (logger.is_json_format() or logger.is_csv_format()):
             return
 
-        header = f"{'timestamp':<20} {'gpu_id':<7} {'severity':<20}"
+        header = f"{'timestamp':<20} {'type':<8} {'severity':<20}"
         if folder:
-            header += f" {'file_name':<17} {'list of afids'}"
+            header += f" {'file_name':<25} {'list of afids'}"
 
         self.cper_print(header, logger)
 
@@ -2454,6 +2455,7 @@ class AMDSMIHelpers:
         file_limit=None,
         cper_file=None,
         cper_counter=None,
+        device_label=None,
     ):
         """Write each CPER entry to ``<folder>/<prefix>-<n>.cper`` plus a sibling
         ``.json`` metadata file, enforce ``file_limit`` rotation, and collect the
@@ -2477,15 +2479,18 @@ class AMDSMIHelpers:
             error_severity = entry.get("error_severity", "").lower()
             notify_type = entry.get("notify_type", "")
             source = entry.get("source")
-            prefix = self._severity_as_string(error_severity, notify_type, True, source)
+            severity_prefix = self._severity_as_string(error_severity, notify_type, True, source)
+            # Fabric and GPU already embed device type in their severity prefix.
+            # AI-NIC does not (severity is now device-agnostic), so prepend explicitly.
+            file_prefix = f"ainic-{severity_prefix}" if source == "ainic" else severity_prefix
 
             # Generate filenames
             count = cper_counter[0] + 1
             if cper_file:
                 cper_name = cper_file
             else:
-                cper_name = f"{prefix}-{count}.cper"
-            json_name = f"{prefix}-{count}.json"
+                cper_name = f"{file_prefix}-{count}.cper"
+            json_name = f"{file_prefix}-{count}.json"
             cper_path = folder / cper_name
             json_path = folder / json_name
 
@@ -2504,7 +2509,14 @@ class AMDSMIHelpers:
                         obj=entry,
                         fp=cper_json_file,
                         indent=2,
-                        default=lambda o: o.decode("utf-8") if isinstance(o, bytes) else o,
+                        default=lambda o: (
+                            o.rstrip(b"\x00").decode("ascii")
+                            if isinstance(o, bytes)
+                            and all(0x20 <= b < 0x7F for b in o.rstrip(b"\x00"))
+                            else o.hex()
+                            if isinstance(o, bytes)
+                            else str(o)
+                        ),
                     )
             except Exception as e:
                 logging.debug(f"Failed to write JSON file {json_path}: {e}")
@@ -2513,13 +2525,16 @@ class AMDSMIHelpers:
             # the path so the AFID decode loop does not have to read
             # the file we just wrote back from disk.
             timestamp = entry.get("timestamp", "unknown")
-            gpu_id = "-"
-            if not isinstance(device_handle, Path):
-                gpu_id = self.get_gpu_id_from_device_handle(device_handle)
+            if device_label is not None:
+                type_col = device_label
+            elif not isinstance(device_handle, Path):
+                type_col = f"GPU {self.get_gpu_id_from_device_handle(device_handle)}"
+            else:
+                type_col = "-"
             severity = self._severity_as_string(error_severity, notify_type, False, source)
             output_rows[cper_path] = [
                 timestamp,
-                gpu_id,
+                type_col,
                 severity,
                 cper_name,
                 cper_data[entry_index]["bytes"],
@@ -2552,6 +2567,7 @@ class AMDSMIHelpers:
         logger: Optional["AMDSMILogger"] = None,
         emit_inline=True,
         cper_counter=None,
+        device_label=None,
     ):
         """
         Dump CPER entries to files in the specified folder. Handles batch deletion if file limit is exceeded.
@@ -2574,7 +2590,7 @@ class AMDSMIHelpers:
         Returns:
             list: JSON row dicts when JSON format is active, otherwise ``[]``.
         """
-        json_output = logger is not None and logger.is_json_format()
+        json_output = logger is not None and (logger.is_json_format() or logger.is_csv_format())
         # Only the AFID message text varies by format. json_output picks the branch.
         output_format = logger.format if logger is not None else "human"
         if cper_counter is None:
@@ -2589,6 +2605,7 @@ class AMDSMIHelpers:
                 file_limit=file_limit,
                 cper_file=cper_file,
                 cper_counter=cper_counter,
+                device_label=device_label,
             )
 
             # Print collected rows
@@ -2617,7 +2634,7 @@ class AMDSMIHelpers:
                     json_rows.append(
                         {
                             "timestamp": timestamp,
-                            "gpu": gpu_id,
+                            "device": gpu_id,
                             "severity": severity,
                             "cper_file": cper_path_str,
                             "metadata_file": json_path_str,
@@ -2628,6 +2645,8 @@ class AMDSMIHelpers:
                             "code": afid_record["code"],
                         }
                     )
+                if logger is not None and logger.is_csv_format():
+                    json_rows = [{**r, "afids": self.afid_cell(r)} for r in json_rows]
                 if emit_inline:
                     self.cper_print(json.dumps(json_rows, indent=2), logger)
                 return json_rows
@@ -2652,13 +2671,16 @@ class AMDSMIHelpers:
                         )
                     afids_str = self.afid_cell(afid_record)
                     self.cper_print(
-                        f"{timestamp:<20} {gpu_id:<7} {severity:<20} {fname:<17} {afids_str}",
+                        f"{timestamp:<20} {gpu_id:<8} {severity:<20} {fname:<25} {afids_str}",
                         logger,
                     )
         else:
             if json_output:
                 try:
-                    gpu_id = self.get_gpu_id_from_device_handle(device_handle)
+                    if device_label is not None:
+                        type_col = device_label
+                    else:
+                        type_col = f"GPU {self.get_gpu_id_from_device_handle(device_handle)}"
                     json_rows = []
                     for entry in entries.values():
                         severity = self._severity_as_string(
@@ -2670,7 +2692,7 @@ class AMDSMIHelpers:
                         json_rows.append(
                             {
                                 "timestamp": entry.get("timestamp", "unknown"),
-                                "gpu": gpu_id,
+                                "device": type_col,
                                 "severity": severity,
                             }
                         )
@@ -2686,7 +2708,14 @@ class AMDSMIHelpers:
                         json.dumps(
                             entries,
                             indent=2,
-                            default=lambda o: o.decode("utf-8") if isinstance(o, bytes) else o,
+                            default=lambda o: (
+                                o.rstrip(b"\x00").decode("ascii")
+                                if isinstance(o, bytes)
+                                and all(0x20 <= b < 0x7F for b in o.rstrip(b"\x00"))
+                                else o.hex()
+                                if isinstance(o, bytes)
+                                else str(o)
+                            ),
                         ),
                         logger,
                     )
@@ -2783,6 +2812,7 @@ class AMDSMIHelpers:
         collected_json_rows,
         emit_inline,
         cper_counter,
+        device_label=None,
     ):
         """Dispatch CPER output to the appropriate handler.
 
@@ -2803,10 +2833,13 @@ class AMDSMIHelpers:
                 logger=logger,
                 emit_inline=emit_inline,
                 cper_counter=cper_counter,
+                device_label=device_label,
             )
             collected_json_rows.extend(cper_rows)
         else:
-            self.display_cper_files_generated(entries, device_handle, logger=logger)
+            self.display_cper_files_generated(
+                entries, device_handle, logger=logger, device_label=device_label
+            )
 
     def ras_cper(self, args, device_handle, logger, gpu_idx, emit_inline=True, cper_counter=None):
         """Fetch and process CPER entries for a single GPU.
@@ -2838,6 +2871,7 @@ class AMDSMIHelpers:
             cper_counter = [0]
 
         gpu_id = self.get_gpu_id_from_device_handle(device_handle)
+        gpu_label = f"GPU {gpu_id}"
 
         primary_partition = self.is_primary_partition(device_handle, gpu_id)
         if not primary_partition:
@@ -2900,6 +2934,7 @@ class AMDSMIHelpers:
                 collected_json_rows,
                 emit_inline,
                 cper_counter,
+                device_label=gpu_label,
             )
 
         # Fetch fabric CPER entries (IFoE RAS events). Fabric cursors live in a
@@ -2969,6 +3004,7 @@ class AMDSMIHelpers:
                     collected_json_rows,
                     emit_inline,
                     cper_counter,
+                    device_label="Fabric",
                 )
 
             if not fabric_has_more:
@@ -2995,7 +3031,103 @@ class AMDSMIHelpers:
                 collected_json_rows,
                 emit_inline,
                 cper_counter,
+                device_label=gpu_label,
             )
+        return collected_json_rows
+
+    def ras_cper_ainic(
+        self, args, ainic_handle, logger, ainic_idx, emit_inline=True, cper_counter=None
+    ):
+        """Fetch and process CPER entries for a single AI-NIC device.
+
+        Reads /sys/kernel/debug/pds_core/<bdf>/cper_events via the existing
+        GPU CPER file reader (same UEFI binary format). The cursor tracks
+        position across --follow iterations with the same semantics as GPU CPER.
+
+        Args:
+            args: Parsed CLI arguments (severity, folder, file_limit, follow, etc.)
+            ainic_handle: AI-NIC processor handle
+            logger: AMDSMILogger instance
+            ainic_idx: Index into args.ainic_cursor for this device
+            emit_inline: Whether to emit output inline vs. return rows for batching
+            cper_counter: Shared 1-indexed filename counter across all devices
+
+        Returns:
+            list: Collected JSON rows (empty list if not JSON format)
+
+        Side effects:
+            ``args.ainic_cursor[ainic_idx]`` is updated with the new cursor position.
+        """
+        severity_mask = self._parse_cper_severity_mask(args.severity)
+        buffer_size = 1048576
+        if cper_counter is None:
+            cper_counter = [0]
+
+        ainic_cursors = getattr(args, "ainic_cursor", None)
+        if ainic_cursors is None:
+            ainic_cursors = []
+            args.ainic_cursor = ainic_cursors
+        while len(ainic_cursors) <= ainic_idx:
+            ainic_cursors.append(0)
+
+        collected_json_rows = []
+        entries = {}
+        cper_data = []
+        num_entries = 0
+
+        while True:
+            try:
+                entries, new_cursor, cper_data, _status = (
+                    amdsmi_interface.amdsmi_get_ainic_cper_entries(
+                        ainic_handle, severity_mask, buffer_size, ainic_cursors[ainic_idx]
+                    )
+                )
+                logging.debug("ainic_cper_entries | entries: %s", entries)
+                num_entries += len(entries)
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                    raise PermissionError(
+                        "Error accessing AI-NIC CPER. This command requires elevation"
+                    ) from e
+                if e.get_error_code() in (
+                    amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED,
+                    amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_FILE_NOT_FOUND,
+                    amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_FILE_ERROR,
+                ):
+                    logging.debug("AI-NIC CPER not available for this device: %s", e)
+                    return []
+                logging.debug("Cannot retrieve AI-NIC CPER entries: %s", e)
+                break
+
+            ainic_cursors[ainic_idx] = new_cursor
+            if len(entries) == 0:
+                break
+
+            self._emit_cper_output(
+                entries,
+                cper_data,
+                ainic_handle,
+                args,
+                logger,
+                collected_json_rows,
+                emit_inline,
+                cper_counter,
+                device_label=f"AINIC {ainic_idx}",
+            )
+
+        if num_entries == 0 and not args.follow:
+            self._emit_cper_output(
+                entries,
+                cper_data,
+                ainic_handle,
+                args,
+                logger,
+                collected_json_rows,
+                emit_inline,
+                cper_counter,
+                device_label=f"AINIC {ainic_idx}",
+            )
+
         return collected_json_rows
 
     @staticmethod
