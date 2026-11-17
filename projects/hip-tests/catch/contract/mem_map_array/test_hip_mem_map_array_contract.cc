@@ -64,3 +64,23 @@ HIP_TEST_CASE(Contract_MemMapArray_HipMemMapArrayAsync_ZeroCount_IsRejected) {
   REQUIRE(status != hipSuccess);
   (void)hipGetLastError();
 }
+
+// @asserts: hipArrayGetSparseProperties - rejects a null properties-out pointer, a null array handle, or a non-sparse array with a non-success status
+HIP_TEST_CASE(Contract_MemMapArray_HipArrayGetSparseProperties_InvalidArgs_AreRejected) {
+  CHECK_IMAGE_SUPPORT;
+  RequireDevice();
+
+  hip::contract::ContractCleanup cleanup;
+  hipArray_t array = nullptr;
+  const hipChannelFormatDesc desc = hipCreateChannelDesc<uint8_t>();
+  hipArraySparseProperties properties{};
+
+  HIP_CHECK(hipMallocArray(&array, &desc, 8, 4));
+  cleanup.Add([array] { (void)hipFreeArray(array); });
+
+  HIP_CHECK(hipGetLastError());
+  REQUIRE(hipArrayGetSparseProperties(nullptr, array) != hipSuccess);
+  REQUIRE(hipArrayGetSparseProperties(&properties, nullptr) != hipSuccess);
+  REQUIRE(hipArrayGetSparseProperties(&properties, array) != hipSuccess);
+  (void)hipGetLastError();
+}

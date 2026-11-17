@@ -1,5 +1,5 @@
 import { expect, test, vi } from 'vitest';
-import { runSearchFields, runSelectionLabel } from '../../src/components/shared/runOptionPresentation.js';
+import { runSearchFields, runSelectionLabelWithBranch } from '../../src/components/shared/runOptionPresentation.js';
 import { formatRunTime } from '../../src/utils/formatters.js';
 import { filterRunOptions } from '../../src/components/branch/branchPresentation.js';
 import RunSelector from '../../src/components/compare/RunSelector.jsx';
@@ -10,18 +10,18 @@ const run = { runId: 'attempt-needle', branch: 'topic/branch-needle', targets: [
 
 test('shared search fields include run and source identity plus raw and displayed clocks', () => {
   expect(runSearchFields(run)).toEqual([
-    runSelectionLabel(run), `Test run ${formatRunTime(run.timestamp)}`, `Commit ${formatRunTime(run.commitTimestamp)}`,
-    run.runId, run.branch, 'default', 'gfx1250', run.timestamp, run.commitTimestamp,
+    runSelectionLabelWithBranch(run), `Test run ${formatRunTime(run.timestamp)}`, `Commit ${formatRunTime(run.commitTimestamp)}`,
+    run.runId, run.branch, 'gfx1250', run.timestamp, run.commitTimestamp,
     run.provenance.rocjitsuCommitSha, 'message-needle',
   ]);
 });
 
 function compareFilter(options, query) {
   const selector = RunSelector({ label: 'Candidate run', options, value: null, onChange() {} });
-  return selector.props.children[0].props.filterOptions(options, { inputValue: query });
+  return selector.props.children.props.filterOptions(options, { inputValue: query });
 }
 
-test.each(['attempt-needle', 'BRANCH-NEEDLE', 'message-needle', 'abcdef1', 'gfx1250', 'default', '2026-10-04', '2026-10-05'])('both pickers search common field %s', (query) => {
+test.each(['attempt-needle', 'BRANCH-NEEDLE', 'message-needle', 'abcdef1', 'gfx1250', '2026-10-04', '2026-10-05'])('both pickers search common field %s', (query) => {
   expect(filterRunOptions([run], { inputValue: query })).toEqual([run]);
   expect(compareFilter([run], query)).toEqual([run]);
 });
@@ -50,4 +50,16 @@ test('branch retains PR search while Compare retains its disclosed 50-match cap'
   const options = Array.from({ length: 60 }, (_, index) => ({ ...run, runId: `attempt-${index}` }));
   expect(filterRunOptions(options, { inputValue: '' })).toHaveLength(60);
   expect(compareFilter(options, '')).toEqual(options.slice(0, 50));
+});
+
+test.each(['default', 'single'])('neither picker searches thread-policy mode %s: a run holds both, so it says nothing about the run', (query) => {
+  expect(filterRunOptions([run], { inputValue: query })).toEqual([]);
+  expect(compareFilter([run], query)).toEqual([]);
+});
+
+test('the compare picker finds a run by pasting the text it shows, branch included', () => {
+  const shown = runSelectionLabelWithBranch(run);
+  expect(shown).toContain(run.branch);
+  expect(compareFilter([run], shown)).toEqual([run]);
+  expect(filterRunOptions([run], { inputValue: shown })).toEqual([run]);
 });

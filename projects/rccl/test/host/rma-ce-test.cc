@@ -194,10 +194,10 @@ protected:
 
     ncclDevrState* devr = &comm_->devrState;
     devr->bigSize = 1;                // ncclDevrInitOnce: already-initialised
-    devr->lsaSize = kLsaSize;
-    devr->lsaSelf = kLsaSelf;
+    devr->lsaTeamSize = kLsaSize;
+    devr->lsaTeamSelf = kLsaSelf;
     lsaRankList_.assign(std::begin(kLsaWorld), std::end(kLsaWorld));
-    devr->lsaRankList = lsaRankList_.data();
+    devr->lsaTeamRankList = lsaRankList_.data();
 
     // Distinct hashes per rank, so no peer looks like it shares our process --
     // windowRegisterNonSym leaves same-process peers unmapped.
@@ -289,7 +289,7 @@ protected:
     free(comm_->devrState.winSorted);   // opaque here, but free() needs no type
     comm_->devrState.winSorted = nullptr;
     comm_->devrState.winSortedCount = comm_->devrState.winSortedCapacity = 0;
-    comm_->devrState.lsaRankList = nullptr;   // borrowed, not malloc'd
+    comm_->devrState.lsaTeamRankList = nullptr;   // borrowed, not malloc'd
     ResetCeFakes();
     // g_cuStreamBatchMemOp lives in rma_fakes, and the launch fixtures bind a
     // this-capturing lambda to it; without this the global outlives the fixture.
@@ -420,7 +420,7 @@ TEST_F(RmaCeInitTest, Init_DevrInitOnceFails_PropagatesAndLeavesUninitialised) {
   EXPECT_NE(ncclRmaCeInit(comm_.get()), ncclSuccess);
   EXPECT_FALSE(comm_->rmaState.rmaCeState.initialized);
   EXPECT_EQ(granularity.calls, 1);
-  comm_->devrState.lsaRankList = nullptr;  // freed on that failure path already
+  comm_->devrState.lsaTeamRankList = nullptr;  // pointed into lsaDomainRankList, freed on that failure path
 }
 
 // A failed window registration unwinds mid-context rather than leaving the state
@@ -602,6 +602,7 @@ TEST_F(RmaCeFinalizeTest, Finalize_StreamDestroyFails_IsIgnored) {
 // the state cleared rather than stopping at the failed free.
 TEST_F(RmaCeFinalizeTest, Finalize_DeviceFreeFails_Propagates) {
   ASSERT_EQ(ncclRmaCeInit(comm_.get()), ncclSuccess);
+  std::vector<void*> failedFrees{Ctx(0)->signalsDev, Ctx(0)->signalOpSeqsDev, Ctx(0)->signalConstDev};
   g_hipFree = [](void*) { return hipErrorInvalidValue; };
 
   EXPECT_EQ(ncclRmaCeFinalize(comm_.get()), ncclUnhandledCudaError);
@@ -609,6 +610,10 @@ TEST_F(RmaCeFinalizeTest, Finalize_DeviceFreeFails_Propagates) {
   // loop carried on instead of abandoning the context at the first one.
   EXPECT_EQ(deregistered_.size(), 1u);
   ExpectTornDown();
+
+  // The injected free failure deliberately leaves the fake malloc-backed
+  // device allocations live; reclaim them directly in the test harness.
+  for (void* ptr : failedFrees) std::free(ptr);
 }
 
 // Finalizing a comm that was never initialised is not an error: every field it

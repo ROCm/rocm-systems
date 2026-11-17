@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "cdna5_sim_test_common.h"
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "rocjitsu/vm/amdgpu/arithmetic_policy.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -145,14 +146,17 @@ TEST(DivisionTest, GuestModeAndFixupCausesMatchGfx1201) {
       // Policies are immutable while waves are active. FMAS needs numeric exactness;
       // FIXUP additionally reports FP status, so give each its own CU.
       config.arithmetic = {amdgpu::ArithmeticSemantics::BitExactEmpiricalNoFpStatus};
-      auto fmas_cu = amdgpu::ComputeUnitCore::create("division_fmas", config, &memory, &cache);
+      std::unique_ptr<amdgpu::ComputeUnitCore> fmas_cu;
+      ASSERT_NO_FATAL_FAILURE(rocjitsu::test::initialize_compute_unit(fmas_cu, "division_fmas",
+                                                                      config, &memory, &cache));
       auto *fmas_wf = fmas_cu->dispatch_wf(0, 0, 128, 32);
       ASSERT_NE(fmas_wf, nullptr);
       fmas_wf->set_exec(1);
       const uint32_t fmas_base = fmas_wf->vgpr_alloc().base;
       config.arithmetic = {amdgpu::ArithmeticSemantics::BitExactEmpirical};
-      std::unique_ptr<amdgpu::ComputeUnitCore> cu =
-          amdgpu::ComputeUnitCore::create("division", config, &memory, &cache);
+      std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+      ASSERT_NO_FATAL_FAILURE(
+          rocjitsu::test::initialize_compute_unit(cu, "division", config, &memory, &cache));
       amdgpu::Wavefront *wf = cu->dispatch_wf(0, 0, 128, 32);
       ASSERT_NE(wf, nullptr);
       wf->set_exec(1);

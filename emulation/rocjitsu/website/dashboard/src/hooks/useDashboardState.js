@@ -1,7 +1,9 @@
+import { compareRunExecution } from '../data/runOrdering.js';
+import { selectAutomaticReference } from '../data/branchSelectors.js';
 import { isJsonObject, isJsonValue } from '../data/jsonValues.js';
 import { THREAD_POLICIES } from '../data/runSchema.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { historyRanges } from '../config/historyRanges.js';
+import { DEFAULT_BENCHMARK_RANGE, DEFAULT_OVERVIEW_RANGE, historyRanges } from '../config/historyRanges.js';
 import { dashboardPages } from '../config/dashboardPages.js';
 import { MAX_BENCHMARK_CHARTS } from '../config/benchmarkGrid.js';
 
@@ -48,7 +50,8 @@ export function readDashboardRoute(href = globalThis.window?.location?.href ?? '
   };
   const route = {
     tab: field('view', 'overview', pages),
-    historyRange: field('range', 'ALL', ranges),
+    historyRange: field('range', DEFAULT_OVERVIEW_RANGE, ranges),
+    benchmarkRange: field('benchmarkRange', DEFAULT_BENCHMARK_RANGE, ranges),
     overviewCatalogId: field('catalog', null),
     preferences,
     comparisonPreferences,
@@ -74,6 +77,7 @@ export function buildDashboardUrl(href, snapshot) {
   const fields = {
     view: snapshot.tab,
     range: snapshot.historyRange,
+    benchmarkRange: snapshot.benchmarkRange,
     catalog: snapshot.overviewCatalogId,
     branch: snapshot.branchSelection.branch,
     run: snapshot.branchSelection.candidateId,
@@ -170,7 +174,7 @@ export function useDashboardState(data) {
     return { ...initial, comparisonPreferences: initial.comparisonPreferences && snapshotScope(data, initial.comparisonPreferences) };
   });
   const snapshotRef = useRef(snapshot);
-  const { preferences, comparisonPreferences, branchSelection, historyRange, overviewCatalogId, tab, comparisonBaselineId, comparisonCandidateId, routeError } = snapshot;
+  const { preferences, comparisonPreferences, branchSelection, historyRange, benchmarkRange, overviewCatalogId, tab, comparisonBaselineId, comparisonCandidateId, routeError } = snapshot;
   // The shell and active page share these filters; only canonical preferences
   // are stored. Comparison scope remains an independent part of the URL snapshot.
   const activePreferences = tab === 'compare' ? comparisonPreferences ?? preferences : preferences;
@@ -212,6 +216,7 @@ export function useDashboardState(data) {
   const setSuites = useCallback((next) => setFilter('suites', next), [setFilter]);
   const setModes = useCallback((next) => setFilter('modes', next), [setFilter]);
   const setHistoryRange = useCallback((next) => updateRoute((current) => ({ ...current, historyRange: resolveNext(next, current.historyRange) }), 'replaceState'), [updateRoute]);
+  const setBenchmarkRange = useCallback((next) => updateRoute((current) => ({ ...current, benchmarkRange: resolveNext(next, current.benchmarkRange) }), 'replaceState'), [updateRoute]);
   const setOverviewCatalogId = useCallback((next) => updateRoute((current) => ({ ...current, overviewCatalogId: resolveNext(next, current.overviewCatalogId) })), [updateRoute]);
   const setTab = useCallback((next) => updateRoute((current) => {
     const tab = resolveNext(next, current.tab);
@@ -242,6 +247,14 @@ export function useDashboardState(data) {
     if (routeError || !comparisonPreferences || !filterKeys.some((key) => comparisonPreferences[key] === null && data[key]?.length)) return;
     updateRoute((current) => ({ ...current, comparisonPreferences: snapshotScope(data, current.comparisonPreferences) }), 'replaceState');
   }, [data, comparisonPreferences, routeError, updateRoute]);
+  // Run comparison opens with a usable pair: the newest attempt against the latest develop
+  // attempt completed before it. Only when neither side is chosen and both exist; replaces history.
+  useEffect(() => {
+    if (tab !== 'compare' || routeError || comparisonCandidateId || comparisonBaselineId) return;
+    const candidate = (data.allRuns ?? []).slice().sort(compareRunExecution).at(-1);
+    const baseline = candidate ? selectAutomaticReference(data, candidate).run : null;
+    if (candidate && baseline) updateRoute((current) => ({ ...current, comparisonCandidateId: candidate.runId, comparisonBaselineId: baseline.runId }), 'replaceState');
+  }, [tab, data, routeError, comparisonCandidateId, comparisonBaselineId, updateRoute]);
   useEffect(() => {
     try { globalThis.window?.localStorage?.setItem(FILTER_STORAGE_KEY, JSON.stringify(preferences)); } catch { /* Storage is optional. */ }
   }, [preferences]);
@@ -260,6 +273,8 @@ export function useDashboardState(data) {
     filters,
     ...filters,
     historyRange,
+    benchmarkRange,
+    setBenchmarkRange,
     overviewCatalogId,
     setOverviewCatalogId,
     tab,

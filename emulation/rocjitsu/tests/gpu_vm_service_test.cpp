@@ -30,7 +30,6 @@
 #include <limits>
 #include <memory>
 #include <mutex>
-#include <new>
 #include <optional>
 #include <span>
 #include <stdexcept>
@@ -39,16 +38,16 @@
 
 namespace rocjitsu::amdgpu {
 
-class GpuQueueRegistryTestAccess {
-public:
-  static void fail_next_registry_allocation(GpuQueueRegistry &registry) {
-    std::lock_guard lock(registry.mutex_);
-    registry.fail_next_registry_allocation_ = true;
-  }
-};
-
 class CommandProcessorCloseTestAccess {
 public:
+  static bool retain_pending_execution(CommandProcessor &command_processor) {
+    std::lock_guard<std::recursive_mutex> lock(command_processor.hw_queue_mutex_);
+    if (command_processor.compute_queues_.size() != 1)
+      return false;
+    command_processor.compute_queues_.front().entries.emplace_back();
+    return true;
+  }
+
   static bool fetch_first_queue(CommandProcessor &command_processor) {
     std::lock_guard<std::recursive_mutex> lock(command_processor.hw_queue_mutex_);
     if (command_processor.compute_queues_.size() != 1)
@@ -606,7 +605,6 @@ enum class BlockedQueueOperation : uint8_t {
   PrepareClose,
   Reconfigure,
   Submit,
-  DestroyBinding,
 };
 
 class RecordingQueueBindingFactory final : public QueueBindingFactory {
@@ -657,7 +655,6 @@ private:
         ++state_->destruction_calls;
         shared_->condition.notify_all();
       }
-      shared_->block(BlockedQueueOperation::DestroyBinding);
       try {
         std::lock_guard lock(shared_->mutex);
         if (shared_->destruction_observer)
@@ -848,6 +845,10 @@ TEST(GpuVmService, TwoQueuesRetainOneAddressSpace) {
   ASSERT_TRUE(second);
   EXPECT_EQ(command_processor.queue_address_space_for_test(1, 7), address_space);
   EXPECT_EQ(command_processor.queue_address_space_for_test(2, 7), address_space);
+  EXPECT_EQ(command_processor.queue_process_identity_kind_for_test(1, 7),
+            ProcessIdentityKind::Pasid);
+  EXPECT_EQ(command_processor.queue_process_identity_kind_for_test(2, 7),
+            ProcessIdentityKind::Pasid);
   ASSERT_TRUE(gpu_vm.lookup(address_space));
   EXPECT_EQ(gpu_vm.lookup(address_space)->queue_references, 2u);
   EXPECT_FALSE(gpu_vm.unregister_address_space(address_space));
@@ -2624,6 +2625,25 @@ TEST(GpuVmService, AqlReconfigureRejectsInvalidRingGeometry) {
   EXPECT_TRUE(gpu_vm.unregister_address_space(address_space));
 }
 
+TEST(GpuVmService, PreemptAqlCloseCancelsPendingExecution) {
+  GpuVm gpu_vm;
+  GpuQueueRegistry queues(gpu_vm);
+  CommandProcessor command_processor("cp");
+  const AddressSpaceHandle address_space = register_byte_address_space(gpu_vm, 7, 0x11);
+  command_processor.set_gpu_vm(&gpu_vm);
+  const QueueHandle queue =
+      queues.register_queue(queue_request(address_space, command_processor, 1));
+  ASSERT_TRUE(queue);
+  ASSERT_TRUE(CommandProcessorCloseTestAccess::retain_pending_execution(command_processor));
+
+  EXPECT_EQ(queues.unregister_queue(queue).status, QueueCloseStatus::Busy);
+  EXPECT_EQ(command_processor.registered_queue_count_for_test(), 1u);
+  EXPECT_EQ(queues.unregister_queue(queue, QueueCloseMode::Preempt).status,
+            QueueCloseStatus::Closed);
+  EXPECT_EQ(command_processor.registered_queue_count_for_test(), 0u);
+  EXPECT_TRUE(gpu_vm.unregister_address_space(address_space));
+}
+
 TEST(GpuVmService, GracefulAqlCloseWaitsForRetiredCursorPublication) {
   GpuVm gpu_vm;
   CommandProcessor command_processor("cp");
@@ -2644,6 +2664,8 @@ TEST(GpuVmService, GracefulAqlCloseWaitsForRetiredCursorPublication) {
   EXPECT_EQ(blocked.status, QueueCloseStatus::Busy);
   EXPECT_TRUE(queues.contains(queue));
   EXPECT_EQ(command_processor.registered_queue_count_for_test(), 1u);
+  EXPECT_EQ(queues.unregister_queue(queue, QueueCloseMode::Preempt).status, QueueCloseStatus::Busy);
+  EXPECT_TRUE(queues.contains(queue));
 
   ASSERT_TRUE(CommandProcessorCloseTestAccess::retry_cursor_publication(command_processor));
   EXPECT_TRUE(queues.unregister_queue(queue));
@@ -2668,6 +2690,8 @@ TEST(GpuVmService, GracefulAqlCloseWaitsForCompletionPublicationRetry) {
   EXPECT_EQ(blocked.status, QueueCloseStatus::Busy);
   EXPECT_TRUE(queues.contains(queue));
   EXPECT_EQ(command_processor.registered_queue_count_for_test(), 1u);
+  EXPECT_EQ(queues.unregister_queue(queue, QueueCloseMode::Preempt).status, QueueCloseStatus::Busy);
+  EXPECT_TRUE(queues.contains(queue));
 
   ASSERT_TRUE(
       CommandProcessorCloseTestAccess::clear_idle_completion_publication(command_processor));
@@ -2692,6 +2716,9 @@ TEST(GpuVmService, TerminalAqlPublicationFailureRequiresForceCancel) {
   EXPECT_EQ(faulted.status, QueueCloseStatus::Faulted);
   EXPECT_TRUE(queues.contains(queue));
   EXPECT_EQ(command_processor.registered_queue_count_for_test(), 1u);
+  EXPECT_EQ(queues.unregister_queue(queue, QueueCloseMode::Preempt).status,
+            QueueCloseStatus::Faulted);
+  EXPECT_TRUE(queues.contains(queue));
 
   const QueueCloseResult canceled = queues.unregister_queue(queue, QueueCloseMode::ForceCancel);
   EXPECT_EQ(canceled.status, QueueCloseStatus::Closed);
@@ -2778,17 +2805,26 @@ TEST(GpuVmService, CloseAllPublishesItsEpochAfterBlockedRegistrationRollsBack) {
       std::make_shared<RecordingQueueBindingFactory>(BlockedQueueOperation::CreateBinding);
   AddressSpaceHandle address_space = register_byte_address_space(gpu_vm, 7, 0x11);
   const uint64_t old_epoch = queues.lifecycle_epoch();
+  std::promise<void> destruction_started;
+  std::promise<void> allow_destruction;
+  std::shared_future<void> destruction_release = allow_destruction.get_future().share();
+  binding_factory->set_destruction_observer([&]() {
+    destruction_started.set_value();
+    destruction_release.wait();
+  });
 
   std::future<QueueHandle> registration = std::async(std::launch::async, [&]() {
     return queues.register_queue(queue_request(address_space, binding_factory, 1));
   });
   if (!binding_factory->wait_until_callback_is_blocked()) {
+    allow_destruction.set_value();
     binding_factory->release_callback();
     (void)registration.get();
     FAIL() << "the binding factory callback did not block";
   }
   std::future<void> close_all = std::async(std::launch::async, [&]() { queues.close_all(); });
   if (!wait_until_registration_admission_closes(queues)) {
+    allow_destruction.set_value();
     binding_factory->release_callback();
     (void)registration.get();
     close_all.get();
@@ -2800,6 +2836,19 @@ TEST(GpuVmService, CloseAllPublishesItsEpochAfterBlockedRegistrationRollsBack) {
   EXPECT_EQ(close_all.wait_for(std::chrono::milliseconds(50)), std::future_status::timeout);
 
   binding_factory->release_callback();
+  const std::future_status destruction_status =
+      destruction_started.get_future().wait_for(std::chrono::seconds(5));
+  EXPECT_EQ(destruction_status, std::future_status::ready);
+  if (destruction_status == std::future_status::ready) {
+    EXPECT_EQ(close_all.wait_for(std::chrono::milliseconds(50)), std::future_status::timeout);
+    EXPECT_EQ(queues.lifecycle_epoch(), old_epoch);
+    const auto retained = gpu_vm.lookup(address_space);
+    EXPECT_TRUE(retained);
+    if (retained) {
+      EXPECT_EQ(retained->queue_references, 1u);
+    }
+  }
+  allow_destruction.set_value();
   EXPECT_FALSE(registration.get());
   close_all.get();
   EXPECT_EQ(binding_factory->create_binding_calls(), 1u);
@@ -2807,56 +2856,6 @@ TEST(GpuVmService, CloseAllPublishesItsEpochAfterBlockedRegistrationRollsBack) {
   EXPECT_EQ(binding_factory->destruction_calls(0), 1u);
   EXPECT_EQ(queues.lifecycle_epoch(), old_epoch + 1);
   EXPECT_EQ(queues.active_queues(), 0u);
-  ASSERT_TRUE(gpu_vm.lookup(address_space));
-  EXPECT_EQ(gpu_vm.lookup(address_space)->queue_references, 0u);
-  EXPECT_TRUE(gpu_vm.unregister_address_space(address_space));
-}
-
-TEST(GpuVmService, CloseAllWaitsForFailedRegistrationCleanupWithoutResettingVm) {
-  GpuMemory memory("memory");
-  GpuVm gpu_vm;
-  GpuQueueRegistry queues(gpu_vm);
-  auto binding_factory =
-      std::make_shared<RecordingQueueBindingFactory>(BlockedQueueOperation::DestroyBinding);
-  AddressSpaceHandle address_space = register_byte_address_space(gpu_vm, 7, 0x11);
-  const uint64_t old_queue_epoch = queues.lifecycle_epoch();
-  const uint64_t old_vm_epoch = gpu_vm.reset_epoch();
-
-  GpuQueueRegistryTestAccess::fail_next_registry_allocation(queues);
-  std::future<QueueHandle> registration = std::async(std::launch::async, [&]() {
-    return queues.register_queue(queue_request(address_space, binding_factory, 1));
-  });
-  if (!binding_factory->wait_until_callback_is_blocked()) {
-    binding_factory->release_callback();
-    try {
-      (void)registration.get();
-    } catch (...) {
-    }
-    FAIL() << "failed registration did not enter binding cleanup";
-  }
-
-  std::future<void> close_all = std::async(std::launch::async, [&]() { queues.close_all(); });
-  if (!wait_until_registration_admission_closes(queues)) {
-    binding_factory->release_callback();
-    try {
-      (void)registration.get();
-    } catch (...) {
-    }
-    close_all.get();
-    FAIL() << "close_all did not close queue admission";
-  }
-
-  EXPECT_EQ(close_all.wait_for(std::chrono::milliseconds(50)), std::future_status::timeout);
-  ASSERT_TRUE(gpu_vm.lookup(address_space));
-  EXPECT_EQ(gpu_vm.lookup(address_space)->queue_references, 1u);
-  EXPECT_EQ(binding_factory->destruction_calls(0), 1u);
-
-  binding_factory->release_callback();
-  EXPECT_THROW((void)registration.get(), std::bad_alloc);
-  close_all.get();
-  EXPECT_EQ(binding_factory->destruction_calls(0), 1u);
-  EXPECT_EQ(queues.lifecycle_epoch(), old_queue_epoch + 1);
-  EXPECT_EQ(gpu_vm.reset_epoch(), old_vm_epoch);
   ASSERT_TRUE(gpu_vm.lookup(address_space));
   EXPECT_EQ(gpu_vm.lookup(address_space)->queue_references, 0u);
   EXPECT_TRUE(gpu_vm.unregister_address_space(address_space));

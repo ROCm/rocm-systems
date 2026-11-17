@@ -25,6 +25,12 @@ THE SOFTWARE.
 
 #include <cstdint>
 
+// Grid bound of a DDA call that replaces another backend: at most its blocks and threads per block (0 = no bound).
+struct rcclDdaLaunchCap {
+  uint32_t blocks;
+  uint32_t threads;
+};
+
 // Single, self-contained description of which implementation RCCL selected for a
 // collective. This is the one source of truth that both the dispatch path
 // (ncclXxx_impl / taskAppend) and the reporting path (rcclGetCollImplInfo, used
@@ -44,6 +50,9 @@ struct rcclCollDecision {
   // taskAppend() so it never recomputes graph-capture state.
   bool ceCapturing;
   bool ceArGraphAllowed;
+  bool symkTdmOnly;  // symk admitted only through the TDM window, so only a TDM kernel may run
+  // Set when DDA replaces another backend for this call; the DDA launchers stay within it.
+  rcclDdaLaunchCap ddaCap;
 };
 
 

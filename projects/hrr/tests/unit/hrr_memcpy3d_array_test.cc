@@ -69,7 +69,7 @@ std::vector<uint8_t> make_record(const Spelling& s, hipMemcpyKind kind, uint64_t
   parms.extent = make_hipExtent(16, 2, 1);
   parms.kind = kind;
   std::memcpy(rec.data() + s.parms_offset, &parms, sizeof(parms));
-  const uint64_t hash[2] = {hash_lo, hash_lo ? 2 : 0};
+  const uint64_t hash[2] = {hash_lo, hash_lo ? UINT64_C(2) : UINT64_C(0)};
   const size_t at = s.hashes_offset + (kind == hipMemcpyHostToDevice ? 0 : 2 * sizeof(uint64_t));
   std::memcpy(rec.data() + at, hash, sizeof(hash));
   return rec;

@@ -11,7 +11,7 @@
 #include "common/wave.h"
 #include "dot/dot2_cases.h"
 #include "dot/helpers.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_dot.h"
 #include <bit>
 
 #include <gtest/gtest.h>

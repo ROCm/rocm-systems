@@ -37,8 +37,21 @@
 
 namespace rocshmem {
 
+namespace {
+
+// The node-local IPC group of the TcpBootstrap path, as global ranks. Both bootstrap queries
+// memoise their result, so calling this again after ipcHostInit returns the same group.
+std::vector<int> ipcGroupRanks(TcpBootstrap *bootstr) {
+  // For VMM_FABRIC, use pod-based IPC capability detection; otherwise use local ranks
+  const bool use_pod_detection =
+      (get_default_allocator()->get_type() == AllocatorTypeVMMFabric);
+  return use_pod_detection ? bootstr->getIpcCapableRanks() : bootstr->getLocalRanks();
+}
+
+}  // namespace
+
 __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
-                                     MPI_Comm thread_comm, MPI_Comm *shmcomm_out) {
+                                     MPI_Comm thread_comm) {
   MPI_Comm shmcomm;
   std::vector<int> ipc_ranks;
 
@@ -187,20 +200,14 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
     }
   }
 
-  if (shmcomm_out != nullptr) {
-    *shmcomm_out = shmcomm;
-  }
+  shm_comm = shmcomm;
+  owns_shm_comm = true;
 }
 
 __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
-                                     TcpBootstrap *bootstr,
-                                     std::vector<int> *shm_ranks_out) {
-  // Check if we should use pod-based detection (for VMM Fabric allocator)
+                                     TcpBootstrap *bootstr) {
   HIPAllocator *allocator = get_default_allocator();
-  bool use_pod_detection = (allocator->get_type() == AllocatorTypeVMMFabric);
-
-  // For VMM_FABRIC, use pod-based IPC capability detection; otherwise use local ranks
-  auto shm_ranks = use_pod_detection ? bootstr->getIpcCapableRanks() : bootstr->getLocalRanks();
+  const std::vector<int> shm_ranks = ipcGroupRanks(bootstr);
   shm_size = shm_ranks.size();
   if (shm_size == 0) {
     printf("Error in detecting IPC / shared memory rank, shm_size is 0\n");
@@ -273,10 +280,6 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
     ipcDetectPattern(shm_ranks.data(), shm_size);
     CHECK_HIP(hipMemcpy(pes_with_ipc_avail, shm_ranks.data(), shm_size * sizeof(int), hipMemcpyHostToDevice));
   }
-
-  if (shm_ranks_out != nullptr) {
-    *shm_ranks_out = std::move(shm_ranks);
-  }
 }
 
 __host__ void IpcOnImpl::ipcHostStop() {
@@ -292,6 +295,11 @@ __host__ void IpcOnImpl::ipcHostStop() {
   if (nullptr != pes_with_ipc_avail) {
     CHECK_HIP(hipFree(pes_with_ipc_avail));
   }
+
+  if (owns_shm_comm) {
+    mpilib_ftable_.Comm_free(&shm_comm);
+    owns_shm_comm = false;
+  }
 }
 
 
@@ -299,17 +307,16 @@ __host__ void IpcOnImpl::ipcHostStop() {
 
 __host__ void IpcSdmaImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
                                        MPI_Comm thread_comm) {
-  MPI_Comm shmcomm = MPI_COMM_NULL;
-  IpcOnImpl::ipcHostInit(my_pe, heap_bases, thread_comm, &shmcomm);
+  IpcOnImpl::ipcHostInit(my_pe, heap_bases, thread_comm);
   sdmaImpl_.sdmaHostInit(my_pe, shm_size, shm_rank, [&](int *values) {
-    mpilib_ftable_.Allgather(MPI_IN_PLACE, 1, MPI_INT, values, 1, MPI_INT, shmcomm);
+    mpilib_ftable_.Allgather(MPI_IN_PLACE, 1, MPI_INT, values, 1, MPI_INT, shm_comm);
   });
 }
 
 __host__ void IpcSdmaImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
                                        TcpBootstrap *bootstrap) {
-  std::vector<int> shm_ranks;
-  IpcOnImpl::ipcHostInit(my_pe, heap_bases, bootstrap, &shm_ranks);
+  IpcOnImpl::ipcHostInit(my_pe, heap_bases, bootstrap);
+  const std::vector<int> shm_ranks = ipcGroupRanks(bootstrap);
   sdmaImpl_.sdmaHostInit(my_pe, shm_size, shm_rank, [&](int *values) {
     bootstrap->groupAllGather(values, sizeof(int), shm_ranks);
   });

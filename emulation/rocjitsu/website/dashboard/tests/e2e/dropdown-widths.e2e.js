@@ -11,8 +11,7 @@ async function expectAlignedPopup(page, picker, resizeWidths = []) {
     if (width) await page.setViewportSize({ width, height: 900 });
     await expect.poll(() => primary.evaluate((node) => {
       const text = node.querySelector('.MuiTypography-body2, .MuiListItemText-primary') ?? node;
-      const scale = Number(getComputedStyle(document.body).zoom);
-      return parseFloat(getComputedStyle(text).fontSize) - 14 * scale;
+      return parseFloat(getComputedStyle(text).fontSize) - 14;
     })).toBeCloseTo(0, 1);
     await expect.poll(async () => {
     const anchor = await field.evaluate((node) => {

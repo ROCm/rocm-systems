@@ -473,11 +473,17 @@ TEST(KernelDescriptorScan, InitialSgprCountFoldsTheSystemBlockOntoTheUserBlock) 
                      rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_INFO, 1);
   EXPECT_EQ(kernel_descriptor_initial_sgpr_count(kArch, info), 9u);
 
-  // ENABLE_PRIVATE_SEGMENT is deliberately excluded.
+  // Architected-flat-scratch targets do not append an ordinary SGPR.
   KD priv = info;
   RJ_AMDHSA_BITS_SET(priv.compute_pgm_rsrc2,
                      rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT, 1);
   EXPECT_EQ(kernel_descriptor_initial_sgpr_count(kArch, priv), 9u);
+  for (const auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
+                          ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+    SCOPED_TRACE(arch);
+    EXPECT_EQ(kernel_descriptor_initial_sgpr_count(arch, info), 9u);
+    EXPECT_EQ(kernel_descriptor_initial_sgpr_count(arch, priv), 10u);
+  }
 }
 
 } // namespace rocjitsu

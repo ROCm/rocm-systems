@@ -6,12 +6,12 @@
 
 #include "fp/half_exponent.h"
 #include "common/alu.h"
-#include "common/float_formats.h"
-#include "common/internal.h"
+#include "common/float_encoding.h"
 #include "common/math.h"
+#include "common/validation.h"
 #include "fp/half_fma_scalar.h"
 #include "register/dpp.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 
 #include <stdint.h>
 
@@ -21,7 +21,8 @@ namespace {
 // pipeline. Bounded finite powers of two are exact in double; integer narrowing
 // applies guest rounding without the original ScopedFenv guards.
 int ldexp_rounded(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags,
-                  uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b) {
+                  uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                  bool quiet_snan) {
   const unsigned a_shift = instruction_flags & RJ_ARITH_ALU_HIGH_A ? 16 : 0;
   const unsigned b_shift = instruction_flags & RJ_ARITH_ALU_HIGH_B ? 16 : 0;
   const unsigned d_shift = instruction_flags & RJ_ARITH_ALU_HIGH_D ? 16 : 0;
@@ -40,7 +41,7 @@ int ldexp_rounded(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags
     const unsigned magnitude = bits & 0x7fff;
     uint16_t encoded;
     if (magnitude >= 0x7c00) {
-      encoded = bits | (magnitude > 0x7c00 ? 0x200 : 0);
+      encoded = bits | (magnitude > 0x7c00 && quiet_snan ? 0x200 : 0);
       if ((instruction_flags & RJ_ARITH_ALU_CLAMP) &&
           !(magnitude > 0x7c00 && (flags & RJ_ARITH_FP_DX10_CLAMP_OFF))) {
         encoded = rocjitsu::arith::half_fma_clamp(encoded);
@@ -86,20 +87,20 @@ int ldexp_rounded(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags
 // Evaluate FP16 LDEXP with guest rounding/denormal controls, preserving inactive destinations.
 [[gnu::noinline]] int ldexp_guest(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
-                                  const uint32_t *const *b, bool rdna3);
+                                  const uint32_t *const *b, bool rdna3, bool force_quiet_snan);
 
 // Scale or decompose FP16 exponents for the selected lanes. Reject invalid controls before
 // changing outputs.
 template <bool Ldexp, bool GuestDenormals = false>
 int half_exponent(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                   uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
-                  bool rdna3 = false) {
+                  bool rdna3 = false, bool force_quiet_snan = false) {
   if (instruction_flags >> 32) {
     return rocjitsu::arith::execute_dpp(flags, exec_mask, instruction_flags, a,
                                         [&](uint32_t exec_mask, const uint32_t *const *source) {
                                           return half_exponent<Ldexp, GuestDenormals>(
                                               flags, exec_mask, uint32_t(instruction_flags), d,
-                                              source, b, rdna3);
+                                              source, b, rdna3, force_quiet_snan);
                                         });
   }
   const uint32_t known = RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_NEG_A | RJ_ARITH_ALU_OMOD_HALF |
@@ -120,15 +121,41 @@ int half_exponent(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags
   }
   if constexpr (Ldexp) {
     if (rocjitsu::arith::is_exact(flags) || (flags & RJ_ARITH_FP_ROUND_MASK)) {
-      return ldexp_rounded(flags, exec_mask, uint32_t(instruction_flags), d, a, b);
+      // gfx11 exact semantics keep signaling NaNs when IEEE is clear.
+      const bool quiet_snan = force_quiet_snan || !rdna3 || (flags & RJ_ARITH_FP_IEEE_MODE) ||
+                              !rocjitsu::arith::is_exact(flags);
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+      if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+        rocjitsu::arith::half_ldexp_exact_x86_64_v4(flags, exec_mask, uint32_t(instruction_flags),
+                                                    d[0], a[0], b[0], quiet_snan);
+        return RJ_ARITH_SUCCESS;
+      }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+      if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+        rocjitsu::arith::half_ldexp_exact_x86_64_v3(flags, exec_mask, uint32_t(instruction_flags),
+                                                    d[0], a[0], b[0], quiet_snan);
+        return RJ_ARITH_SUCCESS;
+      }
+#endif
+      return ldexp_rounded(flags, exec_mask, uint32_t(instruction_flags), d, a, b, quiet_snan);
     }
     if constexpr (!GuestDenormals) {
       if (flags & (RJ_ARITH_FP_FLUSH_INPUT_DENORMALS | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS |
                    RJ_ARITH_FP_DX10_CLAMP_OFF)) {
-        return ldexp_guest(flags, exec_mask, instruction_flags, d, a, b, rdna3);
+        return ldexp_guest(flags, exec_mask, instruction_flags, d, a, b, rdna3, force_quiet_snan);
       }
     }
   }
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if constexpr (!Ldexp) {
+    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+      rocjitsu::arith::half_frexp_exp_x86_64_v4(flags, exec_mask, uint32_t(instruction_flags), d[0],
+                                                a[0]);
+      return RJ_ARITH_SUCCESS;
+    }
+  }
+#endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
     if constexpr (GuestDenormals) {
@@ -207,9 +234,10 @@ int half_exponent(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags
 // Evaluate FP16 LDEXP with guest rounding/denormal controls, preserving inactive destinations.
 [[gnu::noinline]] int ldexp_guest(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
-                                  const uint32_t *const *b, bool rdna3) {
+                                  const uint32_t *const *b, bool rdna3, bool force_quiet_snan) {
   // Separate entry prevents loop merging from adding guest checks to default arithmetic.
-  return half_exponent<true, true>(flags, exec_mask, instruction_flags, d, a, b, rdna3);
+  return half_exponent<true, true>(flags, exec_mask, instruction_flags, d, a, b, rdna3,
+                                   force_quiet_snan);
 }
 
 // Scale or decompose FP16 exponents for Wave64. Reject invalid controls before changing
@@ -217,10 +245,10 @@ int half_exponent(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags
 template <bool Ldexp>
 int half_exponent_wave64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                          uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
-                         bool rdna3 = false) {
+                         bool rdna3 = false, bool force_quiet_snan = false) {
   // Validate before either Wave64 half can modify outputs, even when EXEC is empty.
-  if (int error =
-          half_exponent<Ldexp>(flags, 0, instruction_flags, nullptr, nullptr, nullptr, rdna3)) {
+  if (int error = half_exponent<Ldexp>(flags, 0, instruction_flags, nullptr, nullptr, nullptr,
+                                       rdna3, force_quiet_snan)) {
     return error;
   }
   if (!exec_mask) {
@@ -234,7 +262,7 @@ int half_exponent_wave64(uint64_t flags, uint64_t exec_mask, uint64_t instructio
     const uint32_t *exponent = Ldexp ? b[0] + half * 32 : nullptr;
     if (int error =
             half_exponent<Ldexp>(flags, uint32_t(exec_mask >> (half * 32)), half_instruction_flags,
-                                 &dest, &source, &exponent, rdna3)) {
+                                 &dest, &source, &exponent, rdna3, force_quiet_snan)) {
       return error;
     }
   }
@@ -381,4 +409,44 @@ int rj_arith_v_frexp_exp_i16_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_
   }
   return rj_arith_v_frexp_exp_i16_f16_w64_gfx12(flags & ~RJ_ARITH_FP_DX10_CLAMP_OFF, exec_mask,
                                                 instruction_flags, d, a, trapsts);
+}
+
+// CDNA retains quieting of signaling NaNs independently of IEEE mode.
+int rj_arith_v_ldexp_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts) {
+  // Compatibility inherits the old model; it is not CDNA empirical qualification.
+  if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return half_exponent<true>(flags, exec_mask, instruction_flags, d, a, b, true, true);
+}
+
+// CDNA retains quieting of signaling NaNs independently of IEEE mode.
+int rj_arith_v_ldexp_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts) {
+  // Compatibility inherits the old model; it is not CDNA empirical qualification.
+  if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return half_exponent_wave64<true>(flags, exec_mask, instruction_flags, d, a, b, true, true);
 }

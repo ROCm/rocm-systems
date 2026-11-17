@@ -1,0 +1,16 @@
+# clang-tidy configuration for RCCL.
+
+Checks: >
+  -*,
+  readability-function-cognitive-complexity
+
+CheckOptions:
+  # A don't-make-it-worse line, not a target. At 300 the tree reports seven
+  # functions, the worst being IbCastInitDevices at 675; most RCCL functions
+  # are an order of magnitude below. Lower it as those seven are dealt with.
+  readability-function-cognitive-complexity.Threshold: 300
+  # IgnoreMacros stays at its default of false: RCCL's control flow runs
+  # through NCCLCHECK and friends, and those branches are real.
+
+# RCCL's own sources only, not the ROCm headers they pull in.
+HeaderFilterRegex: '.*/(src|plugins|tools)/.*'
