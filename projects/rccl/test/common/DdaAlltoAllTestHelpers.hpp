@@ -40,13 +40,6 @@ inline bool testRcclDdaAlltoAllThresholdEnabled(
       testDdaAlltoAllThreshold(comm));
 }
 
-// Mirrors dda_alltoall_ipc.cu: in-kernel staging copy on single-block launches only.
-// The fabric path always stages via a pre-kernel memcpy.
-inline bool testAlltoAllUsesInKernelStagingCopy(size_t countPerRank, ncclDataType_t datatype) {
-  const size_t bytesPerRank = countPerRank * static_cast<size_t>(ncclTypeSize(datatype));
-  return dda::common::ddaAlltoAllSingleBlockGrid(bytesPerRank, /* typeSize= */ 1);
-}
-
 inline size_t testAlltoAllDdaIpcStagingBytes(size_t count, int nRanks, size_t typeSize) {
   return count * static_cast<size_t>(nRanks) * typeSize;
 }
@@ -86,11 +79,5 @@ constexpr size_t kAlltoAllFloat32CountAt4MbThreshold =
 constexpr size_t kAlltoAllFloat32CountAt1MbLL128Threshold =
     1048576UL /
     (static_cast<size_t>(nccl_dda_detail::kDdaNranks) * sizeof(float));
-
-// 4 KiB/rank float32: single-block grid on 8-rank IPC launch (in-kernel copy path).
-constexpr size_t kAlltoAllFloat32CountAt4KbPerRank = 1024;
-
-// 8 KiB/rank float32: multi-block grid (pre-kernel memcpy path).
-constexpr size_t kAlltoAllFloat32CountAt8KbPerRank = 2048;
 
 } // namespace RcclUnitTesting
