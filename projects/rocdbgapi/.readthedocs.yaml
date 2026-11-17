@@ -16,3 +16,9 @@ build:
    os: ubuntu-22.04
    tools:
       python: "3.10"
+   jobs:
+      post_checkout:
+        - mkdir -p $HOME/.local/bin /tmp/doxygen
+        - curl -fsSL https://github.com/doxygen/doxygen/releases/download/Release_1_14_0/doxygen-1.14.0.linux.bin.tar.gz | tar xz -C /tmp/doxygen --strip-components=1
+        - cp /tmp/doxygen/bin/doxygen $HOME/.local/bin/doxygen
+        - $HOME/.local/bin/doxygen --version
