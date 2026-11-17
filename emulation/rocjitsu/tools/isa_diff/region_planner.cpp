@@ -444,7 +444,8 @@ RegionPair build_region(const KernelModel &om, const KernelModel &nm, const Cand
       const KernelModel &m = side == &c.o ? om : nm;
       for (size_t i = side->begin; i < side->end; ++i)
         mfma = mfma || m.insts()[i].mnemonic.rfind("v_mfma", 0) == 0 ||
-               m.insts()[i].mnemonic.rfind("v_smfmac", 0) == 0;
+               m.insts()[i].mnemonic.rfind("v_smfmac", 0) == 0 ||
+               is_lds_transpose(m.insts()[i].mnemonic);
     }
     if (mfma) {
       const unsigned lanes = om.artifact().target.wave_size;
@@ -457,9 +458,10 @@ RegionPair build_region(const KernelModel &om, const KernelModel &nm, const Cand
         full.source = "mfma_full_exec";
         k.constraints.push_back(full);
       }
-      k.sources.push_back({"mfma_full_exec: the region issues a matrix instruction under the "
-                           "entry EXEC, which LLVM keeps whole-wave: EXEC is all ones (inactive "
-                           "lanes would feed the matrix product)",
+      k.sources.push_back({"mfma_full_exec: the region issues a matrix instruction or an LDS "
+                           "transpose load under the entry EXEC, which LLVM keeps whole-wave: "
+                           "EXEC is all ones (inactive lanes would feed the matrix product; a "
+                           "transpose load needs a full EXEC)",
                            "mfma_full_exec"});
     }
     k.sources.push_back({"exec_nonzero: EXEC is the entry EXEC on every path to the region "
@@ -687,7 +689,7 @@ RegionPair build_region(const KernelModel &om, const KernelModel &nm, const Cand
       }
       // LDS addresses that are region inputs: inside the window, dword aligned, with room
       // for the instruction offsets.
-      VSet lds_addr;
+      VSet lds_addr, lds_addr8;
       for (const auto *side : {&region.old_side, &region.new_side}) {
         const KernelModel &m = side == &region.old_side ? om : nm;
         VSet vwritten;
@@ -697,6 +699,9 @@ RegionPair build_region(const KernelModel &om, const KernelModel &nm, const Cand
             for (const SourceOperand &so : source_operands(*ref.inst, m.artifact().target))
               if (so.vlocs.any()) {
                 lds_addr |= so.vlocs & ~vwritten & k.ventry_equal;
+                // The B64 transpose loads need eight-byte addresses (else undefined).
+                if (ref.mnemonic.rfind("ds_read_b64_tr_", 0) == 0)
+                  lds_addr8 |= so.vlocs & ~vwritten & k.ventry_equal;
                 break; // the address is the first VGPR source
               }
           vwritten |= ref.fx.vwrites;
@@ -704,11 +709,12 @@ RegionPair build_region(const KernelModel &om, const KernelModel &nm, const Cand
       }
       for (unsigned r = 0; r < kNumVgprs; ++r)
         if (lds_addr.test(r))
-          k.vinput_masks.emplace_back(r, 0x7ffcu);
+          k.vinput_masks.emplace_back(r, lds_addr8.test(r) ? 0x7ff8u : 0x7ffcu);
       if (lds_addr.any())
         k.sources.push_back({"LDS addresses that are region inputs (" + format_vgprs(lds_addr) +
                                  ") lie inside the LDS window: every lane is masked with "
-                                 "0x7ffc (outside the allocation LLVM is undefined)",
+                                 "0x7ffc (outside the allocation LLVM is undefined), 0x7ff8 "
+                                 "for a B64 transpose load (eight-byte addresses)",
                              "memory_model"});
       if (resource)
         k.sources.push_back({"buffer resources that are region inputs are the private segment "

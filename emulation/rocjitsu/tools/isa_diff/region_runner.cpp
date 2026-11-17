@@ -556,7 +556,9 @@ std::unique_ptr<RegionRunner> RegionRunner::create(const std::vector<RegionInst>
     // Classification needs a decode; the memory decision only needs the mnemonic.
     const size_t sp = ri.text.find(' ');
     const std::string mnemonic = sp == std::string::npos ? ri.text : ri.text.substr(0, sp);
-    r->is_mem_.push_back(is_region_memory(mnemonic));
+    // Lane permutes issue like LDS instructions (step(): the LDS counter as the hardware
+    // keeps it), though they access no memory.
+    r->is_mem_.push_back(is_region_memory(mnemonic) || is_region_lane_permute(mnemonic));
     r->frame_access_.push_back(is_frame_access(mnemonic, ri.text));
     r->has_memory_ = r->has_memory_ || r->is_mem_.back();
   }

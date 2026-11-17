@@ -1305,3 +1305,28 @@ What the inconclusives lack (classified on 9cf9729ef9's run, 45 functions):
 | `ds_bpermute_b32` and `ds_read_b64_tr_b16` | 4 | not modelled in regions |
 | calls (`s_swappc`, GOT) | 2 | not modelled |
 | pending-memory false conflict | 1 | a vector load overwriting a destination pending on the in-order vmcnt queue is no conflict (fixed); its address operands still conflict |
+
+## Lane permutes and LDS transpose loads (2026-11-16)
+
+`ds_bpermute_b32`/`ds_permute_b32` and the LDS transpose loads (`ds_read_b64_tr_b16`,
+`_tr_b8`, `_tr_b4`, `ds_read_b96_tr_b6`) kept the 4 awq GEMM kernels of PR 243123 out of
+regions and `f0`. RocJITsu implements both: the permutes finish in `execute_impl` (no
+memory state; a backward permute reads only active source lanes), the transpose loads are
+LDS loads whose elements the LDS unit redistributes (`transpose` in VectorMemState).
+
+- Permutes run in regions, issued through `step()` like LDS instructions (the counters as
+  the hardware keeps them), reading EXEC; they access no memory.
+- Transpose loads are LDS loads (memory model, barrier epochs) and lane-crossing for
+  liveness. The hardware requires a full EXEC (a region issuing one under the entry EXEC
+  gets `mfma_full_exec`) and, for the B64 forms, eight-byte addresses (an input address is
+  masked with 0x7ff8 instead of 0x7ffc); otherwise RocJITsu reports undefined behaviour.
+- `ds_bpermute` carries no memory-issue metadata, so the waitcnt analysis put it on every
+  counter (vmcnt too): `lgkmcnt(0)` never retired it and `f0` was UNRESOLVED (a pending
+  conflict) despite 40150 clean cases. A `ds_` instruction without metadata now counts on
+  the LDS counter only.
+- The memory comparison is a linear merge of the sorted stored bytes (it rebuilt two maps
+  per comparison).
+
+The 4 awq kernels now pass through `f0` (ESTABLISHED, about 40,000 valid cases each,
+pass-masked: NaN and undefined-value masking). Each `f0` takes about 18 minutes (310 M
+instructions per side), beyond the driver's default 300 s budget.

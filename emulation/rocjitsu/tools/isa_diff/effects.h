@@ -239,5 +239,13 @@ struct MemoryAccess {
 /// memory each side accesses per epoch is compared (RegionRunner::barrier). Not a hint: a
 /// hunk that adds, removes or moves one is a semantic change.
 [[nodiscard]] bool is_region_barrier(std::string_view mnemonic);
+/// A lane permute through the LDS crossbar a region may contain (ds_bpermute_b32,
+/// ds_permute_b32): no LDS memory access, lane-crossing, counted on the LDS counter. The
+/// runner issues it like an LDS instruction (step()), so the counters stay the hardware's.
+[[nodiscard]] bool is_region_lane_permute(std::string_view mnemonic);
+/// An LDS transpose load (ds_read_b64_tr_b16, ds_read_b64_tr_b8, ds_read_b64_tr_b4,
+/// ds_read_b96_tr_b6): a load whose elements the LDS unit redistributes across the lanes.
+/// It needs a full EXEC, and the B64 forms eight-byte addresses.
+[[nodiscard]] bool is_lds_transpose(std::string_view mnemonic);
 
 } // namespace rocjitsu::isa_diff

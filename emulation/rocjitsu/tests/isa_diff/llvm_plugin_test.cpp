@@ -1695,6 +1695,87 @@ TEST(IsaDiffWholeFunction, KernelEarlyExitAndItsPrivateMemory) {
   std::filesystem::remove_all(dir);
 }
 
+/// @p ops, then every lane stores v0 at s[0:1] + 4 * its lane id (all lanes observable).
+std::string per_lane_store_fn(const std::vector<std::string> &ops) {
+  std::vector<std::string> body = ops;
+  body.insert(body.end(), {"v_mbcnt_lo_u32_b32 v7, -1, 0", "v_mbcnt_hi_u32_b32 v7, -1, v7",
+                           "v_lshlrev_b32_e32 v7, 2, v7", "global_store_dword v7, v0, s[0:1]",
+                           "s_waitcnt vmcnt(0)"});
+  return fn_listing(body);
+}
+
+TEST(IsaDiffLanes, BpermuteRunsInRegions) {
+  const std::string dir = temp_dir("bpermute");
+  PairOptions o;
+  o.entry_vgprs = 2; // v0 data, v1 source lane
+  auto f = [](const std::string &addr) {
+    return per_lane_store_fn({addr, "ds_bpermute_b32 v0, v3, v0", "s_waitcnt lgkmcnt(0)"});
+  };
+  // The source lane's byte address computed two ways: equal; another lane: a mismatch.
+  EXPECT_EQ(
+      verdict_of(dir, "f", f("v_lshlrev_b32_e32 v3, 2, v1"), f("v_mul_u32_u24_e32 v3, 4, v1"), o),
+      "NO_MISMATCH_FOUND/ESTABLISHED");
+  EXPECT_EQ(
+      verdict_of(dir, "f", f("v_lshlrev_b32_e32 v3, 2, v1"), f("v_lshlrev_b32_e32 v3, 3, v1"), o),
+      "LOCAL_MISMATCH/ESTABLISHED");
+  // The emulator's semantics in the runner: source lane (lane ^ 1) swaps neighbours.
+  auto data =
+      case_of(dir, "f", f("v_lshlrev_b32_e32 v3, 2, v1"), f("v_mul_u32_u24_e32 v3, 4, v1"), o);
+  ASSERT_TRUE(data && data->whole_function);
+  const RegionPair &r = *data->whole_function;
+  // The permute counts on the LDS counter only: lgkmcnt(0) retires it before the store
+  // reads its result (no pending conflict in the whole function).
+  EXPECT_NE(r.contract.pending_effects, "CONFLICT");
+  std::string error;
+  auto runner = RegionRunner::create(r.old_side.insts, "bpermute", error, r.contract.vgpr_count,
+                                     r.contract.gpu().value_or(Target{}));
+  ASSERT_TRUE(runner) << error;
+  MachineState s;
+  s.frame = runner->baseline_frame();
+  s.set(kLocExecLo, 0xffffffffu);
+  s.set(kLocExecHi, 0xffffffffu);
+  s.set(1, 0x10u); // s[0:1]: the stores, away from the code
+  s.resize_vgprs(r.contract.vgpr_count);
+  for (unsigned lane = 0; lane < kWaveLanes; ++lane) {
+    s.vset(0, lane, 0x100u + lane);
+    s.vset(1, lane, lane ^ 1u);
+  }
+  runner->load(s);
+  ASSERT_EQ(runner->run(r.old_side.insts.size()).status, RunStatus::Ok);
+  const MachineState fin = runner->capture();
+  for (unsigned lane = 0; lane < kWaveLanes; ++lane)
+    EXPECT_EQ(fin.vget(0, lane), 0x100u + (lane ^ 1u)) << "lane " << lane;
+  std::filesystem::remove_all(dir);
+}
+
+TEST(IsaDiffLanes, LdsTransposeLoadRunsInRegions) {
+  const std::string dir = temp_dir("lds_tr");
+  PairOptions o;
+  o.entry_vgprs = 3; // v[0:1] data, v2 an index
+  // Each lane writes its 8 bytes to LDS, then reads them back transposed across lanes into
+  // @p dst (renamed between the sides, so the load is in the changed region and its
+  // address is a region input).
+  auto t = [](const std::string &load, unsigned dst) {
+    const std::string lo = "v" + std::to_string(dst), hi = "v" + std::to_string(dst + 1);
+    return per_lane_store_fn(
+        {"v_and_b32_e32 v3, 0xff, v2", "v_lshlrev_b32_e32 v3, 3, v3", "ds_write_b64 v3, v[0:1]",
+         "s_waitcnt lgkmcnt(0)",
+         load + " v[" + std::to_string(dst) + ":" + std::to_string(dst + 1) + "], v3",
+         "s_waitcnt lgkmcnt(0)", "v_xor_b32_e32 v0, " + lo + ", " + hi});
+  };
+  const Json same = report_of(dir, "f", t("ds_read_b64_tr_b16", 4), t("ds_read_b64_tr_b16", 8), o);
+  ASSERT_TRUE(same.is_object());
+  EXPECT_EQ(same["overall"]["test_status"].as_string(), "NO_MISMATCH_FOUND")
+      << mismatch_details(same);
+  // A region whose input is the transpose address gets eight-byte addresses and a full
+  // EXEC: no case ends in undefined behaviour.
+  EXPECT_EQ(same.dump().find("UNDEFINED_BEHAVIOR"), std::string::npos);
+  // Without the transpose the lanes get other elements: a mismatch.
+  EXPECT_EQ(verdict_of(dir, "f", t("ds_read_b64_tr_b16", 4), t("ds_read_b64", 4), o),
+            "LOCAL_MISMATCH/ESTABLISHED");
+  std::filesystem::remove_all(dir);
+}
+
 TEST(IsaDiffMemoryState, OnlyANewFaultIsAMismatch) {
   const std::string dir = temp_dir("fault_side");
   PairOptions o;

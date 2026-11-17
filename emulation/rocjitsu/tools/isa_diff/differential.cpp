@@ -136,26 +136,37 @@ uint8_t initial_byte(const MachineState &s, uint64_t x) {
 
 /// Bytes either side stored whose final values differ. A byte one side did not store
 /// keeps its initial content on that side.
+/// Calls @p f(address, byte on a, byte on b) for every byte either side stored, in address
+/// order: a linear merge of the two sorted mem_written lists.
+template <typename F> void for_each_stored(const MachineState &a, const MachineState &b, F f) {
+  const auto &wa = a.mem_written, &wb = b.mem_written;
+  size_t i = 0, j = 0;
+  while (i < wa.size() || j < wb.size()) {
+    if (j == wb.size() || (i < wa.size() && wa[i].first < wb[j].first)) {
+      f(wa[i].first, wa[i].second, initial_byte(b, wa[i].first));
+      ++i;
+    } else if (i == wa.size() || wb[j].first < wa[i].first) {
+      f(wb[j].first, initial_byte(a, wb[j].first), wb[j].second);
+      ++j;
+    } else {
+      f(wa[i].first, wa[i].second, wb[j].second);
+      ++i;
+      ++j;
+    }
+  }
+}
+
 std::vector<uint64_t> differing_memory(const MachineState &a, const MachineState &b) {
   std::vector<uint64_t> out;
-  if (a.mem_written.empty() && b.mem_written.empty())
-    return out;
-  std::map<uint64_t, uint8_t> ma(a.mem_written.begin(), a.mem_written.end());
-  std::map<uint64_t, uint8_t> mb(b.mem_written.begin(), b.mem_written.end());
-  std::set<uint64_t> addrs;
-  for (const auto &[x, v] : ma)
-    addrs.insert(x);
-  for (const auto &[x, v] : mb)
-    addrs.insert(x);
-  for (const auto *s : {&a, &b})
-    for (uint64_t x : s->mem_dead)
-      addrs.erase(x); // dead where the run left (memory_dead_at_exit)
-  for (uint64_t x : addrs) {
-    const uint8_t va = ma.count(x) ? ma[x] : initial_byte(a, x);
-    const uint8_t vb = mb.count(x) ? mb[x] : initial_byte(b, x);
-    if (va != vb)
+  // mem_written and mem_dead are sorted (capture, from_json).
+  auto dead = [&](uint64_t x) { // dead where the run left (memory_dead_at_exit)
+    return std::binary_search(a.mem_dead.begin(), a.mem_dead.end(), x) ||
+           std::binary_search(b.mem_dead.begin(), b.mem_dead.end(), x);
+  };
+  for_each_stored(a, b, [&](uint64_t x, uint8_t va, uint8_t vb) {
+    if (va != vb && !dead(x))
       out.push_back(x);
-  }
+  });
   return out;
 }
 
@@ -593,14 +604,10 @@ void merge_undef(UndefMask &m, const MachineState &a, const MachineState &b) {
     m.vgpr.assign(a.vgpr.size(), 0);
   for (size_t i = 0; i < a.vgpr.size(); ++i)
     m.vgpr[i] |= a.vgpr[i] ^ (i < b.vgpr.size() ? b.vgpr[i] : 0u);
-  std::set<uint64_t> addrs;
-  for (const auto &[x, v] : a.mem_written)
-    addrs.insert(x);
-  for (const auto &[x, v] : b.mem_written)
-    addrs.insert(x);
-  for (uint64_t x : addrs)
-    if (const uint8_t d = memory_byte(a, x) ^ memory_byte(b, x))
+  for_each_stored(a, b, [&](uint64_t x, uint8_t va, uint8_t vb) {
+    if (const uint8_t d = va ^ vb)
       m.mem[x] |= d;
+  });
   if (m.asm_uses.size() < a.asm_uses.size())
     m.asm_uses.resize(a.asm_uses.size());
   for (size_t i = 0; i < a.asm_uses.size(); ++i) {

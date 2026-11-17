@@ -19,8 +19,15 @@ branches and loops whose exits correspond on both sides (see "Control flow"), ma
 - memory instructions (see "Memory"): loads, stores and atomics of global, flat,
   scratch and buffer memory and of LDS (`ds_read*`/`ds_load*`, `ds_write*`/`ds_store*`
   including the two-address forms, DS atomics), scalar loads, and every counter wait
-  (`s_waitcnt*`, `s_wait_*cnt`). Not the LDS-DMA, `_tr`, `block`, `addtid`, typed-format,
-  GWS, ordered-count or cross-lane DS (`ds_swizzle`, `ds_permute`) forms;
+  (`s_waitcnt*`, `s_wait_*cnt`), and the LDS transpose loads (`ds_read_b64_tr_b16`,
+  `_tr_b8`, `_tr_b4`, `ds_read_b96_tr_b6`: each lane reads at its own address and the LDS
+  unit redistributes the elements across the lanes; a region issuing one under the entry
+  EXEC gets a full EXEC, and an input address of a B64 form is eight-byte aligned, as the
+  hardware requires). Not the LDS-DMA, global transpose, `block`, `addtid`, typed-format,
+  GWS, ordered-count or `ds_swizzle` forms;
+- the lane permutes `ds_bpermute_b32` and `ds_permute_b32` (through the LDS crossbar, no
+  LDS memory; issued like LDS instructions, so `lgkmcnt` counts them; a backward permute
+  reads only active source lanes);
 - scheduling hints without a functional effect (`s_nop`, `s_delay_alu`, `s_clause`,
   `s_wait_alu`, `s_waitcnt_depctr`, prefetch hints). Alignment matches the other
   instructions first and hints only in the gaps between them; a hunk of hints alone

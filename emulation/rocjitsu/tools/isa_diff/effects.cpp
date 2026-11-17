@@ -587,8 +587,12 @@ std::optional<MemoryAccess> region_memory_access(std::string_view m) {
   auto starts = [&](std::string_view p) { return m.substr(0, p.size()) == p; };
   auto has = [&](std::string_view p) { return m.find(p) != std::string_view::npos; };
   const MemoryAccess load{true, false, false}, store{false, true, false}, atomic{true, true, true};
-  // LDS-DMA, transpose, block, add-tid and typed (format) forms stay outside.
-  if (has("addtid") || has("block") || has("lds") || has("_tr") || has("format"))
+  // LDS-DMA, block, add-tid, typed (format) and global transpose forms stay outside. The
+  // LDS transpose loads (ds_read_b64_tr_b16, ...) are loads: each lane reads at its own
+  // address and the LDS unit redistributes the elements across the lanes (lane-crossing,
+  // see KernelModel's crosses_lanes).
+  if (has("addtid") || has("block") || has("lds") || has("format") ||
+      (has("_tr") && !(starts("ds_read_") && has("_tr_b"))))
     return std::nullopt;
   if (starts("s_load_dword") || starts("s_load_b") || starts("s_load_u") || starts("s_load_i"))
     return load;
@@ -663,6 +667,14 @@ bool is_region_noop(std::string_view m) {
 }
 
 bool is_region_barrier(std::string_view m) { return m == "s_barrier"; }
+
+bool is_region_lane_permute(std::string_view m) {
+  return m == "ds_bpermute_b32" || m == "ds_permute_b32";
+}
+
+bool is_lds_transpose(std::string_view m) {
+  return m.substr(0, 8) == "ds_read_" && m.find("_tr_b") != std::string_view::npos;
+}
 
 bool is_region_valu(std::string_view mnemonic, uint64_t flags) {
   if (!(flags & VALU) ||
@@ -836,6 +848,11 @@ Effects classify(const Instruction &inst, const Target &target) {
   const bool salu_ok = is_p0_mnemonic(mnemonic) || noop_ok || branch_ok || barrier_ok || endpgm_ok;
   const bool valu_ok = is_region_valu(mnemonic, flags);
   const bool mem_ok = is_region_memory(mnemonic);
+  // Lane permutes through the LDS crossbar (no LDS memory): only active lanes write, and a
+  // backward permute reads only active source lanes.
+  const bool permute_ok = is_region_lane_permute(mnemonic);
+  if (permute_ok)
+    add_pair(fx.reads, kLocExecLo, kLocExecHi, static_cast<int>(target.wave_size));
   if (mem_ok) {
     const auto access = region_memory_access(mnemonic);
     fx.mem_read = access && access->reads;
@@ -844,7 +861,7 @@ Effects classify(const Instruction &inst, const Target &target) {
     if ((flags & (VMEM | LDS)) != 0 || mnemonic.substr(0, 3) == "ds_")
       add_pair(fx.reads, kLocExecLo, kLocExecHi, static_cast<int>(target.wave_size));
   }
-  if (!salu_ok && !valu_ok && !mem_ok) {
+  if (!salu_ok && !valu_ok && !mem_ok && !permute_ok) {
     fx.reject_reason =
         "opcode not in the region allowlist (SALU allowlist, plain VALU, memory: global, "
         "flat, scratch, buffer, LDS, scalar loads, atomics): " +
@@ -854,7 +871,8 @@ Effects classify(const Instruction &inst, const Target &target) {
   } else if (!first_outside.empty() && !noop_ok) { // a hint's operands are not state
     fx.reject_reason = first_outside;
   } else if ((fx.control_flow && !branch_ok && !endpgm_ok) ||
-             (!mem_ok && !noop_ok && (flags & (MEMORY_OP | WAITCNT | SMEM | VMEM | LDS)) != 0) ||
+             (!mem_ok && !noop_ok && !permute_ok &&
+              (flags & (MEMORY_OP | WAITCNT | SMEM | VMEM | LDS)) != 0) ||
              ((flags & (BARRIER | SUSPENDS_WAVE)) != 0 && !barrier_ok) || (salu_ok && fx.valu)) {
     fx.reject_reason = "instruction class outside the executable region subset";
   } else if (inst.data() != nullptr) {

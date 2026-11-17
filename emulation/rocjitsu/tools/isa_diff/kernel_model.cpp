@@ -740,6 +740,12 @@ producer_counters(const Instruction &inst, rj_code_arch_t arch, std::array<bool,
     return c;
   }
   const uint64_t f = inst.flags();
+  // The LDS-crossbar permutes (ds_bpermute, ds_permute, ds_swizzle) carry no metadata: they
+  // count on the LDS counter only (lgkmcnt/dscnt), in order with the LDS operations.
+  if (std::string_view(inst.mnemonic()).starts_with("ds_") && (f & (VMEM | SMEM)) == 0) {
+    c[PendingState::kDs] = true;
+    return c;
+  }
   if (f & (MEMORY_OP | MEMORY_WAIT_PRODUCER | SMEM | VMEM | LDS))
     c.fill(true);
   return c;
@@ -911,7 +917,7 @@ bool crosses_lanes(const InstRef &r) {
   if (starts("v_readlane") || starts("v_writelane") || starts("v_permlane") ||
       starts("ds_swizzle") || starts("ds_bpermute") || starts("ds_permute") || starts("v_swap") ||
       starts("v_movrel") || starts("v_mfma") || starts("v_smfmac") ||
-      m.find("_dpp") != std::string_view::npos)
+      m.find("_dpp") != std::string_view::npos || is_lds_transpose(m))
     return true;
   const std::string_view t = r.text;
   return t.find("row_") != std::string_view::npos ||
