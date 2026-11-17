@@ -211,6 +211,13 @@ runtime directory. A path selects that runtime directory directly; for example,
 selects its parent directory. Use `rocjitsu paths` or `rocjitsu paths --json` to
 inspect the default paths.
 
+`--attach --clear-env-vars` still uses the daemon socket selected by the
+launcher. If the child environment has no runtime-directory override, attach
+exports the launcher's resolved runtime directory to the interposer. An explicit
+`--env ROCJITSU_RUNTIME_DIR=` is a child override: it clears that variable for
+attach lookup, so selection falls through to the child `XDG_RUNTIME_DIR` and
+then `/tmp/rocjitsu-<uid>`.
+
 The daemon has already built its machine from the config it was started with.
 For that reason, attach rejects launch-only settings that would otherwise mutate
 the machine being built, including `--profile`, `--node`,
