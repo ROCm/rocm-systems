@@ -1,10 +1,18 @@
 # CTest categories for the host-only src/algorithms/dda/ microtests.
 #
-# One pattern per unit: every suite starts with the unit's stem.
+# Suites start with their unit's stem; the launcher patterns cover a whole collective dir, DdaIpc* covers ipc/, and
+# fabric_gpu_barrier/fabric_init add their ledger suites.
 test_categories:
   quick: &micro_dda_quick
     description: "Smoke - host-only src/algorithms/dda/ micro-tests, sub-second."
     test_patterns:
+      - "DdaAllGather*"
+      - "DdaAllReduce*"
+      - "DdaAlltoall*"
+      - "DdaBroadcast*"
+      - "DdaPeerGrid*"  # alltoall/dda-alltoall-fabric-ll128-test.cc
+      - "DdaIpc*"  # ipc/ipc_init.cu, ipc_mem_handler.cc
+      - "DdaReduceScatter*"
       - "FabricMemHandler*"
       - "FabricGpuBarrier*"
       - "FabricInit*"
