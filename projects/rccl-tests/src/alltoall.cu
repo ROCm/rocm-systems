@@ -471,18 +471,40 @@ static AlltoAllGinLaneState AlltoAllGinReadLaneState(const ncclDevComm* devComm)
 
 // The lane state is fixed for the life of a devComm, and RunColl runs inside the
 // timed loop and under -G graph capture, where a synchronous copy cannot. So it
-// is read once per devComm, from AlltoAllRunTest, and cached.
+// is read once per devComm, from AlltoAllRunTest, and cached. A failed copy on
+// any rank clears ctxOk on every rank before that cache is used: the LSA lane
+// and gin.put do not wait on each other, so a split would hang.
+struct AlltoAllGinLaneCache {
+  std::mutex mutex;
+  std::map<std::pair<const ncclDevComm*, const void*>, AlltoAllGinLaneState> map;
+};
+
+static AlltoAllGinLaneCache& alltoAllGinLaneCache() {
+  static AlltoAllGinLaneCache cache;
+  return cache;
+}
+
+static std::pair<const ncclDevComm*, const void*> alltoAllGinLaneKey(const ncclDevComm* devComm) {
+  return std::make_pair(devComm, (const void*)devComm->ginHandles[0]);
+}
+
+static void AlltoAllGinStoreLaneState(const ncclDevComm* devComm, AlltoAllGinLaneState state) {
+  auto& cache = alltoAllGinLaneCache();
+  std::lock_guard<std::mutex> lock(cache.mutex);
+  cache.map[alltoAllGinLaneKey(devComm)] = state;
+}
+
 static AlltoAllGinLaneState AlltoAllGinLaneStateFor(const ncclDevComm* devComm) {
-  static std::mutex mutex;
-  static std::map<std::pair<const ncclDevComm*, const void*>, AlltoAllGinLaneState> cache;
-  const auto key = std::make_pair(devComm, (const void*)devComm->ginHandles[0]);
-  std::lock_guard<std::mutex> lock(mutex);
-  auto it = cache.find(key);
-  if (it == cache.end()) it = cache.emplace(key, AlltoAllGinReadLaneState(devComm)).first;
+  auto& cache = alltoAllGinLaneCache();
+  std::lock_guard<std::mutex> lock(cache.mutex);
+  const auto key = alltoAllGinLaneKey(devComm);
+  auto it = cache.map.find(key);
+  if (it == cache.map.end()) it = cache.map.emplace(key, AlltoAllGinReadLaneState(devComm)).first;
   return it->second;
 }
 
-// Every rank reads the same agreed state, so every rank picks the same lane.
+// Every rank uses the cached state. AlltoAllRunTest has already forced ctxOk
+// false everywhere if any rank's copy failed, so every rank picks the same lane.
 static GinFabricA2AAlgo AlltoAllGinFabricAlgoHost(const ncclDevComm* devComm, size_t bytesPerPeer) {
   const AlltoAllGinLaneState state = AlltoAllGinLaneStateFor(devComm);
   const bool ctxOk = state.ctxOk && g_alltoallLaneFlags.nSlots != 0;
@@ -872,7 +894,7 @@ testResult_t AlltoAllDeviceTime(struct threadArgs* args, ncclDataType_t type, nc
   // -g > 1 each devComm's lane state is checked, not just the first.
   if (deviceImpl == 3) {
     for (int i = 0; i < args->nGpus; i++) {
-      if (AlltoAllGinFabricAlgoHost(args->devComms + i, count * wordSize(type)) == GinFabricA2AAlgo::Lsa) {
+      if (AlltoAllGinFabricAlgoHost(testDevComms(args, i), count * wordSize(type)) == GinFabricA2AAlgo::Lsa) {
         return testSuccess;
       }
     }
@@ -1009,10 +1031,31 @@ testResult_t AlltoAllRunTest(struct threadArgs* args, int root, ncclDataType_t t
   for (int i = 0; i < args->nGpus; i++) {
     CUDACHECK(cudaSetDevice(args->gpus[i]));
     TESTCHECK(uploadGinResourceSharingMode());
-#if ALLTOALL_GIN_FABRIC_LSA
-    if (deviceImpl == 3) (void)AlltoAllGinLaneStateFor(args->devComms + i);
-#endif
   }
+#if ALLTOALL_GIN_FABRIC_LSA
+  // GPU i's devComm is testDevComms(args, i), which strides by testMaxDevComms.
+  // A failed copy is per rank. MIN across threads and MPI ranks clears ctxOk
+  // on every rank before TimeTest, so they all fall back to gin.put together.
+  if (deviceImpl == 3) {
+    long long readsOk = 1;
+    for (int i = 0; i < args->nGpus; i++) {
+      CUDACHECK(cudaSetDevice(args->gpus[i]));
+      ncclDevComm* devComm = testDevComms(args, i);
+      AlltoAllGinLaneState state = AlltoAllGinReadLaneState(devComm);
+      if (!state.ctxOk) readsOk = 0;
+      AlltoAllGinStoreLaneState(devComm, state);
+    }
+    Allreduce(args, &readsOk, /*min*/2);
+    if (readsOk == 0) {
+      for (int i = 0; i < args->nGpus; i++) {
+        ncclDevComm* devComm = testDevComms(args, i);
+        AlltoAllGinLaneState state = AlltoAllGinLaneStateFor(devComm);
+        state.ctxOk = false;
+        AlltoAllGinStoreLaneState(devComm, state);
+      }
+    }
+  }
+#endif
 #endif
   ncclDataType_t *run_types;
   const char **run_typenames;
