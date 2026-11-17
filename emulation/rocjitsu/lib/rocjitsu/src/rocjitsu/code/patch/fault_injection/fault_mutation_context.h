@@ -24,7 +24,12 @@ class InstructionBoundaries;
 class Instrumentor;
 class KernelOwnership;
 
-enum class FaultMutationKind { DropBarrier, LdsWrongAddress, AtomicWrongAddress };
+enum class FaultMutationKind {
+  DropBarrier,
+  LdsWrongAddress,
+  AtomicWrongAddress,
+  OrdinaryWrongAddress
+};
 enum class FaultMutationErrorCode {
   None,
   BadIdentity,
@@ -142,6 +147,9 @@ private:
                                                                    FaultMutationError &);
   friend FailureOr<OrdinaryAcquireInventory>
   discover_ordinary_acquires(const FaultMutationContext &, std::string_view, FaultMutationError &);
+  friend FailureOr<struct OrdinaryWrongAddressResult>
+  apply_ordinary_wrong_address(const FaultMutationContext &, const OrdinaryAcquireSelection &,
+                               std::optional<uint32_t>, FaultMutationError &);
 };
 
 } // namespace rocjitsu

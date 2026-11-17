@@ -4,9 +4,11 @@
 #include "rocjitsu/cli.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/file_io.h"
+#include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/fault_injection/atomic_wrong_address.h"
 #include "rocjitsu/code/patch/fault_injection/drop_barrier.h"
 #include "rocjitsu/code/patch/fault_injection/lds_wrong_address.h"
+#include "rocjitsu/code/patch/fault_injection/ordinary_wrong_address.h"
 #include "rocjitsu/isa/target_registry.h"
 
 #include <algorithm>
@@ -75,8 +77,53 @@ constexpr std::string_view kMutationHelp =
     "gfx1100 wave32/wave64, as well as the modern targets above. DS mutation\n"
     "increments only raw offset0 and requires an aligned result without carry.\n"
     "For two-address exchange this retains the original element-offset policy.\n"
+    "OrdinaryWrongAddress lists only bounded acquire-qualified global_load_b32 loads,\n"
+    "with their exact wait/cache members and complete affected owners.\n"
+    "Mutation supports gfx1250/gfx1251 wave32 profile Cdna5GlobalB32.\n"
+    "gfx1200/gfx1201 wave32/wave64 profile Rdna4GlobalB32 remains query-only;\n"
+    "see --capabilities and each listed address_supported value.\n"
+    "For ordinary sites --exact selects the qualified load and --ordinal counts\n"
+    "qualified loads only. Mutation requires a positive, four-byte-aligned\n"
+    "--address-delta, at most 8388607 bytes; the signed24 sum must fit and align.\n"
+    "Only the load offset changes; cache/wait/bookkeeping, data and scope remain.\n"
+    "CDNA5 scale_offset is preserved; the immediate and delta remain byte offsets.\n"
     "Output must be new; existing files, aliases and in-place mutation are refused.\n"
     "Host transformation only; no GPU execution or detector qualification.\n";
+
+std::string_view ordinary_profile_name(OrdinaryAcquireProfile profile) {
+  switch (profile) {
+  case OrdinaryAcquireProfile::Cdna5GlobalB32:
+    return "Cdna5GlobalB32";
+  case OrdinaryAcquireProfile::Rdna4GlobalB32:
+    return "Rdna4GlobalB32";
+  }
+  return "Unknown";
+}
+
+bool ordinary_address_supported(rj_code_target_id_t target, IsaFamily family,
+                                const OrdinaryAcquireSite &site,
+                                std::span<const OrdinaryWrongAddressCapability> capabilities,
+                                std::span<const KernelDescriptorInfo> kernels) {
+  if (site.affected_owners.empty())
+    return false;
+  for (const FaultMutationOwner &owner : site.affected_owners) {
+    const auto matches_owner = [&](const KernelDescriptorInfo &kernel) {
+      return kernel.kernel_name == owner.entry && kernel.entry_text_offset == owner.entry_offset &&
+             kernel.descriptor_file_offset == owner.descriptor_file_offset;
+    };
+    if (std::ranges::count_if(kernels, matches_owner) != 1)
+      return false;
+    const std::span<const KernelDescriptorInfo>::iterator kernel =
+        std::ranges::find_if(kernels, matches_owner);
+    const uint32_t wave = kernel_wavefront_size(family, kernel->descriptor);
+    if (std::ranges::none_of(capabilities, [&](const OrdinaryWrongAddressCapability &capability) {
+          return capability.target == target && capability.wave_size == wave &&
+                 capability.profile == site.profile;
+        }))
+      return false;
+  }
+  return true;
+}
 
 util::FailureOr<uint64_t> parse_number(std::string_view text, util::DiagnosticEmitter diagnostic) {
   if (!text.starts_with("0x")) {
@@ -253,7 +300,7 @@ int run(int argc, char **argv) {
   auto address_delta_flag = std::make_shared<MutationFlag<uint64_t>>(
       cli::FlagInfo{.name = "--address-delta",
                     .aliases = {},
-                    .description = "Positive atomic byte offset increment",
+                    .description = "Positive atomic or ordinary byte offset increment",
                     .value_placeholder = "N"});
   auto list_flag = std::make_shared<MutationFlag<bool>>(
       cli::FlagInfo{.name = "--list",
@@ -316,6 +363,13 @@ int run(int argc, char **argv) {
                 << " wave=" << capability.wave_size << " form=" << capability.form
                 << " admission=proven-all-owners\n";
     }
+    for (const OrdinaryWrongAddressCapability &capability : ordinary_wrong_address_capabilities()) {
+      const IsaTargetBinding *target = default_isa_target_registry().find_target(capability.target);
+      std::cout << "kind=OrdinaryWrongAddress target=" << target->id
+                << " wave=" << capability.wave_size
+                << " profile=" << ordinary_profile_name(capability.profile)
+                << " admission=proven-all-owners\n";
+    }
     return finish_stdout();
   }
   const std::string input = input_flag->value().value_or("");
@@ -352,14 +406,17 @@ int run(int argc, char **argv) {
     std::cerr << cli::format_help(command) << kMutationHelp;
     return reject("require input, exact kernel, and either --list or --output");
   }
-  if (kind != "DropBarrier" && kind != "LdsWrongAddress" && kind != "AtomicWrongAddress") {
+  if (kind != "DropBarrier" && kind != "LdsWrongAddress" && kind != "AtomicWrongAddress" &&
+      kind != "OrdinaryWrongAddress") {
     return reject("unsupported mutation kind: " + kind);
   }
   if ((kind != "LdsWrongAddress" && address_vgpr) || (list && address_vgpr)) {
     return reject("--address-vgpr applies only to LdsWrongAddress mutation");
   }
-  if ((kind != "AtomicWrongAddress" && address_delta) || (list && address_delta)) {
-    return reject("--address-delta applies only to AtomicWrongAddress mutation");
+  if (((kind != "AtomicWrongAddress" && kind != "OrdinaryWrongAddress") && address_delta) ||
+      (list && address_delta)) {
+    return reject(
+        "--address-delta applies only to AtomicWrongAddress or OrdinaryWrongAddress mutation");
   }
   const util::FailureOr<std::vector<char>> bytes =
       detail::read_file_bytes(input.c_str(), kMaxImageBytes);
@@ -426,6 +483,94 @@ int run(int argc, char **argv) {
               << " output_bytes=" << mutant.value().image.size()
               << " affected_owners=" << selection.value().site().affected_owners.size();
     for (const FaultMutationOwner &owner : selection.value().site().affected_owners)
+      std::cout << " owner=" << owner.entry << ':' << owner.entry_offset << ':'
+                << owner.descriptor_file_offset;
+    std::cout << '\n';
+    return finish_stdout();
+  }
+  if (kind == "OrdinaryWrongAddress") {
+    const FailureOr<OrdinaryAcquireInventory> inventory =
+        discover_ordinary_acquires(context, kernel, error);
+    if (inventory.failed())
+      return reject(error, "discovery");
+    const IsaTargetBinding *target =
+        default_isa_target_registry().find_target(context.source().target_id());
+    const IsaTargetDescriptor *binding =
+        default_isa_target_registry().find(context.source().target_id());
+    if (!target || !binding)
+      return reject({.code = FaultMutationErrorCode::UnsupportedTarget,
+                     .message = "missing ordinary target binding"},
+                    "discovery");
+    if (!target_assertion.empty() && target_assertion != target->id)
+      return reject("target assertion does not match source ELF identity");
+    if (list) {
+      const Section &text = *context.source().text_sections().front();
+      const std::vector<KernelDescriptorInfo> kernels = scan_kernel_descriptors(
+          context.image(), text.sectionOffset(), text.size(), text.sectionHeaderIndex());
+      const std::vector<OrdinaryWrongAddressCapability> capabilities =
+          ordinary_wrong_address_capabilities();
+      size_t index = 0;
+      for (const OrdinaryAcquireSite &site : inventory.value().sites()) {
+        std::cout << "ordinal=" << index++ << " exact=" << site.offset
+                  << " size=" << site.instruction_size << " byte_offset=" << site.byte_offset
+                  << " address_supported="
+                  << ordinary_address_supported(target->public_id, binding->family, site,
+                                                capabilities, kernels)
+                  << " target=" << target->id << " form=" << site.form
+                  << " profile=" << ordinary_profile_name(site.profile) << " raw_scope=";
+        if (site.raw_scope)
+          std::cout << *site.raw_scope;
+        else
+          std::cout << "implicit";
+        std::cout << " container=" << site.container_name << ':' << site.container_entry << ':'
+                  << site.container_size << " cache_members=" << site.cache_members.size()
+                  << " wait_members=" << site.wait_members.size();
+        for (const OrdinaryAcquireMember &member : site.cache_members)
+          std::cout << " cache=" << member.offset << ':' << member.instruction_size << ':'
+                    << member.form;
+        for (const OrdinaryAcquireMember &member : site.wait_members)
+          std::cout << " wait=" << member.offset << ':' << member.instruction_size << ':'
+                    << member.form;
+        std::cout << " affected_owners=" << site.affected_owners.size();
+        for (const FaultMutationOwner &owner : site.affected_owners)
+          std::cout << " owner=" << owner.entry << ':' << owner.entry_offset << ':'
+                    << owner.descriptor_file_offset;
+        std::cout << '\n';
+      }
+      return finish_stdout();
+    }
+    OrdinaryAcquireSelector selector = {.exact = std::nullopt, .ordinal = ordinal};
+    if (exact) {
+      const std::span<const OrdinaryAcquireSite> sites = inventory.value().sites();
+      const std::span<const OrdinaryAcquireSite>::iterator found =
+          std::ranges::find(sites, *exact, &OrdinaryAcquireSite::offset);
+      if (found == sites.end())
+        return reject({.code = FaultMutationErrorCode::InvalidParameters,
+                       .offset = *exact,
+                       .message = "no qualified acquire load at the requested offset"},
+                      "selection", exact);
+      selector.ordinal = static_cast<size_t>(found - sites.begin());
+    }
+    const FailureOr<OrdinaryAcquireSelection> selection =
+        select_ordinary_acquire(inventory.value(), selector, error);
+    if (selection.failed())
+      return reject(error, "selection");
+    const FailureOr<OrdinaryWrongAddressResult> mutant =
+        apply_ordinary_wrong_address(context, selection.value(), address_delta, error);
+    if (mutant.failed())
+      return reject(error, "mutation");
+    if (!write_new_file(output.c_str(), mutant.value().image)) {
+      std::cerr << "rj_code_mutate: cannot create/write/close new output file\n";
+      return 3;
+    }
+    const OrdinaryAcquireSite &site = selection.value().site();
+    std::cout << "kind=OrdinaryWrongAddress target=" << target->id << " exact=" << site.offset
+              << " address_delta=" << *address_delta
+              << " profile=" << ordinary_profile_name(site.profile)
+              << " logical_mutations=" << mutant.value().logical_mutation_count
+              << " output_bytes=" << mutant.value().image.size()
+              << " affected_owners=" << site.affected_owners.size();
+    for (const FaultMutationOwner &owner : site.affected_owners)
       std::cout << " owner=" << owner.entry << ':' << owner.entry_offset << ':'
                 << owner.descriptor_file_offset;
     std::cout << '\n';

@@ -81,6 +81,9 @@ private:
   friend FailureOr<OrdinaryAcquireSelection>
   select_ordinary_acquire(const OrdinaryAcquireInventory &, const struct OrdinaryAcquireSelector &,
                           FaultMutationError &);
+  friend FailureOr<struct OrdinaryWrongAddressResult>
+  apply_ordinary_wrong_address(const FaultMutationContext &, const OrdinaryAcquireSelection &,
+                               std::optional<uint32_t>, FaultMutationError &);
 };
 
 struct OrdinaryAcquireSelector {
