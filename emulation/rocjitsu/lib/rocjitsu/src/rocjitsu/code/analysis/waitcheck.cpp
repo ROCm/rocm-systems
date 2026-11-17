@@ -6,6 +6,7 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/amdhsa_metadata.h"
+#include "rocjitsu/code/analysis/control_flow.h"
 #include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/analysis/waitcheck/byte_interval.h"
 #include "rocjitsu/code/analysis/waitcheck/state.h"
@@ -499,7 +500,7 @@ struct Analyzer : private WaitcheckStateOps {
                                   file_offset, arch);
       analyze_instruction(state, *inst, section_name, section_offset, file_offset, arch, true);
       ++report_.instructions_analyzed;
-      if (inst->is_branch()) {
+      if (is_control_flow_transfer(*inst) && !is_program_path_terminator(*inst)) {
         // A raw word span has no CFG. Following the next encoded instruction
         // could skip a wait on the taken path and claim a false pass.
         report_.complete = false;
@@ -10581,7 +10582,7 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
     }
   }
 
-  if (!selected_kernel_entry && !kernels_known) {
+  if (!selected_kernel_entry) {
     for (const auto &owned_section : code_object.all_sections()) {
       const Section *section = owned_section.get();
       if ((section->flags() & SHF_EXECINSTR) == 0 || section->size() == 0)

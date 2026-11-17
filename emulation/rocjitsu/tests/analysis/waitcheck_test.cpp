@@ -15938,6 +15938,23 @@ TEST(WaitcheckTest, Gfx950StandaloneHelperRequiresProvenExternalReturnLink) {
       << restored_return.analysis_error;
 }
 
+TEST(WaitcheckTest, RawIndirectTransfersRequireCfgBeforeFollowingWords) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_CDNA4;
+  for (uint32_t transfer : {build_s_setpc_b64(8, arch).value(),
+                            build_s_swappc_b64(30, 8, arch).value()}) {
+    std::vector<uint32_t> program;
+    append_gfx950_buffer_load_dword_v0_v8_s0_offen(program);
+    program.push_back(transfer);
+    append_gfx950_s_waitcnt_vmcnt_0(program);
+    append_gfx950_v_mov_b32_v1_v0(program);
+    const auto report = analyze_waitcnts(std::span<const uint32_t>(program), arch);
+    EXPECT_TRUE(report.supported) << report.analysis_error;
+    EXPECT_FALSE(report.complete) << diagnostic_summary(report);
+    EXPECT_FALSE(report.passed());
+    EXPECT_NE(report.analysis_error.find("control flow"), std::string::npos);
+  }
+}
+
 TEST(WaitcheckTest, Gfx1250RelativeDestinationWriteInvalidatesReturnLink) {
   constexpr auto arch = ROCJITSU_CODE_ARCH_CDNA5;
   std::vector<uint32_t> program;
@@ -16273,6 +16290,10 @@ TEST(WaitcheckTest, ExecutableSectionOutsideTextReportsIncomplete) {
   EXPECT_EQ(selected_offset.diagnostics.size(), 1u) << diagnostic_summary(selected_offset);
   const auto kernels = waitcheck_kernels(extra_object);
   ASSERT_EQ(kernels.size(), 1u);
+  const auto batch =
+      analyze_waitcnts_for_kernels(extra_object, ROCJITSU_CODE_ARCH_RDNA4, kernels);
+  EXPECT_FALSE(batch.complete);
+  EXPECT_FALSE(batch.passed());
   const auto selected_descriptor =
       analyze_waitcnts_for_kernel(extra_object, ROCJITSU_CODE_ARCH_RDNA4, kernels[0]);
   ASSERT_TRUE(selected_descriptor.supported && selected_descriptor.complete)
