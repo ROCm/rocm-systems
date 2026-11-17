@@ -242,7 +242,7 @@ bool nan_unit_equal(const MachineState &a, const MachineState &b, uint64_t x) {
 /// With barriers: the first difference in what other waves of the workgroup could observe
 /// ("" for none). One wave runs, so the order of its shared-memory accesses relative to the
 /// barriers stands in for that: the sides execute as many barriers, store to the same
-/// shared dwords in each epoch, and load a dword both load in the same epochs (a load only
+/// shared dwords in each epoch, and load an LDS dword both load in the same epochs (a load only
 /// one side makes, e.g. through a wider access, is not compared).
 std::string barrier_difference(const MachineState &a, const MachineState &b) {
   if (a.barriers != b.barriers)
@@ -1478,6 +1478,7 @@ RegionResult test_region(const RegionPair &region, const TestOptions &options,
   if (old_runner && new_runner) {
     auto image = std::make_shared<MemoryImage>();
     image->set_small_scalars(old_runner->loops() || new_runner->loops());
+    share_code_guard(*old_runner, *new_runner);
     old_runner->set_memory_image(image);
     new_runner->set_memory_image(image);
     old_runner->set_poison_filter(options.poison_filter);
@@ -1910,6 +1911,7 @@ ReplayOutcome replay_counterexample(const Json &bundle, std::string &error) {
     return out;
   auto image = std::make_shared<MemoryImage>();
   image->set_small_scalars(old_runner->loops() || new_runner->loops());
+  share_code_guard(*old_runner, *new_runner);
   old_runner->set_memory_image(image);
   new_runner->set_memory_image(image);
   old_runner->set_memory_dead_at_exit(region->contract.memory_dead_at_exit);
@@ -1959,10 +1961,17 @@ ReplayOutcome replay_counterexample(const Json &bundle, std::string &error) {
                    format_vgprs(m.vlocs) == bundle["vgpr_locations"].as_string() &&
                    m.memory == bundle["memory_differs"].as_bool();
   if (kind != "harness_exit" && oo.status == RunStatus::Ok && on.status == RunStatus::Ok) {
-    // Final values must match the bundle exactly, not just the kind.
+    // Final values must match the bundle exactly, not just the kind. The initial words a run
+    // read (mem_init) are an input record, not an output: the bundle's may also hold words
+    // that reduction's re-runs of the same case read.
     auto fo = MachineState::from_json(bundle["final_state"]["old"], error);
     auto fn = MachineState::from_json(bundle["final_state"]["new"], error);
-    if (!fo || !fn || !(final_old == *fo) || !(final_new == *fn))
+    auto same = [](MachineState a, MachineState b) {
+      a.mem_init.clear();
+      b.mem_init.clear();
+      return a == b;
+    };
+    if (!fo || !fn || !same(final_old, *fo) || !same(final_new, *fn))
       out.reproduced = false;
   }
   out.summary = std::string(out.reproduced ? "REPRODUCED" : "NOT_REPRODUCED") +

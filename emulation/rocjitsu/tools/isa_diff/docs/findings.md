@@ -1267,3 +1267,41 @@ register for the old and source operands, and the permlane reads inactive lanes,
 other entry values on the two sides. LLVM leaves inactive lanes' values unspecified, so this
 is a modelling gap (inactive lanes of entry VGPRs are compared as defined inputs), not a
 miscompile.
+
+## The PR 243123 mismatches were tester artifacts (2026-11-16)
+
+All 5 mismatches of 9cf9729ef9's run (and 4 more seen in timing runs) were the tester's:
+
+- **Code corrupted for the rest of the run** (809f7a894777, baae392a24f3, a9ec7611e8c8,
+  1ca8eaf2f3ea, and the harness errors of 4145ed950ad8, 5274bdebba7c, 1b77a9ed70f8). Code
+  and data share the runner's memory. A case whose store landed on the code was excluded,
+  but `MemoryModel::reset` skipped code bytes, so every later case fetched the corrupted
+  instruction (memory instructions are fetched by `step()`; others run from the decoded
+  copy). A decode or unimplemented failure inside `step()` halts the wave and clears the
+  error, which the runner reported as a memory fault. Evidence: no fault before the first
+  store into code; fresh replays NOT_REPRODUCED; setting the one corrupted bit (GDS on a
+  `ds_read_b128`) in a bundle reproduces a9ec exactly. Fix: the code bytes are restored at
+  every reset, and before every `step()` the runner checks them (a harness error if not).
+- **Data read from the code** (7f6864076a45, dfde0d6dd078, 4173ad3f6494): a small kernel
+  argument made the A matrix overlap the kernel's code, so each side loaded its own
+  instruction bytes (first divergence: a `buffer_load` returning `old.hsaco` vs
+  `new.hsaco` bytes; with identical data both sides store identical bytes). Fix: a load
+  or store at either side's code addresses (the union) is a memory fault, so an input both
+  sides take it on is excluded (no program object overlaps the code).
+- Replay compared `mem_init` (the initial words read, an input record that reduction's
+  re-runs enlarge), so reproducing bundles looked NOT_REPRODUCED; it is no longer compared.
+
+With these fixes PR 243123 has no mismatch. At the driver's default 300 s budget: 10 pass,
+4 pass-masked, 46 inconclusive (35 over the budget; memcpy_known passes once the quadratic
+`touches_code()` is gone, v256i8_liveout once the false pending conflict is).
+
+What the inconclusives lack (classified on 9cf9729ef9's run, 45 functions):
+
+| class | functions | |
+|---|---|---|
+| code-corruption cascade (f0 INCONCLUSIVE/HARNESS_ERROR) | 10 | fixed above |
+| f0 over the time budget | 23 | `touches_code()` scanned every stored byte after every memory instruction (80% of one f0): now a flag. Left: the NaN/undef alternative re-runs (26% of a Triton f0), state capture and the barrier access log; global loads are no longer in the log (a third of f0's time). SparseMemory pages are never freed (RSS grows). |
+| loops that never exit (by construction) | 5 | correct |
+| `ds_bpermute_b32` and `ds_read_b64_tr_b16` | 4 | not modelled in regions |
+| calls (`s_swappc`, GOT) | 2 | not modelled |
+| pending-memory false conflict | 1 | a vector load overwriting a destination pending on the in-order vmcnt queue is no conflict (fixed); its address operands still conflict |

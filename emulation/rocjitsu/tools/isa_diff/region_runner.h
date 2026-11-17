@@ -148,6 +148,12 @@ public:
   [[nodiscard]] size_t step_limit(size_t budget) const;
   /// The region has a backward branch (a loop).
   [[nodiscard]] bool loops() const { return back_edge_; }
+  /// [lo, hi) of the region's code in the runner's memory (empty without memory accesses).
+  [[nodiscard]] std::pair<uint64_t, uint64_t> code_range() const { return {code_lo_, code_hi_}; }
+  /// A load from [lo, hi) reads code and makes the case UNSUPPORTED_OPERAND: give both
+  /// runners of a pair the union of their code ranges (share_code_guard), so both exclude
+  /// the same inputs (each side's code bytes differ).
+  void guard_code(uint64_t lo, uint64_t hi);
   [[nodiscard]] MachineState capture() const;
 
   [[nodiscard]] size_t size() const { return pcs_.size(); }
@@ -200,6 +206,7 @@ private:
   /// reaches the final s_endpgm): the wave ends, which is the region's end exit.
   std::vector<bool> endpgm_;
   uint32_t barriers_ = 0;                         ///< Barriers the last run executed.
+  uint64_t code_lo_ = 0, code_hi_ = 0;            ///< The region's code in memory_.
   std::unordered_map<uint64_t, size_t> pc_index_; ///< Region instruction at each PC.
   size_t loop_scale_ = 1;
   bool back_edge_ = false; ///< Some branch goes backwards (a loop).
@@ -293,5 +300,8 @@ private:
 /// Value a matched inline-asm `def` writes: piece @p slot of block @p block, lane @p lane
 /// (0 for scalars), for the case's inline-asm seed. Half catalog values, half random.
 [[nodiscard]] uint32_t inline_asm_word(uint64_t seed, uint32_t block, uint32_t slot, uint32_t lane);
+
+/// Both runners of a pair treat loads from either side's code as reading code.
+void share_code_guard(RegionRunner &a, RegionRunner &b);
 
 } // namespace rocjitsu::isa_diff

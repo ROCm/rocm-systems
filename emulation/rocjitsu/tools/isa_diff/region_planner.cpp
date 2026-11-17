@@ -191,9 +191,42 @@ void check_pending(const KernelModel &om, const KernelModel &nm, const Candidate
     const KernelModel &m = side == &c.o ? om : nm;
     for (size_t i = side->begin; i < side->end; ++i) {
       const PendingState &p = m.pending_before(i);
-      const Effects &fx = m.insts()[i].fx;
-      conflict |= p.all_dests() & (fx.reads | fx.writes);
-      vconflict |= p.all_vdests() & (fx.vreads | fx.vwrites);
+      const InstRef &ref = m.insts()[i];
+      const Effects &fx = ref.fx;
+      // A vector load writes its destinations after every earlier vector load (vmcnt
+      // returns in issue order): overwriting a destination pending only on that in-order
+      // counter is no conflict (write after write, as LLVM's waitcnt insertion assumes).
+      LocSet wpend = p.all_dests();
+      VSet vwpend = p.all_vdests();
+      const std::string_view mn = ref.mnemonic;
+      const bool vector_load = fx.mem_read && !fx.mem_write &&
+                               (mn.starts_with("global_load") || mn.starts_with("buffer_load") ||
+                                mn.starts_with("scratch_load"));
+      if (vector_load && !p.unordered[0]) {
+        wpend.reset();
+        vwpend.reset();
+        for (unsigned c = 0; c < PendingState::kNumCounters; ++c)
+          if (c != PendingState::kLoad) {
+            wpend |= p.dests[c];
+            vwpend |= p.vdests[c];
+          }
+      }
+      // A predicated destination also counts as read (inactive lanes keep it): for such a
+      // load it lands in order like the write. Its source operands (the address, read at
+      // issue) still conflict, also when they are among its destinations.
+      LocSet own;
+      VSet vown;
+      if (vector_load && ref.inst) {
+        own = fx.writes;
+        vown = fx.vwrites;
+        for (const SourceOperand &so : source_operands(*ref.inst, m.artifact().target)) {
+          own &= ~so.locs;
+          vown &= ~so.vlocs;
+        }
+      }
+      conflict |= (p.all_dests() & fx.reads & ~own) | (wpend & (fx.writes | (fx.reads & own)));
+      vconflict |=
+          (p.all_vdests() & fx.vreads & ~vown) | (vwpend & (fx.vwrites | (fx.vreads & vown)));
     }
   }
   const std::string state = describe_pending("old", po, om.artifact().target) + "; " +
@@ -548,9 +581,10 @@ RegionPair build_region(const KernelModel &om, const KernelModel &nm, const Cand
     k.sources.push_back({"s_barrier: one wave of the workgroup runs, so a barrier waits for no "
                          "other wave; it divides the run into epochs, and the sides must "
                          "execute as many barriers, store to the same shared dwords (LDS, "
-                         "global memory outside the private segment) in each epoch, and load a "
-                         "dword both load in the same epochs. What other waves store is not "
-                         "modelled: their part of memory keeps its initial content",
+                         "global memory outside the private segment) in each epoch, and load an "
+                         "LDS dword both load in the same epochs (global loads are not "
+                         "tracked). What other waves store is not modelled: their part of "
+                         "memory keeps its initial content",
                          "barrier epochs"});
   // Stack-frame bytes the region stores are dead at its exit when nothing outside it can
   // read private memory (spill slots reloaded inside the region, or not at all).

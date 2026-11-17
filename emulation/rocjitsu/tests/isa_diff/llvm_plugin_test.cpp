@@ -1719,6 +1719,93 @@ TEST(IsaDiffMemoryState, OnlyANewFaultIsAMismatch) {
   std::filesystem::remove_all(dir);
 }
 
+TEST(IsaDiffMemoryState, AStoreIntoTheCodeDoesNotOutliveItsCase) {
+  const std::string dir = temp_dir("code_store");
+  PairOptions o;
+  o.entry_vgprs = 1;
+  // A case whose store address is the store instruction itself overwrites the code: that
+  // case faults (excluded on both sides), and the next case must fetch the original instruction
+  // (it runs exactly as on a fresh runner).
+  auto k = [](const std::string &zero) {
+    return kernel_listing({zero, "global_store_dword v4, v0, s[0:1]", "s_waitcnt vmcnt(0)"});
+  };
+  auto data = case_of(dir, "f", k("v_mov_b32_e32 v4, 0"), k("v_and_b32_e32 v4, 0, v0"), o);
+  ASSERT_TRUE(data && data->whole_function);
+  const RegionPair &r = *data->whole_function;
+  uint64_t store_pc = 0;
+  for (const RegionInst &ri : r.old_side.insts)
+    if (ri.text.rfind("global_store", 0) == 0)
+      store_pc = ri.pc;
+  ASSERT_NE(store_pc, 0u);
+  std::string error;
+  const Target target = r.contract.gpu().value_or(Target{});
+  auto runner =
+      RegionRunner::create(r.old_side.insts, "code_store", error, r.contract.vgpr_count, target);
+  auto fresh = RegionRunner::create(r.old_side.insts, "code_store_fresh", error,
+                                    r.contract.vgpr_count, target);
+  ASSERT_TRUE(runner && fresh) << error;
+  auto state = [&](uint64_t base) {
+    MachineState s;
+    s.frame = runner->baseline_frame();
+    s.set(kLocExecLo, 0xffffffffu);
+    s.set(kLocExecHi, 0xffffffffu);
+    s.set(0, static_cast<uint32_t>(base));
+    s.set(1, static_cast<uint32_t>(base >> 32));
+    s.resize_vgprs(r.contract.vgpr_count);
+    for (unsigned lane = 0; lane < kWaveLanes; ++lane)
+      s.vset(0, lane, 0x12345678u);
+    return s;
+  };
+  const size_t n = r.old_side.insts.size();
+  runner->load(state(store_pc));
+  EXPECT_EQ(runner->run(n).status, RunStatus::MemoryFault);
+  runner->load(state(0x0000'0010'0000'0000ull));
+  EXPECT_EQ(runner->run(n).status, RunStatus::Ok);
+  fresh->load(state(0x0000'0010'0000'0000ull));
+  EXPECT_EQ(fresh->run(n).status, RunStatus::Ok);
+  EXPECT_EQ(runner->capture().mem_written, fresh->capture().mem_written);
+  std::filesystem::remove_all(dir);
+}
+
+TEST(IsaDiffMemoryState, ALoadFromTheCodeIsExcluded) {
+  const std::string dir = temp_dir("code_load");
+  PairOptions o;
+  o.entry_vgprs = 1;
+  // A pointer that lands on the code reads each side's own instructions (different bytes
+  // on the two sides): the case is excluded, not compared.
+  auto k = [](const std::string &zero) {
+    return kernel_listing({zero, "global_load_dword v1, v4, s[0:1]", "s_waitcnt vmcnt(0)",
+                           "global_store_dword v4, v1, s[2:3]", "s_waitcnt vmcnt(0)"});
+  };
+  auto data = case_of(dir, "f", k("v_mov_b32_e32 v4, 0"), k("v_and_b32_e32 v4, 0, v0"), o);
+  ASSERT_TRUE(data && data->whole_function);
+  const RegionPair &r = *data->whole_function;
+  std::string error;
+  const Target target = r.contract.gpu().value_or(Target{});
+  auto old_runner =
+      RegionRunner::create(r.old_side.insts, "code_load_old", error, r.contract.vgpr_count, target);
+  auto new_runner =
+      RegionRunner::create(r.new_side.insts, "code_load_new", error, r.contract.vgpr_count, target);
+  ASSERT_TRUE(old_runner && new_runner) << error;
+  share_code_guard(*old_runner, *new_runner);
+  MachineState s;
+  s.frame = old_runner->baseline_frame();
+  s.set(kLocExecLo, 0xffffffffu);
+  s.set(kLocExecHi, 0xffffffffu);
+  const uint64_t code = r.old_side.insts.front().pc;
+  s.set(0, static_cast<uint32_t>(code));
+  s.set(1, static_cast<uint32_t>(code >> 32));
+  s.set(3, 0x10u); // s[2:3]: the store, away from the code
+  s.resize_vgprs(r.contract.vgpr_count);
+  for (auto *runner : {old_runner.get(), new_runner.get()}) {
+    runner->load(s);
+    const RunOutcome out = runner->run(r.old_side.insts.size());
+    EXPECT_EQ(out.status, RunStatus::MemoryFault);
+    EXPECT_NE(out.detail.find("load from the code"), std::string::npos) << out.detail;
+  }
+  std::filesystem::remove_all(dir);
+}
+
 TEST(IsaDiffMemoryState, StoredBytesAreSortedAboveTheLdsTag) {
   const std::string dir = temp_dir("sorted_written");
   PairOptions o;
@@ -1756,6 +1843,27 @@ TEST(IsaDiffMemoryState, StoredBytesAreSortedAboveTheLdsTag) {
   EXPECT_TRUE(std::is_sorted(f.mem_written.begin(), f.mem_written.end()));
   EXPECT_TRUE(std::ranges::any_of(f.mem_written,
                                   [](const auto &b) { return b.first > kLdsTag + 0x10000; }));
+  std::filesystem::remove_all(dir);
+}
+
+TEST(IsaDiffWholeFunction, VectorLoadsOverwriteInOrder) {
+  const std::string dir = temp_dir("vmem_waw");
+  PairOptions o;
+  o.entry_vgprs = 1;
+  auto pending = [&](const std::string &second) {
+    auto k = [&](const std::string &zero) {
+      return kernel_listing({zero, "global_load_dword v1, v4, s[0:1]", second, "s_waitcnt vmcnt(0)",
+                             "global_store_dword v4, v1, s[2:3]", "s_waitcnt vmcnt(0)"});
+    };
+    auto data = case_of(dir, "f", k("v_mov_b32_e32 v4, 0"), k("v_and_b32_e32 v4, 0, v0"), o);
+    EXPECT_TRUE(data && data->whole_function);
+    return data && data->whole_function ? data->whole_function->contract.pending_effects
+                                        : std::string("?");
+  };
+  // A second load into v1 while the first is pending: loads return in issue order.
+  EXPECT_NE(pending("global_load_dword v1, v4, s[0:1] offset:4"), "CONFLICT");
+  // A load whose address v1 is still pending reads it too early: a conflict.
+  EXPECT_EQ(pending("global_load_dword v2, v1, s[0:1]"), "CONFLICT");
   std::filesystem::remove_all(dir);
 }
 

@@ -152,9 +152,21 @@ std::vector<std::pair<uint64_t, uint32_t>> MemoryImage::snapshot() const {
 /// to the CU's LDS, whose bytes appear as kLdsTag | offset. Atomics read and write.
 class RegionRunner::MemoryModel final : public ExecutionPlugin {
 public:
+  /// @p mem already holds the region's code in [code_lo, code_hi); a copy is kept to undo
+  /// stores into it.
   MemoryModel(amdgpu::GpuMemory *mem, amdgpu::Lds *lds, uint64_t code_lo, uint64_t code_hi)
       : ExecutionPlugin("rj_isa_diff_memory"), mem_(mem), lds_(lds), code_lo_(code_lo),
-        code_hi_(code_hi) {}
+        code_hi_(code_hi), guard_lo_(code_lo), guard_hi_(code_hi),
+        code_(code_hi > code_lo ? code_hi - code_lo : 0) {
+    if (!code_.empty())
+      mem_->read_block(code_lo_, std::span<uint8_t>(code_));
+  }
+  /// Loads from [lo, hi) read code (the union of both sides' code ranges).
+  void set_code_guard(uint64_t lo, uint64_t hi) {
+    guard_lo_ = lo;
+    guard_hi_ = hi;
+  }
+  [[nodiscard]] bool reads_code() const { return reads_code_; }
   bool observes_before_execute_instruction() const override { return false; }
   bool observes_after_execute_instruction() const override { return false; }
   bool observes_async_instruction_issued() const override { return false; }
@@ -213,15 +225,16 @@ public:
             bytes.push_back(addr);
           }
         }
-        // Shared memory (LDS; global memory outside the private segment) is what other
-        // waves of the workgroup see: with barriers, each dword access keeps its epoch.
-        // Scalar loads read kernel arguments and constants, which register allocation may
-        // rematerialize after a barrier: not tracked.
-        if (track_epochs_ && (local || !priv) && !scalar_)
+        // Shared memory is what other waves of the workgroup see: with barriers, LDS loads
+        // and stores and global (non-private) stores keep their epoch. Global loads are not
+        // tracked: they are most of a GEMM's traffic, and a wave hands data to the others
+        // through LDS or by storing it. Scalar loads read kernel arguments and constants,
+        // which register allocation may rematerialize after a barrier.
+        if (track_epochs_ && (local || (!priv && writes)) && !scalar_)
           for (uint64_t b : bytes) {
             const uint64_t dword = (local ? kLdsTag : 0) | (b & ~uint64_t{3});
             for (bool store : {false, true})
-              if (store ? writes : reads)
+              if (store ? writes : (reads && local))
                 if (sync_.empty() || sync_.back() != SyncAccess{epoch_, store, dword})
                   sync_.push_back({epoch_, store, dword});
           }
@@ -241,6 +254,12 @@ public:
             record_fp_units(lane, kLdsTag | bytes.front(), bytes.size());
           continue;
         }
+        // Code shares this memory: a load from either side's code range reads that side's
+        // own instructions, so the two sides would see different inputs.
+        if (reads)
+          for (uint64_t b : bytes)
+            if (b >= guard_lo_ && b < guard_hi_)
+              reads_code_ = true;
         if (reads)
           for (uint64_t b : bytes) {
             const uint64_t k = swizzled ? 32 : (b - base) >> 2; // dword of this lane's access
@@ -253,6 +272,8 @@ public:
         if (writes) {
           for (uint64_t b : bytes) {
             stored_.insert(b);
+            if (b >= guard_lo_ && b < guard_hi_)
+              writes_code_ = true;
             if (priv)
               private_.insert(b);
             if (priv && frame_)
@@ -270,11 +291,15 @@ public:
   /// Undo the previous case (touched bytes back to 0, the unwritten state) and set the
   /// seed of the next one.
   void reset(uint64_t seed) {
-    // The region's own code stays: seeding skipped it, and the next case fetches it.
+    // The region's own code stays: seeding skipped it, and the next case fetches it. A case
+    // that stored into it (UNSUPPORTED_OPERAND, touches_code) gets its bytes restored, or
+    // every later case would fetch the corrupted instructions.
     static constexpr uint8_t kZero[1] = {};
     auto clear = [&](uint64_t b) {
       if (b < code_lo_ || b >= code_hi_)
         mem_->write_block(b, std::span<const uint8_t>(kZero, 1));
+      else
+        mem_->write_block(b, std::span<const uint8_t>(&code_[b - code_lo_], 1));
     };
     for (uint64_t w : seeded_)
       for (unsigned k = 0; k < 4; ++k)
@@ -298,6 +323,8 @@ public:
     unsupported_ = false;
     wraps_ = false;
     lds_oob_ = false;
+    reads_code_ = false;
+    writes_code_ = false;
     epoch_ = 0;
     sync_.clear();
   }
@@ -359,12 +386,19 @@ public:
     }
     return {out.begin(), out.end()};
   }
-  [[nodiscard]] bool touches_code() const {
-    for (uint64_t b : stored_)
-      if (b >= code_lo_ && b < code_hi_)
-        return true;
-    return false;
+  /// The @p bytes of code at @p pc are the region's own (memory instructions are fetched
+  /// from this memory; caches written back first).
+  [[nodiscard]] bool code_intact(uint64_t pc, size_t bytes) const {
+    if (pc < code_lo_ || pc + bytes > code_hi_)
+      return true;
+    std::vector<uint8_t> now(bytes);
+    mem_->read_block(pc, std::span<uint8_t>(now));
+    return std::equal(now.begin(), now.end(),
+                      code_.begin() + static_cast<std::ptrdiff_t>(pc - code_lo_));
   }
+  /// A store landed in the code of either side (the guard range), noted as it happens (a
+  /// scan of every stored byte after every memory instruction was quadratic).
+  [[nodiscard]] bool touches_code() const { return writes_code_; }
 
 private:
   void erase_fp_units(const std::vector<uint64_t> &bytes) {
@@ -440,6 +474,10 @@ private:
   bool frame_ = false;  ///< The current instruction addresses the stack frame (no VGPR address).
   bool scalar_ = false; ///< The current instruction is a scalar load (MemoryImage::word).
   uint64_t code_lo_, code_hi_;
+  uint64_t guard_lo_, guard_hi_; ///< Loads from here read code (set_code_guard).
+  std::vector<uint8_t> code_;    ///< The code bytes in [code_lo_, code_hi_), to undo stores.
+  bool reads_code_ = false;      ///< This case loaded from the code range.
+  bool writes_code_ = false;     ///< This case stored into the code range.
   uint64_t seed_ = 0;
   bool unsupported_ = false;
   bool wraps_ = false;
@@ -553,6 +591,8 @@ std::unique_ptr<RegionRunner> RegionRunner::create(const std::vector<RegionInst>
       lo = std::min(lo, ri.pc);
       hi = std::max<uint64_t>(hi, ri.pc + ri.words.size() * 4);
     }
+    r->code_lo_ = lo;
+    r->code_hi_ = hi;
     auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
     auto *model = new MemoryModel(r->memory_.get(), &r->cu_->lds(), lo, hi);
     if (!group->add(OwnedPlugin(model, PluginDeleter{&delete_execution_plugin}))) {
@@ -1545,6 +1585,23 @@ RunOutcome RegionRunner::run_inline_asm(size_t i) {
   return out;
 }
 
+void RegionRunner::guard_code(uint64_t lo, uint64_t hi) {
+  if (mem_)
+    mem_->set_code_guard(lo, hi);
+}
+
+void share_code_guard(RegionRunner &a, RegionRunner &b) {
+  const auto [alo, ahi] = a.code_range();
+  const auto [blo, bhi] = b.code_range();
+  const bool ae = alo >= ahi, be = blo >= bhi;
+  if (ae && be)
+    return;
+  const uint64_t lo = ae ? blo : be ? alo : std::min(alo, blo);
+  const uint64_t hi = ae ? bhi : be ? ahi : std::max(ahi, bhi);
+  a.guard_code(lo, hi);
+  b.guard_code(lo, hi);
+}
+
 size_t RegionRunner::step_limit(size_t budget) const {
   constexpr size_t kLoopStepFactor = 64, kMaxLoopSteps = 1u << 16;
   if (!back_edge_)
@@ -1663,6 +1720,16 @@ RunOutcome RegionRunner::run(size_t budget, std::vector<TraceStep> *trace) {
         cu_->flush_all();
         l2_->invalidate_all();
         cu_->flush_l1();
+        // step() fetches the instruction from this memory: it must still be the region's.
+        // (A case's store into the code is caught after it lands, and reset() restores the
+        // bytes; were they still corrupted, a decode failure would halt the wave and look
+        // like a memory fault.)
+        if (!mem_->code_intact(pcs_[i], inst->size())) {
+          out.status = RunStatus::ExecutionError;
+          out.failed_index = i;
+          out.detail = "the region's code at '" + texts_[i] + "' was overwritten";
+          return out;
+        }
       }
       const uint64_t ub_before = cu_->isa_diagnostic_count();
       const bool trap_before = wf.in_trap_handler();
@@ -1682,11 +1749,20 @@ RunOutcome RegionRunner::run(size_t budget, std::vector<TraceStep> *trace) {
         out.detail = "memory instruction failed";
         return out;
       }
-      if (mem_ && (mem_->unsupported() || mem_->touches_code())) {
+      if (mem_ && mem_->unsupported()) {
         out.status = RunStatus::UnsupportedOperand;
         out.failed_index = i;
-        out.detail = mem_->unsupported() ? "LDS-DMA or image memory access"
-                                         : "store into the region's own code";
+        out.detail = "LDS-DMA or image memory access";
+        return out;
+      }
+      // An access to either side's code: a pointer the program could not have (its objects
+      // never overlap the code), and the two sides' code bytes differ. Outside the model's
+      // address domain, like a wrapping access: a fault (excluded when both sides take it).
+      if (mem_ && (mem_->touches_code() || mem_->reads_code())) {
+        out.status = RunStatus::MemoryFault;
+        out.failed_index = i;
+        out.detail = std::string(mem_->touches_code() ? "store into" : "load from") +
+                     " the code of either side at '" + texts_[i] + "'";
         return out;
       }
       if (mem_ && mem_->lds_oob()) {

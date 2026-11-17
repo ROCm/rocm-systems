@@ -223,10 +223,12 @@ hunks: a changed condition, a retargeted branch):
 - **Barriers.** `s_barrier` (GFX9-GFX11) runs in regions. One wave runs, so a barrier
   waits for no other wave; it divides the run into epochs. Besides the final state, the
   two sides must execute as many barriers, store to the same shared dwords (LDS, and
-  global memory outside the private segment) in each epoch, and load a dword both load in
-  the same epochs (`barriers` in the states; scalar loads, which read kernel arguments and
-  constants that allocation may rematerialize anywhere, are not tracked). A store or load
-  moved across a barrier, or
+  global memory outside the private segment) in each epoch, and load an LDS dword both
+  load in the same epochs (`barriers` in the states). Global loads are not tracked: they
+  are most of a GEMM's traffic (tracking them cost a third of `f0`'s time), and waves hand
+  data to each other through LDS or by storing it. Scalar loads, which read kernel
+  arguments and constants that allocation may rematerialize anywhere, are not tracked
+  either. A store or LDS load moved across a barrier, or
   a value reused across one, is therefore a mismatch even though this wave sees the same
   values; other waves of the workgroup would not. What other waves store is not
   modelled: their part of memory keeps its initial content.
@@ -471,7 +473,11 @@ within the step.
   - On the old side only, the input is excluded too (`memory fault on the old side only`):
     a fault is an access LLVM leaves undefined, so new may do anything there, as with
     reported undefined behaviour.
-  - LDS-DMA, image and code-overwriting accesses are `UNSUPPORTED_OPERAND`.
+  - LDS-DMA and image accesses are `UNSUPPORTED_OPERAND`.
+  - A load or store at either side's code addresses (a pointer that landed on the
+    code; the program's objects never overlap it, and the sides' code bytes differ) is a
+    `MEMORY_FAULT`, so an input both sides take it on is excluded. A case that stored into
+    the code gets its bytes restored before the next one.
 - **LDS.** The wave has a 64 KiB LDS window at offset 0 (one workgroup's allocation).
   - LDS words are seeded from the same image as global memory, as word
     `(kLdsTag | offset) / 4`; stored LDS bytes appear in the states as

@@ -329,6 +329,7 @@ std::string survivor_effect(const RegionPair &base, const RegionPair &mutant, ui
     return "unknown";
   auto image = std::make_shared<MemoryImage>();
   image->set_small_scalars(orig->loops() || mut->loops());
+  share_code_guard(*orig, *mut);
   orig->set_memory_image(image);
   mut->set_memory_image(image);
   const Frame frame = orig->baseline_frame();
