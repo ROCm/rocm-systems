@@ -87,6 +87,7 @@ markers = [
     "max_stat",
     "time_unit",
     "decimal",
+    "col",
     "serial",
     "num_xcds_spec_class",
     "num_xcds_cli_output",
