@@ -5194,9 +5194,12 @@ hipError_t ihipArrayGetMemoryRequirements(hipArrayMemoryRequirements* memoryRequ
     return hipErrorInvalidValue;
   }
 
+  // The values are per device; read them from the device the array was created on.
+  amd::Device* amd_device = g_devices[image->getUserData().deviceId]->devices()[0];
+  device::Memory* device_memory = image->getDeviceMemory(*amd_device, false);
   size_t size = 0;
   size_t alignment = 0;
-  if (!image->getMemoryRequirements(&size, &alignment)) {
+  if (device_memory == nullptr || !device_memory->getImageMemoryRequirements(&size, &alignment)) {
     return hipErrorNotSupported;
   }
 

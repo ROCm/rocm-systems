@@ -597,8 +597,6 @@ class Image : public Memory {
   size_t dim_;         //!< Image dimension
   uint mipLevels_;     //!< The number of mip levels
   uint baseMipLevel_;  //!< The base mip level for a view
-  size_t memReqSize_ = 0;       //!< Size the device requires for the image's memory
-  size_t memReqAlignment_ = 0;  //!< Alignment the device requires for the image's memory
 
  protected:
   Image(const Format& format, Image& parent, uint baseMipLevel = 0, cl_mem_flags flags = 0,
@@ -701,24 +699,6 @@ class Image : public Memory {
 
   //! Sets the byte pitch obtained from HWL
   void setBytePitch(size_t bytePitch) { impl_.bp_ = bytePitch; }
-
-  //! Records the size and alignment the device requires for the image's memory, before any
-  //! padding the runtime adds. Set by the device backend when it allocates the image's own memory.
-  void setMemoryRequirements(size_t size, size_t alignment) {
-    memReqSize_ = size;
-    memReqAlignment_ = alignment;
-  }
-
-  //! Gets the values recorded by setMemoryRequirements(). Returns false if none were recorded,
-  //! e.g. for views and interop images, which don't own their memory.
-  bool getMemoryRequirements(size_t* size, size_t* alignment) const {
-    if (memReqSize_ == 0) {
-      return false;
-    }
-    *size = memReqSize_;
-    *alignment = memReqAlignment_;
-    return true;
-  }
 };
 
 //! SVM-related functionality.

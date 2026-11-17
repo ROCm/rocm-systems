@@ -192,12 +192,10 @@ bool Memory::create(Resource::MemoryType memType, Resource::CreateParams* params
   // MaxGpuAlignment. Views, buffer-backed, pinned and interop images use other memory.
   const bool ownsMemory = (memoryType() == Local) || (memoryType() == Persistent) ||
                           (memoryType() == Remote) || (memoryType() == RemoteUSWC);
-  if (result && ownsMemory && (image() != nullptr) && (owner() != nullptr) &&
-      (owner()->asImage() != nullptr)) {
+  if (result && ownsMemory && (image() != nullptr)) {
     Pal::GpuMemoryRequirements req = {};
     image()->GetGpuMemoryRequirements(&req);
-    owner()->asImage()->setMemoryRequirements(static_cast<size_t>(req.size),
-                                              static_cast<size_t>(req.alignment));
+    setImageMemoryRequirements(static_cast<size_t>(req.size), static_cast<size_t>(req.alignment));
   }
 
   if (result) {

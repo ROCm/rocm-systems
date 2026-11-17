@@ -1610,6 +1610,11 @@ bool Image::create(bool alloc_local, amd::Memory::ErrorCode* errorCode) {
     roc::Image* orgImage = static_cast<roc::Image*>(orgDevMem);
     // fill all required values
     deviceImageInfo_ = orgImage->deviceImageInfo_;
+    size_t memReqSize = 0;
+    size_t memReqAlignment = 0;
+    if (orgImage->getImageMemoryRequirements(&memReqSize, &memReqAlignment)) {
+      setImageMemoryRequirements(memReqSize, memReqAlignment);
+    }
     permission_ = orgImage->permission_;
     deviceMemory_ = orgImage->deviceMemory_;
     hsaImageObject_ = orgImage->hsaImageObject_;
@@ -1628,7 +1633,7 @@ bool Image::create(bool alloc_local, amd::Memory::ErrorCode* errorCode) {
     return false;
   }
   // Record the requirement before the padding below overwrites deviceImageInfo_.size.
-  owner()->asImage()->setMemoryRequirements(deviceImageInfo_.size, deviceImageInfo_.alignment);
+  setImageMemoryRequirements(deviceImageInfo_.size, deviceImageInfo_.alignment);
 
   // roc::Device::hostAlloc and deviceLocalAlloc implementation does not
   // support alignment larger than HSA memory region allocation granularity.
