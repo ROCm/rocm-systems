@@ -147,11 +147,23 @@ if(HIP_TESTS_TAILOR_TAGS_TO_CURRENT_MACHINE)
 
     # Target IDs (e.g. gfx942:xnack+) the tests are built for, taken from the
     # --offload-arch flags. Devices that match none of them are not probed.
+    # SPIR-V code is not tied to a device, so it cannot be tailored to one:
+    # a SPIR-V target is ignored next to device targets and rejected on its own.
     set(_sysinfo_targets)
     foreach(_offload_arch ${OFFLOAD_ARCH_LIST})
         string(REPLACE "--offload-arch=" "" _target_id "${_offload_arch}")
         list(APPEND _sysinfo_targets "${_target_id}")
     endforeach()
+    if(_sysinfo_targets STREQUAL "amdgcnspirv")
+        message(
+            FATAL_ERROR
+            "HIP_TESTS_TAILOR_TAGS_TO_CURRENT_MACHINE is incompatible with "
+            "building the tests only for SPIR-V (amdgcnspirv): tests cannot be "
+            "tailored to a device they are not built for. Add a device target "
+            "or turn the option off."
+        )
+    endif()
+    list(REMOVE_ITEM _sysinfo_targets "amdgcnspirv")
     list(JOIN _sysinfo_targets "," _sysinfo_targets)
     message(
         STATUS

@@ -138,8 +138,11 @@ writes the available features to `hip_tests_features.yaml` in the config build
 directory. Only devices the tests are built for are probed: a device must match one
 of the `--offload-arch` target IDs (e.g. `gfx1201` or `gfx942:xnack+`, as derived
 from `OFFLOAD_ARCH_STR` or `GPU_TARGETS`). Other devices are listed in the report
-with `selected: false` and ignored, and the build fails if no device matches. A
-feature counts as available only when every probed device supports it.
+with `selected: false` and ignored, and the build fails if no device matches. Generic
+targets (e.g. `gfx11-generic`) and SPIR-V (`amdgcnspirv`) match no device, since tests
+cannot be tailored to them; building only for SPIR-V (e.g. with `ENABLE_SPIRV`) is
+rejected at configure time. A feature counts as available only when every probed
+device supports it.
 Test cases that require an unavailable feature are still compiled, but are disabled
 like a `disabled`/`unsupported` match: they get the `[disabled]` tag, plus a
 `[missing_<feature>]` tag for every missing feature. The resulting binaries are

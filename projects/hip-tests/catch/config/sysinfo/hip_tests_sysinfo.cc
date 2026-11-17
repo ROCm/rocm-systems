@@ -80,12 +80,10 @@ bool HasTargetFeature(const std::string& target_id, const std::string& target_fe
 // Returns true if code built for the target ID target (e.g. "gfx942" or
 // "gfx942:xnack+") runs on a device whose gcnArchName is arch_name (e.g.
 // "gfx942:sramecc+:xnack-"): the processors must be equal, and every target
-// feature set in target must be set the same way on the device. SPIR-V code
-// runs on every device.
+// feature set in target must be set the same way on the device. Targets that
+// are not tied to a single processor, such as generic targets (gfx11-generic)
+// or SPIR-V (amdgcnspirv), match no device: features cannot be tailored to them.
 bool TargetMatchesDevice(const std::string& target, const std::string& arch_name) {
-  if (target == "amdgcnspirv") {
-    return true;
-  }
   std::vector<std::string> target_pieces = Split(target, ':');
   std::vector<std::string> device_pieces = Split(arch_name, ':');
   if (target_pieces.empty() || device_pieces.empty() || target_pieces[0] != device_pieces[0]) {
