@@ -18,6 +18,7 @@
 #include <bit>
 #include <bitset>
 #include <cassert>
+#include <compare>
 #include <cstdint>
 #include <cstring>
 #include <deque>
@@ -27,6 +28,7 @@
 #include <optional>
 #include <set>
 #include <string_view>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -256,6 +258,13 @@ struct SgprWriteMask {
     return false;
   }
 
+  void clear(uint16_t sgpr) {
+    if (sgpr < 64)
+      lo &= ~(uint64_t{1} << sgpr);
+    else if (sgpr < REGISTER_SET_MAX_SGPRS)
+      hi &= ~(uint64_t{1} << (sgpr - 64));
+  }
+
   SgprWriteMask &operator|=(const SgprWriteMask &other) {
     lo |= other.lo;
     hi |= other.hi;
@@ -294,6 +303,46 @@ struct CalleeSummary {
       return_gpr_idx_enabled = std::nullopt;
     return *this;
   }
+};
+
+// Symbolic identity of the incoming return address. A nested call overwrites
+// its SGPR pair, so a helper that calls again must carry the incoming halves
+// through a proven lane stash and restore both halves before returning.
+// Values are 0 (unknown), 1 (incoming low half), and 2 (incoming high half).
+struct SummaryReturnFacts {
+  struct LaneHalf {
+    uint16_t vgpr = 0;
+    uint16_t lane = 0;
+    uint8_t half = 0;
+
+    friend auto operator<=>(const LaneHalf &, const LaneHalf &) = default;
+  };
+
+  std::array<uint8_t, REGISTER_SET_MAX_SGPRS> sgprs{};
+  std::vector<LaneHalf> lanes;
+
+  [[nodiscard]] uint8_t read_lane(uint16_t vgpr, uint16_t lane) const {
+    const auto it = std::ranges::lower_bound(lanes, LaneHalf{vgpr, lane, 0});
+    return it != lanes.end() && it->vgpr == vgpr && it->lane == lane ? it->half : 0;
+  }
+
+  void write_lane(uint16_t vgpr, uint16_t lane, uint8_t half) {
+    const auto it = std::ranges::lower_bound(lanes, LaneHalf{vgpr, lane, 0});
+    if (it != lanes.end() && it->vgpr == vgpr && it->lane == lane) {
+      if (half == 0)
+        lanes.erase(it);
+      else
+        it->half = half;
+    } else if (half != 0) {
+      lanes.insert(it, LaneHalf{vgpr, lane, half});
+    }
+  }
+
+  void erase_vgpr(uint16_t vgpr) {
+    std::erase_if(lanes, [=](const LaneHalf &item) { return item.vgpr == vgpr; });
+  }
+
+  friend auto operator<=>(const SummaryReturnFacts &, const SummaryReturnFacts &) = default;
 };
 
 struct CalleeSummaryCacheKey {
@@ -1308,11 +1357,15 @@ bool append_unique_indexed(std::vector<IndirectCallFixup> &out, FixupIndex &inde
   const auto [it, inserted] = index.try_emplace(fixup_identity(fixup), out.size());
   if (!inserted) {
     IndirectCallFixup &duplicate = out[it->second];
+    const bool changed =
+        (!duplicate.source_incomplete && fixup.source_incomplete) ||
+        (duplicate.source_recovery_contiguous && !fixup.source_recovery_contiguous) ||
+        (!duplicate.source_requires_xcnt_drain && fixup.source_requires_xcnt_drain);
     duplicate.source_incomplete = duplicate.source_incomplete || fixup.source_incomplete;
     duplicate.source_recovery_contiguous &= fixup.source_recovery_contiguous;
     duplicate.source_requires_xcnt_drain =
         duplicate.source_requires_xcnt_drain || fixup.source_requires_xcnt_drain;
-    return false;
+    return changed;
   }
   out.push_back(fixup);
   return true;
@@ -1795,6 +1848,12 @@ void emit_fixups_for_values(const AnalysisContext &ctx, size_t inst_index, uint1
   // setpc/swappc consumer. When @p incomplete, at least one predecessor left the
   // pair unconstrained; the concrete targets are still recorded (for relocation
   // and liveness) but flagged so the translator does not build a direct window.
+  // An outside-text value is still a possible runtime target. Although no
+  // local CFG edge can represent it, retaining another target as complete
+  // would falsely claim that the consumer has a closed target set.
+  incomplete |= std::ranges::any_of(values, [&](const PcValue &value) {
+    return value.offset < 0 || static_cast<uint64_t>(value.offset) >= ctx.text.size();
+  });
   for (const PcValue &value : values) {
     if (auto fixup = fixup_for_value(ctx, inst_index, pair_lo, value)) {
       fixup->source_incomplete = incomplete;
@@ -2363,6 +2422,9 @@ constexpr size_t kRetainedAnalysisUnitBytes = 64;
 // entirely. Exhaustion stays fail-closed: an object that outgrows this loses recovery, not memory.
 constexpr size_t kMaxRetainedAnalysisUnits = size_t{1} << 26;
 constexpr size_t kMaxCalleeSummaryVariantsPerTarget = 8;
+constexpr size_t kMaxNestedCalleeSummaryDepth = 4;
+constexpr size_t kMaxCalleeSummaryStates = 4096;
+constexpr size_t kMaxCalleeSummaryWorklist = 8192;
 constexpr size_t kCalleeSummaryCacheEntryUnits =
     1 + (sizeof(CalleeSummaryCacheKey) + sizeof(std::optional<CalleeSummary>) + 3 * sizeof(void *) -
          1) /
@@ -2729,9 +2791,15 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
       callee_summary_cache;
   std::unordered_map<CalleeSummaryGroupKey, size_t, CalleeSummaryGroupKeyHash>
       callee_summary_variants;
-  const auto statically_bounded_callee_summary =
+  std::unordered_set<CalleeSummaryCacheKey, CalleeSummaryCacheKeyHash> active_callee_summaries;
+  std::function<std::optional<CalleeSummary>(uint64_t, uint16_t, std::optional<uint8_t>,
+                                             std::optional<bool>)>
+      statically_bounded_callee_summary;
+  statically_bounded_callee_summary =
       [&](uint64_t target, uint16_t return_pair, std::optional<uint8_t> initial_mode,
           std::optional<bool> initial_gpr_idx_enabled) -> std::optional<CalleeSummary> {
+    if (static_cast<size_t>(return_pair) + 1 >= REGISTER_SET_MAX_SGPRS)
+      return std::nullopt;
     const CalleeSummaryCacheKey key{.target = target,
                                     .return_pair = return_pair,
                                     .mode = initial_mode,
@@ -2751,6 +2819,16 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
       ++group_variants->second;
       return std::nullopt;
     }
+    // A cycle is not a transitive preservation proof. Bound call depth even
+    // when every individual function has a small local CFG.
+    if (active_callee_summaries.size() >= kMaxNestedCalleeSummaryDepth ||
+        !active_callee_summaries.insert(key).second)
+      return std::nullopt;
+    struct ActiveSummaryGuard {
+      decltype(active_callee_summaries) &active;
+      CalleeSummaryCacheKey key;
+      ~ActiveSummaryGuard() { active.erase(key); }
+    } guard{active_callee_summaries, key};
 
     std::optional<CalleeSummary> result;
     auto start = instruction_by_offset.find(target);
@@ -2763,10 +2841,16 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
         std::optional<uint8_t> mode;
         std::optional<bool> setreg_vgpr_msb_hazard;
         std::optional<bool> gpr_idx_enabled;
+        SummaryReturnFacts return_facts;
       };
-      std::vector<WorkItem> worklist{
-          {block_for_instruction[start->second], initial_mode, false, initial_gpr_idx_enabled}};
-      std::unordered_set<uint64_t> visited;
+      SummaryReturnFacts incoming_return;
+      incoming_return.sgprs[return_pair] = 1;
+      incoming_return.sgprs[return_pair + 1] = 2;
+      std::vector<WorkItem> worklist{{block_for_instruction[start->second], initial_mode, false,
+                                      initial_gpr_idx_enabled, std::move(incoming_return)}};
+      std::set<std::tuple<size_t, std::optional<uint8_t>, std::optional<bool>, std::optional<bool>,
+                          SummaryReturnFacts>>
+          visited;
       bool saw_return = false;
       std::optional<uint8_t> return_mode;
       std::optional<bool> return_gpr_idx_enabled;
@@ -2774,18 +2858,16 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
       while (!worklist.empty() && !unsupported) {
         const WorkItem item = worklist.back();
         worklist.pop_back();
-        const uint64_t mode_key = item.mode ? *item.mode : uint64_t{256};
-        const uint64_t hazard_key =
-            item.setreg_vgpr_msb_hazard ? (*item.setreg_vgpr_msb_hazard ? 1u : 0u) : 2u;
-        const uint64_t gpr_idx_key = item.gpr_idx_enabled ? (*item.gpr_idx_enabled ? 1u : 0u) : 2u;
-        const uint64_t visit_key = (static_cast<uint64_t>(item.block_index) << 13) |
-                                   (gpr_idx_key << 11) | (hazard_key << 9) | mode_key;
-        if (!visited.insert(visit_key).second)
+        if (!visited
+                 .emplace(item.block_index, item.mode, item.setreg_vgpr_msb_hazard,
+                          item.gpr_idx_enabled, item.return_facts)
+                 .second)
           continue;
         // Bound malformed or unexpectedly broad callees. Falling back to the
         // ABI is always safe and avoids turning one recovery into a whole-text
         // traversal.
-        if (visited.size() > 4096) {
+        if (visited.size() > kMaxCalleeSummaryStates ||
+            worklist.size() > kMaxCalleeSummaryWorklist) {
           unsupported = true;
           break;
         }
@@ -2794,12 +2876,15 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
         std::optional<uint8_t> mode = item.mode;
         std::optional<bool> setreg_vgpr_msb_hazard = item.setreg_vgpr_msb_hazard;
         std::optional<bool> gpr_idx_enabled = item.gpr_idx_enabled;
+        SummaryReturnFacts return_facts = item.return_facts;
         const auto record_all_banks = [&](uint16_t selector) {
           for (uint16_t bank = 0; bank < 4; ++bank)
             summary.vgprs.set(static_cast<uint16_t>((selector & 0xffu) + bank * 256u));
         };
+        std::optional<uint64_t> nested_continuation;
         for (size_t index = block.first_index; index <= block.last_index; ++index) {
           const Instruction &inst = *ctx.insts[index];
+          const InstructionFacts &facts = ctx.facts[index];
           const std::string_view mnemonic = inst.mnemonic();
           // Relative-register operations can read or write a register selected
           // at runtime. Likewise, an ordinary VGPR destination is not a static
@@ -2812,14 +2897,75 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
             unsupported = true;
             break;
           }
+
+          // Capture symbolic sources before the instruction's destination
+          // invalidation. Only exact scalar moves and fixed VGPR lane transport
+          // can carry the incoming return address through a nested call.
+          std::array<uint8_t, 2> copied_halves{};
+          std::optional<uint16_t> copied_destination;
+          if ((mnemonic == "s_mov_b32" || mnemonic == "s_mov_b64") &&
+              inst.num_dst_operands() == 1 && inst.num_src_operands() == 1 &&
+              inst.dst_operand(0) != nullptr && inst.src_operand(0) != nullptr) {
+            const auto dst = inst.dst_operand(0)->to_register_ref();
+            const auto src = inst.src_operand(0)->to_register_ref();
+            const uint16_t width = mnemonic == "s_mov_b64" ? 2 : 1;
+            if (dst && src && dst->cls == RegClass::SGPR && src->cls == RegClass::SGPR &&
+                dst->width == width && src->width == width &&
+                static_cast<size_t>(dst->index) + width <= REGISTER_SET_MAX_SGPRS &&
+                static_cast<size_t>(src->index) + width <= REGISTER_SET_MAX_SGPRS) {
+              copied_destination = dst->index;
+              for (uint16_t lane = 0; lane < width; ++lane)
+                copied_halves[lane] = return_facts.sgprs[src->index + lane];
+            }
+          }
+
+          const Operand *vgpr_operand = mnemonic == "v_writelane_b32"  ? inst.dst_operand(0)
+                                        : mnemonic == "v_readlane_b32" ? inst.src_operand(0)
+                                                                       : nullptr;
+          const auto vgpr_ref = vgpr_operand ? vgpr_operand->to_register_ref() : std::nullopt;
+          const auto bank =
+              vgpr_operand ? vgpr_bank_for_role(mode, vgpr_operand->vgpr_msb_role()) : std::nullopt;
+          const auto fixed_lane = inline_lane(inst.src_operand(1));
+          const auto written_half = mnemonic == "v_writelane_b32" && inst.src_operand(0)
+                                        ? operand_register(inst.src_operand(0), RegClass::SGPR)
+                                        : std::nullopt;
+          const uint8_t half_to_stash = written_half ? return_facts.sgprs[written_half->index] : 0;
+          const uint8_t half_from_stash =
+              mnemonic == "v_readlane_b32" && vgpr_ref && vgpr_ref->cls == RegClass::VGPR &&
+                      fixed_lane && bank && vgpr_ref->index < 256
+                  ? return_facts.read_lane(static_cast<uint16_t>(vgpr_ref->index + *bank * 256u),
+                                           *fixed_lane)
+                  : 0;
+
           ensure_written_sgprs(ctx, index);
-          ctx.facts[index].written_sgprs.for_each([&](uint16_t sgpr) { summary.sgprs.set(sgpr); });
+          ctx.facts[index].written_sgprs.for_each([&](uint16_t sgpr) {
+            summary.sgprs.set(sgpr);
+            return_facts.sgprs[sgpr] = 0;
+          });
+          if (copied_destination) {
+            return_facts.sgprs[*copied_destination] = copied_halves[0];
+            if (mnemonic == "s_mov_b64")
+              return_facts.sgprs[*copied_destination + 1] = copied_halves[1];
+          }
+          if (mnemonic == "v_readlane_b32") {
+            const auto dst = operand_register(inst.dst_operand(0), RegClass::SGPR);
+            if (dst)
+              return_facts.sgprs[dst->index] = half_from_stash;
+          }
+
           RegisterSet implicit_defs;
           inst.implicit_defs(implicit_defs);
           implicit_defs.for_each([&](RegisterRef ref) {
-            if (ref.cls == RegClass::VGPR)
-              for (uint16_t lane = 0; lane < std::max<uint16_t>(1, ref.width); ++lane)
-                record_all_banks(static_cast<uint16_t>(ref.index + lane));
+            if (ref.cls != RegClass::VGPR || mnemonic == "v_writelane_b32")
+              return;
+            for (uint16_t implicit_lane = 0; implicit_lane < std::max<uint16_t>(1, ref.width);
+                 ++implicit_lane) {
+              const uint16_t selector = static_cast<uint16_t>(ref.index + implicit_lane);
+              record_all_banks(selector);
+              std::erase_if(return_facts.lanes, [&](const SummaryReturnFacts::LaneHalf &item) {
+                return (item.vgpr & 0xffu) == (selector & 0xffu);
+              });
+            }
           });
           for (int dst_index = 0; dst_index < inst.num_dst_operands(); ++dst_index) {
             const Operand *dst = inst.dst_operand(dst_index);
@@ -2833,14 +2979,84 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
               const uint16_t selector = static_cast<uint16_t>(ref->index + lane);
               if (!bank || selector >= 256) {
                 record_all_banks(selector);
+                std::erase_if(return_facts.lanes, [&](const SummaryReturnFacts::LaneHalf &item) {
+                  return (item.vgpr & 0xffu) == (selector & 0xffu);
+                });
               } else {
-                summary.vgprs.set(
-                    static_cast<uint16_t>(selector + static_cast<uint16_t>(*bank) * 256u));
+                const uint16_t physical =
+                    static_cast<uint16_t>(selector + static_cast<uint16_t>(*bank) * 256u);
+                summary.vgprs.set(physical);
+                if (mnemonic == "v_writelane_b32" && dst_index == 0 && lane == 0 && fixed_lane) {
+                  return_facts.write_lane(physical, *fixed_lane, half_to_stash);
+                } else {
+                  return_facts.erase_vgpr(physical);
+                }
               }
             }
           }
+
           update_vgpr_mode(mode, setreg_vgpr_msb_hazard, inst, ctx.text, ctx.setreg_vgpr_msb_fixup);
           update_gpr_idx_enabled(gpr_idx_enabled, inst, ctx.text, ctx.arch);
+
+          if (facts.call_sdst || facts.swappc_sdst) {
+            const uint16_t nested_return_pair =
+                facts.call_sdst ? *facts.call_sdst : *facts.swappc_sdst;
+            const uint64_t next_offset = inst.src_loc() + static_cast<uint64_t>(inst.size());
+            std::vector<uint64_t> targets;
+            if (facts.call_sdst) {
+              const auto delta = inst.branch_offset_bytes();
+              if (delta && static_cast<int64_t>(next_offset) + *delta >= 0)
+                targets.push_back(
+                    static_cast<uint64_t>(static_cast<int64_t>(next_offset) + *delta));
+            } else {
+              for (const IndirectCallFixup &fixup : known_fixups) {
+                if (fixup.source_call_offset != inst.src_loc())
+                  continue;
+                if (fixup.source_incomplete) {
+                  unsupported = true;
+                  break;
+                }
+                targets.push_back(fixup.source_target_offset);
+              }
+            }
+            std::ranges::sort(targets);
+            targets.erase(std::ranges::unique(targets).begin(), targets.end());
+            if (unsupported || targets.empty() || targets.size() > kMaxIndirectTargetsPerConsumer) {
+              unsupported = true;
+              break;
+            }
+            std::optional<CalleeSummary> nested;
+            for (uint64_t nested_target : targets) {
+              auto child = statically_bounded_callee_summary(nested_target, nested_return_pair,
+                                                             mode, gpr_idx_enabled);
+              if (!child) {
+                unsupported = true;
+                break;
+              }
+              if (nested)
+                *nested |= *child;
+              else
+                nested = *child;
+            }
+            if (unsupported)
+              break;
+            summary.sgprs |= nested->sgprs;
+            summary.vgprs |= nested->vgprs;
+            nested->sgprs.for_each([&](uint16_t sgpr) { return_facts.sgprs[sgpr] = 0; });
+            std::erase_if(return_facts.lanes, [&](const SummaryReturnFacts::LaneHalf &item) {
+              return nested->vgprs.test(item.vgpr);
+            });
+            mode = nested->return_mode;
+            gpr_idx_enabled = nested->return_gpr_idx_enabled;
+            nested_continuation = next_offset;
+            if (index != block.last_index)
+              unsupported = true;
+            break;
+          }
+          if (return_facts.lanes.size() > 32) {
+            unsupported = true;
+            break;
+          }
         }
         if (unsupported)
           break;
@@ -2848,7 +3064,8 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
         const Instruction &term = *ctx.insts[block.last_index];
         const InstructionFacts &facts = ctx.facts[block.last_index];
         if (facts.setpc_ssrc) {
-          if (*facts.setpc_ssrc != return_pair)
+          if (*facts.setpc_ssrc != return_pair || return_facts.sgprs[return_pair] != 1 ||
+              return_facts.sgprs[return_pair + 1] != 2)
             unsupported = true;
           else if (!saw_return) {
             return_mode = mode;
@@ -2862,6 +3079,17 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
           }
           continue;
         }
+        if (nested_continuation) {
+          const auto next = instruction_by_offset.find(*nested_continuation);
+          if (next == instruction_by_offset.end() ||
+              block_for_instruction[next->second] == blocks.size()) {
+            unsupported = true;
+            continue;
+          }
+          worklist.push_back({block_for_instruction[next->second], mode, setreg_vgpr_msb_hazard,
+                              gpr_idx_enabled, return_facts});
+          continue;
+        }
         if (facts.call_sdst || facts.swappc_ssrc || is_indirect_branch(term)) {
           unsupported = true;
           continue;
@@ -2872,20 +3100,26 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
           continue;
         }
         for (size_t successor : block.successors)
-          worklist.push_back({successor, mode, setreg_vgpr_msb_hazard, gpr_idx_enabled});
+          worklist.push_back(
+              {successor, mode, setreg_vgpr_msb_hazard, gpr_idx_enabled, return_facts});
       }
-      // A transfer through the nominal return pair is only a proven return if
-      // the callee never repurposed either half. This deliberately rejects
-      // save-and-restore sequences that this summary does not value-track.
-      if (!unsupported && saw_return && !summary.sgprs.test(return_pair) &&
-          !summary.sgprs.test(static_cast<uint16_t>(return_pair + 1))) {
+      if (!unsupported && saw_return) {
+        summary.sgprs.clear(return_pair);
+        summary.sgprs.clear(static_cast<uint16_t>(return_pair + 1));
         summary.return_mode = return_mode;
         summary.return_gpr_idx_enabled = return_gpr_idx_enabled;
         result = summary;
       }
     }
+    // Recursive summaries can insert other mode variants and rehash this map.
+    // Re-read the group after recursion rather than retaining the earlier
+    // iterator or silently exceeding its variant budget.
+    auto current_group = callee_summary_variants.find(group);
+    if (current_group != callee_summary_variants.end() &&
+        current_group->second >= kMaxCalleeSummaryVariantsPerTarget)
+      return std::nullopt;
     const size_t retained_units =
-        kCalleeSummaryCacheEntryUnits + (group_variants == callee_summary_variants.end() ? 1 : 0);
+        kCalleeSummaryCacheEntryUnits + (current_group == callee_summary_variants.end() ? 1 : 0);
     const size_t available_units =
         kMaxRetainedAnalysisUnits - retained_state_units - retained_summary_units;
     if (retained_units > available_units) {
@@ -2893,10 +3127,10 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
       return std::nullopt;
     }
     callee_summary_cache.emplace(key, result);
-    if (group_variants == callee_summary_variants.end())
+    if (current_group == callee_summary_variants.end())
       callee_summary_variants.emplace(group, 1);
     else
-      ++group_variants->second;
+      ++current_group->second;
     retained_summary_units += retained_units;
     return result;
   };
@@ -3616,6 +3850,7 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
   leaders.erase(std::ranges::unique(leaders).begin(), leaders.end());
 
   PcAddressBuilderMap round_builders;
+  bool stabilized = false;
   for (size_t iteration = 0; iteration < kMaxIndirectDiscoveryIterations; ++iteration) {
     add_recovered_leaders(leaders, recovered);
 
@@ -3667,8 +3902,29 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
     bool changed = false;
     for (const IndirectCallFixup &fixup : iteration_recovered)
       changed |= append_unique_indexed(recovered, recovered_index, fixup);
-    if (!changed)
+    // The accumulated graph can acquire a new predecessor after an earlier
+    // round proved a source. If the final CFG no longer emits that proof, retain
+    // its edge only as an incomplete overapproximation. This also prevents a
+    // nested summary from trusting a previously complete but now stale target.
+    for (IndirectCallFixup &fixup : recovered) {
+      if (!iteration_recovered_index.contains(fixup_identity(fixup)) && !fixup.source_incomplete) {
+        fixup.source_incomplete = true;
+        changed = true;
+      }
+    }
+    if (!changed) {
+      stabilized = true;
       break;
+    }
+  }
+
+  if (!stabilized) {
+    // No stable fresh-source coverage was observed within the iteration cap.
+    // The edges remain useful to overapproximate reachability, but none can be
+    // published as a closed control transfer.
+    for (IndirectCallFixup &fixup : recovered)
+      fixup.source_incomplete = true;
+    round_builders.clear();
   }
 
   if (pc_builders != nullptr) {

@@ -5062,6 +5062,267 @@ TEST(CfgAnalysis, Gfx1250UnsupportedCalleeSummaryFallsBackToCallPreservedSgprs) 
   }
 }
 
+TEST(CfgAnalysis, Gfx1250NestedCalleeReturnIdentityControls) {
+  enum class Variant {
+    Valid,
+    ClobberCallerStash,
+    ClobberTargetSgpr,
+    ClobberSavedStash,
+    ClobberReturnStash,
+    MissingReturnHalf,
+    DynamicNestedTarget,
+    RecursiveCall,
+    DepthLimit,
+    AlternateReturn,
+    ChangedBank,
+    DynamicStashLane,
+    DynamicReadLane,
+  };
+  constexpr auto set_mode_zero = cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 0});
+  constexpr auto set_src_bank_one = cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 1});
+  constexpr auto getpc_s0 = cdna5::build_sop1(cdna5::kSGetPcI64Sop1, {.sdst = 0});
+  constexpr auto getpc_s2 = cdna5::build_sop1(cdna5::kSGetPcI64Sop1, {.sdst = 2});
+  constexpr auto add_s0 =
+      cdna5::build_sop2(cdna5::kSAddNcU64Sop2, {.ssrc0 = 0, .ssrc1 = 254, .sdst = 0});
+  constexpr auto add_s2 =
+      cdna5::build_sop2(cdna5::kSAddNcU64Sop2, {.ssrc0 = 2, .ssrc1 = 254, .sdst = 2});
+  constexpr auto endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
+  constexpr auto nop = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5);
+  constexpr auto caller_swappc = rocjitsu::build_s_swappc_b64(30, 0, ROCJITSU_CODE_ARCH_CDNA5);
+  constexpr auto nested_swappc = rocjitsu::build_s_swappc_b64(30, 2, ROCJITSU_CODE_ARCH_CDNA5);
+  constexpr auto dynamic_swappc = rocjitsu::build_s_swappc_b64(30, 4, ROCJITSU_CODE_ARCH_CDNA5);
+  constexpr auto ret = rocjitsu::build_s_setpc_b64(30, ROCJITSU_CODE_ARCH_CDNA5);
+  static_assert(endpgm.succeeded() && nop.succeeded() && caller_swappc.succeeded() &&
+                nested_swappc.succeeded() && dynamic_swappc.succeeded() && ret.succeeded());
+
+  for (Variant variant :
+       {Variant::Valid, Variant::ClobberCallerStash, Variant::ClobberTargetSgpr,
+        Variant::ClobberSavedStash, Variant::ClobberReturnStash, Variant::MissingReturnHalf,
+        Variant::DynamicNestedTarget, Variant::RecursiveCall, Variant::DepthLimit,
+        Variant::AlternateReturn, Variant::ChangedBank, Variant::DynamicStashLane,
+        Variant::DynamicReadLane}) {
+    SCOPED_TRACE(static_cast<int>(variant));
+    std::vector<uint32_t> words;
+    const auto put = [&](uint32_t word) { words.push_back(word); };
+    const auto offset = [&]() { return words.size() * sizeof(uint32_t); };
+    const uint16_t caller_stash = variant == Variant::ClobberSavedStash ? 122 : 0;
+    put(set_mode_zero[0]);
+    const uint64_t caller_getpc = offset();
+    put(getpc_s0[0]);
+    put(add_s0[0]);
+    const size_t caller_literal = words.size();
+    put(0);
+    put(0);
+    put(0xD7610000u | caller_stash);
+    put(0x02010000u); // v_writelane_b32, s0, 0.
+    put(0xD7610000u | caller_stash);
+    put(0x02010201u); // v_writelane_b32, s1, 1.
+    const size_t caller_call = words.size();
+    put(0); // Direct call into the nested helper.
+    put(variant == Variant::ClobberTargetSgpr ? nop.value() : 0xD7600000u);
+    put(variant == Variant::ClobberTargetSgpr ? nop.value()
+                                              : 0x02010100u | caller_stash); // readlane s0.
+    put(variant == Variant::ClobberTargetSgpr ? nop.value() : 0xD7600001u);
+    put(variant == Variant::ClobberTargetSgpr ? nop.value()
+                                              : 0x02010300u | caller_stash); // readlane s1.
+    const uint64_t caller_consumer = offset();
+    put(caller_swappc.value());
+    put(endpgm.value());
+    const uint64_t caller_target = offset();
+    put(endpgm.value());
+
+    const uint64_t helper_entry = offset();
+    put(0xD7610028u);
+    put(variant == Variant::DynamicStashLane ? 0x0200081Eu : 0x0201001Eu);
+    // v_writelane_b32 v40, s30, s4 or fixed lane 0.
+    put(0xD7610028u);
+    put(0x0201021Fu); // v_writelane_b32 v40, s31, 1.
+    const uint64_t helper_getpc = offset();
+    put(getpc_s2[0]);
+    put(add_s2[0]);
+    const size_t helper_literal = words.size();
+    put(0);
+    put(0);
+    put(variant == Variant::DynamicNestedTarget ? dynamic_swappc.value() : nested_swappc.value());
+    if (variant == Variant::AlternateReturn)
+      put(cdna5::build_sopp(cdna5::kSCbranchScc0Sopp, {.simm16 = 4})[0]);
+    if (variant == Variant::ChangedBank)
+      put(set_src_bank_one[0]);
+    put(0xD760001Eu);
+    put(variant == Variant::DynamicReadLane ? 0x02000928u : 0x02010128u);
+    // v_readlane_b32 s30, v40, s4 or fixed lane 0.
+    if (variant != Variant::MissingReturnHalf) {
+      put(0xD760001Fu);
+      put(0x02010328u); // v_readlane_b32 s31, v40, 1.
+    }
+    if (variant == Variant::ChangedBank)
+      put(set_mode_zero[0]);
+    put(ret.value());
+    const uint64_t leaf_entry = offset();
+    if (variant == Variant::ClobberCallerStash)
+      put(cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 128, .vdst = 0})[0]);
+    else if (variant == Variant::ClobberTargetSgpr)
+      put(cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 128, .sdst = 0})[0]);
+    else if (variant == Variant::ClobberSavedStash)
+      put(cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 128, .vdst = 122})[0]);
+    else if (variant == Variant::ClobberReturnStash)
+      put(cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 128, .vdst = 40})[0]);
+    else if (variant == Variant::RecursiveCall) {
+      const int64_t delta =
+          static_cast<int64_t>(helper_entry) - static_cast<int64_t>(offset() + sizeof(uint32_t));
+      ASSERT_EQ(delta % static_cast<int64_t>(sizeof(uint32_t)), 0);
+      const auto recursive_call =
+          rocjitsu::build_s_call_b64(30, static_cast<int16_t>(delta / 4), ROCJITSU_CODE_ARCH_CDNA5);
+      ASSERT_TRUE(recursive_call.succeeded());
+      put(recursive_call.value());
+    } else if (variant == Variant::DepthLimit) {
+      put(0); // Patched to a direct call below.
+    } else {
+      put(nop.value());
+    }
+    put(ret.value());
+
+    if (variant == Variant::DepthLimit) {
+      const auto patch_call = [&](size_t word_index, uint64_t target, uint16_t return_sgpr) {
+        const int64_t delta = static_cast<int64_t>(target) -
+                              static_cast<int64_t>((word_index + 1) * sizeof(uint32_t));
+        ASSERT_EQ(delta % static_cast<int64_t>(sizeof(uint32_t)), 0);
+        const auto call = rocjitsu::build_s_call_b64(return_sgpr, static_cast<int16_t>(delta / 4),
+                                                     ROCJITSU_CODE_ARCH_CDNA5);
+        ASSERT_TRUE(call.succeeded());
+        words[word_index] = call.value();
+      };
+      size_t prior_call = static_cast<size_t>(leaf_entry / sizeof(uint32_t));
+      uint16_t call_return_sgpr = 2;
+      for (uint16_t level = 0; level < 3; ++level) {
+        const uint64_t child_entry = offset();
+        patch_call(prior_call, child_entry, call_return_sgpr);
+        prior_call = words.size();
+        if (level != 2)
+          put(0); // Another direct call, patched at the next child.
+        else
+          put(nop.value());
+        const auto child_return =
+            rocjitsu::build_s_setpc_b64(call_return_sgpr, ROCJITSU_CODE_ARCH_CDNA5);
+        ASSERT_TRUE(child_return.succeeded());
+        put(child_return.value());
+        call_return_sgpr = static_cast<uint16_t>(call_return_sgpr + 2);
+      }
+    }
+
+    words[caller_literal] = static_cast<uint32_t>(caller_target - caller_getpc - 4);
+    words[helper_literal] = static_cast<uint32_t>(leaf_entry - helper_getpc - 4);
+    const int64_t call_delta = static_cast<int64_t>(helper_entry) -
+                               static_cast<int64_t>((caller_call + 1) * sizeof(uint32_t));
+    ASSERT_EQ(call_delta % static_cast<int64_t>(sizeof(uint32_t)), 0);
+    const auto direct_call = rocjitsu::build_s_call_b64(30, static_cast<int16_t>(call_delta / 4),
+                                                        ROCJITSU_CODE_ARCH_CDNA5);
+    ASSERT_TRUE(direct_call.succeeded());
+    words[caller_call] = direct_call.value();
+
+    TestCodeObject co(std::move(words));
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+    ASSERT_NE(decoder, nullptr);
+    auto blocks = build_valid_blocks(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
+    const bool recovered = std::ranges::any_of(blocks, [&](const auto &block) {
+      return std::ranges::any_of(
+          block->static_indirect_call_fixups(), [&](const IndirectCallFixup &fixup) {
+            return fixup.source_call_offset == caller_consumer && !fixup.source_incomplete &&
+                   fixup.source_target_offset == caller_target;
+          });
+    });
+    EXPECT_EQ(recovered, variant == Variant::Valid);
+  }
+}
+
+TEST(CfgAnalysis, Gfx1250NewPredecessorInvalidatesOlderCompleteCallTarget) {
+  constexpr auto getpc_s2 = cdna5::build_sop1(cdna5::kSGetPcI64Sop1, {.sdst = 2});
+  constexpr auto getpc_s0 = cdna5::build_sop1(cdna5::kSGetPcI64Sop1, {.sdst = 0});
+  constexpr auto add_s2 =
+      cdna5::build_sop2(cdna5::kSAddNcU64Sop2, {.ssrc0 = 2, .ssrc1 = 254, .sdst = 2});
+  constexpr auto add_s0 =
+      cdna5::build_sop2(cdna5::kSAddNcU64Sop2, {.ssrc0 = 0, .ssrc1 = 254, .sdst = 0});
+  constexpr auto first_call = rocjitsu::build_s_swappc_b64(30, 2, ROCJITSU_CODE_ARCH_CDNA5);
+  constexpr auto second_call = rocjitsu::build_s_swappc_b64(30, 0, ROCJITSU_CODE_ARCH_CDNA5);
+  constexpr auto endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
+  constexpr auto branch_next = cdna5::build_sopp(cdna5::kSBranchSopp, {.simm16 = 0});
+  constexpr auto clobber_s0 = cdna5::build_sop1(cdna5::kSMovB32Sop1,
+                                                {.ssrc0 = 128, .sdst = 0});
+  constexpr auto branch_back = cdna5::build_sopp(cdna5::kSBranchSopp, {.simm16 = 0xfffb});
+  static_assert(first_call.succeeded() && second_call.succeeded() && endpgm.succeeded());
+
+  TestCodeObject co({
+      getpc_s2[0],
+      add_s2[0],
+      48u,
+      0u,
+      first_call.value(), // +0x10: initially recovered target +0x34.
+      getpc_s0[0],
+      add_s0[0],
+      24u,
+      0u,
+      branch_next[0],      // +0x24: ordinary path enters second call.
+      second_call.value(), // +0x28: initially appears to target +0x30.
+      endpgm.value(),      // +0x2c: continuation.
+      endpgm.value(),      // +0x30: target of second call.
+      clobber_s0[0],       // +0x34: newly reached predecessor kills s0 builder.
+      branch_back[0],      // +0x38: bypass path rejoins the second call.
+  });
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  const std::array<uint64_t, 1> roots{0};
+  auto blocks = build_valid_blocks(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5, roots,
+                                   ExternalEntryPolicy::ExplicitOnly);
+  auto *first = block_starting_at(blocks, 16);
+  ASSERT_NE(first, nullptr);
+  ASSERT_TRUE(std::ranges::any_of(first->static_indirect_call_fixups(),
+                                  [](const IndirectCallFixup &fixup) {
+                                    return fixup.source_call_offset == 16 &&
+                                           fixup.source_target_offset == 52 &&
+                                           !fixup.source_incomplete;
+                                  }));
+  auto *second = block_starting_at(blocks, 40);
+  ASSERT_NE(second, nullptr);
+  const auto &fixups = second->static_indirect_call_fixups();
+  EXPECT_TRUE(std::ranges::none_of(fixups, [](const IndirectCallFixup &fixup) {
+    return fixup.source_call_offset == 40 && !fixup.source_incomplete;
+  }));
+}
+
+TEST(CfgAnalysis, MixedLocalAndOutsideTextTargetsRemainIncomplete) {
+  constexpr uint16_t kPcSreg = 8;
+  constexpr auto endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  constexpr auto swappc = rocjitsu::build_s_swappc_b64(30, kPcSreg, ROCJITSU_CODE_ARCH_CDNA4);
+  static_assert(endpgm.succeeded() && swappc.succeeded());
+  TestCodeObject co({
+      pack_sopp(5, 5),                                  // +0x00: choose either builder.
+      pack_sop1(0x1c, kPcSreg, 0),                      // +0x04: local getpc.
+      pack_sop2(0, kPcSreg, kPcSreg, 255),              // +0x08: local add.
+      44u,                                              // +0x0c: -> +0x34.
+      pack_sop2(4, kPcSreg + 1, kPcSreg + 1, 128),      // +0x10: local carry.
+      pack_sopp(2, 5),                                  // +0x14: branch to consumer.
+      pack_sop1(0x1c, kPcSreg, 0),                      // +0x18: outside getpc.
+      pack_sop2(0, kPcSreg, kPcSreg, 255),              // +0x1c: outside add.
+      4096u,                                            // +0x20: outside text.
+      pack_sop2(4, kPcSreg + 1, kPcSreg + 1, 128),      // +0x24: outside carry.
+      build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4).value(), // +0x28.
+      swappc.value(),                                   // +0x2c: joined consumer.
+      endpgm.value(),                                   // +0x30: continuation.
+      endpgm.value(),                                   // +0x34: local target.
+  });
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  const std::array<uint64_t, 1> roots{0};
+  auto blocks = build_valid_blocks(co, *decoder, ROCJITSU_CODE_ARCH_CDNA4, roots,
+                                   ExternalEntryPolicy::ExplicitOnly);
+  auto *consumer = block_starting_at(blocks, 44);
+  ASSERT_NE(consumer, nullptr);
+  const auto &fixups = consumer->static_indirect_call_fixups();
+  ASSERT_EQ(fixups.size(), 1u);
+  EXPECT_EQ(fixups[0].source_target_offset, 52u);
+  EXPECT_TRUE(fixups[0].source_incomplete);
+}
+
 TEST(CfgAnalysis, CalleeSavedSgprsUseCallingConventionIntersection) {
   EXPECT_FALSE(is_callee_saved_sgpr(20));
   EXPECT_TRUE(is_callee_saved_sgpr(30));
