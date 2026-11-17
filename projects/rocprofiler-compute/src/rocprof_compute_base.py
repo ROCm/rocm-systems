@@ -265,8 +265,14 @@ class RocProfCompute:
         )
         self.__args = self.__parser.parse_args()
 
-        if self.__args.mode == "analyze":
+        if self.__args.mode == "profile":
+            self.handle_profile_args()
+        elif self.__args.mode == "analyze":
             self.handle_analyze_args()
+
+    def handle_profile_args(self) -> None:
+        # True when only block 4 is selected, by --roofline or -b 4
+        self.__args.roof_only = set(self.__args.filter_blocks) == {"4"}
 
     def handle_analyze_args(self) -> None:
         """Handle analyze-specific argument processing"""
@@ -634,9 +640,12 @@ class RocProfCompute:
         promoted to the workload directory after passing validation.
         """
         if self.__mspec.gpu_arch not in BENCHMARKING_SUPPORTED:
-            console_error(
-                f"{self.__mspec.gpu_arch} does not support the roofline benchmark."
+            console_log(
+                "roofline",
+                f"Skipping benchmark: roofline benchmarking not supported on "
+                f"{self.__mspec.gpu_arch}",
             )
+            return
 
         output_dir = Path(self.__args.output_directory)
         if not output_dir.exists():

@@ -421,12 +421,7 @@ Examples:
         "--no-roof",
         required=False,
         default=False,
-        action=DeprecatedAction,
-        base_action="store_true",
-        advice=(
-            "To skip roofline, select blocks with -b or --set that do not include "
-            "block 4."
-        ),
+        action="store_true",
         help="Profile without collecting roofline data.",
     )
     profile_group.add_argument(
