@@ -1216,3 +1216,54 @@ rejected), every verdict as before, 153 s instead of 305 s. The sample was a poo
 were compiled for AMDGPU only because they do not say otherwise in the IR; 1 is gfx90a;
 none of the rest compiled. The 148-file gfx950 set (`triton-gfx950/rj_llir`) is the corpus
 to use for gfx950.
+
+## The whole function runs Triton kernels (2026-11-16)
+
+PR 243123 (56 changed functions, 53 inconclusive) was not blocked by register renaming
+between regions but by `f0` never running on Triton GEMM kernels: `s_barrier` (18 kernels),
+an early `s_endpgm` (3), `ds_bpermute` (4), calls (2), and 21 jobs over the 180 s budget.
+Changes:
+
+- `s_barrier` runs in regions as a one-wave barrier; the sides must execute as many
+  barriers and access the same shared dwords (LDS, non-private global; not scalar loads) in
+  each barrier epoch (`barriers` in the states). A store moved across a barrier is caught.
+- An early `s_endpgm` is an exit to the end of a region that reaches the final one.
+- A function listed without a descriptor that ends with `s_endpgm` (as the driver writes
+  kernels) is a kernel: its `f0` drops private memory and LDS at the end and takes
+  workitem IDs below 256; its regions drop private bytes in any addressing form when
+  nothing outside reads private memory (`private_memory`).
+- `lgkmcnt(N)` retires all but the newest N LDS operations (in issue order, unless a scalar
+  load is outstanding): software-pipelined kernels no longer make `f0` `UNRESOLVED`.
+- In loop regions three cases of four read small scalar data words (kernel arguments).
+- Speed: expansion variants and the unrestricted re-run stop at their first mismatch
+  (a timed-out kernel's regions: 190 s to 3 s); the initial-memory snapshot is kept sorted
+  instead of re-sorted on every capture (its `f0`: 1376 s at 40 GB to 17.5 s at 0.5 GB).
+- Fixes found on the way: stored bytes were not sorted when wild address arithmetic went
+  above the LDS tag (the comparison's lookups missed them); random alternative NaNs were
+  keyed by position among the floating-point instructions executed, so a rescheduled
+  epilogue drew different NaNs for the same operations (now keyed by the NaN the hardware
+  produced); a fault on the old side only is an input outside old's defined behaviour
+  (excluded), a fault on the new side only stays a mismatch.
+- Driver: bare subarch triples (`-mtriple=amdgpu10.10`) were not recognised, so such RUN
+  lines were never compared (found testing the uniform-permlane branch).
+
+PR 243123 again (60 functions: the triple fix adds 4): 9 pass (3 before), 1 pass-masked,
+45 inconclusive, 5 mismatch, 23 over the 180 s budget (21 before, when `f0` never ran).
+The 5 mismatches are not confirmed as defects of the change and look like modelling edges;
+their bundles are in `nod:~/isadiff-pr-cmd/pr243123-f0e`:
+
+| kernel | what differs |
+|---|---|
+| `809f7a894777`, `baae392a24f3` (a16_w16) | new faults at `buffer_store_dwordx2 v[8:9], v10, s[0:3]`; old executes the same store with the same lane-0 offset (`0xffffb8fc`, out of the buffer's range) and completes. Boundary inputs with all-ones bases. |
+| `a9ec7611e8c8` (a16_w16) | new faults at an LDS read in 2646 cases; before the old-side exclusion the first one was an old-side LDS fault: LDS addresses fault on both sides in different cases. |
+| `7f6864076a45`, `dfde0d6dd078` (a16wfp4) | one boundary case: 3 stored bytes differ by one (`0x55` vs `0x54`). |
+
+The uniform-permlane branch (`users/lialan/selectiondag_nightly_20261116_amdgpu_uniform_
+permlane_preserved_source`, d9043e64b854 against 01bf8c1e1985), with the triple fix: 324
+functions on gfx1010/gfx1100/gfx1200, 312 pass (every folded permlane among them), 12
+mismatch, 108 on gfx1310 (not modelled). The 12 are GlobalISel
+`v_permlane{16,x16}_b32_vss_fi{,_bc}_f64`: with fetch-inactive, the change reuses one
+register for the old and source operands, and the permlane reads inactive lanes, which hold
+other entry values on the two sides. LLVM leaves inactive lanes' values unspecified, so this
+is a modelling gap (inactive lanes of entry VGPRs are compared as defined inputs), not a
+miscompile.

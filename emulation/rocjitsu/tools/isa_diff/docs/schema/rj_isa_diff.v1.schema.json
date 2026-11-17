@@ -893,6 +893,7 @@
         "memory_dead_at_exit": {
           "enum": [
             "frame",
+            "private_memory",
             "private"
           ]
         },
@@ -2061,6 +2062,42 @@
               "type": "array",
               "items": {
                 "$ref": "#/$defs/hex"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "barriers": {
+          "type": "object",
+          "description": "Regions with s_barrier: the barriers the run executed (one wave runs, so they wait for nothing) and the shared-memory dwords (LDS: 1<<62 | offset; global memory outside the private segment) it accessed in each barrier epoch, as [epoch, store|load, dword address], sorted.",
+          "required": [
+            "count",
+            "accesses"
+          ],
+          "properties": {
+            "count": {
+              "$ref": "#/$defs/count"
+            },
+            "accesses": {
+              "type": "array",
+              "items": {
+                "type": "array",
+                "prefixItems": [
+                  {
+                    "$ref": "#/$defs/count"
+                  },
+                  {
+                    "enum": [
+                      "store",
+                      "load"
+                    ]
+                  },
+                  {
+                    "$ref": "#/$defs/hex"
+                  }
+                ],
+                "minItems": 3,
+                "maxItems": 3
               }
             }
           },

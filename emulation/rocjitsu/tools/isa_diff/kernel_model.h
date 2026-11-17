@@ -72,13 +72,17 @@ struct PendingState {
   std::array<uint8_t, kNumCounters> count{};   ///< Upper bound of outstanding ops (saturating).
   std::array<LocSet, kNumCounters> dests;      ///< Tracked locations outstanding ops will write.
   std::array<VSet, kNumCounters> vdests;       ///< VGPRs outstanding ops will write.
-  /// Vector loads return in issue order (vmcnt/loadcnt): the destinations of each
-  /// outstanding one, oldest first, so a wait for N retires all but the newest N.
-  /// dests/vdests[kLoad] are their union.
-  std::vector<std::pair<LocSet, VSet>> vm_ops;
-  /// A Load-counter operation outside the in-order vector class is outstanding: only a
-  /// wait for 0 retires Load destinations.
-  bool load_unordered = false;
+  /// Counters whose operations return in issue order: Load (vmcnt/loadcnt, vector memory)
+  /// and Ds (lgkmcnt/dscnt, LDS). Per counter, the destinations of each outstanding
+  /// operation, oldest first, so a wait for N retires all but the newest N; dests/vdests
+  /// of the counter are their union.
+  static constexpr std::array<unsigned, 2> kOrdered = {kLoad, kDs};
+  std::array<std::vector<std::pair<LocSet, VSet>>, 2> ops;
+  /// An operation outside the counter's in-order class is outstanding (e.g. a scalar load
+  /// on lgkmcnt): only a wait for 0 retires that counter's destinations.
+  std::array<bool, 2> unordered{};
+  /// Index of counter @p c in kOrdered, or -1.
+  [[nodiscard]] static int ordered_index(unsigned c) { return c == kLoad ? 0 : c == kDs ? 1 : -1; }
   std::array<bool, kNumCounters> unknown{}; ///< An outstanding op has unknown effects.
   uint64_t example_pc = 0;                  ///< One outstanding producer (for messages).
 

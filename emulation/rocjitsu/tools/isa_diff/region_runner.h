@@ -87,14 +87,28 @@ public:
   /// same case: reduction, traces), otherwise cleared; preset words are added if absent.
   void begin(uint64_t seed, const std::vector<std::pair<uint64_t, uint32_t>> &preset);
   /// Initial value of word @p w; @p pointer_half is -1 for data, 0/1 for the low/high half
-  /// of a pointer (canonical, away from the region's code).
-  uint32_t word(uint64_t w, int pointer_half);
+  /// of a pointer (canonical, away from the region's code). @p scalar: a scalar load reads
+  /// it (kernel arguments, constants).
+  uint32_t word(uint64_t w, int pointer_half, bool scalar = false);
+  /// Every word read so far (word index, value), sorted. Words are only added, so the
+  /// sorted list is kept and the words added since are merged in: a state capture costs a
+  /// copy, not a sort of the case's whole input (a GEMM case reads tens of thousands).
   [[nodiscard]] std::vector<std::pair<uint64_t, uint32_t>> snapshot() const;
+  /// Regions with a loop: in three cases of four, data words that scalar loads read are
+  /// small (below 2^k, k up to 12), so loop bounds and sizes read from kernel arguments
+  /// let loops end; the other cases keep the full catalog and random values.
+  void set_small_scalars(bool on) { small_scalars_ = on; }
+  /// The current case draws small scalar data words.
+  [[nodiscard]] bool small_case() const;
 
 private:
   uint64_t seed_ = 0;
   bool started_ = false;
+  bool small_scalars_ = false;
   std::unordered_map<uint64_t, uint32_t> words_;
+  void added(uint64_t w, uint32_t v) { added_.emplace_back(w, v); }
+  mutable std::vector<std::pair<uint64_t, uint32_t>> sorted_; ///< words_ as of the last snapshot
+  mutable std::vector<std::pair<uint64_t, uint32_t>> added_;  ///< words added since
 };
 
 class RegionRunner {
@@ -132,6 +146,8 @@ public:
   /// Base loop step limit for @p budget instructions: 64 steps per instruction, at most
   /// max(budget, 65536); times loop_scale().
   [[nodiscard]] size_t step_limit(size_t budget) const;
+  /// The region has a backward branch (a loop).
+  [[nodiscard]] bool loops() const { return back_edge_; }
   [[nodiscard]] MachineState capture() const;
 
   [[nodiscard]] size_t size() const { return pcs_.size(); }
@@ -146,10 +162,10 @@ public:
   /// unspecified. Alternative @p alt (1 canonical quiet NaN, 2 all ones, 3 random quiet
   /// NaN from @p seed) replaces every NaN a floating-point instruction produces; 0 keeps
   /// the hardware's. Outputs that change with the choice depend on it (don't care).
-  /// A random NaN is drawn from (seed, k, destination component, lane) for the k-th
-  /// floating-point instruction executed: two programs that run the same floating-point
-  /// operations in the same order draw the same NaNs, whatever hints, moves or register
-  /// names lie between them.
+  /// A random NaN is drawn from (seed, the NaN the hardware produced, destination
+  /// component, lane): two programs that run the same floating-point operation on the same
+  /// inputs draw the same NaN, whatever order they run the operations in and whatever
+  /// hints, moves or register names lie between them.
   void set_nan_choice(unsigned alt, uint64_t seed) {
     nan_choice_ = alt;
     nan_seed_ = seed;
@@ -177,7 +193,13 @@ private:
   Frame baseline_;
   unsigned vgpr_count_ = 0;
   Target target_;
-  std::vector<bool> branch_;                      ///< Direct branch (followed by the runner).
+  std::vector<bool> branch_; ///< Direct branch (followed by the runner).
+  /// s_barrier: one wave runs, so nothing to wait for; it starts the next barrier epoch.
+  std::vector<bool> barrier_;
+  /// s_endpgm inside the region (an early exit; the planner admits it only when the region
+  /// reaches the final s_endpgm): the wave ends, which is the region's end exit.
+  std::vector<bool> endpgm_;
+  uint32_t barriers_ = 0;                         ///< Barriers the last run executed.
   std::unordered_map<uint64_t, size_t> pc_index_; ///< Region instruction at each PC.
   size_t loop_scale_ = 1;
   bool back_edge_ = false; ///< Some branch goes backwards (a loop).
@@ -243,7 +265,6 @@ private:
   uint32_t poison_filter_ = 0;
   unsigned nan_choice_ = 0;
   uint64_t nan_seed_ = 0;
-  uint64_t fp_ordinal_ = 0; ///< Floating-point instructions executed in this run.
   bool nan_produced_ = false;
   /// Note NaN results of instruction @p i (lanes in @p exec) and apply the NaN choice.
   void choose_nans(size_t i, uint64_t exec);

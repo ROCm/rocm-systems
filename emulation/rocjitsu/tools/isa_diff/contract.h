@@ -148,8 +148,9 @@ struct RegionContract {
   /// Stored bytes that are dead at the exit and not compared: "" (none), "frame" (what the
   /// region stored into the stack frame through the stack or frame pointer, without a
   /// VGPR address: at a callable function's return, or when nothing outside the region
-  /// reads private memory) or "private" (a kernel's s_endpgm: all its private memory and
-  /// LDS).
+  /// reads private memory), "private_memory" (a kernel's region outside which nothing reads
+  /// private memory: every private byte it stores, in any addressing form) or "private" (a
+  /// kernel's s_endpgm: all its private memory and LDS).
   std::string memory_dead_at_exit;
   /// Composition check (handoff 5.2): "HOLDS" when must-equality propagated from the
   /// kernel entry through common code and upstream regions' R_out covers entry_equal,

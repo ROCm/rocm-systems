@@ -8,9 +8,11 @@
 #include "kernel_model.h"
 #include "llvm_frontend.h"
 #include "mutation.h"
+#include "region_runner.h"
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -608,8 +610,26 @@ std::string verdict_of(const std::string &dir, const std::string &fn, const std:
          report["overall"]["contract_status"].as_string();
 }
 
+std::optional<CaseData> case_of(const std::string &dir, const std::string &fn,
+                                const std::string &old_s, const std::string &new_s,
+                                const PairOptions &o);
+
 Json report_of(const std::string &dir, const std::string &fn, const std::string &old_s,
                const std::string &new_s, const PairOptions &o) {
+  auto data = case_of(dir, fn, old_s, new_s, o);
+  if (!data)
+    return Json();
+  TestOptions opt;
+  opt.cases = 1000;
+  opt.strict_nan = o.strict_nan;
+  opt.poison_filter = o.poison_filter;
+  return test_case(*data, opt, "", nullptr);
+}
+
+/// Assemble two listings of one function and analyze them.
+std::optional<CaseData> case_of(const std::string &dir, const std::string &fn,
+                                const std::string &old_s, const std::string &new_s,
+                                const PairOptions &o) {
   const auto tc = toolchain();
   Artifact a[2];
   for (int side = 0; side < 2; ++side) {
@@ -638,13 +658,7 @@ Json report_of(const std::string &dir, const std::string &fn, const std::string 
   std::string error;
   auto data = analyze_artifacts(a[0], a[1], {}, error);
   EXPECT_TRUE(data) << error;
-  if (!data)
-    return Json();
-  TestOptions opt;
-  opt.cases = 1000;
-  opt.strict_nan = o.strict_nan;
-  opt.poison_filter = o.poison_filter;
-  return test_case(*data, opt, "", nullptr);
+  return data;
 }
 
 /// Sum of a region count over the regions and the whole function's result.
@@ -762,6 +776,53 @@ TEST(IsaDiffLlvm, NanResultsOfTheSameFormatCompareEqual) {
   EXPECT_EQ(verdict_of(dir, "f", store_fn({"v_xor_b32_e32 v0, 0x80000000, v0"}),
                        store_fn({"v_mul_f32_e32 v0, -1.0, v0"}), o),
             "LOCAL_MISMATCH/ESTABLISHED");
+  std::filesystem::remove_all(dir);
+}
+
+TEST(IsaDiffLlvm, RescheduledNanProducersDrawTheSameNans) {
+  const std::string dir = temp_dir("nan_order");
+  PairOptions o;
+  o.entry_vgprs = 7;
+  // Two independent multiplications whose NaN results meet in integer code (v2 - v3);
+  // new runs them in the other order. The same operations on the same inputs draw the
+  // same alternative NaNs, so the difference of payloads is the same on both sides.
+  const std::string a = "v_mul_f32_e32 v2, v0, v1", b = "v_mul_f32_e32 v3, v6, v5";
+  auto f = [](const std::string &x, const std::string &y) {
+    return store_fn({x, y, "v_sub_u32_e32 v0, v2, v3"});
+  };
+  EXPECT_EQ(verdict_of(dir, "f", f(a, b), f(b, a), o), "NO_MISMATCH_FOUND/ESTABLISHED");
+  // Directly: both sides of the whole function under the random NaN choice, with NaN
+  // inputs in v0 and v6 (other payloads per lane), give each product the same NaN.
+  auto data = case_of(dir, "f", f(a, b), f(b, a), o);
+  ASSERT_TRUE(data && data->whole_function);
+  const RegionPair &r = *data->whole_function;
+  std::string error;
+  const Target target = r.contract.gpu().value_or(Target{});
+  auto run_side = [&](const std::vector<RegionInst> &insts) {
+    auto runner = RegionRunner::create(insts, "nan_order", error, r.contract.vgpr_count, target);
+    EXPECT_TRUE(runner) << error;
+    MachineState s;
+    s.frame = runner->baseline_frame();
+    s.set(kLocExecLo, 0xffffffffu);
+    s.set(kLocExecHi, 0xffffffffu);
+    s.set(1, 0x10u); // s[0:1]: the store's base, far from the code
+    s.resize_vgprs(r.contract.vgpr_count);
+    for (unsigned lane = 0; lane < kWaveLanes; ++lane) {
+      s.vset(0, lane, 0x7f800001u + lane); // signalling NaNs
+      s.vset(1, lane, 0x3f800000u);        // 1.0
+      s.vset(6, lane, 0xffc00000u + lane); // quiet NaNs, sign set
+      s.vset(5, lane, 0x40000000u);        // 2.0
+    }
+    runner->set_nan_choice(3, 0x1234);
+    runner->load(s);
+    EXPECT_EQ(runner->run(insts.size()).status, RunStatus::Ok);
+    return runner->capture();
+  };
+  const MachineState so = run_side(r.old_side.insts), sn = run_side(r.new_side.insts);
+  for (unsigned lane = 0; lane < kWaveLanes; ++lane) {
+    EXPECT_EQ(so.vget(2, lane), sn.vget(2, lane)) << "lane " << lane;
+    EXPECT_EQ(so.vget(3, lane), sn.vget(3, lane)) << "lane " << lane;
+  }
   std::filesystem::remove_all(dir);
 }
 
@@ -1548,6 +1609,171 @@ TEST(IsaDiffControlFlow, SlowerLoopThatTerminatesIsReRunAndCompared) {
   ASSERT_TRUE(report.is_object());
   EXPECT_EQ(report["overall"]["test_status"].as_string(), "NO_MISMATCH_FOUND") << report.dump();
   EXPECT_GT(count_of(report, "step_limit_reruns"), 0u);
+  std::filesystem::remove_all(dir);
+}
+
+/// A kernel f listed without its descriptor, as rj_isa_diff_pr writes kernels: @p body,
+/// then s_endpgm.
+std::string kernel_listing(const std::vector<std::string> &body) {
+  std::string t = "\t.text\n\t.globl\tf\n\t.p2align\t8\n\t.type\tf,@function\nf:\n";
+  for (const auto &l : body)
+    t += "\t" + l + "\n";
+  return t + "\ts_endpgm\n.Lfunc_end0:\n\t.size\tf, .Lfunc_end0-f\n";
+}
+
+/// The first-mismatch details of every region and of the whole function.
+std::string mismatch_details(const Json &report) {
+  std::string s;
+  for (const Json &g : report["regions"].items())
+    s += g["first_mismatch"]["detail"].as_string() + "\n";
+  return s + report["whole_function"]["result"]["first_mismatch"]["detail"].as_string();
+}
+
+TEST(IsaDiffBarrier, SharedMemoryAccessesKeepTheirBarrierEpoch) {
+  const std::string dir = temp_dir("barrier");
+  PairOptions o;
+  o.entry_vgprs = 2; // v0 data, v1 an LDS address (kept inside the window)
+  auto kernel = [](std::vector<std::string> before_barrier,
+                   std::vector<std::string> after_barrier) {
+    std::vector<std::string> b = std::move(before_barrier);
+    b.insert(b.end(), {"s_waitcnt lgkmcnt(0)", "s_barrier"});
+    b.insert(b.end(), after_barrier.begin(), after_barrier.end());
+    b.insert(b.end(), {"ds_read_b32 v2, v1 offset:4", "s_waitcnt lgkmcnt(0)", "v_mov_b32_e32 v4, 0",
+                       "global_store_dword v4, v2, s[0:1]", "s_waitcnt vmcnt(0)"});
+    return kernel_listing(b);
+  };
+  // Two stores before the barrier, in either order: the same stores in the same epoch.
+  // LDS address inputs are below 32768 (masked with 0x7ffc), so the two stores' addresses
+  // never meet (at v1 and v1 + 4 two lanes could store to one dword, and the order would
+  // decide which value stays).
+  const Json same =
+      report_of(dir, "f", kernel({"ds_write_b32 v1, v0 offset:32768", "ds_write_b32 v1, v0"}, {}),
+                kernel({"ds_write_b32 v1, v0", "ds_write_b32 v1, v0 offset:32768"}, {}), o);
+  ASSERT_TRUE(same.is_object());
+  EXPECT_EQ(same["overall"]["test_status"].as_string(), "NO_MISMATCH_FOUND")
+      << mismatch_details(same);
+  // A store moved after the barrier: this wave reads the same value, other waves of the
+  // workgroup would not.
+  const Json moved =
+      report_of(dir, "f", kernel({"ds_write_b32 v1, v0 offset:4"}, {}),
+                kernel({}, {"ds_write_b32 v1, v0 offset:4", "s_waitcnt lgkmcnt(0)"}), o);
+  ASSERT_TRUE(moved.is_object());
+  EXPECT_EQ(moved["overall"]["test_status"].as_string(), "LOCAL_MISMATCH") << moved.dump();
+  EXPECT_NE(mismatch_details(moved).find("barrier"), std::string::npos) << mismatch_details(moved);
+  std::filesystem::remove_all(dir);
+}
+
+TEST(IsaDiffWholeFunction, KernelEarlyExitAndItsPrivateMemory) {
+  const std::string dir = temp_dir("kernel_exit");
+  PairOptions o;
+  o.entry_vgprs = 1;
+  // A value computed into another register on each side (renamed across blocks, so the
+  // regions cannot decide), an early s_endpgm (s4 == 0), then the value kept in private
+  // memory at another offset on each side (a spill slot an allocation change moved): the
+  // whole function decides, and private memory is dead at the kernel's end.
+  auto kernel = [](const std::string &add, const std::string &reg, const std::string &offset) {
+    return kernel_listing({add, "s_cmp_eq_u32 s4, 0", "s_cbranch_scc0 .LBB0_1", "s_endpgm",
+                           ".LBB0_1:", "v_mov_b32_e32 v5, 0",
+                           "scratch_store_dword v5, " + reg + ", off offset:" + offset,
+                           "s_waitcnt vmcnt(0)", "scratch_load_dword v6, v5, off offset:" + offset,
+                           "s_waitcnt vmcnt(0)", "v_mov_b32_e32 v4, 0",
+                           "global_store_dword v4, v6, s[0:1]", "s_waitcnt vmcnt(0)"});
+  };
+  const std::string old_s = kernel("v_add_u32_e32 v2, 1, v0", "v2", "16");
+  const Json report = report_of(dir, "f", old_s, kernel("v_add_u32_e32 v3, 1, v0", "v3", "32"), o);
+  ASSERT_TRUE(report.is_object());
+  EXPECT_EQ(report["overall"]["test_status"].as_string(), "NO_MISMATCH_FOUND")
+      << mismatch_details(report);
+  ASSERT_TRUE(report["whole_function"]["result"].is_object()) << report["whole_function"].dump();
+  EXPECT_EQ(report["whole_function"]["result"]["test_status"].as_string(), "NO_MISMATCH_FOUND");
+  EXPECT_TRUE(report["whole_function"]["decides"].as_bool());
+  // A real difference after the early exit is still found.
+  const Json wrong = report_of(dir, "f", old_s, kernel("v_add_u32_e32 v3, 2, v0", "v3", "32"), o);
+  ASSERT_TRUE(wrong.is_object());
+  EXPECT_EQ(wrong["overall"]["test_status"].as_string(), "LOCAL_MISMATCH")
+      << mismatch_details(wrong);
+  std::filesystem::remove_all(dir);
+}
+
+TEST(IsaDiffMemoryState, OnlyANewFaultIsAMismatch) {
+  const std::string dir = temp_dir("fault_side");
+  PairOptions o;
+  o.entry_vgprs = 2; // v0 data, v1 an LDS address below 32768
+  // A dead LDS load at v1 + 40000 leaves the 64 KiB window for about a fifth of the
+  // inputs. Removing it is fine: those inputs are undefined for old, which faults there.
+  // Adding it makes new fault where old completed: a mismatch.
+  const std::string with_load = kernel_listing(
+      {"ds_read_b32 v2, v1 offset:40000", "s_waitcnt lgkmcnt(0)", "v_mov_b32_e32 v4, 0",
+       "global_store_dword v4, v0, s[0:1]", "s_waitcnt vmcnt(0)"});
+  const std::string without = kernel_listing(
+      {"v_mov_b32_e32 v4, 0", "global_store_dword v4, v0, s[0:1]", "s_waitcnt vmcnt(0)"});
+  const Json removed = report_of(dir, "f", with_load, without, o);
+  ASSERT_TRUE(removed.is_object());
+  EXPECT_EQ(removed["overall"]["test_status"].as_string(), "NO_MISMATCH_FOUND")
+      << mismatch_details(removed);
+  EXPECT_NE(removed.dump().find("memory fault on the old side only"), std::string::npos);
+  const Json added = report_of(dir, "f", without, with_load, o);
+  ASSERT_TRUE(added.is_object());
+  EXPECT_EQ(added["overall"]["test_status"].as_string(), "LOCAL_MISMATCH");
+  EXPECT_NE(mismatch_details(added).find("new side"), std::string::npos) << mismatch_details(added);
+  std::filesystem::remove_all(dir);
+}
+
+TEST(IsaDiffMemoryState, StoredBytesAreSortedAboveTheLdsTag) {
+  const std::string dir = temp_dir("sorted_written");
+  PairOptions o;
+  o.entry_vgprs = 2;
+  // An LDS store and a global store at an address above the LDS tag (wild address
+  // arithmetic reaches 0xffff...): the captured bytes are sorted by address, which the
+  // comparison's lookups rely on.
+  auto k = [](const std::string &data) {
+    return kernel_listing({"ds_write_b32 v1, " + data, "s_waitcnt lgkmcnt(0)",
+                           "v_mov_b32_e32 v4, 0", "global_store_dword v4, v0, s[0:1]",
+                           "s_waitcnt vmcnt(0)"});
+  };
+  auto data = case_of(dir, "f", k("v0"), k("v1"), o);
+  ASSERT_TRUE(data && data->whole_function);
+  const RegionPair &r = *data->whole_function;
+  std::string error;
+  auto runner = RegionRunner::create(r.old_side.insts, "sorted", error, r.contract.vgpr_count,
+                                     r.contract.gpu().value_or(Target{}));
+  ASSERT_TRUE(runner) << error;
+  MachineState s;
+  s.frame = runner->baseline_frame();
+  s.set(kLocExecLo, 0xffffffffu);
+  s.set(kLocExecHi, 0xffffffffu);
+  s.set(1, 0xffff8100u); // s[0:1] = 0xffff8100'00000000
+  s.resize_vgprs(r.contract.vgpr_count);
+  for (unsigned lane = 0; lane < kWaveLanes; ++lane) {
+    s.vset(0, lane, 0x11u * lane);
+    s.vset(1, lane, 4 * lane);
+  }
+  runner->load(s);
+  ASSERT_EQ(runner->run(r.old_side.insts.size()).status, RunStatus::Ok);
+  const MachineState f = runner->capture();
+  ASSERT_FALSE(f.mem_written.empty());
+  EXPECT_GE(f.mem_written.back().first, kLdsTag);
+  EXPECT_TRUE(std::is_sorted(f.mem_written.begin(), f.mem_written.end()));
+  EXPECT_TRUE(std::ranges::any_of(f.mem_written,
+                                  [](const auto &b) { return b.first > kLdsTag + 0x10000; }));
+  std::filesystem::remove_all(dir);
+}
+
+TEST(IsaDiffWholeFunction, LdsLoadsCompleteInOrder) {
+  const std::string dir = temp_dir("lds_order");
+  PairOptions o;
+  o.entry_vgprs = 2;
+  // lgkmcnt(1) after two LDS loads retires the first (LDS returns in issue order): reading
+  // its destination is no pending conflict, so the region's contract holds.
+  auto kernel = [](const std::string &add) {
+    return kernel_listing({"ds_read_b32 v2, v1", "ds_read_b32 v3, v1 offset:4",
+                           "s_waitcnt lgkmcnt(1)", add, "s_waitcnt lgkmcnt(0)",
+                           "v_add_u32_e32 v2, v2, v3", "v_mov_b32_e32 v4, 0",
+                           "global_store_dword v4, v2, s[0:1]", "s_waitcnt vmcnt(0)"});
+  };
+  EXPECT_EQ(verdict_of(dir, "f", kernel("v_add_u32_e32 v2, v2, v0"),
+                       kernel("v_add_u32_e32 v2, v0, v2"), o),
+            "NO_MISMATCH_FOUND/ESTABLISHED");
   std::filesystem::remove_all(dir);
 }
 

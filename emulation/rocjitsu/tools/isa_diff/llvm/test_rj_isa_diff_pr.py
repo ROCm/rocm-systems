@@ -447,6 +447,17 @@ def main():
         ):
             if drv.shift_may_be_poison(body) != want_poison:
                 failures.append(f"shift_may_be_poison({body!r}) != {want_poison}")
+        # The target from a subarch triple, with or without the vendor and OS parts.
+        for run_line, want_target in (
+            ("llc -mtriple=amdgpu10.10 < %s | FileCheck %s", "gfx1010"),
+            ("llc -mtriple=amdgpu9.50-amd-amdhsa < %s | FileCheck %s", "gfx950"),
+            ("llc -mtriple=amdgpu12.00 -mcpu=gfx1201 < %s | FileCheck %s", "gfx1201"),
+        ):
+            got = (drv.parse_run(run_line) or [None])[0]
+            if got != want_target:
+                failures.append(
+                    f"parse_run({run_line!r}) target {got}, expected {want_target}"
+                )
         passing = [
             {"status": "NO_MISMATCH_FOUND", "coverage": "COMPLETE_FOR_DECLARED_SCOPE"}
         ]
@@ -530,6 +541,13 @@ def main():
                 None,
                 ["gfx1250"],
                 "gfx1250",
+            ),
+            (
+                "bare.ll",
+                'target triple = "amdgpu10.10"\n' + ir,
+                None,
+                ["gfx1010"],
+                "gfx1010",
             ),
             (
                 "x86.ll",

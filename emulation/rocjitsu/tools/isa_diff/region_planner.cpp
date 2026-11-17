@@ -231,9 +231,22 @@ void check_pending(const KernelModel &om, const KernelModel &nm, const Candidate
 // ---------------------------------------------------------------------------
 // Region construction (shared by base regions and expansion variants).
 
+/// A kernel: an artifact with a descriptor, or a "callable" function that ends with
+/// s_endpgm on both sides. A function of the C or gfx convention never does; one that does
+/// is a kernel listed without its descriptor (as rj_isa_diff_pr writes them). A shader
+/// part's s_endpgm returns to its epilog.
+bool is_kernel(const KernelModel &om, const KernelModel &nm) {
+  const Artifact &a = om.artifact();
+  if (!a.callable)
+    return true;
+  return a.calling_convention != "shader" && !om.insts().empty() && !nm.insts().empty() &&
+         om.insts().back().mnemonic == "s_endpgm" && nm.insts().back().mnemonic == "s_endpgm";
+}
+
 /// The control flow of instructions [b, e) on one side: one entry (b), direct branches
-/// only. Sets @p exits to the instruction indices control can leave to (e: falling off
-/// the end) and @p branches when there is a branch. Returns why it is not such a region.
+/// only (and an early s_endpgm when the region reaches the final one). Sets @p exits to the
+/// instruction indices control can leave to (e: falling off the end) and @p branches when
+/// there is a branch. Returns why it is not such a region.
 std::optional<std::string> region_flow(const KernelModel &m, size_t b, size_t e, const char *side,
                                        std::vector<size_t> &exits, bool &branches) {
   const auto &in = m.insts();
@@ -253,6 +266,13 @@ std::optional<std::string> region_flow(const KernelModel &m, size_t b, size_t e,
     const InstRef &r = in[i];
     if (!r.fx.control_flow)
       continue;
+    // An s_endpgm before the last instruction ends the wave as the final s_endpgm does (a
+    // kernel's early exit): when the region reaches the final one, it is an exit there.
+    if (r.mnemonic == "s_endpgm" && e + 1 == in.size() && in.back().mnemonic == "s_endpgm") {
+      branches = true;
+      add(e);
+      continue;
+    }
     if (!r.fx.branch || r.branch_target_index < 0)
       return std::string(side) + " " + hex64(r.pc) + " '" + r.text +
              "': only direct branches can be inside a region";
@@ -518,6 +538,20 @@ RegionPair build_region(const KernelModel &om, const KernelModel &nm, const Cand
                       "blocks, so their values cannot be paired";
     }
   }
+  bool barrier = false;
+  for (const auto *side : {&region.old_side, &region.new_side}) {
+    const KernelModel &m = side == &region.old_side ? om : nm;
+    for (size_t i = side->begin; i < side->end; ++i)
+      barrier = barrier || m.insts()[i].fx.barrier;
+  }
+  if (barrier)
+    k.sources.push_back({"s_barrier: one wave of the workgroup runs, so a barrier waits for no "
+                         "other wave; it divides the run into epochs, and the sides must "
+                         "execute as many barriers, store to the same shared dwords (LDS, "
+                         "global memory outside the private segment) in each epoch, and load a "
+                         "dword both load in the same epochs. What other waves store is not "
+                         "modelled: their part of memory keeps its initial content",
+                         "barrier epochs"});
   // Stack-frame bytes the region stores are dead at its exit when nothing outside it can
   // read private memory (spill slots reloaded inside the region, or not at all).
   if (k.memory_writes) {
@@ -529,10 +563,16 @@ RegionPair build_region(const KernelModel &om, const KernelModel &nm, const Cand
           private_reads = may_read_private(m.insts()[i].mnemonic) || m.insts()[i].fx.unknown_effect;
     }
     if (!private_reads) {
-      k.memory_dead_at_exit = "frame";
-      k.sources.push_back({"memory: no instruction outside the region reads private memory, so "
-                           "the stack-frame bytes it stores are dead at its exit and not "
-                           "compared",
+      // A callable function's VGPR-addressed private stores may reach its caller's frame;
+      // a kernel has no caller, so all its private memory is its own.
+      const bool kernel = is_kernel(om, nm);
+      k.memory_dead_at_exit = kernel ? "private_memory" : "frame";
+      k.sources.push_back({kernel ? "memory: no instruction outside the region reads private "
+                                    "memory, so the private bytes this kernel stores are dead "
+                                    "at its exit and not compared"
+                                  : "memory: no instruction outside the region reads private "
+                                    "memory, so the stack-frame bytes it stores are dead at its "
+                                    "exit and not compared",
                            "memory_model"});
     }
   }
@@ -1771,10 +1811,23 @@ PlanResult plan_regions(const KernelModel &old_model, const KernelModel &new_mod
     }
     RegionContract &k = f.contract;
     k.composition = "NOT_CHECKED";
+    const bool kernel = is_kernel(old_model, new_model);
+    if (kernel && k.vgpr_count) {
+      // Its entry VGPRs are the workitem IDs (v0-v2, or x | y << 10 | z << 20 in v0): below
+      // the workgroup size. Arbitrary values put LDS addresses outside the allocation; IDs
+      // below 256 (four waves of 64, a one-dimensional workgroup) stay in its range.
+      for (unsigned r = 0; r < 3 && r < k.vgpr_count; ++r)
+        if (k.ventry_equal.test(r))
+          k.vinput_masks.emplace_back(r, 0xffu);
+      k.sources.push_back({"workitem IDs: a kernel's entry VGPRs v0-v2 are ANDed with 0xff (IDs "
+                           "below 256 in one dimension; the dispatch's real IDs are below the "
+                           "workgroup size)",
+                           "whole_function"});
+    }
     if (k.memory_reads || k.memory_writes) {
       // At the return a function's own stack frame is gone; at s_endpgm so are a kernel's
       // private memory and LDS.
-      k.memory_dead_at_exit = old_model.artifact().callable ? "frame" : "private";
+      k.memory_dead_at_exit = kernel ? "private" : "frame";
       k.sources.push_back({k.memory_dead_at_exit == "frame"
                                ? "memory: bytes the function stores into its own stack frame "
                                  "(through the stack or frame pointer, no VGPR address) are dead "

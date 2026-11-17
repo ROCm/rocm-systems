@@ -226,7 +226,7 @@ def parse_run(run):
             v = toks[i + 1]
         if v:
             target = v
-        m = re.match(r"^--?mtriple=amdgpu(\d+)\.(\w\w)-", t)
+        m = re.match(r"^--?mtriple=amdgpu(\d+)\.(\w\w)(-|$)", t)
         if m and not target:
             target = f"gfx{m.group(1)}{m.group(2)}"
     prefixes = []
@@ -1061,7 +1061,7 @@ def corpus_target(path, text):
         }
     m = re.search(r'^\s*target triple\s*=\s*"([^"]*)"', text, re.M)
     if m:
-        sub = re.match(r"^amdgpu(\d+)\.(\w\w)-", m.group(1))
+        sub = re.match(r"^amdgpu(\d+)\.(\w\w)(-|$)", m.group(1))
         if sub:
             cpu = f"gfx{sub.group(1)}{sub.group(2)}"
             return {"cpus": [cpu], "wave": None, "name": cpu, "source": "triple"}

@@ -2208,4 +2208,44 @@ TEST(IsaDiffPoison, KindsParseAndMapToInstructions) {
   EXPECT_EQ(poison_check_kind("v_mov_b32_e32"), 0u);
 }
 
+TEST(IsaDiffMemory, ScalarDataWordsAreSmallInMostCasesOfALoop) {
+  // Without a loop: the catalog and random values, whatever the access.
+  MemoryImage plain;
+  plain.begin(7, {});
+  EXPECT_FALSE(plain.small_case());
+  EXPECT_EQ(plain.word(100, -1, true), initial_memory_word(7, 100));
+  // With a loop: in about three cases of four, data words scalar loads read are below
+  // 4096; vector loads and pointer halves keep their values.
+  unsigned small_cases = 0;
+  for (uint64_t seed = 1; seed <= 400; ++seed) {
+    MemoryImage image;
+    image.set_small_scalars(true);
+    image.begin(seed, {});
+    MemoryImage pointers;
+    pointers.begin(seed, {});
+    EXPECT_EQ(image.word(8, 1, true), pointers.word(8, 1, false));
+    EXPECT_EQ(image.word(200, -1, false), initial_memory_word(seed, 200));
+    if (!image.small_case())
+      continue;
+    ++small_cases;
+    for (uint64_t w = 10; w < 18; ++w)
+      EXPECT_LT(image.word(w, -1, true), 4096u);
+  }
+  EXPECT_GT(small_cases, 250u);
+  EXPECT_LT(small_cases, 350u);
+}
+
+TEST(IsaDiffMemory, BarrierEpochsRoundTripThroughJson) {
+  MachineState s;
+  s.barriers = 2;
+  s.mem_sync = {{0, true, kLdsTag | 4}, {1, false, kLdsTag | 4}, {2, true, 0x1000}};
+  std::string error;
+  auto back = MachineState::from_json(s.to_json(), error);
+  ASSERT_TRUE(back) << error;
+  EXPECT_EQ(back->barriers, 2u);
+  EXPECT_EQ(back->mem_sync, s.mem_sync);
+  // Without barriers the state has no barrier entry.
+  EXPECT_FALSE(MachineState{}.to_json().has("barriers"));
+}
+
 } // namespace

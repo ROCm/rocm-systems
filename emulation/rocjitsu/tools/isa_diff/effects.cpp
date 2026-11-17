@@ -662,6 +662,8 @@ bool is_region_noop(std::string_view m) {
   return std::ranges::find(kRegionNoops, m) != kRegionNoops.end();
 }
 
+bool is_region_barrier(std::string_view m) { return m == "s_barrier"; }
+
 bool is_region_valu(std::string_view mnemonic, uint64_t flags) {
   if (!(flags & VALU) ||
       (flags & (MEMORY_OP | SMEM | VMEM | LDS | WAITCNT | BARRIER | SUSPENDS_WAVE)))
@@ -827,7 +829,11 @@ Effects classify(const Instruction &inst, const Target &target) {
   // memory instruction.
   const bool noop_ok = is_region_noop(mnemonic);
   const bool branch_ok = is_region_branch(mnemonic);
-  const bool salu_ok = is_p0_mnemonic(mnemonic) || noop_ok || branch_ok;
+  const bool barrier_ok = is_region_barrier(mnemonic);
+  // s_endpgm: an early exit, inside a region only when it reaches the final s_endpgm
+  // (region_flow); the runner leaves through the region's end there.
+  const bool endpgm_ok = mnemonic == "s_endpgm";
+  const bool salu_ok = is_p0_mnemonic(mnemonic) || noop_ok || branch_ok || barrier_ok || endpgm_ok;
   const bool valu_ok = is_region_valu(mnemonic, flags);
   const bool mem_ok = is_region_memory(mnemonic);
   if (mem_ok) {
@@ -847,9 +853,9 @@ Effects classify(const Instruction &inst, const Target &target) {
     fx.reject_reason = "unmodelled effect: " + unknown_what;
   } else if (!first_outside.empty() && !noop_ok) { // a hint's operands are not state
     fx.reject_reason = first_outside;
-  } else if ((fx.control_flow && !branch_ok) ||
+  } else if ((fx.control_flow && !branch_ok && !endpgm_ok) ||
              (!mem_ok && !noop_ok && (flags & (MEMORY_OP | WAITCNT | SMEM | VMEM | LDS)) != 0) ||
-             (flags & (BARRIER | SUSPENDS_WAVE)) != 0 || (salu_ok && fx.valu)) {
+             ((flags & (BARRIER | SUSPENDS_WAVE)) != 0 && !barrier_ok) || (salu_ok && fx.valu)) {
     fx.reject_reason = "instruction class outside the executable region subset";
   } else if (inst.data() != nullptr) {
     fx.reject_reason = "instruction carries dynamic state";
@@ -858,6 +864,7 @@ Effects classify(const Instruction &inst, const Target &target) {
   } else {
     fx.p0 = true;
     fx.branch = branch_ok;
+    fx.barrier = barrier_ok;
   }
   if (!fx.p0) {
     const bool lds = (flags & LDS) != 0 || mnemonic.find("lds") != std::string_view::npos;

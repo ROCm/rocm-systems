@@ -64,6 +64,20 @@ Json MachineState::to_json() const {
   }
   if (exit_pc)
     j.set("exit_pc", hex64(exit_pc));
+  if (barriers || !mem_sync.empty()) {
+    Json b = Json::object();
+    b.set("count", static_cast<uint64_t>(barriers));
+    Json acc = Json::array();
+    for (const SyncAccess &a : mem_sync) {
+      Json x = Json::array();
+      x.push(static_cast<uint64_t>(a.epoch));
+      x.push(a.store ? "store" : "load");
+      x.push(hex64(a.addr));
+      acc.push(std::move(x));
+    }
+    b.set("accesses", std::move(acc));
+    j.set("barriers", std::move(b));
+  }
   if (asm_seed != 0 || !asm_uses.empty()) {
     Json a = Json::object();
     a.set("seed", hex64(asm_seed));
@@ -189,6 +203,21 @@ std::optional<MachineState> MachineState::from_json(const Json &j, std::string &
       s.mem_init.emplace_back(*a >> 2, static_cast<uint32_t>(*v));
     }
     std::sort(s.mem_init.begin(), s.mem_init.end());
+  }
+  const Json &bar = j["barriers"];
+  if (bar.is_object()) {
+    s.barriers = static_cast<uint32_t>(bar["count"].as_uint());
+    for (const Json &x : bar["accesses"].items()) {
+      const auto &f = x.items();
+      auto addr = f.size() == 3 ? json_u64(f[2]) : std::nullopt;
+      if (!addr || !f[1].is_string()) {
+        error = "bad barrier-epoch access in state";
+        return std::nullopt;
+      }
+      s.mem_sync.push_back(
+          {static_cast<uint32_t>(f[0].as_uint()), f[1].as_string() == "store", *addr});
+    }
+    std::sort(s.mem_sync.begin(), s.mem_sync.end());
   }
   const Json &asm_state = j["inline_asm"];
   if (asm_state.is_object()) {

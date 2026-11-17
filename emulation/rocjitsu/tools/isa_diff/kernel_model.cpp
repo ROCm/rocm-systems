@@ -715,13 +715,14 @@ static_assert(PendingState::kDs == static_cast<unsigned>(amdgpu::WaitCounterKind
 static_assert(PendingState::kLoad == static_cast<unsigned>(amdgpu::WaitCounterKind::Load));
 
 /// Wait-counter domains an issued memory operation increments, from RocJITsu's memory-issue
-/// metadata (SMEM, LDS, VMEM, FLAT on every generation). @p in_order is cleared when a Load
-/// obligation is outside the in-order vector class. A memory-flagged instruction without
+/// metadata (SMEM, LDS, VMEM, FLAT on every generation). @p in_order[q] is cleared when its
+/// obligation on ordered counter PendingState::kOrdered[q] is outside that counter's
+/// in-order class (VMEM for Load, LDS for Ds). A memory-flagged instruction without
 /// metadata is assumed to use every counter.
 std::array<bool, PendingState::kNumCounters>
-producer_counters(const Instruction &inst, rj_code_arch_t arch, bool &in_order) {
+producer_counters(const Instruction &inst, rj_code_arch_t arch, std::array<bool, 2> &in_order) {
   std::array<bool, PendingState::kNumCounters> c{};
-  in_order = true;
+  in_order.fill(true);
   const auto model = amdgpu::waitcnt_model(arch);
   if (const auto *issue = inst.amdgpu_memory_issue_info(); issue && !model.failed()) {
     for (const auto &ob : issue->counter_obligations()) {
@@ -730,8 +731,11 @@ producer_counters(const Instruction &inst, rj_code_arch_t arch, bool &in_order) 
       if (k >= PendingState::kNumCounters)
         continue;
       c[k] = true;
-      if (k == PendingState::kLoad && ob.completion_class() != amdgpu::MemoryCompletionClass::VMEM)
-        in_order = false;
+      const int q = PendingState::ordered_index(static_cast<unsigned>(k));
+      const auto ordered_class = k == PendingState::kLoad ? amdgpu::MemoryCompletionClass::VMEM
+                                                          : amdgpu::MemoryCompletionClass::LDS;
+      if (q >= 0 && ob.completion_class() != ordered_class)
+        in_order[static_cast<size_t>(q)] = false;
     }
     return c;
   }
@@ -757,21 +761,24 @@ PendingState pending_transfer(const InstRef &ref, PendingState s, rj_code_arch_t
         continue;
       const uint32_t limit = *fields[c];
       s.count[c] = static_cast<uint8_t>(std::min<uint32_t>(s.count[c], limit));
+      const int q = PendingState::ordered_index(c);
       if (s.count[c] == 0) {
         s.dests[c].reset();
         s.vdests[c].reset();
         s.unknown[c] = false;
-        if (c == PendingState::kLoad) {
-          s.vm_ops.clear();
-          s.load_unordered = false;
+        if (q >= 0) {
+          s.ops[static_cast<size_t>(q)].clear();
+          s.unordered[static_cast<size_t>(q)] = false;
         }
-      } else if (c == PendingState::kLoad && !s.load_unordered && s.vm_ops.size() > limit) {
-        // In order: only the newest `limit` loads can still be outstanding.
-        s.vm_ops.erase(s.vm_ops.begin(), s.vm_ops.end() - static_cast<std::ptrdiff_t>(limit));
+      } else if (q >= 0 && !s.unordered[static_cast<size_t>(q)] &&
+                 s.ops[static_cast<size_t>(q)].size() > limit) {
+        // In order: only the newest `limit` operations can still be outstanding.
+        auto &ops = s.ops[static_cast<size_t>(q)];
+        ops.erase(ops.begin(), ops.end() - static_cast<std::ptrdiff_t>(limit));
         if (!s.unknown[c]) {
           s.dests[c].reset();
           s.vdests[c].reset();
-          for (const auto &[l, v] : s.vm_ops) {
+          for (const auto &[l, v] : ops) {
             s.dests[c] |= l;
             s.vdests[c] |= v;
           }
@@ -780,7 +787,7 @@ PendingState pending_transfer(const InstRef &ref, PendingState s, rj_code_arch_t
     }
     return s;
   }
-  bool in_order = true;
+  std::array<bool, 2> in_order{};
   const auto counters = producer_counters(inst, arch, in_order);
   for (unsigned c = 0; c < PendingState::kNumCounters; ++c) {
     if (!counters[c])
@@ -788,13 +795,15 @@ PendingState pending_transfer(const InstRef &ref, PendingState s, rj_code_arch_t
     s.count[c] = static_cast<uint8_t>(std::min<unsigned>(s.count[c] + 1u, 63u));
     s.dests[c] |= ref.fx.writes;
     s.vdests[c] |= ref.fx.vwrites;
-    if (c == PendingState::kLoad) {
-      s.load_unordered = s.load_unordered || !in_order;
-      s.vm_ops.emplace_back(ref.fx.writes, ref.fx.vwrites);
-      if (s.vm_ops.size() > 63) { // saturate: fold the two oldest
-        s.vm_ops[1].first |= s.vm_ops[0].first;
-        s.vm_ops[1].second |= s.vm_ops[0].second;
-        s.vm_ops.erase(s.vm_ops.begin());
+    if (const int q = PendingState::ordered_index(c); q >= 0) {
+      const auto qi = static_cast<size_t>(q);
+      s.unordered[qi] = s.unordered[qi] || !in_order[qi];
+      auto &ops = s.ops[qi];
+      ops.emplace_back(ref.fx.writes, ref.fx.vwrites);
+      if (ops.size() > 63) { // saturate: fold the two oldest
+        ops[1].first |= ops[0].first;
+        ops[1].second |= ops[0].second;
+        ops.erase(ops.begin());
       }
     }
     s.unknown[c] = s.unknown[c] || ref.fx.unknown_effect;
@@ -813,19 +822,22 @@ PendingState pending_join(const PendingState &a, const PendingState &b) {
     r.vdests[c] = a.vdests[c] | b.vdests[c];
     r.unknown[c] = a.unknown[c] || b.unknown[c];
   }
-  r.load_unordered = a.load_unordered || b.load_unordered;
-  // Align the in-order VMEM queues at their newest end and join element-wise.
-  const size_t n = std::max(a.vm_ops.size(), b.vm_ops.size());
-  r.vm_ops.assign(n, {});
-  for (size_t i = 0; i < n; ++i) {
-    const size_t ri = n - 1 - i;
-    if (i < a.vm_ops.size()) {
-      r.vm_ops[ri].first |= a.vm_ops[a.vm_ops.size() - 1 - i].first;
-      r.vm_ops[ri].second |= a.vm_ops[a.vm_ops.size() - 1 - i].second;
-    }
-    if (i < b.vm_ops.size()) {
-      r.vm_ops[ri].first |= b.vm_ops[b.vm_ops.size() - 1 - i].first;
-      r.vm_ops[ri].second |= b.vm_ops[b.vm_ops.size() - 1 - i].second;
+  // Align each in-order queue at its newest end and join element-wise.
+  for (size_t q = 0; q < r.ops.size(); ++q) {
+    r.unordered[q] = a.unordered[q] || b.unordered[q];
+    const auto &qa = a.ops[q], &qb = b.ops[q];
+    const size_t n = std::max(qa.size(), qb.size());
+    r.ops[q].assign(n, {});
+    for (size_t i = 0; i < n; ++i) {
+      auto &dst = r.ops[q][n - 1 - i];
+      if (i < qa.size()) {
+        dst.first |= qa[qa.size() - 1 - i].first;
+        dst.second |= qa[qa.size() - 1 - i].second;
+      }
+      if (i < qb.size()) {
+        dst.first |= qb[qb.size() - 1 - i].first;
+        dst.second |= qb[qb.size() - 1 - i].second;
+      }
     }
   }
   r.example_pc = a.example_pc ? a.example_pc : b.example_pc;

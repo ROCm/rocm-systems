@@ -100,18 +100,29 @@ RunStatus map_error(amdgpu::InstructionExecutionError e) {
 void MemoryImage::begin(uint64_t seed, const std::vector<std::pair<uint64_t, uint32_t>> &preset) {
   if (!started_ || seed != seed_) {
     words_.clear();
+    sorted_.clear();
+    added_.clear();
     seed_ = seed;
     started_ = true;
   }
   for (const auto &[w, v] : preset)
-    words_.try_emplace(w, v);
+    if (words_.try_emplace(w, v).second)
+      added(w, v);
 }
 
-uint32_t MemoryImage::word(uint64_t w, int pointer_half) {
+bool MemoryImage::small_case() const {
+  return small_scalars_ && (splitmix64(seed_ ^ 0x736d616c6cull) & 3u) != 0;
+}
+
+uint32_t MemoryImage::word(uint64_t w, int pointer_half, bool scalar) {
   auto it = words_.find(w);
   if (it != words_.end())
     return it->second;
   uint32_t v = initial_memory_word(seed_, w);
+  if (pointer_half < 0 && scalar && small_case()) {
+    const uint64_t h = splitmix64(seed_ ^ (w * 0x9e3779b97f4a7c15ull) ^ 0x736d616c6cull);
+    v = static_cast<uint32_t>(h >> 32) & ((1u << (h % 13)) - 1u); // below 2^k, k in 0..12
+  }
   if (pointer_half >= 0) {
     // Canonical and far above the code: high half in [0x10, 0x7f], low half 64 KiB aligned.
     const uint64_t h = splitmix64(seed_ ^ (w * 0x9e3779b97f4a7c15ull) ^ 0x7074725f);
@@ -119,13 +130,20 @@ uint32_t MemoryImage::word(uint64_t w, int pointer_half) {
                           : 0x10u + static_cast<uint32_t>((h >> 32) % 0x70u);
   }
   words_.emplace(w, v);
+  added(w, v);
   return v;
 }
 
 std::vector<std::pair<uint64_t, uint32_t>> MemoryImage::snapshot() const {
-  std::vector<std::pair<uint64_t, uint32_t>> out(words_.begin(), words_.end());
-  std::sort(out.begin(), out.end());
-  return out;
+  if (!added_.empty()) {
+    std::sort(added_.begin(), added_.end());
+    const size_t n = sorted_.size();
+    sorted_.insert(sorted_.end(), added_.begin(), added_.end());
+    std::inplace_merge(sorted_.begin(), sorted_.begin() + static_cast<std::ptrdiff_t>(n),
+                       sorted_.end());
+    added_.clear();
+  }
+  return sorted_;
 }
 
 /// Seeds load bytes from the initial memory content before the pipeline reads them, and
@@ -147,11 +165,13 @@ public:
   bool observes_sgpr_reads() const override { return false; }
   bool observes_memory_routing() const override { return true; }
 
-  void set_access(MemoryImage *image, uint32_t pointer_lo, uint32_t pointer_hi, bool frame) {
+  void set_access(MemoryImage *image, uint32_t pointer_lo, uint32_t pointer_hi, bool frame,
+                  bool scalar) {
     image_ = image;
     pointer_lo_ = pointer_lo;
     pointer_hi_ = pointer_hi;
     frame_ = frame;
+    scalar_ = scalar;
   }
 
   void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &a) override {
@@ -193,6 +213,18 @@ public:
             bytes.push_back(addr);
           }
         }
+        // Shared memory (LDS; global memory outside the private segment) is what other
+        // waves of the workgroup see: with barriers, each dword access keeps its epoch.
+        // Scalar loads read kernel arguments and constants, which register allocation may
+        // rematerialize after a barrier: not tracked.
+        if (track_epochs_ && (local || !priv) && !scalar_)
+          for (uint64_t b : bytes) {
+            const uint64_t dword = (local ? kLdsTag : 0) | (b & ~uint64_t{3});
+            for (bool store : {false, true})
+              if (store ? writes : reads)
+                if (sync_.empty() || sync_.back() != SyncAccess{epoch_, store, dword})
+                  sync_.push_back({epoch_, store, dword});
+          }
         if (local) {
           for (uint64_t b : bytes)
             if (b >= kLdsWindow)
@@ -266,6 +298,19 @@ public:
     unsupported_ = false;
     wraps_ = false;
     lds_oob_ = false;
+    epoch_ = 0;
+    sync_.clear();
+  }
+  /// Regions with a barrier: record the epoch of every shared-memory dword access.
+  void track_barrier_epochs() { track_epochs_ = true; }
+  /// A barrier ran: later accesses belong to the next epoch.
+  void next_epoch() { ++epoch_; }
+  /// The shared-memory accesses of this run per epoch, sorted, without duplicates.
+  [[nodiscard]] std::vector<SyncAccess> sync() const {
+    std::vector<SyncAccess> out = sync_;
+    std::sort(out.begin(), out.end());
+    out.erase(std::unique(out.begin(), out.end()), out.end());
+    return out;
   }
   [[nodiscard]] uint64_t seed() const { return seed_; }
   [[nodiscard]] bool unsupported() const { return unsupported_; }
@@ -292,8 +337,12 @@ public:
       mem_->read_block(b, std::span<uint8_t>(&v, 1));
       out.emplace_back(b, v);
     }
+    const auto lds = static_cast<std::ptrdiff_t>(out.size());
     for (uint64_t b : std::set<uint64_t>(lds_stored_.begin(), lds_stored_.end()))
       out.emplace_back(kLdsTag | b, lds_->read8(static_cast<uint32_t>(b)));
+    // Sorted by address (MachineState::mem_written): a global address at or above the LDS
+    // tag (wild address arithmetic) sorts after LDS bytes.
+    std::inplace_merge(out.begin(), out.begin() + lds, out.end());
     return out;
   }
   /// Stored bytes dead at the exit (RegionContract::memory_dead_at_exit), sorted.
@@ -301,6 +350,8 @@ public:
     std::set<uint64_t> out;
     if (kind == "frame")
       out.insert(frame_bytes_.begin(), frame_bytes_.end());
+    if (kind == "private_memory")
+      out.insert(private_.begin(), private_.end());
     if (kind == "private") {
       out.insert(private_.begin(), private_.end());
       for (uint64_t b : lds_stored_)
@@ -359,7 +410,8 @@ private:
   void seed_word(uint64_t w, int pointer_half) {
     if (!seeded_.insert(w).second)
       return;
-    const uint32_t value = image_ ? image_->word(w, pointer_half) : initial_memory_word(seed_, w);
+    const uint32_t value =
+        image_ ? image_->word(w, pointer_half, scalar_) : initial_memory_word(seed_, w);
     for (unsigned k = 0; k < 4; ++k) {
       const uint64_t addr = (w << 2) + k;
       if (stored_.count(addr) || (addr >= code_lo_ && addr < code_hi_))
@@ -385,7 +437,8 @@ private:
   amdgpu::Lds *lds_;
   MemoryImage *image_ = nullptr;
   uint32_t pointer_lo_ = 0, pointer_hi_ = 0;
-  bool frame_ = false; ///< The current instruction addresses the stack frame (no VGPR address).
+  bool frame_ = false;  ///< The current instruction addresses the stack frame (no VGPR address).
+  bool scalar_ = false; ///< The current instruction is a scalar load (MemoryImage::word).
   uint64_t code_lo_, code_hi_;
   uint64_t seed_ = 0;
   bool unsupported_ = false;
@@ -398,6 +451,9 @@ private:
   std::unordered_set<uint64_t> private_;     ///< Stored bytes of private (scratch) accesses.
   std::unordered_set<uint64_t> frame_bytes_; ///< Private bytes stored in stack-frame form.
   std::vector<FpUnit> fp_units_;             ///< Stored floating-point values this run.
+  bool track_epochs_ = false;                ///< The region has a barrier.
+  uint32_t epoch_ = 0;                       ///< Barriers executed so far this run.
+  std::vector<SyncAccess> sync_;             ///< Shared-memory dword accesses per epoch.
   bool store_fp_ = false, store_hi16_ = false;
   std::array<std::array<uint8_t, 4>, kWaveLanes> store_tags_{};
 };
@@ -530,6 +586,8 @@ std::unique_ptr<RegionRunner> RegionRunner::create(const std::vector<RegionInst>
   r->asm_.assign(insts.size(), std::nullopt);
   r->asm_block_.assign(insts.size(), 0);
   r->branch_.assign(insts.size(), false);
+  r->barrier_.assign(insts.size(), false);
+  r->endpgm_.assign(insts.size(), false);
   for (size_t i = 0; i < insts.size(); ++i)
     r->pc_index_.emplace(insts[i].pc, i);
   for (size_t i = 0; i < insts.size(); ++i) {
@@ -575,6 +633,10 @@ std::unique_ptr<RegionRunner> RegionRunner::create(const std::vector<RegionInst>
     const std::string mn(inst->mnemonic());
     r->mnemonics_[i] = mn;
     const Effects fx = classify(*inst, target);
+    r->barrier_[i] = fx.barrier;
+    r->endpgm_[i] = mn == "s_endpgm";
+    if (fx.barrier && r->mem_)
+      r->mem_->track_barrier_epochs();
     if (fx.branch) {
       r->branch_[i] = true;
       // SOPP simm16 (bits 15:0): the target is PC + 4 + 4 * simm16; a negative offset goes
@@ -786,7 +848,7 @@ void RegionRunner::load(const MachineState &s) {
   sfp_.fill(0);
   poison_hit_.clear();
   nan_produced_ = false;
-  fp_ordinal_ = 0;
+  barriers_ = 0;
 }
 
 MachineState RegionRunner::capture() const {
@@ -828,7 +890,9 @@ MachineState RegionRunner::capture() const {
     s.mem_written = mem_->written();
     s.mem_dead = mem_->dead(dead_kind_);
     s.mem_init = image_->snapshot();
+    s.mem_sync = mem_->sync();
   }
+  s.barriers = barriers_;
   s.asm_seed = asm_seed_;
   s.asm_uses = asm_uses_;
   s.exit_pc = exit_pc_;
@@ -1233,15 +1297,18 @@ void RegionRunner::choose_nans(size_t i, uint64_t exec) {
   }
   if (!scalar_fp && !vector_fp)
     return;
-  // Random NaNs are keyed by this instruction's position among the floating-point
-  // instructions executed, not by its index in the region: a moved hint or an extra move
-  // must not change which NaN the same operation produces on the other side.
-  const uint64_t key = nan_seed_ ^ (fp_ordinal_++ << 20);
+  // Random NaNs are keyed by the NaN the hardware produced (with the destination component
+  // and the lane), not by the instruction's index or position: the same operation on the
+  // same inputs draws the same NaN on both sides, whatever order a scheduler gave the
+  // floating-point operations and whatever hints, moves or register names lie between.
+  auto key_of = [&](uint64_t hw, uint64_t component, uint64_t lane) {
+    return splitmix64(nan_seed_ ^ splitmix64(hw ^ 0x6e616e5f6b6579ull) ^ (component << 8) ^ lane);
+  };
   if (scalar_fp) {
     for (size_t c = 0; c < p.sdsts.size(); ++c) {
       const unsigned l = p.sdsts[c];
       const uint32_t w = read_loc(l);
-      const uint64_t r = splitmix64(key ^ (uint64_t{c} << 8) ^ 0xffu);
+      const uint64_t r = key_of(w, c, 0xffu);
       uint32_t out = w;
       bool any = false;
       if (p.skind == FpResult::F32) {
@@ -1257,10 +1324,10 @@ void RegionRunner::choose_nans(size_t i, uint64_t exec) {
           if (!is_nan_f16(half))
             continue;
           any = true;
-          const uint32_t n = nan_choice_ == 1 ? 0x7e00u
-                             : nan_choice_ == 2
-                                 ? 0xffffu
-                                 : static_cast<uint32_t>(((r >> (16 * h)) & 0x81ffu) | 0x7e00u);
+          const uint64_t rh = key_of(half, (uint64_t{c} << 1) | h, 0xffu);
+          const uint32_t n = nan_choice_ == 1   ? 0x7e00u
+                             : nan_choice_ == 2 ? 0xffffu
+                                                : static_cast<uint32_t>((rh & 0x81ffu) | 0x7e00u);
           out = (out & ~(0xffffu << (16 * h))) | (n << (16 * h));
         }
       }
@@ -1283,9 +1350,11 @@ void RegionRunner::choose_nans(size_t i, uint64_t exec) {
         continue;
       const uint8_t t = vfp_[size_t{d} * kWaveLanes + lane];
       const uint32_t w = read_vgpr(d, lane);
-      const uint64_t r = splitmix64(key ^ (uint64_t{k} << 8) ^ lane);
-      auto pick = [&](uint64_t canonical, uint64_t ones, uint64_t keep, uint64_t quiet) {
-        return nan_choice_ == 1 ? canonical : nan_choice_ == 2 ? ones : ((r & keep) | quiet);
+      auto pick = [&](uint64_t hw, uint64_t canonical, uint64_t ones, uint64_t keep,
+                      uint64_t quiet) {
+        return nan_choice_ == 1   ? canonical
+               : nan_choice_ == 2 ? ones
+                                  : ((key_of(hw, k, lane) & keep) | quiet);
       };
       if (t & kFpF32) {
         if (!is_nan_f32(w))
@@ -1294,14 +1363,14 @@ void RegionRunner::choose_nans(size_t i, uint64_t exec) {
         if (nan_choice_)
           cu_->write_vgpr(
               vbase + d, lane,
-              static_cast<uint32_t>(pick(0x7fc00000u, 0xffffffffu, 0x803fffffu, 0x7fc00000u)));
+              static_cast<uint32_t>(pick(w, 0x7fc00000u, 0xffffffffu, 0x803fffffu, 0x7fc00000u)));
       } else if ((t & kFpF64Lo) && d + 1 < vgpr_count_) {
         const uint64_t v = uint64_t{w} | (uint64_t{read_vgpr(d + 1, lane)} << 32);
         if (!is_nan_f64(v))
           continue;
         nan_produced_ = true;
         if (nan_choice_) {
-          const uint64_t n = pick(0x7ff8000000000000ull, ~uint64_t{0}, 0x8007ffffffffffffull,
+          const uint64_t n = pick(v, 0x7ff8000000000000ull, ~uint64_t{0}, 0x8007ffffffffffffull,
                                   0x7ff8000000000000ull);
           cu_->write_vgpr(vbase + d, lane, static_cast<uint32_t>(n));
           cu_->write_vgpr(vbase + d + 1, lane, static_cast<uint32_t>(n >> 32));
@@ -1315,7 +1384,7 @@ void RegionRunner::choose_nans(size_t i, uint64_t exec) {
           if (!((f16 && is_nan_f16(half)) || (bf16 && is_nan_bf16(half))))
             continue;
           any = true;
-          const uint64_t rh = r >> (16 * h);
+          const uint64_t rh = key_of(half, (uint64_t{k} << 1) | h, lane);
           const uint32_t n =
               f16 ? static_cast<uint32_t>(nan_choice_ == 1   ? 0x7e00u
                                           : nan_choice_ == 2 ? 0xffffu
@@ -1533,6 +1602,32 @@ RunOutcome RegionRunner::run(size_t budget, std::vector<TraceStep> *trace) {
       }
       continue;
     }
+    if (barrier_[i] || endpgm_[i]) {
+      // One wave runs: a barrier has no other wave to wait for, and closes a barrier epoch of
+      // the shared-memory accesses (MemoryModel). An early s_endpgm ends the wave, which is
+      // the region's end exit.
+      ++out.executed;
+      ++total_executed_;
+      if (barrier_[i]) {
+        ++barriers_;
+        if (mem_)
+          mem_->next_epoch();
+      } else {
+        exit_pc_ = 0;
+        left = true;
+      }
+      if (trace) {
+        MachineState now = capture();
+        TraceStep step;
+        step.index = i;
+        step.pc = pcs_[i];
+        step.text = texts_[i];
+        step.after = now;
+        trace->push_back(std::move(step));
+        prev = std::move(now);
+      }
+      continue;
+    }
     Instruction *inst = insts_[i].get();
     const uint64_t exec_before = exec_lanes();
     plan_tags(i, scratch_tags_);
@@ -1541,7 +1636,8 @@ RunOutcome RegionRunner::run(size_t budget, std::vector<TraceStep> *trace) {
       // The full issue path: fetch at the PC, execute, route, complete (functional).
       wf.pc = pcs_[i];
       if (mem_) {
-        mem_->set_access(image_.get(), pointer_lo_[i], pointer_hi_[i], frame_access_[i]);
+        mem_->set_access(image_.get(), pointer_lo_[i], pointer_hi_[i], frame_access_[i],
+                         mnemonics_[i].rfind("s_load", 0) == 0);
         // A store's data carries its floating-point provenance into memory: the data
         // operand is the second VGPR operand (after the address).
         std::array<std::array<uint8_t, 4>, kWaveLanes> lane_tags{};

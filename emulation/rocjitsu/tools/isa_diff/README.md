@@ -26,7 +26,11 @@ branches and loops whose exits correspond on both sides (see "Control flow"), ma
   instructions first and hints only in the gaps between them; a hunk of hints alone
   (change kind `hint`) is not tested, and a function whose only differences are hints is
   `NO_SEMANTIC_DIFF`. Hardware hazards these hints avoid are not modelled, so not checked;
-- direct branches (`s_branch`, `s_cbranch_scc0/1`, `vccz/vccnz`, `execz/execnz`).
+- direct branches (`s_branch`, `s_cbranch_scc0/1`, `vccz/vccnz`, `execz/execnz`), an
+  early `s_endpgm` (see "Control flow");
+- `s_barrier`, as a barrier of a one-wave workgroup whose shared-memory accesses keep their
+  barrier epoch (see "Control flow"). Not a hint: adding, removing or moving one is a
+  change.
 
 The kernel around a region may contain anything; the region may not. Regions may also contain the comment-only
 inline-asm blocks of LLVM tests (`; def v[0:1]`, `; use s4`; see "Inline asm").
@@ -132,10 +136,10 @@ Each evidence level is reported in its own field (`results.json`, `overall` and 
 - A mismatch found under an `UNRESOLVED` contract does not make the overall result
   `LOCAL_MISMATCH`, because the relation itself may be what is wrong.
 - Zero valid cases never count as a pass.
-- When a contract carries constraints derived from the common prefix, the region is also
-  run without them, and the result's `unrestricted` field reports that run. The
-  constrained result is the verdict; `constraint_dependent: true` says the rewrite is
-  only correct under the derived facts.
+- When a contract carries constraints derived from the common prefix and the region
+  passes, it is also run without them (stopping at the first mismatch), and the result's
+  `unrestricted` field reports that run. The constrained result is the verdict;
+  `constraint_dependent: true` says the rewrite is only correct under the derived facts.
 
 ## The contract
 
@@ -163,8 +167,9 @@ For each region pair (`case.json` → `regions[].contract`):
 - **Pending effects** (`pending_effects`): memory operations that may still be in flight,
   from an `s_waitcnt` dataflow over the gfx9 counters.
   - VMEM completes in order, so `vmcnt(N)` retires all but the newest N vector memory
-    operations. SMEM may complete out of order, so only `lgkmcnt(0)` clears scalar-load
-    destinations.
+    operations; so does LDS, so `lgkmcnt(N)` retires all but the newest N LDS operations
+    (software-pipelined kernels wait with N > 0). SMEM may complete out of order, so while
+    a scalar load is outstanding only `lgkmcnt(0)` clears that counter's destinations.
   - The check runs before every region instruction, so a wait inside the region retires
     what it waits for.
   - `NONE` and `DISJOINT` (in flight, but no destination is read or written by the region)
@@ -195,8 +200,10 @@ has its own contract. When there are more shapes than variants, the largest cont
 (all common code forward, and both ways) are kept besides the smallest ones, because the
 code that compensates a difference is often further away than a few instructions.
 
-After a base region shows `LOCAL_MISMATCH`, `test` runs these variants smallest first. The
-base result keeps its local mismatch, and `expansion.resolution` records the outcome:
+After a base region shows `LOCAL_MISMATCH`, `test` runs these variants smallest first. A
+variant resolves only by passing, so it stops at its first mismatch, without reduction
+(a register renaming under the identity mapping fails every variant at once). The base
+result keeps its local mismatch, and `expansion.resolution` records the outcome:
 - `RESOLVED_BY_CONTEXT`: a variant has no mismatch, and the overall verdict uses that
   variant's result and contract;
 - `PERSISTS_WITH_CONTEXT`;
@@ -210,7 +217,19 @@ A region may contain direct branches and span basic blocks (including control-fl
 hunks: a changed condition, a retargeted branch):
 
 - **Shape.** One entry: every block that starts inside the region is reached from
-  inside it only. Calls, returns, `s_endpgm` and indirect jumps stay outside.
+  inside it only. Calls, returns and indirect jumps stay outside. An early `s_endpgm`
+  (a kernel's exit before its last block) is inside a region that reaches the final
+  `s_endpgm`, where it is an exit to the end: it ends the wave as the final one does.
+- **Barriers.** `s_barrier` (GFX9-GFX11) runs in regions. One wave runs, so a barrier
+  waits for no other wave; it divides the run into epochs. Besides the final state, the
+  two sides must execute as many barriers, store to the same shared dwords (LDS, and
+  global memory outside the private segment) in each epoch, and load a dword both load in
+  the same epochs (`barriers` in the states; scalar loads, which read kernel arguments and
+  constants that allocation may rematerialize anywhere, are not tracked). A store or load
+  moved across a barrier, or
+  a value reused across one, is therefore a mismatch even though this wave sees the same
+  values; other waves of the workgroup would not. What other waves store is not
+  modelled: their part of memory keeps its initial content.
 - **Exits.** Each side's exits are the targets of branches that leave the region, and
   falling off its end. They are paired through the instruction matching of the diff
   (falling off the end corresponds on both sides). An exit without a partner is
@@ -252,7 +271,14 @@ function has neither cut:
   final return (or `s_endpgm`) on both sides (`whole_function` in `case.json`;
   `--no-whole-function` turns it off; at most 4096 instructions per side). It needs
   what any region needs: every instruction executable (the list at the top of this file),
-  direct branches only, one return at the end, and no change in the return itself.
+  direct branches only (and early `s_endpgm`), one return at the end, and no change in
+  the return itself.
+- **Kernels.** A kernel is an artifact with a descriptor, or a function listed without
+  one that ends with `s_endpgm` on both sides (as `rj_isa_diff_pr` writes them; a C or
+  gfx-convention function never does, a shader part returns to its epilog). Its `f0`:
+  - drops all private memory and LDS at `s_endpgm` (`memory_dead_at_exit: private`);
+  - takes workitem IDs below 256 in one dimension (v0-v2 ANDed with 0xff): arbitrary
+    values put LDS addresses outside the allocation.
 - **Contract.** Both sides start from the same call or dispatch state, so the entry
   relation is established unless the kernel metadata differs or memory is outstanding;
   entry values are arbitrary, which only widens the inputs. The exit is the return,
@@ -440,7 +466,11 @@ within the step.
   The CU's own wait checker is off, because the planner models waits (pending effects).
 - **Faults.** A wave that halts or traps on an access is a `MEMORY_FAULT`.
   - On both sides, the input is excluded and counted as a rejection.
-  - On one side, it is an `exit_status_divergence` mismatch.
+  - On the new side only, it is an `exit_status_divergence` mismatch: the change
+    introduced a fault.
+  - On the old side only, the input is excluded too (`memory fault on the old side only`):
+    a fault is an access LLVM leaves undefined, so new may do anything there, as with
+    reported undefined behaviour.
   - LDS-DMA, image and code-overwriting accesses are `UNSUPPORTED_OPERAND`.
 - **LDS.** The wave has a 64 KiB LDS window at offset 0 (one workgroup's allocation).
   - LDS words are seeded from the same image as global memory, as word
@@ -471,8 +501,16 @@ within the step.
     states): at the exit of a region when no instruction outside it may read private
     memory (no buffer, scratch or flat load or atomic, no unknown effect), and at a
     callable function's return (`f0`). A kernel's `f0` drops all its private memory and
-    LDS at `s_endpgm` (`private`). A spill slot that moved is therefore not a
-    difference, while a reload from the wrong slot is.
+    LDS at `s_endpgm` (`private`), and a kernel's region outside which nothing reads
+    private memory drops every private byte it stores, in any addressing form
+    (`private_memory`: a kernel has no caller whose frame a VGPR address could reach). A
+    spill slot that moved is therefore not a difference, while a reload from the wrong
+    slot is.
+  - **Small kernel arguments.** In a region with a loop, three cases of four read small
+    values (below 2^k, k up to 12) from data words that scalar loads read (kernel
+    arguments, constants), so loop bounds and sizes loaded from kernel arguments let loops
+    end; the other cases keep the catalog and random values. Pointer words keep their
+    pointer shape.
 - **Contract.**
   - `memory_reads` and `memory_writes` record what the region does.
   - A region that loads needs memory equality at its entry in the composition check.
@@ -762,10 +800,13 @@ switch for the stricter reading.
       ones, then a random quiet NaN.
     - Output bits that change depend on the NaN's choice and are don't care.
     - New re-runs with its own alternative NaNs and must still match. Both sides draw a
-      random NaN from the same seed, keyed by the producing instruction's position among
-      the floating-point instructions executed: when new runs the same floating-point
-      operations as old, a moved hint, an extra move or a renamed register does not
-      change which NaN each one produces.
+      random NaN from the same seed, keyed by the NaN the hardware produced (with the
+      lane and destination component): the same operation on the same inputs draws the
+      same NaN on both sides, whatever order a scheduler gave the floating-point
+      operations, and a moved hint, an extra move or a renamed register changes nothing.
+      (Keying by position among the floating-point instructions executed made a
+      rescheduled GEMM epilogue draw different NaNs for the same operations, which
+      looked like new depending on NaN bits old does not.)
     - Moves, `v_cndmask` and `v_pk_mov` copy a NaN unchanged: only producing
       instructions choose.
     - A mismatch that new shows only under an alternative NaN records the choice

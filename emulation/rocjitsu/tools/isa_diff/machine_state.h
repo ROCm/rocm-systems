@@ -64,6 +64,16 @@ struct FpUnit {
 /// offset in the wave's LDS window, so LDS and global memory never alias.
 inline constexpr uint64_t kLdsTag = uint64_t{1} << 62;
 
+/// A shared-memory dword access in a barrier epoch (regions with s_barrier): what other
+/// waves of the workgroup could observe, and when.
+struct SyncAccess {
+  uint32_t epoch = 0; ///< Barriers executed before the access.
+  bool store = false; ///< A store (or an atomic's write); else a load.
+  uint64_t addr = 0;  ///< Dword address (LDS: kLdsTag | offset).
+  bool operator==(const SyncAccess &) const = default;
+  auto operator<=>(const SyncAccess &) const = default;
+};
+
 struct MachineState {
   std::array<uint32_t, kNumLocs> loc{}; ///< SCC is 0/1.
   Frame frame;
@@ -81,6 +91,11 @@ struct MachineState {
   /// stack frame at its return, a kernel's private memory and LDS at s_endpgm
   /// (RegionContract::memory_dead_at_exit). They are not compared.
   std::vector<uint64_t> mem_dead;
+  /// Barriers (s_barrier) the run executed. One wave runs, so a barrier waits for nothing;
+  /// it divides the run into epochs, and mem_sync records the shared-memory dwords (LDS,
+  /// global memory outside the private segment) accessed in each, sorted.
+  uint32_t barriers = 0;
+  std::vector<SyncAccess> mem_sync;
   /// Inline asm: the seed of the values `def` blocks produce (0: the region has none;
   /// equal on both sides, so a matched block defines the same values), and what `use`
   /// blocks observed during the run, in execution order.

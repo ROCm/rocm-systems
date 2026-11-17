@@ -160,10 +160,10 @@ std::vector<uint64_t> differing_memory(const MachineState &a, const MachineState
 }
 
 uint8_t memory_byte(const MachineState &s, uint64_t x) {
-  for (const auto &[a, v] : s.mem_written)
-    if (a == x)
-      return v;
-  return initial_byte(s, x);
+  // mem_written is sorted by address (capture, from_json).
+  const auto it = std::lower_bound(s.mem_written.begin(), s.mem_written.end(),
+                                   std::pair<uint64_t, uint8_t>{x, 0});
+  return it != s.mem_written.end() && it->first == x ? it->second : initial_byte(s, x);
 }
 
 /// Don't-care bits of old's outputs (LLVM undef): those that changed when old re-ran with
@@ -239,6 +239,60 @@ bool nan_unit_equal(const MachineState &a, const MachineState &b, uint64_t x) {
 }
 
 /// First difference between what the two sides' inline-asm `use` blocks observed, or empty.
+/// With barriers: the first difference in what other waves of the workgroup could observe
+/// ("" for none). One wave runs, so the order of its shared-memory accesses relative to the
+/// barriers stands in for that: the sides execute as many barriers, store to the same
+/// shared dwords in each epoch, and load a dword both load in the same epochs (a load only
+/// one side makes, e.g. through a wider access, is not compared).
+std::string barrier_difference(const MachineState &a, const MachineState &b) {
+  if (a.barriers != b.barriers)
+    return "the sides execute different numbers of barriers: old " + std::to_string(a.barriers) +
+           ", new " + std::to_string(b.barriers);
+  if (a.mem_sync == b.mem_sync)
+    return {};
+  auto where = [](uint64_t addr) {
+    return addr & kLdsTag ? "LDS " + hex64(addr & ~kLdsTag) : hex64(addr);
+  };
+  std::vector<SyncAccess> sa, sb;
+  std::map<uint64_t, std::vector<uint32_t>> la, lb;
+  auto split = [](const MachineState &s, std::vector<SyncAccess> &stores,
+                  std::map<uint64_t, std::vector<uint32_t>> &loads) {
+    for (const SyncAccess &x : s.mem_sync) {
+      if (x.store)
+        stores.push_back(x);
+      else
+        loads[x.addr].push_back(x.epoch);
+    }
+  };
+  split(a, sa, la);
+  split(b, sb, lb);
+  if (sa != sb) {
+    std::vector<SyncAccess> only;
+    std::ranges::set_symmetric_difference(sa, sb, std::back_inserter(only));
+    const SyncAccess &x = only.front();
+    const bool old_only = std::ranges::binary_search(sa, x);
+    return std::string(old_only ? "old" : "new") + " stores " + where(x.addr) +
+           " in barrier epoch " + std::to_string(x.epoch) + " and " + (old_only ? "new" : "old") +
+           " does not: other waves of the workgroup would see different memory after that "
+           "barrier";
+  }
+  auto epochs = [](const std::vector<uint32_t> &e) {
+    std::string s;
+    for (uint32_t x : e)
+      s += (s.empty() ? "" : ",") + std::to_string(x);
+    return s;
+  };
+  for (const auto &[addr, ea] : la) {
+    const auto it = lb.find(addr);
+    if (it != lb.end() && it->second != ea)
+      return "old loads " + where(addr) + " in barrier epoch(s) " + epochs(ea) + ", new in " +
+             epochs(it->second) +
+             ": a load moved across a barrier reads what other waves "
+             "wrote at another time";
+  }
+  return {};
+}
+
 std::string asm_use_difference(const MachineState &a, const MachineState &b,
                                const CompareConfig &cfg, CompareStats &st) {
   const size_t n = std::max(a.asm_uses.size(), b.asm_uses.size());
@@ -465,6 +519,12 @@ std::string compare_pair(const RegionPair &region, const MachineState &init_old,
   const std::string adiff = asm_use_difference(final_old, final_new, cfg, st);
   if (diff.none() && vdiff.none() && mdiff.empty() && !adiff.empty()) {
     m.detail = adiff;
+    return "observable";
+  }
+  // Barriers: what other waves of the workgroup could observe, epoch by epoch.
+  const std::string bdiff = barrier_difference(final_old, final_new);
+  if (diff.none() && vdiff.none() && mdiff.empty() && !bdiff.empty()) {
+    m.detail = bdiff;
     return "observable";
   }
   if (diff.none() && vdiff.none() && !mdiff.empty()) {
@@ -1417,6 +1477,7 @@ RegionResult test_region(const RegionPair &region, const TestOptions &options,
                                : nullptr;
   if (old_runner && new_runner) {
     auto image = std::make_shared<MemoryImage>();
+    image->set_small_scalars(old_runner->loops() || new_runner->loops());
     old_runner->set_memory_image(image);
     new_runner->set_memory_image(image);
     old_runner->set_poison_filter(options.poison_filter);
@@ -1536,15 +1597,14 @@ RegionResult test_region(const RegionPair &region, const TestOptions &options,
     };
     const bool fault_old = out_old.status == RunStatus::MemoryFault;
     const bool fault_new = out_new.status == RunStatus::MemoryFault;
-    if (fault_old != fault_new && (fault_old ? out_new.status : out_old.status) == RunStatus::Ok) {
-      // One side faults where the other completes: a behavioural divergence.
+    if (fault_new && !fault_old && out_old.status == RunStatus::Ok) {
+      // New faults where old completes: the change introduced a fault. (Old faulting where
+      // new completes is an input outside old's defined behaviour, excluded below.)
       ++r.valid_pairs;
       ++phase.valid;
       kind = "exit_status_divergence";
       m.kind = kind;
-      m.detail = std::string(fault_old ? "old" : "new") +
-                 " side: " + (fault_old ? out_old.detail : out_new.detail) +
-                 "; the other side completed";
+      m.detail = "new side: " + out_new.detail + "; the old side completed";
       m.final_old = old_runner->capture();
       m.final_new = new_runner->capture();
       ++r.mismatches;
@@ -1569,6 +1629,11 @@ RegionResult test_region(const RegionPair &region, const TestOptions &options,
       } else if (fault_old && fault_new) {
         // An input outside the memory model's address domain: excluded, counted.
         ++r.rejections["memory fault on both sides (excluded input): " + out_old.detail];
+      } else if (fault_old && out_new.status == RunStatus::Ok) {
+        // Old faults where new completes: a fault is an access LLVM leaves undefined (outside
+        // the allocation, wrapping, misaligned), so the input is outside old's defined
+        // behaviour and new may do anything there (as with reported undefined behaviour).
+        ++r.rejections["memory fault on the old side only (excluded input): " + out_old.detail];
       } else if (one_sided_step_limit(out_old, out_new)) {
         // One side exits, the other still loops past kStepLimitRerunScale times the limit:
         // possibly a non-termination the change introduced or removed. Not a witness (the
@@ -1844,6 +1909,7 @@ ReplayOutcome replay_counterexample(const Json &bundle, std::string &error) {
   if (!old_runner || !new_runner)
     return out;
   auto image = std::make_shared<MemoryImage>();
+  image->set_small_scalars(old_runner->loops() || new_runner->loops());
   old_runner->set_memory_image(image);
   new_runner->set_memory_image(image);
   old_runner->set_memory_dead_at_exit(region->contract.memory_dead_at_exit);

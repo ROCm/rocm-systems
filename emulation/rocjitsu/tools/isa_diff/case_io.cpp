@@ -443,11 +443,14 @@ Json test_case(const CaseData &data, const TestOptions &options, const std::stri
     BaselinePolicy policy(topt.seed);
     RegionResult r = test_region(region, topt, policy);
     // Handoff 3.3/13: with constraints derived from the common prefix, also report the
-    // unrestricted verdict so that a constraint-dependent rewrite is visible as such.
+    // unrestricted verdict so that a constraint-dependent rewrite is visible as such. Only
+    // a constrained pass can depend on them; the unrestricted run stops at its first
+    // mismatch.
     const bool derived = std::ranges::any_of(region.contract.constraints, [](const Constraint &c) {
       return c.source == "common_prefix_analysis";
     });
-    if (derived && region.status == RegionStatus::Ready) {
+    if (derived && region.status == RegionStatus::Ready &&
+        r.test_status == TestStatus::NoMismatchFound) {
       RegionPair open = region;
       std::erase_if(open.contract.constraints,
                     [](const Constraint &c) { return c.source == "common_prefix_analysis"; });
@@ -456,6 +459,8 @@ Json test_case(const CaseData &data, const TestOptions &options, const std::stri
       TestOptions uopt = topt;
       uopt.max_counterexamples = 1;
       uopt.case_log_dir.clear();
+      uopt.stop_at_first_mismatch = true;
+      uopt.reduce = false;
       BaselinePolicy upolicy(topt.seed);
       const RegionResult ur = test_region(open, uopt, upolicy);
       Json u = Json::object();
@@ -472,9 +477,12 @@ Json test_case(const CaseData &data, const TestOptions &options, const std::stri
     }
     if (r.test_status == TestStatus::LocalMismatch) {
       // Handoff 5.2: a local mismatch may be compensated by common code around the
-      // change. Try the precomputed larger regions, smallest first.
+      // change. Try the precomputed larger regions, smallest first. A variant resolves only
+      // by passing, so one mismatch ends it (no reduction: it is not the verdict).
       TestOptions vopt = topt;
       vopt.max_counterexamples = std::min<size_t>(topt.max_counterexamples, 1);
+      vopt.stop_at_first_mismatch = true;
+      vopt.reduce = false;
       bool tried = false;
       for (const auto &variant : data.variants) {
         if (variant.parent != region.id || variant.status != RegionStatus::Ready)

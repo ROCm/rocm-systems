@@ -66,6 +66,8 @@ struct Effects {
   /// A direct branch a region may contain (s_branch, s_cbranch_scc0/1, vccz/vccnz,
   /// execz/execnz): the runner follows it; leaving the region is an exit.
   bool branch = false;
+  /// A workgroup barrier a region may contain (is_region_barrier).
+  bool barrier = false;
 };
 
 /// @brief Classify one decoded instruction of @p target.
@@ -232,5 +234,10 @@ struct MemoryAccess {
 /// An instruction without functional effect in a region: scheduling hints and dependency
 /// waits (s_nop, s_delay_alu, s_clause, s_wait_alu, s_waitcnt_depctr, prefetch hints).
 [[nodiscard]] bool is_region_noop(std::string_view mnemonic);
+/// A workgroup barrier a region may contain (s_barrier, GFX9-GFX11). The runner executes
+/// one wave, so it waits for no other wave; it starts a new barrier epoch, and the shared
+/// memory each side accesses per epoch is compared (RegionRunner::barrier). Not a hint: a
+/// hunk that adds, removes or moves one is a semantic change.
+[[nodiscard]] bool is_region_barrier(std::string_view mnemonic);
 
 } // namespace rocjitsu::isa_diff
