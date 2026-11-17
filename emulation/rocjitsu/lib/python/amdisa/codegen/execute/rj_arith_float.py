@@ -1877,7 +1877,20 @@ def gen_float_dot32(ctx: ExecuteContext) -> str | None:
     src = ctx.src_ops
     enc_name = ctx.enc_name
     opsel_exprs = ctx.opsel_exprs
-    if arch not in ('rdna3', 'rdna4', 'cdna3', 'cdna4') or len(dst) != 1:
+    if (
+        arch
+        not in (
+            'cdna1',
+            'cdna2',
+            'rdna2',
+            'rdna3',
+            'rdna3_5',
+            'rdna4',
+            'cdna3',
+            'cdna4',
+        )
+        or len(dst) != 1
+    ):
         return None
     if mnemonic in DOT4_F32_NAMES:
         if arch != 'rdna4' or enc_name != 'ENC_VOP3P' or len(src) != 3:
@@ -1900,18 +1913,19 @@ def gen_float_dot32(ctx: ExecuteContext) -> str | None:
         )
     if mnemonic not in DOT2_F32_NAMES:
         return None
-    cdna = arch in ('cdna3', 'cdna4')
-    cdna_accumulate = mnemonic in ('V_DOT2C_F32_F16', 'V_DOT2C_F32_BF16')
-    if cdna_accumulate and not cdna:
+    # Older CDNA and RDNA2 inherit the same pair-sum-then-add host model.
+    host_model = arch in ('cdna1', 'cdna2', 'rdna2', 'cdna3', 'cdna4')
+    dotc = mnemonic in ('V_DOT2C_F32_F16', 'V_DOT2C_F32_BF16')
+    if dotc and not host_model:
         return None
-    if arch == 'cdna3' and mnemonic.endswith('_BF16'):
+    if arch != 'cdna4' and host_model and mnemonic.endswith('_BF16'):
         return None
-    accumulate = mnemonic == 'V_DOT2ACC_F32_F16' or cdna_accumulate
-    if cdna_accumulate:
+    accumulate = mnemonic == 'V_DOT2ACC_F32_F16' or dotc
+    if dotc:
         if enc_name not in ('ENC_VOP2', 'ENC_VOP3') or len(src) != 2:
             return None
     elif accumulate:
-        if arch != 'rdna3' or enc_name != 'ENC_VOP2' or len(src) != 2:
+        if arch not in ('rdna3', 'rdna3_5') or enc_name != 'ENC_VOP2' or len(src) != 2:
             return None
     elif enc_name != 'ENC_VOP3P' or len(src) != 3:
         return None
@@ -1932,16 +1946,16 @@ def gen_float_dot32(ctx: ExecuteContext) -> str | None:
                 f'((inst_.neg_hi & {1 << index}) ? RJ_ARITH_DOT_NEG_HI_{source} : 0u)',
             ]
     narrow, replicate = [], []
-    for index in range(0 if cdna_accumulate else 1 if accumulate else 2):
+    for index in range(0 if dotc else 1 if accumulate else 2):
         selector = f'inst_.src{index}'
-        if bf16 and not cdna:
+        if bf16 and not host_model:
             broadcast = f'amdgpu::dot2_src_needs_half_replication({selector})'
             replicate.append(f'({broadcast} ? {1 << index}u : 0u)')
             # BF16 broadcasts upper16(FP32). GFX11 integer inline constants
             # also use upper16; GFX12 integer constants instead use low16.
             condition = (
                 broadcast
-                if arch == 'rdna3'
+                if arch in ('rdna3', 'rdna3_5')
                 else f'amdgpu::is_inline_float_src({selector})'
             )
         else:
@@ -1952,13 +1966,19 @@ def gen_float_dot32(ctx: ExecuteContext) -> str | None:
         + ('bf16' if bf16 else 'f16')
         + (
             ('_gfx950' if bf16 else '_gfx942')
-            if cdna
+            if host_model
             else '_gfx12' if arch == 'rdna4' else ''
         )
     )
     addend = dst[0] if accumulate else src[2]
+    guard = (
+        ['  if (!wf.exec()) return;'] + inherited_half_qualification_guard(arch)
+        if arch == 'rdna3_5'
+        else []
+    )
     return '\n'.join(
-        [
+        guard
+        + [
             '  const uint64_t modifiers = '
             + (' |\n      '.join(terms) if terms else '0')
             + ';',
@@ -1981,7 +2001,7 @@ def gen_half_dot(ctx: ExecuteContext) -> str | None:
     dst = ctx.dst_ops
     src = ctx.src_ops
     is_vop3 = ctx.is_vop3
-    if arch not in ('rdna3', 'rdna4') or mnemonic not in HALF_DOT_NAMES:
+    if arch not in ('rdna3', 'rdna3_5', 'rdna4') or mnemonic not in HALF_DOT_NAMES:
         return None
     if not is_vop3 or len(dst) != 1 or len(src) != 3:
         return None
@@ -2015,6 +2035,12 @@ def gen_half_dot(ctx: ExecuteContext) -> str | None:
         '      wf.cu().arithmetic_flags(), modifiers,',
         f'      {dst[0]}, {", ".join(src)}, {bf16}, narrow_sources, replicate_sources);',
     ]
+    if arch == 'rdna3_5':
+        lines = (
+            ['  if (!wf.exec()) return;']
+            + inherited_half_qualification_guard(arch)
+            + lines
+        )
     return '\n'.join(lines)
 
 

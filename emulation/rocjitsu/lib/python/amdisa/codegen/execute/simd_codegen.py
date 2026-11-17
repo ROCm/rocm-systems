@@ -1225,21 +1225,6 @@ SIMD_VOP3P_MOV_B32: set[str] = {
     'v_pk_mov_b32_vop3p',
 }
 
-# VOP3P integer dot products. dst is a single 32-bit lane (not packed) and
-# src2 is the accumulator, so the fast path vectorizes the reduction across
-# lanes. Parameterised by (ElemBits, Signed). Eligibility: the 16-bit forms
-# decline non-default op_sel packing, the 8/4-bit forms accept it. See
-# try_execute_vop3p_dot_int_simd in simd_glue.h for the arithmetic contract,
-# including how CLAMP and dot4_clamp_supported apply.
-SIMD_VOP3P_DOT_INT: dict[str, str] = {
-    'v_dot4_i32_i8_vop3p': '8, true',
-    'v_dot4_u32_u8_vop3p': '8, false',
-    'v_dot8_i32_i4_vop3p': '4, true',
-    'v_dot8_u32_u4_vop3p': '4, false',
-    'v_dot2_i32_i16_vop3p': '16, true',
-    'v_dot2_u32_u16_vop3p': '16, false',
-}
-
 # v_dot2_f32_{f16,bf16} — two half-precision products + an f32 accumulator into
 # one f32 lane. Eligibility: the HostF32 accumulation policy and the default
 # op_sel packing only; floating DOT ignores CLAMP. The set spans BOTH 16-bit
@@ -1253,39 +1238,6 @@ SIMD_VOP3P_DOT_F16_OR_BF16: set[str] = {
     'v_dot2_f32_f16_vop3p',
     'v_dot2_f32_bf16_vop3p',
 }
-
-# VOP3P mixed-sign integer dots: per-operand signedness from inst.neg bits 0/1
-# at runtime (src0/src1); int32 accumulate from src2. The scalar and SIMD paths
-# both apply op_sel half selection and saturate the signed result when CLAMP is
-# supported; see try_execute_vop3p_dot_int_mixed_simd in simd_glue.h.
-# key -> ElemBits.
-SIMD_VOP3P_DOT_INT_MIXED: dict[str, str] = {
-    'v_dot4_i32_iu8_vop3p': '8',
-    'v_dot8_i32_iu4_vop3p': '4',
-}
-
-# VOP2/VOP3 dst-accumulate integer dots (the "c" forms). Accumulator is vdst
-# (read + write), NOT src2; all signed; no op_sel/neg/clamp. Keyed by full
-# template_name (incl _vop2/_vop3) — the only structural difference is the 2nd
-# source member (vsrc1 vs src1), passed as the Vop3 bool. Value = "ElemBits, Vop3".
-SIMD_DOTC_INT: dict[str, str] = {
-    'v_dot2c_i32_i16_vop2': '16, false',
-    'v_dot2c_i32_i16_vop3': '16, true',
-    'v_dot4c_i32_i8_vop2': '8, false',
-    'v_dot4c_i32_i8_vop3': '8, true',
-    'v_dot8c_i32_i4_vop2': '4, false',
-    'v_dot8c_i32_i4_vop3': '4, true',
-}
-
-# VOP2/VOP3 dst-accumulate f16 dot (v_dot2c_f32_f16). Accumulator is vdst (f32
-# bits); bracketing acc + (a0*b0 + a1*b1) matches the scalar facc += ... form.
-# Value = "Vop3".
-SIMD_DOTC_F16: dict[str, str] = {
-    'v_dot2c_f32_f16_vop2': 'false',
-    'v_dot2c_f32_f16_vop3': 'true',
-    'v_dot2acc_f32_f16_vop2': 'false',
-}
-
 
 # --- VOPC compare -> VCC ---------------------------------------------------
 #
@@ -2807,24 +2759,9 @@ def _simd_probe_line(
         return f'  ROCJITSU_TRY_SIMD_VOP3P_PK_TERNARY_F32({specpkf32t});'
     if template_name in SIMD_VOP3P_MOV_B32:
         return '  ROCJITSU_TRY_SIMD_VOP3P_MOV_B32();'
-    # VOP3P integer dot products (dot4 i8/u8, dot8 i4/u4, dot2 i16/u16).
-    specdot = SIMD_VOP3P_DOT_INT.get(template_name)
-    if specdot is not None:
-        return f'  ROCJITSU_TRY_SIMD_VOP3P_DOT_INT({specdot});'
     if template_name in SIMD_VOP3P_DOT_F16_OR_BF16:
         fmt = 'BF16' if template_name == 'v_dot2_f32_bf16_vop3p' else 'F16'
         return f'  ROCJITSU_TRY_SIMD_VOP3P_DOT_F16({fmt});'
-    # VOP3P mixed-sign integer dots (dot4 iu8, dot8 iu4).
-    specdotm = SIMD_VOP3P_DOT_INT_MIXED.get(template_name)
-    if specdotm is not None:
-        return f'  ROCJITSU_TRY_SIMD_VOP3P_DOT_INT_MIXED({specdotm});'
-    # VOP2/VOP3 dst-accumulate integer dots (v_dot{2,4,8}c_*; vdst is the accum).
-    specdotc = SIMD_DOTC_INT.get(template_name)
-    if specdotc is not None:
-        return f'  ROCJITSU_TRY_SIMD_DOTC_INT({specdotc});'
-    specdotcf16 = SIMD_DOTC_F16.get(template_name)
-    if specdotcf16 is not None:
-        return f'  ROCJITSU_TRY_SIMD_DOTC_F16({specdotcf16});'
     # VOP3 dst-accumulate FMA/MAC (vdst is the third operand). Per-isa class
     # has no src2; the accumulate glue reads vdst instead.
     specfmacf32 = SIMD_VOP3_FMAC_FP32.get(template_name)
