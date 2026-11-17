@@ -26,7 +26,7 @@ namespace {
 
 TEST(FaultLdsWrongAddress, Rdna4Wave32BasicFormsPreserveGuestAndAllocation) {
   const std::vector<LdsCapability> capabilities = lds_wrong_address_capabilities();
-  ASSERT_EQ(capabilities.size(), 205u);
+  ASSERT_EQ(capabilities.size(), 299u);
   for (uint32_t machine : {EF_AMDGPU_MACH_AMDGCN_GFX1200, EF_AMDGPU_MACH_AMDGCN_GFX1201}) {
     SCOPED_TRACE(machine);
     const std::vector<uint8_t> image = test::make_lds_load_elf(machine, true, 0);
@@ -613,8 +613,9 @@ TEST(FaultLdsWrongAddress, TargetsWavesAndTwoAddressFormsStayBounded) {
       discover_lds_wrong_address(wave32, "test_kernel", error);
   ASSERT_TRUE(wave32_inventory.succeeded()) << error.message;
   EXPECT_EQ(wave32_inventory.value().sites().size(), 2u);
-  const FaultMutationContext other(test::make_lds_elf(1, false, EF_AMDGPU_MACH_AMDGCN_GFX1100));
+  const FaultMutationContext other(test::make_lds_elf(1, false, EF_AMDGPU_MACH_AMDGCN_GFX90A));
   EXPECT_TRUE(discover_lds_wrong_address(other, "test_kernel", error).failed());
+  EXPECT_EQ(error.code, FaultMutationErrorCode::UnsupportedTarget);
   const FaultMutationContext dual(
       test::make_lds_elf(1, false, EF_AMDGPU_MACH_AMDGCN_GFX1201, true));
   const FailureOr<LdsInventory> inventory = discover_lds_wrong_address(dual, "test_kernel", error);
