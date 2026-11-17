@@ -1044,6 +1044,7 @@ struct ProcessGridRank {
 struct AdoptedProcessGridChild {
   pid_t pid = -1;
   pid_t pgid = -1;
+  std::optional<uint32_t> global_rank;
   bool running = true;
   bool cleanup_started = false;
   bool cleanup_escalated = false;
@@ -1111,6 +1112,38 @@ std::optional<ProcStat> read_proc_stat(const std::filesystem::directory_entry &e
   return stat;
 }
 
+std::optional<uint32_t> parse_process_grid_rank(std::string_view text) {
+  uint32_t value = 0;
+  const char *begin = text.data();
+  const char *end = begin + text.size();
+  const auto [parsed_end, ec] = std::from_chars(begin, end, value);
+  if (ec != std::errc() || parsed_end != end)
+    return std::nullopt;
+  return value;
+}
+
+std::optional<uint32_t> read_process_grid_rank_from_environ(pid_t pid) {
+  std::ifstream environ(std::format("/proc/{}/environ", pid), std::ios::binary);
+  if (!environ)
+    return std::nullopt;
+
+  const std::string data((std::istreambuf_iterator<char>(environ)),
+                         std::istreambuf_iterator<char>());
+  size_t begin = 0;
+  while (begin < data.size()) {
+    const size_t end = data.find('\0', begin);
+    const std::string_view entry(data.data() + begin,
+                                 (end == std::string::npos ? data.size() : end) - begin);
+    constexpr std::string_view rank_prefix = "RANK=";
+    if (entry.starts_with(rank_prefix))
+      return parse_process_grid_rank(entry.substr(rank_prefix.size()));
+    if (end == std::string::npos)
+      break;
+    begin = end + 1;
+  }
+  return std::nullopt;
+}
+
 std::optional<bool> process_group_has_non_zombie_members(pid_t pgid) {
   if (pgid <= 0)
     return false;
@@ -1174,12 +1207,17 @@ void signal_process_grid_rank(ProcessGridRank &rank, int signal) {
     rank.group_present = false;
 }
 
-void begin_process_grid_rank_cleanup(ProcessGridRank &rank, int signal) {
+void begin_process_grid_rank_cleanup_at(ProcessGridRank &rank, int signal,
+                                        std::chrono::steady_clock::time_point started_at) {
   if (rank.cleanup_started)
     return;
   signal_process_grid_rank(rank, signal);
-  rank.cleanup_started_at = std::chrono::steady_clock::now();
+  rank.cleanup_started_at = started_at;
   rank.cleanup_started = true;
+}
+
+void begin_process_grid_rank_cleanup(ProcessGridRank &rank, int signal) {
+  begin_process_grid_rank_cleanup_at(rank, signal, std::chrono::steady_clock::now());
 }
 
 void signal_adopted_process_grid_child(AdoptedProcessGridChild &child, int signal) {
@@ -1196,21 +1234,45 @@ void signal_adopted_process_grid_child(AdoptedProcessGridChild &child, int signa
     child.running = false;
 }
 
-void begin_adopted_process_grid_child_cleanup(AdoptedProcessGridChild &child, int signal) {
+void begin_adopted_process_grid_child_cleanup_at(AdoptedProcessGridChild &child, int signal,
+                                                 std::chrono::steady_clock::time_point started_at,
+                                                 bool already_signaled = false) {
   if (child.cleanup_started)
     return;
-  signal_adopted_process_grid_child(child, signal);
-  child.cleanup_started_at = std::chrono::steady_clock::now();
+  if (!already_signaled)
+    signal_adopted_process_grid_child(child, signal);
+  child.cleanup_started_at = started_at;
   child.cleanup_started = true;
+}
+
+void begin_adopted_process_grid_child_cleanup(AdoptedProcessGridChild &child, int signal) {
+  begin_adopted_process_grid_child_cleanup_at(child, signal, std::chrono::steady_clock::now());
 }
 
 void begin_process_grid_termination(std::vector<ProcessGridRank> &ranks,
                                     std::vector<AdoptedProcessGridChild> &adopted_children,
-                                    int signal) {
+                                    int signal, std::chrono::steady_clock::time_point started_at) {
   for (ProcessGridRank &rank : ranks)
-    begin_process_grid_rank_cleanup(rank, signal);
+    begin_process_grid_rank_cleanup_at(rank, signal, started_at);
   for (AdoptedProcessGridChild &child : adopted_children)
-    begin_adopted_process_grid_child_cleanup(child, signal);
+    begin_adopted_process_grid_child_cleanup_at(child, signal, started_at);
+}
+
+ProcessGridRank *find_adopted_process_grid_child_owner(std::vector<ProcessGridRank> &ranks,
+                                                       const AdoptedProcessGridChild &child) {
+  if (child.global_rank) {
+    auto by_rank = std::ranges::find_if(
+        ranks, [&](const ProcessGridRank &rank) { return rank.global_rank == *child.global_rank; });
+    if (by_rank != ranks.end())
+      return &*by_rank;
+  }
+  if (child.pgid > 0) {
+    auto by_group = std::ranges::find_if(
+        ranks, [&](const ProcessGridRank &rank) { return rank.pgid == child.pgid; });
+    if (by_group != ranks.end())
+      return &*by_group;
+  }
+  return nullptr;
 }
 
 void adopt_process_grid_children(const std::vector<ProcessGridRank> &ranks,
@@ -1240,8 +1302,9 @@ void adopt_process_grid_children(const std::vector<ProcessGridRank> &ranks,
         }))
       continue;
 
-    AdoptedProcessGridChild child{.pid = stat->pid, .pgid = stat->pgid};
-    begin_adopted_process_grid_child_cleanup(child, SIGTERM);
+    AdoptedProcessGridChild child{.pid = stat->pid,
+                                  .pgid = stat->pgid,
+                                  .global_rank = read_process_grid_rank_from_environ(stat->pid)};
     adopted_children.push_back(child);
   }
 }
@@ -1250,6 +1313,39 @@ void start_finished_rank_cleanup(std::vector<ProcessGridRank> &ranks) {
   for (ProcessGridRank &rank : ranks)
     if (!rank.leader_running && rank.group_present && !rank.cleanup_started)
       begin_process_grid_rank_cleanup(rank, SIGTERM);
+}
+
+void start_adopted_process_grid_child_cleanup(
+    std::vector<ProcessGridRank> &ranks, std::vector<AdoptedProcessGridChild> &adopted_children,
+    bool terminating, int termination_signal,
+    std::optional<std::chrono::steady_clock::time_point> termination_started_at) {
+  const bool any_rank_leader_running = std::ranges::any_of(ranks, &ProcessGridRank::leader_running);
+  const auto now = std::chrono::steady_clock::now();
+  for (AdoptedProcessGridChild &child : adopted_children) {
+    if (!child.running || child.cleanup_started)
+      continue;
+
+    ProcessGridRank *owner = find_adopted_process_grid_child_owner(ranks, child);
+    if (terminating) {
+      const bool already_signaled =
+          owner != nullptr && owner->cleanup_started && child.pgid > 0 && child.pgid == owner->pgid;
+      begin_adopted_process_grid_child_cleanup_at(
+          child, termination_signal, termination_started_at.value_or(now), already_signaled);
+      continue;
+    }
+
+    if (owner != nullptr && !owner->leader_running) {
+      if (!owner->cleanup_started)
+        begin_process_grid_rank_cleanup(*owner, SIGTERM);
+      const bool already_signaled = child.pgid > 0 && child.pgid == owner->pgid;
+      begin_adopted_process_grid_child_cleanup_at(child, SIGTERM, owner->cleanup_started_at,
+                                                  already_signaled);
+      continue;
+    }
+
+    if (owner == nullptr && !any_rank_leader_running)
+      begin_adopted_process_grid_child_cleanup(child, SIGTERM);
+  }
 }
 
 void escalate_process_grid_cleanup(std::vector<ProcessGridRank> &ranks,
@@ -1330,11 +1426,16 @@ int wait_for_process_grid(std::vector<ProcessGridRank> ranks, const sigset_t &sh
                           int initial_exit_code = 0, int initial_shutdown_signal = 0) {
   int exit_code = initial_exit_code;
   bool terminating = false;
+  int termination_signal = SIGTERM;
+  std::optional<std::chrono::steady_clock::time_point> termination_started_at;
   std::vector<AdoptedProcessGridChild> adopted_children;
   auto begin_termination = [&](int signal) {
     if (terminating)
       return;
-    begin_process_grid_termination(ranks, adopted_children, signal);
+    const auto started_at = std::chrono::steady_clock::now();
+    termination_signal = signal;
+    termination_started_at = started_at;
+    begin_process_grid_termination(ranks, adopted_children, signal, started_at);
     terminating = true;
     refresh_process_grid_groups(ranks);
   };
@@ -1345,8 +1446,10 @@ int wait_for_process_grid(std::vector<ProcessGridRank> ranks, const sigset_t &sh
     if (reap_process_grid_children(ranks, adopted_children, exit_code))
       begin_termination(SIGTERM);
 
-    adopt_process_grid_children(ranks, adopted_children);
     start_finished_rank_cleanup(ranks);
+    adopt_process_grid_children(ranks, adopted_children);
+    start_adopted_process_grid_child_cleanup(ranks, adopted_children, terminating,
+                                             termination_signal, termination_started_at);
     refresh_process_grid_groups(ranks);
     escalate_process_grid_cleanup(ranks, adopted_children);
     refresh_process_grid_groups(ranks);

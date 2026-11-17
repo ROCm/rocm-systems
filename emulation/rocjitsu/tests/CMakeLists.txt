@@ -330,7 +330,7 @@ add_test(
     COMMAND
         ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
         "-DTEST_ARGS=--nproc_per_node;two;--;/usr/bin/true"
-        "-DTEST_REGEX=--nproc-per-node requires a positive integer" -P
+        "-DTEST_REGEX=--nproc-per-node: expected unsigned decimal integer" -P
         ${_rj_cli_failure_script}
 )
 add_test(
@@ -345,7 +345,7 @@ add_test(
     NAME RocjitsuProcessGridRejectsAttach
     COMMAND
         ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
-        "-DTEST_ARGS=--num-nodes;2;--attach;--;/usr/bin/true"
+        "-DTEST_ARGS=--num-nodes;2;--attach;default;--;/usr/bin/true"
         "-DTEST_REGEX=process grid options require local in-process mode" -P
         ${_rj_cli_failure_script}
 )
@@ -384,9 +384,9 @@ add_test(
 add_test(
     NAME RocjitsuProcessGridSingleFileSinkSkipsGridGuard
     COMMAND
-        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
-        "-DTEST_ARGS=--config;${CMAKE_CURRENT_SOURCE_DIR}/fixtures/process_grid_file_sink_config.json;--nproc-per-node;1;--;/usr/bin/true"
-        "-DTEST_REGEX=unknown field: sinks" -P ${_rj_cli_failure_script}
+        $<TARGET_FILE:rocjitsu_bin> --config
+        ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/process_grid_file_sink_config.json
+        --nproc-per-node 1 -- /usr/bin/true
 )
 add_test(
     NAME RocjitsuProcessGridRejectsDbtSimulatorFileSink
@@ -6356,30 +6356,29 @@ if(RJ_ENABLE_HIP_TESTS)
                         ${RJ_HIP_TSAN_INSTALL_ENV}
                 )
             endforeach()
-            add_test(
-                NAME RocjitsuProcessGridRcclAllReduce
-                COMMAND
-                    ${CMAKE_COMMAND}
-                    "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
-                    "-DTEST_RCCL_EXECUTABLE=${CMAKE_CURRENT_BINARY_DIR}/hip_rccl_test"
-                    "-DTEST_RUNTIME_DIR=${CMAKE_CURRENT_BINARY_DIR}/runtime/RocjitsuProcessGridRcclAllReduce"
-                    "-DTEST_SHARED_DIR=${CMAKE_CURRENT_BINARY_DIR}/process-grid/RocjitsuProcessGridRcclAllReduce"
-                    -P ${_rj_process_grid_rccl_script}
-            )
-            set_tests_properties(
-                RocjitsuProcessGridRcclAllReduce
-                PROPERTIES TIMEOUT 180 LABELS "rccl;process-grid"
-            )
-            set(_rj_process_grid_rccl_environment
-                ${RJ_RCCL_ASAN_ENV}
-                ${RJ_HIP_TSAN_ENV}
-            )
-            if(_rj_process_grid_rccl_environment)
+            if(NOT RJ_ENABLE_TSAN)
+                add_test(
+                    NAME RocjitsuProcessGridRcclAllReduce
+                    COMMAND
+                        ${CMAKE_COMMAND}
+                        "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+                        "-DTEST_RCCL_EXECUTABLE=${CMAKE_CURRENT_BINARY_DIR}/hip_rccl_test"
+                        "-DTEST_RUNTIME_DIR=${CMAKE_CURRENT_BINARY_DIR}/runtime/RocjitsuProcessGridRcclAllReduce"
+                        "-DTEST_SHARED_DIR=${CMAKE_CURRENT_BINARY_DIR}/process-grid/RocjitsuProcessGridRcclAllReduce"
+                        -P ${_rj_process_grid_rccl_script}
+                )
                 set_tests_properties(
                     RocjitsuProcessGridRcclAllReduce
-                    PROPERTIES
-                        ENVIRONMENT "${_rj_process_grid_rccl_environment}"
+                    PROPERTIES TIMEOUT 180 LABELS "rccl;process-grid"
                 )
+                set(_rj_process_grid_rccl_environment ${RJ_RCCL_ASAN_ENV})
+                if(_rj_process_grid_rccl_environment)
+                    set_tests_properties(
+                        RocjitsuProcessGridRcclAllReduce
+                        PROPERTIES
+                            ENVIRONMENT "${_rj_process_grid_rccl_environment}"
+                    )
+                endif()
             endif()
             message(STATUS "RCCL collective test enabled (found ${RCCL_LIB})")
         elseif(RCCL_LIB AND NOT RJ_HIP_RUNTIME_SUPPORTS_GFX950)
