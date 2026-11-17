@@ -486,8 +486,9 @@ make_trampoline_plan(const ResolvedInstrumentationSite &site, rocjitsu::IsaFamil
 ///
 /// Block decoding is lazy so the CFG is built on the first call that needs
 /// it (validate_points / find_instruction_at_offset). Structural facts are also
-/// lazy; queries and probe-free replacements without resource growth need no CFG
-/// or liveness. Mixed batches analyze the effective replacement program.
+/// lazy; queries and probe-free replacements without resource growth normally
+/// need no CFG or liveness. Sized RDNA4 function alignment requires the original
+/// CFG to qualify the gaps. Mixed batches analyze the effective replacement program.
 class Instrumentor {
 public:
   /// @param obj  The code object to instrument. Borrowed; must outlive the
@@ -534,7 +535,8 @@ public:
   [[nodiscard]] ValidationResult validate_points();
 
   /// @brief Full-source instruction, clause and direct-reference facts.
-  /// @details Performs shared structural admission without CFG ownership or liveness.
+  /// @details Performs shared structural admission, using the original CFG to
+  /// qualify sized RDNA4 function alignment when present. No liveness is required.
   /// Returns null and sets error on failure. The borrowed result must not outlive
   /// the last Instrumentor sharing these facts or the immutable, unmoved source.
   [[nodiscard]] const InstructionBoundaries *instruction_boundaries(TextEditError &error);

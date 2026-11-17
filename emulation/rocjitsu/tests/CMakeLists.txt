@@ -1333,6 +1333,7 @@ endif()
 # Host-only instruction replacement and checked-edit regressions use model ISA providers.
 add_executable(
     rocjitsu_text_edit_tests
+    amdgpu_elf_test_support.cpp
     patch/checked_text_edits_test.cpp
     patch/bi_edit_safety_test.cpp
     patch/instrumentor_replacement_test.cpp

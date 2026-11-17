@@ -642,6 +642,13 @@ void grow_text_function_symbols(std::vector<uint8_t> &image, const Elf64_Ehdr &e
   if (new_text_size <= old_text_size)
     return;
 
+  struct FunctionSymbol {
+    uint64_t file_offset;
+    uint64_t text_offset;
+    Elf64_Sym symbol;
+  };
+  std::vector<FunctionSymbol> functions;
+  uint64_t last_function_start = 0;
   const Elf64_Shdr &text = shdrs[text_index];
   for (const Elf64_Shdr &symtab : shdrs) {
     if (symtab.sh_type != SHT_SYMTAB && symtab.sh_type != SHT_DYNSYM)
@@ -661,33 +668,33 @@ void grow_text_function_symbols(std::vector<uint8_t> &image, const Elf64_Ehdr &e
         continue;
 
       // ET_DYN symbols use virtual addresses; ET_REL symbols use section
-      // offsets.  Normalize both forms so the range test below is independent
-      // of the input code-object kind.
+      // offsets. Normalize both forms before comparing function ranges.
       uint64_t symbol_text_offset = symbol.st_value;
       if (ehdr.e_type != ET_REL) {
         if (symbol.st_value < text.sh_addr)
           continue;
         symbol_text_offset = symbol.st_value - text.sh_addr;
       }
-      if (symbol_text_offset > old_text_size)
+      if (symbol_text_offset > old_text_size || symbol.st_size == 0 ||
+          symbol.st_size > old_text_size - symbol_text_offset)
         continue;
 
-      // The translator appends executable cave code after the original .text
-      // contents and branches into it from relocated instructions.  AMDGPU code
-      // objects often leave padding after the kernel function, so a valid input
-      // function symbol may not reach the old section end.  Any non-empty
-      // function body that starts in the translated .text can now reach appended
-      // cave code, so keep its extent covering those bytes for loaders and
-      // runtime tooling that consult FUNC ranges.
-      if (symbol.st_size == 0)
-        continue;
-
-      const uint64_t grown_size = new_text_size - symbol_text_offset;
-      if (symbol.st_size >= grown_size)
-        continue;
-      symbol.st_size = grown_size;
-      std::memcpy(image.data() + symbol_offset, &symbol, sizeof(symbol));
+      last_function_start = std::max(last_function_start, symbol_text_offset);
+      functions.push_back(
+          {.file_offset = symbol_offset, .text_offset = symbol_text_offset, .symbol = symbol});
     }
+  }
+
+  // ELF function extents are contiguous. Growing earlier functions would cover
+  // inter-function alignment and other bodies, so extend only the tail aliases.
+  for (FunctionSymbol &function : functions) {
+    if (function.text_offset != last_function_start)
+      continue;
+    const uint64_t grown_size = new_text_size - function.text_offset;
+    if (function.symbol.st_size >= grown_size)
+      continue;
+    function.symbol.st_size = grown_size;
+    std::memcpy(image.data() + function.file_offset, &function.symbol, sizeof(function.symbol));
   }
 }
 
@@ -1729,8 +1736,8 @@ bool CodeObjectPatcher::replace_text(
     return false;
   }
   // Instrumentation appends a cave without relocating the original body and
-  // therefore supplies no offset map. Preserve its historical function-range
-  // growth. DBT supplies exact starts/ends and gets precise relocated sizes.
+  // therefore supplies no offset map. Preserve earlier function boundaries while
+  // growing the tail. DBT supplies exact starts/ends and gets precise relocated sizes.
   if (text_relocations.empty())
     grow_text_function_symbols(image_, header, shdrs, *text_index, text_size_, new_text.size());
   text_size_ = new_text.size();

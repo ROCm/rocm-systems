@@ -3,6 +3,7 @@
 
 #include "rocjitsu/code/patch/instrumentor.h"
 
+#include "../amdgpu_elf_test_support.h"
 #include "../amdhsa_metadata_test_util.h"
 #include "../dbi_test_util.h"
 #include "replacement_test_util.h"
@@ -14,6 +15,7 @@
 #include "rocjitsu/code/builders/spill_builders.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
+#include "rocjitsu/code/text_padding.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/operand_types.h"
@@ -1811,6 +1813,227 @@ TEST(InstrumentorReplacement, FullTextFactsRetainClauseMembershipAcrossUnreachab
   ASSERT_TRUE(result.edit_error);
   EXPECT_EQ(result.edit_error->code, TextEditErrorCode::Clause);
   EXPECT_EQ(result.edit_error->offset, 12u);
+}
+
+std::vector<uint8_t> make_rdna4_function_alignment_elf(const std::vector<uint32_t> &words,
+                                                       size_t first_function_words = 1,
+                                                       size_t second_entry_word = 2,
+                                                       int foreign_kind = 0) {
+  std::vector<uint8_t> image =
+      test_support::make_minimal_amdgpu_elf_with_two_kernels_and_function_pointers(
+          words, second_entry_word,
+          {{.offset_word = 0, .words = first_function_words},
+           {.offset_word = 2, .words = words.size() - 2}});
+  Elf64_Ehdr header = {};
+  std::memcpy(&header, image.data(), sizeof(header));
+  header.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX1201;
+  std::memcpy(image.data(), &header, sizeof(header));
+  if (foreign_kind == 0)
+    return image;
+  std::optional<std::vector<Elf64_Shdr>> sections =
+      read_elf_table<Elf64_Shdr>(image, header.e_shoff, header.e_shnum, header.e_shentsize);
+  std::optional<std::vector<Elf64_Phdr>> segments =
+      read_elf_table<Elf64_Phdr>(image, header.e_phoff, header.e_phnum, header.e_phentsize);
+  if (!sections || !segments)
+    return {};
+  const std::vector<Elf64_Shdr>::iterator foreign =
+      std::ranges::find_if(*sections, [](const Elf64_Shdr &section) {
+        return section.sh_type == SHT_PROGBITS && (section.sh_flags & SHF_WRITE) != 0;
+      });
+  if (foreign == sections->end() || foreign->sh_size != 4 * sizeof(uint32_t))
+    return {};
+  foreign->sh_flags |= SHF_EXECINSTR;
+  for (Elf64_Phdr &segment : *segments)
+    if (segment.p_type == PT_LOAD && segment.p_offset == foreign->sh_offset)
+      segment.p_flags |= PF_X;
+  // This loaded slot now contains code, not the fixture's function pointers.
+  for (Elf64_Shdr &section : *sections)
+    if (section.sh_type == SHT_RELA)
+      section.sh_size = 0;
+  constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4;
+  const uint32_t end = build_s_endpgm(arch).value();
+  std::array<uint32_t, 4> foreign_words = {end, build_s_nop(0, arch).value(), end, end};
+  if (foreign_kind == 2)
+    foreign_words[1] = 0; // Same section-local offset as the proven .text gap.
+  if (foreign_kind == 3) {
+    const AmdGpuCodeObject source(image.data(), image.size());
+    if (!source.is_valid() || source.text_sections().size() != 1)
+      return {};
+    const int64_t displacement =
+        (static_cast<int64_t>(source.text_sections().front()->vaddr() + sizeof(uint32_t)) -
+         static_cast<int64_t>(foreign->sh_addr + sizeof(uint32_t))) /
+        static_cast<int64_t>(sizeof(uint32_t));
+    foreign_words[0] = build_s_branch(static_cast<int16_t>(displacement), arch).value();
+  }
+  std::memcpy(image.data() + foreign->sh_offset, foreign_words.data(), sizeof(foreign_words));
+  std::memcpy(image.data() + header.e_shoff, sections->data(),
+              sections->size() * sizeof(Elf64_Shdr));
+  std::memcpy(image.data() + header.e_phoff, segments->data(),
+              segments->size() * sizeof(Elf64_Phdr));
+  return image;
+}
+
+TEST(InstrumentorReplacement, SizedRdna4FunctionAlignmentSurvivesColdWarmQueryAndForkPaths) {
+  constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4;
+  const uint32_t end = build_s_endpgm(arch).value();
+  const uint32_t nop = build_s_nop(0, arch).value();
+  const uint32_t body = build_s_nop(1, arch).value();
+  const uint32_t call = build_s_call_b64(30, 1, arch).value();
+  for (const uint32_t first : {end, call}) {
+    SCOPED_TRACE(first);
+    const std::vector<uint8_t> image = make_rdna4_function_alignment_elf({first, 0, nop, nop, end});
+    const std::vector<uint8_t> pristine = image;
+    const AmdGpuCodeObject source(image.data(), image.size());
+    ASSERT_TRUE(source.is_valid());
+    for (int route = 0; route < 5; ++route) {
+      SCOPED_TRACE(route);
+      Instrumentor seed(source, arch);
+      TextEditError error;
+      if (route >= 3) {
+        seed.add_point_by_offset(12);
+        const Instrumentor::ValidationResult warmed = seed.validate_points();
+        ASSERT_TRUE(warmed.errors.empty()) << warmed.errors.front();
+        ASSERT_EQ(warmed.sites.size(), 1u);
+      }
+      const InstructionBoundaries *facts = nullptr;
+      if (route == 1 || route >= 3) {
+        facts = seed.instruction_boundaries(error);
+        ASSERT_NE(facts, nullptr) << error.message;
+        EXPECT_EQ(facts->find(4), nullptr);
+        EXPECT_NE(facts->find(8), nullptr);
+        EXPECT_EQ(seed.instruction_boundaries(error), facts);
+      }
+      std::unique_ptr<Instrumentor> child;
+      Instrumentor *batch = &seed;
+      if (route == 2 || route == 4) {
+        FailureOr<std::unique_ptr<Instrumentor>> fork = seed.fork(error);
+        ASSERT_TRUE(fork.succeeded()) << error.message;
+        child = std::move(fork).value();
+        batch = child.get();
+        if (facts != nullptr) {
+          EXPECT_EQ(batch->instruction_boundaries(error), facts);
+        }
+      }
+      batch->add_point(replacement_point(8, {nop}, {body}));
+      const Instrumentor::ValidationResult validated = batch->validate_points();
+      ASSERT_TRUE(validated.errors.empty()) << validated.errors.front();
+      const InstrumentedCodeObjectDebug result = batch->patch_with_debug_summaries();
+      ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+      ASSERT_EQ(result.sites.size(), route == 3 ? 2u : 1u);
+      const AmdGpuCodeObject candidate(result.elf_bytes.data(), result.elf_bytes.size());
+      ASSERT_TRUE(candidate.is_valid());
+      const TextAlignmentGaps output_gaps(candidate, arch);
+      EXPECT_TRUE(output_gaps.contains(4));
+      const std::unique_ptr<Decoder> decoder = Decoder::create(arch);
+      ASSERT_NE(decoder, nullptr);
+      const FailureOr<std::vector<std::unique_ptr<BasicBlock>>> decoded =
+          BasicBlock::build(candidate, *decoder, arch);
+      ASSERT_TRUE(decoded.succeeded());
+      const std::vector<uint32_t> output = test::section_words(candidate, ".text");
+      ASSERT_GT(output.size(), 5u);
+      EXPECT_EQ(output[1], 0u);
+      const std::vector<InstrumentedSite>::const_iterator replacement = std::ranges::find(
+          result.sites, InstrumentationKind::ReplaceWithInst, &InstrumentedSite::kind);
+      ASSERT_NE(replacement, result.sites.end());
+      EXPECT_EQ(replacement->original_offset, 8u);
+      EXPECT_EQ(replacement->guest_size, sizeof(uint32_t));
+      ASSERT_LT(replacement->guest_offset / sizeof(uint32_t), output.size());
+      EXPECT_EQ(output[replacement->guest_offset / sizeof(uint32_t)], body);
+      EXPECT_EQ(image, pristine);
+      EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
+    }
+  }
+}
+
+TEST(InstrumentorReplacement, Rdna4FunctionAlignmentDoesNotHideExecutableBytesOrReferences) {
+  constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4;
+  const uint32_t end = build_s_endpgm(arch).value();
+  const uint32_t nop = build_s_nop(0, arch).value();
+  const uint32_t ret = build_s_setpc_b64(30, arch).value();
+  struct Case {
+    std::vector<uint32_t> words;
+    size_t first_size = 1;
+    size_t entry = 2;
+    uint64_t anchor = 8;
+  };
+  const std::array<Case, 7> cases = {
+      Case{.words = {end, 0, nop, end}, .first_size = 2},
+      Case{.words = {nop, 0, nop, end}},
+      Case{.words = {build_s_branch(0, arch).value(), 0, nop, end}},
+      Case{.words = {end, 0, nop, end}, .entry = 1},
+      Case{.words = {end, 0, nop, end}, .anchor = 4},
+      Case{.words = {build_s_call_b64(30, 1, arch).value(), 0, nop, ret}},
+      Case{.words = {build_s_swappc_b64(30, 8, arch).value(), 0, nop, end}}};
+  for (size_t index = 0; index < cases.size(); ++index) {
+    SCOPED_TRACE(index);
+    const Case &test_case = cases[index];
+    const std::vector<uint8_t> image =
+        make_rdna4_function_alignment_elf(test_case.words, test_case.first_size, test_case.entry);
+    const std::vector<uint8_t> pristine = image;
+    const AmdGpuCodeObject source(image.data(), image.size());
+    ASSERT_TRUE(source.is_valid());
+    if (index == 3) {
+      Instrumentor warmed(source, arch);
+      warmed.add_point_by_offset(8);
+      const Instrumentor::ValidationResult eligible = warmed.validate_points();
+      ASSERT_TRUE(eligible.errors.empty()) << eligible.errors.front();
+      TextEditError error;
+      EXPECT_EQ(warmed.instruction_boundaries(error), nullptr);
+      EXPECT_NE(error.message.find("alignment"), std::string::npos) << error.message;
+      EXPECT_TRUE(warmed.fork(error).failed());
+    }
+    Instrumentor instrumentor(source, arch);
+    instrumentor.add_point(
+        replacement_point(test_case.anchor, {test_case.words[test_case.anchor / 4]}, {nop}));
+    const Instrumentor::ValidationResult validated = instrumentor.validate_points();
+    EXPECT_FALSE(validated.errors.empty());
+    EXPECT_TRUE(validated.sites.empty());
+    const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
+    expect_no_output(result);
+    EXPECT_TRUE(result.patches.empty());
+    if (index != 0 && index != 4) {
+      EXPECT_TRUE(std::ranges::any_of(result.errors, [](const std::string &message) {
+        return message.find("alignment") != std::string::npos;
+      }));
+    }
+    EXPECT_EQ(image, pristine);
+    EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
+  }
+}
+
+TEST(InstrumentorReplacement, TextFunctionAlignmentDoesNotApplyToForeignSectionOffsets) {
+  constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4;
+  const uint32_t end = build_s_endpgm(arch).value();
+  const uint32_t nop = build_s_nop(0, arch).value();
+  for (int foreign_kind = 1; foreign_kind <= 3; ++foreign_kind) {
+    SCOPED_TRACE(foreign_kind);
+    const std::vector<uint8_t> image =
+        make_rdna4_function_alignment_elf({end, 0, nop, end}, 1, 2, foreign_kind);
+    const std::vector<uint8_t> pristine = image;
+    const AmdGpuCodeObject source(image.data(), image.size());
+    ASSERT_TRUE(source.is_valid());
+    Instrumentor instrumentor(source, arch);
+    TextEditError error;
+    const InstructionBoundaries *facts = instrumentor.instruction_boundaries(error);
+    if (foreign_kind == 1) {
+      ASSERT_NE(facts, nullptr) << error.message;
+    } else {
+      EXPECT_EQ(facts, nullptr) << "foreign executable bytes/references must fail source queries";
+      EXPECT_NE(error.message.find(foreign_kind == 2 ? "executable section" : "alignment"),
+                std::string::npos)
+          << error.message;
+    }
+    instrumentor.add_point(replacement_point(8, {nop}, {build_s_nop(1, arch).value()}));
+    const InstrumentedCodeObject result = instrumentor.patch();
+    if (foreign_kind == 1) {
+      ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+      EXPECT_EQ(result.sites.size(), 1u);
+    } else {
+      expect_no_output(result);
+    }
+    EXPECT_EQ(image, pristine);
+    EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
+  }
 }
 
 TEST(InstrumentorReplacement, ForkBatchesCheckDescriptorEntriesBeforePublishingAnySite) {

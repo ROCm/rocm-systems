@@ -226,6 +226,16 @@ FailureOr<TextEditReferences> CheckedTextEdits::collect_references(
                   "decoded index extends outside source text");
   if (boundaries.reference_overflow())
     return reject(error, TextEditErrorCode::UnsupportedReferences, "branch reference overflows");
+  for (const uint64_t entry : kernel_entries) {
+    if (alignment_gaps.contains(entry))
+      return reject(error, TextEditErrorCode::UnsupportedReferences,
+                    "kernel entry points into alignment", entry);
+  }
+  for (const uint64_t address : boundaries.reference_addresses()) {
+    if (address >= text.vaddr() && alignment_gaps.contains(address - text.vaddr()))
+      return reject(error, TextEditErrorCode::UnsupportedReferences, "branch targets alignment",
+                    address - text.vaddr());
+  }
   // Fixed addresses preserve text references only at retained boundaries. A
   // symbol start/end in a replaced literal would become a new instruction entry.
   for (const Elf64_Shdr &section : sections) {
