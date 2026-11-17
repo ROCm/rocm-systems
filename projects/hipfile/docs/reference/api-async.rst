@@ -23,25 +23,26 @@ of bytes transferred, or a negative value if the transfer failed. Synchronize
 the stream before you read the result, and keep the pointer arguments valid
 until then. If a call returns an error, nothing was queued.
 
-Registering a stream with ``hipFileStreamRegister()`` is optional. The first
-asynchronous request on a stream that isn't registered registers it implicitly,
-with no flags. Registering a stream that was registered implicitly applies the
-new flags to later requests.
+Registering a stream with ``hipFileStreamRegister()`` is optional and only an
+optimization. Asynchronous I/O on an unregistered stream runs the transfer
+without registering it, on the blocking path described below; register the
+stream to get the faster wait-value-gated path.
 
 How a transfer runs depends on the stream and the device:
 
-Streams on devices that support stream wait values
+Registered streams on devices that support stream wait values
    hipFile hands the transfer to an internal thread pool and makes the stream
    wait for it to finish, so later work on the stream still runs after the
    transfer. Transfers on different streams can run at the same time, and
    queuing a request never waits for the stream, so you can hold a stream with
    your own wait value, queue requests, and release it afterward.
 
-Streams on devices that don't support stream wait values
+Unregistered streams, and registered streams on devices without stream wait values
    The transfer runs in stream order inside a stream host function that waits
    for it to finish. The ROCm runtime runs host functions on a single thread, so
    these transfers run one at a time and delay host functions queued on other
-   streams.
+   streams. Register a stream on a wait-value-capable device for the faster path
+   above.
 
 The null stream and ``hipStreamPerThread``
    The call runs synchronously: it synchronizes the stream, runs the transfer,
@@ -51,11 +52,11 @@ The null stream and ``hipStreamPerThread``
    and keep the pointer arguments valid until the call returns, so the same code
    works on any stream.
 
-Deregister every stream you use for asynchronous I/O, including streams that
-were registered implicitly, before you destroy it. Otherwise a new stream that
-reuses the handle could pick up the old stream's state.
-``hipFileStreamDeregister()`` synchronizes the stream before it frees the
-stream's resources, so it waits for the stream's transfers in flight.
+Deregister every stream you registered with ``hipFileStreamRegister()`` before
+you destroy it. ``hipFileStreamDeregister()`` synchronizes the stream before it
+frees the stream's resources, so it waits for the stream's transfers in flight.
+A stream you used for asynchronous I/O without registering it holds no hipFile
+state and needs no deregistration.
 
 hipFile reserves the device's greatest stream priority for the streams its
 fallback path copies data on. A stream at that priority could hold up those
