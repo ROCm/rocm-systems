@@ -122,13 +122,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
 
   // LL lines carry per-step flags, so skip waiting on peer stores; connFifo sends keep the fence for the proxy.
   inline __device__ void stepBarrier() {
-#if RCCL_STORE_FREE_STEP_BARRIER
-    if (!fifoSend) {
-      storeFreeStepBarrier(nthreads, threadsPerBlock, barrier_next, barriers);
-      return;
-    }
-#endif
-    barrier();
+    if (!storeFreeStepBarrier(fifoSend, nthreads, threadsPerBlock, barrier_next, barriers)) barrier();
   }
 
   int abort = 0;

@@ -57,28 +57,37 @@
   } while (0)
 
 // LL and LL128 step barriers order LDS only instead of waiting for the step's stores to the peer
-// (see storeFreeStepBarrier()). -DRCCL_STORE_FREE_STEP_BARRIER=0 restores the full-fence barriers.
-#ifndef RCCL_STORE_FREE_STEP_BARRIER
-#if defined(__gfx1250__) || defined(__gfx1250_strict__)
+// (see storeFreeStepBarrier()). Configure with -DENABLE_STORE_FREE_STEP_BARRIER=OFF to keep the full-fence barriers.
+#if (defined(__gfx1250__) || defined(__gfx1250_strict__)) && !defined(RCCL_DISABLE_STORE_FREE_STEP_BARRIER)
 #define RCCL_STORE_FREE_STEP_BARRIER 1
 #else
 #define RCCL_STORE_FREE_STEP_BARRIER 0
 #endif
-#endif
 
-#if RCCL_STORE_FREE_STEP_BARRIER
-// Orders LDS between the waves, but does not wait for their global or peer stores to complete. Only valid
-// where the receiver validates every line by its per-step flag and nothing publishes a tail for a proxy.
-inline __device__ void storeFreeStepBarrier(int nthreads, int threadsPerBlock, uint64_t& barrier_next,
+// Runs an LL or LL128 step barrier that orders LDS between the waves but does not wait for their global or peer
+// stores to complete. Returns false where the caller must run its full-fence barrier instead: other architectures,
+// and sends with a connFifo, whose proxy acts on a tail. Only valid where the receiver validates every line by its
+// per-step flag. The fences do not wait for outstanding loads (no s_wait_loadcnt), so every wave must use each value
+// it loaded from the step's slots before it arrives: the head store after the end-of-step barrier hands the slot
+// back to the upstream GPU, which can then overwrite a load still in flight.
+inline __device__ bool storeFreeStepBarrier(bool fifoSend, int nthreads, int threadsPerBlock, uint64_t& barrier_next,
                                             uint64_t* barriers) {
+#if RCCL_STORE_FREE_STEP_BARRIER
+  if (fifoSend) return false;
   if (nthreads != WARP_SIZE) {
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
     barrier_generic_ordered(__atomic_signal_fence(__ATOMIC_SEQ_CST), nthreads, barrier_next, barriers, __ATOMIC_RELAXED,
                             __ATOMIC_RELAXED);
     __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
   }
+  return true;
+#else
+  (void)fifoSend, (void)nthreads, (void)threadsPerBlock, (void)barrier_next, (void)barriers;
+  return false;
+#endif
 }
 
+#if RCCL_STORE_FREE_STEP_BARRIER
 inline __device__ bool anySendConnFifo(struct ncclDevChannel* channel, int const* sendPeers, int nsend, int connIndex) {
   bool fifo = false;
   for (int i = 0; i < nsend; i++) fifo |= channel->peers[sendPeers[i]]->send[connIndex].connFifo != nullptr;

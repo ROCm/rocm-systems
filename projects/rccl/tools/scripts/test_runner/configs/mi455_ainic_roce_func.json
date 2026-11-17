@@ -3507,6 +3507,36 @@
         }
       ]
     },
+    "p2p_ll_step_barrier": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 8,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 600,
+      "description": "Ring LL and LL128 collectives over P2P with per-rank, per-iteration input. On gfx1250 these sends use the store-free step barrier. The DDA, direct, symmetric and TDM switches are cached per process, so they are set before launch.",
+      "env_variables": {
+        "RCCL_LL128_FORCE_ENABLE": "1",
+        "RCCL_DDA_ENABLE": "0",
+        "RCCL_DIRECT_ALLGATHER_DISABLE": "1",
+        "RCCL_DIRECT_REDUCE_SCATTER_DISABLE": "1",
+        "RCCL_SYM_K_MAX_BYTES": "0",
+        "RCCL_TDM_LL128_ENABLE": "0"
+      },
+      "tests": [
+        {
+          "name": "LlStepBarrier_RingLl128OverP2p",
+          "description": "Ring/LL128 AllReduce, ReduceScatter and AllGather over P2P; a line read before its data landed shows up as a wrong element",
+          "test_filter": "LlStepBarrierMPITest.RingLl128OverP2pMatchesPerIterationInput"
+        },
+        {
+          "name": "LlStepBarrier_RingLlOverP2p",
+          "description": "Ring/LL AllReduce, ReduceScatter and AllGather over P2P; a line read before its data landed shows up as a wrong element",
+          "test_filter": "LlStepBarrierMPITest.RingLlOverP2pMatchesPerIterationInput"
+        }
+      ]
+    },
     "ubr_multi_node": {
       "extends": "default",
       "is_gtest": true,
@@ -6594,6 +6624,12 @@
       "name": "NET LL128 connFifo Fence - 8-Rank",
       "description": "Ring/LL128 AllReduce with P2P and SHM disabled so every hop goes through the network proxy, single node",
       "config": "net_ll128_post_send_fence",
+      "enabled": true
+    },
+    {
+      "name": "P2P LL/LL128 Step Barrier - 8-Rank",
+      "description": "Ring LL and LL128 collectives over P2P with data checks, single node",
+      "config": "p2p_ll_step_barrier",
       "enabled": true
     },
     {
