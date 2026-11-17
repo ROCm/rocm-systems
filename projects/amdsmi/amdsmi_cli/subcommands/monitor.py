@@ -49,7 +49,7 @@ class MonitorCommands:
             temperature (bool, optional): Value override for args.temperature. Defaults to None.
             base_board_temps (bool, optional): Value override for args.base_board_temps. Defaults to None.
             gpu_board_temps (bool, optional): Value override for args.gpu_board_temps. Defaults to None.
-            gfx (bool, optional): Value override for args.gfx. Defaults to None.
+            gfx_util (bool, optional): Value override for args.gfx. Defaults to None.
             mem_util (bool, optional): Value override for args.mem. Defaults to None.
             encoder (bool, optional): Value override for args.encoder. Defaults to None.
             decoder (bool, optional): Value override for args.decoder. Defaults to None.
