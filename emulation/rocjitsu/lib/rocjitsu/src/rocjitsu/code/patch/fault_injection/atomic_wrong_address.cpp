@@ -61,10 +61,11 @@ bool atomic_instruction(std::string_view form) {
   if (flat_like_atomic(form) || form.starts_with("scratch_atomic") ||
       form.starts_with("buffer_atomic") || form.starts_with("s_atomic"))
     return true;
-  constexpr std::array<std::string_view, 18> ds_prefixes = {
-      "ds_add",   "ds_sub",       "ds_rsub",     "ds_inc",      "ds_dec",       "ds_min",
-      "ds_max",   "ds_and",       "ds_or",       "ds_xor",      "ds_mskor",     "ds_cmpstore",
-      "ds_cmpst", "ds_storexchg", "ds_condxchg", "ds_cond_sub", "ds_sub_clamp", "ds_pk_add"};
+  constexpr std::array<std::string_view, 19> ds_prefixes = {
+      "ds_add",      "ds_sub",       "ds_rsub",   "ds_inc",       "ds_dec",
+      "ds_min",      "ds_max",       "ds_and",    "ds_or",        "ds_xor",
+      "ds_mskor",    "ds_cmpstore",  "ds_cmpst",  "ds_storexchg", "ds_condxchg",
+      "ds_cond_sub", "ds_sub_clamp", "ds_pk_add", "ds_wrxchg"};
   return std::ranges::any_of(ds_prefixes,
                              [&](std::string_view prefix) { return form.starts_with(prefix); });
 }
@@ -178,7 +179,8 @@ FailureOr<AtomicInventory> discover_atomic_wrong_address(const FaultMutationCont
   const std::span<const uint8_t> image = context.image();
   for (const BasicBlock *block : facts.blocks) {
     for (const Instruction &instruction : block->instructions()) {
-      if (!atomic_instruction(instruction.mnemonic()))
+      if (instruction.amdgpu_memory_kind() != amdgpu::MemoryKind::Atomic &&
+          !atomic_instruction(instruction.mnemonic()))
         continue;
       const uint64_t offset = instruction.src_loc();
       const uint32_t size = instruction.size();
@@ -227,7 +229,7 @@ FailureOr<AtomicInventory> discover_atomic_wrong_address(const FaultMutationCont
       record->source_bytes.emplace(offset, std::move(original));
       record->sites.push_back({.offset = offset,
                                .instruction_size = size,
-                               .form = instruction.mnemonic(),
+                               .form = std::string(instruction.mnemonic()),
                                .byte_offset = byte_offset,
                                .address_supported = supported,
                                .affected_owners = std::move(affected)});
