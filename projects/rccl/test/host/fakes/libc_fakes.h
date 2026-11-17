@@ -120,6 +120,7 @@ extern std::function<DIR*(const char*)> g_opendir;
 extern std::function<struct dirent*(DIR*)> g_readdir;
 extern std::function<int(DIR*)> g_closedir;
 extern std::function<ssize_t(const char*, char*, size_t)> g_readlink;
+extern std::function<ssize_t(int, const char*, char*, size_t)> g_readlinkat;
 extern std::function<int(int, unsigned long, void*)> g_ioctl;
 extern std::function<int(void (*)(void))> g_atexit;
 extern std::function<int(clockid_t, struct timespec*)> g_clockGettime;
