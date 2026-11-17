@@ -22,7 +22,7 @@ deviceLib:
     <<: *level_default
     tags: [bitops, P0]
   Unit_popc:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [bitops, P0]
   Unit_ldg:
     level: [*level_0, *level_default]
@@ -145,10 +145,10 @@ deviceLib:
     <<: *level_default
     tags: [misc, P0]
   Unit_kernel_trigger:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [math, P0]
   Unit_ToAndFroMemCpyToDevice:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [memory, P0]
   Unit_TestIncludeMathPreciseFloat:
     <<: *level_default
@@ -157,7 +157,7 @@ deviceLib:
     <<: *level_default
     tags: [math, P0]
   Unit_hipMemcpyToSymbolAsync_ToNFrom:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [misc, P0]
   Unit_hipGetSymbolAddressAndSize_Validation:
     <<: *level_default
@@ -181,7 +181,7 @@ deviceLib:
     <<: *level_default
     tags: [misc, P0]
   Unit_hipTrigDeviceFunc_Double:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [misc, P0]
   Unit_TestDevice_DoublePrecisionMathFunc:
     <<: *level_default
@@ -295,7 +295,7 @@ deviceLib:
     <<: *level_default
     tags: [atomics]
   Unit_fp16_arith:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [types, P0]
   Unit_fp162_arith:
     <<: *level_default
@@ -397,7 +397,7 @@ deviceLib:
     level: [*level_0, *level_default]
     tags: [types]
   Unit_all_fp4_from_double_device:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [types]
   Unit_all_fp4_from_interger_data:
     <<: *level_default

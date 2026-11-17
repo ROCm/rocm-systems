@@ -1,7 +1,7 @@
 ---
 complex:
   Unit_Device_Complex_Unary_Device_Sanity_Positive:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [deviceLib, types]
   Unit_Device_Complex_Unary_Host_Sanity_Positive:
     <<: *level_default

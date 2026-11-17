@@ -84,7 +84,7 @@ executionctx:
   Unit_hipExecutionCtxWaitEvent_RecordedOnPlainStream:
     <<: *level_default
   Unit_hipExecutionCtxResourceSplit_Sanity:
-    level: [*level_0, *level_default]
+    <<: *level_default
   Unit_hipExecutionCtxResourceSplit_By_Count_Sanity:
     <<: *level_default
   Unit_hipExecutionCtxResourceSplit_Negative:
@@ -103,7 +103,7 @@ executionctx:
       targets: [nvidia_linux]
       reason: "AIRUNTIME-2744 - fails on nvidia_linux. Needs re-triage."
   Unit_hipExecutionCtxSmAlignment_DeviceGetDevResource:
-    level: [*level_0, *level_default]
+    <<: *level_default
   Unit_hipExecutionCtxSmAlignment_StreamGetDevResource:
     <<: *level_default
   Unit_hipExecutionCtxSmAlignment_PropagatesThroughSplit:
@@ -117,7 +117,7 @@ executionctx:
   Unit_hipDeviceGetExecutionCtx_MultiDevice:
     <<: *level_default
   Unit_hipDeviceGetExecutionCtx_GetDevice_RoundTrip:
-    level: [*level_0, *level_default]
+    <<: *level_default
   Unit_hipDeviceGetExecutionCtx_GetId:
     <<: *level_default
   Unit_hipDeviceGetExecutionCtx_Negative:
@@ -127,7 +127,7 @@ executionctx:
   Unit_hipDeviceGetExecutionCtx_PrimaryCtx_Persistence:
     <<: *level_default
   Unit_hipStreamGetDevResource_GreenCtxStream_Functional:
-    level: [*level_0, *level_default]
+    <<: *level_default
   Unit_hipStreamGetDevResource_RegularStream_Functional:
     <<: *level_default
   Unit_hipStreamGetDevResource_Negative:

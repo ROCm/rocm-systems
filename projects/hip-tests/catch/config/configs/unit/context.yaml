@@ -2,10 +2,10 @@
 context:
   Unit_hipDeviceGetPCIBusId_Functional: *level_default
   Unit_hipDrvMemcpy_Functional:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [memory, transfer]
   Unit_hipMemsetD8_Functional:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [memory, memset]
   Unit_hipDevicePrimaryCtxSetFlags_Negative: *level_default
   Unit_hipDeviceAPIs_not_supported: *level_default
@@ -15,5 +15,5 @@ context:
   Unit_hipCtxAPIs_not_supported: *level_default
   Unit_hipDevicePrimaryCtxGetState_Negative: *level_default
   Unit_hipSetDevice_CheckPrimaryCtxState:
-    level: [*level_0, *level_default]
+    <<: *level_default
   Unit_hipCtxDestroy_WithoutCreate_Negative: *level_default
