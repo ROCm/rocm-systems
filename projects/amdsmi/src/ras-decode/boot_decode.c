@@ -457,7 +457,7 @@ JsonValue* decode_boot_controller_generic_v1(OamBootMsg* msg) {
   uint8_t byte7 = extract_byte(msg->value, 7);
 
   char* boot_step_str = create_hex_string(byte4, 2);
-  uint32_t boot_status = ((uint32_t)byte7 << 24) | (byte6 << 16) | (byte5 << 8) | byte0;
+  uint32_t boot_status = (uint32_t)((byte7 << 24) | (byte6 << 16) | (byte5 << 8) | byte0);
   char* boot_status_str = create_hex_string(boot_status, 8);
 
   json_object_set(result, "error_type",
@@ -488,7 +488,7 @@ JsonValue* decode_data_abort_v1(OamBootMsg* msg) {
   uint8_t byte7 = extract_byte(msg->value, 7);
 
   char* boot_step_str = create_hex_string(byte3, 2);
-  uint32_t exception_addr = ((uint32_t)byte7 << 24) | (byte6 << 16) | (byte5 << 8) | byte4;
+  uint32_t exception_addr = (uint32_t)((byte7 << 24) | (byte6 << 16) | (byte5 << 8) | byte4);
   char* exception_addr_str = create_hex_string(exception_addr, 8);
 
   json_object_set(result, "error_type",
@@ -518,7 +518,7 @@ JsonValue* decode_boot_success_v1(OamBootMsg* msg) {
   uint8_t byte7 = extract_byte(msg->value, 7);
 
   char* boot_step_str = create_hex_string(byte4, 2);
-  uint32_t boot_status = ((uint32_t)byte7 << 24) | (byte6 << 16) | (byte5 << 8) | byte0;
+  uint32_t boot_status = (uint32_t)((byte7 << 24) | (byte6 << 16) | (byte5 << 8) | byte0);
   char* boot_status_str = create_hex_string(boot_status, 8);
 
   json_object_set(result, "error_type", json_create_string(RAS_DECODE_ERROR_TYPE_BOOT_SUCCESS));
@@ -556,7 +556,7 @@ JsonValue* decode_unhandled_error_v1(OamBootMsg* msg) {
   uint8_t byte7 = extract_byte(msg->value, 7);
 
   char* boot_step_str = create_hex_string(byte4, 2);
-  uint32_t boot_status = ((uint32_t)byte7 << 24) | (byte6 << 16) | (byte5 << 8) | byte0;
+  uint32_t boot_status = (uint32_t)((byte7 << 24) | (byte6 << 16) | (byte5 << 8) | byte0);
   char* boot_status_str = create_hex_string(boot_status, 8);
 
   json_object_set(result, "error_type", json_create_string(RAS_DECODE_ERROR_TYPE_UNHANDLED));
