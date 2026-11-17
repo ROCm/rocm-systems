@@ -428,7 +428,7 @@ TEST(ExecutionPluginTest, Gfx11IndexedGdsUsesOneLaneForInputsAndResults) {
   }
 }
 
-TEST(ExecutionPluginTest, Gfx115CompareUsesAllocatedSourcesAndTheSimdPredicate) {
+TEST(ExecutionPluginTest, Gfx115CompareUsesAllocatedSources) {
   Wave32PluginFixture f(ROCJITSU_CODE_ARCH_RDNA3_5);
   ASSERT_TRUE(f.cu);
   auto *observer = f.attach_ordering_plugin();
@@ -453,15 +453,9 @@ TEST(ExecutionPluginTest, Gfx115CompareUsesAllocatedSourcesAndTheSimdPredicate) 
         f.cu->write_vgpr(base + 20, 0, 0x40000000);
         wave->set_trapsts(0);
         observer->events.clear();
-        amdgpu::ScopedSimdFastPathTracker tracker;
         ASSERT_TRUE(f.cu->execute_instruction(inst.value().get(), *wave).succeeded());
         EXPECT_EQ(wave->vcc(), 1u);
         EXPECT_EQ(wave->trapsts() & 1u, 1u);
-        if (scalar || !util::has_stdx_simd)
-          EXPECT_TRUE(tracker.no_tracked_path_executed());
-        else
-          EXPECT_TRUE(
-              tracker.only_tracked_path_executed(amdgpu::SimdFastPath::VOPC_COMPARE_STATUS));
         const auto reads = vgpr_read_events(*observer);
         ASSERT_EQ(reads.size(), 2u);
         EXPECT_EQ(reads[0].physical_reg, base);

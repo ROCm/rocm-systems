@@ -301,3 +301,42 @@ def test_tru_alias_is_cdna_only(prefix):
             context(arch, prefix + '_TRU_F32', ['d'], ['a', 'b'], is_vop3=True)
         )
         assert (body is None) == (arch == 'rdna2')
+
+
+@pytest.mark.parametrize('name', [n for n in FLOAT_COMPARISONS if '_TRU_' not in n])
+def test_gfx1150_comparison_bindings_own_signaling_policy(name):
+    bits, constant = FLOAT_COMPARISONS[name]
+    api = 'rj_arith_' + name.lower()
+    for vop3 in (False, True):
+        body = gen_float_compare(
+            context(
+                'rdna3_5',
+                name,
+                ['dst'] if vop3 else [],
+                ['a', 'b'],
+                is_vop3=vop3,
+                result_writer='commit_result' if vop3 else None,
+            )
+        )
+        assert f'{api}_w32_gfx1150, {api}_w64_gfx1150,' in body
+        assert f'execute_float_compare<{bits}>' in body
+        assert 'RJ_ARITH_FP_DX10_CLAMP_OFF' in body
+        assert '/*observe_full_exec=*/false' in body
+        assert ('RJ_ARITH_SEMANTICS_COMPATIBILITY' in body) == constant
+        assert ('RJ_ARITH_ALU_HIGH_A' in body) == (bits == 16 and vop3)
+        assert 'execute_compare_with_exceptions' not in body
+        if name.startswith('V_CMPX_'):
+            assert 'wf.set_vcc_mask' not in body
+
+
+@pytest.mark.parametrize('encoding', ['vopc', 'vop3'])
+def test_gfx1150_compare_translation_units_include_the_bridge_directly(encoding):
+    source = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/rdna3_5'
+        / f'{encoding}_exec.cpp'
+    ).read_text()
+    assert (
+        '#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_compare_exec.h"' in source
+    )
+    assert 'signaling_compare.h' not in source
