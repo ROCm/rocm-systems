@@ -1852,8 +1852,7 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2D_LargeBatch) {
  * ------------------------
  * - Verifies a batch that becomes more SDMA operations than the device-memory signal ring holds
  *   (16 x ROC_SIGNAL_POOL_SIZE). Each source is copied to two destinations, so every source is
- *   its own broadcast operation. Runs the child test case in a process with
- *   DEBUG_CLR_DEV_SIGNALS=1, which is read at HIP init.
+ *   its own broadcast operation.
  * Test source
  * ------------------------
  * - catch/unit/memory/hipMemcpyBatchAsync.cc
@@ -1861,25 +1860,13 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2D_LargeBatch) {
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2D_ManyBroadcasts_DeviceSignals) {
-  hip::SpawnProc proc(getSelfExePath());
-  proc.setEnv("DEBUG_CLR_DEV_SIGNALS", "1");
-  REQUIRE(proc.run("Unit_hipMemcpyBatchAsync_D2D_ManyBroadcasts_DeviceSignals_Child") == 0);
-}
-
-/**
- * Child of Unit_hipMemcpyBatchAsync_D2D_ManyBroadcasts_DeviceSignals, not meant to run on its own.
- */
-HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2D_ManyBroadcasts_DeviceSignals_Child) {
-  const char* devSignals = std::getenv("DEBUG_CLR_DEV_SIGNALS");
-  if (devSignals == nullptr || std::string(devSignals) != "1") {
-    HIP_SKIP_TEST("Only run by Unit_hipMemcpyBatchAsync_D2D_ManyBroadcasts_DeviceSignals.");
-  }
-
-  // Twice the ring's 1024 signals at the default ROC_SIGNAL_POOL_SIZE.
-  constexpr size_t kSources = 2048;
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2D_ManyBroadcasts) {
+  // Twice the ring's 16 x ROC_SIGNAL_POOL_SIZE signals (default pool 64).
+  const char* poolEnv = std::getenv("ROC_SIGNAL_POOL_SIZE");
+  const size_t pool = poolEnv != nullptr ? std::max(std::strtoul(poolEnv, nullptr, 10), 1ul) : 64;
+  const size_t kSources = 2 * 16 * pool;
   constexpr size_t kDstsPerSource = 2;
-  constexpr size_t kCopyCount = kSources * kDstsPerSource;
+  const size_t kCopyCount = kSources * kDstsPerSource;
   constexpr size_t kCopySize = 64;
 
   StreamGuard stream_guard(Streams::created);
