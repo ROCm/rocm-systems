@@ -6,11 +6,13 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -1589,7 +1591,6 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_MixedDirections_BackToBack) {
   }
 }
 
-#if HT_AMD
 namespace {
 // Lets a host function block its stream until the host opens the gate
 struct HostFuncGate {
@@ -1597,12 +1598,29 @@ struct HostFuncGate {
   int passed = 0;
 };
 
+// A host that never opens the gate must not keep the stream, and the process, stuck for good
+constexpr int kGateDeadlineSeconds = 60;
+
 void HoldUntilGateOpens(void* arg) {
   auto* gate = static_cast<HostFuncGate*>(arg);
-  while (__atomic_load_n(&gate->open, __ATOMIC_ACQUIRE) == 0) {
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(kGateDeadlineSeconds);
+  while (__atomic_load_n(&gate->open, __ATOMIC_ACQUIRE) == 0 &&
+         std::chrono::steady_clock::now() < deadline) {
   }
   __atomic_store_n(&gate->passed, 1, __ATOMIC_RELEASE);
 }
+
+// Opens the gate and releases the spinning kernels when the test leaves, also through a failed
+// check, so that the streams can drain before their guards destroy them
+struct ReleaseOnExit {
+  HostFuncGate* gate;
+  int* release;
+  ~ReleaseOnExit() {
+    __atomic_store_n(&gate->open, 1, __ATOMIC_RELEASE);
+    __atomic_store_n(release, 1, __ATOMIC_RELEASE);
+  }
+};
 __global__ void NopKernel() {}
 
 // Runs batches whose shader copy waits on the stream's prior work behind other streams' spin
@@ -1658,11 +1676,14 @@ void RunQueuedShaderWaitBackToBack(const bool launch_barriers) {
   const long long timeout_ticks =
       static_cast<long long>(kWatchdogSeconds) * 1000000 * SpinTicksPerUs();
   HostFuncGate gate;
+  ReleaseOnExit release_on_exit{&gate, release.ptr()};
   HIP_CHECK(hipDeviceSynchronize());
 
+  std::chrono::steady_clock::time_point spin_start;
   for (size_t iteration = 0; iteration < kIterations; ++iteration) {
     if (iteration == kHeldIteration) {
       HIP_CHECK(hipLaunchHostFunc(stream_guard.stream(), HoldUntilGateOpens, &gate));
+      spin_start = std::chrono::steady_clock::now();
       for (StreamGuard& spin_stream : spin_streams) {
         WaitForHostReleaseWithTimeout<<<1, 1, 0, spin_stream.stream()>>>(release.ptr(),
                                                                          timeout_ticks);
@@ -1688,15 +1709,35 @@ void RunQueuedShaderWaitBackToBack(const bool launch_barriers) {
       // Completes the prior work only after the batch waits on it, then lets the copy engine copy
       // finish before the stream's signals wrap around
       __atomic_store_n(&gate.open, 1, __ATOMIC_RELEASE);
-      while (__atomic_load_n(&gate.passed, __ATOMIC_ACQUIRE) == 0) {
+      const auto deadline =
+          std::chrono::steady_clock::now() + std::chrono::seconds(kGateDeadlineSeconds);
+      while (__atomic_load_n(&gate.passed, __ATOMIC_ACQUIRE) == 0 &&
+             std::chrono::steady_clock::now() < deadline) {
       }
+      REQUIRE(__atomic_load_n(&gate.passed, __ATOMIC_ACQUIRE) == 1);
     }
     HIP_CHECK(batch_status);
   }
+  const double held_seconds =
+      std::chrono::duration<double>(std::chrono::steady_clock::now() - spin_start).count();
   __atomic_store_n(release.ptr(), 1, __ATOMIC_RELEASE);
   HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+  // A stream that hangs on a re-armed signal fails the check below after the deadline
+  const auto sync_deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(2 * kWatchdogSeconds);
+  hipError_t stream_status = hipStreamQuery(stream_guard.stream());
+  while (stream_status == hipErrorNotReady && std::chrono::steady_clock::now() < sync_deadline) {
+    std::this_thread::yield();
+    stream_status = hipStreamQuery(stream_guard.stream());
+  }
+  INFO("The stream did not complete within " << 2 * kWatchdogSeconds << " s of the release");
+  HIP_CHECK(stream_status);
   HIP_CHECK(hipDeviceSynchronize());
+  // The spin kernels end by themselves after the watchdog, which releases the held waits early and
+  // lets the test pass without the case it is meant to cover
+  INFO("The batches were queued for " << held_seconds << " s, more than the spin kernels' "
+                                      << kWatchdogSeconds << " s watchdog allows");
+  REQUIRE(held_seconds < kWatchdogSeconds);
 
   const size_t last_pattern_idx = (kIterations - 1) % kNumPatterns;
   for (size_t copy_idx = 0; copy_idx < copies.size(); ++copy_idx) {
@@ -1751,7 +1792,6 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Mixed_QueuedShaderWait_BackToBack) {
 HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Mixed_QueuedShaderWait_OtherStreamBarriers) {
   RunQueuedShaderWaitBackToBack(true);
 }
-#endif
 
 /**
  * Test Description
