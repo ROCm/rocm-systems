@@ -3,6 +3,7 @@
 
 // Tests for scalar bitfield extraction, insertion, and mask generation.
 
+#include "rj_arith/detail/rj_arith_scalar.h"
 #include "scalar/integer_helpers.h"
 
 // Check integer results and SCC against the supplied scalar reference.

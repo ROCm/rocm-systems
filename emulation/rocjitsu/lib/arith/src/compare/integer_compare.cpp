@@ -7,10 +7,10 @@
 // Comparisons follow rocjitsu's execute_v_cmp_* integer models.
 
 #include "compare/integer_compare.h"
-#include "common/internal.h"
+#include "common/validation.h"
 #include "compare/predicate.h"
 #include "register/dpp.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_compare.h"
 
 #include <stdint.h>
 

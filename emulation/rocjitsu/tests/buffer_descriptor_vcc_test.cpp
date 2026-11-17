@@ -35,6 +35,7 @@
 namespace {
 
 using namespace rocjitsu;
+constexpr uint32_t kRdnaFormat32 = 20u << 12; // V# word3 FORMAT = BUF_FMT_32_UINT
 
 TEST(RdnaAddrCalcTest, BufferDescriptorCanSpanSgprsAndVccWithoutReadingAdjacentWave) {
   for (auto arch :
@@ -63,7 +64,8 @@ TEST(RdnaAddrCalcTest, BufferDescriptorCanSpanSgprsAndVccWithoutReadingAdjacentW
     // Adjacent storage has zero NUM_RECORDS; the real bound lives in VCC_LO.
     cu->write_sgpr(next->sgpr_alloc().base, 0);
     cu->write_sgpr(next->sgpr_alloc().base + 1, 0);
-    wf->set_vcc_raw(arch == ROCJITSU_CODE_ARCH_CDNA5 ? 0 : (uint64_t{3u << 28} << 32) | 16);
+    wf->set_vcc_raw(
+        arch == ROCJITSU_CODE_ARCH_CDNA5 ? 0 : (uint64_t{(3u << 28) | kRdnaFormat32} << 32) | 16);
     amdgpu::VectorMemState state(amdgpu::GLOBAL_MEM);
     state.elem_size = 4;
     state.num_elems = 1;

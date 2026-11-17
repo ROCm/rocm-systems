@@ -14,10 +14,10 @@ use crate::ffi::{
 use std::ffi::{c_char, c_void};
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_ext_program_create")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Returns `NOT_INITIALIZED` because the legacy finalizer is unavailable.
 pub extern "C" fn hsa_ext_program_create(
     _machine_model: u32,
@@ -30,20 +30,20 @@ pub extern "C" fn hsa_ext_program_create(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_ext_program_destroy")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Returns `NOT_INITIALIZED` because the legacy finalizer is unavailable.
 pub extern "C" fn hsa_ext_program_destroy(_program: HsaExtProgram) -> Status {
     NOT_INITIALIZED
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_ext_program_add_module")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Returns `NOT_INITIALIZED` because the legacy finalizer is unavailable.
 pub extern "C" fn hsa_ext_program_add_module(
     _program: HsaExtProgram,
@@ -53,10 +53,10 @@ pub extern "C" fn hsa_ext_program_add_module(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_ext_program_iterate_modules")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Returns `NOT_INITIALIZED` because the legacy finalizer is unavailable.
 pub extern "C" fn hsa_ext_program_iterate_modules(
     _program: HsaExtProgram,
@@ -67,10 +67,10 @@ pub extern "C" fn hsa_ext_program_iterate_modules(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_ext_program_get_info")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Returns `NOT_INITIALIZED` because the legacy finalizer is unavailable.
 pub extern "C" fn hsa_ext_program_get_info(
     _program: HsaExtProgram,
@@ -81,10 +81,10 @@ pub extern "C" fn hsa_ext_program_get_info(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_ext_program_finalize")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Returns `NOT_INITIALIZED` because the legacy finalizer is unavailable.
 pub extern "C" fn hsa_ext_program_finalize(
     _program: HsaExtProgram,

@@ -30,29 +30,37 @@ HOSTS = {
 }
 
 
-def validate_host(processor: str, host: str) -> None:
-    expected = HOSTS.get(processor.lower())
+def validate_host(processor: str, host: str, system: str = "Linux") -> None:
+    if system == "Windows":
+        expected = "x86_64-pc-windows-msvc" if processor.lower() in ("x86_64", "amd64") else None
+    elif system == "Linux":
+        expected = HOSTS.get(processor.lower())
+    else:
+        expected = None
     if expected is None or host != expected:
         raise ValueError(
             f"Rust host {host} does not match native CMake target {processor}"
         )
 
 
-def rust_flags(environment: dict[str, str], compiler: str) -> str:
+def rust_flags(environment: dict[str, str], compiler: str, system: str = "Linux") -> str:
     # Cargo's encoded form separates arguments with ASCII unit separators.
     # Preserve that form; otherwise tokenize the conventional RUSTFLAGS.
     encoded = environment.get("CARGO_ENCODED_RUSTFLAGS")
     flags = encoded.split("\x1f") if encoded else []
     if encoded is None:
-        flags = shlex.split(environment.get("RUSTFLAGS", ""))
+        # Cargo's conventional Windows RUSTFLAGS use whitespace separation.
+        # Use the encoded form for an argument containing spaces.
+        value = environment.get("RUSTFLAGS", "")
+        flags = value.split() if system == "Windows" else shlex.split(value)
     # HSA symbol aliases require LLD for cdylibs and Rust test executables.
     flags += [
         "--print=native-static-libs",
         "-C",
         f"linker={compiler}",
-        "-C",
-        "link-arg=-fuse-ld=lld",
     ]
+    if system == "Linux":
+        flags += ["-C", "link-arg=-fuse-ld=lld"]
     return "\x1f".join(flags)
 
 
@@ -89,7 +97,7 @@ def main() -> None:
     parser.add_argument("--cargo-config", default="")
     parser.add_argument("--jobs", default="")
     args = parser.parse_args()
-    if args.system != "Linux":
+    if args.system not in ("Linux", "Windows"):
         raise ValueError(
             f"Rust linker/environment setup is not implemented for {args.system}"
         )
@@ -111,7 +119,9 @@ def main() -> None:
         "CARGO_TARGET_DIR": str(args.binary / "cargo"),
         "CARGO_NET_OFFLINE": "true",
         "PATH": str(args.lld.parent) + os.pathsep + os.environ.get("PATH", ""),
-        "CARGO_ENCODED_RUSTFLAGS": rust_flags(dict(os.environ), str(args.compiler)),
+        "CARGO_ENCODED_RUSTFLAGS": rust_flags(
+            dict(os.environ), str(args.lld if args.system == "Windows" else args.compiler), args.system
+        ),
     }
     if args.jobs:
         environment["CARGO_BUILD_JOBS"] = args.jobs
@@ -136,7 +146,7 @@ def main() -> None:
         raise ValueError(
             f"Provision Rust {version} before configuring; got:\n{rust_info}"
         )
-    validate_host(args.processor, fields["host"])
+    validate_host(args.processor, fields["host"], args.system)
     environment["CARGO_BUILD_TARGET"] = fields["host"]
     cargo_info = output([args.cargo, "--version"])
     if cargo_info.split()[:2] != ["cargo", version]:

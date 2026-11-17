@@ -136,10 +136,10 @@ protected:
         return ethernet;
     }
 
-    // Another valid entry of the same port carrying the same address under a different RoCE type
-    // (the v1/v2 twin), i.e. a GID reindex that keeps the port reachable. The port is the one whose
-    // table holds the cached GID at the cached index, since ncclNetProperties_t::port is not a sysfs
-    // port for VF siblings.
+    // Another RoCE v2 entry of the same port carrying the same address, i.e. a
+    // GID reindex that keeps the routed data path reachable. The port is the one
+    // whose table holds the cached GID at the cached index, since
+    // ncclNetProperties_t::port is not a sysfs port for VF siblings.
     bool FindTwinGid(const ncclIbGidState& real, ncclIbGidState* twin, std::string* why) {
         if (real.linkLayer != IBV_LINK_LAYER_ETHERNET) return *why = "not RoCE", false;
         const std::string portsDir = SysfsPortsDir(real.ibDev);
@@ -157,23 +157,20 @@ protected:
         }
         closedir(dir);
         if (port.empty()) return *why = "cached GID not found in " + portsDir, false;
-        std::string realType;
-        if (!ReadSysfsLine(port + "/gid_attrs/types/" + std::to_string(real.gidIndex), &realType))
-            return *why = "no RoCE type for GID index " + std::to_string(real.gidIndex), false;
         for (int i = 0; i < kMaxGidTableEntries; i++) {
             if (i == real.gidIndex) continue;
             std::string text, type;
             uint8_t gid[16];
             if (!ReadSysfsLine(port + "/gids/" + std::to_string(i), &text)) break;
             if (!ParseGidText(text.c_str(), gid) || memcmp(gid, real.gid, sizeof(gid)) != 0) continue;
-            if (!ReadSysfsLine(port + "/gid_attrs/types/" + std::to_string(i), &type) || type.empty() ||
-                type == realType)
+            if (!ReadSysfsLine(port + "/gid_attrs/types/" + std::to_string(i), &type)
+                || type != "RoCE v2")
                 continue;
             *twin = real;
             twin->gidIndex = i;
             return true;
         }
-        return *why = "no " + realType + " twin in " + port, false;
+        return *why = "no alternate RoCE v2 GID in " + port, false;
     }
 
     bool FindTwinGidOnAllRanks(const ncclIbGidState& real, ncclIbGidState* twin) {
@@ -181,6 +178,21 @@ protected:
         const bool found = FindTwinGid(real, twin, &why);
         if (!found) printf("[   INFO   ] rank %d: no twin GID for ibDev %d: %s\n", MPIEnvironment::world_rank, real.ibDev, why.c_str());
         return AllRanks(found);
+    }
+
+    // With NCCL_IB_RESILIENCY_PORT_RECOVERY=1 every net_ib connect creates UC port recovery QPs,
+    // so a NIC without UC (bnxt_re) fails the connect itself. Collective.
+    bool NetIbRecoveryLacksUc() {
+        if (T().net != &ncclNetIb) return false;
+        const char* recoveryEnv = getenv("NCCL_IB_RESILIENCY_PORT_RECOVERY");
+        bool ok = true;
+        if (recoveryEnv && strcmp(recoveryEnv, "1") == 0) {
+            for (int dev = 0; dev < GetPhysicalDeviceCount(); dev++) {
+                int uc = 0;
+                ok = ok && ncclIbGidUcSupported(dev, &uc) == ncclSuccess && uc == 1;
+            }
+        }
+        return !AllRanks(ok);
     }
 
     bool ProbingUsesGidIndex(void* comm, int devIndex, int gidIndex) {
@@ -268,18 +280,21 @@ TEST_P(NetIbGidChangeTest, GidChangeEventRefreshesDeviceCache) {
     EXPECT_TRUE(AllRanks(ok));
 }
 
-// Connect takes the GID from the device cache: with the cache moved to the v1/v2 twin index, the
-// comm snapshot and every QP of the new connection use the twin.
+// Connect takes the GID from the device cache: with the cache moved to an
+// alternate same-address RoCE v2 index, the comm snapshot and every QP of the
+// new connection use that index.
 TEST_P(NetIbGidChangeTest, ConnectSnapshotsDeviceCache) {
     SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses, false, kMinGpusPerNode, kNoNodeLimit);
     const int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
+    if (NetIbRecoveryLacksUc()) GTEST_SKIP() << "net_ib port recovery is enabled and the NIC cannot create UC QPs";
 
     ncclIbGidState real = {}, expected = {};
     ASSERT_EQ(T().getDev(0, &real), ncclSuccess);
     real.ibDev = 0;
     DevGidGuard guard(T(), 0, real);
-    if (!FindTwinGidOnAllRanks(real, &expected)) GTEST_SKIP() << "Requires a RoCE v1/v2 twin GID on device 0";
+    if (!FindTwinGidOnAllRanks(real, &expected))
+        GTEST_SKIP() << "Requires an alternate same-address RoCE v2 GID on device 0";
     EXPECT_EQ(T().setDev(0, &expected), ncclSuccess);
 
     void* listenComm = nullptr;
@@ -318,6 +333,11 @@ TEST_P(NetIbGidChangeTest, PortRecoveryRefreshesStaleCommGid) {
     const int rank = MPIEnvironment::world_rank;
     int totalDevs = 0;
     AssertInitAndGetDevices(&totalDevs);
+    if (NetIbRecoveryLacksUc()) GTEST_SKIP() << "net_ib port recovery needs UC QPs, which the NIC cannot create";
+    if (T().net == &netIbCast) {
+        RECOVERY_UD_OR_SKIP();
+        FAILOVER_RDMA_READ_OR_SKIP();
+    }
     const int mergedDev = CreateMergedDevicePair(totalDevs);
     if (mergedDev < 0) GTEST_SKIP() << "Requires NIC Fusion (ndevs >= 2), found " << totalDevs;
 

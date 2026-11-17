@@ -120,6 +120,7 @@ test_categories:
       - "DdaAllReduceFabricLL.*"
       - "RasDiagnostics.*"
       - "ProfilerApiEventRank.*"
+      - "Diagnostics.*"
     exclude_windows:
       - "*"
     labels:

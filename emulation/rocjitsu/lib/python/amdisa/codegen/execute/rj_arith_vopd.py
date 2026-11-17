@@ -80,6 +80,12 @@ def gen_vopd_execution(
             args += ', condition'
         if not integer:
             args += ', state'
+        if arch == 'rdna4' and name == 'v_dual_mul_f32':
+            lines += [
+                '  if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY)',
+                '    return amdgpu::arith::gfx12_compat_dual_mul(',
+                '        wf, flags, exec_mask, result, a.data, b.data, state);',
+            ]
         lines += [f'  return {wave_api(api, 32)}({args});', '}']
         cases.append('\n'.join(lines))
     return (
