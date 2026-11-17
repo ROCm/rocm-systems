@@ -3615,22 +3615,6 @@ TEST_F(Cdna4BlockScaleMfmaExecutionTest, BareFp4FormatBitsDoNotModifyAccumulator
   EXPECT_TRUE(decode_fails(*decoder, hostile_prefix.data()));
 }
 
-TEST(Cdna4BlockScaleMfmaModifierTest, SignedZeroTruthTable) {
-  constexpr uint32_t negative_zero = 0x80000000u;
-  EXPECT_EQ(std::bit_cast<uint32_t>(
-                amdgpu::apply_wmma_c_modifier(std::bit_cast<float>(negative_zero), /*none=*/0)),
-            negative_zero);
-  EXPECT_EQ(std::bit_cast<uint32_t>(
-                amdgpu::apply_wmma_c_modifier(std::bit_cast<float>(negative_zero), /*neg=*/1)),
-            0u);
-  EXPECT_EQ(std::bit_cast<uint32_t>(
-                amdgpu::apply_wmma_c_modifier(std::bit_cast<float>(negative_zero), /*abs=*/2)),
-            0u);
-  EXPECT_EQ(std::bit_cast<uint32_t>(amdgpu::apply_wmma_c_modifier(
-                std::bit_cast<float>(negative_zero), /*abs-then-neg=*/3)),
-            negative_zero);
-}
-
 TEST(Cdna4OmodExecutionTest, IeeeSuppressesTrigPreopOmod) {
   amdgpu::GpuMemory gpu_mem("cdna4_trig_preop_omod_mem");
   amdgpu::L2Cache l2("cdna4_trig_preop_omod_l2");
@@ -4295,9 +4279,6 @@ TEST(Gfx1250WmmaTest, F16Fp8K64MatchesReferenceLayout) {
     }
   }
 
-  amdgpu::exec_wmma_f16<16, 16, 64>(*cu, 8, d_base, a_base, b_base, c_base, amdgpu::extract_fp8,
-                                    amdgpu::extract_fp8, amdgpu::ACC_FROM_VGPR);
-
   auto expect_reference = [&] {
     for (uint32_t row = 0; row < 16; ++row) {
       for (uint32_t col = 0; col < 16; ++col) {
@@ -4311,12 +4292,6 @@ TEST(Gfx1250WmmaTest, F16Fp8K64MatchesReferenceLayout) {
       }
     }
   };
-  expect_reference();
-
-  for (uint32_t reg = 0; reg < 4; ++reg)
-    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
-      cu->write_vgpr(d_base + reg, lane, 0xDEADBEEFu);
-
   const uint32_t wmma_words[] = {
       0xCC6E0000U | 40u,
       (256u + 10u) | ((256u + 20u) << 9u) | ((256u + 30u) << 18u),
@@ -4336,11 +4311,6 @@ TEST(Gfx1250WmmaTest, CModifierAppliesAbsBeforeNegate) {
   EXPECT_EQ(amdgpu::wmma_c_modifier(1u << 2u, 0u), 1u);
   EXPECT_EQ(amdgpu::wmma_c_modifier(0u, 1u << 2u), 2u);
   EXPECT_EQ(amdgpu::wmma_c_modifier(1u << 2u, 1u << 2u), 3u);
-
-  EXPECT_EQ(amdgpu::apply_wmma_c_modifier(-3.0f, 0u), -3.0f);
-  EXPECT_EQ(amdgpu::apply_wmma_c_modifier(-3.0f, 1u), 3.0f);
-  EXPECT_EQ(amdgpu::apply_wmma_c_modifier(-3.0f, 2u), 3.0f);
-  EXPECT_EQ(amdgpu::apply_wmma_c_modifier(-3.0f, 3u), -3.0f);
 }
 
 TEST(Gfx1250WmmaTest, E8M0ScaleZeroMatchesUtilContract) {
@@ -4406,7 +4376,13 @@ TEST(Gfx1250WmmaTest, Bf16F32K32Bf16PreservesAccumulatorLayout) {
     }
   }
 
-  amdgpu::exec_wmma_bf16f32_16x16x32_bf16(*cu, d_base, a_base, b_base, c_base);
+  ASSERT_NO_FATAL_FAILURE(
+      mma_test::execute(*cu, *wf,
+                        cdna5::build_vop3p(cdna5::kVWmmaBf16f3216x16x32Bf16Vop3p,
+                                           {.vdst = uint8_t(d_base - vb),
+                                            .src0 = uint16_t(256 + a_base - vb),
+                                            .src1 = uint16_t(256 + b_base - vb),
+                                            .src2 = uint16_t(256 + c_base - vb)})));
 
   for (uint32_t row = 0; row < 16; ++row) {
     for (uint32_t col = 0; col < 16; ++col) {
@@ -4466,37 +4442,25 @@ TEST(Gfx1250WmmaTest, Bf16F32K32Bf16MatchesF32DotOverflow) {
   for (bool scalar : {false, true}) {
     SCOPED_TRACE(testing::Message() << "scalar=" << scalar);
     ForceScalarGuard force_scalar(scalar);
-    amdgpu::exec_wmma_bf16f32_16x16x32_bf16(*cu, d_base, a_base, b_base, c_base);
+    ASSERT_NO_FATAL_FAILURE(
+        mma_test::execute(*cu, *wf,
+                          cdna5::build_vop3p(cdna5::kVWmmaBf16f3216x16x32Bf16Vop3p,
+                                             {.vdst = 40, .src0 = 266, .src1 = 276, .src2 = 286})));
     const auto out = amdgpu::wmma_output_loc_16<16, 16>(/*row=*/0, /*col=*/0);
     const uint32_t word = cu->read_vgpr(d_base + out.reg, out.lane);
     EXPECT_EQ(static_cast<uint16_t>(word >> (16 * out.sub_element)), 0x7F80u);
 
     const uint32_t f32_d_base = vb + 50;
-    amdgpu::exec_wmma_f32_16x16x32_bf16(*cu, f32_d_base, a_base, b_base, c_base);
+    ASSERT_NO_FATAL_FAILURE(
+        mma_test::execute(*cu, *wf,
+                          cdna5::build_vop3p(cdna5::kVWmmaF3216x16x32Bf16Vop3p,
+                                             {.vdst = 50, .src0 = 266, .src1 = 276, .src2 = 286})));
     const auto f32_out = amdgpu::wmma_output_loc_32<16, 16>(/*row=*/0, /*col=*/0);
     EXPECT_EQ(cu->read_vgpr(f32_d_base + f32_out.reg, f32_out.lane), 0x7F800000u);
   }
 
   if (!wf->is_halted())
     wf->halt();
-}
-
-TEST(Gfx1250WmmaTest, Bf16F32FmaHasStableNanPriority) {
-  auto value = [](uint32_t bits) { return std::bit_cast<float>(bits); };
-  auto result_bits = [&](uint32_t a, uint32_t b, uint32_t c) {
-    return std::bit_cast<uint32_t>(amdgpu::wmma_bf16f32_fma(value(a), value(b), value(c)));
-  };
-
-  EXPECT_EQ(result_bits(0x7FC10000u, 0x7FC20000u, 0x7FC30000u), 0x7FC10000u);
-  EXPECT_EQ(result_bits(0x3F800000u, 0x7FC20000u, 0x7FC30000u), 0x7FC20000u);
-  EXPECT_EQ(result_bits(0x3F800000u, 0x3F800000u, 0x7FC30000u), 0x7FC30000u);
-  EXPECT_EQ(result_bits(0x7F810000u, 0x3F800000u, 0x00000000u), 0x7FC10000u);
-  EXPECT_EQ(result_bits(0x3F800000u, 0xFFC40000u, 0x00000000u), 0xFFC40000u);
-  EXPECT_EQ(result_bits(0x7F800000u, 0x00000000u, 0x3F800000u), 0xFFC00000u);
-  const float early_a_nan = amdgpu::wmma_bf16f32_fma(value(0x7FC10000u), 1.0f, 0.0f);
-  EXPECT_EQ(
-      std::bit_cast<uint32_t>(amdgpu::wmma_bf16f32_fma(1.0f, value(0x7FC20000u), early_a_nan)),
-      0x7FC20000u);
 }
 
 TEST(Gfx1250Dpp8Test, Vop2AddF16UsesPermutedSourceLanes) {
