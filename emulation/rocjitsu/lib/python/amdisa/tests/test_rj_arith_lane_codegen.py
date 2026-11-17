@@ -11,7 +11,11 @@ from pathlib import Path
 import pytest
 
 
-from amdisa.codegen.execute.rj_arith_lane import LANE_NAMES, gen_lane
+from amdisa.codegen.execute.rj_arith_lane import (
+    LANE_NAMES,
+    LANE_ARCHITECTURES,
+    gen_lane,
+)
 
 
 def context(arch, name, dst, src):
@@ -52,7 +56,7 @@ def test_lane_family_uses_rj_arith_without_optional_state(name):
         )
     )
     sources = ['a', 'b', 'c'][:count]
-    for arch in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5'):
+    for arch in LANE_ARCHITECTURES:
         destinations = (
             ['d', 'a'] if name.startswith('V_PERMLANE') and '_SWAP_' in name else ['d']
         )
@@ -63,7 +67,7 @@ def test_lane_family_uses_rj_arith_without_optional_state(name):
         assert 'amdgpu::arith::execute_' in body
         assert 'arithmetic_flags()' in body
         assert 'arithmetic_reports_fp_status' not in body
-    assert gen_lane(context('cdna2', name, ['d'], sources)) is None
+    assert gen_lane(context('unknown', name, ['d'], sources)) is None
     assert gen_lane(context('rdna4', name, [], sources)) is None
 
 

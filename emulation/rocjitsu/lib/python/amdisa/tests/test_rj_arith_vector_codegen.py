@@ -830,3 +830,35 @@ def test_gfx942_half_multiply_forwards_sdwa_clamp():
     )
     assert 'inst_.src0 == amdgpu::SRC_SDWA && sdwa_clamp_' in body
     assert 'rj_arith_v_mul_lo_u16_w64_gfx942' in body
+
+
+def test_gfx1150_half_conditional_keeps_selected_half_controls():
+    body = gen_vector32(
+        context('rdna3_5', 'V_CNDMASK_B16', ['d'], ['a', 'b', 'mask'], True)
+    )
+    assert 'execute_conditional<true>' in body
+    assert 'RJ_ARITH_ALU_HIGH_A' in body and 'RJ_ARITH_ALU_HIGH_D' in body
+    assert 'read_wave_mask_scalar(mask, wf)' in body
+    assert (
+        gen_vector32(
+            context('rdna3_5', 'V_CNDMASK_B32', ['d'], ['a', 'b', 'mask'], True)
+        )
+        is not None
+    )
+
+
+@pytest.mark.parametrize('arch', ['cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5'])
+@pytest.mark.parametrize('vop3', [False, True])
+def test_older_word_routing_reuses_apis_without_enabling_neighboring_arithmetic(
+    arch, vop3
+):
+    move = gen_vector32(context(arch, 'V_MOV_B32', ['d'], ['a'], vop3))
+    sources = ['a', 'b', 'mask'] if vop3 else ['a', 'b']
+    select = gen_vector32(context(arch, 'V_CNDMASK_B32', ['d'], sources, vop3))
+    assert ('rj_arith_v_mov_b32_w64,' if vop3 else 'execute_move32') in move
+    assert 'inst_.abs' not in move and 'inst_.neg' not in move
+    assert 'rj_arith_v_cndmask_b32_w32,' in select
+    assert 'rj_arith_v_cndmask_b32_w64,' in select
+    assert ('read_wave_mask_scalar(mask, wf)' in select) == vop3
+    assert ('inst_.abs' in select) == vop3
+    assert gen_vector32(context(arch, 'V_AND_B32', ['d'], ['a', 'b'], vop3)) is None

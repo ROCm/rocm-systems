@@ -408,7 +408,6 @@ def _flush_input_then(fmt: str, functor: str) -> str:
 
 SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
     # --- bitwise / move (uint32, bit-identical) ---
-    'v_mov_b32_vop1': ('uint32_t', 'uint32_t', '[](auto a) { return a; }'),
     'v_accvgpr_mov_b32_vop1': ('uint32_t', 'uint32_t', '[](auto a) { return a; }'),
     'v_not_b32_vop1': ('uint32_t', 'uint32_t', '[](auto a) { return ~a; }'),
     # RDNA3+ 16-bit move / not / int16<->int32 conversions (low-16, zero-extend
@@ -1050,19 +1049,6 @@ SIMD_CVT_B32_TO_F64: dict[str, tuple[str, str]] = {
 }
 
 
-# template_name set for v_cndmask_b32 (VCC-driven per-lane select). No functor:
-# the op is fixed (dst = (VCC bit) ? vsrc1 : src0), a pure 32-bit bit select, so
-# the SIMD result is bit-identical to the scalar body for every input.
-SIMD_VOP2_CNDMASK: set[str] = {
-    'v_cndmask_b32_vop2',
-}
-
-# VOP3 form of v_cndmask_b32: same per-lane select, but the 64-bit selector is
-# read from the SGPR-pair `src2` instead of VCC. Also fixed-op / functorless.
-SIMD_VOP3_CNDMASK: set[str] = {
-    'v_cndmask_b32_vop3',
-}
-
 # VOP3 div_fmas: fused FMA and VCC-controlled scaling, rounded once using
 # the guest mode. Fixed-op / functorless.
 SIMD_VOP3_DIV_FMAS_FP32: set[str] = {
@@ -1216,13 +1202,6 @@ SIMD_VOP3P_PK_TERNARY_F32: dict[str, str] = {
     'v_pk_fma_f32_vop3p': (
         '[&wf](auto a, auto b, auto c) { return amdgpu::fma_f32_simd_unscoped(a, b, c, wf); }'
     ),
-}
-
-# v_pk_mov_b32 — each src is a 64-bit SGPR or VGPR pair. op_sel[0] selects the
-# low output dword from src0 and op_sel[1] selects the high output dword from
-# src1. The fast path is limited to the assembler's default op_sel_hi value.
-SIMD_VOP3P_MOV_B32: set[str] = {
-    'v_pk_mov_b32_vop3p',
 }
 
 # VOP3P integer dot products. dst is a single 32-bit lane (not packed) and
@@ -2581,10 +2560,6 @@ def _simd_probe_line(
         return f'  ROCJITSU_TRY_SIMD_PACKED_FLOAT({op}, {str(bf16).lower()});'
     if template_name in SIMD_VOP3_TRUE16_UNSAFE:
         return None
-    if template_name in SIMD_VOP2_CNDMASK:
-        return '  ROCJITSU_TRY_SIMD_VOP2_CNDMASK();'
-    if template_name in SIMD_VOP3_CNDMASK:
-        return '  ROCJITSU_TRY_SIMD_VOP3_CNDMASK();'
     spec2 = SIMD_VOP2_BINARY.get(template_name)
     if spec2 is not None:
         cpp_t, cpp_op = spec2
@@ -2805,8 +2780,6 @@ def _simd_probe_line(
     specpkf32t = SIMD_VOP3P_PK_TERNARY_F32.get(template_name)
     if specpkf32t is not None:
         return f'  ROCJITSU_TRY_SIMD_VOP3P_PK_TERNARY_F32({specpkf32t});'
-    if template_name in SIMD_VOP3P_MOV_B32:
-        return '  ROCJITSU_TRY_SIMD_VOP3P_MOV_B32();'
     # VOP3P integer dot products (dot4 i8/u8, dot8 i4/u4, dot2 i16/u16).
     specdot = SIMD_VOP3P_DOT_INT.get(template_name)
     if specdot is not None:
@@ -3326,18 +3299,6 @@ def _local_coverage_probe(
         if template_name in ('v_not_b16_vop3', 'v_mov_b16_vop3'):
             expression = '~a' if 'not' in template_name else 'a'
             return call(1, True, 1, f'[](auto a) {{ return {expression}; }}')
-        if template_name == 'v_cndmask_b16_vop3':
-            return call(
-                2,
-                True,
-                3,
-                '[&](auto a, auto b, uint32_t base) { '
-                'a = amdgpu::source_modifier::apply<amdgpu::fp_format::F16>(a, 0, inst.inst_.abs, inst.inst_.neg); '
-                'b = amdgpu::source_modifier::apply<amdgpu::fp_format::F16>(b, 1, inst.inst_.abs, inst.inst_.neg); '
-                'const uint64_t mask = amdgpu::read_wave_mask_scalar(inst.src2, wf); '
-                'util::native<uint32_t> choose([&](auto i) { return uint32_t((mask >> (base + i)) & 1u); }); '
-                'util::stdx::where(choose != 0u, a) = b; return a; }',
-            )
     if e32:
         if template_name in SIMD_VOP1_UNARY:
             tin, tout, op = SIMD_VOP1_UNARY[template_name]

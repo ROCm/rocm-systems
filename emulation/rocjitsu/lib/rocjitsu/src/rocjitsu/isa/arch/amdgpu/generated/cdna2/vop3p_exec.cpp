@@ -8,6 +8,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/vop3p.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_vector_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -250,7 +251,10 @@ void VPkAddF32Vop3p::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VPkMovB32Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_mov_b32_vop3p(*this, wf);
+  amdgpu::arith::execute_pair_move<true>(wf,
+                                         ((inst_.op_sel & 1) ? RJ_ARITH_PK_LO_A_HIGH : 0u) |
+                                             ((inst_.op_sel & 2) ? RJ_ARITH_PK_LO_B_HIGH : 0u),
+                                         vdst, src0, &src1);
 }
 
 void VAccvgprReadVop3p::execute_impl(amdgpu::Wavefront &wf) {

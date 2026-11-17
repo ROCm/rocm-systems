@@ -4,7 +4,7 @@
 """Packed math execute body generators.
 
 Free functions that emit C++ execute_impl bodies for packed 16-bit
-instructions (V_PK_ADD_F16, etc.), packed F32 instructions,
+instructions (V_PK_ADD_F16, etc.), packed F32 instructions, mad_mix,
 dot product instructions, and V_PK_MOV_B32.
 
 The opsel_exprs parameter carries the C++ expressions for op_sel and
@@ -53,8 +53,11 @@ def _append_pk16_src_reads(
     constant. F16 and DOT operands retain their separate narrowing rules.
     Narrowing is keyed on the source-selector field rather than the operand,
     so a 32-bit literal
-    (selector 255) keeps its value even when that value lands in 240..248.
-    The narrowed inline pattern occupies the low half of the packed pair.
+    (selector 255) keeps its value even when that value lands in 240..248 --
+    the same keying read_mix_src uses in the mad_mix bodies below. The
+    narrowed pattern goes in the low half only; read_mix_src instead returns
+    it for either half, because a mad_mix source is one scalar whose half
+    op_sel picks, not a packed v2 pair.
 
     pk16_src_needs_narrowing also declines a source that is declared 16 bits
     wide, because Operand::read_lane already resolved that one through the
@@ -303,7 +306,58 @@ def gen_pk_ternary(
             )
             L.append('  }')
             return '\n'.join(L)
-        raise ValueError(f'packed FP16 ternary fallback does not support {op}')
+        if op == 'fma':
+            for name, raw, selector in (
+                ('a_lo', 'raw0', 'sel0_lo'),
+                ('b_lo', 'raw1', 'sel1_lo'),
+                ('c_lo', 'raw2', 'sel2_lo'),
+                ('a_hi', 'raw0', 'sel0_hi'),
+                ('b_hi', 'raw1', 'sel1_hi'),
+                ('c_hi', 'raw2', 'sel2_hi'),
+            ):
+                L.append(
+                    f'    uint16_t {name} = static_cast<uint16_t>({selector} ? ({raw} >> 16) : {raw});'
+                )
+            L.append(
+                '    uint16_t rlo = amdgpu::fp_mode::fma_f16(a_lo, b_lo, c_lo, false, false, false, inst_.neg & 1u, inst_.neg & 2u, inst_.neg & 4u, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), 0, inst_.clamp, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf), amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));'
+            )
+            L.append(
+                '    uint16_t rhi = amdgpu::fp_mode::fma_f16(a_hi, b_hi, c_hi, false, false, false, inst_.neg_hi & 1u, inst_.neg_hi & 2u, inst_.neg_hi & 4u, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), 0, inst_.clamp, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf), amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));'
+            )
+            L.append(
+                f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, static_cast<uint32_t>(rlo) | (static_cast<uint32_t>(rhi) << 16));'
+            )
+            L.append('  }')
+            return '\n'.join(L)
+        L.append(
+            '    float a_lo = util::f16_to_f32(static_cast<uint16_t>(sel0_lo ? (raw0 >> 16) : raw0));'
+        )
+        L.append(
+            '    float b_lo = util::f16_to_f32(static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1));'
+        )
+        L.append(
+            '    float c_lo = util::f16_to_f32(static_cast<uint16_t>(sel2_lo ? (raw2 >> 16) : raw2));'
+        )
+        L.append(
+            '    float a_hi = util::f16_to_f32(static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0));'
+        )
+        L.append(
+            '    float b_hi = util::f16_to_f32(static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1));'
+        )
+        L.append(
+            '    float c_hi = util::f16_to_f32(static_cast<uint16_t>(sel2_hi ? (raw2 >> 16) : raw2));'
+        )
+        L.append('    if (inst_.neg & 1) { a_lo = -a_lo; }')
+        L.append('    if (inst_.neg & 2) { b_lo = -b_lo; }')
+        L.append('    if (inst_.neg & 4) { c_lo = -c_lo; }')
+        L.append('    if (inst_.neg_hi & 1) { a_hi = -a_hi; }')
+        L.append('    if (inst_.neg_hi & 2) { b_hi = -b_hi; }')
+        L.append('    if (inst_.neg_hi & 4) { c_hi = -c_hi; }')
+        L.append('    float rlo = a_lo * b_lo + c_lo;')
+        L.append('    float rhi = a_hi * b_hi + c_hi;')
+        L.append(
+            f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, util::f32_to_f16_mode(rlo, wf.fp16_ovfl()) | (static_cast<uint32_t>(util::f32_to_f16_mode(rhi, wf.fp16_ovfl())) << 16));'
+        )
     elif dtype == 'bf16':
         if op != 'fma':
             raise ValueError(f'Unsupported packed BF16 ternary operation: {op}')
@@ -740,39 +794,6 @@ def gen_pk_lshl_add_u64(dst: list[str], src: list[str]) -> str:
             '  }',
         ]
     )
-
-
-def gen_pk_mov_b32(
-    dst: list[str],
-    src: list[str],
-    opsel_exprs: tuple[str, str] = ('', ''),
-) -> str:
-    """Generate V_PK_MOV_B32: move two 32-bit values based on op_sel."""
-    d, s0, s1 = dst[0], src[0], src[1]
-    L = []
-    L.append('  uint64_t exec = wf.exec();')
-    L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
-    L.append('    if (!(exec & (1ULL << lane))) continue;')
-    for var, src in [('s0', s0), ('s1', s1)]:
-        L.append(
-            f'    uint64_t {var}_pair_w = amdgpu::RegisterAccess(wf).read_lane64({src}, lane);'
-        )
-        L.append(f'    uint32_t {var}_lo_w = static_cast<uint32_t>({var}_pair_w);')
-        L.append(
-            f'    uint32_t {var}_hi_w = static_cast<uint32_t>({var}_pair_w >> 32);'
-        )
-    opsel, opsel_hi = opsel_exprs
-    s0_lo = _pk_f32_word_expr('s0', 'lo')
-    s0_hi = _pk_f32_word_expr('s0', 'hi')
-    s1_lo = _pk_f32_word_expr('s1', 'lo')
-    s1_hi = _pk_f32_word_expr('s1', 'hi')
-    L.append(f'    uint32_t lo = ({opsel} & 1) ? {s0_hi} : {s0_lo};')
-    L.append(f'    uint32_t hi = ({opsel} & 2) ? {s1_hi} : {s1_lo};')
-    L.append(
-        f'    amdgpu::RegisterAccess(wf).write_lane64({d}, lane, static_cast<uint64_t>(lo) | (static_cast<uint64_t>(hi) << 32));'
-    )
-    L.append('  }')
-    return '\n'.join(L)
 
 
 def gen_dot2(

@@ -4,13 +4,29 @@
 // AVX2 SIMD halfword moves and swaps.
 // CPU-specific arithmetic stays here; public entry points select this backend.
 
+#include "common/compiler.h"
 #include "common/simd.h"
+#include "register/swap.h"
 #include "rj_arith/detail/rj_arith_register.h"
 
 #include <immintrin.h>
 #include <stdint.h>
 
 namespace rocjitsu::arith {
+
+// Exchange active Wave32 words, preserving inactive lanes and coincident operands.
+void swap_words_x86_64_v3(uint32_t exec_mask, uint32_t *d, uint32_t *a) {
+  RJ_ARITH_UNROLL(4)
+  for (int lane = 0; lane < 32; lane += 8) {
+    // Load both operands before either store, including D == A.
+    auto old_a = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(a + lane));
+    auto old_d = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(d + lane));
+    auto active = _mm256_sllv_epi32(_mm256_set1_epi32(uint32_t(exec_mask >> lane)),
+                                    _mm256_setr_epi32(31, 30, 29, 28, 27, 26, 25, 24));
+    _mm256_maskstore_epi32(reinterpret_cast<int *>(d + lane), active, old_a);
+    _mm256_maskstore_epi32(reinterpret_cast<int *>(a + lane), active, old_d);
+  }
+}
 
 // Evaluate move half for the caller-selected operation. Preserve destination lanes outside
 // exec_mask.

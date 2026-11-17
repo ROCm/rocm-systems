@@ -30,7 +30,21 @@ CDNA_INTEGER_ALIASES = {
 }
 INTEGER_ARCHITECTURES = ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5')
 # Routing and conversions migrate independently of integer arithmetic.
-ROUTING_ARCHITECTURES = INTEGER_ARCHITECTURES
+ROUTING_ARCHITECTURES = (
+    'cdna1',
+    'cdna2',
+    'cdna3',
+    'cdna4',
+    'cdna5',
+    'rdna1',
+    'rdna2',
+    'rdna3',
+    'rdna3_5',
+    'rdna4',
+)
+WORD_ROUTING_NAMES = {'V_MOV_B32', 'V_CNDMASK_B32'}
+HALF_CONDITIONAL_ARCHITECTURES = (*INTEGER_ARCHITECTURES, 'rdna3_5')
+SCREEN_PARTITION_ARCHITECTURES = ('cdna1', 'cdna2', 'cdna3', 'cdna4')
 
 
 # These integer APIs use one 32-bit VGPR for each result and source.
@@ -154,12 +168,20 @@ def gen_vector32(ctx: ExecuteContext) -> str | None:
         return None
     if mnemonic == 'V_PRNG_B32' and arch not in ('cdna4', 'cdna5'):
         return None
-    if arch not in INTEGER_ARCHITECTURES or mnemonic not in VECTOR32_NAMES:
-        return None
-    if (
-        mnemonic in CONDITIONAL_NAMES | {'V_MOV_B32'}
-        and arch not in ROUTING_ARCHITECTURES
-    ):
+    architectures = (
+        SCREEN_PARTITION_ARCHITECTURES
+        if mnemonic == 'V_SCREEN_PARTITION_4SE_B32'
+        else (
+            HALF_CONDITIONAL_ARCHITECTURES
+            if mnemonic == 'V_CNDMASK_B16'
+            else (
+                ROUTING_ARCHITECTURES
+                if mnemonic in WORD_ROUTING_NAMES
+                else INTEGER_ARCHITECTURES
+            )
+        )
+    )
+    if arch not in architectures or mnemonic not in VECTOR32_NAMES:
         return None
     if mnemonic in WIDEN16_NAMES and arch not in ('rdna3', 'rdna4', 'cdna5'):
         return None
@@ -170,7 +192,7 @@ def gen_vector32(ctx: ExecuteContext) -> str | None:
     if mnemonic == 'V_MOV_B32' and not is_vop3 and len(dst) == len(src) == 1:
         return f'  amdgpu::arith::execute_move32(*this, wf, {dst[0]}, {src[0]});'
     if mnemonic == 'V_SCREEN_PARTITION_4SE_B32':
-        if arch not in ('cdna3', 'cdna4') or len(dst) != 1 or len(src) != 1:
+        if len(dst) != 1 or len(src) != 1:
             return None
         # These CDNA targets only execute Wave64. Decoder operands retain DPP/SDWA routing.
         return (

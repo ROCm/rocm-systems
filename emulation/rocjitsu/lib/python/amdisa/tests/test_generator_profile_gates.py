@@ -2800,10 +2800,15 @@ def test_failure_stub_recognition_keeps_conditional_modifier_restoration(
         assert 'ScopedVgprWriteMask' in modifier
         assert 'sdwa::stage_source' in modifier
         assert '.restore();' in modifier
-        assert 'execute_v_mov_b32_vop1' in modifier
-        shared_body = codegen._shared_execute_bodies[('v_mov_b32', 'ENC_VOP1')][2]
-        assert 'InstructionExecutionError::UnimplementedInstruction' in shared_body
-        assert 'return;' in shared_body
+        # The migrated move is inline; conditional failure must retain the
+        # same staging/restoration wrapper around its normal rj-arith call.
+        assert 'amdgpu::arith::execute_move32' in modifier
+        assert 'InstructionExecutionError::UnimplementedInstruction' in modifier
+        assert 'return;' in modifier
+        assert modifier.index('UnimplementedInstruction') < modifier.index(
+            'execute_move32'
+        )
+        assert modifier.index('execute_move32') < modifier.index('.restore();')
     else:
         assert signature not in source
         body = _generated_function_body(source, 'void VMovB32Vop1::execute_impl')
@@ -10939,7 +10944,7 @@ def test_gfx1250_index_generation_uses_scalar_selector_library_bridge():
 def test_cdna_screen_partition_uses_wave64_library_bridge():
     from amdisa.codegen.execute.rj_arith_vector import gen_vector32
 
-    for arch in ('cdna3', 'cdna4', 'cdna5', 'rdna4'):
+    for arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4', 'cdna5', 'rdna4'):
         ctx = SimpleNamespace(
             arch_name=arch,
             inst=SimpleNamespace(name='V_SCREEN_PARTITION_4SE_B32'),
@@ -10948,7 +10953,7 @@ def test_cdna_screen_partition_uses_wave64_library_bridge():
             is_vop3=False,
         )
         result = gen_vector32(ctx)
-        if arch in ('cdna3', 'cdna4'):
+        if arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4'):
             assert 'execute_screen_partition(*this, wf, vdst, src0)' in result
         else:
             assert result is None

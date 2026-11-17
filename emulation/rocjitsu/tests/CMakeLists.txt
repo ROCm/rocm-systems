@@ -519,6 +519,10 @@ add_executable(
     rj_vm_config_test.cpp
     checkpoint_restore_errors_test.cpp
     cdna_integer_arith_test.cpp
+    older_lane_routing_test.cpp
+    older_ds_routing_test.cpp
+    older_relative_move_test.cpp
+    older_word_routing_test.cpp
     rj_arith_policy_test.cpp
     rj_arith_config_test.cpp
     rj_arith_bridge_test.cpp
@@ -534,6 +538,8 @@ add_executable(
     cdna5_dispatch_memory_test.cpp
     cdna5_execution_test.cpp
     numeric_encoding_regression_test.cpp
+    older_screen_partition_test.cpp
+    older_packed_routing_test.cpp
     cdna5_gfx1251_simulation_test.cpp
     cdna5_instruction_test.cpp
     cdna5_sdma_test.cpp
