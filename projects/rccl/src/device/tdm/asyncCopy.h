@@ -621,6 +621,8 @@ __device__ inline void realignSlot(uint8_t* win, uint32_t slot, uint32_t t0) {
       *toLds<LdsWord4>(p + (i + k) * WARP_BYTES_B128) = o;
     }
   }
+  // The async store reads the slot by address, outside this wave's DS ordering: it must wait for these writes.
+  __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
 }
 
 // Load leg of pipeline chunk c into `slot` of the window, from per-lane pointers `g` (the chunk's source) and `win`
@@ -767,17 +769,21 @@ __device__ __forceinline__ void pipelineCore(const uint8_t* s, uint8_t* d, uint8
     loadSlot = (loadSlot + 1 == S) ? 0 : loadSlot + 1;
   };
   // Phases whose chunks are all full (the last chunk is the only short one). The first stores P - L chunks and each
-  // later one P, so every count is static: issue time after the drain is on the critical path.
-  if (ld + P < K) {
+  // later one P, so every count is static: issue time after the drain is on the critical path. Shift issues its loads
+  // first, so they are in flight while each store waits for its slot's realign. The loads touch none of the slots
+  // the realigns read or write, since the phase's chunks span distinct slots.
+  auto phase = [&](auto nStore) {
     asyncWaitAtMost<0>();
-    staticFor<0, P - L>([&](auto) { storeNext(storeF); });
-    staticFor<0, P>([&](auto) { loadNext(loadF); });
-  }
-  while (ld + P < K) {
-    asyncWaitAtMost<0>();
-    staticFor<0, P>([&](auto) { storeNext(storeF); });
-    staticFor<0, P>([&](auto) { loadNext(loadF); });
-  }
+    if constexpr (F == LoadFrame::Shift) {
+      staticFor<0, P>([&](auto) { loadNext(loadF); });
+      staticFor<0, decltype(nStore)::value>([&](auto) { storeNext(storeF); });
+    } else {
+      staticFor<0, decltype(nStore)::value>([&](auto) { storeNext(storeF); });
+      staticFor<0, P>([&](auto) { loadNext(loadF); });
+    }
+  };
+  if (ld + P < K) phase(std::integral_constant<uint32_t, P - L>{});
+  while (ld + P < K) phase(std::integral_constant<uint32_t, P>{});
   while (st < K) {
     asyncWaitAtMost<0>();
     const size_t storeEnd = ld < K ? ld - L : K;

@@ -105,6 +105,16 @@ __global__ void kAsyncTwoTeamCopy([[maybe_unused]] uint8_t* dst0, [[maybe_unused
 #endif
 }
 
+// Each block copies its own `per`-byte slice of [0, gridDim.x * per).
+__global__ void kAsyncGridCopy([[maybe_unused]] uint8_t* dst, [[maybe_unused]] const uint8_t* src,
+                               [[maybe_unused]] size_t per, [[maybe_unused]] size_t ldsBytes) {
+#if ASYNC_COPY_SUPPORTED
+  extern __shared__ __align__(128) uint8_t lds[];
+  const size_t o = blockIdx.x * per;
+  async::tdmCopy(dst + o, src + o, per, lds, ldsBytes);
+#endif
+}
+
 // Writes the device-side compile-time capability into result[0].
 __global__ void kAsyncSupportProbe(int* result) {
   if (threadIdx.x == 0 && blockIdx.x == 0)
@@ -247,6 +257,9 @@ INSTANTIATE_TEST_SUITE_P(
     AsyncBlockCase{4096,        64,   0,   0,   64,  "tiny_lds_direct_fallback"},
     AsyncBlockCase{16384,       512,  0,   0,   256, "lds_limits_issuers"},
     AsyncBlockCase{4096,        1024, 0,   0,   32,  "single_warp_block"},
+    // Only full warps issue the async path: a partial final warp sits out, and a block with no full warp falls back.
+    AsyncBlockCase{4096,        4096, 0,   0,   48,  "partial_warp_48"},
+    AsyncBlockCase{4096,        4096, 0,   0,   16,  "no_full_warp_16"},
     AsyncBlockCase{65536 + 37,  8192, 0,   0,   256, "large_odd_remainder"},
     AsyncBlockCase{1,           1024, 3,   3,   32,  "one_byte_head"},
     AsyncBlockCase{4096,        4096, 8,   8,   64,  "head_width8"},
@@ -392,6 +405,47 @@ protected:
 
 TEST_F(AsyncTwoTeamTest, Blocking) { run<false>(8192, 2048, 256); }
 TEST_F(AsyncTwoTeamTest, Async)    { run<true>(8192, 2048, 256);  }
+
+// ===========================================================================
+//  One block per CU, each copying its own slice at a misaligned offset.
+// ===========================================================================
+
+// The Shift frame's stores read LDS that the realign just wrote. A store that runs ahead of those writes copies
+// stale bytes, which a lone block rarely shows but a full device shows on nearly every run.
+class AsyncGridCopyTest : public AsyncCopyTest {
+protected:
+  void run(int soff, int doff, size_t lds, size_t per) {
+    if (!supported_) GTEST_SKIP() << "async copy not supported on this device";
+    hipDeviceProp_t p{};
+    ASSERT_EQ(hipGetDeviceProperties(&p, 0), hipSuccess);
+    const int grid = p.multiProcessorCount;
+    const size_t n = per * grid;
+
+    const size_t srcTotal  = static_cast<size_t>(soff) + n;
+    const size_t dstTotal  = static_cast<size_t>(kAsyncGuard) + doff + n + kAsyncGuard;
+    const size_t copyStart = static_cast<size_t>(kAsyncGuard) + doff;
+
+    auto h_src = makePattern(srcTotal, static_cast<uint32_t>(soff * 131 + doff));
+    DeviceBuffer<uint8_t> d_src(srcTotal);
+    d_src.copyFrom(h_src);
+    std::vector<uint8_t> h_dstInit(dstTotal, kAsyncSentinel);
+    DeviceBuffer<uint8_t> d_dst(dstTotal);
+    d_dst.copyFrom(h_dstInit);
+
+    ASSERT_EQ(hipFuncSetAttribute(reinterpret_cast<const void*>(kAsyncGridCopy),
+                                  hipFuncAttributeMaxDynamicSharedMemorySize, static_cast<int>(lds)),
+              hipSuccess);
+    kAsyncGridCopy<<<grid, 256, lds>>>(d_dst.ptr + copyStart, d_src.ptr + soff, per, lds);
+    syncAndCheck();
+
+    auto h_out = d_dst.copyTo();
+    checkCopy(h_out, h_src, static_cast<size_t>(soff), copyStart, n, "grid_shift");
+  }
+};
+
+TEST_F(AsyncGridCopyTest, ShiftOdd)     { run(1, 0, 65536, (256 << 10) + 37); }
+TEST_F(AsyncGridCopyTest, ShiftTwoByte) { run(2, 0, 65536, (256 << 10) + 37); }
+TEST_F(AsyncGridCopyTest, ShiftBoth)    { run(3, 1, 65536, (256 << 10) + 37); }
 
 // ===========================================================================
 //  Non-default cache policy still copies correctly.
