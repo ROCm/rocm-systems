@@ -13,7 +13,8 @@
  * must take the tier a 16-byte aligned call takes, and every received byte must be exact, at sizes
  * where the aligned call takes a DDA tier under the active arch table. In place, every offset must
  * take Direct p2p; its data is not checked, since per-peer Send/Recv does not order the send of a
- * chunk before the receive that overwrites it.
+ * chunk before the receive that overwrites it. A query without buffers (both null) must report the
+ * out-of-place tier.
  *
  * DdaAlltoAllPeerColumnsMPI repeats the cases with RCCL_DDA_FABRIC_MAXBLOCKS=2, so each LL128 block
  * column serves several peers.
@@ -144,6 +145,10 @@ protected:
         ++ddaCases_;
         ll128Cases_ += alignedAlgo == RCCL_DDA_FABRIC_LL128;
         EXPECT_EQ(selectedAlgo(send, recv, count, c.datatype), alignedAlgo) << "Rank " << rank_;
+        // The buffer-less query (rcclSymKGetInfo) passes null for both buffers; it must report the
+        // out-of-place tier, not the in-place fallback.
+        EXPECT_EQ(selectedAlgo(nullptr, nullptr, count, c.datatype), alignedAlgo)
+            << "Rank " << rank_ << ": buffer-less query";
         if(alignedAlgo == RCCL_DDA_FABRIC_LL128)
             EXPECT_LE(blocks, getActiveCommunicator()->ddaFabricMaxBlocks)
                 << "Rank " << rank_ << ": LL128 grid exceeds the fabric block budget";
