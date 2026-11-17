@@ -49,6 +49,7 @@ RJ_DIAGNOSTIC_POP
 
 #include "util/dynamic_loader.h"
 #include "util/log.h"
+#include "util/native_cleanup.h"
 
 #include <algorithm>
 #include <array>
@@ -171,44 +172,39 @@ static_assert(std::atomic<uint32_t>::is_always_lock_free,
 template <typename Cleanup>
 long futex_wait_until(std::atomic<uint32_t> &word, uint32_t expected, const timespec *deadline,
                       Cleanup &cleanup) {
-  long result;
-  pthread_cleanup_push(+[](void *state) { (*static_cast<Cleanup *>(state))(); }, &cleanup);
+  return util::with_native_cleanup(cleanup, [&] {
 #ifdef INTERPOSER_TSAN
-  // Raw syscalls bypass TSan's blocking-call tracking, which otherwise defers
-  // native exit until after this cleanup is gone. Its signal trampoline resets
-  // interception before calling the handler, so only normal return needs post.
-  __sanitizer_syscall_pre_futex(&word, FUTEX_WAIT_BITSET_PRIVATE, expected, deadline, nullptr,
-                                FUTEX_BITSET_MATCH_ANY);
+    // Raw syscalls bypass TSan's blocking-call tracking, which otherwise defers
+    // native exit until after this cleanup is gone. Its signal trampoline resets
+    // interception before calling the handler, so only normal return needs post.
+    __sanitizer_syscall_pre_futex(&word, FUTEX_WAIT_BITSET_PRIVATE, expected, deadline, nullptr,
+                                  FUTEX_BITSET_MATCH_ANY);
 #endif
-  // Use the resolved pointer instead of libc's noexcept syscall declaration.
-  result =
-      rocjitsu::libc_passthrough().syscall(SYS_futex, &word, FUTEX_WAIT_BITSET_PRIVATE, expected,
-                                           deadline, nullptr, FUTEX_BITSET_MATCH_ANY);
+    // Use the resolved pointer instead of libc's noexcept syscall declaration.
+    const long result =
+        rocjitsu::libc_passthrough().syscall(SYS_futex, &word, FUTEX_WAIT_BITSET_PRIVATE, expected,
+                                             deadline, nullptr, FUTEX_BITSET_MATCH_ANY);
 #ifdef INTERPOSER_TSAN
-  const int wait_errno = errno;
-  __sanitizer_syscall_post_futex(result, &word, FUTEX_WAIT_BITSET_PRIVATE, expected, deadline,
-                                 nullptr, FUTEX_BITSET_MATCH_ANY);
-  errno = wait_errno;
+    const int wait_errno = errno;
+    __sanitizer_syscall_post_futex(result, &word, FUTEX_WAIT_BITSET_PRIVATE, expected, deadline,
+                                   nullptr, FUTEX_BITSET_MATCH_ANY);
+    errno = wait_errno;
 #endif
-  pthread_cleanup_pop(0);
-  return result;
+    return result;
+  });
 }
 
 /// @brief Keep a dispatch snapshot alive and release it on native thread exit.
 template <typename Driver, typename... Args>
 int dispatch_ioctl_snapshot(std::shared_ptr<Driver> &driver, unsigned long request, void *arg,
                             Args &&...args) {
-  int result;
-  pthread_cleanup_push(
-      +[](void *state) {
-        const int saved_errno = errno;
-        static_cast<std::shared_ptr<Driver> *>(state)->reset();
-        errno = saved_errno;
-      },
-      &driver);
-  result = driver->ioctl(request, arg, std::forward<Args>(args)...);
-  pthread_cleanup_pop(0);
-  return result;
+  auto cleanup = [&driver] {
+    const int saved_errno = errno;
+    driver.reset();
+    errno = saved_errno;
+  };
+  return util::with_native_cleanup(
+      cleanup, [&] { return driver->ioctl(request, arg, std::forward<Args>(args)...); });
 }
 
 /// @brief Wake every waiter sleeping on @p word.

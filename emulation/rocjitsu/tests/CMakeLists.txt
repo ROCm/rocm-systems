@@ -18,6 +18,34 @@ if(RJ_ENABLE_UBSAN)
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    foreach(mode IN ITEMS exceptions no_exceptions)
+        set(native_cleanup_target native_cleanup_${mode}_test)
+        add_executable(${native_cleanup_target} util/native_cleanup_test.cpp)
+        target_include_directories(
+            ${native_cleanup_target}
+            PRIVATE ../lib/util/include
+        )
+        target_link_libraries(${native_cleanup_target} PRIVATE Threads::Threads)
+        rj_configure_target(${native_cleanup_target} WARNINGS)
+        if(mode STREQUAL "no_exceptions")
+            target_compile_options(
+                ${native_cleanup_target}
+                PRIVATE -fno-exceptions
+            )
+            target_compile_definitions(
+                ${native_cleanup_target}
+                PRIVATE EXPECT_NO_EXCEPTIONS
+            )
+        else()
+            target_compile_options(
+                ${native_cleanup_target}
+                PRIVATE -fexceptions
+            )
+        endif()
+        add_test(NAME NativeCleanup.${mode} COMMAND ${native_cleanup_target})
+        set_tests_properties(NativeCleanup.${mode} PROPERTIES TIMEOUT 15)
+    endforeach()
+
     # A separate executable lets --wrap hide modern stat symbols without
     # affecting any other test or the interposer's own symbol resolution.
     add_executable(

@@ -10,13 +10,13 @@
 #include "rocjitsu/kmd/linux/libc_passthrough.h"
 #include "rocjitsu/kmd/linux/simulated_kfd.h"
 #include "util/log.h"
+#include "util/native_cleanup.h"
 
 #include <algorithm>
 #include <cassert>
 #include <cerrno>
 #include <chrono>
 #include <cstdint>
-#include <pthread.h>
 #include <unistd.h>
 
 namespace rocjitsu {
@@ -392,16 +392,15 @@ int EventState::wait_events(void *arg, uint32_t process_id) {
     my_cv.reset();
   };
   bool is_poll = (args->timeout == 0);
-  pthread_cleanup_push(
-      +[](void *opaque) { (*static_cast<decltype(cleanup) *>(opaque))(); }, &cleanup);
-  if (is_poll) {
-    // Poll mode.
-  } else if (args->timeout == kWaitEventsInfiniteMs) {
-    my_cv->wait(lock, is_ready);
-  } else {
-    my_cv->wait_for(lock, std::chrono::milliseconds(args->timeout), is_ready);
-  }
-  pthread_cleanup_pop(0);
+  util::with_native_cleanup(cleanup, [&] {
+    if (is_poll) {
+      // Poll mode.
+    } else if (args->timeout == kWaitEventsInfiniteMs) {
+      my_cv->wait(lock, is_ready);
+    } else {
+      my_cv->wait_for(lock, std::chrono::milliseconds(args->timeout), is_ready);
+    }
+  });
 
   unregister_waiters();
 

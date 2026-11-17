@@ -14,6 +14,7 @@
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "util/dynamic_loader.h"
 #include "util/log.h"
+#include "util/native_cleanup.h"
 #include "util/unique_handle.h"
 
 #include <algorithm>
@@ -68,16 +69,6 @@
 
 namespace rocjitsu {
 namespace {
-
-/// @brief Release call-owned state if a blocking RPC exits its native thread.
-template <typename Cleanup, typename Function>
-auto native_rpc_call(Cleanup &cleanup, Function &&function) {
-  decltype(function()) result;
-  pthread_cleanup_push(+[](void *state) { (*static_cast<Cleanup *>(state))(); }, &cleanup);
-  result = function();
-  pthread_cleanup_pop(0);
-  return result;
-}
 
 // Reply descriptors are temporary driver-owned aliases. Cleanup must preserve
 // the errno from a failed RPC, size check, or mapping without re-entering hooks.
@@ -1221,7 +1212,7 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg,
     // sendmsg() on a stream socket may accept only part of the buffer; the
     // ancillary fds ride on the first byte, so a short send is a truncated frame
     // with the descriptors already handed over.
-    const auto sent = native_rpc_call(abandon_rpc, [&] {
+    const auto sent = util::with_native_cleanup(abandon_rpc, [&] {
       return rpc_send_msg(sock_, buf.data(), buf.size(), send_fds, num_send_fds);
     });
     if (sent > 0 && static_cast<size_t>(sent) != buf.size())
@@ -1234,8 +1225,8 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg,
     }
   } else {
     size_t sent = 0;
-    if (!native_rpc_call(abandon_rpc,
-                         [&] { return rpc_send_exact(sock_, buf.data(), buf.size(), &sent); })) {
+    if (!util::with_native_cleanup(
+            abandon_rpc, [&] { return rpc_send_exact(sock_, buf.data(), buf.size(), &sent); })) {
       if (sent > 0)
         return poison_stream();
       return transport_errno();
@@ -1244,7 +1235,7 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg,
 
   // Receive response — may include a backing descriptor via SCM_RIGHTS for ALLOC_MEMORY.
   uint8_t resp_header_buf[sizeof(RpcHeader)];
-  auto bytes = native_rpc_call(abandon_rpc, [&] {
+  auto bytes = util::with_native_cleanup(abandon_rpc, [&] {
     return rpc_recv_msg(sock_, resp_header_buf, sizeof(resp_header_buf), received_fds, &num_fds);
   });
 
@@ -1286,7 +1277,7 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg,
     payload.resize(resp->payload_bytes);
     // A partial read consumes part of the declared payload and abandons the
     // rest, which is the same misalignment as refusing it outright.
-    if (!native_rpc_call(abandon_rpc, [&] {
+    if (!util::with_native_cleanup(abandon_rpc, [&] {
           return rpc_recv_exact(sock_, payload.data(), resp->payload_bytes);
         }))
       return poison_reply();

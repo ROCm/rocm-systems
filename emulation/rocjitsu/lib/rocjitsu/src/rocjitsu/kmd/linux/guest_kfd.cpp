@@ -9,6 +9,7 @@
 #include "rocjitsu/kmd/linux/rpc.h"
 
 #include "util/log.h"
+#include "util/native_cleanup.h"
 
 #include <algorithm>
 #include <array>
@@ -22,7 +23,6 @@
 #include <fcntl.h>
 #include <filesystem>
 #include <optional>
-#include <pthread.h>
 #include <sstream>
 #include <string_view>
 #include <sys/mman.h>
@@ -889,22 +889,20 @@ int GuestKfd::wait_events(unsigned long request, void *arg) {
   if (!lease.held())
     return -(errno != 0 ? errno : ENODEV);
 
-  int rc = 0;
-  // Native thread exit can bypass C++ destructors in an exception-free build.
-  pthread_cleanup_push(+[](void *state) { static_cast<WaitLease *>(state)->release(); }, &lease);
-  // Forward a null arg unchanged rather than dereferencing it for the timeout: the
-  // kernel answers it with EFAULT/EINVAL, and the interposer must reproduce that
-  // failure instead of segfaulting inside the caller's ioctl().
-  //
-  // The simulator serves the wait itself and begin_local_shutdown() can wake it, so it
-  // takes ONE ordinary blocking forward -- slicing it would add repolling that buys
-  // nothing. Only the kernel, which nothing in this process can interrupt, needs the
-  // wait broken into cancellable slices.
-  if (!arg || execution_driver_)
-    rc = forward_ioctl(request, arg);
-  else
-    rc = forward_wait_events_bounded(request, arg);
-  pthread_cleanup_pop(0);
+  auto cleanup = [&lease] { lease.release(); };
+  const int rc = util::with_native_cleanup(cleanup, [&] {
+    // Forward a null arg unchanged rather than dereferencing it for the timeout: the
+    // kernel answers it with EFAULT/EINVAL, and the interposer must reproduce that
+    // failure instead of segfaulting inside the caller's ioctl().
+    //
+    // The simulator serves the wait itself and begin_local_shutdown() can wake it, so it
+    // takes ONE ordinary blocking forward -- slicing it would add repolling that buys
+    // nothing. Only the kernel, which nothing in this process can interrupt, needs the
+    // wait broken into cancellable slices.
+    if (!arg || execution_driver_)
+      return forward_ioctl(request, arg);
+    return forward_wait_events_bounded(request, arg);
+  });
 
   // Drop the lease after forwarding has released its locks. The last lease can
   // complete a deferred final close without disturbing the captured result.
@@ -998,12 +996,9 @@ int GuestKfd::forward_wait_events_bounded(unsigned long request, void *arg) {
       return -(errno != 0 ? errno : EIO);
     return ret;
   };
-  int result;
-  pthread_cleanup_push(
-      +[](void *state) { *static_cast<std::function<int()> *>(state) = nullptr; }, &poll);
-  result = wait_events_poll_loop(*wait_args, hw_closing_, poll);
-  pthread_cleanup_pop(0);
-  return result;
+  auto cleanup = [&poll] { poll = nullptr; };
+  return util::with_native_cleanup(
+      cleanup, [&] { return wait_events_poll_loop(*wait_args, hw_closing_, poll); });
 }
 
 void GuestKfd::record_kfd_identity(int kfd_fd) {
