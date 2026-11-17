@@ -46,7 +46,6 @@ struct GinWindow {
 
 struct GinAllGatherMockComm {
   ncclComm comm{};
-  ncclSharedResources sharedRes{};
   char bootstrapPlaceholder{0};
   char archName_[16]{};
 
@@ -61,11 +60,11 @@ struct GinAllGatherMockComm {
     comm.symmetricSupport = true;
     comm.globalGinSupport = NCCL_GIN_CONNECTION_FULL;
     comm.devrState.bigSize = 1;
-    comm.devrState.lsaSize = comm.nRanks;
-    comm.devrState.lsaSelf = comm.rank;
-    sharedRes.ginState.numActiveBackends = 1;
-    sharedRes.ginState.backends[0].ginType = (ncclGinType_t)NCCL_NET_DEVICE_GIN_ANVIL_SDMA;
-    comm.sharedRes = &sharedRes;
+    comm.devrState.lsaTeamSize = comm.nRanks;
+    comm.devrState.lsaTeamSelf = comm.rank;
+    // ncclGetGinType reads comm->ginState, not a shared-resources copy.
+    comm.ginState.numActiveBackends = 1;
+    comm.ginState.backends[0].ginType = (ncclGinType_t)NCCL_NET_DEVICE_GIN_ANVIL_SDMA;
   }
 };
 
@@ -131,14 +130,14 @@ TEST_F(GinAllGatherEligibilityTest, RejectsMissingBootstrapAndMultiNode) {
 
 TEST_F(GinAllGatherEligibilityTest, RejectsUnsupportedTopologyAndBackend) {
   mock_.comm.nRanks = 32;
-  mock_.comm.devrState.lsaSize = 32;
+  mock_.comm.devrState.lsaTeamSize = 32;
   installSingleSegment();
   EXPECT_FALSE(eligible());
   mock_.comm.nRanks = 8;
-  mock_.comm.devrState.lsaSize = 8;
+  mock_.comm.devrState.lsaTeamSize = 8;
   installSingleSegment();
   EXPECT_TRUE(eligible());
-  mock_.sharedRes.ginState.backends[0].ginType = (ncclGinType_t)NCCL_NET_DEVICE_GIN_PROXY;
+  mock_.comm.ginState.backends[0].ginType = (ncclGinType_t)NCCL_NET_DEVICE_GIN_PROXY;
   EXPECT_FALSE(eligible());
 }
 
@@ -148,7 +147,7 @@ TEST_F(GinAllGatherEligibilityTest, RejectsNonSymmetricAndPartialLsa) {
   mock_.comm.symmetricSupport = false;
   EXPECT_FALSE(eligible());
   mock_.comm.symmetricSupport = true;
-  mock_.comm.devrState.lsaSize = 4;
+  mock_.comm.devrState.lsaTeamSize = 4;
   EXPECT_FALSE(eligible());
 }
 
