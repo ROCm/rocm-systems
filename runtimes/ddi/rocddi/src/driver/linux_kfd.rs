@@ -5,6 +5,7 @@
 //! retains each exact VM binding for recreation within its lifetime policy.
 mod advice;
 mod allocation;
+mod configuration;
 mod drm;
 mod event;
 mod imported_system;
@@ -24,6 +25,10 @@ mod uapi;
 use crate::os::linux::{errno, file as os_file, memory as os_memory};
 use target::KfdTargetProfile;
 mod vmem;
+
+pub use configuration::{
+    DebuggerRegistration, DebuggerRegistrationMode, KfdConfiguration, XnackModeRequest,
+};
 
 use crate::device::gpu::kernel_queue::{
     KernelCommand, KernelQueueFormat, KernelQueueStatus, KernelQueueWait,
@@ -49,7 +54,7 @@ use crate::memory::{
 };
 use crate::os::ProcessIdentity;
 use crate::os::native_error;
-use crate::session::{DebuggerRegistrationMode, DriverContextLifetime, XnackModeRequest};
+use crate::session::DriverContextLifetime;
 use crate::topology::Endpoint;
 use crate::{Error, ErrorKind};
 pub(crate) use allocation::LinuxAllocation;
@@ -84,10 +89,8 @@ pub(crate) struct LinuxKfdDriver {
     lifetime: DriverContextLifetime,
     /// Records whether this instance joined the process-owned context.
     joined_primary: AtomicBool,
-    /// Native fault-mode request, fixed before this driver's first activation.
-    xnack_requested: Option<XnackModeRequest>,
-    /// Debugger record and trap-temporary policy fixed before first activation.
-    debugger: Option<sys::RuntimeDebuggerRegistration>,
+    /// Complete native options, fixed before this driver's first activation.
+    configuration: KfdConfiguration,
     /// Connection and bindings used for a session-owned context.
     local: KfdContextResources,
 }
@@ -393,7 +396,7 @@ impl KfdContextResources {
         lifetime: DriverContextLifetime,
         native: &sysfs::KfdNode,
         xnack_requested: Option<XnackModeRequest>,
-        debugger: Option<sys::RuntimeDebuggerRegistration>,
+        debugger: Option<DebuggerRegistration>,
     ) -> Result<Shared<memory::DeviceVm>, Error> {
         let kfd = self.kfd()?;
         kfd.prepare_context(lifetime)
@@ -467,8 +470,7 @@ impl LinuxKfdDriver {
             closing: false,
             lifetime,
             joined_primary: AtomicBool::new(false),
-            xnack_requested: None,
-            debugger: None,
+            configuration: KfdConfiguration::default(),
             local: KfdContextResources::new(process),
         }
     }
@@ -487,45 +489,6 @@ impl LinuxKfdDriver {
         } else {
             Ok(())
         }
-    }
-
-    pub(crate) fn request_xnack_mode(&mut self, request: XnackModeRequest) -> Result<(), Error> {
-        self.ensure_open()?;
-        if self.joined_primary.load(Ordering::Acquire) || self.local.kfd.get().is_some() {
-            return Err(error(
-                ErrorKind::Busy,
-                "XNACK configuration must precede GPU activation",
-            ));
-        }
-        self.xnack_requested = Some(request);
-        Ok(())
-    }
-
-    pub(crate) fn request_debugger_registration(
-        &mut self,
-        address: usize,
-        setup_ttmp: bool,
-        mode: DebuggerRegistrationMode,
-    ) -> Result<(), Error> {
-        self.ensure_open()?;
-        if address == 0 || address % 8 != 0 {
-            return Err(error(
-                ErrorKind::InvalidArgument,
-                "invalid runtime debugger record address",
-            ));
-        }
-        if self.joined_primary.load(Ordering::Acquire) || self.local.kfd.get().is_some() {
-            return Err(error(
-                ErrorKind::Busy,
-                "debugger registration must precede GPU activation",
-            ));
-        }
-        self.debugger = Some(sys::RuntimeDebuggerRegistration {
-            address: address as u64,
-            setup_ttmp,
-            mode,
-        });
-        Ok(())
     }
 
     fn with_context_resources<T>(
@@ -675,16 +638,16 @@ impl Driver for LinuxKfdDriver {
             self.local.activate_device(
                 self.lifetime,
                 &native,
-                self.xnack_requested,
-                self.debugger,
+                self.configuration.xnack,
+                self.configuration.debugger,
             )?
         } else {
             let resources = primary_slot()?.join(&self.joined_primary, &self.process)?;
             resources.activate_device(
                 self.lifetime,
                 &native,
-                self.xnack_requested,
-                self.debugger,
+                self.configuration.xnack,
+                self.configuration.debugger,
             )?
         };
         let device_info = vm
@@ -812,32 +775,6 @@ mod tests {
         assert_eq!(status, 0);
         drop(held);
         assert!(ensure_native_connection_process().is_ok());
-    }
-
-    #[test]
-    fn xnack_request_is_passive_and_locked_after_activation_begins() {
-        let mut driver = LinuxKfdDriver::new();
-        driver
-            .request_xnack_mode(XnackModeRequest::Require(true))
-            .unwrap();
-        assert_eq!(
-            driver.xnack_requested,
-            Some(XnackModeRequest::Require(true))
-        );
-        assert!(driver.local.kfd.get().is_none());
-        driver.joined_primary.store(true, Ordering::Release);
-        assert_eq!(
-            driver
-                .request_xnack_mode(XnackModeRequest::Require(false))
-                .unwrap_err()
-                .kind(),
-            ErrorKind::Busy
-        );
-        assert_eq!(
-            driver.xnack_requested,
-            Some(XnackModeRequest::Require(true))
-        );
-        driver.joined_primary.store(false, Ordering::Release);
     }
 
     #[test]
