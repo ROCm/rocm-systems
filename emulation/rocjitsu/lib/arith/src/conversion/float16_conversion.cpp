@@ -32,7 +32,9 @@ int convert(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *
       arithmetic_modifiers | (Op == Float16Conversion::Widen        ? RJ_ARITH_ALU_HIGH_A
                               : Op == Float16Conversion::Stochastic ? RJ_ARITH_ALU_HIGH_D
                                                                     : 0);
-  if (int error = rocjitsu::arith::validate(flags, mode & ~uint64_t(known))) {
+  constexpr bool packed_f16 = Format == Float16Format::F16 && Op == Float16Conversion::Pack;
+  if (int error = rocjitsu::arith::validate(flags, mode & ~uint64_t(known),
+                                            packed_f16 ? RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS : 0)) {
     return error;
   }
   if (!exec_mask) {
@@ -74,16 +76,19 @@ int convert(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *
       int shift = mode & RJ_ARITH_ALU_HIGH_D ? 16 : 0;
       result[lane] = (d[0][lane] & ~(0xffffU << shift)) | (value << shift);
     } else if constexpr (Op == Float16Conversion::StochasticPack) {
+      // Each half-seed occupies the high half of the single-result converter's seed.
+      const uint32_t seeds = c[0][lane];
       result[lane] =
-          rocjitsu::arith::narrow_packed_sr<Format>(a[0][lane], uint16_t(c[0][lane]), saturate) |
-          (rocjitsu::arith::narrow_packed_sr<Format>(b[0][lane], uint16_t(c[0][lane] >> 16),
-                                                     saturate)
+          rocjitsu::arith::narrow_float16<Format>(a[0][lane], seeds << 16, true, saturate) |
+          (rocjitsu::arith::narrow_float16<Format>(b[0][lane], seeds & 0xffff0000u, true, saturate)
            << 16);
     } else {
-      result[lane] =
-          rocjitsu::arith::narrow_float16<Format>(source(a[0][lane], 0), 0, false, saturate) |
-          (rocjitsu::arith::narrow_float16<Format>(source(b[0][lane], 1), 0, false, saturate)
-           << 16);
+      const uint32_t low =
+          rocjitsu::arith::narrow_float16<Format>(source(a[0][lane], 0), 0, false, saturate);
+      const uint32_t high =
+          rocjitsu::arith::narrow_float16<Format>(source(b[0][lane], 1), 0, false, saturate);
+      result[lane] = rocjitsu::arith::pack_rounded_halves(
+          low, high, flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS);
     }
   }
   for (int lane = 0; lane < 32; ++lane) {

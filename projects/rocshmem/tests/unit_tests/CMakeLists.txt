@@ -78,7 +78,8 @@ if (USE_IPC)
   )
 endif()
 
-if (USE_IPC AND USE_TDM)
+if (USE_IPC AND (USE_TDM OR USE_LDS_STAGE))
+  # these also cover the async (non-TDM) backend
   target_sources(
     ${PROJECT_NAME}
     PRIVATE
@@ -108,6 +109,7 @@ if (USE_HOST_VERBS)
       ib_ctrl_gtest.cpp
       rdma_loopback_gtest.cpp
       rma_engine_gtest.cpp
+      window_info_verbs_gtest.cpp
   )
 endif()
 

@@ -13,7 +13,6 @@
 #include <cstdlib>
 #include <functional>
 #include <initializer_list>
-#include <type_traits>
 #include <vector>
 
 #include "ScopedHook.h"
@@ -36,15 +35,6 @@ namespace {
 
 using rma_socket_test::Scene;
 
-template <typename Connect, typename... Arguments>
-ncclResult_t ConnectWithoutAbort(Connect connect, Arguments... arguments) {
-  if constexpr (std::is_invocable_v<Connect, Arguments..., volatile uint32_t*>) {
-    return connect(arguments..., nullptr);
-  } else {
-    return connect(arguments...);
-  }
-}
-
 class ScopedConnectHandshake {
  private:
   std::vector<int> acceptedRanks_;
@@ -61,8 +51,8 @@ class ScopedConnectHandshake {
         readyPollsPerPeer_(readyPollsPerPeer > 0 ? readyPollsPerPeer : 1),
         init(g_ncclSocketInit,
              [this](ncclSocket* sock, const ncclSocketAddress* addr, uint64_t magic, ncclSocketType,
-                    volatile uint32_t*, int, int) {
-               if (addr != nullptr) outgoingConnects.push_back({sock, addr, magic});
+                    volatile uint32_t* abortFlag, int, int) {
+               if (addr != nullptr) outgoingConnects.push_back({sock, addr, magic, abortFlag});
                else temporarySocket = sock;
                return ncclSuccess;
              }),
@@ -108,6 +98,7 @@ class ScopedConnectHandshake {
     ncclSocket* sock;
     const ncclSocketAddress* addr;
     uint64_t magic;
+    volatile uint32_t* abortFlag;
   };
 
   std::vector<int> sentRanks;
@@ -179,7 +170,7 @@ class RmaSocketSetupMicrotest : public ::testing::Test {
     });
     void* output = &listen;
 
-    EXPECT_EQ(ConnectWithoutAbort(ncclRmaSocketProxyConnect, nullptr, handles.data(), 2, 1, &listen, &output),
+    EXPECT_EQ(ncclRmaSocketProxyConnect(nullptr, handles.data(), 2, 1, &listen, &output, nullptr),
               ncclRemoteError);
     EXPECT_EQ(output, nullptr);
     EXPECT_EQ(failure.calls, failCall);
@@ -309,19 +300,14 @@ TEST_F(RmaSocketSetupMicrotest, Connect_InvalidArgumentsAreRejectedWithoutPublis
   void* handles[] = {&handle};
   void* collComm = reinterpret_cast<void*>(0x1);
 
-  EXPECT_EQ(ConnectWithoutAbort(ncclRmaSocketProxyConnect, nullptr, nullptr, 1, 0, &listen, &collComm),
-            ncclInvalidArgument);
+  EXPECT_EQ(ncclRmaSocketProxyConnect(nullptr, nullptr, 1, 0, &listen, &collComm, nullptr), ncclInvalidArgument);
   EXPECT_EQ(collComm, reinterpret_cast<void*>(0x1));
-  EXPECT_EQ(ConnectWithoutAbort(ncclRmaSocketProxyConnect, nullptr, handles, 1, 0, nullptr, &collComm),
-            ncclInvalidArgument);
+  EXPECT_EQ(ncclRmaSocketProxyConnect(nullptr, handles, 1, 0, nullptr, &collComm, nullptr), ncclInvalidArgument);
   EXPECT_EQ(collComm, reinterpret_cast<void*>(0x1));
-  EXPECT_EQ(ConnectWithoutAbort(ncclRmaSocketProxyConnect, nullptr, handles, 1, 0, &listen, nullptr),
-            ncclInvalidArgument);
-  EXPECT_EQ(ConnectWithoutAbort(ncclRmaSocketProxyConnect, nullptr, handles, 1, -1, &listen, &collComm),
-            ncclInvalidArgument);
+  EXPECT_EQ(ncclRmaSocketProxyConnect(nullptr, handles, 1, 0, &listen, nullptr, nullptr), ncclInvalidArgument);
+  EXPECT_EQ(ncclRmaSocketProxyConnect(nullptr, handles, 1, -1, &listen, &collComm, nullptr), ncclInvalidArgument);
   EXPECT_EQ(collComm, reinterpret_cast<void*>(0x1));
-  EXPECT_EQ(ConnectWithoutAbort(ncclRmaSocketProxyConnect, nullptr, handles, 1, 1, &listen, &collComm),
-            ncclInvalidArgument);
+  EXPECT_EQ(ncclRmaSocketProxyConnect(nullptr, handles, 1, 1, &listen, &collComm, nullptr), ncclInvalidArgument);
   EXPECT_EQ(collComm, reinterpret_cast<void*>(0x1));
 }
 
@@ -334,9 +320,9 @@ TEST_F(RmaSocketSetupMicrotest, Connect_AllPeersConnectedBuildsBidirectionalPeer
   std::array<void*, nranks> handles{{&handleStorage[0], &handleStorage[1]}};
   ScopedConnectHandshake handshake({1, 0}, /*firstMagic=*/100, /*readyPollsPerPeer=*/2);
   void* opaque = nullptr;
+  volatile uint32_t abortFlag = 0;
 
-  ASSERT_EQ(ConnectWithoutAbort(ncclRmaSocketProxyConnect, nullptr, handles.data(), nranks, 0, &listen, &opaque),
-            ncclSuccess);
+  ASSERT_EQ(ncclRmaSocketProxyConnect(nullptr, handles.data(), nranks, 0, &listen, &opaque, &abortFlag), ncclSuccess);
   auto* comm = static_cast<ncclRmaSocketProxyCollComm*>(opaque);
   ASSERT_NE(comm, nullptr);
   EXPECT_EQ(comm->rank, 0);
@@ -358,6 +344,8 @@ TEST_F(RmaSocketSetupMicrotest, Connect_AllPeersConnectedBuildsBidirectionalPeer
     EXPECT_EQ(handshake.outgoingConnects[peer].sock, &comm->peerSender[peer].sock);
     EXPECT_EQ(handshake.outgoingConnects[peer].addr, &handleStorage[peer].connectAddr);
     EXPECT_EQ(handshake.outgoingConnects[peer].magic, handleStorage[peer].magic);
+    // The caller's abort flag is threaded into every outgoing socket.
+    EXPECT_EQ(handshake.outgoingConnects[peer].abortFlag, &abortFlag);
   }
   for (int peer = 0; peer < nranks; ++peer) {
     EXPECT_NE(comm->peerSender[peer].buffer, nullptr);
@@ -376,8 +364,7 @@ TEST_F(RmaSocketSetupMicrotest, Connect_MissingPeerHandleReturnsErrorAndLeavesOu
   void* opaque = reinterpret_cast<void*>(0x1);
   ScopedHook close(g_ncclSocketClose, [](ncclSocket*, bool) { return ncclSuccess; });
 
-  EXPECT_EQ(ConnectWithoutAbort(ncclRmaSocketProxyConnect, nullptr, handles, 1, 0, &listen, &opaque),
-            ncclInvalidArgument);
+  EXPECT_EQ(ncclRmaSocketProxyConnect(nullptr, handles, 1, 0, &listen, &opaque, nullptr), ncclInvalidArgument);
   EXPECT_EQ(opaque, nullptr);
   EXPECT_EQ(close.calls, 2);
 }
@@ -389,10 +376,27 @@ TEST_F(RmaSocketSetupMicrotest, Connect_InvalidAcceptedRankReturnsErrorAndCleans
   void* opaque = reinterpret_cast<void*>(0x1);
   ScopedConnectHandshake handshake({1});
 
-  EXPECT_EQ(ConnectWithoutAbort(ncclRmaSocketProxyConnect, nullptr, handles, 1, 0, &listen, &opaque),
-            ncclInternalError);
+  EXPECT_EQ(ncclRmaSocketProxyConnect(nullptr, handles, 1, 0, &listen, &opaque, nullptr), ncclInternalError);
   EXPECT_EQ(opaque, nullptr);
   EXPECT_EQ(handshake.move.calls, 0);
+  EXPECT_EQ(handshake.close.calls, 3);
+}
+
+TEST_F(RmaSocketSetupMicrotest, Connect_AbortFlagWhileWaitingForAcceptReturnsErrorAndCleansPartialState) {
+  ncclSocket listen{};
+  ncclRmaSocketProxyHandle handle{};
+  void* handles[] = {&handle};
+  void* opaque = reinterpret_cast<void*>(0x1);
+  volatile uint32_t abortFlag = 1;
+  ScopedConnectHandshake handshake({0}, /*firstMagic=*/0, /*readyPollsPerPeer=*/2);
+
+  EXPECT_EQ(ncclRmaSocketProxyConnect(nullptr, handles, 1, 0, &listen, &opaque, &abortFlag), ncclInternalError);
+  EXPECT_EQ(opaque, nullptr);
+  // The ready loop observes the abort after its first poll, before the rank is received.
+  EXPECT_EQ(handshake.ready.calls, 1);
+  EXPECT_EQ(handshake.recv.calls, 0);
+  EXPECT_EQ(handshake.move.calls, 0);
+  // The in-flight accepted socket plus the sender and receiver sockets FreeCollComm closes.
   EXPECT_EQ(handshake.close.calls, 3);
 }
 
@@ -404,8 +408,7 @@ TEST_F(RmaSocketSetupMicrotest, Connect_DuplicateAcceptedRankReturnsErrorAndClea
   void* opaque = reinterpret_cast<void*>(0x1);
   ScopedConnectHandshake handshake({0, 0}, /*firstMagic=*/99);
 
-  EXPECT_EQ(ConnectWithoutAbort(ncclRmaSocketProxyConnect, nullptr, handles.data(), nranks, 0, &listen, &opaque),
-            ncclInternalError);
+  EXPECT_EQ(ncclRmaSocketProxyConnect(nullptr, handles.data(), nranks, 0, &listen, &opaque, nullptr), ncclInternalError);
   EXPECT_EQ(opaque, nullptr);
   EXPECT_EQ(handshake.move.calls, 1);
   EXPECT_EQ(handshake.close.calls, nranks * 2 + 1);
@@ -421,14 +424,8 @@ TEST_F(RmaSocketSetupMicrotest, CreateContext_InvalidConfigurationIsRejected) {
   EXPECT_EQ(ncclRmaSocketProxyCreateContext(&comm, nullptr, &ctx), ncclInvalidArgument);
   EXPECT_EQ(ncclRmaSocketProxyCreateContext(&comm, &config, nullptr), ncclInvalidArgument);
   config.nContexts = 0;
-  config.rankStride = 1;
   EXPECT_EQ(ncclRmaSocketProxyCreateContext(&comm, &config, &ctx), ncclInvalidArgument);
   config.nContexts = 1;
-  config.rankStride = 0;
-  EXPECT_EQ(ncclRmaSocketProxyCreateContext(&comm, &config, &ctx), ncclInvalidArgument);
-  config.rankStride = 3;
-  EXPECT_EQ(ncclRmaSocketProxyCreateContext(&comm, &config, &ctx), ncclInvalidArgument);
-  config.rankStride = 1;
   comm.nContexts = INT_MAX;
   EXPECT_EQ(ncclRmaSocketProxyCreateContext(&comm, &config, &ctx), ncclInvalidArgument);
 }
@@ -438,7 +435,6 @@ TEST_F(RmaSocketSetupMicrotest, CreateAndDestroyContext_PublishesRequestsAndUpda
   ASSERT_NE(comm, nullptr);
   ncclRmaConfig_t config{};
   config.nContexts = 2;
-  config.rankStride = 1;
   void* opaque = nullptr;
 
   ASSERT_EQ(ncclRmaSocketProxyCreateContext(comm, &config, &opaque), ncclSuccess);
@@ -467,7 +463,6 @@ TEST_F(RmaSocketSetupMicrotest, CreateContext_QueueCapacityOverflowDoesNotPublis
   comm->nContexts = existingContexts;
   ncclRmaConfig_t config{};
   config.nContexts = 2;
-  config.rankStride = 1;
   void* output = nullptr;
 
   EXPECT_EQ(ncclRmaSocketProxyCreateContext(comm, &config, &output), ncclInvalidArgument);
@@ -486,10 +481,8 @@ TEST_F(RmaSocketSetupMicrotest, CreateContext_SuccessiveBatchesGrowCapacityFromC
   ASSERT_NE(comm, nullptr);
   ncclRmaConfig_t firstConfig{};
   firstConfig.nContexts = 1;
-  firstConfig.rankStride = 1;
   ncclRmaConfig_t secondConfig{};
   secondConfig.nContexts = 2;
-  secondConfig.rankStride = 1;
   void* first = nullptr;
   void* second = nullptr;
 
