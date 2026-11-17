@@ -15765,11 +15765,13 @@ TEST(WaitcheckTest, Gfx1250RelativeDestinationWriteInvalidatesReturnLink) {
       << report.analysis_error;
 }
 
-TEST(WaitcheckTest, Gfx12NestedCallRestoresLinkFromProvenVgprLanes) {
+TEST(WaitcheckTest, Gfx11And12NestedCallRestoresLinkFromProvenVgprLanes) {
   for (const auto [arch, machine] :
-       {std::pair{ROCJITSU_CODE_ARCH_CDNA5, EF_AMDGPU_MACH_AMDGCN_GFX1250},
+       {std::pair{ROCJITSU_CODE_ARCH_RDNA3, EF_AMDGPU_MACH_AMDGCN_GFX1100},
+        std::pair{ROCJITSU_CODE_ARCH_RDNA3_5, EF_AMDGPU_MACH_AMDGCN_GFX1150},
+        std::pair{ROCJITSU_CODE_ARCH_CDNA5, EF_AMDGPU_MACH_AMDGCN_GFX1250},
         std::pair{ROCJITSU_CODE_ARCH_RDNA4, EF_AMDGPU_MACH_AMDGCN_GFX1201}}) {
-    for (bool clobber_spill : {false, true}) {
+    for (unsigned clobber_spill : {0u, 1u, 2u}) {
       SCOPED_TRACE(testing::Message() << machine << '/' << clobber_spill);
       std::vector<uint32_t> program;
       program.push_back(build_s_call_b64(30, 1, arch).value()); // Helper at 0x08.
@@ -15778,8 +15780,12 @@ TEST(WaitcheckTest, Gfx12NestedCallRestoresLinkFromProvenVgprLanes) {
                                      0xd7610002u, 0x0201021fu}); // v_writelane v2,s31,1.
       const size_t inner_call = program.size();
       program.push_back(0);
-      if (clobber_spill)
+      if (clobber_spill == 1)
         append_inst(program, v_mov_b32(2, 0)); // Destroy both saved lanes.
+      if (clobber_spill == 2) {
+        program.push_back(0xbefd0081u); // s_mov_b32 m0, 1.
+        program.push_back(0x7e028480u); // v_movreld_b32 v1, 0 writes v2.
+      }
       program.insert(program.end(), {0xd760001eu, 0x02010102u, // v_readlane s30,v2,0.
                                      0xd760001fu, 0x02010302u}); // v_readlane s31,v2,1.
       program.push_back(build_s_setpc_b64(30, arch).value());
@@ -15791,7 +15797,7 @@ TEST(WaitcheckTest, Gfx12NestedCallRestoresLinkFromProvenVgprLanes) {
       const AmdGpuCodeObject object(image.data(), image.size());
       const auto report = analyze_waitcnts_for_kernel(object, arch, 0);
       ASSERT_TRUE(report.supported) << report.analysis_error;
-      EXPECT_EQ(report.complete, !clobber_spill) << diagnostic_summary(report);
+      EXPECT_EQ(report.complete, clobber_spill == 0) << diagnostic_summary(report);
       if (clobber_spill)
         EXPECT_NE(report.analysis_error.find("incomplete control flow"), std::string::npos)
             << report.analysis_error;
@@ -15854,6 +15860,44 @@ TEST(WaitcheckTest, Gfx950NestedCallRestoresLinkFromProvenVgprLanes) {
     ASSERT_TRUE(report.supported) << report.analysis_error;
     EXPECT_EQ(report.complete, !clobber_spill && !enable_vskip)
         << report.analysis_error << '\n' << diagnostic_summary(report);
+  }
+}
+
+TEST(WaitcheckTest, Gfx950SymbolledCalleePreservesAbiSavedLinkLane) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_CDNA4;
+  for (const auto [spill_vgpr, symbolled_leaf] :
+       {std::pair{40u, true}, std::pair{40u, false}, std::pair{2u, true}}) {
+    SCOPED_TRACE(testing::Message() << spill_vgpr << '/' << symbolled_leaf);
+    std::vector<uint32_t> caller{build_s_call_b64(30, 1, arch).value(),
+                                 build_s_endpgm(arch).value()};
+    std::vector<uint32_t> outer{0xd28a0000u | spill_vgpr,
+                                0x0001001eu, // Save s30 in lane 0.
+                                0xd28a0000u | spill_vgpr,
+                                0x0001021fu, // Save s31 in lane 1.
+                                build_s_call_b64(30, 5, arch).value(),
+                                0xd289001eu,
+                                0x00010100u | spill_vgpr, // Restore s30.
+                                0xd289001fu,
+                                0x00010300u | spill_vgpr, // Restore s31.
+                                build_s_setpc_b64(30, arch).value()};
+    std::vector<uint32_t> leaf{0xdc70401cu,
+                               0x00200000u | (spill_vgpr << 8),  // Save the VGPR in scratch.
+                               0x7e000300u | (spill_vgpr << 17), // Clobber it temporarily.
+                               0xdc50401cu,
+                               (spill_vgpr << 24) | 0x00200000u, // Restore the VGPR.
+                               build_s_setpc_b64(30, arch).value()};
+    auto image = waitcheck_test::make_gfx_multi_kernel_code_object(
+        {{"caller", caller}, {"outer", outer}, {"leaf", leaf}}, EF_AMDGPU_MACH_AMDGCN_GFX950);
+    if (!symbolled_leaf) {
+      const auto *ehdr = reinterpret_cast<const Elf64_Ehdr *>(image.data());
+      const auto *sections = reinterpret_cast<const Elf64_Shdr *>(image.data() + ehdr->e_shoff);
+      auto *symbols = reinterpret_cast<Elf64_Sym *>(image.data() + sections[3].sh_offset);
+      symbols[6].st_info = 0; // Keep the leaf code but remove its ABI function symbol.
+    }
+    const AmdGpuCodeObject object(image.data(), image.size());
+    const auto report = analyze_waitcnts_for_kernel(object, arch, 0);
+    ASSERT_TRUE(report.supported) << report.analysis_error;
+    EXPECT_EQ(report.complete, spill_vgpr == 40 && symbolled_leaf) << diagnostic_summary(report);
   }
 }
 

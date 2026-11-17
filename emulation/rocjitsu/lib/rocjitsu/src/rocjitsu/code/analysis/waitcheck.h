@@ -255,7 +255,9 @@ waitcheck_kernels(const AmdGpuCodeObject &code_object);
 ///
 /// @details Each kernel is still analyzed independently, but the decoder,
 /// diagnostic state, and report are reused across the batch. This is intended
-/// for bounded-granularity offline schedulers.
+/// for bounded-granularity offline schedulers. An empty span analyzes no
+/// kernels; callers that receive no entries from waitcheck_kernels() must use
+/// analyze_waitcnts() to check function symbols or executable sections.
 [[nodiscard]] WaitcheckReport
 analyze_waitcnts_for_kernels(const CodeObject &code_object, rj_code_arch_t arch,
                              std::span<const WaitcheckKernelInfo> kernels,

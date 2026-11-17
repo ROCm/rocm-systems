@@ -504,7 +504,8 @@ struct Analyzer : private WaitcheckStateOps {
   void analyze_cfg(std::vector<std::unique_ptr<BasicBlock>> &blocks,
                    const std::string &section_name, uint64_t file_offset_base, rj_code_arch_t arch,
                    uint32_t wavefront_size, uint64_t text_size,
-                   std::span<const uint64_t> entry_offsets = {}, bool non_entry_function = false) {
+                   std::span<const uint64_t> entry_offsets = {}, bool non_entry_function = false,
+                   std::span<const uint64_t> abi_function_entries = {}) {
     if (blocks.empty())
       return;
     wavefront_size_ = wavefront_size;
@@ -557,17 +558,16 @@ struct Analyzer : private WaitcheckStateOps {
       uint8_t restored = 0;
       auto operator<=>(const LinkLaneSpill &) const = default;
     };
-    using CallFrame =
-        std::tuple<size_t, uint16_t, size_t, uint64_t, bool, std::optional<uint16_t>,
-                   LinkLaneSpill>;
+    using CallFrame = std::tuple<size_t, uint16_t, size_t, uint64_t, bool, std::optional<uint16_t>,
+                                 LinkLaneSpill, bool>;
     using CallContinuationSeed = std::pair<uint16_t, uint64_t>;
     using AnalysisNodeKey =
         std::tuple<size_t, std::vector<CallFrame>, std::optional<CallContinuationSeed>>;
     constexpr size_t kMaxCallDepth = 32;
-    // PyTorch's incomplete-gamma kernels have over 220,000 distinct
-    // block/return-stack pairs at depth four, with under 1,500 physical
-    // blocks. Bound the expansion independently of physical block count.
-    constexpr size_t kCallContextNodeAllowance = 262144;
+    // Large device helpers can exceed 262,144 distinct block/return-stack
+    // pairs despite having under 1,500 physical blocks. Keep a fixed bound
+    // independent of physical block count; reaching it reports incomplete.
+    constexpr size_t kCallContextNodeAllowance = 524288;
     const size_t max_analysis_nodes =
         std::max(blocks.size() * 32, blocks.size() + kCallContextNodeAllowance);
 
@@ -684,6 +684,9 @@ struct Analyzer : private WaitcheckStateOps {
                                  src->cls == RegClass::SGPR && dst->width == 2 && src->width == 2;
           const bool relative_sgpr_write = name.starts_with("s_movreld") ||
                                            name.starts_with("s_movrelsd");
+          const bool relative_vgpr_write = name.starts_with("v_movreld") ||
+                                           name.starts_with("v_movrelsd") ||
+                                           name.starts_with("v_swaprel");
           const bool writelane = name == "v_writelane_b32" && inst.num_dst_operands() == 1 &&
                                  inst.num_src_operands() == 3 &&
                                  (!inst.is_vskip_affected() || !vskip_may_enable);
@@ -692,19 +695,27 @@ struct Analyzer : private WaitcheckStateOps {
                                 (!inst.is_vskip_affected() || !vskip_may_enable);
           const auto write_vgpr =
               writelane ? inst.dst_operand(0)->to_register_ref() : std::nullopt;
-          // GFX12 lists the old destination last; older VOP3 lists it first.
-          const unsigned write_value_operand =
-              arch == ROCJITSU_CODE_ARCH_CDNA5 || arch == ROCJITSU_CODE_ARCH_RDNA4 ? 0 : 1;
-          const auto write_source =
-              writelane ? inst.src_operand(write_value_operand)->to_register_ref() : std::nullopt;
-          const auto write_lane =
-              writelane ? inst.src_operand(write_value_operand + 1)->const_value() : std::nullopt;
+          // Decoder operand order differs between VOP3 and VOP1. The saved
+          // SGPR and literal lane are adjacent in either form.
+          std::optional<RegisterRef> write_source;
+          std::optional<uint64_t> write_lane;
+          if (writelane)
+            for (int operand = 0; operand + 1 < inst.num_src_operands(); ++operand) {
+              const auto source = inst.src_operand(operand)->to_register_ref();
+              const auto lane = inst.src_operand(operand + 1)->const_value();
+              if (source && source->cls == RegClass::SGPR && lane) {
+                write_source = source;
+                write_lane = lane;
+                break;
+              }
+            }
           const auto read_sgpr =
               readlane ? inst.dst_operand(0)->to_register_ref() : std::nullopt;
           const auto read_vgpr =
               readlane ? inst.src_operand(0)->to_register_ref() : std::nullopt;
           const auto read_lane = readlane ? inst.src_operand(1)->const_value() : std::nullopt;
-          for (auto &frame : call_stack_after_block) {
+          for (size_t frame_index = 0; frame_index < call_stack_after_block.size(); ++frame_index) {
+            auto &frame = call_stack_after_block[frame_index];
             const uint16_t link = std::get<1>(frame);
             const auto saved = std::get<5>(frame);
             auto &spill = std::get<6>(frame);
@@ -718,13 +729,22 @@ struct Analyzer : private WaitcheckStateOps {
               if (!half)
                 continue;
               const auto [vgpr, lane] = *half;
+              // A resolved AMDHSA function symbol follows the AMDGPU call
+              // convention. Its callee-saved VGPRs retain the caller's saved
+              // link even if the callee temporarily uses those registers.
+              // Unknown targets and registers outside the preserved mask
+              // continue through the ordinary clobber proof below.
+              const bool abi_saved_vgpr = vgpr >= 40 && vgpr <= 255 && (vgpr - 40) % 16 < 8;
+              if (frame_index + 1 < call_stack_after_block.size() &&
+                  std::get<7>(call_stack_after_block.back()) && abi_saved_vgpr)
+                continue;
               if (du.defs.intersects(RegisterRef{RegClass::VGPR, vgpr, 1}) &&
                   !(write_vgpr && write_vgpr->cls == RegClass::VGPR &&
                     write_vgpr->index == vgpr && write_lane && *write_lane < wavefront_size &&
                     *write_lane != lane))
                 half.reset();
             }
-            if (name == "s_set_vgpr_msb" || name.starts_with("s_setreg") ||
+            if (relative_vgpr_write || name == "s_set_vgpr_msb" || name.starts_with("s_setreg") ||
                 name == "s_alloc_vgpr")
               spill.halves = {};
             if (write_vgpr && write_vgpr->cls == RegClass::VGPR && write_source &&
@@ -874,8 +894,12 @@ struct Analyzer : private WaitcheckStateOps {
           return;
         }
         std::vector<CallFrame> callee_stack = call_stack_after_block;
+        const bool abi_function =
+            std::ranges::find(abi_function_entries, call.callee->start_offset()) !=
+            abi_function_entries.end();
         callee_stack.emplace_back(continuation_it->second, call.return_sreg, callee_it->second,
-                                  call.source_call_offset, true, std::nullopt, LinkLaneSpill{});
+                                  call.source_call_offset, true, std::nullopt, LinkLaneSpill{},
+                                  abi_function);
         if (!add_context_edge(callee_it->second, std::move(callee_stack),
                               /*conservative_sgpr_entry=*/true)) {
           report_.supported = false;
@@ -10517,9 +10541,10 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
     const std::span<const WaitcheckKernelInfo> kernels =
         kernels_known ? known_kernels : std::span<const WaitcheckKernelInfo>{discovered_kernels};
     report.kernels_discovered = kernels.size();
-    const auto function_entries = !kernels_known && kernels.empty()
-                                      ? find_waitcheck_function_entries(code_object)
-                                      : std::vector<uint64_t>{};
+    const auto all_function_entries = find_waitcheck_function_entries(code_object);
+    const auto abi_function_entries = hsa_abi != 0 ? all_function_entries : std::vector<uint64_t>{};
+    const auto function_entries =
+        !kernels_known && kernels.empty() ? all_function_entries : std::vector<uint64_t>{};
     if (kernels_known && kernels.empty())
       return report;
     if (selected_kernel_entry &&
@@ -10558,7 +10583,7 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
         analyzer.set_kernel_context(kernel);
         analyzer.analyze_cfg(blocks.value(), ".text", text_file_offset, arch, wavefront_size,
                              text_size, entry,
-                             /*non_entry_function=*/kernel == nullptr);
+                             /*non_entry_function=*/kernel == nullptr, abi_function_entries);
         if (kernel && report.supported && !report.stopped_early) {
           ++report.kernels_analyzed;
           if (options.kernel_analyzed_callback)
