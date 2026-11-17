@@ -39,7 +39,7 @@ struct LegacyAtomicTargetCase {
   const char *name;
 };
 
-inline constexpr std::array<LegacyAtomicTargetCase, 2> kLegacyAtomicTargetCases = {{
+inline constexpr std::array<LegacyAtomicTargetCase, 4> kLegacyAtomicTargetCases = {{
     {.target = ROCJITSU_CODE_TARGET_GFX950,
      .machine = EF_AMDGPU_MACH_AMDGCN_GFX950,
      .arch = IsaFamily::Cdna4,
@@ -52,6 +52,18 @@ inline constexpr std::array<LegacyAtomicTargetCase, 2> kLegacyAtomicTargetCases 
      .wave = 64,
      .cdna = true,
      .name = "Gfx942Wave64"},
+    {.target = ROCJITSU_CODE_TARGET_GFX1100,
+     .machine = EF_AMDGPU_MACH_AMDGCN_GFX1100,
+     .arch = IsaFamily::Rdna3,
+     .wave = 32,
+     .cdna = false,
+     .name = "Gfx1100Wave32"},
+    {.target = ROCJITSU_CODE_TARGET_GFX1100,
+     .machine = EF_AMDGPU_MACH_AMDGCN_GFX1100,
+     .arch = IsaFamily::Rdna3,
+     .wave = 64,
+     .cdna = false,
+     .name = "Gfx1100Wave64"},
 }};
 
 enum class LegacyAtomicForm { FlatAdd, GlobalAdd, BufferAdd, FlatCas, GlobalCas, BufferCas };
@@ -73,17 +85,18 @@ inline bool legacy_atomic_compare(LegacyAtomicForm form) {
          form == LegacyAtomicForm::BufferCas;
 }
 
-inline bool legacy_atomic_signed(const LegacyAtomicTargetCase &target, LegacyAtomicForm form) {
-  return !legacy_atomic_buffer(form) && (!target.cdna || legacy_atomic_global(form));
+inline bool legacy_atomic_signed(const LegacyAtomicTargetCase &, LegacyAtomicForm form) {
+  return legacy_atomic_global(form);
 }
 
 inline std::string legacy_atomic_mnemonic(const LegacyAtomicTargetCase &target,
                                           LegacyAtomicForm form) {
-  (void)target;
   const std::string prefix = legacy_atomic_buffer(form)   ? "buffer_atomic_"
                              : legacy_atomic_global(form) ? "global_atomic_"
                                                           : "flat_atomic_";
-  return prefix + (legacy_atomic_compare(form) ? "cmpswap" : "add");
+  if (target.cdna)
+    return prefix + (legacy_atomic_compare(form) ? "cmpswap" : "add");
+  return prefix + (legacy_atomic_compare(form) ? "cmpswap_b32" : "add_u32");
 }
 
 // Literal opcode/operand/cache fixtures, independent of generated builders and
@@ -92,10 +105,21 @@ inline std::string legacy_atomic_mnemonic(const LegacyAtomicTargetCase &target,
 inline std::array<uint32_t, 2> legacy_atomic_words(const LegacyAtomicTargetCase &target,
                                                    LegacyAtomicForm form, int32_t byte_offset = 4,
                                                    bool returning = true) {
-  (void)target;
   const bool buffer = legacy_atomic_buffer(form);
   const bool global = legacy_atomic_global(form);
   const bool compare = legacy_atomic_compare(form);
+  if (!target.cdna) {
+    const uint32_t base = buffer   ? (compare ? 0xe0d07000u : 0xe0d47000u)
+                          : global ? (compare ? 0xdcd2e000u : 0xdcd6e000u)
+                                   : (compare ? 0xdcd0e000u : 0xdcd4e000u);
+    const uint32_t mask = global ? 0x1fffu : 0xfffu;
+    const uint32_t vdst = returning ? 0x06000000u : 0u;
+    return {(base & ~(mask | 0x4000u)) | (returning ? 0x4000u : 0u) |
+                (static_cast<uint32_t>(byte_offset) & mask),
+            buffer   ? 0x07c20204u
+            : global ? vdst | 0x00040204u
+                     : vdst | 0x007c0204u};
+  }
   const uint32_t word0 = buffer   ? (compare ? 0xe106f000u : 0xe10af000u)
                          : global ? (compare ? 0xdf07a000u : 0xdf0ba000u)
                                   : (compare ? 0xdf070000u : 0xdf0b0000u);
@@ -110,7 +134,7 @@ inline std::array<uint32_t, 2> legacy_atomic_words(const LegacyAtomicTargetCase 
 
 inline std::vector<uint8_t> make_legacy_atomic_sequence_elf(const LegacyAtomicTargetCase &target,
                                                             std::vector<uint32_t> words) {
-  words.push_back(0xbf8c0000u); // s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0).
+  words.push_back(target.cdna ? 0xbf8c0000u : 0xbf890000u); // s_waitcnt all counters zero.
   words.push_back(build_s_endpgm(target.arch).value());
   std::vector<uint8_t> image = make_amdgpu_kernel_elf(words, 0, 3, target.machine, 3, 0, false,
                                                       false, false, false, target.wave == 32);
@@ -180,7 +204,7 @@ inline std::vector<uint8_t> make_shared_legacy_atomic_elf(const LegacyAtomicTarg
   const std::array<uint32_t, 2> atomic =
       legacy_atomic_words(target, LegacyAtomicForm::GlobalCas, -4);
   words.insert(words.end(), atomic.begin(), atomic.end());
-  words.push_back(0xbf8c0000u);
+  words.push_back(target.cdna ? 0xbf8c0000u : 0xbf890000u);
   words.push_back(build_s_setpc_b64(30, target.arch).value());
   std::vector<uint8_t> image = make_amdgpu_two_kernel_elf(words, 0, 3, target.machine,
                                                           {target.wave == 32, target.wave == 32});
@@ -242,7 +266,7 @@ inline bool legacy_atomic_output_matches(const FaultMutationContext &source, uin
   if ((prefix != 0xe0000000u && prefix != 0xdc000000u) ||
       (prefix == 0xdc000000u && segment != 0 && segment != 2))
     return false;
-  const bool signed_offset = prefix == 0xdc000000u && (!cdna || segment == 2);
+  const bool signed_offset = prefix == 0xdc000000u && segment == 2;
   const uint32_t mask = signed_offset ? 0x1fffu : 0xfffu;
   const uint32_t encoded = original[0] & mask;
   const int64_t old_offset =
