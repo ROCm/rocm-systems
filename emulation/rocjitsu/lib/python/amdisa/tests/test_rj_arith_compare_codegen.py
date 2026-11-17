@@ -432,40 +432,6 @@ def test_tru_alias_matches_profile_spelling(prefix):
 
 
 @pytest.mark.parametrize('arch', ['rdna1', 'rdna2'])
-@pytest.mark.parametrize(
-    'name',
-    [
-        n
-        for n, (b, _) in FLOAT_COMPARISONS.items()
-        if b in (32, 64) and '_TRU_' not in n
-    ],
-)
-def test_gfx10_native_float_comparisons_use_library_status(arch, name):
-    bits, constant = FLOAT_COMPARISONS[name]
-    for vop3 in (False, True):
-        body = gen_float_compare(
-            context(
-                arch,
-                name,
-                ['dst'] if vop3 else [],
-                ['a', 'b'],
-                is_vop3=vop3,
-                result_writer='commit_result' if vop3 else None,
-            )
-        )
-        api = 'rj_arith_' + name.lower()
-        assert f'{api}_w32_gfx10, {api}_w64_gfx10,' in body
-        assert f'execute_float_compare<{bits}>' in body
-        assert 'execute_compare_with_exceptions' not in body
-        assert ('RJ_ARITH_SEMANTICS_COMPATIBILITY' in body) == (constant and vop3)
-        assert ('RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL' in body) == (constant and vop3)
-        assert 'RJ_ARITH_ALU_HIGH' not in body
-        if name.startswith('V_CMPX_'):
-            assert ('commit_result' if vop3 else 'wf.set_exec(result)') in body
-            assert 'wf.set_vcc_mask(result)' not in body
-
-
-@pytest.mark.parametrize('arch', ['rdna1', 'rdna2'])
 @pytest.mark.parametrize('encoding,count', [('vopc', 96), ('vop3', 64)])
 def test_gfx10_native_float_ownership_per_method(arch, encoding, count):
     root = (
@@ -495,5 +461,67 @@ def test_gfx10_native_float_ownership_per_method(arch, encoding, count):
                 'ROCJITSU_TRY_SIMD',
             )
         ), match[1]
+        checked += 1
+    assert checked == count
+
+
+@pytest.mark.parametrize('arch', ['rdna1', 'rdna2'])
+@pytest.mark.parametrize(
+    'name',
+    [
+        n
+        for n, (b, _) in FLOAT_COMPARISONS.items()
+        if b in (16, 32, 64) and '_TRU_' not in n
+    ],
+)
+def test_gfx10_float_comparisons_use_library_status(arch, name):
+    bits, constant = FLOAT_COMPARISONS[name]
+    for vop3 in (False, True):
+        body = gen_float_compare(
+            context(
+                arch,
+                name,
+                ['dst'] if vop3 else [],
+                ['a', 'b'],
+                is_vop3=vop3,
+                result_writer='commit_result' if vop3 else None,
+            )
+        )
+        api = 'rj_arith_' + name.lower()
+        assert f'{api}_w32_gfx10, {api}_w64_gfx10,' in body
+        assert f'execute_float_compare<{bits}>' in body
+        assert 'execute_compare_with_exceptions' not in body
+        assert ('RJ_ARITH_SEMANTICS_COMPATIBILITY' in body) == (constant and vop3)
+        assert ('RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL' in body) == (constant and vop3)
+        assert 'RJ_ARITH_ALU_HIGH' not in body
+        if name.startswith('V_CMPX_'):
+            assert ('commit_result' if vop3 else 'wf.set_exec(result)') in body
+            assert 'wf.set_vcc_mask(result)' not in body
+
+
+@pytest.mark.parametrize('arch', ['rdna1', 'rdna2'])
+@pytest.mark.parametrize('encoding,count', [('vopc', 64), ('vop3', 32)])
+def test_gfx10_half_float_ownership_per_method(arch, encoding, count):
+    root = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+    )
+    source = (root / arch / f'{encoding}_exec.cpp').read_text()
+    checked = 0
+    for match in re.finditer(
+        r'void (VCmpx?\w+F16Vop\w*)::execute(?:_modifier)?_impl\([^)]*\)\s*\{', source
+    ):
+        if 'Class' in match[1]:
+            continue
+        end, depth = match.end(), 1
+        while depth:
+            depth += (source[end] == '{') - (source[end] == '}')
+            end += 1
+        body = source[match.end() : end - 1]
+        assert '_gfx10,' in body, match[1]
+        assert 'execute_float_compare<16>' in body, match[1]
+        assert 'execute_compare_with_exceptions' not in body, match[1]
+        assert 'CapturedArithmeticSource' not in body, match[1]
+        assert 'RJ_ARITH_ALU_HIGH' not in body, match[1]
         checked += 1
     assert checked == count

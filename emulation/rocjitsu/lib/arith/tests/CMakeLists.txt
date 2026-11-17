@@ -294,6 +294,7 @@ foreach(
         float_equality
         float_gfx908
         float_native_gfx10
+        float_half_gfx10
         float_ordered
         float_gfx1150
         float_unordered

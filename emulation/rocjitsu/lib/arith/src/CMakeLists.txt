@@ -42,6 +42,7 @@ add_library(
     compare/float_compare_gfx1150.cpp
     compare/float_compare_gfx908.cpp
     compare/float_compare_gfx10.cpp
+    compare/float_compare_half_gfx10.cpp
     compare/integer_compare.cpp
     dot/scalar_repair.cpp
     dot/dot.cpp

@@ -145,14 +145,8 @@ def gen_float_compare(ctx: ExecuteContext) -> str | None:
     if len(src) != 2 or len(dst) > 1:
         return None
     bits, constant = FLOAT_COMPARISONS[mnemonic]
-    gfx10_native = arch in ('rdna1', 'rdna2') and bits in (32, 64)
-    # GFX10 also spells true TRU. Its not-yet-migrated FP16 alias keeps
-    # the legacy constant handler until its signaling policy is ported.
-    if '_TRU_' in mnemonic and not (arch.startswith('cdna') or gfx10_native):
-        return None
-    if arch == 'rdna1' and not gfx10_native:
-        return None
-    if arch == 'rdna2' and not is_vop3 and not gfx10_native:
+    gfx10 = arch in ('rdna1', 'rdna2')
+    if '_TRU_' in mnemonic and not (arch.startswith('cdna') or gfx10):
         return None
     # GFX12 removed the constant predicates; their rj-arith APIs describe RDNA3.
     if arch == 'rdna4' and constant:
@@ -167,7 +161,7 @@ def gen_float_compare(ctx: ExecuteContext) -> str | None:
             '                       ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |',
             '                       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);',
         ]
-        if bits == 16 and arch != 'rdna2':
+        if bits == 16 and not gfx10:
             lines += [
                 '  const uint32_t opsel = amdgpu::vop3_opsel(inst_);',
                 '  modifiers |= ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) |',
@@ -207,7 +201,7 @@ def gen_float_compare(ctx: ExecuteContext) -> str | None:
             f'      {src[0]}, {src[1]}, {skip_inputs}, {result_writer}, exec_mask);',
         ]
         return '\n'.join(lines)
-    if arch == 'cdna1' or gfx10_native:
+    if arch == 'cdna1' or gfx10:
         # Signaling constant predicates still need operands when reporting FP status.
         skip_inputs = str(constant).lower()
         if constant and is_vop3:
@@ -230,9 +224,8 @@ def gen_float_compare(ctx: ExecuteContext) -> str | None:
             f'      {result_writer}, exec_mask);',
         ]
         return '\n'.join(lines)
-    signaling = ', true' if arch == 'rdna2' else ''
     lines += [
-        f'  amdgpu::arith::execute_float_compare<{bits}{signaling}>(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
+        f'  amdgpu::arith::execute_float_compare<{bits}>(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
         f'      wf.cu().arithmetic_flags(), {modifiers},',
         f'      {src[0]}, {src[1]}, {str(constant).lower()},',
         f'      {result_writer}, exec_mask);',
