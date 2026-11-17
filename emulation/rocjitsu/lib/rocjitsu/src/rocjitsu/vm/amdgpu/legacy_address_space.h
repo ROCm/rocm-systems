@@ -186,6 +186,8 @@ public:
   /// Local/admitted classification must remain stable while request_mutex is
   /// held shared; callbacks must not acquire that mutex themselves.
   std::function<VmAccessAdmission(uint64_t, std::size_t, VmAccessKind)> access_admission = {};
+  std::shared_ptr<const std::atomic<uint64_t>> local_grant_epoch = {};
+  std::function<VmLocalGrant(uint64_t, std::size_t)> local_grant = {};
   /// Optional nonblocking permit across raw admission and backing mutation.
   std::shared_ptr<VmRawBackingWriteGate> raw_write_gate = {};
   /// Copied grant metadata; classification must not retain a backing owner.
@@ -274,11 +276,13 @@ public:
                        : std::shared_lock<util::DistributedSharedMutex>{}) {}
 
     void bind(LegacyPageTable *page_table, util::DistributedSharedMutex *page_table_mutex,
-              const uint64_t *generation, uint64_t registry_generation) {
+              const uint64_t *generation, uint64_t registry_generation,
+              const LegacyPageTableCacheState *policies) {
       page_table_ = page_table;
       page_table_mutex_ = page_table_mutex;
       generation_ = generation;
       registry_generation_ = registry_generation;
+      policies_ = policies;
     }
 
     std::shared_ptr<util::DistributedSharedMutex> mutex_;
@@ -287,6 +291,7 @@ public:
     util::DistributedSharedMutex *page_table_mutex_ = nullptr;
     const uint64_t *generation_ = nullptr;
     uint64_t registry_generation_ = 0;
+    const LegacyPageTableCacheState *policies_ = nullptr;
   };
 
   explicit LegacyAddressSpace(GpuMemory &backing)
@@ -294,6 +299,8 @@ public:
         instance_id_(next_instance_id_.fetch_add(1, std::memory_order_relaxed)) {
     rocjitsu::install_host_access_guard();
   }
+
+  uint64_t instance_id() const { return instance_id_; }
 
   /// @brief Register a process's page table in the VMID table.
   /// @param generation Optional mutation counter used by translation caches.
@@ -348,7 +355,7 @@ public:
       if (it == vmid_table_.end() || it->second.request_mutex != expected)
         return {};
       guard.bind(it->second.page_table, it->second.mutex, it->second.generation,
-                 vmid_registry_generation_);
+                 vmid_registry_generation_, it->second.page_table_cache_state.get());
       return guard;
     }
     while (true) {
@@ -366,7 +373,7 @@ public:
       auto it = vmid_table_.find(vmid);
       if (it != vmid_table_.end() && it->second.request_mutex == request_mutex) {
         guard.bind(it->second.page_table, it->second.mutex, it->second.generation,
-                   vmid_registry_generation_);
+                   vmid_registry_generation_, it->second.page_table_cache_state.get());
         return guard;
       }
     }
@@ -386,7 +393,7 @@ public:
       auto it = vmid_table_.find(vmid);
       if (it != vmid_table_.end() && it->second.request_mutex == guard.mutex_) {
         guard.bind(it->second.page_table, it->second.mutex, it->second.generation,
-                   vmid_registry_generation_);
+                   vmid_registry_generation_, it->second.page_table_cache_state.get());
         return true;
       }
       guard.lock_.unlock();
@@ -645,6 +652,13 @@ public:
       });
     });
   }
+
+  /// Check an ordinary local VRAM instruction against one stable page table.
+  /// Complex extents fall back to the general per-span translation path.
+  bool local_ingress_mapped(std::span<const MemoryIngressSpan> spans, uint64_t begin, uint64_t end,
+                            uint32_t vmid,
+                            const std::shared_ptr<util::DistributedSharedMutex> &expected,
+                            const std::shared_ptr<LegacyPageTableCacheState> &policies) const;
 
   /// @brief Return whether a GPU VA has a VMID page-table mapping.
   bool is_mapped(uint64_t addr, uint32_t vmid = 0) const {
@@ -1720,6 +1734,12 @@ private:
   friend class GpuVm;
   friend class LegacyAddressSpaceTestAccess;
 
+#if defined(RJ_GPU_MEMORY_WITH_ASAN)
+  static constexpr bool kCheckAsanBacking = true;
+#else
+  static constexpr bool kCheckAsanBacking = false;
+#endif
+
   void set_default_passthrough(bool passthrough) {
     std::unique_lock lock(vmid_mutex_);
     default_passthrough_ = passthrough;
@@ -2553,62 +2573,7 @@ private:
   ///   this path:  page table lock -> close() -> descriptor lock
   ///   GEM_VA:     descriptor lock -> map_pages() -> page table lock
   /// Nothing about reading procfs wants the hooks, so it does not call them.
-  static PageWritability host_page_writability(const uint8_t *page) {
-    if (page == nullptr)
-      return PageWritability::Inaccessible;
-    if (proc_maps_open_failure_for_test_.load(std::memory_order_relaxed))
-      return PageWritability::Indeterminate;
-    const auto address = reinterpret_cast<uintptr_t>(page);
-    const long fd = ::syscall(SYS_openat, AT_FDCWD, "/proc/self/maps", O_RDONLY | O_CLOEXEC);
-    if (fd < 0)
-      return PageWritability::Indeterminate;
-
-    // Parsed incrementally: the table can be large, and a line may straddle
-    // reads, so keep any partial tail and prepend it to the next chunk.
-    std::string pending;
-    char chunk[8192];
-    PageWritability answer = PageWritability::Indeterminate;
-    for (bool reading = true; reading;) {
-      const long got = ::syscall(SYS_read, static_cast<int>(fd), chunk, sizeof(chunk));
-      if (got < 0) {
-        // A signal arriving mid-read says nothing about the mapping.
-        if (errno == EINTR)
-          continue;
-        break;
-      }
-      if (got == 0) {
-        // Walked the whole table without covering the address: nothing is
-        // mapped there, which is a definite answer rather than a failure.
-        answer = PageWritability::Inaccessible;
-        break;
-      }
-      pending.append(chunk, static_cast<size_t>(got));
-      size_t line_begin = 0;
-      for (size_t newline = pending.find('\n', line_begin); newline != std::string::npos;
-           newline = pending.find('\n', line_begin)) {
-        const std::string line(pending, line_begin, newline - line_begin);
-        line_begin = newline + 1;
-        uintptr_t begin = 0;
-        uintptr_t end = 0;
-        char permissions[5] = {};
-        if (std::sscanf(line.c_str(), "%zx-%zx %4s", &begin, &end, permissions) != 3)
-          continue;
-        if (address < begin || address >= end)
-          continue;
-        // A mapping that permits neither read nor write -- a PROT_NONE
-        // reservation, the shape the runtime leaves behind around an aperture
-        // -- is absent as far as the GPU is concerned, not merely protected.
-        answer = permissions[1] == 'w'   ? PageWritability::Writable
-                 : permissions[0] == 'r' ? PageWritability::ReadOnly
-                                         : PageWritability::Inaccessible;
-        reading = false;
-        break;
-      }
-      pending.erase(0, line_begin);
-    }
-    ::syscall(SYS_close, static_cast<int>(fd));
-    return answer;
-  }
+  static PageWritability host_page_writability(const uint8_t *page, uintptr_t *vma_end = nullptr);
 
   inline static std::atomic<bool> proc_maps_open_failure_for_test_{false};
 

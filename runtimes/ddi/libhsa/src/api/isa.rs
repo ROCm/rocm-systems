@@ -14,10 +14,10 @@ use crate::runtime::{boundary, lock};
 /// The callback must be callable with the C ABI; `data` must remain valid for
 /// any access the callback performs during this call.
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_agent_iterate_isas")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_agent_iterate_isas(
     agent: HsaAgent,
     callback: IsaCallback,
@@ -63,10 +63,10 @@ pub unsafe extern "C" fn hsa_agent_iterate_isas(
 /// Any non-null `name` must point to a readable NUL-terminated C string; any
 /// non-null `isa` must address writable `HsaIsa` storage.
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_isa_from_name")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_isa_from_name(name: *const c_char, isa: *mut HsaIsa) -> Status {
     boundary(|| {
         if name.is_null() || isa.is_null() {
@@ -101,10 +101,10 @@ pub unsafe extern "C" fn hsa_isa_from_name(name: *const c_char, isa: *mut HsaIsa
 /// Any non-null `value` must address aligned, writable storage for the type
 /// selected by `attribute`.
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_isa_get_info_alt")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_isa_get_info_alt(
     isa: HsaIsa,
     attribute: u32,
@@ -175,10 +175,10 @@ pub unsafe extern "C" fn hsa_isa_get_info_alt(
 /// Any non-null `value` must address aligned, writable storage for the type
 /// selected by `attribute` and `index`.
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_isa_get_info")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_isa_get_info(
     isa: HsaIsa,
     attribute: u32,
@@ -221,10 +221,10 @@ pub unsafe extern "C" fn hsa_isa_get_info(
 /// # Safety
 /// Any non-null `mask` must address writable `u16` storage.
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_isa_get_exception_policies")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_isa_get_exception_policies(
     isa: HsaIsa,
     profile: u32,
@@ -253,10 +253,10 @@ pub unsafe extern "C" fn hsa_isa_get_exception_policies(
 /// # Safety
 /// Any non-null `round_method` must address writable `u32` storage.
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_isa_get_round_method")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_isa_get_round_method(
     isa: HsaIsa,
     fp_type: u32,
@@ -288,10 +288,10 @@ pub unsafe extern "C" fn hsa_isa_get_round_method(
 /// The callback must be callable with the C ABI; `data` must remain valid for
 /// any access the callback performs during this call.
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_isa_iterate_wavefronts")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_isa_iterate_wavefronts(
     isa: HsaIsa,
     callback: WavefrontCallback,
@@ -321,10 +321,10 @@ pub unsafe extern "C" fn hsa_isa_iterate_wavefronts(
 /// Any non-null `value` must address aligned, writable storage for the type
 /// selected by `attribute`.
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_wavefront_get_info")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_wavefront_get_info(
     wavefront: HsaWavefront,
     attribute: u32,
@@ -361,10 +361,10 @@ pub unsafe extern "C" fn hsa_wavefront_get_info(
 /// # Safety
 /// Any non-null `result` must address writable `bool` storage.
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_isa_compatible")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_isa_compatible(
     code_object_isa: HsaIsa,
     agent_isa: HsaIsa,
