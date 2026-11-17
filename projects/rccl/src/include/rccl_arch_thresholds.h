@@ -157,7 +157,7 @@ struct rcclArchThresholds {
   size_t ddaRsLL128PeerMaxShard;
   size_t ddaRsLL128PeerMaxShardPerRank;
   size_t ddaRsLL128PeerMaxBytes;
-  // On comms of at least ddaRsLL128LargeCommMinRanks ranks the DDA LL128 ReduceScatter tier runs to
+  // On comms of at least ddaRsLL128LargeCommMinRanks ranks an enabled DDA LL128 ReduceScatter tier runs to
   // ddaRsLL128LargeCommMaxBytes when that is above its rank-scaled cap. 0 leaves the tier cap alone.
   int ddaRsLL128LargeCommMinRanks;
   size_t ddaRsLL128LargeCommMaxBytes;

@@ -7991,6 +7991,24 @@ TEST(WrapMicrotestIsolated, DdaTierCaps_RankScaledFromMinRanks) {
       });
 }
 
+// A ReduceScatter LL128 tier the table turns off stays off on large comms.
+TEST(WrapMicrotestIsolated, DdaTierCaps_RsLL128OffStaysOffOnLargeComms) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaTierCaps_RsLL128OffStaysOffOnLargeComms",
+      []() {
+        rcclArchThresholds table = MakeRankScaledTable();
+        table.ddaLL128Max[ncclFuncReduceScatter] = 0;
+        table.ddaLL128MaxPerRank[ncclFuncReduceScatter] = 0;
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = &table;
+        for (int nRanks : {32, 64}) {
+          comm->nRanks = nRanks;
+          EXPECT_EQ(0u, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter)) << nRanks << " ranks";
+        }
+        DeleteCommWithArch(comm);
+      });
+}
+
 // RCCL_DDA_LL_THRESHOLD still wins over the rank-scaled cap.
 TEST(WrapMicrotestIsolated, DdaTierCaps_EnvWinsOverRankScaling) {
   RUN_ISOLATED_TEST(
