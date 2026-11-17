@@ -2,12 +2,13 @@
 
 Full documentation for rocDecode is available at [https://rocm.docs.amd.com/projects/rocDecode/en/latest/](https://rocm.docs.amd.com/projects/rocDecode/en/latest/)
 
-## (Unreleased) rocDecode 1.12.1
+## (Unreleased) rocDecode 1.13.0
 
 ### Resolved issues
 
 * The `videoDecodeRaw` and `videoDecode` samples now exit with code 77 instead of 1 when the GPU doesn't support the stream's codec, and the `video_decodeRaw-*` and `video_decode-*` CTests report it as skipped instead of failed.
 * The `videoDecodeBatch` sample now checks the GPU's decode capability for each input file first and decodes only the supported files rather than exiting when a file has an unsupported codec.
+* Fixed decoders that one process creates on different compute partitions of the same GPU (DPX, TPX, QPX, or CPX mode) all decoding on the first partition of that GPU that the process used.
 
 ## rocDecode 1.12.0 for ROCm 10.2.0
 

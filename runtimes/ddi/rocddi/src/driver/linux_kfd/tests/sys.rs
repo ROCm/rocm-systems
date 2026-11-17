@@ -15,6 +15,269 @@ fn endpoint(hook: IoctlHook) -> Kfd {
 }
 
 #[test]
+fn debugger_registration_is_stable_until_confirmed_runtime_disable() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let observed = calls.clone();
+    let kfd = endpoint(Arc::new(move |call| {
+        let Call::RuntimeEnable(args) = call else {
+            panic!("unexpected ioctl")
+        };
+        observed
+            .lock()
+            .unwrap()
+            .push((args.mode_mask, args.r_debug));
+        Ok(())
+    }));
+    let first = Some(RuntimeDebuggerRegistration {
+        address: 0x1000,
+        setup_ttmp: true,
+        mode: DebuggerRegistrationMode::Require,
+    });
+    let second = Some(RuntimeDebuggerRegistration {
+        address: 0x2000,
+        setup_ttmp: false,
+        mode: DebuggerRegistrationMode::Require,
+    });
+    {
+        let mut runtime = kfd.runtime_guard().unwrap();
+        kfd.configure_debugger_locked(&mut runtime, first).unwrap();
+        kfd.enable_runtime_locked(&mut runtime).unwrap();
+        kfd.configure_debugger_locked(&mut runtime, first).unwrap();
+        kfd.configure_debugger_locked(&mut runtime, None).unwrap();
+        assert_eq!(runtime.state.debugger, first);
+        assert_eq!(
+            kfd.configure_debugger_locked(&mut runtime, second)
+                .unwrap_err()
+                .raw_os_error(),
+            Some(errno::EBUSY)
+        );
+    }
+    kfd.disable_runtime().unwrap();
+    {
+        let mut runtime = kfd.runtime_guard().unwrap();
+        assert_eq!(runtime.state.debugger, None);
+        kfd.configure_debugger_locked(&mut runtime, second).unwrap();
+        kfd.enable_runtime_locked(&mut runtime).unwrap();
+    }
+    kfd.disable_runtime().unwrap();
+    assert_eq!(
+        *calls.lock().unwrap(),
+        [(3, 0x1000), (0, 0), (1, 0x2000), (0, 0)]
+    );
+}
+
+#[test]
+fn advisory_debugger_registration_preserves_an_active_unregistered_context() {
+    let mut kfd = endpoint(Arc::new(|_| {
+        panic!("advisory request changed an active native context")
+    }));
+    kfd.mark_runtime_enabled_for_test();
+    let request = RuntimeDebuggerRegistration {
+        address: 0x1000,
+        setup_ttmp: true,
+        mode: DebuggerRegistrationMode::Prefer,
+    };
+    {
+        let mut runtime = kfd.runtime_guard().unwrap();
+        assert!(
+            !kfd.configure_debugger_locked(&mut runtime, Some(request))
+                .unwrap()
+        );
+        assert!(runtime.state.debugger.is_none());
+        kfd.enable_runtime_locked(&mut runtime).unwrap();
+        assert_eq!(
+            kfd.configure_debugger_locked(
+                &mut runtime,
+                Some(RuntimeDebuggerRegistration {
+                    mode: DebuggerRegistrationMode::Require,
+                    ..request
+                })
+            )
+            .unwrap_err()
+            .raw_os_error(),
+            Some(errno::EBUSY)
+        );
+    }
+    assert!(!kfd.debugger_registration_matches(0x1000, true).unwrap());
+}
+
+#[test]
+fn debugger_registration_survives_uncertain_enable_and_disable() {
+    let calls = AtomicUsize::new(0);
+    let kfd = endpoint(Arc::new(move |call| {
+        let Call::RuntimeEnable(args) = call else {
+            panic!("unexpected ioctl")
+        };
+        match calls.fetch_add(1, Ordering::Relaxed) {
+            0 => {
+                assert_eq!((args.mode_mask, args.r_debug), (3, 0x1000));
+                Err(io::Error::from_raw_os_error(errno::EINTR))
+            }
+            1 => {
+                assert_eq!(args.mode_mask, 0);
+                Err(io::Error::from_raw_os_error(errno::EIO))
+            }
+            2 => {
+                assert_eq!(args.mode_mask, 0);
+                Ok(())
+            }
+            _ => panic!("unexpected lifecycle replay"),
+        }
+    }));
+    let registration = Some(RuntimeDebuggerRegistration {
+        address: 0x1000,
+        setup_ttmp: true,
+        mode: DebuggerRegistrationMode::Require,
+    });
+    {
+        let mut runtime = kfd.runtime_guard().unwrap();
+        kfd.configure_debugger_locked(&mut runtime, registration)
+            .unwrap();
+        assert!(kfd.enable_runtime_locked(&mut runtime).is_err());
+        assert_eq!(runtime.state.debugger, registration);
+    }
+    assert!(kfd.disable_runtime().is_err());
+    assert_eq!(kfd.runtime_guard().unwrap().state.debugger, registration);
+    kfd.disable_runtime().unwrap();
+    assert_eq!(kfd.runtime_guard().unwrap().state.debugger, None);
+}
+
+#[test]
+fn xnack_request_is_verified_before_runtime_enable() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let observed = calls.clone();
+    let mode = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let native_mode = mode.clone();
+    let kfd = endpoint(Arc::new(move |call| {
+        match call {
+            Call::XnackMode(args) => {
+                observed.lock().unwrap().push(args.xnack_enabled);
+                if args.xnack_enabled >= 0 {
+                    native_mode.store(args.xnack_enabled != 0, Ordering::Release);
+                }
+                args.xnack_enabled = i32::from(native_mode.load(Ordering::Acquire));
+            }
+            Call::RuntimeEnable(args) => {
+                assert_eq!(args.mode_mask, 1);
+                assert!(native_mode.load(Ordering::Acquire));
+                observed.lock().unwrap().push(2);
+            }
+            _ => panic!("unexpected ioctl"),
+        }
+        Ok(())
+    }));
+    let mut runtime = kfd.runtime_guard().unwrap();
+    kfd.configure_xnack_mode_locked(&mut runtime, XnackModeRequest::Require(true))
+        .unwrap();
+    kfd.enable_runtime_locked(&mut runtime).unwrap();
+    assert_eq!(*calls.lock().unwrap(), [-1, 1, -1, 2]);
+}
+
+#[test]
+fn active_primary_xnack_request_can_query_but_cannot_change_mode() {
+    let queries = Arc::new(AtomicUsize::new(0));
+    let observed = queries.clone();
+    let mut kfd = endpoint(Arc::new(move |call| {
+        let Call::XnackMode(args) = call else {
+            panic!("unexpected ioctl")
+        };
+        assert_eq!(args.xnack_enabled, -1, "active context issued a set");
+        observed.fetch_add(1, Ordering::Relaxed);
+        args.xnack_enabled = 1;
+        Ok(())
+    }));
+    kfd.mark_runtime_enabled_for_test();
+    let mut runtime = kfd.runtime_guard().unwrap();
+    kfd.configure_xnack_mode_locked(&mut runtime, XnackModeRequest::Require(true))
+        .unwrap();
+    kfd.configure_xnack_mode_locked(&mut runtime, XnackModeRequest::Prefer(false))
+        .unwrap();
+    assert_eq!(
+        kfd.configure_xnack_mode_locked(&mut runtime, XnackModeRequest::Require(false))
+            .unwrap_err()
+            .raw_os_error(),
+        Some(errno::EBUSY)
+    );
+    assert_eq!(queries.load(Ordering::Relaxed), 3);
+}
+
+#[test]
+fn preferred_xnack_falls_back_only_to_a_confirmed_live_mode() {
+    for mode_changed in [false, true] {
+        let effective = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mode = effective.clone();
+        let queries = Arc::new(AtomicUsize::new(0));
+        let observed = queries.clone();
+        let kfd = endpoint(Arc::new(move |call| {
+            let Call::XnackMode(args) = call else {
+                panic!("unexpected ioctl")
+            };
+            if args.xnack_enabled >= 0 {
+                mode.store(mode_changed, Ordering::Release);
+                return Err(io::Error::from_raw_os_error(errno::EINTR));
+            }
+            observed.fetch_add(1, Ordering::Relaxed);
+            args.xnack_enabled = i32::from(mode.load(Ordering::Acquire));
+            Ok(())
+        }));
+        let mut runtime = kfd.runtime_guard().unwrap();
+        kfd.configure_xnack_mode_locked(&mut runtime, XnackModeRequest::Prefer(true))
+            .unwrap();
+        assert_eq!(effective.load(Ordering::Acquire), mode_changed);
+        assert_eq!(queries.load(Ordering::Relaxed), 2);
+    }
+
+    let queries = AtomicUsize::new(0);
+    let kfd = endpoint(Arc::new(move |call| {
+        let Call::XnackMode(args) = call else {
+            panic!("unexpected ioctl")
+        };
+        if args.xnack_enabled >= 0 {
+            return Err(io::Error::from_raw_os_error(errno::EPERM));
+        }
+        if queries.fetch_add(1, Ordering::Relaxed) > 0 {
+            return Err(io::Error::from_raw_os_error(errno::EIO));
+        }
+        args.xnack_enabled = 0;
+        Ok(())
+    }));
+    let mut runtime = kfd.runtime_guard().unwrap();
+    assert_eq!(
+        kfd.configure_xnack_mode_locked(&mut runtime, XnackModeRequest::Prefer(true))
+            .unwrap_err()
+            .raw_os_error(),
+        Some(errno::EIO)
+    );
+    assert_eq!(runtime.state.enable, RuntimeState::Disabled);
+}
+
+#[test]
+fn xnack_set_failure_and_unconfirmed_mode_never_enable_runtime() {
+    for fail_set in [false, true] {
+        let kfd = endpoint(Arc::new(move |call| {
+            let Call::XnackMode(args) = call else {
+                panic!("XNACK failure reached a non-mode ioctl")
+            };
+            if args.xnack_enabled >= 0 && fail_set {
+                return Err(io::Error::from_raw_os_error(errno::EINTR));
+            }
+            args.xnack_enabled = 0;
+            Ok(())
+        }));
+        let mut runtime = kfd.runtime_guard().unwrap();
+        let error = kfd
+            .configure_xnack_mode_locked(&mut runtime, XnackModeRequest::Require(true))
+            .unwrap_err();
+        if fail_set {
+            assert_eq!(error.raw_os_error(), Some(errno::EINTR));
+        } else {
+            assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        }
+        assert_eq!(runtime.state.enable, RuntimeState::Disabled);
+    }
+}
+
+#[test]
 fn clock_query_preserves_the_correlated_kernel_sample() {
     let kfd = endpoint(Arc::new(|call| {
         let Call::ClockCounters(counters) = call else {

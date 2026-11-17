@@ -1474,6 +1474,11 @@
           "test_filter": "TransportTest.*"
         },
         {
+          "name": "P2pCeChannelCap",
+          "description": "Copy Engine P2P channel, connection, step-size, and shared-stream policies",
+          "test_filter": "P2pCeChannelCapTests.*"
+        },
+        {
           "name": "XmlTest",
           "description": "XML topology parsing tests",
           "test_filter": "XmlTest.*"
