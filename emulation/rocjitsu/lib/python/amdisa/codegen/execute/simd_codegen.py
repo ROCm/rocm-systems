@@ -1111,8 +1111,6 @@ SIMD_VOP3P_DOT_F16_OR_BF16: set[str] = {
 _VOPC_SUFFIX: dict[str, tuple[str, str]] = {
     'f32': ('float32_t', '{x}'),
     'f16': ('uint32_t', 'util::f16_to_f32_simd({x})'),
-    'i32': ('int32_t', '{x}'),
-    'u32': ('uint32_t', '{x}'),
     # 16-bit integers read as uint32 lanes; sign-extend / mask the low 16 bits to
     # match the scalar static_cast<int16_t>/<uint16_t>.
     'i16': (
@@ -1201,7 +1199,7 @@ def _build_simd_vopc() -> dict[str, tuple[str, str]]:
     for suf in ('f16', 'f32'):
         for rel in _VOPC_FLOAT_RELS:
             table[f'v_cmp_{rel}_{suf}_vopc'] = _float_vopc_entry(suf, rel)
-    for suf in ('i16', 'u16', 'i32', 'u32'):
+    for suf in ('i16', 'u16'):
         lane_t, conv = _VOPC_SUFFIX[suf]
         for rel in _VOPC_INT_RELS:
             table[f'v_cmp_{rel}_{suf}_vopc'] = (lane_t, _vopc_functor(conv, rel))
@@ -1386,12 +1384,12 @@ _VOP3_FLOAT_RELS = _VOPC_FLOAT_RELS + ['t']
 
 
 def _build_simd_vopc_vop3_int_32() -> dict[str, tuple[str, str]]:
-    """VOP3 form of the 32-bit-lane integer VOPC relations (i16/u16/i32/u32).
+    """VOP3 form of the 32-bit-lane integer VOPC relations (i16/u16).
 
     Keyed by ``_vop3``; the functor matches the VOPC one (no modifiers).
     """
     table: dict[str, tuple[str, str]] = {}
-    for suf in ('i16', 'u16', 'i32', 'u32'):
+    for suf in ('i16', 'u16'):
         lane_t, conv = _VOPC_SUFFIX[suf]
         for rel in _VOPC_INT_RELS:
             table[f'v_cmp_{rel}_{suf}_vop3'] = (lane_t, _vopc_functor(conv, rel))
