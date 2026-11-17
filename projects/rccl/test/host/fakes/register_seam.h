@@ -4,7 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Renames src/register/register.cc's definitions of the three names nccl_fakes.cc keeps as seams for
+// Renames src/register/register.cc's definitions of the names nccl_fakes.cc keeps as seams or fakes for
 // p2p-test.cc, so the real file can be compiled into the same binary; tests call the micro_* names. Include it
 // before the #include REGISTER_CC_PATH and register_seam_undef.h after it. No include guard on purpose.
 
@@ -14,3 +14,6 @@
 #define ncclRegLocalIsValid micro_ncclRegLocalIsValid
 #define ncclCommGraphRegister micro_ncclCommGraphRegister
 #define ncclCommGraphDeregister micro_ncclCommGraphDeregister
+#define rcclRegCheckOwned micro_rcclRegCheckOwned
+// register_inline.h's ncclRegFind calls the renamed name; register.h above declared only the original.
+ncclResult_t rcclRegCheckOwned(struct ncclComm* comm, const void* buff, struct ncclReg* reg, bool* stale);

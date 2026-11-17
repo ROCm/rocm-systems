@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <deque>
 #include <memory>
 #include <set>
@@ -28,7 +29,21 @@
 #include "fakes/param_redirect.h"
 
 #include "fakes/transport_p2p_reg_seam.h"
+
+// Routes coll_reg.cc's automatic registration through a per-test hook; register-test.cc covers the real one.
+#include "register.h"
+static std::function<ncclResult_t(ncclComm*, void*, size_t, ncclReg**)> g_rcclRegAutoLocal;
+static ncclResult_t micro_rcclRegAutoLocal(ncclComm* comm, void* buff, size_t size, ncclReg** reg) {
+  if (!g_rcclRegAutoLocal) {
+    ADD_FAILURE() << "unexpected rcclRegAutoLocal(" << buff << ", " << size << ")";
+    return ncclInternalError;
+  }
+  return g_rcclRegAutoLocal(comm, buff, size, reg);
+}
+#define rcclRegAutoLocal micro_rcclRegAutoLocal
+
 #include COLL_REG_CC_PATH
+#undef rcclRegAutoLocal
 #include "fakes/transport_p2p_reg_seam_undef.h"
 
 namespace {
@@ -117,6 +132,7 @@ class RegisterCollMicrotestBase : public ::testing::Test {
     free(task_.sendNetHandles);
     free(task_.recvNetHandles);
     free(task_.srecvNetHandles);
+    g_rcclRegAutoLocal = nullptr;
     ResetNcclFakes();
     ResetTransportP2pRegFakes();
     ResetTransportStubs();
@@ -1357,6 +1373,137 @@ TEST_F(RegisterCollRingMicrotest, MultiRpnGatherRegistered_KeepsChannels) {
   NetLocalRegisters({1, 1, 1});
   EXPECT_EQ(Run(), ncclSuccess);
   EXPECT_EQ(task_.nMaxChannels, 32);
+}
+
+// ---------------------------------------------------------------------------
+// ncclRegisterCollBuffers: gfx1250 Ring Simple registers unregistered AllReduce / AllGather buffers itself
+// ---------------------------------------------------------------------------
+
+// The ring fixture's P2P-only neighbours with nothing in the cache; rcclRegAutoLocal adds what it is asked for.
+class RegisterCollRingAutoMicrotest : public RegisterCollRingMicrotest {
+ protected:
+  char arch_[16] = "gfx1250";
+  std::vector<std::pair<const void*, size_t>> autoCalls_;
+
+  void SetUp() override {
+    RegisterCollRingMicrotest::SetUp();
+    P2pOnly();
+    regSlots_.clear();
+    comm_->regCache.population = 0;
+    comm_->archName = arch_;
+    g_loadParam = ParamOverride({{"LOCAL_REGISTER", 1}, {"GRAPH_REGISTER", 1}, {"RCCL_RING_AUTO_REGISTER", 1}});
+    AutoRegisters(true);
+  }
+
+  void AutoRegisters(bool ok) {
+    g_rcclRegAutoLocal = [this, ok](ncclComm*, void* buff, size_t size, ncclReg** reg) {
+      autoCalls_.emplace_back(buff, size);
+      *reg = nullptr;
+      if (ok) {
+        AddRegRecord(buff, size);
+        *reg = &regs_.back();
+      }
+      return ncclSuccess;
+    };
+  }
+  void ExpectNoAutoRegistration() { EXPECT_TRUE(autoCalls_.empty()); }
+};
+
+TEST_F(RegisterCollRingAutoMicrotest, AllReduce_RegistersRecvBufferAndTakesIpc) {
+  IpcLocalRegisters({kRecv});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(autoCalls_, (std::vector<std::pair<const void*, size_t>>{{kRecv, kBytes}}));
+  std::vector<RegCall> expected{{kRecv, kBytes, NCCL_IPC_COLLECTIVE, {1, 2, 3}, {}}};
+  EXPECT_EQ(ipcLocal_, expected);
+  EXPECT_EQ(task_.regBufType, NCCL_IPC_REG_BUFFER);
+}
+
+TEST_F(RegisterCollRingAutoMicrotest, AllGather_RegistersWholeRecvBuffer) {
+  task_.func = ncclFuncAllGather;
+  IpcLocalRegisters({kRecv});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(autoCalls_, (std::vector<std::pair<const void*, size_t>>{{kRecv, kRanks * kBytes}}));
+  EXPECT_EQ(task_.regBufType, NCCL_IPC_REG_BUFFER);
+}
+
+TEST_F(RegisterCollRingAutoMicrotest, MultiNode_LeavesBufferUnregistered) {
+  comm_->nNodes = 2;
+  EXPECT_EQ(Run(), ncclSuccess);
+  ExpectNoAutoRegistration();
+  ExpectUnregistered();
+}
+
+TEST_F(RegisterCollRingAutoMicrotest, BufferCannotBeRegistered_LeavesBufferUnregistered) {
+  AutoRegisters(false);
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(autoCalls_.size(), 1u);
+  ExpectUnregistered();
+  EXPECT_TRUE(ipcLocal_.empty());
+}
+
+TEST_F(RegisterCollRingAutoMicrotest, AutoRegisterUnset_IsOffByDefault) {
+  g_loadParam = ParamOverride({{"LOCAL_REGISTER", 1}, {"GRAPH_REGISTER", 1}});
+  EXPECT_EQ(Run(), ncclSuccess);
+  ExpectNoAutoRegistration();
+  ExpectUnregistered();
+}
+
+TEST_F(RegisterCollRingAutoMicrotest, AutoRegisterOff_LeavesBufferUnregistered) {
+  g_loadParam = ParamOverride({{"LOCAL_REGISTER", 1}, {"GRAPH_REGISTER", 1}, {"RCCL_RING_AUTO_REGISTER", 0}});
+  EXPECT_EQ(Run(), ncclSuccess);
+  ExpectNoAutoRegistration();
+  ExpectUnregistered();
+}
+
+TEST_F(RegisterCollRingAutoMicrotest, LocalRegisterOff_LeavesBufferUnregistered) {
+  g_loadParam = ParamOverride({{"LOCAL_REGISTER", 0}, {"GRAPH_REGISTER", 0}});
+  EXPECT_EQ(Run(), ncclSuccess);
+  ExpectNoAutoRegistration();
+  ExpectUnregistered();
+}
+
+TEST_F(RegisterCollRingAutoMicrotest, OtherArch_LeavesBufferUnregistered) {
+  strcpy(arch_, "gfx950");
+  EXPECT_EQ(Run(), ncclSuccess);
+  ExpectNoAutoRegistration();
+  ExpectUnregistered();
+}
+
+TEST_F(RegisterCollRingAutoMicrotest, GraphCapture_KeepsGraphRegistration) {
+  UseGraphCapture();
+  IpcGraphRegisters({kRecv});
+  EXPECT_EQ(Run(), ncclSuccess);
+  ExpectNoAutoRegistration();
+  EXPECT_EQ(ipcGraph_.size(), 1u);
+  EXPECT_EQ(task_.regBufType, NCCL_IPC_REG_BUFFER);
+}
+
+TEST_F(RegisterCollRingAutoMicrotest, NotSimpleProtocol_LeavesBufferUnregistered) {
+  task_.protocol = NCCL_PROTO_LL;
+  EXPECT_EQ(Run(), ncclSuccess);
+  ExpectNoAutoRegistration();
+  EXPECT_EQ(task_.regBufType, NCCL_REGULAR_BUFFER);
+}
+
+TEST_F(RegisterCollRingAutoMicrotest, ReduceScatter_LeavesBufferUnregistered) {
+  task_.func = ncclFuncReduceScatter;
+  EXPECT_EQ(Run(), ncclSuccess);
+  ExpectNoAutoRegistration();
+  ExpectUnregistered();
+}
+
+TEST_F(RegisterCollRingAutoMicrotest, Broadcast_LeavesBufferUnregistered) {
+  task_.func = ncclFuncBroadcast;
+  EXPECT_EQ(Run(), ncclSuccess);
+  ExpectNoAutoRegistration();
+  ExpectUnregistered();
+}
+
+TEST_F(RegisterCollRingAutoMicrotest, InPlaceAllReduce_LeavesBufferUnregistered) {
+  task_.sendbuff = kRecv;
+  EXPECT_EQ(Run(), ncclSuccess);
+  ExpectNoAutoRegistration();
+  ExpectUnregistered();
 }
 
 // ---------------------------------------------------------------------------

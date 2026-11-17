@@ -3730,4 +3730,260 @@ TEST_F(UBR_AllToAllStress, ConcurrentMultiComm_MultiNode)
     TEST_INFO("Concurrent multi-comm stress test completed successfully");
 }
 
+// ============================================================================
+// RCCL_RING_AUTO_REGISTER: RCCL registers unregistered gfx1250 Ring Simple
+// AllReduce/AllGather buffers itself. Freeing the buffer and getting a new
+// allocation at the same address must not let peers write into the old one.
+// ============================================================================
+
+class RingAutoRegister : public RegistrationTestBase
+{
+protected:
+    static constexpr size_t kCountPerRank = 4 * 1024 * 1024;  // 16 MB of float
+    static constexpr int    kIters        = 3;
+
+    std::unique_ptr<MPIHelpers::MpiEnvGuard> algoGuard_;
+    std::unique_ptr<MPIHelpers::MpiEnvGuard> protoGuard_;
+
+    void SetUp() override
+    {
+        algoGuard_  = std::make_unique<MPIHelpers::MpiEnvGuard>("NCCL_ALGO", "Ring");
+        protoGuard_ = std::make_unique<MPIHelpers::MpiEnvGuard>("NCCL_PROTO", "Simple");
+        RegistrationTestBase::SetUp();
+    }
+
+    void TearDown() override
+    {
+        RegistrationTestBase::TearDown();
+        protoGuard_.reset();
+        algoGuard_.reset();
+    }
+
+    // Empty when the auto-registered path can run on every rank.
+    std::string skipReason()
+    {
+        const char* autoReg = getenv("RCCL_RING_AUTO_REGISTER");
+        const char* why     = nullptr;
+        if (!IsArchMatch(getActiveCommunicator()->archName, "gfx1250"))
+            why = "RCCL_RING_AUTO_REGISTER applies to gfx1250 only";
+        else if (getActiveCommunicator()->nNodes > 1)
+            why = "RCCL_RING_AUTO_REGISTER applies within one node or MNNVL domain only";
+        else if (!autoReg || atoi(autoReg) == 0)
+            // Opt-in, and read once per process, so it has to be set at launch.
+            why = "RCCL_RING_AUTO_REGISTER is off; launch with RCCL_RING_AUTO_REGISTER=1";
+        else if (getenv("NCCL_LOCAL_REGISTER") && std::string(getenv("NCCL_LOCAL_REGISTER")) == "0")
+            why = "NCCL_LOCAL_REGISTER=0";
+        else if (!ncclCuMemEnable())
+            why = "Requires cuMem (NCCL_CUMEM_ENABLE=1) so buffers IPC-register";
+        else if (!rcclNcclAlgoEnvIsSet())
+            // RCCL caches NCCL_ALGO on first use; without it CE/DDA/symmetric selection can bypass Ring.
+            why = "NCCL_ALGO was unset when RCCL first read it; launch with NCCL_ALGO=Ring NCCL_PROTO=Simple";
+        return mpiCoordinatedSkipReason(why != nullptr, why);
+    }
+
+    // Runs the collective into recv (prefilled with NaN) and checks the result and that RCCL owns its registration.
+    // ASSERT_MPI_* fail or skip on every rank together; callers return when either happened.
+    void runAndCheck(bool allGather, float* send, float* recv, int rank, int nRanks, const char* what)
+    {
+        const size_t recvCount = allGather ? kCountPerRank * nRanks : kCountPerRank;
+        initSendBuffer<float>(send, kCountPerRank, rank);
+        ASSERT_MPI_EQ(hipSuccess, hipMemset(recv, 0xff, recvCount * sizeof(float)));
+        ncclResult_t result =
+            allGather ? ncclAllGather(send, recv, kCountPerRank, ncclFloat, getActiveCommunicator(), getActiveStream())
+                      : ncclAllReduce(send, recv, kCountPerRank, ncclFloat, ncclSum, getActiveCommunicator(),
+                                      getActiveStream());
+        ASSERT_MPI_EQ(ncclSuccess, result);
+        ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+        const bool correct = allGather ? verifyAllGatherResult<float>(recv, kCountPerRank, nRanks)
+                                       : verifyAllReduceResult<float>(recv, kCountPerRank, nRanks);
+        if (!correct) ADD_FAILURE() << what << ": wrong result";
+        ASSERT_MPI_TRUE(correct);
+
+        struct ncclReg* reg = nullptr;
+        {
+            rcclRegAutoScope visible(&getActiveCommunicator()->regCache);
+            ASSERT_MPI_EQ(ncclSuccess, ncclRegFind(getActiveCommunicator(), recv, recvCount * sizeof(float), &reg));
+        }
+        const bool owned = reg != nullptr && reg->rcclAuto.owned;
+        if (!owned) ADD_FAILURE() << what << ": receive buffer not auto-registered";
+        ASSERT_MPI_TRUE(owned);
+    }
+
+    void runStaleAllocation(bool allGather)
+    {
+        if (!validateTestPrerequisites(2, kNoProcessLimit, kNoPowerOfTwoRequired, 1, kNoNodeLimit)) {
+            GTEST_SKIP() << "Requires 2+ ranks";
+        }
+        ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+        if (auto reason = skipReason(); !reason.empty()) GTEST_SKIP() << reason;
+
+        int rank = 0, nRanks = 0;
+        ASSERT_MPI_EQ(ncclSuccess, ncclCommUserRank(getActiveCommunicator(), &rank));
+        ASSERT_MPI_EQ(ncclSuccess, ncclCommCount(getActiveCommunicator(), &nRanks));
+        const size_t sendBytes = kCountPerRank * sizeof(float);
+        const size_t recvBytes = allGather ? sendBytes * nRanks : sendBytes;
+
+        void* send = nullptr;
+        void* recv = nullptr;
+        ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&send, sendBytes));
+        auto sendGuard = makeHipMemBufferAutoGuard(send);
+        auto recvCleanup = makeScopeGuard([&]() {
+            if (recv) (void)ncclMemFree(recv);
+        });
+
+        // ncclMemAlloc usually hands the freed address straight back.
+        ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&recv, recvBytes));
+        for (int it = 0; it < kIters; ++it) {
+            runAndCheck(allGather, (float*)send, (float*)recv, rank, nRanks, "ncclMemAlloc");
+            if (HasFailure() || IsSkipped()) return;
+            ASSERT_MPI_EQ(ncclSuccess, ncclMemFree(recv));
+            recv = nullptr;
+            ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&recv, recvBytes));
+        }
+        runAndCheck(allGather, (float*)send, (float*)recv, rank, nRanks, "ncclMemAlloc after reuse");
+        if (HasFailure() || IsSkipped()) return;
+        ASSERT_MPI_EQ(ncclSuccess, ncclMemFree(recv));
+        recv = nullptr;
+
+        // VMM: keep the virtual range and swap the physical allocation behind it.
+        int dev = 0;
+        ASSERT_MPI_EQ(hipSuccess, hipGetDevice(&dev));
+        hipMemAllocationProp prop = {};
+        prop.type                 = hipMemAllocationTypePinned;
+        prop.location.type        = hipMemLocationTypeDevice;
+        prop.location.id          = dev;
+        prop.requestedHandleType  = hipMemHandleTypeFabric;
+        size_t gran               = 0;
+        ASSERT_MPI_EQ(hipSuccess, hipMemGetAllocationGranularity(&gran, &prop, hipMemAllocationGranularityRecommended));
+        const size_t vaSize = (recvBytes + gran - 1) / gran * gran;
+        void* va            = nullptr;
+        ASSERT_MPI_EQ(hipSuccess, hipMemAddressReserve(&va, vaSize, 0, nullptr, 0));
+        hipMemGenericAllocationHandle_t handle{};
+        bool mapped = false;
+        auto vmmCleanup = makeScopeGuard([&]() {
+            if (mapped) {
+                (void)hipMemUnmap(va, vaSize);
+                (void)hipMemRelease(handle);
+            }
+            (void)hipMemAddressFree(va, vaSize);
+        });
+        auto map = [&]() {
+            if (hipMemCreate(&handle, vaSize, &prop, 0) != hipSuccess) {
+                // Without a fabric manager, fall back to a POSIX FD handle for intra-node peers.
+                (void)hipGetLastError();
+                prop.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
+                if (hipMemCreate(&handle, vaSize, &prop, 0) != hipSuccess) return false;
+            }
+            hipMemAccessDesc access = {};
+            access.location.type    = hipMemLocationTypeDevice;
+            access.location.id      = dev;
+            access.flags            = hipMemAccessFlagsProtReadWrite;
+            mapped = hipMemMap(va, vaSize, 0, handle, 0) == hipSuccess;
+            return mapped && hipMemSetAccess(va, vaSize, &access, 1) == hipSuccess;
+        };
+        auto unmap = [&]() {
+            mapped = false;
+            return hipMemUnmap(va, vaSize) == hipSuccess && hipMemRelease(handle) == hipSuccess;
+        };
+
+        ASSERT_MPI_TRUE(map());
+        for (int it = 0; it < kIters; ++it) {
+            runAndCheck(allGather, (float*)send, (float*)va, rank, nRanks, "VMM");
+            if (HasFailure() || IsSkipped()) return;
+            ASSERT_MPI_TRUE(unmap());
+            ASSERT_MPI_TRUE(map());
+        }
+        runAndCheck(allGather, (float*)send, (float*)va, rank, nRanks, "VMM after remap");
+    }
+};
+
+TEST_F(RingAutoRegister, AllReduce_FreedAndReusedAddress)
+{
+    runStaleAllocation(false);
+}
+
+TEST_F(RingAutoRegister, AllGather_FreedAndReusedAddress)
+{
+    runStaleAllocation(true);
+}
+
+// Abort skips rcclRegAutoRelease, so commFree meets RCCL's live and retired records after the proxies are gone.
+TEST_F(RingAutoRegister, AbortWithLiveAndRetiredRecords_Completes)
+{
+    if (!validateTestPrerequisites(2, kNoProcessLimit, kNoPowerOfTwoRequired, 1, kNoNodeLimit)) {
+        GTEST_SKIP() << "Requires 2+ ranks";
+    }
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    if (auto reason = skipReason(); !reason.empty()) GTEST_SKIP() << reason;
+
+    int rank = 0, nRanks = 0;
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommUserRank(getActiveCommunicator(), &rank));
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommCount(getActiveCommunicator(), &nRanks));
+    const size_t bytes = kCountPerRank * sizeof(float);
+
+    void* send = nullptr;
+    void* recv = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&send, bytes));
+    auto sendGuard   = makeHipMemBufferAutoGuard(send);
+    auto recvCleanup = makeScopeGuard([&]() {
+        if (recv) (void)ncclMemFree(recv);
+    });
+    ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&recv, bytes));
+    runAndCheck(false, (float*)send, (float*)recv, rank, nRanks, "before free");
+    if (HasFailure() || IsSkipped()) return;
+    ASSERT_MPI_EQ(ncclSuccess, ncclMemFree(recv));
+    recv = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&recv, bytes));
+    runAndCheck(false, (float*)send, (float*)recv, rank, nRanks, "after reuse");
+    if (HasFailure() || IsSkipped()) return;
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    ncclComm_t comm = test_comm_;
+    test_comm_      = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommAbort(comm));
+}
+
+// Send/recv must not use RCCL's registration: the peer's buffer is unregistered, and a one-sided direct path hangs.
+TEST_F(RingAutoRegister, SendRecv_FromAutoRegisteredBufferToUnregisteredPeer)
+{
+    if (!validateTestPrerequisites(2, kNoProcessLimit, kNoPowerOfTwoRequired, 1, kNoNodeLimit)) {
+        GTEST_SKIP() << "Requires 2+ ranks";
+    }
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    if (auto reason = skipReason(); !reason.empty()) GTEST_SKIP() << reason;
+
+    int rank = 0, nRanks = 0;
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommUserRank(getActiveCommunicator(), &rank));
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommCount(getActiveCommunicator(), &nRanks));
+    if (nRanks % 2 != 0) GTEST_SKIP() << "Requires an even number of ranks";
+    const size_t bytes = kCountPerRank * sizeof(float);
+
+    void* send  = nullptr;
+    void* reg   = nullptr;
+    void* unreg = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&send, bytes));
+    auto sendGuard = makeHipMemBufferAutoGuard(send);
+    ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&reg, bytes));
+    auto regGuard = makeHipMemBufferAutoGuard(reg);
+    ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&unreg, bytes));
+    auto unregGuard = makeHipMemBufferAutoGuard(unreg);
+
+    runAndCheck(false, (float*)send, (float*)reg, rank, nRanks, "AllReduce");
+    if (HasFailure() || IsSkipped()) return;
+
+    const int peer = rank ^ 1;
+    ASSERT_MPI_EQ(hipSuccess, hipMemset(unreg, 0xff, bytes));
+    ASSERT_MPI_EQ(ncclSuccess, ncclGroupStart());
+    ASSERT_MPI_EQ(ncclSuccess, ncclSend(reg, kCountPerRank, ncclFloat, peer, getActiveCommunicator(), getActiveStream()));
+    ASSERT_MPI_EQ(ncclSuccess,
+                  ncclRecv(unreg, kCountPerRank, ncclFloat, peer, getActiveCommunicator(), getActiveStream()));
+    ASSERT_MPI_EQ(ncclSuccess, ncclGroupEnd());
+    ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+    const bool correct = verifyAllReduceResult<float>((float*)unreg, kCountPerRank, nRanks);
+    if (!correct) ADD_FAILURE() << "send/recv: wrong result";
+    ASSERT_MPI_TRUE(correct);
+}
+
 #endif // MPI_TESTS_ENABLED
