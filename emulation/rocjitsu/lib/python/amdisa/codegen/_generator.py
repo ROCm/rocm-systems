@@ -18312,13 +18312,13 @@ class CodeGenerator:
                     CDNA5_PACKED_TERNARY,
                     VECTOR32_NAMES,
                     CDNA_INTEGER_ALIASES,
-                    INTEGER_ARCHITECTURES,
                     CARRY32_NAMES,
                     WIDE_INTEGER_NAMES,
                     INTEGER16_NAMES,
                     WIDENING_INTEGER_NAMES,
                     PACKED_INTEGER_NAMES,
                     INTEGER_DOT_NAMES,
+                    INTEGER32_ARCHITECTURES,
                 )
                 from amdisa.codegen.execute.rj_arith_scalar import supports_scalar
                 from amdisa.codegen.execute.rj_arith_graphics import CUBE_NAMES
@@ -18407,7 +18407,7 @@ class CodeGenerator:
                 from amdisa.codegen.execute.rj_arith_pair_move import PAIR_MOVE_NAMES
 
                 uses_vector_arith = (
-                    self.isa_spec.arch_name in INTEGER_ARCHITECTURES
+                    self.isa_spec.arch_name in INTEGER32_ARCHITECTURES
                     and any(
                         i.name in PAIR_MOVE_NAMES
                         or i.name in CDNA_INTEGER_ALIASES

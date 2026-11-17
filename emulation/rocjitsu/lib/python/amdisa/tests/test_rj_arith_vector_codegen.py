@@ -52,7 +52,9 @@ def context(
     )
 
 
-@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+@pytest.mark.parametrize(
+    'arch', ['rdna1', 'rdna2', 'rdna3', 'rdna3_5', 'rdna4', 'cdna1', 'cdna2']
+)
 @pytest.mark.parametrize('name', sorted(BINARY32))
 def test_binary_bindings_have_both_wave_apis_and_clamp(arch, name):
     body = gen_vector32(context(arch, name, ['dst'], ['a', 'b'], True))
@@ -71,11 +73,9 @@ def test_binary_bindings_have_both_wave_apis_and_clamp(arch, name):
     )
 
 
-def test_unmigrated_architectures_and_operand_shapes_keep_existing_path():
+def test_unmigrated_routing_and_operand_shapes_keep_existing_path():
     for arch in ('rdna1', 'rdna2', 'rdna3_5', 'cdna1', 'cdna2'):
-        assert (
-            gen_vector32(context(arch, 'V_AND_B32', ['dst'], ['a', 'b'], False)) is None
-        )
+        assert gen_vector32(context(arch, 'V_MOV_B32', ['dst'], ['a'], False)) is None
     assert (
         gen_vector32(context('rdna4', 'V_AND_B32', ['dst', 'scc'], ['a', 'b'], False))
         is None
@@ -110,7 +110,15 @@ def test_single_vgpr_integer_bindings_match_public_signatures(name, count, kind)
     architectures = (
         ('cdna5',)
         if name in CDNA5_COMBINED32
-        else ('cdna4', 'cdna5') if name == 'V_PRNG_B32' else ('rdna3', 'rdna4')
+        else (
+            ('cdna4', 'cdna5')
+            if name == 'V_PRNG_B32'
+            else (
+                ('rdna3', 'rdna4')
+                if name == 'V_MOV_B32'
+                else ('rdna1', 'rdna2', 'rdna3', 'rdna3_5', 'rdna4', 'cdna1', 'cdna2')
+            )
+        )
     )
     for arch in architectures:
         body = gen_vector32(context(arch, name, ['dst'], sources, True))

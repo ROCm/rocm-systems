@@ -2162,7 +2162,6 @@ def test_true16_vop3_integer_ops_do_not_use_whole_dword_simd_probe():
     assert simd_probe_line('v_cmp_lt_i16_vop3') is None
     assert simd_probe_line('v_cmp_eq_u16_vop3') is None
     assert simd_probe_line('v_or_b16_vop3') is None
-    assert simd_probe_line('v_add_nc_u32_vop3') is not None
 
 
 def test_vop3_compare_simd_probe_can_commit_raw_result():
@@ -3792,9 +3791,7 @@ def test_generated_special_vop3_true16_paths_use_selected_halves(
 ):
     execute_shared = execute_shared_path.read_text()
 
-    mad_u32 = _shared_execute_body(
-        execute_shared, 'v_mad_u32_u16_vop3', 'v_mad_u32_u24_vop3'
-    )
+    mad_u32 = _shared_execute_body(execute_shared, 'v_mad_u32_u16_vop3')
     assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_SRC01' in mad_u32
     assert 'read_vop3_true16_src(inst.src0, wf, lane, opsel, 0)' in mad_u32
     assert 'read_vop3_true16_src(inst.src1, wf, lane, opsel, 1)' in mad_u32
@@ -3804,9 +3801,7 @@ def test_generated_special_vop3_true16_paths_use_selected_halves(
         in mad_u32
     )
 
-    mad_i32 = _shared_execute_body(
-        execute_shared, 'v_mad_i32_i16_vop3', 'v_mad_i32_i24_vop3'
-    )
+    mad_i32 = _shared_execute_body(execute_shared, 'v_mad_i32_i16_vop3')
     assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_SRC01' in mad_i32
     assert 'read_vop3_true16_src(inst.src0, wf, lane, opsel, 0)' in mad_i32
     assert 'read_vop3_true16_src(inst.src1, wf, lane, opsel, 1)' in mad_i32
@@ -3827,9 +3822,7 @@ def test_generated_special_vop3_true16_paths_use_selected_halves(
     assert 'read_vop3_true16_src(src2, wf, lane, opsel, 2)' in div_fixup
     assert 'write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits,' in div_fixup
 
-    pack = _shared_execute_body(
-        execute_shared, 'v_pack_b32_f16_vop3', 'v_perm_b32_vop3'
-    )
+    pack = _shared_execute_body(execute_shared, 'v_pack_b32_f16_vop3')
     assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_SRC' in pack
     assert 'read_vop3_true16_src(inst.src0, wf, lane, inst.inst_.op_sel, 0)' in pack
     assert 'read_vop3_true16_src(inst.src1, wf, lane, inst.inst_.op_sel, 1)' in pack

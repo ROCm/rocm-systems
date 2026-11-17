@@ -78,54 +78,6 @@ def _read_vop3_true16_src(opnd: str, opsel: str, src_idx: int) -> str:
     )
 
 
-def gen_vector_bcnt(dst: list[str], src: list[str]) -> str:
-    """Generate V_BCNT_U32_B32 body: D.u32 = CountOneBits(S0.u32) + S1.u32."""
-    L = []
-    L.append('  uint64_t exec = wf.exec();')
-    L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
-    L.append('    if (!(exec & (1ULL << lane))) continue;')
-    L.append(
-        f'    uint32_t bits = amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane);'
-    )
-    L.append(
-        f'    uint32_t accum = amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane);'
-    )
-    L.append(
-        f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane,'
-        ' static_cast<uint32_t>(std::popcount(bits)) + accum);'
-    )
-    L.append('  }')
-    return '\n'.join(L)
-
-
-def gen_vector_mbcnt(dst: list[str], src: list[str], op: str | None) -> str:
-    """Generate V_MBCNT_LO/HI_U32_B32 body."""
-    L = []
-    L.append('  uint64_t exec = wf.exec();')
-    L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
-    L.append('    if (!(exec & (1ULL << lane))) continue;')
-    L.append(
-        f'    uint32_t mask = amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane);'
-    )
-    L.append(
-        f'    uint32_t base = amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane);'
-    )
-    if op == 'lo':
-        L.append(
-            '    uint32_t thread_mask = lane < 32 ? (1u << lane) - 1 : 0xFFFFFFFFu;'
-        )
-        L.append('    uint32_t count = std::popcount(mask & thread_mask);')
-    else:  # hi
-        L.append('    uint32_t shift = lane >= 32 ? lane - 32 : 0;')
-        L.append('    uint32_t thread_mask = lane >= 32 ? (1u << shift) - 1 : 0;')
-        L.append('    uint32_t count = std::popcount(mask & thread_mask);')
-    L.append(
-        f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, base + count);'
-    )
-    L.append('  }')
-    return '\n'.join(L)
-
-
 def _resolved_vgpr_offset_call(opnd: str, uses_vgpr_msb_indexing: bool) -> str:
     if uses_vgpr_msb_indexing:
         return (
