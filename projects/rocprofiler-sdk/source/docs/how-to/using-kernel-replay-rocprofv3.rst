@@ -202,6 +202,11 @@ Limitations (CLI)
   restricted this way -- a custom tool can enable and disable services per pass through the
   local-context API (see :ref:`using-kernel-replay`) -- so this is a CLI limitation, not a hardware
   or SDK one. Kernel dispatch tracing (``--kernel-trace``) still records every pass.
+* **A dispatch that is not replayed is counted and not thread-traced.** HIP graph launches,
+  multi-packet submissions, and a dispatch whose snapshot is declined run once, with no per-pass
+  callback. Counter collection and thread trace share one user-data slot, so tracing that dispatch
+  would replace the counter record's thread id and pass. When the agent has counter groups, the
+  trace is skipped and the counters are kept.
 * **HIP graph launches are not replayed.** A graph seen while replay is active warns once and
   runs un-replayed (not a hard error).
 * **Only single-packet, single-dispatch submissions** are replayed.

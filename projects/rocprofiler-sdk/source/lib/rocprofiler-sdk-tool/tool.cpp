@@ -1969,7 +1969,7 @@ att_shader_data_callback(rocprofiler_thread_trace_shader_data_t shader_data,
 }
 
 rocprofiler_thread_trace_control_flags_t
-att_dispatch_callback(rocprofiler_agent_id_t /* agent_id  */,
+att_dispatch_callback(rocprofiler_agent_id_t agent_id,
                       rocprofiler_queue_id_t /* queue_id  */,
                       rocprofiler_async_correlation_id_t /* correlation_id */,
                       rocprofiler_kernel_id_t   kernel_id,
@@ -1977,6 +1977,16 @@ att_dispatch_callback(rocprofiler_agent_id_t /* agent_id  */,
                       void* /*userdata_config*/,
                       rocprofiler_user_data_t* userdata_shader)
 {
+    // Counter collection and dispatch thread trace are handed the same user_data slot. The value
+    // written here is what the counter record callback later unpacks as thread id and replay pass.
+    // Inside a replay pass only one of the two services is enabled, so the write is safe. A
+    // dispatch that is not inside a pass — replay declined, a HIP graph, a multi-packet submission
+    // — runs both. When this agent has counter groups, that record is real: leave the packed value
+    // in place and do not trace the dispatch.
+    if(tool::get_config().kernel_replay && !tl_current_replay_pass.has_value() &&
+       get_replay_group_count(agent_id) > 0)
+        return ROCPROFILER_THREAD_TRACE_CONTROL_NONE;
+
     static auto kernel_iteration = common::Synchronized<kernel_iteration_t, true>{};
     userdata_shader->value       = dispatch_id;
 

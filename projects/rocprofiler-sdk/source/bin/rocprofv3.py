@@ -1511,7 +1511,11 @@ def services_conflicting_with_kernel_replay(args, environ=None):
     if getattr(args, "advanced_thread_trace", None):
         if getattr(args, "att_no_intercept", None):
             conflicts.append("--att-no-intercept")
-        if getattr(args, "att_consecutive_kernels", None):
+        # argparse stores this as a string. "0" is the default and means dispatch
+        # thread trace. Only a count above zero is device mode, which cannot stay
+        # on one replay pass.
+        consecutive = getattr(args, "att_consecutive_kernels", None)
+        if consecutive not in (None, False, 0, "0"):
             conflicts.append("--att-consecutive-kernels")
         if getattr(args, "selected_regions", None):
             conflicts.append("--selected-regions with --att")
