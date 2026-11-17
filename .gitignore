@@ -17,6 +17,6 @@ __pycache__
 # Visual Studio Code settings
 .vscode/
 /.rocshmem-worktree
-/projects/cuid/_build
+/shared/cuid/_build
 build/
 .worktrees/

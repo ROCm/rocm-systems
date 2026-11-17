@@ -41,6 +41,8 @@ class SdmaPingPongTester : public Tester {
   char *s_buf;
   char *r_buf;
   uint64_t *sig_addr;
+  // True if SDMA failed to connect on this topology.
+  bool sdma_unavailable;
 };
 
 #endif

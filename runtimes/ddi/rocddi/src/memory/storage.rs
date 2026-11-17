@@ -1,10 +1,11 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-//! Fallible storage for runtime owners and standard vectors.
+//! Fallible storage for runtime owners and callback-backed metadata vectors.
 //!
-//! Production storage uses the system allocator; test-only callbacks inject
-//! allocation failures into cleanup paths. Constructors that will acquire
+//! Owner storage can use a scoped callback allocator. Standard vectors retain
+//! the system allocator; test hooks can inject their allocation failures.
+//! Constructors that will acquire
 //! native resources should reserve their storage first with
 //! [`Owned::try_new_uninit`] and publish the completed owner with
 //! [`UninitOwned::write`], which performs no allocation. This storage manages
@@ -14,11 +15,12 @@
 
 mod allocator;
 mod owners;
+mod vector;
 
 pub use allocator::AllocationError;
-#[cfg(any(test, feature = "allocator-test-hooks"))]
-pub use allocator::{AllocateFn, Allocator, AllocatorScope, FreeFn, InvalidAllocator};
+pub use allocator::{AllocateFn, Allocator, FreeFn, InvalidAllocator, ResizeFn};
 pub use owners::{Owned, Shared, UninitOwned, UninitShared};
+pub use vector::OwnerVec;
 
 /// Creates a standard vector after fallibly reserving its initial capacity.
 ///

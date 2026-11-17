@@ -1,15 +1,10 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "rocjitsu/vm/amdgpu/aql/amd_vendor_packets.h"
 #include "rocjitsu/vm/amdgpu/aql/aql_packet_processor.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory_access.h"
-
-#include "rocjitsu/base/rj_compiler.h"
-RJ_DIAGNOSTIC_PUSH
-RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/amd_ext_aql_packet.h"
-RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
 
@@ -197,7 +192,29 @@ TEST(AqlPacketProcessorTest, BarrierDependencyMustResolveBeforeAdmission) {
   EXPECT_EQ(admitted.completion_signal, 0x2000u);
   EXPECT_TRUE(admitted.barrier_bit);
   EXPECT_TRUE(admitted.blocks_following);
+  EXPECT_TRUE(admitted.no_fence_aql_barrier);
   EXPECT_TRUE(complete.blocks_following);
+}
+
+TEST(AqlPacketProcessorTest, ScopedBarriersCannotUseTheNoFenceRootReplacementPath) {
+  AqlPreparedPacket admitted{};
+  AqlPacketProcessor processor({
+      .load_signal = {},
+      .admit =
+          [&](const AqlPacketProcessRequest &, AqlPreparedPacket prepared) {
+            admitted = prepared;
+            return AqlAdmissionResult{.status = AqlAdmissionStatus::Complete};
+          },
+  });
+
+  for (const uint16_t scope_shift : {uint16_t{HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE},
+                                     uint16_t{HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE}}) {
+    hsa_barrier_and_packet_t packet{};
+    packet.header = HSA_PACKET_TYPE_BARRIER_AND | (HSA_FENCE_SCOPE_AGENT << scope_shift);
+    const auto bytes = packet_bytes(packet);
+    EXPECT_EQ(processor.process(request_for(bytes)).packet.status, PacketProcessStatus::Complete);
+    EXPECT_FALSE(admitted.no_fence_aql_barrier);
+  }
 }
 
 TEST(AqlPacketProcessorTest, RevokedDependencySnapshotIsTerminalRatherThanBlocked) {
@@ -329,11 +346,11 @@ TEST(AqlPacketProcessorTest, ReportsUnsupportedVendorFormatWithoutAdmission) {
 
 TEST(AqlPacketProcessorTest, ReportsUnsupportedBarrierConditionWithoutAdmission) {
   AmdBarrierValuePacket packet{};
-  packet.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC | (1 << HSA_PACKET_HEADER_BARRIER);
-  packet.amd_format = kHsaAmdPacketTypeBarrierValue;
+  packet.header.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC | (1 << HSA_PACKET_HEADER_BARRIER);
+  packet.header.AmdFormat = kHsaAmdPacketTypeBarrierValue;
   packet.signal.handle = 0x1000;
   packet.mask = std::numeric_limits<int64_t>::max();
-  packet.condition = 99;
+  packet.cond = 99;
   const auto bytes = packet_bytes(packet);
 
   uint32_t admissions = 0;
@@ -424,8 +441,8 @@ TEST(AqlPacketProcessorTest, RejectsOverflowInEverySignalValueAddress) {
   const AqlPacketProcessResult barrier_result = processor.process(request_for(barrier_bytes));
 
   AmdBarrierValuePacket barrier_value{};
-  barrier_value.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC;
-  barrier_value.amd_format = kHsaAmdPacketTypeBarrierValue;
+  barrier_value.header.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC;
+  barrier_value.header.AmdFormat = kHsaAmdPacketTypeBarrierValue;
   barrier_value.signal.handle = kOverflowingHandle;
   const auto barrier_value_bytes = packet_bytes(barrier_value);
   const AqlPacketProcessResult barrier_value_result =

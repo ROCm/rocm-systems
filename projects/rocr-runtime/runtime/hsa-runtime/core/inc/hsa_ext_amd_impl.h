@@ -446,6 +446,19 @@ hsa_status_t HSA_API hsa_amd_svm_discard_and_prefetch_batch_async(
     hsa_signal_t completion_signal);
 
 // Mirrors Amd Extension Apis
+hsa_status_t HSA_API hsa_amd_signal_batch_create(uint32_t count,
+                                                 const hsa_signal_value_t* initial_values,
+                                                 uint32_t num_consumers,
+                                                 const hsa_agent_t* consumers,
+                                                 uint64_t attributes,
+                                                 hsa_amd_memory_pool_t pool,
+                                                 hsa_amd_signal_batch_t* batch,
+                                                 hsa_signal_t* signals);
+
+// Mirrors Amd Extension Apis
+hsa_status_t HSA_API hsa_amd_signal_batch_destroy(hsa_amd_signal_batch_t batch);
+
+// Mirrors Amd Extension Apis
 hsa_status_t HSA_API hsa_amd_enable_logging(uint8_t* flags, void* file);
 
 // Mirrors Amd Extension Apis

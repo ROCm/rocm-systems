@@ -3,7 +3,7 @@
  - See LICENSE.txt for license information
  -->
 <system version="2">
-  <cpu numaid="3" affinity="ffff0000,00000000,ffff0000,00000000" arch="x86_64" vendor="AuthenticAMD" familyid="175" modelid="48">
+  <cpu numaid="3" affinity="ffff0000,00000000,ffff0000,00000000" arch="x86_64" vendor="AuthenticAMD" familyid="25" modelid="48">
     <pci busid="0000:c1:00.0" class="0x038000" vendor="0x1002" device="0x7408" subsystem_vendor="0x1002" subsystem_device="0x0b0c" link_speed="16 GT/s" link_width="16">
       <gpu dev="0" sm="104" gcn="910" arch="38911" rank="0" gdr="0">
         <xgmi target="0000:c6:00.0" count="1" tclass="0x038000"/>
@@ -22,7 +22,7 @@
       <net name="bond0" dev="0" speed="1000" port="0" guid="0x0" maxconn="65536" gdr="0"/>
     </nic>
   </cpu>
-  <cpu numaid="1" affinity="00000000,ffff0000,00000000,ffff0000" arch="x86_64" vendor="AuthenticAMD" familyid="175" modelid="48">
+  <cpu numaid="1" affinity="00000000,ffff0000,00000000,ffff0000" arch="x86_64" vendor="AuthenticAMD" familyid="25" modelid="48">
     <pci busid="0000:c9:00.0" class="0x038000" vendor="0x1002" device="0x7408" subsystem_vendor="0x1002" subsystem_device="0x0b0c" link_speed="16 GT/s" link_width="16">
       <gpu dev="2" sm="104" gcn="910" arch="38911" rank="2" gdr="0">
         <xgmi target="0000:c1:00.0" count="1" tclass="0x038000"/>
@@ -38,7 +38,7 @@
       </gpu>
     </pci>
   </cpu>
-  <cpu numaid="0" affinity="00000000,0000ffff,00000000,0000ffff" arch="x86_64" vendor="AuthenticAMD" familyid="175" modelid="48">
+  <cpu numaid="0" affinity="00000000,0000ffff,00000000,0000ffff" arch="x86_64" vendor="AuthenticAMD" familyid="25" modelid="48">
     <pci busid="0000:d1:00.0" class="0x038000" vendor="0x1002" device="0x7408" subsystem_vendor="0x1002" subsystem_device="0x0b0c" link_speed="16 GT/s" link_width="16">
       <gpu dev="4" sm="104" gcn="910" arch="38911" rank="4" gdr="0">
         <xgmi target="0000:c9:00.0" count="1" tclass="0x038000"/>

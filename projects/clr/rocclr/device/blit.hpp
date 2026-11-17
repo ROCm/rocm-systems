@@ -150,6 +150,11 @@ class BlitManager {
       const std::vector<amd::BatchCopyOp>& copyOps  //!< Batch of copy operations
   ) const = 0;
 
+  //! Copies multiple pitched boxes between buffer objects in a batch
+  virtual bool CopyBufferRectBatch(
+      const std::vector<amd::BatchCopyRectOp>& copy_ops  //!< Batch of box copy operations
+  ) const = 0;
+
   //! Copies pageable host-to-device operations in a batch
   virtual bool WriteBufferBatch(
       const std::vector<amd::BatchWriteMemoryOp>& write_ops  //!< Batch of write operations
@@ -161,7 +166,7 @@ class BlitManager {
   ) const = 0;
 
   //! Copies an image object to a buffer object
-  virtual bool copyImageToBuffer(
+  [[nodiscard]] virtual bool copyImageToBuffer(
       Memory& srcMemory,                                    //!< Source memory object
       Memory& dstMemory,                                    //!< Destination memory object
       const amd::Coord3D& srcOrigin,                        //!< Source origin
@@ -174,7 +179,7 @@ class BlitManager {
   ) const = 0;
 
   //! Copies a buffer object to an image object
-  virtual bool copyBufferToImage(
+  [[nodiscard]] virtual bool copyBufferToImage(
       Memory& srcMemory,                                    //!< Source memory object
       Memory& dstMemory,                                    //!< Destination memory object
       const amd::Coord3D& srcOrigin,                        //!< Source origin
@@ -364,6 +369,11 @@ class HostBlitManager : public device::BlitManager {
   virtual bool copyBufferBatch(
       const std::vector<amd::BatchCopyOp>& copyOps  //!< Batch of copy operations
   ) const;
+
+  //! Copies multiple pitched boxes between buffer objects in a batch
+  bool CopyBufferRectBatch(
+      const std::vector<amd::BatchCopyRectOp>& copy_ops  //!< Batch of box copy operations
+  ) const override;
 
   //! Copies pageable host-to-device operations in a batch
   virtual bool WriteBufferBatch(

@@ -60,6 +60,11 @@ inline InstructionFamily classify_instruction(const Instruction &inst) {
       has_prefix("v_swmmac_"))
     return InstructionFamily::Matrix;
 
+  // GWS uses the DS completion pipeline, but reports synchronization work even
+  // before execution has attached its memory state.
+  if (has_prefix("ds_gws_"))
+    return InstructionFamily::Control;
+
   // Memory traffic that the generated encodings describe only by name. Whole
   // prefix families never set MEMORY_OP -- RDNA4 `ds_direct_load` and
   // `tbuffer_load_format_x`, RDNA3.5 `lds_direct_load`, the image encodings
@@ -135,11 +140,9 @@ inline InstructionFamily classify_instruction(const Instruction &inst) {
   // and no-ops are not counted as LDS traffic. `s_barrier` catches the split
   // barrier family: on CDNA5 only `s_barrier_wait` carries the BARRIER flag,
   // so init/join/leave/signal/signal_isfirst would otherwise land in `scalar`
-  // next to ordinary ALU work. `ds_gws_` is the GWS barrier/semaphore set,
-  // which carries no flag on any architecture.
+  // next to ordinary ALU work.
   if ((inst.flags() & control_flags) != 0 || has_prefix("s_nop") || has_prefix("s_sleep") ||
-      has_prefix("s_delay") || has_prefix("s_barrier") || has_prefix("ds_nop") ||
-      has_prefix("ds_gws_"))
+      has_prefix("s_delay") || has_prefix("s_barrier") || has_prefix("ds_nop"))
     return InstructionFamily::Control;
 
   if (const InstructionFamily named = memory_family(); named != InstructionFamily::Other)

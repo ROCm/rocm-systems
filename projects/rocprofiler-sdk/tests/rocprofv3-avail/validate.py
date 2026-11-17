@@ -65,7 +65,8 @@ def test_validate_spm_refclk_config(rocm_path):
         ]
         if not refclk:
             continue
-        assert name.removesuffix("-strict") in {
+        arch = name[: -len("-strict")] if name.endswith("-strict") else name
+        assert arch in {
             "gfx1200",
             "gfx1201",
             "gfx1250",

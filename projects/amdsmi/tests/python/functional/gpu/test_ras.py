@@ -79,8 +79,38 @@ class TestGpuRas(unittest.TestCase):
 
     def test_get_gpu_total_ecc_count(self):
         self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(
-            amdsmi_get_gpu_total_ecc_count=amdsmi.amdsmi_get_gpu_total_ecc_count
+        # amdsmi_get_gpu_total_ecc_count() reads ras/features once per call and returns:
+        #   SUCCESS       - mask read and parsed
+        #   NOT_SUPPORTED - RAS unsupported on this ASIC (ras/features absent)
+        # AMDSMI_STATUS_API_FAILED (a malformed/unreadable mask) is deliberately not
+        # accepted: on present, real hardware that would mean the mask-read fix this
+        # suite guards has regressed, not an outcome to tolerate.
+        accept = [amdsmi.AmdSmiStatus.SUCCESS, amdsmi.AmdSmiStatus.NOT_SUPPORTED]
+        with self.common.status_sweep():
+            for i, gpu in enumerate(self.common.processors):
+                self.common.print_device_header(i)
+                msg = f"\t### amdsmi_get_gpu_total_ecc_count(gpu={i}):"
+                data = "N/A"
+                with self.common.expect_status(msg, accept):
+                    data = amdsmi.amdsmi_get_gpu_total_ecc_count(gpu)
+                self.common.print(f"\t\tamdsmi_get_gpu_total_ecc_count(gpu={i}): {data}")
+                self.common.print("")
+        return
+
+    def test_get_gpu_total_ecc_count_rejects_non_handle(self):
+        self.common.print_func_name("")
+        # A non-handle fails the Python-side isinstance check before any library
+        # call happens, so it is not a status expect_status can judge.
+        self.common.print('\t### amdsmi_get_gpu_total_ecc_count(processor_handle="not_a_handle"):')
+        with self.assertRaises(amdsmi.AmdSmiParameterException) as cm:
+            amdsmi.amdsmi_get_gpu_total_ecc_count("not_a_handle")
+        # Confirms it is *this* isinstance check that fired, not some other
+        # AmdSmiParameterException raised earlier/elsewhere for a different reason.
+        self.assertEqual(cm.exception.expectedType, amdsmi.amdsmi_wrapper.amdsmi_processor_handle)
+        self.common.print(
+            f"\tTEST SUCCESS, raised {type(cm.exception).__name__}, "
+            f"actual type {cm.exception.actualType.__name__}, "
+            f"expected type {cm.exception.expectedType.__name__}"
         )
         return
 

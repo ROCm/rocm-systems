@@ -32,6 +32,7 @@ enum class DiagnosticKind {
   ResourceLimit,
   KernelSkipped,
   ResidualRewrite,
+  InternalError, ///< Translator contract failure, not an invalid input.
 };
 
 /// @brief One user/developer-facing DBT diagnostic.

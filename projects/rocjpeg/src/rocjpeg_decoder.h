@@ -211,11 +211,30 @@ private:
    RocJpegStatus InitHIP(int device_id);
 
    /**
+    * @brief Checks that the crop rectangle of the decode parameters lies within the image.
+    *
+    * A rectangle with all four coordinates set to 0 requests no cropping. Any other rectangle must satisfy
+    * 0 <= left < right <= width and 0 <= top < bottom <= height, so that every output pixel comes from the image.
+    * @param decode_params The decode parameters holding the crop rectangle.
+    * @param jpeg_stream_params The parsed JPEG stream parameters holding the image dimensions.
+    * @return ROCJPEG_STATUS_SUCCESS if the crop rectangle is valid, ROCJPEG_STATUS_INVALID_PARAMETER otherwise.
+    */
+   static RocJpegStatus ValidateCropRectangle(const RocJpegDecodeParams &decode_params, const JpegStreamParameters &jpeg_stream_params);
+
+   /**
     * @brief Waits for the submitted surfaces and copies/converts the decoded output.
     *
     * This is the only finalize path; the single-image decoders call it with a batch size of one.
+    * Every surface is released when it returns, whether it succeeds or fails.
     */
    RocJpegStatus FinalizeDecodeBatched(const VASurfaceID *surface_ids, const JpegStreamParameters *jpeg_stream_params, const RocJpegDecodeParams *decode_params, RocJpegImage *destinations, int batch_size);
+
+   /**
+    * @brief Does the work of FinalizeDecodeBatched one sub-batch at a time, releasing each sub-batch's surfaces once
+    *        its output is complete. On failure it returns at once; num_released is the number of leading surfaces
+    *        already released.
+    */
+   RocJpegStatus FinalizeSubBatches(const VASurfaceID *surface_ids, const JpegStreamParameters *jpeg_stream_params, const RocJpegDecodeParams *decode_params, RocJpegImage *destinations, int batch_size, int &num_released);
 
    /**
     * @brief Retrieves the height of the chroma channel.

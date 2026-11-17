@@ -4,6 +4,11 @@
 
 include(HipFileAddExecutable)
 
+# Check that hipfile.h is valid C11 and C++11
+if(HIPFILE_BUILD_AMD_DETAIL)
+    add_subdirectory(header)
+endif()
+
 set(SHARED_SOURCE_FILES
     common/magic-word.cpp
 )

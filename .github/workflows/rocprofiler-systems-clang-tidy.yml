@@ -30,7 +30,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
           filter: blob:none
@@ -59,13 +59,13 @@ jobs:
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git config --global --add safe.directory "$PWD"
-          cmake --preset debug-mpi
+          cmake --preset debug-mpi-amdclang
 
       - name: Run clang-tidy-check
         working-directory: projects/rocprofiler-systems
         run: |
           python3 scripts/clang-tidy-check.py \
-            --base "origin/${{ github.base_ref }}" \
-            --build-path build/debug-mpi \
+            --base "origin/${GITHUB_BASE_REF}" \
+            --build-path build/debug-mpi-amdclang \
             -j $(nproc) \
             --timeout 600

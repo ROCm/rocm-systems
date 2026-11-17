@@ -28,6 +28,7 @@
 #include <string>
 #include <vector>
 
+#include "amd_smi/impl/amd_smi_test_overrides.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_device.h"
 #include "rocm_smi/rocm_smi_exception.h"
@@ -408,48 +409,6 @@ int ParseGpuOdFanRange(const std::string& path, uint64_t* min_pwm, uint64_t* max
   return 0;
 }
 
-int ParseGpuOdFanCurrentPwm(const std::string& path, uint64_t* current_pwm) {
-  // Read fan_minimum_pwm sysfs file and parse the current FAN_MINIMUM_PWM value.
-  // File format (multi-line):
-  //   FAN_MINIMUM_PWM:
-  //   <value>
-  //   OD_RANGE:
-  //   MINIMUM_PWM: <min> <max>
-  std::vector<std::string> lines;
-  int ret = ReadSysfsLines(path, &lines);
-  if (ret != 0) {
-    return ret;
-  }
-
-  if (lines.empty()) {
-    return EINVAL;
-  }
-
-  // Use TextFileTagContents_t for structured parsing
-  amd::smi::TextFileTagContents_t parser(lines);
-  parser.set_title_terminator(":", amd::smi::TagSplitterPositional_t::kLAST)
-      .set_key_data_splitter(":", amd::smi::TagSplitterPositional_t::kBETWEEN)
-      .structure_content();
-
-  // Check if FAN_MINIMUM_PWM section exists
-  if (!parser.contains_title_key("FAN_MINIMUM_PWM:")) {
-    return EINVAL;
-  }
-
-  // Get the first value under FAN_MINIMUM_PWM section
-  auto current_str = parser.get_structured_data_subkey_first("FAN_MINIMUM_PWM:");
-
-  // Parse the value
-  uint64_t val;
-  std::istringstream iss(current_str);
-  if (!(iss >> val)) {
-    return EINVAL;
-  }
-
-  if (current_pwm) *current_pwm = val;
-  return 0;
-}
-
 rsmi_status_t WriteGpuOdFanPwm(const std::string& path, const std::string& value) {
   int write_ret = WriteSysfsStr(path, value);
   if (write_ret != 0) {
@@ -619,7 +578,7 @@ rsmi_status_t storeTmpFile(uint32_t dv_ind, std::string parameterName, std::stri
     return RSMI_STATUS_SUCCESS;
   }
   // template for our file
-  std::string fullTempFilePath = "/tmp/" + fullFileName + ".XXXXXX";
+  std::string fullTempFilePath = test_hooks::AppTmpDir() + "/" + fullFileName + ".XXXXXX";
   char* fileName = fullTempFilePath.data();
   int fd = mkstemp(fileName);
   if (fd == -1) {
@@ -636,7 +595,7 @@ rsmi_status_t storeTmpFile(uint32_t dv_ind, std::string parameterName, std::stri
 }
 
 std::vector<std::string> getListOfAppTmpFiles() {
-  std::string path = "/tmp";
+  std::string path = test_hooks::AppTmpDir();
   DIR* dir;
   struct dirent* ent;
   std::vector<std::string> tmpFiles;

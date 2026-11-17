@@ -35,15 +35,8 @@ template <typename T, typename RedOp, typename Fan, int Direct, int P2p, bool is
 class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pipeline, useAcc, UserRegMode>
   : public PrimitivesWithoutDirect<
       Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pipeline, useAcc, UserRegMode>> {
-  // In the case of Fan::MaxRecv == 0, we need to force MaxRecv to 1 for this to compile
-  // This is because of a recv buffer which is allocated to MaxRecv length in send-only cases.
-  static constexpr int MaxRecv = Fan::MaxRecv > 1 ? Fan::MaxRecv : 1;
-#if defined(NCCL_OS_WINDOWS)
-  // MSVC rejects zero-length arrays; clamp to 1 on Windows only.
-  static constexpr int MaxSend = Fan::MaxSend > 1 ? Fan::MaxSend : 1;
-#else
+  static constexpr int MaxRecv = Fan::MaxRecv;
   static constexpr int MaxSend = Fan::MaxSend;
-#endif
   static constexpr int Input = 0, Output = 1, Acc = 2;
   RedOp redOp;
   const int tid;
@@ -64,10 +57,11 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
   uint64_t sendConnHead;
   uint64_t sendConnHeadCache; // Cache last seen value
 
-  uint64_t recvStep[MaxRecv];
-  uint64_t sendStep[MaxSend];
-  union ncclLLFifoLine* recvBuff[MaxRecv];
-  union ncclLLFifoLine* sendBuff[MaxSend];
+  // Avoid zero-length arrays while keeping the logical fan sizes unchanged.
+  uint64_t recvStep[MaxRecv ? MaxRecv : 1];
+  uint64_t sendStep[MaxSend ? MaxSend : 1];
+  union ncclLLFifoLine* recvBuff[MaxRecv ? MaxRecv : 1];
+  union ncclLLFifoLine* sendBuff[MaxSend ? MaxSend : 1];
 
   inline __device__ int recvOffset(int i) {
     return (recvStep[i] % NCCL_STEPS) * stepLines;
@@ -217,7 +211,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
   }
 
   template <int BeginIx>
-  __device__ void readLLBeginAll(int offset, ncclLLFifoLine (&line)[MaxRecv]) {
+  __device__ void readLLBeginAll(int offset, ncclLLFifoLine (&line)[MaxRecv ? MaxRecv : 1]) {
 #pragma unroll
     for (int i = BeginIx; i < MaxRecv; i++) {
       // Yes, for some template arguments this code will be unreachable.  That's fine.
@@ -246,7 +240,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
       }
     }
   }
-  __device__ uint64_t readLLFinish(int offset, ncclLLFifoLine (&line)[MaxRecv], int i) {
+  __device__ uint64_t readLLFinish(int offset, ncclLLFifoLine (&line)[MaxRecv ? MaxRecv : 1], int i) {
     union ncclLLFifoLine* src = recvPtr(i) + offset;
     uint32_t flag = recvFlag(i);
     int spins = 0;
@@ -367,6 +361,8 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
     return elt;
   }
 
+  // User buffers only. Comm FIFO stores must go through storeLL, which keeps
+  // the gfx950 hipHostMallocUncached fence for ROCm < 7.0.2.
   template <typename U>
   __device__ static void store(U* dst, U val) {
     union {
@@ -396,11 +392,6 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
     else if (sizeof(U) == 2) __builtin_nontemporal_store(u2, (uint16_t*)dst);
     else if (sizeof(U) == 4) __builtin_nontemporal_store(u4, (uint32_t*)dst);
     else __builtin_nontemporal_store(u8, (uint64_t*)dst);
-#if defined(__gfx950__) && ROCM_VERSION < 70002
-    __builtin_amdgcn_fence(
-      __ATOMIC_RELEASE,
-      ""); // flush cache on gfx950 if ROCr fix for hipHostMallocUncached is not available (ROCm version < 7.0.2)
-#endif
 #endif
 #else
     if (sizeof(U) == 1) asm volatile("st.volatile.global.b8 [%0],%1;" ::"l"(dst), "r"(u4) : "memory");
@@ -490,7 +481,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
       int eltInLine = EltPerLine < nelem ? EltPerLine : nelem;
 
       DataLoader dl, accdl;
-      ncclLLFifoLine line[MaxRecv];
+      ncclLLFifoLine line[MaxRecv ? MaxRecv : 1];
       uint64_t data, peerData, accData;
       if (SRC) {
         dl.loadBegin(srcElts, eltInLine);
@@ -506,7 +497,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
       }
       if (RECV) {
         data = !SRC ? peerData : applyReduce(redOp, peerData, data);
-#pragma unroll MaxRecv
+        NVCC_PRAGMA_UNROLL(MaxRecv ? MaxRecv : 1)
         // Yes, for some template arguments this code will be unreachable.  That's fine.
         // coverity[dead_error_line]
         for (int i = 1; i < MaxRecv && i < fan.nrecv(); i++) {
@@ -593,10 +584,9 @@ public:
     barriers = &ncclShmem.groups[group].barrier;
     // If we are going to support oneshot collNet + LL, then we would need to add connector index here
     int nrecv = 0, nsend = 0;
-    // We compare with Fan::MaxRecv here because this->MaxRecv is always at least 1
     // Yes, for some template arguments this code will be unreachable.  That's fine.
     // coverity[dead_error_line]
-    while (nrecv < Fan::MaxRecv && recvPeers[nrecv] >= 0) {
+    while (nrecv < MaxRecv && recvPeers[nrecv] >= 0) {
       loadRecvConn(&channel->peers[recvPeers[nrecv]]->recv[connIndexRecv], nrecv);
       nrecv++;
     }

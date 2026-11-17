@@ -37,9 +37,13 @@
 #   5. dispatch_id identity: a replayed dispatch keeps ONE dispatch_id across its passes (only the
 #      replay_pass index advances), and dispatch_id increments sequentially across dispatches -- one
 #      id minted per logical dispatch, reused by every pass (never one id per pass).
+#   6. With --rocpd-input, the rocpd counters_collection view reports each (dispatch, counter) as
+#      the mean of the passes that collected it, so the common counters are not multiplied by N,
+#      and every raw rocpd row carries the replay pass that pmc_events reports.
 # (The app verifies its own results in the generate step, guarding the restored data itself.)
 
 import collections
+import json
 import sys
 
 # Python 3.6 compatibility: dataclasses added in 3.7
@@ -51,6 +55,8 @@ except ImportError:
     _HAVE_DATACLASS = False
 
 import pytest
+
+from rocprofiler_sdk.pytest_utils import gpu_uses_auto_perf_level
 
 # Tolerate the in-flight rename of the per-pass index field (replay_pass <-> n).
 _PASS_KEYS = ("replay_pass", "n")
@@ -341,6 +347,74 @@ def test_expected_logical_dispatch_count(json_data, expected_dispatch_count):
     )
 
 
+def test_unselected_dispatches_run_once(json_data, expected_passes):
+    # Only the dispatches the kernel filters select are replayed; the others run once. The kernel
+    # trace has a record per execution, so a selected dispatch has one per pass and any other has
+    # one.
+    sdk = _sdk(json_data)
+    executions = sdk.get("buffer_records", {}).get("kernel_dispatch", [])
+    if not executions:
+        pytest.skip("generated without --kernel-trace")
+
+    names = _kernel_id_to_name(sdk)
+    selected = set(_dispatch_passes(sdk))
+    runs = collections.Counter()
+    kernels = {}
+    for rec in executions:
+        info = rec["dispatch_info"]
+        runs[int(info["dispatch_id"])] += 1
+        kernels[int(info["dispatch_id"])] = names.get(int(info["kernel_id"]), "")
+
+    unselected = [did for did in runs if did not in selected]
+    assert unselected, f"no unselected dispatches to check: dispatch_ids={sorted(runs)}"
+    for did, count in sorted(runs.items()):
+        want = expected_passes if did in selected else 1
+        assert (
+            count == want
+        ), f"dispatch {did} ({kernels[did]}) ran {count} time(s), expected {want}: " + (
+            "a selected dispatch runs once per pass"
+            if did in selected
+            else "a dispatch the kernel filters do not select must not be replayed"
+        )
+
+
+def test_iteration_range_selects_launches(json_data, selected_kernel, selected_launches):
+    # --kernel-iteration-range numbers the launches the profiler observes, from 1, once each however
+    # often a selected launch is replayed. With --selected-regions only the launches inside a region
+    # are observed, and the kernel trace records exactly those.
+    if not selected_kernel or not selected_launches:
+        pytest.skip("--selected-kernel and --selected-launches were not specified")
+
+    sdk = _sdk(json_data)
+    executions = sdk.get("buffer_records", {}).get("kernel_dispatch", [])
+    if not executions:
+        pytest.skip("generated without --kernel-trace")
+
+    names = _kernel_id_to_name(sdk)
+    launches = sorted(
+        {
+            int(rec["dispatch_info"]["dispatch_id"])
+            for rec in executions
+            if selected_kernel in names.get(int(rec["dispatch_info"]["kernel_id"]), "")
+        }
+    )
+    assert len(launches) >= max(selected_launches), (
+        f"only {len(launches)} launches of {selected_kernel} were traced, expected at least "
+        f"{max(selected_launches)}"
+    )
+
+    want = [launches[launch - 1] for launch in selected_launches]
+    got = sorted(
+        did
+        for did, entry in _dispatch_passes(sdk).items()
+        if selected_kernel in names.get(entry["kernel_id"], "")
+    )
+    assert got == want, (
+        f"counters came from {selected_kernel} dispatches {got}, expected launches "
+        f"{selected_launches} of {len(launches)}, which are dispatches {want}"
+    )
+
+
 def test_dispatch_ids_increment_sequentially(json_data):
     # Across distinct dispatches the dispatch_id increments sequentially -- one fresh id per logical
     # dispatch, none skipped, none reused. Replay passes reuse their dispatch's reserved id (they
@@ -369,37 +443,119 @@ def test_dispatch_id_nonzero_every_pass(json_data):
     ), f"{len(zero)} pass record(s) carry dispatch_id==0 (replay_pass indices {zero})"
 
 
-def test_common_counters_constant_across_passes(json_data, common_counters):
-    # Metric 2: the shared sanity counters appear in every pass and are constant for a kernel.
-    table = _records_by_dispatch(_sdk(json_data))
+def test_common_counters_constant_across_passes(json_data, common_counter):
+    # Check each shared counter separately so unavailable instruction counters do not
+    # skip the wave-count check or replay-structure validation.
+    sdk = _sdk(json_data)
+    table = _records_by_dispatch(sdk)
+    counter = common_counter
+    if counter.startswith("SQ_INSTS_") and all(
+        batch.get(counter) == 0
+        for entry in table.values()
+        for batch in entry["passes"].values()
+    ):
+        first_gpu = next((agent for agent in sdk["agents"] if agent["type"] == 2), None)
+        if first_gpu is not None and gpu_uses_auto_perf_level(first_gpu):
+            pytest.skip(f"{counter} is zero on gfx11/gfx12 with AUTO performance level")
+
     for dispatch_id, entry in table.items():
         passes = entry["passes"]
-        for counter in common_counters:
-            values = [batch[counter] for batch in passes.values() if counter in batch]
-            assert len(values) == len(passes), (
-                f"dispatch {dispatch_id} ({entry['kernel']}) common counter {counter} missing in "
-                f"some passes: present in {len(values)}/{len(passes)}"
-            )
-            # A counter stuck at zero is constant, so the spread check below cannot see it.
-            assert min(values) > 0, (
-                f"dispatch {dispatch_id} ({entry['kernel']}) common counter {counter} is not > 0 "
-                f"in every replay pass: {values}"
-            )
-            # Apply tolerance check with both relative and absolute components.
-            # For SQ_WAVES, this allows up to 8-wave spread regardless of magnitude.
-            # This works across all GPU architectures (gfx90a, gfx908, gfx942, etc.)
-            # since the absolute tolerance handles the spread independent of baseline value.
-            tolerance = _pass_tolerance(counter)
-            assert _approx_equal(
-                min(values),
-                max(values),
-                relative=tolerance.relative,
-                absolute=tolerance.absolute,
-            ), (
-                f"dispatch {dispatch_id} ({entry['kernel']}) counter {counter} varies across "
-                f"replay passes (allowed relative {tolerance.relative:.0%}, "
-                f"absolute {tolerance.absolute:g}): {values}"
-            )
+        values = [batch[counter] for batch in passes.values() if counter in batch]
+        assert len(values) == len(passes), (
+            f"dispatch {dispatch_id} ({entry['kernel']}) common counter {counter} missing in "
+            f"some passes: present in {len(values)}/{len(passes)}"
+        )
+        # A counter stuck at zero is constant, so the spread check below cannot see it.
+        assert min(values) > 0, (
+            f"dispatch {dispatch_id} ({entry['kernel']}) common counter {counter} is not > 0 "
+            f"in every replay pass: {values}"
+        )
+        # Apply tolerance check with both relative and absolute components.
+        # For SQ_WAVES, this allows up to 8-wave spread regardless of magnitude.
+        # This works across all GPU architectures (gfx90a, gfx908, gfx942, etc.)
+        # since the absolute tolerance handles the spread independent of baseline value.
+        tolerance = _pass_tolerance(counter)
+        assert _approx_equal(
+            min(values),
+            max(values),
+            relative=tolerance.relative,
+            absolute=tolerance.absolute,
+        ), (
+            f"dispatch {dispatch_id} ({entry['kernel']}) counter {counter} varies across "
+            f"replay passes (allowed relative {tolerance.relative:.0%}, "
+            f"absolute {tolerance.absolute:g}): {values}"
+        )
+
+
+def test_rocpd_counters_collection_averages_passes(json_data, rocpd_db):
+    # rocpd stores every pass of a replayed dispatch under the dispatch's one event, so the
+    # counters_collection view must average a counter over the passes that collected it. Summing
+    # them reported each common counter, which every group lists, at N times its value.
+    per_pass = {}
+    for dispatch_id, entry in _records_by_dispatch(_sdk(json_data)).items():
+        for batch in entry["passes"].values():
+            for counter, value in batch.items():
+                per_pass.setdefault((dispatch_id, counter), []).append(value)
+    assert any(
+        len(values) > 1 for values in per_pass.values()
+    ), "no counter was collected by more than one pass, so the run cannot show summed passes"
+
+    actual = {
+        (int(dispatch_id), counter): float(value)
+        for dispatch_id, counter, value in rocpd_db.execute(
+            "SELECT dispatch_id, counter_name, value FROM counters_collection"
+        )
+    }
+    assert sorted(actual) == sorted(per_pass), (
+        "rocpd counters_collection and JSON disagree on the (dispatch, counter) pairs: "
+        f"only in rocpd {sorted(set(actual) - set(per_pass))}, "
+        f"only in JSON {sorted(set(per_pass) - set(actual))}"
+    )
+    for (dispatch_id, counter), values in sorted(per_pass.items()):
+        mean = sum(values) / len(values)
+        assert actual[(dispatch_id, counter)] == pytest.approx(mean, rel=1e-9), (
+            f"dispatch {dispatch_id} counter {counter}: rocpd counters_collection reports "
+            f"{actual[(dispatch_id, counter)]}, but its replay passes in JSON are {values} "
+            f"(mean {mean})"
+        )
+
+
+def test_rocpd_rows_carry_replay_pass(json_data, rocpd_db):
+    # The averaging above depends on the writer tagging every row: a pass after the first
+    # carries exactly {"replay_pass":N} in extdata and pass 0 keeps "{}". Each (dispatch, pass)
+    # must hold one row per instance value in that pass's JSON record, and pmc_events must
+    # report the same pass for each row.
+    want = collections.Counter()
+    for rec in _counter_records(_sdk(json_data)):
+        want[(_dispatch_id(rec), _pass_index(rec))] += len(rec.get("records", []))
+
+    got = collections.Counter()
+    for dispatch_id, extdata, rows in rocpd_db.execute(
+        "SELECT K.dispatch_id, E.extdata, COUNT(*) FROM rocpd_pmc_event E "
+        "INNER JOIN rocpd_kernel_dispatch K ON K.event_id = E.event_id AND K.guid = E.guid "
+        "WHERE E.sample_id IS NULL GROUP BY K.dispatch_id, E.extdata"
+    ):
+        pass_index = json.loads(extdata).get("replay_pass", 0)
+        tag = "{}" if pass_index == 0 else f'{{"replay_pass":{pass_index}}}'
+        assert (
+            extdata == tag
+        ), f"dispatch {dispatch_id}: rocpd_pmc_event extdata {extdata!r}, expected {tag!r}"
+        got[(int(dispatch_id), pass_index)] += rows
+    assert got == want, (
+        "rocpd_pmc_event rows per (dispatch, replay pass) do not match the JSON instance "
+        f"records: rocpd {sorted(got.items())}, JSON {sorted(want.items())}"
+    )
+
+    by_view = collections.Counter()
+    for dispatch_id, pass_index, rows in rocpd_db.execute(
+        "SELECT dispatch_id, replay_pass, COUNT(*) FROM pmc_events "
+        "GROUP BY dispatch_id, replay_pass"
+    ):
+        by_view[(int(dispatch_id), int(pass_index))] += rows
+    assert by_view == want, (
+        "pmc_events rows per (dispatch, replay_pass) do not match the JSON instance records: "
+        f"rocpd {sorted(by_view.items())}, JSON {sorted(want.items())}"
+    )
 
 
 def test_each_pass_collects_distinct_batch(json_data, expected_passes, common_counters):

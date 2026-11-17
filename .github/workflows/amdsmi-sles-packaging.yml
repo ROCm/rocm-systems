@@ -68,6 +68,8 @@ jobs:
           # rocm-systems is a large monorepo; only the amdsmi project is needed.
           sparse-checkout: |
             projects/amdsmi
+            shared/cuid
+            shared/sha256
             .github/workflows
 
       - name: Mark workspace safe for git

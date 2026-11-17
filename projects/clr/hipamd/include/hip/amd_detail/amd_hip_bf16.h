@@ -154,7 +154,7 @@ typedef struct __attribute__((aligned(4))) {
 } __hip_bfloat162_raw;
 
 /**
- * \defgroup HIP_INTRINSIC_BFLOAT16_STRUCT
+ * \defgroup HIP_INTRINSIC_BFLOAT16_STRUCT Bfloat16 Struct
  * \ingroup HIP_INTRINSIC_BFLOAT16
  * \brief Struct to represent a 16 bit brain floating point number.
  * @{
@@ -327,7 +327,7 @@ typedef __bf16 __bf16_2 __attribute__((vector_size(sizeof(__bf16) * 2)));
 #endif
 
 /**
- * \defgroup HIP_INTRINSIC_BFLOAT162_STRUCT
+ * \defgroup HIP_INTRINSIC_BFLOAT162_STRUCT Bfloat162 Struct
  * \ingroup HIP_INTRINSIC_BFLOAT16
  * \brief Struct to represent a two 16 bit brain floating point number.
  * @{
@@ -1305,12 +1305,7 @@ __BF16_HOST_DEVICE_STATIC__ bool __hneu(const __hip_bfloat16 a, const __hip_bflo
  * \brief Compare two bfloat162 values - return max
  */
 __BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __hmax(const __hip_bfloat16 a, const __hip_bfloat16 b) {
-  auto a_nan = __hisnan(a), b_nan = __hisnan(b);
-  if (a_nan || b_nan) {
-    if (a_nan && b_nan) return HIPRT_NAN_BF16;  // return canonical NaN
-    return a_nan ? b : a;
-  }
-  return (__bf16)a > (__bf16)b ? a : b;
+  return __builtin_elementwise_maximumnum((__bf16)a, (__bf16)b);
 }
 
 /**
@@ -1318,12 +1313,7 @@ __BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __hmax(const __hip_bfloat16 a, const 
  * \brief Compare two bfloat162 values - return min
  */
 __BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __hmin(const __hip_bfloat16 a, const __hip_bfloat16 b) {
-  auto a_nan = __hisnan(a), b_nan = __hisnan(b);
-  if (a_nan || b_nan) {
-    if (a_nan && b_nan) return HIPRT_NAN_BF16;  // return canonical NaN
-    return a_nan ? b : a;
-  }
-  return (__bf16)a < (__bf16)b ? a : b;
+  return __builtin_elementwise_minimumnum((__bf16)a, (__bf16)b);
 }
 
 /**

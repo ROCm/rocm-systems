@@ -34,6 +34,7 @@ THE SOFTWARE.
 #include <iostream>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "hsa/hsa.h"
@@ -41,6 +42,20 @@ THE SOFTWARE.
 
 namespace amd {
 namespace rdc {
+
+// Calls a function when it goes out of scope: on a normal return and when an exception leaves
+// the scope. The tests use it to release the HSA objects they create on every path.
+template <typename F>
+class ScopeExit {
+ public:
+  explicit ScopeExit(F fn) : fn_(std::move(fn)) {}
+  ~ScopeExit() { fn_(); }
+  ScopeExit(const ScopeExit&) = delete;
+  ScopeExit& operator=(const ScopeExit&) = delete;
+
+ private:
+  F fn_;
+};
 
 #if defined(_MSC_VER)
 #define ALIGNED_(x) __declspec(align(x))
@@ -209,6 +224,13 @@ hsa_status_t GetAgentPools(std::vector<std::shared_ptr<agent_pools_t>>* agent_po
 void throw_if_error(hsa_status_t err, const std::string& msg = "");
 
 void throw_if_skip(const std::string& msg);
+
+// The queue the checks dispatch on for agent. The first call for an agent creates it, and
+// rdc_diag_destroy() destroys it; callers must not destroy it. Fails with
+// HSA_STATUS_ERROR_NOT_INITIALIZED unless the module holds its ROCr reference. Checks take their
+// queue from here and create none of their own: rocprofiler-sdk never frees a queue it
+// intercepted, so every queue a check created stayed in rdcd.
+hsa_status_t AcquireDiagQueue(hsa_agent_t agent, hsa_queue_t** queue);
 
 // The customize exception when the test has to be skipped
 class SkipException : public std::exception {

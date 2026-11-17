@@ -138,14 +138,15 @@ if(ROCPROFILER_BUILD_STACK_PROTECTOR)
 endif()
 
 # ----------------------------------------------------------------------------------------#
-# developer build flags
+# developer and CI build flags
 #
 rocprofiler_target_compile_options(
     rocprofiler-sdk-developer-flags
     LANGUAGES C CXX
     INTERFACE "-Werror" "-Wdouble-promotion" "-Wshadow" "-Wextra" "-Wvla")
 
-if(ROCPROFILER_BUILD_DEVELOPER)
+# Enable strict compiler flags even when developer tooling is disabled.
+if(ROCPROFILER_BUILD_CI OR ROCPROFILER_BUILD_DEVELOPER)
     target_link_libraries(rocprofiler-sdk-build-flags
                           INTERFACE rocprofiler-sdk::rocprofiler-sdk-developer-flags)
 endif()

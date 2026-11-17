@@ -4,6 +4,8 @@ Instruction decoders, execution bodies, legalization tables, and encoding
 translators are generated from the
 [Machine-Readable ISA (MR ISA)](https://gpuopen.com/machine-readable-isa/)
 XML specification via the `amdisa` Python library in `lib/python/amdisa/`.
+DBT generation also emits the matrix lane-conversion catalog from Python
+layout formulas and a fixed inventory of source/target layout names.
 
 ## amdisa modules
 
@@ -14,10 +16,12 @@ XML specification via the `amdisa` Python library in `lib/python/amdisa/`.
 | `isa_profile.py` | Per-ISA profile constants and encoding rules |
 | `semantics.py` | Derive instruction semantics from mnemonics |
 | `cross_isa.py` | Cross-ISA instruction overlap analysis |
-| `codegen/` | Generate C++ decoders, encoders, and instruction execute bodies |
+| `codegen/` | Generate C++ decoders, encoders and execute bodies, and native assembly dispatch tables |
 | `legalization.py` | Generate cross-ISA legalization tables (Action classification) |
 | `legalization_codegen.py` | Emit C++20 `InstructionLegalization[]` legalization table headers |
 | `encoding_translator_codegen.py` | Emit C++20 neutral field structs + decode/encode functions |
+| `layout_catalog.py` | Matrix lane-layout descriptors and XOR permutation formulas |
+| `codegen/dbt/rule_gen.py` | Derive and emit the matrix lane-conversion catalog |
 
 ## Installation
 
@@ -197,13 +201,28 @@ python -m amdisa cdna5:/path/to/amdgpu_isa_cdna5.xml \
 
 ## Generated file locations
 
+The portable C++ switches and native assembly tables share the same
+opcode-to-factory rows.
+
 | Generated files | Location | Generator |
 |---|---|---|
-| ISA decoders, encoders, execute bodies, and `insts.h` | `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/<output-directory>/` | `codegen/` |
+| ISA decoders (including `decode_factories.h`, `decode_tables.inc`, and `decode_tables.S`), encoders, execute bodies, and `insts.h` | `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/<output-directory>/` | `codegen/` |
 | Shared execute templates | `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/shared/` | `codegen/` |
 | ISA files generated at a custom path | A caller-selected tree such as `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/custom/generated/` | `codegen/` |
 | Cross-ISA legalization tables | `lib/rocjitsu/src/rocjitsu/code/dbt/generated/` | `legalization_codegen.py` |
 | Encoding decode/encode functions | `lib/rocjitsu/src/rocjitsu/code/dbt/generated/` | `encoding_translator_codegen.py` |
+| Matrix lane-conversion catalog (`matrix_conversions.h`) | `lib/rocjitsu/src/rocjitsu/code/dbt/generated/` | `codegen/dbt/rule_gen.py` |
+
+The matrix header is regenerated during DBT generation from the four preserved
+layout pairs in `_MATRIX_CONVERSION_PAIRS` in `codegen/dbt/rule_gen.py` and the
+lane-layout formulas in `layout_catalog.py`. The output helper creates the
+directory and runs `clang-format` when available. The inventory describes
+layout permutations; adding a row does not implement a translation or establish
+opcode availability. In particular, `V_WMMA_I32_16X16X32_I8` is a historical
+layout-only placeholder absent from the pinned RDNA4 XML, whose 8-bit integer
+WMMA instruction is `V_WMMA_I32_16X16X16_IU8`. The current consumer in
+`cdna4_to_rdna4.cpp` selects a row by source mnemonic and emits a fixed F16 WMMA
+instruction; it does not validate or select the catalog's destination names.
 
 GPUOpen's public CDNA5 MR ISA uses the architecture name `AMD CDNA 5` and the
 filename `amdgpu_isa_cdna5.xml`. rocjitsu's logical generator key and
@@ -238,7 +257,7 @@ python -m amdisa [--isa-additions NAME:XML] [--isa-variants NAME:JSON]
 | `--isa-additions NAME:XML` | Apply a validated ISA additions file to the named ISA; may be repeated |
 | `--isa-variants NAME:JSON` | Attach one validated target-capability manifest to the named ISA |
 | `--gen-isas` | Generate ISA C++ files (decoders, encodings, execute bodies) |
-| `--gen-dbt` | Generate DBT legalization tables and encoding translators |
+| `--gen-dbt` | Generate DBT legalization tables, matrix layout conversions, and encoding translators |
 | `--isa-output DIR` | Output path for generated ISA C++ files |
 | `--include-root DIR` | Compiler include root used to spell relocatable generated includes |
 | `--dbt-output DIR` | Output directory for DBT tables (defaults to `--isa-output`) |

@@ -21,18 +21,25 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
+#include "lib/common/scope_destructor.hpp"
+#include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/hsa/hsa.hpp"
+#include "lib/rocprofiler-sdk/kfd/correlation_types.hpp"
 
 #include <gtest/gtest.h>
 
 #include <hsa/amd_hsa_queue.h>
 #include <hsa/amd_hsa_signal.h>
 #include <hsa/hsa.h>
+#include <hsa/hsa_ext_amd.h>
 
 #include <atomic>
 #include <chrono>
+#include <cstring>
 #include <future>
 #include <memory>
 #include <thread>
+#include <vector>
 
 namespace rocprofiler
 {
@@ -357,6 +364,147 @@ TEST(queue_interposition, doorbell_backpressure_waits_when_ring_full_k0)
     EXPECT_EQ(get_pkt(ring, 4, 3)->kernel_object, static_cast<uint64_t>(0xABCD));
 }
 
+namespace
+{
+constexpr uint16_t k_dispatch_header = HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE;
+constexpr uint16_t k_retired_header  = HSA_PACKET_TYPE_INVALID << HSA_PACKET_HEADER_TYPE;
+
+uint64_t
+deadline_in(std::chrono::milliseconds budget)
+{
+    return kfd::steady_now_ns() + static_cast<uint64_t>(std::chrono::nanoseconds{budget}.count());
+}
+}  // namespace
+
+// The read index lags a finished burst (gfx1250 defers its write-back while the
+// queue idles), but the CP has reset every slot it retired: the drain must not
+// spend its budget waiting for a read index that will not move.
+TEST(queue_interposition, hw_drain_accepts_retired_slots_behind_stale_read_index)
+{
+    QueueState       state{};
+    alignas(64) char ring[64 * 64];
+    memset(ring, 0, sizeof(ring));
+    uint64_t real_rdid = 16;
+
+    state.ring_buf  = ring;
+    state.ring_size = 64;
+    state.ring_mask = 63;
+    state.real_rdid = &real_rdid;
+
+    for(uint64_t i = 16; i < 19; ++i)
+        get_pkt(ring, i, 63)->header = k_retired_header;
+
+    const auto start = std::chrono::steady_clock::now();
+    EXPECT_TRUE(wait_queue_hw_drained_locked(state, 19, deadline_in(std::chrono::seconds{10})));
+    EXPECT_LT(std::chrono::steady_clock::now() - start, std::chrono::seconds{1});
+}
+
+TEST(queue_interposition, hw_drain_times_out_while_a_packet_is_in_flight)
+{
+    QueueState       state{};
+    alignas(64) char ring[64 * 64];
+    memset(ring, 0, sizeof(ring));
+    uint64_t real_rdid = 0;
+
+    state.ring_buf  = ring;
+    state.ring_size = 64;
+    state.ring_mask = 63;
+    state.real_rdid = &real_rdid;
+
+    // Older packets retired, the newest still running; a zero-filled header
+    // (type VENDOR_SPECIFIC) is not retired either.
+    get_pkt(ring, 0, 63)->header = k_retired_header;
+    get_pkt(ring, 1, 63)->header = k_retired_header;
+    get_pkt(ring, 2, 63)->header = k_dispatch_header;
+    EXPECT_FALSE(
+        wait_queue_hw_drained_locked(state, 3, deadline_in(std::chrono::milliseconds{20})));
+
+    get_pkt(ring, 2, 63)->header = k_retired_header;
+    get_pkt(ring, 0, 63)->header = 0;
+    EXPECT_FALSE(
+        wait_queue_hw_drained_locked(state, 3, deadline_in(std::chrono::milliseconds{20})));
+}
+
+TEST(queue_interposition, hw_drain_completes_when_the_last_packet_retires)
+{
+    QueueState       state{};
+    alignas(64) char ring[64 * 64];
+    memset(ring, 0, sizeof(ring));
+    uint64_t real_rdid = 0;
+
+    state.ring_buf  = ring;
+    state.ring_size = 64;
+    state.ring_mask = 63;
+    state.real_rdid = &real_rdid;
+
+    get_pkt(ring, 0, 63)->header = k_retired_header;
+    get_pkt(ring, 1, 63)->header = k_dispatch_header;
+
+    auto* last_hdr = &get_pkt(ring, 1, 63)->header;
+    auto  retire   = std::async(std::launch::async, [last_hdr]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds{5});
+        __atomic_store_n(last_hdr, k_retired_header, __ATOMIC_RELEASE);
+    });
+
+    const auto start = std::chrono::steady_clock::now();
+    EXPECT_TRUE(wait_queue_hw_drained_locked(state, 2, deadline_in(std::chrono::seconds{10})));
+    EXPECT_LT(std::chrono::steady_clock::now() - start, std::chrono::seconds{1});
+    retire.get();
+}
+
+// A read index that has caught up is sufficient on its own: slots it has passed
+// may already hold the producer's next packets.
+TEST(queue_interposition, hw_drain_trusts_a_caught_up_read_index)
+{
+    QueueState       state{};
+    alignas(64) char ring[64 * 64];
+    memset(ring, 0, sizeof(ring));
+    uint64_t real_rdid = 3;
+
+    state.ring_buf  = ring;
+    state.ring_size = 64;
+    state.ring_mask = 63;
+    state.real_rdid = &real_rdid;
+
+    for(uint64_t i = 0; i < 3; ++i)
+        get_pkt(ring, i, 63)->header = k_dispatch_header;
+
+    EXPECT_TRUE(wait_queue_hw_drained_locked(state, 3, deadline_in(std::chrono::milliseconds{20})));
+}
+
+// The window [read index, P) wraps the ring: only the slots it covers count, so a
+// live packet in a slot outside it does not hold the drain.
+TEST(queue_interposition, hw_drain_checks_the_window_across_ring_wrap)
+{
+    QueueState       state{};
+    alignas(64) char ring[64 * 4];
+    memset(ring, 0, sizeof(ring));
+    uint64_t real_rdid = 6;
+
+    state.ring_buf  = ring;
+    state.ring_size = 4;
+    state.ring_mask = 3;
+    state.real_rdid = &real_rdid;
+
+    // indices 6, 7, 8 -> slots 2, 3, 0; slot 1 holds the next, unpublished packet
+    get_pkt(ring, 6, 3)->header = k_retired_header;
+    get_pkt(ring, 7, 3)->header = k_retired_header;
+    get_pkt(ring, 8, 3)->header = k_retired_header;
+    get_pkt(ring, 9, 3)->header = k_dispatch_header;
+    EXPECT_TRUE(wait_queue_hw_drained_locked(state, 9, deadline_in(std::chrono::milliseconds{20})));
+
+    // a window longer than the ring cannot be decided from headers
+    real_rdid                   = 4;
+    get_pkt(ring, 9, 3)->header = k_retired_header;
+    EXPECT_FALSE(
+        wait_queue_hw_drained_locked(state, 9, deadline_in(std::chrono::milliseconds{20})));
+
+    real_rdid                   = 6;
+    get_pkt(ring, 8, 3)->header = k_dispatch_header;
+    EXPECT_FALSE(
+        wait_queue_hw_drained_locked(state, 9, deadline_in(std::chrono::milliseconds{20})));
+}
+
 TEST(queue_interposition, doorbell_out_of_order_does_not_hang)
 {
     auto             state = std::make_shared<QueueState>();
@@ -412,6 +560,343 @@ TEST(queue_interposition, doorbell_out_of_order_does_not_hang)
     EXPECT_EQ(state->next_scan_pos, 2u);
     EXPECT_EQ(get_pkt(ring, 0, 255)->kernel_object, static_cast<uint64_t>(0xB0));
     EXPECT_EQ(get_pkt(ring, 1, 255)->kernel_object, static_cast<uint64_t>(0xB1));
+}
+
+void
+fill_hsa_fn_tables()
+{
+    auto* core = rocprofiler::hsa::get_core_table();
+    auto* amd  = rocprofiler::hsa::get_amd_ext_table();
+    ASSERT_NE(core, nullptr);
+    ASSERT_NE(amd, nullptr);
+
+    core->hsa_signal_store_screlease_fn = hsa_signal_store_screlease;
+    core->hsa_signal_wait_relaxed_fn    = hsa_signal_wait_relaxed;
+    core->hsa_signal_destroy_fn         = hsa_signal_destroy;
+    core->hsa_signal_load_scacquire_fn  = hsa_signal_load_scacquire;
+
+    amd->hsa_amd_signal_create_fn   = hsa_amd_signal_create;
+    amd->hsa_amd_signal_wait_any_fn = hsa_amd_signal_wait_any;
+}
+
+CoreApiTable
+make_core_table()
+{
+    auto table = CoreApiTable{};
+    std::memset(&table, 0, sizeof(table));
+    table.hsa_queue_add_write_index_relaxed_fn     = hsa_queue_add_write_index_relaxed;
+    table.hsa_queue_add_write_index_scacq_screl_fn = hsa_queue_add_write_index_scacq_screl;
+    table.hsa_queue_add_write_index_scacquire_fn   = hsa_queue_add_write_index_scacquire;
+    table.hsa_queue_add_write_index_screlease_fn   = hsa_queue_add_write_index_screlease;
+    table.hsa_queue_store_write_index_relaxed_fn   = hsa_queue_store_write_index_relaxed;
+    table.hsa_queue_store_write_index_screlease_fn = hsa_queue_store_write_index_screlease;
+    table.hsa_queue_cas_write_index_relaxed_fn     = hsa_queue_cas_write_index_relaxed;
+    table.hsa_queue_cas_write_index_scacq_screl_fn = hsa_queue_cas_write_index_scacq_screl;
+    table.hsa_queue_cas_write_index_scacquire_fn   = hsa_queue_cas_write_index_scacquire;
+    table.hsa_queue_cas_write_index_screlease_fn   = hsa_queue_cas_write_index_screlease;
+    table.hsa_queue_load_write_index_relaxed_fn    = hsa_queue_load_write_index_relaxed;
+    table.hsa_queue_load_write_index_scacquire_fn  = hsa_queue_load_write_index_scacquire;
+    table.hsa_signal_store_relaxed_fn              = hsa_signal_store_relaxed;
+    table.hsa_signal_store_screlease_fn            = hsa_signal_store_screlease;
+    table.hsa_signal_silent_store_relaxed_fn       = hsa_signal_silent_store_relaxed;
+    table.hsa_signal_silent_store_screlease_fn     = hsa_signal_silent_store_screlease;
+    return table;
+}
+
+void
+make_dispatch_tracing_context(rocprofiler::context::context& ctx)
+{
+    ctx.callback_tracer = std::make_unique<rocprofiler::context::callback_tracing_service>();
+    EXPECT_EQ(rocprofiler::context::add_domain(ctx.callback_tracer->domains,
+                                               ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH),
+              ROCPROFILER_STATUS_SUCCESS);
+}
+
+class QueueInterpositionConsumerTransition : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        if(hsa_init() != HSA_STATUS_SUCCESS)
+        {
+            GTEST_SKIP() << "hsa_init failed; consumer-transition tests need HSA";
+        }
+        fill_hsa_fn_tables();
+        core_table_ = make_core_table();
+        interposition_init(&core_table_, true);
+        ASSERT_TRUE(supports_queue_interposition());
+    }
+
+    void TearDown() override
+    {
+        if(!supports_queue_interposition()) return;
+        stop_completion_monitor();
+        interposition_fini();
+    }
+
+    CoreApiTable core_table_{};
+};
+
+TEST_F(QueueInterpositionConsumerTransition, start_resyncs_stale_shadow)
+{
+    auto               dummy_queue = hsa_queue_t{};
+    const hsa_queue_t* queue_ptr   = &dummy_queue;
+
+    auto     state     = std::make_shared<QueueState>();
+    uint64_t real_wdid = 17;
+    uint64_t real_rdid = 3;
+    state->real_wdid   = &real_wdid;
+    state->real_rdid   = &real_rdid;
+    state->virtual_wptr.store(0);
+    state->next_scan_pos   = 0;
+    state->next_submit_pos = 0;
+    state->hsa_queue       = queue_ptr;
+
+    get_queue_registry().wlock([&](auto& registry) { registry[queue_ptr] = state; });
+
+    auto ctx = rocprofiler::context::context{};
+    make_dispatch_tracing_context(ctx);
+    notify_queue_interposition_consumer_context_started(&ctx);
+
+    EXPECT_EQ(state->virtual_wptr.load(), 17u);
+    EXPECT_EQ(state->next_scan_pos, 17u);
+    EXPECT_EQ(state->next_submit_pos, 17u);
+
+    notify_queue_interposition_consumer_context_stopped(&ctx);
+    get_queue_registry().wlock([&](auto& registry) { registry.erase(queue_ptr); });
+}
+
+TEST_F(QueueInterpositionConsumerTransition, non_tracing_context_does_not_resync)
+{
+    auto               dummy_queue = hsa_queue_t{};
+    const hsa_queue_t* queue_ptr   = &dummy_queue;
+
+    auto     state     = std::make_shared<QueueState>();
+    uint64_t real_wdid = 9;
+    state->real_wdid   = &real_wdid;
+    state->virtual_wptr.store(1);
+    state->next_scan_pos   = 1;
+    state->next_submit_pos = 1;
+
+    get_queue_registry().wlock([&](auto& registry) { registry[queue_ptr] = state; });
+
+    auto ctx = rocprofiler::context::context{};
+    notify_queue_interposition_consumer_context_started(&ctx);
+    notify_queue_interposition_consumer_context_stopped(&ctx);
+
+    EXPECT_EQ(state->virtual_wptr.load(), 1u);
+    EXPECT_EQ(state->next_scan_pos, 1u);
+    EXPECT_EQ(state->next_submit_pos, 1u);
+
+    get_queue_registry().wlock([&](auto& registry) { registry.erase(queue_ptr); });
+}
+
+TEST_F(QueueInterpositionConsumerTransition, stop_then_start_resyncs_again)
+{
+    auto               dummy_queue = hsa_queue_t{};
+    const hsa_queue_t* queue_ptr   = &dummy_queue;
+
+    auto     state     = std::make_shared<QueueState>();
+    uint64_t real_wdid = 4;
+    state->real_wdid   = &real_wdid;
+    state->virtual_wptr.store(4);
+    state->next_scan_pos   = 4;
+    state->next_submit_pos = 4;
+
+    get_queue_registry().wlock([&](auto& registry) { registry[queue_ptr] = state; });
+
+    auto ctx = rocprofiler::context::context{};
+    make_dispatch_tracing_context(ctx);
+    notify_queue_interposition_consumer_context_started(&ctx);
+    notify_queue_interposition_consumer_context_stopped(&ctx);
+
+    real_wdid = 12;
+    notify_queue_interposition_consumer_context_started(&ctx);
+
+    EXPECT_EQ(state->virtual_wptr.load(), 12u);
+    EXPECT_EQ(state->next_scan_pos, 12u);
+    EXPECT_EQ(state->next_submit_pos, 12u);
+
+    notify_queue_interposition_consumer_context_stopped(&ctx);
+    get_queue_registry().wlock([&](auto& registry) { registry.erase(queue_ptr); });
+}
+
+TEST_F(QueueInterpositionConsumerTransition, rapid_start_stop_does_not_hang)
+{
+    auto ctx = rocprofiler::context::context{};
+    make_dispatch_tracing_context(ctx);
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{10};
+
+    for(int i = 0; i < 50; ++i)
+    {
+        notify_queue_interposition_consumer_context_started(&ctx);
+        notify_queue_interposition_consumer_context_stopped(&ctx);
+        ASSERT_LT(std::chrono::steady_clock::now(), deadline)
+            << "hung in consumer 0→1 / 1→0 after " << i << " cycles";
+    }
+}
+
+// Fake hardware write index. Installed as the next-table write-index ops so a
+// bypassing wrapper advances "HW" without a real HSA queue.
+uint64_t g_stub_hw_wdid = 0;
+
+uint64_t
+stub_add_write_index(const hsa_queue_t*, uint64_t value)
+{
+    return __atomic_fetch_add(&g_stub_hw_wdid, value, __ATOMIC_ACQ_REL);
+}
+
+void
+stub_store_write_index(const hsa_queue_t*, uint64_t value)
+{
+    __atomic_store_n(&g_stub_hw_wdid, value, __ATOMIC_RELEASE);
+}
+
+uint64_t
+stub_cas_write_index(const hsa_queue_t*, uint64_t expected, uint64_t value)
+{
+    auto cur = expected;
+    __atomic_compare_exchange_n(
+        &g_stub_hw_wdid, &cur, value, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
+    return cur;
+}
+
+uint64_t
+stub_load_write_index(const hsa_queue_t*)
+{
+    return __atomic_load_n(&g_stub_hw_wdid, __ATOMIC_ACQUIRE);
+}
+
+class QueueInterpositionConsumerTransitionConcurrent : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        if(hsa_init() != HSA_STATUS_SUCCESS)
+        {
+            GTEST_SKIP() << "hsa_init failed; consumer-transition tests need HSA";
+        }
+        fill_hsa_fn_tables();
+        g_stub_hw_wdid = 0;
+        core_table_    = make_core_table();
+        // Wire stubs in before init: interposition_init copies this table as the
+        // next-in-chain that bypass wrappers call.
+        core_table_.hsa_queue_add_write_index_relaxed_fn     = stub_add_write_index;
+        core_table_.hsa_queue_add_write_index_scacq_screl_fn = stub_add_write_index;
+        core_table_.hsa_queue_add_write_index_scacquire_fn   = stub_add_write_index;
+        core_table_.hsa_queue_add_write_index_screlease_fn   = stub_add_write_index;
+        core_table_.hsa_queue_store_write_index_relaxed_fn   = stub_store_write_index;
+        core_table_.hsa_queue_store_write_index_screlease_fn = stub_store_write_index;
+        core_table_.hsa_queue_cas_write_index_relaxed_fn     = stub_cas_write_index;
+        core_table_.hsa_queue_cas_write_index_scacq_screl_fn = stub_cas_write_index;
+        core_table_.hsa_queue_cas_write_index_scacquire_fn   = stub_cas_write_index;
+        core_table_.hsa_queue_cas_write_index_screlease_fn   = stub_cas_write_index;
+        core_table_.hsa_queue_load_write_index_relaxed_fn    = stub_load_write_index;
+        core_table_.hsa_queue_load_write_index_scacquire_fn  = stub_load_write_index;
+        interposition_init(&core_table_, true);
+        ASSERT_TRUE(supports_queue_interposition());
+    }
+
+    void TearDown() override
+    {
+        if(!supports_queue_interposition()) return;
+        stop_completion_monitor();
+        interposition_fini();
+    }
+
+    CoreApiTable core_table_{};
+};
+
+// 0→1 with live bypass traffic: several threads call the installed write-index
+// wrappers (so inflight counting and should_bypass run) while consumer start
+// resyncs shadow. Start must complete within a deadline, and afterward shadow
+// must not sit behind the hardware write index (that inversion is the hang).
+TEST_F(QueueInterpositionConsumerTransitionConcurrent,
+       start_with_concurrent_bypass_producers_keeps_shadow_ahead_of_hw)
+{
+    auto               dummy_queue = hsa_queue_t{};
+    const hsa_queue_t* queue_ptr   = &dummy_queue;
+
+    auto state       = std::make_shared<QueueState>();
+    state->real_wdid = &g_stub_hw_wdid;
+    state->virtual_wptr.store(0);
+    state->next_scan_pos   = 0;
+    state->next_submit_pos = 0;
+    state->hsa_queue       = queue_ptr;
+
+    get_queue_registry().wlock([&](auto& registry) { registry[queue_ptr] = state; });
+
+    std::atomic<bool> run{true};
+    std::atomic<bool> pause{false};
+    std::atomic<int>  paused{0};
+    auto              producer = [&]() {
+        while(run.load(std::memory_order_relaxed))
+        {
+            if(pause.load(std::memory_order_acquire))
+            {
+                paused.fetch_add(1, std::memory_order_acq_rel);
+                while(pause.load(std::memory_order_acquire) && run.load(std::memory_order_relaxed))
+                    std::this_thread::sleep_for(std::chrono::microseconds{50});
+                paused.fetch_sub(1, std::memory_order_acq_rel);
+                continue;
+            }
+            // Wrapper entry point (not the stub): exercises bypass inflight + gate.
+            core_table_.hsa_queue_add_write_index_relaxed_fn(queue_ptr, 1);
+        }
+    };
+
+    constexpr int            k_producers = 4;
+    std::vector<std::thread> threads;
+    threads.reserve(k_producers);
+    for(int i = 0; i < k_producers; ++i)
+        threads.emplace_back(producer);
+
+    // Join producers on every exit (including ASSERT failure) so the vector
+    // destructor never sees joinable threads and calls std::terminate.
+    auto join_producers = common::scope_destructor{[&]() {
+        run.store(false, std::memory_order_relaxed);
+        pause.store(false, std::memory_order_release);
+        for(auto& t : threads)
+        {
+            if(t.joinable()) t.join();
+        }
+    }};
+
+    const auto warm_deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
+    while(__atomic_load_n(&g_stub_hw_wdid, __ATOMIC_ACQUIRE) < 256u &&
+          std::chrono::steady_clock::now() < warm_deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds{1});
+    ASSERT_GE(__atomic_load_n(&g_stub_hw_wdid, __ATOMIC_ACQUIRE), 256u)
+        << "producers failed to advance stub HW write index under bypass";
+
+    auto ctx = rocprofiler::context::context{};
+    make_dispatch_tracing_context(ctx);
+
+    auto start_fut = std::async(
+        std::launch::async, [&]() { notify_queue_interposition_consumer_context_started(&ctx); });
+    ASSERT_EQ(start_fut.wait_for(std::chrono::seconds{10}), std::future_status::ready)
+        << "0→1 hung with concurrent bypass producers";
+    start_fut.get();
+
+    // Stop further advances so the shadow-vs-HW check is stable.
+    pause.store(true, std::memory_order_release);
+    const auto pause_deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
+    while(paused.load(std::memory_order_acquire) < k_producers &&
+          std::chrono::steady_clock::now() < pause_deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds{1});
+    ASSERT_EQ(paused.load(std::memory_order_acquire), k_producers);
+
+    const uint64_t hw   = __atomic_load_n(&g_stub_hw_wdid, __ATOMIC_ACQUIRE);
+    const uint64_t vwp  = state->virtual_wptr.load();
+    const uint64_t scan = state->next_scan_pos;
+    // next_scan_pos is only advanced by resync/doorbell publish — not by post-cutover
+    // intercept write-index adds — so it exposes HW races that virtual_wptr can mask.
+    EXPECT_GE(scan, hw) << "scan/shadow behind HW after 0→1 with concurrent bypass producers"
+                        << " (scan=" << scan << " hw=" << hw << " vwp=" << vwp << ")";
+    EXPECT_GE(vwp, hw) << "virtual_wptr behind HW after 0→1 with concurrent bypass producers";
+
+    notify_queue_interposition_consumer_context_stopped(&ctx);
+    get_queue_registry().wlock([&](auto& registry) { registry.erase(queue_ptr); });
 }
 }  // namespace
 }  // namespace queue_interposition

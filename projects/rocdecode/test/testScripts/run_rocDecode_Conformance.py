@@ -39,8 +39,10 @@ def run_and_log(cmd, logFilePath):
     # progress stays visible during long runs, while appending it to the log.
     # cmd is an argument list launched without a shell, so paths holding spaces
     # or shell metacharacters reach the sample unmangled.
+    # universal_newlines (not the 3.7+ 'text' alias) keeps this working on the
+    # python3 3.6 that ships with SLES 15 and RHEL 8.
     with open(logFilePath, 'a') as logf:
-        p = Popen(cmd, shell=False, stdout=PIPE, stderr=STDOUT, text=True)
+        p = Popen(cmd, shell=False, stdout=PIPE, stderr=STDOUT, universal_newlines=True)
         for line in p.stdout:
             print(line, end='')
             logf.write(line)

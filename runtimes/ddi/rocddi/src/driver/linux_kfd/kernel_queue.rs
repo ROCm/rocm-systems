@@ -9,7 +9,7 @@
 //! caller may reuse an indirect buffer.
 
 use super::memory::DeviceVm;
-use super::{drm, errno, error, native_error, os_process};
+use super::{drm, errno, error, native_error};
 use crate::device::gpu::kernel_queue::{
     KernelCommand, KernelQueueFormat, KernelQueueStatus, KernelQueueWait,
 };
@@ -73,18 +73,29 @@ fn validate_command(command: KernelCommand) -> Result<u32, Error> {
 
 /// One private DRM submission context, completion fence, and atomic slot.
 pub(crate) struct KfdKernelQueue {
+    /// Exact render VM that owns the command context and completion fence.
     vm: Shared<DeviceVm>,
-    process: u32,
+    /// Private DRM submission context until destruction succeeds.
     context_id: Option<u32>,
+    /// Timeline object proving command retirement.
     completion_syncobj: Option<u32>,
+    /// Hardware IP and ring selected for this queue.
     engine: drm::CommandEngine,
+    /// Atomic submission slot guarding concurrent producers.
     slot: AtomicU64,
+    /// Highest native submission accepted by the driver.
     accepted: AtomicU64,
+    /// Highest submission whose retirement has been proved.
     retired: AtomicU64,
+    /// A failed submission may have reached native execution.
     ambiguous_submission: AtomicBool,
+    /// Native sequence did not match the expected submission identity.
     sequence_mismatch: AtomicBool,
+    /// Sticky terminal error classification.
     terminal: AtomicU8,
+    /// Context release may have completed despite an error.
     context_free_ambiguous: bool,
+    /// Timeline destruction may have completed despite an error.
     syncobj_destroy_ambiguous: bool,
 }
 
@@ -118,7 +129,6 @@ impl KfdKernelQueue {
         // Drop then share exactly the same resumable cleanup state.
         let mut queue = slot.write(Self {
             vm,
-            process: std::process::id(),
             context_id: None,
             completion_syncobj: None,
             engine,
@@ -196,7 +206,9 @@ impl KfdKernelQueue {
     }
 
     fn check_process(&self) -> Result<(), Error> {
-        os_process::check_process(self.process)
+        self.vm
+            .kfd()
+            .check_process()
             .map_err(|source| native_error("DRM command context process check", source))
     }
 
@@ -486,6 +498,7 @@ mod tests {
         ))
         .unwrap();
         let node = sysfs::KfdNode {
+            host_atomics: false,
             node: 1,
             gpu_id: 42,
             render_minor: Some(128),
@@ -493,6 +506,7 @@ mod tests {
             identity: [0; 16],
             queues: sysfs::KfdQueueProperties {
                 gfx_target: 120_001,
+                target_profile: crate::topology::GpuTargetProfile::Gfx1201,
                 xcc_count: 1,
                 ..sysfs::KfdQueueProperties::default()
             },
@@ -607,7 +621,11 @@ mod tests {
                     })
                     .unwrap();
                 assert_eq!(
-                    queue.refresh_status().unwrap_err().native_error_code(),
+                    queue
+                        .refresh_status()
+                        .unwrap_err()
+                        .native_status()
+                        .and_then(crate::NativeStatus::errno_code),
                     Some(errno::EIO)
                 );
                 assert_eq!(queue.status().retired_submission, 0);
@@ -742,7 +760,12 @@ mod tests {
                 let error = KfdKernelQueue::create(vm.clone(), KernelQueueFormat::Pm4)
                     .err()
                     .unwrap();
-                assert_eq!(error.native_error_code(), Some(errno::EFAULT));
+                assert_eq!(
+                    error
+                        .native_status()
+                        .and_then(crate::NativeStatus::errno_code),
+                    Some(errno::EFAULT)
+                );
             },
         );
         drm::with_script(
@@ -758,7 +781,12 @@ mod tests {
                 let error = KfdKernelQueue::create(vm.clone(), KernelQueueFormat::Pm4)
                     .err()
                     .unwrap();
-                assert_eq!(error.native_error_code(), Some(errno::EBUSY));
+                assert_eq!(
+                    error
+                        .native_status()
+                        .and_then(crate::NativeStatus::errno_code),
+                    Some(errno::EBUSY)
+                );
                 // Drop retries the ordinary EBUSY rollback through the owner.
             },
         );

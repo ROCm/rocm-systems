@@ -61,7 +61,7 @@
 
 cmake_minimum_required(VERSION 3.21)
 
-project(amd-dbgapi VERSION 0.82.1 LANGUAGES CXX DESCRIPTION "ROCm Debugger API")
+project(amd-dbgapi VERSION 0.84.0 LANGUAGES CXX DESCRIPTION "ROCm Debugger API")
 
 include(GNUInstallDirs)
 include(CheckCXXSourceCompiles)
@@ -312,6 +312,26 @@ option(ENABLE_ASSERTIONS "Enable assertions" ${ENABLE_ASSERTIONS_DEFAULT})
 # <https://cmake.org/cmake/help/latest/variable/BUILD_SHARED_LIBS.html>.
 option(BUILD_SHARED_LIBS "Build amd-dbgapi as a shared library" ON)
 
+# Test suite options.  Default OFF so downstream consumers (e.g.
+# TheRock superbuild) are not forced to pick up GoogleTest/GMock until
+# they are ready to opt in.
+#
+# ENABLE_TESTS is the master switch: turning it ON flips the default
+# for every per-tier option below to ON as well.  Each tier can still
+# be toggled independently of the master switch, e.g.
+# -DENABLE_TESTS=OFF -DENABLE_UNIT_TESTS=ON builds only the unit tier.
+option(ENABLE_TESTS "Build all rocdbgapi test suites" OFF)
+option(ENABLE_UNIT_TESTS "Build rocdbgapi unit tests" ${ENABLE_TESTS})
+
+# Only one tier exists today, so this condition is just the unit tier's
+# option.  When a second tier is added, extend it to
+# ENABLE_UNIT_TESTS OR ENABLE_<TIER>_TESTS so that test/ is entered
+# whenever any tier is requested.
+if(ENABLE_UNIT_TESTS)
+    enable_testing()
+    add_subdirectory(test)
+endif()
+
 if(ENABLE_ASSERTIONS)
     if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
         # Add -UNDEBUG to the CXXFLAGS (project is C++ only, no CFLAGS needed)
@@ -377,6 +397,7 @@ add_library(
     src/memory.cpp
     src/os_driver.cpp
     src/process.cpp
+    src/property.cpp
     src/queue.cpp
     src/register.cpp
     src/utils.cpp
@@ -394,6 +415,16 @@ set_target_properties(
         CXX_EXTENSIONS ON
         CXX_VISIBILITY_PRESET hidden
         OUTPUT_NAME "rocm-dbgapi"
+        # Windows has no symbol versioning, so a DLL's file name is the only
+        # identity the loader checks.  Encoding major.minor here gives the DLL
+        # the fail-at-load behavior that the version nodes in src/exportmap.in
+        # give the ELF build, as those nodes move with the minor version.  The
+        # import library keeps the unversioned OUTPUT_NAME above, so consumers
+        # link -lrocm-dbgapi and pick the versioned name up through the PE
+        # import table.  This has no effect on a .so or a static library, whose
+        # artifacts are LIBRARY and ARCHIVE, not RUNTIME.
+        RUNTIME_OUTPUT_NAME
+            "rocm-dbgapi-${PROJECT_VERSION_MAJOR}-${PROJECT_VERSION_MINOR}"
         LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib
         DEFINE_SYMBOL "AMD_DBGAPI_EXPORTS"
         VERSION ${PROJECT_VERSION}
@@ -595,11 +626,17 @@ configure_file(
     @ONLY
 )
 
+# A Windows DLL is a RUNTIME artifact and installs to bin, next to the
+# executable that loads it, which is where Windows searches.  A Unix
+# shared object is a LIBRARY artifact, not RUNTIME, so it installs to
+# lib.  Options after an artifact-kind keyword apply to that kind
+# alone, so COMPONENT has to be repeated for each one.
 install(
     TARGETS amd-dbgapi
     EXPORT amd-dbgapi-export
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    COMPONENT dev
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT dev
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dev
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dev
 )
 
 install(

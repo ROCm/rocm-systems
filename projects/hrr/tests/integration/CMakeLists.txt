@@ -45,11 +45,23 @@
 #
 # hrr_kernel_args_test.cc covers what replay does with a pointer-typed kernel
 # argument no allocation explains: a sentinel keeps its value, an
-# address-shaped lost pointer becomes null. Contains its own hidden
+# address-shaped lost pointer becomes null. It also checks that capture logs
+# argument bytes for HIP_HRR_DEBUG_ARGS only in a Debug runtime. Contains its
+# own hidden [.][hrr-direct] workload.
+#
+# hrr_kernel_signature_test.cc covers the check replay makes of a kernel launch
+# record's arguments against the signature of the kernel in the code object:
+# an unmodified archive replays, a copy whose launch record has
+# too few arguments is refused with nothing launched, and copies with an extra or
+# a wider argument replay like the original. Contains its own hidden
 # [.][hrr-direct] workload.
 #
+# hrr_pinned_host_test.cc covers pinned host memory a kernel reads directly,
+# which capture snapshots before each launch and replay writes back. Contains
+# its own hidden [.][hrr-direct] workloads.
+#
 # hrr_va_placement_test.cc covers capture-address placement: a device pointer
-# stored in device memory by an H2D copy (ROCM-31827). Contains its own hidden
+# stored in device memory by an H2D copy. Contains its own hidden
 # [.][hrr-direct] workload.
 #
 # hrr_dispatch_swap_test.cc covers capture shutdown: a slot another component
@@ -88,8 +100,11 @@ set(HRR_GPU_WORKLOAD_SOURCES
   hrr_regions_test.cc
   hrr_api_matrix_workload_test.cc
   hrr_kernel_args_test.cc
+  hrr_kernel_signature_test.cc
+  hrr_pinned_host_test.cc
   hrr_va_placement_test.cc
   hrr_disk_space_test.cc
+  hrr_host_alloc_budget_test.cc
 )
 
 if(NOT DEFINED HIP_PLATFORM)
@@ -141,8 +156,14 @@ target_include_directories(hrr-integration-tests PRIVATE
 # hiprtc::hiprtc (hipRTC) is a separate ROCm CMake package from hip::host.
 find_package(hiprtc CONFIG REQUIRED)
 
+# Disable deprecated warnings as it is not relevant
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  target_compile_options(hrr-integration-tests PRIVATE -Wno-deprecated-declarations)
+endif()
+
 target_link_libraries(hrr-integration-tests PRIVATE
   hrr::reader
+  hrr::warnings
   hip::host
   hiprtc::hiprtc
   Catch2::Catch2WithMain)
@@ -163,9 +184,9 @@ if(NOT WIN32)
 
   # hrr_disk_space_test.cc defines these for the HIP runtime to bind to. An
   # executable exports only what its link-time libraries reference, and the
-  # runtime may name either statvfs or statvfs64, so export all three.
+  # runtime may name statvfs or fstatvfs by either name, so export all five.
   set(_hrr_disk_space_exports "${CMAKE_CURRENT_BINARY_DIR}/hrr_disk_space_exports.list")
-  file(WRITE "${_hrr_disk_space_exports}" "{ statvfs; statvfs64; fsync; };\n")
+  file(WRITE "${_hrr_disk_space_exports}" "{ statvfs; statvfs64; fstatvfs; fstatvfs64; fsync; };\n")
   target_link_options(hrr-integration-tests PRIVATE
                       "LINKER:--dynamic-list=${_hrr_disk_space_exports}")
   target_link_libraries(hrr-integration-tests PRIVATE ${CMAKE_DL_LIBS})
@@ -185,6 +206,13 @@ if(NOT DEFINED HRR_RAW_TRACE_EXE)
   else()
     set(HRR_RAW_TRACE_EXE "")
   endif()
+endif()
+
+# Capture honours HIP_HRR_DEBUG_ARGS only in a CLR built without NDEBUG
+# (CMAKE_BUILD_TYPE=Debug). Tell the tests which kind of runtime they run against.
+option(HRR_TEST_CLR_DEBUG_FLAGS "The HIP runtime under test is a Debug build" OFF)
+if(HRR_TEST_CLR_DEBUG_FLAGS)
+  target_compile_definitions(hrr-integration-tests PRIVATE HRR_TEST_CLR_DEBUG_FLAGS)
 endif()
 
 target_compile_definitions(hrr-integration-tests PRIVATE
@@ -209,7 +237,7 @@ if(NOT WIN32)
     CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON
     CXX_VISIBILITY_PRESET hidden)
-  target_link_libraries(hrr-test-dispatch-tool PRIVATE ${CMAKE_DL_LIBS})
+  target_link_libraries(hrr-test-dispatch-tool PRIVATE hrr::warnings ${CMAKE_DL_LIBS})
   find_package(Threads REQUIRED)
   target_link_libraries(hrr-integration-tests PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
   target_compile_definitions(hrr-integration-tests PRIVATE

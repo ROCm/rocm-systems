@@ -60,12 +60,14 @@ target_sources(
     rocprofiler-systems-common-library
     INTERFACE
         ${CMAKE_CURRENT_BINARY_DIR}/defines.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/clocks.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/delimit.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/environment.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/invoke.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/join.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/md5sum.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/path.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/regex_utility.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/setup.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/static_object.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/string_utility.hpp

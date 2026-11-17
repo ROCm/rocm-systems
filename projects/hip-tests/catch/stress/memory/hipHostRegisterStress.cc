@@ -42,9 +42,8 @@ static __global__ void Inc(uint8_t* Ad) {
 HIP_TEST_CASE(Stress_hipHostRegister_Oversubscription) {
   hipDeviceProp_t prop;
   HIP_CHECK(hipGetDeviceProperties(&prop, 0));
-  std::string arch = prop.gcnArchName;
 #if HT_AMD
-  if (std::string::npos == arch.find("xnack+")) {
+  if (!HipTest::isXnackOn()) {
     HIP_SKIP_TEST(HipTest::SkipReason::kGpuXnackNotEnabled);
   }
 #endif

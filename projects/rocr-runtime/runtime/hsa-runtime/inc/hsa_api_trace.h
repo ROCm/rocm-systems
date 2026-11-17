@@ -181,6 +181,7 @@ struct ImageExtTable {
   decltype(hsa_ext_image_data_get_info_with_layout)* hsa_ext_image_data_get_info_with_layout_fn;
   decltype(hsa_ext_image_create_with_layout)* hsa_ext_image_create_with_layout_fn;
   decltype(hsa_ext_sampler_create_v2)* hsa_ext_sampler_create_v2_fn;
+  decltype(hsa_ext_sampler_create_v3)* hsa_ext_sampler_create_v3_fn;
 
 };
 
@@ -296,6 +297,8 @@ struct AmdExtTable {
   decltype(hsa_amd_agent_set_attribute)* hsa_amd_agent_set_attribute_fn;
   decltype(hsa_amd_vmem_get_vmem_info)* hsa_amd_vmem_get_vmem_info_fn;
   decltype(hsa_amd_enable_high_precision_timestamps)* hsa_amd_enable_high_precision_timestamps_fn;
+  decltype(hsa_amd_signal_batch_create)* hsa_amd_signal_batch_create_fn;
+  decltype(hsa_amd_signal_batch_destroy)* hsa_amd_signal_batch_destroy_fn;
 };
 
 // Table to export HSA Core Runtime Apis
