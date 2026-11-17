@@ -84,8 +84,12 @@ enum class Lifecycle {
   RunKernel
 };
 
-void exercise_lifecycle(Lifecycle lifecycle) {
+enum class Teardown { Commands, DeviceClose, Destroy };
+
+void exercise_lifecycle(Lifecycle lifecycle, Teardown teardown = Teardown::Commands) {
   const bool create_queue = lifecycle != Lifecycle::CreateDestroy && lifecycle != Lifecycle::Paths;
+  const bool dispatch_kernel =
+      lifecycle == Lifecycle::StepKernel || lifecycle == Lifecycle::RunKernel;
   const size_t initial_leases = keeper_lease_count();
   constexpr std::array signals{SIGSEGV, SIGBUS, SIGINT, SIGTERM};
   std::array<struct sigaction, signals.size()> actions{};
@@ -132,8 +136,16 @@ void exercise_lifecycle(Lifecycle lifecycle) {
     struct alignas(64) Kernel {
       // The code-object ABI record consumed by the dispatch packet.
       rocjitsu::amdhsa::kernel_descriptor_t descriptor{};
-      // CDNA5 s_endpgm, so completion proves a CU execution batch ran.
-      uint32_t instruction = 0xBFB00000u;
+      // CDNA5 store to a separately mapped VRAM allocation, followed by completion.
+      std::array<uint32_t, 10> instructions{
+          0xBE8400FFu, 0x200000u,                // s_mov_b32 s4, output GPU VA
+          0xBE850080u,                           // s_mov_b32 s5, 0
+          0x7E000280u,                           // v_mov_b32_e32 v0, 0
+          0x7E020281u,                           // v_mov_b32_e32 v1, 1
+          0xEE068004u, 0x00800000u, 0x00000000u, // global_store_b32 v0, v1, s[4:5]
+          0xBFC10000u,                           // s_wait_storecnt 0
+          0xBFB00000u,                           // s_endpgm
+      };
     };
     struct alignas(4096) Storage {
       // KFD queue descriptor, including producer and consumer cursors.
@@ -211,6 +223,34 @@ void exercise_lifecycle(Lifecycle lifecycle) {
       // CDNA5 registration translates and updates this word on the command thread.
       ASSERT_NE(descriptor.caps & AMD_QUEUE_CAPS_CP_ASYNC_RECLAIM, 0u);
     }
+    kfd_ioctl_alloc_memory_of_gpu_args output_allocation{};
+    rj_vm_map_t output_mapping{};
+    if (dispatch_kernel) {
+      output_allocation.va_addr = 0x200000;
+      output_allocation.size = 4096;
+      output_allocation.gpu_id = 1250;
+      output_allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC |
+                                KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+      ASSERT_NO_FATAL_FAILURE(command(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, output_allocation));
+      output_mapping.length = output_allocation.size;
+      output_mapping.offset = output_allocation.mmap_offset;
+      output_mapping.prot = PROT_READ | PROT_WRITE;
+      output_mapping.flags = MAP_SHARED;
+      ASSERT_EQ(map_device(vm.get(), process_id, &output_mapping), ROCJITSU_STATUS_SUCCESS);
+      ASSERT_EQ(output_mapping.map_errno, 0);
+      ASSERT_NE(output_mapping.mapped_addr, reinterpret_cast<uint64_t>(MAP_FAILED));
+      *reinterpret_cast<uint32_t *>(output_mapping.mapped_addr) = 0;
+      struct {
+        // KFD command header followed by its inline device list.
+        kfd_ioctl_map_memory_to_gpu_args arguments{};
+        // GPU receiving access to the output allocation.
+        uint32_t gpu_id = 1250;
+      } mapping;
+      mapping.arguments.handle = output_allocation.handle;
+      mapping.arguments.n_devices = 1;
+      ASSERT_NO_FATAL_FAILURE(command(AMDKFD_IOC_MAP_MEMORY_TO_GPU, mapping));
+      ASSERT_EQ(mapping.arguments.n_success, 1u);
+    }
     rj_vm_map_t doorbell{};
     const bool execute_packet = create_queue && lifecycle != Lifecycle::CreateQueue;
     completion.kind = AMD_SIGNAL_KIND_USER;
@@ -219,7 +259,7 @@ void exercise_lifecycle(Lifecycle lifecycle) {
       return std::atomic_ref<int64_t>(const_cast<int64_t &>(completion.value))
                  .load(std::memory_order_acquire) == 0;
     };
-    kernel.descriptor.kernel_code_entry_byte_offset = offsetof(Kernel, instruction);
+    kernel.descriptor.kernel_code_entry_byte_offset = offsetof(Kernel, instructions);
     if (execute_packet) {
       doorbell.length = 4096;
       doorbell.offset = queue.doorbell_offset & ~uint64_t{4095};
@@ -228,8 +268,6 @@ void exercise_lifecycle(Lifecycle lifecycle) {
       ASSERT_EQ(map_device(vm.get(), process_id, &doorbell), ROCJITSU_STATUS_SUCCESS);
       ASSERT_EQ(doorbell.map_errno, 0);
       ASSERT_NE(doorbell.mapped_addr, reinterpret_cast<uint64_t>(MAP_FAILED));
-      const bool dispatch_kernel =
-          lifecycle == Lifecycle::StepKernel || lifecycle == Lifecycle::RunKernel;
       uint16_t header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
       if (dispatch_kernel) {
         hsa_kernel_dispatch_packet_t dispatch{};
@@ -240,7 +278,8 @@ void exercise_lifecycle(Lifecycle lifecycle) {
         dispatch.kernel_object = reinterpret_cast<uint64_t>(&kernel.descriptor);
         dispatch.completion_signal.handle = reinterpret_cast<uint64_t>(&completion);
         std::memcpy(ring.data(), &dispatch, sizeof(dispatch));
-        header = HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE;
+        header = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE) |
+                 (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
       } else {
         ring[0].completion_signal.handle = reinterpret_cast<uint64_t>(&completion);
       }
@@ -264,6 +303,8 @@ void exercise_lifecycle(Lifecycle lifecycle) {
         stopper.request_stop();
       }
       EXPECT_TRUE(completed());
+      if (dispatch_kernel)
+        EXPECT_EQ(*reinterpret_cast<const uint32_t *>(output_mapping.mapped_addr), 1u);
       EXPECT_EQ(
           std::atomic_ref<uint64_t>(const_cast<uint64_t &>(descriptor.read_dispatch_id)).load(),
           1u);
@@ -275,7 +316,7 @@ void exercise_lifecycle(Lifecycle lifecycle) {
       runner.join();
       EXPECT_EQ(run_status, ROCJITSU_STATUS_SUCCESS);
     }
-    if (create_queue) {
+    if (create_queue && teardown == Teardown::Commands) {
       kfd_ioctl_destroy_queue_args destroy_queue{};
       destroy_queue.queue_id = queue.queue_id;
       ASSERT_NO_FATAL_FAILURE(command(AMDKFD_IOC_DESTROY_QUEUE, destroy_queue));
@@ -289,15 +330,24 @@ void exercise_lifecycle(Lifecycle lifecycle) {
         // GPU whose descriptor access is retired before freeing the backing.
         uint32_t gpu_id = 1250;
       } unmapping;
-      unmapping.arguments.handle = allocation.handle;
-      unmapping.arguments.n_devices = 1;
-      ASSERT_NO_FATAL_FAILURE(command(AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, unmapping));
-      ASSERT_EQ(unmapping.arguments.n_success, 1u);
-      kfd_ioctl_free_memory_of_gpu_args free_memory{};
-      free_memory.handle = allocation.handle;
-      ASSERT_NO_FATAL_FAILURE(command(AMDKFD_IOC_FREE_MEMORY_OF_GPU, free_memory));
+      const std::array handles{allocation.handle, output_allocation.handle};
+      for (size_t index = 0; index < (dispatch_kernel ? 2u : 1u); ++index) {
+        unmapping.arguments.handle = handles[index];
+        unmapping.arguments.n_devices = 1;
+        unmapping.arguments.n_success = 0;
+        ASSERT_NO_FATAL_FAILURE(command(AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, unmapping));
+        ASSERT_EQ(unmapping.arguments.n_success, 1u);
+        if (index == 1) {
+          rj_vm_unmap_t unmap{output_mapping.mapped_addr, output_mapping.length};
+          ASSERT_EQ(unmap_device(vm.get(), process_id, &unmap), ROCJITSU_STATUS_SUCCESS);
+        }
+        kfd_ioctl_free_memory_of_gpu_args free_memory{};
+        free_memory.handle = handles[index];
+        ASSERT_NO_FATAL_FAILURE(command(AMDKFD_IOC_FREE_MEMORY_OF_GPU, free_memory));
+      }
     }
-    EXPECT_EQ(close_device(vm.get(), process_id), ROCJITSU_STATUS_SUCCESS);
+    if (teardown != Teardown::Destroy)
+      EXPECT_EQ(close_device(vm.get(), process_id), ROCJITSU_STATUS_SUCCESS);
     ASSERT_EQ(destroy(vm.get()), ROCJITSU_STATUS_SUCCESS);
     (void)vm.release();
     EXPECT_EQ(keeper_lease_count(), initial_leases + 1);
@@ -384,6 +434,14 @@ TEST(VmEmbeddingApi, UnloadsAfterSteppingAKernelOnALiveHostThread) {
 
 TEST(VmEmbeddingApi, UnloadsAfterRunningAKernelOnALiveHostThread) {
   exercise_lifecycle(Lifecycle::RunKernel);
+}
+
+TEST(VmEmbeddingApi, UnloadsAfterDeviceCloseWithLiveResources) {
+  exercise_lifecycle(Lifecycle::StepKernel, Teardown::DeviceClose);
+}
+
+TEST(VmEmbeddingApi, UnloadsAfterCheckedDestroyWithLiveResources) {
+  exercise_lifecycle(Lifecycle::StepKernel, Teardown::Destroy);
 }
 
 void exercise_code_inspection(bool basic_blocks) {

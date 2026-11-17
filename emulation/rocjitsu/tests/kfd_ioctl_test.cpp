@@ -928,21 +928,27 @@ TEST(GpuAliasIngressGateTest, LocalPermitsJoinExactCloseAndCrossThreadRelease) {
   const Gate::Key second{1, 202, 0x2000, 8, 12};
   const Gate::Key other{2, 101, 0x1000, 7, 11};
   const std::array keys{first, second};
-  auto a = gate->try_acquire_local(first);
-  auto b = std::async(std::launch::async, [&] { return gate->try_acquire_local(second); }).get();
+  Gate::LocalCache cache;
+  auto a = gate->try_acquire_local(first, cache);
+  auto b = std::async(std::launch::async, [&] {
+             Gate::LocalCache worker_cache;
+             return gate->try_acquire_local(second, worker_cache);
+           }).get();
   ASSERT_TRUE(a);
   ASSERT_TRUE(b);
   EXPECT_EQ(gate->tracked_generation_count(), 2u);
   EXPECT_FALSE(gate->try_freeze_for_effect(keys));
-  auto independent =
-      std::async(std::launch::async, [&] { return gate->try_acquire_local(other); }).get();
+  auto independent = std::async(std::launch::async, [&] {
+                       Gate::LocalCache worker_cache;
+                       return gate->try_acquire_local(other, worker_cache);
+                     }).get();
   ASSERT_TRUE(independent);
   std::function<void()> posted;
   int drained = 0;
   ASSERT_TRUE(
       gate->close_batch(keys, [&](auto done) { posted = std::move(done); }, [&] { ++drained; }));
-  EXPECT_FALSE(gate->try_acquire_local(first));
-  EXPECT_TRUE(gate->try_acquire_local(other));
+  EXPECT_FALSE(gate->try_acquire_local(first, cache));
+  EXPECT_TRUE(gate->try_acquire_local(other, cache));
   a.reset();
   EXPECT_FALSE(posted);
   b.reset();
@@ -952,11 +958,35 @@ TEST(GpuAliasIngressGateTest, LocalPermitsJoinExactCloseAndCrossThreadRelease) {
   ASSERT_TRUE(gate->reopen_batch(keys));
   auto freeze = gate->try_freeze_for_effect(keys);
   ASSERT_TRUE(freeze);
-  EXPECT_FALSE(gate->try_acquire_local(second));
+  EXPECT_FALSE(gate->try_acquire_local(second, cache));
   freeze.reset();
-  EXPECT_TRUE(gate->try_acquire_local(second));
+  EXPECT_TRUE(gate->try_acquire_local(second, cache));
   independent.reset();
   EXPECT_EQ(gate->tracked_generation_count(), 0u);
+}
+
+TEST(GpuAliasIngressGateTest, LocalPermitsRetainGatesAfterCacheReplacementAndScopeExit) {
+  using Gate = rocjitsu::GpuAliasIngressGate;
+  std::array<std::weak_ptr<Gate>, 2> gates;
+  std::array<std::optional<rocjitsu::amdgpu::MemoryIngressPermit>, 2> permits;
+  {
+    Gate::LocalCache cache;
+    for (size_t index = 0; index < gates.size(); ++index) {
+      auto gate = std::make_shared<Gate>();
+      gates[index] = gate;
+      permits[index] = gate->try_acquire_local({1, 101, 0x1000, 7, 11}, cache);
+      ASSERT_TRUE(permits[index]);
+    }
+  }
+  for (const auto &gate : gates)
+    EXPECT_FALSE(gate.expired());
+  std::jthread releaser([permits = std::move(permits)]() mutable {
+    for (auto &permit : permits)
+      permit.reset();
+  });
+  releaser.join();
+  for (const auto &gate : gates)
+    EXPECT_TRUE(gate.expired());
 }
 
 TEST(GpuAliasIngressGateTest, CopiedDrainAuthorityExpiresAfterOwnerContinuation) {

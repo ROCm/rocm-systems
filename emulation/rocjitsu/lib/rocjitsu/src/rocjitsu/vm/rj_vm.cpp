@@ -343,6 +343,7 @@ rj_status_t rj_vm_step(rj_vm_t *vm, int *active) {
     return ROCJITSU_STATUS_UNSUPPORTED;
 
   const amdgpu::LegacyAddressSpace::ScopedPteCache translation_cache;
+  const SimulatedKfd::ScopedIngressCache ingress_cache;
   const amdgpu::GpuVmAccessBatchGuard::ScopedCache execution_cache;
   bool any_active = vm->engine->step();
   if (vm->engine->exit_code() != 0)
@@ -359,6 +360,7 @@ rj_status_t rj_vm_run(rj_vm_t *vm, uint64_t *ticks_executed) {
     return ROCJITSU_STATUS_ERROR;
 
   const amdgpu::LegacyAddressSpace::ScopedPteCache translation_cache;
+  const SimulatedKfd::ScopedIngressCache ingress_cache;
   const amdgpu::GpuVmAccessBatchGuard::ScopedCache execution_cache;
   auto exit = vm->engine->run();
 
@@ -471,6 +473,7 @@ rj_status_t execute_impl(SimulatedKfd *driver, uint32_t process_id, rj_vm_cmd_t 
   // Queue creation may translate GPU memory on the embedding thread. A
   // persistent TLS cache would retain this DSO until that host thread exits.
   const amdgpu::LegacyAddressSpace::ScopedPteCache translation_cache;
+  const SimulatedKfd::ScopedIngressCache ingress_cache;
   cmd->result =
       driver->ioctl(process_id, cmd->cmd, cmd->buf, &cmd->in_mem_handle, cmd->in_proc_handle);
   cmd->shared_handle = -1;
