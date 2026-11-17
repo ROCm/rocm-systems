@@ -209,6 +209,12 @@ struct WaitcheckReport {
 /// @details Unsupported targets return ROCJITSU_CODE_ARCH_INVALID.
 [[nodiscard]] rj_code_arch_t waitcheck_arch_for_target(rj_code_target_id_t target);
 
+/// @brief Conventional wavefront size for a descriptor-less code object.
+///
+/// @details A descriptor or explicit fallback override takes precedence. Raw
+/// word streams independently default to wave64.
+[[nodiscard]] uint32_t waitcheck_default_wavefront_size(rj_code_arch_t arch);
+
 /// @brief Build exact register-allocation and wavefront bounds for one descriptor.
 ///
 /// @param entry_text_offset Byte offset of the entry within `.text`, not the

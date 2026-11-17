@@ -27,8 +27,8 @@ correct waits before you deploy it to hardware.
 ## Supported targets
 
 Waitcheck supports the following targets: `gfx942` (CDNA3), `gfx950`
-(CDNA4), `gfx1100` (RDNA3), `gfx1200` (RDNA4), `gfx1201` (RDNA4), and
-`gfx1250`.
+(CDNA4), `gfx1100` (RDNA3), `gfx1150` and `gfx1151` (RDNA3.5),
+`gfx1200` and `gfx1201` (RDNA4), and `gfx1250` and `gfx1251` (CDNA5).
 
 ## Hazard classes
 

@@ -11705,7 +11705,10 @@ TEST(WaitcheckTest, Gfx1201ScalarVccBranchesClearValuVccBeforeIndirectTransfer) 
     append_inst(program, v_cmp_gt_u32_e32(5, 12));
     append_inst(program, sopp(branch, 0));
     program.push_back(build_s_setpc_b64(8, ROCJITSU_CODE_ARCH_RDNA4).value());
-    const auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4);
+    const auto image = waitcheck_test::make_gfx_code_object(
+        program, EF_AMDGPU_MACH_AMDGCN_GFX1201, /*wave32=*/true);
+    const AmdGpuCodeObject object(image.data(), image.size());
+    const auto report = analyze_waitcnts_for_kernel(object, ROCJITSU_CODE_ARCH_RDNA4, 0);
     ASSERT_TRUE(report.supported) << report.analysis_error;
     if (branch == 35u || branch == 36u) {
       EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
@@ -12440,6 +12443,9 @@ TEST(WaitcheckTest, Gfx1201Wave64DivScaleDefinesBothMaskSgprs) {
 }
 
 TEST(WaitcheckTest, RawStreamWaveSizeIsExplicitAndDefaultsToWave64) {
+  EXPECT_EQ(waitcheck_default_wavefront_size(ROCJITSU_CODE_ARCH_RDNA4), 32u);
+  EXPECT_EQ(waitcheck_default_wavefront_size(ROCJITSU_CODE_ARCH_CDNA5), 32u);
+  EXPECT_EQ(waitcheck_default_wavefront_size(ROCJITSU_CODE_ARCH_CDNA4), 64u);
   std::vector<uint32_t> program;
   append_inst(program, s_load_b32(3, 16));
   append_v_div_scale_f32_v5_s2_s8_s9_s8(program);
@@ -15892,6 +15898,46 @@ TEST(WaitcheckTest, Gfx950OverwrittenReturnPairLeavesIndirectJumpIncomplete) {
       << report.analysis_error;
 }
 
+TEST(WaitcheckTest, Gfx950StandaloneHelperRequiresProvenExternalReturnLink) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_CDNA4;
+  std::vector<uint32_t> program;
+  append_gfx950_buffer_load_dword_v0_v8_s0_offen(program);
+  program.push_back(build_sop1_encoding(arch, 0x01, 30, 8).value()); // Unknown target in s[8:9].
+  program.push_back(build_s_setpc_b64(30, arch).value());
+  auto image = waitcheck_test::make_gfx_function_only_code_object(
+      {{"helper", program}}, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  AmdGpuCodeObject object(image.data(), image.size());
+  ASSERT_TRUE(object.is_valid());
+  const auto unknown = analyze_waitcnts(object, arch);
+  EXPECT_TRUE(unknown.supported) << unknown.analysis_error;
+  EXPECT_FALSE(unknown.complete) << diagnostic_summary(unknown);
+  EXPECT_NE(unknown.analysis_error.find("incomplete control flow"), std::string::npos);
+
+  // An untouched incoming link is a valid return to the external caller.
+  program.erase(program.begin() + 2);
+  image = waitcheck_test::make_gfx_function_only_code_object(
+      {{"helper", program}}, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  AmdGpuCodeObject returned(image.data(), image.size());
+  ASSERT_TRUE(returned.is_valid());
+  const auto direct_return = analyze_waitcnts(returned, arch);
+  EXPECT_TRUE(direct_return.supported && direct_return.complete)
+      << direct_return.analysis_error;
+
+  program.insert(program.begin() + 2,
+                 build_sop1_encoding(arch, 0x01, 32, 30).value()); // Save incoming link.
+  program.insert(program.begin() + 3,
+                 build_sop1_encoding(arch, 0x01, 30, 8).value()); // Reuse link registers.
+  program.insert(program.begin() + 4,
+                 build_sop1_encoding(arch, 0x01, 30, 32).value()); // Restore incoming link.
+  image = waitcheck_test::make_gfx_function_only_code_object(
+      {{"helper", program}}, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  AmdGpuCodeObject restored(image.data(), image.size());
+  ASSERT_TRUE(restored.is_valid());
+  const auto restored_return = analyze_waitcnts(restored, arch);
+  EXPECT_TRUE(restored_return.supported && restored_return.complete)
+      << restored_return.analysis_error;
+}
+
 TEST(WaitcheckTest, Gfx1250RelativeDestinationWriteInvalidatesReturnLink) {
   constexpr auto arch = ROCJITSU_CODE_ARCH_CDNA5;
   std::vector<uint32_t> program;
@@ -16203,6 +16249,36 @@ TEST(WaitcheckTest, ExecutableSectionOutsideTextReportsIncomplete) {
   const auto text_report = analyze_waitcnts(text_object, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(text_report.supported && text_report.complete) << text_report.analysis_error;
   ASSERT_EQ(text_report.diagnostics.size(), 1u) << diagnostic_summary(text_report);
+
+  const auto raw_report = analyze_waitcnts(std::span<const uint32_t>(program),
+                                          ROCJITSU_CODE_ARCH_RDNA4);
+  EXPECT_TRUE(raw_report.supported) << raw_report.analysis_error;
+  EXPECT_FALSE(raw_report.complete) << diagnostic_summary(raw_report);
+  EXPECT_FALSE(raw_report.passed());
+  EXPECT_NE(raw_report.analysis_error.find("control flow"), std::string::npos);
+
+  auto extra_executable = image;
+  auto *extra_ehdr = reinterpret_cast<Elf64_Ehdr *>(extra_executable.data());
+  auto *extra_sections = reinterpret_cast<Elf64_Shdr *>(extra_executable.data() +
+                                                         extra_ehdr->e_shoff);
+  extra_sections[2].sh_flags |= SHF_EXECINSTR; // Unreferenced executable .rodata.
+  AmdGpuCodeObject extra_object(extra_executable.data(), extra_executable.size());
+  ASSERT_TRUE(extra_object.is_valid());
+  const auto whole_extra = analyze_waitcnts(extra_object, ROCJITSU_CODE_ARCH_RDNA4);
+  EXPECT_FALSE(whole_extra.complete);
+  const auto selected_offset =
+      analyze_waitcnts_for_kernel(extra_object, ROCJITSU_CODE_ARCH_RDNA4, 0);
+  ASSERT_TRUE(selected_offset.supported && selected_offset.complete)
+      << selected_offset.analysis_error;
+  EXPECT_EQ(selected_offset.diagnostics.size(), 1u) << diagnostic_summary(selected_offset);
+  const auto kernels = waitcheck_kernels(extra_object);
+  ASSERT_EQ(kernels.size(), 1u);
+  const auto selected_descriptor =
+      analyze_waitcnts_for_kernel(extra_object, ROCJITSU_CODE_ARCH_RDNA4, kernels[0]);
+  ASSERT_TRUE(selected_descriptor.supported && selected_descriptor.complete)
+      << selected_descriptor.analysis_error;
+  EXPECT_EQ(selected_descriptor.diagnostics.size(), 1u)
+      << diagnostic_summary(selected_descriptor);
 
   Elf64_Ehdr ehdr{};
   std::memcpy(&ehdr, image.data(), sizeof(ehdr));

@@ -20,13 +20,13 @@ file(
     "${seed_directory}/seed-????.bin"
 )
 list(LENGTH emitted_seeds emitted_seed_count)
-if(NOT emitted_seed_count EQUAL 12)
+if(NOT emitted_seed_count EQUAL 13)
     message(
         FATAL_ERROR
-        "expected 12 padded seed names, found ${emitted_seed_count}"
+        "expected 13 padded seed names, found ${emitted_seed_count}"
     )
 endif()
-foreach(seed IN ITEMS seed-0000.bin seed-0011.bin)
+foreach(seed IN ITEMS seed-0000.bin seed-0012.bin)
     if(NOT EXISTS "${seed_directory}/${seed}")
         message(FATAL_ERROR "missing emitted seed ${seed}")
     endif()

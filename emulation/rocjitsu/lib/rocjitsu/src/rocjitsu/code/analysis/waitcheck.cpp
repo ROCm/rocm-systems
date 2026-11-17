@@ -62,13 +62,6 @@ using namespace waitcheck_detail;
          arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
 }
 
-[[nodiscard]] uint32_t default_wavefront_size(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-                 arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5
-             ? 32
-             : 64;
-}
-
 [[nodiscard]] bool starts_with(std::string_view text, std::string_view prefix) {
   return text.size() >= prefix.size() && text.substr(0, prefix.size()) == prefix;
 }
@@ -506,6 +499,13 @@ struct Analyzer : private WaitcheckStateOps {
                                   file_offset, arch);
       analyze_instruction(state, *inst, section_name, section_offset, file_offset, arch, true);
       ++report_.instructions_analyzed;
+      if (inst->is_branch()) {
+        // A raw word span has no CFG. Following the next encoded instruction
+        // could skip a wait on the taken path and claim a false pass.
+        report_.complete = false;
+        report_.analysis_error = "raw waitcheck stream control flow requires a code object CFG";
+        return;
+      }
       word_index += inst_words;
       if (should_stop_after_diagnostic())
         break;
@@ -571,7 +571,7 @@ struct Analyzer : private WaitcheckStateOps {
       auto operator<=>(const LinkLaneSpill &) const = default;
     };
     using CallFrame = std::tuple<size_t, uint16_t, size_t, uint64_t, bool, std::optional<uint16_t>,
-                                 LinkLaneSpill, bool>;
+                                 LinkLaneSpill, bool, bool>;
     using CallContinuationSeed = std::pair<uint16_t, uint64_t>;
     using AnalysisNodeKey =
         std::tuple<size_t, std::vector<CallFrame>, std::optional<CallContinuationSeed>,
@@ -668,7 +668,15 @@ struct Analyzer : private WaitcheckStateOps {
       }
     }
     for (size_t i : root_blocks) {
-      const auto root = get_or_add_node({i, {}, std::nullopt, {true, 0}, false});
+      std::vector<CallFrame> root_stack;
+      if (non_entry_function && !entry_offsets.empty() &&
+          std::ranges::find(abi_function_entries, entry_offsets.front()) !=
+              abi_function_entries.end())
+        // A standalone AMDHSA function starts with its external return link
+        // in s[30:31]. Reuse the ordinary save/restore proof so an overwritten
+        // link cannot turn an unresolved jump into an assumed ABI return.
+        root_stack.emplace_back(i, 30, i, 0, true, std::nullopt, LinkLaneSpill{}, false, true);
+      const auto root = get_or_add_node({i, std::move(root_stack), std::nullopt, {true, 0}, false});
       if (!root) {
         report_.supported = false;
         set_call_context_limit_error();
@@ -857,6 +865,8 @@ struct Analyzer : private WaitcheckStateOps {
           block.static_indirect_call_fixups().empty() && term->raw_encoding() != nullptr &&
           static_cast<uint16_t>(term->raw_encoding()[0] & 0xffu) ==
               std::get<1>(call_stack_after_block.back())) {
+        if (std::get<8>(call_stack_after_block.back()))
+          continue; // Proven return to the caller outside this code object.
         std::vector<CallFrame> caller_stack = std::move(call_stack_after_block);
         const size_t continuation_index = std::get<0>(caller_stack.back());
         const uint16_t return_sreg = std::get<1>(caller_stack.back());
@@ -877,15 +887,10 @@ struct Analyzer : private WaitcheckStateOps {
         const bool recovered =
             block.successor_issue() == BasicBlock::SuccessorIssue::IndirectControlFlow &&
             !fixups.empty() && std::ranges::none_of(fixups, &IndirectCallFixup::source_incomplete);
-        // Standalone function analysis has no caller context for the ABI return.
-        const bool external_return =
-            non_entry_function && std::get<1>(node_key).empty() && term &&
-            (term->mnemonic() == "s_setpc_b64" || term->mnemonic() == "s_set_pc_i64") &&
-            term->raw_encoding() && (term->raw_encoding()[0] & 0xffu) == 30;
         const bool end_of_region =
             block.successor_issue() == BasicBlock::SuccessorIssue::MissingFallthrough &&
             block.end_offset() == text_size && term && !term->is_branch();
-        if (!recovered && !external_return && !end_of_region)
+        if (!recovered && !end_of_region)
           missing_successor = term ? term->src_loc() : block.start_offset();
       }
       for (const BasicBlock *successor : block.successors()) {
@@ -944,7 +949,7 @@ struct Analyzer : private WaitcheckStateOps {
             abi_function_entries.end();
         callee_stack.emplace_back(continuation_it->second, call.return_sreg, callee_it->second,
                                   call.source_call_offset, true, std::nullopt, LinkLaneSpill{},
-                                  abi_function);
+                                  abi_function, false);
         if (!add_context_edge(callee_it->second, std::move(callee_stack),
                               /*conservative_sgpr_entry=*/true)) {
           report_.supported = false;
@@ -10499,6 +10504,13 @@ rj_code_arch_t waitcheck_arch_for_target(rj_code_target_id_t target) {
   }
 }
 
+uint32_t waitcheck_default_wavefront_size(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+                 arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5
+             ? 32
+             : 64;
+}
+
 std::vector<WaitcheckKernelInfo> waitcheck_kernels(const AmdGpuCodeObject &code_object) {
   return find_waitcheck_kernels(code_object, waitcheck_arch_for_target(code_object.target_id()));
 }
@@ -10569,23 +10581,25 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
     }
   }
 
-  for (const auto &owned_section : code_object.all_sections()) {
-    const Section *section = owned_section.get();
-    if ((section->flags() & SHF_EXECINSTR) == 0 || section->size() == 0)
-      continue;
-    if (std::ranges::find(code_object.text_sections(), section) !=
-        code_object.text_sections().end())
-      continue;
-    // CFG construction only covers text sections. A linear pass through
-    // another executable section could miss a branch that skips a wait.
-    report.complete = false;
-    report.analysis_error = "executable section outside waitcheck CFG coverage: " +
-                            std::string(section->name());
-    return report;
+  if (!selected_kernel_entry && !kernels_known) {
+    for (const auto &owned_section : code_object.all_sections()) {
+      const Section *section = owned_section.get();
+      if ((section->flags() & SHF_EXECINSTR) == 0 || section->size() == 0)
+        continue;
+      if (std::ranges::find(code_object.text_sections(), section) !=
+          code_object.text_sections().end())
+        continue;
+      // CFG construction only covers text sections. A linear pass through
+      // another executable section could miss a branch that skips a wait.
+      report.complete = false;
+      report.analysis_error = "executable section outside waitcheck CFG coverage: " +
+                              std::string(section->name());
+      return report;
+    }
   }
 
   const uint32_t fallback_wavefront_size =
-      options.fallback_wavefront_size.value_or(default_wavefront_size(arch));
+      options.fallback_wavefront_size.value_or(waitcheck_default_wavefront_size(arch));
   const auto image = std::span(reinterpret_cast<const uint8_t *>(code_object.image_data()),
                                code_object.image_size());
   Analyzer analyzer(report, options, elf_flags, image, hsa_abi);

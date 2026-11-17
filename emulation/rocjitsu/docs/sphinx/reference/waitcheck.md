@@ -68,9 +68,9 @@ rj_waitcheck /path/to/site-packages/torch \
 
 | Option | Meaning |
 | --- | --- |
-| `--target gfx942\|gfx950\|gfx1100\|gfx1200\|gfx1201\|gfx1250` | Select one supported target from an executable input. |
+| `--target gfx942\|gfx950\|gfx1100\|gfx1150\|gfx1151\|gfx1200\|gfx1201\|gfx1250\|gfx1251` | Select one supported target from an executable input. |
 | `--code-object-index N` | Select the Nth code object for the selected target. |
-| `--kernel-entry OFFSET` | Analyze only the descriptor whose `.text` entry byte offset matches `OFFSET`. |
+| `--kernel-entry OFFSET` | Analyze every descriptor and wavefront mode whose `.text` entry byte offset matches `OFFSET`. Offline callers iterating `waitcheck_kernels()` should pass each `WaitcheckKernelInfo` to the core overload to avoid repeating shared-entry groups. |
 | `--all-code-objects` | Analyze all supported code objects in each input. |
 | `--recursive` | Expand directory inputs into recursive file sweeps. |
 | `--exhaustive` | Strict target-specific recursive sweep with code-object and kernel completeness totals. Requires `--target`. Implies `--recursive --all-code-objects`. |
@@ -93,9 +93,10 @@ waitcheck supports the following targets:
 -   `gfx942` (CDNA3)
 -   `gfx950` (CDNA4)
 -   `gfx1100` (RDNA3)
+-   `gfx1150` and `gfx1151` (RDNA3.5)
 -   `gfx1200` (RDNA4)
 -   `gfx1201` (RDNA4)
--   `gfx1250`
+-   `gfx1250` and `gfx1251` (CDNA5)
 
 See [Supported GPU architectures](/reference/supported-architectures.md) for the full list of architectures supported by rocJITsu.
 
