@@ -424,6 +424,7 @@ void GraphExecSegmented::BuildSyncPlan() {
   sync_plan_.leaf_segment_ids.clear();
   sync_plan_.seg_to_hw_event.assign(segments_.size(), -1);
   sync_plan_.seg_to_child_entry_hw_event.assign(segments_.size(), -1);
+  sync_plan_.child_leaf_wait_patches.assign(segments_.size(), {});
   sync_plan_.num_hw_events = 0;
   sync_plan_.num_unordered_segments = 0;
 
@@ -756,9 +757,8 @@ void GraphExecSegmented::BuildSyncPlan() {
     }
 
     // Child-graph segment: the leading batch completes the child entry
-    // signal so off-stream child roots can start. The whole-child completion
-    // signal is completed by the trailing batch below, after the child's
-    // accumulate has joined its off-stream leaves.
+    // signal so off-stream child roots can start. The trailing batch waits on
+    // the child's off-stream leaves and then completes the whole-child signal.
     if (segment.child_graph_ptr != nullptr) {
       const int entry_hw_slot = sync_plan_.seg_to_child_entry_hw_event[segment.id];
       if (entry_hw_slot >= 0) {
@@ -785,12 +785,57 @@ void GraphExecSegmented::BuildSyncPlan() {
     const bool completion_signal_needed = (hw_slot >= 0);
 
     auto& lastBatch = segBatch.packet_batches.back();
-    // A segment whose trailing nodes emit no packets at all (e.g. a leaf segment
-    // holding only an empty node) has nothing to carry the signal, so it needs a
-    // standalone barrier just like an uncaptured trailing node. Without this the
-    // slot allocated in PASS 1 is never signalled and the leaf sync in
-    // EnqueueSegmentedGraph waits on it forever.
-    if (completion_signal_needed && (last_node_uncaptured || lastBatch.dispatchPackets.empty())) {
+    // A child graph does not enqueue an accumulate. Its off-stream leaves are
+    // joined here: the trailing batch waits on their completion signals, and its
+    // last packet completes this segment's signal. Same-stream leaves are already
+    // ordered on this queue. The dep patches index the child's signal set and are
+    // filled in at launch, after that set is acquired.
+    if (segment.child_graph_ptr != nullptr) {
+      auto* child = static_cast<GraphExecSegmented*>(segment.child_graph_ptr);
+      std::vector<int> leaf_slots;
+      for (int leaf_id : child->sync_plan_.leaf_segment_ids) {
+        const auto& leaf = child->segments_[leaf_id];
+        if (leaf.dev_id == segment.dev_id && leaf.stream_id == segment.stream_id) continue;
+        const int slot = child->sync_plan_.seg_to_hw_event[leaf_id];
+        if (slot >= 0) {
+          leaf_slots.push_back(slot);
+        }
+      }
+      auto& wait_patches = sync_plan_.child_leaf_wait_patches[segment.id];
+      const int num_deps = static_cast<int>(leaf_slots.size());
+      const int barrier_count = (num_deps + 4) / 5;
+      for (int b = 0; b < barrier_count; ++b) {
+        const int start_dep = b * 5;
+        const int end_dep = std::min(start_dep + 5, num_deps);
+        uint8_t* barrier_pkt = device->CreateBarrierPacket(end_dep - start_dep);
+        sync_plan_.barrier_packets.push_back(barrier_pkt);
+        lastBatch.dispatchPackets.push_back(barrier_pkt);
+        lastBatch.dispatchKernelNames.push_back(kBarrierKernelNamePtr);
+        lastBatch.dispatchMetadataPackets.push_back(nullptr);
+        for (int d = start_dep; d < end_dep; ++d) {
+          wait_patches.push_back({barrier_pkt, nullptr, leaf_slots[d], d - start_dep});
+        }
+      }
+      if (completion_signal_needed) {
+        // With no off-stream leaf there is no wait barrier, so a standalone
+        // barrier carries the signal.
+        if (lastBatch.dispatchPackets.empty()) {
+          uint8_t* completion_barrier = device->CreateBarrierPacket();
+          sync_plan_.barrier_packets.push_back(completion_barrier);
+          lastBatch.dispatchPackets.push_back(completion_barrier);
+          lastBatch.dispatchKernelNames.push_back(kBarrierKernelNamePtr);
+          lastBatch.dispatchMetadataPackets.push_back(nullptr);
+        }
+        sync_plan_.patch_list.push_back({lastBatch.dispatchPackets.back(), nullptr, hw_slot,
+                                         amd::Device::HwEventPatch::kCompletionSignal});
+      }
+    } else if (completion_signal_needed &&
+               (last_node_uncaptured || lastBatch.dispatchPackets.empty())) {
+      // A segment whose trailing nodes emit no packets at all (e.g. a leaf segment
+      // holding only an empty node) has nothing to carry the signal, so it needs a
+      // standalone barrier just like an uncaptured trailing node. Without this the
+      // slot allocated in PASS 1 is never signalled and the leaf sync in
+      // EnqueueSegmentedGraph waits on it forever.
       uint8_t* completion_barrier = device->CreateBarrierPacket();
       sync_plan_.barrier_packets.push_back(completion_barrier);
 
@@ -1562,8 +1607,9 @@ void GraphExecSegmented::ComputeCompletionSignalFlags() {
   for (auto& seg : segments_) {
     seg.needs_completion_signal = false;
     if (seg.segment_ids_edges.empty()) {
-      // Leaf segments need a completion signal so EnqueueSegmentedGraph can
-      // sync them back to the launch stream via graph_accumulate dep_signals.
+      // Leaf segments need a completion signal so the consumer can wait: the root
+      // accumulate for a top-level leaf, or the parent segment's trailing batch
+      // for a leaf of a child graph.
       if (leaf_sync_required) {
         seg.needs_completion_signal = true;
       }
@@ -2566,6 +2612,14 @@ hipError_t GraphExecSegmented::CaptureAndFormPacketsForGraph(bool reuseKernargSl
       batch->ownedPatches.push_back({i, slot});
     }
   }
+  for (auto& wait_patches : sync_plan_.child_leaf_wait_patches) {
+    for (auto& patch : wait_patches) {
+      auto it = pktToFlat.find(patch.packet);
+      if (it != pktToFlat.end()) {
+        patch.flat_packet = it->second.first;
+      }
+    }
+  }
 
   for (auto& [seg_id, segBatch] : segmentBatches_) {
     for (auto& batch : segBatch.packet_batches) {
@@ -2999,7 +3053,9 @@ amd::Command* GraphExecSegmented::EnqueueSegmentedGraph(hip::Stream* launch_stre
                                                std::vector<GraphLaunchSignalSet>* signal_sets,
                                                const std::vector<void*>* parent_hw_events,
                                                int parent_entry_hw_event_index,
-                                               bool sync_launch_stream_deps) {
+                                               bool sync_launch_stream_deps,
+                                               amd::AccumulateCommand* dispatch_accumulate,
+                                               std::vector<void*>* out_hw_events) {
   hipError_t status = hipSuccess;
   if (out_status != nullptr) {
     *out_status = hipSuccess;
@@ -3030,18 +3086,23 @@ amd::Command* GraphExecSegmented::EnqueueSegmentedGraph(hip::Stream* launch_stre
     return streams[seg.stream_id];
   };
 
-  // Single AccumulateCommand on launch_stream manages all HW event lifetimes
-  // and serves as the dispatch anchor for all segments across all streams.
-  // Kernel dispatch records are added to the command at dispatch time (via
-  // addKernelDispatch in dispatchAqlPacketBatchFlat) — no string borrowing,
-  // no GraphExecBase pin.
-  auto* graph_accumulate = new amd::AccumulateCommand(*launch_stream, {}, nullptr);
-  // A launch whose segments all run on the launch stream (one segment, or collapsed to a single
-  // stream) has no side queue waiting on its end marker (DEBUG_CLR_GRAPH_FAST_LAUNCH)
-  graph_accumulate->setMultiStream(
-      std::any_of(segments_.begin(), segments_.end(), [&](const Segment& seg) {
-        return resolveSegmentStream(seg) != launch_stream;
-      }));
+  // The graph passed to hipGraphLaunch owns the one AccumulateCommand. It is the
+  // dispatch anchor (kernel records are added in dispatchAqlPacketBatchFlat) and,
+  // once enqueued, the launch completion. A nested child reuses that command and
+  // does not enqueue another: its off-stream leaves are joined by the parent
+  // segment's trailing batch.
+  const bool enqueue_accumulate = (dispatch_accumulate == nullptr);
+  amd::AccumulateCommand* graph_accumulate = dispatch_accumulate;
+  if (enqueue_accumulate) {
+    graph_accumulate = new amd::AccumulateCommand(*launch_stream, {}, nullptr);
+    // A launch whose segments all run on the launch stream (one segment, or collapsed
+    // to a single stream) has no side queue waiting on its end marker
+    // (DEBUG_CLR_GRAPH_FAST_LAUNCH)
+    graph_accumulate->setMultiStream(
+        std::any_of(segments_.begin(), segments_.end(), [&](const Segment& seg) {
+          return resolveSegmentStream(seg) != launch_stream;
+        }));
+  }
 
   // Child entry waits are part of the normal patch list and name the immediate parent's
   // entry signal, which stays in the parent's set
@@ -3123,7 +3184,9 @@ amd::Command* GraphExecSegmented::EnqueueSegmentedGraph(hip::Stream* launch_stre
                               &segment_hw_events);
 
       if (status != hipSuccess) {
-        graph_accumulate->release();
+        if (enqueue_accumulate) {
+          graph_accumulate->release();
+        }
         if (out_status != nullptr) {
           *out_status = status;
         }
@@ -3134,7 +3197,9 @@ amd::Command* GraphExecSegmented::EnqueueSegmentedGraph(hip::Stream* launch_stre
 
   // Sync parallel-stream leaves back to launch_stream via graph_accumulate's
   // dep_signal[]. Same-stream leaves rely on in-order queue semantics instead.
-  if (IsLeafNodeSyncRequired()) {
+  // A nested child skips this: the parent segment's trailing batch waits on those
+  // leaves, and only the hipGraphLaunch accumulate is enqueued.
+  if (enqueue_accumulate && IsLeafNodeSyncRequired()) {
     for (int seg_id : sync_plan_.leaf_segment_ids) {
       if (seg_id < 0 || seg_id >= static_cast<int>(segments_.size())) continue;
       hip::Stream* seg_stream = resolveSegmentStream(segments_[seg_id]);
@@ -3145,12 +3210,17 @@ amd::Command* GraphExecSegmented::EnqueueSegmentedGraph(hip::Stream* launch_stre
     }
   }
 
-  graph_accumulate->enqueue();
+  if (enqueue_accumulate) {
+    graph_accumulate->enqueue();
+  }
+  if (out_hw_events != nullptr) {
+    *out_hw_events = std::move(segment_hw_events);
+  }
 
   if (out_status != nullptr) {
     *out_status = status;
   }
-  return graph_accumulate;
+  return enqueue_accumulate ? graph_accumulate : nullptr;
 }
 
 // ================================================================================================
@@ -3236,14 +3306,15 @@ hipError_t GraphExecSegmented::EnqueueSegment(const Segment& segment, hip::Strea
       }
     }
 
-    // Recursively enqueue the child and collect its borrowed signal set for
-    // recycling by the root launch-completion callback.
+    // Submit the child's packets on the root accumulate. The child's own signal
+    // set is appended to signal_sets and recycled when the whole launch finishes.
     hipError_t child_status = hipSuccess;
     const int child_entry_hw_event_index =
         sync_plan_.seg_to_child_entry_hw_event[segment.id];
-    amd::Command* child_last_cmd = childGraphExec->EnqueueSegmentedGraph(
+    std::vector<void*> child_hw_events;
+    childGraphExec->EnqueueSegmentedGraph(
         stream, streams, &child_status, signal_sets, parent_segment_hw_events,
-        child_entry_hw_event_index, false);
+        child_entry_hw_event_index, false, accumulate, &child_hw_events);
 
     if (child_status != hipSuccess) {
       ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
@@ -3252,11 +3323,15 @@ hipError_t GraphExecSegmented::EnqueueSegment(const Segment& segment, hip::Strea
       return child_status;
     }
 
-    if (child_last_cmd != nullptr) {
-      child_last_cmd->release();
+    // Trailing batch: wait on the child's off-stream leaves, then complete this
+    // segment's signal. The dep slots index child_hw_events.
+    const auto& leaf_wait_patches = sync_plan_.child_leaf_wait_patches[segment.id];
+    if (!leaf_wait_patches.empty()) {
+      auto* device = g_devices[stream->DeviceId()]->devices()[0];
+      device->ApplyHwEventPatches(leaf_wait_patches, child_hw_events,
+                                  accumulate->profilingInfo().timed_, nullptr);
     }
 
-    // Dispatch completion barrier after child graph — signals parent's HW event
     while (segBatch && batchIndex < segBatch->packet_batches.size()) {
       status = dispatchCurrentBatch();
       if (status != hipSuccess) return status;
