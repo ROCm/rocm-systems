@@ -4,6 +4,7 @@
 #include "sys_info_read.h"
 
 #include <gtest/gtest.h>
+#include <unistd.h>
 
 #include <cstdint>
 #include <iomanip>
@@ -160,6 +161,10 @@ void TestSysInfoRead::Run(void) {
     err = amdsmi_get_gpu_kfd_info(processor_handles_[i], &kfd_info);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
     if (err != AMDSMI_STATUS_SUCCESS) {
+      if (access("/dev/dxg", F_OK) == 0) {
+        EXPECT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED)
+            << "gpu " << i << ": KFD info should not be present in WSL environment.";
+      }
       EXPECT_EQ(kfd_info.kfd_id, std::numeric_limits<uint64_t>::max());
       EXPECT_EQ(kfd_info.node_id, std::numeric_limits<uint32_t>::max());
       EXPECT_EQ(kfd_info.current_partition_id, std::numeric_limits<uint32_t>::max());
