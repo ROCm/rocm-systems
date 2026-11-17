@@ -796,7 +796,19 @@ def gen_conversion32(ctx: ExecuteContext) -> str | None:
     src = ctx.src_ops
     is_vop3 = ctx.is_vop3
     if (
-        arch not in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5')
+        arch
+        not in (
+            'cdna1',
+            'cdna2',
+            'rdna1',
+            'rdna2',
+            'rdna3_5',
+            'rdna3',
+            'rdna4',
+            'cdna3',
+            'cdna4',
+            'cdna5',
+        )
         or mnemonic not in CONVERSION32_NAMES
     ):
         return None
@@ -833,7 +845,7 @@ def gen_conversion32(ctx: ExecuteContext) -> str | None:
         + (' | '.join(modifiers) if modifiers else '0u')
         + ';'
     ]
-    if arch in ('cdna3', 'cdna4') and not is_vop3:
+    if arch in ('cdna1', 'cdna2', 'rdna1', 'rdna2', 'cdna3', 'cdna4') and not is_vop3:
         result_format = 'F32' if to_float else 'NONE'
         lines += [
             '  if (inst_.src0 == amdgpu::SRC_SDWA) {',
@@ -862,7 +874,19 @@ def gen_conversion64(ctx: ExecuteContext) -> str | None:
     src = ctx.src_ops
     is_vop3 = ctx.is_vop3
     if (
-        arch not in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5')
+        arch
+        not in (
+            'cdna1',
+            'cdna2',
+            'rdna1',
+            'rdna2',
+            'rdna3_5',
+            'rdna3',
+            'rdna4',
+            'cdna3',
+            'cdna4',
+            'cdna5',
+        )
         or mnemonic not in CONVERSION64_NAMES
     ):
         return None
@@ -893,7 +917,7 @@ def gen_conversion64(ctx: ExecuteContext) -> str | None:
     if output.startswith('F'):
         rounding = 'fp_round_mode_f32' if output == 'F32' else 'fp_round_mode_f16_f64'
         lines += [f'  flags |= uint64_t(wf.{rounding}()) << 24;']
-    if arch in ('rdna3', 'cdna3', 'cdna4') and output.startswith('F'):
+    if arch not in ('rdna4', 'cdna5') and output.startswith('F'):
         lines += ['  if (!wf.dx10_clamp()) flags |= RJ_ARITH_FP_DX10_CLAMP_OFF;']
     modifiers = '0u'
     if is_vop3:

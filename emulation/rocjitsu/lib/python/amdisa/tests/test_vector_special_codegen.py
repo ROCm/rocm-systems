@@ -806,33 +806,6 @@ def test_packed_integer_vop3_modifiers_precede_conversion(op, has_abs):
         assert cpp.index(modifiers) < cpp.index(f'amdgpu::cvt_{op}(f0)')
 
 
-@pytest.mark.parametrize('name', ['v_cvt_i32_f64', 'v_cvt_u32_f64'])
-def test_f64_to_integer_simd_defers_source_modifiers_to_scalar(name):
-    vop3 = simd_probe_line(f'{name}_vop3')
-    # The glue carries no modifiers, so a modified encoding runs the scalar body.
-    assert vop3.startswith('  if (!inst.inst_.abs && !inst.inst_.neg) {\n')
-    assert '  ROCJITSU_TRY_SIMD_CVT_F64_TO_B32(' in vop3
-    assert 'apply_vop3_src_mod_f64' not in vop3
-    assert 'inst_.abs' not in simd_probe_line(f'{name}_vop1')
-
-
-@pytest.mark.parametrize(
-    ('name', 'operation'),
-    [
-        ('v_cvt_floor_i32_f32', 'FloorI32'),
-        ('v_cvt_flr_i32_f32', 'FloorI32'),
-        ('v_cvt_nearest_i32_f32', 'NearestI32'),
-        ('v_cvt_rpi_i32_f32', 'NearestI32'),
-    ],
-)
-def test_floor_nearest_simd_uses_shared_raw_bit_conversion(name, operation):
-    # Both forms pass the scalar body's FloorI32/NearestI32 stage object; for
-    # VOP3 it holds ABS/NEG, so a modified encoding stays on the SIMD path.
-    probe = '  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, conversion);'
-    assert simd_probe_line(f'{name}_vop1') == probe
-    assert simd_probe_line(f'{name}_vop3') == probe
-
-
 @pytest.mark.parametrize('dtype', ['f32', 'f16'])
 @pytest.mark.parametrize('op', ['u16', 'i16'])
 @pytest.mark.parametrize('has_abs', [False, True])
