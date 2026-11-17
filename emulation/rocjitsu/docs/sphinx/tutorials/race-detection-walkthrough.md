@@ -139,6 +139,11 @@ not order wave 0's read after the store. A missing barrier alone does not tell u
 wait requirements have been satisfied. The kernel needs `__syncthreads()`
 between the write and the cross-wave read either way.
 
+Other kernels can use synchronization that the detector does not observe,
+such as an LDS barrier phase wait. The synchronization line can then accompany
+a false positive; see the race detector's
+[limitations](https://rocm.github.io/rocm-systems/rocjitsu/race-detector/#limitations).
+
 ## Fix the kernel
 
 Add `__syncthreads()` between the write and the cross-lane read:
@@ -173,6 +178,11 @@ For CI pipelines or scripted workflows, create the output directory with
 ```
 
 Rerun with the same command. Reports are written to `/tmp/output/race.log`.
+
+The plugin writes its summary of emitted reports and suppressed observations
+at VM teardown. A successful application can emit complete `RACE` blocks
+without a final summary, so a missing summary does not mean zero races or
+zero suppressed observations.
 
 ## Next steps
 
