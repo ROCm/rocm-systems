@@ -59,6 +59,7 @@ int64_t ncclLoadParam(char const* env, int64_t deftVal, int64_t, int64_t* cache,
   return *cache;
 }
 const char* ncclGetEnv(const char* name) { return getenv(name); }
+int8_t ncclAliasCachePolicy(char const*, char const*) { return 0; }
 
 int64_t ncclParamP2pDisable() { return g_loadParam("P2P_DISABLE", 0); }
 int64_t ncclParamMultiRankGpuEnable() { return g_loadParam("MULTI_RANK_GPU_ENABLE", 0); }

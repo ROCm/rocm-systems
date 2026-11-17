@@ -138,6 +138,8 @@ void ResetEnvFakes() {
 
 const char* ncclGetEnv(const char* name) { return micro_getenv(name); }
 
+int8_t ncclAliasCachePolicy(char const*, char const*) { return 0; }
+
 int64_t DefaultLoadParam(char const* env, int64_t deftVal, int64_t /*uninitialized*/,
                          int64_t* cache, int8_t* noCache) {
   int64_t value = deftVal;
