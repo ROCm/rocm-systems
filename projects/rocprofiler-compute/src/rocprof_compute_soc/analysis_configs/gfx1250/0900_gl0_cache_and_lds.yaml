@@ -23,11 +23,12 @@ Panel Config:
         max: Max
         unit: Unit
       metric:
-        # Utilization: TX_VMW_VMW_BUSY_sum is summed across all GL0 cache units (one per WGP).
+        # TX_VMW_VMW_BUSY_sum is summed across WGPs. GRBM_GUI_ACTIVE_sum already sums XCDs,
+        # so divide by active WGPs per XCD.
         Utilization:
-          avg: 100 * SUM(TX_VMW_VMW_BUSY_sum) / SUM(GRBM_GUI_ACTIVE_sum * $cu_per_gpu)
-          min: 100 * MIN(TX_VMW_VMW_BUSY_sum / (GRBM_GUI_ACTIVE_sum * $cu_per_gpu))
-          max: 100 * MAX(TX_VMW_VMW_BUSY_sum / (GRBM_GUI_ACTIVE_sum * $cu_per_gpu))
+          avg: 100 * SUM(TX_VMW_VMW_BUSY_sum) / SUM(GRBM_GUI_ACTIVE_sum * $cu_per_gpu / $num_xcd)
+          min: 100 * MIN(TX_VMW_VMW_BUSY_sum / (GRBM_GUI_ACTIVE_sum * $cu_per_gpu / $num_xcd))
+          max: 100 * MAX(TX_VMW_VMW_BUSY_sum / (GRBM_GUI_ACTIVE_sum * $cu_per_gpu / $num_xcd))
           unit: Percent
 
   - metric_table:
