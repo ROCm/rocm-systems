@@ -293,7 +293,7 @@ TEST_P(DbiReplacementSim, SameSiteProbePreservesTheReplacementInputInEitherQueue
   std::vector<uint32_t> words = setup_;
   const uint64_t anchor = words.size() * sizeof(uint32_t);
   words.push_back(copy_v3_v2_);
-  finish_kernel(words);
+  ASSERT_NO_FATAL_FAILURE(finish_kernel(words));
   ASSERT_NO_FATAL_FAILURE(expect_memory(words, kInitialPrivateBytes, kOriginalInput));
   std::vector<uint8_t> image;
   ASSERT_NO_FATAL_FAILURE(make_image(words, image));
@@ -349,7 +349,7 @@ TEST_P(DbiReplacementSim, RemovingALaterDefinitionChangesLivenessAtAnEarlierProb
   const uint32_t definition = test::make_mov_vgpr_inline(1, kOriginalInput);
   words.push_back(definition);
   words.push_back(copy_v3_v1_);
-  finish_kernel(words);
+  ASSERT_NO_FATAL_FAILURE(finish_kernel(words));
   ASSERT_NO_FATAL_FAILURE(expect_memory(words, kInitialPrivateBytes, kOriginalInput));
   std::vector<uint8_t> image;
   ASSERT_NO_FATAL_FAILURE(make_image(words, image));
@@ -507,7 +507,6 @@ TEST_P(DbiReplacementSim, ObservationLivenessRespectsDefinitionMasksAndScratchAv
     ASSERT_EQ(source.image_size(), pristine.size());
     EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
     if (test_case.definition != ObservationDefinition::Full) {
-      ASSERT_FALSE(result.errors.empty());
       EXPECT_TRUE(std::ranges::any_of(result.errors, [](const std::string &error) {
         return error.find("fixed scratch to spill into") != std::string::npos;
       }));
@@ -601,7 +600,6 @@ TEST_P(DbiReplacementSim, InteriorDescriptorEntryKeepsObservationExecAnalysisCon
   ASSERT_TRUE(validated.errors.empty()) << validated.errors.front();
   ASSERT_EQ(validated.sites.size(), 2u);
   const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
-  ASSERT_FALSE(result.errors.empty());
   EXPECT_TRUE(std::ranges::any_of(result.errors, [](const std::string &error) {
     return error.find("fixed scratch to spill into") != std::string::npos;
   }));
@@ -617,7 +615,7 @@ TEST_P(DbiReplacementSim, EmptyReplacementRemovesTheOriginalEffect) {
   const uint32_t definition = test::make_mov_vgpr_inline(1, kOriginalInput);
   words.push_back(definition);
   words.push_back(copy_v3_v1_);
-  finish_kernel(words);
+  ASSERT_NO_FATAL_FAILURE(finish_kernel(words));
   ASSERT_NO_FATAL_FAILURE(expect_memory(words, kInitialPrivateBytes, kOriginalInput));
   std::vector<uint8_t> image;
   ASSERT_NO_FATAL_FAILURE(make_image(words, image));
@@ -668,7 +666,7 @@ protected:
     words.push_back(set_m0.value());
     value.anchor = words.size() * sizeof(uint32_t);
     words.push_back(copy_v3_v1_);
-    finish_kernel(words);
+    ASSERT_NO_FATAL_FAILURE(finish_kernel(words));
     make_image(words, value.image);
     value.probe =
         test::make_gfx1200_probe_elf("replacement_probe", {clear_v2.value(), ret.value()});

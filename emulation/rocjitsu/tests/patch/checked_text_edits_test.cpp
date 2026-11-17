@@ -450,11 +450,13 @@ TEST(CheckedTextEdits, ThreeNonadjacentCompleteExtentsPreserveOtherTextAndDescri
                                    result.value().elf_bytes.size());
   ASSERT_TRUE(candidate.is_valid());
   EXPECT_EQ(candidate.target_id(), kTarget);
+  ASSERT_EQ(candidate.text_sections().size(), 1u);
   const Section &emitted_text = *candidate.text_sections().front();
   const std::vector<KernelDescriptorInfo> kernels =
       scan_kernel_descriptors(result.value().elf_bytes, emitted_text.sectionOffset(),
                               emitted_text.size(), emitted_text.sectionHeaderIndex());
-  ASSERT_EQ(kernels.size(), 1u);
+  EXPECT_EQ(kernels.size(), 1u);
+  ASSERT_LE(text.size(), emitted_text.size());
   ASSERT_EQ(result.value().sites.size(), requests.size());
   uint64_t cave_offset = text.size();
   for (size_t index = 0; index < requests.size(); ++index) {
@@ -465,18 +467,21 @@ TEST(CheckedTextEdits, ThreeNonadjacentCompleteExtentsPreserveOtherTextAndDescri
     EXPECT_EQ(site.instrumentation_offset, cave_offset);
     EXPECT_EQ(site.instrumentation_size, 0u);
     EXPECT_EQ(site.guest_offset, cave_offset);
-    EXPECT_EQ(site.guest_size, requests[index].replacement.size());
+    const size_t replacement_size = requests[index].replacement.size();
+    EXPECT_EQ(site.guest_size, replacement_size);
     // Only the requested NOP sequence occupies this guest range. The original
     // literal instruction and store are never replayed in the trampoline.
-    EXPECT_EQ(std::memcmp(candidate.text_sections().front()->data() + site.guest_offset,
-                          requests[index].replacement.data(), site.guest_size),
+    ASSERT_LE(site.guest_offset, emitted_text.size());
+    ASSERT_LE(replacement_size, emitted_text.size() - site.guest_offset);
+    EXPECT_EQ(std::memcmp(emitted_text.data() + site.guest_offset,
+                          requests[index].replacement.data(), replacement_size),
               0);
     cave_offset += requests[index].replacement.size() + sizeof(uint32_t);
   }
   EXPECT_EQ(candidate.text_sections().front()->size(), cave_offset);
   for (const uint64_t control_offset : {4u, 16u, 32u})
-    EXPECT_EQ(std::memcmp(candidate.text_sections().front()->data() + control_offset,
-                          text.data() + control_offset, sizeof(uint32_t)),
+    EXPECT_EQ(std::memcmp(emitted_text.data() + control_offset, text.data() + control_offset,
+                          sizeof(uint32_t)),
               0);
   EXPECT_TRUE(test::source_image_matches(object, image));
 }
@@ -528,19 +533,12 @@ TEST(CheckedTextEdits, TrampolinePayloadLengthIsIndependentOfCompleteSourceExten
              .replacement = InstructionReplacement{.expected_bytes = edit.expected,
                                                    .replacement_bytes = edit.replacement}});
         const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
-        ASSERT_TRUE(result.errors.empty()) << result.errors.front();
-        EXPECT_FALSE(result.edit_error);
-        ASSERT_EQ(result.sites.size(), 1u);
-        const InstrumentedSite &site = result.sites.front();
-        EXPECT_EQ(site.original_size, original.expected.size());
-        EXPECT_EQ(site.guest_offset, source.text_sections().front()->size());
-        EXPECT_EQ(site.guest_size, body.size());
-        EXPECT_EQ(site.instrumentation_offset, site.guest_offset);
-        EXPECT_EQ(site.instrumentation_size, 0u);
-        EXPECT_TRUE(matches_checked_output(source, std::span(&edit, 1), result.elf_bytes));
         ASSERT_NO_FATAL_FAILURE(test::expect_replacement_guest(
             result, original.offset, static_cast<uint32_t>(original.expected.size()), body,
             test_case.arch, false));
+        EXPECT_FALSE(result.edit_error);
+        EXPECT_EQ(result.sites.front().guest_offset, source.text_sections().front()->size());
+        EXPECT_TRUE(matches_checked_output(source, std::span(&edit, 1), result.elf_bytes));
         EXPECT_TRUE(test::source_image_matches(source, test_case.image));
       }
     }
@@ -619,7 +617,7 @@ TEST(CheckedTextEdits, ContinuationMustNameAnInstructionRatherThanZeroPadding) {
     EXPECT_TRUE(apply_replacements(source, std::span(&edit, 1), error).failed());
     EXPECT_EQ(error.code, TextEditErrorCode::InvalidInstruction);
     EXPECT_EQ(error.offset, 0u);
-    EXPECT_EQ(image, pristine);
+    EXPECT_TRUE(test::source_image_matches(source, pristine));
   }
   const ReplacementEdit terminal = {.offset = 0,
                                     .expected = make_instruction_bytes({end}),
@@ -639,7 +637,8 @@ TEST(CheckedTextEdits, ContinuationMustNameAnInstructionRatherThanZeroPadding) {
       apply_replacements(continued, std::span(&normal, 1), error);
   ASSERT_TRUE(result.succeeded()) << error.message;
   EXPECT_TRUE(matches_checked_output(continued, std::span(&normal, 1), result.value().elf_bytes));
-  EXPECT_EQ(image, pristine);
+  EXPECT_TRUE(test::source_image_matches(source, pristine));
+  EXPECT_TRUE(test::source_image_matches(continued, continued_image));
 }
 
 TEST(CheckedTextEdits, PcDependentReplacementPayloadsAreNotMovedWithoutRelocation) {
@@ -1242,7 +1241,7 @@ void expect_reference_result(const std::vector<uint8_t> &image, uint64_t anchor,
   if (rejected_reference) {
     EXPECT_TRUE(result.elf_bytes.empty());
     EXPECT_TRUE(result.sites.empty());
-    ASSERT_FALSE(result.errors.empty());
+    EXPECT_FALSE(result.errors.empty());
     ASSERT_TRUE(result.edit_error);
     EXPECT_EQ(result.edit_error->code, TextEditErrorCode::UnsupportedReferences);
     EXPECT_EQ(result.edit_error->offset, *rejected_reference);
@@ -3190,7 +3189,7 @@ TEST(CheckedTextEdits, InstrumentorRejectsWholeBatchOnLaterInteriorReference) {
     if (reference == 12) {
       // The first anchor is valid, but the reference enters the second anchor's
       // literal. A failed transaction must not publish either applied site.
-      ASSERT_FALSE(result.errors.empty());
+      EXPECT_FALSE(result.errors.empty());
       ASSERT_TRUE(result.edit_error);
       EXPECT_EQ(result.edit_error->code, TextEditErrorCode::UnsupportedReferences);
       EXPECT_EQ(result.edit_error->offset, reference);

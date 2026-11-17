@@ -145,8 +145,14 @@ inline void expect_replacement_guest(const InstrumentedCodeObjectDebug &result,
   EXPECT_EQ(patch.trampoline_offset, site.instrumentation_offset);
   const AmdGpuCodeObject candidate(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(candidate.is_valid());
+  ASSERT_EQ(candidate.text_sections().size(), 1u);
   const Section &text = *candidate.text_sections().front();
-  ASSERT_LE(site.guest_offset + replacement.size() + 4, text.size());
+  ASSERT_LE(source_offset, text.size());
+  ASSERT_LE(sizeof(uint32_t), text.size() - source_offset);
+  ASSERT_LE(site.guest_offset, text.size());
+  ASSERT_LE(replacement.size(), text.size() - site.guest_offset);
+  const uint64_t return_offset = site.guest_offset + replacement.size();
+  ASSERT_LE(sizeof(uint32_t), text.size() - return_offset);
   if (!replacement.empty()) {
     EXPECT_EQ(std::memcmp(text.data() + site.guest_offset, replacement.data(), replacement.size()),
               0);
@@ -157,10 +163,10 @@ inline void expect_replacement_guest(const InstrumentedCodeObjectDebug &result,
   uint32_t actual = 0;
   std::memcpy(&actual, text.data() + source_offset, sizeof(actual));
   EXPECT_EQ(actual, *entry_branch);
-  const std::optional<uint32_t> return_branch = expected_replacement_branch(
-      site.guest_offset + replacement.size(), source_offset + original_size, arch);
+  const std::optional<uint32_t> return_branch =
+      expected_replacement_branch(return_offset, source_offset + original_size, arch);
   ASSERT_TRUE(return_branch);
-  std::memcpy(&actual, text.data() + site.guest_offset + replacement.size(), sizeof(actual));
+  std::memcpy(&actual, text.data() + return_offset, sizeof(actual));
   EXPECT_EQ(actual, *return_branch);
   ASSERT_TRUE(patch.return_target);
   EXPECT_EQ(*patch.return_target, source_offset + original_size);
