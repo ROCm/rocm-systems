@@ -417,43 +417,6 @@ inline util::native<uint32_t> simd_lshr_u32(util::native<uint32_t> v, util::nati
       v, sh, [](uint32_t value, uint32_t count) { return value >> (count & 31u); });
 }
 
-/// @brief Convert f32 to a zero-extended packed i16 lane.
-/// @details NaN converts to zero and out-of-range values saturate before the
-/// signed 16-bit result is returned in the low half of a uint32_t.
-inline uint32_t cvt_i16_f32(float32_t value) {
-  if (std::isnan(value)) {
-    return uint32_t{0};
-  }
-  if (value >= 32768.0f) {
-    return static_cast<uint32_t>(static_cast<uint16_t>(std::numeric_limits<int16_t>::max()));
-  }
-  if (value < -32768.0f) {
-    return static_cast<uint32_t>(static_cast<uint16_t>(std::numeric_limits<int16_t>::min()));
-  }
-  return static_cast<uint16_t>(static_cast<int16_t>(value));
-}
-
-/// @brief Convert f32 to a zero-extended packed u16 lane.
-/// @details NaN and negative inputs convert to zero; values above the u16 range
-/// saturate to UINT16_MAX.
-inline uint32_t cvt_u16_f32(float32_t value) {
-  if (std::isnan(value) || value < 0.0f) {
-    return uint32_t{0};
-  }
-  if (value >= 65536.0f) {
-    return static_cast<uint32_t>(std::numeric_limits<uint16_t>::max());
-  }
-  return static_cast<uint16_t>(value);
-}
-
-inline util::native<uint32_t> simd_cvt_i16_f32_to_u32(util::native<float32_t> s) {
-  return util::map_native_convert_scalar<uint32_t>(s, cvt_i16_f32);
-}
-
-inline util::native<uint32_t> simd_cvt_u16_f32_to_u32(util::native<float32_t> s) {
-  return util::map_native_convert_scalar<uint32_t>(s, cvt_u16_f32);
-}
-
 template <typename Op>
 inline void write_wave_mask_scalar(const Op &op, Wavefront &wf, uint64_t mask) {
   write_explicit_lane_mask(op, wf, mask);
@@ -802,20 +765,6 @@ inline conversion::ToFloat<From, To> conversion_to_float(const Wavefront &wf, ui
   return stages;
 }
 
-/// @brief Resolve a VOP1 conversion to F16, which scales by SDWA OMOD before rounding.
-/// @details Keeps the emulator's SDWA F16 order of sdwa::round_f16_result: the
-/// producer scales before narrowing, and sdwa::write_lane then applies OMOD's zero
-/// rules and CLAMP. gfx1030 captures disagree: SDWA F16 conversions match VOP3,
-/// rounding first (65535 div:2 gives 0x7c00, not 0x7800). Without SDWA there is no OMOD.
-template <typename From, typename Inst>
-inline conversion::ToFloat<From, fp_format::F16> sdwa_conversion_to_f16(const Inst &inst,
-                                                                        const Wavefront &wf) {
-  auto stages = conversion_to_float<From, fp_format::F16>(wf);
-  constexpr int32_t kScale[] = {0, 1, 2, -1};
-  stages.rounding.prescale = kScale[sdwa::output_modifier<sdwa::ResultFormat::F16>(inst, wf) & 3u];
-  return stages;
-}
-
 /// @brief Resolve V_CVT_FLOOR_I32_F32 or V_CVT_NEAREST_I32_F32 (conversion::FloorI32,
 /// conversion::NearestI32) from the F32 input-denormal control and ABS/NEG.
 
@@ -824,19 +773,6 @@ template <typename Fmt>
 inline conversion::ToFp8<Fmt> conversion_to_fp8(const Wavefront &wf, uint32_t abs = 0,
                                                 uint32_t neg = 0) {
   return {abs, neg, input_denormal_policy<fp_format::F32>(wf), wf.fp16_ovfl()};
-}
-
-/// @brief Resolve V_CVT_PK_RTZ_F16_F32: each F32 source rounds toward zero into one half.
-/// @details MODE.FP_ROUND is ignored. ABS/NEG bit i applies to source i; OMOD and
-/// CLAMP are not applied to the packed result.
-inline conversion::PackedF16<fp_format::F32>
-conversion_pk_rtz_f16(const Wavefront &wf, uint32_t abs = 0, uint32_t neg = 0) {
-  conversion::PackedF16<fp_format::F32> packed{
-      conversion_to_float<fp_format::F32, fp_format::F16>(wf, abs, neg),
-      conversion_to_float<fp_format::F32, fp_format::F16>(wf, abs >> 1, neg >> 1)};
-  packed.low.rounding.direction = conversion::Rounding::TOWARD_ZERO;
-  packed.high.rounding.direction = conversion::Rounding::TOWARD_ZERO;
-  return packed;
 }
 
 /// @brief Wrap a raw-bit operation with the instruction's source and output modifiers.
@@ -1760,70 +1696,6 @@ template <typename Inst, typename Stages>
 
 template <typename Inst, typename Stages>
 [[nodiscard]] bool try_execute_conversion_to_f64_simd(Inst &, Wavefront &, const Stages &) {
-  return false;
-}
-
-/// @brief Apply V_CVT_F32_F16 policy before widening a SIMD batch.
-inline util::native<float> cvt_f32_f16_mode_simd(util::native<uint32_t> raw, const Wavefront &wf) {
-  using U = util::native<uint32_t>;
-  raw = input_denormal::prepare<fp_format::F16>(
-      raw, input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64()));
-  const U magnitude = raw & U(0x7fffu);
-  if (fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode())) {
-    util::stdx::where(magnitude > U(0x7c00u), raw) = raw | U(0x0200u);
-  }
-  return util::f16_to_f32_simd(raw);
-}
-
-/// VOP3 v_cvt_f32_f16 fast path. The generic form reads the low f16 half and
-/// writes the full f32 dword, matching non-true16 scalar write_lane semantics.
-/// The true16 form selects src0 with op_sel[0] before widening; the destination
-/// is f32 in both cases, so no destination half merge is needed.
-/// Widening is exact and the output stage is raw-bit, so neither needs a guest
-/// FP environment.
-template <bool True16, typename Inst>
-  requires(util::has_stdx_simd)
-[[nodiscard]] inline bool try_execute_cvt_f32_f16_vop3_simd(Inst &inst, Wavefront &wf) {
-  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
-      !inst.src0.simd_capable() || !inst.vdst.simd_capable()) {
-    return false;
-  }
-  using T = uint32_t;
-  const uint32_t abs = inst.inst_.abs;
-  const uint32_t neg = inst.inst_.neg;
-  const uint32_t opsel = vop3_opsel(inst.inst_);
-  const uint32_t omod = effective_vop3_omod_f32(wf, inst.inst_.omod);
-  const uint32_t clamp = inst.inst_.clamp;
-  constexpr std::size_t W = util::native_width_v<T>;
-  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
-  const uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  RegisterAccess regs(wf);
-  auto src0 = regs.read_operand(inst.src0, exec);
-  auto dst = regs.write_operand(inst.vdst, exec);
-  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
-    const uint64_t chunk = (exec >> base) & chunk_full;
-    if (chunk == 0) {
-      continue;
-    }
-    auto raw = src0.template load_native<T>(base);
-    if constexpr (True16) {
-      raw = select_vop3_true16_src(raw, opsel, 0);
-    } else {
-      raw = raw & util::broadcast<T>(0xffffu);
-    }
-    const auto src = apply_vop3_src_mod_f32<0>(cvt_f32_f16_mode_simd(raw, wf), abs, neg);
-    const auto result = apply_vop3_dst_mod_f32(src, omod, clamp, floating_clamp_nan_to_zero(wf),
-                                               wf.fp_round_mode_f32());
-    if (dst.template store_native<T>(base, std::bit_cast<util::native<T>>(result), chunk)
-            .failed()) {
-      return true;
-    }
-  }
-  return true;
-}
-
-template <bool True16, typename Inst>
-[[nodiscard]] bool try_execute_cvt_f32_f16_vop3_simd(Inst &, Wavefront &) {
   return false;
 }
 
@@ -4048,22 +3920,6 @@ template <Vop3pDotHalfFormat Fmt, typename Inst>
     return;                                                                                        \
   }
 #endif
-
-/// VOP3 v_cvt_f32_f16 counterpart. Generic form reads src0.l; TRUE16 form
-/// selects src0 via op_sel[0]. Both write a full f32 dword.
-#define ROCJITSU_TRY_SIMD_CVT_F32_F16_VOP3()                                                       \
-  do {                                                                                             \
-    if (::rocjitsu::amdgpu::try_execute_cvt_f32_f16_vop3_simd<false>(inst, wf)) {                  \
-      return;                                                                                      \
-    }                                                                                              \
-  } while (false)
-
-#define ROCJITSU_TRY_SIMD_CVT_F32_F16_VOP3_TRUE16()                                                \
-  do {                                                                                             \
-    if (::rocjitsu::amdgpu::try_execute_cvt_f32_f16_vop3_simd<true>(inst, wf)) {                   \
-      return;                                                                                      \
-    }                                                                                              \
-  } while (false)
 
 /// VOPC compare counterpart. `T` is the 32-bit lane read type; the comparison
 /// functor (which may convert/narrow inside) is variadic so its commas pass

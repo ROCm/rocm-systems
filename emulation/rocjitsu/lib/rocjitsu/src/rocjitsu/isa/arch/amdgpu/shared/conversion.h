@@ -168,10 +168,6 @@ struct FloatRounding {
   Rounding direction = Rounding::NEAREST_EVEN;
   bool flush_tiny = false;
   bool saturate = false;
-  /// Scale the exact value by 2^prescale before rounding. Only
-  /// sdwa_conversion_to_f16 sets it, to keep the simulator's SDWA F16 order;
-  /// gfx1030 rounds first instead (see sdwa_conversion_to_f16).
-  int32_t prescale = 0;
 };
 
 namespace detail {
@@ -298,8 +294,7 @@ constexpr V round_finite(V bits, const FloatRounding &policy) {
   const V fraction = magnitude & V(From::kMinNormal - 1);
   const auto subnormal = field == V(L{0});
   const V significand = fraction | choose(subnormal, V(L{0}), V(From::kMinNormal));
-  const V exponent =
-      choose(subnormal, V(L{1}), field) + V(L(kRebias + static_cast<L>(policy.prescale)));
+  const V exponent = choose(subnormal, V(L{1}), field) + V(L(kRebias));
   return detail::round_magnitude<To, From::kMantissaBits>(significand, exponent, negative, policy);
 }
 
@@ -365,7 +360,7 @@ constexpr V from_integer(V magnitude, const Mask &negative, const FloatRounding 
   // Integers are at least one, so results are never tiny.
   const V top = fp_format::bit_width(magnitude | V(L{1})) - V(L{1});
   const V significand = magnitude << (V(L{kTopBit}) - top);
-  const V exponent = top + V(L((To::kExponentMax >> 1) + static_cast<L>(policy.prescale)));
+  const V exponent = top + V(L((To::kExponentMax >> 1)));
   V result = detail::round_normal<To, kTopBit>(significand, exponent, negative, policy.direction);
   result = detail::resolve_overflow<To>(result, negative, policy);
   result = choose(magnitude == V(L{0}), V(L{0}), result);
@@ -448,7 +443,6 @@ private:
       if constexpr (From::kMantissaBits > To::kMantissaBits) {
         return narrow<Source, Destination>(bits, rounding);
       } else {
-        assert(rounding.prescale == 0 && "widening is exact and applies no prescale");
         const V widened = widen<Source, Destination>(bits);
         if (quiet_nan) {
           return widened;
@@ -459,18 +453,6 @@ private:
         return choose(signaling, widened & ~V(Destination::kQuiet), widened);
       }
     }
-  }
-};
-
-/// @brief Two conversions to F16 packed into the low and high halves of a 32-bit lane.
-/// @details `low` converts the first source and `high` the second; each carries the
-/// modifier bits of its own source in bit 0.
-template <typename From> struct PackedF16 {
-  ToFloat<From, fp_format::F16> low;
-  ToFloat<From, fp_format::F16> high;
-
-  template <typename V> constexpr V operator()(V first, V second) const {
-    return low(first) | (high(second) << 16);
   }
 };
 

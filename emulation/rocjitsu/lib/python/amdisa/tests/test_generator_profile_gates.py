@@ -3131,23 +3131,16 @@ def test_cdna4_fp8_cvt_keeps_ocp_helper_variant():
     assert 'fnuz' not in unary
 
 
-def test_f32_to_f16_vector_conversion_resolves_mode_once():
-    # conversion_to_float reads FP16_OVFL and the rounding fields from MODE.
-    unary = _lower_unary('V_CVT_F16_F32')
-
-    declaration = 'const auto conversion = amdgpu::sdwa_conversion_to_f16<amdgpu::fp_format::F32>('
-    assert declaration in unary
-    assert unary.index(declaration) < unary.index('for (uint32_t lane')
-    assert 'util::f32_to_f16' not in unary
+@pytest.mark.parametrize('arch', ['cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5'])
+def test_older_half_narrowing_uses_arithmetic(arch, amdgpu_generated_root: Path):
+    text = (amdgpu_generated_root / arch / 'vop1_exec.cpp').read_text()
+    body = text.split('void VCvtF16F32Vop1::execute_impl', 1)[1].split('\n}', 1)[0]
+    assert 'rj_arith_v_cvt_f16_f32_w64' in body
+    assert 'RJ_ARITH_FP16_OVFL' in body
+    assert 'execute_v_cvt_f16_f32' not in body
 
 
 def test_fp16_ovfl_sensitive_f16_simd_probes_stay_vectorized():
-    # The scalar body's stage object reads FP16_OVFL when it is resolved.
-    cvt_probe = simd_probe_line('v_cvt_f16_f32_vop1')
-    assert (
-        cvt_probe == '  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, conversion);'
-    )
-
     add_probe = simd_probe_line('v_add_f16_vop3', true16_vop3=True)
     assert add_probe is not None
     # The MODE-aware helper now owns both FP16_OVFL narrowing variants.

@@ -3612,12 +3612,10 @@ std::vector<ArithmeticCase> conversion_mode_boundary_cases() {
   const auto rdna4 = [](uint16_t op, uint8_t omod = 0) {
     return rdna4::build_vop3(op, {.vdst = 6, .src0 = 256, .omod = omod});
   };
-  const auto f16 = expect_simd_path(amdgpu::SimdFastPath::VOP_WORDS);
+  // These conversions use rj-arith dispatch, outside the legacy tracker.
+  const SimdPathExpectation f16{};
   const SimdPathExpectation from_f64{}; // rj-arith dispatch is outside the legacy tracker.
   const SimdPathExpectation to_f64{};
-  // RDNA2 F16 results take the VOP1 path. OMOD and CLAMP travel in the stage
-  // object, so modified encodings take the same paths as unmodified ones.
-  const auto rdna2_f16 = expect_simd_path(amdgpu::SimdFastPath::VOP1_UNARY);
   constexpr auto kRdna4 = rocjitsu::IsaFamily::Rdna4;
   constexpr uint32_t kDx10 = 1u << 8;
 
@@ -3644,18 +3642,18 @@ std::vector<ArithmeticCase> conversion_mode_boundary_cases() {
   add("Gfx1201ClampSignalingNanToZero", kRdna4, clamp_f32_f64(kRdna4),
       f64_source(0x7ff0000000000001ull), single(0u), 0xf0u, from_f64);
   add("Gfx1030ClampKeepsNanWithoutDx10", kRdna2, clamp_f16_f32(kRdna2), f32_source(0x7fc00000u),
-      half(0x7e00u), 0xf0u, rdna2_f16);
+      half(0x7e00u), 0xf0u, f16);
   add("Gfx1030ClampNanToZeroWithDx10", kRdna2, clamp_f16_f32(kRdna2), f32_source(0x7fc00000u),
-      half(0u), 0xf0u | kDx10, rdna2_f16);
+      half(0u), 0xf0u | kDx10, f16);
   add("Gfx1030ClampKeepsNanPayloadWithoutDx10", kRdna2, clamp_f32_f64(kRdna2),
       f64_source(0x7ff4000012345678ull), single(0x7fe00000u), 0xf0u, from_f64);
   add("Gfx1030ClampNanPayloadToZeroWithDx10", kRdna2, clamp_f32_f64(kRdna2),
       f64_source(0x7ff4000012345678ull), single(0u), 0xf0u | kDx10, from_f64);
   // CLAMP still maps -Inf to +0 and +Inf to 1.0 on both, with or without DX10_CLAMP.
   add("Gfx1030ClampNegativeInfinityToZero", kRdna2, clamp_f16_f32(kRdna2), f32_source(0xff800000u),
-      half(0u), 0xf0u, rdna2_f16);
+      half(0u), 0xf0u, f16);
   add("Gfx1030ClampInfinityToOne", kRdna2, clamp_f16_f32(kRdna2), f32_source(0x7f800000u),
-      half(0x3c00u), 0xf0u, rdna2_f16);
+      half(0x3c00u), 0xf0u, f16);
 
   const auto f16_f32 = rdna4(rdna4::kVCvtF16F32Vop3);
   const auto f16_f32_mul2 = rdna4(rdna4::kVCvtF16F32Vop3, 1);
@@ -3717,16 +3715,14 @@ std::vector<ArithmeticCase> conversion_mode_boundary_cases() {
     rocjitsu::IsaFamily arch;
     // Both targets keep the initialized F16 destination's high half.
     uint32_t high;
-    // RDNA3 F16 results take the true16 word path; RDNA2 ones the VOP1 path.
-    amdgpu::SimdFastPath f16_path;
     Words f16_mul2;
     Words f32_mul2;
   };
   const std::array legacy{
-      Legacy{"Gfx1100", rocjitsu::IsaFamily::Rdna3, kHigh, amdgpu::SimdFastPath::VOP_WORDS,
+      Legacy{"Gfx1100", rocjitsu::IsaFamily::Rdna3, kHigh,
              rdna3::build_vop3(rdna3::kVCvtF16F32Vop3, {.vdst = 6, .src0 = 256, .omod = 1}),
              rdna3::build_vop3(rdna3::kVCvtF32F64Vop3, {.vdst = 6, .src0 = 256, .omod = 1})},
-      Legacy{"Gfx1030", rocjitsu::IsaFamily::Rdna2, kHigh, amdgpu::SimdFastPath::VOP1_UNARY,
+      Legacy{"Gfx1030", rocjitsu::IsaFamily::Rdna2, kHigh,
              rdna2::build_vop3(rdna2::kVCvtF16F32Vop3, {.vdst = 6, .src0 = 256, .omod = 1}),
              rdna2::build_vop3(rdna2::kVCvtF32F64Vop3, {.vdst = 6, .src0 = 256, .omod = 1})},
   };
@@ -3735,7 +3731,7 @@ std::vector<ArithmeticCase> conversion_mode_boundary_cases() {
     const auto both = [&](const char *suffix, uint32_t mode, uint32_t h, uint32_t f) {
       add(name + "F16F32NegativeTinyMul2" + suffix, target.arch, target.f16_mul2,
           Pairs{{0, 0xb87fe800u}, {6, target.high | (target.high >> 16)}},
-          Pairs{{6, target.high | h}}, mode, expect_simd_path(target.f16_path));
+          Pairs{{6, target.high | h}}, mode, f16);
       add(name + "F32F64NegativeTinyMul2" + suffix, target.arch, target.f32_mul2,
           f64_source(0xb80fffffe8000000u), single(f), mode, from_f64);
     };

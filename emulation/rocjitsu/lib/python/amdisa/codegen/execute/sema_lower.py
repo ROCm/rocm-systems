@@ -1510,8 +1510,6 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     # generic generated scalar F16 arithmetic is gated out in CodeGenerator.
     'cvt_f16_f32': 'util::f32_to_f16_mode(std::bit_cast<float>(static_cast<uint32_t>({0})), wf.fp16_ovfl())',
     'cvt_f32_f16': 'std::bit_cast<uint32_t>(util::f16_to_f32(static_cast<uint16_t>({0})))',
-    # VALU applies MODE policy; keep the existing raw SALU conversion separate.
-    'cvt_f32_f16_valu': 'amdgpu::fp_mode::cvt_f32_f16({0}, wf.cu().arch(), wf.ieee_mode())',
     'cvt_f32_bf16': 'std::bit_cast<uint32_t>(util::bf16_to_f32(static_cast<uint16_t>({0})))',
     'cvt_f32_fp8': 'std::bit_cast<uint32_t>(util::fp8_e4m3_to_f32(static_cast<uint8_t>({0})))',
     'cvt_f32_bf8': 'std::bit_cast<uint32_t>(util::bf8_e5m2_to_f32(static_cast<uint8_t>({0})))',
@@ -1543,15 +1541,8 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     ' if (s >= 32768.0f) return static_cast<uint32_t>(static_cast<uint16_t>(INT16_MAX));'
     ' if (s < -32768.0f) return static_cast<uint32_t>(static_cast<uint16_t>(INT16_MIN));'
     ' return static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(s))); }}()',
-    'cvt_off_f32_i4': '[&]() -> float {{ int32_t nibble = static_cast<int32_t>({0} & 0xfu);'
-    ' if (nibble & 0x8) nibble -= 16;'
-    ' return static_cast<float>(nibble) * 0.0625f; }}()',
     'cvt_i32_i16': 'static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>({0} & 0xFFFF)))',
     'cvt_u32_u16': '({0} & 0xFFFFu)',
-    'cvt_f32_ubyte0': 'std::bit_cast<uint32_t>(static_cast<float>({0} & 0xFFu))',
-    'cvt_f32_ubyte1': 'std::bit_cast<uint32_t>(static_cast<float>(({0} >> 8) & 0xFFu))',
-    'cvt_f32_ubyte2': 'std::bit_cast<uint32_t>(static_cast<float>(({0} >> 16) & 0xFFu))',
-    'cvt_f32_ubyte3': 'std::bit_cast<uint32_t>(static_cast<float>(({0} >> 24) & 0xFFu))',
     'cvt': '{0}',
 }
 
@@ -1974,6 +1965,10 @@ def _frexp_flushed_source(node: SemaNode, ctx: LoweringContext) -> str | None:
 def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
     """Lower a .call node through inline ops, helper registry, or VOP3 modifiers."""
     callee = node.call_name or ''
+    if callee == 'cvt_f32_f16_valu':
+        raise ValueError('Half conversions require rj-arith lowering')
+    if callee == 'cvt_off_f32_i4' or callee.startswith('cvt_f32_ubyte'):
+        raise ValueError('Byte conversions require rj-arith lowering')
 
     if callee == 'apply_src_mod':
         return _lower_apply_src_mod(node, ctx)

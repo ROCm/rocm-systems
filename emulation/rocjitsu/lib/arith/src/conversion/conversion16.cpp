@@ -18,7 +18,7 @@ namespace {
 
 // Convert FP16, FP32, or 16-bit integers for the selected lanes. Reject invalid controls
 // before changing outputs.
-template <rocjitsu::arith::Conversion16 Op, bool AcceptExact = false>
+template <rocjitsu::arith::Conversion16 Op, bool AcceptExact = false, bool AllowSdwaWiden = false>
 int convert(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
             const uint32_t *const *a, bool quiet_nan = true, bool preserve_half = true) {
   if ((mode >> 32) && (mode & RJ_ARITH_CVT_SDWA)) {
@@ -27,16 +27,17 @@ int convert(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *
   if (mode >> 32) {
     return rocjitsu::arith::execute_dpp(
         flags, exec_mask, mode, a, [&](uint32_t exec_mask, const uint32_t *const *source) {
-          return convert<Op, AcceptExact>(flags, exec_mask, uint32_t(mode), d, source, quiet_nan,
-                                          preserve_half);
+          return convert<Op, AcceptExact, AllowSdwaWiden>(flags, exec_mask, uint32_t(mode), d,
+                                                          source, quiet_nan, preserve_half);
         });
   }
   constexpr bool from_integer = Op == rocjitsu::arith::Conversion16::SignedToHalf ||
                                 Op == rocjitsu::arith::Conversion16::UnsignedToHalf;
   constexpr bool to_half = from_integer || Op == rocjitsu::arith::Conversion16::FloatToHalf;
   const uint32_t known =
-      (!preserve_half && to_half ? RJ_ARITH_CVT_SDWA : 0) | RJ_ARITH_ALU_OMOD_MASK |
-      RJ_ARITH_ALU_CLAMP | (from_integer ? 0 : RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_NEG_A) |
+      ((!preserve_half && to_half) || AllowSdwaWiden ? RJ_ARITH_CVT_SDWA : 0) |
+      RJ_ARITH_ALU_OMOD_MASK | RJ_ARITH_ALU_CLAMP |
+      (from_integer ? 0 : RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_NEG_A) |
       (Op == rocjitsu::arith::Conversion16::FloatToHalf ? 0 : RJ_ARITH_ALU_HIGH_A) |
       (Op == rocjitsu::arith::Conversion16::HalfToFloat ? 0 : RJ_ARITH_ALU_HIGH_D);
   if (int error = rocjitsu::arith::validate(
@@ -44,6 +45,10 @@ int convert(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *
           RJ_ARITH_FP_ROUND_MASK | RJ_ARITH_FP_IEEE_MODE | RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
               RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS | RJ_ARITH_FP_DX10_CLAMP_OFF)) {
     return error;
+  }
+  if ((mode & RJ_ARITH_CVT_SDWA) &&
+      (flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
   }
   // Each conversion has one model. Entry points accept exact requests once their results have
   // been checked against hardware captures; none reports FP status. SDWA F16 prescaling stays
@@ -57,6 +62,10 @@ int convert(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *
   }
   if (!exec_mask) {
     return RJ_ARITH_SUCCESS;
+  }
+  if constexpr (AllowSdwaWiden) {
+    // Legacy SDWA scaling quiets a signaling NaN even when widening preserves it.
+    quiet_nan = quiet_nan || ((mode & RJ_ARITH_CVT_SDWA) && (mode & RJ_ARITH_ALU_OMOD_MASK));
   }
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
   if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
@@ -93,12 +102,12 @@ int convert(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *
 
 // Convert FP16, FP32, or 16-bit integers for Wave64. Reject invalid controls before changing
 // outputs.
-template <rocjitsu::arith::Conversion16 Op, bool AcceptExact = false>
+template <rocjitsu::arith::Conversion16 Op, bool AcceptExact = false, bool AllowSdwaWiden = false>
 int convert_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *d,
                    const uint32_t *const *a, bool quiet_nan = true, bool preserve_half = true) {
   // Validate before either Wave64 half can modify outputs, even when EXEC is empty.
-  if (int error =
-          convert<Op, AcceptExact>(flags, 0, mode, nullptr, nullptr, quiet_nan, preserve_half)) {
+  if (int error = convert<Op, AcceptExact, AllowSdwaWiden>(flags, 0, mode, nullptr, nullptr,
+                                                           quiet_nan, preserve_half)) {
     return error;
   }
   if (!exec_mask) {
@@ -108,9 +117,9 @@ int convert_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *
     uint64_t half_instruction_flags = rocjitsu::arith::dpp_half_wave_instruction_flags(mode, half);
     uint32_t *dest = d[0] + half * 32;
     const uint32_t *source = a[0] + half * 32;
-    if (int error = convert<Op, AcceptExact>(flags, uint32_t(exec_mask >> (half * 32)),
-                                             half_instruction_flags, &dest, &source, quiet_nan,
-                                             preserve_half)) {
+    if (int error = convert<Op, AcceptExact, AllowSdwaWiden>(
+            flags, uint32_t(exec_mask >> (half * 32)), half_instruction_flags, &dest, &source,
+            quiet_nan, preserve_half)) {
       return error;
     }
   }
@@ -546,7 +555,9 @@ int rj_arith_v_cvt_f32_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t inst
                                uint32_t *const *d, const uint32_t *const *a,
                                [[maybe_unused]] uint32_t *trapsts) {
   flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+      flags, (instruction_flags & RJ_ARITH_CVT_SDWA)
+                 ? RJ_ARITH_SEMANTICS_LOOSE
+                 : RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -555,7 +566,7 @@ int rj_arith_v_cvt_f32_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t inst
   }
 
   instruction_flags = rocjitsu::arith::rdna3_output_modifiers(flags, instruction_flags);
-  return convert<rocjitsu::arith::Conversion16::HalfToFloat, true>(
+  return convert<rocjitsu::arith::Conversion16::HalfToFloat, true, true>(
       flags, exec_mask, instruction_flags, d, a, (flags & RJ_ARITH_FP_IEEE_MODE) != 0);
 }
 
@@ -566,7 +577,9 @@ int rj_arith_v_cvt_f32_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t inst
                                uint32_t *const *d, const uint32_t *const *a,
                                [[maybe_unused]] uint32_t *trapsts) {
   flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+      flags, (instruction_flags & RJ_ARITH_CVT_SDWA)
+                 ? RJ_ARITH_SEMANTICS_LOOSE
+                 : RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -575,7 +588,7 @@ int rj_arith_v_cvt_f32_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t inst
   }
 
   instruction_flags = rocjitsu::arith::rdna3_output_modifiers(flags, instruction_flags);
-  return convert_wave64<rocjitsu::arith::Conversion16::HalfToFloat, true>(
+  return convert_wave64<rocjitsu::arith::Conversion16::HalfToFloat, true, true>(
       flags, exec_mask, instruction_flags, d, a, (flags & RJ_ARITH_FP_IEEE_MODE) != 0);
 }
 

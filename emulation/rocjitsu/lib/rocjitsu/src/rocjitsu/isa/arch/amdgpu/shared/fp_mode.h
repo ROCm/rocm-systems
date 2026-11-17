@@ -293,18 +293,6 @@ inline bool quiets_nan(rocjitsu::IsaFamily arch, bool ieee_mode) {
   return arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5 || ieee_mode;
 }
 
-/// @brief Apply V_CVT_F32_F16 policy to an already decoded and modified half.
-/// @details Raw half decoding preserves signaling NaNs. The caller flushes the
-/// half under MODE before widening it; this applies target-specific NaN quieting.
-inline uint32_t cvt_f32_f16(float source, rocjitsu::IsaFamily arch, bool ieee_mode) {
-  uint32_t bits = std::bit_cast<uint32_t>(source);
-  const uint32_t magnitude = bits & 0x7fffffffu;
-  if (quiets_nan(arch, ieee_mode) && magnitude > 0x7f800000u) {
-    bits |= 0x00400000u;
-  }
-  return bits;
-}
-
 /// @brief Pack two rounded F16 results, applying the destination denormal mode to each half.
 /// @details gfx1250 flushes the exact subnormal 2^-20. At the normal boundary,
 /// the packed conversion models tininess using the rounded FP16 encoding.

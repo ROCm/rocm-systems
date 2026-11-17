@@ -53,6 +53,8 @@ def declaration(dtype: str, fields: tuple[str, ...] | None = None) -> str:
     result takes the SDWA OMOD, which scales before rounding and is zero for
     encodings without SDWA.
     """
+    if dtype in ('f16_i16', 'f16_u16', 'f16_f32'):
+        raise ValueError('Half conversions require rj-arith lowering')
     if dtype in F32_TO_INTEGER_CONVERSIONS:
         raise ValueError(
             'F32 floor/nearest integer conversions require rj-arith lowering'
@@ -107,6 +109,8 @@ def simd_probe(
     if match is None or match['dtype'] not in TO_FLOAT_CONVERSIONS:
         return None
     dtype = match['dtype']
+    if dtype in ('f16_i16', 'f16_u16', 'f16_f32'):
+        return None
     vop3 = match['encoding'] == 'vop3'
     half_dst = destination(dtype) == 'F16'
     half_source = int(dtype.endswith('16'))
@@ -131,13 +135,6 @@ def _resolve_with_source_modifiers(
         return f'{resolver}(wf)'
     abs_field = f'{inst}.abs' if has_abs else '0u'
     return f'{resolver}(wf, {abs_field}, {inst}.neg)'
-
-
-def pk_rtz_f16_expr(is_vop3: bool, has_abs: bool, inst: str) -> str:
-    """Resolve V_CVT_PK_RTZ_F16_F32's stages."""
-    return _resolve_with_source_modifiers(
-        'amdgpu::conversion_pk_rtz_f16', is_vop3, has_abs, inst
-    )
 
 
 # OCP 8-bit float formats in shared/conversion.h, for targets whose

@@ -917,6 +917,10 @@ class TestDeriveVectorUnary:
         if has_abs:
             fields.add('abs')
         block = enrich_block(derive_sema_block(sem), enc_field_names=frozenset(fields))
+        if suffix == 'F32':
+            with pytest.raises(ValueError, match='require rj-arith lowering'):
+                lower_sema_block(block)
+            return
         cpp = lower_sema_block(block)
         # F32_F16 flushes the raw half before widening it; the modifiers apply
         # to the widened value. The integer forms keep their own source read.
@@ -1033,7 +1037,7 @@ class TestDeriveVectorUnary:
         assert 'UnimplementedInst' not in cpp
 
     @pytest.mark.parametrize('enc', ['ENC_VOP1', 'ENC_VOP3'])
-    def test_cvt_off_f32_i4_lowers_to_signed_nibble_table(self, enc):
+    def test_cvt_off_f32_i4_requires_arith_lowering(self, enc):
         sem = derive_semantics('V_CVT_OFF_F32_I4', enc)
         assert sem is not None
         assert sem.semantic_class == 'vector_unary'
@@ -1041,11 +1045,10 @@ class TestDeriveVectorUnary:
         assert sem.data_type == 'f32'
 
         block = derive_sema_block(sem)
-        cpp = lower_sema_block(block)
-        assert '& 0xfu' in cpp
-        assert 'nibble -= 16' in cpp
-        assert '* 0.0625f' in cpp
-        assert 'cvt_off_f32_i4(' not in cpp
+        with pytest.raises(
+            ValueError, match='Byte conversions require rj-arith lowering'
+        ):
+            lower_sema_block(block)
 
     @pytest.mark.parametrize(
         ('name', 'helper'),
@@ -1379,14 +1382,9 @@ class TestDeriveVectorUnary:
         assert sem.operation == 'cvt'
         assert sem.data_type == 'f16_f32'
 
-        # The stage object reads MODE, including FP16_OVFL, when it is resolved.
         block = derive_sema_block(sem)
-        cpp = lower_sema_block(block)
-        assert (
-            'const auto conversion = '
-            'amdgpu::sdwa_conversion_to_f16<amdgpu::fp_format::F32>(*this, wf);'
-        ) in cpp
-        assert 'util::f32_to_f16' not in cpp
+        with pytest.raises(ValueError, match='require rj-arith lowering'):
+            lower_sema_block(block)
 
     def test_cvt_sr_pk_f16_bf16_f32_splits_seed_and_threads_fp16_ovfl(self):
         for name in ('V_CVT_SR_PK_F16_F32', 'V_CVT_SR_PK_BF16_F32'):

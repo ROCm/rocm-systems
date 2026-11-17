@@ -219,9 +219,11 @@ constexpr uint32_t RJ_ARITH_ALU_HIGH_B = 1U << 10;
 constexpr uint32_t RJ_ARITH_ALU_HIGH_C = 1U << 11;
 constexpr uint32_t RJ_ARITH_ALU_HIGH_D = 1U << 12;
 
-// gfx942/gfx950 conversions to FP16: use inherited SDWA arithmetic, scaling the
-// exact value before rounding. Source selection and destination byte placement
-// remain separate from this arithmetic control.
+// gfx942/gfx950 FP16 destinations accept inherited SDWA prescaling before rounding.
+// Unsuffixed F16-to-F32 accepts it for NaN quieting under active OMOD.
+// Source selection and destination byte placement remain separate.
+// BF16 widening accepts inherited output scaling and clamp.
+// Packed RTZ finalizes already-rounded halves without a second multiplier.
 constexpr uint32_t RJ_ARITH_CVT_SDWA = 1U << 16;
 // Select inherited SDWA output processing where the entry point documents support.
 // Depending on the instruction, this scales a rounded result or finalizes an already-scaled
