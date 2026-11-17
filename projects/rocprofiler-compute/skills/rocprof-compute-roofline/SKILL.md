@@ -15,7 +15,8 @@ carries the same numbers in readable form.
 
 ## Before you start
 
-If `command -v rocprof-compute` finds the tool, skip this section.
+If `command -v rocprof-compute` finds the tool and
+`rocprof-compute analyze --verify-deps` passes, skip this section.
 
 Otherwise, check that ROCm and a GPU are present:
 
@@ -38,10 +39,11 @@ tell the user.
 Then follow "Install the analyze mode dependencies" in the
 [install guide](../../docs/install/core-install.rst), which installs
 rocprof-compute in a virtual environment of its own. Use the nightly index so the
-version matches these skills, and confirm with
-`rocprof-compute analyze --verify-deps`. Call that environment's
-`rocprof-compute` by its full path, so the application keeps running with its own
-Python.
+version matches these skills. Activate that environment with
+`source <venv>/bin/activate` before you run rocprof-compute, and confirm with
+`rocprof-compute analyze --verify-deps`. If the application is a Python script,
+note the full path of its Python before you activate, and run the script with
+that path.
 
 ## 1. Collect
 
