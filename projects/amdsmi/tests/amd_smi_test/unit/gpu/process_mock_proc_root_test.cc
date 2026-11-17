@@ -7,14 +7,15 @@
 // read, so the functional tests skip that comparison there.
 
 #include <gtest/gtest.h>
-#include <unistd.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cerrno>
 #include <cstdint>
 #include <filesystem>
 #include <limits>
 #include <string>
+#include <vector>
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_drm.h"
@@ -287,6 +288,9 @@ TEST(GpuUnit, ProcessListVramIsTheLargerCountAndMemTheSum) {
   amdsmi_proc_info_t list[4] = {};
   ASSERT_EQ(amdsmi_get_gpu_process_list(gpu.handle(), &num_processes, list), AMDSMI_STATUS_SUCCESS);
   ASSERT_EQ(num_processes, 3U);
+  std::vector<uint32_t> pids{list[0].pid, list[1].pid, list[2].pid};
+  std::sort(pids.begin(), pids.end());
+  EXPECT_EQ(pids, (std::vector<uint32_t>{kFdinfoMore, kKfdMore, kKfdLargest}));
   for (const amdsmi_proc_info_t& proc : {list[0], list[1], list[2]}) {
     const uint64_t vram = proc.pid == kKfdLargest ? kLargestVram
                           : proc.pid == kKfdMore  ? kKfdVram
@@ -448,7 +452,6 @@ TEST(GpuUnit, ProcessListFailsWhenReadingAnFdinfoFileFails) {
 }
 
 TEST(GpuUnit, ProcessListLeavesOutAProcessWhoseGpusTheCallerMayNotRead) {
-  if (geteuid() == 0) GTEST_SKIP() << "Root reads files whatever their mode";
   ScopedAmdsmiInit smi_init;
   MockProcessRoots roots;
   // The caller may read neither process's KFD queue. The fdinfo of the first
@@ -467,14 +470,20 @@ TEST(GpuUnit, ProcessListLeavesOutAProcessWhoseGpusTheCallerMayNotRead) {
 
   TestGpu gpu;
   WaitOutProcessListCache();
-  uint32_t num_processes = 4;
-  amdsmi_proc_info_t list[4] = {};
-  const amdsmi_status_t status = amdsmi_get_gpu_process_list(gpu.handle(), &num_processes, list);
+  // Root reads files whatever their mode, so the list is read as another user.
+  auto list_readable_process = [&] {
+    uint32_t num_processes = 4;
+    amdsmi_proc_info_t list[4] = {};
+    EXPECT_EQ(amdsmi_get_gpu_process_list(gpu.handle(), &num_processes, list),
+              AMDSMI_STATUS_SUCCESS);
+    EXPECT_EQ(num_processes, 1U);
+    EXPECT_EQ(list[0].pid, kShown);
+    return AMDSMI_STATUS_SUCCESS;
+  };
+  const amdsmi_status_t status = amd::smi::testing::RunAsUnprivilegedUser(list_readable_process);
   std::filesystem::permissions(roots.proc().root() + "/4260/fdinfo",
                                std::filesystem::perms::owner_all);
-  ASSERT_EQ(status, AMDSMI_STATUS_SUCCESS);
-  ASSERT_EQ(num_processes, 1U);
-  EXPECT_EQ(list[0].pid, kShown);
+  EXPECT_EQ(status, AMDSMI_STATUS_SUCCESS);
 }
 
 // Lists KFD processes as KFD does, except that the first listing after
@@ -522,6 +531,27 @@ TEST(GpuUnit, ProcessListByPidLeavesOutOnlyAGpuWhoseListFails) {
   EXPECT_EQ(by_pid[0].pid, kPid);
   ASSERT_EQ(by_pid[0].num_gpus, 1U);
   EXPECT_EQ(by_pid[0].gpus[0].gpu_index, other.index());
+}
+
+TEST(GpuUnit, ProcessListByPidSucceedsWhenTheOnlyListReadIsEmpty) {
+  ScopedAmdsmiInit smi_init;
+  MockProcessRoots roots;
+  // No process uses a GPU, so the second GPU's list is read and empty.
+  TestGpu failing;
+  TestGpu other("card10", OtherTestBdf(), kOtherKfdGpuId);
+  ScopedKfdNode kfd_node(kOtherKfdGpuId, other.index());
+  WaitOutProcessListCache();
+  // The first GPU's list fails, as when reading KFD's process directory fails.
+  g_listings = 0;
+  ScopedKfdProcessLister lister(FailFirstListing);
+  amdsmi_processor_handle handles[] = {failing.handle(), other.handle()};
+  uint32_t num_pids = 4;
+  amdsmi_proc_info_by_pid_t by_pid[4] = {};
+  const amdsmi_status_t status = amdsmi_get_gpu_process_list_by_pid(handles, 2, by_pid, &num_pids);
+  // A list was read, so the first one's error is not returned.
+  EXPECT_EQ(g_listings.load(), 2);
+  EXPECT_EQ(status, AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(num_pids, 0U);
 }
 
 // Fails every listing: the first with EIO, the others because the caller may

@@ -357,9 +357,7 @@ class EpermLink {
     char path[64];
     snprintf(path, sizeof(path), "/proc/self/map_files/%" PRIxPTR "-%" PRIxPTR, start,
              start + page_size_);
-    const int fd = open(path, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-    if (fd < 0 && errno == EPERM) path_ = path;
-    if (fd >= 0) close(fd);
+    path_ = path;
   }
   ~EpermLink() {
     if (page_ != MAP_FAILED) munmap(page_, page_size_);
@@ -369,8 +367,15 @@ class EpermLink {
   EpermLink(const EpermLink&) = delete;
   EpermLink& operator=(const EpermLink&) = delete;
 
-  // Empty unless open() of the link fails with EPERM for this caller.
+  // Empty if the page could not be mapped.
   const std::string& path() const { return path_; }
+
+  // Whether open() of the link fails with EPERM for this caller.
+  bool DeniesThisCaller() const {
+    const int fd = open(path_.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (fd >= 0) close(fd);
+    return fd < 0 && errno == EPERM;
+  }
 
  private:
   FILE* file_;
@@ -383,9 +388,7 @@ TEST(GpuUnit, PidNamespaceListsLeaveOutAProcessThatHidepidDenies) {
   const auto files = FindGpuFiles();
   if (!files) GTEST_SKIP() << "No character devices to stand for /dev/kfd and render nodes";
   EpermLink denied;
-  if (denied.path().empty()) {
-    GTEST_SKIP() << "Opening a /proc/self/map_files link does not fail with EPERM for this caller";
-  }
+  ASSERT_FALSE(denied.path().empty()) << "Mapping a page of a temporary file failed";
   ScopedAmdsmiInit smi_init;
   MockPidNamespace ns(*files);
   AddProcesses(&ns);
@@ -402,24 +405,39 @@ TEST(GpuUnit, PidNamespaceListsLeaveOutAProcessThatHidepidDenies) {
   ns.LinkEntry(std::to_string(kMapsDenied) + "/maps", denied.path());
   WaitOutProcessListCache();
 
-  // The lists leave out the first two rather than fail. The third is a KFD
-  // process, and with its queues unreadable and no render node open, no GPU
-  // lists it.
-  uint32_t num_items = 0;
-  ASSERT_EQ(amdsmi_get_gpu_compute_process_info(nullptr, &num_items), AMDSMI_STATUS_SUCCESS);
-  EXPECT_EQ(num_items, 6U);
-  uint32_t num_processes = 8;
-  amdsmi_proc_info_t list[8] = {};
-  ASSERT_EQ(amdsmi_get_gpu_process_list(ns.handle(), &num_processes, list), AMDSMI_STATUS_SUCCESS);
-  EXPECT_EQ(num_processes, 3U);
-  // A lookup of each reports that the caller may not read it.
-  for (const uint32_t pid : {kDenied, kFdDenied, kMapsDenied}) {
-    uint32_t gpu_count = 0;
-    EXPECT_EQ(amdsmi_get_gpu_compute_process_gpus(pid, nullptr, &gpu_count), AMDSMI_STATUS_NO_PERM)
-        << "pid " << pid;
+  // A caller with CAP_SYS_ADMIN or CAP_CHECKPOINT_RESTORE, such as root, may
+  // open the link, so the lists are read as an unprivileged user.
+  // NOT_SUPPORTED stands for a caller the link does not deny.
+  auto read_lists = [&] {
+    if (!denied.DeniesThisCaller()) return AMDSMI_STATUS_NOT_SUPPORTED;
+    // The lists leave out the first two rather than fail. The third is a KFD
+    // process, and with its queues unreadable and no render node open, no GPU
+    // lists it.
+    uint32_t num_items = 0;
+    EXPECT_EQ(amdsmi_get_gpu_compute_process_info(nullptr, &num_items), AMDSMI_STATUS_SUCCESS);
+    EXPECT_EQ(num_items, 6U);
+    uint32_t num_processes = 8;
+    amdsmi_proc_info_t list[8] = {};
+    EXPECT_EQ(amdsmi_get_gpu_process_list(ns.handle(), &num_processes, list),
+              AMDSMI_STATUS_SUCCESS);
+    EXPECT_EQ(num_processes, 3U);
+    // A lookup of each reports that the caller may not read it.
+    for (const uint32_t pid : {kDenied, kFdDenied, kMapsDenied}) {
+      uint32_t gpu_count = 0;
+      EXPECT_EQ(amdsmi_get_gpu_compute_process_gpus(pid, nullptr, &gpu_count),
+                AMDSMI_STATUS_NO_PERM)
+          << "pid " << pid;
+    }
+    amdsmi_process_info_t info{};
+    EXPECT_EQ(amdsmi_get_gpu_compute_process_info_by_pid(kDenied, &info), AMDSMI_STATUS_NO_PERM);
+    return AMDSMI_STATUS_SUCCESS;
+  };
+  const amdsmi_status_t status = amd::smi::testing::RunAsUnprivilegedUser(read_lists);
+  if (status == AMDSMI_STATUS_NOT_SUPPORTED) {
+    GTEST_SKIP() << "Opening a /proc/self/map_files link does not fail with EPERM for an "
+                    "unprivileged caller";
   }
-  amdsmi_process_info_t info{};
-  EXPECT_EQ(amdsmi_get_gpu_compute_process_info_by_pid(kDenied, &info), AMDSMI_STATUS_NO_PERM);
+  EXPECT_EQ(status, AMDSMI_STATUS_SUCCESS);
 }
 
 }  // namespace

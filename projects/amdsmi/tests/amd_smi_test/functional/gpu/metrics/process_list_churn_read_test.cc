@@ -44,7 +44,7 @@ using amdsmi_test::kIocAllocMemoryOfGpu;
 using Clock = std::chrono::steady_clock;
 
 constexpr size_t kMaxProcs = 512;
-constexpr uint64_t kPageSize = 4096;
+const uint64_t kPageSize = static_cast<uint64_t>(sysconf(_SC_PAGESIZE));
 constexpr int kChurnThreads = 3;
 constexpr auto kChurnTime = std::chrono::seconds(8);
 // Fewest churn processes that must bind for a run to count; AMDSMI CI runs bound 285 to 486.
@@ -106,11 +106,13 @@ pid_t StartHolder(uint32_t kfd_gpu_id, const char* render_node, HelperReport* re
     report->err = errno;
     return -1;
   }
+  const pid_t parent = getpid();
   const pid_t child = fork();
   if (child < 0) report->err = errno;
   if (child == 0) {
     close(fds[0]);
-    prctl(PR_SET_PDEATHSIG, SIGKILL);
+    // Never outlive the test, even if it died before the signal was set.
+    if (prctl(PR_SET_PDEATHSIG, SIGKILL) != 0 || getppid() != parent) _exit(1);
     const HelperReport bound = BindKfd(kfd_gpu_id, render_node, kPageSize);
     if (write(fds[1], &bound, sizeof(bound)) != sizeof(bound) ||
         bound.step != HelperReport::kReady) {

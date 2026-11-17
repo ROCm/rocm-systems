@@ -126,10 +126,14 @@ enum Outcome { kRight, kWrongMemory, kMissing, kEmpty, kError, kNumOutcomes };
 // it), and in the initial PID namespace the VRAM KFD reports for it on that GPU
 // where that is larger, taken as GTT where amdgpu places KFD's VRAM in GTT. In
 // a PID namespace other than the initial one, KFD's statistics are not
-// available.
+// available. DRM fdinfo names only a GPU's PCI device, so it cannot tell the
+// partitions of a GPU apart: when any GPU is split into partitions, the sizes
+// are not compared, and the larger one need only reach `at_least` (any).
 struct HelperMemory {
   uint64_t vram = 0;
   uint64_t gtt = 0;
+  bool any = false;
+  uint64_t at_least = 0;
 };
 
 // Looks the helper up in one GPU's process list, which must report `memory`
@@ -148,9 +152,11 @@ Outcome QueryOnce(amdsmi_processor_handle gpu, pid_t pid, const HelperMemory& me
   for (uint32_t i = 0; i < count && i < procs->size(); ++i) {
     const amdsmi_proc_info_t& proc = (*procs)[i];
     if (proc.pid == static_cast<uint32_t>(pid)) {
-      return proc.memory_usage.vram_mem == memory.vram && proc.memory_usage.gtt_mem == memory.gtt
-                 ? kRight
-                 : kWrongMemory;
+      const bool right = memory.any ? std::max(proc.memory_usage.vram_mem,
+                                               proc.memory_usage.gtt_mem) >= memory.at_least
+                                    : proc.memory_usage.vram_mem == memory.vram &&
+                                          proc.memory_usage.gtt_mem == memory.gtt;
+      return right ? kRight : kWrongMemory;
     }
   }
   return kMissing;
@@ -208,6 +214,7 @@ void TestProcessListConcurrentRead::Run(void) {
   const size_t num_gpus = num_monitor_devs();
   if (num_gpus == 0) GTEST_SKIP() << "No GPUs found";
   std::vector<HelperGpu> gpus;
+  bool partitioned = false;
   for (size_t i = 0; i < num_gpus; ++i) {
     amdsmi_kfd_info_t kfd_info{};
     amdsmi_enumeration_info_t enum_info{};
@@ -222,6 +229,11 @@ void TestProcessListConcurrentRead::Run(void) {
     if (kfd_info.kfd_id == std::numeric_limits<uint64_t>::max() || enum_info.drm_render == 0 ||
         enum_info.drm_render == std::numeric_limits<uint32_t>::max()) {
       GTEST_SKIP() << "GPU " << i << " has no known KFD node or render node";
+    }
+    // A partition past the first; 0xFFFFFFFF where partitions are not supported.
+    if (kfd_info.current_partition_id != 0 &&
+        kfd_info.current_partition_id != std::numeric_limits<uint32_t>::max()) {
+      partitioned = true;
     }
     gpus.push_back({static_cast<uint32_t>(kfd_info.kfd_id),
                     "/dev/dri/renderD" + std::to_string(enum_info.drm_render)});
@@ -272,6 +284,12 @@ void TestProcessListConcurrentRead::Run(void) {
   const bool initial_pid_namespace = InInitialPidNamespace();
   std::vector<HelperMemory> memory(num_gpus);
   for (size_t i = 0; i < num_gpus; ++i) {
+    if (partitioned) {
+      // KFD's count for the GPU reaches its list, as VRAM or GTT.
+      memory[i].any = true;
+      memory[i].at_least = initial_pid_namespace ? HelperVram(i, tag) : 0;
+      continue;
+    }
     const DrmMemory drm = DrmMemoryBytes(helper, gpus[i].render_node);
     const bool vram_in_gtt = KfdVramIsInGtt(gpus[i].kfd_gpu_id, gpus[i].render_node);
     // The DRM client reports the part the helper mapped, as GTT where amdgpu
@@ -337,5 +355,11 @@ void TestProcessListConcurrentRead::Run(void) {
   IF_VERB(STANDARD) {
     std::cout << "\t**Queries in turn: " << in_turn.str()
               << "\n\t**Concurrent queries: " << concurrent.str() << std::endl;
+    if (num_gpus < 2) {
+      std::cout << "\t**One GPU: telling GPUs' numbers apart needs two or more" << std::endl;
+    }
+    if (partitioned) {
+      std::cout << "\t**GPUs split into partitions: only KFD's VRAM count checked" << std::endl;
+    }
   }
 }
