@@ -20,7 +20,6 @@ import yaml
 
 import config
 from rocprof_compute_soc.soc_base import (
-    AnalysisConfigMetric,
     CounterFile,
     LimitedSet,
     OmniSoC_Base,
@@ -233,15 +232,7 @@ def apply_cp_util_priority_patches(soc: OmniSoC_Base, patch_stack: ExitStack) ->
             soc,
             "_iter_arch_analysis_yaml_metrics",
             return_value=iter([
-                AnalysisConfigMetric(
-                    "1700",
-                    1701,
-                    1,
-                    "CP Utilization",
-                    CP_UTIL_METRIC_EXPRESSIONS,
-                    table={},
-                    metric={},
-                )
+                ("1700", 1701, 1, "CP Utilization", CP_UTIL_METRIC_EXPRESSIONS)
             ]),
         )
     )
