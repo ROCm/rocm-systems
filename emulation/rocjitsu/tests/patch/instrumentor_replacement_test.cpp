@@ -26,6 +26,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/legacy_memory_displacement_encoded_fields.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/memory_displacement_encoded_fields.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -1332,6 +1333,104 @@ TEST(InstrumentorReplacement, ProbeAdmissionUsesEffectiveGuestVgprCompletenessAc
     }
     EXPECT_FALSE(result.edit_error);
     EXPECT_TRUE(test::source_image_matches(source, image));
+  }
+}
+
+TEST(InstrumentorReplacement, LegacyOffsetFieldKeepsEightByteGuestAndContinuation) {
+  struct SourceCase {
+    rj_code_target_id_t target;
+    IsaFamily arch;
+    uint32_t machine;
+    bool wave32;
+    std::array<uint32_t, 2> words;
+    uint32_t replacement_word0;
+    std::string_view mnemonic;
+  };
+  constexpr std::array<SourceCase, 4> cases = {{
+      {.target = ROCJITSU_CODE_TARGET_GFX950,
+       .arch = IsaFamily::Cdna4,
+       .machine = EF_AMDGPU_MACH_AMDGCN_GFX950,
+       .wave32 = false,
+       .words = {0xdc519ffcu, 0x057f0004u},
+       .replacement_word0 = 0xdc518008u,
+       .mnemonic = "global_load_dword"},
+      {.target = ROCJITSU_CODE_TARGET_GFX942,
+       .arch = IsaFamily::Cdna3,
+       .machine = EF_AMDGPU_MACH_AMDGCN_GFX942,
+       .wave32 = false,
+       .words = {0xdc519ffcu, 0x057f0004u},
+       .replacement_word0 = 0xdc518008u,
+       .mnemonic = "global_load_dword"},
+      {.target = ROCJITSU_CODE_TARGET_GFX1100,
+       .arch = IsaFamily::Rdna3,
+       .machine = EF_AMDGPU_MACH_AMDGCN_GFX1100,
+       .wave32 = false,
+       .words = {0xdc52fffcu, 0x057c0004u},
+       .replacement_word0 = 0xdc52e008u,
+       .mnemonic = "global_load_b32"},
+      {.target = ROCJITSU_CODE_TARGET_GFX1100,
+       .arch = IsaFamily::Rdna3,
+       .machine = EF_AMDGPU_MACH_AMDGCN_GFX1100,
+       .wave32 = true,
+       .words = {0xdc52fffcu, 0x057c0004u},
+       .replacement_word0 = 0xdc52e008u,
+       .mnemonic = "global_load_b32"},
+  }};
+  for (const SourceCase &fixture : cases) {
+    SCOPED_TRACE(static_cast<int>(fixture.target));
+    SCOPED_TRACE(fixture.wave32);
+    const std::optional<std::array<uint32_t, 2>> replacement =
+        amdgpu::replace_legacy_memory_byte_offset(fixture.target, fixture.words, 8);
+    ASSERT_TRUE(replacement);
+    const std::array<uint32_t, 2> expected = {fixture.replacement_word0, fixture.words[1]};
+    ASSERT_EQ(*replacement, expected);
+    const util::FailureOr<uint32_t> end = build_s_endpgm(fixture.arch);
+    ASSERT_TRUE(end.succeeded());
+    const std::vector<uint8_t> image = test::make_amdgpu_kernel_elf(
+        {fixture.words[0], fixture.words[1], end.value()}, 0, 3, fixture.machine, 1, 0, false,
+        false, false, false, fixture.wave32);
+    const std::vector<uint8_t> pristine = image;
+    const AmdGpuCodeObject source(image.data(), image.size());
+    ASSERT_TRUE(source.is_valid());
+    ASSERT_EQ(source.target_id(), fixture.target);
+    const InstrumentationPoint point = replacement_point(0, {fixture.words[0], fixture.words[1]},
+                                                         {(*replacement)[0], (*replacement)[1]});
+    Instrumentor instrumentor(source, fixture.arch);
+    instrumentor.add_point(point);
+    const InstrumentedCodeObject emitted = instrumentor.patch();
+    ASSERT_NO_FATAL_FAILURE(
+        expect_pure_replacements(source, emitted,
+                                 {{.offset = 0,
+                                   .expected = point.replacement->expected_bytes,
+                                   .replacement = instruction_bytes({expected[0], expected[1]})}},
+                                 fixture.arch));
+    ASSERT_EQ(emitted.sites.size(), 1u);
+    const InstrumentedSite &site = emitted.sites.front();
+    EXPECT_EQ(site.original_size, 8u);
+    EXPECT_EQ(site.guest_size, 8u);
+    const AmdGpuCodeObject candidate(emitted.elf_bytes.data(), emitted.elf_bytes.size());
+    ASSERT_TRUE(candidate.is_valid());
+    const Section &text = *candidate.text_sections().front();
+    ASSERT_LE(site.guest_offset + 12u, text.size());
+    std::array<uint32_t, 2> guest = {};
+    std::memcpy(guest.data(), text.data() + site.guest_offset, sizeof(guest));
+    EXPECT_EQ(guest, expected);
+    EXPECT_EQ(guest[0] & ~0x1fffu, fixture.words[0] & ~0x1fffu);
+    EXPECT_EQ(guest[1], fixture.words[1]);
+    const std::optional<uint32_t> continuation =
+        test::expected_replacement_branch(site.guest_offset + 8, 8, fixture.arch);
+    ASSERT_TRUE(continuation);
+    uint32_t actual_return = 0;
+    std::memcpy(&actual_return, text.data() + site.guest_offset + 8, sizeof(actual_return));
+    EXPECT_EQ(actual_return, *continuation);
+    std::unique_ptr<Decoder> decoder =
+        Decoder::create(default_isa_target_registry(), fixture.target);
+    ASSERT_TRUE(decoder);
+    const DecodeResult decoded = decoder->decode_window(guest, site.guest_offset);
+    ASSERT_TRUE(decoded.succeeded());
+    EXPECT_EQ(decoded.value()->mnemonic(), fixture.mnemonic);
+    EXPECT_EQ(decoded.value()->size(), 8u);
+    EXPECT_EQ(image, pristine);
   }
 }
 
