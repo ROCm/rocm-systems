@@ -308,3 +308,12 @@ retains its existing qualification. The VM stages inputs and places output bytes
 Unsuffixed packed RTZ conversion also accepts `CVT_SDWA`. It finalizes already-
 rounded halves and applies inherited clamp without multiplying again; scalar,
 AVX2 and AVX-512 share the finalizer. The gfx12 API keeps rejecting this selector.
+
+### gfx10 native floating comparisons
+
+FP32/FP64 relational CMP/CMPX, including F/TRU, use the library on gfx1010
+and gfx1030 for both waves. Shared gfx908/gfx10 status composition preserves
+Compatibility's CLAMP-only INVALID policy. F/T predicates retain strict
+FP-status support for this simple classification; other predicates still reject
+that mode. Loose skips reporting. Scalar, AVX2 and AVX-512 paths remain wide.
+FP16 migration is separate; its existing VM-side signaling path remains live.
