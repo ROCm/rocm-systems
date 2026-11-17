@@ -318,7 +318,7 @@ ncclResult_t ncclPrepareTasksAndCollPreconnectFunc(struct ncclAsyncJob* job_) {
   memset(algoNeedConnect, 0, sizeof(bool) * NCCL_NUM_ALGORITHMS);
   CUDACHECK(cudaSetDevice(comm->cudaDev));
   if (!job_->isThreadMain && ncclOsCpuCount(comm->cpuAffinity)) ncclOsSetAffinity(comm->cpuAffinity);
-  NCCLCHECK(ncclPrepareTasks(comm, algoNeedConnect, &needConnect, job->simInfo));
+  NCCLCHECK(ncclPrepareTasks(comm, algoNeedConnect, &needConnect, /*needGenkDevComm=*/nullptr, job->simInfo));
   // Allow on-demand PAT connection without cuMem support (ROCm default), so PAT QPs can be created lazily.
   if ((comm->cuMemSupport || algoNeedConnect[NCCL_ALGO_PAT]) && needConnect) {
     // Preconnect is not meant to be captured;
@@ -434,7 +434,7 @@ ncclResult_t ncclCommGroupRegisterSymmetric(struct ncclAsyncJob* job_) {
   while (!ncclIntruQueueEmpty(&comm->devrState.commCreateTaskQueue)) {
     struct ncclDevrCommCreateTask* task = ncclIntruQueueDequeue(&comm->devrState.commCreateTaskQueue);
     ncclResult_t taskRet =
-      ncclDevrCommCreateInternal(comm, task->reqs, task->outDevComm, /*isInternal=*/false, task->deviceCodeVersion);
+      ncclDevrCommCreateInternal(comm, task->reqs, task->outDevComm, task->isInternal, task->deviceCodeVersion);
     freeDevCommRequirements(task->reqs); // free additional task memory for reqs
     free(task);
     NCCLCHECKGOTO(taskRet, ret, fail);
@@ -879,12 +879,12 @@ static ncclResult_t ncclPrepareTasksAndCollPreconnect(
     job->simInfo = simInfo;
     ncclIntruQueueEnqueue(asyncCollJobs, &job->base);
   } else {
-    bool needConnect = false;
+    bool needConnect = false, needGenkDevComm = false;
     bool algoNeedConnect[NCCL_NUM_ALGORITHMS];
     memset(algoNeedConnect, 0, sizeof(bool) * NCCL_NUM_ALGORITHMS);
 
     CUDACHECK(cudaSetDevice(comm->cudaDev));
-    NCCLCHECK(ncclPrepareTasks(comm, algoNeedConnect, &needConnect, simInfo));
+    NCCLCHECK(ncclPrepareTasks(comm, algoNeedConnect, &needConnect, &needGenkDevComm, simInfo));
 
     // Allow on-demand PAT connection without cuMem support (ROCm default), so PAT QPs can be created lazily.
     if ((comm->cuMemSupport || algoNeedConnect[NCCL_ALGO_PAT]) && needConnect) {
@@ -902,6 +902,19 @@ static ncclResult_t ncclPrepareTasksAndCollPreconnect(
         NCCLCHECK(ret);
       }
       memcpy(job->algoNeedConnect, algoNeedConnect, sizeof(bool) * NCCL_NUM_ALGORITHMS);
+      ncclIntruQueueEnqueue(asyncCollJobs, &job->base);
+    }
+
+    if (needGenkDevComm) {
+      struct ncclGroupSymmetricJob* job;
+      NEW_NOTHROW(job, ncclGroupSymmetricJob);
+      job->base.func = ncclCommGroupRegisterSymmetric;
+      job->base.undo = nullptr;
+      job->base.destructor = ncclGroupSymmetricJobFree;
+      job->base.state = ncclGroupJobRunning;
+      job->base.abortFlag = comm->abortFlag;
+      job->base.abortFlagDev = comm->abortFlagDev;
+      job->comm = comm;
       ncclIntruQueueEnqueue(asyncCollJobs, &job->base);
     }
   }

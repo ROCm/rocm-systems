@@ -157,7 +157,6 @@ Device::Device(hsa_agent_t bkendDevice)
   gpu_fine_grained_segment_.handle = 0;
   gpu_ext_fine_grained_segment_.handle = 0;
   prefetch_signal_.handle = 0;
-  isXgmi_ = false;
   cache_state_ = Device::CacheState::kCacheStateInvalid;
 }
 
@@ -203,8 +202,7 @@ void Device::setupCpuAgent() {
   }
   std::vector<amd::Device::LinkAttrType> link_attrs;
   link_attrs.push_back(std::make_pair(LinkAttribute::kLinkLinkType, 0));
-  if (findLinkInfo(cpu_agents_[0].fine_grain_pool, &link_attrs)) {
-    isXgmi_ = (link_attrs[0].second == HSA_AMD_LINK_INFO_TYPE_XGMI);
+  if (findLinkInfo(cpu_agents_[index].fine_grain_pool, &link_attrs)) {
     // findLinkInfo stores -1 when there are zero hops. kLinkHopCount is a
     // NUMA-distance estimate and is 0 when that distance is below one hop.
     const bool cpu_link = link_attrs[0].second >= 0;
@@ -220,7 +218,7 @@ void Device::setupCpuAgent() {
           "Numa selects cpu agent[%zu]=0x%zx(fine=0x%zx,"
           "coarse=0x%zx) for gpu agent=0x%zx CPU<->GPU XGMI=%d",
           index, cpu_agent_info_->agent.handle, cpu_agent_info_->fine_grain_pool.handle,
-          cpu_agent_info_->coarse_grain_pool.handle, bkendDevice_.handle, isXgmi_);
+          cpu_agent_info_->coarse_grain_pool.handle, bkendDevice_.handle, !pcie_stores_need_flush_);
 }
 
 void Device::checkAtomicSupport() {
@@ -674,6 +672,11 @@ bool Device::create() {
   // Query before Settings::create() since the threshold selection depends on it,
   // and before setupCpuAgent() so large BAR can exclude APUs.
   isAPU_ = agentIsAPU(bkendDevice_);
+  // Left true by a runtime without the query, since flushing is always correct. ROCr reads it
+  // for the link from this GPU to its nearest CPU node. Settings choose the kernarg mode from it.
+  Hsa::agent_get_info(bkendDevice_,
+                      static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_PCIE_STORES_NEED_FLUSH),
+                      &pcie_stores_need_flush_);
 
   setupCpuAgent();
 
@@ -705,7 +708,7 @@ bool Device::create() {
   settings_ = hsaSettings;
   if (!hsaSettings || !hsaSettings->create((agent_profile_ == HSA_PROFILE_FULL), *isa,
                                            isa->xnack() == amd::Isa::Feature::Enabled, coop_groups,
-                                           isXgmi_, isAPU_, aql_ext_dispatch)) {
+                                           pcie_stores_need_flush_, isAPU_, aql_ext_dispatch)) {
     LogPrintfError("Unable to create settings for HSA device %s (PCI ID %x)", agent_name,
                    pciDeviceId_);
     return false;
@@ -1301,10 +1304,6 @@ bool Device::populateOCLDeviceConstants() {
       amd::IS_HIP && info_.largeBar_ && (device_signal_pool_.handle != 0) && !tool_attached;
   graph_device_signals_ = DEBUG_CLR_GRAPH_DEV_SIGNALS && device_signals;
   queue_device_signals_ = DEBUG_CLR_DEV_SIGNALS && device_signals;
-  // Left true by a runtime without the query, since flushing is always correct
-  Hsa::agent_get_info(bkendDevice_,
-                      static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_PCIE_STORES_NEED_FLUSH),
-                      &pcie_stores_need_flush_);
   // CP firmware without hint support takes a hinted handle as the signal address. Left false by
   // a runtime that does not report the AQL extension. A profiler tool hands packet completion
   // signals to ROCr, which rejects a hinted handle.
@@ -3804,7 +3803,7 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
 
   // Build the queue creation descriptor with priority, CU mask, and flags.
   // settings().aql_device_ring_buf_ controls queue ring buffer placement (enabled
-  // by default on gfx94x/gfx125x, overridable via DEBUG_CLR_AQL_DEV_QUEUE):
+  // by default on gfx94x and gfx12+, overridable via DEBUG_CLR_AQL_DEV_QUEUE):
   //   false - system memory
   //   true  - ring buffer in device memory if Large BAR is available.
   const bool device_mem_ring_buf = AqlRingsInDeviceMemory();
@@ -4339,6 +4338,7 @@ bool Device::CreateHwEvents(int count, bool batched, std::vector<void*>& hw_even
     ProfilingSignal* profiling_signal = new ProfilingSignal(SignalHints());
     profiling_signal->signal_ = signals[event_idx];
     profiling_signal->in_device_memory_ = in_device_memory;
+    profiling_signal->event_id_ = amd_signal_from_handle(signals[event_idx].handle)->event_id;
     hw_events[event_idx] = profiling_signal;
   }
   return true;
@@ -4561,6 +4561,7 @@ bool Device::CreateUserEvent(amd::UserEvent* event) const {
       (HSA_STATUS_SUCCESS != Hsa::signal_create(0, 0, nullptr, &signal->signal_))) {
     return false;
   }
+  signal->event_id_ = amd_signal_from_handle(signal->signal_.handle)->event_id;
   Hsa::signal_silent_store_relaxed(signal->signal_, kInitSignalValueOne);
   event->SetHwEvent(signal.release());
   return true;
