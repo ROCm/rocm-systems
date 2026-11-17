@@ -540,17 +540,27 @@ TEST_F(EnqueueMicrotest, P2pPolicyChannels_Gfx942MultiNodeAlltoallCapsAboveTwoFi
   EXPECT_EQ(-1, rcclP2pPolicyChannels(comm.get(), &task)) << "same-node peer";
 }
 
-TEST_F(EnqueueMicrotest, P2pPolicyChannels_P2pDisableReturnsBeforeTheGfx942Cap) {
-  // The disable check is above the arch read. A null topology must not be
-  // dereferenced, or this case crashes instead of returning -1.
+TEST_F(EnqueueMicrotest, P2pPolicyChannels_P2pDisableStillCapsRemoteGfx942Alltoall) {
   g_loadParam = [](const char* env, int64_t deft) {
     return std::strcmp(env, "P2P_DISABLE") == 0 ? int64_t(1) : deft;
   };
+  auto topo = std::unique_ptr<ncclTopoSystem>(new ncclTopoSystem{});
   auto comm = P2pPartsComm(/*nNodes=*/2, /*nRanks=*/16, /*p2pnChannels=*/64, /*perPeer=*/4);
+  comm->topo = topo.get();
+  topo->nodes[GPU].count = 1;
+  std::snprintf(topo->nodes[GPU].nodes[0].gpu.gcn, sizeof(topo->nodes[GPU].nodes[0].gpu.gcn), "gfx942");
+  int rankNode[2] = {0, 1};
+  comm->node = 0;
+  comm->rankToNode = rankNode;
   ncclTaskP2p task{};
   task.collAPI = ncclFuncAlltoAll;
-  EXPECT_EQ(nullptr, comm->topo);
-  EXPECT_EQ(-1, rcclP2pPolicyChannels(comm.get(), &task));
+  task.root = 1;
+  EXPECT_EQ(2, rcclP2pPolicyChannels(comm.get(), &task)) << "remote peer, P2P disabled";
+  task.root = 0;
+  EXPECT_EQ(-1, rcclP2pPolicyChannels(comm.get(), &task)) << "same-node peer, P2P disabled";
+  std::snprintf(topo->nodes[GPU].nodes[0].gpu.gcn, sizeof(topo->nodes[GPU].nodes[0].gpu.gcn), "gfx1100");
+  task.root = 1;
+  EXPECT_EQ(-1, rcclP2pPolicyChannels(comm.get(), &task)) << "gfx110 stays below the disable return";
 }
 
 TEST_F(EnqueueMicrotest, P2pPolicyChannels_SaturateP2pSkipsTheGfx942Cap) {

@@ -1404,11 +1404,9 @@ static int rcclP2pPolicyChannels(struct ncclComm* comm, struct ncclTaskP2p* task
   // The Scatter part limit is about network flows, so it applies with P2P disabled too.
   int taskParts = rcclP2pTaskParts(comm, task->collAPI, task->root);
   if (taskParts < comm->p2pnChannelsPerPeer) return taskParts;
-  // The policies below target direct P2P/IPC traffic only. When P2P is disabled,
-  // preserve the normal channel selection for the fallback transport.
-  if (ncclParamP2pDisable()) return -1;
   // Remote gfx942 alltoall peers share one NIC, so a lone-peer count
   // oversubscribes it. Same-node peers, send, and sendrecv are not capped.
+  // The fallback still uses the NIC when P2P is disabled.
   // Skipped when the nRanks fit already gives 2 or less, or the user set
   // nChannelsPerNetPeer or RCCL_SATURATE_P2P_NCHANNELS.
   if (comm->nNodes > 1 && task->collAPI == ncclFuncAlltoAll &&
@@ -1420,6 +1418,9 @@ static int rcclP2pPolicyChannels(struct ncclComm* comm, struct ncclTaskP2p* task
     while (fitted * comm->nRanks > comm->p2pnChannels && fitted > 1) fitted /= 2;
     if (fitted > 2) return 2;
   }
+  // The policies below target direct P2P/IPC traffic only. When P2P is disabled,
+  // preserve the normal channel selection for the fallback transport.
+  if (ncclParamP2pDisable()) return -1;
   constexpr Policy policies[] = {
     // Two-channel full-mesh traffic has high variance on gfx110x. Keep the
     // workaround specific to AllToAll so Gather, SendRecv and Scatter (outside the
