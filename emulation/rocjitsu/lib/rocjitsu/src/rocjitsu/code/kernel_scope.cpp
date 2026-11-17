@@ -379,6 +379,28 @@ static FailureOr<ProvedReturns> proved_call_return_offsets(std::span<BasicBlock 
 
 namespace {
 
+bool pc_builder_crosses_call(const BasicBlock &producer, const BasicBlock &consumer) {
+  // Recovery keeps useful builder edges across syntactic call continuations,
+  // but ownership additionally needs proof that the callee preserved the pair.
+  // Stop at the producer: executing getpc again refreshes the value, including
+  // on loop backedges. Inspect predecessor edges so the consumer's own call
+  // does not invalidate the target it reads before entering its callee.
+  std::vector<const BasicBlock *> pending = {&consumer};
+  std::unordered_set<const BasicBlock *> visited;
+  while (!pending.empty()) {
+    const BasicBlock *block = pending.back();
+    pending.pop_back();
+    if (block == &producer || !visited.insert(block).second)
+      continue;
+    for (const BasicBlock *predecessor : block->predecessors()) {
+      if (!predecessor->call_edges().empty())
+        return true;
+      pending.push_back(predecessor);
+    }
+  }
+  return false;
+}
+
 std::optional<uint64_t> file_backed_address(std::span<const Elf64_Phdr> segments, uint64_t offset,
                                             uint64_t size, uint32_t required_flags) {
   if (size == 0)
@@ -635,7 +657,10 @@ KernelOwnership::build(std::shared_ptr<const AmdGpuCodeObject> source_handle,
         if (crosses_entry(call.callee) || crosses_entry(call.continuation))
           return reject("call crosses another kernel entry");
       for (const Instruction &instruction : block->instructions()) {
-        if (!is_control_flow_transfer(instruction) || instruction.branch_offset_bytes())
+        // The CFG closes abort traps and retains other traps' fallthrough.
+        // Their register definitions still participate in the return proof.
+        if (!is_control_flow_transfer(instruction) || is_program_path_terminator(instruction) ||
+            (instruction.flags() & SOFTWARE_TRAP) != 0 || instruction.branch_offset_bytes())
           continue;
         if (returns.value().offsets.contains(instruction.src_loc()))
           continue;
@@ -647,6 +672,9 @@ KernelOwnership::build(std::shared_ptr<const AmdGpuCodeObject> source_handle,
           if (fixup.source_incomplete || !target ||
               target->start_offset() != fixup.source_target_offset)
             return reject("incomplete indirect ownership");
+          const BasicBlock *producer = block_for_offset(index, fixup.source_getpc_offset);
+          if (!producer || pc_builder_crosses_call(*producer, *block))
+            return reject("call-carried PC builder requires callee preservation proof");
           recovered = true;
         }
         if (!recovered)
@@ -704,6 +732,20 @@ KernelOwnership::build(std::shared_ptr<const AmdGpuCodeObject> source_handle,
   }
   if (result.owners_.size() != blocks.size())
     return reject("unresolved code ownership");
+  for (const std::unique_ptr<BasicBlock> &block : blocks) {
+    if (result.owners_.at(block.get()).size() < 2)
+      continue;
+    // A shared dispatch's recovered edges contain the union of all incoming
+    // builders. Without kernel-specific value provenance, following that union
+    // for each owner would invent owners at its distinct destinations.
+    std::unordered_map<uint64_t, uint64_t> targets;
+    for (const IndirectCallFixup &fixup : block->static_indirect_call_fixups()) {
+      const std::pair<std::unordered_map<uint64_t, uint64_t>::iterator, bool> inserted =
+          targets.emplace(fixup.source_call_offset, fixup.source_target_offset);
+      if (!inserted.second && inserted.first->second != fixup.source_target_offset)
+        return reject("shared indirect targets require kernel-specific proof");
+    }
+  }
   for (uint64_t function : declared_functions) {
     const BasicBlock *block = block_for_offset(result.offsets_, function);
     if (!block || block->start_offset() != function || !result.owners_at(function))

@@ -114,6 +114,8 @@ struct KernelOwnerFlow {
 /// @details The result borrows the immutable source via weak_ptr and owns its CFG.
 /// The factory discovers and validates descriptor roots and constructs the
 /// target-bound CFG itself. Unknown flow or unproved returns fail without facts.
+/// Shared multi-target transfers require kernel-specific provenance; PC builders
+/// carried across calls require callee-preservation proof. Both fail in this profile.
 /// Query spans are valid only while both this result and the source remain alive;
 /// callers must retain the source when consuming a returned span.
 class KernelOwnership {

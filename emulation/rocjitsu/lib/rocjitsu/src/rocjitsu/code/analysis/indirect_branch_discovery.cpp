@@ -1207,9 +1207,9 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
 [[nodiscard]] std::optional<IndirectCallFixup> fixup_for_value(const AnalysisContext &ctx,
                                                                size_t inst_index, uint16_t pair_lo,
                                                                const PcValue &value) {
-  // A recovered target outside the current text section cannot become a local
-  // BasicBlock successor. Drop it here rather than forcing the caller to filter
-  // impossible leaders.
+  // A target outside this section cannot become a local BasicBlock successor.
+  // The emitter must preserve that loss of target-set completeness on any
+  // remaining local targets; another executable section may contain the target.
   if (value.offset < 0 || static_cast<uint64_t>(value.offset) >= ctx.text.size())
     return std::nullopt;
 
@@ -1790,9 +1790,12 @@ void emit_fixups_for_values(const AnalysisContext &ctx, size_t inst_index, uint1
   // setpc/swappc consumer. When @p incomplete, at least one predecessor left the
   // pair unconstrained; the concrete targets are still recorded (for relocation
   // and liveness) but flagged so the translator does not build a direct window.
+  const bool omitted_target = std::ranges::any_of(values, [&](const PcValue &value) {
+    return value.offset < 0 || static_cast<uint64_t>(value.offset) >= ctx.text.size();
+  });
   for (const PcValue &value : values) {
     if (auto fixup = fixup_for_value(ctx, inst_index, pair_lo, value)) {
-      fixup->source_incomplete = incomplete;
+      fixup->source_incomplete = incomplete || omitted_target;
       append_unique_indexed(recovered, recovered_index, *fixup);
     }
   }
