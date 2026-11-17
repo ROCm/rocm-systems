@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/consan/contract.h"
-#include "rocjitsu/code/consan/encoding.h"
+#include "rocjitsu/code/consan/contract_internal.h"
 #include "rocjitsu/code/consan/target.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 
@@ -15,82 +15,8 @@
 #include <utility>
 
 namespace rocjitsu::consan {
-namespace {
 
-// "RJCSFACT" identifies serialized ConSan facts so readers can reject unrelated
-// input before decoding the payload.
-constexpr std::array<uint8_t, 8> kFactsMagic = {'R', 'J', 'C', 'S', 'F', 'A', 'C', 'T'};
-constexpr size_t kEnvelopeBytes = 8 + 16 + 8 + 32;
-constexpr size_t kSiteWireBytes = 68;
-constexpr size_t kBarrierWireBytes = 56;
-// Manifest prefix (144), entry fields including the name length (80), and site
-// count (4). Name bytes and per-site records are accounted for separately.
-constexpr size_t kFixedPayloadBytes = 144 + 80 + 4;
-
-class Encoder {
-public:
-  void u32(uint32_t value) {
-    for (uint32_t shift = 0; shift != 32; shift += 8)
-      bytes_.push_back(static_cast<uint8_t>(value >> shift));
-  }
-  void u64(uint64_t value) {
-    u32(static_cast<uint32_t>(value));
-    u32(static_cast<uint32_t>(value >> 32));
-  }
-  void bytes(std::span<const uint8_t> value) {
-    bytes_.insert(bytes_.end(), value.begin(), value.end());
-  }
-  void string(std::string_view value) {
-    u32(static_cast<uint32_t>(value.size()));
-    bytes_.insert(bytes_.end(), value.begin(), value.end());
-  }
-  std::vector<uint8_t> take() { return std::move(bytes_); }
-
-private:
-  std::vector<uint8_t> bytes_;
-};
-
-class Decoder {
-public:
-  explicit Decoder(std::span<const uint8_t> bytes) : bytes_(bytes) {}
-
-  bool u32(uint32_t &value) {
-    if (remaining() < 4)
-      return false;
-    value = 0;
-    for (uint32_t shift = 0; shift != 32; shift += 8)
-      value |= uint32_t{bytes_[offset_++]} << shift;
-    return true;
-  }
-  bool u64(uint64_t &value) {
-    uint32_t low = 0;
-    uint32_t high = 0;
-    if (!u32(low) || !u32(high))
-      return false;
-    value = uint64_t{low} | (uint64_t{high} << 32);
-    return true;
-  }
-  bool bytes(std::span<uint8_t> value) {
-    if (value.size() > remaining())
-      return false;
-    std::copy_n(bytes_.begin() + offset_, value.size(), value.begin());
-    offset_ += value.size();
-    return true;
-  }
-  bool string(std::string &value, uint32_t limit) {
-    uint32_t size = 0;
-    if (!u32(size) || size > limit || size > remaining())
-      return false;
-    value.assign(reinterpret_cast<const char *>(bytes_.data() + offset_), size);
-    offset_ += size;
-    return true;
-  }
-  size_t remaining() const { return bytes_.size() - offset_; }
-
-private:
-  std::span<const uint8_t> bytes_;
-  size_t offset_ = 0;
-};
+namespace wire {
 
 void encode_identity(Encoder &encoder, const ImageIdentity &identity) {
   encoder.bytes(identity.sha256);
@@ -132,7 +58,21 @@ bool decode_entry(Decoder &decoder, EntryFacts &entry, uint32_t string_limit) {
          decoder.u32(entry.maximum_workgroup_size) && decoder.u32(entry.workgroup_id_scalar);
 }
 
-void encode_site(Encoder &encoder, const SiteFacts &site) {
+} // namespace wire
+
+namespace {
+
+// "RJCSFACT" identifies serialized ConSan facts so readers can reject unrelated
+// input before decoding the payload.
+constexpr std::array<uint8_t, 8> kFactsMagic = {'R', 'J', 'C', 'S', 'F', 'A', 'C', 'T'};
+constexpr size_t kEnvelopeBytes = 8 + 16 + 8 + 32;
+constexpr size_t kSiteWireBytes = 68;
+constexpr size_t kBarrierWireBytes = 56;
+// Manifest prefix (144), entry fields including the name length (80), and site
+// count (4). Name bytes and per-site records are accounted for separately.
+constexpr size_t kFixedPayloadBytes = 144 + 80 + 4;
+
+void encode_site(wire::Encoder &encoder, const SiteFacts &site) {
   encoder.u32(site.id);
   encoder.u32(site.owner_entry);
   encoder.u32(static_cast<uint32_t>(site.analysis));
@@ -149,7 +89,7 @@ void encode_site(Encoder &encoder, const SiteFacts &site) {
   encoder.u32(site.first_slot);
 }
 
-bool decode_site(Decoder &decoder, SiteFacts &site) {
+bool decode_site(wire::Decoder &decoder, SiteFacts &site) {
   uint32_t analysis = 0;
   uint32_t record = 0;
   uint32_t access = 0;
@@ -321,9 +261,9 @@ FailureOr<std::vector<uint8_t>> encode_manifest(const Manifest &manifest,
                                                 const ContractLimits &limits) {
   if (validate_manifest(manifest, diagnostic, limits).failed())
     return Result::failure();
-  Encoder payload;
-  encode_identity(payload, manifest.original);
-  encode_identity(payload, manifest.prepared);
+  wire::Encoder payload;
+  wire::encode_identity(payload, manifest.original);
+  wire::encode_identity(payload, manifest.prepared);
   payload.bytes(manifest.options);
   payload.u32(manifest.target);
   payload.u32(manifest.wave_size);
@@ -331,7 +271,7 @@ FailureOr<std::vector<uint8_t>> encode_manifest(const Manifest &manifest,
   payload.u32(static_cast<uint32_t>(manifest.scope));
   payload.u64(manifest.original_text_bytes);
   payload.u64(manifest.prepared_text_bytes);
-  encode_entry(payload, manifest.entry);
+  wire::encode_entry(payload, manifest.entry);
   payload.u32(static_cast<uint32_t>(manifest.sites.size()));
   for (const SiteFacts &site : manifest.sites)
     encode_site(payload, site);
@@ -348,7 +288,7 @@ FailureOr<std::vector<uint8_t>> encode_manifest(const Manifest &manifest,
   }
   const std::vector<uint8_t> contents = payload.take();
 
-  Encoder envelope;
+  wire::Encoder envelope;
   envelope.bytes(kFactsMagic);
   envelope.bytes(kProducerContract);
   envelope.u64(contents.size());
@@ -362,7 +302,7 @@ FailureOr<Manifest> decode_manifest(std::span<const uint8_t> bytes,
                                     const ContractLimits &limits) {
   if (bytes.size() > limits.metadata_bytes)
     return diagnostic.emit() << "static facts exceed metadata budget";
-  Decoder envelope(bytes);
+  wire::Decoder envelope(bytes);
   std::array<uint8_t, 8> magic{};
   std::array<uint8_t, 16> contract{};
   uint64_t payload_size = 0;
@@ -376,16 +316,16 @@ FailureOr<Manifest> decode_manifest(std::span<const uint8_t> bytes,
   if (digest(payload) != checksum)
     return diagnostic.emit() << "static-facts digest mismatch";
 
-  Decoder decoder(payload);
+  wire::Decoder decoder(payload);
   Manifest manifest;
   uint32_t scope = 0;
   uint32_t count = 0;
-  if (!decode_identity(decoder, manifest.original) ||
-      !decode_identity(decoder, manifest.prepared) || !decoder.bytes(manifest.options) ||
+  if (!wire::decode_identity(decoder, manifest.original) ||
+      !wire::decode_identity(decoder, manifest.prepared) || !decoder.bytes(manifest.options) ||
       !decoder.u32(manifest.target) || !decoder.u32(manifest.wave_size) ||
       !decoder.u32(manifest.code_object_abi) || !decoder.u32(scope) ||
       !decoder.u64(manifest.original_text_bytes) || !decoder.u64(manifest.prepared_text_bytes) ||
-      !decode_entry(decoder, manifest.entry, limits.string_bytes) || !decoder.u32(count))
+      !wire::decode_entry(decoder, manifest.entry, limits.string_bytes) || !decoder.u32(count))
     return diagnostic.emit() << "truncated or oversized static facts";
   manifest.scope = static_cast<ScopeKind>(scope);
   if (count > limits.sites)

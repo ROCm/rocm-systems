@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/consan/capture.h"
+#include "rocjitsu/code/consan/contract_internal.h"
 #include "rocjitsu/code/consan/encoding.h"
 
 #include <algorithm>

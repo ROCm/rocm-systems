@@ -1237,6 +1237,8 @@ add_executable(
     consan_contract_test
     code/consan/contract_test.cpp
     code/consan/capture_test.cpp
+    code/consan/encoding_test.cpp
+    code/consan/image_facts_test.cpp
 )
 target_link_libraries(
     consan_contract_test
