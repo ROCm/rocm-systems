@@ -1427,6 +1427,7 @@ add_executable(
     patch/fault_injection/gfx1100_lds_test.cpp
     patch/fault_injection/gfx1251_lds_test.cpp
     patch/fault_injection/cdna_lds_wrong_address_test.cpp
+    patch/fault_injection/atomic_ds_test.cpp
 )
 target_include_directories(
     rocjitsu_fault_injection_tests
