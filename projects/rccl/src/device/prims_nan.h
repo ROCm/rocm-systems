@@ -34,6 +34,7 @@
 // escapeSentinel), which leaves a NaN that cannot be mistaken for an empty slot.
 
 #include "rccl_ptr.h"
+#include "uniform.h"
 
 // Element-sized integer per floating-point type, for the sub-pack tail of a
 // slice. Deliberately left undefined for every other type: generate.py only
@@ -189,7 +190,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
 
   __device__ inline int checkAbort(int& abortCache, const int abortValue, int& spins) {
     if (abortCache == 0 && ++spins == NCCL_SPINS_BEFORE_CHECK_ABORT) {
-      int abort = __builtin_amdgcn_readfirstlane(
+      int abort = wave::uniform(
         __scoped_atomic_load_n((__attribute__((address_space(1))) uint32_t*)ncclShmem.comm.abortFlag,
                                __ATOMIC_SEQ_CST, __MEMORY_SCOPE_SYSTEM));
       spins = 0;
@@ -619,18 +620,6 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
   static constexpr CachePolicy kTdmFifo = createCachePolicy(TemporalHint::NT, MemScope::SYS);
   static constexpr CachePolicy kTdmUser = createCachePolicy(TemporalHint::RT, MemScope::DEV);
 
-  // A tensor op takes its addresses and sizes from SGPRs.
-  __device__ __forceinline__ static int uniform(int x) {
-    return __builtin_amdgcn_readfirstlane(x);
-  }
-  template <typename P>
-  __device__ __forceinline__ static P* uniformPtr(P* p) {
-    const uint64_t v = (uint64_t)p;
-    const uint32_t lo = __builtin_amdgcn_readfirstlane((uint32_t)v);
-    const uint32_t hi = __builtin_amdgcn_readfirstlane((uint32_t)(v >> 32));
-    return (P*)(((uint64_t)hi << 32) | lo);
-  }
-
   // Keeps the first n bytes of x (n may fall outside [0, 16]) and zeroes the rest.
   __device__ __forceinline__ static v4u keepBytes(v4u x, int n) {
 #pragma unroll
@@ -678,7 +667,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
       }
 #pragma unroll
       for (int m = WARP_SIZE / 2; m > 0; m /= 2) first = min(first, __shfl_xor(first, m));
-      first = uniform(first);
+      first = wave::uniform(first);
       if (first >= n) return;
       from = first;
       if (checkAbort(abortCache, 1, spins)) return;
@@ -695,13 +684,14 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
     char* swin = ncclNanTdmWindow(warpInBlock, 1);
     char* out = RECV ? rwin : swin;
     const char* sent = ncclNanTdmSentinel();
-    char* recvFifo = RECV ? uniformPtr((char*)recvPtr(0)) : nullptr;
-    char* sendFifo = SEND ? uniformPtr((char*)sendPtr(0)) : nullptr;
-    const uint8_t* src = SRC ? uniformPtr((const uint8_t*)srcPtr) : nullptr;
-    uint8_t* dst = DST ? uniformPtr((uint8_t*)dstPtr) : nullptr;
-    const int bytes = uniform(nelem * (int)sizeof(T));
-    const int padN = uniform(padBytes(nelem));
-    const int per = uniform(min(TdmWindow, divUp(divUp(padN, nwarps), RowBytes) * RowBytes));
+    // A tensor op takes its addresses and sizes from SGPRs.
+    char* recvFifo = RECV ? wave::uniform((char*)recvPtr(0)) : nullptr;
+    char* sendFifo = SEND ? wave::uniform((char*)sendPtr(0)) : nullptr;
+    const uint8_t* src = SRC ? wave::uniform((const uint8_t*)srcPtr) : nullptr;
+    uint8_t* dst = DST ? wave::uniform((uint8_t*)dstPtr) : nullptr;
+    const int bytes = wave::uniform(nelem * (int)sizeof(T));
+    const int padN = wave::uniform(padBytes(nelem));
+    const int per = wave::uniform(min(TdmWindow, divUp(divUp(padN, nwarps), RowBytes) * RowBytes));
     if (RECV) tdmFillSentinel(lane);
 
     for (int off = warp * per; off < padN; off += nwarps * per) {
@@ -822,7 +812,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
     for (int i = 0; i < MaxSend; i++) {
       sendFifo[i] = SEND && i < nsend ? (v4u_gptr)sendPtr(i) + PackPerSlice * warp + lane : nullptr;
     }
-    int abortCache = __builtin_amdgcn_readfirstlane(abort);
+    int abortCache = wave::uniform(abort);
 
     // A proxy ships exactly these bytes, so rows past padBytes() must not be
     // counted: stale ones in the staging slot would land over the peer's sentinel.
@@ -940,6 +930,7 @@ public:
                         bool ipcReg = false, bool netReg = false, int stepSize_ = 0)
     : redOp(redOpArg), tid(tid), nthreads(nthreads), wid(tid % WARP_SIZE),
       stepSize(ncclShmem.comm.buffSizes[NCCL_PROTO_NAN] / NCCL_STEPS / sizeof(uint64_t)),
+      // Raw builtin: wave::uniform here costs extra scalar instructions in the Tree kernels.
       warp(__builtin_amdgcn_readfirstlane(tid / WARP_SIZE)),
       warpInBlock(threadIdx.x / WARP_SIZE), group(group), threadsPerBlock(blockDim.x) {
 #ifdef ENABLE_WARP_SPEED
