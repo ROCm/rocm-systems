@@ -472,25 +472,6 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
   return util::Result::success();
 }
 
-std::optional<ClassifiedEvent> WaitcheckTarget::gfx10_scalar_source(const Instruction &inst,
-                                                                    rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_RDNA1 || !(inst.flags() & (VMEM | LDS)))
-    return std::nullopt;
-  const auto mnemonic = inst.mnemonic();
-  // GFX10.1 needs a zero VM_VSRC dependency wait even in ordinary scheduling
-  // mode. Vector-memory instructions read EXEC, in addition to their encoded
-  // scalar inputs. GDS and the address-bearing DS forms below also read M0.
-  const bool gds =
-      (inst.flags() & LDS) && inst.raw_encoding() && (inst.raw_encoding()[0] & (1u << 17)) != 0;
-  const bool uses_m0 = gds || mnemonic.find("_addtid_") != std::string_view::npos ||
-                       mnemonic == "ds_append" || mnemonic == "ds_consume" ||
-                       mnemonic == "ds_ordered_count" || mnemonic.starts_with("ds_gws_");
-  return ClassifiedEvent(WaitCounterKind::VmVsrc, WaitEventKind::Gfx10ScalarSource,
-                         TrackedRegisterSource::Uses, /*check_uses=*/false, /*check_defs=*/true,
-                         /*check_exec_defs=*/true,
-                         uses_m0 ? std::optional{RegisterRef{RegClass::M0, 0, 1}} : std::nullopt);
-}
-
 util::Result WaitcheckTarget::classify_memory_events_into(const Instruction &inst,
                                                           rj_code_arch_t arch,
                                                           std::vector<ClassifiedEvent> &events) {
