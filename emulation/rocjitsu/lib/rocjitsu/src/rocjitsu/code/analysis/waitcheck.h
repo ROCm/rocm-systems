@@ -107,10 +107,13 @@ struct WaitcheckCounterUnderaccountingDiagnostic {
 struct WaitcheckOptions {
   /// @brief Wavefront size when no AMDHSA descriptor supplies one.
   ///
-  /// @details Raw streams and symbol-less ELF sections default to wave64,
-  /// matching WaitcheckKernelInfo and WaitcheckStreamOptions. Pass 32
-  /// explicitly for wave32 code. Described kernels always use the descriptor.
-  uint32_t fallback_wavefront_size = 64;
+  /// @details Raw streams default to wave64, matching WaitcheckStreamOptions.
+  /// Descriptor-less ELF code objects, including helper-only modules, retain
+  /// the target's conventional default (wave32 on RDNA3/3.5/4 and CDNA5;
+  /// wave64 on CDNA3/4). Supply 32 or 64
+  /// when the actual ELF wave mode is known. Described kernels always use
+  /// their descriptor, even when this override is present.
+  std::optional<uint32_t> fallback_wavefront_size = std::nullopt;
   /// @brief Maximum diagnostics to retain. Analysis still reports failure after
   /// the first hazard when this is zero.
   size_t max_diagnostics = std::numeric_limits<size_t>::max();

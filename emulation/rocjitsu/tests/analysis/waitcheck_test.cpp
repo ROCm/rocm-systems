@@ -12457,6 +12457,58 @@ TEST(WaitcheckTest, RawStreamWaveSizeIsExplicitAndDefaultsToWave64) {
   EXPECT_NE(invalid.analysis_error.find("wavefront size"), std::string::npos);
 }
 
+TEST(WaitcheckTest, SymbolLessWave32FallbackGuidesIndirectCfgRecovery) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_RDNA4;
+  std::vector<uint32_t> program;
+  program.push_back(build_s_getpc_b64(4, arch).value());
+  program.push_back(build_s_add_u32(4, 4, 255, arch).value());
+  const size_t delta_word = program.size();
+  program.push_back(0);
+  program.push_back(build_s_addc_u32(5, 5, 128, arch).value());
+  append_inst(program, s_wait_alu_sa_sdst_0());
+  append_v_cmp_gt_u32_sdst_s5_v12(program, 3); // Wave64 also clobbers target s4.
+  append_inst(program, s_wait_alu_va_sdst_0());
+  program.push_back(build_s_setpc_b64(4, arch).value());
+  program.push_back(build_s_endpgm(arch).value());
+  const uint64_t target = program.size() * sizeof(uint32_t);
+  program[delta_word] = static_cast<uint32_t>(target - sizeof(uint32_t));
+  program.push_back(build_s_endpgm(arch).value());
+  const auto image = waitcheck_test::make_gfx_symbol_less_code_object(
+      program, EF_AMDGPU_MACH_AMDGCN_GFX1201, /*wave32=*/true);
+  const AmdGpuCodeObject object(image.data(), image.size());
+  ASSERT_TRUE(object.is_valid());
+  ASSERT_TRUE(waitcheck_kernels(object).empty());
+  const auto automatic = analyze_waitcnts(object, arch);
+  WaitcheckOptions wave32;
+  wave32.fallback_wavefront_size = 32;
+  const auto explicit32 = analyze_waitcnts(object, arch, wave32);
+  ASSERT_TRUE(automatic.supported && explicit32.supported);
+  EXPECT_TRUE(automatic.complete) << automatic.analysis_error;
+  EXPECT_TRUE(explicit32.complete) << explicit32.analysis_error;
+  EXPECT_TRUE(automatic.diagnostics.empty()) << diagnostic_summary(automatic);
+  EXPECT_TRUE(explicit32.diagnostics.empty()) << diagnostic_summary(explicit32);
+}
+
+TEST(WaitcheckTest, SymbolLessRdna4KeepsTargetDerivedWave32Default) {
+  std::vector<uint32_t> program;
+  append_inst(program, s_load_b32(3, 16));
+  append_v_div_scale_f32_v5_s2_s8_s9_s8(program);
+  append_inst(program, sopp(71, 0)); // s_wait_kmcnt 0
+  append_inst(program, s_endpgm());
+  const auto image = waitcheck_test::make_gfx_symbol_less_code_object(
+      program, EF_AMDGPU_MACH_AMDGCN_GFX1201, /*wave32=*/true);
+  const AmdGpuCodeObject object(image.data(), image.size());
+  ASSERT_TRUE(object.is_valid());
+  ASSERT_TRUE(waitcheck_kernels(object).empty());
+  const auto automatic = analyze_waitcnts(object, ROCJITSU_CODE_ARCH_RDNA4);
+  WaitcheckOptions wave64;
+  wave64.fallback_wavefront_size = 64;
+  const auto explicit64 = analyze_waitcnts(object, ROCJITSU_CODE_ARCH_RDNA4, wave64);
+  ASSERT_TRUE(automatic.supported && explicit64.supported);
+  EXPECT_TRUE(automatic.diagnostics.empty()) << diagnostic_summary(automatic);
+  EXPECT_EQ(explicit64.diagnostics_observed, 1u) << diagnostic_summary(explicit64);
+}
+
 TEST(WaitcheckTest, Gfx1250Wave32VopCompareDoesNotDefineAdjacentMaskSgpr) {
   std::vector<uint32_t> program;
   append_inst(program, s_load_b32(2, 16));

@@ -141,6 +141,7 @@ TEST(ConcurrentDispatchFuzzTest, CanonicalProgramsUseTargetSpecificFlatBaseAndWa
       expected_words = {0xdcc80000, 0x007d0200, 0xbf8c0000, 0xbbfd0000};
       break;
     case execution_fuzz::FuzzTarget::Gfx1100:
+    case execution_fuzz::FuzzTarget::Gfx1150:
     case execution_fuzz::FuzzTarget::Gfx1151:
       expected_words = {0xdcd40000, 0x007c0200, 0xbf890000, 0xbc7c0000};
       break;

@@ -62,6 +62,13 @@ using namespace waitcheck_detail;
          arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
 }
 
+[[nodiscard]] uint32_t default_wavefront_size(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+                 arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5
+             ? 32
+             : 64;
+}
+
 [[nodiscard]] bool starts_with(std::string_view text, std::string_view prefix) {
   return text.size() >= prefix.size() && text.substr(0, prefix.size()) == prefix;
 }
@@ -464,7 +471,7 @@ struct Analyzer : private WaitcheckStateOps {
     source_allocation_may_change_ = false;
     stream_words_ = words;
     track_sgpr_offsets_ = true;
-    wavefront_size_ = options_.fallback_wavefront_size;
+    wavefront_size_ = options_.fallback_wavefront_size.value_or(64);
 
     PendingState state;
     state.expert_scheduling.enabled = amdgpu::supports_expert_scheduling(arch);
@@ -10510,7 +10517,8 @@ WaitcheckReport analyze_waitcnts(std::span<const uint32_t> words, rj_code_arch_t
     report.analysis_error = "unsupported architecture";
     return report;
   }
-  if (options.fallback_wavefront_size != 32 && options.fallback_wavefront_size != 64) {
+  if (options.fallback_wavefront_size && *options.fallback_wavefront_size != 32 &&
+      *options.fallback_wavefront_size != 64) {
     report.supported = false;
     report.analysis_error = "raw waitcheck stream wavefront size must be 32 or 64";
     return report;
@@ -10535,7 +10543,8 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
     report.analysis_error = "unsupported architecture";
     return report;
   }
-  if (options.fallback_wavefront_size != 32 && options.fallback_wavefront_size != 64) {
+  if (options.fallback_wavefront_size && *options.fallback_wavefront_size != 32 &&
+      *options.fallback_wavefront_size != 64) {
     report.supported = false;
     report.analysis_error = "fallback waitcheck wavefront size must be 32 or 64";
     return report;
@@ -10575,6 +10584,8 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
     return report;
   }
 
+  const uint32_t fallback_wavefront_size =
+      options.fallback_wavefront_size.value_or(default_wavefront_size(arch));
   const auto image = std::span(reinterpret_cast<const uint8_t *>(code_object.image_data()),
                                code_object.image_size());
   Analyzer analyzer(report, options, elf_flags, image, hsa_abi);
@@ -10612,13 +10623,17 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
       return report;
     }
     if (kernels.empty() && function_entries.empty()) {
-      auto blocks =
-          BasicBlock::build(code_object, analyzer.decoder(), arch, DecodeErrorEmitter(cfg_error));
+      auto blocks = BasicBlock::build_cfg(
+          code_object, analyzer.decoder(), arch,
+          {.decode_policy = BasicBlock::DecodePolicy::FullSection,
+           .entry_policy = ExternalEntryPolicy::InferPredecessorless,
+           .wave_size = static_cast<uint8_t>(fallback_wavefront_size)},
+          DecodeErrorEmitter(cfg_error));
       if (blocks.failed())
         return report;
       analyzer.set_kernel_context(nullptr);
       analyzer.analyze_cfg(blocks.value(), ".text", text_file_offset, arch,
-                           options.fallback_wavefront_size, text_size);
+                           fallback_wavefront_size, text_size);
     } else {
       // Analyze each kernel independently. Building one combined CFG for a
       // multi-kernel library keeps two large wait states per basic block alive
@@ -10661,7 +10676,7 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
         for (uint64_t entry_offset : function_entries) {
           if (selected_kernel_entry && entry_offset != *selected_kernel_entry)
             continue;
-          analyze_entry(entry_offset, nullptr, options.fallback_wavefront_size);
+          analyze_entry(entry_offset, nullptr, fallback_wavefront_size);
           if (!report.supported || report.stopped_early)
             break;
         }

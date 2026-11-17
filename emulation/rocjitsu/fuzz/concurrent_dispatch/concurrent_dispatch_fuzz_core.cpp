@@ -177,6 +177,7 @@ std::vector<uint8_t> cache_program(execution_fuzz::FuzzTarget target) {
     append_words(code,
                  rdna3::build_sopk(rdna3::kSWaitcntVscntSopk, {.sdst = rdna3::OPR_SREG_NULL}));
     break;
+  case execution_fuzz::FuzzTarget::Gfx1150:
   case execution_fuzz::FuzzTarget::Gfx1151:
     append_words(code,
                  rdna3_5::build_flat(rdna3_5::kFlatAtomicAddU32Flat,
@@ -221,6 +222,7 @@ uint32_t representative_xcd_count(execution_fuzz::FuzzTarget target) {
   case execution_fuzz::FuzzTarget::Gfx1010:
   case execution_fuzz::FuzzTarget::Gfx1030:
   case execution_fuzz::FuzzTarget::Gfx1100:
+  case execution_fuzz::FuzzTarget::Gfx1150:
   case execution_fuzz::FuzzTarget::Gfx1151:
   case execution_fuzz::FuzzTarget::Gfx1200:
   case execution_fuzz::FuzzTarget::Gfx1201:
