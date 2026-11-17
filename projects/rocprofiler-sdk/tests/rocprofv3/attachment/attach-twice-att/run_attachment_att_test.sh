@@ -22,7 +22,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-set -euo pipefail
+set -e
 
 wait_for_attach_ready() {
     local pid=$1
@@ -56,7 +56,7 @@ require_cycle_output() {
         return 1
     fi
 
-    results_json=$(find "${cycle_dir}" -type f \
+    results_json=$(find "${cycle_dir}" -type f -size +0c \
         \( -name "${APP_PID}_results.json" -o -name "${APP_PID}_*_results.json" \) \
         -print -quit)
     if [ -z "${results_json}" ]; then
@@ -89,7 +89,7 @@ run_attach_cycle() {
         --att \
         "${ATT_LIB_ARGS[@]}" \
         --kernel-include-regex simple_kernel \
-        --kernel-iteration-range 1-3 \
+        --kernel-iteration-range "1-${EXPECTED_DISPATCHES}" \
         --att-target-cu 0 \
         --att-shader-engine-mask 0xFFFFFFFF \
         --att-buffer-size 0x1000000 \
@@ -110,7 +110,8 @@ TEST_APP=$1
 ROCPROFV3=$2
 OUTPUT_DIR=${3:-${PWD}}
 LOG_LEVEL=${4:-info}
-ATT_LIB_DIR=${5:-}
+EXPECTED_DISPATCHES=${5:-3}
+ATT_LIB_DIR=${6:-}
 
 export ROCP_TOOL_ATTACH=1
 

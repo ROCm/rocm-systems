@@ -2943,10 +2943,6 @@ tool_attach(rocprofiler_client_detach_t /*detach_func*/,
            "After the initial attachment, it is recommended to just use `rocprofv3 --pid=<pid> [-o "
            "<output_file> -d <output_directory> ...]` to attach to a new process.";
 
-    // Kernel registrations outlive an attachment, but dispatch iteration selection belongs to one
-    // attachment session.
-    if(tool::get_config().advanced_thread_trace) reset_att_dispatch_kernel_iterations();
-
     assign_attach_output_session_suffix();
 
     pid_t instrumented_pid = getpid();   // The process being profiled
@@ -4571,6 +4567,11 @@ tool_detach(void* /*tool_data*/)
             });
         });
     }
+
+    // Kernel registrations and contexts outlive an attachment. Clear dispatch ATT iteration
+    // selection only after this session's contexts have stopped; tool_init starts the first
+    // context before tool_attach runs, while other target threads can continue dispatching.
+    if(tool::get_config().advanced_thread_trace) reset_att_dispatch_kernel_iterations();
 }
 
 void
