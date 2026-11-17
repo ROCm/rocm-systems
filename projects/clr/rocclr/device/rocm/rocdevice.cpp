@@ -157,7 +157,6 @@ Device::Device(hsa_agent_t bkendDevice)
   gpu_fine_grained_segment_.handle = 0;
   gpu_ext_fine_grained_segment_.handle = 0;
   prefetch_signal_.handle = 0;
-  isXgmi_ = false;
   cache_state_ = Device::CacheState::kCacheStateInvalid;
 }
 
@@ -203,8 +202,7 @@ void Device::setupCpuAgent() {
   }
   std::vector<amd::Device::LinkAttrType> link_attrs;
   link_attrs.push_back(std::make_pair(LinkAttribute::kLinkLinkType, 0));
-  if (findLinkInfo(cpu_agents_[0].fine_grain_pool, &link_attrs)) {
-    isXgmi_ = (link_attrs[0].second == HSA_AMD_LINK_INFO_TYPE_XGMI);
+  if (findLinkInfo(cpu_agents_[index].fine_grain_pool, &link_attrs)) {
     // findLinkInfo stores -1 when there are zero hops. kLinkHopCount is a
     // NUMA-distance estimate and is 0 when that distance is below one hop.
     const bool cpu_link = link_attrs[0].second >= 0;
@@ -220,7 +218,7 @@ void Device::setupCpuAgent() {
           "Numa selects cpu agent[%zu]=0x%zx(fine=0x%zx,"
           "coarse=0x%zx) for gpu agent=0x%zx CPU<->GPU XGMI=%d",
           index, cpu_agent_info_->agent.handle, cpu_agent_info_->fine_grain_pool.handle,
-          cpu_agent_info_->coarse_grain_pool.handle, bkendDevice_.handle, isXgmi_);
+          cpu_agent_info_->coarse_grain_pool.handle, bkendDevice_.handle, !pcie_stores_need_flush_);
 }
 
 void Device::checkAtomicSupport() {
@@ -674,6 +672,11 @@ bool Device::create() {
   // Query before Settings::create() since the threshold selection depends on it,
   // and before setupCpuAgent() so large BAR can exclude APUs.
   isAPU_ = agentIsAPU(bkendDevice_);
+  // Left true by a runtime without the query, since flushing is always correct. ROCr reads it
+  // for the link from this GPU to its nearest CPU node. Settings choose the kernarg mode from it.
+  Hsa::agent_get_info(bkendDevice_,
+                      static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_PCIE_STORES_NEED_FLUSH),
+                      &pcie_stores_need_flush_);
 
   setupCpuAgent();
 
@@ -705,7 +708,7 @@ bool Device::create() {
   settings_ = hsaSettings;
   if (!hsaSettings || !hsaSettings->create((agent_profile_ == HSA_PROFILE_FULL), *isa,
                                            isa->xnack() == amd::Isa::Feature::Enabled, coop_groups,
-                                           isXgmi_, isAPU_, aql_ext_dispatch)) {
+                                           pcie_stores_need_flush_, isAPU_, aql_ext_dispatch)) {
     LogPrintfError("Unable to create settings for HSA device %s (PCI ID %x)", agent_name,
                    pciDeviceId_);
     return false;
@@ -1301,10 +1304,6 @@ bool Device::populateOCLDeviceConstants() {
       amd::IS_HIP && info_.largeBar_ && (device_signal_pool_.handle != 0) && !tool_attached;
   graph_device_signals_ = DEBUG_CLR_GRAPH_DEV_SIGNALS && device_signals;
   queue_device_signals_ = DEBUG_CLR_DEV_SIGNALS && device_signals;
-  // Left true by a runtime without the query, since flushing is always correct
-  Hsa::agent_get_info(bkendDevice_,
-                      static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_PCIE_STORES_NEED_FLUSH),
-                      &pcie_stores_need_flush_);
   // CP firmware without hint support takes a hinted handle as the signal address. Left false by
   // a runtime that does not report the AQL extension. A profiler tool hands packet completion
   // signals to ROCr, which rejects a hinted handle.
@@ -1921,16 +1920,17 @@ bool Device::populateOCLDeviceConstants() {
       &info_.clusterMaxSize_);
 
 
-  // this is required for clustered kernel launches; but it might not be supported in older rocr,
-  // so invalid argument might no be necessarily an error
+  // Older ROCr does not implement this query. Invalid argument is not an error.
   if (HSA_STATUS_SUCCESS != hsaStatus && HSA_STATUS_ERROR_INVALID_ARGUMENT != hsaStatus) {
     LogError("HSA_AMD_AGENT_INFO_CLUSTER_MAX_SIZE query failed");
-  } else {
-    // this is a temporary override of the ROCr result (when there is cluster support). This line
-    // will be removed as soon as ROCr provides the correct result
-    info_.clusterMaxSize_ = info_.clusterMaxSize_ > 1?
-                            info_.maxComputeUnits_ / info_.numberOfShaderEngines_ :
-                            1;
+  }
+
+  // The limit comes from ROCr. gfx12.5 cluster sizes are correct only with a
+  // ROCr that derives them from the active CUs per shader engine. HIP does not
+  // recompute the limit. Devices without clustered launch support, and a query
+  // this ROCr does not implement, report a max cluster size of 1.
+  if (hsaStatus != HSA_STATUS_SUCCESS || info_.clusterMaxSize_ <= 1) {
+    info_.clusterMaxSize_ = 1;
   }
 
   info_.gpuDirectRdmaWithHipVmmSupported_ =
@@ -2848,60 +2848,76 @@ bool Device::virtualFree(void* addr) {
 }
 
 // ================================================================================================
-// Direct synchronous map/unmap path bypassing VirtualMapCommand. Used by the
-// non-async hipMemMap/hipMemUnmap entry points (wired up in subsequent
-// commits). No execution() lock and no barrier packet: the HIP layer is
-// responsible for draining access-device queues from the CPU side before
-// calling, and hsa_amd_vmem_{map,unmap} are synchronous w.r.t. the CPU.
-cl_int Device::virtualMap(void* va, size_t size, amd::Memory* phys) {
-  if (phys == nullptr) {
-    LogError("virtualMap: phys is nullptr");
-    return CL_INVALID_VALUE;
+// Single map implementation shared by the synchronous hipMemMap path (Device::virtualMap) and
+// the command path (VirtualGPU::submitVirtualMap). track_mapping is false for the mempool /
+// graph callers that manage the VA bookkeeping themselves.
+cl_int Device::MapPhysicalToVirtual(void* va, size_t size, amd::Memory* phys,
+                                    bool track_mapping) const {
+  assert(phys != nullptr && "MapPhysicalToVirtual requires a physical memory object!");
+
+  amd::Memory* vaddr_sub_obj = nullptr;
+  if (track_mapping) {
+    vaddr_sub_obj = MapMemObjBookkeeping(phys, va, size);
+    if (vaddr_sub_obj == nullptr) {
+      LogError("MapPhysicalToVirtual: MapMemObjBookkeeping failed");
+      return CL_INVALID_VALUE;
+    }
   }
 
-  amd::Memory* vaddr_sub_obj = MapMemObjBookkeeping(phys, va, size);
-  if (vaddr_sub_obj == nullptr) {
-    LogError("virtualMap: MapMemObjBookkeeping failed");
-    return CL_INVALID_VALUE;
-  }
-
-  hsa_amd_vmem_alloc_handle_t opaque_hsa_handle;
-  opaque_hsa_handle.handle = phys->getUserData().hsa_handle;
-  hsa_status_t hsa_status = Hsa::vmem_map(vaddr_sub_obj->getSvmPtr(), size,
-                                          vaddr_sub_obj->getOffset(), opaque_hsa_handle, 0);
+  hsa_amd_vmem_alloc_handle_t phys_handle{phys->getUserData().hsa_handle};
+  const size_t phys_offset = (vaddr_sub_obj != nullptr) ? vaddr_sub_obj->getOffset() : 0;
+  hsa_status_t hsa_status = Hsa::vmem_map(va, size, phys_offset, phys_handle, 0);
   if (hsa_status != HSA_STATUS_SUCCESS) {
-    LogPrintfError("virtualMap: hsa_amd_vmem_map failed with status: %d", hsa_status);
-    // Roll back the bookkeeping so the sub_obj/MemObjMap doesn't leak.
-    // FinalizeMapMemObjBookkeeping was never called, so MemObjMap doesn't
-    // contain va and the cross-links are not wired. Just tear down the
-    // sub-buffer view directly.
-    vaddr_sub_obj->getContext().devices()[0]->DestroyVirtualBuffer(vaddr_sub_obj);
-    vaddr_sub_obj->release();
+    LogPrintfError("MapPhysicalToVirtual: hsa_amd_vmem_map failed with status: %d", hsa_status);
+    if (vaddr_sub_obj != nullptr) {
+      // Roll back the bookkeeping so the sub_obj doesn't leak. FinalizeMapMemObjBookkeeping was
+      // never called, so MemObjMap doesn't contain va and the cross-links are not wired. Just
+      // tear down the sub-buffer view directly.
+      vaddr_sub_obj->getContext().devices()[0]->DestroyVirtualBuffer(vaddr_sub_obj);
+      vaddr_sub_obj->release();
+    }
     return CL_OUT_OF_HOST_MEMORY;
   }
 
-  constexpr bool kImportVmmForInterprocess = true;
-  FinalizeMapMemObjBookkeeping(vaddr_sub_obj, phys, va, kImportVmmForInterprocess);
-  // Resolve owningAgent now that the handle is reachable, refresh every device view.
-  for (auto* device : vaddr_sub_obj->getContext().devices()) {
-    if (auto* devMem = static_cast<Memory*>(vaddr_sub_obj->getDeviceMemory(*device))) {
-      devMem->refreshOwningAgentFromPointerInfo();
+  if (vaddr_sub_obj != nullptr) {
+    constexpr bool kImportVmmForInterprocess = true;
+    FinalizeMapMemObjBookkeeping(vaddr_sub_obj, phys, va, kImportVmmForInterprocess);
+
+    // Views created before the map inherited the VA reservation's owner. Views created later
+    // resolve it in computeAndSetOwningAgent().
+    constexpr bool kNoAlloc = false;
+    for (const auto* ctx_device : vaddr_sub_obj->getContext().devices()) {
+      if (auto* dev_mem =
+              static_cast<Memory*>(vaddr_sub_obj->getDeviceMemory(*ctx_device, kNoAlloc))) {
+        dev_mem->refreshOwningAgent();
+      }
     }
   }
   return CL_SUCCESS;
 }
 
 // ================================================================================================
-cl_int Device::virtualUnmap(void* va, size_t size) {
+// Single unmap implementation shared by Device::virtualUnmap and VirtualGPU::submitVirtualMap.
+cl_int Device::UnmapVirtual(void* va, size_t size, bool track_mapping) const {
+  if (!track_mapping) {
+    hsa_status_t hsa_status = Hsa::vmem_unmap(va, size);
+    if (hsa_status != HSA_STATUS_SUCCESS) {
+      LogPrintfError("UnmapVirtual: hsa_amd_vmem_unmap failed with status: %d", hsa_status);
+      return CL_INVALID_VALUE;
+    }
+    return CL_SUCCESS;
+  }
+
   amd::Memory* vaddr_sub_obj = amd::MemObjMap::FindMemObj(va);
+  assert(vaddr_sub_obj != nullptr && "Tracked VA has no sub_obj in MemObjMap!");
   if (vaddr_sub_obj == nullptr) {
-    LogPrintfError("virtualUnmap: no sub_obj for va: %p", va);
+    LogPrintfError("UnmapVirtual: no sub_obj for va: %p", va);
     return CL_INVALID_VALUE;
   }
 
   hsa_status_t hsa_status = Hsa::vmem_unmap(vaddr_sub_obj->getSvmPtr(), size);
   if (hsa_status != HSA_STATUS_SUCCESS) {
-    LogPrintfError("virtualUnmap: hsa_amd_vmem_unmap failed with status: %d", hsa_status);
+    LogPrintfError("UnmapVirtual: hsa_amd_vmem_unmap failed with status: %d", hsa_status);
     return CL_INVALID_VALUE;
   }
 
@@ -2909,6 +2925,28 @@ cl_int Device::virtualUnmap(void* va, size_t size) {
   constexpr bool kReleaseSubObj = true;
   UnmapMemObjBookkeeping(vaddr_sub_obj, va, kDestroyVirtualBuffer, kReleaseSubObj);
   return CL_SUCCESS;
+}
+
+// ================================================================================================
+// Direct synchronous map/unmap path bypassing VirtualMapCommand. Used by the
+// non-async hipMemMap/hipMemUnmap entry points. No execution() lock and no
+// barrier packet: the HIP layer is responsible for draining access-device
+// queues from the CPU side before calling, and hsa_amd_vmem_{map,unmap} are
+// synchronous w.r.t. the CPU.
+cl_int Device::virtualMap(void* va, size_t size, amd::Memory* phys) {
+  if (phys == nullptr) {
+    LogError("virtualMap: phys is nullptr");
+    return CL_INVALID_VALUE;
+  }
+
+  constexpr bool kTrackMapping = true;
+  return MapPhysicalToVirtual(va, size, phys, kTrackMapping);
+}
+
+// ================================================================================================
+cl_int Device::virtualUnmap(void* va, size_t size) {
+  constexpr bool kTrackMapping = true;
+  return UnmapVirtual(va, size, kTrackMapping);
 }
 
 // ================================================================================================
@@ -3804,7 +3842,7 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
 
   // Build the queue creation descriptor with priority, CU mask, and flags.
   // settings().aql_device_ring_buf_ controls queue ring buffer placement (enabled
-  // by default on gfx94x/gfx125x, overridable via DEBUG_CLR_AQL_DEV_QUEUE):
+  // by default on gfx94x and gfx12+, overridable via DEBUG_CLR_AQL_DEV_QUEUE):
   //   false - system memory
   //   true  - ring buffer in device memory if Large BAR is available.
   const bool device_mem_ring_buf = AqlRingsInDeviceMemory();
@@ -4339,6 +4377,7 @@ bool Device::CreateHwEvents(int count, bool batched, std::vector<void*>& hw_even
     ProfilingSignal* profiling_signal = new ProfilingSignal(SignalHints());
     profiling_signal->signal_ = signals[event_idx];
     profiling_signal->in_device_memory_ = in_device_memory;
+    profiling_signal->event_id_ = amd_signal_from_handle(signals[event_idx].handle)->event_id;
     hw_events[event_idx] = profiling_signal;
   }
   return true;
@@ -4561,6 +4600,7 @@ bool Device::CreateUserEvent(amd::UserEvent* event) const {
       (HSA_STATUS_SUCCESS != Hsa::signal_create(0, 0, nullptr, &signal->signal_))) {
     return false;
   }
+  signal->event_id_ = amd_signal_from_handle(signal->signal_.handle)->event_id;
   Hsa::signal_silent_store_relaxed(signal->signal_, kInitSignalValueOne);
   event->SetHwEvent(signal.release());
   return true;

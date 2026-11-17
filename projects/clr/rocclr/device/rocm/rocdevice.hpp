@@ -81,6 +81,7 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   bool use_retired_ = true;      //!< The last use is known to be complete
   bool armed_ = false;           //!< The value holds kInitSignalValueOne, visible to the GPU
   bool in_device_memory_ = false;  //!< Host stores to the value need FlushSignalStores
+  uint32_t event_id_ = 0;          //!< amd_signal_t::event_id, which never changes
   bool binary_use_ = false;  //!< The current use starts at 1 and only its packet decrements it
   bool timed_use_ = true;    //!< The current use captures timestamps
   //! Bit 0: a host check on any thread loaded the current use's value as 0, unlike use_retired_,
@@ -581,6 +582,16 @@ class Device : public NullDevice {
   virtual cl_int virtualMap(void* va, size_t size, amd::Memory* phys) override;
   virtual cl_int virtualUnmap(void* va, size_t size) override;
 
+  //! Maps phys at va. With track_mapping, creates the VA sub-object, wires MemObjMap, resolves
+  //! the owning agent on its existing device views, and rolls the sub-object back if the map
+  //! fails. phys must not be nullptr.
+  [[nodiscard]] cl_int MapPhysicalToVirtual(void* va, size_t size, amd::Memory* phys,
+                                            bool track_mapping) const;
+
+  //! Unmaps va. With track_mapping, also tears down the VA sub-object bookkeeping, and va must
+  //! name a range this runtime previously mapped and bookkept.
+  [[nodiscard]] cl_int UnmapVirtual(void* va, size_t size, bool track_mapping) const;
+
   virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
                             VmmLocationType = VmmLocationType::kDevice,
                             int numaNode = -1) override;
@@ -628,6 +639,9 @@ class Device : public NullDevice {
   //! reports that stores to device memory come over PCIe, re-store the last one and read it back.
   //! last_stored must be in device memory, or the readback does not drain HDP.
   void FlushSignalStores(hsa_signal_t last_stored, hsa_signal_value_t value) const;
+  //! Host stores to this device's memory come over PCIe through HDP and must be flushed before
+  //! the device can observe them (HSA_AMD_AGENT_INFO_PCIE_STORES_NEED_FLUSH)
+  bool PcieStoresNeedFlush() const { return pcie_stores_need_flush_; }
   //! AQL completion signal handles carry hints the CP firmware decodes
   bool SignalHints() const { return signal_hints_; }
   //! AQL queue ring buffers are placed in device memory. A profiler tool scans and rewrites the
@@ -783,7 +797,7 @@ class Device : public NullDevice {
   void HiddenHeapAlloc(const VirtualGPU& gpu);
   //! Init hidden heap for device memory allocations
   void HiddenHeapInit(const VirtualGPU& gpu);
-  bool isXgmi() const override { return isXgmi_; }
+  bool isXgmi() const override { return !PcieStoresNeedFlush(); }
 
   //! SDMA engine allocation for per-stream affinity
   uint32_t AllocateSdmaEngine(VirtualGPU* vgpu, HwQueueEngine engine_type,
@@ -954,7 +968,6 @@ class Device : public NullDevice {
   //! Read and Write mask for device<->host
   uint32_t maxSdmaReadMask_;
   uint32_t maxSdmaWriteMask_;
-  bool isXgmi_;  //!< Flag to indicate if there is XGMI between CPU<->GPU
   bool isAPU_ = false;  //!< Flag to indicate the agent shares physical memory with the CPU
   bool pm4_emulation_ = false;  //!< Flag to indicate if PM4 emulation is enabled
   uint32_t numHwPipes_;  //!< Number of hardware pipes

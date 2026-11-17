@@ -5,6 +5,7 @@
 //! retains each exact VM binding for recreation within its lifetime policy.
 mod advice;
 mod allocation;
+mod configuration;
 mod drm;
 mod event;
 mod imported_system;
@@ -19,10 +20,15 @@ mod registered_host;
 pub(super) mod sys;
 mod sysfs;
 mod target;
+mod trap;
 mod uapi;
 use crate::os::linux::{errno, file as os_file, memory as os_memory};
 use target::KfdTargetProfile;
 mod vmem;
+
+pub use configuration::{
+    DebuggerRegistration, DebuggerRegistrationMode, KfdConfiguration, XnackModeRequest,
+};
 
 use crate::device::gpu::kernel_queue::{
     KernelCommand, KernelQueueFormat, KernelQueueStatus, KernelQueueWait,
@@ -62,6 +68,7 @@ use std::os::fd::{AsRawFd, BorrowedFd, RawFd};
 use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
 pub(crate) use sysfs::KfdNode as LinuxSelector;
+pub(crate) use trap::KfdProcessTrap;
 pub(crate) use vmem::{
     KfdVirtualAddress, KfdVirtualDeviceMapping, KfdVirtualHostMapping, KfdVirtualMemory,
 };
@@ -82,6 +89,8 @@ pub(crate) struct LinuxKfdDriver {
     lifetime: DriverContextLifetime,
     /// Records whether this instance joined the process-owned context.
     joined_primary: AtomicBool,
+    /// Complete native options, fixed before this driver's first activation.
+    configuration: KfdConfiguration,
     /// Connection and bindings used for a session-owned context.
     local: KfdContextResources,
 }
@@ -96,6 +105,8 @@ struct KfdContextResources {
     initialization: Mutex<()>,
     /// Activated GPU VMs and their loss-event owner.
     bindings: memory::VmBindings,
+    /// Immutable executable backing shared across all process-context clients.
+    traps: Mutex<Vec<trap::ProcessTrapEntry>>,
 }
 
 /// Primary KFD context resources shared by process-lifetime sessions.
@@ -343,6 +354,16 @@ pub(crate) struct DeviceState {
 }
 
 impl DeviceState {
+    pub(crate) fn debugger_registration_matches(
+        &self,
+        address: usize,
+        setup_ttmp: bool,
+    ) -> Result<bool, Error> {
+        self.vm
+            .kfd()
+            .debugger_registration_matches(address as u64, setup_ttmp)
+            .map_err(|source| native_error("KFD debugger registration query", source))
+    }
     pub(crate) fn event_origin_id(&self) -> crate::device::event::DeviceEventOriginId {
         self.vm.event_origin_id()
     }
@@ -366,6 +387,7 @@ impl KfdContextResources {
             kfd: OnceLock::new(),
             initialization: Mutex::new(()),
             bindings: memory::VmBindings::new(),
+            traps: Mutex::new(Vec::new()),
         }
     }
 
@@ -373,11 +395,14 @@ impl KfdContextResources {
         &self,
         lifetime: DriverContextLifetime,
         native: &sysfs::KfdNode,
+        xnack_requested: Option<XnackModeRequest>,
+        debugger: Option<DebuggerRegistration>,
     ) -> Result<Shared<memory::DeviceVm>, Error> {
         let kfd = self.kfd()?;
         kfd.prepare_context(lifetime)
             .map_err(|source| native_error("KFD context selection", source))?;
-        self.bindings.device(&kfd, native)
+        self.bindings
+            .device(&kfd, native, xnack_requested, debugger)
     }
 
     fn kfd(&self) -> Result<Shared<sys::Kfd>, Error> {
@@ -445,6 +470,7 @@ impl LinuxKfdDriver {
             closing: false,
             lifetime,
             joined_primary: AtomicBool::new(false),
+            configuration: KfdConfiguration::default(),
             local: KfdContextResources::new(process),
         }
     }
@@ -609,10 +635,20 @@ impl Driver for LinuxKfdDriver {
             ));
         };
         let vm = if self.lifetime == DriverContextLifetime::Session {
-            self.local.activate_device(self.lifetime, &native)?
+            self.local.activate_device(
+                self.lifetime,
+                &native,
+                self.configuration.xnack,
+                self.configuration.debugger,
+            )?
         } else {
             let resources = primary_slot()?.join(&self.joined_primary, &self.process)?;
-            resources.activate_device(self.lifetime, &native)?
+            resources.activate_device(
+                self.lifetime,
+                &native,
+                self.configuration.xnack,
+                self.configuration.debugger,
+            )?
         };
         let device_info = vm
             .render()
@@ -742,6 +778,48 @@ mod tests {
     }
 
     #[test]
+    fn clean_primary_generations_rejoin_the_same_native_resources() {
+        let disables = Arc::new(AtomicUsize::new(0));
+        let observed = disables.clone();
+        let mut kfd = sys::Kfd::with_hook(
+            std::fs::File::open("/dev/null").unwrap(),
+            Arc::new(move |call| {
+                let sys::Call::RuntimeEnable(args) = call else {
+                    return Err(std::io::Error::other("unexpected KFD call"));
+                };
+                if args.mode_mask == 0 {
+                    observed.fetch_add(1, Ordering::Relaxed);
+                }
+                Ok(())
+            }),
+        );
+        kfd.mark_runtime_enabled_for_test();
+        let process = ProcessIdentity::capture().unwrap();
+        let resources = Arc::new(KfdContextResources::new(process.clone()));
+        assert!(resources.kfd.set(Shared::new(kfd).unwrap()).is_ok());
+        let slot = ProcessSlot {
+            process: process.clone(),
+            state: Mutex::new(ProcessState {
+                resources: Some(resources.clone()),
+                joined_sessions: 1,
+                pending_disable: false,
+                disabling: false,
+            }),
+            changed: Condvar::new(),
+        };
+        let joined = AtomicBool::new(true);
+        slot.leave(&joined).unwrap();
+        let next = AtomicBool::new(false);
+        let recreated = slot.join(&next, &process).unwrap();
+        assert!(Arc::ptr_eq(&resources, &recreated));
+        assert_eq!(disables.load(Ordering::Relaxed), 1);
+        recreated.kfd().unwrap().enable_runtime().unwrap();
+        slot.leave(&next).unwrap();
+        assert_eq!(disables.load(Ordering::Relaxed), 2);
+        assert_eq!(slot.state.lock().unwrap().joined_sessions, 0);
+    }
+
+    #[test]
     fn failed_primary_disable_stays_pending_until_kfd_confirms_it() {
         let calls = Arc::new(AtomicUsize::new(0));
         let observed = calls.clone();
@@ -779,13 +857,17 @@ mod tests {
             changed: Condvar::new(),
         });
         slot_ref.set(Arc::downgrade(&slot)).unwrap();
+        let joining = AtomicBool::new(false);
         assert_eq!(
-            slot.finish_pending_disable()
-                .unwrap_err()
+            slot.join(&joining, &slot.process)
+                .err()
+                .unwrap()
                 .native_status()
                 .and_then(crate::NativeStatus::errno_code),
             Some(errno::EINTR)
         );
+        assert!(!joining.load(Ordering::Acquire));
+        assert_eq!(slot.state.lock().unwrap().joined_sessions, 0);
         assert!(slot.state.lock().unwrap().pending_disable);
         slot.finish_pending_disable().unwrap();
         assert!(!slot.state.lock().unwrap().pending_disable);

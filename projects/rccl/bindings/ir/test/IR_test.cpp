@@ -32,7 +32,7 @@
  *          — runtime invocations: SKIP (require a live ncclDevComm + GIN net)
  *
  * Build is NOT a normal CMake/GTest build: librccl_device.bc must already
- * exist (cmake -DEMIT_LLVM_IR=ON) and the translation unit must be compiled
+ * exist (cmake -DNCCL_EMIT_LLVM_IR=ON) and the translation unit must be compiled
  * by hipcc at -O0 with the bitcode routed to the AMDGPU device-side LTO link.
  * The pytest harness in test/ir-device/ drives the build + run in CI (it links
  * GTest and emits the bitcode on demand); see test/ir-device/tests/conftest.py.
@@ -142,10 +142,20 @@ struct PeerCase {
   int      tm_nRanks, tm_rank, tm_stride, peer;
 };
 
-/* Reference pointer-arithmetic, identical to core__funcs.h logic. */
+/* The window's lsaPeerDelta4G entry for the case's peer, as the host fills it for a contiguous LSA team. */
+static int32_t peer_delta4G(const PeerCase& c) {
+  int i = c.lsaRank + (c.peer - c.tm_rank) * c.tm_stride;
+  return (int32_t)(uint32_t)((int32_t)i * (int32_t)c.stride4G);
+}
+
+/* World rank of the case's peer: the index ncclGetPeerPointer reads lsaPeerDelta4G at. */
+static int peer_world_rank(const PeerCase& c) {
+  return c.worldRank + (c.peer - c.tm_rank) * c.tm_stride;
+}
+
+/* Reference pointer-arithmetic for core__funcs.h: base advanced by the peer's delta (in 4 GiB units), plus offset. */
 static uintptr_t host_peer_ptr(uintptr_t base, const PeerCase& c) {
-  int      i       = c.lsaRank + (c.peer - c.tm_rank) * c.tm_stride;
-  uint32_t delta4G = (uint32_t)((int32_t)i * (int32_t)c.stride4G);
+  uint32_t delta4G = (uint32_t)peer_delta4G(c);
   uint32_t lo      = (uint32_t)(base & 0xFFFFFFFFu);
   uint32_t hi      = (uint32_t)(base >> 32) + delta4G;
   uintptr_t shift  = ((uintptr_t)hi << 32) | lo;
@@ -153,41 +163,46 @@ static uintptr_t host_peer_ptr(uintptr_t base, const PeerCase& c) {
 }
 
 static const PeerCase kPeerCases[] = {
+  /* worldRank = tm_rank * tm_stride: the caller's own world rank, so every peer's world rank is >= 0. */
   /* lsaRank  worldRank  stride4G  offset             tm_nRanks  tm_rank  tm_stride  peer */
   {  0,       0,         0,        0,                  1,         0,       1,         0   },
   {  0,       0,         1,        64,                 2,         0,       1,         1   },
-  {  0,       0,         1,        64,                 2,         1,       1,         0   },
+  {  0,       1,         1,        64,                 2,         1,       1,         0   },
   {  0,       0,         2,        128,                4,         0,       1,         3   },
   {  0,       0,         1,        0,                  8,         0,       2,         4   },
   {  5,       0,         1,        0,                  1,         0,       1,         0   },
   {  0,       0,         1,        0xDEADBEEFull,      1,         0,       1,         0   },
   {  0,       0,         0x10,     0,                  2,         0,       1,         1   },
-  {  3,       0,         2,        512,                4,         1,       1,         2   },
+  {  3,       1,         2,        512,                4,         1,       1,         2   },
   {  0,       0,         7,        0,                  1,         0,       1,         0   },
   {  0,       0,         1,        0xCAFEBABEull,      2,         0,       1,         1   },
-  {  2,       0,         1,        0,                  3,         1,       1,         2   },
-  {  0,       0,         4,        0x1000,             2,         1,       1,         0   },
-  {  1,       0,         1,        8,                  4,         2,       1,         3   },
+  {  2,       1,         1,        0,                  3,         1,       1,         2   },
+  {  0,       1,         4,        0x1000,             2,         1,       1,         0   },
+  {  1,       2,         1,        8,                  4,         2,       1,         3   },
   {  0,       0,         15,       0x40000000ull,      1,         0,       1,         0   },
-  {  4,       0,         3,        16,                 8,         3,       2,         6   },
+  {  4,       6,         3,        16,                 8,         3,       2,         6   },
   /* Additional edge cases */
   {  0,       0,         0,        0xFFFFFFFFull,      1,         0,       1,         0   },  /* max offset */
   {  0,       0,         0xFFFF,   0,                  2,         0,       1,         1   },  /* large stride */
   { -1,       0,         1,        0,                  1,         0,       1,         0   },  /* negative lsaRank */
-  {  0,       0,         1,        0,                  4,         3,       1,         0   },  /* wrap-around peer */
+  {  0,       3,         1,        0,                  4,         3,       1,         0   },  /* wrap-around peer */
 };
 
-__global__ void k_peer_ptr(char* base, const PeerCase* cases, int N, void** out) {
+/* Per-case lsaPeerDelta4G table width; every case's peer world rank is below it. */
+constexpr int kDeltaTableSize = 64;
+
+__global__ void k_peer_ptr(char* base, const PeerCase* cases, const int* deltas, int N, void** out) {
   int t = blockIdx.x * blockDim.x + threadIdx.x;
   if (t >= N) return;
   const PeerCase c = cases[t];
   ncclWindow_vidmem w{};
-  w.winHost     = nullptr;
-  w.lsaFlatBase = base;
-  w.lsaRank     = c.lsaRank;
-  w.worldRank   = c.worldRank;
-  w.stride4G    = c.stride4G;
-  w.mcOffset4K  = 0;
+  w.winHost        = nullptr;
+  w.lsaFlatBase    = base;
+  w.lsaRank        = c.lsaRank;
+  w.worldRank      = c.worldRank;
+  w.stride4G       = c.stride4G;
+  w.lsaPeerDelta4G = deltas + t * kDeltaTableSize;
+  w.mcOffset4K     = 0;
   ncclTeam tm{ c.tm_nRanks, c.tm_rank, c.tm_stride };
   out[t] = ncclGetPeerPointerTeam(&w, c.offset, tm, c.peer);
 }
@@ -196,13 +211,23 @@ TEST_F(IRDeviceTest, A_GetPeerPointerTeam) {
   constexpr int N = (int)(sizeof kPeerCases / sizeof kPeerCases[0]);
   const uintptr_t base = 0x100000000ull;
 
-  PeerCase* d_cases = nullptr; void** d_out = nullptr;
-  HIP_ASSERT(hipMalloc(&d_cases, sizeof kPeerCases));
-  HIP_ASSERT(hipMalloc(&d_out,   sizeof(void*) * N));
+  std::vector<int> deltas((size_t)N * kDeltaTableSize, NCCL_LSA_PEER_DELTA4G_INVALID);
+  for (int i = 0; i < N; ++i) {
+    int world = peer_world_rank(kPeerCases[i]);
+    ASSERT_TRUE(world >= 0 && world < kDeltaTableSize) << "peer case " << i;
+    deltas[(size_t)i * kDeltaTableSize + world] = peer_delta4G(kPeerCases[i]);
+  }
+
+  PeerCase* d_cases = nullptr; int* d_deltas = nullptr; void** d_out = nullptr;
+  HIP_ASSERT(hipMalloc(&d_cases,  sizeof kPeerCases));
+  HIP_ASSERT(hipMalloc(&d_deltas, sizeof(int) * deltas.size()));
+  HIP_ASSERT(hipMalloc(&d_out,    sizeof(void*) * N));
   HIP_ASSERT(hipMemcpy(d_cases, kPeerCases, sizeof kPeerCases,
                        hipMemcpyHostToDevice));
+  HIP_ASSERT(hipMemcpy(d_deltas, deltas.data(), sizeof(int) * deltas.size(),
+                       hipMemcpyHostToDevice));
 
-  k_peer_ptr<<<1, N>>>((char*)base, d_cases, N, d_out);
+  k_peer_ptr<<<1, N>>>((char*)base, d_cases, d_deltas, N, d_out);
   HIP_ASSERT(hipGetLastError());
   HIP_ASSERT(hipDeviceSynchronize());
 
@@ -210,6 +235,7 @@ TEST_F(IRDeviceTest, A_GetPeerPointerTeam) {
   HIP_ASSERT(hipMemcpy(got.data(), d_out, sizeof(void*) * N,
                        hipMemcpyDeviceToHost));
   HIP_ASSERT(hipFree(d_cases));
+  HIP_ASSERT(hipFree(d_deltas));
   HIP_ASSERT(hipFree(d_out));
 
   for (int i = 0; i < N; ++i) {
