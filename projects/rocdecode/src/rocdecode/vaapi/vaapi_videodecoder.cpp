@@ -1216,7 +1216,9 @@ rocDecStatus VaContext::CheckDecCapForCodecType(RocdecDecodeCaps *dec_cap) {
     // A positive count is not evidence of decode capability: drivers advertise VAProfileNone for
     // the video post-processing entrypoint, so a list holding nothing else is the same failed-probe
     // case as an empty one.
-    const int num_probed_profiles = std::max(va_contexts_[va_ctx_id].num_va_profiles, 0);
+    // Bound by the buffer as well as the count, in case a driver reports more than it filled.
+    const size_t num_probed_profiles = std::min<size_t>(std::max(va_contexts_[va_ctx_id].num_va_profiles, 0),
+                                                        va_contexts_[va_ctx_id].va_profile_list.size());
     const bool probe_empty = std::none_of(va_contexts_[va_ctx_id].va_profile_list.begin(),
                                           va_contexts_[va_ctx_id].va_profile_list.begin() + num_probed_profiles,
                                           [](VAProfile p) { return p != VAProfileNone; });

@@ -329,6 +329,8 @@ if(_deps_met)
   install(FILES test/rocDecodeNegativeApiTests/CMakeLists.txt test/rocDecodeNegativeApiTests/README.md test/rocDecodeNegativeApiTests/rocdecode_api_negative_tests.cpp test/rocDecodeNegativeApiTests/rocdecode_api_negative_tests.h test/rocDecodeNegativeApiTests/rocdecodenegativetest.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/test/rocDecodeNegativeApiTests)
   if(WIN32)
     install(FILES test/rocDecodeMissingVaLibTest/CMakeLists.txt test/rocDecodeMissingVaLibTest/rocdecodemissingvalibtest.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/test/rocDecodeMissingVaLibTest)
+  else()
+    install(FILES test/rocDecodeEmptyVaProfileTest/CMakeLists.txt test/rocDecodeEmptyVaProfileTest/rocdecodeemptyvaprofiletest.cpp test/rocDecodeEmptyVaProfileTest/stub_drv_video.cpp DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/test/rocDecodeEmptyVaProfileTest)
   endif()
 
   message("-- ${White}AMD ROCm ${PROJECT_NAME} -- CMAKE_CXX_FLAGS:${CMAKE_CXX_FLAGS}${ColourReset}")
