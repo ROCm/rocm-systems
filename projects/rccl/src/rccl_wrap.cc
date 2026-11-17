@@ -2887,7 +2887,8 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
   // (3) gfx1250 fabric paths (rcclSelectAlltoAllFabric: LL, LL128).
   // In place, gfx1250 AllToAll takes no DDA fabric tier (LL, LL128 or VMM); it falls through to
   // Direct per-peer Send/Recv. The buffer-less query (rcclSymKGetInfo) passes null for both
-  // buffers, which is unknown, not in place.
+  // buffers, which is unknown, not in place. Each rank decides from its own buffers, so all ranks
+  // must agree on in place; mixing in place and out of place in one call is not supported.
   const bool a2aFabricArch = IsArchMatch(comm->archName, "gfx1250");
   const bool a2aFabricInPlace = a2aFabricArch && sendbuff != nullptr && sendbuff == recvbuff;
   if (!query && a2aFabricInPlace) INFO(NCCL_TUNING, "A2A DDA fabric disqualified: in place");

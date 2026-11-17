@@ -3402,8 +3402,6 @@ TEST(RcclAlltoAllDecision, Gfx1250_DdaLL_Band)
 // gfx1250, message just above the LL ceiling and within the LL128 band
 // (ddaLL128Max[A2A] = 16 MiB total):
 // rcclSelectAlltoAll must choose RCCL_DDA_FABRIC_LL128.
-// gfx1250, LL128 tier disabled (ddaLL128Max[A2A] = 0 after commit 363b197e):
-// a message just above the LL ceiling must fall to Direct p2p, not LL128.
 TEST(RcclAlltoAllDecision, Gfx1250_DdaLL128_Band)
 {
     auto comm = std::make_unique<ncclComm>();

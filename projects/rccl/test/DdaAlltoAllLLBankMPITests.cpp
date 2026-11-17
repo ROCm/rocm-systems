@@ -8,14 +8,10 @@
  * @file DdaAlltoAllLLBankMPITests.cpp
  * @brief MPI end-to-end test that gfx1250 AlltoAll DDA LL stays out of the other tiers' bank 0
  *
- * Every DDA LL/LL128 tier double-buffers its scratch: a call writes bank (epoch & 1) of its peers
- * while a slower peer may still be reading the previous call from the other bank. AlltoAll LL used
- * to put bank 1 at a fixed nRanks * 32 MiB, which on the large DPX scratch falls inside bank 0,
- * where the two-shot AllReduce LL128 keeps its second-phase slots. A rank that finished such an
- * AllReduce could then write its AlltoAll packets over lines a peer had not read yet. The test
- * runs the largest AllReduce LL128 call, then AlltoAll LL twice so the AllReduce alternates banks,
- * and checks every element of both. A second test interleaves AlltoAll LL with AllGather LL128 and
- * AllReduce LL, the other tiers that share the banks and the epoch on the same communicator.
+ * Every DDA LL/LL128 tier writes bank (epoch & 1) of its peers' scratch, and bank 1 starts at the same offset
+ * for all of them. The first test runs the largest AllReduce LL128 call, then AlltoAll LL twice so the AllReduce
+ * alternates banks, and checks every element of both. The second interleaves AlltoAll LL with AllGather LL128
+ * and AllReduce LL, which share the banks and the epoch.
  */
 
 #ifdef MPI_TESTS_ENABLED

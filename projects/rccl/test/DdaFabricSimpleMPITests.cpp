@@ -174,7 +174,7 @@ protected:
         return desired < alignedMaxCount ? desired : alignedMaxCount;
     }
 
-    // The largest count under kAllToAllMaxTotalBytes: above the AllToAll LL tier on SPX (128 KiB) and DPX (2 MiB), so
+    // The largest count under kAllToAllMaxTotalBytes: above the AllToAll LL tier on SPX and DPX (128 KiB), so
     // the SIMPLE kernels run.
     size_t simpleAllToAllCount() const
     {

@@ -230,7 +230,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
     0,                   // [7] Recv            -- not used
-    0,                   // [8] AlltoAll        -- VMM off
+    0,                   // [8] AlltoAll        -- ddaVmmMax total
   },
   .rankScaledMinRanks = 8,
   .rankScaledMaxBytes = 256ULL*1024*1024,
@@ -476,7 +476,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
     0,                   // [7] Recv            -- not used
-    0,                   // [8] AlltoAll        -- VMM off
+    0,                   // [8] AlltoAll        -- ddaVmmMax total
   },
   .rankScaledMinRanks = 8,
   .rankScaledMaxBytes = 256ULL*1024*1024,
