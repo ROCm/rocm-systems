@@ -57,7 +57,7 @@ static std::string get_perf_level_string(amdsmi_dev_perf_level_t level) {
   }
 }
 
-TestBase::TestBase() : setup_failed_(false) {}
+TestBase::TestBase() : setup_failed_(false), num_monitor_devs_(0) {}
 TestBase::~TestBase() = default;
 
 void TestBase::MakeHeaderStr(const char* inStr, std::string* outStr) const {

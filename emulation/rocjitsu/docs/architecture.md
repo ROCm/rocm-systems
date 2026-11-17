@@ -56,10 +56,10 @@ Models the GPU hardware pipeline:
   files, LDS, and scratch memory. Supports functional and cycle-accurate
   modes.
 - **CompletionTracker** — Tracks per-dispatch workgroup retirement.
-  Fires completion signals in submission order. Writes queue-inactive
-  signal on HQD idle. Guest-visible publication is journaled across transient
-  backing stalls; only the affected queue pauses while independent queues keep
-  fetching and dispatching.
+  Fires completion signals in submission order. On HQD idle, it writes the queue
+  event's mailbox when present and delivers the idle interrupts. Guest-visible
+  publication is journaled across transient backing stalls. Only the affected
+  queue pauses while independent queues keep fetching and dispatching.
 - **ShaderEngine / XCD / IOD** — Hierarchical GPU topology matching
   real hardware (shader engines contain CU arrays, XCDs contain SEs).
 - **GpuVm** — Frontend-neutral owner of address-space identity, lifetime,
@@ -262,7 +262,13 @@ Emulates the AMDKFD kernel driver via LD_PRELOAD interposition:
 - **RemoteDriver** — Client-side RPC stub for daemon mode. Forwards
   ioctls over a Unix socket to the daemon's SimulatedDriver.
 - **EventState** — KFD event lifecycle (create, set, reset, wait,
-  destroy). Signal page shared via memfd between daemon and client.
+  destroy). Signal page uses the same shared backing as GPU allocations.
+
+GPU allocations, doorbells, event pages, and GEM objects use the private
+`rocjitsu-memory` helper to keep backing creation independent of application
+file-size limits. It provides native memfds or shared-memory tokens consumed
+through the `memory_backing` adapters. See [KFD and GEM memory backing](memory-backing.md)
+for allocation policy, mapping semantics, resource limits, and helper lifecycle.
 
 ### Code — Executable Loading & Analysis (`code/`)
 

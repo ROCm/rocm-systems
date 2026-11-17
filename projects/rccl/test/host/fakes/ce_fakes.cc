@@ -29,6 +29,7 @@ ASSERT_HOOK_MATCHES_PROD(g_ncclCeEnsureAllReduceStaging, ncclCeEnsureAllReduceSt
 ASSERT_HOOK_MATCHES_PROD(g_ceAlltoAllvEligible, ncclCeAlltoAllvEligible);
 ASSERT_HOOK_MATCHES_PROD(g_hierCeAlltoAllvEligible, ncclHierCeAlltoAllvEligible);
 ASSERT_HOOK_MATCHES_PROD(g_ceAllReduce, ncclCeAllReduce);
+ASSERT_HOOK_MATCHES_PROD(g_ceReduceScatter, ncclCeReduceScatter);
 #undef ASSERT_HOOK_MATCHES_PROD
 
 static ncclResult_t DefaultCeInit(struct ncclComm*) {
@@ -187,6 +188,19 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
   return g_ceAllReduce(comm, sendbuff, recvbuff, count, datatype, op, stream, recvWin, profilerArgs);
 }
 
+static ncclResult_t DefaultCeReduceScatter(struct ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t,
+                                           hipStream_t, struct ncclDevrWindow*, struct ncclCeCollArgs*) {
+  FailLoudUnfaked("ce_fakes", "ncclCeReduceScatter");
+}
+std::function<ncclResult_t(struct ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t, hipStream_t,
+                           struct ncclDevrWindow*, struct ncclCeCollArgs*)>
+    g_ceReduceScatter = DefaultCeReduceScatter;
+ncclResult_t ncclCeReduceScatter(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t recvcount,
+                                 ncclDataType_t datatype, ncclRedOp_t op, hipStream_t stream,
+                                 struct ncclDevrWindow* recvWin, struct ncclCeCollArgs* profilerArgs) {
+  return g_ceReduceScatter(comm, sendbuff, recvbuff, recvcount, datatype, op, stream, recvWin, profilerArgs);
+}
+
 void ResetCeFakes() {
   g_ceInitBatchOpsParams = DefaultCeInitBatchOpsParams;
   g_ceLaunchBatchOps     = DefaultCeLaunchBatchOps;
@@ -203,4 +217,5 @@ void ResetCeFakes() {
   g_ceAlltoAllvEligible = DefaultCeAlltoAllvEligible;
   g_hierCeAlltoAllvEligible = DefaultHierCeAlltoAllvEligible;
   g_ceAllReduce = DefaultCeAllReduce;
+  g_ceReduceScatter = DefaultCeReduceScatter;
 }

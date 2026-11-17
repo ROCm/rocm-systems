@@ -49,8 +49,10 @@ inline void push_branch_stack(Wavefront &wf, BranchStackEntry entry) {
   const uint32_t physical_sgpr = branch_stack_entry_physical_sgpr(wf, csp);
   check_branch_stack_entry_allocated(wf, physical_sgpr);
   RegisterAccess regs(wf);
-  regs.write_sgpr64(physical_sgpr, entry.lanes);
-  regs.write_sgpr64(physical_sgpr + 2, entry.resume_pc);
+  if (regs.write_sgpr64(physical_sgpr, entry.lanes).failed())
+    return;
+  if (regs.write_sgpr64(physical_sgpr + 2, entry.resume_pc).failed())
+    return;
   wf.set_cond_stack_ptr(csp + 1);
 }
 

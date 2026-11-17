@@ -91,6 +91,11 @@ class GraphConnectMicrotest : public ::testing::Test {
   // CollNet chain graphs of this rank's node get the same rows, as ncclTopoPreset would have used.
   std::vector<ncclTopoRanks> AllRanks(int nGpus, int nNodes, int nChannels) {
     int myBase = comm_->rank / nGpus * nGpus;
+    // The searched ring and tree graphs hold the preset channels; NCCL 2.32.6 ncclTopoPostset divides by them to
+    // get nCtasPerChannel. Keep a count a test set explicitly.
+    for (int algo : {NCCL_ALGO_RING, NCCL_ALGO_TREE}) {
+      if (graphs_[algo]->nChannels == 0) graphs_[algo]->nChannels = nChannels;
+    }
     for (int algo : {NCCL_ALGO_TREE, NCCL_ALGO_COLLNET_CHAIN}) {
       for (int c = 0; c < nChannels; c++) {
         for (int i = 0; i < nGpus; i++) graphs_[algo]->intra[c * nGpus + i] = myBase + (c % 2 ? nGpus - 1 - i : i);
@@ -585,11 +590,14 @@ TEST_F(GraphConnectMicrotest, SetTreeDown_AFourthChildIsAnError) {
   int ranks[4] = {10, 11, 12, 13};
   tree.down[0] = tree.down[1] = tree.down[2] = -1;
 
-  for (int d = 0; d < 3; d++) ASSERT_EQ(ncclSuccess, setTreeDown(&tree, ranks, d));
-  EXPECT_EQ(ncclSuccess, setTreeDown(&tree, ranks, -1));
-  EXPECT_EQ(ncclInternalError, setTreeDown(&tree, ranks, 3));
+  // NCCL 2.32.6: each down edge also records its stable Flow connection index.
+  const int connIdx[3] = {ncclFlowTreeIndexChild0, ncclFlowTreeIndexChild1, ncclFlowTreeIndexIntra};
+  for (int d = 0; d < 3; d++) ASSERT_EQ(ncclSuccess, setTreeDown(&tree, ranks, d, connIdx[d]));
+  EXPECT_EQ(ncclSuccess, setTreeDown(&tree, ranks, -1, ncclFlowTreeIndexChild0));
+  EXPECT_EQ(ncclInternalError, setTreeDown(&tree, ranks, 3, ncclFlowTreeIndexChild0));
 
   EXPECT_EQ(12, tree.down[2]);
+  for (int d = 0; d < 3; d++) EXPECT_EQ(connIdx[d], tree.downIndices[d]) << "slot " << d;
   EXPECT_TRUE(Logged("tree already has 3 children (10 11 12)"));
 }
 
@@ -915,6 +923,12 @@ TEST_F(GraphConnectPostsetMicrotest, Postset_SingleNodeClosesTheRingsAndDoublesT
   EXPECT_EQ(1, comm_->channels[0].ring.next);
   EXPECT_EQ(3, comm_->channels[3].ring.next);
   EXPECT_EQ(3, comm_->channels[0].tree.depth);
+  // NCCL 2.32.6: 4 compute channels over 2 search channels, and the symmetric-kernel channel split.
+  EXPECT_EQ(2, graphs_[NCCL_ALGO_RING]->nCtasPerChannel);
+  EXPECT_EQ(2, graphs_[NCCL_ALGO_TREE]->nCtasPerChannel);
+  EXPECT_EQ(2, comm_->symkState.genkComm.nRingChannels);  // the rings of the doubled half are copies
+  EXPECT_EQ(4, comm_->symkState.genkComm.nTreeChannels);  // the second tree is distinct
+  EXPECT_EQ(2, comm_->symkState.genkComm.nTreeSearchChannels);
 }
 
 TEST_F(GraphConnectPostsetMicrotest, Postset_BandwidthChannelCountRepeatsTheRings) {

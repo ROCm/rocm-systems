@@ -6,9 +6,14 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Added
 
+- rocJPEG API tracing for `rocJpegDecodeAsync`, `rocJpegDecodeSync`, `rocJpegDecodeBatchedAsync`, `rocJpegDecodeBatchedSync`, and `rocJpegGetDecoderCaps`. The rocJPEG dispatch table the SDK expects is now step version 3.
+  - New `ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeAsync`, `ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeSync`, `ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeBatchedAsync`, `ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeBatchedSync`, and `ROCPROFILER_ROCJPEG_API_ID_rocJpegGetDecoderCaps` operation IDs, and matching entries in `rocprofiler_rocjpeg_api_args_t`.
+
 ### Changed
 
 ### Resolved issues
+
+- Fixed rocpd reporting a counter at N times its value under `rocprofv3 --replay-mode kernel` when N `--pmc` groups list it, for example a sanity counter such as `SQ_WAVES` in every group. Every pass of a replayed dispatch shares the dispatch's record, so the `counters_collection` view, and the counter CSV and Perfetto output that `rocpd convert` builds from it, summed the passes. Passes after the first are now tagged with `replay_pass` in `rocpd_pmc_event.extdata`, the view averages a counter over the passes that collected it, and the `pmc_events` view reports each row's pass in a new `replay_pass` column. This behavior is identified by rocpd schema version 3.0.6.
 
 ### Known issues
 
@@ -59,6 +64,8 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 ### Changed
 
 - rocPD schema 3.0.5 stores SPM counter location on `rocpd_info_pmc`. Each agent and combination of counter, XCC, shader engine, shader array, WGP, and instance has its own pmc id. Location dimensions not provided for a counter are stored as `NULL` and left blank in CSV output. The instance index is always stored. `rocpd_pmc_event` keeps the sample value and points at that id.
+- Bump rocpd schema to version 3.1.0 for PC sampling support (`rocpd_gpu_pc_sample`, blob tables `rocpd_info_blob_schema`/`rocpd_info_blob_field`/`rocpd_blob_event`, `rocpd_disassembly_data`, and `rocpd_event.parent_id`). The pre-PC-sampling 3.0.6 schema is now frozen under `versions/3.0.6/` per the rocpd schema versioning scheme.
+- rocpd lazily disassembles PC samples only from code objects whose bytes match the content hash `rocprofv3` records for them, and writes back only those instructions. `rocpd2csv` and `python -m rocpd.query` accept `--no-cache-disassembly` and `--codeobj-path-prefix-map`, and the PC-sampling CSV files start with a `Guid` column.
 - Request ROCr high-precision timestamp correlation during HSA registration when GPU timestamp collection is configured and the runtime provides the tools API. Older runtimes and tools that only trace CPU APIs or markers retain the existing behavior.
 - Dispatch counter collection, Advanced Thread Trace (ATT), SPM, and PC sampling no longer register with the HSA queue controller's per-queue callback registry. The write interceptor and async completion path call each service's dispatch hooks explicitly, with agent-scoped active checks so a service configured on one GPU does not pull other GPUs off the fast path (#11967, #11968, #11969, #11970).
 - Experimental `rocprofiler_spm_dispatch_counting_service_set_agents()` scopes dispatch SPM to selected GPU agents; two SPM contexts may be active together when their agent sets are disjoint (#11968).
@@ -174,6 +181,8 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 
 ### Resolved issues
+
+  - Improved `rocpd` time-window validation to clamp overlapping ranges, account for all timed tables, and report invalid input without tracebacks.
 
   - Fixed `rocprofv3` crashing during output generation when a second tool subscribed to code object tracing in the same process, which blocked profiling PyTorch and Triton workloads through rocprofiler-compute.
   - Fixed `rocprofv3` hanging instead of exiting when a fatal signal arrives while it is already handling one, for example when output generation aborts. It previously left GPU child processes running and required killing the process manually.

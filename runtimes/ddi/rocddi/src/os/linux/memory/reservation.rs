@@ -9,22 +9,69 @@
 #![allow(unsafe_code)]
 
 use super::{madvise, page_size};
-use crate::os::linux::{invalid_data, process_identity::check_process};
+use crate::memory::constraints::fits_address_bounds;
+use crate::os::ProcessIdentity;
+use crate::os::linux::invalid_data;
 use crate::os::native_error;
 use libc::{
-    MADV_DONTFORK, MAP_ANONYMOUS, MAP_FIXED, MAP_NORESERVE, MAP_PRIVATE, MAP_SHARED, PROT_NONE,
-    PROT_READ, PROT_WRITE, mmap, mprotect, munmap,
+    MADV_DONTFORK, MAP_ANONYMOUS, MAP_FIXED, MAP_NORESERVE, MAP_PRIVATE, MAP_SHARED, MREMAP_FIXED,
+    MREMAP_MAYMOVE, PROT_NONE, PROT_READ, PROT_WRITE, mmap, mprotect, mremap, munmap,
 };
 use std::ffi::{c_int, c_void};
 use std::fs::File;
 use std::io;
 use std::os::fd::AsRawFd;
 use std::ptr;
-use std::sync::atomic::AtomicU64;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 const PROT_READ_WRITE: c_int = PROT_READ | PROT_WRITE;
 // libc does not expose this Linux flag for the supported GNU targets.
 const MAP_FIXED_NOREPLACE: c_int = 0x10_0000;
+
+/// Stages a new VMA before replacing a range owned by `owner`.
+/// A failed mmap leaves the destination untouched. Relocation errors poison
+/// the owner because the kernel may have unmapped the destination first.
+pub(super) fn replace_mapping(
+    owner: &Reservation,
+    address: usize,
+    size: usize,
+    protection: c_int,
+    flags: c_int,
+    fd: c_int,
+    offset: i64,
+) -> io::Result<*mut c_void> {
+    // SAFETY: This creates a distinct mapping; failure cannot disturb the
+    // caller's reservation. The caller retains fd through the operation.
+    let staged = unsafe { mmap(ptr::null_mut(), size, protection, flags, fd, offset) };
+    if staged == libc::MAP_FAILED {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: Linux moves the entire staged VMA over the caller-owned range.
+    // MREMAP_FIXED may unmap the destination before reporting an error, so
+    // the caller must stop using that range after a relocation failure.
+    let mapped = unsafe {
+        mremap(
+            staged,
+            size,
+            size,
+            MREMAP_MAYMOVE | MREMAP_FIXED,
+            address as *mut c_void,
+        )
+    };
+    if mapped == libc::MAP_FAILED {
+        let source = io::Error::last_os_error();
+        owner.poison();
+        // SAFETY: A failed move leaves this temporary VMA owned by this call.
+        let _ = unsafe { munmap(staged, size) };
+        return Err(source);
+    }
+    if mapped as usize != address {
+        owner.poison();
+        return Err(invalid_data("mapping relocation missed the owned range"));
+    }
+    Ok(mapped)
+}
 
 /// Owns the entire reservation, including alignment padding. Keeping padding
 /// avoids fallible partial unmaps during construction and leaves one range to
@@ -39,11 +86,14 @@ pub(crate) struct Reservation {
     /// Usable bytes from `address`, excluding any alignment padding.
     size: usize,
     /// Acquiring process; an inherited owner must not unmap its parent's range.
-    process: u32,
+    process: ProcessIdentity,
     /// Whether CPU writes to the current usable mapping are permitted.
     writable: bool,
     /// Restores inaccessible memory inside a retained parent on release.
     restore_on_release: bool,
+    /// Shared with child views so a failed recovery also quarantines the
+    /// parent range from future fixed maps or unmaps.
+    poisoned: Arc<AtomicBool>,
     /// One injected unmapping failure used to verify retryable ownership.
     #[cfg(test)]
     release_error: Option<i32>,
@@ -59,10 +109,17 @@ impl Reservation {
         bounds: (u64, u64),
         host: bool,
     ) -> io::Result<Self> {
-        Self::new_with_sharing(size, alignment, bounds, host, false, std::process::id())
+        Self::new_with_sharing(
+            size,
+            alignment,
+            bounds,
+            host,
+            false,
+            ProcessIdentity::capture()?,
+        )
     }
 
-    /// Captures a session process ID that was checked before host allocation.
+    /// Captures a checked process ID before acquiring host address space.
     /// The retained owner checks that identity again before release.
     pub(crate) fn new_host_in_process(
         size: usize,
@@ -70,7 +127,17 @@ impl Reservation {
         bounds: (u64, u64),
         process: u32,
     ) -> io::Result<Self> {
-        Self::new_with_sharing(size, alignment, bounds, true, false, process)
+        if process != std::process::id() {
+            return Err(io::Error::from(io::ErrorKind::Unsupported));
+        }
+        Self::new_with_sharing(
+            size,
+            alignment,
+            bounds,
+            true,
+            false,
+            ProcessIdentity::capture()?,
+        )
     }
 
     /// Attempts the requested address without replacing an existing mapping.
@@ -82,16 +149,13 @@ impl Reservation {
         bounds: (u64, u64),
         address: usize,
     ) -> io::Result<Self> {
+        let process = ProcessIdentity::capture()?;
         let page = page_size()?;
-        if size == 0 || size % page != 0 || !alignment.is_power_of_two() || alignment < page {
+        if !super::valid_host_layout(size, alignment, page) {
             return Err(io::Error::from(io::ErrorKind::InvalidInput));
         }
         if address != 0
-            && address % alignment == 0
-            && address as u64 >= bounds.0
-            && address
-                .checked_add(size - 1)
-                .is_some_and(|last| last as u64 <= bounds.1)
+            && fits_address_bounds(address as u64, size as u64, alignment as u64, bounds)
         {
             // SAFETY: MAP_FIXED_NOREPLACE either acquires this exact free range
             // or fails without replacing an existing mapping.
@@ -111,9 +175,10 @@ impl Reservation {
                     length: size,
                     address,
                     size,
-                    process: std::process::id(),
+                    process,
                     writable: false,
                     restore_on_release: false,
+                    poisoned: Arc::new(AtomicBool::new(false)),
                     #[cfg(test)]
                     release_error: None,
                 });
@@ -133,7 +198,14 @@ impl Reservation {
         alignment: usize,
         bounds: (u64, u64),
     ) -> io::Result<Self> {
-        Self::new_with_sharing(size, alignment, bounds, true, true, std::process::id())
+        Self::new_with_sharing(
+            size,
+            alignment,
+            bounds,
+            true,
+            true,
+            ProcessIdentity::capture()?,
+        )
     }
 
     /// Allocates writable host pages and trims alignment padding before
@@ -143,8 +215,9 @@ impl Reservation {
         alignment: usize,
         bounds: (u64, u64),
     ) -> io::Result<Self> {
+        let process = ProcessIdentity::capture()?;
         let page = page_size()?;
-        if size == 0 || size % page != 0 || !alignment.is_power_of_two() || alignment < page {
+        if !super::valid_host_layout(size, alignment, page) {
             return Err(io::Error::from(io::ErrorKind::InvalidInput));
         }
         let length = size
@@ -177,8 +250,7 @@ impl Reservation {
                 "mmap alignment overflows the host address width",
             ));
         };
-        let last = address.checked_add(size - 1);
-        if (address as u64) < bounds.0 || last.is_none_or(|last| last as u64 > bounds.1) {
+        if !fits_address_bounds(address as u64, size as u64, alignment as u64, bounds) {
             // SAFETY: The complete mapping is still owned by this call.
             let _ = unsafe { munmap(mapped, length) };
             return Err(io::Error::from(io::ErrorKind::OutOfMemory));
@@ -210,9 +282,10 @@ impl Reservation {
             length: size,
             address,
             size,
-            process: std::process::id(),
+            process,
             writable: true,
             restore_on_release: false,
+            poisoned: Arc::new(AtomicBool::new(false)),
             #[cfg(test)]
             release_error: None,
         })
@@ -226,10 +299,10 @@ impl Reservation {
         bounds: (u64, u64),
         host: bool,
         shared: bool,
-        process: u32,
+        process: ProcessIdentity,
     ) -> io::Result<Self> {
         let page = page_size()?;
-        if size == 0 || size % page != 0 || !alignment.is_power_of_two() || alignment < page {
+        if !super::valid_host_layout(size, alignment, page) {
             return Err(io::Error::from(io::ErrorKind::InvalidInput));
         }
         let length = size
@@ -259,6 +332,7 @@ impl Reservation {
             process,
             writable: host,
             restore_on_release: false,
+            poisoned: Arc::new(AtomicBool::new(false)),
             #[cfg(test)]
             release_error: None,
         };
@@ -268,8 +342,7 @@ impl Reservation {
             ));
         };
         reservation.address = address;
-        let last = address.checked_add(size - 1);
-        if (address as u64) < bounds.0 || last.is_none_or(|last| last as u64 > bounds.1) {
+        if !fits_address_bounds(address as u64, size as u64, alignment as u64, bounds) {
             return Err(io::Error::from(io::ErrorKind::OutOfMemory));
         }
         Ok(reservation)
@@ -278,20 +351,57 @@ impl Reservation {
     /// Creates a view into a reservation retained by another owner. If a file
     /// mapping replaces this view, releasing it restores anonymous reserved VA
     /// instead of exposing a hole inside the parent range.
-    pub(crate) fn view(address: usize, size: usize) -> Self {
-        debug_assert_ne!(address, 0);
-        debug_assert_ne!(size, 0);
+    #[cfg(test)]
+    pub(crate) fn view(address: usize, size: usize) -> io::Result<Self> {
+        Self::view_with_poison(address, size, Arc::new(AtomicBool::new(false)))
+    }
+
+    /// Creates a child view that shares its parent's ownership poison state.
+    pub(crate) fn view_in(parent: &Self, address: usize, size: usize) -> Self {
         Self {
             base: address,
             length: 0,
             address,
             size,
-            process: std::process::id(),
+            process: parent.process.clone(),
             writable: false,
             restore_on_release: true,
+            poisoned: parent.poisoned.clone(),
             #[cfg(test)]
             release_error: None,
         }
+    }
+
+    /// Creates a child view after an aperture allocator released its lock.
+    pub(crate) fn view_with_poison(
+        address: usize,
+        size: usize,
+        poisoned: Arc<AtomicBool>,
+    ) -> io::Result<Self> {
+        debug_assert_ne!(address, 0);
+        debug_assert_ne!(size, 0);
+        Ok(Self {
+            base: address,
+            length: 0,
+            address,
+            size,
+            process: ProcessIdentity::capture()?,
+            writable: false,
+            restore_on_release: true,
+            poisoned,
+            #[cfg(test)]
+            release_error: None,
+        })
+    }
+
+    /// Rejects a child before it can use or release this mapping.
+    pub(crate) fn check_process(&self) -> io::Result<()> {
+        self.process.check()
+    }
+
+    /// Retains the mapping's creating process after this reservation is freed.
+    pub(crate) fn process_identity(&self) -> ProcessIdentity {
+        self.process.clone()
     }
 
     /// Returns the configured usable size; callers must separately retain the
@@ -307,7 +417,15 @@ impl Reservation {
 
     /// Whether this owner still holds the range that its cached extent names.
     pub(crate) fn is_live(&self) -> bool {
-        self.length != 0
+        self.length != 0 && !self.poisoned.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn poison_token(&self) -> Arc<AtomicBool> {
+        self.poisoned.clone()
+    }
+
+    pub(crate) fn poison(&self) {
+        self.poisoned.store(true, Ordering::Release);
     }
 
     /// Whether this owner still holds a writable CPU mapping, rather than an
@@ -318,8 +436,8 @@ impl Reservation {
 
     /// Prevents a live mapping from being inherited across `fork`.
     pub(crate) fn dont_fork(&self) -> io::Result<()> {
-        check_process(self.process)?;
-        if self.length == 0 {
+        self.check_process()?;
+        if !self.is_live() {
             return Err(invalid_data("address reservation is not live"));
         }
         // SAFETY: The live owned mapping covers this exact usable extent.
@@ -336,7 +454,7 @@ impl Reservation {
     /// address. Keeping the surrounding reservation prevents a failed partial
     /// cleanup from making a still-referenced GPU address available for reuse.
     pub(crate) fn map_render(&mut self, render: &File, offset: u64) -> io::Result<()> {
-        check_process(self.process)?;
+        self.check_process()?;
         let offset = i64::try_from(offset).map_err(invalid_data)?;
         self.map_file(render, offset, PROT_READ_WRITE)
     }
@@ -345,7 +463,7 @@ impl Reservation {
     /// scratch allocations require this VMA even though userspace never reads
     /// or writes the backing through the CPU.
     pub(crate) fn map_render_inaccessible(&mut self, render: &File, offset: u64) -> io::Result<()> {
-        check_process(self.process)?;
+        self.check_process()?;
         let offset = i64::try_from(offset).map_err(invalid_data)?;
         self.map_file(render, offset, PROT_NONE)
     }
@@ -376,8 +494,8 @@ impl Reservation {
 
     /// Changes permissions on the complete live host view in place.
     pub(crate) fn set_permissions(&mut self, permission_bits: u32) -> io::Result<()> {
-        check_process(self.process)?;
-        if self.length == 0 {
+        self.check_process()?;
+        if !self.is_live() {
             return Err(invalid_data("host mapping is not live"));
         }
         let protection = match permission_bits {
@@ -402,25 +520,30 @@ impl Reservation {
         self.map_file(file, offset, PROT_READ_WRITE)
     }
 
-    /// Replaces only the usable range with a file mapping. A view into a parent
-    /// becomes the owner of that replacement and later restores inaccessible
-    /// address space instead of removing the parent's range.
-    fn map_file(&mut self, file: &File, offset: i64, protection: c_int) -> io::Result<()> {
-        check_process(self.process)?;
-        if self.length == 0 && !self.restore_on_release {
-            return Err(invalid_data("file mapping has no live address reservation"));
+    /// Maps a KFD doorbell or MMIO page at its final address without moving
+    /// the driver-owned VMA. The reservation must be fresh, unpublished, and
+    /// exact-sized; its caller drops it if the native mmap fails.
+    pub(crate) fn map_kfd_file_in_place(&mut self, file: &File, offset: i64) -> io::Result<()> {
+        self.check_process()?;
+        if !self.is_live()
+            || self.restore_on_release
+            || self.writable
+            || self.base != self.address
+            || self.length != self.size
+            || offset % i64::try_from(page_size()?).map_err(invalid_data)? != 0
+        {
+            return Err(invalid_data(
+                "KFD mapping requires a fresh exact reservation",
+            ));
         }
-        if offset % i64::try_from(page_size()?).map_err(invalid_data)? != 0 {
-            return Err(invalid_data("file mapping offset is not page aligned"));
-        }
-        // SAFETY: MAP_FIXED replaces only the aligned usable extent of our own
-        // reservation. The original range is still owned and no Rust references
-        // alias it. The caller keeps the allocation and render file alive.
+        // SAFETY: This unpublished reservation owns the exact destination.
+        // KFD must see the final VMA created by its mmap hook, since moving
+        // that VMA can invalidate driver-side mapping bookkeeping.
         let mapped = unsafe {
             mmap(
                 self.address as *mut c_void,
                 self.size,
-                protection,
+                PROT_READ_WRITE,
                 MAP_SHARED | MAP_FIXED,
                 file.as_raw_fd(),
                 offset,
@@ -429,6 +552,36 @@ impl Reservation {
         if mapped == libc::MAP_FAILED {
             return Err(io::Error::last_os_error());
         }
+        if mapped as usize != self.address {
+            self.poison();
+            return Err(invalid_data("KFD mapping missed its reserved address"));
+        }
+        // SAFETY: The successful mapping covers this owner at its final VA.
+        let _ = unsafe { madvise(mapped, self.size, MADV_DONTFORK) };
+        self.writable = true;
+        Ok(())
+    }
+
+    /// Replaces only the usable range with a file mapping. A view into a parent
+    /// becomes the owner of that replacement and later restores inaccessible
+    /// address space instead of removing the parent's range.
+    fn map_file(&mut self, file: &File, offset: i64, protection: c_int) -> io::Result<()> {
+        self.check_process()?;
+        if self.poisoned.load(Ordering::Acquire) || (self.length == 0 && !self.restore_on_release) {
+            return Err(invalid_data("file mapping has no live address reservation"));
+        }
+        if offset % i64::try_from(page_size()?).map_err(invalid_data)? != 0 {
+            return Err(invalid_data("file mapping offset is not page aligned"));
+        }
+        let mapped = replace_mapping(
+            self,
+            self.address,
+            self.size,
+            protection,
+            MAP_SHARED,
+            file.as_raw_fd(),
+            offset,
+        )?;
         if self.restore_on_release {
             self.base = self.address;
             self.length = self.size;
@@ -503,8 +656,8 @@ impl Reservation {
 
     /// Checks process identity, mapping liveness, CPU write access, and range.
     fn check_write(&self, offset: usize, length: usize) -> io::Result<()> {
-        check_process(self.process)?;
-        if self.length == 0
+        self.check_process()?;
+        if !self.is_live()
             || !self.writable
             || offset.checked_add(length).is_none_or(|end| end > self.size)
         {
@@ -517,7 +670,10 @@ impl Reservation {
     /// failure retains the live ownership record for explicit retry; release
     /// after success is harmless.
     pub(crate) fn release(&mut self) -> io::Result<()> {
-        check_process(self.process)?;
+        self.check_process()?;
+        if self.poisoned.load(Ordering::Acquire) {
+            return Err(invalid_data("address reservation ownership is uncertain"));
+        }
         if self.length == 0 {
             return Ok(());
         }
@@ -526,22 +682,17 @@ impl Reservation {
             return Err(io::Error::from_raw_os_error(errno));
         }
         if self.restore_on_release {
-            // SAFETY: This exact subrange replaced part of a retained parent
-            // reservation. Native GPU cleanup is complete, so replace the BO
-            // mapping with inaccessible anonymous VA for future scratch reuse.
-            let mapped = unsafe {
-                mmap(
-                    self.base as *mut c_void,
-                    self.length,
-                    PROT_NONE,
-                    MAP_ANONYMOUS | MAP_NORESERVE | MAP_PRIVATE | MAP_FIXED,
-                    -1,
-                    0,
-                )
-            };
-            if mapped == libc::MAP_FAILED {
-                return Err(io::Error::last_os_error());
-            }
+            // The parent retains the range. A failed relocation poisons its
+            // shared ownership token because the destination may be a hole.
+            replace_mapping(
+                self,
+                self.base,
+                self.length,
+                PROT_NONE,
+                MAP_ANONYMOUS | MAP_NORESERVE | MAP_PRIVATE,
+                -1,
+                0,
+            )?;
         } else {
             // SAFETY: This owner holds the entire live, page-aligned range.
             // Native GPU cleanup must have completed before release.
@@ -563,9 +714,14 @@ impl Reservation {
 
 impl Drop for Reservation {
     fn drop(&mut self) {
+        if self.check_process().is_err() {
+            // A fork child cannot release this range or report its inherited
+            // ownership as a failed constructor rollback.
+            return;
+        }
         // The resource owner forgets this reservation if GPU cleanup fails.
         // Reaching this destructor means only CPU address ownership remains.
-        if self.length != 0 || self.restore_on_release {
+        if !self.poisoned.load(Ordering::Acquire) && (self.length != 0 || self.restore_on_release) {
             if let Err(source) = self.release() {
                 // An unpublished reservation can be discarded during an AMDF
                 // memory constructor. Its failed unmap is independent of the
@@ -590,18 +746,100 @@ mod tests {
     use super::*;
 
     #[test]
+    fn failed_file_map_keeps_its_original_reservation_live() {
+        let page = page_size().unwrap();
+        let mut reservation = Reservation::new(page, page, (0, u64::MAX), false).unwrap();
+        let file = File::open("/dev/null").unwrap();
+        assert!(matches!(
+            reservation
+                .map_file_read_write(&file, 0)
+                .unwrap_err()
+                .raw_os_error(),
+            Some(libc::ENODEV | libc::EACCES | libc::EPERM)
+        ));
+        assert!(reservation.is_live());
+        let mut resident = 0;
+        // SAFETY: The failed file map left the original PROT_NONE VMA intact.
+        assert_eq!(
+            unsafe {
+                libc::mincore(
+                    reservation.address() as *mut c_void,
+                    page,
+                    &raw mut resident,
+                )
+            },
+            0
+        );
+        reservation.release().unwrap();
+    }
+
+    #[test]
+    fn failed_child_file_map_does_not_poison_its_parent() {
+        let page = page_size().unwrap();
+        let mut parent = Reservation::new(page, page, (0, u64::MAX), false).unwrap();
+        let mut child = Reservation::view_in(&parent, parent.address(), page);
+        let file = File::open("/dev/null").unwrap();
+        assert!(child.map_file_read_write(&file, 0).is_err());
+        assert!(parent.is_live());
+        child.release().unwrap();
+        parent.release().unwrap();
+    }
+
+    #[test]
+    fn fresh_kfd_mapping_uses_and_releases_its_reserved_address() {
+        use std::os::unix::fs::FileExt;
+        let page = page_size().unwrap();
+        let path =
+            std::env::temp_dir().join(format!("rocddi-kfd-in-place-map-{}", std::process::id()));
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .unwrap();
+        std::fs::remove_file(&path).unwrap();
+        file.set_len(page as u64).unwrap();
+        file.write_all_at(&[0x5a], 0).unwrap();
+        let mut reservation = Reservation::new(page, page, (0, u64::MAX), false).unwrap();
+        let address = reservation.address();
+        reservation.map_kfd_file_in_place(&file, 0).unwrap();
+        assert_eq!(reservation.address(), address);
+        // SAFETY: The live mapping is writable and the file is retained.
+        assert_eq!(unsafe { (address as *const u8).read_volatile() }, 0x5a);
+        reservation.release().unwrap();
+
+        let mut failed = Reservation::new(page, page, (0, u64::MAX), false).unwrap();
+        let unavailable = File::open("/dev/null").unwrap();
+        assert!(failed.map_kfd_file_in_place(&unavailable, 0).is_err());
+        failed.release().unwrap();
+    }
+
+    #[test]
+    fn poisoned_child_prevents_parent_release() {
+        let page = page_size().unwrap();
+        let mut parent = Reservation::new(page, page, (0, u64::MAX), false).unwrap();
+        let child = Reservation::view_in(&parent, parent.address(), page);
+        child.poison();
+        assert!(!parent.is_live());
+        assert!(parent.release().is_err());
+        // SAFETY: This synthetic poison did not replace or release the page.
+        assert_eq!(unsafe { munmap(parent.address() as *mut c_void, page) }, 0);
+    }
+
+    #[test]
     fn foreign_process_rejects_release_and_keeps_the_reservation_owned() {
         let page = page_size().unwrap();
         let mut reservation = Reservation::new(page, page * 4, (0, u64::MAX), false).unwrap();
         assert_eq!(reservation.address() % (page * 4), 0);
         let length = reservation.length;
-        reservation.process = std::process::id().wrapping_add(1);
+        reservation.process =
+            ProcessIdentity::with_pid_for_test(std::process::id().wrapping_add(1));
         assert_eq!(
             reservation.release().unwrap_err().kind(),
             io::ErrorKind::Unsupported
         );
         assert_eq!(reservation.length, length);
-        reservation.process = std::process::id();
+        reservation.process = ProcessIdentity::capture().unwrap();
         reservation.fail_release_once(12);
         assert!(reservation.release().is_err());
         assert_eq!(reservation.length, length);
@@ -660,7 +898,7 @@ mod tests {
         std::fs::remove_file(&path).unwrap();
         file.set_len(page as u64).unwrap();
         let parent = Reservation::new(page * 2, page, (0, u64::MAX), false).unwrap();
-        let mut view = Reservation::view(parent.address(), page);
+        let mut view = Reservation::view(parent.address(), page).unwrap();
 
         view.map_render_inaccessible(&file, 0).unwrap();
         assert_eq!(view.length, page);
@@ -688,7 +926,7 @@ mod tests {
         let page = page_size().unwrap();
         let parent = Reservation::new(page, page, (0, u64::MAX), false).unwrap();
         let file = File::open("/dev/zero").unwrap();
-        let mut view = Reservation::view(parent.address(), page);
+        let mut view = Reservation::view(parent.address(), page).unwrap();
 
         assert_eq!(
             view.map_dma_buf_with_permissions(&file, 0, 4)
@@ -707,7 +945,7 @@ mod tests {
             .write(true)
             .open("/dev/zero")
             .unwrap();
-        let mut view = Reservation::view(parent.address(), page);
+        let mut view = Reservation::view(parent.address(), page).unwrap();
         view.map_dma_buf_with_permissions(&file, 0, 1).unwrap();
         let address = view.address();
         view.set_permissions(3).unwrap();

@@ -237,11 +237,8 @@ pub(crate) fn agent_pool_relationship(
                 runtime.gpu_index(agent).and_then(|index| {
                     runtime
                         .topology
-                        .nodes_for_endpoint(&runtime.gpus[index].endpoint)
-                        .find(|node| {
-                            runtime.topology.sources[node.source.0].kind
-                                == rocddi::topology::SourceKind::LinuxKfd
-                        })
+                        .native_nodes_for_endpoint(&runtime.gpus[index].endpoint)
+                        .next()
                         .map(|node| node.id)
                 })
             })

@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <iterator>
 #include <memory>
+#include <new>
 #include <map>
 #include <set>
 #include <unordered_map>
@@ -19,6 +20,7 @@
 #include <cstdio>
 #include <cstring>
 #include <atomic>
+#include <functional>
 #include <mutex>
 #include <shared_mutex>
 #include <chrono>
@@ -105,6 +107,24 @@ inline std::vector<HrrVaRange> hrr_place_plan(std::vector<HrrVaRange> allocs,
     return out;
 }
 
+// The granule-aligned range [base, end) that placing `size` bytes at the
+// recorded address `rec` would map, checked: false if `size` is 0 or if
+// `rec + size` or the rounding wraps. `gran` is not 0; `rec` and `size` come
+// from the archive. The range is never empty. Whether it lies in held address
+// space is HrrHeldRanges::take's to say: the held ranges stop at the placement
+// ceiling and do not include 0.
+inline bool hrr_place_range(uint64_t rec, uint64_t size, uint64_t gran,
+                            uint64_t* base, uint64_t* end) {
+    if (size == 0) return false;
+    uint64_t last;  // one past the last byte
+    if (__builtin_add_overflow(rec, size, &last)) return false;
+    uint64_t up;
+    if (__builtin_add_overflow(last, gran - 1, &up)) return false;
+    *base = rec - rec % gran;
+    *end  = up / gran * gran;
+    return true;
+}
+
 // The placeholders still standing, base -> end, kept merged.
 struct HrrHeldRanges {
     std::map<uint64_t, uint64_t> r;
@@ -122,7 +142,7 @@ struct HrrHeldRanges {
         }
         r[b] = e;
     }
-    // Drop [b, e) if one held range covers all of it.
+    // Drop [b, e), e > b, if one held range covers all of it.
     bool take(uint64_t b, uint64_t e) {
         auto it = r.upper_bound(b);
         if (it == r.begin()) return false;
@@ -178,10 +198,12 @@ inline thread_local HrrUnmappedNote hrr_unmapped_note;
 // release it at teardown. Mixing them up (e.g. hipFree on a host pointer)
 // returns errors and can corrupt allocator bookkeeping.
 enum class AllocKind : uint8_t {
-    Device,        // hipMalloc / hipMallocManaged / hipMallocPitch -> hipFree
+    Device,        // hipMalloc / hipMallocPitch                    -> hipFree
+    Managed,       // hipMallocManaged: host-backed, charged to host_budget -> hipFree
     HostMalloc,    // hipHostMalloc / hipMallocHost                 -> hipHostFree
-    HostRegister,  // hipHostRegister backing buffer  -> hipHostUnregister + free
-                   //   (released via host_reg_bufs; skipped in the alloc_map loop)
+    HostRegister,  // hipHostRegister backing buffer  -> hipHostUnregister
+                   //   (via host_reg_bufs; skipped in the alloc_map loop; the
+                   //   block is freed with the context)
     DevicePtrAlias // hipHostGetDevicePointer result  -> not separately freed
                    //   (alias into an already-tracked pinned host allocation)
 };
@@ -199,6 +221,12 @@ struct PlaybackContext {
     // ---- Handle translation maps (recorded raw ptr -> live handle) ----
     // Protected by map_mutex: shared_lock for reads, unique_lock for writes.
     mutable std::shared_mutex map_mutex;
+    // Orders a pinned-host snapshot copy against the free of its destination.
+    // A kernel launch holds it shared from before it hands on the turn until
+    // its launch call returns (hrr_launch_hold); every host free holds it
+    // exclusive across map removal and the HIP free. Take this before
+    // map_mutex, never the other way round.
+    std::shared_mutex host_free_mu;
     std::unordered_map<uint64_t, hipStream_t>    stream_map;
     std::unordered_map<uint64_t, hipEvent_t>     event_map;
     std::unordered_map<uint64_t, hipModule_t>    module_map;
@@ -296,6 +324,10 @@ struct PlaybackContext {
     // The archive header has HRR_FILE_FLAG_PACKED_HOST_RECTS: the host blobs of
     // the pitched copies hold only the copied rows, packed end to end.
     bool packed_host_rects = false;
+    // The archive header has HRR_FILE_FLAG_EXT_LAUNCH_EVENT_MARKERS: capture
+    // wrote the hipEventRecord events for hipExtModuleLaunchKernel start/stop
+    // events. Without it the archive predates them.
+    bool ext_launch_event_markers = false;
     std::string kernel_filter;
 
     // Lightweight replay tracing. These are intentionally separate from
@@ -416,8 +448,8 @@ struct PlaybackContext {
     // Appended under map_mutex (unique_lock); no lock needed to read (single writer).
     std::vector<hipEvent_t> owned_timing_events;
 
-    // Backing buffers for hipHostRegister replay: recorded ptr -> malloc'd host buffer.
-    // Needed so hipHostUnregister can call hipHostUnregister then free the buffer.
+    // Registered hipHostRegister replay buffers: recorded ptr -> block in
+    // host_reg_blocks. Needed so hipHostUnregister can find the buffer.
     // Guarded by map_mutex.
     std::unordered_map<uint64_t, void*> host_reg_bufs;
 
@@ -433,8 +465,17 @@ struct PlaybackContext {
 
     // VMM replay maps (guarded by map_mutex):
     //   vmm_handle_map: recorded hipMemGenericAllocationHandle_t (as u64) -> live handle
-    //   vmm_va_map    : recorded reserved-VA base (u64) -> {live_va, size}
+    //   vmm_live_map  : live handle -> the host bytes charged for it (0 for a
+    //                   device-located handle), how many mappings hold it, and
+    //                   whether hipMemRelease was called. hipMemMap takes its own
+    //                   reference on the handle, so the memory (and the charge)
+    //                   outlives hipMemRelease until the last hipMemUnmap.
+    //   vmm_mappings  : live VA of each hipMemMap -> {size, live handle}
     std::unordered_map<uint64_t, hipMemGenericAllocationHandle_t> vmm_handle_map;
+    struct VmmLive { uint64_t host_charge; int maps; bool released; };
+    std::unordered_map<hipMemGenericAllocationHandle_t, VmmLive> vmm_live_map;
+    struct VmmMapping { size_t size; hipMemGenericAllocationHandle_t live; };
+    std::map<uintptr_t, VmmMapping> vmm_mappings;
     struct VmmVA { void* live; size_t size; };
     std::unordered_map<uint64_t, VmmVA> vmm_va_map;
 
@@ -451,6 +492,51 @@ struct PlaybackContext {
         std::shared_lock lk(map_mutex);
         auto it = vmm_handle_map.find(rec);
         return it != vmm_handle_map.end() ? it->second : hipMemGenericAllocationHandle_t{};
+    }
+
+    // The charge of a live handle goes back once it is released and unmapped.
+    // Caller holds map_mutex exclusively.
+    void vmm_drop_if_free_locked(hipMemGenericAllocationHandle_t live) {
+        auto it = vmm_live_map.find(live);
+        if (it == vmm_live_map.end() || !it->second.released || it->second.maps > 0) return;
+        host_budget.release(it->second.host_charge);
+        vmm_live_map.erase(it);
+    }
+    void vmm_note_create(uint64_t rec, hipMemGenericAllocationHandle_t live, uint64_t charge) {
+        std::unique_lock lk(map_mutex);
+        vmm_handle_map[rec] = live;
+        vmm_live_map[live] = {charge, 0, false};
+    }
+    // hipMemRelease succeeded on `live`: it is no longer reachable by name, and
+    // its charge stays while a mapping holds it.
+    void vmm_note_release(hipMemGenericAllocationHandle_t live) {
+        std::unique_lock lk(map_mutex);
+        auto it = vmm_live_map.find(live);
+        if (it == vmm_live_map.end()) return;
+        it->second.released = true;
+        vmm_drop_if_free_locked(live);
+    }
+    void vmm_note_map(void* live_va, size_t size, hipMemGenericAllocationHandle_t live) {
+        std::unique_lock lk(map_mutex);
+        auto it = vmm_live_map.find(live);
+        if (it == vmm_live_map.end()) return;
+        ++it->second.maps;
+        vmm_mappings[reinterpret_cast<uintptr_t>(live_va)] = {size, live};
+    }
+    // hipMemUnmap succeeded on [live_va, live_va + size): every mapping wholly
+    // inside gives its reference back.
+    void vmm_note_unmap(void* live_va, size_t size) {
+        std::unique_lock lk(map_mutex);
+        const uintptr_t lo = reinterpret_cast<uintptr_t>(live_va);
+        const uintptr_t hi = lo + size;
+        for (auto it = vmm_mappings.lower_bound(lo); it != vmm_mappings.end() && it->first < hi;) {
+            if (it->first + it->second.size > hi) { ++it; continue; }
+            const auto live = it->second.live;
+            it = vmm_mappings.erase(it);
+            auto lit = vmm_live_map.find(live);
+            if (lit != vmm_live_map.end()) --lit->second.maps;
+            vmm_drop_if_free_locked(live);
+        }
     }
 
     // ---- External region annotations (regions/*.hrrr, see hrr_regions.h) ----
@@ -722,6 +808,7 @@ struct PlaybackContext {
             case AllocKind::HostMalloc:     return "pinned host";
             case AllocKind::HostRegister:   return "registered host";
             case AllocKind::DevicePtrAlias: return "pinned host alias";
+            case AllocKind::Managed:        return "managed";
             default:                        return "device";
         }
     }
@@ -857,9 +944,27 @@ struct PlaybackContext {
         std::unique_lock lk(map_mutex);
         auto it = alloc_map.find(rec);
         if (it == alloc_map.end()) return;
-        // Host allocations were charged to host_budget before they were made.
+        erase_alloc_locked(it);
+    }
+    // Removes the entry only while it still maps to `live`. An archive
+    // allocation recorded at the same address earlier in the stream replaces the
+    // entry, so a later release of the old pointer must leave the new entry and
+    // its charge alone. Region tracking is single-threaded (off under
+    // --multi-thread), so no other thread races this check.
+    bool remove_alloc_if_live(uint64_t rec, void* live) {
+        std::unique_lock lk(map_mutex);
+        auto it = alloc_map.find(rec);
+        if (it == alloc_map.end() || it->second.live_ptr != live) return false;
+        erase_alloc_locked(it);
+        return true;
+    }
+    // Caller holds map_mutex exclusively.
+    void erase_alloc_locked(std::unordered_map<uint64_t, AllocEntry>::iterator it) {
+        // Host allocations (and managed memory, which the runtime may back
+        // from host memory) were charged to host_budget before they were made.
+        // A hipHostRegister block stays charged in host_reg_blocks.
         if (it->second.kind == AllocKind::HostMalloc ||
-            it->second.kind == AllocKind::HostRegister)
+            it->second.kind == AllocKind::Managed)
             host_budget.release(it->second.size);
         alloc_map.erase(it);
     }
@@ -873,13 +978,46 @@ struct PlaybackContext {
     // moved or freed before teardown.
     // Keyed by the recorded host address so the same recorded destination
     // reuses one block until a later event asks for more room.
-    struct LandingBuffer {
-        std::unique_ptr<uint8_t[]> cur;   // the block new nodes are given
+    // Blocks start on a 64-byte cache line, as hipHostRegister asks of
+    // registered memory, so two blocks never share one.
+    struct HostBlockFree {
+        void operator()(uint8_t* p) const { ::operator delete[](p, std::align_val_t{64}); }
+    };
+    using HostBlockPtr = std::unique_ptr<uint8_t[], HostBlockFree>;
+    struct HostBlock {
+        HostBlockPtr cur;   // the block new nodes are given
         size_t size = 0;
         // Blocks an earlier node may still point into, outgrown but not freed.
-        std::vector<std::unique_ptr<uint8_t[]>> retired;
+        std::vector<HostBlockPtr> retired;
     };
-    std::unordered_map<uint64_t, LandingBuffer> host_landing_buffers;
+    std::unordered_map<uint64_t, HostBlock> host_landing_buffers;
+    // hipHostRegister backing buffers, kept the same way: a graph node may
+    // still point into one after hipHostUnregister.
+    std::unordered_map<uint64_t, HostBlock> host_reg_blocks;
+
+    // The block for a recorded host address, at least sz bytes, zero-filled
+    // when new. Null when the allocation fails, and with the replay ended
+    // when the budget refuses a new block.
+    void* host_block(std::unordered_map<uint64_t, HostBlock>& blocks, uint64_t rec,
+                     size_t sz, const char* what) {
+        std::unique_lock lk(map_mutex);
+        auto& buf = blocks[rec];
+        if (!buf.cur || buf.size < sz) {
+            // Charged whole, since the outgrown block stays resident.
+            if (!charge_host(sz, what)) return nullptr;
+            HostBlockPtr next(new (std::align_val_t{64}, std::nothrow) uint8_t[sz ? sz : 1]());
+            if (!next) {
+                host_budget.release(sz);
+                fprintf(stderr, "[HRR] no %zu-byte %s for recorded host address 0x%llx\n", sz,
+                        what, static_cast<unsigned long long>(rec));
+                return nullptr;
+            }
+            if (buf.cur) buf.retired.push_back(std::move(buf.cur));
+            buf.cur = std::move(next);
+            buf.size = sz;
+        }
+        return buf.cur.get();
+    }
 
     // A recorded key of 0 is a null host pointer the capturing process passed,
     // and the call it belonged to failed there. Handing back a real buffer
@@ -887,17 +1025,7 @@ struct PlaybackContext {
     // and the caller's null check reports it.
     void* host_landing_buffer(uint64_t rec, size_t sz) {
         if (!rec) return nullptr;
-        std::unique_lock lk(map_mutex);
-        auto& buf = host_landing_buffers[rec];
-        if (!buf.cur || buf.size < sz) {
-            // Charged whole, since the outgrown block stays resident.
-            if (!charge_host(sz, "graph host operand buffer")) return nullptr;
-            auto next = std::make_unique<uint8_t[]>(sz ? sz : 1);
-            if (buf.cur) buf.retired.push_back(std::move(buf.cur));
-            buf.cur = std::move(next);
-            buf.size = sz;
-        }
-        return buf.cur.get();
+        return host_block(host_landing_buffers, rec, sz, "graph host operand buffer");
     }
 
     // ---- Symbol registration and lookup ----
@@ -964,6 +1092,11 @@ struct PlaybackContext {
                            size_t* sz_out, const char* what) const;
     // Load a code object and cache the resulting hipModule_t
     hipModule_t load_module(uint64_t hash_lo, uint64_t hash_hi);
+
+    // Parameter sizes the code object declares for `func`, in order. Empty
+    // means the default, which asks HIP (hipKernelGetParamInfo); a handler test
+    // sets it to stand in for a code object.
+    std::function<void(hipFunction_t, std::vector<size_t>&)> kernel_param_sizes;
 
     // Resolve a playback-time replacement function for a recorded kernel name.
     // Returns a hipFunction_t loaded from a user-supplied .hsaco if `kernel_name`
@@ -1059,6 +1192,14 @@ void* hrr_runtime_symbol(const char* name);
 bool hrr_replayed_recorded_error(PlaybackContext& ctx, const char* api,
                                  int32_t recorded_ret, hipError_t replayed);
 
+// hrr_decode_kernel_args — the kernel-argument decoder a launch and a graph
+// kernel node share, for a handler test to look at what it hands to HIP: each
+// argument's storage ends with 8 zeroed bytes past the recorded size.
+void hrr_decode_kernel_args(PlaybackContext& ctx, const uint8_t* p,
+                            const uint8_t* end, uint16_t num_args,
+                            std::vector<void*>& arg_ptrs,
+                            std::vector<std::vector<uint8_t>>& arg_storage);
+
 // ---------------------------------------------------------------------------
 // hrr_live_ctx — a usable hipCtx_t for a recorded one.
 //
@@ -1072,10 +1213,55 @@ bool hrr_replayed_recorded_error(PlaybackContext& ctx, const char* api,
 // that capture shows failing that way fails the same way here.
 hipCtx_t hrr_live_ctx(uint64_t recorded);
 
+// Replaces the srcArray and dstArray handles of a recorded hipMemcpy3DParms with
+// the live arrays replay created for them. A handle replay never created is an
+// archive-chosen address the runtime would dereference, so it is named on stderr
+// and false is returned; the copy must then not reach HIP. A null handle stays null.
+bool hrr_translate_memcpy3d_arrays(const PlaybackContext& ctx, const char* api,
+                                   hipMemcpy3DParms& parms);
+
 // Thread-local sequence ID — set by dispatch_event before calling any handler.
 // Kernel-launch handlers read this to wait for their submission turn at the
 // exact point of the HIP call, allowing preparation work to run in parallel.
 extern thread_local uint64_t hrr_dispatch_seq;
+
+// Kernel-launch handoff, for dispatch_event. A launch gives up the global turn
+// before its handler runs, so it holds host_free_mu shared from before that
+// (hrr_launch_hold) until the launch call returns: the handler calls
+// hrr_launch_release then, and dispatch_event again on the way out. A free of
+// pinned host memory takes the lock exclusive, so it cannot drop a destination
+// a snapshot is about to be queued for. Both are per thread.
+void hrr_launch_hold(PlaybackContext& ctx);
+void hrr_launch_release();
+// True for the handlers that replay a kernel launch.
+bool hrr_is_launch_handler(hipError_t (*fn)(PlaybackContext&, const uint8_t*));
+
+// Hands the global turn on for one event, which dispatch_event does through
+// this guard. An unordered event hands the turn on at construction, an ordered
+// one on destruction. A kernel launch takes the host_free_mu hold first, before
+// it hands the turn on, and gives it up on destruction if its handler has not.
+class HrrTurnGuard {
+ public:
+  HrrTurnGuard(PlaybackContext& ctx, uint64_t next, bool ordered, bool launch)
+      : ctx_(ctx), next_(next), ordered_(ordered), launch_(launch) {
+    if (!ordered_) {
+      if (launch_) hrr_launch_hold(ctx_);
+      ctx_.next_seq.store(next_, std::memory_order_release);
+    }
+  }
+  ~HrrTurnGuard() {
+    if (ordered_) ctx_.next_seq.store(next_, std::memory_order_release);
+    if (launch_) hrr_launch_release();
+  }
+  HrrTurnGuard(const HrrTurnGuard&) = delete;
+  HrrTurnGuard& operator=(const HrrTurnGuard&) = delete;
+
+ private:
+  PlaybackContext& ctx_;
+  uint64_t next_;
+  bool ordered_;
+  bool launch_;
+};
 
 // Device synchronize with an optional watchdog. When ctx.sync_watchdog_ms == 0
 // this is a plain hipDeviceSynchronize(). Otherwise the (potentially blocking)

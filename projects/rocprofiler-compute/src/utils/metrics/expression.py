@@ -10,7 +10,9 @@ import re
 
 from utils.logger import console_warning
 from utils.utils_common import SUPPORTED_FIELD
-from utils.utils_counter_defs import SUPPORTED_DENOM
+from utils.utils_counter_defs import AMMOLITE_VAR_RE, SUPPORTED_DENOM
+
+RAW_PMC_COLUMN_RE = re.compile(r"raw_pmc_df\[['\"]([^'\"]+)['\"]\]")
 
 
 class InvalidExpressionError(ValueError):
@@ -85,8 +87,6 @@ SUPPORTED_CALL: dict[str, str] = {
     "MOD": "to_mod",
     # String concatenation operation
     "CONCAT": "to_concat",
-    # Threshold-based clamping for multi-pass profiling noise
-    "NOISE_CLAMP": "to_noise_clamp",
 }
 
 
@@ -231,6 +231,23 @@ def build_eval_string(equation: str) -> str:
     return equation_string
 
 
+def columns_read(eval_string: str, build_in_vars: dict[str, str]) -> set[str]:
+    """Return the raw_pmc_df columns an eval string reads. Columns that its
+    built-in variables read count too."""
+    columns = set(RAW_PMC_COLUMN_RE.findall(eval_string))
+    pending = set(AMMOLITE_VAR_RE.findall(eval_string))
+    seen: set[str] = set()
+    while pending:
+        name = pending.pop()
+        seen.add(name)
+        if name not in build_in_vars:
+            continue
+        builtin_string = build_eval_string(build_in_vars[name])
+        columns.update(RAW_PMC_COLUMN_RE.findall(builtin_string))
+        pending.update(set(AMMOLITE_VAR_RE.findall(builtin_string)) - seen)
+    return columns
+
+
 def update_denominator_string(equation: str, normal_unit: str) -> str:
     """Update $denom in equation with runtime normalization unit."""
     if not equation:
@@ -261,75 +278,6 @@ def update_normal_unit_string(equation: str, normal_unit: str) -> str:
         rf"\g<PREFIX> {re.sub('_', ' ', normal_unit)}",
         str(equation),
     )
-
-
-def gen_counter_list(formula: str) -> tuple[bool, list[str]]:
-    function_filter = {
-        "MIN": None,
-        "MAX": None,
-        "AVG": None,
-        "ROUND": None,
-        "TO_INT": None,
-        "GB": None,
-        "STD": None,
-        "GFLOP": None,
-        "GOP": None,
-        "OP": None,
-        "CU": None,
-        "NC": None,
-        "UC": None,
-        "CC": None,
-        "RW": None,
-        "GIOP": None,
-        "GFLOPs": None,
-        "CONCAT": None,
-        "MOD": None,
-    }
-
-    built_in_counter = [
-        "LDS_Per_Workgroup",
-        "Grid_Size",
-        "Workgroup_Size",
-        "Arch_VGPR",
-        "Accum_VGPR",
-        "SGPR",
-        "Scratch_Per_Workitem",
-        "Start_Timestamp",
-        "End_Timestamp",
-    ]
-
-    visited = False
-    counters: list[str] = []
-    if not isinstance(formula, str):
-        return visited, counters
-    try:
-        tree = ast.parse(
-            formula
-            .replace("$normUnit", "SQ_WAVES")
-            .replace("$denom", "SQ_WAVES")
-            .replace(
-                "$numActiveCUs",
-                "TO_INT(MIN((((ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / "
-                "$GRBM_GUI_ACTIVE_PER_XCD})), 0) / $maxWavesPerCU) * 8) + "
-                "MIN(MOD(ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / "
-                "$GRBM_GUI_ACTIVE_PER_XCD)), 0), $maxWavesPerCU), 8)), $numCU))",
-            )
-            .replace("$", "")
-        )
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Name):
-                val = (
-                    str(node.id)[:-4] if str(node.id).endswith("_sum") else str(node.id)
-                )
-                if val.isupper() and val not in function_filter:
-                    counters.append(val)
-                    visited = True
-                if val in built_in_counter:
-                    visited = True
-    except Exception:
-        pass
-
-    return visited, counters
 
 
 def build_metric_value_string(

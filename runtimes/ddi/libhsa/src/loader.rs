@@ -8,12 +8,12 @@
 //! images, and owns executable publication and lifetime. This module owns HSA
 //! handles, C ABI queries, and status translation.
 //!
-//! File readers use rocddi's Linux descriptor provider to snapshot caller
-//! storage while leaving descriptor ownership with the application.
+//! File readers retain one OS file reference while snapshotting caller bytes;
+//! the native handle and cursor remain owned by the application.
 
 use std::collections::HashMap;
 use std::ffi::{CStr, c_char, c_void};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use rocddi::memory::device::MemoryKind;
 #[cfg(test)]
@@ -32,9 +32,12 @@ use rocloader::{
 use crate::ffi::*;
 use crate::runtime::{HsaState, boundary, initialized_mut, lock, map_error};
 
+mod traversal;
+use traversal::ExecutableTraversalGate;
+
 /// Keeps executable handles stable across loader traversal callbacks.
 /// Acquire this before the lifecycle mutex; callbacks may query that mutex.
-pub(crate) static EXECUTABLE_TRAVERSAL: RwLock<()> = RwLock::new(());
+pub(crate) static EXECUTABLE_TRAVERSAL: ExecutableTraversalGate = ExecutableTraversalGate::new();
 
 /// Origin retained for loader queries after bytes have been snapshotted.
 #[derive(Clone)]
@@ -46,14 +49,6 @@ pub(crate) enum ReaderStorage {
         /// Source URI preserved after the descriptor is released.
         uri: Vec<u8>,
     },
-}
-
-impl ReaderStorage {
-    /// Builds this value from file.
-    fn from_file(descriptor: i32, offset: usize, size: usize) -> Self {
-        crate::platform::code_object_file_uri(descriptor, offset, size)
-            .map_or(Self::Memory, |uri| Self::File { uri })
-    }
 }
 
 /// Immutable code-object byte snapshot associated with one reader handle.
@@ -70,17 +65,31 @@ impl Reader {
         (self.bytes.clone(), self.storage.clone())
     }
 
-    /// Owns a file snapshot while preserving its original offset.
-    pub(crate) fn from_file_with_offset(
-        bytes: Vec<u8>,
-        descriptor: i32,
+    /// Takes an immutable bounded snapshot using one retained native file.
+    pub(crate) fn snapshot_file(
+        file: &std::fs::File,
         offset: usize,
         size: usize,
-    ) -> Self {
-        Self {
-            bytes: bytes.into(),
-            storage: ReaderStorage::from_file(descriptor, offset, size),
+    ) -> Result<Self, Status> {
+        if size == 0 {
+            return Err(INVALID_CODE_OBJECT);
         }
+        if size > isize::MAX as usize || offset.checked_add(size).is_none() {
+            return Err(OUT_OF_RESOURCES);
+        }
+        let mut bytes = Vec::new();
+        bytes
+            .try_reserve_exact(size)
+            .map_err(|_| OUT_OF_RESOURCES)?;
+        bytes.resize(size, 0);
+        rocddi::host::file::read_exact_at(file, &mut bytes, offset as u64)
+            .map_err(|_| INVALID_FILE)?;
+        let storage = crate::platform::code_object_file_uri(file, offset, size)
+            .map_or(ReaderStorage::Memory, |uri| ReaderStorage::File { uri });
+        Ok(Self {
+            bytes: bytes.into(),
+            storage,
+        })
     }
 
     /// Owns a snapshot supplied directly by an HSA caller.
@@ -88,14 +97,6 @@ impl Reader {
         Self {
             bytes: bytes.into(),
             storage: ReaderStorage::Memory,
-        }
-    }
-
-    /// Owns a file snapshot and retains its source description.
-    pub(crate) fn from_file(bytes: Vec<u8>, descriptor: i32, size: usize) -> Self {
-        Self {
-            bytes: bytes.into(),
-            storage: ReaderStorage::from_file(descriptor, 0, size),
         }
     }
 }
@@ -173,8 +174,16 @@ pub(crate) struct Executable {
     pub(crate) profile: u32,
     /// Default floating-point rounding mode.
     pub(crate) default_rounding: u32,
+    /// Stable native debugger maps; unlinked before any image owner drops.
+    pub(crate) debugger: crate::debugger::ExecutableDebugInfo,
     /// Loader-owned images and scoped symbol index.
     pub(crate) core: rocloader::Executable<LoadedMetadata>,
+}
+
+impl Drop for Executable {
+    fn drop(&mut self) {
+        self.debugger.unpublish();
+    }
 }
 
 /// Resolves a complete range in a loaded executable to its CPU mapping.
@@ -189,6 +198,25 @@ pub(crate) fn loaded_host_range(
             Ok(None) => {}
             Err(rocloader::Error::InvalidRange) => return Err(INVALID_ALLOCATION),
             Err(error) => return Err(map_loader_error(error)),
+        }
+    }
+    Ok(None)
+}
+
+/// Resolves a loaded range for read-only inspection, including staged images.
+pub(crate) fn loaded_query_host_range(
+    loader: &LoaderState,
+    address: usize,
+) -> Result<Option<usize>, Status> {
+    for executable in loader.executables.values() {
+        for object in executable.core.loaded() {
+            if let Some(host) = object
+                .image
+                .query_host_range(address as u64, 1)
+                .map_err(map_loader_error)?
+            {
+                return Ok(Some(host));
+            }
         }
     }
     Ok(None)
@@ -239,12 +267,20 @@ impl LoaderState {
     }
 
     /// Drops HSA symbol handles before their executable and reader owners.
+    /// The caller must first establish `can_release()`.
     pub(crate) fn clear(&mut self) {
         self.symbols.clear();
         self.executables.clear();
         self.readers.clear();
         self.code_symbols.clear();
         self.code_objects.clear();
+    }
+
+    /// Whether all executable publication work has conclusively retired.
+    pub(crate) fn can_release(&self) -> bool {
+        self.executables
+            .values()
+            .all(|executable| executable.core.can_release())
     }
 
     /// Registers a caller-owned code-object reader snapshot.
@@ -262,11 +298,11 @@ pub(crate) mod code_object;
 pub(crate) mod executable;
 pub(crate) mod query;
 
-use code_object::map_loader_error;
+pub(crate) use code_object::map_loader_error;
 
-#[cfg(any(test, not(target_arch = "x86_64")))]
+#[cfg(any(test, not(hsa_tool_dispatch)))]
 /// Returns the loader extension functions in public ABI table order.
-pub(crate) fn loader_extension_table() -> [usize; 7] {
+pub(crate) fn loader_extension_table() -> [usize; 9] {
     [
         crate::api::loader::query::hsa_ven_amd_loader_query_host_address as *const () as usize,
         crate::api::loader::query::hsa_ven_amd_loader_query_segment_descriptors as *const () as usize,
@@ -276,6 +312,8 @@ pub(crate) fn loader_extension_table() -> [usize; 7] {
         crate::api::loader::query::hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size as *const ()
             as usize,
         crate::api::loader::query::hsa_ven_amd_loader_iterate_executables as *const () as usize,
+        crate::api::loader::query::hsa_ven_amd_loader_code_object_reader_get_load_size as *const () as usize,
+        crate::api::loader::executable::state::hsa_ven_amd_loader_executable_load_agent_code_object_at_address as *const () as usize,
     ]
 }
 

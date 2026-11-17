@@ -350,6 +350,8 @@ std::pair<const Isa*, const Isa*> Isa::supportedIsas() {
        1024, 1024, 16, 106, 106, true, false, 0x049, "gfx12-5-generic"},
       {"gfx1250-strict", true, true, 12, 5, 0, NONE, NONE, 4, 32, 1, 256, 320* Ki, 64, 1024,
        1024, 1024, 16, 106, 106, true, false, 0x0eb},
+      {"gfx1251", true, true, 12, 5, 1, NONE, NONE, 4, 32, 1, 256, 320* Ki, 64, 1024,
+       1024, 1024, 16, 106, 106, true, false, 0x05a, "gfx12-5-generic"},
       {"gfx12-generic", true, true, 12, 0, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024,
        256, 1536, 24, 106, 106, true, true, 0x059},
       {"gfx12-5-generic", true, true, 12, 5, 0, NONE, NONE, 4, 32, 1, 256, 320* Ki, 64, 1024,
@@ -706,7 +708,7 @@ void MemObjMap::AddIpcHandleMemObj(const IpcMemHandle& k, amd::Memory* v) {
 void MemObjMap::RemoveIpcHandleMemObj(amd::Memory* v) {
   std::unique_lock lock(AllocatedLock_);
 
-  for (const auto it : IpcHandleMemObjMap_) {
+  for (const auto& it : IpcHandleMemObjMap_) {
     if (it.second == v) {
       IpcHandleMemObjMap_.erase(it.first);
       break;
@@ -1058,8 +1060,8 @@ Device::Device()
       blitProgram_(nullptr),
       context_(nullptr),
       heap_buffer_(nullptr),
-      initial_heap_buffer_(nullptr),
       arena_mem_obj_(nullptr),
+      initial_heap_buffer_(nullptr),
       vaCacheAccess_(nullptr),
       vaCacheMap_(nullptr),
       index_(0) {

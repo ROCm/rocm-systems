@@ -14,29 +14,11 @@ test_categories:
     # A trailing '.*' anchors the end of the suite name. Dropping the dot widens instead
     # ("Devcomm*" matches all five Devcomm suites).
     test_patterns:
-      # transport/p2p.cc
-      - "P2pMicrotest.*"
-      - "P2pMicrotestIsolated.*"
-      - "P2pCanConnectMicrotest.*"
-      - "P2pCanConnectMicrotestIsolated.*"
-      - "P2pSetupMicrotest.*"
-      - "P2pFreeMicrotest.*"
-      - "P2pShareableBufferMicrotest.*"
-      - "P2pRegisterFamilyMicrotest.*"
-      - "P2pMultiSegmentMicrotest.*"
-      - "P2pProxyRegisterMicrotest.*"
-      - "P2pProxyDeregisterMicrotest.*"
-      - "P2pProxyLifecycleMicrotest.*"
-      - "P2pProxyCeMicrotestIsolated.*"
-      - "GuardOperands/P2pAllocateSkipMarkExport.*"
-      - "MappingStages/P2pImportMapStageFails.*"
-      - "FreshRegistrationMicrotest.*"
-      - "FreshRegistrationLegacyIpcSucceedsFixture.*"
-      - "ConnStepAcquireMicrotest.*"
       # ras/ras.cc
       - "RasMicrotest.*"
       # ras/diagnostics_checks_common.cc
       - "RasDiagnosticsCommonMicrotest.*"
+      - "RasDiagnosticsPathsMicrotest.*"
       # ras/collectives.cc
       - "RasCollectivesMicrotest.*"
       # ras/diagnostics.cc
@@ -49,6 +31,10 @@ test_categories:
       - "RasPeersMicrotest.*"
       # ras/diagnostics_env.cc
       - "RasDiagnosticsEnvMicrotest.*"
+      - "RasDiagnosticsPciMicrotest.*"
+      - "RasDiagnosticsPciIsolatedTest.*"
+      # ras/diagnostics_net.cc
+      - "RasDiagnosticsNetMicrotest.*"
       # ras/client.cc
       - "RasClientMicrotest.*"
       # ras/client_support.cc
@@ -81,8 +67,12 @@ test_categories:
       - "RmaDebugLoggingTest.*"
       - "RmaProxyGatingTest.*"
       - "RmaProxyReadyTest.*"
+      # plugin/rma.cc
+      - "RmaPluginInitTest.*"
       # tuning/tuning_general.cc
       - "TuningGeneralMicrotest.*"
+      # tuning/cost_model.cc
+      - "CostModelMicrotest.*"
       # tuning/tuning.cc
       - "TuningMicrotest.*"
       # plugin/tuner/csv_tuner.cc
@@ -110,6 +100,7 @@ test_categories:
       - "MgmtTaskJobFuncTest.*"
       - "GroupRegisterSymmetricCeInitTest.*"
       - "GroupRegisterSymmetricTest.*"
+      - "GroupRegisterSymmetricDevCommTest.*"
       - "GroupCleanupTest.*"
       - "AsyncJobLaunchDirectTest.*"
       # rccl_wrap.cc
@@ -117,12 +108,11 @@ test_categories:
       - "WrapMicrotestIsolated.*"
       # misc/gdr_probe.cc
       - "GdrProbeTest.*"
-      # transport/nvls.cc (rccl-UnitTestsMicroNvls)
-      - "NvlsHipStubTest.*"
       # misc/ionicdvsymbols.cc, misc/mlx5dvsymbols.cc
       - "DvSymbolsTestIsolated.*"
       # ce_coll.cc (rccl-UnitTestsMicroCe)
       - "CeCollMicrotest.*"
+      - "CeInitMicrotest.*"
       - "LaunchPaths/CeAlltoAllvSyncMicrotest.*"
       # graph/rccl_graph_gen.cc
       - "GraphGenPermuteTest.*"
@@ -149,6 +139,10 @@ test_categories:
       - "Win*"
       # test/common/ProcessIsolatedTestRunner.cpp
       - "ProcessIsolatedRunnerMicrotest.*"
+      # register/*.cc
+      - "Register*"
+      # test/host/host_test_dispatch.cc (rccl-UnitTestsMicroHostDispatch)
+      - "HostDispatch*"
     exclude_windows:
       - "*"
     labels:

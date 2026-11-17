@@ -1,0 +1,44 @@
+# rccl-UnitTestsMicroSearch — shared/ctest schema.
+
+test_categories:
+  quick: &micro_search_quick
+    description: "Smoke — host-only src/graph/search.cc micro-tests (channel search and XML-graph import), a few seconds."
+    test_patterns:
+      - "Search*"
+    exclude_windows:
+      - "*"
+    labels:
+      - "rccl"
+      - "quick"
+      - "smoke"
+      - "precheck"
+      - "microtest"
+  standard:
+    <<: *micro_search_quick
+    labels:
+      - "rccl"
+      - "standard"
+      - "regression"
+      - "microtest"
+  comprehensive:
+    <<: *micro_search_quick
+    labels:
+      - "rccl"
+      - "comprehensive"
+      - "comprehensive_regression"
+      - "microtest"
+  full:
+    <<: *micro_search_quick
+    labels:
+      - "rccl"
+      - "full"
+      - "full_regression"
+      - "microtest"
+
+execution_settings:
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 600
+    standard: 600
+    comprehensive: 600
+    full: 600

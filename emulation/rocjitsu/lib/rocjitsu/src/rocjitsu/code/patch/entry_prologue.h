@@ -31,9 +31,9 @@ struct DbiEntryStorage {
 };
 
 /// @brief Lowest SGPR index above everything the kernel's own code and ABI name:
-///        @ref explicit_ordinary_sgpr_bound folded with the descriptor's
-///        user-SGPR block and its enabled system SGPRs (workgroup IDs and
-///        workgroup info).
+///        @ref explicit_ordinary_sgpr_bound at the kernel's wave size, folded
+///        with the descriptor's user-SGPR block and its enabled system SGPRs
+///        (workgroup IDs and workgroup info).
 ///
 /// @details Deliberately not COMPUTE_PGM_RSRC1's SGPR count. That is an
 /// allocation total whose tail can hold VCC, flat scratch, XNACK and granularity
