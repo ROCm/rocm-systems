@@ -28,6 +28,8 @@
 #include <array>
 #include <bit>
 #include <cassert>
+#include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <initializer_list>
 #include <limits>
@@ -1931,6 +1933,26 @@ ExpandResult expand_dot2_f32_bf16_cdna4_to_cdna3(const Instruction &inst, uint32
   return lower_dot2_f32_bf16_cdna4_to_cdna3(inst, liveness, context);
 }
 
+template <uint32_t MatrixBlockLanes>
+ExpandResult check_mfma_a_broadcast_cdna4_to_cdna3(const Instruction &inst, uint32_t, uint64_t,
+                                                   std::span<const uint8_t>,
+                                                   const LivenessAnalysis &, TranslationContext &,
+                                                   const LaneLayout *, const LaneLayout *) {
+  const uint32_t *raw = inst.raw_encoding();
+  if (!raw || static_cast<size_t>(inst.size()) < sizeof(cdna4::Vop3pMfmaMachineInst))
+    return ExpandResult::failed("Could not decode source MFMA broadcast fields");
+  cdna4::Vop3pMfmaMachineInst mfma{};
+  std::memcpy(&mfma, raw, sizeof(mfma));
+  // MI300X uses adjacent matrix blocks; gfx950's selection is unverified.
+  // The full-wave and adjacent-block models agree when broadcasting is off
+  // or covers every matrix block, but copying partial broadcasts can change A.
+  if (mfma.cbsz != 0 && (64u >> mfma.cbsz) > MatrixBlockLanes)
+    return ExpandResult::failed(
+        "MFMA A broadcast lane selection is unverified for gfx950-to-gfx942 translation",
+        {"Qualify gfx950 A broadcasting before copying or lowering these controls."});
+  return ExpandResult::not_handled();
+}
+
 // Table MUST be sorted by (src_encoding_id, src_opcode) for binary search.
 constexpr TranslationRule kExpandRules_cdna4_to_cdna3[] = {
     {cdna4::encoding::kVop1, cdna4::kVPermlane16SwapB32Vop1, RuleAction::Expand, 0, 0, nullptr,
@@ -1971,10 +1993,26 @@ constexpr TranslationRule kExpandRules_cdna4_to_cdna3[] = {
      nullptr, expand_mfma_f32_16x16x32_bf16_cdna4_to_cdna3, nullptr, nullptr},
     {cdna4::encoding::kVop3pMfma, cdna4::kVMfmaF3232x32x16Bf16Vop3pMfma, RuleAction::Expand, 0, 0,
      nullptr, expand_mfma_f32_32x32x16_bf16_cdna4_to_cdna3, nullptr, nullptr},
+    {cdna4::encoding::kVop3pMfma, cdna4::kVMfmaF3216x16x14bF32Vop3pMfma, RuleAction::Expand, 0, 0,
+     nullptr, check_mfma_a_broadcast_cdna4_to_cdna3<16>, nullptr, nullptr, false},
+    {cdna4::encoding::kVop3pMfma, cdna4::kVMfmaF324x4x116bF32Vop3pMfma, RuleAction::Expand, 0, 0,
+     nullptr, check_mfma_a_broadcast_cdna4_to_cdna3<4>, nullptr, nullptr, false},
+    {cdna4::encoding::kVop3pMfma, cdna4::kVMfmaF3216x16x44bF16Vop3pMfma, RuleAction::Expand, 0, 0,
+     nullptr, check_mfma_a_broadcast_cdna4_to_cdna3<16>, nullptr, nullptr, false},
+    {cdna4::encoding::kVop3pMfma, cdna4::kVMfmaF324x4x416bF16Vop3pMfma, RuleAction::Expand, 0, 0,
+     nullptr, check_mfma_a_broadcast_cdna4_to_cdna3<4>, nullptr, nullptr, false},
+    {cdna4::encoding::kVop3pMfma, cdna4::kVMfmaI3216x16x44bI8Vop3pMfma, RuleAction::Expand, 0, 0,
+     nullptr, check_mfma_a_broadcast_cdna4_to_cdna3<16>, nullptr, nullptr, false},
+    {cdna4::encoding::kVop3pMfma, cdna4::kVMfmaI324x4x416bI8Vop3pMfma, RuleAction::Expand, 0, 0,
+     nullptr, check_mfma_a_broadcast_cdna4_to_cdna3<4>, nullptr, nullptr, false},
     {cdna4::encoding::kVop3pMfma, cdna4::kVMfmaF3216x16x32F16Vop3pMfma, RuleAction::Expand, 0, 0,
      nullptr, expand_mfma_f32_16x16x32_f16_cdna4_to_cdna3, nullptr, nullptr},
     {cdna4::encoding::kVop3pMfma, cdna4::kVMfmaF3232x32x16F16Vop3pMfma, RuleAction::Expand, 0, 0,
      nullptr, expand_mfma_f32_32x32x16_f16_cdna4_to_cdna3, nullptr, nullptr},
+    {cdna4::encoding::kVop3pMfma, cdna4::kVMfmaF3216x16x44bBf16Vop3pMfma, RuleAction::Expand, 0, 0,
+     nullptr, check_mfma_a_broadcast_cdna4_to_cdna3<16>, nullptr, nullptr, false},
+    {cdna4::encoding::kVop3pMfma, cdna4::kVMfmaF324x4x416bBf16Vop3pMfma, RuleAction::Expand, 0, 0,
+     nullptr, check_mfma_a_broadcast_cdna4_to_cdna3<4>, nullptr, nullptr, false},
     {cdna4::encoding::kDsHi3, cdna4::kDsReadB64TrB16Ds, RuleAction::Expand, 0, 0, nullptr,
      expand_ds_read_b64_tr_b16_cdna4_to_cdna3, nullptr, nullptr},
     {cdna4::encoding::kDsHi7, cdna4::kDsReadB64TrB16Ds, RuleAction::Expand, 0, 0, nullptr,

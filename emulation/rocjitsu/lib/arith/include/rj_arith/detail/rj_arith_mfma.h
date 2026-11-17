@@ -55,9 +55,9 @@ constexpr uint64_t RJ_ARITH_MFMA_BLGP_SHIFT = 7ULL;
 
 // Batched gfx942 F32/F16/BF16/I8 forms broadcast within adjacent M-lane blocks.
 // Set this control for those forms; other entry points reject it. Leave it clear
-// for gfx950 to retain full-wave broadcasting. MI300X captures agree with the
-// CDNA3 ISA (5-August-2025) section 13.3.6.1 ABID description, which contradicts
-// the full-wave formula in section 7.1.5.1.
+// for gfx950's existing full-wave model, pending hardware validation. MI300X
+// captures agree with the CDNA3 ISA (5-August-2025) section 13.3.6.1 ABID
+// description, which contradicts the full-wave formula in section 7.1.5.1.
 constexpr uint64_t RJ_ARITH_MFMA_A_ADJACENT_BLOCKS = 1ULL << 10;
 
 // Arithmetic and register reads share this Wave64 mapping. The caller supplies

@@ -257,10 +257,11 @@ TEST_P(IsaDiagnosticsTest, MfmaBroadcastBlockBoundary) {
   }
 }
 
-TEST_P(IsaDiagnosticsTest, Gfx942MfmaBroadcastMatchesHardware) {
+TEST_P(IsaDiagnosticsTest, BatchedMfmaBroadcastUsesTargetPolicy) {
   if (GetParam() != ROCJITSU_CODE_ARCH_CDNA3 && GetParam() != ROCJITSU_CODE_ARCH_CDNA4)
     GTEST_SKIP();
   // CBSZ=2, ABID=1 on gfx942 selects A lanes 4-7, 20-23, 36-39 and 52-55.
+  // The gfx950 expectation preserves the emulator's model, pending hardware qualification.
   constexpr std::array<uint32_t, 16> first_rows = {5,  5,  5,  5,  21, 21, 21, 21,
                                                    37, 37, 37, 37, 53, 53, 53, 53};
   for (uint64_t exec : {~uint64_t{0}, uint64_t{1}, uint64_t{0}}) {

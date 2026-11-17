@@ -1016,6 +1016,71 @@ TEST(BinaryTranslatorE2E, LegacyAtomicMinMaxRequiresSemanticExpansion) {
   }
 }
 
+TEST(BinaryTranslatorE2E, MfmaABroadcastTranslationRequiresAgreedLaneSelection) {
+  struct BroadcastCase {
+    uint16_t opcode;
+    uint8_t max_cbsz;
+  };
+  constexpr std::array<BroadcastCase, 12> cases = {{
+      {cdna4::kVMfmaF324x4x116bF32Vop3pMfma, 4},
+      {cdna4::kVMfmaF3216x16x14bF32Vop3pMfma, 2},
+      {cdna4::kVMfmaF3232x32x12bF32Vop3pMfma, 1},
+      {cdna4::kVMfmaF324x4x416bF16Vop3pMfma, 4},
+      {cdna4::kVMfmaF3216x16x44bF16Vop3pMfma, 2},
+      {cdna4::kVMfmaF3232x32x42bF16Vop3pMfma, 1},
+      {cdna4::kVMfmaF324x4x416bBf16Vop3pMfma, 4},
+      {cdna4::kVMfmaF3216x16x44bBf16Vop3pMfma, 2},
+      {cdna4::kVMfmaF3232x32x42bBf16Vop3pMfma, 1},
+      {cdna4::kVMfmaI324x4x416bI8Vop3pMfma, 4},
+      {cdna4::kVMfmaI3216x16x44bI8Vop3pMfma, 2},
+      {cdna4::kVMfmaI3232x32x42bI8Vop3pMfma, 1},
+  }};
+  for (const BroadcastCase &test : cases) {
+    for (uint8_t cbsz = 0; cbsz <= test.max_cbsz; ++cbsz) {
+      for (uint8_t abid = 0; abid < (1u << cbsz); ++abid) {
+        for (uint8_t blgp : {0, 7}) {
+          SCOPED_TRACE(::testing::Message() << "opcode=" << test.opcode << " cbsz=" << int(cbsz)
+                                            << " abid=" << int(abid) << " blgp=" << int(blgp));
+          const std::array<uint32_t, 2> mfma = cdna4::build_vop3p_mfma(test.opcode, {.vdst = 32,
+                                                                                     .cbsz = cbsz,
+                                                                                     .abid = abid,
+                                                                                     .src0 = 256,
+                                                                                     .src1 = 258,
+                                                                                     .src2 = 128,
+                                                                                     .blgp = blgp});
+          const std::vector<uint8_t> image = make_minimal_amdgpu_elf_with_descriptor_after_text(
+              {mfma[0], mfma[1], build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4).value()});
+          AmdGpuCodeObject source(image.data(), image.size());
+          ASSERT_TRUE(source.is_valid());
+          BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+          const TranslatedCodeObject result = translator.translate(source);
+          // Both interpretations select the same A lanes with no broadcast or
+          // one source block broadcast to all matrix blocks in the wave.
+          if (cbsz != 0 && cbsz != test.max_cbsz) {
+            EXPECT_FALSE(result.dispatchable());
+            EXPECT_EQ(result.elf_bytes, image);
+            EXPECT_TRUE(has_error_containing(
+                result, DiagnosticKind::ExpandFailed,
+                "MFMA A broadcast lane selection is unverified for gfx950-to-gfx942 translation"));
+            continue;
+          }
+          ASSERT_TRUE(result.dispatchable())
+              << (result.diagnostics.empty() ? "" : result.diagnostics.front().message);
+          AmdGpuCodeObject output(result.elf_bytes.data(), result.elf_bytes.size());
+          ASSERT_TRUE(output.is_valid());
+          EXPECT_EQ(output.target_id(), ROCJITSU_CODE_TARGET_GFX942);
+          ASSERT_EQ(output.text_sections().size(), 1u);
+          ASSERT_GE(output.text_sections().front()->size(), sizeof(mfma));
+          std::array<uint32_t, 2> translated{};
+          std::memcpy(translated.data(), output.text_sections().front()->data(),
+                      sizeof(translated));
+          EXPECT_EQ(translated, mfma);
+        }
+      }
+    }
+  }
+}
+
 TEST(BinaryTranslatorE2E, LegacyCacheAtomicAddRequiresSemanticExpansion) {
   // CDNA4 and RDNA4 L2 F32 ADD both keep input denormals, but their FLAT-to-LDS
   // denormal policies still differ, so the instruction needs an expansion.
