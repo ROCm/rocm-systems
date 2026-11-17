@@ -38,6 +38,7 @@
 
 #include "gfx11_mimg_test_common.h"
 
+#include <array>
 #include <cstring>
 #include <fstream>
 #include <iterator>
@@ -109,6 +110,95 @@ TEST_F(MemoryWaitScoreboardTest, CancellingTheLatestIssuePreservesOlderCounterPo
   EXPECT_EQ(hazards[0].reg.index, 6u);
 }
 
+TEST_F(MemoryWaitScoreboardTest, RetainedFindingsPreserveDependenciesUntilAWait) {
+  load(5, WaitCounterKind::Load, 0b110, 0b0111);
+  for (uint64_t pc : {0x200, 0x204}) {
+    state.bind(
+        pc, &hazards,
+        [](void *p, const auto &hazard) { static_cast<decltype(hazards) *>(p)->push_back(hazard); },
+        MemoryWaitScoreboard::Recovery::Retain);
+    read(5, 0b101, 0b1110);
+    ASSERT_EQ(state.events().size(), 1u);
+    EXPECT_FALSE(state.events().front().reported);
+    EXPECT_EQ(state.outstanding(WaitCounterKind::Load), 1u);
+  }
+  ASSERT_EQ(hazards.size(), 2u);
+  EXPECT_EQ(hazards[0].consumer_pc, 0x200u);
+  EXPECT_EQ(hazards[1].consumer_pc, 0x204u);
+  for (const auto &hazard : hazards) {
+    EXPECT_EQ(hazard.producer.pc, 0x100u);
+    EXPECT_EQ(hazard.lanes, 0b100u);
+    EXPECT_EQ(hazard.bytes, 0b0110u);
+    EXPECT_EQ(hazard.required_wait, 0u);
+  }
+  state.wait(WaitCounterKind::Load, 0);
+  EXPECT_TRUE(state.empty());
+  EXPECT_EQ(state.outstanding(WaitCounterKind::Load), 0u);
+  read(5);
+  EXPECT_EQ(hazards.size(), 2u);
+}
+
+TEST_F(MemoryWaitScoreboardTest, DefaultRecoveryDoesNotProveCounterCompletion) {
+  load(5);
+  read(5);
+  ASSERT_EQ(hazards.size(), 1u);
+  EXPECT_TRUE(state.empty());
+  EXPECT_EQ(state.outstanding(WaitCounterKind::Load), 1u);
+  read(5);
+  EXPECT_EQ(hazards.size(), 1u);
+  state.wait(WaitCounterKind::Load, 0);
+  EXPECT_EQ(state.outstanding(WaitCounterKind::Load), 0u);
+}
+
+TEST_F(MemoryWaitScoreboardTest, RetainedFindingsOwnInstructionEvidenceAndExactRegisterOverlap) {
+  std::array<uint32_t, 2> words{0x11111111, 0x22222222};
+  const auto bind = [&](uint64_t pc) {
+    state.bind(
+        pc, &hazards,
+        [](void *p, const auto &hazard) { static_cast<decltype(hazards) *>(p)->push_back(hazard); },
+        MemoryWaitScoreboard::Recovery::Retain, InstructionSnapshot(pc, words));
+  };
+  bind(0x100);
+  state.add({state.issue(WaitCounterKind::Load),
+             0x100,
+             0b110,
+             {RegClass::VGPR, 4, 4},
+             WaitCounterKind::Load,
+             0x3});
+  words = {0x33333333, 0x44444444};
+  bind(0x200);
+  state.access({RegClass::VGPR, 6, 4}, 0b101, 0xf, true);
+  words.fill(0);
+  state.clear();
+  ASSERT_EQ(hazards.size(), 1u);
+  const auto &hazard = hazards.front();
+  EXPECT_EQ(hazard.reg, (RegisterRef{RegClass::VGPR, 6, 2}));
+  EXPECT_EQ(hazard.lanes, 0b100u);
+  EXPECT_EQ(hazard.bytes, 0x3u);
+  ASSERT_TRUE(hazard.producer.instruction);
+  EXPECT_EQ(hazard.producer.instruction->pc(), 0x100u);
+  EXPECT_EQ(hazard.producer.instruction->encoding()[0], 0x11111111u);
+  ASSERT_TRUE(hazard.consumer_instruction);
+  EXPECT_EQ(hazard.consumer_instruction->pc(), 0x200u);
+  EXPECT_EQ(hazard.consumer_instruction->encoding()[0], 0x33333333u);
+}
+
+TEST_F(MemoryWaitScoreboardTest, InstructionEvidenceIsNotBorrowedFromAnotherPcOrClearedWave) {
+  const std::array<uint32_t, 1> words{0xbf800000};
+  state.bind(0x300, nullptr, nullptr, MemoryWaitScoreboard::Recovery::Retain,
+             InstructionSnapshot(0x300, words));
+  load(5);
+  EXPECT_FALSE(state.events().front().instruction);
+  state.clear();
+  state.add({state.issue(WaitCounterKind::Load),
+             0x300,
+             1,
+             {RegClass::VGPR, 5, 1},
+             WaitCounterKind::Load,
+             0xf});
+  EXPECT_FALSE(state.events().front().instruction);
+}
+
 TEST_F(MemoryWaitScoreboardTest, CancellationRestoresACoalescedProducerAtTheSamePc) {
   load(5);
   const auto older = state.events().front();
@@ -156,7 +246,7 @@ TEST_F(MemoryWaitScoreboardTest, CancellationPreservesOlderScalarReplaySources) 
                {RegClass::SGPR, static_cast<uint16_t>(i), 1},
                WaitCounterKind::Km,
                0xf});
-    const auto translation = state.issue_xcnt(WaitCounterKind::Km, true);
+    const auto translation = state.issue_xcnt(std::array{WaitCounterKind::Km}, true);
     state.add({translation, pc, ~uint64_t{0}, {RegClass::SGPR, 2, 1}, WaitCounterKind::X, 0xf});
   }
   const std::array counters{WaitCounterType::KMCNT};
@@ -173,12 +263,12 @@ TEST_F(MemoryWaitScoreboardTest, CancellationPreservesOlderScalarReplaySources) 
 
 TEST_F(MemoryWaitScoreboardTest, IssueSnapshotPreservesOlderCompletionAndReplayPositions) {
   load(5);
-  const auto older_x = state.issue_xcnt(WaitCounterKind::Load, false);
+  const auto older_x = state.issue_xcnt(std::array{WaitCounterKind::Load}, false);
   state.add({older_x, 0x100, 1, {RegClass::VGPR, 7, 1}, WaitCounterKind::X, 0xf});
   const auto before = state.issue_snapshot();
   const auto completion = state.issue(WaitCounterKind::Ds);
   state.add({completion, 0x104, 1, {RegClass::VGPR, 6, 1}, WaitCounterKind::Ds, 0xf});
-  const auto replay = state.issue_xcnt(WaitCounterKind::Ds, false);
+  const auto replay = state.issue_xcnt(std::array{WaitCounterKind::Ds}, false);
   state.add({replay, 0x104, 1, {RegClass::VGPR, 8, 1}, WaitCounterKind::X, 0xf});
   ASSERT_TRUE(state.cancel_last_issue(0x104, before));
   EXPECT_EQ(state.outstanding(WaitCounterKind::Load), 1u);
@@ -229,13 +319,12 @@ TEST_F(MemoryWaitScoreboardTest, PartialWaitReleasesOnlyTheOlderLoad) {
 }
 
 TEST_F(MemoryWaitScoreboardTest, WideAccessReportsThePendingRegisterIntersection) {
-  for (auto cls : {RegClass::VGPR, RegClass::SGPR})
+  for (auto cls : {RegClass::VGPR, RegClass::SGPR, RegClass::TTMP})
     for (bool write : {false, true})
       for (const auto &[producer, consumer, overlap] :
-           {std::tuple{RegisterRef{cls, 51, 1}, RegisterRef{cls, 50, 4}, RegisterRef{cls, 51, 1}},
-            std::tuple{RegisterRef{cls, 48, 4}, RegisterRef{cls, 50, 4}, RegisterRef{cls, 50, 2}},
-            std::tuple{RegisterRef{cls, 50, 4}, RegisterRef{cls, 51, 1},
-                       RegisterRef{cls, 51, 1}}}) {
+           {std::tuple{RegisterRef{cls, 5, 1}, RegisterRef{cls, 4, 4}, RegisterRef{cls, 5, 1}},
+            std::tuple{RegisterRef{cls, 2, 4}, RegisterRef{cls, 4, 4}, RegisterRef{cls, 4, 2}},
+            std::tuple{RegisterRef{cls, 4, 4}, RegisterRef{cls, 5, 1}, RegisterRef{cls, 5, 1}}}) {
         SCOPED_TRACE(static_cast<unsigned>(cls));
         SCOPED_TRACE(write);
         SCOPED_TRACE(producer.index);
@@ -507,7 +596,7 @@ TEST_F(MemoryWaitScoreboardTest, AsyncDirectionsAndLegacyImageTypesHaveSeparateC
 
 TEST_F(MemoryWaitScoreboardTest, CompletionBackpressureAlsoProvesReplayTranslation) {
   state.issue(WaitCounterKind::Load);
-  state.add({state.issue_xcnt(WaitCounterKind::Load, false),
+  state.add({state.issue_xcnt(std::array{WaitCounterKind::Load}, false),
              0x100,
              1,
              {RegClass::VGPR, 5, 1},
@@ -1327,6 +1416,77 @@ TEST(MemoryWaitExecutionTest, FormattedLoadsTrackRegisterLayoutInsteadOfMemoryFo
   }
 }
 
+TEST(MemoryWaitExecutionTest, D16ResultDependenciesFollowTargetEccWriteback) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA4}) {
+    SCOPED_TRACE(static_cast<unsigned>(arch));
+    GpuMemory memory("d16_ecc_wait_memory");
+    L2Cache l2("d16_ecc_wait_l2");
+    ComputeUnitCore::Config config{};
+    config.arch = arch;
+    config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 128;
+    config.vgprs_per_wf = 32;
+    std::unique_ptr<ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "d16_ecc_wait_cu", config, &memory, &l2));
+    auto *wave = cu->dispatch_wf(0, 0x100, 128, 32, arch == ROCJITSU_CODE_ARCH_CDNA4 ? 64 : 32);
+    ASSERT_NE(wave, nullptr);
+    wave->set_exec(1);
+    const bool ecc = arch != ROCJITSU_CODE_ARCH_RDNA4;
+    ASSERT_EQ(cu->sram_ecc(), ecc);
+    auto decoder = Decoder::create(arch);
+    auto &state = wave->ensure_memory_wait_scoreboard();
+    for (unsigned form = 0; form < 3; ++form) {
+      // CDNA5 has low/high D16 loads, but no packed formatted loads.
+      if (form == 2 && arch == ROCJITSU_CODE_ARCH_CDNA5)
+        continue;
+      std::vector<uint32_t> words;
+      auto set_words = [&](auto encoded) { words.assign(encoded.begin(), encoded.end()); };
+      if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+        const uint16_t opcodes[] = {cdna4::kBufferLoadUbyteD16Mubuf,
+                                    cdna4::kBufferLoadUbyteD16HiMubuf,
+                                    cdna4::kBufferLoadFormatD16XyzMubuf};
+        set_words(cdna4::build_mubuf(opcodes[form], {.vdata = 4, .srsrc = 0, .soffset = 128}));
+      } else if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+        set_words(cdna5::build_vbuffer(form == 0 ? cdna5::kBufferLoadD16U8Vbuffer
+                                                 : cdna5::kBufferLoadD16HiU8Vbuffer,
+                                       {.soffset = 124, .vdata = 4}));
+      } else {
+        const uint16_t opcodes[] = {rdna4::kBufferLoadD16U8Vbuffer,
+                                    rdna4::kBufferLoadD16HiU8Vbuffer,
+                                    rdna4::kBufferLoadD16FormatXyzVbuffer};
+        set_words(rdna4::build_vbuffer(opcodes[form], {.soffset = 124, .vdata = 4}));
+      }
+      util::StringDiagnostic error;
+      auto decoded = decoder->decode_window(words, wave->pc, error.emitter());
+      ASSERT_TRUE(decoded.succeeded()) << error.message();
+      SCOPED_TRACE(decoded.value()->mnemonic());
+      const uint8_t first = ecc || form == 2 ? 0xf : form == 1 ? 0xc : 0x3;
+      const uint8_t second = form == 2 ? (ecc ? 0xf : 0x3) : 0;
+      const std::array<uint8_t, 3> expected{first, second, 0};
+      for (uint16_t offset = 0; offset < expected.size(); ++offset)
+        for (uint8_t bytes : {0x3, 0xc})
+          for (uint64_t lanes : {1, 2})
+            for (bool write : {false, true})
+              for (bool waited : {false, true}) {
+                state.clear();
+                cu->track_memory_wait(*decoded.value(), *wave);
+                unsigned reports = 0;
+                state.bind(0x200, &reports,
+                           [](void *p, const auto &) { ++*static_cast<unsigned *>(p); });
+                if (waited)
+                  state.wait(WaitCounterKind::Load, 0);
+                state.access({RegClass::VGPR, static_cast<uint16_t>(4 + offset), 1}, lanes, bytes,
+                             write);
+                EXPECT_EQ(reports, !waited && lanes == 1 && (expected[offset] & bytes) ? 1u : 0u)
+                    << "offset=" << offset << " bytes=" << unsigned(bytes) << " lanes=" << lanes
+                    << " write=" << write << " waited=" << waited;
+              }
+    }
+  }
+}
+
 TEST(MemoryWaitExecutionTest, LdsStackTracksOnePointerWordAlongsideTwoPoppedNodes) {
   GpuMemory memory("stack_wait_memory");
   L2Cache l2("stack_wait_l2");
@@ -1550,7 +1710,7 @@ TEST(MemoryWaitExecutionTest, MessageResultsCheckM0AndOnlyConsumedExecWords) {
   }
 }
 
-TEST(MemoryWaitExecutionTest, CounterOnlyCacheOperationDoesNotProveOlderLoadComplete) {
+TEST(MemoryWaitExecutionTest, CounterOnlyCacheOperationSharesLoadCompletionOrder) {
   using namespace rocjitsu::amdhsa;
   for (bool zero_exec : {false, true}) {
     for (unsigned threshold : {0u, 1u, 2u}) {
@@ -1583,9 +1743,8 @@ TEST(MemoryWaitExecutionTest, CounterOnlyCacheOperationDoesNotProveOlderLoadComp
       step_until_halted(*sim.engine, *sim.cu());
       ASSERT_EQ(sim.snapshot->snapshots().size(), 1u);
       EXPECT_EQ(sim.snapshot->snapshots().front().vgpr(3, 0), 0x12345678u);
-      // Invalidation contributes to LOADcnt even with zero EXEC, but does not
-      // share the load's completion order. Only a zero wait proves it ready.
-      EXPECT_EQ(sim.cu()->memory_wait_diagnostic_count(), threshold != 0 ? 1u : 0u);
+      // Invalidation takes an ordered LOADcnt slot even with zero EXEC.
+      EXPECT_EQ(sim.cu()->memory_wait_diagnostic_count(), threshold > 1 ? 1u : 0u);
     }
   }
 }
@@ -1785,8 +1944,10 @@ TEST(MemoryWaitExecutionTest, FlatLanesHaveSeparateDependenciesAndCounterPartici
         ASSERT_NO_FATAL_FAILURE(inst.initialize(2));
         cu->track_memory_wait(inst, *wf);
         auto &state = *wf->memory_wait_scoreboard();
-        EXPECT_EQ(state.outstanding(WaitCounterKind::Load), shared_lanes != 0b1111 ? 1u : 0u);
-        EXPECT_EQ(state.outstanding(WaitCounterKind::Ds), shared_lanes != 0 ? 1u : 0u);
+        EXPECT_EQ(state.outstanding(WaitCounterKind::Load),
+                  arch == ROCJITSU_CODE_ARCH_CDNA5 || shared_lanes != 0b1111 ? 1u : 0u);
+        EXPECT_EQ(state.outstanding(WaitCounterKind::Ds),
+                  arch == ROCJITSU_CODE_ARCH_CDNA5 || shared_lanes != 0 ? 1u : 0u);
         std::vector<MemoryWaitScoreboard::Hazard> hazards;
         state.bind(0x200, &hazards, [](void *p, const auto &hazard) {
           static_cast<decltype(hazards) *>(p)->push_back(hazard);
@@ -1800,7 +1961,8 @@ TEST(MemoryWaitExecutionTest, FlatLanesHaveSeparateDependenciesAndCounterPartici
         state.wait(waited, 0);
         state.access(result, ready_lanes, 0xf, false);
         EXPECT_TRUE(hazards.empty());
-        EXPECT_EQ(state.outstanding(pending), pending_lanes ? 1u : 0u);
+        EXPECT_EQ(state.outstanding(pending),
+                  arch == ROCJITSU_CODE_ARCH_CDNA5 || pending_lanes ? 1u : 0u);
         state.access(result, pending_lanes, 0xf, false);
         ASSERT_EQ(hazards.size(), pending_lanes ? 1u : 0u);
         if (pending_lanes) {
@@ -1818,10 +1980,17 @@ TEST(MemoryWaitExecutionTest, FlatLanesHaveSeparateDependenciesAndCounterPartici
 TEST(MemoryWaitExecutionTest, DecodedFlatPlansMatchExecutedAddressesBeforeAnyRegisterAccess) {
   class Observer final : public ExecutionPlugin {
   public:
+    bool observes_vgpr_reads() const override { return true; }
+    bool observes_scalar_register_reads() const override { return true; }
+    bool supports_async_instructions() const override { return false; }
+
     Observer() : ExecutionPlugin("flat_planning_observer") {}
     unsigned reads = 0;
     void onAmdgpuReadVgprLanes(const Wavefront *, uint32_t, uint64_t, uint8_t) override { ++reads; }
-    void onAmdgpuReadSgpr(const Wavefront *, uint32_t) override { ++reads; }
+    void onAmdgpuReadScalarRegister(const Wavefront *, RegisterRef reg) override {
+      if (reg.cls == RegClass::SGPR)
+        reads += reg.width;
+    }
   };
   constexpr uint64_t shared = uint64_t{2} << 32;
   constexpr uint64_t private_base = uint64_t{3} << 32;
@@ -1936,9 +2105,10 @@ TEST(MemoryWaitExecutionTest, DecodedFlatPlansMatchExecutedAddressesBeforeAnyReg
           state.check_instruction(inst, *wf);
           cu->track_memory_wait(inst, *wf);
           EXPECT_EQ(observed->reads, 0u);
-          EXPECT_EQ(state.outstanding(WaitCounterKind::Ds), planned.shared ? 1u : 0u);
+          EXPECT_EQ(state.outstanding(WaitCounterKind::Ds),
+                    (cdna5 && exec) || planned.shared ? 1u : 0u);
           EXPECT_EQ(state.outstanding(WaitCounterKind::Load),
-                    planned.requests & ~planned.shared ? 1u : 0u);
+                    (cdna5 && exec) || (planned.requests & ~planned.shared) ? 1u : 0u);
           inst.execute(inst, wf);
           ASSERT_NE(inst.data(), nullptr);
           const auto &data = *inst.data_as<VectorMemState>();
@@ -2010,7 +2180,7 @@ TEST(MemoryWaitExecutionTest, FlatLdsWaitUsesTheWavesAperture) {
     auto &state = wf->ensure_memory_wait_scoreboard();
     cu->track_memory_wait(*decoded.value(), *wf);
     EXPECT_EQ(state.outstanding(WaitCounterKind::Ds), 1u);
-    EXPECT_EQ(state.outstanding(WaitCounterKind::Load), 0u);
+    EXPECT_EQ(state.outstanding(WaitCounterKind::Load), 1u);
     std::vector<MemoryWaitScoreboard::Hazard> hazards;
     state.bind(0x200, &hazards, [](void *p, const auto &hazard) {
       static_cast<decltype(hazards) *>(p)->push_back(hazard);
@@ -2050,7 +2220,7 @@ struct MemoryWaitOrderingTest : ::testing::Test {
   }
   void track(Instruction &inst) {
     auto &state = wf->ensure_memory_wait_scoreboard();
-    state.before(inst, cu->arch());
+    state.before(inst, cu->arch(), wf);
     state.check_instruction(inst, *wf);
     cu->track_memory_wait(inst, *wf);
     wf->pc += 8;
@@ -2485,10 +2655,10 @@ TEST_F(MemoryWaitOrderingTest, FlatAndGlobalStoresShareCompletionOrderForReplay)
         ASSERT_EQ(state.outstanding(WaitCounterKind::X), 2u);
         state.wait(WaitCounterKind::Store, threshold);
         state.access({RegClass::VGPR, 0, 2}, 1, 0xf, true);
-        // The runtime counts only routed domains: an LDS-only FLAT contributes
-        // no Store position. This pins that existing model, not the ISA's
-        // unconditional dual-counter issue rule.
-        const bool translated = threshold == 0 || (threshold == 1 && shared_lanes != 0b1111);
+        // The unused STOREcnt slot can complete an older global store, but
+        // the LDS-only FLAT's own replay sources still depend on DScnt.
+        const bool translated =
+            threshold == 0 || (threshold == 1 && (!flat_first || shared_lanes != 0b1111));
         EXPECT_EQ(cu->xcnt_diagnostic_count(), translated ? 0u : 1u);
       }
 }
@@ -3073,6 +3243,9 @@ TEST(MemoryWaitExecutionTest, SdwaExplicitCompareDoesNotOverwriteItsTemporaryVcc
 TEST(MemoryWaitExecutionTest, ScratchAddressChecksDoNotObserveGlobalOrInactiveLanes) {
   class AddressObserver final : public ExecutionPlugin {
   public:
+    bool observes_vgpr_reads() const override { return true; }
+    bool supports_async_instructions() const override { return false; }
+
     AddressObserver() : ExecutionPlugin("scratch_planning_observer") {}
     unsigned reads = 0;
     void onAmdgpuReadVgprLanes(const Wavefront *, uint32_t, uint64_t, uint8_t) override { ++reads; }
@@ -3459,7 +3632,7 @@ TEST_F(MemoryWaitScoreboardTest, ReplayCompletionWaitsMapMixedCountersToTranslat
   state.xcnt_group(false);
   auto issue = [&](WaitCounterKind counter, uint16_t reg) {
     state.issue(counter);
-    state.add({state.issue_xcnt(counter, false),
+    state.add({state.issue_xcnt(std::array{counter}, false),
                0x100,
                1,
                {RegClass::VGPR, reg, 1},
@@ -3489,18 +3662,14 @@ TEST_F(MemoryWaitScoreboardTest, UnmappedReplayEntriesRetainTheirPlaceInTheTrans
   for (bool wait_for_completion : {false, true}) {
     state.clear();
     state.issue(WaitCounterKind::Load);
-    state.add({state.issue_xcnt(WaitCounterKind::Load, false),
+    state.add({state.issue_xcnt(std::array{WaitCounterKind::Load}, false),
                0x100,
                1,
                {RegClass::VGPR, 5, 1},
                WaitCounterKind::X,
                0xf});
-    state.add({state.issue_xcnt(std::nullopt, false),
-               0x104,
-               1,
-               {RegClass::EXEC, 0, 1},
-               WaitCounterKind::X,
-               0xf});
+    state.add(
+        {state.issue_xcnt({}, false), 0x104, 1, {RegClass::EXEC, 0, 1}, WaitCounterKind::X, 0xf});
     state.wait(WaitCounterKind::Store, 0);
     EXPECT_TRUE(shadow.test(5, true));
     EXPECT_TRUE(shadow.pending({RegClass::EXEC, 0, 1}, true));
@@ -3511,7 +3680,7 @@ TEST_F(MemoryWaitScoreboardTest, UnmappedReplayEntriesRetainTheirPlaceInTheTrans
     EXPECT_EQ(state.outstanding(WaitCounterKind::X), 1u);
     // A later mapped instruction's completion proves the remaining X prefix.
     state.issue(WaitCounterKind::Store);
-    state.issue_xcnt(WaitCounterKind::Store, false);
+    state.issue_xcnt(std::array{WaitCounterKind::Store}, false);
     state.wait(WaitCounterKind::Store, 0);
     EXPECT_FALSE(shadow.pending({RegClass::EXEC, 0, 1}, true));
     EXPECT_EQ(state.outstanding(WaitCounterKind::X), 0u);
@@ -3576,7 +3745,7 @@ util::FailureOr<std::array<uint64_t, 2>> run_xcnt_kernel(std::vector<uint32_t> c
   EXPECT_EQ(sim.snapshot->snapshots().size(), 1u);
   if (wait_checking == "off" ||
       (wait_checking.empty() && memory_setting == "off" && xcnt_setting != "warn")) {
-    EXPECT_FALSE(sim.cu()->wf(0)->memory_wait_checks_enabled());
+    EXPECT_FALSE(sim.cu()->config().memory_wait_checks_enabled());
     EXPECT_EQ(sim.cu()->wf(0)->memory_wait_scoreboard(), nullptr);
   }
   return std::array<uint64_t, 2>{sim.cu()->xcnt_diagnostic_count(),
@@ -4223,6 +4392,65 @@ TEST(XcntExecutionTest, FlatReplayCompletionFollowsTheWholeRequestRoute) {
   }
 }
 
+TEST(XcntExecutionTest, AsyncCompletionReleasesOnlyProvenReplaySources) {
+  GpuMemory memory("async_replay_memory");
+  L2Cache l2("async_replay_l2");
+  ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  config.xcnt_diagnostics = MemoryWaitDiagnostics::Warn;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 128;
+  config.vgprs_per_wf = 32;
+  config.lds_size_kb = 64;
+  std::unique_ptr<ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "async_replay_cu", config, &memory, &l2));
+  auto *wf = cu->dispatch_wf(0, 0x100, 128, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1);
+  wf->set_mode_raw(wf->mode_raw() | (1u << 25));
+  auto decoder = Decoder::create(config.arch);
+  for (bool load : {false, true})
+    for (bool mixed : {false, true})
+      for (unsigned wait = 0; wait < 5; ++wait) {
+        SCOPED_TRACE(testing::Message()
+                     << "load=" << load << " mixed=" << mixed << " wait=" << wait);
+        auto &state = wf->ensure_memory_wait_scoreboard();
+        state.clear();
+        for (unsigned index = 0; index < 2; ++index) {
+          const bool issue_load = load != (mixed && index == 1);
+          util::StringDiagnostic error;
+          auto decoded = decoder->decode_window(
+              cdna5::build_vglobal(
+                  issue_load ? cdna5::kGlobalLoadAsyncToLdsB32Vglobal
+                             : cdna5::kGlobalStoreAsyncFromLdsB32Vglobal,
+                  {.saddr = 0, .vdst = 8, .vsrc = 8, .vaddr = static_cast<uint8_t>(index)}),
+              0, error.emitter());
+          ASSERT_TRUE(decoded.succeeded()) << error.message();
+          cu->track_memory_wait(*decoded.value(), *wf);
+        }
+        ASSERT_EQ(state.outstanding(WaitCounterKind::X), 2u);
+        if (wait == 1 || wait == 2)
+          state.wait(WaitCounterKind::Async, wait == 1 ? 1 : 0);
+        else if (wait == 3)
+          state.wait(load ? WaitCounterKind::Load : WaitCounterKind::Store, 0);
+        else if (wait == 4)
+          state.wait(WaitCounterKind::X, 0);
+        unsigned reports = 0;
+        state.bind(0x200, &reports,
+                   [](void *context, const auto &) { ++*static_cast<unsigned *>(context); });
+        state.access({RegClass::VGPR, 0, 1}, 1, 0xf, true);
+        // CDNA5 ISA 10.8: async loads and stores each complete in order,
+        // but a partial wait cannot choose between the two directions.
+        const bool reusable = wait >= 2 || (wait == 1 && !mixed);
+        EXPECT_EQ(reports, reusable ? 0u : 1u);
+        reports = 0;
+        state.access({RegClass::VGPR, 1, 1}, 1, 0xf, true);
+        const bool later_reusable = wait == 2 || wait == 4 || (wait == 3 && !mixed);
+        EXPECT_EQ(reports, later_reusable ? 0u : 1u);
+      }
+}
+
 TEST(XcntExecutionTest, EmptyExecWithoutPendingTranslationsHasNoReplayDependency) {
   std::vector<uint32_t> code;
   enable_multi_group_replay(code);
@@ -4272,6 +4500,10 @@ TEST(XcntExecutionTest, EmptyExecStoreCannotUseAnOlderCompletionToDrainReplaySou
 // and computes the footprint before executing the instruction.
 class MemoryWaitFootprintObserver final : public ExecutionPlugin {
 public:
+  bool observes_vgpr_reads() const override { return true; }
+  bool observes_vgpr_writes() const override { return true; }
+  bool supports_async_instructions() const override { return false; }
+
   MemoryWaitFootprintObserver() : ExecutionPlugin("wait_footprint_test") {}
   struct Access {
     std::array<uint64_t, 4> read{};
@@ -5383,10 +5615,13 @@ TEST(MemoryWaitExecutionTest, MemoryProducerOverwriteIsCheckedBeforeExecution) {
   using namespace rocjitsu::amdhsa;
   class BeforeObserver final : public ExecutionPlugin {
   public:
+    bool observes_before_execute_instruction() const override { return true; }
+    bool supports_async_instructions() const override { return false; }
+
     BeforeObserver(uint64_t pc, ComputeUnitCore *cu)
         : ExecutionPlugin("wait_before_test"), target(pc), cu(cu) {}
-    void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &,
-                                          Wavefront &wf) override {
+    void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &, Wavefront &wf,
+                                          std::span<const uint32_t>) override {
       if (pc == target) {
         ++visits;
         diagnostics = cu->memory_wait_diagnostic_count();
@@ -5797,6 +6032,9 @@ TEST(MemoryWaitExecutionTest, ModernRejectedBufferReadsOnlyItsRequiredDescriptor
 TEST(MemoryWaitExecutionTest, BufferTypeSuppressesResultsButKeepsEncodedSourceDependencies) {
   class Observer final : public ExecutionPlugin {
   public:
+    bool observes_scalar_register_reads() const override { return true; }
+    bool supports_async_instructions() const override { return false; }
+
     Observer() : ExecutionPlugin("planning_observer") {}
     void onAmdgpuReadScalarRegister(const Wavefront *, RegisterRef) override { ++reads; }
     unsigned reads = 0;
@@ -6012,6 +6250,10 @@ TEST(MemoryWaitExecutionTest, DecodedScalarIssueUsesArchitecturalWaitDomain) {
 TEST(MemoryWaitFootprintTest, ScalarRelativeAccessesMatchExecution) {
   class ScalarObserver final : public ExecutionPlugin {
   public:
+    bool observes_scalar_register_reads() const override { return true; }
+    bool observes_scalar_register_writes() const override { return true; }
+    bool supports_async_instructions() const override { return false; }
+
     ScalarObserver() : ExecutionPlugin("scalar_relative_footprint") {}
     std::vector<RegisterRef> reads, writes;
     void onAmdgpuReadScalarRegister(const Wavefront *, RegisterRef reg) override {
@@ -6835,6 +7077,10 @@ TEST(MemoryWaitExecutionTest,
      BufferResourceAliasesAndEncodedAddressInputsArePlannedBeforeExecution) {
   class Observer final : public ExecutionPlugin {
   public:
+    bool observes_vgpr_reads() const override { return true; }
+    bool observes_scalar_register_reads() const override { return true; }
+    bool supports_async_instructions() const override { return false; }
+
     Observer() : ExecutionPlugin("buffer_alias_observer") {}
     unsigned reads = 0;
     void onAmdgpuReadScalarRegister(const Wavefront *, RegisterRef) override { ++reads; }
@@ -7429,7 +7675,10 @@ TEST(MemoryWaitExecutionTest, DiagnosticBudgetsAndCountersAreIndependentAcrossCU
         0x200,
         {RegClass::VGPR, 0, 1},
         false,
-        0};
+        0,
+        1,
+        0xf,
+        std::nullopt};
     testing::internal::CaptureStderr();
     for (unsigned report = 0; report < 20; ++report)
       ComputeUnitCore::report_memory_wait(wf, hazard);

@@ -48,6 +48,7 @@ enum class WaitCounterKind : uint8_t {
 };
 
 [[nodiscard]] std::string_view wait_counter_name(WaitCounterKind counter);
+[[nodiscard]] std::string_view wait_counter_name(rj_code_arch_t arch, WaitCounterKind counter);
 
 inline constexpr size_t kWaitCounterCount = static_cast<size_t>(WaitCounterKind::Count);
 using WaitFields = std::array<std::optional<uint32_t>, kWaitCounterCount>;

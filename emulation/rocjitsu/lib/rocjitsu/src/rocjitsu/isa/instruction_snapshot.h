@@ -10,7 +10,7 @@
 #include <cstdint>
 #include <span>
 
-namespace rocjitsu::plugins::race_detector {
+namespace rocjitsu {
 
 /// @brief A copy of one executed instruction's PC and encoding.
 ///
@@ -47,4 +47,4 @@ private:
   uint32_t word_count_;
 };
 
-} // namespace rocjitsu::plugins::race_detector
+} // namespace rocjitsu

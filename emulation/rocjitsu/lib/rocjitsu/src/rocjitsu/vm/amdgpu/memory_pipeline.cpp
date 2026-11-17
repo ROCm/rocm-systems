@@ -19,12 +19,12 @@
 #include "rocjitsu/vm/amdgpu/l1_vector_cache.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
+#include "rocjitsu/vm/amdgpu/lds_allocation.h"
 #include "rocjitsu/vm/amdgpu/lds_barrier_cell.h"
 #include "rocjitsu/vm/amdgpu/lds_stack.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/texel_byte_range.h"
 #include "rocjitsu/vm/amdgpu/translated_local_cache_policy.h"
-#include "rocjitsu/vm/plugins/memory_access_observation.h"
 #include "util/log.h"
 
 #include <algorithm>
@@ -55,14 +55,7 @@ MemoryPipeline::~MemoryPipeline() {
 
 MemoryPipeline::WaitCounterTokens MemoryPipeline::issue_counters(const Instruction &inst) const {
   WaitCounterTokens counters;
-  const DynamicInstState *state = inst.data();
-  const auto *issue = inst.amdgpu_memory_issue_info();
-  if (state && (state->tag() == GLOBAL_MEM || state->tag() == LOCAL_MEM)) {
-    const auto &routed = inst.data_as<VectorMemState>()->routed_issue_info;
-    if (routed)
-      issue = &*routed;
-  }
-  if (issue) {
+  if (const auto *issue = resolved_memory_issue_info(inst)) {
     for (const auto obligation : issue->counter_obligations()) {
       for (uint8_t token = 0; token < obligation.counter_increment(); ++token)
         counters.types[counters.size++] = obligation.wait_counter_type();
@@ -71,7 +64,7 @@ MemoryPipeline::WaitCounterTokens MemoryPipeline::issue_counters(const Instructi
   }
 
   WaitCounterType counter = counter_type_;
-  if (state != nullptr) {
+  if (const auto *state = inst.data()) {
     switch (state->tag()) {
     case SCALAR_MEM:
       counter = inst.data_as<ScalarMemState>()->wait_counter_type;

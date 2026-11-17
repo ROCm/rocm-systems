@@ -14,10 +14,10 @@
 
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/register_set.h"
-#include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/plugins/kernel_dispatch_info.h"
 #include "rocjitsu/vm/plugins/memory_access_observation.h"
 #include "rocjitsu/vm/plugins/plugin_sink.h"
+#include "rocjitsu/vm/plugins/register_hazard_observation.h"
 #include "rocjitsu/vm/plugins/tensor_dma_issue_observation.h"
 #include "rocjitsu/vm/plugins/tensor_dma_memory_access_observation.h"
 #include "rocjitsu/vm/plugins/wavefront_state.h"
@@ -27,6 +27,10 @@
 #include <string>
 
 namespace rocjitsu {
+
+namespace amdgpu {
+class Wavefront;
+}
 
 /// The kind of barrier passed to ExecutionPlugin::onAmdgpuBarrierResolved.
 enum class BarrierKind : uint8_t {
@@ -56,8 +60,8 @@ public:
 /// Expected instruction failures use Wavefront::report_instruction_execution_error();
 /// callbacks must still preserve issue/completion accounting and cancellation.
 /// This is a semantic contract; callback types do not impose noexcept.
-/// All hooks have empty default implementations so plugins only override
-/// what they need. The no-plugin path has near-zero overhead (the
+/// All hooks have empty default implementations. High-frequency hooks also
+/// require an explicit interest declaration. The no-plugin path has near-zero overhead (the
 /// default empty group returns before locking or dispatch).
 ///
 /// Ownership: plugins are owned by an ExecutionPluginGroup via
@@ -100,7 +104,7 @@ public:
 
   /// Whether this plugin consumes high-frequency callbacks for @p wf.
   ///
-  /// The conservative default preserves the historical behavior. A plugin may
+  /// Wavefronts are observed by default. A plugin may
   /// return false after its wavefront-dispatch callback has decided that the
   /// wave is outside its observation scope. The group samples the decision once
   /// after every plugin's wavefront-dispatch callback and reuses it until halt
@@ -114,28 +118,50 @@ public:
     return true;
   }
 
-  /// Per-hook interest declarations for callbacks on the instruction hot path.
-  /// The conservative defaults preserve existing plugins. Implementations may
-  /// opt out of callbacks they do not consume; the group samples these stable
-  /// capabilities once when the plugin is added.
-  virtual bool observes_before_execute_instruction() const { return true; }
-  virtual bool observes_after_execute_instruction() const { return true; }
-  virtual bool observes_async_instruction_issued() const { return true; }
-  virtual bool observes_memory_instruction_routing() const { return true; }
-  virtual bool observes_vgpr_reads() const { return true; }
-  virtual bool observes_vgpr_writes() const { return true; }
-  virtual bool observes_scalar_register_writes() const { return true; }
+  /// High-frequency hooks are opt-in: override the corresponding interest
+  /// method as well as the callback. Unrequested hooks do not enable observation
+  /// work in the emulator. The group samples each interest once on add(), so
+  /// values must be stable from construction onward. Lifecycle hooks need no
+  /// interest declaration; wave selection is a separate filter above.
+  virtual bool observes_before_execute_instruction() const { return false; }
+  virtual bool observes_after_execute_instruction() const { return false; }
+  virtual bool observes_async_instruction_issued() const { return false; }
+  virtual bool observes_memory_instruction_routing() const { return false; }
+  virtual bool observes_vgpr_reads() const { return false; }
+  virtual bool observes_vgpr_writes() const { return false; }
+  virtual bool observes_scalar_register_reads() const { return false; }
+  virtual bool observes_scalar_register_writes() const { return false; }
+  virtual bool observes_memory_routing() const { return false; }
+  virtual bool observes_tensor_dma_memory_access() const { return false; }
+  virtual bool observes_tensor_dma_issue() const { return false; }
 
-  /// Opt in to asynchronous arithmetic and its issue notification.
-  /// Leave false when relying on synchronous before/after state inspection:
-  /// any such plugin disables offload for its group. Async-aware plugins must
-  /// handle both issue notifications and synchronous callbacks, since offload can fall back to
-  /// synchronous execution. The group samples this capability outside the instruction path. Sampled
-  /// once on add(). Register hooks may run on helpers concurrently with issuer hooks for the SAME
-  /// wave, and may precede the issue notification. At issue, inspect only instruction/dispatch
-  /// metadata and synchronized plugin state: even sources may alias a destination currently being
-  /// written. Serializing hooks alone does not meet this contract.
-  virtual bool supports_async_instructions() const { return false; }
+  /// Request core register-dependency checking, independently of stderr warning
+  /// settings. Findings retain pending dependencies for later consumers; the
+  /// observer owns suppression. This does not request register-access hooks.
+  virtual bool observes_register_hazards() const { return false; }
+
+  /// Called on the issuer during issue, before async submission or memory
+  /// publication. Usually precedes the before-execute hook; buffer payload
+  /// checks needing prepared lane masks run after address preparation. The record
+  /// owns its instruction evidence; the wave is borrowed only for this callback.
+  /// Does not apply the core stderr budget. The observer must not mutate the
+  /// scoreboard or execute/replay instructions from this callback.
+  virtual void onAmdgpuRegisterHazard(const amdgpu::RegisterHazardObservation & /*hazard*/,
+                                      const amdgpu::Wavefront & /*wf*/) {}
+
+  /// Whether this plugin tolerates asynchronous arithmetic. The default leaves
+  /// offload enabled. Return false when inspecting synchronous instruction state
+  /// or requiring the before/after pair for every instruction: any such plugin
+  /// disables offload for its group. This capability does not subscribe to hooks.
+  /// Instruction observers that support async must handle both accepted-issue
+  /// and synchronous callbacks, since offload can fall back to synchronous execution.
+  /// Sampled once on add(), with a stable value from construction onward.
+  /// Register hooks may run on helpers concurrently with issuer hooks for the
+  /// SAME wave, and may precede the issue notification. At issue, inspect only
+  /// instruction/dispatch metadata and synchronized plugin state: even sources
+  /// may alias a destination currently being written. Serializing hooks alone
+  /// does not meet this contract.
+  virtual bool supports_async_instructions() const { return true; }
 
   // -- Lifecycle hooks ------------------------------------------------------
 
@@ -154,21 +180,16 @@ public:
   /// Wavefront state reflects the state prior to the instruction's effects.
   /// Memory instructions expose their decoded issue metadata through
   /// Instruction::amdgpu_memory_issue_info() at this point.
+  /// The CU supplies four DWORDs starting at the instruction PC, including
+  /// words following a shorter instruction. For a GFX10 MIMG instruction
+  /// with NSA=3, the window also contains the fifth DWORD. An empty span
+  /// means no fetch window is available. The instruction, wave and fetch
+  /// window are borrowed only for this callback.
   /// May run concurrently across simulation partitions unless
   /// requires_serial_hot_hooks() returns true.
   virtual void onAmdgpuBeforeExecuteInstruction(uint64_t /*pc*/, const Instruction & /*inst*/,
-                                                amdgpu::Wavefront & /*wf*/) {}
-
-  /// Fetch-aware form of onAmdgpuBeforeExecuteInstruction(). The CU supplies
-  /// four DWORDs starting at @p pc, including words following a shorter
-  /// instruction. For a GFX10 MIMG instruction with NSA=3, the borrowed
-  /// window also contains the fifth DWORD. The default forwards to the
-  /// original hook.
-  virtual void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
-                                                amdgpu::Wavefront &wf,
-                                                std::span<const uint32_t> /*fetch_window*/) {
-    onAmdgpuBeforeExecuteInstruction(pc, inst, wf);
-  }
+                                                amdgpu::Wavefront & /*wf*/,
+                                                std::span<const uint32_t> /*fetch_window*/) {}
 
   /// Called after a synchronously executed AMDGPU instruction.
   /// Wavefront state (wait targets, PC, etc.) reflects the instruction's effects.
@@ -198,29 +219,13 @@ public:
   /// instruction, including one no pipeline accepted, which is reported with
   /// an UNKNOWN route rather than dropped.
   ///
-  /// The observation's spans borrow execution-owned storage and are valid
-  /// only for the duration of this callback.
+  /// The instruction and wave already reflect the selected route. They and
+  /// the observation's execution-owned spans are borrowed only for this callback.
   /// May run concurrently across simulation partitions unless
   /// requires_serial_hot_hooks() returns true.
-  virtual void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation & /*access*/) {}
-
-  /// Wavefront-aware form of onAmdgpuMemoryAccessRouted(). The default keeps
-  /// source compatibility with plugins that only need the observation payload.
-  /// Plugins with wave-local state can override this form to avoid a shared
-  /// identity lookup in concurrent hot callbacks.
-  virtual void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access,
-                                          const amdgpu::Wavefront & /*wf*/) {
-    onAmdgpuMemoryAccessRouted(access);
-  }
-
-  /// Context-preserving form of onAmdgpuMemoryAccessRouted(). The instruction
-  /// and wavefront are borrowed for the duration of the callback and already
-  /// reflect the selected route. The default preserves source compatibility by
-  /// forwarding to the wavefront-aware hook.
-  virtual void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access,
-                                          const Instruction & /*inst*/, amdgpu::Wavefront &wf) {
-    onAmdgpuMemoryAccessRouted(access, wf);
-  }
+  virtual void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation & /*access*/,
+                                          const Instruction & /*inst*/,
+                                          amdgpu::Wavefront & /*wf*/) {}
 
   /// Called after one tensor DMA instruction and any descriptor-requested
   /// atomic-barrier arrival return normally, when the transfer made at least one
@@ -228,18 +233,12 @@ public:
   /// The observation contains only in-bounds global requests attempted, in
   /// execution order. It intentionally does not filter memory access outcomes,
   /// matching the observer boundary.
-  /// Its deferred address view is borrowed and valid only during this callback.
+  /// The wave and deferred address view are borrowed only for this callback.
   /// May run concurrently across simulation partitions unless
   /// requires_serial_hot_hooks() returns true.
   virtual void
-  onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation & /*access*/) {}
-
-  /// Wavefront-aware form of onAmdgpuTensorDmaMemoryAccess(). See the regular
-  /// memory overload above for the compatibility and concurrency contract.
-  virtual void onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &access,
-                                             const amdgpu::Wavefront & /*wf*/) {
-    onAmdgpuTensorDmaMemoryAccess(access);
-  }
+  onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation & /*access*/,
+                                const amdgpu::Wavefront & /*wf*/) {}
 
   /// Called once when a tensor DMA instruction issues, after its descriptor is
   /// read and, unless it is NULL, validated and prepared. A store has already
@@ -277,13 +276,12 @@ public:
   /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
   virtual void onAmdgpuDispatchExecutionEnd(uint32_t /*dispatch_id*/) {}
 
-  /// Called after a workgroup's wavefronts have been dispatched to a CU.
-  /// @param physical_vgpr_count Physical VGPR allocation block size per wavefront.
-  /// @param physical_sgpr_count Physical SGPR allocation block size per wavefront.
+  /// Called after all of a workgroup's waves are initialized on a CU, before
+  /// onAmdgpuWavefrontDispatched() runs for any of them. The span is valid only
+  /// during this callback. Register allocation metadata is available through
+  /// each wave and its CU.
   /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
   virtual void onAmdgpuWorkgroupDispatched(uint32_t /*dispatch_id*/, uint32_t /*wg_id*/,
-                                           uint32_t /*physical_vgpr_count*/,
-                                           uint32_t /*physical_sgpr_count*/,
                                            std::span<amdgpu::Wavefront *> /*wavefronts*/) {}
 
   /// Called when the last wavefront of a workgroup has completed normally.
@@ -344,26 +342,14 @@ public:
                                       uint64_t /*lane_mask*/,
                                       uint8_t /*byte_mask*/ = kFullByteMask) {}
 
-  /// Called when an SGPR is read during instruction execution.
-  /// @param wf Owning wavefront, or nullptr if the register is unallocated.
-  /// @param physical_reg Physical register index in the SGPR file.
-  /// May run concurrently across simulation partitions unless
-  /// requires_serial_hot_hooks() returns true.
-  virtual void onAmdgpuReadSgpr(const amdgpu::Wavefront * /*wf*/, uint32_t /*physical_reg*/) {}
-
   /// Called when an architectural scalar register is read during instruction execution.
   /// @param wf Owning wavefront.
-  /// @param reg Logical register identity. The class distinguishes ordinary
-  ///        SGPRs from TTMPs without exposing their encoded selector values or
-  ///        physical storage layout.
+  /// @param reg Logical register range, reported in one callback. The class
+  ///        distinguishes ordinary SGPRs from TTMPs without exposing their
+  ///        encoded selector values or physical storage layout.
   /// May run concurrently across simulation partitions unless
   /// requires_serial_hot_hooks() returns true.
-  virtual void onAmdgpuReadScalarRegister(const amdgpu::Wavefront *wf, RegisterRef reg) {
-    if (!wf || reg.cls != RegClass::SGPR)
-      return;
-    for (uint32_t offset = 0; offset < reg.width; ++offset)
-      onAmdgpuReadSgpr(wf, wf->sgpr_alloc().base + reg.index + offset);
-  }
+  virtual void onAmdgpuReadScalarRegister(const amdgpu::Wavefront * /*wf*/, RegisterRef /*reg*/) {}
 
   /// Called when an architectural scalar register is written during instruction execution.
   /// Memory completion and runtime initialization remain unobserved storage operations.
@@ -375,31 +361,6 @@ public:
   /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
   virtual void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> /*wavefronts*/,
                                        BarrierKind /*kind*/) {}
-
-  /// Whether this plugin consumes onAmdgpuMemoryAccessRouted(). Building the
-  /// observation is real work on the per-instruction path, so a plugin that
-  /// does not override the hook should not pay for it. The group samples this
-  /// policy once when the plugin is added, so implementations must return a
-  /// stable value from construction onward. The conservative default is false:
-  /// a plugin that wants the hook says so.
-  virtual bool observes_memory_routing() const { return false; }
-
-  /// Whether this plugin consumes onAmdgpuTensorDmaMemoryAccess(). Recording
-  /// every copied element is real work on the instruction path, so consumers
-  /// opt in explicitly. The group samples this stable policy when the plugin is
-  /// added.
-  virtual bool observes_tensor_dma_memory_access() const { return false; }
-
-  /// Whether this plugin consumes onAmdgpuTensorDmaIssued(). Building the LDS
-  /// ranges is work on the instruction path, so consumers must opt in. The
-  /// group samples this stable policy when the plugin is added.
-  virtual bool observes_tensor_dma_issue() const { return false; }
-
-  /// Whether this plugin needs typed scalar-register reads or legacy SGPR reads.
-  /// The group samples this policy once when the plugin is added. The
-  /// conservative default preserves existing plugin behavior: callbacks
-  /// continue unless a plugin explicitly opts out.
-  virtual bool observes_sgpr_reads() const { return true; }
 
   /// Opt in to reads of the LDS-direct VALU source. Sampled when the plugin is registered.
   virtual bool observes_lds_direct_reads() const { return false; }

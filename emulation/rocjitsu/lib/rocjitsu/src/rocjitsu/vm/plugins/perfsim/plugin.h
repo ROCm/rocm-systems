@@ -34,15 +34,10 @@ public:
 
   bool requires_serial_hot_hooks() const override;
   bool observes_hot_hooks_for_wavefront(const amdgpu::Wavefront *wf) const override;
-  bool observes_after_execute_instruction() const override { return false; }
-  bool observes_async_instruction_issued() const override { return false; }
-  bool observes_memory_instruction_routing() const override { return false; }
-  bool observes_vgpr_reads() const override { return false; }
-  bool observes_vgpr_writes() const override { return false; }
-  bool observes_scalar_register_writes() const override { return false; }
+  bool observes_before_execute_instruction() const override { return true; }
   bool observes_memory_routing() const override { return true; }
   bool observes_tensor_dma_memory_access() const override { return true; }
-  bool observes_sgpr_reads() const override { return false; }
+  bool supports_async_instructions() const override { return false; }
 
   /// @brief Activate the configured backend, whose callbacks must not throw.
   /// The FFM on_init callback returns no status and cannot report activation failure.
@@ -54,22 +49,15 @@ public:
   void onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) override;
   void onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) override;
   void onAmdgpuWavefrontCancelled(amdgpu::Wavefront &wf) override;
-  void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
-                                        amdgpu::Wavefront &wf) override;
   void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst, amdgpu::Wavefront &wf,
                                         std::span<const uint32_t> fetch_window) override;
-  void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access) override;
   void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access,
-                                  const amdgpu::Wavefront &wf) override;
-  void
-  onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &access) override;
+                                  const Instruction &inst, amdgpu::Wavefront &wf) override;
   void onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &access,
                                      const amdgpu::Wavefront &wf) override;
 
 private:
   void retire_wavefront(amdgpu::Wavefront &wf, bool cancelled);
-  void record_instruction(uint64_t pc, const Instruction &inst, amdgpu::Wavefront &wf,
-                          std::span<const uint32_t> fetch_window);
 
   struct Impl;
   std::unique_ptr<Impl> impl_;

@@ -180,18 +180,10 @@ public:
   explicit ExecutionCounter(RunStats &stats)
       : ExecutionPlugin("execution_fuzz_raw_counter"), stats_(stats) {}
 
-  bool observes_after_execute_instruction() const override { return false; }
+  bool observes_before_execute_instruction() const override { return true; }
   bool observes_async_instruction_issued() const override { return true; }
-  bool observes_memory_instruction_routing() const override { return false; }
-  bool observes_vgpr_reads() const override { return false; }
-  bool observes_vgpr_writes() const override { return false; }
-  bool observes_scalar_register_writes() const override { return false; }
-  bool observes_sgpr_reads() const override { return false; }
-  bool observes_memory_routing() const override { return false; }
-  bool observes_tensor_dma_memory_access() const override { return false; }
-  bool supports_async_instructions() const override { return true; }
-  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &,
-                                        amdgpu::Wavefront &) override {
+  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &, amdgpu::Wavefront &,
+                                        std::span<const uint32_t>) override {
     ++stats_.executed;
   }
   void onAmdgpuAsyncInstructionIssued(uint64_t, const Instruction &, amdgpu::Wavefront &) override {

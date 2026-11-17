@@ -6,18 +6,11 @@
 
 #pragma once
 
-#include <cstdint>
+#include "rocjitsu/vm/amdgpu/lds_byte_range.h"
+
 #include <span>
 
 namespace rocjitsu::amdgpu {
-
-/// @brief One contiguous run of LDS bytes touched by a tensor DMA transfer.
-struct TensorDmaLdsRange {
-  uint32_t address = 0; ///< Absolute CU LDS byte address.
-  uint32_t bytes = 0;
-
-  bool operator==(const TensorDmaLdsRange &) const = default;
-};
 
 /// @brief A tensor DMA instruction as it issues, before its global requests
 /// and LDS writes.
@@ -51,7 +44,7 @@ struct TensorDmaLdsRange {
 /// duration of the callback.
 struct TensorDmaIssueObservation {
   bool is_load = true; ///< True for a global-to-LDS load, false for an LDS-to-global store.
-  std::span<const TensorDmaLdsRange> lds_ranges{}; ///< LDS bytes the transfer will touch.
+  std::span<const LdsByteRange> lds_ranges{}; ///< LDS bytes the transfer will touch.
 };
 
 } // namespace rocjitsu::amdgpu

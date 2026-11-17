@@ -41,6 +41,19 @@ std::string_view wait_counter_name(WaitCounterKind counter) {
   return "unknown";
 }
 
+std::string_view wait_counter_name(rj_code_arch_t arch, WaitCounterKind counter) {
+  const auto model = waitcnt_model(arch);
+  if (model.succeeded() && uses_legacy_waitcnt(model.value())) {
+    if (counter == WaitCounterKind::Load)
+      return "vmcnt";
+    if (counter == WaitCounterKind::Store)
+      return "vscnt";
+    if (counter == WaitCounterKind::Ds)
+      return "lgkmcnt";
+  }
+  return wait_counter_name(counter);
+}
+
 [[nodiscard]] size_t WaitCounterPolicy::counter_index(WaitCounterKind counter) {
   return static_cast<size_t>(counter);
 }

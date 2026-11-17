@@ -2689,6 +2689,12 @@ TEST(ExecutionPluginTest, DisabledWaitCheckingPreservesRegisterHooksAcrossPlugin
 TEST(ExecutionPluginTest, RegisterObserverSnapshotsPreservePendingWaits) {
   class SnapshotPlugin : public ExecutionPlugin {
   public:
+    bool observes_vgpr_reads() const override { return true; }
+    bool observes_vgpr_writes() const override { return true; }
+    bool observes_scalar_register_reads() const override { return true; }
+    bool observes_scalar_register_writes() const override { return true; }
+    bool supports_async_instructions() const override { return false; }
+
     SnapshotPlugin() : ExecutionPlugin("register_snapshot") {}
     void snapshot(const Wavefront *wf) {
       (void)wf->read_scc();
@@ -2702,11 +2708,11 @@ TEST(ExecutionPluginTest, RegisterObserverSnapshotsPreservePendingWaits) {
     void onAmdgpuWriteVgprLanes(const Wavefront *wf, uint32_t, uint64_t, uint8_t) override {
       snapshot(wf);
     }
-    void onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &) override {
-      snapshot(tensor_wave);
+    void onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &,
+                                       const Wavefront &wf) override {
+      snapshot(&wf);
     }
     bool observes_tensor_dma_memory_access() const override { return true; }
-    const Wavefront *tensor_wave = nullptr;
     unsigned snapshots = 0;
   };
   Wave32PluginFixture f;
@@ -2719,7 +2725,6 @@ TEST(ExecutionPluginTest, RegisterObserverSnapshotsPreservePendingWaits) {
   auto *wf = f.cu->dispatch_wf(0, 0x200, 104, 32);
   ASSERT_NE(wf, nullptr);
   wf->set_exec(1);
-  snapshots->tensor_wave = wf;
   const amdgpu::RegisterAccess regs(*wf);
   const uint32_t sbase = wf->sgpr_alloc().base;
   const uint32_t vbase = wf->vgpr_alloc().base;
@@ -2793,6 +2798,9 @@ TEST(ExecutionPluginTest, SpecialDestinationTrackingIncludesTheHighDword) {
 // Records the host FP environment seen by each VGPR read callback.
 class RoundingObserverPlugin : public ExecutionPlugin {
 public:
+  bool observes_vgpr_reads() const override { return true; }
+  bool supports_async_instructions() const override { return false; }
+
   RoundingObserverPlugin() : ExecutionPlugin("rounding_observer") {}
   std::vector<int> read_roundings;
   std::vector<uint32_t> read_mxcsrs;
@@ -2811,6 +2819,9 @@ TEST(ExecutionPluginTest, ScalarRoundConvertAndPackObserversSeeCallerFpEnvironme
   class ScalarObserver final : public ExecutionPlugin {
   public:
     ScalarObserver() : ExecutionPlugin("scalar_fp_observer") {}
+    bool observes_scalar_register_reads() const override { return true; }
+    bool observes_scalar_register_writes() const override { return true; }
+    bool supports_async_instructions() const override { return false; }
     void onAmdgpuReadScalarRegister(const Wavefront *, RegisterRef) override {
       reads.push_back(std::fegetround());
     }
@@ -3739,7 +3750,7 @@ TEST(ExecutionPluginTest, MfmaSnapshotsReadBeforeFullWaveWritesAndSkipConstantAc
         }
 }
 
-// Register observers, such as the race detector, must see the same (register, lane) reads and
+// Register observers must see the same (register, lane) reads and
 // writes from the snapshot path as from the per-element forced-scalar path, including when
 // cbsz/abid or blgp broadcast part of a register. The snapshot path writes each destination
 // register once.

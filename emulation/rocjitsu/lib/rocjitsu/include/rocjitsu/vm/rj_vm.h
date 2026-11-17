@@ -197,7 +197,11 @@ RJ_API_EXPORT rj_status_t rj_vm_create_from_string_for_node(const char *json, co
 /// first rj_vm_step or rj_vm_run call and must not overlap either call; that
 /// ordering keeps plugin initialization and replacement outside the
 /// simulation-callback interval. Admission failures preserve the installed group
-/// and its active state. Exceptions during shutdown, replacement, or initialization
+/// and its active state. Register-hazard observers, including the race plugin,
+/// require all supported wait checks on every CU receiving the plugins: ordinary
+/// checking on all targets, plus XCNT on gfx1250. This uses the VM's effective
+/// settings, not overrides in config_json. `wait_checking=all` enables both.
+/// Exceptions during shutdown, replacement, or initialization
 /// are translated to errors without a state-preservation guarantee. To reconfigure
 /// a single-instance plugin such as Perfsim, first pass an empty string to remove
 /// the installed group, then load the new config. This removes the old group

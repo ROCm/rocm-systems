@@ -309,6 +309,9 @@ TEST_F(SimdCoverage, VopdStagesBothSlotsBeforeAliasingWrites) {
 
 class VopdReadRecorder final : public ExecutionPlugin {
 public:
+  bool observes_vgpr_reads() const override { return true; }
+  bool supports_async_instructions() const override { return false; }
+
   VopdReadRecorder() : ExecutionPlugin("vopd_read_recorder") {}
 
   void onAmdgpuReadVgprLanes(const Wavefront *wave, uint32_t physical_reg, uint64_t lane_mask,

@@ -1101,6 +1101,7 @@ void MemoryWaitScoreboard::check_memory_result(const Instruction &inst, Wavefron
 }
 
 void MemoryWaitScoreboard::clear() {
+  instruction_.reset();
   events_.clear();
   superseded_.clear();
   pending_scalar_ = false;
@@ -1215,6 +1216,9 @@ std::optional<uint32_t> completion_order_kind(const waitcheck_detail::Classified
                                               rj_code_arch_t arch) {
   using namespace waitcheck_detail;
   const auto model = waitcnt_model(arch).value();
+  // GLOBAL_INV occupies a LOADcnt slot in order with VMEM on gfx1250.
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5 && event.kind == WaitEventKind::GlobalInv)
+    return uint32_t{1} << static_cast<unsigned>(WaitEventKind::VmemNoSamplerLoad);
   const bool legacy_flat =
       model == WaitcntModel::LegacyNoVscnt &&
       (event.kind == WaitEventKind::FlatLoad || event.kind == WaitEventKind::FlatStore);
@@ -1322,6 +1326,8 @@ void MemoryWaitScoreboard::add(Event event) {
   if (!event.lanes || !event.bytes || !event.reg.width)
     return;
   event.reg = pending_.canonical(event.reg);
+  if (!event.instruction && instruction_ && event.pc == instruction_->pc())
+    event.instruction = instruction_;
   stamp_order(event);
   // A newer result covering the entire old destination is the stronger
   // dependency within the same FIFO class. Discard the superseded record rather
@@ -1440,14 +1446,16 @@ void MemoryWaitScoreboard::xcnt_group(bool scalar) {
   xcnt_scalar_ = scalar;
 }
 
-uint64_t MemoryWaitScoreboard::issue_xcnt(std::optional<WaitCounterKind> completion, bool scalar) {
+uint64_t MemoryWaitScoreboard::issue_xcnt(std::span<const WaitCounterKind> completions,
+                                          bool scalar) {
   const auto sequence = issue(WaitCounterKind::X, scalar);
-  if (!scalar && completion) {
-    const auto i = static_cast<size_t>(*completion);
-    const auto order = last_order_[i];
-    translations_.push_back({sequence, issued_[i], *completion, order,
-                             order == kUnordered ? 0 : orders_[order].issued});
-  }
+  if (!scalar)
+    for (const auto completion : completions) {
+      const auto i = static_cast<size_t>(completion);
+      const auto order = last_order_[i];
+      translations_.push_back({sequence, issued_[i], completion, order,
+                               order == kUnordered ? 0 : orders_[order].issued});
+    }
   return sequence;
 }
 
@@ -1466,7 +1474,33 @@ void MemoryWaitScoreboard::xcnt_ordered_write(RegisterRef reg, uint64_t lanes, u
          static_cast<uint32_t>(issued_[static_cast<size_t>(WaitCounterKind::X)] - through));
 }
 
-void MemoryWaitScoreboard::before(const Instruction &inst, rj_code_arch_t arch) {
+bool MemoryWaitScoreboard::counts_memory_counter(const Instruction &inst, const Wavefront &wave,
+                                                 WaitCounterKind counter) {
+  // Replay-source lifetime is independent of completion-counter occupancy.
+  if (counter == WaitCounterKind::X)
+    return true;
+  const auto *info = inst.amdgpu_memory_issue_info();
+  if (!info)
+    return true;
+  const auto arch = wave.cu().arch();
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5 && (inst.flags() & CONDITIONAL_MEMORY_LANES)) {
+    RegisterModifiers modifiers;
+    inst.amdgpu_register_modifiers(modifiers);
+    if (addr_calc::cdna5_ignores_buffer_resource(modifiers, wave))
+      return false;
+  }
+  // RDNA4 retains zero-EXEC positions behind pending VMEM (ISA 3.2.2.1).
+  if (arch == ROCJITSU_CODE_ARCH_RDNA4 || !info->exec_masked || wave.exec() != 0)
+    return true;
+  const auto counted = info->for_exec_zero(arch, inst.mnemonic());
+  const auto model = waitcnt_model(arch).value();
+  return std::ranges::any_of(counted.counter_obligations(), [&](const auto obligation) {
+    return canonical_wait_counter(obligation.wait_counter_type(), model) == counter;
+  });
+}
+
+void MemoryWaitScoreboard::before(const Instruction &inst, rj_code_arch_t arch,
+                                  const Wavefront *wave) {
   using namespace waitcheck_detail;
   // Most kernels wait well before a queue is full. Avoid classifying the
   // incoming instruction twice unless some ordered class can force progress.
@@ -1483,9 +1517,11 @@ void MemoryWaitScoreboard::before(const Instruction &inst, rj_code_arch_t arch) 
     const auto events = WaitcheckTarget::classify_events(inst, arch);
     if (events.succeeded())
       for (const auto &event : events.value()) {
-        // FLAT may not use either memory domain. Its resolved requests apply
-        // the corresponding capacity constraint after address calculation.
-        if (inst.mnemonic().starts_with("flat_") &&
+        if (wave && !counts_memory_counter(inst, *wave, event.counter))
+          continue;
+        // gfx1250 FLAT always takes both slots. Earlier targets apply capacity
+        // after address calculation selects the domains actually used.
+        if (arch != ROCJITSU_CODE_ARCH_CDNA5 && inst.mnemonic().starts_with("flat_") &&
             (event.counter == WaitCounterKind::Load || event.counter == WaitCounterKind::Store ||
              event.counter == WaitCounterKind::Ds))
           continue;
@@ -1528,14 +1564,17 @@ void MemoryWaitScoreboard::access_pending(RegisterRef reg, uint64_t lanes, uint8
         event.reg.cls != reg.cls || !(event.lanes & lanes) || !(event.bytes & bytes) ||
         reg.index >= event.reg.index + event.reg.width || event.reg.index >= reg.index + reg.width)
       continue;
-    event.reported = true;
+    event.reported = recovery_ == Recovery::FirstConflict;
     if (reporter_) {
       const auto first = std::max(reg.index, event.reg.index);
       const auto end = std::min(reg.index + reg.width, event.reg.index + event.reg.width);
       const RegisterRef overlap{reg.cls, first, static_cast<uint8_t>(end - first)};
-      reporter_(context_, {event, pc_, overlap, write, required_wait(event)});
+      reporter_(context_, {event, pc_, overlap, write, required_wait(event), event.lanes & lanes,
+                           static_cast<uint8_t>(event.bytes & bytes), instruction_});
     }
   }
+  if (recovery_ == Recovery::Retain)
+    return;
   const auto size = events_.size();
   std::erase_if(events_, [&](const Event &event) {
     if (event.reported)

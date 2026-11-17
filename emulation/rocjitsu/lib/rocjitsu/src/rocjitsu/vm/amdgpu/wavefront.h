@@ -714,11 +714,9 @@ public:
   }
 
   /// Diagnostic readiness is independent of eager functional writeback.
-  bool memory_wait_checks_enabled() const { return memory_wait_checks_enabled_; }
   const MemoryWaitShadow &memory_wait_shadow() const { return memory_wait_shadow_; }
   MemoryWaitScoreboard *memory_wait_scoreboard() const { return memory_wait_scoreboard_.get(); }
   MemoryWaitScoreboard &ensure_memory_wait_scoreboard() {
-    assert(memory_wait_checks_enabled_ && "memory wait checking is disabled");
     if (!memory_wait_scoreboard_)
       memory_wait_scoreboard_ = std::make_unique<MemoryWaitScoreboard>(memory_wait_shadow_);
     return *memory_wait_scoreboard_;
@@ -1501,12 +1499,9 @@ private:
   SgprPair vcc_;
   uint32_t m0_ = 0; ///< M0 special register (misc addressing).
   uint32_t ib_sts2_gfx11_ = 0;
-  uint32_t status_raw_ = 0;          ///< STATUS register state.
-  uint32_t mode_raw_ = 0;            ///< MODE register state.
-  bool mode_has_gpr_idx_en_ = false; ///< True when MODE[27] is GPR_IDX_EN.
-  // Immutable across wave reuse and helper execution. Disabled accesses skip
-  // register indexing and shadow loads before consulting diagnostic state.
-  const bool memory_wait_checks_enabled_;
+  uint32_t status_raw_ = 0;             ///< STATUS register state.
+  uint32_t mode_raw_ = 0;               ///< MODE register state.
+  bool mode_has_gpr_idx_en_ = false;    ///< True when MODE[27] is GPR_IDX_EN.
   uint8_t vgpr_msb_mode_ = 0;           ///< S_SET_VGPR_MSB layout for MODE VGPR_MSB bits.
   bool setreg_vgpr_msb_hazard_ = false; ///< Drop an immediately following S_SET_VGPR_MSB.
   uint32_t wave_sched_mode_raw_ = 0;    ///< WAVE_SCHED_MODE register state.

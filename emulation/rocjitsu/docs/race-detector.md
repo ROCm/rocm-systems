@@ -1,20 +1,20 @@
 # Race Detector
 
-Detects synchronization hazards in AMD GPU kernels. Tracks in-flight memory
-events (loads, stores) and reports races when a register or LDS memory is
-accessed before the operation that produced it has been properly synchronized.
+Detects synchronization hazards in AMD GPU kernels. The emulator's core checks
+register dependencies at instruction issue. The race plugin reports those
+findings with kernel context and instruction traces, and separately checks LDS
+accesses against pending operations and unsynchronized peer waves.
 
-Currently detects intra-workgroup races — cases where the value read from a
-register or LDS is not deterministic due to missing `s_waitcnt` or `s_barrier`
-instructions.
+These checks cover missing waits and barriers within a workgroup. They do not
+model global-memory races or synchronization between workgroups.
 
 ## Target scope
 
 The race detector supports gfx942 (GFX9/CDNA3), gfx950 (GFX9/CDNA4) and
 gfx1151 (GFX11.5/RDNA3.5), with end-to-end tests for each. Support for gfx1250
-(CDNA5) is limited and under active development; end-to-end tests currently
-cover its tensor DMA races (see Tensor DMA races below) and its counter-capacity
-backpressure.
+(CDNA5) is limited and under active development; end-to-end tests cover split
+wait counters, tensor DMA races and counter-capacity backpressure. See the
+specific limits below.
 
 ## Quick start
 
@@ -79,7 +79,7 @@ Enable the race detector by adding it to the `plugins` section of your
 rocjitsu config file (`my_config.json`):
 
 ```json
-{ "plugins": { "race": {} } }
+{ "wait_checking": "all", "plugins": { "race": {} } }
 ```
 
 Run it under the emulator:
@@ -91,7 +91,7 @@ $BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- /tmp/race_example
 You should see output:
 
 ```
-RACE kernel=transpose_lds symbol=_Z13transpose_ldsPKiPi dispatch=1 type=LDS access=read reg=508 wave=0 lane=0 wg=0,0,0 conflict=unknown
+RACE kernel=transpose_lds symbol=_Z13transpose_ldsPKiPi dispatch=1 type=LDS access=read reg=508 wave=0 lane=0 wg=0,0,0 conflict=unknown producer_pc=0x7f6a1e801010 consumer_pc=0x7f6a1e80101c checker=plugin
 Race on LDS byte 508 [workgroup (0, 0, 0), wave 0, lane 0]
   ==>  0x7f6a1e801010  ds_write_b32 v0, v1  ; <-- wave 1
        0x7f6a1e801018  v_sub_u32_e32 v1, 0, v0
@@ -150,6 +150,7 @@ scripted workflows), add a `sinks` section to your config:
 
 ```json
 {
+  "wait_checking": "all",
   "plugins": { "race": {} },
   "sinks": { "types": ["file"], "dir": "/tmp/output" }
 }
@@ -159,6 +160,52 @@ scripted workflows), add a `sinks` section to your config:
 $BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- ./my_app
 # Reports are written to /tmp/output/race.log
 ```
+
+### Core-backed register reports
+
+Enabling `"race": {}` requires all wait checks supported by the target. Use
+`"wait_checking": "all"` or `--wait-checking=all`; this works on every architecture.
+Other architectures also accept `on`, while gfx1250 requires the additional input
+register reuse checks controlled by XCNT. Incompatible effective settings, including
+per-CU overrides, reject plugin loading.
+
+The core checks each instruction once for both warnings and plugin reports; the
+plugin does not subscribe to register-access hooks or maintain another set of
+register dependencies. See
+[memory wait diagnostics](memory-wait-diagnostics.md) for target coverage,
+recovery policy, and replay-mode limits.
+
+Every `RACE` record includes `producer_pc`, `consumer_pc`, and `checker`.
+Register records have `checker=core`; LDS records have `checker=plugin`.
+Register records additionally include:
+
+| Field | Meaning |
+|---|---|
+| `counter`, `required_wait` | Counter and sufficient maximum wait threshold for this dependency. |
+| `reg`, `width` | First overlapping wave-relative physical register and number of dwords. |
+| `lanes`, `bytes` | Actual overlapping lane mask and byte mask within a dword, in hexadecimal. Scalar lanes are all ones. |
+| `lane` | First overlapping vector lane, or -1 for a scalar/special register. |
+
+The trace uses captured instruction encodings, not code reread at a saved PC.
+The issuer usually reports before the consumer's instruction notification;
+buffer payload checks that need prepared lane masks run after address
+preparation, before memory publication. The reporter includes the consumer's
+owned encoding in the displayed trace in either case. If
+either encoding is unavailable, the report keeps both PCs and prints explicit
+`encoding unavailable` witnesses instead of a reconstructed trace.
+
+The plugin emits one representative register finding per dispatch,
+producer/consumer PC pair, register class/index, access kind, and counter.
+Repeated visits to that site are counted but suppressed, including visits with
+different lanes or widths. Different producers and consumers remain separate
+sites. A read-modify-write can report both a read and an overwrite, and a later
+unwaited consumer can report the same producer again: reporting does not retire
+the dependency. Only a wait or another architectural guarantee does.
+
+Core warnings have a separate per-CU budget. LDS reports use broader PC-based
+suppression: within a dispatch, an emitted pair suppresses further LDS reports
+involving either PC. The final summary counts emitted records and suppressed
+register findings. Neither a clean nor an interrupted run proves complete coverage.
 
 ## What is a race?
 
@@ -184,10 +231,13 @@ races. Some examples:
 - **VGPR races**: a vector register is read or overwritten by an instruction
   before a pending global or LDS load has completed (`s_waitcnt vmcnt` /
   `s_waitcnt lgkmcnt` insufficient).
-- **Scalar-register races**: an SGPR or TTMP is read or overwritten before a
-  pending scalar-memory load has completed. A later scalar load to the same
-  destination is also checked because scalar-memory results can complete out
-  of order.
+- **Scalar-register races**: an SGPR, TTMP, or supported special register is
+  read or overwritten before its pending result is ready. A later scalar load
+  to the same destination is also checked because scalar-memory results can
+  complete out of order.
+- **Replay-source hazards** (gfx1250, opt-in): a protected memory source is
+  overwritten before address translation is known complete. See the core's
+  [XCNT coverage](memory-wait-diagnostics.md#xcnt-replay-source-diagnostics).
 - **LDS races**: an LDS byte is read by one wave while another wave has an
   outstanding write to the same byte, or written by one wave while another
   wave has an outstanding read of the same byte, without an intervening
@@ -256,107 +306,103 @@ races. Some examples:
   tensor operation is pending (3.2.2.1), and counting it then retires no later
   copy early. Either way, the instruction occupies its `asynccnt` slot.
 
-Detection is at byte granularity: D16 (half-register) loads only flag races on
-the affected bytes, and LDS races are tracked per byte.
+Detection is at byte granularity. Register findings use the core's lane and
+byte masks, including target-dependent D16 writeback rules; LDS conflicts identify
+a byte shared by the two accesses.
 
 ## How it works
 
-Every in-flight memory operation has an **event** that goes through the
-following lifecycle:
+### One register checker, separate LDS history
 
-1. **ACTIVE** — the operation is in flight. Ordinary DS operations issued by
-   the same wave remain ordered with respect to each other, so a later
-   same-wave DS read or write does not race solely because the earlier DS event
-   is still active. Direct-to-LDS VMEM writes still require the owning wave to
-   wait for `vmcnt` before reading the destination bytes. Tensor DMA transfers
-   complete in issue order, but as a conservative rule an active tensor load or
-   store still conflicts with a later, overlapping transfer in the other
-   direction from the same wave (see Tensor DMA races above). An active async
-   store's LDS source likewise conflicts with any later, overlapping LDS write
-   from the same wave (see Async copy races above).
-1. **WAVE_COMPLETE** — waits have satisfied every counter obligation for the
-   event. This means the event is no longer in flight from the perspective of
-   the wave that issued the operation, but is still in flight from the
-   perspective of other waves in the same workgroup.
-1. **RETIRED** — `s_barrier` has synchronized all waves. The event is fully
-   retired and, from the perspective of all threads in all wavefronts, the
-   operation is complete. A workgroup with a single wave has no other wave to
-   race with, so its LDS events are retired as soon as they are wave-complete,
-   without a barrier. They then leave the LDS lists that race checks scan, so
-   those checks do not slow down as completed events add up in long
-   single-wave kernels. Retired events stay in the event registry until it
-   trims them, and it trims only from the oldest event: an older event that is
-   still pending, such as a global load waiting on `loadcnt`, keeps every
-   later retired event in the registry.
+The [core register scoreboard](memory-wait-diagnostics.md#access-planning-and-cost)
+checks decoded operands before execution or asynchronous MMA publication. It
+tracks returned register bytes and, when enabled, replay sources. Register
+accessors and memory writeback do not run the checker. Its
+[counter coverage](memory-wait-counter-coverage.md) defines producer families,
+target-specific waits, completion ordering, mixed-FLAT lane readiness, and
+capacity proofs.
 
-Generic `FLAT_*` instructions select counter domains from their resolved memory
-requests. Global and scratch requests use the vector-memory counter; LDS
-requests use the LDS counter. An instruction with requests in both domains uses
-both counters. The runtime applies this conditional-participation model across
-AMD GPU targets, for loads, stores and atomics. Validation on every physical GPU
-architecture is not established.
+The plugin consumes structured core findings for reporting. Its own analysis
+state contains only LDS footprints and counter progress. This state cannot be
+replaced by register readiness: a wave's wait can release a register while its
+completed LDS access still conflicts with an unsynchronized peer.
 
-For uniform requests, the race detector uses only the selected memory domain.
-For example, on gfx950 with global addresses in every requesting lane, this use
-of `v8` has a sufficient wait:
+The plugin supports asynchronous MMA execution. It records instruction evidence
+from the issuer's synchronous before-execute or accepted async-issue callback.
+The async callback reads no register values, and helper register accesses do not
+enter the race plugin. For MMA, core register findings precede either notification, so the
+reporter includes the current consumer when extending its trace. Memory issue
+capacity handling remains in the synchronous before-execute hook.
 
-```asm
-flat_load_dword v8, v[0:1]
-s_waitcnt vmcnt(0)
-flat_store_dword v[2:3], v8
-```
+### Workgroup lifetime
 
-LDS-only loads instead require `lgkmcnt(0)`. Newer targets use their corresponding
-split counters. Routing preserves decoded completion ordering and the VMEM/DS
-obligations used by the requests. Generated VMEM/FLAT stores and atomics do not
-carry an EXP completion obligation. In particular, CDNA4 FLAT completion stays
-unordered; a nonzero wait cannot prove a result ready.
+Participating waves share ownership of their workgroup's LDS detector. Each
+wave's plugin state holds an aliasing pointer to its detector-owned history.
+Halting or cancelling a wave releases that pointer and its instruction trace,
+but surviving peers keep all histories, including those of ended waves.
+Ending a wave does not establish LDS ordering with its peers.
 
-Functional counter acquisition and the core memory-wait checker use the selected
-memory domains. So does the race detector on the pre-GFX12 capacity targets
-(CDNA1 through CDNA4 and GFX11): it applies FLAT capacity constraints after
-addresses are resolved, because before the address operands are read, neither
-domain is guaranteed to need a counter slot. On those targets, a full LDS
-counter followed by a global-only FLAT therefore cannot prove an older LDS
-result complete. On gfx1250, every FLAT instruction increments both DScnt and
-LOADcnt or STOREcnt when it issues (CDNA5 ISA 5.7.1.3), and the race detector
-counts it on both; see the gfx1250 capacity model below.
+The last wave to halt or be cancelled releases the detector. Cleanup does not
+depend on successful workgroup completion, so setup rollback and dispatch
+cancellation release it as well. Destroying resident wave slots also releases
+their ownership. Kernel names and recorded report summaries have a separate
+plugin lifetime and remain available after a detector is released.
 
-A mixture of global and scratch lanes uses the same VMEM domain. Mixed LDS/global
-observations still attach both obligations to the whole race-plugin event, so a
-consumer restricted to an already-completed lane group can still get a false
-report. `TODO(newling)` regression cases track this remaining #12237 gap. The
-core checker's [FLAT register-readiness policy](memory-wait-counter-coverage.md#flat-register-readiness)
-tracks the groups separately. Functional execution splits mixed requests by
-address space, completing retryable global/scratch work before accessing LDS.
-The race plugin retains both counter obligations on its single mixed event.
-LDS validation and interval registration are bounded by the CU backing capacity.
-For RDNA4 FLAT LDS, they also stop at the captured workgroup allocation end,
-retaining only complete memory elements; a lane whose first element does not fit
-records no LDS bytes, and an atomic requires its whole element. This end is the
-modeled `lds_base + lds_size`, including current 256-byte scheduler rounding;
-PM4 sizes may already be 512-byte multiples, and target allocation and encoding
-granules remain unmodeled. Out-of-bounds addresses preserve register and counter
-dependencies without recording LDS bytes. DDS has no emulator backing and faults
-before execution.
+### LDS events and completion
 
-An all-ones wait-count field is the architectural “do not wait” value. CDNA's
-four-bit `lgkmcnt(15)` and six-bit `vmcnt(63)` therefore retire no events;
-`lgkmcnt(14)` and `vmcnt(62)` are the largest values that can impose an
-explicit wait. Hardware also prevents counter overflow by stalling issue.
+The plugin records an event for each observed memory issue with counter
+obligations. An event has an optional LDS read or write footprint, a producing
+instruction snapshot, and its counter obligations. Operations without an LDS
+effect still occupy queue positions. Otherwise a partial wait could incorrectly
+identify which LDS operations completed.
 
-The physical LGKMCNT capacity is shared by every event accounted to LGKMCNT,
-including LDS, GDS, scalar-memory, and message operations. Sharing that counter
-does not mean those event classes complete in order with each other. The
-detector therefore retires only the oldest prefix that is provably complete in
-an ordered class. For example, a new LGKM-counted instruction issued after 15
-pending local-LDS operations proves that the oldest LDS operation completed,
-even when the new instruction is scalar memory or GDS. Mixed-class pressure
-that does not identify a completed event remains conservatively pending. VMCNT
-is handled the same way for its 63-entry ordered non-FLAT VMEM class.
+Tensor DMA supplies LDS byte ranges through a borrowed span. Registering the
+event builds owned intervals; the detector retains no borrowed execution storage.
 
-The detector's persistent counter accounting is limited to operations routed
-through rocJITsu's memory pipelines. A narrow `s_sendmsg*` fallback applies
+Counter completion order and LDS access order answer different questions.
+For example, tensor DMA completes in issue order on `tensorcnt`, so a partial
+wait can complete a prefix. That does not prove that an overlapping tensor load
+and store access LDS in order before the wait. Their LDS accesses are therefore
+checked as unordered.
+
+On gfx1250, both the core register checker and the plugin's LDS analysis count
+FLAT on DScnt and LOADcnt or STOREcnt at issue (CDNA5 ISA 5.7.1.3), including
+slots in a domain with no requests. Other targets apply FLAT capacity only after
+addresses select a domain. Register results depend only on the counter for each
+returned lane's address. Functional counter acquisition remains routing-specific.
+
+Race-analysis events have three states:
+
+1. **ACTIVE** — not every counter obligation has been satisfied. A conflicting
+   peer access is checked regardless of whether execution already wrote the
+   data eagerly. Ordinary DS operations from the same wave remain ordered with
+   each other. Direct-to-LDS VMEM, async copies and tensor DMA use their own ordering
+   rules and may require a wait even for an access from the issuing wave.
+1. **WAVE_COMPLETE** — all counter obligations have been satisfied. The issuing
+   wave can reuse the bytes, but completed LDS evidence remains available for
+   checks by unsynchronized peers. This is not a claim that execution is still
+   physically in flight.
+1. **RETIRED** — neither counter progress nor peer checks need the event. A
+   resolved workgroup barrier retires completed LDS evidence. Events without
+   LDS bytes or peer waves go directly from **ACTIVE** to **RETIRED** when all
+   counter obligations are satisfied; they need no barrier.
+
+The event registry trims only a retired prefix. One older pending event can
+therefore retain many later retired records even after those records have left
+the LDS conflict lists. Logical retirement and reclaiming registry storage are
+separate.
+
+The adapter and memory pipeline read the same `MemoryIssueInfo` selected by
+routing; the plugin does not infer FLAT's counter domains from addresses again.
+On gfx1250 it also retains the unused decoded domains as counter-only slots.
+`WaitCounterPolicy` decodes explicit waits and removes all-ones no-wait fields.
+The race core receives only the remaining numeric bounds, not ISA encodings.
+A zero wait completes every event on its selected counter. A nonzero wait retires
+only the provable prefix within each independently ordered completion class.
+Sharing a counter does not make scalar memory, GDS, and indexed LDS one FIFO.
+
+The detector retains memory-pipeline and tensor-DMA counter positions, plus
+gfx1250 cache-operation and LDS lane-permute slots. A narrow `s_sendmsg*` fallback applies
 issue-time pressure: one LGKMCNT token on the pre-GFX12 capacity targets (CDNA1
 through CDNA4 and GFX11), and on gfx1250 one KMcnt token, or two for
 `s_sendmsg_rtn_*`, which also counts its returned data (CDNA5 ISA 5.4). On
@@ -371,31 +417,7 @@ treated as complete message, timestamp or barrier modeling. Leaving out a
 counter's operations only makes its capacity model conservative: the detector
 can miss a completion, never retire too much.
 
-For example, CDNA cannot issue the final scalar load below while all 15 earlier
-LGKM tokens remain outstanding:
-
-```asm
-ds_read_b32 v0, v16
-ds_read_b32 v1, v16
-; ... 13 more ordered LDS reads, through v14 ...
-s_load_dword s4, s[2:3], 0
-```
-
-The scalar load can issue only after the LGKMCNT value drops below its
-four-bit capacity. Because all preceding operations are ordered LDS reads, this
-proves that the oldest read into `v0` completed. If those pending operations
-belonged to different or unordered classes, the capacity stall would not prove
-which individual event completed.
-
-The detector records the target-specific wait-counter family on every event.
-It handles both the combined wait fields and the standalone counter forms on
-supported targets, for example:
-
-```asm
-s_waitcnt vmcnt(0) lgkmcnt(0)  ; combined fields
-s_waitcnt_vmcnt null, 0        ; standalone VMCNT form
-s_waitcnt_lgkmcnt null, 0      ; standalone LGKMCNT form
-```
+### Counter capacity
 
 Counter-capacity backpressure is modeled for the VMCNT and LGKMCNT domains on
 CDNA1 through CDNA4 and GFX11. CDNA uses a four-bit LGKMCNT and six-bit VMCNT;
@@ -449,43 +471,33 @@ LDS bytes, in order with that domain's other operations, so later capacity
 checks and partial waits count it as hardware does. The FLAT's own result still
 depends only on the domains its addresses used.
 
-The same completion-order distinction is used for nonzero partial waits; a
-zero wait still completes every event on the selected counter. The detector
-also uses these classes to determine whether two asynchronous writes to the
-same VGPR are ordered.
+### LDS footprints
 
-The plugin keeps track, for all registers and LDS memory bytes, of which memory
-operations are in flight. When an instruction in the emulator accesses an LDS
-byte, there is a check to see what memory events are still in flight that
-read/write that byte, from the perspective of the accessing thread. In this way,
-RAW (read-after-write) and WAR (write-after-read) hazards can be detected.
-For VGPRs and scalar registers, the detector also flags WAW when an instruction
-write can be clobbered by a pending asynchronous load. The detector also reports
-WAW between scalar loads targeting the same SGPR or TTMP.
+Memory routing supplies actual lane masks and addresses. Global/scratch-only
+issues contribute counters without LDS intervals. Mixed global/LDS FLAT issues
+contribute one event, with both obligations and only the ordinary LDS lanes'
+intervals. The plugin conservatively keeps that whole event pending until both
+domains complete; unlike the core's register dependencies, its LDS footprint
+does not yet have independent per-domain readiness.
 
-On architectures where scalar-memory and data-share operations use a combined
-`lgkmcnt`, a nonzero partial wait cannot identify which scalar destination has
-completed. Those scalar destinations remain pending until `lgkmcnt(0)`. The
-same partial wait can still retire older data-share operations that are provably
-complete from their in-order completion rule.
+LDS ranges are bounded by the CU backing capacity. RDNA4 FLAT additionally clips
+to the captured workgroup allocation, keeping only complete memory elements.
+Its bound is the modeled `lds_base + lds_size`, including scheduler rounding,
+not a new target-allocation model. Tensor DMA observations instead describe
+byte ranges and can include a partial element at the allocation boundary.
+Rejected LDS addresses record no intervals but retain their counter participation.
+DDS has no emulator backing and faults before execution.
 
-**LDS race detection** uses coarse-grained counters (one per 16-byte chunk) for
-fast-path checks, with interval-based overlap scanning as a fallback. Live
-events are split by direction so that RAW and WAR hazards are checked
-independently. Chunks containing only ordinary LDS accesses from the accessing
-wave can bypass the interval scan because those operations are ordered. A
-mixed chunk uses the scan until its count drains. The history remains available
-for checks by other waves until a barrier retires it. Direct-to-LDS and unordered
-memory operations still require their own completion checks.
+Conflict checks use counts per 16-byte chunk before scanning overlapping
+intervals. Read and write histories are separate: a read checks prior writes
+(RAW), and a write checks prior reads (WAR). Chunks containing only ordered DS
+accesses from the same wave can bypass the scan. Cross-wave evidence remains
+until synchronization; LDS write/write conflicts are not currently checked.
+
 For a DS or FLAT instruction, the plugin first merges the active lanes' byte
 ranges into intervals and checks the chunk counts under them. When no chunk can
 hold a conflict, it skips the per-lane checks. The same intervals become the
 instruction's event.
-
-**VGPR race detection** tracks events per register, using the stored exec mask
-to determine which lanes are affected. Tracking is at byte granularity within
-each 32-bit VGPR so that D16 instructions do not cause false positives when the
-other half is accessed independently.
 
 ### Worked example
 
@@ -543,15 +555,14 @@ Source files are under `lib/rocjitsu/src/rocjitsu/vm/plugins/race_detector/`:
 
 ```
 race_detector/
-├── plugin.h/.cpp            rocjitsu plugin adapter (translates hooks to core API)
-└── core/                    event tracking and lifetime
-    ├── race_detector.h/.cpp  main detector: event allocation, validation, retirement
-    ├── wave_race_state.h/.cpp  per-wave state: register tracking, waitcnt resolution
-    ├── event_registry.h      append-only event store with prefix trimming
-    ├── interval_set.h        half-open byte range tracking for LDS
-    ├── types.h               core enum types and structs
-    ├── common_register.h     memory event types and ordering
-    └── dim3d.h               3D coordinate helpers
+├── plugin.h/.cpp             core-finding reports and LDS observation adapter
+└── core/                     LDS analysis
+    ├── race_detector.h/.cpp   workgroup footprints, conflict checks, retirement
+    ├── wave_race_state.h/.cpp  per-wave counter progress and wait resolution
+    ├── event_registry.h       append-only event store with prefix trimming
+    ├── interval_set.h         half-open byte ranges
+    ├── types.h                LDS access, event, and violation types
+    └── dim3d.h                3D coordinate helpers
 ```
 
 Explicit wait decoding is shared with the core checker in
@@ -561,21 +572,23 @@ Explicit wait decoding is shared with the core checker in
 
 Tests are part of the rocjitsu test suite (`emulation/rocjitsu/tests/`):
 
-- `race_detector_tests.cpp` — drives `RaceDetector` and `WaveRaceState` directly
-  via `race_test_builder.h`, covering VGPR, SGPR, LDS, D16, DTL, exec mask,
-  multi-workgroup, and mixed counter scenarios.
-- `race_detector_counter_capacity_tests.cpp` — counter-capacity backpressure,
-  for the combined counters before GFX12 and the gfx1250 split counters.
-- `interval_set_tests.cpp` — unit tests for `IntervalSet`.
-- `execution_plugin_race_test.cpp` — drives the plugin's hooks, including
-  tensor DMA transfers and async copies on gfx1250.
-- `wait_hazard_test.cpp` — wait/readiness tests shared with the core checker.
+- `race-detector/` — LDS overlap, bounds, counter progress, partial waits,
+  capacity, barrier lifetime, event storage, and interval tests.
+- `execution_plugin_race_test.cpp` — LDS routing, tensor DMA, async copies, workgroup
+  lifecycle, and owned report traces through the plugin's hooks.
+- `execution_plugin_register_hazard_test.cpp` — core findings through the
+  actual issuer, report fields, owned witnesses, suppression, waits, and LDS
+  controls.
+- `memory_wait_scoreboard_test.cpp` — register readiness and counter proofs,
+  including instruction footprint comparisons against execution observations.
+- `wait_hazard_test.cpp` — explicit-wait conformance shared by independent
+  core-register and plugin-LDS backends.
 - The `race` suite in
   [ROCm/rocjitsu-test-corpus](https://github.com/ROCm/rocjitsu-test-corpus)
   owns the gfx942, gfx950, gfx1151 and gfx1250 end-to-end HIP programs; the
-  gfx1250 program covers tensor DMA and counter capacity. The
-  `rocjitsu-test-corpus` workflow builds them with the corpus HIP toolchain and
-  runs each case under the emulator with the `race` plugin enabled.
+  gfx1250 program covers split wait counters, tensor DMA and counter capacity. The `rocjitsu-test-corpus` workflow builds
+  them with the corpus HIP toolchain and runs each case under the emulator with
+  the `race` plugin enabled.
 
 ```bash
 # Core detection tests
@@ -607,19 +620,8 @@ this source tree. The original
   (missing `s_waitcnt` and `s_barrier`). It does not detect inter-workgroup
   races, races between dispatches, or host-device synchronization issues.
 
-- **Limited WAW detection**: VGPR WAW covers instruction writes and
-  asynchronous memory writes that overlap a pending load. Scalar-register WAW
-  covers instruction writes and scalar loads that overlap pending scalar-memory
-  destinations. LDS WAW is not currently reported.
-
-- **Embedded waits**: the plugin handles explicit wait instructions, including
-  `s_wait_idle` and RDNA4's compatibility `s_waitcnt`, but does not apply waits
-  embedded in other instructions. For example, RDNA4 `v_interp_p10_f32` with
-  `wait_exp:0` retires pending EXPCNT results in the core checker, while the
-  plugin leaves them pending and can report false register hazards. With
-  `wait_exp:7` (no wait), both keep those results pending. The shared
-  `wait_hazard_test.cpp` suite records this boundary. Supporting embedded waits
-  requires retirement before the instruction's register accesses.
+- **Limited WAW detection**: the core checks register overwrites against pending
+  results. The LDS checker reports RAW and WAR, but not LDS write/write conflicts.
 
 - **Tensor DMA scope**: only the LDS side of a transfer is tracked. Its global
   memory accesses are not checked.
@@ -655,11 +657,21 @@ this source tree. The original
   considers full, can leave an earlier transfer pending, so a real race would
   go unreported.
 
-- **Conservative DPP/SDWA write masks**: WAW precision depends on the execution
-  plugin's instruction-write lane and byte masks. DPP destinations can currently
-  report all active lanes, and SDWA preserve-mode destinations can report a full
-  dword, so writes to architecturally preserved lanes or bytes may be
-  conservatively reported as races.
+- **Incomplete LDS counter occupancy**: pipeline memory issues and tensor DMA
+  are retained. The plugin also retains gfx1250 cache-operation and LDS lane-permute slots.
+  A narrow `s_sendmsg*` fallback applies issue-time LGKMCNT or KMcnt pressure,
+  but does not retain message occupancy. Inline timestamp and other
+  non-pipeline producers are not fully represented. Do not infer complete LDS
+  partial-wait coverage from the core's broader register-producer coverage.
+
+- **Mixed-FLAT LDS readiness**: the plugin attaches both domains' obligations
+  to one mixed event. An already-completed LDS portion can therefore remain
+  pending until the global portion also completes, producing conservative LDS
+  reports. Core register readiness tracks the lane groups separately.
+
+- **Cluster LDS multicast**: peer writes are not tracked. The plugin warns when
+  an observed transfer targets peer workgroups and checks only the local LDS
+  effect.
 
 - **Kernel name resolution**: kernel names in race reports may show as `"?"` if
   symbol information is not available in the code object.
@@ -670,7 +682,6 @@ The race detection logic was originally developed as part of **race-emulator**,
 a standalone CPU-side GPU assembly emulator that parsed `.s` assembly text
 files.
 
-The detection logic is independent of any particular emulation approach — it
-operates on abstract memory events (register loads, LDS accesses, waitcnt,
-barrier) regardless of how those events are produced. The emulation part of
-race-emulator is no longer under development; rocjitsu is used for emulation.
+The plugin's LDS analysis operates on memory events, counter progress, and
+barriers. Register analysis belongs to rocjitsu's core scoreboard. The original
+race-emulator execution engine is no longer under development.

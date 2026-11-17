@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/plugins/execution_plugin.h"
 
 #include "rocjitsu/vm/plugins/race_detector/core/race_detector.h"
@@ -10,12 +11,12 @@
 
 #include <cstdint>
 #include <functional>
-#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <unordered_map>
 #include <vector>
@@ -74,7 +75,9 @@ struct RaceWavefrontState : WavefrontState {
   /// a copy of its encoding, so reports can disassemble it after the code is
   /// rewritten or unmapped.
   RingBuffer<InstructionSnapshot, 256> trace;
-  WaveRaceState *race_state = nullptr;
+  // Aliases this wave's state while owning the whole workgroup detector. Peers
+  // keep an ended wave's LDS history alive until the last wave releases it.
+  std::shared_ptr<WaveRaceState> race_state;
   struct LdsOperandRead {
     uint32_t address;
     uint32_t bytes;
@@ -87,26 +90,26 @@ class RaceDetectorPlugin : public ExecutionPlugin,
                            public AmdgpuTrapEntryObserver,
                            public AmdgpuImplicitMemoryWaitObserver {
 public:
-  /// @param config_json Plugin configuration object as a JSON string (unused;
-  ///        this plugin takes no configuration). May be null.
+  /// Reports the core's register findings and checks LDS ordering.
   explicit RaceDetectorPlugin(const char *config_json = nullptr);
   ~RaceDetectorPlugin() override;
 
-  bool observes_sgpr_reads() const override { return true; }
+  bool observes_before_execute_instruction() const override { return true; }
+  bool observes_after_execute_instruction() const override { return true; }
+  bool observes_async_instruction_issued() const override { return true; }
+  bool observes_register_hazards() const override { return true; }
   bool observes_memory_routing() const override { return true; }
   bool observes_tensor_dma_issue() const override { return true; }
-  /// Skip waves without race state, including slots between a halt and the
-  /// next workgroup dispatch, when other plugins may read their registers.
+  /// Skip slots without a live race-analysis state.
   bool observes_hot_hooks_for_wavefront(const amdgpu::Wavefront *wf) const override;
 
   void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) override;
 
-  void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id,
-                                   uint32_t physical_vgpr_count, uint32_t physical_sgpr_count,
-                                   std::span<amdgpu::Wavefront *> wavefronts) override;
+  void onAmdgpuRegisterHazard(const amdgpu::RegisterHazardObservation &hazard,
+                              const amdgpu::Wavefront &wf) override;
 
-  /// Release the workgroup's detector. Reported races are still counted.
-  void onAmdgpuWorkgroupCompleted(uint32_t dispatch_id, uint32_t wg_id) override;
+  void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id,
+                                   std::span<amdgpu::Wavefront *> wavefronts) override;
 
   void onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) override;
 
@@ -123,19 +126,11 @@ public:
   void onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObservation &issue,
                                const amdgpu::Wavefront &wf) override;
 
-  void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg, uint64_t lane_mask,
-                             uint8_t byte_mask = ExecutionPlugin::kFullByteMask) override;
+  void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst, amdgpu::Wavefront &wf,
+                                        std::span<const uint32_t>) override;
 
-  void onAmdgpuWriteVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg,
-                              uint64_t lane_mask,
-                              uint8_t byte_mask = ExecutionPlugin::kFullByteMask) override;
-
-  void onAmdgpuReadScalarRegister(const amdgpu::Wavefront *wf, RegisterRef reg) override;
-
-  void onAmdgpuWriteScalarRegister(const amdgpu::Wavefront *wf, RegisterRef reg) override;
-
-  void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
-                                        amdgpu::Wavefront &wf) override;
+  void onAmdgpuAsyncInstructionIssued(uint64_t pc, const Instruction &inst,
+                                      amdgpu::Wavefront &wf) override;
 
   void onAmdgpuAfterExecuteInstruction(uint64_t pc, const Instruction &inst,
                                        amdgpu::Wavefront &wf) override;
@@ -148,22 +143,26 @@ public:
 
   std::string getSummary() const;
 
-  /// Number of workgroups whose detector state is still held.
-  size_t retainedWorkgroupCount() const;
-
 private:
-  struct WorkgroupKey {
-    uint32_t dispatch_id;
-    uint32_t workgroup_id;
-    bool operator<(const WorkgroupKey &o) const {
-      return std::tie(dispatch_id, workgroup_id) < std::tie(o.dispatch_id, o.workgroup_id);
-    }
-  };
-
   struct KernelNames {
     std::string name;
     std::string symbol;
   };
+
+  struct ReportLocation {
+    std::string_view space;
+    int index;
+    int wave;
+    int lane;
+    bool write;
+    Dim3d workgroup;
+    uint64_t producer_pc;
+    uint64_t consumer_pc;
+    rj_code_arch_t arch;
+  };
+  // Called with report_mutex_ held, after selecting a report for emission.
+  void emit_report(uint32_t dispatch, const ReportLocation &location, std::string_view details,
+                   const amdgpu::RegisterHazardObservation *hazard = nullptr);
 
   RaceWavefrontState *get_state(const amdgpu::Wavefront &wf) {
     return static_cast<RaceWavefrontState *>(wf.plugin_state(slot_index()));
@@ -173,11 +172,13 @@ private:
   }
   void release_wave_state(amdgpu::Wavefront &wf) { wf.clear_plugin_state(slot_index()); }
 
-  mutable std::mutex dispatch_mutex_;
-  std::map<WorkgroupKey, std::unique_ptr<RaceDetector>> detectors_;
-
-  std::mutex report_mutex_;
+  mutable std::mutex report_mutex_;
   std::set<std::pair<uint32_t, uint64_t>> observed_races_;
+  using RegisterSite =
+      std::tuple<uint32_t, uint64_t, uint64_t, RegClass, uint16_t, bool, amdgpu::WaitCounterKind>;
+  std::set<RegisterSite> observed_register_races_;
+  uint64_t reported_races_ = 0;
+  uint64_t repeated_register_races_ = 0;
   std::unordered_map<uint32_t, KernelNames> dispatch_kernel_names_;
 };
 

@@ -3,6 +3,8 @@
 
 #include "rocjitsu/vm/plugins/logging/plugin.h"
 
+#include "rocjitsu/vm/amdgpu/wavefront.h"
+
 #include <format>
 
 namespace rocjitsu {

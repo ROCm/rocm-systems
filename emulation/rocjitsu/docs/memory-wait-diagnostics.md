@@ -5,8 +5,10 @@ memory results eagerly; a core, per-wave scoreboard separately tracks whether a
 register result is known complete.
 Reading or overwriting an outstanding destination prints a `memory-wait` warning
 with the issuing PC, consuming PC, register, counter, and sufficient wait
-threshold. Execution continues with the eager value. The first conflicting access
-reports the producer and recovers its readiness to avoid cascading warnings. Each CU
+threshold. Execution continues with the eager value. By default, the first
+conflicting access reports the producer and removes that dependency to avoid
+cascading warnings. This is diagnostic recovery, not proof that the operation
+completed: its counter position remains outstanding. Each CU
 prints at most 16 warnings during its lifetime, then one suppression notice.
 This budget is per CU, so N active CUs can print up to 17 × N lines for the
 same kernel. The budget stays local so a faulty kernel on one CU does not hide
@@ -17,11 +19,20 @@ rerun to expose later sites. For an unfiltered investigation, a host debugger
 breakpoint at `ComputeUnitCore::report_memory_wait` observes every reported
 hazard before the output limit is applied.
 
+An execution plugin can instead request structured register findings through
+`observes_register_hazards()`. With such an observer attached, dependencies remain
+available after a finding until a wait or another architectural guarantee releases
+them. A later consumer can therefore report the same producer. Observers receive
+findings before the stderr budget, and own their report selection and suppression.
+The [race plugin](race-detector.md#core-backed-register-reports) uses this path
+to add kernel context and owned instruction traces. It does not run a second
+register checker.
+
 Registers in diagnostics use the scoreboard's physical numbering. On targets
 with an accumulator bank, `v256+n` names `aN` (for example, `v288` is `a32`).
 
-If warnings appear incorrect or checking slows a workload, disable both ordinary
-and XCNT checks for a launch without editing the config or rebuilding:
+For a launch without the race plugin, disable the ordinary and XCNT warning
+settings without editing the config or rebuilding:
 
 ```sh
 rocjitsu --config /path/to/config.json --wait-checking=off -- <command>
@@ -34,6 +45,11 @@ Use `--wait-checking=on` for ordinary checks only, or `--wait-checking=all` to i
 gfx1250 XCNT. These modes override both per-CU settings on every GPU. Omitting the
 flag preserves JSON settings and defaults. See [configuration](configuration.md#memory-wait-diagnostics)
 for persistent global overrides and launch-mode restrictions.
+The race plugin requires all wait checks supported by the target: `all` on gfx1250,
+and `on` or `all` elsewhere. This also applies to other plugins that observe
+register findings. Plugin loading checks each CU's effective settings, including
+per-CU overrides. Ordinary checking must be enabled everywhere, and XCNT must
+also be enabled on gfx1250.
 
 Without a global override, memory-result diagnostics default to
 `memory_wait_diagnostics=warn`. To disable them per CU, add this entry to each
@@ -68,7 +84,9 @@ The accepted values are `warn` and `off`; invalid values reject the configuratio
 This setting has no effect on other architectures. It controls diagnostics, not
 hardware XNACK support. A global `wait_checking` override takes precedence over
 both per-CU keys. Without one, setting `memory_wait_diagnostics=off` leaves an
-explicitly enabled XCNT check active. Use `--wait-checking=off` to disable both.
+explicitly enabled XCNT check active. Use `--wait-checking=off` to disable both
+when no register-finding plugin is enabled. Use `--wait-checking=on` to disable
+XCNT while retaining ordinary checking when no register-finding plugin is enabled.
 
 VMEM coverage is qualified for `MODE.REPLAY_MODE=1` (bit 25), the multi-group mode
 selected by LLVM at kernel entry. VMEM replay sources in single-group mode are
@@ -77,9 +95,9 @@ coverage boundary, not a claim that single-group kernels are replay-safe.
 
 Within the qualified model, X waits retire an ordered VMEM queue prefix. SMEM
 translation is unordered and requires a zero wait. A zero KM wait also releases
-SMEM sources. VMEM completion waits map completed instructions back to their X
-queue positions and release the proven translation prefix, including mixed loads
-and stores. Completion counters retain their independent positions.
+SMEM sources. VMEM and async completion waits map completed instructions back to
+their X queue positions and release the proven translation prefix, including mixed
+loads and stores. Completion counters retain their independent positions.
 The checker accounts for implicit drains at branches, register-control operations,
 messages and barriers, SMEM/VMEM transitions, and ordered VMEM destination reuse.
 It protects source dwords and executed vector lanes, without retaining payloads or
@@ -141,10 +159,16 @@ only where the target's counter capacity and completion ordering prove readiness
 unqualified completion classes remain conservative. The checker does not simulate
 hardware occupancy or select a latency at which memory becomes visible.
 
+MFMA broadcast reads are still checked across the whole wave. A pending load into
+B's lane 40 can therefore be reported by an MFMA with `blgp:4`, even though it reads
+B only from lanes 0–15. The race plugin also reports this known false positive;
+the correction is in [PR #15704](https://github.com/ROCm/rocm-systems/pull/15704).
+
 These are known limits, not an exhaustive list. Investigate warnings against the
-target's ordering rules; use `--wait-checking=off` to suppress both warning classes
-when needed. Plugins may overlap with these checks and additionally validate
-hazards such as memory visibility and communication between waves.
+target's ordering rules. The race plugin reports these same register findings and
+separately checks LDS ordering and communication between waves. Its
+[LDS coverage limits](race-detector.md#limitations) are independent of register
+readiness.
 
 ## Access planning and cost
 
@@ -177,5 +201,7 @@ suppresses the memory effect.
 
 Detailed records are allocated on the first tracked issue and reused across wave
 slot activations. Retirement clears affected shadow bytes and restores overlapping
-live records. Diagnostic formatting occurs only on a hazard. With both settings
-disabled, the issuer skips the checker; execution-plugin callbacks remain independent.
+live records. Instruction evidence is copied only when a register-finding observer
+requests it; disassembly occurs only when a report is emitted. With both warning
+settings disabled and no register-finding observer, the issuer skips the checker;
+other execution-plugin callbacks remain independent.

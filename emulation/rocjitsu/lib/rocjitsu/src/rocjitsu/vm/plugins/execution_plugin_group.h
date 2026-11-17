@@ -20,6 +20,7 @@
 #pragma once
 
 #include "rocjitsu/base/rj_compiler.h"
+#include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "rocjitsu/vm/plugins/plugin_sink.h"
 
@@ -125,13 +126,14 @@ public:
     const bool observes_memory_instruction_routing = p->observes_memory_instruction_routing();
     const bool observes_vgpr_reads = p->observes_vgpr_reads();
     const bool observes_vgpr_writes = p->observes_vgpr_writes();
-    const bool observes_sgpr_reads = p->observes_sgpr_reads();
+    const bool observes_scalar_register_reads = p->observes_scalar_register_reads();
     const bool observes_scalar_register_writes = p->observes_scalar_register_writes();
     const bool observes_memory_routing = p->observes_memory_routing();
     const bool observes_lds_direct_reads = p->observes_lds_direct_reads();
     observes_lds_direct_reads_ |= observes_lds_direct_reads;
     const bool observes_tensor_dma_memory_access = p->observes_tensor_dma_memory_access();
     const bool observes_tensor_dma_issue = p->observes_tensor_dma_issue();
+    const bool observes_register_hazards = p->observes_register_hazards();
     serialize_hot_hooks_ |= p->requires_serial_hot_hooks();
     observes_before_execute_instruction_ |= observes_before_execute_instruction;
     observes_after_execute_instruction_ |= observes_after_execute_instruction;
@@ -139,11 +141,12 @@ public:
     observes_memory_instruction_routing_ |= observes_memory_instruction_routing;
     observes_vgpr_reads_ |= observes_vgpr_reads;
     observes_vgpr_writes_ |= observes_vgpr_writes;
-    observes_sgpr_reads_ |= observes_sgpr_reads;
+    observes_scalar_register_reads_ |= observes_scalar_register_reads;
     observes_scalar_register_writes_ |= observes_scalar_register_writes;
     observes_memory_routing_ |= observes_memory_routing;
     observes_tensor_dma_memory_access_ |= observes_tensor_dma_memory_access;
     observes_tensor_dma_issue_ |= observes_tensor_dma_issue;
+    observes_register_hazards_ |= observes_register_hazards;
     supports_async_instructions_ &= p->supports_async_instructions();
     SinkBundle sink = build_sink_bundle(p->name() + ".log");
     if (auto *configured_sink = sink.get())
@@ -151,9 +154,9 @@ public:
     plugins_.push_back(PluginEntry{
         std::move(sink), observes_before_execute_instruction, observes_after_execute_instruction,
         observes_async_instruction_issued, observes_memory_instruction_routing, observes_vgpr_reads,
-        observes_vgpr_writes, observes_sgpr_reads, observes_scalar_register_writes,
+        observes_vgpr_writes, observes_scalar_register_reads, observes_scalar_register_writes,
         observes_memory_routing, observes_tensor_dma_memory_access, observes_tensor_dma_issue,
-        observes_lds_direct_reads, std::move(p)});
+        observes_lds_direct_reads, observes_register_hazards, std::move(p)});
     return true;
   }
 
@@ -179,6 +182,7 @@ public:
   bool observes_vgpr_reads() const { return observes_vgpr_reads_; }
   bool observes_vgpr_writes() const { return observes_vgpr_writes_; }
   bool observes_scalar_register_writes() const { return observes_scalar_register_writes_; }
+  bool observes_register_hazards() const { return observes_register_hazards_; }
 
   /// @brief Whether any contained plugin consumes the routed-memory hook.
   /// @details False for an empty group, so the caller's guard covers both.
@@ -192,9 +196,9 @@ public:
   /// @details False for an empty group, so the caller's guard covers both.
   bool observes_tensor_dma_issue() const { return observes_tensor_dma_issue_; }
 
-  /// Whether any contained plugin observes SGPR reads. Plugin policy is
-  /// sampled when each plugin is added so SGPR access stays O(1).
-  bool observes_sgpr_reads() const { return observes_sgpr_reads_; }
+  /// Whether any contained plugin observes scalar-register reads. Sampled on
+  /// add() so access checks do not query individual plugins.
+  bool observes_scalar_register_reads() const { return observes_scalar_register_reads_; }
 
   // -- Lifecycle (non-virtual) --
   // The host calls these outside the simulation-callback interval: onInit()
@@ -216,16 +220,15 @@ public:
   }
 
   // -- AMDGPU (non-virtual) --
-  void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
-                                        amdgpu::Wavefront &wf) {
-    if (!observes_before_execute_instruction_)
+  void onAmdgpuRegisterHazard(const amdgpu::RegisterHazardObservation &hazard,
+                              const amdgpu::Wavefront &wf) {
+    if (!observes_register_hazards_)
       return;
     dispatch_wave_hot_hook(&wf, [&](bool cached) {
       for (size_t index = 0; index != plugins_.size(); ++index) {
         auto &entry = plugins_[index];
-        if (entry.observes_before_execute_instruction &&
-            plugin_observes_hot_hooks(index, &wf, cached))
-          entry.plugin->onAmdgpuBeforeExecuteInstruction(pc, inst, wf);
+        if (entry.observes_register_hazards && plugin_observes_hot_hooks(index, &wf, cached))
+          entry.plugin->onAmdgpuRegisterHazard(hazard, wf);
       }
     });
   }
@@ -289,14 +292,6 @@ public:
     return false;
   }
 
-  void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access) {
-    dispatch_with_optional_plugin_lock([&]() {
-      for (auto &entry : plugins_)
-        if (entry.observes_memory_routing)
-          entry.plugin->onAmdgpuMemoryAccessRouted(access);
-    });
-  }
-
   void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access,
                                   const Instruction &inst, amdgpu::Wavefront &wf) {
     dispatch_wave_hot_hook(&wf, [&](bool cached) {
@@ -339,14 +334,6 @@ public:
         return true;
     }
     return false;
-  }
-
-  void onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &access) {
-    dispatch_with_optional_plugin_lock([&]() {
-      for (auto &entry : plugins_)
-        if (entry.observes_tensor_dma_memory_access)
-          entry.plugin->onAmdgpuTensorDmaMemoryAccess(access);
-    });
   }
 
   void onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &access,
@@ -419,12 +406,10 @@ public:
   }
 
   void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id,
-                                   uint32_t physical_vgpr_count, uint32_t physical_sgpr_count,
                                    std::span<amdgpu::Wavefront *> wavefronts) {
     dispatch_with_plugin_lock([&]() {
       for (auto &entry : plugins_)
-        entry.plugin->onAmdgpuWorkgroupDispatched(dispatch_id, wg_id, physical_vgpr_count,
-                                                  physical_sgpr_count, wavefronts);
+        entry.plugin->onAmdgpuWorkgroupDispatched(dispatch_id, wg_id, wavefronts);
     });
   }
 
@@ -489,25 +474,13 @@ public:
     });
   }
 
-  void onAmdgpuReadSgpr(const amdgpu::Wavefront *wf, uint32_t physical_reg) {
-    if (!observes_sgpr_reads_)
-      return;
-    dispatch_wave_hot_hook(wf, [&](bool cached) {
-      for (size_t index = 0; index != plugins_.size(); ++index) {
-        auto &entry = plugins_[index];
-        if (entry.observes_sgpr_reads && plugin_observes_hot_hooks(index, wf, cached))
-          entry.plugin->onAmdgpuReadSgpr(wf, physical_reg);
-      }
-    });
-  }
-
   void onAmdgpuReadScalarRegister(const amdgpu::Wavefront *wf, RegisterRef reg) {
-    if (!observes_sgpr_reads_)
+    if (!observes_scalar_register_reads_)
       return;
     dispatch_wave_hot_hook(wf, [&](bool cached) {
       for (size_t index = 0; index != plugins_.size(); ++index) {
         auto &entry = plugins_[index];
-        if (entry.observes_sgpr_reads && plugin_observes_hot_hooks(index, wf, cached))
+        if (entry.observes_scalar_register_reads && plugin_observes_hot_hooks(index, wf, cached))
           entry.plugin->onAmdgpuReadScalarRegister(wf, reg);
       }
     });
@@ -675,7 +648,8 @@ private:
   bool observes_lds_direct_reads_ = false;
   bool observes_tensor_dma_memory_access_ = false;
   bool observes_tensor_dma_issue_ = false;
-  bool observes_sgpr_reads_ = false;
+  bool observes_register_hazards_ = false;
+  bool observes_scalar_register_reads_ = false;
   bool observes_scalar_register_writes_ = false;
   bool supports_async_instructions_ = true;
 
@@ -752,18 +726,19 @@ private:
   /// therefore destroyed before its sink bundle.
   struct PluginEntry {
     SinkBundle sink;
-    bool observes_before_execute_instruction = true;
-    bool observes_after_execute_instruction = true;
-    bool observes_async_instruction_issued = true;
-    bool observes_memory_instruction_routing = true;
-    bool observes_vgpr_reads = true;
-    bool observes_vgpr_writes = true;
-    bool observes_sgpr_reads = true;
-    bool observes_scalar_register_writes = true;
-    bool observes_memory_routing = false;
-    bool observes_tensor_dma_memory_access = false;
-    bool observes_tensor_dma_issue = false;
-    bool observes_lds_direct_reads = false;
+    bool observes_before_execute_instruction;
+    bool observes_after_execute_instruction;
+    bool observes_async_instruction_issued;
+    bool observes_memory_instruction_routing;
+    bool observes_vgpr_reads;
+    bool observes_vgpr_writes;
+    bool observes_scalar_register_reads;
+    bool observes_scalar_register_writes;
+    bool observes_memory_routing;
+    bool observes_tensor_dma_memory_access;
+    bool observes_tensor_dma_issue;
+    bool observes_lds_direct_reads;
+    bool observes_register_hazards;
     OwnedPlugin plugin;
   };
 

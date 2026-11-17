@@ -6,6 +6,7 @@
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/code/analysis/waitcheck/target.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/sgpr_layout.h"
+#include "rocjitsu/isa/instruction_snapshot.h"
 #include "rocjitsu/isa/register_set.h"
 
 #include <array>
@@ -13,6 +14,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu {
@@ -135,6 +137,10 @@ private:
 /// No memory payloads, decoder objects, or helper threads are retained here.
 class MemoryWaitScoreboard {
 public:
+  /// FirstConflict is diagnostic recovery, not proof of memory completion.
+  /// Retain keeps dependencies available to other consumers until a wait or
+  /// another architectural guarantee releases them.
+  enum class Recovery { FirstConflict, Retain };
   static constexpr uint8_t kFullDwordByteMask = 0xf;
   static constexpr uint16_t kUnordered = UINT16_MAX;
   explicit MemoryWaitScoreboard(MemoryWaitShadow &shadow) : pending_(shadow) {
@@ -155,6 +161,7 @@ public:
     // qualify for ordered writeback (see access_pending). Results whose counter
     // decrements in order are not necessarily written to registers in order.
     bool ordered_overwrite = true;
+    std::optional<InstructionSnapshot> instruction = std::nullopt;
   };
   struct Hazard {
     Event producer;
@@ -162,6 +169,9 @@ public:
     RegisterRef reg;
     bool write;
     uint32_t required_wait;
+    uint64_t lanes;
+    uint8_t bytes;
+    std::optional<InstructionSnapshot> consumer_instruction;
   };
   using Reporter = void (*)(void *, const Hazard &);
 
@@ -176,7 +186,11 @@ public:
   /// may issue before cancelling that instruction with this snapshot.
   IssueSnapshot issue_snapshot() const { return issued_; }
   bool cancel_last_issue(uint64_t pc, const IssueSnapshot &before);
-  void before(const Instruction &inst, rj_code_arch_t arch);
+  /// Wave state qualifies EXEC-zero and ignored-resource admission. Counter-only
+  /// clients may omit it when their instruction is already known to issue.
+  void before(const Instruction &inst, rj_code_arch_t arch, const Wavefront *wave = nullptr);
+  static bool counts_memory_counter(const Instruction &inst, const Wavefront &wave,
+                                    WaitCounterKind counter);
   /// Return whether address preparation can change which lanes supply VDATA.
   static bool needs_buffer_payload_lanes(const Instruction &inst, rj_code_arch_t arch);
   void check_instruction(const Instruction &inst, Wavefront &wf);
@@ -195,8 +209,8 @@ public:
                               uint64_t shared_limit);
   /// X has one translation group at a time, independent of completion queues.
   void xcnt_group(bool scalar);
-  /// Map translation to this instruction's completion position, if it received one.
-  uint64_t issue_xcnt(std::optional<WaitCounterKind> completion, bool scalar);
+  /// Map translation to each completion position issued for this instruction.
+  uint64_t issue_xcnt(std::span<const WaitCounterKind> completions, bool scalar);
   /// A VMEM destination orders translation of older overlapping VMEM sources.
   void xcnt_ordered_write(RegisterRef reg, uint64_t lanes, uint8_t bytes);
   /// Count every operation, including stores without a register destination.
@@ -227,10 +241,14 @@ public:
     access_pending(pending_.canonical(reg), lanes, bytes, write, ordered_write_order);
   }
 
-  void bind(uint64_t pc, void *context, Reporter reporter) {
+  void bind(uint64_t pc, void *context, Reporter reporter,
+            Recovery recovery = Recovery::FirstConflict,
+            std::optional<InstructionSnapshot> instruction = std::nullopt) {
     pc_ = pc;
     context_ = context;
     reporter_ = reporter;
+    recovery_ = recovery;
+    instruction_ = std::move(instruction);
   }
   const std::vector<Event> &events() const { return events_; }
 
@@ -295,6 +313,8 @@ private:
   uint64_t pc_ = 0;
   void *context_ = nullptr;
   Reporter reporter_ = nullptr;
+  Recovery recovery_ = Recovery::FirstConflict;
+  std::optional<InstructionSnapshot> instruction_;
 };
 
 } // namespace amdgpu

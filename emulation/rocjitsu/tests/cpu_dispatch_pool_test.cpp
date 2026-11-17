@@ -103,9 +103,12 @@ struct DispatchPoolFixture {
 // execution and keep submissions open until every waiter is explicitly released.
 class GatedInstructionPlugin final : public ExecutionPlugin {
 public:
+  bool observes_scalar_register_reads() const override { return true; }
+  bool supports_async_instructions() const override { return false; }
+
   GatedInstructionPlugin() : ExecutionPlugin("gated_instruction") {}
 
-  void onAmdgpuReadSgpr(const amdgpu::Wavefront *, uint32_t) override {
+  void onAmdgpuReadScalarRegister(const amdgpu::Wavefront *, RegisterRef) override {
     std::unique_lock lock(mutex_);
     ++entered_;
     changed_.notify_all();
@@ -148,12 +151,15 @@ GatedInstructionPlugin *gate_fixture(DispatchPoolFixture &fixture) {
 // remaining CUs. The caller identity is published before run() queues work.
 class DrainingWorkerGate final : public ExecutionPlugin {
 public:
+  bool observes_scalar_register_reads() const override { return true; }
+  bool supports_async_instructions() const override { return false; }
+
   DrainingWorkerGate() : ExecutionPlugin("draining_worker_gate") {}
   void set_caller() {
     std::lock_guard lock(mutex_);
     caller_ = std::this_thread::get_id();
   }
-  void onAmdgpuReadSgpr(const amdgpu::Wavefront *, uint32_t) override {
+  void onAmdgpuReadScalarRegister(const amdgpu::Wavefront *, RegisterRef) override {
     std::unique_lock lock(mutex_);
     const auto id = std::this_thread::get_id();
     if (id == caller_) {

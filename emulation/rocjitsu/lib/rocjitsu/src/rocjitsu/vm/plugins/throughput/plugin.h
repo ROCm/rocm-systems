@@ -48,8 +48,9 @@ public:
   explicit ThroughputPlugin(const char *config_json = nullptr);
   ~ThroughputPlugin() override;
 
-  bool observes_sgpr_reads() const override { return false; }
-  bool supports_async_instructions() const override { return true; }
+  bool observes_before_execute_instruction() const override { return true; }
+  bool observes_after_execute_instruction() const override { return true; }
+  bool observes_async_instruction_issued() const override { return true; }
   void onAmdgpuAsyncInstructionIssued(uint64_t pc, const Instruction &inst,
                                       amdgpu::Wavefront &wf) override;
 
@@ -59,8 +60,8 @@ public:
   void onAmdgpuDispatchExecutionEnd(uint32_t dispatch_id) override;
   void onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) override;
   void onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) override;
-  void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
-                                        amdgpu::Wavefront &wf) override;
+  void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst, amdgpu::Wavefront &wf,
+                                        std::span<const uint32_t>) override;
   void onAmdgpuAfterExecuteInstruction(uint64_t pc, const Instruction &inst,
                                        amdgpu::Wavefront &wf) override;
 
