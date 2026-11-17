@@ -66,20 +66,6 @@ def _cmp_condition(
         if is_vop3:
             modifiers = ('inst_.abs' if has_abs else '0u', 'inst_.neg')
         return float_compare.evaluate_expr(dtype, op, 's0', 's1', modifiers=modifiers)
-    elif dtype in ('i64',):
-        L.append(
-            f'    int64_t s0 = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64({src[0]}, lane));'
-        )
-        L.append(
-            f'    int64_t s1 = static_cast<int64_t>(amdgpu::RegisterAccess(wf).read_lane64({src[1]}, lane));'
-        )
-    elif dtype in ('u64',):
-        L.append(
-            f'    uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64({src[0]}, lane);'
-        )
-        L.append(
-            f'    uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64({src[1]}, lane);'
-        )
     elif dtype in ('i16',):
         if is_vop3:
             L.append(
@@ -129,13 +115,15 @@ def _cmp_condition(
         L.append(
             f'    int32_t s1 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane));'
         )
-    else:
+    elif dtype == 'u32':
         L.append(
             f'    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane);'
         )
         L.append(
             f'    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane);'
         )
+    else:
+        raise ValueError(f'unsupported legacy integer compare type: {dtype}')
     cmp_map = {
         'eq': '==',
         'ne': '!=',

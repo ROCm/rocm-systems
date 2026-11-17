@@ -42,16 +42,16 @@ TEST(FpMulF16W64Gfx11, Arithmetic) {
 TEST(FpMulF16W32Gfx10, Arithmetic) {
   rocjitsu::arith::test::check_binary_arithmetic<16, 32>(
       rj_arith_v_mul_f16_w32_gfx10, [](double x, double y) { return x * y; },
-      /*gfx12=*/false, /*fp_status_supported=*/false, /*compatibility_status=*/false,
-      /*half_exact=*/false);
+      /*gfx12=*/false, /*fp_status_supported=*/false,
+      /*compatibility_status=*/false, /*half_exact=*/false);
 }
 
 // RDNA2 keeps the RDNA3 model but refuses strict exact until its captures are reviewed.
 TEST(FpMulF16W64Gfx10, Arithmetic) {
   rocjitsu::arith::test::check_binary_arithmetic<16, 64>(
       rj_arith_v_mul_f16_w64_gfx10, [](double x, double y) { return x * y; },
-      /*gfx12=*/false, /*fp_status_supported=*/false, /*compatibility_status=*/false,
-      /*half_exact=*/false);
+      /*gfx12=*/false, /*fp_status_supported=*/false,
+      /*compatibility_status=*/false, /*half_exact=*/false);
 }
 
 namespace {

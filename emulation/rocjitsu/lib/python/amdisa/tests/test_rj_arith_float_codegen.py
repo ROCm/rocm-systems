@@ -42,6 +42,11 @@ BYTE_SUFFIX = {
     'cdna3': '',
     'cdna4': '',
     'cdna5': '_gfx12',
+    'cdna1': '',
+    'cdna2': '',
+    'rdna1': '',
+    'rdna2': '',
+    'rdna3_5': '',
 }
 
 FMA64_SUFFIX = {
@@ -51,6 +56,10 @@ FMA64_SUFFIX = {
     'cdna3': '_gfx942',
     'cdna4': '_gfx942',
     'cdna5': '_gfx1250',
+    'cdna1': '_gfx942',
+    'cdna2': '_gfx942',
+    'rdna1': '_gfx942',
+    'rdna3_5': '_gfx942',
 }
 
 

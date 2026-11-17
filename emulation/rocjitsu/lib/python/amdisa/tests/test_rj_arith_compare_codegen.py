@@ -76,7 +76,7 @@ def test_integer_compare_signatures_and_result_commit(name):
     assert (
         gen_integer_compare(context('cdna2', name, [], ['a', 'b'], is_vop3=False))
         is not None
-    ) == (bits == 32)
+    ) == (bits in (32, 64))
 
 
 @pytest.mark.parametrize(
@@ -240,10 +240,10 @@ def test_every_vopc_handler_routes_through_rj_arith(arch):
 def test_cdna_integer_compare_architectural_destinations(
     arch, cmpx, explicit_destination
 ):
-    name = 'V_CMPX_EQ_U32' if cmpx else 'V_CMP_EQ_U32'
+    name = 'V_CMPX_EQ_U64' if cmpx else 'V_CMP_EQ_U64'
     dst = ['dst'] if explicit_destination else []
     body = gen_integer_compare(context(arch, name, dst, ['a', 'b']))
-    assert 'execute_compare<32>' in body
+    assert 'execute_compare<64>' in body
     assert ('wf.set_exec(result)' in body) == cmpx
     writes_scalar = not cmpx or _PROFILES[arch.replace('_', '.')]().cmpx_writes_vcc
     assert ('write_wave_mask_scalar(dst' in body) == (
