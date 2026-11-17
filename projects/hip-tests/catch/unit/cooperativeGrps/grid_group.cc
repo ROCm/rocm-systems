@@ -295,7 +295,9 @@ HIP_TEST_CASE(Unit_Grid_Group_Sync_Positive_Basic) {
   {
     hipError_t launch_err = hipLaunchCooperativeKernel(sync_kernel, blocks, threads, params, 0, 0);
     if (launch_err == hipErrorCooperativeLaunchTooLarge) {
-      // Grid exceeds physical CU capacity for cooperative launch — skip this combo
+      (void)hipGetLastError();  // clear thread-local error state
+      WARN("Grid " << blocks.x << "x" << blocks.y << "x" << blocks.z
+           << " exceeds cooperative residency limit — skipped");
       HIP_CHECK(hipFree(per_loop_atomic_val));
       HIP_CHECK(hipFree(atomic_val));
       HIP_CHECK(hipHostFree(uint_arr));

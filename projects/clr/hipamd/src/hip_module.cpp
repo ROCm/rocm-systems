@@ -432,20 +432,24 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::LaunchParams& l
     if (err != hipSuccess) {
       return err;
     }
-
-    // Cap to physical wavefront-slot limit: all cooperative blocks must be
-    // resident simultaneously, so the grid cannot exceed CUs × blocks/CU.
+    // Safety cap: use the kernel's wavefront size and per-CU wave slots to
+    // bound the grid.  This catches overestimates from the occupancy API
+    // (e.g. WGP-mode rounding) that would cause grid.sync() to deadlock.
     {
-      const uint32_t wf = device->isa().simdWidth();
+      const auto* kernel = hip::asKernel(f);
+      const auto* wgi = kernel->getDeviceKernel(*device)->workGroupInfo();
+      const uint32_t wf = wgi->wavefrontSize_;
       const uint32_t waves = (block_size + wf - 1) / wf;
       if (waves > 0 && device->info().maxComputeUnits_ > 0) {
-        const uint32_t slots_per_cu = device->isa().simdPerCU() *
-            ((device->isa().versionMajor() >= 10) ? 16 : 8);
-        const int hw_max = device->info().maxComputeUnits_ * (slots_per_cu / waves);
-        max_blocks_per_grid = std::min(max_blocks_per_grid, hw_max);
+        const size_t MaxWavesPerSimd = (device->isa().versionMajor() <= 9) ? 8 : 16;
+        const uint32_t slots = device->isa().simdPerCU() * MaxWavesPerSimd;
+        const int hw_max = device->info().maxComputeUnits_ *
+            static_cast<int>(slots / waves);
+        if (hw_max > 0) {
+          max_blocks_per_grid = std::min(max_blocks_per_grid, hw_max);
+        }
       }
     }
-
     if (((launch_params.global_.product()) / block_size) > unsigned(max_blocks_per_grid)) {
       return hipErrorCooperativeLaunchTooLarge;
     }
