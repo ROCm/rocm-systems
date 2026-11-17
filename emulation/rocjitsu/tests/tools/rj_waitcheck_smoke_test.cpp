@@ -663,6 +663,14 @@ TEST(RjWaitcheck, CompletedKernelHazardSurvivesIncompleteObjectSkip) {
       << with_parity_jsonl;
   EXPECT_TRUE(contains(with_parity_jsonl, "\"kernel_name\":\"hazard\""))
       << with_parity_jsonl;
+
+  const std::string parity_only =
+      shell_quote(g_waitcheck_tool.string()) + " " + shell_quote(input.string()) +
+      " --all-code-objects --skip-unsupported --check-counter-parity > " +
+      shell_quote(output.string());
+  EXPECT_TRUE(command_succeeded(std::system(parity_only.c_str()))) << read_text_file(output);
+  EXPECT_TRUE(contains(read_text_file(output), "skipped=1 code-objects=0 diagnostics=0"))
+      << read_text_file(output);
 }
 
 TEST(RjWaitcheck, ExhaustiveWritesLosslessGfx950CounterParityJsonl) {

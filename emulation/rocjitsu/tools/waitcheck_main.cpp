@@ -1797,10 +1797,11 @@ void print_slowest_kernels(const ScanTotals &totals) {
       }
     }
     if (!result.report.supported || !result.report.complete) {
-      // Shared parity requires one whole-object analysis. If one entry makes
-      // that analysis incomplete, recover ordinary hazards from independently
-      // complete entries without publishing incomplete parity conclusions.
-      if (options.check_counter_parity && task.kernels.size() > 1) {
+      // Shared parity requires one whole-object analysis. If that analysis is
+      // incomplete, recover ordinary JSONL hazards from complete entries so
+      // the summary matches the rows actually published. Parity-only scans
+      // still skip the incomplete object without claiming a hazard result.
+      if (diagnostic_writer && options.check_counter_parity && task.kernels.size() > 1) {
         CliOptions hazard_options = options;
         hazard_options.check_counter_parity = false;
         for (const WaitcheckKernelInfo &kernel : task.kernels) {
