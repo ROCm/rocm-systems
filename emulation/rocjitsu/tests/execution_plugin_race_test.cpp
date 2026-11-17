@@ -2467,7 +2467,8 @@ TEST_F(Gfx950CounterCapacityRaceTest, PartialVmcntWaitCountsExecZeroInstruction)
   };
   const uint32_t wait_one = legacy_wait_word(ROCJITSU_CODE_ARCH_CDNA4, /*vmcnt=*/1, /*lgkmcnt=*/15);
   const uint32_t wait_all = legacy_wait_word(ROCJITSU_CODE_ARCH_CDNA4, /*vmcnt=*/0, /*lgkmcnt=*/15);
-  for (const auto &[is_load, lds_dst] : {std::pair{true, false}, {false, false}, {false, true}}) {
+  // A gfx950 buffer load to LDS sets both is_load and lds_dst.
+  for (const auto &[is_load, lds_dst] : {std::pair{true, false}, {false, false}, {true, true}}) {
     SCOPED_TRACE(testing::Message() << "is_load=" << is_load << " lds_dst=" << lds_dst);
     load(/*lds=*/false, /*vgpr=*/0);
     exec_zero(is_load, lds_dst);

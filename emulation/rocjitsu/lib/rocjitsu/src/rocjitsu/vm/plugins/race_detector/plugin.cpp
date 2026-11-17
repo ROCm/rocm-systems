@@ -119,9 +119,10 @@ uint8_t vector_memory_byte_mask(const amdgpu::VectorMemState &state, const amdgp
 /// instruction leaves no older operation on those counters to complete, so
 /// either way its admission is sound.
 ///
-/// On gfx950 (CDNA4), a buffer or global instruction issued with EXEC zero
-/// counts on VMCNT, in order with the wave's other vector memory instructions.
-/// docs/race-detector.md lists the instructions measured on MI355X (#15938).
+/// On gfx950 (CDNA4), a buffer, global or scratch instruction issued with EXEC
+/// zero counts on VMCNT, in order with the wave's other vector memory
+/// instructions (CDNA4 ISA sections 3.3, 4.4 and 10.5). docs/race-detector.md
+/// lists the instructions measured on MI355X (#15938).
 bool exec_zero_memory_issue_counts(rj_code_arch_t arch) {
   return arch == ROCJITSU_CODE_ARCH_CDNA5 || arch == ROCJITSU_CODE_ARCH_CDNA4;
 }
@@ -135,7 +136,7 @@ bool exec_zero_memory_issue_counts(rj_code_arch_t arch) {
 /// recording its slot are sound. On any other counter, such as the ASYNCcnt of
 /// ds_atomic_async_barrier_arrive_b64, an LDS instruction, it may be skipped
 /// while the counter is nonzero, so that obligation is left out. On CDNA4 only a
-/// buffer or global instruction keeps its VMCNT obligation; DS and FLAT
+/// buffer, global or scratch instruction keeps its VMCNT obligation; DS and FLAT
 /// instructions issued with EXEC zero were not measured there (see
 /// exec_zero_memory_issue_counts()).
 amdgpu::MemoryIssueInfo exec_zero_counted_obligations(const amdgpu::MemoryIssueInfo &info,
