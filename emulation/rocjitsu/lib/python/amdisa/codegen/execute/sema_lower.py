@@ -1377,7 +1377,6 @@ def _lower_arrayderef(node: SemaNode, ctx: LoweringContext) -> str:
 
 
 _INLINE_UNARY_OPS: dict[str, str] = {
-    'screen_partition_4se': 'amdgpu::screen_partition_4se({0})',
     'rcp': 'amdgpu::transcendental::rcp_f32({0})',
     'rcp_iflag': 'amdgpu::transcendental::rcp_f32({0})',
     'rsq': 'amdgpu::transcendental::rsq_f32({0})',

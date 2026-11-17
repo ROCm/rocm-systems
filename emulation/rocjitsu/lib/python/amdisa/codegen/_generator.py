@@ -8003,7 +8003,11 @@ class CodeGenerator:
 
         rj_arith_ds = gen_ds(ctx)
         if rj_arith_ds is not None:
-            return RjArithBody(rj_arith_ds)
+            # Preserve gfx1150's GDS rejection before any register effects.
+            guard = (
+                self._gen_ds_gds_guard() if self.isa_spec.arch_name == 'rdna3_5' else ''
+            )
+            return RjArithBody(guard + rj_arith_ds)
 
         from amdisa.codegen.execute.rj_arith_lane import gen_lane
 
@@ -8335,17 +8339,6 @@ class CodeGenerator:
                 if cls == 'vector_cndmask' and is_vop3 and len(src_ops) >= 3:
                     selector_read = f'amdgpu::read_wave_mask_scalar({src_ops[2]}, wf)'
                     lctx.vcc_read = selector_read
-                    if inst.name == 'V_CNDMASK_B32':
-                        return (
-                            '  uint64_t exec = wf.exec();\n'
-                            '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {\n'
-                            '    if (!(exec & (1ULL << lane)))\n'
-                            '      continue;\n'
-                            f'    const uint32_t src0_value = amdgpu::apply_vop3_b32_src_mod(amdgpu::RegisterAccess(wf).read_lane({src_ops[0]}, lane), inst_.abs, inst_.neg, 0);\n'
-                            f'    const uint32_t src1_value = amdgpu::apply_vop3_b32_src_mod(amdgpu::RegisterAccess(wf).read_lane({src_ops[1]}, lane), inst_.abs, inst_.neg, 1);\n'
-                            f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, (({selector_read} >> lane) & 1) ? src1_value : src0_value);\n'
-                            '  }\n'
-                        )
                     # ABS/NEG modify the selected half's sign bit, as for F16.
                     # Measured on gfx1201 and gfx1100; RDNA3.5 and CDNA5 inherit it.
                     lctx.source_modifier_format = 'F16'
@@ -9128,38 +9121,6 @@ class CodeGenerator:
             )
             return '\n'.join(L)
 
-        if cls == 'vector_readfirstlane':
-            L.append('  uint64_t exec = wf.exec();')
-            L.append(
-                '  uint32_t lane = exec ? static_cast<uint32_t>(std::countr_zero(exec)) : 0;'
-            )
-            L.append(
-                f'  uint32_t val = amdgpu::RegisterAccess(wf).read_scalar_selected_lane({src_ops[0]}, lane);'
-            )
-            L.append(f'  amdgpu::RegisterAccess(wf).write_scalar({dst_ops[0]}, val);')
-            return '\n'.join(L)
-
-        if cls == 'vector_readlane':
-            L.append(
-                f'  uint32_t lane = amdgpu::RegisterAccess(wf).read_scalar({src_ops[1]});'
-            )
-            L.append(
-                f'  amdgpu::RegisterAccess(wf).write_scalar({dst_ops[0]}, amdgpu::RegisterAccess(wf).read_scalar_selected_lane({src_ops[0]}, lane));'
-            )
-            return '\n'.join(L)
-
-        if cls == 'vector_writelane':
-            L.append(
-                f'  uint32_t val = amdgpu::RegisterAccess(wf).read_scalar({src_ops[0]});'
-            )
-            L.append(
-                f'  uint32_t lane = amdgpu::RegisterAccess(wf).read_scalar({src_ops[1]});'
-            )
-            L.append(
-                f'  amdgpu::RegisterAccess(wf).write_scalar_selected_lane({dst_ops[0]}, lane, val);'
-            )
-            return '\n'.join(L)
-
         # vector_swap now handled by SemaAST.
 
         if cls == 'vector_fmamk':
@@ -9567,48 +9528,6 @@ class CodeGenerator:
             return self._gen_ds_gds_guard(require_gds=True) + self._gen_ds_gws(
                 dst_ops, src_ops, sem
             )
-
-        if cls in ('ds_permute', 'ds_swizzle'):
-            is_swizzle = cls == 'ds_swizzle'
-            is_bpermute = 'BPERMUTE' in sem.name.upper()
-            fetch_inactive = 'BPERMUTE_FI' in sem.name.upper()
-            L.append('  uint64_t exec = wf.exec();')
-            L.append('  uint32_t offset = inst_.offset0 | (inst_.offset1 << 8);')
-            L.append('  ::rocjitsu::amdgpu::RegisterAccess regs(wf);')
-            if not is_swizzle:
-                L.append(
-                    '  const unsigned group_width = amdgpu::ds_permute_group_width(wf.cu().arch(), wf.wf_size());'
-                )
-            # Collect only consumed sources before any write, preserving aliasing.
-            L.append('  uint32_t tmp[64] = {};')
-            L.append('  for (unsigned lane = 0; lane < wf.wf_size(); ++lane) {')
-            L.append('    if (!(exec & (uint64_t{1} << lane))) continue;')
-            if is_swizzle:
-                L.append(
-                    '    const unsigned source = amdgpu::ds_swizzle_lane(lane, offset);'
-                )
-                L.append('    if (exec & (uint64_t{1} << source))')
-                L.append('      tmp[lane] = regs.read_lane(addr, source);')
-            elif is_bpermute:
-                L.append(
-                    '    const unsigned source = amdgpu::ds_permute_lane(lane, regs.read_lane(addr, lane), offset, group_width);'
-                )
-                if not fetch_inactive:
-                    L.append('    if (exec & (uint64_t{1} << source))')
-                L.append('      tmp[lane] = regs.read_lane(data0, source);')
-            else:
-                L.append(
-                    '    const unsigned destination = amdgpu::ds_permute_lane(lane, regs.read_lane(addr, lane), offset, group_width);'
-                )
-                L.append('    tmp[destination] = regs.read_lane(data0, lane);')
-            L.append('  }')
-            L.append('  for (unsigned lane = 0; lane < wf.wf_size(); ++lane)')
-            L.append('    if (exec & (uint64_t{1} << lane))')
-            L.append('      regs.write_lane(vdst, lane, tmp[lane]);')
-            guard = (
-                self._gen_ds_gds_guard() if self.isa_spec.arch_name == 'rdna3_5' else ''
-            )
-            return guard + '\n'.join(L)
 
         if self._uses_lds_parameter_load(inst.name):
             return '  amdgpu::execute_lds_parameter_load(*this, wf, inst_.vdst, inst_.attr, inst_.attr_chan);'
@@ -16755,14 +16674,6 @@ class CodeGenerator:
                                         + (
                                             ', wf.vcc_mask()'
                                             if inst.name == 'V_CNDMASK_B32'
-                                            and self.isa_spec.arch_name
-                                            in (
-                                                'rdna3',
-                                                'rdna4',
-                                                'cdna3',
-                                                'cdna4',
-                                                'cdna5',
-                                            )
                                             else ''
                                         )
                                         + ');\n'
@@ -16780,8 +16691,6 @@ class CodeGenerator:
                                     + (
                                         ', ~wf.vcc_mask()'
                                         if inst.name == 'V_CNDMASK_B32'
-                                        and self.isa_spec.arch_name
-                                        in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5')
                                         else ''
                                     )
                                     + ');\n'
@@ -18084,19 +17993,22 @@ class CodeGenerator:
                             False,
                         )
                     )
-                from amdisa.codegen.execute.rj_arith_ds import DS_NAMES
+                from amdisa.codegen.execute.rj_arith_ds import (
+                    DS_ARCHITECTURES,
+                    DS_NAMES,
+                )
 
-                if self.isa_spec.arch_name in (
-                    'rdna3',
-                    'rdna4',
-                    'cdna3',
-                    'cdna4',
-                    'cdna5',
-                ) and any(i.name in DS_NAMES for i in all_insts):
+                if self.isa_spec.arch_name in DS_ARCHITECTURES and any(
+                    i.name in DS_NAMES for i in all_insts
+                ):
                     cpp_includes.append(
                         ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_ds_exec.h', False)
                     )
-                from amdisa.codegen.execute.rj_arith_lane import LANE_HEADER_NAMES
+                from amdisa.codegen.execute.rj_arith_lane import (
+                    LANE_HEADER_NAMES,
+                    LANE_ARCHITECTURES,
+                    RELATIVE_NAMES,
+                )
 
                 from amdisa.codegen.execute.rj_arith_fma64_variants import (
                     FMA64_VARIANTS,
@@ -18128,13 +18040,10 @@ class CodeGenerator:
                         )
                     )
 
-                if self.isa_spec.arch_name in (
-                    'rdna3',
-                    'rdna4',
-                    'cdna3',
-                    'cdna4',
-                    'cdna5',
-                ) and any(i.name in LANE_HEADER_NAMES for i in all_insts):
+                if any(i.name in RELATIVE_NAMES for i in all_insts) or (
+                    self.isa_spec.arch_name in LANE_ARCHITECTURES
+                    and any(i.name in LANE_HEADER_NAMES for i in all_insts)
+                ):
                     cpp_includes.append(
                         ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_lane_exec.h', False)
                     )
@@ -18373,6 +18282,10 @@ class CodeGenerator:
                     HALF_INTEGER_ARCHITECTURES,
                     WIDEN16_NAMES,
                     CARRY_WIDE_ARCHITECTURES,
+                    SCREEN_PARTITION_ARCHITECTURES,
+                    HALF_CONDITIONAL_ARCHITECTURES,
+                    ROUTING_ARCHITECTURES,
+                    WORD_ROUTING_NAMES,
                     CARRY32_NAMES,
                     WIDE_INTEGER_NAMES,
                     INTEGER16_NAMES,
@@ -18482,7 +18395,10 @@ class CodeGenerator:
                             False,
                         )
                     )
-                from amdisa.codegen.execute.rj_arith_pair_move import PAIR_MOVE_NAMES
+                from amdisa.codegen.execute.rj_arith_pair_move import (
+                    PAIR_MOVE_NAMES,
+                    PAIR_MOVE_ARCHITECTURES,
+                )
 
                 uses_vector_arith = (
                     self.isa_spec.arch_name in CARRY_WIDE_ARCHITECTURES
@@ -18509,6 +18425,22 @@ class CodeGenerator:
                         | WIDEN16_NAMES
                         for i in all_insts
                     )
+                )
+                uses_vector_arith |= (
+                    self.isa_spec.arch_name in PAIR_MOVE_ARCHITECTURES
+                    and any(i.name in PAIR_MOVE_NAMES for i in all_insts)
+                )
+                uses_vector_arith |= (
+                    self.isa_spec.arch_name in HALF_CONDITIONAL_ARCHITECTURES
+                    and any(i.name == 'V_CNDMASK_B16' for i in all_insts)
+                )
+                uses_vector_arith |= (
+                    self.isa_spec.arch_name in ROUTING_ARCHITECTURES
+                    and any(i.name in WORD_ROUTING_NAMES for i in all_insts)
+                )
+                uses_vector_arith |= (
+                    self.isa_spec.arch_name in SCREEN_PARTITION_ARCHITECTURES
+                    and any(i.name == 'V_SCREEN_PARTITION_4SE_B32' for i in all_insts)
                 )
                 uses_vector_arith |= self.isa_spec.arch_name in (
                     'cdna1',

@@ -495,7 +495,10 @@ void VPkAddF32Vop3p::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VPkMovB32Vop3p::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_pk_mov_b32_vop3p(*this, wf);
+  amdgpu::arith::execute_pair_move<true>(wf,
+                                         ((inst_.op_sel & 1) ? RJ_ARITH_PK_LO_A_HIGH : 0u) |
+                                             ((inst_.op_sel & 2) ? RJ_ARITH_PK_LO_B_HIGH : 0u),
+                                         vdst, src0, &src1);
 }
 
 void VAccvgprReadVop3p::execute_impl(amdgpu::Wavefront &wf) {
