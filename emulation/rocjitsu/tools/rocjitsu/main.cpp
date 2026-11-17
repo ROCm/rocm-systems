@@ -1093,7 +1093,7 @@ int main(int argc, char *argv[]) {
       return 1;
     }
     launched_daemon_pid = daemon_pid;
-  } else {
+  } else if (!attach_mode) {
     if (!rocjitsu::config::write_dbt_runtime_config_handoff(abs_config, dbt_guest_config, my_pid)) {
       std::cerr << "rocjitsu: failed to write config file\n";
       cleanup_runtime_files(my_pid);
