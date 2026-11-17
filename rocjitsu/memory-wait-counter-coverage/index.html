@@ -202,7 +202,7 @@
     <div class="md-source__repository md-source__repository--active">
       ROCm/rocm-systems
       <ul class="md-source__facts">
-        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 565 · build snapshot" aria-label="Stars: 565">565</li>
+        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 566 · build snapshot" aria-label="Stars: 566">566</li>
         <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 505 · build snapshot" aria-label="Forks: 505">505</li>
       </ul>
     </div>
@@ -255,7 +255,7 @@
     <div class="md-source__repository md-source__repository--active">
       ROCm/rocm-systems
       <ul class="md-source__facts">
-        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 565 · build snapshot" aria-label="Stars: 565">565</li>
+        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 566 · build snapshot" aria-label="Stars: 566">566</li>
         <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 505 · build snapshot" aria-label="Forks: 505">505</li>
       </ul>
     </div>
@@ -1802,7 +1802,12 @@ incoming register checks cover those actual sources, including the VGPR0 fallbac
 and the incoming producer share an ordered completion class. On legacy RDNA,
 ordinary loads, image samples and BVH results share VMcnt but keep separate
 classes. A newer result supersedes a fully covered older dependency only within
-the same ordered class; other classes and unordered results remain tracked.</p>
+the same ordered class; other classes and unordered results remain tracked.
+On RDNA1 through RDNA3.5, a partial VMcnt wait retires these reads in issue
+order across writeback classes. RDNA3 ISA §5.6 distinguishes VGPR write order
+from in-order counter decrement. LLVM's SIInsertWaitcnts normalizes sample and
+BVH reads to VMEM reads on these targets in counterOutOfOrder, while checking
+the VMEM writeback type separately for overwrites.</p>
 <p>Indexed LDS results are written to registers in issue order on every target, so
 an incoming indexed LDS load does not need a wait before overwriting a pending
 indexed LDS result in both the runtime and static checkers. RDNA3/3.5 section
