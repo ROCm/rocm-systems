@@ -119,12 +119,13 @@ uint8_t vector_memory_byte_mask(const amdgpu::VectorMemState &state, const amdgp
 /// instruction leaves no older operation on those counters to complete, so
 /// either way its admission is sound.
 ///
-/// On gfx950 (CDNA4), a buffer, global or scratch instruction issued with EXEC
+/// On CDNA3 and CDNA4, a buffer, global or scratch instruction issued with EXEC
 /// zero counts on VMCNT, in order with the wave's other vector memory
-/// instructions (CDNA4 ISA sections 3.3, 4.4 and 10.5). docs/race-detector.md
-/// lists the instructions measured on MI355X (#15938).
+/// instructions (both ISA manuals, sections 3.3, 4.4 and 10.5).
+/// docs/race-detector.md lists the instructions measured on MI300X and MI355X.
 bool exec_zero_memory_issue_counts(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_CDNA5 || arch == ROCJITSU_CODE_ARCH_CDNA4;
+  return arch == ROCJITSU_CODE_ARCH_CDNA5 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
+         arch == ROCJITSU_CODE_ARCH_CDNA3;
 }
 
 /// The obligations on which a gfx1250 memory instruction issued with EXEC zero
@@ -135,9 +136,9 @@ bool exec_zero_memory_issue_counts(rj_code_arch_t arch) {
 /// it either counts or was skipped because they were empty, so admitting it and
 /// recording its slot are sound. On any other counter, such as the ASYNCcnt of
 /// ds_atomic_async_barrier_arrive_b64, an LDS instruction, it may be skipped
-/// while the counter is nonzero, so that obligation is left out. On CDNA4 only a
-/// buffer, global or scratch instruction keeps its VMCNT obligation; DS and FLAT
-/// instructions issued with EXEC zero were not measured there (see
+/// while the counter is nonzero, so that obligation is left out. On CDNA3 and
+/// CDNA4 only a buffer, global or scratch instruction keeps its VMCNT obligation;
+/// DS and FLAT instructions issued with EXEC zero were not measured there (see
 /// exec_zero_memory_issue_counts()).
 amdgpu::MemoryIssueInfo exec_zero_counted_obligations(const amdgpu::MemoryIssueInfo &info,
                                                       std::string_view mnemonic) {
@@ -950,14 +951,14 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
     if (d.exec_mask == 0 && !(gfx10 && inst.mnemonic().starts_with("ds_gws_"))) {
       if (ignored_memory_issue(inst, wf) ||
           (!arch_is_rdna(arch) && !exec_zero_memory_issue_counts(arch)) ||
-          (arch == ROCJITSU_CODE_ARCH_CDNA4 && wf.exec() != 0))
+          (arch_is_cdna_4_or_lower(arch) && wf.exec() != 0))
         return;
       auto counted = issued;
       if (exec_zero_memory_issue_counts(arch) && wf.exec() == 0)
         counted = exec_zero_counted_obligations(issued, inst.mnemonic());
       if (counted.empty())
         return;
-      if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+      if (arch_is_cdna_4_or_lower(arch)) {
         register_counter_slot(*rs, instruction, counted.counter_obligations(),
                               memoryOrderForObligations(counted.counter_obligations()), d.is_load);
         return;

@@ -479,16 +479,19 @@ SAMPLECNT, ASYNCCNT and TENSORCNT hold up to 63 positions where implemented,
 KMCNT holds up to 31, and BVHCNT and EXPCNT hold up to 7. Generic FLAT
 uses the target-specific admission rules above.
 
-On CDNA4, a buffer, global or scratch instruction issued with wave
-EXEC zero counts on VMCNT and completes in order with the wave's other vector
-memory instructions (CDNA4 ISA sections 3.3, 4.4 and 10.5). This was measured
-on MI355X (gfx950) for buffer and global loads to VGPRs, buffer and global
-stores, and buffer loads to LDS (#15938). Such an instruction applies VMCNT
+On CDNA3 and CDNA4, a buffer, global or scratch instruction issued
+with wave EXEC zero counts on VMCNT and completes in order with the wave's
+other vector memory instructions (both ISA manuals, 5 August 2025, sections
+3.3, 4.4 and 10.5). This was measured on MI355X (gfx950) for buffer and global
+loads to VGPRs, buffer and global stores, and buffer loads to LDS (#15938).
+On MI300X (gfx942), the same forms and scratch loads and stores were measured
+with paired `vmcnt(1)` and `vmcnt(2)` waits after an older buffer load. Such an
+instruction applies VMCNT
 backpressure and keeps its slot, recorded as an event with no registers or LDS
 bytes, so a later `s_waitcnt vmcnt(N)` counts it; an EXEC-zero
 `scratch_load_dword`, for example, counts toward `vmcnt(1)`. DS and FLAT
-instructions issued with wave EXEC zero were not measured on CDNA4 and keep no
-slot.
+instructions issued with wave EXEC zero were not measured on CDNA3 or CDNA4
+and keep no slot.
 
 On gfx1250 it is modeled for each split counter: LOADcnt, STOREcnt, DScnt,
 ASYNCcnt and TENSORcnt are 6-bit counters and KMcnt is a 5-bit counter (the
