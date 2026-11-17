@@ -4,6 +4,7 @@
 """Unit tests for src/rocprof_compute_analyze/analysis_base.py."""
 
 import argparse
+import functools
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -23,6 +24,12 @@ PRE_PROCESSING_ARGS = {
     "gpu_id": None,
     "gpu_dispatch_id": None,
 }
+
+
+def record_error_and_exit(errors, *args, **kwargs):
+    """Record a console_error call, then exit like the real one."""
+    errors.append(args)
+    raise SystemExit(1)
 
 
 def test_sanitize_rejects_paths_sharing_a_workload_name(tmp_path, monkeypatch) -> None:
@@ -174,3 +181,64 @@ def test_membw_analysis_collected(profiling_config, expected) -> None:
 def test_membw_analysis_collected_without_config_attribute() -> None:
     inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
     assert inst.membw_analysis_collected() is False
+
+
+@pytest.mark.parametrize(
+    "flag_kwargs, expected_trace",
+    [
+        pytest.param(
+            {
+                "list_torch_operators": True,
+                "list_triton_operators": False,
+                "torch_operator": None,
+                "triton_operator": None,
+            },
+            "--torch-trace",
+            id="list_torch",
+        ),
+        pytest.param(
+            {
+                "list_torch_operators": False,
+                "list_triton_operators": True,
+                "torch_operator": None,
+                "triton_operator": None,
+            },
+            "--triton-trace",
+            id="list_triton",
+        ),
+        pytest.param(
+            {
+                "list_torch_operators": False,
+                "list_triton_operators": False,
+                "torch_operator": None,
+                "triton_operator": ["*matmul*"],
+            },
+            "--triton-trace",
+            id="triton_operator",
+        ),
+    ],
+)
+def test_sanitize_errors_when_operator_flag_without_trace(
+    tmp_path, monkeypatch, flag_kwargs, expected_trace
+):
+    workload = tmp_path / "app" / "MI300"
+    workload.mkdir(parents=True)
+    (workload / "profiling_config.yaml").write_text(
+        "torch_trace: false\ntriton_trace: false\nml_api_trace: false\n",
+        encoding="utf-8",
+    )
+    errors = []
+    monkeypatch.setattr(
+        f"{MODULE}.console_error", functools.partial(record_error_and_exit, errors)
+    )
+    with pytest.raises(SystemExit):
+        OmniAnalyze_Base(
+            argparse.Namespace(
+                tui=False,
+                path=[[str(workload)]],
+                **flag_kwargs,
+            ),
+            {},
+        ).sanitize()
+    assert "was not profiled" in errors[-1][1]
+    assert expected_trace in errors[-1][1]
