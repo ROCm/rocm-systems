@@ -604,7 +604,19 @@ def gen_normalized(ctx: ExecuteContext) -> str | None:
     src = ctx.src_ops
     is_vop3 = ctx.is_vop3
     if (
-        arch not in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5')
+        arch
+        not in (
+            'cdna1',
+            'cdna2',
+            'rdna1',
+            'rdna2',
+            'rdna3_5',
+            'rdna3',
+            'rdna4',
+            'cdna3',
+            'cdna4',
+            'cdna5',
+        )
         or mnemonic not in NORMALIZED_NAMES
     ):
         return None
@@ -612,21 +624,24 @@ def gen_normalized(ctx: ExecuteContext) -> str | None:
     half = mnemonic.endswith('_F16')
     if len(dst) != 1 or len(src) != (2 if packed else 1):
         return None
+    zero_extend_low = arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4')
+    legacy_e32 = zero_extend_low or arch in ('rdna1', 'rdna2')
     api = 'rj_arith_' + mnemonic.lower()
     if packed and half and arch in ('rdna4', 'cdna5'):
         api += '_gfx12'
-    if not packed and arch in ('cdna3', 'cdna4'):
+    if not packed and zero_extend_low:
         api += '_gfx942'
     lines = ['  uint64_t flags = wf.cu().arithmetic_flags();']
     if half:
         lines += [
             '  if (!(wf.fp_denorm_mode_f16_f64() & 1)) flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;'
         ]
-    if not packed and not is_vop3 and arch in ('cdna3', 'cdna4'):
+    if not packed and not is_vop3 and legacy_e32:
+        sdwa_api = 'rj_arith_' + mnemonic.lower() + '_gfx942'
         lines += [
             '  if (inst_.src0 == amdgpu::SRC_SDWA) {',
             '    amdgpu::arith::execute_normalized_sdwa(*this, wf,',
-            f'        {wave_api(api, 32)}, {wave_api(api, 64)}, flags, {dst[0]}, {src[0]});',
+            f'        {wave_api(sdwa_api, 32)}, {wave_api(sdwa_api, 64)}, flags, {dst[0]}, {src[0]});',
             '    return;',
             '  }',
         ]
@@ -648,7 +663,7 @@ def gen_normalized(ctx: ExecuteContext) -> str | None:
                 '((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u)',
             ]
     source_operand, destination_operand = src[0], dst[0]
-    if not packed and not is_vop3 and arch not in ('cdna3', 'cdna4'):
+    if not packed and not is_vop3 and not legacy_e32:
         for operand, flag in ((src[0], 'A'), (dst[0], 'D')):
             terms += [
                 f'((amdgpu::e32_packed_vgpr_operand({operand}) && ({operand}.encoding_value() & 0x80)) ? RJ_ARITH_ALU_HIGH_{flag} : 0u)'
@@ -663,7 +678,7 @@ def gen_normalized(ctx: ExecuteContext) -> str | None:
     ]
     if not packed:
         destination_bytes = '(modifiers & RJ_ARITH_ALU_HIGH_D) ? 0xC : ' + (
-            '0xF' if arch in ('cdna3', 'cdna4') else '0x3'
+            '0xF' if zero_extend_low else '0x3'
         )
         lines += [
             '  const uint8_t source_bytes = (modifiers & RJ_ARITH_ALU_HIGH_A) ? 0xC : 0x3;',
@@ -1380,7 +1395,12 @@ def gen_bit_pack(ctx: ExecuteContext) -> str | None:
     dst = ctx.dst_ops
     src = ctx.src_ops
     is_vop3 = ctx.is_vop3
-    if mnemonic == 'V_CVT_PKACCUM_U8_F32' and arch in ('cdna3', 'cdna4'):
+    if mnemonic == 'V_CVT_PKACCUM_U8_F32' and arch in (
+        'cdna1',
+        'cdna2',
+        'cdna3',
+        'cdna4',
+    ):
         if not is_vop3 or len(dst) != 1 or len(src) != 2:
             return None
         return '\n'.join(
@@ -1391,7 +1411,19 @@ def gen_bit_pack(ctx: ExecuteContext) -> str | None:
             ]
         )
     if (
-        arch not in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5')
+        arch
+        not in (
+            'cdna1',
+            'cdna2',
+            'rdna1',
+            'rdna2',
+            'rdna3_5',
+            'rdna3',
+            'rdna4',
+            'cdna3',
+            'cdna4',
+            'cdna5',
+        )
         or mnemonic not in BIT_PACK_NAMES
         or not is_vop3
     ):

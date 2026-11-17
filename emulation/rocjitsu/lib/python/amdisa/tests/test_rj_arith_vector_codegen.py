@@ -910,3 +910,19 @@ def test_older_integer_dot_generated_methods_have_no_legacy_route(arch):
             assert 'shared/rj_arith_vector_exec.h"' in text
             count += 1
     assert count > 0
+
+
+@pytest.mark.parametrize('arch', ['cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5'])
+def test_older_saturation_retains_word_or_selected_half_policy(arch):
+    for vop3 in (False, True):
+        body = gen_vector32(context(arch, 'V_SAT_PK_U8_I16', ['dst'], ['a'], vop3))
+        legacy = arch != 'rdna3_5'
+        assert ('rj_arith_v_sat_pk_u8_i16_w64_gfx942' in body) == legacy
+        assert ('execute_saturating_pack_sdwa' in body) == (legacy and not vop3)
+        assert ('vop3_opsel' in body) == (vop3 and arch not in ('rdna1', 'rdna2'))
+        assert ('word_destination' in body) == (not legacy and not vop3)
+    # Word-integer routing is already supplied by develop.
+    assert (
+        gen_vector32(context(arch, 'V_ADD_NC_U32', ['dst'], ['a', 'b'], True))
+        is not None
+    )

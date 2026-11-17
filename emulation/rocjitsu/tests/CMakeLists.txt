@@ -598,6 +598,8 @@ add_executable(
     transcendental_test.cpp
     comparison_test.cpp
     conversion_test.cpp
+    older_normalized_conversion_test.cpp
+    older_packing_test.cpp
     denormal_test.cpp
     floating_operation_test.cpp
     input_denormal_test.cpp

@@ -1497,38 +1497,6 @@ SIMD_VOP3_BINARY_INT_EXTRA: dict[str, tuple[str, str]] = {
     # v_cvt_pk_i16_i32 / v_cvt_pk_u16_u32 above are safe to route through this glue.
     # Normalized f32 pack-converts. src read as raw f32 (bit_cast), scale by K,
     # clamp, isnan->0, round once to nearest-even, pack 16|16. Helpers in util/simd.h.
-    'v_cvt_pknorm_i16_f32_vop3': (
-        'uint32_t',
-        '[](auto a, auto b) {'
-        ' using U = util::native<uint32_t>;'
-        ' auto lo = util::cvt_pknorm_i16_f32_simd(std::bit_cast<util::native<float>>(a));'
-        ' auto hi = util::cvt_pknorm_i16_f32_simd(std::bit_cast<util::native<float>>(b));'
-        ' return ((util::stdx::static_simd_cast<U>(hi) & 0xFFFFu) << 16) |'
-        ' (util::stdx::static_simd_cast<U>(lo) & 0xFFFFu); }',
-    ),
-    'v_cvt_pk_norm_i16_f32_vop3': (
-        'uint32_t',
-        '[](auto a, auto b) {'
-        ' using U = util::native<uint32_t>;'
-        ' auto lo = util::cvt_pknorm_i16_f32_simd(std::bit_cast<util::native<float>>(a));'
-        ' auto hi = util::cvt_pknorm_i16_f32_simd(std::bit_cast<util::native<float>>(b));'
-        ' return ((util::stdx::static_simd_cast<U>(hi) & 0xFFFFu) << 16) |'
-        ' (util::stdx::static_simd_cast<U>(lo) & 0xFFFFu); }',
-    ),
-    'v_cvt_pknorm_u16_f32_vop3': (
-        'uint32_t',
-        '[](auto a, auto b) {'
-        ' auto lo = util::cvt_pknorm_u16_f32_simd(std::bit_cast<util::native<float>>(a));'
-        ' auto hi = util::cvt_pknorm_u16_f32_simd(std::bit_cast<util::native<float>>(b));'
-        ' return ((hi & 0xFFFFu) << 16) | (lo & 0xFFFFu); }',
-    ),
-    'v_cvt_pk_norm_u16_f32_vop3': (
-        'uint32_t',
-        '[](auto a, auto b) {'
-        ' auto lo = util::cvt_pknorm_u16_f32_simd(std::bit_cast<util::native<float>>(a));'
-        ' auto hi = util::cvt_pknorm_u16_f32_simd(std::bit_cast<util::native<float>>(b));'
-        ' return ((hi & 0xFFFFu) << 16) | (lo & 0xFFFFu); }',
-    ),
     'v_add_i16_vop3': ('uint32_t', '[](auto a, auto b) { return (a + b) & 0xFFFFu; }'),
     'v_sub_i16_vop3': ('uint32_t', '[](auto a, auto b) { return (a - b) & 0xFFFFu; }'),
     'v_add_nc_i16_vop3': (
@@ -1559,36 +1527,9 @@ SIMD_VOP3_BINARY_INT_EXTRA: dict[str, tuple[str, str]] = {
 SIMD_VOP3_BINARY_TRUE16_SRC: dict[str, tuple[str, str]] = {
     # True16 source selectors choose the f16 half of src0/src1, but these
     # instructions write a full packed b32 result.
-    'v_pack_b32_f16_vop3': ('uint32_t', conversion.STAGES),
-    'v_cvt_pk_norm_i16_f16_vop3': (
-        'uint32_t',
-        '[](auto a, auto b) {'
-        ' using U = util::native<uint32_t>;'
-        ' auto lo = util::cvt_pknorm_i16_f32_simd(util::f16_to_f32_simd(a));'
-        ' auto hi = util::cvt_pknorm_i16_f32_simd(util::f16_to_f32_simd(b));'
-        ' return ((util::stdx::static_simd_cast<U>(hi) & 0xFFFFu) << 16) |'
-        ' (util::stdx::static_simd_cast<U>(lo) & 0xFFFFu); }',
-    ),
-    'v_cvt_pk_norm_u16_f16_vop3': (
-        'uint32_t',
-        '[](auto a, auto b) {'
-        ' auto lo = util::cvt_pknorm_u16_f32_simd(util::f16_to_f32_simd(a));'
-        ' auto hi = util::cvt_pknorm_u16_f32_simd(util::f16_to_f32_simd(b));'
-        ' return ((hi & 0xFFFFu) << 16) | (lo & 0xFFFFu); }',
-    ),
 }
 # GFX9 and RDNA1/2 spell the F16 normalized packs *_PKNORM_*. They read the
 # same op_sel-selected halves, so they share the RDNA3+ fast path.
-SIMD_VOP3_BINARY_TRUE16_SRC.update(
-    {
-        'v_cvt_pknorm_i16_f16_vop3': SIMD_VOP3_BINARY_TRUE16_SRC[
-            'v_cvt_pk_norm_i16_f16_vop3'
-        ],
-        'v_cvt_pknorm_u16_f16_vop3': SIMD_VOP3_BINARY_TRUE16_SRC[
-            'v_cvt_pk_norm_u16_f16_vop3'
-        ],
-    }
-)
 
 # True16 VOP3 scalar semantics select 16-bit source halves and merge a selected
 # destination half. The generic 32-bit VOP3 SIMD glue overwrites the whole dword.
@@ -1984,16 +1925,7 @@ def _indent_probe(probe: str) -> str:
     return '\n'.join(('  ' + line) if line else line for line in probe.splitlines())
 
 
-_PACKED_NORMALIZED_VOP3 = (
-    'v_cvt_pknorm_i16_f32_vop3',
-    'v_cvt_pknorm_u16_f32_vop3',
-    'v_cvt_pk_norm_i16_f32_vop3',
-    'v_cvt_pk_norm_u16_f32_vop3',
-    'v_cvt_pknorm_i16_f16_vop3',
-    'v_cvt_pknorm_u16_f16_vop3',
-    'v_cvt_pk_norm_i16_f16_vop3',
-    'v_cvt_pk_norm_u16_f16_vop3',
-)
+_PACKED_NORMALIZED_VOP3 = ()
 
 
 _PACKED_RTZ_VOP3 = ('v_cvt_pkrtz_f16_f32_vop3', 'v_cvt_pk_rtz_f16_f32_vop3')
@@ -2150,8 +2082,6 @@ def _simd_probe_line(
     conversion_probe = conversion.simd_probe(template_name, true16_vop3=true16_vop3)
     if conversion_probe is not None:
         return conversion_probe
-    if template_name == 'v_cvt_pk_u8_f32_vop3':
-        return f'  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(uint32_t, {conversion.STAGES});'
     if template_name in SIMD_PACKED_FLOAT:
         op, bf16 = SIMD_PACKED_FLOAT[template_name]
         return f'  ROCJITSU_TRY_SIMD_PACKED_FLOAT({op}, {str(bf16).lower()});'
