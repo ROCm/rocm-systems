@@ -398,6 +398,9 @@ static void RunAllgatherBackToBack(size_t max_devices, bool with_intra_device_co
  * with an intra-device shader copy in each batch.
  */
 HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_P2P_Allgather_BackToBack) {
+  if (RunInEachSignalTracker("Unit_hipMemcpyBatchAsync_P2P_Allgather_BackToBack")) {
+    return;
+  }
   RunAllgatherBackToBack(2, GENERATE(false, true));
 }
 
@@ -406,6 +409,10 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_P2P_Allgather_BackToBack) {
  * optionally with an intra-device shader copy in each batch.
  */
 HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_P2P_Allgather_BackToBack_AllDevices) {
+  if (RunInEachSignalTracker("Unit_hipMemcpyBatchAsync_P2P_Allgather_BackToBack_AllDevices",
+                             kSignalTrackerChildLongDeadlineSeconds)) {
+    return;
+  }
   RunAllgatherBackToBack(std::numeric_limits<size_t>::max(), GENERATE(false, true));
 }
 #endif

@@ -1519,6 +1519,9 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_MixedAttributes_DefaultSwapIndirect) {
  *  - HIP_VERSION >= 7.1
  */
 HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_MixedDirections_BackToBack) {
+  if (RunInEachSignalTracker("Unit_hipMemcpyBatchAsync_MixedDirections_BackToBack")) {
+    return;
+  }
   constexpr size_t kNumPatterns = 2;
   const auto pattern = [](size_t source_idx, size_t pattern_idx) {
     return std::vector<unsigned char>(
@@ -1599,7 +1602,7 @@ struct HostFuncGate {
 };
 
 // A host that never opens the gate must not keep the stream, and the process, stuck for good
-constexpr int kGateDeadlineSeconds = 60;
+constexpr int kGateDeadlineSeconds = 10;
 
 void HoldUntilGateOpens(void* arg) {
   auto* gate = static_cast<HostFuncGate*>(arg);
@@ -1637,7 +1640,7 @@ void RunQueuedShaderWaitBackToBack(const bool launch_barriers) {
   // barrier variant queues two kernels on every spin stream per batch, which needs fewer still, and
   // more batches than the tracker lets pins wait for a fence (64)
   const size_t kIterations = launch_barriers ? 100 : 200;
-  constexpr int kWatchdogSeconds = 30;
+  constexpr int kWatchdogSeconds = 10;
   constexpr size_t kNumPatterns = 2;
   const auto pattern = [](size_t copy_idx, size_t pattern_idx) {
     return std::vector<unsigned char>(
@@ -1724,13 +1727,13 @@ void RunQueuedShaderWaitBackToBack(const bool launch_barriers) {
   HIP_CHECK(hipGetLastError());
   // A stream that hangs on a re-armed signal fails the check below after the deadline
   const auto sync_deadline =
-      std::chrono::steady_clock::now() + std::chrono::seconds(2 * kWatchdogSeconds);
+      std::chrono::steady_clock::now() + std::chrono::seconds(kWatchdogSeconds);
   hipError_t stream_status = hipStreamQuery(stream_guard.stream());
   while (stream_status == hipErrorNotReady && std::chrono::steady_clock::now() < sync_deadline) {
     std::this_thread::yield();
     stream_status = hipStreamQuery(stream_guard.stream());
   }
-  INFO("The stream did not complete within " << 2 * kWatchdogSeconds << " s of the release");
+  INFO("The stream did not complete within " << kWatchdogSeconds << " s of the release");
   HIP_CHECK(stream_status);
   HIP_CHECK(hipDeviceSynchronize());
   // The spin kernels end by themselves after the watchdog, which releases the held waits early and
@@ -1769,6 +1772,9 @@ void RunQueuedShaderWaitBackToBack(const bool launch_barriers) {
  *  - HIP_VERSION >= 7.1
  */
 HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Mixed_QueuedShaderWait_BackToBack) {
+  if (RunInEachSignalTracker("Unit_hipMemcpyBatchAsync_Mixed_QueuedShaderWait_BackToBack")) {
+    return;
+  }
   RunQueuedShaderWaitBackToBack(false);
 }
 
@@ -1790,6 +1796,9 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Mixed_QueuedShaderWait_BackToBack) {
  *  - HIP_VERSION >= 7.1
  */
 HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Mixed_QueuedShaderWait_OtherStreamBarriers) {
+  if (RunInEachSignalTracker("Unit_hipMemcpyBatchAsync_Mixed_QueuedShaderWait_OtherStreamBarriers")) {
+    return;
+  }
   RunQueuedShaderWaitBackToBack(true);
 }
 
