@@ -92,6 +92,7 @@ rj_add_object_library(rocjitsu_code
     patch/fault_injection/drop_barrier.cpp
     patch/fault_injection/fault_mutation_context.cpp
     patch/fault_injection/lds_wrong_address.cpp
+    patch/fault_injection/ordinary_acquire.cpp
     patch/fault_injection/atomic_wrong_address.cpp
     patch/entry_prologue.cpp
     patch/kernel_text_layout.cpp

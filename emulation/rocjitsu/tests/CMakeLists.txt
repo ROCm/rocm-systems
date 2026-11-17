@@ -1430,6 +1430,7 @@ add_executable(
     patch/fault_injection/cdna_lds_wrong_address_test.cpp
     patch/fault_injection/atomic_ds_test.cpp
     patch/fault_injection/atomic_legacy_test.cpp
+    patch/fault_injection/ordinary_acquire_test.cpp
 )
 target_include_directories(
     rocjitsu_fault_injection_tests
