@@ -1,4 +1,4 @@
-# rccl-UnitTestsMicro — shared/ctest schema.
+# Root binaries without their own yaml — shared/ctest schema.
 # Host-only micro-tests (no GPU, no librccl/HIP runtime); build in Release and Debug.
 # RCCL does not support Windows: exclude_windows matches all tests so generated suites are empty on Windows.
 #
