@@ -221,3 +221,62 @@ TEST(buffering, parallel)
         validate(_records, test_data_types{}, test_data_sizes);
     });
 }
+
+TEST(buffering, bounded_parallel_reservations)
+{
+    struct alignas(32) record
+    {
+        uint64_t value      = 0;
+        uint64_t checksum   = 0;
+        uint64_t padding[2] = {};
+    };
+    for(size_t round = 0; round < 20; ++round)
+    {
+        record_header_buffer_t   buffer{4096};
+        std::atomic<bool>        start{false};
+        std::atomic<size_t>      accepted{0};
+        std::vector<std::thread> writers;
+        writers.reserve(8);
+        for(size_t thread = 0; thread < 8; ++thread)
+            writers.emplace_back([&, thread]() {
+                while(!start.load())
+                    std::this_thread::yield();
+                for(size_t i = 0; i < 256; ++i)
+                {
+                    record value{thread * 256 + i, ~(thread * 256 + i), {}};
+                    if(buffer.emplace(1, 1, value)) ++accepted;
+                }
+            });
+        start.store(true);
+        for(auto& thread : writers)
+            thread.join();
+        EXPECT_EQ(accepted.load(), buffer.capacity() / sizeof(record));
+        EXPECT_EQ(buffer.count(), buffer.capacity());
+        std::vector<bool> seen(2048, false);
+        EXPECT_EQ(buffer.process_record_headers(
+                      std::true_type{},
+                      [&](auto&& headers) {
+                          for(const auto* header : headers)
+                          {
+                              const auto& value = *static_cast<const record*>(header->payload);
+                              ASSERT_LT(value.value, seen.size());
+                              EXPECT_EQ(value.checksum, ~value.value);
+                              EXPECT_FALSE(seen[value.value]);
+                              seen[value.value] = true;
+                          }
+                      }),
+                  accepted.load());
+    }
+}
+
+TEST(buffering, bounded_reservations_include_alignment_padding)
+{
+    rocprofiler::common::container::base::ring_buffer buffer{4096};
+    auto                                              capacity = buffer.capacity();
+    ASSERT_NE(buffer.request(capacity - 6, 1, false), nullptr);
+    EXPECT_EQ(buffer.request(4, 8, false), nullptr);
+    EXPECT_EQ(buffer.count(), capacity - 6);
+    EXPECT_NE(buffer.request(6, 1, false), nullptr);
+    EXPECT_EQ(buffer.count(), capacity);
+    EXPECT_EQ(buffer.request(1, 1, false), nullptr);
+}

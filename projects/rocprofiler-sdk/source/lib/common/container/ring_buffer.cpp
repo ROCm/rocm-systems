@@ -140,9 +140,31 @@ ring_buffer::request(size_t _length, size_t _align, bool _wrap)
 {
     if(m_ptr == nullptr || m_size == 0) return nullptr;
 
-    if(is_full()) return (_wrap) ? retrieve(_length, _align) : nullptr;
-
     LOG_IF(FATAL, _align == 0) << "alignment must be non-zero";
+    if(!_wrap)
+    {
+        auto write_count = m_write_count.load(std::memory_order_relaxed);
+        for(;;)
+        {
+            // Validate capacity against the SAME snapshot used by the CAS. A
+            // separate free() check can become stale before loading write_count.
+            auto read_count = m_read_count.load(std::memory_order_acquire);
+            auto used       = write_count - read_count;
+            if(used > m_size) return nullptr;
+            auto index     = write_count % m_size;
+            auto address   = reinterpret_cast<uintptr_t>(m_ptr) + index;
+            auto padding   = (_align - address % _align) % _align;
+            auto available = std::min(m_size - used, m_size - index);
+            if(padding > available || _length > available - padding) return nullptr;
+            if(m_write_count.compare_exchange_weak(write_count,
+                                                   write_count + padding + _length,
+                                                   std::memory_order_acq_rel,
+                                                   std::memory_order_relaxed))
+                return static_cast<char*>(m_ptr) + index + padding;
+        }
+    }
+
+    if(is_full()) return (_wrap) ? retrieve(_length, _align) : nullptr;
 
     // if write count is at the tail of buffer, bump to the end of buffer
     size_t _write_count = 0;

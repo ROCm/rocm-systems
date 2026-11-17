@@ -26,13 +26,23 @@
 #include <rocprofiler-sdk/rocprofiler.h>
 
 #include "lib/common/demangle.hpp"
+#include "lib/common/logging.hpp"
 #include "lib/common/mpl.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/context/correlation_id.hpp"
 #include "lib/rocprofiler-sdk/context/domain.hpp"
 
 #include <gtest/gtest.h>
+#include <unistd.h>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <memory>
+#include <mutex>
+#include <thread>
+#include <unordered_set>
+#include <vector>
 
 namespace context = ::rocprofiler::context;
 namespace common  = ::rocprofiler::common;
@@ -381,4 +391,157 @@ TEST(contexts, buffer_tracing)
             check_operations(tracer, i, std::false_type{});
         }
     }
+}
+
+TEST(contexts, correlation_id_parallel_allocation)
+{
+    constexpr size_t total = 65536;
+    for(size_t num_threads : {1, 2, 4, 8})
+    {
+        SCOPED_TRACE(num_threads);
+        std::vector<std::vector<context::correlation_id*>> ids(
+            num_threads, std::vector<context::correlation_id*>(total / num_threads));
+        std::vector<uint64_t>    tids(num_threads);
+        std::vector<std::thread> threads;
+        std::mutex               mutex;
+        std::condition_variable  changed;
+        size_t                   ready = 0, finished = 0;
+        bool                     start = false;
+        for(size_t thread = 0; thread < num_threads; ++thread)
+        {
+            threads.emplace_back([&, thread]() {
+                tids[thread] = common::get_tid();
+                {
+                    std::unique_lock<std::mutex> lock{mutex};
+                    ++ready;
+                    changed.notify_all();
+                    changed.wait(lock, [&]() { return start; });
+                }
+                for(auto& id : ids[thread])
+                {
+                    id = context::correlation_tracing_service::construct(1);
+                    if(id) context::pop_latest_correlation_id(id);
+                }
+                {
+                    std::lock_guard<std::mutex> lock{mutex};
+                    ++finished;
+                }
+                changed.notify_all();
+            });
+        }
+        std::unique_lock<std::mutex> lock{mutex};
+        changed.wait(lock, [&]() { return ready == num_threads; });
+        auto begin = std::chrono::steady_clock::now();
+        start      = true;
+        changed.notify_all();
+        changed.wait(lock, [&]() { return finished == num_threads; });
+        auto seconds =
+            std::chrono::duration<double>(std::chrono::steady_clock::now() - begin).count();
+        lock.unlock();
+        for(auto& thread : threads)
+            thread.join();
+        RecordProperty("ids_per_second_" + std::to_string(num_threads),
+                       std::to_string(static_cast<uint64_t>(total / seconds)));
+
+        std::unordered_set<uint64_t> internal_ids;
+        for(size_t thread = 0; thread < num_threads; ++thread)
+        {
+            for(auto* id : ids[thread])
+            {
+                ASSERT_NE(id, nullptr);
+                EXPECT_EQ(id->thread_idx, tids[thread]);
+                EXPECT_EQ(id->ancestor, 0);
+                EXPECT_TRUE(internal_ids.emplace(id->internal).second);
+                EXPECT_EQ(id->add_ref_count(), 1);
+                EXPECT_EQ(id->sub_ref_count(), 2);
+                EXPECT_EQ(id->sub_ref_count(), 1);
+            }
+        }
+    }
+}
+
+TEST(contexts, correlation_id_nested_growth)
+{
+    ASSERT_EQ(context::get_latest_correlation_id(), nullptr);
+    auto* parent = context::correlation_tracing_service::construct(1);
+    ASSERT_NE(parent, nullptr);
+    for(size_t i = 0; i < 8193; ++i)
+    {
+        auto* child = context::correlation_tracing_service::construct(1);
+        ASSERT_NE(child, nullptr);
+        EXPECT_EQ(child->ancestor, parent->internal);
+        EXPECT_EQ(context::get_latest_correlation_id(), child);
+        EXPECT_EQ(context::pop_latest_correlation_id(child), parent);
+        EXPECT_EQ(child->sub_ref_count(), 1);
+    }
+    EXPECT_EQ(context::get_latest_correlation_id(), parent);
+    EXPECT_EQ(context::pop_latest_correlation_id(parent), nullptr);
+    EXPECT_EQ(parent->sub_ref_count(), 1);
+}
+
+TEST(contextsDeathTest, correlation_id_finalize_races_allocation)
+{
+    ASSERT_EXIT(
+        {
+            absl::SetMinLogLevel(absl::LogSeverityAtLeast::kError);
+            constexpr size_t                                   num_threads = 8;
+            std::vector<std::vector<context::correlation_id*>> ids(num_threads);
+            std::vector<std::thread>                           threads;
+            std::atomic<size_t>                                ready{0};
+            std::atomic<size_t>                                errors{0};
+            std::atomic<bool>                                  start{false};
+            std::atomic<bool>                                  sealed{false};
+            context::correlation_id*                           exited_id = nullptr;
+            std::thread                                        exited_thread([&]() {
+                exited_id = context::correlation_tracing_service::construct(2);
+                if(exited_id) context::pop_latest_correlation_id(exited_id);
+            });
+            exited_thread.join();
+            for(size_t thread = 0; thread < num_threads; ++thread)
+            {
+                threads.emplace_back([&, thread]() {
+                    ids[thread].reserve(8193);
+                    auto allocate = [&]() {
+                        auto* id = context::correlation_tracing_service::construct(1);
+                        if(id)
+                        {
+                            ids[thread].emplace_back(id);
+                            context::pop_latest_correlation_id(id);
+                        }
+                        return id;
+                    };
+                    // Exercise both cached storage and first registration during the sweep.
+                    if(thread % 2 == 0 && !allocate()) ++errors;
+                    ++ready;
+                    while(!start.load())
+                        std::this_thread::yield();
+                    for(size_t i = 0; i < 8192; ++i)
+                        if(!allocate()) break;
+                    while(!sealed.load())
+                        std::this_thread::yield();
+                    if(allocate()) ++errors;
+                });
+            }
+            while(ready.load() != num_threads)
+                std::this_thread::yield();
+            start.store(true);
+            // Invoke the sweep directly to test its sealing independently of the
+            // registration status check, which a constructor may already have passed.
+            context::correlation_id_finalize();
+            sealed.store(true);
+            for(auto& thread : threads)
+                thread.join();
+            for(const auto& storage : ids)
+                for(const auto* id : storage)
+                    if(id->get_ref_count() != 0 || id->internal == 0) ++errors;
+            if(!exited_id || exited_id->get_ref_count() != 0) ++errors;
+            std::thread late([&]() {
+                if(context::correlation_tracing_service::construct(1)) ++errors;
+            });
+            late.join();
+            context::correlation_id_finalize();
+            _exit(errors.load() == 0 ? 0 : 1);
+        },
+        ::testing::ExitedWithCode(0),
+        "");
 }

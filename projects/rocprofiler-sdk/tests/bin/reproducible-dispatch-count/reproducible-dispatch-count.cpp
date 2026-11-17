@@ -87,7 +87,7 @@ main(int argc, char** argv)
         {
             fprintf(stderr,
                     "usage: reproducible-dispatch-count [KERNEL ITERATIONS PER THREAD (default: "
-                    "%zu msec)] [NUM_THREADS (default: %zu)] [SPIN CYCLES PER KERNEL LAUNCH "
+                    "%zu)] [NUM_THREADS (default: %zu)] [SPIN CYCLES PER KERNEL LAUNCH "
                     "(default: %u)] [ITERATION PER SYNC (default: %zu)\n",
                     niterations,
                     nthreads,
@@ -111,6 +111,7 @@ main(int argc, char** argv)
     int ndevice = 0;
     HIP_API_CALL(hipGetDeviceCount(&ndevice));
     printf("[reproducible-dispatch-count] Number of devices found: %i\n", ndevice);
+    auto _beg     = std::chrono::steady_clock::now();
     auto _threads = std::vector<std::thread>{};
     for(size_t i = 0; i < nthreads; ++i)
     {
@@ -119,10 +120,25 @@ main(int argc, char** argv)
         else
             _threads.emplace_back(run_nsync, i, i % ndevice);
     }
+
     for(auto& itr : _threads)
         itr.join();
+
     HIP_API_CALL(hipDeviceSynchronize());
     HIP_API_CALL(hipDeviceReset());
+
+    auto _end = std::chrono::steady_clock::now();
+    {
+        auto _elapsed = (_end - _beg);
+        auto _time =
+            std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(_elapsed).count();
+        auto _msg = std::stringstream{};
+        _msg << "[reproducible-dispatch-count] Elapsed time for " << nthreads
+             << " threads: " << std::setprecision(2) << std::fixed << _time << " ms ("
+             << std::setprecision(3) << (_time / 1000.0f) << " sec).\n";
+        auto_lock_t _lk{print_lock};
+        std::cout << _msg.str() << std::flush;
+    }
 
     return 0;
 }
@@ -201,6 +217,11 @@ run_nsync(int tid, int devid)
     uint64_t      nlaunch = 0;
 
     HIP_API_CALL(hipSetDevice(devid));
+    {
+        int _devid = 0;
+        HIP_API_CALL(hipGetDevice(&_devid));
+        if(_devid != devid) throw std::runtime_error("Device mismatch");
+    }
     HIP_API_CALL(hipStreamCreate(&stream));
 
     auto _elapsed = std::chrono::steady_clock::duration{};

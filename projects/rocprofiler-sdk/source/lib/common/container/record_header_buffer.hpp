@@ -239,21 +239,15 @@ template <typename Tp>
 bool
 record_header_buffer::emplace(uint64_t _hash, Tp& _v)
 {
+    auto access = scope_destructor{[this]() { read_unlock(); }, [this]() { read_lock(); }};
     if(m_headers.empty()) return false;
 
     constexpr auto request_size = sizeof(Tp);
     constexpr auto align_size   = alignof(Tp);
 
-    // notify there was a request
     m_requested.fetch_add(1);
-
-    // in theory, we shouldn't need to lock here but the thread sanitizer says there is a race.
-    // the lock will be short-lived so hopefully, it will scale fine
-    write_lock();
-    auto* _addr = m_buffer.request(request_size, align_size, false);
-    write_unlock();
-
-    read_lock();
+    auto  request = scope_destructor{[this]() { m_requested.fetch_sub(1); }};
+    auto* _addr   = m_buffer.request(request_size, align_size, false);
     if(_addr)
     {
         // if there is space in the buffer, atomically get an index
@@ -270,11 +264,6 @@ record_header_buffer::emplace(uint64_t _hash, Tp& _v)
         record.payload    = _addr;
         m_headers.at(idx) = record;
     }
-    read_unlock();
-
-    // remove notification of request
-    m_requested.fetch_sub(1);
-
     return (_addr != nullptr);
 }
 
@@ -282,30 +271,18 @@ template <typename Tp>
 bool
 record_header_buffer::emplace(uint32_t _category, uint32_t _kind, Tp& _v)
 {
+    auto access = scope_destructor{[this]() { read_unlock(); }, [this]() { read_lock(); }};
     if(m_headers.empty()) return false;
 
     constexpr auto request_size = sizeof(Tp);
     constexpr auto align_size   = alignof(Tp);
 
-    // notify there was a request
     m_requested.fetch_add(1);
-
-    // in theory, we shouldn't need to lock here but the thread sanitizer says there is a race.
-    // the lock will be short-lived so hopefully, it will scale fine
-    write_lock();
-    auto* _addr = m_buffer.request(request_size, align_size, false);
-    write_unlock();
-
-    read_lock();
+    auto  request = scope_destructor{[this]() { m_requested.fetch_sub(1); }};
+    auto* _addr   = m_buffer.request(request_size, align_size, false);
     if(_addr)
     {
-        // if there is space in the buffer, atomically get an index
-        // for where the header record should be placed.
-        // NOTE: m_headers was resized to be large enough to accommodate
-        // sizeof(Tp) == 1 for every entry in buffer
         auto idx = m_index.fetch_add(1, std::memory_order_release);
-
-        // placement new
         new(_addr) Tp{_v};
 
         auto record       = rocprofiler_record_header_t{};
@@ -314,11 +291,6 @@ record_header_buffer::emplace(uint32_t _category, uint32_t _kind, Tp& _v)
         record.payload    = _addr;
         m_headers.at(idx) = record;
     }
-    read_unlock();
-
-    // remove notification of request
-    m_requested.fetch_sub(1);
-
     return (_addr != nullptr);
 }
 

@@ -751,7 +751,6 @@ emit_dispatch_records(retired_batch&& batch)
             ROCP_FATAL_IF(_corr_id->get_ref_count() == 0)
                 << "reference counter for correlation id " << _corr_id->internal << " from thread "
                 << _corr_id->thread_idx << " has no reference count";
-            _corr_id->sub_kern_count();
             _corr_id->sub_ref_count();
         }
     }
@@ -795,7 +794,6 @@ complete_signal_less_dispatch(kfd::signal_less_hub_t::proven&& proven)
         ROCP_FATAL_IF(_corr_id->get_ref_count() == 0)
             << "reference counter for correlation id " << _corr_id->internal
             << " has no reference count";
-        _corr_id->sub_kern_count();
         _corr_id->sub_ref_count();
     };
 
@@ -1080,6 +1078,12 @@ completion_monitor_loop(completion_monitor& mon)
         signals.clear();
         conds.clear();
         values.clear();
+
+        const auto reserve_size = mon.active.size() + 2;  // +2 for wake signal and null signal
+        signals.reserve(reserve_size);
+        conds.reserve(reserve_size);
+        values.reserve(reserve_size);
+
         for(const auto& pending : mon.active)
         {
             signals.emplace_back(pending.completion_signal);
@@ -1385,7 +1389,6 @@ write_interceptor(Queue*                                queue,
             // increase the reference count to denote that this correlation id is being used in a
             // kernel
             corr_id->add_ref_count();
-            corr_id->add_kern_count();
 
             auto _packet_data = packet_data_t{};
 
@@ -1512,7 +1515,7 @@ write_interceptor(Queue*                                queue,
                 _pl.callback_record = _packet_data.callback_record;
                 _pl.tracing_data    = _packet_data.tracing_data;
                 // The reference this payload inherits was taken by the
-                // add_ref_count()/add_kern_count() above; the finalizer releases it.
+                // add_ref_count() above; the finalizer releases it.
                 _pl.correlation_id = corr_id;
                 _pl.tid            = thr_id;
                 _pl.agent_id       = queue->get_agent().get_rocp_agent()->id;
