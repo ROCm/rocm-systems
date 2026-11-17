@@ -721,8 +721,10 @@ VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront 
                                           "unsupported integer atomic operation");
     return VmAccessOutcome::Malformed;
   }
-  if (d.memviol)
+  if (d.memviol) {
+    wf.raise_memory_violation("negative scalar buffer offset");
     return VmAccessOutcome::Faulted;
+  }
   // A scalar atomic accesses one 4- or 8-byte element and returns it as dwords.
   if (d.atomic_op != AtomicOp::NONE &&
       ((d.elem_size != sizeof(uint32_t) && d.elem_size != sizeof(uint64_t)) ||
@@ -1748,7 +1750,11 @@ VmAccessOutcome GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront 
   // instruction before global or LDS side effects rather than narrowing a
   // DDS address into another workgroup's LDS allocation.
   const uint64_t request_lanes = transpose_request_lane_mask(d, wf.wf_size());
-  if (d.ds_memviol || rejects_flat_dds(inst, wf, request_lanes))
+  if (d.ds_memviol) {
+    wf.raise_memory_violation("misaligned LDS atomic");
+    return VmAccessOutcome::Faulted;
+  }
+  if (rejects_flat_dds(inst, wf, request_lanes))
     return VmAccessOutcome::Faulted;
   if (d.rejects_private_atomic(request_lanes)) {
     const auto arch = wf.cu().arch();
@@ -1816,7 +1822,8 @@ VmAccessOutcome GlobalMemPipeline::initiate_global_access(VectorMemState &d, Wav
 
 VmAccessOutcome GlobalMemPipeline::initiate_texel_access(VectorMemState &d, Wavefront &wf,
                                                          uint64_t request_lanes) {
-  if (d.requires_scratch_backing && (d.scratch_lane_mask & request_lanes) && wf.scratch_base() == 0) {
+  if (d.requires_scratch_backing && (d.scratch_lane_mask & request_lanes) &&
+      wf.scratch_base() == 0) {
     wf.set_unreported_memory_failure("private access without scratch backing");
     return VmAccessOutcome::Faulted;
   }
@@ -2081,8 +2088,10 @@ VmAccessOutcome LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &
     return VmAccessOutcome::Faulted;
   d.wg_id = wf.wg_id();
   d.wf_id = wf.wf_id();
-  if (d.ds_memviol)
+  if (d.ds_memviol) {
+    wf.raise_memory_violation("misaligned LDS atomic");
     return VmAccessOutcome::Faulted;
+  }
   if (d.lds_stack_inputs) {
     execute_lds_stack(wf, d);
     return VmAccessOutcome::Complete;
@@ -2094,8 +2103,10 @@ VmAccessOutcome LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &
       d.ds2_response_data.resize(d.wf_size * d.num_elems * d.elem_size);
   }
   const auto arch = wf.cu().arch();
-  if (native_ds_atomic_misaligned(d, arch, request_lanes))
+  if (native_ds_atomic_misaligned(d, arch, request_lanes)) {
+    wf.raise_memory_violation("misaligned LDS atomic");
     return VmAccessOutcome::Faulted;
+  }
   execute_lds_access(d, wf, wf.lds(), d.per_lane_addr, request_lanes & ~d.ds_oob_lane_mask,
                      d.store_data, d.response_data);
   if (d.ds2_active && request_lanes) {
