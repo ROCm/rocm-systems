@@ -1,53 +1,33 @@
 {
   "evaluations": [
     {
-      "id": "tt-triton-inductor-kernels",
+      "id": "tt-end-to-end",
       "skill_should_trigger": true,
-      "prompt": "my model uses torch.compile, how do I attribute the generated Triton kernels?",
+      "prompt": "My model uses torch.compile. How do I attribute the generated Triton kernels to PyTorch operators, and then show the counters for just the relu operators?",
       "expected_behavior": [
-        "uses --experimental --trace-ml-api torch, because --trace-ml-api triton does not capture kernels that torch.compile generates"
+        "recommends --trace-ml-api torch for torch.compile kernels and filtering with --operator"
       ],
-      "unexpected_behavior": [
-        "relies on --trace-ml-api triton alone to capture torch.compile kernels"
-      ],
-      "logs_contain": ["--trace-ml-api torch"]
+      "logs_contain": ["--trace-ml-api torch", "--operator"]
     },
     {
-      "id": "tt-filter-by-operator",
+      "id": "tt-triton-inductor-kernels-routing",
       "skill_should_trigger": true,
-      "prompt": "show me the counters for just the relu operators in this traced PyTorch workload",
-      "expected_behavior": [
-        "filters with --experimental --operator",
-        "treats the pattern as a shell-style glob rather than a regex"
-      ],
-      "unexpected_behavior": [
-        "passes --list-operators and --operator on the same command"
-      ],
-      "logs_contain": ["--operator"]
+      "prompt": "my model uses torch.compile, how do I attribute the generated Triton kernels?"
     },
     {
-      "id": "tt-user-roctx-no-collection-control",
+      "id": "tt-filter-by-operator-routing",
       "skill_should_trigger": true,
-      "prompt": "start and stop rocprof-compute counter collection at my ROCTx range UserDefined",
-      "expected_behavior": [
-        "says rocprof-compute does not start, stop, or resume counter collection at a user ROCTx range",
-        "offers --list-operators user or --operator user:PATTERN on an already traced Python profile, or -k/-d"
-      ],
-      "unexpected_behavior": [
-        "claims --user-range, ROCTx, or --trace-ml-api can start or stop counter collection"
-      ]
+      "prompt": "show me the counters for just the relu operators in this traced PyTorch workload"
     },
     {
-      "id": "tt-non-python-binary",
+      "id": "tt-user-roctx-no-collection-control-routing",
       "skill_should_trigger": true,
-      "prompt": "attribute GPU kernels to functions in my compiled C++ HIP binary",
-      "expected_behavior": [
-        "says that operator attribution requires a Python workload and cannot annotate a compiled binary",
-        "offers kernel filtering with -k or dispatch filtering with -d instead"
-      ],
-      "unexpected_behavior": [
-        "claims --trace-ml-api can attribute kernels to functions in a compiled binary"
-      ]
+      "prompt": "start and stop rocprof-compute counter collection at my ROCTx range UserDefined"
+    },
+    {
+      "id": "tt-non-python-binary-routing",
+      "skill_should_trigger": true,
+      "prompt": "attribute GPU kernels to functions in my compiled C++ HIP binary"
     },
     {
       "id": "tt-cuda-pytorch",

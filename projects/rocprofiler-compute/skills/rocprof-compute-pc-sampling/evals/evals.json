@@ -1,24 +1,24 @@
 {
   "evaluations": [
     {
-      "id": "pcs-which-instruction-stalls",
+      "id": "pcs-end-to-end",
       "skill_should_trigger": true,
-      "prompt": "Which instruction in my MI300 kernel stalls the most?\n\nThe application is ./vrandom_access.cpp, a single-file HIP program that is not built yet. It takes no arguments and runs in a few seconds. Answer with the instruction and its stall reason.",
+      "prompt": "Which instruction in my MI300 kernel stalls the most, and which line of my HIP source does it come from? Also export the annotated disassembly with sample counts to a file.\n\nThe application is ./vrandom_access.cpp, a single-file HIP program that is not built yet. It takes no arguments and runs in a few seconds. Answer with the instruction, its stall reason, its source line, and where the export was written.",
       "workspace": "evals/samples",
       "expected_behavior": [
-        "names the instruction with the most samples and the stall reason the report gives for it"
+        "names the instruction with the most samples, the stall reason and source line the report gives for it, and where the export was written"
       ],
-      "logs_contain": ["rocprofv3-avail", "--experimental", "--pc-sampling", "rocprof-compute analyze"]
+      "logs_contain": ["rocprofv3-avail", "--pc-sampling", "rocprof-compute analyze", "--output-format"]
     },
     {
-      "id": "pcs-source-line-attribution",
+      "id": "pcs-which-instruction-stalls-routing",
       "skill_should_trigger": true,
-      "prompt": "Map the hottest GPU instructions in my kernel back to my HIP source lines.\n\nThe application is ./vrandom_access.cpp, a single-file HIP program that is not built yet. It takes no arguments and runs in a few seconds. Build it however you need. Answer with the source lines of the hottest instructions.",
-      "workspace": "evals/samples",
-      "expected_behavior": [
-        "builds the application with debug info before collecting PC samples"
-      ],
-      "logs_contain": ["hipcc", "--pc-sampling", "rocprof-compute analyze"]
+      "prompt": "Which instruction in my MI300 kernel stalls the most?"
+    },
+    {
+      "id": "pcs-source-line-attribution-routing",
+      "skill_should_trigger": true,
+      "prompt": "Map the hottest GPU instructions in my kernel back to my HIP source lines."
     },
     {
       "id": "pcs-export-disassembly-routing",

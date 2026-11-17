@@ -151,6 +151,9 @@ amd/skills grades each skill with skillscope under these rules:
   model, since the catalog runners may not have PyTorch. The catalog skips this
   file. Also put cases there when the behavioral cases in `evals.json` would
   take more than ten minutes together, since the catalog stops a skill's run
-  after ten minutes.
+  after ten minutes. Each skill's `evals.json` has one behavioral case that asks
+  the skill's main questions together, so the catalog builds and profiles once.
+  Every other case that should trigger is routing-only there, and its
+  behavioral version is in `extended_evals.json`.
 - It copies only the skill directory, so `evals/samples/` holds copies of the
   samples from `sample/`.
