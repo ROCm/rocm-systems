@@ -1177,18 +1177,30 @@ public:
   bool fatal_exception_cwsr_valid() const { return fatal_exception_cwsr_valid_; }
   void set_fatal_exception_cwsr_valid(bool valid) { fatal_exception_cwsr_valid_ = valid; }
 
+  /// @brief Why a memory pipeline rejected this wave's access before any VM
+  /// fault reporter saw it.
+  struct MemoryRejection {
+    const char *cause = nullptr; ///< Static description; null when nothing was rejected.
+    bool memviol = false;        ///< Architectural MEMVIOL rather than an unsupported access.
+    explicit operator bool() const { return cause != nullptr; }
+  };
   /// @brief Record that a memory pipeline failed this wave's access before any
   /// VM fault reporter saw it.
   /// @details ROCr acts on a memory-violation status only after the matching VM
   /// fault event. A failure no reporter covers (an unsupported operation, a
   /// missing scratch allocation, a retired address space) must instead abort
   /// the queue, so the compute unit's failure handler consumes this marker.
-  /// @param cause Static description used in the diagnostic; null clears it.
-  void set_unreported_memory_failure(const char *cause) { unreported_memory_failure_ = cause; }
-  /// @brief Consume the cause recorded by set_unreported_memory_failure(), or null.
-  const char *take_unreported_memory_failure() {
-    return std::exchange(unreported_memory_failure_, nullptr);
-  }
+  /// @param cause Static description used in the diagnostic.
+  void set_unreported_memory_failure(const char *cause) { memory_rejection_ = {cause, false}; }
+  /// @brief Record an architectural MEMVIOL raised before translation.
+  /// @details Hardware reports it as an aperture violation, which the compute
+  /// unit delivers through the unmaskable memory trap: a trap shader, the
+  /// debugger, or the queue owner, none of which waits for a VM fault event.
+  /// @param cause Static description used in the diagnostic.
+  void raise_memory_violation(const char *cause) { memory_rejection_ = {cause, true}; }
+  /// @brief Consume the rejection recorded by set_unreported_memory_failure()
+  /// or raise_memory_violation().
+  MemoryRejection take_memory_rejection() { return std::exchange(memory_rejection_, {}); }
 
   /// @brief Whether a future debugger resume should request single-step mode.
   bool debug_single_step() const { return single_step_; }
@@ -1418,7 +1430,7 @@ public:
     runtime_suspended_ = false;
     fatal_exception_pending_ = false;
     fatal_exception_cwsr_valid_ = false;
-    unreported_memory_failure_ = nullptr;
+    memory_rejection_ = {};
     single_step_ = false;
     trap_id_ = 0;
     debug_wave_id_ = 0;
@@ -1582,10 +1594,10 @@ private:
   bool runtime_suspended_ = false; ///< Queue-suspended by the runtime (queue_percentage 0).
   bool fatal_exception_pending_ = false;
   bool fatal_exception_cwsr_valid_ = false;
-  const char *unreported_memory_failure_ = nullptr; ///< See set_unreported_memory_failure().
-  bool single_step_ = false;   ///< Execute one instruction on resume, then re-stop.
-  uint32_t trap_id_ = 0;       ///< Trap id from the last s_trap (breakpoint = 1).
-  uint64_t debug_wave_id_ = 0; ///< Stable debugger wave id (TTMP4:5); 0 until assigned.
+  MemoryRejection memory_rejection_; ///< See take_memory_rejection().
+  bool single_step_ = false;         ///< Execute one instruction on resume, then re-stop.
+  uint32_t trap_id_ = 0;             ///< Trap id from the last s_trap (breakpoint = 1).
+  uint64_t debug_wave_id_ = 0;       ///< Stable debugger wave id (TTMP4:5); 0 until assigned.
 
 public:
   uint32_t trace_inst_count_ = 0; ///< Debug: instruction count for trace.

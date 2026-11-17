@@ -810,13 +810,21 @@ void ComputeUnitCore::handle_memory_access_failure(Wavefront &wf, VmAccessOutcom
                                                    uint64_t issue_pc) {
   assert(outcome != VmAccessOutcome::Complete && outcome != VmAccessOutcome::Unavailable);
   // Consume the pipeline's marker now so a claimed fault cannot leave it behind.
-  const char *unreported = wf.take_unreported_memory_failure();
+  const Wavefront::MemoryRejection rejection = wf.take_memory_rejection();
   if (wf.instruction_execution_failed()) {
     fail_wave_instruction(
         wf, "memory instruction", issue_pc, wf.instruction_execution_error(),
         wf.instruction_execution_error_detail() ? wf.instruction_execution_error_detail() : "");
     return;
   }
+  if (rejection.memviol) {
+    // MEMVIOL raises no VM fault event; deliver it as the aperture violation
+    // hardware reports, before the next instruction issues.
+    wf.latch_memory_violation();
+    wf.request_unmaskable_memory_trap();
+    return;
+  }
+  const char *unreported = rejection.cause;
   if (!unreported && wf.address_space() && !wf.snapshot_vm_access())
     unreported = "address space retired during the access";
   if (wf.fail_pm4_submission()) {
