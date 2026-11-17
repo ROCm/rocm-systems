@@ -180,6 +180,7 @@ These settings may impact performance and stability and should only be used when
         | - On large-BAR dGPUs, dmabuf export with ``HSA_AMD_DMABUF_MAPPING_TYPE_PCIE`` returns ``NOT_SUPPORTED``.
         | - Explicit CPU access granted through ``hsa_amd_vmem_set_access`` is still honored.
         | - ``HSA_USE_UDMABUF`` is ignored for device memory.
+        | - Device memory imported from another process through legacy KFD IPC (``HSA_ENABLE_IPC_MODE_LEGACY``, or kernels without dma-buf IPC support) remains CPU-accessible; the default dma-buf IPC path does not map imported memory for the CPU.
 
     * - | ``HSAKMT_DEBUG_LEVEL``
         | Controls the verbosity level of debug messages from the ``libhsakmt.so`` driver layer.

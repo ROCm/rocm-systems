@@ -704,8 +704,15 @@ TEST(rocrtstFunc, Memory_Fragment_Coherence_Test) {
     RunCustomTestEpilog(&mf);
 }
 
-TEST(rocrtstFunc, Device_Mem_No_Host_Access_Test) {
-    DeviceMemNoHostAccess dm;
+TEST(rocrtstFunc, Device_Mem_No_Host_Access_Default_Test) {
+    DeviceMemNoHostAccess dm(false);
+    if (!RunCustomTestProlog(&dm)) return;
+    dm.CpuAccessTest();
+    RunCustomTestEpilog(&dm);
+}
+
+TEST(rocrtstFunc, Device_Mem_No_Host_Access_Enabled_Test) {
+    DeviceMemNoHostAccess dm(true);
     if (!RunCustomTestProlog(&dm)) return;
     dm.CpuAccessTest();
     RunCustomTestEpilog(&dm);
