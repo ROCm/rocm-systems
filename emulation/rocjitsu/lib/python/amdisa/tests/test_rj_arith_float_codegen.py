@@ -880,7 +880,21 @@ def test_fp8_narrow_modes_and_partial_destination(stochastic):
         )
 
 
-@pytest.mark.parametrize('arch', ['rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5'])
+@pytest.mark.parametrize(
+    'arch',
+    [
+        'cdna1',
+        'cdna2',
+        'rdna1',
+        'rdna2',
+        'rdna3_5',
+        'rdna3',
+        'rdna4',
+        'cdna3',
+        'cdna4',
+        'cdna5',
+    ],
+)
 def test_conversion64_operand_layouts_and_policy(arch):
     from amdisa.codegen.execute.rj_arith_float import (
         CONVERSION64_NAMES,
@@ -911,7 +925,21 @@ def test_conversion64_operand_layouts_and_policy(arch):
         assert gen_conversion64(context(arch, name, ['dst'], [], is_vop3=True)) is None
 
 
-@pytest.mark.parametrize('arch', ['rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5'])
+@pytest.mark.parametrize(
+    'arch',
+    [
+        'cdna1',
+        'cdna2',
+        'rdna1',
+        'rdna2',
+        'rdna3_5',
+        'rdna3',
+        'rdna4',
+        'cdna3',
+        'cdna4',
+        'cdna5',
+    ],
+)
 def test_conversion32_modifiers_and_state_policy(arch):
     from amdisa.codegen.execute.rj_arith_float import (
         CONVERSION32_NAMES,
@@ -1701,7 +1729,9 @@ def test_cdna_half_conversion_layout_and_sdwa(arch):
                 assert 'RJ_ARITH_ALU_HIGH_D) ? 0xC : 0xF' in body
 
 
-@pytest.mark.parametrize('arch', ['cdna3', 'cdna4', 'cdna5'])
+@pytest.mark.parametrize(
+    'arch', ['cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5', 'cdna3', 'cdna4', 'cdna5']
+)
 def test_cdna_conversion32_legacy_names_and_sdwa(arch):
     from amdisa.codegen.execute.rj_arith_float import gen_conversion32
 
@@ -1712,7 +1742,7 @@ def test_cdna_conversion32_legacy_names_and_sdwa(arch):
             )
             assert f'rj_arith_v_cvt_{current}_i32_f32_w64' in body
             assert ('execute_conversion32_sdwa' in body) == (
-                arch != 'cdna5' and not vop3
+                arch not in ('cdna5', 'rdna3_5') and not vop3
             )
 
 

@@ -114,7 +114,6 @@ enum class SimdFastPath : uint8_t {
   VOP3_BINARY_TRUE16_SRC,
   VOP3_TERNARY,
   CVT_F64_TO_B32,
-  CVT_B32_TO_F64,
   VOPD,
   VOPC_COMPARE_STATUS,
 };
@@ -505,28 +504,6 @@ inline util::native<uint32_t> simd_bfm_b32(util::native<uint32_t> width,
                                            [](uint32_t width_value, uint32_t offset_value) {
                                              return bfm_b32(width_value, offset_value);
                                            });
-}
-
-inline util::native<int32_t> simd_cvt_i32_f32(util::native<float32_t> s) {
-  return util::map_native_convert_scalar<int32_t>(s, [](float32_t value) {
-    if (std::isnan(value))
-      return int32_t{0};
-    if (value >= 2147483648.0f)
-      return std::numeric_limits<int32_t>::max();
-    if (value < -2147483648.0f)
-      return std::numeric_limits<int32_t>::min();
-    return static_cast<int32_t>(value);
-  });
-}
-
-inline util::native<uint32_t> simd_cvt_u32_f32(util::native<float32_t> s) {
-  return util::map_native_convert_scalar<uint32_t>(s, [](float32_t value) {
-    if (std::isnan(value) || value < 0.0f)
-      return uint32_t{0};
-    if (value >= 4294967296.0f)
-      return std::numeric_limits<uint32_t>::max();
-    return static_cast<uint32_t>(value);
-  });
 }
 
 /// @brief Convert f32 to a zero-extended packed i16 lane.
@@ -923,13 +900,6 @@ inline conversion::ToFloat<From, fp_format::F16> sdwa_conversion_to_f16(const In
   constexpr int32_t kScale[] = {0, 1, 2, -1};
   stages.rounding.prescale = kScale[sdwa::output_modifier<sdwa::ResultFormat::F16>(inst, wf) & 3u];
   return stages;
-}
-
-/// @brief Resolve V_CVT_FLOOR_I32_F32 or V_CVT_NEAREST_I32_F32 (conversion::FloorI32,
-/// conversion::NearestI32) from the F32 input-denormal control and ABS/NEG.
-template <typename Op>
-inline Op conversion_f32_to_integer(const Wavefront &wf, uint32_t abs = 0, uint32_t neg = 0) {
-  return {abs, neg, input_denormal_policy<fp_format::F32>(wf)};
 }
 
 /// @brief Resolve V_CVT_PK_U8_F32, which rounds in the F32 MODE.FP_ROUND field.
@@ -1807,15 +1777,8 @@ template <typename T, typename Inst, typename UnOp>
   return false;
 }
 
-/// Mixed-width VOP1 conversion SIMD fast path, f64 source -> 32-bit dst
-/// (v_cvt_f32_f64, v_cvt_i32_f64, v_cvt_u32_f64). Reads src0 as `native<double>`
-/// through a 64-bit RegisterAccess operand view, applies `cvt_op`
-/// (`native<double> -> narrow32<Tout>`), and masked-stores the `native_width64`
-/// 32-bit results to vdst. The double->Tout step is a single `static_simd_cast`
-/// (cvt_f32_f64 maps to vcvtpd2ps, correctly rounded; the int forms clamp/NaN in
-/// the double domain first, then one cast). Bit-identical to the scalar body for
-/// finite/Inf inputs; a NaN *result* may differ in payload (accepted), which the
-/// A/B test skips. Returns true when the SIMD path executed.
+// Evaluate FP64 inputs and store one 32-bit result per lane, preserving inactive
+// destinations. FREXP exponent extraction still uses this mixed-width bridge.
 template <typename Tout, typename Inst, typename CvtOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_cvt_f64_to_b32_simd(Inst &inst, Wavefront &wf, CvtOp cvt_op) {
@@ -1843,80 +1806,6 @@ template <typename Tout, typename Inst, typename CvtOp>
 /// Unconstrained fallback for the f64->b32 cvt path; see the binary-path note.
 template <typename Tout, typename Inst, typename CvtOp>
 [[nodiscard]] bool try_execute_cvt_f64_to_b32_simd(Inst &, Wavefront &, CvtOp) {
-  return false;
-}
-
-/// Mixed-width VOP1 conversion SIMD fast path, 32-bit source -> f64 dst
-/// (v_cvt_f64_f32, v_cvt_f64_i32, v_cvt_f64_u32). Reads src0 as `narrow32<Tin>`
-/// (native_width64 32-bit lanes), applies `cvt_op` (`narrow32<Tin> ->
-/// native<double>`), and masked-stores the result to the 64-bit vdst through a
-/// 64-bit RegisterAccess write view. Each conversion is an exact widening
-/// `static_simd_cast` (vcvtps2pd / int->double), bit-identical to the scalar body
-/// for every input. Returns true when the SIMD path executed.
-template <typename Tin, typename Inst, typename CvtOp>
-  requires(util::has_stdx_simd)
-[[nodiscard]] inline bool try_execute_cvt_b32_to_f64_simd(Inst &inst, Wavefront &wf, CvtOp cvt_op) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.vdst.simd_capable())
-    return false;
-  constexpr std::size_t W = util::native_width64;
-  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
-  const uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  RegisterAccess regs(wf);
-  auto src0 = regs.read_operand(inst.src0, exec);
-  auto dst = regs.write_operand64(inst.vdst, exec);
-  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
-    const uint64_t chunk = (exec >> base) & chunk_full;
-    if (chunk == 0)
-      continue;
-    const auto in = src0.template load_narrow<Tin>(base);
-    if (dst.template store_native<double>(base, cvt_op(in), chunk).failed())
-      return true;
-  }
-  return true;
-}
-
-/// Unconstrained fallback for the b32->f64 cvt path; see the binary-path note.
-template <typename Tin, typename Inst, typename CvtOp>
-[[nodiscard]] bool try_execute_cvt_b32_to_f64_simd(Inst &, Wavefront &, CvtOp) {
-  return false;
-}
-
-/// @brief Run a raw-bit F64-source conversion on the f64->b32 cvt path.
-/// @details `stages` maps F64 encodings in 64-bit lanes to 32-bit destination
-/// encodings in the same lanes, such as a conversion::ToFloat; the store keeps
-/// their low 32 bits.
-template <typename Inst, typename Stages>
-  requires(util::has_stdx_simd)
-[[nodiscard]] inline bool try_execute_conversion_from_f64_simd(Inst &inst, Wavefront &wf,
-                                                               const Stages &stages) {
-  return try_execute_cvt_f64_to_b32_simd<uint32_t>(inst, wf, [&stages](util::native<double> s) {
-    return util::stdx::static_simd_cast<util::narrow32<uint32_t>>(
-        stages(std::bit_cast<util::native<uint64_t>>(s)));
-  });
-}
-
-template <typename Inst, typename Stages>
-[[nodiscard]] bool try_execute_conversion_from_f64_simd(Inst &, Wavefront &, const Stages &) {
-  return false;
-}
-
-/// @brief Run a raw-bit conversion to F64 on the b32->f64 cvt path.
-/// @details The 32-bit source encodings are zero-extended into 64-bit lanes for
-/// `stages`, which returns F64 encodings.
-template <typename Inst, typename Stages>
-  requires(util::has_stdx_simd)
-[[nodiscard]] inline bool try_execute_conversion_to_f64_simd(Inst &inst, Wavefront &wf,
-                                                             const Stages &stages) {
-  return try_execute_cvt_b32_to_f64_simd<uint32_t>(
-      inst, wf, [&stages](util::narrow32<uint32_t> source) {
-        return std::bit_cast<util::native<double>>(
-            stages(util::stdx::static_simd_cast<util::native<uint64_t>>(source)));
-      });
-}
-
-template <typename Inst, typename Stages>
-[[nodiscard]] bool try_execute_conversion_to_f64_simd(Inst &, Wavefront &, const Stages &) {
   return false;
 }
 
@@ -4977,38 +4866,6 @@ template <bool Vop3, typename Inst>
   if (::rocjitsu::amdgpu::try_execute_cvt_f64_to_b32_simd<Tout>(inst, wf, __VA_ARGS__)) {          \
     ::rocjitsu::amdgpu::detail::record_simd_fast_path(                                             \
         ::rocjitsu::amdgpu::SimdFastPath::CVT_F64_TO_B32);                                         \
-    return;                                                                                        \
-  }
-#endif
-
-/// Mixed-width cvt counterpart, 32-bit source -> f64 dst. `Tin` is the 32-bit
-/// source lane type; the functor (`narrow32<Tin> -> native<double>`) is variadic.
-#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
-#define ROCJITSU_TRY_SIMD_CVT_B32_TO_F64(Tin, ...) static_cast<void>(inst)
-#else
-#define ROCJITSU_TRY_SIMD_CVT_B32_TO_F64(Tin, ...)                                                 \
-  if (::rocjitsu::amdgpu::try_execute_cvt_b32_to_f64_simd<Tin>(inst, wf, __VA_ARGS__)) {           \
-    ::rocjitsu::amdgpu::detail::record_simd_fast_path(                                             \
-        ::rocjitsu::amdgpu::SimdFastPath::CVT_B32_TO_F64);                                         \
-    return;                                                                                        \
-  }
-#endif
-
-/// Raw-bit conversions from or to F64 (shared/conversion.h stage objects).
-#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
-#define ROCJITSU_TRY_SIMD_CONVERSION_FROM_F64(...) static_cast<void>(inst)
-#define ROCJITSU_TRY_SIMD_CONVERSION_TO_F64(...) static_cast<void>(inst)
-#else
-#define ROCJITSU_TRY_SIMD_CONVERSION_FROM_F64(...)                                                 \
-  if (::rocjitsu::amdgpu::try_execute_conversion_from_f64_simd(inst, wf, __VA_ARGS__)) {           \
-    ::rocjitsu::amdgpu::detail::record_simd_fast_path(                                             \
-        ::rocjitsu::amdgpu::SimdFastPath::CVT_F64_TO_B32);                                         \
-    return;                                                                                        \
-  }
-#define ROCJITSU_TRY_SIMD_CONVERSION_TO_F64(...)                                                   \
-  if (::rocjitsu::amdgpu::try_execute_conversion_to_f64_simd(inst, wf, __VA_ARGS__)) {             \
-    ::rocjitsu::amdgpu::detail::record_simd_fast_path(                                             \
-        ::rocjitsu::amdgpu::SimdFastPath::CVT_B32_TO_F64);                                         \
     return;                                                                                        \
   }
 #endif
