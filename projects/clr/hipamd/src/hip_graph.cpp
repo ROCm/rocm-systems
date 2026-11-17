@@ -1434,29 +1434,27 @@ hipError_t hipStreamEndCapture_common(hipStream_t stream, hip::Graph** pGraph) {
     return hipErrorStreamCaptureInvalidated;
   }
 
-  if (hip::GraphRecapture* rc = s->GetGraphRecapture()) {
+  if (s->GetGraphRecapture() != nullptr) {
     // Ending from the callback's thread returns the graph as is, even with unmatched nodes:
     // the callback still holds an original node handle, so the graph must not be destroyed
     // under it. EndCapture tells the matcher that the capture ended.
     bool endFromCallback = false;
     {
       std::unique_lock<std::recursive_mutex> lock = s->LockCaptureState();
-      endFromCallback =
-          rc->callbackInProgress && rc->callbackThread == std::this_thread::get_id();
+      hip::GraphRecapture* rc = s->GetGraphRecapture();
+      endFromCallback = rc != nullptr && rc->callbackInProgress &&
+                        rc->callbackThread == std::this_thread::get_id();
     }
     if (endFromCallback) {
       *pGraph = s->EndCapture();
       return hipSuccess;
     }
-    // Read the cursor before EndCapture destroys the recapture state. The temporary node and
-    // the unjoined check do not apply: every original node being matched is enough.
-    const bool complete = rc->next == rc->originals.size();
-    if (!complete) {
-      s->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
-      (void)s->EndCapture();
+    // EndCapture waits for another thread's callback, then reads the cursor under the same
+    // lock. An original node left unmatched invalidates the capture and yields no graph.
+    *pGraph = s->EndCapture();
+    if (*pGraph == nullptr) {
       return hipErrorGraphRecaptureFailure;
     }
-    *pGraph = s->EndCapture();
     return hipSuccess;
   }
 
@@ -4280,7 +4278,7 @@ static hipError_t RecaptureMatch(hip::Stream* capturing, hip::GraphRecapture& rc
     rc.callbackInProgress = true;
     rc.callbackThread = std::this_thread::get_id();
     rc.callbackEndedCapture = &captureEnded;
-    
+
     // Drop the lock because cb can call apis that need it again
     lock.unlock();
     RecaptureCallbackScope* outerScope = tls_recaptureCallback;

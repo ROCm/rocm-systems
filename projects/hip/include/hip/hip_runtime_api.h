@@ -9148,10 +9148,18 @@ hipError_t hipStreamBeginCaptureToGraph(hipStream_t stream, hipGraph_t graph,
  * If @p callbackData has a non-null callbackFunc, it is called for every node whose captured
  * parameters differ from the existing ones. The status tells whether ::hipGraphExecUpdate can
  * apply the change. Returning an error from the callback, or a status of
- * #hipGraphRecaptureError, terminates the recapture.
+ * #hipGraphRecaptureError, terminates the recapture. A rejected update still consumes that
+ * original node. A status of #hipGraphRecaptureError does not.
  *
- * ::hipStreamEndCapture returns #hipErrorGraphRecaptureFailure if the recapture was terminated,
- * if an operation did not match, or if not every existing node was matched.
+ * ::hipStreamEndCapture returns #hipErrorGraphRecaptureFailure when an original node is left
+ * unmatched. That includes a status of #hipGraphRecaptureError, a rejected update followed by
+ * more nodes, an operation that does not match, and a node that was never recaptured. Rejecting
+ * the update of the last node still consumes it, so end returns #hipSuccess and that node keeps
+ * its previous parameters.
+ *
+ * A captured operation can return #hipErrorGraphRecaptureFailure. Adding a node directly to a
+ * graph that is being recaptured returns #hipErrorGraphRecaptureFailure. ::hipGraphDestroyNode
+ * returns #hipErrorIllegalState and leaves the node in place.
  *
  * @param [in] stream - Stream to initiate recapture.
  * @param [in] mode - Controls the interaction of this capture sequence with other API calls that
@@ -9173,7 +9181,7 @@ hipError_t hipStreamBeginRecaptureToGraph(hipStream_t stream, hipStreamCaptureMo
  * @param [out] pGraph - Captured graph. Set to NULL on every error.
  *
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorStreamCaptureInvalidated,
- * #hipErrorStreamCaptureUnjoined
+ * #hipErrorStreamCaptureUnjoined, #hipErrorGraphRecaptureFailure
  *
  */
 hipError_t hipStreamEndCapture(hipStream_t stream, hipGraph_t* pGraph);

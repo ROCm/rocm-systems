@@ -173,8 +173,9 @@ hip::Graph* Stream::EndCapture(bool preserveInvalidated) {
     std::unique_lock<std::recursive_mutex> lock(lock_);
     // hipStreamEndCapture and hipStreamDestroy from the callback thread must return. The
     // matcher reads the flag after the callback and does not lock this stream again.
-    if (graphRecapture_->callbackInProgress &&
-        graphRecapture_->callbackThread == std::this_thread::get_id()) {
+    const bool endedByCallback = graphRecapture_->callbackInProgress &&
+                                 graphRecapture_->callbackThread == std::this_thread::get_id();
+    if (endedByCallback) {
       *graphRecapture_->callbackEndedCapture = true;
     }
     while (graphRecapture_ != nullptr && graphRecapture_->callbackInProgress &&
@@ -182,6 +183,13 @@ hip::Graph* Stream::EndCapture(bool preserveInvalidated) {
       lock.unlock();
       std::this_thread::yield();
       lock.lock();
+    }
+    // next is advanced before the matcher drops this lock, so a callback that just accepted
+    // the last node is complete here. Ending from that callback's own thread still returns
+    // the graph with whatever nodes remain unmatched.
+    if (!endedByCallback && graphRecapture_ != nullptr &&
+        graphRecapture_->next != graphRecapture_->originals.size()) {
+      SetCaptureStatus(hipStreamCaptureStatusInvalidated);
     }
     if (captureGraph_ != nullptr) {
       captureGraph_->SetRecapturingStream(nullptr);

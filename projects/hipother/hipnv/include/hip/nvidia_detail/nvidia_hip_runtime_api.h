@@ -1905,18 +1905,17 @@ typedef struct cudaGraphNodeParams hipGraphNodeParams;
 #endif
 
 #if CUDA_VERSION >= CUDA_13030
-// Verified against CUDA 13.3 driver_types.h. The type name matches. The enumerators omit
-// "Status": cudaGraphRecaptureEligibleForUpdate, cudaGraphRecaptureIneligibleForUpdate and
-// cudaGraphRecaptureError, with values 0, 1 and 2. The cast between the two enums is valid.
-typedef enum hipGraphRecaptureStatus {
-  hipGraphRecaptureEligibleForUpdate = 0,
-  hipGraphRecaptureIneligibleForUpdate = 1,
-  hipGraphRecaptureError = 2,
-} hipGraphRecaptureStatus;
+typedef enum cudaGraphRecaptureStatus hipGraphRecaptureStatus;
+#define hipGraphRecaptureEligibleForUpdate cudaGraphRecaptureEligibleForUpdate
+#define hipGraphRecaptureIneligibleForUpdate cudaGraphRecaptureIneligibleForUpdate
+#define hipGraphRecaptureError cudaGraphRecaptureError
 
-typedef hipError_t (*hipGraphRecaptureCallback_t)(
-    void* data, hipGraphNode_t node, const hipGraphNodeParams* originalParams,
-    const hipGraphNodeParams* recaptureParams, hipGraphRecaptureStatus status);
+// Returns hipError_t, as declared in hip_runtime_api.h. hipRecaptureCallbackToCuda converts the
+// result, because CUDA reads the return value of the callback as a cudaError_t.
+typedef hipError_t (*hipGraphRecaptureCallback_t)(void* data, hipGraphNode_t node,
+                                                  const hipGraphNodeParams* originalParams,
+                                                  const hipGraphNodeParams* recaptureParams,
+                                                  hipGraphRecaptureStatus status);
 
 typedef struct hipGraphRecaptureCallbackData {
   hipGraphRecaptureCallback_t callbackFunc;
@@ -4867,14 +4866,14 @@ typedef struct hipRecaptureCallbackAdapter {
   cudaGraphRecaptureCallbackData cudaData;
 } hipRecaptureCallbackAdapter;
 
-inline static cudaError_t hipRecaptureCallbackTrampoline(void* data, cudaGraphNode_t node,
-                                                         const cudaGraphNodeParams* originalParams,
-                                                         const cudaGraphNodeParams* recaptureParams,
-                                                         cudaGraphRecaptureStatus status) {
+inline static cudaError_t hipRecaptureCallbackToCuda(void* data, cudaGraphNode_t node,
+                                                     const cudaGraphNodeParams* originalParams,
+                                                     const cudaGraphNodeParams* recaptureParams,
+                                                     cudaGraphRecaptureStatus status) {
   hipRecaptureCallbackAdapter* adapter = (hipRecaptureCallbackAdapter*)data;
-  return hipErrorToCudaError(adapter->hipData.callbackFunc(
-      adapter->hipData.userData, node, originalParams, recaptureParams,
-      static_cast<hipGraphRecaptureStatus>(status)));
+  return hipErrorToCudaError(
+      adapter->hipData.callbackFunc(adapter->hipData.userData, node, originalParams,
+                                    recaptureParams, static_cast<hipGraphRecaptureStatus>(status)));
 }
 
 inline static void CUDART_CB hipRecaptureCallbackAdapterDestroy(void* data) { free(data); }
@@ -4896,22 +4895,25 @@ inline static hipError_t hipStreamBeginRecaptureToGraph(
     return hipErrorOutOfMemory;
   }
   adapter->hipData = *callbackData;
-  adapter->cudaData = cudaGraphRecaptureCallbackData{hipRecaptureCallbackTrampoline, adapter};
+  adapter->cudaData = cudaGraphRecaptureCallbackData{hipRecaptureCallbackToCuda, adapter};
 
-  cudaError_t err = cudaStreamBeginRecaptureToGraph(stream, mode, graph, &adapter->cudaData);
+  cudaUserObject_t object;
+  cudaError_t err = cudaUserObjectCreate(&object, adapter, hipRecaptureCallbackAdapterDestroy, 1,
+                                         cudaUserObjectNoDestructorSync);
   if (err != cudaSuccess) {
     free(adapter);
     return hipCUDAErrorTohipError(err);
   }
 
-  // Recapture is now active and CUDA may call the trampoline, so on failure below the adapter
-  // is leaked rather than freed.
-  cudaUserObject_t object;
-  err = cudaUserObjectCreate(&object, adapter, hipRecaptureCallbackAdapterDestroy, 1,
-                             cudaUserObjectNoDestructorSync);
+  err = cudaStreamBeginRecaptureToGraph(stream, mode, graph, &adapter->cudaData);
   if (err != cudaSuccess) {
+    // The destructor frees the adapter.
+    (void)cudaUserObjectRelease(object, 1);
     return hipCUDAErrorTohipError(err);
   }
+
+  // Recapture is active and CUDA may call the callback, so if the retain fails the adapter is
+  // leaked rather than freed. Ending the capture to unwind would destroy the caller's graph.
   return hipCUDAErrorTohipError(
       cudaGraphRetainUserObject(graph, object, 1, cudaGraphUserObjectMove));
 }

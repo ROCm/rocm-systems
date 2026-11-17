@@ -729,7 +729,7 @@ contract:
   Contract_CaptureToGraph_HipStreamBeginRecaptureToGraph_Recapture_LaunchWritesNewValue:
     <<: *level_0
     tags: [capture_to_graph, P0]
-  Contract_CaptureToGraph_HipStreamBeginRecaptureToGraph_MissingNode_DestroysGraph:
+  Contract_CaptureToGraph_HipStreamBeginRecaptureToGraph_MissingNode_EndsCapture:
     <<: *level_0
     tags: [capture_to_graph, P0]
   Contract_GraphKernel_HipGraphAddKernelNode_Default_WritesExpectedValue:

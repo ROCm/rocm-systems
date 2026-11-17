@@ -205,12 +205,22 @@ graph instantiated from the graph can be refreshed with
 An optional :cpp:type:`hipGraphRecaptureCallbackData` callback is called for
 every node whose parameters changed. Its :cpp:type:`hipGraphRecaptureStatus`
 argument tells whether :cpp:func:`hipGraphExecUpdate` can apply the change.
-Returning an error from the callback terminates the recapture.
+Returning an error from the callback terminates the recapture. A rejected
+update still consumes that original node. A status of
+``hipGraphRecaptureError`` does not.
 
-:cpp:func:`hipStreamEndCapture` returns ``hipErrorGraphRecaptureFailure`` if the
-recapture was terminated, if an operation did not match, or if not every
-existing node was matched. User objects owned by the graph are released when
-recapture begins.
+:cpp:func:`hipStreamEndCapture` returns ``hipErrorGraphRecaptureFailure`` when
+an original node is left unmatched. That includes a ``hipGraphRecaptureError``
+status, a rejected update followed by more nodes, an operation that does not
+match, and a node that was never recaptured. Rejecting the update of the last
+node still consumes it, so end returns ``hipSuccess`` and that node keeps its
+previous parameters.
+
+A captured operation can return ``hipErrorGraphRecaptureFailure``. Adding a
+node directly to a graph that is being recaptured returns the same error.
+:cpp:func:`hipGraphDestroyNode` returns ``hipErrorIllegalState`` and leaves the
+node in place. User objects owned by the graph are released when recapture
+begins.
 
 Explicit graph creation
 ================================================================================

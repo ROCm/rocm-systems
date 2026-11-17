@@ -5609,9 +5609,11 @@ static hipError_t playback_hipStreamBeginRecaptureToGraph(PlaybackContext& ctx, 
     }
     return hipSuccess;
   }
-  return (hipError_t)_fn(
+  hipError_t _r = (hipError_t)_fn(
       (hipStream_t)ctx.translate_stream(a->stream), (hipStreamCaptureMode)a->mode,
       (hipGraph_t)ctx.translate_graph(a->graph), nullptr);
+  if (_r == hipSuccess) ctx.in_graph_capture = true;
+  return _r;
 }
 
 static hipError_t playback___hipPopCallConfiguration(PlaybackContext& ctx, const uint8_t* payload) {
