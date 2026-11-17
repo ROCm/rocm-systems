@@ -10,6 +10,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -21,7 +22,7 @@ namespace rocjitsu {
 struct AtomicSite {
   uint64_t offset = 0;
   uint32_t instruction_size = 0;
-  std::string_view form;
+  std::string form;
   std::optional<int32_t> byte_offset;
   bool address_supported = false;
   std::vector<FaultMutationOwner> affected_owners;
