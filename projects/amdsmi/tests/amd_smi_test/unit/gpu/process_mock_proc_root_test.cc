@@ -429,6 +429,24 @@ TEST(GpuUnit, ProcessListFailsWhenAnFdinfoFileCannotBeRead) {
             AMDSMI_STATUS_UNEXPECTED_DATA);
 }
 
+TEST(GpuUnit, ProcessListFailsWhenReadingAnFdinfoFileFails) {
+  ScopedAmdsmiInit smi_init;
+  MockProcessRoots roots;
+  // As in ProcessListFailsWhenAnFdinfoFileCannotBeRead, except that the file
+  // that might have shown this GPU opens and then fails to read (a directory).
+  roots.kfd().WriteFile("4264/queues/0/gpuid", "not-a-gpu-id\n");
+  AddKfdFilesForEveryGpu(&roots.kfd(), "4264");
+  AddProcess(&roots.proc(), 4264, kOtherBdfText);
+  std::filesystem::create_directory(roots.proc().root() + "/4264/fdinfo/9");
+
+  TestGpu gpu;
+  WaitOutProcessListCache();
+  uint32_t num_processes = 4;
+  amdsmi_proc_info_t list[4] = {};
+  EXPECT_EQ(amdsmi_get_gpu_process_list(gpu.handle(), &num_processes, list),
+            AMDSMI_STATUS_UNEXPECTED_DATA);
+}
+
 TEST(GpuUnit, ProcessListLeavesOutAProcessWhoseGpusTheCallerMayNotRead) {
   if (geteuid() == 0) GTEST_SKIP() << "Root reads files whatever their mode";
   ScopedAmdsmiInit smi_init;
