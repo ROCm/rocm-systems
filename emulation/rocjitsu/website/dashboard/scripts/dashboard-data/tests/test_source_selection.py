@@ -218,6 +218,9 @@ def test_invalid_pr_rejects_early(tmp_path, changes):
     )
     assert result.returncode != 0
     assert 'pull_request_number' not in values
+    if 'base' in changes:
+        assert "targets 'release'" in result.stderr
+        assert "requires base branch 'develop'" in result.stderr
 
 
 def test_selected_commit_must_also_belong_to_pr_head_history(tmp_path):
