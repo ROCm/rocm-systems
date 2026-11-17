@@ -91,7 +91,7 @@ fn gfx1201_code_object() -> Vec<u8> {
 
     let kernel = SYMBOL_OFFSET + 24;
     write_u32(&mut bytes, kernel, 1);
-    bytes[kernel + 4] = (SYMBOL_BINDING_GLOBAL << 4) | SYMBOL_TYPE_AMDGPU_HSA_KERNEL;
+    bytes[kernel + 4] = (SYMBOL_BINDING_GLOBAL << 4) | SYMBOL_TYPE_OBJECT;
     write_u16(&mut bytes, kernel + 6, 3);
     write_u64(&mut bytes, kernel + 8, 0x1000);
     write_u64(&mut bytes, kernel + 16, 64);
@@ -157,6 +157,98 @@ fn rejects_non_hsa_elf_images() {
     let mut bytes = gfx1201_code_object();
     bytes[7] = 0;
     assert!(matches!(parse_elf_layout(&bytes), Err(INVALID_CODE_OBJECT)));
+}
+
+#[test]
+/// Legacy kernels and short descriptor sections cannot use modern metadata.
+fn rejects_legacy_and_truncated_kernel_descriptors() {
+    let mut bytes = gfx1201_code_object();
+    bytes[8] = 0;
+    assert!(matches!(
+        LoaderCodeObject::parse(&bytes),
+        Err(rocloader::Error::InvalidObject)
+    ));
+    let mut bytes = gfx1201_code_object();
+    // The fixture has more bytes after .text, but those are not descriptor bytes.
+    write_u64(&mut bytes, 64 + 192 + 32, 32);
+    assert!(
+        LoaderCodeObject::parse(&bytes)
+            .unwrap()
+            .symbols(SymbolTableOrder::RegularFirst)
+            .is_err()
+    );
+    let mut bytes = gfx1201_code_object();
+    bytes[448 + 24 + 4] = (SYMBOL_BINDING_GLOBAL << 4) | SYMBOL_TYPE_AMDGPU_HSA_KERNEL;
+    assert!(
+        LoaderCodeObject::parse(&bytes)
+            .unwrap()
+            .symbols(SymbolTableOrder::RegularFirst)
+            .is_err()
+    );
+}
+
+#[test]
+/// External kernel descriptors resolve without local definition bytes.
+fn resolves_undefined_kernel_descriptor_references() {
+    for symbol_type in [0, SYMBOL_TYPE_OBJECT] {
+        let mut bytes = gfx1201_code_object();
+        let kernel = 448 + 24;
+        bytes[kernel + 4] = (SYMBOL_BINDING_GLOBAL << 4) | symbol_type;
+        write_u16(&mut bytes, kernel + 6, 0); // SHN_UNDEF
+        write_u64(&mut bytes, kernel + 8, 0);
+        write_u64(&mut bytes, kernel + 16, 0);
+
+        // Append a relocation and relocate the header table to add its section.
+        let mut sections = bytes[64..384].to_vec();
+        let relocation = bytes.len();
+        bytes.resize(relocation + 24, 0);
+        write_u64(&mut bytes, relocation, 0x2000);
+        write_u64(
+            &mut bytes,
+            relocation + 8,
+            (1_u64 << 32) | u64::from(RELOCATION_ABSOLUTE_64),
+        );
+        let header = sections.len();
+        sections.resize(header + 64, 0);
+        write_u32(&mut sections, header + 4, SECTION_RELA);
+        write_u64(&mut sections, header + 24, relocation as u64);
+        write_u64(&mut sections, header + 32, 24);
+        write_u32(&mut sections, header + 40, 2); // Symbol-table section.
+        write_u64(&mut sections, header + 56, 24);
+        let section_offset = bytes.len();
+        bytes.extend_from_slice(&sections);
+        write_u64(&mut bytes, 40, section_offset as u64);
+        write_u16(&mut bytes, 60, 6);
+
+        let object = LoaderCodeObject::parse(&bytes).unwrap();
+        let symbols = object.symbols(SymbolTableOrder::DynamicFirst).unwrap();
+        let imported = &symbols[0];
+        assert_eq!(imported.full_name, "module::kernel.kd");
+        assert_eq!(imported.kind, SymbolKind::Kernel);
+        assert!(!imported.is_definition);
+        assert_eq!((imported.group_size, imported.private_size), (0, 0));
+
+        let mut image = [0_u8; 8];
+        assert_eq!(
+            apply_relocations(&bytes, object.layout(), 0x2000, 0x4000, &mut image, |_| {
+                None
+            }),
+            Err(VARIABLE_UNDEFINED)
+        );
+        let address = 0x1234_5678_0000;
+        assert_eq!(
+            apply_relocations(
+                &bytes,
+                object.layout(),
+                0x2000,
+                0x4000,
+                &mut image,
+                |name| { (name == imported.full_name).then_some(address) }
+            ),
+            Ok(())
+        );
+        assert_eq!(u64::from_le_bytes(image), address);
+    }
 }
 
 #[test]
@@ -332,4 +424,11 @@ fn applies_relative_and_defined_absolute_relocations() {
     );
     assert_eq!(read_u64(&image, 0x20), Some(0x1080));
     assert_eq!(read_u64(&image, 0x28), Some(0x1048));
+    // A supplied destination may be below the object's preferred virtual base.
+    assert_eq!(
+        apply_relocations(&bytes, layout, 0x100, 0x80, &mut image, |_| None),
+        Ok(())
+    );
+    assert_eq!(read_u64(&image, 0x20), Some(0x100));
+    assert_eq!(read_u64(&image, 0x28), Some(0xc8));
 }

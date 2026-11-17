@@ -84,7 +84,6 @@ from amdisa.codegen.execute.vop3_modifiers import vop3_src_mod
 from amdisa.codegen.execute.vector_special import (
     cvt_scale_layout,
     gen_vector_cvt_pk,
-    gen_vector_cvt_scale,
 )
 
 
@@ -8884,17 +8883,12 @@ class CodeGenerator:
             'vector_cvt_pk_bf16_f32',
             'vector_cvt_sr_pk_f16_f32',
             'vector_cvt_sr_pk_bf16_f32',
-            'vector_cvt_scale',
             'vector_cvt_sr_f16_f32',
             'vector_cvt_sr_bf16_f32',
             'vector_cvt_sr_fp8_f16',
             'vector_cvt_sr_bf8_f16',
             'vector_pack_b32_f16',
         ):
-            if cls == 'vector_cvt_scale':
-                return gen_vector_cvt_scale(
-                    dst_ops, src_ops, cls, op, self.isa_spec.arch_name
-                )
             opsel = '0u'
             if is_vop3:
                 inst_fields = getattr(self, '_current_inst_fields', set())
@@ -17008,6 +17002,8 @@ class CodeGenerator:
                     PACKED_TERNARY_SELECTION,
                     CDNA_TERNARY_SELECTION,
                     TERNARY_SELECTION_RDNA4,
+                    BINARY_ARITHMETIC_F16,
+                    FMA_F16,
                     SCALED_WIDEN_NAMES,
                     MIXED_BF16_NAMES,
                     DOT2_F32_NAMES,
@@ -17054,6 +17050,19 @@ class CodeGenerator:
                         | PACKED_TERNARY_SELECTION
                         | CDNA_TERNARY_SELECTION
                         | TERNARY_SELECTION_RDNA4
+                        | BINARY_ARITHMETIC_F16
+                        | FMA_F16
+                        | {
+                            'V_FREXP_EXP_I16_F16',
+                            'V_MAD_F16',
+                            'V_MAD_LEGACY_F16',
+                            'V_MADMK_F16',
+                            'V_MADAK_F16',
+                            'V_PK_FMAC_F16',
+                            'V_PK_ADD_F16',
+                            'V_PK_MUL_F16',
+                            'V_PK_FMA_F16',
+                        }
                     )
                 if self.isa_spec.arch_name in (
                     'rdna2',
@@ -17162,7 +17171,7 @@ class CodeGenerator:
                     supports_scalar(self.isa_spec.arch_name, i.name) for i in all_insts
                 )
                 if has_rj_arith_scalar:
-                    cpp_includes.append(('rj_arith/rj_arith.h', False))
+                    cpp_includes.append(('rj_arith/detail/rj_arith_scalar.h', False))
                 if self.isa_spec.arch_name in ('cdna3', 'cdna4', 'cdna5') and any(
                     i.name in CUBE_NAMES for i in all_insts
                 ):

@@ -47,7 +47,9 @@ int ncclPatEnable(struct ncclComm* comm);
 // NOTE: struct ncclPeerInfo lives in comm.h in RCCL (upstream declares it here).
 // It is exchanged before NCCL version validation; preserve its wire ABI by
 // appending new fields (upstream v2.32.3-1 appends cudaDriverVersion,
-// gpuCftMulticastSupport, gpuCftCountedSupport and gitVersionHash).
+// gpuCftMulticastSupport, gpuCftCountedSupport and gitVersionHash; v2.32.6-1
+// adds rmaRankStride, cuMemHostSupport, cftUnicastCliqueId and
+// cftMulticastCliqueId).
 
 #define CONNECT_SIZE 256
 #define NCCL_MAX_PAGE_SIZE (512L * 1024L * 1024L)
@@ -85,6 +87,7 @@ struct ncclNvlsSharedRes {
   int nChannels;
   int nHeads;
   int chunkSize;
+  int fifoLayout;
   int treeMaxChunkSize;
   struct ncclShmemCollBuff nvlsShmem;
   void* nvlsShmemHandle;
@@ -140,6 +143,7 @@ ncclResult_t ncclTransportIsAllDirectP2p(struct ncclComm* comm, int* isAllDirect
 bool ncclP2pUsesMemcpy();
 
 ncclResult_t ncclNvlsInit(struct ncclComm* comm);
+ncclResult_t ncclNvlsChannels(struct ncclComm* comm, int* nChannels, int* chunkSize, int* treeMaxChunkSize);
 ncclResult_t ncclNvlsTuning(struct ncclComm* comm);
 ncclResult_t ncclNvlsSetup(struct ncclComm* comm, struct ncclComm* parent);
 ncclResult_t ncclNvlsBufferSetup(struct ncclComm* comm);
