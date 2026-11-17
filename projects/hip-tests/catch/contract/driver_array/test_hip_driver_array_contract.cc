@@ -106,6 +106,8 @@ HIP_TEST_CASE(Contract_DriverArray_HipArrayGetDescriptor_InvalidArgs_AreRejected
   REQUIRE(hipArrayGetDescriptor(&returned_desc, nullptr) != hipSuccess);
 }
 
+// BACKEND-DIFF: the nvidia_detail wrapper for hipArrayGetPlane is guarded on CUDA 11.2, when cuArrayGetPlane was introduced.
+#if HT_AMD || (defined(CUDA_VERSION) && CUDA_VERSION >= CUDA_11020)
 // @asserts: hipArrayGetPlane - rejects a null plane-out pointer or null array handle with a non-success error
 HIP_TEST_CASE(Contract_DriverArray_HipArrayGetPlane_InvalidArgs_AreRejected) {
   CHECK_IMAGE_SUPPORT;
@@ -122,6 +124,7 @@ HIP_TEST_CASE(Contract_DriverArray_HipArrayGetPlane_InvalidArgs_AreRejected) {
   REQUIRE(hipArrayGetPlane(nullptr, array, 0) != hipSuccess);
   REQUIRE(hipArrayGetPlane(&plane, nullptr, 0) != hipSuccess);
 }
+#endif  // HT_AMD || CUDA_VERSION >= CUDA_11020
 
 // @asserts: hipArray3DCreate - creating a 3D array from a valid descriptor yields a non-null array handle
 HIP_TEST_CASE(Contract_DriverArray_HipArray3DCreate_Default_ReturnsUsableArray) {
