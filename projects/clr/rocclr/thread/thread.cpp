@@ -105,11 +105,7 @@ void Thread::resume() {
 
 namespace details {
 
-#if defined(__x86_64__)
-__thread Thread* thread_ __attribute__((tls_model("initial-exec")));
-#else
-__thread Thread* thread_ __attribute__((tls_model("global-dynamic")));
-#endif
+__thread Thread* thread_ ROCCLR_TLS_MODEL;
 
 }  // namespace details
 

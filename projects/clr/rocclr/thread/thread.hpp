@@ -136,11 +136,7 @@ namespace details {
 
 #if defined(__linux__)
 
-#if defined(__x86_64__)
-extern __thread Thread* thread_ __attribute__((tls_model("initial-exec")));
-#else
-extern __thread Thread* thread_ __attribute__((tls_model("global-dynamic")));
-#endif
+extern __thread Thread* thread_ ROCCLR_TLS_MODEL;
 
 static inline Thread* currentThread() { return thread_; }
 

@@ -74,6 +74,15 @@
 #define NOT_LINUX(x) x
 #endif /*!__linux__*/
 
+// TLS model for thread-local variables. initial-exec is only safe on x86_64; other
+// architectures (e.g. ppc64le) have a smaller static TLS block, and dlopen()ing the
+// library fails with "cannot allocate memory in static TLS block".
+#if defined(__x86_64__)
+#define ROCCLR_TLS_MODEL __attribute__((tls_model("initial-exec")))
+#else
+#define ROCCLR_TLS_MODEL __attribute__((tls_model("global-dynamic")))
+#endif
+
 #ifdef __APPLE__
 #define IS_MACOS true
 #define MACOS_ONLY(x) x
