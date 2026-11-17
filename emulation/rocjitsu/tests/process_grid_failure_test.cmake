@@ -17,29 +17,47 @@ endif()
 file(REMOVE_RECURSE "${TEST_OUTPUT_DIR}")
 file(MAKE_DIRECTORY "${TEST_OUTPUT_DIR}")
 
-set(_rank_script "${TEST_OUTPUT_DIR}/rank.sh")
+set(_rank_script "${TEST_OUTPUT_DIR}/rank.py")
 file(
     WRITE "${_rank_script}"
     [=[
-#!/bin/sh
-if [ "$RANK" != 0 ]; then
-    sleep 60 &
-    printf "%s\n" "$!" > "$RJ_GRID_OUT/worker-$RANK"
-    trap 'printf "term\n" > "$RJ_GRID_OUT/term-$RANK"; exit 0' TERM INT
-fi
-printf "%s\n" "$$" > "$RJ_GRID_OUT/pid-$RANK"
-if [ "$RANK" = 0 ]; then
-    i=0
-    while [ "$i" -lt 100 ]; do
-        [ -s "$RJ_GRID_OUT/pid-1" ] && break
-        i=$((i + 1))
-        sleep 0.1
-    done
-    exit 42
-fi
-while :; do
-    sleep 1
-done
+import os
+import signal
+import subprocess
+import sys
+import time
+
+out = os.environ["RJ_GRID_OUT"]
+rank = os.environ["RANK"]
+
+def wait_for(path):
+    for _ in range(100):
+        if os.path.exists(path) and os.path.getsize(path) > 0:
+            return
+        time.sleep(0.1)
+
+if rank != "0":
+    worker = subprocess.Popen(["/usr/bin/sleep", "60"])
+    with open(os.path.join(out, f"worker-{rank}"), "w", encoding="utf-8") as f:
+        print(worker.pid, file=f, flush=True)
+
+    def stop(signum, frame):
+        with open(os.path.join(out, f"term-{rank}"), "w", encoding="utf-8") as f:
+            print("term", file=f, flush=True)
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
+
+with open(os.path.join(out, f"pid-{rank}"), "w", encoding="utf-8") as f:
+    print(os.getpid(), file=f, flush=True)
+
+if rank == "0":
+    wait_for(os.path.join(out, "pid-1"))
+    sys.exit(42)
+
+while True:
+    time.sleep(1)
 ]=]
 )
 
@@ -48,7 +66,8 @@ execute_process(
         "${CMAKE_COMMAND}" -E env
         "ROCJITSU_RUNTIME_DIR=${TEST_RUNTIME_DIR}/peer-failure"
         "${TEST_EXECUTABLE}" --profile mi350x --num-nodes 1 --nproc-per-node 2
-        --env "RJ_GRID_OUT=${TEST_OUTPUT_DIR}" -- /bin/sh "${_rank_script}"
+        --env "RJ_GRID_OUT=${TEST_OUTPUT_DIR}" -- "${PYTHON_EXECUTABLE}"
+        "${_rank_script}"
     RESULT_VARIABLE _result
     OUTPUT_VARIABLE _stdout
     ERROR_VARIABLE _stderr
@@ -101,26 +120,37 @@ endif()
 
 set(_leader_exit_dir "${TEST_OUTPUT_DIR}/leader-exit")
 file(MAKE_DIRECTORY "${_leader_exit_dir}")
-set(_leader_exit_script "${_leader_exit_dir}/rank.sh")
+set(_leader_exit_script "${_leader_exit_dir}/rank.py")
 file(
     WRITE "${_leader_exit_script}"
     [=[
-#!/bin/sh
-if [ "$RANK" = 0 ]; then
-    sleep 60 &
-    printf "%s\n" "$!" > "$RJ_GRID_OUT/worker-0"
-    printf "%s\n" "$$" > "$RJ_GRID_OUT/pid-0"
-    exit 0
-fi
-i=0
-while [ "$i" -lt 100 ]; do
-    [ -s "$RJ_GRID_OUT/worker-0" ] && break
-    i=$((i + 1))
-    sleep 0.1
-done
-printf "%s\n" "$$" > "$RJ_GRID_OUT/pid-1"
-sleep 0.5
-exit 42
+import os
+import subprocess
+import sys
+import time
+
+out = os.environ["RJ_GRID_OUT"]
+rank = os.environ["RANK"]
+
+def wait_for(path):
+    for _ in range(100):
+        if os.path.exists(path) and os.path.getsize(path) > 0:
+            return
+        time.sleep(0.1)
+
+if rank == "0":
+    worker = subprocess.Popen(["/usr/bin/sleep", "60"])
+    with open(os.path.join(out, "worker-0"), "w", encoding="utf-8") as f:
+        print(worker.pid, file=f, flush=True)
+    with open(os.path.join(out, "pid-0"), "w", encoding="utf-8") as f:
+        print(os.getpid(), file=f, flush=True)
+    sys.exit(0)
+
+wait_for(os.path.join(out, "worker-0"))
+with open(os.path.join(out, "pid-1"), "w", encoding="utf-8") as f:
+    print(os.getpid(), file=f, flush=True)
+time.sleep(0.5)
+sys.exit(42)
 ]=]
 )
 
@@ -129,7 +159,7 @@ execute_process(
         "${CMAKE_COMMAND}" -E env
         "ROCJITSU_RUNTIME_DIR=${TEST_RUNTIME_DIR}/leader-exit"
         "${TEST_EXECUTABLE}" --profile mi350x --num-nodes 1 --nproc-per-node 2
-        --env "RJ_GRID_OUT=${_leader_exit_dir}" -- /bin/sh
+        --env "RJ_GRID_OUT=${_leader_exit_dir}" -- "${PYTHON_EXECUTABLE}"
         "${_leader_exit_script}"
     RESULT_VARIABLE _leader_result
     OUTPUT_VARIABLE _leader_stdout
@@ -161,6 +191,70 @@ foreach(_attempt RANGE 0 50)
 endforeach()
 if(_leader_worker_alive EQUAL 0)
     message(FATAL_ERROR "rank 0 worker survived after its leader exited")
+endif()
+
+set(_adopted_live_dir "${TEST_OUTPUT_DIR}/adopted-live-child")
+file(MAKE_DIRECTORY "${_adopted_live_dir}")
+set(_adopted_live_script "${_adopted_live_dir}/rank.py")
+file(
+    WRITE "${_adopted_live_script}"
+    [=[
+import os
+import sys
+import time
+
+out = os.environ["RJ_GRID_OUT"]
+
+if os.environ["RANK"] == "0":
+    child = os.fork()
+    if child == 0:
+        worker = os.fork()
+        if worker == 0:
+            with open(os.path.join(out, "worker-pid"), "w", encoding="utf-8") as f:
+                print(os.getpid(), file=f, flush=True)
+            time.sleep(0.5)
+            with open(os.path.join(out, "worker-done"), "w", encoding="utf-8") as f:
+                print("done", file=f, flush=True)
+            sys.exit(0)
+        sys.exit(0)
+
+    os.waitpid(child, 0)
+    for _ in range(50):
+        if os.path.exists(os.path.join(out, "worker-done")):
+            with open(os.path.join(out, "rank-done"), "w", encoding="utf-8") as f:
+                print("done", file=f, flush=True)
+            sys.exit(0)
+        time.sleep(0.1)
+    sys.exit(7)
+
+sys.exit(0)
+]=]
+)
+
+execute_process(
+    COMMAND
+        "${CMAKE_COMMAND}" -E env
+        "ROCJITSU_RUNTIME_DIR=${TEST_RUNTIME_DIR}/adopted-live-child"
+        "${TEST_EXECUTABLE}" --profile mi350x --num-nodes 1 --nproc-per-node 1
+        --env "RJ_GRID_OUT=${_adopted_live_dir}" -- "${PYTHON_EXECUTABLE}"
+        "${_adopted_live_script}"
+    RESULT_VARIABLE _adopted_live_result
+    OUTPUT_VARIABLE _adopted_live_stdout
+    ERROR_VARIABLE _adopted_live_stderr
+    TIMEOUT 15
+)
+
+if(NOT "${_adopted_live_result}" STREQUAL "0")
+    message(
+        FATAL_ERROR
+        "expected live adopted child launch to finish, got ${_adopted_live_result}\nstdout:\n${_adopted_live_stdout}\nstderr:\n${_adopted_live_stderr}"
+    )
+endif()
+if(NOT EXISTS "${_adopted_live_dir}/rank-done")
+    message(FATAL_ERROR "rank did not survive its live adopted child")
+endif()
+if(NOT EXISTS "${_adopted_live_dir}/worker-done")
+    message(FATAL_ERROR "live adopted child did not finish")
 endif()
 
 set(_adopted_child_dir "${TEST_OUTPUT_DIR}/adopted-child")
@@ -250,13 +344,31 @@ if(_adopted_worker_alive EQUAL 0)
     message(FATAL_ERROR "setsid worker survived after rank exit")
 endif()
 
-set(_sigchld_driver "${TEST_OUTPUT_DIR}/sigchld-ignored.sh")
+set(_sigchld_child "${TEST_OUTPUT_DIR}/exit_42.py")
+file(WRITE "${_sigchld_child}" "import sys\nsys.exit(42)\n")
+set(_sigchld_driver "${TEST_OUTPUT_DIR}/sigchld_ignored.py")
 file(
     WRITE "${_sigchld_driver}"
     [=[
-#!/bin/sh
-trap '' CHLD
-exec "$RJ_EXECUTABLE" --profile mi350x --num-nodes 1 --nproc-per-node 2 -- /bin/sh -c 'exit 42'
+import os
+import signal
+
+signal.signal(signal.SIGCHLD, signal.SIG_IGN)
+os.execv(
+    os.environ["RJ_EXECUTABLE"],
+    [
+        os.environ["RJ_EXECUTABLE"],
+        "--profile",
+        "mi350x",
+        "--num-nodes",
+        "1",
+        "--nproc-per-node",
+        "2",
+        "--",
+        os.environ["PYTHON_EXECUTABLE"],
+        os.environ["RJ_CHILD_SCRIPT"],
+    ],
+)
 ]=]
 )
 
@@ -264,7 +376,10 @@ execute_process(
     COMMAND
         "${CMAKE_COMMAND}" -E env
         "ROCJITSU_RUNTIME_DIR=${TEST_RUNTIME_DIR}/sigchld"
-        "RJ_EXECUTABLE=${TEST_EXECUTABLE}" /bin/sh "${_sigchld_driver}"
+        "RJ_EXECUTABLE=${TEST_EXECUTABLE}"
+        "PYTHON_EXECUTABLE=${PYTHON_EXECUTABLE}"
+        "RJ_CHILD_SCRIPT=${_sigchld_child}" "${PYTHON_EXECUTABLE}"
+        "${_sigchld_driver}"
     RESULT_VARIABLE _sigchld_result
     OUTPUT_VARIABLE _sigchld_stdout
     ERROR_VARIABLE _sigchld_stderr

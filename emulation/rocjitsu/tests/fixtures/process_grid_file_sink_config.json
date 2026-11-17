@@ -45,5 +45,6 @@
       ]}
     ]
   },
+  "local_node": "tray0",
   "sinks": {"types": ["file"], "dir": "/tmp/rocjitsu-process-grid-sinks"}
 }
