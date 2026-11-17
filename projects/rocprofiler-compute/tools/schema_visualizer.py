@@ -29,9 +29,9 @@ if str(_SRC_DIR) not in sys.path:
     sys.path.insert(0, str(_SRC_DIR))
 
 # Import from the ORM module so the diagrams stay a view onto the real schema.
-from sqlalchemy import MetaData, Table
+from sqlalchemy import MetaData, Table  # noqa: E402
 
-from utils.analysis_orm import PREFIX, Base, Database
+from utils.analysis_orm import PREFIX, Base, Database  # noqa: E402
 
 DEFAULT_OUTPUT_DIR = (
     Path(__file__).resolve().parent.parent / "docs" / "data" / "analyze"

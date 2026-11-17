@@ -14,7 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from instruction_pipeline_generator import (
+from instruction_pipeline_generator import (  # noqa: E402
     Corpus,
     InstructionRecord,
     Pipeline,
