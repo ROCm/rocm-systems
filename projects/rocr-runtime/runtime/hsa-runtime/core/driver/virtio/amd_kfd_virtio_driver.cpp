@@ -239,8 +239,10 @@ hsa_status_t KfdVirtioDriver::AllocateMemory(const core::MemoryRegion& mem_regio
     handle->owns_allocation = true;
   };
 
-  kmt_alloc_flags.ui32.ExecuteAccess =
-      (alloc_flags & core::MemoryRegion::AllocateExecutable ? 1 : 0);
+  // A region may already carry execute permission, e.g. a device kernarg
+  // region. Requests only add it.
+  if (alloc_flags & core::MemoryRegion::AllocateExecutable)
+    kmt_alloc_flags.ui32.ExecuteAccess = 1;
   kmt_alloc_flags.ui32.AQLQueueMemory =
       (alloc_flags & core::MemoryRegion::AllocateDoubleMap ? 1 : 0);
 

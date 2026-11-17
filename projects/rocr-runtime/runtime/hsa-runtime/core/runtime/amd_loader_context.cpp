@@ -293,7 +293,7 @@ const core::MemoryRegion* RegionMemory::AgentLocal(hsa_agent_t agent, bool is_co
           std::find_if(gpu_agent->regions().begin(), gpu_agent->regions().end(),
                        [&](const std::shared_ptr<const core::MemoryRegion>& region) {
                          auto amd_region = static_cast<const AMD::MemoryRegion*>(region.get());
-                         return amd_region->IsLocalMemory() && (!amd_region->fine_grain());
+                         return amd_region->IsGeneralCoarseLocal();
                        });
       return region_it == gpu_agent->regions().end() ? nullptr : region_it->get();
     }
