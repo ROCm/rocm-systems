@@ -450,10 +450,10 @@ TEST_F(EnqueueMicrotest, P2pReservationChannels_P2pNetPreservesAinicScatterLimit
   EXPECT_EQ(1, rcclP2pReservationChannels(comm.get(), /*recv=*/nullptr, &task));
 }
 
-// gfx942 remote alltoall cap (enqueue.cc). The fit loop divides
-// p2pnChannelsPerPeer by two while fitted * nRanks is strictly greater than
-// p2pnChannels, then returns 2 only when the result is still above 2. The peer
-// in this table is on the other node. A same-node peer, every other collective,
+// gfx942 remote alltoall cap (enqueue.cc). Returns 2 when the stored
+// p2pnChannelsPerPeer is still above 2. paths.cc has already fitted that
+// count to p2pMaxPeers, so this function does not fit again. The peer in
+// this table is on the other node. A same-node peer, every other collective,
 // arch, node count, a user-set nChannelsPerNetPeer, and RCCL_SATURATE_P2P_NCHANNELS
 // fall through. gfx110 alltoall still reaches its own table entry.
 TEST_F(EnqueueMicrotest, P2pPolicyChannels_Gfx942MultiNodeAlltoallCapsAboveTwoFittedChannels) {
@@ -467,24 +467,15 @@ TEST_F(EnqueueMicrotest, P2pPolicyChannels_Gfx942MultiNodeAlltoallCapsAboveTwoFi
     int expect;
   };
   const Case cases[] = {
-    // 4 * 16 == 64, so the strict > does not halve. fitted stays 4.
     {"2x8 alltoall", 2, 16, 64, 4, "gfx942", ncclFuncAlltoAll, false, 0, 2},
-    // 16*16=256 > 64 -> 8; 8*16=128 > 64 -> 4; 4*16 == 64 stops.
-    {"two halvings still above 2", 2, 16, 64, 16, "gfx942", ncclFuncAlltoAll, false, 0, 2},
-    // 8*16=128 > 64 -> 4; 4*16 == 64 stops. 4 > 2.
-    {"one halving still above 2", 2, 16, 64, 8, "gfx942", ncclFuncAlltoAll, false, 0, 2},
-    // 6*16=96 > 64 -> 3; 3*16=48 stops. Integer halving is not pow2.
+    // A larger job whose stored count paths.cc left above 2 is capped too.
+    // The old nRanks loop returned -1 here (4*24 > 64 halved to 2).
+    {"3-node stored count still 4", 3, 24, 64, 4, "gfx942", ncclFuncAlltoAll, false, 0, 2},
     {"non-pow2 per peer", 2, 16, 64, 6, "gfx942", ncclFuncAlltoAll, false, 0, 2},
     // IsArchMatch is a prefix compare, so a stepping suffix still matches.
     {"gfx942 stepping", 2, 16, 64, 4, "gfx942:xnack-", ncclFuncAlltoAll, false, 0, 2},
-    // 2*128 > 64 -> 1, and 1*128 is still greater, but the loop refuses to halve past 1.
-    {"stops at one channel", 16, 128, 64, 2, "gfx942", ncclFuncAlltoAll, false, 0, -1},
-    // 4*32=128 > 64 -> 2; 2*32 == 64 stops. 2 > 2 is false.
-    {"fitted lands on 2", 4, 32, 64, 4, "gfx942", ncclFuncAlltoAll, false, 0, -1},
-    // 4*64 > 64 -> 2; 2*64 > 64 -> 1. The loop stops at 1.
-    {"fitted lands on 1", 8, 64, 64, 4, "gfx942", ncclFuncAlltoAll, false, 0, -1},
-    // 2*16=32 is not greater than 64.
-    {"already 2", 2, 16, 64, 2, "gfx942", ncclFuncAlltoAll, false, 0, -1},
+    {"stored count 2", 4, 32, 64, 2, "gfx942", ncclFuncAlltoAll, false, 0, -1},
+    {"stored count 1", 8, 64, 64, 1, "gfx942", ncclFuncAlltoAll, false, 0, -1},
     {"single node", 1, 8, 64, 4, "gfx942", ncclFuncAlltoAll, false, 0, -1},
     {"gfx950", 2, 16, 64, 4, "gfx950", ncclFuncAlltoAll, false, 0, -1},
     // Misses gfx942, then the gfx110 table returns 1. Single node must too:
@@ -538,6 +529,13 @@ TEST_F(EnqueueMicrotest, P2pPolicyChannels_Gfx942MultiNodeAlltoallCapsAboveTwoFi
   comm->node = 0;
   task.root = 0;
   EXPECT_EQ(-1, rcclP2pPolicyChannels(comm.get(), &task)) << "same-node peer";
+
+  // maxP2pPeers below nRanks must not grow a second fit. The stored count is the input.
+  comm->p2pMaxPeers = 2;
+  comm->nRanks = 16;
+  comm->node = 0;
+  task.root = 1;
+  EXPECT_EQ(2, rcclP2pPolicyChannels(comm.get(), &task)) << "p2pMaxPeers below nRanks";
 }
 
 TEST_F(EnqueueMicrotest, P2pPolicyChannels_P2pDisableStillCapsRemoteGfx942Alltoall) {

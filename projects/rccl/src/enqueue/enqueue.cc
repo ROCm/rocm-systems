@@ -1405,19 +1405,18 @@ static int rcclP2pPolicyChannels(struct ncclComm* comm, struct ncclTaskP2p* task
   int taskParts = rcclP2pTaskParts(comm, task->collAPI, task->root);
   if (taskParts < comm->p2pnChannelsPerPeer) return taskParts;
   // Remote gfx942 alltoall peers share one NIC, so a lone-peer count
-  // oversubscribes it. Same-node peers, send, and sendrecv are not capped.
-  // The fallback still uses the NIC when P2P is disabled.
-  // Skipped when the nRanks fit already gives 2 or less, or the user set
-  // nChannelsPerNetPeer or RCCL_SATURATE_P2P_NCHANNELS.
+  // oversubscribes it. paths.cc already fitted the stored count to
+  // p2pMaxPeers, so 2 or below is left alone. Same-node peers, send, and
+  // sendrecv are not capped. The fallback still uses the NIC when P2P is
+  // disabled. Skipped when the user set nChannelsPerNetPeer or
+  // RCCL_SATURATE_P2P_NCHANNELS.
   if (comm->nNodes > 1 && task->collAPI == ncclFuncAlltoAll &&
       comm->config.nChannelsPerNetPeer == NCCL_CONFIG_UNDEF_INT &&
       (rcclParamSaturateP2pNChannels() == 0 || rcclParamSaturateP2pNChannels() == RCCL_VALUE_UNSET) &&
       comm->rankToNode[task->root] != comm->node &&
-      IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942")) {
-    int fitted = comm->p2pnChannelsPerPeer;
-    while (fitted * comm->nRanks > comm->p2pnChannels && fitted > 1) fitted /= 2;
-    if (fitted > 2) return 2;
-  }
+      IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") &&
+      comm->p2pnChannelsPerPeer > 2)
+    return 2;
   // The policies below target direct P2P/IPC traffic only. When P2P is disabled,
   // preserve the normal channel selection for the fallback transport.
   if (ncclParamP2pDisable()) return -1;
