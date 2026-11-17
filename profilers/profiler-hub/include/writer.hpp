@@ -137,6 +137,21 @@ struct writer_t
         const writer_types::trace_environment_t& trace_environment);
 
     /**
+     * @brief Insert a HIP graph launch into rocpd_graph_launch
+     * @note Stored by schema 3.0.2 and newer. Older schemas throw std::runtime_error.
+     */
+    void insert_graph_launch_data(
+        const writer_types::graph_launch_data_t& graph_launch_data,
+        const writer_types::trace_environment_t& trace_environment);
+
+    /**
+     * @brief Insert a HIP event barrier into rocpd_hip_event
+     * @note Stored by schema 3.0.4 and newer. Older schemas throw std::runtime_error.
+     */
+    void insert_hip_event_data(const writer_types::hip_event_data_t&    hip_event_data,
+                               const writer_types::trace_environment_t& trace_environment);
+
+    /**
      * @brief Flush in-memory data to disk
      * @note This function is only used with in-memory database option
      */

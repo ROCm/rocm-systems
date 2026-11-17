@@ -125,6 +125,22 @@ writer_t::insert_memory_alloc_data(
 }
 
 void
+writer_t::insert_graph_launch_data(
+    const writer_types::graph_launch_data_t& graph_launch_data,
+    const writer_types::trace_environment_t& trace_environment)
+{
+    m_impl->insert_graph_launch_data(graph_launch_data, trace_environment);
+}
+
+void
+writer_t::insert_hip_event_data(
+    const writer_types::hip_event_data_t&    hip_event_data,
+    const writer_types::trace_environment_t& trace_environment)
+{
+    m_impl->insert_hip_event_data(hip_event_data, trace_environment);
+}
+
+void
 writer_t::flush_in_memory_data_to_disk()
 {
     m_impl->flush_in_memory_data_to_disk();

@@ -30,6 +30,8 @@ struct primary_key_providers
     [[nodiscard]] auto& kernel_dispatch_data() { return m_kernel_dispatch_data; }
     [[nodiscard]] auto& memory_copy_data() { return m_memory_copy_data; }
     [[nodiscard]] auto& memory_alloc_data() { return m_memory_alloc_data; }
+    [[nodiscard]] auto& graph_launch_data() { return m_graph_launch_data; }
+    [[nodiscard]] auto& hip_event_data() { return m_hip_event_data; }
 
 private:
     autoincrementer<primary_key_t> m_process_info;
@@ -48,6 +50,8 @@ private:
     autoincrementer<primary_key_t> m_kernel_dispatch_data;
     autoincrementer<primary_key_t> m_memory_copy_data;
     autoincrementer<primary_key_t> m_memory_alloc_data;
+    autoincrementer<primary_key_t> m_graph_launch_data;
+    autoincrementer<primary_key_t> m_hip_event_data;
 };
 
 }  // namespace profiler_hub

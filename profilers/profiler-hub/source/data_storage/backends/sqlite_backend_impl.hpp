@@ -26,8 +26,9 @@ using rocpd::data_storage::schema::latest_schema_version;
 
 // Oldest to newest. version_t{} selects the last entry, which is the newest schema
 // the writer can populate. Add a version here only when a writer exists for it.
-inline constexpr profiler_hub::version_t k_writer_supported_versions[] = { { 3, 0, 0 },
-                                                                           { 3, 0, 1 } };
+inline constexpr profiler_hub::version_t k_writer_supported_versions[] = {
+    { 3, 0, 0 }, { 3, 0, 1 }, { 3, 0, 2 }, { 3, 0, 3 }, { 3, 0, 4 }, { 3, 0, 5 }
+};
 
 /**
  * Creates the parent directory of `db_file` when it does not already exist.
@@ -109,7 +110,7 @@ resolve_writable_schema(const profiler_hub::version_t& requested)
 
 /**
  * Versions the writer can populate, oldest to newest, from k_writer_supported_versions.
- * @return A comma-separated list such as "3.0.1".
+ * @return A comma-separated list such as "3.0.0, 3.0.1, 3.0.2, 3.0.3, 3.0.4, 3.0.5".
  */
 [[maybe_unused]] std::string
 supported_writable_schemas()

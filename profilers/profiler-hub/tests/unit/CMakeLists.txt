@@ -10,6 +10,8 @@ set(UNIT_TEST_SOURCES
     entity_utility_test.cpp
     json_serializer_test.cpp
     writer_test.cpp
+    schema_3_0_5/writer_test.cpp
+    schema_writers/version_matrix_test.cpp
     reader_test.cpp
     sqlite_backend_impl_test.cpp
 )

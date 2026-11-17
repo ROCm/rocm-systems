@@ -3,67 +3,49 @@
 
 #pragma once
 
+// Schema 3.0.0 PMC event, also used by 3.0.1 and 3.0.2.
+
+#include "writers/common/pmc_event_writer.hpp"
 #include "writers/pmc_event_writer.hpp"
-#include "writers/schema_v3/common_insert_operations.hpp"
-#include "writers/writer_context.hpp"
 
-#include "data_storage/schema_v3/insert_statements.hpp"
 #include "data_storage/schema_version.hpp"
-#include "profiler-hub/writer_types.hpp"
 
-#include <memory>
-#include <optional>
+#include <stdexcept>
+#include <string>
 
 namespace profiler_hub
 {
 
 template <>
 class pmc_event_writer<data_storage::schema_v3_tag>
-: public pmc_event_writer_interface<pmc_event_writer<data_storage::schema_v3_tag>>
+: public pmc_event_common<pmc_event_writer<data_storage::schema_v3_tag>>
 {
 public:
-    explicit pmc_event_writer(
-        std::shared_ptr<writer_context> ctx,
-        std::shared_ptr<
-            data_storage::schema_v3::insert_statements<data_storage::sqlite_backend>>
-                                                                               stmts,
-        std::shared_ptr<common_insert_operations<data_storage::schema_v3_tag>> common_ops)
-    : m_ctx(std::move(ctx))
-    , m_stmts(std::move(stmts))
-    , m_common_ops(std::move(common_ops))
-    {}
+    using pmc_event_common<
+        pmc_event_writer<data_storage::schema_v3_tag>>::pmc_event_common;
 
-    void insert_impl(const writer_types::pmc_event_data_t&     data,
-                     const writer_types::pmc_info_unique_id_t& pmc_unique_id)
+    void reject_unsupported_fields(const writer_types::pmc_event_data_t& data) const
     {
-        auto transaction_block = m_ctx->backend->begin_transaction();
-
-        m_ctx->validator->require_pmc(pmc_unique_id);
-
-        const auto pmc_pk = m_ctx->validator->resolve_pmc_key(pmc_unique_id);
-
-        std::optional<primary_key_t> event_pk = std::nullopt;
-        if(data.event.has_value())
-        {
-            event_pk = m_common_ops->insert_event(data.event.value());
-        }
-
-        const auto pk = m_ctx->key_providers->pmc_event_data().get_primary_key_value();
-
-        m_stmts->pmc_event_statement()(pk, event_pk, pmc_pk, data.value, data.extdata);
-
-        if(event_pk.has_value())
-        {
-            m_common_ops->insert_sample(data.sample, event_pk.value());
-        }
+        const auto version = m_ctx->schema_version.to_string();
+        const auto reject =
+            [&](bool set, std::string_view field, std::string_view since) {
+                if(!set) return;
+                throw std::runtime_error("pmc_event." + std::string(field) +
+                                         " is not stored by schema " + version +
+                                         ". It is stored by " + std::string(since) + ".");
+            };
+        reject(data.sample_id.has_value(), "sample_id", "3.0.3");
+        reject(data.xcc.has_value(), "xcc", "3.0.3");
+        reject(data.shader_engine.has_value(), "shader_engine", "3.0.3");
+        reject(data.instance.has_value(), "instance", "3.0.3");
     }
 
-private:
-    std::shared_ptr<writer_context> m_ctx;
-    std::shared_ptr<
-        data_storage::schema_v3::insert_statements<data_storage::sqlite_backend>>
-                                                                           m_stmts;
-    std::shared_ptr<common_insert_operations<data_storage::schema_v3_tag>> m_common_ops;
+    void write_pmc_event(const writer_types::pmc_event_data_t& data,
+                         const pmc_event_insert&               row)
+    {
+        m_stmts->pmc_event_statement()(
+            row.pk, row.event_pk, row.pmc_pk, data.value, data.extdata);
+    }
 };
 
 }  // namespace profiler_hub
