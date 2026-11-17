@@ -1330,6 +1330,63 @@ def test_owned_cleanup_does_not_follow_runner_output_symlink(tmp_path):
     assert (outside / 'keep').read_text() == 'keep'
 
 
+@pytest.mark.parametrize('truncated_commands', [False, True])
+def test_diagnostics_prioritizes_failure_evidence_under_file_cap(
+    tmp_path, truncated_commands
+):
+    import sys
+    import tarfile
+
+    module, ctx = fixture_preparation(tmp_path)
+    ctx.start('rdna')
+    bulk_logs = [ctx.logs / f'aaa-earlier-{index:03}.log' for index in range(128)]
+    for path in bulk_logs:
+        path.write_text('unrelated successful command output\n')
+    with pytest.raises(ValueError, match='verification failed'):
+        ctx.run(
+            'verification',
+            [
+                sys.executable,
+                '-c',
+                'print("specific verification failure"); raise SystemExit(7)',
+            ],
+        )
+    ctx.finish(False)
+    commands = ctx.root / 'commands.jsonl'
+    failed_log = Path(json.loads(commands.read_text().splitlines()[-1])['log'])
+    if truncated_commands:
+        with commands.open('a') as stream:
+            stream.write('{"interrupted_record":')
+    phase = ctx.root / 'phase-rdna.json'
+    report = ctx.root / 'reports/gluon-verification.json'
+    report.write_text(json.dumps({'verified': False}))
+    critical = {commands, failed_log, phase, report}
+    expected = {path.relative_to(ctx.root).as_posix() for path in critical}
+    with mock.patch.object(ctx, 'sources'):
+        ctx.diagnostics()
+    with tarfile.open(ctx.root / 'preparation-diagnostics.tar.gz') as archive:
+
+        def read_member(name):
+            stream = archive.extractfile(name)
+            assert stream is not None
+            return stream.read()
+
+        assert expected <= set(archive.getnames())
+        assert b'specific verification failure' in read_member(
+            failed_log.relative_to(ctx.root).as_posix()
+        )
+        assert json.loads(read_member('phase-rdna.json'))['success'] is False
+        assert json.loads(read_member('reports/gluon-verification.json')) == {
+            'verified': False
+        }
+        inventory = json.loads(read_member('diagnostic-inventory.json'))
+        assert inventory['file_limit'] == len(inventory['entries']) == 128
+        assert inventory['omitted_files'] == len(bulk_logs) + len(critical) - 128
+        assert {entry['path'] for entry in inventory['entries']} == set(
+            archive.getnames()
+        ) - {'diagnostic-inventory.json'}
+
+
 def test_diagnostics_size_limits_and_symlink_exclusion(tmp_path):
     import tarfile
 

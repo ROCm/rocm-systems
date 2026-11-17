@@ -1239,7 +1239,40 @@ class Preparation:
                                 variant / name
                                 for name in ('artifacts.json', 'selection.yaml')
                             )
-        files = sorted({path for path in files if self.diagnostic_file(path)})
+        files = {path for path in files if self.diagnostic_file(path)}
+        commands = self.root / 'commands.jsonl'
+        failed_logs = set()
+        if commands in files:
+            with commands.open(errors='replace') as stream:
+                for line in stream:
+                    try:
+                        command = json.loads(line)
+                    except json.JSONDecodeError:
+                        # An interrupted write must not prevent diagnostic collection.
+                        continue
+                    if (
+                        isinstance(command, dict)
+                        and isinstance(command.get('log'), str)
+                        and (
+                            command.get('exit_code') != 0 or command.get('interrupted')
+                        )
+                    ):
+                        failed_logs.add(Path(command['log']))
+
+        def priority(path):
+            if path == commands or (
+                path.parent == self.root and path.name.startswith('phase-')
+            ):
+                return 0
+            if path in failed_logs:
+                return 1
+            if path.parent == self.root / 'reports':
+                return 2
+            return 3
+
+        # Reserve space for failure evidence before bulk logs/build artifacts.
+        # The same cap still applies if prioritized evidence itself exceeds it.
+        files = sorted(files, key=lambda path: (priority(path), path))
         summary = []
         # Exclusive creation refuses existing files, dangling links and links to
         # external files without ever truncating their targets.
