@@ -361,7 +361,7 @@ auto  att_device_context     = rocprofiler_context_id_t{0};
 // Dispatch thread trace on its own context when kernel replay is also on, so a replay pass can
 // stop it without stopping the rest of the tracing context. Zero unless that mode is configured.
 auto att_replay_context = rocprofiler_context_id_t{0};
-auto  att_device_trace_id =
+auto att_device_trace_id =
     std::atomic<rocprofiler_dispatch_id_t>{std::numeric_limits<uint64_t>::max()};
 std::mutex att_shader_data;
 
@@ -3756,8 +3756,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         // contexts; apply_core_capability_gates turns replay off for those.
         const bool att_replay_pass = kernel_replay_att_pass_enabled() && !att_no_intercept &&
                                      !handle_consecutive_kernels && !handle_marker_trace;
-        if(att_replay_pass)
-            create_pause_resume_ctx(att_replay_context, "ATT kernel replay");
+        if(att_replay_pass) create_pause_resume_ctx(att_replay_context, "ATT kernel replay");
 
         for(auto& [id, agent] : tool_metadata->agents_map)
         {
