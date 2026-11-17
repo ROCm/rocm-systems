@@ -215,6 +215,14 @@ TEST(rocrtstFunc, MemoryAllocateContiguousTest) {
   RunCustomTestEpilog(&ma);
 }
 
+TEST(rocrtstFunc, MemoryFill_Long_Dependency_Copy) {
+  MemoryFill mf;
+
+  if (!RunCustomTestProlog(&mf)) return;
+  mf.LongDependencyCopyTest();
+  RunCustomTestEpilog(&mf);
+}
+
 TEST(rocrtstFunc, MemoryFillTest) {
   MemoryFill mf;
   if (!RunCustomTestProlog(&mf)) return;
