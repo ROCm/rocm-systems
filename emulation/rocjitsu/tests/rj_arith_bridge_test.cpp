@@ -14832,4 +14832,109 @@ TEST(ArithBridgeTest, ShortScaledSpecialScaleRejectsStrictWithoutOperandReads) {
 }
 
 } // namespace
+
+// SDWA output preserves the inherited rounding boundary, masks and overlapping storage.
+TEST(ArithBridgeTest, MantissaSdwaOutput) {
+  const uint32_t inputs[] = {0x00ffffffU, 1,           0x3fc00000U, 0x80000000U,
+                             0x7f812345U, 0x7f800000U, 0xff800000U, 0x807fffffU};
+  const uint32_t golden[] = {0x3effffffU, 0,           0x3ec00000U, 0,
+                             0x7fc12345U, 0x7f800000U, 0xff800000U, 0};
+  for (auto semantics : {ArithmeticSemantics::Compatibility, ArithmeticSemantics::Loose}) {
+    for (uint32_t rounding : {0U, 1U, 3U}) {
+      for (bool clamped : {false, true}) {
+        for (int aliasing_offset : {0, 2}) {
+          ArithmeticPolicy policy{};
+          policy.semantics = semantics;
+          BridgeFixture fixture(ROCJITSU_CODE_ARCH_CDNA4, 64, policy);
+          ASSERT_NE(fixture.wave, nullptr);
+          fixture.wave->set_mode_raw(rounding | Wavefront::DX10_CLAMP_BIT);
+          fixture.wave->set_trapsts(0x100U);
+          const uint64_t exec_mask = 0x80000003000000ffULL;
+          fixture.wave->set_exec(exec_mask);
+          for (int lane = 0; lane < 64; ++lane) {
+            fixture.cu->write_vgpr(fixture.base() + aliasing_offset, lane, 0xdeadbeefU);
+            fixture.cu->write_vgpr(fixture.base(), lane, inputs[lane % 8]);
+          }
+          const auto first = cdna4::build_vop1(
+              cdna4::kVFrexpMantF32Vop1, {.src0 = SRC_SDWA, .vdst = uint8_t(aliasing_offset)});
+          const std::array<uint32_t, 2> words{first[0], (6U << 8) | (6U << 16) | (3U << 14) |
+                                                            (clamped ? 1U << 13 : 0U)};
+          auto instruction = fixture.decoder->decode_window(words);
+          ASSERT_TRUE(instruction.succeeded());
+          ASSERT_TRUE(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
+                          .succeeded());
+          EXPECT_EQ(fixture.wave->trapsts(), 0x100U);
+          for (int lane = 0; lane < 64; ++lane) {
+            const int index = lane % 8;
+            uint32_t expected = golden[index];
+            if (clamped) {
+              expected = (expected & 0x80000000U) || (expected & 0x7fffffffU) > 0x7f800000U ? 0
+                         : expected > 0x3f800000U ? 0x3f800000U
+                                                  : expected;
+            }
+            if (!(exec_mask >> lane & 1)) {
+              expected = aliasing_offset ? 0xdeadbeefU : inputs[index];
+            }
+            EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + aliasing_offset, lane), expected)
+                << rounding << ':' << clamped << ':' << aliasing_offset << ':' << lane;
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(ArithBridgeTest, FractSdwaOutput) {
+  const uint32_t inputs[] = {0x00ffffffU, 1,           0x3fc00000U, 0x80000000U,
+                             0x7f812345U, 0x7f800000U, 0xff800000U, 0x807fffffU};
+  const uint32_t golden[] = {0x00800000U, 0,           0x3e800000U, 0,
+                             0x7fc12345U, 0xffc00000U, 0xffc00000U, 0};
+  for (auto semantics : {ArithmeticSemantics::Compatibility, ArithmeticSemantics::Loose}) {
+    for (uint32_t rounding : {0U, 1U, 3U}) {
+      for (bool clamped : {false, true}) {
+        for (int aliasing_offset : {0, 2}) {
+          ArithmeticPolicy policy{};
+          policy.semantics = semantics;
+          BridgeFixture fixture(ROCJITSU_CODE_ARCH_CDNA4, 64, policy);
+          ASSERT_NE(fixture.wave, nullptr);
+          fixture.wave->set_mode_raw(rounding | Wavefront::DX10_CLAMP_BIT);
+          fixture.wave->set_trapsts(0x100U);
+          const uint64_t exec_mask = 0x80000003000000ffULL;
+          fixture.wave->set_exec(exec_mask);
+          for (int lane = 0; lane < 64; ++lane) {
+            fixture.cu->write_vgpr(fixture.base() + aliasing_offset, lane, 0xdeadbeefU);
+            fixture.cu->write_vgpr(fixture.base(), lane, inputs[lane % 8]);
+          }
+          const auto first = cdna4::build_vop1(
+              cdna4::kVFractF32Vop1, {.src0 = SRC_SDWA, .vdst = uint8_t(aliasing_offset)});
+          const std::array<uint32_t, 2> words{first[0], (6U << 8) | (6U << 16) | (3U << 14) |
+                                                            (clamped ? 1U << 13 : 0U)};
+          auto instruction = fixture.decoder->decode_window(words);
+          ASSERT_TRUE(instruction.succeeded());
+          ASSERT_TRUE(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
+                          .succeeded());
+          EXPECT_EQ(fixture.wave->trapsts(), 0x100U);
+          for (int lane = 0; lane < 64; ++lane) {
+            const int index = lane % 8;
+            uint32_t expected = golden[index];
+            if (index == 0 && rounding == 3) {
+              expected = 0; // /2 rounds down to tiny, then flushes under toward-zero.
+            }
+            if (clamped) {
+              expected = (expected & 0x80000000U) || (expected & 0x7fffffffU) > 0x7f800000U ? 0
+                         : expected > 0x3f800000U ? 0x3f800000U
+                                                  : expected;
+            }
+            if (!(exec_mask >> lane & 1)) {
+              expected = aliasing_offset ? 0xdeadbeefU : inputs[index];
+            }
+            EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + aliasing_offset, lane), expected)
+                << rounding << ':' << clamped << ':' << aliasing_offset << ':' << lane;
+          }
+        }
+      }
+    }
+  }
+}
+
 } // namespace rocjitsu::amdgpu

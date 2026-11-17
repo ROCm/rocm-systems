@@ -18269,16 +18269,49 @@ class CodeGenerator:
                 if self.isa_spec.arch_name in (
                     'cdna1',
                     'cdna2',
+                    'cdna3',
+                    'cdna4',
+                    'cdna5',
                     'rdna1',
+                    'rdna2',
                     'rdna3_5',
                 ) and any(
-                    i.name in {'V_PK_FMA_F16', 'V_PK_FMAC_F16'} for i in all_insts
+                    i.name
+                    in {
+                        'V_CEIL_F32',
+                        'V_FLOOR_F32',
+                        'V_FRACT_F32',
+                        'V_FRACT_F64',
+                        'V_FREXP_EXP_I32_F32',
+                        'V_FREXP_EXP_I32_F64',
+                        'V_FREXP_MANT_F32',
+                        'V_FREXP_MANT_F64',
+                        'V_RNDNE_F32',
+                        'V_TRUNC_F32',
+                    }
+                    for i in all_insts
                 ):
                     cpp_includes.append(
                         ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h', False)
                     )
-                if self.isa_spec.arch_name in ('cdna1', 'cdna2') and any(
-                    i.name in {'V_MAD_MIX_F32', 'V_MAD_MIXLO_F16', 'V_MAD_MIXHI_F16'}
+                if self.isa_spec.arch_name in (
+                    'cdna1',
+                    'cdna2',
+                    'rdna1',
+                    'rdna2',
+                    'rdna3_5',
+                ) and any(
+                    i.name
+                    in {
+                        'V_PK_FMA_F16',
+                        'V_PK_FMAC_F16',
+                        'V_MAD_MIX_F32',
+                        'V_MAD_MIXLO_F16',
+                        'V_MAD_MIXHI_F16',
+                        'V_FMA_MIX_F32',
+                        'V_FMA_MIXLO_F16',
+                        'V_FMA_MIXHI_F16',
+                    }
                     for i in all_insts
                 ):
                     cpp_includes.append(

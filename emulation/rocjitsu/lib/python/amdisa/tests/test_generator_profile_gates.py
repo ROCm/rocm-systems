@@ -3906,7 +3906,7 @@ def test_generated_vop3_f16_alu_paths_split_shared_generic_from_true16(
         gfx1250_generated_root / 'vop3_exec_ternary.cpp'
     ).read_text()
 
-    unary = _shared_execute_body(execute_shared, 'v_ceil_f16_vop3', 'v_ceil_f32_vop1')
+    unary = _shared_execute_body(execute_shared, 'v_ceil_f16_vop3')
     assert 'ROCJITSU_TRY_SIMD_VOP3_UNARY_FP16' in unary
     assert 'ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16' not in unary
     assert 'read_vop3_true16_src' not in unary

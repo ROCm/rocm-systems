@@ -179,6 +179,7 @@ set(rj_arith_x86_64_v4_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/dot/x86_64/fp8_dot_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/dot/x86_64/half_dot_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/fp64_directed_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/frexp_exp_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/selection_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/div_fixup_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/div_fmas_x86_64_v4.cpp
@@ -218,6 +219,8 @@ set(rj_arith_x86_64_v4_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/rcp_iflag_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/root_exact_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/round_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/fract_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/frexp_mant_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/trans_f64_exact_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/trig_preop_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/dpp_x86_64_v4.cpp
