@@ -2240,9 +2240,10 @@ ncclResult_t ncclProfilerPostPlanWork(struct ncclComm* comm, struct ncclKernelPl
       struct ncclTaskP2p* t1 = (pid != 0 && p2pt->next && p2pt->next->p2pPairId == pid) ? p2pt->next : nullptr;
       uint64_t m0 = (t0->eActivationMask & ncclProfileKernelCh) ? t0->channelMask : 0;
       uint64_t m1 = (t1 && (t1->eActivationMask & ncclProfileKernelCh)) ? t1->channelMask : 0;
-      for (int c = 0; c < MAXCHANNELS; c++) {
+      // channelMask holds 64 channels but MAXCHANNELS is larger, and a shift by 64 or more is undefined.
+      for (uint64_t pending = m0 | m1; pending != 0;) {
+        int c = popFirstOneBit(&pending);
         uint64_t bit = 1ull << c;
-        if (!((m0 | m1) & bit)) continue;
         uint64_t wc = ++comm->profiler.workCounter[c];
         if (m0 & bit) profilerEnqueueOp(thr, comm, c, wc, t0->eActivationMask, t0->eventHandle, /*sym=*/false);
         if (m1 & bit) profilerEnqueueOp(thr, comm, c, wc, t1->eActivationMask, t1->eventHandle, /*sym=*/false);
