@@ -2271,9 +2271,12 @@ hipError_t validateMemoryObject(const void* ptr, bool isDeviceMemory, amd::Coord
   amd::Coord3D start(rect.start_, 0, 0);
   amd::Coord3D size(rect.end_, 1, 1);
   if (memory && memory->parent() && (memory->getMemFlags() & CL_MEM_VA_RANGE_AMD)) {
-    // VMM mapping: the region may continue into the next mappings of the reserved range
-    size_t region_end = offset + rect.start_ + rect.end_;
-    if (getMappedSize(memory, region_end) < region_end) {
+    // VMM mapping: the region may continue into the next mappings of the reserved range. Keep
+    // the checks of validateRegion: a region that is not empty and doesn't wrap around.
+    const size_t region_start = offset + rect.start_;
+    const size_t region_end = region_start + rect.end_;
+    if ((rect.end_ == 0) || (region_start < offset) || (region_end < region_start) ||
+        (getMappedSize(memory, region_end) < region_end)) {
       return hipErrorInvalidValue;
     }
   } else if (memory && !memory->validateRegion(start, size)) {
@@ -3729,7 +3732,8 @@ hipError_t ihipGraphMemsetParams_validate(const hipMemsetParams* pNodeParams) {
       return hipErrorUnknown;
     }
 
-    if ((pNodeParams->pitch * pNodeParams->height) > memObj->getSize()) {
+    const size_t sizeBytes = pNodeParams->pitch * pNodeParams->height;
+    if (sizeBytes > getMappedSize(memObj, sizeBytes)) {
       return hipErrorInvalidValue;
     }
   }
@@ -3908,8 +3912,16 @@ hipError_t ihipMemset3D_validate(hipPitchedPtr pitchedDevPtr, amd::Memory* memor
   if (memory == nullptr) {
     return hipErrorInvalidValue;
   }
+  size_t required = sizeBytes;
+  const size_t rows = extent.height * extent.depth;
+  if ((memory->parent() != nullptr) && (memory->getMemFlags() & CL_MEM_VA_RANGE_AMD) &&
+      (rows != 0)) {
+    // VMM mapping: the rows may continue into the next mappings of the reserved range, so check
+    // the pitched span, which must not reach unmapped memory
+    required = std::max(sizeBytes, (rows - 1) * pitchedDevPtr.pitch + sizeBytes / rows);
+  }
   // Return error if sizeBytes passed to memcpy is more than the actual size allocated
-  if (sizeBytes > (getMappedSize(memory, offset + sizeBytes) - offset)) {
+  if (required > (getMappedSize(memory, offset + required) - offset)) {
     return hipErrorInvalidValue;
   }
   if (pitchedDevPtr.pitch == memory->getUserData().pitch_) {

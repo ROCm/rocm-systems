@@ -602,8 +602,9 @@ HIP_TEST_CASE(Unit_hipMemSetAccess_SegmentsAccess) {
  * set access on the whole range. Take a pitched region that starts in the
  * first mapping and ends in the last one, so that rows cross both mapping
  * boundaries. Copy it with hipMemcpy2DAsync (H2D, D2H, D2D), hipMemcpy3DAsync
- * and fill it with hipMemset2DAsync, and validate the data in the whole range.
- * A region that runs past the last mapping is still rejected.
+ * and fill it with hipMemset2DAsync, also captured in a graph, and validate the
+ * data in the whole range. A region that runs past the last mapping is still
+ * rejected.
  * ------------------------
  *    - unit/virtualMemoryManagement/hipMemSetGetAccess.cc
  * Test requirements
@@ -737,6 +738,29 @@ HIP_TEST_CASE(Unit_hipMemSetAccess_SegmentsMemcpy2D) {
     REQUIRE(result == expected_set);
   }
 
+  SECTION("hipMemset2DAsync captured in a graph") {
+    constexpr int value = 0xa5;
+    hipGraph_t graph = nullptr;
+    hipGraphExec_t graph_exec = nullptr;
+    HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+    const hipError_t memset_status = hipMemset2DAsync(region, pitch, value, width, height, stream);
+    // End the capture before checking, so a failure doesn't leave the stream capturing
+    const hipError_t capture_status = hipStreamEndCapture(stream, &graph);
+    HIP_CHECK(memset_status);
+    HIP_CHECK(capture_status);
+    HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphLaunch(graph_exec, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipGraphExecDestroy(graph_exec));
+    HIP_CHECK(hipGraphDestroy(graph));
+    HIP_CHECK(hipMemcpy(result.data(), base, total_size, hipMemcpyDeviceToHost));
+    std::vector<char> expected_set = init;
+    for (size_t y = 0; y < height; y++) {
+      std::fill_n(expected_set.begin() + offset + y * pitch, width, static_cast<char>(value));
+    }
+    REQUIRE(result == expected_set);
+  }
+
   SECTION("Region past the last mapping is rejected") {
     const size_t past_height = (total_size - offset) / pitch + 2;
     std::vector<char> out(width * past_height);
@@ -745,6 +769,10 @@ HIP_TEST_CASE(Unit_hipMemSetAccess_SegmentsMemcpy2D) {
                     hipErrorInvalidValue);
     HIP_CHECK_ERROR(hipMemcpy2DAsync(region, pitch, out.data(), width, width, past_height,
                                      hipMemcpyHostToDevice, stream),
+                    hipErrorInvalidValue);
+    // width * past_height bytes would fit, but the pitched rows reach unmapped memory
+    REQUIRE(offset + width * past_height <= total_size);
+    HIP_CHECK_ERROR(hipMemset2DAsync(region, pitch, 0, width, past_height, stream),
                     hipErrorInvalidValue);
     // Consume the error the rejected calls leave behind
     (void)hipGetLastError();
