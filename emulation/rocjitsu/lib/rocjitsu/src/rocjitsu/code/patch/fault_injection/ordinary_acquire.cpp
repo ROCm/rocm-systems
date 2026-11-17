@@ -11,8 +11,12 @@
 #include "rocjitsu/code/patch/fault_injection/ordinary_acquire_internal.h"
 #include "rocjitsu/code/patch/instrumentor.h"
 #include "rocjitsu/code/relocation_function_table.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/legacy_memory_displacement_encoded_fields.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/target_registry.h"
 
@@ -46,7 +50,8 @@ struct DecodedAcquireLoad {
 
 template <typename Raw>
 std::optional<DecodedAcquireLoad> decode_modern_acquire_load(const Instruction &instruction,
-                                                             std::span<const uint8_t> bytes) {
+                                                             std::span<const uint8_t> bytes,
+                                                             rj_code_target_id_t) {
   if (instruction.mnemonic() != "global_load_b32" || bytes.size() != sizeof(Raw) ||
       instruction.size() != static_cast<int>(sizeof(Raw)) || !instruction.src_operand(0) ||
       !instruction.dst_operand(0) || !instruction.src_operand(0)->decoded_vgpr() ||
@@ -69,6 +74,46 @@ std::optional<DecodedAcquireLoad> decode_modern_acquire_load(const Instruction &
   return DecodedAcquireLoad{.byte_offset = offset, .raw_scope = static_cast<uint32_t>(raw.scope)};
 }
 
+template <typename Raw>
+std::optional<DecodedAcquireLoad> decode_cdna34_acquire_load(const Instruction &instruction,
+                                                             std::span<const uint8_t> bytes,
+                                                             rj_code_target_id_t target) {
+  if (instruction.mnemonic() != "global_load_dword" || bytes.size() != sizeof(Raw) ||
+      instruction.size() != static_cast<int>(sizeof(Raw)))
+    return std::nullopt;
+  Raw raw = {};
+  std::memcpy(&raw, bytes.data(), sizeof(raw));
+  if (raw.encoding != 0x37u || raw.seg != 2u || raw.sc1 == 0)
+    return std::nullopt;
+  std::array<uint32_t, 2> words = {};
+  std::memcpy(words.data(), bytes.data(), sizeof(words));
+  const std::optional<int32_t> offset = amdgpu::read_legacy_memory_byte_offset(target, words);
+  if (!offset)
+    return std::nullopt;
+  // Native SC1 admits Device/System load scope. These legacy controls are
+  // not a literal GFX12 scope field; keep the public raw_scope absent.
+  return DecodedAcquireLoad{.byte_offset = *offset, .raw_scope = std::nullopt};
+}
+
+bool modern_acquire_wait(const Instruction &instruction, std::span<const uint8_t>) {
+  return instruction.mnemonic().starts_with("s_wait");
+}
+
+template <IsaFamily Arch>
+bool legacy_acquire_wait(const Instruction &instruction, std::span<const uint8_t> bytes) {
+  if (instruction.mnemonic() != "s_waitcnt" || bytes.size() != sizeof(uint32_t) ||
+      instruction.size() != static_cast<int>(sizeof(uint32_t)))
+    return false;
+  uint32_t word = 0;
+  std::memcpy(&word, bytes.data(), sizeof(word));
+  return amdgpu::decode_legacy_waitcnt(word & 0xffffu, Arch).vmcnt == 0;
+}
+
+AcquireCacheKind cdna34_acquire_cache(std::string_view form) {
+  return form == "buffer_inv" || form == "s_dcache_inv" ? AcquireCacheKind::Single
+                                                        : AcquireCacheKind::None;
+}
+
 AcquireCacheKind modern_acquire_cache(std::string_view form) {
   return form == "global_inv" || form == "s_dcache_inv" ? AcquireCacheKind::Single
                                                         : AcquireCacheKind::None;
@@ -77,23 +122,63 @@ AcquireCacheKind modern_acquire_cache(std::string_view form) {
 struct AcquireProfile {
   IsaFamily arch;
   OrdinaryAcquireProfile id;
-  std::optional<DecodedAcquireLoad> (*decode_load)(const Instruction &, std::span<const uint8_t>);
+  std::optional<DecodedAcquireLoad> (*decode_load)(const Instruction &, std::span<const uint8_t>,
+                                                   rj_code_target_id_t);
+  bool (*qualifying_wait)(const Instruction &, std::span<const uint8_t>);
   AcquireCacheKind (*classify_cache)(std::string_view);
   std::string_view first_cache;
 };
 
-constexpr std::array<AcquireProfile, 2> kAcquireProfiles = {{
+constexpr std::array<AcquireProfile, 4> kAcquireProfiles = {{
     {.arch = IsaFamily::Cdna5,
      .id = OrdinaryAcquireProfile::Cdna5GlobalB32,
      .decode_load = decode_modern_acquire_load<cdna5::VglobalMachineInst>,
+     .qualifying_wait = modern_acquire_wait,
      .classify_cache = modern_acquire_cache,
      .first_cache = "global_inv"},
     {.arch = IsaFamily::Rdna4,
      .id = OrdinaryAcquireProfile::Rdna4GlobalB32,
      .decode_load = decode_modern_acquire_load<rdna4::VglobalMachineInst>,
+     .qualifying_wait = modern_acquire_wait,
      .classify_cache = modern_acquire_cache,
      .first_cache = "global_inv"},
+    {.arch = IsaFamily::Cdna4,
+     .id = OrdinaryAcquireProfile::Cdna34GlobalDword,
+     .decode_load = decode_cdna34_acquire_load<cdna4::FlatGlblMachineInst>,
+     .qualifying_wait = legacy_acquire_wait<IsaFamily::Cdna4>,
+     .classify_cache = cdna34_acquire_cache,
+     .first_cache = "buffer_inv"},
+    {.arch = IsaFamily::Cdna3,
+     .id = OrdinaryAcquireProfile::Cdna34GlobalDword,
+     .decode_load = decode_cdna34_acquire_load<cdna3::FlatGlblMachineInst>,
+     .qualifying_wait = legacy_acquire_wait<IsaFamily::Cdna3>,
+     .classify_cache = cdna34_acquire_cache,
+     .first_cache = "buffer_inv"},
 }};
+
+// Native BUFFER_INV without SC1 is either a NOP or conditional on TG_SPLIT,
+// which this implicit-Agent acquire profile does not establish.
+template <typename Raw>
+bool qualifying_cdna34_cache(const Instruction &instruction, std::span<const uint8_t> bytes) {
+  if (instruction.mnemonic() != "buffer_inv" || bytes.size() != sizeof(Raw) ||
+      instruction.size() != static_cast<int>(sizeof(Raw)))
+    return false;
+  Raw raw = {};
+  std::memcpy(&raw, bytes.data(), sizeof(raw));
+  return raw.encoding == 0x38u && raw.sc1 != 0;
+}
+
+bool qualifying_acquire_cache(const AcquireProfile &profile, const Instruction &instruction,
+                              std::span<const uint8_t> bytes) {
+  switch (profile.arch) {
+  case IsaFamily::Cdna3:
+    return qualifying_cdna34_cache<cdna3::MubufMachineInst>(instruction, bytes);
+  case IsaFamily::Cdna4:
+    return qualifying_cdna34_cache<cdna4::MubufMachineInst>(instruction, bytes);
+  default:
+    return true;
+  }
+}
 
 struct AcquireContainer {
   uint64_t begin = 0;
@@ -185,6 +270,7 @@ struct AcquirePathProof {
   std::optional<uint64_t> loop_header;
   std::vector<OrdinaryAcquireMember> waits;
   std::vector<uint64_t> proof_offsets;
+  bool saw_required_wait = false;
 };
 
 OrdinaryAcquireMember member_of(const Instruction &instruction) {
@@ -196,7 +282,7 @@ OrdinaryAcquireMember member_of(const Instruction &instruction) {
 bool scan_bookkeeping(const BasicBlock &block, uint64_t begin, uint64_t end,
                       const AcquireContainer &container,
                       const std::map<uint64_t, AcquirePoint> &points, AcquirePathProof &proof,
-                      bool collect_waits = true) {
+                      const AcquireProfile &profile, bool collect_waits = true) {
   uint64_t expected = begin;
   for (const Instruction &instruction : block.instructions()) {
     const uint64_t offset = instruction.src_loc();
@@ -210,8 +296,10 @@ bool scan_bookkeeping(const BasicBlock &block, uint64_t begin, uint64_t end,
         static_cast<uint64_t>(instruction.size()) > end - offset)
       return false;
     proof.proof_offsets.push_back(offset);
-    if (collect_waits && instruction.mnemonic().starts_with("s_wait"))
+    if (collect_waits && instruction.mnemonic().starts_with("s_wait")) {
       proof.waits.push_back(member_of(instruction));
+      proof.saw_required_wait |= profile.qualifying_wait(instruction, point->second.bytes);
+    }
     expected += static_cast<uint64_t>(instruction.size());
   }
   return expected == end;
@@ -219,7 +307,8 @@ bool scan_bookkeeping(const BasicBlock &block, uint64_t begin, uint64_t end,
 
 std::optional<AcquirePathProof> prove_acquire_path(const AcquirePoint &load,
                                                    const AcquirePoint &cache,
-                                                   const std::map<uint64_t, AcquirePoint> &points) {
+                                                   const std::map<uint64_t, AcquirePoint> &points,
+                                                   const AcquireProfile &profile) {
   constexpr uint64_t kMaximumBookkeepingBytes = 64;
   constexpr uint64_t kMaximumLoopPrefixBytes = 128;
   if (!compatible_endpoints(load, cache) || !load.block || !cache.block)
@@ -234,17 +323,18 @@ std::optional<AcquirePathProof> prove_acquire_path(const AcquirePoint &load,
     return std::nullopt;
   AcquirePathProof proof;
   if (&source == &boundary) {
-    if (!scan_bookkeeping(source, load_end, cache_begin, *load.container, points, proof) ||
-        proof.waits.empty())
+    if (!scan_bookkeeping(source, load_end, cache_begin, *load.container, points, proof, profile) ||
+        !proof.saw_required_wait)
       return std::nullopt;
     return proof;
   }
   if (!source.has_terminator() && source.end_offset() == boundary.start_offset() &&
       source.successors().size() == 1 && source.successors().front() == &boundary) {
-    if (!scan_bookkeeping(source, load_end, source.end_offset(), *load.container, points, proof) ||
+    if (!scan_bookkeeping(source, load_end, source.end_offset(), *load.container, points, proof,
+                          profile) ||
         !scan_bookkeeping(boundary, boundary.start_offset(), cache_begin, *load.container, points,
-                          proof) ||
-        proof.waits.empty())
+                          proof, profile) ||
+        !proof.saw_required_wait)
       return std::nullopt;
     proof.kind = OrdinaryAcquirePath::ExactFallthroughJoin;
     return proof;
@@ -269,11 +359,12 @@ std::optional<AcquirePathProof> prove_acquire_path(const AcquirePoint &load,
       terminator->src_loc() < load_end ||
       terminator->src_loc() + static_cast<uint64_t>(terminator->size()) != source.end_offset() ||
       !scan_bookkeeping(source, source.start_offset(), load_begin, *load.container, points, proof,
-                        false) ||
-      !scan_bookkeeping(source, load_end, terminator->src_loc(), *load.container, points, proof) ||
+                        profile, false) ||
+      !scan_bookkeeping(source, load_end, terminator->src_loc(), *load.container, points, proof,
+                        profile) ||
       !scan_bookkeeping(boundary, boundary.start_offset(), cache_begin, *load.container, points,
-                        proof) ||
-      proof.waits.empty())
+                        proof, profile) ||
+      !proof.saw_required_wait)
     return std::nullopt;
   proof.kind = OrdinaryAcquirePath::ExactSelfLoopExit;
   proof.loop_header = source.start_offset();
@@ -283,7 +374,12 @@ std::optional<AcquirePathProof> prove_acquire_path(const AcquirePoint &load,
 
 bool valid_wave(IsaFamily arch, const KernelDescriptorInfo &kernel) {
   const uint32_t wave = kernel_wavefront_size(arch, kernel.descriptor);
-  return arch == IsaFamily::Cdna5 ? wave == 32 : wave == 32 || wave == 64;
+  if (arch == IsaFamily::Cdna5)
+    return wave == 32;
+  if (arch == IsaFamily::Cdna3 || arch == IsaFamily::Cdna4)
+    return wave == 64 && (kernel.descriptor.kernel_code_properties &
+                          amdhsa::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32) == 0;
+  return wave == 32 || wave == 64;
 }
 
 } // namespace
@@ -305,10 +401,11 @@ FailureOr<OrdinaryAcquireInventory> discover_ordinary_acquires(const FaultMutati
   const IsaTargetDescriptor *target_facts = default_isa_target_registry().find(target);
   if (!target_facts ||
       (target != ROCJITSU_CODE_TARGET_GFX1250 && target != ROCJITSU_CODE_TARGET_GFX1251 &&
-       target != ROCJITSU_CODE_TARGET_GFX1200 && target != ROCJITSU_CODE_TARGET_GFX1201))
+       target != ROCJITSU_CODE_TARGET_GFX1200 && target != ROCJITSU_CODE_TARGET_GFX1201 &&
+       target != ROCJITSU_CODE_TARGET_GFX950 && target != ROCJITSU_CODE_TARGET_GFX942))
     return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedTarget,
                                  "target has no ordinary acquire query profile");
-  const std::array<AcquireProfile, 2>::const_iterator profile =
+  const std::array<AcquireProfile, 4>::const_iterator profile =
       std::ranges::find(kAcquireProfiles, target_facts->family, &AcquireProfile::arch);
   if (profile == kAcquireProfiles.end())
     return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedTarget,
@@ -446,7 +543,7 @@ FailureOr<OrdinaryAcquireInventory> discover_ordinary_acquires(const FaultMutati
     if (!load.exact || !load.container)
       continue;
     const std::optional<DecodedAcquireLoad> decoded =
-        profile->decode_load(*load.instruction, load.bytes);
+        profile->decode_load(*load.instruction, load.bytes, target);
     if (!decoded)
       continue;
     const uint64_t load_end = item.first + static_cast<uint64_t>(load.instruction->size());
@@ -457,7 +554,8 @@ FailureOr<OrdinaryAcquireInventory> discover_ordinary_acquires(const FaultMutati
       if (profile->classify_cache(cache.instruction->mnemonic()) != AcquireCacheKind::Single ||
           !compatible_endpoints(load, cache))
         continue;
-      const std::optional<AcquirePathProof> proof = prove_acquire_path(load, cache, points);
+      const std::optional<AcquirePathProof> proof =
+          prove_acquire_path(load, cache, points, *profile);
       if (proof)
         single_matches.push_back({.caches = {&cache}, .proof = *proof});
     }
@@ -466,6 +564,8 @@ FailureOr<OrdinaryAcquireInventory> discover_ordinary_acquires(const FaultMutati
       association = std::move(single_matches.front());
     if (!association ||
         association->caches.front()->instruction->mnemonic() != profile->first_cache ||
+        !qualifying_acquire_cache(*profile, *association->caches.front()->instruction,
+                                  association->caches.front()->bytes) ||
         std::ranges::any_of(association->caches, [&](const AcquirePoint *cache) {
           return claimed_caches.contains(cache->instruction->src_loc());
         }))

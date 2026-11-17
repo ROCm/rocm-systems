@@ -582,7 +582,7 @@ TEST(FaultOrdinaryAcquireIdentity, SnapshotForeignContextAndExpiredMetadataAreIn
 TEST(FaultOrdinaryAcquireIdentity,
      TargetsWithoutAnAcquireProfileAndDefaultInventoryFailExplicitly) {
   std::vector<uint8_t> image = test::make_amdgpu_kernel_elf(
-      {build_s_endpgm(IsaFamily::Cdna4).value()}, 0, 3, EF_AMDGPU_MACH_AMDGCN_GFX950);
+      {build_s_endpgm(IsaFamily::Cdna2).value()}, 0, 3, EF_AMDGPU_MACH_AMDGCN_GFX90A);
   image[EI_DATA] = ELFDATA2LSB;
   image[EI_ABIVERSION] = ELFABIVERSION_AMDGPU_HSA_V5;
   const FaultMutationContext context(image);
