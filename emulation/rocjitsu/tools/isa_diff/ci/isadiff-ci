@@ -1,0 +1,66 @@
+#!/bin/bash
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+# Host side of isadiff-ci: builds the image and starts containers; all work happens inside.
+#   isadiff-ci build REV            image isadiff-ci:<sha12> (+ :latest) from tool commit REV
+#   isadiff-ci init                 clone llvm-project into the isadiff-llvm volume (once)
+#   isadiff-ci scan [--tier quick|deep] [--pr N]
+#   isadiff-ci post N [--yes]       print / post the latest run's PR comment
+#   isadiff-ci reply N ID [--yes] < body.md
+#   isadiff-ci gh ARGS...           gh inside the container, with the token
+#   isadiff-ci run CMD...           any command in the container (e.g. rj_isa_diff replay)
+#   isadiff-ci shell
+set -euo pipefail
+HOME_DIR=${ISADIFF_CI_HOME:-$HOME/isadiff-ci}
+IMAGE=${ISADIFF_CI_IMAGE:-isadiff-ci:latest}
+RS_REPO=${ISADIFF_RS_REPO:-$HOME/workspace/rj-incremental-isa-diff-20261115}
+
+build() {
+  local rev=${1:?usage: isadiff-ci build REV}
+  local sha
+  sha=$(git -C "$RS_REPO" rev-parse --verify "$rev^{commit}")
+  ctx=$(mktemp -d)  # global: the EXIT trap runs after build() has returned
+  trap 'rm -rf "$ctx"' EXIT
+  # The tool source without ci/, so editing ci/ does not rebuild the tool stage.
+  git -C "$RS_REPO" -c gc.auto=0 archive --format=tar "$sha" -- emulation/rocjitsu \
+    ':(exclude)emulation/rocjitsu/tools/isa_diff/ci' runtimes/api-headers \
+    > "$ctx/rocjitsu-src.tar"
+  mkdir "$ctx/ci"
+  git -C "$RS_REPO" -c gc.auto=0 archive --format=tar "$sha" \
+    emulation/rocjitsu/tools/isa_diff/ci | tar -x -C "$ctx/ci" --strip-components=5
+  docker build --build-arg TOOL_SHA="$sha" -t "isadiff-ci:${sha:0:12}" -t isadiff-ci:latest \
+    -f "$ctx/ci/Dockerfile" "$ctx"
+}
+
+run() {  # run [docker run options] -- [container arguments]
+  local opts=()
+  while [[ $1 != -- ]]; do opts+=("$1"); shift; done
+  shift
+  [[ -f $HOME_DIR/secrets/gh_token ]] || { echo "missing $HOME_DIR/secrets/gh_token" >&2; exit 1; }
+  [[ -f $HOME_DIR/config.json ]] || { echo "missing $HOME_DIR/config.json" >&2; exit 1; }
+  mkdir -p "$HOME_DIR/results" "$HOME_DIR/corpus" "$HOME_DIR/logs"
+  docker run --rm --init --user 1000:1000 \
+    --cpus "${ISADIFF_CI_CPUS:-16}" --memory "${ISADIFF_CI_MEMORY:-96g}" \
+    -v isadiff-llvm:/work/llvm-project -v isadiff-builds:/work/builds \
+    -v isadiff-ccache:/work/ccache \
+    -v "$HOME_DIR/results:/work/results" -v "$HOME_DIR/corpus:/work/corpus:ro" \
+    -v "$HOME_DIR/config.json:/work/config.json:ro" \
+    -v "$HOME_DIR/secrets/gh_token:/run/secrets/gh_token:ro" \
+    -v "$HOME/llvm-project:/host/llvm-project:ro" \
+    "${opts[@]}" "$IMAGE" "$@"
+}
+
+case "${1:-}" in
+  build) shift; build "$@" ;;
+  scan)
+    # One scan at a time: a quick scan skips when one is running, a deep scan waits 2 h.
+    mkdir -p "$HOME_DIR"
+    exec 9>"$HOME_DIR/scan.lock"
+    if [[ " $* " == *" deep "* ]]; then wait_opt=(-w 7200); else wait_opt=(-n); fi
+    flock "${wait_opt[@]}" 9 || { echo "$(date -Is) a scan is running; skipped"; exit 0; }
+    run --name isadiff-ci-scan -- "$@" ;;
+  reply) run -i -- "$@" ;;
+  gh|run) if [[ -t 0 ]]; then run -it -- "$@"; else run -i -- "$@"; fi ;;
+  shell) run -it -- shell ;;
+  *) run -- "$@" ;;
+esac

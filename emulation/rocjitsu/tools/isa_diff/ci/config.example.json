@@ -1,0 +1,6 @@
+{
+  "authors": ["lialan"],
+  "local_branches": ["users/lialan/selectiondag_nightly_*"],
+  "jobs": 16,
+  "post": {"mode": "manual", "auto_prs": []}
+}
