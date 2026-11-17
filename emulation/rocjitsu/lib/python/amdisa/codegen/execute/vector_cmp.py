@@ -199,6 +199,7 @@ def _cmp_condition(
 ) -> str:
     """Emit source reads and return the C++ condition expression.
 
+    Integer reads here retain the legacy 32-/64-bit forms.
     Floating relations read the raw encodings and return a
     comparison::evaluate call, which applies VOP3 ABS/NEG, MODE input
     flushing and NaN ordering; the caller declares its policy.
@@ -232,48 +233,6 @@ def _cmp_condition(
         L.append(
             f'    uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64({src[1]}, lane);'
         )
-    elif dtype in ('i16',):
-        if is_vop3:
-            L.append(
-                f'    uint32_t s0_raw = amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane);'
-            )
-            L.append(
-                f'    uint32_t s1_raw = amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane);'
-            )
-            L.append('    if (opsel & (1u << 0)) s0_raw >>= 16;')
-            L.append('    if (opsel & (1u << 1)) s1_raw >>= 16;')
-            L.append(
-                '    int16_t s0 = static_cast<int16_t>(static_cast<uint16_t>(s0_raw));'
-            )
-            L.append(
-                '    int16_t s1 = static_cast<int16_t>(static_cast<uint16_t>(s1_raw));'
-            )
-        else:
-            L.append(
-                f'    int16_t s0 = static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane) & 0xFFFF);'
-            )
-            L.append(
-                f'    int16_t s1 = static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane) & 0xFFFF);'
-            )
-    elif dtype in ('u16',):
-        if is_vop3:
-            L.append(
-                f'    uint32_t s0_raw = amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane);'
-            )
-            L.append(
-                f'    uint32_t s1_raw = amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane);'
-            )
-            L.append('    if (opsel & (1u << 0)) s0_raw >>= 16;')
-            L.append('    if (opsel & (1u << 1)) s1_raw >>= 16;')
-            L.append('    uint16_t s0 = static_cast<uint16_t>(s0_raw);')
-            L.append('    uint16_t s1 = static_cast<uint16_t>(s1_raw);')
-        else:
-            L.append(
-                f'    uint16_t s0 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane));'
-            )
-            L.append(
-                f'    uint16_t s1 = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane));'
-            )
     elif dtype in ('i32',):
         L.append(
             f'    int32_t s0 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane));'
@@ -281,13 +240,15 @@ def _cmp_condition(
         L.append(
             f'    int32_t s1 = static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane));'
         )
-    else:
+    elif dtype == 'u32':
         L.append(
             f'    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane);'
         )
         L.append(
             f'    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane);'
         )
+    else:
+        raise ValueError(f'unsupported legacy integer comparison type: {dtype}')
     cmp_map = {
         'eq': '==',
         'ne': '!=',
@@ -302,7 +263,7 @@ def _cmp_condition(
 
 
 def _uses_vop3_true16_opsel(op: str | None, dtype: str | None, is_vop3: bool) -> bool:
-    return is_vop3 and dtype in ('f16', 'i16', 'u16') and op not in ('f', 't')
+    return is_vop3 and dtype == 'f16' and op not in ('f', 't')
 
 
 def gen_vector_cmp(

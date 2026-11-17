@@ -1311,13 +1311,6 @@ _VOPC_SUFFIX: dict[str, tuple[str, str]] = {
     'f16': ('uint32_t', 'util::f16_to_f32_simd({x})'),
     'i32': ('int32_t', '{x}'),
     'u32': ('uint32_t', '{x}'),
-    # 16-bit integers read as uint32 lanes; sign-extend / mask the low 16 bits to
-    # match the scalar static_cast<int16_t>/<uint16_t>.
-    'i16': (
-        'uint32_t',
-        '((util::stdx::static_simd_cast<util::native<int32_t>>({x}) << 16) >> 16)',
-    ),
-    'u16': ('uint32_t', '({x} & 0xFFFFu)'),
     # 64-bit lanes: read directly as the native 64-bit lane type (read_simd64),
     # so the conversion is the identity. Routed through the VOPC64 glue.
     'f64': ('double', '{x}'),
@@ -1399,7 +1392,7 @@ def _build_simd_vopc() -> dict[str, tuple[str, str]]:
     for suf in ('f16', 'f32'):
         for rel in _VOPC_FLOAT_RELS:
             table[f'v_cmp_{rel}_{suf}_vopc'] = _float_vopc_entry(suf, rel)
-    for suf in ('i16', 'u16', 'i32', 'u32'):
+    for suf in ('i32', 'u32'):
         lane_t, conv = _VOPC_SUFFIX[suf]
         for rel in _VOPC_INT_RELS:
             table[f'v_cmp_{rel}_{suf}_vopc'] = (lane_t, _vopc_functor(conv, rel))
@@ -1584,12 +1577,12 @@ _VOP3_FLOAT_RELS = _VOPC_FLOAT_RELS + ['t']
 
 
 def _build_simd_vopc_vop3_int_32() -> dict[str, tuple[str, str]]:
-    """VOP3 form of the 32-bit-lane integer VOPC relations (i16/u16/i32/u32).
+    """VOP3 form of the 32-bit-lane integer VOPC relations (i32/u32).
 
     Keyed by ``_vop3``; the functor matches the VOPC one (no modifiers).
     """
     table: dict[str, tuple[str, str]] = {}
-    for suf in ('i16', 'u16', 'i32', 'u32'):
+    for suf in ('i32', 'u32'):
         lane_t, conv = _VOPC_SUFFIX[suf]
         for rel in _VOPC_INT_RELS:
             table[f'v_cmp_{rel}_{suf}_vop3'] = (lane_t, _vopc_functor(conv, rel))
@@ -1832,18 +1825,6 @@ SIMD_VOP3_TRUE16_UNSAFE = frozenset(
         'v_add_nc_u16_vop3',
         'v_add_u16_vop3',
         'v_and_b16_vop3',
-        'v_cmp_eq_i16_vop3',
-        'v_cmp_eq_u16_vop3',
-        'v_cmp_ge_i16_vop3',
-        'v_cmp_ge_u16_vop3',
-        'v_cmp_gt_i16_vop3',
-        'v_cmp_gt_u16_vop3',
-        'v_cmp_le_i16_vop3',
-        'v_cmp_le_u16_vop3',
-        'v_cmp_lt_i16_vop3',
-        'v_cmp_lt_u16_vop3',
-        'v_cmp_ne_i16_vop3',
-        'v_cmp_ne_u16_vop3',
         'v_mul_lo_u16_vop3',
         'v_not_b16_vop3',
         'v_or_b16_vop3',
@@ -2689,7 +2670,7 @@ def _simd_probe_line(
     if specvopc64 is not None:
         lane_t, cpp_op = specvopc64
         return f'  ROCJITSU_TRY_SIMD_VOPC64({lane_t}, {cpp_op});'
-    # VOP3 form of the integer/bitwise VOPC compares (i16/u16/i32/u32 and
+    # VOP3 form of the remaining integer VOPC compares (i32/u32 and
     # i64/u64). Same functor as the VOPC table (no modifiers); result-writer
     # variants return the packed mask to the generated wrapper for commit.
     specvopcv3i32 = SIMD_VOPC_VOP3_INT_32.get(template_name)
