@@ -6,6 +6,7 @@
 #include "../amdgpu_elf_test_support.h"
 #include "../amdhsa_metadata_test_util.h"
 #include "../dbi_test_util.h"
+#include "loaded_prefix_test_util.h"
 #include "replacement_test_util.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
@@ -19,7 +20,6 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/operand_types.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
@@ -135,49 +135,6 @@ void expect_pure_replacements(const AmdGpuCodeObject &source, const Instrumented
     EXPECT_EQ(site.instrumentation_offset, cave);
     EXPECT_EQ(site.instrumentation_size, 0u);
   }
-}
-
-void expect_replacement_guest(const InstrumentedCodeObjectDebug &result, uint64_t source_offset,
-                              uint32_t original_size, std::span<const uint8_t> replacement,
-                              rocjitsu::IsaFamily arch, bool has_probe) {
-  ASSERT_TRUE(result.errors.empty()) << result.errors.front();
-  ASSERT_EQ(result.sites.size(), 1u);
-  ASSERT_EQ(result.patches.size(), 1u);
-  const InstrumentedSite &site = result.sites.front();
-  EXPECT_EQ(site.kind, InstrumentationKind::ReplaceWithInst);
-  EXPECT_EQ(site.original_offset, source_offset);
-  EXPECT_EQ(site.original_size, original_size);
-  EXPECT_EQ(site.guest_size, replacement.size());
-  EXPECT_EQ(site.instrumentation_offset + site.instrumentation_size, site.guest_offset);
-  if (has_probe) {
-    EXPECT_GT(site.instrumentation_size, 0u);
-  } else {
-    EXPECT_EQ(site.instrumentation_size, 0u);
-  }
-  const InstrumentationPatch &patch = result.patches.front();
-  EXPECT_EQ(patch.is_probe_call, has_probe);
-  EXPECT_EQ(patch.trampoline_offset, site.instrumentation_offset);
-  const AmdGpuCodeObject candidate(result.elf_bytes.data(), result.elf_bytes.size());
-  ASSERT_TRUE(candidate.is_valid());
-  const Section &text = *candidate.text_sections().front();
-  ASSERT_LE(site.guest_offset + replacement.size() + 4, text.size());
-  if (!replacement.empty()) {
-    EXPECT_EQ(std::memcmp(text.data() + site.guest_offset, replacement.data(), replacement.size()),
-              0);
-  }
-  const std::optional<uint32_t> entry_branch =
-      test::expected_replacement_branch(source_offset, site.instrumentation_offset, arch);
-  ASSERT_TRUE(entry_branch);
-  uint32_t actual = 0;
-  std::memcpy(&actual, text.data() + source_offset, sizeof(actual));
-  EXPECT_EQ(actual, *entry_branch);
-  const std::optional<uint32_t> return_branch = test::expected_replacement_branch(
-      site.guest_offset + replacement.size(), source_offset + original_size, arch);
-  ASSERT_TRUE(return_branch);
-  std::memcpy(&actual, text.data() + site.guest_offset + replacement.size(), sizeof(actual));
-  EXPECT_EQ(actual, *return_branch);
-  ASSERT_TRUE(patch.return_target);
-  EXPECT_EQ(*patch.return_target, source_offset + original_size);
 }
 
 void check_wide_entry_source_attribution(bool with_entry, bool with_replacement) {
@@ -367,8 +324,7 @@ void check_wide_entry_source_attribution(bool with_entry, bool with_replacement)
       } else {
         EXPECT_EQ(std::memcmp(text.data(), original.data(), original.size()), 0);
       }
-      EXPECT_EQ(image, pristine);
-      EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
+      EXPECT_TRUE(test::source_image_matches(source, pristine));
     }
   }
 }
@@ -393,9 +349,9 @@ TEST(InstrumentorReplacement, OwnsQueuedPayloadAndReportsTrampolineRanges) {
                            {{.offset = 0,
                              .expected = instruction_bytes({original}),
                              .replacement = instruction_bytes({replacement})}});
-  expect_replacement_guest(result, 0, 4, instruction_bytes({replacement}), kArch, false);
+  test::expect_replacement_guest(result, 0, 4, instruction_bytes({replacement}), kArch, false);
   EXPECT_FALSE(result.edit_error);
-  EXPECT_EQ(image, pristine);
+  EXPECT_TRUE(test::source_image_matches(source, pristine));
   expect_no_output(instrumentor.patch());
 }
 
@@ -442,7 +398,7 @@ TEST(InstrumentorReplacement, ForkSharesFactsButNotRequestsOrPatchBudget) {
                            {{.offset = 4,
                              .expected = instruction_bytes({nop}),
                              .replacement = instruction_bytes({kNop3Word})}});
-  EXPECT_EQ(image, pristine);
+  EXPECT_TRUE(test::source_image_matches(source, pristine));
 
   const AmdGpuCodeObject mutant(first_result.elf_bytes.data(), first_result.elf_bytes.size());
   Instrumentor fresh_mutant(mutant, kArch);
@@ -548,7 +504,7 @@ TEST(InstrumentorReplacement, ForkOwnsCopiedCfgFactsAfterObservationalParentDies
                              .expected = instruction_bytes({nop}),
                              .replacement = instruction_bytes({replacement})}},
                            arch);
-  EXPECT_EQ(image, pristine);
+  EXPECT_TRUE(test::source_image_matches(source, pristine));
 }
 
 TEST(InstrumentorReplacement, DoesNotRequireRelocatableAnchorsOrReplayGuestInstructions) {
@@ -581,7 +537,7 @@ TEST(InstrumentorReplacement, DoesNotRequireRelocatableAnchorsOrReplayGuestInstr
                              .replacement = instruction_bytes({end})}});
   ASSERT_EQ(result.patches.size(), 3u);
   EXPECT_FALSE(result.patches.back().return_target);
-  EXPECT_EQ(image, pristine);
+  EXPECT_TRUE(test::source_image_matches(source, pristine));
 }
 
 TEST(InstrumentorReplacement, DoesNotApplyObservationalBranchStackGate) {
@@ -655,7 +611,7 @@ TEST(InstrumentorReplacement, LateStaleBytesFailValidationAndEmissionWithoutPart
   ASSERT_TRUE(result.edit_error);
   EXPECT_EQ(result.edit_error->code, TextEditErrorCode::StaleBytes);
   EXPECT_EQ(result.edit_error->offset, 4u);
-  EXPECT_EQ(image, pristine);
+  EXPECT_TRUE(test::source_image_matches(source, pristine));
 }
 
 TEST(InstrumentorReplacement, RejectsPhysicalOverlapBeforePublishingAnySite) {
@@ -727,7 +683,7 @@ TEST(InstrumentorReplacement, ComposesDistinctReplacementAndObservationInEitherQ
         EXPECT_EQ(result.patches[index].is_probe_call, !replacement && callable);
       }
       EXPECT_FALSE(result.edit_error);
-      EXPECT_EQ(image, pristine);
+      EXPECT_TRUE(test::source_image_matches(source, pristine));
     }
   }
 }
@@ -772,7 +728,7 @@ TEST(InstrumentorReplacement, ComposesProbeAndReplacementAtTheSameSite) {
       EXPECT_EQ(resolved.sites.front().probe_args, arguments);
       const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
       ASSERT_TRUE(result.errors.empty()) << result.errors.front();
-      expect_replacement_guest(result, 0, 4, instruction_bytes({replacement}), kArch, true);
+      test::expect_replacement_guest(result, 0, 4, instruction_bytes({replacement}), kArch, true);
       if (mode == 0)
         direct_image = result.elf_bytes;
       else
@@ -780,7 +736,7 @@ TEST(InstrumentorReplacement, ComposesProbeAndReplacementAtTheSameSite) {
         // policy, not just the argument vector exposed by validate_points().
         EXPECT_EQ(result.elf_bytes, direct_image);
       EXPECT_FALSE(result.edit_error);
-      EXPECT_EQ(image, pristine);
+      EXPECT_TRUE(test::source_image_matches(source, pristine));
     }
   }
 }
@@ -852,14 +808,13 @@ std::vector<uint8_t> make_probe_cfg_extent_elf(bool external_target) {
 }
 
 TEST(InstrumentorReplacement, ProbeAdmissionRequiresTheEffectiveGuestToStayInItsCfg) {
-  enum class Seed { Cold, Query, Fork, WarmFork };
   struct Case {
     const char *name;
     bool external;
     bool with_probe;
     bool remove_branch;
     int composition;
-    Seed seed;
+    test::FactsRoute seed;
   };
   const std::array<Case, 8> cases = {{
       {.name = "external, direct probe",
@@ -867,49 +822,49 @@ TEST(InstrumentorReplacement, ProbeAdmissionRequiresTheEffectiveGuestToStayInIts
        .with_probe = true,
        .remove_branch = false,
        .composition = 0,
-       .seed = Seed::Cold},
+       .seed = test::FactsRoute::Cold},
       {.name = "external, replacement then probe",
        .external = true,
        .with_probe = true,
        .remove_branch = false,
        .composition = 1,
-       .seed = Seed::Query},
+       .seed = test::FactsRoute::Queried},
       {.name = "external, probe then replacement",
        .external = true,
        .with_probe = true,
        .remove_branch = false,
        .composition = 2,
-       .seed = Seed::Fork},
+       .seed = test::FactsRoute::Fork},
       {.name = "external, warm fork",
        .external = true,
        .with_probe = true,
        .remove_branch = false,
        .composition = 0,
-       .seed = Seed::WarmFork},
+       .seed = test::FactsRoute::WarmFork},
       {.name = "external, probe-free deletion",
        .external = true,
        .with_probe = false,
        .remove_branch = false,
        .composition = 0,
-       .seed = Seed::WarmFork},
+       .seed = test::FactsRoute::WarmFork},
       {.name = "contained live register",
        .external = false,
        .with_probe = true,
        .remove_branch = false,
        .composition = 0,
-       .seed = Seed::Cold},
+       .seed = test::FactsRoute::Cold},
       {.name = "contained, merged probe",
        .external = false,
        .with_probe = true,
        .remove_branch = false,
        .composition = 2,
-       .seed = Seed::Query},
+       .seed = test::FactsRoute::Queried},
       {.name = "offending branch removed",
        .external = true,
        .with_probe = true,
        .remove_branch = true,
        .composition = 0,
-       .seed = Seed::WarmFork},
+       .seed = test::FactsRoute::WarmFork},
   }};
   constexpr uint32_t clobber = cdna4::build_sop1(
       cdna4::kSMovB32Sop1, {.ssrc0 = scalar_positive_inline_u32(0), .sdst = 8})[0];
@@ -927,23 +882,9 @@ TEST(InstrumentorReplacement, ProbeAdmissionRequiresTheEffectiveGuestToStayInIts
     const Section &text = *source.text_sections().front();
     uint32_t branch = 0;
     std::memcpy(&branch, text.data() + 8, sizeof(branch));
-    Instrumentor seed(source, kArch);
-    Instrumentor *batch = &seed;
-    std::unique_ptr<Instrumentor> child;
-    TextEditError error;
-    if (test_case.seed == Seed::Query) {
-      ASSERT_NE(seed.instruction_boundaries(error), nullptr) << error.message;
-    } else if (test_case.seed != Seed::Cold) {
-      if (test_case.seed == Seed::WarmFork) {
-        seed.add_point_by_offset(4);
-        const Instrumentor::ValidationResult warmed = seed.validate_points();
-        ASSERT_TRUE(warmed.errors.empty()) << warmed.errors.front();
-      }
-      FailureOr<std::unique_ptr<Instrumentor>> fork = seed.fork(error);
-      ASSERT_TRUE(fork.succeeded()) << error.message;
-      child = std::move(fork).value();
-      batch = child.get();
-    }
+    test::FactsRouteFixture fixture(source, kArch);
+    ASSERT_TRUE(fixture.prepare(test_case.seed, 4));
+    Instrumentor *batch = &fixture.batch();
     InstrumentationPoint replace = replacement_point(4, {kNop0Word}, {});
     if (test_case.with_probe && test_case.composition == 0) {
       replace.probe_obj = &probe;
@@ -1005,8 +946,7 @@ TEST(InstrumentorReplacement, ProbeAdmissionRequiresTheEffectiveGuestToStayInIts
         EXPECT_GT(kernels.front().descriptor.private_segment_fixed_size, 64u);
       }
     }
-    EXPECT_EQ(image, pristine);
-    EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
+    EXPECT_TRUE(test::source_image_matches(source, pristine));
   }
 }
 
@@ -1083,7 +1023,7 @@ TEST(InstrumentorReplacement, ProbeAdmissionRejectsUnmodeledIndirectAndCallEdges
             source, result,
             {{.offset = 4, .expected = instruction_bytes({kNop0Word}), .replacement = {}}});
       }
-      EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
+      EXPECT_TRUE(test::source_image_matches(source, pristine));
     }
   }
 }
@@ -1195,8 +1135,7 @@ TEST(InstrumentorReplacement, RegisterGrowthProtectsObservedVgprsBeyondTheUsedCo
           cdna4::build_vop1(cdna4::kVMovB32Vop1, {.src0 = 257, .vdst = 4})[0];
       EXPECT_EQ(std::ranges::find(moves, conflicting), moves.end());
     }
-    EXPECT_EQ(image, pristine);
-    EXPECT_EQ(std::memcmp(guest.image_data(), pristine.data(), pristine.size()), 0);
+    EXPECT_TRUE(test::source_image_matches(guest, pristine));
   }
 }
 
@@ -1256,25 +1195,22 @@ TEST(InstrumentorReplacement, RejectsIndirectSgprReadsIntroducedByReplacementWit
         ASSERT_TRUE(validated.errors.empty()) << validated.errors.front();
         ASSERT_EQ(validated.sites.size(), 1u);
         ASSERT_TRUE(result.errors.empty()) << result.errors.front();
-        expect_replacement_guest(result, 4, 4, instruction_bytes({direct}), kArch, true);
+        test::expect_replacement_guest(result, 4, 4, instruction_bytes({direct}), kArch, true);
       }
       EXPECT_FALSE(result.edit_error);
-      EXPECT_EQ(image, pristine);
-      ASSERT_EQ(source.image_size(), pristine.size());
-      EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
+      EXPECT_TRUE(test::source_image_matches(source, pristine));
     }
   }
 }
 
 TEST(InstrumentorReplacement, ProbeAdmissionUsesEffectiveGuestVgprCompletenessAcrossFactsReuse) {
-  enum class SeedMode { Cold, Query, ColdFork, WarmPristineFork };
   struct CompletenessCase {
     std::string_view name;
     rocjitsu::IsaFamily arch = kArch;
     uint32_t original = kNop0Word;
     std::vector<uint32_t> body;
     std::vector<uint32_t> tail = {};
-    SeedMode mode = SeedMode::Cold;
+    test::FactsRoute mode = test::FactsRoute::Cold;
     bool reject = true;
   };
   constexpr uint16_t mode_bit27 = 1u | (27u << 6);
@@ -1299,26 +1235,26 @@ TEST(InstrumentorReplacement, ProbeAdmissionUsesEffectiveGuestVgprCompletenessAc
        .arch = rocjitsu::IsaFamily::Rdna4,
        .original = rdna_nop,
        .body = {swap_relative},
-       .mode = SeedMode::Query},
-      {.name = "index on", .body = {index_on}, .mode = SeedMode::ColdFork},
-      {.name = "dynamic MODE bit27", .body = {dynamic_mode}, .mode = SeedMode::WarmPristineFork},
+       .mode = test::FactsRoute::Queried},
+      {.name = "index on", .body = {index_on}, .mode = test::FactsRoute::Fork},
+      {.name = "dynamic MODE bit27", .body = {dynamic_mode}, .mode = test::FactsRoute::WarmFork},
       {.name = "immediate MODE bit27 on", .body = {immediate_mode, 1}},
       {.name = "immediate MODE bit27 clear",
        .body = {immediate_mode, 0},
-       .mode = SeedMode::WarmPristineFork,
+       .mode = test::FactsRoute::WarmFork,
        .reject = false},
       {.name = "removed original movrel",
        .arch = rocjitsu::IsaFamily::Rdna4,
        .original = relative,
        .body = {direct},
-       .mode = SeedMode::WarmPristineFork,
+       .mode = test::FactsRoute::WarmFork,
        .reject = false},
       {.name = "retained movrel elsewhere",
        .arch = rocjitsu::IsaFamily::Rdna4,
        .original = rdna_nop,
        .body = {direct},
        .tail = {relative},
-       .mode = SeedMode::Query},
+       .mode = test::FactsRoute::Queried},
   }};
   for (const CompletenessCase &test_case : cases) {
     SCOPED_TRACE(test_case.name);
@@ -1354,23 +1290,9 @@ TEST(InstrumentorReplacement, ProbeAdmissionUsesEffectiveGuestVgprCompletenessAc
                                .replacement = point.replacement->replacement_bytes}},
                              test_case.arch);
 
-    Instrumentor seed(source, test_case.arch);
-    Instrumentor *batch = &seed;
-    std::unique_ptr<Instrumentor> child;
-    TextEditError error;
-    if (test_case.mode == SeedMode::Query) {
-      ASSERT_NE(seed.instruction_boundaries(error), nullptr) << error.message;
-    } else if (test_case.mode != SeedMode::Cold) {
-      if (test_case.mode == SeedMode::WarmPristineFork) {
-        seed.add_point_by_offset(0);
-        const Instrumentor::ValidationResult warmed = seed.validate_points();
-        ASSERT_TRUE(warmed.errors.empty()) << warmed.errors.front();
-      }
-      FailureOr<std::unique_ptr<Instrumentor>> fork = seed.fork(error);
-      ASSERT_TRUE(fork.succeeded()) << error.message;
-      child = std::move(fork).value();
-      batch = child.get();
-    }
+    test::FactsRouteFixture fixture(source, test_case.arch);
+    ASSERT_TRUE(fixture.prepare(test_case.mode));
+    Instrumentor *batch = &fixture.batch();
     point.probe_obj = &probe;
     point.probe_symbol = "probe";
     batch->add_point(point);
@@ -1388,12 +1310,11 @@ TEST(InstrumentorReplacement, ProbeAdmissionUsesEffectiveGuestVgprCompletenessAc
       ASSERT_TRUE(validation.errors.empty()) << validation.errors.front();
       ASSERT_EQ(validation.sites.size(), 1u);
       ASSERT_TRUE(result.errors.empty()) << result.errors.front();
-      expect_replacement_guest(result, 0, 4, point.replacement->replacement_bytes, test_case.arch,
-                               true);
+      test::expect_replacement_guest(result, 0, 4, point.replacement->replacement_bytes,
+                                     test_case.arch, true);
     }
     EXPECT_FALSE(result.edit_error);
-    ASSERT_EQ(source.image_size(), image.size());
-    EXPECT_EQ(std::memcmp(source.image_data(), image.data(), image.size()), 0);
+    EXPECT_TRUE(test::source_image_matches(source, image));
   }
 }
 
@@ -1459,31 +1380,7 @@ TEST(InstrumentorReplacement, SameSiteConflictsAndInvalidBodiesPublishNothing) {
       ASSERT_TRUE(result.edit_error);
       EXPECT_EQ(result.edit_error->code, TextEditErrorCode::InvalidInstruction);
     }
-    EXPECT_EQ(image, pristine);
-  }
-}
-
-TEST(InstrumentorReplacement, EmptyAndVariableLengthBodiesUseTrampolines) {
-  const uint32_t original = kNop1Word;
-  const uint32_t nop = kNop0Word;
-  const std::vector<uint8_t> image = test::make_gfx950_kernel_elf({original, kEndpgmWord}, 0);
-  const std::vector<uint8_t> pristine = image;
-  const AmdGpuCodeObject source(image.data(), image.size());
-  for (size_t words = 0; words < 4; ++words) {
-    SCOPED_TRACE(words);
-    InstrumentationPoint point = replacement_point(0, {original}, {});
-    point.replacement->replacement_bytes.resize(words * 4);
-    for (size_t index = 0; index < words; ++index)
-      std::memcpy(point.replacement->replacement_bytes.data() + index * 4, &nop, sizeof(nop));
-    Instrumentor instrumentor(source, kArch);
-    instrumentor.add_point(point);
-    const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
-    expect_pure_replacements(source, result,
-                             {{.offset = 0,
-                               .expected = instruction_bytes({original}),
-                               .replacement = point.replacement->replacement_bytes}});
-    expect_replacement_guest(result, 0, 4, point.replacement->replacement_bytes, kArch, false);
-    EXPECT_EQ(image, pristine);
+    EXPECT_TRUE(test::source_image_matches(source, pristine));
   }
 }
 
@@ -1530,7 +1427,7 @@ TEST(InstrumentorReplacement, RejectsMalformedReplacementAndProbeRequests) {
     expect_no_output(result);
     EXPECT_TRUE(result.patches.empty());
     EXPECT_FALSE(result.edit_error);
-    EXPECT_EQ(image, pristine);
+    EXPECT_TRUE(test::source_image_matches(source, pristine));
   }
 }
 
@@ -1547,7 +1444,7 @@ TEST(InstrumentorReplacement, CannotReuseExpectedBytesFromAnotherSource) {
   ASSERT_TRUE(result.edit_error);
   EXPECT_EQ(result.edit_error->code, TextEditErrorCode::StaleBytes);
   EXPECT_EQ(result.edit_error->offset, 0u);
-  EXPECT_EQ(image, pristine);
+  EXPECT_TRUE(test::source_image_matches(source, pristine));
 }
 
 TEST(InstrumentorReplacement, ForkRetainsSharedResourceOptions) {
@@ -1597,7 +1494,7 @@ TEST(InstrumentorReplacement, ForkRetainsSharedResourceOptions) {
     }
     EXPECT_FALSE(resolved.edit_error);
     EXPECT_FALSE(result.edit_error);
-    EXPECT_EQ(image, pristine);
+    EXPECT_TRUE(test::source_image_matches(source, pristine));
   }
 }
 
@@ -1619,6 +1516,7 @@ TEST(InstrumentorReplacement, MutantReceivesFreshCallableProbeAnalysis) {
                                .replacement = instruction_bytes({nop})}});
     ASSERT_EQ(result.sites.size(), 1u);
     mutant_guest = result.sites.front().guest_offset;
+    EXPECT_TRUE(test::source_image_matches(source, pristine));
     mutant_image = std::move(result.elf_bytes);
   }
   // The pristine object and Instrumentor are gone. Observe the effective guest
@@ -1643,8 +1541,7 @@ TEST(InstrumentorReplacement, MutantReceivesFreshCallableProbeAnalysis) {
   const std::vector<uint32_t> words = test::section_words(candidate, ".text");
   EXPECT_EQ(words.at(result.sites.front().guest_offset / 4), nop);
   EXPECT_GT(candidate.text_sections().front()->size(), mutant.text_sections().front()->size());
-  EXPECT_EQ(mutant_image, pristine_mutant);
-  EXPECT_EQ(image, pristine);
+  EXPECT_TRUE(test::source_image_matches(mutant, pristine_mutant));
 }
 
 TEST(InstrumentorReplacement, ConcreteVariantControlsSourceAndReplacementDecoding) {
@@ -1780,8 +1677,7 @@ TEST(InstrumentorReplacement, CallerArchitecturePolicyAgreesAcrossQueryForkValid
       ASSERT_TRUE(result.edit_error);
       EXPECT_EQ(result.edit_error->code, TextEditErrorCode::UnsupportedTarget);
     }
-    EXPECT_EQ(image, pristine);
-    EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
+    EXPECT_TRUE(test::source_image_matches(source, pristine));
   }
 }
 
@@ -1850,7 +1746,7 @@ std::vector<uint8_t> make_rdna4_function_alignment_elf(const std::vector<uint32_
   for (Elf64_Shdr &section : *sections)
     if (section.sh_type == SHT_RELA)
       section.sh_size = 0;
-  constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Rdna4;
   const uint32_t end = build_s_endpgm(arch).value();
   std::array<uint32_t, 4> foreign_words = {end, build_s_nop(0, arch).value(), end, end};
   if (foreign_kind == 2)
@@ -1874,7 +1770,7 @@ std::vector<uint8_t> make_rdna4_function_alignment_elf(const std::vector<uint32_
 }
 
 TEST(InstrumentorReplacement, SizedRdna4FunctionAlignmentSurvivesColdWarmQueryAndForkPaths) {
-  constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Rdna4;
   const uint32_t end = build_s_endpgm(arch).value();
   const uint32_t nop = build_s_nop(0, arch).value();
   const uint32_t body = build_s_nop(1, arch).value();
@@ -1885,41 +1781,27 @@ TEST(InstrumentorReplacement, SizedRdna4FunctionAlignmentSurvivesColdWarmQueryAn
     const std::vector<uint8_t> pristine = image;
     const AmdGpuCodeObject source(image.data(), image.size());
     ASSERT_TRUE(source.is_valid());
-    for (int route = 0; route < 5; ++route) {
-      SCOPED_TRACE(route);
-      Instrumentor seed(source, arch);
+    for (const test::FactsRoute route :
+         {test::FactsRoute::Cold, test::FactsRoute::Queried, test::FactsRoute::Fork,
+          test::FactsRoute::WarmDirect, test::FactsRoute::WarmQueriedFork}) {
+      SCOPED_TRACE(test::facts_route_name(route));
+      test::FactsRouteFixture fixture(source, arch);
+      ASSERT_TRUE(fixture.prepare(route, 12));
       TextEditError error;
-      if (route >= 3) {
-        seed.add_point_by_offset(12);
-        const Instrumentor::ValidationResult warmed = seed.validate_points();
-        ASSERT_TRUE(warmed.errors.empty()) << warmed.errors.front();
-        ASSERT_EQ(warmed.sites.size(), 1u);
-      }
-      const InstructionBoundaries *facts = nullptr;
-      if (route == 1 || route >= 3) {
-        facts = seed.instruction_boundaries(error);
-        ASSERT_NE(facts, nullptr) << error.message;
+      const InstructionBoundaries *facts = fixture.queried_facts();
+      if (facts != nullptr) {
         EXPECT_EQ(facts->find(4), nullptr);
         EXPECT_NE(facts->find(8), nullptr);
-        EXPECT_EQ(seed.instruction_boundaries(error), facts);
+        EXPECT_EQ(fixture.seed().instruction_boundaries(error), facts);
+        EXPECT_EQ(fixture.batch().instruction_boundaries(error), facts);
       }
-      std::unique_ptr<Instrumentor> child;
-      Instrumentor *batch = &seed;
-      if (route == 2 || route == 4) {
-        FailureOr<std::unique_ptr<Instrumentor>> fork = seed.fork(error);
-        ASSERT_TRUE(fork.succeeded()) << error.message;
-        child = std::move(fork).value();
-        batch = child.get();
-        if (facts != nullptr) {
-          EXPECT_EQ(batch->instruction_boundaries(error), facts);
-        }
-      }
+      Instrumentor *batch = &fixture.batch();
       batch->add_point(replacement_point(8, {nop}, {body}));
       const Instrumentor::ValidationResult validated = batch->validate_points();
       ASSERT_TRUE(validated.errors.empty()) << validated.errors.front();
       const InstrumentedCodeObjectDebug result = batch->patch_with_debug_summaries();
       ASSERT_TRUE(result.errors.empty()) << result.errors.front();
-      ASSERT_EQ(result.sites.size(), route == 3 ? 2u : 1u);
+      ASSERT_EQ(result.sites.size(), route == test::FactsRoute::WarmDirect ? 2u : 1u);
       const AmdGpuCodeObject candidate(result.elf_bytes.data(), result.elf_bytes.size());
       ASSERT_TRUE(candidate.is_valid());
       const TextAlignmentGaps output_gaps(candidate, arch);
@@ -1939,14 +1821,13 @@ TEST(InstrumentorReplacement, SizedRdna4FunctionAlignmentSurvivesColdWarmQueryAn
       EXPECT_EQ(replacement->guest_size, sizeof(uint32_t));
       ASSERT_LT(replacement->guest_offset / sizeof(uint32_t), output.size());
       EXPECT_EQ(output[replacement->guest_offset / sizeof(uint32_t)], body);
-      EXPECT_EQ(image, pristine);
-      EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
+      EXPECT_TRUE(test::source_image_matches(source, pristine));
     }
   }
 }
 
 TEST(InstrumentorReplacement, Rdna4FunctionAlignmentDoesNotHideExecutableBytesOrReferences) {
-  constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Rdna4;
   const uint32_t end = build_s_endpgm(arch).value();
   const uint32_t nop = build_s_nop(0, arch).value();
   const uint32_t ret = build_s_setpc_b64(30, arch).value();
@@ -1996,13 +1877,12 @@ TEST(InstrumentorReplacement, Rdna4FunctionAlignmentDoesNotHideExecutableBytesOr
         return message.find("alignment") != std::string::npos;
       }));
     }
-    EXPECT_EQ(image, pristine);
-    EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
+    EXPECT_TRUE(test::source_image_matches(source, pristine));
   }
 }
 
 TEST(InstrumentorReplacement, TextFunctionAlignmentDoesNotApplyToForeignSectionOffsets) {
-  constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Rdna4;
   const uint32_t end = build_s_endpgm(arch).value();
   const uint32_t nop = build_s_nop(0, arch).value();
   for (int foreign_kind = 1; foreign_kind <= 3; ++foreign_kind) {
@@ -2031,8 +1911,7 @@ TEST(InstrumentorReplacement, TextFunctionAlignmentDoesNotApplyToForeignSectionO
     } else {
       expect_no_output(result);
     }
-    EXPECT_EQ(image, pristine);
-    EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
+    EXPECT_TRUE(test::source_image_matches(source, pristine));
   }
 }
 
@@ -2105,8 +1984,7 @@ TEST(InstrumentorReplacement, ForkBatchesCheckDescriptorEntriesBeforePublishingA
                                    .replacement = instruction_bytes({nop, nop})}},
                                  arch);
       }
-      EXPECT_EQ(image, pristine);
-      EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
+      EXPECT_TRUE(test::source_image_matches(source, pristine));
     }
   }
 }
@@ -2143,8 +2021,7 @@ TEST(InstrumentorReplacement, RejectsSourceDebugBranchesWithoutDestinationMetada
     ASSERT_TRUE(result.edit_error);
     EXPECT_EQ(result.edit_error->code, TextEditErrorCode::UnsupportedReferences);
     EXPECT_EQ(result.edit_error->offset, 0u);
-    EXPECT_EQ(image, pristine);
-    EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
+    EXPECT_TRUE(test::source_image_matches(source, pristine));
   }
   const std::vector<uint8_t> image = test::make_gfx942_kernel_elf(
       {control_branch.value(), 0xbe8000ffu, 0x12345678u, endpgm.value()}, 0);
@@ -2160,8 +2037,7 @@ TEST(InstrumentorReplacement, RejectsSourceDebugBranchesWithoutDestinationMetada
                              .expected = instruction_bytes({0xbe8000ffu, 0x12345678u}),
                              .replacement = instruction_bytes({nop, nop})}},
                            arch);
-  EXPECT_EQ(image, pristine);
-  EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
+  EXPECT_TRUE(test::source_image_matches(source, pristine));
 }
 
 TEST(InstrumentorReplacement, SubvectorLoopReferencesRejectQueryForkValidationAndEmission) {
@@ -2372,139 +2248,23 @@ TEST(InstrumentorReplacement, RelocatableSymbolEndpointsKeepSectionRelativeCoord
                                    .replacement = instruction_bytes({nop, nop})}},
                                  arch);
       }
-      EXPECT_EQ(image, pristine);
-      EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
+      EXPECT_TRUE(test::source_image_matches(source, pristine));
     }
   }
 }
 
 void expect_loaded_prefix_relocation_policy(uint64_t bytes_before_text, bool overlaps_text) {
-  constexpr rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Cdna5;
-  constexpr uint64_t loaded_prefix_size = sizeof(uint64_t);
-  const util::FailureOr<uint32_t> barrier =
-      build_sop1_encoding(arch, cdna5::kSBarrierSignalSop1, 0, 193);
-  const util::FailureOr<uint32_t> nop = build_s_nop(0, arch);
+  constexpr rocjitsu::IsaFamily arch = test::kLoadedPrefixArch;
+  test::LoadedPrefixRelocation fixture;
+  ASSERT_NO_FATAL_FAILURE(
+      test::make_loaded_prefix_relocation(bytes_before_text, overlaps_text, fixture));
+  const std::vector<uint8_t> pristine = fixture.image;
+  const AmdGpuCodeObject source(fixture.image.data(), fixture.image.size());
   const util::FailureOr<uint32_t> replacement_nop = build_s_nop(1, arch);
-  const util::FailureOr<uint32_t> endpgm = build_s_endpgm(arch);
-  ASSERT_TRUE(barrier.succeeded());
-  ASSERT_TRUE(nop.succeeded());
   ASSERT_TRUE(replacement_nop.succeeded());
-  ASSERT_TRUE(endpgm.succeeded());
-  std::vector<uint8_t> image = test::make_amdgpu_kernel_elf(
-      {barrier.value(), nop.value(), endpgm.value()}, 0, 3, EF_AMDGPU_MACH_AMDGCN_GFX1250);
-  const AmdGpuCodeObject original(image.data(), image.size());
-  ASSERT_TRUE(original.is_valid());
-  const Section &original_text = *original.text_sections().front();
-  const CodeObjectPatcher original_patcher(original);
-  std::vector<Elf64_Shdr> sections = original_patcher.section_headers();
-  Elf64_Ehdr header = {};
-  std::memcpy(&header, image.data(), sizeof(header));
-  header.e_ident[EI_DATA] = ELFDATA2LSB;
-  header.e_ident[EI_VERSION] = 1;
-  header.e_ident[EI_ABIVERSION] = ELFABIVERSION_AMDGPU_HSA_V5;
-  std::optional<std::vector<Elf64_Phdr>> segments =
-      read_elf_table<Elf64_Phdr>(image, header.e_phoff, header.e_phnum, header.e_phentsize);
-  ASSERT_TRUE(segments);
-  const std::vector<Elf64_Phdr>::iterator text_load =
-      std::ranges::find_if(*segments, [](const Elf64_Phdr &segment) {
-        return segment.p_type == PT_LOAD && (segment.p_flags & PF_X) != 0;
-      });
-  const std::vector<Elf64_Phdr>::iterator data_load =
-      std::ranges::find_if(*segments, [](const Elf64_Phdr &segment) {
-        return segment.p_type == PT_LOAD && (segment.p_flags & PF_X) == 0;
-      });
-  const std::vector<Elf64_Shdr>::iterator symbols =
-      std::ranges::find(sections, SHT_SYMTAB, &Elf64_Shdr::sh_type);
-  ASSERT_NE(text_load, segments->end());
-  ASSERT_NE(data_load, segments->end());
-  ASSERT_NE(symbols, sections.end());
-  ASSERT_EQ(text_load->p_offset, original_text.sectionOffset());
-  ASSERT_EQ(text_load->p_vaddr, original_text.vaddr());
-  ASSERT_GE(text_load->p_offset, loaded_prefix_size);
-  ASSERT_LE(bytes_before_text, loaded_prefix_size);
-  text_load->p_offset -= loaded_prefix_size;
-  text_load->p_vaddr -= loaded_prefix_size;
-  text_load->p_paddr -= loaded_prefix_size;
-  text_load->p_filesz += loaded_prefix_size;
-  text_load->p_memsz += loaded_prefix_size;
-  text_load->p_flags |= 0x2u; // PF_W
-  std::fill_n(image.data() + text_load->p_offset, loaded_prefix_size, uint8_t{0x5a});
-
-  // This is actual loaded, file-backed padding, not an address before the LOAD.
-  // ABS64 writes eight bytes even when only its tail reaches the first instruction.
-  const uint64_t relocation_offset = header.e_shoff;
-  const uint64_t relocation_vaddr = data_load->p_vaddr + relocation_offset - data_load->p_offset;
-  const Elf64_Rela relocation = {.r_offset = original_text.vaddr() - bytes_before_text,
-                                 .r_info = (uint64_t{1} << 32) | R_AMDGPU_ABS64,
-                                 .r_addend = 0};
-  const uint32_t symbol_table_index = static_cast<uint32_t>(symbols - sections.begin());
-  symbols->sh_type = SHT_DYNSYM;
-  header.e_shoff += sizeof(relocation);
-  data_load->p_filesz = header.e_shoff - data_load->p_offset;
-  data_load->p_memsz = data_load->p_filesz;
-  sections.push_back({.sh_name = 0,
-                      .sh_type = SHT_RELA,
-                      .sh_flags = SHF_ALLOC,
-                      .sh_addr = relocation_vaddr,
-                      .sh_offset = relocation_offset,
-                      .sh_size = sizeof(relocation),
-                      .sh_link = symbol_table_index,
-                      .sh_info = SHN_UNDEF,
-                      .sh_addralign = alignof(Elf64_Rela),
-                      .sh_entsize = sizeof(relocation)});
-  header.e_shnum = static_cast<uint16_t>(sections.size());
-  image.resize(header.e_shoff + sections.size() * sizeof(Elf64_Shdr));
-  std::memcpy(image.data() + relocation_offset, &relocation, sizeof(relocation));
-  std::memcpy(image.data(), &header, sizeof(header));
-  std::memcpy(image.data() + header.e_phoff, segments->data(),
-              segments->size() * sizeof(Elf64_Phdr));
-  std::memcpy(image.data() + header.e_shoff, sections.data(), sections.size() * sizeof(Elf64_Shdr));
-
-  const std::vector<uint8_t> pristine = image;
-  const AmdGpuCodeObject source(image.data(), image.size());
-  ASSERT_TRUE(source.is_valid());
-  ASSERT_EQ(source.target_id(), ROCJITSU_CODE_TARGET_GFX1250);
-  ASSERT_EQ(source.text_sections().size(), 1u);
-  const Section &text = *source.text_sections().front();
-  ASSERT_EQ(text.vaddr(), original_text.vaddr());
-  ASSERT_EQ(classify_rocr_relocation_section(header, sections, sections.back()),
-            RocrRelocationSectionMode::Dynamic);
-  ASSERT_EQ(sections[symbol_table_index].sh_type, SHT_DYNSYM);
-  Elf64_Sym symbol = {};
-  std::memcpy(&symbol, image.data() + sections[symbol_table_index].sh_offset + sizeof(symbol),
-              sizeof(symbol));
-  ASSERT_NE(symbol.st_shndx, *text.sectionHeaderIndex());
-  ASSERT_NE(symbol.st_shndx, SHN_UNDEF);
-  ASSERT_EQ(elf_reloc_type(relocation.r_info), R_AMDGPU_ABS64);
-  ASSERT_LT(relocation.r_offset, text.vaddr());
-  ASSERT_GE(relocation.r_offset, text_load->p_vaddr);
-  ASSERT_LE(relocation.r_offset + sizeof(uint64_t), text_load->p_vaddr + text_load->p_filesz);
-  ASSERT_EQ(relocation.r_offset + sizeof(uint64_t) > text.vaddr(), overlaps_text);
-  ASSERT_TRUE(std::ranges::none_of(sections, [&](const Elf64_Shdr &section) {
-    return (section.sh_flags & SHF_ALLOC) != 0 && relocation.r_offset >= section.sh_addr &&
-           relocation.r_offset - section.sh_addr < section.sh_size;
-  }));
-  const uint64_t write_file_offset = text_load->p_offset + relocation.r_offset - text_load->p_vaddr;
-  ASSERT_LT(write_file_offset, text.sectionOffset());
-  ASSERT_LE(write_file_offset + sizeof(uint64_t), image.size());
-  ASSERT_EQ(image[write_file_offset], 0x5a);
-  std::unique_ptr<Decoder> decoder =
-      Decoder::create(default_isa_target_registry(), source.target_id());
-  ASSERT_NE(decoder, nullptr);
-  const std::array<uint32_t, 1> barrier_words = {barrier.value()};
-  const DecodeResult decoded = decoder->decode_window(barrier_words);
-  ASSERT_TRUE(decoded.succeeded());
-  ASSERT_EQ(decoded.value()->mnemonic(), "s_barrier_signal");
-  ASSERT_EQ(decoded.value()->size(), sizeof(uint32_t));
-  const CodeObjectPatcher patcher(source);
-  EXPECT_FALSE(patcher.has_malformed_rocr_relocation_section());
-  EXPECT_FALSE(patcher.has_rocr_rejected_none_relocation());
-  EXPECT_FALSE(patcher.has_unsupported_relocation_to_text());
-  EXPECT_EQ(patcher.has_relocations_within_text(), overlaps_text);
-
   Instrumentor instrumentor(source, arch);
-  instrumentor.add_point(replacement_point(4, {nop.value()}, {replacement_nop.value()}));
-  instrumentor.add_point(replacement_point(0, {barrier.value()}, {nop.value()}));
+  instrumentor.add_point(replacement_point(4, {fixture.nop_word}, {replacement_nop.value()}));
+  instrumentor.add_point(replacement_point(0, {fixture.barrier_word}, {fixture.nop_word}));
   const Instrumentor::ValidationResult validation = instrumentor.validate_points();
   const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
   if (overlaps_text) {
@@ -2526,15 +2286,14 @@ void expect_loaded_prefix_relocation_policy(uint64_t bytes_before_text, bool ove
     ASSERT_EQ(validation.sites.size(), 2u);
     expect_pure_replacements(source, result,
                              {{.offset = 4,
-                               .expected = instruction_bytes({nop.value()}),
+                               .expected = instruction_bytes({fixture.nop_word}),
                                .replacement = instruction_bytes({replacement_nop.value()})},
                               {.offset = 0,
-                               .expected = instruction_bytes({barrier.value()}),
-                               .replacement = instruction_bytes({nop.value()})}},
+                               .expected = instruction_bytes({fixture.barrier_word}),
+                               .replacement = instruction_bytes({fixture.nop_word})}},
                              arch);
   }
-  EXPECT_EQ(image, pristine);
-  EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
+  EXPECT_TRUE(test::source_image_matches(source, pristine));
 }
 
 TEST(InstrumentorReplacement, RejectsRelocationWriteStartingInLoadedPrefix) {

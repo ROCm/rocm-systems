@@ -6,10 +6,13 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
+#include "rocjitsu/code/patch/instrumentor.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/target_registry.h"
 #include "util/result.h"
+
+#include <gtest/gtest.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -18,6 +21,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu::test {
@@ -27,6 +31,80 @@ struct ExpectedReplacement {
   std::vector<uint8_t> expected;
   std::vector<uint8_t> replacement;
 };
+
+enum class FactsRoute { Cold, Queried, Fork, WarmFork, WarmQueriedFork, WarmDirect };
+
+inline const char *facts_route_name(FactsRoute route) {
+  switch (route) {
+  case FactsRoute::Cold:
+    return "cold";
+  case FactsRoute::Queried:
+    return "queried";
+  case FactsRoute::Fork:
+    return "fork";
+  case FactsRoute::WarmFork:
+    return "warm fork";
+  case FactsRoute::WarmQueriedFork:
+    return "warm queried fork";
+  case FactsRoute::WarmDirect:
+    return "warm direct";
+  }
+  return "unknown facts route";
+}
+
+// Keep the seed and its optional child alive through validation and emission.
+class FactsRouteFixture {
+public:
+  FactsRouteFixture(const AmdGpuCodeObject &source, rocjitsu::IsaFamily arch) : seed_(source, arch) {}
+
+  testing::AssertionResult prepare(FactsRoute route, uint64_t warm_anchor = 0) {
+    if (route == FactsRoute::WarmFork || route == FactsRoute::WarmQueriedFork ||
+        route == FactsRoute::WarmDirect) {
+      seed_.add_point_by_offset(warm_anchor);
+      const Instrumentor::ValidationResult warmed = seed_.validate_points();
+      if (!warmed.errors.empty())
+        return testing::AssertionFailure() << warmed.errors.front();
+      if (warmed.sites.size() != 1)
+        return testing::AssertionFailure()
+               << "warm validation produced " << warmed.sites.size() << " sites instead of one";
+    }
+    if (route == FactsRoute::Queried || route == FactsRoute::WarmQueriedFork ||
+        route == FactsRoute::WarmDirect) {
+      TextEditError error;
+      queried_facts_ = seed_.instruction_boundaries(error);
+      if (queried_facts_ == nullptr)
+        return testing::AssertionFailure() << error.message;
+    }
+    if (route == FactsRoute::Fork || route == FactsRoute::WarmFork ||
+        route == FactsRoute::WarmQueriedFork) {
+      TextEditError error;
+      util::FailureOr<std::unique_ptr<Instrumentor>> fork = seed_.fork(error);
+      if (fork.failed())
+        return testing::AssertionFailure() << error.message;
+      child_ = std::move(fork).value();
+    }
+    return testing::AssertionSuccess();
+  }
+
+  Instrumentor &seed() { return seed_; }
+  Instrumentor &batch() { return child_ ? *child_ : seed_; }
+  const InstructionBoundaries *queried_facts() const { return queried_facts_; }
+
+private:
+  Instrumentor seed_;
+  std::unique_ptr<Instrumentor> child_;
+  const InstructionBoundaries *queried_facts_ = nullptr;
+};
+
+inline testing::AssertionResult source_image_matches(const AmdGpuCodeObject &source,
+                                                     std::span<const uint8_t> pristine) {
+  if (source.image_size() != pristine.size())
+    return testing::AssertionFailure()
+           << "source image size changed from " << pristine.size() << " to " << source.image_size();
+  if (!pristine.empty() && std::memcmp(source.image_data(), pristine.data(), pristine.size()) != 0)
+    return testing::AssertionFailure() << "source image bytes changed";
+  return testing::AssertionSuccess();
+}
 
 // Compute the displacement independently of the production planner/range helper.
 inline std::optional<uint32_t> expected_replacement_branch(uint64_t from, uint64_t to,
@@ -42,6 +120,50 @@ inline std::optional<uint32_t> expected_replacement_branch(uint64_t from, uint64
   if (branch.failed())
     return std::nullopt;
   return branch.value() | static_cast<uint16_t>(distance / 4);
+}
+
+inline void expect_replacement_guest(const InstrumentedCodeObjectDebug &result,
+                                     uint64_t source_offset, uint32_t original_size,
+                                     std::span<const uint8_t> replacement, rocjitsu::IsaFamily arch,
+                                     bool has_probe) {
+  ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+  ASSERT_EQ(result.sites.size(), 1u);
+  ASSERT_EQ(result.patches.size(), 1u);
+  const InstrumentedSite &site = result.sites.front();
+  EXPECT_EQ(site.kind, InstrumentationKind::ReplaceWithInst);
+  EXPECT_EQ(site.original_offset, source_offset);
+  EXPECT_EQ(site.original_size, original_size);
+  EXPECT_EQ(site.guest_size, replacement.size());
+  EXPECT_EQ(site.instrumentation_offset + site.instrumentation_size, site.guest_offset);
+  if (has_probe) {
+    EXPECT_GT(site.instrumentation_size, 0u);
+  } else {
+    EXPECT_EQ(site.instrumentation_size, 0u);
+  }
+  const InstrumentationPatch &patch = result.patches.front();
+  EXPECT_EQ(patch.is_probe_call, has_probe);
+  EXPECT_EQ(patch.trampoline_offset, site.instrumentation_offset);
+  const AmdGpuCodeObject candidate(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(candidate.is_valid());
+  const Section &text = *candidate.text_sections().front();
+  ASSERT_LE(site.guest_offset + replacement.size() + 4, text.size());
+  if (!replacement.empty()) {
+    EXPECT_EQ(std::memcmp(text.data() + site.guest_offset, replacement.data(), replacement.size()),
+              0);
+  }
+  const std::optional<uint32_t> entry_branch =
+      expected_replacement_branch(source_offset, site.instrumentation_offset, arch);
+  ASSERT_TRUE(entry_branch);
+  uint32_t actual = 0;
+  std::memcpy(&actual, text.data() + source_offset, sizeof(actual));
+  EXPECT_EQ(actual, *entry_branch);
+  const std::optional<uint32_t> return_branch = expected_replacement_branch(
+      site.guest_offset + replacement.size(), source_offset + original_size, arch);
+  ASSERT_TRUE(return_branch);
+  std::memcpy(&actual, text.data() + site.guest_offset + replacement.size(), sizeof(actual));
+  EXPECT_EQ(actual, *return_branch);
+  ASSERT_TRUE(patch.return_target);
+  EXPECT_EQ(*patch.return_target, source_offset + original_size);
 }
 
 // This oracle constructs source splices and replacement caves without consuming
