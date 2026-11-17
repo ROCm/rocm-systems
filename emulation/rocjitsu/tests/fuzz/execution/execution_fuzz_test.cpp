@@ -45,7 +45,8 @@ std::optional<uint64_t> find_generated_kernel_seed(FuzzTarget target, uint64_t s
 TEST(ExecutionFuzzTargetTest, NamesCoverEveryExecutionTarget) {
   constexpr std::array<std::string_view, static_cast<size_t>(FuzzTarget::Count)> expected = {
       "gfx908",  "gfx90a",  "gfx942",  "gfx950",  "gfx1010", "gfx1030",
-      "gfx1100", "gfx1151", "gfx1200", "gfx1201", "gfx1250", "gfx1251"};
+      "gfx1100", "gfx1151", "gfx1200", "gfx1201", "gfx1250", "gfx1251",
+      "gfx1150"};
   for (uint8_t index = 0; index < static_cast<uint8_t>(FuzzTarget::Count); ++index) {
     const FuzzTarget target = *indexed_target(index);
     EXPECT_EQ(target_name(target), expected[index]);

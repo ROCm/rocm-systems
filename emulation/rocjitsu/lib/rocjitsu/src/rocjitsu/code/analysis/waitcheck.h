@@ -150,13 +150,14 @@ struct WaitcheckKernelInfo {
   uint64_t code_size = 0;
   /// @brief Wavefront size selected by the AMDHSA kernel descriptor.
   uint32_t wavefront_size = 64;
-  /// Other descriptors selecting the same executable entry and wave size.
-  /// Dispatch clients must index each alias and descriptor_vaddr with the load delta.
+  /// Other descriptors selecting the same executable entry and wave size in
+  /// an offline group. The group's allocation bounds are not a dispatch ABI.
   std::vector<uint64_t> alias_descriptor_vaddrs;
   /// Bounds across descriptors sharing this entry and wave size, in dwords.
   uint32_t min_vgprs = 0, max_vgprs = 0;
   uint32_t min_sgprs = 0, max_sgprs = 0;
-  /// Kernel argument SGPR pair and byte extent common to the descriptors.
+  /// Kernel argument SGPR pair and byte extent of the first descriptor.
+  /// An offline group with aliases cannot use these for a shared argument proof.
   std::optional<uint16_t> kernarg_sgpr = std::nullopt;
   uint32_t kernarg_size = 0;
   /// Largest ordinary and accumulator banks across descriptors. A zero
@@ -205,10 +206,13 @@ waitcheck_kernel_from_descriptor(std::string name, uint64_t descriptor_vaddr, ui
                                  uint64_t code_size, rj_code_arch_t arch,
                                  const amdhsa::kernel_descriptor_t &descriptor);
 
-/// @brief Discover independently analyzable AMDHSA kernels in a code object.
+/// @brief Discover independently analyzable AMDHSA entry and wave groups.
 ///
-/// @details Index descriptor_vaddr and every alias_descriptor_vaddrs entry with
-/// the loader's load delta to recognize each AQL dispatch kernel_object.
+/// @details Descriptors sharing an entry and wave are merged conservatively for
+/// offline analysis. The allocation and argument fields of a merged group do
+/// not describe any particular dispatch. Runtime hooks must build an exact
+/// WaitcheckKernelInfo with waitcheck_kernel_from_descriptor() from the launched
+/// descriptor, identified by AQL kernel_object and the loader's load delta.
 [[nodiscard]] std::vector<WaitcheckKernelInfo>
 waitcheck_kernels(const AmdGpuCodeObject &code_object);
 
@@ -239,8 +243,9 @@ waitcheck_kernels(const AmdGpuCodeObject &code_object);
 
 /// @brief Analyze an already-discovered kernel without repeating descriptor discovery.
 ///
-/// @details This overload is intended for schedulers and runtime hooks that
-/// obtained @p kernel from waitcheck_kernels().
+/// @details Offline schedulers may pass a merged entry and wave group from
+/// waitcheck_kernels(). Runtime hooks must pass exact descriptor information
+/// built with waitcheck_kernel_from_descriptor().
 [[nodiscard]] WaitcheckReport analyze_waitcnts_for_kernel(const CodeObject &code_object,
                                                           rj_code_arch_t arch,
                                                           const WaitcheckKernelInfo &kernel,

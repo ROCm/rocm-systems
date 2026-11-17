@@ -41,6 +41,7 @@ enum class FuzzTarget : uint8_t {
   Gfx1201,
   Gfx1250,
   Gfx1251,
+  Gfx1150,
   Count,
 };
 

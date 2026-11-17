@@ -266,6 +266,23 @@ TEST(WaitcheckTest, CdnaMemoryResultsRespectBothDescriptorBanksAndAliasLimits) {
     const AmdGpuCodeObject object(image.data(), image.size());
     const auto report = analyze_waitcnts(object, ROCJITSU_CODE_ARCH_CDNA3);
     EXPECT_TRUE(report.supported && report.complete) << report.analysis_error;
+    if (first == 160 && second == 256) {
+      const auto &text = *object.text_sections().front();
+      const auto descriptors = scan_kernel_descriptors(image, text.sectionOffset(), text.size(),
+                                                        text.sectionHeaderIndex());
+      EXPECT_EQ(descriptors.size(), 2u);
+      std::vector<size_t> exact_counts;
+      for (const auto &descriptor : descriptors) {
+        const auto exact = waitcheck_kernel_from_descriptor(
+            descriptor.kernel_name, descriptor.descriptor_vaddr, descriptor.entry_text_offset,
+            0, ROCJITSU_CODE_ARCH_CDNA3, descriptor.descriptor);
+        const auto exact_report =
+            analyze_waitcnts_for_kernel(object, ROCJITSU_CODE_ARCH_CDNA3, exact);
+        EXPECT_TRUE(exact_report.supported && exact_report.complete) << exact_report.analysis_error;
+        exact_counts.push_back(exact_report.diagnostics.size());
+      }
+      EXPECT_EQ(exact_counts, (std::vector<size_t>{0, 1}));
+    }
     return report.diagnostics.size();
   };
   // A November AITER load into v224 needs 225 ordinary VGPRs. Either
@@ -15696,6 +15713,123 @@ TEST(WaitcheckTest, Gfx950OverwrittenReturnPairLeavesIndirectJumpIncomplete) {
   EXPECT_FALSE(report.complete) << diagnostic_summary(report);
   EXPECT_NE(report.analysis_error.find("incomplete control flow"), std::string::npos)
       << report.analysis_error;
+}
+
+TEST(WaitcheckTest, Gfx1250RelativeDestinationWriteInvalidatesReturnLink) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_CDNA5;
+  std::vector<uint32_t> program;
+  program.push_back(build_s_call_b64(30, 1, arch).value()); // Helper at 0x08.
+  program.push_back(build_s_endpgm(arch).value());
+  program.push_back(0xbefd00ffu); // s_mov_b32 m0, 2 << 16.
+  program.push_back(0x00020000u);
+  program.push_back(build_sop1_encoding(arch, 0x44, 28, 8).value());
+  program.push_back(build_s_setpc_b64(30, arch).value());
+
+  auto decoder = Decoder::create(arch);
+  std::unique_ptr<Instruction> relative_write(decode_valid(*decoder, &program[4], 0x10));
+  ASSERT_NE(relative_write, nullptr);
+  ASSERT_EQ(relative_write->mnemonic(), "s_movrelsd_2_b32");
+
+  const auto image = waitcheck_test::make_gfx_code_object(
+      program, EF_AMDGPU_MACH_AMDGCN_GFX1250, /*wave32=*/true);
+  const AmdGpuCodeObject object(image.data(), image.size());
+  const auto report = analyze_waitcnts_for_kernel(object, arch, 0);
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_FALSE(report.complete) << diagnostic_summary(report);
+  EXPECT_NE(report.analysis_error.find("incomplete control flow"), std::string::npos)
+      << report.analysis_error;
+}
+
+TEST(WaitcheckTest, Gfx12NestedCallRestoresLinkFromProvenVgprLanes) {
+  for (const auto [arch, machine] :
+       {std::pair{ROCJITSU_CODE_ARCH_CDNA5, EF_AMDGPU_MACH_AMDGCN_GFX1250},
+        std::pair{ROCJITSU_CODE_ARCH_RDNA4, EF_AMDGPU_MACH_AMDGCN_GFX1201}}) {
+    for (bool clobber_spill : {false, true}) {
+      SCOPED_TRACE(testing::Message() << machine << '/' << clobber_spill);
+      std::vector<uint32_t> program;
+      program.push_back(build_s_call_b64(30, 1, arch).value()); // Helper at 0x08.
+      program.push_back(build_s_endpgm(arch).value());
+      program.insert(program.end(), {0xd7610002u, 0x0201001eu, // v_writelane v2,s30,0.
+                                     0xd7610002u, 0x0201021fu}); // v_writelane v2,s31,1.
+      const size_t inner_call = program.size();
+      program.push_back(0);
+      if (clobber_spill)
+        append_inst(program, v_mov_b32(2, 0)); // Destroy both saved lanes.
+      program.insert(program.end(), {0xd760001eu, 0x02010102u, // v_readlane s30,v2,0.
+                                     0xd760001fu, 0x02010302u}); // v_readlane s31,v2,1.
+      program.push_back(build_s_setpc_b64(30, arch).value());
+      const size_t leaf = program.size();
+      program[inner_call] = build_s_call_b64(30, static_cast<int>(leaf - inner_call - 1), arch).value();
+      program.push_back(build_s_setpc_b64(30, arch).value());
+
+      const auto image = waitcheck_test::make_gfx_code_object(program, machine, /*wave32=*/true);
+      const AmdGpuCodeObject object(image.data(), image.size());
+      const auto report = analyze_waitcnts_for_kernel(object, arch, 0);
+      ASSERT_TRUE(report.supported) << report.analysis_error;
+      EXPECT_EQ(report.complete, !clobber_spill) << diagnostic_summary(report);
+      if (clobber_spill)
+        EXPECT_NE(report.analysis_error.find("incomplete control flow"), std::string::npos)
+            << report.analysis_error;
+    }
+  }
+}
+
+TEST(WaitcheckTest, Gfx950NestedCallRestoresLinkFromProvenVgprLanes) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_CDNA4;
+  for (const auto [clobber_spill, enable_vskip] :
+       {std::pair{false, false}, std::pair{true, false}, std::pair{false, true}}) {
+    SCOPED_TRACE(testing::Message() << clobber_spill << '/' << enable_vskip);
+    std::vector<uint32_t> program;
+    program.push_back(build_s_call_b64(30, 1, arch).value()); // Helper at 0x08.
+    program.push_back(build_s_endpgm(arch).value());
+    if (enable_vskip)
+      program.push_back(0xbf108081u); // VSKIP can suppress both lane writes.
+    const size_t first_write = program.size();
+    program.insert(program.end(), {0xd28a0002u, 0x0001001eu, // v_writelane v2,s30,0.
+                                   0xd28a0002u, 0x0001021fu}); // v_writelane v2,s31,1.
+    const size_t inner_call = program.size();
+    program.push_back(0);
+    if (clobber_spill)
+      program.push_back(0x7e040300u); // v_mov_b32 v2,v0 destroys both saved lanes.
+    if (enable_vskip)
+      program.push_back(0xbf108080u); // Disable VSKIP before the lane reads.
+    program.insert(program.end(), {0xd289001eu, 0x00010102u, // v_readlane s30,v2,0.
+                                   0xd289001fu, 0x00010302u}); // v_readlane s31,v2,1.
+    program.push_back(build_s_setpc_b64(30, arch).value());
+    const size_t leaf = program.size();
+    program[inner_call] = build_s_call_b64(30, static_cast<int>(leaf - inner_call - 1), arch).value();
+    program.push_back(build_s_setpc_b64(30, arch).value());
+
+    auto decoder = Decoder::create(arch);
+    std::unique_ptr<Instruction> write(decode_valid(
+        *decoder, &program[first_write], first_write * sizeof(uint32_t)));
+    ASSERT_NE(write, nullptr);
+    EXPECT_EQ(write->mnemonic(), "v_writelane_b32");
+    EXPECT_EQ(write->num_src_operands(), 3);
+    EXPECT_EQ(write->src_operand(1)->to_register_ref(),
+              (RegisterRef{RegClass::SGPR, 30, 1}));
+    EXPECT_EQ(write->src_operand(2)->const_value(), 0);
+    EXPECT_TRUE(write->is_vskip_affected());
+    const size_t read_index = inner_call + 1 + (clobber_spill ? 1 : 0) +
+                              (enable_vskip ? 1 : 0);
+    std::unique_ptr<Instruction> read(decode_valid(*decoder, &program[read_index],
+                                                    read_index * sizeof(uint32_t)));
+    ASSERT_NE(read, nullptr);
+    EXPECT_EQ(read->mnemonic(), "v_readlane_b32");
+    EXPECT_EQ(read->dst_operand(0)->to_register_ref(),
+              (RegisterRef{RegClass::SGPR, 30, 1}));
+    EXPECT_EQ(read->src_operand(0)->to_register_ref(),
+              (RegisterRef{RegClass::VGPR, 2, 1}));
+    EXPECT_EQ(read->src_operand(1)->const_value(), 0);
+    EXPECT_TRUE(read->is_vskip_affected());
+
+    const auto image = waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX950);
+    const AmdGpuCodeObject object(image.data(), image.size());
+    const auto report = analyze_waitcnts_for_kernel(object, arch, 0);
+    ASSERT_TRUE(report.supported) << report.analysis_error;
+    EXPECT_EQ(report.complete, !clobber_spill && !enable_vskip)
+        << report.analysis_error << '\n' << diagnostic_summary(report);
+  }
 }
 
 TEST(WaitcheckTest, Gfx950SharedSwappcReturnsToMatchingContinuation) {

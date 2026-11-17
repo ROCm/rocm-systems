@@ -87,11 +87,12 @@ constexpr std::array<TargetInfo, static_cast<size_t>(FuzzTarget::Count)> kTarget
     {"gfx1010", ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_TARGET_INVALID},
     {"gfx1030", ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_TARGET_INVALID},
     {"gfx1100", ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_TARGET_GFX1100},
-    {"gfx1151", ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_TARGET_INVALID},
+    {"gfx1151", ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_TARGET_GFX1151},
     {"gfx1200", ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_TARGET_GFX1200},
     {"gfx1201", ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_TARGET_GFX1201},
     {"gfx1250", ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_TARGET_GFX1250},
     {"gfx1251", ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_TARGET_GFX1251},
+    {"gfx1150", ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_TARGET_GFX1150},
 }};
 
 const TargetInfo &target_info(FuzzTarget target) {
@@ -253,6 +254,7 @@ const std::vector<std::vector<uint8_t>> &instruction_seeds(FuzzTarget target) {
           make_instruction_seeds(FuzzTarget::Gfx1201, rdna4::test_data::ENCODINGS),
           make_instruction_seeds(FuzzTarget::Gfx1250, cdna5::test_data::ENCODINGS),
           make_instruction_seeds(FuzzTarget::Gfx1251, cdna5::test_data::ENCODINGS),
+          make_instruction_seeds(FuzzTarget::Gfx1150, rdna3_5::test_data::ENCODINGS),
       };
   return seeds[static_cast<size_t>(target)];
 }

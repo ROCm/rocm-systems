@@ -525,6 +525,17 @@ struct Analyzer : private WaitcheckStateOps {
     for (size_t i = 0; i < blocks.size(); ++i)
       block_index.emplace(blocks[i].get(), i);
 
+    // The CFG starts with VSKIP clear. If any instruction in this region can
+    // enable it, a lane move might be skipped; do not use that move to prove
+    // a return link. This broad check keeps call-context expansion bounded.
+    const bool vskip_may_enable = std::ranges::any_of(blocks, [&](const auto &block) {
+      return std::ranges::any_of(block->instructions(), [&](const Instruction &inst) {
+        std::optional<bool> skip = false;
+        update_vector_skip(skip, inst, arch);
+        return skip != false;
+      });
+    });
+
     // A shared helper may be called from many sites. Keep the active return
     // continuation in the analysis-node identity so an s_setpc_b64 return can
     // resume only the call that created that context. Without this expansion,
@@ -539,10 +550,16 @@ struct Analyzer : private WaitcheckStateOps {
     // link-register seed after that block, so a later loop backedge does not
     // manufacture another return from the call.
     // A matching s_setpc source is a return only while it still contains the
-    // caller's link. Track one explicit SGPR-pair save so a helper may use the
-    // link pair for a local indirect jump and restore it before returning.
+    // caller's link. Track one explicit SGPR-pair save or the two VGPR lanes
+    // used by LLVM to preserve a link across a nested device call.
+    struct LinkLaneSpill {
+      std::array<std::optional<std::pair<uint16_t, uint8_t>>, 2> halves;
+      uint8_t restored = 0;
+      auto operator<=>(const LinkLaneSpill &) const = default;
+    };
     using CallFrame =
-        std::tuple<size_t, uint16_t, size_t, uint64_t, bool, std::optional<uint16_t>>;
+        std::tuple<size_t, uint16_t, size_t, uint64_t, bool, std::optional<uint16_t>,
+                   LinkLaneSpill>;
     using CallContinuationSeed = std::pair<uint16_t, uint64_t>;
     using AnalysisNodeKey =
         std::tuple<size_t, std::vector<CallFrame>, std::optional<CallContinuationSeed>>;
@@ -658,22 +675,75 @@ struct Analyzer : private WaitcheckStateOps {
       if (!call_stack_after_block.empty()) {
         for (const Instruction &inst : block.instructions()) {
           const InstDefUse du(inst, wavefront_size);
+          const auto name = inst.mnemonic();
           const bool move_pair = inst.mnemonic() == "s_mov_b64" && inst.num_dst_operands() == 1 &&
                                  inst.num_src_operands() == 1;
           const auto dst = move_pair ? inst.dst_operand(0)->to_register_ref() : std::nullopt;
           const auto src = move_pair ? inst.src_operand(0)->to_register_ref() : std::nullopt;
           const bool sgpr_pair = dst && src && dst->cls == RegClass::SGPR &&
                                  src->cls == RegClass::SGPR && dst->width == 2 && src->width == 2;
-          const bool relative_sgpr_write = inst.mnemonic().starts_with("s_movreld");
+          const bool relative_sgpr_write = name.starts_with("s_movreld") ||
+                                           name.starts_with("s_movrelsd");
+          const bool writelane = name == "v_writelane_b32" && inst.num_dst_operands() == 1 &&
+                                 inst.num_src_operands() == 3 &&
+                                 (!inst.is_vskip_affected() || !vskip_may_enable);
+          const bool readlane = name == "v_readlane_b32" && inst.num_dst_operands() == 1 &&
+                                inst.num_src_operands() >= 2 &&
+                                (!inst.is_vskip_affected() || !vskip_may_enable);
+          const auto write_vgpr =
+              writelane ? inst.dst_operand(0)->to_register_ref() : std::nullopt;
+          // GFX12 lists the old destination last; older VOP3 lists it first.
+          const unsigned write_value_operand =
+              arch == ROCJITSU_CODE_ARCH_CDNA5 || arch == ROCJITSU_CODE_ARCH_RDNA4 ? 0 : 1;
+          const auto write_source =
+              writelane ? inst.src_operand(write_value_operand)->to_register_ref() : std::nullopt;
+          const auto write_lane =
+              writelane ? inst.src_operand(write_value_operand + 1)->const_value() : std::nullopt;
+          const auto read_sgpr =
+              readlane ? inst.dst_operand(0)->to_register_ref() : std::nullopt;
+          const auto read_vgpr =
+              readlane ? inst.src_operand(0)->to_register_ref() : std::nullopt;
+          const auto read_lane = readlane ? inst.src_operand(1)->const_value() : std::nullopt;
           for (auto &frame : call_stack_after_block) {
             const uint16_t link = std::get<1>(frame);
             const auto saved = std::get<5>(frame);
+            auto &spill = std::get<6>(frame);
             const bool disjoint_link = sgpr_pair &&
                                        (dst->index + 2 <= link || dst->index >= link + 2);
             const bool copy_link = disjoint_link && std::get<4>(frame) && src->index == link;
             const bool copy_saved = sgpr_pair && saved && src->index == *saved;
+            // A whole-VGPR write destroys both saved lanes. WRITELANE changes
+            // only its selected lane, so the other saved half can survive.
+            for (auto &half : spill.halves) {
+              if (!half)
+                continue;
+              const auto [vgpr, lane] = *half;
+              if (du.defs.intersects(RegisterRef{RegClass::VGPR, vgpr, 1}) &&
+                  !(write_vgpr && write_vgpr->cls == RegClass::VGPR &&
+                    write_vgpr->index == vgpr && write_lane && *write_lane < wavefront_size &&
+                    *write_lane != lane))
+                half.reset();
+            }
+            if (name == "s_set_vgpr_msb" || name.starts_with("s_setreg") ||
+                name == "s_alloc_vgpr")
+              spill.halves = {};
+            if (write_vgpr && write_vgpr->cls == RegClass::VGPR && write_source &&
+                write_source->cls == RegClass::SGPR && write_source->width == 1 &&
+                write_lane && *write_lane < wavefront_size && std::get<4>(frame)) {
+              for (unsigned half = 0; half < 2; ++half)
+                if (write_source->index == link + half)
+                  spill.halves[half] =
+                      std::pair{write_vgpr->index, static_cast<uint8_t>(*write_lane)};
+            }
             if (relative_sgpr_write || du.defs.intersects(RegisterRef{RegClass::SGPR, link, 2}))
               std::get<4>(frame) = false;
+            if (relative_sgpr_write)
+              spill.restored = 0;
+            else
+              for (unsigned half = 0; half < 2; ++half)
+                if (du.defs.intersects(RegisterRef{RegClass::SGPR,
+                                                   static_cast<uint16_t>(link + half), 1}))
+                  spill.restored &= static_cast<uint8_t>(~(1u << half));
             if (relative_sgpr_write ||
                 (saved && du.defs.intersects(RegisterRef{RegClass::SGPR, *saved, 2})))
               std::get<5>(frame).reset();
@@ -681,6 +751,19 @@ struct Analyzer : private WaitcheckStateOps {
               std::get<5>(frame) = dst->index;
             if (copy_saved && dst->index == link)
               std::get<4>(frame) = true;
+            if (read_sgpr && read_sgpr->cls == RegClass::SGPR && read_sgpr->width == 1 &&
+                read_vgpr && read_vgpr->cls == RegClass::VGPR && read_lane &&
+                *read_lane < wavefront_size) {
+              for (unsigned half = 0; half < 2; ++half) {
+                if (read_sgpr->index != link + half || !spill.halves[half] ||
+                    *spill.halves[half] !=
+                        std::pair{read_vgpr->index, static_cast<uint8_t>(*read_lane)})
+                  continue;
+                spill.restored |= static_cast<uint8_t>(1u << half);
+              }
+              if (spill.restored == 3)
+                std::get<4>(frame) = true;
+            }
           }
         }
       }
@@ -792,7 +875,7 @@ struct Analyzer : private WaitcheckStateOps {
         }
         std::vector<CallFrame> callee_stack = call_stack_after_block;
         callee_stack.emplace_back(continuation_it->second, call.return_sreg, callee_it->second,
-                                  call.source_call_offset, true, std::nullopt);
+                                  call.source_call_offset, true, std::nullopt, LinkLaneSpill{});
         if (!add_context_edge(callee_it->second, std::move(callee_stack),
                               /*conservative_sgpr_entry=*/true)) {
           report_.supported = false;
