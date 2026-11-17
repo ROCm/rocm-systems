@@ -55,7 +55,7 @@ PC sampling decodes.
 - A kernel symbol must be registered before the first dispatch of that kernel,
   so counter collection can be filtered by kernel name.
 
-## Agents
+## GPU agents
 
 Identifies the GPU that ran each dispatch.
 
