@@ -8,37 +8,20 @@
 
 namespace rocjitsu::consan {
 FailureOr<LdsRaceResult> analyze_capture(const Capture &capture, const AnalysisOptions &options,
-                                         ContractError *error) {
-  if (error != nullptr)
-    *error = {};
-  if (validate_manifest(capture.header.manifest, error).failed())
+                                         util::DiagnosticEmitter diagnostic) {
+  if (validate_manifest(capture.header.manifest, diagnostic).failed())
     return Result::failure();
   // Capture names are opaque bytes; the JSON-facing analyzer requires text.
-  if (!util::is_valid_utf8(capture.header.manifest.entry.name)) {
-    if (error != nullptr)
-      *error = {ContractErrorCode::InvalidFacts, "entry name is not valid UTF-8 for JSON output"};
-    return Result::failure();
-  }
-  if (capture.header.execution_conditions != kSupportedExecutionConditions) {
-    if (error != nullptr)
-      *error = {ContractErrorCode::InvalidFacts, "unsupported capture execution conditions"};
-    return Result::failure();
-  }
-  if (std::ranges::all_of(capture.header.run_identity, [](uint8_t value) { return value == 0; })) {
-    if (error != nullptr)
-      *error = {ContractErrorCode::InvalidFacts, "missing capture run identity"};
-    return Result::failure();
-  }
-  if (capture.executions.size() > CaptureLimits{}.executions) {
-    if (error != nullptr)
-      *error = {ContractErrorCode::InvalidFacts, "capture execution budget exceeded"};
-    return Result::failure();
-  }
-  if (options.examples > kMaxFindingExamples) {
-    if (error != nullptr)
-      *error = {ContractErrorCode::InvalidFacts, "finding example budget exceeded"};
-    return Result::failure();
-  }
+  if (!util::is_valid_utf8(capture.header.manifest.entry.name))
+    return diagnostic.emit() << "entry name is not valid UTF-8 for JSON output";
+  if (capture.header.execution_conditions != kSupportedExecutionConditions)
+    return diagnostic.emit() << "unsupported capture execution conditions";
+  if (std::ranges::all_of(capture.header.run_identity, [](uint8_t value) { return value == 0; }))
+    return diagnostic.emit() << "missing capture run identity";
+  if (capture.executions.size() > CaptureLimits{}.executions)
+    return diagnostic.emit() << "capture execution budget exceeded";
+  if (options.examples > kMaxFindingExamples)
+    return diagnostic.emit() << "finding example budget exceeded";
   LdsRaceResult result;
   result.run_identity = capture.header.run_identity;
   result.original = capture.header.manifest.original;

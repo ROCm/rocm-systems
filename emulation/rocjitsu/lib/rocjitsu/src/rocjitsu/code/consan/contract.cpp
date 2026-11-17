@@ -27,17 +27,6 @@ constexpr size_t kBarrierWireBytes = 56;
 // count (4). Name bytes and per-site records are accounted for separately.
 constexpr size_t kFixedPayloadBytes = 144 + 80 + 4;
 
-Result reject(ContractError *error, ContractErrorCode code, std::string_view message) {
-  if (error != nullptr)
-    *error = {.code = code, .message = std::string(message)};
-  return Result::failure();
-}
-
-void clear_error(ContractError *error) {
-  if (error != nullptr)
-    *error = {};
-}
-
 class Encoder {
 public:
   void u32(uint32_t value) {
@@ -191,19 +180,18 @@ Digest mvp_options_digest() {
   return hash.finish();
 }
 
-Result validate_manifest(const Manifest &manifest, ContractError *error,
+Result validate_manifest(const Manifest &manifest, util::DiagnosticEmitter diagnostic,
                          const ContractLimits &limits) {
-  clear_error(error);
   if (manifest.original.bytes > limits.image_bytes ||
       manifest.prepared.bytes > limits.image_bytes || manifest.sites.size() > limits.sites ||
       manifest.entry.name.size() > limits.string_bytes || manifest.barriers.size() > kSyncCapacity)
-    return reject(error, ContractErrorCode::ResourceLimit, "image, site or name budget exceeded");
+    return diagnostic.emit() << "image, site or name budget exceeded";
 
   const uint64_t encoded_bytes = kEnvelopeBytes + kFixedPayloadBytes + manifest.entry.name.size() +
                                  uint64_t{manifest.sites.size()} * kSiteWireBytes +
                                  (4 + manifest.barriers.size() * kBarrierWireBytes);
   if (encoded_bytes > limits.metadata_bytes)
-    return reject(error, ContractErrorCode::ResourceLimit, "static facts exceed metadata budget");
+    return diagnostic.emit() << "static facts exceed metadata budget";
 
   const TargetProfile *target = target_profile(manifest.target);
   if (manifest.original.bytes == 0 || manifest.prepared.bytes == 0 || target == nullptr ||
@@ -212,12 +200,11 @@ Result validate_manifest(const Manifest &manifest, ContractError *error,
        manifest.scope != ScopeKind::NativeLdsWorkgroupBarrier &&
        manifest.scope != ScopeKind::NativeLdsWorkgroupBarrierLoop) ||
       manifest.options != mvp_options_digest())
-    return reject(error, ContractErrorCode::InvalidFacts,
-                  "empty image or unsupported target, ABI, scope or options");
+    return diagnostic.emit() << "empty image or unsupported target, ABI, scope or options";
 
   const EntryFacts &entry = manifest.entry;
   if (!make_kernarg_extension_layout(entry.original_kernarg_bytes, kContextPointerPayloads))
-    return reject(error, ContractErrorCode::ResourceLimit, "wrapper exceeds descriptor size field");
+    return diagnostic.emit() << "wrapper exceeds descriptor size field";
   if (entry.id != 0 || entry.name.empty() || entry.name.find('\0') != std::string::npos ||
       !std::has_single_bit(entry.kernarg_alignment) || entry.kernarg_alignment < 8 ||
       entry.original_kernarg_bytes == 0 || entry.original_private_bytes != 0 ||
@@ -232,7 +219,7 @@ Result validate_manifest(const Manifest &manifest, ContractError *error,
             ? entry.workgroup_id_scalar != kWorkgroupIdTtmp9Selector
             : (entry.workgroup_id_scalar < 2 || entry.workgroup_id_scalar > 16 ||
                entry.workgroup_id_scalar >= entry.prepared_sgprs))))
-    return reject(error, ContractErrorCode::InvalidFacts, "invalid entry ABI or resources");
+    return diagnostic.emit() << "invalid entry ABI or resources";
 
   if (!util::is_range_in_bounds(entry.original_descriptor_offset, 64, manifest.original.bytes) ||
       !util::is_range_in_bounds(entry.prepared_descriptor_offset, 64, manifest.prepared.bytes) ||
@@ -242,14 +229,13 @@ Result validate_manifest(const Manifest &manifest, ContractError *error,
       !util::is_range_in_bounds(entry.prepared_entry_offset, 4, manifest.prepared_text_bytes) ||
       (entry.original_entry_offset % 4) != 0 || (entry.prepared_entry_offset % 4) != 0 ||
       manifest.sites.empty())
-    return reject(error, ContractErrorCode::InvalidFacts,
-                  "entry mapping or text extent is missing");
+    return diagnostic.emit() << "entry mapping or text extent is missing";
 
   if ((manifest.scope != ScopeKind::NativeLdsNoSynchronization) != !manifest.barriers.empty())
-    return reject(error, ContractErrorCode::InvalidFacts, "barrier scope and facts disagree");
+    return diagnostic.emit() << "barrier scope and facts disagree";
   if (!manifest.barriers.empty() && entry.maximum_workgroup_size <= manifest.wave_size)
-    return reject(error, ContractErrorCode::InvalidFacts,
-                  "barrier profile requires a maximum workgroup size permitting two waves");
+    return diagnostic.emit()
+           << "barrier profile requires a maximum workgroup size permitting two waves";
   std::vector<std::pair<uint64_t, uint64_t>> prepared_ranges;
   prepared_ranges.reserve(2 * manifest.sites.size() + 2 * manifest.barriers.size());
   uint64_t previous_barrier_end = 0;
@@ -272,14 +258,12 @@ Result validate_manifest(const Manifest &manifest, ContractError *error,
         barrier.probe_size % 4 != 0 ||
         !util::is_range_in_bounds(barrier.completion_probe, barrier.probe_size,
                                   manifest.prepared_text_bytes))
-      return reject(error, ContractErrorCode::InvalidFacts,
-                    "invalid fixed barrier qualification or mapping");
+      return diagnostic.emit() << "invalid fixed barrier qualification or mapping";
     previous_barrier_end = barrier.original_wait + 4;
     for (const SiteFacts &site : manifest.sites)
       if (site.original_offset + site.original_size > barrier.original_drain &&
           site.original_offset < barrier.original_wait + 4)
-        return reject(error, ContractErrorCode::InvalidFacts,
-                      "access overlaps original barrier group");
+        return diagnostic.emit() << "access overlaps original barrier group";
     // Distinct source operations cannot share prepared instruction bytes.
     // Include each wait's completion callback so partial overlaps fail too.
     if (split_barrier)
@@ -307,8 +291,7 @@ Result validate_manifest(const Manifest &manifest, ContractError *error,
         !util::is_range_in_bounds(site.probe_offset, site.probe_size,
                                   manifest.prepared_text_bytes) ||
         uint64_t{site.first_slot} != uint64_t{index} * kAddressGroupsPerSite)
-      return reject(error, ContractErrorCode::InvalidFacts,
-                    "invalid site identity, mapping or address group");
+      return diagnostic.emit() << "invalid site identity, mapping or address group";
     previous_original_end = site.original_offset + site.original_size;
     prepared_ranges.emplace_back(site.prepared_guest_offset,
                                  site.prepared_guest_offset + site.prepared_guest_size);
@@ -317,27 +300,26 @@ Result validate_manifest(const Manifest &manifest, ContractError *error,
   std::sort(prepared_ranges.begin(), prepared_ranges.end());
   for (size_t index = 1; index < prepared_ranges.size(); ++index) {
     if (prepared_ranges[index].first < prepared_ranges[index - 1].second)
-      return reject(error, ContractErrorCode::InvalidFacts,
-                    "duplicate or overlapping prepared mapping");
+      return diagnostic.emit() << "duplicate or overlapping prepared mapping";
   }
   return Result::success();
 }
 
 Result match_images(const Manifest &manifest, std::span<const uint8_t> original,
-                    std::span<const uint8_t> prepared, ContractError *error,
+                    std::span<const uint8_t> prepared, util::DiagnosticEmitter diagnostic,
                     const ContractLimits &limits) {
-  if (validate_manifest(manifest, error, limits).failed())
+  if (validate_manifest(manifest, diagnostic, limits).failed())
     return Result::failure();
   if (original.size() != manifest.original.bytes || prepared.size() != manifest.prepared.bytes ||
       digest(original) != manifest.original.sha256 || digest(prepared) != manifest.prepared.sha256)
-    return reject(error, ContractErrorCode::IdentityMismatch,
-                  "exact code-object identity mismatch");
+    return diagnostic.emit() << "exact code-object identity mismatch";
   return Result::success();
 }
 
-FailureOr<std::vector<uint8_t>> encode_manifest(const Manifest &manifest, ContractError *error,
+FailureOr<std::vector<uint8_t>> encode_manifest(const Manifest &manifest,
+                                                util::DiagnosticEmitter diagnostic,
                                                 const ContractLimits &limits) {
-  if (validate_manifest(manifest, error, limits).failed())
+  if (validate_manifest(manifest, diagnostic, limits).failed())
     return Result::failure();
   Encoder payload;
   encode_identity(payload, manifest.original);
@@ -375,11 +357,11 @@ FailureOr<std::vector<uint8_t>> encode_manifest(const Manifest &manifest, Contra
   return envelope.take();
 }
 
-FailureOr<Manifest> decode_manifest(std::span<const uint8_t> bytes, ContractError *error,
+FailureOr<Manifest> decode_manifest(std::span<const uint8_t> bytes,
+                                    util::DiagnosticEmitter diagnostic,
                                     const ContractLimits &limits) {
-  clear_error(error);
   if (bytes.size() > limits.metadata_bytes)
-    return reject(error, ContractErrorCode::ResourceLimit, "static facts exceed metadata budget");
+    return diagnostic.emit() << "static facts exceed metadata budget";
   Decoder envelope(bytes);
   std::array<uint8_t, 8> magic{};
   std::array<uint8_t, 16> contract{};
@@ -387,12 +369,12 @@ FailureOr<Manifest> decode_manifest(std::span<const uint8_t> bytes, ContractErro
   Digest checksum{};
   if (!envelope.bytes(magic) || !envelope.bytes(contract) || !envelope.u64(payload_size) ||
       !envelope.bytes(checksum) || magic != kFactsMagic || payload_size != envelope.remaining())
-    return reject(error, ContractErrorCode::InvalidEncoding, "invalid static-facts framing");
+    return diagnostic.emit() << "invalid static-facts framing";
   if (contract != kProducerContract)
-    return reject(error, ContractErrorCode::IncompatibleContract, "producer contract mismatch");
+    return diagnostic.emit() << "producer contract mismatch";
   const std::span<const uint8_t> payload = bytes.subspan(kEnvelopeBytes);
   if (digest(payload) != checksum)
-    return reject(error, ContractErrorCode::IdentityMismatch, "static-facts digest mismatch");
+    return diagnostic.emit() << "static-facts digest mismatch";
 
   Decoder decoder(payload);
   Manifest manifest;
@@ -404,63 +386,62 @@ FailureOr<Manifest> decode_manifest(std::span<const uint8_t> bytes, ContractErro
       !decoder.u32(manifest.code_object_abi) || !decoder.u32(scope) ||
       !decoder.u64(manifest.original_text_bytes) || !decoder.u64(manifest.prepared_text_bytes) ||
       !decode_entry(decoder, manifest.entry, limits.string_bytes) || !decoder.u32(count))
-    return reject(error, ContractErrorCode::InvalidEncoding, "truncated or oversized static facts");
+    return diagnostic.emit() << "truncated or oversized static facts";
   manifest.scope = static_cast<ScopeKind>(scope);
   if (count > limits.sites)
-    return reject(error, ContractErrorCode::ResourceLimit, "site count exceeds budget");
+    return diagnostic.emit() << "site count exceeds budget";
   if (uint64_t{count} * kSiteWireBytes + 4 > decoder.remaining())
-    return reject(error, ContractErrorCode::InvalidEncoding, "site count disagrees with extent");
+    return diagnostic.emit() << "site count disagrees with extent";
   manifest.sites.resize(count);
   for (SiteFacts &site : manifest.sites) {
     if (!decode_site(decoder, site))
-      return reject(error, ContractErrorCode::InvalidEncoding, "truncated site facts");
+      return diagnostic.emit() << "truncated site facts";
   }
   uint32_t groups = 0;
   if (!decoder.u32(groups) || groups > kSyncCapacity ||
       uint64_t{groups} * kBarrierWireBytes != decoder.remaining())
-    return reject(error, ContractErrorCode::InvalidEncoding, "barrier count disagrees with extent");
+    return diagnostic.emit() << "barrier count disagrees with extent";
   for (uint32_t group = 0; group < groups; ++group) {
     BarrierFacts barrier;
     if (!decoder.u64(barrier.original_drain) || !decoder.u64(barrier.original_signal) ||
         !decoder.u64(barrier.original_wait) || !decoder.u64(barrier.prepared_signal) ||
         !decoder.u64(barrier.prepared_wait) || !decoder.u64(barrier.completion_probe) ||
         !decoder.u32(barrier.probe_size) || !decoder.u32(barrier.identity))
-      return reject(error, ContractErrorCode::InvalidEncoding, "truncated barrier facts");
+      return diagnostic.emit() << "truncated barrier facts";
     manifest.barriers.push_back(barrier);
   }
-  if (validate_manifest(manifest, error, limits).failed())
+  if (validate_manifest(manifest, diagnostic, limits).failed())
     return Result::failure();
   return manifest;
 }
 
 FailureOr<LaunchLayout> plan_launch(const Manifest &manifest, const LaunchDimensions &dimensions,
                                     uint32_t packet_group_bytes, uint32_t packet_private_bytes,
-                                    ContractError *error, const ContractLimits &limits) {
-  if (validate_manifest(manifest, error, limits).failed())
+                                    util::DiagnosticEmitter diagnostic,
+                                    const ContractLimits &limits) {
+  if (validate_manifest(manifest, diagnostic, limits).failed())
     return Result::failure();
   if (dimensions.workgroup[0] == 0 || dimensions.grid[0] == 0 ||
       dimensions.workgroup[0] > manifest.entry.maximum_workgroup_size ||
       dimensions.workgroup[1] != 1 || dimensions.workgroup[2] != 1 || dimensions.grid[1] != 1 ||
       dimensions.grid[2] != 1 || packet_private_bytes != 0 ||
       dimensions.grid[0] % dimensions.workgroup[0] != 0)
-    return reject(error, ContractErrorCode::UnsupportedLaunch,
-                  "capture requires complete bounded 1D workgroups and no private segment");
+    return diagnostic.emit()
+           << "capture requires complete bounded 1D workgroups and no private segment";
   const uint32_t workgroups = dimensions.grid[0] / dimensions.workgroup[0];
   if (workgroups > kWorkgroupCapacity ||
       (workgroups > 1 && manifest.entry.workgroup_id_scalar == UINT32_MAX))
-    return reject(error, ContractErrorCode::UnsupportedLaunch,
-                  "multi-workgroup profile requires at most 16 groups and original "
-                  "workgroup-X input");
+    return diagnostic.emit() << "multi-workgroup profile requires at most 16 groups and original "
+                                "workgroup-X input";
   const uint64_t row_stride = report_row_bytes(manifest.sites.size(), !manifest.barriers.empty());
   const uint32_t waves_per_group =
       (dimensions.workgroup[0] + manifest.wave_size - 1) / manifest.wave_size;
   if (!manifest.barriers.empty() && waves_per_group < 2)
-    return reject(error, ContractErrorCode::UnsupportedLaunch,
-                  "barrier profile requires at least two waves per workgroup");
+    return diagnostic.emit() << "barrier profile requires at least two waves per workgroup";
   const uint64_t rows = uint64_t{workgroups} * waves_per_group;
   if (rows > std::numeric_limits<uint32_t>::max() ||
       row_stride > (std::numeric_limits<uint64_t>::max() - kReportHeaderBytes) / rows)
-    return reject(error, ContractErrorCode::ResourceLimit, "report extent arithmetic overflow");
+    return diagnostic.emit() << "report extent arithmetic overflow";
   const uint64_t report_bytes = kReportHeaderBytes + rows * row_stride;
   const std::optional<KernargExtensionLayout> kernarg =
       make_kernarg_extension_layout(manifest.entry.original_kernarg_bytes, kContextPointerPayloads);
@@ -469,11 +450,10 @@ FailureOr<LaunchLayout> plan_launch(const Manifest &manifest, const LaunchDimens
   if (row_stride > std::numeric_limits<uint32_t>::max() ||
       report_bytes > std::numeric_limits<uint32_t>::max() || report_bytes > limits.report_bytes ||
       !kernarg)
-    return reject(error, ContractErrorCode::ResourceLimit,
-                  "report or wrapper extent exceeds budget");
+    return diagnostic.emit() << "report or wrapper extent exceeds budget";
   const uint32_t group_bytes = std::max(packet_group_bytes, manifest.entry.prepared_group_bytes);
   if (group_bytes > 65536)
-    return reject(error, ContractErrorCode::UnsupportedLaunch, "LDS extent exceeds subset limit");
+    return diagnostic.emit() << "LDS extent exceeds subset limit";
   return LaunchLayout{.wrapper_bytes = kernarg->wrapper_size,
                       .original_pointer_offset = kernarg->original_kernarg_pointer_offset,
                       .context_pointer_offset = kernarg->payload_offsets[0],
@@ -490,15 +470,14 @@ FailureOr<TransportImage> initialize_transport(const Manifest &manifest,
                                                const LaunchDimensions &dimensions,
                                                uint32_t group_bytes, uint32_t private_bytes,
                                                uint64_t serial, uint64_t report_address,
-                                               ContractError *error) {
+                                               util::DiagnosticEmitter diagnostic) {
   const FailureOr<LaunchLayout> layout =
-      plan_launch(manifest, dimensions, group_bytes, private_bytes, error);
+      plan_launch(manifest, dimensions, group_bytes, private_bytes, diagnostic);
   if (layout.failed())
     return Result::failure();
   if (serial == 0 || report_address == 0 || (report_address % 64) != 0 ||
       layout.value().report_bytes > std::numeric_limits<uint64_t>::max() - report_address)
-    return reject(error, ContractErrorCode::InvalidFacts,
-                  "invalid serial or report address extent");
+    return diagnostic.emit() << "invalid serial or report address extent";
   TransportImage image;
   image.report.resize(layout.value().report_bytes);
   wire::write_u64(image.context, wire::kContextSerial, serial);
