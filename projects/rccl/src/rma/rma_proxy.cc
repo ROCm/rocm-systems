@@ -14,6 +14,7 @@
 #include "gdrwrap.h"
 #include "comm.h"
 #include "bootstrap.h"
+#include "bootstrap_agree.h"
 #include "compiler.h"
 #include "rma/rma.h"
 #include "rma/rma_proxy.h"
@@ -535,19 +536,16 @@ ncclResult_t ncclRmaProxyConnectOnce(struct ncclComm* comm) {
   rmaCommCount = std::min<int>(rmaProxyState->rmaCommCount, NCCL_RMA_MAX_CONNECTIONS);
   rmaCommCount = std::min<int>(rmaCommCount, ndev);
 
-  int* allCommCounts = NULL;
   void** handles = NULL;
   char* allHandles = NULL;
 
   // Get the min local net count from all ranks
-  NCCLCHECK(ncclCalloc(&allCommCounts, comm->nRanks));
-  allCommCounts[comm->rank] = rmaCommCount;
-  NCCLCHECKGOTO(bootstrapAllGather(comm->bootstrap, allCommCounts, sizeof(int)), ret, fail);
-  for (int i = 0; i < comm->nRanks; i++) {
-    rmaCommCount = std::min<int>(rmaCommCount, allCommCounts[i]);
-  }
-  free(allCommCounts);
-  allCommCounts = NULL;
+  NCCLCHECKGOTO(ncclBootstrapAgree(comm, rmaCommCount,
+                                   [&](int const* counts, int nRanks) {
+                                     for (int i = 0; i < nRanks; i++)
+                                       rmaCommCount = std::min<int>(rmaCommCount, counts[i]);
+                                   }),
+                ret, fail);
 
   if (rmaCommCount == 0) {
     WARN("Rma connect : min local net count is zero");
@@ -632,7 +630,6 @@ exit:
   if (ret == ncclSuccess) rmaProxyState->connected = true;
   return ret;
 fail:
-  free(allCommCounts);
   free(allHandles);
   free(handles);
   goto exit;

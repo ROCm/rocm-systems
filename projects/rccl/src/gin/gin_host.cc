@@ -11,6 +11,7 @@
 #include "graph.h"
 #include "transport.h"
 #include "register_inline.h"
+#include "bootstrap_agree.h"
 #include "gin/gin_anvil_reach.h"
 #include "gin/gin_host.h"
 #include "gin/gin_host_proxy.h"
@@ -201,10 +202,8 @@ ncclResult_t ncclGinConnectOnce(struct ncclComm* comm) {
   void** listenComms = NULL;
   int ndev = 0;
   struct ncclGinBackendState* backend = NULL;
-  int* ginCommCountHandles = NULL;
 
   NCCLCHECKGOTO(ncclCalloc(&listenComms, ginState->numActiveBackends), ret, fail);
-  NCCLCHECKGOTO(ncclCalloc(&ginCommCountHandles, comm->nRanks), ret, fail);
   NCCLCHECKGOTO(ncclCalloc(&allHandles, (size_t)comm->nRanks * NCCL_NET_HANDLE_MAXSIZE), ret, fail);
   NCCLCHECKGOTO(ncclCalloc(&handles, comm->nRanks), ret, fail);
 
@@ -248,11 +247,12 @@ ncclResult_t ncclGinConnectOnce(struct ncclComm* comm) {
       INFO(NCCL_INIT, "GIN: increased ginCommCount to %d to match GIN_PROXY_NTHREADS", backend->ginCommCount);
     }
 
-    ginCommCountHandles[comm->rank] = backend->ginCommCount;
-    NCCLCHECKGOTO(bootstrapAllGather(comm->bootstrap, ginCommCountHandles, sizeof(int)), ret, fail);
-    for (int r = 0; r < comm->nRanks; r++) {
-      backend->ginCommCount = std::min(backend->ginCommCount, ginCommCountHandles[r]);
-    }
+    NCCLCHECKGOTO(ncclBootstrapAgree(comm, backend->ginCommCount,
+                                     [&](int const* counts, int nRanks) {
+                                       for (int r = 0; r < nRanks; r++)
+                                         backend->ginCommCount = std::min(backend->ginCommCount, counts[r]);
+                                     }),
+                  ret, fail);
     // After cross-rank min, proxyNthreads may exceed ginCommCount if ranks disagree
     // on NCCL_GIN_PROXY_NTHREADS (atypical — env vars are normally uniform across a job).
     // Extra threads simply idle in the stride loop; no correctness issue.
@@ -303,7 +303,6 @@ ncclResult_t ncclGinConnectOnce(struct ncclComm* comm) {
 exit:
   free(handles);
   free(allHandles);
-  free(ginCommCountHandles);
   free(listenComms);
   if (ret == ncclSuccess) ginState->connected = true;
   return ret;
