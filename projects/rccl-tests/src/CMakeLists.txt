@@ -161,6 +161,43 @@ add_rccl_test(reduce_scatter)
 add_rccl_test(reduce)
 add_rccl_test(scatter)
 add_rccl_test(sendrecv)
+
+# The 11 binaries test_rccl.py launched with no arguments. Defaults are
+# 1 GPU, one 32 MiB buffer, ncclFloat, ncclSum. They are not gtest cases, so
+# the same command is labeled both standard and comprehensive.
+set(_rccl_perf_tests
+  all_gather
+  all_reduce
+  alltoall
+  alltoallv
+  broadcast
+  gather
+  hypercube
+  reduce_scatter
+  reduce
+  scatter
+  sendrecv
+)
+set(_rccl_perf_labels "rccl;standard;comprehensive")
+foreach(_perf IN LISTS _rccl_perf_tests)
+  set_tests_properties(${_perf} PROPERTIES LABELS "${_rccl_perf_labels}")
+endforeach()
+
+include(GNUInstallDirs)
+set(_rccl_perf_ctest "${CMAKE_CURRENT_BINARY_DIR}/rccl_perf_tests.cmake")
+file(WRITE "${_rccl_perf_ctest}"
+  "# Installed next to rccl's CTestTestfile.cmake. Commands are relative to bin/rccl.\n")
+foreach(_perf IN LISTS _rccl_perf_tests)
+  file(APPEND "${_rccl_perf_ctest}"
+    "add_test(NAME rccl-perf-${_perf} COMMAND ../${_perf}_perf)\n"
+    "set_tests_properties(rccl-perf-${_perf} PROPERTIES LABELS \"${_rccl_perf_labels}\")\n")
+endforeach()
+install(
+  FILES "${_rccl_perf_ctest}"
+  DESTINATION "${CMAKE_INSTALL_BINDIR}/rccl"
+  COMPONENT tests
+)
+
 add_rccl_test(all_reduce_bias)
 
 if (ENABLE_ROCSHMEM_GIN AND RCCL_SOURCE_DIR)
