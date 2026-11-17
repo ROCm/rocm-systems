@@ -674,7 +674,6 @@ constexpr auto k_timemory_only_sampling_settings = std::to_array<std::string_vie
     env_vars::SAMPLING_OVERFLOW_SIGNAL,
     env_vars::SAMPLING_OVERFLOW_EVENT,
     env_vars::SAMPLING_ALLOCATOR_SIZE,
-    env_vars::SAMPLING_KEEP_INTERNAL,
     env_vars::SAMPLING_KEEP_DYNINST_SUFFIX,
     env_vars::SAMPLING_INCLUDE_INLINES,
 });

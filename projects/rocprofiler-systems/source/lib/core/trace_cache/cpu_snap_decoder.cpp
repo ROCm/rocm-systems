@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "core/trace_cache/cpu_snap_decoder.hpp"
+#include "common/path.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "logger/debug.hpp"
 #include "rocprofiler-systems/categories.h"
@@ -41,13 +42,15 @@ struct frame_strings
 {
     std::string name;
     std::string call_stack;
+    bool        skipped = false;
 };
 }  // namespace
 
 struct cpu_snap_decoder::impl
 {
-    explicit impl(on_slice_fn on_slice_in)
+    impl(on_slice_fn on_slice_in, std::vector<std::string> skipped_module_prefixes_in)
     : on_slice{ std::move(on_slice_in) }
+    , skipped_module_prefixes{ std::move(skipped_module_prefixes_in) }
     {
         reader.on_event([this](const ::cpu_snap::core::record_variant& record) {
             on_record(record);
@@ -109,6 +112,10 @@ struct cpu_snap_decoder::impl
         for(auto const address : frames | std::views::reverse)
         {
             auto const& frame = frame_cache.at(address);
+            if(frame.skipped)
+            {
+                continue;
+            }
             on_slice(backtrace_region_sample{
                 static_cast<std::uint32_t>(ROCPROFSYS_CATEGORY_TIMER_SAMPLING),
                 sample.tid, track_name, frame.name, start, sample.timestamp_ns,
@@ -142,20 +149,31 @@ struct cpu_snap_decoder::impl
             {
                 name = fmt::format("0x{:x}", address);
             }
-            auto const     module = modules.resolve(address, timestamp);
+            auto const     module  = modules.resolve(address, timestamp);
+            auto const     skipped = module && is_skipped_module(module->path);
             nlohmann::json call_stack;
             call_stack["name"] = name;
             call_stack["pc"]   = fmt::format("{:X}", address);
             call_stack["file"] = module ? module->path : std::string{};
-            frame_cache.emplace(address,
-                                frame_strings{ .name       = std::move(name),
-                                               .call_stack = call_stack.dump() });
+            frame_cache.emplace(address, frame_strings{ .name       = std::move(name),
+                                                        .call_stack = call_stack.dump(),
+                                                        .skipped    = skipped });
         }
+    }
+
+    [[nodiscard]] bool is_skipped_module(std::string_view module_path) const
+    {
+        auto const file_name = path::filename(module_path);
+        return std::ranges::any_of(skipped_module_prefixes,
+                                   [&file_name](const std::string& prefix) {
+                                       return file_name.starts_with(prefix);
+                                   });
     }
 
     using address_at = std::pair<std::uint64_t, std::uint64_t>;
 
     on_slice_fn              on_slice;
+    std::vector<std::string> skipped_module_prefixes;
     ::cpu_snap::core::reader reader;
     // Modules loaded over time, from the stream's maps records; read by the symbolizer.
     ::cpu_snap::core::module_map                modules;
@@ -172,8 +190,10 @@ struct cpu_snap_decoder::impl
     std::uint64_t                                    unresolved_samples = 0;
 };
 
-cpu_snap_decoder::cpu_snap_decoder(on_slice_fn on_slice)
-: m_impl{ std::make_unique<impl>(std::move(on_slice)) }
+cpu_snap_decoder::cpu_snap_decoder(on_slice_fn              on_slice,
+                                   std::vector<std::string> skipped_module_prefixes)
+: m_impl{ std::make_unique<impl>(std::move(on_slice),
+                                 std::move(skipped_module_prefixes)) }
 {}
 
 cpu_snap_decoder::~cpu_snap_decoder() = default;

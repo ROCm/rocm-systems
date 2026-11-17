@@ -7,7 +7,9 @@
 
 #include <functional>
 #include <memory>
+#include <string>
 #include <string_view>
+#include <vector>
 
 namespace rocprofsys::trace_cache
 {
@@ -25,7 +27,8 @@ inline constexpr std::string_view k_cpu_snap_display_name =
  * slice. Frames are named by cpu-snap's symbolizer (in-process, libdwfl), resolved
  * against the modules loaded when the sample was taken; an address it cannot name
  * keeps "0x<address>". The call_stack JSON carries name, pc and binary path, as the
- * old sampler writes it.
+ * old sampler writes it. Frames whose module file name starts with one of the given
+ * prefixes are left out; the frames around them stay.
  */
 class cpu_snap_decoder
 {
@@ -33,7 +36,13 @@ public:
     /// Receives each slice. The sample's string views are valid only during the call.
     using on_slice_fn = std::function<void(const backtrace_region_sample&)>;
 
-    explicit cpu_snap_decoder(on_slice_fn on_slice);
+    /**
+     * @param on_slice                Receives each slice.
+     * @param skipped_module_prefixes Frames whose module file name starts with one of
+     *                                these are left out; empty keeps every frame.
+     */
+    cpu_snap_decoder(on_slice_fn              on_slice,
+                     std::vector<std::string> skipped_module_prefixes);
     ~cpu_snap_decoder();
 
     cpu_snap_decoder(const cpu_snap_decoder&)            = delete;
