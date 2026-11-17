@@ -8235,18 +8235,25 @@ private:
         mask_b->inst().mnemonic() != "s_and_b32" || mask_a->offset() >= mask_b->offset())
       return false;
 
-    // No other branch may enter after the wait mask was formed. In the local
-    // producer interval, only EXEC-zero guards may alter the straight-line
-    // route, and no other edge can bypass this full wait into the consumer.
+    // A single conditional backedge may skip this iteration's wait only when
+    // it returns before the producer. A later consumer then passes its own
+    // wait, which drains earlier iterations too. Reject all other branches
+    // that could bypass the wait or enter after its mask was formed.
+    std::optional<std::pair<uint64_t, uint64_t>> loop_backedge;
     for (const auto &[offset, where] : code) {
-      if (event.section_offset < offset && offset < consumer_pc && where.inst().is_branch() &&
-          where.inst().mnemonic() != "s_cbranch_execz")
+      if (event.section_offset >= offset || offset >= consumer_pc || !where.inst().is_branch() ||
+          where.inst().mnemonic() == "s_cbranch_execz")
+        continue;
+      const auto target = branch_target(where);
+      if (loop_backedge || !where.inst().mnemonic().starts_with("s_cbranch_scc") || !target ||
+          !code.contains(*target) || *target >= event.section_offset || offset >= mask_a->offset())
         return false;
+      loop_backedge = std::pair{offset, *target};
     }
     for (const auto &[source, destination] : branch_edges) {
-      // A later iteration can reissue the producer or reuse a different
-      // EXEC value. This short proof covers only forward paths.
-      if (event.section_offset < source && source < consumer_pc && destination <= source)
+      if (event.section_offset < source && source < consumer_pc && destination <= source &&
+          (!loop_backedge || loop_backedge->first != source ||
+           loop_backedge->second != destination))
         return false;
       if (mask_a->offset() < destination && destination <= consumer_pc &&
           !(event.section_offset <= source && source < consumer_pc))
@@ -8321,6 +8328,8 @@ private:
     const auto cmp_a = unique_writer(*cmp_mask_a, *mask_a);
     const auto cmp_b = unique_writer(*cmp_mask_b, *mask_b);
     if (!cmp_a || !cmp_b || cmp_a->offset() >= cmp_b->offset())
+      return false;
+    if (loop_backedge && loop_backedge->second <= cmp_b->offset())
       return false;
     if (operand_ref(*cmp_a, cmp_a->inst().dst_operand(0)) != cmp_mask_a ||
         operand_ref(*cmp_b, cmp_b->inst().dst_operand(0)) != cmp_mask_b)

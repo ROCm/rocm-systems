@@ -10162,6 +10162,12 @@ TEST(WaitcheckTest, Gfx1250OrderedSignedMaskGuardsProveEarlierVaDrain) {
     CommonLoadWait,
     CommonLoadNoWait,
     Backedge,
+    LoopBeforeProducer,
+    LoopEntersAfterProducer,
+    LoopBypassesWait,
+    LoopChangedBound,
+    LoopChangedCommonMask,
+    LoopCarriesYounger,
     YoungerProducer,
   };
   const auto check = [](Variation variation) {
@@ -10172,7 +10178,9 @@ TEST(WaitcheckTest, Gfx1250OrderedSignedMaskGuardsProveEarlierVaDrain) {
       if (variation == Variation::BoundLoadWait)
         append_inst(code, sopp(71, 0)); // full KMCNT before either compare
     } else {
-      append_inst(code, s_mov_b32(68, variation == Variation::ChangedBound ? 132 : 133));
+      const bool changed_bound =
+          variation == Variation::ChangedBound || variation == Variation::LoopChangedBound;
+      append_inst(code, s_mov_b32(68, changed_bound ? 132 : 133));
     }
     append_inst(code, s_mov_b32(106, 193)); // vcc_lo = -1
     if (variation == Variation::CommonLoadWait || variation == Variation::CommonLoadNoWait) {
@@ -10193,7 +10201,7 @@ TEST(WaitcheckTest, Gfx1250OrderedSignedMaskGuardsProveEarlierVaDrain) {
     code.push_back(0x36240298u); // v18 = v1 & 24
     code.push_back(variation == Variation::Reversed ? 0x38262482u : 0x38262481u);
     code.insert(code.end(), {0xd4440003u, 0x02022644u}); // s3 = s68 > v19
-    if (variation == Variation::ChangedBound)
+    if (variation == Variation::ChangedBound || variation == Variation::LoopChangedBound)
       append_inst(code, s_mov_b32(68, 133)); // A looser second bound cannot prove subset
     if (variation == Variation::ChangedBase)
       code.push_back(0x36240290u); // v18 = v1 & 16 before the later index
@@ -10201,16 +10209,26 @@ TEST(WaitcheckTest, Gfx1250OrderedSignedMaskGuardsProveEarlierVaDrain) {
     code.insert(code.end(), {0xd4440004u, 0x02022844u}); // s4 = s68 > v20
     const bool common_load =
         variation == Variation::CommonLoadWait || variation == Variation::CommonLoadNoWait;
+    const size_t loop_entry = code.size();
     code.push_back(common_load ? 0x8b051d03u : 0x8b056a03u); // s5 = s3 & common
     if (variation == Variation::AmbiguousBank)
       append_inst(code, s_set_vgpr_msb(0)); // producer and consumer banks are known
     const uint64_t producer = code.size() * sizeof(uint32_t);
     append_inst(code, v_mov_b32(8, 3));
+    if (variation == Variation::LoopBeforeProducer || variation == Variation::LoopChangedBound ||
+        variation == Variation::LoopChangedCommonMask) {
+      append_inst(code, s_cmp_eq_u32(0, 1)); // independent, unknown loop decision
+      const int32_t displacement =
+          static_cast<int32_t>(loop_entry) - static_cast<int32_t>(code.size()) - 1;
+      code.push_back(0xbfa20000u | static_cast<uint16_t>(displacement));
+      code.push_back(common_load ? 0x8b051d03u : 0x8b056a03u); // mask for this iteration
+    }
     std::optional<size_t> bypass;
-    if (variation == Variation::BypassWait) {
+    if (variation == Variation::BypassWait || variation == Variation::LoopBypassesWait) {
       bypass = code.size();
       code.push_back(0xbfa00000u); // direct path to the later active consumer
     }
+    const size_t first_save = code.size();
     code.push_back(0xbe8a2005u); // s_and_saveexec_b32 s10,s5
     const auto first_branch = code.size();
     code.push_back(0xbfa50000u); // s_cbranch_execz past the VA drain
@@ -10224,10 +10242,10 @@ TEST(WaitcheckTest, Gfx1250OrderedSignedMaskGuardsProveEarlierVaDrain) {
     }
     if (bypass)
       code[*bypass] |= static_cast<uint32_t>(code.size() - *bypass - 1);
-    if (variation == Variation::ChangedCommonMask)
+    if (variation == Variation::ChangedCommonMask || variation == Variation::LoopChangedCommonMask)
       append_inst(code, s_mov_b32(106, 0)); // an unknown new common mask
     uint64_t expected_producer = producer;
-    if (variation == Variation::YoungerProducer) {
+    if (variation == Variation::YoungerProducer || variation == Variation::LoopCarriesYounger) {
       expected_producer = code.size() * sizeof(uint32_t);
       append_inst(code, v_mov_b32(8, 3)); // issued after the earlier full drain
     }
@@ -10240,6 +10258,16 @@ TEST(WaitcheckTest, Gfx1250OrderedSignedMaskGuardsProveEarlierVaDrain) {
     code[second_branch] |= static_cast<uint32_t>(code.size() - second_branch - 1);
     append_inst(code, s_wait_xcnt_0());
     code.push_back(0x8c7e0b7eu); // s_or_b32 exec_lo,exec_lo,s11
+    if (variation == Variation::LoopEntersAfterProducer ||
+        variation == Variation::LoopBypassesWait || variation == Variation::LoopCarriesYounger) {
+      const size_t target = variation == Variation::LoopEntersAfterProducer ? first_save
+                            : variation == Variation::LoopCarriesYounger
+                                ? expected_producer / sizeof(uint32_t)
+                                : producer / sizeof(uint32_t);
+      const int32_t displacement =
+          static_cast<int32_t>(target) - static_cast<int32_t>(code.size()) - 1;
+      code.push_back(0xbfa20000u | static_cast<uint16_t>(displacement));
+    }
     append_inst(code, s_endpgm());
     const auto image =
         waitcheck_test::make_gfx_code_object(code, EF_AMDGPU_MACH_AMDGCN_GFX1250, true);
@@ -10253,15 +10281,30 @@ TEST(WaitcheckTest, Gfx1250OrderedSignedMaskGuardsProveEarlierVaDrain) {
     });
     EXPECT_EQ(hazard == report.diagnostics.end(), variation == Variation::Ordered ||
                                                       variation == Variation::BoundLoadWait ||
-                                                      variation == Variation::CommonLoadWait)
+                                                      variation == Variation::CommonLoadWait ||
+                                                      variation == Variation::LoopBeforeProducer)
         << diagnostic_summary(report);
   };
-  for (const auto variation :
-       {Variation::Ordered, Variation::Reversed, Variation::ChangedBound, Variation::ChangedBase,
-        Variation::ChangedCommonMask, Variation::PartialWait, Variation::BypassWait,
-        Variation::AmbiguousBank, Variation::BoundLoadWait, Variation::BoundLoadNoWait,
-        Variation::CommonLoadWait, Variation::CommonLoadNoWait, Variation::Backedge,
-        Variation::YoungerProducer}) {
+  for (const auto variation : {Variation::Ordered,
+                               Variation::Reversed,
+                               Variation::ChangedBound,
+                               Variation::ChangedBase,
+                               Variation::ChangedCommonMask,
+                               Variation::PartialWait,
+                               Variation::BypassWait,
+                               Variation::AmbiguousBank,
+                               Variation::BoundLoadWait,
+                               Variation::BoundLoadNoWait,
+                               Variation::CommonLoadWait,
+                               Variation::CommonLoadNoWait,
+                               Variation::Backedge,
+                               Variation::LoopBeforeProducer,
+                               Variation::LoopEntersAfterProducer,
+                               Variation::LoopBypassesWait,
+                               Variation::LoopChangedBound,
+                               Variation::LoopChangedCommonMask,
+                               Variation::LoopCarriesYounger,
+                               Variation::YoungerProducer}) {
     SCOPED_TRACE(static_cast<int>(variation));
     check(variation);
   }
