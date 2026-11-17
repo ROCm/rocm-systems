@@ -16,6 +16,7 @@ add_library(
     mfma/matrix_i8.cpp
     mfma/sparse_matrix_i8.cpp
     mfma/smfmac_float.cpp
+    wmma/wmma_gfx1251_f64.cpp
     wmma/swmmac_gfx1250_float.cpp
     common/cpu.cpp
     common/cpu_decode.cpp

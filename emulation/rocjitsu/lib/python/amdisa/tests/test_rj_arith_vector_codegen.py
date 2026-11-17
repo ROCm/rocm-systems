@@ -1044,3 +1044,19 @@ def test_older_word_routing_reuses_apis_without_enabling_neighboring_arithmetic(
     assert ('read_wave_mask_scalar(mask, wf)' in select) == vop3
     assert ('inst_.abs' in select) == vop3
     assert gen_vector32(context(arch, 'V_AND_B32', ['d'], ['a', 'b'], vop3)) is not None
+
+
+@pytest.mark.parametrize('arch', ['cdna1', 'cdna2', 'cdna3', 'cdna4'])
+def test_accumulator_transfers_keep_bank_resolution_in_operands(arch):
+    names = ['V_ACCVGPR_READ', 'V_ACCVGPR_WRITE']
+    if arch != 'cdna1':
+        names.append('V_ACCVGPR_MOV_B32')
+    for name in names:
+        body = gen_vector32(context(arch, name, ['d'], ['a'], True))
+        assert body == '  amdgpu::arith::execute_move32(*this, wf, d, a);'
+        assert gen_vector32(context('rdna3', name, ['d'], ['a'], True)) is None
+    if arch in ('cdna1', 'cdna2'):
+        assert (
+            gen_vector32(context(arch, 'V_AND_B32', ['d'], ['a', 'b'], False))
+            is not None
+        )

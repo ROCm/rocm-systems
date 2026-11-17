@@ -3204,8 +3204,10 @@ void VWmmaF6416x16x4F64Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   } else {
     const_acc = amdgpu::RegisterAccess(wf).read_scalar64(src2);
   }
-  amdgpu::exec_wmma_f64_16x16x4_f64(cu, dst, src0_base, src1_base, s2, const_acc, inst_.neg,
-                                    inst_.neg_hi, wf.exec());
+  const uint64_t controls = inst_.neg | (uint64_t(inst_.neg_hi) << 3);
+  amdgpu::arith::exec_dense_fp_matrix<4, 16, 32, 16, false, true>(
+      wf, rj_arith_v_wmma_f64_16x16x4_f64_w32, cu.arithmetic_flags(), controls, dst, src0_base,
+      src1_base, s2, !src2_off ? std::optional<uint64_t>(const_acc) : std::nullopt);
 }
 
 namespace {

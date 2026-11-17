@@ -284,7 +284,6 @@ def _flush_input_then(fmt: str, functor: str) -> str:
 
 
 SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
-    'v_accvgpr_mov_b32_vop1': ('uint32_t', 'uint32_t', '[](auto a) { return a; }'),
     'v_mov_b16_vop1': ('uint32_t', 'uint32_t', '[](auto a) { return a & 0xFFFFu; }'),
     'v_not_b16_vop1': ('uint32_t', 'uint32_t', '[](auto a) { return (~a) & 0xFFFFu; }'),
     'v_cvt_i32_i16_vop1': (
