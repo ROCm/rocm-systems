@@ -28,6 +28,42 @@ PendingEvent load(uint16_t reg, uint32_t younger, uint64_t offset = 0) {
   return event;
 }
 
+TEST(WaitcheckState, Rdna4Wave64CmpxAdvancesExpertValuWithEmptyExec) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_RDNA4;
+  auto decoder = Decoder::create(arch);
+  ASSERT_NE(decoder, nullptr);
+  ClassifiedEvent event;
+  event.counter = WaitCounterKind::VaVdst;
+  event.kind = WaitEventKind::ValuCore;
+  for (auto [word, wave32_issues, wave64_issues] :
+       {std::tuple{0x7d94170bu, false, true}, // v_cmpx_eq_u32 v11, v11.
+        std::tuple{0x7e000000u, true, true},  // v_nop.
+        std::tuple{0x7e100303u, false, false}}) { // v_mov_b32 v8, v3.
+    const std::array words{word};
+    auto decoded = decoder->decode_window(words, 0);
+    ASSERT_TRUE(decoded.succeeded());
+    const auto &inst = *decoded.value();
+    RegisterSet defs;
+    inst.implicit_defs(defs);
+    for (int i = 0; i < inst.num_dst_operands(); ++i)
+      if (const auto ref = inst.dst_operand(i)->to_register_ref())
+        defs.expand(*ref);
+    for (auto [wave_size, expected] : {std::pair{32u, wave32_issues},
+                                      std::pair{64u, wave64_issues}}) {
+      PendingState state;
+      state.expert_exec_empty = true;
+      state.expert_valu_may_skip = true;
+      const auto units = Ops::track_issue_units(state, inst, event, defs, arch, wave_size);
+      EXPECT_EQ(units, expected ? std::optional<uint32_t>{1} : std::nullopt)
+          << inst.mnemonic() << " wave_size=" << wave_size;
+    }
+  }
+  const std::array scalar_nop{0xbf800000u};
+  auto decoded_nop = decoder->decode_window(scalar_nop, 0);
+  ASSERT_TRUE(decoded_nop.succeeded());
+  EXPECT_FALSE(Ops::expert_valu_kind(*decoded_nop.value(), arch));
+}
+
 TEST(WaitcheckState, Gfx9D16WritebackRequiresKnownSramEccSetting) {
   EXPECT_TRUE(Ops::tracks_d16_subregisters(ROCJITSU_CODE_ARCH_CDNA1, EF_AMDGPU_MACH_AMDGCN_GFX900));
   EXPECT_TRUE(Ops::tracks_d16_subregisters(ROCJITSU_CODE_ARCH_CDNA1, EF_AMDGPU_MACH_AMDGCN_GFX90C));

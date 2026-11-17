@@ -1836,7 +1836,8 @@ private:
         const auto mode_write = expert_scheduling_mode_write(inst, arch);
         const bool valu_issues_with_empty_exec =
             (issued_counters & (uint64_t{1} << counter_index(WaitCounterKind::VaVdst))) &&
-            (invalidates_vcc || expert_valu_issues_without_active_lanes(inst, du.defs));
+            (invalidates_vcc ||
+             expert_valu_issues_without_active_lanes(inst, du.defs, arch, wavefront_size_));
         const bool neutral =
             !invalidates_exec && !invalidates_vcc && defs->second.empty() && !predicate &&
             !inst.is_branch() && !inst.is_waitcnt() && !is_program_end(inst.mnemonic()) &&
@@ -9984,7 +9985,8 @@ private:
     const size_t idx = counter_index(classification.counter);
     if (classification.kind == WaitEventKind::Smem)
       state.pending_smem[idx] = true;
-    const auto units = track_issue_units(state, inst, classification, du.defs, arch);
+    const auto units = track_issue_units(state, inst, classification, du.defs, arch,
+                                         wavefront_size_);
     if (!units)
       return;
     const bool vm_source =

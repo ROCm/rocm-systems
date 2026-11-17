@@ -346,11 +346,17 @@ uint8_t WaitcheckTarget::wmma_valu_wait_states(const Instruction &inst, rj_code_
 }
 
 bool WaitcheckTarget::expert_valu_issues_without_active_lanes(const Instruction &inst,
-                                                         const RegisterSet &defs) {
+                                                               const RegisterSet &defs,
+                                                               rj_code_arch_t arch,
+                                                               uint32_t wave_size) {
   const auto name = inst.mnemonic();
-  // V_CMPX only writes EXEC on CDNA5; on RDNA4 wave64 either pass may skip.
-  // Withhold a younger completion credit unless issue is guaranteed.
-  return defs.intersects({RegClass::SGPR, 0, REGISTER_SET_MAX_SGPRS}) ||
+  // A wave64 V_CMPX on RDNA3/3.5/4 can skip one pass, but not both. A wave32
+  // V_CMPX and CDNA5's EXEC-only form cannot prove a younger issue at EXEC=0.
+  const bool cmpx_wave64 = wave_size == 64 && name.starts_with("v_cmpx_") &&
+                           (arch == ROCJITSU_CODE_ARCH_RDNA3 ||
+                            arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+                            arch == ROCJITSU_CODE_ARCH_RDNA4);
+  return cmpx_wave64 || defs.intersects({RegClass::SGPR, 0, REGISTER_SET_MAX_SGPRS}) ||
          defs.contains({RegClass::VCC, 0, 1}) || name.starts_with("v_cmp_") ||
          name == "v_add_co_ci_u32_e32" || name == "v_sub_co_ci_u32_e32" ||
          name == "v_subrev_co_ci_u32_e32" || name.starts_with("v_wmma_") ||

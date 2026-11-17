@@ -336,7 +336,7 @@ struct WaitcheckStateOps : WaitcheckTarget {
                                                                  uint32_t wave_size);
   [[nodiscard]] static std::optional<uint32_t>
   track_issue_units(PendingState &state, const Instruction &inst, const ClassifiedEvent &event,
-                    const RegisterSet &defs, rj_code_arch_t arch);
+                    const RegisterSet &defs, rj_code_arch_t arch, uint32_t wave_size);
   [[nodiscard]] static bool preserves_exec_lanes(const Instruction &inst);
   [[nodiscard]] static bool vm_source_results_allocated(const Instruction &inst,
                                                         rj_code_arch_t arch,

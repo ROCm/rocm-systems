@@ -289,11 +289,13 @@ std::optional<uint32_t> WaitcheckStateOps::track_issue_units(PendingState &state
                                                              const Instruction &inst,
                                                              const ClassifiedEvent &event,
                                                              const RegisterSet &defs,
-                                                             rj_code_arch_t arch) {
+                                                             rj_code_arch_t arch,
+                                                             uint32_t wave_size) {
   const auto units = issue_units(inst, event, arch);
   if (event.counter != WaitCounterKind::VaVdst)
     return units;
-  if (!state.expert_valu_may_skip || expert_valu_issues_without_active_lanes(inst, defs)) {
+  if (!state.expert_valu_may_skip ||
+      expert_valu_issues_without_active_lanes(inst, defs, arch, wave_size)) {
     return units;
   }
   if (state.expert_exec_empty) {

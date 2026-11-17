@@ -323,7 +323,8 @@ private:
     const auto max_wait = Ops::maximum_dependency_wait(arch_, event.counter);
     if (max_wait.failed())
       return util::Result::failure();
-    const auto units = Ops::track_issue_units(state_, inst, classification, effects.defs, arch_);
+    const auto units = Ops::track_issue_units(state_, inst, classification, effects.defs, arch_,
+                                               options_.wave_size);
     if (!units)
       return util::Result::success();
     const bool vm_source = event.counter == WaitCounterKind::VmVsrc && options_.expert_scheduling;

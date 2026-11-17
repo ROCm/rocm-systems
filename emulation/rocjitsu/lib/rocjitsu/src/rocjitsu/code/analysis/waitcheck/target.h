@@ -166,7 +166,9 @@ struct WaitcheckTarget : WaitCounterPolicy {
   [[nodiscard]] static std::optional<WaitEventKind> expert_valu_kind(const Instruction &inst,
                                                                      rj_code_arch_t arch);
   [[nodiscard]] static bool expert_valu_issues_without_active_lanes(const Instruction &inst,
-                                                               const RegisterSet &defs);
+                                                                    const RegisterSet &defs,
+                                                                    rj_code_arch_t arch,
+                                                                    uint32_t wave_size);
   // The longest documented WMMA-to-VALU overlap window across CDNA5 targets.
   [[nodiscard]] static uint8_t
   wmma_valu_wait_states(const Instruction &inst, rj_code_arch_t arch,
