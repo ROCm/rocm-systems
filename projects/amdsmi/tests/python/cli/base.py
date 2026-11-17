@@ -658,195 +658,11 @@ class TestCliBase(unittest.TestCase):
 
         # Calculate and substitute in dependent values
         # Removes cmds that are invalid
-        for index, cmd_cond in enumerate(cmds):
-            cmd, cond = cmd_cond
-            tolerated = self._lookup(self.SWEEP_TOLERATED_CODES, cmd)
-            if tolerated is not None:
-                cond = [*ok, tolerated]
-            while self.openCurlyBrace in cmd:
-                items = cmd.split()
-                # Find gpu index. No --gpu, "all" or a bdf all target every device.
-                explicit_gpu = False
-                try:
-                    i = items.index("--gpu")
-                    gpu = items[i + 1]
-                    if gpu.isdigit():
-                        gpu_index = int(gpu)
-                        explicit_gpu = True
-                    else:
-                        gpu_index = 0
-                except ValueError:
-                    gpu_index = 0
-
-                # Find conditional arguments
-                posOpen = cmd.find(self.openCurlyBrace)
-                if posOpen < 0:
-                    break
-                posClose = cmd.find(self.closeCurlyBrace, posOpen)
-                if posClose < 0:
-                    break
-                nameStr = cmd[posOpen : posClose + 1]
-
-                if (
-                    nameStr == "{json}"
-                    or "json_file" in nameStr
-                    or nameStr == "{csv}"
-                    or "csv_file" in nameStr
-                ):
-                    # For adding file options
-                    if nameStr == "{json}":
-                        cmd = cmd.replace(nameStr, "--json", 1)
-                    elif nameStr == "{json_file}":
-                        cmd = cmd.replace(nameStr, f"--json --file {self.tmp_filename}", 1)
-                    elif nameStr == "{json_file_append}":
-                        cmd = cmd.replace(nameStr, f"--json --file {self.tmp_filename} --append", 1)
-                    elif nameStr == "{json_file_overwrite}":
-                        cmd = cmd.replace(
-                            nameStr, f"--json --file {self.tmp_filename} --overwrite", 1
-                        )
-                    elif nameStr == "{csv}":
-                        cmd = cmd.replace(nameStr, "--csv", 1)
-                    elif nameStr == "{csv_file}":
-                        cmd = cmd.replace(nameStr, f"--csv --file {self.tmp_filename}", 1)
-                    elif nameStr == "{csv_file_append}":
-                        cmd = cmd.replace(nameStr, f"--csv --file {self.tmp_filename} --append", 1)
-                    elif nameStr == "{csv_file_overwrite}":
-                        cmd = cmd.replace(
-                            nameStr, f"--csv --file {self.tmp_filename} --overwrite", 1
-                        )
-                    else:
-                        print(f"Error: could not replace json/csv options, {nameStr}  cmd={cmd}")
-                        cmd = ""
-                elif nameStr == "{watch_time}" or nameStr == "{watch_iterations}":
-                    # For adding watch options
-                    if nameStr == "{watch_time}":
-                        cmd = cmd.replace(nameStr, "--watch 1 --watch_time 2", 1)
-                    else:
-                        cmd = cmd.replace(nameStr, "--watch 1 --iterations 2", 1)
-                elif (
-                    nameStr == "{min_power}" or nameStr == "{avg_power}" or nameStr == "{max_power}"
-                ):
-                    # For setting --power-cap
-                    # Stop at the match; a later iteration would overwrite it with "N/A".
-                    for power_type in self.power_types:
-                        if power_type in cmd:
-                            power_type = self.static_data["gpu_data"][gpu_index]["limit"][
-                                power_type
-                            ]
-                            break
-                    else:
-                        power_type = "N/A"
-                    if (
-                        power_type == "N/A"
-                        or not isinstance(power_type, dict)
-                        or power_type["min_power_limit"] == "N/A"
-                        or power_type["max_power_limit"] == "N/A"
-                    ):
-                        cmd = ""
-                    else:
-                        # A current cap of 0 means the CLI refuses every write to this
-                        # sensor, whatever value is asked for.
-                        current_cap = power_type["socket_power_limit"]
-                        if isinstance(current_cap, dict) and current_cap["value"] == 0:
-                            cond = [*ok, AmdSmiExitCode.INVALID_PARAMETER_VALUE]
-                        # The CLI clamps its lower bound to 1, so a reported min of 0
-                        # is refused rather than being the smallest settable cap.
-                        min_power = max(power_type["min_power_limit"]["value"], 1)
-                        max_power = power_type["max_power_limit"]["value"]
-                        avg_power = int((min_power + max_power) / 2)
-                        if nameStr == "{min_power}":
-                            cmd = cmd.replace("{min_power}", str(min_power), 1)
-                        elif nameStr == "{avg_power}":
-                            cmd = cmd.replace("{avg_power}", str(avg_power), 1)
-                        elif nameStr == "{max_power}":
-                            cmd = cmd.replace("{max_power}", str(max_power), 1)
-                elif nameStr == "{perf_determinism}":
-                    clock_sys = self.static_data["gpu_data"][gpu_index]["clock"]["sys"]
-                    if clock_sys != "N/A" and len(clock_sys["frequency_levels"]):
-                        num = len(clock_sys["frequency_levels"])
-                        level = f"Level {num - 1}"
-                        clock_freq = int(clock_sys["frequency_levels"][level]["value"])
-                        cmd = cmd.replace(
-                            "{perf_determinism}", f"--perf-determinism {clock_freq + 50}", 1
-                        )
-                    else:
-                        cmd = ""
-                elif "clk_limit" in nameStr:
-                    clk_type, bound = CLK_LIMIT_TARGETS[nameStr]
-                    value = self._clk_limit_probe_value(
-                        self.metric_data["gpu_data"][gpu_index]["clock"], clk_type, bound
-                    )
-                    if value is None:
-                        cmd = ""
-                    else:
-                        # The sweep writes MAX before MIN, and that write can narrow the
-                        # range, so a value probed from the snapshot may no longer fit.
-                        cond = [*ok, AmdSmiExitCode.INVALID_PARAMETER_VALUE]
-                        cmd = cmd.replace(nameStr, f"{clk_type} {bound} {value}", 1)
-                elif "clk_level" in nameStr:
-                    clk_type = CLK_LEVEL_TYPES[nameStr]
-                    count = self._clk_level_count(clk_type, gpu_index, explicit_gpu)
-                    if clk_type != "PCIE":
-                        # A DPM table's length is a runtime value, not a fixed property:
-                        # the same device reports fewer levels when the domain is idle.
-                        # The CLI re-reads it as the command runs, so a mask sized here
-                        # can name a level it no longer accepts.
-                        cond = [*ok, AmdSmiExitCode.INVALID_PARAMETER_VALUE]
-                    if count:
-                        levels = " ".join(str(level) for level in range(count))
-                        cmd = cmd.replace(nameStr, f"{clk_type} {levels}", 1)
-                    else:
-                        cmd = ""
-                elif nameStr.startswith("{profile_"):
-                    profile = nameStr[len("{profile_") : -1]
-                    if self._profile_supported(gpu_index, explicit_gpu, profile):
-                        cmd = cmd.replace(nameStr, profile, 1)
-                    else:
-                        cmd = ""
-                elif nameStr == "{reset_profile}":
-                    if self._profile_supported(gpu_index, explicit_gpu):
-                        cmd = cmd.replace(nameStr, "--profile", 1)
-                    else:
-                        cmd = ""
-                elif nameStr == "{soc_pstate}":
-                    soc_pstate = self.static_data["gpu_data"][gpu_index]["soc_pstate"]
-                    if type(soc_pstate) is dict:
-                        num_supported = int(soc_pstate["num_supported"])
-                        if num_supported > 0:
-                            current = int(soc_pstate["current_id"])
-                            if current == 0:
-                                num = num_supported - 1
-                            else:
-                                num = 0
-                            cmd = cmd.replace(nameStr, f"{num}", 1)
-                        else:
-                            cmd = ""
-                    else:
-                        cmd = ""
-                elif nameStr == "{xgmi_plpd}":
-                    xgmi_plpd = self.static_data["gpu_data"][gpu_index]["xgmi_plpd"]
-                    if type(xgmi_plpd) is dict:
-                        num_supported = int(xgmi_plpd["num_supported"])
-                        if num_supported > 0:
-                            current = int(xgmi_plpd["current_id"])
-                            if current == 0:
-                                num = num_supported - 1
-                            else:
-                                num = 0
-                            cmd = cmd.replace(nameStr, f"{num}", 1)
-                        else:
-                            cmd = ""
-                    else:
-                        cmd = ""
-            # The NIC path prints once and never loops, so the parser rejects --watch with --nic
-            words = cmd.split()
-            if "--nic" in words and ("--watch" in words):
-                cond = [AmdSmiExitCode.INVALID_PARAMETER]
-            if (words[1:2] == ["metric"]) and ("--nic" in words):
-                given_flags = {word for word in words if word.startswith("--")}
-                if given_flags - self.NIC_METRIC_FLAGS:
-                    cond = [AmdSmiExitCode.INVALID_PARAMETER]
-            cmds[index] = (cmd, cond)
+        # The unresolved text of each command, so per-GPU runs can resolve it
+        # again with another GPU's data.
+        templates = [cmd for cmd, _ in cmds]
+        for index, (cmd, cond) in enumerate(cmds):
+            cmds[index] = self._resolve_cmd(cmd, cond, ok)
 
         # Pare down commands
         if self.ReduceCmds:
@@ -949,6 +765,200 @@ class TestCliBase(unittest.TestCase):
             print(f"cmds: {'*' * 80}")
             print(json.dumps(cmds, sort_keys=False, indent=4), flush=True)
         return cmds
+
+    def _resolve_cmd(self, cmd, cond, ok):
+        """Substitute *cmd*'s placeholders and pick the codes it may answer with.
+
+        Placeholders take the values of the GPU the command names with
+        ``--gpu N``, or of GPU 0 when it names none.
+
+        Args:
+            cmd: the command, with its ``{placeholder}`` values unresolved.
+            cond: the codes the command was declared to answer with.
+            ok: the codes the whole sweep accepts.
+
+        Returns:
+            tuple: (cmd, cond); cmd is "" when the target cannot take the command.
+        """
+        tolerated = self._lookup(self.SWEEP_TOLERATED_CODES, cmd)
+        if tolerated is not None:
+            cond = [*ok, tolerated]
+        while self.openCurlyBrace in cmd:
+            items = cmd.split()
+            # Find gpu index. No --gpu, "all" or a bdf all target every device.
+            explicit_gpu = False
+            try:
+                i = items.index("--gpu")
+                gpu = items[i + 1]
+                if gpu.isdigit():
+                    gpu_index = int(gpu)
+                    explicit_gpu = True
+                else:
+                    gpu_index = 0
+            except ValueError:
+                gpu_index = 0
+
+            # Find conditional arguments
+            posOpen = cmd.find(self.openCurlyBrace)
+            if posOpen < 0:
+                break
+            posClose = cmd.find(self.closeCurlyBrace, posOpen)
+            if posClose < 0:
+                break
+            nameStr = cmd[posOpen : posClose + 1]
+
+            if (
+                nameStr == "{json}"
+                or "json_file" in nameStr
+                or nameStr == "{csv}"
+                or "csv_file" in nameStr
+            ):
+                # For adding file options
+                if nameStr == "{json}":
+                    cmd = cmd.replace(nameStr, "--json", 1)
+                elif nameStr == "{json_file}":
+                    cmd = cmd.replace(nameStr, f"--json --file {self.tmp_filename}", 1)
+                elif nameStr == "{json_file_append}":
+                    cmd = cmd.replace(nameStr, f"--json --file {self.tmp_filename} --append", 1)
+                elif nameStr == "{json_file_overwrite}":
+                    cmd = cmd.replace(nameStr, f"--json --file {self.tmp_filename} --overwrite", 1)
+                elif nameStr == "{csv}":
+                    cmd = cmd.replace(nameStr, "--csv", 1)
+                elif nameStr == "{csv_file}":
+                    cmd = cmd.replace(nameStr, f"--csv --file {self.tmp_filename}", 1)
+                elif nameStr == "{csv_file_append}":
+                    cmd = cmd.replace(nameStr, f"--csv --file {self.tmp_filename} --append", 1)
+                elif nameStr == "{csv_file_overwrite}":
+                    cmd = cmd.replace(nameStr, f"--csv --file {self.tmp_filename} --overwrite", 1)
+                else:
+                    print(f"Error: could not replace json/csv options, {nameStr}  cmd={cmd}")
+                    cmd = ""
+            elif nameStr == "{watch_time}" or nameStr == "{watch_iterations}":
+                # For adding watch options
+                if nameStr == "{watch_time}":
+                    cmd = cmd.replace(nameStr, "--watch 1 --watch_time 2", 1)
+                else:
+                    cmd = cmd.replace(nameStr, "--watch 1 --iterations 2", 1)
+            elif nameStr == "{min_power}" or nameStr == "{avg_power}" or nameStr == "{max_power}":
+                # For setting --power-cap
+                # Stop at the match; a later iteration would overwrite it with "N/A".
+                for power_type in self.power_types:
+                    if power_type in cmd:
+                        power_type = self.static_data["gpu_data"][gpu_index]["limit"][power_type]
+                        break
+                else:
+                    power_type = "N/A"
+                if (
+                    power_type == "N/A"
+                    or not isinstance(power_type, dict)
+                    or power_type["min_power_limit"] == "N/A"
+                    or power_type["max_power_limit"] == "N/A"
+                ):
+                    cmd = ""
+                else:
+                    # A current cap of 0 means the CLI refuses every write to this
+                    # sensor, whatever value is asked for.
+                    current_cap = power_type["socket_power_limit"]
+                    if isinstance(current_cap, dict) and current_cap["value"] == 0:
+                        cond = [*ok, AmdSmiExitCode.INVALID_PARAMETER_VALUE]
+                    # The CLI clamps its lower bound to 1, so a reported min of 0
+                    # is refused rather than being the smallest settable cap.
+                    min_power = max(power_type["min_power_limit"]["value"], 1)
+                    max_power = power_type["max_power_limit"]["value"]
+                    avg_power = int((min_power + max_power) / 2)
+                    if nameStr == "{min_power}":
+                        cmd = cmd.replace("{min_power}", str(min_power), 1)
+                    elif nameStr == "{avg_power}":
+                        cmd = cmd.replace("{avg_power}", str(avg_power), 1)
+                    elif nameStr == "{max_power}":
+                        cmd = cmd.replace("{max_power}", str(max_power), 1)
+            elif nameStr == "{perf_determinism}":
+                clock_sys = self.static_data["gpu_data"][gpu_index]["clock"]["sys"]
+                if clock_sys != "N/A" and len(clock_sys["frequency_levels"]):
+                    num = len(clock_sys["frequency_levels"])
+                    level = f"Level {num - 1}"
+                    clock_freq = int(clock_sys["frequency_levels"][level]["value"])
+                    cmd = cmd.replace(
+                        "{perf_determinism}", f"--perf-determinism {clock_freq + 50}", 1
+                    )
+                else:
+                    cmd = ""
+            elif "clk_limit" in nameStr:
+                clk_type, bound = CLK_LIMIT_TARGETS[nameStr]
+                value = self._clk_limit_probe_value(
+                    self.metric_data["gpu_data"][gpu_index]["clock"], clk_type, bound
+                )
+                if value is None:
+                    cmd = ""
+                else:
+                    # The sweep writes MAX before MIN, and that write can narrow the
+                    # range, so a value probed from the snapshot may no longer fit.
+                    cond = [*ok, AmdSmiExitCode.INVALID_PARAMETER_VALUE]
+                    cmd = cmd.replace(nameStr, f"{clk_type} {bound} {value}", 1)
+            elif "clk_level" in nameStr:
+                clk_type = CLK_LEVEL_TYPES[nameStr]
+                count = self._clk_level_count(clk_type, gpu_index, explicit_gpu)
+                if clk_type != "PCIE":
+                    # A DPM table's length is a runtime value, not a fixed property:
+                    # the same device reports fewer levels when the domain is idle.
+                    # The CLI re-reads it as the command runs, so a mask sized here
+                    # can name a level it no longer accepts.
+                    cond = [*ok, AmdSmiExitCode.INVALID_PARAMETER_VALUE]
+                if count:
+                    levels = " ".join(str(level) for level in range(count))
+                    cmd = cmd.replace(nameStr, f"{clk_type} {levels}", 1)
+                else:
+                    cmd = ""
+            elif nameStr.startswith("{profile_"):
+                profile = nameStr[len("{profile_") : -1]
+                if self._profile_supported(gpu_index, explicit_gpu, profile):
+                    cmd = cmd.replace(nameStr, profile, 1)
+                else:
+                    cmd = ""
+            elif nameStr == "{reset_profile}":
+                if self._profile_supported(gpu_index, explicit_gpu):
+                    cmd = cmd.replace(nameStr, "--profile", 1)
+                else:
+                    cmd = ""
+            elif nameStr == "{soc_pstate}":
+                soc_pstate = self.static_data["gpu_data"][gpu_index]["soc_pstate"]
+                if type(soc_pstate) is dict:
+                    num_supported = int(soc_pstate["num_supported"])
+                    if num_supported > 0:
+                        current = int(soc_pstate["current_id"])
+                        if current == 0:
+                            num = num_supported - 1
+                        else:
+                            num = 0
+                        cmd = cmd.replace(nameStr, f"{num}", 1)
+                    else:
+                        cmd = ""
+                else:
+                    cmd = ""
+            elif nameStr == "{xgmi_plpd}":
+                xgmi_plpd = self.static_data["gpu_data"][gpu_index]["xgmi_plpd"]
+                if type(xgmi_plpd) is dict:
+                    num_supported = int(xgmi_plpd["num_supported"])
+                    if num_supported > 0:
+                        current = int(xgmi_plpd["current_id"])
+                        if current == 0:
+                            num = num_supported - 1
+                        else:
+                            num = 0
+                        cmd = cmd.replace(nameStr, f"{num}", 1)
+                    else:
+                        cmd = ""
+                else:
+                    cmd = ""
+        # The NIC path prints once and never loops, so the parser rejects --watch with --nic
+        words = cmd.split()
+        if "--nic" in words and ("--watch" in words):
+            cond = [AmdSmiExitCode.INVALID_PARAMETER]
+        if (words[1:2] == ["metric"]) and ("--nic" in words):
+            given_flags = {word for word in words if word.startswith("--")}
+            if given_flags - self.NIC_METRIC_FLAGS:
+                cond = [AmdSmiExitCode.INVALID_PARAMETER]
+        return cmd, cond
 
     def _order_sweep_args(self, cmd_name, args):
         """Move one of *args* to the front and one to the back, per SWEEP_ARG_ORDER.
