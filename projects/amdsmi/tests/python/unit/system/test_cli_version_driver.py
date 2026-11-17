@@ -11,7 +11,10 @@ import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 
-from common.common import stub_modules_at_import
+from common.common import cli_search_order, find_cli_dir, stub_modules_at_import
+
+_CLI_DIR = find_cli_dir(*cli_search_order(str(Path(__file__).resolve().parent)))
+_VERSION_PATH = Path(_CLI_DIR) / "subcommands" / "version.py" if _CLI_DIR else None
 
 _DRIVER_INFO = {
     "driver_name": "amdgpu",
@@ -62,8 +65,7 @@ def _load_version_module(interface: types.SimpleNamespace) -> types.ModuleType:
 
     restore = stub_modules_at_import({"amdsmi": amdsmi, "_version": version_metadata})
     try:
-        path = Path(__file__).resolve().parents[4] / "amdsmi_cli/subcommands/version.py"
-        spec = importlib.util.spec_from_file_location("version_driver_under_test", path)
+        spec = importlib.util.spec_from_file_location("version_driver_under_test", _VERSION_PATH)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         return module
@@ -99,9 +101,8 @@ def _run_version_with_interface(
 class TestVersionDriverOutput(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        path = Path(__file__).resolve().parents[4] / "amdsmi_cli/subcommands/version.py"
-        if not path.is_file():
-            raise unittest.SkipTest(f"amd-smi CLI version.py not found at {path}")
+        if _VERSION_PATH is None or not _VERSION_PATH.is_file():
+            raise unittest.SkipTest(f"amd-smi CLI version.py not found (looked in {_CLI_DIR})")
 
     def test_json_reports_driver_version(self) -> None:
         output = _run_version()
@@ -147,3 +148,45 @@ class TestVersionDriverOutput(unittest.TestCase):
         output = _run_version_with_interface(interface)
 
         self.assertEqual(output["amdgpu_version"], "N/A")
+
+
+def _run_version_without_flags(loaded: set, hsmp_devices: list) -> dict:
+    """``amd-smi version`` with no option: what it reports follows the drivers and the hardware."""
+    module = _load_version_module(_default_interface())
+    commands = object.__new__(module.VersionCommands)
+    commands.logger = _Logger()
+    commands.helpers = types.SimpleNamespace(
+        is_driver_loaded=lambda driver: driver in loaded,
+        is_amd_hsmp_initialized=lambda: False,
+        get_devices_without_driver=lambda driver: hsmp_devices if driver == "hsmp_acpi" else [],
+        get_ainic_handles=lambda: [],
+    )
+    commands.group_check_printed = True
+    args = types.SimpleNamespace(gpu_version=None, cpu_version=None, nic_version=None)
+    commands.version(args)
+    return commands.logger.output
+
+
+class TestVersionWithoutFlags(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        if _VERSION_PATH is None or not _VERSION_PATH.is_file():
+            raise unittest.SkipTest(f"amd-smi CLI version.py not found (looked in {_CLI_DIR})")
+
+    def test_cpu_row_is_shown_when_its_hardware_lacks_the_driver(self) -> None:
+        output = _run_version_without_flags({"amdgpu"}, hsmp_devices=["AMDI0097:00"])
+        self.assertEqual(output["amd_hsmp_driver_version"], "not loaded")
+
+    def test_cpu_row_is_left_out_without_cpu_hardware(self) -> None:
+        output = _run_version_without_flags({"amdgpu"}, hsmp_devices=[])
+        self.assertEqual(output["amd_hsmp_driver_version"], "N/A")
+
+    def test_any_one_nic_driver_counts_as_loaded(self) -> None:
+        for driver in ("ionic", "bnxt_en", "bng_en"):
+            with self.subTest(driver=driver):
+                output = _run_version_without_flags({"amdgpu", driver}, hsmp_devices=[])
+                self.assertNotEqual(output["nic_driver_version"], "not loaded")
+
+    def test_no_nic_driver_reports_not_loaded(self) -> None:
+        output = _run_version_without_flags({"amdgpu"}, hsmp_devices=[])
+        self.assertEqual(output["nic_driver_version"], "not loaded")

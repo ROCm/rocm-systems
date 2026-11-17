@@ -358,8 +358,9 @@ protected:
   // offset rather than fixing one.
   void patch(const std::vector<uint32_t> &text, uint64_t anchor_offset,
              const AmdGpuCodeObject &probe_obj, PatchedKernel &out) {
-    auto target = test::make_kernarg_kernel_elf(text, /*private_bytes=*/64, a_.e_flags,
-                                                kGuestKernargSize, a_.wave32);
+    auto target =
+        test::make_kernarg_kernel_elf(text, /*private_bytes=*/64, a_.e_flags, kGuestKernargSize,
+                                      a_.wave32, test::kCallableProbeGranulatedSgprCount);
     target = test::with_descriptor_metadata(target, a_.arch);
     AmdGpuCodeObject obj(target.data(), target.size());
     ASSERT_TRUE(obj.is_valid());

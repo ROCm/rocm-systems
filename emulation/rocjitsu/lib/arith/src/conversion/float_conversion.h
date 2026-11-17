@@ -11,7 +11,7 @@
 #include "conversion/conversion32.h"
 #include "conversion/conversion64.h"
 #include "conversion/model/conversion.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
 namespace conversion_detail {
@@ -44,12 +44,24 @@ V convert16(V raw, uint64_t flags, uint32_t mode, bool quiet_nan = true) {
   if constexpr (Op != Conversion16::FloatToHalf) {
     raw = (raw >> ((mode & RJ_ARITH_ALU_HIGH_A) ? 16 : 0)) & V(0xffffU);
   }
-  if constexpr (Op == Conversion16::SignedToHalf) {
-    return float_policy<model::I16, fmt::F16>(flags, mode)(raw);
-  } else if constexpr (Op == Conversion16::UnsignedToHalf) {
-    return float_policy<model::U16, fmt::F16>(flags, mode)(raw);
-  } else if constexpr (Op == Conversion16::FloatToHalf) {
-    return float_policy<fmt::F32, fmt::F16>(flags, mode)(raw);
+  if constexpr (Op == Conversion16::SignedToHalf || Op == Conversion16::UnsignedToHalf ||
+                Op == Conversion16::FloatToHalf) {
+    using From = std::conditional_t<
+        Op == Conversion16::SignedToHalf, model::I16,
+        std::conditional_t<Op == Conversion16::UnsignedToHalf, model::U16, fmt::F32>>;
+    auto policy = float_policy<From, fmt::F16>(flags, mode);
+    if (mode & RJ_ARITH_CVT_SDWA) {
+      constexpr int scale[] = {0, 1, 2, -1};
+      policy.rounding.prescale = scale[(mode >> RJ_ARITH_ALU_OMOD_SHIFT) & 3];
+      policy.output.omod = 0;
+    }
+    V result = policy(raw);
+    if ((mode & RJ_ARITH_CVT_SDWA) && (mode & RJ_ARITH_ALU_OMOD_MASK)) {
+      // SDWA's writer finalizes OMOD after the producer has already scaled.
+      result =
+          model::detail::choose((result & V(0x7c00U)) == V(uint32_t{0}), V(uint32_t{0}), result);
+    }
+    return result;
   } else if constexpr (Op == Conversion16::HalfToFloat) {
     return float_policy<fmt::F16, fmt::F32>(flags, mode, quiet_nan)(raw);
   } else {

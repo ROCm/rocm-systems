@@ -4,6 +4,7 @@
 #ifndef ROCJITSU_ISA_ARCH_AMDGPU_SHARED_MEMORY_ISSUE_H_
 #define ROCJITSU_ISA_ARCH_AMDGPU_SHARED_MEMORY_ISSUE_H_
 
+#include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/wait_counter.h"
 
 #include <array>

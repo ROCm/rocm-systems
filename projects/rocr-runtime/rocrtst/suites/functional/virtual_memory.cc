@@ -448,17 +448,43 @@ void VirtMemoryTestBasic::TestRefCount(hsa_agent_t agent, hsa_amd_memory_pool_t 
   }
 
   size_t granule_size = pool_i.alloc_granule;
+  if (granule_size == 0) return;
 
-  ASSERT_SUCCESS(hsa_amd_vmem_address_reserve(&addrRange, 10 * granule_size, 0, 0));
+  /* Ten granules, or enough to hold an address 2 MiB into the mapping. */
+  const size_t two_mib = 2 * 1024 * 1024;
+  const size_t granule_count = std::max<size_t>(10, (two_mib / granule_size) + 2);
+  const size_t map_size = granule_count * granule_size;
+
+  ASSERT_SUCCESS(hsa_amd_vmem_address_reserve(&addrRange, map_size, 0, 0));
 
   hsa_amd_vmem_alloc_handle_t mem_handleA1;
   ASSERT_SUCCESS(
-      hsa_amd_vmem_handle_create(pool, 10 * granule_size, MEMORY_TYPE_NONE, 0, &mem_handleA1));
-  ASSERT_SUCCESS(hsa_amd_vmem_map(addrRange, 10 * granule_size, 0, mem_handleA1, 0));
+      hsa_amd_vmem_handle_create(pool, map_size, MEMORY_TYPE_NONE, 0, &mem_handleA1));
+  ASSERT_SUCCESS(hsa_amd_vmem_map(addrRange, map_size, 0, mem_handleA1, 0));
 
-  /* Allocate duplicate handle */
+  /* Allocate duplicate handle from the mapping base. */
   hsa_amd_vmem_alloc_handle_t mem_handleA1Dup;
   ASSERT_SUCCESS(hsa_amd_vmem_retain_alloc_handle(&mem_handleA1Dup, addrRange));
+  ASSERT_EQ(mem_handleA1Dup.handle, mem_handleA1.handle);
+
+  /* An address inside the mapping retains the same handle, including the last
+   * byte. The byte after the mapping does not. Release each extra retain so
+   * the refcount checks below still see one duplicate. */
+  auto* base = reinterpret_cast<uint8_t*>(addrRange);
+
+  hsa_amd_vmem_alloc_handle_t interior_handle;
+  ASSERT_SUCCESS(hsa_amd_vmem_retain_alloc_handle(&interior_handle, base + two_mib));
+  ASSERT_EQ(interior_handle.handle, mem_handleA1.handle);
+  ASSERT_SUCCESS(hsa_amd_vmem_handle_release(interior_handle));
+
+  hsa_amd_vmem_alloc_handle_t last_handle;
+  ASSERT_SUCCESS(hsa_amd_vmem_retain_alloc_handle(&last_handle, base + map_size - 1));
+  ASSERT_EQ(last_handle.handle, mem_handleA1.handle);
+  ASSERT_SUCCESS(hsa_amd_vmem_handle_release(last_handle));
+
+  hsa_amd_vmem_alloc_handle_t past_handle;
+  err = hsa_amd_vmem_retain_alloc_handle(&past_handle, base + map_size);
+  ASSERT_EQ(err, HSA_STATUS_ERROR_INVALID_ALLOCATION);
 
   /* Try to unmap with incorrect size */
   err = hsa_amd_vmem_unmap(addrRange, 5 * granule_size);
@@ -474,14 +500,14 @@ void VirtMemoryTestBasic::TestRefCount(hsa_agent_t agent, hsa_amd_memory_pool_t 
   ASSERT_NE(err, HSA_STATUS_SUCCESS);
 
   /* Unmap with correct size - un-mapping after releasing the handle is valid */
-  ASSERT_SUCCESS(hsa_amd_vmem_unmap(addrRange, 10 * granule_size));
+  ASSERT_SUCCESS(hsa_amd_vmem_unmap(addrRange, map_size));
 
   /* Try to free with incorrect size */
   err = hsa_amd_vmem_address_free(addrRange, 5 * granule_size);
   ASSERT_NE(err, HSA_STATUS_SUCCESS);
 
   /* Free with correct size */
-  ASSERT_SUCCESS(hsa_amd_vmem_address_free(addrRange, 10 * granule_size));
+  ASSERT_SUCCESS(hsa_amd_vmem_address_free(addrRange, map_size));
 }
 
 void VirtMemoryTestBasic::TestRefCount(void) {

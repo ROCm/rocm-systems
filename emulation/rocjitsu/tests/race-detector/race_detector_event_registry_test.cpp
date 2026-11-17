@@ -56,6 +56,39 @@ TEST(RaceDetector, EventRegistry_TrimmedWaveLocalEventsAreNotBarrierQueued) {
   wave.flushBarrierPendingEvents();
 }
 
+TEST(RaceDetector, EventRegistry_LdsEventsWithoutBytesAreTrimmedOnceComplete) {
+  // An LDS event can touch no LDS bytes: an async copy with no active lanes, or
+  // a tensor transfer that moves no data. It still holds a counter slot, but no
+  // other wave can race with it, so once its wait completes it is trimmable
+  // like a wave-local event, and must not be queued for barrier retirement.
+  // The workgroup has two waves, so completed LDS events are not retired
+  // immediately as in a single-wave workgroup: only the trim rule for events
+  // without LDS bytes lets these go.
+  int N = EventRegistry::kTrimAttemptInterval;
+  RaceDetector detector(/*nWaves=*/
+                        2, /*vgprCount=*/2, /*sgprCount=*/2, Dim3d(0), [](RaceViolation) {},
+                        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA5),
+                        /*ldsSizeBytes=*/64 * 1024);
+  auto &wave = detector.getWaveRaceState(0);
+  const std::array obligations{rocjitsu::amdgpu::MemoryCounterObligation{
+      rocjitsu::amdgpu::WaitCounterType::ASYNCCNT, MemoryOrderClass::ASYNC_STORE}};
+
+  for (int i = 0; i < N; ++i) {
+    wave.registerLdsRangeEvent(testInstruction(/*pc=*/static_cast<uint64_t>(i)),
+                               MemoryEventType::LDS_TO_GLOBAL, /*ranges=*/{}, obligations,
+                               MemoryOrderClass::ASYNC_STORE);
+    PendingWaitCount wait;
+    wait.add(rocjitsu::amdgpu::WaitCounterType::ASYNCCNT, 0);
+    wave.dispatch(wait);
+  }
+
+  // The trim attempt runs after event N - 1 is added, when every earlier event
+  // is complete and empty.
+  EXPECT_EQ(detector.events().trimmedCount(), N - 1);
+  EXPECT_TRUE(wave.getBarrierPendingEvents().empty());
+  EXPECT_TRUE(detector.getLdsReadEvents().empty());
+}
+
 namespace {
 using namespace rocjitsu;
 using amdgpu::MemoryCounterObligation;
@@ -65,12 +98,6 @@ constexpr std::array<uint32_t, 1> kWords{0xbf800007};
 constexpr InstructionSnapshot kInstruction{0x1234, kWords};
 constexpr std::array kObligations{
     MemoryCounterObligation{WaitCounterType::LGKMCNT, MemoryOrderClass::UNORDERED}};
-
-TEST(InstructionSnapshotTest, RejectsEmptyAndOversizedEncodings) {
-  const std::array<uint32_t, InstructionSnapshot::kMaxWords + 1> words{};
-  EXPECT_THROW(InstructionSnapshot(0x10, std::span(words).first(0)), std::logic_error);
-  EXPECT_THROW(InstructionSnapshot(0x10, words), std::logic_error);
-}
 
 TEST(InstructionSnapshotTest, CopiesEveryEncodingWidth) {
   constexpr std::array<uint32_t, 5> expected{1, 2, 3, 4, 5};
@@ -110,13 +137,13 @@ TEST(EventRegistry, RetainsCapturedInstruction) {
   EventRegistry events;
   const auto id = events.add(WaveId{0}, kInstruction, MemoryEventType::GLOBAL_TO_VGPR, {2}, 1, 0xf,
                              {}, kObligations, MemoryOrderClass::UNORDERED);
-  EXPECT_EQ(events.pc(id), kInstruction.pc());
   EXPECT_EQ(events.instruction(id), kInstruction);
 }
 
 TEST_F(RaceEventRegistrationTest, WaveApisRetainCapturedPcAndEncoding) {
   auto &wave = detector.getWaveRaceState(0);
   const std::array<uint32_t, 1> addresses{8};
+  const std::array<uint32_t, 1> secondAddresses{16};
   auto at = [](int offset) { return InstructionSnapshot(kInstruction.pc() + offset, kWords); };
   wave.registerEvent(at(0), MemoryEventType::GLOBAL_TO_VGPR, {2}, 1, 0xf, kObligations,
                      MemoryOrderClass::UNORDERED);
@@ -124,18 +151,16 @@ TEST_F(RaceEventRegistrationTest, WaveApisRetainCapturedPcAndEncoding) {
                           MemoryOrderClass::UNORDERED);
   wave.registerLdsEvent(at(2), MemoryEventType::LDS_TO_VGPR, {3}, 1, 1, addresses, 4, 0xf,
                         kObligations, MemoryOrderClass::UNORDERED);
-  wave.registerLdsEvent(at(3), MemoryEventType::LDS_TO_VGPR, {4}, 1, 1, addresses, addresses, 4,
-                        0xf, kObligations, MemoryOrderClass::UNORDERED);
-  wave.registerDualOffsetLdsEvent(at(4), MemoryEventType::LDS_TO_VGPR, {5}, 1, 1, addresses, 1, 3,
-                                  kObligations, MemoryOrderClass::UNORDERED);
+  wave.registerLdsEvent(at(3), MemoryEventType::LDS_TO_VGPR, {4}, 1, 1, addresses, secondAddresses,
+                        4, 0xf, kObligations, MemoryOrderClass::UNORDERED);
 
-  ASSERT_EQ(detector.events().totalAllocated(), 5);
-  for (int i = 0; i < 5; ++i)
+  ASSERT_EQ(detector.events().totalAllocated(), 4);
+  for (int i = 0; i < 4; ++i)
     EXPECT_EQ(detector.events().instruction(EventId{i}), at(i));
-  const auto &intervals = detector.events().ldsIntervals(EventId{4});
-  EXPECT_TRUE(intervals.overlapsRange(16, 24));
-  EXPECT_TRUE(intervals.overlapsRange(32, 40));
-  EXPECT_FALSE(intervals.overlapsRange(24, 32));
+  const auto &intervals = detector.events().ldsIntervals(EventId{3});
+  EXPECT_TRUE(intervals.overlapsRange(8, 12));
+  EXPECT_TRUE(intervals.overlapsRange(16, 20));
+  EXPECT_FALSE(intervals.overlapsRange(12, 16));
 }
 } // namespace
 

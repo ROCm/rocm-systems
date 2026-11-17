@@ -10,7 +10,8 @@
 #include "common/floating_point.h"
 #include "common/registers.h"
 #include "common/semantics.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
+#include "rj_arith/detail/rj_arith_wmma.h"
 
 #include <algorithm>
 #include <bit>

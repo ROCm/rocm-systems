@@ -108,7 +108,12 @@ std::optional<uint64_t> smem_calculate_address(const SmemInst &inst, amdgpu::Wav
                                                ScalarMemState *state = nullptr,
                                                bool check_negative_offset = false) {
   constexpr uint64_t kDwordMask = ~0x3ULL;
-  auto base = amdgpu::try_read_scalar_selector64(wf, inst.sbase * 2);
+  // SBASE names a pair. Scalar buffer bounds can reside in separate storage.
+  uint32_t base_selector = inst.sbase * 2;
+  if (base_selector <= kScalarSgprSelectorLast &&
+      wf.exceeds_rounded_sgpr_allocation(base_selector, 2))
+    base_selector = 0;
+  auto base = amdgpu::try_read_scalar_selector64(wf, base_selector);
   if (!base)
     return std::nullopt;
   *base &= kDwordMask;
@@ -136,7 +141,7 @@ std::optional<uint64_t> smem_calculate_address(const SmemInst &inst, amdgpu::Wav
   reg_offset &= kDwordMask;
   // A DWORD is in range only if all four bytes are, so round the bound down.
   if (gfx9_smem_is_buffer_op(inst.op))
-    return scalar_buffer_address(wf, inst.sbase * 2, *base, inst_offset + reg_offset, state,
+    return scalar_buffer_address(wf, base_selector, *base, inst_offset + reg_offset, state,
                                  /*align_mask=*/3, /*size_align_mask=*/3);
   const uint64_t addr = *base + inst_offset + reg_offset;
   util::Logger::vm([&](auto &os) {
@@ -165,9 +170,12 @@ void ds_calculate_addresses(const DsInst &inst, amdgpu::Wavefront &wf, VectorMem
   d.wf_size = wf.wf_size();
   d.wg_id = wf.wg_id();
   d.wf_id = wf.wf_id();
+  const uint32_t ds_base = wf.lds_base();
   uint32_t offset = (static_cast<uint32_t>(inst.offset1) << 8) | inst.offset0;
   RegisterAccess regs(cu);
-  auto addr_region = regs.read_vgpr_region(wf.vgpr_alloc().base + inst.addr, 1, exec);
+  uint32_t addr = wf.vgpr_alloc().base + inst.addr;
+  addr = wf.ds_source_vgpr(addr);
+  auto addr_region = regs.read_vgpr_region(addr, 1, exec);
   auto maybe_addresses = addr_region.lanes();
   if (maybe_addresses.failed())
     return;
@@ -175,7 +183,7 @@ void ds_calculate_addresses(const DsInst &inst, amdgpu::Wavefront &wf, VectorMem
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    d.per_lane_addr[lane] = addresses[lane] + offset + wf.lds_base();
+    d.per_lane_addr[lane] = ds_address(ds_base, addresses[lane], offset);
   }
   util::Logger::vm([&](auto &os) {
     static uint64_t ds_addr_count = 0;

@@ -4,7 +4,7 @@
 // Guest-controlled interpolation reuses the existing directed mixed-FMA arithmetic.
 #pragma once
 
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 #include <stdint.h>
 
 namespace rocjitsu::arith {
