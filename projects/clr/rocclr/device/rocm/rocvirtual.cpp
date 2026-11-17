@@ -1162,6 +1162,9 @@ void VirtualGPU::RetiringSignalTracker::AcquireSlot() {
       MarkCompleted(oldest);
       const bool replaced = oldest->referenceCount() > 1 && ReplaceWithSpare(next);
       if (!replaced) {
+        if (oldest->referenceCount() > 1) {
+          LogError("No spare signal: reusing a signal that another holder may still wait on");
+        }
         assert(oldest->referenceCount() == 1 && "Signal reuse conflicts with another holder!");
         StoreValue(oldest, kInitSignalValueOne);
         FlushStores();
