@@ -3,6 +3,7 @@
 
 // Tests for floating-point logarithm and exponential entry points.
 
+#include "math/older_half_unary_test.h"
 #include "math/unary_test.h"
 #include "rj_arith/detail/rj_arith_math.h"
 
@@ -114,4 +115,12 @@ TEST(MathTrans, OutputOverflowIgnoresGuestRounding) {
       }
     }
   }
+}
+
+// Inherited half EXP/LOG keep their special-value policy and selected-half aliases.
+TEST(MathOlderHalfLogExp, Arithmetic) {
+  rocjitsu::arith::test::check_older_half_unary<32>(rj_arith_v_exp_f16_w32_gfx908, 8);
+  rocjitsu::arith::test::check_older_half_unary<64>(rj_arith_v_exp_f16_w64_gfx908, 8);
+  rocjitsu::arith::test::check_older_half_unary<32>(rj_arith_v_log_f16_w32_gfx908, 9);
+  rocjitsu::arith::test::check_older_half_unary<64>(rj_arith_v_log_f16_w64_gfx908, 9);
 }

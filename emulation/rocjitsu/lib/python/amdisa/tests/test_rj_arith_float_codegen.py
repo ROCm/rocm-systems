@@ -2697,6 +2697,72 @@ def test_gfx1250_simple_half_unary_reuses_gfx12_and_preserves_halves(op, vop3):
 @pytest.mark.parametrize(
     'arch', ['cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5', 'cdna3', 'cdna4']
 )
+@pytest.mark.parametrize('op', ['SIN', 'COS'])
+def test_older_half_trig_inherits_policy_and_staged_sdwa(arch, op):
+    from amdisa.codegen.execute.rj_arith_float import gen_float_unary16
+
+    for vop3 in (False, True):
+        body = gen_float_unary16(
+            context(arch, f'V_{op}_F16', ['d'], ['a'], is_vop3=vop3)
+        )
+        assert f'rj_arith_v_{op.lower()}_f16_w32_gfx908' in body
+        assert '/*guest_rounding=*/false' in body
+        assert ('execute_half_unary_sdwa' in body) == (not vop3)
+        assert 'RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS' in body
+
+
+@pytest.mark.parametrize('vop3', [False, True])
+@pytest.mark.parametrize('op', ['SIN', 'COS'])
+def test_gfx1250_half_trig_keeps_qualification_and_true16_layout(vop3, op):
+    from amdisa.codegen.execute.rj_arith_float import gen_float_unary16
+
+    body = gen_float_unary16(
+        context('cdna5', f'V_{op}_F16', ['d'], ['a'], is_vop3=vop3)
+    )
+    assert f'rj_arith_v_{op.lower()}_f16_w32_gfx12' in body
+    assert 'nullptr' in body
+    assert body.index('if (!wf.exec())') < body.index('arithmetic_flags()')
+    assert 'guest_rounding=*/false' in body
+    assert ('word_source' in body) == (not vop3)
+    assert 'RJ_ARITH_ALU_HIGH_A' in body and 'RJ_ARITH_ALU_HIGH_D' in body
+
+
+@pytest.mark.parametrize(
+    'arch', ['cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5', 'cdna3', 'cdna4']
+)
+@pytest.mark.parametrize('op', ['RCP', 'RSQ', 'SQRT', 'EXP', 'LOG'])
+def test_older_half_roots_use_fixed_rounding_and_staged_sdwa(arch, op):
+    from amdisa.codegen.execute.rj_arith_float import gen_float_unary16
+
+    for vop3 in (False, True):
+        body = gen_float_unary16(
+            context(arch, f'V_{op}_F16', ['d'], ['a'], is_vop3=vop3)
+        )
+        assert f'rj_arith_v_{op.lower()}_f16_w32_gfx908' in body
+        assert '/*guest_rounding=*/false' in body
+        assert ('execute_half_unary_sdwa' in body) == (not vop3)
+        assert 'RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS' in body
+
+
+@pytest.mark.parametrize('vop3', [False, True])
+@pytest.mark.parametrize('op', ['RCP', 'RSQ', 'SQRT', 'EXP', 'LOG'])
+def test_gfx1250_half_roots_keep_qualification_and_true16_layout(vop3, op):
+    from amdisa.codegen.execute.rj_arith_float import gen_float_unary16
+
+    body = gen_float_unary16(
+        context('cdna5', f'V_{op}_F16', ['d'], ['a'], is_vop3=vop3)
+    )
+    assert f'rj_arith_v_{op.lower()}_f16_w32_gfx12' in body
+    assert 'nullptr' in body
+    assert body.index('if (!wf.exec())') < body.index('arithmetic_flags()')
+    assert 'guest_rounding=*/false' in body
+    assert ('word_source' in body) == (not vop3)
+    assert 'RJ_ARITH_ALU_HIGH_A' in body and 'RJ_ARITH_ALU_HIGH_D' in body
+
+
+@pytest.mark.parametrize(
+    'arch', ['cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5', 'cdna3', 'cdna4']
+)
 def test_older_half_fract_uses_rounded_result_adapter(arch):
     from amdisa.codegen.execute.rj_arith_float import gen_float_unary16
 

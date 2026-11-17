@@ -1834,6 +1834,8 @@ std::vector<ArithmeticCase> half_log_exp_arithmetic_cases() {
         ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA1,
         ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
         ROCJITSU_CODE_ARCH_RDNA4}) {
+    // All half EXP/LOG paths assume default host controls.
+    const bool arith_half = true;
     const bool gcn = arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
                      arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
     const bool preserves_high_half = !gcn;
@@ -1869,9 +1871,10 @@ std::vector<ArithmeticCase> half_log_exp_arithmetic_cases() {
                            {{0, sample.source}},
                            {{6, expected}},
                            sample.mode | (rounding << 2),
-                           uses_default_host_controls(arch) ? FE_TONEAREST : (FE_UPWARD),
+                           arith_half ? FE_TONEAREST : (FE_UPWARD),
                            0x9fc0u,
-                           uses_default_host_controls(arch) ? (0x1f80u & (0x9fc0u)) : (0x9f60u)});
+                           arith_half ? (0x1f80u & (0x9fc0u)) : (0x9f60u)});
+          cases.back().arith_host_contract = arith_half;
         }
       }
     }
@@ -1889,9 +1892,10 @@ std::vector<ArithmeticCase> half_log_exp_arithmetic_cases() {
                            {{0, (source << 16) | 0x1234u}},
                            {{6, (result << 16) | 0xbeefu}},
                            48u | (rounding << 2),
-                           uses_default_host_controls(arch) ? FE_TONEAREST : (FE_UPWARD),
+                           arith_half ? FE_TONEAREST : (FE_UPWARD),
                            0x9fc0u,
-                           uses_default_host_controls(arch) ? (0x1f80u & (0x9fc0u)) : (0x9f60u)});
+                           arith_half ? (0x1f80u & (0x9fc0u)) : (0x9f60u)});
+          cases.back().arith_host_contract = arith_half;
         }
         cases.push_back(
             {"Arch" + std::to_string(arch) + "SdwaLogClampRound" + std::to_string(rounding),
@@ -1900,9 +1904,10 @@ std::vector<ArithmeticCase> half_log_exp_arithmetic_cases() {
              {{0, 0x7c011234u}},
              {{6, 0x0000beefu}},
              304u | (rounding << 2),
-             uses_default_host_controls(arch) ? FE_TONEAREST : (FE_UPWARD),
+             arith_half ? FE_TONEAREST : (FE_UPWARD),
              0x9fc0u,
-             uses_default_host_controls(arch) ? (0x1f80u & (0x9fc0u)) : (0x9f60u)});
+             arith_half ? (0x1f80u & (0x9fc0u)) : (0x9f60u)});
+        cases.back().arith_host_contract = arith_half;
       }
     }
   }
