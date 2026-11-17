@@ -126,7 +126,7 @@ function(get_hipfile_gnu_warning_flags outvar compiler_version)
         set(flags
             # Misc warnings
             -Wtrailing-whitespace
-            -Wleading-whitespace=tabs
+            -Wleading-whitespace=spaces
             ${flags}
         )
     endif()

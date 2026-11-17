@@ -52,7 +52,7 @@ const char* hiprtcGetErrorString(hiprtcResult x) {
 hiprtcResult hiprtcCreateProgram(hiprtcProgram* prog, const char* src, const char* name,
                                  int numHeaders, const char* const* headers,
                                  const char* const* headerNames) {
-  HIPRTC_INIT_API(prog, src, name, numHeaders, headers, headerNames);
+  HIPRTC_INIT_API_COMGR(prog, src, name, numHeaders, headers, headerNames);
 
   if (prog == nullptr) {
     HIPRTC_RETURN(HIPRTC_ERROR_INVALID_PROGRAM);
@@ -277,7 +277,7 @@ hiprtcResult hiprtcGetBitcodeSize(hiprtcProgram prog, size_t* bitcode_size) {
 
 hiprtcResult hiprtcLinkCreate(unsigned int num_options, hiprtcJIT_option* options_ptr,
                               void** options_vals_pptr, hiprtcLinkState* hip_link_state_ptr) {
-  HIPRTC_INIT_API(num_options, options_ptr, options_vals_pptr, hip_link_state_ptr);
+  HIPRTC_INIT_API_COMGR(num_options, options_ptr, options_vals_pptr, hip_link_state_ptr);
 
   if (hip_link_state_ptr == nullptr) {
     HIPRTC_RETURN(HIPRTC_ERROR_INVALID_INPUT);
