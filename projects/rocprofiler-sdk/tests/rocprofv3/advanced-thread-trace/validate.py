@@ -184,10 +184,35 @@ def validate_dispatch_event(dispatch, dispatches, occupancy_file):
     assert dispatches[dispatch_id] == dispatch["kernel_name"]
 
 
+def describe_att_output(output_path, max_rows=3):
+    """Summarize an ATT output directory so that a failed assertion shows what the
+    trace produced: the directory entries, and the first rows of each stats CSV."""
+    out_dir = Path(output_path)
+    lines = [f"ATT output directory: {out_dir}"]
+
+    for entry in sorted(out_dir.iterdir()):
+        if entry.is_dir():
+            names = sorted(p.name for p in entry.rglob("*") if p.is_file())
+            lines.append(f"  [dir]  {entry.name}: {len(names)} files, first: {names[:5]}")
+        else:
+            lines.append(f"  [file] {entry.name}: {entry.stat().st_size} bytes")
+
+    for stats_file in sorted(out_dir.glob("stats_*.csv")):
+        rows = stats_file.read_text(errors="replace").splitlines()
+        lines.append(f"  {stats_file.name}: {len(rows)} lines, first {max_rows}:")
+        lines.extend(f"    {row[:200]}" for row in rows[:max_rows])
+
+    ret = "\n".join(lines)
+    return ret
+
+
 def read_att_stats_kernel_names(output_path):
     traced_kernel_names = set()
     stats_files = list(Path(output_path).glob("stats_*.csv"))
-    assert len(stats_files) > 0, f"No stats_*.csv files found in {output_path}"
+    assert len(stats_files) > 0, (
+        f"No stats_*.csv files found in {output_path}\n"
+        f"{describe_att_output(output_path)}"
+    )
 
     for stats_file in stats_files:
         with open(stats_file, "r") as f:
@@ -200,7 +225,9 @@ def read_att_stats_kernel_names(output_path):
                 if len(row) >= 8 and row[7].strip():
                     traced_kernel_names.add(row[7].strip())
 
-    assert len(traced_kernel_names) > 0, "No kernel names found in stats CSV files"
+    assert (
+        len(traced_kernel_names) > 0
+    ), f"No kernel names found in stats CSV files\n{describe_att_output(output_path)}"
     return traced_kernel_names
 
 
