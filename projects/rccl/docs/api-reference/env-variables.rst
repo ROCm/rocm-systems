@@ -132,6 +132,15 @@ in the following table.
           initialization does not use NVLS and does not fail because of it.
         | Default: ``2``
 
+    * - | ``RCCL_USE_AMD_SMI_LIB``
+        | Selects the backend for GPU topology and fabric discovery. When
+          enabled, RCCL loads ``libamd_smi.so`` at runtime via ``dlopen``;
+          if loading fails, it falls back to the sysfs-based path automatically.
+          The AMD SMI library path is required for fabric telemetry
+          (``RCCL_FABRIC_TELEMETRY_ENABLE``).
+      - | ``0``: Use the internal sysfs-based discovery (ARSMI).
+        | ``1``: Use the AMD SMI library with automatic sysfs fallback (default).
+
 Logging and debugging
 =====================
 
@@ -317,17 +326,16 @@ Fabric telemetry
 fabric telemetry category for the GPUs this process opens communicators on and
 logs the counters that moved. It is diagnostic only and off by default.
 
-Three settings are needed for any output to appear. The first two are easy to
-omit, and leaving either out makes the feature silent rather than noisy::
+Two settings are needed for any output to appear::
 
-    RCCL_USE_AMD_SMI_LIB=1 RCCL_FABRIC_TELEMETRY_ENABLE=1 \
+    RCCL_FABRIC_TELEMETRY_ENABLE=1 \
       NCCL_DEBUG=INFO NCCL_DEBUG_SUBSYS=INIT \
       mpirun -np 4 ./all_reduce_perf -b 8 -e 1G -f 2 -g 1
 
-``RCCL_USE_AMD_SMI_LIB=1`` is required because the counters are only reachable
-through the amd-smi library; the sysfs fabric discovery path RCCL uses otherwise
-exposes no telemetry. Without it, RCCL warns that telemetry is disabled and
-initialization continues.
+The AMD SMI library path (``RCCL_USE_AMD_SMI_LIB=1``) is now the default. The
+counters are only reachable through the amd-smi library; the sysfs fallback path
+exposes no telemetry. If ``RCCL_USE_AMD_SMI_LIB=0`` is set, RCCL warns that
+telemetry is disabled and initialization continues.
 
 .. note::
 

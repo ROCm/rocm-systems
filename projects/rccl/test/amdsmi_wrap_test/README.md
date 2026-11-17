@@ -31,12 +31,24 @@ make info
 ## Running
 
 ```bash
-# Run with internal ARSMI fallback (default)
+# Run with AMD SMI library (default since ROCm 7.0)
 make run
 
-# Run with AMD SMI library (requires libamdsmi.so)
-make run-amdsmi
+# Run with internal ARSMI/sysfs fallback
+RCCL_USE_AMD_SMI_LIB=0 make run
 ```
+
+### Testing the dlopen Fallback Path
+
+When `RCCL_USE_AMD_SMI_LIB=1` (default) but `libamd_smi.so` cannot be loaded,
+RCCL falls back to the sysfs path automatically. To test this fallback:
+
+```bash
+# Simulate missing libamd_smi.so by pointing LD_LIBRARY_PATH elsewhere
+LD_LIBRARY_PATH=/nonexistent make run
+```
+
+The test should succeed using the sysfs fallback path.
 
 ## Test Coverage
 
@@ -65,5 +77,5 @@ The test exercises these `amdsmi_wrap` functions:
 
 | Variable | Description |
 |----------|-------------|
-| `RCCL_USE_AMD_SMI_LIB` | Set to `1` to use AMD SMI library |
+| `RCCL_USE_AMD_SMI_LIB` | `1` (default): AMD SMI library; `0`: sysfs fallback |
 | `ROCM_PATH` | Path to ROCm (default: `/opt/rocm`) |
