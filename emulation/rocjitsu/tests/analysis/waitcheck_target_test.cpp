@@ -198,6 +198,15 @@ TEST(WaitcheckTarget, DependencyWaitExpressionsUseTheTargetMnemonic) {
   }
 }
 
+TEST(WaitcheckTarget, SplitCounterWaitExpressionsAreAssemblable) {
+  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    EXPECT_EQ(wait_expression(WaitCounterKind::Load, 0, arch).value(), "s_wait_loadcnt 0");
+    EXPECT_EQ(wait_expression(WaitCounterKind::Store, 1, arch).value(), "s_wait_storecnt 1");
+    EXPECT_EQ(wait_expression(WaitCounterKind::Ds, 2, arch).value(), "s_wait_dscnt 2");
+    EXPECT_EQ(wait_expression(WaitCounterKind::Km, 0, arch).value(), "s_wait_kmcnt 0");
+  }
+}
+
 TEST(WaitcheckTarget, Cdna5RejectsDirectAndParameterLdsInstructions) {
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   for (auto opcode : {rdna4::kDsDirectLoadVdsdir, rdna4::kDsParamLoadVdsdir}) {

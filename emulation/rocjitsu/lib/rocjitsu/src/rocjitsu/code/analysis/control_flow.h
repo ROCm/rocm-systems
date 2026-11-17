@@ -32,7 +32,7 @@ namespace rocjitsu {
                                                      rj_code_arch_t arch,
                                                      bool assume_trap_two_aborts = true) {
   if (is_software_trap_two(inst, arch))
-    return assume_trap_two_aborts && arch != ROCJITSU_CODE_ARCH_RDNA3;
+    return assume_trap_two_aborts;
   if ((inst.flags() & PROGRAM_TERMINATOR) != 0)
     return true;
   return false;

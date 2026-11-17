@@ -131,7 +131,7 @@ TEST(WaitcheckStream, ReportsProducerConsumerAndRequiredWait) {
   EXPECT_EQ(diagnostic.reg, (RegisterRef{RegClass::VGPR, 0, 1}));
   EXPECT_EQ(diagnostic.access, WaitcheckAccess::Read);
   EXPECT_EQ(diagnostic.required_count, 0u);
-  EXPECT_EQ(diagnostic.required_wait, "s_wait_loadcnt <= 0");
+  EXPECT_EQ(diagnostic.required_wait, "s_wait_loadcnt 0");
   EXPECT_TRUE(diagnostic.producer.starts_with("global_load_b32"));
   EXPECT_TRUE(diagnostic.consumer.starts_with("v_mov_b32"));
   EXPECT_EQ(report.instructions_analyzed, 2u);
@@ -323,7 +323,7 @@ TEST(WaitcheckStream, Gfx1251PackedArithmeticPreservesSubsequentMemoryChecks) {
       EXPECT_EQ(diagnostic.counter, amdgpu::WaitCounterKind::Load);
       EXPECT_EQ(diagnostic.reg, (RegisterRef{RegClass::VGPR, 0, 1}));
       EXPECT_EQ(diagnostic.access, WaitcheckAccess::Read);
-      EXPECT_EQ(diagnostic.required_wait, "s_wait_loadcnt <= 0");
+      EXPECT_EQ(diagnostic.required_wait, "s_wait_loadcnt 0");
     }
   }
 }

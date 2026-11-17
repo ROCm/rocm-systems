@@ -14229,6 +14229,10 @@ TEST(WaitcheckTest, TrapTwoIdWidthMatchesTargetGeneration) {
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, &word));
     ASSERT_NE(inst, nullptr);
     EXPECT_EQ(is_software_trap_two(*inst, arch), trap_two);
+    if (trap_two) {
+      EXPECT_TRUE(is_program_path_terminator(*inst, arch));
+      EXPECT_FALSE(is_program_path_terminator(*inst, arch, /*assume_trap_two_aborts=*/false));
+    }
   }
 }
 
@@ -14253,8 +14257,65 @@ TEST(WaitcheckTest, TrapTwoAtSizedFunctionZeroGap) {
     const auto report = analyze_waitcnts(object, arch);
     EXPECT_TRUE(report.supported && report.complete) << report.analysis_error;
     EXPECT_EQ(report.kernels_analyzed, 2u);
-    EXPECT_EQ(report.instructions_analyzed, 2u);
+    // The zero words execute as NOPs on CDNA3/4; gfx115x has no local
+    // decodable successor in the sized alignment gap.
+    EXPECT_EQ(report.instructions_analyzed,
+              arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ? 7u : 2u);
     EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+  }
+}
+
+TEST(WaitcheckTest, SharedCfgDefaultKeepsTrapTwoTerminal) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_RDNA3;
+  std::vector<uint32_t> words{build_s_trap(arch, 2).value()};
+  append_gfx1100_v_mov_b32_v1_v0(words);
+  words.push_back(build_s_endpgm(arch).value());
+  const TestCodeObject object(words);
+  auto decoder = Decoder::create(arch);
+  ASSERT_NE(decoder, nullptr);
+  const std::array<uint64_t, 1> entries{0};
+  const auto ordinary = BasicBlock::build_cfg(
+      object, *decoder, arch, {.entries = entries, .wave_size = 32});
+  ASSERT_TRUE(ordinary.succeeded());
+  ASSERT_EQ(ordinary.value().size(), 1u);
+  EXPECT_EQ(ordinary.value().front()->num_instructions(), 1u);
+
+  const auto resumable = BasicBlock::build_cfg(
+      object, *decoder, arch,
+      {.entries = entries, .wave_size = 32, .trap_two_may_resume = true});
+  ASSERT_TRUE(resumable.succeeded());
+  EXPECT_TRUE(std::ranges::any_of(resumable.value(),
+                                  [](const auto &block) { return block->start_offset() == 4; }));
+}
+
+TEST(WaitcheckTest, ExecutableZeroGapAfterSizedTrapRetainsPendingLoad) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_CDNA3;
+  constexpr auto machine = EF_AMDGPU_MACH_AMDGCN_GFX942;
+  for (unsigned trap_id : {2u, 3u}) {
+    for (bool sized_gap : {false, true}) {
+      SCOPED_TRACE(testing::Message() << "trap=" << trap_id << " sized=" << sized_gap);
+      const std::vector<uint32_t> first{0xdc508000u, 0x047f0002u,
+                                        build_s_trap(arch, trap_id).value()};
+      const std::vector<uint32_t> zero_words(4, 0u);
+      const std::vector<uint32_t> second{0x7e0a0304u, build_s_endpgm(arch).value()};
+      auto image = waitcheck_test::make_gfx_multi_kernel_code_object(
+          {{"first", first}, {"padding", zero_words}, {"second", second}}, machine);
+      auto *ehdr = reinterpret_cast<Elf64_Ehdr *>(image.data());
+      auto *shdrs = reinterpret_cast<Elf64_Shdr *>(image.data() + ehdr->e_shoff);
+      auto *symbols = reinterpret_cast<Elf64_Sym *>(image.data() + shdrs[3].sh_offset);
+      symbols[3] = {};
+      symbols[4] = {};
+      if (!sized_gap)
+        symbols[2].st_size += zero_words.size() * sizeof(uint32_t);
+      AmdGpuCodeObject object(image.data(), image.size());
+      ASSERT_TRUE(object.is_valid());
+      const auto report = analyze_waitcnts_for_kernel(object, arch, 0);
+      ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+      ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+      EXPECT_EQ(report.diagnostics.front().producer_section_offset, 0u);
+      EXPECT_EQ(report.diagnostics.front().section_offset, 28u);
+      EXPECT_EQ(report.diagnostics.front().counter, WaitCounterKind::Load);
+    }
   }
 }
 

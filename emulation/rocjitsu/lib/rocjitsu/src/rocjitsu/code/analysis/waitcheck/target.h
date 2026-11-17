@@ -60,7 +60,7 @@ wait_expression(WaitCounterKind counter, uint32_t required_count, rj_code_arch_t
        << (counter == WaitCounterKind::VmVsrc ? "depctr_vm_vsrc(" : "depctr_va_vdst(")
        << required_count << ")";
   } else {
-    os << "s_wait_" << amdgpu::wait_counter_name(counter) << " <= " << required_count;
+    os << "s_wait_" << amdgpu::wait_counter_name(counter) << ' ' << required_count;
   }
   return os.str();
 }

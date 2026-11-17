@@ -932,13 +932,20 @@ BasicBlock::build_cfg(const CodeObject &co, Decoder &decoder, rj_code_arch_t arc
                 next_offset < section_end &&
                 section_end - next_offset >= sizeof(uint32_t) &&
                 words[next_offset / sizeof(uint32_t)] == 0) {
-              // A zero word can decode as an instruction. Only a sized ELF
-              // function ending exactly here, followed by a verified zero
-              // alignment gap, proves that this trap has no local fallthrough.
+              // A sized function and verified zero alignment gap can end this
+              // path only if the first zero word cannot execute. Some targets
+              // decode zero as a NOP and can resume through the gap.
               if (!trap_alignment_gaps)
                 trap_alignment_gaps.emplace(co, arch, /*for_resumable_trap=*/true);
               gap_after_trap = trap_alignment_gaps->contains(next_offset) &&
                                !trap_alignment_gaps->contains(next_offset - 1);
+              if (gap_after_trap) {
+                auto successor = decoder.decode_window(
+                    std::span<const uint32_t>(words + next_offset / sizeof(uint32_t),
+                                              (section_end - next_offset) / sizeof(uint32_t)),
+                    next_offset, DecodeErrorEmitter{});
+                gap_after_trap = successor.failed();
+              }
             }
             if (gap_after_trap)
               prepared.trap_padding_exits.insert(inst.src_loc());
