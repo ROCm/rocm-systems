@@ -510,6 +510,12 @@ prepare(const hsa::Queue& queue)
     return get_state(queue.get_agent()) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
 }
 
+bool
+has_code_object(const hsa::Queue& queue)
+{
+    return !find_code_object(queue.get_agent()).empty();
+}
+
 struct packet_info::implementation
 {
     std::array<hsa::rocprofiler_packet, max_dispatches + 1> packets{};

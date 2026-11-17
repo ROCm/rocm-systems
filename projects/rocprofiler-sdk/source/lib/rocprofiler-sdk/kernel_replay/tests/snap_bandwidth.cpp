@@ -188,11 +188,15 @@ measure_snap_restore_once(hsa_agent_t        agent,
 {
     using clock = std::chrono::steady_clock;
 
-    const auto ctx = capture_context(agent, mode);
-    if(!ctx) return {};
+    // Automatic mode with the forced mode's budgets places the snapshot the same way, but keeps the
+    // arena between snapshots, so the warmup allocates it and the timed iterations reuse it.
+    const auto forced = capture_context(agent, mode);
+    const auto ctx    = capture_context(agent, msnp::capture_mode::automatic);
+    if(!forced || !ctx) return {};
+    const auto budgets = msnp::plan_budgets(*forced);
 
     auto snap_start = clock::now();
-    auto snapshot   = msnp::snap(*ctx);
+    auto snapshot   = msnp::snap(*ctx, budgets);
     auto snap_end   = clock::now();
     if(!snapshot.complete()) return {};
 

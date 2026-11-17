@@ -283,6 +283,25 @@ retain_block(hsa_amd_memory_pool_t pool, block_t block) noexcept
     free_pool_block(block);
 }
 
+// Frees the arena kept for the pool, if there is one.
+void
+release_retained_block(hsa_amd_memory_pool_t pool) noexcept
+{
+    if(pool.handle == 0) return;
+    auto released = block_t{};
+    try
+    {
+        retained_backing().wlock([&](auto& retained) {
+            if(auto itr = retained.find(pool.handle); itr != retained.end())
+                released = std::exchange(itr->second, block_t{});
+        });
+    } catch(...)
+    {
+        return;
+    }
+    free_pool_block(released);
+}
+
 constexpr size_t arena_alignment = 16;
 
 // A region that does not fit what is left of a tier is cut on a tile boundary and the rest is
@@ -367,13 +386,23 @@ gpu_plan_budget(const capture_context_t& ctx)
     auto maximum = pool_allocation_max(ctx.gpu_pool);
     if(!maximum) return 0;
 
-    // Hold at most half of the device's memory, and leave the application at least 5% of what is
-    // free.
+    // Leave the application at least 5% of what is free, which the replayed kernel may need for
+    // scratch. Only when the SDK chooses does it also hold at most half of the device's memory.
     auto budget = static_cast<uint64_t>(*maximum);
-    if(auto total = pool_size(ctx.gpu_pool)) budget = std::min<uint64_t>(budget, *total / 2);
+    if(ctx.mode == capture_mode::automatic)
+    {
+        if(auto total = pool_size(ctx.gpu_pool)) budget = std::min<uint64_t>(budget, *total / 2);
+    }
     if(auto available = gpu_available_bytes(ctx.agent))
         budget = std::min(budget,
                           planning::tier_budget(retained_capacity(ctx.gpu_pool), *available, 20));
+    else if(ctx.mode == capture_mode::force_gpu)
+    {
+        // Without the free memory, keep the reserve against the device's size.
+        const auto total = pool_size(ctx.gpu_pool);
+        if(!total) return 0;
+        budget = std::min<uint64_t>(budget, *total - *total / 20);
+    }
     return static_cast<size_t>(budget);
 }
 
@@ -383,6 +412,8 @@ host_plan_budget(const capture_context_t& ctx)
     if(ctx.mode == capture_mode::force_gpu) return 0;
     auto maximum = pool_allocation_max(ctx.pinned_pool);
     if(!maximum) return 0;
+    // A tool that asks for host memory only gets whatever the pool can allocate.
+    if(ctx.mode == capture_mode::force_pinned) return *maximum;
     // Pinned memory cannot be swapped out, so use at most half of what the host has available.
     if(auto available = host_available_bytes())
         return std::min(*maximum,
@@ -409,12 +440,10 @@ struct hsa_pool_allocator
         if(!available || pool.handle == 0 || size == 0) return std::nullopt;
 
         // A retained arena that is large enough consumes no fresh capacity. Consult it before
-        // asking whether a new allocation of this size is currently possible.
-        if(retain == retain_mode::across_replays)
-        {
-            if(auto retained = take_retained_block(pool, size); retained)
-                return owned_block_t{retained, kind, pool, retain};
-        }
+        // asking whether a new allocation of this size is currently possible. A per-replay block
+        // frees it when the snapshot ends.
+        if(auto retained = take_retained_block(pool, size); retained)
+            return owned_block_t{retained, kind, pool, retain};
 
         if(!pool_accepts(pool, size)) return std::nullopt;
 
@@ -453,13 +482,17 @@ using snapshot_storage = storage::fallback<hsa_tier, hsa_tier, storage::null_tie
 snapshot_storage
 make_snapshot_storage(const capture_context_t& ctx, storage_budgets_t budgets)
 {
+    // A snapshot the tool limited to one memory keeps nothing once it ends, not even an arena it
+    // took over from an earlier replay.
+    const auto retain =
+        ctx.mode == capture_mode::automatic ? retain_mode::across_replays : retain_mode::per_replay;
     const auto gpu    = hsa_pool_allocator{.kind      = storage_kind::gpu_local,
-                                        .retain    = retain_mode::across_replays,
+                                        .retain    = retain,
                                         .pool      = ctx.gpu_pool,
                                         .agent     = ctx.agent,
                                         .available = ctx.gpu_backend_available};
     const auto pinned = hsa_pool_allocator{.kind       = storage_kind::pinned_host,
-                                           .retain     = retain_mode::across_replays,
+                                           .retain     = retain,
                                            .pool       = ctx.pinned_pool,
                                            .agent      = ctx.agent,
                                            .peer_agent = ctx.cpu_agent,
@@ -583,6 +616,18 @@ snapshot_t::storage() const
     return first;
 }
 
+size_t
+kept_arena_bytes(hsa_amd_memory_pool_t pool) noexcept
+{
+    return retained_capacity(pool);
+}
+
+void
+release_kept_arena(hsa_amd_memory_pool_t pool) noexcept
+{
+    release_retained_block(pool);
+}
+
 snapshot_t
 snap(hsa_agent_t agent)
 {
@@ -604,22 +649,32 @@ snap(hsa_agent_t agent)
     });
 }
 
+storage_budgets_t
+plan_budgets(const capture_context_t& ctx)
+{
+    return storage_budgets_t{gpu_plan_budget(ctx), host_plan_budget(ctx)};
+}
+
 snapshot_t
 snap(const capture_context_t& ctx)
 {
-    return snap(ctx, storage_budgets_t{gpu_plan_budget(ctx), host_plan_budget(ctx)});
+    return snap(ctx, plan_budgets(ctx));
 }
 
 snapshot_t
 snap(const capture_context_t& ctx, const batch_copy_fn_t& batch_copy)
 {
-    return snap(ctx, storage_budgets_t{gpu_plan_budget(ctx), host_plan_budget(ctx)}, batch_copy);
+    return snap(ctx, plan_budgets(ctx), batch_copy);
 }
 
 snapshot_t
 snap(const capture_context_t& ctx, storage_budgets_t budgets, const batch_copy_fn_t& batch_copy)
 {
     auto out = snapshot_t{};
+
+    // A forced mode keeps the snapshot out of the other memory, whatever the budgets allow.
+    if(ctx.mode == capture_mode::force_pinned) budgets.gpu_bytes = 0;
+    if(ctx.mode == capture_mode::force_gpu) budgets.host_bytes = 0;
 
     // Note: trackable allocations carrying HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG are recorded in
     // memory_tracker::unsupported_executable() and omitted from the main inventory. Declining

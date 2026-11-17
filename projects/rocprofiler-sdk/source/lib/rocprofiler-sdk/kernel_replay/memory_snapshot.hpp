@@ -174,9 +174,17 @@ struct snapshot_t
 
 using batch_copy_fn_t = std::function<hsa_status_t(const std::vector<blit::copy_region_t>&)>;
 
+// The budgets snap(const capture_context_t&) places against. When the SDK chooses, the GPU budget
+// is at most half of the device's memory and the host budget at most half of what the host has
+// available. A forced mode drops those limits for its memory, but still leaves the application 5%
+// of the free device memory.
+storage_budgets_t
+plan_budgets(const capture_context_t&);
+
 // Place regions against queried GPU and host budgets, in that order. A region that does not fit
 // what is left of the GPU budget is cut, and the rest goes to pinned host memory. Materialize at
-// most one arena per tier, and capture only after every required arena exists.
+// most one arena per tier, and capture only after every required arena exists. Arenas are kept for
+// later replays only when the mode is automatic.
 snapshot_t
 snap(const capture_context_t&);
 
@@ -186,12 +194,22 @@ snap(const capture_context_t&);
 snapshot_t
 snap(const capture_context_t&, const batch_copy_fn_t& batch_copy);
 
+// A forced mode sets the other memory's budget to zero.
 snapshot_t
 snap(const capture_context_t&, storage_budgets_t, const batch_copy_fn_t& batch_copy = {});
 
-// Direct-test convenience: force the nearest CPU agent's pinned HSA pool.
+// Direct-test convenience: force the nearest CPU agent's pinned HSA pool, with no size limit of the
+// SDK's own, and free the arena when the snapshot is destroyed.
 snapshot_t
 snap(hsa_agent_t agent);
+
+// Bytes of the arena kept for the pool between replays, or 0 when none is kept.
+size_t
+kept_arena_bytes(hsa_amd_memory_pool_t pool) noexcept;
+
+// Frees the arena kept for the pool between replays, if there is one.
+void
+release_kept_arena(hsa_amd_memory_pool_t pool) noexcept;
 
 // Copy each saved region back to its live device allocation. A region freed after snap is skipped.
 // A failed copy returns false immediately because the snapshot is then only partially applied.
