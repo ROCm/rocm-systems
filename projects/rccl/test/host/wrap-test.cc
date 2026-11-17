@@ -9091,8 +9091,8 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_Gfx1250NeverPicksSymmetric) {
       });
 }
 
-// gfx1250 SPX ReduceScatter: DDA LL to 1M and 2M from 32 ranks, LL128 to 224M below 8 ranks, 256M from 8 and 512M from
-// 32, then Ring.
+// gfx1250 SPX ReduceScatter: DDA LL to 1M and 2M from 32 ranks, LL128 to 224M below 8 ranks, 256M from 8 and
+// 512M from 32, then Ring.
 TEST(WrapMicrotestIsolated, SelectReduceScatter_Gfx1250SpxLL128Caps) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectReduceScatter_Gfx1250SpxLL128Caps",

@@ -23,13 +23,19 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <utility>
 
 namespace {
 
+// Launch shape of whichever kernel the message takes.
+struct DdaLLRsGeom {
+  dim3 grid;
+  dim3 block;
+  bool spread;
+};
+
 // The launch grid, which ncclReduceScatterDdaFabricLLBlocks reports: a thread on each packet of one shard for the shard
 // kernel, of the whole message for the spread kernel.
-static inline std::pair<dim3, dim3> ddaReduceScatterFabricLLGeom(const ncclComm* comm, size_t shardBytes) {
+static inline DdaLLRsGeom ddaReduceScatterFabricLLGeom(const ncclComm* comm, size_t shardBytes) {
   const bool spread = comm->nRanks >= dda::common::kDdaLLRsSpreadMinRanks;
   const size_t nPk = shardBytes >> 3; // 8 payload bytes per packet
   const unsigned threads = spread ? (unsigned)dda::common::kDdaLLRsSpreadThreads : 256u;
@@ -52,7 +58,7 @@ static inline std::pair<dim3, dim3> ddaReduceScatterFabricLLGeom(const ncclComm*
     const size_t slice = dda::common::ddaLLRsSpreadSlicePkts(nPk, blocks);
     blocks = (unsigned)((nPk + slice - 1) / slice);
   }
-  return {dim3(blocks), dim3(threads)};
+  return {dim3(blocks), dim3(threads), spread};
 }
 
 template <typename T>
@@ -62,9 +68,9 @@ static ncclResult_t ncclReduceScatterDdaFabricLLTyped(const void* sendbuff, void
   const size_t bytes = recvcount * sizeof(T); // per-rank shard bytes
   const size_t nPk = bytes >> 3;              // 8 payload bytes per packet
 
-  const auto geom = ddaReduceScatterFabricLLGeom(comm, bytes);
-  const dim3 grid = geom.first;
-  const dim3 block = geom.second;
+  const DdaLLRsGeom geom = ddaReduceScatterFabricLLGeom(comm, bytes);
+  const dim3 grid = geom.grid;
+  const dim3 block = geom.block;
 
   T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
   uint32_t* epochDev = comm->ddaLLEpochDev;
@@ -72,13 +78,12 @@ static ncclResult_t ncclReduceScatterDdaFabricLLTyped(const void* sendbuff, void
   // Bank 1 starts at ddaBankSize, matching the other LL tiers on this scratch.
   const size_t bankSize = dda::common::ddaBankSize(comm->ddaScratchBytes);
 
-  const bool spread = nRanks >= dda::common::kDdaLLRsSpreadMinRanks;
   INFO(NCCL_COLL, "DDA fabric ReduceScatter LL%s: nRanks=%d shardBytes=%zu nPk=%zu grid=%u block=%u bankSize=%zu",
-       spread ? " spread" : "", nRanks, bytes, nPk, grid.x, block.x, bankSize);
+       geom.spread ? " spread" : "", nRanks, bytes, nPk, grid.x, block.x, bankSize);
 
   const dda::common::DdaKernelParams params{comm->abortFlagDev};
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
-  if (spread) {
+  if (geom.spread) {
     hipExtLaunchKernelGGL((dda::common::ddaReduceScatterFabricSpreadLL<T, 0>), grid, block, 0, stream,
                           /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff),
                           static_cast<const T*>(sendbuff), recvcount, comm->rank, nRanks, epochDev, epochLen,
@@ -155,7 +160,7 @@ bool ncclReduceScatterDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, 
 }
 
 uint32_t ncclReduceScatterDdaFabricLLBlocks(ncclComm* comm, size_t recvcount, ncclDataType_t datatype) {
-  return ddaReduceScatterFabricLLGeom(comm, recvcount * ncclTypeSize(datatype)).first.x;
+  return ddaReduceScatterFabricLLGeom(comm, recvcount * ncclTypeSize(datatype)).grid.x;
 }
 
 ncclResult_t ncclReduceScatterDdaFabricLL(const void* sendbuff, void* recvbuff, size_t recvcount,

@@ -5,8 +5,7 @@
  ************************************************************************/
 
 // Host-only microtests for src/algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric_ll.cu: eligibility against
-// the fixed 1 MiB LL slot, the datatype dispatch, the packet grid and its epoch clamp, the reported block count, and
-// the launch.
+// the fixed 1 MiB LL slot, the datatype dispatch, the packet grid and its epoch clamp, block counts and the launch.
 
 #include <gtest/gtest.h>
 

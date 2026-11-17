@@ -12,14 +12,9 @@
 #include <cstddef>
 #include <cstdint>
 
-#if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
 #include <hip/hip_runtime.h>
-#else
-#include <cuda_runtime.h>
-#endif
 
 #include "algorithms/dda/device/CollCommon.h"
-
 #include "algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll.h"
 
 namespace dda::common {
