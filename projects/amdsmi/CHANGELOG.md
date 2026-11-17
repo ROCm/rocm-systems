@@ -6,6 +6,19 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ## amd_smi_lib for ROCm 10.3.0
 
+### Resolved Issues
+
+- **Fixed CPU and core APIs accepting handles for the wrong processor type**.
+  - Global CPU version queries now also require a valid CPU socket handle.
+
+- **Fixed `amd-smi ras --cper` crashing with `TypeError` when no GPU devices are available**.
+  - When the `amdgpu` driver is not loaded, the command now exits with a clear driver-not-loaded message and exit code 206 instead of an unhandled exception.
+
+- **Fixed `amd-smi` failures on non-x86 systems where the library is built without ESMI (EPYC CPU) support**.  
+  - `amd-smi` no longer tries to initialize CPU monitoring on such builds, and the Python CPU APIs now raise `AmdSmiLibraryException` with `AMDSMI_STATUS_NOT_SUPPORTED` instead of `AttributeError`. CPU affinity is reported again instead of N/A, and the Go shim builds without ESMI.
+
+## amd_smi_lib for ROCm 10.2.0
+
 ### Added
 
 - **Added ``amd-smi metric --nic --rdma [idx]`` and the Python ``amdsmi_get_nic_rdma_port_statistics()``**.  

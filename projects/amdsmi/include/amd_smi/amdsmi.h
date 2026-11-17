@@ -257,6 +257,11 @@ typedef enum {
 /**
  * @brief opaque handler point to underlying implementation
  *
+ * CPU socket and core monitoring and control APIs require a registered handle
+ * of the corresponding processor type and return ::AMDSMI_STATUS_NOT_SUPPORTED
+ * for a registered handle of another type. Global CPU version queries also
+ * require a CPU socket handle.
+ *
  * @cond @tag{gpu_bm_linux} @tag{host} @tag{cpu_bm} @tag{guest_windows} @endcond
  */
 typedef void* amdsmi_processor_handle;

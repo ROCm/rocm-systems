@@ -61,6 +61,37 @@ class TestCpuHsmp(unittest.TestCase):
         )
         return
 
+    def test_cpu_apis_reject_gpu_handle(self) -> None:
+        if not self.common._check_amd_hsmp_driver():
+            self.skipTest("AMD HSMP driver is unavailable")
+
+        cpu_handles = amdsmi.amdsmi_get_cpu_handles()["processor_handles"]
+        if not cpu_handles:
+            self.skipTest("No AMD CPU socket handles available")
+
+        gpu_handles = [
+            processor
+            for processor in self.common.processors
+            if amdsmi.amdsmi_get_processor_type(processor)["processor_type"]
+            == amdsmi.AmdSmiProcessorType.AMD_GPU.name
+        ]
+        if not gpu_handles:
+            self.skipTest("No AMD GPU handles available")
+
+        amdsmi.amdsmi_get_cpu_hsmp_proto_ver(cpu_handles[0])
+        for processor in gpu_handles:
+            for cpu_api in (
+                amdsmi.amdsmi_get_cpu_ddr_bw,
+                amdsmi.amdsmi_get_cpu_core_energy,
+                amdsmi.amdsmi_get_cpu_hsmp_proto_ver,
+            ):
+                with self.subTest(api=cpu_api.__name__):
+                    with self.assertRaises(amdsmi.AmdSmiLibraryException) as error:
+                        cpu_api(processor)
+                    self.assertEqual(
+                        error.exception.get_error_code(), amdsmi.AmdSmiStatus.NOT_SUPPORTED
+                    )
+
     def test_get_esmi_err_msg(self):
         self.common.print_func_name("")
 
