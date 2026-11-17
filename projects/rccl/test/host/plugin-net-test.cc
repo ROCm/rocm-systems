@@ -23,7 +23,6 @@
 
 #include "../common/LogCapture.hpp"
 #include "../common/ProcessIsolatedTestRunner.hpp"
-#include "ExpectedCrash.h"
 #include "ScopedHook.h"
 #include "fakes/env_fakes.h"
 #include "fakes/nccl_fakes.h"
@@ -875,22 +874,24 @@ TEST_F(PluginNetMicrotest, InitFromParentRejectsADifferentNetNameButOnlyLogsTraf
   EXPECT_EQ(Logged(NCCL_LOG_INFO, "trafficClass"), 1);
 }
 
-// A child with a netName under a parent without one passes NULL to strcasecmp.
-// Pins AICOMRCCL-2984; a fix flips this pin.
-TEST_F(PluginNetMicrotest, InitFromParent_KnownBug_CrashesWhenOnlyTheChildHasANetName) {
+// AICOMRCCL-2984: a parent without a netName runs on the network ncclNetInit picked for it, so a child's netName is
+// checked against that network rather than the parent's NULL netName.
+TEST_F(PluginNetMicrotest, InitFromParentChecksAChildNetNameAgainstTheNetworkOfAnUnnamedParent) {
   auto parent = std::make_unique<ncclComm>();
-  // Opaque, so the optimizer can't treat strcasecmp(..., NULL) as unreachable and drop the crash.
-  const char* noName = nullptr;
-  asm volatile("" : "+r"(noName));
-  parent->config.netName = noName;
-  comm_->config.netName = "IB";
-  ScopedDeathTestStyle style("threadsafe");
-  EXPECT_EXIT(
-      {
-        DisableCoreDumpsForExpectedCrash();
-        (void)ncclNetInitFromParent(comm_.get(), parent.get());
-      },
-      DEATH_BY_SEGV, "");
+  parent->ncclNet = &ncclNetIb;
+  parent->config.netName = nullptr;
+  comm_->config.netName = "ib";
+  ASSERT_EQ(ncclNetInitFromParent(comm_.get(), parent.get()), ncclSuccess);
+  EXPECT_EQ(comm_->ncclNet, &ncclNetIb);
+  EXPECT_EQ(Logged(NCCL_LOG_WARN, "netName"), 0);
+
+  comm_->config.netName = "Socket";
+  EXPECT_EQ(ncclNetInitFromParent(comm_.get(), parent.get()), ncclInvalidUsage);
+  EXPECT_EQ(Logged(NCCL_LOG_WARN, "Comm config netName (Socket) does not match the parent (IB)"), 1);
+
+  comm_->config.netName = nullptr;
+  EXPECT_EQ(ncclNetInitFromParent(comm_.get(), parent.get()), ncclSuccess);
+  EXPECT_EQ(Logged(NCCL_LOG_WARN, "netName"), 1);
 }
 
 // Device counts
