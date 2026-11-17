@@ -154,6 +154,11 @@ other modes, such as rounding FP16 results before applying OMOD.
 FP32 MUL selects numeric-only exact semantics in every configuration. Its
 integration retains Rocjitsu's existing exception classifier for Compatibility;
 explicit mode 3 uses the library's qualified reporting domain instead.
+Gfx12 scalar FP Compatibility computes the inherited numerical result and FP
+status inside the library; the VM commits the destination and raises guest traps.
+For arithmetic and conversion, this inherited reporting does not qualify explicit
+mode 3, which continues to reject unsupported status. Compatibility requires
+valid status storage for these operations, as specified by their declarations.
 Compatibility may retain demonstrated hardware-fidelity improvements over the
 previous interpreter; instruction contracts document such exceptions.
 On RDNA4 the simulator also records invalid inputs to FP32 binary arithmetic
