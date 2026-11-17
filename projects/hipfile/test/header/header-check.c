@@ -10,6 +10,17 @@
 
 #include <hipfile.h>
 
+/* Linking hipfile must not raise the language standard (see
+ * CMakeLists.txt)
+ */
+#if defined(__cplusplus)
+#if __cplusplus != 201103L
+#error "hipfile.h must be compiled as C++11 here; does hipfile export a cxx_std_* requirement?"
+#endif
+#elif !defined(__STDC_VERSION__) || __STDC_VERSION__ != 201112L
+#error "hipfile.h must be compiled as C11 here; does hipfile export a c_std_* requirement?"
+#endif
+
 /* A macro is only checked where it's expanded, so this uses every
  * macro hipfile.h defines
  */
