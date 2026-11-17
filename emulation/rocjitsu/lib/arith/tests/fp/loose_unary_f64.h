@@ -22,20 +22,23 @@ namespace rocjitsu::arith::test {
 
 // Exercise the common loose-only FP64 unary contract, including rejected exact
 // modes, modifiers, EXEC, aliasing, and untouched FP status. The caller supplies
-// the entry point and an independent scalar reference expression.
+// the entry point and an independent scalar reference expression. Disable the
+// RDNA OMOD checks for models whose scaling stages are tested separately.
 template <int Lanes, typename Call, typename Reference>
-void check_loose_unary_f64(Call call, Reference reference, bool gfx12) {
+void check_loose_unary_f64(Call call, Reference reference, bool gfx12, bool check_omod = true) {
   static_assert(Lanes == 32 || Lanes == 64);
   using Mask = std::conditional_t<Lanes == 32, uint32_t, uint64_t>;
   using Registers = rocjitsu::arith::test::Registers<10, Lanes>;
   Registers input = make_fp_inputs<64, Lanes>();
   Registers witness;
   write_fp(witness.v, 0, 64, 0x3ff8000000000000ULL); // A positive, nonintegral finite input.
-  check_fp64_omod<Lanes>(
-      [&](uint64_t flags, uint64_t modifier, uint32_t *const *d) {
-        return call(flags, Mask(1), modifier, d, witness.v, nullptr);
-      },
-      reference(1.5), gfx12);
+  if (check_omod) {
+    check_fp64_omod<Lanes>(
+        [&](uint64_t flags, uint64_t modifier, uint32_t *const *d) {
+          return call(flags, Mask(1), modifier, d, witness.v, nullptr);
+        },
+        reference(1.5), gfx12);
+  }
 
   auto invalid_request = [&](uint64_t flags, uint64_t mode) {
     Registers r = input;

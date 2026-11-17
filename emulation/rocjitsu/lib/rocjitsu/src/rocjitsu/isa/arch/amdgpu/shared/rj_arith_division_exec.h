@@ -10,6 +10,7 @@
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <type_traits>
@@ -18,7 +19,8 @@ namespace rocjitsu::amdgpu::arith {
 
 enum class DivisionOperation { Scale, Fmas, Fixup };
 
-// SCALE produces SDST after its vector result, clearing inactive condition bits.
+// SCALE produces SDST after its vector result. CDNA preserves inactive bits from VCC;
+// the RDNA policy clears them.
 // FMAS consumes pre-instruction VCC. FMAS/FIXUP optionally accumulate
 // architectural exception state. All sources are acquired before any destination is written.
 template <unsigned Width, DivisionOperation Op, typename Wave32, typename Wave64,
@@ -26,8 +28,10 @@ template <unsigned Width, DivisionOperation Op, typename Wave32, typename Wave64
 inline void execute_division(Wavefront &wave, Wave32 wave32, Wave64 wave64, uint64_t flags,
                              uint64_t modifiers, const Operand &destination, const Operand &lhs,
                              const Operand &rhs, const Operand &third, bool rdna3,
-                             CommitCondition commit_condition = nullptr) {
-  const uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
+                             CommitCondition commit_condition = nullptr,
+                             bool preserve_inactive_condition = false) {
+  const uint64_t exec_mask = wave.exec();
+  const uint64_t write_mask = exec_mask & wave.vgpr_write_mask();
   const uint64_t old_condition = wave.vcc();
   flags = Width == 64 ? float16_f64_flags(wave, flags, rdna3) : float32_flags(wave, flags, rdna3);
   if (!exec_mask) {
@@ -41,7 +45,9 @@ inline void execute_division(Wavefront &wave, Wave32 wave32, Wave64 wave64, uint
       if (error != RJ_ARITH_SUCCESS)
         wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
       else
-        commit_condition(wave.wf_size() == 32 ? narrow_condition : condition);
+        commit_condition(preserve_inactive_condition ? old_condition
+                         : wave.wf_size() == 32      ? narrow_condition
+                                                     : condition);
     }
     return;
   }
@@ -82,14 +88,41 @@ inline void execute_division(Wavefront &wave, Wave32 wave32, Wave64 wave64, uint
     }
   };
   bool success;
-  if constexpr (Width == 64)
-    success = write_vector64_result(wave, registers, destination, exec_mask, invoke);
+  if (write_mask != exec_mask) {
+    // DPP masks VGPR stores, but SDST and FP status still cover every EXEC lane.
+    std::array<std::array<uint32_t, 64>, Width / 32> result;
+    std::array<uint32_t *, Width / 32> d;
+    for (unsigned reg = 0; reg < Width / 32; ++reg) {
+      d[reg] = result[reg].data();
+    }
+    success =
+        !wave.instruction_execution_failed() && invoke(d.data(), exec_mask) == RJ_ARITH_SUCCESS;
+    if (!success) {
+      wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+    } else if (write_mask) {
+      auto publish = [&](uint32_t *const *output, uint64_t lanes) {
+        for (unsigned reg = 0; reg < Width / 32; ++reg) {
+          for (unsigned lane = 0; lane < wave.wf_size(); ++lane) {
+            if ((lanes >> lane) & 1) {
+              output[reg][lane] = result[reg][lane];
+            }
+          }
+        }
+        return RJ_ARITH_SUCCESS;
+      };
+      if constexpr (Width == 64)
+        success = write_vector64_result(wave, registers, destination, write_mask, publish);
+      else
+        success = write_vector32_result(wave, registers, destination, write_mask, publish);
+    }
+  } else if constexpr (Width == 64)
+    success = write_vector64_result(wave, registers, destination, write_mask, invoke);
   else
-    success = write_vector32_result(wave, registers, destination, exec_mask, invoke);
+    success = write_vector32_result(wave, registers, destination, write_mask, invoke);
   if (!success)
     return;
   if constexpr (Op == DivisionOperation::Scale)
-    commit_condition(condition);
+    commit_condition(condition | (preserve_inactive_condition ? old_condition & ~exec_mask : 0));
   else {
     wave.set_trapsts(wave.trapsts() | causes);
     wave.raise_alu_causes(causes);
