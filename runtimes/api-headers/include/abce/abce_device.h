@@ -510,14 +510,10 @@ static inline uint64_t abce_device_fetch_lane(uint64_t value, uint32_t source_la
   return ((uint64_t)high << 32) | low;
 }
 
-// Keyed by the control block, which is what lanes on one ring contend on.
-static inline uint64_t abce_device_ring_key(const abce_device_submit_view_t* view) {
-  return (uint64_t)(uintptr_t)view->engine->ring.control;
-}
-
 // Whether another active lane submits to this lane's ring.
 static inline bool abce_device_shares_ring(const abce_device_submit_view_t* view) {
-  const uint64_t ring_key = abce_device_ring_key(view);
+  // Keyed by the control block, which is what lanes on one ring contend on.
+  const uint64_t ring_key = (uint64_t)(uintptr_t)view->engine->ring.control;
   bool shares_ring = false;
   for (uint64_t unsorted = abce_device_lane_mask(true); unsorted != 0;) {
     const uint64_t group_key =
@@ -534,7 +530,7 @@ static inline bool abce_device_shares_ring(const abce_device_submit_view_t* view
 // publishes them all, and each lane writes its own. The leaders of different
 // rings wait on no other lane, so they reserve and publish at once. A lane whose
 // request fails validation drops out. Groups past half the ring take turns
-// instead. A non-blocking lane must be alone on its ring, so that a NOT_READY
+// afterwards. A non-blocking lane must be alone on its ring, so that a NOT_READY
 // holds back no other lane.
 static inline abce_status_t abce_device_submit_groups(const abce_device_submit_view_t* view,
                                                       const abce_device_request_t* request,
@@ -545,7 +541,7 @@ static inline abce_status_t abce_device_submit_groups(const abce_device_submit_v
   const uint64_t members = abce_device_lane_mask(abce_status_is_ok(status));
   if (!abce_status_is_ok(status)) return status;
 
-  const uint64_t ring_key = abce_device_ring_key(view);
+  const uint64_t ring_key = (uint64_t)(uintptr_t)view->engine->ring.control;
   uint32_t leader = lane;
   uint64_t offset = 0;
   uint64_t total_bytes = 0;
@@ -557,30 +553,33 @@ static inline abce_status_t abce_device_submit_groups(const abce_device_submit_v
     if (member < lane) offset += member_bytes;
     total_bytes += member_bytes;
   }
-  // Register copy, as with abce_device_submit_view_t.
-  abce_device_ring_t ring_copy = view->engine->ring;
-  abce_device_ring_t* ring = &ring_copy;
-  for (uint64_t waiting = abce_device_lane_mask(total_bytes > ring->size / 2); waiting != 0;
-       waiting &= waiting - 1) {
+  if (total_bytes <= view->engine->ring.size / 2) {
+    // Register copy, as with abce_device_submit_view_t.
+    abce_device_ring_t ring_copy = view->engine->ring;
+    abce_device_ring_t* ring = &ring_copy;
+    // Only a non-blocking reserve fails, and that lane is alone in its group.
+    abce_ring_reservation_t reservation;
+    uint64_t payload_start = 0;
+    if (lane == leader) {
+      status = abce_device_reserve_payload(ring, total_bytes,
+                                           !(request->flags & ABCE_DEVICE_SUBMIT_NONBLOCKING),
+                                           &reservation, &payload_start);
+      if (!abce_status_is_ok(status)) return status;
+    }
+    payload_start = abce_device_fetch_lane(payload_start, leader);
+    abce_device_write_frame(&view->builder, request, &frame,
+                            abce_device_ring_write_address(ring, payload_start + offset));
+    // The publish's store wait covers every lane's stores: the count is the wave's.
+    if (lane == leader) return abce_device_ring_submit(ring, &reservation);
+    return ABCE_STATUS_OK;
+  }
+
+  // Past half the ring. These lanes take turns after the one-pass lanes return,
+  // so none of the one-pass state stays live across their submits.
+  for (uint64_t waiting = abce_device_lane_mask(true); waiting != 0; waiting &= waiting - 1) {
     if ((uint32_t)abce_count_trailing_zeros_u64(waiting) == lane)
       return abce_device_emit(&view->builder, &view->engine->ring, request);
   }
-
-  // Within half the ring: only a non-blocking reserve fails, and that lane is
-  // alone in its group.
-  abce_ring_reservation_t reservation;
-  uint64_t payload_start = 0;
-  if (lane == leader) {
-    status = abce_device_reserve_payload(ring, total_bytes,
-                                         !(request->flags & ABCE_DEVICE_SUBMIT_NONBLOCKING),
-                                         &reservation, &payload_start);
-    if (!abce_status_is_ok(status)) return status;
-  }
-  payload_start = abce_device_fetch_lane(payload_start, leader);
-  abce_device_write_frame(&view->builder, request, &frame,
-                          abce_device_ring_write_address(ring, payload_start + offset));
-  // The publish's store wait covers every lane's stores: the count is the wave's.
-  if (lane == leader) return abce_device_ring_submit(ring, &reservation);
   return ABCE_STATUS_OK;
 }
 
