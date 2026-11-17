@@ -3,6 +3,7 @@
 
 #pragma once
 #include "rocjitsu/isa/arch/amdgpu/shared/memory_issue.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
 
 #include <array>
 #include <cassert>
@@ -11,6 +12,11 @@
 #include <span>
 
 namespace rocjitsu::plugins::race_detector {
+
+struct ConditionalVgprWrite {
+  uint32_t reg = 0;
+  uint64_t lanes = 0;
+};
 
 /// Categorizes in-flight memory operations for race detection.
 enum class MemoryEventType {
@@ -34,13 +40,13 @@ enum class MemoryEventType {
   GLOBAL_TO_TTMP,   ///< Scalar load to a TTMP; the event stores its counter family separately.
   SCALAR_TO_GLOBAL, ///< Scalar store; retained to preserve partial-wait ordering.
 
-  /// LDS-to-global transfer, such as a tensor DMA store: reads LDS and writes
-  /// global memory, with no VGPR registers -- only LDS intervals. The reverse
-  /// direction is GLOBAL_TO_LDS.
+  /// LDS-to-global transfer, such as a tensor DMA store or a gfx1250 async
+  /// store: reads LDS and writes global memory, with no VGPR registers -- only
+  /// LDS intervals. The reverse direction is GLOBAL_TO_LDS.
   ///
-  /// The event records its counter family and completion order separately.
-  /// defaultWaitCounterType and defaultMemoryOrder return those of a tensor DMA
-  /// store (TENSORCNT, TENSOR).
+  /// The event records its counter family and completion order separately: an
+  /// async store carries ASYNCCNT and ASYNC_STORE. defaultWaitCounterType and
+  /// defaultMemoryOrder return those of a tensor DMA store (TENSORCNT, TENSOR).
   LDS_TO_GLOBAL,
 
   /// A synchronous VALU operand read visible to peers until a barrier.
@@ -50,6 +56,17 @@ enum class MemoryEventType {
 
 /// Race-detector name for the decoded hardware completion-order classification.
 using MemoryOrderClass = amdgpu::MemoryCompletionClass;
+
+/// VMEM result writes can use distinct hardware FIFOs while sharing a counter.
+class VgprWriteOrder {
+public:
+  constexpr VgprWriteOrder(MemoryOrderClass completion,
+                           amdgpu::VmemWriteback type = amdgpu::VmemWriteback::Ordinary)
+      : completion(completion), type(type) {}
+  bool operator==(const VgprWriteOrder &) const = default;
+  MemoryOrderClass completion;
+  amdgpu::VmemWriteback type;
+};
 
 struct LdsAccess {
   bool read_modify_write = false;

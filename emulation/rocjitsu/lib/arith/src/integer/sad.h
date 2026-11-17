@@ -19,6 +19,12 @@ template <Sad Op>
 void sad_x86_64_v3(uint32_t exec_mask, bool clamp, uint32_t *const *d, const uint32_t *const *a,
                    const uint32_t *b, const uint32_t *const *c);
 
+// Accumulate absolute differences. Preserve destination lanes outside exec_mask.
+// Requires the named CPU features and validated instruction controls.
+template <Sad Op>
+void sad_x86_64_v4(uint32_t exec_mask, bool clamp, uint32_t *const *d, const uint32_t *const *a,
+                   const uint32_t *b, const uint32_t *const *c);
+
 } // namespace rocjitsu::arith
 
 #endif

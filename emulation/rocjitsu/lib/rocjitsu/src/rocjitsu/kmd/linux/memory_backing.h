@@ -60,7 +60,8 @@ int create_memory_backing(size_t size, bool preallocate = false,
 /// @brief Populate a newly created metadata file using the keeper's inherited hard limit.
 /// @details The caller owns this unpublished regular file; its offset is unchanged.
 /// Unlike GPU backing, metadata files must fit the keeper's inherited hard file limit.
-int populate_backing_file(int fd, const void *data, size_t size);
+/// Reserve storage before copying into a snapshot mapping on capacity-limited tmpfs.
+int populate_backing_file(int fd, const void *data, size_t size, bool reserve_space = false);
 
 /// @brief An unpublished metadata file and its individual creation/population error.
 struct BackingFile {

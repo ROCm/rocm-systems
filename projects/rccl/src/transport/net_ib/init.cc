@@ -423,12 +423,39 @@ static const bool ncclIbCpuArchAarch64 = false;
 #endif
 
 static const uint32_t NCCL_IB_MLX_VENDOR_ID = 0x02c9;
-// CX9 FW versions are 82.XX.XXXX; the part ID is not consistent between PF and VF.
+static const uint32_t NCCL_IB_CX9_PART_ID = 0x1025;
+static const uint32_t NCCL_IB_VF_PART_ID = 0x101e;
 static bool ncclIbIsCx9(const struct ncclIbDev* dev) {
-  return dev->vendorId == NCCL_IB_MLX_VENDOR_ID && strncmp(dev->fwVer, "82.", 3) == 0;
+  return dev->vendorId == NCCL_IB_MLX_VENDOR_ID &&
+         (dev->vendorPartId == NCCL_IB_CX9_PART_ID || dev->vendorPartId == NCCL_IB_VF_PART_ID) &&
+         strncmp(dev->fwVer, "82.", 3) == 0;
 }
 static const int NCCL_IB_VR_SOCKET_COUNT = 2;
 static const int NCCL_IB_VR_RAILS_PER_SOCKET = 2;
+
+int ncclIbCx9RailId(enum ncclIbRailPolicy policy, int devId, int nDevs) {
+  if (nDevs <= 0 || nDevs % 8) {
+    INFO(NCCL_NET | NCCL_ENV,
+         "NET/IB: rail policy was set to CX9 but the number of CX9 found (=%d) is not a modulo of 8, ignoring.", nDevs);
+    return NCCL_NET_ID_UNDEF;
+  }
+  int nCx9PerSocket = nDevs / NCCL_IB_VR_SOCKET_COUNT;
+  int devIdLocal = devId % nCx9PerSocket;
+  int socketRail = (devId / nCx9PerSocket) * NCCL_IB_VR_RAILS_PER_SOCKET;
+  if (policy == NCCL_IB_RAIL_POLICY_CX9_ALT) {
+    // Alternate layout per socket = [0 1 0 1 ...]
+    return socketRail + (devIdLocal % NCCL_IB_VR_RAILS_PER_SOCKET);
+  }
+  if (policy == NCCL_IB_RAIL_POLICY_CX9_BLOCK) {
+    // Block layout per socket = [0 ... 0 1 ... 1]
+    int nCx9PerRailPerSocket = nCx9PerSocket / NCCL_IB_VR_RAILS_PER_SOCKET;
+    return socketRail + (devIdLocal / nCx9PerRailPerSocket);
+  }
+  // Flipped layout per socket = [0 1 | 1 0].
+  int groupLocalId = std::min(devIdLocal, (nCx9PerSocket - 1) - devIdLocal);
+  int nCx9PerRailPerGroup = divUp(nCx9PerSocket, 2) / NCCL_IB_VR_RAILS_PER_SOCKET;
+  return socketRail + (groupLocalId / nCx9PerRailPerGroup);
+}
 
 static void ncclIbGetRailPolicy(enum ncclIbRailPolicy* policy) {
   static std::once_flag onceFlag;
@@ -499,35 +526,13 @@ static ncclResult_t ncclIbAutoAssignRailPlane(int d, const char** uniquePaths, i
   if ((policy == NCCL_IB_RAIL_POLICY_CX9_ALT || policy == NCCL_IB_RAIL_POLICY_CX9_BLOCK ||
        policy == NCCL_IB_RAIL_POLICY_CX9_FLIP) &&
       ncclIbIsCx9(dev)) {
-    if (nDevs % 8) {
-      INFO(NCCL_NET | NCCL_ENV,
-           "NET/IB: rail policy was set to CX9 but the number of CX9 found (=%d) is not a modulo of 8, ignoring.",
-           nDevs);
-      return ncclSuccess;
-    }
     // Get the index of the corresponding CX9 device (CX9s are sorted by PCIe path)
     int devId = ncclIbGetPciIndex(*uniqueCount, uniquePaths, dev);
+    int railId = ncclIbCx9RailId(policy, devId, nDevs);
+    if (railId == NCCL_NET_ID_UNDEF) return ncclSuccess;
     if (devId == *uniqueCount) uniquePaths[(*uniqueCount)++] = dev->pciPath;
 
-    if (dev->railId == NCCL_NET_ID_UNDEF) {
-      int nCx9PerSocket = nDevs / NCCL_IB_VR_SOCKET_COUNT;
-      int devIdLocal = devId % nCx9PerSocket; // ID local to the socket
-      if (policy == NCCL_IB_RAIL_POLICY_CX9_ALT) {
-        // Alternate layout per socket = [0 1 0 1 ...]
-        dev->railId =
-          (devId / nCx9PerSocket) * NCCL_IB_VR_RAILS_PER_SOCKET + (devIdLocal % NCCL_IB_VR_RAILS_PER_SOCKET);
-      } else if (policy == NCCL_IB_RAIL_POLICY_CX9_BLOCK) {
-        // Block layout per socket = [0 ... 0 1 ... 1]
-        int nCx9PerRailPerSocket = nCx9PerSocket / NCCL_IB_VR_RAILS_PER_SOCKET;
-        dev->railId = (devId / nCx9PerSocket) * NCCL_IB_VR_RAILS_PER_SOCKET + (devIdLocal / nCx9PerRailPerSocket);
-      } else if (policy == NCCL_IB_RAIL_POLICY_CX9_FLIP) {
-        // Flipped layout per socket = [0 1 | 1 0].
-        // Implementation: split nCx9PerSocket in 2 groups and use a group local index to obtain a block layout in each group.
-        int groupLocalId = std::min(devIdLocal, (nCx9PerSocket - 1) - devIdLocal);
-        int nCx9PerRailPerGroup = divUp(nCx9PerSocket, 2) / NCCL_IB_VR_RAILS_PER_SOCKET;
-        dev->railId = (devId / nCx9PerSocket) * NCCL_IB_VR_RAILS_PER_SOCKET + (groupLocalId / nCx9PerRailPerGroup);
-      }
-    }
+    if (dev->railId == NCCL_NET_ID_UNDEF) dev->railId = railId;
   }
   // Regardless of the rail assignment, get the plane ID looking at the devices already assigned to the same rail.
   if (dev->planeId == NCCL_NET_ID_UNDEF) {
@@ -719,10 +724,6 @@ ncclResult_t ncclIbInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
                  ncclIbDevs[ncclNIbDevs].speed, context, ncclIbDevs[ncclNIbDevs].pciPath, ncclIbDevs[ncclNIbDevs].ar,
                  ncclIbDevs[ncclNIbDevs].oooRqSize);
 
-            ncclIbAsyncThread = std::thread(ncclIbAsyncThreadMain, ncclIbDevs + ncclNIbDevs);
-            ncclSetThreadName(ncclIbAsyncThread, "NCCL IbAsync %2d", ncclNIbDevs);
-            ncclIbAsyncThread.detach();
-
             ncclNIbDevs++;
             nPorts++;
           }
@@ -733,9 +734,10 @@ ncclResult_t ncclIbInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
         }
       }
 
-      if (devices && (ncclSuccess != wrap_ibv_free_device_list(devices))) {
-        ret = ncclInternalError;
-        goto fail;
+      if (devices) {
+        // wrap_ibv_free_device_list never fails; clear devices so the fail path cannot free it twice
+        wrap_ibv_free_device_list(devices);
+        devices = NULL;
       }
     }
     if (ncclNIbDevs == 0) {
@@ -754,6 +756,12 @@ ncclResult_t ncclIbInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
     }
     // sort devices to ensure a consistent order across nodes
     if (ncclParamIbDevicePciOrder()) qsort(ncclIbDevs, ncclNIbDevs, sizeof(struct ncclIbDev), ncclIbCompareDevs);
+    // Start the async-event threads only once ncclIbDevs[] has its final, stable device order.
+    for (int d = 0; d < ncclNIbDevs; d++) {
+      ncclIbAsyncThread = std::thread(ncclIbAsyncThreadMain, ncclIbDevs + d);
+      ncclSetThreadName(ncclIbAsyncThread, "NCCL IbAsync %2d", d);
+      ncclIbAsyncThread.detach();
+    }
     // Once sorted, get the realPort ID, the plane index, and create the virtual devices.
     // Doing it after sorting ensures that devices will have consistent realPort IDs and plane indexes accross ranks.
     char line[2048] = "";
@@ -791,9 +799,7 @@ ncclResult_t ncclIbInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
 exit:
   return ret;
 fail:
-  if (devices != NULL && ncclSuccess != wrap_ibv_free_device_list(devices)) {
-    WARN("NET/IB : Unable to free device list");
-  }
+  if (devices) wrap_ibv_free_device_list(devices);
   goto exit;
 }
 
