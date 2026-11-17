@@ -232,6 +232,30 @@ void add_math(std::vector<Benchmark> &cases) {
   add(cases, "math", "v_frexp_mant_f32_w64_gfx12", [](Operands &r, uint64_t flags) {
     return rj_arith_v_frexp_mant_f32_w64_gfx12(flags, UINT64_MAX, 0, r.d, r.a, &r.status);
   });
+  add(cases, "math", "v_trunc_f16_w32_gfx908", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_trunc_f16_w32_gfx908(flags, UINT32_MAX, 0, r.d, r.a, &r.status);
+  });
+  add(cases, "math", "v_ceil_f16_w32_gfx908", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_ceil_f16_w32_gfx908(flags, UINT32_MAX, 0, r.d, r.a, &r.status);
+  });
+  add(cases, "math", "v_rndne_f16_w32_gfx908", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_rndne_f16_w32_gfx908(flags, UINT32_MAX, 0, r.d, r.a, &r.status);
+  });
+  add(cases, "math", "v_floor_f16_w32_gfx908", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_floor_f16_w32_gfx908(flags, UINT32_MAX, 0, r.d, r.a, &r.status);
+  });
+  add(cases, "math", "v_trunc_f16_w64_gfx908", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_trunc_f16_w64_gfx908(flags, UINT64_MAX, 0, r.d, r.a, &r.status);
+  });
+  add(cases, "math", "v_ceil_f16_w64_gfx908", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_ceil_f16_w64_gfx908(flags, UINT64_MAX, 0, r.d, r.a, &r.status);
+  });
+  add(cases, "math", "v_rndne_f16_w64_gfx908", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_rndne_f16_w64_gfx908(flags, UINT64_MAX, 0, r.d, r.a, &r.status);
+  });
+  add(cases, "math", "v_floor_f16_w64_gfx908", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_floor_f16_w64_gfx908(flags, UINT64_MAX, 0, r.d, r.a, &r.status);
+  });
   add(cases, "math", "v_trunc_f16_w32", [](Operands &r, uint64_t flags) {
     return rj_arith_v_trunc_f16_w32(flags, UINT32_MAX, 0, r.d, r.a, &r.status);
   });
@@ -291,6 +315,18 @@ void add_math(std::vector<Benchmark> &cases) {
   });
   add(cases, "math", "v_fract_f16_w32_gfx12", [](Operands &r, uint64_t flags) {
     return rj_arith_v_fract_f16_w32_gfx12(flags, UINT32_MAX, 0, r.d, r.a, &r.status);
+  });
+  add(cases, "math", "v_fract_f16_w32_gfx908", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_fract_f16_w32_gfx908(flags, UINT32_MAX, 0, r.d, r.a, &r.status);
+  });
+  add(cases, "math", "v_fract_f16_w64_gfx908", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_fract_f16_w64_gfx908(flags, UINT64_MAX, 0, r.d, r.a, &r.status);
+  });
+  add(cases, "math", "v_frexp_mant_f16_w32_gfx908", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_frexp_mant_f16_w32_gfx908(flags, UINT32_MAX, 0, r.d, r.a, &r.status);
+  });
+  add(cases, "math", "v_frexp_mant_f16_w64_gfx908", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_frexp_mant_f16_w64_gfx908(flags, UINT64_MAX, 0, r.d, r.a, &r.status);
   });
   add(cases, "math", "v_frexp_mant_f16_w32", [](Operands &r, uint64_t flags) {
     return rj_arith_v_frexp_mant_f16_w32(flags, UINT32_MAX, 0, r.d, r.a, &r.status);

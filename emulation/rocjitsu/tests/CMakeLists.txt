@@ -535,6 +535,7 @@ add_executable(
     cdna5_dispatch_memory_test.cpp
     cdna5_execution_test.cpp
     numeric_encoding_regression_test.cpp
+    older_half_unary_test.cpp
     cdna5_gfx1251_simulation_test.cpp
     cdna5_instruction_test.cpp
     cdna5_sdma_test.cpp
