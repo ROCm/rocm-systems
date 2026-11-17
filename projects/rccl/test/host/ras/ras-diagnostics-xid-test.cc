@@ -22,6 +22,11 @@
 #include "fakes/ras_diagnostics_test_support.h"
 #include "ras/diagnostics.h"
 
+// CollectLocal's externals: not called here, but linked unless --gc-sections drops it.
+uint64_t getHostHash() { std::abort(); }
+ncclResult_t getHostName(char*, int, const char) { std::abort(); }
+int ncclDiagChildRun(const char*, int, char*, int, bool*) { std::abort(); }
+
 #include RAS_DIAGNOSTICS_XID_CC_PATH
 
 namespace {
@@ -205,8 +210,9 @@ TEST(RasDiagnosticsXidMicrotest, DmesgTimestampScalesToMicroseconds) {
   EXPECT_EQ(7000000u, usec);
   ASSERT_TRUE(rasDiagnosticsXidDmesgTimestamp("[1.1234567] x", &usec, &message));
   EXPECT_EQ(1123456u, usec);
-  for (const char* line : {"no bracket", "[abc] x", "[1.5 x", "[18446744073709551615] x"})
+  for (const char* line : {"no bracket", "[abc] x", "[1.5 x", "[18446744073709551615] x"}) {
     EXPECT_FALSE(rasDiagnosticsXidDmesgTimestamp(line, &usec, &message)) << line;
+  }
 }
 
 TEST(RasDiagnosticsXidMicrotest, DmesgTextKeepsInWindowEventsAndFlagsOverlongLines) {
@@ -223,7 +229,9 @@ TEST(RasDiagnosticsXidMicrotest, DmesgTextKeepsInWindowEventsAndFlagsOverlongLin
   EXPECT_EQ(2, scan.events[0].count);
   EXPECT_FALSE(scan.truncated);
 
-  std::string longLine = "[   11.000000] " + std::string(RAS_DIAG_XID_LINE_BYTES, 'x') + "\n";
+  // Exactly the copy buffer's size: no room for the terminator.
+  std::string longLine = "[   11.000000] ";
+  longLine += std::string(RAS_DIAG_XID_LINE_BYTES - longLine.size(), 'x') + "\n";
   rasDiagnosticsXidScanDmesgText(longLine.c_str(), &window, &scan);
   EXPECT_TRUE(scan.truncated);
 }
@@ -295,8 +303,9 @@ TEST(RasDiagnosticsXidMicrotest, IsoWallTimeHonorsUtcAndOffsets) {
 TEST(RasDiagnosticsXidMicrotest, IsoWallTimeRejectsBadTimesAndOffsets) {
   time_t t;
   for (const char* line : {"Nov 12 10:00:00 host", "2026-11-12T10:00:00+5", "2026-11-12T10:00:00+24:00",
-                           "2026-11-12T10:00:00+05:60", "2026-11-12T10:00:00+05x30"})
+                           "2026-11-12T10:00:00+05:60", "2026-11-12T10:00:00+05x30"}) {
     EXPECT_FALSE(rasDiagnosticsXidParseIsoWallTime(line, &t)) << line;
+  }
 }
 
 TEST(RasDiagnosticsXidMicrotest, SyslogWallTimeTakesTheYearFromNow) {
@@ -322,8 +331,9 @@ TEST(RasDiagnosticsXidMicrotest, SyslogWallTimeRejectsMalformedStamps) {
   const time_t now = Local(2026, 11, 12, 12, 0, 0);
   time_t t;
   for (const char* line : {"Foo 12 10:00:00 host kernel", "Nov 32 10:00:00 host kernel", "Nov 12 24:00:00 host kern",
-                           "Nov 12 10:60:00 host kernel", "Nov 12 10:00", "Nov 12 10:00:61 host kernel"})
+                           "Nov 12 10:60:00 host kernel", "Nov 12 10:00", "Nov 12 10:00:61 host kernel"}) {
     EXPECT_FALSE(rasDiagnosticsXidParseSyslogWallTime(line, now, &t)) << line;
+  }
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -506,6 +516,14 @@ TEST_F(RasDiagnosticsXidSummarizeMicrotest, XidFindingCarriesCountAndGuidance) {
   ASSERT_EQ(1u, state_.lines.size());
   EXPECT_TRUE(AnyLineContains("Xid 13 detected 3 times on host h1"));
   EXPECT_TRUE(AnyLineContains("Restart the affected application"));
+}
+
+TEST_F(RasDiagnosticsXidSummarizeMicrotest, SaturatedCountIsReportedAsALowerBound) {
+  Host(1, "h1");
+  Xid(1, 13, UINT16_MAX);
+  records_.back().event.value.countSaturated = true;
+  ASSERT_EQ(ncclSuccess, Summarize());
+  EXPECT_TRUE(AnyLineContains("Xid 13 detected at least 65535 times on host h1"));
 }
 
 TEST_F(RasDiagnosticsXidSummarizeMicrotest, DuplicateReportsOfOneEventCountOnce) {

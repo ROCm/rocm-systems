@@ -126,6 +126,7 @@ rccl_add_ras_micro_binary(rccl-UnitTestsMicroRasDiagnostics ras-diagnostics-test
 rccl_add_ras_micro_binary(rccl-UnitTestsMicroRasDiagnosticsXid ras-diagnostics-xid-test.cc
   SOURCES
     fakes/nccl_fakes.cc
+    fakes/ras_comms_fakes.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_checks_common.cc)
 
 rccl_add_ras_micro_binary(rccl-UnitTestsMicroRasParam ras-param-test.cc
