@@ -35,9 +35,13 @@ TEST_F(NicUnit, ShutdownUninstallsTheNicLogSinkWhenTheGpuShutdownFails) {
     GTEST_SKIP() << "needs a host with a GPU";
   }
   // Release the library's own ROCm SMI reference, so the shutdown below finds it already closed.
-  ASSERT_EQ(rsmi_shut_down(), RSMI_STATUS_SUCCESS);
-
-  EXPECT_NE(amdsmi_shut_down(), AMDSMI_STATUS_SUCCESS);
+  // On WSL, rsmi library is never actually initialized, so skip if that is the case.
+  if (access("/dev/dxg", F_OK) != 0) {
+    ASSERT_EQ(rsmi_shut_down(), RSMI_STATUS_SUCCESS);
+    EXPECT_NE(amdsmi_shut_down(), AMDSMI_STATUS_SUCCESS);
+  } else {
+    EXPECT_EQ(amdsmi_shut_down(), AMDSMI_STATUS_SUCCESS);
+  }
 
   EXPECT_FALSE(amd::smi::nic::log::is_enabled());
 }
