@@ -5,8 +5,10 @@
 
 #include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
 #include "rocjitsu/vm/plugins/race_detector/core/dim3d.h"
+#include "rocjitsu/vm/plugins/race_detector/core/instruction_snapshot.h"
 #include <algorithm>
 #include <cstdint>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -73,6 +75,22 @@ struct RaceViolation {
   bool isWrite; ///< True if the violating access was a write.
   Dim3d workgroupId;
   EventId conflictingEvent; ///< Exact pending memory event that caused the violation.
+
+  enum class Kind {
+    Race,
+    /// An LDS write that stores the same bytes as an unordered pending write to
+    /// the same addresses. Not a race; it may be wasted work.
+    RedundantWrite,
+  };
+  Kind kind = Kind::Race;
+  /// For a read that observes two unordered writes to the same LDS bytes,
+  /// observedWrite is the earlier write and observedLaterWrite the later one.
+  /// Their events may have retired, so the violation holds copies.
+  /// observedLaterWrite is empty when validateWrite received no instruction.
+  std::optional<InstructionSnapshot> observedWrite;
+  int observedWriteWave = -1;
+  std::optional<InstructionSnapshot> observedLaterWrite;
+  int observedLaterWriteWave = -1;
 
   RaceViolation(Space space, int index, int wave, int lane, bool isWrite, Dim3d workgroupId,
                 EventId conflictingEvent)

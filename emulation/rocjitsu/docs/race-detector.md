@@ -191,7 +191,8 @@ races. Some examples:
 - **LDS races**: an LDS byte is read by one wave while another wave has an
   outstanding write to the same byte, or written by one wave while another
   wave has an outstanding read of the same byte, without an intervening
-  `s_barrier`;
+  `s_barrier`; or a read observes a byte that two unordered writes stored with
+  different or unknown values (see LDS write-after-write below);
   or a wave reads bytes targeted by its own outstanding direct-to-LDS operation
   before the required `s_waitcnt vmcnt`. A direct-to-LDS write over bytes of
   the same wave's pending DS read is also reported, on every target with
@@ -217,7 +218,9 @@ races. Some examples:
   the same wave that touch the same LDS byte, in either order, until
   `s_wait_tensorcnt` or a full `tensorcnt` retires the earlier one. Two stores
   of the same tile only read it, which is safe; two loads over the same bytes
-  are an LDS write/write conflict, reported under the same rule. Each
+  are an LDS write/write conflict, reported when a later read observes the
+  bytes, unless `s_wait_tensorcnt` or a full `tensorcnt` retired the earlier
+  load before the later one issued. Each
   instruction is registered when it issues, as other memory
   instructions are, so an instruction that moves no data still occupies its
   `tensorcnt` slot, and a transfer that waits for memory is pending from the
@@ -258,6 +261,45 @@ races. Some examples:
 
 Detection is at byte granularity: D16 (half-register) loads only flag races on
 the affected bytes, and LDS races are tracked per byte.
+
+## LDS write-after-write
+
+Two writes to the same LDS bytes are ordered when the earlier write completes
+before the later one issues: for writes of different waves, the earlier wave
+waits for its write and a barrier follows; for writes of one wave, the wave
+waits for the earlier write or both writes share a completion class. Other
+pairs are unordered. Unordered writes change a result only when they store
+different values and a later read observes the bytes, so the detector reports
+the race at that read:
+
+- When a write overlaps an unordered pending write, the detector compares the
+  bytes it stores with the bytes LDS holds for the pending write. LDS holds
+  them only for a pending DS store or FLAT store to LDS, which takes effect
+  when it executes; the bytes of a pending DMA write are not known. Identical
+  bytes are not a race. Unknown or different bytes record a conflict on the
+  overlapping range.
+- A read of a byte with a recorded conflict reports a race, naming both writes.
+- A later write ordered after both writes replaces the bytes and removes the
+  conflict. A conflict that no read observes is dropped when the workgroup
+  ends.
+
+With the `notes` option, the plugin also prints NOTE lines for LDS writes that
+cannot change a result and can be wasted work:
+
+```json
+{ "plugins": { "race": { "notes": true } } }
+```
+
+```
+NOTE redundant-write kernel=<name> dispatch=<id> wg=<x>,<y>,<z> wave=<w> lane=<l> byte=<b> pc=<later write> earlier_pc=<earlier write>
+NOTE unread-write kernel=<name> dispatch=<id> wg=<id> bytes=[<start>,<end>) first_pc=<pc> first_wave=<w> second_wave=<w>
+```
+
+A `redundant-write` line reports a write that repeats the bytes of an
+unordered pending write; it is printed once per dispatch and later write's PC.
+An `unread-write` line reports a pair of unordered writes that no read
+observed before the workgroup ended; it is printed once per dispatch and
+earlier write's PC.
 
 ## How it works
 
@@ -610,10 +652,10 @@ this source tree. The original
 - **Limited WAW detection**: VGPR WAW covers instruction writes and
   asynchronous memory writes that overlap a pending load. Scalar-register WAW
   covers instruction writes and scalar loads that overlap pending scalar-memory
-  destinations. LDS WAW is reported under the rules for LDS reads: an earlier
-  write of another wave must be waited for and followed by a barrier, and an
-  earlier write of the same wave must be waited for or share an in-order
-  completion class with the later write.
+  destinations. LDS WAW is reported only when a read observes the bytes (see
+  LDS write-after-write above). Two buffer, async or tensor loads to LDS of
+  identical data are reported as a race when read, because their bytes are not
+  known when they issue.
 
 - **Embedded waits**: the plugin handles explicit wait instructions, including
   `s_wait_idle` and RDNA4's compatibility `s_waitcnt`, but does not apply waits

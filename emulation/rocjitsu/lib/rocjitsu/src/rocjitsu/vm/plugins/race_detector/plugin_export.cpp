@@ -10,4 +10,6 @@
 #include "rocjitsu/vm/plugins/plugin_exports.h"
 #include "rocjitsu/vm/plugins/race_detector/plugin.h"
 
-ROCJITSU_DEFINE_PLUGIN(rocjitsu::plugins::race_detector::RaceDetectorPlugin, "race", "{}")
+ROCJITSU_DEFINE_PLUGIN(
+    rocjitsu::plugins::race_detector::RaceDetectorPlugin, "race",
+    R"json({"notes":{"type":"boolean","description":"Also print NOTE lines for LDS writes that cannot change a result: redundant-write for a write that repeats the bytes of an unordered pending write, unread-write for two unordered writes that no read observes","default":false}})json")

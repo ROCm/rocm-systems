@@ -15,6 +15,9 @@
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/log.h"
 
+#include "flatbuffers/flexbuffers.h"
+#include "flatbuffers/idl.h"
+
 #include "rocjitsu/vm/plugins/memory_access_observation.h"
 #include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
 #include "rocjitsu/vm/plugins/race_detector/core/interval_set.h"
@@ -25,6 +28,7 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
+#include <cstring>
 #include <format>
 #include <limits>
 #include <mutex>
@@ -397,7 +401,27 @@ util::FailureOr<std::string> formatTrace(
   return oss.str();
 }
 
-RaceDetectorPlugin::RaceDetectorPlugin(const char * /*config_json*/) : ExecutionPlugin("race") {}
+RaceDetectorPlugin::RaceDetectorPlugin(const char *config_json) : ExecutionPlugin("race") {
+  // {"notes": true} prints NOTE lines for LDS writes that cannot change a result: a write that
+  // repeats the bytes of an unordered pending write, and a pair of unordered writes that no read
+  // observes. Such writes can be wasted work.
+  if (!config_json)
+    return;
+  flexbuffers::Builder builder;
+  flatbuffers::Parser parser;
+  if (!parser.ParseFlexBuffer(config_json, nullptr, &builder)) {
+    util::Logger::warn("race plugin configuration is not valid JSON; ignoring it");
+    return;
+  }
+  const auto root = flexbuffers::GetRoot(builder.GetBuffer());
+  if (!root.IsMap())
+    return;
+  const auto notes = root.AsMap()["notes"];
+  if (notes.IsBool())
+    notes_ = notes.AsBool();
+  else if (!notes.IsNull())
+    util::Logger::warn("race plugin option 'notes' must be true or false; ignoring it");
+}
 
 RaceDetectorPlugin::~RaceDetectorPlugin() { sink().write(getSummary()); }
 
@@ -431,6 +455,14 @@ void RaceDetectorPlugin::onAmdgpuDispatchPacketProcessed(const KernelDispatchInf
                            kernel_names.symbol));
 }
 
+RaceDetectorPlugin::KernelNames
+RaceDetectorPlugin::kernel_names_locked(uint32_t dispatch_id) const {
+  auto iter = dispatch_kernel_names_.find(dispatch_id);
+  return iter == dispatch_kernel_names_.end()
+             ? KernelNames{kUnknownKernelIdentity, kUnknownKernelIdentity}
+             : iter->second;
+}
+
 void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id,
                                                      uint32_t physical_vgpr_count,
                                                      uint32_t physical_sgpr_count,
@@ -457,7 +489,35 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
     }
 
     auto *detector = ws->race_state->getDetector();
-    util::FailureOr<MarkedInstruction> maybe_conflict = findConflict(v, *detector);
+    if (v.kind == RaceViolation::Kind::RedundantWrite) {
+      // Not a race: the write repeats the bytes of an unordered pending write.
+      if (!notes_)
+        return;
+      KernelNames names;
+      {
+        std::lock_guard<std::mutex> lock(report_mutex_);
+        if (!observed_redundant_notes_.emplace(dispatch_id, pc).second)
+          return;
+        names = kernel_names_locked(dispatch_id);
+      }
+      const uint64_t earlier = detector->events().contains(v.conflictingEvent)
+                                   ? detector->events().instruction(v.conflictingEvent).pc()
+                                   : 0;
+      sink().write(std::format("NOTE redundant-write kernel={} dispatch={} wg={},{},{} wave={} "
+                               "lane={} byte={} pc=0x{:x} earlier_pc=0x{:x}\n",
+                               names.name, dispatch_id, v.workgroupId.x, v.workgroupId.y,
+                               v.workgroupId.z, v.wave, v.lane, v.index, pc, earlier));
+      return;
+    }
+    // For a read that observes two unordered writes, the conflicting instruction is the later
+    // write, or the earlier one when the later one's instruction is unknown. The report text
+    // below names both.
+    util::FailureOr<MarkedInstruction> maybe_conflict =
+        v.observedLaterWrite ? util::FailureOr<MarkedInstruction>(MarkedInstruction{
+                                   *v.observedLaterWrite, v.observedLaterWriteWave, -1})
+        : v.observedWrite    ? util::FailureOr<MarkedInstruction>(
+                                MarkedInstruction{*v.observedWrite, v.observedWriteWave, -1})
+                          : findConflict(v, *detector);
     if (maybe_conflict.failed()) {
       report_plugin_failure(*wf, "race violation references an unavailable conflicting event");
       return;
@@ -478,6 +538,16 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
     if (v.space != RaceViolation::Space::SGPR && v.space != RaceViolation::Space::TTMP)
       oss << ", lane " << v.lane;
     oss << "]\n";
+    if (v.observedWrite) {
+      oss << std::format("The read observes two unordered writes: 0x{:x} (wave {})",
+                         v.observedWrite->pc(), v.observedWriteWave);
+      if (v.observedLaterWrite)
+        oss << std::format(" and 0x{:x} (wave {})", v.observedLaterWrite->pc(),
+                           v.observedLaterWriteWave);
+      else
+        oss << std::format(" and a write of wave {}", v.observedLaterWriteWave);
+      oss << "\n";
+    }
 
     MarkedInstruction access_mark{*current, v.wave, v.lane};
     util::StringDiagnostic diagnostic;
@@ -503,15 +573,13 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
       observed_races_.emplace(dispatch_id, pc);
       if (is_new) {
         observed_races_.emplace(dispatch_id, conflict.instruction.pc());
+        if (v.observedWrite)
+          observed_races_.emplace(dispatch_id, v.observedWrite->pc());
         const char *space = v.space == RaceViolation::Space::VGPR   ? "VGPR"
                             : v.space == RaceViolation::Space::SGPR ? "SGPR"
                             : v.space == RaceViolation::Space::TTMP ? "TTMP"
                                                                     : "LDS";
-        auto kernel_name_iter = dispatch_kernel_names_.find(dispatch_id);
-        const KernelNames kernel_names =
-            kernel_name_iter == dispatch_kernel_names_.end()
-                ? KernelNames{kUnknownKernelIdentity, kUnknownKernelIdentity}
-                : kernel_name_iter->second;
+        const KernelNames kernel_names = kernel_names_locked(dispatch_id);
         const char *access = v.isWrite ? "write" : "read";
         sink().write(std::format(
             "RACE kernel={} symbol={} dispatch={} type={} access={} reg={} wave={} "
@@ -537,6 +605,10 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
       wavefronts.front()->lds().size_bytes());
 
   auto &det = *detectors_[key];
+  amdgpu::Lds &lds = wavefronts.front()->lds();
+  det.setLdsReader([&lds](int addr, int n, uint8_t *dst) {
+    lds.read(static_cast<uint64_t>(addr), dst, static_cast<uint32_t>(n));
+  });
   for (uint32_t w = 0; w < num_waves; ++w) {
     auto state = std::make_unique<RaceWavefrontState>();
     state->race_state = &det.getWaveRaceState(static_cast<int>(w));
@@ -546,8 +618,32 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
 
 void RaceDetectorPlugin::onAmdgpuWorkgroupCompleted(uint32_t dispatch_id, uint32_t wg_id) {
   // Each wave released its pointer into this detector when it halted.
-  std::lock_guard<std::mutex> lock(dispatch_mutex_);
-  detectors_.erase(WorkgroupKey{dispatch_id, wg_id});
+  std::unique_ptr<RaceDetector> detector;
+  {
+    std::lock_guard<std::mutex> lock(dispatch_mutex_);
+    auto iter = detectors_.find(WorkgroupKey{dispatch_id, wg_id});
+    if (iter == detectors_.end())
+      return;
+    detector = std::move(iter->second);
+    detectors_.erase(iter);
+  }
+  if (!notes_)
+    return;
+  // Two unordered writes that no read observed before the workgroup ended; at least one of them
+  // is wasted work.
+  for (const auto &[start, c] : detector->getLdsWawConflicts()) {
+    std::string kernel_name;
+    {
+      std::lock_guard<std::mutex> lock(report_mutex_);
+      if (!observed_unread_notes_.emplace(dispatch_id, c.first.pc()).second)
+        continue;
+      kernel_name = kernel_names_locked(dispatch_id).name;
+    }
+    sink().write(std::format("NOTE unread-write kernel={} dispatch={} wg={} bytes=[{},{}) "
+                             "first_pc=0x{:x} first_wave={} second_wave={}\n",
+                             kernel_name, dispatch_id, wg_id, c.start, c.end, c.first.pc(),
+                             c.firstWave.value, c.secondWave.value));
+  }
 }
 
 void RaceDetectorPlugin::onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) {
@@ -705,6 +801,14 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
     const bool checkWrites =
         (!d.is_load || ldsAccess.read_modify_write) &&
         detector->mayConflict(intervals, waveId, /*isWrite=*/true, memoryOrder);
+    // A lane's store data; null for atomics, which store a value computed from
+    // memory.
+    auto storeData = [&](size_t set, uint32_t lane) -> const uint8_t * {
+      const std::vector<uint8_t> &data = set == 0 ? d.store_data : d.ds2_store_data;
+      if (ldsAccess.read_modify_write || data.size() < (lane + 1) * size_t{perLaneBytes})
+        return nullptr;
+      return data.data() + lane * size_t{perLaneBytes};
+    };
     if (checkReads || checkWrites) {
       for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
         for (size_t set = 0; set < numAddressSets; ++set) {
@@ -718,7 +822,7 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
                                    atomicBytes);
           if (checkWrites)
             detector->validateWrite(address, waveId, static_cast<int>(lane), bytes, memoryOrder,
-                                    atomicBytes);
+                                    atomicBytes, storeData(set, lane), &instruction);
         }
       }
     }
@@ -794,7 +898,8 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
         const auto bytes = detector->ldsBytesInRange(ldsAddrs[lane], perLaneBytes, perLaneBytes);
         if (bytes != 0)
           detector->validateWrite(static_cast<int>(ldsAddrs[lane]), waveId, static_cast<int>(lane),
-                                  static_cast<int>(bytes), memoryOrder);
+                                  static_cast<int>(bytes), memoryOrder, /*atomicBytes=*/0,
+                                  /*data=*/nullptr, &instruction);
       }
       if (obligations.empty())
         return;
@@ -928,7 +1033,8 @@ void RaceDetectorPlugin::onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObs
       continue;
     const int addr = static_cast<int>(range.address);
     if (issue.is_load)
-      detector->validateWrite(addr, waveId, -1, static_cast<int>(bytes), ldsAccessOrder);
+      detector->validateWrite(addr, waveId, -1, static_cast<int>(bytes), ldsAccessOrder,
+                              /*atomicBytes=*/0, /*data=*/nullptr, &instruction);
     else
       detector->validateRead(addr, waveId, -1, static_cast<int>(bytes), ldsAccessOrder);
   }

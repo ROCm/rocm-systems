@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <span>
 #include <utility>
 #include <vector>
@@ -77,14 +78,41 @@ public:
   /// non-UNORDERED completion class.
   void validateRead(int addr, WaveId, int lane, int nBytes,
                     MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS,
-                    uint8_t atomicBytes = 0) const;
+                    uint8_t atomicBytes = 0);
 
   /// Check for WAR and WAW hazards: no outstanding LDS reads or writes overlap
   /// the range. Same-wave operations are ordered only when both belong to the
   /// same non-UNORDERED completion class.
+  ///
+  /// A write over an unordered pending write is a race only if the two store
+  /// different values and a read observes them. `data` points to the written
+  /// bytes, or is null when they are unknown. A write whose bytes equal what the
+  /// LDS reader returns for a pending store from VGPRs is reported as
+  /// RaceViolation::Kind::RedundantWrite. Any other overlap becomes a conflict:
+  /// a later read reports it, and a later write ordered after the pending writes
+  /// clears it.
   void validateWrite(int addr, WaveId, int lane, int nBytes,
                      MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS,
-                     uint8_t atomicBytes = 0) const;
+                     uint8_t atomicBytes = 0, const uint8_t *data = nullptr,
+                     const InstructionSnapshot *instruction = nullptr);
+
+  /// Reads LDS bytes as the emulator holds them when a write is validated: a DS
+  /// write already applied, the write being validated not yet.
+  using LdsReader = std::function<void(int addr, int nBytes, uint8_t *dst)>;
+  void setLdsReader(LdsReader reader) { ldsReader = std::move(reader); }
+
+  /// Two unordered writes to LDS bytes [start, end) that no read has observed.
+  struct LdsWawConflict {
+    int start;
+    int end;
+    InstructionSnapshot first;
+    WaveId firstWave;
+    std::optional<InstructionSnapshot> second;
+    WaveId secondWave;
+    int secondLane;
+  };
+  /// Disjoint conflicts keyed by start address.
+  const std::map<int, LdsWawConflict> &getLdsWawConflicts() const { return wawConflicts; }
 
   /// @brief Conservatively check an instruction's LDS intervals for conflicts.
   /// @details The intervals must describe valid LDS byte ranges. False proves
@@ -144,11 +172,29 @@ private:
   static bool hasPotentialLdsConflict(int addr, int nBytes,
                                       const std::vector<LdsChunkCounts> &counts, WaveId wave,
                                       MemoryOrderClass currentMemoryOrder);
+  /// The hazard between the current access and a pending event.
+  enum class LdsHazard { ReadAfterWrite, WriteAfterRead, WriteAfterWrite };
+
   /// Report each event of `pending` that overlaps the access and is not
-  /// ordered before it.
-  void reportUnorderedOverlaps(const std::vector<EventId> &pending, int addr, WaveId wave, int lane,
-                               int nBytes, bool isWrite, MemoryOrderClass currentMemoryOrder,
-                               uint8_t atomicBytes) const;
+  /// ordered before it. For WriteAfterWrite, record a conflict or report a
+  /// redundant write instead (see validateWrite).
+  void reportUnorderedOverlaps(const std::vector<EventId> &pending, LdsHazard hazard, int addr,
+                               WaveId wave, int lane, int nBytes,
+                               MemoryOrderClass currentMemoryOrder, uint8_t atomicBytes,
+                               const uint8_t *data = nullptr,
+                               const InstructionSnapshot *instruction = nullptr);
+  /// Report and drop each conflict a read of [addr, addr + nBytes) observes.
+  void reportObservedConflicts(int addr, int nBytes, WaveId wave, int lane);
+  /// Drop the parts of conflicts inside [start, end).
+  void clearConflicts(int start, int end);
+  /// Split the conflict that straddles `at`, if any, so that no conflict does.
+  void splitConflictAt(int at);
+  bool overlapsConflict(int start, int end) const;
+  /// Whether LDS bytes [start, end) hold `data`.
+  bool sameAsLds(int start, int end, const uint8_t *data) const;
+
+  std::map<int, LdsWawConflict> wawConflicts;
+  LdsReader ldsReader;
 
   /// Active LDS write events (for scanning during read and write validation).
   std::vector<EventId> ldsWriteEvents;
