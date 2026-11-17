@@ -10,9 +10,9 @@ This driver validates CI execution and captured output, not the accuracy of
 profiler timings. Profiler/report correctness fixes are owned by PR #11881 and
 separate follow-ups; failed output checks remain visible here.
 
-AllToAll is intentionally excluded. Its current fallback is represented as
-grouped P2P Send/Recv tasks, while the ACCL plugin currently correlates only
-collective event parents. That work belongs in a separate RCCL/profiler ticket.
+AllToAll is not in the sweep yet. The plugin records AlltoAll calls that RCCL
+runs as per-peer Send/Recv tasks, as it does Direct AllGather, but RCCL also has
+pivot, CE and GDA AlltoAll paths whose coverage on this cluster is unchecked.
 """
 
 from __future__ import annotations
@@ -924,8 +924,8 @@ def build_manifest(
         },
         "deferred": {
             "alltoall_perf": (
-                "Requires ACCL support for ncclProfileP2p parent correlation; "
-                "tracked separately from AICOMRCCL-2172."
+                "Coverage of RCCL's pivot, CE and GDA AlltoAll paths under the "
+                "profiler is unchecked."
             )
         },
         "environment": RUBY_RCCL_ENV,
