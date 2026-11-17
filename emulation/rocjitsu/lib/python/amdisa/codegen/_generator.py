@@ -16811,7 +16811,7 @@ class CodeGenerator:
                                     )
                             if _clamped_constant and _dpp_source_setup:
                                 _dpp_preamble += (
-                                    '  if (!wf.dx10_clamp()) {\n'
+                                    '  if (amdgpu::gfx1150_constant_compare_reads_inputs(wf.cu().arithmetic_flags(), wf.dx10_clamp())) {\n'
                                     + textwrap.indent(_dpp_source_setup, '  ')
                                     + '  }\n'
                                 )
@@ -18095,12 +18095,9 @@ class CodeGenerator:
                 from amdisa.codegen.execute.rj_arith_graphics import INTERP_NAMES
                 from amdisa.codegen.execute.rj_arith_compare import COMPARE_NAMES
 
-                if self.isa_spec.arch_name in ('rdna1', 'rdna2', 'rdna3_5') and (
-                    enc.enc_name == 'ENC_VOP3'
-                    or (
-                        self.isa_spec.arch_name == 'rdna3_5'
-                        and enc.enc_name == 'ENC_VOPC'
-                    )
+                if (
+                    self.isa_spec.arch_name in ('rdna1', 'rdna2')
+                    and enc.enc_name == 'ENC_VOP3'
                 ):
                     cpp_includes.append(
                         ('rocjitsu/isa/arch/amdgpu/shared/signaling_compare.h', False)
@@ -18117,6 +18114,7 @@ class CodeGenerator:
                 if self.isa_spec.arch_name in (
                     'rdna2',
                     'rdna3',
+                    'rdna3_5',
                     'rdna4',
                     'cdna3',
                     'cdna4',
@@ -19327,6 +19325,10 @@ class CodeGenerator:
                     tokens = (tokens,)
                 if any(token in impl_text for token in tokens):
                     result.append((include, system))
+            if 'amdgpu::gfx1150_constant_compare_reads_inputs(' in impl_text:
+                result.append(
+                    ('rocjitsu/isa/arch/amdgpu/shared/gfx1150_compare_input.h', False)
+                )
             scalar_header = ('rj_arith/detail/rj_arith_scalar.h', False)
             if (
                 'amdgpu::arith::execute_pseudo_scalar(' in impl_text

@@ -597,6 +597,7 @@ add_executable(
     scalar_cache_discard_test.cpp
     transcendental_test.cpp
     comparison_test.cpp
+    gfx1150_compare_test.cpp
     conversion_test.cpp
     denormal_test.cpp
     floating_operation_test.cpp
