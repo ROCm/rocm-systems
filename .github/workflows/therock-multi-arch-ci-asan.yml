@@ -4,8 +4,8 @@
 # Multi-Arch CI ASAN for rocm-systems
 #
 # Presubmit and on-demand ASAN builds. This workflow requests host-asan and
-# pins TheRock at the #9887 branch (users/endurthiabhilash/setup-multi-arch-pr-label-inputs).
-# pull_request_tests lets a pull request keep its test runners. The default
+# pins TheRock at the #10034 branch (users/endurthiabhilash/run-rocm-tests).
+# run_rocm_tests lets a pull request keep its test runners. The default
 # family is gfx90a, which has no sandbox runner, so it uses its normal runner
 # (linux-gfx90a-1gpu-ossci-rocm). The opt-in label is left unset, so a pull
 # request is not skipped for a missing label.
@@ -64,11 +64,11 @@ concurrency:
 
 jobs:
   setup:
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@ced2254237a7dbe702b6bafa16811a71f7468588 # TheRock#9887
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@62a625338d71d410ac00b6669bed98a2cb01be44 # TheRock#10034
     with:
       build_variant: "host-asan"
-      # Required by TheRock#9887. Without it a pull request clears the test runner.
-      pull_request_tests: true
+      # Required by TheRock#10034. Without it a pull request clears the test runner.
+      run_rocm_tests: true
       pull_request_opt_out_label: "ci:no-host-asan"
       pull_request_opt_in_label: "ci:host-asan"
       build_stages: "compiler-runtime,runtime-tests"
@@ -85,7 +85,7 @@ jobs:
       baseline_run_id: ${{ inputs.baseline_run_id || '' }}
       baseline_repository: ${{ inputs.baseline_repository || (inputs.baseline_run_id != '' && github.repository) || '' }}
       repository: ROCm/TheRock
-      ref: ced2254237a7dbe702b6bafa16811a71f7468588 # TheRock#9887
+      ref: 62a625338d71d410ac00b6669bed98a2cb01be44 # TheRock#10034
       external_repo: >-
         {
           "repository": "${{ github.repository }}",
@@ -105,7 +105,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@ced2254237a7dbe702b6bafa16811a71f7468588 # TheRock#9887
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@62a625338d71d410ac00b6669bed98a2cb01be44 # TheRock#10034
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
       test_labels: ${{ needs.setup.outputs.linux_test_labels }}
@@ -115,7 +115,7 @@ jobs:
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       repository: ROCm/TheRock
-      ref: ced2254237a7dbe702b6bafa16811a71f7468588 # TheRock#9887
+      ref: 62a625338d71d410ac00b6669bed98a2cb01be44 # TheRock#10034
     permissions:
       contents: read
       id-token: write
@@ -133,7 +133,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: ced2254237a7dbe702b6bafa16811a71f7468588 # TheRock#9887
+          ref: 62a625338d71d410ac00b6669bed98a2cb01be44 # TheRock#10034
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
