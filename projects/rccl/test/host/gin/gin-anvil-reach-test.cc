@@ -5,7 +5,7 @@
  ************************************************************************/
 
 // Host-only microtests for src/gin/gin_anvil_reach.cc: which communicators the
-// Anvil SDMA GIN backend can serve on MI300, MI350 and MI450, and when it
+// Anvil SDMA GIN backend can serve, and when it
 // registers windows through fabric memory. Built into
 // rccl-UnitTestsMicroGinAnvilReach; this TU #includes the hipified source
 // (GIN_ANVIL_REACH_CC_PATH). No GPU, no librccl.so.
@@ -44,7 +44,6 @@ struct AnvilReachCase {
   int nRanks;
   int cliqueSize;
   int cuMem;
-  GinAnvilArch expectedArch;
   GinAnvilSdmaReach expected;
 };
 
@@ -71,7 +70,6 @@ struct ReachComm {
 }  // namespace
 
 TEST_F(GinAnvilReachMicrotest, NullComm_ReachesNothing) {
-  EXPECT_EQ(ginAnvilArch(nullptr), GinAnvilArch::Other);
   EXPECT_EQ(ginAnvilSdmaReachCapable(nullptr), GinAnvilSdmaReach::None);
   EXPECT_FALSE(ginAnvilUseFabricPod(nullptr));
   EXPECT_FALSE(ginAnvilFabricMemCapable(nullptr));
@@ -112,7 +110,6 @@ TEST_P(GinAnvilReachMicrotestPerSystem, ByArchAndTopology_CrossesHostsOnlyInMi45
   const AnvilReachCase c = GetParam();
   ReachComm rc(c.arch, c.mnnvl, c.nRanks, c.cliqueSize, c.nHosts, c.cuMem);
 
-  EXPECT_EQ(ginAnvilArch(rc.comm.get()), c.expectedArch);
   EXPECT_EQ(ginAnvilSdmaReachCapable(rc.comm.get()), c.expected);
   EXPECT_EQ(ginAnvilUseFabricPod(rc.comm.get()), c.expected == GinAnvilSdmaReach::FabricPod);
 }
@@ -120,23 +117,18 @@ TEST_P(GinAnvilReachMicrotestPerSystem, ByArchAndTopology_CrossesHostsOnlyInMi45
 INSTANTIATE_TEST_SUITE_P(
     PerSystem, GinAnvilReachMicrotestPerSystem,
     ::testing::Values(
-        AnvilReachCase{"Mi300SingleHost", "gfx942:sramecc+:xnack-", 0, 1, 8, 8, 1, GinAnvilArch::Mi300,
-                       GinAnvilSdmaReach::Host},
-        AnvilReachCase{"Mi300MultiHostForcedMnnvl", "gfx942", 1, 2, 16, 16, 1, GinAnvilArch::Mi300,
-                       GinAnvilSdmaReach::None},
-        AnvilReachCase{"Mi350SingleHost", "gfx950", 0, 1, 8, 8, 0, GinAnvilArch::Mi350, GinAnvilSdmaReach::Host},
-        AnvilReachCase{"Mi350MultiHostForcedMnnvl", "gfx950", 1, 2, 16, 16, 1, GinAnvilArch::Mi350,
-                       GinAnvilSdmaReach::None},
-        AnvilReachCase{"Mi450SingleHost", "gfx1250", 0, 1, 4, 4, 0, GinAnvilArch::Mi450, GinAnvilSdmaReach::Host},
-        AnvilReachCase{"Mi450FabricPod", "gfx1250", 1, 2, 8, 8, 1, GinAnvilArch::Mi450,
-                       GinAnvilSdmaReach::FabricPod},
-        AnvilReachCase{"Mi450TwoCliques", "gfx1250", 1, 2, 8, 4, 1, GinAnvilArch::Mi450, GinAnvilSdmaReach::None},
-        AnvilReachCase{"Mi450NoCuMem", "gfx1250", 1, 2, 8, 8, 0, GinAnvilArch::Mi450, GinAnvilSdmaReach::None},
-        AnvilReachCase{"Mi450NoMnnvl", "gfx1250", 0, 2, 8, 8, 1, GinAnvilArch::Mi450, GinAnvilSdmaReach::None},
-        AnvilReachCase{"Mi450PodAboveRankCap", "gfx1250", 1, 4, kGinAnvilPodMaxRanks + 1,
-                       kGinAnvilPodMaxRanks + 1, 1, GinAnvilArch::Mi450, GinAnvilSdmaReach::None},
-        AnvilReachCase{"OtherArchMultiHost", "gfx90a", 1, 2, 8, 8, 1, GinAnvilArch::Other,
-                       GinAnvilSdmaReach::None}),
+        AnvilReachCase{"Mi300SingleHost", "gfx942:sramecc+:xnack-", 0, 1, 8, 8, 1, GinAnvilSdmaReach::Host},
+        AnvilReachCase{"Mi300MultiHostForcedMnnvl", "gfx942", 1, 2, 16, 16, 1, GinAnvilSdmaReach::None},
+        AnvilReachCase{"Mi350SingleHost", "gfx950", 0, 1, 8, 8, 0, GinAnvilSdmaReach::Host},
+        AnvilReachCase{"Mi350MultiHostForcedMnnvl", "gfx950", 1, 2, 16, 16, 1, GinAnvilSdmaReach::None},
+        AnvilReachCase{"Mi450SingleHost", "gfx1250", 0, 1, 4, 4, 0, GinAnvilSdmaReach::Host},
+        AnvilReachCase{"Mi450FabricPod", "gfx1250", 1, 2, 8, 8, 1, GinAnvilSdmaReach::FabricPod},
+        AnvilReachCase{"Mi450TwoCliques", "gfx1250", 1, 2, 8, 4, 1, GinAnvilSdmaReach::None},
+        AnvilReachCase{"Mi450NoCuMem", "gfx1250", 1, 2, 8, 8, 0, GinAnvilSdmaReach::None},
+        AnvilReachCase{"Mi450NoMnnvl", "gfx1250", 0, 2, 8, 8, 1, GinAnvilSdmaReach::None},
+        AnvilReachCase{"Mi450PodAboveRankCap", "gfx1250", 1, 4, kGinAnvilIpcMaxRanks + 1,
+                       kGinAnvilIpcMaxRanks + 1, 1, GinAnvilSdmaReach::None},
+        AnvilReachCase{"OtherArchMultiHost", "gfx90a", 1, 2, 8, 8, 1, GinAnvilSdmaReach::None}),
     [](const ::testing::TestParamInfo<AnvilReachCase>& info) { return std::string(info.param.name); });
 
 // Capability is topology only. This rank's pod opt-in also needs both
@@ -151,35 +143,27 @@ TEST_F(GinAnvilReachMicrotest, UseFabricPod_NeedsBothOptIns) {
   EXPECT_EQ(ginAnvilSdmaReachCapable(rc.comm.get()), GinAnvilSdmaReach::FabricPod);
 }
 
-TEST(GinAnvilReachMicrotestPredicate, SingleHostOnEveryArch) {
-  for (GinAnvilArch arch : {GinAnvilArch::Other, GinAnvilArch::Mi300, GinAnvilArch::Mi350, GinAnvilArch::Mi450}) {
-    EXPECT_EQ(ginAnvilSdmaReachPredicate(arch, 1, 8, false), GinAnvilSdmaReach::Host);
-    EXPECT_EQ(ginAnvilSdmaReachPredicate(arch, 1, 64, true), GinAnvilSdmaReach::Host);
-  }
+TEST(GinAnvilReachMicrotestPredicate, SingleHostAlwaysReached) {
+  EXPECT_EQ(ginAnvilSdmaReachPredicate(1, 8, false), GinAnvilSdmaReach::Host);
+  EXPECT_EQ(ginAnvilSdmaReachPredicate(1, 64, true), GinAnvilSdmaReach::Host);
 }
 
-TEST(GinAnvilReachMicrotestPredicate, Mi300AndMi350StopAtTheHost) {
-  for (GinAnvilArch arch : {GinAnvilArch::Mi300, GinAnvilArch::Mi350, GinAnvilArch::Other}) {
-    EXPECT_EQ(ginAnvilSdmaReachPredicate(arch, 2, 16, false), GinAnvilSdmaReach::None);
-    EXPECT_EQ(ginAnvilSdmaReachPredicate(arch, 2, 16, true), GinAnvilSdmaReach::None);
-    EXPECT_STREQ(ginAnvilSdmaNoReachReason(arch, 16, false), "SDMA reaches only GPUs on the same host");
-  }
+TEST(GinAnvilReachMicrotestPredicate, CrossesHostsOnlyInFabricPodWithinPeerTable) {
+  EXPECT_EQ(ginAnvilSdmaReachPredicate(2, 8, true), GinAnvilSdmaReach::FabricPod);
+  EXPECT_EQ(ginAnvilSdmaReachPredicate(4, kGinAnvilIpcMaxRanks, true), GinAnvilSdmaReach::FabricPod);
+  EXPECT_EQ(ginAnvilSdmaReachPredicate(2, 8, false), GinAnvilSdmaReach::None);
+  EXPECT_EQ(ginAnvilSdmaReachPredicate(4, kGinAnvilIpcMaxRanks + 1, true), GinAnvilSdmaReach::None);
 }
 
-TEST(GinAnvilReachMicrotestPredicate, Mi450CrossesHostsOnlyInFabricPod) {
-  EXPECT_EQ(ginAnvilSdmaReachPredicate(GinAnvilArch::Mi450, 2, 8, true), GinAnvilSdmaReach::FabricPod);
-  EXPECT_EQ(ginAnvilSdmaReachPredicate(GinAnvilArch::Mi450, 4, kGinAnvilPodMaxRanks, true),
-            GinAnvilSdmaReach::FabricPod);
-  EXPECT_EQ(ginAnvilSdmaReachPredicate(GinAnvilArch::Mi450, 2, 8, false), GinAnvilSdmaReach::None);
-  EXPECT_EQ(ginAnvilSdmaReachPredicate(GinAnvilArch::Mi450, 4, kGinAnvilPodMaxRanks + 1, true),
-            GinAnvilSdmaReach::None);
-  EXPECT_STRNE(ginAnvilSdmaNoReachReason(GinAnvilArch::Mi450, 8, false),
-               ginAnvilSdmaNoReachReason(GinAnvilArch::Mi450, kGinAnvilPodMaxRanks + 1, false));
-}
-
-// A pod the topology allows but a rank did not opt in to names the variables to set.
-TEST(GinAnvilReachMicrotestPredicate, Mi450PodWithoutOptInNamesTheOptIns) {
-  const char* reason = ginAnvilSdmaNoReachReason(GinAnvilArch::Mi450, 8, true);
-  EXPECT_NE(std::string(reason).find("RCCL_GIN_ANVIL_FABRIC_POD=1"), std::string::npos);
-  EXPECT_NE(std::string(reason).find("RCCL_GIN_ANVIL_FABRIC_MEM=1"), std::string::npos);
+// Each reason the reach is None logs a different line, and a pod the topology
+// allows but a rank did not opt in to names the variables to set.
+TEST(GinAnvilReachMicrotestPredicate, NoReachReasonNamesTheCause) {
+  const std::string noPod = ginAnvilSdmaNoReachReason(false, 8);
+  const std::string tooMany = ginAnvilSdmaNoReachReason(true, kGinAnvilIpcMaxRanks + 1);
+  const std::string noOptIn = ginAnvilSdmaNoReachReason(true, 8);
+  EXPECT_NE(noPod, tooMany);
+  EXPECT_NE(noPod, noOptIn);
+  EXPECT_NE(tooMany, noOptIn);
+  EXPECT_NE(noOptIn.find("RCCL_GIN_ANVIL_FABRIC_POD=1"), std::string::npos);
+  EXPECT_NE(noOptIn.find("RCCL_GIN_ANVIL_FABRIC_MEM=1"), std::string::npos);
 }

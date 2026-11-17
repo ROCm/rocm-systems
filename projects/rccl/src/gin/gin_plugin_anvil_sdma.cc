@@ -41,8 +41,8 @@
 #include <unordered_map>
 #include <vector>
 
-static_assert(kGinAnvilPodMaxRanks == NCCL_GIN_ANVIL_IPC_MAX_RANKS,
-              "the fabric pod rank cap must match Anvil's IPC peer table");
+static_assert(kGinAnvilIpcMaxRanks == NCCL_GIN_ANVIL_IPC_MAX_RANKS,
+              "the cross-host rank cap must match Anvil's IPC peer table");
 
 #if defined(GIN_ANVIL_PLUGIN_UNIT_TEST)
 namespace GinAnvilPluginTestHooks {

@@ -64,15 +64,14 @@ int64_t ncclParamGinEnable() { return 1; }
 int64_t ncclParamGinType() { return -1; }
 
 // ncclGinSetDefaultBackend asks how far Anvil SDMA reaches. The comm readers
-// live in gin_anvil_reach.cc, which this binary does not compile, so arch,
-// fabric state and the pod opt-in come from the test while the per-system
-// policy stays real.
-static GinAnvilArch g_anvilArch = GinAnvilArch::Other;
+// live in gin_anvil_reach.cc, which this binary does not compile, so fabric
+// state and the pod opt-in come from the test while the reach policy stays
+// real.
 static bool g_anvilFabricMem = false;
 static bool g_anvilPodOptIn = false;
-GinAnvilArch ginAnvilArch(struct ncclComm*) { return g_anvilArch; }
+bool ginAnvilFabricMemCapable(struct ncclComm*) { return g_anvilFabricMem; }
 GinAnvilSdmaReach ginAnvilSdmaReachCapable(struct ncclComm* comm) {
-  return ginAnvilSdmaReachPredicate(g_anvilArch, comm->topo->nHosts, comm->nRanks, g_anvilFabricMem);
+  return ginAnvilSdmaReachPredicate(comm->topo->nHosts, comm->nRanks, g_anvilFabricMem);
 }
 bool ginAnvilUseFabricPod(struct ncclComm* comm) {
   return ginAnvilSdmaReachCapable(comm) == GinAnvilSdmaReach::FabricPod && g_anvilPodOptIn;
@@ -199,7 +198,6 @@ class GinFinalizeTest : public GinPluginInitTest {
     comm_.sharedRes = sharedRes_.get();
     topo_->nHosts = 1;
     comm_.topo = topo_.get();
-    g_anvilArch = GinAnvilArch::Other;
     g_anvilFabricMem = false;
     g_anvilPodOptIn = false;
     peerPodOptIn_ = true;
@@ -217,7 +215,6 @@ class GinFinalizeTest : public GinPluginInitTest {
   }
 
   void TearDown() override {
-    g_anvilArch = GinAnvilArch::Other;
     g_anvilFabricMem = false;
     g_anvilPodOptIn = false;
     g_devrBootstrapAllGather = [](void*, void*, int) { return ncclSuccess; };
@@ -421,16 +418,15 @@ TEST(GinTypeListTest, EmptyGinTypeCountsAsUnset) {
   }
 }
 
-// Which systems keep Anvil SDMA next to PROXY (gin_anvil_reach.h): every
-// single-host communicator, and across hosts only an MI450 fabric pod within
-// Anvil's peer table size whose ranks all opted in. MI300 and MI350 have no
-// cross-host SDMA path.
+// Which communicators keep Anvil SDMA next to PROXY (gin_anvil_reach.h): every
+// single-host communicator, and across hosts only a fabric pod within Anvil's
+// peer table size whose ranks all opted in. MI300X and MI350 never form a pod:
+// ginAnvilFabricMemCapable needs gfx1250 with MNNVL.
 struct AnvilReachCase {
   const char* name;
-  GinAnvilArch arch;
   int nHosts;
   int nRanks;
-  bool fabricMem;
+  bool fabricMem;      // ginAnvilFabricMemCapable
   bool localPodOptIn;  // this rank
   bool peerPodOptIn;   // every other rank
   bool kept;
@@ -451,7 +447,6 @@ TEST_P(GinAnvilReachTest, AnvilKeptOnlyWithinSdmaReach) {
   ginState->backends[1].ginType = NCCL_GIN_TYPE_PROXY;
   topo_->nHosts = c.nHosts;
   comm_.nRanks = c.nRanks;
-  g_anvilArch = c.arch;
   g_anvilFabricMem = c.fabricMem;
   g_anvilPodOptIn = c.localPodOptIn;
   peerPodOptIn_ = c.peerPodOptIn;
@@ -477,24 +472,15 @@ TEST_P(GinAnvilReachTest, AnvilKeptOnlyWithinSdmaReach) {
 INSTANTIATE_TEST_SUITE_P(
     PerSystem, GinAnvilReachTest,
     ::testing::Values(
-        AnvilReachCase{"Mi300SingleHost", GinAnvilArch::Mi300, 1, 8, false, false, false, true, 0},
-        AnvilReachCase{"Mi300MultiHost", GinAnvilArch::Mi300, 2, 16, false, false, false, false, 0},
-        AnvilReachCase{"Mi300MultiHostWithFabricMemAndOptIn", GinAnvilArch::Mi300, 2, 16, true, true, true, false, 0},
-        AnvilReachCase{"Mi350SingleHost", GinAnvilArch::Mi350, 1, 8, false, false, false, true, 0},
-        AnvilReachCase{"Mi350MultiHost", GinAnvilArch::Mi350, 2, 16, false, false, false, false, 0},
-        AnvilReachCase{"Mi350MultiHostWithFabricMemAndOptIn", GinAnvilArch::Mi350, 2, 16, true, true, true, false, 0},
-        AnvilReachCase{"Mi450SingleHost", GinAnvilArch::Mi450, 1, 4, false, false, false, true, 0},
-        AnvilReachCase{"Mi450SingleHostWithFabricMem", GinAnvilArch::Mi450, 1, 4, true, true, true, true, 0},
-        AnvilReachCase{"Mi450MultiHostOutsidePod", GinAnvilArch::Mi450, 2, 8, false, true, true, false, 0},
-        AnvilReachCase{"Mi450FabricPodWithoutOptIn", GinAnvilArch::Mi450, 2, 8, true, false, false, false, 1},
-        AnvilReachCase{"Mi450FabricPod", GinAnvilArch::Mi450, 2, 8, true, true, true, true, 1},
-        AnvilReachCase{"Mi450FabricPodOnlyPeersOptIn", GinAnvilArch::Mi450, 2, 8, true, false, true, false, 1},
-        AnvilReachCase{"Mi450FabricPodOnlyThisRankOptIn", GinAnvilArch::Mi450, 2, 8, true, true, false, false, 1},
-        AnvilReachCase{"Mi450FabricPodAtRankCap", GinAnvilArch::Mi450, 4, kGinAnvilPodMaxRanks, true, true,
-                       true, true, 1},
-        AnvilReachCase{"Mi450FabricPodAboveRankCap", GinAnvilArch::Mi450, 4, kGinAnvilPodMaxRanks + 1, true,
-                       true, true, false, 0},
-        AnvilReachCase{"OtherArchMultiHost", GinAnvilArch::Other, 2, 4, true, true, true, false, 0}),
+        AnvilReachCase{"SingleHost", 1, 8, false, false, false, true, 0},
+        AnvilReachCase{"SingleHostWithFabricMem", 1, 4, true, true, true, true, 0},
+        AnvilReachCase{"MultiHostOutsidePod", 2, 16, false, true, true, false, 0},
+        AnvilReachCase{"FabricPodWithoutOptIn", 2, 8, true, false, false, false, 1},
+        AnvilReachCase{"FabricPod", 2, 8, true, true, true, true, 1},
+        AnvilReachCase{"FabricPodOnlyPeersOptIn", 2, 8, true, false, true, false, 1},
+        AnvilReachCase{"FabricPodOnlyThisRankOptIn", 2, 8, true, true, false, false, 1},
+        AnvilReachCase{"FabricPodAtRankCap", 4, kGinAnvilIpcMaxRanks, true, true, true, true, 1},
+        AnvilReachCase{"FabricPodAboveRankCap", 4, kGinAnvilIpcMaxRanks + 1, true, true, true, false, 0}),
     [](const ::testing::TestParamInfo<AnvilReachCase>& info) { return std::string(info.param.name); });
 
 // The pod exception does not override the all-ranks mask: a rank without Anvil
@@ -510,7 +496,6 @@ TEST_F(GinFinalizeTest, AnvilSdma_FabricPodStillHonorsGlobalMask) {
   ginState->backends[1].ginType = NCCL_GIN_TYPE_PROXY;
   topo_->nHosts = 2;
   comm_.nRanks = 8;
-  g_anvilArch = GinAnvilArch::Mi450;
   g_anvilFabricMem = true;
   g_anvilPodOptIn = true;
 
@@ -538,7 +523,6 @@ TEST_F(GinFinalizeTest, AnvilSdma_FabricPodNeedsEveryRankOptIn) {
   topo_->nHosts = 2;
   comm_.nRanks = 8;
   comm_.rank = 3;
-  g_anvilArch = GinAnvilArch::Mi450;
   g_anvilFabricMem = true;
   g_anvilPodOptIn = true;
   peerPodOptIn_ = false;
@@ -563,7 +547,6 @@ TEST_F(GinFinalizeTest, AnvilSdma_FabricPodVoteFailurePropagates) {
   ginState->backends[0].ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
   topo_->nHosts = 2;
   comm_.nRanks = 8;
-  g_anvilArch = GinAnvilArch::Mi450;
   g_anvilFabricMem = true;
   g_anvilPodOptIn = true;
   g_devrBootstrapAllGather = [](void*, void*, int) { return ncclSystemError; };
@@ -584,7 +567,6 @@ TEST_F(GinFinalizeTest, AnvilSdmaOnly_MultiHostClearsSupported) {
   struct ncclGinState* ginState = &comm_.ginState;
   ginState->backends[0].ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
   topo_->nHosts = 2;
-  g_anvilArch = GinAnvilArch::Mi300;
 
   EXPECT_EQ(ncclGinSetDefaultBackend(&comm_, BIT(NCCL_GIN_TYPE_ANVIL_SDMA)), ncclSuccess);
   EXPECT_FALSE(ginState->supported);

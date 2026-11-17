@@ -135,6 +135,11 @@ can address, so how far the backend reaches depends on the system:
 | MI300X (gfx942), MI350 (gfx950) | Anvil SDMA over xGMI or PCIe | Not available: no scale-up fabric between hosts, so PROXY or rocSHMEM GDA serves the communicator |
 | MI450 (gfx1250) | Anvil SDMA | Anvil SDMA when every rank is in one fabric pod (MNNVL, one clique covering the communicator, cuMem), the communicator has at most 16 ranks, and every rank sets `RCCL_GIN_ANVIL_FABRIC_POD=1` and `RCCL_GIN_ANVIL_FABRIC_MEM=1`; otherwise PROXY or rocSHMEM GDA |
 
+The code does not list systems: a multi-host communicator keeps Anvil SDMA only
+when its ranks form a fabric pod (`ginAnvilFabricMemCapable`), which MI300X and
+MI350 never do. The 16-rank bound is the size of Anvil's peer table
+(`NCCL_GIN_ANVIL_IPC_MAX_RANKS`), not of the pod.
+
 In an MI450 pod, peers on other hosts are written through their fabric-mapped
 memory using this host's SDMA engines. Each such peer has its own SDMA queue: a
 queue is an in-order ring, so a peer sharing one with a same-host peer would

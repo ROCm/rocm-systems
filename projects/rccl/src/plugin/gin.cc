@@ -535,13 +535,12 @@ ncclResult_t ncclGinSetDefaultBackend(struct ncclComm* comm, uint64_t globalBitM
     }
     if (anvilUnreachable || !(BIT(backend->ginType) & globalBitMask)) {
       if (anvilUnreachable) {
-        const GinAnvilArch arch = ginAnvilArch(comm);
         INFO(NCCL_INIT | NCCL_NET,
              "GIN backend ANVIL_SDMA removed from active backends on %s: %s (nHosts=%d MNNVL=%d cliqueSize=%d "
-             "nRanks=%d)",
-             ginAnvilArchName(arch),
-             ginAnvilSdmaNoReachReason(arch, comm->nRanks, anvilCapable == GinAnvilSdmaReach::FabricPod),
-             comm->topo->nHosts, comm->MNNVL, comm->clique.size, comm->nRanks);
+             "nRanks=%d anvilMaxRanks=%d)",
+             comm->archName,
+             ginAnvilSdmaNoReachReason(ginAnvilFabricMemCapable(comm), comm->nRanks),
+             comm->topo->nHosts, comm->MNNVL, comm->clique.size, comm->nRanks, kGinAnvilIpcMaxRanks);
       } else {
         WARN("GIN backend type %d not supported on all ranks, removing from active backends", backend->ginType);
       }
