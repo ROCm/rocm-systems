@@ -135,11 +135,10 @@ void WaitcheckStateOps::apply_admission(PendingState &state, const Instruction &
                                         std::span<const ClassifiedEvent> events,
                                         rj_code_arch_t arch, bool after_source_reads) {
   for (const auto &event : events) {
-    // Before GFX12, FLAT reads its address before routing can admit the
-    // request. Its capacity stall must not clear a pending address result.
-    const bool post_source_flat = has_conditional_route(event.kind) &&
-                                  arch != ROCJITSU_CODE_ARCH_CDNA5 &&
-                                  arch != ROCJITSU_CODE_ARCH_RDNA4;
+    // Only CDNA5 reserves FLAT slots before reading its address. RDNA4 and
+    // older targets check the source before queue admission can retire it.
+    const bool post_source_flat =
+        has_conditional_route(event.kind) && arch != ROCJITSU_CODE_ARCH_CDNA5;
     if (post_source_flat != after_source_reads)
       continue;
     const bool translation = event.counter == WaitCounterKind::X;

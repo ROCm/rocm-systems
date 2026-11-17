@@ -670,7 +670,7 @@ struct Analyzer : private WaitcheckStateOps {
       if (!std::get<1>(node_key).empty() && term != nullptr &&
           term->size() == static_cast<int>(sizeof(uint32_t)) &&
           (term->mnemonic() == "s_setpc_b64" || term->mnemonic() == "s_set_pc_i64") &&
-          term->raw_encoding() != nullptr &&
+          block.static_indirect_call_fixups().empty() && term->raw_encoding() != nullptr &&
           static_cast<uint16_t>(term->raw_encoding()[0] & 0xffu) ==
               std::get<1>(std::get<1>(node_key).back())) {
         std::vector<CallFrame> caller_stack = std::get<1>(node_key);
@@ -5077,8 +5077,22 @@ private:
   effective_events(const Instruction &inst, const VgprMsbState &banks, rj_code_arch_t arch) const {
     auto events = classify_events(inst, arch).value();
     if ((arch == ROCJITSU_CODE_ARCH_CDNA5 || arch == ROCJITSU_CODE_ARCH_RDNA4) &&
-        rejects_memory_destination(inst, banks, arch))
-      events.clear();
+        rejects_memory_destination(inst, banks, arch)) {
+      if (inst.mnemonic().starts_with("flat_")) {
+        // The nullified instruction reads no address and returns no value,
+        // but an older outstanding request can still force its counter slots.
+        for (auto &event : events) {
+          event.registers = TrackedRegisterSource::None;
+          event.check_uses = false;
+          event.check_defs = false;
+          event.check_exec_defs = false;
+          event.check_memory_order = false;
+          event.check_program_end = false;
+        }
+      } else {
+        events.clear();
+      }
+    }
     return events;
   }
 

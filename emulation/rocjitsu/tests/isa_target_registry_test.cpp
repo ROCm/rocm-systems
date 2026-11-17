@@ -434,7 +434,8 @@ TEST(IsaTargetRegistryTest, BuiltinRegistryUsesDescriptorOwnedPublicEnumBindings
   constexpr std::array kExecutableTargets{
       ROCJITSU_CODE_TARGET_GFX90A,  ROCJITSU_CODE_TARGET_GFX942,  ROCJITSU_CODE_TARGET_GFX950,
       ROCJITSU_CODE_TARGET_GFX1200, ROCJITSU_CODE_TARGET_GFX1201, ROCJITSU_CODE_TARGET_GFX1250,
-      ROCJITSU_CODE_TARGET_GFX1251, ROCJITSU_CODE_TARGET_GFX1100,
+      ROCJITSU_CODE_TARGET_GFX1251, ROCJITSU_CODE_TARGET_GFX1100, ROCJITSU_CODE_TARGET_GFX1150,
+      ROCJITSU_CODE_TARGET_GFX1151,
   };
   for (rj_code_target_id_t target : kExecutableTargets) {
     const IsaGpuTargetDescription *binding = registry.find_gpu_target(target);

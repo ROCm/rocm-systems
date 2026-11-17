@@ -806,7 +806,7 @@ TEST(WaitcheckState, Cdna3And4FlatAdmissionNeedsAnActiveRequest) {
   }
 }
 
-TEST(WaitcheckState, Gfx12FlatAdmissionPrecedesSourceReads) {
+TEST(WaitcheckState, OnlyCdna5FlatAdmissionPrecedesSourceReads) {
   for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
     auto nop = decode_wait(0xbf800000u, arch);
     ASSERT_TRUE(nop);
@@ -825,6 +825,8 @@ TEST(WaitcheckState, Gfx12FlatAdmissionPrecedesSourceReads) {
       state.exec_nonzero = true;
       const std::array issued{ClassifiedEvent{counter, WaitEventKind::FlatLoad}};
       Ops::apply_admission(state, *nop, issued, arch, false);
+      EXPECT_EQ(state.pending[index].empty(), arch == ROCJITSU_CODE_ARCH_CDNA5);
+      Ops::apply_admission(state, *nop, issued, arch, true);
       EXPECT_TRUE(state.pending[index].empty());
     }
   }

@@ -8131,6 +8131,81 @@ TEST(WaitcheckTest, Gfx12OutOfRangeOrdinaryLoadsDoNotReadTheirAddresses) {
   }
 }
 
+TEST(WaitcheckTest, Gfx12NullifiedFlatStillOccupiesAnOlderLoadsCounterPosition) {
+  for (const auto [arch, machine] :
+       {std::pair{ROCJITSU_CODE_ARCH_CDNA5, EF_AMDGPU_MACH_AMDGCN_GFX1250},
+        std::pair{ROCJITSU_CODE_ARCH_RDNA4, EF_AMDGPU_MACH_AMDGCN_GFX1201}}) {
+    for (bool wait : {false, true}) {
+      SCOPED_TRACE(testing::Message() << machine << '/' << wait);
+      std::vector<uint32_t> program;
+      append_inst(program, global_load_b32(2, 8));
+      append_inst(program, flat_load_b32(16)); // Beyond the 16-VGPR allocation.
+      if (wait)
+        append_inst(program, sopp(64, 1)); // Older load is one position behind FLAT.
+      const uint64_t consumer = program.size() * sizeof(uint32_t);
+      append_inst(program, v_mov_b32(3, 2));
+      append_inst(program, s_endpgm());
+      const auto report = analyze_gfx12_with_vgpr_allocation(program, machine, arch, true, 16);
+      ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+      EXPECT_EQ(std::ranges::any_of(report.diagnostics,
+                                    [&](const auto &d) {
+                                      return d.counter == WaitCounterKind::Load &&
+                                             d.producer_section_offset == 0 &&
+                                             d.section_offset == consumer && d.reg.index == 2;
+                                    }),
+                !wait)
+          << diagnostic_summary(report);
+    }
+  }
+}
+
+TEST(WaitcheckTest, Gfx12NullifiedFlatWithoutOlderRequestDoesNotJustifyWait) {
+  for (const auto [arch, machine] :
+       {std::pair{ROCJITSU_CODE_ARCH_CDNA5, EF_AMDGPU_MACH_AMDGCN_GFX1250},
+        std::pair{ROCJITSU_CODE_ARCH_RDNA4, EF_AMDGPU_MACH_AMDGCN_GFX1201}}) {
+    std::vector<uint32_t> program;
+    append_inst(program, flat_load_b32(16));
+    append_inst(program, sopp(64, 0));
+    append_inst(program, s_endpgm());
+    WaitcheckOptions options;
+    options.check_counter_parity = true;
+    const auto report =
+        analyze_gfx12_with_vgpr_allocation(program, machine, arch, true, 16, options);
+    ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+    EXPECT_EQ(report.counter_parity_exact, 0u) << diagnostic_summary(report);
+    EXPECT_EQ(report.counter_unmodeled_wait_observed, 1u) << diagnostic_summary(report);
+  }
+}
+
+TEST(WaitcheckTest, Gfx1201FlatChecksAddressBeforeQueueCapacityAdmission) {
+  for (unsigned younger : {61u, 62u}) {
+    for (bool wait : {false, true}) {
+      SCOPED_TRACE(testing::Message() << younger << '/' << wait);
+      std::vector<uint32_t> program;
+      append_global_load_b64_v8_v7_s0_offset16(program);
+      for (unsigned i = 0; i < younger; ++i)
+        append_inst(program, global_load_b32(0, 4));
+      if (wait)
+        append_inst(program, sopp(64, 0));
+      const uint64_t consumer = program.size() * sizeof(uint32_t);
+      append_inst(program, flat_load_b32(1)); // Address v[8:9] reads the oldest load.
+      append_inst(program, s_endpgm());
+      const auto image = waitcheck_test::make_gfx1201_code_object(program);
+      const AmdGpuCodeObject object(image.data(), image.size());
+      const auto report = analyze_waitcnts_for_kernel(object, ROCJITSU_CODE_ARCH_RDNA4, 0);
+      ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+      EXPECT_EQ(std::ranges::any_of(report.diagnostics,
+                                    [&](const auto &d) {
+                                      return d.counter == WaitCounterKind::Load &&
+                                             d.producer_section_offset == 0 &&
+                                             d.section_offset == consumer && d.reg.index == 8;
+                                    }),
+                !wait)
+          << diagnostic_summary(report);
+    }
+  }
+}
+
 TEST(WaitcheckTest, Gfx12BufferTfeStatusWordParticipatesInResultBounds) {
   for (const auto [arch, machine] :
        {std::pair{ROCJITSU_CODE_ARCH_CDNA5, EF_AMDGPU_MACH_AMDGCN_GFX1250},
@@ -15484,6 +15559,41 @@ TEST(WaitcheckTest, Gfx950ResolvedSwappcPropagatesHelperLoadToContinuation) {
   EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Load);
   EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Use);
   EXPECT_EQ(report.diagnostics[0].reg.index, 0u);
+}
+
+TEST(WaitcheckTest, Gfx950RecoveredSetpcTargetOverridesMatchingReturnRegister) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_CDNA4;
+  for (uint16_t target_sreg : {uint16_t{28}, uint16_t{30}}) {
+    SCOPED_TRACE(target_sreg);
+    std::vector<uint32_t> program;
+    program.push_back(build_s_call_b64(30, 3, arch).value()); // Helper at 0x10.
+    append_gfx950_s_waitcnt_vmcnt_0(program);
+    append_gfx950_v_mov_b32_v1_v0(program);
+    program.push_back(build_s_endpgm(arch).value());
+    ASSERT_EQ(program.size() * sizeof(uint32_t), 0x10u);
+    append_gfx950_buffer_load_dword_v0_v8_s0_offen(program);
+    program.push_back(0xbea0011eu); // Save caller link s[30:31] in s[32:33].
+    program.push_back(build_s_getpc_b64(target_sreg, arch).value());
+    const uint64_t getpc_result = program.size() * sizeof(uint32_t);
+    program.push_back(build_s_add_u32(target_sreg, target_sreg, 255, arch).value());
+    const size_t delta_word = program.size();
+    program.push_back(0);
+    program.push_back(build_s_addc_u32(target_sreg + 1, target_sreg + 1, 128, arch).value());
+    program.push_back(build_s_setpc_b64(target_sreg, arch).value());
+    const uint64_t target = program.size() * sizeof(uint32_t);
+    program[delta_word] = static_cast<uint32_t>(target - getpc_result);
+    append_gfx950_v_mov_b32_v1_v0(program); // Recovered local target reads pending v0.
+    program.push_back(0xbe9e0120u);         // Restore the caller link.
+    program.push_back(build_s_setpc_b64(30, arch).value());
+
+    const auto image = waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX950);
+    const AmdGpuCodeObject object(image.data(), image.size());
+    const auto report = analyze_waitcnts_for_kernel(object, arch, 0);
+    ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+    EXPECT_TRUE(std::ranges::any_of(report.diagnostics, [&](const auto &d) {
+      return d.counter == WaitCounterKind::Load && d.section_offset == target && d.reg.index == 0;
+    })) << diagnostic_summary(report);
+  }
 }
 
 TEST(WaitcheckTest, Gfx950SharedSwappcReturnsToMatchingContinuation) {
