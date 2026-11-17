@@ -73,14 +73,26 @@ def gen_dense_wmma(ctx: ExecuteContext) -> str | None:
         '  const uint32_t lanes = wf.wf_size();',
         '  const uint32_t vb = wf.vgpr_alloc().base;',
     ]
+
+    def source_base(operand: str) -> str:
+        value = f'amdgpu::src_base(vb, {operand}.encoding_value_)'
+        if ctx.arch_name == 'rdna3_5':
+            return f'registers.gfx115_wmma_source_base({operand}, {value})'
+        return value
+
+    if ctx.arch_name == 'rdna3_5':
+        lines.append('  const amdgpu::RegisterAccess registers(wf);')
+    accumulator_type = 'uint32_t' if ctx.arch_name == 'rdna3_5' else 'const uint32_t'
     lines += [
         f'  const uint32_t dst = vb + {dst}.encoding_value_;',
-        f'  const uint32_t src0_base = amdgpu::src_base(vb, {src0_base}.encoding_value_);',
-        f'  const uint32_t src1_base = amdgpu::src_base(vb, {src1_base}.encoding_value_);',
+        f'  const uint32_t src0_base = {source_base(src0_base)};',
+        f'  const uint32_t src1_base = {source_base(src1_base)};',
         '  uint32_t const_acc = 0;',
-        f'  const uint32_t s2 = {ctx.arch_name}::resolve_acc(vb, dst, {s2}.encoding_value_,',
+        f'  {accumulator_type} s2 = {ctx.arch_name}::resolve_acc(vb, dst, {s2}.encoding_value_,',
         f'      const_acc, [&] {{ return amdgpu::RegisterAccess(wf).read_scalar({s2}); }});',
     ]
+    if ctx.arch_name == 'rdna3_5':
+        lines.append(f'  s2 = registers.gfx115_wmma_source_base({s2}, s2);')
     lines += [
         '  uint64_t flags = wf.cu().arithmetic_flags();',
         '  if (wf.fp16_ovfl()) flags |= RJ_ARITH_FP16_OVFL;',

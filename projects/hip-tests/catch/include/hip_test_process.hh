@@ -22,7 +22,9 @@
 #include <vector>
 #include <sstream>
 #include <algorithm>
+#include <cctype>
 #include <map>
+#include <set>
 
 #if HT_WIN
 #ifndef WIN32_LEAN_AND_MEAN
@@ -132,6 +134,7 @@ Class to spawn a process in isolation and test its standard output and return st
 How to use:
   hip::SpawnProc proc("ExeName", true);  // true = capture stdout
   proc.setEnv("MY_VAR", "value");        // optional: set env vars for child
+  proc.clearEnv("REMOVED_VAR");          // optional: remove env vars from the child
   int exitCode = proc.run("optional args");
   std::string output = proc.getOutput();
 
@@ -151,6 +154,7 @@ class SpawnProc {
   bool spawned_ = false;
   std::future<int> asyncFuture_;
   std::map<std::string, std::string> envVars_;
+  std::set<std::string> clearedEnv_;
 
   std::string getRandomString(size_t len = 6) {
     std::random_device dev;
@@ -171,6 +175,38 @@ class SpawnProc {
     while (iss >> tok) tokens.push_back(tok);
     return tokens;
   }
+
+#if HT_WIN
+  static bool envNamesEqual(const std::string& left, const std::string& right) {
+    if (left.size() != right.size()) return false;
+    for (size_t i = 0; i < left.size(); ++i) {
+      unsigned char l = static_cast<unsigned char>(left[i]);
+      unsigned char r = static_cast<unsigned char>(right[i]);
+      if (std::tolower(l) != std::tolower(r)) return false;
+    }
+    return true;
+  }
+
+  static void eraseEnvKey(std::map<std::string, std::string>& vars, const std::string& key) {
+    for (auto it = vars.begin(); it != vars.end();) {
+      if (envNamesEqual(it->first, key)) {
+        it = vars.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
+
+  static void eraseEnvKey(std::set<std::string>& names, const std::string& key) {
+    for (auto it = names.begin(); it != names.end();) {
+      if (envNamesEqual(*it, key)) {
+        it = names.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
+#endif
 
   int doSpawn(const std::string& commandLineArgs) {
     std::vector<std::string> argStorage;
@@ -211,14 +247,14 @@ class SpawnProc {
 
     std::vector<char> envBlock;
     LPVOID lpEnvironment = NULL;
-    if (!envVars_.empty()) {
-      auto icaseFind = [&](const std::string& key) {
-        std::string lowerKey = key;
-        std::transform(lowerKey.begin(), lowerKey.end(), lowerKey.begin(), ::tolower);
+    if (!envVars_.empty() || !clearedEnv_.empty()) {
+      // True if this key was given to setEnv or clearEnv.
+      auto overriddenEnvVar = [&](const std::string& key) {
         for (const auto& kv : envVars_) {
-          std::string lowerMapKey = kv.first;
-          std::transform(lowerMapKey.begin(), lowerMapKey.end(), lowerMapKey.begin(), ::tolower);
-          if (lowerMapKey == lowerKey) return true;
+          if (envNamesEqual(kv.first, key)) return true;
+        }
+        for (const auto& keyToClear : clearedEnv_) {
+          if (envNamesEqual(keyToClear, key)) return true;
         }
         return false;
       };
@@ -229,7 +265,9 @@ class SpawnProc {
           std::string entry(var);
           auto eq = entry.find('=', 1);
           std::string key = (eq != std::string::npos) ? entry.substr(0, eq) : entry;
-          if (!icaseFind(key)) {
+          // Skip an inherited name this spawn overrides.
+          // setEnv replaces it below; clearEnv leaves it unset.
+          if (!overriddenEnvVar(key)) {
             envBlock.insert(envBlock.end(), entry.begin(), entry.end());
             envBlock.push_back('\0');
           }
@@ -263,6 +301,9 @@ class SpawnProc {
 
     process_ = fork();
     if (process_ == 0) {
+      for (const auto& key : clearedEnv_) {
+        unsetenv(key.c_str());
+      }
       for (const auto& kv : envVars_) {
         setenv(kv.first.c_str(), kv.second.c_str(), 1);
       }
@@ -361,8 +402,26 @@ class SpawnProc {
     }
   }
 
+  // Sets an environment variable on the child.
   void setEnv(const std::string& key, const std::string& value) {
+#if HT_WIN
+    eraseEnvKey(envVars_, key);
+    eraseEnvKey(clearedEnv_, key);
+#else
+    clearedEnv_.erase(key);
+#endif
     envVars_[key] = value;
+  }
+
+  // Removes an environment variable from the child.
+  void clearEnv(const std::string& key) {
+#if HT_WIN
+    eraseEnvKey(envVars_, key);
+    eraseEnvKey(clearedEnv_, key);
+#else
+    envVars_.erase(key);
+#endif
+    clearedEnv_.insert(key);
   }
 
   /**

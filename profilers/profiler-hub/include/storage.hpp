@@ -48,11 +48,18 @@ public:
     storage_t& operator=(storage_t&&)      = delete;
 
     /**
+     * @brief Profiler-hub library version this storage was built with.
+     * @return The version from the VERSION file, for example 0.2.0.
+     *         This is not the RocPD schema version.
+     */
+    [[nodiscard]] profiler_hub::version_t get_storage_version() const;
+
+    /**
      * @brief Schema version the writer creates for this storage
      * @return The resolved writable version. version_t{} is returned as 3.0.5.
      *         An explicit 3.0.0 through 3.0.5 is returned unchanged.
      */
-    [[nodiscard]] profiler_hub::version_t get_storage_version() const;
+    [[nodiscard]] profiler_hub::version_t get_writer_schema_version() const;
 
 private:
     friend struct writer_t;

@@ -284,6 +284,7 @@ pub(crate) unsafe extern "C" fn scope_pair_info(
 ) -> u64 {
     crate::support::boundary(|| unsafe {
         let scope = object(pointer.cast::<Scope>())?;
+        (*scope.instance).require_current_process()?;
         let query = input(query, AMDF_STRUCTURE_TYPE_MEMORY_PROFILE_PAIR_QUERY)?;
         let out = output(out, AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO)?;
         if query.reserved != 0
@@ -311,7 +312,7 @@ pub(crate) unsafe extern "C" fn scope_pair_info(
                     endpoint: &*device.endpoint,
                     request: access.requirements,
                     address_range: device.native.address_range(),
-                    import_supported: linux_interop::supports_system_dma_buf_import(&device.native),
+                    import_supported: external_transport::supports_system_import(&device.native),
                 })
                 .map_err(|_| EXHAUSTED)?;
         }

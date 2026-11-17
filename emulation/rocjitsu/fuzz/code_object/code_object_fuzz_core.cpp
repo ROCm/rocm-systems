@@ -8,12 +8,14 @@
 #include "rocjitsu/code/executable.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/isa/target_registry.h"
+#include "util/log.h"
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cstddef>
+#include <cstdlib>
 #include <cstring>
-#include <stdexcept>
 #include <string_view>
 
 namespace rocjitsu::code_object_fuzz {
@@ -51,16 +53,16 @@ uint64_t align_up(uint64_t value, uint64_t alignment) {
 }
 
 template <typename T> void write_at(std::vector<uint8_t> &image, uint64_t offset, const T &value) {
-  if (offset > image.size() || sizeof(value) > image.size() - offset)
-    throw std::logic_error("code-object fuzz seed write exceeds image");
+  assert(offset <= image.size() && sizeof(value) <= image.size() - offset &&
+         "code-object fuzz seed write exceeds image");
   std::memcpy(image.data() + offset, &value, sizeof(value));
 }
 
 void write_bytes(std::vector<uint8_t> &image, uint64_t offset, const void *data, std::size_t size) {
-  if (offset > image.size() || size > image.size() - offset)
-    throw std::logic_error("code-object fuzz seed write exceeds image");
+  assert(offset <= image.size() && size <= image.size() - offset &&
+         "code-object fuzz seed write exceeds image");
   if (size != 0)
-    std::memcpy(image.data() + offset, data, size);
+    std::copy_n(static_cast<const uint8_t *>(data), size, image.begin() + offset);
 }
 
 std::vector<uint8_t> make_device_elf(uint32_t machine_flag) {
@@ -247,13 +249,18 @@ std::vector<uint8_t> make_host_bundle(std::span<const uint8_t> device, std::stri
   return image;
 }
 
+[[noreturn]] void invariant_failure(std::string_view message) {
+  util::Logger::warn(message);
+  std::abort();
+}
+
 class LoadSink {
 public:
   explicit LoadSink(std::span<const uint8_t> image) : image_(image) {}
 
   void load_image(const uint8_t *data, std::size_t size, uint64_t address) {
     if (!load_segment_in_bounds(image_, reinterpret_cast<std::uintptr_t>(data), size)) {
-      throw std::logic_error("code object exposed an out-of-bounds load segment");
+      invariant_failure("code object exposed an out-of-bounds load segment");
     }
     if (size != 0) {
       checksum_ ^= data[0];
@@ -313,11 +320,11 @@ void inspect_executable(std::span<const uint8_t> bytes, RunStats &stats) {
     for (uint32_t index = 0; index < count; ++index) {
       const AmdGpuCodeObject *object = executable.code_object(target, index);
       if (object == nullptr || !object->is_valid() || object->target_id() != target)
-        throw std::logic_error("executable exposed an inconsistent code object");
+        invariant_failure("executable exposed an inconsistent code object");
       inspect_object(*object, stats);
     }
     if (executable.code_object(target, count) != nullptr)
-      throw std::logic_error("executable accepted an out-of-range code-object index");
+      invariant_failure("executable accepted an out-of-range code-object index");
   }
   const rj_code_target_id_t invalid_target = ROCJITSU_CODE_TARGET_INVALID;
   const uint32_t invalid_count = executable.num_code_objects(invalid_target);
@@ -325,11 +332,11 @@ void inspect_executable(std::span<const uint8_t> bytes, RunStats &stats) {
   for (uint32_t index = 0; index < invalid_count; ++index) {
     const AmdGpuCodeObject *object = executable.code_object(invalid_target, index);
     if (object == nullptr || !object->is_valid() || object->target_id() != invalid_target)
-      throw std::logic_error("executable exposed an inconsistent code object");
+      invariant_failure("executable exposed an inconsistent code object");
     inspect_object(*object, stats);
   }
   if (executable.code_object(invalid_target, invalid_count) != nullptr)
-    throw std::logic_error("executable accepted an out-of-range code-object index");
+    invariant_failure("executable accepted an out-of-range code-object index");
 }
 
 void overwrite_integer(std::vector<uint8_t> &bytes, SplitMix64 &random, std::size_t width) {
@@ -408,9 +415,10 @@ RunStats &operator+=(RunStats &left, const RunStats &right) {
   return left;
 }
 
-RunStats run_input(std::span<const uint8_t> bytes) {
+util::FailureOr<RunStats> run_input(std::span<const uint8_t> bytes,
+                                    util::DiagnosticEmitter diagnostic) {
   if (bytes.size() > kMaxInputSize)
-    throw std::invalid_argument("code-object fuzz input exceeds size limit");
+    return diagnostic.emit() << "code-object fuzz input exceeds size limit";
   RunStats stats{.inputs = 1};
   AmdGpuCodeObject object(bytes.data(), bytes.size());
   inspect_object(object, stats);

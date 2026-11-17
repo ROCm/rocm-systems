@@ -370,14 +370,14 @@ TEST(sqlite_backend_impl_test,
         }
 
         const profiler_hub::storage_t storage{ db_path, uuid, version };
-        EXPECT_TRUE(storage.get_storage_version() == version);
+        EXPECT_TRUE(storage.get_writer_schema_version() == version);
 
         auto backend = mock_backend_t::create(
             db_path, uuid, mock_backend_t::storage_mode_t::in_memory);
         {
             ::testing::InSequence sequence;
             expect_schema_exec(sqlite, schema, uuid);
-            backend->initialize_schema(storage.get_storage_version());
+            backend->initialize_schema(storage.get_writer_schema_version());
         }
         ASSERT_TRUE(::testing::Mock::VerifyAndClearExpectations(&sqlite));
     }
@@ -401,7 +401,7 @@ TEST(sqlite_backend_impl_test,
     const profiler_hub::version_t created{ writable->major,
                                            writable->minor,
                                            writable->patch };
-    EXPECT_EQ(storage.get_storage_version(), created);
+    EXPECT_EQ(storage.get_writer_schema_version(), created);
 
     ::testing::NiceMock<mock_sqlite_api> sqlite;
     const sqlite_mock_guard              guard{ sqlite };
@@ -410,7 +410,7 @@ TEST(sqlite_backend_impl_test,
     {
         ::testing::InSequence sequence;
         expect_schema_exec(sqlite, *writable, uuid);
-        backend->initialize_schema(storage.get_storage_version());
+        backend->initialize_schema(storage.get_writer_schema_version());
     }
     ASSERT_TRUE(::testing::Mock::VerifyAndClearExpectations(&sqlite));
 }
@@ -429,7 +429,7 @@ TEST(sqlite_backend_impl_test, storage_3_0_0_executes_the_embedded_3_0_0_schema)
     EXPECT_STREQ(schema->version, "3.0.0");
 
     const profiler_hub::storage_t storage{ db_path, uuid, requested };
-    EXPECT_EQ(storage.get_storage_version(), requested);
+    EXPECT_EQ(storage.get_writer_schema_version(), requested);
 
     ::testing::NiceMock<mock_sqlite_api> sqlite;
     const sqlite_mock_guard              guard{ sqlite };
@@ -438,7 +438,7 @@ TEST(sqlite_backend_impl_test, storage_3_0_0_executes_the_embedded_3_0_0_schema)
     {
         ::testing::InSequence sequence;
         expect_schema_exec(sqlite, *schema, uuid);
-        backend->initialize_schema(storage.get_storage_version());
+        backend->initialize_schema(storage.get_writer_schema_version());
     }
     ASSERT_TRUE(::testing::Mock::VerifyAndClearExpectations(&sqlite));
 }
@@ -556,6 +556,24 @@ TEST(sqlite_backend_impl_test, latest_schema_version_matches_newest_embedded_sch
     }
 }
 
+// One case per row of k_embedded_schemas, which CMake writes from versions.yml.
+// A schema added to that file is covered on the next configure, with no edit here.
+const std::vector<profiler_hub::version_t>&
+embedded_schema_versions()
+{
+    static const std::vector<profiler_hub::version_t> versions = [] {
+        std::vector<profiler_hub::version_t> collected;
+        collected.reserve(std::size(k_embedded_schemas));
+        for(const auto& schema : k_embedded_schemas)
+        {
+            collected.push_back(
+                profiler_hub::version_t{ schema.major, schema.minor, schema.patch });
+        }
+        return collected;
+    }();
+    return versions;
+}
+
 class latest_schema_version_test
 : public ::testing::TestWithParam<profiler_hub::version_t>
 {};
@@ -566,21 +584,26 @@ TEST_P(latest_schema_version_test, equals_only_the_newest_versions_yml_entry)
     const profiler_hub::version_t latest =
         rocpd::data_storage::schema::latest_schema_version();
 
-    const profiler_hub::version_t newest_in_versions_yml{ 3, 0, 5 };
+    profiler_hub::version_t newest_in_versions_yml{};
+    for(const auto& schema : k_embedded_schemas)
+    {
+        const profiler_hub::version_t embedded{ schema.major,
+                                                schema.minor,
+                                                schema.patch };
+        if(newest_in_versions_yml < embedded)
+        {
+            newest_in_versions_yml = embedded;
+        }
+    }
 
-    EXPECT_NE(latest, profiler_hub::version_t{});
+    EXPECT_EQ(latest, newest_in_versions_yml);
     EXPECT_FALSE(latest < version);
     EXPECT_EQ(latest == version, version == newest_in_versions_yml);
 }
 
-INSTANTIATE_TEST_SUITE_P(schemas_3_0_0_through_3_0_5,
+INSTANTIATE_TEST_SUITE_P(embedded_schemas,
                          latest_schema_version_test,
-                         ::testing::Values(profiler_hub::version_t{ 3, 0, 0 },
-                                           profiler_hub::version_t{ 3, 0, 1 },
-                                           profiler_hub::version_t{ 3, 0, 2 },
-                                           profiler_hub::version_t{ 3, 0, 3 },
-                                           profiler_hub::version_t{ 3, 0, 4 },
-                                           profiler_hub::version_t{ 3, 0, 5 }));
+                         ::testing::ValuesIn(embedded_schema_versions()));
 
 class embedded_schema_catalog_test
 : public ::testing::TestWithParam<profiler_hub::version_t>
@@ -605,14 +628,9 @@ TEST_P(embedded_schema_catalog_test, version_is_embedded_from_versions_yml)
     EXPECT_NE(schema->metadata, nullptr);
 }
 
-INSTANTIATE_TEST_SUITE_P(schemas_3_0_0_through_3_0_5,
+INSTANTIATE_TEST_SUITE_P(embedded_schemas,
                          embedded_schema_catalog_test,
-                         ::testing::Values(profiler_hub::version_t{ 3, 0, 0 },
-                                           profiler_hub::version_t{ 3, 0, 1 },
-                                           profiler_hub::version_t{ 3, 0, 2 },
-                                           profiler_hub::version_t{ 3, 0, 3 },
-                                           profiler_hub::version_t{ 3, 0, 4 },
-                                           profiler_hub::version_t{ 3, 0, 5 }));
+                         ::testing::ValuesIn(embedded_schema_versions()));
 
 TEST(sqlite_backend_impl_test, rejected_schema_names_the_writable_schemas)
 {
