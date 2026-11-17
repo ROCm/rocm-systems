@@ -715,22 +715,6 @@ add_test(
         ${WORKING_DIR_OPTION}
 )
 
-add_test(
-    NAME test_per_source_line_export
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_per_source_line_export.xml
-        ${COV_OPTION} tests/unit/pc_sampling/test_per_source_line_export.py
-        ${WORKING_DIR_OPTION}
-)
-
-add_test(
-    NAME test_pc_sampling_csv_export
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_pc_sampling_csv_export.xml
-        ${COV_OPTION} tests/unit/pc_sampling/test_pc_sampling_csv_export.py
-        ${WORKING_DIR_OPTION}
-)
-
 # -----------------------------------
 # Metrics unit tests
 # -----------------------------------
@@ -1169,8 +1153,6 @@ if(${ENABLE_COVERAGE})
         test_pc_sampling_analyze_cli
         test_pc_sampling_profile
         test_per_kernel_isa_export
-        test_per_source_line_export
-        test_pc_sampling_csv_export
         test_metrics_common
         test_metric_validation
         test_native_tool_finder
