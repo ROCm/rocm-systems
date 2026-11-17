@@ -1570,8 +1570,7 @@ class db_analysis(OmniAnalyze_Base):
                 "l0_cache_data": roofline_data_expressions.get("AI L0", ""),
                 "l1_cache_data": roofline_data_expressions.get("AI L1", ""),
                 "l2_cache_data": roofline_data_expressions.get("AI L2", ""),
-                "hbm_cache_data": roofline_data_expressions.get("AI HBM", "")
-                or roofline_data_expressions.get("AI VRAM", ""),
+                "hbm_cache_data": roofline_data_expressions.get("AI HBM", ""),
                 "lds_cache_data": roofline_data_expressions.get("AI LDS", ""),
             }
 

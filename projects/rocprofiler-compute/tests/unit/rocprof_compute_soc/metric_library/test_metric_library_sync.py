@@ -162,15 +162,6 @@ UNIT_VARIANTS["gfx115x"] = {
     "11.4.1": ("GL2 Read 128B Requests", "(Count + $normUnit)"),
     "11.4.2": ("GL2 Write Requests", "(Count + $normUnit)"),
 }
-UNIT_VARIANTS["gfx1201"] = {
-    "2.1.6": ("LDS Bank Conflicts", "Cycles"),
-    "3.4.0": ("LDS Req", "(Requests + $normUnit)"),
-    "3.9.0": ("Memory Read Requests", "(Requests + $normUnit)"),
-    "3.9.1": ("Memory Write Requests", "(Requests + $normUnit)"),
-    "7.2.4": ("LDS Allocation", "Bytes"),
-    "9.2.0": ("Total Requests", "(Count + $normUnit)"),
-    "11.3.0": ("Total Requests", "(Count + $normUnit)"),
-}
 UNIT_VARIANTS["gfx1250"] = {
     "2.1.17": ("Active WGPs", "WGPs per Cycle"),
     "3.4.0": ("LDS Load Requests", "(Requests + $normUnit)"),

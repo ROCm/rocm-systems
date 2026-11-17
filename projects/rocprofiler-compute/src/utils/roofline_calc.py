@@ -21,7 +21,7 @@ from utils.utils_common import _workload_base_dir
 XMIN = 0.01
 XMAX_DEFAULT = 1000.0
 
-CACHE_LEVELS = ["ai_l0", "ai_l1", "ai_l2", "ai_hbm", "ai_vram", "ai_lds"]
+CACHE_LEVELS = ["ai_l0", "ai_l1", "ai_l2", "ai_hbm", "ai_lds"]
 
 
 # Enum class representing support of VALU and Matrix Operations
@@ -47,7 +47,6 @@ _METRIC_TO_AI_FIELD = {
     "AI L1": "ai_l1",
     "AI L2": "ai_l2",
     "AI HBM": "ai_hbm",
-    "AI VRAM": "ai_vram",
     "AI LDS": "ai_lds",
 }
 
@@ -68,7 +67,6 @@ class PlotPoints:
     ai_l1: list[list[float]]
     ai_l2: list[list[float]]
     ai_hbm: list[list[float]]
-    ai_vram: list[list[float]]
     ai_lds: list[list[float]]
     kernelNames: list[str]
     counts: list[Optional[float]]
@@ -86,7 +84,6 @@ class PlotPoints:
             ai_l1=[[], []],
             ai_l2=[[], []],
             ai_hbm=[[], []],
-            ai_vram=[[], []],
             ai_lds=[[], []],
             kernelNames=[],
             counts=[],
@@ -103,7 +100,6 @@ class GraphPoints:
     """Data structure for storing roofline graph ceiling points."""
 
     hbm: list[Union[list[float], float, None]]
-    vram: list[Union[list[float], float, None]]
     l2: list[Union[list[float], float, None]]
     l1: list[Union[list[float], float, None]]
     l0: list[Union[list[float], float, None]]
@@ -116,7 +112,6 @@ class GraphPoints:
         """Create empty graph points structure."""
         return cls(
             hbm=[None, None, None],
-            vram=[None, None, None],
             l2=[None, None, None],
             l1=[None, None, None],
             l0=[None, None, None],
@@ -177,7 +172,6 @@ def calc_ceilings(
 
     graph_points: dict[str, list[Union[list[float], float, None]]] = {
         "hbm": [],
-        "vram": [],
         "l2": [],
         "l1": [],
         "l0": [],

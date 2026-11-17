@@ -9,6 +9,8 @@ This module provides:
 - generate_machine_specs() as the main entry point for spec generation
 """
 
+from __future__ import annotations
+
 import argparse
 import importlib
 import os
@@ -19,7 +21,7 @@ from dataclasses import dataclass, field, fields
 from datetime import datetime
 from math import ceil
 from pathlib import Path as path
-from typing import Any, Dict, List, Optional, Set, Tuple, Type, TypeVar, Union
+from typing import Any, Optional, TypeVar
 
 import config
 from utils import amdsmi_interface
@@ -35,7 +37,7 @@ from utils.utils_common import format_table_ascii, get_version
 
 T = TypeVar("T")
 
-VERSION_LOC: List[str] = [
+VERSION_LOC: list[str] = [
     "version",
     "version-dev",
     "version-hip-libraries",
@@ -47,47 +49,30 @@ VERSION_LOC: List[str] = [
 ]
 
 
-def spec_family_for_arch(gpu_arch: Optional[str]) -> Type["MachineSpecs"]:
+def spec_family_for_arch(gpu_arch: Optional[str]) -> type[MachineSpecs]:
     """Return the MachineSpecs subclass for a GPU arch (by series).
 
-    RDNA3.5 and RDNA4 share shader-array GL1 caches and GDDR channel fields.
-    Other supported families use the CDNA specification record.
+    The "RDNA3.5" series maps to RDNA 3.5; everything else (mi100, mi200,
+    mi300, etc.) maps to CDNA.
     """
     series = mi_gpu_specs.get_gpu_series(gpu_arch) if gpu_arch else None
-    if series and series.upper() in {"RDNA3.5", "RDNA4"}:
-        return MachineSpecsRDNA
+    if series and series.upper() == "RDNA3.5":
+        return MachineSpecsRDNA35
     return MachineSpecsCDNA
 
 
 def generate_machine_specs(
-    args: Optional[argparse.Namespace], sysinfo: Optional[Dict[str, Any]] = None
-) -> "MachineSpecs":
+    args: Optional[argparse.Namespace], sysinfo: Optional[dict[str, Any]] = None
+) -> MachineSpecs:
     """Generate machine specifications from sysinfo dict or live hardware probing.
 
     If sysinfo is provided, reconstructs MachineSpecs from the saved data.
     Otherwise, probes the current system for hardware information.
     """
     if sysinfo is not None:
-        check_experimental_arch(sysinfo.get("gpu_arch"), args)
         return _reconstruct_specs_from_sysinfo(sysinfo)
 
     return _probe_live_machine_specs(args)
-
-
-def check_experimental_arch(
-    gpu_arch: Optional[str], args: Optional[argparse.Namespace]
-) -> None:
-    """Stop on an experimental gpu_arch without --experimental; warn with it."""
-    if gpu_arch not in mi_gpu_specs.get_experimental_archs():
-        return
-    if not getattr(args, "experimental", False):
-        console_error(
-            f"{gpu_arch} is an experimental GPU. Use --experimental to enable it."
-        )
-        return
-    console_warning(
-        f"{gpu_arch} support is experimental and may change in future releases."
-    )
 
 
 def get_rocm_ver() -> str:
@@ -144,16 +129,16 @@ def set_cache_sizes(
     num_cu: int,
     cache_info: dict,
     num_dies: int,
-    num_se: Union[str, int],
-    num_sa_se: Union[str, int],
-) -> Dict[str, int]:
+    num_se: str | int,
+    num_sa_se: str | int,
+) -> dict[str, int]:
     """Extrapolate cache sizes from AMD-SMI cache info output."""
     if num_cu == 0:
         console_error("Failed to determine GPU compute unit count from AMD-SMI.")
     if not cache_info:
         console_error("Failed to retrieve GPU cache information from AMD-SMI.")
 
-    cache_sizes: Dict[str, int] = {}
+    cache_sizes: dict[str, int] = {}
     memory_levels = mi_gpu_specs.get_memory_levels(gpu_model)
 
     l1_data_caches = [
@@ -175,9 +160,9 @@ def set_cache_sizes(
             )
         else:
             sa_level_cache = [
-                cache
-                for cache in l1_data_caches
-                if cache["num_cache_instance"] == int(num_se) * int(num_sa_se)
+                c
+                for c in l1_data_caches
+                if c["num_cache_instance"] == int(num_se) * int(num_sa_se)
             ]
             if sa_level_cache:
                 cache_sizes["L1"] = int(sa_level_cache[0]["cache_size"]) * 1024
@@ -207,7 +192,7 @@ def _kw_only(cls: T) -> T:
     return cls
 
 
-def _run_command(cmd: List[str]) -> Optional[str]:
+def _run_command(cmd: list[str]) -> Optional[str]:
     """Run a command and return stdout, aborting on execution failures."""
     cmd_str = " ".join(cmd)
     try:
@@ -243,10 +228,10 @@ def search_pattern(pattern: str, string: str) -> Optional[str]:
     return None
 
 
-def _detect_arch(rocminfo_lines: List[str]) -> Optional[Tuple[str, int]]:
+def _detect_arch(rocminfo_lines: list[str]) -> Optional[tuple[str, int]]:
     """Detect GPU architecture from rocminfo output."""
     supported_gpu_arch = mi_gpu_specs.get_gpu_series_dict()
-    unsupported_gpu_arch: Set[str] = set()
+    unsupported_gpu_arch: set[str] = set()
 
     for idx, line_text in enumerate(rocminfo_lines):
         # The regex stops at the first non-alphanumeric character (e.g. `-`)
@@ -274,10 +259,10 @@ def _detect_arch(rocminfo_lines: List[str]) -> Optional[Tuple[str, int]]:
     return None
 
 
-def _detect_gpu_chip_id(rocminfo_lines: List[str]) -> Optional[str]:
+def _detect_gpu_chip_id(rocminfo_lines: list[str]) -> Optional[str]:
     """Detect GPU chip ID from rocminfo output."""
     chip_id_dict = mi_gpu_specs.get_chip_id_dict()
-    unknown_chips: List[str] = []
+    unknown_chips: list[str] = []
 
     for line_text in rocminfo_lines:
         chip_id = search_pattern(r"^\s*Chip ID\s*:\s* ([0-9]+).*\s*$", line_text)
@@ -295,7 +280,7 @@ def _detect_gpu_chip_id(rocminfo_lines: List[str]) -> Optional[str]:
     return None
 
 
-def _reconstruct_specs_from_sysinfo(sysinfo: Dict[str, Any]) -> "MachineSpecs":
+def _reconstruct_specs_from_sysinfo(sysinfo: dict[str, Any]) -> MachineSpecs:
     """Reconstruct MachineSpecs from saved sysinfo dictionary."""
     try:
         sysinfo_ver = str(sysinfo["version"])
@@ -327,7 +312,7 @@ def _reconstruct_specs_from_sysinfo(sysinfo: Dict[str, Any]) -> "MachineSpecs":
         raise
 
 
-def _probe_live_machine_specs(args: Optional[argparse.Namespace]) -> "MachineSpecs":
+def _probe_live_machine_specs(args: Optional[argparse.Namespace]) -> MachineSpecs:
     """Probe live hardware to generate MachineSpecs."""
     now = datetime.now()
     local_now = now.astimezone()
@@ -339,7 +324,6 @@ def _probe_live_machine_specs(args: Optional[argparse.Namespace]) -> "MachineSpe
 
     machine_info = _extract_machine_info()
     soc_info = _extract_soc_info()
-    check_experimental_arch(soc_info["gpu_arch"], args)
     gpu_info = _extract_gpu_info(gpu_arch=soc_info["gpu_arch"])
 
     with amdsmi_interface.amdsmi_ctx():
@@ -375,7 +359,7 @@ def _probe_live_machine_specs(args: Optional[argparse.Namespace]) -> "MachineSpe
     return specs
 
 
-def _load_soc_module(args: Optional[argparse.Namespace], specs: "MachineSpecs") -> None:
+def _load_soc_module(args: Optional[argparse.Namespace], specs: MachineSpecs) -> None:
     """Load the architecture-specific SoC module."""
     try:
         soc_module = importlib.import_module(
@@ -391,9 +375,9 @@ def _load_soc_module(args: Optional[argparse.Namespace], specs: "MachineSpecs") 
 
 
 @demarcate
-def _extract_machine_info() -> Dict[str, Any]:
+def _extract_machine_info() -> dict[str, Any]:
     """Extract machine information from /proc and /sys filesystems."""
-    result: Dict[str, Optional[str]] = {
+    result: dict[str, Optional[str]] = {
         "cpu_model": None,
         "sbios": None,
         "linux_kernel_version": None,
@@ -425,13 +409,13 @@ def _extract_machine_info() -> Dict[str, Any]:
 
 
 @demarcate
-def _extract_gpu_info(gpu_arch: Optional[str]) -> Dict[str, Any]:
+def _extract_gpu_info(gpu_arch: Optional[str]) -> dict[str, Any]:
     """Extract GPU information from amd-smi."""
     is_partition_supported = gpu_arch and MIGPUSpecs.is_partition_supported(
         gpu_arch=gpu_arch, gpu_model=None
     )
 
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "vbios": None,
         "compute_partition": None,
         "memory_partition": None,
@@ -453,7 +437,7 @@ def _extract_gpu_info(gpu_arch: Optional[str]) -> Dict[str, Any]:
         result["num_compute_units"] = amdsmi_interface.get_gpu_num_compute_units()
         result["gpu_cache_info"] = amdsmi_interface.get_gpu_cache_info() or {}
         result["vram_bit_width"] = amdsmi_interface.get_gpu_vram_bit_width()
-        if spec_family_for_arch(gpu_arch) is MachineSpecsRDNA:
+        if spec_family_for_arch(gpu_arch) is MachineSpecsRDNA35:
             result["perf_level"] = amdsmi_interface.get_gpu_perf_level()
 
     if is_partition_supported:
@@ -482,9 +466,9 @@ def _extract_gpu_info(gpu_arch: Optional[str]) -> Dict[str, Any]:
 
 
 @demarcate
-def _extract_soc_info() -> Dict[str, Any]:
+def _extract_soc_info() -> dict[str, Any]:
     """Extract SoC information from rocminfo."""
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "rocminfo_lines": None,
         "gpu_arch": None,
         "gpu_chip_id": None,
@@ -901,7 +885,7 @@ class MachineSpecs:
             "show_in_table": False,
         },
     )
-    cache_sizes: Optional[Dict[str, int]] = field(
+    cache_sizes: Optional[dict[str, int]] = field(
         default=None,
         metadata={
             "doc": "Size of cache at each level present on the GPU",
@@ -910,7 +894,7 @@ class MachineSpecs:
         },
     )
 
-    def finalize_soc_fields(self, gpu_info: Dict[str, Any]) -> None:
+    def finalize_soc_fields(self, gpu_info: dict[str, Any]) -> None:
         """Derive shared SoC-dependent fields. Subclasses override and call super()."""
         self.total_l2_chan = totall2_banks(
             self.gpu_arch,
@@ -928,10 +912,10 @@ class MachineSpecs:
             self.sa_per_se,
         )
 
-    def get_class_members(self) -> Dict[str, Any]:
+    def get_class_members(self) -> dict[str, Any]:
         """Return class members as a dictionary."""
-        data: Dict[str, Any] = {}
-        missing_required_fields: List[str] = []
+        data: dict[str, Any] = {}
+        missing_required_fields: list[str] = []
 
         for class_field in fields(self):
             if not class_field.metadata.get("show_in_table", True):
@@ -959,14 +943,14 @@ class MachineSpecs:
             "Machine Specifications: describing the state of the machine that "
             "ROCm Compute Profiler data was collected on.\n"
         )
-        data: List[Dict[str, Any]] = []
+        data: list[dict[str, Any]] = []
         has_description = False
         has_unit = False
 
         for class_field in fields(self):
             name = class_field.name
             if class_field.metadata.get("show_in_table", True):
-                _data: Dict[str, Any] = {}
+                _data: dict[str, Any] = {}
                 value = getattr(self, name)
                 if class_field.metadata:
                     if (
@@ -1057,7 +1041,7 @@ class MachineSpecsCDNA(MachineSpecs):
         divisor = {"nps2": 2, "nps4": 4, "nps8": 8}.get(partition, 1)
         return str(int(self.l2_banks) * whole_chip_xcds // divisor)
 
-    def finalize_soc_fields(self, gpu_info: Dict[str, Any]) -> None:
+    def finalize_soc_fields(self, gpu_info: dict[str, Any]) -> None:
         self.compute_partition = gpu_info["compute_partition"]
         self.memory_partition = gpu_info["memory_partition"]
         self.num_xcd = str(
@@ -1071,11 +1055,8 @@ class MachineSpecsCDNA(MachineSpecs):
 
 @_kw_only
 @dataclass(repr=False)
-class MachineSpecsRDNA(MachineSpecs):
-    """Specs of RDNA 3.5 and RDNA 4 GPUs.
-
-    They also hold the number of GL1 caches and of GDDR channels.
-    """
+class MachineSpecsRDNA35(MachineSpecs):
+    """RDNA 3.5 specs: adds GL1 cache count field."""
 
     num_gl1c: Optional[str] = field(
         default=None,
@@ -1102,7 +1083,7 @@ class MachineSpecsRDNA(MachineSpecs):
         },
     )
 
-    def finalize_soc_fields(self, gpu_info: Dict[str, Any]) -> None:
+    def finalize_soc_fields(self, gpu_info: dict[str, Any]) -> None:
         if self.se_per_gpu is None or self.sa_per_se is None:
             self.num_gl1c = None
         else:

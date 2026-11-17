@@ -73,7 +73,7 @@ FLOPS_TEST_KEYS = {
 
 # Benchmarks whose launcher hard-codes the kernel name it resolves.
 LITERAL_KERNEL_NAMES = [
-    ("HBM", "device_memory_bw_src", "HBM_bw"),
+    ("HBM", "hbm_bw_src", "HBM_bw"),
     ("LDS", "lds_benchmark_src", "LDS_bw"),
 ]
 

@@ -37,10 +37,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * `analyze --debug-table-view`: print every block as plain tables.
   * `analyze --debug-verify-deps`: check that the Python dependencies of analyze mode are installed, then exit.
 
-* Added GPU metrics, the Memory Chart and the roofline for gfx1201.
-  * gfx1201 support is experimental and requires the `--experimental` option.
-  * Set the GPU performance level to `STABLE_STD` before profiling, as described in [Setting GPU performance level for PMC profiling](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#setting-gpu-performance-level-for-pmc-profiling).
-
 ### Changed
 
 * Improved the standalone roofline HTML kernel hover tooltip: it now shows the limiting roof, percent of roofline, achieved and peak bandwidth per memory level, dispatch count and share of total application dispatches, and kernel duration and share of total application time. Kernel names longer than 200 characters are truncated in the sidebar, with the full name shown on hover.
@@ -162,8 +158,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Fixed the aggregate L2 cache hit rate in the L2 Cache (per Channel) panel counting only the first 16 L2 channels on AMD Instinct MI300 and MI350 Series.
 
 * Fixed the Cache Lookup Hit Rate and Cache Sector Lookup Hit Rate averages in the GL0 Cache and LDS panel on gfx1250, which showed negative values.
-
-* Fixed `-b 21` and `-b 30` rejecting `--experimental` when it comes before the mode, as in `rocprof-compute --experimental profile --pc-sampling -b 21`.
 
 ### Upcoming changes
 

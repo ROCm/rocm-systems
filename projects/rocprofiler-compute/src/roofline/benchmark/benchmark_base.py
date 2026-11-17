@@ -50,9 +50,6 @@ VALU_NFMA = 1024
 # Bench_base Class (ABSTRACT)
 # =============================================================================
 class Bench_base(ABC):
-    # Device memory is HBM on MI accelerators and VRAM on other GPUs.
-    DEVICE_MEMORY_LABEL = "HBM"
-
     def __init__(self, device_id: int, cache_sizes: dict) -> None:
         self.device_id = device_id
 
@@ -103,7 +100,7 @@ class Bench_base(ABC):
             """
 
         # Kernel source must be set in child classes
-        self.device_memory_bw_src: str
+        self.hbm_bw_src: str
         self.mall_bw_src: str
         self.l2_bw_src: str
         self.l1_bw_src: str
@@ -400,14 +397,14 @@ class Bench_base(ABC):
     # Benchmarking kernel methods
     # -----------------------------------------------------------------------------
 
-    # Device-memory bandwidth benchmark
-    def device_memory_bw_benchmark(self, device: int) -> float:
+    # HBM bandwidth benchmark
+    def hbm_bw_benchmark(self, device: int) -> float:
         num_experiments = DEFAULT_NUM_EXPERIMENTS
         hip.hipSetDevice(device)
 
         cus = hip.hipGetDeviceProperties(device).multiProcessorCount
 
-        prog = self.Program(self.device_memory_bw_src)
+        prog = self.Program(self.hbm_bw_src)
         func = prog.get_kernel("HBM_bw")
 
         workgroup_size = DEFAULT_WORKGROUP_SIZE
@@ -453,8 +450,7 @@ class Bench_base(ABC):
         event_ms = total_bytes / peak / 1e6
 
         print(
-            f"{self.DEVICE_MEMORY_LABEL} BW, GPU ID: {device}, "
-            f"workgroupSize:{workgroup_size}, "
+            f"HBM BW, GPU ID: {device}, workgroupSize:{workgroup_size}, "
             f"workgroups:{workgroups}, experiments:{num_experiments}, "
             f"traffic:{total_bytes} bytes, duration:{event_ms:.1f} ms, "
             f"peak:{peak:.1f} GB/sec"

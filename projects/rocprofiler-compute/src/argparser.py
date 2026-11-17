@@ -8,7 +8,6 @@ from typing import Any, Dict, List, Optional, Type
 
 from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS, OPERATOR_BACKENDS
 from utils.logger import console_warning
-from utils.mi_gpu_spec import mi_gpu_specs
 from utils.utils_common import METRIC_ID_RE, resolve_rocm_library_path
 
 # Standard argparse actions that the CustomAction subclasses delegate to
@@ -106,19 +105,16 @@ def add_general_group(
         "-s", "--specs", action="store_true", help="Print system specs and exit."
     )
 
-    experimental_gpus = ", ".join(sorted(mi_gpu_specs.get_experimental_archs()))
-    gpus_help = f"   GPUs ({experimental_gpus})\n" if experimental_gpus else ""
     general_group.add_argument(
         "--experimental",
         action="store_true",
-        # Lets --experimental come before or after the mode
-        default=argparse.SUPPRESS,
+        default=False,
         help=(
             "Enable experimental feature(s):\n"
             "   ML API trace (--trace-ml-api, --list-operators, --operator)\n"
             "   Memory Bandwidth Analysis (--membw-analysis)\n"
             "   PC Sampling (--pc-sampling, --pc-sampling-method, "
-            "--pc-sampling-interval)\n" + gpus_help
+            "--pc-sampling-interval)\n"
         ),
     )
     general_group.add_argument(
@@ -185,7 +181,6 @@ def _omniarg_parser(
     )
     debug_group = parser.add_argument_group("Debug Options")
     _add_list_metrics_gfx_id(debug_group, supported_archs, debug_enabled)
-    parser.set_defaults(experimental=False)
     parser._positionals.title = "Modes"
     parser._optionals.title = "Help"
     skills_note = _skills_note(rocprof_compute_home)

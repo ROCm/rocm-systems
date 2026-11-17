@@ -94,7 +94,6 @@ def test_arch_chain_of_real_archs():
         "gfx950",
     ]
     assert loader.arch_chain("gfx1151") == ["gfx115x"]
-    assert loader.arch_chain("gfx1201") == ["gfx1201"]
     assert loader.arch_chain("gfx1250") == ["gfx1250"]
 
 

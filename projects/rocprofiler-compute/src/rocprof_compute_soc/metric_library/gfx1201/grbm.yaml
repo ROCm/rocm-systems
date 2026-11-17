@@ -1,9 +1,0 @@
-grbm.gpu_busy:
-  name: GPU Busy
-  formula: 100 * SUM(GRBM_GUI_ACTIVE) / SUM(GRBM_COUNT)
-  unit: Percent
-  description: >-
-    Percentage of time the GPU was actively processing work. This is the primary
-    utilization metric showing overall GPU activity. Low GPU busy indicates
-    underutilization, possibly due to insufficient workload or host-side
-    bottlenecks.

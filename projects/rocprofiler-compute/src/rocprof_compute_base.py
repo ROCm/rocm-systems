@@ -33,7 +33,6 @@ from utils.metrics.expression import update_normal_unit_string
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.specs import (
     MachineSpecs,
-    check_experimental_arch,
     generate_machine_specs,
 )
 from utils.utils_common import (
@@ -299,11 +298,6 @@ class RocProfCompute:
 
     @demarcate
     def handle_list_args(self) -> None:
-        # Archs given on the command line; generate_machine_specs checks detected ones
-        check_experimental_arch(
-            self.__args.debug_list_metrics_gfx_id or self.__args.list_blocks,
-            self.__args,
-        )
         if self.__args.specs:
             print(generate_machine_specs(self.__args))
             sys.exit(0)

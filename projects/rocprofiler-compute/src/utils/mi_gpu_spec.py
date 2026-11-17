@@ -65,9 +65,6 @@ class MIGPUSpecs:
 
     _all_gpu_models: List[str] = []
 
-    # gpu_archs marked experimental: true, usable only with --experimental
-    _experimental_archs: Set[str] = set()
-
     # key: gpu_arch, the arch's roofline block; only archs with a roofline benchmark
     _roofline: Dict[str, Dict[str, Any]] = {}
     # key: gpu_arch, the roofline.csv columns its benchmark measures
@@ -129,7 +126,6 @@ class MIGPUSpecs:
                         | -- logical_partitions_per_die (CDNA)
                         | -- memory_levels
                     |-- roofline: what the roofline benchmark measures
-                    |-- experimental: needs --experimental to profile or analyze
         """
 
         current_dir = Path(__file__).parent
@@ -152,8 +148,6 @@ class MIGPUSpecs:
                 curr_gpu_arch = archs.get("gpu_arch")
 
                 cls._gpu_series_dict[curr_gpu_arch] = curr_gpu_series
-                if archs.get("experimental"):
-                    cls._experimental_archs.add(curr_gpu_arch)
                 cls._perfmon_config[curr_gpu_arch] = archs.get("perfmon_config", {})
                 cls._gpu_model_dict[curr_gpu_arch] = []
                 if "roofline" in archs:
@@ -212,11 +206,6 @@ class MIGPUSpecs:
                         f"arch found: {gpu_arch} -> {single_model} (partition:"
                         f" {compute_partition})"
                     )
-
-    @classmethod
-    def get_experimental_archs(cls) -> Set[str]:
-        """Return the gpu_archs that need --experimental."""
-        return cls._experimental_archs
 
     @classmethod
     def get_gpu_series_dict(cls) -> Dict[str, str]:

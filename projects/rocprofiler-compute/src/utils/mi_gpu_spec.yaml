@@ -29,7 +29,6 @@
 #               | -- valu # Data types with a VALU ceiling
 #               | -- mfma or wmma # Data types with a matrix ceiling, by matrix type
 #               | -- mfma_mixed or wmma_mixed # Mixed-precision matrix types, not plotted
-#           |-- experimental: needs --experimental to profile or analyze
 #
 # --------------------------------------------------------------------------------
 
@@ -472,39 +471,6 @@ mi_gpu_spec:
               memory_levels: ["LDS", "L0", "L1", "L2"]
             chip_ids:
               physical: 6402
-
-  # RDNA 4 (gfx120x). Navi 48 uses L2, Infinity Cache, and VRAM.
-  - gpu_series: rdna4
-    gpu_archs:
-      - gpu_arch: gfx1201
-        experimental: true
-        perfmon_config:
-          SQ: 8
-          SQG: 8
-          TA: 2
-          TCP: 4
-          GRBM: 2
-          CPC: 2
-          CPF: 2
-          GC_EA_SE: 2
-          SPI: 6
-          GL1A: 4
-          GL1C: 4
-          GL2A: 4
-          GL2C: 4
-        roofline:
-          # Only the levels that have a kernel point (AI VRAM, AI L0, AI LDS).
-          bandwidth: [VRAM, L0, LDS]
-          # No native support for I8 or I64. RDNA4 has no native 8-bit VALU
-          # and no native 64-bit integer multiply-add.
-          valu: [FP16, FP32, FP64, I32]
-          wmma: [FP8, FP16, BF16]
-        models:
-          - gpu_model: rdna4_navi48
-            design:
-              memory_levels: ["LDS", "L0", "L1", "L2", "MALL", "VRAM"]
-            chip_ids:
-              physical: 30032  # 0x7550, Radeon RX 9070 and RX 9070 XT
 
   #########################################################
   # gfx1250 family
