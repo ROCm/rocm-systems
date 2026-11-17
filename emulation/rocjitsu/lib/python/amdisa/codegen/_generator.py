@@ -18085,6 +18085,7 @@ class CodeGenerator:
                 from amdisa.codegen.execute.rj_arith_compare import (
                     COMPARE_NAMES,
                     CLASS_COMPARISONS,
+                    supports_integer_compare,
                 )
 
                 if (
@@ -18115,6 +18116,11 @@ class CodeGenerator:
                         'cdna5',
                     )
                     and any(i.name in COMPARE_NAMES for i in all_insts)
+                ) or (
+                    any(
+                        supports_integer_compare(self.isa_spec.arch_name, i.name)
+                        for i in all_insts
+                    )
                     or any(i.name in CLASS_COMPARISONS for i in all_insts)
                 ):
                     cpp_includes.append(
