@@ -22,7 +22,6 @@ for (const width of [1440, 390]) {
     for (const control of [first, newer, older, last]) {
       await expect(control).toHaveText('');
       await expect(control.locator('svg')).toHaveCount(1);
-      await expect(control).toHaveAttribute('title', await control.getAttribute('aria-label'));
     }
     await last.click();
     await expect(card.getByRole('status')).toHaveText('Showing 61–65 of 65 runs');

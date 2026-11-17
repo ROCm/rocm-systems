@@ -4,18 +4,41 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// See enqueue_test_deps.h. This file holds only the reset chain for the
-// `rccl-UnitTestsMicroEnqueue` binary; every seam it resets is defined in a
-// fakes file named after the production TU that owns the symbol.
+// See enqueue_test_deps.h. This file holds the reset chain for the
+// `rccl-UnitTestsMicroEnqueue` binary and the few stubs that cannot live in a
+// shared fakes file; every seam it resets is defined in a fakes file named
+// after the production TU that owns the symbol.
 
 #include "enqueue_test_deps.h"
 
+#include "fail_loud.h"
 #include "nccl_fakes.h"
+#include "rma/rma.h"
 
 // init.cc owns NCCL_PARAM(P2pDisable). enqueue.cc's addP2pToPlan calls it via
 // rcclP2pPolicyChannels; wrap_fakes.cc supplies the body for binaries that
 // compile rccl_wrap.cc, which this target does not.
 int64_t ncclParamP2pDisable() { return g_loadParam("P2P_DISABLE", 0); }
+bool ncclP2pUsesMemcpy() {
+  const char* value = getenv("NCCL_P2P_USE_CUDA_MEMCPY");
+  return value != nullptr && strtoll(value, nullptr, 0) != 0;
+}
+int64_t rcclParamP2pCeChannelsPerPeer() { return g_loadParam("RCCL_P2P_CE_CHANNELS_PER_PEER", 16); }
+int rcclP2pCeChannelsPerPeerCap(int current, int pool, bool isGfx1250, bool useMemcpy, int64_t configuredCap) {
+  if (!isGfx1250 || !useMemcpy || configuredCap <= 0 || pool <= 0) return current;
+  int cap = pow2Down((int)(configuredCap < pool ? configuredCap : pool));
+  if (cap < 1) cap = 1;
+  return current < cap ? current : cap;
+}
+
+// rma.cc owns scheduleRmaTasksToPlan, but rma_fakes.cc also links into binaries that compile the
+// real rma.cc. api_trace.cc owns ncclGetErrorString, and api_trace_fakes.cc does not link here.
+#ifndef RCCL_ENQUEUE_TEST_DEPS_OMIT_scheduleRmaTasksToPlan
+ncclResult_t scheduleRmaTasksToPlan(struct ncclComm*, struct ncclKernelPlan*) {
+  FailLoudUnfaked("enqueue_test_deps", "scheduleRmaTasksToPlan");
+}
+#endif
+const char* ncclGetErrorString(ncclResult_t) { FailLoudUnfaked("enqueue_test_deps", "ncclGetErrorString"); }
 
 void ResetEnqueueTestDeps() {
   ResetAllocatorFakes();
@@ -27,6 +50,7 @@ void ResetEnqueueTestDeps() {
   ResetDevRuntimeFakes();
   ResetGroupFakes();
   ResetMgmtTaskEnqFakes();
+  ResetProfilerFakes();
   ResetProxyFakes();
   ResetRcclWrapFakes();
   ResetRecorderFakes();

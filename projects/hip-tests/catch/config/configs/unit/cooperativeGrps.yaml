@@ -201,6 +201,9 @@ cooperativeGrps:
   Unit_tiled_groups_metagrp_basic:
     <<: *level_default
     tags: [cooperative, groups]
+  Unit_tiled_groups_metagrp_rank:
+    <<: *level_default
+    tags: [cooperative, groups]
   Unit_coalesced_groups_metagrp_basic:
     <<: *level_default
     tags: [cooperative, groups]

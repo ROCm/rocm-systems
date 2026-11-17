@@ -179,9 +179,7 @@ Result validate_prepared(std::span<const uint8_t> original, const PreparedArtifa
       metadata.value().vgprs != artifact.manifest.entry.prepared_vgprs)
     return reject(error, "final AMDHSA resource mismatch: " + metadata_error);
   std::unique_ptr<Decoder> decoder =
-      target->public_id == ROCJITSU_CODE_TARGET_INVALID
-          ? Decoder::create(default_isa_target_registry(), arch)
-          : Decoder::create(default_isa_target_registry(), target->public_id);
+      Decoder::create(default_isa_target_registry(), target->public_id);
   if (decoder == nullptr)
     return reject(error, "final target decoder is unavailable");
   const std::array<uint64_t, 1> entries{kernels.front().entry_text_offset};

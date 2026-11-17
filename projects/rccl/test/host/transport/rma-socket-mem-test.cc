@@ -24,10 +24,6 @@
 #include RMA_SOCKET_MEM_CC_PATH
 #include "fakes/gdrwrap_seam_undef.h"
 
-// Owned by src/init.cc. This binary does not compile init.cc; the socket-RMA
-// units use the real discriminator exposed by gdrwrap.h.
-gdr_t ncclGdrCopy = nullptr;
-
 namespace {
 
 using rma_socket_test::Scene;

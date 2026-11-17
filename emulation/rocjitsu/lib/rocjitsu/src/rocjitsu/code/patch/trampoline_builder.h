@@ -95,6 +95,15 @@ struct TrampolinePlan {
   std::vector<InlineAsmItem> before_items;
   std::vector<InlineAsmItem> after_items;
   bool emit_original = true;
+  /// Execute the relocated anchor before the callable envelope.
+  /// The caller must ensure an emitted anchor falls through into the envelope
+  /// and resolve its software-managed register hazards before the envelope
+  /// reads results or overwrites registers with pending source reads. Live-after
+  /// preservation alone is insufficient; the builder neither checks these
+  /// obligations nor inserts anchor-specific hazard spacing.
+  /// With emit_original=false, both placements emit only the envelope and keep
+  /// the same original_byte_offset and call-envelope range.
+  bool probe_after_original = false;
   /// A dispatch-only callback returns to an untouched original entry; it has
   /// no anchor splice and imposes no relocation-size constraint on that entry.
   bool patch_anchor = true;
@@ -106,8 +115,8 @@ struct TrampolinePlan {
   //
   // These are the call-envelope resource decisions made BEFORE layout is known:
   // which registers the envelope uses and how many words it spans. Emission
-  // materializes `before_items` from these decisions plus the assigned layout,
-  // so it must not re-pick registers or recount words. Folded into
+  // materializes `before_items` or `after_items` according to probe_after_original
+  // and emit_original, so it must not re-pick registers or recount words. Folded into
   // TrampolinePlan for now since this is the builder's one input;
   // lift back out into a dedicated resource-plan type if it grows unwieldy.
   //----------------------------------------------------------------------------
@@ -175,10 +184,10 @@ struct TrampolinePlan {
   /// The ABI fixes the link and argument registers; live values in them require
   /// preservation. The other destinations are chosen outside the live set.
   RegisterSet builder_clobbers;
-  /// Planned envelope words, including internal RDNA4 guards. The spill
-  /// bracket, the boundary drains and the GFX9 wait-state pad are accounted by
-  /// emit_probe_call, not here.
-  uint32_t before_word_count = 0;
+  /// Planned envelope words, including internal RDNA4 guards, independent of
+  /// placement. This is not the final emitted size: emit_probe_call additionally
+  /// accounts for the spill bracket, boundary drains and restore hazard spacing.
+  uint32_t planned_envelope_word_count = 0;
   uint64_t probe_target_offset = 0; ///< .text-relative byte offset of the copied probe body.
 
   /// VGPRs to save/restore around the call; emit_probe_call brackets each with a
@@ -201,7 +210,15 @@ struct TrampolineBytes {
   /// Empty without an anchor splice; otherwise original_size bytes.
   std::vector<uint8_t> patched_anchor_bytes;
   std::vector<uint32_t> trampoline_words;
+  /// Original's byte offset from trampoline start, or its insertion boundary
+  /// between before_items and after_items when emit_original=false. Callable
+  /// plans without an original place this after the envelope, at the return
+  /// branch if present, otherwise at the end of the trampoline.
   uint32_t original_byte_offset = 0;
+  /// Call envelope relative to trampoline start, excluding the relocated guest
+  /// instruction and resume branch. Both fields are zero for inline plans.
+  uint32_t call_envelope_byte_offset = 0;
+  uint32_t call_envelope_byte_size = 0;
 };
 
 class TrampolineBuilder {
@@ -227,8 +244,8 @@ public:
   /// Picks the call-envelope registers and computes the envelope word count
   /// without choosing layout or emitting bytes. On success, fills
   /// `plan.is_probe_call`, `link_pair_base`, `target_pair_base`, `scc_temp`,
-  /// `special_state_saves`, `builder_clobbers`, and `before_word_count`, then
-  /// returns true. (`preserve_scc`/`preserve_*` are inputs, read but not written.)
+  /// `special_state_saves`, `builder_clobbers`, and `planned_envelope_word_count`,
+  /// then returns true. (`preserve_scc`/`preserve_*` are inputs, read but not written.)
   ///
   /// Resource constraints:
   ///   - Link pair is read off @p abi; one that fails is_valid_probe_abi()
@@ -257,29 +274,33 @@ public:
   ///
   /// @param plan                Trampoline plan whose resource fields are filled.
   /// @param abi                 Probe ABI; supplies the link pair.
-  /// @param live_at_anchor      Registers live immediately before the anchor.
+  /// @param live_at_anchor      Registers live at the selected observation point.
+  ///                           For post-instruction placement, the caller must
+  ///                           supply the live-after state, including anchor
+  ///                           definitions that the callback must preserve.
+  ///                           The builder does not compute liveness.
   /// @param probe_body_clobbers Ordinary registers the copied probe body writes.
   [[nodiscard]] static bool plan_probe_call(TrampolinePlan &plan, const ProbeAbi &abi,
                                             const RegisterSet &live_at_anchor,
                                             const RegisterSet &probe_body_clobbers,
                                             std::string *error_out = nullptr);
 
-  /// @brief Emit a planned probe call: envelope, relocated original, return
-  ///        branch.
+  /// @brief Emit a planned probe call before or after the relocated original,
+  ///        followed by a return branch when requested.
   ///
   /// Requires @p plan.is_probe_call (i.e. plan_probe_call() succeeded). Builds
   /// the call envelope from the planned resources and @p plan.probe_target_offset
   /// then delegates to build() for layout and branch math.
   ///
   /// On GFX9 (CDNA1-4), which does not interlock them, a restored SGPR or M0 is
-  /// spaced from the relocated original by the wait states its readers need: one
+  /// spaced from guest resumption by the wait states its readers need: one
   /// s_nop tops up what the instructions after the restore already supply. That
-  /// word is not part of before_word_count, since it depends on the spill sets,
-  /// which are filled after planning.
+  /// word is not part of planned_envelope_word_count, since it depends on the
+  /// spill sets, which are filled after planning.
   ///
   /// Returns std::nullopt and writes a diagnostic to @p error_out (if non-null)
   /// when the plan is not a probe call, the synthesized envelope size disagrees
-  /// with the planned before_word_count (plan/emit drift), a spill or boundary-wait
+  /// with planned_envelope_word_count (plan/emit drift), a spill or boundary-wait
   /// builder rejects the architecture or register class, build() reports a
   /// branch-range failure, or a delegated vector builder rejects an argument operand.
   [[nodiscard]] static std::optional<TrampolineBytes>

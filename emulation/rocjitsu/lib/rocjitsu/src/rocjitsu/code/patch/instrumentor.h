@@ -19,8 +19,10 @@
 ///         |  make_trampoline_plan() + TrampolineBuilder::build()
 ///         v
 ///   (preflight: per-site plan + built bytes, accumulated locally)
-///         |  splice anchors + append probe bodies, entry stub and trampolines
-///         |  into .text + redirect the entry to the stub + emit()
+///         |  KernelEntry callbacks: retarget only the entry-stub branch
+///         |  checked transaction into the private original-text buffer
+///         |  append probe bodies, entry stub and trampolines to .text
+///         |  replace_text() + finalize ELF/resource updates
 ///         v
 ///   InstrumentedCodeObject      -- patch(): patched ELF + diagnostics
 ///   InstrumentedCodeObjectDebug -- patch_with_debug_summaries(): same result
@@ -42,10 +44,12 @@
 
 #pragma once
 
+#include "rocjitsu/code/analysis/instruction_boundaries.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/probe_callable.h"
 #include "rocjitsu/code/patch/probe_clobber.h"
 #include "rocjitsu/code/patch/spill_manager.h"
+#include "rocjitsu/code/patch/text_edit_error.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/register_set.h"
@@ -172,6 +176,9 @@ struct InstrumentationPatch {
 /// @brief Production attribution from an original anchor to its emitted bytes.
 /// @details Offsets are relative to .text. KernelEntry has no relocated guest
 /// instruction, so guest_size is zero and guest_offset names its return branch.
+/// For callable sites, instrumentation_offset and instrumentation_size cover
+/// the call envelope and exclude the relocated guest instruction and resume
+/// branch.
 struct InstrumentedSite {
   InstrumentationKind kind = InstrumentationKind::BeforeInst;
   uint64_t original_offset = 0;
@@ -197,6 +204,8 @@ struct InstrumentationResources {
 struct InstrumentedCodeObject {
   std::vector<uint8_t> elf_bytes;
   std::vector<std::string> errors;
+  /// Present for anchor-batch failures; errors retains the human-readable diagnostic.
+  std::optional<TextEditError> edit_error;
   std::vector<std::string> warnings;
   std::vector<InstrumentedSite> sites;
   InstrumentationResources resources;
@@ -278,8 +287,11 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
 /// Temporarily fills it ONLY with a plan to instrument with a nop.
 /// Fills before_items = {{ s_nop 0 }}, after_items = {}, emit_original = true.
 /// The caller chooses @p trampoline_offset (typically `patcher.text_size()`).
-[[nodiscard]] TrampolinePlan make_trampoline_plan(const ResolvedInstrumentationSite &site,
-                                                  rj_code_arch_t arch, uint64_t trampoline_offset);
+/// @returns std::nullopt for an unsupported architecture; writes the reason to
+/// @p error_out when supplied.
+[[nodiscard]] std::optional<TrampolinePlan>
+make_trampoline_plan(const ResolvedInstrumentationSite &site, rj_code_arch_t arch,
+                     uint64_t trampoline_offset, std::string *error_out = nullptr);
 
 /// @brief Verify @p plan matches the (temporary) inlined nop body shape:
 ///        exactly one `before_items` entry containing `s_nop 0`, empty
@@ -442,7 +454,7 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
 class Instrumentor {
 public:
   /// @param obj  The code object to instrument. Borrowed; must outlive the
-  ///             Instrumentor.
+  ///             Instrumentor and must remain immutable and unmoved.
   /// @param arch The ISA used to decode @p obj. An arch that has no
   ///             registered Decoder (RV32I/RV64I/INVALID/etc.) surfaces as
   ///             a ValidationResult / InstrumentedCodeObject error at
@@ -474,6 +486,8 @@ public:
   /// Currently all-or-nothing: on any failure, `sites` is empty and `errors`
   /// lists every fatal diagnostic encountered. On success, `sites` contains
   /// one record per queued point in insertion order and `errors` is empty.
+  /// Success establishes per-site eligibility, not that the final patch will succeed.
+  /// Complete encoded-batch reference checks and final layout checks run in patch().
   [[nodiscard]] ValidationResult validate_points();
 
   /// @brief Validate, plan, build, and apply the queued points; emit a
@@ -524,10 +538,9 @@ private:
   // blocks_ so find_instruction_at_offset is O(1). Pointers are stable for
   // the lifetime of blocks_ (BasicBlock owns the Instructions via unique_ptr).
   std::unordered_map<uint64_t, const Instruction *> offset_to_inst_;
-  // .text-relative byte offsets that cannot be trampoline anchors because they
-  // are among the following instructions covered by an s_clause. The s_clause
-  // instruction itself is rejected by is_relocatable_anchor().
-  std::unordered_set<uint64_t> clause_blocked_offsets_;
+  // Owned full-section index built with this source's decoder alongside blocks_.
+  // The local anchor transaction borrows it during patching.
+  InstructionBoundaries instruction_boundaries_;
   bool blocks_built_ = false;
 
   // Returns false if no decoder exists for arch_ (RV32I/RV64I/INVALID/etc.);

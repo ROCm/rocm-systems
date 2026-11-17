@@ -13,20 +13,20 @@ contract tier intentionally pins only small, portable semantic guarantees.
 ## Snapshot
 
 <!-- contract-coverage-snapshot
-contract_tests: 631
-contract_domains: 118
-declared_apis: 505
-covered_apis: 492
+contract_tests: 635
+contract_domains: 119
+declared_apis: 507
+covered_apis: 494
 uncovered_allowlisted: 13
 coverage_pct: 97.4
 -->
 
-- Snapshot date: 2026-08-26
-- Snapshot commit: `920418c484`
-- Contract tests: 631
-- Contract domains: 118
-- Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 505
-- Declared HIP runtime APIs directly exercised by contract tests: 492
+- Snapshot date: 2026-11-05
+- Snapshot commit: `1daccbf1b37`
+- Contract tests: 635
+- Contract domains: 119
+- Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 507
+- Declared HIP runtime APIs directly exercised by contract tests: 494
 - Intentionally uncovered, allowlisted APIs: 13
 - Approximate declared API-name coverage: 97.4%
 - Additional public macro exercised: `hipLaunchKernelGGL`
@@ -61,8 +61,8 @@ allowlisted:
 ### External-semaphore graph nodes
 
 These APIs require a valid external semaphore node. The device-only contract harness
-cannot construct such a node without an external producer, and the add path faults when
-fed an invalid handle on some runtime paths.
+cannot construct such a node without an external producer. Invalid-argument checks for
+all eight live in `catch/unit/graph/hipGraphExternalSemaphoresNodes.cc`.
 
 - `hipGraphAddExternalSemaphoresSignalNode`
 - `hipGraphAddExternalSemaphoresWaitNode`

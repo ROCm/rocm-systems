@@ -35,6 +35,14 @@
 
 #include <cassert>
 
+#ifdef USE_HOST_VERBS
+#include <cstdlib>
+#include <string>
+#include <hip/hip_runtime_api.h>
+#include "net/verbs_host.hpp"
+#include "net/window_info_verbs.hpp"
+#endif
+
 namespace rocshmem {
 
 namespace {
@@ -65,6 +73,13 @@ __host__ HostContextWindowInfo::~HostContextWindowInfo() {
 }
 
 WindowInfo* HostInterface::acquire_window_context() {
+#ifdef USE_HOST_VERBS
+  if (verbs_host_) {
+    WindowInfo* w = verbs_host_->acquire();
+    assert(w != nullptr);
+    return w;
+  }
+#endif
   auto index{find_avail_pool_entry()};
   /* Entry should have been available; consider this as an error. */
   assert(index >= 0);
@@ -77,6 +92,12 @@ WindowInfo* HostInterface::acquire_window_context() {
 }
 
 __host__ void HostInterface::release_window_context(WindowInfo* window_info) {
+#ifdef USE_HOST_VERBS
+  if (auto* w = dynamic_cast<WindowInfoVerbs*>(window_info)) {
+    verbs_host_->release(w);
+    return;
+  }
+#endif
   auto index{find_win_info_in_pool(window_info)};
   /* Entry should have been present; consider this as an error. */
   assert(index >= 0);
@@ -141,6 +162,10 @@ __host__ HostInterface::HostInterface(HdpPolicy* hdp_policy,
   // calling `get_hdp_flush_ptr`.
   create_hdp_window();
 #endif  // defined(USE_HDP_FLUSH) && !defined(USE_SINGLE_NODE)
+
+#ifdef USE_HOST_VERBS
+  maybe_setup_verbs_host(heap);
+#endif
 }
 
 #if defined USE_HDP_FLUSH
@@ -187,7 +212,57 @@ __host__ HostInterface::HostInterface(HdpPolicy* hdp_policy,
 #if defined USE_HDP_FLUSH &&  not defined USE_SINGLE_NODE
   LOG_ERROR_ABORT("Non-mpi use-cases only supported with coherent heap at the moment");
 #endif
+
+#ifdef USE_HOST_VERBS
+  maybe_setup_verbs_host(heap);
+#endif
 }
+
+#ifdef USE_HOST_VERBS
+__host__ void HostInterface::maybe_setup_verbs_host(SymmetricHeap* heap) {
+  if (envvar::host_transport.get_value() != "verbs") {
+    return;  // MPI-window host path remains the default
+  }
+
+  // All-gather over whichever bootstrap this interface was built with.
+  net::AllgatherFn allgather = [this](void* inout, size_t bpp) {
+    if (host_comm_world_ != MPI_COMM_NULL) {
+      mpilib_ftable_.Allgather(MPI_IN_PLACE, static_cast<int>(bpp), MPI_CHAR,
+                               inout, static_cast<int>(bpp), MPI_CHAR,
+                               host_comm_world_);
+    } else if (host_bootstrap_ != nullptr) {
+      host_bootstrap_->allGather(inout, static_cast<int>(bpp));
+    }
+  };
+
+  // dma-buf export for device pointers (symmetric heap is device memory).
+  net::DmabufFn dmabuf = [](void* addr, size_t len, int* fd,
+                            uint64_t* offset) -> bool {
+    hipError_t e = hipMemGetHandleForAddressRange(
+        fd, addr, len, hipMemRangeHandleTypeDmaBufFd, 0);
+    *offset = 0;
+    return e == hipSuccess;
+  };
+
+  void* heap_base = heap->get_local_heap_base();
+  hipPointerAttribute_t attr;
+  bool heap_device = (hipPointerGetAttributes(&attr, heap_base) == hipSuccess &&
+                      attr.type == hipMemoryTypeDevice);
+
+  // Reuse the same NIC selector as the GDA path; empty means auto-detect.
+  const std::string& hca = envvar::requested_nic.get_value();
+
+  verbs_host_ = std::make_unique<net::VerbsHost>();
+  if (!verbs_host_->init(hdp_policy_, heap_base, heap->get_size(), heap_device,
+                         num_pes_, my_pe_,
+                         static_cast<int>(envvar::max_num_host_contexts),
+                         std::move(allgather), std::move(dmabuf),
+                         hca.empty() ? nullptr : hca.c_str())) {
+    LOG_ERROR_ABORT("ROCSHMEM_HOST_TRANSPORT=verbs selected but host-verbs "
+                    "setup failed");
+  }
+}
+#endif  // USE_HOST_VERBS
 
 __host__ HostInterface::~HostInterface() {
 #if defined USE_HDP_FLUSH
@@ -213,6 +288,12 @@ __host__ HostInterface::~HostInterface() {
 __host__ void HostInterface::putmem_nbi(void* dest, const void* source,
                                         size_t nelems, int pe,
                                         WindowInfo* window_info) {
+#ifdef USE_HOST_VERBS
+  if (auto* w = dynamic_cast<WindowInfoVerbs*>(window_info)) {
+    w->put_nbi(dest, source, nelems, pe);
+    return;
+  }
+#endif
   WindowInfoMPI* window_info_mpi = dynamic_cast<WindowInfoMPI*>(window_info);
   if (!window_info_mpi) {
     abort();
@@ -223,6 +304,12 @@ __host__ void HostInterface::putmem_nbi(void* dest, const void* source,
 __host__ void HostInterface::getmem_nbi(void* dest, const void* source,
                                         size_t nelems, int pe,
                                         WindowInfo* window_info) {
+#ifdef USE_HOST_VERBS
+  if (auto* w = dynamic_cast<WindowInfoVerbs*>(window_info)) {
+    w->get_nbi(dest, source, nelems, pe);
+    return;
+  }
+#endif
   WindowInfoMPI* window_info_mpi = dynamic_cast<WindowInfoMPI*>(window_info);
   if (!window_info_mpi) {
     abort();
@@ -233,6 +320,12 @@ __host__ void HostInterface::getmem_nbi(void* dest, const void* source,
 __host__ void HostInterface::putmem(void* dest, const void* source,
                                     size_t nelems, int pe,
                                     WindowInfo* window_info) {
+#ifdef USE_HOST_VERBS
+  if (auto* w = dynamic_cast<WindowInfoVerbs*>(window_info)) {
+    w->put(dest, source, nelems, pe);
+    return;
+  }
+#endif
   WindowInfoMPI* window_info_mpi = dynamic_cast<WindowInfoMPI*>(window_info);
   if (!window_info_mpi) {
     abort();
@@ -245,6 +338,12 @@ __host__ void HostInterface::putmem(void* dest, const void* source,
 __host__ void HostInterface::getmem(void* dest, const void* source,
                                     size_t nelems, int pe,
                                     WindowInfo* window_info) {
+#ifdef USE_HOST_VERBS
+  if (auto* w = dynamic_cast<WindowInfoVerbs*>(window_info)) {
+    w->get(dest, source, nelems, pe);
+    return;
+  }
+#endif
   WindowInfoMPI* window_info_mpi = dynamic_cast<WindowInfoMPI*>(window_info);
   if (!window_info_mpi) {
     abort();
@@ -261,6 +360,12 @@ __host__ void HostInterface::getmem(void* dest, const void* source,
 }
 
 __host__ void HostInterface::fence(WindowInfo* window_info) {
+#ifdef USE_HOST_VERBS
+  if (auto* w = dynamic_cast<WindowInfoVerbs*>(window_info)) {
+    w->fence();
+    return;
+  }
+#endif
   WindowInfoMPI* window_info_mpi = dynamic_cast<WindowInfoMPI*>(window_info);
   if (!window_info_mpi) {
     abort();
@@ -283,6 +388,12 @@ __host__ void HostInterface::fence(WindowInfo* window_info) {
 }
 
 __host__ void HostInterface::quiet(WindowInfo* window_info) {
+#ifdef USE_HOST_VERBS
+  if (auto* w = dynamic_cast<WindowInfoVerbs*>(window_info)) {
+    w->quiet();
+    return;
+  }
+#endif
   WindowInfoMPI* window_info_mpi = dynamic_cast<WindowInfoMPI*>(window_info);
   if (!window_info_mpi) {
     abort();
@@ -423,12 +534,12 @@ __host__ void HostInterface::alltoallmem_on_stream(rocshmem_team_t team,
   // - Query optimal block size using occupancy API
   // - Limit block size to nelems (number of bytes) to avoid over-subscription
   // - Always use 1 block (single workgroup collective)
-  const size_t tdm_lds_bytes = rocshmem_query_tdm_lds_bytes();
+  const size_t lds_stage_bytes = rocshmem_query_lds_stage_bytes();
   int optimal_block_size = 0;
   int grid_size = 0;
   CHECK_HIP(hipOccupancyMaxPotentialBlockSize(&grid_size, &optimal_block_size,
                                               rocshmem_alltoallmem_kernel,
-                                              tdm_lds_bytes, 0));
+                                              lds_stage_bytes, 0));
 
   // Limit block size to nelems (bytes) to avoid over-subscription
   int num_threads_per_block = (optimal_block_size > static_cast<int>(nelems))
@@ -438,7 +549,7 @@ __host__ void HostInterface::alltoallmem_on_stream(rocshmem_team_t team,
   // Launch kernel to do alltoall with given stream
   dim3 gridSize(1);
   dim3 blockSize(num_threads_per_block);
-  rocshmem_alltoallmem_kernel<<<gridSize, blockSize, tdm_lds_bytes, stream>>>(
+  rocshmem_alltoallmem_kernel<<<gridSize, blockSize, lds_stage_bytes, stream>>>(
       team, dest, source, nelems);
 }
 
@@ -451,13 +562,13 @@ __host__ void HostInterface::broadcastmem_on_stream(rocshmem_team_t team,
   // - Query optimal block size using occupancy API
   // - Limit block size to nelems (number of bytes) to avoid over-subscription
   // - Always use 1 block (single workgroup collective)
-  const size_t tdm_lds_bytes = rocshmem_query_tdm_lds_bytes();
+  const size_t lds_stage_bytes = rocshmem_query_lds_stage_bytes();
   int optimal_block_size = 0;
   int grid_size = 0;
   CHECK_HIP(hipOccupancyMaxPotentialBlockSize(&grid_size,
                                               &optimal_block_size,
                                               rocshmem_broadcastmem_kernel,
-                                              tdm_lds_bytes,
+                                              lds_stage_bytes,
                                               0));
 
   // Limit block size to nelems (bytes) to avoid over-subscription
@@ -468,19 +579,19 @@ __host__ void HostInterface::broadcastmem_on_stream(rocshmem_team_t team,
   // Launch kernel to do broadcast with given stream
   dim3 gridSize(1);
   dim3 blockSize(num_threads_per_block);
-  rocshmem_broadcastmem_kernel<<<gridSize, blockSize, tdm_lds_bytes, stream>>>(
+  rocshmem_broadcastmem_kernel<<<gridSize, blockSize, lds_stage_bytes, stream>>>(
       team, dest, source, nelems, pe_root);
 }
 
 __host__ void HostInterface::getmem_on_stream(void *dest, const void *source,
                                               size_t nelems, int pe,
                                               hipStream_t stream) {
-  const size_t tdm_lds_bytes = rocshmem_query_tdm_lds_bytes();
+  const size_t lds_stage_bytes = rocshmem_query_lds_stage_bytes();
   int optimal_block_size = 0;
   int grid_size = 0;
   CHECK_HIP(hipOccupancyMaxPotentialBlockSize(&grid_size, &optimal_block_size,
                                               rocshmem_getmem_kernel,
-                                              tdm_lds_bytes, 0));
+                                              lds_stage_bytes, 0));
 
   // Limit block size to nelems to avoid over-subscription
   int num_threads_per_block = (optimal_block_size > static_cast<int>(nelems))
@@ -490,19 +601,19 @@ __host__ void HostInterface::getmem_on_stream(void *dest, const void *source,
   // Launch kernel to do getmem with given stream
   dim3 gridSize(1);
   dim3 blockSize(num_threads_per_block);
-  rocshmem_getmem_kernel<<<gridSize, blockSize, tdm_lds_bytes, stream>>>(
+  rocshmem_getmem_kernel<<<gridSize, blockSize, lds_stage_bytes, stream>>>(
       dest, source, nelems, pe);
 }
 
 __host__ void HostInterface::putmem_on_stream(void *dest, const void *source,
                                               size_t nelems, int pe,
                                               hipStream_t stream) {
-  const size_t tdm_lds_bytes = rocshmem_query_tdm_lds_bytes();
+  const size_t lds_stage_bytes = rocshmem_query_lds_stage_bytes();
   int optimal_block_size = 0;
   int grid_size = 0;
   CHECK_HIP(hipOccupancyMaxPotentialBlockSize(&grid_size, &optimal_block_size,
                                               rocshmem_putmem_kernel,
-                                              tdm_lds_bytes, 0));
+                                              lds_stage_bytes, 0));
 
   // Limit block size to nelems to avoid over-subscription
   int num_threads_per_block = (optimal_block_size > static_cast<int>(nelems))
@@ -512,19 +623,19 @@ __host__ void HostInterface::putmem_on_stream(void *dest, const void *source,
   // Launch kernel to do putmem with given stream
   dim3 gridSize(1);
   dim3 blockSize(num_threads_per_block);
-  rocshmem_putmem_kernel<<<gridSize, blockSize, tdm_lds_bytes, stream>>>(
+  rocshmem_putmem_kernel<<<gridSize, blockSize, lds_stage_bytes, stream>>>(
       dest, source, nelems, pe);
 }
 
 __host__ void HostInterface::putmem_signal_on_stream(
     void *dest, const void *source, size_t nelems, uint64_t *sig_addr,
     uint64_t signal, int sig_op, int pe, hipStream_t stream) {
-  const size_t tdm_lds_bytes = rocshmem_query_tdm_lds_bytes();
+  const size_t lds_stage_bytes = rocshmem_query_lds_stage_bytes();
   int optimal_block_size = 0;
   int grid_size = 0;
   CHECK_HIP(hipOccupancyMaxPotentialBlockSize(
       &grid_size, &optimal_block_size, rocshmem_putmem_signal_kernel,
-      tdm_lds_bytes, 0));
+      lds_stage_bytes, 0));
 
   // Limit block size to nelems to avoid over-subscription
   int num_threads_per_block = (optimal_block_size > static_cast<int>(nelems))
@@ -534,8 +645,20 @@ __host__ void HostInterface::putmem_signal_on_stream(
   // Launch kernel to do putmem_signal with given stream
   dim3 gridSize(1);
   dim3 blockSize(num_threads_per_block);
-  rocshmem_putmem_signal_kernel<<<gridSize, blockSize, tdm_lds_bytes, stream>>>(
+  rocshmem_putmem_signal_kernel<<<gridSize, blockSize, lds_stage_bytes, stream>>>(
       dest, source, nelems, sig_addr, signal, sig_op, pe);
+}
+
+__host__ void HostInterface::signal_add_on_stream(uint64_t *sig_addr,
+                                                  uint64_t signal, int pe,
+                                                  hipStream_t stream) {
+  rocshmem_signal_add_kernel<<<1, 1, 0, stream>>>(sig_addr, signal, pe);
+}
+
+__host__ void HostInterface::signal_set_on_stream(uint64_t *sig_addr,
+                                                  uint64_t signal, int pe,
+                                                  hipStream_t stream) {
+  rocshmem_signal_set_kernel<<<1, 1, 0, stream>>>(sig_addr, signal, pe);
 }
 
 __host__ void HostInterface::signal_wait_until_on_stream(uint64_t *sig_addr,

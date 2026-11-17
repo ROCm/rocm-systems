@@ -4,6 +4,7 @@
 /// @file packed_wmma_test.cpp
 /// @brief WMMA hardware fixtures and numerical regression checks.
 
+#include "compute_unit_test_util.h"
 #include "fixtures/float_dot/packed_operand_cases.h"
 #include "fixtures/float_dot/packed_wmma_cases.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
@@ -51,13 +52,18 @@ public:
     cfg.sgprs_per_wf = 106;
     cfg.vgprs_per_wf = 256;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("dot_test", cfg, &memory, &cache);
+    rocjitsu::test::initialize_compute_unit(cu, "dot_test", cfg, &memory, &cache);
+    if (!cu)
+      return;
     decoder = Decoder::create(arch);
     wave = cu->dispatch_wf(0, 0, 106, 256, width);
     wave->set_exec(width == 64 ? ~uint64_t{0} : 0xffffffff);
     base = wave->vgpr_alloc().base;
   }
-  ~DotMachine() { wave->halt(); }
+  ~DotMachine() {
+    if (wave)
+      wave->halt();
+  }
   void set(uint32_t reg, uint32_t lane, uint32_t bits) { cu->write_vgpr(base + reg, lane, bits); }
   uint32_t get(uint32_t reg, uint32_t lane) { return cu->read_vgpr(base + reg, lane); }
   void execute(std::array<uint32_t, 2> encoding) {
@@ -71,7 +77,7 @@ public:
   amdgpu::L2Cache cache;
   std::unique_ptr<amdgpu::ComputeUnitCore> cu;
   std::unique_ptr<Decoder> decoder;
-  amdgpu::Wavefront *wave;
+  amdgpu::Wavefront *wave = nullptr;
   uint32_t base;
 };
 
@@ -82,6 +88,7 @@ public:
 TEST(Cdna5Wmma, Bf16CancellationPreservesIncomingC) {
   HostState restore;
   DotMachine machine(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   constexpr std::array<float, 32> products = {3456,   4608, 5376,  3072, -3840, 2816, -27648, 3072,
                                               -1920,  1024, -6656, 1792, 20480, 7680, 0,      1024,
                                               -43008, 3072, -7168, 1280, 14336, 2560, 3456,   1536,
@@ -174,6 +181,7 @@ TEST(PackedWmma, HardwareMatricesBothWavesAndOperandOverlap) {
     const bool gfx12 = arch == ROCJITSU_CODE_ARCH_RDNA4;
     for (uint32_t width : {32u, 64u}) {
       DotMachine machine(arch, width);
+      ASSERT_FALSE(::testing::Test::HasFatalFailure());
       for (bool bf16 : {false, true})
         for (uint32_t high = 0; high < (gfx12 ? 1u : 2u); ++high)
           for (uint32_t dst : {16u, 24u, 0u, 8u})
@@ -248,6 +256,7 @@ TEST(PackedWmma, HardwareModifiersSelectorsAndInlineConstants) {
     const bool gfx12 = arch == ROCJITSU_CODE_ARCH_RDNA4;
     for (uint32_t width : {32u, 64u}) {
       DotMachine machine(arch, width);
+      ASSERT_FALSE(::testing::Test::HasFatalFailure());
       for (const auto &fixture : kPackedOperandCases) {
         for (uint32_t lane = 0; lane < width; ++lane)
           for (uint32_t reg = 0; reg < 8; ++reg) {
@@ -276,6 +285,7 @@ TEST(PackedWmma, HardwareOverflowModeAtIntermediateSteps) {
     const bool gfx12 = arch == ROCJITSU_CODE_ARCH_RDNA4;
     for (uint32_t width : {32u, 64u}) {
       DotMachine machine(arch, width);
+      ASSERT_FALSE(::testing::Test::HasFatalFailure());
       for (bool bf16 : {false, true})
         for (bool saturate : {false, true})
           for (uint32_t pattern = 0; pattern < 4; ++pattern)

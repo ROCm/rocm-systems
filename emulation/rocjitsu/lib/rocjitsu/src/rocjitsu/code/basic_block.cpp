@@ -7,6 +7,7 @@
 #include "rocjitsu/code/analysis/control_flow.h"
 #include "rocjitsu/code/analysis/indirect_branch_discovery.h"
 #include "rocjitsu/code/code_object.h"
+#include "rocjitsu/code/text_padding.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 
@@ -202,7 +203,7 @@ BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t ar
         const size_t pc = static_cast<size_t>(byte_offset / sizeof(uint32_t));
         // gfx1250 zero-filled alignment is not an instruction. The finalizer
         // preserves the existing implicit-termination policy for these gaps.
-        if (arch == ROCJITSU_CODE_ARCH_CDNA5 && inst_data[pc] == 0) {
+        if (is_text_padding_word(arch, inst_data[pc])) {
           byte_offset += sizeof(uint32_t);
           continue;
         }
@@ -325,9 +326,9 @@ BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t ar
                      range.start_offset + range.size - next_offset >= sizeof(uint32_t);
             });
         const bool reaches_gfx1250_zero =
-            decode_gap && arch == ROCJITSU_CODE_ARCH_CDNA5 && next_offset < section_end &&
+            decode_gap && next_offset < section_end &&
             section_end - next_offset >= sizeof(uint32_t) && padding_permitted &&
-            inst_data[next_offset / sizeof(uint32_t)] == 0;
+            is_text_padding_word(arch, inst_data[next_offset / sizeof(uint32_t)]);
         // Running off the end of `.text` is the same boundary as running into padding: there is no
         // next instruction either way. Requiring padding to be present would make the result
         // depend on whether the linker happened to align the section, so an unterminated tail
@@ -841,8 +842,8 @@ BasicBlock::build_cfg(const CodeObject &co, Decoder &decoder, rj_code_arch_t arc
         }
         // Fallthrough into gfx1250 alignment terminates the path. An explicit
         // entry or branch into the same padding is malformed, not an empty graph.
-        if (arch == ROCJITSU_CODE_ARCH_CDNA5 && decode_end - offset >= sizeof(uint32_t) &&
-            words[offset / sizeof(uint32_t)] == 0) {
+        if (decode_end - offset >= sizeof(uint32_t) &&
+            is_text_padding_word(arch, words[offset / sizeof(uint32_t)])) {
           if (required_targets.contains(offset))
             return emit_error.emit() << "CFG target points into padding at byte " << offset;
           break;

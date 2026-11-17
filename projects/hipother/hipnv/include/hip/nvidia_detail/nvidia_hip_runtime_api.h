@@ -2599,6 +2599,33 @@ inline static hipError_t hipMemcpy3DBatchAsync(size_t numOps, hipMemcpy3DBatchOp
   return hipCUDAErrorTohipError(cudaMemcpy3DBatchAsync(numOps, opList, failIdx, flags, stream));
 #endif
 }
+inline static hipError_t hipMemcpyWithAttributesAsync(void* dst, const void* src, size_t size,
+                                                      hipMemcpyAttributes* attr,
+                                                      hipStream_t stream) {
+#if CUDA_VERSION >= 13020
+  return hipCUDAErrorTohipError(cudaMemcpyWithAttributesAsync(dst, src, size, attr, stream));
+#else
+  // Added in CUDA 13.2. On older toolkits this API is exactly a batch of one, and
+  // hipMemcpyBatchAsync above already adapts to the pre-13.0 signature.
+  void* dsts[1] = {dst};
+  void* srcs[1] = {const_cast<void*>(src)};
+  size_t sizes[1] = {size};
+  size_t attrsIdxs[1] = {0};
+  size_t failIdx = 0;
+  return hipMemcpyBatchAsync(dsts, srcs, sizes, 1, attr, attrsIdxs, 1, &failIdx, stream);
+#endif
+}
+inline static hipError_t hipMemcpy3DWithAttributesAsync(hipMemcpy3DBatchOp* op,
+                                                        unsigned long long flags,
+                                                        hipStream_t stream) {
+#if CUDA_VERSION >= 13020
+  return hipCUDAErrorTohipError(cudaMemcpy3DWithAttributesAsync(op, flags, stream));
+#else
+  // Added in CUDA 13.2. On older toolkits this API is exactly a batch of one.
+  size_t failIdx = 0;
+  return hipMemcpy3DBatchAsync(1, op, &failIdx, flags, stream);
+#endif
+}
 inline static hipError_t hipMemcpy3DPeer(hipMemcpy3DPeerParms* p) {
   return hipCUDAErrorTohipError(cudaMemcpy3DPeer(p));
 }
@@ -3145,7 +3172,7 @@ inline static hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t att
     case hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported:
       return hipCUResultTohipError(cuDeviceGetAttribute(
           pi, CU_DEVICE_ATTRIBUTE_GPU_DIRECT_RDMA_WITH_CUDA_VMM_SUPPORTED, device));
-#if CUDA_VERSION >= CUDA_11000
+#if CUDA_VERSION >= CUDA_11030
     case hipDeviceAttributeGPUDirectRDMASupported:
       cdattr = cudaDevAttrGPUDirectRDMASupported;
       break;
@@ -3155,7 +3182,7 @@ inline static hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t att
     case hipDeviceAttributeGPUDirectRDMAWritesOrdering:
       cdattr = cudaDevAttrGPUDirectRDMAWritesOrdering;
       break;
-#endif  // CUDA_VERSION >= CUDA_11000
+#endif  // CUDA_VERSION >= CUDA_11030
 #if CUDA_VERSION >= CUDA_12040
     case hipDeviceAttributeHandleTypeFabricSupported:
       return hipCUResultTohipError(cuDeviceGetAttribute(
@@ -3878,7 +3905,7 @@ inline static hipError_t hipDeviceFlushGPUDirectRDMAWrites(
     return hipErrorInvalidValue;
   }
 
-#if CUDA_VERSION >= CUDA_11000
+#if CUDA_VERSION >= CUDA_11030
   enum cudaFlushGPUDirectRDMAWritesScope cudaScope;
   switch (scope) {
     case hipFlushGPUDirectRDMAWritesToOwner:
@@ -3899,7 +3926,7 @@ inline static hipError_t hipDeviceFlushGPUDirectRDMAWrites(
     return hipErrorInvalidValue;
   }
   return hipErrorNotSupported;
-#endif  // CUDA_VERSION >= CUDA_11000
+#endif  // CUDA_VERSION >= CUDA_11030
 }
 
 inline static hipError_t hipDeviceGetSharedMemConfig(hipSharedMemConfig* config) {

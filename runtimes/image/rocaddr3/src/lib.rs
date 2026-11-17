@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-//! Checked GFX12 surface layouts computed through AMD `AddrLib3`.
+//! Checked GFX9 through GFX12 surface layouts computed through AMD `AddrLib`.
 //!
 //! The library owns no GPU resource. Callers supply hardware address geometry
 //! from the same device that will access a surface, then retain the returned
@@ -31,6 +31,8 @@ pub enum ResourceType {
 pub struct SurfaceRequest {
     /// ASIC family ID reported by the GPU driver.
     pub family: u32,
+    /// External ASIC revision returned by the same native device.
+    pub chip_revision: u32,
     /// Hardware `GB_ADDR_CONFIG` reported by the GPU driver.
     pub gb_addr_config: u32,
     /// Uncompressed format size in bits per pixel.
@@ -63,6 +65,8 @@ pub struct MipLayout {
 /// Complete surface layout for the requested mip chain.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SurfaceLayout {
+    /// Explicit input pitch, which GFX12's per-mip output does not preserve.
+    requested_pitch_in_elements: u32,
     /// Total byte extent of the surface.
     pub size: u64,
     /// Extent of one array slice, including the mip chain.
@@ -73,7 +77,7 @@ pub struct SurfaceLayout {
     pub pitch: u32,
     /// Padded base mip height in format elements.
     pub height: u32,
-    /// GFX12 resource-descriptor swizzle mode.
+    /// Selected family resource-descriptor swizzle mode.
     pub swizzle_mode: u32,
     /// First mip level packed into the mip tail.
     pub first_mip_in_tail: u32,
@@ -95,6 +99,7 @@ pub enum Error {
 #[derive(Clone, Copy, Default)]
 struct RawInput {
     family: u32,
+    chip_revision: u32,
     gb_addr_config: u32,
     bits_per_pixel: u32,
     width: u32,
@@ -102,6 +107,8 @@ struct RawInput {
     slices: u32,
     mip_levels: u32,
     resource_type: u32,
+    linear: u32,
+    pitch_in_elements: u32,
 }
 
 /// C ABI result for one mip level from `AddrLib3`.
@@ -171,6 +178,7 @@ impl From<SurfaceRequest> for RawInput {
     fn from(request: SurfaceRequest) -> Self {
         Self {
             family: request.family,
+            chip_revision: request.chip_revision,
             gb_addr_config: request.gb_addr_config,
             bits_per_pixel: request.bits_per_pixel,
             width: request.width,
@@ -178,20 +186,43 @@ impl From<SurfaceRequest> for RawInput {
             slices: request.slices,
             mip_levels: request.mip_levels,
             resource_type: request.resource_type as u32,
+            linear: 0,
+            pitch_in_elements: 0,
         }
     }
 }
 
-/// Computes a native GFX12 texture layout using the device's address geometry.
+/// Computes a native texture layout using the device's address geometry.
 ///
 /// # Errors
 /// Returns `InvalidRequest` for invalid dimensions or format size and
-/// `NoLayout` when `AddrLib3` cannot select a supported swizzle and extent.
+/// `NoLayout` when `AddrLib` cannot select a supported swizzle and extent.
 pub fn compute(request: SurfaceRequest) -> Result<SurfaceLayout, Error> {
+    compute_selected(request, false, 0)
+}
+
+/// Computes a linear texture using the selected family's native pitch rules.
+///
+/// # Errors
+/// Rejects invalid extents or pitches that the hardware cannot represent.
+pub fn compute_linear(
+    request: SurfaceRequest,
+    pitch_in_elements: u32,
+) -> Result<SurfaceLayout, Error> {
+    compute_selected(request, true, pitch_in_elements)
+}
+
+fn compute_selected(
+    request: SurfaceRequest,
+    linear: bool,
+    pitch: u32,
+) -> Result<SurfaceLayout, Error> {
     if !valid_request(request) {
         return Err(Error::InvalidRequest);
     }
-    let raw = RawInput::from(request);
+    let mut raw = RawInput::from(request);
+    raw.linear = u32::from(linear);
+    raw.pitch_in_elements = pitch;
     let mut result = RawOutput::default();
     // SAFETY: Both pointers refer to initialized, uniquely owned fixed-size
     // records. The bridge writes only the output record before returning.
@@ -211,6 +242,7 @@ pub fn compute(request: SurfaceRequest) -> Result<SurfaceLayout, Error> {
         })
         .collect();
     Ok(SurfaceLayout {
+        requested_pitch_in_elements: pitch,
         size: result.size,
         slice_size: result.slice_size,
         alignment: result.alignment,
@@ -233,22 +265,26 @@ pub struct SurfaceMapper {
     swizzle_mode: u32,
     /// Complete byte extent used to validate returned offsets.
     layout_size: u64,
+    /// Byte stride between array layers or depth planes in linear storage.
+    slice_size: u64,
 }
 
 impl SurfaceMapper {
-    /// Creates a mapper for a layout computed from the same request.
+    /// Creates a GFX12 mapper for a layout computed from the same request.
     ///
     /// # Errors
     /// Returns `InvalidRequest` for mismatched layout metadata and `NoLayout`
     /// when `AddrLib` cannot initialize for this device geometry.
     pub fn new(request: SurfaceRequest, layout: &SurfaceLayout) -> Result<Self, Error> {
-        if !valid_request(request)
+        if request.family != 0x98
+            || !valid_request(request)
             || layout.mips.len() != request.mip_levels as usize
             || layout.swizzle_mode >= 8
         {
             return Err(Error::InvalidRequest);
         }
-        let raw = RawInput::from(request);
+        let mut raw = RawInput::from(request);
+        raw.pitch_in_elements = layout.requested_pitch_in_elements;
         // SAFETY: The bridge reads one initialized request and returns an
         // independently owned handle or null.
         let handle = NonNull::new(unsafe { rocaddr3_mapper_create(&raw const raw) })
@@ -258,6 +294,7 @@ impl SurfaceMapper {
             request: raw,
             swizzle_mode: layout.swizzle_mode,
             layout_size: layout.size,
+            slice_size: layout.slice_size,
         })
     }
 
@@ -279,6 +316,14 @@ impl SurfaceMapper {
             return Err(Error::InvalidRequest);
         }
         let count = u32::try_from(offsets.len()).map_err(|_| Error::InvalidRequest)?;
+        if self.swizzle_mode == 0
+            && self.request.mip_levels == 1
+            && self.request.pitch_in_elements != 0
+        {
+            // The vendored GFX12 coordinate mapper replaces an explicit pitch
+            // with the natural mip pitch. Address this linear layout directly.
+            return self.map_linear_row(x, y, slice, offsets);
+        }
         // SAFETY: This mapper owns the live handle and the bridge writes at
         // most `count` offsets into the uniquely borrowed slice.
         if unsafe {
@@ -304,6 +349,36 @@ impl SurfaceMapper {
                 .is_none_or(|end| end > self.layout_size)
         }) {
             return Err(Error::NoLayout);
+        }
+        Ok(())
+    }
+
+    /// Maps an explicit-pitch single-mip row using its computed storage strides.
+    fn map_linear_row(&self, x: u32, y: u32, slice: u32, offsets: &mut [u64]) -> Result<(), Error> {
+        if x >= self.request.width
+            || offsets.len() > (self.request.width - x) as usize
+            || y >= self.request.height
+            || slice >= self.request.slices
+            || (self.request.resource_type == ResourceType::Texture1D as u32 && y != 0)
+        {
+            return Err(Error::NoLayout);
+        }
+        let element_bytes = u64::from(self.request.bits_per_pixel / 8);
+        let row_offset = (u64::from(y) * u64::from(self.request.pitch_in_elements) + u64::from(x))
+            .checked_mul(element_bytes)
+            .ok_or(Error::NoLayout)?;
+        let start = u64::from(slice)
+            .checked_mul(self.slice_size)
+            .and_then(|offset| offset.checked_add(row_offset))
+            .ok_or(Error::NoLayout)?;
+        if start
+            .checked_add(offsets.len() as u64 * element_bytes)
+            .is_none_or(|end| end > self.layout_size)
+        {
+            return Err(Error::NoLayout);
+        }
+        for (index, offset) in offsets.iter_mut().enumerate() {
+            *offset = start + index as u64 * element_bytes;
         }
         Ok(())
     }

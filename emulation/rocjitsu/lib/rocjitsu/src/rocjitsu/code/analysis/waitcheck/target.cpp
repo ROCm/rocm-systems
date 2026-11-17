@@ -3,11 +3,25 @@
 
 #include "rocjitsu/code/analysis/waitcheck/target.h"
 
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
 
 namespace rocjitsu {
 namespace waitcheck_detail {
+
+std::optional<RegisterRef> WaitcheckTarget::register_operand(const Operand &operand,
+                                                             rj_code_arch_t arch) {
+  if (const auto ref = operand.to_register_ref())
+    return ref;
+  // Mesh exports read M0 through a fieldless input. Scalar instructions such
+  // as S_SENDMSG_RTN_B32 can produce the same register through a selector.
+  if ((amdgpu::has_typed_export_waits(arch) && operand.to_special_reg_class() == RegClass::M0) ||
+      (operand.has_register_selector() &&
+       static_cast<uint32_t>(operand.encoding_value()) == amdgpu::scalar_m0_selector(arch)))
+    return RegisterRef{RegClass::M0, 0, 1};
+  return std::nullopt;
+}
 
 bool WaitcheckTarget::vm_vsrc_event_implied_by_wait(WaitEventKind kind, WaitCounterKind counter) {
   switch (counter) {
@@ -244,7 +258,7 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
     return util::Result::failure();
   auto has_register_result = [&] {
     for (int i = 0; i < inst.num_dst_operands(); ++i) {
-      if (const Operand *operand = inst.dst_operand(i); operand && operand->to_register_ref())
+      if (const Operand *operand = inst.dst_operand(i); operand && register_operand(*operand, arch))
         return true;
     }
     return false;
@@ -295,7 +309,8 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
                       (inst.raw_encoding() != nullptr && inst.size() >= 8 &&
                        (inst.raw_encoding()[0] & (1u << gds_bit)) != 0));
     events.push_back({WaitCounterKind::Ds, gds ? WaitEventKind::Gds : WaitEventKind::Ds});
-    if (gds)
+    // CDNA4 retains the legacy wait encoding, but EXPCNT is unused (ISA 3.1/4.4).
+    if (gds && arch != ROCJITSU_CODE_ARCH_CDNA4)
       events.push_back({WaitCounterKind::Exp, WaitEventKind::Gds, TrackedRegisterSource::VectorUses,
                         false, true, true});
     if (expert)
@@ -484,8 +499,33 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
   }
 
   if (mnemonic == "export" || mnemonic == "exp") {
-    events.push_back({WaitCounterKind::Exp, WaitEventKind::Export, TrackedRegisterSource::Uses,
-                      false, true, true});
+    auto kind = WaitEventKind::Export;
+    auto sources = TrackedRegisterSource::Uses;
+    if (amdgpu::has_typed_export_waits(arch)) {
+      // M0 supplies the row at issue. The export grant reads the enabled VGPRs
+      // and EXEC; the latter is protected by check_exec_defs.
+      sources = TrackedRegisterSource::VectorUses;
+      amdgpu::RegisterModifiers modifiers;
+      inst.amdgpu_register_modifiers(modifiers);
+      if (modifiers.shader_export) {
+        using Export = amdgpu::ShaderExportOperands;
+        const uint8_t target = modifiers.shader_export->target;
+        // RDNA4 groups color with depth but gives the blend pair a separate FIFO (ISA 5.7).
+        if (target <= Export::kLastMrt)
+          kind = WaitEventKind::ExportMrt;
+        else if (target == Export::kDualSource0 || target == Export::kDualSource1)
+          kind = arch == ROCJITSU_CODE_ARCH_RDNA4 ? WaitEventKind::ExportDualSourceBlend
+                                                  : WaitEventKind::ExportMrt;
+        else if (target == Export::kDepth)
+          kind =
+              arch == ROCJITSU_CODE_ARCH_RDNA4 ? WaitEventKind::ExportMrt : WaitEventKind::ExportZ;
+        else if (target >= Export::kFirstPosition && target <= Export::kLastPosition)
+          kind = WaitEventKind::ExportPosition;
+        else if (target == Export::kPrimitive)
+          kind = WaitEventKind::ExportPrimitive;
+      }
+    }
+    events.push_back({WaitCounterKind::Exp, kind, sources, false, true, true});
     return util::Result::success();
   }
 

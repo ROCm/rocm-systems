@@ -113,25 +113,31 @@ protected:
       AmdGpuCodeObject object(image.data(), image.size());
       CodeObjectPatcher patcher(object);
       std::vector<uint8_t> text(patcher.text_bytes().begin(), patcher.text_bytes().end());
-      append_nop_padding(
-          text,
-          padding_for_residue(text.size(), input.kernel.entry_text_offset, kKernelEntryAlignment),
-          arch);
+      ASSERT_TRUE(
+          append_nop_padding(text,
+                             padding_for_residue(text.size(), input.kernel.entry_text_offset,
+                                                 kKernelEntryAlignment),
+                             arch)
+              .succeeded());
       const uint64_t bootstrap_offset = text.size();
       std::vector<uint32_t> words = plan->prologue.words;
+      const util::FailureOr<uint32_t> nop = build_s_nop(0, arch);
+      ASSERT_TRUE(nop.succeeded());
       if (mode == Bootstrap::OmitPayloadLoad) {
-        words[0] = build_s_nop(0, arch);
-        words[1] = build_s_nop(0, arch);
+        words[0] = nop.value();
+        words[1] = nop.value();
       }
       if (mode == Bootstrap::OmitPointerRestore) {
-        words[words.size() - 2] = build_s_nop(0, arch);
-        words[words.size() - 1] = build_s_nop(0, arch);
+        words[words.size() - 2] = nop.value();
+        words[words.size() - 1] = nop.value();
       }
       append_words(text, words);
       const std::optional<int16_t> branch =
           compute_sopp_branch_simm16(text.size(), input.kernel.entry_text_offset);
       ASSERT_TRUE(branch.has_value());
-      const std::array<uint32_t, 1> jump = {build_s_branch(*branch, arch)};
+      const util::FailureOr<uint32_t> branch_word = build_s_branch(*branch, arch);
+      ASSERT_TRUE(branch_word.succeeded());
+      const std::array<uint32_t, 1> jump = {branch_word.value()};
       append_words(text, jump);
       ASSERT_TRUE(patcher.replace_text(text));
       image = std::move(patcher).emit();
@@ -149,10 +155,8 @@ protected:
     }
 
     std::string topology(kTopology);
-    const std::string vm = "\"arch\":\"" + std::string(config::arch_to_string(arch)) + "\"" +
-                           (profile->public_id == ROCJITSU_CODE_TARGET_INVALID
-                                ? ""
-                                : ",\"target\":\"" + std::string(target_mode.target) + "\"");
+    const std::string vm = "\"arch\":\"" + std::string(config::arch_to_string(arch)) +
+                           "\",\"target\":\"" + std::string(target_mode.target) + "\"";
     topology.replace(topology.find("\"arch\":\"rdna3\""), std::string("\"arch\":\"rdna3\"").size(),
                      vm);
     config::LoadedConfig loaded;
@@ -161,8 +165,11 @@ protected:
     amdgpu::GpuMemory *memory = loaded.memory();
     simdojo::SimulationEngine engine(loaded.engine_config);
     engine.topology().set_root(loaded.take_root());
-    loaded.wire_links(engine.topology());
-    engine.create();
+    util::StringDiagnostic admission_diagnostic;
+    ASSERT_TRUE(loaded.wire_links(engine.topology(), admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
+    ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
     ::rocjitsu::test::HaltSnapshotPlugin *snapshots = nullptr;
     const std::shared_ptr<ExecutionPluginGroup> plugins =
         ::rocjitsu::test::make_halt_snapshot_group(&snapshots);
@@ -252,6 +259,7 @@ protected:
 TEST_F(ConSanBootstrapSim, ActualWave32DescriptorRunsBothDefinedDisjointWaves) {
   RunResult original;
   run("disjoint", Bootstrap::None, original);
+  ASSERT_FALSE(HasFatalFailure());
   ASSERT_EQ(original.waves.size(), 2u);
   EXPECT_EQ(original.output, (std::array<uint32_t, 2>{7, 8}));
   for (const ::rocjitsu::test::WavefrontSnapshot &wave : original.waves) {
@@ -265,7 +273,9 @@ TEST_F(ConSanBootstrapSim, ContextDeliveryAndOriginalArgumentViewSurviveInBothWa
   RunResult original;
   RunResult wrapped;
   run("disjoint", Bootstrap::None, original);
+  ASSERT_FALSE(HasFatalFailure());
   run("disjoint", Bootstrap::Enabled, wrapped);
+  ASSERT_FALSE(HasFatalFailure());
   ASSERT_EQ(original.waves.size(), 2u);
   ASSERT_EQ(wrapped.waves.size(), 2u);
   EXPECT_EQ(wrapped.output, original.output);
@@ -290,6 +300,7 @@ TEST_F(ConSanBootstrapSim, ContextDeliveryAndOriginalArgumentViewSurviveInBothWa
 TEST_F(ConSanBootstrapSim, RemovingPointerRestoreChangesTheIndependentNumericOracle) {
   RunResult control;
   run("disjoint", Bootstrap::OmitPointerRestore, control);
+  ASSERT_FALSE(HasFatalFailure());
   ASSERT_EQ(control.waves.size(), 2u);
   EXPECT_EQ(control.output, (std::array<uint32_t, 2>{13, 14}));
   for (const ::rocjitsu::test::WavefrontSnapshot &wave : control.waves)
@@ -299,6 +310,7 @@ TEST_F(ConSanBootstrapSim, RemovingPointerRestoreChangesTheIndependentNumericOra
 TEST_F(ConSanBootstrapSim, RemovingPayloadLoadStopsContextDelivery) {
   RunResult control;
   run("disjoint", Bootstrap::OmitPayloadLoad, control);
+  ASSERT_FALSE(HasFatalFailure());
   ASSERT_EQ(control.waves.size(), 2u);
   EXPECT_EQ(control.output, (std::array<uint32_t, 2>{7, 8}));
   for (const ::rocjitsu::test::WavefrontSnapshot &wave : control.waves)
@@ -311,7 +323,9 @@ TEST_F(ConSanBootstrapSim,
     RunResult original;
     RunResult instrumented;
     run(fixture, Bootstrap::None, original);
+    ASSERT_FALSE(HasFatalFailure());
     run(fixture, Bootstrap::Instrumented, instrumented);
+    ASSERT_FALSE(HasFatalFailure());
     ASSERT_EQ(original.waves.size(), 2u);
     ASSERT_EQ(instrumented.waves.size(), 2u);
     EXPECT_EQ(instrumented.output, (std::array<uint32_t, 2>{7, 8}));
@@ -350,6 +364,7 @@ TEST_F(ConSanBootstrapSim, ProductionRaceReadReadAndCollisionMasksComeFromGuestP
   for (const std::string_view fixture : {"race", "read_read", "collision", "single_lane"}) {
     RunResult result;
     run(fixture, Bootstrap::Instrumented, result);
+    ASSERT_FALSE(HasFatalFailure());
     ASSERT_EQ(result.waves.size(), 2u);
     const uint32_t sites = static_cast<uint32_t>(result.manifest.sites.size());
     const uint32_t stride = kRowHeaderBytes + sites * 4 * kAccessRecordBytes;
@@ -389,6 +404,7 @@ TEST_F(ConSanBootstrapSim,
        {"four_ranges", "exhausted", "empty", "branched", "immediate"}) {
     RunResult result;
     run(fixture, Bootstrap::Instrumented, result);
+    ASSERT_FALSE(HasFatalFailure());
     ASSERT_EQ(result.waves.size(), 2u);
     const uint32_t stride = kRowHeaderBytes + static_cast<uint32_t>(result.manifest.sites.size()) *
                                                   4 * kAccessRecordBytes;

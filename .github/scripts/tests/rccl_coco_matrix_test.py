@@ -41,6 +41,7 @@ class ScheduledRunsTest(unittest.TestCase):
                 "oci-rccl-perf-weekly",
                 "tensorwave-rccl-perf-weekly",
                 "crusoe-rccl-perf-weekly",
+                "ruby64-rccl-tls-weekly",
             },
         )
 
