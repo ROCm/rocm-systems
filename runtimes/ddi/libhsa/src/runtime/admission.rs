@@ -16,12 +16,16 @@ static PROCESS_ADMISSION: std::sync::LazyLock<Arc<InFlightTracker>> =
 thread_local! {
     /// Generation retained by this thread's current call or callback.
     static API_LEASE_GENERATION: Cell<u64> = const { Cell::new(0) };
+    /// Cleanup work uses the worker stop flag instead of public cancellation.
+    static API_CLEANUP_LEASE: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Owns a process lease and makes it available to nested work on this thread.
 pub(crate) struct ApiLeaseScope {
     /// Lease generation restored when this scope exits.
     previous: u64,
+    /// Cleanup classification restored together with the generation.
+    previous_cleanup: bool,
     /// The parent count stays live until the thread-local marker is cleared.
     _token: InFlightToken,
     /// A lease scope must be dropped on the thread whose marker it changed.
@@ -32,8 +36,10 @@ impl ApiLeaseScope {
     /// Publishes an owned lease on its calling thread until this scope drops.
     pub(crate) fn enter(token: InFlightToken) -> Self {
         let previous = API_LEASE_GENERATION.with(|slot| slot.replace(token.generation()));
+        let previous_cleanup = API_CLEANUP_LEASE.with(|slot| slot.replace(token.cleanup));
         Self {
             previous,
+            previous_cleanup,
             _token: token,
             _thread_bound: std::marker::PhantomData,
         }
@@ -42,6 +48,11 @@ impl ApiLeaseScope {
     /// Reports whether this thread holds the current generation's lease.
     pub(crate) fn current() -> bool {
         API_LEASE_GENERATION.with(|slot| slot.get() != 0)
+    }
+
+    /// Whether the current call is part of explicit generation cleanup.
+    pub(crate) fn cleanup() -> bool {
+        API_CLEANUP_LEASE.with(Cell::get)
     }
 
     /// Allows nested work on this thread to inherit its live parent lease.
@@ -53,6 +64,7 @@ impl ApiLeaseScope {
 impl Drop for ApiLeaseScope {
     fn drop(&mut self) {
         API_LEASE_GENERATION.with(|slot| slot.set(self.previous));
+        API_CLEANUP_LEASE.with(|slot| slot.set(self.previous_cleanup));
     }
 }
 
@@ -69,6 +81,8 @@ pub(crate) struct InFlightTracker {
     state: AtomicUsize,
     /// Generation served by the process admission gate, or zero for a local gate.
     generation: AtomicU64,
+    /// Serializes delegated cleanup admission against the end of preparation.
+    cleanup_generation: Mutex<u64>,
     /// Wakes shutdown when the final token is dropped.
     idle: Condvar,
     /// Prevents a notification from racing the waiter's predicate check.
@@ -82,6 +96,7 @@ impl InFlightTracker {
             process: false,
             state: AtomicUsize::new(0),
             generation: AtomicU64::new(0),
+            cleanup_generation: Mutex::new(0),
             idle: Condvar::new(),
             idle_lock: Mutex::new(()),
         }
@@ -93,6 +108,7 @@ impl InFlightTracker {
             process: true,
             state: AtomicUsize::new(ADMISSION_CLOSED),
             generation: AtomicU64::new(0),
+            cleanup_generation: Mutex::new(0),
             idle: Condvar::new(),
             idle_lock: Mutex::new(()),
         }
@@ -138,7 +154,94 @@ impl InFlightTracker {
         Some(InFlightToken {
             tracker: Some(self.clone()),
             generation: self.generation.load(Ordering::Acquire),
+            cleanup: ApiLeaseScope::cleanup(),
         })
+    }
+
+    /// Grants one internal teardown lease only after a matching process
+    /// generation is closed and idle. The lifecycle owner retains its state.
+    #[cfg(any(test, hsa_tool_dispatch))]
+    pub(super) fn enter_cleanup(self: &Arc<Self>, generation: u64) -> Option<InFlightToken> {
+        if !crate::platform::process_is_current()
+            || !self.process
+            || generation == 0
+            || self.generation.load(Ordering::Acquire) != generation
+        {
+            return None;
+        }
+        self.state
+            .compare_exchange(
+                ADMISSION_CLOSED,
+                ADMISSION_CLOSED + 1,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .ok()?;
+        Some(InFlightToken {
+            tracker: Some(self.clone()),
+            generation,
+            cleanup: true,
+        })
+    }
+
+    /// Opens a cleanup window after ordinary admission has drained. The
+    /// anchor remains live until the owner closes delegation on every exit.
+    #[cfg(any(test, hsa_tool_dispatch))]
+    pub(super) fn begin_cleanup(self: &Arc<Self>, generation: u64) -> Option<ToolCleanupScope> {
+        let mut active = self.cleanup_generation.lock().ok()?;
+        if *active != 0 {
+            return None;
+        }
+        let token = self.enter_cleanup(generation)?;
+        *active = generation;
+        Some(ToolCleanupScope {
+            tracker: self.clone(),
+            _lease: ApiLeaseScope::enter(token),
+        })
+    }
+
+    /// Delegates one bounded cleanup operation to a known worker. The mutex
+    /// makes closing the cleanup window atomic with acquiring its last lease.
+    pub(super) fn enter_delegated_cleanup(
+        self: &Arc<Self>,
+        generation: u64,
+    ) -> Option<InFlightToken> {
+        let active = self.cleanup_generation.lock().ok()?;
+        if generation == 0 || *active != generation || !crate::platform::process_is_current() {
+            return None;
+        }
+        self.state
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |state| {
+                (ADMISSION_CLOSED + 1..usize::MAX)
+                    .contains(&state)
+                    .then_some(state + 1)
+            })
+            .ok()?;
+        Some(InFlightToken {
+            tracker: Some(self.clone()),
+            generation,
+            cleanup: true,
+        })
+    }
+
+    /// Retains an already admitted internal operation through public closure.
+    /// Unlike ordinary work, its bounded native stop/drain sequence is not
+    /// canceled by closing public admission.
+    #[cfg(all(hsa_tool_dispatch, not(test)))]
+    pub(super) fn enter_tool_work(self: &Arc<Self>, generation: u64) -> Option<InFlightToken> {
+        if generation == 0 || self.generation.load(Ordering::Acquire) != generation {
+            return None;
+        }
+        let mut token = self.enter()?;
+        token.cleanup = true;
+        Some(token)
+    }
+
+    /// Internal callback workers can drain during preparation, but cannot
+    /// keep admitting work after the owner closes the delegated window.
+    fn enter_service(self: &Arc<Self>) -> Option<InFlightToken> {
+        self.enter()
+            .or_else(|| self.enter_delegated_cleanup(self.generation.load(Ordering::Acquire)))
     }
 
     /// Excludes new native work before shutdown waits for existing tokens.
@@ -163,6 +266,26 @@ impl InFlightTracker {
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
         }
     }
+
+    /// Bounds preparation when an external tool holds an admitted native
+    /// operation. A timeout requires retaining the generation, not detachment.
+    pub(crate) fn wait_idle_for(&self, timeout: Duration) -> bool {
+        if !crate::platform::process_is_current() {
+            return false;
+        }
+        debug_assert!(self.state.load(Ordering::Acquire) & ADMISSION_CLOSED != 0);
+        let idle = self
+            .idle_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (_idle, _) = self
+            .idle
+            .wait_timeout_while(idle, timeout, |()| {
+                self.state.load(Ordering::Acquire) & !ADMISSION_CLOSED != 0
+            })
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.is_closed_and_idle()
+    }
 }
 
 /// One registered operation that must finish before runtime teardown.
@@ -171,6 +294,38 @@ pub(crate) struct InFlightToken {
     tracker: Option<Arc<InFlightTracker>>,
     /// Generation retained by this token, or zero for an object-local drain.
     generation: u64,
+    /// Selects cleanup cancellation for nested HSA calls.
+    cleanup: bool,
+}
+
+/// Retains preparation and closes worker delegation before releasing its
+/// anchor. Failure paths retain state without waiting for a stuck worker.
+#[cfg(any(test, hsa_tool_dispatch))]
+pub(crate) struct ToolCleanupScope {
+    /// Process gate whose delegated admission is closed on drop.
+    tracker: Arc<InFlightTracker>,
+    /// Same-thread cleanup anchor released after delegated admission closes.
+    _lease: ApiLeaseScope,
+}
+
+#[cfg(any(test, hsa_tool_dispatch))]
+impl Drop for ToolCleanupScope {
+    fn drop(&mut self) {
+        *self
+            .tracker
+            .cleanup_generation
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = 0;
+    }
+}
+
+/// Acquires a generation lease for an internal callback iteration.
+pub(crate) fn enter_runtime_service() -> Option<ApiLeaseScope> {
+    #[cfg(test)]
+    let token = enter_public_raw_handle();
+    #[cfg(not(test))]
+    let token = PROCESS_ADMISSION.enter_service();
+    token.map(ApiLeaseScope::enter)
 }
 
 impl InFlightToken {
@@ -300,5 +455,76 @@ mod raw_handle_tests {
         gate.wait_idle();
         gate.open(8);
         assert_eq!(gate.enter().unwrap().generation(), 8);
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::panic)]
+mod cleanup_tests {
+    use super::*;
+
+    #[test]
+    fn cleanup_lease_does_not_reopen_external_admission() {
+        let tracker = Arc::new(InFlightTracker::new_process());
+        tracker.open(17);
+        assert!(tracker.enter_cleanup(17).is_none());
+        tracker.close();
+        assert!(tracker.enter_cleanup(18).is_none());
+        let Some(token) = tracker.enter_cleanup(17) else {
+            panic!("closed idle generation denied cleanup")
+        };
+        assert!(tracker.enter().is_none());
+        assert!(tracker.enter_cleanup(17).is_none());
+        {
+            let _scope = ApiLeaseScope::enter(token);
+            assert!(tracker.enter().is_some());
+            let other = tracker.clone();
+            assert!(
+                std::thread::spawn(move || other.enter().is_none())
+                    .join()
+                    .unwrap()
+            );
+        }
+        assert!(tracker.is_closed_and_idle());
+        assert!(tracker.enter().is_none());
+    }
+
+    #[test]
+    fn cleanup_delegation_is_generation_scoped_and_drained_after_closure() {
+        let tracker = Arc::new(InFlightTracker::new_process());
+        tracker.open(41);
+        tracker.close();
+        let preparation = tracker.begin_cleanup(41).unwrap();
+        assert!(ApiLeaseScope::cleanup());
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let worker_tracker = tracker.clone();
+        let worker = std::thread::spawn(move || {
+            assert!(worker_tracker.enter().is_none());
+            assert!(worker_tracker.enter_delegated_cleanup(40).is_none());
+            let _lease = ApiLeaseScope::enter(worker_tracker.enter_service().unwrap());
+            assert!(ApiLeaseScope::cleanup());
+            started_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+            // A retained parent still admits nested native cleanup after
+            // delegation closes; the caller must drain it before retirement.
+            assert!(worker_tracker.enter().is_some());
+        });
+        started_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        drop(preparation);
+        assert!(!ApiLeaseScope::cleanup());
+        assert!(!tracker.is_closed_and_idle());
+        assert!(!tracker.wait_idle_for(Duration::from_millis(1)));
+        assert!(tracker.enter_service().is_none());
+        assert!(tracker.enter_delegated_cleanup(41).is_none());
+        release_tx.send(()).unwrap();
+        worker.join().unwrap();
+        tracker.wait_idle();
+        assert!(tracker.wait_idle_for(Duration::ZERO));
+        tracker.open(42);
+        tracker.close();
+        let _next = tracker.begin_cleanup(42).unwrap();
+        assert!(tracker.enter_delegated_cleanup(41).is_none());
+        assert!(tracker.enter_delegated_cleanup(42).is_some());
     }
 }

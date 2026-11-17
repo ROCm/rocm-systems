@@ -126,29 +126,35 @@ TEST(s_xnor_saveexec_b64, Arithmetic) {
 // Check EXEC transformations, saved masks, and SCC results.
 TEST(s_and_not0_saveexec_b64, Arithmetic) {
   check_exec<uint64_t>(rj_arith_s_and_not0_saveexec_b64, 4, true);
+  check_exec<uint64_t>(rj_arith_s_andn1_saveexec_b64, 4, true);
 }
 
 // Check EXEC transformations, saved masks, and SCC results.
 TEST(s_or_not0_saveexec_b64, Arithmetic) {
   check_exec<uint64_t>(rj_arith_s_or_not0_saveexec_b64, 13, true);
+  check_exec<uint64_t>(rj_arith_s_orn1_saveexec_b64, 13, true);
 }
 
 // Check EXEC transformations, saved masks, and SCC results.
 TEST(s_and_not1_saveexec_b64, Arithmetic) {
   check_exec<uint64_t>(rj_arith_s_and_not1_saveexec_b64, 2, true);
+  check_exec<uint64_t>(rj_arith_s_andn2_saveexec_b64, 2, true);
 }
 
 // Check EXEC transformations, saved masks, and SCC results.
 TEST(s_or_not1_saveexec_b64, Arithmetic) {
   check_exec<uint64_t>(rj_arith_s_or_not1_saveexec_b64, 11, true);
+  check_exec<uint64_t>(rj_arith_s_orn2_saveexec_b64, 11, true);
 }
 
 // Check EXEC transformations, saved masks, and SCC results.
 TEST(s_and_not0_wrexec_b64, Arithmetic) {
   check_exec<uint64_t>(rj_arith_s_and_not0_wrexec_b64, 4, false);
+  check_exec<uint64_t>(rj_arith_s_andn1_wrexec_b64, 4, false);
 }
 
 // Check EXEC transformations, saved masks, and SCC results.
 TEST(s_and_not1_wrexec_b64, Arithmetic) {
   check_exec<uint64_t>(rj_arith_s_and_not1_wrexec_b64, 2, false);
+  check_exec<uint64_t>(rj_arith_s_andn2_wrexec_b64, 2, false);
 }

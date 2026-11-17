@@ -3415,3 +3415,10 @@ hipError_t hipKernelSetCacheConfig(hipKernel_t kernel, hipFuncCache_t config, hi
   return hip::GetHipDispatchTable()->hipKernelSetCacheConfig_fn(kernel, config, dev);
   CATCH;
 }
+
+HIP_PUBLIC_API hipError_t hipArrayGetSparseProperties(hipArraySparseProperties* sparseProperties,
+                                                      hipArray_t array) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipArrayGetSparseProperties_fn(sparseProperties, array);
+  CATCH;
+}

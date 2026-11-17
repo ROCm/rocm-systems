@@ -106,7 +106,7 @@ pub(super) fn cpu_agents(
             Some(Cpu {
                 node: Some(node.id),
                 native_node,
-                name: host.name.clone().into_boxed_str(),
+                name: host.name.as_deref().unwrap_or("CPU").into(),
                 compute_units: cpu.core_count,
                 maximum_clock_mhz: cpu.maximum_clock_mhz.unwrap_or(0),
                 memory_bytes,
@@ -118,7 +118,7 @@ pub(super) fn cpu_agents(
         cpus.push(Cpu {
             node: None,
             native_node: 0,
-            name: host.name.clone().into_boxed_str(),
+            name: host.name.as_deref().unwrap_or("CPU").into(),
             compute_units: host.compute_units,
             maximum_clock_mhz: 0,
             memory_bytes: host_memory_bytes,
@@ -183,6 +183,12 @@ pub(super) fn cpu_cache_sizes(caches: &[Cache], agent: HsaAgent) -> [u32; 4] {
 
 /// Activated GPU and its HSA-specific compatibility state.
 pub(crate) struct Gpu {
+    /// Target-resolved scratch allocation and reclamation policy.
+    pub(crate) scratch: Arc<crate::queue::ScratchPolicy>,
+    /// Process CU restriction after visible-agent reordering.
+    pub(crate) global_cu_mask: Option<Vec<u32>>,
+    /// Confirmed CP capabilities; failed probes remain retryable.
+    pub(crate) cp_caps: Arc<Mutex<Option<u32>>>,
     /// Passive endpoint used for identity and topology queries.
     pub(crate) endpoint: Endpoint,
     /// Process-wide recoverable page-fault mode observed at activation.
@@ -224,10 +230,16 @@ impl Gpu {
             .unwrap_or("AMD Radeon Graphics")
     }
 
-    /// Selects the populated DRM family when it is available.
+    /// Returns the provider-resolved family from the activated device.
+    #[allow(
+        clippy::expect_used,
+        reason = "Gpu is constructed only after confirming an activated GPU endpoint"
+    )]
     pub(crate) fn asic_family_id(&self) -> u32 {
-        let info = self.info();
-        info.drm_asic_family_id.unwrap_or(info.asic_family_id)
+        self.device
+            .gpu()
+            .expect("activated HSA GPU endpoint")
+            .asic_family_id()
     }
 
     /// Returns the optional native timestamp frequency as an HSA value.
