@@ -309,17 +309,22 @@ public:
   explicit NamedInstruction(std::string_view name) : Instruction(name, nullptr) {}
 };
 
-TEST(WaitcheckTarget, AsyncLoadUpdatesBothMemoryAndAsyncCounters) {
-  NamedInstruction inst("global_load_async_to_lds_b32");
-  auto events_result = Target::classify_events(inst, ROCJITSU_CODE_ARCH_CDNA5);
-  ASSERT_TRUE(events_result.succeeded());
-  const auto events = std::move(events_result).value();
-  ASSERT_EQ(events.size(), 3u);
-  EXPECT_EQ(events[0].counter, WaitCounterKind::Load);
-  EXPECT_EQ(events[1].counter, WaitCounterKind::Async);
-  EXPECT_TRUE(events[1].check_memory_order);
-  EXPECT_FALSE(events[1].check_program_end);
-  EXPECT_EQ(events[2].counter, WaitCounterKind::X);
+TEST(WaitcheckTarget, AsyncTransfersCompleteOnAsyncAndMayRetainReplaySources) {
+  for (auto name : {"global_load_async_to_lds_b32", "cluster_load_async_to_lds_b32",
+                    "global_store_async_from_lds_b32"}) {
+    SCOPED_TRACE(name);
+    NamedInstruction inst(name);
+    const auto result = Target::classify_events(inst, ROCJITSU_CODE_ARCH_CDNA5);
+    ASSERT_TRUE(result.succeeded());
+    const auto &events = result.value();
+    ASSERT_EQ(events.size(), 2u);
+    EXPECT_EQ(events.back().counter, WaitCounterKind::X);
+    EXPECT_TRUE(events.back().check_defs);
+    EXPECT_TRUE(events.back().check_exec_defs);
+    EXPECT_EQ(events.front().counter, WaitCounterKind::Async);
+    EXPECT_TRUE(events.front().check_memory_order);
+    EXPECT_FALSE(events.front().check_program_end);
+  }
 }
 
 TEST(WaitcheckTarget, TensorOperationsHaveOnlyTensorEvents) {
@@ -645,7 +650,12 @@ TEST(WaitcheckTarget, PrefetchesDoNotContributeCompletionEntries) {
       NamedInstruction inst(name);
       auto events = Target::classify_events(inst, arch);
       ASSERT_TRUE(events.succeeded());
-      EXPECT_TRUE(events.value().empty()) << name;
+      if (arch == ROCJITSU_CODE_ARCH_CDNA5 && std::string_view(name).starts_with("s_")) {
+        ASSERT_EQ(events.value().size(), 1u) << name;
+        EXPECT_EQ(events.value()[0].counter, WaitCounterKind::X);
+      } else {
+        EXPECT_TRUE(events.value().empty()) << name;
+      }
     }
 }
 

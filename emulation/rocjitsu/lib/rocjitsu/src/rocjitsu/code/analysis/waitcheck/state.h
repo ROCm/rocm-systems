@@ -306,6 +306,7 @@ struct PendingState {
   bool expert_valu_may_skip = false;
   bool expert_exec_nonzero = false;
   std::bitset<amdgpu::kVccSelectorLast + 1> expert_saved_nonzero_exec;
+  bool exec_empty = false; ///< Every incoming path has a proven zero EXEC mask.
   bool exec_nonzero = false; ///< All incoming paths have at least one active lane.
   bool vgpr_msb_setreg_hazard = false;
   bool previous_vm_vsrc_zero_wait = false;

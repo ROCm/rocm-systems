@@ -152,6 +152,154 @@ TEST_F(MemoryWaitScoreboardTest, NamedAndOrdinaryCdna3SgprAliasesShareWaitDepend
   EXPECT_EQ(hazards.size(), 2u);
 }
 
+class NamedRuntimeWaitInstruction : public Instruction {
+public:
+  explicit NamedRuntimeWaitInstruction(std::string_view name, bool valu = false)
+      : Instruction(name, nullptr) {
+    if (valu)
+      flags_ |= VALU;
+  }
+};
+
+TEST(RuntimeWaitTargetTest, OrdinaryEventsMatchTheDevelopClassifier) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5})
+    for (std::string_view name :
+         {"global_load_dword", "ds_read_b32", "s_load_dword", "s_sendmsg_rtn_b32"}) {
+      SCOPED_TRACE(testing::Message() << "arch=" << arch << " mnemonic=" << name);
+      NamedRuntimeWaitInstruction inst(name);
+      const auto base = waitcheck_detail::WaitcheckTarget::classify_events(inst, arch);
+      const auto runtime = waitcheck_detail::RuntimeWaitTarget::classify_events(inst, arch);
+      ASSERT_TRUE(base.succeeded());
+      ASSERT_TRUE(runtime.succeeded());
+      ASSERT_EQ(base.value().size(), runtime.value().size());
+      for (size_t i = 0; i < base.value().size(); ++i) {
+        EXPECT_EQ(base.value()[i].counter, runtime.value()[i].counter);
+        EXPECT_EQ(base.value()[i].kind, runtime.value()[i].kind);
+        EXPECT_EQ(base.value()[i].registers, runtime.value()[i].registers);
+        EXPECT_EQ(base.value()[i].check_uses, runtime.value()[i].check_uses);
+        EXPECT_EQ(base.value()[i].check_defs, runtime.value()[i].check_defs);
+      }
+    }
+}
+
+TEST(RuntimeWaitTargetTest, CacheAsyncAndExpertPoliciesKeepTheirRuntimePositions) {
+  for (std::string_view name : {"buffer_inv", "buffer_wbl2"}) {
+    NamedRuntimeWaitInstruction inst(name);
+    const auto events =
+        waitcheck_detail::RuntimeWaitTarget::classify_events(inst, ROCJITSU_CODE_ARCH_CDNA4);
+    ASSERT_TRUE(events.succeeded());
+    ASSERT_EQ(events.value().size(), 1u);
+    EXPECT_EQ(events.value()[0].counter, WaitCounterKind::Load);
+    EXPECT_EQ(events.value()[0].kind, name == "buffer_inv"
+                                          ? waitcheck_detail::WaitEventKind::GlobalInv
+                                          : waitcheck_detail::WaitEventKind::GlobalWb);
+    EXPECT_EQ(waitcheck_detail::RuntimeWaitTarget::completion_order_kind(
+                  events.value()[0].counter, events.value()[0].kind, ROCJITSU_CODE_ARCH_CDNA4),
+              0u);
+  }
+  NamedRuntimeWaitInstruction async("global_load_async_to_lds_b32");
+  const auto events =
+      waitcheck_detail::RuntimeWaitTarget::classify_events(async, ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_TRUE(events.succeeded());
+  ASSERT_EQ(events.value().size(), 2u);
+  EXPECT_EQ(events.value()[0].counter, WaitCounterKind::Async);
+  EXPECT_EQ(events.value()[1].counter, WaitCounterKind::X);
+  EXPECT_EQ(waitcheck_detail::RuntimeWaitTarget::completion_order_kind(
+                events.value()[0].counter, events.value()[0].kind, ROCJITSU_CODE_ARCH_CDNA5),
+            1u << static_cast<unsigned>(waitcheck_detail::WaitEventKind::AsyncLdsLoad));
+
+  NamedRuntimeWaitInstruction matrix("v_wmma_scale_f16_16x16x32_f16");
+  const waitcheck_detail::ClassifiedEvent valu{WaitCounterKind::VaVdst,
+                                               waitcheck_detail::kValuMatrix};
+  EXPECT_EQ(
+      waitcheck_detail::RuntimeWaitTarget::issue_units(matrix, valu, ROCJITSU_CODE_ARCH_CDNA5), 2u);
+  EXPECT_EQ(waitcheck_detail::RuntimeWaitTarget::wmma_valu_wait_states(
+                matrix, ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_TARGET_GFX1250),
+            4u);
+}
+
+TEST(RuntimeWaitTargetTest, CheckerAndRuntimeSpecialWaitPoliciesAgree) {
+  using waitcheck_detail::RuntimeWaitTarget;
+  using waitcheck_detail::WaitcheckTarget;
+  static_assert(waitcheck_detail::kGfx10ScalarSource ==
+                waitcheck_detail::WaitEventKind::Gfx10ScalarSource);
+  static_assert(waitcheck_detail::kValuCore == waitcheck_detail::WaitEventKind::ValuCore);
+  static_assert(waitcheck_detail::kValuDp == waitcheck_detail::WaitEventKind::ValuDp);
+  static_assert(waitcheck_detail::kValuMatrix == waitcheck_detail::WaitEventKind::ValuMatrix);
+  static_assert(waitcheck_detail::kValuTrans == waitcheck_detail::WaitEventKind::ValuTrans);
+  for (const auto [arch, name] : {
+           std::pair{ROCJITSU_CODE_ARCH_CDNA2, "buffer_wbl2"},
+           std::pair{ROCJITSU_CODE_ARCH_CDNA3, "buffer_inv"},
+           std::pair{ROCJITSU_CODE_ARCH_CDNA4, "buffer_wbl2"},
+           std::pair{ROCJITSU_CODE_ARCH_CDNA5, "global_load_async_to_lds_b32"},
+           std::pair{ROCJITSU_CODE_ARCH_CDNA5, "global_store_async_from_lds_b32"},
+           std::pair{ROCJITSU_CODE_ARCH_CDNA5, "s_prefetch_inst"}}) {
+    SCOPED_TRACE(testing::Message() << "arch=" << arch << " mnemonic=" << name);
+    NamedRuntimeWaitInstruction inst(name);
+    const auto checker = WaitcheckTarget::classify_events(inst, arch);
+    const auto runtime = RuntimeWaitTarget::classify_events(inst, arch);
+    ASSERT_TRUE(checker.succeeded());
+    ASSERT_TRUE(runtime.succeeded());
+    ASSERT_EQ(checker.value().size(), runtime.value().size());
+    for (size_t i = 0; i < checker.value().size(); ++i) {
+      const auto &lhs = checker.value()[i];
+      const auto &rhs = runtime.value()[i];
+      EXPECT_EQ(lhs.counter, rhs.counter);
+      EXPECT_EQ(lhs.kind, rhs.kind);
+      EXPECT_EQ(lhs.registers, rhs.registers);
+      EXPECT_EQ(lhs.check_uses, rhs.check_uses);
+      EXPECT_EQ(lhs.check_defs, rhs.check_defs);
+      EXPECT_EQ(lhs.check_exec_defs, rhs.check_exec_defs);
+      EXPECT_EQ(lhs.check_memory_order, rhs.check_memory_order);
+      EXPECT_EQ(lhs.check_program_end, rhs.check_program_end);
+      EXPECT_EQ(WaitcheckTarget::completion_order_kind(lhs.counter, lhs.kind, arch),
+                RuntimeWaitTarget::completion_order_kind(rhs.counter, rhs.kind, arch));
+      EXPECT_EQ(WaitcheckTarget::issue_units(inst, lhs, arch),
+                RuntimeWaitTarget::issue_units(inst, rhs, arch));
+    }
+  }
+  NamedRuntimeWaitInstruction matrix("v_wmma_scale_f16_16x16x32_f16", true);
+  const auto checker_kind = WaitcheckTarget::expert_valu_kind(matrix, ROCJITSU_CODE_ARCH_CDNA5);
+  const auto runtime_kind = RuntimeWaitTarget::expert_valu_kind(matrix, ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_TRUE(checker_kind);
+  EXPECT_EQ(checker_kind, runtime_kind);
+  EXPECT_EQ(WaitcheckTarget::wmma_valu_wait_states(
+                matrix, ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_TARGET_GFX1250),
+            RuntimeWaitTarget::wmma_valu_wait_states(
+                matrix, ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_TARGET_GFX1250));
+  const waitcheck_detail::ClassifiedEvent event{WaitCounterKind::VaVdst, *checker_kind};
+  EXPECT_EQ(WaitcheckTarget::issue_units(matrix, event, ROCJITSU_CODE_ARCH_CDNA5),
+            RuntimeWaitTarget::issue_units(matrix, event, ROCJITSU_CODE_ARCH_CDNA5));
+}
+
+TEST_F(MemoryWaitScoreboardTest, MatrixOperandDiagnosticIncludesCompletedCorePositions) {
+  using waitcheck_detail::ClassifiedEvent;
+  using waitcheck_detail::WaitEventKind;
+  constexpr auto arch = ROCJITSU_CODE_ARCH_CDNA5;
+  constexpr auto counter = WaitCounterKind::VaVdst;
+  const ClassifiedEvent matrix{counter, waitcheck_detail::kValuMatrix};
+  const ClassifiedEvent core{counter, waitcheck_detail::kValuCore};
+  const RegisterRef operand{RegClass::VGPR, 8, 1};
+  for (const uint32_t count : {0u, 2u, 3u}) {
+    SCOPED_TRACE(count);
+    state.clear();
+    hazards.clear();
+    const auto preceding_core = state.issue(core, arch, 4);
+    const auto producer = state.issue(matrix, arch);
+    MemoryWaitScoreboard::Event event{producer, 0x100, 1, operand, counter, 0xf};
+    event.valu_source = true;
+    event.wmma_wait_states = 4;
+    event.preceding_core_valu = preceding_core;
+    state.add(event);
+    state.issue(core, arch, 7);
+    state.wait(counter, count);
+    state.access(operand, 1, 0xf, true);
+    ASSERT_EQ(hazards.size(), unsigned(count > 2));
+    if (!hazards.empty())
+      EXPECT_EQ(hazards.front().required_wait, 2u);
+  }
+}
+
 TEST_F(MemoryWaitScoreboardTest, CancellingTheLatestIssuePreservesOlderCounterPositions) {
   load(5);
   const auto sequence = state.issue(WaitCounterKind::Load, false, 0, 2);

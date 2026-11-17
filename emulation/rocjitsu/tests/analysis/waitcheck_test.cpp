@@ -16,6 +16,9 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
 #include "rocjitsu/isa/decoder.h"
@@ -13860,6 +13863,101 @@ TEST(WaitcheckTest, ReportsMissingExpcntBeforeExecOverwriteAfterExport) {
   EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Exp);
   EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Def);
   EXPECT_EQ(report.diagnostics[0].reg.cls, RegClass::EXEC);
+}
+
+TEST(WaitcheckTest, EmptyExecSkipsNonDoneNonPositionShaderExports) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
+                    ROCJITSU_CODE_ARCH_RDNA4}) {
+    for (const uint8_t target : {0u, 12u}) {
+      for (const uint8_t done : {0u, 1u}) {
+        SCOPED_TRACE(testing::Message() << static_cast<unsigned>(arch) << " target="
+                                        << static_cast<unsigned>(target) << " done="
+                                        << static_cast<unsigned>(done));
+        std::vector<uint32_t> program{0xbefe0180u}; // s_mov_b64 exec, 0
+        if (arch == ROCJITSU_CODE_ARCH_RDNA4)
+          append_inst(program, rdna4::build_vexport({.en = 1, .tgt = target,
+                                                    .done = done, .vsrc0 = 0}));
+        else if (arch == ROCJITSU_CODE_ARCH_RDNA3_5)
+          append_inst(program, rdna3_5::build_exp({.en = 1, .tgt = target,
+                                                   .done = done, .vsrc0 = 0}));
+        else
+          append_inst(program, rdna3::build_exp({.en = 1, .tgt = target,
+                                                 .done = done, .vsrc0 = 0}));
+        program.push_back(0xbefe0181u); // s_mov_b64 exec, 1
+
+        const auto report = analyze_waitcnts(program, arch);
+        ASSERT_TRUE(report.supported) << report.analysis_error;
+        EXPECT_EQ(report.diagnostics.size(), done || target == 12 ? 1u : 0u)
+            << diagnostic_summary(report);
+        if (done || target == 12) {
+          EXPECT_EQ(report.diagnostics.front().counter, WaitCounterKind::Exp);
+          EXPECT_EQ(report.diagnostics.front().reg.cls, RegClass::EXEC);
+        }
+      }
+    }
+  }
+}
+
+TEST(WaitcheckTest, ExportExecSkipRequiresProofOnEveryIncomingPath) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
+                    ROCJITSU_CODE_ARCH_RDNA4}) {
+    SCOPED_TRACE(static_cast<unsigned>(arch));
+    const auto export_words = arch == ROCJITSU_CODE_ARCH_RDNA4
+                                  ? rdna4::build_vexport({.en = 1, .tgt = 0, .vsrc0 = 0})
+                                  : rdna3::build_exp({.en = 1, .tgt = 0, .vsrc0 = 0});
+    std::vector<uint32_t> unknown_write{0xbefe0180u, 0xbefe0100u};
+    append_inst(unknown_write, export_words);
+    unknown_write.push_back(0xbefe0181u);
+    const auto unknown = analyze_waitcnts(unknown_write, arch);
+    ASSERT_TRUE(unknown.supported) << unknown.analysis_error;
+    ASSERT_EQ(unknown.diagnostics.size(), 1u) << diagnostic_summary(unknown);
+    EXPECT_EQ(unknown.diagnostics.front().counter, WaitCounterKind::Exp);
+
+    std::vector<uint32_t> bypass;
+    append_inst(bypass, s_cmp_eq_u32(0, 129)); // dynamic compare s0 == 1
+    append_inst(bypass, sopp(34, 1));          // branch skips EXEC=0
+    bypass.push_back(0xbefe0180u);
+    append_inst(bypass, export_words);
+    bypass.push_back(0xbefe0181u);
+    const uint32_t machine = arch == ROCJITSU_CODE_ARCH_RDNA3
+                                 ? EF_AMDGPU_MACH_AMDGCN_GFX1100
+                             : arch == ROCJITSU_CODE_ARCH_RDNA3_5
+                                 ? EF_AMDGPU_MACH_AMDGCN_GFX1150
+                                 : EF_AMDGPU_MACH_AMDGCN_GFX1201;
+    const auto image = waitcheck_test::make_gfx_code_object(bypass, machine, /*wave32=*/true);
+    const AmdGpuCodeObject object(image.data(), image.size());
+    const auto merged = analyze_waitcnts_for_kernel(object, arch, 0);
+    ASSERT_TRUE(merged.supported) << merged.analysis_error;
+    ASSERT_EQ(merged.diagnostics.size(), 1u) << diagnostic_summary(merged);
+    EXPECT_EQ(merged.diagnostics.front().counter, WaitCounterKind::Exp);
+  }
+}
+
+TEST(WaitcheckTest, Wave64LowExecZeroDoesNotSkipNonDoneExport) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
+                    ROCJITSU_CODE_ARCH_RDNA4}) {
+    SCOPED_TRACE(static_cast<unsigned>(arch));
+    std::vector<uint32_t> program{0xbefe01c1u, 0xbefe0080u}; // EXEC=-1; EXEC_LO=0
+    if (arch == ROCJITSU_CODE_ARCH_RDNA4)
+      append_inst(program, rdna4::build_vexport({.en = 1, .tgt = 0, .vsrc0 = 0}));
+    else if (arch == ROCJITSU_CODE_ARCH_RDNA3_5)
+      append_inst(program, rdna3_5::build_exp({.en = 1, .tgt = 0, .vsrc0 = 0}));
+    else
+      append_inst(program, rdna3::build_exp({.en = 1, .tgt = 0, .vsrc0 = 0}));
+    program.push_back(0xbefe0181u); // overwrite both EXEC halves
+    const uint32_t machine = arch == ROCJITSU_CODE_ARCH_RDNA3
+                                 ? EF_AMDGPU_MACH_AMDGCN_GFX1100
+                             : arch == ROCJITSU_CODE_ARCH_RDNA3_5
+                                 ? EF_AMDGPU_MACH_AMDGCN_GFX1150
+                                 : EF_AMDGPU_MACH_AMDGCN_GFX1201;
+    const auto image = waitcheck_test::make_gfx_code_object(program, machine, /*wave32=*/false);
+    const AmdGpuCodeObject object(image.data(), image.size());
+    const auto report = analyze_waitcnts_for_kernel(object, arch, 0);
+    ASSERT_TRUE(report.supported) << report.analysis_error;
+    ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+    EXPECT_EQ(report.diagnostics.front().counter, WaitCounterKind::Exp);
+    EXPECT_EQ(report.diagnostics.front().reg.cls, RegClass::EXEC);
+  }
 }
 
 TEST(WaitcheckTest, AcceptsExpcntZeroBeforeExecOverwriteAfterExport) {

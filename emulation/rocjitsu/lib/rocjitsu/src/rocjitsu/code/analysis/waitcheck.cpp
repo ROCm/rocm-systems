@@ -1054,6 +1054,8 @@ struct Analyzer : private WaitcheckStateOps {
       if (lhs.expert_exec_nonzero != rhs.expert_exec_nonzero ||
           lhs.expert_saved_nonzero_exec != rhs.expert_saved_nonzero_exec)
         append("expert-saved-mask");
+      if (lhs.exec_empty != rhs.exec_empty)
+        append("exec-empty");
       if (lhs.exec_nonzero != rhs.exec_nonzero)
         append("exec-nonzero");
       if (lhs.vgpr_msb != rhs.vgpr_msb)
@@ -1093,6 +1095,7 @@ struct Analyzer : private WaitcheckStateOps {
         merged.expert_exec_nonzero = true;
         merged.expert_exec_empty = false;
         merged.expert_valu_may_skip = false;
+        merged.exec_empty = false;
       }
       if (conservative_sgpr_entries[i] != 0) {
         // Linked code objects do not retain whether LLVM's boundary-cull
@@ -10191,6 +10194,18 @@ private:
       finish_instruction();
       return;
     }
+    if ((arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA4) &&
+        state.exec_empty && (inst.mnemonic() == "export" || inst.mnemonic() == "exp")) {
+      amdgpu::RegisterModifiers modifiers;
+      inst.amdgpu_register_modifiers(modifiers);
+      if (modifiers.shader_export && !modifiers.shader_export->done &&
+          modifiers.shader_export->target != amdgpu::ShaderExportOperands::kFirstPosition) {
+        // GFX11/12 skip this request entirely when every EXEC lane is inactive.
+        finish_instruction();
+        return;
+      }
+    }
     if (apply_sgpr_hazard_ds_nop_cull(state.sgpr_hazards, inst.mnemonic()))
       clear_va_vdst_hazards(state.va_vdst_hazards);
     apply_xcnt_drain(state, inst, arch, immediately_after_mode_setreg);
@@ -10307,6 +10322,8 @@ private:
     update_scalar_offsets(state, inst, du, arch);
     const bool writes_exec = writes_exec_mask(inst) || du.defs.contains({RegClass::EXEC, 0, 1}) ||
                              (inst.flags() & INDIRECT_CALL);
+    if (writes_exec)
+      state.exec_empty = constant_exec_nonzero(inst, wavefront_size_) == false;
     if (amdgpu::supports_expert_scheduling(arch) &&
         (writes_exec || state.expert_saved_nonzero_exec.any() ||
          (state.expert_exec_nonzero && inst.mnemonic() == "s_mov_b32")))

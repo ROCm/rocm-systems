@@ -673,6 +673,7 @@ void WaitcheckStateOps::merge_into(PendingState &dst, const PendingState &src) {
   dst.expert_valu_may_skip |= src.expert_valu_may_skip;
   dst.expert_exec_nonzero &= src.expert_exec_nonzero;
   dst.expert_saved_nonzero_exec &= src.expert_saved_nonzero_exec;
+  dst.exec_empty &= src.exec_empty;
   dst.exec_nonzero &= src.exec_nonzero;
   dst.previous_vm_vsrc_zero_wait &= src.previous_vm_vsrc_zero_wait;
   if (dst.prefetch_enabled != src.prefetch_enabled)
