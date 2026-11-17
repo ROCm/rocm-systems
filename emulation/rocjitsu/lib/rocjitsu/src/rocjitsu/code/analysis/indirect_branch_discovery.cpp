@@ -1212,6 +1212,7 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
       .source_call_sreg = pair_lo,
       .source_builder_sreg = value.source_sreg,
       .source_is_call = ctx.facts[inst_index].swappc_sdst.has_value(),
+      .source_recovery_contiguous = value.contiguous,
       .source_return_sreg = ctx.facts[inst_index].swappc_sdst.value_or(0),
   };
 }
@@ -1268,7 +1269,7 @@ bool append_unique(std::vector<IndirectCallFixup> &out, IndirectCallFixup fixup)
            existing.source_recovery_end_offset == fixup.source_recovery_end_offset;
   });
   if (duplicate != out.end()) {
-    // Both flags below are monotonic and must survive the merge, because only
+    // These requirements are monotonic and must survive the merge, because only
     // the first record of a duplicate group is kept. Incompleteness: if any
     // iteration observes this fixup as incomplete, the merged record must stay
     // incomplete, or a later fixed-point pass that rediscovers an
@@ -1278,6 +1279,7 @@ bool append_unique(std::vector<IndirectCallFixup> &out, IndirectCallFixup fixup)
     // it cannot be outvoted by one that does not. Any future requirement that
     // changes the bytes relocation emits belongs here too.
     duplicate->source_incomplete = duplicate->source_incomplete || fixup.source_incomplete;
+    duplicate->source_recovery_contiguous &= fixup.source_recovery_contiguous;
     duplicate->source_requires_xcnt_drain =
         duplicate->source_requires_xcnt_drain || fixup.source_requires_xcnt_drain;
     return false;
@@ -1298,6 +1300,7 @@ bool append_unique_indexed(std::vector<IndirectCallFixup> &out, FixupIndex &inde
   if (!inserted) {
     IndirectCallFixup &duplicate = out[it->second];
     duplicate.source_incomplete = duplicate.source_incomplete || fixup.source_incomplete;
+    duplicate.source_recovery_contiguous &= fixup.source_recovery_contiguous;
     duplicate.source_requires_xcnt_drain =
         duplicate.source_requires_xcnt_drain || fixup.source_requires_xcnt_drain;
     return false;
@@ -1732,6 +1735,19 @@ bool try_apply_pair_update(AnalysisContext &ctx, size_t index, BlockState &state
     PcValue updated = *value;
     const Instruction &inst = *ctx.insts[index];
     const uint32_t word = ctx.facts[index].word;
+    // RDNA4 GETPC zero-extends the 48-bit PC. LLVM sign-extends its high
+    // half before adding the function displacement. This preserves the PC
+    // used by SETPC/SWAPPC. Keep the normalization outside the relocatable
+    // arithmetic range so it still executes if the displacement is rewritten.
+    if (ctx.arch == ROCJITSU_CODE_ARCH_RDNA4 &&
+        updated.source_recovery_end_offset == updated.source_getpc_offset + sizeof(uint32_t) &&
+        sop1_same_sreg(inst, word, "s_sext_i32_i16", pair_lo + 1)) {
+      updated.source_recovery_begin_offset = inst.src_loc() + inst.size();
+      updated.source_recovery_end_offset = updated.source_recovery_begin_offset;
+      invalidate_written_sgprs(ctx, index, state, pair_lo);
+      state.set_builder(pair_lo, updated);
+      return true;
+    }
     // A builder step must start exactly where the recorded range ends. If the
     // pair survived an instruction between the previous step and this one, that
     // instruction sits inside [begin, end) and would be NOP-erased by

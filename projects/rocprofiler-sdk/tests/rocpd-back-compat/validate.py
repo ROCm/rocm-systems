@@ -41,6 +41,8 @@ Key invariants verified:
   * CSV  — counters_collection averages a counter over kernel-replay passes for the
            latest schema instead of summing them, and pmc_events reports each pass.
   * Perfetto — counter values for the latest schema are those pass means.
+    * CSV  — PC-sampling files absent before 3.1.0; present with their documented
+                     columns from 3.1.0.
   * Perfetto — .pftrace exists and is non-empty for every schema.
   * OTF2 — "HIP Graph Launch" locations absent for pre-latest schemas;
             present for the latest schema (requires the ``otf2`` package).
@@ -360,7 +362,10 @@ def test_counters_collection_schema_unchanged_from_3_0_5(output_root, latest_sch
 
 
 def test_pmc_events_replay_pass_absent_before_3_0_6(output_root, old_schema):
-    """Archived schemas must retain their original pmc_events columns."""
+    """Schemas before 3.0.6 must retain their original pmc_events columns."""
+    if tuple(map(int, old_schema.split("."))) >= (3, 0, 6):
+        return test_pmc_events_report_replay_pass(output_root, old_schema)
+
     db_path = (
         output_root / old_schema / "db" / f"schema_{old_schema.replace('.', '_')}.db"
     )
@@ -409,6 +414,65 @@ def test_pmc_events_report_replay_pass(output_root, latest_schema):
         (1, "SQ_INSTS_SALU", 2, 6.0),
         (2, "SQ_WAVES", 0, 8.0),
     ], f"unexpected pmc_events passes for schema {latest_schema}: {rows}"
+
+
+# ---------------------------------------------------------------------------
+# CSV tests — schema 3.1.0 (PC sampling output)
+# ---------------------------------------------------------------------------
+
+_PC_SAMPLING_CSVS = (
+    "out_pc_sampling_host_trap_trace.csv",
+    "out_pc_sampling_stochastic_trace.csv",
+)
+_PC_SAMPLING_COLUMNS = [
+    "guid",
+    "sample_timestamp",
+    "exec_mask",
+    "dispatch_id",
+    "instruction",
+    "instruction_comment",
+    "correlation_id",
+]
+_PC_SAMPLING_STOCHASTIC_COLUMNS = _PC_SAMPLING_COLUMNS + [
+    "wave_issued_instruction",
+    "instruction_type",
+    "stall_reason",
+    "wave_count",
+]
+
+
+def test_csv_for_schema_3_1_0_changes_absent(output_root, old_schema):
+    """PC-sampling CSVs must not be produced for pre-3.1.0 schemas."""
+    if tuple(map(int, old_schema.split("."))) >= (3, 1, 0):
+        return test_csv_for_schema_3_1_0_changes_present(output_root, old_schema)
+
+    for name in _PC_SAMPLING_CSVS:
+        assert not (
+            output_root / old_schema / "csv" / name
+        ).exists(), f"{name} should not be created for schema {old_schema}"
+
+
+def test_csv_for_schema_3_1_0_changes_present(output_root, latest_schema):
+    """Schema 3.1.0 PC samples are exported with their documented columns."""
+    csv_dir = output_root / latest_schema / "csv"
+    host_trap, stochastic = (csv_dir / name for name in _PC_SAMPLING_CSVS)
+    for path in (host_trap, stochastic):
+        assert path.exists(), f"{path.name} not found for schema {latest_schema}"
+
+    assert _csv_columns(host_trap) == _PC_SAMPLING_COLUMNS
+    assert _csv_columns(stochastic) == _PC_SAMPLING_STOCHASTIC_COLUMNS
+    # Stored disassembly is served, and the full 64-bit mask is exported exactly.
+    assert _csv_column_values(host_trap, "instruction") == ["s_nop 0"]
+    assert _csv_column_values(host_trap, "exec_mask") == ["18446744073709551615"]
+    assert _csv_column_values(stochastic, "instruction_type") == [
+        "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_VALU"
+    ]
+    assert _csv_column_values(stochastic, "wave_count") == ["4"]
+    # The fixture's code object cannot be read, so the PC is reported undecoded.
+    assert _csv_column_values(stochastic, "instruction") == [""]
+    assert _csv_column_values(stochastic, "instruction_comment")[0].startswith(
+        "Decode unavailable"
+    )
 
 
 # ---------------------------------------------------------------------------
