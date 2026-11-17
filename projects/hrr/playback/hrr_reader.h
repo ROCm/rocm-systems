@@ -24,7 +24,7 @@
 //   events.bin:
 //     [0..7]   hrr_file_header  { HRR_MAGIC, HRR_VERSION, reserved }
 //     [8..]    hrr_event_header (32 bytes) + payload bytes, repeated per event
-//   blobs/<2hex>/  — content-addressed raw buffers (FNV-1a-128 hash)
+//   blobs/<2hex>/  — content-addressed raw buffers (128-bit content hash)
 //   code_objects/  — .hsaco ELFs keyed by hash
 // Format constants (HRR_MAGIC, HRR_VERSION, hrr_file_header, hrr_event_header)
 // are defined in hrr_api_args.h (included above).

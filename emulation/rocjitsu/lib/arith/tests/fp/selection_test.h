@@ -31,27 +31,32 @@ template <int Width, int Operands, typename Call> void check_selection_omod(Call
   for (uint64_t cpu : supported_cpu_levels()) {
     for (uint64_t rounding :
          {uint64_t(0), RJ_ARITH_FP_ROUND_UP, RJ_ARITH_FP_ROUND_DOWN, RJ_ARITH_FP_ROUND_ZERO}) {
-      for (bool negative : {false, true}) {
-        for (uint32_t mode : {RJ_ARITH_ALU_OMOD_2, RJ_ARITH_ALU_OMOD_4}) {
-          Registers<8, 32> r;
-          uint64_t bits = (negative ? sign_bit : 0) | (infinity - 1);
-          for (int reg : {0, 2, 4}) {
-            write_fp(r.v + reg, 0, Width, bits);
+      for (uint64_t saturation : {uint64_t(0), RJ_ARITH_FP16_OVFL}) {
+        for (bool negative : {false, true}) {
+          for (uint32_t mode : {RJ_ARITH_ALU_OMOD_2, RJ_ARITH_ALU_OMOD_4}) {
+            Registers<8, 32> r;
+            uint64_t bits = (negative ? sign_bit : 0) | (infinity - 1);
+            for (int reg : {0, 2, 4}) {
+              write_fp(r.v + reg, 0, Width, bits);
+            }
+            uint64_t flags = cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS |
+                             RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS | rounding | saturation;
+            int result;
+            if constexpr (Operands == 3) {
+              result = call(flags, 1, mode, r.v + 6, r.v, r.v + 2, r.v + 4, nullptr);
+            } else {
+              result = call(flags, 1, mode, r.v + 6, r.v, r.v + 2, nullptr);
+            }
+            ASSERT_EQ(result, RJ_ARITH_SUCCESS);
+            bool to_infinity = rounding == 0 || rounding == (negative ? RJ_ARITH_FP_ROUND_DOWN
+                                                                      : RJ_ARITH_FP_ROUND_UP);
+            if constexpr (Width == 16) {
+              to_infinity &= !saturation;
+            }
+            EXPECT_EQ(read_fp(r.v + 6, 0, Width),
+                      (negative ? sign_bit : 0) | (infinity - !to_infinity))
+                << cpu << '/' << rounding << '/' << negative << '/' << mode;
           }
-          uint64_t flags = cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS |
-                           RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS | rounding;
-          int result;
-          if constexpr (Operands == 3) {
-            result = call(flags, 1, mode, r.v + 6, r.v, r.v + 2, r.v + 4, nullptr);
-          } else {
-            result = call(flags, 1, mode, r.v + 6, r.v, r.v + 2, nullptr);
-          }
-          ASSERT_EQ(result, RJ_ARITH_SUCCESS);
-          bool to_infinity = rounding == 0 ||
-                             rounding == (negative ? RJ_ARITH_FP_ROUND_DOWN : RJ_ARITH_FP_ROUND_UP);
-          EXPECT_EQ(read_fp(r.v + 6, 0, Width),
-                    (negative ? sign_bit : 0) | (infinity - !to_infinity))
-              << cpu << '/' << rounding << '/' << negative << '/' << mode;
         }
       }
     }

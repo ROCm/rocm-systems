@@ -17,14 +17,13 @@ This module is ONLY used in profile mode. Analyze mode can use pandas freely.
 """
 
 import csv
-from collections.abc import Iterator, Sequence
 from contextlib import ExitStack
-from typing import Callable, Optional
+from typing import Callable, Iterator, List, Optional, Sequence, Tuple
 
 from utils import csv_compression
 
 
-def read_csv_as_dicts(csv_file: str) -> tuple[list[dict], list[str]]:
+def read_csv_as_dicts(csv_file: str) -> Tuple[List[dict], List[str]]:
     """Read a whole CSV file into a list of dicts, plus its fieldnames."""
     try:
         with csv_compression.open_gzip_csv_read(csv_file) as f:
@@ -53,7 +52,7 @@ def iter_csv_dicts(csv_file: str) -> Iterator[dict]:
 
 
 def write_csv_from_dicts(
-    csv_file: str, rows: list[dict], fieldnames: Optional[list[str]] = None
+    csv_file: str, rows: List[dict], fieldnames: Optional[List[str]] = None
 ) -> None:
     """Write a list of dicts to a CSV file."""
     if not rows and not fieldnames:

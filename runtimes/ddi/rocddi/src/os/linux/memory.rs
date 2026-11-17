@@ -33,6 +33,48 @@ unsafe extern "C" {
     fn madvise(address: *mut c_void, length: usize, advice: c_int) -> c_int;
 }
 
+/// Gives a retained anonymous reservation ordinary demand-paged host backing.
+///
+/// # Safety
+/// The caller owns this whole anonymous range and excludes other mappings or
+/// concurrent protection changes while this operation runs.
+pub(crate) unsafe fn commit_svm_range(address: usize, size: usize) -> io::Result<()> {
+    // SAFETY: The caller retains the anonymous VMA and grants host access to it.
+    if unsafe {
+        libc::mprotect(
+            address as *mut c_void,
+            size,
+            libc::PROT_READ | libc::PROT_WRITE,
+        )
+    } != 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+/// Discards pages in an anonymous mapping retained by a higher-level owner.
+///
+/// # Safety
+/// The range must remain mapped, anonymous and page aligned. The caller must
+/// exclude host and device accesses whose contents need to survive discard.
+pub(crate) unsafe fn discard_svm_range(
+    address: usize,
+    size: usize,
+    immediate: bool,
+) -> io::Result<()> {
+    let advice = if immediate {
+        libc::MADV_DONTNEED
+    } else {
+        libc::MADV_FREE
+    };
+    // SAFETY: The caller owns the complete mapping and permits discarding it.
+    if unsafe { madvise(address as *mut c_void, size, advice) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
 /// Returns the Linux page size after checking it is a nonzero power of two.
 pub(crate) fn page_size() -> io::Result<usize> {
     // SAFETY: getpagesize has no pointer arguments or mutable process state.
@@ -127,6 +169,18 @@ pub(crate) struct HostAllocation {
     source: Option<File>,
 }
 
+fn valid_host_layout(size: usize, alignment: usize, page: usize) -> bool {
+    crate::memory::constraints::AllocationLimits {
+        alignment: page as u64,
+        granularity: page as u64,
+        maximum_size: isize::MAX as u64,
+    }
+    .supports(crate::memory::constraints::AllocationDesc {
+        size: size as u64,
+        alignment: alignment as u64,
+    })
+}
+
 impl HostAllocation {
     /// Validates size and alignment, reserves shared ownership metadata, then
     /// acquires page-aligned host memory. The retained `process` guards later
@@ -145,12 +199,7 @@ impl HostAllocation {
             )
         })?;
         let page = page_size().map_err(|e| native_error("host page size", e))?;
-        if size == 0
-            || size % page != 0
-            || size > isize::MAX as usize
-            || !alignment.is_power_of_two()
-            || alignment < page
-        {
+        if !valid_host_layout(size, alignment, page) {
             return Err(error(
                 ErrorKind::InvalidArgument,
                 "invalid host allocation extent or alignment",
@@ -186,12 +235,7 @@ impl HostAllocation {
             )
         })?;
         let page = page_size().map_err(|source| native_error("host page size", source))?;
-        if size == 0
-            || size % page != 0
-            || size > isize::MAX as usize
-            || !alignment.is_power_of_two()
-            || alignment < page
-        {
+        if !valid_host_layout(size, alignment, page) {
             return Err(error(
                 ErrorKind::InvalidArgument,
                 "invalid host source geometry",
@@ -233,6 +277,10 @@ impl HostAllocation {
             process,
             source: Some(file),
         }))
+    }
+
+    pub(crate) fn is_remappable(&self) -> bool {
+        self.source.is_some()
     }
 
     pub(crate) fn source(&self) -> Option<&File> {
@@ -296,6 +344,29 @@ impl Drop for HostAllocation {
     }
 }
 
+pub(crate) fn host_memory_capabilities()
+-> Result<crate::memory::host::HostMemoryCapabilities, Error> {
+    use crate::memory::constraints::AllocationLimits;
+    use crate::memory::host::{HostMemoryCapabilities, HostReservationCapabilities};
+    let page = host_page_size()?;
+    Ok(HostMemoryCapabilities {
+        allocation: AllocationLimits {
+            alignment: page,
+            granularity: page,
+            maximum_size: isize::MAX as u64,
+        },
+        remappable_backing: true,
+        reservation: Some(HostReservationCapabilities {
+            reservation_granularity: page,
+            mapping_granularity: page,
+            maximum_size: (isize::MAX as u64) & !(page - 1),
+            maximum_alignment: 1_u64 << (usize::BITS - 2),
+            minimum_address: page,
+            maximum_address: usize::MAX as u64,
+        }),
+    })
+}
+
 #[cfg(test)]
 #[allow(unsafe_code, clippy::unwrap_used)]
 mod tests {
@@ -304,6 +375,36 @@ mod tests {
     use crate::memory::host::{HostAllocation as PublicHostAllocation, host_page_size};
     use crate::os::linux::errno;
     use crate::session::{DriverContextLifetime, Session};
+
+    #[test]
+    fn svm_commit_preserves_contents_and_discard_only_replaces_selected_pages() {
+        let page = page_size().unwrap();
+        let mut reservation =
+            HostReservation::create(page * 3, page, page, std::process::id()).unwrap();
+        let (address, length) = reservation.extent();
+        // SAFETY: This test exclusively owns the anonymous three-page mapping
+        // and uses only raw pointers while changing its backing.
+        unsafe {
+            commit_svm_range(address, length).unwrap();
+            std::ptr::write_bytes(address as *mut u8, 0x5a, length);
+            commit_svm_range(address + page, page).unwrap();
+            assert_eq!((address as *const u8).add(page).read_volatile(), 0x5a);
+
+            discard_svm_range(address + page, page, true).unwrap();
+            let bytes = std::slice::from_raw_parts(address as *const u8, length);
+            assert!(bytes[..page].iter().all(|&byte| byte == 0x5a));
+            assert!(bytes[page..page * 2].iter().all(|&byte| byte == 0));
+            assert!(bytes[page * 2..].iter().all(|&byte| byte == 0x5a));
+
+            // Lazy discard does not promise whether earlier contents survive;
+            // a later write must cancel lazy reclamation for the written page.
+            discard_svm_range(address + page, page, false).unwrap();
+            (address as *mut u8).add(page).write_volatile(0xa5);
+            assert_eq!((address as *const u8).add(page).read_volatile(), 0xa5);
+        }
+        reservation.free().unwrap();
+    }
+
     #[test]
     fn cpu_storage_remains_available_after_session_shutdown() {
         let mut session = Session::new(DriverContextLifetime::Session).unwrap();
@@ -339,7 +440,8 @@ mod tests {
                 .unwrap()
                 .free()
                 .unwrap_err()
-                .native_error_code(),
+                .native_status()
+                .and_then(crate::NativeStatus::errno_code),
             Some(errno::EIO)
         );
         assert_eq!(allocation.extent(), extent);
