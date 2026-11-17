@@ -18,9 +18,9 @@ for prefix in ('V_CMP', 'V_CMPX'):
             INTEGER_COMPARISONS[f'{prefix}_{predicate}_{dtype}'] = (bits, True)
 
 
-def mask_result_writer(mnemonic, dst, result_writer, arch):
-    if arch in ('cdna3', 'cdna4') and mnemonic.startswith('V_CMPX_'):
-        # CDNA3/4 CMPX writes the scalar mask destination as well as EXEC.
+def mask_result_writer(mnemonic, dst, result_writer, cmpx_writes_vcc):
+    if cmpx_writes_vcc and mnemonic.startswith('V_CMPX_'):
+        # GFX9 CMPX writes the scalar mask destination as well as EXEC.
         # Keep the decoder's EXEC writer, which also applies modifier masks.
         mask_write = (
             f'amdgpu::write_wave_mask_scalar({dst[0]}, wf, result);'
@@ -64,7 +64,9 @@ def gen_integer_compare(ctx: ExecuteContext) -> str | None:
             '                             ((opsel & 2) ? RJ_ARITH_ALU_HIGH_B : 0u);',
         ]
         modifiers = 'modifiers'
-    result_writer = mask_result_writer(mnemonic, dst, result_writer, arch)
+    result_writer = mask_result_writer(
+        mnemonic, dst, result_writer, ctx.cmpx_writes_vcc
+    )
     api = 'rj_arith_' + mnemonic.lower()
     lines += [
         f'  amdgpu::arith::execute_compare<{bits}>(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
@@ -137,7 +139,7 @@ def gen_float_compare(ctx: ExecuteContext) -> str | None:
             'amdgpu::vop3_opsel(inst_), inst_.abs, inst_.neg' if is_vop3 else '0, 0, 0'
         )
         signaling = 'inst_.clamp' if is_vop3 else 'false'
-        writer = mask_result_writer(mnemonic, dst, result_writer, arch)
+        writer = mask_result_writer(mnemonic, dst, result_writer, ctx.cmpx_writes_vcc)
         return (
             f'  amdgpu::execute_compare_with_exceptions<amdgpu::fp_format::F{bits}, '
             f'amdgpu::comparison::{relation}>(wf, {src[0]}, {src[1]}, {selectors}, '
@@ -163,7 +165,9 @@ def gen_float_compare(ctx: ExecuteContext) -> str | None:
                 '               ((opsel & 2) ? RJ_ARITH_ALU_HIGH_B : 0u);',
             ]
         modifiers = 'modifiers'
-    result_writer = mask_result_writer(mnemonic, dst, result_writer, arch)
+    result_writer = mask_result_writer(
+        mnemonic, dst, result_writer, ctx.cmpx_writes_vcc
+    )
     # CDNA retains the inherited numerical model without claiming gfx12 FP status.
     api = (
         'rj_arith_'
@@ -185,7 +189,19 @@ def gen_class_compare(ctx: ExecuteContext) -> str | None:
     dst, src = ctx.dst_ops, ctx.src_ops
     is_vop3, result_writer = ctx.is_vop3, ctx.result_writer
     if (
-        arch not in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5')
+        arch
+        not in (
+            'cdna1',
+            'cdna2',
+            'cdna3',
+            'cdna4',
+            'cdna5',
+            'rdna1',
+            'rdna2',
+            'rdna3',
+            'rdna3_5',
+            'rdna4',
+        )
         or mnemonic not in CLASS_COMPARISONS
     ):
         return None
@@ -200,7 +216,7 @@ def gen_class_compare(ctx: ExecuteContext) -> str | None:
             '                       ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |',
             '                       (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);',
         ]
-        if bits == 16:
+        if bits == 16 and ctx.profile.uses_true16_vop3_opsel:
             lines += [
                 '  const uint32_t opsel = amdgpu::vop3_opsel(inst_);',
                 '  modifiers |= ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) |',
@@ -208,7 +224,9 @@ def gen_class_compare(ctx: ExecuteContext) -> str | None:
             ]
         modifiers = 'modifiers'
     api = 'rj_arith_' + mnemonic.lower() + ('_gfx12' if arch == 'rdna4' else '')
-    result_writer = mask_result_writer(mnemonic, dst, result_writer, arch)
+    result_writer = mask_result_writer(
+        mnemonic, dst, result_writer, ctx.cmpx_writes_vcc
+    )
     lines += [
         f'  amdgpu::arith::execute_compare<{bits}, {min(bits, 32)}>(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
         f'      wf.cu().arithmetic_flags(), {modifiers},',

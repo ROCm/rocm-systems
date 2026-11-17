@@ -8,6 +8,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/vopc.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_compare_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/signaling_compare.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
@@ -2881,7 +2882,9 @@ void VCmpClassF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  amdgpu::execute_v_cmp_class_f16_vopc(*this, wf);
+  amdgpu::arith::execute_compare<16, 16>(
+      wf, rj_arith_v_cmp_class_f16_w32, rj_arith_v_cmp_class_f16_w64, wf.cu().arithmetic_flags(), 0,
+      src0, vsrc1, false, [&](uint64_t result) { wf.set_vcc_mask(result); });
 }
 
 RJ_NOINLINE void VCmpClassF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -2903,7 +2906,11 @@ RJ_NOINLINE void VCmpClassF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) 
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
   amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 32768ull, dpp_modifiers_, 0);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  amdgpu::execute_v_cmp_class_f16_vopc(*this, wf);
+  amdgpu::arith::execute_compare<16, 16>(
+      wf, rj_arith_v_cmp_class_f16_w32, rj_arith_v_cmp_class_f16_w64, wf.cu().arithmetic_flags(), 0,
+      src0, vsrc1, false, [&](uint64_t result) { wf.set_vcc_mask(result); });
+  if (wf.instruction_execution_failed())
+    return;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -2919,7 +2926,9 @@ void VCmpClassF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  amdgpu::execute_v_cmp_class_f32_vopc(*this, wf);
+  amdgpu::arith::execute_compare<32, 32>(
+      wf, rj_arith_v_cmp_class_f32_w32, rj_arith_v_cmp_class_f32_w64, wf.cu().arithmetic_flags(), 0,
+      src0, vsrc1, false, [&](uint64_t result) { wf.set_vcc_mask(result); });
 }
 
 RJ_NOINLINE void VCmpClassF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -2941,7 +2950,11 @@ RJ_NOINLINE void VCmpClassF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) 
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
   amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 2147483648ull, dpp_modifiers_, 0);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  amdgpu::execute_v_cmp_class_f32_vopc(*this, wf);
+  amdgpu::arith::execute_compare<32, 32>(
+      wf, rj_arith_v_cmp_class_f32_w32, rj_arith_v_cmp_class_f32_w64, wf.cu().arithmetic_flags(), 0,
+      src0, vsrc1, false, [&](uint64_t result) { wf.set_vcc_mask(result); });
+  if (wf.instruction_execution_failed())
+    return;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -2953,7 +2966,9 @@ RJ_NOINLINE void VCmpClassF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) 
 }
 
 void VCmpClassF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cmp_class_f64_vopc(*this, wf);
+  amdgpu::arith::execute_compare<64, 32>(
+      wf, rj_arith_v_cmp_class_f64_w32, rj_arith_v_cmp_class_f64_w64, wf.cu().arithmetic_flags(), 0,
+      src0, vsrc1, false, [&](uint64_t result) { wf.set_vcc_mask(result); });
 }
 
 void VCmpxFF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
@@ -6497,46 +6512,9 @@ void VCmpxClassF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint16_t s0_raw = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    uint32_t mask = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    bool match = false;
-    uint16_t f16_exp = (s0_raw >> 10) & 0x1F;
-    uint16_t f16_mant = s0_raw & 0x3FF;
-    bool f16_sign = (s0_raw & 0x8000) != 0;
-    bool is_nan = (f16_exp == 0x1F) && (f16_mant != 0);
-    bool is_inf = (f16_exp == 0x1F) && (f16_mant == 0);
-    bool is_zero = (f16_exp == 0) && (f16_mant == 0);
-    bool is_denorm = (f16_exp == 0) && (f16_mant != 0);
-    bool is_normal = (f16_exp >= 1) && (f16_exp <= 30);
-    if ((mask & 0x001) && is_nan && (s0_raw & 0x0200) == 0)
-      match = true;
-    if ((mask & 0x002) && is_nan && (s0_raw & 0x0200) != 0)
-      match = true;
-    if ((mask & 0x004) && is_inf && f16_sign)
-      match = true;
-    if ((mask & 0x008) && is_normal && f16_sign)
-      match = true;
-    if ((mask & 0x010) && is_denorm && f16_sign)
-      match = true;
-    if ((mask & 0x020) && is_zero && f16_sign)
-      match = true;
-    if ((mask & 0x040) && is_zero && !f16_sign)
-      match = true;
-    if ((mask & 0x080) && is_denorm && !f16_sign)
-      match = true;
-    if ((mask & 0x100) && is_normal && !f16_sign)
-      match = true;
-    if ((mask & 0x200) && is_inf && !f16_sign)
-      match = true;
-    if (match)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  amdgpu::arith::execute_compare<16, 16>(
+      wf, rj_arith_v_cmpx_class_f16_w32, rj_arith_v_cmpx_class_f16_w64, wf.cu().arithmetic_flags(),
+      0, src0, vsrc1, false, [&](uint64_t result) { wf.set_exec(result); });
 }
 
 RJ_NOINLINE void VCmpxClassF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -6558,46 +6536,11 @@ RJ_NOINLINE void VCmpxClassF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf)
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
   amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 32768ull, dpp_modifiers_, 0);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint16_t s0_raw = static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    uint32_t mask = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    bool match = false;
-    uint16_t f16_exp = (s0_raw >> 10) & 0x1F;
-    uint16_t f16_mant = s0_raw & 0x3FF;
-    bool f16_sign = (s0_raw & 0x8000) != 0;
-    bool is_nan = (f16_exp == 0x1F) && (f16_mant != 0);
-    bool is_inf = (f16_exp == 0x1F) && (f16_mant == 0);
-    bool is_zero = (f16_exp == 0) && (f16_mant == 0);
-    bool is_denorm = (f16_exp == 0) && (f16_mant != 0);
-    bool is_normal = (f16_exp >= 1) && (f16_exp <= 30);
-    if ((mask & 0x001) && is_nan && (s0_raw & 0x0200) == 0)
-      match = true;
-    if ((mask & 0x002) && is_nan && (s0_raw & 0x0200) != 0)
-      match = true;
-    if ((mask & 0x004) && is_inf && f16_sign)
-      match = true;
-    if ((mask & 0x008) && is_normal && f16_sign)
-      match = true;
-    if ((mask & 0x010) && is_denorm && f16_sign)
-      match = true;
-    if ((mask & 0x020) && is_zero && f16_sign)
-      match = true;
-    if ((mask & 0x040) && is_zero && !f16_sign)
-      match = true;
-    if ((mask & 0x080) && is_denorm && !f16_sign)
-      match = true;
-    if ((mask & 0x100) && is_normal && !f16_sign)
-      match = true;
-    if ((mask & 0x200) && is_inf && !f16_sign)
-      match = true;
-    if (match)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  amdgpu::arith::execute_compare<16, 16>(
+      wf, rj_arith_v_cmpx_class_f16_w32, rj_arith_v_cmpx_class_f16_w64, wf.cu().arithmetic_flags(),
+      0, src0, vsrc1, false, [&](uint64_t result) { wf.set_exec(result); });
+  if (wf.instruction_execution_failed())
+    return;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -6613,40 +6556,9 @@ void VCmpxClassF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    uint32_t mask = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    bool match = false;
-    if ((mask & 0x001) && std::isnan(s0) && (std::bit_cast<uint32_t>(s0) & 0x00400000) == 0)
-      match = true;
-    if ((mask & 0x002) && std::isnan(s0) && (std::bit_cast<uint32_t>(s0) & 0x00400000) != 0)
-      match = true;
-    if ((mask & 0x004) && std::isinf(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x008) && std::isnormal(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x010) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f &&
-        std::signbit(s0))
-      match = true;
-    if ((mask & 0x020) && s0 == 0.0f && std::signbit(s0))
-      match = true;
-    if ((mask & 0x040) && s0 == 0.0f && !std::signbit(s0))
-      match = true;
-    if ((mask & 0x080) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f &&
-        !std::signbit(s0))
-      match = true;
-    if ((mask & 0x100) && std::isnormal(s0) && s0 > 0)
-      match = true;
-    if ((mask & 0x200) && std::isinf(s0) && s0 > 0)
-      match = true;
-    if (match)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  amdgpu::arith::execute_compare<32, 32>(
+      wf, rj_arith_v_cmpx_class_f32_w32, rj_arith_v_cmpx_class_f32_w64, wf.cu().arithmetic_flags(),
+      0, src0, vsrc1, false, [&](uint64_t result) { wf.set_exec(result); });
 }
 
 RJ_NOINLINE void VCmpxClassF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -6668,40 +6580,11 @@ RJ_NOINLINE void VCmpxClassF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf)
     amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
   amdgpu::dpp::apply_source_modifiers(src0, dpp_src0_, wf, 2147483648ull, dpp_modifiers_, 0);
   ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    uint32_t mask = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    bool match = false;
-    if ((mask & 0x001) && std::isnan(s0) && (std::bit_cast<uint32_t>(s0) & 0x00400000) == 0)
-      match = true;
-    if ((mask & 0x002) && std::isnan(s0) && (std::bit_cast<uint32_t>(s0) & 0x00400000) != 0)
-      match = true;
-    if ((mask & 0x004) && std::isinf(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x008) && std::isnormal(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x010) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f &&
-        std::signbit(s0))
-      match = true;
-    if ((mask & 0x020) && s0 == 0.0f && std::signbit(s0))
-      match = true;
-    if ((mask & 0x040) && s0 == 0.0f && !std::signbit(s0))
-      match = true;
-    if ((mask & 0x080) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f &&
-        !std::signbit(s0))
-      match = true;
-    if ((mask & 0x100) && std::isnormal(s0) && s0 > 0)
-      match = true;
-    if ((mask & 0x200) && std::isinf(s0) && s0 > 0)
-      match = true;
-    if (match)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  amdgpu::arith::execute_compare<32, 32>(
+      wf, rj_arith_v_cmpx_class_f32_w32, rj_arith_v_cmpx_class_f32_w64, wf.cu().arithmetic_flags(),
+      0, src0, vsrc1, false, [&](uint64_t result) { wf.set_exec(result); });
+  if (wf.instruction_execution_failed())
+    return;
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_row_bank_mask = dpp_row_bank_mask_;
     uint64_t dpp_source_write_mask = dpp_source_write_mask_;
@@ -6713,42 +6596,9 @@ RJ_NOINLINE void VCmpxClassF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf)
 }
 
 void VCmpxClassF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint64_t result = 0;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    uint32_t mask = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
-    bool match = false;
-    if ((mask & 0x001) && std::isnan(s0) &&
-        (std::bit_cast<uint64_t>(s0) & 0x0008000000000000ULL) == 0)
-      match = true;
-    if ((mask & 0x002) && std::isnan(s0) &&
-        (std::bit_cast<uint64_t>(s0) & 0x0008000000000000ULL) != 0)
-      match = true;
-    if ((mask & 0x004) && std::isinf(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x008) && std::isnormal(s0) && s0 < 0)
-      match = true;
-    if ((mask & 0x010) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0 &&
-        std::signbit(s0))
-      match = true;
-    if ((mask & 0x020) && s0 == 0.0 && std::signbit(s0))
-      match = true;
-    if ((mask & 0x040) && s0 == 0.0 && !std::signbit(s0))
-      match = true;
-    if ((mask & 0x080) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0 &&
-        !std::signbit(s0))
-      match = true;
-    if ((mask & 0x100) && std::isnormal(s0) && s0 > 0)
-      match = true;
-    if ((mask & 0x200) && std::isinf(s0) && s0 > 0)
-      match = true;
-    if (match)
-      result |= (1ULL << lane);
-  }
-  wf.set_exec(result);
+  amdgpu::arith::execute_compare<64, 32>(
+      wf, rj_arith_v_cmpx_class_f64_w32, rj_arith_v_cmpx_class_f64_w64, wf.cu().arithmetic_flags(),
+      0, src0, vsrc1, false, [&](uint64_t result) { wf.set_exec(result); });
 }
 
 } // namespace rdna3_5

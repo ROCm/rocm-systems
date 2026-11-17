@@ -8,6 +8,9 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
@@ -144,7 +147,8 @@ public:
 
   explicit BridgeFixture(rj_code_arch_t arch, uint32_t lanes = 32, ArithmeticPolicy policy = {},
                          uint32_t vgprs = 256)
-      : backend(arch == ROCJITSU_CODE_ARCH_CDNA1   ? &rocjitsu::cdna1::execution_backend()
+      : backend(arch == ROCJITSU_CODE_ARCH_CDNA2   ? &rocjitsu::cdna2::execution_backend()
+                : arch == ROCJITSU_CODE_ARCH_CDNA1 ? &rocjitsu::cdna1::execution_backend()
                 : arch == ROCJITSU_CODE_ARCH_RDNA3 ? &rocjitsu::rdna3::execution_backend()
                 : arch == ROCJITSU_CODE_ARCH_CDNA3 ? &rocjitsu::cdna3::execution_backend()
                 : arch == ROCJITSU_CODE_ARCH_CDNA4 ? &rocjitsu::cdna4::execution_backend()
@@ -10070,6 +10074,19 @@ TEST(ArithBridgeTest, DecodedClassCompareStrictStatusIsArchitectureSpecific) {
               gfx11);
     EXPECT_EQ(fixture.wave->vcc(), gfx11 ? 0x80U : 1U);
   }
+  // Even finite gfx90a CLASS requests reject unqualified strict FP status.
+  BridgeFixture fixture(ROCJITSU_CODE_ARCH_CDNA2, 64,
+                        parse_arithmetic_policy("bit_exact_empirical"));
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
+  fixture.wave->set_exec(1);
+  fixture.wave->set_vcc_mask(0x80);
+  fixture.cu->write_vgpr(fixture.base(), 0, 0x3f800000);
+  fixture.cu->write_vgpr(fixture.base() + 1, 0, 0x100);
+  auto words = cdna2::build_vopc(cdna2::kVCmpClassF32Vopc, {.src0 = 256, .vsrc1 = 1});
+  auto instruction = fixture.decoder->decode_window(words);
+  ASSERT_TRUE(instruction.succeeded());
+  EXPECT_TRUE(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).failed());
+  EXPECT_EQ(fixture.wave->vcc_mask(), 0x80U);
 }
 
 TEST(ArithBridgeTest, PseudoScalarReciprocalDistinguishesLooseAndEmpirical) {
