@@ -99,13 +99,19 @@ template <typename T> void append_value(std::vector<uint8_t> &bytes, T value) {
   bytes.insert(bytes.end(), raw, raw + sizeof(value));
 }
 
-std::vector<uint8_t> make_clang_offload_bundle(const std::vector<uint8_t> &code_object) {
+std::vector<uint8_t> make_clang_offload_bundle(const std::vector<uint8_t> &code_object,
+                                               bool include_spirv = false) {
   constexpr std::string_view magic = "__CLANG_OFFLOAD_BUNDLE__";
   constexpr std::string_view host_id = "host-x86_64-unknown-linux-gnu-";
   constexpr std::string_view gpu_id = "hipv4-amdgcn-amd-amdhsa--gfx950";
-  constexpr uint64_t bundle_count = 2;
-  const uint64_t header_size = magic.size() + sizeof(bundle_count) + 2 * 3 * sizeof(uint64_t) +
-                               host_id.size() + gpu_id.size();
+  constexpr std::string_view spirv_id = "hip-spirv64-amd-amdhsa--amdgcnspirv";
+  constexpr std::array<uint8_t, 20> spirv{0x03, 0x02, 0x23, 0x07, 0x00, 0x06, 0x01,
+                                          0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00,
+                                          0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+  const uint64_t bundle_count = include_spirv ? 3 : 2;
+  const uint64_t header_size = magic.size() + sizeof(bundle_count) +
+                               bundle_count * 3 * sizeof(uint64_t) + host_id.size() +
+                               gpu_id.size() + (include_spirv ? spirv_id.size() : 0);
   const uint64_t payload_offset = rocjitsu::waitcheck_test::align_up(header_size, 4096);
 
   std::vector<uint8_t> bundle;
@@ -119,8 +125,16 @@ std::vector<uint8_t> make_clang_offload_bundle(const std::vector<uint8_t> &code_
   append_value(bundle, static_cast<uint64_t>(code_object.size()));
   append_value(bundle, static_cast<uint64_t>(gpu_id.size()));
   bundle.insert(bundle.end(), gpu_id.begin(), gpu_id.end());
+  if (include_spirv) {
+    append_value(bundle, payload_offset + code_object.size());
+    append_value(bundle, static_cast<uint64_t>(spirv.size()));
+    append_value(bundle, static_cast<uint64_t>(spirv_id.size()));
+    bundle.insert(bundle.end(), spirv_id.begin(), spirv_id.end());
+  }
   bundle.resize(static_cast<size_t>(payload_offset), 0);
   bundle.insert(bundle.end(), code_object.begin(), code_object.end());
+  if (include_spirv)
+    bundle.insert(bundle.end(), spirv.begin(), spirv.end());
   return bundle;
 }
 
@@ -1596,6 +1610,26 @@ TEST(RjWaitcheck, ExtractsExactElfFromCompressedHipContainer) {
   EXPECT_TRUE(command_exited_with(std::system(alias_command.c_str()), 2));
   EXPECT_EQ(read_text_file(input),
             std::string(reinterpret_cast<const char *>(container.data()), container.size()));
+}
+
+TEST(RjWaitcheck, MixedNativeAndSpirvBundleRetainsNativeKernel) {
+  const TempDir temp_dir(std::filesystem::temp_directory_path() /
+                         ("rj-waitcheck-mixed-" + std::to_string(getpid())));
+  const auto input = temp_dir.path / "mixed.so";
+  const auto output = temp_dir.path / "kernels.jsonl";
+  const auto code_object = rocjitsu::waitcheck_test::make_gfx_multi_kernel_code_object(
+      {{"native", {0xBF810000u}}}, rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX950);
+  const auto container = make_gnu_host_fat_binary(
+      {make_compressed_offload_bundle(make_clang_offload_bundle(code_object, true), 1, true)});
+  ASSERT_TRUE(write_binary_file(input, container));
+
+  const std::string command = shell_quote(g_waitcheck_tool.string()) + " " +
+                              shell_quote(input.string()) + " --target gfx950 --list-kernels > " +
+                              shell_quote(output.string()) + " 2>&1";
+  EXPECT_TRUE(command_exited_with(std::system(command.c_str()), 0)) << read_text_file(output);
+  const std::string rows = read_text_file(output);
+  EXPECT_TRUE(contains(rows, "\"kernel_name\":\"native\"")) << rows;
+  EXPECT_TRUE(contains(rows, "\"target\":\"gfx950\"")) << rows;
 }
 
 TEST(RjWaitcheck, SymbolLessCodeObjectsRemainUnsupported) {

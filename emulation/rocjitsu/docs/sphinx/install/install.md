@@ -14,6 +14,10 @@ rocJITsu requires:
     `ROCJITSU_ENABLE_VFIO=ON`)
 -   **C++20 compiler**: GCC 13 or later, or Clang 16 or later
 -   **pthreads** (found automatically by CMake `find_package(Threads)`)
+-   **zlib development package** (for example, `zlib1g-dev` on Debian or
+    Ubuntu)
+-   **zstd development package** (for example, `libzstd-dev` on Debian or
+    Ubuntu)
 
 Optional prerequisites:
 

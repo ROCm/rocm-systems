@@ -427,6 +427,22 @@ size_t Executable::load_clang_offload_bundle(const char *bundle_data, size_t bun
     }
 
     if (parts[0] == CLANG_OFFLOAD_KIND_HIP || parts[0] == CLANG_OFFLOAD_KIND_HIPV4) {
+      // Clang can put native AMDGPU ELF and SPIR-V in the same HIP bundle.
+      // SPIR-V is a different device format, not a damaged AMDGPU ELF.
+      if (parts[1] == "spirv64" && parts[2] == "amd" && parts[3] == "amdhsa" &&
+          parts[5] == "amdgcnspirv") {
+        constexpr std::array<uint8_t, 4> spirv_magic{0x03, 0x02, 0x23, 0x07};
+        if (info.size < spirv_magic.size() ||
+            std::memcmp(bundle_data + info.offset, spirv_magic.data(), spirv_magic.size()) != 0) {
+          is_valid_ = false;
+          return 0;
+        }
+        continue;
+      }
+      if (parts[1] != "amdgcn" || parts[2] != "amd" || parts[3] != "amdhsa") {
+        is_valid_ = false;
+        return 0;
+      }
       util::Logger::debug_print(__func__, ": Fatbin has target triple ", parts[5]);
       auto co = std::make_unique<AmdGpuCodeObject>(
           reinterpret_cast<const uint8_t *>(bundle_data + info.offset),

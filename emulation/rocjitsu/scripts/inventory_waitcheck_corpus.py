@@ -374,6 +374,23 @@ def main() -> int:
             return 1
     else:
         artifacts = [Artifact(path, path, 0) for path in files]
+        if args.target:
+            try:
+                # Inspect targets before writing the manifest header so its
+                # artifact count includes only selected code objects. Keep
+                # malformed inputs as errors instead of treating them as a
+                # target mismatch.
+                with ThreadPoolExecutor(max_workers=min(args.jobs, 4)) as executor:
+                    selected = executor.map(
+                        lambda artifact: artifact_matches_target(
+                            args.waitcheck, artifact, args.target
+                        ), artifacts
+                    )
+                    artifacts = [artifact for artifact, matches in zip(artifacts, selected)
+                                 if matches]
+            except (OSError, RuntimeError, ValueError) as error:
+                print(error, file=sys.stderr)
+                return 1
     if not artifacts:
         print("no AMDGPU code objects found in the requested inputs", file=sys.stderr)
         return 1

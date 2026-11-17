@@ -105,6 +105,30 @@ class InventoryWaitcheckCorpusTest(unittest.TestCase):
                 self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(),
                                  artifact["artifact_sha256"])
 
+    def test_direct_inventory_filters_other_targets_before_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "vector_add_gfx942.o").write_bytes(INPUT.read_bytes())
+            (root / "vector_add_gfx1100.o").write_bytes(
+                INPUT.with_name("vector_add_gfx1100.o").read_bytes()
+            )
+            manifest = root / "manifest.jsonl"
+            result = subprocess.run(
+                [sys.executable, str(SCRIPT), str(root), "--recursive", "--waitcheck",
+                 str(WAITCHECK), "--project", "pytorch", "--source", "test-fixture",
+                 "--provenance", "llvm", "--target", "gfx942", "--output", str(manifest)],
+                capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            rows = [json.loads(line) for line in manifest.read_text().splitlines()]
+            self.assertEqual(rows[0]["artifact_count"], 1)
+            artifacts = [row for row in rows if row["kind"] == "artifact"]
+            kernels = [row for row in rows if row["kind"] == "kernel"]
+            self.assertEqual(len(artifacts), 1)
+            self.assertEqual(artifacts[0]["artifact"], str(root / "vector_add_gfx942.o"))
+            self.assertGreater(len(kernels), 0)
+            self.assertTrue(all(row["target"] == "gfx942" for row in kernels))
+
     def test_recursive_rerun_ignores_its_output_tree(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             corpus = Path(temp) / "corpus"
