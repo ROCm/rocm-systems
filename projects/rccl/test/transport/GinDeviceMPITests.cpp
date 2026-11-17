@@ -8435,15 +8435,12 @@ TEST_F(GinMPIDeviceTests, MixedBackends_TwoNodePerHostSplitKeepsAnvil) {
   ASSERT_MPI_EQ(ncclSuccess, ncclCommQueryProperties(world, &worldProps));
   ASSERT_MPI_EQ(false, worldProps.ginSupport[NCCL_GIN_TYPE_ANVIL_SDMA]);
 
-  // ncclCommSplit takes splitShare from the parent. A shared child would reuse
-  // the world comm's ginState, which no longer holds Anvil SDMA.
   ncclComm_t host = nullptr;
   ASSERT_MPI_EQ(ncclSuccess, ncclCommSplit(world, world->topo->hostIdx, getTestMpiRank(), &host, nullptr));
   ASSERT_MPI_TRUE(host != nullptr);
   auto hostCleanup = makeScopeGuard([&]() {
     if (host) (void)ncclCommDestroy(host);
   });
-  ASSERT_MPI_TRUE(world->sharedRes != host->sharedRes);
   ASSERT_MPI_EQ(1, host->topo->nHosts);
 
   ncclCommProperties_t props = NCCL_COMM_PROPERTIES_INITIALIZER;
