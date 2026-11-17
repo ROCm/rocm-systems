@@ -15,6 +15,7 @@
 
 ### Fixed
 
+* The exported `hip::hipfile` CMake target no longer requires C++20 of the targets that link it. Previously, it carried hipFile's own C++ standard as a usage requirement, so CMake compiled every C++ target that linked it as C++20 (or the standard set by `HIPFILE_CXX_STANDARD`), whatever standard that target asked for. Consumers that relied on getting C++20 this way must now request it themselves, for example with `target_compile_features(<target> PRIVATE cxx_std_20)`.
 * `ais-check` no longer reports an LVM parity RAID logical volume (`raid4`, `raid5`, `raid6`) as fastpath capable.
 * Per-GPU I/O statistics are now attributed to the GPU that owns the I/O buffer instead of the caller's active HIP device. Previously, `hipFileGetStatsL3()` and `ais-stats` could report counters against the wrong GPU when the active device differed from the buffer's device.
 * `hipfile.h` now includes `<time.h>`, which declares the `struct timespec` used by `hipFileBatchIOGetStatus()`. Previously, C code that included `<time.h>` after `hipfile.h` got an incompatible pointer type error or warning when passing a `struct timespec *` to `hipFileBatchIOGetStatus()`.
