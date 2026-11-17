@@ -8276,6 +8276,122 @@ TEST(WaitcheckTest, Gfx12OutOfRangeOrdinaryLoadsDoNotReadTheirAddresses) {
   }
 }
 
+TEST(WaitcheckTest, Gfx12OutOfRangeDsResultsNullifyAddressAndPayloadReads) {
+  for (const auto [arch, machine] :
+       {std::pair{ROCJITSU_CODE_ARCH_CDNA5, EF_AMDGPU_MACH_AMDGCN_GFX1250},
+        std::pair{ROCJITSU_CODE_ARCH_RDNA4, EF_AMDGPU_MACH_AMDGCN_GFX1201}}) {
+    for (bool returning_atomic : {false, true}) {
+      for (bool out_of_range : {false, true}) {
+        SCOPED_TRACE(testing::Message() << machine << '/' << returning_atomic << '/'
+                                        << out_of_range);
+        std::vector<uint32_t> program;
+        append_inst(program, global_load_b32(8, 4));
+        const uint64_t ds_pc = program.size() * sizeof(uint32_t);
+        const uint8_t dest = returning_atomic ? (out_of_range ? 16 : 15)
+                                              : (out_of_range ? 15 : 14);
+        const uint16_t op = returning_atomic ? rdna4::kDsAddRtnU32Vds
+                                             : rdna4::kDsLoad2addrB32Vds;
+        if (arch == ROCJITSU_CODE_ARCH_CDNA5)
+          append_inst(program, cdna5::build_vds(op, {.addr = 8, .data0 = 8, .vdst = dest}));
+        else
+          append_inst(program, rdna4::build_vds(op, {.addr = 8, .data0 = 8, .vdst = dest}));
+        const uint64_t source_consumer = program.size() * sizeof(uint32_t);
+        append_inst(program, v_mov_b32(3, 8));
+        const uint64_t result_consumer = program.size() * sizeof(uint32_t);
+        append_inst(program, v_mov_b32(4, dest));
+        append_inst(program, s_endpgm());
+        const auto report = analyze_gfx12_with_vgpr_allocation(program, machine, arch, true, 16);
+        ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+        EXPECT_EQ(std::ranges::any_of(report.diagnostics, [&](const auto &d) {
+                    return d.counter == WaitCounterKind::Load && d.producer_section_offset == 0 &&
+                           d.section_offset == ds_pc && d.reg.index == 8;
+                  }),
+                  !out_of_range)
+            << diagnostic_summary(report);
+        EXPECT_TRUE(std::ranges::any_of(report.diagnostics, [&](const auto &d) {
+          return d.counter == WaitCounterKind::Load && d.producer_section_offset == 0 &&
+                 d.section_offset == source_consumer && d.reg.index == 8;
+        })) << diagnostic_summary(report);
+        EXPECT_EQ(std::ranges::any_of(report.diagnostics, [&](const auto &d) {
+                    return d.counter == WaitCounterKind::Ds &&
+                           d.producer_section_offset == ds_pc &&
+                           d.section_offset == result_consumer && d.reg.index == dest;
+                  }),
+                  !out_of_range)
+            << diagnostic_summary(report);
+      }
+    }
+  }
+}
+
+TEST(WaitcheckTest, Gfx12OutOfRangeGlobalAddtidDoesNotReadPendingScalarAddress) {
+  for (const auto [arch, machine] :
+       {std::pair{ROCJITSU_CODE_ARCH_CDNA5, EF_AMDGPU_MACH_AMDGCN_GFX1250},
+        std::pair{ROCJITSU_CODE_ARCH_RDNA4, EF_AMDGPU_MACH_AMDGCN_GFX1201}}) {
+    for (bool out_of_range : {false, true}) {
+      SCOPED_TRACE(testing::Message() << machine << '/' << out_of_range);
+      std::vector<uint32_t> program;
+      append_inst(program, s_load_b32(8, 0));
+      const uint64_t load_pc = program.size() * sizeof(uint32_t);
+      const uint8_t dest = out_of_range ? 16 : 15;
+      if (arch == ROCJITSU_CODE_ARCH_CDNA5)
+        append_inst(program, cdna5::build_vglobal(cdna5::kGlobalLoadAddtidB32Vglobal,
+                                                  {.saddr = 8, .vdst = dest}));
+      else
+        append_inst(program, rdna4::build_vglobal(rdna4::kGlobalLoadAddtidB32Vglobal,
+                                                  {.saddr = 8, .vdst = dest}));
+      const uint64_t consumer = program.size() * sizeof(uint32_t);
+      append_inst(program, s_mov_b32(12, 8));
+      append_inst(program, s_endpgm());
+      const auto report = analyze_gfx12_with_vgpr_allocation(program, machine, arch, true, 16);
+      ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+      const auto source_warning = [&](uint64_t pc) {
+        return std::ranges::any_of(report.diagnostics, [&](const auto &d) {
+          return d.counter == WaitCounterKind::Km && d.producer_section_offset == 0 &&
+                 d.section_offset == pc && d.reg.index == 8;
+        });
+      };
+      EXPECT_EQ(source_warning(load_pc), !out_of_range) << diagnostic_summary(report);
+      EXPECT_TRUE(source_warning(consumer)) << diagnostic_summary(report);
+    }
+  }
+}
+
+TEST(WaitcheckTest, Gfx12NullifiedDsResultKeepsAnOlderDsCounterPosition) {
+  for (const auto [arch, machine] :
+       {std::pair{ROCJITSU_CODE_ARCH_CDNA5, EF_AMDGPU_MACH_AMDGCN_GFX1250},
+        std::pair{ROCJITSU_CODE_ARCH_RDNA4, EF_AMDGPU_MACH_AMDGCN_GFX1201}}) {
+    for (bool returning_atomic : {false, true}) {
+      for (bool wait : {false, true}) {
+        SCOPED_TRACE(testing::Message() << machine << '/' << returning_atomic << '/' << wait);
+        std::vector<uint32_t> program;
+        append_inst(program, ds_load_b32(2, 4));
+        const uint16_t op = returning_atomic ? rdna4::kDsAddRtnU32Vds
+                                             : rdna4::kDsLoad2addrB32Vds;
+        const uint8_t dest = returning_atomic ? 16 : 15;
+        if (arch == ROCJITSU_CODE_ARCH_CDNA5)
+          append_inst(program, cdna5::build_vds(op, {.addr = 4, .data0 = 5, .vdst = dest}));
+        else
+          append_inst(program, rdna4::build_vds(op, {.addr = 4, .data0 = 5, .vdst = dest}));
+        if (wait)
+          append_inst(program, sopp(70, 1)); // Oldest DS result is one slot behind.
+        const uint64_t consumer = program.size() * sizeof(uint32_t);
+        append_inst(program, v_mov_b32(3, 2));
+        append_inst(program, s_endpgm());
+        const auto report = analyze_gfx12_with_vgpr_allocation(program, machine, arch, true, 16);
+        ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+        EXPECT_EQ(std::ranges::any_of(report.diagnostics, [&](const auto &d) {
+                    return d.counter == WaitCounterKind::Ds &&
+                           d.producer_section_offset == 0 && d.section_offset == consumer &&
+                           d.reg.index == 2;
+                  }),
+                  !wait)
+            << diagnostic_summary(report);
+      }
+    }
+  }
+}
+
 TEST(WaitcheckTest, Gfx12OutOfRangeD16LoadsDoNotReadTheirAddresses) {
   for (const auto [arch, machine] :
        {std::pair{ROCJITSU_CODE_ARCH_CDNA5, EF_AMDGPU_MACH_AMDGCN_GFX1250},

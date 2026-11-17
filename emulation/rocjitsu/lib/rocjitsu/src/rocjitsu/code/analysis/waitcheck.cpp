@@ -5233,8 +5233,9 @@ private:
                             (name.starts_with("global_load_") ||
                              name.starts_with("scratch_load_")) &&
                             !name.ends_with("_block");
+      const bool ds_result = name.starts_with("ds_");
       if (!(inst.flags() & SIMPLE_MEMORY_RESULT) && !name.starts_with("flat_") && !buffer_load &&
-          !d16_load &&
+          !d16_load && !ds_result &&
           !(is_vmem_atomic(name) && (name.starts_with("global_") || name.starts_with("buffer_"))))
         return false;
     }
