@@ -32,10 +32,12 @@ struct KernelDescriptorInfo {
 /// @details Walks .symtab/.dynsym, decodes each descriptor's file offset and
 /// .text-relative entry, drops entries outside .text, and dedups by file offset.
 /// The single discovery routine shared by DBT translation and DBI; operates on the
-/// raw, pre-growth image.
+/// raw, pre-growth image. Weak descriptors are admitted only when include_weak
+/// is true; the default preserves existing callers' global-only policy.
 [[nodiscard]] std::vector<KernelDescriptorInfo>
 scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, uint64_t text_size,
-                        std::optional<size_t> text_section_index = std::nullopt);
+                        std::optional<size_t> text_section_index = std::nullopt,
+                        bool include_weak = false);
 
 /// @brief SGPRs at the top of a CDNA kernel's allocation that hold special
 ///        registers rather than ordinary ones.

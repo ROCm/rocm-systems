@@ -28,16 +28,18 @@ namespace rocjitsu {
 
 namespace {
 
-bool is_block_terminator(const Instruction &inst, rj_code_arch_t arch) {
-  return is_program_path_terminator(inst, arch) ||
+bool is_block_terminator(const Instruction &inst, rj_code_arch_t arch, bool trap_two_may_resume) {
+  return is_program_path_terminator(inst, arch, !trap_two_may_resume) ||
+         (trap_two_may_resume && is_software_trap_two(inst, arch)) ||
          (inst.flags() & (BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL));
 }
 
-bool has_no_static_successor(const Instruction &inst, rj_code_arch_t arch) {
+bool has_no_static_successor(const Instruction &inst, rj_code_arch_t arch,
+                             bool trap_two_may_resume) {
   // Indirect calls return to the fallthrough block; indirect branches do not
   // expose a statically-known successor in this local CFG, except for the
   // fallthrough of a fork or join.
-  return is_program_path_terminator(inst, arch) ||
+  return is_program_path_terminator(inst, arch, !trap_two_may_resume) ||
          ((inst.flags() & INDIRECT_BRANCH) && !indirect_branch_falls_through(inst));
 }
 
@@ -180,7 +182,8 @@ FailureOr<std::vector<std::unique_ptr<BasicBlock>>> BasicBlock::build_impl(
     const CodeObject &co, Decoder &decoder, rj_code_arch_t arch, DecodeErrorEmitter emit_error,
     std::span<const uint64_t> extra_leaders, ExternalEntryPolicy entry_policy,
     std::span<const uint64_t> extra_split_points, DecodedSection *prepared,
-    std::span<const CodeRange> permitted_ranges, rj_code_target_id_t target_id, uint8_t wave_size) {
+    std::span<const CodeRange> permitted_ranges, rj_code_target_id_t target_id, uint8_t wave_size,
+    bool trap_two_may_resume) {
   std::vector<std::unique_ptr<BasicBlock>> blocks;
 
   for (const auto *sec : co.text_sections()) {
@@ -219,7 +222,7 @@ FailureOr<std::vector<std::unique_ptr<BasicBlock>>> BasicBlock::build_impl(
             // A noreturn call can end a function. Check its targets after
             // indirect discovery and call/return classification.
             calls_before_alignment.insert(previous.src_loc());
-          } else if (!has_no_static_successor(previous, arch) &&
+          } else if (!has_no_static_successor(previous, arch, trap_two_may_resume) &&
                      !is_unconditional_branch(previous)) {
             return emit_error.emit() << "fallthrough into alignment at byte " << byte_offset;
           }
@@ -270,7 +273,7 @@ FailureOr<std::vector<std::unique_ptr<BasicBlock>>> BasicBlock::build_impl(
       discovery_entries.push_back(decoded.front()->src_loc());
       recovered_indirect_targets = discover_indirect_branch_edges(
           decoded_span, text, arch, discovery_entries, entry_policy, &pc_address_builders,
-          extra_split_points, {}, target_id, wave_size);
+          extra_split_points, {}, target_id, wave_size, false, trap_two_may_resume);
     }
 
     std::set<uint64_t> leaders;
@@ -306,7 +309,7 @@ FailureOr<std::vector<std::unique_ptr<BasicBlock>>> BasicBlock::build_impl(
       if (i + 1 < decoded.size() && decoded[i + 1]->src_loc() != next_offset)
         leaders.insert(decoded[i + 1]->src_loc());
 
-      if (is_block_terminator(inst, arch) && next_offset < section_end)
+      if (is_block_terminator(inst, arch, trap_two_may_resume) && next_offset < section_end)
         leaders.insert(next_offset);
 
       auto branch_delta = inst.branch_offset_bytes();
@@ -329,7 +332,7 @@ FailureOr<std::vector<std::unique_ptr<BasicBlock>>> BasicBlock::build_impl(
       while (i < decoded.size()) {
         const uint64_t inst_offset = decoded[i]->src_loc();
         const uint64_t next_offset = inst_offset + static_cast<uint64_t>(decoded[i]->size());
-        const bool terminates = is_block_terminator(*decoded[i], arch);
+        const bool terminates = is_block_terminator(*decoded[i], arch, trap_two_may_resume);
         current->add_instruction(std::move(decoded[i]), terminates);
         ++i;
 
@@ -337,7 +340,8 @@ FailureOr<std::vector<std::unique_ptr<BasicBlock>>> BasicBlock::build_impl(
             i >= decoded.size() ? next_offset < section_end : decoded[i]->src_loc() != next_offset;
         const Instruction &last = *current->terminator();
         const bool can_fall_through =
-            !is_program_path_terminator(last, arch) && !is_unconditional_branch(last) &&
+            !is_program_path_terminator(last, arch, !trap_two_may_resume) &&
+            !is_unconditional_branch(last) &&
             ((last.flags() & INDIRECT_BRANCH) == 0 || indirect_branch_falls_through(last));
         // Range bounds are not evidence that a callee ends here. Apply this
         // distinction before call/return classification can prune continuations.
@@ -472,7 +476,7 @@ FailureOr<std::vector<std::unique_ptr<BasicBlock>>> BasicBlock::build_impl(
         continue;
       if ((term->flags() & (INDIRECT_BRANCH | INDIRECT_CALL)) && !term->branch_offset_bytes())
         block.note_successor_issue(SuccessorIssue::IndirectControlFlow);
-      if (has_no_static_successor(*term, arch))
+      if (has_no_static_successor(*term, arch, trap_two_may_resume))
         continue;
 
       auto branch_delta = term->branch_offset_bytes();
@@ -621,7 +625,7 @@ FailureOr<std::vector<std::unique_ptr<BasicBlock>>> BasicBlock::build_impl(
         const bool has_branch_exit = term->branch_offset_bytes().has_value() ||
                                      (flags & (INDIRECT_BRANCH | INDIRECT_CALL)) != 0;
         const bool is_program_exit = (block->has_implicit_terminator() && !has_branch_exit) ||
-                                     is_program_path_terminator(*term, arch);
+                                     is_program_path_terminator(*term, arch, !trap_two_may_resume);
         if ((flags & (INDIRECT_BRANCH | INDIRECT_CALL)) != 0) {
           const auto &fixups = block->static_indirect_call_fixups();
           if (fixups.empty() || std::ranges::any_of(fixups, &IndirectCallFixup::source_incomplete))
@@ -755,7 +759,7 @@ BasicBlock::build_cfg(const CodeObject &co, Decoder &decoder, rj_code_arch_t arc
       return emit_error.emit() << "full-section CFG does not accept ranges or decode seeds";
     return build_impl(co, decoder, arch, std::move(emit_error), options.entries,
                       options.entry_policy, options.split_points, nullptr, {}, target_id,
-                      options.wave_size);
+                      options.wave_size, options.trap_two_may_resume);
   }
   if (options.entry_policy != ExternalEntryPolicy::ExplicitOnly)
     return emit_error.emit() << "reachable CFG requires explicit external entries";
@@ -913,8 +917,9 @@ BasicBlock::build_cfg(const CodeObject &co, Decoder &decoder, rj_code_arch_t arc
           if (target >= 0)
             enqueue(static_cast<uint64_t>(target), true);
         }
-        if (is_block_terminator(inst, arch)) {
-          if (!has_no_static_successor(inst, arch) && !is_unconditional_branch(inst))
+        if (is_block_terminator(inst, arch, options.trap_two_may_resume)) {
+          if (!has_no_static_successor(inst, arch, options.trap_two_may_resume) &&
+              !is_unconditional_branch(inst))
             enqueue(next_offset, false);
           break;
         }
@@ -931,7 +936,7 @@ BasicBlock::build_cfg(const CodeObject &co, Decoder &decoder, rj_code_arch_t arc
       prepared.indirect_targets = discover_indirect_branch_edges(
           decoded_insts, text, arch, entry_offsets, ExternalEntryPolicy::ExplicitOnly,
           &prepared.pc_address_builders, split_points, decode_seeds, target_id, options.wave_size,
-          options.verify_closed_zero_bank_calls);
+          options.verify_closed_zero_bank_calls, options.trap_two_may_resume);
       analyzed_size = decoded.size();
       for (const IndirectCallFixup &fixup : prepared.indirect_targets) {
         if (!is_decoded_start(fixup.source_target_offset))
@@ -966,7 +971,7 @@ BasicBlock::build_cfg(const CodeObject &co, Decoder &decoder, rj_code_arch_t arc
   // This shares block/call construction without decoding or analyzing twice.
   return build_impl(co, decoder, arch, std::move(emit_error), entry_offsets,
                     ExternalEntryPolicy::ExplicitOnly, split_points, &prepared, merged_ranges,
-                    target_id, options.wave_size);
+                    target_id, options.wave_size, options.trap_two_may_resume);
 }
 
 } // namespace rocjitsu

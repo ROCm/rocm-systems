@@ -346,6 +346,38 @@ TEST(WaitcheckStream, ConcreteTargetsUseTheirArchitectureOptions) {
   }
 }
 
+TEST(WaitcheckStream, ConcreteCdna5TargetSelectsMatrixCompletionWindow) {
+  Program program{0xbefe0081u, 0xcc600000u, 0x1c02e528u};
+  // Set EXEC_LO nonzero so the six independent VALUs are known to issue.
+  // The dense f16 WMMA reads v42.
+  for (unsigned i = 0; i < 6; ++i)
+    program.push_back(v_mov(12, 11));
+  append(program, cdna5::build_sopp(cdna5::kSWaitAluSopp, {.simm16 = 0x1f9f}));
+  append(program, cdna5::build_vglobal(cdna5::kGlobalLoadB32Vglobal,
+                                      {.saddr = 124, .vdst = 42, .vaddr = 8}));
+
+  const auto has_matrix_hazard = [&](rj_code_target_id_t target) {
+    util::StringDiagnostic error;
+    auto result = analyze_waitcheck_stream(program, default_isa_target_registry(), target,
+                                           {.wave_size = 32, .expert_scheduling = true},
+                                           error.emitter());
+    EXPECT_TRUE(result.succeeded()) << error.message();
+    if (result.failed())
+      return false;
+    EXPECT_FALSE(result.value().incomplete);
+    return std::ranges::any_of(result.value().diagnostics, [](const auto &row) {
+      return row.counter == amdgpu::WaitCounterKind::VaVdst && row.reg.index == 42;
+    });
+  };
+  EXPECT_FALSE(has_matrix_hazard(ROCJITSU_CODE_TARGET_GFX1250));
+  EXPECT_TRUE(has_matrix_hazard(ROCJITSU_CODE_TARGET_GFX1251));
+  const auto targetless = analyze(program, ROCJITSU_CODE_ARCH_CDNA5, true, 32);
+  EXPECT_FALSE(targetless.incomplete);
+  EXPECT_TRUE(std::ranges::any_of(targetless.diagnostics, [](const auto &row) {
+    return row.counter == amdgpu::WaitCounterKind::VaVdst && row.reg.index == 42;
+  }));
+}
+
 TEST(WaitcheckStream, UnknownAndUnsupportedConcreteTargetsFail) {
   for (auto target : {ROCJITSU_CODE_TARGET_INVALID, ROCJITSU_CODE_TARGET_GFX90A}) {
     SCOPED_TRACE(target);
@@ -1208,11 +1240,11 @@ TEST(WaitcheckStream, EndProgramBoundsAnalysisBeforeUnrelatedBytes) {
   EXPECT_EQ(report.instructions_analyzed, 1u);
 }
 
-TEST(WaitcheckStream, AbortTrapBoundsAnalysisButReturningTrapIsIncomplete) {
+TEST(WaitcheckStream, TrapWithoutKnownHandlerStopsAnalysisAsIncomplete) {
   for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
     const auto abort = analyze({0xbf900002u, 0xffffffffu}, arch);
-    EXPECT_FALSE(abort.incomplete);
-    EXPECT_EQ(abort.instructions_analyzed, 1u);
+    ASSERT_TRUE(abort.incomplete);
+    EXPECT_EQ(abort.instructions_analyzed, 0u);
     const auto returning = analyze({0xbf900001u, 0xbfc00000u}, arch);
     ASSERT_TRUE(returning.incomplete);
     EXPECT_EQ(returning.instructions_analyzed, 0u);
@@ -1223,8 +1255,8 @@ TEST(WaitcheckStream, AbortTrapBoundsAnalysisButReturningTrapIsIncomplete) {
   EXPECT_EQ(gfx1100.instructions_analyzed, 0u);
 
   const auto gfx1150 = analyze({0xbf900002u, 0xffffffffu}, ROCJITSU_CODE_ARCH_RDNA3_5);
-  EXPECT_FALSE(gfx1150.incomplete);
-  EXPECT_EQ(gfx1150.instructions_analyzed, 1u);
+  EXPECT_TRUE(gfx1150.incomplete);
+  EXPECT_EQ(gfx1150.instructions_analyzed, 0u);
 }
 
 TEST(WaitcheckStream, ControlFlowStopsBeforeAFallthroughWait) {

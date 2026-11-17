@@ -361,6 +361,7 @@ struct AnalysisContext {
   uint8_t wave_size = 0;
   bool setreg_vgpr_msb_fixup = false;
   bool verify_closed_zero_bank_calls = false;
+  bool trap_two_may_resume = false;
   std::vector<InstructionFacts> facts;
 
   // Whole-text superset of every SGPR pair that a deferred cross-block
@@ -872,8 +873,10 @@ void invalidate_written_sgprs(AnalysisContext &ctx, size_t index, BlockState &st
   return (inst.flags() & INDIRECT_BRANCH) != 0;
 }
 
-[[nodiscard]] bool is_block_terminator(const Instruction &inst, rj_code_arch_t arch) {
-  return is_program_path_terminator(inst, arch) ||
+[[nodiscard]] bool is_block_terminator(const Instruction &inst, rj_code_arch_t arch,
+                                       bool trap_two_may_resume) {
+  return is_program_path_terminator(inst, arch, !trap_two_may_resume) ||
+         (trap_two_may_resume && is_software_trap_two(inst, arch)) ||
          (inst.flags() & (BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL));
 }
 
@@ -887,12 +890,13 @@ void invalidate_written_sgprs(AnalysisContext &ctx, size_t index, BlockState &st
   return is_indirect_branch(inst) || ((inst.flags() & INDIRECT_CALL) != 0 && !is_direct_call(inst));
 }
 
-[[nodiscard]] bool has_no_direct_successor(const Instruction &inst, rj_code_arch_t arch) {
+[[nodiscard]] bool has_no_direct_successor(const Instruction &inst, rj_code_arch_t arch,
+                                            bool trap_two_may_resume) {
   // Indirect branches have no known target until this analysis recovers one.
   // Indirect calls still expose their ordinary fallthrough/return continuation
   // in the direct CFG, which is required for liveness and for callers that do
   // not care about the callee body. Forks and joins also keep their fallthrough.
-  return is_program_path_terminator(inst, arch) ||
+  return is_program_path_terminator(inst, arch, !trap_two_may_resume) ||
          (is_indirect_branch(inst) && !indirect_branch_falls_through(inst));
 }
 
@@ -918,7 +922,8 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
 /// scan, so the two agree on where a block begins.
 [[nodiscard]] std::vector<uint8_t> compute_block_leaders(std::span<const Instruction *const> insts,
                                                          std::span<const uint64_t> extra_leaders,
-                                                         rj_code_arch_t arch) {
+                                                         rj_code_arch_t arch,
+                                                         bool trap_two_may_resume) {
   std::vector<uint8_t> leaders(insts.size(), 0);
   if (insts.empty())
     return leaders;
@@ -940,7 +945,8 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
     // new block.
     if (i + 1 < insts.size() && insts[i + 1]->src_loc() != next_offset)
       leaders[i + 1] = 1;
-    if (is_block_terminator(inst, arch) && next_offset < section_end && i + 1 < insts.size() &&
+    if (is_block_terminator(inst, arch, trap_two_may_resume) && next_offset < section_end &&
+        i + 1 < insts.size() &&
         insts[i + 1]->src_loc() == next_offset)
       leaders[i + 1] = 1;
 
@@ -1399,7 +1405,8 @@ build_analysis_blocks(const AnalysisContext &ctx, std::span<const uint64_t> extr
   // each setpc/swappc the last instruction in its analysis block, so the block
   // transfer summarizes the state at the control-transfer boundary rather than
   // after unrelated fallthrough instructions.
-  const std::vector<uint8_t> leaders = compute_block_leaders(ctx.insts, extra_leaders, ctx.arch);
+  const std::vector<uint8_t> leaders =
+      compute_block_leaders(ctx.insts, extra_leaders, ctx.arch, ctx.trap_two_may_resume);
 
   std::vector<AnalysisBlock> blocks;
   blocks.reserve(std::ranges::count(leaders, uint8_t{1}));
@@ -1440,7 +1447,7 @@ build_analysis_blocks(const AnalysisContext &ctx, std::span<const uint64_t> extr
       }
     }
 
-    if (has_no_direct_successor(term, ctx.arch) ||
+    if (has_no_direct_successor(term, ctx.arch, ctx.trap_two_may_resume) ||
         (is_unconditional_branch(term) && !is_direct_call(term)))
       continue;
 
@@ -2860,7 +2867,7 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
           continue;
         }
         if (block.successors.empty()) {
-          if (!is_program_path_terminator(term, ctx.arch))
+          if (!is_program_path_terminator(term, ctx.arch, !ctx.trap_two_may_resume))
             unsupported = true;
           continue;
         }
@@ -3583,12 +3590,13 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
     std::span<const uint64_t> extra_leaders, ExternalEntryPolicy entry_policy,
     std::vector<PcAddressBuilder> *pc_builders, std::span<const uint64_t> extra_split_points,
     std::span<const uint64_t> analysis_root_offsets, rj_code_target_id_t target, uint8_t wave_size,
-    bool verify_closed_zero_bank_calls) {
+    bool verify_closed_zero_bank_calls, bool trap_two_may_resume) {
   std::vector<IndirectCallFixup> recovered;
   FixupIndex recovered_index;
   AnalysisContext ctx = build_context(insts, text, arch, target);
   ctx.wave_size = wave_size;
   ctx.verify_closed_zero_bank_calls = verify_closed_zero_bank_calls;
+  ctx.trap_two_may_resume = trap_two_may_resume;
   std::vector<uint64_t> sorted_extra_leaders(extra_leaders.begin(), extra_leaders.end());
   std::ranges::sort(sorted_extra_leaders);
   sorted_extra_leaders.erase(std::ranges::unique(sorted_extra_leaders).begin(),
@@ -3698,7 +3706,7 @@ std::vector<IndirectCallFixup> discover_indirect_branch_edges(
     std::span<const uint64_t> extra_leaders, ExternalEntryPolicy entry_policy,
     std::vector<PcAddressBuilder> *pc_builders, std::span<const uint64_t> extra_split_points,
     std::span<const uint64_t> analysis_root_offsets, rj_code_target_id_t target, uint8_t wave_size,
-    bool verify_closed_zero_bank_calls) {
+    bool verify_closed_zero_bank_calls, bool trap_two_may_resume) {
   if (pc_builders != nullptr)
     pc_builders->clear();
   if (insts.empty())
@@ -3718,7 +3726,8 @@ std::vector<IndirectCallFixup> discover_indirect_branch_edges(
     // recovery path for another consumer kind must extend the predicate above.
     const auto unfiltered = discover_indirect_branch_edges_unfiltered(
         insts, text, arch, extra_leaders, entry_policy, nullptr, extra_split_points,
-        analysis_root_offsets, target, wave_size, verify_closed_zero_bank_calls);
+        analysis_root_offsets, target, wave_size, verify_closed_zero_bank_calls,
+        trap_two_may_resume);
     assert(unfiltered.empty() && "indirect-recovery prefilter skipped a fixup-producing consumer");
 #endif
     return {};
@@ -3726,7 +3735,8 @@ std::vector<IndirectCallFixup> discover_indirect_branch_edges(
 
   return discover_indirect_branch_edges_unfiltered(
       insts, text, arch, extra_leaders, entry_policy, pc_builders, extra_split_points,
-      analysis_root_offsets, target, wave_size, verify_closed_zero_bank_calls);
+      analysis_root_offsets, target, wave_size, verify_closed_zero_bank_calls,
+      trap_two_may_resume);
 }
 
 } // namespace rocjitsu

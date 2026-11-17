@@ -111,7 +111,9 @@ struct WaitcheckOptions {
   /// Descriptor-less ELF code objects, including helper-only modules, retain
   /// the target's conventional default (wave32 on RDNA3/3.5/4 and CDNA5;
   /// wave64 on CDNA3/4). Supply 32 or 64
-  /// when the actual ELF wave mode is known. Described kernels always use
+  /// when the actual ELF wave mode is known. For executable descriptorless
+  /// code, a complete result also requires an explicit entry offset;
+  /// otherwise the fallback is diagnostic-only. Described kernels always use
   /// their descriptor, even when this override is present.
   std::optional<uint32_t> fallback_wavefront_size = std::nullopt;
   /// @brief Maximum diagnostics to retain. Analysis still reports failure after
@@ -254,7 +256,9 @@ waitcheck_kernels_exact(const AmdGpuCodeObject &code_object);
 /// @brief Analyze all executable sections in a code object.
 ///
 /// @details Offsets in diagnostics are relative to each section and to the ELF
-/// file offset when the section exposes one.
+/// file offset when the section exposes one. Executable descriptorless code
+/// without both an explicit entry offset and wavefront size remains incomplete,
+/// although reachable diagnostics are retained.
 [[nodiscard]] WaitcheckReport analyze_waitcnts(const CodeObject &code_object, rj_code_arch_t arch,
                                                WaitcheckOptions options = {});
 
@@ -263,9 +267,10 @@ waitcheck_kernels_exact(const AmdGpuCodeObject &code_object);
 /// @details waitcheck_kernels() merges same-wave descriptors at one entry and
 /// conservatively combines their allocation bounds; distinct wavefront modes
 /// are analyzed separately. Reachable functions are included, while kernels
-/// at other entries and unrelated executable sections are skipped. Dispatch
-/// callers must use the WaitcheckKernelInfo overload below with exact
-/// descriptor bounds and wavefront mode.
+/// at other entries and unrelated executable sections are skipped. Descriptorless
+/// callers must also supply fallback_wavefront_size for a complete result.
+/// Dispatch callers with a descriptor must use the WaitcheckKernelInfo overload
+/// below with exact descriptor bounds and wavefront mode.
 [[nodiscard]] WaitcheckReport analyze_waitcnts_for_kernel(const CodeObject &code_object,
                                                           rj_code_arch_t arch,
                                                           uint64_t kernel_entry_offset,
@@ -288,9 +293,9 @@ waitcheck_kernels_exact(const AmdGpuCodeObject &code_object);
 /// for bounded-granularity offline schedulers. It retains whole-object
 /// executable-section coverage; use the single-kernel overload to scope a
 /// dispatch when unrelated executable sections are present. An empty span
-/// analyzes no kernels; callers that receive no entries from
-/// waitcheck_kernels() must use analyze_waitcnts() to check function symbols
-/// or executable sections.
+/// with executable text is unsupported; callers that receive no entries from
+/// waitcheck_kernels() can use analyze_waitcnts() for diagnostic-only function
+/// or section coverage.
 [[nodiscard]] WaitcheckReport
 analyze_waitcnts_for_kernels(const CodeObject &code_object, rj_code_arch_t arch,
                              std::span<const WaitcheckKernelInfo> kernels,

@@ -15,18 +15,27 @@ namespace rocjitsu {
 
 /// @brief Whether an instruction ends the current program path.
 ///
-/// @details ROCr reserves trap ID 2 for assertion/abort handling. GFX11.0 has
-/// a privileged-mode trap-2 NOP behavior, so its fallthrough remains reachable.
-/// Elsewhere the assertion/abort path does not resume at the next instruction.
-[[nodiscard]] inline bool is_program_path_terminator(const Instruction &inst,
-                                                     rj_code_arch_t arch) {
-  if ((inst.flags() & PROGRAM_TERMINATOR) != 0)
-    return true;
+/// @details Trap ID 2 is an abort only when the caller establishes a terminating
+/// handler contract. Offline analysis cannot infer that contract from the ISA.
+[[nodiscard]] inline bool is_software_trap_two(const Instruction &inst, rj_code_arch_t arch) {
   if ((inst.flags() & SOFTWARE_TRAP) == 0 || inst.size() != sizeof(uint32_t))
     return false;
   const uint32_t *raw = inst.raw_encoding();
-  return raw != nullptr && static_cast<uint16_t>(raw[0]) == 2 &&
-         arch != ROCJITSU_CODE_ARCH_RDNA3;
+  const uint32_t trap_id_mask =
+      (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5) ? 0xfu : 0xffu;
+  return raw != nullptr && (raw[0] & trap_id_mask) == 2;
+}
+
+/// @param assume_trap_two_aborts Preserve the established ROCr abort contract
+/// for existing callers; offline checkers pass false when a handler may be absent.
+[[nodiscard]] inline bool is_program_path_terminator(const Instruction &inst,
+                                                     rj_code_arch_t arch,
+                                                     bool assume_trap_two_aborts = true) {
+  if (is_software_trap_two(inst, arch))
+    return assume_trap_two_aborts && arch != ROCJITSU_CODE_ARCH_RDNA3;
+  if ((inst.flags() & PROGRAM_TERMINATOR) != 0)
+    return true;
+  return false;
 }
 
 /// @brief Whether an indirect branch can also continue at the next instruction.

@@ -202,6 +202,8 @@ struct PcAddressBuilder {
 ///        enable reachability. Empty preserves the existing external-entry policy.
 /// @param target Concrete GPU target whose target-specific instruction semantics
 ///        apply. Invalid selects the architecture's default concrete target.
+/// @param trap_two_may_resume Keep trap-2 fallthrough when the caller has no
+///        terminating-handler contract. The default retains prior CFG behavior.
 [[nodiscard]] std::vector<IndirectCallFixup> discover_indirect_branch_edges(
     std::span<const Instruction *const> insts, std::span<const uint8_t> text, rj_code_arch_t arch,
     std::span<const uint64_t> extra_leaders = {},
@@ -210,6 +212,6 @@ struct PcAddressBuilder {
     std::span<const uint64_t> extra_split_points = {},
     std::span<const uint64_t> analysis_root_offsets = {},
     rj_code_target_id_t target = ROCJITSU_CODE_TARGET_INVALID, uint8_t wave_size = 0,
-    bool verify_closed_zero_bank_calls = false);
+    bool verify_closed_zero_bank_calls = false, bool trap_two_may_resume = false);
 
 } // namespace rocjitsu

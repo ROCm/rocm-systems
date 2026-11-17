@@ -7,6 +7,7 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/analysis/indirect_branch_discovery.h"
+#include "rocjitsu/code/analysis/control_flow.h"
 #include "rocjitsu/code/analysis/waitcheck.h"
 #include "rocjitsu/code/analysis/waitcheck/byte_interval.h"
 #include "rocjitsu/code/basic_block.h"
@@ -12580,8 +12581,8 @@ TEST(WaitcheckTest, SymbolLessWave32FallbackGuidesIndirectCfgRecovery) {
   wave32.fallback_wavefront_size = 32;
   const auto explicit32 = analyze_waitcnts(object, arch, wave32);
   ASSERT_TRUE(automatic.supported && explicit32.supported);
-  EXPECT_TRUE(automatic.complete) << automatic.analysis_error;
-  EXPECT_TRUE(explicit32.complete) << explicit32.analysis_error;
+  EXPECT_FALSE(automatic.complete);
+  EXPECT_FALSE(explicit32.complete);
   EXPECT_TRUE(automatic.diagnostics.empty()) << diagnostic_summary(automatic);
   EXPECT_TRUE(explicit32.diagnostics.empty()) << diagnostic_summary(explicit32);
 }
@@ -12604,6 +12605,34 @@ TEST(WaitcheckTest, SymbolLessRdna4KeepsTargetDerivedWave32Default) {
   ASSERT_TRUE(automatic.supported && explicit64.supported);
   EXPECT_TRUE(automatic.diagnostics.empty()) << diagnostic_summary(automatic);
   EXPECT_EQ(explicit64.diagnostics_observed, 1u) << diagnostic_summary(explicit64);
+}
+
+TEST(WaitcheckTest, DescriptorlessCodeNeedsExplicitEntryAndWaveContract) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_CDNA4;
+  const std::vector<uint32_t> code{build_s_endpgm(arch).value()};
+  const auto image = waitcheck_test::make_gfx_function_only_code_object(
+      {{"helper", code}}, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  AmdGpuCodeObject object(image.data(), image.size());
+  ASSERT_TRUE(object.is_valid());
+  EXPECT_TRUE(waitcheck_kernels(object).empty());
+
+  const auto implicit = analyze_waitcnts(object, arch);
+  EXPECT_TRUE(implicit.supported);
+  EXPECT_FALSE(implicit.complete);
+  EXPECT_NE(implicit.analysis_error.find("descriptorless"), std::string::npos);
+
+  WaitcheckOptions wave64;
+  wave64.fallback_wavefront_size = 64;
+  const auto with_wave_only = analyze_waitcnts(object, arch, wave64);
+  EXPECT_FALSE(with_wave_only.complete);
+  const auto selected = analyze_waitcnts_for_kernel(object, arch, 0, wave64);
+  EXPECT_TRUE(selected.supported && selected.complete) << selected.analysis_error;
+
+  const auto no_inventory = analyze_waitcnts_for_kernels(
+      object, arch, std::span<const WaitcheckKernelInfo>{}, wave64);
+  EXPECT_FALSE(no_inventory.supported);
+  EXPECT_FALSE(no_inventory.complete);
+  EXPECT_NE(no_inventory.analysis_error.find("no kernel descriptors"), std::string::npos);
 }
 
 TEST(WaitcheckTest, Gfx1250Wave32VopCompareDoesNotDefineAdjacentMaskSgpr) {
@@ -13568,18 +13597,58 @@ TEST(WaitcheckTest, AcceptsEndpgmAfterPendingVmemStore) {
 }
 
 TEST(WaitcheckTest, EndpgmClearsPendingStateBeforeNextEntry) {
-  for (uint32_t terminator :
-       {build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4).value(),
-        build_s_trap(ROCJITSU_CODE_ARCH_RDNA4, 2).value()}) {
-    std::vector<uint32_t> program;
-    append_inst(program, global_load_b32(0));
-    program.push_back(terminator);
-    append_inst(program, v_mov_b32(1, 0));
+  std::vector<uint32_t> program;
+  append_inst(program, global_load_b32(0));
+  program.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4).value());
+  append_inst(program, v_mov_b32(1, 0));
 
-    const auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4);
-    EXPECT_TRUE(report.supported) << report.analysis_error;
-    EXPECT_TRUE(report.complete) << report.analysis_error;
-    EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+  const auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4);
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.complete) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx1201TrapTwoKeepsUnboundHandlerFallthrough) {
+  for (uint16_t trap_id : {uint16_t{2}, uint16_t{0x12}, uint16_t{0x102}}) {
+    for (bool waited : {false, true}) {
+      std::vector<uint32_t> program;
+      append_inst(program, global_load_b32(0));
+      program.push_back(build_s_trap(ROCJITSU_CODE_ARCH_RDNA4, trap_id).value());
+      if (waited)
+        append_inst(program, sopp(64, 0)); // s_wait_loadcnt 0.
+      const auto consumer = program.size() * sizeof(uint32_t);
+      append_inst(program, v_mov_b32(1, 0));
+      append_inst(program, s_endpgm());
+      const auto image = waitcheck_test::make_gfx_code_object(
+          program, EF_AMDGPU_MACH_AMDGCN_GFX1201, true);
+      AmdGpuCodeObject object(image.data(), image.size());
+      ASSERT_TRUE(object.is_valid());
+      const auto report = analyze_waitcnts(object, ROCJITSU_CODE_ARCH_RDNA4);
+      ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+      ASSERT_EQ(report.diagnostics.size(), waited ? 0u : 1u) << diagnostic_summary(report);
+      if (!waited) {
+        EXPECT_EQ(report.diagnostics.front().section_offset, consumer);
+        EXPECT_EQ(report.diagnostics.front().counter, WaitCounterKind::Load);
+      }
+      const auto raw = analyze_waitcnts(std::span<const uint32_t>(program),
+                                        ROCJITSU_CODE_ARCH_RDNA4);
+      EXPECT_FALSE(raw.complete);
+    }
+  }
+}
+
+TEST(WaitcheckTest, TrapTwoIdWidthMatchesTargetGeneration) {
+  for (const auto [arch, immediate, trap_two] :
+       {std::tuple{ROCJITSU_CODE_ARCH_RDNA3, uint16_t{0x12}, false},
+        std::tuple{ROCJITSU_CODE_ARCH_RDNA3, uint16_t{0x102}, true},
+        std::tuple{ROCJITSU_CODE_ARCH_RDNA4, uint16_t{0x12}, true},
+        std::tuple{ROCJITSU_CODE_ARCH_CDNA5, uint16_t{0x12}, true}}) {
+    const uint32_t word = build_s_trap(arch, immediate).value();
+    auto decoder = Decoder::create(arch);
+    ASSERT_NE(decoder, nullptr);
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, &word));
+    ASSERT_NE(inst, nullptr);
+    EXPECT_EQ(is_software_trap_two(*inst, arch), trap_two);
   }
 }
 
@@ -15219,6 +15288,110 @@ TEST(WaitcheckTest, SharedCalleeDiagnosticIsAttributedToEachKernelEntry) {
             batch.diagnostics[1].producer_section_offset);
 }
 
+TEST(WaitcheckTest, WeakDescriptorIsAnalyzedBesideStrongDescriptor) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_CDNA4;
+  std::vector<uint32_t> weak;
+  append_gfx950_buffer_load_dword_v0_v8_s0_offen(weak);
+  weak.push_back(0x7e020300u); // v_mov_b32 v1, v0 without vmcnt(0).
+  weak.push_back(build_s_endpgm(arch).value());
+  const std::vector<uint32_t> strong{build_s_endpgm(arch).value()};
+  auto image = waitcheck_test::make_gfx_multi_kernel_code_object(
+      {{"strong", strong}, {"weak", weak}}, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  auto *ehdr = reinterpret_cast<Elf64_Ehdr *>(image.data());
+  auto *shdrs = reinterpret_cast<Elf64_Shdr *>(image.data() + ehdr->e_shoff);
+  auto *symbols = reinterpret_cast<Elf64_Sym *>(image.data() + shdrs[3].sh_offset);
+  symbols[3].st_info = elf_symbol_info(kElfSymbolBindWeak, kElfSymbolTypeObject);
+  symbols[4].st_info = elf_symbol_info(kElfSymbolBindWeak, kElfSymbolTypeFunc);
+
+  AmdGpuCodeObject object(image.data(), image.size());
+  ASSERT_TRUE(object.is_valid());
+  const auto kernels = waitcheck_kernels_exact(object);
+  ASSERT_EQ(kernels.size(), 2u);
+  const auto report = analyze_waitcnts(object, arch);
+  ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+  EXPECT_EQ(report.kernels_discovered, 2u);
+  EXPECT_EQ(report.kernels_analyzed, 2u);
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics.front().kernel_name, "weak");
+}
+
+TEST(WaitcheckTest, SharedWaitParityUsesStrongestRequirementAcrossKernelEntries) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_CDNA4;
+  for (bool weaker_wait : {false, true}) {
+    std::vector<uint32_t> first;
+    append_gfx950_buffer_load_dword_v0_v8_s0_offen(first);
+    first.push_back(build_s_call_b64(30, 7, arch).value());
+    first.push_back(build_s_endpgm(arch).value());
+    std::vector<uint32_t> second;
+    append_gfx950_buffer_load_dword_v0_v8_s0_offen(second);
+    append_gfx950_buffer_load_dword_v1_v8_s0_offen(second);
+    second.push_back(build_s_call_b64(30, 1, arch).value());
+    second.push_back(build_s_endpgm(arch).value());
+    std::vector<uint32_t> helper;
+    if (weaker_wait)
+      append_gfx950_s_waitcnt_vmcnt_1(helper);
+    else
+      append_gfx950_s_waitcnt_vmcnt_0(helper);
+    helper.push_back(0x7e040300u); // v_mov_b32 v2, v0.
+    helper.push_back(build_sop1_encoding(arch, 0x1d, 0, 30).value());
+    auto image = waitcheck_test::make_gfx_multi_kernel_code_object(
+        {{"first", first}, {"second", second}, {"helper", helper}},
+        EF_AMDGPU_MACH_AMDGCN_GFX950);
+    auto *ehdr = reinterpret_cast<Elf64_Ehdr *>(image.data());
+    auto *shdrs = reinterpret_cast<Elf64_Shdr *>(image.data() + ehdr->e_shoff);
+    auto *symbols = reinterpret_cast<Elf64_Sym *>(image.data() + shdrs[3].sh_offset);
+    symbols[5] = {}; // The helper is a function, not a dispatch entry.
+    AmdGpuCodeObject object(image.data(), image.size());
+    ASSERT_TRUE(object.is_valid());
+    const auto kernels = waitcheck_kernels(object);
+    ASSERT_EQ(kernels.size(), 2u);
+    WaitcheckOptions options;
+    options.check_counter_parity = true;
+    for (const auto &report : {analyze_waitcnts(object, arch, options),
+                               analyze_waitcnts_for_kernels(object, arch, kernels, options)}) {
+      ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+      EXPECT_EQ(report.kernels_analyzed, 2u);
+      EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+      EXPECT_EQ(report.counter_underaccounting_observed, 0u);
+      if (weaker_wait) {
+        ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+        EXPECT_EQ(report.diagnostics.front().kernel_name, "first");
+      } else {
+        EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+        EXPECT_EQ(report.counter_parity_exact, 1u);
+      }
+    }
+  }
+}
+
+TEST(WaitcheckTest, DeferredSharedParityKeepsOriginatingKernelIdentity) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_CDNA4;
+  const std::vector<uint32_t> first{build_s_call_b64(30, 3, arch).value(),
+                                    build_s_endpgm(arch).value()};
+  const std::vector<uint32_t> second{build_s_call_b64(30, 1, arch).value(),
+                                     build_s_endpgm(arch).value()};
+  std::vector<uint32_t> helper;
+  append_gfx950_s_waitcnt_vmcnt_0(helper);
+  helper.push_back(0x7e040303u); // v_mov_b32 v2, v3; no memory dependency.
+  helper.push_back(build_sop1_encoding(arch, 0x1d, 0, 30).value());
+  auto image = waitcheck_test::make_gfx_multi_kernel_code_object(
+      {{"first", first}, {"second", second}, {"helper", helper}},
+      EF_AMDGPU_MACH_AMDGCN_GFX950);
+  auto *ehdr = reinterpret_cast<Elf64_Ehdr *>(image.data());
+  auto *shdrs = reinterpret_cast<Elf64_Shdr *>(image.data() + ehdr->e_shoff);
+  auto *symbols = reinterpret_cast<Elf64_Sym *>(image.data() + shdrs[3].sh_offset);
+  symbols[5] = {};
+  AmdGpuCodeObject object(image.data(), image.size());
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  const auto report = analyze_waitcnts(object, arch, options);
+  ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+  EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 1u);
+  ASSERT_EQ(report.counter_underaccounting_diagnostics.size(), 1u);
+  EXPECT_EQ(report.counter_underaccounting_diagnostics.front().kernel_name, "first");
+}
+
 TEST(WaitcheckTest, SharedKernelEntryPreservesDistinctWaveModes) {
   const std::vector<uint32_t> words{0xBFB00000U}; // s_endpgm.
   auto image = rocjitsu::waitcheck_test::make_gfx_multi_kernel_code_object(
@@ -16206,7 +16379,7 @@ TEST(WaitcheckTest, Gfx950StandaloneHelperRequiresProvenExternalReturnLink) {
   AmdGpuCodeObject returned(image.data(), image.size());
   ASSERT_TRUE(returned.is_valid());
   const auto direct_return = analyze_waitcnts(returned, arch);
-  EXPECT_TRUE(direct_return.supported && direct_return.complete)
+  EXPECT_TRUE(direct_return.supported && !direct_return.complete)
       << direct_return.analysis_error;
 
   program.insert(program.begin() + 2,
@@ -16220,7 +16393,7 @@ TEST(WaitcheckTest, Gfx950StandaloneHelperRequiresProvenExternalReturnLink) {
   AmdGpuCodeObject restored(image.data(), image.size());
   ASSERT_TRUE(restored.is_valid());
   const auto restored_return = analyze_waitcnts(restored, arch);
-  EXPECT_TRUE(restored_return.supported && restored_return.complete)
+  EXPECT_TRUE(restored_return.supported && !restored_return.complete)
       << restored_return.analysis_error;
 }
 

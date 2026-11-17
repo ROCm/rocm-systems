@@ -99,6 +99,10 @@ public:
     /// In a candidate closed CFG, preserve a known-zero VGPR bank state through calls.
     /// The caller must prove the image preserves zero and discard a CFG with unknown exits.
     bool verify_closed_zero_bank_calls = false;
+
+    /// Keep trap-2 fallthrough when no terminating handler contract is known.
+    /// Existing callers retain the ROCr-oriented CFG behavior by default.
+    bool trap_two_may_resume = false;
   };
 
   /// @brief First missing successor, or control flow requiring indirect analysis.
@@ -326,7 +330,7 @@ private:
              DecodeErrorEmitter emit_error, std::span<const uint64_t> extra_leaders,
              ExternalEntryPolicy entry_policy, std::span<const uint64_t> extra_split_points,
              DecodedSection *prepared, std::span<const CodeRange> permitted_ranges,
-             rj_code_target_id_t target, uint8_t wave_size);
+             rj_code_target_id_t target, uint8_t wave_size, bool trap_two_may_resume);
 
   void note_successor_issue(SuccessorIssue issue) {
     if (successor_issue_ == SuccessorIssue::None)

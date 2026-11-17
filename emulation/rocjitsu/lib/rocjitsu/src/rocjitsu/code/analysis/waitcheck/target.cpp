@@ -348,6 +348,8 @@ uint8_t WaitcheckTarget::wmma_valu_wait_states(const Instruction &inst, rj_code_
 bool WaitcheckTarget::expert_valu_issues_without_active_lanes(const Instruction &inst,
                                                          const RegisterSet &defs) {
   const auto name = inst.mnemonic();
+  // V_CMPX only writes EXEC on CDNA5; on RDNA4 wave64 either pass may skip.
+  // Withhold a younger completion credit unless issue is guaranteed.
   return defs.intersects({RegClass::SGPR, 0, REGISTER_SET_MAX_SGPRS}) ||
          defs.contains({RegClass::VCC, 0, 1}) || name.starts_with("v_cmp_") ||
          name == "v_add_co_ci_u32_e32" || name == "v_sub_co_ci_u32_e32" ||

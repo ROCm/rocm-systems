@@ -136,7 +136,8 @@ std::optional<std::string_view> deferred_reason(const Instruction &inst, rj_code
         op->size_bits() > 0 && (!ref || ref->cls != RegClass::SGPR))
       return "scalar-memory destination is not represented by register tracking";
   }
-  if (is_control_flow_transfer(inst) && !is_program_path_terminator(inst, arch))
+  if (is_control_flow_transfer(inst) &&
+      !is_program_path_terminator(inst, arch, /*assume_trap_two_aborts=*/false))
     return "control flow requires CFG analysis";
   if (name == "s_alloc_vgpr")
     return "dynamic VGPR allocation requires dispatch state";
@@ -207,8 +208,9 @@ RegisterSet registers_for_event(const ClassifiedEvent &event, const RegisterEffe
 
 class StreamAnalyzer {
 public:
-  StreamAnalyzer(rj_code_arch_t arch, WaitcheckStreamOptions options, WaitcheckStreamReport &report)
-      : arch_(arch), options_(options), report_(report) {
+  StreamAnalyzer(rj_code_arch_t arch, rj_code_target_id_t target, WaitcheckStreamOptions options,
+                 WaitcheckStreamReport &report)
+      : arch_(arch), target_(target), options_(options), report_(report) {
     state_.expert_scheduling.enabled = options.expert_scheduling;
   }
 
@@ -250,6 +252,7 @@ public:
 
 private:
   rj_code_arch_t arch_;
+  rj_code_target_id_t target_;
   WaitcheckStreamOptions options_;
   PendingState state_;
   WaitcheckStreamReport &report_;
@@ -298,7 +301,7 @@ private:
     event.counter = classification.counter;
     event.kind = classification.kind;
     if (event.kind == WaitEventKind::ValuMatrix)
-      event.wmma_wait_states = WaitcheckTarget::wmma_valu_wait_states(inst, arch_);
+      event.wmma_wait_states = WaitcheckTarget::wmma_valu_wait_states(inst, arch_, target_);
     event.regs = registers_for_event(classification, effects, inst);
     if (event.counter == WaitCounterKind::VmVsrc &&
         event.kind != WaitEventKind::Gfx10ScalarSource) {
@@ -365,7 +368,8 @@ private:
 };
 
 util::FailureOr<WaitcheckStreamReport> analyze_stream(std::span<const uint32_t> words,
-                                                      rj_code_arch_t arch, Decoder &decoder,
+                                                      rj_code_arch_t arch,
+                                                      rj_code_target_id_t target, Decoder &decoder,
                                                       WaitcheckStreamOptions options,
                                                       const util::DiagnosticEmitter &emit_error) {
   // Runtime diagnostics share the counter model but also support older GPUs.
@@ -388,7 +392,7 @@ util::FailureOr<WaitcheckStreamReport> analyze_stream(std::span<const uint32_t> 
   if (options.expert_scheduling && !amdgpu::supports_expert_scheduling(arch))
     return emit_error.emit() << "expert scheduling is unavailable on this architecture";
   WaitcheckStreamReport report;
-  StreamAnalyzer analyzer{arch, options, report};
+  StreamAnalyzer analyzer{arch, target, options, report};
   size_t index = 0;
   while (index < words.size()) {
     const uint64_t offset = index * sizeof(uint32_t);
@@ -415,7 +419,7 @@ util::FailureOr<WaitcheckStreamReport> analyze_stream(std::span<const uint32_t> 
       return emit_error.emit() << "waitcheck transfer failed at byte " << offset;
     ++report.instructions_analyzed;
     index += static_cast<size_t>(inst.size()) / sizeof(uint32_t);
-    if (is_program_path_terminator(inst, arch))
+    if (is_program_path_terminator(inst, arch, /*assume_trap_two_aborts=*/false))
       break;
   }
   return report;
@@ -432,7 +436,7 @@ analyze_waitcheck_stream(std::span<const uint32_t> words, const IsaTargetRegistr
   auto decoder = Decoder::create(registry, target);
   if (!decoder)
     return emit_error.emit() << "missing waitcheck ISA decoder";
-  return analyze_stream(words, descriptor->architecture_id, *decoder, options, emit_error);
+  return analyze_stream(words, descriptor->architecture_id, target, *decoder, options, emit_error);
 }
 
 util::FailureOr<WaitcheckStreamReport>
@@ -442,6 +446,6 @@ analyze_waitcheck_stream(std::span<const uint32_t> words, rj_code_arch_t arch,
   auto decoder = Decoder::create(arch);
   if (!decoder)
     return emit_error.emit() << "missing waitcheck ISA decoder";
-  return analyze_stream(words, arch, *decoder, options, emit_error);
+  return analyze_stream(words, arch, ROCJITSU_CODE_TARGET_INVALID, *decoder, options, emit_error);
 }
 } // namespace rocjitsu

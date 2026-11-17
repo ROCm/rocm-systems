@@ -158,7 +158,7 @@ find_waitcheck_kernels_exact(const CodeObject &code_object, rj_code_arch_t arch)
   const auto function_sizes = find_waitcheck_function_sizes(code_object);
   std::vector<WaitcheckKernelInfo> kernels;
   for (auto &info : scan_kernel_descriptors(image, text.sectionOffset(), text.size(),
-                                            text.sectionHeaderIndex())) {
+                                            text.sectionHeaderIndex(), /*include_weak=*/true)) {
     const auto size = function_sizes.find(info.entry_text_offset);
     kernels.push_back(waitcheck_kernel_from_descriptor(
         std::move(info.kernel_name), info.descriptor_vaddr, info.entry_text_offset,
@@ -301,7 +301,8 @@ void retry_gfx1250_indirect_calls(const CodeObject &code_object, Decoder &decode
                                          {.entries = entry,
                                           .decode_seeds = seeds,
                                           .wave_size = static_cast<uint8_t>(wavefront_size),
-                                          .verify_closed_zero_bank_calls = true});
+                                          .verify_closed_zero_bank_calls = true,
+                                          .trap_two_may_resume = true});
   if (candidate.succeeded() && std::ranges::all_of(candidate.value(), [](const auto &block) {
         return has_closed_device_transfers(*block);
       }))
@@ -502,7 +503,8 @@ struct Analyzer : private WaitcheckStateOps {
                                   file_offset, arch);
       analyze_instruction(state, *inst, section_name, section_offset, file_offset, arch, true);
       ++report_.instructions_analyzed;
-      if (is_control_flow_transfer(*inst) && !is_program_path_terminator(*inst, arch)) {
+      if (is_control_flow_transfer(*inst) &&
+          !is_program_path_terminator(*inst, arch, /*assume_trap_two_aborts=*/false)) {
         // A raw word span has no CFG. Following the next encoded instruction
         // could skip a wait on the taken path and claim a false pass.
         report_.complete = false;
@@ -1184,7 +1186,28 @@ struct Analyzer : private WaitcheckStateOps {
       if (should_stop_after_diagnostic())
         break;
     }
-    // One physical wait protects all paths that reach this instruction. A
+    if (!defer_shared_parity_finalization_)
+      finish_shared_parity();
+    cfg_outputs_ = {};
+    current_cfg_view_index_.reset();
+    current_function_entry_.reset();
+    current_call_return_sreg_.reset();
+    clear_cfg_path_filter();
+    if (missing_successor) {
+      report_.complete = false;
+      std::ostringstream message;
+      message << "incomplete control flow in " << section_name << "+0x" << std::hex
+              << *missing_successor;
+      report_.analysis_error = message.str();
+    }
+  }
+
+  void set_kernel_context(const WaitcheckKernelInfo *kernel) { current_kernel_ = kernel; }
+
+  void defer_shared_parity_finalization(bool defer) { defer_shared_parity_finalization_ = defer; }
+
+  void finish_shared_parity() {
+    // One physical wait protects every path from every dispatch entry. A
     // completed proof in one caller rules out a weaker setting even if
     // another caller reaches the same wait with no dependency.
     for (auto &entry : shared_parity_) {
@@ -1209,21 +1232,7 @@ struct Analyzer : private WaitcheckStateOps {
       record_counter_underaccounting(std::move(*result.diagnostic));
     }
     shared_parity_.clear();
-    cfg_outputs_ = {};
-    current_cfg_view_index_.reset();
-    current_function_entry_.reset();
-    current_call_return_sreg_.reset();
-    clear_cfg_path_filter();
-    if (missing_successor) {
-      report_.complete = false;
-      std::ostringstream message;
-      message << "incomplete control flow in " << section_name << "+0x" << std::hex
-              << *missing_successor;
-      report_.analysis_error = message.str();
-    }
   }
-
-  void set_kernel_context(const WaitcheckKernelInfo *kernel) { current_kernel_ = kernel; }
 
 private:
   [[nodiscard]] static bool is_counter_token_only(const PendingEvent &event) {
@@ -2357,7 +2366,7 @@ private:
   }
 
   void record_counter_underaccounting(WaitcheckCounterUnderaccountingDiagnostic diag) {
-    if (current_kernel_) {
+    if (current_kernel_ && !diag.has_kernel) {
       diag.has_kernel = true;
       diag.kernel_name = current_kernel_->name;
       diag.kernel_entry_offset = current_kernel_->entry_offset;
@@ -4031,7 +4040,7 @@ private:
       // after a return and from an ordinary branch. One qualifying path can
       // require the encoded field even if another path arrived with no work.
       const auto start = path_query_starts_.find(group.section_offset);
-      const bool shared = function_boundary_policy ||
+      const bool shared = defer_shared_parity_finalization_ || function_boundary_policy ||
                           (start != path_query_starts_.end() && start->second.contexts > 1);
       const auto key =
           std::tuple{group.section_offset, group.last_wait_section_offset, counter, emitted_count};
@@ -4359,6 +4368,11 @@ private:
       }
 
       WaitcheckCounterUnderaccountingDiagnostic diag;
+      if (current_kernel_) {
+        diag.has_kernel = true;
+        diag.kernel_name = current_kernel_->name;
+        diag.kernel_entry_offset = current_kernel_->entry_offset;
+      }
       diag.counter = counter;
       diag.emitted_count = emitted_count;
       diag.required_count = required_count;
@@ -10177,7 +10191,8 @@ private:
       update_va_vdst_hazards(state.va_vdst_hazards, inst, du, section_name, section_offset,
                              file_offset);
 
-    if (is_program_end(inst.mnemonic()) || is_program_path_terminator(inst, arch)) {
+    if (is_program_end(inst.mnemonic()) ||
+        is_program_path_terminator(inst, arch, /*assume_trap_two_aborts=*/false)) {
       state = {};
       return;
     }
@@ -10237,6 +10252,7 @@ private:
     std::optional<WaitcheckCounterUnderaccountingDiagnostic> diagnostic;
   };
   std::map<std::tuple<uint64_t, uint64_t, WaitCounterKind, uint32_t>, SharedParity> shared_parity_;
+  bool defer_shared_parity_finalization_ = false;
   WaitcheckReport &report_;
   WaitcheckOptions options_;
   std::unique_ptr<Decoder> decoder_;
@@ -10448,6 +10464,7 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
 
   uint32_t elf_flags = 0;
   uint8_t hsa_abi = 0;
+  bool amd_gpu_elf = false;
   if (code_object.image_size() >= sizeof(Elf64_Ehdr)) {
     Elf64_Ehdr ehdr{};
     std::memcpy(&ehdr, code_object.image_data(), sizeof(ehdr));
@@ -10458,6 +10475,7 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
         return report;
       }
       if (ehdr.e_machine == EM_AMDGPU) {
+        amd_gpu_elf = true;
         elf_flags = ehdr.e_flags;
         if (ehdr.e_ident[EI_OSABI] == ELFOSABI_AMDGPU_HSA)
           hsa_abi = ehdr.e_ident[EI_ABIVERSION];
@@ -10499,6 +10517,7 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
     report.supported = false;
     report.analysis_error = "decode failed while building CFG: " + std::string(message);
   };
+  bool descriptorless_without_contract = false;
   {
     std::vector<WaitcheckKernelInfo> discovered_kernels;
     if (!kernels_known)
@@ -10510,8 +10529,20 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
     const auto abi_function_entries = hsa_abi != 0 ? all_function_entries : std::vector<uint64_t>{};
     const auto function_entries =
         !kernels_known && kernels.empty() ? all_function_entries : std::vector<uint64_t>{};
-    if (kernels_known && kernels.empty())
+    const bool has_executable_text = std::ranges::any_of(
+        code_object.text_sections(), [](const auto *section) { return section->size() != 0; });
+    descriptorless_without_contract =
+        amd_gpu_elf && kernels.empty() && has_executable_text &&
+        (!selected_kernel_entry || !options.fallback_wavefront_size);
+    analyzer.defer_shared_parity_finalization(kernels.size() + function_entries.size() > 1);
+    if (kernels_known && kernels.empty()) {
+      if (has_executable_text) {
+        report.supported = false;
+        report.complete = false;
+        report.analysis_error = "no kernel descriptors supplied for executable code";
+      }
       return report;
+    }
     if (selected_kernel_entry &&
         std::ranges::find(kernels, *selected_kernel_entry, &WaitcheckKernelInfo::entry_offset) ==
             kernels.end() &&
@@ -10525,7 +10556,8 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
           code_object, analyzer.decoder(), arch,
           {.decode_policy = BasicBlock::DecodePolicy::FullSection,
            .entry_policy = ExternalEntryPolicy::InferPredecessorless,
-           .wave_size = static_cast<uint8_t>(fallback_wavefront_size)},
+           .wave_size = static_cast<uint8_t>(fallback_wavefront_size),
+           .trap_two_may_resume = true},
           DecodeErrorEmitter(cfg_error));
       if (blocks.failed())
         return report;
@@ -10542,7 +10574,8 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
         const auto start = std::chrono::steady_clock::now();
         auto blocks = BasicBlock::build_cfg(
             code_object, analyzer.decoder(), arch,
-            {.entries = entry, .wave_size = static_cast<uint8_t>(wavefront_size)},
+            {.entries = entry, .wave_size = static_cast<uint8_t>(wavefront_size),
+             .trap_two_may_resume = true},
             DecodeErrorEmitter(cfg_error));
         if (blocks.failed())
           return;
@@ -10583,10 +10616,19 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
             break;
         }
       }
+      if (report.supported && !report.stopped_early)
+        analyzer.finish_shared_parity();
     }
   }
   if (!report.supported)
     return report;
+  if (descriptorless_without_contract) {
+    report.complete = false;
+    if (report.analysis_error.empty())
+      report.analysis_error =
+          "descriptorless code needs an explicit entry offset and wavefront size for complete "
+          "analysis";
+  }
   if (report.stopped_early)
     return report;
   if (selected_kernel_entry || kernels_known)

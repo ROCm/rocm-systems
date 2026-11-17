@@ -25,14 +25,16 @@ using KD = rocjitsu::amdhsa::kernel_descriptor_t;
 static_assert(sizeof(KD) == 64, "AMDHSA kernel descriptor size changed");
 
 [[nodiscard]] std::optional<std::string>
-kernel_descriptor_symbol_name(const Elf64_Sym &sym, const char *strtab, size_t strtab_size) {
+kernel_descriptor_symbol_name(const Elf64_Sym &sym, const char *strtab, size_t strtab_size,
+                              bool include_weak) {
   if (sym.st_size != sizeof(KD))
     return std::nullopt;
 
-  // AMDHSA kernel descriptors are global object symbols. Size alone is not a
-  // durable signal because unrelated data objects can also be 64 bytes.
+  // AMDHSA kernel descriptors are named object symbols. Waitcheck also admits
+  // weak definitions; other callers retain the original global-only policy.
+  const auto binding = elf_symbol_bind(sym.st_info);
   if (elf_symbol_type(sym.st_info) != kElfSymbolTypeObject ||
-      elf_symbol_bind(sym.st_info) != kElfSymbolBindGlobal)
+      (binding != kElfSymbolBindGlobal && !(include_weak && binding == kElfSymbolBindWeak)))
     return std::nullopt;
 
   // AMDHSA descriptors are named "<kernel>.kd". An unnamed 64-byte global object
@@ -78,7 +80,7 @@ text_vaddr_for_section(uint64_t text_offset, uint64_t text_size,
 
 std::vector<KernelDescriptorInfo>
 scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, uint64_t text_size,
-                        std::optional<size_t> text_section_index) {
+                        std::optional<size_t> text_section_index, bool include_weak) {
   std::vector<KernelDescriptorInfo> out;
   if (image.size() < sizeof(Elf64_Ehdr))
     return out;
@@ -125,7 +127,7 @@ scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, ui
 
     for (const Elf64_Sym &symbol : *symbols) {
       std::optional<std::string> kernel_name =
-          kernel_descriptor_symbol_name(symbol, strtab, strtab_size);
+          kernel_descriptor_symbol_name(symbol, strtab, strtab_size, include_weak);
       if (!kernel_name)
         continue;
 
