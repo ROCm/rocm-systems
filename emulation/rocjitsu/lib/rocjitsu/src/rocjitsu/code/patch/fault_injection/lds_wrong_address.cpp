@@ -90,10 +90,10 @@ join_lds_profiles(const std::array<LdsProfile, Sizes> &...groups) {
   make_lds_profiles(ROCJITSU_CODE_TARGET_GFX942, IsaFamily::Cdna3, __VA_ARGS__)
 #define CDNA4_LDS_PROFILES(...)                                                                    \
   make_lds_profiles(ROCJITSU_CODE_TARGET_GFX950, IsaFamily::Cdna4, __VA_ARGS__)
-#define CDNA5_LDS_PROFILES(...)                                                                    \
-  make_lds_profiles(ROCJITSU_CODE_TARGET_GFX1250, IsaFamily::Cdna5, __VA_ARGS__)
+#define CDNA5_LDS_PROFILES(target_name, ...)                                                       \
+  make_lds_profiles(ROCJITSU_CODE_TARGET_##target_name, IsaFamily::Cdna5, __VA_ARGS__)
 
-constexpr std::array<LdsProfile, 145> kLdsProfiles = join_lds_profiles(
+constexpr std::array<LdsProfile, 209> kLdsProfiles = join_lds_profiles(
     RDNA4_LDS_PROFILES(GFX1200, replace_rdna4_b32_address, "ds_store_b32"),
     RDNA4_LDS_PROFILES(GFX1201, replace_rdna4_b32_address, "ds_store_b32"),
     RDNA4_LDS_PROFILES(GFX1200, replace_rdna4_b32_address, "ds_load_b32"),
@@ -106,12 +106,12 @@ constexpr std::array<LdsProfile, 145> kLdsProfiles = join_lds_profiles(
     CDNA4_LDS_PROFILES(amdgpu::replace_cdna_ds_write_address, "ds_write_b32", "ds_write_b128"),
     CDNA3_LDS_PROFILES(amdgpu::replace_ds_address_field, "ds_read2_b64", "ds_write2st64_b64"),
     CDNA4_LDS_PROFILES(amdgpu::replace_ds_address_field, "ds_read2_b64", "ds_write2st64_b64"),
-    CDNA5_LDS_PROFILES(cdna5::replace_ds_b32_address, "ds_store_b32", "ds_load_b32"),
+    CDNA5_LDS_PROFILES(GFX1250, cdna5::replace_ds_b32_address, "ds_store_b32", "ds_load_b32"),
     RDNA4_LDS_PROFILES(GFX1200, amdgpu::replace_ds_address_field, "ds_load_b96", "ds_store_b96"),
     RDNA4_LDS_PROFILES(GFX1201, amdgpu::replace_ds_address_field, "ds_load_b96", "ds_store_b96"),
     CDNA3_LDS_PROFILES(amdgpu::replace_ds_address_field, "ds_read_b96", "ds_write_b96"),
     CDNA4_LDS_PROFILES(amdgpu::replace_ds_address_field, "ds_read_b96", "ds_write_b96"),
-    CDNA5_LDS_PROFILES(amdgpu::replace_ds_address_field, "ds_load_b96", "ds_store_b96"),
+    CDNA5_LDS_PROFILES(GFX1250, amdgpu::replace_ds_address_field, "ds_load_b96", "ds_store_b96"),
     RDNA4_LDS_PROFILES(GFX1200, amdgpu::replace_ds_address_field, "ds_load_b64", "ds_store_b64",
                        "ds_load_b128", "ds_store_b128", "ds_load_2addr_b32",
                        "ds_load_2addr_stride64_b32", "ds_store_2addr_stride64_b32",
@@ -122,7 +122,7 @@ constexpr std::array<LdsProfile, 145> kLdsProfiles = join_lds_profiles(
                        "ds_load_2addr_stride64_b32", "ds_store_2addr_stride64_b32",
                        "ds_store_2addr_b64", "ds_load_2addr_stride64_b64",
                        "ds_store_2addr_stride64_b64"),
-    CDNA5_LDS_PROFILES(amdgpu::replace_ds_address_field, "ds_load_b64", "ds_store_b64",
+    CDNA5_LDS_PROFILES(GFX1250, amdgpu::replace_ds_address_field, "ds_load_b64", "ds_store_b64",
                        "ds_load_b128", "ds_store_b128"),
     CDNA3_LDS_PROFILES(amdgpu::replace_ds_address_field, "ds_read_b32", "ds_read_b64",
                        "ds_write_b64", "ds_read_b128", "ds_read2_b32", "ds_write2_b32",
@@ -132,9 +132,9 @@ constexpr std::array<LdsProfile, 145> kLdsProfiles = join_lds_profiles(
                        "ds_write_b64", "ds_read_b128", "ds_read2_b32", "ds_write2_b32",
                        "ds_read2st64_b32", "ds_write2st64_b32", "ds_write2_b64",
                        "ds_read2st64_b64"),
-    CDNA5_LDS_PROFILES(amdgpu::replace_ds_address_field, "ds_load_u16", "ds_load_i16", "ds_load_u8",
-                       "ds_load_i8", "ds_store_b8", "ds_store_b8_d16_hi", "ds_store_b16",
-                       "ds_store_b16_d16_hi"),
+    CDNA5_LDS_PROFILES(GFX1250, amdgpu::replace_ds_address_field, "ds_load_u16", "ds_load_i16",
+                       "ds_load_u8", "ds_load_i8", "ds_store_b8", "ds_store_b8_d16_hi",
+                       "ds_store_b16", "ds_store_b16_d16_hi"),
     CDNA4_LDS_PROFILES(amdgpu::replace_ds_address_field, "ds_read_u16", "ds_read_b64_tr_b16",
                        "ds_write_b16", "ds_read_i8", "ds_read_u8", "ds_write_b8",
                        "ds_write_b8_d16_hi", "ds_write_b16_d16_hi"),
@@ -148,16 +148,39 @@ constexpr std::array<LdsProfile, 145> kLdsProfiles = join_lds_profiles(
                        "ds_load_i8_d16", "ds_load_i8_d16_hi", "ds_load_u16_d16",
                        "ds_load_u16_d16_hi", "ds_store_b8", "ds_store_b16", "ds_store_b8_d16_hi",
                        "ds_store_b16_d16_hi"),
-    CDNA5_LDS_PROFILES(amdgpu::replace_ds_address_field, "ds_load_u8_d16", "ds_load_u8_d16_hi",
-                       "ds_load_i8_d16", "ds_load_i8_d16_hi", "ds_load_u16_d16",
-                       "ds_load_u16_d16_hi", "ds_load_tr8_b64", "ds_load_tr16_b128"),
+    CDNA5_LDS_PROFILES(GFX1250, amdgpu::replace_ds_address_field, "ds_load_u8_d16",
+                       "ds_load_u8_d16_hi", "ds_load_i8_d16", "ds_load_i8_d16_hi",
+                       "ds_load_u16_d16", "ds_load_u16_d16_hi", "ds_load_tr8_b64",
+                       "ds_load_tr16_b128"),
     CDNA3_LDS_PROFILES(amdgpu::replace_ds_address_field, "ds_read_i8", "ds_read_u8", "ds_read_i16",
                        "ds_read_u16", "ds_read_u8_d16", "ds_read_u8_d16_hi", "ds_read_i8_d16",
                        "ds_read_i8_d16_hi", "ds_read_u16_d16", "ds_read_u16_d16_hi", "ds_write_b8",
                        "ds_write_b16", "ds_write_b8_d16_hi", "ds_write_b16_d16_hi"),
     CDNA4_LDS_PROFILES(amdgpu::replace_ds_address_field, "ds_read_i16", "ds_read_u8_d16",
                        "ds_read_u8_d16_hi", "ds_read_i8_d16", "ds_read_i8_d16_hi",
-                       "ds_read_u16_d16", "ds_read_u16_d16_hi"));
+                       "ds_read_u16_d16", "ds_read_u16_d16_hi"),
+    make_lds_profiles(ROCJITSU_CODE_TARGET_GFX1100, IsaFamily::Rdna3,
+                      amdgpu::replace_ds_address_field, "ds_load_b32", "ds_load_b64", "ds_load_b96",
+                      "ds_load_b128", "ds_store_b32", "ds_store_b64", "ds_store_b96",
+                      "ds_store_b128", "ds_load_2addr_b32", "ds_store_2addr_b32",
+                      "ds_load_2addr_stride64_b32", "ds_store_2addr_stride64_b32",
+                      "ds_load_2addr_b64", "ds_store_2addr_b64", "ds_load_2addr_stride64_b64",
+                      "ds_store_2addr_stride64_b64", "ds_load_i8", "ds_load_u8", "ds_load_i16",
+                      "ds_load_u16", "ds_load_u8_d16", "ds_load_u8_d16_hi", "ds_load_i8_d16",
+                      "ds_load_i8_d16_hi", "ds_load_u16_d16", "ds_load_u16_d16_hi", "ds_store_b8",
+                      "ds_store_b16", "ds_store_b8_d16_hi", "ds_store_b16_d16_hi"),
+    // gfx1251 replaces one intact VDS; gfx1250 retains its original split-replay exclusions.
+    CDNA5_LDS_PROFILES(GFX1251, cdna5::replace_ds_b32_address, "ds_store_b32", "ds_load_b32"),
+    CDNA5_LDS_PROFILES(GFX1251, amdgpu::replace_ds_address_field, "ds_load_b64", "ds_load_b96",
+                       "ds_load_b128", "ds_store_b64", "ds_store_b96", "ds_store_b128",
+                       "ds_load_2addr_b32", "ds_store_2addr_b32", "ds_load_2addr_stride64_b32",
+                       "ds_store_2addr_stride64_b32", "ds_load_2addr_b64", "ds_store_2addr_b64",
+                       "ds_load_2addr_stride64_b64", "ds_store_2addr_stride64_b64", "ds_load_i8",
+                       "ds_load_u8", "ds_load_i16", "ds_load_u16", "ds_load_u8_d16",
+                       "ds_load_u8_d16_hi", "ds_load_i8_d16", "ds_load_i8_d16_hi",
+                       "ds_load_u16_d16", "ds_load_u16_d16_hi", "ds_store_b8", "ds_store_b16",
+                       "ds_store_b8_d16_hi", "ds_store_b16_d16_hi", "ds_load_tr4_b64",
+                       "ds_load_tr6_b96", "ds_load_tr8_b64", "ds_load_tr16_b128"));
 
 #undef RDNA4_LDS_PROFILES
 #undef CDNA3_LDS_PROFILES
@@ -177,9 +200,13 @@ replace_lds_address(const LdsProfile &profile, std::span<const uint32_t> words, 
   if (!profile.rewrite || words.size() != 2) {
     return std::nullopt;
   }
-  // GDS is outside the LDS profile. ACC refers to data and is preserved.
+  // GDS is outside the LDS profile: CDNA3/4 use bit16, RDNA3 uses bit17.
+  // CDNA ACC refers to data and is preserved.
   if ((profile.arch == IsaFamily::Cdna3 || profile.arch == IsaFamily::Cdna4) &&
       (words[0] & 0x00010000u) != 0) {
+    return std::nullopt;
+  }
+  if (profile.arch == IsaFamily::Rdna3 && (words[0] & 0x00020000u) != 0) {
     return std::nullopt;
   }
   return profile.rewrite(profile.target, words, reg);
@@ -194,9 +221,9 @@ std::vector<LdsCapability> lds_wrong_address_capabilities() {
       continue;
     }
     capabilities.push_back({.target = profile.target,
-                            .wave_size = profile.target == ROCJITSU_CODE_TARGET_GFX1250 ? 32u : 64u,
+                            .wave_size = profile.arch == IsaFamily::Cdna5 ? 32u : 64u,
                             .form = profile.form});
-    if (profile.arch == IsaFamily::Rdna4) {
+    if (profile.arch == IsaFamily::Rdna3 || profile.arch == IsaFamily::Rdna4) {
       capabilities.push_back({.target = profile.target, .wave_size = 32u, .form = profile.form});
     }
   }
@@ -278,11 +305,12 @@ FailureOr<LdsInventory> discover_lds_wrong_address(const FaultMutationContext &c
   }
   error = {};
   const FaultSourceFacts &facts = ownership ? shared_facts : *found.value();
-  const bool cdna5 = target == ROCJITSU_CODE_TARGET_GFX1250;
+  const bool cdna5 = target_profile->arch == IsaFamily::Cdna5;
   const uint32_t wave = kernel_wavefront_size(target_profile->arch, facts.descriptor.descriptor);
-  const bool rdna4 = target_profile->arch == IsaFamily::Rdna4;
-  if ((!rdna4 && wave != (cdna5 ? 32u : 64u)) ||
-      (!rdna4 && !cdna5 &&
+  const bool rdna =
+      target_profile->arch == IsaFamily::Rdna3 || target_profile->arch == IsaFamily::Rdna4;
+  if ((!rdna && wave != (cdna5 ? 32u : 64u)) ||
+      (!rdna && !cdna5 &&
        (facts.descriptor.descriptor.kernel_code_properties &
         amdhsa::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32) != 0)) {
     return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedForm,
@@ -387,8 +415,8 @@ FailureOr<LdsInventory> discover_lds_wrong_address(const FaultMutationContext &c
           }
           const KernelDescriptorInfo &descriptor = (*owner_kernels)[owner.kernel_index];
           const uint32_t owner_wave = kernel_wavefront_size(profile->arch, descriptor.descriptor);
-          if ((!rdna4 && owner_wave != (cdna5 ? 32u : 64u)) ||
-              (!rdna4 && !cdna5 &&
+          if ((!rdna && owner_wave != (cdna5 ? 32u : 64u)) ||
+              (!rdna && !cdna5 &&
                (descriptor.descriptor.kernel_code_properties &
                 amdhsa::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32) != 0)) {
             valid = false;
@@ -399,7 +427,7 @@ FailureOr<LdsInventory> discover_lds_wrong_address(const FaultMutationContext &c
                                   amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT) +
                1) *
               descriptor_vgpr_granularity_for_wavefront(profile->arch, owner_wave);
-          if (!rdna4 && !cdna5)
+          if (!rdna && !cdna5)
             count =
                 std::min(count, (RJ_AMDHSA_BITS_GET(descriptor.descriptor.compute_pgm_rsrc3,
                                                     amdhsa::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET) +

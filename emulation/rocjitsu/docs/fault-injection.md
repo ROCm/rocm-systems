@@ -107,9 +107,9 @@ Generic mechanics and recipe semantics have separate responsibilities:
 | Feature | Status and main boundary | References |
 | --- | --- | --- |
 | Complete barrier Drop | Implemented for the target/wave forms below. Removes one logical barrier: an ordered two-member signal/wait pair or one true full-barrier instruction. A half-pair is never a singleton. | [`StaticBarrier` / family policy](../lib/rocjitsu/src/rocjitsu/code/analysis/static_barriers.h), [qualification](../lib/rocjitsu/src/rocjitsu/code/analysis/static_barriers.cpp), [analysis regressions](../tests/analysis/static_barriers_test.cpp), [Drop regressions](../tests/patch/fault_injection/drop_barrier_test.cpp) |
-| LDS wrong address | Implements scalar b32/b64/b96/b128 loads and stores on gfx1200/gfx1201 wave32/wave64, gfx942/gfx950 wave64, and gfx1250 wave32. Also admits b32/b64 two-address and stride64 families on gfx1200/gfx1201/gfx942/gfx950. Replaces only the address VGPR with an explicitly supplied, distinct VGPR that satisfies every affected owner's allocation and bank checks. Adds the target-specific subword, D16, and transpose profiles in the exact LDS matrices below. Other forms and targets remain follow-up work. | [LDS API](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/lds_wrong_address.h), [library tests](../tests/patch/fault_injection/lds_wrong_address_test.cpp), [CLI tests](../tests/patch/fault_injection/lds_cli_test.cpp) |
+| LDS wrong address | Implements the exact scalar, two-address, subword, D16 and transpose matrices below on seven concrete targets and ten target/wave profiles. Replaces only the address VGPR with an explicitly supplied, distinct, allocated VGPR. Direct and shared execution owners must all satisfy allocation and bank requirements. | [LDS API](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/lds_wrong_address.h), [library tests](../tests/patch/fault_injection/lds_wrong_address_test.cpp), [CLI tests](../tests/patch/fault_injection/lds_cli_test.cpp) |
 | Exact and logical-ordinal selection | An exact kernel name chooses one inventory; an exact context-bound handle takes precedence over the zero-based logical ordinal. Invalid exact requests fail without fallback. Ordinal zero chooses the first barrier by first-member offset, or the first LDS instruction by source offset. There is no race ranking or legacy physical-index adapter. | [`DropBarrierSelector`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.h), [`select_drop_barrier`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.cpp), [`LdsSelector`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/lds_wrong_address.h) and [`select_lds_wrong_address`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/lds_wrong_address.cpp), [selection regressions](../tests/patch/fault_injection/drop_barrier_test.cpp) |
-| Multiple kernels in one text section | Discovery checks all entries before exposing one exact kernel's inventory. Drop requires independent sibling CFGs; LDS also admits shared sites when complete affected ownership is proved. Unresolved owners are rejected. | [`FaultMutationContext`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/fault_mutation_context.h), [ownership analysis](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/fault_mutation_context.cpp), [sibling preservation tests](../tests/patch/fault_injection/drop_barrier_test.cpp) |
+| Multiple kernels in one text section | Discovery checks all entries before exposing one exact kernel's inventory. Drop requires independent sibling CFGs; LDS retains complete affected-owner facts for shared helpers. Unresolved or incomplete ownership is rejected. | [`FaultMutationContext`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/fault_mutation_context.h), [ownership analysis](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/fault_mutation_context.cpp), [sibling preservation tests](../tests/patch/fault_injection/drop_barrier_test.cpp) |
 | Shared DBI instruction replacement | Consumed through `InstrumentationKind::ReplaceWithInst`. One transaction replaces complete source instructions through trampolines. Drop supplies one 4-byte NOP body for each qualified 4-byte barrier member. This does not widen observational trampoline-anchor admission. | [Instrumentor contract](../lib/rocjitsu/src/rocjitsu/code/patch/instrumentor.h), [DBI design](dbi-design.md), [transaction tests](../tests/patch/checked_text_edits_test.cpp), [replacement tests](../tests/patch/instrumentor_replacement_test.cpp) |
 | Offline CLI | Lists current-input sites and emits one complete Drop or one supported LDS address mutation using the same library. | [usage](#command-line-usage), [frontend](../tools/rj_code_mutate.cpp), [integration tests](../tests/patch/fault_injection/mutation_cli_test.cpp) |
 | Persistent selection files and replay bundles | Not provided; no durable replay format is committed. | — |
@@ -149,13 +149,12 @@ targets and ten target/wave combinations:
 | CDNA4 | gfx950 | 64 | Full `s_barrier` singleton, workgroup |
 
 The table above describes Drop only. `lds_wrong_address_capabilities()` separately
-reports the exact LDS matrix below: scalar b32/b64/b96/b128 loads and stores on
-all five concrete targets, plus b32/b64 two-address and stride64 families on
-gfx1200/gfx1201/gfx942/gfx950 and the target-specific subword/transpose
-profiles below. LDS admits independent direct CFGs and qualified shared sites
-with complete affected-owner facts; the exact ownership and emission limits
-are described below.
-CDNA GDS encodings are excluded; the ACC data selector is preserved.
+reports the exact seven-target, ten-target/wave LDS matrices below. LDS admits
+independent direct CFGs and shared sites with complete affected-owner facts.
+Every affected owner must satisfy allocation and, on CDNA5, agree on the proven
+address bank. GDS encodings are excluded using the concrete target's field;
+the CDNA ACC data selector is preserved. The ownership and emission limits are
+described below.
 A target is omitted if its decoder or binding is not linked. Other targets,
 waves, and DS forms are not advertised by this recipe; the Drop table does not
 imply LDS support.
@@ -235,31 +234,41 @@ The LDS address profiles cover these exact instruction families:
 
 | Concrete target | Waves | Scalar forms | Two-address forms |
 | --- | --- | --- | --- |
-| gfx1200, gfx1201 | 32, 64 | `ds_load_b32/b64/b96/b128`, `ds_store_b32/b64/b96/b128` | `ds_load_2addr_b32/b64`, `ds_store_2addr_b32/b64`, `ds_load_2addr_stride64_b32/b64`, `ds_store_2addr_stride64_b32/b64` |
+| gfx1100, gfx1200, gfx1201 | 32, 64 | `ds_load_b32/b64/b96/b128`, `ds_store_b32/b64/b96/b128` | `ds_load_2addr_b32/b64`, `ds_store_2addr_b32/b64`, `ds_load_2addr_stride64_b32/b64`, `ds_store_2addr_stride64_b32/b64` |
 | gfx942, gfx950 | 64 | `ds_read_b32/b64/b96/b128`, `ds_write_b32/b64/b96/b128` | `ds_read2_b32/b64`, `ds_write2_b32/b64`, `ds_read2st64_b32/b64`, `ds_write2st64_b32/b64` |
-| gfx1250 | 32 | `ds_load_b32/b64/b96/b128`, `ds_store_b32/b64/b96/b128` | None; these forms require split relocation outside this profile. |
+| gfx1250 | 32 | `ds_load_b32/b64/b96/b128`, `ds_store_b32/b64/b96/b128` | Excluded by the retained gfx1250 profile. |
+| gfx1251 | 32 | `ds_load_b32/b64/b96/b128`, `ds_store_b32/b64/b96/b128` | `ds_load_2addr_b32/b64`, `ds_store_2addr_b32/b64`, `ds_load_2addr_stride64_b32/b64`, `ds_store_2addr_stride64_b32/b64` |
 
 Additional subword and transpose forms are admitted only on their listed targets:
 
 | Concrete target | Subword forms | Transpose forms |
 | --- | --- | --- |
-| gfx1200, gfx1201 | `ds_load_i8/u8/i16/u16`, `ds_load_u8_d16`, `ds_load_i8_d16`, `ds_load_u16_d16` and their `_hi` variants; `ds_store_b8/b16` and their `_d16_hi` variants | None |
+| gfx1100, gfx1200, gfx1201 | `ds_load_i8/u8/i16/u16`, `ds_load_u8_d16`, `ds_load_i8_d16`, `ds_load_u16_d16` and their `_hi` variants; `ds_store_b8/b16` and their `_d16_hi` variants | None |
 | gfx942 | `ds_read_i8/u8/i16/u16`, `ds_read_u8_d16`, `ds_read_i8_d16`, `ds_read_u16_d16` and their `_hi` variants; `ds_write_b8/b16` and their `_d16_hi` variants | None |
 | gfx950 | Same subword families as gfx942 | `ds_read_b64_tr_b16` |
-| gfx1250 | Same subword families as gfx1200/gfx1201 | `ds_load_tr8_b64`, `ds_load_tr16_b128` |
+| gfx1250 | Same subword families as gfx1100/gfx1200/gfx1201 | `ds_load_tr8_b64`, `ds_load_tr16_b128` |
+| gfx1251 | Same subword families as gfx1100/gfx1200/gfx1201 | `ds_load_tr4_b64`, `ds_load_tr6_b96`, `ds_load_tr8_b64`, `ds_load_tr16_b128` |
 
-All admitted gfx1200/gfx1201 forms support both descriptor-selected waves.
-Wave32 allocation uses the descriptor granularity of eight VGPRs. The gfx1250
-two-address exclusion also applies when other transpose forms are admitted.
+All admitted gfx1100/gfx1200/gfx1201 forms support both descriptor-selected
+waves: Wave32 uses descriptor granules of eight VGPRs and Wave64 uses four.
+gfx1250/gfx1251 always use Wave32 with descriptor granules of sixteen VGPRs,
+including code objects that omit the legacy Wave32 enable bit.
+
+The gfx1251 two-address profile preserves one complete eight-byte VDS instruction,
+including both offsets. The gfx1250 two-address exclusion is retained from its
+original ConSan split-replay qualification; it is a profile policy, not a limitation
+of the raw address-field setter. Its existing transpose profiles remain admitted.
+ADDTID operations use M0 and lane ID without an address VGPR and are excluded.
+RDNA3 has no corresponding transpose opcodes; concrete decoding rejects them.
 
 A slash-separated width suffix denotes each named form, for example
 `ds_load_b32/b64` denotes `ds_load_b32` and `ds_load_b64`; similarly,
 `ds_load_i8/u8` denotes `ds_load_i8` and `ds_load_u8`. The two matrices cover
-145 concrete target/form profiles, expanded to 205 target/wave/form capabilities. Only the
-address VGPR selector changes; the two offsets, stride semantics, data and
-destination tuples, and CDNA ACC bit are preserved. CDNA3/4 GDS instructions
-remain excluded. gfx1250 requires a statically proven address bank and checks
-the replacement selector against that bank's allocated register window.
+209 concrete target/form profiles, expanded to 299 target/wave/form capabilities.
+Only the address VGPR selector changes; the two offsets, stride semantics, data and
+destination tuples, and CDNA ACC bit are preserved. GDS instructions remain
+excluded using RDNA3 bit17 and CDNA3/4 bit16. gfx1250/gfx1251 require a statically
+proven address bank and check the replacement selector against that bank's allocated register window.
 
 The LDS inventory contains complete, reachable instructions of the admitted forms in
 the kernel; clause members are not advertised. It does not require a
@@ -268,8 +277,10 @@ explicit, representable in the eight-bit encoded address field, different from
 the original, and inside every affected descriptor's allocated ordinary VGPR window.
 A shared instruction is one physical site even when selected through either owner.
 Discovery retains all owners before applying the exact kernel filter, and requires
-all gfx1250 owners to prove the same address bank at that instruction. Preload
-roots use the shared hardware-entry policy. A shared exact handle may be rebound
+all gfx1250/gfx1251 owners to prove the same address bank at that instruction.
+Bank analysis uses each concrete target's MODE capability: gfx1250 enables its
+setreg fixup and adjacency hazard; gfx1251 uses ordinary right-justified HWREG
+slices without that fixup. Preload roots use the shared hardware-entry policy. A shared exact handle may be rebound
 through another affected owner of the same immutable source; unrelated owners and
 foreign or expired contexts cannot authorize it.
 
@@ -403,12 +414,12 @@ emulation/rocjitsu/build/tools/rj_code_mutate \
 ```
 
 The `--address-vgpr` argument is the encoded 8-bit selector, not a physical VGPR
-number. Listing reports `address_bank`; for gfx1250, allocation is checked for
+number. Listing reports `address_bank`; for gfx1250/gfx1251, allocation is checked for
 `256 * address_bank + address-vgpr`. The caller must initialize that full VGPR
 with the intended runtime address: bank 1 with selector 6 reads v262, so initialize
 v262. The mutation preserves the bank and does not initialize register values.
 
-To list the supported LDS instructions in a gfx1200 or gfx1201 wave32 or wave64 kernel and mutate one,
+To list the supported LDS instructions in a gfx1100, gfx1200 or gfx1201 wave32 or wave64 kernel and mutate one,
 choose an address register whose runtime value the caller has initialized. Here
 `v6` is an example only: it must differ from the selected instruction's address
 register and fall within the kernel descriptor's allocated VGPR window.
