@@ -18,13 +18,13 @@ namespace profiler_hub::reader_types
 
 using timestamp_ns_t = size_t;
 
-enum class event_kind_t  // NOLINT(performance-enum-size)
+enum class event_kind_t
 {
     region,  ///< Has start and end, displayed as bar/span
     instant  ///< Single point in time, displayed as marker/dot
 };
 
-enum class event_type_t  // NOLINT(performance-enum-size)
+enum class event_type_t
 {
     region,
     kernel_dispatch,
@@ -46,7 +46,7 @@ struct pagination_t
     std::optional<size_t> offset{ std::nullopt };  ///< Skip first N events
 };
 
-enum class sort_order_t  // NOLINT(performance-enum-size)
+enum class sort_order_t
 {
     ascending,
     descending
@@ -57,7 +57,7 @@ enum class sort_order_t  // NOLINT(performance-enum-size)
  *
  * Typed enum prevents ORDER BY injection that a raw string would permit.
  */
-enum class sort_property_t  // NOLINT(performance-enum-size)
+enum class sort_property_t
 {
     start,     ///< Sort by start timestamp
     end,       ///< Sort by end timestamp
