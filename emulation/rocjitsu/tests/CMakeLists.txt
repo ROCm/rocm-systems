@@ -461,6 +461,8 @@ add_executable(
     sdma_ring_consumer_test.cpp
     cdna5_tensor_dma_test.cpp
     ds_address_encoded_fields_test.cpp
+    gfx1100_ds_address_test.cpp
+    gfx1251_ds_address_test.cpp
     ds_memory_snapshot_test.cpp
     ds_gws_test.cpp
     buffer_lds_transfer_test.cpp
