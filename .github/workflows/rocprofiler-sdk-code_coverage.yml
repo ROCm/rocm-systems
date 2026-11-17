@@ -473,3 +473,31 @@ jobs:
         path: gpu-coredumps/
         if-no-files-found: ignore
         retention-days: 7
+
+    # ROCr writes no core dump for a GPU hang. The amdgpu and KFD drivers record a hang or
+    # reset, and the cause of a GPU fault, in the kernel log, not in the test output. The
+    # container is privileged, so the kernel log may be readable.
+    - name: Print GPU kernel log
+      if: ${{ failure() }}
+      timeout-minutes: 2
+      shell: bash
+      run: |
+        if ! command -v dmesg > /dev/null; then
+          echo "dmesg is not available in the container"
+          exit 0
+        fi
+        if ! kernel_log=$(dmesg -T 2>&1); then
+          echo "dmesg could not read the kernel log:"
+          echo "${kernel_log}"
+          exit 0
+        fi
+        if [ -z "${kernel_log}" ]; then
+          echo "the kernel log is empty"
+          exit 0
+        fi
+        gpu_lines=$(printf '%s\n' "${kernel_log}" | grep -i -E "amdgpu|kfd|gpu reset|ring .*timeout|vm fault|page fault" | tail -n 300 || true)
+        if [ -n "${gpu_lines}" ]; then
+          echo "${gpu_lines}"
+        else
+          echo "no GPU lines in the kernel log ($(printf '%s\n' "${kernel_log}" | wc -l) lines in total)"
+        fi
