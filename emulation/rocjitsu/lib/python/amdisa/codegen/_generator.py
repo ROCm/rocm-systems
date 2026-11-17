@@ -18251,6 +18251,9 @@ class CodeGenerator:
                 if self.isa_spec.arch_name in (
                     'cdna1',
                     'cdna2',
+                    'cdna3',
+                    'cdna4',
+                    'cdna5',
                     'rdna1',
                     'rdna2',
                     'rdna3_5',

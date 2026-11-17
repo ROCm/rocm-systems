@@ -1298,6 +1298,9 @@ void add_fp(std::vector<Benchmark> &cases) {
   add(cases, "fp", "v_fract_f64_w64_gfx12", [](Operands &r, uint64_t flags) {
     return rj_arith_v_fract_f64_w64_gfx12(flags, UINT64_MAX, 0, r.d, r.a, &r.status);
   });
+  add(cases, "fp", "v_fract_f64_w64_gfx908", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_fract_f64_w64_gfx908(flags, UINT64_MAX, 0, r.d, r.a, &r.status);
+  });
   add(cases, "fp", "v_sqrt_f64_w64", [](Operands &r, uint64_t flags) {
     return rj_arith_v_sqrt_f64_w64(flags, UINT64_MAX, 0, r.d, r.a, &r.status);
   });
@@ -1336,6 +1339,9 @@ void add_fp(std::vector<Benchmark> &cases) {
   });
   add(cases, "fp", "v_frexp_mant_f64_w64_gfx12", [](Operands &r, uint64_t flags) {
     return rj_arith_v_frexp_mant_f64_w64_gfx12(flags, UINT64_MAX, 0, r.d, r.a, &r.status);
+  });
+  add(cases, "fp", "v_frexp_mant_f64_w64_gfx908", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_frexp_mant_f64_w64_gfx908(flags, UINT64_MAX, 0, r.d, r.a, &r.status);
   });
   add(cases, "fp", "v_min_f64_w64", [](Operands &r, uint64_t flags) {
     return rj_arith_v_min_f64_w64(flags, UINT64_MAX, 0, r.d, r.a, r.b, &r.status);
@@ -1667,6 +1673,9 @@ void add_fp(std::vector<Benchmark> &cases) {
   add(cases, "fp", "v_fract_f64_w32_gfx12", [](Operands &r, uint64_t flags) {
     return rj_arith_v_fract_f64_w32_gfx12(flags, UINT32_MAX, 0, r.d, r.a, &r.status);
   });
+  add(cases, "fp", "v_fract_f64_w32_gfx908", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_fract_f64_w32_gfx908(flags, UINT32_MAX, 0, r.d, r.a, &r.status);
+  });
   add(cases, "fp", "v_sqrt_f64_w32", [](Operands &r, uint64_t flags) {
     return rj_arith_v_sqrt_f64_w32(flags, UINT32_MAX, 0, r.d, r.a, &r.status);
   });
@@ -1693,6 +1702,9 @@ void add_fp(std::vector<Benchmark> &cases) {
   });
   add(cases, "fp", "v_frexp_mant_f64_w32_gfx12", [](Operands &r, uint64_t flags) {
     return rj_arith_v_frexp_mant_f64_w32_gfx12(flags, UINT32_MAX, 0, r.d, r.a, &r.status);
+  });
+  add(cases, "fp", "v_frexp_mant_f64_w32_gfx908", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_frexp_mant_f64_w32_gfx908(flags, UINT32_MAX, 0, r.d, r.a, &r.status);
   });
   add(cases, "fp", "v_frexp_exp_i32_f32_w32", [](Operands &r, uint64_t flags) {
     return rj_arith_v_frexp_exp_i32_f32_w32(flags, UINT32_MAX, 0, r.d, r.a, &r.status);

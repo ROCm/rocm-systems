@@ -337,6 +337,65 @@ const CapturedGfx11 ldexp_f64_lanes[] = {
     {"Mul2", RJ_ARITH_ALU_OMOD_2, 0x100, 0x7ff0000000000001, 0x0, 0, 0x7ff0000000000001},
 };
 
+TEST(FrexpExponent, SimdBoundaries) {
+  using namespace rocjitsu::arith::test;
+  for (int width : {32, 64}) {
+    const uint64_t normal = width == 64 ? 0x0010000000000000ULL : 0x00800000ULL;
+    const uint64_t infinity = width == 64 ? 0x7ff0000000000000ULL : 0x7f800000ULL;
+    const uint64_t sign = 1ULL << (width - 1);
+    const int top = width == 64 ? 51 : 22;
+    for (uint64_t cpu : supported_cpu_levels()) {
+      for (bool flush : {false, true}) {
+        for (int scenario = 0; scenario < 3; ++scenario) {
+          Registers<4, 32> input;
+          for (int lane = 0; lane < 32; ++lane) {
+            const int power = (lane / 3) * top / 10;
+            uint64_t bits = (1ULL << power) + uint64_t(lane % 3) - 1;
+            if (scenario == 1) {
+              bits = (lane & 1 ? normal : infinity) + uint64_t(lane % 3) - 1;
+            }
+            if (scenario == 2) {
+              bits = lane & 1 ? 0 : infinity + 1;
+            }
+            if (lane & 2) {
+              bits |= sign;
+            }
+            write_fp(input.v, lane, width, bits);
+          }
+          auto call =
+              width == 64 ? rj_arith_v_frexp_exp_i32_f64_w32 : rj_arith_v_frexp_exp_i32_f32_w32;
+          for (int aliasing_offset : {0, 1, 3}) {
+            SCOPED_TRACE(::testing::Message() << width << ':' << cpu << ':' << flush << ':'
+                                              << scenario << ':' << aliasing_offset);
+            auto actual = input;
+            uint32_t status = 0x100;
+            constexpr uint32_t exec_mask = 0x8000aaaa;
+            const uint64_t flags = cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY |
+                                   (flush ? RJ_ARITH_FP_FLUSH_INPUT_DENORMALS : 0);
+            ASSERT_EQ(call(flags, exec_mask, 0, actual.v + aliasing_offset, actual.v, &status),
+                      RJ_ARITH_SUCCESS);
+            EXPECT_EQ(status, 0x100U);
+            actual.expect_preserved(input, aliasing_offset, 1);
+            for (int lane = 0; lane < 32; ++lane) {
+              uint32_t expected = input.v[aliasing_offset][lane];
+              if (exec_mask >> lane & 1) {
+                const uint64_t bits = read_fp(input.v, lane, width);
+                const double x = fp_value(bits, width);
+                int exponent = 0;
+                if (std::isfinite(x) && x != 0 && (!flush || (bits & ~sign) >= normal)) {
+                  std::frexp(x, &exponent);
+                }
+                expected = uint32_t(exponent);
+              }
+              EXPECT_EQ(actual.v[aliasing_offset][lane], expected) << lane;
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 } // namespace
 
 // Compatibility reproduces captured gfx1100 LDEXP lanes.
