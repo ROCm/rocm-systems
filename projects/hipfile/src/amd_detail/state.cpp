@@ -233,15 +233,10 @@ DriverState::getFileBufferAndStream(hipFileHandle_t fh, const void *buf, hipStre
         stream = StreamMap::makeDefaultStream(hipStream);
     }
     else if (!stream) {
-        // Implicit registration on first async use, as cuFile does. A candidate that loses the race is
-        // dropped after the lock is released.
-        auto candidate = StreamMap::makeImplicitStream(hipStream);
-
-        unique_lock<shared_mutex> ulock{state_mutex};
-        if (ref_count == 0) {
-            throw DriverNotInitialized();
-        }
-        stream = stream_map->adoptImplicitStream(hipStream, candidate);
+        // An unregistered stream runs the transfer transiently, without being registered, as cuFile
+        // does. Nothing is keyed to the handle, so a later stream that reuses the handle value can't
+        // pick up stale state.
+        stream = StreamMap::makeTransientStream(hipStream);
     }
 
     return {std::move(file), std::move(buffer), std::move(stream)};
