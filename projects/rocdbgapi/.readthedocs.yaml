@@ -19,6 +19,6 @@ build:
    jobs:
       post_checkout:
         - mkdir -p $HOME/.local/bin /tmp/doxygen
-        - curl -fsSL https://github.com/doxygen/doxygen/releases/download/Release_1_14_0/doxygen-1.14.0.linux.bin.tar.gz | tar xz -C /tmp/doxygen --strip-components=1
+        - curl -fsSL https://github.com/doxygen/doxygen/releases/download/Release_1_16_0/doxygen-1.16.0.linux.bin.tar.gz | tar xz -C /tmp/doxygen --strip-components=1
         - cp /tmp/doxygen/bin/doxygen $HOME/.local/bin/doxygen
         - $HOME/.local/bin/doxygen --version
