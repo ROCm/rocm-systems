@@ -1404,12 +1404,11 @@ static int rcclP2pPolicyChannels(struct ncclComm* comm, struct ncclTaskP2p* task
   // The Scatter part limit is about network flows, so it applies with P2P disabled too.
   int taskParts = rcclP2pTaskParts(comm, task->collAPI, task->root);
   if (taskParts < comm->p2pnChannelsPerPeer) return taskParts;
-  // Remote gfx942 alltoall peers share one NIC, so a lone-peer count
-  // oversubscribes it. paths.cc already fitted the stored count to
-  // p2pMaxPeers, so 2 or below is left alone. Same-node peers, send, and
-  // sendrecv are not capped. The fallback still uses the NIC when P2P is
-  // disabled. Skipped when the user set nChannelsPerNetPeer or
-  // RCCL_SATURATE_P2P_NCHANNELS.
+  // Remote gfx942 alltoall peers share one NIC. 2 is the count the 2x8
+  // sweep restored. paths.cc already fitted the stored count to p2pMaxPeers,
+  // so 2 or below is left alone. Same-node peers, send, and sendrecv are
+  // not capped. The fallback still uses the NIC when P2P is disabled.
+  // Skipped when the user set nChannelsPerNetPeer or RCCL_SATURATE_P2P_NCHANNELS.
   if (comm->nNodes > 1 && task->collAPI == ncclFuncAlltoAll &&
       comm->config.nChannelsPerNetPeer == NCCL_CONFIG_UNDEF_INT &&
       (rcclParamSaturateP2pNChannels() == 0 || rcclParamSaturateP2pNChannels() == RCCL_VALUE_UNSET) &&
