@@ -1090,11 +1090,12 @@ in the following table.
           copies directly into peer receive windows. Larger messages use
           ``gin.put``. Ignored unless ``RCCL_GIN_ANVIL_FABRIC_LSA_A2A`` is ``1``.
           Every rank must set the same value.
-      - | Unset: the rank count squared, in MiB, when the lane is enabled (4 MiB at 2
-          ranks, 16 MiB at 4, 64 MiB at 8, 256 MiB at 16), otherwise 0. On
-          MI450 the lane's crossover with ``gin.put`` grows with the rank
-          count: 4 to 8 MiB total at 2 ranks, 16 MiB at 4, 64 MiB at 8, and
-          past 512 MiB at 16 ranks on four nodes.
+      - | Unset: when the lane is enabled, the rank count squared, in MiB, below
+          16 ranks (4 MiB at 2 ranks, 16 MiB at 4, 64 MiB at 8), and no limit
+          from 16 ranks; otherwise 0. On MI450 the lane's crossover with
+          ``gin.put`` grows with the rank count: 4 to 8 MiB total at 2 ranks,
+          16 MiB at 4 and 64 MiB at 8. At 16 ranks on four nodes the lane is
+          faster at every measured size, through 512 MiB.
         | Non-negative integer byte count: the agreed threshold.
 
     * - | ``NCCL_RMA_PLUGIN``

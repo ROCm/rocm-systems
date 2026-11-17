@@ -84,12 +84,14 @@ TEST(GinFabricLsaPolicy, FlagBlocksCapAt64) {
 TEST(GinFabricLsaPolicy, ThresholdIsZeroUnlessOptedIn) {
   EXPECT_EQ(ginFabricLsaA2AThreshold(false, -1, 4), 0u);
   EXPECT_EQ(ginFabricLsaA2AThreshold(false, 65536, 4), 0u);
-  // A total size of nRanks^2 MiB.
+  // A total size of nRanks^2 MiB below 16 ranks, and no cap from 16.
   EXPECT_EQ(ginFabricLsaA2AThreshold(true, -1, 2), 4u * 1024 * 1024);
   EXPECT_EQ(ginFabricLsaA2AThreshold(true, -1, 4), 16u * 1024 * 1024);
   EXPECT_EQ(ginFabricLsaA2AThreshold(true, -1, 8), 64u * 1024 * 1024);
-  EXPECT_EQ(ginFabricLsaA2AThreshold(true, -1, 16), 256u * 1024 * 1024);
-  EXPECT_EQ(ginFabricLsaA2AThreshold(true, -1, 64), (size_t)4 * 1024 * 1024 * 1024);
+  EXPECT_EQ(ginFabricLsaA2AThreshold(true, -1, 15), 225u * 1024 * 1024);
+  EXPECT_EQ(ginFabricLsaA2AThreshold(true, -1, 16), ~(size_t)0);
+  EXPECT_EQ(ginFabricLsaA2AThreshold(true, -1, 64), ~(size_t)0);
+  EXPECT_EQ(ginFabricLsaA2AThreshold(true, (int64_t)256 * 1024 * 1024, 16), 256u * 1024 * 1024);
   EXPECT_EQ(ginFabricLsaA2AThreshold(true, -1, 1), 0u);
   EXPECT_EQ(ginFabricLsaA2AThreshold(true, 65536, 4), 65536u);
   EXPECT_EQ(ginFabricLsaA2AThreshold(true, 0, 4), 0u);
@@ -108,11 +110,16 @@ TEST(GinFabricA2ASelect, LsaWhenOptedInAndUnderThresholdElsePut) {
             GinFabricA2AAlgo::Lsa);
   EXPECT_EQ(ginFabricA2ASelectAlgo(true, 1, 2, 4 * 1024 * 1024, ginFabricLsaA2ADefaultThreshold(2)),
             GinFabricA2AAlgo::Put);
-  // 16 ranks: 16 MiB/peer (256 MiB total) is LSA, 32 MiB/peer gin.put
-  EXPECT_EQ(ginFabricA2ASelectAlgo(true, 1, 16, 16 * 1024 * 1024, ginFabricLsaA2ADefaultThreshold(16)),
+  // 8 ranks: 8 MiB/peer (64 MiB total) is LSA, one more vector per peer gin.put
+  EXPECT_EQ(ginFabricA2ASelectAlgo(true, 1, 8, 8 * 1024 * 1024, ginFabricLsaA2ADefaultThreshold(8)),
             GinFabricA2AAlgo::Lsa);
-  EXPECT_EQ(ginFabricA2ASelectAlgo(true, 1, 16, 32 * 1024 * 1024, ginFabricLsaA2ADefaultThreshold(16)),
+  EXPECT_EQ(ginFabricA2ASelectAlgo(true, 1, 8, 8 * 1024 * 1024 + 16, ginFabricLsaA2ADefaultThreshold(8)),
             GinFabricA2AAlgo::Put);
+  // 16 ranks: no cap, so 32 MiB/peer (512 MiB total) and 256 MiB/peer (4 GiB) stay on LSA
+  EXPECT_EQ(ginFabricA2ASelectAlgo(true, 1, 16, 32 * 1024 * 1024, ginFabricLsaA2ADefaultThreshold(16)),
+            GinFabricA2AAlgo::Lsa);
+  EXPECT_EQ(ginFabricA2ASelectAlgo(true, 1, 16, (size_t)256 * 1024 * 1024, ginFabricLsaA2ADefaultThreshold(16)),
+            GinFabricA2AAlgo::Lsa);
   // LSA not armed: put
   EXPECT_EQ(ginFabricA2ASelectAlgo(true, 0, 4, 32 * 1024, lsaThr), GinFabricA2AAlgo::Put);
   // Context failed its layout check: put

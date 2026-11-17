@@ -470,7 +470,7 @@ TEST_F(GinAnvilPluginTest, CreateContext_LsaOptInWithoutCapabilityKeepsLaneOff) 
   plugin_.finalize(ictx);
 }
 
-// An explicit threshold replaces the nRanks^2 MiB default.
+// An explicit threshold replaces the default.
 TEST_F(GinAnvilPluginTest, CreateContext_LsaThresholdEnvOverridesDefault) {
   GinAnvilPluginStubs::SetFabricLsaOptIn(true);
   GinAnvilPluginStubs::SetFabricLsaThresholdEnv(256 * 1024);
