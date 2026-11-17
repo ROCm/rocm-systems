@@ -77,9 +77,6 @@ DISPATCH: dict[str, Callable[[ExecuteContext], str]] = {}
 
 def _register_handlers() -> None:
     """Populate DISPATCH with handlers from the extracted modules."""
-    from amdisa.codegen.execute.scalar import (
-        gen_scalar_cmpk,
-    )
     from amdisa.codegen.execute.vector_cmp import (
         gen_vector_cmp_class,
         gen_vector_cmpx,
@@ -129,12 +126,6 @@ def _register_handlers() -> None:
         gen_accvgpr_read,
         gen_accvgpr_write,
         gen_mfma,
-    )
-
-    # Scalar ALU — scalar_unary, scalar_binop, scalar_cmp, scalar_bitcmp,
-    # scalar_saveexec now handled by SemaAST pipeline (_SEMA_CLASSES).
-    DISPATCH['scalar_cmpk'] = lambda c: gen_scalar_cmpk(
-        c.dst_ops, c.src_ops, c.op, c.dtype
     )
 
     # Vector ALU — vector_unary, pseudo_scalar_unary, vector_binop, and
