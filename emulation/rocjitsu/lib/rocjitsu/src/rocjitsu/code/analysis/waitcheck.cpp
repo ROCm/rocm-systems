@@ -1168,6 +1168,7 @@ struct Analyzer : private WaitcheckStateOps {
 
     cfg_has_unknown_successor_ = missing_successor.has_value();
     prepare_cfg_path_filter(analysis_blocks, cfg_predecessors, cfg_successors, in, arch);
+    cfg_inputs_ = in;
     cfg_outputs_ = out;
     relative_entry_proven_ = current_kernel_ && !missing_successor;
     for (size_t i = 0; i < analysis_blocks.size(); ++i) {
@@ -1189,6 +1190,7 @@ struct Analyzer : private WaitcheckStateOps {
     if (!defer_shared_parity_finalization_)
       finish_shared_parity();
     cfg_outputs_ = {};
+    cfg_inputs_ = {};
     current_cfg_view_index_.reset();
     current_function_entry_.reset();
     current_call_return_sreg_.reset();
@@ -7978,6 +7980,475 @@ private:
     return current_kernel_ && cfg_has_exec_guards_ && is_exec_masked_lane_access(consumer, reg);
   }
 
+  // A later lane mask can be a subset of the mask guarding a full VA drain.
+  // Prove that relation only for one bounded, fully decoded kernel CFG. The
+  // ordinary path search deliberately treats unrelated VOP3 mask values as
+  // independent, so this query is made only for a candidate diagnostic.
+  bool cdna5_guarded_va_drain(const PendingEvent &event, const Instruction &consumer,
+                              RegisterRef reg, rj_code_arch_t arch) {
+    if (arch != ROCJITSU_CODE_ARCH_CDNA5 || wavefront_size_ != 32 || !current_kernel_ ||
+        cfg_has_unknown_successor_ || event.counter != WaitCounterKind::VaVdst ||
+        reg.cls != RegClass::VGPR || !is_exec_masked_lane_access(consumer, reg) ||
+        event.section_offset >= consumer.src_loc() ||
+        consumer.src_loc() - event.section_offset > 1024)
+      return false;
+
+    struct Location {
+      size_t block = 0;
+      size_t index = 0;
+      const CfgInstructionView *view = nullptr;
+      [[nodiscard]] const Instruction &inst() const { return *view->instruction; }
+      [[nodiscard]] uint64_t offset() const { return view->section_offset; }
+    };
+    constexpr size_t kMaxInstructions = 32768;
+    std::map<uint64_t, Location> code;
+    for (size_t block = 0; block < cfg_views_.size(); ++block) {
+      const auto &instructions = cfg_views_[block].instructions;
+      for (size_t index = 0; index < instructions.size(); ++index) {
+        const auto &view = instructions[index];
+        if (code.size() == kMaxInstructions ||
+            !code.emplace(view.section_offset, Location{block, index, &view}).second)
+          return false; // A repeated call context or an oversized CFG needs its own proof.
+      }
+    }
+    if (code.empty() || code.begin()->first != current_kernel_->entry_offset)
+      return false;
+    const auto consumer_it = code.find(consumer.src_loc());
+    if (consumer_it == code.end() || consumer_it->second.view->instruction != &consumer)
+      return false;
+
+    auto branch_target = [](const Location &location) -> std::optional<uint64_t> {
+      const auto delta = location.inst().branch_offset_bytes();
+      if (!delta)
+        return std::nullopt;
+      const int64_t target = static_cast<int64_t>(location.offset()) + location.inst().size() +
+                             static_cast<int64_t>(*delta);
+      if (target < 0)
+        return std::nullopt;
+      return static_cast<uint64_t>(target);
+    };
+    std::vector<std::pair<uint64_t, uint64_t>> branch_edges;
+    for (const auto &[offset, location] : code) {
+      const auto name = location.inst().mnemonic();
+      if (!name.starts_with("s_branch") && !name.starts_with("s_cbranch"))
+        continue;
+      const auto target = branch_target(location);
+      if (!target || !code.contains(*target))
+        return false;
+      branch_edges.emplace_back(offset, *target);
+    }
+
+    // Preserve physical VGPR identity, including s_set_vgpr_msb banks. A join
+    // with an unknown bank cannot establish an equality between expressions.
+    auto operand_ref = [&](const Location &where,
+                           const Operand *operand) -> std::optional<RegisterRef> {
+      if (!operand || !where.view->vgpr_msb.known)
+        return std::nullopt;
+      auto ref = register_operand(*operand, arch);
+      if (!ref || ref->width != 1)
+        return std::nullopt;
+      if (ref->cls == RegClass::VGPR && operand->vgpr_msb_role() != amdgpu::VgprMsbRole::None)
+        ref->index = static_cast<uint16_t>(
+            ref->index + where.view->vgpr_msb.for_role(operand->vgpr_msb_role()) * 256u);
+      return ref;
+    };
+
+    std::map<const Instruction *, RegisterSet> defs_cache;
+    auto defs = [&](const Location &where) -> const RegisterSet & {
+      auto [it, inserted] = defs_cache.try_emplace(where.view->instruction);
+      if (inserted)
+        it->second =
+            inst_def_use_for_waitcheck(where.inst(), where.view->vgpr_msb, arch, wavefront_size_)
+                .defs;
+      return it->second;
+    };
+    // A register can change at completion of an earlier asynchronous writer
+    // without any intervening instruction definition. Reconstruct the state
+    // at the expression use, then require its value to be settled.
+    auto settled_before = [&](RegisterRef wanted, const Location &use) {
+      if (use.block >= cfg_inputs_.size())
+        return false;
+      PendingState state = cfg_inputs_[use.block];
+      for (size_t index = 0; index < use.index; ++index) {
+        const auto &view = cfg_views_[use.block].instructions[index];
+        analyze_instruction(state, *view.instruction, event.section_name, view.section_offset, 0,
+                            arch, false);
+      }
+      for (const auto &counter : state.pending)
+        for (const auto &pending : counter)
+          if (pending.check_uses && pending.regs.intersects(wanted) &&
+              has_cfg_path_with_event_pending(pending, use.offset(), arch, false, false)
+                  .value_or(true))
+            return false;
+      if (wanted.cls == RegClass::VCC)
+        return state.sgpr_hazards.vcc_hazard == 0;
+      if (wanted.cls == RegClass::SGPR && wanted.index < 128)
+        return !state.sgpr_hazards.salu_hazards.test(wanted.index) &&
+               !state.sgpr_hazards.valu_hazards.test(wanted.index);
+      return true;
+    };
+    // Return a definition only when it is the sole writer on every predecessor
+    // path. This is deliberately lazy and returns unknown at the finite cutoff.
+    auto unique_writer = [&](RegisterRef wanted, Location use) -> std::optional<Location> {
+      std::vector<std::pair<size_t, size_t>> work{{use.block, use.index}};
+      std::set<std::pair<size_t, size_t>> seen;
+      std::optional<Location> writer;
+      while (!work.empty()) {
+        if (seen.size() >= kMaxInstructions)
+          return std::nullopt;
+        const auto [block, index] = work.back();
+        work.pop_back();
+        if (!seen.emplace(block, index).second)
+          continue;
+        if (index != 0) {
+          const Location previous{block, index - 1, &cfg_views_[block].instructions[index - 1]};
+          if (defs(previous).intersects(wanted)) {
+            if (writer && writer->view->instruction != previous.view->instruction)
+              return std::nullopt;
+            writer = previous;
+          } else {
+            work.emplace_back(block, index - 1);
+          }
+          continue;
+        }
+        const auto &predecessors = cfg_views_[block].predecessors;
+        if (predecessors.empty())
+          return std::nullopt;
+        for (size_t predecessor : predecessors)
+          work.emplace_back(predecessor, cfg_views_[predecessor].instructions.size());
+      }
+      return writer;
+    };
+    auto previous_matching = [&](uint64_t before, uint64_t floor,
+                                 auto predicate) -> std::optional<Location> {
+      auto it = code.lower_bound(before);
+      while (it != code.begin()) {
+        --it;
+        if (it->first < floor)
+          break;
+        if (predicate(it->second))
+          return it->second;
+      }
+      return std::nullopt;
+    };
+    auto is_exec_restore = [&](const Location &where, RegisterRef saved) {
+      const auto &inst = where.inst();
+      return inst.mnemonic() == "s_or_b32" && inst.num_src_operands() == 2 &&
+             low_selector(inst.dst_operand(0), amdgpu::kExecSelectorFirst) &&
+             low_selector(inst.src_operand(0), amdgpu::kExecSelectorFirst) &&
+             operand_ref(where, inst.src_operand(1)) == saved;
+    };
+
+    // Validate every EXEC save/restore before the comparisons. Outside each
+    // complete pair, the entry EXEC is unchanged. Direct branches may skip an
+    // entire pair, but may not enter its interior or leave before restoration.
+    auto exec_pairs_preserve_entry = [&](uint64_t begin, uint64_t end,
+                                         std::span<const uint64_t> checkpoints) {
+      std::optional<Location> save;
+      for (auto it = code.lower_bound(begin); it != code.end() && it->first < end; ++it) {
+        const Location &where = it->second;
+        if (std::ranges::find(checkpoints, where.offset()) != checkpoints.end() && save)
+          return false;
+        if (!where.view->invalidates_exec)
+          continue;
+        if (!save) {
+          if (where.inst().mnemonic() != "s_and_saveexec_b32" ||
+              where.inst().num_dst_operands() < 1 || where.inst().num_src_operands() < 1)
+            return false;
+          save = where;
+          continue;
+        }
+        const auto saved = operand_ref(*save, save->inst().dst_operand(0));
+        if (!saved || saved->cls != RegClass::SGPR || !is_exec_restore(where, *saved))
+          return false;
+        const auto writer = unique_writer(*saved, where);
+        if (!writer || writer->view->instruction != save->view->instruction)
+          return false;
+        std::optional<Location> branch;
+        for (auto middle = code.upper_bound(save->offset()); middle != it; ++middle) {
+          if (middle->second.inst().is_branch()) {
+            if (branch)
+              return false;
+            branch = middle->second;
+          }
+        }
+        if (!branch || branch->inst().mnemonic() != "s_cbranch_execz")
+          return false;
+        const auto target = branch_target(*branch);
+        if (!target || *target <= branch->offset() || *target > where.offset())
+          return false;
+        for (const auto &[source, destination] : branch_edges)
+          if (save->offset() < destination && destination <= where.offset() &&
+              !(save->offset() <= source && source < where.offset()))
+            return false;
+        save.reset();
+      }
+      return !save;
+    };
+
+    // Find the nearest full VA drain after this producer, then its guarded
+    // branch and the later branch that selects the consumer.
+    const uint64_t consumer_pc = consumer.src_loc();
+    const auto wait =
+        previous_matching(consumer_pc, event.section_offset + 1, [&](const Location &where) {
+          if (where.inst().mnemonic() != "s_wait_alu")
+            return false;
+          const auto fields = cfg_explicit_wait_fields(where.block, where.inst(), arch);
+          return fields && (*fields)[counter_index(WaitCounterKind::VaVdst)] == 0u;
+        });
+    if (!wait)
+      return false;
+    const auto wait_branch =
+        previous_matching(wait->offset(), wait->offset() - std::min<uint64_t>(wait->offset(), 32),
+                          [](const Location &where) { return where.inst().is_branch(); });
+    if (!wait_branch || wait_branch->inst().mnemonic() != "s_cbranch_execz")
+      return false;
+    const auto wait_save =
+        previous_matching(wait_branch->offset(),
+                          wait_branch->offset() - std::min<uint64_t>(wait_branch->offset(), 32),
+                          [](const Location &where) { return where.view->invalidates_exec; });
+    if (!wait_save || wait_save->inst().mnemonic() != "s_and_saveexec_b32")
+      return false;
+    const auto load_branch =
+        previous_matching(consumer_pc, consumer_pc - std::min<uint64_t>(consumer_pc, 128),
+                          [](const Location &where) { return where.inst().is_branch(); });
+    if (!load_branch || load_branch->inst().mnemonic() != "s_cbranch_execz" ||
+        load_branch->offset() <= wait->offset())
+      return false;
+    const auto load_target = branch_target(*load_branch);
+    if (!load_target || *load_target <= consumer_pc)
+      return false;
+    const auto load_save =
+        previous_matching(load_branch->offset(),
+                          load_branch->offset() - std::min<uint64_t>(load_branch->offset(), 32),
+                          [](const Location &where) { return where.view->invalidates_exec; });
+    if (!load_save || load_save->inst().mnemonic() != "s_and_saveexec_b32")
+      return false;
+    const auto wait_guard = operand_ref(*wait_save, wait_save->inst().src_operand(0));
+    const auto load_guard = operand_ref(*load_save, load_save->inst().src_operand(0));
+    if (!wait_guard || !load_guard || wait_guard->cls != RegClass::SGPR ||
+        load_guard->cls != RegClass::SGPR)
+      return false;
+    const auto mask_a = unique_writer(*wait_guard, *wait_save);
+    const auto mask_b = unique_writer(*load_guard, *load_save);
+    if (!mask_a || !mask_b || mask_a->inst().mnemonic() != "s_and_b32" ||
+        mask_b->inst().mnemonic() != "s_and_b32" || mask_a->offset() >= mask_b->offset())
+      return false;
+
+    // No other branch may enter after the wait mask was formed. In the local
+    // producer interval, only EXEC-zero guards may alter the straight-line
+    // route, and no other edge can bypass this full wait into the consumer.
+    for (const auto &[offset, where] : code) {
+      if (event.section_offset < offset && offset < consumer_pc && where.inst().is_branch() &&
+          where.inst().mnemonic() != "s_cbranch_execz")
+        return false;
+    }
+    for (const auto &[source, destination] : branch_edges) {
+      // A later iteration can reissue the producer or reuse a different
+      // EXEC value. This short proof covers only forward paths.
+      if (event.section_offset < source && source < consumer_pc && destination <= source)
+        return false;
+      if (mask_a->offset() < destination && destination <= consumer_pc &&
+          !(event.section_offset <= source && source < consumer_pc))
+        return false;
+      if (source != wait_branch->offset() && event.section_offset <= source &&
+          source < wait->offset() && wait->offset() < destination && destination <= consumer_pc)
+        return false;
+    }
+    const auto wait_target = branch_target(*wait_branch);
+    if (!wait_target || *wait_target <= wait->offset())
+      return false;
+    const auto saved_wait = operand_ref(*wait_save, wait_save->inst().dst_operand(0));
+    if (!saved_wait || saved_wait->cls != RegClass::SGPR)
+      return false;
+    std::optional<Location> wait_restore;
+    for (auto it = code.upper_bound(wait->offset()); it != code.end() && it->first < consumer_pc;
+         ++it)
+      if (is_exec_restore(it->second, *saved_wait)) {
+        wait_restore = it->second;
+        break;
+      }
+    const auto saved_writer =
+        wait_restore ? unique_writer(*saved_wait, *wait_restore) : std::nullopt;
+    if (!wait_restore || wait_restore->offset() < *wait_target ||
+        wait_restore->offset() >= mask_b->offset() || !saved_writer ||
+        saved_writer->view->instruction != wait_save->view->instruction)
+      return false;
+
+    auto and_sources = [&](const Location &where) -> std::optional<std::array<RegisterRef, 2>> {
+      const auto &inst = where.inst();
+      // SALU bitwise ops also expose their implicit SCC result as a second
+      // destination. The first destination is the mask SGPR.
+      if (inst.num_src_operands() != 2 || inst.num_dst_operands() < 1)
+        return std::nullopt;
+      const auto lhs = operand_ref(where, inst.src_operand(0));
+      const auto rhs = operand_ref(where, inst.src_operand(1));
+      const auto dst = operand_ref(where, inst.dst_operand(0));
+      if (!lhs || !rhs || !dst || dst->cls != RegClass::SGPR)
+        return std::nullopt;
+      return std::array{*lhs, *rhs};
+    };
+    const auto first = and_sources(*mask_a);
+    const auto second = and_sources(*mask_b);
+    if (!first || !second)
+      return false;
+    if (operand_ref(*mask_a, mask_a->inst().dst_operand(0)) != wait_guard ||
+        operand_ref(*mask_b, mask_b->inst().dst_operand(0)) != load_guard)
+      return false;
+    std::optional<RegisterRef> common;
+    std::optional<RegisterRef> cmp_mask_a;
+    std::optional<RegisterRef> cmp_mask_b;
+    for (unsigned i = 0; i < 2; ++i)
+      for (unsigned j = 0; j < 2; ++j)
+        if ((*first)[i] == (*second)[j] && !common) {
+          common = (*first)[i];
+          cmp_mask_a = (*first)[1 - i];
+          cmp_mask_b = (*second)[1 - j];
+        }
+    if (!common || !cmp_mask_a || !cmp_mask_b ||
+        (common->cls != RegClass::SGPR && common->cls != RegClass::VCC) ||
+        cmp_mask_a->cls != RegClass::SGPR || cmp_mask_b->cls != RegClass::SGPR)
+      return false;
+    if (!settled_before(*common, *mask_a) || !settled_before(*cmp_mask_a, *mask_a) ||
+        !settled_before(*cmp_mask_b, *mask_b))
+      return false;
+    for (auto it = code.upper_bound(mask_a->offset());
+         it != code.end() && it->first < mask_b->offset(); ++it)
+      if (defs(it->second).intersects(*common) ||
+          (common->cls == RegClass::VCC && it->second.view->invalidates_vcc_condition))
+        return false;
+
+    const auto cmp_a = unique_writer(*cmp_mask_a, *mask_a);
+    const auto cmp_b = unique_writer(*cmp_mask_b, *mask_b);
+    if (!cmp_a || !cmp_b || cmp_a->offset() >= cmp_b->offset())
+      return false;
+    if (operand_ref(*cmp_a, cmp_a->inst().dst_operand(0)) != cmp_mask_a ||
+        operand_ref(*cmp_b, cmp_b->inst().dst_operand(0)) != cmp_mask_b)
+      return false;
+    auto compare_operands =
+        [&](const Location &where) -> std::optional<std::pair<RegisterRef, RegisterRef>> {
+      const auto &inst = where.inst();
+      if (inst.mnemonic() != "v_cmp_gt_i32" || inst.size() != 8 || inst.num_src_operands() != 2 ||
+          inst.num_dst_operands() != 1 || !inst.raw_encoding() || where.view->vector_skip != false)
+        return std::nullopt;
+      cdna5::Vop3MachineInst encoding{};
+      std::memcpy(&encoding, inst.raw_encoding(), sizeof(encoding));
+      if (encoding.abs || encoding.opsel || encoding.clamp || encoding.omod || encoding.neg)
+        return std::nullopt;
+      const auto bound = operand_ref(where, inst.src_operand(0));
+      const auto index = operand_ref(where, inst.src_operand(1));
+      if (!bound || !index || bound->cls != RegClass::SGPR || index->cls != RegClass::VGPR)
+        return std::nullopt;
+      return std::pair{*bound, *index};
+    };
+    const auto operands_a = compare_operands(*cmp_a);
+    const auto operands_b = compare_operands(*cmp_b);
+    if (!operands_a || !operands_b || operands_a->first != operands_b->first)
+      return false;
+    const auto bound_a = unique_writer(operands_a->first, *cmp_a);
+    const auto bound_b = unique_writer(operands_b->first, *cmp_b);
+    if (!bound_a || !bound_b || bound_a->view->instruction != bound_b->view->instruction)
+      return false;
+
+    // A scalar load can complete between compares without an instruction
+    // definition. Require a full KMCNT drain on every writer-to-compare path.
+    if (bound_a->inst().is_memory_op()) {
+      if (!bound_a->inst().mnemonic().starts_with("s_load"))
+        return false;
+      std::vector<std::pair<size_t, size_t>> work{{bound_a->block, bound_a->index + 1}};
+      std::set<std::pair<size_t, size_t>> seen;
+      bool crossed_drain = false;
+      while (!work.empty()) {
+        if (seen.size() >= kMaxInstructions)
+          return false;
+        const auto [block, index] = work.back();
+        work.pop_back();
+        if (!seen.emplace(block, index).second)
+          continue;
+        if (index == cfg_views_[block].instructions.size()) {
+          for (size_t successor : cfg_views_[block].successors)
+            work.emplace_back(successor, 0);
+          continue;
+        }
+        const auto &view = cfg_views_[block].instructions[index];
+        if (view.instruction == cmp_a->view->instruction)
+          return false;
+        const auto fields = view.instruction->is_waitcnt()
+                                ? cfg_explicit_wait_fields(block, *view.instruction, arch)
+                                : std::nullopt;
+        if (fields && (*fields)[counter_index(WaitCounterKind::Km)] == 0u) {
+          crossed_drain = true;
+          continue;
+        }
+        work.emplace_back(block, index + 1);
+      }
+      if (!crossed_drain)
+        return false;
+    }
+
+    auto or_index = [&](const Location &compare, RegisterRef index)
+        -> std::optional<std::pair<Location, std::pair<uint32_t, RegisterRef>>> {
+      const auto writer = unique_writer(index, compare);
+      if (!writer || writer->inst().mnemonic() != "v_or_b32_e32" ||
+          writer->inst().num_src_operands() != 2 || writer->view->vector_skip != false)
+        return std::nullopt;
+      const auto constant = writer->inst().src_operand(0)->const_value();
+      const auto base = operand_ref(*writer, writer->inst().src_operand(1));
+      if (!constant || *constant < 0 || *constant >= 8 || !base || base->cls != RegClass::VGPR)
+        return std::nullopt;
+      return std::pair{*writer, std::pair{static_cast<uint32_t>(*constant), *base}};
+    };
+    const auto index_a = or_index(*cmp_a, operands_a->second);
+    const auto index_b = or_index(*cmp_b, operands_b->second);
+    if (!index_a || !index_b || index_a->second.second != index_b->second.second ||
+        index_a->second.first >= index_b->second.first)
+      return false;
+    const auto base_a = unique_writer(index_a->second.second, index_a->first);
+    const auto base_b = unique_writer(index_b->second.second, index_b->first);
+    if (!base_a || !base_b || base_a->view->instruction != base_b->view->instruction ||
+        base_a->view->vector_skip != false)
+      return false;
+    const auto &base_inst = base_a->inst();
+    std::optional<int> shift_source;
+    if (base_inst.mnemonic() == "v_lshlrev_b32_e32")
+      shift_source = 0;
+    else if (base_inst.mnemonic().starts_with("v_dual_lshlrev_b32"))
+      shift_source = vopd_source_begin(base_inst, index_a->second.second, "v_dual_lshlrev_b32", 2);
+    bool aligned = false;
+    if (shift_source && base_inst.num_src_operands() > *shift_source) {
+      const auto amount = base_inst.src_operand(*shift_source)->const_value();
+      aligned = amount && *amount >= 3 && *amount < 32;
+    } else if (base_inst.mnemonic() == "v_and_b32_e32" && base_inst.num_src_operands() == 2) {
+      const auto mask = base_inst.src_operand(0)->const_value();
+      aligned = mask && (static_cast<uint32_t>(*mask) & 7u) == 0;
+    }
+    if (!aligned)
+      return false;
+
+    // A branch from outside the expression interval must not import a
+    // different EXEC, and a backedge must not reuse an earlier mask after a
+    // later iteration changes its inputs. This also rules out a reissued
+    // producer reaching the consumer through an earlier physical wait.
+    for (const auto &[source, destination] : branch_edges) {
+      if (source > base_a->offset() && destination <= base_a->offset())
+        return false;
+      if (base_a->offset() < destination && destination <= cmp_b->offset() &&
+          !(base_a->offset() <= source && source < cmp_b->offset()))
+        return false;
+      if (event.section_offset < destination && destination <= consumer_pc && source >= consumer_pc)
+        return false;
+    }
+
+    const std::array<uint64_t, 5> expression_points{base_a->offset(), index_a->first.offset(),
+                                                    index_b->first.offset(), cmp_a->offset(),
+                                                    cmp_b->offset()};
+    if (!exec_pairs_preserve_entry(current_kernel_->entry_offset, cmp_b->offset(),
+                                   expression_points) ||
+        !exec_pairs_preserve_entry(mask_a->offset(), mask_b->offset(), {}))
+      return false;
+    return true;
+  }
+
   // If this masked VGPR access executes, earlier FLAT loads under the same
   // EXEC also issue on the LDS FIFO. Count them backwards from a covering
   // wait, stopping before any possible reissue of the reported producer.
@@ -8045,6 +8516,9 @@ private:
     const bool before_wait = relative_wait_operand(consumer, arch) != nullptr;
     const auto reaches = has_cfg_path_with_event_pending(event, consumer_offset, arch, before_wait,
                                                          active, 0, {}, lane_operand);
+    if (reaches != false && active && !before_wait &&
+        cdna5_guarded_va_drain(event, consumer, reg, arch))
+      return false;
     if (reaches || !active || cfg_has_unknown_successor_ || !is_completion_counter(event.counter))
       return reaches.value_or(true);
     // A lane search may exceed its bound even if scalar branches force every
@@ -10327,6 +10801,7 @@ private:
   std::vector<CfgBlockView> cfg_views_;
   std::map<std::tuple<uint64_t, size_t, uint64_t>, bool> copy_lane_cache_;
   std::optional<size_t> current_cfg_view_index_;
+  std::span<const PendingState> cfg_inputs_;
   std::span<const PendingState> cfg_outputs_;
   bool relative_entry_proven_ = false;
   std::optional<uint64_t> current_function_entry_;
