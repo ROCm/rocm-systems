@@ -1286,13 +1286,19 @@ class GraphExecSegmented : public GraphExecBase {
 
   //! All signal sets borrowed by the root and child graphs are collected for
   //! recycling by the root launch-completion callback.
+  //! A nested child passes the root accumulate and does not enqueue one of its own:
+  //! its off-stream leaves are joined by the parent segment's trailing batch.
+  //! out_hw_events receives the set this call acquired, so that trailing batch can
+  //! name the child's signals.
   amd::Command* EnqueueSegmentedGraph(hip::Stream* launch_stream,
                                       const std::vector<hip::Stream*>& streams,
                                       hipError_t* out_status = nullptr,
                                       std::vector<GraphLaunchSignalSet>* signal_sets = nullptr,
                                       const std::vector<void*>* parent_hw_events = nullptr,
                                       int parent_entry_hw_event_index = -1,
-                                      bool sync_launch_stream_deps = true);
+                                      bool sync_launch_stream_deps = true,
+                                      amd::AccumulateCommand* dispatch_accumulate = nullptr,
+                                      std::vector<void*>* out_hw_events = nullptr);
   hipError_t EnqueueSegment(const Segment& segment, hip::Stream* stream,
                             const std::vector<hip::Stream*>& streams,
                             std::vector<GraphLaunchSignalSet>* signal_sets,
@@ -1481,6 +1487,11 @@ class GraphExecSegmented : public GraphExecBase {
     //! child's needs_entry_wait_ is set (an off-stream child root must wait). This
     //! segment's leading batch completes it; the child's waits name it at launch.
     std::vector<int> seg_to_child_entry_hw_event;
+    //! Trailing-batch dependency patches for a child-graph segment, indexed like
+    //! segments_. Each patch's hw_event_index is a slot in the child graph's own
+    //! signal set (an off-stream leaf). Applied after that set is acquired, before
+    //! the trailing batch is dispatched. Empty for every other segment.
+    std::vector<std::vector<amd::Device::HwEventPatch>> child_leaf_wait_patches;
 
     std::vector<amd::Device::HwEventPatch> patch_list;
     std::vector<uint8_t*> barrier_packets;
