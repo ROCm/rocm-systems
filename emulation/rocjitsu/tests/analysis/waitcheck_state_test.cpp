@@ -865,7 +865,7 @@ TEST(WaitcheckState, FlatSourceRetirementRequiresBothCounterOnlyFacets) {
       }
 }
 
-TEST(WaitcheckState, LegacyFlatCannotProveOlderCompletionFromAnUnroutedCredit) {
+TEST(WaitcheckState, LegacyFlatUnusedRouteCannotProveCounterCapacityCompletion) {
   for (auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
                     ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
     auto nop = decode_wait(0xbf800000u, arch);
@@ -877,7 +877,11 @@ TEST(WaitcheckState, LegacyFlatCannotProveOlderCompletionFromAnUnroutedCredit) {
         SCOPED_TRACE(static_cast<int>(kind));
         const auto maximum = Ops::maximum_dependency_wait(arch, counter);
         ASSERT_TRUE(maximum.succeeded());
-        EXPECT_FALSE(Ops::guaranteed_issue_order(counter, kind, arch, true));
+        const bool ordered_wait_credit =
+            (arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2) &&
+            (counter == WaitCounterKind::Ds || kind == WaitEventKind::FlatLoad);
+        EXPECT_EQ(Ops::guaranteed_issue_order(counter, kind, arch, true).has_value(),
+                  ordered_wait_credit);
         PendingState initial;
         auto older = load(8, maximum.value());
         older.counter = counter;
@@ -912,7 +916,7 @@ TEST(WaitcheckState, LegacyFlatCannotProveOlderCompletionFromAnUnroutedCredit) {
   }
 }
 
-TEST(WaitcheckState, LegacyFlatCannotAgeOlderNativeResultForAPartialWait) {
+TEST(WaitcheckState, Gfx10FlatWaitCreditAgesOlderNativeResultButGfx9DoesNot) {
   for (auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
                     ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2})
     for (auto counter : {WaitCounterKind::Load, WaitCounterKind::Ds}) {
@@ -931,9 +935,11 @@ TEST(WaitcheckState, LegacyFlatCannotAgeOlderNativeResultForAPartialWait) {
       auto incoming = older;
       incoming.kind = WaitEventKind::FlatLoad;
       Ops::age_events(state, incoming, arch, maximum.value());
-      EXPECT_EQ(state.pending[index][0].min_younger, 0u);
+      const bool gfx10 = arch == ROCJITSU_CODE_ARCH_RDNA1 ||
+                         arch == ROCJITSU_CODE_ARCH_RDNA2;
+      EXPECT_EQ(state.pending[index][0].min_younger, gfx10 ? 1u : 0u);
       ASSERT_TRUE(Ops::apply_memory_wait(state, counter, 1, arch).succeeded());
-      EXPECT_EQ(state.pending[index], (std::vector<PendingEvent>{older}));
+      EXPECT_EQ(state.pending[index].empty(), gfx10);
 
       // A younger native request in the same queue has ordered completion.
       PendingState native;
@@ -945,6 +951,60 @@ TEST(WaitcheckState, LegacyFlatCannotAgeOlderNativeResultForAPartialWait) {
       ASSERT_TRUE(Ops::apply_memory_wait(native, counter, 1, arch).succeeded());
       EXPECT_TRUE(native.pending[index].empty());
     }
+}
+
+TEST(WaitcheckState, Gfx10PartialWaitCountsOlderGenericFlatOnBothCounters) {
+  // LLVM's GFX10+ FLAT count ordering permits the first of two FLAT loads to
+  // complete at VMcnt(1) and LGKMcnt(1), regardless of its routed result.
+  // GFX10 still issues both positions with empty EXEC; GFX9 retains both
+  // possible result facets until the counters reach zero.
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA1,
+                    ROCJITSU_CODE_ARCH_RDNA2})
+    for (auto counter : {WaitCounterKind::Load, WaitCounterKind::Ds})
+      for (bool exec_nonzero : {false, true}) {
+        SCOPED_TRACE(arch);
+        SCOPED_TRACE(static_cast<int>(counter));
+        SCOPED_TRACE(exec_nonzero);
+        PendingState state;
+        state.exec_nonzero = exec_nonzero;
+        auto older = load(0, 0);
+        older.counter = counter;
+        older.kind = WaitEventKind::FlatLoad;
+        const auto index = Ops::counter_index(counter);
+        state.pending[index] = {older};
+        state.pending_event_ages[index].values[static_cast<size_t>(WaitEventKind::FlatLoad)] = 0;
+        Ops::age_events(state, older, arch, Ops::maximum_dependency_wait(arch, counter).value());
+        const bool gfx10 = arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
+        EXPECT_EQ(state.pending[index][0].min_younger, gfx10 ? 1u : 0u);
+        ASSERT_TRUE(Ops::apply_memory_wait(state, counter, 1, arch).succeeded());
+        EXPECT_EQ(state.pending[index].empty(), gfx10);
+        // The summary still represents the newer FLAT request at age zero.
+        EXPECT_EQ(
+            state.pending_event_ages[index].values[static_cast<size_t>(WaitEventKind::FlatLoad)],
+            0u);
+      }
+}
+
+TEST(WaitcheckState, Gfx10FlatStoreDsCreditAgesOlderNativeDsResult) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4,
+                    ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+    PendingState state;
+    state.exec_nonzero = true;
+    auto older = load(0, 0);
+    older.counter = WaitCounterKind::Ds;
+    older.kind = WaitEventKind::Ds;
+    const auto index = Ops::counter_index(WaitCounterKind::Ds);
+    state.pending[index] = {older};
+    auto incoming = older;
+    incoming.kind = WaitEventKind::FlatStore;
+    Ops::age_events(state, incoming, arch,
+                    Ops::maximum_dependency_wait(arch, WaitCounterKind::Ds).value());
+    const bool gfx10 = arch == ROCJITSU_CODE_ARCH_RDNA1 ||
+                       arch == ROCJITSU_CODE_ARCH_RDNA2;
+    EXPECT_EQ(state.pending[index][0].min_younger, gfx10 ? 1u : 0u);
+    ASSERT_TRUE(Ops::apply_memory_wait(state, WaitCounterKind::Ds, 1, arch).succeeded());
+    EXPECT_EQ(state.pending[index].empty(), gfx10);
+  }
 }
 
 TEST(WaitcheckState, OnlyCdna5FlatAdmissionPrecedesSourceReads) {

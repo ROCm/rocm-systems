@@ -71,6 +71,28 @@ bool has_conditional_route(WaitEventKind kind) {
   return kind == WaitEventKind::FlatLoad || kind == WaitEventKind::FlatStore;
 }
 
+bool gfx10_flat_wait_credit_is_ordered(WaitCounterKind counter, WaitEventKind kind,
+                                       rj_code_arch_t arch) {
+  // GFX10 legacy FLAT reports VM/LGKM counter decrements in order even when the
+  // result takes the other route. This says nothing about an unused route's
+  // ability to force an older request out when its queue reaches capacity.
+  return (arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2) &&
+         has_conditional_route(kind) &&
+         ((counter == WaitCounterKind::Load && kind == WaitEventKind::FlatLoad) ||
+          counter == WaitCounterKind::Ds);
+}
+
+std::optional<uint32_t> explicit_wait_order_kind(WaitCounterKind counter, WaitEventKind kind,
+                                                rj_code_arch_t arch) {
+  if (gfx10_flat_wait_credit_is_ordered(counter, kind, arch)) {
+    const auto model = amdgpu::waitcnt_model(arch).value();
+    if (const auto normalized =
+            WaitcheckTarget::normalized_hardware_event_kind(counter, kind, model))
+      return WaitcheckTarget::completion_order_kind(counter, *normalized, arch);
+  }
+  return WaitcheckTarget::completion_order_kind(counter, kind, arch);
+}
+
 bool gfx11_flat_ds(WaitCounterKind counter, WaitEventKind kind, rj_code_arch_t arch) {
   return counter == WaitCounterKind::Ds && has_conditional_route(kind) &&
          (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5);
@@ -78,10 +100,11 @@ bool gfx11_flat_ds(WaitCounterKind counter, WaitEventKind kind, rj_code_arch_t a
 
 bool lacks_guaranteed_completion_position(WaitCounterKind counter, WaitEventKind kind,
                                           rj_code_arch_t arch, bool exec_nonzero) {
-  // An active legacy FLAT reserves both counter credits, but an unused route
-  // is not evidence that an older result on that counter completed. Neither
-  // partial waits nor counter capacity may rely on a particular route here.
-  if (has_conditional_route(kind) && amdgpu::legacy_flat_issues_both_counter_domains(arch))
+  // GFX9 FLAT may report an unused-route completion ahead of an older routed
+  // request. GFX10 orders counter decrements, so its explicit partial waits
+  // can use the credit; counter-capacity inference is restricted separately.
+  if (has_conditional_route(kind) && amdgpu::legacy_flat_issues_both_counter_domains(arch) &&
+      !gfx10_flat_wait_credit_is_ordered(counter, kind, arch))
     return true;
   // A live VMcnt/VScnt position forces issue on GFX11. A live LGKM position
   // alone does not. Queue summaries are upper bounds, so a different VMEM
@@ -104,7 +127,7 @@ std::optional<uint32_t> WaitcheckStateOps::guaranteed_issue_order(WaitCounterKin
   // position is guaranteed, independently of the lanes' route.
   if (lacks_guaranteed_completion_position(counter, kind, arch, exec_nonzero))
     return std::nullopt;
-  return completion_order_kind(counter, kind, arch);
+  return explicit_wait_order_kind(counter, kind, arch);
 }
 
 bool WaitcheckStateOps::ordered_waw(const PendingEvent &event,
@@ -147,6 +170,8 @@ void WaitcheckStateOps::apply_admission(PendingState &state, const Instruction &
           !state.exec_nonzero || has_xcnt_smem(state))
         continue;
     } else if (!is_completion_counter(event.counter) ||
+               (has_conditional_route(event.kind) &&
+                amdgpu::legacy_flat_issues_both_counter_domains(arch)) ||
                lacks_guaranteed_completion_position(event.counter, event.kind, arch,
                                                     state.exec_nonzero)) {
       continue;
@@ -407,7 +432,8 @@ void WaitcheckStateOps::age_events(PendingState &state, const PendingEvent &even
           !(results_allocated && (state.exec_nonzero || active_source)))
         return;
     }
-    if (!completion || (incoming && completion_order_kind(event.counter, older, arch) == incoming))
+    if (!completion ||
+        (incoming && explicit_wait_order_kind(event.counter, older, arch) == incoming))
       value = std::min<uint32_t>(value + units, max_age);
   };
   // Stores have a primary counter position without a register-result event. A
