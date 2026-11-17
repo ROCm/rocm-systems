@@ -91,6 +91,7 @@ select_atomic_wrong_address(const AtomicInventory &, const AtomicSelector &, Fau
 /// @brief Apply a positive, four-byte-aligned byte delta to one supported atomic.
 /// @details The delta must not exceed 0x7fffff; the resulting offset must fit the
 /// form's encoded field. Modern Buffer atomics require a nonnegative source offset.
+/// Legacy Flat/Global/Buffer use their native unsigned12 or signed13 byte fields.
 /// DS recipes retain the prototype's raw offset0 increment: the sum must fit eight
 /// bits and be four-byte aligned, while offset1 stays unchanged. For two-address
 /// exchange forms this field is scaled by the instruction, so the request does
