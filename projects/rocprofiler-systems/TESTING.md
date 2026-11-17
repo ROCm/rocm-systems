@@ -232,7 +232,7 @@ Legend:
 | **Multi-GPU and system** | | | | | | |
 | rocSHMEM, TransferBench (XGMI) | `test_rocshmem_tracing`, `test_transferbench` | — | — | skip (needs ≥ 2 GPUs) | skip | — |
 | AMD-SMI GPU metrics | no dedicated test file | ✓ (mock backend + provider) | — | indirect | indirect | — |
-| NIC, AI NIC | `test_nic_perf`, `test_ainic` | ✓ (NIC collector) | **excl** (`network`) | — (not `gpu`) | — | — |
+| NIC, AI NIC | `test_nic_perf`, `test_ainic` | ✓ (NIC collector) | ~ (AI NIC settings check selected, subject to AMD-SMI ≥ 26.3; counter tests excluded by `network`) | — (not `gpu`) | — | — |
 | **Output and packaging** | | | | | | |
 | Perfetto, rocpd, timemory output | validators in most E2E tests | ✓ (perfetto, trace_cache) | ✓ | ✓ | ✓ | — |
 | Install, modulefile, `find_package` | `scripts/test-install.sh`, `test-find-package.sh` | — | ✓ | — | — | — |
