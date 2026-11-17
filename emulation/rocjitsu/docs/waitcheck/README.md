@@ -370,7 +370,7 @@ Useful options:
 | `--target gfx942|gfx950|gfx1100|gfx1150|gfx1151|gfx1200|gfx1201|gfx1250|gfx1251` | Select one supported target from an executable input. |
 | `--code-object-index N` | Select the Nth code object for the selected target. |
 | `--kernel-entry OFFSET --wave-size 32|64` | Analyze descriptors at one `.text` entry and wave size. Omitting `--wave-size` checks every wave mode. Descriptors sharing both fields may still have different register allocations; offline analysis conservatively groups them, while dispatch mode checks the exact launched descriptor. |
-| `--wave-size 32|64` | Without `--kernel-entry`, override the target-derived wave size used for executable entries without descriptors. Descriptor-backed entries keep their recorded wave size. |
+| `--wave-size 32|64` | With `--kernel-entry`, provide the wave size for an executable entry without descriptors, or select one descriptor wave mode. Descriptor-backed entries keep their recorded wave size. |
 | `--all-code-objects` | Analyze all supported code objects in each input. |
 | `--list-kernels` | List selected code objects and all descriptor-backed kernels as JSONL, then exit. |
 | `--recursive` | Expand directory inputs into recursive file sweeps. |
@@ -495,7 +495,7 @@ Environment variables:
 | --- | --- | --- |
 | `ROCJITSU_WAITCHECK` | `1` | Set to `0` to disable checking while leaving the HSA tool loaded. |
 | `ROCJITSU_WAITCHECK_MODE` | `dispatch` | `dispatch` checks a kernel immediately before its first AQL dispatch and caches the result. `eager` exhaustively checks every kernel when its code object is loaded. |
-| `ROCJITSU_WAITCHECK_FAIL` | `0` | Set to `1` to stop on a missing wait. Dispatch mode aborts before submitting the bad packet; eager mode and dispatch mode with a cooperative queue reject a hazardous load before ROCR loads it. |
+| `ROCJITSU_WAITCHECK_FAIL` | `0` | Set to `1` to stop on a missing wait. Dispatch mode aborts before submitting the bad packet; eager mode and dispatch mode with a cooperative queue reject a hazardous reader before ROCR loads it. A loaded image that cannot be matched to the checked reader is rejected before freeze. |
 | `ROCJITSU_WAITCHECK_SUMMARY` | `0` | Set to `1` to print load/dispatch/check/cache/pass/hazard counters at shutdown or process exit. |
 
 The tool prints diagnostics to stderr. With `ROCJITSU_WAITCHECK_FAIL=0`, it
@@ -506,6 +506,14 @@ actually submitted. This keeps large PyTorch and Tensile code objects from
 paying whole-library analysis costs. Use `ROCJITSU_WAITCHECK_MODE=eager` for
 load-only validation or when the application never creates an interceptable
 HSA queue.
+
+After a successful load, the hook compares the loader's selected image with
+the reader it checked. If another loader layer substitutes an image, or the
+selected bytes cannot be obtained, it discards the pending dispatch mapping
+and reports that checking is unavailable. With `ROCJITSU_WAITCHECK_FAIL=1`,
+the load returns an error before freeze. Eager mode can conservatively reject
+a hazardous caller reader before a later loader layer substitutes it; that
+diagnostic describes the caller reader, not the selected image.
 
 Descriptor queues requesting device-memory placement keep their original queue
 and cannot be intercepted by dispatch mode. With `ROCJITSU_WAITCHECK_FAIL=1`,

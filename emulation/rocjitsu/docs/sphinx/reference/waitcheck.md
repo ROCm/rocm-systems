@@ -111,8 +111,8 @@ Kernel generators with a final HSA ELF image can include
 `<rocjitsu/analysis/rj_waitcheck.h>` and link `librocjitsu_waitcheck`.
 Initialize `rj_waitcheck_options_t` and `rj_waitcheck_result_t` with their
 `_init` functions, then call `rj_waitcheck_analyze` with the image bytes. The
-function returns a status; on success, `result.passed` reports whether the
-analyzed code has a wait hazard. It does not abort the process. To check one
+function returns a status; on success, `result.passed != 0` means the analyzed
+code has no reported wait hazard. It does not abort the process. To check one
 entry, call `rj_waitcheck_analyze_kernel` with its byte offset within `.text`.
 See `docs/waitcheck/README.md` and the public header for a complete example.
 

@@ -16,12 +16,14 @@
 #include "rocjitsu/isa/target_registry.h"
 #include <algorithm>
 #include <atomic>
+#include <cerrno>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -32,6 +34,8 @@
 #include <utility>
 #include <vector>
 
+#include <sys/stat.h>
+
 namespace {
 
 using CreateFromFileWithOffsetSizeFn = hsa_status_t (*)(hsa_file_t, size_t, size_t,
@@ -39,6 +43,12 @@ using CreateFromFileWithOffsetSizeFn = hsa_status_t (*)(hsa_file_t, size_t, size
 using LoadedCodeObjectGetInfoFn = hsa_status_t (*)(hsa_loaded_code_object_t, uint32_t, void *);
 
 inline constexpr uint32_t kLoadedCodeObjectInfoLoadDelta = 8;
+inline constexpr uint32_t kLoadedCodeObjectInfoStorageType = 4;
+inline constexpr uint32_t kLoadedCodeObjectInfoMemoryBase = 5;
+inline constexpr uint32_t kLoadedCodeObjectInfoMemorySize = 6;
+inline constexpr uint32_t kLoadedCodeObjectInfoFile = 7;
+inline constexpr uint32_t kLoadedCodeObjectInfoUriLength = 11;
+inline constexpr uint32_t kLoadedCodeObjectInfoUri = 12;
 
 struct AmdLoaderTablePrefix {
   void *query_host_address = nullptr;
@@ -928,6 +938,101 @@ WaitcheckHsaLayer &layer() {
   return *state;
 }
 
+[[nodiscard]] LoadedCodeObjectGetInfoFn resolve_loaded_code_object_get_info() {
+  if (auto *get_info = layer().loaded_code_object_get_info(); get_info != nullptr)
+    return get_info;
+  AmdLoaderTablePrefix loader{};
+  auto *get_table = layer().get_major_extension_table();
+  if (get_table == nullptr ||
+      get_table(HSA_EXTENSION_AMD_LOADER, 1, sizeof(loader), &loader) != HSA_STATUS_SUCCESS)
+    return nullptr;
+  layer().save_loaded_code_object_get_info(loader.loaded_code_object_get_info);
+  return loader.loaded_code_object_get_info;
+}
+
+enum class LoadedImageIdentity { Same, Changed, Unavailable };
+
+[[nodiscard]] LoadedImageIdentity loaded_image_identity(hsa_loaded_code_object_t loaded,
+                                                        const uint8_t *expected, size_t size) {
+  auto *get_info = resolve_loaded_code_object_get_info();
+  if (get_info == nullptr || expected == nullptr || size == 0)
+    return LoadedImageIdentity::Unavailable;
+  uint32_t storage_type = 0;
+  if (get_info(loaded, kLoadedCodeObjectInfoStorageType, &storage_type) != HSA_STATUS_SUCCESS)
+    return LoadedImageIdentity::Unavailable;
+
+  if (storage_type == 2) { // HSA memory reader
+    uint64_t base = 0;
+    uint64_t loaded_size = 0;
+    if (get_info(loaded, kLoadedCodeObjectInfoMemoryBase, &base) != HSA_STATUS_SUCCESS ||
+        get_info(loaded, kLoadedCodeObjectInfoMemorySize, &loaded_size) != HSA_STATUS_SUCCESS ||
+        base == 0)
+      return LoadedImageIdentity::Unavailable;
+    if (loaded_size != size)
+      return LoadedImageIdentity::Changed;
+    const auto *bytes = reinterpret_cast<const uint8_t *>(static_cast<uintptr_t>(base));
+    return std::memcmp(bytes, expected, size) == 0 ? LoadedImageIdentity::Same
+                                                   : LoadedImageIdentity::Changed;
+  }
+  if (storage_type == 1) { // HSA file reader
+    int file = -1;
+    if (get_info(loaded, kLoadedCodeObjectInfoFile, &file) != HSA_STATUS_SUCCESS || file < 0)
+      return LoadedImageIdentity::Unavailable;
+    struct stat status {};
+    if (fstat(file, &status) != 0 || !S_ISREG(status.st_mode) || status.st_size < 0 ||
+        static_cast<uintmax_t>(status.st_size) > std::numeric_limits<size_t>::max())
+      return LoadedImageIdentity::Unavailable;
+    size_t offset = 0;
+    size_t loaded_size = static_cast<size_t>(status.st_size);
+    uint32_t uri_length = 0;
+    if (get_info(loaded, kLoadedCodeObjectInfoUriLength, &uri_length) != HSA_STATUS_SUCCESS ||
+        uri_length > 8192)
+      return LoadedImageIdentity::Unavailable;
+    std::string uri(uri_length + 1, '\0');
+    if (get_info(loaded, kLoadedCodeObjectInfoUri, uri.data()) != HSA_STATUS_SUCCESS ||
+        uri[uri_length] != '\0')
+      return LoadedImageIdentity::Unavailable;
+    uri.resize(uri_length);
+    size_t range = uri.find("#offset=");
+    if (range == std::string::npos)
+      range = uri.find("?offset=");
+    if (range != std::string::npos) {
+      const char *start = uri.c_str() + range + 8;
+      char *end = nullptr;
+      errno = 0;
+      const unsigned long long parsed_offset = std::strtoull(start, &end, 0);
+      if (errno != 0 || end == start || std::strncmp(end, "&size=", 6) != 0 ||
+          parsed_offset > std::numeric_limits<size_t>::max())
+        return LoadedImageIdentity::Unavailable;
+      start = end + 6;
+      errno = 0;
+      const unsigned long long parsed_size = std::strtoull(start, &end, 0);
+      if (errno != 0 || end == start || *end != '\0' ||
+          parsed_size > std::numeric_limits<size_t>::max())
+        return LoadedImageIdentity::Unavailable;
+      offset = static_cast<size_t>(parsed_offset);
+      loaded_size = static_cast<size_t>(parsed_size);
+    }
+    if (loaded_size != size)
+      return LoadedImageIdentity::Changed;
+    const auto bytes = rocjitsu::snapshot_code_object_file_range(file, offset, size);
+    if (!bytes)
+      return LoadedImageIdentity::Unavailable;
+    return bytes->size() == size && std::memcmp(bytes->data(), expected, size) == 0
+               ? LoadedImageIdentity::Same
+               : LoadedImageIdentity::Changed;
+  }
+  return LoadedImageIdentity::Unavailable;
+}
+
+[[nodiscard]] hsa_status_t unchecked_loaded_image_status(LoadedImageIdentity identity) {
+  g_stats.unavailable.fetch_add(1, std::memory_order_relaxed);
+  std::fprintf(stderr, "rocjitsu-waitcheck: loaded code object image %s; check unavailable\n",
+               identity == LoadedImageIdentity::Changed ? "differs from reader" : "is unavailable");
+  return env_enabled("ROCJITSU_WAITCHECK_FAIL", false) ? HSA_STATUS_ERROR_INVALID_CODE_OBJECT
+                                                        : HSA_STATUS_SUCCESS;
+}
+
 [[nodiscard]] bool amd_loader_table_has_file_range_reader(size_t table_length) {
   constexpr size_t reader_offset =
       offsetof(AmdLoaderTablePrefix, create_from_file_with_offset_size);
@@ -1075,13 +1180,22 @@ hsa_status_t HSA_API waitcheck_executable_load_agent_code_object(
       return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
     }
     const hsa_status_t status = original(executable, agent, reader, options, runtime_output);
-    if (status == HSA_STATUS_SUCCESS)
-      registry.complete(prepared, *runtime_output, true);
-    else
+    if (status != HSA_STATUS_SUCCESS) {
       registry.complete(prepared, {}, false);
+      return status;
+    }
+    const auto identity = loaded_image_identity(*runtime_output, entry->bytes, entry->size);
+    if (identity != LoadedImageIdentity::Same) {
+      registry.complete(prepared, {}, false);
+      return unchecked_loaded_image_status(identity);
+    }
+    registry.complete(prepared, *runtime_output, true);
     return status;
   }
 
+  hsa_loaded_code_object_t captured_loaded{};
+  hsa_loaded_code_object_t *runtime_output =
+      loaded_code_object == nullptr ? &captured_loaded : loaded_code_object;
   if (entry != nullptr) {
     std::lock_guard entry_lock(entry->mutex);
     if (!entry->analyzed) {
@@ -1092,10 +1206,15 @@ hsa_status_t HSA_API waitcheck_executable_load_agent_code_object(
         env_enabled("ROCJITSU_WAITCHECK_FAIL", false)) {
       return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
     }
+    const hsa_status_t status = original(executable, agent, reader, options, runtime_output);
+    if (status != HSA_STATUS_SUCCESS || !env_enabled("ROCJITSU_WAITCHECK", true))
+      return status;
+    const auto identity = loaded_image_identity(*runtime_output, entry->bytes, entry->size);
+    return identity == LoadedImageIdentity::Same ? status : unchecked_loaded_image_status(identity);
   } else if (env_enabled("ROCJITSU_WAITCHECK", true)) {
     g_stats.unavailable.fetch_add(1, std::memory_order_relaxed);
   }
-  return original(executable, agent, reader, options, loaded_code_object);
+  return original(executable, agent, reader, options, runtime_output);
 }
 
 hsa_status_t HSA_API waitcheck_executable_freeze(hsa_executable_t executable, const char *options) {
@@ -1106,16 +1225,7 @@ hsa_status_t HSA_API waitcheck_executable_freeze(hsa_executable_t executable, co
   if (status != HSA_STATUS_SUCCESS)
     return status;
 
-  LoadedCodeObjectGetInfoFn get_info = layer().loaded_code_object_get_info();
-  if (get_info == nullptr) {
-    AmdLoaderTablePrefix loader{};
-    auto *get_table = layer().get_major_extension_table();
-    if (get_table != nullptr &&
-        get_table(HSA_EXTENSION_AMD_LOADER, 1, sizeof(loader), &loader) == HSA_STATUS_SUCCESS) {
-      layer().save_loaded_code_object_get_info(loader.loaded_code_object_get_info);
-      get_info = loader.loaded_code_object_get_info;
-    }
-  }
+  LoadedCodeObjectGetInfoFn get_info = resolve_loaded_code_object_get_info();
   DispatchRegistry::instance().activate(executable, get_info);
   return status;
 }
@@ -1252,6 +1362,12 @@ hsa_status_t HSA_API waitcheck_amd_queue_intercept_create(
     hsa_agent_t agent, uint32_t size, hsa_queue_type32_t type,
     void (*callback)(hsa_status_t, hsa_queue_t *, void *), void *data,
     uint32_t private_segment_size, uint32_t group_segment_size, hsa_queue_t **queue) {
+  if (!env_enabled("ROCJITSU_WAITCHECK", true)) {
+    auto *create = layer().intercept_create();
+    return create == nullptr ? HSA_STATUS_ERROR_NOT_INITIALIZED
+                             : create(agent, size, type, callback, data, private_segment_size,
+                                      group_segment_size, queue);
+  }
   return waitcheck_queue_create(agent, size, type, callback, data, private_segment_size,
                                 group_segment_size, queue);
 }

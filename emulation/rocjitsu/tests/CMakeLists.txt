@@ -4864,6 +4864,7 @@ if(RJ_ENABLE_HIP_TESTS)
                 CONFIG ${RJ_HIP_TEST_CONFIG}
                 ENVIRONMENT ${_waitcheck_dispatch_env} "DEBUG_CLR_DIRECT_DOORBELL=1"
                 REQUIRED_OUTPUT "summary loads=[1-9][0-9]* dispatches=[1-9][0-9]* checked=[1-9][0-9]*"
+                TIMEOUT 30
             )
             set(_waitcheck_disabled_env ${_waitcheck_env})
             list(REMOVE_ITEM _waitcheck_disabled_env "ROCJITSU_WAITCHECK=1")
@@ -4876,16 +4877,47 @@ if(RJ_ENABLE_HIP_TESTS)
                 REQUIRED_OUTPUT "summary loads=[1-9][0-9]* dispatches=0 checked=0"
             )
             rj_add_hip_test(hip_waitcheck_hazard_test ARCH ${RJ_HIP_TEST_ARCH})
+            set(_waitcheck_hazard_fixture
+                ${CMAKE_CURRENT_BINARY_DIR}/hip_waitcheck_hazard_fixture.hsaco)
+            set(_waitcheck_hazard_bundle
+                ${CMAKE_CURRENT_BINARY_DIR}/hip_waitcheck_hazard_fixture.bundle.o)
+            add_custom_command(
+                OUTPUT ${_waitcheck_hazard_fixture}
+                BYPRODUCTS ${_waitcheck_hazard_bundle}
+                COMMAND ${AMDCXX} -x hip --offload-device-only
+                    --offload-arch=${RJ_HIP_TEST_ARCH} --rocm-path=${ROCM_PATH}
+                    -std=c++20 -O2 -c -o ${_waitcheck_hazard_bundle}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/hip_waitcheck_hazard_fixture.hip
+                COMMAND ${ROCM_PATH}/lib/llvm/bin/clang-offload-bundler
+                    --unbundle --type=o
+                    --targets=hipv4-amdgcn-amd-amdhsa--${RJ_HIP_TEST_ARCH}
+                    --input=${_waitcheck_hazard_bundle}
+                    --output=${_waitcheck_hazard_fixture}
+                DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/hip_waitcheck_hazard_fixture.hip ${AMDCXX}
+                VERBATIM
+            )
+            add_custom_target(hip_waitcheck_hazard_fixture_target
+                DEPENDS ${_waitcheck_hazard_fixture})
             add_dependencies(
                 hip_waitcheck_hazard_test_target
-                rocjitsu_waitcheck_hooks
+                rocjitsu_waitcheck_hooks hip_waitcheck_hazard_fixture_target
             )
+            if(RJ_INSTALL_TESTS)
+                install(FILES ${_waitcheck_hazard_fixture}
+                    DESTINATION ${RJ_INSTALL_TEST_BIN_DIR})
+            endif()
             rj_add_hip_test_case(
                 hip_waitcheck_hazard_test "HipWaitcheckHazardTest.FailClosedRejectsKernelCodeObject"
                 NAME WaitcheckHsaToolsHipTest.FailClosedRejectsHazard
                 CONFIG ${RJ_HIP_TEST_CONFIG}
                 ENVIRONMENT ${_waitcheck_env} "ROCJITSU_WAITCHECK_MODE=eager"
                 REQUIRED_OUTPUT "summary loads=[1-9][0-9]* dispatches=0 checked=[1-9][0-9]* cache_hits=0 passed=[0-9]+ hazards=[1-9][0-9]*"
+            )
+            rj_add_hip_test_case(
+                hip_waitcheck_hazard_test "HipWaitcheckHazardTest.ModuleLoadsWithoutChecking"
+                NAME WaitcheckHsaToolsHipTest.HazardModuleLoadsWhenDisabled
+                CONFIG ${RJ_HIP_TEST_CONFIG}
+                ENVIRONMENT ${_waitcheck_disabled_env} "ROCJITSU_WAITCHECK_MODE=eager"
             )
             rj_add_hip_test_case(
                 hip_waitcheck_hazard_test "HipWaitcheckHazardTest.DispatchRejectsBeforeSubmission"
