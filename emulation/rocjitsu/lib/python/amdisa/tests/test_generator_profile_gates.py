@@ -3973,22 +3973,6 @@ def test_scalar_f16_source_lowering_uses_numeric_operand_format(arch_name):
                 assert 'read<From>(wf, src, high)' in conversion
             continue
 
-        if arch_name == 'rdna4' and numeric_sources:
-            for operand in inst.src_operands:
-                if operand.name in numeric_sources:
-                    assert operand.data_format_name == 'FMT_NUM_F16', name
-            if name == arithmetic:
-                assert (
-                    'arithmetic<amdgpu::scalar_fp::F16, amdgpu::scalar_fp::Op::Add>(wf, sdst, ssrc0, ssrc1)'
-                    in body
-                )
-            else:
-                extra = ', true' if high else ''
-                assert (
-                    f'convert<amdgpu::scalar_fp::F16, amdgpu::scalar_fp::F32>(wf, sdst, ssrc0{extra})'
-                    in body
-                )
-            continue
         for operand in inst.src_operands:
             if operand.name in numeric_sources:
                 assert operand.data_format_name == 'FMT_NUM_F16', name

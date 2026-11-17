@@ -104,3 +104,12 @@ including the inherited whole-wave nonfinite gate. The VM owns operand views,
 VCC/EXEC writes and trap delivery. Ordinary Compatibility comparisons remain
 numeric-only; explicit reporting qualification is unchanged. Gfx10 signaling
 policy remains in the partially migrated RDNA2 adapter until that migration.
+
+## Scalar floating point
+
+gfx12 scalar arithmetic, comparisons, rounding and conversions use rj-arith in
+every semantics, including Compatibility. Compatibility retains the inherited
+scalar FP-status model; arithmetic and conversions still reject explicit mode 3
+where reporting is not qualified. Scalar comparisons and rounding support mode 3.
+The VM owns SGPR/SCC writes and trap delivery. gfx1150 retains its legacy scalar
+FP implementation pending migration; gfx1250 has its own documented library policy.
