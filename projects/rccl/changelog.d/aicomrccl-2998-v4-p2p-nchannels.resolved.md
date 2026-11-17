@@ -1,0 +1,1 @@
+* Fixed v4 profiler plugins receiving an uninitialized `p2p.nChannels` in point-to-point event descriptors. The v4 adapter never copied the channel count, so the plugin read whatever was left on the stack.
