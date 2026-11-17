@@ -9,6 +9,8 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <cstdio>
+#include <cstring>
 #include <limits>
 #include <memory>
 
@@ -44,6 +46,28 @@ smi_nic_status_t CountingMtuFill(smi_nic_ctx_t, uint64_t, smi_nic_rdma_devices_i
   return SMI_NIC_STATUS_SUCCESS;
 }
 
+constexpr char kRdmaDevice[] = "rdma0";
+
+void DescribeRdmaDevice(amdsmi_nic_rdma_devices_info_t& rdma_dev) {
+  rdma_dev.num_rdma_dev = 1;
+  auto& device = rdma_dev.rdma_dev_info[0];
+  std::snprintf(device.rdma_dev, sizeof(device.rdma_dev), "%s", kRdmaDevice);
+  device.num_rdma_ports = kRdmaPorts;
+  for (auto k = uint8_t{0}; k < kRdmaPorts; k++) {
+    device.rdma_port_info[k].rdma_port = static_cast<uint8_t>(k + 1);
+    device.rdma_port_info[k].max_mtu = kUnknownMtu;
+    device.rdma_port_info[k].active_mtu = kUnknownMtu;
+  }
+}
+
+// RDMA info is read on every call, without the MTU, as the production getter does.
+smi_nic_status_t LiveRdmaWithoutMtu(smi_nic_ctx_t, uint64_t, smi_nic_rdma_devices_info_t* info) {
+  auto* rdma_dev = reinterpret_cast<amdsmi_nic_rdma_devices_info_t*>(info);
+  std::memset(rdma_dev, 0, sizeof(*rdma_dev));
+  DescribeRdmaDevice(*rdma_dev);
+  return SMI_NIC_STATUS_SUCCESS;
+}
+
 amd::smi::nic_info_getters_t g_getters = {};
 
 // Installs the counting MTU fill and returns a device whose ports still hold the unknown MTU.
@@ -51,16 +75,12 @@ std::unique_ptr<AMDSmiAINICDevice::AINICInfo> PrepareRdmaDeviceInfo() {
   g_mtu_fill_calls = 0;
   g_mtu_fill_status = SMI_NIC_STATUS_SUCCESS;
   g_getters = kStubGetters;
+  g_getters.rdma = LiveRdmaWithoutMtu;
   g_getters.rdma_mtu = CountingMtuFill;
   amd::smi::nic_set_info_getters_for_testing(&g_getters);
 
   auto info = std::make_unique<AMDSmiAINICDevice::AINICInfo>();
-  info->rdma_dev.num_rdma_dev = 1;
-  info->rdma_dev.rdma_dev_info[0].num_rdma_ports = kRdmaPorts;
-  for (auto k = uint8_t{0}; k < kRdmaPorts; k++) {
-    info->rdma_dev.rdma_dev_info[0].rdma_port_info[k].max_mtu = kUnknownMtu;
-    info->rdma_dev.rdma_dev_info[0].rdma_port_info[k].active_mtu = kUnknownMtu;
-  }
+  DescribeRdmaDevice(info->rdma_dev);
   return info;
 }
 

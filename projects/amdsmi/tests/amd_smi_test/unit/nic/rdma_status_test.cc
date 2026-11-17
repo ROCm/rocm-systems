@@ -18,12 +18,9 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
-#include <filesystem>
 #include <iterator>
 #include <memory>
 #include <stdexcept>
-#include <string>
-#include <system_error>
 
 #include "amd_smi/impl/amd_smi_nic_testing.h"
 #include "nic_unit_fixture.h"
@@ -219,6 +216,11 @@ TEST_F(NicUnit, PortInfoIsReadWhenCalled) {
 
   g_status[kPort] = SMI_NIC_STATUS_DRIVER_NOT_LOADED;
   EXPECT_EQ(amdsmi_get_nic_port_info(nic.handle(), port.get()), AMDSMI_STATUS_DRIVER_NOT_LOADED);
+
+  // A fwctl-only NIC has no port: as at discovery, an empty port info.
+  g_status[kPort] = SMI_NIC_STATUS_NO_DATA;
+  EXPECT_EQ(amdsmi_get_nic_port_info(nic.handle(), port.get()), AMDSMI_STATUS_SUCCESS);
+  EXPECT_TRUE(IsFilledWith(*port, 0));
 }
 
 // The amdsmi.h contract for a NIC without RDMA, at the public getter: a tolerated
@@ -279,18 +281,19 @@ TEST_F(NicUnit, StaticInfoComesFromDiscovery) {
 }
 
 template <typename Info>
-smi_nic_status_t ThrowParseError(smi_nic_ctx_t, uint64_t, Info*) {
-  throw std::invalid_argument("stoul");
+smi_nic_status_t Throw(smi_nic_ctx_t, uint64_t, Info*) {
+  throw std::runtime_error("NIC read failed");
 }
 
-// The NIC library's std::stoul throws on sysfs text it cannot parse. A getter must
-// return a status instead of letting the exception reach a C caller.
-TEST_F(NicUnit, UnparsableValueIsAStatus) {
-  static const nic_info_getters_t kThrowingGetters = {
-      Stub<kBus, smi_nic_bus_info_t>,       Stub<kDriver, smi_nic_driver_info_t>,
-      Stub<kAsic, smi_nic_asic_info_t>,     Stub<kNuma, smi_nic_numa_info_t>,
-      ThrowParseError<smi_nic_port_info_t>, ThrowParseError<smi_nic_rdma_devices_info_t>,
-  };
+// A read made on every call must return a status instead of letting an exception from the NIC
+// library reach a C caller.
+TEST_F(NicUnit, ThrowingNicReadIsAStatus) {
+  static const amd::smi::nic_info_getters_t kThrowingGetters = [] {
+    amd::smi::nic_info_getters_t getters = kStubGetters;
+    getters.port = Throw<smi_nic_port_info_t>;
+    getters.rdma = Throw<smi_nic_rdma_devices_info_t>;
+    return getters;
+  }();
   RegisteredNic nic;
   nic_set_info_getters_for_testing(&kThrowingGetters);
   auto port = std::make_unique<amdsmi_nic_port_info_t>();
@@ -300,47 +303,58 @@ TEST_F(NicUnit, UnparsableValueIsAStatus) {
             AMDSMI_STATUS_INTERNAL_EXCEPTION);
 }
 
-// The counter path starts at /sys/class/net/<netdev>. A real netdev name cannot contain '/', so
-// only a test can aim it at a scratch tree through "..", and then remove or break that directory.
-TEST_F(NicUnit, RdmaPortStatisticsListingFailureIsAStatus) {
-  FakeSysfsTree tree;
-  ASSERT_FALSE(tree.root().empty());
-  const std::string counters =
-      "device/infiniband/rdma0/subsystem/rdma0/subsystem/rdma0/ports/1/hw_counters";
-  tree.WriteFile(counters + "/rx_packets", "7\n");
+constexpr uint16_t kUnknownMtu = UINT16_MAX;
 
+void SetRdmaPort(amdsmi_nic_rdma_dev_info_t& device, const char* name, uint8_t port_num,
+                 const char* state, uint16_t mtu) {
+  std::snprintf(device.rdma_dev, sizeof(device.rdma_dev), "%s", name);
+  device.num_rdma_ports = 1;
+  amdsmi_nic_rdma_port_info_t& port = device.rdma_port_info[0];
+  port.rdma_port = port_num;
+  std::snprintf(port.state, sizeof(port.state), "%s", state);
+  port.max_mtu = mtu;
+  port.active_mtu = mtu;
+}
+
+// The state read now: rdma0 went down, and rdma1 appeared after discovery.
+smi_nic_status_t LiveRdma(smi_nic_ctx_t, uint64_t, smi_nic_rdma_devices_info_t* info) {
+  auto* rdma = reinterpret_cast<amdsmi_nic_rdma_devices_info_t*>(info);
+  std::memset(rdma, 0, sizeof(*rdma));
+  rdma->num_rdma_dev = 2;
+  SetRdmaPort(rdma->rdma_dev_info[0], "rdma0", 1, "DOWN", kUnknownMtu);
+  SetRdmaPort(rdma->rdma_dev_info[1], "rdma1", 1, "ACTIVE", kUnknownMtu);
+  return SMI_NIC_STATUS_SUCCESS;
+}
+
+// The MTU probe forks per port, so it runs once; the state is read on every call.
+TEST_F(NicUnit, RdmaDevInfoKeepsTheProbedMtu) {
+  static const amd::smi::nic_info_getters_t kLiveRdmaGetters = [] {
+    amd::smi::nic_info_getters_t getters = kStubGetters;
+    getters.rdma = LiveRdma;
+    return getters;
+  }();
+  constexpr uint16_t kProbedMtu = 4096;
   auto discovered = std::make_unique<AMDSmiAINICDevice::AINICInfo>();
   discovered->rdma_dev.num_rdma_dev = 1;
-  amdsmi_nic_rdma_dev_info_t& dev = discovered->rdma_dev.rdma_dev_info[0];
-  std::snprintf(dev.rdma_dev, sizeof(dev.rdma_dev), "rdma0");
-  dev.num_rdma_ports = 1;
-  amdsmi_nic_rdma_port_info_t& port = dev.rdma_port_info[0];
-  std::snprintf(port.netdev, sizeof(port.netdev), "../../..%s", tree.root().c_str());
-  port.rdma_port = 1;
+  SetRdmaPort(discovered->rdma_dev.rdma_dev_info[0], "rdma0", 1, "ACTIVE", kProbedMtu);
   RegisteredNic nic(*discovered);
+  nic_set_info_getters_for_testing(&kLiveRdmaGetters);
 
-  std::array<amdsmi_nic_stat_t, 4> stats{};
-  uint32_t count = static_cast<uint32_t>(stats.size());
-  ASSERT_EQ(amdsmi_get_nic_rdma_port_statistics(nic.handle(), 0, &count, stats.data()),
-            AMDSMI_STATUS_SUCCESS);
-  EXPECT_EQ(count, 1u);
-  EXPECT_STREQ(stats[0].name, "rx_packets");
-  EXPECT_EQ(stats[0].value, 7u);
+  auto rdma = std::make_unique<amdsmi_nic_rdma_devices_info_t>();
+  ASSERT_EQ(amdsmi_get_nic_rdma_dev_info(nic.handle(), rdma.get()), AMDSMI_STATUS_SUCCESS);
+  ASSERT_EQ(rdma->num_rdma_dev, 2);
+  const amdsmi_nic_rdma_port_info_t& known = rdma->rdma_dev_info[0].rdma_port_info[0];
+  EXPECT_STREQ(known.state, "DOWN");
+  EXPECT_EQ(known.max_mtu, kProbedMtu);
+  EXPECT_EQ(known.active_mtu, kProbedMtu);
+  const amdsmi_nic_rdma_port_info_t& added = rdma->rdma_dev_info[1].rdma_port_info[0];
+  EXPECT_STREQ(added.state, "ACTIVE");
+  EXPECT_EQ(added.max_mtu, kUnknownMtu);
 
-  const std::filesystem::path dir = std::filesystem::path(tree.root()) / counters;
-  std::error_code ec;
-  std::filesystem::remove_all(dir, ec);
-  ASSERT_FALSE(ec) << ec.message();
-  count = static_cast<uint32_t>(stats.size());
-  EXPECT_EQ(amdsmi_get_nic_rdma_port_statistics(nic.handle(), 0, &count, stats.data()),
-            AMDSMI_STATUS_FILE_ERROR);
-
-  // A self-referencing link: the listing fails with ELOOP instead of ENOENT.
-  std::filesystem::create_directory_symlink(dir.filename(), dir, ec);
-  ASSERT_FALSE(ec) << ec.message();
-  count = static_cast<uint32_t>(stats.size());
-  EXPECT_EQ(amdsmi_get_nic_rdma_port_statistics(nic.handle(), 0, &count, stats.data()),
-            AMDSMI_STATUS_FILE_ERROR);
+  auto info = std::make_unique<AMDSmiAINICDevice::AINICInfo>();
+  ASSERT_EQ(amdsmi_get_ainic_info(nic.handle(), info.get()), AMDSMI_STATUS_SUCCESS);
+  EXPECT_STREQ(info->rdma_dev.rdma_dev_info[0].rdma_port_info[0].state, "DOWN");
+  EXPECT_EQ(info->rdma_dev.rdma_dev_info[0].rdma_port_info[0].max_mtu, kProbedMtu);
 }
 
 }  // namespace

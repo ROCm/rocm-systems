@@ -835,7 +835,11 @@ amdsmi_status_t amdsmi_get_ainic_info(amdsmi_processor_handle processor_handle,
   const auto& system = amd::smi::AMDSmiSystem::getInstance();
   r = system.read_ainic_port_info(nic_device->bdf(), &info->port);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
-  return system.read_ainic_rdma_dev_info(nic_device->bdf(), &info->rdma_dev);
+  r = system.read_ainic_rdma_dev_info(nic_device->bdf(), &info->rdma_dev);
+  if (r == AMDSMI_STATUS_SUCCESS) {
+    nic_device->copy_rdma_mtu(info->rdma_dev);
+  }
+  return r;
 }
 
 amdsmi_status_t amdsmi_get_nic_asic_info(amdsmi_processor_handle processor_handle,
@@ -990,7 +994,11 @@ amdsmi_status_t amdsmi_get_nic_rdma_dev_info(amdsmi_processor_handle processor_h
   if (status != AMDSMI_STATUS_SUCCESS) {
     return status;
   }
-  return amd::smi::AMDSmiSystem::getInstance().read_ainic_rdma_dev_info(nic_device->bdf(), info);
+  status = amd::smi::AMDSmiSystem::getInstance().read_ainic_rdma_dev_info(nic_device->bdf(), info);
+  if (status == AMDSMI_STATUS_SUCCESS) {
+    nic_device->copy_rdma_mtu(*info);
+  }
+  return status;
 }
 
 amdsmi_status_t amdsmi_get_nic_fw_info(amdsmi_processor_handle processor_handle,

@@ -607,14 +607,20 @@ static amdsmi_status_t report_ainic_read_exception(const char* func, uint64_t bd
   return AMDSMI_STATUS_INTERNAL_EXCEPTION;
 }
 
-// The NIC library's sysfs parsing (std::stoul) throws on text it cannot parse; a read made on
-// every call must not let that escape through the C API. Both reads cast to the struct pairs
-// whose layout populate_amd_ainic_device() static_asserts.
+// A read made on every call must not let an exception from the NIC library escape through the
+// C API. Both reads cast to the struct pairs whose layout populate_amd_ainic_device()
+// static_asserts.
 amdsmi_status_t AMDSmiSystem::read_ainic_port_info(uint64_t bdf,
                                                    amdsmi_nic_port_info_t* info) const {
   try {
-    return ainic_to_amdsmi_status(
-        g_nic_info_getters->port(ainic_ctx_, bdf, reinterpret_cast<smi_nic_port_info_t*>(info)));
+    const smi_nic_status_t status =
+        g_nic_info_getters->port(ainic_ctx_, bdf, reinterpret_cast<smi_nic_port_info_t*>(info));
+    if (status == SMI_NIC_STATUS_NO_DATA) {
+      // A fwctl-only NIC has no port; discovery keeps it with an empty port info.
+      std::memset(info, 0, sizeof(*info));
+      return AMDSMI_STATUS_SUCCESS;
+    }
+    return ainic_to_amdsmi_status(status);
   } catch (const std::exception& e) {
     return report_ainic_read_exception(__func__, bdf, e.what());
   } catch (...) {

@@ -4,6 +4,7 @@
 /**
  * Each single-field NIC getter returns its own sub-struct of the NIC info and keeps the status
  * codes of amdsmi_get_ainic_info() for a bad handle, a bad pointer and an uninitialised library.
+ * Port and RDMA info are read when called, so those getters return what the NIC getters write.
  */
 
 #include <gtest/gtest.h>
@@ -93,14 +94,18 @@ TEST_F(NicUnit, NumaInfoIsTheNumaField) {
   check_getter(amdsmi_get_nic_numa_info, info->numa, *info);
 }
 
-TEST_F(NicUnit, PortInfoIsThePortField) {
+TEST_F(NicUnit, PortInfoIsReadFromThePortGetter) {
   const auto info = make_filled_info();
-  check_getter(amdsmi_get_nic_port_info, info->port, *info);
+  auto expected = std::make_unique<amdsmi_nic_port_info_t>();
+  std::memset(expected.get(), FillByte(kPort), sizeof(*expected));
+  check_getter(amdsmi_get_nic_port_info, *expected, *info);
 }
 
-TEST_F(NicUnit, RdmaDevInfoIsTheRdmaField) {
+TEST_F(NicUnit, RdmaDevInfoIsReadFromTheRdmaGetter) {
   const auto info = make_filled_info();
-  check_getter(amdsmi_get_nic_rdma_dev_info, info->rdma_dev, *info);
+  auto expected = std::make_unique<amdsmi_nic_rdma_devices_info_t>();
+  std::memset(expected.get(), FillByte(kRdma), sizeof(*expected));
+  check_getter(amdsmi_get_nic_rdma_dev_info, *expected, *info);
 }
 
 TEST_F(NicUnit, DeviceBdfIsTheBusBdf) {
