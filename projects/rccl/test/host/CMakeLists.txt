@@ -1507,9 +1507,7 @@ function(rccl_standalone_setup)
                      "${CMAKE_BINARY_DIR}/external/fmt")
   endif()
 
-  # --- __hip_atomic_* poison (in-tree builds get it from test/CMakeLists.txt) ---
-  # After GTest and fmt so a fetched googletest is not built with it, and before
-  # any test target below.
+  # --- __hip_atomic_* poison: after GTest/fmt so a fetched googletest is not built with it ---
   option(RCCL_POISON_HIP_ATOMICS "Reject __hip_atomic_* builtins in RCCL sources" ON)
   if(RCCL_POISON_HIP_ATOMICS)
     add_compile_options(--include=${CMAKE_CURRENT_SOURCE_DIR}/../../src/include/poison_hip_atomics.h)
