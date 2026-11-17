@@ -10,13 +10,11 @@
 
 namespace rocjitsu {
 
-// Both patch entry points run the patch gates, which refuse points that need
-// runtime support no runtime provides yet, such as the kernarg wrapper the entry
-// prologue loads through. skip_patch_gates() lets a test exercise the gated
-// path. A simulator test may supply that support itself (the harness hands the
-// CP the wrapper); a unit test may only inspect the planned prologue and never
-// dispatch it. Skipping supplies nothing the gates check for, and the planner's
-// own fail-closed checks still run after them.
+// Both patch entry points require an explicit runtime binding for entry storage.
+// skip_patch_gates() lets a test exercise that path without declaring a binding.
+// A simulator test may supply its own wrapper directly to the CP; a unit test may
+// only inspect the planned prologue. Skipping does not construct a wrapper, and
+// the planner's own fail-closed checks still run afterward.
 //
 // Must live in namespace rocjitsu (not an anonymous namespace) so it names the
 // same type as the friend declaration in Instrumentor.

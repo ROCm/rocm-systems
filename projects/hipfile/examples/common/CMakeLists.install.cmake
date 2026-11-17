@@ -5,7 +5,7 @@
 # You may need to add -DCMAKE_PREFIX_PATH=/path/to/hipfile
 # if hipFile has been installed to a non-standard location
 
-cmake_minimum_required(VERSION 3.21)
+cmake_minimum_required(VERSION 3.25.2)
 
 project(examples_common LANGUAGES CXX)
 

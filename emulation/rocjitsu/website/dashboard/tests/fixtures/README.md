@@ -1,7 +1,7 @@
 # Fictional corpus-schema dashboard fixtures
 
 Every measurement, branch, machine and commit message is fictional test input,
-not a published Rocjitsu performance claim. Never publish this directory.
+not a published rocjitsu performance claim. Never publish this directory.
 Production builds neither import generators nor copy fixture JSON.
 
 `maintainedDataset.js` builds 24 develop attempts and 20 side branches.

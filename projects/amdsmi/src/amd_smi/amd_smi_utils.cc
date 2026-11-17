@@ -177,7 +177,7 @@ amdsmi_status_t smi_amdgpu_find_hwmon_dir(amd::smi::AMDSmiGPUDevice* device,
   SMIGPUDEVICE_MUTEX(device->get_mutex())
   DIR* dh;
   struct dirent* contents;
-  std::string device_path = "/sys/class/drm/" + device->get_gpu_path();
+  std::string device_path = amd::smi::test_hooks::SysfsDrmRoot() + "/" + device->get_gpu_path();
   std::string directory_path = device_path + "/device/hwmon/";
 
   if (!isAMDGPU(device_path)) {
@@ -206,16 +206,16 @@ amdsmi_status_t smi_amdgpu_find_hwmon_dir(amd::smi::AMDSmiGPUDevice* device,
 amdsmi_status_t smi_amdgpu_get_board_info(amd::smi::AMDSmiGPUDevice* device,
                                           amdsmi_board_info_t* info) {
   SMIGPUDEVICE_MUTEX(device->get_mutex())
-  std::string model_number_path =
-      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/product_number");
-  std::string product_serial_path =
-      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/serial_number");
-  std::string fru_id_path =
-      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/fru_id");
-  std::string manufacturer_name_path =
-      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/manufacturer");
-  std::string product_name_path =
-      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/product_name");
+  std::string model_number_path = amd::smi::test_hooks::SysfsDrmRoot() + "/" +
+                                  device->get_gpu_path() + std::string("/device/product_number");
+  std::string product_serial_path = amd::smi::test_hooks::SysfsDrmRoot() + "/" +
+                                    device->get_gpu_path() + std::string("/device/serial_number");
+  std::string fru_id_path = amd::smi::test_hooks::SysfsDrmRoot() + "/" + device->get_gpu_path() +
+                            std::string("/device/fru_id");
+  std::string manufacturer_name_path = amd::smi::test_hooks::SysfsDrmRoot() + "/" +
+                                       device->get_gpu_path() + std::string("/device/manufacturer");
+  std::string product_name_path = amd::smi::test_hooks::SysfsDrmRoot() + "/" +
+                                  device->get_gpu_path() + std::string("/device/product_name");
 
   auto ret_mod =
       openFileAndModifyBuffer(model_number_path, info->model_number, AMDSMI_MAX_STRING_LENGTH);
@@ -413,7 +413,8 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
                                       int* max_freq, int* min_freq, int* num_dpm,
                                       int* sleep_state_freq) {
   SMIGPUDEVICE_MUTEX(device->get_mutex())
-  std::string fullpath = "/sys/class/drm/" + device->get_gpu_path() + "/device";
+  std::string fullpath =
+      amd::smi::test_hooks::SysfsDrmRoot() + "/" + device->get_gpu_path() + "/device";
 
   std::string smclk_min_max_fullpath = "";
 
@@ -483,7 +484,7 @@ amdsmi_status_t smi_amdgpu_get_enabled_blocks(amd::smi::AMDSmiGPUDevice* device,
                                               uint64_t* enabled_blocks) {
   SMIGPUDEVICE_MUTEX(device->get_mutex())
   std::string fullpath =
-      smi_amdgpu_sysfs_drm_root() + device->get_gpu_path() + "/device/ras/features";
+      amd::smi::test_hooks::SysfsDrmRoot() + "/" + device->get_gpu_path() + "/device/ras/features";
   std::ifstream f(fullpath.c_str());
   std::string tmp_str;
 
@@ -530,8 +531,8 @@ amdsmi_status_t smi_amdgpu_get_bad_page_info(amd::smi::AMDSmiGPUDevice* device, 
   std::string line;
   std::vector<std::string> badPagesVec;
 
-  std::string fullpath =
-      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/ras/gpu_vram_bad_pages");
+  std::string fullpath = amd::smi::test_hooks::SysfsDrmRoot() + "/" + device->get_gpu_path() +
+                         std::string("/device/ras/gpu_vram_bad_pages");
   std::ifstream fs(fullpath.c_str());
 
   if (fs.fail()) {
@@ -624,35 +625,6 @@ amdsmi_status_t smi_amdgpu_validate_ras_eeprom(amd::smi::AMDSmiGPUDevice* device
   return AMDSMI_STATUS_NOT_SUPPORTED;
 }
 
-amdsmi_status_t smi_amdgpu_get_ecc_error_count(amd::smi::AMDSmiGPUDevice* device,
-                                               amdsmi_error_count_t* err_cnt) {
-  SMIGPUDEVICE_MUTEX(device->get_mutex())
-  char str[10];
-
-  std::string fullpath =
-      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/ras/umc_err_count");
-  std::ifstream f(fullpath.c_str());
-
-  if (f.fail()) {
-    // fall back to aca file
-    fullpath = "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/ras/aca_umc");
-    f.open(fullpath.c_str());
-    if (f.fail()) {
-      return AMDSMI_STATUS_NOT_SUPPORTED;
-    }
-  }
-
-  std::string line;
-  getline(f, line);
-  sscanf(line.c_str(), "%9s%ld", str, &(err_cnt->uncorrectable_count));
-
-  getline(f, line);
-  sscanf(line.c_str(), "%9s%ld", str, &(err_cnt->correctable_count));
-
-  f.close();
-
-  return AMDSMI_STATUS_SUCCESS;
-}
 amdsmi_status_t smi_amdgpu_get_driver_version(amd::smi::AMDSmiGPUDevice* device, int* length,
                                               char* version) {
   SMIGPUDEVICE_MUTEX(device->get_mutex())
@@ -813,8 +785,8 @@ amdsmi_status_t smi_amdgpu_is_gpu_power_management_enabled(amd::smi::AMDSmiGPUDe
   }
 
   SMIGPUDEVICE_MUTEX(device->get_mutex())
-  std::string fullpath =
-      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/pp_features");
+  std::string fullpath = amd::smi::test_hooks::SysfsDrmRoot() + "/" + device->get_gpu_path() +
+                         std::string("/device/pp_features");
   std::ifstream fs(fullpath.c_str());
 
   if (fs.fail()) {
@@ -842,7 +814,8 @@ amdsmi_status_t smi_amdgpu_get_vcn_busy_percent(amd::smi::AMDSmiGPUDevice* devic
   }
 
   SMIGPUDEVICE_MUTEX(device->get_mutex())
-  std::string fullpath = "/sys/class/drm/" + device->get_gpu_path() + "/device/vcn_busy_percent";
+  std::string fullpath = amd::smi::test_hooks::SysfsDrmRoot() + "/" + device->get_gpu_path() +
+                         "/device/vcn_busy_percent";
 
   std::ifstream fs(fullpath.c_str());
   if (fs.fail()) {
@@ -922,21 +895,7 @@ std::string smi_amdgpu_get_status_string(amdsmi_status_t ret, bool fullStatus = 
   return std::string(err_str);
 }
 
-uint32_t smi_brcm_get_value_u32(const std::string& folder, const std::string& file_name) {
-  std::string file_path = folder + "/" + file_name;
-  std::ifstream file(file_path.c_str(), std::ifstream::in);
-  if (!file.is_open()) {
-    return 0xFFFF;
-  } else {
-    std::string line;
-    getline(file, line);
-    return static_cast<uint32_t>(stoi(line));
-  }
-
-  return 0;
-}
-
-std::string smi_brcm_get_value_string(const std::string& folder, const std::string& file_name) {
+std::string smi_read_sysfs_string(const std::string& folder, const std::string& file_name) {
   std::stringstream temp;
   std::string file_path = folder + "/" + file_name;
   std::ifstream file(file_path.c_str(), std::ifstream::in);
@@ -953,27 +912,6 @@ std::string smi_brcm_get_value_string(const std::string& folder, const std::stri
   }
 
   return temp.str();
-}
-
-amdsmi_status_t smi_brcm_execute_cmd_get_data(const std::string& command, std::string* data) {
-  std::string result;
-  char buffer[128];
-
-  // Open a pipe to execute the command
-  std::shared_ptr<FILE> pipe(popen(command.c_str(), "r"), [](FILE* f) {
-    if (f) pclose(f);
-  });
-  if (!pipe) {
-    return AMDSMI_STATUS_API_FAILED;
-  }
-
-  // Read the output of the command into the buffer
-  while (fgets(buffer, sizeof(buffer), pipe.get()) != nullptr) {
-    result += buffer;
-  }
-  *data = result;
-
-  return AMDSMI_STATUS_SUCCESS;
 }
 
 // TODO(amdsmi_team): Do we want to include these functions in header?
@@ -1407,8 +1345,8 @@ amdsmi_status_t smi_amdgpu_read_clk_freq_from_pp_dpm(amd::smi::AMDSmiGPUDevice* 
   }
 
   uint32_t drm_render = device->get_drm_render_minor();
-  std::string sysfs_path =
-      "/sys/class/drm/renderD" + std::to_string(drm_render) + "/device/" + pp_dpm_file;
+  std::string sysfs_path = amd::smi::test_hooks::SysfsDrmRoot() + "/renderD" +
+                           std::to_string(drm_render) + "/device/" + pp_dpm_file;
 
   std::ifstream file(sysfs_path);
   if (!file.good()) {

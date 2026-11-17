@@ -9,7 +9,9 @@
 #include "common/floating_point.h"
 #include "common/registers.h"
 #include "common/semantics.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
+#include "rj_arith/detail/rj_arith_wmma.h"
+#include "wmma/exact_simd.h"
 #include "wmma/helpers.h"
 
 #include <bit>
@@ -27,7 +29,12 @@ using Registers = rocjitsu::arith::test::Registers<17, 64>;
 // Check matrix results, operand aliases, and instruction-flag contracts across supported CPUs
 // and semantics.
 TEST(WmmaF32F16W64Gfx12, Arithmetic) {
+  rocjitsu::arith::test::expect_wmma_exact_simd<false, 64, false, false>(
+      rj_arith_v_wmma_f32_16x16x16_f16_w64_gfx12);
+
   rocjitsu::arith::test::expect_matrix_modifiers<false, 64, false>(
+      rj_arith_v_wmma_f32_16x16x16_f16_w64_gfx12);
+  rocjitsu::arith::test::expect_wmma_fixed_controls<false, 64, false, false>(
       rj_arith_v_wmma_f32_16x16x16_f16_w64_gfx12);
 
   Registers input;

@@ -4,6 +4,7 @@
 /// @file scalar_f16_constant_test.cpp
 /// @brief Decoded scalar F16 source formatting and full-word destination controls.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
@@ -44,21 +45,82 @@ TEST(ScalarF16CompatibilityTest, Rdna35MinFormatsNumericInlineFloats) {
   config.sgprs_per_wf = 106;
   config.vgprs_per_wf = 16;
   config.lds_size_kb = 64;
-  auto cu = amdgpu::ComputeUnitCore::create("rdna35_scalar_f16", config, &memory, &cache);
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "rdna35_scalar_f16", config, &memory, &cache));
   auto decoder = Decoder::create(config.arch);
-  ASSERT_NE(cu, nullptr);
   ASSERT_NE(decoder, nullptr);
   auto *wave = cu->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
   ASSERT_NE(wave, nullptr);
   wave->set_exec(0);
-  const std::array<uint32_t, 2> words{
-      build_sop2_encoding(config.arch, rdna3_5::kSMinF16Sop2, 4, 242, 244), 0};
+  util::FailureOr<uint32_t> encoding =
+      build_sop2_encoding(config.arch, rdna3_5::kSMinF16Sop2, 4, 242, 244);
+  ASSERT_TRUE(encoding.succeeded());
+  const std::array<uint32_t, 2> words{encoding.value(), 0};
   std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
   ASSERT_NE(instruction, nullptr);
   cu->write_sgpr(wave->sgpr_alloc().base + 4, 0xDEADBEEFu);
   EXPECT_TRUE(cu->execute_instruction(instruction.get(), *wave).succeeded());
   EXPECT_EQ(cu->read_sgpr(wave->sgpr_alloc().base + 4), 0x00003C00u);
   wave->halt();
+}
+
+TEST(Rdna35ScalarFp, WaveModesAndExceptionsWithEmptyExec) {
+  amdgpu::GpuMemory memory{"scalar_fp_memory"};
+  amdgpu::L2Cache l2{"scalar_fp_l2"};
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_RDNA3_5;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 106;
+  config.vgprs_per_wf = 16;
+  config.lds_size_kb = 64;
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "scalar_fp", config, &memory, &l2));
+  auto decoder = Decoder::create(config.arch);
+  ASSERT_NE(decoder, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(0);
+  const auto base = wf->sgpr_alloc().base;
+  struct Case {
+    const char *mnemonic;
+    uint32_t word, mode, a, b, old_dst, expected_dst, expected_causes;
+    bool expected_scc;
+  };
+  constexpr uint32_t ieee = 1u << 9, denorm = 0xf0u, sat = 1u << 23, sentinel = 0xdeadbeef;
+  constexpr std::array cases{
+      Case{"s_add_f32", 0xa0020100, ieee | 1, 0x3f800000, 0x33800000, 0, 0x3f800001, 32, false},
+      Case{"s_add_f16", 0xa4820100, ieee | 4, 0x3c00, 0x1000, sentinel, 0x3c01, 32, false},
+      Case{"s_cvt_f32_i32", 0xbe826400, ieee | 1, 0x1000001, 0, 0, 0x4b800001, 32, false},
+      Case{"s_cmp_eq_f32", 0xbf420100, ieee, 1, 0, sentinel, sentinel, 0, true},
+      Case{"s_cmp_eq_f16", 0xbf520100, ieee | denorm, 1, 0, sentinel, sentinel, 2, false},
+      Case{"s_ceil_f32", 0xbe826000, ieee, 1, 0, 0, 0, 0, false},
+      Case{"s_fmac_f16", 0xa7020100, ieee, 0x0561, 0x4df3, 0x46f2, 0x46f3, 32, false},
+      Case{"s_mul_f16", 0xa6820100, ieee | sat, 0x7bff, 0x4000, 0, 0x7bff, 40, false},
+      Case{"s_mul_f32", 0xa2020100, ieee, 0x7f800000, 0, 0, 0xffc00000, 1, false},
+      Case{"s_mul_f32", 0xa2020100, ieee | (1u << 8), 0x7f800000, 0, 0, 0xffc00000, 0, false},
+  };
+  for (const auto &test : cases) {
+    SCOPED_TRACE(test.mnemonic);
+    wf->set_mode_raw(test.mode);
+    wf->write_scc(false);
+    wf->set_trapsts(1u << 7); // Preserve causes from older instructions.
+    wf->clear_pending_alu_causes();
+    cu->write_sgpr(base, test.a);
+    cu->write_sgpr(base + 1, test.b);
+    cu->write_sgpr(base + 2, test.old_dst);
+    const std::array<uint32_t, 2> words{test.word, 0};
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_EQ(std::string_view(inst->mnemonic()), test.mnemonic);
+    ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+    EXPECT_EQ(cu->read_sgpr(base + 2), test.expected_dst);
+    EXPECT_EQ(wf->read_scc(), test.expected_scc);
+    EXPECT_EQ(wf->trapsts(), (1u << 7) | test.expected_causes);
+    EXPECT_EQ(wf->pending_alu_causes(), test.expected_causes);
+  }
+  wf->halt();
 }
 
 struct ScalarF16Target {
@@ -87,9 +149,9 @@ protected:
     config.sgprs_per_wf = 106;
     config.vgprs_per_wf = 16;
     config.lds_size_kb = 64;
-    cu_ = amdgpu::ComputeUnitCore::create("scalar_f16_constants", config, &memory_, &cache_);
+    ASSERT_NO_FATAL_FAILURE(rocjitsu::test::initialize_compute_unit(cu_, "scalar_f16_constants",
+                                                                    config, &memory_, &cache_));
     decoder_ = Decoder::create(GetParam().arch);
-    ASSERT_NE(cu_, nullptr);
     ASSERT_NE(decoder_, nullptr);
     wave_ = cu_->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
     ASSERT_NE(wave_, nullptr);
@@ -127,18 +189,20 @@ protected:
 
   void expect_sop1(const ScalarOperation &operation, uint16_t source, uint32_t expected,
                    std::optional<uint32_t> literal = std::nullopt) {
-    const std::array<uint32_t, 2> words{
-        build_sop1_encoding(GetParam().arch, opcode(operation), kDestination, source),
-        literal.value_or(0)};
+    util::FailureOr<uint32_t> encoding =
+        build_sop1_encoding(GetParam().arch, opcode(operation), kDestination, source);
+    ASSERT_TRUE(encoding.succeeded());
+    const std::array<uint32_t, 2> words{encoding.value(), literal.value_or(0)};
     ASSERT_NO_FATAL_FAILURE(
         expect_execution(words, literal ? 8u : 4u, operation.mnemonic, expected));
   }
 
   void expect_sop2(const ScalarOperation &operation, uint16_t source0, uint16_t source1,
                    uint32_t expected, std::optional<uint32_t> literal = std::nullopt) {
-    const std::array<uint32_t, 2> words{
-        build_sop2_encoding(GetParam().arch, opcode(operation), kDestination, source0, source1),
-        literal.value_or(0)};
+    util::FailureOr<uint32_t> encoding =
+        build_sop2_encoding(GetParam().arch, opcode(operation), kDestination, source0, source1);
+    ASSERT_TRUE(encoding.succeeded());
+    const std::array<uint32_t, 2> words{encoding.value(), literal.value_or(0)};
     ASSERT_NO_FATAL_FAILURE(
         expect_execution(words, literal ? 8u : 4u, operation.mnemonic, expected));
   }
@@ -247,8 +311,10 @@ TEST_P(ScalarF16ConstantTest, DelegationUsesTheEffectiveRegisterSource) {
   ScopedIsaExecutionBackend execution_backend_scope{GetParam().arch == ROCJITSU_CODE_ARCH_RDNA4
                                                         ? &rdna4::execution_backend()
                                                         : &cdna5::execution_backend()};
-  const std::array<uint32_t, 2> words{
-      build_sop2_encoding(GetParam().arch, opcode(kAdd), kDestination, 242, 242), 0u};
+  util::FailureOr<uint32_t> encoding =
+      build_sop2_encoding(GetParam().arch, opcode(kAdd), kDestination, 242, 242);
+  ASSERT_TRUE(encoding.succeeded());
+  const std::array<uint32_t, 2> words{encoding.value(), 0u};
   std::unique_ptr<Instruction> instruction(decode_valid(*decoder_, words.data()));
   ASSERT_NE(instruction, nullptr);
   std::unique_ptr<Operand> replacement;

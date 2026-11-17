@@ -45,6 +45,7 @@
 #include "putmem_on_stream_tester.hpp"
 #include "putmem_signal_on_stream_tester.hpp"
 #include "signal_wait_until_on_stream_tester.hpp"
+#include "signal_ops_on_stream_tester.hpp"
 #include "ping_all_tester.hpp"
 #include "ping_pong_tester.hpp"
 #include "primitive_tester.hpp"
@@ -168,7 +169,9 @@ Tester::Tester(TesterArguments args) : args(args) {
       case WGPutSignalTestType:
       case WGPutSignalNBITestType:
       case QpPutNbiTestType:
+      case QpPutNbiPollTestType:
       case SdmaPutNbiTestType:
+      case SdmaPutNbiPollTestType:
         max_msg_size = args.max_volume_size / args.num_wgs;
         break;
       case PingPongTestType:
@@ -560,6 +563,10 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case SignalWaitUntilOnStreamTestType:
       test_name = "Signal_Wait_Until_On_Stream";
       testers.push_back(new SignalWaitUntilOnStreamTester(args));
+      break;
+    case SignalOpsOnStreamTestType:
+      test_name = "Signal_Ops_On_Stream";
+      testers.push_back(new SignalOpsOnStreamTester(args));
       break;
     case TeamFCollectTestType:
       test_name = "Fcollect Test";
@@ -1169,6 +1176,10 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       test_name = "QP-Direct Put NBI";
       testers.push_back(new QpPutNbiTester(args));
       break;
+    case QpPutNbiPollTestType:
+      test_name = "QP-Direct Put NBI Poll";
+      testers.push_back(new QpPutNbiTester(args));
+      break;
 #endif
 #if defined(USE_SDMA)
     case SdmaPingPongTestType:
@@ -1178,6 +1189,10 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       break;
     case SdmaPutNbiTestType:
       test_name = "SDMA-Direct Put NBI";
+      testers.push_back(new SdmaPutNbiTester(args));
+      break;
+    case SdmaPutNbiPollTestType:
+      test_name = "SDMA-Direct Put NBI Poll";
       testers.push_back(new SdmaPutNbiTester(args));
       break;
 #endif
@@ -1325,6 +1340,7 @@ bool Tester::peLaunchesKernel() {
     case PutmemOnStreamTestType:
     case PutmemSignalOnStreamTestType:
     case SignalWaitUntilOnStreamTestType:
+    case SignalOpsOnStreamTestType:
     case SignalAddTestType:
     case SignalSetTestType:
     case SignalWaitUntilTestType:
@@ -1408,7 +1424,7 @@ void Tester::print(uint64_t size) {
 
   double msg_rate = num_timed_msgs / time_s;
 
-  double bandwidth_gbs =
+  double bandwidth_gibs =
       static_cast<double>(bw_factor * total_size) / time_s / pow(2, 30);
 
   float total_kern_time_ms;
@@ -1424,7 +1440,7 @@ void Tester::print(uint64_t size) {
            15, "Msg Size (B)",
            15, "# of timed Msgs",
            field_width, "Latency (us)",
-           field_width, "Bandwidth (GB/s)",
+           field_width, "Bandwidth (GiB/s)",
            field_width + 1, "Msg Rate (Msg/s)\n");
     _print_header = 0;
   }
@@ -1434,7 +1450,7 @@ void Tester::print(uint64_t size) {
          15, size,
          15, num_timed_msgs,
          field_width, float_precision, latency,
-         field_width, float_precision, bandwidth_gbs,
+         field_width, float_precision, bandwidth_gibs,
          field_width, float_precision, msg_rate);
 
   fflush(stdout);

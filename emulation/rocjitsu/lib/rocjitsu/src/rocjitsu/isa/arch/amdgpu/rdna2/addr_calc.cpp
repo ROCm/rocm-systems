@@ -33,23 +33,35 @@ std::optional<uint32_t> read_smem_offset(uint32_t soffset, amdgpu::Wavefront &wf
 
 } // namespace
 
+bool nullify_unallocated_memory_return(Instruction &inst, const amdgpu::Wavefront &wf,
+                                       amdgpu::MemPipelineTag pipeline) {
+  if (amdgpu::RegisterAccess(wf).vgpr_results_fit_allocation(inst))
+    return false;
+  auto state = std::make_unique<amdgpu::VectorMemState>(pipeline);
+  state->wf_size = wf.wf_size();
+  inst.set_data(std::move(state));
+  return true;
+}
+
 std::optional<uint64_t> smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf,
                                                amdgpu::ScalarMemState *state) {
   const uint32_t sbase_sel = inst.sbase * 2;
   auto base = amdgpu::try_read_scalar_selector64(wf, sbase_sel);
   if (!base)
     return std::nullopt;
-  int64_t off = static_cast<int64_t>(static_cast<int32_t>(inst.offset << 11) >> 11);
-  auto soffset = read_smem_offset(inst.soffset, wf);
+  const int64_t inst_offset = static_cast<int32_t>(inst.offset << 11) >> 11;
+  const auto soffset = read_smem_offset(inst.soffset, wf);
   if (!soffset)
     return std::nullopt;
-  off += *soffset;
-  // Only the non-buffer addressing section defines a negative sum as undefined.
-  if (!amdgpu::addr_calc::smem_is_buffer_load_op(inst.op) && off < 0)
-    wf.report_undefined_behavior("negative combined scalar-memory offset");
   if (amdgpu::addr_calc::smem_is_buffer_load_op(inst.op))
-    return amdgpu::addr_calc::scalar_buffer_address(wf, sbase_sel, *base, off, state);
-  return (*base + off) & ~0x3ULL;
+    return amdgpu::addr_calc::scalar_buffer_address(wf, sbase_sel, *base & ~uint64_t{3},
+                                                    inst_offset + *soffset, state,
+                                                    /*align_mask=*/3, /*size_align_mask=*/0);
+  // RDNA2 ignores the low two bits of each non-buffer address component before addition.
+  const int64_t offset = (inst_offset & ~int64_t{3}) + (*soffset & ~uint32_t{3});
+  if (inst_offset + *soffset < 0)
+    wf.report_undefined_behavior("negative combined scalar-memory offset");
+  return (*base & ~uint64_t{3}) + offset;
 }
 
 void flat_calculate_addresses(const FlatMachineInst &inst, amdgpu::Wavefront &wf,
@@ -64,7 +76,8 @@ void flat_calculate_addresses(const FlatMachineInst &inst, amdgpu::Wavefront &wf
   d.lane_mask = exec;
   d.exec_mask = exec;
   d.wf_size = wf.wf_size();
-  int64_t offset = static_cast<int64_t>(static_cast<int32_t>(inst.offset << 20) >> 20);
+  const int64_t offset =
+      inst.seg == 0 ? int32_t(inst.offset & 0x7ffu) : static_cast<int32_t>(inst.offset << 20) >> 20;
   amdgpu::RegisterAccess regs(cu);
   uint64_t saddr_val = 0;
   if (has_saddr(inst.saddr)) {
@@ -87,7 +100,11 @@ void flat_calculate_addresses(const FlatMachineInst &inst, amdgpu::Wavefront &wf
     } else {
       vaddr = vaddr_region.lane64(0, lane);
     }
-    d.per_lane_addr[lane] = saddr_val + vaddr + offset;
+    uint64_t address = saddr_val + vaddr + offset;
+    if (inst.seg == 0) {
+      address = amdgpu::addr_calc::capture_flat_private_address(wf, d, address, lane);
+    }
+    d.per_lane_addr[lane] = address;
   }
 }
 

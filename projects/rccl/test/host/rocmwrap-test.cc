@@ -10,6 +10,7 @@
 
 #include <gtest/gtest.h>
 
+#include <fcntl.h>
 #include <sys/utsname.h>
 #include <unistd.h>
 
@@ -122,7 +123,7 @@ static bool RocmWrapTestReadKernelConfig(std::string* content, char* pathOut, si
 
 namespace {
 
-constexpr int kKernel_6_8 = KERNEL_VERSION_CODE(6, 8);
+constexpr int kKernel_6_8 = NCCL_KERNEL_VERSION_CODE(6, 8);
 constexpr int kCuMemDriverVersion = ROCM_VER_7_12_60540;  // inside NCCL_CUMEM_VERSION_SUPPORTED
 constexpr int kOldDriverVersion = 70002000;               // 7.0.2, below the backport window
 
@@ -136,6 +137,7 @@ struct VmmLog {
   size_t createSize = 0;
   std::string failAt;  // the call that returns an error; empty means all succeed
   size_t granularity = 4096;
+  bool exportInvalidFd = false;  // DMA-BUF export succeeds but hands back fd -1
 };
 
 class RocmwrapMicrotest : public ::testing::Test {
@@ -261,6 +263,14 @@ protected:
       return step("addressRange");
     };
     g_hipPointerGetAttribute = [step](void*, hipPointer_attribute, hipDeviceptr_t) { return step("pointerAttr"); };
+#if NCCL_CUMEM_DMABUF_EXPORT_GATE
+    g_hipMemGetHandleForAddressRange = [&log, step](void* handle, hipDeviceptr_t, size_t, hipMemRangeHandleType type,
+                                                    unsigned long long) {
+      hipError_t e = step(type == hipMemRangeHandleTypeDmaBufFd ? "dmabufExport" : "exportWrongType");
+      *static_cast<int*>(handle) = (e != hipSuccess || log.exportInvalidFd) ? -1 : open("/dev/null", O_RDONLY);
+      return e;
+    };
+#endif
     g_hipMemUnmap = [step](void*, size_t) { return step("unmap"); };
     g_hipMemAddressFree = [step](void*, size_t) { return step("addressFree"); };
     g_hipMemRelease = [step](hipMemGenericAllocationHandle_t) { return step("release"); };
@@ -334,6 +344,9 @@ TEST_F(RocmwrapMicrotest, FunctionalProbe_AllStepsSucceed_ReturnsOneAndUndoesEve
 #if HIP_VERSION >= ROCM_VER_7_12_60540
   expected.insert(expected.begin() + 7, "pointerAttr");  // the legacy-IPC capability query
 #endif
+#if NCCL_CUMEM_DMABUF_EXPORT_GATE
+  expected.insert(expected.end() - 3, "dmabufExport");
+#endif
   EXPECT_EQ(log.calls, expected);
   // One granularity unit of pinned device memory on the probed ordinal.
   EXPECT_EQ(log.createSize, 4096u);
@@ -385,6 +398,25 @@ TEST_F(RocmwrapMicrotest, FunctionalProbe_EachFailureUndoesOnlyTheCompletedSteps
     EXPECT_TRUE(Logged(NCCL_LOG_INFO, "cuMem functional probe failed on device 1"));
   }
 }
+
+#if NCCL_CUMEM_DMABUF_EXPORT_GATE
+// A host without DMA-BUF export (e.g. kernel 5.15) must fail the probe, since the net transport exports every buffer.
+TEST_F(RocmwrapMicrotest, FunctionalProbe_DmaBufExportFailureFailsTheProbe) {
+  for (bool invalidFd : {false, true}) {
+    SCOPED_TRACE(invalidFd ? "fd -1" : "export error");
+    g_logged.clear();
+    VmmLog log;
+    if (invalidFd) log.exportInvalidFd = true;
+    else log.failAt = "dmabufExport";
+    InstallVmm(log);
+    EXPECT_EQ(ncclCuMemFunctionalProbe(0, 0), 0);
+    ASSERT_GE(log.calls.size(), 4u);
+    EXPECT_EQ(std::vector<std::string>(log.calls.end() - 4, log.calls.end()),
+              std::vector<std::string>({"dmabufExport", "unmap", "addressFree", "release"}));
+    EXPECT_TRUE(Logged(NCCL_LOG_INFO, "cuMem functional probe failed on device 0"));
+  }
+}
+#endif
 
 // A failing cleanup call is only reported; the probe still answers from the steps before it.
 TEST_F(RocmwrapMicrotest, FunctionalProbe_FailingCleanupIsReportedButDoesNotChangeTheAnswer) {
@@ -451,7 +483,6 @@ TEST_F(RocmwrapMicrotest, CapabilityCheck_EachCheapGateFailureReturnsZeroWithout
     const char* warn;
   };
   const std::vector<Case> cases = {
-    {"kernel 6.7", [] { SetKernelRelease("6.7.12"); }, "requires Linux kernel >= 6.8"},
     {"driver 7.0.2",
      [] {
        g_driverGetVersion = [](int* v) {
@@ -480,8 +511,43 @@ TEST_F(RocmwrapMicrotest, CapabilityCheck_KernelExactly6_8Passes) {
   VmmLog log;
   InstallVmm(log);
   EXPECT_EQ(ncclCuMemCapabilityCheck(1), 1);
-  EXPECT_FALSE(Logged(NCCL_LOG_WARN, "kernel"));
-  static_assert(kKernel_6_8 == ((6 << 16) | (8 << 8)), "KERNEL_VERSION_CODE layout");
+  EXPECT_FALSE(Logged(NCCL_LOG_WARN, "requires Linux kernel"));
+  EXPECT_FALSE(Logged(NCCL_LOG_WARN, "may not be performant"));
+  static_assert(kKernel_6_8 == ((6 << 16) | (8 << 8)), "NCCL_KERNEL_VERSION_CODE layout");
+}
+
+// Below 6.8 the kernel is only a performance advisory: the probe still runs and decides the result.
+// The advisory comes from the check that decides: auto-detect (gfx1250 gate) for -2, the runtime check for force-on.
+TEST_F(RocmwrapMicrotest, CapabilityCheck_KernelBelow6_8IsAdvisoryOnly) {
+  struct Case {
+    int64_t param;
+    int requireGfx1250;
+    bool advises;
+  };
+  for (const Case& c : std::vector<Case>{{-2, 1, true}, {1, 0, true}, {1, 1, false}, {-2, 0, false}, {-1, 1, false},
+                                         {0, 1, false}}) {
+    SCOPED_TRACE(::testing::Message() << "param " << c.param << " requireGfx1250 " << c.requireGfx1250);
+    Reset();
+    g_params["CUMEM_ENABLE"] = c.param;
+    SetKernelRelease("6.7.12");
+    VmmLog log;
+    InstallVmm(log);
+    EXPECT_EQ(ncclCuMemCapabilityCheck(c.requireGfx1250), 1);
+    EXPECT_FALSE(log.calls.empty());
+    EXPECT_FALSE(Logged(NCCL_LOG_WARN, "requires Linux kernel"));
+    EXPECT_EQ(Logged(NCCL_LOG_WARN, "may not be performant"), c.advises);
+  }
+}
+
+// No advisory when a later gate turns cuMem off anyway.
+TEST_F(RocmwrapMicrotest, CapabilityCheck_KernelBelow6_8ProbeFailureSkipsTheAdvisory) {
+  g_params["CUMEM_ENABLE"] = -2;
+  SetKernelRelease("6.7.12");
+  VmmLog log;
+  log.failAt = "create";
+  InstallVmm(log);
+  EXPECT_EQ(ncclCuMemCapabilityCheck(1), 0);
+  EXPECT_FALSE(Logged(NCCL_LOG_WARN, "may not be performant"));
 }
 
 TEST_F(RocmwrapMicrotest, CapabilityCheck_BackportDriverWindowIsAccepted) {
@@ -550,6 +616,23 @@ TEST_F(RocmwrapMicrotest, RuntimeSupported_SkipsTheArchGateAndRunsTheCheckOnce) 
     },
     ::testing::ExitedWithCode(0), "");
 }
+
+#if NCCL_CUMEM_VERSION_SUPPORTED(HIP_VERSION)
+// NCCL_CUMEM_ENABLE=1 on a non-gfx1250 GPU with kernel < 6.8 (MI308X on 6.6) must still enable cuMem.
+TEST_F(RocmwrapMicrotest, CuMemEnable_ForceOnBelowKernel6_8EnablesCuMem) {
+  EXPECT_EXIT(
+    {
+      SetArch("gfx942");
+      SetKernelRelease("6.6.119-47.8.tl4.x86_64");
+      g_params["CUMEM_ENABLE"] = 1;
+      VmmLog log;
+      InstallVmm(log);
+      bool ok = ncclCuMemEnable() == 1 && !log.calls.empty() && !Logged(NCCL_LOG_WARN, "requires Linux kernel");
+      std::exit(ok ? 0 : 1);
+    },
+    ::testing::ExitedWithCode(0), "");
+}
+#endif
 
 // ncclCuMemEnable / ncclCuMemHostEnable (out-of-window HIP_VERSION arm)
 

@@ -52,6 +52,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <cstring>
 #include <stdexcept>
 #include <string>
 #include "common/base_rocr.h"
@@ -756,5 +757,46 @@ hsa_status_t AllocAndSetKernArgs(BaseRocR* test, void* args, size_t arg_size) {
 }
 
 #undef RET_IF_HSA_UTILS_ERR
+
+uint64_t WriteBarrierAndToQueue(hsa_queue_t* queue, hsa_signal_t dependency,
+                                hsa_signal_t completion_signal) {
+  hsa_barrier_and_packet_t barrier = {};
+  barrier.dep_signal[0] = dependency;
+  barrier.completion_signal = completion_signal;
+
+  const uint64_t index = hsa_queue_add_write_index_scacq_screl(queue, 1);
+  while (index - hsa_queue_load_read_index_scacquire(queue) >= queue->size) {
+  }
+  auto* slot = reinterpret_cast<hsa_barrier_and_packet_t*>(queue->base_address) +
+               (index & (queue->size - 1));
+  // The packet processor may read the slot as soon as the header is valid, so the header goes last
+  memcpy(reinterpret_cast<uint8_t*>(slot) + sizeof(uint32_t),
+         reinterpret_cast<const uint8_t*>(&barrier) + sizeof(uint32_t),
+         sizeof(barrier) - sizeof(uint32_t));
+  const uint16_t header = (HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE) |
+                          (1 << HSA_PACKET_HEADER_BARRIER);
+  AtomicSetPacketHeader(header, 0, reinterpret_cast<hsa_kernel_dispatch_packet_t*>(slot));
+  return index;
+}
+
+hsa_amd_memory_pool_t FindExtendedFineGrainedPool(hsa_agent_t agent) {
+  hsa_amd_memory_pool_t found_pool = {0};
+  hsa_amd_agent_iterate_memory_pools(
+      agent,
+      [](hsa_amd_memory_pool_t pool, void* data) {
+        hsa_amd_segment_t segment;
+        uint32_t global_flags = 0;
+        hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &segment);
+        if (segment != HSA_AMD_SEGMENT_GLOBAL) return HSA_STATUS_SUCCESS;
+        hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, &global_flags);
+        if (!(global_flags & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_EXTENDED_SCOPE_FINE_GRAINED)) {
+          return HSA_STATUS_SUCCESS;
+        }
+        *static_cast<hsa_amd_memory_pool_t*>(data) = pool;
+        return HSA_STATUS_INFO_BREAK;
+      },
+      &found_pool);
+  return found_pool;
+}
 
 }  // namespace rocrtst

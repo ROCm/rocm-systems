@@ -148,6 +148,17 @@ struct ScopedDir {
   ~ScopedDir() { fs::remove_all(path); }
 };
 
+// `name` under the temp directory, suffixed with this process's id so
+// concurrent runs of the suite do not share it.
+inline fs::path hrr_temp_dir(const std::string& name) {
+#ifdef _WIN32
+  const unsigned long pid = GetCurrentProcessId();
+#else
+  const long pid = static_cast<long>(::getpid());
+#endif
+  return fs::temp_directory_path() / (name + "_" + std::to_string(pid));
+}
+
 inline std::vector<uint8_t> read_file(const fs::path& path) {
   std::ifstream f(path, std::ios::binary);
   REQUIRE(f.good());

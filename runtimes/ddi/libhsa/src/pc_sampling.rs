@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::ffi::c_void;
 use std::num::NonZeroU32;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 
 use rocddi::device::gpu::profiling::{PcSamplingIntervalUnit, PcSamplingMethod, PcSamplingRequest};
 
@@ -25,18 +25,18 @@ pub(crate) struct PcSamplingState {
     /// Sessions undergoing a native transition.
     busy: HashSet<u64>,
     /// Prevents reuse after uncertain native cleanup.
-    quarantine: Arc<AtomicBool>,
+    quarantine: Arc<crate::runtime::GenerationHealth>,
     /// Trap assets retained until native users have stopped.
     retired: Vec<RetiredAssets>,
 }
 
 impl PcSamplingState {
     /// Initializes an empty PC sampling session registry.
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(quarantine: Arc<crate::runtime::GenerationHealth>) -> Self {
         Self {
             sessions: HashMap::new(),
             busy: HashSet::new(),
-            quarantine: Arc::new(AtomicBool::new(false)),
+            quarantine,
             retired: Vec::new(),
         }
     }
@@ -62,7 +62,7 @@ impl PcSamplingState {
     /// Releases every native sampling session before device teardown.
     /// Failure retains the remaining state with the whole HSA generation.
     pub(crate) fn shutdown(&mut self) -> bool {
-        if self.quarantine.load(Ordering::Acquire) {
+        if self.quarantine.is_quarantined() {
             self.quarantine_all();
             return false;
         }
@@ -182,7 +182,7 @@ pub(crate) fn create_session(args: &CreateArgs) -> Status {
         unit,
         interval: args.interval as u64,
     };
-    let (handle, device, info, page_size, quarantine, _token) = {
+    let (handle, device, info, page_size, quarantine, restore, _token) = {
         let mut guard = match lock() {
             Ok(guard) => guard,
             Err(status) => return status,
@@ -197,12 +197,21 @@ pub(crate) fn create_session(args: &CreateArgs) -> Status {
             return INVALID_AGENT;
         };
         let info = runtime.gpus[index].info();
-        if !session::supported_gpu(info) {
+        if !session::supported_gpu(&info) {
             return NOT_SUPPORTED;
         }
         if runtime.pc_sampling_state.agent_busy(args.agent) {
             return RESOURCE_BUSY;
         }
+        let Some(restore) = runtime
+            .debugger
+            .as_ref()
+            .and_then(|debugger| debugger.restore_token(&runtime.gpus[index].device))
+        else {
+            // A shared native context may belong to another adapter. Do not
+            // replace a trap binding whose restoration/lifetime we do not own.
+            return NOT_SUPPORTED;
+        };
         let Some(token) = runtime.inflight.enter() else {
             return OUT_OF_RESOURCES;
         };
@@ -217,6 +226,7 @@ pub(crate) fn create_session(args: &CreateArgs) -> Status {
             info,
             runtime.host_page_size,
             runtime.pc_sampling_state.quarantine.clone(),
+            restore,
             token,
         )
     };
@@ -225,13 +235,14 @@ pub(crate) fn create_session(args: &CreateArgs) -> Status {
     let callback_data = unsafe { CallbackArg::new(args.callback_data) };
     let result = Resources::prepare(
         device,
-        info,
+        &info,
         request,
         args.trace_id,
         args.buffer_size,
         page_size,
         args.callback,
         callback_data,
+        restore,
     )
     .and_then(|resources| SessionHandle::create(resources, args.agent, &quarantine));
     let mut guard = match lock() {
@@ -241,7 +252,7 @@ pub(crate) fn create_session(args: &CreateArgs) -> Status {
                 if let Ok(retired) = owner.destroy() {
                     std::mem::forget(retired);
                 } else {
-                    quarantine.store(true, Ordering::Release);
+                    quarantine.quarantine();
                     owner.quarantine();
                     std::mem::forget(owner);
                 }
@@ -255,7 +266,7 @@ pub(crate) fn create_session(args: &CreateArgs) -> Status {
             if let Ok(retired) = owner.destroy() {
                 std::mem::forget(retired);
             } else {
-                quarantine.store(true, Ordering::Release);
+                quarantine.quarantine();
                 owner.quarantine();
                 std::mem::forget(owner);
             }
@@ -310,7 +321,7 @@ pub(crate) fn destroy_session(session: HsaPcSampling) -> Status {
     let mut guard = match lock() {
         Ok(guard) => guard,
         Err(status) => {
-            quarantine.store(true, Ordering::Release);
+            quarantine.quarantine();
             owner.quarantine();
             if let Ok(retired) = outcome {
                 std::mem::forget(retired);
@@ -323,7 +334,7 @@ pub(crate) fn destroy_session(session: HsaPcSampling) -> Status {
             std::mem::forget(retired);
             return SUCCESS;
         }
-        quarantine.store(true, Ordering::Release);
+        quarantine.quarantine();
         owner.quarantine();
         return INVALID_RUNTIME_STATE;
     };
