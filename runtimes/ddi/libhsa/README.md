@@ -4,7 +4,7 @@
 # libhsa
 
 libhsa implements the HSA C ABI over [rocddi](../rocddi/README.md). It reports
-HSA runtime version 1.21 and AMD extension version 1.36. This early frontend
+HSA runtime version 1.21 and AMD extension version 1.39. The frontend
 does not yet provide complete ROCr compatibility. The
 [HSA headers](../../api-headers/include/hsa/) define the public ABI; an
 exported entry point does not imply that every request is supported.
@@ -17,18 +17,25 @@ signals, memory handles, and executables. rocddi supplies native device
 mechanisms, while
 [rocloader](../../loader/rocloader/README.md) handles HSA code objects and
 executable state. Final shutdown waits for outstanding native calls and stops
-runtime workers. On Linux KFD, a primary process context may remain after
-shutdown; later runtime generations use an instance-owned context when KFD
-supports it.
+runtime workers. On Linux KFD, clean later generations reuse the exact retained
+primary connection and GPU VMs. This preserves primary-context SVM and profiling
+support across generations. A pending native disable, changed GPU identity,
+sticky device loss, or uncertain cleanup still prevents reuse.
 
-The final reference closes one process admission gate under the lifecycle
-lock and requests worker stop. Calls already admitted retain their generation;
-nested work on the same thread can finish while its parent lease is live.
-Unbounded signal waits observe the stop request and return their last observed
-value. Shutdown waits for calls on other threads. A shutdown invoked from an
-admitted callback or runtime worker uses a helper to finish teardown after
-that caller returns. Application code must avoid holding a lock needed by a
+The final reference closes public admission under the lifecycle lock and
+cancels ordinary waits and native work. Calls already admitted retain their
+generation; nested work on the same thread can finish while its parent lease
+is live. Unbounded signal waits return their last observed value. When a
+compatible profiler is registered, preparation gives it explicit generation
+leases to stop profiling engines while native queues and completion callbacks
+remain available. Shutdown closes cleanup delegation, joins callbacks, and
+checks native queue inactivation before tools release their operands. A shutdown
+invoked from an admitted callback or runtime worker uses a helper to finish
+teardown after that caller returns. Application code must avoid holding a lock needed by a
 worker callback while calling `hsa_shut_down`, since shutdown joins workers.
+An admitted operation that does not drain within five seconds retains the
+generation and reports `HSA_STATUS_ERROR_RESOURCE_BUSY`; the timeout never
+authorizes releasing storage that native work may still use.
 
 Final shutdown has three outcomes:
 
@@ -64,33 +71,65 @@ host CPU projection is used when native CPU nodes are absent. Cache selection
 follows explicit locality and CPU sharing records. Missing CPU model names
 receive the HSA display fallback. These projections do not activate CPU devices;
 cache handles, names, callback order and public attributes remain frontend policy.
+Generations with no selected GPU use host pages for ordinary signals and
+system-pool signal batches, including waits and asynchronous callbacks.
 
 The CMake build stages `libhsa-runtime64.so.1` with `ROCR_1` symbol versions.
 Its `libamdf.so` alias exports AMDF from the same image. The two ABIs have
 separate frontend lifecycles and rocddi sessions; process-lifetime KFD context
 resources are shared by rocddi. HSA calls do not route through AMDF.
 
+## Debugger and trap ownership
+
+Before native activation, HSA requests a process-lifetime debugger rendezvous
+with ABI version 11. Matching runtime trap handlers and TTMP setup provide the
+trap ABI expected by current rocdbgapi. Loaded code objects enter the native
+debugger list only after executable freeze completes their writes and code-cache
+publication; they leave that list before executable backing is released.
+
+An already active AMDF or other primary-context registration can prevent HSA
+from owning that rendezvous. HSA initialization and execution remain available
+in that case; the existing registration and trap binding are preserved. GPU
+debugging through this HSA generation is unavailable, and AMD PC sampling
+creation reports `HSA_STATUS_ERROR_NOT_SUPPORTED` because HSA cannot safely
+restore an unowned trap binding. Activate HSA before the other native runtime
+when these facilities are needed. An active KFD runtime cannot safely change its
+debugger registration while another client owns queues.
+
+PC sampling retains the normal debugger trap while installing its sampling
+handler and restores the normal handler on destruction. Trap code, arguments,
+and executable images remain retained after ambiguous native retirement.
+The adjacent [trap sources and license](src/debugger/traps/LICENSE) and
+[regeneration script](src/debugger/traps/regenerate.py) reproduce the embedded
+handler programs without depending on an external ROCr checkout at build time.
+
+`HSA_XNACK=0` and `HSA_XNACK=1` request the corresponding native fault mode before
+activation. Requests are advisory: a rejected change falls back to a confirmed
+live mode, which is also used for ISA names and code-object compatibility.
+Other values leave the mode unchanged. A failed live-mode query is an
+initialization error rather than an assumed mode.
+
 ## Current support
 
 - CPU and GPU agents, memory regions and pools, virtual memory, SVM, IPC,
   signals, AQL and SDMA queues, and synchronous and asynchronous copies.
-- Code-object and executable loading for matching GFX12 targets through
-  rocloader. The image extension is advertised only on gfx1200 and gfx1201,
-  for supported formats and layouts.
+- Modern code-object loading on gfx908, gfx90a, gfx942, gfx950, selected
+  gfx10.1/gfx10.3/gfx11.0/gfx11.5 targets, gfx1200, gfx1201, and gfx1250.
+  Admission requires a matching loader, AQL/scratch implementation, and
+  compute-copy asset. Loader extension 1.04 supports caller-owned executable
+  destinations, published at freeze without taking ownership of their mapping.
+- Images and samplers on those GFX9/GFX10/GFX11 and GFX12.0 targets, including
+  imported-image transfers, packed/depth/sRGB formats, and sampler-v3
+  anisotropy. Format and geometry queries report the supported combinations.
+- SVM pointer classification and discard/prefetch batches when XNACK is
+  enabled, rectangular copy batches, non-peer staging, and compute copy/fill.
+- Scratch occupancy reduction, use-once reclamation, and asynchronous
+  reclamation on firmware supporting the CP protocol. Local queue descriptors
+  require a coherent host XGMI route with atomic access. SDMA queues support
+  endpoint fault callbacks and normal scheduling priority.
 - AMD PC sampling on gfx1200, gfx1201, or gfx1250 when KFD reports native
   configurations. Its GPU behavior still needs hardware qualification.
-- `rocprofiler-register` and legacy `HSA_TOOLS_LIB` loading on Linux x86-64.
-  libhsa retains each registrar table and dispatches through stable bridges
-  so existing SDK late attachment remains visible. The current registrar ABI
-  provides no update notification or reader lock: a concurrent table rewrite
-  and bridge read remain a known race until that ABI gains synchronization.
-  The existing SDK wrapper stops its completion monitor before native HSA
-  shutdown; libhsa does not call private SDK lifecycle entry points. A late
-  registrar replay must not overlap final `hsa_shut_down`, because it can
-  restart that monitor after the wrapper stops it. The existing ABI does not
-  provide a fence for this overlap. Each full HSA reinitialization creates
-  another registrar instance, which the current registrar limits to eight;
-  profiler resource reuse across those generations is not qualified.
+- Legacy `HSA_TOOLS_LIB` loading on Linux x86-64 and AArch64.
   Legacy tools must finish table edits before `OnLoad` returns. libhsa
   snapshots those edits into atomic dispatch slots and retains every staging
   table through process exit, so a tool may keep a table pointer across
@@ -104,9 +143,54 @@ resources are shared by rocddi. HSA calls do not route through AMDF.
   must retain any state that wrapper needs until it returns. The AMD profiler
   and AQLprofile extension tables are not advertised.
 
+The runtime also implements an optional version 2 registrar boundary for
+immutable profiler snapshots, generation-scoped worker admission, and separate
+prepare/retire callbacks. These entry points are exercised by a local registrar
+fixture. The registrar and SDK currently in this checkout do not implement that
+protocol; their companion changes are deferred. SDK registration, concurrent
+late attachment, and SDK resource reuse across HSA generations are therefore
+not supported by the current component combination. Runtime initialization and
+legacy tools remain available when the version 2 symbols are absent. The older
+mutable-table registrar ABI is not used because it lacks a writer/shutdown fence.
+
+The private versioned descriptor-interception hook preserves native batch
+errors, priority, CU masks, requested ring/control placement, and cooperative
+queue references. Integration of that hook into the SDK and attachment helper
+also requires the deferred companion changes. It does not change the public
+HSA headers or make the current SDK wrappers descriptor-aware.
+
 Availability depends on the selected agent and driver. Query system and agent
 extensions, memory pools, and queue capabilities before relying on a feature.
 The finalizer extension and external semaphore operations are not supported.
+`hsa_amd_svm_prefetch_async` requires confirmed migration completion and reports
+`HSA_STATUS_ERROR_NOT_SUPPORTED` on the current Linux KFD backend, which only
+provides best-effort prefetch completion.
+
+The current target profile excludes gfx11.7 because no matching compute-copy
+object can be generated by the selected compiler. gfx1250 images remain
+unavailable because that compiler cannot generate the required image kernel.
+gfx1251 has loader definitions but no established native address/queue profile
+in the selected kernel baseline. These are implementation/toolchain limits,
+separate from whether a particular device has been tested. Legacy V1/V2 code
+objects are rejected instead of being decoded as modern descriptors.
+
+## Configuration
+
+These controls are sampled when an HSA generation initializes. Native device
+identity is independent of the resulting HSA agent order.
+
+| Control | Behavior |
+| --- | --- |
+| `ROCR_VISIBLE_DEVICES` | Ordered GPU ordinals or unique UUID prefixes. An empty value exposes CPU topology only; an invalid or repeated token ends the accepted prefix. |
+| `HSA_XNACK` | Advisory `0`/`1` request before activation; ISA reporting uses the confirmed effective mode. |
+| `HSA_CU_MASK` | Process CU restrictions intersect every queue mask, including later mask resets. |
+| `HSA_ENABLE_SDMA`, `HSA_ENABLE_PEER_SDMA` | `0` disables the selected SDMA path; copies use the compute/staging implementation. |
+| `HSA_NO_SCRATCH_RECLAIM` | `1` disables scratch reclamation. |
+| `HSA_ENABLE_SCRATCH_ASYNC_RECLAIM` | `0` disables asynchronous reclaim on supported firmware. |
+| `HSA_NO_SCRATCH_THREAD_LIMITER` | `1` disables occupancy reduction after scratch allocation pressure. |
+| `HSA_SCRATCH_SINGLE_LIMIT`, `HSA_SCRATCH_SINGLE_LIMIT_ASYNC` | Per-queue byte thresholds, clamped to the device scratch aperture. The asynchronous threshold can also be updated through the AMD agent API. |
+| `HSA_DISABLE_FRAGMENT_ALLOCATOR` | `1` disables allocation fragments. |
+| `HSA_FORCE_FINE_GRAIN_PCIE` | `1` exposes the fine-grain PCIe pool policy. |
 
 ## Build and verification
 

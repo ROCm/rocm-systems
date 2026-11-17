@@ -339,7 +339,7 @@ impl KfdVirtualAddress {
         Ok(())
     }
 
-    fn check(&self) -> Result<(), Error> {
+    pub(super) fn check(&self) -> Result<(), Error> {
         let Some(reservation) = self.reservation.as_ref() else {
             return Err(error(
                 ErrorKind::InvalidArgument,

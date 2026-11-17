@@ -15,7 +15,9 @@ protected:
                                      const std::vector<std::string>& counters_pmc0,
                                      const std::vector<std::string>& counters_pmc1 = {});
     void invoke_record_callback(uint64_t counter_id, const std::string& counter_name, double counter_value);
-    void invoke_tool_tracing_callback(uint64_t kernel_id, const std::string& kernel_name = "default");
+    void invoke_tool_tracing_callback(uint64_t           kernel_id,
+                                      const std::string& kernel_name    = "default",
+                                      uint64_t           code_object_id = 0);
     void invoke_kernel_dispatch_callback(rocprofiler_tracing_operation_t operation);
 
     static std::string convert_counters_per_pmc_to_str(const std::vector<std::vector<std::string>>& counters_per_pmc);
@@ -34,13 +36,12 @@ protected:
 
 class TestSdkCallbacksMultiplexing
     : public TestSdkCallbacks
-    , public ::testing::WithParamInterface<rocprofiler_compute_tool::iteration_multiplexing_mode_t>
+    , public ::testing::WithParamInterface<bool>
 {
 protected:
     void SetUp() override;
 
-    rocprofiler_compute_tool::iteration_multiplexing_mode_t m_multiplexing_mode =
-        rocprofiler_compute_tool::iteration_multiplexing_mode_t::DISABLED;
+    bool m_iteration_multiplexing = false;
 };
 
 struct kernel_filtering_test_params_t

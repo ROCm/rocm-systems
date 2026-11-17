@@ -102,6 +102,10 @@ pub enum GpuTargetProfile {
 pub enum GpuScratchEncoding {
     /// Wave64 scratch descriptor with GFX9 alignment.
     Gfx9,
+    /// GFX10 descriptor with 1024-byte wave alignment.
+    Gfx10,
+    /// GFX11 descriptor with 256-byte wave alignment.
+    Gfx11,
     /// Wave32 scratch descriptor with GFX12 alignment.
     Gfx12,
 }
@@ -111,6 +115,10 @@ pub enum GpuScratchEncoding {
 pub enum GpuSdmaDialect {
     /// GFX9 SDMA packets.
     Gfx9,
+    /// OSS5 packets and cache controls used by GFX10.
+    Gfx10,
+    /// OSS5-compatible packets and cache controls used by GFX11.
+    Gfx11,
     /// GFX12.0 SDMA packets.
     Gfx1200,
     /// GFX12.5 SDMA packets.
@@ -123,6 +131,8 @@ impl GpuTargetProfile {
     pub const fn scratch_encoding(self, wavefront_size: u32) -> Option<GpuScratchEncoding> {
         match self {
             Self::Gfx9 if wavefront_size == 64 => Some(GpuScratchEncoding::Gfx9),
+            Self::Gfx10 if wavefront_size == 32 => Some(GpuScratchEncoding::Gfx10),
+            Self::Gfx11 if wavefront_size == 32 => Some(GpuScratchEncoding::Gfx11),
             Self::Gfx1200 | Self::Gfx1201 | Self::Gfx1250 if wavefront_size == 32 => {
                 Some(GpuScratchEncoding::Gfx12)
             }
@@ -141,9 +151,11 @@ impl GpuTargetProfile {
     pub const fn sdma_dialect(self) -> Option<GpuSdmaDialect> {
         match self {
             Self::Gfx9 => Some(GpuSdmaDialect::Gfx9),
+            Self::Gfx10 => Some(GpuSdmaDialect::Gfx10),
+            Self::Gfx11 => Some(GpuSdmaDialect::Gfx11),
             Self::Gfx1200 | Self::Gfx1201 => Some(GpuSdmaDialect::Gfx1200),
             Self::Gfx1250 => Some(GpuSdmaDialect::Gfx1250),
-            Self::Other | Self::Gfx10 | Self::Gfx11 => None,
+            Self::Other => None,
         }
     }
 
@@ -174,8 +186,8 @@ impl GpuTargetProfile {
     #[must_use]
     pub const fn supports_image_sampler(self) -> bool {
         match self {
-            Self::Gfx1200 | Self::Gfx1201 => true,
-            Self::Other | Self::Gfx9 | Self::Gfx10 | Self::Gfx11 | Self::Gfx1250 => false,
+            Self::Gfx9 | Self::Gfx10 | Self::Gfx11 | Self::Gfx1200 | Self::Gfx1201 => true,
+            Self::Other | Self::Gfx1250 => false,
         }
     }
 
@@ -244,6 +256,9 @@ pub struct GpuInfo {
     pub shader_engine_count_per_xcc: u32,
     /// SIMD arrays composing one shader engine.
     pub shader_array_count_per_engine: u32,
+    /// Physical compute-unit capacity per shader engine, when reported.
+    /// This bounds a native workgroup cluster independently of harvested CUs.
+    pub maximum_compute_units_per_shader_engine: u32,
     /// SDMA engines dedicated to XGMI transfers.
     pub sdma_xgmi_engine_count: u32,
     /// Global wave synchronization resources.
