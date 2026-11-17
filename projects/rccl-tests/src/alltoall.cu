@@ -105,6 +105,7 @@ void AlltoAllGetBw(size_t count, size_t typesize, double sec, double* algBw, dou
 #if ALLTOALL_GIN_FABRIC_LSA
 // The fabric LSA lane's ready/done flags. thread_local for -t N, like Broadcast's
 // LL requirement: each host thread links its own node into its requirements list.
+// Without -p 1 only thread 0's is filled; AlltoAllRunTest copies it to the rest.
 thread_local ncclLLA2AHandle g_alltoallLaneFlags = {};
 thread_local ncclDevResourceRequirements g_alltoallLaneFlagReq = {};
 #endif
@@ -416,11 +417,14 @@ __global__ void NvlAlltoAllKernelOptimized(ncclWindow_t sendwin, size_t sendoffs
 }
 
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7) && defined(NCCL_OS_LINUX)
-// RCCL_TESTS_A2A_LANE_LOG names the -D 3 lane RunColl took, once per lane, so a
-// test can tell the fabric LSA lane from the gin.put fallback it silently takes.
+// Records the -D 3 lane RunColl took for this thread's proto column. With
+// RCCL_TESTS_A2A_LANE_LOG it also names the lane, once per lane, so a test can
+// tell the fabric LSA lane from the gin.put fallback it silently takes.
 enum class AlltoAllGinLane { GinPut, Lsa };
+thread_local AlltoAllGinLane g_alltoallLastLane = AlltoAllGinLane::GinPut;
 
 static void alltoallReportLane(AlltoAllGinLane lane) {
+  g_alltoallLastLane = lane;
   static const char* const kLaneNames[] = {"gin-put", "lsa"};
   // Read once: RunColl is on the timed path.
   static const bool enabled = getenv("RCCL_TESTS_A2A_LANE_LOG") != nullptr;
@@ -984,10 +988,12 @@ testResult_t AlltoAllGetCollImplInfo(ncclComm_t comm, size_t count, ncclDataType
   return testSuccess;
 }
 
-// Tier report for -D runs. AllToAll is an all-peers DIRECT exchange with no
-// size-based crossover; only the transport changes per deviceImpl (AlltoAllRunColl):
+// Tier report for -D runs. AllToAll is an all-peers DIRECT exchange; the
+// transport depends on deviceImpl (AlltoAllRunColl):
 //   -D 1/2 -> NvlAlltoAllKernel[Optimized]: intra-node LSA stores, no GIN.
-//   -D 3   -> GinAlltoAllKernel:            every peer via gin.put (GIN).
+//   -D 3   -> GinAlltoAllKernel:            every peer via gin.put (GIN), or
+//             GinAlltoAllLsaKernel (LSA) for sizes RunColl sent to the fabric
+//             LSA lane. The row reports the lane this size's RunColl took.
 //   -D 4   -> HybridAlltoAllKernel:         CTA 0 GIN, CTAs 1..N LSA.
 testResult_t AlltoAllGetDeviceImplInfo(int deviceImpl, size_t /*count*/, ncclDataType_t /*type*/,
     int /*nRanks*/, int /*lsaSize*/, char* algoOut, char* protoOut) {
@@ -998,6 +1004,9 @@ testResult_t AlltoAllGetDeviceImplInfo(int deviceImpl, size_t /*count*/, ncclDat
     case 4:         proto = "LSA/GIN"; break;
     default:        proto = "GIN";     break;  // -D 3
   }
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7) && defined(NCCL_OS_LINUX)
+  if (deviceImpl == 3 && g_alltoallLastLane == AlltoAllGinLane::Lsa) proto = "LSA";
+#endif
   snprintf(protoOut, 16, "%s", proto);
   return testSuccess;
 }
@@ -1031,11 +1040,24 @@ testResult_t AlltoAllRunTest(struct threadArgs* args, int root, ncclDataType_t t
   }
 #if ALLTOALL_GIN_FABRIC_LSA
   // GPU i's devComm is testDevComms(args, i), which strides by testMaxDevComms.
-  // Both inputs to ctxOk can differ between ranks: the context copy can fail on
-  // one, and without -p 1 only host thread 0 created the devComms, so only it
-  // holds the thread_local lane flags. MIN across threads and MPI ranks makes
-  // every rank fall back to gin.put together if any of them lacks either.
+  // Without -p 1 only host thread 0 created the devComms, so only it holds the
+  // lane flags. Their buffer handle is an offset ncclDevCommCreate derives from
+  // the requirements list alone, so it is the same for every devComm created
+  // from that list, and the other threads take thread 0's copy.
+  // The context copy can still fail on one rank; MIN across threads and MPI
+  // ranks then makes every rank fall back to gin.put together.
   if (deviceImpl == 3) {
+    static std::mutex laneFlagsMutex;
+    static ncclLLA2AHandle sharedLaneFlags = {};
+    if (g_alltoallLaneFlags.nSlots != 0) {
+      std::lock_guard<std::mutex> lock(laneFlagsMutex);
+      sharedLaneFlags = g_alltoallLaneFlags;
+    }
+    Barrier(args);
+    if (g_alltoallLaneFlags.nSlots == 0) {
+      std::lock_guard<std::mutex> lock(laneFlagsMutex);
+      g_alltoallLaneFlags = sharedLaneFlags;
+    }
     std::vector<AlltoAllGinLaneState> states(args->nGpus);
     long long laneOk = 1;
     for (int i = 0; i < args->nGpus; i++) {

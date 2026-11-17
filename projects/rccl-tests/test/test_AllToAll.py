@@ -105,8 +105,12 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def _launch_a2a(request, total_bytes, dtype, extra_env=()):
-    """Launch alltoall_perf -D 3 once at a fixed total (per-rank) size."""
+def _launch_a2a(request, total_bytes, dtype, extra_env=(), nprocs=None, perf_extra=None):
+    """Launch alltoall_perf -D 3 once at a fixed total (per-rank) size.
+
+    `nprocs` overrides the MPI process count and `perf_extra` is appended after
+    -D (a later -g/-t wins), so NP ranks can run as NP/2 processes of two.
+    """
     size = str(int(total_bytes))
     gin_env = gin_env_xflags(
         [
@@ -120,9 +124,9 @@ def _launch_a2a(request, total_bytes, dtype, extra_env=()):
     )
 
     args = (
-        mpi_launch_prefix(request, LAUNCHER, NP, MPI_OPTS)
+        mpi_launch_prefix(request, LAUNCHER, nprocs or NP, MPI_OPTS)
         + gin_env
-        + gin_perf_argv(executable, size, dtype, CTAS)
+        + gin_perf_argv(executable, size, dtype, CTAS, extra=perf_extra)
     )
     cmd = " ".join(shlex.quote(a) for a in args)
     hang_msg = gin_hang_msg(
@@ -135,12 +139,12 @@ def _launch_a2a(request, total_bytes, dtype, extra_env=()):
     return launch_mpi_shell(cmd, TIMEOUT_S, hang_msg)
 
 
-def _run_a2a(request, total_bytes, dtype, extra_env=()):
+def _run_a2a(request, total_bytes, dtype, extra_env=(), nprocs=None, perf_extra=None):
     """Run one all-to-all with connectivity-gate retry on gfx950 VMM aborts."""
     if NP < 2:
         pytest.skip("need >= 2 ranks/GPUs for AllToAll")
     return run_with_conn_gate_retry(
-        lambda: _launch_a2a(request, total_bytes, dtype, extra_env), CONN_RETRIES
+        lambda: _launch_a2a(request, total_bytes, dtype, extra_env, nprocs, perf_extra), CONN_RETRIES
     )
 
 
@@ -187,3 +191,22 @@ def test_AllToAllGinFabricLsaLane(request, lane, dtype):
         assert lanes == expected, "AllToAll took lane(s) {}, expected {} (lane={}, dtype={})".format(
             sorted(lanes), sorted(expected), lane, dtype
         )
+
+
+# Two ranks per process: -g 2 reads each GPU's devComm slot, and -t 2 without
+# -p 1 runs the worker thread on host thread 0's lane flags. Every rank must
+# still take the lane. Only the lane sizes run here: -D 3 gin.put with more than
+# one rank per process faults on the MI450 ROCm 10.3 images, lane or not.
+@pytest.mark.parametrize("layout", [["-g", "2"], ["-t", "2"]], ids=["g2", "t2"])
+def test_AllToAllGinFabricLsaLaneTwoRanksPerProcess(request, layout):
+    if not EXPECT_LSA_LANE:
+        pytest.skip("needs RCCL_TESTS_A2A_EXPECT_LSA_LANE=1 (MI450 fabric)")
+    if NP % 2:
+        pytest.skip("needs an even number of ranks/GPUs")
+    env = ("RCCL_TESTS_A2A_LANE_LOG=1",) + _FABRIC_LSA_ENV
+    rc, out = _run_a2a(request, 64 * 1024 * NP, "float", env, nprocs=NP // 2, perf_extra=layout)
+    assert rc == 0, "AllToAll data check failed (nonzero exit), layout={}".format(layout)
+    lanes = set(A2A_LANE_RE.findall(out or ""))
+    assert lanes == {"lsa"}, "AllToAll took lane(s) {}, expected ['lsa'] (layout={})".format(
+        sorted(lanes), layout
+    )
