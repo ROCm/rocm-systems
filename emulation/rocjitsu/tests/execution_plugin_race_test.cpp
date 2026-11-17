@@ -2361,7 +2361,7 @@ TEST_F(Gfx1250CounterCapacityRaceTest, TensorBelowCapacityOverwritingAPendingSou
   EXPECT_TRUE(tensor_load_oldest());
 }
 
-/// Counter capacity on CDNA3 and CDNA4, whose combined VMCNT holds 63 tokens and
+/// Counter capacity on CDNA1 through CDNA4: combined VMCNT holds 63 tokens and
 /// LGKMCNT 15 (the generated ISA properties). These tests pin the pre-GFX12 side
 /// of behavior that differs on gfx1250.
 class CdnaCounterCapacityRaceTest : public ::testing::TestWithParam<const char *> {
@@ -2438,7 +2438,7 @@ TEST_P(CdnaCounterCapacityRaceTest, MessageAdvancesLgkmcnt) {
 }
 
 // An EXEC-zero buffer or global instruction counts on VMCNT, so it applies
-// backpressure (CDNA3 and CDNA4 ISA sections 3.3 and 4.4).
+// backpressure (CDNA1 through CDNA4 ISA sections 3.3 and 4.4).
 TEST_P(CdnaCounterCapacityRaceTest, ExecZeroLoadAppliesBackpressure) {
   load(/*lds=*/false, /*vgpr=*/0);
   for (int index = 0; index < kVmcntCapacity - 1; ++index)
@@ -2496,8 +2496,8 @@ TEST_P(CdnaCounterCapacityRaceTest, LoadAdvancesVmcnt) {
   EXPECT_FALSE(vgpr_read(0));
 }
 
-INSTANTIATE_TEST_SUITE_P(Cdna3AndCdna4, CdnaCounterCapacityRaceTest,
-                         ::testing::Values("cdna3", "cdna4"));
+INSTANTIATE_TEST_SUITE_P(Cdna1ThroughCdna4, CdnaCounterCapacityRaceTest,
+                         ::testing::Values("cdna1", "cdna2", "cdna3", "cdna4"));
 
 // Wave 1 writes LDS and may end; wave 0 then passes a barrier and reads the
 // bytes. The fixture's DS helpers are not specific to tensor DMA.
