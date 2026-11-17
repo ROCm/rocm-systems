@@ -105,6 +105,12 @@ struct WaitcheckCounterUnderaccountingDiagnostic {
 
 /// @brief Controls for waitcheck analysis.
 struct WaitcheckOptions {
+  /// @brief Wavefront size when no AMDHSA descriptor supplies one.
+  ///
+  /// @details Raw streams and symbol-less ELF sections default to wave64,
+  /// matching WaitcheckKernelInfo and WaitcheckStreamOptions. Pass 32
+  /// explicitly for wave32 code. Described kernels always use the descriptor.
+  uint32_t fallback_wavefront_size = 64;
   /// @brief Maximum diagnostics to retain. Analysis still reports failure after
   /// the first hazard when this is zero.
   size_t max_diagnostics = std::numeric_limits<size_t>::max();
@@ -200,9 +206,13 @@ struct WaitcheckReport {
 /// @details Unsupported targets return ROCJITSU_CODE_ARCH_INVALID.
 [[nodiscard]] rj_code_arch_t waitcheck_arch_for_target(rj_code_target_id_t target);
 
-/// @brief Build the exact register-allocation and wavefront bounds for one dispatch descriptor.
+/// @brief Build exact register-allocation and wavefront bounds for one descriptor.
+///
+/// @param entry_text_offset Byte offset of the entry within `.text`, not the
+/// signed descriptor-relative kernel_code_entry_byte_offset. Use
+/// waitcheck_kernels_exact() when a whole AMDHSA code object is available.
 [[nodiscard]] WaitcheckKernelInfo
-waitcheck_kernel_from_descriptor(std::string name, uint64_t descriptor_vaddr, uint64_t entry_offset,
+waitcheck_kernel_from_descriptor(std::string name, uint64_t descriptor_vaddr, uint64_t entry_text_offset,
                                  uint64_t code_size, rj_code_arch_t arch,
                                  const amdhsa::kernel_descriptor_t &descriptor);
 
@@ -216,9 +226,19 @@ waitcheck_kernel_from_descriptor(std::string name, uint64_t descriptor_vaddr, ui
 [[nodiscard]] std::vector<WaitcheckKernelInfo>
 waitcheck_kernels(const AmdGpuCodeObject &code_object);
 
+/// @brief Discover one kernel record for each AMDHSA dispatch descriptor.
+///
+/// @details Each result keeps its descriptor's exact allocation and wavefront
+/// bounds. Runtime dispatch hooks should match descriptor_vaddr to the packet's
+/// kernel_object after applying the loader's address delta.
+[[nodiscard]] std::vector<WaitcheckKernelInfo>
+waitcheck_kernels_exact(const AmdGpuCodeObject &code_object);
+
 /// @brief Analyze one stream of 32-bit instruction words.
 ///
-/// @details Unsupported architectures return a report with supported=false.
+/// @details The stream has no descriptor; options.fallback_wavefront_size selects
+/// wave32 or wave64 and defaults to wave64. Unsupported architectures or wave
+/// sizes return a report with supported=false.
 [[nodiscard]] WaitcheckReport analyze_waitcnts(std::span<const uint32_t> words, rj_code_arch_t arch,
                                                WaitcheckOptions options = {});
 
