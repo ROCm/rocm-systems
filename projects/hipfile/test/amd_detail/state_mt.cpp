@@ -320,8 +320,8 @@ thread_function(int id)
                     auto [file, buffer, stream] = ds->getFileBufferAndStream(fh, buf, hip_stream);
                 } break;
 
-                // Case 12: Get a file, a buffer, and a new stream that isn't registered, which
-                //          registers it implicitly
+                // Case 12: Get a file, a buffer, and a new unregistered stream, which hipFile builds a
+                //          transient stream for instead of registering.
                 case 12: {
                     if (buffers.empty() || files.empty()) {
                         break;
@@ -343,8 +343,17 @@ thread_function(int id)
                     uniform_int_distribution<size_t> buf_dist{0, buffers.size() - 1};
                     auto                             buf = buffers[buf_dist(gen)];
 
-                    auto [file, buffer, stream] = ds->getFileBufferAndStream(fh, buf, hip_stream);
-                    hip_streams.push_back(hip_stream);
+                    (void)ds->getFileBufferAndStream(fh, buf, hip_stream);
+
+                    // The stream isn't registered, so it isn't tracked for deregistration; destroy it here.
+                    err = hipStreamDestroy(hip_stream);
+                    if (err != hipSuccess) {
+                        {
+                            lock_guard<mutex> guard{io_mutex};
+                            cerr << "hipStreamDestroy() failed!" << endl;
+                        }
+                        exit(EXIT_FAILURE);
+                    }
                 } break;
 
                 default: {
