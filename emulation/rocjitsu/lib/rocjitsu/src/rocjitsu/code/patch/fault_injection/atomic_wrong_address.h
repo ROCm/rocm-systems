@@ -91,8 +91,9 @@ select_atomic_wrong_address(const AtomicInventory &, const AtomicSelector &, Fau
 /// @details The delta must be a multiple of four bytes and the operation's natural
 /// alignment (eight bytes for 64-bit atomics, four for 32-bit and packed pairs),
 /// and must not exceed 0x7fffff. CAS alignment follows the memory element's width.
-/// The resulting offset must fit the form's signed field. Each call produces an
-/// independent pristine-source mutant and changes only the immediate. The caller
+/// The resulting offset must fit the form's signed field. Modern Buffer atomics
+/// require a nonnegative source offset. Each call produces an independent
+/// pristine-source mutant and changes only the immediate. The caller
 /// must ensure the original runtime address is aligned and both addresses are valid.
 [[nodiscard]] FailureOr<AtomicResult> apply_atomic_wrong_address(const FaultMutationContext &,
                                                                  const AtomicSelection &,

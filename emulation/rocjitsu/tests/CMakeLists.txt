@@ -1421,6 +1421,7 @@ add_executable(
     patch/fault_injection/scalar_two_lds_test.cpp
     patch/fault_injection/lds_wrong_address_test.cpp
     patch/fault_injection/atomic_wrong_address_test.cpp
+    patch/fault_injection/atomic_buffer_test.cpp
     patch/fault_injection/lds_ownership_test.cpp
     patch/fault_injection/lds_target_ownership_test.cpp
     patch/fault_injection/gfx1100_lds_test.cpp
