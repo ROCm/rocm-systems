@@ -6,6 +6,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Added
 
+- `rocprofv3 --att` can be combined with `--replay-mode kernel`. Dispatch thread trace is collected on one extra replay pass, with counter collection stopped for that pass, so a multi-group counter run no longer has to be repeated to capture a thread trace of the same dispatch. `--att-no-intercept`, `--att-consecutive-kernels`, `--selected-regions` with `--att`, PC sampling, and `--spm` are still rejected. With `--att` and no `--kernel-iteration-range`, the first launch of each kernel is the one that is replayed.
 - rocJPEG API tracing for `rocJpegDecodeAsync`, `rocJpegDecodeSync`, `rocJpegDecodeBatchedAsync`, `rocJpegDecodeBatchedSync`, and `rocJpegGetDecoderCaps`. The rocJPEG dispatch table the SDK expects is now step version 3.
   - New `ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeAsync`, `ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeSync`, `ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeBatchedAsync`, `ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeBatchedSync`, and `ROCPROFILER_ROCJPEG_API_ID_rocJpegGetDecoderCaps` operation IDs, and matching entries in `rocprofiler_rocjpeg_api_args_t`.
 

@@ -66,8 +66,10 @@ Collecting counters with kernel replay
 
 ``--replay-mode kernel`` requires counter collection (``--pmc``, input-file ``pmc``, or
 ``pmc_groups``) and ``--kernel-replay-beta-enabled``. The number of replay passes is the number of
-counter groups (one pass per group). There is no separate pass-count flag. ``rocprofv3`` uses
-callback dispatch counting for counter records; ``replay_pass`` is emitted on that path.
+counter groups (one pass per group). ``--att`` adds one pass after those groups: counters are
+stopped and dispatch thread trace runs on that pass only. There is no separate pass-count flag.
+``rocprofv3`` uses callback dispatch counting for counter records; ``replay_pass`` is emitted on
+that path. The thread-trace pass has no counter record.
 
 .. code-block:: bash
 
@@ -77,8 +79,16 @@ The preceding command collects both counter groups in a **single** run of ``<app
 Each targeted dispatch is replayed twice: pass 0 collects ``SQ_WAVES`` and ``GRBM_COUNT``; pass 1
 collects ``GRBM_GUI_ACTIVE``. Device memory is restored between those passes.
 
-A single ``--pmc`` group still works. In that case the tool asks the SDK for one pass, which does
-not snapshot or restore — the dispatch takes the ordinary path.
+Adding ``--att`` replays each targeted dispatch once more. That last pass collects thread trace and
+no counters:
+
+.. code-block:: bash
+
+   rocprofv3 --pmc SQ_WAVES GRBM_COUNT --pmc GRBM_GUI_ACTIVE --att --replay-mode kernel --kernel-replay-beta-enabled -- <application_path>
+
+A single ``--pmc`` group without ``--att`` still works. In that case the tool asks the SDK for one
+pass, which does not snapshot or restore — the dispatch takes the ordinary path. A single ``--pmc``
+group with ``--att`` is two passes, so counters and thread trace do not share an execution.
 
 .. code-block:: bash
 
@@ -100,11 +110,13 @@ Pass count
 The pass count is **not** a user-supplied integer. ``rocprofv3`` derives it per dispatch from the
 number of counter groups collectable on **that dispatch's GPU agent**. Pass ``i`` maps to group
 ``i``. An agent with fewer collectable groups than the global ``--pmc`` list is replayed only as
-many times as it has groups, so pass and group stay aligned.
+many times as it has groups, so pass and group stay aligned. With ``--att``, one pass is added
+after the last counter group. That pass does not map to a counter group.
 
 There is no ``--kernel-replay-passes`` flag and no pass-count environment variable. The CLI does
-not wire ``replay_continue`` or the localized start/stop context callbacks; those remain SDK
-tool APIs (:ref:`using-kernel-replay`).
+not wire ``replay_continue``. It does use the localized start/stop callbacks to put dispatch thread
+trace on its own pass; any other per-pass arrangement remains an SDK tool API
+(:ref:`using-kernel-replay`).
 
 Output
 ======
@@ -170,16 +182,26 @@ Limitations (CLI)
 
 * **Beta.** The flag, the SDK API, and the output schema may change.
 * **Requires** ``--pmc``. The flag is an alternative to application replay for counter groups, not
-  a general "replay my kernel N times" switch.
+  a general "replay my kernel N times" switch. ``--att`` is collected on top of those groups, not
+  instead of them.
 * **Each** ``--pmc`` **group must fit one hardware pass.**
-* **Fixed pass count** equal to the number of collectable groups on that agent. No
-  ``replay_continue`` and no per-pass local-context toggles from the CLI.
-* **Counters only.** ``--att``, PC sampling, and ``--spm`` are rejected alongside
-  ``--replay-mode kernel``. Because the CLI has no per-pass toggles, any other service
-  would remain enabled for every pass and report each kernel once per pass, all under the single
-  dispatch ID that replay reuses. The SDK itself is not restricted this way -- a custom tool can
-  enable and disable services per pass through the local-context API (see
-  :ref:`using-kernel-replay`) -- so this is a CLI limitation, not a hardware or SDK one.
+* **Fixed pass count** equal to the number of collectable groups on that agent, plus one when
+  ``--att`` is set. No ``replay_continue``. The CLI toggles counter collection and dispatch thread
+  trace between those passes; other per-pass control remains an SDK tool API.
+* **Dispatch thread trace only.** ``--att`` is traced on the final pass, with counter collection
+  stopped, so the trace is not repeated once per counter group. With ``--att`` and no
+  ``--kernel-iteration-range``, the kernel filter keeps thread-trace rules: the first launch of
+  each kernel is replayed, for both counters and the trace. ``--att-activity`` and
+  ``--att-perfcounters`` remain incompatible with ``--pmc``. ``--att-serialize-all`` still inserts
+  its serialization barriers on the counter passes, because a locally stopped thread-trace context
+  keeps those barriers.
+* **PC sampling and SPM are rejected**, as are ``--att-no-intercept``,
+  ``--att-consecutive-kernels``, and ``--selected-regions`` together with ``--att``. Those services
+  stay enabled for every pass or do not honor per-pass context control, so they would report each
+  kernel once per pass under the single dispatch ID that replay reuses. The SDK itself is not
+  restricted this way -- a custom tool can enable and disable services per pass through the
+  local-context API (see :ref:`using-kernel-replay`) -- so this is a CLI limitation, not a hardware
+  or SDK one. Kernel dispatch tracing (``--kernel-trace``) still records every pass.
 * **HIP graph launches are not replayed.** A graph seen while replay is active warns once and
   runs un-replayed (not a hard error).
 * **Only single-packet, single-dispatch submissions** are replayed.

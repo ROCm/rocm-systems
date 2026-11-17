@@ -254,9 +254,37 @@ def test_counters_only_replay_has_no_service_conflict():
     assert service_conflicts(pmc=["SQ_WAVES"]) == []
 
 
-def test_att_conflicts_with_replay():
-    # ATT instruments every pass and reports them all under the dispatch id replay reuses.
-    assert service_conflicts(advanced_thread_trace=True) == ["--att"]
+def test_dispatch_att_does_not_conflict_with_replay():
+    # Dispatch thread trace is stopped on counter passes and started on one extra pass.
+    assert service_conflicts(advanced_thread_trace=True) == []
+    assert service_conflicts(advanced_thread_trace=True, pmc=["SQ_WAVES"]) == []
+
+
+def test_att_no_intercept_conflicts_with_replay():
+    assert service_conflicts(advanced_thread_trace=True, att_no_intercept=True) == [
+        "--att-no-intercept"
+    ]
+
+
+def test_att_consecutive_kernels_conflict_with_replay():
+    assert service_conflicts(advanced_thread_trace=True, att_consecutive_kernels=2) == [
+        "--att-consecutive-kernels"
+    ]
+
+
+def test_att_consecutive_kernels_zero_does_not_conflict():
+    # The option's default is zero, which means dispatch thread trace, not device mode.
+    assert service_conflicts(advanced_thread_trace=True, att_consecutive_kernels=0) == []
+
+
+def test_selected_regions_with_att_conflict_with_replay():
+    assert service_conflicts(advanced_thread_trace=True, selected_regions=True) == [
+        "--selected-regions with --att"
+    ]
+
+
+def test_selected_regions_without_att_do_not_conflict():
+    assert service_conflicts(selected_regions=True, pmc=["SQ_WAVES"]) == []
 
 
 def test_pc_sampling_flag_conflicts_with_replay():
@@ -279,8 +307,19 @@ def test_spm_conflicts_with_replay():
 def test_every_conflicting_service_is_reported_together():
     # A user who asked for all of them should be told about all of them, not one per run.
     assert service_conflicts(
-        advanced_thread_trace=True, pc_sampling_beta_enabled=True, spm=["SQ_WAVES"]
-    ) == ["--att", "PC sampling", "--spm"]
+        advanced_thread_trace=True,
+        att_no_intercept=True,
+        att_consecutive_kernels=2,
+        selected_regions=True,
+        pc_sampling_beta_enabled=True,
+        spm=["SQ_WAVES"],
+    ) == [
+        "--att-no-intercept",
+        "--att-consecutive-kernels",
+        "--selected-regions with --att",
+        "PC sampling",
+        "--spm",
+    ]
 
 
 def test_unset_service_options_do_not_conflict():
@@ -342,8 +381,11 @@ def test_conflicts_are_reported_in_a_stable_order():
     different text on different runs and defeats matching in tests and docs."""
     for _ in range(5):
         assert service_conflicts(
-            spm=["SQ_WAVES"], advanced_thread_trace=True, pc_sampling_beta_enabled=True
-        ) == ["--att", "PC sampling", "--spm"]
+            spm=["SQ_WAVES"],
+            advanced_thread_trace=True,
+            att_no_intercept=True,
+            pc_sampling_beta_enabled=True,
+        ) == ["--att-no-intercept", "PC sampling", "--spm"]
 
 
 def test_missing_attributes_are_treated_as_unset():
@@ -356,7 +398,28 @@ def test_missing_attributes_are_treated_as_unset():
 
 
 def test_att_alone_does_not_drag_in_other_services():
-    assert service_conflicts(advanced_thread_trace=True, spm=None) == ["--att"]
+    assert service_conflicts(advanced_thread_trace=True, spm=None) == []
+
+
+def test_dispatch_att_replay_is_accepted():
+    """main() must not reject --att with kernel replay before the run starts.
+
+    The service check lives in run(), which this test replaces, so acceptance here means the
+    earlier validation still treats dispatch thread trace as part of a kernel-replay run.
+    """
+    runs = launched_runs(
+        "--pmc",
+        "SQ_WAVES",
+        "--pmc",
+        "GRBM_COUNT",
+        "--att",
+        "--replay-mode",
+        "kernel",
+        "--kernel-replay-beta-enabled",
+    )
+    assert len(runs) == 1
+    assert runs[0].advanced_thread_trace is True
+    assert runs[0].replay_mode == "kernel"
 
 
 def test_counter_collection_is_never_itself_a_conflict():

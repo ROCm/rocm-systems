@@ -89,6 +89,12 @@ To collect thread trace with default parameters, use:
 
   rocprofv3 --att -d <output_dir> -- <application_path>
 
+To collect that trace from the same dispatch as several counter groups, in one application run, add
+``--replay-mode kernel --kernel-replay-beta-enabled`` and the ``--pmc`` groups. Thread trace runs
+on one extra pass after the counter passes. See :ref:`using-kernel-replay-rocprofv3`.
+``--att-no-intercept``, ``--att-consecutive-kernels``, and ``--selected-regions`` cannot be combined
+with kernel replay.
+
 The following table lists the parameters relevant to thread tracing:
 
 +-----------------------------+---------+---------+-----------+--------------------------------------------------------------+

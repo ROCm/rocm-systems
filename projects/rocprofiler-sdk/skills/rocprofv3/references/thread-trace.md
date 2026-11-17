@@ -233,7 +233,7 @@ traced CU). `Hitcount` of the first executed instruction approximates the number
 | No `stats_*.csv` | The regex matched no kernel, the instance in `--kernel-iteration-range` never ran, or the app crashed. Check the demangled name with a kernel trace. |
 | Stats CSV has rows but every Hitcount is 0 | No wave ran on the traced CU: change `--att-target-cu`, widen `--att-shader-engine-mask`, launch more workgroups, or restrict CUs with `HSA_CU_MASK`. |
 | Empty Source column | Rebuild with `-g`. |
-| `--att` rejected with `--replay-mode kernel` | Collect ATT in its own run. |
+| `--att-no-intercept`, `--att-consecutive-kernels`, or `--selected-regions` rejected with `--replay-mode kernel` | Use dispatch `--att` so thread trace runs on its own replay pass, or collect those modes in a separate run. |
 | `ATT perfcounters cannot be enabled with PMC` | Drop `--pmc` or `--att-activity`/`--att-perfcounters`. |
 | `--att-consecutive-kernels` with `--selected-regions` rejected | Use one or the other. |
 | Run is very slow | Tracing serializes traced kernels; narrow the filter and iteration range. |
