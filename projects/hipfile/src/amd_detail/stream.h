@@ -84,7 +84,9 @@ public:
     void applyFlags(uint32_t flags) override;
     void drainAndRelease() override;
 
-    Stream(const hipStream_t hip_stream, uint32_t flags, const PassKey<StreamMap> &k);
+    // blocking_only forces the blocking offload path (no wait-value gating, no signal slot), used for
+    // transient streams that are never registered.
+    Stream(const hipStream_t hip_stream, uint32_t flags, bool blocking_only, const PassKey<StreamMap> &k);
 
 private:
     Stream(const Stream &)             = delete;
@@ -114,7 +116,6 @@ public:
     /// @brief Registers a stream to use for async operations
     /// @param hip_stream A HIP stream
     /// @param flags Stream flags
-    /// @note Registering an implicitly registered stream applies the flags to later submissions.
     void registerStream(const hipStream_t hip_stream, uint32_t flags);
 
     /// @brief Deregisters a stream from use
@@ -132,23 +133,15 @@ public:
     /// @return The registered stream, or null if it isn't registered
     std::shared_ptr<IStream> findStream(hipStream_t hip_stream) const;
 
-    /// @brief Build a stream for implicit registration without touching any map
+    /// @brief Build a transient, unregistered stream for a single async submission on an unregistered
+    ///        stream, without touching any map
     /// @param hip_stream A non-default HIP stream
-    static std::shared_ptr<IStream> makeImplicitStream(hipStream_t hip_stream);
-
-    /// @brief Implicitly register a stream built by makeImplicitStream unless one is already registered
-    /// @param hip_stream A non-default HIP stream
-    /// @param candidate The stream to register
-    /// @return The registered stream: the existing one if another thread won, otherwise candidate
-    std::shared_ptr<IStream> adoptImplicitStream(hipStream_t                     hip_stream,
-                                                 const std::shared_ptr<IStream> &candidate);
+    /// @note The stream uses the blocking offload path, so nothing persistent is keyed to the handle;
+    ///       a later stream that reuses the handle value cannot pick up stale state.
+    static std::shared_ptr<IStream> makeTransientStream(hipStream_t hip_stream);
 
 private:
-    struct Entry {
-        std::shared_ptr<IStream> stream;
-        bool                     implicit;
-    };
-    std::unordered_map<hipStream_t, Entry> from_ptr;
+    std::unordered_map<hipStream_t, std::shared_ptr<IStream>> from_ptr;
 };
 
 }

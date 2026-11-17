@@ -40,7 +40,7 @@ SignalSlotDeleter::operator()(uint64_t *slot) const noexcept
     }
 }
 
-Stream::Stream(const hipStream_t _hip_stream, uint32_t flags, const PassKey<StreamMap> &)
+Stream::Stream(const hipStream_t _hip_stream, uint32_t flags, bool blocking_only, const PassKey<StreamMap> &)
     : hip_stream{_hip_stream}, device_id{0}, can_use_stream_wait_value{false},
       signal_slot{nullptr, SignalSlotDeleter{0}}
 {
@@ -59,7 +59,10 @@ Stream::Stream(const hipStream_t _hip_stream, uint32_t flags, const PassKey<Stre
         throw ReservedStreamPriority();
     }
 
+    // A transient (unregistered) stream always uses the blocking offload path, so it needs no signal
+    // slot and keeps no persistent per-stream state.
     can_use_stream_wait_value =
+        !blocking_only &&
         Context<Hip>::get()->hipDeviceGetAttribute(hipDeviceAttributeCanUseStreamWaitValue, device_id) != 0;
 
 #ifdef AIS_TESTING
@@ -70,8 +73,7 @@ Stream::Stream(const hipStream_t _hip_stream, uint32_t flags, const PassKey<Stre
     }
 #endif
 
-    // The signal slot is allocated lazily by ensureSignalSlot() on first gated use, not here, so a
-    // throwaway candidate that loses implicit registration never touches the device.
+    // The signal slot is allocated lazily by ensureSignalSlot() on first gated use, not here.
 }
 
 void
@@ -196,18 +198,12 @@ StreamMap::registerStream(hipStream_t hip_stream, uint32_t flags)
         return;
     }
 
-    auto itr = StreamMap::from_ptr.find(hip_stream);
-    if (StreamMap::from_ptr.end() != itr) {
-        if (!itr->second.implicit) {
-            throw std::invalid_argument("Stream is already registered");
-        }
-        itr->second.stream->applyFlags(flags);
-        itr->second.implicit = false;
-        return;
+    if (StreamMap::from_ptr.find(hip_stream) != StreamMap::from_ptr.end()) {
+        throw std::invalid_argument("Stream is already registered");
     }
 
-    auto stream = std::shared_ptr<Stream>(new Stream(hip_stream, flags, PassKey<StreamMap>{}));
-    StreamMap::from_ptr[hip_stream] = Entry{stream, false};
+    StreamMap::from_ptr[hip_stream] =
+        std::shared_ptr<Stream>(new Stream(hip_stream, flags, /*blocking_only=*/false, PassKey<StreamMap>{}));
 }
 
 std::shared_ptr<IStream>
@@ -222,7 +218,7 @@ StreamMap::deregisterStream(hipStream_t hip_stream)
         throw std::invalid_argument("Stream is not registered");
     }
 
-    auto stream = std::move(itr->second.stream);
+    auto stream = std::move(itr->second);
     StreamMap::from_ptr.erase(itr);
     return stream;
 }
@@ -230,7 +226,7 @@ StreamMap::deregisterStream(hipStream_t hip_stream)
 std::shared_ptr<IStream>
 StreamMap::makeDefaultStream(hipStream_t hip_stream)
 {
-    return std::shared_ptr<Stream>(new Stream(hip_stream, 0, PassKey<StreamMap>{}));
+    return std::shared_ptr<Stream>(new Stream(hip_stream, 0, /*blocking_only=*/false, PassKey<StreamMap>{}));
 }
 
 std::shared_ptr<IStream>
@@ -241,19 +237,13 @@ StreamMap::findStream(hipStream_t hip_stream) const
         return nullptr;
     }
 
-    return itr->second.stream;
+    return itr->second;
 }
 
 std::shared_ptr<IStream>
-StreamMap::makeImplicitStream(hipStream_t hip_stream)
+StreamMap::makeTransientStream(hipStream_t hip_stream)
 {
-    return std::shared_ptr<Stream>(new Stream(hip_stream, 0, PassKey<StreamMap>{}));
-}
-
-std::shared_ptr<IStream>
-StreamMap::adoptImplicitStream(hipStream_t hip_stream, const std::shared_ptr<IStream> &candidate)
-{
-    return StreamMap::from_ptr.try_emplace(hip_stream, Entry{candidate, true}).first->second.stream;
+    return std::shared_ptr<Stream>(new Stream(hip_stream, 0, /*blocking_only=*/true, PassKey<StreamMap>{}));
 }
 
 StreamMap::~StreamMap()
@@ -262,7 +252,7 @@ StreamMap::~StreamMap()
     // with outstanding operations.
     int count = 0;
     for (const auto &p : from_ptr) {
-        if (p.second.stream.use_count() > 1) {
+        if (p.second.use_count() > 1) {
             count++;
         }
     }

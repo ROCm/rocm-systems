@@ -354,72 +354,28 @@ TEST_F(HipFileStream, find_stream_returns_only_registered_streams)
     EXPECT_NE(stream_map.findStream(nonnull_stream), nullptr);
 }
 
-TEST_F(HipFileStream, adopt_registers_implicit_stream)
+TEST_F(HipFileStream, make_transient_stream_is_blocking_and_unmapped)
 {
     EXPECT_CALL(mhip, hipStreamGetDevice);
-    auto candidate = StreamMap::makeImplicitStream(nonnull_stream);
-    // A candidate allocates no signal slot; the winner allocates lazily on first use.
-    EXPECT_TRUE(candidate->canUseStreamWaitValue());
-    EXPECT_EQ(candidate->signalSlot(), nullptr);
-    EXPECT_EQ(stream_map.adoptImplicitStream(nonnull_stream, candidate), candidate);
-    EXPECT_EQ(stream_map.findStream(nonnull_stream), candidate);
+    EXPECT_CALL(mhip, hipExtMallocWithFlags).Times(0);
+    auto transient = StreamMap::makeTransientStream(nonnull_stream);
+    ASSERT_NE(transient, nullptr);
+    // A transient stream uses the blocking path (no wait-value gating, no slot) and is never mapped,
+    // so nothing persistent is keyed to the handle.
+    EXPECT_FALSE(transient->canUseStreamWaitValue());
+    EXPECT_EQ(transient->signalSlot(), nullptr);
+    EXPECT_EQ(stream_map.findStream(nonnull_stream), nullptr);
 }
 
-TEST_F(HipFileStream, adopt_keeps_existing_registration)
+TEST_F(HipFileStream, register_after_transient_use_is_independent)
 {
     EXPECT_CALL(mhip, hipStreamGetDevice).Times(2);
+    // Using a stream transiently leaves it unregistered, so a later explicit registration starts fresh.
+    (void)StreamMap::makeTransientStream(nonnull_stream);
+    EXPECT_EQ(stream_map.findStream(nonnull_stream), nullptr);
     stream_map.registerStream(nonnull_stream, 0);
-    auto registered = stream_map.findStream(nonnull_stream);
-    auto candidate  = StreamMap::makeImplicitStream(nonnull_stream);
-    EXPECT_EQ(stream_map.adoptImplicitStream(nonnull_stream, candidate), registered);
-}
-
-// Regression guard for the device-sync race: a candidate that loses implicit registration must
-// allocate and free nothing, so its destruction never runs the device-synchronizing hipFree.
-TEST(HipFileStreamLosingCandidate, allocates_and_frees_nothing)
-{
-    StrictMock<MHip> mhip;
-    StrictMock<MSys> msys;
-    expectNoForceBlocking(msys);
-    EXPECT_CALL(mhip, hipStreamGetDevice).Times(::testing::AnyNumber());
-    EXPECT_CALL(mhip, hipDeviceGetStreamPriorityRange)
-        .WillRepeatedly(::testing::Return(HipStreamPriorityRange{1, -1}));
-    EXPECT_CALL(mhip, hipStreamGetPriority).WillRepeatedly(::testing::Return(0));
-    EXPECT_CALL(mhip, hipDeviceGetAttribute).WillRepeatedly(::testing::Return(1));
-    // The candidate must never touch device memory, win or lose.
-    EXPECT_CALL(mhip, hipExtMallocWithFlags).Times(0);
-    EXPECT_CALL(mhip, hipFree).Times(0);
-
-    StreamMap stream_map;
-    auto      hip_stream = reinterpret_cast<hipStream_t>(1);
-    stream_map.registerStream(hip_stream, 0);
-    auto winner    = stream_map.findStream(hip_stream);
-    auto candidate = StreamMap::makeImplicitStream(hip_stream);
-    // The already-registered stream wins; the candidate is returned to the caller to drop.
-    EXPECT_EQ(stream_map.adoptImplicitStream(hip_stream, candidate), winner);
-    candidate.reset(); // Destroying the loser must not call hipFree.
-}
-
-TEST_F(HipFileStream, register_after_implicit_registration_applies_flags)
-{
-    EXPECT_CALL(mhip, hipStreamGetDevice);
-    auto stream =
-        stream_map.adoptImplicitStream(nonnull_stream, StreamMap::makeImplicitStream(nonnull_stream));
-    EXPECT_FALSE(stream->fixedIOSize());
-    stream_map.registerStream(nonnull_stream, HIPFILE_STREAM_FIXED_FILE_SIZE);
-    EXPECT_TRUE(stream->fixedIOSize());
-    EXPECT_EQ(stream_map.findStream(nonnull_stream), stream);
+    EXPECT_NE(stream_map.findStream(nonnull_stream), nullptr);
     EXPECT_THROW(stream_map.registerStream(nonnull_stream, 0), std::invalid_argument);
-}
-
-TEST_F(HipFileStream, register_after_implicit_registration_rejects_invalid_flags)
-{
-    EXPECT_CALL(mhip, hipStreamGetDevice);
-    stream_map.adoptImplicitStream(nonnull_stream, StreamMap::makeImplicitStream(nonnull_stream));
-    EXPECT_THROW(stream_map.registerStream(nonnull_stream, HIPFILE_STREAM_FLAGS_MASK + 1),
-                 std::invalid_argument);
-    // Still implicitly registered, so a valid explicit registration succeeds.
-    stream_map.registerStream(nonnull_stream, 0);
 }
 
 TEST_F(HipFileStream, register_stream_at_reserved_priority_throws)
@@ -431,12 +387,12 @@ TEST_F(HipFileStream, register_stream_at_reserved_priority_throws)
     EXPECT_EQ(stream_map.findStream(nonnull_stream), nullptr);
 }
 
-TEST_F(HipFileStream, implicit_stream_at_reserved_priority_throws)
+TEST_F(HipFileStream, transient_stream_at_reserved_priority_throws)
 {
     EXPECT_CALL(mhip, hipStreamGetDevice);
     EXPECT_CALL(mhip, hipStreamGetPriority(nonnull_stream)).WillOnce(::testing::Return(-1));
     EXPECT_CALL(mhip, hipExtMallocWithFlags).Times(0);
-    EXPECT_THROW(StreamMap::makeImplicitStream(nonnull_stream), ReservedStreamPriority);
+    EXPECT_THROW(StreamMap::makeTransientStream(nonnull_stream), ReservedStreamPriority);
 }
 
 TEST_F(HipFileStream, reserved_priority_is_not_enforced_with_one_priority_level)
@@ -450,7 +406,8 @@ TEST_F(HipFileStream, reserved_priority_is_not_enforced_with_one_priority_level)
     EXPECT_NE(stream_map.findStream(nonnull_stream), nullptr);
 }
 
-// Implicit registration through the real DriverState, as hipFileReadAsync/hipFileWriteAsync use it.
+// Unregistered-stream async lookups through the real DriverState, as hipFileReadAsync/hipFileWriteAsync
+// use them.
 struct HipFileStreamImplicit : public HipFileOpened {
     HipFileStreamImplicit()
     {
@@ -495,39 +452,40 @@ struct HipFileStreamImplicit : public HipFileOpened {
     hipStream_t                         nonnull_stream{reinterpret_cast<hipStream_t>(1)};
 };
 
-TEST_F(HipFileStreamImplicit, first_async_lookup_registers_stream_implicitly)
+TEST_F(HipFileStreamImplicit, first_async_lookup_builds_transient_stream)
 {
-    // Lookup registers the stream but allocates no signal slot; that happens on the first gated op.
+    // An unregistered stream is used transiently: blocking path, no signal slot, never mapped. Each
+    // lookup builds a fresh object, and nothing is left registered.
     EXPECT_CALL(mhip, hipExtMallocWithFlags).Times(0);
     auto first  = lookup(nonnull_stream);
     auto second = lookup(nonnull_stream);
     ASSERT_NE(first.stream, nullptr);
-    EXPECT_TRUE(first.stream->canUseStreamWaitValue());
+    EXPECT_FALSE(first.stream->canUseStreamWaitValue());
     EXPECT_EQ(first.stream->signalSlot(), nullptr);
-    EXPECT_EQ(first.stream, second.stream);
+    EXPECT_NE(first.stream, second.stream);
+    EXPECT_EQ(hipFileStreamDeregister(nonnull_stream), HipFileOpError(hipFileInvalidValue));
 }
 
-TEST_F(HipFileStreamImplicit, default_streams_are_not_registered_implicitly)
+TEST_F(HipFileStreamImplicit, default_streams_have_no_signal_slot)
 {
     EXPECT_CALL(mhip, hipExtMallocWithFlags).Times(0);
     EXPECT_EQ(lookup(nullptr).stream->signalSlot(), nullptr);
     EXPECT_EQ(lookup(hipStreamPerThread).stream->signalSlot(), nullptr);
 }
 
-TEST_F(HipFileStreamImplicit, register_after_implicit_registration_succeeds)
+TEST_F(HipFileStreamImplicit, register_after_transient_use_succeeds)
 {
-    auto implicit = lookup(nonnull_stream).stream;
+    // Transient use leaves the stream unregistered, so an explicit registration still succeeds.
+    (void)lookup(nonnull_stream);
     EXPECT_EQ(hipFileStreamRegister(nonnull_stream, HIPFILE_STREAM_FIXED_FILE_SIZE), HIPFILE_SUCCESS);
-    EXPECT_TRUE(implicit->fixedIOSize());
-    EXPECT_EQ(lookup(nonnull_stream).stream, implicit);
+    EXPECT_TRUE(lookup(nonnull_stream).stream->fixedIOSize());
     EXPECT_EQ(hipFileStreamRegister(nonnull_stream, 0), HipFileOpError(hipFileInvalidValue));
 }
 
-TEST_F(HipFileStreamImplicit, implicitly_registered_stream_deregisters)
+TEST_F(HipFileStreamImplicit, transiently_used_stream_is_not_registered)
 {
+    // Using a stream for async IO without registering it leaves nothing to deregister.
     (void)lookup(nonnull_stream);
-    EXPECT_CALL(mhip, hipStreamSynchronize(nonnull_stream));
-    EXPECT_EQ(hipFileStreamDeregister(nonnull_stream), HIPFILE_SUCCESS);
     EXPECT_EQ(hipFileStreamDeregister(nonnull_stream), HipFileOpError(hipFileInvalidValue));
 }
 
