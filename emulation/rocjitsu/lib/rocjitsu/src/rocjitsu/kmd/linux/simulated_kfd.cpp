@@ -970,7 +970,13 @@ int reap_notification_writer(pid_t writer, int pidfd, int *status, bool defer_re
       } while (result < 0 && errno == EINTR);
     }
     if (result == 0) {
-      notification_writer_reaper().adopt(writer);
+      try {
+        notification_writer_reaper().adopt(writer);
+      } catch (...) {
+        // The child remains owned by this process and will be reparented at
+        // process exit. Allocation failure must not turn a bounded engine path
+        // back into a blocking one.
+      }
     }
     return failure != 0 ? -failure : -EAGAIN;
   }

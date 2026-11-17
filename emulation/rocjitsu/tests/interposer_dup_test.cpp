@@ -6367,16 +6367,22 @@ TEST(InterposerSyncobjTest, TimelineWaitAllowsThreadExitFromSignal) {
   sigemptyset(&action.sa_mask);
   ASSERT_EQ(sigaction(SIGUSR1, &action, &old_action), 0);
   std::atomic<pid_t> tid{0};
-  bool cleaned_up = false, returned = false;
+  bool unwound = false, returned = false;
   std::thread waiter([&] {
-    pthread_cleanup_push(+[](void *state) { *static_cast<bool *>(state) = true; }, &cleaned_up);
+    class Cleanup {
+    public:
+      explicit Cleanup(bool &unwound) : unwound_(unwound) {}
+      ~Cleanup() { unwound_ = true; }
+
+    private:
+      bool &unwound_;
+    } cleanup(unwound);
     tid.store(syscall(SYS_gettid), std::memory_order_release);
     (void)call(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait);
     returned = true;
-    pthread_cleanup_pop(0);
   });
   // Wait for the actual futex sleep so a signal during setup cannot make this
-  // pass without exercising native thread-exit cleanup in the interposer.
+  // pass without exercising forced unwinding through the interposer.
   bool blocked = false;
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
   while (std::chrono::steady_clock::now() < deadline) {
@@ -6397,7 +6403,7 @@ TEST(InterposerSyncobjTest, TimelineWaitAllowsThreadExitFromSignal) {
   }
   waiter.join();
   EXPECT_TRUE(blocked);
-  EXPECT_TRUE(cleaned_up);
+  EXPECT_TRUE(unwound);
   EXPECT_FALSE(returned);
   EXPECT_EQ(sigaction(SIGUSR1, &old_action, nullptr), 0);
   drm_syncobj_destroy destroy{};

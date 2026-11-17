@@ -3699,7 +3699,7 @@ thread_local GuestWaitExitState *g_guest_wait_exit = nullptr;
 
 int exit_from_guest_wait(int, unsigned long, ...) {
   // Close while the wait holds its lease. Native exit must then drain it,
-  // including the deferred close, even when C++ unwinding is disabled.
+  // including the deferred close, while unwinding through the guest driver.
   g_guest_wait_exit->close_result = g_guest_wait_exit->guest->close();
   ::pthread_exit(g_guest_wait_exit);
 }

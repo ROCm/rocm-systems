@@ -9,7 +9,6 @@
 #include "rocjitsu/kmd/linux/rpc.h"
 
 #include "util/log.h"
-#include "util/native_cleanup.h"
 
 #include <algorithm>
 #include <array>
@@ -889,20 +888,10 @@ int GuestKfd::wait_events(unsigned long request, void *arg) {
   if (!lease.held())
     return -(errno != 0 ? errno : ENODEV);
 
-  auto cleanup = [&lease] { lease.release(); };
-  const int rc = util::with_native_cleanup(cleanup, [&] {
-    // Forward a null arg unchanged rather than dereferencing it for the timeout: the
-    // kernel answers it with EFAULT/EINVAL, and the interposer must reproduce that
-    // failure instead of segfaulting inside the caller's ioctl().
-    //
-    // The simulator serves the wait itself and begin_local_shutdown() can wake it, so it
-    // takes ONE ordinary blocking forward -- slicing it would add repolling that buys
-    // nothing. Only the kernel, which nothing in this process can interrupt, needs the
-    // wait broken into cancellable slices.
-    if (!arg || execution_driver_)
-      return forward_ioctl(request, arg);
-    return forward_wait_events_bounded(request, arg);
-  });
+  // Forward null unchanged: the kernel supplies EFAULT/EINVAL. Simulator waits
+  // can be woken directly; only hardware waits need cancellable bounded slices.
+  const int rc = (!arg || execution_driver_) ? forward_ioctl(request, arg)
+                                             : forward_wait_events_bounded(request, arg);
 
   // Drop the lease after forwarding has released its locks. The last lease can
   // complete a deferred final close without disturbing the captured result.
@@ -987,7 +976,7 @@ int GuestKfd::forward_wait_events_bounded(unsigned long request, void *arg) {
   //
   // Zero-timeout requests come through here too: "non-blocking" removes the wait, not
   // the load/use race, and wait_events_poll_loop issues them unsliced anyway.
-  std::function<int()> poll = [&] {
+  return wait_events_poll_loop(*wait_args, hw_closing_, [&] {
     const int slice_fd = host_fd();
     if (slice_fd < 0 || !fd_is_expected_kfd(slice_fd))
       return -ENODEV;
@@ -995,10 +984,7 @@ int GuestKfd::forward_wait_events_bounded(unsigned long request, void *arg) {
     if (ret < 0)
       return -(errno != 0 ? errno : EIO);
     return ret;
-  };
-  auto cleanup = [&poll] { poll = nullptr; };
-  return util::with_native_cleanup(
-      cleanup, [&] { return wait_events_poll_loop(*wait_args, hw_closing_, poll); });
+  });
 }
 
 void GuestKfd::record_kfd_identity(int kfd_fd) {

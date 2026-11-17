@@ -27,6 +27,7 @@
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <new>
 #include <optional>
 #include <stop_token>
 #include <string>
@@ -245,24 +246,31 @@ public:
   ClientSession(int client_fd, rj_daemon_t *daemon)
       : client_fd_(client_fd), daemon_(daemon), client_pid_(peer_pid_for_socket(client_fd)) {}
 
-  ~ClientSession() { close_device(); }
+  ~ClientSession() {
+    try {
+      close_device();
+    } catch (...) {
+    }
+  }
 
   ClientSession(const ClientSession &) = delete;
   ClientSession &operator=(const ClientSession &) = delete;
 
   void run(std::stop_token stop) {
-    while (!stop.stop_requested() && !daemon_->stop_requested.load(std::memory_order_acquire)) {
-      RpcHeader header{};
-      ReceivedFds input_fds;
-      if (!receive_header_with_fds(client_fd_, &header, &input_fds))
-        break;
+    try {
+      while (!stop.stop_requested() && !daemon_->stop_requested.load(std::memory_order_acquire)) {
+        RpcHeader header{};
+        ReceivedFds input_fds;
+        if (!receive_header_with_fds(client_fd_, &header, &input_fds))
+          break;
 
-      if (header.reserved != 0 ||
-          handle_request(header, input_fds) == RequestDisposition::Disconnect) {
-        break;
+        if (header.reserved != 0 ||
+            handle_request(header, input_fds) == RequestDisposition::Disconnect) {
+          break;
+        }
       }
+    } catch (...) {
     }
-
     close_device();
   }
 
@@ -756,32 +764,42 @@ void accept_clients(rj_daemon_t *daemon, std::stop_token stop) {
     std::shared_ptr<std::atomic<bool>> complete;
   };
   std::vector<ClientThread> client_threads;
+  try {
+    while (!stop.stop_requested() && !daemon->stop_requested.load(std::memory_order_acquire)) {
+      std::erase_if(client_threads, [](const ClientThread &client) {
+        return client.complete->load(std::memory_order_acquire);
+      });
 
-  while (!stop.stop_requested() && !daemon->stop_requested.load(std::memory_order_acquire)) {
-    std::erase_if(client_threads, [](const ClientThread &client) {
-      return client.complete->load(std::memory_order_acquire);
-    });
+      const int client_fd = accept4(daemon->listen_fd, nullptr, nullptr, SOCK_CLOEXEC);
+      if (client_fd < 0) {
+        if (errno == EINTR)
+          continue;
+        break;
+      }
 
-    const int client_fd = accept4(daemon->listen_fd, nullptr, nullptr, SOCK_CLOEXEC);
-    if (client_fd < 0) {
-      if (errno == EINTR)
-        continue;
-      break;
+      {
+        std::lock_guard lock(daemon->clients_mutex);
+        daemon->client_fds.push_back(client_fd);
+      }
+      try {
+        client_threads.reserve(client_threads.size() + 1);
+        auto complete = std::make_shared<std::atomic<bool>>(false);
+        std::jthread thread([daemon, client_fd, complete](std::stop_token client_stop) {
+          try {
+            handle_client(client_fd, daemon, client_stop);
+          } catch (...) {
+          }
+          close_client(daemon, client_fd);
+          complete->store(true, std::memory_order_release);
+        });
+        client_threads.push_back({std::move(thread), std::move(complete)});
+      } catch (...) {
+        close_client(daemon, client_fd);
+        throw;
+      }
     }
-
-    {
-      std::lock_guard lock(daemon->clients_mutex);
-      daemon->client_fds.push_back(client_fd);
-    }
-
-    client_threads.reserve(client_threads.size() + 1);
-    auto complete = std::make_shared<std::atomic<bool>>(false);
-    std::jthread thread([daemon, client_fd, complete](std::stop_token client_stop) {
-      handle_client(client_fd, daemon, client_stop);
-      close_client(daemon, client_fd);
-      complete->store(true, std::memory_order_release);
-    });
-    client_threads.push_back({std::move(thread), std::move(complete)});
+  } catch (...) {
+    mark_error(daemon);
   }
 
   if (!daemon->stop_requested.load(std::memory_order_acquire))
@@ -955,49 +973,57 @@ rj_status_t rj_daemon_start_with_options(const char *json, const char *socket_pa
   if (socket_path_length == 0 || socket_path_length >= sizeof(sockaddr_un::sun_path))
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-  // Keep ownership outside the fatal boundary so a failed launch cannot unwind
-  // and join the engine before it has been asked to stop.
   std::unique_ptr<rj_daemon_t> created;
-  return [&]() noexcept -> rj_status_t {
+  try {
     created = std::make_unique<rj_daemon_t>();
     created->socket_path = socket_path;
+  } catch (const std::bad_alloc &) {
+    return ROCJITSU_STATUS_OUT_OF_RESOURCES;
+  }
 
-    rj_status_t status = rj_vm_create_from_string(json, RJ_VM_MODE_DAEMON, &created->vm);
-    if (status != ROCJITSU_STATUS_SUCCESS)
-      return status;
+  rj_status_t status = rj_vm_create_from_string(json, RJ_VM_MODE_DAEMON, &created->vm);
+  if (status != ROCJITSU_STATUS_SUCCESS)
+    return status;
 
-    if (options && (options->flags & RJ_DAEMON_OPTION_TRACE_FABRIC_EFFECTS) != 0) {
-      auto *fabric = created->vm->vm ? created->vm->vm->fabric_endpoint() : nullptr;
-      const size_t capacity = options->fabric_trace_capacity == 0
-                                  ? static_cast<size_t>(RJ_DAEMON_FABRIC_TRACE_MAX_CAPACITY)
-                                  : options->fabric_trace_capacity;
-      if (!fabric || !fabric->enable_effect_trace(capacity)) {
-        rj_vm_destroy(created->vm);
-        created->vm = nullptr;
-        return ROCJITSU_STATUS_INVALID_ARGUMENT;
-      }
-      created->trace_fabric_effects = true;
-    }
-
-    // Daemon callers supply the same configuration as local-mode callers, so
-    // install its plugins before any client can submit work. With no explicit
-    // directory, the loader discovers modules relative to librocjitsu or the
-    // statically linked rocjitsu CLI.
-    status = rj_vm_load_plugins(created->vm, json, nullptr);
-    if (status != ROCJITSU_STATUS_SUCCESS) {
+  if (options && (options->flags & RJ_DAEMON_OPTION_TRACE_FABRIC_EFFECTS) != 0) {
+    auto *fabric = created->vm->vm ? created->vm->vm->fabric_endpoint() : nullptr;
+    const size_t capacity = options->fabric_trace_capacity == 0
+                                ? static_cast<size_t>(RJ_DAEMON_FABRIC_TRACE_MAX_CAPACITY)
+                                : options->fabric_trace_capacity;
+    if (!fabric || !fabric->enable_effect_trace(capacity)) {
       rj_vm_destroy(created->vm);
       created->vm = nullptr;
-      return status;
+      return ROCJITSU_STATUS_INVALID_ARGUMENT;
     }
+    created->trace_fabric_effects = true;
+  }
 
+  // Daemon callers supply the same configuration as local-mode callers, so
+  // install its plugins before any client can submit work. With no explicit
+  // directory, the loader discovers modules relative to librocjitsu or the
+  // statically linked rocjitsu CLI.
+  status = rj_vm_load_plugins(created->vm, json, nullptr);
+  if (status != ROCJITSU_STATUS_SUCCESS) {
+    rj_vm_destroy(created->vm);
+    created->vm = nullptr;
+    return status;
+  }
+
+  try {
     status = bind_socket(created.get());
-    if (status != ROCJITSU_STATUS_SUCCESS) {
-      rj_vm_destroy(created->vm);
-      created->vm = nullptr;
-      remove_owned_socket(created.get());
-      return status;
-    }
+  } catch (const std::bad_alloc &) {
+    status = ROCJITSU_STATUS_OUT_OF_RESOURCES;
+  } catch (...) {
+    status = ROCJITSU_STATUS_ERROR;
+  }
+  if (status != ROCJITSU_STATUS_SUCCESS) {
+    rj_vm_destroy(created->vm);
+    created->vm = nullptr;
+    remove_owned_socket(created.get());
+    return status;
+  }
 
+  try {
     created->engine_thread = std::jthread([state = created.get()] {
       const rj_status_t run_status = rj_vm_run(state->vm, nullptr);
       if (run_status != ROCJITSU_STATUS_SUCCESS ||
@@ -1007,18 +1033,24 @@ rj_status_t rj_daemon_start_with_options(const char *json, const char *socket_pa
     });
     created->accept_thread = std::jthread(
         [state = created.get()](std::stop_token stop) { accept_clients(state, stop); });
+  } catch (const std::system_error &) {
+    teardown(created.get());
+    return ROCJITSU_STATUS_OUT_OF_RESOURCES;
+  } catch (const std::bad_alloc &) {
+    teardown(created.get());
+    return ROCJITSU_STATUS_OUT_OF_RESOURCES;
+  }
 
-    rj_daemon_status_t expected = RJ_DAEMON_STATUS_STARTING;
-    if (!created->status.compare_exchange_strong(expected, RJ_DAEMON_STATUS_RUNNING,
-                                                 std::memory_order_acq_rel)) {
-      teardown(created.get());
-      return ROCJITSU_STATUS_ERROR;
-    }
-    created->status.notify_all();
+  rj_daemon_status_t expected = RJ_DAEMON_STATUS_STARTING;
+  if (!created->status.compare_exchange_strong(expected, RJ_DAEMON_STATUS_RUNNING,
+                                               std::memory_order_acq_rel)) {
+    teardown(created.get());
+    return ROCJITSU_STATUS_ERROR;
+  }
+  created->status.notify_all();
 
-    *daemon = created.release();
-    return ROCJITSU_STATUS_SUCCESS;
-  }();
+  *daemon = created.release();
+  return ROCJITSU_STATUS_SUCCESS;
 }
 
 rj_status_t rj_daemon_start(const char *json, const char *socket_path, rj_daemon_t **daemon) {

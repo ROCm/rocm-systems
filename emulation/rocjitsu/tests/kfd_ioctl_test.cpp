@@ -26623,6 +26623,135 @@ TEST(RemoteDriverSvmTest, UserptrPromotionNotifiesAfterClientReplacement) {
 // reply can already be waiting when the request goes out.
 namespace {
 
+// Fill the client direction without changing its blocking mode. The next ioctl
+// must stop in sendmsg, so cancellation cannot accidentally exercise receive.
+bool fill_rpc_send_buffer(int socket) {
+  const int send_buffer_bytes = 4096;
+  if (::setsockopt(socket, SOL_SOCKET, SO_SNDBUF, &send_buffer_bytes, sizeof(send_buffer_bytes)) !=
+      0)
+    return false;
+  const std::array<uint8_t, 4096> padding{};
+  for (;;) {
+    const ssize_t sent =
+        ::send(socket, padding.data(), padding.size(), MSG_DONTWAIT | MSG_NOSIGNAL);
+    if (sent < 0)
+      return errno == EAGAIN || errno == EWOULDBLOCK;
+    if (sent == 0)
+      return false;
+  }
+}
+
+void check_rpc_send_exit(bool with_descriptor) {
+  int sockets[2];
+  ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sockets), 0);
+  const CloseOnScopeExit server{sockets[1]};
+  rocjitsu::RemoteDriver driver(sockets[0]);
+  const CloseOnScopeExit notifier{::eventfd(0, EFD_CLOEXEC)};
+  ASSERT_TRUE(notifier);
+  ASSERT_TRUE(fill_rpc_send_buffer(sockets[0]));
+  const auto count_fds = [] {
+    size_t count = 0;
+    for ([[maybe_unused]] const auto &entry : std::filesystem::directory_iterator("/proc/self/fd"))
+      ++count;
+    return count;
+  };
+  const size_t initial_fds = count_fds();
+  struct WaitState {
+    rocjitsu::RemoteDriver *driver;
+    int notifier;
+    bool with_descriptor;
+    std::atomic<pid_t> tid{0};
+    bool returned = false;
+  } state{&driver, notifier.get(), with_descriptor};
+  pthread_t waiter{};
+  ASSERT_EQ(::pthread_create(
+                &waiter, nullptr,
+                +[](void *argument) -> void * {
+                  auto &state = *static_cast<WaitState *>(argument);
+                  kfd_ioctl_dbg_trap_args enable{};
+                  enable.pid = static_cast<uint32_t>(::getpid());
+                  enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+                  enable.enable.dbg_fd = static_cast<uint32_t>(state.notifier);
+                  kfd_ioctl_get_version_args version{};
+                  state.tid.store(syscall(SYS_gettid), std::memory_order_release);
+                  if (state.with_descriptor)
+                    (void)state.driver->ioctl(AMDKFD_IOC_DBG_TRAP, &enable);
+                  else
+                    (void)state.driver->ioctl(AMDKFD_IOC_GET_VERSION, &version);
+                  state.returned = true;
+                  return nullptr;
+                },
+                &state),
+            0);
+  bool blocked = false;
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  while (std::chrono::steady_clock::now() < deadline) {
+    if (const pid_t tid = state.tid.load(std::memory_order_acquire)) {
+      std::ifstream syscall_state("/proc/self/task/" + std::to_string(tid) + "/syscall");
+      long number;
+      if (syscall_state >> number && number == SYS_sendmsg) {
+        blocked = true;
+        break;
+      }
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  EXPECT_TRUE(blocked);
+  if (blocked)
+    EXPECT_EQ(count_fds(), initial_fds + (with_descriptor ? 2u : 0u));
+  ASSERT_EQ(::pthread_cancel(waiter), 0);
+  void *result = nullptr;
+  ASSERT_EQ(::pthread_join(waiter, &result), 0);
+  EXPECT_EQ(result, PTHREAD_CANCELED);
+  EXPECT_FALSE(state.returned);
+  EXPECT_EQ(count_fds(), initial_fds);
+  EXPECT_GE(::fcntl(notifier.get(), F_GETFD), 0);
+  kfd_ioctl_get_version_args after{};
+  EXPECT_EQ(driver.ioctl(AMDKFD_IOC_GET_VERSION, &after), -EPROTO);
+  EXPECT_EQ(driver.close(), -EIO);
+}
+
+void check_zero_byte_rpc_send(bool with_descriptor) {
+  int sockets[2];
+  ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sockets), 0);
+  const CloseOnScopeExit server{sockets[1]};
+  rocjitsu::RemoteDriver driver(sockets[0]);
+  const CloseOnScopeExit notifier{::eventfd(0, EFD_CLOEXEC)};
+  ASSERT_TRUE(notifier);
+  ASSERT_TRUE(fill_rpc_send_buffer(sockets[0]));
+  const int flags = ::fcntl(sockets[0], F_GETFL);
+  ASSERT_GE(flags, 0);
+  ASSERT_EQ(::fcntl(sockets[0], F_SETFL, flags | O_NONBLOCK), 0);
+  kfd_ioctl_dbg_trap_args enable{};
+  enable.pid = static_cast<uint32_t>(::getpid());
+  enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+  enable.enable.dbg_fd = static_cast<uint32_t>(notifier.get());
+  kfd_ioctl_get_version_args version{};
+  const int failed = with_descriptor ? driver.ioctl(AMDKFD_IOC_DBG_TRAP, &enable)
+                                     : driver.ioctl(AMDKFD_IOC_GET_VERSION, &version);
+  EXPECT_EQ(failed, -EAGAIN);
+
+  std::array<uint8_t, 4096> padding{};
+  ssize_t drained;
+  do {
+    drained = ::recv(sockets[1], padding.data(), padding.size(), MSG_DONTWAIT);
+  } while (drained > 0);
+  ASSERT_EQ(drained, -1);
+  ASSERT_EQ(errno, EAGAIN);
+  rocjitsu::RpcHeader response{};
+  response.opcode = rocjitsu::RPC_IOCTL;
+  response.payload_bytes = sizeof(version);
+  kfd_ioctl_get_version_args expected{};
+  expected.major_version = 1;
+  expected.minor_version = 23;
+  ASSERT_TRUE(rocjitsu::rpc_send_exact(sockets[1], &response, sizeof(response)));
+  ASSERT_TRUE(rocjitsu::rpc_send_exact(sockets[1], &expected, sizeof(expected)));
+  EXPECT_EQ(driver.ioctl(AMDKFD_IOC_GET_VERSION, &version), 0);
+  EXPECT_EQ(version.major_version, expected.major_version);
+  EXPECT_EQ(version.minor_version, expected.minor_version);
+  EXPECT_GE(::fcntl(notifier.get(), F_GETFD), 0);
+}
+
 void check_native_rpc_exit(bool waiting_for_payload) {
   int sockets[2];
   ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sockets), 0);
@@ -26701,6 +26830,34 @@ void check_native_rpc_exit(bool waiting_for_payload) {
 }
 
 } // namespace
+
+TEST(RemoteDriverStreamPoisonDeathTest, NativeExitDuringOrdinarySendUnlocksAndPoisonsTheStream) {
+  ASSERT_EXIT(
+      {
+        ::alarm(5);
+        check_rpc_send_exit(false);
+        _exit(::testing::Test::HasFailure() ? 1 : 0);
+      },
+      ::testing::ExitedWithCode(0), "");
+}
+
+TEST(RemoteDriverStreamPoisonDeathTest, NativeExitDuringDescriptorSendReleasesTemporaryFds) {
+  ASSERT_EXIT(
+      {
+        ::alarm(5);
+        check_rpc_send_exit(true);
+        _exit(::testing::Test::HasFailure() ? 1 : 0);
+      },
+      ::testing::ExitedWithCode(0), "");
+}
+
+TEST(RemoteDriverStreamPoisonTest, ZeroByteOrdinarySendFailureLeavesConnectionUsable) {
+  check_zero_byte_rpc_send(false);
+}
+
+TEST(RemoteDriverStreamPoisonTest, ZeroByteDescriptorSendFailureLeavesConnectionUsable) {
+  check_zero_byte_rpc_send(true);
+}
 
 TEST(RemoteDriverStreamPoisonDeathTest, NativeExitDuringHeaderReceiveUnlocksAndPoisonsTheStream) {
   ASSERT_EXIT(

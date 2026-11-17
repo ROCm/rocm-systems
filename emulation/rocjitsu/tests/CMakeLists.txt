@@ -18,34 +18,6 @@ if(RJ_ENABLE_UBSAN)
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    foreach(mode IN ITEMS exceptions no_exceptions)
-        set(native_cleanup_target native_cleanup_${mode}_test)
-        add_executable(${native_cleanup_target} util/native_cleanup_test.cpp)
-        target_include_directories(
-            ${native_cleanup_target}
-            PRIVATE ../lib/util/include
-        )
-        target_link_libraries(${native_cleanup_target} PRIVATE Threads::Threads)
-        rj_configure_target(${native_cleanup_target} WARNINGS)
-        if(mode STREQUAL "no_exceptions")
-            target_compile_options(
-                ${native_cleanup_target}
-                PRIVATE -fno-exceptions
-            )
-            target_compile_definitions(
-                ${native_cleanup_target}
-                PRIVATE EXPECT_NO_EXCEPTIONS
-            )
-        else()
-            target_compile_options(
-                ${native_cleanup_target}
-                PRIVATE -fexceptions
-            )
-        endif()
-        add_test(NAME NativeCleanup.${mode} COMMAND ${native_cleanup_target})
-        set_tests_properties(NativeCleanup.${mode} PROPERTIES TIMEOUT 15)
-    endforeach()
-
     # A separate executable lets --wrap hide modern stat symbols without
     # affecting any other test or the interposer's own symbol resolution.
     add_executable(
@@ -1953,6 +1925,9 @@ rj_add_test(
     TIMEOUT 60
 )
 
+# Keep the socket path short and isolate it from other build trees and users.
+string(SHA256 _system_graph_runtime_id "${CMAKE_CURRENT_BINARY_DIR}")
+string(SUBSTRING "${_system_graph_runtime_id}" 0 16 _system_graph_runtime_id)
 rj_add_test(
     NAME "SystemGraphTest.DaemonStartsSelectedNode"
     COMMAND
@@ -1965,8 +1940,7 @@ rj_add_test(
         --
         /bin/true
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    # AF_UNIX sun_path is short; the source/build checkout may be much longer.
-    ENVIRONMENT "ROCJITSU_RUNTIME_DIR=/tmp/rj-system-graph"
+    ENVIRONMENT "ROCJITSU_RUNTIME_DIR=/tmp/rj-sg-${_system_graph_runtime_id}"
     TIMEOUT 60
 )
 
@@ -3036,8 +3010,8 @@ rj_add_interposer_test_suite(
 )
 set(_rj_signal_exit_env)
 if(RJ_ENABLE_TSAN)
-    # Model Wine's deliberate pthread_exit from a signal handler. Thread-exit
-    # cleanup frees memory, so disable only this test's signal-safety
+    # Model Wine's deliberate pthread_exit from a signal handler. Forced unwind
+    # allocates and frees memory, so disable only this test's signal-safety
     # diagnostic; retain TSan's race and mutex checks.
     set(_rj_signal_exit_env "TSAN_OPTIONS=report_signal_unsafe=0")
 endif()
