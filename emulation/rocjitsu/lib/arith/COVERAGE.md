@@ -147,3 +147,12 @@ Loose uses FP32-intermediate MAD. Guest rounding, forced intermediate flushing,
 IEEE NaN quieting, FP16_OVFL and final output modifiers are retained. This is
 software-model reuse, not new empirical qualification; strict modes reject and
 FP status is unchanged. The native half FMA migration is independent.
+
+### gfx908 floating comparisons
+
+All FP16/FP32/FP64 relational CMP/CMPX forms, including F/TRU, use shared
+scalar, AVX2 and AVX-512 numeric predicates. Wave64-only gfx908 APIs preserve
+Compatibility's CLAMP-only INVALID classification, including quiet NaNs and
+constant predicates. Loose and numeric-only modes leave status untouched;
+mode 3 remains unsupported. This carries the existing emulator model without
+claiming new empirical qualification. Other older profiles migrate separately.

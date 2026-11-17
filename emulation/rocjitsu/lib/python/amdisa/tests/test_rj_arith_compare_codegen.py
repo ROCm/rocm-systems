@@ -83,6 +83,7 @@ def test_integer_compare_signatures_and_result_commit(name):
         ('rdna3', 'integer', 144),
         ('rdna4', 'integer', 120),
         ('rdna3', 'float', 160),
+        ('cdna1', 'float', {'vopc': 160, 'vop3': 96}),
         ('rdna4', 'float', 140),
         ('rdna3', 'class', 10),
         ('rdna4', 'class', 10),
@@ -105,7 +106,7 @@ def test_generated_comparisons_cannot_bypass_rj_arith(arch, kind, count):
                 depth += (source[end] == '{') - (source[end] == '}')
                 end += 1
             body = source[match.end() : end - 1]
-            if 'arith::execute_float_compare<' in body:
+            if re.search(r'arith::execute_float_compare(?:_wave64)?<', body):
                 family = 'float'
             elif 'arith::execute_compare<' in body:
                 family = (
@@ -124,13 +125,16 @@ def test_generated_comparisons_cannot_bypass_rj_arith(arch, kind, count):
             if '::execute_modifier_impl(' in match[0]:
                 if 'dpp_new_result' in body:
                     assert 'if (wf.instruction_execution_failed())' in body
-                if kind == 'float':
+                if kind == 'float' and arch == 'cdna1':
+                    assert 'if (wf.instruction_execution_failed())' in body
+                    assert 'wf.set_vcc_raw(dpp_old_vcc_)' in body
+                elif kind == 'float':
                     assert (
                         'exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;'
                         in body
                     )
             checked += 1
-        assert checked == count
+        assert checked == (count[encoding] if isinstance(count, dict) else count)
 
 
 @pytest.mark.parametrize('name', sorted(FLOAT_COMPARISONS))
@@ -267,7 +271,8 @@ def test_cdna_float_compare_reuses_numeric_model_without_gfx12_status(
             arch, name, ['dst'], ['a', 'b'], is_vop3=True, result_writer='commit_result'
         )
     )
-    assert 'rj_arith_' + name.lower() + '_w64,' in body
+    suffix = '_gfx908' if arch == 'cdna3' and generator is gen_float_compare else ''
+    assert 'rj_arith_' + name.lower() + '_w64' + suffix + ',' in body
     assert '_gfx12' not in body
     assert ('write_wave_mask_scalar(dst' in body) == (arch in ('cdna3', 'cdna4'))
     assert 'commit_result' in body
@@ -301,3 +306,31 @@ def test_tru_alias_is_cdna_only(prefix):
             context(arch, prefix + '_TRU_F32', ['d'], ['a', 'b'], is_vop3=True)
         )
         assert (body is None) == (arch == 'rdna2')
+
+
+@pytest.mark.parametrize('name', sorted(FLOAT_COMPARISONS))
+def test_gfx908_float_comparisons_have_no_legacy_status_bypass(name):
+    bits, constant = FLOAT_COMPARISONS[name]
+    api = 'rj_arith_' + name.lower().replace('_tru_', '_t_') + '_w64_gfx908'
+    assert api + '(' in public_headers()
+    for vop3 in (False, True):
+        body = gen_float_compare(
+            context(
+                'cdna1',
+                name,
+                ['dst'] if vop3 else [],
+                ['a', 'b'],
+                is_vop3=vop3,
+                result_writer='commit_result' if vop3 else None,
+            )
+        )
+        assert f'execute_float_compare_wave64<{bits}>(wf, {api},' in body
+        assert 'record_signaling_compare' not in body
+        assert ('RJ_ARITH_SEMANTICS_COMPATIBILITY' in body) == (constant and vop3)
+        if name.startswith('V_CMPX_'):
+            assert (
+                'write_wave_mask_scalar(dst, wf, result)'
+                if vop3
+                else 'wf.set_vcc_mask(result)'
+            ) in body
+            assert ('commit_result(result)' if vop3 else 'wf.set_exec(result)') in body

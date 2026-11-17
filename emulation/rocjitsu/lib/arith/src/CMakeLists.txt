@@ -37,6 +37,7 @@ add_library(
     compare/class.cpp
     compare/constant_compare.cpp
     compare/float_compare.cpp
+    compare/float_compare_gfx908.cpp
     compare/integer_compare.cpp
     dot/scalar_repair.cpp
     dot/dot.cpp
