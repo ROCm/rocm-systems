@@ -42,6 +42,7 @@ static_assert(sizeof(kfd_ioctl_acquire_vm_args) == 8 &&
               "KFD UAPI layout changed");
 
 inline constexpr char kKfdProcRoot[] = "/sys/class/kfd/kfd/proc/";
+inline constexpr char kKfdNodesRoot[] = "/sys/class/kfd/kfd/topology/nodes/";
 
 // The value the library reports for a statistic that is not available.
 inline constexpr uint32_t kNotAvailable32 = std::numeric_limits<uint32_t>::max();
@@ -70,25 +71,65 @@ inline uint64_t KfdVram(const std::string& pid, uint32_t kfd_gpu_id) {
   return (file >> vram) ? vram : 0;
 }
 
-// The VRAM, in bytes, that the DRM client which process `pid` opened on
-// `render_node` reports in its fdinfo, or 0.
-inline uint64_t DrmVramBytes(pid_t pid, const std::string& render_node) {
+// Memory sizes in bytes.
+struct DrmMemory {
+  uint64_t vram = 0;
+  uint64_t gtt = 0;
+  uint64_t cpu = 0;
+};
+
+// The memory that the DRM client which process `pid` opened on `render_node`
+// reports in its fdinfo; all 0 without one.
+inline DrmMemory DrmMemoryBytes(pid_t pid, const std::string& render_node) {
   const std::string dir = "/proc/" + std::to_string(pid);
   DIR* fds = opendir((dir + "/fd").c_str());
-  if (fds == nullptr) return 0;
-  uint64_t kib = 0;
+  if (fds == nullptr) return {};
+  DrmMemory kib;
   while (const dirent* entry = readdir(fds)) {
     char target[256] = {};
     const std::string link = dir + "/fd/" + entry->d_name;
     if (readlink(link.c_str(), target, sizeof(target) - 1) <= 0 || render_node != target) continue;
     std::ifstream fdinfo(dir + "/fdinfo/" + entry->d_name);
     for (std::string line; std::getline(fdinfo, line);) {
-      if (sscanf(line.c_str(), "drm-memory-vram: %" SCNu64, &kib) == 1) break;
+      sscanf(line.c_str(), "drm-memory-vram: %" SCNu64, &kib.vram);
+      sscanf(line.c_str(), "drm-memory-gtt: %" SCNu64, &kib.gtt);
+      sscanf(line.c_str(), "drm-memory-cpu: %" SCNu64, &kib.cpu);
     }
     break;
   }
   closedir(fds);
-  return kib * 1024;
+  return {kib.vram * 1024, kib.gtt * 1024, kib.cpu * 1024};
+}
+
+// Whether amdgpu places what KFD allocates as VRAM on the GPU with KFD id
+// `kfd_gpu_id` and render node `render_node` in GTT, as it does on an APU with
+// less VRAM than GTT. KFD then offers more local memory than the GPU has VRAM.
+inline bool KfdVramIsInGtt(uint32_t kfd_gpu_id, const std::string& render_node) {
+  uint64_t kfd_memory = 0;
+  if (DIR* nodes = opendir(kKfdNodesRoot)) {
+    while (const dirent* node = readdir(nodes)) {
+      const std::string dir = kKfdNodesRoot + std::string(node->d_name);
+      std::ifstream gpu_id_file(dir + "/gpu_id");
+      uint64_t gpu_id = 0;
+      if (node->d_name[0] == '.' || !(gpu_id_file >> gpu_id) || gpu_id != kfd_gpu_id) continue;
+      if (DIR* banks = opendir((dir + "/mem_banks").c_str())) {
+        while (const dirent* bank = readdir(banks)) {
+          if (bank->d_name[0] == '.') continue;
+          std::ifstream properties(dir + "/mem_banks/" + bank->d_name + "/properties");
+          for (std::string line; std::getline(properties, line);) {
+            uint64_t size = 0;
+            if (sscanf(line.c_str(), "size_in_bytes %" SCNu64, &size) == 1) kfd_memory += size;
+          }
+        }
+        closedir(banks);
+      }
+    }
+    closedir(nodes);
+  }
+  const std::string node_name = render_node.substr(render_node.rfind('/') + 1);
+  std::ifstream vram_file("/sys/class/drm/" + node_name + "/device/mem_info_vram_total");
+  uint64_t vram = 0;
+  return (vram_file >> vram) && kfd_memory > vram;
 }
 
 // Whether this process runs in the initial PID namespace, where KFD's process

@@ -1831,7 +1831,7 @@ Field | Description
 `pid` | Process ID
 `mem` | Memory the process uses on this GPU in Bytes: the sum of its `memory_usage` values (sum of the process memory is not expected to be the total memory usage.)
 `engine_usage` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`gfx`</td><td>GFX engine usage in ns</td></tr><tr><td>`enc`</td><td>Encode engine usage in ns</td></tr></tbody></table>
-`memory_usage` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`gtt_mem`</td><td>GTT memory usage in Bytes</td></tr><tr><td>`cpu_mem`</td><td>CPU memory usage in Bytes</td></tr><tr><td>`vram_mem`</td><td>VRAM the process uses in Bytes: the larger of the VRAM KFD reports for it (its allocations, mapped or not) and the VRAM its DRM fdinfo reports (the buffers its DRM clients map, graphics ones too)</td></tr> </tbody></table>
+`memory_usage` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`gtt_mem`</td><td>GTT memory usage in Bytes: what its DRM fdinfo reports, or the VRAM KFD reports for it where that is larger and amdgpu places KFD's VRAM in GTT (an APU with less VRAM than GTT)</td></tr><tr><td>`cpu_mem`</td><td>CPU memory usage in Bytes</td></tr><tr><td>`vram_mem`</td><td>VRAM the process uses in Bytes: the larger of the VRAM KFD reports for it (its allocations, mapped or not) and the VRAM its DRM fdinfo reports (the buffers its DRM clients map, graphics ones too), or the latter alone where amdgpu places KFD's VRAM in GTT</td></tr> </tbody></table>
 `cu_occupancy` | Number of Compute Units utilized
 `evicted_time` | Time that queues are evicted on a GPU in milliseconds
 `sdma_usage`   | SDMA usage in microseconds

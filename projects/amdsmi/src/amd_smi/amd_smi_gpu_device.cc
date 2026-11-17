@@ -32,8 +32,10 @@ extern "C" {
 #include "amd_smi/impl/amd_smi_test_overrides.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "amd_smi/impl/fdinfo.h"
+#include "rocm_smi/rocm_smi_device.h"
 #include "rocm_smi/rocm_smi_kfd.h"
 #include "rocm_smi/rocm_smi_logger.h"
+#include "rocm_smi/rocm_smi_main.h"
 #include "rocm_smi/rocm_smi_utils.h"
 
 namespace amd::smi {
@@ -187,6 +189,43 @@ SmiKfdProcessListerFn KfdProcessLister() {
   return lister != nullptr ? lister : GetProcessInfo;
 }
 
+// A partition's address holds its ID in bits 31:28 or, with some drivers, in the PCI
+// function (bits 2:0).
+constexpr uint64_t kPartitionIdBits = (uint64_t{0xF} << 28) | 0x7;
+
+// Whether amdgpu places the memory KFD allocates as VRAM on rocm_smi device
+// `index` (KFD id `kfd_gpu_id`) in GTT, as it does on an APU with less VRAM than
+// GTT. KFD then offers more local memory than the GPU has VRAM. The VRAM total
+// comes from sysfs, as rsmi_dev_memory_total_get() falls back to KFD's size, and
+// for a partition whose render node has none, from the GPU's first partition.
+// No if either size cannot be read.
+bool KfdVramIsInGtt(uint32_t index, uint64_t kfd_gpu_id) {
+  try {
+    RocmSMI& smi = RocmSMI::getInstance();
+    const auto node = smi.kfd_node_map().find(kfd_gpu_id);
+    const auto& devices = smi.devices();
+    uint64_t kfd_memory = 0;
+    if (node == smi.kfd_node_map().end() || node->second->get_total_memory(&kfd_memory) != 0 ||
+        index >= devices.size()) {
+      return false;
+    }
+    uint64_t vram = 0;
+    if (devices[index]->readDevInfo(kDevMemTotVRAM, &vram) != 0) {
+      if (devices[index]->bdfid() == UINT64_MAX) return false;
+      const uint64_t gpu = devices[index]->bdfid() & ~kPartitionIdBits;
+      const auto first = std::find_if(devices.begin(), devices.end(), [&](const auto& device) {
+        return (device->bdfid() & ~kPartitionIdBits) == gpu &&
+               device->readDevInfo(kDevMemTotVRAM, &vram) == 0;
+      });
+      if (first == devices.end()) return false;
+    }
+    return kfd_memory > vram;
+  } catch (...) {
+    // rocm_smi throws on a size that is not a number.
+    return false;
+  }
+}
+
 }  // namespace
 
 amdsmi_status_t AMDSmiGPUDevice::get_compute_process_list_impl(
@@ -254,6 +293,7 @@ amdsmi_status_t AMDSmiGPUDevice::get_compute_process_list_impl(
           "fall back to full KFD topology discovery.";
     LOG_WARN(ss);
   }
+  const bool kfd_vram_in_gtt = KfdVramIsInGtt(gpu_id_, kfd_gpu_id);
 
   auto get_process_info = [&](const rsmi_process_info_t& rsmi_proc_info,
                               amdsmi_proc_info_t& amdsmi_proc_info) {
@@ -265,12 +305,15 @@ amdsmi_status_t AMDSmiGPUDevice::get_compute_process_list_impl(
     if (status_code != amdsmi_status_t::AMDSMI_STATUS_SUCCESS) {
       amdsmi_proc_info.pid = rsmi_proc_info.process_id;
     }
-    // KFD counts allocations whether mapped or not, fdinfo the buffers every DRM
-    // client maps (graphics too): each can miss some, so VRAM is the larger. An
-    // unknown KFD size (all-ones) adds nothing.
+    // KFD counts the VRAM a process allocated, mapped or not; fdinfo the buffers
+    // its DRM clients map (graphics too), by where they are now. Each can miss
+    // some, so the size is the larger of the two: GTT's where amdgpu places
+    // KFD's VRAM in GTT, VRAM's elsewhere. An unknown KFD size (all-ones) is
+    // skipped.
     if (rsmi_proc_info.vram_usage != UINT64_MAX) {
-      amdsmi_proc_info.memory_usage.vram_mem =
-          std::max(amdsmi_proc_info.memory_usage.vram_mem, rsmi_proc_info.vram_usage);
+      uint64_t& size = kfd_vram_in_gtt ? amdsmi_proc_info.memory_usage.gtt_mem
+                                       : amdsmi_proc_info.memory_usage.vram_mem;
+      size = std::max(size, rsmi_proc_info.vram_usage);
     }
 
     // Copy the kfd stats from rsmi_process_info_t to amdsmi_proc_info_t

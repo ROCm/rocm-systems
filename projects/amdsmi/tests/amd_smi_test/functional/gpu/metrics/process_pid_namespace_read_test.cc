@@ -34,12 +34,14 @@
 
 namespace {
 
-using amdsmi_test::DrmVramBytes;
+using amdsmi_test::DrmMemory;
+using amdsmi_test::DrmMemoryBytes;
 using amdsmi_test::FindHelperKfdPids;
 using amdsmi_test::HelperReport;
 using amdsmi_test::HelperStopper;
 using amdsmi_test::InInitialPidNamespace;
 using amdsmi_test::IsEnvironmentFailure;
+using amdsmi_test::KfdVramIsInGtt;
 using amdsmi_test::kIocAcquireVm;
 using amdsmi_test::kIocAllocMemoryOfGpu;
 using amdsmi_test::kNotAvailable32;
@@ -333,8 +335,11 @@ void TestProcessPidNamespaceRead::Run(void) {
     }
     FAIL() << "Helper setup failed: step " << report.step << ", errno " << report.err;
   }
-  const uint64_t drm_vram = DrmVramBytes(helper, render_node);
-  ASSERT_GE(drm_vram, vram) << "GPU 0's fdinfo misses the helper's VRAM";
+  // Its DRM client reports what the helper mapped, as GTT where amdgpu places
+  // KFD's VRAM in GTT.
+  const DrmMemory drm = DrmMemoryBytes(helper, render_node);
+  ASSERT_GE(KfdVramIsInGtt(kfd_gpu_id, render_node) ? drm.gtt : drm.vram, vram)
+      << "GPU 0's fdinfo misses the helper's VRAM";
   // KFD knows the helper by its PID in the initial PID namespace. A second match
   // is another run of this test that drew the same size.
   const std::vector<pid_t> kfd_pids = FindHelperKfdPids(helper, kfd_gpu_id, vram);
@@ -409,9 +414,10 @@ void TestProcessPidNamespaceRead::Run(void) {
   ASSERT_GT(readlink("/proc/self/exe", exe, sizeof(exe) - 1), 0);
   EXPECT_EQ(std::string(found.name, strnlen(found.name, sizeof(found.name))),
             std::string(exe).substr(0, sizeof(found.name) - 1));
-  // Its VRAM is what its own DRM client reports: the VRAM it mapped, with the
-  // GPU's page tables for it.
-  EXPECT_EQ(found.memory_usage.vram_mem, drm_vram);
+  // Its memory is what its own DRM client reports: the buffers it mapped, with
+  // the GPU's page tables for them, where amdgpu placed them.
+  EXPECT_EQ(found.memory_usage.vram_mem, drm.vram);
+  EXPECT_EQ(found.memory_usage.gtt_mem, drm.gtt);
   EXPECT_EQ(found.cu_occupancy, kNotAvailable32);
   EXPECT_EQ(found.evicted_time, kNotAvailable32);
   EXPECT_EQ(found.sdma_usage, kNotAvailable64);

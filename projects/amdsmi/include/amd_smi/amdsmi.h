@@ -1444,9 +1444,11 @@ typedef struct {
     uint32_t reserved[12];
   } engine_usage;  //!< time the process spends using these engines in ns
   struct memory_usage_ {
-    uint64_t gtt_mem;   //!< In Bytes
+    uint64_t gtt_mem;   //!< In Bytes; on Linux, DRM fdinfo's count, or KFD's VRAM count if
+                        //!< larger where amdgpu places KFD's VRAM in GTT
     uint64_t cpu_mem;   //!< In Bytes
-    uint64_t vram_mem;  //!< In Bytes; on Linux, the larger of KFD's and DRM fdinfo's counts
+    uint64_t vram_mem;  //!< In Bytes; on Linux, the larger of KFD's and DRM fdinfo's counts,
+                        //!< or fdinfo's alone where amdgpu places KFD's VRAM in GTT
     uint32_t reserved[10];
   } memory_usage;  //!< In Bytes
   char container_name[AMDSMI_MAX_STRING_LENGTH];
@@ -1470,9 +1472,9 @@ typedef struct {
     uint32_t reserved[12];
   } engine_usage;
   struct {
-    uint64_t gtt_mem;   //!< GTT memory in bytes
+    uint64_t gtt_mem;   //!< GTT memory in bytes, as amdsmi_proc_info_t's gtt_mem
     uint64_t cpu_mem;   //!< CPU memory in bytes
-    uint64_t vram_mem;  //!< VRAM in bytes: the larger of KFD's and DRM fdinfo's counts
+    uint64_t vram_mem;  //!< VRAM in bytes, as amdsmi_proc_info_t's vram_mem
     uint32_t reserved[10];
   } memory_usage;
   uint32_t cu_occupancy;  //!< Number of CUs utilized
@@ -8740,11 +8742,15 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
  *        The max_processes is always changed to reflect the actual size of
  *        list of processes running, so the caller knows where it is at.
  *
- *  @note On Linux, memory_usage holds the memory a process uses on this GPU, in bytes:
- *        gtt_mem and cpu_mem as its DRM fdinfo reports them, and vram_mem the larger of
- *        the VRAM KFD reports for it (its allocations, mapped or not) and the VRAM its
- *        fdinfo reports (the buffers its DRM clients map, graphics ones too). mem is the
- *        sum of the three.
+ *  @note On Linux, memory_usage holds the memory a process uses on this GPU, in bytes: the
+ *        sizes its DRM fdinfo reports (the buffers its DRM clients map, graphics ones too, by
+ *        where they are now), except that the VRAM KFD reports for it (its allocations,
+ *        mapped or not) replaces vram_mem when larger. Where amdgpu places what KFD
+ *        allocates as VRAM in GTT, as on an APU with less VRAM than GTT, KFD's count
+ *        replaces gtt_mem when larger instead. mem is the sum of the three. VRAM that amdgpu
+ *        has moved to GTT for a while (evicted) can count in both. If the caller may not
+ *        read the process's fdinfo (another user's, without root), only KFD's count is
+ *        known: the other sizes are 0.
  *
  *  @param[in]      processor_handle Device which to query
  *

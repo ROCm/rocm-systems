@@ -39,6 +39,7 @@ using amdsmi_test::HelperReport;
 using amdsmi_test::HelperStopper;
 using amdsmi_test::InInitialPidNamespace;
 using amdsmi_test::IsEnvironmentFailure;
+using amdsmi_test::KfdVramIsInGtt;
 using amdsmi_test::kIocAcquireVm;
 using amdsmi_test::kIocAllocMemoryOfGpu;
 using amdsmi_test::kNotAvailable32;
@@ -125,7 +126,8 @@ TestProcessMemoryRead::TestProcessMemoryRead() : TestBase() {
   set_description(
       "This test verifies that amdsmi_get_gpu_process_list reports a process's "
       "VRAM, GTT and CPU memory in bytes, counting its DRM client once however "
-      "many fds refer to it, VRAM as the larger of KFD's and fdinfo's counts, "
+      "many fds refer to it, VRAM (GTT where amdgpu places KFD's VRAM in GTT) "
+      "as the larger of KFD's and fdinfo's counts, "
       "and mem as the sum of the three. In a PID namespace other than the "
       "initial one, where KFD's statistics for the process are not available, "
       "it verifies that they are reported so.");
@@ -251,11 +253,14 @@ void TestProcessMemoryRead::Run(void) {
 
   // fdinfo sizes are KiB, and the helper's 1 + kDupFds fds all name one client.
   uint64_t expected_vram = expected.vram * 1024;
+  uint64_t expected_gtt = expected.gtt * 1024;
   if (InInitialPidNamespace()) {
     // KFD names the helper by its PID and counts the VRAM it allocated, which
-    // its DRM client has not mapped, so VRAM is KFD's count.
+    // its DRM client has not mapped, so that size is KFD's count: GTT's where
+    // amdgpu places KFD's VRAM in GTT, VRAM's elsewhere.
     EXPECT_EQ(kfd_pid, helper);
-    expected_vram = std::max<uint64_t>(expected_vram, vram);
+    uint64_t& size = KfdVramIsInGtt(kfd_gpu_id, render_node) ? expected_gtt : expected_vram;
+    size = std::max<uint64_t>(size, vram);
   } else {
     // KFD's statistics for a process of another PID namespace are not
     // available, so the sizes are those its fdinfo reports.
@@ -264,10 +269,10 @@ void TestProcessMemoryRead::Run(void) {
     EXPECT_EQ(found.sdma_usage, kNotAvailable64);
   }
   EXPECT_EQ(found.memory_usage.vram_mem, expected_vram);
-  EXPECT_EQ(found.memory_usage.gtt_mem, expected.gtt * 1024);
+  EXPECT_EQ(found.memory_usage.gtt_mem, expected_gtt);
   EXPECT_EQ(found.memory_usage.cpu_mem, expected.cpu * 1024);
   // mem is the sum of the three.
-  EXPECT_EQ(found.mem, expected_vram + (expected.gtt + expected.cpu) * 1024);
+  EXPECT_EQ(found.mem, expected_vram + expected_gtt + expected.cpu * 1024);
   IF_VERB(STANDARD) {
     std::cout << "\t**fdinfo KiB vram " << expected.vram << ", gtt " << expected.gtt << ", cpu "
               << expected.cpu << "; listed bytes vram " << found.memory_usage.vram_mem << ", gtt "

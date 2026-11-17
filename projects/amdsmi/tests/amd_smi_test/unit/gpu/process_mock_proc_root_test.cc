@@ -40,6 +40,7 @@ constexpr char kBdfText[] = "0000:fe:1f.7";
 constexpr char kOtherBdfText[] = "0000:c3:00.0";
 constexpr uint64_t kKfdGpuId = 41651;
 constexpr uint64_t kOtherKfdGpuId = 1234;
+constexpr uint64_t kUnrelatedKfdGpuId = 5678;
 
 amdsmi_bdf_t TestBdf() {
   amdsmi_bdf_t bdf{};
@@ -110,11 +111,16 @@ class TestGpu {
                    uint64_t kfd_gpu_id = kKfdGpuId)
       : rocm_device_(sysfs_.root() + "/" + card),
         gpu_device_(rocm_device_.index(), card, bdf, drm_),
-        registration_(&gpu_device_) {
+        registration_(&gpu_device_),
+        card_(card) {
     amd::smi::RocmSMI::getInstance().devices()[rocm_device_.index()]->set_kfd_gpu_id(kfd_gpu_id);
   }
   uint32_t index() const { return rocm_device_.index(); }
   amdsmi_processor_handle handle() const { return registration_.handle(); }
+  // Writes `content` to the file at `path` in the GPU's sysfs directory.
+  void WriteSysfsFile(const std::string& path, const std::string& content) {
+    sysfs_.WriteFile(card_ + "/" + path, content);
+  }
 
  private:
   FakeSysfsTree sysfs_;
@@ -122,22 +128,30 @@ class TestGpu {
   AMDSmiDrm drm_;
   AMDSmiGPUDevice gpu_device_;
   ScopedProcessorRegistration registration_;
+  std::string card_;
 };
 
+// A mock /proc, KFD process root and KFD topology (no nodes unless a test adds
+// them), so that no list reads the host's.
 class MockProcessRoots {
  public:
   MockProcessRoots()
       : proc_root_(amd::smi::test_hooks::ProcRoot, amd::smi::test_hooks::SetProcRoot, proc_.root()),
-        kfd_root_(kfd_.root()) {}
+        kfd_root_(kfd_.root()),
+        topology_root_(amd::smi::test_hooks::KfdNodesPathRoot,
+                       amd::smi::test_hooks::SetKfdNodesPathRoot, topology_.root()) {}
 
   FakeSysfsTree& proc() { return proc_; }
   FakeSysfsTree& kfd() { return kfd_; }
+  FakeSysfsTree& topology() { return topology_; }
 
  private:
   FakeSysfsTree proc_;
   FakeSysfsTree kfd_;
+  FakeSysfsTree topology_;
   ScopedOverride<std::string> proc_root_;
   ScopedKfdProcRoot kfd_root_;
+  ScopedOverride<std::string> topology_root_;
 };
 
 TEST(GpuUnit, ProcessInfoSumsTheFdinfoOfAMockProcess) {
@@ -263,7 +277,10 @@ TEST(GpuUnit, ProcessListVramIsTheLargerCountAndMemTheSum) {
     AddProcess(&roots.proc(), pid, kBdfText);
   }
 
+  // KFD's node offers as much memory as the GPU has VRAM, as on a discrete GPU.
+  roots.topology().WriteFile("0/mem_banks/0/properties", "heap_type 1\nsize_in_bytes 536870912\n");
   TestGpu gpu;
+  gpu.WriteSysfsFile("device/mem_info_vram_total", "536870912\n");
   ScopedKfdNode kfd_node(kKfdGpuId, gpu.index());
   WaitOutProcessListCache();
   uint32_t num_processes = 4;
@@ -279,6 +296,117 @@ TEST(GpuUnit, ProcessListVramIsTheLargerCountAndMemTheSum) {
     // A sum that does not fit stops one below all-ones.
     const uint64_t mem = proc.pid == kKfdLargest ? kLargestVram : vram + kGtt + kCpu;
     EXPECT_EQ(proc.mem, mem) << "pid " << proc.pid;
+  }
+}
+
+TEST(GpuUnit, ProcessListTakesKfdVramAsGttWhereAmdgpuPlacesItInGtt) {
+  ScopedAmdsmiInit smi_init;
+  MockProcessRoots roots;
+  // As on an APU with less VRAM than GTT, KFD offers more local memory than the
+  // GPU has VRAM, and amdgpu places what KFD allocates as VRAM in GTT. KFD
+  // reports more of it for the first process than its fdinfo's GTT, less for the
+  // second.
+  constexpr uint32_t kKfdMore = 4262;
+  constexpr uint32_t kFdinfoMore = 4263;
+  constexpr uint64_t kKfdVram = 8 * 1024 * 1024;
+  for (const auto& [pid, kfd_vram] : {std::pair<uint32_t, uint64_t>{kKfdMore, kKfdVram},
+                                      std::pair<uint32_t, uint64_t>{kFdinfoMore, 7}}) {
+    const std::string dir = std::to_string(pid);
+    roots.kfd().WriteFile(dir + "/queues/0/gpuid", std::to_string(kKfdGpuId) + "\n");
+    AddKfdFilesForEveryGpu(&roots.kfd(), dir);
+    roots.kfd().WriteFile(dir + "/vram_" + std::to_string(kKfdGpuId), std::to_string(kfd_vram));
+    AddProcess(&roots.proc(), pid, kBdfText);
+  }
+  roots.topology().WriteFile("0/mem_banks/0/properties",
+                             "heap_type 1\nsize_in_bytes 14040223744\n");
+
+  TestGpu gpu;
+  gpu.WriteSysfsFile("device/mem_info_vram_total", "536870912\n");
+  ScopedKfdNode kfd_node(kKfdGpuId, gpu.index());
+  WaitOutProcessListCache();
+  uint32_t num_processes = 4;
+  amdsmi_proc_info_t list[4] = {};
+  ASSERT_EQ(amdsmi_get_gpu_process_list(gpu.handle(), &num_processes, list), AMDSMI_STATUS_SUCCESS);
+  ASSERT_EQ(num_processes, 2U);
+  for (const amdsmi_proc_info_t& proc : {list[0], list[1]}) {
+    ASSERT_TRUE(proc.pid == kKfdMore || proc.pid == kFdinfoMore) << "pid " << proc.pid;
+    const uint64_t gtt = proc.pid == kKfdMore ? kKfdVram : kGtt;
+    EXPECT_EQ(proc.memory_usage.vram_mem, kVram) << "pid " << proc.pid;
+    EXPECT_EQ(proc.memory_usage.gtt_mem, gtt) << "pid " << proc.pid;
+    EXPECT_EQ(proc.mem, kVram + gtt + kCpu) << "pid " << proc.pid;
+  }
+}
+
+TEST(GpuUnit, ProcessListKeepsKfdVramAsVramWhenTheVramTotalIsNotANumber) {
+  ScopedAmdsmiInit smi_init;
+  MockProcessRoots roots;
+  // KFD's node offers more memory than an APU's VRAM would be, but the GPU's
+  // VRAM total is not a number, which rocm_smi throws on: the list still
+  // succeeds, with KFD's count as VRAM.
+  constexpr uint32_t kPid = 4265;
+  constexpr uint64_t kKfdVram = 8 * 1024 * 1024;
+  const std::string dir = std::to_string(kPid);
+  roots.kfd().WriteFile(dir + "/queues/0/gpuid", std::to_string(kKfdGpuId) + "\n");
+  AddKfdFilesForEveryGpu(&roots.kfd(), dir);
+  roots.kfd().WriteFile(dir + "/vram_" + std::to_string(kKfdGpuId), std::to_string(kKfdVram));
+  AddProcess(&roots.proc(), kPid, kBdfText);
+  roots.topology().WriteFile("0/mem_banks/0/properties",
+                             "heap_type 1\nsize_in_bytes 14040223744\n");
+
+  TestGpu gpu;
+  gpu.WriteSysfsFile("device/mem_info_vram_total", "x\n");
+  ScopedKfdNode kfd_node(kKfdGpuId, gpu.index());
+  WaitOutProcessListCache();
+  uint32_t num_processes = 4;
+  amdsmi_proc_info_t list[4] = {};
+  ASSERT_EQ(amdsmi_get_gpu_process_list(gpu.handle(), &num_processes, list), AMDSMI_STATUS_SUCCESS);
+  ASSERT_EQ(num_processes, 1U);
+  EXPECT_EQ(list[0].memory_usage.vram_mem, kKfdVram);
+  EXPECT_EQ(list[0].memory_usage.gtt_mem, kGtt);
+}
+
+TEST(GpuUnit, ProcessListTakesKfdVramAsGttOnEveryPartitionOfSuchAnApu) {
+  ScopedAmdsmiInit smi_init;
+  MockProcessRoots roots;
+  // As on an APU in native mode split into partitions: only the first
+  // partition's render node has the GPU's VRAM total, 0, and KFD offers each
+  // partition more. KFD places the process on the second partition.
+  constexpr uint32_t kPid = 4264;
+  constexpr uint64_t kKfdVram = 8 * 1024 * 1024;
+  const std::string dir = std::to_string(kPid);
+  roots.kfd().WriteFile(dir + "/queues/0/gpuid", std::to_string(kKfdGpuId) + "\n");
+  AddKfdFilesForEveryGpu(&roots.kfd(), dir);
+  roots.kfd().WriteFile(dir + "/vram_" + std::to_string(kKfdGpuId), std::to_string(kKfdVram));
+  AddProcess(&roots.proc(), kPid, kBdfText);
+  roots.topology().WriteFile("0/mem_banks/0/properties",
+                             "heap_type 1\nsize_in_bytes 14040223744\n");
+
+  // rocm_smi's address of a partition holds its ID in bits 31:28 or, with some
+  // drivers, in the PCI function.
+  constexpr uint64_t kBdfid = (0xfeULL << 8) | (0x1fULL << 3);
+  for (const uint64_t second_bdfid : {kBdfid | (uint64_t{1} << 28), kBdfid | uint64_t{1}}) {
+    // Another GPU, listed before them, with more VRAM than KFD offers: only the
+    // first partition's total may count.
+    TestGpu other("card8", OtherTestBdf(), kUnrelatedKfdGpuId);
+    other.WriteSysfsFile("device/mem_info_vram_total", "68719476736\n");
+    TestGpu first("card9", TestBdf(), kOtherKfdGpuId);
+    first.WriteSysfsFile("device/mem_info_vram_total", "0\n");
+    TestGpu second("card10", TestBdf(), kKfdGpuId);
+    auto& devices = amd::smi::RocmSMI::getInstance().devices();
+    devices[other.index()]->set_bdfid(0xc300);
+    devices[first.index()]->set_bdfid(kBdfid);
+    devices[second.index()]->set_bdfid(second_bdfid);
+    ScopedKfdNode kfd_node(kKfdGpuId, second.index());
+    WaitOutProcessListCache();
+    uint32_t num_processes = 4;
+    amdsmi_proc_info_t list[4] = {};
+    ASSERT_EQ(amdsmi_get_gpu_process_list(second.handle(), &num_processes, list),
+              AMDSMI_STATUS_SUCCESS);
+    ASSERT_EQ(num_processes, 1U);
+    EXPECT_EQ(list[0].pid, kPid);
+    EXPECT_EQ(list[0].memory_usage.vram_mem, kVram) << "address " << std::hex << second_bdfid;
+    EXPECT_EQ(list[0].memory_usage.gtt_mem, kKfdVram) << "address " << std::hex << second_bdfid;
+    EXPECT_EQ(list[0].mem, kVram + kKfdVram + kCpu) << "address " << std::hex << second_bdfid;
   }
 }
 
