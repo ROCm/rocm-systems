@@ -44,7 +44,11 @@ constexpr uint32_t kGenericVersionOffset = 24;
 
 //! The amd::Isa row of the processor with EF_AMDGPU_MACH_* value @p mach, or null. Processors
 //! CLR has no row for (gfx6, gfx7) can't run on any device, so their code objects stay unnamed.
+//! Feature rows leave elfMach() 0, so EF_AMDGPU_MACH_NONE (0) names no processor.
 const amd::Isa* FindMach(uint32_t mach) {
+  if (mach == 0) {
+    return nullptr;
+  }
   for (const amd::Isa* isa = amd::Isa::begin(); isa != amd::Isa::end(); ++isa) {
     if (isa->elfMach() == mach) return isa;
   }

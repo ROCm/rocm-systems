@@ -18,8 +18,7 @@ if(CLR_OFFLINE_BLIT_KERNELS AND ROCCLR_ENABLE_HSA)
   add_subdirectory(device/blit_kernels)
 endif()
 
-# Offline tests of the code object formats (no GPU); fetches Catch2
-option(CODEOBJECT_BUILD_TESTS "Build the code object unit tests (codeobject_test)" OFF)
+# Offline tests of the code object formats; the option is in the top-level CMakeLists.txt
 if(CODEOBJECT_BUILD_TESTS)
   add_subdirectory(device/codeobject/tests)
 endif()

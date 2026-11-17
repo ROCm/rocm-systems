@@ -5,11 +5,15 @@
  */
 
 #include "device/codeobject/compressed_bundle.hpp"
+#include "device/codeobject/elf_header.hpp"
 
 #include "os/os.hpp"
 
+#include <algorithm>
 #include <cstring>
+#include <limits>
 #include <mutex>
+#include <stdexcept>
 
 namespace amd::codeobject {
 
@@ -21,6 +25,9 @@ constexpr size_t kCompressedMagicSize = sizeof(kCompressedMagic) - 1;
 // Compression method stored in the header (llvm::compression::Format)
 constexpr uint16_t kMethodZlib = 0;
 constexpr uint16_t kMethodZstd = 1;
+
+// ZSTD_CONTENTSIZE_ERROR; ZSTD_CONTENTSIZE_UNKNOWN is the one value above it
+constexpr uint64_t kZstdContentSizeError = ~uint64_t(0) - 1;
 
 // Header sizes: magic (4), version (2), method (2), then per version
 //   v1: uncompressed size u32, hash u64
@@ -65,7 +72,7 @@ struct Zstd {
     static std::once_flag once;
     std::call_once(once, [] {
       for (const char* name : kZstdNames) {
-        void* handle = Os::loadLibrary(name);
+        void* handle = Os::loadLibrary(name, /*searchCwd=*/false);
         if (handle == nullptr) continue;
         zstd.decompress = reinterpret_cast<DecompressFn>(Os::getSymbol(handle, "ZSTD_decompress"));
         zstd.isError = reinterpret_cast<IsErrorFn>(Os::getSymbol(handle, "ZSTD_isError"));
@@ -97,7 +104,7 @@ struct Zlib {
     static std::once_flag once;
     std::call_once(once, [] {
       for (const char* name : kZlibNames) {
-        void* handle = Os::loadLibrary(name);
+        void* handle = Os::loadLibrary(name, /*searchCwd=*/false);
         if (handle == nullptr) continue;
         zlib.uncompress = reinterpret_cast<UncompressFn>(Os::getSymbol(handle, "uncompress"));
         if (zlib.uncompress != nullptr) return;
@@ -108,7 +115,34 @@ struct Zlib {
   }
 };
 
+//! Sizes @p out to @p size; a size the process can't hold fails instead of throwing
+bool Allocate(std::vector<char>& out, uint64_t size, std::string* error) {
+  try {
+    if (size > out.max_size()) throw std::length_error("");
+    out.resize(static_cast<size_t>(size));
+  } catch (const std::exception&) {
+    *error = "can't allocate " + std::to_string(size) + " bytes for the compressed bundle";
+    return false;
+  }
+  return true;
+}
+
 }  // namespace
+
+// ================================================================================================
+bool CanDecompressBundle(const void* image, size_t imageBound) {
+  if (!IsKnownCompressedBundle(image, imageBound)) {
+    return false;
+  }
+  switch (LoadLe(static_cast<const char*>(image) + 6, 2)) {
+    case kMethodZstd:
+      return Zstd::Get().decompress != nullptr;
+    case kMethodZlib:
+      return Zlib::Get().uncompress != nullptr;
+    default:
+      return false;
+  }
+}
 
 // ================================================================================================
 bool IsCompressedBundle(const void* image, size_t imageBound) {
@@ -201,29 +235,47 @@ bool DecompressBundle(const void* image, size_t imageBound, std::vector<char>& o
   const char* compressed = p + headerSize;
 
   // The uncompressed size comes from the header; it is checked against the compressed data
-  // before anything is allocated for it
+  // before anything is allocated for it. The compressed size is the header's too, and with
+  // kUnknownSize (a registered fat binary) nothing bounds it.
   if (method == kMethodZstd) {
     const Zstd& zstd = Zstd::Get();
     if (zstd.decompress == nullptr) {
       *error = "zstd library not found";
       return false;
     }
-    if (version == 1) {
-      // v1 records no size, and what follows the frame (padding, the next translation unit's
-      // bundle) isn't zstd data: decompress the one frame only
-      const size_t frameSize = zstd.frameSize(compressed, static_cast<size_t>(compressedSize));
-      if (zstd.isError(frameSize)) {
-        *error = "zstd frame is malformed";
-        return false;
-      }
-      compressedSize = frameSize;
+    // LLVM's bundler records the content size in the zstd frame header as well. The frame
+    // header is as untrusted as the bundle header: an invalid frame (ZSTD_CONTENTSIZE_ERROR)
+    // or one without a size (ZSTD_CONTENTSIZE_UNKNOWN) matches a header holding that value
+    const uint64_t frameContentSize =
+        zstd.contentSize(compressed, static_cast<size_t>(compressedSize));
+    if (frameContentSize >= kZstdContentSizeError) {
+      *error = "zstd frame has no valid content size";
+      return false;
     }
-    // LLVM's bundler records the content size in the zstd frame header as well
-    if (zstd.contentSize(compressed, static_cast<size_t>(compressedSize)) != uncompressedSize) {
+    if (frameContentSize != uncompressedSize) {
       *error = "zstd frame size doesn't match the bundle header";
       return false;
     }
-    out.resize(static_cast<size_t>(uncompressedSize));
+    // The frame is measured, so the ratio check below works on the data itself. v1 records no
+    // size, and what follows the frame (padding, the next translation unit's bundle) isn't zstd
+    // data: decompress the one frame only
+    const size_t frameSize = zstd.frameSize(compressed, static_cast<size_t>(compressedSize));
+    if (zstd.isError(frameSize)) {
+      *error = "zstd frame is malformed";
+      return false;
+    }
+    compressedSize = frameSize;
+    // A zstd block of at most 128 KiB takes at least 4 bytes (an RLE block)
+    constexpr uint64_t kMaxZstdRatio = (128 * 1024) / 4;
+    if (compressedSize < ~uint64_t(0) / kMaxZstdRatio &&
+        uncompressedSize > compressedSize * kMaxZstdRatio) {
+      *error = "compressed bundle size " + std::to_string(uncompressedSize) +
+               " exceeds what its zstd data can hold";
+      return false;
+    }
+    if (!Allocate(out, uncompressedSize, error)) {
+      return false;
+    }
     const size_t result = zstd.decompress(out.data(), out.size(), compressed, compressedSize);
     if (zstd.isError(result) || result != out.size()) {
       *error = "zstd decompression failed";
@@ -243,12 +295,38 @@ bool DecompressBundle(const void* image, size_t imageBound, std::vector<char>& o
                " exceeds what its zlib data can hold";
       return false;
     }
-    out.resize(static_cast<size_t>(uncompressedSize));
-    unsigned long outSize = static_cast<unsigned long>(out.size());
-    if (zlib.uncompress(reinterpret_cast<unsigned char*>(out.data()), &outSize,
-                        reinterpret_cast<const unsigned char*>(compressed),
-                        static_cast<unsigned long>(compressedSize)) != 0 ||
-        outSize != out.size()) {
+    // uncompress takes unsigned long sizes, 32-bit on Windows; LLVM's zlib path has the same
+    // limit, so comgr couldn't read such a bundle either. Without a bound the compressed size is
+    // only a claim: zlib reads to the end of the stream
+    constexpr uint64_t kMaxZlibSize = std::numeric_limits<unsigned long>::max();
+    if (uncompressedSize > kMaxZlibSize ||
+        (compressedSize > kMaxZlibSize && imageBound != kUnknownSize)) {
+      *error = "compressed bundle is too large for zlib on this platform";
+      return false;
+    }
+    const unsigned long sourceSize =
+        static_cast<unsigned long>(std::min(compressedSize, kMaxZlibSize));
+    // Deflate records no size the ratio check could trust without a bound, so the output grows
+    // only as far as the data decompresses: uncompress fails with Z_BUF_ERROR when the buffer is
+    // full, and the buffer doubles from there
+    constexpr int kZlibBufError = -5;
+    constexpr uint64_t kFirstZlibBuffer = 16 * 1024 * 1024;
+    uint64_t bufferSize = std::min(uncompressedSize, kFirstZlibBuffer);
+    int result = 0;
+    unsigned long outSize = 0;
+    for (;;) {
+      if (!Allocate(out, bufferSize, error)) {
+        return false;
+      }
+      outSize = static_cast<unsigned long>(out.size());
+      result = zlib.uncompress(reinterpret_cast<unsigned char*>(out.data()), &outSize,
+                               reinterpret_cast<const unsigned char*>(compressed), sourceSize);
+      if (result != kZlibBufError || bufferSize == uncompressedSize) {
+        break;
+      }
+      bufferSize = std::min(bufferSize * 2, uncompressedSize);
+    }
+    if (result != 0 || outSize != uncompressedSize) {
       *error = "zlib decompression failed";
       return false;
     }

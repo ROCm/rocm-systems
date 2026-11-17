@@ -37,7 +37,7 @@ uint64_t OffloadBundleSize(const void* bundle, size_t headerBound);
  * and compatible with it (see IsCompatibleTarget). Only the first of concatenated bundles is read.
  * Unlike comgr, an entry holding an AMDGPU ELF is matched by the ISA its ELF header names (as
  * the loader does), not by the target spelled in its id, so LLVM's amdgpuN.M triples need no
- * parsing; entries that aren't ELF (SPIR-V) are matched by their id.
+ * parsing; entries that aren't ELF (SPIR-V) are matched by their id. Empty entries are skipped.
  *
  * @param bundle       Start of the bundle.
  * @param headerBound  Readable bytes for the header; reading past it fails the lookup.

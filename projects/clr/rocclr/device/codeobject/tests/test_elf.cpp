@@ -551,6 +551,9 @@ TEST_CASE("The ISA is named from the ELF header like the loader names it", "[elf
   CHECK(isa(v5, ELF::EF_AMDGPU_MACH_AMDGCN_GFX600) == "<none>");
   CHECK(isa(v5, ELF::EF_AMDGPU_MACH_AMDGCN_GFX700) == "<none>");
   CHECK(isa(v5, ELF::EF_AMDGPU_MACH_AMDGCN_RESERVED_0X27) == "<none>");
+  // EF_AMDGPU_MACH_NONE: feature rows have elfMach() 0, but none of them is a processor
+  CHECK(isa(v5, ELF::EF_AMDGPU_MACH_NONE) == "<none>");
+  CHECK(isa(v3, ELF::EF_AMDGPU_MACH_NONE | ELF::EF_AMDGPU_FEATURE_XNACK_V3) == "<none>");
 }
 
 TEST_CASE("Every processor row has its mach value and generic target", "[elf][isa]") {

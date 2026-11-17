@@ -204,6 +204,24 @@ TEST_CASE("Entries the loader can't name are skipped", "[bundle]") {
     const auto bundle = MakeBundle({{"hipv4-" + kGfx1100, MakeElf(0xfe)}});
     CHECK(Lookup(bundle, {kGfx1100})[0].size == 0);
   }
+  SECTION("EF_AMDGPU_MACH_NONE ahead of a valid entry") {
+    // Mach 0 is the value of every feature row's elfMach(): it must not name gfx801
+    const std::string gfx801 = "amdgcn-amd-amdhsa--gfx801:xnack-";
+    const auto bundle =
+        MakeBundle({{"hipv4-" + gfx801, MakeElf(ELF::EF_AMDGPU_MACH_NONE)},
+                    {"hipv4-" + gfx801, MakeElf(ELF::EF_AMDGPU_MACH_AMDGCN_GFX801)}});
+    CHECK(Lookup(bundle, {gfx801})[0].offset == EntryOffset(bundle, 1));
+  }
+  SECTION("empty entries don't use up the targets") {
+    const auto bundle =
+        MakeBundle({{"hipv4-" + kGfx1100, {}},
+                    {"hipv4-" + kGfx1100, {}},
+                    {"hipv4-" + kGfx1100, MakeElf(ELF::EF_AMDGPU_MACH_AMDGCN_GFX1100)},
+                    {"hipv4-" + kSpirv, {0x03, 0x02, 0x23, 0x07}}});
+    const auto found = Lookup(bundle, {kGfx1100, kSpirv});
+    CHECK(found[0].offset == EntryOffset(bundle, 2));
+    CHECK(found[1].offset == EntryOffset(bundle, 3));
+  }
   SECTION("code object v2") {
     const auto bundle = MakeBundle({{"hipv4-" + kGfx1100, MakeElf(ELF::EF_AMDGPU_MACH_AMDGCN_GFX1100, 0,
                                                                    /*abiVersion=*/0)}});

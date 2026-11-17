@@ -13,9 +13,12 @@
 #include "os/os.hpp"
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <cstring>
+#include <filesystem>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace amd::codeobject;
@@ -91,51 +94,141 @@ std::vector<char> Payload() {
   return std::vector<char>(text.begin(), text.end());
 }
 
+//! A well-formed zstd frame whose header claims @p contentSize: single segment, an 8-byte
+//! content size, then one last raw block of 8 bytes
+std::vector<char> ZstdFrameClaiming(uint64_t contentSize) {
+  std::vector<char> frame = {'\x28', '\xb5', '\x2f', '\xfd', '\xe0'};
+  AppendLe(frame, contentSize, 8);
+  AppendLe(frame, (8u << 3) | 1u, 3);  // block size 8, raw, last
+  frame.insert(frame.end(), 8, '\0');
+  return frame;
+}
+
+//! Sets the v3 total size of @p ccob to @p totalSize
+void SetTotalSizeV3(std::vector<char>& ccob, uint64_t totalSize) {
+  for (size_t i = 0; i < 8; ++i) ccob[8 + i] = static_cast<char>(totalSize >> (8 * i));
+}
+
 }  // namespace
 
 TEST_CASE("Every header version and method decompresses", "[ccob]") {
   const std::vector<char> payload = Payload();
-  for (const uint16_t method : {kZlib, kZstd}) {
-    const std::vector<char> compressed = Compress(method, payload);
-    if (compressed.empty()) {
-      WARN("compression library for method " << method << " not installed");
-      continue;
-    }
-    for (const uint16_t version : {1, 2, 3}) {
-      INFO("version " << version << " method " << method);
-      const std::vector<char> ccob = MakeCcob(version, method, compressed, payload.size());
-      CHECK(IsCompressedBundle(ccob.data(), ccob.size()));
-      CHECK(IsKnownCompressedBundle(ccob.data(), ccob.size()));
-      std::vector<char> out;
-      std::string error;
-      REQUIRE(DecompressBundle(ccob.data(), ccob.size(), out, &error));
-      CHECK(out == payload);
-      CHECK(CompressedBundleSize(ccob.data(), ccob.size()) == (version == 1 ? 0 : ccob.size()));
-    }
+  const uint16_t method = GENERATE(kZlib, kZstd);
+  const std::vector<char> compressed = Compress(method, payload);
+  if (compressed.empty()) SKIP("compression library for method " << method << " not installed");
+  for (const uint16_t version : {1, 2, 3}) {
+    INFO("version " << version << " method " << method);
+    const std::vector<char> ccob = MakeCcob(version, method, compressed, payload.size());
+    CHECK(IsCompressedBundle(ccob.data(), ccob.size()));
+    CHECK(IsKnownCompressedBundle(ccob.data(), ccob.size()));
+    CHECK(CanDecompressBundle(ccob.data(), ccob.size()));
+    std::vector<char> out;
+    std::string error;
+    REQUIRE(DecompressBundle(ccob.data(), ccob.size(), out, &error));
+    CHECK(out == payload);
+    CHECK(CompressedBundleSize(ccob.data(), ccob.size()) == (version == 1 ? 0 : ccob.size()));
   }
+}
+
+TEST_CASE("zlib output larger than the first buffer decompresses", "[ccob]") {
+  // The zlib buffer starts at 16 MiB and doubles while uncompress fills it
+  std::vector<char> payload(40u << 20);
+  for (size_t i = 0; i < payload.size(); ++i) payload[i] = static_cast<char>(i * 7 / 4096);
+  const std::vector<char> compressed = Compress(kZlib, payload);
+  if (compressed.empty()) SKIP("zlib not installed");
+  const std::vector<char> ccob = MakeCcob(3, kZlib, compressed, payload.size());
+  const size_t bound = GENERATE(size_t{0}, kUnknownSize);
+  INFO("bound " << (bound == kUnknownSize ? "unknown" : "known"));
+  std::vector<char> out;
+  std::string error;
+  REQUIRE(DecompressBundle(ccob.data(), bound == 0 ? ccob.size() : bound, out, &error));
+  CHECK(out == payload);
+}
+
+TEST_CASE("Sizes a pointer load can't bound are checked against the data", "[ccob]") {
+  // Without a bound the compressed size is the header's claim: 1 TiB claimed for both headers
+  // here, so the ratio checks against it pass
+  std::vector<char> out;
+  std::string error;
+  bool ok = true;
+  SECTION("zstd measures the frame") {
+    if (Compress(kZstd, Payload()).empty()) SKIP("zstd not installed");
+    constexpr uint64_t kClaimed = uint64_t{1} << 40;
+    std::vector<char> ccob = MakeCcob(3, kZstd, ZstdFrameClaiming(kClaimed), kClaimed);
+    SetTotalSizeV3(ccob, kClaimed * 2);
+    CHECK_NOTHROW(ok = DecompressBundle(ccob.data(), kUnknownSize, out, &error));
+    CHECK_FALSE(ok);
+    CHECK(error.find("exceeds what its zstd data can hold") != std::string::npos);
+  }
+  SECTION("zlib grows the output only as the data decompresses") {
+    const std::vector<char> compressed = Compress(kZlib, Payload());
+    if (compressed.empty()) SKIP("zlib not installed");
+    constexpr uint64_t kClaimed = uint64_t{1} << 39;
+    std::vector<char> ccob = MakeCcob(3, kZlib, compressed, kClaimed);
+    SetTotalSizeV3(ccob, kClaimed * 2);
+    CHECK_NOTHROW(ok = DecompressBundle(ccob.data(), kUnknownSize, out, &error));
+    CHECK_FALSE(ok);
+    CHECK(error == "zlib decompression failed");
+  }
+  CHECK(out.capacity() < (size_t{1} << 30));
+}
+
+TEST_CASE("Compression libraries can be kept out of the current directory", "[ccob]") {
+#if defined(_WIN32)
+  SKIP("LoadLibrary's search order has the current directory in it on its own");
+#else
+  // A copy of the installed zstd under a name only the current directory has
+  namespace fs = std::filesystem;
+  void* symbol = FindSymbol(kZstdNames, "ZSTD_decompress");
+  std::string path;
+  size_t offset = 0;
+  if (symbol == nullptr || !Os::FindFileNameFromAddress(symbol, &path, &offset)) {
+    SKIP("zstd not installed");
+  }
+  struct TempCwd {
+    fs::path saved = fs::current_path();
+    fs::path dir =
+        fs::temp_directory_path() / ("codeobject_cwd_" + std::to_string(Os::getProcessId()));
+    TempCwd() {
+      fs::create_directories(dir);
+      fs::current_path(dir);
+    }
+    ~TempCwd() {
+      std::error_code ec;
+      fs::current_path(saved, ec);
+      fs::remove_all(dir, ec);
+    }
+  } cwd;
+  constexpr const char* kName = "codeobject_cwd_probe.so.1";
+  fs::copy_file(path, cwd.dir / kName);
+
+  CHECK(Os::loadLibrary(kName, /*searchCwd=*/false) == nullptr);
+  void* handle = Os::loadLibrary(kName);
+  CHECK(handle != nullptr);
+  if (handle != nullptr) Os::unloadLibrary(handle);
+#endif
 }
 
 TEST_CASE("A version 1 bundle stops at the end of its own data", "[ccob]") {
   // v1 records no size. A registered fat binary gives no bound either, and what follows the
   // compressed data (padding, the next translation unit's CCOB) isn't part of it.
   const std::vector<char> payload = Payload();
-  for (const uint16_t method : {kZlib, kZstd}) {
-    const std::vector<char> compressed = Compress(method, payload);
-    if (compressed.empty()) continue;
-    INFO("method " << method);
-    std::vector<char> image = MakeCcob(1, method, compressed, payload.size());
-    image.resize(image.size() + 4096 - image.size() % 4096, '\0');
-    const std::vector<char> next = MakeCcob(1, method, compressed, payload.size());
-    image.insert(image.end(), next.begin(), next.end());
+  const uint16_t method = GENERATE(kZlib, kZstd);
+  const std::vector<char> compressed = Compress(method, payload);
+  if (compressed.empty()) SKIP("compression library for method " << method << " not installed");
+  INFO("method " << method);
+  std::vector<char> image = MakeCcob(1, method, compressed, payload.size());
+  image.resize(image.size() + 4096 - image.size() % 4096, '\0');
+  const std::vector<char> next = MakeCcob(1, method, compressed, payload.size());
+  image.insert(image.end(), next.begin(), next.end());
 
-    std::vector<char> out;
-    std::string error;
-    REQUIRE(DecompressBundle(image.data(), image.size(), out, &error));
-    CHECK(out == payload);
-    out.clear();
-    REQUIRE(DecompressBundle(image.data(), kUnknownSize, out, &error));
-    CHECK(out == payload);
-  }
+  std::vector<char> out;
+  std::string error;
+  REQUIRE(DecompressBundle(image.data(), image.size(), out, &error));
+  CHECK(out == payload);
+  out.clear();
+  REQUIRE(DecompressBundle(image.data(), kUnknownSize, out, &error));
+  CHECK(out == payload);
 }
 
 TEST_CASE("Newer formats are left to comgr", "[ccob]") {
@@ -150,6 +243,7 @@ TEST_CASE("Newer formats are left to comgr", "[ccob]") {
     ccob[4] = 4;
     CHECK(IsCompressedBundle(ccob.data(), ccob.size()));
     CHECK_FALSE(IsKnownCompressedBundle(ccob.data(), ccob.size()));
+    CHECK_FALSE(CanDecompressBundle(ccob.data(), ccob.size()));
     CHECK(CompressedBundleSize(ccob.data(), ccob.size()) == 0);
     CHECK_FALSE(DecompressBundle(ccob.data(), ccob.size(), out, &error));
     CHECK(error == "unknown compressed bundle version 4");
@@ -157,6 +251,7 @@ TEST_CASE("Newer formats are left to comgr", "[ccob]") {
   SECTION("unknown method") {
     std::vector<char> ccob = MakeCcob(3, 2, compressed, payload.size());
     CHECK_FALSE(IsKnownCompressedBundle(ccob.data(), ccob.size()));
+    CHECK_FALSE(CanDecompressBundle(ccob.data(), ccob.size()));
     CHECK_FALSE(DecompressBundle(ccob.data(), ccob.size(), out, &error));
     CHECK(error == "unknown compression method 2");
   }
@@ -207,6 +302,33 @@ TEST_CASE("Malformed compressed bundles are rejected", "[ccob]") {
     bool ok = true;
     CHECK_NOTHROW(ok = DecompressBundle(bad.data(), bad.size(), out, &error));
     CHECK_FALSE(ok);
+    CHECK(out.capacity() < (size_t{1} << 30));
+  }
+  SECTION("zstd's content size sentinels in both headers are rejected before allocating") {
+    // Invalid data makes ZSTD_getFrameContentSize return ZSTD_CONTENTSIZE_ERROR; a frame
+    // without a size returns ZSTD_CONTENTSIZE_UNKNOWN. Either matches a bundle header that
+    // holds the same value.
+    const std::vector<char> notZstd(compressed.size(), 'x');
+    std::vector<char> frameNoSize = {'\x28', '\xb5', '\x2f', '\xfd', '\x00', '\x58'};
+    frameNoSize.insert(frameNoSize.end(), 16, '\0');
+    for (const auto& [data, rawSize] :
+         {std::make_pair(notZstd, ~uint64_t(0) - 1), std::make_pair(frameNoSize, ~uint64_t(0))}) {
+      std::vector<char> bad = MakeCcob(3, kZstd, data, rawSize);
+      bool ok = true;
+      CHECK_NOTHROW(ok = DecompressBundle(bad.data(), bad.size(), out, &error));
+      CHECK_FALSE(ok);
+      CHECK(error == "zstd frame has no valid content size");
+      CHECK(out.capacity() < (size_t{1} << 30));
+    }
+  }
+  SECTION("a zstd frame header claiming more than its blocks can hold is rejected") {
+    // Both headers agree on 1 TiB, but an 8-byte block can't expand to that size
+    constexpr uint64_t kClaimed = uint64_t{1} << 40;
+    std::vector<char> bad = MakeCcob(3, kZstd, ZstdFrameClaiming(kClaimed), kClaimed);
+    bool ok = true;
+    CHECK_NOTHROW(ok = DecompressBundle(bad.data(), bad.size(), out, &error));
+    CHECK_FALSE(ok);
+    CHECK(error.find("exceeds what its zstd data can hold") != std::string::npos);
     CHECK(out.capacity() < (size_t{1} << 30));
   }
   SECTION("corrupt data") {

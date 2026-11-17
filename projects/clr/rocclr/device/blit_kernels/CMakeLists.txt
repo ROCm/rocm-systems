@@ -12,9 +12,27 @@ set(_BLIT_LLVM_BIN "${ROCM_PATH}/lib/llvm/bin" "${ROCM_PATH}/llvm/bin")
 find_program(BLIT_CLANG_EXE NAMES amdclang clang HINTS ${_BLIT_LLVM_BIN} NO_DEFAULT_PATH)
 find_package(Python3 COMPONENTS Interpreter)
 if(NOT BLIT_CLANG_EXE OR NOT Python3_Interpreter_FOUND)
-  message(WARNING "amdclang or Python 3 not found: blit kernels are compiled at runtime "
-                  "(CLR_OFFLINE_BLIT_KERNELS=OFF)")
-  set(CLR_OFFLINE_BLIT_KERNELS OFF CACHE BOOL "" FORCE)
+  # Only this configure falls back: the option stays as the user set it, so a later configure
+  # with the tools in place builds the kernels again
+  message(WARNING "amdclang or Python 3 not found: blit kernels are compiled at runtime")
+  return()
+endif()
+
+# OpenCL needs the device libraries (opencl.bc, ocml, ockl, oclc_*) wherever the compiler looks
+# for them under ROCM_PATH: compile one kernel the way the targets below do
+set(_BLIT_PROBE_SRC "${CMAKE_CURRENT_BINARY_DIR}/blit_probe.cl")
+file(WRITE "${_BLIT_PROBE_SRC}" "__kernel void probe(__global int* p) { p[0] = 1; }\n")
+execute_process(
+  COMMAND "${BLIT_CLANG_EXE}" -x cl -cl-std=CL1.2 -target amdgcn-amd-amdhsa -mcpu=gfx9-generic
+          -mcode-object-version=6 -fno-rtlib-add-rpath "--rocm-path=${ROCM_PATH}"
+          -o "${CMAKE_CURRENT_BINARY_DIR}/blit_probe.elf" "${_BLIT_PROBE_SRC}"
+  RESULT_VARIABLE _BLIT_PROBE_RESULT
+  OUTPUT_VARIABLE _BLIT_PROBE_OUTPUT
+  ERROR_VARIABLE _BLIT_PROBE_OUTPUT)
+if(NOT _BLIT_PROBE_RESULT EQUAL 0)
+  message(WARNING "${BLIT_CLANG_EXE} can't compile OpenCL for amdgcn with ROCM_PATH=${ROCM_PATH} "
+                  "(device libraries missing?): blit kernels are compiled at runtime\n"
+                  "${_BLIT_PROBE_OUTPUT}")
   return()
 endif()
 

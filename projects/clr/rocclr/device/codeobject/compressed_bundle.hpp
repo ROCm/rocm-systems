@@ -31,16 +31,24 @@ bool IsKnownCompressedBundle(const void* image, size_t imageBound);
 uint64_t CompressedBundleSize(const void* image, size_t imageBound);
 
 /**
+ * @returns True if @p image is a known compressed bundle (IsKnownCompressedBundle) and the
+ *          library for its compression method loads. Comgr, which finds its compression
+ *          libraries through its own library path, reads the others.
+ */
+bool CanDecompressBundle(const void* image, size_t imageBound);
+
+/**
  * Decompresses the first compressed offload bundle (CCOB) at @p image into @p out, which then
  * holds an uncompressed clang offload bundle.
  *
  * Header versions 1, 2 and 3 are read; methods are zlib and zstd, each loaded with
  * Os::loadLibrary on first use. The stored hash is not checked, as in clang's OffloadBundler.
  * The uncompressed size in the header is checked against the compressed data (the zstd frame's
- * content size, deflate's maximum ratio) before it is allocated.
+ * content size and measured size, deflate's maximum ratio) before it is allocated; zlib output,
+ * which has no size of its own, grows only as far as the data decompresses.
  *
  * @param image       Start of the compressed bundle.
- * @param imageBound  Readable bytes at @p image.
+ * @param imageBound  Readable bytes at @p image, or kUnknownSize.
  * @param out         Decompressed bundle.
  * @param error       Reason on failure.
  * @returns False for a malformed header, an unknown version or method, a missing compression

@@ -289,6 +289,10 @@ bool LookupCodeObjects(const void* bundle, size_t headerBound, size_t imageBound
     // The encoded size may include a null terminator
     id.erase(id.find_last_not_of('\0') + 1);
 
+    // An empty entry has no code object to load: it would match a target without filling it
+    if (size == 0) {
+      continue;
+    }
     // Entry id: <offload kind>-<target>
     const size_t dash = id.find('-');
     const std::string kind = id.substr(0, dash);

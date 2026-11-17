@@ -97,7 +97,8 @@ ROCr's loader still parses each code object itself when it loads it.
      into the image, nothing is copied;
    - **CCOB v1-v3**: `DecompressBundle` once for all devices, then `LookupCodeObjects` on the
      result; only the selected entries are copied out;
-   - **CCOB in a newer format**: comgr unbundles it (`UnbundleWithComgr`, section 6).
+   - **CCOB in a newer format, or without its compression library**: comgr unbundles it
+     (`UnbundleWithComgr`, section 6).
 3. `AddDevProgram` per device takes the native entry, else the device's generic target
    (`TargetToGeneric`), else SPIR-V (compiled by comgr).
 4. The backend's `createKernels` calls `createKernelMetadataMap`: the ISA from the ELF header
@@ -121,7 +122,7 @@ ROCr's loader still parses each code object itself when it loads it.
 | Compatibility | comgr's `isCompatibleIsaName`: same processor; a feature the code object sets (+ or -) must match the device; one it leaves unset (any) matches both. Processor and feature validity come from `amd::Isa` |
 | Order | entries in file order; each entry fills the first query still empty that it is compatible with (comgr's `lookup_code_object`) |
 | Per device | native entry first, then the device's generic target (`TargetToGeneric`), then SPIR-V |
-| Skipped | an ELF whose ISA the loader doesn't know (unknown mach, code object v2, 32-bit), or of a processor with no `amd::Isa` row (gfx6, gfx7): no device could run it |
+| Skipped | an ELF whose ISA the loader doesn't know (unknown mach or `EF_AMDGPU_MACH_NONE`, code object v2, 32-bit), or of a processor with no `amd::Isa` row (gfx6, gfx7): no device could run it |
 
 The processor data comes from `amd::Isa`, so a new processor is one row there. Its row without
 features carries two columns: `elfMach`, the `EF_AMDGPU_MACH_*` value of `e_flags` (the values
@@ -145,16 +146,24 @@ The format is defined by LLVM (`llvm/lib/Object/OffloadBundle.cpp`):
 | 3 | 64-bit total and uncompressed sizes (32 bytes), for bundles over 4 GB | January 2025 |
 
 - **Methods:** zlib (0) and zstd (1), each loaded with `Os::loadLibrary` on first use
-  (`librocm_sysdeps_*` first, then the system library).
-- **v1 has no size.** zstd input is cut at the frame end (`ZSTD_findFrameCompressedSize`); zlib
-  stops at its stream end. The input copy `hipLibraryLoadData` keeps can't be sized, so a v1
+  (`librocm_sysdeps_*` first, then the system library), without the `./<name>` retry from the current
+  directory (Windows' `LoadLibrary` search order still has it after the system directories).
+  Without the library the bundle goes to comgr, which finds its own.
+- **v1 has no size.** zstd input is cut at the frame end (`ZSTD_findFrameCompressedSize`, for
+  every version); zlib stops at its stream end. The input copy `hipLibraryLoadData` keeps can't be sized, so a v1
   bundle loads through `hipModuleLoad*` and from files, but not through `hipLibraryLoadData`.
 - **Sizes are checked:** a recorded total size larger than the readable bound is rejected. The
   uncompressed size is checked before it is allocated: for zstd it must equal the frame's own
-  content size, for zlib it must fit deflate's maximum ratio (1032:1).
-- **Newer formats go to comgr.** A version above 3 or an unknown method is unbundled by comgr,
-  as CLR always did; its length is read from the 32-bit total size of the v2 header
-  (`UnknownCompressedBundleSize`). No compiler writes such a bundle yet: the hip-test for it (a
+  content size, which must be a size (not `ZSTD_CONTENTSIZE_ERROR`/`_UNKNOWN`), and fit zstd's
+  maximum ratio (32768:1, a 128 KiB block from a 4-byte RLE block) over the measured frame; for
+  zlib it must fit deflate's maximum ratio (1032:1) and zlib's `unsigned long` sizes (32-bit on
+  Windows, as in LLVM's own zlib path). Without a bound (a pointer load) the compressed size is
+  only the header's claim, so the zlib output buffer starts at 16 MiB and doubles only while
+  `uncompress` fills it. An allocation that fails is an error, not an exception.
+- **Newer formats go to comgr.** A version above 3, an unknown method or a method whose library
+  doesn't load (`CanDecompressBundle`) is unbundled by comgr, as CLR always did. A newer
+  format's length is read from the 32-bit total size of the v2 header
+  (`UnknownCompressedBundleSize`); a v1 bundle needs a known bound. No compiler writes such a bundle yet: the hip-test for it (a
   version patched to 4) shows the path is taken and fails cleanly.
 - The stored hash is not checked, as in clang's own bundler.
 
@@ -202,7 +211,8 @@ enqueue scheduler) used to be compiled from OpenCL C through comgr on the first 
   `GPU_ENABLE_WGP_MODE`, `DEBUG_CLR_BLIT_KERNARG_OPT`), with ASan, or with
   `GPU_DUMP_BLIT_KERNELS`. The PAL backend always compiles them.
 - **Build:** `CLR_OFFLINE_BLIT_KERNELS` (on by default) needs amdclang and the device libraries
-  under `ROCM_PATH`; without them it turns off. The embedded code objects add about 0.5 MB to
+  under `ROCM_PATH`; configure compiles one probe kernel with them and, if that fails, skips the
+  offline kernels for that configure (the option keeps its value). The embedded code objects add about 0.5 MB to
   each runtime library.
 
 ---
@@ -232,7 +242,7 @@ metadata are columns of the `amd::Isa` table. The CLR profiler demangles kernel 
 
 | Layer | Where | Needs | What |
 |---|---|---|---|
-| Offline unit tests | `codeobject/tests` (`codeobject_test`, `-DCODEOBJECT_BUILD_TESTS=ON`, Catch2 via FetchContent) | nothing for the format tests; comgr for the ISA check | 53 cases: bundle selection by `e_flags` including `amdgpu12.50` ids, generic targets, xnack/sramecc, SPIR-V, bounds, malformed headers; target-id compatibility; `TargetToGeneric`; CCOB v1-v3 x zlib/zstd and malformed sizes; ELF size, notes, `.dynsym`, also at every odd offset in the buffer (the readers copy headers instead of using typed pointers; checked with `-fsanitize=alignment`); the `elfMach` and `genericTarget` columns of `amd::Isa`; note merging; msgpack in every width; truncation at every byte; the `amd::Isa` ISA columns against comgr's ISA metadata |
+| Offline unit tests | `codeobject/tests` (`codeobject_test`, `-DCODEOBJECT_BUILD_TESTS=ON`, Catch2 via FetchContent; run directly or with `ctest` in the build directory) | nothing for the format tests; comgr for the ISA check | 53 cases: bundle selection by `e_flags` including `amdgpu12.50` ids, generic targets, xnack/sramecc, SPIR-V, bounds, malformed headers; target-id compatibility; `TargetToGeneric`; CCOB v1-v3 x zlib/zstd and malformed sizes; ELF size, notes, `.dynsym`, also at every odd offset in the buffer (the readers copy headers instead of using typed pointers; checked with `-fsanitize=alignment`); the `elfMach` and `genericTarget` columns of `amd::Isa`; note merging; msgpack in every width; truncation at every byte; the `amd::Isa` ISA columns against comgr's ISA metadata |
 | GPU tests | hip-tests `unit/module/hipCodeObjectMetadata.cc` in `ModuleTest` | a GPU, hipcc | 7 cases: uncompressed and compressed (v2, v3) fat binaries, generic-only, native next to generic, raw ELF, two notes linked from separately assembled objects, each from a file and from memory; a CCOB patched to version 4. Checks names, argument offsets and sizes, LDS, launch bounds, scratch, argument values, buffered printf |
 | Fuzzing | `codeobject/tests/fuzz_codeobject.cpp` (`codeobject_fuzz`) | clang | bundle lookup, CCOB, ELF size, notes, `.dynsym`, msgpack |
 | Comparison | `co_compare` (CRUX tools) | a second runtime | names, parameters and attributes of every kernel in the installed Tensile libraries and hip-tests code objects: 9,773 kernels, no differences |
@@ -244,7 +254,12 @@ Compressed and generic fat binaries registered by an executable are covered by `
 
 ## 11 · Limits and open items
 
-- **The comgr fallback's success path has never run:** no compiler writes a CCOB newer than v3.
+- **The comgr fallback** for a CCOB newer than v3 has never run: no compiler writes one. The
+  fallback for a missing zstd was checked by hand, with an `LD_PRELOAD` shim failing its
+  `dlopen`; no suite reaches it, since the library loads are process-wide.
+- **zstd sizes up to the format's maximum ratio** (32768:1) are allocated and zero-filled before
+  decompression, as LLVM's bundler allocates the size from the header: a 1 MB frame can claim
+  32 GiB.
 - **v1 CCOB through `hipLibraryLoadData`** is rejected (section 6).
 - **Unknown bound.** For a pointer load the image size is unknown, so entry offsets in a bundle
   header are trusted, as before; the header of every hip entry is read.

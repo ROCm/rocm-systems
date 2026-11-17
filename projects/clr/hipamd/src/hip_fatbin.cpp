@@ -174,8 +174,25 @@ static size_t UnknownCompressedBundleSize(const void* image, size_t image_bound)
   return (total_size < kHeaderSize || total_size > image_bound) ? 0 : total_size;
 }
 
-// Unbundles a compressed bundle in a format newer than DecompressBundle reads with comgr, which
-// follows LLVM's bundler.
+/**
+ * Size of a compressed bundle handed to comgr: the recorded size of a known format, the bound
+ * for version 1, which records none, and UnknownCompressedBundleSize for a newer format.
+ * @returns 0 if there is no valid size.
+ */
+static size_t ComgrCompressedBundleSize(const void* image, size_t image_bound) {
+  if (!amd::codeobject::IsKnownCompressedBundle(image, image_bound)) {
+    return UnknownCompressedBundleSize(image, image_bound);
+  }
+  uint16_t version = 0;
+  std::memcpy(&version, static_cast<const char*>(image) + 4, sizeof(version));
+  if (version == 1) {
+    return image_bound == amd::codeobject::kUnknownSize ? 0 : image_bound;
+  }
+  return static_cast<size_t>(amd::codeobject::CompressedBundleSize(image, image_bound));
+}
+
+// Unbundles with comgr, which follows LLVM's bundler, a compressed bundle DecompressBundle can't
+// read: a newer format, or a compression library the runtime doesn't find.
 static bool UnbundleWithComgr(
     const void* image, size_t image_size, const std::set<std::string>& unique_isa_names,
     std::map<std::string, std::pair<const void*, size_t>>& code_obj_map) {
@@ -405,14 +422,14 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
   std::map<std::string, std::pair<const void*, size_t>> code_obj_map;  //!< code object map
   if (is_compressed) {
     bool unbundled = false;
-    if (amd::codeobject::IsKnownCompressedBundle(image_, image_bound)) {
+    if (amd::codeobject::CanDecompressBundle(image_, image_bound)) {
       unbundled =
           UncompressAndPopulateCodeObject(image_, image_bound, unique_isa_names, code_obj_map);
     } else {
-      // A newer bundler format: comgr reads it
-      const size_t bundle_size = UnknownCompressedBundleSize(image_, image_bound);
+      // A newer bundler format, or no zstd/zlib library where the runtime looks: comgr reads it
+      const size_t bundle_size = ComgrCompressedBundleSize(image_, image_bound);
       if (bundle_size == 0) {
-        LogError("Rejecting compressed fat binary: unknown format without a valid total size");
+        LogError("Rejecting compressed fat binary: no valid total size for comgr");
         return hipErrorInvalidImage;
       }
       uint16_t version = 0;
