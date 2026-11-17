@@ -9,22 +9,31 @@ phase's kernels feed each other. Re-running one kernel of a phase in isolation m
 whose inputs the rest of the phase has already changed, so the passes are not comparable to each
 other and none of them corresponds to what the phase actually did.
 
-**Range replay** covers a sequence. A tool brackets the phase; the SDK records the dispatches inside
-it, and after the range closes it restores the range-entry device memory and re-submits the whole
-recording once per extra pass.
+**Range replay** on this line covers a sequence by re-running the application's own code. The
+application marks the phase with `sigsetjmp`. After each pass the SDK restores device memory and
+the host regions the application registered, then `siglongjmp`s back to that mark. Recorded
+packets are not re-submitted. A range whose tool does not set `host_replay` runs once and closes
+with `PACKET_REPLAY_UNSUPPORTED`.
 
-| | Kernel replay | Range replay |
+| | Kernel replay | Host range replay |
 |---|---|---|
-| Unit of repetition | one dispatch | a recorded sequence of dispatches |
-| Who drives pass 0 | the SDK | the application (the SDK only observes) |
-| When passes run | inside the dispatch, before the application sees it complete | after the range closes |
-| Application observability | none: the extra passes are invisible | none for correctness, but the range takes longer to close |
-| Ordering within a pass | n/a (one dispatch) | serialized dispatch-by-dispatch |
+| Unit of repetition | one dispatch | the application's code between begin and end |
+| Who drives pass 0 | the SDK | the application |
+| Who drives later passes | the SDK, in place | the application, re-entered by `siglongjmp` |
+| When later passes run | inside the dispatch, before the application sees it complete | before `end` returns |
+| What is restored | that dispatch's device inputs | every GPU agent's tracked device memory, plus registered host memory |
 
 Range replay is **experimental**. The public header is
 `rocprofiler-sdk/experimental/range_replay.h`. It shares kernel replay's device-memory snapshot,
 its per-agent replay window, and its pass-count and localized-context-toggle semantics, so a tool
 that already drives kernel replay reuses most of its pass logic unchanged.
+
+## Host replay is the replay
+
+`rocprofiler_range_replay_end` does not re-submit recorded packets. The diagram below is the
+recording path this branch no longer replays. Supported replay is host replay: the tool sets
+`host_replay`, and the application opens the range with `ROCPROFILER_RANGE_REPLAY_HOST_BEGIN`.
+See [Host range replay](range_replay_host.md).
 
 ## Record live, then replay
 

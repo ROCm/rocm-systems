@@ -1,14 +1,12 @@
 (range-replay-host)=
 # Host range replay (`sigsetjmp` / `siglongjmp`)
 
-Packet replay records the dispatch packets a range submits and re-submits them. That is cheap, but
-it only reproduces a range whose whole effect is those packets on one queue. A real time-stepping
-loop is not like that. Each step mixes kernels on several streams, device-to-device and host-device
-copies, memsets, graph launches, scratch allocations, and host computation whose results feed the
-next step's kernels. Packet replay declines such a range, and it has to: the recording does not
-contain the copies, the host computation, or the second stream.
+This line does not re-submit recorded packets. A real time-stepping loop mixes kernels on several
+streams, device-to-device and host-device copies, memsets, graph launches, scratch allocations, and
+host computation whose results feed the next step's kernels. Re-submitting dispatch packets cannot
+reproduce that.
 
-Host replay is the alternate path for those ranges. Nothing is recorded. The application's own code
+Host replay is the replay path. Nothing is recorded for re-submit. The application's own code
 between begin and end *is* the program, and each extra pass runs it again:
 
 ```text
@@ -77,7 +75,7 @@ never a jump target.
 
 | Tool sets `host_replay` | Application armed the jump | Result |
 |---|---|---|
-| no | either | packet replay |
+| no | either | one run, `PACKET_REPLAY_UNSUPPORTED` when the tool asked for more than one pass |
 | yes | yes | host replay |
 | yes | no | declined, `HOST_JMP_NOT_SET` (the range runs once) |
 
@@ -212,8 +210,8 @@ runtime, just as for packet replay. See [Performance](range_replay_performance.m
   open-ended pass count stopped by `replay_continue_cb`, and a local counter stop. The checks are
   that every pass ends with the same device checksum and host state and that registered host state
   was rewound. They also check the PASS order, a divergence count of 0, and the exact counter record
-  count. Two negative variants check that packet replay declines the same range and that an unarmed
-  application declines `HOST_JMP_NOT_SET`.
+  count. Two negative variants check that a tool which does not set `host_replay` does not replay
+  the range, and that an unarmed application declines `HOST_JMP_NOT_SET`.
 - `test-range-replay-host-fence-timeout`, in the same directory, sets
   `ROCPROFILER_RANGE_REPLAY_HOST_FENCE_TIMEOUT_MS=1000` and opens a range while a kernel on another
   stream spins on a flag in host memory. The range must decline with `CONCURRENT_DISPATCH` after

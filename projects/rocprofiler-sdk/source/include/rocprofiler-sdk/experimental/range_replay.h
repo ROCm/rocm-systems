@@ -74,6 +74,10 @@ typedef enum rocprofiler_range_replay_status_t  // NOLINT(performance-enum-size)
     ROCPROFILER_RANGE_REPLAY_STATUS_HOST_JMP_NOT_SET,  ///< Tool asked for host replay, but the
                                                        ///< application did not arm a sigsetjmp in
                                                        ///< the caller's frame
+    ROCPROFILER_RANGE_REPLAY_STATUS_PACKET_REPLAY_UNSUPPORTED,  ///< The tool did not ask for host
+                                                                ///< replay. Recorded packets are
+                                                                ///< not re-submitted; the range
+                                                                ///< runs once
     ROCPROFILER_RANGE_REPLAY_STATUS_LAST,
 } rocprofiler_range_replay_status_t;
 
@@ -96,21 +100,13 @@ typedef enum rocprofiler_range_replay_status_t  // NOLINT(performance-enum-size)
  *   execution and the final replayed pass (0 when verification is off or nothing diverged).
  *
  * Unlike @ref ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY, which re-executes one dispatch in place
- * before the application observes its completion, a range covers a *sequence* of dispatches that
- * the application has already observed. The SDK therefore records the range while it runs, and
- * re-executes the recording afterwards: pass 0 is the application's own run, passes 1..N-1 are
- * SDK-driven re-executions of the recorded dispatches from the range-entry memory state.
+ * before the application observes its completion, a range covers a *sequence* the application has
+ * already run. This line does not re-submit recorded packets. Extra passes exist only for host
+ * replay: pass 0 is the application's own run, and passes 1..N-1 re-enter that same code.
  *
- * @warning Beta. A range is replayed only when every recorded dispatch targets one queue on one
- * agent, no HIP graph launch occurs inside it, no async copy writes device memory inside it, no
- * device allocation is made or freed inside it, and no other thread dispatches to the same agent
- * while it is open. Repeatability rests on the same
- * device-memory snapshot kernel replay uses (coarse-grained device allocations owned by the agent
- * plus module-scope @c __device__ / @c __constant__ variables), so unified/managed memory, host and
- * fine-grained memory, and virtual-memory-mapped allocations are not restored between passes.
- * Replayed passes are serialized dispatch-by-dispatch, so concurrency-sensitive measurements differ
- * from pass 0. A range whose kernels consume values the host recomputed inside the range is not a
- * candidate for packet replay.
+ * @warning Beta. Recorded packets are not re-submitted. A tool that leaves @c host_replay unset
+ * gets one execution and @ref ROCPROFILER_RANGE_REPLAY_STATUS_PACKET_REPLAY_UNSUPPORTED, unless an
+ * earlier decline or an opt-out applies.
  *
  * Host replay (@c host_replay set during CONFIG, range opened with
  * @ref ROCPROFILER_RANGE_REPLAY_HOST_BEGIN) lifts the packet restrictions: nothing is recorded, and
@@ -156,7 +152,8 @@ typedef struct rocprofiler_callback_tracing_range_replay_data_t
     /// counting the application's own execution as pass 0. The tool sets this during CONFIG
     /// @ref ROCPROFILER_CALLBACK_PHASE_ENTER; the SDK then calls it (if non-null) to size the loop:
     ///  - left NULL     => the range is observed but never re-executed (per-range opt-out)
-    ///  - returns N > 1 => the recorded range is re-executed N-1 times after the live run
+    ///  - returns N > 1 => host replay re-enters the range N-1 times. Without host replay the
+    ///                     range runs once and closes PACKET_REPLAY_UNSUPPORTED
     ///  - returns 0     => open-ended re-execution (requires @c replay_continue_cb)
     ///  - returns 1     => opt-out, same as NULL
     ///
@@ -197,18 +194,21 @@ typedef struct rocprofiler_callback_tracing_range_replay_data_t
     ///
     /// @var host_replay
     /// @brief [CONFIG] Set non-zero during CONFIG @ref ROCPROFILER_CALLBACK_PHASE_ENTER to re-run
-    /// the host code inside the range instead of re-submitting recorded packets. Requires the
-    /// application to open the range with @ref ROCPROFILER_RANGE_REPLAY_HOST_BEGIN; otherwise the
-    /// range declines with @ref ROCPROFILER_RANGE_REPLAY_STATUS_HOST_JMP_NOT_SET. Zero (the
-    /// default) keeps packet replay.
+    /// the host code inside the range. Requires the application to open the range with
+    /// @ref ROCPROFILER_RANGE_REPLAY_HOST_BEGIN; otherwise the range declines with
+    /// @ref ROCPROFILER_RANGE_REPLAY_STATUS_HOST_JMP_NOT_SET. Zero (the default) does not replay:
+    /// the range runs once and closes with
+    /// @ref ROCPROFILER_RANGE_REPLAY_STATUS_PACKET_REPLAY_UNSUPPORTED, unless an earlier decline
+    /// applies. Opt-out (@c pass_count_cb left NULL, or returning 1) is still
+    /// @ref ROCPROFILER_RANGE_REPLAY_STATUS_NO_PASS_COUNT.
 } rocprofiler_callback_tracing_range_replay_data_t;
 
 /**
  * @brief Open a replay range on the calling thread.
  *
- * The dispatches the calling thread submits until the matching @ref rocprofiler_range_replay_end
- * are recorded, and a device-memory snapshot of the range's agent is taken before the first of them
- * executes. Ranges are thread-scoped and do not nest.
+ * Submissions until the matching @ref rocprofiler_range_replay_end are observed so a decline can
+ * be reported. Extra passes run only when the tool set @c host_replay and the application armed
+ * @ref ROCPROFILER_RANGE_REPLAY_HOST_BEGIN. Ranges are thread-scoped and do not nest.
  *
  * Emits @ref ROCPROFILER_RANGE_REPLAY_CONFIG so the tool can supply the pass count.
  *
@@ -306,12 +306,13 @@ rocprofiler_status_t
 rocprofiler_range_replay_get_host_pass(uint64_t* pass) ROCPROFILER_API;
 
 /**
- * @brief Close the replay range open on the calling thread and run its extra passes.
+ * @brief Close the replay range open on the calling thread.
  *
- * Drains the agent, then re-executes the recorded dispatches from the snapshot taken at
- * @ref rocprofiler_range_replay_begin, raising @ref ROCPROFILER_RANGE_REPLAY_PASS around each pass
- * and @ref ROCPROFILER_RANGE_REPLAY_CLOSE once at the end. Blocks the calling thread for the
- * duration of the replay.
+ * A range that was not opened for host replay closes after the application's own run. It does not
+ * re-submit recorded packets. CLOSE reports
+ * @ref ROCPROFILER_RANGE_REPLAY_STATUS_PACKET_REPLAY_UNSUPPORTED when the tool asked for more than
+ * one pass, @ref ROCPROFILER_RANGE_REPLAY_STATUS_NO_PASS_COUNT when it opted out, or an earlier
+ * decline.
  *
  * For a host-replay range this function does not return after passes 0..N-2: it waits for every
  * GPU queue to go idle, restores device memory and the registered host regions, raises
