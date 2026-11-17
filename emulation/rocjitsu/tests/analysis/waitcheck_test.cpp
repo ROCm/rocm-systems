@@ -12623,7 +12623,7 @@ TEST(WaitcheckTest, ReportsKmcntZeroForOverflowSizedSmemQueue) {
   EXPECT_EQ(report.diagnostics[0].reg.cls, RegClass::SGPR);
   EXPECT_EQ(report.diagnostics[0].reg.index, kOverflowKmcntBaseSgpr);
   EXPECT_EQ(report.diagnostics[0].required_count, 0u);
-  EXPECT_NE(report.diagnostics[0].message.find("s_wait_kmcnt <= 0"), std::string::npos);
+  EXPECT_NE(report.diagnostics[0].message.find("s_wait_kmcnt 0"), std::string::npos);
 }
 
 TEST(WaitcheckTest, NonzeroKmcntDoesNotRetireOldestSmemResult) {
