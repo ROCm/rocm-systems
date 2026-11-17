@@ -33,6 +33,7 @@ void SetUseFabricMem(bool use);
 void SetFabricMemCapable(bool capable);
 void SetFabricAddSelfFail(bool fail);
 void SetFabricExchangeFail(bool fail);
+int GetFabricExchangeCalls();
 void SetFabricPeerBase(void* ptr);
 void SetFabricPeerStride(size_t stride);
 void SetFabricVmmQueryOk(bool ok);

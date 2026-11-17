@@ -590,9 +590,12 @@ static ncclResult_t ginAnvilRegMrSymFabric(ginAnvilCollCtx* cctx, void* data, si
     if (ag != ncclSuccess) return ag;
   }
 
-  // Everything from here to the publish vote below is collective, so a local
-  // failure is carried in publishOk rather than returned: a one-sided return
-  // leaves the peers blocked in ginAnvilAllgatherOk instead of failing with us.
+  // Setup is the one vote that stays in front of exchangeMemPtrs: that call is
+  // itself collective, so a rank that failed setup cannot skip it. Everything
+  // after exchange (publishing the buffer, installing remote VAs) is local.
+  // Those failures are carried in publishOk and checked once, below. A
+  // one-sided return would leave peers blocked in that vote. When the vote
+  // fails, each rank drops whatever it already published.
   int publishOk = 1;
   bool refTaken = false;
 
@@ -633,15 +636,12 @@ static ncclResult_t ginAnvilRegMrSymFabric(ginAnvilCollCtx* cctx, void* data, si
     if (guard.handler == nullptr || !guard.retained || !setupOk) return ncclSystemError;
 
     // Do not hold pluginMutex across exchangeMemPtrs (bootstrapAllGather).
+    // A failed exchange must still reach the publish vote: peers that already
+    // exported their buffer roll their own state back when that vote fails.
     ret = guard.handler->exchangeMemPtrs();
-    {
-      const int exchangeOk = (ret == ncclSuccess) ? 1 : 0;
-      ncclResult_t ag = ginAnvilAllgatherOk(comm, exchangeOk);
-      if (ag != ncclSuccess) return ag;
-    }
-    if (ret != ncclSuccess) return ret;
+    if (ret != ncclSuccess) publishOk = 0;
 
-    {
+    if (publishOk) {
       std::lock_guard<std::mutex> lock(pluginMutex);
       auto refIt = fabricBuffers.emplace(key, GinAnvilFabricBuf{}).first;
       GinAnvilFabricBuf& buf = refIt->second;
