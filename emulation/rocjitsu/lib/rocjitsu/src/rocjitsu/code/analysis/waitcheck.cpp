@@ -2711,6 +2711,7 @@ private:
       auto &requirement = requirements[counter_index(WaitCounterKind::VaVdst)];
       if (!requirement || requirement->required_count != 0) {
         if (auto trans = trans_use_requirement(requirement_state->trans_use_hazards, consumer, du,
+                                               requirement_state->vgpr_msb, arch,
                                                consumer_section_offset, consumer_file_offset))
           requirement = std::move(trans);
       }
@@ -3109,7 +3110,8 @@ private:
         for (size_t i = 0; i < sources.size(); ++i) {
           if (history.writers[i] != unseen || !du.defs.intersects(sources[i].reg) ||
               (sources[i].bytes != 0xf &&
-               !(trans_operand_bytes(inst, sources[i].reg, false) & sources[i].bytes)))
+               !(trans_operand_bytes(inst, sources[i].reg, false, entry.vgpr_msb, arch) &
+                 sources[i].bytes)))
             continue;
           history.writers[i] = history.age;
           if (history.exec == unseen || (wait && !history.crossed_wait))
@@ -3251,7 +3253,8 @@ private:
               offset == relative_cfg_m0_.end() ? ScalarOffsetValues{} : offset->second);
           const auto file_offset = group.file_offset - group.section_offset + entry.section_offset;
           if (auto result =
-                  trans_use_requirement(hazards, inst, du, entry.section_offset, file_offset))
+                  trans_use_requirement(hazards, inst, du, entry.vgpr_msb, ROCJITSU_CODE_ARCH_RDNA3,
+                                        entry.section_offset, file_offset))
             return result;
         }
         advance_trans_use_hazards(hazards, inst);
@@ -3593,9 +3596,9 @@ private:
       }
       if (actual && counter == WaitCounterKind::VaVdst) {
         if (arch == ROCJITSU_CODE_ARCH_RDNA3) {
-          auto hazard =
-              trans_use_requirement(state.trans_use_hazards, instruction, du, view.section_offset,
-                                    group.file_offset - group.section_offset + view.section_offset);
+          auto hazard = trans_use_requirement(
+              state.trans_use_hazards, instruction, du, state.vgpr_msb, arch, view.section_offset,
+              group.file_offset - group.section_offset + view.section_offset);
           if (hazard)
             return hazard;
         }
@@ -4996,25 +4999,52 @@ private:
   }
 
   void add_source_use(RegisterSet &uses, RegisterRef ref, const Operand &op,
-                      const VgprMsbState &banks, rj_code_arch_t arch) const {
+                      const Instruction &inst, const VgprMsbState &banks,
+                      rj_code_arch_t arch) const {
     if (ref.cls != RegClass::VGPR || !current_kernel_) {
       expand_vgpr_msb_ref(uses, ref, op, banks, arch);
       return;
     }
-    // An out-of-range vector source reads VGPR0. Use each physical component
-    // after VGPR-MSB selection: a wide operand can straddle the allocation.
+    // Memory sources substitute VGPR0 for each out-of-range dword. On GFX11/12,
+    // VALU instead substitutes the base of the whole tuple when
+    // any dword is out of range; VOPD preserves the low two source-index bits.
     // Different descriptor aliases, or S_ALLOC_VGPR, may leave both the
-    // encoded component and VGPR0 possible.
+    // encoded operand and its fallback possible.
     const uint32_t guaranteed =
         source_allocation_may_change_ ? 0 : current_kernel_->min_vgprs;
+    const uint32_t possible = source_allocation_may_change_ || !current_kernel_->max_vgprs
+                                  ? std::numeric_limits<uint32_t>::max()
+                                  : current_kernel_->max_vgprs;
+    const bool valu_tuple_fallback =
+        (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5) &&
+        (inst.flags() & VALU);
+    const bool vopd_source =
+        op.is_vopd_source() || inst.mnemonic().find(" :: ") != std::string_view::npos;
     const auto add_at = [&](uint32_t base) {
+      if (valu_tuple_fallback) {
+        if (base + ref.width <= possible)
+          uses.expand({RegClass::VGPR, static_cast<uint16_t>(base), ref.width});
+        if (base + ref.width > guaranteed) {
+          const uint32_t low = vopd_source ? base % 4 : 0;
+          uses.expand({RegClass::VGPR,
+                       static_cast<uint16_t>(low), ref.width});
+          // CDNA5 appends VGPR_MSB before the allocation check. The manual
+          // leaves the subsequent fallback's bank selection unstated, so keep
+          // the selected-bank reading possible until hardware resolves it.
+          if (arch == ROCJITSU_CODE_ARCH_CDNA5 && base >= 256)
+            uses.expand({RegClass::VGPR,
+                         static_cast<uint16_t>((base & ~255u) + low), ref.width});
+        }
+        return;
+      }
       if (base + ref.width <= guaranteed) {
         uses.expand({RegClass::VGPR, static_cast<uint16_t>(base), ref.width});
         return;
       }
       for (uint32_t index = base; index < base + ref.width; ++index) {
-        const RegisterRef component{RegClass::VGPR, static_cast<uint16_t>(index), 1};
-        uses.expand(component);
+        if (index < possible)
+          uses.expand({RegClass::VGPR, static_cast<uint16_t>(index), 1});
         if (index >= guaranteed)
           uses.expand({RegClass::VGPR, 0, 1});
       }
@@ -5234,8 +5264,12 @@ private:
     du.uses.expand({RegClass::M0, 0, 1});
     const auto resolve = [&](const Operand &op, bool relative, bool dst, RegisterSet &regs) {
       if (!relative) {
-        if (auto ref = register_operand(op, arch))
-          expand_vgpr_msb_ref(regs, *ref, op, banks, arch);
+        if (auto ref = register_operand(op, arch)) {
+          if (!dst && vector)
+            add_source_use(regs, *ref, op, inst, banks, arch);
+          else
+            expand_vgpr_msb_ref(regs, *ref, op, banks, arch);
+        }
         return true;
       }
       const unsigned width = std::max(1, op.size_bits() / 32);
@@ -5421,7 +5455,7 @@ private:
       if (add_adjusted_source_use(du, inst, *op, i, wavefront_size))
         continue;
       if (auto ref = register_operand(*op, arch))
-        add_source_use(du.uses, *ref, *op, state, arch);
+        add_source_use(du.uses, *ref, *op, inst, state, arch);
     }
     RegisterSet implicit_uses;
     inst.implicit_uses(implicit_uses);
@@ -5436,7 +5470,7 @@ private:
         if (op == nullptr)
           continue;
         if (auto ref = op->to_register_ref(); ref && ref->cls == RegClass::VGPR)
-          add_source_use(implicit_uses, *ref, *op, state, arch);
+          add_source_use(implicit_uses, *ref, *op, inst, state, arch);
       }
     }
     // D16 memory loads preserve the opposite half for liveness, but the two
@@ -5609,7 +5643,21 @@ private:
     return mnemonic == "s_endpgm" || mnemonic == "s_endpgm_saved";
   }
 
-  [[nodiscard]] static uint8_t memory_source_mask(const Instruction &inst, RegisterRef word) {
+  [[nodiscard]] bool source_operand_contains(const Instruction &inst, const Operand &op,
+                                             RegisterRef word, const VgprMsbState &banks,
+                                             rj_code_arch_t arch) const {
+    const auto ref = op.to_register_ref();
+    if (!ref || ref->cls != word.cls)
+      return false;
+    if (ref->cls != RegClass::VGPR)
+      return word.index >= ref->index && word.index < ref->index + ref->width;
+    RegisterSet physical;
+    add_source_use(physical, *ref, op, inst, banks, arch);
+    return physical.contains(word);
+  }
+
+  [[nodiscard]] uint8_t memory_source_mask(const Instruction &inst, RegisterRef word,
+                                           const VgprMsbState &banks, rj_code_arch_t arch) const {
     // A store can name the same VGPR as both data and an address component.
     // Union the bytes actually read by each decoded operand before narrowing.
     uint8_t bytes = 0;
@@ -5617,9 +5665,7 @@ private:
       const Operand *op = inst.src_operand(i);
       if (!op || !inst.tracks_explicit_source(i))
         continue;
-      const auto ref = op->to_register_ref();
-      if (ref && ref->cls == word.cls && word.index >= ref->index &&
-          word.index < ref->index + ref->width)
+      if (source_operand_contains(inst, *op, word, banks, arch))
         bytes |= op->register_byte_mask();
     }
     // An implicit use has no decoded subregister selection.
@@ -5629,10 +5675,12 @@ private:
   }
 
   [[nodiscard]] uint8_t instruction_register_mask(const Instruction &inst, RegisterRef ref,
-                                                  WaitcheckAccessKind access) const {
+                                                  WaitcheckAccessKind access,
+                                                  const VgprMsbState &banks,
+                                                  rj_code_arch_t arch) const {
     if (access == WaitcheckAccessKind::Use && ref.cls == RegClass::VGPR && tracks_d16_halves_ &&
         inst.is_memory_op())
-      return memory_source_mask(inst, ref);
+      return memory_source_mask(inst, ref, banks, arch);
     const auto partial = access == WaitcheckAccessKind::Def
                              ? partial_d16_load_def(inst, tracks_d16_halves_)
                              : std::nullopt;
@@ -5724,7 +5772,8 @@ private:
   [[nodiscard]] std::optional<RegisterRef>
   first_dependency_intersection(const PendingEvent &event, const Instruction &inst,
                                 const InstDefUse &du, WaitcheckAccessKind access,
-                                rj_code_arch_t arch, const ScalarOffsetValues &m0) const {
+                                rj_code_arch_t arch, const ScalarOffsetValues &m0,
+                                const VgprMsbState &banks) const {
     const RegisterSet &current_regs = access == WaitcheckAccessKind::Use ? du.uses : du.defs;
     std::optional<RegisterRef> result;
     event.regs.for_each([&](RegisterRef ref) {
@@ -5735,7 +5784,8 @@ private:
           result = RegisterRef{RegClass::VCC, static_cast<uint16_t>(overlap & 1 ? 0 : 1), 1};
       } else if (!result && current_regs.contains(ref) &&
                  (!event.partial_reg || *event.partial_reg != ref ||
-                  (event.partial_reg_mask & instruction_register_mask(inst, ref, access))))
+                  (event.partial_reg_mask &
+                   instruction_register_mask(inst, ref, access, banks, arch))))
         result = ref;
     });
     return result;
@@ -5779,7 +5829,8 @@ private:
     const bool single_access = is_vmem_atomic(inst.mnemonic());
     const auto overwrites_source = [&](const PendingEvent &event) {
       if (!is_xcnt_vmem_event(event) ||
-          !first_dependency_intersection(event, inst, du, WaitcheckAccessKind::Def, arch, state.m0))
+          !first_dependency_intersection(event, inst, du, WaitcheckAccessKind::Def, arch, state.m0,
+                                         state.vgpr_msb))
         return false;
       if (!inst.mnemonic().starts_with("flat_"))
         return true;
@@ -6115,15 +6166,17 @@ private:
     return mask;
   }
 
-  static uint8_t trans_operand_bytes(const Instruction &inst, RegisterRef word, bool read) {
+  uint8_t trans_operand_bytes(const Instruction &inst, RegisterRef word, bool read,
+                              const VgprMsbState &banks, rj_code_arch_t arch) const {
     uint8_t bytes = 0;
     for (int i = 0; i < (read ? inst.num_src_operands() : inst.num_dst_operands()); ++i) {
       const auto *op = read ? inst.src_operand(i) : inst.dst_operand(i);
       if (!op || (read && !inst.tracks_explicit_source(i)))
         continue;
       const auto ref = op->to_register_ref();
-      if (!ref || ref->cls != RegClass::VGPR || word.index < ref->index ||
-          word.index >= ref->index + ref->width)
+      if (!ref || ref->cls != RegClass::VGPR ||
+          (read ? !source_operand_contains(inst, *op, word, banks, arch)
+                : word.index < ref->index || word.index >= ref->index + ref->width))
         continue;
       bytes |= valu_operand_bytes(inst, *op, i);
     }
@@ -6144,15 +6197,16 @@ private:
     return 0xf;
   }
 
-  [[nodiscard]] static std::optional<CounterParityRequirement>
+  [[nodiscard]] std::optional<CounterParityRequirement>
   trans_use_requirement(const TransUseHazards &hazards, const Instruction &consumer,
-                        const InstDefUse &du, uint64_t section_offset, uint64_t file_offset) {
+                        const InstDefUse &du, const VgprMsbState &banks, rj_code_arch_t arch,
+                        uint64_t section_offset, uint64_t file_offset) const {
     if (hazards.empty() || !is_vector_alu(consumer))
       return std::nullopt;
     for (const auto &[key, hazard] : hazards) {
       const RegisterRef reg{RegClass::VGPR, static_cast<uint16_t>(key.first / 2), 1};
       const uint8_t half = key.first % 2 ? 0xc : 0x3;
-      if (!du.uses.contains(reg) || !(trans_operand_bytes(consumer, reg, true) & half))
+      if (!du.uses.contains(reg) || !(trans_operand_bytes(consumer, reg, true, banks, arch) & half))
         continue;
       PendingEvent event;
       event.counter = WaitCounterKind::VaVdst;
@@ -8793,10 +8847,10 @@ private:
                                                        wavefront_size_, incoming.m0);
       if ((event.check_uses &&
            first_dependency_intersection(event, consumer, operands, WaitcheckAccessKind::Use, arch,
-                                         incoming.m0)) ||
+                                         incoming.m0, incoming.vgpr_msb)) ||
           (event.check_defs &&
            first_dependency_intersection(event, consumer, operands, WaitcheckAccessKind::Def, arch,
-                                         incoming.m0)))
+                                         incoming.m0, incoming.vgpr_msb)))
         return false;
     }
     return reached;
@@ -9136,11 +9190,11 @@ private:
         // an explicit wait or a qualified ordering rule retires the event.
         if (event.check_uses) {
           reg = first_dependency_intersection(event, inst, du, WaitcheckAccessKind::Use, arch,
-                                              state.m0);
+                                              state.m0, state.vgpr_msb);
         }
         if (!reg && event.check_defs) {
           reg = first_dependency_intersection(event, inst, du, WaitcheckAccessKind::Def, arch,
-                                              state.m0);
+                                              state.m0, state.vgpr_msb);
           access = WaitcheckAccessKind::Def;
         }
         if (reg && guarded_lane_operand(event, inst, *reg, access, arch)) {
@@ -9158,7 +9212,8 @@ private:
                              ordered_waw(event, current_events, arch))
                 continue;
               if (event.partial_reg == part &&
-                  !(event.partial_reg_mask & instruction_register_mask(inst, part, kind)))
+                  !(event.partial_reg_mask &
+                    instruction_register_mask(inst, part, kind, state.vgpr_msb, arch)))
                 continue;
               if (read && inst.mnemonic().starts_with("v_writelane") && du.defs.contains(part))
                 continue;
@@ -10677,7 +10732,7 @@ private:
       const bool read = classification.registers == TrackedRegisterSource::VectorUses;
       RegisterSet full;
       event.regs.for_each([&](RegisterRef ref) {
-        const uint8_t bytes = trans_operand_bytes(inst, ref, read);
+        const uint8_t bytes = trans_operand_bytes(inst, ref, read, state.vgpr_msb, arch);
         if (bytes == 0xf) {
           full.expand(ref);
         } else if (bytes) {
@@ -10846,8 +10901,8 @@ private:
     apply_admission(state, inst, events, arch, true);
     if (arch == ROCJITSU_CODE_ARCH_RDNA3) {
       if (emit_report_diagnostics) {
-        if (auto hazard = trans_use_requirement(state.trans_use_hazards, inst, du, section_offset,
-                                                file_offset))
+        if (auto hazard = trans_use_requirement(state.trans_use_hazards, inst, du, state.vgpr_msb,
+                                                arch, section_offset, file_offset))
           emit_diagnostic(inst, hazard->event, hazard->reg, WaitcheckAccessKind::Use, 0,
                           section_offset, file_offset, arch);
       }
@@ -10858,7 +10913,7 @@ private:
         du.defs.for_each([&](RegisterRef ref) {
           if (ref.cls != RegClass::VGPR)
             return;
-          const uint8_t bytes = trans_operand_bytes(inst, ref, false);
+          const uint8_t bytes = trans_operand_bytes(inst, ref, false, state.vgpr_msb, arch);
           for (uint16_t half = 0; half < 2; ++half) {
             if (bytes & (half ? 0xc : 0x3))
               state.trans_use_hazards[{static_cast<uint16_t>(2 * ref.index + half), 0}] =
@@ -11049,7 +11104,8 @@ waitcheck_kernel_from_descriptor(std::string name, uint64_t descriptor_vaddr,
       arch == ROCJITSU_CODE_ARCH_CDNA4) {
     ordinary = std::min(vgprs, amdhsa::gfx90a_accum_vgpr_base(descriptor.compute_pgm_rsrc3));
     accumulators = std::min(vgprs - ordinary, amdgpu::ACC_VGPR_OFFSET);
-  } else if (arch == ROCJITSU_CODE_ARCH_CDNA5 || arch == ROCJITSU_CODE_ARCH_RDNA4) {
+  } else if (arch == ROCJITSU_CODE_ARCH_CDNA5 || arch == ROCJITSU_CODE_ARCH_RDNA3 ||
+             arch == ROCJITSU_CODE_ARCH_RDNA3_5 || arch == ROCJITSU_CODE_ARCH_RDNA4) {
     ordinary = vgprs;
   }
   return {std::move(name),
@@ -11213,7 +11269,7 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
     report.supported = false;
     report.analysis_error = "decode failed while building CFG: " + std::string(message);
   };
-  bool descriptorless_without_contract = false;
+  bool descriptorless_without_allocation = false;
   {
     std::vector<WaitcheckKernelInfo> discovered_kernels;
     if (!kernels_known)
@@ -11227,9 +11283,26 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
         !kernels_known && kernels.empty() ? all_function_entries : std::vector<uint64_t>{};
     const bool has_executable_text = std::ranges::any_of(
         code_object.text_sections(), [](const auto *section) { return section->size() != 0; });
-    descriptorless_without_contract =
-        amd_gpu_elf && kernels.empty() && has_executable_text &&
-        (!selected_kernel_entry || !options.fallback_wavefront_size);
+    const bool selected_descriptorless_entry =
+        amd_gpu_elf && !kernels_known && kernels.empty() && selected_kernel_entry &&
+        std::ranges::find(function_entries, *selected_kernel_entry) == function_entries.end() &&
+        has_executable_text;
+    if (selected_descriptorless_entry &&
+        (code_object.text_sections().size() != 1 || *selected_kernel_entry >= text_size ||
+         (*selected_kernel_entry & 3u) != 0)) {
+      report.supported = false;
+      report.analysis_error = "descriptorless kernel entry is outside aligned executable text";
+      return report;
+    }
+    if (selected_descriptorless_entry && !options.fallback_wavefront_size) {
+      report.supported = false;
+      report.analysis_error = "descriptorless kernel entry needs an explicit wavefront size";
+      return report;
+    }
+    const bool explicit_descriptorless_entry =
+        selected_descriptorless_entry && options.fallback_wavefront_size;
+    descriptorless_without_allocation =
+        amd_gpu_elf && kernels.empty() && has_executable_text;
     analyzer.defer_shared_parity_finalization(kernels.size() + function_entries.size() > 1);
     if (kernels_known && kernels.empty()) {
       if (has_executable_text) {
@@ -11242,12 +11315,13 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
     if (selected_kernel_entry &&
         std::ranges::find(kernels, *selected_kernel_entry, &WaitcheckKernelInfo::entry_offset) ==
             kernels.end() &&
-        std::ranges::find(function_entries, *selected_kernel_entry) == function_entries.end()) {
+        std::ranges::find(function_entries, *selected_kernel_entry) == function_entries.end() &&
+        !explicit_descriptorless_entry) {
       report.supported = false;
       report.analysis_error = "kernel entry offset is not present in the code object";
       return report;
     }
-    if (kernels.empty() && function_entries.empty()) {
+    if (kernels.empty() && function_entries.empty() && !explicit_descriptorless_entry) {
       auto blocks =
           BasicBlock::build_cfg(code_object, analyzer.decoder(), arch,
                                 {.decode_policy = BasicBlock::DecodePolicy::FullSection,
@@ -11314,18 +11388,24 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
             break;
         }
       }
+      if (explicit_descriptorless_entry && report.supported && !report.stopped_early)
+        analyze_entry(*selected_kernel_entry, nullptr, fallback_wavefront_size);
       if (report.supported && !report.stopped_early)
         analyzer.finish_shared_parity();
     }
   }
   if (!report.supported)
     return report;
-  if (descriptorless_without_contract) {
+  if (descriptorless_without_allocation) {
     report.complete = false;
-    if (report.analysis_error.empty())
-      report.analysis_error =
-          "descriptorless code needs an explicit entry offset and wavefront size for complete "
-          "analysis";
+    if (report.analysis_error.empty()) {
+      report.analysis_error = selected_kernel_entry && options.fallback_wavefront_size
+                                  ? "descriptorless code has no VGPR allocation; wait analysis "
+                                    "cannot be complete"
+                                  : "descriptorless code needs an explicit entry offset and "
+                                    "wavefront size and has no VGPR allocation; wait analysis "
+                                    "cannot be complete";
+    }
   }
   if (report.stopped_early)
     return report;

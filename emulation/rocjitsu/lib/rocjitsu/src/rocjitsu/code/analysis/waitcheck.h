@@ -118,10 +118,10 @@ struct WaitcheckOptions {
   /// Descriptor-less ELF code objects, including helper-only modules, retain
   /// the target's conventional default (wave32 on RDNA3/3.5/4 and CDNA5;
   /// wave64 on CDNA3/4). Supply 32 or 64
-  /// when the actual ELF wave mode is known. For executable descriptorless
-  /// code, a complete result also requires an explicit entry offset;
-  /// otherwise the fallback is diagnostic-only. Described kernels always use
-  /// their descriptor, even when this override is present.
+  /// when the actual ELF wave mode is known. Executable descriptorless code
+  /// remains diagnostic-only because its VGPR allocation is unknown, even
+  /// with an explicit entry offset. Described kernels always use their
+  /// descriptor, even when this override is present.
   std::optional<uint32_t> fallback_wavefront_size = std::nullopt;
   /// @brief Maximum diagnostics to retain. Analysis still reports failure after
   /// the first hazard when this is zero.
@@ -266,8 +266,8 @@ waitcheck_kernels_exact(const AmdGpuCodeObject &code_object);
 ///
 /// @details Offsets in diagnostics are relative to each section and to the ELF
 /// file offset when the section exposes one. Executable descriptorless code
-/// without both an explicit entry offset and wavefront size remains incomplete,
-/// although reachable diagnostics are retained.
+/// remains incomplete because its VGPR allocation is unknown, although
+/// reachable diagnostics are retained.
 [[nodiscard]] WaitcheckReport analyze_waitcnts(const CodeObject &code_object, rj_code_arch_t arch,
                                                WaitcheckOptions options = {});
 
@@ -277,7 +277,8 @@ waitcheck_kernels_exact(const AmdGpuCodeObject &code_object);
 /// conservatively combines their allocation bounds; distinct wavefront modes
 /// are analyzed separately. Reachable functions are included, while kernels
 /// at other entries and unrelated executable sections are skipped. Descriptorless
-/// callers must also supply fallback_wavefront_size for a complete result.
+/// callers may supply fallback_wavefront_size to decode the selected entry,
+/// but the result remains incomplete without VGPR allocation bounds.
 /// Dispatch callers with a descriptor must use the WaitcheckKernelInfo overload
 /// below with exact descriptor bounds and wavefront mode.
 [[nodiscard]] WaitcheckReport analyze_waitcnts_for_kernel(const CodeObject &code_object,

@@ -114,24 +114,27 @@ template <typename T> void append_inst(std::vector<uint32_t> &words, const T &in
   std::vector<uint32_t> kd_symbol_names;
   std::vector<uint32_t> function_symbol_names;
   std::vector<uint32_t> allocation_alias_names;
-  const bool gfx12_alias =
+  const bool wide_allocation_alias =
       allocation_alias &&
-      (mach == EF_AMDGPU_MACH_AMDGCN_GFX1200 || mach == EF_AMDGPU_MACH_AMDGCN_GFX1201 ||
+      (mach == EF_AMDGPU_MACH_AMDGCN_GFX1100 || mach == EF_AMDGPU_MACH_AMDGCN_GFX1150 ||
+       mach == EF_AMDGPU_MACH_AMDGCN_GFX1151 ||
+       mach == EF_AMDGPU_MACH_AMDGCN_GFX1200 || mach == EF_AMDGPU_MACH_AMDGCN_GFX1201 ||
        mach == EF_AMDGPU_MACH_AMDGCN_GFX1250 || mach == EF_AMDGPU_MACH_AMDGCN_GFX1251);
   for (const auto &[name, words] : kernels) {
     (void)words;
     kd_symbol_names.push_back(add_elf_name(strtab, name + ".kd"));
     function_symbol_names.push_back(add_elf_name(strtab, name));
-    if (gfx12_alias)
+    if (wide_allocation_alias)
       allocation_alias_names.push_back(add_elf_name(strtab, name + ".fixture_allocation.kd"));
   }
 
   const uint64_t rodata_offset = text_offset + text_size;
   const uint64_t rodata_vaddr = text_vaddr + text_size + load_align;
-  const uint64_t rodata_size = kernels.size() * (gfx12_alias ? 2 : 1) * kernel_descriptor_size;
+  const uint64_t rodata_size =
+      kernels.size() * (wide_allocation_alias ? 2 : 1) * kernel_descriptor_size;
   const uint64_t strtab_offset = rodata_offset + rodata_size;
   const uint64_t symtab_offset = align_up(strtab_offset + strtab.size(), 8);
-  const size_t sym_count = (gfx12_alias ? 3 : 2) * kernels.size() + 1;
+  const size_t sym_count = (wide_allocation_alias ? 3 : 2) * kernels.size() + 1;
   const uint64_t shstrtab_offset = symtab_offset + sym_count * sizeof(Elf64_Sym);
   const uint64_t shoff = align_up(shstrtab_offset + shstrtab.size(), 8);
   constexpr uint16_t section_count = 6;
@@ -203,7 +206,7 @@ template <typename T> void append_inst(std::vector<uint32_t> &words, const T &in
                 sizeof(kernel_code_properties));
     std::memcpy(image.data() + rodata_offset + i * kernel_descriptor_size, kernel_descriptor.data(),
                 kernel_descriptor.size());
-    if (gfx12_alias) {
+    if (wide_allocation_alias) {
       // The small descriptor keeps minimum-allocation path proofs exercised.
       // This second dispatch descriptor makes the maximum large enough for
       // unrelated instruction fixtures that use arbitrary encoded VGPRs.
@@ -213,10 +216,9 @@ template <typename T> void append_inst(std::vector<uint32_t> &words, const T &in
           static_cast<int64_t>(text_vaddr + entry_offsets[i]) - static_cast<int64_t>(alias_vaddr);
       std::memcpy(kernel_descriptor.data() + kernel_code_entry_byte_offset_offset, &alias_entry,
                   sizeof(alias_entry));
-      const uint32_t full_vgprs =
-          (mach == EF_AMDGPU_MACH_AMDGCN_GFX1200 || mach == EF_AMDGPU_MACH_AMDGCN_GFX1201) && wave32
-              ? 31u
-              : 63u;
+      const bool rdna_wave32 = wave32 && mach != EF_AMDGPU_MACH_AMDGCN_GFX1250 &&
+                               mach != EF_AMDGPU_MACH_AMDGCN_GFX1251;
+      const uint32_t full_vgprs = rdna_wave32 ? 31u : 63u;
       std::memcpy(kernel_descriptor.data() + 48, &full_vgprs, sizeof(full_vgprs));
       std::memcpy(image.data() + rodata_offset + alias_index * kernel_descriptor_size,
                   kernel_descriptor.data(), kernel_descriptor.size());
@@ -239,7 +241,7 @@ template <typename T> void append_inst(std::vector<uint32_t> &words, const T &in
     function_symbol.st_shndx = 1;
     function_symbol.st_value = text_vaddr + entry_offsets[i];
     function_symbol.st_size = kernels[i].second.size() * sizeof(uint32_t);
-    if (gfx12_alias) {
+    if (wide_allocation_alias) {
       Elf64_Sym &alias = syms[2 * kernels.size() + 1 + i];
       alias.st_name = allocation_alias_names[i];
       alias.st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeObject);

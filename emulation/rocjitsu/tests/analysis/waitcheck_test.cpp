@@ -20,6 +20,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/machine_insts.h"
@@ -1718,7 +1719,8 @@ TEST(WaitcheckTest, RelativeVectorSourcesFallBackOnlyOutsideTheDescriptorAllocat
       // Wave32 allocates 8 or 16 VGPRs. With M0 = 5, MOVRELS reads v[4+5].
       std::vector<uint32_t> words{0xbefd0085, 0xd8d80000, (producer << 24) | 1, 0x7e0e8704,
                                   0xbfb00000};
-      auto image = waitcheck_test::make_gfx_code_object(words, EF_AMDGPU_MACH_AMDGCN_GFX1100, true);
+      auto image = waitcheck_test::make_gfx_code_object(
+          words, EF_AMDGPU_MACH_AMDGCN_GFX1100, /*wave32=*/true, /*allocation_alias=*/false);
       // The fixture places its descriptor directly after .text.
       const size_t rsrc1_offset = 0x100 + words.size() * sizeof(uint32_t) + 48;
       std::memcpy(image.data() + rsrc1_offset, &vgpr_field, sizeof(vgpr_field));
@@ -8216,6 +8218,22 @@ TEST(WaitcheckTest, GenericGfx1250FixtureKeepsAllocationBoundsSeparate) {
   EXPECT_NE(exact[0].max_vgprs, exact[1].max_vgprs);
 }
 
+TEST(WaitcheckTest, Gfx11DescriptorsExposeOrdinaryMemoryAllocation) {
+  for (const auto [arch, machine] :
+       {std::pair{ROCJITSU_CODE_ARCH_RDNA3, EF_AMDGPU_MACH_AMDGCN_GFX1100},
+        std::pair{ROCJITSU_CODE_ARCH_RDNA3_5, EF_AMDGPU_MACH_AMDGCN_GFX1150},
+        std::pair{ROCJITSU_CODE_ARCH_RDNA3_5, EF_AMDGPU_MACH_AMDGCN_GFX1151}}) {
+    SCOPED_TRACE(machine);
+    const auto image = waitcheck_test::make_gfx_code_object(
+        {0xbfb00000u}, machine, /*wave32=*/true, /*allocation_alias=*/false);
+    const AmdGpuCodeObject object(image.data(), image.size());
+    const auto exact = waitcheck_kernels_exact(object);
+    ASSERT_EQ(exact.size(), 1u);
+    EXPECT_EQ(exact[0].max_memory_vgprs, exact[0].max_vgprs);
+    EXPECT_GT(exact[0].max_memory_vgprs, 0u);
+  }
+}
+
 TEST(WaitcheckTest, ExactDescriptorDiscoveryKeepsDispatchAllocation) {
   std::vector<uint32_t> program;
   append_inst(program, global_load_b32(16));
@@ -8469,6 +8487,229 @@ TEST(WaitcheckTest, OutOfRangeVectorSourcesReadVgprZero) {
           EXPECT_EQ(warning, !waited) << diagnostic_summary(report);
         }
       }
+    }
+  }
+}
+
+TEST(WaitcheckTest, OutOfRangeValuTupleAndVopdSourcesUseArchitecturalFallback) {
+  enum class Consumer { WideOutside, WideStraddling, Vopd };
+  for (const auto [arch, machine, allocation] :
+       {std::tuple{ROCJITSU_CODE_ARCH_RDNA4, EF_AMDGPU_MACH_AMDGCN_GFX1201, 8u},
+        std::tuple{ROCJITSU_CODE_ARCH_CDNA5, EF_AMDGPU_MACH_AMDGCN_GFX1250, 16u}}) {
+    for (Consumer kind : {Consumer::WideOutside, Consumer::WideStraddling, Consumer::Vopd}) {
+      for (bool waited : {false, true}) {
+        SCOPED_TRACE(testing::Message() << machine << '/' << static_cast<int>(kind) << '/'
+                                        << waited);
+        std::vector<uint32_t> program;
+        append_inst(program, global_load_b32(1, 2));
+        if (waited)
+          append_inst(program, sopp(64, 0)); // s_wait_loadcnt 0
+        const uint64_t consumer = program.size() * sizeof(uint32_t);
+        if (kind == Consumer::Vopd) {
+          program.insert(program.end(), {0xca100121u, 0x04040102u});
+        } else {
+          const uint32_t source = kind == Consumer::WideOutside ? 32 : allocation - 1;
+          program.push_back(0x3e080080u | (source << 9)); // v_lshlrev_b64 v[4:5],0,v[source:source+1]
+        }
+        append_inst(program, sopp(64, 0));
+        append_inst(program, s_endpgm());
+        const auto report =
+            analyze_gfx12_with_vgpr_allocation(program, machine, arch, true, allocation);
+        ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+        const auto count = std::ranges::count_if(report.diagnostics, [&](const auto &d) {
+          return d.counter == WaitCounterKind::Load && d.producer_section_offset == 0 &&
+                 d.section_offset == consumer && d.reg.cls == RegClass::VGPR && d.reg.index == 1;
+        });
+        EXPECT_EQ(count, waited ? 0 : 1) << diagnostic_summary(report);
+      }
+    }
+  }
+}
+
+TEST(WaitcheckTest, Gfx115xOutOfRangeVopdSourcePreservesIndexModuloFour) {
+  for (uint32_t machine : {EF_AMDGPU_MACH_AMDGCN_GFX1150,
+                           EF_AMDGPU_MACH_AMDGCN_GFX1151}) {
+    for (bool waited : {false, true}) {
+      SCOPED_TRACE(testing::Message() << machine << '/' << waited);
+      std::vector<uint32_t> program{0xd8d80000u, 0x02000004u}; // ds_load_b32 v2,v4
+      if (waited)
+        program.push_back(0xbf89fc07u); // s_waitcnt lgkmcnt(0)
+      const uint64_t consumer = program.size() * sizeof(uint32_t);
+      program.insert(program.end(), {0xca100122u, 0x04040108u}); // v_dual_mov v4,v34 :: v5,v8
+      program.push_back(0xbf89fc07u);
+      append_inst(program, s_endpgm());
+      const auto report = analyze_gfx12_with_vgpr_allocation(
+          program, machine, ROCJITSU_CODE_ARCH_RDNA3_5, true, 32);
+      ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+      const auto count = std::ranges::count_if(report.diagnostics, [&](const auto &d) {
+        return d.counter == WaitCounterKind::Ds && d.producer_section_offset == 0 &&
+               d.section_offset == consumer && d.reg.cls == RegClass::VGPR && d.reg.index == 2;
+      });
+      EXPECT_EQ(count, waited ? 0 : 1) << diagnostic_summary(report);
+    }
+  }
+}
+
+TEST(WaitcheckTest, Gfx1100OutOfRangeValuTupleAndVopdSources) {
+  for (bool vopd : {false, true}) {
+    for (bool waited : {false, true}) {
+      SCOPED_TRACE(testing::Message() << vopd << '/' << waited);
+      std::vector<uint32_t> program{0xd8d80000u, 0x01000004u}; // ds_load_b32 v1,v4
+      if (waited)
+        program.push_back(0xbf89fc07u); // s_waitcnt lgkmcnt(0)
+      const uint64_t consumer = program.size() * sizeof(uint32_t);
+      if (vopd)
+        program.insert(program.end(), {0xca100121u, 0x04040102u}); // v_dual_mov v4,v33 :: v5,v2
+      else {
+        // The first source is v[7:8], crossing this wave's v0-v7 allocation.
+        append_inst(program, rdna3::build_vop3(rdna3::kVAddF64Vop3,
+                                               {.vdst = 4, .src0 = 263, .src1 = 258}));
+      }
+      program.push_back(0xbf89fc07u);
+      append_inst(program, s_endpgm());
+      const auto report = analyze_gfx12_with_vgpr_allocation(
+          program, EF_AMDGPU_MACH_AMDGCN_GFX1100, ROCJITSU_CODE_ARCH_RDNA3, true, 8);
+      ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+      const auto count = std::ranges::count_if(report.diagnostics, [&](const auto &d) {
+        return d.counter == WaitCounterKind::Ds && d.producer_section_offset == 0 &&
+               d.section_offset == consumer && d.reg.cls == RegClass::VGPR && d.reg.index == 1;
+      });
+      EXPECT_EQ(count, waited ? 0 : 1) << diagnostic_summary(report);
+    }
+  }
+}
+
+TEST(WaitcheckTest, Gfx1201OutOfRangeValuTupleDropsImpossibleEncodedUse) {
+  for (uint32_t destination : {1u, 7u}) {
+    for (bool waited : {false, true}) {
+      SCOPED_TRACE(testing::Message() << destination << '/' << waited);
+      std::vector<uint32_t> program;
+      append_inst(program, global_load_b32(destination, 2));
+      if (waited)
+        append_inst(program, sopp(64, 0)); // s_wait_loadcnt 0
+      const uint64_t consumer = program.size() * sizeof(uint32_t);
+      program.push_back(0x3e080080u | (7u << 9)); // v_lshlrev_b64 v[4:5],0,v[7:8]
+      append_inst(program, sopp(64, 0));
+      append_inst(program, s_endpgm());
+      const auto report = analyze_gfx12_with_vgpr_allocation(
+          program, EF_AMDGPU_MACH_AMDGCN_GFX1201, ROCJITSU_CODE_ARCH_RDNA4, true, 8);
+      ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+      const auto count = std::ranges::count_if(report.diagnostics, [&](const auto &d) {
+        return d.counter == WaitCounterKind::Load && d.section_offset == consumer &&
+               d.reg.cls == RegClass::VGPR && d.reg.index == destination;
+      });
+      EXPECT_EQ(count, !waited && destination == 1 ? 1 : 0) << diagnostic_summary(report);
+    }
+  }
+}
+
+TEST(WaitcheckTest, Gfx1201D16StoreAddressFallbackReadsBothHalves) {
+  for (bool waited : {false, true}) {
+    SCOPED_TRACE(waited);
+    std::vector<uint32_t> program{0xee08007cu, 0u, 2u}; // global_load_d16_b16 v0,v[2:3],off
+    if (waited)
+      append_inst(program, sopp(64, 0)); // s_wait_loadcnt 0
+    const uint64_t consumer = program.size() * sizeof(uint32_t);
+    program.insert(program.end(), {0xee094004u, 0u, 32u});
+    // global_store_d16_hi_b16 v32,v0,s[4:5]; v32 aliases address v0.
+    append_inst(program, sopp(64, 0));
+    append_inst(program, s_endpgm());
+    const auto report = analyze_gfx12_with_vgpr_allocation(program, EF_AMDGPU_MACH_AMDGCN_GFX1201,
+                                                           ROCJITSU_CODE_ARCH_RDNA4, true, 8);
+    ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+    const auto count = std::ranges::count_if(report.diagnostics, [&](const auto &d) {
+      return d.counter == WaitCounterKind::Load && d.producer_section_offset == 0 &&
+             d.section_offset == consumer && d.reg.cls == RegClass::VGPR && d.reg.index == 0;
+    });
+    EXPECT_EQ(count, waited ? 0 : 1) << diagnostic_summary(report);
+  }
+}
+
+TEST(WaitcheckTest, Gfx1100True16FallbackUnionsSourceHalves) {
+  enum class Sources { AliasedAndDirect, FallbackOnly, Direct };
+  for (Sources sources : {Sources::AliasedAndDirect, Sources::FallbackOnly, Sources::Direct}) {
+    for (bool waited : {false, true}) {
+      SCOPED_TRACE(testing::Message() << static_cast<int>(sources) << '/' << waited);
+      std::vector<uint32_t> program{0xd5d74000u, 0x02010104u}; // v_log_f16 v0.h,v4.l
+      if (waited)
+        program.push_back(0xbf880f9fu); // depctr_va_vdst(0)
+      const uint64_t consumer = program.size() * sizeof(uint32_t);
+      const uint32_t second = sources == Sources::FallbackOnly ? 0x02020510u : 0x02020110u;
+      program.insert(program.end(),
+                     {0xd5350804u, sources == Sources::Direct ? 0x02020100u : second});
+      append_inst(program, s_endpgm());
+      const auto image = waitcheck_test::make_gfx_code_object(
+          program, EF_AMDGPU_MACH_AMDGCN_GFX1100, /*wave32=*/true,
+          /*allocation_alias=*/false);
+      const AmdGpuCodeObject object(image.data(), image.size());
+      const auto report = analyze_waitcnts_for_kernel(object, ROCJITSU_CODE_ARCH_RDNA3, 0);
+      ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+      const auto count = std::ranges::count_if(report.diagnostics, [&](const auto &d) {
+        return d.counter == WaitCounterKind::VaVdst && d.producer_section_offset == 0 &&
+               d.section_offset == consumer && d.reg.cls == RegClass::VGPR && d.reg.index == 0;
+      });
+      EXPECT_EQ(count, waited ? 0 : 1) << diagnostic_summary(report);
+    }
+  }
+}
+
+TEST(WaitcheckTest, Gfx1250OutOfRangeValuSourceKeepsSelectedBankPossible) {
+  for (bool vopd : {false, true}) {
+    for (bool waited : {false, true}) {
+      SCOPED_TRACE(testing::Message() << vopd << '/' << waited);
+      std::vector<uint32_t> program;
+      append_inst(program, s_set_vgpr_msb(vgpr_msb_mode(0, 0, 0, 1)));
+      const uint64_t producer = program.size() * sizeof(uint32_t);
+      append_inst(program, global_load_b32(1, 2)); // Result v257 in the selected bank.
+      if (waited)
+        append_inst(program, sopp(64, 0)); // s_wait_loadcnt 0
+      append_inst(program, s_set_vgpr_msb(vgpr_msb_mode(1, 1, 1, 0)));
+      const uint64_t consumer = program.size() * sizeof(uint32_t);
+      if (vopd)
+        program.insert(program.end(), {0xca100121u, 0x04040102u}); // Source v289.
+      else
+        program.push_back(0x3e084080u); // Wide source v[288:289].
+      append_inst(program, sopp(64, 0));
+      append_inst(program, s_endpgm());
+      const auto report = analyze_gfx12_with_vgpr_allocation(
+          program, EF_AMDGPU_MACH_AMDGCN_GFX1250, ROCJITSU_CODE_ARCH_CDNA5, true, 272);
+      ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+      const auto count = std::ranges::count_if(report.diagnostics, [&](const auto &d) {
+        return d.counter == WaitCounterKind::Load && d.producer_section_offset == producer &&
+               d.section_offset == consumer && d.reg.cls == RegClass::VGPR && d.reg.index == 257;
+      });
+      EXPECT_EQ(count, waited ? 0 : 1) << diagnostic_summary(report);
+    }
+  }
+}
+
+TEST(WaitcheckTest, OutOfRangeMovreldUnindexedSourceReadsVgprZero) {
+  for (const auto [arch, machine] :
+       {std::pair{ROCJITSU_CODE_ARCH_RDNA4, EF_AMDGPU_MACH_AMDGCN_GFX1201},
+        std::pair{ROCJITSU_CODE_ARCH_CDNA5, EF_AMDGPU_MACH_AMDGCN_GFX1250}}) {
+    for (bool waited : {false, true}) {
+      SCOPED_TRACE(testing::Message() << machine << '/' << waited);
+      std::vector<uint32_t> program{0xbefd0080u}; // s_mov_b32 m0,0
+      const uint64_t producer = program.size() * sizeof(uint32_t);
+      append_inst(program, global_load_b32(0, 2));
+      if (waited)
+        append_inst(program, sopp(64, 0)); // s_wait_loadcnt 0
+      const uint64_t consumer = program.size() * sizeof(uint32_t);
+      if (arch == ROCJITSU_CODE_ARCH_CDNA5)
+        append_inst(program, cdna5::build_vop1(cdna5::kVMovreldB32Vop1,
+                                                {.src0 = 288, .vdst = 4}));
+      else
+        append_inst(program, rdna4::build_vop1(rdna4::kVMovreldB32Vop1,
+                                                {.src0 = 288, .vdst = 4}));
+      append_inst(program, sopp(64, 0));
+      append_inst(program, s_endpgm());
+      const auto report = analyze_gfx12_with_vgpr_allocation(program, machine, arch, true, 16);
+      ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+      const auto count = std::ranges::count_if(report.diagnostics, [&](const auto &d) {
+        return d.counter == WaitCounterKind::Load && d.producer_section_offset == producer &&
+               d.section_offset == consumer && d.reg.cls == RegClass::VGPR && d.reg.index == 0;
+      });
+      EXPECT_EQ(count, waited ? 0 : 1) << diagnostic_summary(report);
     }
   }
 }
@@ -10832,6 +11073,41 @@ TEST(WaitcheckTest, Gfx1250DisabledWmmaArbStallCannotProvePartialVaWait) {
                d.section_offset == consumer && d.reg.index == 42;
       });
       EXPECT_EQ(warning, mode == 6) << diagnostic_summary(report);
+    }
+  }
+}
+
+TEST(WaitcheckTest, Gfx1250OutOfRangeValuDestinationStillSuppliesWmmaIssueCredit) {
+  enum class IndependentValu { InRangeMove, OutOfRangeMove, Nop };
+  for (auto instruction :
+       {IndependentValu::InRangeMove, IndependentValu::OutOfRangeMove, IndependentValu::Nop}) {
+    for (unsigned mode : {2u, 6u}) {
+      SCOPED_TRACE(testing::Message() << static_cast<int>(instruction) << '/' << mode);
+      std::vector<uint32_t> code;
+      append_inst(code, s_setreg_imm32_b32(hwreg(26, 0, 3), mode));
+      const auto producer = code.size() * sizeof(uint32_t);
+      code.insert(code.end(), {0xcc600000u, 0x1c02e528u}); // WMMA reads v42.
+      for (unsigned i = 0; i < 6; ++i) {
+        if (instruction == IndependentValu::Nop)
+          code.push_back(0x7e000000u); // v_nop.
+        else
+          append_inst(code, v_mov_b32(instruction == IndependentValu::InRangeMove ? 12 : 128, 11));
+      }
+      append_inst(code, sopp(8, 0x1f9f)); // VA_VDST(1).
+      const auto consumer = code.size() * sizeof(uint32_t);
+      append_inst(code, global_load_b32(42, 8));
+      append_inst(code, s_endpgm());
+      const auto report = analyze_gfx12_with_vgpr_allocation(code, EF_AMDGPU_MACH_AMDGCN_GFX1250,
+                                                             ROCJITSU_CODE_ARCH_CDNA5, true, 128);
+      ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+      EXPECT_EQ(std::ranges::any_of(report.diagnostics,
+                                    [&](const auto &d) {
+                                      return d.counter == WaitCounterKind::VaVdst &&
+                                             d.producer_section_offset == producer &&
+                                             d.section_offset == consumer && d.reg.index == 42;
+                                    }),
+                mode == 6)
+          << diagnostic_summary(report);
     }
   }
 }
@@ -13238,6 +13514,88 @@ TEST(WaitcheckTest, SymbolLessWave32FallbackGuidesIndirectCfgRecovery) {
   EXPECT_TRUE(explicit32.diagnostics.empty()) << diagnostic_summary(explicit32);
 }
 
+TEST(WaitcheckTest, ExplicitEntryDecodesSymbolLessDescriptorlessTextWithoutAllocation) {
+  const auto image = waitcheck_test::make_gfx_symbol_less_code_object(
+      {0xbfb00000u}, EF_AMDGPU_MACH_AMDGCN_GFX1201, /*wave32=*/true);
+  const AmdGpuCodeObject object(image.data(), image.size());
+  ASSERT_TRUE(object.is_valid());
+  ASSERT_TRUE(waitcheck_kernels(object).empty());
+  WaitcheckOptions options;
+  options.fallback_wavefront_size = 32;
+  const auto report = analyze_waitcnts_for_kernel(object, ROCJITSU_CODE_ARCH_RDNA4, 0, options);
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_FALSE(report.complete);
+  EXPECT_NE(report.analysis_error.find("VGPR allocation"), std::string::npos);
+  EXPECT_EQ(report.instructions_analyzed, 1u);
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+  const auto missing_wave =
+      analyze_waitcnts_for_kernel(object, ROCJITSU_CODE_ARCH_RDNA4, 0);
+  EXPECT_FALSE(missing_wave.supported);
+  EXPECT_NE(missing_wave.analysis_error.find("wavefront size"), std::string::npos);
+  for (uint64_t entry : {2u, 4u}) {
+    const auto invalid = analyze_waitcnts_for_kernel(object, ROCJITSU_CODE_ARCH_RDNA4, entry,
+                                                     options);
+    EXPECT_FALSE(invalid.supported);
+    EXPECT_NE(invalid.analysis_error.find("aligned executable text"), std::string::npos);
+  }
+}
+
+TEST(WaitcheckTest, ExplicitDescriptorlessEntryAllowsUnrelatedFunctionSymbol) {
+  auto image = waitcheck_test::make_gfx_function_only_code_object(
+      {{"unnamed", {0xbfb00000u}}, {"helper", {0xbfb00000u}}},
+      EF_AMDGPU_MACH_AMDGCN_GFX1201, /*wave32=*/true);
+  auto *header = reinterpret_cast<Elf64_Ehdr *>(image.data());
+  auto *sections = reinterpret_cast<Elf64_Shdr *>(image.data() + header->e_shoff);
+  auto *symbols = reinterpret_cast<Elf64_Sym *>(image.data() + sections[3].sh_offset);
+  symbols[2] = {}; // Keep the helper symbol at .text+4, hide the entry at .text+0.
+  const AmdGpuCodeObject object(image.data(), image.size());
+  ASSERT_TRUE(object.is_valid());
+  ASSERT_TRUE(waitcheck_kernels(object).empty());
+
+  WaitcheckOptions options;
+  options.fallback_wavefront_size = 32;
+  const auto selected = analyze_waitcnts_for_kernel(object, ROCJITSU_CODE_ARCH_RDNA4, 0, options);
+  EXPECT_TRUE(selected.supported) << selected.analysis_error;
+  EXPECT_FALSE(selected.complete);
+  EXPECT_EQ(selected.instructions_analyzed, 1u);
+  EXPECT_NE(selected.analysis_error.find("VGPR allocation"), std::string::npos);
+}
+
+TEST(WaitcheckTest, ExplicitDescriptorlessEntryCannotCertifyVgprSourceAliases) {
+  for (const bool waited : {false, true}) {
+    SCOPED_TRACE(waited);
+    std::vector<uint32_t> program;
+    append_inst(program, global_load_b32(1, 2));
+    if (waited)
+      append_inst(program, sopp(64, 0)); // s_wait_loadcnt 0
+    const uint64_t consumer = program.size() * sizeof(uint32_t);
+    program.push_back(0x3e080080u | (32u << 9)); // v_lshlrev_b64 v[4:5],0,v[32:33]
+    append_inst(program, sopp(64, 0));
+    append_inst(program, s_endpgm());
+
+    const auto described = analyze_gfx12_with_vgpr_allocation(
+        program, EF_AMDGPU_MACH_AMDGCN_GFX1201, ROCJITSU_CODE_ARCH_RDNA4, true, 8);
+    ASSERT_TRUE(described.supported && described.complete) << described.analysis_error;
+    const auto hazard = [&](const auto &d) {
+      return d.counter == WaitCounterKind::Load && d.section_offset == consumer &&
+             d.reg.cls == RegClass::VGPR && d.reg.index == 1;
+    };
+    EXPECT_EQ(std::ranges::count_if(described.diagnostics, hazard), waited ? 0 : 1)
+        << diagnostic_summary(described);
+
+    const auto stripped = waitcheck_test::make_gfx_symbol_less_code_object(
+        program, EF_AMDGPU_MACH_AMDGCN_GFX1201, /*wave32=*/true);
+    const AmdGpuCodeObject object(stripped.data(), stripped.size());
+    WaitcheckOptions options;
+    options.fallback_wavefront_size = 32;
+    const auto descriptorless =
+        analyze_waitcnts_for_kernel(object, ROCJITSU_CODE_ARCH_RDNA4, 0, options);
+    EXPECT_TRUE(descriptorless.supported) << descriptorless.analysis_error;
+    EXPECT_FALSE(descriptorless.complete);
+    EXPECT_NE(descriptorless.analysis_error.find("VGPR allocation"), std::string::npos);
+  }
+}
+
 TEST(WaitcheckTest, SymbolLessRdna4KeepsTargetDerivedWave32Default) {
   std::vector<uint32_t> program;
   append_inst(program, s_load_b32(3, 16));
@@ -13277,7 +13635,9 @@ TEST(WaitcheckTest, DescriptorlessCodeNeedsExplicitEntryAndWaveContract) {
   const auto with_wave_only = analyze_waitcnts(object, arch, wave64);
   EXPECT_FALSE(with_wave_only.complete);
   const auto selected = analyze_waitcnts_for_kernel(object, arch, 0, wave64);
-  EXPECT_TRUE(selected.supported && selected.complete) << selected.analysis_error;
+  EXPECT_TRUE(selected.supported) << selected.analysis_error;
+  EXPECT_FALSE(selected.complete);
+  EXPECT_NE(selected.analysis_error.find("VGPR allocation"), std::string::npos);
 
   const auto no_inventory = analyze_waitcnts_for_kernels(
       object, arch, std::span<const WaitcheckKernelInfo>{}, wave64);
