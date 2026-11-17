@@ -5,7 +5,7 @@
  ************************************************************************/
 
 // Host-only microtests for src/algorithms/dda/alltoall/dda_alltoall_fabric.cu: eligibility, the scratch check, the
-// staging copy ahead of the launch, the grid, and the kernel launched; for the push model also the kernel choice, the
+// in-kernel staging copy, the grid, and the kernel launched; for the push model also the kernel choice, the
 // peer-major geometry, pieces and drain blocks, and the all-peer TDM geometry.
 
 #include <gtest/gtest.h>
@@ -44,7 +44,7 @@ const void* Kernel() {
 class DdaAlltoallFabricMicrotest : public ::testing::Test {
  protected:
   void SetUp() override {
-    // These tests exercise the pull kernel and its staging copy.
+    // These tests exercise the pull kernel, which stages sendbuff into scratch itself.
     g_loadParam = ParamOverride({{"RCCL_DDA_A2A_PUSH", 0}});
     g_hipGetLastError = [] { return hipSuccess; };
     RecordDdaCopies(&copies_);
@@ -163,26 +163,18 @@ TEST_F(DdaAlltoallFabricMicrotest, Launch_WholeSendBufferMayFillScratchExactly) 
   EXPECT_EQ(Run(16), ncclSuccess);
   EXPECT_EQ(Run(20), ncclInvalidArgument);
   EXPECT_EQ(g_ddaLaunches.size(), 1u);
-  EXPECT_EQ(copies_.size(), 1u);
+  EXPECT_TRUE(copies_.empty());
 }
 
-TEST_F(DdaAlltoallFabricMicrotest, Launch_StagesWholeSendBufferIntoScratchBeforeTheKernel) {
-  ASSERT_EQ(Run(8, ncclFloat16), ncclSuccess);
-  ASSERT_EQ(copies_.size(), 1u);
-  EXPECT_EQ(copies_[0].dst, comm().ddaScratch);
-  EXPECT_EQ(copies_[0].src, kSendbuff);
-  EXPECT_EQ(copies_[0].bytes, 8u * 16);
-  EXPECT_EQ(copies_[0].kind, hipMemcpyDeviceToDevice);
-  EXPECT_EQ(copies_[0].stream, kStream);
-  EXPECT_EQ(copies_[0].launchesBefore, 0u);
-  EXPECT_EQ(g_ddaLaunches.size(), 1u);
-}
-
-TEST_F(DdaAlltoallFabricMicrotest, Launch_StagingCopyErrorIsReportedWithoutLaunching) {
-  g_hipMemcpyAsync = [](void*, const void*, size_t, hipMemcpyKind, hipStream_t) { return hipErrorInvalidValue; };
-  EXPECT_EQ(Run(4), ncclUnhandledCudaError);
-  EXPECT_TRUE(g_ddaLaunches.empty());
-  EXPECT_EQ(comm().addonStopEvent, kStopEvent);
+// The kernel stages sendbuff into scratch itself: no pre-kernel copy at any grid size.
+TEST_F(DdaAlltoallFabricMicrotest, Launch_StagesInsideTheKernelWithoutAPreKernelCopy) {
+  for (size_t count : {size_t{4}, size_t{2052}, size_t{1} << 18}) {
+    g_ddaLaunches.clear();
+    ASSERT_EQ(Run(count), ncclSuccess);
+    ASSERT_EQ(g_ddaLaunches.size(), 1u);
+    EXPECT_EQ(g_ddaLaunches[0].kernel, Kernel<8>()) << "count " << count;
+  }
+  EXPECT_TRUE(copies_.empty());
 }
 
 TEST_F(DdaAlltoallFabricMicrotest, Launch_FourAndEightRanksUnrolledOthersRuntime) {
@@ -194,7 +186,7 @@ TEST_F(DdaAlltoallFabricMicrotest, Launch_FourAndEightRanksUnrolledOthersRuntime
     ASSERT_EQ(Run(4), ncclSuccess);
     ASSERT_EQ(g_ddaLaunches.size(), 1u);
     EXPECT_EQ(g_ddaLaunches[0].kernel, kernel) << "nRanks " << nRanks;
-    EXPECT_EQ(g_ddaLaunches[0].Arg<int>(4), nRanks);
+    EXPECT_EQ(g_ddaLaunches[0].Arg<int>(5), nRanks);
   }
 }
 
@@ -209,12 +201,13 @@ TEST_F(DdaAlltoallFabricMicrotest, Launch_PassesBuffersPerPeerBytesRankAndBarrie
   EXPECT_EQ(comm().addonStopEvent, nullptr);
   EXPECT_EQ(launch.sharedMemBytes, 0u);
   EXPECT_EQ(launch.flags, 0u);
-  ASSERT_EQ(launch.args.size(), 6u);
+  ASSERT_EQ(launch.args.size(), 7u);
   EXPECT_EQ(launch.Arg<int8_t**>(0), comm().ddaPeerPtrsDev);
   EXPECT_EQ(launch.Arg<int8_t*>(1), kRecvbuff);
   EXPECT_EQ(launch.Arg<size_t>(2), 16u);
-  EXPECT_EQ(launch.Arg<int>(3), 3);
-  EXPECT_TRUE(SameBarrier(launch.Arg<FabricGpuBarrier>(5), barrier_->barrierHost));
+  EXPECT_EQ(launch.Arg<const int8_t*>(3), kSendbuff);
+  EXPECT_EQ(launch.Arg<int>(4), 3);
+  EXPECT_TRUE(SameBarrier(launch.Arg<FabricGpuBarrier>(6), barrier_->barrierHost));
 }
 
 // Grids spelled out from getGridAndBlockDims over one peer's bytes (16 B per thread, 512 threads, 64-thread warps).
