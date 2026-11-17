@@ -101,7 +101,8 @@ add_output_info_to_extdata(std::string_view extdata, const std::string& output_p
     {
         if(!extdata.empty())
         {
-            LOG_WARNING("Process extdata is not a JSON object; replacing it: {}",
+            LOG_WARNING("Process extdata is not a valid JSON object; it will be "
+                        "replaced with an empty JSON object. Original extdata: {}",
                         extdata);
         }
         json = nlohmann::json::object();
