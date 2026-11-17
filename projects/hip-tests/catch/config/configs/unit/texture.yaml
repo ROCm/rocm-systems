@@ -2,6 +2,7 @@
 texture:
   Unit_hipCreateTextureObject_ArgValidation:
     <<: *level_default
+    requires: [images]
     tags: [texobj, image]
   Unit_hipCreateTextureObject_MaxAnisotropy_Positive:
     <<: *level_default
@@ -29,6 +30,7 @@ texture:
     tags: [image]
   Unit_hipTextureObj2D_Check:
     <<: *level_default
+    requires: [images]
     disabled:
       targets: [asan]
       reason: "AIRUNTIME-2892 - fails under device ASAN on gfx90a but passes on the non-ASAN build; disabled on asan pending re-triage."

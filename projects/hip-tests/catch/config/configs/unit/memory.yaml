@@ -1599,6 +1599,7 @@ memory:
     tags: [alloc, P1]
   Unit_hipMemcpyPeer_Positive_Default:
     <<: *level_default
+    requires: [multi_gpu]
     tags: [multigpu, transfer, P1]
   Unit_hipMemcpyPeer_Positive_Synchronization_Behavior:
     <<: *level_default

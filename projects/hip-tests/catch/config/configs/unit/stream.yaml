@@ -282,6 +282,7 @@ stream:
     tags: [callback, P1]
   Unit_hipLaunchHostFunc_multidevice:
     <<: *level_default
+    requires: [multi_gpu]
     tags: [callback, multigpu, P1]
   Unit_hipLaunchHostFunc_Samepriority:
     <<: *level_default
