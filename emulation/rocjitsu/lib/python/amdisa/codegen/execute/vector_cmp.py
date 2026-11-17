@@ -4,7 +4,7 @@
 """Vector compare execute body generators.
 
 Free functions that emit C++ execute_impl bodies for vector compare
-instructions: V_CMP_*, V_CMPX_*, V_CMP_CLASS_*, and V_ADD_CO_U32.
+instructions: V_CMP_*, V_CMPX_* and V_CMP_CLASS_*.
 """
 
 from __future__ import annotations
@@ -384,89 +384,4 @@ def gen_vector_cmpx(
         L.append('      result |= (1ULL << lane);')
     L.append('  }')
     L.extend(_write_cmpx_result(dst, is_vop3, cmpx_writes_vcc, result_writer))
-    return '\n'.join(L)
-
-
-def gen_vector_add_co(
-    dst: list[str], src: list[str], op: str | None, dtype: str | None
-) -> str:
-    """Generate vector add/sub with carry in/out.
-
-    VOP2: carry in/out via VCC (implicit).
-    VOP3/VOP3_SDST_ENC: carry-in from src[2] (explicit SGPR pair),
-    carry-out to dst[1] (explicit SGPR pair).
-    """
-    L = []
-    d = dst[0]
-    s0, s1 = src[0], src[1]
-    _is_vop3 = len(src) > 2 or len(dst) > 1
-
-    L.append('  uint64_t exec = wf.exec();')
-    if _is_vop3 and op in ('addc', 'subbc', 'subbrevco') and len(src) > 2:
-        # VOP3: carry-in from explicit src2 SGPR pair.
-        L.append(
-            f'  uint64_t old_vcc = amdgpu::RegisterAccess(wf).read_scalar64({src[2]});'
-        )
-    elif op in ('addc', 'subbc', 'subbrevco'):
-        # VOP2: carry-in from VCC.
-        L.append('  uint64_t old_vcc = wf.vcc();')
-    L.append('  uint64_t vcc = wf.vcc();')
-    L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
-    L.append('    if (!(exec & (1ULL << lane))) continue;')
-    L.append(f'    uint32_t sv0 = amdgpu::RegisterAccess(wf).read_lane({s0}, lane);')
-    L.append(f'    uint32_t sv1 = amdgpu::RegisterAccess(wf).read_lane({s1}, lane);')
-
-    if op == 'add':
-        L.append(
-            '    uint64_t wide = static_cast<uint64_t>(sv0) + static_cast<uint64_t>(sv1);'
-        )
-    elif op == 'sub':
-        L.append(
-            '    uint64_t wide = static_cast<uint64_t>(sv0) - static_cast<uint64_t>(sv1);'
-        )
-        L.append('    bool borrow = sv0 < sv1;')
-    elif op == 'rsub':
-        L.append(
-            '    uint64_t wide = static_cast<uint64_t>(sv1) - static_cast<uint64_t>(sv0);'
-        )
-        L.append('    bool borrow = sv1 < sv0;')
-    elif op == 'addc':
-        L.append('    uint32_t cin = (old_vcc & (1ULL << lane)) ? 1u : 0u;')
-        L.append(
-            '    uint64_t wide = static_cast<uint64_t>(sv0) + static_cast<uint64_t>(sv1) + cin;'
-        )
-    elif op == 'subbc':
-        L.append('    uint32_t cin = (old_vcc & (1ULL << lane)) ? 1u : 0u;')
-        L.append(
-            '    uint64_t wide = static_cast<uint64_t>(sv0) - static_cast<uint64_t>(sv1) - cin;'
-        )
-        L.append(
-            '    bool borrow = static_cast<uint64_t>(sv0) < static_cast<uint64_t>(sv1) + cin;'
-        )
-    elif op == 'subbrevco':
-        L.append('    uint32_t cin = (old_vcc & (1ULL << lane)) ? 1u : 0u;')
-        L.append(
-            '    uint64_t wide = static_cast<uint64_t>(sv1) - static_cast<uint64_t>(sv0) - cin;'
-        )
-        L.append(
-            '    bool borrow = static_cast<uint64_t>(sv1) < static_cast<uint64_t>(sv0) + cin;'
-        )
-
-    L.append(
-        f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, static_cast<uint32_t>(wide));'
-    )
-
-    if op in ('add', 'addc'):
-        L.append(
-            '    if (wide > 0xFFFFFFFFULL) vcc |= (1ULL << lane); else vcc &= ~(1ULL << lane);'
-        )
-    elif op in ('sub', 'rsub', 'subbc', 'subbrevco'):
-        L.append('    if (borrow) vcc |= (1ULL << lane); else vcc &= ~(1ULL << lane);')
-
-    L.append('  }')
-    if len(dst) > 1:
-        # VOP3_SDST_ENC: carry-out goes to sdst (any SGPR pair).
-        L.extend(_write_explicit_lane_mask(dst[1], 'vcc'))
-    else:
-        L.append('  wf.set_vcc_mask(vcc);')
     return '\n'.join(L)

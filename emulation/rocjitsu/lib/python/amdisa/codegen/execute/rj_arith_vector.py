@@ -29,6 +29,14 @@ CDNA_INTEGER_ALIASES = {
     'V_SUBBREV_CO_U32': 'V_SUBREV_CO_CI_U32',
 }
 INTEGER_ARCHITECTURES = ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5')
+# Carry and multiword arithmetic migrate independently of single-word/packed operations.
+CARRY_WIDE_ARCHITECTURES = INTEGER_ARCHITECTURES + (
+    'cdna1',
+    'cdna2',
+    'rdna1',
+    'rdna2',
+    'rdna3_5',
+)
 # Routing and conversions migrate independently of integer arithmetic.
 ROUTING_ARCHITECTURES = INTEGER_ARCHITECTURES
 
@@ -321,11 +329,11 @@ CARRY32_NAMES = {
 
 def gen_carry32(ctx: ExecuteContext) -> str | None:
     arch, mnemonic = ctx.arch_name, ctx.inst.name
-    if arch.startswith('cdna'):
+    if arch.startswith('cdna') or arch in ('rdna1', 'rdna2'):
         mnemonic = CDNA_INTEGER_ALIASES.get(mnemonic, mnemonic)
     dst, src = ctx.dst_ops, ctx.src_ops
     is_vop3, result_writer = ctx.is_vop3, ctx.result_writer
-    if arch not in INTEGER_ARCHITECTURES or mnemonic not in CARRY32_NAMES:
+    if arch not in CARRY_WIDE_ARCHITECTURES or mnemonic not in CARRY32_NAMES:
         return None
     with_carry = '_CI_' in mnemonic
     if len(dst) != (2 if is_vop3 else 1) or len(src) != (
@@ -348,9 +356,12 @@ def gen_carry32(ctx: ExecuteContext) -> str | None:
         carry = f'wf.exec() ? {carry} : 0u'
     modifiers = 'inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u' if is_vop3 else '0u'
     api = 'rj_arith_' + mnemonic.lower()
-    carry_policy = ', false' if arch.startswith('cdna') else ''
+    # Pre-gfx11 Radeon preserves carry across DPP destination-only masks.
+    carry_policy = (
+        ', false' if arch.startswith('cdna') or arch in ('rdna1', 'rdna2') else ''
+    )
     sdwa = ''
-    if arch in ('cdna3', 'cdna4') and not is_vop3:
+    if arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4', 'rdna1', 'rdna2') and not is_vop3:
         sdwa = (
             '  if (inst_.src0 == amdgpu::SRC_SDWA) {\n'
             f'    amdgpu::arith::execute_sdwa_carry32<{str(with_carry).lower()}>(*this, wf, {wave_api(api, 32)}, {wave_api(api, 64)},\n'
@@ -398,7 +409,7 @@ def gen_wide_integer(ctx: ExecuteContext) -> str | None:
     arch, mnemonic = ctx.arch_name, ctx.inst.name
     dst, src = ctx.dst_ops, ctx.src_ops
     is_vop3, result_writer = ctx.is_vop3, ctx.result_writer
-    if arch not in INTEGER_ARCHITECTURES or mnemonic not in WIDE_INTEGER_NAMES:
+    if arch not in CARRY_WIDE_ARCHITECTURES or mnemonic not in WIDE_INTEGER_NAMES:
         return None
     api = 'rj_arith_' + mnemonic.lower()
     modifiers = 'inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u' if is_vop3 else '0u'
