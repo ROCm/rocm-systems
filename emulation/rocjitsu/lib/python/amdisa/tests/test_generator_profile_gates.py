@@ -4451,6 +4451,26 @@ def test_generated_f16_sdwa_rounds_before_omod(
 ):
     """FRACT/LDEXP round and MIN/MAX select; the SDWA store applies OMOD."""
     route, output = generated_f16_sdwa_consumers
+    if instruction in {'V_MIN_F16', 'V_MAX_F16'}:
+        # Both generation modes keep migrated arithmetic out of shared executors.
+        if route == 'shared':
+            shared = (output / 'shared' / 'execute_shared.h').read_text()
+            assert f'execute_{instruction.lower()}_{encoding}' not in shared
+        source = (output / 'rdna2/vop2_exec.cpp').read_text()
+        class_name = ''.join(word.title() for word in instruction.split('_'))
+        body = _generated_function_body(
+            source, f'void {class_name}Vop2::execute_modifier_impl('
+        )
+        assert 'execute_sdwa_float_binary16' in body
+        helper = (
+            Path(__file__).resolve().parents[3]
+            / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h'
+        ).read_text()
+        store = _generated_function_body(
+            helper, 'inline void execute_sdwa_float_binary16('
+        )
+        assert 'sdwa::OutputPolicy::ROUNDED>' in store
+        return
     if route == 'shared':
         source = (output / 'shared' / 'execute_shared.h').read_text()
         signature = f'inline void execute_{instruction.lower()}_{encoding}('

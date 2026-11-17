@@ -44,9 +44,7 @@ FORMATS = input_policy.FORMATS
 LEGACY_FORMS = frozenset({'min', 'max', 'min3', 'max3', 'med3', 'minmax', 'maxmin'})
 LEGACY_POLICY = 'amdgpu::fp_mode::legacy_minmax_policy(wf.cu().arch(), wf.ieee_mode())'
 
-_TEMPLATE = re.compile(
-    r'v_(?P<form>\w+)_(?P<dtype>f16|f32|f64)_(?P<encoding>vop2|vop3)'
-)
+_TEMPLATE = re.compile(r'v_(?P<form>\w+)_(?P<dtype>f32|f64)_(?P<encoding>vop2|vop3)')
 
 
 def _format(dtype: str) -> str:
@@ -112,11 +110,11 @@ def simd_functor(dtype: str, form: str) -> str:
     return f'[{", ".join(captures)}]({args}) {{ return {call}; }}'
 
 
-def simd_probe(template_name: str, true16_vop3: bool = False) -> str | None:
+def simd_probe(template_name: str) -> str | None:
     """Emit the min/max SIMD fast-path call, or None to use the regular dispatch.
 
-    None also covers VOP2 F16, whose register-half handling is provided by
-    SIMD_VOP2_BINARY. All min/max functors receive raw unsigned encodings.
+    FP16 selection uses rj-arith; only the remaining FP32/FP64 callers
+    need these raw-encoding legacy probes.
     """
     match = _TEMPLATE.fullmatch(template_name)
     if match is None:
@@ -128,8 +126,6 @@ def simd_probe(template_name: str, true16_vop3: bool = False) -> str | None:
         return None
     source_count = FORMS[form][1]
     if encoding == 'vop2':
-        if dtype == 'f16':
-            return None
         functor = simd_functor(dtype, form)
         if dtype == 'f64':
             return f'  ROCJITSU_TRY_SIMD_VOP2_BINARY_RAW_FP64({functor});'
@@ -139,11 +135,7 @@ def simd_probe(template_name: str, true16_vop3: bool = False) -> str | None:
         if source_count != 2:
             return None
         macro = 'VOP3_BINARY_RAW_FP64'
-    elif dtype == 'f16' and true16_vop3:
-        macro = f'VOP3_{shape}_TRUE16_RAW_FP16'
     else:
-        # Without true16 half selection, F16 uses the same unsigned
-        # 32-bit loads/stores as F32; the functor interprets the low 16 bits.
         macro = f'VOP3_{shape}_RAW_FP'
     operation = operation_expr(dtype, form, input_policy.policy_expr(dtype))
     return f'  ROCJITSU_TRY_SIMD_{macro}({_format(dtype)}, {operation});'

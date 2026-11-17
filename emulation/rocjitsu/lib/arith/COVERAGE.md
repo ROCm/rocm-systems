@@ -147,3 +147,20 @@ Loose uses FP32-intermediate MAD. Guest rounding, forced intermediate flushing,
 IEEE NaN quieting, FP16_OVFL and final output modifiers are retained. This is
 software-model reuse, not new empirical qualification; strict modes reject and
 FP status is unchanged. The native half FMA migration is independent.
+
+### Older-target half selection
+
+Gfx908/gfx90a MIN/MAX/MIN3/MAX3/MED3 reuse the existing CDNA selection model;
+gfx1010/gfx1030/gfx1150 reuse Radeon NaN priority and median zero ordering.
+Gfx1150 also routes MINMAX/MAXMIN. Compatibility, Loose and allow-Loose use
+scalar/AVX2/AVX-512 kernels with decoded half selection, aliases and EXEC.
+SDWA retains rounded-result scaling and byte placement. These migrations add
+no target empirical qualification or FP status; strict decoded requests reject.
+
+## Legacy selection SDWA output
+
+Unpacked legacy MIN/MAX FP16/FP32, unsuffixed and gfx942, accept `ALU_SDWA`
+for inherited scaling of the rounded result and subsequent clamp. Scalar, AVX2
+and AVX-512 preserve guest rounding, selected halves, aliases and EXEC. Numerical
+policy lives in the library; byte placement and observations remain in the VM.
+Ordinary selection and its FP-status/qualification behavior are unchanged.

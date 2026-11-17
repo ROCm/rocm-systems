@@ -948,3 +948,27 @@ def test_pack_b32_f16_uses_the_shared_conversion(has_abs):
     assert 'conversion(s0, s1)' in cpp
     probe = simd_probe_line('v_pack_b32_f16_vop3')
     assert probe == '  ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_SRC(uint32_t, conversion);'
+
+
+@pytest.mark.parametrize(
+    'mnemonic',
+    [
+        'min',
+        'max',
+        'min3',
+        'max3',
+        'med3',
+        'minmax',
+        'maxmin',
+        'min_num',
+        'max_num',
+        'minimum',
+        'maximum',
+    ],
+)
+@pytest.mark.parametrize('true16', [False, True])
+def test_half_selection_has_no_legacy_simd_probe(mnemonic, true16):
+    for encoding in ('vop2', 'vop3'):
+        assert (
+            simd_probe_line(f'v_{mnemonic}_f16_{encoding}', true16_vop3=true16) is None
+        )

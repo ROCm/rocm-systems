@@ -1066,6 +1066,19 @@ inline void execute_float_binary16(Wavefront &wave, FloatBinary32Function wave32
   }
 }
 
+// Forward encoded SDWA modifiers; rj-arith resolves the architecture's numerical policy.
+// Profiles without SDWA instantiate the surrounding generated branch with zero controls.
+template <typename Inst> inline uint64_t sdwa_float_modifiers(const Inst &inst) {
+  if constexpr (requires {
+                  inst.sdwa_omod_;
+                  inst.sdwa_clamp_;
+                }) {
+    return uint64_t(inst.sdwa_omod_) * RJ_ARITH_ALU_OMOD_2 |
+           (inst.sdwa_clamp_ ? RJ_ARITH_ALU_CLAMP : 0u);
+  }
+  return 0;
+}
+
 // SDWA selects source words before arithmetic, then scales the rounded half,
 // clamps it, and merges the result into the selected destination field.
 template <HalfBinaryOperation Op = HalfBinaryOperation::None, typename Inst>
@@ -1073,30 +1086,42 @@ inline void execute_sdwa_float_binary16(Inst &inst, Wavefront &wave, FloatBinary
                                         FloatBinary64Function wave64, const Operand &destination,
                                         const Operand &lhs, const Operand &rhs) {
   const auto exec = wave.exec();
-  if (!exec)
+  if (!exec) {
     return;
+  }
   RegisterAccess registers(wave);
   VectorInput32 a(registers, wave, lhs, exec);
   VectorInput32 b(registers, wave, rhs, exec);
-  if (wave.instruction_execution_failed())
+  if (wave.instruction_execution_failed()) {
     return;
+  }
   std::array<uint32_t, 64> results{};
   uint32_t *output = results.data();
   uint32_t causes = 0;
   const uint64_t flags = float16_flags(wave, wave.cu().arithmetic_flags(), true);
-  if constexpr (Op != HalfBinaryOperation::None)
+  // Arithmetic template instantiations retain their live VM output policy.
+  uint64_t mode = 0;
+  if constexpr (Op == HalfBinaryOperation::None) {
+    mode = RJ_ARITH_ALU_SDWA | sdwa_float_modifiers(inst);
+  } else {
     causes = gfx10_half_binary_causes<Op>(wave, a.data, b.data, exec, flags, 0, inst.sdwa_omod_);
+  }
   const int status = wave.wf_size() == 32
-                         ? wave32(flags, uint32_t(exec), 0, &output, &a.data, &b.data, &causes)
-                         : wave64(flags, exec, 0, &output, &a.data, &b.data, &causes);
+                         ? wave32(flags, uint32_t(exec), mode, &output, &a.data, &b.data, &causes)
+                         : wave64(flags, exec, mode, &output, &a.data, &b.data, &causes);
   if (status != RJ_ARITH_SUCCESS) {
     wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
   for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
-    if (exec & (uint64_t{1} << lane))
-      sdwa::write_lane<sdwa::ResultFormat::F16, sdwa::OutputPolicy::ROUNDED>(
-          inst, wave, destination, lane, results[lane]);
+    if (exec & (uint64_t{1} << lane)) {
+      if constexpr (Op == HalfBinaryOperation::None) {
+        sdwa::write_lane<sdwa::ResultFormat::NONE>(inst, wave, destination, lane, results[lane]);
+      } else {
+        sdwa::write_lane<sdwa::ResultFormat::F16, sdwa::OutputPolicy::ROUNDED>(
+            inst, wave, destination, lane, results[lane]);
+      }
+    }
   }
   wave.set_trapsts(wave.trapsts() | causes);
   wave.raise_alu_causes(causes);

@@ -8,6 +8,7 @@
 #include "common/alu.h"
 #include "common/float_encoding.h"
 #include "common/packed_alu.h"
+#include "common/sdwa_dispatch.h"
 #include "common/validation.h"
 #include "fp/binary.h"
 #include "fp/binary_impl.h"
@@ -926,8 +927,11 @@ int rj_arith_v_min_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruct
   if (rocjitsu::arith::reports_fp_status(flags)) {
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
-  return half_binary<rocjitsu::arith::Binary::MinLegacy, false, true>(flags, exec_mask,
-                                                                      instruction_flags, d, a, b);
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F16>(
+      flags, exec_mask, instruction_flags, d, [&](uint64_t core_mode) {
+        return half_binary<rocjitsu::arith::Binary::MinLegacy, false, true>(flags, exec_mask,
+                                                                            core_mode, d, a, b);
+      });
 }
 
 // Select the maximum for selected lanes.
@@ -944,8 +948,11 @@ int rj_arith_v_max_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruct
   if (rocjitsu::arith::reports_fp_status(flags)) {
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
-  return half_binary<rocjitsu::arith::Binary::MaxLegacy, false, true>(flags, exec_mask,
-                                                                      instruction_flags, d, a, b);
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F16>(
+      flags, exec_mask, instruction_flags, d, [&](uint64_t core_mode) {
+        return half_binary<rocjitsu::arith::Binary::MaxLegacy, false, true>(flags, exec_mask,
+                                                                            core_mode, d, a, b);
+      });
 }
 
 // Select the minimum with packed elements for selected lanes.
@@ -1354,8 +1361,11 @@ int rj_arith_v_min_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruct
   if (rocjitsu::arith::reports_fp_status(flags)) {
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
-  return half_binary_wave64<rocjitsu::arith::Binary::MinLegacy, false, true>(
-      flags, exec_mask, instruction_flags, d, a, b);
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F16>(
+      flags, exec_mask, instruction_flags, d, [&](uint64_t core_mode) {
+        return half_binary_wave64<rocjitsu::arith::Binary::MinLegacy, false, true>(
+            flags, exec_mask, core_mode, d, a, b);
+      });
 }
 
 // Select the maximum for selected lanes.
@@ -1372,8 +1382,11 @@ int rj_arith_v_max_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruct
   if (rocjitsu::arith::reports_fp_status(flags)) {
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
-  return half_binary_wave64<rocjitsu::arith::Binary::MaxLegacy, false, true>(
-      flags, exec_mask, instruction_flags, d, a, b);
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F16>(
+      flags, exec_mask, instruction_flags, d, [&](uint64_t core_mode) {
+        return half_binary_wave64<rocjitsu::arith::Binary::MaxLegacy, false, true>(
+            flags, exec_mask, core_mode, d, a, b);
+      });
 }
 
 // Select the minimum with packed elements for selected lanes.
@@ -1496,8 +1509,11 @@ int rj_arith_v_min_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t i
   if (rocjitsu::arith::reports_fp_status(flags)) {
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
-  return half_binary<rocjitsu::arith::Binary::MinLegacyCdna, false, true>(
-      flags, exec_mask, instruction_flags, d, a, b);
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F16>(
+      flags, exec_mask, instruction_flags, d, [&](uint64_t core_mode) {
+        return half_binary<rocjitsu::arith::Binary::MinLegacyCdna, false, true>(flags, exec_mask,
+                                                                                core_mode, d, a, b);
+      });
 }
 
 // Select FP16 operands with the inherited CDNA two-NaN and signaling-priority rules.
@@ -1512,8 +1528,11 @@ int rj_arith_v_min_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t i
   if (rocjitsu::arith::reports_fp_status(flags)) {
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
-  return half_binary_wave64<rocjitsu::arith::Binary::MinLegacyCdna, false, true>(
-      flags, exec_mask, instruction_flags, d, a, b);
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F16>(
+      flags, exec_mask, instruction_flags, d, [&](uint64_t core_mode) {
+        return half_binary_wave64<rocjitsu::arith::Binary::MinLegacyCdna, false, true>(
+            flags, exec_mask, core_mode, d, a, b);
+      });
 }
 
 // Select FP16 operands with the inherited CDNA two-NaN and signaling-priority rules.
@@ -1528,8 +1547,11 @@ int rj_arith_v_max_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t i
   if (rocjitsu::arith::reports_fp_status(flags)) {
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
-  return half_binary<rocjitsu::arith::Binary::MaxLegacyCdna, false, true>(
-      flags, exec_mask, instruction_flags, d, a, b);
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F16>(
+      flags, exec_mask, instruction_flags, d, [&](uint64_t core_mode) {
+        return half_binary<rocjitsu::arith::Binary::MaxLegacyCdna, false, true>(flags, exec_mask,
+                                                                                core_mode, d, a, b);
+      });
 }
 
 // Select FP16 operands with the inherited CDNA two-NaN and signaling-priority rules.
@@ -1544,8 +1566,11 @@ int rj_arith_v_max_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t i
   if (rocjitsu::arith::reports_fp_status(flags)) {
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
-  return half_binary_wave64<rocjitsu::arith::Binary::MaxLegacyCdna, false, true>(
-      flags, exec_mask, instruction_flags, d, a, b);
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F16>(
+      flags, exec_mask, instruction_flags, d, [&](uint64_t core_mode) {
+        return half_binary_wave64<rocjitsu::arith::Binary::MaxLegacyCdna, false, true>(
+            flags, exec_mask, core_mode, d, a, b);
+      });
 }
 
 // Select FP16 operands with the inherited CDNA two-NaN and signaling-priority rules.
