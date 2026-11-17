@@ -149,6 +149,8 @@ amd/skills grades each skill with skillscope under these rules:
 - Put cases that cannot pass on those runners in `evals/extended_evals.json`:
   cases that need an Instinct GPU, and the torch-trace cases that profile a
   model, since the catalog runners may not have PyTorch. The catalog skips this
-  file.
+  file. Also put cases there when the behavioral cases in `evals.json` would
+  take more than ten minutes together, since the catalog stops a skill's run
+  after ten minutes.
 - It copies only the skill directory, so `evals/samples/` holds copies of the
   samples from `sample/`.
