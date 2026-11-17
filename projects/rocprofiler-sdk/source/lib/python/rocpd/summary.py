@@ -696,7 +696,7 @@ def create_summary_region_queries(
 
     marker_query_name = "marker"
     marker_query = """
-        SELECT JSON_EXTRACT(extdata, '$.message') AS marker_name, *
+        SELECT COALESCE(JSON_EXTRACT(extdata, '$.message'), name) AS marker_name, *
         FROM regions_and_samples
         WHERE category LIKE 'MARKER_%'
     """
