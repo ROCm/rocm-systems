@@ -35,9 +35,11 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/register_set.h"
+#include "rocjitsu/isa/target_registry.h"
 
 #include "../amdgpu_elf_test_support.h"
 #include "../amdhsa_metadata_test_util.h"
+#include "../dbi/dbi_sim.h"
 #include "../dbi_test_util.h"
 #include "../instrumentor_test_access.h"
 
@@ -5770,7 +5772,7 @@ TEST(InstrumentorKernelBoundary, EntryStubComposesWithCheckedOrdinaryAndExitEdit
 TEST(InstrumentorResources, ExplicitPoliciesRequireTheirMetadataInputs) {
   const std::vector<uint8_t> image = make_gfx950_kernel_elf_with_two_nops();
   const AmdGpuCodeObject object(image.data(), image.size());
-  for (const InstrumentationOptions options :
+  for (const InstrumentationOptions &options :
        {InstrumentationOptions{.preservation = GuestStatePreservation::DeclaredRegisters,
                                .register_growth = std::nullopt},
         InstrumentationOptions{.register_growth = OriginalRegisterCounts{32, 4}}}) {
@@ -7435,6 +7437,561 @@ TEST(Instrumentor, RegisterGrowthStillRejectsRelativeSgprAccess) {
   ASSERT_FALSE(result.errors.empty());
   EXPECT_NE(result.errors.front().find("enumerable register uses"), std::string::npos)
       << result.errors.front();
+}
+
+std::vector<uint8_t> make_disjoint_entry_growth_image(bool second_metadata = true) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
+  constexpr util::FailureOr<uint32_t> nop = build_s_nop(0, kArch);
+  constexpr util::FailureOr<uint32_t> end = build_s_endpgm(kArch);
+  static_assert(nop.succeeded() && end.succeeded());
+  std::vector<uint32_t> words(67, nop.value());
+  const util::FailureOr<uint32_t> sibling_register = build_v_mov_b32_src(16, 128, kArch);
+  if (sibling_register.failed())
+    return {};
+  words[2] = end.value();
+  words[64] = sibling_register.value();
+  words[66] = end.value();
+  std::vector<uint8_t> image =
+      make_amdgpu_two_kernel_elf(words, 0, 3, EF_AMDGPU_MACH_AMDGCN_GFX1250, {true, true});
+  const AmdGpuCodeObject source(image.data(), image.size());
+  const Section *text = source.text_sections().front();
+  const std::vector<KernelDescriptorInfo> kernels =
+      scan_kernel_descriptors(image, text->sectionOffset(), text->size());
+  if (kernels.size() != 2)
+    return {};
+  for (size_t index = 0; index < kernels.size(); ++index) {
+    amdhsa::kernel_descriptor_t descriptor = kernels[index].descriptor;
+    descriptor.kernel_code_entry_byte_offset += index * 256;
+    descriptor.kernarg_size = index == 0 ? 16 : 32;
+    descriptor.group_segment_fixed_size = index == 0 ? 8 : 256;
+    RJ_AMDHSA_BITS_SET(descriptor.kernel_code_properties,
+                       amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+    RJ_AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, amdhsa::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+    RJ_AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                       amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                       index == 0 ? 0 : 1);
+    std::memcpy(image.data() + kernels[index].descriptor_file_offset, &descriptor,
+                sizeof(descriptor));
+  }
+  if (second_metadata)
+    return with_resource_metadata(
+        image, {{"test_kernel0", 16, 16, 8, 0}, {"test_kernel1", 32, 32, 24, 0}});
+  return with_resource_metadata(image, {{"test_kernel0", 16, 16, 8, 0}});
+}
+
+std::vector<KernelDescriptorInfo> entry_growth_kernels(const std::vector<uint8_t> &image) {
+  const AmdGpuCodeObject object(image.data(), image.size());
+  if (!object.is_valid() || object.text_sections().size() != 1)
+    return {};
+  const Section *text = object.text_sections().front();
+  return scan_kernel_descriptors(image, text->sectionOffset(), text->size());
+}
+
+EntryInstrumentationOptions entry_growth_request(const KernelDescriptorInfo &kernel, size_t index) {
+  return {.descriptor_file_offset = kernel.descriptor_file_offset,
+          .kernarg_binding = DbiKernargBinding::CallerSuppliedWrapper,
+          .preservation = GuestStatePreservation::DeclaredRegisters,
+          .register_growth = OriginalRegisterCounts{.sgprs = index == 0 ? 16u : 32u,
+                                                    .vgprs = index == 0 ? 8u : 24u}};
+}
+
+void add_entry_growth_points(Instrumentor &instrumentor, const AmdGpuCodeObject &probe,
+                             uint64_t entry) {
+  for (const std::pair<InstrumentationKind, uint64_t> &point :
+       {std::pair{InstrumentationKind::KernelEntry, entry},
+        std::pair{InstrumentationKind::BeforeInst, entry + 4},
+        std::pair{InstrumentationKind::KernelExit, entry + 8}})
+    instrumentor.add_point({.anchor_offset = point.second,
+                            .kind = point.first,
+                            .probe_obj = &probe,
+                            .probe_symbol = "entry_growth_probe",
+                            .probe_args = {{.source = ProbeArgSource::LogBufferPtrLo},
+                                           {.source = ProbeArgSource::LogBufferPtrHi}}});
+}
+
+TEST(InstrumentorDisjointEntries, ValidationPreservesInterleavedEntryAndOrdinaryPointOrder) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
+  const util::FailureOr<uint32_t> ret = build_s_setpc_b64(30, kArch);
+  ASSERT_TRUE(ret.succeeded());
+  const std::vector<uint8_t> body =
+      make_amdgpu_probe_elf("entry_order_probe", {ret.value()}, EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  const AmdGpuCodeObject probe(body.data(), body.size());
+  const std::vector<uint8_t> image = make_disjoint_entry_growth_image();
+  const AmdGpuCodeObject source(image.data(), image.size());
+  const std::vector<KernelDescriptorInfo> kernels = entry_growth_kernels(image);
+  ASSERT_EQ(kernels.size(), 2u);
+  InstrumentationOptions options;
+  for (size_t index = 0; index < kernels.size(); ++index)
+    options.entries.push_back(entry_growth_request(kernels[index], index));
+  Instrumentor instrumentor(source, kArch, options);
+  instrumentor.add_point({.anchor_offset = 0,
+                          .kind = InstrumentationKind::KernelEntry,
+                          .probe_obj = &probe,
+                          .probe_symbol = "entry_order_probe",
+                          .probe_args = {}});
+  instrumentor.add_point_by_offset(256);
+  instrumentor.add_point_by_offset(0);
+  const Instrumentor::ValidationResult validation = instrumentor.validate_points();
+  ASSERT_TRUE(validation.errors.empty()) << validation.errors.front();
+  ASSERT_EQ(validation.sites.size(), 3u);
+  EXPECT_EQ(validation.sites[0].kind, InstrumentationKind::KernelEntry);
+  EXPECT_EQ(validation.sites[0].anchor_offset, 0u);
+  EXPECT_EQ(validation.sites[1].kind, InstrumentationKind::BeforeInst);
+  EXPECT_EQ(validation.sites[1].anchor_offset, 256u);
+  EXPECT_EQ(validation.sites[2].kind, InstrumentationKind::BeforeInst);
+  EXPECT_EQ(validation.sites[2].anchor_offset, 0u);
+}
+
+TEST(InstrumentorDisjointEntries, NativeKernargPreloadCannotHideAForeignFirmwareEntry) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const util::FailureOr<uint32_t> nop = build_s_nop(0, kArch);
+  const util::FailureOr<uint32_t> end = build_s_endpgm(kArch);
+  const util::FailureOr<uint32_t> branch = build_s_branch(-128, kArch);
+  const util::FailureOr<uint32_t> ret = build_s_setpc_b64(30, kArch);
+  ASSERT_TRUE(nop.succeeded() && end.succeeded() && branch.succeeded() && ret.succeeded());
+  const std::vector<uint8_t> body =
+      make_amdgpu_probe_elf("entry_growth_probe", {ret.value()}, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  const AmdGpuCodeObject probe(body.data(), body.size());
+  for (const bool preload : {false, true}) {
+    SCOPED_TRACE(preload);
+    std::vector<uint32_t> words(129, nop.value());
+    words[1] = end.value();
+    words[64] = end.value();
+    words[128] = branch.value();
+    std::vector<uint8_t> image =
+        make_amdgpu_two_kernel_elf(words, 0, 7, EF_AMDGPU_MACH_AMDGCN_GFX950);
+    const std::vector<KernelDescriptorInfo> kernels = entry_growth_kernels(image);
+    ASSERT_EQ(kernels.size(), 2u);
+    for (size_t index = 0; index < kernels.size(); ++index) {
+      amdhsa::kernel_descriptor_t descriptor = kernels[index].descriptor;
+      descriptor.kernel_code_entry_byte_offset += index * 256;
+      descriptor.kernarg_size = 16;
+      RJ_AMDHSA_BITS_SET(descriptor.kernel_code_properties,
+                         amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+      RJ_AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, amdhsa::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT,
+                         2);
+      if (index == 1 && preload)
+        RJ_AMDHSA_BITS_SET(descriptor.kernarg_preload, amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 1);
+      std::memcpy(image.data() + kernels[index].descriptor_file_offset, &descriptor,
+                  sizeof(descriptor));
+    }
+    image = with_resource_metadata(
+        image, {{"test_kernel0", 16, 64, 8, 0}, {"test_kernel1", 16, 64, 8, 0}});
+    const AmdGpuCodeObject source(image.data(), image.size());
+    Instrumentor instrumentor(
+        source, kArch,
+        {.register_growth = std::nullopt,
+         .entries = {{.descriptor_file_offset = kernels[0].descriptor_file_offset,
+                      .kernarg_binding = DbiKernargBinding::CallerSuppliedWrapper,
+                      .register_growth = std::nullopt}}});
+    instrumentor.add_point({.anchor_offset = 4,
+                            .kind = InstrumentationKind::KernelExit,
+                            .probe_obj = &probe,
+                            .probe_symbol = "entry_growth_probe",
+                            .probe_args = {{.source = ProbeArgSource::LogBufferPtrLo},
+                                           {.source = ProbeArgSource::LogBufferPtrHi}}});
+    const InstrumentedCodeObject result = instrumentor.patch();
+    if (preload) {
+      ASSERT_FALSE(result.errors.empty());
+      EXPECT_NE(result.errors.front().find("preload"), std::string::npos);
+      EXPECT_TRUE(result.elf_bytes.empty());
+      EXPECT_TRUE(result.sites.empty());
+      EXPECT_TRUE(result.entries.empty());
+    } else {
+      ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+      EXPECT_FALSE(result.elf_bytes.empty());
+    }
+  }
+}
+
+TEST(InstrumentorDisjointEntries, Gfx942GrowthRejectsMovedNumericSgprAliases) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA3;
+  const FailureOr<uint32_t> nop = build_s_nop(0, kArch);
+  const FailureOr<uint32_t> end = build_s_endpgm(kArch);
+  const FailureOr<uint32_t> ret = build_s_setpc_b64(30, kArch);
+  ASSERT_TRUE(nop.succeeded() && end.succeeded() && ret.succeeded());
+  const std::vector<uint8_t> body =
+      make_amdgpu_probe_elf("alias_probe", {ret.value()}, EF_AMDGPU_MACH_AMDGCN_GFX942);
+  const AmdGpuCodeObject probe(body.data(), body.size());
+  for (const bool alias : {false, true}) {
+    SCOPED_TRACE(alias);
+    const FailureOr<uint32_t> read = build_v_mov_b32_src(0, alias ? 30 : 2, kArch);
+    ASSERT_TRUE(read.succeeded());
+    const std::vector<uint8_t> image =
+        with_resource_metadata(make_amdgpu_kernel_elf({read.value(), nop.value(), end.value()}, 0,
+                                                      3, EF_AMDGPU_MACH_AMDGCN_GFX942, 0, 1),
+                               {{"test_kernel", 0, 32, 8, 0}});
+    const std::vector<KernelDescriptorInfo> kernels = entry_growth_kernels(image);
+    ASSERT_EQ(kernels.size(), 1u);
+    const AmdGpuCodeObject source(image.data(), image.size());
+    Instrumentor instrumentor(
+        source, kArch,
+        {.register_growth = std::nullopt,
+         .entries = {{.descriptor_file_offset = kernels.front().descriptor_file_offset,
+                      .preservation = GuestStatePreservation::DeclaredRegisters,
+                      .register_growth = OriginalRegisterCounts{.sgprs = 32, .vgprs = 8}}}});
+    instrumentor.add_point(
+        {.anchor_offset = 4, .probe_obj = &probe, .probe_symbol = "alias_probe", .probe_args = {}});
+    const InstrumentedCodeObject result = instrumentor.patch();
+    if (alias) {
+      ASSERT_FALSE(result.errors.empty());
+      EXPECT_NE(result.errors.front().find("numeric SGPR alias"), std::string::npos)
+          << result.errors.front();
+      EXPECT_TRUE(result.elf_bytes.empty());
+      EXPECT_TRUE(result.sites.empty());
+      EXPECT_TRUE(result.entries.empty());
+    } else {
+      ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+      ASSERT_EQ(result.entries.size(), 1u);
+      EXPECT_GT(result.entries.front().resources.sgprs, 32u);
+    }
+  }
+}
+
+TEST(InstrumentorDisjointEntries, SelectingEitherEntryPreservesTheNativeSibling) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
+  const util::FailureOr<uint32_t> ret = build_s_setpc_b64(30, kArch);
+  ASSERT_TRUE(ret.succeeded());
+  const std::vector<uint8_t> body =
+      make_amdgpu_probe_elf("entry_growth_probe", {ret.value()}, EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  const AmdGpuCodeObject probe(body.data(), body.size());
+  const std::vector<uint8_t> image = make_disjoint_entry_growth_image();
+  const AmdGpuCodeObject source(image.data(), image.size());
+  const std::vector<KernelDescriptorInfo> kernels = entry_growth_kernels(image);
+  ASSERT_EQ(kernels.size(), 2u);
+  for (const size_t selected : {0u, 1u}) {
+    SCOPED_TRACE(selected);
+    InstrumentationOptions options;
+    options.entries.push_back(entry_growth_request(kernels[selected], selected));
+    Instrumentor instrumentor(source, kArch, options);
+    add_entry_growth_points(instrumentor, probe, kernels[selected].entry_text_offset);
+    const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
+    ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+    ASSERT_EQ(result.entries.size(), 1u);
+    EXPECT_EQ(result.entries.front().original_descriptor_offset,
+              kernels[selected].descriptor_file_offset);
+    EXPECT_EQ(result.entries.front().sites.size(), 3u);
+    const std::vector<KernelDescriptorInfo> updated = entry_growth_kernels(result.elf_bytes);
+    ASSERT_EQ(updated.size(), 2u);
+    const size_t native = 1 - selected;
+    EXPECT_EQ(updated[native].entry_text_offset, kernels[native].entry_text_offset);
+    EXPECT_EQ(updated[native].descriptor.kernarg_size, kernels[native].descriptor.kernarg_size);
+    EXPECT_EQ(updated[native].descriptor.compute_pgm_rsrc1,
+              kernels[native].descriptor.compute_pgm_rsrc1);
+    EXPECT_EQ(updated[native].descriptor.compute_pgm_rsrc2,
+              kernels[native].descriptor.compute_pgm_rsrc2);
+    EXPECT_EQ(updated[native].descriptor.kernel_code_properties,
+              kernels[native].descriptor.kernel_code_properties);
+    EXPECT_EQ(updated[native].descriptor.group_segment_fixed_size,
+              kernels[native].descriptor.group_segment_fixed_size);
+    EXPECT_EQ(updated[native].descriptor.private_segment_fixed_size, 0u);
+    const AmdGpuCodeObject prepared(result.elf_bytes.data(), result.elf_bytes.size());
+    const Section *prepared_text = prepared.text_sections().front();
+    const Section *original_text = source.text_sections().front();
+    EXPECT_EQ(std::memcmp(prepared_text->data() + kernels[native].entry_text_offset,
+                          original_text->data() + kernels[native].entry_text_offset, 12),
+              0);
+    const std::optional<std::vector<KernargExtensionMetadata>> extensions =
+        parse_kernarg_extension_metadata(
+            section_bytes(prepared, kKernargExtensionMetadataSectionName));
+    ASSERT_TRUE(extensions);
+    ASSERT_EQ(extensions->size(), 1u);
+    EXPECT_EQ(extensions->front().kernel_name, kernels[selected].kernel_name);
+    EXPECT_EQ(extensions->front().original_kernarg_size, kernels[selected].descriptor.kernarg_size);
+  }
+}
+
+TEST(InstrumentorDisjointEntries, BothSelectedEntriesHaveIndependentBootstrapResourcesAndMaps) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
+  const util::FailureOr<uint32_t> ret = build_s_setpc_b64(30, kArch);
+  ASSERT_TRUE(ret.succeeded());
+  const std::vector<uint8_t> body =
+      make_amdgpu_probe_elf("entry_growth_probe", {ret.value()}, EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  const AmdGpuCodeObject probe(body.data(), body.size());
+  const std::vector<uint8_t> image = make_disjoint_entry_growth_image();
+  const std::vector<uint8_t> original = image;
+  const AmdGpuCodeObject source(image.data(), image.size());
+  const std::vector<KernelDescriptorInfo> kernels = entry_growth_kernels(image);
+  ASSERT_EQ(kernels.size(), 2u);
+  InstrumentationOptions options;
+  // Caller order does not control source identity or final result order.
+  options.entries.push_back(entry_growth_request(kernels[1], 1));
+  options.entries.push_back(entry_growth_request(kernels[0], 0));
+  Instrumentor instrumentor(source, kArch, options);
+  add_entry_growth_points(instrumentor, probe, 256);
+  add_entry_growth_points(instrumentor, probe, 0);
+  const Instrumentor::ValidationResult validation = instrumentor.validate_points();
+  ASSERT_TRUE(validation.errors.empty()) << validation.errors.front();
+  ASSERT_EQ(validation.sites.size(), 6u);
+  EXPECT_EQ(validation.sites.front().anchor_offset, 256u);
+  EXPECT_EQ(validation.sites.at(3).anchor_offset, 0u);
+  const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
+  ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+  ASSERT_EQ(result.entries.size(), 2u);
+  ASSERT_EQ(result.sites.size(), 6u);
+  const std::vector<KernelDescriptorInfo> updated = entry_growth_kernels(result.elf_bytes);
+  ASSERT_EQ(updated.size(), 2u);
+  EXPECT_NE(result.entries[0].prepared_entry_offset, result.entries[1].prepared_entry_offset);
+  const AmdGpuCodeObject prepared(result.elf_bytes.data(), result.elf_bytes.size());
+  const std::vector<uint32_t> code = section_words(prepared, ".text");
+  const FailureOr<amdhsa::MetadataDocument> metadata =
+      amdhsa::MetadataDocument::parse(result.elf_bytes);
+  ASSERT_TRUE(metadata.succeeded());
+  const amdhsa::MetadataValue *metadata_entries = metadata.value().root().field("amdhsa.kernels");
+  ASSERT_NE(metadata_entries, nullptr);
+  ASSERT_EQ(metadata_entries->array.size(), 2u);
+  for (size_t index = 0; index < result.entries.size(); ++index) {
+    const InstrumentedEntry &entry = result.entries[index];
+    EXPECT_EQ(entry.original_descriptor_offset, kernels[index].descriptor_file_offset);
+    EXPECT_EQ(entry.prepared_descriptor_offset, updated[index].descriptor_file_offset);
+    EXPECT_EQ(entry.prepared_entry_offset, updated[index].entry_text_offset);
+    EXPECT_EQ(entry.resources.kernarg_bytes, index == 0 ? 32u : 48u);
+    EXPECT_EQ(updated[index].descriptor.kernarg_size, entry.resources.kernarg_bytes);
+    EXPECT_GT(entry.resources.sgprs, index == 0 ? 16u : 32u);
+    EXPECT_GE(entry.resources.vgprs, index == 0 ? 8u : 24u);
+    EXPECT_EQ(metadata_entries->array[index].integer_field(".sgpr_count"), entry.resources.sgprs);
+    EXPECT_EQ(metadata_entries->array[index].integer_field(".vgpr_count"), entry.resources.vgprs);
+    EXPECT_EQ(metadata_entries->array[index].integer_field(".kernarg_segment_size"),
+              entry.resources.kernarg_bytes);
+    ASSERT_EQ(entry.sites.size(), 3u);
+    // The callback resumes its own untouched entry; a second kernel's entry
+    // cannot become an accidental continuation of this trampoline.
+    const InstrumentedSite &callback = entry.sites.front();
+    const int64_t callback_return =
+        static_cast<int64_t>(callback.guest_offset) + 4 +
+        int64_t{static_cast<int16_t>(code.at(callback.guest_offset / 4))} * 4;
+    EXPECT_EQ(callback_return, static_cast<int64_t>(entry.original_entry_offset));
+    for (const InstrumentedSite &site : entry.sites) {
+      EXPECT_GE(site.original_offset, index * 256u);
+      EXPECT_LT(site.original_offset, index * 256u + 12u);
+      EXPECT_GE(site.instrumentation_offset, 268u);
+      EXPECT_NE(site.instrumentation_size, 0u);
+    }
+  }
+  EXPECT_NE(result.entries[0].resources.sgprs, result.entries[1].resources.sgprs);
+  const std::optional<std::vector<KernargExtensionMetadata>> extensions =
+      parse_kernarg_extension_metadata(
+          section_bytes(prepared, kKernargExtensionMetadataSectionName));
+  ASSERT_TRUE(extensions);
+  ASSERT_EQ(extensions->size(), 2u);
+  EXPECT_EQ(extensions->at(0).original_kernarg_size, 16u);
+  EXPECT_EQ(extensions->at(1).original_kernarg_size, 32u);
+  EXPECT_EQ(std::memcmp(source.image_data(), original.data(), original.size()), 0);
+}
+
+TEST(InstrumentorDisjointEntries, LastEntryMetadataFailurePublishesNoPartialBatch) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
+  const util::FailureOr<uint32_t> ret = build_s_setpc_b64(30, kArch);
+  ASSERT_TRUE(ret.succeeded());
+  const std::vector<uint8_t> body =
+      make_amdgpu_probe_elf("entry_growth_probe", {ret.value()}, EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  const AmdGpuCodeObject probe(body.data(), body.size());
+  const std::vector<uint8_t> image = make_disjoint_entry_growth_image(false);
+  const AmdGpuCodeObject source(image.data(), image.size());
+  const std::vector<KernelDescriptorInfo> kernels = entry_growth_kernels(image);
+  ASSERT_EQ(kernels.size(), 2u);
+  InstrumentationOptions options;
+  for (size_t index = 0; index < kernels.size(); ++index)
+    options.entries.push_back(entry_growth_request(kernels[index], index));
+  Instrumentor instrumentor(source, kArch, options);
+  add_entry_growth_points(instrumentor, probe, 0);
+  add_entry_growth_points(instrumentor, probe, 256);
+  const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("missing AMDHSA metadata"), std::string::npos);
+  EXPECT_TRUE(result.elf_bytes.empty());
+  EXPECT_TRUE(result.entries.empty());
+  EXPECT_TRUE(result.sites.empty());
+  EXPECT_TRUE(result.patches.empty());
+}
+
+TEST(InstrumentorDisjointEntries, DuplicateUnknownAndUnselectedOwnersFailClosed) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
+  const std::vector<uint8_t> image = make_disjoint_entry_growth_image();
+  const AmdGpuCodeObject source(image.data(), image.size());
+  const std::vector<KernelDescriptorInfo> kernels = entry_growth_kernels(image);
+  ASSERT_EQ(kernels.size(), 2u);
+  for (const unsigned scenario : {0u, 1u, 2u, 3u}) {
+    SCOPED_TRACE(scenario);
+    InstrumentationOptions options;
+    options.entries.push_back(entry_growth_request(kernels[0], 0));
+    if (scenario == 0)
+      options.entries.push_back(options.entries.front());
+    if (scenario == 1)
+      options.entries.front().descriptor_file_offset += 1;
+    if (scenario == 3)
+      options.register_growth = OriginalRegisterCounts{.sgprs = 16, .vgprs = 8};
+    Instrumentor instrumentor(source, kArch, options);
+    instrumentor.add_point_by_offset(scenario == 2 ? 256 : 0);
+    const InstrumentedCodeObject result = instrumentor.patch();
+    ASSERT_FALSE(result.errors.empty());
+    EXPECT_TRUE(result.elf_bytes.empty());
+    EXPECT_TRUE(result.entries.empty());
+    EXPECT_TRUE(result.sites.empty());
+  }
+}
+
+TEST(InstrumentorDisjointEntries, AliasedEntriesAndCrossEntryBranchesAreRejected) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
+  for (const unsigned scenario : {0u, 1u, 2u, 3u}) {
+    SCOPED_TRACE(scenario);
+    std::vector<uint8_t> image = make_disjoint_entry_growth_image();
+    std::vector<KernelDescriptorInfo> kernels = entry_growth_kernels(image);
+    ASSERT_EQ(kernels.size(), 2u);
+    if (scenario == 0) {
+      amdhsa::kernel_descriptor_t second = kernels[1].descriptor;
+      second.kernel_code_entry_byte_offset -= 256;
+      std::memcpy(image.data() + kernels[1].descriptor_file_offset, &second, sizeof(second));
+    } else {
+      // Include an unselected B transferring into selected A. Native scopes
+      // need the same complete proof as the scope that owns the patch points.
+      const util::FailureOr<uint32_t> branch =
+          scenario == 3 ? build_s_setpc_b64(4, kArch)
+                        : build_s_branch(scenario == 1 ? 63 : -65, kArch);
+      ASSERT_TRUE(branch.succeeded());
+      const AmdGpuCodeObject before(image.data(), image.size());
+      const uint64_t instruction = scenario == 1 ? 0 : 256;
+      std::memcpy(image.data() + before.text_sections().front()->sectionOffset() + instruction,
+                  &branch.value(), sizeof(uint32_t));
+    }
+    const AmdGpuCodeObject source(image.data(), image.size());
+    InstrumentationOptions options;
+    options.entries.push_back(entry_growth_request(kernels[0], 0));
+    Instrumentor instrumentor(source, kArch, options);
+    instrumentor.add_point_by_offset(4);
+    const InstrumentedCodeObject result = instrumentor.patch();
+    EXPECT_FALSE(result.errors.empty());
+    EXPECT_TRUE(result.elf_bytes.empty());
+    EXPECT_TRUE(result.entries.empty());
+  }
+}
+
+TEST(InstrumentorDisjointEntries, NativeTextTailFallthroughCannotEnterAppendedCode) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
+  constexpr util::FailureOr<uint32_t> nop = build_s_nop(0, kArch);
+  const util::FailureOr<uint32_t> ret = build_s_setpc_b64(30, kArch);
+  static_assert(nop.succeeded());
+  ASSERT_TRUE(ret.succeeded());
+  const std::vector<uint8_t> body =
+      make_amdgpu_probe_elf("entry_growth_probe", {ret.value()}, EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  const AmdGpuCodeObject probe(body.data(), body.size());
+  for (const bool unterminated : {false, true}) {
+    SCOPED_TRACE(unterminated);
+    std::vector<uint8_t> image = make_disjoint_entry_growth_image();
+    const std::vector<KernelDescriptorInfo> kernels = entry_growth_kernels(image);
+    ASSERT_EQ(kernels.size(), 2u);
+    const AmdGpuCodeObject before(image.data(), image.size());
+    const Section *text = before.text_sections().front();
+    ASSERT_EQ(text->size(), kernels[1].entry_text_offset + 12);
+    if (unterminated) {
+      // A stays closed. Native B now consists only of three S_NOPs at the
+      // exact .text tail, so appended probe code would become its fallthrough.
+      const uint64_t last_word = text->sectionOffset() + text->size() - sizeof(uint32_t);
+      std::memcpy(image.data() + last_word, &nop.value(), sizeof(uint32_t));
+    }
+    const AmdGpuCodeObject source(image.data(), image.size());
+    if (unterminated) {
+      std::unique_ptr<Decoder> decoder = Decoder::create(default_isa_target_registry(), kArch);
+      ASSERT_NE(decoder, nullptr);
+      const std::array<uint64_t, 1> entries = {kernels[1].entry_text_offset};
+      const FailureOr<std::vector<std::unique_ptr<BasicBlock>>> blocks =
+          BasicBlock::build_reachable(source, *decoder, kArch, entries);
+      ASSERT_TRUE(blocks.succeeded());
+      ASSERT_EQ(blocks.value().size(), 1u);
+      EXPECT_TRUE(blocks.value().front()->has_implicit_terminator());
+      EXPECT_EQ(blocks.value().front()->successor_issue(), BasicBlock::SuccessorIssue::None);
+    }
+    InstrumentationOptions options;
+    options.entries.push_back(entry_growth_request(kernels[0], 0));
+    Instrumentor instrumentor(source, kArch, options);
+    add_entry_growth_points(instrumentor, probe, kernels[0].entry_text_offset);
+    const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
+    if (!unterminated) {
+      ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+      ASSERT_FALSE(result.elf_bytes.empty());
+      const AmdGpuCodeObject prepared(result.elf_bytes.data(), result.elf_bytes.size());
+      EXPECT_GT(prepared.text_sections().front()->size(), text->size());
+      continue;
+    }
+    EXPECT_FALSE(result.errors.empty());
+    EXPECT_TRUE(result.elf_bytes.empty());
+    EXPECT_TRUE(result.entries.empty());
+    EXPECT_TRUE(result.sites.empty());
+    EXPECT_TRUE(result.patches.empty());
+  }
+}
+
+TEST(InstrumentorDisjointEntries, SimulatorEntryStorageRemainsSpecificAfterGuestClobbersKernargs) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
+  const util::FailureOr<uint32_t> clobber_lo = build_s_mov_b32(0, 128, kArch);
+  const util::FailureOr<uint32_t> clobber_hi = build_s_mov_b32(1, 128, kArch);
+  const util::FailureOr<uint32_t> publish_lo = build_v_mov_b32_src(2, 256, kArch);
+  const util::FailureOr<uint32_t> publish_hi = build_v_mov_b32_src(3, 257, kArch);
+  const util::FailureOr<uint32_t> ret = build_s_setpc_b64(30, kArch);
+  ASSERT_TRUE(clobber_lo.succeeded() && clobber_hi.succeeded() && publish_lo.succeeded() &&
+              publish_hi.succeeded() && ret.succeeded());
+  std::vector<uint8_t> image = make_disjoint_entry_growth_image();
+  const AmdGpuCodeObject before(image.data(), image.size());
+  const uint64_t text_offset = before.text_sections().front()->sectionOffset();
+  for (const uint64_t entry : {0u, 256u}) {
+    std::memcpy(image.data() + text_offset + entry, &clobber_lo.value(), sizeof(uint32_t));
+    std::memcpy(image.data() + text_offset + entry + 4, &clobber_hi.value(), sizeof(uint32_t));
+  }
+  const AmdGpuCodeObject source(image.data(), image.size());
+  const std::vector<KernelDescriptorInfo> kernels = entry_growth_kernels(image);
+  ASSERT_EQ(kernels.size(), 2u);
+  const std::vector<uint8_t> body = make_amdgpu_probe_elf(
+      "entry_growth_probe", {publish_lo.value(), publish_hi.value(), ret.value()},
+      EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  const AmdGpuCodeObject probe(body.data(), body.size());
+  InstrumentationOptions options;
+  for (size_t index = 0; index < kernels.size(); ++index) {
+    EntryInstrumentationOptions request = entry_growth_request(kernels[index], index);
+    request.preservation = GuestStatePreservation::LiveRegisters;
+    options.entries.push_back(request);
+  }
+  Instrumentor instrumentor(source, kArch, options);
+  for (const uint64_t entry : {0u, 256u})
+    instrumentor.add_point({.anchor_offset = entry + 8,
+                            .kind = InstrumentationKind::KernelExit,
+                            .probe_obj = &probe,
+                            .probe_symbol = "entry_growth_probe",
+                            .probe_args = {{.source = ProbeArgSource::LogBufferPtrLo},
+                                           {.source = ProbeArgSource::LogBufferPtrHi}}});
+  const InstrumentedCodeObject result = instrumentor.patch();
+  ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+  ASSERT_EQ(result.entries.size(), 2u);
+  const AmdGpuCodeObject prepared(result.elf_bytes.data(), result.elf_bytes.size());
+  const std::vector<uint32_t> code = section_words(prepared, ".text");
+  const std::array<uint64_t, 2> pointers = {0x123456785555AAA0ull, 0xCAFEBABE11223340ull};
+  // DbiSim owns one dispatch; separate instances check B/A/B entry execution.
+  // This does not replace the controlled-HSA one-load integration test.
+  for (const size_t index : {1u, 0u, 1u}) {
+    SCOPED_TRACE(index);
+    const std::array<KernargExtensionPayloadLayout, 1> payloads{kDbiEntryPayloadLayout};
+    const std::optional<KernargExtensionLayout> layout =
+        make_kernarg_extension_layout(kernels[index].descriptor.kernarg_size, payloads);
+    ASSERT_TRUE(layout);
+    const std::vector<uint8_t> arguments(kernels[index].descriptor.kernarg_size, 0x5a);
+    std::vector<uint8_t> wrapper(layout->wrapper_size);
+    const KernargExtensionPayloadWrite payload = {.data = &pointers[index],
+                                                  .size = sizeof(uint64_t)};
+    ASSERT_TRUE(write_kernarg_extension_wrapper(wrapper, *layout, arguments.data(),
+                                                0x100000 + index * 0x1000, std::span{&payload, 1}));
+    test::DbiSim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize("cdna5", 32));
+    sim.set_wave32_dispatch();
+    sim.set_kernarg(std::move(wrapper));
+    sim.set_entry_offset(result.entries[index].prepared_entry_offset);
+    const std::vector<std::vector<uint32_t>> registers = sim.run_and_read_vgprs(code, 0, {2, 3});
+    ASSERT_EQ(registers.size(), 2u);
+    ASSERT_EQ(registers[0].size(), 32u);
+    ASSERT_EQ(registers[1].size(), 32u);
+    for (size_t lane = 0; lane < 32; ++lane) {
+      EXPECT_EQ(registers[0][lane], static_cast<uint32_t>(pointers[index]));
+      EXPECT_EQ(registers[1][lane], static_cast<uint32_t>(pointers[index] >> 32));
+    }
+  }
 }
 
 TEST(InstrumentorResources, EntrySnapshotsWithGrowthRespectOriginalOrdinaryRegisterBounds) {
