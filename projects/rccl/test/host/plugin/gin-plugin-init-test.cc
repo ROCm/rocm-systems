@@ -68,10 +68,12 @@ int64_t ncclParamGinType() { return -1; }
 // state and the pod opt-in come from the test while the reach policy stays
 // real.
 static bool g_anvilFabricMem = false;
+static bool g_anvilCrossNic = true;
 static bool g_anvilPodOptIn = false;
 bool ginAnvilFabricMemCapable(struct ncclComm*) { return g_anvilFabricMem; }
+bool ginAnvilCrossNic(struct ncclComm*) { return g_anvilCrossNic; }
 GinAnvilSdmaReach ginAnvilSdmaReachCapable(struct ncclComm* comm) {
-  return ginAnvilSdmaReachPredicate(comm->topo->nHosts, comm->nRanks, g_anvilFabricMem);
+  return ginAnvilSdmaReachPredicate(comm->topo->nHosts, comm->nRanks, g_anvilFabricMem, g_anvilCrossNic);
 }
 bool ginAnvilUseFabricPod(struct ncclComm* comm) {
   return ginAnvilSdmaReachCapable(comm) == GinAnvilSdmaReach::FabricPod && g_anvilPodOptIn;
@@ -199,6 +201,7 @@ class GinFinalizeTest : public GinPluginInitTest {
     topo_->nHosts = 1;
     comm_.topo = topo_.get();
     g_anvilFabricMem = false;
+    g_anvilCrossNic = true;
     g_anvilPodOptIn = false;
     peerPodOptIn_ = true;
     podVotes_ = 0;
@@ -216,6 +219,7 @@ class GinFinalizeTest : public GinPluginInitTest {
 
   void TearDown() override {
     g_anvilFabricMem = false;
+    g_anvilCrossNic = true;
     g_anvilPodOptIn = false;
     g_devrBootstrapAllGather = [](void*, void*, int) { return ncclSuccess; };
     std::memset(pluginLibs, 0, sizeof(pluginLibs));
@@ -431,6 +435,7 @@ struct AnvilReachCase {
   bool peerPodOptIn;   // every other rank
   bool kept;
   int podVotes;
+  bool crossNic = true;  // false: NCCL_CROSS_NIC=0 somewhere, GIN connects RAIL
 };
 
 class GinAnvilReachTest : public GinFinalizeTest, public ::testing::WithParamInterface<AnvilReachCase> {};
@@ -448,6 +453,7 @@ TEST_P(GinAnvilReachTest, AnvilKeptOnlyWithinSdmaReach) {
   topo_->nHosts = c.nHosts;
   comm_.nRanks = c.nRanks;
   g_anvilFabricMem = c.fabricMem;
+  g_anvilCrossNic = c.crossNic;
   g_anvilPodOptIn = c.localPodOptIn;
   peerPodOptIn_ = c.peerPodOptIn;
 
@@ -480,7 +486,9 @@ INSTANTIATE_TEST_SUITE_P(
         AnvilReachCase{"FabricPodOnlyPeersOptIn", 2, 8, true, false, true, false, 1},
         AnvilReachCase{"FabricPodOnlyThisRankOptIn", 2, 8, true, true, false, false, 1},
         AnvilReachCase{"FabricPodAtRankCap", 4, kGinAnvilIpcMaxRanks, true, true, true, true, 1},
-        AnvilReachCase{"FabricPodAboveRankCap", 4, kGinAnvilIpcMaxRanks + 1, true, true, true, false, 0}),
+        AnvilReachCase{"FabricPodAboveRankCap", 4, kGinAnvilIpcMaxRanks + 1, true, true, true, false, 0},
+        AnvilReachCase{"FabricPodRailConnected", 2, 8, true, true, true, false, 0, false},
+        AnvilReachCase{"SingleHostRailConnected", 1, 4, true, true, true, true, 0, false}),
     [](const ::testing::TestParamInfo<AnvilReachCase>& info) { return std::string(info.param.name); });
 
 // The pod exception does not override the all-ranks mask: a rank without Anvil

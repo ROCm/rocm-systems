@@ -21,16 +21,22 @@ enum class GinAnvilSdmaReach : int {
 };
 
 // fabricPod: comm's peers are fabric-mapped (ginAnvilFabricMemCapable), and for
-// the agreed reach, every rank opted in to the pod.
-inline GinAnvilSdmaReach ginAnvilSdmaReachPredicate(int nHosts, int nRanks, bool fabricPod) {
+// the agreed reach, every rank opted in to the pod. crossNic: every rank's GIN
+// connection can reach every other rank (NCCL_GIN_CONNECTION_FULL). A RAIL
+// connection (NCCL_CROSS_NIC=0) strides its peers by the ranks per host, while
+// Anvil's signal table maps GIN peers to consecutive LSA slots.
+inline GinAnvilSdmaReach ginAnvilSdmaReachPredicate(int nHosts, int nRanks, bool fabricPod, bool crossNic) {
   if (nHosts <= 1) return GinAnvilSdmaReach::Host;
-  return fabricPod && nRanks <= kGinAnvilIpcMaxRanks ? GinAnvilSdmaReach::FabricPod : GinAnvilSdmaReach::None;
+  return fabricPod && crossNic && nRanks <= kGinAnvilIpcMaxRanks ? GinAnvilSdmaReach::FabricPod
+                                                                 : GinAnvilSdmaReach::None;
 }
 
 // Why the agreed reach is None on a multi-host communicator, for the log line.
-// fabricCapable is ginAnvilFabricMemCapable.
-inline const char* ginAnvilSdmaNoReachReason(bool fabricCapable, int nRanks) {
+// fabricCapable is ginAnvilFabricMemCapable and crossNic ginAnvilCrossNic.
+inline const char* ginAnvilSdmaNoReachReason(bool fabricCapable, bool crossNic, int nRanks) {
   if (!fabricCapable) return "SDMA crosses hosts only inside one fabric pod (MNNVL, a single clique, cuMem)";
+  if (!crossNic) return "GIN is rail-connected (NCCL_CROSS_NIC=0), and Anvil SDMA signals across hosts only "
+                        "over a full connection";
   if (nRanks > kGinAnvilIpcMaxRanks) return "the communicator has more ranks than Anvil's peer table";
   return "crossing hosts in a fabric pod needs RCCL_GIN_ANVIL_FABRIC_POD=1 and RCCL_GIN_ANVIL_FABRIC_MEM=1 on "
          "every rank";
@@ -39,6 +45,11 @@ inline const char* ginAnvilSdmaNoReachReason(bool fabricCapable, int nRanks) {
 struct ncclComm;
 
 // Readers of comm state, defined in src/gin/gin_anvil_reach.cc.
+
+// True when every rank reports cross-NIC support, so GIN connects FULL rather
+// than RAIL (ginConnectionType in init.cc). Every rank of comm gets the same
+// answer.
+bool ginAnvilCrossNic(struct ncclComm* comm);
 
 // Reach of comm by topology alone, as if every rank opted in to the pod. Every
 // rank of comm gets the same answer.

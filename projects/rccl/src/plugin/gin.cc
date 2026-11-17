@@ -539,7 +539,7 @@ ncclResult_t ncclGinSetDefaultBackend(struct ncclComm* comm, uint64_t globalBitM
              "GIN backend ANVIL_SDMA removed from active backends on %s: %s (nHosts=%d MNNVL=%d cliqueSize=%d "
              "nRanks=%d anvilMaxRanks=%d)",
              comm->archName,
-             ginAnvilSdmaNoReachReason(ginAnvilFabricMemCapable(comm), comm->nRanks),
+             ginAnvilSdmaNoReachReason(ginAnvilFabricMemCapable(comm), ginAnvilCrossNic(comm), comm->nRanks),
              comm->topo->nHosts, comm->MNNVL, comm->clique.size, comm->nRanks, kGinAnvilIpcMaxRanks);
       } else {
         WARN("GIN backend type %d not supported on all ranks, removing from active backends", backend->ginType);

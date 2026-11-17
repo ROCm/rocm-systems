@@ -133,7 +133,7 @@ can address, so how far the backend reaches depends on the system:
 | System | Single-host communicator | Multi-host communicator |
 |--------|--------------------------|-------------------------|
 | MI300X (gfx942), MI350 (gfx950) | Anvil SDMA over xGMI or PCIe | Not available: no scale-up fabric between hosts, so PROXY or rocSHMEM GDA serves the communicator |
-| MI450 (gfx1250) | Anvil SDMA | Anvil SDMA when every rank is in one fabric pod (MNNVL, one clique covering the communicator, cuMem), the communicator has at most 16 ranks, and every rank sets `RCCL_GIN_ANVIL_FABRIC_POD=1` and `RCCL_GIN_ANVIL_FABRIC_MEM=1`; otherwise PROXY or rocSHMEM GDA |
+| MI450 (gfx1250) | Anvil SDMA | Anvil SDMA when every rank is in one fabric pod (MNNVL, one clique covering the communicator, cuMem), the communicator has at most 16 ranks, GIN connects every rank to every other (not `NCCL_CROSS_NIC=0`), and every rank sets `RCCL_GIN_ANVIL_FABRIC_POD=1` and `RCCL_GIN_ANVIL_FABRIC_MEM=1`; otherwise PROXY or rocSHMEM GDA |
 
 The code does not list systems: a multi-host communicator keeps Anvil SDMA only
 when its ranks form a fabric pod (`ginAnvilFabricMemCapable`), which MI300X and

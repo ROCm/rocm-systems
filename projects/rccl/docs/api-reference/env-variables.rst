@@ -1077,8 +1077,10 @@ in the following table.
           written through their fabric-mapped memory, so this also needs
           ``RCCL_GIN_ANVIL_FABRIC_MEM=1``. Every rank must set both;
           otherwise RCCL removes Anvil SDMA from the communicator on every
-          rank and PROXY or rocSHMEM GDA serves it. Ignored on MI300X and
-          MI350, which have no scale-up fabric between hosts.
+          rank and PROXY or rocSHMEM GDA serves it. GIN must also connect
+          every rank to every other, so ``NCCL_CROSS_NIC=0`` keeps it off.
+          Ignored on MI300X and MI350, which have no scale-up fabric between
+          hosts.
       - | Unset or ``0``: off (default). Anvil SDMA serves single-host
           communicators only.
         | ``1``: on.

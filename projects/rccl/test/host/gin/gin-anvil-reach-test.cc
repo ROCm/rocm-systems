@@ -14,6 +14,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "comm.h"
 #include "graph/topo.h"
@@ -53,10 +54,11 @@ class GinAnvilReachMicrotestPerSystem : public GinAnvilReachMicrotest,
 struct ReachComm {
   std::unique_ptr<ncclComm> comm = std::make_unique<ncclComm>();
   std::unique_ptr<ncclTopoSystem> topo = std::make_unique<ncclTopoSystem>();
+  std::vector<ncclPeerInfo> peers;
   std::string arch;
 
-  ReachComm(const char* archName, int mnnvl, int nRanks, int cliqueSize, int nHosts = 1,
-            int cuMemSupport = 1) : arch(archName) {
+  ReachComm(const char* archName, int mnnvl, int nRanks, int cliqueSize, int nHosts = 1, int cuMemSupport = 1)
+    : peers(static_cast<size_t>(nRanks)), arch(archName) {
     comm->archName = &arch[0];
     comm->MNNVL = mnnvl;
     comm->nRanks = nRanks;
@@ -64,6 +66,8 @@ struct ReachComm {
     comm->cuMemSupport = cuMemSupport;
     topo->nHosts = nHosts;
     comm->topo = topo.get();
+    for (ncclPeerInfo& p : peers) p.crossNicSupport = true;
+    comm->peerInfo = peers.data();
   }
 };
 
@@ -72,6 +76,7 @@ struct ReachComm {
 TEST_F(GinAnvilReachMicrotest, NullComm_ReachesNothing) {
   EXPECT_EQ(ginAnvilSdmaReachCapable(nullptr), GinAnvilSdmaReach::None);
   EXPECT_FALSE(ginAnvilUseFabricPod(nullptr));
+  EXPECT_FALSE(ginAnvilCrossNic(nullptr));
   EXPECT_FALSE(ginAnvilFabricMemCapable(nullptr));
   EXPECT_FALSE(ginAnvilUseFabricMem(nullptr));
 }
@@ -143,27 +148,47 @@ TEST_F(GinAnvilReachMicrotest, UseFabricPod_NeedsBothOptIns) {
   EXPECT_EQ(ginAnvilSdmaReachCapable(rc.comm.get()), GinAnvilSdmaReach::FabricPod);
 }
 
-TEST(GinAnvilReachMicrotestPredicate, SingleHostAlwaysReached) {
-  EXPECT_EQ(ginAnvilSdmaReachPredicate(1, 8, false), GinAnvilSdmaReach::Host);
-  EXPECT_EQ(ginAnvilSdmaReachPredicate(1, 64, true), GinAnvilSdmaReach::Host);
+// NCCL_CROSS_NIC=0 on any rank makes GIN rail-connected, which Anvil's signal
+// table cannot map across hosts, so a pod is not formed; a single host is
+// unaffected.
+TEST_F(GinAnvilReachMicrotest, FabricPod_NeedsCrossNicOnEveryRank) {
+  ReachComm pod("gfx1250", 1, 8, 8, 2);
+  EXPECT_TRUE(ginAnvilCrossNic(pod.comm.get()));
+  pod.peers[5].crossNicSupport = false;
+  EXPECT_FALSE(ginAnvilCrossNic(pod.comm.get()));
+  EXPECT_EQ(ginAnvilSdmaReachCapable(pod.comm.get()), GinAnvilSdmaReach::None);
+  EXPECT_FALSE(ginAnvilUseFabricPod(pod.comm.get()));
+
+  ReachComm host("gfx1250", 1, 4, 4, 1);
+  for (ncclPeerInfo& p : host.peers) p.crossNicSupport = false;
+  EXPECT_EQ(ginAnvilSdmaReachCapable(host.comm.get()), GinAnvilSdmaReach::Host);
 }
 
-TEST(GinAnvilReachMicrotestPredicate, CrossesHostsOnlyInFabricPodWithinPeerTable) {
-  EXPECT_EQ(ginAnvilSdmaReachPredicate(2, 8, true), GinAnvilSdmaReach::FabricPod);
-  EXPECT_EQ(ginAnvilSdmaReachPredicate(4, kGinAnvilIpcMaxRanks, true), GinAnvilSdmaReach::FabricPod);
-  EXPECT_EQ(ginAnvilSdmaReachPredicate(2, 8, false), GinAnvilSdmaReach::None);
-  EXPECT_EQ(ginAnvilSdmaReachPredicate(4, kGinAnvilIpcMaxRanks + 1, true), GinAnvilSdmaReach::None);
+TEST(GinAnvilReachMicrotestPredicate, SingleHostAlwaysReached) {
+  EXPECT_EQ(ginAnvilSdmaReachPredicate(1, 8, false, false), GinAnvilSdmaReach::Host);
+  EXPECT_EQ(ginAnvilSdmaReachPredicate(1, 64, true, true), GinAnvilSdmaReach::Host);
+}
+
+TEST(GinAnvilReachMicrotestPredicate, CrossesHostsOnlyInCrossNicFabricPodWithinPeerTable) {
+  EXPECT_EQ(ginAnvilSdmaReachPredicate(2, 8, true, true), GinAnvilSdmaReach::FabricPod);
+  EXPECT_EQ(ginAnvilSdmaReachPredicate(4, kGinAnvilIpcMaxRanks, true, true), GinAnvilSdmaReach::FabricPod);
+  EXPECT_EQ(ginAnvilSdmaReachPredicate(2, 8, false, true), GinAnvilSdmaReach::None);
+  EXPECT_EQ(ginAnvilSdmaReachPredicate(2, 8, true, false), GinAnvilSdmaReach::None);
+  EXPECT_EQ(ginAnvilSdmaReachPredicate(4, kGinAnvilIpcMaxRanks + 1, true, true), GinAnvilSdmaReach::None);
 }
 
 // Each reason the reach is None logs a different line, and a pod the topology
 // allows but a rank did not opt in to names the variables to set.
 TEST(GinAnvilReachMicrotestPredicate, NoReachReasonNamesTheCause) {
-  const std::string noPod = ginAnvilSdmaNoReachReason(false, 8);
-  const std::string tooMany = ginAnvilSdmaNoReachReason(true, kGinAnvilIpcMaxRanks + 1);
-  const std::string noOptIn = ginAnvilSdmaNoReachReason(true, 8);
-  EXPECT_NE(noPod, tooMany);
-  EXPECT_NE(noPod, noOptIn);
+  const std::string noPod = ginAnvilSdmaNoReachReason(false, true, 8);
+  const std::string rail = ginAnvilSdmaNoReachReason(true, false, 8);
+  const std::string tooMany = ginAnvilSdmaNoReachReason(true, true, kGinAnvilIpcMaxRanks + 1);
+  const std::string noOptIn = ginAnvilSdmaNoReachReason(true, true, 8);
+  for (const std::string& other : {rail, tooMany, noOptIn}) EXPECT_NE(noPod, other);
+  EXPECT_NE(rail, tooMany);
+  EXPECT_NE(rail, noOptIn);
   EXPECT_NE(tooMany, noOptIn);
+  EXPECT_NE(rail.find("NCCL_CROSS_NIC=0"), std::string::npos);
   EXPECT_NE(noOptIn.find("RCCL_GIN_ANVIL_FABRIC_POD=1"), std::string::npos);
   EXPECT_NE(noOptIn.find("RCCL_GIN_ANVIL_FABRIC_MEM=1"), std::string::npos);
 }

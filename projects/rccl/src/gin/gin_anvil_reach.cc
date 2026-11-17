@@ -31,9 +31,18 @@ bool ginAnvilUseFabricMem(struct ncclComm* comm) {
   return ginAnvilFabricMemPredicate(comm, rcclParamGinAnvilFabricMem() != 0);
 }
 
+bool ginAnvilCrossNic(struct ncclComm* comm) {
+  if (comm == nullptr || comm->peerInfo == nullptr) return false;
+  for (int r = 0; r < comm->nRanks; r++) {
+    if (!comm->peerInfo[r].crossNicSupport) return false;
+  }
+  return true;
+}
+
 GinAnvilSdmaReach ginAnvilSdmaReachCapable(struct ncclComm* comm) {
   if (comm == nullptr || comm->topo == nullptr) return GinAnvilSdmaReach::None;
-  return ginAnvilSdmaReachPredicate(comm->topo->nHosts, comm->nRanks, ginAnvilFabricMemCapable(comm));
+  return ginAnvilSdmaReachPredicate(comm->topo->nHosts, comm->nRanks, ginAnvilFabricMemCapable(comm),
+                                    ginAnvilCrossNic(comm));
 }
 
 bool ginAnvilUseFabricPod(struct ncclComm* comm) {
