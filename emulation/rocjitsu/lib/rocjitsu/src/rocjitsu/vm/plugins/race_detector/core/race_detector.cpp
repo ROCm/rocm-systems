@@ -29,23 +29,23 @@ WaveRaceState &RaceDetector::getWaveRaceState(int waveIndex) {
   return waveRaceStates[waveIndex];
 }
 
-EventId
-RaceDetector::allocateEventId(WaveId waveId, InstructionSnapshot instruction, MemoryEventType type,
-                              std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask,
-                              IntervalSet ldsIntervals,
-                              std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-                              MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask) {
+EventId RaceDetector::allocateEventId(
+    WaveId waveId, InstructionSnapshot instruction, MemoryEventType type,
+    std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask, IntervalSet ldsIntervals,
+    std::span<const amdgpu::MemoryCounterObligation> counterObligations,
+    MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask, LdsAccess ldsAccess) {
   bool hasLds = !ldsIntervals.empty();
-  EventId eid =
-      events_.add(waveId, instruction, type, std::move(registers), execMask, byteMask,
-                  std::move(ldsIntervals), counterObligations, memoryOrder, lastRegisterByteMask);
+  EventId eid = events_.add(waveId, instruction, type, std::move(registers), execMask, byteMask,
+                            std::move(ldsIntervals), counterObligations, memoryOrder,
+                            lastRegisterByteMask, ldsAccess);
   if (hasLds) {
     const auto &ivs = events_.ldsIntervals(eid);
     const WaveId orderedWave = memoryOrder == MemoryOrderClass::LDS ? waveId : WaveId{-1};
-    if (isToLds(type)) {
+    if (events_.writesLds(eid)) {
       ldsWriteEvents.push_back(eid);
       adjustByteCounts(ivs, byteWriteCounts, +1, orderedWave);
-    } else if (isFromLds(type)) {
+    }
+    if (events_.readsLds(eid)) {
       ldsReadEvents.push_back(eid);
       adjustByteCounts(ivs, byteReadCounts, +1, orderedWave);
     }
@@ -60,11 +60,11 @@ bool RaceDetector::satisfyEventWaitCounter(EventId eventId, amdgpu::WaitCounterT
 }
 
 void RaceDetector::retireEvent(EventId eventId) {
-  auto type = events_.type(eventId);
-  if (isToLds(type)) {
+  if (events_.writesLds(eventId)) {
     removeFromUnorderedList(ldsWriteEvents, eventId);
     adjustByteCounts(events_.ldsIntervals(eventId), byteWriteCounts, -1);
-  } else if (isFromLds(type)) {
+  }
+  if (events_.readsLds(eventId)) {
     removeFromUnorderedList(ldsReadEvents, eventId);
     adjustByteCounts(events_.ldsIntervals(eventId), byteReadCounts, -1);
   }
@@ -72,7 +72,7 @@ void RaceDetector::retireEvent(EventId eventId) {
 }
 
 void RaceDetector::validateRead(int addr, WaveId wave, int lane, int nBytes,
-                                MemoryOrderClass currentMemoryOrder) const {
+                                MemoryOrderClass currentMemoryOrder, uint8_t atomicBytes) const {
   if (addr < 0 || nBytes <= 0 || !validLdsRange(addr, nBytes))
     return;
   if (!hasPotentialLdsConflict(addr, nBytes, byteWriteCounts, wave, currentMemoryOrder)) {
@@ -80,6 +80,8 @@ void RaceDetector::validateRead(int addr, WaveId wave, int lane, int nBytes,
   }
 
   for (EventId eventId : ldsWriteEvents) {
+    if (events_.atomicLdsElementMatches(eventId, atomicBytes))
+      continue;
     if (wave == events_.waveId(eventId)) {
       // Operations in the same non-UNORDERED class complete in issue order.
       // A completed event is safe for its owning wave regardless of class, but
@@ -100,7 +102,7 @@ void RaceDetector::validateRead(int addr, WaveId wave, int lane, int nBytes,
 }
 
 void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes,
-                                 MemoryOrderClass currentMemoryOrder) const {
+                                 MemoryOrderClass currentMemoryOrder, uint8_t atomicBytes) const {
   if (addr < 0 || nBytes <= 0 || !validLdsRange(addr, nBytes))
     return;
   if (!hasPotentialLdsConflict(addr, nBytes, byteReadCounts, wave, currentMemoryOrder)) {
@@ -108,6 +110,8 @@ void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes,
   }
 
   for (EventId eventId : ldsReadEvents) {
+    if (events_.atomicLdsElementMatches(eventId, atomicBytes))
+      continue;
     if (wave == events_.waveId(eventId)) {
       // The LDS bytes are safe only when the two operations share a proven
       // FIFO completion class, or an explicit wait completed the older event.
@@ -125,6 +129,15 @@ void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes,
       raceHandler({RaceViolation::Space::LDS, *byte, wave.value, lane, true, workgroupId, eventId});
     }
   }
+}
+
+bool RaceDetector::mayConflict(const IntervalSet &accessed, WaveId wave, bool isWrite,
+                               MemoryOrderClass currentMemoryOrder) const {
+  const std::vector<LdsChunkCounts> &counts = isWrite ? byteReadCounts : byteWriteCounts;
+  return std::ranges::any_of(accessed, [&](const Interval &interval) {
+    return hasPotentialLdsConflict(interval.start, interval.end - interval.start, counts, wave,
+                                   currentMemoryOrder);
+  });
 }
 
 bool RaceDetector::hasPotentialLdsConflict(int addr, int nBytes,

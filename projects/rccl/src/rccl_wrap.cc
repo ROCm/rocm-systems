@@ -2393,7 +2393,8 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
           decision->protocol = NCCL_PROTO_SIMPLE;
           decision->nMaxChannels = interComm->p2pnChannels;
         } else {
-          struct ncclTaskColl task;
+          // Zero-initialized: getAlgoInfo now reads task.algMask/forceAlgSelection.
+          struct ncclTaskColl task = {};
           task.func = ncclFuncAllGather;
           task.count = sendcount;
           task.datatype = datatype;
@@ -2408,7 +2409,8 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
           intraProto = NCCL_PROTO_SIMPLE;
           intraChan = intraComm->p2pnChannels;
         } else {
-          struct ncclTaskColl task;
+          // Zero-initialized: getAlgoInfo now reads task.algMask/forceAlgSelection.
+          struct ncclTaskColl task = {};
           task.func = ncclFuncAllGather;
           task.count = intraCount;
           task.datatype = datatype;
@@ -2958,6 +2960,8 @@ bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize) {
   // - 2 nodes: enable for 128KiB .. 2MiB
   // - 4 nodes: enable up to 4MiB
   // - 8 and 16 nodes: enable up to 8MiB
+  // rawTaskAppend does not lower useDirect, so under NCCL_ENQUEUE_REARCH_ENABLE nothing would stage tempBuff.
+  if (ncclParamEnqueueRearchEnable()) return false;
   static int userDirectReduceScatterInput = rcclParamDirectReduceScatterDisable();
   if (userDirectReduceScatterInput != 0) {
     INFO(NCCL_INIT, "RCCL DIRECT REDUCE-SCATTER has been disabled by environment variable.");

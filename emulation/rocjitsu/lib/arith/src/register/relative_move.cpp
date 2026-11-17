@@ -7,8 +7,8 @@
 // Indexing/routing follow rocjitsu. The 255 offset limit follows section
 // 3.3.2.2 of both RDNA ISA manuals.
 
-#include "common/internal.h"
-#include "rj_arith/rj_arith.h"
+#include "common/validation.h"
+#include "rj_arith/detail/rj_arith_register.h"
 
 #include <stdint.h>
 

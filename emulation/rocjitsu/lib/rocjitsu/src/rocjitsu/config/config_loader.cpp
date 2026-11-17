@@ -67,8 +67,9 @@ resolve_execution_threads(const ExecutionThreadRequest &request, uint32_t host_t
   auto effective = [&](ExecutionThreadChoice choice) {
     ExecutionThreadAllocation result;
     result.engines = std::min(request.engines ? request.engines : choice.engines, xcds);
-    result.helpers = request.helpers >= 0 ? static_cast<uint32_t>(request.helpers)
-                                          : (async_supported ? choice.helpers : 0);
+    result.helpers = !async_supported       ? 0
+                     : request.helpers >= 0 ? static_cast<uint32_t>(request.helpers)
+                                            : choice.helpers;
     for (uint32_t capacity : dispatch_capacities)
       result.dispatch.push_back(
           std::min(request.dispatch ? request.dispatch : choice.dispatch, std::max(capacity, 1u)));
@@ -1147,9 +1148,12 @@ util::FailureOr<ExecutionTopology> execution_topology(const fb::ComponentDef *ro
   auto visit = [&](auto &&self, const fb::ComponentDef *node, uint64_t copies) -> util::Result {
     if (!copies)
       return util::Result::success();
-    if (type(node) == "xcd" && checked_capacity(result.xcds + copies, result.xcds).failed())
+    const auto node_type = type(node);
+    if (node_type == "xcd" && checked_capacity(result.xcds + copies, result.xcds).failed())
       return util::Result::failure();
-    if (!node->children())
+    // Match build_children: leaf components do not instantiate declared children.
+    if (!node->children() || node_type == "gpu_memory" || node_type == "l2_cache" ||
+        node_type == "memory_side_cache" || node_type == "command_processor")
       return util::Result::success();
     bool has_cp = false, has_se = false;
     uint64_t direct_cus = 0, se_cus = 0;
@@ -1580,6 +1584,42 @@ util::FailureOr<DeviceIdentityConfig> load_device_identity(const std::string &js
         if (identity.device.present)
           (void)resolve_gpu_generation_topology(identity.device);
         identity.pci = pci_device_from_fb(config->vm()->gpu()->pci());
+        return identity;
+      });
+}
+
+util::FailureOr<NodeDeviceIdentityConfig>
+load_node_device_identity_from_string(const std::string &json, const std::string &schema_text,
+                                      std::string_view node_id,
+                                      util::DiagnosticEmitter emit_error) {
+  return with_config_json(
+      json, schema_text, emit_error,
+      [&](const fb::SimulationConfig *config) -> util::FailureOr<NodeDeviceIdentityConfig> {
+        auto graph = system_graph_from_fb(config, emit_error);
+        if (graph.failed())
+          return util::Result::failure();
+        auto selection = selected_node(config, graph.value(), node_id, emit_error);
+        if (selection.failed())
+          return util::Result::failure();
+        const SystemNode &node = *selection.value();
+        auto topology = execution_topology(
+            config->topology() ? config->topology()->root() : nullptr, emit_error);
+        if (topology.failed())
+          return util::Result::failure();
+
+        NodeDeviceIdentityConfig identity;
+        identity.local_node_id = node.id;
+        identity.num_xcc = topology.value().xcds;
+        identity.publish_peer_links = !graph.value().explicit_manifest;
+        if (config->vm() && config->vm()->gpu())
+          identity.pci = pci_device_from_fb(config->vm()->gpu()->pci());
+        identity.devices.reserve(node.gpus.size());
+        for (const auto &gpu : node.gpus) {
+          auto device = gpu.device;
+          if (device.present)
+            (void)resolve_gpu_generation_topology(device);
+          identity.devices.push_back(std::move(device));
+        }
         return identity;
       });
 }

@@ -3,22 +3,26 @@
 
 //! Linux KFD and DRM driver. Construction is inert; activation opens KFD and
 //! retains each exact VM binding for recreation within its lifetime policy.
+mod advice;
 mod allocation;
 mod drm;
 mod event;
 mod imported_system;
-pub(crate) mod interop;
+mod interop;
 mod kernel_queue;
 pub(super) mod memory;
+pub(crate) mod notification;
 mod operations;
 mod pc_sampling;
 mod queue;
 mod registered_host;
 pub(super) mod sys;
 mod sysfs;
+mod target;
+mod trap;
 mod uapi;
-use crate::memory::storage::TryPush;
 use crate::os::linux::{errno, file as os_file, memory as os_memory};
+use target::KfdTargetProfile;
 mod vmem;
 
 use crate::device::gpu::kernel_queue::{
@@ -30,15 +34,14 @@ use crate::device::gpu::profiling::{
 };
 use crate::device::gpu::queue::{QueuePriority, QueueRequest, QueueScratch, QueueTransport};
 use crate::driver::{
-    AddressSpaceInfo, AllocationOperations, CachedInfo, Driver, EndpointSelector, GpuDriver,
-    GpuInstrumentationOperations, GpuKernelQueueOperations, GpuUserQueueOperations,
-    KernelQueueResource, UserQueueResource, VirtualMemoryOperations,
+    AddressSpaceInfo, AllocationOperations, CachedInfo, Driver, EndpointSelector,
+    GpuCacheControlOperations, GpuClockOperations, GpuFaultModeOperations,
+    GpuKernelQueueOperations, GpuMemoryQueryOperations, GpuPcSamplingOperations, GpuSpmOperations,
+    GpuSurfaceOperations, GpuTrapOperations, GpuUserQueueOperations, KernelQueueResource,
+    UserQueueResource, VirtualMemoryOperations,
 };
 use crate::error::error;
-use crate::memory::interop::linux::{
-    AisFileOperation, AisFileResult, DmaBuf, KfdIpcMemoryHandle, KfdSvmAccess, KfdSvmAttribute,
-    KfdSvmLocation,
-};
+use crate::memory::interop::linux::{AisFileOperation, AisFileResult, DmaBuf, KfdIpcMemoryHandle};
 use crate::memory::storage::{Owned, Shared};
 use crate::memory::{
     AllocationDesc, AllocationLimits, DeviceAccess, HostMappingPolicy, HostRegistration,
@@ -46,7 +49,7 @@ use crate::memory::{
 };
 use crate::os::ProcessIdentity;
 use crate::os::native_error;
-use crate::session::DriverContextLifetime;
+use crate::session::{DebuggerRegistrationMode, DriverContextLifetime, XnackModeRequest};
 use crate::topology::Endpoint;
 use crate::{Error, ErrorKind};
 pub(crate) use allocation::LinuxAllocation;
@@ -60,6 +63,7 @@ use std::os::fd::{AsRawFd, BorrowedFd, RawFd};
 use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
 pub(crate) use sysfs::KfdNode as LinuxSelector;
+pub(crate) use trap::KfdProcessTrap;
 pub(crate) use vmem::{
     KfdVirtualAddress, KfdVirtualDeviceMapping, KfdVirtualHostMapping, KfdVirtualMemory,
 };
@@ -80,6 +84,10 @@ pub(crate) struct LinuxKfdDriver {
     lifetime: DriverContextLifetime,
     /// Records whether this instance joined the process-owned context.
     joined_primary: AtomicBool,
+    /// Native fault-mode request, fixed before this driver's first activation.
+    xnack_requested: Option<XnackModeRequest>,
+    /// Debugger record and trap-temporary policy fixed before first activation.
+    debugger: Option<sys::RuntimeDebuggerRegistration>,
     /// Connection and bindings used for a session-owned context.
     local: KfdContextResources,
 }
@@ -94,6 +102,8 @@ struct KfdContextResources {
     initialization: Mutex<()>,
     /// Activated GPU VMs and their loss-event owner.
     bindings: memory::VmBindings,
+    /// Immutable executable backing shared across all process-context clients.
+    traps: Mutex<Vec<trap::ProcessTrapEntry>>,
 }
 
 /// Primary KFD context resources shared by process-lifetime sessions.
@@ -334,11 +344,23 @@ pub(crate) struct DeviceState {
     vm: Shared<memory::DeviceVm>,
     /// KFD topology identity revalidated during activation.
     native: sysfs::KfdNode,
+    /// ASIC family resolved against the activated native device.
+    pub(crate) asic_family_id: u32,
     /// GPU clock frequency queried from the activated native device.
     gpu_counter_frequency_hz: u64,
 }
 
 impl DeviceState {
+    pub(crate) fn debugger_registration_matches(
+        &self,
+        address: usize,
+        setup_ttmp: bool,
+    ) -> Result<bool, Error> {
+        self.vm
+            .kfd()
+            .debugger_registration_matches(address as u64, setup_ttmp)
+            .map_err(|source| native_error("KFD debugger registration query", source))
+    }
     pub(crate) fn event_origin_id(&self) -> crate::device::event::DeviceEventOriginId {
         self.vm.event_origin_id()
     }
@@ -362,6 +384,7 @@ impl KfdContextResources {
             kfd: OnceLock::new(),
             initialization: Mutex::new(()),
             bindings: memory::VmBindings::new(),
+            traps: Mutex::new(Vec::new()),
         }
     }
 
@@ -369,11 +392,14 @@ impl KfdContextResources {
         &self,
         lifetime: DriverContextLifetime,
         native: &sysfs::KfdNode,
+        xnack_requested: Option<XnackModeRequest>,
+        debugger: Option<sys::RuntimeDebuggerRegistration>,
     ) -> Result<Shared<memory::DeviceVm>, Error> {
         let kfd = self.kfd()?;
         kfd.prepare_context(lifetime)
             .map_err(|source| native_error("KFD context selection", source))?;
-        self.bindings.device(&kfd, native)
+        self.bindings
+            .device(&kfd, native, xnack_requested, debugger)
     }
 
     fn kfd(&self) -> Result<Shared<sys::Kfd>, Error> {
@@ -441,6 +467,8 @@ impl LinuxKfdDriver {
             closing: false,
             lifetime,
             joined_primary: AtomicBool::new(false),
+            xnack_requested: None,
+            debugger: None,
             local: KfdContextResources::new(process),
         }
     }
@@ -459,6 +487,45 @@ impl LinuxKfdDriver {
         } else {
             Ok(())
         }
+    }
+
+    pub(crate) fn request_xnack_mode(&mut self, request: XnackModeRequest) -> Result<(), Error> {
+        self.ensure_open()?;
+        if self.joined_primary.load(Ordering::Acquire) || self.local.kfd.get().is_some() {
+            return Err(error(
+                ErrorKind::Busy,
+                "XNACK configuration must precede GPU activation",
+            ));
+        }
+        self.xnack_requested = Some(request);
+        Ok(())
+    }
+
+    pub(crate) fn request_debugger_registration(
+        &mut self,
+        address: usize,
+        setup_ttmp: bool,
+        mode: DebuggerRegistrationMode,
+    ) -> Result<(), Error> {
+        self.ensure_open()?;
+        if address == 0 || address % 8 != 0 {
+            return Err(error(
+                ErrorKind::InvalidArgument,
+                "invalid runtime debugger record address",
+            ));
+        }
+        if self.joined_primary.load(Ordering::Acquire) || self.local.kfd.get().is_some() {
+            return Err(error(
+                ErrorKind::Busy,
+                "debugger registration must precede GPU activation",
+            ));
+        }
+        self.debugger = Some(sys::RuntimeDebuggerRegistration {
+            address: address as u64,
+            setup_ttmp,
+            mode,
+        });
+        Ok(())
     }
 
     fn with_context_resources<T>(
@@ -487,160 +554,6 @@ impl LinuxKfdDriver {
 
     fn kfd(&self) -> Result<Shared<sys::Kfd>, Error> {
         self.with_context_resources(KfdContextResources::kfd)
-    }
-
-    fn svm_location_to_native(&self, location: KfdSvmLocation) -> Result<u32, Error> {
-        match location {
-            KfdSvmLocation::System => Ok(uapi::SVM_LOCATION_SYSTEM),
-            KfdSvmLocation::Undefined => Ok(uapi::SVM_LOCATION_UNDEFINED),
-            KfdSvmLocation::Device(identity) => {
-                self.with_context_resources(|resources| resources.bindings.svm_gpu_id(identity))
-            }
-        }
-    }
-
-    fn svm_location_from_native(&self, location: u32) -> Result<KfdSvmLocation, Error> {
-        match location {
-            uapi::SVM_LOCATION_SYSTEM => Ok(KfdSvmLocation::System),
-            uapi::SVM_LOCATION_UNDEFINED => Ok(KfdSvmLocation::Undefined),
-            gpu_id => self
-                .with_context_resources(|resources| resources.bindings.svm_identity(gpu_id))
-                .map(KfdSvmLocation::Device),
-        }
-    }
-
-    fn encode_svm_attributes(
-        &self,
-        attributes: &[KfdSvmAttribute],
-    ) -> Result<Vec<uapi::SvmAttribute>, Error> {
-        let mut native = crate::memory::storage::try_vec_with_capacity(attributes.len())?;
-        for attribute in attributes {
-            let encoded = match *attribute {
-                KfdSvmAttribute::PreferredLocation(location) => uapi::SvmAttribute {
-                    attribute_type: uapi::SVM_ATTR_PREFERRED_LOCATION,
-                    value: self.svm_location_to_native(location)?,
-                },
-                KfdSvmAttribute::PrefetchLocation(location) => uapi::SvmAttribute {
-                    attribute_type: uapi::SVM_ATTR_PREFETCH_LOCATION,
-                    value: self.svm_location_to_native(location)?,
-                },
-                KfdSvmAttribute::Access { device, access } => uapi::SvmAttribute {
-                    attribute_type: match access {
-                        KfdSvmAccess::Accessible => uapi::SVM_ATTR_ACCESS,
-                        KfdSvmAccess::AccessibleInPlace => uapi::SVM_ATTR_ACCESS_IN_PLACE,
-                        KfdSvmAccess::NoAccess => uapi::SVM_ATTR_NO_ACCESS,
-                    },
-                    value: self.with_context_resources(|resources| {
-                        resources.bindings.svm_gpu_id(device)
-                    })?,
-                },
-                KfdSvmAttribute::SetFlags(value) => {
-                    if value & !uapi::SVM_FLAGS != 0 {
-                        return Err(error(
-                            ErrorKind::InvalidArgument,
-                            "SVM set-flags attribute contains unknown bits",
-                        ));
-                    }
-                    uapi::SvmAttribute {
-                        attribute_type: uapi::SVM_ATTR_SET_FLAGS,
-                        value,
-                    }
-                }
-                KfdSvmAttribute::ClearFlags(value) => {
-                    if value & !uapi::SVM_FLAGS != 0 {
-                        return Err(error(
-                            ErrorKind::InvalidArgument,
-                            "SVM clear-flags attribute contains unknown bits",
-                        ));
-                    }
-                    uapi::SvmAttribute {
-                        attribute_type: uapi::SVM_ATTR_CLEAR_FLAGS,
-                        value,
-                    }
-                }
-                KfdSvmAttribute::MigrationGranularity(value) => uapi::SvmAttribute {
-                    attribute_type: uapi::SVM_ATTR_GRANULARITY,
-                    value,
-                },
-            };
-            native.try_push(encoded)?;
-        }
-        Ok(native)
-    }
-
-    fn decode_svm_attributes(
-        &self,
-        attributes: &mut [KfdSvmAttribute],
-        native: &[uapi::SvmAttribute],
-    ) -> Result<(), Error> {
-        for (attribute, returned) in attributes.iter_mut().zip(native) {
-            *attribute = match *attribute {
-                KfdSvmAttribute::PreferredLocation(_) => {
-                    if returned.attribute_type != uapi::SVM_ATTR_PREFERRED_LOCATION {
-                        return Err(error(
-                            ErrorKind::DriverContract,
-                            "KFD changed an SVM preferred-location query type",
-                        ));
-                    }
-                    KfdSvmAttribute::PreferredLocation(
-                        self.svm_location_from_native(returned.value)?,
-                    )
-                }
-                KfdSvmAttribute::PrefetchLocation(_) => {
-                    if returned.attribute_type != uapi::SVM_ATTR_PREFETCH_LOCATION {
-                        return Err(error(
-                            ErrorKind::DriverContract,
-                            "KFD changed an SVM prefetch-location query type",
-                        ));
-                    }
-                    KfdSvmAttribute::PrefetchLocation(
-                        self.svm_location_from_native(returned.value)?,
-                    )
-                }
-                KfdSvmAttribute::Access { device, .. } => {
-                    let access = match returned.attribute_type {
-                        uapi::SVM_ATTR_ACCESS => KfdSvmAccess::Accessible,
-                        uapi::SVM_ATTR_ACCESS_IN_PLACE => KfdSvmAccess::AccessibleInPlace,
-                        uapi::SVM_ATTR_NO_ACCESS => KfdSvmAccess::NoAccess,
-                        _ => {
-                            return Err(error(
-                                ErrorKind::DriverContract,
-                                "KFD returned an invalid SVM access mode",
-                            ));
-                        }
-                    };
-                    KfdSvmAttribute::Access { device, access }
-                }
-                KfdSvmAttribute::SetFlags(_) => {
-                    if returned.attribute_type != uapi::SVM_ATTR_SET_FLAGS {
-                        return Err(error(
-                            ErrorKind::DriverContract,
-                            "KFD changed an SVM set-flags query type",
-                        ));
-                    }
-                    KfdSvmAttribute::SetFlags(returned.value)
-                }
-                KfdSvmAttribute::ClearFlags(_) => {
-                    if returned.attribute_type != uapi::SVM_ATTR_CLEAR_FLAGS {
-                        return Err(error(
-                            ErrorKind::DriverContract,
-                            "KFD changed an SVM clear-flags query type",
-                        ));
-                    }
-                    KfdSvmAttribute::ClearFlags(returned.value)
-                }
-                KfdSvmAttribute::MigrationGranularity(_) => {
-                    if returned.attribute_type != uapi::SVM_ATTR_GRANULARITY {
-                        return Err(error(
-                            ErrorKind::DriverContract,
-                            "KFD changed an SVM granularity query type",
-                        ));
-                    }
-                    KfdSvmAttribute::MigrationGranularity(returned.value)
-                }
-            };
-        }
-        Ok(())
     }
 }
 
@@ -675,18 +588,29 @@ impl Driver for LinuxKfdDriver {
             visitor,
         )
     }
-    fn contribute_topology(
+    fn contribute_topology_graph(
         &self,
-        snapshot: &mut crate::topology::TopologySnapshot,
+        snapshot: &mut crate::topology::TopologyGraphSnapshot,
     ) -> Result<(), Error> {
         self.ensure_open()?;
-        sysfs::contribute_topology(
+        let start = snapshot.endpoints.len();
+        sysfs::contribute_topology_graph(
             Self::TOPOLOGY_ROOT,
             Self::DRM_ROOT,
             self.driver_instance,
             snapshot,
-        )
+        )?;
+        // DRM NUMA attachment is an independent OS locality observation. It
+        // does not identify a KFD node or qualify peer memory access.
+        for index in start..snapshot.endpoints.len() {
+            let endpoint = &snapshot.endpoints[index];
+            if let Some(numa) = crate::topology::platform::linux::host_numa_node(endpoint) {
+                snapshot.attach_host_locality(endpoint.id, self.driver_instance, numa)?;
+            }
+        }
+        Ok(())
     }
+
     fn can_access_local_memory(&self, consumer: &Endpoint, owner: &Endpoint) -> bool {
         sysfs::can_access_local_memory(consumer, owner)
     }
@@ -748,20 +672,36 @@ impl Driver for LinuxKfdDriver {
             ));
         };
         let vm = if self.lifetime == DriverContextLifetime::Session {
-            self.local.activate_device(self.lifetime, &native)?
+            self.local.activate_device(
+                self.lifetime,
+                &native,
+                self.xnack_requested,
+                self.debugger,
+            )?
         } else {
             let resources = primary_slot()?.join(&self.joined_primary, &self.process)?;
-            resources.activate_device(self.lifetime, &native)?
+            resources.activate_device(
+                self.lifetime,
+                &native,
+                self.xnack_requested,
+                self.debugger,
+            )?
         };
-        let gpu_counter_frequency_hz = vm
+        let device_info = vm
             .render()
             .ok()
-            .and_then(|render| operations::matching_device_info(endpoint, render))
+            .and_then(|render| operations::matching_device_info(endpoint, render));
+        let gpu_counter_frequency_hz = device_info
             .and_then(operations::device_counter_frequency_hz)
             .unwrap_or(0);
+        let asic_family_id = operations::resolved_family_id(
+            endpoint.gpu().map_or(0, |info| info.asic_family_id),
+            device_info,
+        );
         Ok(DeviceState {
             vm,
             native,
+            asic_family_id,
             gpu_counter_frequency_hz,
         })
     }
@@ -774,6 +714,18 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Weak};
+
+    #[test]
+    fn activated_family_uses_matching_native_information_without_losing_fallback() {
+        assert_eq!(operations::resolved_family_id(11, None), 11);
+        assert_eq!(
+            operations::resolved_family_id(11, Some(drm::DeviceInfoPrefix::default())),
+            11
+        );
+        let mut native = drm::DeviceInfoPrefix::default();
+        native.family_id = 42;
+        assert_eq!(operations::resolved_family_id(11, Some(native)), 42);
+    }
 
     #[test]
     fn marketing_name_matches_device_and_revision() {
@@ -863,6 +815,74 @@ mod tests {
     }
 
     #[test]
+    fn xnack_request_is_passive_and_locked_after_activation_begins() {
+        let mut driver = LinuxKfdDriver::new();
+        driver
+            .request_xnack_mode(XnackModeRequest::Require(true))
+            .unwrap();
+        assert_eq!(
+            driver.xnack_requested,
+            Some(XnackModeRequest::Require(true))
+        );
+        assert!(driver.local.kfd.get().is_none());
+        driver.joined_primary.store(true, Ordering::Release);
+        assert_eq!(
+            driver
+                .request_xnack_mode(XnackModeRequest::Require(false))
+                .unwrap_err()
+                .kind(),
+            ErrorKind::Busy
+        );
+        assert_eq!(
+            driver.xnack_requested,
+            Some(XnackModeRequest::Require(true))
+        );
+        driver.joined_primary.store(false, Ordering::Release);
+    }
+
+    #[test]
+    fn clean_primary_generations_rejoin_the_same_native_resources() {
+        let disables = Arc::new(AtomicUsize::new(0));
+        let observed = disables.clone();
+        let mut kfd = sys::Kfd::with_hook(
+            std::fs::File::open("/dev/null").unwrap(),
+            Arc::new(move |call| {
+                let sys::Call::RuntimeEnable(args) = call else {
+                    return Err(std::io::Error::other("unexpected KFD call"));
+                };
+                if args.mode_mask == 0 {
+                    observed.fetch_add(1, Ordering::Relaxed);
+                }
+                Ok(())
+            }),
+        );
+        kfd.mark_runtime_enabled_for_test();
+        let process = ProcessIdentity::capture().unwrap();
+        let resources = Arc::new(KfdContextResources::new(process.clone()));
+        assert!(resources.kfd.set(Shared::new(kfd).unwrap()).is_ok());
+        let slot = ProcessSlot {
+            process: process.clone(),
+            state: Mutex::new(ProcessState {
+                resources: Some(resources.clone()),
+                joined_sessions: 1,
+                pending_disable: false,
+                disabling: false,
+            }),
+            changed: Condvar::new(),
+        };
+        let joined = AtomicBool::new(true);
+        slot.leave(&joined).unwrap();
+        let next = AtomicBool::new(false);
+        let recreated = slot.join(&next, &process).unwrap();
+        assert!(Arc::ptr_eq(&resources, &recreated));
+        assert_eq!(disables.load(Ordering::Relaxed), 1);
+        recreated.kfd().unwrap().enable_runtime().unwrap();
+        slot.leave(&next).unwrap();
+        assert_eq!(disables.load(Ordering::Relaxed), 2);
+        assert_eq!(slot.state.lock().unwrap().joined_sessions, 0);
+    }
+
+    #[test]
     fn failed_primary_disable_stays_pending_until_kfd_confirms_it() {
         let calls = Arc::new(AtomicUsize::new(0));
         let observed = calls.clone();
@@ -900,12 +920,17 @@ mod tests {
             changed: Condvar::new(),
         });
         slot_ref.set(Arc::downgrade(&slot)).unwrap();
+        let joining = AtomicBool::new(false);
         assert_eq!(
-            slot.finish_pending_disable()
-                .unwrap_err()
-                .native_error_code(),
+            slot.join(&joining, &slot.process)
+                .err()
+                .unwrap()
+                .native_status()
+                .and_then(crate::NativeStatus::errno_code),
             Some(errno::EINTR)
         );
+        assert!(!joining.load(Ordering::Acquire));
+        assert_eq!(slot.state.lock().unwrap().joined_sessions, 0);
         assert!(slot.state.lock().unwrap().pending_disable);
         slot.finish_pending_disable().unwrap();
         assert!(!slot.state.lock().unwrap().pending_disable);

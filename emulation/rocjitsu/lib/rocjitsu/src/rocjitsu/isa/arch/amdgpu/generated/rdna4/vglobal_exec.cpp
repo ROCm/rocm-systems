@@ -1439,7 +1439,7 @@ void GlobalAtomicOrderedAddB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
-  d->atomic_op = amdgpu::AtomicOp::ADD;
+  d->atomic_op = amdgpu::AtomicOp::ORDERED_ADD;
   d->wait_counter_type =
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT);

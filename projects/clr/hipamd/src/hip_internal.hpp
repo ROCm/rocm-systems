@@ -74,11 +74,11 @@ enum MemcpyType {
   hipCopyBufferP2P,   //!< Memcpy from device A to device B
 };
 
-struct Graph;
-struct GraphNode;
+class Graph;
+class GraphNode;
 class GraphExecBase;
 class GraphExecSegmented;
-struct UserObject;
+class UserObject;
 class Stream;
 
 #define IHIP_IPC_EVENT_HANDLE_SIZE 32
@@ -832,6 +832,17 @@ namespace hip {
   extern int ihipGetDevice();
 
   extern hipError_t ihipMalloc(void** ptr, size_t sizeBytes, unsigned int flags);
+
+  //! Owner of the storage behind a managed allocation, which determines its lifetime.
+  enum class ManagedMemOwner {
+    kApplication,     //!< Released by the application, or by a device reset
+    kModuleVariable,  //!< Released with the module declaring the __managed__ variable
+  };
+
+  extern hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align = 0,
+                                       bool use_host_ptr = false,
+                                       ManagedMemOwner owner = ManagedMemOwner::kApplication);
+
   extern hipError_t ihipHostMalloc(void** ptr, size_t sizeBytes, unsigned int flags);
   extern hipError_t ihipMemGetInfo(size_t* free, size_t* total);
   extern amd::Memory* getMemoryObject(hip::Device* device, const void* ptr, size_t& offset,
