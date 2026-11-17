@@ -1370,6 +1370,38 @@ class AMDSMIHelpers:
         except:
             return False
 
+    def device_has_ualink(self, device_handle):
+        """Check if device has ualink sysfs directory.
+
+        Args:
+            device_handle: GPU device handle
+
+        Returns:
+            bool: True if /sys/class/drm/<card>/device/ualink/ exists
+        """
+        try:
+            bdf_str = amdsmi_interface.amdsmi_get_gpu_device_bdf(device_handle)
+            drm_path = "/sys/class/drm"
+
+            for card in os.listdir(drm_path):
+                if not card.startswith("card"):
+                    continue
+                uevent_path = os.path.join(drm_path, card, "device", "uevent")
+                if not os.path.exists(uevent_path):
+                    continue
+
+                with open(uevent_path) as f:
+                    for line in f:
+                        if (
+                            line.startswith("PCI_SLOT_NAME=")
+                            and line.split("=")[1].strip() == bdf_str
+                        ):
+                            ualink_path = os.path.join(drm_path, card, "device", "ualink")
+                            return os.path.isdir(ualink_path)
+            return False
+        except Exception:
+            return False
+
     def get_perf_levels(self):
         perf_levels_str = [clock.name for clock in amdsmi_interface.AmdSmiDevPerfLevel]
         perf_levels_int = list(set(clock.value for clock in amdsmi_interface.AmdSmiDevPerfLevel))
