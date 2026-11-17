@@ -39,6 +39,9 @@ inline constexpr size_t kBackToBackIterations = 400;
 inline constexpr int kSignalTrackerChildDeadlineSeconds = 30;
 inline constexpr int kSignalTrackerChildLongDeadlineSeconds = 60;
 
+// The exit code of a Catch2 run in which every test case was skipped, as HIP_SKIP_TEST does
+inline constexpr int kAllTestsSkippedExitCode = 4;
+
 // Runs the child to completion and returns its exit code, or kills it after the deadline and sets
 // timed_out. The code of a killed child is 128 plus the signal on Linux.
 inline int RunChildWithDeadline(hip::SpawnProc& child, const std::string& args, int deadline_seconds,
@@ -78,13 +81,16 @@ inline int RunChildWithDeadline(hip::SpawnProc& child, const std::string& args, 
 // process that has no tracker chosen for it, runs the calling test case once with each tracker in a
 // process of its own and returns true, so the caller returns. In those processes it returns false
 // and the caller runs the test. A child that doesn't finish within deadline_seconds fails the test
-// and is killed.
+// and is killed. If the test skips itself in the children, for lack of a second GPU for example, it
+// is skipped here too.
 inline bool RunInEachSignalTracker(const std::string& test_name,
                                    const int deadline_seconds = kSignalTrackerChildDeadlineSeconds) {
   constexpr const char* kChildMarker = "HIP_TEST_BATCH_COPY_SIGNAL_TRACKER_CHILD";
   if (std::getenv(kChildMarker) != nullptr) {
     return false;
   }
+  bool skipped = false;
+  bool failed = false;
   for (const char* dev_signals : {"0", "1"}) {
     INFO("DEBUG_CLR_DEV_SIGNALS=" << dev_signals);
     hip::SpawnProc proc(getSelfExePath());
@@ -93,10 +99,18 @@ inline bool RunInEachSignalTracker(const std::string& test_name,
     bool timed_out = false;
     const int exit_code =
         RunChildWithDeadline(proc, test_name, deadline_seconds, timed_out);
+    if (!timed_out && exit_code == kAllTestsSkippedExitCode) {
+      skipped = true;
+      continue;
+    }
+    failed = failed || timed_out || exit_code != 0;
     INFO("Exit code " << exit_code);
     INFO("The test did not finish within " << deadline_seconds << " s and was killed: " << timed_out);
     CHECK(!timed_out);
     CHECK(exit_code == 0);
+  }
+  if (skipped && !failed) {
+    HIP_SKIP_TEST("The test skipped itself in the process it ran in.");
   }
   return true;
 }
