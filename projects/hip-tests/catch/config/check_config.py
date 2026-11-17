@@ -8,7 +8,6 @@ import sys
 
 from common import iter_group_configs, ERROR, RESET
 
-
 # Known Jira project keys accepted in a skip 'reason'. Add a new key here when
 # a new project starts tracking hip-tests skips.
 JIRA_PROJECTS = ("AIRUNTIME", "ROCM", "SWDEV", "EXSWHTEC", "AIRADSW")
