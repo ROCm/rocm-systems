@@ -20,6 +20,7 @@
 #include <deque>
 #include <limits>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 
@@ -263,7 +264,8 @@ LivenessAnalysis::LivenessAnalysis(KernelBlockScope blocks, uint8_t wave_size,
         options.additional_entry_blocks,
         target != nullptr && target->capabilities.setreg_vgpr_msb_fixup);
   }
-  collect_global_register_usage(deferred_scope, options.text, options.arch);
+  collect_global_register_usage(deferred_scope, options.text, options.arch,
+                                options.additional_uses);
 }
 
 LivenessAnalysis::~LivenessAnalysis() = default;
@@ -286,9 +288,15 @@ Result LivenessAnalysis::ensure_analyzed() const {
   return Result::success();
 }
 
-void LivenessAnalysis::collect_global_register_usage(KernelBlockScope blocks,
-                                                     std::span<const uint8_t> text,
-                                                     rj_code_arch_t arch) {
+void LivenessAnalysis::collect_global_register_usage(
+    KernelBlockScope blocks, std::span<const uint8_t> text, rj_code_arch_t arch,
+    std::span<const AdditionalRegisterUse> additional_uses) {
+  std::unordered_map<const Instruction *, RegisterSet> requested_uses;
+  for (const AdditionalRegisterUse &use : additional_uses) {
+    const RegisterSet ordinary = use.registers.ordinary_only();
+    if (use.instruction != nullptr && !ordinary.none())
+      requested_uses[use.instruction] |= ordinary;
+  }
   for (BasicBlock *block : blocks) {
     if (block == nullptr)
       continue;
@@ -302,6 +310,12 @@ void LivenessAnalysis::collect_global_register_usage(KernelBlockScope blocks,
                                 UnknownVgprDefPolicy::ExpandAll);
       globally_used_registers_ |= accesses.defs.ordinary_only();
       globally_used_registers_ |= accesses.uses.ordinary_only();
+      const std::unordered_map<const Instruction *, RegisterSet>::const_iterator additional =
+          requested_uses.find(&inst);
+      if (additional != requested_uses.end()) {
+        additional_uses_.emplace(&inst, additional->second);
+        globally_used_registers_ |= additional->second;
+      }
     }
   }
 }
@@ -378,6 +392,10 @@ void LivenessAnalysis::analyze(KernelBlockScope blocks, bool restrict_live_befor
       InstDefUse du(inst, wave_size_, gfx1250_vgpr_msb_.get());
       RegisterSet kills = kill_defs(du, exec_before(inst));
       RegisterSet upward_uses = du.uses.ordinary_only();
+      const std::unordered_map<const Instruction *, RegisterSet>::const_iterator additional =
+          additional_uses_.find(&inst);
+      if (additional != additional_uses_.end())
+        upward_uses |= additional->second;
       upward_uses -= state.kill;
       state.gen |= upward_uses;
       state.kill |= kills;
@@ -448,6 +466,10 @@ void LivenessAnalysis::analyze(KernelBlockScope blocks, bool restrict_live_befor
       RegisterSet kills = kill_defs(du, exec_before(*inst));
       live -= kills;
       live |= du.uses.ordinary_only();
+      const std::unordered_map<const Instruction *, RegisterSet>::const_iterator additional =
+          additional_uses_.find(inst);
+      if (additional != additional_uses_.end())
+        live |= additional->second;
       if (!filter_live_before || requested_live_before.contains(inst)) {
         live_before_.emplace(inst, live);
         if (filter_live_before && --remaining_requested == 0)

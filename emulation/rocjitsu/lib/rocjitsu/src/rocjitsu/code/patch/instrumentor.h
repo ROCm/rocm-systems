@@ -604,7 +604,8 @@ private:
   [[nodiscard]] bool ensure_source_facts(TextEditError &error);
   [[nodiscard]] bool ensure_liveness_built(uint8_t wave_size,
                                            std::span<const KernelDescriptorInfo> kernels,
-                                           std::string *error_out = nullptr);
+                                           std::string *error_out = nullptr,
+                                           std::span<const InstrumentationPoint> observations = {});
   [[nodiscard]] const Instruction *find_instruction_at_offset(uint64_t anchor_offset) const;
 
   // The DBI entry prologue as a dispatch-only stub in the cave: the descriptor

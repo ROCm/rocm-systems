@@ -869,10 +869,13 @@ persistent and are excluded from every call envelope, just like the pointer.
 `AnchorVgpr` sources are parallel copies made before constants or scalar-sourced
 argument writes. The builder orders overlapping copies and breaks cycles with a
 dead VGPR. Observed sources participate in resource exclusion even if the guest
-itself no longer uses them. The batch's observed VGPRs are conservatively preserved
-at every callable probe, including when a replacement deletes their last guest
-read. Guest definitions between probes still take effect. This policy can require
-extra spill or backup resources, or reject when those resources are unavailable.
+itself no longer uses them. Each observation is a read before its anchor in the
+effective CFG, including when a replacement deletes the last guest read. Liveness
+propagates that read backward to earlier probes until a proven full-lane definition
+ends the old value's live range. Partial or unknown EXEC remains conservative;
+EXEC precision is disabled for unmodeled calls, transfers, or descriptor entries.
+Dispatch-only KernelEntry reads are local to their entry probe, rather than reads
+on guest backedges. Adding a queued point invalidates the cached liveness.
 Sources must fit the original ordinary VGPR allocation before register growth;
 growth also reserves observed inputs beyond the original metadata's used count.
 Register-backup destinations must avoid live values,

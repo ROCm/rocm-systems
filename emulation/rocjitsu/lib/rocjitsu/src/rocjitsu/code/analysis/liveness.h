@@ -48,6 +48,12 @@ struct ScopedCfgEdge {
   BasicBlock *to = nullptr;
 };
 
+/// @brief Caller-supplied register reads immediately before an instruction.
+struct AdditionalRegisterUse {
+  const Instruction *instruction = nullptr;
+  RegisterSet registers;
+};
+
 /// @brief Block-level dataflow state for one kernel scope.
 ///
 /// @details `gen` is the upward-exposed use set: registers read in the block
@@ -151,6 +157,15 @@ struct LivenessAnalysisOptions {
   /// src_loc()+4) instead of indexing past a decoded instruction's encoding word.
   /// Empty is tolerated: such writes then mark the affected banks ambiguous.
   std::span<const uint8_t> text = {};
+
+  /// @brief Additional ordinary-register reads before the specified instructions.
+  ///
+  /// @details These reads precede each instruction's definitions and participate
+  /// in eager global usage and full CFG dataflow, independently of snapshot
+  /// filtering. Construction copies the sets, merges duplicate instruction
+  /// entries, projects out special registers and ignores instructions outside
+  /// the analyzed scope. The option span need not outlive construction.
+  std::span<const AdditionalRegisterUse> additional_uses = {};
 };
 
 /// @brief Reverse-post-order traversal of one kernel's implicit CFG.
@@ -376,7 +391,8 @@ private:
 
   /// @brief Collect whole-kernel register use without running backward dataflow.
   void collect_global_register_usage(KernelBlockScope blocks, std::span<const uint8_t> text,
-                                     rj_code_arch_t arch);
+                                     rj_code_arch_t arch,
+                                     std::span<const AdditionalRegisterUse> additional_uses);
 
   void analyze(KernelBlockScope blocks, bool restrict_live_before_to_instructions,
                std::span<const Instruction *const> live_before_instructions,
@@ -396,6 +412,7 @@ private:
   // where EXEC is provably full.
   std::unique_ptr<ExecMaskAnalysis> exec_;
   RegisterSet globally_used_registers_;
+  std::unordered_map<const Instruction *, RegisterSet> additional_uses_;
   std::vector<BasicBlock *> deferred_blocks_;
   std::unordered_set<const BasicBlock *> scoped_blocks_;
   bool deferred_restrict_live_before_to_instructions_ = false;
