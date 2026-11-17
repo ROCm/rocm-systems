@@ -8,7 +8,11 @@
 #include <rocprofiler-sdk/registration.h>
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 
 namespace
 {
@@ -16,11 +20,54 @@ constexpr uint64_t kPasses = 4;
 
 rocprofiler_context_id_t g_replay_ctx{0};
 std::atomic<int>         g_replayed{0};
+std::atomic<int>         g_config_exits{0};
 std::atomic<int>         g_passes_seen{0};
+std::atomic<int>         g_pass_options_seen{0};
 
 uint64_t replay_pass_count(rocprofiler_kernel_dispatch_info_t, rocprofiler_user_data_t)
 {
     return kPasses;
+}
+
+bool
+placement_is(const char* name)
+{
+    const char* placement = std::getenv("KR_SNAPSHOT");
+    return placement != nullptr && std::strcmp(placement, name) == 0;
+}
+
+// KR_SNAPSHOT=host or KR_SNAPSHOT=device limits where the SDK keeps the snapshot, and
+// KR_SNAPSHOT=unknown-flag sets a flag the SDK does not know, so the dispatch runs once. The
+// options are static because the SDK reads them after the CONFIG callback returns.
+const rocprofiler_kernel_replay_options_t*
+snapshot_options()
+{
+    static const auto options = []() {
+        auto flags = uint64_t{ROCPROFILER_KERNEL_REPLAY_OPTION_NONE};
+        if(placement_is("host"))
+            flags = ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST;
+        else if(placement_is("device"))
+            flags = ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_DEVICE;
+        else if(placement_is("unknown-flag"))
+            flags = uint64_t{1} << 63;
+        return rocprofiler_kernel_replay_options_t{sizeof(rocprofiler_kernel_replay_options_t),
+                                                   flags};
+    }();
+    return &options;
+}
+
+uint64_t
+expected_passes()
+{
+    return placement_is("unknown-flag") ? 0 : kPasses;
+}
+
+// An older SDK's record ends before replay_options.
+bool
+has_replay_options(const rocprofiler_callback_tracing_kernel_replay_data_t* p)
+{
+    return p->size >= offsetof(rocprofiler_callback_tracing_kernel_replay_data_t, replay_options) +
+                          sizeof(p->replay_options);
 }
 
 void
@@ -34,7 +81,15 @@ kernel_replay_cb(rocprofiler_callback_tracing_record_t record, rocprofiler_user_
        record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
     {
         p->replay_pass_count = replay_pass_count;
+        if(has_replay_options(p)) p->replay_options = snapshot_options();
         g_replayed.fetch_add(1);
+        return;
+    }
+
+    if(record.operation == ROCPROFILER_KERNEL_REPLAY_CONFIG &&
+       record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
+    {
+        g_config_exits.fetch_add(1);
         return;
     }
 
@@ -47,6 +102,7 @@ kernel_replay_cb(rocprofiler_callback_tracing_record_t record, rocprofiler_user_
                 static_cast<unsigned long>(p->total_passes),
                 static_cast<unsigned long>(p->dispatch_info.dispatch_id));
         g_passes_seen.fetch_add(1);
+        if(has_replay_options(p) && p->replay_options != nullptr) g_pass_options_seen.fetch_add(1);
     }
 }
 
@@ -69,11 +125,22 @@ void
 tool_fini(void*)
 {
     fprintf(stderr,
-            "[basic] replayed=%d passes_seen=%d expected_passes=%lu\n",
+            "[basic] replayed=%d config_exits=%d passes_seen=%d expected_passes=%lu "
+            "pass_options_seen=%d\n",
             g_replayed.load(),
+            g_config_exits.load(),
             g_passes_seen.load(),
-            static_cast<unsigned long>(kPasses));
-    if(g_replayed.load() != 1 || g_passes_seen.load() != static_cast<int>(kPasses)) std::abort();
+            static_cast<unsigned long>(expected_passes()),
+            g_pass_options_seen.load());
+    // An abort would make ctest report a failure even when SKIP_REGULAR_EXPRESSION matches, and
+    // _Exit skips the flush of the application's buffered output.
+    if(g_replayed.load() != 1 || g_config_exits.load() != 1 ||
+       g_passes_seen.load() != static_cast<int>(expected_passes()) ||
+       g_pass_options_seen.load() != 0)
+    {
+        std::fflush(nullptr);
+        std::_Exit(EXIT_FAILURE);
+    }
 }
 }  // namespace
 

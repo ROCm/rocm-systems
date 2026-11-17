@@ -1190,9 +1190,23 @@ WriteInterceptor(const void* packets,
 
             const auto gpu_backend_available =
                 kernel_replay::blit::prepare(queue) == HSA_STATUS_SUCCESS;
+            const auto device_only = replay_plan.snapshot_mode ==
+                                     kernel_replay::memory_snapshot::capture_mode::force_gpu;
             if(!gpu_backend_available)
-                LOG_FIRST_N(WARNING, 1) << "kernel replay: internal blit kernel unavailable; "
-                                           "trying pinned-host snapshot backing";
+            {
+                if(device_only && !kernel_replay::blit::has_code_object(queue))
+                    LOG_FIRST_N(WARNING, 1)
+                        << "kernel replay: device-only snapshot unavailable: the tool's "
+                           "replay_options allow only device memory, and there is no internal "
+                           "blit kernel for this GPU";
+                else if(device_only)
+                    LOG_FIRST_N(WARNING, 1)
+                        << "kernel replay: the internal blit kernel failed to load, so the "
+                           "device-only snapshot the tool's replay_options ask for is not possible";
+                else
+                    LOG_FIRST_N(WARNING, 1) << "kernel replay: internal blit kernel unavailable; "
+                                               "trying pinned-host snapshot backing";
+            }
 
             // Whether to hash between passes is decided before the capture, which keeps the
             // digests for it, and settled once the snapshot's size is known.
@@ -1221,23 +1235,34 @@ WriteInterceptor(const void* packets,
             // restores from it.
             if(gpu_backend_available) kernel_replay::blit::forget_kept_list(queue);
 
+            // Host memory only means no snapshot memory on the device, including an arena kept
+            // from an earlier replay.
+            if(replay_plan.snapshot_mode ==
+               kernel_replay::memory_snapshot::capture_mode::force_pinned)
+                kernel_replay::memory_snapshot::release_kept_arena(queue.get_agent().gpu_pool());
+
             // Save this agent's tracked device allocations so every pass runs against identical
-            // inputs. Place them against the GPU budget, then pinned host for what does not fit,
-            // cutting the region at the boundary, and materialize at most one arena per tier before
-            // capture starts. The blit copies both tiers; without it, the pinned tier is copied
-            // synchronously.
-            const auto snapshot = kernel_replay::memory_snapshot::snap(
-                kernel_replay::memory_snapshot::capture_context_t{
+            // inputs, in the memory the tool's replay_options allow. By default, place them against
+            // the GPU budget, then pinned host for what does not fit, cutting the region at the
+            // boundary, and materialize at most one arena per tier before capture starts. The blit
+            // copies both tiers; without it, the pinned tier is copied synchronously. A device-only
+            // snapshot needs the blit, so without it the snapshot stays empty and is declined.
+            auto snapshot = kernel_replay::memory_snapshot::snapshot_t{};
+            if(gpu_backend_available || !device_only)
+            {
+                const auto context = kernel_replay::memory_snapshot::capture_context_t{
                     replay_agent,
                     queue.get_agent().near_cpu(),
                     queue.get_agent().gpu_pool(),
                     queue.get_agent().cpu_pool(),
-                    kernel_replay::memory_snapshot::capture_mode::automatic,
+                    replay_plan.snapshot_mode,
                     gpu_backend_available,
-                },
-                gpu_backend_available
-                    ? kernel_replay::memory_snapshot::batch_copy_fn_t{capture_copy}
-                    : kernel_replay::memory_snapshot::batch_copy_fn_t{});
+                };
+                if(gpu_backend_available)
+                    snapshot = kernel_replay::memory_snapshot::snap(context, capture_copy);
+                else
+                    snapshot = kernel_replay::memory_snapshot::snap(context);
+            }
 
             // Snapshot incomplete, or checked kernel arguments identify memory outside it:
             // restoring only part of what the passes write would corrupt application data, so
@@ -1248,8 +1273,17 @@ WriteInterceptor(const void* packets,
                                            dispatch_pkt.kernel_dispatch, snapshot))
             {
                 if(!snapshot.complete())
-                    LOG_FIRST_N(WARNING, 1) << "kernel replay: snapshot capture incomplete; "
-                                               "running this dispatch once without replay";
+                {
+                    if(replay_plan.snapshot_mode ==
+                       kernel_replay::memory_snapshot::capture_mode::automatic)
+                        LOG_FIRST_N(WARNING, 1) << "kernel replay: snapshot capture incomplete; "
+                                                   "running this dispatch once without replay";
+                    else
+                        LOG_FIRST_N(WARNING, 1)
+                            << "kernel replay: snapshot capture incomplete in the memory the "
+                               "tool's replay_options allow; running this dispatch once without "
+                               "replay";
+                }
                 kernel_replay::execute_config_phase_exit(
                     replay_plan, thr_id, internal_corr_id, ancestor_corr_id);
                 if(drain_signal != null_hsa_signal)

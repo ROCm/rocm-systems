@@ -37,6 +37,7 @@
 #include <rocprofiler-sdk/experimental/kernel_replay.h>
 
 #include <atomic>
+#include <cstddef>
 #include <type_traits>
 
 namespace rocprofiler
@@ -190,6 +191,25 @@ make_dispatch_info(const hsa::Queue&              queue,
     return info;
 }
 
+std::optional<memory_snapshot::capture_mode>
+capture_mode_for(const rocprofiler_kernel_replay_options_t* options)
+{
+    using memory_snapshot::capture_mode;
+    if(options == nullptr) return capture_mode::automatic;
+
+    constexpr auto flags_end = offsetof(rocprofiler_kernel_replay_options_t, flags) +
+                               sizeof(rocprofiler_kernel_replay_options_t::flags);
+    if(options->size < flags_end) return std::nullopt;
+
+    constexpr auto device = uint64_t{ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_DEVICE};
+    constexpr auto host   = uint64_t{ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST};
+    if((options->flags & ~(device | host)) != 0) return std::nullopt;
+
+    if(options->flags == device) return capture_mode::force_gpu;
+    if(options->flags == host) return capture_mode::force_pinned;
+    return capture_mode::automatic;
+}
+
 replay_plan_t
 execute_config_phase_enter(const hsa::Queue&              queue,
                            const hsa::rocprofiler_packet& pkt,
@@ -253,6 +273,22 @@ execute_config_phase_enter(const hsa::Queue&              queue,
 
     plan.indefinite       = (plan.total_passes == 0);
     plan.replay_requested = plan.indefinite || plan.total_passes > 1;
+
+    if(plan.replay_requested)
+    {
+        if(const auto mode = capture_mode_for(plan.config_data.replay_options))
+        {
+            plan.snapshot_mode = *mode;
+        }
+        else
+        {
+            LOG_FIRST_N(WARNING, 1) << "kernel replay: replay_options has a size that does not "
+                                       "cover flags or an unknown flag; dispatch will not be "
+                                       "replayed";
+            plan.replay_requested = false;
+        }
+    }
+
     if(!plan.replay_requested)
         execute_config_phase_exit(plan, thr_id, internal_corr_id, ancestor_corr_id);
 

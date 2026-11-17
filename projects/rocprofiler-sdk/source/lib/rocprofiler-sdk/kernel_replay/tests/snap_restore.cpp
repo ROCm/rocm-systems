@@ -367,6 +367,249 @@ TEST(kernel_replay_snapshot, forced_gpu_arena_captures_through_batch_copy)
     ASSERT_EQ(hipFree(buffer), hipSuccess);
 }
 
+TEST(kernel_replay_snapshot, releasing_the_kept_gpu_arena_frees_it)
+{
+    if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
+
+    constexpr int n      = 4096;
+    float*        buffer = nullptr;
+    ASSERT_EQ(hipMalloc(&buffer, n * sizeof(float)), hipSuccess);
+    const auto allocation = mt::query_alloc(buffer);
+    ASSERT_TRUE(allocation.trackable);
+    const auto agent = allocation.agent;
+    ASSERT_NE(agent.handle, 0U);
+    const auto ctx = capture_context(agent, msnp::capture_mode::automatic);
+    ASSERT_TRUE(ctx.has_value());
+    record_for_snapshot_test(buffer, n * sizeof(float), agent);
+    launch_fill(buffer, 7.0f, n);
+
+    {
+        auto snapshot =
+            msnp::snap(*ctx, msnp::storage_budgets_t{512U * 1024U * 1024U, 512U * 1024U * 1024U});
+        ASSERT_TRUE(snapshot.complete());
+        ASSERT_EQ(snapshot.storage(), msnp::storage_kind::gpu_local);
+    }
+    EXPECT_GT(msnp::kept_arena_bytes(ctx->gpu_pool), 0U);
+
+    msnp::release_kept_arena(ctx->gpu_pool);
+    EXPECT_EQ(msnp::kept_arena_bytes(ctx->gpu_pool), 0U);
+
+    unrecord_for_snapshot_test(buffer);
+    ASSERT_EQ(hipFree(buffer), hipSuccess);
+}
+
+// A snapshot limited to one memory takes over an arena an earlier replay kept, and frees it.
+TEST(kernel_replay_snapshot, forced_snapshots_keep_no_arena_once_they_end)
+{
+    if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
+
+    constexpr int    n      = 4096;
+    constexpr size_t room   = 512U * 1024U * 1024U;
+    float*           buffer = nullptr;
+    ASSERT_EQ(hipMalloc(&buffer, n * sizeof(float)), hipSuccess);
+    const auto allocation = mt::query_alloc(buffer);
+    ASSERT_TRUE(allocation.trackable);
+    const auto agent = allocation.agent;
+    ASSERT_NE(agent.handle, 0U);
+    const auto automatic   = capture_context(agent, msnp::capture_mode::automatic);
+    const auto device_only = capture_context(agent, msnp::capture_mode::force_gpu);
+    const auto host_only   = capture_context(agent, msnp::capture_mode::force_pinned);
+    ASSERT_TRUE(automatic.has_value());
+    ASSERT_TRUE(device_only.has_value());
+    ASSERT_TRUE(host_only.has_value());
+    record_for_snapshot_test(buffer, n * sizeof(float), agent);
+    launch_fill(buffer, 7.0f, n);
+
+    {
+        auto kept = msnp::snap(*automatic, msnp::storage_budgets_t{room, room});
+        ASSERT_TRUE(kept.complete());
+        ASSERT_EQ(kept.storage(), msnp::storage_kind::gpu_local);
+    }
+    ASSERT_GT(msnp::kept_arena_bytes(automatic->gpu_pool), 0U);
+    {
+        auto snapshot = msnp::snap(*device_only);
+        ASSERT_TRUE(snapshot.complete());
+        EXPECT_EQ(snapshot.storage(), msnp::storage_kind::gpu_local);
+    }
+    EXPECT_EQ(msnp::kept_arena_bytes(device_only->gpu_pool), 0U);
+
+    {
+        auto kept = msnp::snap(*automatic, msnp::storage_budgets_t{0, room});
+        ASSERT_TRUE(kept.complete());
+        ASSERT_EQ(kept.storage(), msnp::storage_kind::pinned_host);
+    }
+    ASSERT_GT(msnp::kept_arena_bytes(automatic->pinned_pool), 0U);
+    {
+        auto snapshot = msnp::snap(*host_only);
+        ASSERT_TRUE(snapshot.complete());
+        EXPECT_EQ(snapshot.storage(), msnp::storage_kind::pinned_host);
+    }
+    EXPECT_EQ(msnp::kept_arena_bytes(host_only->pinned_pool), 0U);
+
+    unrecord_for_snapshot_test(buffer);
+    ASSERT_EQ(hipFree(buffer), hipSuccess);
+}
+
+// The SDK's own limits apply only when it chooses where the snapshot goes. A forced mode may use
+// all of its memory, apart from the 5% of free device memory left for the replayed kernel.
+TEST(kernel_replay_snapshot, forced_modes_drop_the_sdk_size_limits)
+{
+    if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
+
+    float* buffer = nullptr;
+    ASSERT_EQ(hipMalloc(&buffer, sizeof(float)), hipSuccess);
+    const auto allocation = mt::query_alloc(buffer);
+    ASSERT_TRUE(allocation.trackable);
+    const auto agent = allocation.agent;
+    ASSERT_NE(agent.handle, 0U);
+    const auto automatic   = capture_context(agent, msnp::capture_mode::automatic);
+    const auto device_only = capture_context(agent, msnp::capture_mode::force_gpu);
+    const auto host_only   = capture_context(agent, msnp::capture_mode::force_pinned);
+    ASSERT_TRUE(automatic.has_value());
+    ASSERT_TRUE(device_only.has_value());
+    ASSERT_TRUE(host_only.has_value());
+
+    size_t gpu_pool_size = 0;
+    size_t pinned_max    = 0;
+    ASSERT_EQ(hsa_amd_memory_pool_get_info(
+                  automatic->gpu_pool, HSA_AMD_MEMORY_POOL_INFO_SIZE, &gpu_pool_size),
+              HSA_STATUS_SUCCESS);
+    ASSERT_EQ(hsa_amd_memory_pool_get_info(
+                  automatic->pinned_pool, HSA_AMD_MEMORY_POOL_INFO_ALLOC_MAX_SIZE, &pinned_max),
+              HSA_STATUS_SUCCESS);
+
+    const auto chosen = msnp::plan_budgets(*automatic);
+    EXPECT_LE(chosen.gpu_bytes, gpu_pool_size / 2);
+    EXPECT_LE(chosen.host_bytes, pinned_max);
+
+    const auto host_budgets = msnp::plan_budgets(*host_only);
+    EXPECT_EQ(host_budgets.gpu_bytes, 0U);
+    EXPECT_EQ(host_budgets.host_bytes, pinned_max);
+
+    EXPECT_EQ(msnp::plan_budgets(*device_only).host_bytes, 0U);
+
+    ASSERT_EQ(hipFree(buffer), hipSuccess);
+}
+
+TEST(kernel_replay_snapshot, device_only_budget_is_not_capped_at_half_the_device)
+{
+    if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
+
+    float* buffer = nullptr;
+    ASSERT_EQ(hipMalloc(&buffer, sizeof(float)), hipSuccess);
+    const auto allocation = mt::query_alloc(buffer);
+    ASSERT_TRUE(allocation.trackable);
+    const auto agent = allocation.agent;
+    ASSERT_NE(agent.handle, 0U);
+    const auto device_only = capture_context(agent, msnp::capture_mode::force_gpu);
+    ASSERT_TRUE(device_only.has_value());
+
+    size_t   pool_size = 0;
+    size_t   alloc_max = 0;
+    uint64_t available = 0;
+    ASSERT_EQ(hsa_amd_memory_pool_get_info(
+                  device_only->gpu_pool, HSA_AMD_MEMORY_POOL_INFO_SIZE, &pool_size),
+              HSA_STATUS_SUCCESS);
+    ASSERT_EQ(hsa_amd_memory_pool_get_info(
+                  device_only->gpu_pool, HSA_AMD_MEMORY_POOL_INFO_ALLOC_MAX_SIZE, &alloc_max),
+              HSA_STATUS_SUCCESS);
+    ASSERT_EQ(
+        hsa_agent_get_info(
+            agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MEMORY_AVAIL), &available),
+        HSA_STATUS_SUCCESS);
+    ASSERT_EQ(hipFree(buffer), hipSuccess);
+
+    const auto half_device = pool_size / 2;
+    const auto margin      = size_t{64} << 20;
+    if(alloc_max <= half_device + margin || available - available / 20 <= half_device + margin)
+        GTEST_SKIP() << "needs a GPU whose free memory and largest allocation are well over half "
+                        "of its memory";
+
+    EXPECT_GT(msnp::plan_budgets(*device_only).gpu_bytes, half_device);
+}
+
+TEST(kernel_replay_snapshot, host_only_snapshot_stays_out_of_device_memory)
+{
+    if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
+
+    constexpr int n      = 4096;
+    float*        buffer = nullptr;
+    ASSERT_EQ(hipMalloc(&buffer, n * sizeof(float)), hipSuccess);
+    const auto allocation = mt::query_alloc(buffer);
+    ASSERT_TRUE(allocation.trackable);
+    const auto agent = allocation.agent;
+    ASSERT_NE(agent.handle, 0U);
+    const auto ctx = capture_context(agent, msnp::capture_mode::force_pinned);
+    ASSERT_TRUE(ctx.has_value());
+    record_for_snapshot_test(buffer, n * sizeof(float), agent);
+    launch_fill(buffer, 7.0f, n);
+
+    // The budgets leave room on the GPU, which host-only must not use.
+    auto snapshot =
+        msnp::snap(*ctx, msnp::storage_budgets_t{512U * 1024U * 1024U, 512U * 1024U * 1024U});
+    ASSERT_TRUE(snapshot.complete());
+    EXPECT_EQ(snapshot.storage(), msnp::storage_kind::pinned_host);
+    EXPECT_EQ(snapshot.stored_bytes(msnp::storage_kind::gpu_local), 0U);
+
+    launch_fill(buffer, 19.0f, n);
+    ASSERT_TRUE(msnp::restore(snapshot));
+    for(const auto value : read_device(buffer, n))
+        EXPECT_FLOAT_EQ(value, 7.0f);
+
+    unrecord_for_snapshot_test(buffer);
+    ASSERT_EQ(hipFree(buffer), hipSuccess);
+}
+
+TEST(kernel_replay_snapshot, device_only_snapshot_that_does_not_fit_is_declined)
+{
+    if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
+
+    constexpr int n      = 4096;
+    float*        buffer = nullptr;
+    ASSERT_EQ(hipMalloc(&buffer, n * sizeof(float)), hipSuccess);
+    const auto allocation = mt::query_alloc(buffer);
+    ASSERT_TRUE(allocation.trackable);
+    const auto agent = allocation.agent;
+    ASSERT_NE(agent.handle, 0U);
+    const auto ctx = capture_context(agent, msnp::capture_mode::force_gpu);
+    ASSERT_TRUE(ctx.has_value());
+    record_for_snapshot_test(buffer, n * sizeof(float), agent);
+
+    // The GPU budget is smaller than the buffer; the room left in host memory must not be used.
+    const auto snapshot =
+        msnp::snap(*ctx, msnp::storage_budgets_t{8U * 1024U, 512U * 1024U * 1024U});
+    EXPECT_FALSE(snapshot.complete());
+    EXPECT_EQ(snapshot.status, msnp::capture_status::unavailable);
+
+    unrecord_for_snapshot_test(buffer);
+    ASSERT_EQ(hipFree(buffer), hipSuccess);
+}
+
+TEST(kernel_replay_snapshot, host_only_snapshot_that_does_not_fit_is_declined)
+{
+    if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
+
+    constexpr int n      = 4096;
+    float*        buffer = nullptr;
+    ASSERT_EQ(hipMalloc(&buffer, n * sizeof(float)), hipSuccess);
+    const auto allocation = mt::query_alloc(buffer);
+    ASSERT_TRUE(allocation.trackable);
+    const auto agent = allocation.agent;
+    ASSERT_NE(agent.handle, 0U);
+    const auto ctx = capture_context(agent, msnp::capture_mode::force_pinned);
+    ASSERT_TRUE(ctx.has_value());
+    record_for_snapshot_test(buffer, n * sizeof(float), agent);
+
+    // The host budget is smaller than the buffer; the room left on the GPU must not be used.
+    const auto snapshot =
+        msnp::snap(*ctx, msnp::storage_budgets_t{512U * 1024U * 1024U, 8U * 1024U});
+    EXPECT_FALSE(snapshot.complete());
+    EXPECT_EQ(snapshot.status, msnp::capture_status::unavailable);
+
+    unrecord_for_snapshot_test(buffer);
+    ASSERT_EQ(hipFree(buffer), hipSuccess);
+}
+
 TEST(kernel_replay_snapshot, unavailable_gpu_backend_falls_back_to_one_pinned_arena)
 {
     if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";

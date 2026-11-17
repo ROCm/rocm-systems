@@ -89,6 +89,9 @@ function(add_kernel_replay_sample NAME CLIENT_SRC)
     if(arg_ATT AND NOT attdecoder_FOUND)
         set(_disabled ON)
     endif()
+    set(_skip_regex
+        "PC sampling unavailable|SPM unavailable|ATT unavailable|device-only snapshot unavailable"
+        )
     set_tests_properties(
         ${NAME}
         PROPERTIES TIMEOUT
@@ -100,7 +103,7 @@ function(add_kernel_replay_sample NAME CLIENT_SRC)
                    FAIL_REGULAR_EXPRESSION
                    "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                    SKIP_REGULAR_EXPRESSION
-                   "PC sampling unavailable|SPM unavailable|ATT unavailable"
+                   "${_skip_regex}"
                    RUN_SERIAL
                    ON
                    DISABLED
@@ -138,6 +141,12 @@ add_kernel_replay_sample(kernel-replay-basic-hash-once basic_client.cpp ENVIRONM
                          "ROCPROFILER_INTERNAL_REPLAY_RESTORE_FORCE_MODE=hash-once")
 add_kernel_replay_sample(kernel-replay-basic-hash-every-pass basic_client.cpp ENVIRONMENT
                          "ROCPROFILER_INTERNAL_REPLAY_RESTORE_FORCE_MODE=hash-every-pass")
+add_kernel_replay_sample(kernel-replay-basic-host-snapshot basic_client.cpp ENVIRONMENT
+                         "KR_SNAPSHOT=host")
+add_kernel_replay_sample(kernel-replay-basic-device-snapshot basic_client.cpp ENVIRONMENT
+                         "KR_SNAPSHOT=device")
+add_kernel_replay_sample(kernel-replay-basic-unknown-option basic_client.cpp ENVIRONMENT
+                         "KR_SNAPSHOT=unknown-flag")
 add_kernel_replay_sample(kernel-replay-counters-hash-once counters_client.cpp ENVIRONMENT
                          "ROCPROFILER_INTERNAL_REPLAY_RESTORE_FORCE_MODE=hash-once")
 add_kernel_replay_sample(

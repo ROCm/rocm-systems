@@ -25,6 +25,7 @@
 
 #include <rocprofiler-sdk/buffer_tracing.h>
 #include <rocprofiler-sdk/callback_tracing.h>
+#include <rocprofiler-sdk/experimental/kernel_replay.h>
 #include <rocprofiler-sdk/experimental/thread_trace.h>
 #include <rocprofiler-sdk/external_correlation.h>
 #include <rocprofiler-sdk/fwd.h>
@@ -1742,6 +1743,11 @@ ROCPROFILER_ENUM_INFO(rocprofiler_kernel_replay_operation_t,
                       ROCPROFILER_KERNEL_REPLAY_LAST,
                       false,
                       is_operation);
+ROCPROFILER_ENUM_INFO(rocprofiler_kernel_replay_option_flag_t,
+                      ROCPROFILER_KERNEL_REPLAY_OPTION_NONE,
+                      ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST + 1,
+                      true,
+                      not_operation);
 ROCPROFILER_ENUM_INFO(rocprofiler_hip_event_operation_t,
                       ROCPROFILER_HIP_EVENT_NONE,
                       ROCPROFILER_HIP_EVENT_LAST,
@@ -2105,6 +2111,10 @@ ROCPROFILER_ENUM_LABEL(ROCPROFILER_KERNEL_REPLAY_NONE);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_KERNEL_REPLAY_CONFIG);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_KERNEL_REPLAY_PASS);
 static_assert(ROCPROFILER_KERNEL_REPLAY_LAST == 3);
+
+// rocprofiler_kernel_replay_option_flag_t
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_DEVICE);
+ROCPROFILER_ENUM_LABEL(ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST);
 
 // rocprofiler_hip_event_operation_t
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_HIP_EVENT_NONE);

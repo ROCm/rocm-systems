@@ -53,6 +53,11 @@ struct copy_region_t
 hsa_status_t
 prepare(const hsa::Queue& queue);
 
+// Whether there is a code object for this queue's GPU. Without one, prepare() cannot succeed; with
+// one, a failure in prepare() is a failure to load it.
+bool
+has_code_object(const hsa::Queue& queue);
+
 class packet_info
 {
 public:
