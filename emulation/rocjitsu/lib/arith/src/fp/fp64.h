@@ -16,6 +16,8 @@ enum class Fp64 {
   Mul,
   Fma,
   MinLegacy,
+  MinLegacyCdna,
+  MaxLegacyCdna,
   MaxLegacy,
   MinNum,
   MaxNum,
@@ -42,6 +44,11 @@ void fp64_x86_64_v3(Fp64 op, uint64_t flags, uint32_t exec_mask, uint32_t mode, 
 #endif
 
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
+// Evaluate a binary selection with validated controls, preserving inactive lanes and aliases.
+void selection_f64_x86_64_v4(Fp64 op, uint64_t flags, uint32_t exec_mask, uint32_t mode,
+                             uint32_t *const *d, const uint32_t *const *a,
+                             const uint32_t *const *b);
+
 // Evaluate FP64 ADD/MUL/FMA with instruction-local guest rounding and masked destination stores.
 // Requires validated flags and a nonzero guest rounding mode. NaNs are selected in source
 // order and quieted unless quiet_snan is clear.

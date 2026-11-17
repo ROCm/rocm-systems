@@ -137,6 +137,16 @@ class CheckMadKnobs(unittest.TestCase):
         tm.check_mad_knobs(empty, tm.WORKLOAD_CONFIGS["llama-3.1-405b-maxtext"])
 
 
+class SglangLauncherKnobs(unittest.TestCase):
+
+    def test_barrier_timeout_uses_the_launcher_name(self):
+        # sglang_disagg_mori_io_ep.sh reads BARRIER_TIMEOUT_SECONDS; any other
+        # name leaves its 3600 s default in place.
+        env = tm.WORKLOAD_CONFIGS["deepseek-r1-sglang-disagg"]["env_vars"]
+        self.assertEqual(env.get("BARRIER_TIMEOUT_SECONDS"), "1800")
+        self.assertNotIn("BARRIER_TIMEOUT_S", env)
+
+
 class IgnoredMadKnobs(unittest.TestCase):
 
     # As MAD 36339bd8 prints it from warn_if_knobs_ignored().

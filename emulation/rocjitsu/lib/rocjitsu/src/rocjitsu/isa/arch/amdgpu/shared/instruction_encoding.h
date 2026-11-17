@@ -217,6 +217,42 @@ public:
   bool channel_enabled(unsigned channel) const { return components & (1u << channel); }
 };
 
+/// E8M0 scale location for a CDNA5 V_CVT_SCALE_PK widening conversion.
+struct CvtScaleSelection {
+  uint8_t lane_base;
+  uint8_t first_byte;
+  uint8_t byte_step;
+
+  // CDNA5 ISA 7.6.3, Table 36. Bit 0 selects the scale half-wave. Bit 2 selects
+  // Block16, where bit 1 chooses bytes 0/2 or 1/3 for the two data half-waves.
+  // In Block32, bit 1 chooses bytes 0/1 or 2/3. Bit 3 is ignored.
+  static constexpr CvtScaleSelection f4_f6(unsigned opsel) {
+    const auto base = static_cast<uint8_t>((opsel & 1) * 16);
+    const auto pair = static_cast<uint8_t>(opsel & 2);
+    if (opsel & 4)
+      return {base, static_cast<uint8_t>(pair / 2), 2};
+    return {base, pair, 1};
+  }
+
+  // Table 37. Bit 3 selects Block16. In Block32, bit 0 selects the scale half-wave
+  // and bits 1 and 2 contribute 2 and 1 to the byte index shared by both data halves.
+  // In Block16, bit 1 selects both the scale half-wave and byte pair. Bit 0 is
+  // ignored. Selectors 12..15 are reserved.
+  static constexpr CvtScaleSelection f8(unsigned opsel) {
+    if (opsel & 8) {
+      const unsigned half = (opsel >> 1) & 1;
+      return {static_cast<uint8_t>(half * 16), static_cast<uint8_t>(half * 2), 1};
+    }
+    return {static_cast<uint8_t>((opsel & 1) * 16),
+            static_cast<uint8_t>((opsel & 2) | ((opsel >> 2) & 1)), 0};
+  }
+
+  constexpr unsigned lane(unsigned data_lane) const { return (data_lane & ~16u) | lane_base; }
+  constexpr unsigned byte(unsigned data_lane) const {
+    return first_byte + ((data_lane & 16) ? byte_step : 0);
+  }
+};
+
 /// @brief Decoded register-access modifiers.
 /// @details This view contains no wave state or values.
 struct RegisterModifiers {
@@ -227,6 +263,7 @@ struct RegisterModifiers {
   uint8_t memory_result_last_bytes = 0xf; // Last data word, excluding optional image status.
   /// A nonzero count bounds the payload masks. An appended status word owns all four bytes.
   uint8_t memory_result_payload_words = 0;
+  std::optional<CvtScaleSelection> cvt_scale; // Widening conversion scale in SRC1.
   bool memory_result_has_status = false;
   void set_packed_image_result(unsigned components, unsigned result_words) {
     if (components & 1u) {
@@ -491,12 +528,13 @@ inline void append_bit_array(std::string &out, std::string_view name, uint32_t b
 /// @brief Add packed VOP3 source-selection and arithmetic attributes.
 inline void append_vop3p_disassembly(std::string &out, uint32_t op_sel, uint32_t op_sel_hi,
                                      uint32_t neg_lo, uint32_t neg_hi, uint32_t clamp,
-                                     uint32_t source_count, bool packed_defaults) {
+                                     uint32_t source_count, bool packed_defaults,
+                                     bool display_op_sel_hi = true) {
   const uint32_t mask = (uint32_t{1} << source_count) - 1;
   if ((op_sel & mask) != 0)
     append_bit_array(out, "op_sel", op_sel, source_count);
   const uint32_t default_op_sel_hi = packed_defaults ? mask : 0;
-  if ((op_sel_hi & mask) != default_op_sel_hi)
+  if (display_op_sel_hi && (op_sel_hi & mask) != default_op_sel_hi)
     append_bit_array(out, "op_sel_hi", op_sel_hi, source_count);
   if ((neg_lo & mask) != 0)
     append_bit_array(out, "neg_lo", neg_lo, source_count);

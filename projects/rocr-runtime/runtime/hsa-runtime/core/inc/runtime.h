@@ -131,6 +131,7 @@ namespace core {
 extern bool g_use_interrupt_wait;
 extern bool g_use_mwaitx;
 extern bool g_use_yielding_poll;
+extern bool g_use_clflushopt;
 
 /// @brief  Runtime class provides the following functions:
 /// - open and close connection to kernel driver.

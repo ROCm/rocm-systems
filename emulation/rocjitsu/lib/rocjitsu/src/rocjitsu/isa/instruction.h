@@ -143,7 +143,11 @@ enum InstFlags : uint64_t {
   /// Global transpose addresses come from lanes 0-31. Each wave64 lane gets half the encoded width.
   COMPACT_WAVE64_MEMORY_RESULT = (1ULL << 41),
   /// Global load-transpose instructions acquire no register operands when EXEC is zero.
-  GLOBAL_TRANSPOSE_LOAD = (1ULL << 43)
+  GLOBAL_TRANSPOSE_LOAD = (1ULL << 43),
+  /// CDNA5 packed widening disallows overlap after applying each operand's VGPR bank.
+  CHECK_CVT_SCALE_OVERLAP = (1ULL << 45),
+  /// CDNA5 Table 37 reserves FP8/BF8 scale selectors 12..15.
+  RESERVED_CVT_SCALE_SELECTOR = (1ULL << 46)
 };
 
 class BasicBlock;

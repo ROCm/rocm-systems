@@ -28,11 +28,13 @@ namespace rocjitsu::plugins::race_detector {
 
 class RaceTestBuilder {
 public:
-  RaceTestBuilder(int numWaves, int vgprs, int sgprs, int waveSize = 64, Dim3d wgId = Dim3d(0))
+  RaceTestBuilder(
+      int numWaves, int vgprs, int sgprs, int waveSize = 64, Dim3d wgId = Dim3d(0),
+      CounterCapacities counterCapacities = counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4))
       : waveSize_(waveSize), defaultExec_(waveSize == 64 ? ~0ULL : (1ULL << waveSize) - 1) {
     detector_ = std::make_unique<RaceDetector>(
         numWaves, vgprs, sgprs, wgId, [this](RaceViolation v) { violations_.push_back(v); },
-        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4), /*ldsSizeBytes=*/64 * 1024);
+        counterCapacities, /*ldsSizeBytes=*/64 * 1024);
     for (int w = 0; w < numWaves; ++w) {
       waves_.push_back(&detector_->getWaveRaceState(w));
     }
@@ -175,6 +177,54 @@ public:
 
   void prepareMemoryIssue(int wave, const amdgpu::MemoryIssueInfo &info) {
     ASSERT_TRUE(waves_[wave]->prepareForMemoryIssue(info).succeeded());
+  }
+
+  // -- Operations on one explicit counter and completion class --
+  //
+  // Each applies issue-time backpressure for `increment` tokens on `counter`,
+  // as the plugin does before an instruction's accesses, then registers one
+  // event. They name the counter exactly, so they can exercise split counters
+  // (LOADCNT, STORECNT, DSCNT, KMCNT, ASYNCCNT, TENSORCNT) directly.
+
+  /// An operation with no destination register and no LDS bytes, such as a
+  /// store to global memory.
+  void counterOp(int wave, amdgpu::WaitCounterType counter, MemoryOrderClass order,
+                 uint8_t increment = 1) {
+    ASSERT_TRUE(waves_[wave]->prepareForCounterIncrement(counter, increment).succeeded());
+    const std::array obligations{amdgpu::MemoryCounterObligation{counter, order, increment}};
+    waves_[wave]->registerEvent(testInstruction(pc_++), MemoryEventType::VGPR_TO_GLOBAL,
+                                /*registers=*/{}, defaultExec_, /*byteMask=*/0xF, obligations,
+                                order);
+  }
+
+  /// A transfer that writes (GLOBAL_TO_LDS) or reads (LDS_TO_GLOBAL) LDS byte
+  /// ranges, such as an async or tensor transfer. Its LDS accesses are checked
+  /// as unordered, as the plugin checks async and tensor transfers.
+  void counterLdsTransfer(int wave, amdgpu::WaitCounterType counter, MemoryOrderClass order,
+                          MemoryEventType type, std::vector<LdsByteRange> ranges) {
+    ASSERT_TRUE(waves_[wave]->prepareForCounterIncrement(counter).succeeded());
+    for (const auto &range : ranges) {
+      const auto bytes = static_cast<int>(
+          detector_->ldsBytesInRange(range.address, range.bytes, /*elementBytes=*/1));
+      if (bytes == 0)
+        continue;
+      const int addr = static_cast<int>(range.address);
+      if (type == MemoryEventType::GLOBAL_TO_LDS)
+        detector_->validateWrite(addr, WaveId{wave}, /*lane=*/-1, bytes,
+                                 MemoryOrderClass::UNORDERED);
+      else
+        detector_->validateRead(addr, WaveId{wave}, /*lane=*/-1, bytes,
+                                MemoryOrderClass::UNORDERED);
+    }
+    const std::array obligations{amdgpu::MemoryCounterObligation{counter, order}};
+    waves_[wave]->registerLdsRangeEvent(testInstruction(pc_++), type, ranges, obligations, order);
+  }
+
+  /// Dispatch a wait on one counter, such as s_wait_loadcnt.
+  void waitCounter(int wave, amdgpu::WaitCounterType counter, int threshold) {
+    PendingWaitCount wait;
+    wait.add(counter, threshold);
+    waves_[wave]->dispatch(wait);
   }
 
   /// Register an LDS write and validate against outstanding reads.
