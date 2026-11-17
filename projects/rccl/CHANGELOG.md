@@ -37,6 +37,20 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * `RCCL_DDA_BC_MAX_BLOCKS` (default `0`): lowers the per-rank block budget of the DDA `ncclBroadcast` kernels below the CU-derived cap (`RCCL_DDA_FABRIC_MAXBLOCKS` or the CU count); it cannot raise it. `0` keeps the cap.
 * `RCCL_DDA_LL_BC_THREADS` (default `256`): block size of the DDA LL one-shot `ncclBroadcast` kernel. Values that are not a multiple of the wave size or exceed 512 fall back to the default.
 * `RCCL_DDA_BC_ALLOW_IPC` (default `0`): development only. Lets the `ncclBroadcast` selector also consider the DDA LL tier on the non-fabric (IPC) path. Not intended for production use.
+* Compatibility with NCCL 2.32.6.
+* NCCL profiler plugin API v8. A plugin can ask NCCL to stamp a CPU timestamp (`tsCpu`) on each event, on the clock it selects with `cpuClock` at init; by default NCCL reads no clock and the plugin times events itself, as in v7. Plugins built against v1 to v7 still load.
+* Two profiler plugins at once: `NCCL_PROFILER_PLUGIN` accepts a comma-separated list of up to two plugins, and each plugin receives only the event types it enabled.
+* The `DIAG` debug subsystem (`NCCL_DEBUG_SUBSYS=DIAG`), which logs detailed results from the active and RAS diagnostics. It is not in the default subsystem set.
+* `NCCL_CE_BATCH_CAPTURE_ENABLE` (default `0`): opt-in use of the Copy Engine batch-copy API (`hipMemcpyBatchAsync`) for batched copies captured into a graph; also requires `RCCL_CE_BATCH_ASYNC_ENABLE` and runtime batch-API support.
+* `NCCL_CFT_UC_TEAM_SIZE` / `NCCL_CFT_MC_TEAM_SIZE` (default `0`): upstream unicast/multicast CFT team-size overrides. No-op on RCCL: ROCm has no logical endpoints, so CFT teams stay one rank regardless of these values.
+* `NCCL_USE_CMAKE`: build-time switch read by `device/general/generate.py` to print the generated kernel-file list for a CMake build instead of writing `rules.mk`. Not an RCCL runtime variable; RCCL's own build does not use this path.
+* `NCCL_RUBIN_SM_BW` (default `24`): per-CTA bandwidth upstream uses to size ring compute channels on Rubin and later GPUs. Compiled out on HIP, so it has no effect on RCCL.
+* `NCCL_SYM_GENK_ENABLE` (default `0`): enables upstream's generic symmetric-kernel (GENK) path. RCCL builds without it, so setting it only logs that it is ignored.
+* `NCCL_RMA_RANK_STRIDE` (default unset): temporary override for the RMA-context rank stride, used when the stride RCCL derives automatically does not fit. An explicit invalid value still fails initialization.
+* `NCCL_SYMK_LL_SCRATCH_SIZE` (default `256 << 10`): size of the scratch buffer the symmetric LL kernels stage through.
+* `NCCL_GIN_GDAKI_CQ_TYPE` (default `0`): completion-queue type for the GDAKI IB GIN backend.
+* `NCCL_GIN_GDAKI_Q_COUNTER` (default `1`): diagnostic only. Gives GDAKI queue pairs a dedicated GIN-owned queue-counter set; `0` leaves them on the device's default counter set.
+* `NCCL_NVLS_FIFO_LAYOUT` (default `-1`): selects the NVLS staging-FIFO slot-addressing layout (`0`, `1` or `2`); `-1` picks automatically by topology and architecture.
 
 ### Changed
 * An empty `NCCL_GIN_TYPE` now counts as unset for the in-tree GIN backends, as it already did for the backend filter: Anvil SDMA initializes and `RCCL_GIN_TYPE_LIST` applies. Previously an empty value turned Anvil SDMA off.
@@ -81,13 +95,22 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * The gfx1250 AllToAll DDA fabric LL128 kernel caps its grid at the communicator's CU budget, so every block is co-resident. On DPX, the tuning table caps it further at 72 blocks from 256 KiB to 16 MiB total.
 * gfx1250 AllToAll skips the DDA fabric paths under `NCCL_CHECK_MODE` or on a suspended or revoked communicator, and takes the next path.
 * `RCCL_DDA_LL128_A2A_THREADS` now defaults to `0`, which reads the arch table and keeps 256 threads where it sets none. It still overrides the table with a multiple of 32 up to 1024 (it took a multiple of 16 before). `RCCL_DDA_LL128_A2A_MAXBPP` (was default `64`) and `RCCL_DDA_LL128_A2A_LPB` (was default `4`) are now unset by default, so each warp moves one slice and the block budget alone caps the grid; when set, MAXBPP caps the blocks per peer column and LPB sizes them from 120-byte lines, both within the block budget.
+* On gfx1250, a single-node FP8 e4m3 or e5m2 `ncclAllReduce` with more than 8 ranks no longer gets the 1024x ring penalty at or above the DDA LL128 ceiling, so the tuner can select Ring. The penalty stays when that ceiling is zero and for every other FP8 ring above 8 ranks.
+* Updated the tuner plugin interface to v7, whose cost-model constants (`ncclTunerConstants_v7_t`) add a fifth compute-capability row. Plugins built against v2 to v6 still load.
+* Updated the GIN plugin interface to v15. `ncclGinProperties_v15_t` adds `barrierOptions`, the context config replaces `rankStride` with a sorted `peerArray` of the peers to connect, and `connect` takes an abort flag. Plugins built against v13 or v14 still load.
+* Updated the RMA plugin interface to v17. The context config replaces `rankStride` with `peerArray`, and `connect` takes an abort flag. Plugins built against v13 to v16 still load.
+* The RCCL-only `NCCL_VERBS` debug subsystem flag moved from `0x40000` to `0x80000`, because NCCL 2.32.6 assigns `0x40000` to `NCCL_DIAG`. External plugins built against older RCCL headers that log with `NCCL_VERBS` are now shown under `DIAG`; rebuild them against the current headers.
+* The CMake option that builds the LLVM bitcode library is now `NCCL_EMIT_LLVM_IR`, matching NCCL 2.32.6. `EMIT_LLVM_IR` is still accepted as an alias.
+* `NCCL_SYM_NOWIN_ENABLE` is now also read by the symmetric-kernel cost model's candidate search. When set, symmetric LL kernels that do not need registered windows may run without one.
+* `NCCL_P2P_NET_CHUNKSIZE` / `NCCL_P2P_PCI_CHUNKSIZE` / `NCCL_P2P_NVL_CHUNKSIZE` default changed from the literals `1 << 17` / `1 << 17` / `1 << 19` to `-2`, a sentinel for the built-in default. The resolved default on RCCL is unchanged, and RCCL's gfx942/gfx950 P2P net chunk-size override still applies first.
+* `NCCL_IB_GID_INDEX` / `NCCL_IB_SL` / `NCCL_IB_TC` / `NCCL_IB_FIFO_TC` default changed `-1` -> `NCCL_PARAM_VAL_AUTO`, a renamed sentinel for the same automatic value; behavior is unchanged.
+* `NCCL_IB_USE_INLINE` / `NCCL_IB_ECE_ENABLE` / `NCCL_IB_WARN_RAIL_LOCAL` / `NCCL_GDR_FLUSH_DISABLE` default literals changed from `0`/`1` to the equivalent `false`/`true`; behavior is unchanged.
 
 ### Removed
 
 * `RCCL_DDA_LL128_RS_THREADS` removed (was default `1024`): reduce-scatter LL128 now launches a fixed 512-thread block, one warp per slice, so the thread count is no longer a tuning knob.
 
 ### Resolved issues
-* Fixed AlltoAllv leaving its internal group open or replay recording suppressed after a failed send/receive, and dropping `ncclInProgress` from group completion. If any rank is nonblocking, all ranks use the point-to-point path instead of the synchronous CE metadata exchange. Replay suppression is thread-local so overlapping calls cannot leave recording disabled.
 * Fixed `NCCL_CE_BATCH_CAPTURE_ENABLE=1` producing wrong results under HIP graph capture. `hipMemcpyBatchAsync` does not support graph capture, so Copy Engine copies recorded into a graph now always use per-copy `hipMemcpyAsync`, as with the variable unset, and RCCL logs once that it ignored the variable.
 * Fixed hierarchical Copy Engine `ncclAlltoAllv` failing with `ncclInvalidArgument` on rail-only host RMA (`NCCL_CROSS_NIC=0`). Like `ncclAlltoAll`, it puts to every remote rank, so it now falls back to the kernel path unless host RMA reaches every rank.
 * When mlx5 data-direct DMA-BUF registration is missing or fails, RCCL uses `ibv_reg_dmabuf_mr` and reports a failed data-direct attempt once per protection domain. A missing `mlx5dv_reg_dmabuf_mr` leaves data-direct off.
@@ -124,6 +147,8 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Fixed communicator initialization leaking memory when connecting rings or trees failed.
 * Fixed communicator creation with socket encryption (`ncclSetEncryption`) failing intermittently on 2-rank communicators, including one process driving 2 GPUs, and on any communicator with `NCCL_BOOTSTRAP_BIDIR_ALLGATHER=0`. The TLS server sent session tickets that bootstrap clients which only write never read, so closing such a socket reset the connection and dropped the bootstrap data still queued. RCCL no longer sends TLS session tickets.
 * Fixed a Socket communicator's cached "no GPU Direct RDMA" verdict being reused by later IB communicators on the same GPU, including `ncclCommSplit` children.
+* Fixed collectives failing with `unspecified launch failure` when `NCCL_ENQUEUE_REARCH_ENABLE=1`. The re-architected enqueue path sized thread blocks for NVIDIA's 32-thread warp plus a sync warp, so ring and tree collectives launched up to 576 threads per block on 64-lane AMD GPUs, past the 256 that RCCL kernels are built for. With `NCCL_PROTO=LL128` it also requested `ncclAllReduce`, `ncclAllGather` and `ncclBroadcast` kernels that RCCL does not build. The path now sizes blocks, slices single-node rings and selects kernels the way the default path does, and keeps the `ncclAllReduceWithBias` accumulator, which it used to drop and so returned wrong results. Direct ReduceScatter is not used on this path, because the path does not issue the per-peer transfers that Direct ReduceScatter needs.
+* Fixed mid-size multi-node Simple send latency on builds without the 128-bit global load/store builtins (for example ROCm older than 7.0.2, or `-DDWORDX4_INTRINSICS=OFF`). On these builds every Simple send took the full system-scope fence, which writes back and invalidates the L2 cache, even when the cheap post-send fence was enabled. Simple sends to unregistered buffers use the cheap post-send fence again. Registered user buffers and point-to-point sends keep the full fence.
 
 ### Known issues
 
