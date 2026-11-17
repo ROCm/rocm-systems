@@ -12,9 +12,13 @@
 
 #include "../common/ProcessIsolatedTestRunner.hpp"  // RUN_ISOLATED_TEST
 #include "fakes/dl_fakes.h"
+#include "ibvsymbols.h"
 #include "misc/WrapTable.h"
 
 #include MLX5DVWRAP_CC_PATH
+
+// Defined in ibvwrap.cc, which this binary compiles. wrap_reg_dmabuf_mr calls it.
+extern struct ncclIbvSymbols ibvSymbols;
 
 namespace {
 
@@ -31,6 +35,10 @@ char* const kBuf = reinterpret_cast<char*>(0x130);
 
 int g_ret;
 ibv_mr* g_mr;
+int g_mlx5Calls;
+int g_ibvCalls;
+
+ibv_mr* const kIbvMr = reinterpret_cast<ibv_mr*>(0xE1);
 
 void InstallRegDmabufMr() {
   mlx5dvSymbols.mlx5dv_internal_reg_dmabuf_mr = [](ibv_pd* pd, uint64_t offset, size_t len, uint64_t iova, int fd,
@@ -51,6 +59,8 @@ class Mlx5dvwrapMicrotest : public ::testing::Test {
   void SetUp() override {
     g_ret = 0;
     g_mr = kMr;
+    g_mlx5Calls = 0;
+    g_ibvCalls = 0;
   }
 
  private:
@@ -94,9 +104,11 @@ TEST_F(Mlx5dvwrapDataDirectMicrotest, VerbReturnsOtherErrno_ReturnsSystemError) 
   EXPECT_EQ(Call(), ncclSystemError);
 }
 
-TEST_F(Mlx5dvwrapDataDirectMicrotest, SymbolNotLoaded_ReturnsInternalError) {
+// Stock rdma-core without MLX5_1.25 has no data-direct sysfs helper. That is
+// "not data-direct". ncclInternalError would abort IB device init.
+TEST_F(Mlx5dvwrapDataDirectMicrotest, SymbolNotLoaded_ReturnsInvalidArgument) {
   mlx5dvSymbols.mlx5dv_internal_get_data_direct_sysfs_path = nullptr;
-  EXPECT_EQ(Call(), ncclInternalError);
+  EXPECT_EQ(Call(), ncclInvalidArgument);
 }
 
 TEST_F(Mlx5dvwrapMicrotest, RegDmabufMr_VerbReturnsMr_SucceedsAndHandsItBack) {
@@ -124,11 +136,92 @@ TEST_F(Mlx5dvwrapMicrotest, DirectRegDmabufMr_SymbolLoaded_ReturnsVerbResult) {
   EXPECT_EQ(wrap_direct_mlx5dv_reg_dmabuf_mr(kPd, 0x40, 4096, 0x5000, 7, 3, 4), kMr);
 }
 
-// ncclIbDmaBufSupport() reads errno to tell "unsupported" from a real failure.
-TEST_F(Mlx5dvwrapMicrotest, DirectRegDmabufMr_SymbolNotLoaded_ReturnsNullWithEopnotsupp) {
+// ENOSYS, not EOPNOTSUPP. The kernel DMA-BUF probe treats EOPNOTSUPP as
+// "ibv_reg_dmabuf_mr is unsupported" and then registers GPU memory with
+// ibv_reg_mr_iova2. A missing mlx5 symbol is not that.
+TEST_F(Mlx5dvwrapMicrotest, DirectRegDmabufMr_SymbolNotLoaded_ReturnsNullWithEnosys) {
   errno = 0;
   EXPECT_EQ(wrap_direct_mlx5dv_reg_dmabuf_mr(kPd, 0x40, 4096, 0x5000, 7, 3, 4), nullptr);
-  EXPECT_EQ(errno, EOPNOTSUPP);
+  EXPECT_EQ(errno, ENOSYS);
+}
+
+void InstallIbvRegDmabufMr() {
+  ibvSymbols.ibv_internal_reg_dmabuf_mr = [](ibv_pd* pd, uint64_t offset, size_t len, uint64_t iova, int fd,
+                                             int access) {
+    EXPECT_EQ(pd, kPd);
+    EXPECT_EQ(offset, 0x40u);
+    EXPECT_EQ(len, 4096u);
+    EXPECT_EQ(iova, 0x5000u);
+    EXPECT_EQ(fd, 7);
+    EXPECT_EQ(access, 3);
+    ++g_ibvCalls;
+    return kIbvMr;
+  };
+}
+
+void InstallMlx5RegDmabufMr(bool succeed) {
+  mlx5dvSymbols.mlx5dv_internal_reg_dmabuf_mr = [](ibv_pd* pd, uint64_t offset, size_t len, uint64_t iova, int fd,
+                                                  int access, int mlx5Access) {
+    EXPECT_EQ(pd, kPd);
+    EXPECT_EQ(offset, 0x40u);
+    EXPECT_EQ(len, 4096u);
+    EXPECT_EQ(iova, 0x5000u);
+    EXPECT_EQ(fd, 7);
+    EXPECT_EQ(access, 3);
+    EXPECT_EQ(mlx5Access, MLX5DV_REG_DMABUF_ACCESS_DATA_DIRECT);
+    ++g_mlx5Calls;
+    if (g_mr == nullptr) {
+      errno = EINVAL;
+      return static_cast<ibv_mr*>(nullptr);
+    }
+    return g_mr;
+  };
+  g_mr = succeed ? kMr : nullptr;
+}
+
+// wrap_reg_dmabuf_mr calls the real ibv wrapper, so this fixture owns that symbol table too.
+class Mlx5dvwrapRegDmabufMicrotest : public Mlx5dvwrapMicrotest {
+ private:
+  ScopedZeroedTable<ncclIbvSymbols> ibv_{ibvSymbols};
+};
+
+TEST_F(Mlx5dvwrapRegDmabufMicrotest, DataDirectOff_UsesIbv) {
+  InstallIbvRegDmabufMr();
+  InstallMlx5RegDmabufMr(true);
+  ibv_mr* mr = nullptr;
+  EXPECT_EQ(wrap_reg_dmabuf_mr(&mr, kPd, 0x40, 4096, 0x5000, 7, 3, false), ncclSuccess);
+  EXPECT_EQ(mr, kIbvMr);
+  EXPECT_EQ(g_ibvCalls, 1);
+  EXPECT_EQ(g_mlx5Calls, 0);
+}
+
+TEST_F(Mlx5dvwrapRegDmabufMicrotest, MissingMlx5Symbol_FallsBackToIbv) {
+  InstallIbvRegDmabufMr();
+  ibv_mr* mr = nullptr;
+  EXPECT_EQ(wrap_reg_dmabuf_mr(&mr, kPd, 0x40, 4096, 0x5000, 7, 3, true), ncclSuccess);
+  EXPECT_EQ(mr, kIbvMr);
+  EXPECT_EQ(g_ibvCalls, 1);
+  EXPECT_EQ(g_mlx5Calls, 0);
+}
+
+TEST_F(Mlx5dvwrapRegDmabufMicrotest, DataDirect_UsesMlx5WhenItSucceeds) {
+  InstallIbvRegDmabufMr();
+  InstallMlx5RegDmabufMr(true);
+  ibv_mr* mr = nullptr;
+  EXPECT_EQ(wrap_reg_dmabuf_mr(&mr, kPd, 0x40, 4096, 0x5000, 7, 3, true), ncclSuccess);
+  EXPECT_EQ(mr, kMr);
+  EXPECT_EQ(g_ibvCalls, 0);
+  EXPECT_EQ(g_mlx5Calls, 1);
+}
+
+TEST_F(Mlx5dvwrapRegDmabufMicrotest, Mlx5Failure_FallsBackToIbv) {
+  InstallIbvRegDmabufMr();
+  InstallMlx5RegDmabufMr(false);
+  ibv_mr* mr = nullptr;
+  EXPECT_EQ(wrap_reg_dmabuf_mr(&mr, kPd, 0x40, 4096, 0x5000, 7, 3, true), ncclSuccess);
+  EXPECT_EQ(mr, kIbvMr);
+  EXPECT_EQ(g_ibvCalls, 1);
+  EXPECT_EQ(g_mlx5Calls, 1);
 }
 
 void InstallQueryDevice() {

@@ -11,7 +11,7 @@
 
 namespace rocjitsu::arith {
 
-enum class IntegerTernary { ShiftAdd, AddShift, ShiftOr, AndOr, Or3, Xor3, XorAdd, Lerp };
+enum class IntegerTernary { ShiftAdd, AddShift, ShiftOr, AndOr, Or3, Xor3, XorAdd, Lerp, Mad };
 
 // Evaluate three-input integer operations. Preserve destination lanes outside exec_mask.
 // Requires the named CPU features and validated instruction controls.

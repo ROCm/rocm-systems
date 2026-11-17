@@ -52,6 +52,10 @@ public:
 /// @brief Abstract plugin interface for execution hooks.
 ///
 /// Plugins receive callbacks at key points during simulation execution.
+/// Plugin callbacks, policy queries, construction and destruction must not throw.
+/// Expected instruction failures use Wavefront::report_instruction_execution_error();
+/// callbacks must still preserve issue/completion accounting and cancellation.
+/// This is a semantic contract; callback types do not impose noexcept.
 /// All hooks have empty default implementations so plugins only override
 /// what they need. The no-plugin path has near-zero overhead (the
 /// default empty group returns before locking or dispatch).
@@ -293,6 +297,8 @@ public:
 
   /// Called when a wavefront terminates normally, after its memory operations
   /// have drained and before its resources are freed.
+  /// This is a terminal notification; report problems through sink().write().
+  /// Instruction-execution errors recorded here are discarded with the wave.
   /// Dispatch cancellation uses onAmdgpuWavefrontCancelled instead.
   /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
   virtual void onAmdgpuWavefrontHalted(amdgpu::Wavefront & /*wf*/) {}

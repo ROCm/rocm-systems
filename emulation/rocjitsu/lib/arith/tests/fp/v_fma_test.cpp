@@ -6,6 +6,7 @@
 #include "common/cpu.h"
 #include "common/registers.h"
 #include "common/semantics.h"
+#include "fp/captured_gfx11_test.h"
 #include "fp/elementwise.h"
 #include "fp/fma_dpp_test.h"
 #include "fp/fma_reference.h"
@@ -869,4 +870,35 @@ template <int Lanes, typename Call> void check_fma_f64_nan(Call call) {
 TEST(FpFmaF64, NanPriority) {
   check_fma_f64_nan<32>(rj_arith_v_fma_f64_w32_gfx12);
   check_fma_f64_nan<64>(rj_arith_v_fma_f64_w64_gfx12);
+}
+
+namespace {
+
+using rocjitsu::arith::test::CapturedGfx11;
+
+// gfx1100 FMA_F64 lanes from the MODE.IEEE-clear corpus (hw1100-noieee): the first NaN source is
+// returned unquieted, and 0 * infinity gives the default NaN even with a NaN addend. IEEE-set
+// lanes are from the gfx1100 v2 capture (hw2-gfx1100).
+const CapturedGfx11 fma_f64_lanes[] = {
+    {"SignalingB", 0, 0x100, 0x0, 0x7ff0000000000001, 0x0, 0x7ff0000000000001},
+    {"SignalingBRoundDown", 0, 0x15a, 0x0, 0x7ff0000000000001, 0x0, 0x7ff0000000000001},
+    {"SignalingAddend", 0, 0x1f0, 0x0, 0x0, 0x7ff0000000000001, 0x7ff0000000000001},
+    {"SignalingBeforeQuiet", 0, 0x1f0, 0x7ff0000000000001, 0x7ff8000000000000, 0x0,
+     0x7ff0000000000001},
+    {"InvalidProductQuietAddend", 0, 0x1f0, 0x7ff0000000000000, 0x0, 0x7ff8000000000000,
+     0xfff8000000000000},
+    {"NegC", RJ_ARITH_ALU_NEG_C, 0x1f0, 0x7ff0000000000001, 0x0, 0x7ff8000000000000,
+     0x7ff0000000000001},
+    {"Div2", RJ_ARITH_ALU_OMOD_HALF, 0x100, 0x7ff0000000000001, 0x0, 0x0, 0x7ff0000000000001},
+    {"IeeeSetInvalidProductQuietAddend", 0, 0x300, 0x0, 0x7ff0000000000000, 0x7ff8000000000000,
+     0xfff8000000000000},
+};
+
+} // namespace
+
+// Compatibility reproduces captured gfx1100 FP64 FMA NaN lanes.
+TEST(FpFmaF64Gfx11, CapturedNans) {
+  using rocjitsu::arith::test::check_captured_gfx11;
+  check_captured_gfx11<32, 64>(rj_arith_v_fma_f64_w32, fma_f64_lanes);
+  check_captured_gfx11<64, 64>(rj_arith_v_fma_f64_w64, fma_f64_lanes);
 }

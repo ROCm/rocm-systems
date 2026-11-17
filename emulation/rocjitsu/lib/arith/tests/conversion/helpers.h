@@ -121,7 +121,8 @@ int invoke_conversion(Call call, uint64_t flags, Mask exec_mask, uint64_t mode, 
 template <int Lanes, int Operands, int InputWords, int OutputWords, bool Dpp, typename Call,
           typename Reference, typename Compare>
 void check_conversion(Call call, const Registers<8, Lanes> &input, Reference reference,
-                      Compare compare, uint64_t modifiers, bool exact, uint64_t guest_flags = 0) {
+                      Compare compare, uint64_t modifiers, bool exact, uint64_t guest_flags = 0,
+                      uint64_t separately_tested_modifiers = 0) {
   using Mask = WaveMask<Lanes>;
   using Source = const uint32_t *const *;
   constexpr bool status_parameter =
@@ -152,7 +153,7 @@ void check_conversion(Call call, const Registers<8, Lanes> &input, Reference ref
                   RJ_ARITH_ERROR_INVALID_FLAGS);
         return error;
       },
-      modifiers);
+      modifiers | separately_tested_modifiers);
   auto modes = conversion_modes(modifiers, Dpp);
   auto cpu_levels = supported_cpu_levels();
   // Independent samples of guest policies and modifiers, plus a full-mask

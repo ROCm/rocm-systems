@@ -14,6 +14,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/legacy_page_table.h"
 #include "rocjitsu/vm/amdgpu/memory_transaction.h"
+#include "rocjitsu/vm/amdgpu/raw_backing_write_gate.h"
 #include "simdojo/components/sparse_memory.h"
 #include "simdojo/sim/component.h"
 #include "util/conditional_wake_spinlock.h"
@@ -73,6 +74,7 @@ namespace rocjitsu {
 namespace amdgpu {
 
 class LegacyAddressSpaceTestAccess;
+class LegacyAddressSpace;
 
 static_assert(kLegacyPageShift == simdojo::SparseMemory::PAGE_SHIFT,
               "KFD and sparse-memory page shifts must match");
@@ -148,6 +150,22 @@ public:
   virtual void report_memory_fault(uint32_t vmid, uint64_t addr, MemoryFaultCause cause) = 0;
 };
 
+/// @brief The owned effect required for a compatibility data request.
+enum class LegacyDeferredCandidate : uint8_t {
+  None,                 ///< The request has no deferred backing effect.
+  Peer,                 ///< Read or write through a peer backing owner.
+  ControlledLocalWrite, ///< Write through the local backing owner under a token.
+};
+
+/// @brief A copied route classification for one compatibility data request.
+struct LegacyDataRoute {
+  VmDataRoute route = VmDataRoute::Local;
+  // The first allocation boundary limits a synchronous or deferred step. A
+  // local write with no proven extent cannot authorize a raw backing path.
+  std::size_t first_extent_bytes = 0;
+  LegacyDeferredCandidate candidate = LegacyDeferredCandidate::None;
+};
+
 /// @brief Complete frontend contribution to one legacy address-space binding.
 class LegacyAddressSpaceRegistration {
 public:
@@ -163,6 +181,27 @@ public:
   int client_mem_fd = -1;
   bool passthrough = false;
   MemoryFaultReporter *fault_reporter = nullptr;
+  /// Optional live per-device allocation policy for the compatibility binding.
+  /// A span may be rejected even when its individual pages are admitted.
+  /// Local/admitted classification must remain stable while request_mutex is
+  /// held shared; callbacks must not acquire that mutex themselves.
+  std::function<VmAccessAdmission(uint64_t, std::size_t, VmAccessKind)> access_admission = {};
+  std::shared_ptr<const std::atomic<uint64_t>> local_grant_epoch = {};
+  std::function<VmLocalGrant(uint64_t, std::size_t)> local_grant = {};
+  /// Optional nonblocking permit across raw admission and backing mutation.
+  std::shared_ptr<VmRawBackingWriteGate> raw_write_gate = {};
+  /// Copied grant metadata; classification must not retain a backing owner.
+  /// It follows the same request_mutex contract as access_admission.
+  std::function<LegacyDataRoute(uint64_t, std::size_t, VmAccessKind)> data_route = {};
+  /// Prepare one owned candidate chunk. Empty means the candidate must fault.
+  /// @details The operation must retain write bytes and the VM effect gate until
+  /// its owner event completes or proves revocation. ControlledLocalWrite is
+  /// supplied only for writes; Peer may prepare reads or writes.
+  std::function<std::unique_ptr<VmDeferredTransfer>(
+      LegacyDeferredCandidate, uint64_t, std::size_t, std::span<const std::byte>, bool,
+      const std::shared_ptr<VmTransferEffectGate> &, const GpuVmAccess &,
+      std::shared_ptr<const LegacyAddressSpace>)>
+      prepare_deferred_transfer = {};
 };
 
 /// @brief Why a block access ended, once a faulted address is distinguishable
@@ -237,11 +276,13 @@ public:
                        : std::shared_lock<util::DistributedSharedMutex>{}) {}
 
     void bind(LegacyPageTable *page_table, util::DistributedSharedMutex *page_table_mutex,
-              const uint64_t *generation, uint64_t registry_generation) {
+              const uint64_t *generation, uint64_t registry_generation,
+              const LegacyPageTableCacheState *policies) {
       page_table_ = page_table;
       page_table_mutex_ = page_table_mutex;
       generation_ = generation;
       registry_generation_ = registry_generation;
+      policies_ = policies;
     }
 
     std::shared_ptr<util::DistributedSharedMutex> mutex_;
@@ -250,6 +291,7 @@ public:
     util::DistributedSharedMutex *page_table_mutex_ = nullptr;
     const uint64_t *generation_ = nullptr;
     uint64_t registry_generation_ = 0;
+    const LegacyPageTableCacheState *policies_ = nullptr;
   };
 
   explicit LegacyAddressSpace(GpuMemory &backing)
@@ -257,6 +299,8 @@ public:
         instance_id_(next_instance_id_.fetch_add(1, std::memory_order_relaxed)) {
     rocjitsu::install_host_access_guard();
   }
+
+  uint64_t instance_id() const { return instance_id_; }
 
   /// @brief Register a process's page table in the VMID table.
   /// @param generation Optional mutation counter used by translation caches.
@@ -311,7 +355,7 @@ public:
       if (it == vmid_table_.end() || it->second.request_mutex != expected)
         return {};
       guard.bind(it->second.page_table, it->second.mutex, it->second.generation,
-                 vmid_registry_generation_);
+                 vmid_registry_generation_, it->second.page_table_cache_state.get());
       return guard;
     }
     while (true) {
@@ -329,7 +373,7 @@ public:
       auto it = vmid_table_.find(vmid);
       if (it != vmid_table_.end() && it->second.request_mutex == request_mutex) {
         guard.bind(it->second.page_table, it->second.mutex, it->second.generation,
-                   vmid_registry_generation_);
+                   vmid_registry_generation_, it->second.page_table_cache_state.get());
         return guard;
       }
     }
@@ -349,7 +393,7 @@ public:
       auto it = vmid_table_.find(vmid);
       if (it != vmid_table_.end() && it->second.request_mutex == guard.mutex_) {
         guard.bind(it->second.page_table, it->second.mutex, it->second.generation,
-                   vmid_registry_generation_);
+                   vmid_registry_generation_, it->second.page_table_cache_state.get());
         return true;
       }
       guard.lock_.unlock();
@@ -516,6 +560,51 @@ public:
     });
   }
 
+  /// @brief Check every byte of a mapped host extent for readable protection.
+  /// @details Peer effect admission uses this before cache maintenance. Unlike
+  /// has_host_backing(), a PROT_NONE application extent cannot pass this probe.
+  bool has_readable_host_backing(uint64_t addr, uint32_t vmid, size_t size) const {
+    if (size == 0 || size - 1 > std::numeric_limits<uint64_t>::max() - addr)
+      return false;
+    return for_each_page_chunk_until(addr, size, [&](uint64_t ea, size_t, size_t chunk) {
+      return with_page_mapping(ea, vmid, [&](const LegacyPageTableEntry *pte, IdentityPage) {
+        if (!pte)
+          return false;
+        struct Span {
+          size_t value_offset = 0;
+          uint8_t *host_ptr = nullptr;
+          size_t size = 0;
+          const LegacyHostExtent *extent = nullptr;
+        };
+        std::vector<Span> spans;
+        const auto mapping_lease = rocjitsu::host_mapping_lock().lock_shared();
+        const size_t mapped_bytes =
+            for_each_mapped_span(*pte, ea & PAGE_MASK, chunk,
+                                 [&](size_t value_offset, uint8_t *host_ptr, size_t span_size,
+                                     const LegacyHostExtent &extent) {
+                                   spans.push_back({value_offset, host_ptr, span_size, &extent});
+                                 });
+        if (mapped_bytes != chunk)
+          return false;
+        std::ranges::sort(spans, {}, &Span::value_offset);
+        size_t covered = 0;
+        for (const Span &span : spans) {
+          if (span.value_offset != covered ||
+              addressable_prefix(span.host_ptr, span.size) != span.size)
+            return false;
+          if (span.extent->owner != LegacyHostExtentOwner::Driver &&
+              span.extent->owner != LegacyHostExtentOwner::DriverSealedRam) {
+            const PageWritability protection = host_range_writability(span.host_ptr, span.size);
+            if (protection != PageWritability::Writable && protection != PageWritability::ReadOnly)
+              return false;
+          }
+          covered += span.size;
+        }
+        return covered == chunk;
+      });
+    });
+  }
+
   /// @brief Check that every host-backed byte in a range may be modified.
   /// @details This is the non-mutating counterpart of the strict write and
   /// atomic paths. It observes the same sub-page extent boundaries and host
@@ -563,6 +652,13 @@ public:
       });
     });
   }
+
+  /// Check an ordinary local VRAM instruction against one stable page table.
+  /// Complex extents fall back to the general per-span translation path.
+  bool local_ingress_mapped(std::span<const MemoryIngressSpan> spans, uint64_t begin, uint64_t end,
+                            uint32_t vmid,
+                            const std::shared_ptr<util::DistributedSharedMutex> &expected,
+                            const std::shared_ptr<LegacyPageTableCacheState> &policies) const;
 
   /// @brief Return whether a GPU VA has a VMID page-table mapping.
   bool is_mapped(uint64_t addr, uint32_t vmid = 0) const {
@@ -1638,6 +1734,12 @@ private:
   friend class GpuVm;
   friend class LegacyAddressSpaceTestAccess;
 
+#if defined(RJ_GPU_MEMORY_WITH_ASAN)
+  static constexpr bool kCheckAsanBacking = true;
+#else
+  static constexpr bool kCheckAsanBacking = false;
+#endif
+
   void set_default_passthrough(bool passthrough) {
     std::unique_lock lock(vmid_mutex_);
     default_passthrough_ = passthrough;
@@ -2471,62 +2573,7 @@ private:
   ///   this path:  page table lock -> close() -> descriptor lock
   ///   GEM_VA:     descriptor lock -> map_pages() -> page table lock
   /// Nothing about reading procfs wants the hooks, so it does not call them.
-  static PageWritability host_page_writability(const uint8_t *page) {
-    if (page == nullptr)
-      return PageWritability::Inaccessible;
-    if (proc_maps_open_failure_for_test_.load(std::memory_order_relaxed))
-      return PageWritability::Indeterminate;
-    const auto address = reinterpret_cast<uintptr_t>(page);
-    const long fd = ::syscall(SYS_openat, AT_FDCWD, "/proc/self/maps", O_RDONLY | O_CLOEXEC);
-    if (fd < 0)
-      return PageWritability::Indeterminate;
-
-    // Parsed incrementally: the table can be large, and a line may straddle
-    // reads, so keep any partial tail and prepend it to the next chunk.
-    std::string pending;
-    char chunk[8192];
-    PageWritability answer = PageWritability::Indeterminate;
-    for (bool reading = true; reading;) {
-      const long got = ::syscall(SYS_read, static_cast<int>(fd), chunk, sizeof(chunk));
-      if (got < 0) {
-        // A signal arriving mid-read says nothing about the mapping.
-        if (errno == EINTR)
-          continue;
-        break;
-      }
-      if (got == 0) {
-        // Walked the whole table without covering the address: nothing is
-        // mapped there, which is a definite answer rather than a failure.
-        answer = PageWritability::Inaccessible;
-        break;
-      }
-      pending.append(chunk, static_cast<size_t>(got));
-      size_t line_begin = 0;
-      for (size_t newline = pending.find('\n', line_begin); newline != std::string::npos;
-           newline = pending.find('\n', line_begin)) {
-        const std::string line(pending, line_begin, newline - line_begin);
-        line_begin = newline + 1;
-        uintptr_t begin = 0;
-        uintptr_t end = 0;
-        char permissions[5] = {};
-        if (std::sscanf(line.c_str(), "%zx-%zx %4s", &begin, &end, permissions) != 3)
-          continue;
-        if (address < begin || address >= end)
-          continue;
-        // A mapping that permits neither read nor write -- a PROT_NONE
-        // reservation, the shape the runtime leaves behind around an aperture
-        // -- is absent as far as the GPU is concerned, not merely protected.
-        answer = permissions[1] == 'w'   ? PageWritability::Writable
-                 : permissions[0] == 'r' ? PageWritability::ReadOnly
-                                         : PageWritability::Inaccessible;
-        reading = false;
-        break;
-      }
-      pending.erase(0, line_begin);
-    }
-    ::syscall(SYS_close, static_cast<int>(fd));
-    return answer;
-  }
+  static PageWritability host_page_writability(const uint8_t *page, uintptr_t *vma_end = nullptr);
 
   inline static std::atomic<bool> proc_maps_open_failure_for_test_{false};
 

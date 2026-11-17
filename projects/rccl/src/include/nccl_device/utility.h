@@ -57,12 +57,6 @@
 #define NCCL_EXTERN_C
 #endif
 
-#ifdef __clang_llvm_bitcode_lib__
-#define NCCL_IR_EXTERN_C extern "C"
-#else
-#define NCCL_IR_EXTERN_C
-#endif
-
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -503,9 +497,9 @@ NCCL_DEVICE_INLINE T loadConstLdg(T const* p) {
   }
 }
 
-// loadConst defaults to ordinary dereference loads to avoid the __ldg/acquire-fence regression.
-// The loadConst selection macro is intentionally 0 for now; future CUDA-version gating belongs at
-// the define site above.
+// [RCCL] Upstream selects ordinary dereference loads only for CUDA versions affected by the
+// __ldg/acquire-fence regression; RCCL has no such version gate and always uses plain loads
+// (NCCL_DEVICE_LOADCONST_USE_LDG is fixed to 0 above).
 template <typename T>
 NCCL_DEVICE_INLINE T loadConst(T const* p) {
 #if NCCL_DEVICE_LOADCONST_USE_LDG
@@ -514,7 +508,7 @@ NCCL_DEVICE_INLINE T loadConst(T const* p) {
   return *p;
 #endif
 }
-#endif
+#endif // NCCL_DEVICE_COMPILE
 
 ////////////////////////////////////////////////////////////////////////////////
 // Optional<T>: Holds a T that may or may not be constructed. An Optional
