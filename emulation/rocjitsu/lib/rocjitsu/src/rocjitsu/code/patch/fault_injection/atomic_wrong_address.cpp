@@ -57,6 +57,17 @@ bool flat_like_atomic(std::string_view form) {
   return form.starts_with("flat_atomic") || form.starts_with("global_atomic");
 }
 
+bool admitted_modern_atomic_form(std::string_view form, std::optional<int32_t> byte_offset) {
+  if (!byte_offset)
+    return false;
+  if (flat_like_atomic(form))
+    return true;
+  if (!form.starts_with("buffer_atomic"))
+    return false;
+  // Both modern families require nonnegative VBUFFER immediates despite the signed raw field.
+  return *byte_offset >= 0;
+}
+
 bool atomic_instruction(std::string_view form) {
   if (flat_like_atomic(form) || form.starts_with("scratch_atomic") ||
       form.starts_with("buffer_atomic") || form.starts_with("s_atomic"))
@@ -91,7 +102,7 @@ std::vector<AtomicCapability> atomic_wrong_address_capabilities() {
       continue;
     const bool cdna5 =
         target == ROCJITSU_CODE_TARGET_GFX1250 || target == ROCJITSU_CODE_TARGET_GFX1251;
-    for (std::string_view form : {"flat_atomic", "global_atomic"}) {
+    for (std::string_view form : {"flat_atomic", "global_atomic", "buffer_atomic"}) {
       capabilities.push_back({.target = target, .wave_size = cdna5 ? 32u : 64u, .form = form});
       if (!cdna5)
         capabilities.push_back({.target = target, .wave_size = 32u, .form = form});
@@ -223,9 +234,10 @@ FailureOr<AtomicInventory> discover_atomic_wrong_address(const FaultMutationCont
         byte_offset = amdgpu::read_vmem_signed24_offset(target, words);
       }
       const InstructionBoundaries::Entry *boundary = facts.boundaries->find(offset);
-      const bool supported =
-          modern_atomic_target(target) && flat_like_atomic(instruction.mnemonic()) && byte_offset &&
-          boundary && boundary->size == size && !boundary->clause && !boundary->clause_member;
+      const bool supported = modern_atomic_target(target) &&
+                             admitted_modern_atomic_form(instruction.mnemonic(), byte_offset) &&
+                             boundary && boundary->size == size && !boundary->clause &&
+                             !boundary->clause_member;
       record->source_bytes.emplace(offset, std::move(original));
       record->sites.push_back({.offset = offset,
                                .instruction_size = size,
@@ -296,7 +308,7 @@ FailureOr<AtomicResult> apply_atomic_wrong_address(const FaultMutationContext &c
         "atomic byte delta must be positive, four-byte aligned, and at most 0x7fffff", offset);
   if (!selection.site_.address_supported || selection.site_.instruction_size != 12 ||
       !modern_atomic_target(context.source().target_id()) ||
-      !flat_like_atomic(selection.site_.form))
+      !admitted_modern_atomic_form(selection.site_.form, selection.site_.byte_offset))
     return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedForm,
                                  "selected atomic form has no address recipe", offset);
   const std::unordered_map<uint64_t, std::vector<uint8_t>>::const_iterator expected =
