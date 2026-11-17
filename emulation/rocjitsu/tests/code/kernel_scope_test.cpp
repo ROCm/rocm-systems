@@ -13,6 +13,8 @@
 #include "rocjitsu/code/code_object.h"
 #include "rocjitsu/code/kernel_scope.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
@@ -191,6 +193,17 @@ std::vector<uint32_t> shared_helper_words(bool indirect, bool clobber,
   return words;
 }
 
+void write_pc_builder(std::vector<uint32_t> &words, uint32_t offset, uint16_t pair,
+                      uint32_t target) {
+  const std::array<uint32_t, 4> builder = {
+      build_s_getpc_b64(pair, kArch).value(),
+      build_s_add_u32(pair, pair, 255, kArch).value(),
+      target - offset - 4,
+      build_s_addc_u32(pair + 1, pair + 1, 128, kArch).value(),
+  };
+  std::ranges::copy(builder, words.begin() + offset / sizeof(uint32_t));
+}
+
 void add_function_symbol(std::vector<uint8_t> &image, uint64_t offset, bool dynamic,
                          uint8_t symbol_type = kElfSymbolTypeFunc) {
   Elf64_Ehdr header = {};
@@ -294,6 +307,224 @@ TEST(KernelOwnershipTest, RecoveredAndDirectSharedCallsProveAllOwners) {
     EXPECT_EQ((*owners)[0].proof,
               indirect ? KernelOwnerProof::RecoveredIndirectCall : KernelOwnerProof::DirectCall);
     EXPECT_EQ((*owners)[1].proof, (*owners)[0].proof);
+  }
+}
+
+TEST(KernelOwnershipTest, RejectsSharedIndirectTargetsWithoutKernelProvenance) {
+  std::vector<uint32_t> words(194, build_s_nop(0, kArch).value());
+  write_pc_builder(words, 0, 8, 768);
+  words[4] = build_s_branch(123, kArch).value(); // 16 -> shared dispatch at 512.
+  write_pc_builder(words, 256, 8, 772);
+  words[68] = build_s_branch(59, kArch).value(); // 272 -> shared dispatch at 512.
+  words[128] = build_s_setpc_b64(8, kArch).value();
+  words[192] = build_s_endpgm(kArch).value();
+  words[193] = build_s_endpgm(kArch).value();
+  const std::vector<uint8_t> image = two_owner_image(words, 256);
+  const std::shared_ptr<const AmdGpuCodeObject> source =
+      std::make_shared<AmdGpuCodeObject>(image.data(), image.size());
+  std::string error;
+  const FailureOr<KernelOwnership> ownership =
+      KernelOwnership::build(source, ROCJITSU_CODE_TARGET_GFX950, error);
+  EXPECT_TRUE(ownership.failed());
+  EXPECT_EQ(error, "shared indirect targets require kernel-specific proof");
+
+  write_pc_builder(words, 256, 8, 768);
+  const std::vector<uint8_t> same_target_image = two_owner_image(words, 256);
+  const std::shared_ptr<const AmdGpuCodeObject> same_target_source =
+      std::make_shared<AmdGpuCodeObject>(same_target_image.data(), same_target_image.size());
+  const FailureOr<KernelOwnership> same_target =
+      KernelOwnership::build(same_target_source, ROCJITSU_CODE_TARGET_GFX950, error);
+  ASSERT_TRUE(same_target.succeeded()) << error;
+  ASSERT_TRUE(same_target.value().owners_at(768));
+  EXPECT_EQ(same_target.value().owners_at(768)->size(), 2u);
+}
+
+TEST(KernelOwnershipTest, RejectsPcBuilderCarriedAcrossClobberingIndirectCall) {
+  std::vector<uint32_t> words(194, build_s_nop(0, kArch).value());
+  write_pc_builder(words, 0, 8, 768);
+  write_pc_builder(words, 16, 10, 512);
+  words[8] = build_s_swappc_b64(30, 10, kArch).value();
+  words[9] = build_s_setpc_b64(8, kArch).value();
+  words[64] = build_s_branch(128, kArch).value(); // B enters the actual target at 772.
+  write_pc_builder(words, 512, 8, 772);           // Callee replaces A's pending target.
+  words[132] = build_s_setpc_b64(30, kArch).value();
+  words[192] = build_s_endpgm(kArch).value();
+  words[193] = build_s_endpgm(kArch).value();
+  const std::vector<uint8_t> image = two_owner_image(words, 256);
+  const std::shared_ptr<const AmdGpuCodeObject> source =
+      std::make_shared<AmdGpuCodeObject>(image.data(), image.size());
+  std::string error;
+  const FailureOr<KernelOwnership> ownership =
+      KernelOwnership::build(source, ROCJITSU_CODE_TARGET_GFX950, error);
+  EXPECT_TRUE(ownership.failed());
+  EXPECT_EQ(error, "call-carried PC builder requires callee preservation proof");
+}
+
+TEST(KernelOwnershipTest, FreshPcBuilderAfterIndirectCallProvesActualOwners) {
+  std::vector<uint32_t> words(194, build_s_nop(0, kArch).value());
+  write_pc_builder(words, 0, 8, 768);
+  write_pc_builder(words, 16, 10, 512);
+  words[8] = build_s_swappc_b64(30, 10, kArch).value();
+  write_pc_builder(words, 36, 8, 772);
+  words[13] = build_s_setpc_b64(8, kArch).value();
+  words[64] = build_s_branch(128, kArch).value();
+  write_pc_builder(words, 512, 8, 772);
+  words[132] = build_s_setpc_b64(30, kArch).value();
+  words[192] = build_s_endpgm(kArch).value();
+  words[193] = build_s_endpgm(kArch).value();
+  const std::vector<uint8_t> image = two_owner_image(words, 256);
+  const std::shared_ptr<const AmdGpuCodeObject> source =
+      std::make_shared<AmdGpuCodeObject>(image.data(), image.size());
+  std::string error;
+  const FailureOr<KernelOwnership> ownership =
+      KernelOwnership::build(source, ROCJITSU_CODE_TARGET_GFX950, error);
+  ASSERT_TRUE(ownership.succeeded()) << error;
+  ASSERT_TRUE(ownership.value().owners_at(772));
+  EXPECT_EQ(ownership.value().owners_at(772)->size(), 2u);
+}
+
+TEST(KernelOwnershipTest, RejectsDroppedTargetInAnotherExecutableSection) {
+  std::vector<uint32_t> words(256, build_s_nop(0, kArch).value());
+  words[0] = build_s_cbranch_scc0(7); // 0 -> 32.
+  write_pc_builder(words, 4, 8, 512);
+  words[5] = build_s_branch(10, kArch).value(); // 20 -> join at 64.
+  write_pc_builder(words, 32, 8, 896);
+  words[12] = build_s_branch(3, kArch).value(); // 48 -> join at 64.
+  words[16] = build_s_setpc_b64(8, kArch).value();
+  words[64] = build_s_branch(127, kArch).value(); // B -> shared store at 768.
+  words[128] = build_s_endpgm(kArch).value();
+  const std::array<uint32_t, 2> store =
+      cdna4::build_ds(cdna4::kDsWriteB32Ds, {.addr = 2, .data0 = 3});
+  words[192] = store[0];
+  words[193] = store[1];
+  words[194] = build_s_endpgm(kArch).value();
+  words[224] = build_s_branch(-33, kArch).value(); // Auxiliary section: 896 -> 768.
+  std::vector<uint8_t> image = two_owner_image(words, 256);
+
+  Elf64_Ehdr header = {};
+  std::memcpy(&header, image.data(), sizeof(header));
+  std::vector<Elf64_Shdr> sections(header.e_shnum);
+  std::memcpy(sections.data(), image.data() + header.e_shoff, sections.size() * sizeof(Elf64_Shdr));
+  Elf64_Shdr &names_header = sections[header.e_shstrndx];
+  std::vector<uint8_t> names(image.begin() + names_header.sh_offset,
+                             image.begin() + names_header.sh_offset + names_header.sh_size);
+  Elf64_Shdr auxiliary = sections[1];
+  auxiliary.sh_name = test::add_elf_name(names, ".aux");
+  auxiliary.sh_offset += 896;
+  auxiliary.sh_addr += 896;
+  auxiliary.sh_size = sizeof(uint32_t);
+  sections[1].sh_size = 800;
+  names_header.sh_offset = image.size();
+  names_header.sh_size = names.size();
+  image.insert(image.end(), names.begin(), names.end());
+  sections.push_back(auxiliary);
+  header.e_shoff = test::align_up_for_test(image.size(), alignof(Elf64_Shdr));
+  header.e_shnum = static_cast<uint16_t>(sections.size());
+  image.resize(header.e_shoff + sections.size() * sizeof(Elf64_Shdr));
+  std::memcpy(image.data() + header.e_shoff, sections.data(), sections.size() * sizeof(Elf64_Shdr));
+  std::memcpy(image.data(), &header, sizeof(header));
+
+  const std::shared_ptr<const AmdGpuCodeObject> source =
+      std::make_shared<AmdGpuCodeObject>(image.data(), image.size());
+  ASSERT_TRUE(source->is_valid());
+  ASSERT_EQ(source->text_sections().size(), 1u);
+  std::string error;
+  const FailureOr<KernelOwnership> ownership =
+      KernelOwnership::build(source, ROCJITSU_CODE_TARGET_GFX950, error);
+  EXPECT_TRUE(ownership.failed());
+  EXPECT_EQ(error, "incomplete indirect ownership");
+}
+
+TEST(KernelOwnershipTest, AbortTrapClosesOnlyItsOwnArm) {
+  std::vector<uint32_t> words(65, build_s_nop(0, kArch).value());
+  words[0] = build_s_cbranch_scc0(2); // 0 -> endpgm at 12.
+  words[1] = build_s_trap(kArch, 2).value();
+  words[2] = 0xffffffffu; // Dead after abort, never decoded.
+  words[3] = build_s_endpgm(kArch).value();
+  words[64] = build_s_endpgm(kArch).value();
+  const std::vector<uint8_t> image = two_owner_image(words, 256);
+  const std::shared_ptr<const AmdGpuCodeObject> source =
+      std::make_shared<AmdGpuCodeObject>(image.data(), image.size());
+  std::string error;
+  const FailureOr<KernelOwnership> ownership =
+      KernelOwnership::build(source, ROCJITSU_CODE_TARGET_GFX950, error);
+  ASSERT_TRUE(ownership.succeeded()) << error;
+  EXPECT_NE(ownership.value().instruction_at(0, 4), nullptr);
+  EXPECT_EQ(ownership.value().instruction_at(0, 8), nullptr);
+  EXPECT_NE(ownership.value().instruction_at(0, 12), nullptr);
+}
+
+TEST(KernelOwnershipTest, DebugTrapResumesWithoutProvingUnknownIndirectTargets) {
+  for (bool unresolved : {false, true}) {
+    SCOPED_TRACE(unresolved);
+    std::vector<uint32_t> words(65, build_s_nop(0, kArch).value());
+    words[0] = build_s_trap(kArch, 3).value();
+    words[1] = unresolved ? build_s_setpc_b64(8, kArch).value() : build_s_endpgm(kArch).value();
+    words[64] = build_s_endpgm(kArch).value();
+    const std::vector<uint8_t> image = two_owner_image(words, 256);
+    const std::shared_ptr<const AmdGpuCodeObject> source =
+        std::make_shared<AmdGpuCodeObject>(image.data(), image.size());
+    std::string error;
+    const FailureOr<KernelOwnership> ownership =
+        KernelOwnership::build(source, ROCJITSU_CODE_TARGET_GFX950, error);
+    if (unresolved) {
+      EXPECT_TRUE(ownership.failed());
+      EXPECT_EQ(error, "unresolved indirect ownership");
+    } else {
+      ASSERT_TRUE(ownership.succeeded()) << error;
+      EXPECT_NE(ownership.value().instruction_at(0, 4), nullptr);
+    }
+  }
+}
+
+TEST(KernelOwnershipTest, DebugTrapDoesNotHideReturnLinkWrites) {
+  for (bool clobber : {false, true}) {
+    SCOPED_TRACE(clobber);
+    std::vector<uint32_t> words = shared_helper_words(false, false);
+    words[128] = build_s_trap(kArch, 3).value();
+    words[129] = clobber ? build_s_mov_b32(30, 128, kArch).value() : build_s_nop(0, kArch).value();
+    words.push_back(build_s_setpc_b64(30, kArch).value());
+    const std::vector<uint8_t> image = two_owner_image(words, 256);
+    const std::shared_ptr<const AmdGpuCodeObject> source =
+        std::make_shared<AmdGpuCodeObject>(image.data(), image.size());
+    std::string error;
+    const FailureOr<KernelOwnership> ownership =
+        KernelOwnership::build(source, ROCJITSU_CODE_TARGET_GFX950, error);
+    if (clobber) {
+      EXPECT_TRUE(ownership.failed());
+      EXPECT_EQ(error, "unresolved indirect ownership");
+    } else {
+      ASSERT_TRUE(ownership.succeeded()) << error;
+      ASSERT_TRUE(ownership.value().owners_at(512));
+      EXPECT_EQ(ownership.value().owners_at(512)->size(), 2u);
+    }
+  }
+}
+
+TEST(KernelOwnershipTest, RelativeScalarReturnLinkWritesAreIndependentOfPcRecovery) {
+  for (bool relative_destination : {false, true}) {
+    SCOPED_TRACE(relative_destination);
+    std::vector<uint32_t> words = shared_helper_words(false, false);
+    words[128] = build_s_mov_b32(scalar_operand_m0(kArch).value(), 158, kArch).value();
+    const std::array<uint32_t, 1> relative =
+        cdna4::build_sop1(relative_destination ? cdna4::kSMovreldB32Sop1 : cdna4::kSMovrelsB32Sop1,
+                          {.ssrc0 = 1, .sdst = 0});
+    words[129] = relative[0];
+    words.push_back(build_s_setpc_b64(30, kArch).value());
+    const std::vector<uint8_t> image = two_owner_image(words, 256);
+    const std::shared_ptr<const AmdGpuCodeObject> source =
+        std::make_shared<AmdGpuCodeObject>(image.data(), image.size());
+    std::string error;
+    const FailureOr<KernelOwnership> ownership =
+        KernelOwnership::build(source, ROCJITSU_CODE_TARGET_GFX950, error);
+    if (relative_destination) {
+      EXPECT_TRUE(ownership.failed());
+      EXPECT_EQ(error, "unresolved indirect ownership");
+    } else {
+      ASSERT_TRUE(ownership.succeeded()) << error;
+      ASSERT_TRUE(ownership.value().owners_at(512));
+      EXPECT_EQ(ownership.value().owners_at(512)->size(), 2u);
+    }
   }
 }
 
