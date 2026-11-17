@@ -470,10 +470,10 @@ static AlltoAllGinLaneState AlltoAllGinReadLaneState(const ncclDevComm* devComm)
 }
 
 // The lane state is fixed for the life of a devComm, and RunColl runs inside the
-// timed loop and under -G graph capture, where a synchronous copy cannot. So it
-// is read once per devComm, from AlltoAllRunTest, and cached. A failed copy on
-// any rank clears ctxOk on every rank before that cache is used: the LSA lane
-// and gin.put do not wait on each other, so a split would hang.
+// timed loop and under -G graph capture, where a synchronous copy cannot. So
+// AlltoAllRunTest reads it once per devComm, agrees ctxOk across ranks, and
+// caches it; RunColl never copies. The LSA lane and gin.put do not wait on each
+// other, so every rank must pick the same one.
 struct AlltoAllGinLaneCache {
   std::mutex mutex;
   std::map<std::pair<const ncclDevComm*, const void*>, AlltoAllGinLaneState> map;
@@ -494,21 +494,18 @@ static void AlltoAllGinStoreLaneState(const ncclDevComm* devComm, AlltoAllGinLan
   cache.map[alltoAllGinLaneKey(devComm)] = state;
 }
 
+// A devComm AlltoAllRunTest did not cache gets gin.put, never a copy.
 static AlltoAllGinLaneState AlltoAllGinLaneStateFor(const ncclDevComm* devComm) {
   auto& cache = alltoAllGinLaneCache();
   std::lock_guard<std::mutex> lock(cache.mutex);
-  const auto key = alltoAllGinLaneKey(devComm);
-  auto it = cache.map.find(key);
-  if (it == cache.map.end()) it = cache.map.emplace(key, AlltoAllGinReadLaneState(devComm)).first;
+  auto it = cache.map.find(alltoAllGinLaneKey(devComm));
+  if (it == cache.map.end()) return AlltoAllGinLaneState{false, 0, 0};
   return it->second;
 }
 
-// Every rank uses the cached state. AlltoAllRunTest has already forced ctxOk
-// false everywhere if any rank's copy failed, so every rank picks the same lane.
 static GinFabricA2AAlgo AlltoAllGinFabricAlgoHost(const ncclDevComm* devComm, size_t bytesPerPeer) {
   const AlltoAllGinLaneState state = AlltoAllGinLaneStateFor(devComm);
-  const bool ctxOk = state.ctxOk && g_alltoallLaneFlags.nSlots != 0;
-  return ginFabricA2ASelectAlgo(ctxOk, state.lsaEnabled, devComm->nRanks, bytesPerPeer, state.lsaThreshold);
+  return ginFabricA2ASelectAlgo(state.ctxOk, state.lsaEnabled, devComm->nRanks, bytesPerPeer, state.lsaThreshold);
 }
 
 // blockIdx.x is the peer and blockIdx.y the chunk.
@@ -1034,25 +1031,23 @@ testResult_t AlltoAllRunTest(struct threadArgs* args, int root, ncclDataType_t t
   }
 #if ALLTOALL_GIN_FABRIC_LSA
   // GPU i's devComm is testDevComms(args, i), which strides by testMaxDevComms.
-  // A failed copy is per rank. MIN across threads and MPI ranks clears ctxOk
-  // on every rank before TimeTest, so they all fall back to gin.put together.
+  // Both inputs to ctxOk can differ between ranks: the context copy can fail on
+  // one, and without -p 1 only host thread 0 created the devComms, so only it
+  // holds the thread_local lane flags. MIN across threads and MPI ranks makes
+  // every rank fall back to gin.put together if any of them lacks either.
   if (deviceImpl == 3) {
-    long long readsOk = 1;
+    std::vector<AlltoAllGinLaneState> states(args->nGpus);
+    long long laneOk = 1;
     for (int i = 0; i < args->nGpus; i++) {
       CUDACHECK(cudaSetDevice(args->gpus[i]));
-      ncclDevComm* devComm = testDevComms(args, i);
-      AlltoAllGinLaneState state = AlltoAllGinReadLaneState(devComm);
-      if (!state.ctxOk) readsOk = 0;
-      AlltoAllGinStoreLaneState(devComm, state);
+      states[i] = AlltoAllGinReadLaneState(testDevComms(args, i));
+      states[i].ctxOk = states[i].ctxOk && g_alltoallLaneFlags.nSlots != 0;
+      if (!states[i].ctxOk) laneOk = 0;
     }
-    Allreduce(args, &readsOk, /*min*/2);
-    if (readsOk == 0) {
-      for (int i = 0; i < args->nGpus; i++) {
-        ncclDevComm* devComm = testDevComms(args, i);
-        AlltoAllGinLaneState state = AlltoAllGinLaneStateFor(devComm);
-        state.ctxOk = false;
-        AlltoAllGinStoreLaneState(devComm, state);
-      }
+    Allreduce(args, &laneOk, /*min*/2);
+    for (int i = 0; i < args->nGpus; i++) {
+      if (laneOk == 0) states[i].ctxOk = false;
+      AlltoAllGinStoreLaneState(testDevComms(args, i), states[i]);
     }
   }
 #endif
