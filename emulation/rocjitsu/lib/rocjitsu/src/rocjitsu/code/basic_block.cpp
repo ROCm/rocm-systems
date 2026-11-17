@@ -10,6 +10,7 @@
 #include "rocjitsu/code/text_padding.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/target_registry.h"
 
 #include <algorithm>
 #include <cassert>
@@ -103,6 +104,7 @@ struct BasicBlock::DecodedSection {
   std::vector<std::unique_ptr<Instruction>> instructions;
   std::vector<IndirectCallFixup> indirect_targets;
   std::vector<PcAddressBuilder> pc_address_builders;
+  std::unordered_set<uint64_t> trap_padding_exits;
 };
 
 BasicBlock::BasicBlock(uint64_t start_offset) : start_offset_(start_offset) {}
@@ -191,10 +193,12 @@ FailureOr<std::vector<std::unique_ptr<BasicBlock>>> BasicBlock::build_impl(
     std::vector<std::unique_ptr<Instruction>> decoded;
     std::vector<IndirectCallFixup> recovered_indirect_targets;
     std::vector<PcAddressBuilder> pc_address_builders;
+    std::unordered_set<uint64_t> trap_padding_exits;
     if (prepared) {
       decoded = std::move(prepared->instructions);
       recovered_indirect_targets = std::move(prepared->indirect_targets);
       pc_address_builders = std::move(prepared->pc_address_builders);
+      trap_padding_exits = std::move(prepared->trap_padding_exits);
     }
     const uint64_t section_end = sec->size();
     std::unordered_set<uint64_t> calls_before_alignment;
@@ -362,7 +366,9 @@ FailureOr<std::vector<std::unique_ptr<BasicBlock>>> BasicBlock::build_impl(
         // would be translated verbatim in one build and given a terminator in the next.
         const bool reaches_section_end =
             arch == ROCJITSU_CODE_ARCH_CDNA5 && i >= decoded.size() && next_offset >= section_end;
-        if (can_fall_through && (reaches_gfx1250_zero || reaches_section_end)) {
+        if (can_fall_through &&
+            (reaches_gfx1250_zero || reaches_section_end ||
+             trap_padding_exits.contains(last.src_loc()))) {
           current->has_terminator_ = true;
           current->has_implicit_terminator_ = true;
         }
@@ -856,6 +862,8 @@ BasicBlock::build_cfg(const CodeObject &co, Decoder &decoder, rj_code_arch_t arc
       std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(section.data()), section.size());
   DecodedSection prepared;
   auto &decoded = prepared.instructions;
+  std::optional<TextAlignmentGaps> trap_alignment_gaps;
+  std::unique_ptr<Decoder> trap_probe_decoder;
   size_t analyzed_size = 0;
   size_t work_index = 0;
   std::vector<uint64_t> ordered_seeds(decode_seeds.begin(), decode_seeds.end());
@@ -919,8 +927,37 @@ BasicBlock::build_cfg(const CodeObject &co, Decoder &decoder, rj_code_arch_t arc
         }
         if (is_block_terminator(inst, arch, options.trap_two_may_resume)) {
           if (!has_no_static_successor(inst, arch, options.trap_two_may_resume) &&
-              !is_unconditional_branch(inst))
-            enqueue(next_offset, false);
+              !is_unconditional_branch(inst)) {
+            bool gap_after_trap = false;
+            if (options.trap_two_may_resume && is_software_trap_two(inst, arch) &&
+                next_offset < section_end &&
+                section_end - next_offset >= sizeof(uint32_t) &&
+                words[next_offset / sizeof(uint32_t)] == 0) {
+              // A zero word can be a legal instruction on some generations.
+              // End the path only when the decoder rejects it and sized ELF
+              // functions prove the entire intervening zero span is alignment.
+              const auto next_words = std::span<const uint32_t>(
+                  words + next_offset / sizeof(uint32_t),
+                  (section_end - next_offset) / sizeof(uint32_t));
+              if (!trap_probe_decoder) {
+                trap_probe_decoder =
+                    target_id != ROCJITSU_CODE_TARGET_INVALID
+                        ? Decoder::create(default_isa_target_registry(), target_id)
+                        : Decoder::create(arch);
+              }
+              if (trap_probe_decoder &&
+                  trap_probe_decoder->decode_window(next_words, next_offset,
+                                                    DecodeErrorEmitter{}).failed()) {
+                if (!trap_alignment_gaps)
+                  trap_alignment_gaps.emplace(co, arch, /*for_resumable_trap=*/true);
+                gap_after_trap = trap_alignment_gaps->contains(next_offset);
+              }
+            }
+            if (gap_after_trap)
+              prepared.trap_padding_exits.insert(inst.src_loc());
+            else
+              enqueue(next_offset, false);
+          }
           break;
         }
         offset = next_offset;

@@ -13652,6 +13652,43 @@ TEST(WaitcheckTest, TrapTwoIdWidthMatchesTargetGeneration) {
   }
 }
 
+TEST(WaitcheckTest, Gfx115xTrapTwoAtSizedFunctionZeroGap) {
+  for (const auto mach : {EF_AMDGPU_MACH_AMDGCN_GFX1150, EF_AMDGPU_MACH_AMDGCN_GFX1151}) {
+    const std::vector<uint32_t> trapping{build_s_trap(ROCJITSU_CODE_ARCH_RDNA3_5, 2).value()};
+    const std::vector<uint32_t> padding(4, 0u);
+    const std::vector<uint32_t> next{build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA3_5).value()};
+    auto image = waitcheck_test::make_gfx_multi_kernel_code_object(
+        {{"trapping", trapping}, {"padding", padding}, {"next", next}}, mach);
+    auto *ehdr = reinterpret_cast<Elf64_Ehdr *>(image.data());
+    auto *shdrs = reinterpret_cast<Elf64_Shdr *>(image.data() + ehdr->e_shoff);
+    auto *symbols = reinterpret_cast<Elf64_Sym *>(image.data() + shdrs[3].sh_offset);
+    symbols[3] = {}; // The zero span has no kernel descriptor or function symbol.
+    symbols[4] = {};
+    AmdGpuCodeObject object(image.data(), image.size());
+    ASSERT_TRUE(object.is_valid());
+    const auto report = analyze_waitcnts(object, ROCJITSU_CODE_ARCH_RDNA3_5);
+    EXPECT_TRUE(report.supported && report.complete) << report.analysis_error;
+    EXPECT_EQ(report.kernels_analyzed, 2u);
+    EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+  }
+}
+
+TEST(WaitcheckTest, Gfx1150TrapTwoWithValidFallthroughRetainsHazard) {
+  std::vector<uint32_t> program;
+  append_gfx1150_global_load_b32(program, 0);
+  program.push_back(build_s_trap(ROCJITSU_CODE_ARCH_RDNA3_5, 2).value());
+  append_gfx1100_v_mov_b32_v1_v0(program);
+  program.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA3_5).value());
+  const auto image = waitcheck_test::make_gfx_code_object(
+      program, EF_AMDGPU_MACH_AMDGCN_GFX1150, true);
+  AmdGpuCodeObject object(image.data(), image.size());
+  ASSERT_TRUE(object.is_valid());
+  const auto report = analyze_waitcnts(object, ROCJITSU_CODE_ARCH_RDNA3_5);
+  ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics.front().section_offset, 12u);
+}
+
 TEST(WaitcheckTest, Gfx1100TrapTwoRetainsReachableLoadConsumer) {
   std::vector<uint32_t> program;
   append_gfx1100_global_load_b32_v0_v8_s0(program);

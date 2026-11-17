@@ -12,8 +12,10 @@
 
 namespace rocjitsu {
 
-TextAlignmentGaps::TextAlignmentGaps(const CodeObject &object, rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_RDNA4 || object.text_sections().size() != 1)
+TextAlignmentGaps::TextAlignmentGaps(const CodeObject &object, rj_code_arch_t arch,
+                                     bool for_resumable_trap) {
+  if ((!for_resumable_trap && arch != ROCJITSU_CODE_ARCH_RDNA4) ||
+      object.text_sections().size() != 1)
     return;
   const auto *elf = dynamic_cast<const AmdGpuCodeObject *>(&object);
   if (!elf)
@@ -31,6 +33,9 @@ TextAlignmentGaps::TextAlignmentGaps(const CodeObject &object, rj_code_arch_t ar
       gaps_.push_back({end, range.start_offset});
     end = std::max(end, range.start_offset + range.size);
   }
+  if (for_resumable_trap && end < bytes.size() &&
+      std::ranges::all_of(bytes.subspan(end), [](auto byte) { return byte == 0; }))
+    gaps_.push_back({end, bytes.size()});
 }
 
 bool TextAlignmentGaps::contains(uint64_t byte_offset) const {

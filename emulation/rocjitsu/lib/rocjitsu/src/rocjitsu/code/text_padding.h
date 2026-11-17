@@ -19,11 +19,14 @@ namespace rocjitsu {
 
 class CodeObject;
 
-/// Zero-filled intervals strictly between sized RDNA4 function symbols. An in-function
-/// zero word is v_illegal and must still be presented to the instruction decoder.
+/// Zero-filled intervals strictly between sized function symbols. An in-function
+/// zero word must still be presented to the instruction decoder. Other targets
+/// and tail gaps are opt-in for a resumable-trap CFG; existing callers keep
+/// RDNA4's interior-gap policy.
 class TextAlignmentGaps {
 public:
-  TextAlignmentGaps(const CodeObject &object, rj_code_arch_t arch);
+  TextAlignmentGaps(const CodeObject &object, rj_code_arch_t arch,
+                    bool for_resumable_trap = false);
   [[nodiscard]] bool contains(uint64_t byte_offset) const;
 
 private:
