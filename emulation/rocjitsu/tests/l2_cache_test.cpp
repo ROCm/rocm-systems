@@ -2016,8 +2016,12 @@ TEST(DeviceCacheCoherenceTest, CheckedGroupPreparedFailurePreservesDirtyState) {
   const uint64_t data_epoch = coherence->current_epoch();
   const uint64_t instruction_epoch = coherence->current_instruction_epoch();
   util::StringDiagnostic diagnostic;
+  std::shared_ptr<VmTransferEffectGate> reported_gate;
   auto report = [&](std::string_view message) {
     EXPECT_TRUE(L2CacheTestAccess::cache_access_available(l2));
+    EXPECT_TRUE(L2CacheTestAccess::dirty_byte(l2, kAddress, kVmid, 8));
+    reported_gate->close();
+    EXPECT_TRUE(reported_gate->drained());
     EXPECT_EQ(coherence->current_epoch(), data_epoch);
     EXPECT_EQ(coherence->current_instruction_epoch(), instruction_epoch);
     diagnostic(message);
@@ -2034,6 +2038,7 @@ TEST(DeviceCacheCoherenceTest, CheckedGroupPreparedFailurePreservesDirtyState) {
                             "prepared cache writeback failed"};
   for (size_t failure = 0; failure < messages.size(); ++failure) {
     auto gate = std::make_shared<VmTransferEffectGate>();
+    reported_gate = gate;
     if (failure == 1)
       gate->revoke();
     owner->fail_on_attempt = failure == 2 ? 1 : 0;
@@ -2075,6 +2080,27 @@ TEST(DeviceCacheCoherenceTest, CheckedGroupPreparedFailurePreservesDirtyState) {
           domains, DeviceCacheOperation::WritebackInvalidate, allocation_failure, emit_error),
       std::bad_alloc);
   check_dirty();
+
+  owner->fail_on_attempt = 0;
+  auto gate = std::make_shared<VmTransferEffectGate>();
+  const auto resolve = [&](uint32_t, uint32_t, uint64_t address, size_t size) {
+    return PreparedCanonicalWritebackTestAccess::make(
+        address, size, kVmid, 101, 23,
+        rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset, size), gate);
+  };
+  auto leases = DeviceCacheCoherence::acquire_cache_maintenance_group(
+      domains, DeviceCacheOperation::WritebackInvalidate, resolve, emit_error);
+  ASSERT_TRUE(leases.succeeded());
+  ASSERT_EQ(leases.value().size(), 1u);
+  EXPECT_EQ(owner->bytes_[8], std::byte{0x5a});
+  EXPECT_FALSE(L2CacheTestAccess::cache_access_available(l2));
+  EXPECT_EQ(coherence->current_epoch(), data_epoch);
+  EXPECT_EQ(coherence->current_instruction_epoch(), instruction_epoch);
+  leases.value().clear();
+  EXPECT_TRUE(L2CacheTestAccess::cache_access_available(l2));
+  EXPECT_FALSE(L2CacheTestAccess::dirty_byte(l2, kAddress, kVmid, 8));
+  EXPECT_GT(coherence->current_epoch(), data_epoch);
+  EXPECT_GT(coherence->current_instruction_epoch(), instruction_epoch);
 }
 
 TEST(DeviceCacheCoherenceTest, GroupPreparedRevokedGateRetainsDirtyL2Run) {

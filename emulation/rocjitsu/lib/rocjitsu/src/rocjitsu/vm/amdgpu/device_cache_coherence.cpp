@@ -24,13 +24,6 @@ namespace rocjitsu {
 namespace amdgpu {
 namespace {
 
-// Keep operational backing refusals distinct from broken cache invariants while
-// the legacy group API still reports failures with exceptions.
-class CacheMaintenanceFailure final : public util::Exception {
-public:
-  explicit CacheMaintenanceFailure(std::string_view message) : util::Exception(message) {}
-};
-
 template <typename T> void unregister_cache(std::vector<T *> &caches, T *cache) {
   typename std::vector<T *>::iterator position = std::ranges::find(caches, cache);
   assert(position != caches.end());
@@ -433,18 +426,24 @@ std::vector<DeviceCacheMaintenanceLease> DeviceCacheCoherence::acquire_cache_mai
 std::vector<DeviceCacheMaintenanceLease> DeviceCacheCoherence::acquire_cache_maintenance_group(
     std::span<const DeviceCacheDomain> domains, DeviceCacheOperation operation,
     const PreparedWritebackResolver &resolve_writeback) {
-  return acquire_prepared_cache_maintenance_group(domains, operation, resolve_writeback, {}, false);
+  util::StringDiagnostic diagnostic;
+  auto leases =
+      acquire_cache_maintenance_group(domains, operation, resolve_writeback, diagnostic.emitter());
+  if (leases.failed())
+    throw_legacy_flush_failure(VmAccessOutcome::Faulted, diagnostic.message());
+  return std::move(leases.value());
 }
 
 util::FailureOr<std::vector<DeviceCacheMaintenanceLease>>
 DeviceCacheCoherence::acquire_cache_maintenance_group(
     std::span<const DeviceCacheDomain> domains, DeviceCacheOperation operation,
     const PreparedWritebackResolver &resolve_writeback, util::DiagnosticEmitter emit_error) {
-  try {
-    return acquire_cache_maintenance_group(domains, operation, resolve_writeback);
-  } catch (const CacheMaintenanceFailure &error) {
-    return emit_error.emit() << error.what();
-  }
+  util::StringDiagnostic diagnostic;
+  auto leases = acquire_prepared_cache_maintenance_group(domains, operation, resolve_writeback,
+                                                         diagnostic.emitter(), {}, false);
+  if (leases.failed())
+    return emit_error.emit() << diagnostic.message();
+  return leases;
 }
 
 std::vector<DeviceCacheMaintenanceLease> DeviceCacheCoherence::acquire_prepared_atomic_boundary(
@@ -526,15 +525,19 @@ DeviceCacheCoherence::acquire_scoped_alias_maintenance_group_with_budget(
           continue;
         throw util::ConfigError("scoped cache witness has conflicting selected aliases");
       }
-  return acquire_prepared_cache_maintenance_group(
-      domains, DeviceCacheOperation::WritebackInvalidate, resolve_writeback, aliases, true,
-      resolve_witness, admission_retry_budget);
+  util::StringDiagnostic diagnostic;
+  auto leases = acquire_prepared_cache_maintenance_group(
+      domains, DeviceCacheOperation::WritebackInvalidate, resolve_writeback, diagnostic.emitter(),
+      aliases, true, resolve_witness, admission_retry_budget);
+  if (leases.failed())
+    throw_legacy_flush_failure(VmAccessOutcome::Faulted, diagnostic.message());
+  return std::move(leases.value());
 }
 
-std::vector<DeviceCacheMaintenanceLease>
+util::FailureOr<std::vector<DeviceCacheMaintenanceLease>>
 DeviceCacheCoherence::acquire_prepared_cache_maintenance_group(
     std::span<const DeviceCacheDomain> domains, DeviceCacheOperation operation,
-    const PreparedWritebackResolver &resolve_writeback,
+    const PreparedWritebackResolver &resolve_writeback, util::DiagnosticEmitter emit_error,
     std::span<const DeviceCacheAliasScope> aliases, bool scoped,
     const CanonicalLineWitnessResolver &resolve_witness,
     std::chrono::milliseconds admission_retry_budget) {
@@ -636,6 +639,9 @@ DeviceCacheCoherence::acquire_prepared_cache_maintenance_group(
     }
     if (retained_l1_gates)
       retained_l1_gates->clear();
+  };
+  const auto fail = [&](std::string_view message) -> util::Result {
+    return emit_error.emit() << message;
   };
   const auto record_scoped_timeout = [&locked]() noexcept {
     for (const DomainLocks &entry : locked)
@@ -860,7 +866,7 @@ DeviceCacheCoherence::acquire_prepared_cache_maintenance_group(
   };
   std::shared_ptr<std::vector<PreparedCanonicalWriteback>> prepared;
   std::shared_ptr<std::vector<CanonicalLineWitness>> witnesses;
-  try {
+  const auto acquire = [&]() -> util::FailureOr<std::vector<DeviceCacheMaintenanceLease>> {
     acquire_all();
     const Snapshot before = capture();
     bool has_zero_writer = false;
@@ -950,9 +956,9 @@ DeviceCacheCoherence::acquire_prepared_cache_maintenance_group(
       if (candidate_outcome == VmAccessOutcome::Unavailable)
         throw CacheMaintenanceUnavailable("prepared cache writeback is unavailable");
       if (candidate_outcome != VmAccessOutcome::Complete)
-        throw CacheMaintenanceFailure("prepared cache writeback was rejected");
+        return fail("prepared cache writeback was rejected");
       if (!backing)
-        throw CacheMaintenanceFailure("prepared cache writeback does not cover dirty line");
+        return fail("prepared cache writeback does not cover dirty line");
       if (resolve_witness && line.selected) {
         const auto matching =
             std::ranges::find_if(aliases, [&](const DeviceCacheAliasScope &scope) {
@@ -965,7 +971,7 @@ DeviceCacheCoherence::acquire_prepared_cache_maintenance_group(
         if (matching == aliases.end() || backing->backing_id != matching->backing_id ||
             backing->backing_offset !=
                 matching->backing_offset + (line.address - matching->address))
-          throw CacheMaintenanceFailure("selected dirty line changed canonical backing");
+          return fail("selected dirty line changed canonical backing");
       }
       prepared_lines.push_back({index, std::move(*backing)});
       prepared->push_back(std::move(candidate));
@@ -982,7 +988,7 @@ DeviceCacheCoherence::acquire_prepared_cache_maintenance_group(
         std::ranges::any_of(prepared_lines, [&before](const PreparedLine &line) {
           return before.dirty[line.snapshot_index].selected && line.backing.direct_bytes.empty();
         }))
-      throw CacheMaintenanceFailure("multiple dirty writes require direct canonical backing");
+      return fail("multiple dirty writes require direct canonical backing");
 
     // Compare full canonical lines, including aliases at different GPU VAs.
     // A single domain may overlay its L2 bytes on its own MSC line only when
@@ -1021,8 +1027,7 @@ DeviceCacheCoherence::acquire_prepared_cache_maintenance_group(
             left_line.tag.admission_generation == right_line.tag.admission_generation &&
             left.backing.backing_offset == right.backing.backing_offset;
         if (!ordered_overlay)
-          throw CacheMaintenanceFailure(
-              "group maintenance has overlapping canonical backing lines");
+          return fail("group maintenance has overlapping canonical backing lines");
       }
     }
 
@@ -1113,9 +1118,9 @@ DeviceCacheCoherence::acquire_prepared_cache_maintenance_group(
 
     std::vector<WriteOp> writes;
     writes.reserve(prepared_write_count);
-    const auto add_write = [&writes](const CommitLine &line,
-                                     const PreparedCanonicalWriteback::ResolvedLine &backing,
-                                     uint32_t begin, uint32_t size) {
+    const auto add_write = [&writes, &fail](const CommitLine &line,
+                                            const PreparedCanonicalWriteback::ResolvedLine &backing,
+                                            uint32_t begin, uint32_t size) -> util::Result {
       const uint64_t address = line.snapshot->address + begin;
       std::byte *destination = nullptr;
       FabricBacking fallible;
@@ -1124,10 +1129,11 @@ DeviceCacheCoherence::acquire_prepared_cache_maintenance_group(
       } else {
         fallible = backing.backing.subview(backing.backing_offset + begin, size);
         if (!fallible)
-          throw CacheMaintenanceFailure("prepared cache writeback run is unavailable");
+          return fail("prepared cache writeback run is unavailable");
       }
       writes.push_back({line.source + begin, destination, std::move(fallible), size,
                         line.snapshot->l2, address});
+      return util::Result::success();
     };
     // The MSC image can be older than the L2 dirty bytes. Apply all whole MSC
     // lines first, then overlay every L2 run, regardless of domain order.
@@ -1140,7 +1146,8 @@ DeviceCacheCoherence::acquire_prepared_cache_maintenance_group(
         if ((commit_line.snapshot->memory_side != nullptr) != memory_side_pass)
           continue;
         if (memory_side_pass) {
-          add_write(commit_line, line.backing, 0, MemorySideCache::LINE_SIZE);
+          if (add_write(commit_line, line.backing, 0, MemorySideCache::LINE_SIZE).failed())
+            return util::Result::failure();
           continue;
         }
         for (uint32_t byte = 0; byte < L2Cache::LINE_SIZE;) {
@@ -1151,8 +1158,8 @@ DeviceCacheCoherence::acquire_prepared_cache_maintenance_group(
           while (byte < L2Cache::LINE_SIZE &&
                  (commit_line.snapshot->dirty_mask[byte / 64] & (uint64_t{1} << (byte % 64))) != 0)
             ++byte;
-          if (begin != byte)
-            add_write(commit_line, line.backing, begin, byte - begin);
+          if (begin != byte && add_write(commit_line, line.backing, begin, byte - begin).failed())
+            return util::Result::failure();
         }
       }
     }
@@ -1170,7 +1177,7 @@ DeviceCacheCoherence::acquire_prepared_cache_maintenance_group(
     for (const std::shared_ptr<VmTransferEffectGate> &gate : effect_gates) {
       std::optional<VmTransferEffectGate::Permit> permit = gate->try_acquire();
       if (!permit)
-        throw CacheMaintenanceFailure("prepared cache writeback VM gate was revoked");
+        return fail("prepared cache writeback VM gate was revoked");
       gate_permits.push_back(std::move(*permit));
     }
 
@@ -1182,7 +1189,7 @@ DeviceCacheCoherence::acquire_prepared_cache_maintenance_group(
         std::memcpy(write.direct_destination, write.source, write.size);
       } else if (!write.fallible_destination.write(
                      std::as_bytes(std::span<const uint8_t>(write.source, write.size)))) {
-        throw CacheMaintenanceFailure("prepared cache writeback failed");
+        return fail("prepared cache writeback failed");
       }
     }
     for (const WriteOp &write : writes)
@@ -1229,28 +1236,34 @@ DeviceCacheCoherence::acquire_prepared_cache_maintenance_group(
           cache->invalidate_selected_lines(aliases);
       }
     }
+
+    for (DomainLocks &entry : locked) {
+      DeviceCacheMaintenanceLease lease(
+          entry.domain.coherence.get(), entry.locked_l2_count, entry.locked_memory_side_count,
+          std::move(entry.atomic_lock), std::move(entry.coherence_lock), !scoped,
+          entry.locked_scalar_count, entry.locked_vector_count);
+      lease.owner_handle_ = entry.domain.coherence;
+      lease.prepared_writebacks_ = prepared;
+      lease.read_witnesses_ = witnesses;
+      lease.l1_gate_domains_ = retained_l1_gate_domains;
+      lease.l1_gate_locks_ = retained_l1_gates;
+      leases.push_back(std::move(lease));
+    }
+    if (scoped)
+      for (const DomainLocks &entry : locked)
+        entry.domain.coherence->scoped_maintenance_success_count_.fetch_add(
+            1, std::memory_order_relaxed);
+    return std::move(leases);
+  };
+  try {
+    auto result = acquire();
+    if (result.failed())
+      release_unpublished();
+    return result;
   } catch (...) {
     release_unpublished();
     throw;
   }
-
-  for (DomainLocks &entry : locked) {
-    DeviceCacheMaintenanceLease lease(entry.domain.coherence.get(), entry.locked_l2_count,
-                                      entry.locked_memory_side_count, std::move(entry.atomic_lock),
-                                      std::move(entry.coherence_lock), !scoped,
-                                      entry.locked_scalar_count, entry.locked_vector_count);
-    lease.owner_handle_ = entry.domain.coherence;
-    lease.prepared_writebacks_ = prepared;
-    lease.read_witnesses_ = witnesses;
-    lease.l1_gate_domains_ = retained_l1_gate_domains;
-    lease.l1_gate_locks_ = retained_l1_gates;
-    leases.push_back(std::move(lease));
-  }
-  if (scoped)
-    for (const DomainLocks &entry : locked)
-      entry.domain.coherence->scoped_maintenance_success_count_.fetch_add(
-          1, std::memory_order_relaxed);
-  return leases;
 }
 
 void DeviceCacheCoherence::complete_cache_maintenance(size_t locked_l2_count,

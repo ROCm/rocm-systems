@@ -394,10 +394,10 @@ private:
   static constexpr size_t kLocalLineEpochSlots = 8192;
   [[nodiscard]] static size_t local_line_slot(uint64_t backing_address);
 
-  [[nodiscard]] static std::vector<DeviceCacheMaintenanceLease>
+  [[nodiscard]] static util::FailureOr<std::vector<DeviceCacheMaintenanceLease>>
   acquire_prepared_cache_maintenance_group(
       std::span<const DeviceCacheDomain> domains, DeviceCacheOperation operation,
-      const PreparedWritebackResolver &resolve_writeback,
+      const PreparedWritebackResolver &resolve_writeback, util::DiagnosticEmitter emit_error,
       std::span<const DeviceCacheAliasScope> aliases, bool scoped,
       const CanonicalLineWitnessResolver &resolve_witness = {},
       std::chrono::milliseconds admission_retry_budget = kScopedAdmissionRetryBudget);
