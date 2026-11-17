@@ -384,7 +384,7 @@ TEST_F(GinAnvilPluginTest, CreateContext_PublishesDeviceFabricLsaA2ALane) {
   GinAnvilPluginStubs::SetUseFabricMem(true);
   GinAnvilPluginStubs::SetFabricLsaCapable(true);
   mockComm_.comm.MNNVL = 1;
-  mockComm_.comm.devrState.lsaSize = 4;
+  mockComm_.comm.devrState.lsaTeamSize = 4;
   setupFabricComm(4);
 
   void* ictx = nullptr;
@@ -416,7 +416,7 @@ TEST_F(GinAnvilPluginTest, CreateContext_LsaThresholdMismatchDisablesLane) {
   GinAnvilPluginStubs::SetUseFabricMem(true);
   GinAnvilPluginStubs::SetFabricLsaCapable(true);
   mockComm_.comm.MNNVL = 1;
-  mockComm_.comm.devrState.lsaSize = 4;
+  mockComm_.comm.devrState.lsaTeamSize = 4;
   setupFabricComm(4);
 
   void* ictx = nullptr;
@@ -447,7 +447,7 @@ TEST_F(GinAnvilPluginTest, CreateContext_LsaOptInWithoutCapabilityKeepsLaneOff) 
   GinAnvilPluginStubs::SetUseFabricMem(true);
   GinAnvilPluginStubs::SetFabricLsaCapable(false);
   mockComm_.comm.MNNVL = 1;
-  mockComm_.comm.devrState.lsaSize = 4;
+  mockComm_.comm.devrState.lsaTeamSize = 4;
   setupFabricComm(4);
 
   void* ictx = nullptr;
@@ -477,7 +477,7 @@ TEST_F(GinAnvilPluginTest, CreateContext_LsaThresholdEnvOverridesDefault) {
   GinAnvilPluginStubs::SetUseFabricMem(true);
   GinAnvilPluginStubs::SetFabricLsaCapable(true);
   mockComm_.comm.MNNVL = 1;
-  mockComm_.comm.devrState.lsaSize = 4;
+  mockComm_.comm.devrState.lsaTeamSize = 4;
   setupFabricComm(4);
 
   void* ictx = nullptr;
@@ -504,7 +504,7 @@ TEST_F(GinAnvilPluginTest, CreateContext_LsaEnvUnsetDisablesLane) {
   GinAnvilPluginStubs::SetUseFabricMem(true);
   GinAnvilPluginStubs::SetFabricLsaCapable(true);
   mockComm_.comm.MNNVL = 1;
-  mockComm_.comm.devrState.lsaSize = 4;
+  mockComm_.comm.devrState.lsaTeamSize = 4;
   setupFabricComm(4);
 
   void* ictx = nullptr;

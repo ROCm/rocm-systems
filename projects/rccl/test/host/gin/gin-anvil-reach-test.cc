@@ -91,7 +91,7 @@ TEST_F(GinAnvilReachMicrotest, FabricMemCapable_NeedsCuMemOnEveryRank) {
 TEST_F(GinAnvilReachMicrotest, UseFabricMem_NeedsOptIn) {
   ReachComm rc("gfx1250", 1, 8, 8);
   // Everything else the lane needs is in place, so only the opt-in keeps it off.
-  rc.comm->devrState.lsaSize = 8;
+  rc.comm->devrState.lsaTeamSize = 8;
   useFabricHandles();
   g_loadParam = [](const char*, int64_t deft) { return deft; };
   EXPECT_FALSE(ginAnvilUseFabricMem(rc.comm.get()));
@@ -104,12 +104,12 @@ TEST_F(GinAnvilReachMicrotest, UseFabricMem_NeedsOptIn) {
 // both cover the communicator.
 TEST_F(GinAnvilReachMicrotest, FabricLsaA2ACapable_NeedsFabricHandlesAndFullTeams) {
   ReachComm rc("gfx1250", 1, 8, 8);
-  rc.comm->devrState.lsaSize = 8;
+  rc.comm->devrState.lsaTeamSize = 8;
   EXPECT_FALSE(ginFabricLsaA2ACapable(rc.comm.get(), 8));
   useFabricHandles();
   EXPECT_TRUE(ginFabricLsaA2ACapable(rc.comm.get(), 8));
   EXPECT_FALSE(ginFabricLsaA2ACapable(rc.comm.get(), 4));
-  rc.comm->devrState.lsaSize = 4;
+  rc.comm->devrState.lsaTeamSize = 4;
   EXPECT_FALSE(ginFabricLsaA2ACapable(rc.comm.get(), 8));
 }
 

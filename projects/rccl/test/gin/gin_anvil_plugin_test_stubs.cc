@@ -439,7 +439,7 @@ bool ginFabricLsaA2ACapable(struct ncclComm* comm, int ginNranks) {
   if (comm == nullptr) return false;
   if (ginNranks != comm->nRanks) return false;
   if (comm->MNNVL == 0) return false;
-  if (comm->devrState.lsaSize != comm->nRanks) return false;
+  if (comm->devrState.lsaTeamSize != comm->nRanks) return false;
   return true;
 }
 

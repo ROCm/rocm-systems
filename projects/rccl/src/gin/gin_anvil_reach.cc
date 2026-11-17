@@ -37,7 +37,7 @@ bool ginFabricLsaA2ACapable(struct ncclComm* comm, int ginNranks) {
   if (comm == nullptr) return false;
   return gin::fabric::ginFabricLsaA2ACapablePredicate(ginAnvilUseFabricMem(comm), comm->MNNVL != 0,
                                                       ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_FABRIC, ginNranks,
-                                                      comm->nRanks, comm->devrState.lsaSize);
+                                                      comm->nRanks, comm->devrState.lsaTeamSize);
 }
 
 bool ginAnvilFabricLsaA2AOptIn() { return rcclParamGinAnvilFabricLsaA2A() != 0; }
