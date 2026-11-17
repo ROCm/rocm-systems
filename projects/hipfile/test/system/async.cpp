@@ -727,7 +727,8 @@ INSTANTIATE_TEST_SUITE_P(
         return param_info.param.name;
     });
 
-// Async IO on a stream that was never registered; hipFile registers it implicitly on first use.
+// Async IO on a stream that was never registered; hipFile runs the transfer transiently, without
+// registering the stream.
 class HipAsyncUnregisteredStream : public HipAsync, public ::testing::WithParamInterface<AsyncIoFunction> {
 public:
     void SetUp() override
@@ -747,9 +748,9 @@ public:
     }
     void TearDown() override
     {
-        // A stream used for async IO must be deregistered before it's destroyed, even if it was only
-        // registered implicitly.
-        ASSERT_EQ(hipFileStreamDeregister(stream), HIPFILE_SUCCESS);
+        // The stream was never registered, so there is nothing to deregister; deregistering it reports
+        // that it isn't registered. Destroying it directly is safe.
+        ASSERT_EQ(hipFileStreamDeregister(stream), HipFileOpError(hipFileInvalidValue));
         ASSERT_EQ(hipStreamDestroy(stream), hipSuccess);
         HipAsync::TearDown();
     }
