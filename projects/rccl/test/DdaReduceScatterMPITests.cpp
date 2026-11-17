@@ -275,12 +275,11 @@ protected:
         ncclComm_t comm = getActiveCommunicator();
         // These switch every DDA LL tier off for the process, so there is no LL path to assert.
         const bool ddaOff = rcclNcclAlgoEnvIsSet() || rcclParamDdaEnable() == 0 || rcclParamDdaLL() == 0
-                            || comm->config.launchOrderImplicit == 1
                             || rcclDdaLLThreshold(comm, ncclFuncReduceScatter) == 0
                             || (needsLL128 && rcclDdaLL128Threshold(comm, ncclFuncReduceScatter) == 0);
         const std::string ddaOffSkip = mpiCoordinatedSkipReason(
             ddaOff,
-            "DDA ReduceScatter LL tier off (NCCL_ALGO, RCCL_DDA_ENABLE/LL/LL128, thresholds, implicit launch order)");
+            "DDA ReduceScatter LL tier off (NCCL_ALGO, RCCL_DDA_ENABLE/LL/LL128, thresholds)");
         if(!ddaOffSkip.empty())
         {
             GTEST_SKIP() << ddaOffSkip;

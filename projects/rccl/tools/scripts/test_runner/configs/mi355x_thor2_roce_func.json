@@ -2299,7 +2299,7 @@
         {
           "name": "ImplicitLaunchOrder_MultiCommunicatorChain",
           "description": "Test NCCL_LAUNCH_ORDER_IMPLICIT serialization across multiple communicators",
-          "test_filter": "ImplicitLaunchOrderMPITest.MultiCommunicatorChain"
+          "test_filter": "ImplicitLaunchOrderMPITest.MultiCommunicatorChain*"
         }
       ]
     },
