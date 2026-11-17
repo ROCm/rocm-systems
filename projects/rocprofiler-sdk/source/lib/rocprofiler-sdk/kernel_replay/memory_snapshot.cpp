@@ -44,11 +44,11 @@
 #include <fstream>
 #include <functional>
 #include <limits>
+#include <map>
 #include <new>
 #include <optional>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -199,10 +199,19 @@ discover_module_variables(hsa_agent_t agent)
     return scan;
 }
 
-// At most one retained high-water arena per pool. A larger returned arena replaces and frees the
-// old one, and smaller returns are freed. A snapshot that needs more than the retained arena frees
-// it before allocating, so retained memory never exceeds the largest snapshot so far.
-using retained_backing_t = std::unordered_map<uint64_t, block_t>;
+// At most one retained high-water arena per pool and agent. GPUs share the host pool, and an
+// arena is mapped only for the agent that allocated it, so one agent never takes another's. A
+// larger returned arena replaces and frees the old one, and smaller returns are freed. A snapshot
+// that needs more than the retained arena frees it before allocating, so retained memory never
+// exceeds the largest snapshot so far.
+using kept_key_t         = std::pair<uint64_t, uint64_t>;  // pool, agent
+using retained_backing_t = std::map<kept_key_t, block_t>;
+
+kept_key_t
+kept_key(hsa_amd_memory_pool_t pool, hsa_agent_t agent) noexcept
+{
+    return {pool.handle, agent.handle};
+}
 
 common::Synchronized<retained_backing_t>&
 retained_backing()
@@ -221,10 +230,10 @@ free_pool_block(block_t block) noexcept
         ext->hsa_amd_memory_pool_free_fn(block.data);
 }
 
-// Returns the pool's retained arena when it can hold `size`. One that is too small is freed
-// instead, so the larger allocation that follows can use its memory.
+// Returns the agent's retained arena in the pool when it can hold `size`. One that is too small is
+// freed instead, so the larger allocation that follows can use its memory.
 block_t
-take_retained_block(hsa_amd_memory_pool_t pool, size_t size) noexcept
+take_retained_block(hsa_amd_memory_pool_t pool, hsa_agent_t agent, size_t size) noexcept
 {
     if(pool.handle == 0 || size == 0) return {};
     auto taken   = block_t{};
@@ -232,7 +241,7 @@ take_retained_block(hsa_amd_memory_pool_t pool, size_t size) noexcept
     try
     {
         retained_backing().wlock([&](auto& retained) {
-            auto itr = retained.find(pool.handle);
+            auto itr = retained.find(kept_key(pool, agent));
             if(itr == retained.end() || !itr->second) return;
             auto& out = itr->second.size >= size ? taken : evicted;
             out       = std::exchange(itr->second, block_t{});
@@ -246,13 +255,13 @@ take_retained_block(hsa_amd_memory_pool_t pool, size_t size) noexcept
 }
 
 size_t
-retained_capacity(hsa_amd_memory_pool_t pool) noexcept
+retained_capacity(hsa_amd_memory_pool_t pool, hsa_agent_t agent) noexcept
 {
     if(pool.handle == 0) return 0;
     try
     {
         return retained_backing().rlock([&](const auto& retained) {
-            auto itr = retained.find(pool.handle);
+            auto itr = retained.find(kept_key(pool, agent));
             return itr == retained.end() ? size_t{0} : itr->second.size;
         });
     } catch(...)
@@ -262,7 +271,7 @@ retained_capacity(hsa_amd_memory_pool_t pool) noexcept
 }
 
 void
-retain_block(hsa_amd_memory_pool_t pool, block_t block) noexcept
+retain_block(hsa_amd_memory_pool_t pool, hsa_agent_t agent, block_t block) noexcept
 {
     if(pool.handle == 0 || !block)
     {
@@ -275,7 +284,7 @@ retain_block(hsa_amd_memory_pool_t pool, block_t block) noexcept
     try
     {
         retained_backing().wlock([&](auto& retained) {
-            auto& current = retained[pool.handle];
+            auto& current = retained[kept_key(pool, agent)];
             if(!current || block.size > current.size) std::swap(current, block);
         });
     } catch(...)
@@ -283,16 +292,16 @@ retain_block(hsa_amd_memory_pool_t pool, block_t block) noexcept
     free_pool_block(block);
 }
 
-// Frees the arena kept for the pool, if there is one.
+// Frees the agent's arena kept in the pool, if there is one.
 void
-release_retained_block(hsa_amd_memory_pool_t pool) noexcept
+release_retained_block(hsa_amd_memory_pool_t pool, hsa_agent_t agent) noexcept
 {
     if(pool.handle == 0) return;
     auto released = block_t{};
     try
     {
         retained_backing().wlock([&](auto& retained) {
-            if(auto itr = retained.find(pool.handle); itr != retained.end())
+            if(auto itr = retained.find(kept_key(pool, agent)); itr != retained.end())
                 released = std::exchange(itr->second, block_t{});
         });
     } catch(...)
@@ -394,8 +403,9 @@ gpu_plan_budget(const capture_context_t& ctx)
         if(auto total = pool_size(ctx.gpu_pool)) budget = std::min<uint64_t>(budget, *total / 2);
     }
     if(auto available = gpu_available_bytes(ctx.agent))
-        budget = std::min(budget,
-                          planning::tier_budget(retained_capacity(ctx.gpu_pool), *available, 20));
+        budget = std::min(
+            budget,
+            planning::tier_budget(retained_capacity(ctx.gpu_pool, ctx.agent), *available, 20));
     else if(ctx.mode == capture_mode::force_gpu)
     {
         // Without the free memory, keep the reserve against the device's size.
@@ -418,7 +428,7 @@ host_plan_budget(const capture_context_t& ctx)
     if(auto available = host_available_bytes())
         return std::min(*maximum,
                         static_cast<size_t>(planning::tier_budget(
-                            retained_capacity(ctx.pinned_pool), *available, 2)));
+                            retained_capacity(ctx.pinned_pool, ctx.agent), *available, 2)));
     return *maximum;
 }
 
@@ -442,8 +452,8 @@ struct hsa_pool_allocator
         // A retained arena that is large enough consumes no fresh capacity. Consult it before
         // asking whether a new allocation of this size is currently possible. A per-replay block
         // frees it when the snapshot ends.
-        if(auto retained = take_retained_block(pool, size); retained)
-            return owned_block_t{retained, kind, pool, retain};
+        if(auto retained = take_retained_block(pool, agent, size); retained)
+            return owned_block_t{retained, kind, pool, agent, retain};
 
         if(!pool_accepts(pool, size)) return std::nullopt;
 
@@ -468,7 +478,7 @@ struct hsa_pool_allocator
 
         status = ext->hsa_amd_agents_allow_access_fn(1, &agent, nullptr, ptr);
         if(status == HSA_STATUS_SUCCESS)
-            return owned_block_t{block_t{size, ptr}, kind, pool, retain};
+            return owned_block_t{block_t{size, ptr}, kind, pool, agent, retain};
 
         ext->hsa_amd_memory_pool_free_fn(ptr);
         return std::nullopt;
@@ -543,10 +553,12 @@ restore_copy(const snapshot_t& snapshot, const snapshot_extent_t& extent)
 owned_block_t::owned_block_t(block_t               block,
                              storage_kind          kind,
                              hsa_amd_memory_pool_t pool,
+                             hsa_agent_t           agent,
                              retain_mode           retain)
 : m_block{block}
 , m_kind{kind}
 , m_pool{pool}
+, m_agent{agent}
 , m_retain{retain}
 {}
 
@@ -556,6 +568,7 @@ owned_block_t::owned_block_t(owned_block_t&& rhs) noexcept
 : m_block{std::exchange(rhs.m_block, block_t{})}
 , m_kind{std::exchange(rhs.m_kind, storage_kind::none)}
 , m_pool{std::exchange(rhs.m_pool, hsa_amd_memory_pool_t{.handle = 0})}
+, m_agent{std::exchange(rhs.m_agent, hsa_agent_t{.handle = 0})}
 , m_retain{std::exchange(rhs.m_retain, retain_mode::per_replay)}
 {}
 
@@ -567,6 +580,7 @@ owned_block_t::operator=(owned_block_t&& rhs) noexcept
     m_block  = std::exchange(rhs.m_block, block_t{});
     m_kind   = std::exchange(rhs.m_kind, storage_kind::none);
     m_pool   = std::exchange(rhs.m_pool, hsa_amd_memory_pool_t{.handle = 0});
+    m_agent  = std::exchange(rhs.m_agent, hsa_agent_t{.handle = 0});
     m_retain = std::exchange(rhs.m_retain, retain_mode::per_replay);
     return *this;
 }
@@ -576,13 +590,14 @@ owned_block_t::reset() noexcept
 {
     if(!m_block) return;
     if(m_retain == retain_mode::across_replays)
-        retain_block(m_pool, m_block);
+        retain_block(m_pool, m_agent, m_block);
     else if(auto* ext = hsa::get_amd_ext_table(); ext && ext->hsa_amd_memory_pool_free_fn)
         ext->hsa_amd_memory_pool_free_fn(m_block.data);
 
     m_block  = {};
     m_kind   = storage_kind::none;
     m_pool   = hsa_amd_memory_pool_t{.handle = 0};
+    m_agent  = hsa_agent_t{.handle = 0};
     m_retain = retain_mode::per_replay;
 }
 
@@ -617,15 +632,15 @@ snapshot_t::storage() const
 }
 
 size_t
-kept_arena_bytes(hsa_amd_memory_pool_t pool) noexcept
+kept_arena_bytes(hsa_amd_memory_pool_t pool, hsa_agent_t agent) noexcept
 {
-    return retained_capacity(pool);
+    return retained_capacity(pool, agent);
 }
 
 void
-release_kept_arena(hsa_amd_memory_pool_t pool) noexcept
+release_kept_arena(hsa_amd_memory_pool_t pool, hsa_agent_t agent) noexcept
 {
-    release_retained_block(pool);
+    release_retained_block(pool, agent);
 }
 
 snapshot_t

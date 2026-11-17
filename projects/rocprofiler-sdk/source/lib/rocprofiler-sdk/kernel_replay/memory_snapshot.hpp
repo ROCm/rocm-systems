@@ -85,16 +85,16 @@ struct block_t
 enum class retain_mode : uint8_t
 {
     per_replay,      // freed back to its pool
-    across_replays,  // kept as its pool's high-water arena for later replays
+    across_replays,  // kept as its pool's high-water arena for the agent's later replays
 };
 
-// RAII handle for one materialized HSA arena. Releasing it frees the arena or keeps it for later
-// replays, according to its retain mode.
+// RAII handle for one materialized HSA arena. Releasing it frees the arena or keeps it for the
+// agent's later replays, according to its retain mode.
 class owned_block_t
 {
 public:
     owned_block_t() = default;
-    owned_block_t(block_t, storage_kind, hsa_amd_memory_pool_t, retain_mode);
+    owned_block_t(block_t, storage_kind, hsa_amd_memory_pool_t, hsa_agent_t, retain_mode);
     ~owned_block_t();
 
     owned_block_t(const owned_block_t&) = delete;
@@ -112,6 +112,7 @@ private:
     block_t               m_block{};
     storage_kind          m_kind = storage_kind::none;
     hsa_amd_memory_pool_t m_pool{.handle = 0};
+    hsa_agent_t           m_agent{.handle = 0};
     retain_mode           m_retain = retain_mode::per_replay;
 };
 
@@ -203,13 +204,13 @@ snap(const capture_context_t&, storage_budgets_t, const batch_copy_fn_t& batch_c
 snapshot_t
 snap(hsa_agent_t agent);
 
-// Bytes of the arena kept for the pool between replays, or 0 when none is kept.
+// Bytes of the arena kept in the pool for the agent's later replays, or 0 when none is kept.
 size_t
-kept_arena_bytes(hsa_amd_memory_pool_t pool) noexcept;
+kept_arena_bytes(hsa_amd_memory_pool_t pool, hsa_agent_t agent) noexcept;
 
-// Frees the arena kept for the pool between replays, if there is one.
+// Frees the arena kept in the pool for the agent's later replays, if there is one.
 void
-release_kept_arena(hsa_amd_memory_pool_t pool) noexcept;
+release_kept_arena(hsa_amd_memory_pool_t pool, hsa_agent_t agent) noexcept;
 
 // Copy each saved region back to its live device allocation. A region freed after snap is skipped.
 // A failed copy returns false immediately because the snapshot is then only partially applied.

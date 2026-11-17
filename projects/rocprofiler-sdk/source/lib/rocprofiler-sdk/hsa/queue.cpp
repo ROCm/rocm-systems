@@ -1239,7 +1239,8 @@ WriteInterceptor(const void* packets,
             // from an earlier replay.
             if(replay_plan.snapshot_mode ==
                kernel_replay::memory_snapshot::capture_mode::force_pinned)
-                kernel_replay::memory_snapshot::release_kept_arena(queue.get_agent().gpu_pool());
+                kernel_replay::memory_snapshot::release_kept_arena(queue.get_agent().gpu_pool(),
+                                                                   replay_agent);
 
             // Save this agent's tracked device allocations so every pass runs against identical
             // inputs, in the memory the tool's replay_options allow. By default, place them against
