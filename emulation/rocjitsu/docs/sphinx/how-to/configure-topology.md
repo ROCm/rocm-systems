@@ -155,8 +155,8 @@ initialization depth:
 | Mode | Behavior |
 | --- | --- |
 | `RJ_VM_MODE_DEFAULT` | Standalone simulation. The caller drives execution through `rj_vm_step` or `rj_vm_run`. Topology and driver are not initialized. |
-| `RJ_VM_MODE_LOCAL` | Single-process serving through the C API or LD_PRELOAD interposer. The engine runs indefinitely, topology is generated, and the driver is opened for in-process KFD commands. C API use does not require the interposer. |
-| `RJ_VM_MODE_DAEMON` | Multi-process serving. Same as local mode, plus GPU allocations are backed by memfds for cross-process sharing. |
+| `RJ_VM_MODE_LOCAL` | Single-process serving through the C API or LD_PRELOAD interposer. Topology is generated, the driver is opened for in-process KFD commands, and the engine has no tick limit. Creation does not start execution: a C API host drives the engine through `rj_vm_step` or `rj_vm_run`. C API use does not require the interposer. |
+| `RJ_VM_MODE_DAEMON` | Multi-process serving. Same as local mode, plus GPU allocations have shareable backing handles (memfds or opaque tokens) for cross-process sharing. |
 
 ### Create from a file path
 

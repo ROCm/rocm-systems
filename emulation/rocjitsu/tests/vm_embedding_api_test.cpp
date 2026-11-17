@@ -7,6 +7,7 @@
 #include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/code/rj_code.h"
 #include "scoped_temp.h"
+#include "syscall_error_filter.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -21,15 +22,19 @@ RJ_DIAGNOSTIC_POP
 #include <array>
 #include <atomic>
 #include <barrier>
+#include <cerrno>
 #include <csignal>
 #include <cstddef>
+#include <cstdio>
 #include <cstring>
 #include <dlfcn.h>
 #include <fstream>
 #include <memory>
 #include <string>
 #include <sys/mman.h>
+#include <sys/syscall.h>
 #include <thread>
+#include <unistd.h>
 #include <vector>
 
 namespace {
@@ -52,9 +57,14 @@ size_t keeper_lease_count() {
   std::ifstream mappings("/proc/self/maps");
   EXPECT_TRUE(mappings.is_open());
   size_t count = 0;
-  for (std::string line; std::getline(mappings, line);)
-    if (line.find("/memfd:rocjitsu-owner") != std::string::npos)
+  for (std::string line; std::getline(mappings, line);) {
+    // Keeper leases are inaccessible shared mappings. ENOSYS replaces the
+    // named memfd with an unnamed /dev/shm inode; GPU backing remains accessible.
+    if (line.find(" ---s ") != std::string::npos &&
+        (line.find("/memfd:rocjitsu-owner (deleted)") != std::string::npos ||
+         (line.find("/dev/shm/#") != std::string::npos && line.ends_with(" (deleted)"))))
       ++count;
+  }
   EXPECT_TRUE(mappings.eof());
   return count;
 }
@@ -359,6 +369,24 @@ void exercise_lifecycle(Lifecycle lifecycle, Teardown teardown = Teardown::Comma
     EXPECT_EQ(retained, nullptr) << "library retained after VM and worker teardown";
     ASSERT_NO_FATAL_FAILURE(check_actions());
   }
+}
+
+TEST(VmEmbeddingApiDeathTest, UnloadsAfterStoresWithoutMemfd) {
+  ASSERT_EXIT(
+      {
+        rocjitsu::test::set_syscall_error(SYS_memfd_create, ENOSYS);
+        if (::testing::Test::HasFatalFailure())
+          _exit(1);
+        exercise_lifecycle(Lifecycle::StepKernel);
+        if (!::testing::Test::HasFailure())
+          exercise_lifecycle(Lifecycle::RunKernel);
+        const auto *result = ::testing::UnitTest::GetInstance()->current_test_info()->result();
+        for (int index = 0; index < result->total_part_count(); ++index)
+          if (const auto &failure = result->GetTestPartResult(index); failure.failed())
+            std::fprintf(stderr, "%s\n", failure.message());
+        _exit(::testing::Test::HasFailure() ? 1 : 0);
+      },
+      ::testing::ExitedWithCode(0), "");
 }
 
 TEST(VmEmbeddingApi, ConcurrentLocalCreationInitializesIndependentVms) {

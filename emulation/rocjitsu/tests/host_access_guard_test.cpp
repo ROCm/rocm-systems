@@ -2,12 +2,16 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/kmd/linux/host_access_guard.h"
+#include "syscall_error_filter.h"
 
 #include <gtest/gtest.h>
 
 #include <array>
+#include <cerrno>
+#include <cstdio>
 #include <cstring>
 #include <sys/mman.h>
+#include <sys/syscall.h>
 #include <unistd.h>
 
 TEST(HostAccessGuardTest, ValidAccessRunsOnce) {
@@ -32,35 +36,45 @@ TEST(HostAccessGuardTest, ValidAccessRunsOnce) {
 
 #if defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 TEST(HostAccessGuardDeathTest, DisabledRecoveryDeliversRealFaultsToTheHost) {
-  for (const int expected_signal : {SIGSEGV, SIGBUS}) {
-    SCOPED_TRACE(expected_signal);
-    EXPECT_EXIT(([&] {
-                  struct sigaction action {};
-                  action.sa_handler = [](int signal_number) { _exit(64 + signal_number); };
-                  if (sigemptyset(&action.sa_mask) != 0 ||
-                      sigaction(expected_signal, &action, nullptr) != 0)
-                    _exit(1);
-                  rocjitsu::install_host_access_guard();
-                  const size_t page_size = static_cast<size_t>(sysconf(_SC_PAGESIZE));
-                  int descriptor = -1;
-                  int flags = MAP_PRIVATE | MAP_ANONYMOUS;
-                  if (expected_signal == SIGBUS) {
-                    // A mapping beyond a zero-length memfd produces a real SIGBUS.
-                    descriptor = memfd_create("rocjitsu-host-fault", MFD_CLOEXEC);
-                    if (descriptor < 0)
-                      _exit(2);
-                    flags = MAP_SHARED;
-                  }
-                  void *page =
-                      mmap(nullptr, page_size, PROT_READ | PROT_WRITE, flags, descriptor, 0);
-                  if (page == MAP_FAILED ||
-                      (expected_signal == SIGSEGV && mprotect(page, page_size, PROT_NONE) != 0))
-                    _exit(3);
-                  (void)rocjitsu::with_host_access_guard(
-                      [&] { *static_cast<volatile unsigned char *>(page) = 1; });
-                  _exit(4);
-                }()),
-                ::testing::ExitedWithCode(64 + expected_signal), "");
+  for (const bool disable_memfd : {false, true}) {
+    SCOPED_TRACE(disable_memfd);
+    for (const int expected_signal : {SIGSEGV, SIGBUS}) {
+      SCOPED_TRACE(expected_signal);
+      EXPECT_EXIT(([&] {
+                    if (disable_memfd) {
+                      rocjitsu::test::set_syscall_error(SYS_memfd_create, ENOSYS);
+                      if (::testing::Test::HasFatalFailure())
+                        _exit(5);
+                    }
+                    struct sigaction action {};
+                    action.sa_handler = [](int signal_number) { _exit(64 + signal_number); };
+                    if (sigemptyset(&action.sa_mask) != 0 ||
+                        sigaction(expected_signal, &action, nullptr) != 0)
+                      _exit(1);
+                    rocjitsu::install_host_access_guard();
+                    const size_t page_size = static_cast<size_t>(sysconf(_SC_PAGESIZE));
+                    int descriptor = -1;
+                    int flags = MAP_PRIVATE | MAP_ANONYMOUS;
+                    if (expected_signal == SIGBUS) {
+                      // Access beyond an empty regular file produces a real SIGBUS
+                      // even on hosts where memfd_create is unavailable.
+                      FILE *file = std::tmpfile();
+                      if (!file)
+                        _exit(2);
+                      descriptor = fileno(file);
+                      flags = MAP_SHARED;
+                    }
+                    void *page =
+                        mmap(nullptr, page_size, PROT_READ | PROT_WRITE, flags, descriptor, 0);
+                    if (page == MAP_FAILED ||
+                        (expected_signal == SIGSEGV && mprotect(page, page_size, PROT_NONE) != 0))
+                      _exit(3);
+                    (void)rocjitsu::with_host_access_guard(
+                        [&] { *static_cast<volatile unsigned char *>(page) = 1; });
+                    _exit(4);
+                  }()),
+                  ::testing::ExitedWithCode(64 + expected_signal), "");
+    }
   }
 }
 
