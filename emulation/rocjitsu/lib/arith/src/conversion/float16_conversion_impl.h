@@ -7,6 +7,7 @@
 #include "common/float_encoding.h"
 #include "common/isa.h"
 #include "conversion/float16_conversion.h"
+#include "conversion/model/denormal.h"
 #include <stdint.h>
 
 namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
@@ -75,18 +76,15 @@ inline uint32_t narrow_float16(uint32_t raw, uint32_t seed, bool sr, bool satura
   }
 }
 
-// Packed SR consumes independent 16-bit addends, unlike single-result SR.
-// FP16 adds before exponent alignment; BF16 uses the addend as discarded bits.
-template <Float16Format Format>
-inline uint32_t narrow_packed_sr(uint32_t raw, uint16_t addend, bool saturate) {
-  if constexpr (Format == Float16Format::F16) {
-    if ((raw & 0x7fffffffU) < 0x47800000U) {
-      raw += addend;
-    }
-    return narrow_f16_sr(raw, 0, saturate);
-  } else {
-    return narrow_bf16(raw, uint32_t(addend) << 16, true, saturate);
+// gfx1250 flushes an exact 2^-20 packed result. Use the rounded FP16
+// encoding to model the unmeasured boundary between normal and subnormal.
+template <typename V> inline V pack_rounded_halves(V low, V high, bool flush_f16) {
+  if (flush_f16) {
+    using F16 = conversion_model::fp_format::F16;
+    low = conversion_model::denormal::flush<F16>(low);
+    high = conversion_model::denormal::flush<F16>(high);
   }
+  return low | (high << 16);
 }
 
 } // namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE

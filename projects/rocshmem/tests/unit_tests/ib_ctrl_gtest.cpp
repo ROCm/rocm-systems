@@ -22,6 +22,8 @@
 
 #include "ib_ctrl_gtest.hpp"
 
+#include <cstdlib>
+
 using namespace rocshmem;
 using namespace rocshmem::net;
 
@@ -45,4 +47,57 @@ TEST_F(IbCtrlTestFixture, ConnectQpReachesRts) {
   // redundant raw ibv_query_qp() call just to re-confirm the same state).
   EXPECT_TRUE(ctrl_.connect_qp(0, local[1])) << "lane 0 failed to reach RTS";
   EXPECT_TRUE(ctrl_.connect_qp(1, local[0])) << "lane 1 failed to reach RTS";
+}
+
+TEST_F(IbCtrlTestFixture, SelectGidPrefersRoutableRoCEv2OverLinkLocal) {
+  if (!ctrl_.dev().is_roce) {
+    GTEST_SKIP() << "not a RoCE port; GID-preference logic doesn't apply";
+  }
+  if (getenv("ROCSHMEM_ROCE_GID_INDEX")) {
+    GTEST_SKIP() << "ROCSHMEM_ROCE_GID_INDEX override set; selection "
+                    "algorithm not exercised";
+  }
+
+  // Independently recompute the expected selection straight from the GID
+  // table, mirroring IbCtrl::select_gid()'s documented rule (skip fe80::/10
+  // link-local, prefer RoCEv2 over RoCEv1), to verify the fix without calling
+  // the private method under test.
+  constexpr size_t kMax = 128;
+  std::vector<struct ibv_gid_entry> entries(kMax);
+  int n = ibv_.query_gid_table(ctrl_.dev().ctx, entries.data(), kMax);
+  ASSERT_GT(n, 0) << "no GID table entries; cannot verify selection";
+
+  int expected = -1;
+  uint32_t expected_type = IBV_GID_TYPE_ROCE_V1;
+  for (int i = 0; i < n; i++) {
+    const auto &e = entries[i];
+    if (e.port_num != ctrl_.dev().port) {
+      continue;
+    }
+    bool zero = true;
+    for (int b = 0; b < 16; b++) {
+      if (e.gid.raw[b] != 0) {
+        zero = false;
+        break;
+      }
+    }
+    if (zero) {
+      continue;
+    }
+    if (e.gid.raw[0] == 0xfe && (e.gid.raw[1] & 0xc0) == 0x80) {
+      continue;  // link-local, not routable across nodes
+    }
+    if (expected < 0 || e.gid_type > expected_type) {
+      expected = static_cast<int>(e.gid_index);
+      expected_type = e.gid_type;
+    }
+  }
+  ASSERT_GE(expected, 0) << "no routable (non-link-local) GID found on this port";
+
+  EXPECT_EQ(ctrl_.dev().gid_index, expected);
+
+  // The selected GID itself must not be link-local.
+  const auto &g = ctrl_.dev().gid;
+  bool link_local = (g.raw[0] == 0xfe) && ((g.raw[1] & 0xc0) == 0x80);
+  EXPECT_FALSE(link_local) << "selected GID is link-local (not routable)";
 }

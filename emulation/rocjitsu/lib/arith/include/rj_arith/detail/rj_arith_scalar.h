@@ -346,6 +346,10 @@ int rj_arith_s_cmp_eq_u64(uint64_t flags, uint64_t instruction_flags, uint32_t *
 int rj_arith_s_cmp_lg_u64(uint64_t flags, uint64_t instruction_flags, uint32_t *scc, uint64_t a,
                           uint64_t b);
 
+// Scalar FP comparisons ignore EXEC. Mode 3 and Compatibility require valid
+// excp_flag_user storage and accumulate inherited gfx12 input classification.
+// Other semantics leave that storage unused. SCC is a required result in every mode.
+
 // SCC is a < b.
 int rj_arith_s_cmp_lt_f32(uint64_t flags, uint64_t instruction_flags, uint32_t *scc, uint32_t a,
                           uint32_t b, uint32_t *excp_flag_user);
@@ -460,20 +464,25 @@ int rj_arith_s_cmp_nlt_f16(uint64_t flags, uint64_t instruction_flags, uint32_t 
 
 // Scalar conversions execute once per wave and ignore EXEC, including zero;
 // d is required and SCC is unchanged. Operands are raw register bits. Sources
-// may originate from d storage. instruction_flags must be zero; loose semantics
-// only. Errors leave d unchanged. Requires host nearest-even rounding and enabled
+// may originate from d storage. instruction_flags must be zero. Loose and exact
+// semantics are supported; explicit mode 3 reporting is unsupported. Compatibility
+// requires valid excp_flag_user storage and accumulates inherited gfx12 conversion
+// causes; RTZ packing leaves the status pointer unused.
+// Integer-to-FP32
+// and FP32-to-FP16 accept RJ_ARITH_FP_ROUND_MASK (the destination format's MODE
+// field). Errors leave d unchanged. Requires host nearest-even rounding and enabled
 // denormals; preserves host rounding but may change exception flags.
 // Guest input flushing applies to floating inputs. Output flushing applies to
-// FP16 outputs, including tininess detection before subnormal rounding for RNE.
-// FP16_OVFL saturates finite RNE narrowing overflow; it does not affect RTZ.
+// FP16 outputs, with tininess detected before destination subnormal rounding.
+// FP16_OVFL saturates finite narrowing overflow; it does not affect RTZ packing.
 // All other guest FP-state flags accepted here have no effect on integer results
 // or integer inputs. Floating conversions quiet signaling NaNs.
 
-// Signed 32-bit integer to FP32, nearest-even.
+// Signed 32-bit integer to FP32 with guest rounding.
 int rj_arith_s_cvt_f32_i32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
                            uint32_t *excp_flag_user);
 
-// Unsigned 32-bit integer to FP32, nearest-even.
+// Unsigned 32-bit integer to FP32 with guest rounding.
 int rj_arith_s_cvt_f32_u32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
                            uint32_t *excp_flag_user);
 
@@ -485,7 +494,7 @@ int rj_arith_s_cvt_i32_f32(uint64_t flags, uint64_t instruction_flags, uint32_t 
 int rj_arith_s_cvt_u32_f32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
                            uint32_t *excp_flag_user);
 
-// FP32 to FP16, nearest-even; writes a zero upper half.
+// FP32 to FP16 with guest rounding; writes a zero upper half.
 int rj_arith_s_cvt_f16_f32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
                            uint32_t *excp_flag_user);
 
@@ -509,9 +518,9 @@ int rj_arith_s_cvt_pk_rtz_f16_f32(uint64_t flags, uint64_t instruction_flags, ui
 // be zero. Guest input flushing applies; output flushing and FP16_OVFL have no
 // effect. Preserves all host FP state and SCC, independently of host rounding.
 // Inputs may originate from d storage. Errors leave d unchanged.
-// Exact mode with non-NULL excp_flag_user accumulates INVALID for signaling NaNs
-// and INPUT_DENORM for preserved subnormals. Discarding a fractional part does
-// not raise INEXACT. Loose mode leaves excp_flag_user unchanged.
+// Mode 3 and Compatibility require valid excp_flag_user storage and accumulate INVALID for
+// signaling NaNs and INPUT_DENORM for preserved subnormals. Discarding a fractional part does not
+// raise INEXACT. Loose mode leaves excp_flag_user unchanged.
 
 // Round to an integral value toward positive infinity.
 int rj_arith_s_ceil_f32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
@@ -548,14 +557,15 @@ int rj_arith_s_rndne_f16(uint64_t flags, uint64_t instruction_flags, uint32_t *d
 // Scalar fused multiply-add ignores EXEC, including zero EXEC; d is required.
 // Operands and literals are raw IEEE bits. FP16 reads low halves and writes a
 // zero upper half. Rounds once to the destination format. SCC is unchanged.
-// instruction_flags must be zero. FP32 supports both semantics; FP16 remains
-// loose-only. Loose NaN signs/payloads are unspecified. Exact FP32 follows the
-// borrowed FMA NaN ordering. Mode 3 FP status reporting is unsupported.
-// Guest input/output flushing and FP16_OVFL are supported, with
-// tininess detected before destination subnormal rounding. Loose mode requires
-// host nearest-even rounding and enabled denormals; exact FP32 uses integer
-// arithmetic and honors RJ_ARITH_FP_ROUND_MASK. Loose FP32 may ignore that selector;
-// FP16 rejects it. Errors leave d unchanged. Inputs may come from d storage.
+// instruction_flags must be zero. FP32 and FP16 support loose and exact semantics;
+// explicit mode 3 reporting is unsupported. Compatibility accumulates the inherited
+// gfx12 scalar FMA causes into required excp_flag_user storage. Loose NaN signs/payloads are
+// unspecified. Exact results follow the borrowed FMA NaN ordering. Guest
+// input/output flushing, FP16_OVFL and RJ_ARITH_FP_ROUND_MASK (the destination
+// format's MODE field) are supported, with tininess detected before destination
+// subnormal rounding. Exact results use integer arithmetic; loose nearest-even FP32
+// requires host nearest-even rounding and enabled denormals. Errors leave d unchanged.
+// Inputs may come from d storage.
 
 // Fused a * b + old *d.
 int rj_arith_s_fmac_f32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
@@ -576,13 +586,19 @@ int rj_arith_s_fmamk_f32(uint64_t flags, uint64_t instruction_flags, uint32_t *d
 // Scalar FP16/FP32 binary arithmetic executes once per wave and ignores EXEC,
 // including zero EXEC; d is required. Inputs are raw IEEE bits. FP16 reads the
 // low halves and writes a zero upper half. instruction_flags must be zero.
-// Loose semantics only; NaN signs/payloads are unspecified. Requires host
-// nearest-even rounding and enabled denormals. Preserves host rounding but may
-// change exception flags. SCC is unchanged. Errors leave d unchanged.
+// Requires host nearest-even rounding and enabled denormals. Preserves host
+// rounding but may change exception flags. SCC is unchanged. Errors leave d unchanged.
 // Guest input flushing applies to every operation. Guest output flushing applies
 // to add/subtract/multiply; min/max ignore it. FP16_OVFL saturates finite FP16
 // overflow. Multiplication flushes tiny results before destination subnormal
 // rounding, so a value that would round up to the smallest normal may flush.
+// Loose and exact semantics are supported; explicit mode 3 reporting is unsupported.
+// Compatibility requires valid excp_flag_user storage and accumulates inherited
+// gfx12 scalar arithmetic/selection causes. Modes 0–2 leave status unused.
+// Add/subtract/multiply accept RJ_ARITH_FP_ROUND_MASK (the destination format's MODE
+// field). Exact results equal FMA(a, 1, b), FMA(a, 1, -b) and FMA(a, b, signed zero),
+// so subtraction negates a NaN b. A NaN selection result is the first NaN operand,
+// quieted. Loose NaN signs/payloads are unspecified.
 
 // Sum of a and b.
 int rj_arith_s_add_f32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
