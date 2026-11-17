@@ -14,46 +14,53 @@ from functools import partial, partialmethod
 from pathlib import Path
 from typing import Any, Callable
 
-from utils.inject_roctx import core
-from utils.inject_roctx.core import (
-    _pop_scope,
-    _push_scope,
-    resolve_user_caller_location,
-)
-from utils.inject_roctx.registry import register
+from ml_api_tracing.inject_roctx import marker_ranges
+from ml_api_tracing.inject_roctx.backend_contract import register
 from utils.logger import console_log, console_warning
 
 _BACKEND_NAME = "triton"
 
 
-class _TritonState:
-    """Resolved Triton launch entry-point handles, populated by _resolve_triton()."""
-
-    def __init__(self) -> None:
-        self.compiled_kernel: Any = None
-        self.jit_function: Any = None
-
-
-_STATE = _TritonState()
+def patch_triton_launcher() -> None:
+    """Wrap every available Triton launch entry point."""
+    wrapped_any = False
+    jit_function = _CoreState.jit_function
+    compiled_kernel = _CoreState.compiled_kernel
+    if jit_function is not None:
+        wrapped_any |= _wrap_launch(jit_function, "run", "triton.JITFunction")
+    if compiled_kernel is not None:
+        # Prefer run(); fall back to __call__.
+        if hasattr(compiled_kernel, "run"):
+            wrapped_any |= _wrap_launch(compiled_kernel, "run", "triton.CompiledKernel")
+        else:
+            wrapped_any |= _wrap_launch(
+                compiled_kernel, "__call__", "triton.CompiledKernel"
+            )
+    if not wrapped_any:
+        console_warning(
+            "ml api trace",
+            "No Triton launch entry points found to instrument; "
+            "Triton API tracing may have no effect.",
+        )
 
 
 def _resolve_triton() -> bool:
-    """Bind the triton handles on _STATE. Returns True if triton is importable."""
+    """Bind the triton handles on _CoreState. Returns True if triton is importable."""
     if importlib.util.find_spec("triton") is None:
         return False
     try:
         from triton.compiler import CompiledKernel as _CK
 
-        _STATE.compiled_kernel = _CK
+        _CoreState.compiled_kernel = _CK
     except Exception:
-        _STATE.compiled_kernel = None
+        _CoreState.compiled_kernel = None
     try:
         from triton.runtime.jit import JITFunction as _JIT
 
-        _STATE.jit_function = _JIT
+        _CoreState.jit_function = _JIT
     except Exception:
-        _STATE.jit_function = None
-    return _STATE.compiled_kernel is not None or _STATE.jit_function is not None
+        _CoreState.jit_function = None
+    return _CoreState.compiled_kernel is not None or _CoreState.jit_function is not None
 
 
 def _register_framework_root() -> None:
@@ -68,7 +75,7 @@ def _register_framework_root() -> None:
         )
         triton_file = getattr(triton, "__file__", None)
         if triton_file:
-            core.add_framework_root(str(Path(triton_file).parent))
+            marker_ranges.add_framework_root(str(Path(triton_file).parent))
     except Exception as exc:
         console_warning(
             "ml api trace",
@@ -77,8 +84,8 @@ def _register_framework_root() -> None:
 
 
 def _extract_kernel_name(obj: object, default: str = "<triton_kernel>") -> str:
-    """Resolve the kernel name from ``name``, ``metadata``, or ``fn``,
-    returning ``default`` when none is available."""
+    """Resolve the kernel name from name, metadata, or fn,
+    returning default when none is available."""
     name = getattr(obj, "name", None)
     if isinstance(name, str) and name:
         return name
@@ -102,31 +109,39 @@ def _extract_kernel_name(obj: object, default: str = "<triton_kernel>") -> str:
 
 
 def _run_with_marker(
-    self_obj: object,
+    instance: object,
     marker_prefix: str,
-    thunk: Callable[[], Any],
+    call: Callable[..., Any],
+    /,
+    *call_args: Any,
+    **call_kwargs: Any,
 ) -> object:
-    """Run thunk inside a ROCTX range."""
-    kernel_name = _extract_kernel_name(self_obj)
+    """Run call(*call_args, **call_kwargs) inside a ROCTX range.
+
+    The first three parameters are positional-only so a keyword argument of the
+    wrapped call can never collide with them.
+    """
+    kernel_name = _extract_kernel_name(instance)
     marker = f"{marker_prefix}.{kernel_name}"
-    location = resolve_user_caller_location()
-    _push_scope(marker, location, backend=_BACKEND_NAME)
+    location = marker_ranges.resolve_user_caller_location()
+    marker_ranges.push_scope(marker, location, backend=_BACKEND_NAME)
     try:
-        return thunk()
+        return call(*call_args, **call_kwargs)
     finally:
-        _pop_scope()
+        marker_ranges.pop_scope()
 
 
 def _roctx_method_call(
     instance: object,
     marker_prefix: str,
     original: Callable[..., Any],
+    /,
     *args: Any,
     **kwargs: Any,
 ) -> object:
-    """Run a wrapped method ``original`` inside a ROCTX range."""
+    """Run a wrapped method original inside a ROCTX range."""
     return _run_with_marker(
-        instance, marker_prefix, partial(original, instance, *args, **kwargs)
+        instance, marker_prefix, original, instance, *args, **kwargs
     )
 
 
@@ -143,11 +158,12 @@ def _roctx_launch(
     instance: object,
     marker_prefix: str,
     launcher: Callable[..., Any],
+    /,
     *args: Any,
     **kwargs: Any,
 ) -> object:
-    """Run a property-returned ``launcher`` inside a ROCTX range."""
-    return _run_with_marker(instance, marker_prefix, partial(launcher, *args, **kwargs))
+    """Run a property-returned launcher inside a ROCTX range."""
+    return _run_with_marker(instance, marker_prefix, launcher, *args, **kwargs)
 
 
 def _roctx_property_get(
@@ -183,7 +199,7 @@ def _wrap_launch(
     method_name: str,
     marker_prefix: str,
 ) -> bool:
-    """Wrap ``owner.method_name`` (a method or property) with a ROCTX range.
+    """Wrap owner.method_name (a method or property) with a ROCTX range.
 
     Idempotent. Returns True when the wrapper is installed or already present.
     """
@@ -216,27 +232,15 @@ def _wrap_launch(
     return installed
 
 
-def patch_triton_launcher() -> None:
-    """Wrap every available Triton launch entry point."""
-    wrapped_any = False
-    jit_function = _STATE.jit_function
-    compiled_kernel = _STATE.compiled_kernel
-    if jit_function is not None:
-        wrapped_any |= _wrap_launch(jit_function, "run", "triton.JITFunction")
-    if compiled_kernel is not None:
-        # Prefer run(); fall back to __call__.
-        if hasattr(compiled_kernel, "run"):
-            wrapped_any |= _wrap_launch(compiled_kernel, "run", "triton.CompiledKernel")
-        else:
-            wrapped_any |= _wrap_launch(
-                compiled_kernel, "__call__", "triton.CompiledKernel"
-            )
-    if not wrapped_any:
-        console_warning(
-            "ml api trace",
-            "No Triton launch entry points found to instrument; "
-            "Triton API tracing may have no effect.",
-        )
+class _TritonState:
+    """Resolved Triton launch entry-point handles, populated by _resolve_triton()."""
+
+    def __init__(self) -> None:
+        self.compiled_kernel: Any = None
+        self.jit_function: Any = None
+
+
+_CoreState = _TritonState()
 
 
 class TritonBackend:
@@ -249,7 +253,7 @@ class TritonBackend:
                 "Triton is not installed; skipping triton instrumentation.",
             )
             return
-        if not core.ensure_python_tier():
+        if not marker_ranges.ensure_python_tier():
             console_warning(
                 "ml api trace",
                 "ROCTX bindings not found; skipping triton instrumentation.",

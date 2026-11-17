@@ -1,0 +1,141 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
+"""ROCTX range push and pop for ML API tracing backends."""
+
+import importlib.util
+import inspect
+import os
+import sys
+import threading
+from importlib.machinery import PathFinder
+from pathlib import Path
+from typing import Callable, List, Tuple
+
+from ml_api_tracing.marker_format import compose_marker
+
+# Frames under the package directory are skipped during caller-location
+# resolution.
+_PACKAGE_ROOT: str = str(Path(__file__).resolve().parent) + os.sep
+
+_thread_local = threading.local()
+
+
+def push_scope(
+    marker: str,
+    context: str,
+    backend: str = "",
+    args: str = "n/a",
+) -> None:
+    """Emit a marker and count this thread's scope only after its push succeeds."""
+    _CoreState.range_push(compose_marker(marker, context, backend, args=args))
+    _thread_local.depth = getattr(_thread_local, "depth", 0) + 1
+
+
+def pop_scope() -> None:
+    """Pop a recorded scope and decrement depth even if the callback raises."""
+    depth = getattr(_thread_local, "depth", 0)
+    if depth <= 0:
+        return
+    try:
+        _CoreState.range_pop()
+    finally:
+        _thread_local.depth = depth - 1
+
+
+def set_python_tier_io(
+    push: Callable[[str], None],
+    pop: Callable[[], None],
+) -> None:
+    _CoreState.range_push = push
+    _CoreState.range_pop = pop
+
+
+def python_tier_configured() -> bool:
+    """True once the Python-tier push/pop callbacks have been wired."""
+    return _CoreState.range_push is not _missing_range_push
+
+
+def get_python_tier_io() -> Tuple[Callable[[str], None], Callable[[], None]]:
+    """Return the currently wired (rangePush, rangePop) callbacks."""
+    return _CoreState.range_push, _CoreState.range_pop
+
+
+def roctx_candidate_paths() -> List[str]:
+    """Return the directories probed for the roctx module."""
+    return list(_CoreState.roctx_candidate_paths)
+
+
+def ensure_python_tier() -> bool:
+    """Wire the Python-tier rangePush/rangePop callbacks from the ROCm roctx
+    module. Idempotent; returns True if the Python tier is configured.
+    """
+    if python_tier_configured():
+        return True
+    rocm_root = os.environ.get("ROCM_PATH", "/opt/rocm")
+    py = f"python{sys.version_info.major}.{sys.version_info.minor}"
+    _CoreState.roctx_candidate_paths = [
+        f"{rocm_root}/lib/{py}/site-packages",
+        f"{rocm_root}/libexec/rocprofiler-sdk/python",
+    ]
+    spec = PathFinder.find_spec("roctx", _CoreState.roctx_candidate_paths)
+    if spec is None or spec.loader is None:
+        return False
+    roctx_mod = importlib.util.module_from_spec(spec)
+    # Register before exec so relative submodule imports resolve.
+    sys.modules["roctx"] = roctx_mod
+    try:
+        spec.loader.exec_module(roctx_mod)
+    except Exception:
+        sys.modules.pop("roctx", None)
+        return False
+    set_python_tier_io(roctx_mod.rangePush, roctx_mod.rangePop)
+    return True
+
+
+def add_framework_root(path: str) -> None:
+    # Store with a trailing separator so prefix matching is exact.
+    if not path:
+        return
+    root = path if path.endswith(os.sep) else path + os.sep
+    if root not in _CoreState.framework_roots:
+        _CoreState.framework_roots.append(root)
+
+
+def resolve_user_caller_location() -> str:
+    """'file:line' for the nearest user frame, or 'n/a'."""
+    frame = inspect.currentframe()
+    while frame is not None:
+        fn_path = frame.f_code.co_filename
+        in_package = fn_path.startswith(_PACKAGE_ROOT)
+        in_framework = any(
+            fn_path.startswith(root) for root in _CoreState.framework_roots
+        )
+        if not in_package and not in_framework:
+            return f"{Path(fn_path).name}:{frame.f_lineno}"
+        frame = frame.f_back
+    return "n/a"
+
+
+def _missing_range_push(_label: str) -> None:
+    raise RuntimeError(
+        "inject_roctx.marker_ranges: Python tier rangePush is not configured.",
+    )
+
+
+def _missing_range_pop() -> None:
+    raise RuntimeError(
+        "inject_roctx.marker_ranges: Python tier rangePop is not configured.",
+    )
+
+
+class _CoreState:
+    """Mutable core state: the Python-tier rangePush/rangePop callbacks, the
+    registered framework roots, and the ROCm directories probed for the roctx
+    module. The attributes are used on the class itself.
+    """
+
+    range_push: Callable[[str], None] = _missing_range_push
+    range_pop: Callable[[], None] = _missing_range_pop
+    framework_roots: List[str] = []
+    roctx_candidate_paths: List[str] = []

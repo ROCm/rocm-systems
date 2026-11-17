@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Shared isolated import checks and ML API trace input factories."""
+"""Fixtures for the ML API tracing tests: import checks, trace inputs, registry."""
 
 import subprocess
 import sys
@@ -9,7 +9,13 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
+from profile_import_utils import (
+    PROFILE_IMPORT_SETUP,
+    PROJECT_TESTS_ROOT,
+    run_profile_import,
+)
 
+from ml_api_tracing.inject_roctx import backend_contract
 from utils import csv_compression
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -84,6 +90,28 @@ def guid():
 @pytest.fixture
 def other_guid():
     return TEST_GUID_OTHER
+
+
+@pytest.fixture
+def fresh_registry(monkeypatch):
+    """Isolate the backend registry shared by the contract and installer tests."""
+    monkeypatch.setattr(backend_contract, "_REGISTRY", {})
+    return backend_contract
+
+
+@pytest.fixture
+def assert_profile_import():
+    return run_profile_import
+
+
+@pytest.fixture
+def profile_import_setup():
+    return PROFILE_IMPORT_SETUP
+
+
+@pytest.fixture
+def profile_import_tests_root():
+    return PROJECT_TESTS_ROOT
 
 
 def run_stdlib_import(module_name):

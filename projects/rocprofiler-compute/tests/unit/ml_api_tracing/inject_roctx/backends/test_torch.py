@@ -7,13 +7,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from tests.integration.common import require_torch
-from utils.inject_roctx import core
-from utils.inject_roctx._backends import torch as torch_backend
-from utils.inject_roctx._backends.torch import (
+from ml_api_tracing.inject_roctx import marker_ranges
+from ml_api_tracing.inject_roctx.backends import torch as torch_backend
+from ml_api_tracing.inject_roctx.backends.torch_wraps import (
     DEEP_TENSOR_METHOD_WRAPS,
     TENSOR_METHOD_WRAPS,
 )
+from ml_api_tracing.marker_format import compose_marker
+from tests.integration.common import require_torch
 
 
 class FakeDType:
@@ -26,6 +27,25 @@ class FakeDType:
 
 def fake_tensor(shape=(2, 4), dtype_name="torch.float32"):
     return SimpleNamespace(shape=shape, dtype=FakeDType(dtype_name))
+
+
+def run_nn_module_entry(self, *args, **kwargs):
+    self.entry_state.events.append(("invoke", self, args, kwargs))
+    if self.entry_state.outcome == "workload-fails":
+        raise ValueError("module workload failed")
+    return self.entry_state.return_value
+
+
+class NnModulePushRecorder:
+    """Stand in for rangePush: record the marker and fail when asked to."""
+
+    def __init__(self, entry_state):
+        self.entry_state = entry_state
+
+    def __call__(self, marker):
+        self.entry_state.events.append(("push", marker))
+        if self.entry_state.outcome == "push-fails":
+            raise RuntimeError("module scope push failed")
 
 
 def noop_torch_structural_wraps(monkeypatch, torch_backend):
@@ -69,6 +89,23 @@ class UnreadableDtype:
         raise ValueError("dtype is unavailable")
 
 
+@pytest.fixture(
+    params=[
+        ("process_group", "patch_process_group_methods"),
+        ("function", "install_function_apply_wrappers"),
+    ],
+    ids=["process-group", "autograd-function"],
+)
+def install_subclass_wrappers(request, monkeypatch):
+    state_attribute, installer_name = request.param
+
+    def install(base):
+        monkeypatch.setattr(torch_backend._CoreState, state_attribute, base)
+        getattr(torch_backend, installer_name)()
+
+    return install
+
+
 @pytest.fixture
 def torch_module():
     require_torch()
@@ -86,9 +123,9 @@ def recorded_ranges(monkeypatch):
         markers.append(marker)
         active.append(marker)
 
-    monkeypatch.setattr(core._STATE, "range_push", push)
-    monkeypatch.setattr(core._STATE, "range_pop", active.pop)
-    monkeypatch.setattr(core._thread_local, "depth", 0, raising=False)
+    monkeypatch.setattr(marker_ranges._CoreState, "range_push", push)
+    monkeypatch.setattr(marker_ranges._CoreState, "range_pop", active.pop)
+    monkeypatch.setattr(marker_ranges._thread_local, "depth", 0, raising=False)
     yield markers
     assert active == []
 
@@ -117,24 +154,20 @@ def test_format_wrap_args_caps_raw_text_before_encoding(delimiter, encoded):
 
 
 def test_dispatcher_marker_name_for_aten_packet():
-    from utils.inject_roctx._backends.torch import dispatcher_marker_name_for
-
     packet = SimpleNamespace(_qualified_op_name="aten::addmm")
     func = SimpleNamespace(overloadpacket=packet)
-    assert dispatcher_marker_name_for(func) == "torch.ops.aten.addmm"
+    assert torch_backend.dispatcher_marker_name_for(func) == "torch.ops.aten.addmm"
 
 
 def test_roctx_wrapper_idempotent_and_push_pop(monkeypatch):
-    from utils.inject_roctx._backends import torch as torch_backend
-
     pushes = []
     pops = []
     monkeypatch.setattr(
-        torch_backend,
-        "_push_scope",
+        marker_ranges,
+        "push_scope",
         lambda *args, **kwargs: pushes.append(1),
     )
-    monkeypatch.setattr(torch_backend, "_pop_scope", lambda: pops.append(1))
+    monkeypatch.setattr(marker_ranges, "pop_scope", lambda: pops.append(1))
     wrapped = torch_backend.roctx_wrapper(lambda value: value + 1)
     assert wrapped(1) == 2
     assert pushes == [1]
@@ -143,20 +176,17 @@ def test_roctx_wrapper_idempotent_and_push_pop(monkeypatch):
 
 
 def test_inject_roctx_into_model_pushes_class_forward(monkeypatch):
-    from tests.integration.common import require_torch
-    from utils.inject_roctx._backends import torch as torch_backend
-
     require_torch()
     import torch
 
     torch_backend._resolve_torch()
     pushes = []
     monkeypatch.setattr(
-        torch_backend,
-        "_push_scope",
+        marker_ranges,
+        "push_scope",
         lambda name, location, backend="", args="n/a": pushes.append((name, backend)),
     )
-    monkeypatch.setattr(torch_backend, "_pop_scope", lambda: None)
+    monkeypatch.setattr(marker_ranges, "pop_scope", lambda: None)
     original_call = torch.nn.Module.__call__
     try:
         torch_backend.inject_roctx_into_model()
@@ -166,9 +196,90 @@ def test_inject_roctx_into_model_pushes_class_forward(monkeypatch):
         torch.nn.Module.__call__ = original_call
 
 
-def test_torch_backend_install_skips_dispatcher_when_collector_loads(monkeypatch):
-    from utils.inject_roctx._backends import torch as torch_backend
+@pytest.mark.parametrize(
+    ("entry_method_name", "marker_method_name"),
+    [("to", "to"), ("__call__", "forward")],
+)
+@pytest.mark.parametrize("outcome", ["returns", "workload-fails", "push-fails"])
+def test_nn_module_entry_preserves_marker_and_scope_lifecycle(
+    monkeypatch, entry_method_name, marker_method_name, outcome
+):
+    entry_state = SimpleNamespace(events=[], outcome=outcome, return_value=object())
+    module_class = type(
+        "FakeModule", (), {"to": run_nn_module_entry, "__call__": run_nn_module_entry}
+    )
+    receivers = [
+        type("FirstModule", (module_class,), {})(),
+        type("SecondModule", (module_class,), {})(),
+    ]
+    for receiver in receivers:
+        receiver.entry_state = entry_state
+    monkeypatch.setattr(
+        torch_backend._CoreState, "nn", SimpleNamespace(Module=module_class)
+    )
 
+    if entry_method_name == "__call__":
+        install = torch_backend.inject_roctx_into_model
+    else:
+        install = torch_backend.inject_roctx_into_module_methods
+    install()
+    wrapped_once = getattr(module_class, entry_method_name)
+    assert wrapped_once._roctx_wrapped is True
+    install()
+    assert getattr(module_class, entry_method_name) is wrapped_once
+
+    monkeypatch.setattr(
+        marker_ranges._CoreState,
+        "range_push",
+        NnModulePushRecorder(entry_state),
+    )
+    monkeypatch.setattr(
+        marker_ranges._CoreState,
+        "range_pop",
+        lambda: entry_state.events.append(("pop",)),
+    )
+    monkeypatch.setattr(marker_ranges._thread_local, "depth", 0, raising=False)
+    monkeypatch.setattr(
+        marker_ranges, "resolve_user_caller_location", lambda: "module_entry.py:42"
+    )
+    positional_tensor = fake_tensor()
+    keyword_tensor = fake_tensor(shape=(1,), dtype_name="torch.float64")
+    for receiver in receivers:
+        entry_state.events.clear()
+        entry = getattr(receiver, entry_method_name)
+        if outcome == "push-fails":
+            with pytest.raises(RuntimeError, match="module scope push failed"):
+                entry(positional_tensor, bias=keyword_tensor)
+        elif outcome == "workload-fails":
+            with pytest.raises(ValueError, match="module workload failed"):
+                entry(positional_tensor, bias=keyword_tensor)
+        else:
+            assert (
+                entry(positional_tensor, bias=keyword_tensor)
+                is entry_state.return_value
+            )
+
+        expected_events = [
+            (
+                "push",
+                compose_marker(
+                    f"nn.Module.{receiver.__class__.__name__}.{marker_method_name}",
+                    "module_entry.py:42",
+                    backend="torch",
+                    args="(float32[2x4], bias=float64[1])",
+                ),
+            )
+        ]
+        if outcome != "push-fails":
+            expected_events.extend([
+                ("invoke", receiver, (positional_tensor,), {"bias": keyword_tensor}),
+                ("pop",),
+            ])
+        assert entry_state.events == expected_events
+        assert marker_ranges._thread_local.depth == 0
+
+
+def test_torch_backend_install_skips_dispatcher_when_collector_loads(monkeypatch):
     noop_torch_structural_wraps(monkeypatch, torch_backend)
     monkeypatch.setattr(torch_backend.torch_trace_collector, "install", lambda: True)
     hook_calls = []
@@ -184,8 +295,6 @@ def test_torch_backend_install_skips_dispatcher_when_collector_loads(monkeypatch
 
 
 def test_torch_backend_install_falls_back_to_dispatch_mode(monkeypatch):
-    from utils.inject_roctx._backends import torch as torch_backend
-
     noop_torch_structural_wraps(monkeypatch, torch_backend)
     monkeypatch.setattr(torch_backend.torch_trace_collector, "install", lambda: False)
     hook_calls = []
@@ -201,13 +310,8 @@ def test_torch_backend_install_falls_back_to_dispatch_mode(monkeypatch):
 
 
 def test_deep_tensor_method_wraps_disabled_by_env(monkeypatch):
-    from utils.inject_roctx._backends.torch import (
-        TENSOR_METHOD_WRAPS,
-        _selected_tensor_method_wraps,
-    )
-
     monkeypatch.setenv("ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS", "0")
-    assert _selected_tensor_method_wraps() == TENSOR_METHOD_WRAPS
+    assert torch_backend._selected_tensor_method_wraps() == TENSOR_METHOD_WRAPS
 
 
 def test_lazy_linear_to_under_tensor_wraps(monkeypatch):
@@ -216,15 +320,15 @@ def test_lazy_linear_to_under_tensor_wraps(monkeypatch):
     from torch.nn.parameter import UninitializedParameter
 
     if not torch_backend._resolve_torch():
-        pytest.skip("torch could not be resolved for inject_roctx backend")
+        pytest.skip("torch could not be resolved for ML API tracing backend")
 
     pushes = []
     monkeypatch.setattr(
-        torch_backend,
-        "_push_scope",
+        marker_ranges,
+        "push_scope",
         lambda name, location, backend="", args="n/a": pushes.append(name),
     )
-    monkeypatch.setattr(torch_backend, "_pop_scope", lambda: None)
+    monkeypatch.setattr(marker_ranges, "pop_scope", lambda: None)
     install_tensor_method_wrappers_for_test(monkeypatch, torch_backend, torch)
 
     model = torch.nn.LazyLinear(10).to("cpu")
@@ -240,7 +344,7 @@ def test_uninitialized_tensor_item_still_raises(monkeypatch):
     from torch.nn.parameter import UninitializedParameter
 
     if not torch_backend._resolve_torch():
-        pytest.skip("torch could not be resolved for inject_roctx backend")
+        pytest.skip("torch could not be resolved for ML API tracing backend")
 
     param = UninitializedParameter()
     with pytest.raises(ValueError, match="uninitialized"):
@@ -248,8 +352,8 @@ def test_uninitialized_tensor_item_still_raises(monkeypatch):
     with pytest.raises(ValueError, match="uninitialized"):
         param.contiguous()
 
-    monkeypatch.setattr(torch_backend, "_push_scope", lambda *args, **kwargs: None)
-    monkeypatch.setattr(torch_backend, "_pop_scope", lambda: None)
+    monkeypatch.setattr(marker_ranges, "push_scope", lambda *args, **kwargs: None)
+    monkeypatch.setattr(marker_ranges, "pop_scope", lambda: None)
     install_tensor_method_wrappers_for_test(monkeypatch, torch_backend, torch)
 
     wrapped = UninitializedParameter()
@@ -265,10 +369,10 @@ def test_lazy_batch_norm_to_dtype_keeps_uninitialized_buffer(monkeypatch):
     from torch.nn.parameter import UninitializedBuffer
 
     if not torch_backend._resolve_torch():
-        pytest.skip("torch could not be resolved for inject_roctx backend")
+        pytest.skip("torch could not be resolved for ML API tracing backend")
 
-    monkeypatch.setattr(torch_backend, "_push_scope", lambda *args, **kwargs: None)
-    monkeypatch.setattr(torch_backend, "_pop_scope", lambda: None)
+    monkeypatch.setattr(marker_ranges, "push_scope", lambda *args, **kwargs: None)
+    monkeypatch.setattr(marker_ranges, "pop_scope", lambda: None)
     install_tensor_method_wrappers_for_test(monkeypatch, torch_backend, torch)
 
     model = torch.nn.LazyBatchNorm1d().to(dtype=torch.float64)
@@ -284,10 +388,10 @@ def test_uninitialized_buffer_keeps_persistent_on_to(monkeypatch):
     from torch.nn.parameter import UninitializedBuffer
 
     if not torch_backend._resolve_torch():
-        pytest.skip("torch could not be resolved for inject_roctx backend")
+        pytest.skip("torch could not be resolved for ML API tracing backend")
 
-    monkeypatch.setattr(torch_backend, "_push_scope", lambda *args, **kwargs: None)
-    monkeypatch.setattr(torch_backend, "_pop_scope", lambda: None)
+    monkeypatch.setattr(marker_ranges, "push_scope", lambda *args, **kwargs: None)
+    monkeypatch.setattr(marker_ranges, "pop_scope", lambda: None)
     install_tensor_method_wrappers_for_test(monkeypatch, torch_backend, torch)
 
     moved = UninitializedBuffer(persistent=False).to(dtype=torch.float64)
@@ -348,6 +452,45 @@ def test_direct_tensor_to_wrapper_converts_uninitialized_parameter(
     assert "|args=n/a|torch" in recorded_ranges[0]
 
 
+def test_future_subclass_binds_original_hook_to_child(install_subclass_wrappers):
+    calls = []
+
+    class Base:
+        def __init_subclass__(cls, tag, **kwargs):
+            super().__init_subclass__(**kwargs)
+            calls.append((cls, tag))
+
+    install_subclass_wrappers(Base)
+    child = type("Child", (Base,), {}, tag="application")
+
+    assert calls == [(child, "application")]
+
+
+def test_future_subclass_survives_instrumentation_failure(install_subclass_wrappers):
+    class RejectInstrumentation(type):
+        def __setattr__(cls, name, value):
+            if name in {"apply", "allreduce"}:
+                raise RuntimeError("instrumentation assignment failed")
+            super().__setattr__(name, value)
+
+    class Base(metaclass=RejectInstrumentation):
+        @classmethod
+        def apply(cls):
+            return cls
+
+        def allreduce(self):
+            return "application result"
+
+    install_subclass_wrappers(Base)
+
+    class Child(Base):
+        def allreduce(self):
+            return "application result"
+
+    assert Child.apply() is Child
+    assert Child().allreduce() == "application result"
+
+
 @pytest.mark.parametrize(
     "created_after_install", [False, True], ids=["existing-child", "new-child"]
 )
@@ -385,7 +528,7 @@ def test_inherited_function_apply_is_wrapped_once(
     if not created_after_install:
         inherited = type("InheritedScale", (Scale,), child_methods)
 
-    monkeypatch.setattr(torch_backend._STATE, "function", FunctionBase)
+    monkeypatch.setattr(torch_backend._CoreState, "function", FunctionBase)
     assert torch_backend.install_function_apply_wrappers()
     assert torch_backend.install_function_apply_wrappers()
     if created_after_install:
@@ -431,7 +574,7 @@ def test_custom_function_apply_preserves_binding(
             else staticmethod(static_apply)
         )
 
-    monkeypatch.setattr(torch_backend._STATE, "function", FunctionBase)
+    monkeypatch.setattr(torch_backend._CoreState, "function", FunctionBase)
     assert torch_backend.install_function_apply_wrappers()
 
     class Child(Scale):
@@ -453,9 +596,9 @@ def test_torch_wrapper_only_pops_successful_launcher_push(
 ):
     events = []
     monkeypatch.setattr(
-        torch_backend, "_push_scope", lambda *_a, **_k: events.append("range")
+        marker_ranges, "push_scope", lambda *_a, **_k: events.append("range")
     )
-    monkeypatch.setattr(torch_backend, "_pop_scope", lambda: events.append("end range"))
+    monkeypatch.setattr(marker_ranges, "pop_scope", lambda: events.append("end range"))
     monkeypatch.setattr(
         torch_backend.torch_trace_collector,
         "push_launcher_tid",
@@ -488,8 +631,8 @@ def test_torch_wrapper_only_pops_successful_launcher_push(
 def test_failed_nested_launcher_push_preserves_outer_launcher(monkeypatch):
     launcher_stack = []
     push_results = iter([True, False])
-    monkeypatch.setattr(torch_backend, "_push_scope", lambda *_a, **_k: None)
-    monkeypatch.setattr(torch_backend, "_pop_scope", lambda: None)
+    monkeypatch.setattr(marker_ranges, "push_scope", lambda *_a, **_k: None)
+    monkeypatch.setattr(marker_ranges, "pop_scope", lambda: None)
 
     def push_launcher():
         pushed = next(push_results)

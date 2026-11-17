@@ -34,12 +34,6 @@ string(
     "${FULL_VERSION_STRING}"
 )
 
-# string(REGEX REPLACE "(${ROCPROFCOMPUTE_VERSION})(.*)" "\\2"
-# ROCPROFCOMPUTE_VERSION_TWEAK
-# "${FULL_VERSION_STRING}")
-# string(REGEX REPLACE "^\\." "" ROCPROFCOMPUTE_VERSION_TWEAK
-# "${ROCPROFCOMPUTE_VERSION_TWEAK}")
-
 project(
     rocprofiler-compute
     VERSION ${ROCPROFCOMPUTE_VERSION}
@@ -1107,27 +1101,72 @@ add_test(
 )
 
 add_test(
-    NAME test_inject_roctx_package
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_inject_roctx_package.xml
-        ${COV_OPTION} tests/unit/utils/inject_roctx/test_inject_roctx_package.py
-        ${WORKING_DIR_OPTION}
-)
-
-add_test(
-    NAME test_inject_roctx_torch_trace_collector
+    NAME test_ml_api_tracing_inject_roctx_backend_contract
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest
-        --junitxml=tests/test_inject_roctx_torch_trace_collector.xml ${COV_OPTION}
-        tests/unit/utils/inject_roctx/_backends/test_torch_trace_collector.py
+        --junitxml=tests/test_ml_api_tracing_inject_roctx_backend_contract.xml
+        ${COV_OPTION} tests/unit/ml_api_tracing/inject_roctx/test_backend_contract.py
         ${WORKING_DIR_OPTION}
 )
 
 add_test(
-    NAME test_inject_roctx_torch
+    NAME test_ml_api_tracing_inject_roctx_installer
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_inject_roctx_torch.xml
-        ${COV_OPTION} tests/unit/utils/inject_roctx/test_torch.py ${WORKING_DIR_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_ml_api_tracing_inject_roctx_installer.xml ${COV_OPTION}
+        tests/unit/ml_api_tracing/inject_roctx/test_installer.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_ml_api_tracing_inject_roctx_marker_ranges
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_ml_api_tracing_inject_roctx_marker_ranges.xml ${COV_OPTION}
+        tests/unit/ml_api_tracing/inject_roctx/test_marker_ranges.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_ml_api_tracing_inject_roctx_launch
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_ml_api_tracing_inject_roctx_launch.xml ${COV_OPTION}
+        tests/unit/ml_api_tracing/inject_roctx/test_launch.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_ml_api_tracing_inject_roctx_triton
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_ml_api_tracing_inject_roctx_triton.xml ${COV_OPTION}
+        tests/unit/ml_api_tracing/inject_roctx/backends/test_triton.py
+        ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_ml_api_tracing_inject_roctx_torch
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_ml_api_tracing_inject_roctx_torch.xml ${COV_OPTION}
+        tests/unit/ml_api_tracing/inject_roctx/backends/test_torch.py
+        ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_ml_api_tracing_inject_roctx_torch_trace_collector
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_ml_api_tracing_inject_roctx_torch_trace_collector.xml
+        ${COV_OPTION}
+        tests/unit/ml_api_tracing/inject_roctx/backends/test_torch_trace_collector.py
+        ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_inject_roctx_isolated_imports
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_inject_roctx_isolated_imports.xml ${COV_OPTION}
+        tests/integration/test_inject_roctx_isolated_imports.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -1177,6 +1216,39 @@ add_test(
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_profiler_base.xml
         ${COV_OPTION} tests/unit/rocprof_compute_profile/test_profiler_base.py
+        ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_ml_api_tracing_profiling_orchestrator
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_ml_api_tracing_profiling_orchestrator.xml ${COV_OPTION}
+        tests/unit/ml_api_tracing/profiling/test_orchestrator.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_ml_api_tracing_profiling_storage
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_ml_api_tracing_profiling_storage.xml ${COV_OPTION}
+        tests/unit/ml_api_tracing/profiling/test_storage.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_profiler_rocprofiler_sdk
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_profiler_rocprofiler_sdk.xml ${COV_OPTION}
+        tests/unit/rocprof_compute_profile/test_profiler_rocprofiler_sdk.py
+        ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_profiler_rocprof_v3
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_profiler_rocprof_v3.xml
+        ${COV_OPTION} tests/unit/rocprof_compute_profile/test_profiler_rocprof_v3.py
         ${WORKING_DIR_OPTION}
 )
 
@@ -1366,9 +1438,18 @@ if(${ENABLE_COVERAGE})
         test_profile_triton_trace
         test_profile_ml_api_trace
         test_torch_trace_coverage
-        test_inject_roctx_package
-        test_inject_roctx_torch
-        test_inject_roctx_torch_trace_collector
+        test_ml_api_tracing_inject_roctx_backend_contract
+        test_ml_api_tracing_inject_roctx_installer
+        test_ml_api_tracing_inject_roctx_marker_ranges
+        test_ml_api_tracing_inject_roctx_launch
+        test_ml_api_tracing_inject_roctx_triton
+        test_ml_api_tracing_inject_roctx_torch
+        test_ml_api_tracing_inject_roctx_torch_trace_collector
+        test_inject_roctx_isolated_imports
+        test_ml_api_tracing_profiling_orchestrator
+        test_ml_api_tracing_profiling_storage
+        test_profiler_rocprofiler_sdk
+        test_profiler_rocprof_v3
         test_inject_roctx_torch_gpu
         test_analysis_db
         test_analysis_base
