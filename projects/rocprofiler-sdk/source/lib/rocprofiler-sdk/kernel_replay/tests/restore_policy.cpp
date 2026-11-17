@@ -83,8 +83,9 @@ TEST(kernel_replay_restore_policy, two_or_three_passes_hash_before_each)
     EXPECT_EQ(policy::choose(inputs(2, 64 * mib)), restore_mode::hash_every_pass);
     EXPECT_EQ(policy::choose(inputs(3, 64 * mib)), restore_mode::hash_every_pass);
     EXPECT_EQ(policy::choose(inputs(4, 64 * mib)), restore_mode::hash_once);
-    // A tool that decides as the replay goes may run any number of passes.
-    EXPECT_EQ(policy::choose(inputs(0, 64 * mib)), restore_mode::hash_once);
+    // A tool that decides as the replay goes may stop after any pass, so there is no last pass to
+    // check a reused list before.
+    EXPECT_EQ(policy::choose(inputs(0, 64 * mib)), restore_mode::hash_every_pass);
 }
 
 TEST(kernel_replay_restore_policy, one_pass_never_hashes)
@@ -110,9 +111,11 @@ TEST(kernel_replay_restore_policy, history_turns_hashing_off_once_full_restores_
               restore_mode::hash_once);
     EXPECT_EQ(policy::choose(inputs(5, 1024 * mib, 0, policy::history_t{7, 6})),
               restore_mode::full);
-    // Without a pass count, hashing once never moves more.
-    EXPECT_EQ(policy::choose(inputs(0, 1024 * mib, 0, policy::history_t{100, 100})),
-              restore_mode::hash_once);
+    // Without a pass count it hashes before every pass, which moves less until half change.
+    EXPECT_EQ(policy::choose(inputs(0, 1024 * mib, 0, policy::history_t{100, 49})),
+              restore_mode::hash_every_pass);
+    EXPECT_EQ(policy::choose(inputs(0, 1024 * mib, 0, policy::history_t{100, 50})),
+              restore_mode::full);
     // Pinned memory is hashed whatever changed.
     EXPECT_EQ(policy::choose(inputs(4, 1024 * mib, 4 * mib, policy::history_t{100, 100})),
               restore_mode::hash_once);

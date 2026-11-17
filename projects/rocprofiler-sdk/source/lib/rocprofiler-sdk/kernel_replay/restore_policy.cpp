@@ -134,8 +134,10 @@ choose(const inputs_t& inputs)
     // Such a kernel may not write the same tiles every pass.
     if(inputs.history.unlisted) return restore_mode::full;
     // With two or three passes, hashing before each costs no more than reusing a list and checking
-    // it, and does not assume the kernel writes the same tiles every pass.
-    const auto mode = (inputs.total_passes != 0 && inputs.total_passes <= 3)
+    // it, and does not assume the kernel writes the same tiles every pass. A replay with no pass
+    // count has no last pass known in advance to check a reused list before, so it hashes before
+    // every pass too.
+    const auto mode = (inputs.total_passes == 0 || inputs.total_passes <= 3)
                           ? restore_mode::hash_every_pass
                           : restore_mode::hash_once;
     // A pinned restore crosses PCIe, so hashing pays off there even when most tiles change.

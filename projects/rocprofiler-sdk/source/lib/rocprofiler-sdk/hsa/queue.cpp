@@ -1314,10 +1314,11 @@ WriteInterceptor(const void* packets,
                 snapshot.stored_bytes(kernel_replay::memory_snapshot::storage_kind::pinned_host);
             const auto has_digests =
                 gpu_backend_available && kernel_replay::blit::has_digests(queue);
-            auto restore_mode    = has_digests ? restore_policy::choose(restore_inputs)
-                                               : restore_policy::restore_mode::full;
-            auto hashed_restores = uint32_t{0};
-            auto listed_restores = uint32_t{0};
+            auto restore_mode     = has_digests ? restore_policy::choose(restore_inputs)
+                                                : restore_policy::restore_mode::full;
+            auto hashed_restores  = uint32_t{0};
+            auto listed_restores  = uint32_t{0};
+            auto checked_unlisted = false;
             ROCP_INFO << fmt::format(
                 "kernel replay: {} restores for {}B in GPU memory and {}B in pinned memory",
                 restore_policy::name_of(restore_mode),
@@ -1350,6 +1351,39 @@ WriteInterceptor(const void* packets,
                     ROCP_FATAL_IF(restore.retire() != HSA_STATUS_SUCCESS)
                         << "kernel replay: asynchronous restore blit failed";
                 restore_packets.clear();
+            };
+
+            // Counts the tiles that changed off the reused list. A result that cannot be read
+            // counts as changed, so the caller restores everything.
+            auto check_unlisted_tiles = [&]() -> uint32_t {
+                auto pending = std::vector<kernel_replay::blit::packet_info>{};
+                auto status  = kernel_replay::blit::check_unlisted(queue, writer, pending);
+                if(status == HSA_STATUS_SUCCESS && !pending.empty()) status = pending.back().wait();
+                pending.clear();
+                const auto counts = status == HSA_STATUS_SUCCESS
+                                        ? kernel_replay::blit::read_digest_counts(queue)
+                                        : std::nullopt;
+                if(!counts)
+                {
+                    ROCP_ERROR << fmt::format(
+                        "kernel replay: could not check the tiles off the list restored before "
+                        "each pass of kernel object {:#x}. Restoring every changed tile before the "
+                        "last pass",
+                        restore_key.kernel_object);
+                    return 1;
+                }
+                if(counts->unlisted_changed > 0)
+                    ROCP_ERROR << fmt::format(
+                        "kernel replay: {} of {} tiles changed outside the list restored before "
+                        "each pass of kernel object {:#x}, so earlier passes may have started from "
+                        "modified memory. Restoring every changed tile before the last pass{}",
+                        counts->unlisted_changed,
+                        counts->tiles,
+                        restore_key.kernel_object,
+                        restore_inputs.requested == restore_policy::restore_mode::automatic
+                            ? ". Its later dispatches restore everything."
+                            : "");
+                return counts->unlisted_changed;
             };
 
             // Per-pass loop: PASS enter -> optional restore -> submit -> drain the async handler ->
@@ -1394,9 +1428,28 @@ WriteInterceptor(const void* packets,
                                 }
                                 else
                                 {
-                                    blit_status = kernel_replay::blit::restore_listed(
-                                        queue, writer, restore_packets);
-                                    ++listed_restores;
+                                    // Reusing the list assumes the kernel writes the same tiles
+                                    // every pass. Before the last pass, check the tiles off it,
+                                    // so the pass whose output the application keeps starts from
+                                    // the captured memory even when an earlier pass wrote others.
+                                    auto unlisted = uint32_t{0};
+                                    if(is_final)
+                                    {
+                                        checked_unlisted = true;
+                                        unlisted         = check_unlisted_tiles();
+                                    }
+                                    if(unlisted > 0)
+                                    {
+                                        blit_status = kernel_replay::blit::restore_changed(
+                                            queue, writer, restore_packets);
+                                        ++hashed_restores;
+                                    }
+                                    else
+                                    {
+                                        blit_status = kernel_replay::blit::restore_listed(
+                                            queue, writer, restore_packets);
+                                        ++listed_restores;
+                                    }
                                 }
                                 if(blit_status != HSA_STATUS_SUCCESS) return blit_status;
 
@@ -1443,12 +1496,12 @@ WriteInterceptor(const void* packets,
                     break;
             }
 
-            // Reusing a list assumed the kernel writes the same tiles every pass, so check the
-            // tiles off it once. What the restores found decides how this kernel's next dispatch
-            // restores.
+            // The tiles off a reused list are checked before the last pass. A replay the tool ended
+            // before its planned last pass is checked here instead. What the restores found decides
+            // how this kernel's next dispatch restores.
             if(restore_mode != restore_policy::restore_mode::full && hashed_restores > 0)
             {
-                auto checked = (listed_restores == 0);
+                auto checked = (listed_restores == 0) || checked_unlisted;
                 if(!checked)
                 {
                     const auto status =
@@ -1472,11 +1525,11 @@ WriteInterceptor(const void* packets,
                     ROCP_INFO << fmt::format("kernel replay: {} of {} tiles changed by a pass",
                                              counts->changed,
                                              counts->tiles);
-                    if(counts->unlisted_changed > 0)
-                        ROCP_WARNING << fmt::format(
+                    if(counts->unlisted_changed > 0 && !checked_unlisted)
+                        ROCP_ERROR << fmt::format(
                             "kernel replay: {} of {} tiles changed outside the list restored "
-                            "before each pass of kernel object {:#x}, so a pass may have started "
-                            "from modified memory{}",
+                            "before each pass of kernel object {:#x}, so a pass, possibly the "
+                            "last, may have started from modified memory{}",
                             counts->unlisted_changed,
                             counts->tiles,
                             restore_key.kernel_object,
