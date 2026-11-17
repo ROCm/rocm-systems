@@ -103,7 +103,7 @@ ConSan uses this orchestrator for its compiled probe calls. See
 [Extending ConSan](consan.md#extending-consan) for the ownership boundary and
 current limits.
 
-- Source-derived decoding: a concrete ELF target selects its concrete decoder features; recognized legacy ELF identities retain the existing architecture policy, and an unknown machine uses the caller architecture. Both operation paths use the same decoder selection; a conflicting known architecture is rejected. Observational CFG construction is lazy and uses `BasicBlock::build`; replacement-only validation needs full-text structural facts but no reachable ownership graph or liveness.
+- Source-derived decoding: a concrete ELF target selects its concrete decoder features; recognized legacy ELF identities retain the existing architecture policy, and an unknown machine uses the caller architecture. Both operation paths use the same decoder selection; a conflicting known architecture is rejected. Observational CFG construction is lazy and uses `BasicBlock::build`; replacement-only validation needs full-text structural facts. Sized RDNA4 function alignment additionally requires original CFG qualification; liveness remains optional.
 - `validate_points()` resolves each operation through its own admission path. Observations use `validate_anchor()` for per-site eligibility; final encoded-batch references and layout are checked during `patch()`. Replacements validate expected bytes, complete extents, references, clauses, and replacement encoding. Any failure empties `sites` and reports diagnostics in `errors`; source-facts and structural replacement failures also expose `edit_error` with a category and text-relative offset. Malformed requests or unsupported options use `errors` only, without an `edit_error`.
 - `patch()` preflights the entire batch before changing the private writer. Both operations build trampolines and commit their original-text anchor replacements together through the checked backend. `KernelEntry` callbacks retarget the entry-stub branch without adding original-text edits. The orchestrator appends copied probe bodies, the entry stub, and trampolines, then grows the section in one `CodeObjectPatcher::replace_text()` call. The shared pipeline returns ELF bytes, diagnostics, production site maps and any planned probe resources.
 - `patch_with_debug_summaries()` is a test/debug entry point returning `InstrumentedCodeObjectDebug` (extends `InstrumentedCodeObject` with per-site `InstrumentationPatch` summaries — schema unstable; production callers use `patch()` and its `InstrumentedSite` maps).
@@ -170,7 +170,7 @@ moves allocated storage or consumes a loaded file/zero-fill tail. Linked address
 constants are not yet relocated. This conservative restriction includes cases
 whose actual target stays fixed while unrelated metadata moves. Removing every
 source getpc in the batch remains permitted. The check uses immutable source
-facts across queries and forks; it does not add CFG/liveness to pure replacement.
+facts across queries and forks; this movement guard does not require liveness.
 
 Retained direct branches and section-tail fallthrough edges in every allocated
 executable section of a linked object are checked against storage moved by growth,
@@ -229,8 +229,10 @@ The preceding `instrumentation_offset/instrumentation_size` range describes the
 probe envelope and is empty for pure replacement. Return branches follow the guest.
 
 `instruction_boundaries(error)` exposes a borrowed read-only pristine full-text
-index without requiring a CFG. Private `SourceTextFacts` owns the index and collected
-reference values; no mutable decoder, writer, CFG or liveness is shared.
+index. Cold gap-free sources use linear decoding; sized RDNA4 function alignment
+is qualified through the original CFG first. Private `SourceTextFacts` owns the
+index and collected reference values; no mutable decoder, writer, CFG or liveness
+is shared.
 `fork(error)` retains those facts for the exact same source/architecture/options
 while creating an empty queue and independent patch budget. A child can outlive its
 parent, but the immutable, unmoved source **code object** must outlive all forks.
@@ -447,11 +449,22 @@ Replacement/query/fork are the consumers of reusable ownership. A private
 `SourceTextFacts` owns the full-text index and collected references behind
 `shared_ptr<const ...>`; it does not own the source ELF. Instrumentor performs a
 standalone full-section decode when no existing index is available, using the
-same decoder-selection policy as observation. A fork shares only those immutable
-facts. Each Instrumentor creates its own decoder. Source admission checks complete
-4/8/12-byte extents and incoming references; final branch splices preserve those
+same decoder-selection policy as observation. For symbol-bounded RDNA4 alignment,
+it instead reuses the original CFG so fallthrough and returning calls into a gap
+retain the shared rejection rules. Descriptor entries and known branch destinations
+into those gaps also reject admission. Gap classification belongs only to the
+original `.text`; foreign sections keep their independent decoding. A fork shares
+only the resulting immutable structural facts. Each Instrumentor creates its own
+decoder. Source admission checks complete 4/8/12-byte extents and incoming references;
+final branch splices preserve those
 extents while effective guest bodies can have different lengths. The transaction borrows those inputs for a synchronous call
 and writes only after the entire batch passes. It has no factory, cache or PImpl.
+
+Without an explicit relocation map, ELF emission grows only the final function
+range, including aliases at that start, to cover the cave. Earlier ranges keep
+their original extents so inter-function alignment remains outside function
+bodies in both private analysis and emitted objects. Cave code reached from an
+earlier function is discontiguous and cannot fit its single ELF symbol range.
 
 The orchestrator passes its existing patcher's text or its local assembly buffer;
 it does not emit an intermediate ELF merely to recover text. Diagnostics live

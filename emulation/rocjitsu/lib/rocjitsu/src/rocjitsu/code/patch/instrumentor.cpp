@@ -1094,6 +1094,7 @@ bool Instrumentor::ensure_source_facts(TextEditError &error) {
   }
   auto facts = std::make_shared<SourceTextFacts>();
   const Section &text = *obj_.text_sections().front();
+  const TextAlignmentGaps alignment_gaps(obj_, arch_);
   Elf64_Ehdr header = {};
   std::memcpy(&header, obj_.image_data(), sizeof(header));
   const auto record_instruction = [&](const Instruction &instruction, const Section &section,
@@ -1157,6 +1158,23 @@ bool Instrumentor::ensure_source_facts(TextEditError &error) {
       return fail(TextEditErrorCode::UnsupportedReferences, 0, "branch reference overflows");
     return true;
   };
+  const std::span<const uint32_t> text_words(reinterpret_cast<const uint32_t *>(text.data()),
+                                             text.size() / sizeof(uint32_t));
+  for (size_t cursor = 0; cursor < text_words.size(); ++cursor) {
+    const uint64_t byte_offset = cursor * sizeof(uint32_t);
+    if (text_words[cursor] != 0 || !alignment_gaps.contains(byte_offset))
+      continue;
+    // Qualify alignment with the original CFG, including calls that may return
+    // into it. Sources without such gaps retain the linear replacement path.
+    std::string cfg_error;
+    if (!ensure_blocks_built(&cfg_error)) {
+      error = {.code = TextEditErrorCode::InvalidInstruction,
+               .offset = byte_offset,
+               .message = std::move(cfg_error)};
+      return false;
+    }
+    break;
+  }
   if (blocks_built_ && !analysis_object_) {
     // Own the index rather than borrowing storage from the parent Instrumentor.
     for (const std::unique_ptr<BasicBlock> &block : blocks_) {
@@ -1200,6 +1218,15 @@ bool Instrumentor::ensure_source_facts(TextEditError &error) {
       facts->foreign_kernel_entries.push_back(section->vaddr() + kernel.entry_text_offset);
   }
   for (const SourceTextFacts::ControlFlowEdge &edge : facts->flow_edges) {
+    if (edge.destination >= text.vaddr() &&
+        alignment_gaps.contains(edge.destination - text.vaddr())) {
+      error = {.code = TextEditErrorCode::UnsupportedReferences,
+               .offset = edge.source.text_offset.value_or(0),
+               .message = "control flow targets .text alignment"};
+      if (!edge.source.text_offset)
+        error.message += " (source VA " + std::to_string(edge.source.address) + ")";
+      return false;
+    }
     if (!edge.fallthrough && !edge.source.text_offset)
       facts->references.branch_addresses.push_back(edge.destination);
   }
