@@ -3,6 +3,7 @@
 
 from types import SimpleNamespace
 from amdisa.codegen.execute import ExecuteContext
+from amdisa.__main__ import _PROFILES
 
 
 from pathlib import Path
@@ -18,7 +19,7 @@ def context(arch, name, dst, src, *, is_vop3=False, result_writer=None):
     return ExecuteContext(
         inst=SimpleNamespace(name=name),
         sem=None,
-        profile=None,
+        profile=_PROFILES[arch](),
         arch_name=arch,
         dst_ops=dst,
         src_ops=src,
