@@ -154,10 +154,12 @@ TEST_F(DdaReduceScatterFabricLLMicrotest, Eligible_ShardBytesMultipleOf16UpTo1Mi
   EXPECT_FALSE(Eligible(kMaxShardBytes / 4 + 4));
 }
 
-TEST_F(DdaReduceScatterFabricLLMicrotest, Eligible_BuffersMustBe16ByteAligned) {
-  void* const misaligned = reinterpret_cast<void*>(0x1008);
-  EXPECT_FALSE(ncclReduceScatterDdaFabricLLEligible(mock_.get(), misaligned, kRecvbuff, 4, ncclFloat32, ncclSum));
-  EXPECT_FALSE(ncclReduceScatterDdaFabricLLEligible(mock_.get(), kSendbuff, misaligned, 4, ncclFloat32, ncclSum));
+// Eligibility ignores the buffers, so ranks whose pointers differ in alignment still agree.
+TEST_F(DdaReduceScatterFabricLLMicrotest, Eligible_IgnoresBufferAlignment) {
+  char* const base = reinterpret_cast<char*>(0x10000);
+  EXPECT_TRUE(ncclReduceScatterDdaFabricLLEligible(mock_.get(), base + 8, kRecvbuff, 4, ncclFloat32, ncclSum));
+  EXPECT_TRUE(ncclReduceScatterDdaFabricLLEligible(mock_.get(), kSendbuff, base + 4, 4, ncclFloat32, ncclSum));
+  EXPECT_TRUE(ncclReduceScatterDdaFabricLLEligible(mock_.get(), base + 2, base + 2, 8, ncclBfloat16, ncclSum));
 }
 
 TEST_F(DdaReduceScatterFabricLLMicrotest, Eligible_ScratchMustHoldBothBanksOfFixedSlots) {

@@ -119,6 +119,8 @@ static ncclResult_t ncclReduceScatterDdaFabricLLTyped(const void* sendbuff, void
 
 bool ncclReduceScatterDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t recvcount,
                                           ncclDataType_t datatype, ncclRedOp_t op) {
+  (void)sendbuff;
+  (void)recvbuff;
   if (comm == nullptr || comm->bootstrap == nullptr) {
     return false;
   }
@@ -141,11 +143,6 @@ bool ncclReduceScatterDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, 
   const size_t bytes = recvcount * ncclTypeSize(datatype); // per-rank shard
 
   if (bytes % 16 != 0) {
-    return false;
-  }
-  // The kernels access both user buffers in 32-bit words.
-  // The 16B rule matches LL128, so both tiers reject the same buffers.
-  if (!dda::common::ddaUserBuffers16ByteAligned(sendbuff, recvbuff)) {
     return false;
   }
   // Slot holds kDdaLLRsMaxBytes of payload (stride = cap/8 packets).
