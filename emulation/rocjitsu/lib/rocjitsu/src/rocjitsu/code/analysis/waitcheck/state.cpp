@@ -1125,6 +1125,28 @@ util::Result WaitcheckStateOps::apply_memory_wait(PendingState &state, WaitCount
     for (auto &source : state.pending[counter_index(WaitCounterKind::VmVsrc)])
       source.younger_source_primaries &= ~primary;
   }
+  if (arch == ROCJITSU_CODE_ARCH_RDNA1 && counter == WaitCounterKind::Ds && count == 0) {
+    // A fully drained native DS operation has read its scalar inputs. Match
+    // the GFX10 source to the same operation's completion. Partial waits need
+    // pathwise proof that every younger DS request issued with active EXEC.
+    const auto &primary = state.pending[counter_index(counter)];
+    auto &sources = state.pending[counter_index(WaitCounterKind::VmVsrc)];
+    std::erase_if(sources, [&](const PendingEvent &source) {
+      if (source.kind != WaitEventKind::Gfx10ScalarSource || !source.implies_active_exec)
+        return false;
+      bool matched = false;
+      for (const auto &event : primary) {
+        if (event.kind != WaitEventKind::Ds || event.section_name != source.section_name ||
+            event.section_offset != source.section_offset ||
+            event.file_offset != source.file_offset || event.instruction != source.instruction)
+          continue;
+        matched = true;
+        if (!event.present_on_all_paths)
+          return false;
+      }
+      return matched;
+    });
+  }
   if (count != 0) {
     // A primary-counter wait can complete an operation even when a younger
     // counter-only request has no VM_VSRC facet. Correlate existing facets by

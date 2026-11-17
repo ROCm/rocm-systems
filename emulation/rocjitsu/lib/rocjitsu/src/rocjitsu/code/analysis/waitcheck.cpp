@@ -1504,6 +1504,7 @@ private:
     indexed_loop_parity_ = false;
     loop_parity_.reset();
     path_mask_inputs_.clear();
+    cfg_ds_wait_offsets_.clear();
     cfg_has_scratch_zero_exit_ = false;
     path_exec_inputs_.clear();
     exec_masked_results_.clear();
@@ -1709,6 +1710,9 @@ private:
               if ((*fields)[i] == 0)
                 zero_wait_counters |= uint64_t{1} << i;
             }
+            if (arch == ROCJITSU_CODE_ARCH_RDNA1 &&
+                (*fields)[counter_index(WaitCounterKind::Ds)])
+              cfg_ds_wait_offsets_.push_back(section_offset);
           }
         }
         const bool invalidates_scc = du.defs.contains({RegClass::SCC, 0, 1}) ||
@@ -1896,6 +1900,10 @@ private:
       }
       cfg_views_.push_back(std::move(view));
     }
+    std::ranges::sort(cfg_ds_wait_offsets_);
+    cfg_ds_wait_offsets_.erase(std::unique(cfg_ds_wait_offsets_.begin(),
+                                           cfg_ds_wait_offsets_.end()),
+                               cfg_ds_wait_offsets_.end());
 
     // A deferred write to M0 may complete between the literal and the
     // relative move. Keep the general transfer in that case.
@@ -6167,6 +6175,8 @@ private:
     bool source_implies_nonempty_exec = false;
     bool crossed_exec_expansion = false;
     uint8_t younger_source_primaries = 0;
+    uint8_t gfx10_younger_ds = 0;
+    bool gfx10_ds_source_active = false;
     std::bitset<128> saved_source_exec;
     bool unknown_delay_issue = false;
     bool operator==(const PathProgress &) const = default;
@@ -6600,6 +6610,7 @@ private:
     std::optional<bool> vcc;
     std::optional<bool> scc;
     bool vcc_is_exec = false;
+    bool vcc_subset_exec = false;
     bool scc_is_exec = false;
     Wave32Lanes exec_lanes{};
     Wave32Lanes issue_lanes{};
@@ -6681,6 +6692,7 @@ private:
       masks.vcc.reset();
       masks.scc.reset();
       masks.vcc_is_exec = false;
+      masks.vcc_subset_exec = false;
       masks.scc_is_exec = false;
       masks.exec_lanes = {};
     }
@@ -6696,11 +6708,13 @@ private:
       if (masks.scc_is_exec)
         masks.scc.reset();
       masks.vcc_is_exec = false;
+      masks.vcc_subset_exec = false;
       masks.scc_is_exec = false;
     }
     if (view.scalar_result_dest_vcc) {
       masks.vcc.reset();
       masks.vcc_is_exec = false;
+      masks.vcc_subset_exec = false;
     }
     const Operand *dst = inst.dst_operand(0);
     if (view.invalidates_exec && !writes_only_sgpr) {
@@ -6712,6 +6726,7 @@ private:
         masks.scc = masks.exec;
         masks.scc_is_exec = false;
       }
+      masks.vcc_subset_exec = false;
     }
     std::optional<bool> and_exec_result;
     bool and_exec_relation = false;
@@ -6734,6 +6749,13 @@ private:
       const bool tracks_result = low_selector(dst, amdgpu::kVccSelectorFirst);
       masks.vcc = tracks_result && !masks.scalar_pending_vcc ? and_exec_result : std::nullopt;
       masks.vcc_is_exec = tracks_result && !masks.scalar_pending_vcc && and_exec_relation;
+      // The lanes in (EXEC & mask) are a subset of EXEC even when mask is
+      // unknown. A nonempty VCC branch therefore proves active EXEC.
+      masks.vcc_subset_exec = tracks_result && !masks.scalar_pending_vcc &&
+                              !masks.scalar_pending_exec && !masks.scalar_pending_unknown &&
+                              inst.mnemonic() == "s_and_b32" &&
+                              (low_selector(inst.src_operand(0), amdgpu::kExecSelectorFirst) ||
+                               low_selector(inst.src_operand(1), amdgpu::kExecSelectorFirst));
     }
     if (view.invalidates_scc && !is_scc_conditional_branch(inst.mnemonic())) {
       masks.scc = masks.scalar_pending_scc ? std::nullopt : and_exec_result;
@@ -6997,6 +7019,11 @@ private:
                           event.kind != WaitEventKind::Gfx10ScalarSource));
     const bool scratch_guard = !scalar_full_drains_only && has_guarded_scratch_result(event);
     const bool resolve_scratch_relative = scratch_guard && cfg_can_resolve_scratch_relative_;
+    const auto ds_wait = std::ranges::upper_bound(cfg_ds_wait_offsets_, event.section_offset);
+    const bool native_ds_wait_between =
+        !before_target && !cfg_has_unknown_successor_ && arch == ROCJITSU_CODE_ARCH_RDNA1 &&
+        event.kind == WaitEventKind::Gfx10ScalarSource && event.instruction.starts_with("ds_") &&
+        ds_wait != cfg_ds_wait_offsets_.end() && *ds_wait < consumer_offset;
     // Every consumer in a neutral run observes the same pending-event state.
     // Reuse one path query for the run instead of repeating the CFG search for
     // every arithmetic use of the same asynchronous load. A producer between
@@ -7035,7 +7062,7 @@ private:
     // Avoid launching the path-sensitive CFG search for the overwhelmingly
     // common compiler pattern of a wait shortly after its producer.
     if (!requires_active_lane && !track_async_issue && !weakened && !scratch_guard &&
-        current_cfg_view_index_ &&
+        !native_ds_wait_between && current_cfg_view_index_ &&
         *current_cfg_view_index_ < cfg_views_.size()) {
       const BasicBlock *current_block = cfg_views_[*current_cfg_view_index_].block;
       if (current_block != nullptr && event.section_offset < consumer_offset &&
@@ -7156,6 +7183,7 @@ private:
         track_masks && wavefront_size_ == 32 &&
         (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5) &&
         has_gfx11_exec_masked_result(event);
+    const bool track_gfx10_ds_completion = track_masks && native_ds_wait_between;
     if (relevant_predicates.empty() && !cfg_has_constant_scc_ && !track_masks && !masked_guard &&
         !parity) {
       // Without a supported repeated scalar predicate there is no correlation
@@ -7251,6 +7279,8 @@ private:
               static_cast<size_t>(key.progress.source_implies_nonempty_exec),
               static_cast<size_t>(key.progress.crossed_exec_expansion),
               static_cast<size_t>(key.progress.younger_source_primaries),
+              static_cast<size_t>(key.progress.gfx10_younger_ds),
+              static_cast<size_t>(key.progress.gfx10_ds_source_active),
               std::hash<std::bitset<128>>{}(key.progress.saved_source_exec),
               static_cast<size_t>(key.progress.delay_id),
               static_cast<size_t>(key.progress.unknown_delay_issue),
@@ -7286,6 +7316,7 @@ private:
           for (auto value : {state.masks.exec, state.masks.vcc, state.masks.scc})
             key.push_back(!value ? '?' : *value ? '1' : '0');
           key.push_back(state.masks.vcc_is_exec ? '1' : '0');
+          key.push_back(state.masks.vcc_subset_exec ? '1' : '0');
           key.push_back(state.masks.scc_is_exec ? '1' : '0');
           key += ':' + std::to_string(state.masks.scalar_pending_counters);
           for (uint16_t reg : state.masks.scalar_pending_sgprs)
@@ -7453,6 +7484,17 @@ private:
         apply_path_pre_dependency_waits(inst, event, arch, state.pending, state.progress, expert,
                                         replacement ? &*replacement : nullptr);
       }
+      if (track_gfx10_ds_completion && state.pending &&
+          state.progress.gfx10_ds_source_active && inst.is_waitcnt()) {
+        const auto fields = replacement ? replacement
+                                        : cfg_explicit_wait_fields(state.block_index, inst, arch);
+        const auto ds = fields ? (*fields)[counter_index(WaitCounterKind::Ds)] : std::nullopt;
+        // Native DS requests complete in issue order within their FIFO.
+        // This wait must have retired the original when enough younger DS
+        // requests are known to have issued on the same path.
+        if (ds && state.progress.gfx10_younger_ds >= *ds)
+          state.pending = false;
+      }
       if (!state.pending) {
         state.crossed_wait = false;
         state.progress.age = 0;
@@ -7462,6 +7504,8 @@ private:
         state.progress.crossed_exec_expansion = false;
         state.progress.saved_source_exec.reset();
         state.progress.younger_source_primaries = 0;
+        state.progress.gfx10_younger_ds = 0;
+        state.progress.gfx10_ds_source_active = false;
         state.progress.delay_id = 0;
         state.progress.unknown_delay_issue = false;
       }
@@ -7490,6 +7534,16 @@ private:
                                   state.masks.exec != true && vector_issue_masked;
       const bool same_producer = inst_view.section_offset == event.section_offset;
       const bool no_result = may_skip_lanes && state.masks.exec == false;
+      uint32_t native_ds_issues = 0;
+      if (track_gfx10_ds_completion && state.masks.exec == true && (inst.flags() & LDS)) {
+        const auto classified = classify_events(inst, arch);
+        if (classified.failed())
+          return feasible_path_cache_[cache_key] = std::nullopt;
+        // GFX10 LGKMCNT charges one position per native LDS instruction.
+        for (const auto &issued : classified.value())
+          if (issued.counter == WaitCounterKind::Ds && issued.kind == WaitEventKind::Ds)
+            ++native_ds_issues;
+      }
       // CDNA3 dedicated VMEM still occupies VMCNT with empty EXEC while the
       // tracked producer is outstanding. VSKIP was handled above.
       if (same_producer &&
@@ -7508,6 +7562,8 @@ private:
           state.progress.crossed_exec_expansion = false;
           state.progress.saved_source_exec.reset();
           state.progress.younger_source_primaries = 0;
+          state.progress.gfx10_younger_ds = 0;
+          state.progress.gfx10_ds_source_active = native_ds_issues != 0;
           // The live physical source implies its original mask had a lane.
           // This evidence applies only to the pending event, never to a CFG edge.
           state.progress.source_implies_nonempty_exec =
@@ -7597,6 +7653,10 @@ private:
           state.progress.age = std::min<uint32_t>(state.progress.age + 1, kMaxTrackedAge);
         }
       }
+      if (track_gfx10_ds_completion && state.pending && !same_producer &&
+          state.progress.gfx10_ds_source_active && native_ds_issues)
+        state.progress.gfx10_younger_ds = std::min<unsigned>(
+            UINT8_MAX, state.progress.gfx10_younger_ds + native_ds_issues);
 
       if (delay_histories && state.pending) {
         // Only a known issue may prove queue progress. Although skipped VALUs
@@ -7777,10 +7837,13 @@ private:
                   continue;
                 auto &mask = *branch == RegClass::EXEC ? successor.masks.exec : successor.masks.vcc;
                 mask = pending_write ? std::optional<bool>{} : std::optional<bool>{edge_nonempty};
-                if (!pending_write && *branch == RegClass::VCC &&
-                    successor.masks.vcc_is_exec) {
-                  successor.masks.exec = edge_nonempty;
+                if (!pending_write && *branch == RegClass::VCC) {
+                  if (successor.masks.vcc_is_exec)
+                    successor.masks.exec = edge_nonempty;
+                  else if (edge_nonempty && successor.masks.vcc_subset_exec)
+                    successor.masks.exec = true;
                   successor.masks.vcc_is_exec = false;
+                  successor.masks.vcc_subset_exec = false;
                 }
                 if (!pending_write && *branch == RegClass::EXEC &&
                     successor.masks.exec_lanes.source &&
@@ -9941,6 +10004,11 @@ private:
       if (state.expert_exec_empty)
         event.regs = {};
       event.implies_active_exec = !event.regs.none();
+    } else if (event.kind == WaitEventKind::Gfx10ScalarSource) {
+      // A native DS completion can discharge this source only when the
+      // operation definitely issued a request. Empty EXEC may still reach
+      // the scalar-source hazard without reserving a DS counter position.
+      event.implies_active_exec = state.exec_nonzero;
     }
     event.check_exec_defs = classification.check_exec_defs;
     event.section_name = std::move(section_name);
@@ -10237,6 +10305,7 @@ private:
   bool indexed_loop_parity_ = false;
   std::optional<LoopParity> loop_parity_;
   std::set<uint16_t> path_mask_inputs_;
+  std::vector<uint64_t> cfg_ds_wait_offsets_;
   bool cfg_has_scratch_zero_exit_ = false;
   bool cfg_can_resolve_scratch_relative_ = false;
   std::set<uint16_t> path_exec_inputs_;

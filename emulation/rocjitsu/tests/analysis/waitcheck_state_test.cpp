@@ -9,6 +9,7 @@
 #include <array>
 #include <memory>
 #include <span>
+#include <tuple>
 
 #include <gtest/gtest.h>
 
@@ -91,6 +92,62 @@ TEST(WaitcheckState, Rdna1ScalarSourceLifetimeRequiresAZeroDependencyWait) {
   EXPECT_EQ(state.pending[index].size(), 1u);
   ASSERT_TRUE(Ops::apply_counter_wait(state, counter, 0, arch).succeeded());
   EXPECT_TRUE(state.pending[index].empty());
+}
+
+TEST(WaitcheckState, Rdna1FullDsWaitReleasesOnlySameOperationSource) {
+  const auto source_index = Ops::counter_index(WaitCounterKind::VmVsrc);
+  const auto ds_index = Ops::counter_index(WaitCounterKind::Ds);
+  auto make_source = [](uint64_t pc) {
+    PendingEvent source;
+    source.counter = WaitCounterKind::VmVsrc;
+    source.kind = WaitEventKind::Gfx10ScalarSource;
+    source.section_name = ".text";
+    source.section_offset = pc;
+    source.instruction = "ds_read_b32 v0, v1";
+    source.regs.expand({RegClass::EXEC, 0, 1});
+    source.implies_active_exec = true;
+    return source;
+  };
+  auto make_primary = [&](uint64_t pc, uint32_t younger) {
+    auto event = make_source(pc);
+    event.counter = WaitCounterKind::Ds;
+    event.kind = WaitEventKind::Ds;
+    event.min_younger = younger;
+    return event;
+  };
+  const auto oldest = make_source(8);
+  const auto newest = make_source(16);
+  PendingState state;
+  state.pending[source_index] = {oldest, newest};
+  state.pending[ds_index] = {make_primary(8, 1), make_primary(16, 0)};
+  ASSERT_TRUE(Ops::apply_memory_wait(state, WaitCounterKind::Ds, 0,
+                                     ROCJITSU_CODE_ARCH_RDNA1).succeeded());
+  EXPECT_TRUE(state.pending[source_index].empty());
+
+  PendingState partial;
+  partial.pending[source_index] = {oldest};
+  partial.pending[ds_index] = {make_primary(8, 1)};
+  ASSERT_TRUE(Ops::apply_memory_wait(partial, WaitCounterKind::Ds, 1,
+                                     ROCJITSU_CODE_ARCH_RDNA1).succeeded());
+  EXPECT_EQ(partial.pending[source_index], std::vector{oldest});
+
+  for (const auto [kind, same_operation, all_paths, active, arch] : {
+           std::tuple{WaitEventKind::FlatLoad, true, true, true, ROCJITSU_CODE_ARCH_RDNA1},
+           std::tuple{WaitEventKind::Ds, false, true, true, ROCJITSU_CODE_ARCH_RDNA1},
+           std::tuple{WaitEventKind::Ds, true, false, true, ROCJITSU_CODE_ARCH_RDNA1},
+           std::tuple{WaitEventKind::Ds, true, true, false, ROCJITSU_CODE_ARCH_RDNA1},
+           std::tuple{WaitEventKind::Ds, true, true, true, ROCJITSU_CODE_ARCH_RDNA2}}) {
+    auto control = PendingState{};
+    control.pending[source_index] = {oldest};
+    control.pending[source_index][0].implies_active_exec = active;
+    auto primary = make_primary(same_operation ? 8 : 12, 1);
+    primary.kind = kind;
+    primary.present_on_all_paths = all_paths;
+    control.pending[ds_index] = {primary};
+    const auto expected_source = control.pending[source_index];
+    ASSERT_TRUE(Ops::apply_memory_wait(control, WaitCounterKind::Ds, 0, arch).succeeded());
+    EXPECT_EQ(control.pending[source_index], expected_source);
+  }
 }
 
 TEST(WaitcheckState, PartialWaitRetiresOnlySufficientlyOldEvents) {
