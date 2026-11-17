@@ -28,98 +28,38 @@
 // tests below are the ones that specifically exercise the *absence* of that
 // registration call, and must not call amdsmi_test_register_node_handle().
 //
-// rsmi_dev_npm_limit_set() (rocm_smi.cc) applies REQUIRE_ROOT_ACCESS before
-// touching any file, so:
-//   - non-root callers always observe AMDSMI_STATUS_NO_PERM, regardless of
-//     whether the board_path/file exists -- this is verifiable without root
-//     and is asserted unconditionally below.
-//   - success / not-supported branches (reached only past the root gate)
-//     require root and are gated with GTEST_SKIP_ following the existing
-//     is_sudo_user() convention used throughout tests/amd_smi_test/main.cc.
-// Since set_npm_board_limit()/rsmi_dev_npm_limit_set() operate on an
-// arbitrary board_path string (not hardcoded to /sys), the root-gated cases
-// use a plain std::filesystem temp directory instead of real /sys mocking.
+// Permission failures are tested with file modes, as in ras_features_test.cc: see
+// SetNpmLimitUnwritableLimitFileIsNoPerm. The board directory is a FakeSysfsTree, since
+// set_npm_board_limit()/rsmi_dev_npm_limit_set() take an arbitrary board_path string.
 
 #include <gtest/gtest.h>
 
 #include <cstdint>
 #include <cstring>
-#include <filesystem>
-#include <fstream>
 #include <limits>
+#include <optional>
 #include <string>
 
 #include "amd_smi/amdsmi.h"
+#include "amd_smi/impl/amd_smi_drm.h"
+#include "amd_smi/impl/amd_smi_gpu_device.h"
 #include "amd_smi/impl/amd_smi_test_internal.h"
 #include "config/amd_smi_config.h"
-#include "rocm_smi/rocm_smi_utils.h"
+#include "test_fixture_utils.h"
 
 #if defined(ENABLE_WSL_BACKEND)
 #include "amd_smi/impl/amd_smi_wsl_device.h"
 #endif  // ENABLE_WSL_BACKEND
 
-namespace fs = std::filesystem;
-
-// On a real WSL2 CI runner, WSLGPUBackend::IsActive() makes every NPM call
-// short-circuit to AMDSMI_STATUS_NOT_SUPPORTED before ever consulting this
-// test's fabricated board_path content (see the ENABLE_WSL_BACKEND guard at
-// the top of each amdsmi_*npm* function in amd_smi.cc). A plain helper
-// function would not work here: GTEST_SKIP_() expands to a `return`, which
-// would only exit the helper, not the TEST() body -- hence a macro.
-#if defined(ENABLE_WSL_BACKEND)
-#define SKIP_IF_WSL_BACKEND_ACTIVE()                                   \
-  do {                                                                 \
-    if (amd::smi::WSLGPUBackend::IsActive()) {                         \
-      GTEST_SKIP_(                                                     \
-          "WSLGPUBackend is active: this NPM call short-circuits to "  \
-          "AMDSMI_STATUS_NOT_SUPPORTED before this test's fabricated " \
-          "board content is ever consulted");                          \
-    }                                                                  \
-  } while (0)
-#else
-#define SKIP_IF_WSL_BACKEND_ACTIVE() \
-  do {                               \
-  } while (0)
-#endif  // ENABLE_WSL_BACKEND
-
 namespace {
 
-// RAII helper identical in spirit to the one in rocm_smi_npm_test.cc; kept
-// local to this file to avoid coupling across unit-test translation units.
-class TempBoardDir {
+// Real amdsmi_init() with GPU discovery, unlike the fixture ScopedAmdsmiInit. Needed where the
+// test depends on discovery: the round trip walks real sockets (amdsmi_get_node_handle() issues
+// DRM ioctls no fixture fakes yet), and the WSL backend only activates during discovery.
+class ScopedRealDiscoveryInit {
  public:
-  TempBoardDir() {
-    path_ = fs::temp_directory_path() /
-            fs::path("amdsmi_npm_limit_test_" + std::to_string(reinterpret_cast<uintptr_t>(this)));
-    fs::create_directories(path_);
-  }
-  ~TempBoardDir() {
-    std::error_code ec;
-    fs::remove_all(path_, ec);
-  }
-  const fs::path& path() const { return path_; }
-  void WriteFile(const std::string& filename, const std::string& contents) const {
-    std::ofstream ofs(path_ / filename);
-    ofs << contents;
-  }
-  std::string ReadFile(const std::string& filename) const {
-    std::ifstream ifs(path_ / filename);
-    std::string line;
-    std::getline(ifs, line);
-    return line;
-  }
-
- private:
-  fs::path path_;
-};
-
-// Small RAII wrapper around amdsmi_init()/amdsmi_shut_down() so each test is
-// self-contained regardless of test execution order (ref-counted, so nesting
-// with other tests' init/shutdown pairs elsewhere in the binary is safe).
-class ScopedAmdSmiInit {
- public:
-  ScopedAmdSmiInit() { status_ = amdsmi_init(AMDSMI_INIT_AMD_GPUS); }
-  ~ScopedAmdSmiInit() {
+  ScopedRealDiscoveryInit() { status_ = amdsmi_init(AMDSMI_INIT_AMD_GPUS); }
+  ~ScopedRealDiscoveryInit() {
     if (status_ == AMDSMI_STATUS_SUCCESS) {
       amdsmi_shut_down();
     }
@@ -128,6 +68,38 @@ class ScopedAmdSmiInit {
 
  private:
   amdsmi_status_t status_;
+};
+
+// amdsmi_init() without hardware discovery, plus a fake ROCm SMI device 0: the NPM entry points
+// call rsmi_dev_npm_*(0, ...), which needs a device 0 even though the board path comes from the
+// handle. For the setters: ROCm SMI is never initialized, so its cached euid stays 0 and the
+// root-only setters run unprivileged. A real init would make them return NO_PERM.
+class NpmTestEnv {
+ public:
+  NpmTestEnv() : device_(tree_.root() + "/card0") {}
+
+ private:
+  ScopedAmdsmiInit init_;
+  FakeSysfsTree tree_;
+  ScopedRocmSmiDevice device_;
+};
+
+// The real amdsmi_init() over a fake KFD and DRM tree with one GPU, for the getters, which need
+// no root.
+class NpmDiscoveredGpuEnv {
+ public:
+  NpmDiscoveredGpuEnv() {
+    WriteGpuNode(tree_, kGpuNode, kGpuCard, kGpuId);
+    topology_.emplace(tree_);
+  }
+
+ private:
+  static constexpr uint32_t kGpuNode = 1;
+  static constexpr uint32_t kGpuCard = 0;
+  static constexpr uint64_t kGpuId = 4242;
+
+  FakeSysfsTree tree_;
+  std::optional<FakeKfdTopology> topology_;
 };
 
 }  // namespace
@@ -147,42 +119,33 @@ class ScopedAmdSmiInit {
 // ---------------------------------------------------------------------
 
 TEST(GpuUnit, SetNpmLimitNullHandleIsInval) {
-  ScopedAmdSmiInit init;
-  REQUIRE_AMDSMI_INIT(init);
+  NpmTestEnv env;
 
   EXPECT_EQ(amdsmi_set_npm_limit(nullptr, 100), AMDSMI_STATUS_INVAL);
 }
 
-TEST(GpuUnit, SetNpmLimitNonRootIsNoPerm) {
-  ScopedAmdSmiInit init;
-  REQUIRE_AMDSMI_INIT(init);
-  SKIP_IF_WSL_BACKEND_ACTIVE();
+TEST(GpuUnit, SetNpmLimitUnwritableLimitFileIsNoPerm) {
+  NpmTestEnv env;
 
-  if (amd::smi::is_sudo_user()) {
-    GTEST_SKIP_(
-        "Running as root: REQUIRE_ROOT_ACCESS gate cannot be exercised here; "
-        "see SetNpmLimitRoot* tests instead");
-  }
-
-  // Any non-empty board path is sufficient: REQUIRE_ROOT_ACCESS in
-  // rsmi_dev_npm_limit_set() rejects before the path is ever touched.
-  std::string board_path = "/tmp/amdsmi_npm_limit_test_nonroot_probe";
+  FakeSysfsTree board;
+  board.WriteFile("npm_status", "enabled");
+  board.WriteFile("max_node_power_limit", "6400");
+  board.WriteFile("cur_node_power_limit", "6000");
+  board.SetPermissions("cur_node_power_limit", 0444);
+  std::string board_path = board.root();
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
-  EXPECT_EQ(amdsmi_set_npm_limit(handle, 100), AMDSMI_STATUS_NO_PERM);
+  auto set_limit = [&] { return amdsmi_set_npm_limit(handle, 100); };
+  EXPECT_EQ(amd::smi::testing::RunAsUnprivilegedUser(set_limit), AMDSMI_STATUS_NO_PERM);
+  // A rejected write leaves the file unchanged.
+  EXPECT_EQ(board.ReadFile("cur_node_power_limit"), "6000");
 }
 
-TEST(GpuUnit, SetNpmLimitRootSuccessWritesValue) {
-  ScopedAmdSmiInit init;
-  REQUIRE_AMDSMI_INIT(init);
-  SKIP_IF_WSL_BACKEND_ACTIVE();
+TEST(GpuUnit, SetNpmLimitSuccessWritesValue) {
+  NpmTestEnv env;
 
-  if (!amd::smi::is_sudo_user()) {
-    GTEST_SKIP_("Invalid permission - Must run as super user");
-  }
-
-  TempBoardDir board;
+  FakeSysfsTree board;
   // NPM must be enabled on this node now that rsmi_dev_npm_limit_set()
   // rejects the write outright when it is not.
   board.WriteFile("npm_status", "enabled");
@@ -191,10 +154,26 @@ TEST(GpuUnit, SetNpmLimitRootSuccessWritesValue) {
   // rsmi_dev_power_cap_set()'s range_get()-before-write pattern).
   board.WriteFile("max_node_power_limit", "6400");
   board.WriteFile("cur_node_power_limit", "0");
-  std::string board_path = board.path().string();
+  std::string board_path = board.root();
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
+  EXPECT_EQ(amdsmi_set_npm_limit(handle, 250), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(board.ReadFile("cur_node_power_limit"), "250");
+}
+
+TEST(GpuUnit, SetNpmLimitOverwritesLongerPreviousValue) {
+  NpmTestEnv env;
+
+  FakeSysfsTree board;
+  board.WriteFile("npm_status", "enabled");
+  board.WriteFile("max_node_power_limit", "6400");
+  board.WriteFile("cur_node_power_limit", "6000");
+  std::string board_path = board.root();
+  amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
+  ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
+
+  // A write that did not truncate would leave "2500".
   EXPECT_EQ(amdsmi_set_npm_limit(handle, 250), AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(board.ReadFile("cur_node_power_limit"), "250");
 }
@@ -207,25 +186,19 @@ TEST(GpuUnit, SetNpmLimitRootSuccessWritesValue) {
 // cur_node_power_limit while NPM is disabled has no defined effect.
 // ---------------------------------------------------------------------
 
-TEST(GpuUnit, SetNpmLimitRootRejectsWhenNpmDisabled) {
-  ScopedAmdSmiInit init;
-  REQUIRE_AMDSMI_INIT(init);
-  SKIP_IF_WSL_BACKEND_ACTIVE();
+TEST(GpuUnit, SetNpmLimitRejectsWhenNpmDisabled) {
+  NpmTestEnv env;
 
-  if (!amd::smi::is_sudo_user()) {
-    GTEST_SKIP_("Invalid permission - Must run as super user");
-  }
-
-  TempBoardDir board;
+  FakeSysfsTree board;
   board.WriteFile("npm_status", "disabled");
   board.WriteFile("max_node_power_limit", "6400");
   board.WriteFile("cur_node_power_limit", "0");
-  std::string board_path = board.path().string();
+  std::string board_path = board.root();
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
   EXPECT_EQ(amdsmi_set_npm_limit(handle, 250), AMDSMI_STATUS_INVAL);
-  // The write must not have happened.
+  // A rejected write leaves the file unchanged.
   EXPECT_EQ(board.ReadFile("cur_node_power_limit"), "0");
 }
 
@@ -239,84 +212,60 @@ TEST(GpuUnit, SetNpmLimitRootRejectsWhenNpmDisabled) {
 // if the max itself can't be read.
 // ---------------------------------------------------------------------
 
-TEST(GpuUnit, SetNpmLimitRootRejectsZero) {
-  ScopedAmdSmiInit init;
-  REQUIRE_AMDSMI_INIT(init);
-  SKIP_IF_WSL_BACKEND_ACTIVE();
+TEST(GpuUnit, SetNpmLimitRejectsZero) {
+  NpmTestEnv env;
 
-  if (!amd::smi::is_sudo_user()) {
-    GTEST_SKIP_("Invalid permission - Must run as super user");
-  }
-
-  TempBoardDir board;
+  FakeSysfsTree board;
   board.WriteFile("npm_status", "enabled");
   board.WriteFile("max_node_power_limit", "6400");
   board.WriteFile("cur_node_power_limit", "6000");
-  std::string board_path = board.path().string();
+  std::string board_path = board.root();
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
   EXPECT_EQ(amdsmi_set_npm_limit(handle, 0), AMDSMI_STATUS_INVAL);
-  // The write must not have happened.
+  // A rejected write leaves the file unchanged.
   EXPECT_EQ(board.ReadFile("cur_node_power_limit"), "6000");
 }
 
-TEST(GpuUnit, SetNpmLimitRootRejectsOverMax) {
-  ScopedAmdSmiInit init;
-  REQUIRE_AMDSMI_INIT(init);
-  SKIP_IF_WSL_BACKEND_ACTIVE();
+TEST(GpuUnit, SetNpmLimitRejectsOverMax) {
+  NpmTestEnv env;
 
-  if (!amd::smi::is_sudo_user()) {
-    GTEST_SKIP_("Invalid permission - Must run as super user");
-  }
-
-  TempBoardDir board;
+  FakeSysfsTree board;
   board.WriteFile("npm_status", "enabled");
   board.WriteFile("max_node_power_limit", "6400");
   board.WriteFile("cur_node_power_limit", "6000");
-  std::string board_path = board.path().string();
+  std::string board_path = board.root();
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
   EXPECT_EQ(amdsmi_set_npm_limit(handle, 6401), AMDSMI_STATUS_INVAL);
-  // The write must not have happened.
+  // A rejected write leaves the file unchanged.
   EXPECT_EQ(board.ReadFile("cur_node_power_limit"), "6000");
 }
 
-TEST(GpuUnit, SetNpmLimitRootRejectsWhenMaxUnreadable) {
-  ScopedAmdSmiInit init;
-  REQUIRE_AMDSMI_INIT(init);
-  SKIP_IF_WSL_BACKEND_ACTIVE();
+TEST(GpuUnit, SetNpmLimitRejectsWhenMaxUnreadable) {
+  NpmTestEnv env;
 
-  if (!amd::smi::is_sudo_user()) {
-    GTEST_SKIP_("Invalid permission - Must run as super user");
-  }
-
-  TempBoardDir board;
+  FakeSysfsTree board;
   board.WriteFile("npm_status", "enabled");
   // Deliberately do not create max_node_power_limit: the platform max is
   // unreadable, so the request must be rejected (fail closed) rather than
   // falling through to an unbounded write.
   board.WriteFile("cur_node_power_limit", "6000");
-  std::string board_path = board.path().string();
+  std::string board_path = board.root();
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
   EXPECT_EQ(amdsmi_set_npm_limit(handle, 250), AMDSMI_STATUS_NOT_SUPPORTED);
-  // The write must not have happened.
+  // A rejected write leaves the file unchanged.
   EXPECT_EQ(board.ReadFile("cur_node_power_limit"), "6000");
 }
 
-TEST(GpuUnit, SetNpmLimitRootRejectsWhenMaxCorrupted) {
-  ScopedAmdSmiInit init;
-  REQUIRE_AMDSMI_INIT(init);
-  SKIP_IF_WSL_BACKEND_ACTIVE();
+TEST(GpuUnit, SetNpmLimitRejectsWhenMaxCorrupted) {
+  NpmTestEnv env;
 
-  if (!amd::smi::is_sudo_user()) {
-    GTEST_SKIP_("Invalid permission - Must run as super user");
-  }
-
-  TempBoardDir board;
+  FakeSysfsTree board;
   // "-1" is a regression case, not generic garbage: std::stoull("-1", ...)
   // is well-defined C++ behavior that successfully parses to UINT64_MAX
   // (leading '-' negates modulo 2^64) rather than throwing, so a naive
@@ -324,12 +273,12 @@ TEST(GpuUnit, SetNpmLimitRootRejectsWhenMaxCorrupted) {
   // huge platform max -- which would let any limit through the
   // `limit > max_limit` check. The platform max must fail to parse and be
   // treated as unreadable (fail closed), exactly like the missing-file case
-  // in SetNpmLimitRootRejectsWhenMaxUnreadable above, not silently accepted
+  // in SetNpmLimitRejectsWhenMaxUnreadable above, not silently accepted
   // as UINT64_MAX.
   board.WriteFile("npm_status", "enabled");
   board.WriteFile("max_node_power_limit", "-1");
   board.WriteFile("cur_node_power_limit", "6000");
-  std::string board_path = board.path().string();
+  std::string board_path = board.root();
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
@@ -339,24 +288,34 @@ TEST(GpuUnit, SetNpmLimitRootRejectsWhenMaxCorrupted) {
   // RSMI_STATUS_UNEXPECTED_DATA, which rsmi_dev_npm_limit_set() propagates
   // as-is (fail closed) and which maps to AMDSMI_STATUS_UNEXPECTED_DATA.
   EXPECT_EQ(amdsmi_set_npm_limit(handle, 250), AMDSMI_STATUS_UNEXPECTED_DATA);
-  // The write must not have happened.
+  // A rejected write leaves the file unchanged.
   EXPECT_EQ(board.ReadFile("cur_node_power_limit"), "6000");
 }
 
-TEST(GpuUnit, SetNpmLimitRootAcceptsInRange) {
-  ScopedAmdSmiInit init;
-  REQUIRE_AMDSMI_INIT(init);
-  SKIP_IF_WSL_BACKEND_ACTIVE();
+TEST(GpuUnit, SetNpmLimitRejectsWhenMaxIsNotANumber) {
+  NpmTestEnv env;
 
-  if (!amd::smi::is_sudo_user()) {
-    GTEST_SKIP_("Invalid permission - Must run as super user");
-  }
+  FakeSysfsTree board;
+  board.WriteFile("npm_status", "enabled");
+  board.WriteFile("max_node_power_limit", "not-a-number");
+  board.WriteFile("cur_node_power_limit", "6000");
+  std::string board_path = board.root();
+  amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
+  ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
-  TempBoardDir board;
+  EXPECT_EQ(amdsmi_set_npm_limit(handle, 250), AMDSMI_STATUS_UNEXPECTED_DATA);
+  // A rejected write leaves the file unchanged.
+  EXPECT_EQ(board.ReadFile("cur_node_power_limit"), "6000");
+}
+
+TEST(GpuUnit, SetNpmLimitAcceptsInRange) {
+  NpmTestEnv env;
+
+  FakeSysfsTree board;
   board.WriteFile("npm_status", "enabled");
   board.WriteFile("max_node_power_limit", "6400");
   board.WriteFile("cur_node_power_limit", "0");
-  std::string board_path = board.path().string();
+  std::string board_path = board.root();
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
@@ -364,46 +323,110 @@ TEST(GpuUnit, SetNpmLimitRootAcceptsInRange) {
   EXPECT_EQ(board.ReadFile("cur_node_power_limit"), "6400");
 }
 
-TEST(GpuUnit, SetNpmLimitRootMissingFileIsNotSupported) {
-  ScopedAmdSmiInit init;
-  REQUIRE_AMDSMI_INIT(init);
-  SKIP_IF_WSL_BACKEND_ACTIVE();
+TEST(GpuUnit, SetNpmLimitMissingFileIsNotSupported) {
+  NpmTestEnv env;
 
-  if (!amd::smi::is_sudo_user()) {
-    GTEST_SKIP_("Invalid permission - Must run as super user");
-  }
-
-  TempBoardDir board;
+  FakeSysfsTree board;
   board.WriteFile("npm_status", "enabled");
   // max_node_power_limit present (so the new range check itself succeeds),
   // but cur_node_power_limit deliberately absent -- exercises the write-time
   // NOT_SUPPORTED path in set_npm_board_limit(), distinct from
-  // SetNpmLimitRootRejectsWhenMaxUnreadable above.
+  // SetNpmLimitRejectsWhenMaxUnreadable above.
   board.WriteFile("max_node_power_limit", "6400");
-  std::string board_path = board.path().string();
+  std::string board_path = board.root();
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
   EXPECT_EQ(amdsmi_set_npm_limit(handle, 250), AMDSMI_STATUS_NOT_SUPPORTED);
 }
 
-TEST(GpuUnit, SetNpmLimitRootMissingBoardDirIsNotSupported) {
-  ScopedAmdSmiInit init;
-  REQUIRE_AMDSMI_INIT(init);
-  SKIP_IF_WSL_BACKEND_ACTIVE();
+TEST(GpuUnit, SetNpmLimitMissingBoardDirIsNotSupported) {
+  NpmTestEnv env;
 
-  if (!amd::smi::is_sudo_user()) {
-    GTEST_SKIP_("Invalid permission - Must run as super user");
-  }
-
-  fs::path missing = fs::temp_directory_path() / "amdsmi_npm_limit_test_missing_board_dir";
-  std::error_code ec;
-  fs::remove_all(missing, ec);
-  std::string board_path = missing.string();
+  FakeSysfsTree board;  // the board directory below is never created
+  std::string board_path = board.root() + "/missing_board";
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
   EXPECT_EQ(amdsmi_set_npm_limit(handle, 250), AMDSMI_STATUS_NOT_SUPPORTED);
+}
+
+TEST(GpuUnit, SetNpmLimitDirectoryInPlaceOfLimitFileIsNotSupported) {
+  NpmTestEnv env;
+
+  FakeSysfsTree board;
+  board.WriteFile("npm_status", "enabled");
+  board.WriteFile("max_node_power_limit", "6400");
+  // WriteFile() creates parent directories, so this makes cur_node_power_limit a directory.
+  board.WriteFile("cur_node_power_limit/placeholder", "");
+  std::string board_path = board.root();
+  amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
+  ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
+
+  EXPECT_EQ(amdsmi_set_npm_limit(handle, 100), AMDSMI_STATUS_NOT_SUPPORTED);
+}
+
+// ---------------------------------------------------------------------
+// amdsmi_get_npm_info() -- current_node_power from board/node_power
+//
+// Only npm_status is required; an unreadable or malformed node_power is reported as the
+// UINT32_MAX sentinel rather than failing the call.
+// ---------------------------------------------------------------------
+
+TEST(GpuUnit, GetNpmInfoReportsCurrentNodePower) {
+  NpmDiscoveredGpuEnv env;
+
+  FakeSysfsTree board;
+  board.WriteFile("npm_status", "enabled");
+  board.WriteFile("node_power", "777");
+  std::string board_path = board.root();
+  amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
+  ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
+
+  amdsmi_npm_info_t npm_info{};
+  EXPECT_EQ(amdsmi_get_npm_info(handle, &npm_info), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(npm_info.current_node_power, 777u);
+}
+
+TEST(GpuUnit, GetNpmInfoMissingNodePowerReportsSentinel) {
+  NpmDiscoveredGpuEnv env;
+
+  FakeSysfsTree board;
+  board.WriteFile("npm_status", "enabled");
+  std::string board_path = board.root();
+  amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
+  ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
+
+  amdsmi_npm_info_t npm_info{};
+  EXPECT_EQ(amdsmi_get_npm_info(handle, &npm_info), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(npm_info.current_node_power, std::numeric_limits<uint32_t>::max());
+}
+
+TEST(GpuUnit, GetNpmInfoNonNumericNodePowerReportsSentinel) {
+  NpmDiscoveredGpuEnv env;
+
+  FakeSysfsTree board;
+  board.WriteFile("npm_status", "enabled");
+  board.WriteFile("node_power", "not-a-number");
+  std::string board_path = board.root();
+  amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
+  ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
+
+  amdsmi_npm_info_t npm_info{};
+  EXPECT_EQ(amdsmi_get_npm_info(handle, &npm_info), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(npm_info.current_node_power, std::numeric_limits<uint32_t>::max());
+}
+
+TEST(GpuUnit, GetNpmInfoMissingBoardDirIsNotSupported) {
+  NpmDiscoveredGpuEnv env;
+
+  FakeSysfsTree board;  // the board directory below is never created
+  std::string board_path = board.root() + "/missing_board";
+  amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
+  ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
+
+  amdsmi_npm_info_t npm_info{};
+  EXPECT_EQ(amdsmi_get_npm_info(handle, &npm_info), AMDSMI_STATUS_NOT_SUPPORTED);
 }
 
 // ---------------------------------------------------------------------
@@ -430,8 +453,7 @@ TEST(GpuUnit, SetNpmLimitRootMissingBoardDirIsNotSupported) {
 // ---------------------------------------------------------------------
 
 TEST(GpuUnit, GetNpmInfoRejectsUnregisteredHandle) {
-  ScopedAmdSmiInit init;
-  REQUIRE_AMDSMI_INIT(init);
+  NpmDiscoveredGpuEnv env;
 
   // Heap-allocated (not stack-allocated) so this address cannot alias a
   // stack slot some other test in this binary already passed to
@@ -441,8 +463,8 @@ TEST(GpuUnit, GetNpmInfoRejectsUnregisteredHandle) {
   // legitimately hand back again for a later test's stack frame. A fresh
   // heap allocation that nothing in this file ever registers cannot collide
   // with that set.
-  auto unregistered_board_path =
-      std::make_unique<std::string>("/tmp/amdsmi_npm_limit_test_unregistered_probe");
+  FakeSysfsTree board;  // the board directory below is never created
+  auto unregistered_board_path = std::make_unique<std::string>(board.root() + "/missing_board");
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(unregistered_board_path.get());
 
   amdsmi_npm_info_t npm_info{};
@@ -450,57 +472,29 @@ TEST(GpuUnit, GetNpmInfoRejectsUnregisteredHandle) {
 }
 
 TEST(GpuUnit, SetNpmLimitRejectsUnregisteredHandle) {
-  ScopedAmdSmiInit init;
-  REQUIRE_AMDSMI_INIT(init);
+  NpmTestEnv env;
 
   // See GetNpmInfoRejectsUnregisteredHandle above for why this must be
   // heap-allocated rather than a stack-local std::string.
-  auto unregistered_board_path =
-      std::make_unique<std::string>("/tmp/amdsmi_npm_limit_test_unregistered_probe2");
+  FakeSysfsTree board;  // the board directory below is never created
+  auto unregistered_board_path = std::make_unique<std::string>(board.root() + "/missing_board");
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(unregistered_board_path.get());
 
-  // AMDSMI_STATUS_INVAL must be returned regardless of caller privilege: the
-  // registry check runs before REQUIRE_ROOT_ACCESS is ever reached, whether
-  // or not this test process happens to be root.
+  // The registry check runs first, before any board file is touched.
   EXPECT_EQ(amdsmi_set_npm_limit(handle, 100), AMDSMI_STATUS_INVAL);
-}
-
-TEST(GpuUnit, SetNpmLimitAcceptsHandleAfterTestRegistration) {
-  ScopedAmdSmiInit init;
-  REQUIRE_AMDSMI_INIT(init);
-  SKIP_IF_WSL_BACKEND_ACTIVE();
-
-  if (amd::smi::is_sudo_user()) {
-    GTEST_SKIP_(
-        "Running as root: this test isolates the registry check from "
-        "REQUIRE_ROOT_ACCESS by asserting NO_PERM (not INVAL); see "
-        "SetNpmLimitNonRootIsNoPerm for the rationale");
-  }
-
-  // Same handle shape as SetNpmLimitRejectsUnregisteredHandle above, but
-  // registered first: the registry check must pass, and the request must
-  // proceed to (and be stopped by) REQUIRE_ROOT_ACCESS instead of being
-  // rejected as INVAL -- demonstrating the fix does not reject legitimately
-  // vended handles.
-  std::string board_path = "/tmp/amdsmi_npm_limit_test_registered_probe";
-  amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
-  ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
-
-  EXPECT_EQ(amdsmi_set_npm_limit(handle, 100), AMDSMI_STATUS_NO_PERM);
 }
 
 #if defined(ENABLE_WSL_BACKEND)
 // When the WSL backend is active, amdsmi_set_npm_limit() must short-circuit
 // to AMDSMI_STATUS_NOT_SUPPORTED before ever touching board_path/sysfs (see
 // the `#ifdef ENABLE_WSL_BACKEND` / WSLGPUBackend::IsActive() guard at the
-// top of amdsmi_set_npm_limit() in amd_smi.cc). This is only observable on a
-// real WSL2 machine where amdsmi_init() -> populate_amd_gpu_devices() ->
-// WSLGPUBackend::TryPopulate() actually succeeded (requires /dev/dxg and a
-// loadable librocdxg); otherwise IsActive() stays false even when compiled
-// with ENABLE_WSL_BACKEND=ON, so this test skips itself in that case rather
-// than asserting anything about the (untaken) native-Linux path.
+// top of amdsmi_set_npm_limit() in amd_smi.cc).
+//
+// End-to-end needs: a real WSL2 machine, i.e. /dev/dxg and a loadable librocdxg, so that
+// WSLGPUBackend::TryPopulate() succeeds during amdsmi_init(). IsActive() is a file-static set only
+// there and has no test seam, so anywhere else this test skips.
 TEST(GpuUnit, SetNpmLimitNotSupportedWhenWslBackendActive) {
-  ScopedAmdSmiInit init;
+  ScopedRealDiscoveryInit init;
   REQUIRE_AMDSMI_INIT(init);
 
   if (!amd::smi::WSLGPUBackend::IsActive()) {
@@ -512,7 +506,8 @@ TEST(GpuUnit, SetNpmLimitNotSupportedWhenWslBackendActive) {
 
   // Any board path is sufficient: the WSL-backend guard runs before the
   // path is ever dereferenced.
-  std::string board_path = "/tmp/amdsmi_npm_limit_test_wsl_probe";
+  FakeSysfsTree board;  // the board directory below is never created
+  std::string board_path = board.root() + "/missing_board";
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
@@ -529,8 +524,8 @@ TEST(GpuUnit, SetNpmLimitNotSupportedWhenWslBackendActive) {
 // amdsmi_get_npm_info()) -- see the "Set npm power limit" design doc. It is
 // still populated by resolving the board directory from the real device's
 // enumeration info (drm_render) via amdsmi_get_node_handle(), not from a
-// caller-supplied path, so it cannot be pointed at a temp directory the way
-// amdsmi_set_npm_limit() can. This test therefore validates against whatever
+// caller-supplied path. The GetNpmInfo*NodePower* tests above cover the file
+// reads through a fabricated handle; this test validates against whatever
 // the current hardware reports: either a concrete value (if
 // board/node_power exists) or the UINT32_MAX sentinel/"N/A" case (if it
 // doesn't, e.g. no board/ directory on this platform) -- both are valid,
@@ -541,8 +536,11 @@ TEST(GpuUnit, SetNpmLimitNotSupportedWhenWslBackendActive) {
 // the file header comment above), so on hardware/mocks where that gate is
 // not satisfied this test will skip rather than fail -- it is exercising the
 // real acquisition path end-to-end, not a test-fabricated handle.
+//
+// End-to-end needs: the amdgpu driver loaded with a real GPU, and either that hardware's DRM
+// ioctls or a fake for them (none exists yet), since amdsmi_get_node_handle() issues them.
 TEST(GpuUnit, GetNpmInfoCurrentNodePowerRoundTrip) {
-  ScopedAmdSmiInit init;
+  ScopedRealDiscoveryInit init;
   REQUIRE_AMDSMI_INIT(init);
 
   amdsmi_socket_handle sockets[16];
@@ -597,21 +595,12 @@ TEST(GpuUnit, GetNpmInfoCurrentNodePowerRoundTrip) {
 }
 
 TEST(GpuUnit, GetPowerInfoNullInfoIsInval) {
-  ScopedAmdSmiInit init;
-  REQUIRE_AMDSMI_INIT(init);
+  ScopedAmdsmiInit smi_init;
+  FakeSysfsTree tree;
+  ScopedRocmSmiDevice rocm_device(tree.root() + "/card0");
+  amd::smi::AMDSmiDrm drm;
+  amd::smi::AMDSmiGPUDevice gpu_device(rocm_device.index(), "card0", amdsmi_bdf_t{}, drm);
+  amd::smi::testing::ScopedProcessorRegistration registration(&gpu_device);
 
-  amdsmi_socket_handle sockets[16];
-  uint32_t socket_count = 16;
-  ASSERT_EQ(amdsmi_get_socket_handles(&socket_count, sockets), AMDSMI_STATUS_SUCCESS);
-  if (socket_count == 0) {
-    GTEST_SKIP_("No sockets discovered on this system");
-  }
-  amdsmi_processor_handle procs[16];
-  uint32_t proc_count = 16;
-  ASSERT_EQ(amdsmi_get_processor_handles(sockets[0], &proc_count, procs), AMDSMI_STATUS_SUCCESS);
-  if (proc_count == 0) {
-    GTEST_SKIP_("No processors discovered on this system");
-  }
-
-  EXPECT_EQ(amdsmi_get_power_info(procs[0], nullptr), AMDSMI_STATUS_INVAL);
+  EXPECT_EQ(amdsmi_get_power_info(registration.handle(), nullptr), AMDSMI_STATUS_INVAL);
 }

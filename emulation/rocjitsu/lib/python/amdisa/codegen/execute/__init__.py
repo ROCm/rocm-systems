@@ -108,9 +108,7 @@ def _register_handlers() -> None:
         gen_vector_permlane_family,
         gen_vector_permlane_idx_gen,
         gen_vector_cvt_pk,
-        gen_vector_cvt_scale,
         gen_cvt_fp8,
-        gen_cvt_scalef32,
     )
     from amdisa.codegen.execute.packed import (
         gen_pk_binop,
@@ -316,11 +314,7 @@ def _register_handlers() -> None:
         ),
         arch_name=c.arch_name,
     )
-    DISPATCH['vector_cvt_scale'] = lambda c: gen_vector_cvt_scale(
-        c.dst_ops, c.src_ops, c.cls, c.op, c.arch_name
-    )
     DISPATCH['cvt_fp8'] = lambda c: gen_cvt_fp8(c)
-    DISPATCH['cvt_scalef32'] = lambda c: gen_cvt_scalef32(c)
 
     # Packed
     DISPATCH['pk_binop'] = lambda c: gen_pk_binop(

@@ -18,10 +18,10 @@ use crate::memory::*;
 use crate::runtime::{boundary, initialized_mut, lock, map_error};
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_memory_copy")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Copies bytes between validated host and GPU memory ranges.
 pub unsafe extern "C" fn hsa_memory_copy(
     dst: *mut c_void,
@@ -79,7 +79,7 @@ pub unsafe extern "C" fn hsa_memory_copy(
                 *slot = Some(base);
             }
         }
-        let stop = runtime.stop_workers.clone();
+        let stop = runtime.operation_stop();
         let health = runtime.health.clone();
         drop(guard);
 
@@ -99,10 +99,10 @@ pub unsafe extern "C" fn hsa_memory_copy(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_memory_fill")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Fills an allocation with repeated 32-bit values.
 pub unsafe extern "C" fn hsa_amd_memory_fill(
     pointer: *mut c_void,
@@ -185,21 +185,30 @@ pub unsafe extern "C" fn hsa_amd_memory_fill(
             return status;
         }
         let device = runtime.gpus[index].device.clone();
-        let stop = runtime.stop_workers.clone();
+        let compute =
+            !runtime.sdma_enabled || !device.gpu().is_ok_and(|gpu| gpu.supports_linear_copy());
+        let stop = runtime.operation_stop();
         let health = runtime.health.clone();
         drop(guard);
 
-        let (status, may_be_live) = match device.gpu() {
-            Ok(gpu) => {
-                // SAFETY: The complete writable GPU range was checked above.
-                // Its allocation borrow and in-flight token remain live until
-                // retirement or process teardown after an uncertain result.
-                match unsafe { gpu.fill_u32(address, value, native_count, &stop) } {
-                    Ok(()) => (SUCCESS, false),
-                    Err(failure) => (map_error(failure.error), failure.operands_may_be_live),
-                }
+        let (status, may_be_live) = if compute {
+            match compute_copy::fill(&device, address, value, native_count) {
+                Ok(()) => (SUCCESS, false),
+                Err(failure) => (failure.status, failure.operands_may_be_live),
             }
-            Err(error) => (map_error(error), false),
+        } else {
+            match device.gpu() {
+                Ok(gpu) => {
+                    // SAFETY: The complete writable GPU range was checked above.
+                    // Its allocation borrow and in-flight token remain live until
+                    // retirement or process teardown after an uncertain result.
+                    match unsafe { gpu.fill_u32(address, value, native_count, &stop) } {
+                        Ok(()) => (SUCCESS, false),
+                        Err(failure) => (map_error(failure.error), failure.operands_may_be_live),
+                    }
+                }
+                Err(error) => (map_error(error), false),
+            }
         };
         if may_be_live {
             health.quarantine();
@@ -210,10 +219,10 @@ pub unsafe extern "C" fn hsa_amd_memory_fill(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_svm_attributes_set")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Sets SVM policy attributes for a virtual address range.
 pub unsafe extern "C" fn hsa_amd_svm_attributes_set(
     pointer: *mut c_void,
@@ -253,10 +262,10 @@ pub unsafe extern "C" fn hsa_amd_svm_attributes_set(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_svm_attributes_get")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Reads SVM policy attributes for a virtual address range.
 pub unsafe extern "C" fn hsa_amd_svm_attributes_get(
     pointer: *mut c_void,
@@ -294,10 +303,10 @@ pub unsafe extern "C" fn hsa_amd_svm_attributes_get(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_svm_prefetch_async")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Prefetches an SVM range after its dependency signals complete.
 pub unsafe extern "C" fn hsa_amd_svm_prefetch_async(
     pointer: *mut c_void,
@@ -371,6 +380,21 @@ pub unsafe extern "C" fn hsa_amd_svm_prefetch_async(
         if completion.handle != 0 {
             signal_handles.push(completion);
         }
+        let end = address + size;
+        let mut reservations = Vec::new();
+        for (&base, reservation) in runtime.memory_state.vmem_reservations.range(..end as usize) {
+            if reservation.address.info().address + reservation.address.info().size > address {
+                if reservations.try_reserve(1).is_err() {
+                    return OUT_OF_RESOURCES;
+                }
+                reservations.push(Some(base));
+            }
+        }
+        let stop = runtime.operation_stop();
+        let cleanup = match runtime.inherit_cleanup() {
+            Ok(cleanup) => cleanup,
+            Err(status) => return status,
+        };
         let mut pending = match PendingAsyncRetention::new(
             &mut runtime.signal_state,
             &mut runtime.memory_state,
@@ -379,26 +403,29 @@ pub unsafe extern "C" fn hsa_amd_svm_prefetch_async(
             Ok(pending) => pending,
             Err(status) => return status,
         };
-        let stop = runtime.stop_workers.clone();
+        for &base in reservations.iter().flatten() {
+            if let Err(status) = pending.retain_memory(base) {
+                return status;
+            }
+        }
         let worker_handles = pending.handles.clone();
         let dependency_len = dependency_slice.len();
         let worker = match thread::Builder::new()
             .name("rocddi-svm-prefetch".into())
             .spawn(move || {
+                let _lease = cleanup.map(crate::runtime::ApiLeaseScope::enter);
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     svm_prefetch_worker(
                         service,
                         stop,
                         &worker_handles[..dependency_len],
-                        completion,
                         address,
                         size,
                         location,
-                    );
+                    )
                 }));
-                if result.is_err() {
-                    finish_async_signal(completion, false);
-                }
+                release_async_resources(&[], &reservations, false);
+                finish_async_signal(completion, matches!(result, Ok(true)));
                 release_async_resources(&worker_handles, &[], false);
             }) {
             Ok(worker) => worker,
@@ -411,41 +438,38 @@ pub unsafe extern "C" fn hsa_amd_svm_prefetch_async(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_svm_discard_batch_async")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Discards the requested SVM ranges asynchronously.
 pub unsafe extern "C" fn hsa_amd_svm_discard_batch_async(
     pointers: *mut *mut c_void,
     sizes: *mut usize,
     count: u32,
-    _dependency_count: u32,
-    _dependencies: *const HsaSignal,
-    _completion: HsaSignal,
+    dependency_count: u32,
+    dependencies: *const HsaSignal,
+    completion: HsaSignal,
 ) -> Status {
-    boundary(|| {
-        let guard = match lock() {
-            Ok(guard) => guard,
-            Err(status) => return status,
-        };
-        if guard.as_ref().is_none() {
-            return NOT_INITIALIZED;
-        }
-        if pointers.is_null() || sizes.is_null() || count == 0 {
-            return INVALID_ARGUMENT;
-        }
-        // GFX1201 reports XNACK disabled through hsa_system_get_info, so ROCr
-        // rejects this operation before inspecting dependencies or ranges.
-        XNACK_DISABLED
-    })
+    // SAFETY: The common implementation validates and copies the C arrays.
+    unsafe {
+        crate::memory::svm::submit_discard(
+            pointers,
+            sizes,
+            count,
+            None,
+            dependency_count,
+            dependencies,
+            completion,
+        )
+    }
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_svm_discard_and_prefetch_batch_async")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Discards and then prefetches SVM ranges asynchronously.
 pub unsafe extern "C" fn hsa_amd_svm_discard_and_prefetch_batch_async(
     pointers: *mut *mut c_void,
@@ -453,28 +477,20 @@ pub unsafe extern "C" fn hsa_amd_svm_discard_and_prefetch_batch_async(
     count: u32,
     destination_agents: *const HsaAgent,
     destination_count: u32,
-    _dependency_count: u32,
-    _dependencies: *const HsaSignal,
-    _completion: HsaSignal,
+    dependency_count: u32,
+    dependencies: *const HsaSignal,
+    completion: HsaSignal,
 ) -> Status {
-    boundary(|| {
-        let guard = match lock() {
-            Ok(guard) => guard,
-            Err(status) => return status,
-        };
-        if guard.as_ref().is_none() {
-            return NOT_INITIALIZED;
-        }
-        if pointers.is_null()
-            || sizes.is_null()
-            || count == 0
-            || destination_agents.is_null()
-            || destination_count == 0
-        {
-            return INVALID_ARGUMENT;
-        }
-        // See hsa_amd_svm_discard_batch_async: XNACK is unavailable on the
-        // currently supported target, matching ROCr's required status.
-        XNACK_DISABLED
-    })
+    // SAFETY: The common implementation validates and copies the C arrays.
+    unsafe {
+        crate::memory::svm::submit_discard(
+            pointers,
+            sizes,
+            count,
+            Some((destination_agents, destination_count)),
+            dependency_count,
+            dependencies,
+            completion,
+        )
+    }
 }
