@@ -23,6 +23,7 @@ downstream consumer of the library.
 ### Added
 
 - `storage_t` accepts a RocPD schema version: 3.0.0 and 3.0.1 are writable, and other versions throw at construction.
+- `storage_t::get_writer_schema_version()` returns the RocPD schema the writer creates for this storage.
 - Windows/MSVC build support. When SQLite is fetched, Windows downloads the
   official amalgamation zip instead of running `./configure`.
 

@@ -32,18 +32,21 @@ struct storage_t::impl
     [[nodiscard]] std::string get_uuid() const;
 
     [[nodiscard]] profiler_hub::version_t get_storage_version() const;
+    [[nodiscard]] profiler_hub::version_t get_writer_schema_version() const;
 
     std::shared_ptr<data_storage::sqlite_backend> create_database(
         const storage_type_t& storage_type);
 
 private:
-    profiler_hub::version_t m_schema_version{};
+    profiler_hub::version_t m_schema_version{};  // The schema the writer will create.
 
     storage_type_t                                m_storage_type{ storage_type_t::none };
     std::shared_ptr<data_storage::sqlite_backend> m_database{ nullptr };
 
     std::string m_database_path;
     std::string m_uuid;
+
+    profiler_hub::version_t m_library_version{};
 
     struct database_factory_t;
 };
