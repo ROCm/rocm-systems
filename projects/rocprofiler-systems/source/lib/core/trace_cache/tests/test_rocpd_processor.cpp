@@ -1634,6 +1634,87 @@ TEST_F(rocpd_write_read_test_interface, process_extdata_contains_output_path_and
         << (output_path / output_file);
 }
 
+namespace
+{
+// Asserts that `extdata` is an object whose output_path/output_file name `db_path`.
+void
+expect_extdata_names_database(const nlohmann::json& extdata, const std::string& db_path)
+{
+    ASSERT_TRUE(extdata.is_object()) << extdata.dump();
+    ASSERT_TRUE(extdata.contains("output_path")) << extdata.dump();
+    ASSERT_TRUE(extdata.contains("output_file")) << extdata.dump();
+
+    const std::filesystem::path db_file{ db_path };
+    EXPECT_EQ(extdata["output_file"].get<std::string>(), db_file.filename().string());
+    EXPECT_TRUE(std::filesystem::equivalent(
+        std::filesystem::path{ extdata["output_path"].get<std::string>() },
+        db_file.parent_path()))
+        << extdata.dump();
+}
+}  // namespace
+
+TEST_F(rocpd_write_read_test_interface, process_extdata_malformed_json_is_replaced)
+{
+    // Prepare: process extdata is not parseable JSON.
+    run_processor_and_open_reader({},
+                                  [](const std::shared_ptr<metadata_registry>& metadata) {
+                                      auto proc    = metadata->get_process_info();
+                                      proc.extdata = "{not json";
+                                      metadata->set_process(proc);
+                                  });
+
+    // Validate: finalization does not throw and the output location is recorded.
+    const auto processes = m_reader->get_all_processes();
+    ASSERT_EQ(processes.size(), 1U);
+    ASSERT_TRUE(nlohmann::json::accept(processes[0]->extdata)) << processes[0]->extdata;
+    const auto extdata = nlohmann::json::parse(processes[0]->extdata);
+    expect_extdata_names_database(extdata, m_db_path);
+    EXPECT_EQ(extdata.size(), 2U) << extdata.dump();
+}
+
+TEST_F(rocpd_write_read_test_interface, process_extdata_non_object_json_is_replaced)
+{
+    // Prepare: process extdata is valid JSON, but an array rather than an object.
+    run_processor_and_open_reader({},
+                                  [](const std::shared_ptr<metadata_registry>& metadata) {
+                                      auto proc    = metadata->get_process_info();
+                                      proc.extdata = "[1, 2, 3]";
+                                      metadata->set_process(proc);
+                                  });
+
+    // Validate: the array is replaced by an object holding the output location.
+    const auto processes = m_reader->get_all_processes();
+    ASSERT_EQ(processes.size(), 1U);
+    ASSERT_TRUE(nlohmann::json::accept(processes[0]->extdata)) << processes[0]->extdata;
+    const auto extdata = nlohmann::json::parse(processes[0]->extdata);
+    expect_extdata_names_database(extdata, m_db_path);
+    EXPECT_EQ(extdata.size(), 2U) << extdata.dump();
+}
+
+TEST_F(rocpd_write_read_test_interface, process_extdata_stale_output_keys_are_overwritten)
+{
+    // Prepare: producer-set output keys that disagree with the real database location,
+    // alongside an unrelated key that must survive.
+    run_processor_and_open_reader({},
+                                  [](const std::shared_ptr<metadata_registry>& metadata) {
+                                      auto proc    = metadata->get_process_info();
+                                      proc.extdata = nlohmann::json{
+                                          { "output_path", "/stale/dir" },
+                                          { "output_file", "stale.db" },
+                                          { "keep", "me" }
+                                      }.dump();
+                                      metadata->set_process(proc);
+                                  });
+
+    // Validate: the processor's values win; unrelated keys are preserved.
+    const auto processes = m_reader->get_all_processes();
+    ASSERT_EQ(processes.size(), 1U);
+    ASSERT_TRUE(nlohmann::json::accept(processes[0]->extdata)) << processes[0]->extdata;
+    const auto extdata = nlohmann::json::parse(processes[0]->extdata);
+    expect_extdata_names_database(extdata, m_db_path);
+    EXPECT_EQ(extdata.value("keep", ""), "me") << extdata.dump();
+}
+
 // ---------------------------------------------------------------------------
 // Output file existence and non-empty after flush
 // ---------------------------------------------------------------------------
