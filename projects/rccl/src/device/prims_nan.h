@@ -172,6 +172,13 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
 
   uint64_t* barriers;
   uint64_t barrier_next = 0;
+  bool fifoSend = false;
+
+  // NaN slots are validated by their payload, so skip waiting on peer stores; connFifo sends keep the fence for the
+  // proxy. A receiving step's end barrier is not one of these: its sentinel restores must land before postRecv().
+  inline __device__ void stepBarrier() {
+    if (!storeFreeStepBarrier(fifoSend, nthreads, threadsPerBlock, barrier_next, barriers)) barrier();
+  }
 
   inline __device__ void barrier() {
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
@@ -817,7 +824,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
     // A proxy ships exactly these bytes, so rows past padBytes() must not be
     // counted: stale ones in the staging slot would land over the peer's sentinel.
     if (SEND) waitSend(padBytes(nelem));
-    barrier();
+    stepBarrier();
 
     sqtt_marker_enter("PRIM_NAN_DATA_PROCESS");
     bool useTdm = false;
@@ -876,7 +883,8 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
     // order; one that did not waits for them here.
     if (RECV && !polled) __asm__ volatile("s_waitcnt vmcnt(0)" ::: "memory");
 #endif
-    barrier();
+    if (RECV) barrier();
+    else stepBarrier();
 
     sqtt_marker_exit("PRIM_NAN_DATA_PROCESS");
 
@@ -953,6 +961,9 @@ public:
     loadRecvSync();
     // coverity[var_deref_model:FALSE]
     loadSendSync();
+#if RCCL_STORE_FREE_STEP_BARRIER
+    fifoSend = anySendConnFifo(channel, sendPeers, nsend, connIndexSend);
+#endif
     setDataPtrs(inputBuf, outputBuf, e != nullptr ? e->acc : nullptr);
   }
 
