@@ -4,6 +4,7 @@
 // GFX9 dense matrix register layout and MFMA source-lane controls.
 #pragma once
 #include "common/bits.h"
+#include "rj_arith/rj_arith.h"
 #include <stdint.h>
 
 namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
@@ -30,31 +31,16 @@ constexpr int mfma_input_index(int index, int k, int batch) {
   return (local / PerWord * 64 + lane) * PerWord + local % PerWord;
 }
 
-// MI300 §7.1.5.1 and CDNA4 §7.1.6.1 give this full-wave A-lane formula.
-// Their §13.3.6.1 ABID tables describe adjacent block groups instead. The
-// reduction follows the formula pending a distinguishing hardware capture.
+// Retain the full-wave A mapping of the arithmetic API. Register reads and
+// dependency checks use the same permutation; hardware fidelity is separate.
 inline int mfma_a_lane(int lane, uint64_t controls) {
-  int cbsz = int(controls & 7);
-  if (!cbsz || cbsz > 4) {
-    return lane;
-  }
-  int blocks = 1 << cbsz;
-  return lane % (64 / blocks) + (64 / blocks) * (int(controls >> 3 & 15) % blocks);
+  return int(rj_arith_mfma_a_source_lane(uint32_t(lane), uint32_t(controls & 7),
+                                         uint32_t(controls >> 3 & 15), 0));
 }
 
 // Apply the eight encoded B lane permutations, keeping the lane inside Wave64.
 inline int mfma_b_lane(int lane, uint64_t controls) {
-  int blgp = int(controls >> 7 & 7);
-  if (blgp == 0) {
-    return lane;
-  }
-  if (blgp <= 2) {
-    return lane % 32 + (blgp - 1) * 32;
-  }
-  if (blgp == 3) {
-    return (lane + 16) % 64;
-  }
-  return lane % 16 + (blgp - 4) * 16;
+  return int(rj_arith_mfma_b_source_lane(uint32_t(lane), uint32_t(controls >> 7 & 7)));
 }
 
 // Apply lane controls without changing the element position inside its source word.

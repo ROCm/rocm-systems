@@ -38,12 +38,16 @@
 
 #include "gfx11_mimg_test_common.h"
 
+#include <array>
+#include <cstdint>
 #include <cstring>
 #include <fstream>
 #include <iterator>
+#include <memory>
 #include <thread>
 #include <tuple>
 #include <utility>
+#include <vector>
 
 namespace {
 constexpr uint32_t kRdnaFormat32 = 20u << 12; // V# word3 FORMAT = BUF_FMT_32_UINT
@@ -4268,8 +4272,8 @@ TEST(XcntExecutionTest, EmptyExecStoreCannotUseAnOlderCompletionToDrainReplaySou
     }
 }
 
-// The observer is an independent test oracle. Production checking stays in core
-// and computes the footprint before executing the instruction.
+// Compare the core's predicted footprint with execution's register accesses.
+// Fixed-lane tests separately check MFMA mapping and conservative-check policies.
 class MemoryWaitFootprintObserver final : public ExecutionPlugin {
 public:
   MemoryWaitFootprintObserver() : ExecutionPlugin("wait_footprint_test") {}
@@ -4465,6 +4469,166 @@ TEST(MemoryWaitFootprintTest, Cdna4HazardsMatchObservedVectorAccesses) {
   add(cdna4::build_vop3p(cdna4::kVMadMixF32Vop3p,
                          {.vdst = 16, .src0 = 256, .src1 = 260, .src2 = 264}));
   check_vector_footprints(ROCJITSU_CODE_ARCH_CDNA4, 64, 512, cases);
+}
+
+TEST(MemoryWaitFootprintTest, MfmaShapesCheckEveryOperandAndSkipConstantAccumulators) {
+  std::vector<std::vector<uint32_t>> cases;
+  for (uint16_t accumulator : {uint16_t{288}, uint16_t{128}}) {
+    for (uint16_t opcode :
+         {cdna4::kVMfmaF6416x16x4F64Vop3pMfma, cdna4::kVMfmaI3216x16x64I8Vop3pMfma,
+          cdna4::kVMfmaF324x4x116bF32Vop3pMfma}) {
+      const auto words = cdna4::build_vop3p_mfma(
+          opcode, {.vdst = 64, .src0 = 256, .src1 = 272, .src2 = accumulator});
+      cases.emplace_back(words.begin(), words.end());
+    }
+    // Mixed FP8/FP4 inputs occupy different numbers of source registers.
+    const auto words = cdna4::build_vop3p_mfma(
+        cdna4::kVMfmaF3216x16x128F8f6f4Vop3pMfma,
+        {.vdst = 64, .cbsz = 0, .src0 = 256, .src1 = 272, .src2 = accumulator, .blgp = 4});
+    cases.emplace_back(words.begin(), words.end());
+    // F64 ignores CBSZ/ABID and uses BLGP for negation, not lane selection.
+    const auto f64 =
+        cdna4::build_vop3p_mfma(cdna4::kVMfmaF6416x16x4F64Vop3pMfma, {.vdst = 64,
+                                                                      .cbsz = 2,
+                                                                      .abid = 1,
+                                                                      .src0 = 256,
+                                                                      .src1 = 272,
+                                                                      .src2 = accumulator,
+                                                                      .blgp = 7});
+    cases.emplace_back(f64.begin(), f64.end());
+  }
+  check_vector_footprints(ROCJITSU_CODE_ARCH_CDNA4, 64, 80, cases);
+}
+
+TEST(MemoryWaitFootprintTest, MfmaBroadcastChecksOnlySelectedSourceLanes) {
+  for (const auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
+                          ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    SCOPED_TRACE(static_cast<int>(arch));
+    std::vector<std::vector<uint32_t>> cases;
+    for (const auto [cbsz, abid, blgp] : {std::array<uint8_t, 3>{2, 1, 4},
+                                          {0, 0, 1},
+                                          {1, 1, 2},
+                                          {4, 15, 3},
+                                          {3, 6, 7},
+                                          {2, 1, 5},
+                                          {2, 1, 6}}) {
+      for (uint16_t opcode :
+           {cdna4::kVMfmaI324x4x416bI8Vop3pMfma, cdna4::kVMfmaF324x4x116bF32Vop3pMfma}) {
+        // These GFX9 encodings share their opcodes and broadcast fields across
+        // CDNA1-4. Compare checks against the reads made by each target's executor.
+        const auto words = cdna4::build_vop3p_mfma(opcode, {.vdst = 64,
+                                                            .cbsz = cbsz,
+                                                            .abid = abid,
+                                                            .src0 = 256,
+                                                            .src1 = 272,
+                                                            .src2 = 288,
+                                                            .blgp = blgp});
+        cases.emplace_back(words.begin(), words.end());
+      }
+    }
+    check_vector_footprints(arch, 64, 512, cases);
+  }
+}
+
+void check_mfma_broadcast_loads(rj_code_arch_t arch, uint8_t cbsz, uint8_t abid, uint8_t blgp,
+                                const std::array<uint64_t, 2> &checked_lanes) {
+  GpuMemory memory("mfma_wait_memory");
+  L2Cache l2("mfma_wait_l2");
+  ComputeUnitCore::Config config{};
+  config.arch = arch;
+  config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 128;
+  config.vgprs_per_wf = 512;
+  config.lds_size_kb = 64;
+  std::unique_ptr<ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(test::initialize_compute_unit(cu, "mfma_wait_cu", config, &memory, &l2));
+  auto *wf = cu->dispatch_wf(0, 0x100, 104, 512, 64);
+  ASSERT_NE(wf, nullptr);
+  auto decoder = Decoder::create(arch);
+  util::StringDiagnostic error;
+  const auto words = cdna4::build_vop3p_mfma(cdna4::kVMfmaF324x4x116bF32Vop3pMfma, {.vdst = 64,
+                                                                                    .cbsz = cbsz,
+                                                                                    .abid = abid,
+                                                                                    .src0 = 256,
+                                                                                    .src1 = 272,
+                                                                                    .src2 = 288,
+                                                                                    .blgp = blgp});
+  auto mfma = decoder->decode_window(words, 0, error.emitter());
+  ASSERT_TRUE(mfma.succeeded()) << error.message();
+  const auto wait_words = cdna4::build_sopp(cdna4::kSWaitcntSopp, {.simm16 = 0});
+  auto wait = decoder->decode_window(wait_words, 0, error.emitter());
+  ASSERT_TRUE(wait.succeeded()) << error.message();
+  auto &state = wf->ensure_memory_wait_scoreboard();
+  std::vector<MemoryWaitScoreboard::Hazard> hazards;
+
+  for (unsigned source = 0; source < 2; ++source) {
+    const uint8_t reg = source == 0 ? 0 : 16;
+    SCOPED_TRACE(static_cast<unsigned>(reg));
+    const auto load_words = cdna4::build_flat(cdna4::kFlatLoadDwordFlat,
+                                              {.seg = 2, .addr = 4, .saddr = 127, .vdst = reg});
+    auto load = decoder->decode_window(load_words, 0, error.emitter());
+    ASSERT_TRUE(load.succeeded()) << error.message();
+    for (unsigned lane = 0; lane < 64; ++lane) {
+      SCOPED_TRACE(lane);
+      for (uint64_t exec : {~uint64_t{0}, uint64_t{1}, uint64_t{0}}) {
+        SCOPED_TRACE(exec);
+        for (bool waited : {false, true}) {
+          SCOPED_TRACE(waited);
+          state.clear();
+          hazards.clear();
+          wf->pc = 0x100;
+          wf->set_exec_raw(uint64_t{1} << lane);
+          // Track the decoded load without completing its memory pipeline.
+          cu->track_memory_wait(*load.value(), *wf);
+          ASSERT_EQ(state.events().size(), 1u);
+          EXPECT_EQ(state.events()[0].reg, (RegisterRef{RegClass::VGPR, reg, 1}));
+          EXPECT_EQ(state.events()[0].lanes, uint64_t{1} << lane);
+          wf->set_exec_raw(exec);
+          if (waited)
+            state.before(*wait.value(), arch);
+          state.bind(0x108, &hazards, [](void *context, const auto &hazard) {
+            static_cast<decltype(hazards) *>(context)->push_back(hazard);
+          });
+          state.check_instruction(*mfma.value(), *wf);
+          const bool expected = !waited && (checked_lanes[source] & (uint64_t{1} << lane));
+          ASSERT_EQ(hazards.size(), expected ? 1u : 0u);
+          if (expected) {
+            EXPECT_EQ(hazards[0].reg, (RegisterRef{RegClass::VGPR, reg, 1}));
+            EXPECT_EQ(hazards[0].producer.pc, 0x100u);
+            EXPECT_EQ(hazards[0].consumer_pc, 0x108u);
+            EXPECT_EQ(hazards[0].producer.counter, WaitCounterKind::Load);
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(MemoryWaitExecutionTest, MfmaChecksTheEmulatedASourceLanes) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    SCOPED_TRACE(static_cast<unsigned>(arch));
+    // This is the retained execution model, independently of hardware mapping
+    // qualification: A reads lanes 16-31 and B reads lanes 0-15.
+    check_mfma_broadcast_loads(arch, 2, 1, 4, {0xffff0000, 0xffff});
+  }
+}
+
+TEST(MemoryWaitExecutionTest, MfmaCdna2UsesAdjacentABlocks) {
+  check_mfma_broadcast_loads(ROCJITSU_CODE_ARCH_CDNA2, 2, 1, 4, {0x00f000f000f000f0, 0xffff});
+}
+
+TEST(MemoryWaitExecutionTest, MfmaBBroadcastChecksFixedLaneGroups) {
+  // CDNA4 ISA (5-August-2025), section 7.1.6.3, Table 29, and the AMD matrix
+  // calculator's BLGP table (including selector 7). Fixed expectations keep
+  // these checks independent of the permutation shared with execution.
+  constexpr std::array<uint64_t, 8> lanes{
+      0xffffffffffffffff, 0x00000000ffffffff, 0xffffffff00000000, 0xffffffffffffffff,
+      0x000000000000ffff, 0x00000000ffff0000, 0x0000ffff00000000, 0xffff000000000000};
+  for (uint8_t blgp = 0; blgp < lanes.size(); ++blgp) {
+    SCOPED_TRACE(static_cast<unsigned>(blgp));
+    check_mfma_broadcast_loads(ROCJITSU_CODE_ARCH_CDNA4, 0, 0, blgp, {~uint64_t{0}, lanes[blgp]});
+  }
 }
 
 TEST(MemoryWaitFootprintTest, DualFmacHazardsMatchObservedVectorAccesses) {

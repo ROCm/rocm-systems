@@ -598,15 +598,10 @@ def gen_mfma(ctx: ExecuteContext) -> str:
             inputs, outputs = M * K * B // 256, M * M * B // 64
         if is_dense_i8_mfma:
             L.append(
-                '  const uint64_t a_lanes = inst_.cbsz == 0 ? ~uint64_t{0} : amdgpu::mfma_permuted_lane_mask([&](uint32_t lane) {'
+                '  const uint64_t a_lanes = amdgpu::mfma_a_lane_mask(inst_.cbsz, inst_.abid, '
+                f'amdgpu::mfma_a_block_lanes(cu.arch(), {M}));'
             )
-            L.append(
-                '    return amdgpu::permute_a_lane(lane, inst_.cbsz, inst_.abid); });'
-            )
-            L.append(
-                '  const uint64_t b_lanes = inst_.blgp == 0 ? ~uint64_t{0} : amdgpu::mfma_permuted_lane_mask([&](uint32_t lane) {'
-            )
-            L.append('    return amdgpu::permute_b_lane(lane, inst_.blgp); });')
+            L.append('  const uint64_t b_lanes = amdgpu::mfma_b_lane_mask(inst_.blgp);')
         L.append(
             f'  amdgpu::arith::exec_dense_fp_matrix<{inputs}, {outputs}, {lanes}>('
         )
@@ -661,13 +656,10 @@ def gen_mfma(ctx: ExecuteContext) -> str:
         )
         L.append('      | (uint64_t(inst_.blgp) << RJ_ARITH_MFMA_BLGP_SHIFT);')
         L.append(
-            '  const uint64_t a_lanes = inst_.cbsz == 0 ? ~uint64_t{0} : amdgpu::mfma_permuted_lane_mask([&](uint32_t lane) {'
+            '  const uint64_t a_lanes = amdgpu::mfma_a_lane_mask(inst_.cbsz, inst_.abid, '
+            f'amdgpu::mfma_a_block_lanes(cu.arch(), {M}));'
         )
-        L.append('    return amdgpu::permute_a_lane(lane, inst_.cbsz, inst_.abid); });')
-        L.append(
-            '  const uint64_t b_lanes = inst_.blgp == 0 ? ~uint64_t{0} : amdgpu::mfma_permuted_lane_mask([&](uint32_t lane) {'
-        )
-        L.append('    return amdgpu::permute_b_lane(lane, inst_.blgp); });')
+        L.append('  const uint64_t b_lanes = amdgpu::mfma_b_lane_mask(inst_.blgp);')
         L.append(
             f'  amdgpu::arith::exec_dense_fp_matrix<{M * K * B * in_bits // 2048}, {M * N * B // 64}, 64>('
         )
