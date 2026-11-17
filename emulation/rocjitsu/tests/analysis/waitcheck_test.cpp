@@ -7948,7 +7948,7 @@ TEST(WaitcheckTest, Gfx1250JoinedAtomicKeepsUnorderedIncomingSource) {
   }
 }
 
-TEST(WaitcheckTest, Gfx12OutOfRangeReturningAtomicsDoNotRetireOlderLoads) {
+TEST(WaitcheckTest, Gfx12ReturningAtomicsRetireOlderLoadsAtCapacity) {
   for (const auto [arch, machine] :
        {std::pair{ROCJITSU_CODE_ARCH_CDNA5, EF_AMDGPU_MACH_AMDGCN_GFX1250},
         std::pair{ROCJITSU_CODE_ARCH_RDNA4, EF_AMDGPU_MACH_AMDGCN_GFX1201}}) {
@@ -7974,7 +7974,7 @@ TEST(WaitcheckTest, Gfx12OutOfRangeReturningAtomicsDoNotRetireOlderLoads) {
               return d.counter == WaitCounterKind::Load && d.producer_section_offset == 0 &&
                      d.section_offset == consumer && d.reg.index == 9;
             });
-        EXPECT_EQ(older_load_survives, out_of_range) << diagnostic_summary(report);
+        EXPECT_FALSE(older_load_survives) << diagnostic_summary(report);
       }
     }
   }
@@ -8155,6 +8155,87 @@ TEST(WaitcheckTest, Gfx12NullifiedFlatStillOccupiesAnOlderLoadsCounterPosition) 
                                     }),
                 !wait)
           << diagnostic_summary(report);
+    }
+  }
+}
+
+TEST(WaitcheckTest, Gfx12NullifiedVmemStillOccupiesAnOlderLoadsCounterPosition) {
+  for (const auto [arch, machine] :
+       {std::pair{ROCJITSU_CODE_ARCH_CDNA5, EF_AMDGPU_MACH_AMDGCN_GFX1250},
+        std::pair{ROCJITSU_CODE_ARCH_RDNA4, EF_AMDGPU_MACH_AMDGCN_GFX1201}}) {
+    for (unsigned kind = 0; kind < 4; ++kind) {
+      for (bool wait : {false, true}) {
+        SCOPED_TRACE(testing::Message() << machine << '/' << kind << '/' << wait);
+        std::vector<uint32_t> program;
+        append_inst(program, global_load_b32(2, 8));
+        if (kind == 1) {
+          auto load = std::bit_cast<rdna4::VbufferMachineInst>(
+              std::array<uint32_t, 3>{0xC4050000U, 0, 0}); // buffer_load_b32
+          load.vdata = 16; // Beyond the 16-VGPR allocation.
+          load.vaddr = 8;
+          load.rsrc = 40;
+          load.soffset = 124;
+          load.offen = 1;
+          append_inst(program, load);
+        } else if (kind == 0) {
+          append_inst(program, global_load_b32(16, 8));
+        } else if (kind == 2) {
+          append_inst(program, global_atomic_add_u32(16, 8, 124, true));
+        } else {
+          append_inst(program, buffer_atomic_add_u32(16));
+        }
+        if (wait)
+          append_inst(program, sopp(64, 1));
+        const uint64_t consumer = program.size() * sizeof(uint32_t);
+        append_inst(program, v_mov_b32(3, 2));
+        append_inst(program, s_endpgm());
+        const auto report = analyze_gfx12_with_vgpr_allocation(program, machine, arch, true, 16);
+        ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+        EXPECT_EQ(std::ranges::any_of(report.diagnostics,
+                                      [&](const auto &d) {
+                                        return d.counter == WaitCounterKind::Load &&
+                                               d.producer_section_offset == 0 &&
+                                               d.section_offset == consumer && d.reg.index == 2;
+                                      }),
+                  !wait)
+            << diagnostic_summary(report);
+      }
+    }
+  }
+}
+
+TEST(WaitcheckTest, Gfx12NullifiedVmemWithoutOlderRequestDoesNotJustifyWait) {
+  for (const auto [arch, machine] :
+       {std::pair{ROCJITSU_CODE_ARCH_CDNA5, EF_AMDGPU_MACH_AMDGCN_GFX1250},
+        std::pair{ROCJITSU_CODE_ARCH_RDNA4, EF_AMDGPU_MACH_AMDGCN_GFX1201}}) {
+    for (unsigned kind = 0; kind < 4; ++kind) {
+      SCOPED_TRACE(testing::Message() << machine << '/' << kind);
+      std::vector<uint32_t> program;
+      if (kind == 1) {
+        auto load = std::bit_cast<rdna4::VbufferMachineInst>(
+            std::array<uint32_t, 3>{0xC4050000U, 0, 0}); // buffer_load_b32
+        load.vdata = 16;
+        load.vaddr = 8;
+        load.rsrc = 40;
+        load.soffset = 124;
+        load.offen = 1;
+        append_inst(program, load);
+      } else if (kind == 0) {
+        append_inst(program, global_load_b32(16, 8));
+      } else if (kind == 2) {
+        append_inst(program, global_atomic_add_u32(16, 8, 124, true));
+      } else {
+        append_inst(program, buffer_atomic_add_u32(16));
+      }
+      append_inst(program, sopp(64, 0));
+      append_inst(program, s_endpgm());
+      WaitcheckOptions options;
+      options.check_counter_parity = true;
+      const auto report =
+          analyze_gfx12_with_vgpr_allocation(program, machine, arch, true, 16, options);
+      ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+      EXPECT_EQ(report.counter_parity_exact, 0u) << diagnostic_summary(report);
+      EXPECT_EQ(report.counter_unmodeled_wait_observed, 1u) << diagnostic_summary(report);
     }
   }
 }
@@ -15594,6 +15675,27 @@ TEST(WaitcheckTest, Gfx950RecoveredSetpcTargetOverridesMatchingReturnRegister) {
       return d.counter == WaitCounterKind::Load && d.section_offset == target && d.reg.index == 0;
     })) << diagnostic_summary(report);
   }
+}
+
+TEST(WaitcheckTest, Gfx950OverwrittenReturnPairLeavesIndirectJumpIncomplete) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_CDNA4;
+  std::vector<uint32_t> program;
+  program.push_back(build_s_call_b64(30, 3, arch).value()); // Helper at 0x10.
+  append_gfx950_s_waitcnt_vmcnt_0(program);
+  append_gfx950_v_mov_b32_v1_v0(program);
+  program.push_back(build_s_endpgm(arch).value());
+  ASSERT_EQ(program.size() * sizeof(uint32_t), 0x10u);
+  append_gfx950_buffer_load_dword_v0_v8_s0_offen(program);
+  program.push_back(build_sop1_encoding(arch, 0x01, 30, 8).value()); // s_mov_b64 s[30:31],s[8:9]
+  program.push_back(build_s_setpc_b64(30, arch).value());
+
+  const auto image = waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  const AmdGpuCodeObject object(image.data(), image.size());
+  const auto report = analyze_waitcnts_for_kernel(object, arch, 0);
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_FALSE(report.complete) << diagnostic_summary(report);
+  EXPECT_NE(report.analysis_error.find("incomplete control flow"), std::string::npos)
+      << report.analysis_error;
 }
 
 TEST(WaitcheckTest, Gfx950SharedSwappcReturnsToMatchingContinuation) {

@@ -538,7 +538,11 @@ struct Analyzer : private WaitcheckStateOps {
     // one specific call returns. Keeping it in the node identity consumes the
     // link-register seed after that block, so a later loop backedge does not
     // manufacture another return from the call.
-    using CallFrame = std::tuple<size_t, uint16_t, size_t, uint64_t>;
+    // A matching s_setpc source is a return only while it still contains the
+    // caller's link. Track one explicit SGPR-pair save so a helper may use the
+    // link pair for a local indirect jump and restore it before returning.
+    using CallFrame =
+        std::tuple<size_t, uint16_t, size_t, uint64_t, bool, std::optional<uint16_t>>;
     using CallContinuationSeed = std::pair<uint16_t, uint64_t>;
     using AnalysisNodeKey =
         std::tuple<size_t, std::vector<CallFrame>, std::optional<CallContinuationSeed>>;
@@ -650,6 +654,37 @@ struct Analyzer : private WaitcheckStateOps {
       const AnalysisNodeKey node_key = analysis_node_keys[node_index];
       const BasicBlock &block = *blocks[std::get<0>(node_key)];
 
+      std::vector<CallFrame> call_stack_after_block = std::get<1>(node_key);
+      if (!call_stack_after_block.empty()) {
+        for (const Instruction &inst : block.instructions()) {
+          const InstDefUse du(inst, wavefront_size);
+          const bool move_pair = inst.mnemonic() == "s_mov_b64" && inst.num_dst_operands() == 1 &&
+                                 inst.num_src_operands() == 1;
+          const auto dst = move_pair ? inst.dst_operand(0)->to_register_ref() : std::nullopt;
+          const auto src = move_pair ? inst.src_operand(0)->to_register_ref() : std::nullopt;
+          const bool sgpr_pair = dst && src && dst->cls == RegClass::SGPR &&
+                                 src->cls == RegClass::SGPR && dst->width == 2 && src->width == 2;
+          const bool relative_sgpr_write = inst.mnemonic().starts_with("s_movreld");
+          for (auto &frame : call_stack_after_block) {
+            const uint16_t link = std::get<1>(frame);
+            const auto saved = std::get<5>(frame);
+            const bool disjoint_link = sgpr_pair &&
+                                       (dst->index + 2 <= link || dst->index >= link + 2);
+            const bool copy_link = disjoint_link && std::get<4>(frame) && src->index == link;
+            const bool copy_saved = sgpr_pair && saved && src->index == *saved;
+            if (relative_sgpr_write || du.defs.intersects(RegisterRef{RegClass::SGPR, link, 2}))
+              std::get<4>(frame) = false;
+            if (relative_sgpr_write ||
+                (saved && du.defs.intersects(RegisterRef{RegClass::SGPR, *saved, 2})))
+              std::get<5>(frame).reset();
+            if (copy_link || (copy_saved && disjoint_link))
+              std::get<5>(frame) = dst->index;
+            if (copy_saved && dst->index == link)
+              std::get<4>(frame) = true;
+          }
+        }
+      }
+
       auto add_context_edge = [&](size_t target_block_index, std::vector<CallFrame> call_stack,
                                   bool conservative_sgpr_entry = false,
                                   std::optional<CallContinuationSeed> call_continuation =
@@ -667,13 +702,14 @@ struct Analyzer : private WaitcheckStateOps {
       };
 
       const Instruction *term = block.terminator();
-      if (!std::get<1>(node_key).empty() && term != nullptr &&
+      if (!call_stack_after_block.empty() && std::get<4>(call_stack_after_block.back()) &&
+          term != nullptr &&
           term->size() == static_cast<int>(sizeof(uint32_t)) &&
           (term->mnemonic() == "s_setpc_b64" || term->mnemonic() == "s_set_pc_i64") &&
           block.static_indirect_call_fixups().empty() && term->raw_encoding() != nullptr &&
           static_cast<uint16_t>(term->raw_encoding()[0] & 0xffu) ==
-              std::get<1>(std::get<1>(node_key).back())) {
-        std::vector<CallFrame> caller_stack = std::get<1>(node_key);
+              std::get<1>(call_stack_after_block.back())) {
+        std::vector<CallFrame> caller_stack = std::move(call_stack_after_block);
         const size_t continuation_index = std::get<0>(caller_stack.back());
         const uint16_t return_sreg = std::get<1>(caller_stack.back());
         const uint64_t source_call_offset = std::get<3>(caller_stack.back());
@@ -724,7 +760,7 @@ struct Analyzer : private WaitcheckStateOps {
                 CallContinuationSeed{return_ref->index, source_call_offset};
           }
         }
-        if (!is_call_fallthrough && !add_context_edge(successor_it->second, std::get<1>(node_key),
+        if (!is_call_fallthrough && !add_context_edge(successor_it->second, call_stack_after_block,
                                                       unresolved_call_continuation.has_value(),
                                                       unresolved_call_continuation)) {
           report_.supported = false;
@@ -754,9 +790,9 @@ struct Analyzer : private WaitcheckStateOps {
           report_.analysis_error = "recursive call exceeds waitcheck call-context model";
           return;
         }
-        std::vector<CallFrame> callee_stack = std::get<1>(node_key);
+        std::vector<CallFrame> callee_stack = call_stack_after_block;
         callee_stack.emplace_back(continuation_it->second, call.return_sreg, callee_it->second,
-                                  call.source_call_offset);
+                                  call.source_call_offset, true, std::nullopt);
         if (!add_context_edge(callee_it->second, std::move(callee_stack),
                               /*conservative_sgpr_entry=*/true)) {
           report_.supported = false;
@@ -5029,8 +5065,8 @@ private:
   }
 
   // A proven out-of-allocation result nullifies its vector memory operation.
-  // CDNA2–4 still occupy a counter position. GFX12 suppresses ordinary
-  // requests; a generic FLAT may reserve a conditional empty-EXEC position.
+  // CDNA2–4 still occupy a counter position. GFX12 can reserve a conditional
+  // empty-EXEC position while an older request is outstanding.
   [[nodiscard]] bool rejects_memory_destination(const Instruction &inst, const VgprMsbState &banks,
                                                 rj_code_arch_t arch) const {
     if (!current_kernel_ || !current_kernel_->max_memory_vgprs || source_allocation_may_change_ ||
@@ -5078,19 +5114,15 @@ private:
     auto events = classify_events(inst, arch).value();
     if ((arch == ROCJITSU_CODE_ARCH_CDNA5 || arch == ROCJITSU_CODE_ARCH_RDNA4) &&
         rejects_memory_destination(inst, banks, arch)) {
-      if (inst.mnemonic().starts_with("flat_")) {
-        // The nullified instruction reads no address and returns no value,
-        // but an older outstanding request can still force its counter slots.
-        for (auto &event : events) {
-          event.registers = TrackedRegisterSource::None;
-          event.check_uses = false;
-          event.check_defs = false;
-          event.check_exec_defs = false;
-          event.check_memory_order = false;
-          event.check_program_end = false;
-        }
-      } else {
-        events.clear();
+      // The nullified instruction reads no address and returns no value,
+      // but an older outstanding request can still force its counter slots.
+      for (auto &event : events) {
+        event.registers = TrackedRegisterSource::None;
+        event.check_uses = false;
+        event.check_defs = false;
+        event.check_exec_defs = false;
+        event.check_memory_order = false;
+        event.check_program_end = false;
       }
     }
     return events;

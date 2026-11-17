@@ -225,11 +225,13 @@ waitcheck_kernels(const AmdGpuCodeObject &code_object);
 [[nodiscard]] WaitcheckReport analyze_waitcnts(const CodeObject &code_object, rj_code_arch_t arch,
                                                WaitcheckOptions options = {});
 
-/// @brief Analyze only the kernel whose entry point is at @p kernel_entry_offset.
+/// @brief Analyze all kernel descriptors whose entry point is at @p kernel_entry_offset.
 ///
-/// @details Reachable functions are included, while sibling kernels and
-/// unrelated executable sections are skipped. This is the runtime-oriented
-/// counterpart to the exhaustive code-object overload above.
+/// @details Distinct wavefront modes at the same entry are analyzed separately.
+/// Reachable functions are included, while kernels at other entries and
+/// unrelated executable sections are skipped. Callers with a dispatch
+/// descriptor should use the WaitcheckKernelInfo overload below to select its
+/// exact wavefront mode.
 [[nodiscard]] WaitcheckReport analyze_waitcnts_for_kernel(const CodeObject &code_object,
                                                           rj_code_arch_t arch,
                                                           uint64_t kernel_entry_offset,
