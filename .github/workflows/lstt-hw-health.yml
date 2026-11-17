@@ -56,10 +56,10 @@ jobs:
             gfx: gfx1151
           # One row per runner entry, so the two arches check in parallel. The
           # MI210 label is shared by several hosts, so that row also needs the
-          # generic host label lstt-host-02 on its runner.
+          # generic host label host-02 on its runner.
           - id: host-02
             label: lstt-gfx90a
-            host_label: lstt-host-02
+            host_label: host-02
             gfx: gfx90a
             bmc: true
           - id: host-02
