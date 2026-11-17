@@ -1,8 +1,11 @@
+# CTest categories for host-only src/device/ microtests.
+#
+# Suites start with their source unit's stem.
 test_categories:
-  quick: &micro_devcomm_v23000_quick
-    description: "Smoke — host-only devcomm_v23000.cc compatibility micro-tests, sub-second."
+  quick: &micro_device_quick
+    description: "Smoke - host-only src/device/ micro-tests, sub-second."
     test_patterns:
-      - "DevcommV23000*"
+      - "Onerank*"
     exclude_windows:
       - "*"
     labels:
@@ -12,21 +15,21 @@ test_categories:
       - "precheck"
       - "microtest"
   standard:
-    <<: *micro_devcomm_v23000_quick
+    <<: *micro_device_quick
     labels:
       - "rccl"
       - "standard"
       - "regression"
       - "microtest"
   comprehensive:
-    <<: *micro_devcomm_v23000_quick
+    <<: *micro_device_quick
     labels:
       - "rccl"
       - "comprehensive"
       - "comprehensive_regression"
       - "microtest"
   full:
-    <<: *micro_devcomm_v23000_quick
+    <<: *micro_device_quick
     labels:
       - "rccl"
       - "full"

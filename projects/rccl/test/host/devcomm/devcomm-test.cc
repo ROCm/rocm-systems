@@ -19,7 +19,7 @@
 #include <type_traits>
 #include <vector>
 
-#include "../common/LogCapture.hpp"
+#include "../../common/LogCapture.hpp"
 #include "DevcommTest.h"
 #include "ScopedHook.h"
 #include "fakes/devcomm_fakes.h"
@@ -28,20 +28,24 @@
 #include "dev_runtime.h"
 #include "nccl.h"
 
-// ncclDevCommCopyLsaData is defined for real by dev_runtime.cc, which is now
-// compiled into this same binary by dev-runtime-test.cc. devcomm_fakes.cc can
-// therefore no longer define it, but these tests still need to observe and
-// suppress the copy -- so route this TU's call sites through the hook instead,
-// the same shim p2p-test.cc uses for p2p.cc's HIP calls. The real definition
-// stays available to everyone else.
-#define ncclDevCommCopyLsaData(dst, src) g_ncclDevCommCopyLsaData((dst), (src))
-
 // The units under test. v22902 is hipified (one line prepended); v22907 is
 // copied verbatim, so its hipified line numbers match src/ exactly.
 #include DEVCOMM_V22902_CC_PATH
 #include DEVCOMM_V22907_CC_PATH
 // v23204 (NCCL 2.32.6) has no file-static callbacks; it is compiled here so the compat table is the real one.
 #include DEVCOMM_V23204_CC_PATH
+
+// Real definitions live in dev_runtime.cc, not linked into this binary; the compat tables reference them by address.
+ncclResult_t ncclDevCommGinSignalsPerBarrier_v22902(ncclComm_t, struct ncclGinBackendState const*, int nRanks,
+                                                    int* outSlots) {
+  *outSlots = nRanks;
+  return ncclSuccess;
+}
+ncclResult_t ncclDevCommGinSignalsPerBarrier_v23204(ncclComm_t, struct ncclGinBackendState const*, int nRanks,
+                                                    int* outSlots) {
+  *outSlots = nRanks;
+  return ncclSuccess;
+}
 
 namespace {
 
