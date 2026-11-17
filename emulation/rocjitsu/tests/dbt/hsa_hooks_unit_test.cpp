@@ -506,6 +506,7 @@ hsa_status_t HSA_API fake_amd_memory_async_batch_copy(const hsa_amd_memory_copy_
       }
       continue;
     case HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST:
+    case HSA_AMD_MEMORY_COPY_OP_RECT:
       if (op.num_entries == 0 || op.dst_agent_list == nullptr)
         return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       for (uint16_t entry_idx = 0; entry_idx < op.num_entries; ++entry_idx) {
@@ -1088,6 +1089,26 @@ hsa_status_t HSA_API capture_iterated_symbol_for_test(hsa_executable_t, hsa_agen
   return HSA_STATUS_SUCCESS;
 }
 
+TEST(HsaHooksUnitTest, RejectsUnreadableRuntimeHandoff) {
+  rocjitsu::test::ScopedTempDirectory runtime;
+  ASSERT_TRUE(runtime.initialize("rj-hsa-unreadable-handoff-"));
+  rocjitsu::test::ScopedEnvironmentVariable runtime_dir("ROCJITSU_RUNTIME_DIR", runtime.path());
+  rocjitsu::test::ScopedEnvironmentVariable invocation_dir(rocjitsu::kRpcInvocationDirEnv,
+                                                           runtime.path());
+  const std::string handoff = runtime.path() + "/config_path";
+  ASSERT_TRUE(std::filesystem::create_directory(handoff));
+  FakeApiTable api;
+  OnUnload();
+  testing::internal::CaptureStderr();
+  EXPECT_FALSE(OnLoad(&api.table, 0, 0, nullptr));
+  const std::string diagnostic = testing::internal::GetCapturedStderr();
+  EXPECT_NE(diagnostic.find("failed to load runtime config"), std::string::npos);
+  EXPECT_NE(diagnostic.find("Cannot read runtime config handoff: " + handoff), std::string::npos);
+  EXPECT_EQ(api.core.hsa_code_object_reader_create_from_file_fn,
+            fake_code_object_reader_create_from_file);
+  OnUnload();
+}
+
 TEST(HsaHooksUnitTest, IterateAgentsDropsGuestOwnSlotWhenGuestAppearsFirst) {
   reset_pool_blocker(false);
   reset_agent_blocker(false);
@@ -1572,6 +1593,35 @@ TEST(HsaHooksUnitTest, BatchCopyMapsBroadcastScalarSourceAndDestinationList) {
   op.dst_agent_list = dst_agents;
   op.dst_list = dst_list;
   op.size = 64;
+
+  expect_batch_copy_forwarding(op, {kHostAgent.handle, kHostAgent.handle},
+                               {kHostAgent.handle, kHostAgent.handle});
+}
+
+TEST(HsaHooksUnitTest, BatchCopyMapsRectScalarSourceAndDestinationList) {
+  int src0 = 0;
+  int src1 = 0;
+  int dst0 = 0;
+  int dst1 = 0;
+  hsa_amd_memory_copy_rect_ptr_t rect_src[] = {
+      {.pitched_ptr = {.base = &src0, .pitch = 64, .slice = 64}, .offset = {}},
+      {.pitched_ptr = {.base = &src1, .pitch = 64, .slice = 64}, .offset = {}},
+  };
+  hsa_amd_memory_copy_rect_ptr_t rect_dst[] = {
+      {.pitched_ptr = {.base = &dst0, .pitch = 64, .slice = 64}, .offset = {}},
+      {.pitched_ptr = {.base = &dst1, .pitch = 64, .slice = 64}, .offset = {}},
+  };
+  hsa_dim3_t ranges[] = {{.x = 64, .y = 1, .z = 1}, {.x = 64, .y = 1, .z = 1}};
+  hsa_agent_t dst_agents[] = {kGuestAgent, kHostAgent};
+
+  hsa_amd_memory_copy_op_t op{};
+  op.type = HSA_AMD_MEMORY_COPY_OP_RECT;
+  op.num_entries = 2;
+  op.rect_src = rect_src;
+  op.src_agent = kGuestAgent;
+  op.dst_agent_list = dst_agents;
+  op.rect_dst = rect_dst;
+  op.range_list = ranges;
 
   expect_batch_copy_forwarding(op, {kHostAgent.handle, kHostAgent.handle},
                                {kHostAgent.handle, kHostAgent.handle});

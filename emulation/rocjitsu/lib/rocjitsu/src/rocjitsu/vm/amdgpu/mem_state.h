@@ -317,10 +317,13 @@ public:
   /// Separate LDS and L2 modes cover FLAT requests routed to either pipeline.
   uint32_t atomic_denorm_mode = 3;
   uint32_t atomic_lds_denorm_mode = 3;
-  /// Older MIN/MAX compare flushed inputs but return the original selected bits.
-  /// They also propagate signaling NaNs instead of treating them as missing numbers.
+  /// Current emulator policy for older MIN/MAX: compare flushed inputs, return the original
+  /// selected bits and propagate signaling NaNs instead of treating them as missing numbers.
   bool atomic_legacy_minmax = true;
-  /// L2 ADD on qualified RDNA4 targets selects the incoming NaN first.
+  /// MI300A/MI350X MIN/MAX select flushed inputs but still return a quieted
+  /// signaling NaN, the data operand's first.
+  bool atomic_minmax_snan_wins = false;
+  /// L2 ADD on qualified RDNA4 and CDNA3/4 targets selects the incoming NaN first.
   /// Indexed LDS has an independent source-first policy.
   bool atomic_source_nan_first = false;
   bool lds_dword_extend = false; ///< Narrow LDS transfers extend to a full DWORD per lane.
@@ -331,8 +334,18 @@ public:
   /// allocation base; per-lane destination offsets are carried in
   /// per_lane_lds_addr.
   uint32_t lds_base = 0;
-  bool lds_per_lane_addr = false; ///< Per-lane LDS endpoints of a load or store.
+  /// Read the store payload from LDS rather than VGPRs, as gfx1250 async stores
+  /// do. per_lane_lds_addr then holds each lane's LDS source address, or
+  /// kInvalidLdsAddress for a lane that reads no LDS bytes.
+  bool lds_src = false;
+  /// Per-lane LDS endpoints of a load or store: per_lane_lds_addr holds the LDS
+  /// destination (lds_dst) or source (lds_src) addresses.
+  bool lds_per_lane_addr = false;
   std::array<uint32_t, 64> per_lane_lds_addr = {};
+  /// For lds_src, the leading LDS bytes each lane reads from per_lane_lds_addr:
+  /// the bytes of its source inside the allocation. Bytes past them read zero.
+  /// Zero for lanes that read no LDS.
+  std::array<uint8_t, 64> per_lane_lds_src_bytes = {};
   bool cluster_multicast = false;  ///< Cluster async-to-LDS load: multicast LDS writes by M0 mask.
   uint32_t cluster_mcast_mask = 0; ///< Cluster workgroup destination mask captured at issue time.
   uint64_t issue_pc = 0;           ///< PC at which the instruction was issued (debug).
