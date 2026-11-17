@@ -5,7 +5,7 @@
  ************************************************************************/
 
 // Host-only microtests for src/algorithms/dda/alltoall/dda_alltoall_ipc.cu: eligibility, the scratch check, the
-// in-kernel versus pre-kernel staging copy, the 24-block grid, and the launch.
+// in-kernel staging copy, the 24-block grid, and the launch.
 
 #include <gtest/gtest.h>
 
@@ -30,12 +30,11 @@ void* const kSendbuff = reinterpret_cast<void*>(0x1000);
 void* const kRecvbuff = reinterpret_cast<void*>(0x2000);
 const hipStream_t kStream = reinterpret_cast<hipStream_t>(0x88);
 const hipEvent_t kStopEvent = reinterpret_cast<hipEvent_t>(0x77);
-// One 512-thread block of 16 B loads covers 8 KiB per peer; below that the kernel stages the copy itself.
+// One 512-thread block of 16 B loads covers 8 KiB per peer; above that the grid has more than one block.
 constexpr size_t kSingleBlockFloats = 8192 / 4;
 
-template <bool kStagingCopyInKernel>
 const void* Kernel() {
-  return KernelPtr(&dda::common::ddaAllToAllIpc<int8_t, 8, false, kStagingCopyInKernel>);
+  return KernelPtr(&dda::common::ddaAllToAllIpc<int8_t, 8, false>);
 }
 
 class DdaAlltoallIpcMicrotest : public ::testing::Test {
@@ -153,28 +152,21 @@ TEST_F(DdaAlltoallIpcMicrotest, Launch_WholeSendBufferMayFillScratchExactly) {
 TEST_F(DdaAlltoallIpcMicrotest, Launch_SingleBlockPayloadStagesInsideTheKernel) {
   ASSERT_EQ(Run(kSingleBlockFloats - 4), ncclSuccess);
   ASSERT_EQ(g_ddaLaunches.size(), 1u);
-  EXPECT_EQ(g_ddaLaunches[0].kernel, Kernel<true>());
+  EXPECT_EQ(g_ddaLaunches[0].kernel, Kernel());
   EXPECT_EQ(g_ddaLaunches[0].grid.x, 1u);
   EXPECT_TRUE(copies_.empty());
 }
 
-TEST_F(DdaAlltoallIpcMicrotest, Launch_LargerPayloadIsStagedIntoScratchBeforeTheKernel) {
-  ASSERT_EQ(Run(kSingleBlockFloats), ncclSuccess);
-  ASSERT_EQ(g_ddaLaunches.size(), 1u);
-  EXPECT_EQ(g_ddaLaunches[0].kernel, Kernel<false>());
-  ASSERT_EQ(copies_.size(), 1u);
-  EXPECT_EQ(copies_[0].dst, comm().ddaScratch);
-  EXPECT_EQ(copies_[0].src, kSendbuff);
-  EXPECT_EQ(copies_[0].bytes, 8 * kSingleBlockFloats * 4);
-  EXPECT_EQ(copies_[0].kind, hipMemcpyDeviceToDevice);
-  EXPECT_EQ(copies_[0].stream, kStream);
-  EXPECT_EQ(copies_[0].launchesBefore, 0u);
-}
-
-TEST_F(DdaAlltoallIpcMicrotest, Launch_StagingCopyErrorIsReportedWithoutLaunching) {
-  g_hipMemcpyAsync = [](void*, const void*, size_t, hipMemcpyKind, hipStream_t) { return hipErrorInvalidValue; };
-  EXPECT_EQ(Run(kSingleBlockFloats), ncclUnhandledCudaError);
-  EXPECT_TRUE(g_ddaLaunches.empty());
+// The multi-block grid also stages inside the kernel: no pre-kernel copy at any size up to the scratch cap.
+TEST_F(DdaAlltoallIpcMicrotest, Launch_MultiBlockPayloadAlsoStagesInsideTheKernel) {
+  for (size_t count : {kSingleBlockFloats, kSingleBlockFloats * 8, size_t{1} << 17}) {
+    g_ddaLaunches.clear();
+    ASSERT_EQ(Run(count), ncclSuccess);
+    ASSERT_EQ(g_ddaLaunches.size(), 1u);
+    EXPECT_EQ(g_ddaLaunches[0].kernel, Kernel()) << "count " << count;
+    EXPECT_GT(g_ddaLaunches[0].grid.x, 1u) << "count " << count;
+  }
+  EXPECT_TRUE(copies_.empty());
 }
 
 TEST_F(DdaAlltoallIpcMicrotest, Launch_PassesBuffersPerPeerBytesRankAndBarrier) {
