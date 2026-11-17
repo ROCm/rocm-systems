@@ -39,12 +39,6 @@ test_categories:
       - "RmaDebugLoggingTest.*"
       - "RmaProxyGatingTest.*"
       - "RmaProxyReadyTest.*"
-      # tuning/tuning_general.cc
-      - "TuningGeneralMicrotest.*"
-      # tuning/cost_model.cc
-      - "CostModelMicrotest.*"
-      # tuning/tuning.cc
-      - "TuningMicrotest.*"
       # commDump.cc
       - "CommDumpMicrotest.*"
       # include/timer.h

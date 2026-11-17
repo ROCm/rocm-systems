@@ -6,8 +6,8 @@
 
 // Host-only microtests for the REAL symmetric cost model (src/tuning/sym_model.cc and
 // src/tuning/sym_model/*.cc), focused on how it costs the Tensor Data Mover (Tma) kernels on
-// gfx1250 now that NCCL_SYM_TMA_ENABLE defaults to 1. Linked into rccl-UnitTestsMicroSymKernels,
-// whose sym-kernels-test.cc TU supplies the real src/sym_kernels.cc.
+// gfx1250 now that NCCL_SYM_TMA_ENABLE defaults to 1. tuning/sym_kernels_wrapper.cc supplies the real
+// src/sym_kernels.cc.
 
 #include <gtest/gtest.h>
 
