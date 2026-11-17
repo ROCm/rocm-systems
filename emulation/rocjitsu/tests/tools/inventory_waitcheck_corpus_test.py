@@ -128,6 +128,20 @@ class InventoryWaitcheckCorpusTest(unittest.TestCase):
             self.assertEqual(artifacts[0]["artifact"], artifacts[1]["artifact"])
             self.assertEqual(artifacts[0]["artifact_sha256"], artifacts[1]["artifact_sha256"])
 
+            existing_object = corpus / "other.o"
+            original_bytes = INPUT.read_bytes()
+            existing_object.write_bytes(original_bytes)
+            rejected = subprocess.run(
+                [sys.executable, str(SCRIPT), str(corpus), "--recursive", "--waitcheck",
+                 str(WAITCHECK), "--project", "pytorch", "--source", "test-fixture",
+                 "--provenance", "llvm", "--extract-dir", str(extracted),
+                 "--target", "gfx942", "--output", str(existing_object)],
+                capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(rejected.returncode, 2, rejected.stderr)
+            self.assertIn("manifest output aliases", rejected.stderr)
+            self.assertEqual(existing_object.read_bytes(), original_bytes)
+
     def test_raw_container_rebuild_preserves_prior_artifact(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

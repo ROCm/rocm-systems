@@ -91,10 +91,9 @@ def parse_args() -> argparse.Namespace:
 
 
 def input_files(
-    inputs: list[Path], recursive: bool, extract_dir: Path | None, output: Path | None
+    inputs: list[Path], recursive: bool, extract_dir: Path | None
 ) -> list[Path]:
     extract_root = extract_dir.resolve() if extract_dir else None
-    output_file = output.resolve() if output else None
     files: set[Path] = set()
     for path in inputs:
         if path.is_file():
@@ -113,7 +112,6 @@ def input_files(
                 files.update(
                     candidate for name in names
                     if (candidate := directory_path / name).is_file()
-                    and (output_file is None or candidate.resolve() != output_file)
                 )
         else:
             raise ValueError(
@@ -313,16 +311,40 @@ def paths_alias(left: Path, right: Path) -> bool:
     return left.resolve() == right.resolve()
 
 
+def is_existing_manifest(path: Path) -> bool:
+    try:
+        with path.open("rb") as stream:
+            first_line = stream.readline(8193)
+        if len(first_line) > 8192:
+            return False
+        header = json.loads(first_line)
+    except (OSError, UnicodeDecodeError, ValueError):
+        return False
+    return (isinstance(header, dict)
+            and header.get("schema") == "rj-waitcheck-corpus-manifest-v1"
+            and header.get("kind") == "manifest")
+
+
 def main() -> int:
     args = parse_args()
     if args.jobs < 1 or args.jobs > 16:
         print("--jobs must be between 1 and 16", file=sys.stderr)
         return 2
     try:
-        files = input_files(args.inputs, args.recursive, args.extract_dir, args.output)
+        files = input_files(args.inputs, args.recursive, args.extract_dir)
     except ValueError as error:
         print(error, file=sys.stderr)
         return 2
+    if args.output:
+        output_inputs = [path for path in files if paths_alias(args.output, path)]
+        if output_inputs:
+            explicit_input = any(
+                path.is_file() and paths_alias(args.output, path) for path in args.inputs
+            )
+            if explicit_input or not is_existing_manifest(args.output):
+                print("manifest output aliases an input or selected artifact", file=sys.stderr)
+                return 2
+            files = [path for path in files if not paths_alias(args.output, path)]
 
     if args.extract_dir:
         args.extract_dir.mkdir(parents=True, exist_ok=True)
