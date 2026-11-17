@@ -166,26 +166,17 @@ def test_profile_kernel_iteration_range():
 
 
 # =============================================================================
-# analyze debug options
+# analyze --verify-deps
 # =============================================================================
 
 
-def test_analyze_debug_options():
-    """Debug options work without --debug, and without -p."""
-    defaults = build_args(["analyze", "-p", "/tmp/workload"])
-    assert defaults.debug_metric_expression is False
-    assert defaults.debug_table_view is False
-    assert defaults.debug_verify_deps is False
+def test_analyze_verify_deps_defaults_off():
+    assert build_args(["analyze", "-p", "/tmp/workload"]).verify_deps is False
 
-    args = build_args([
-        "analyze",
-        "--debug-metric-expression",
-        "--debug-table-view",
-        "--debug-verify-deps",
-    ])
-    assert args.debug_metric_expression is True
-    assert args.debug_table_view is True
-    assert args.debug_verify_deps is True
+
+def test_analyze_verify_deps_needs_no_workload():
+    """The flag is a standalone environment check, so -p stays optional."""
+    assert build_args(["analyze", "--verify-deps"]).verify_deps is True
 
 
 def test_pc_sampling_analyze_options():
@@ -279,7 +270,10 @@ def test_experimental_feature_without_flag_errors(monkeypatch, capsys):
         action=ExperimentalAction,
         experimental_enabled=False,
         feature_label="Test experimental feature",
-        base_action="store_true",
+        base_action="store_const",
+        nargs=0,
+        const=True,
+        default=False,
         help="Custom Help",
     )
 
@@ -310,7 +304,10 @@ def test_experimental_feature_with_flag_succeeds(monkeypatch, caplog):
         action=ExperimentalAction,
         experimental_enabled=True,
         feature_label="Test experimental feature",
-        base_action="store_true",
+        base_action="store_const",
+        nargs=0,
+        const=True,
+        default=False,
         help="Custom Help",
     )
 
@@ -350,7 +347,10 @@ def test_experimental_flag_parsing_before_separator(monkeypatch, caplog):
         action=ExperimentalAction,
         experimental_enabled=True,
         feature_label="Test experimental feature",
-        base_action="store_true",
+        base_action="store_const",
+        nargs=0,
+        const=True,
+        default=False,
         help="Custom Help",
     )
 
@@ -386,7 +386,10 @@ def test_experimental_flag_parsing_after_separator(monkeypatch, capsys):
         action=ExperimentalAction,
         experimental_enabled=False,
         feature_label="Test experimental feature",
-        base_action="store_true",
+        base_action="store_const",
+        nargs=0,
+        const=True,
+        default=False,
         help="Custom Help",
     )
 
@@ -436,7 +439,10 @@ def test_experimental_action_help_suppression():
         action=ExperimentalAction,
         experimental_enabled=False,
         feature_label="Test experimental feature",
-        base_action="store_true",
+        base_action="store_const",
+        nargs=0,
+        const=True,
+        default=False,
         help="Test help text",
     )
 
