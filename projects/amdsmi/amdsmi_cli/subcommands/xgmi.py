@@ -157,6 +157,13 @@ class XgmiCommands:
                 for link in metrics["links"]
             )
 
+        # Hide the GPU grid only when the CPU columns are actually replacing
+        # it (distinct_package_ids present); otherwise an unrelated
+        # resolution failure (single GPU, PCIe-only host, a raised
+        # amdsmi_get_link_metrics()) would leave no destination columns at
+        # all instead of falling back to the pre-CPU-column GPU grid.
+        show_gpu_columns = gpu_gpu_resolvable or not distinct_package_ids
+
         if args.metric:
             # prepend link metrics header to the table header
             link_metrics_header = (
@@ -167,7 +174,7 @@ class XgmiCommands:
                 + "link_type".ljust(11)
             )
             column_header = ""
-            if gpu_gpu_resolvable:
+            if show_gpu_columns:
                 column_header += "".join(f"GPU{d['gpu']}".rjust(13) for d in xgmi_values)
             if distinct_package_ids:
                 column_header += "".join(
@@ -191,6 +198,7 @@ class XgmiCommands:
                     "max_bandwidth": "N/A",
                     "link_type": "N/A",
                     "links": [],
+                    "cpu_links": [],
                 }
                 xgmi_metrics_info = link_metrics_by_bdf.get(src_gpu_bdf, {"links": []})
 
@@ -210,7 +218,7 @@ class XgmiCommands:
                     self.logger, max_bandwidth, bw_unit
                 )
 
-                if gpu_gpu_resolvable:
+                if show_gpu_columns:
                     # Populate link metrics
                     for dest_gpu in args.gpu:
                         primary_partition = self.helpers.is_primary_partition(dest_gpu)
@@ -295,10 +303,24 @@ class XgmiCommands:
                         data_unit = "KB"
                         raw_read = xgmi_metrics_info["links"][0]["read"]
                         raw_write = xgmi_metrics_info["links"][0]["write"]
+                        # links[] is a fixed-size array, so an unpopulated slot
+                        # reads back as the driver's UINT64_MAX sentinel rather
+                        # than being absent.
+                        uint64_max = 0xFFFFFFFFFFFFFFFF
+                        if raw_read == uint64_max:
+                            raw_read = "N/A"
+                        if raw_write == uint64_max:
+                            raw_write = "N/A"
                         if self.logger.is_human_readable_format():
-                            read_val = self.helpers.convert_bytes_to_readable(raw_read * 1024, True)
-                            write_val = self.helpers.convert_bytes_to_readable(
-                                raw_write * 1024, True
+                            read_val = (
+                                self.helpers.convert_bytes_to_readable(raw_read * 1024, True)
+                                if raw_read != "N/A"
+                                else "N/A"
+                            )
+                            write_val = (
+                                self.helpers.convert_bytes_to_readable(raw_write * 1024, True)
+                                if raw_write != "N/A"
+                                else "N/A"
                             )
                         else:
                             read_val = self.helpers.unit_format(self.logger, raw_read, data_unit)
@@ -311,7 +333,7 @@ class XgmiCommands:
                         xgmi_dict["link_metrics"]["link_type"] = "XGMI"
                     for package_id in distinct_package_ids:
                         connected = package_id in connected_package_ids
-                        xgmi_dict["link_metrics"]["links"].append(
+                        xgmi_dict["link_metrics"]["cpu_links"].append(
                             {
                                 "package_id": package_id,
                                 "read": read_val if connected else "N/A",
@@ -350,9 +372,14 @@ class XgmiCommands:
                             for link_key, link_value in value.items():
                                 if link_key == "links":
                                     for link in link_value:
-                                        col_id = link.get("package_id", link.get("gpu"))
-                                        read_output_dict[f"bdf_{col_id}"] = link["read"]
-                                        write_output_dict[f"bdf_{col_id}"] = link["write"]
+                                        read_output_dict[f"bdf_{link['gpu']}"] = link["read"]
+                                        write_output_dict[f"bdf_{link['gpu']}"] = link["write"]
+                                if link_key == "cpu_links":
+                                    for link in link_value:
+                                        read_output_dict[f"pkg_{link['package_id']}"] = link["read"]
+                                        write_output_dict[f"pkg_{link['package_id']}"] = link[
+                                            "write"
+                                        ]
                     tabular_output.append(read_output_dict)
                     tabular_output.append(write_output_dict)
 
@@ -433,10 +460,10 @@ class XgmiCommands:
         if args.link_status:
             # XGMI LINK STATUS: GPU rows against destination columns. GPU and
             # CPU destination columns are each shown only when their own
-            # data resolves (see gpu_gpu_resolvable/distinct_package_ids above)
+            # data resolves (see show_gpu_columns/distinct_package_ids above)
             # -- independently, not mutually exclusive.
             header = ["       ".ljust(7), "bdf".ljust(14)]
-            if gpu_gpu_resolvable:
+            if show_gpu_columns:
                 header += [f"GPU{d['gpu']}".ljust(14) for d in xgmi_values]
             if distinct_package_ids:
                 header += [f"CPU(PKG{package_id})".ljust(14) for package_id in distinct_package_ids]
@@ -444,7 +471,7 @@ class XgmiCommands:
             self.logger.table_title = "\nXGMI LINK STATUS"
 
             src_link_status_map = {}
-            if gpu_gpu_resolvable:
+            if show_gpu_columns:
                 for gpu_dict in xgmi_values:
                     src_gpu_bdf = gpu_dict["bdf"]
                     src_gpu = src_gpu_handles.get(src_gpu_bdf)
@@ -468,7 +495,7 @@ class XgmiCommands:
                     row_dict = {"gpu": f"GPU{src_gpu_id}", "bdf": src_gpu_bdf}
                 json_status = []
 
-                if gpu_gpu_resolvable:
+                if show_gpu_columns:
                     xgmi_metrics_info = link_metrics_by_bdf.get(src_gpu_bdf, {"links": []})
                     for dest_xgmi_dict in xgmi_values:
                         dest_gpu_bdf = dest_xgmi_dict["bdf"]

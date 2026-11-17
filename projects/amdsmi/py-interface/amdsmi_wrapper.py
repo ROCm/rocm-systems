@@ -1649,7 +1649,7 @@ struct_amdsmi_cpu_link_t._layout_ = 'ms'
 struct_amdsmi_cpu_link_t._fields_ = [
     ('package_id', ctypes.c_uint32),
     ('link_type', amdsmi_link_type_t),
-    ('reserved', ctypes.c_uint32 * 4),
+    ('reserved', ctypes.c_uint64 * 4),
 ]
 
 amdsmi_cpu_link_t = struct_amdsmi_cpu_link_t

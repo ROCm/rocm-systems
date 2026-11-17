@@ -1326,7 +1326,7 @@ typedef struct {
 typedef struct {
   uint32_t package_id;           //!< The connected CPU's real physical socket id
   amdsmi_link_type_t link_type;  //!< e.g. ::AMDSMI_LINK_TYPE_XGMI, ::AMDSMI_LINK_TYPE_PCIE.
-  uint32_t reserved[4];
+  uint64_t reserved[4];
 } amdsmi_cpu_link_t;
 
 /**

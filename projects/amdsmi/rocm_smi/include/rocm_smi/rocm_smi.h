@@ -934,7 +934,7 @@ typedef struct {
   uint32_t numa_node_id;   //!< the CPU neighbor's real Linux NUMA node id
   RSMI_IO_LINK_TYPE type;  //!< the link's type (e.g. RSMI_IOLINK_TYPE_XGMI,
                            //!< RSMI_IOLINK_TYPE_PCIEXPRESS)
-  uint32_t reserved[4];
+  uint64_t reserved[4];
 } rsmi_cpu_link_t;
 
 /**

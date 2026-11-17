@@ -232,13 +232,27 @@ amdsmi_status_t AMDSmiSystem::get_sys_num_of_cpu_sockets(uint32_t* sock_num) {
   return AMDSMI_STATUS_SUCCESS;
 }
 
+namespace {
+const char* g_sys_devices_system_root_override = nullptr;
+}  // namespace
+
+const char* SysDevicesSystemRoot() {
+  return g_sys_devices_system_root_override ? g_sys_devices_system_root_override
+                                            : "/sys/devices/system";
+}
+
+void SetSysDevicesSystemRootForTesting(const char* path) {
+  g_sys_devices_system_root_override = path;
+}
+
 std::vector<uint32_t> AMDSmiSystem::get_cpu_sockets_from_numa_node(int32_t numa_node) {
   std::vector<uint32_t> sockets;
   if (numa_node < 0) {
     sockets.push_back(std::numeric_limits<int32_t>::max());
     return sockets;
   }
-  std::ifstream node_info("/sys/devices/system/node/node" + std::to_string(numa_node) + "/cpulist");
+  std::string root = SysDevicesSystemRoot();
+  std::ifstream node_info(root + "/node/node" + std::to_string(numa_node) + "/cpulist");
   std::string info;
 
   if (node_info.is_open()) {
@@ -246,7 +260,7 @@ std::vector<uint32_t> AMDSmiSystem::get_cpu_sockets_from_numa_node(int32_t numa_
     std::istringstream iss(info);
     uint32_t index;
     while (iss >> index) {
-      std::ifstream cpu_info("/sys/devices/system/cpu/cpu" + std::to_string(index) +
+      std::ifstream cpu_info(root + "/cpu/cpu" + std::to_string(index) +
                              "/topology/physical_package_id");
       if (cpu_info.is_open()) {
         uint32_t socket;

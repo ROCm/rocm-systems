@@ -3946,6 +3946,10 @@ amdsmi_status_t amdsmi_get_gpu_cpu_links(amdsmi_processor_handle processor_handl
     auto packages = amd::smi::AMDSmiSystem::getInstance().get_cpu_sockets_from_numa_node(
         static_cast<int32_t>(link.numa_node_id));
     if (packages.empty()) {
+      std::ostringstream ss;
+      ss << __PRETTY_FUNCTION__ << " | NUMA node " << link.numa_node_id
+         << " did not resolve to a physical CPU package; dropping this CPU link";
+      LOG_DEBUG(ss);
       continue;  // can't resolve this NUMA node to a physical package; drop it
     }
     amdsmi_cpu_link_t resolved_link{};

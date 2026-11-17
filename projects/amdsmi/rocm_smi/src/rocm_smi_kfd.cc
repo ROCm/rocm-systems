@@ -408,7 +408,7 @@ int ReadKFDDeviceProperties(uint32_t kfd_node_id, std::vector<std::string>* retV
   return 0;
 }
 
-static int ReadKFDGpuId(uint32_t kfd_node_id, uint64_t* gpu_id) {
+int ReadKFDGpuId(uint32_t kfd_node_id, uint64_t* gpu_id) {
   std::string line;
   int ret;
   std::ifstream fs;
