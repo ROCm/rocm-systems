@@ -601,6 +601,14 @@ def test_workflow_preparation_order_pins_and_timeout_authority(tmp_path):
         names.index(name) for name in required
     )
     by_name = {step['name']: step for step in steps}
+    assert all(
+        not ('uses' in step and 'run' in step) for step in steps
+    ), 'An Actions step must not combine uses and run'
+    python_setup = by_name['Set up Python']
+    assert python_setup['uses'] == (
+        'actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405'
+    )
+    assert python_setup['with']['python-version'] == '3.12'
     setup = [
         'Set benchmark paths',
         'Install base dependencies',
