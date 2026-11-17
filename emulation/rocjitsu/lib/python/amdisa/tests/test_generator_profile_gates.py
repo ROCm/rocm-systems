@@ -4106,7 +4106,19 @@ def test_generated_f16_sdwa_selects_producer_helper(
     """GFX10 arithmetic rounds to half before SDWA output scaling."""
     route, output = generated_f16_sdwa_consumers
     encoding = 'vop2' if instruction == 'V_ADD_F16' else 'vop1'
-    if instruction in {'V_CEIL_F16', 'V_FLOOR_F16'}:
+    if instruction in {
+        'V_CEIL_F16',
+        'V_COS_F16',
+        'V_EXP_F16',
+        'V_FLOOR_F16',
+        'V_LOG_F16',
+        'V_RCP_F16',
+        'V_RSQ_F16',
+        'V_SIN_F16',
+        'V_SQRT_F16',
+        'V_EXP_F16',
+        'V_LOG_F16',
+    }:
         source = (output / 'rdna2' / 'vop1_exec.cpp').read_text()
         class_name = ''.join(word.title() for word in instruction.split('_'))
         body = _generated_function_body(
@@ -4114,6 +4126,16 @@ def test_generated_f16_sdwa_selects_producer_helper(
         )
         assert 'execute_half_unary_sdwa' in body
         assert 'rj_arith_v_' + instruction.lower()[2:] + '_w32_gfx908' in body
+        if instruction in {
+            'V_RCP_F16',
+            'V_RSQ_F16',
+            'V_SQRT_F16',
+            'V_EXP_F16',
+            'V_LOG_F16',
+            'V_SIN_F16',
+            'V_COS_F16',
+        }:
+            assert 'RJ_ARITH_ALU_SDWA' in body
         return
     if instruction in ('V_ADD_F16', 'V_LDEXP_F16'):
         arch = 'rdna1' if route == 'shared' else 'rdna2'

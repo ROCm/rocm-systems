@@ -416,6 +416,14 @@ CDNA_HALF_SELECTION = BINARY_SELECTION_F16 | (
 OLDER_HALF_ROUNDING_TARGETS = {'cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5'}
 HALF_ROUNDING_NAMES = {f'V_{op}_F16' for op in ('TRUNC', 'CEIL', 'FLOOR', 'RNDNE')}
 OLDER_HALF_FREXP_NAMES = {'V_FREXP_MANT_F16', 'V_FREXP_EXP_I16_F16'}
+OLDER_HALF_TRANS_NAMES = {
+    'V_RCP_F16',
+    'V_RSQ_F16',
+    'V_SQRT_F16',
+    'V_EXP_F16',
+    'V_LOG_F16',
+}
+OLDER_HALF_TRIG_NAMES = {'V_SIN_F16', 'V_COS_F16'}
 
 UNARY_F16 = {
     'V_TRUNC_F16',
@@ -3435,7 +3443,11 @@ def gen_float_unary16(ctx: ExecuteContext) -> str | None:
     src = ctx.src_ops
     is_vop3 = ctx.is_vop3
     older = arch in OLDER_HALF_ROUNDING_TARGETS and mnemonic in (
-        HALF_ROUNDING_NAMES | OLDER_HALF_FREXP_NAMES | {'V_FRACT_F16'}
+        HALF_ROUNDING_NAMES
+        | OLDER_HALF_FREXP_NAMES
+        | {'V_FRACT_F16'}
+        | OLDER_HALF_TRANS_NAMES
+        | OLDER_HALF_TRIG_NAMES
     )
     cdna = arch in ('cdna3', 'cdna4', 'cdna5')
     names = (
@@ -3479,9 +3491,7 @@ def gen_float_unary16(ctx: ExecuteContext) -> str | None:
     writer = ''
     modifiers = '0'
     lines = (
-        ['  if (!wf.exec()) { return; }']
-        if older
-        else cdna_qualification_guard(arch) if mnemonic == 'V_FREXP_EXP_I16_F16' else []
+        ['  if (!wf.exec()) { return; }'] if older else cdna_qualification_guard(arch)
     )
     if older:
         lines += [
@@ -3499,10 +3509,15 @@ def gen_float_unary16(ctx: ExecuteContext) -> str | None:
             if mnemonic == 'V_FREXP_EXP_I16_F16'
             else 'execute_half_unary_sdwa'
         )
+        sdwa_policy = (
+            ', RJ_ARITH_ALU_SDWA'
+            if mnemonic in OLDER_HALF_TRANS_NAMES | OLDER_HALF_TRIG_NAMES
+            else ''
+        )
         lines += [
             '  if (inst_.src0 == amdgpu::SRC_SDWA) {',
             f'    amdgpu::arith::{adapter}(*this, wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
-            f'        wf.cu().arithmetic_flags(), {dst[0]}, {src[0]});',
+            f'        wf.cu().arithmetic_flags(), {dst[0]}, {src[0]}{sdwa_policy});',
             '    return;',
             '  }',
         ]
