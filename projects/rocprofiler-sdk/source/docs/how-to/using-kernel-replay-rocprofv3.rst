@@ -122,6 +122,11 @@ the dispatch's ``report.json`` says why.
 lists them). ``--att-remap-library`` points at ``libremapper.so`` when it is not installed next to
 ``rocprofv3``.
 
+Each SIMD is traced through its own device thread trace context, started and stopped around the
+passes that trace it, so every traced GPU allocates four thread trace buffers of
+``--att-buffer-size``. A ``target-cu`` in ``--att-remap-options`` must name the same WGP as
+``--att-target-cu``.
+
 Each remapped dispatch writes ``att_remap/<pid>/dispatch-<id>/`` under the output directory: the
 rewritten code object, ``manifest.json``, ``report.json`` and ``passes.json``, which says what
 each pass ran and traced. After the application exits, ``rocprofv3`` runs the remapper's merge,

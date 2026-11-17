@@ -424,11 +424,33 @@ def test_att_remap_passes_the_target_cu_and_options_to_the_tool():
     assert env["ROCPROF_ATT_REMAP_OPTIONS"] == "target-cu=3,records=2"
     assert env["ROCPROF_ATT_REMAP_INDEX"] == "/x"
     assert env["ROCPROF_ATT_REMAP_LIBRARY"].endswith("libremapper.so")
-    # An explicit target-cu option wins, and no --att-target-cu adds nothing.
-    env = att_remap_env(att_target_cu="3", att_remap_options="target_cu=5")
-    assert env["ROCPROF_ATT_REMAP_OPTIONS"] == "target_cu=5"
+    # No --att-target-cu adds nothing.
     assert att_remap_env()["ROCPROF_ATT_REMAP_OPTIONS"] == ""
     assert "ROCPROF_ATT_REMAP_INDEX" not in att_remap_env()
+
+
+def test_att_remap_traces_the_wgp_the_remapper_targets():
+    # The tool configures its thread trace contexts for --att-target-cu, so a target-cu remapper
+    # option sets it, and the two may not disagree.
+    args = argparse.Namespace(
+        pmc=None,
+        pmc_groups=None,
+        att_target_cu=None,
+        att_simd_select=None,
+        att_shader_engine_mask=None,
+        att_remap_options="records=2,target_cu=5",
+        att_remap_library=None,
+        att_remap_index=None,
+    )
+    env = {}
+    rocprofv3().configure_att_remap(args, True, lambda k, v, **kw: env.update({k: v}))
+    assert args.att_target_cu == 5
+    assert env["ROCPROF_ATT_REMAP_OPTIONS"] == "records=2,target_cu=5"
+    env = att_remap_env(att_target_cu="0x5", att_remap_options="target-cu=5")
+    assert env["ROCPROF_ATT_REMAP_OPTIONS"] == "target-cu=5"
+    assert rejected(
+        lambda: att_remap_env(att_target_cu="3", att_remap_options="target_cu=5")
+    )
 
 
 def test_att_remap_rejects_what_the_remapper_decides_or_cannot_do():

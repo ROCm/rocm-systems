@@ -1517,10 +1517,11 @@ def services_conflicting_with_kernel_replay(args, environ=None):
 
     Kernel replay re-runs each dispatch once per pass. Counter collection is pass-aware: the tool
     hands the SDK a pass count derived from the counter groups and picks a different group on each
-    pass. Dispatch thread trace is pass-aware only with --att-remap, where the remapper chooses each
-    pass's dispatch and trace target. Every other service is simply left enabled for the whole
-    replay loop, so it instruments all of the passes and reports them under the one dispatch id the
-    replay reuses -- N thread traces, or N sets of PC samples, where the run asked for one.
+    pass. Thread trace is pass-aware only with --att-remap, where the remapper chooses each pass's
+    dispatch and trace target and the tool traces just those passes. Every other service is simply
+    left enabled for the whole replay loop, so it instruments all of the passes and reports them
+    under the one dispatch id the replay reuses -- N thread traces, or N sets of PC samples, where
+    the run asked for one.
 
     Returns the display names of the conflicting services, in the order they are reported.
     """
@@ -1735,10 +1736,19 @@ def configure_att_remap(args, kernel_replay_mode, update_env):
             "--att-remap picks the SIMD and shader engines of every pass; "
             "drop --att-simd-select and --att-shader-engine-mask"
         )
+    # The tool configures its thread trace contexts for the WGP the remapper traces, so the two
+    # must name the same one.
     options = args.att_remap_options or ""
-    if args.att_target_cu is not None and not re.search(
-        r"(^|,)\s*target[-_]cu\s*=", options
-    ):
+    remap_cu = re.search(r"(^|,)\s*target[-_]cu\s*=\s*([^,\s]+)", options)
+    if remap_cu:
+        target_cu = int_auto(remap_cu.group(2))
+        if args.att_target_cu is not None and int_auto(args.att_target_cu) != target_cu:
+            fatal_error(
+                f"--att-target-cu {args.att_target_cu} and --att-remap-options "
+                f"target-cu={remap_cu.group(2)} name different WGPs"
+            )
+        args.att_target_cu = target_cu
+    elif args.att_target_cu is not None:
         target_cu = int_auto(args.att_target_cu)
         options = ",".join(itr for itr in (f"target-cu={target_cu}", options) if itr)
     update_env("ROCPROF_ATT_REMAP", True, overwrite=True)

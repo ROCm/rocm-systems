@@ -25,6 +25,7 @@
 #include "lib/common/logging.hpp"
 #include "lib/common/synchronized.hpp"
 
+#include <rocprofiler-sdk/context.h>
 #include <rocprofiler-sdk/experimental/thread_trace.h>
 
 #include <fmt/format.h>
@@ -132,15 +133,28 @@ library()
 /// One replay loop the remapper runs.
 struct session_t
 {
-    remapper_session_t*      handle      = nullptr;
-    uint64_t                 dispatch_id = 0;
-    rocprofiler_context_id_t att_context = {};
-    int                      last_exit   = 0;
-    bool                     traced      = false;
-    att_replay_target        target      = {};
+    remapper_session_t*      handle        = nullptr;
+    uint64_t                 dispatch_id   = 0;
+    rocprofiler_agent_id_t   agent         = {};
+    int                      last_exit     = 0;
+    bool                     traced        = false;
+    rocprofiler_context_id_t trace_context = {};
 };
 
 thread_local session_t* tl_session = nullptr;
+
+/// The device thread trace contexts of one agent
+struct agent_trace_t
+{
+    uint64_t                                        target_cu          = 0;
+    uint64_t                                        shader_engine_mask = 0;
+    std::array<rocprofiler_context_id_t, num_simds> contexts           = {};
+};
+
+// agent handle -> its thread trace contexts. Written during tool initialization only.
+auto agent_traces = common::Synchronized<std::unordered_map<uint64_t, agent_trace_t>>{};
+// agent handle -> the pass it is tracing
+auto traced_passes = common::Synchronized<std::unordered_map<uint64_t, traced_pass>>{};
 
 auto code_objects = common::Synchronized<std::unordered_map<uint64_t, std::vector<uint8_t>>>{};
 // dispatch directories of the finished sessions
@@ -213,6 +227,21 @@ percent_decode(const std::string& s)
             out += s[i];
     }
     return out;
+}
+
+// Stop the thread trace context `s` started for its current pass. The pass has completed, and the
+// stop delivers its trace to the shader data callback before returning.
+void
+stop_trace(session_t& s, uint64_t pass)
+{
+    if(!s.traced) return;
+    s.traced          = false;
+    const auto status = rocprofiler_stop_context(s.trace_context);
+    ROCP_ERROR_IF(status != ROCPROFILER_STATUS_SUCCESS)
+        << "--att-remap: dispatch " << s.dispatch_id << " pass " << pass
+        << ": stopping thread trace failed: " << rocprofiler_get_status_string(status);
+    traced_passes.wlock([](auto& _passes, uint64_t _handle) { _passes.erase(_handle); },
+                        s.agent.handle);
 }
 
 template <typename FuncT>
@@ -297,6 +326,63 @@ fini(const std::string& trace_path)
 }
 
 void
+configure_agent(rocprofiler_agent_id_t                                   agent,
+                uint64_t                                                 num_shader_engines,
+                const std::vector<rocprofiler_thread_trace_parameter_t>& parameters,
+                rocprofiler_thread_trace_shader_data_callback_t          shader_callback)
+{
+    auto trace = agent_trace_t{};
+    trace.shader_engine_mask =
+        (num_shader_engines >= 64) ? ~uint64_t{0} : (uint64_t{1} << num_shader_engines) - 1;
+
+    auto base = std::vector<rocprofiler_thread_trace_parameter_t>{};
+    for(const auto& itr : parameters)
+    {
+        if(itr.type == ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU) trace.target_cu = itr.value;
+        if(itr.type != ROCPROFILER_THREAD_TRACE_PARAMETER_SIMD_SELECT &&
+           itr.type != ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK)
+            base.emplace_back(itr);
+    }
+    base.push_back(
+        {ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, {trace.shader_engine_mask}});
+
+    for(uint64_t simd = 0; simd < num_simds; ++simd)
+    {
+        auto params = base;
+        params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SIMD_SELECT, {simd}});
+
+        auto& context = trace.contexts.at(simd);
+        auto  status  = rocprofiler_create_context(&context);
+        if(status == ROCPROFILER_STATUS_SUCCESS)
+            status = rocprofiler_configure_device_thread_trace_service(
+                context,
+                agent,
+                params.data(),
+                params.size(),
+                shader_callback,
+                rocprofiler_user_data_t{.value = 0});
+        ROCP_FATAL_IF(status != ROCPROFILER_STATUS_SUCCESS)
+            << "--att-remap: configuring thread trace of SIMD " << simd << " on agent "
+            << agent.handle << " failed: " << rocprofiler_get_status_string(status);
+    }
+
+    agent_traces.wlock(
+        [](auto& _traces, uint64_t _handle, const agent_trace_t& _trace) {
+            _traces[_handle] = _trace;
+        },
+        agent.handle,
+        trace);
+}
+
+bool
+traces_agent(rocprofiler_agent_id_t agent)
+{
+    return agent_traces.rlock(
+        [](const auto& _traces, uint64_t _handle) { return _traces.count(_handle) > 0; },
+        agent.handle);
+}
+
+void
 add_code_object(uint64_t code_object_id, std::vector<uint8_t> bytes)
 {
     code_objects.wlock(
@@ -309,8 +395,7 @@ add_code_object(uint64_t code_object_id, std::vector<uint8_t> bytes)
 bool
 begin(rocprofiler_callback_tracing_kernel_replay_data_t* payload,
       rocprofiler_user_data_t*                           user_data,
-      const dispatch_source&                             source,
-      rocprofiler_context_id_t                           att_context)
+      const dispatch_source&                             source)
 {
     auto& lib = library();
     if(lib.remapper == nullptr || lib.wants_dispatch(lib.remapper) == 0) return false;
@@ -379,7 +464,7 @@ begin(rocprofiler_callback_tracing_kernel_replay_data_t* payload,
     auto* s        = new session_t{};
     s->handle      = handle;
     s->dispatch_id = info.dispatch_id;
-    s->att_context = att_context;
+    s->agent       = info.agent_id;
     user_data->ptr = s;
     tl_session     = s;
 
@@ -434,23 +519,53 @@ pass_enter(rocprofiler_callback_tracing_kernel_replay_data_t* payload,
 
     if(plan.trace != 0)
     {
-        s->target         = {plan.target_cu, plan.simd, plan.shader_engine_mask};
-        const auto params = std::array<rocprofiler_thread_trace_parameter_t, 3>{
-            {{ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU, {plan.target_cu}},
-             {ROCPROFILER_THREAD_TRACE_PARAMETER_SIMD_SELECT, {plan.simd}},
-             {ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, {plan.shader_engine_mask}}}};
-        auto status = payload->replay_set_thread_trace_parameters(
-            s->att_context, params.data(), params.size());
+        // The pass is the only work on the agent between here and its PASS PHASE_EXIT: kernel
+        // replay holds other dispatches off the agent for the whole loop, and restores device
+        // memory after PHASE_EXIT.
+        const auto target  = att_replay_target{plan.target_cu, plan.simd, plan.shader_engine_mask};
+        const auto context = agent_traces.rlock(
+            [](const auto& _traces, uint64_t _handle, const att_replay_target& _target) {
+                auto itr = _traces.find(_handle);
+                if(itr == _traces.end() || _target.simd_select >= num_simds ||
+                   _target.target_cu != itr->second.target_cu ||
+                   _target.shader_engine_mask != itr->second.shader_engine_mask)
+                    return std::optional<rocprofiler_context_id_t>{};
+                return std::make_optional(itr->second.contexts.at(_target.simd_select));
+            },
+            s->agent.handle,
+            target);
+
+        auto status = ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
+        if(context)
+        {
+            traced_passes.wlock(
+                [](auto& _passes, uint64_t _handle, const traced_pass& _pass) {
+                    _passes[_handle] = _pass;
+                },
+                s->agent.handle,
+                traced_pass{s->dispatch_id, pass, target});
+            status = rocprofiler_start_context(*context);
+        }
         s->traced = (status == ROCPROFILER_STATUS_SUCCESS);
-        ROCP_ERROR_IF(!s->traced) << fmt::format(
-            "--att-remap: dispatch {} pass {} is not traced: selecting thread trace target "
-            "(target_cu={}, simd_select={}, shader_engine_mask={:#x}) failed: {}",
-            s->dispatch_id,
-            pass,
-            plan.target_cu,
-            plan.simd,
-            plan.shader_engine_mask,
-            rocprofiler_get_status_string(status));
+        if(s->traced)
+        {
+            s->trace_context = *context;
+        }
+        else
+        {
+            traced_passes.wlock([](auto& _passes, uint64_t _handle) { _passes.erase(_handle); },
+                                s->agent.handle);
+            ROCP_ERROR << fmt::format(
+                "--att-remap: dispatch {} pass {} is not traced (target_cu={}, simd_select={}, "
+                "shader_engine_mask={:#x}): {}",
+                s->dispatch_id,
+                pass,
+                plan.target_cu,
+                plan.simd,
+                plan.shader_engine_mask,
+                context ? rocprofiler_get_status_string(status)
+                        : "no thread trace context is configured for this target");
+        }
     }
 }
 
@@ -461,6 +576,8 @@ pass_exit(rocprofiler_callback_tracing_kernel_replay_data_t* payload,
     auto* s = static_cast<session_t*>(user_data.ptr);
     if(s == nullptr) return;
 
+    stop_trace(*s, payload->current_pass);
+
     auto result = library().pass_exit(s->handle, payload->current_pass);
     if(result < 0)
     {
@@ -469,7 +586,6 @@ pass_exit(rocprofiler_callback_tracing_kernel_replay_data_t* payload,
         result = 0;
     }
     s->last_exit = result;
-    s->traced    = false;
 }
 
 void
@@ -502,11 +618,15 @@ end(rocprofiler_user_data_t user_data)
     delete s;
 }
 
-std::optional<att_replay_target>
-current_trace_target()
+std::optional<traced_pass>
+traced_pass_on(rocprofiler_agent_id_t agent)
 {
-    if(tl_session == nullptr || !tl_session->traced) return std::nullopt;
-    return tl_session->target;
+    return traced_passes.rlock(
+        [](const auto& _passes, uint64_t _handle) {
+            auto itr = _passes.find(_handle);
+            return (itr != _passes.end()) ? std::make_optional(itr->second) : std::nullopt;
+        },
+        agent.handle);
 }
 
 std::optional<std::vector<uint8_t>>

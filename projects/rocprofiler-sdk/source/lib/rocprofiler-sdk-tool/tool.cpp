@@ -385,15 +385,6 @@ thread_local auto tl_current_replay_pass = std::optional<uint64_t>{};
 // Memoizes is_targeted_kernel() for the duration of one replay loop; see the comment there.
 thread_local auto tl_replay_dispatch_targeted = std::optional<bool>{};
 
-// dispatch id -> replay pass whose thread trace is in flight and the target it traces, for
-// dispatches --att-remap traces pass by pass. The shader data callback may run on another thread,
-// but all of a pass's data is delivered before the SDK dispatches the next pass.
-auto att_replay_pass_by_dispatch = common::Synchronized<
-    std::unordered_map<rocprofiler_dispatch_id_t, std::pair<uint64_t, tool::att_replay_target>>>{};
-
-// agents a dispatch thread trace service is configured on
-auto att_dispatch_agents = common::Synchronized<std::unordered_set<uint64_t>>{};
-
 // Stores stream ids, graph attribution, and kernel region ids for the
 // kernel-rename, hip-stream-display, and hip-graph-display services.
 struct kernel_rename_and_stream_data
@@ -457,39 +448,6 @@ is_targeted_kernel(uint64_t                                        _kern_id,
 
     if(tl_current_replay_pass.has_value()) tl_replay_dispatch_targeted = _is_target;
     return _is_target;
-}
-
-// Whether is_targeted_kernel() will select the next launch of `_kern_id`, without counting that
-// launch. Lets the replay pass-count callback skip replaying dispatches nothing will trace.
-bool
-next_launch_is_targeted(uint64_t                                        _kern_id,
-                        common::Synchronized<kernel_iteration_t, true>& _kernel_iteration)
-{
-    const auto next_iteration = _kernel_iteration.rlock(
-        [](const kernel_iteration_t& _kernel_iter, uint64_t _kernel_id) {
-            auto itr = _kernel_iter.find(_kernel_id);
-            return ((itr != _kernel_iter.end()) ? itr->second : size_t{0}) + 1;
-        },
-        _kern_id);
-
-    return target_kernels.rlock(
-        [next_iteration](const targeted_kernels_map_t& _targets_v, uint64_t _kern_id_v) {
-            auto target_itr = _targets_v.find(_kern_id_v);
-            if(target_itr == _targets_v.end()) return false;
-            const auto& range = target_itr->second;
-            if(range.empty())
-                return !tool::get_config().advanced_thread_trace || next_iteration == 1;
-            return range.count(next_iteration) > 0;
-        },
-        _kern_id);
-}
-
-// The launch counts thread trace keeps for --kernel-iteration-range
-auto&
-att_kernel_iteration()
-{
-    static auto kernel_iteration = common::Synchronized<kernel_iteration_t, true>{};
-    return kernel_iteration;
 }
 
 auto&
@@ -1958,13 +1916,12 @@ att_shader_data_callback(rocprofiler_thread_trace_shader_data_t shader_data,
     // from the global atomic (set by consecutive-kernels or marker-trace logic)
     if(dispatch_id == 0) dispatch_id = att_device_trace_id.load();
 
-    const auto replay = att_replay_pass_by_dispatch.rlock(
-        [](const auto& _passes, rocprofiler_dispatch_id_t _dispatch_id) {
-            auto itr = _passes.find(_dispatch_id);
-            return (itr != _passes.end()) ? std::make_optional(itr->second) : std::nullopt;
-        },
-        dispatch_id);
-    const auto replay_pass = replay ? std::optional<uint64_t>{replay->first} : std::nullopt;
+    // --att-remap traces one replay pass at a time through a device thread trace context, so the
+    // trace belongs to the pass the agent is tracing.
+    const auto replay =
+        tool::att_remap::enabled() ? tool::att_remap::traced_pass_on(agent) : std::nullopt;
+    if(replay) dispatch_id = replay->dispatch_id;
+    const auto replay_pass = replay ? std::optional<uint64_t>{replay->pass} : std::nullopt;
     // The decoder reads the shader engine from the last two '_'-separated fields, so the replay
     // pass goes before them.
     filename << agent.handle;
@@ -1979,7 +1936,7 @@ att_shader_data_callback(rocprofiler_thread_trace_shader_data_t shader_data,
     tool_metadata->att_filenames[key].emplace_back(output_filename);
     if(replay)
     {
-        const auto& target                     = replay->second;
+        const auto& target                     = replay->target;
         tool_metadata->att_replay_targets[key] = {
             target.target_cu, target.simd_select, target.shader_engine_mask};
     }
@@ -1994,40 +1951,12 @@ att_dispatch_callback(rocprofiler_agent_id_t /* agent_id  */,
                       void* /*userdata_config*/,
                       rocprofiler_user_data_t* userdata_shader)
 {
-    userdata_shader->value = dispatch_id;
+    static auto kernel_iteration = common::Synchronized<kernel_iteration_t, true>{};
+    userdata_shader->value       = dispatch_id;
 
-    const auto record_pass = [dispatch_id](const tool::att_replay_target& _target) {
-        att_replay_pass_by_dispatch.wlock(
-            [](auto&                          _passes,
-               rocprofiler_dispatch_id_t      _dispatch_id,
-               uint64_t                       _pass,
-               const tool::att_replay_target& _target_v) {
-                _passes[_dispatch_id] = {_pass, _target_v};
-            },
-            dispatch_id,
-            *tl_current_replay_pass,
-            _target);
-    };
-
-    // Under --att-remap only the passes the remapper traces are traced. A remapped launch was
-    // counted against the kernel filters when its replay loop began; its passes may run another
-    // kernel, so they are not counted again.
-    if(tool::att_remap::enabled())
-    {
-        if(!tool::att_remap::active() || !tl_current_replay_pass.has_value())
-        {
-            is_targeted_kernel(kernel_id, att_kernel_iteration());
-            return ROCPROFILER_THREAD_TRACE_CONTROL_NONE;
-        }
-        const auto target = tool::att_remap::current_trace_target();
-        if(!target) return ROCPROFILER_THREAD_TRACE_CONTROL_NONE;
-        record_pass(*target);
+    if(is_targeted_kernel(kernel_id, kernel_iteration))
         return ROCPROFILER_THREAD_TRACE_CONTROL_START_AND_STOP;
-    }
-
-    if(!is_targeted_kernel(kernel_id, att_kernel_iteration()))
-        return ROCPROFILER_THREAD_TRACE_CONTROL_NONE;
-    return ROCPROFILER_THREAD_TRACE_CONTROL_START_AND_STOP;
+    return ROCPROFILER_THREAD_TRACE_CONTROL_NONE;
 }
 
 void
@@ -2654,11 +2583,13 @@ void
 begin_att_remap(rocprofiler_callback_tracing_kernel_replay_data_t* payload,
                 rocprofiler_user_data_t*                           user_data)
 {
-    const auto& info         = payload->dispatch_info;
-    const bool  traced_agent = att_dispatch_agents.rlock(
-        [](const auto& _agents, uint64_t _handle) { return _agents.count(_handle) > 0; },
-        info.agent_id.handle);
-    if(!traced_agent || !next_launch_is_targeted(info.kernel_id, att_kernel_iteration())) return;
+    const auto& info = payload->dispatch_info;
+    if(!tool::att_remap::traces_agent(info.agent_id)) return;
+
+    // Each launch kernel replay can replay counts against --kernel-iteration-range once, here,
+    // whether or not the remapper takes it; its passes do not.
+    static auto kernel_iteration = common::Synchronized<kernel_iteration_t, true>{};
+    if(!is_targeted_kernel(info.kernel_id, kernel_iteration)) return;
 
     auto        source = tool::att_remap::dispatch_source{};
     const auto* symbol = CHECK_NOTNULL(tool_metadata)->get_kernel_symbol(info.kernel_id);
@@ -2671,9 +2602,7 @@ begin_att_remap(rocprofiler_callback_tracing_kernel_replay_data_t* payload,
        agent != tool_metadata->agents_map.end())
         source.agent_node_id = agent->second.node_id;
 
-    // The launch counts against --kernel-iteration-range once, here; its passes do not.
-    if(tool::att_remap::begin(payload, user_data, source, get_client_ctx()))
-        is_targeted_kernel(info.kernel_id, att_kernel_iteration());
+    tool::att_remap::begin(payload, user_data, source);
 }
 
 // Kernel replay CONFIG callback: install the pass-count callback during PHASE_ENTER so the SDK can
@@ -2700,12 +2629,6 @@ kernel_replay_callback(rocprofiler_callback_tracing_record_t record,
     else if(record.operation == ROCPROFILER_KERNEL_REPLAY_CONFIG &&
             record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
     {
-        // Every pass's shader data has been delivered by the time the replay loop ends.
-        att_replay_pass_by_dispatch.wlock(
-            [](auto& _passes, rocprofiler_dispatch_id_t _dispatch_id) {
-                _passes.erase(_dispatch_id);
-            },
-            payload->dispatch_info.dispatch_id);
         if(tool::att_remap::enabled()) tool::att_remap::end(*user_data);
     }
     else if(record.operation == ROCPROFILER_KERNEL_REPLAY_PASS)
@@ -3771,6 +3694,13 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                      trace_config.userdata),
                                  "thread trace service configure");
             }
+            else if(tool::att_remap::enabled())
+            {
+                // --att-remap traces a replay pass by starting a device thread trace context
+                // around it, so each SIMD it traces has its own context.
+                tool::att_remap::configure_agent(
+                    id, agent.num_shader_banks, agent_params, callbacks.att_shader_data);
+            }
             else if(!handle_consecutive_kernels && !handle_marker_trace)
             {
                 ROCPROFILER_CALL(
@@ -3782,8 +3712,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                                         callbacks.att_shader_data,
                                                                         tool_data),
                     "thread trace service configure");
-                att_dispatch_agents.wlock(
-                    [](auto& _agents, uint64_t _handle) { _agents.emplace(_handle); }, id.handle);
             }
             else
             {
@@ -3933,11 +3861,11 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     // single application run by replaying each dispatch once per group or target (device memory is
     // snapshot/restored between passes). The tool supplies the pass count via
     // kernel_replay_callback during CONFIG PHASE_ENTER; counter_dispatch_callback selects the
-    // per-pass group, and kernel_replay_callback selects the per-pass thread trace target at PASS
-    // PHASE_ENTER.
+    // per-pass group, and under --att-remap kernel_replay_callback starts the device thread trace
+    // context of the pass's target at PASS PHASE_ENTER and stops it at PASS PHASE_EXIT.
     //
-    // apply_core_capability_gates turned replay off when neither counter collection nor dispatch
-    // thread trace is on, or the rocprofiler-sdk library cannot replay
+    // apply_core_capability_gates turned replay off when neither counter collection nor
+    // --att-remap is on, or the rocprofiler-sdk library cannot replay
     if(tool::att_remap::enabled())
     {
         ROCP_FATAL_IF(!tool::get_config().kernel_replay ||

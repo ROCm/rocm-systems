@@ -26,6 +26,7 @@
 
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/experimental/kernel_replay.h>
+#include <rocprofiler-sdk/experimental/thread_trace.h>
 #include <rocprofiler-sdk/fwd.h>
 
 #include <cstdint>
@@ -51,6 +52,23 @@ init(const std::string& output_path);
 void
 fini(const std::string& trace_path);
 
+/// The SIMDs of a WGP; a remapped dispatch is traced on each in turn.
+constexpr uint64_t num_simds = 4;
+
+/// Configure the device thread trace contexts that trace `agent`: one per SIMD, because a thread
+/// trace context traces the target it was configured with. Each uses `parameters` with the SIMD
+/// replaced and every one of the agent's `num_shader_engines` selected, and delivers its trace to
+/// `shader_callback`. The contexts stay stopped until a pass traces through them.
+void
+configure_agent(rocprofiler_agent_id_t                                   agent,
+                uint64_t                                                 num_shader_engines,
+                const std::vector<rocprofiler_thread_trace_parameter_t>& parameters,
+                rocprofiler_thread_trace_shader_data_callback_t          shader_callback);
+
+/// Whether configure_agent() set `agent` up for tracing.
+bool
+traces_agent(rocprofiler_agent_id_t agent);
+
 /// Keep a loaded code object's bytes; the remapper rewrites them.
 void
 add_code_object(uint64_t code_object_id, std::vector<uint8_t> bytes);
@@ -68,19 +86,20 @@ struct dispatch_source
 bool
 begin(rocprofiler_callback_tracing_kernel_replay_data_t* payload,
       rocprofiler_user_data_t*                           user_data,
-      const dispatch_source&                             source,
-      rocprofiler_context_id_t                           att_context);
+      const dispatch_source&                             source);
 
 /// Whether a remap loop is running on this thread.
 bool
 active();
 
-/// PASS PHASE_ENTER: submit and trace what the remapper planned for this pass.
+/// PASS PHASE_ENTER: submit what the remapper planned for this pass and, for a traced pass, start
+/// the device thread trace context of its SIMD.
 void
 pass_enter(rocprofiler_callback_tracing_kernel_replay_data_t* payload,
            rocprofiler_user_data_t                            user_data);
 
-/// PASS PHASE_EXIT: hand the pass's results to the remapper.
+/// PASS PHASE_EXIT: stop the pass's thread trace context, which delivers its trace, and hand the
+/// pass's results to the remapper.
 void
 pass_exit(rocprofiler_callback_tracing_kernel_replay_data_t* payload,
           rocprofiler_user_data_t                            user_data);
@@ -89,9 +108,18 @@ pass_exit(rocprofiler_callback_tracing_kernel_replay_data_t* payload,
 void
 end(rocprofiler_user_data_t user_data);
 
-/// The current pass's thread trace target, if the remapper traces it.
-std::optional<att_replay_target>
-current_trace_target();
+/// A replay pass whose thread trace is being collected or delivered.
+struct traced_pass
+{
+    uint64_t          dispatch_id = 0;
+    uint64_t          pass        = 0;
+    att_replay_target target      = {};
+};
+
+/// The pass `agent` is tracing, from its PASS PHASE_ENTER until its trace has been delivered. An
+/// agent replays one dispatch at a time, so there is at most one.
+std::optional<traced_pass>
+traced_pass_on(rocprofiler_agent_id_t agent);
 
 /// The bytes of a loaded code object: the memory it was loaded from, or, for a file-backed one, the
 /// range its `file://PATH#offset=N&size=M` URI names, read through `file_descriptor` (the file
