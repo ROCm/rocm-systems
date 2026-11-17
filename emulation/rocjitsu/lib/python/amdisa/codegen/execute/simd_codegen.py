@@ -297,16 +297,6 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
         'uint32_t',
         '[](auto a) { return a & 0xFFFFu; }',
     ),
-    'v_frexp_mant_f32_vop1': (
-        'float32_t',
-        'float32_t',
-        '[&wf](auto a) { return util::native<float>([&](auto i) { return amdgpu::frexp_f32(static_cast<float>(a[i]), wf.fp_denorm_mode_f32()).mantissa; }); }',
-    ),
-    'v_frexp_exp_i32_f32_vop1': (
-        'uint32_t',
-        'uint32_t',
-        '[&wf](auto a) { return util::native<uint32_t>([&](auto i) { return static_cast<uint32_t>(amdgpu::frexp_f32(std::bit_cast<float>(static_cast<uint32_t>(a[i])), wf.fp_denorm_mode_f32()).exponent); }); }',
-    ),
     'v_cvt_f32_fp8_vop1': (
         'uint32_t',
         'float32_t',
@@ -317,27 +307,6 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
         'float32_t',
         '[](auto a) { return util::bf8_e5m2_to_f32_simd(a); }',
     ),
-    'v_floor_f32_vop1': (
-        'float32_t',
-        'float32_t',
-        _flush_input_then('F32', '[](auto a) { return util::floor_simd(a); }'),
-    ),
-    'v_ceil_f32_vop1': (
-        'float32_t',
-        'float32_t',
-        _flush_input_then('F32', '[](auto a) { return util::ceil_simd(a); }'),
-    ),
-    'v_trunc_f32_vop1': (
-        'float32_t',
-        'float32_t',
-        '[](auto a) { return util::trunc_simd(a); }',
-    ),
-    'v_rndne_f32_vop1': (
-        'float32_t',
-        'float32_t',
-        '[](auto a) { return util::rndne_simd(a); }',
-    ),
-    'v_fract_f32_vop1': ('uint32_t', 'uint32_t', float_fract.simd_functor('f32')),
     'v_rcp_f32_vop1': (
         'float32_t',
         'float32_t',
@@ -522,7 +491,6 @@ SIMD_VOP2_BINARY_FP64: dict[str, str] = {
 # the glue note + UtilSimd.*F64*_BitExact guards). v_mov_b64 is a pure 64-bit
 # copy (T = uint64_t).
 SIMD_VOP1_UNARY_F64: dict[str, tuple[str, str]] = {
-    'v_fract_f64_vop1': ('uint64_t', float_fract.simd_functor('f64')),
     'v_rcp_f64_vop1': (
         'double',
         '[](auto a) { return util::native<double>(1.0) / a; }',
@@ -533,28 +501,11 @@ SIMD_VOP1_UNARY_F64: dict[str, tuple[str, str]] = {
     ),
     'v_sqrt_f64_vop1': ('double', '[](auto a) { return util::sqrt_f64_simd(a); }'),
     'v_mov_b64_vop1': ('uint64_t', '[](auto a) { return a; }'),
-    'v_frexp_mant_f64_vop1': (
-        'double',
-        _flush_input_then('F64', '[](auto a) { return util::frexp_mant_f64_simd(a); }'),
-    ),
 }
 
 
 # FREXP exponent extraction still needs a mixed-width FP64-to-32-bit bridge.
-SIMD_CVT_F64_TO_B32: dict[str, tuple[str, str]] = {
-    # FREXP exponent (F64 -> int32): flush the source under MODE, then narrow
-    # the low 32 exponent bits. The VOP3 twin reuses this functor: ABS/NEG
-    # cannot change the exponent.
-    'v_frexp_exp_i32_f64_vop1': (
-        'int32_t',
-        _flush_input_then(
-            'F64',
-            '[](auto s) {'
-            ' return util::stdx::static_simd_cast<util::narrow32<int32_t>>('
-            'util::frexp_exp_f64_simd(s)); }',
-        ),
-    ),
-}
+SIMD_CVT_F64_TO_B32: dict[str, tuple[str, str]] = {}
 
 # VOP3 div_fmas: fused FMA and VCC-controlled scaling, rounded once using
 # the guest mode. Fixed-op / functorless.
@@ -1036,15 +987,7 @@ SIMD_VOP3_TRUE16_UNSAFE = frozenset(
 # (operand shape is identical: src0 in, vdst out, 32-bit lanes) — only the
 # probe routing key differs. RDNA3+; CDNA4 does not decode.
 SIMD_VOP3_UNARY_INT_EXTRA: dict[str, tuple[str, str, str]] = {
-    # ABS/NEG cannot change the exponent; the result has no FP output modifiers.
-    'v_frexp_exp_i32_f32_vop3': SIMD_VOP1_UNARY['v_frexp_exp_i32_f32_vop1'],
-    # v_not_b16: `uint16_t(~src0)`, zero-extended. Same shape as v_not_b32 but
-    # masked to 16 bits.
-    'v_not_b16_vop3': (
-        'uint32_t',
-        'uint32_t',
-        '[](auto a) { return (~a) & 0xFFFFu; }',
-    ),
+    'v_not_b16_vop3': ('uint32_t', 'uint32_t', '[](auto a) { return (~a) & 0xFFFFu; }')
 }
 
 
@@ -1073,9 +1016,6 @@ _ROUNDED_VOP3_BINARY_FP64 = frozenset({'v_add_f64_vop3', 'v_mul_f64_vop3'})
 # finite / Inf / NaN / signed-zero input.
 SIMD_VOP3_UNARY_FP64: dict[str, str] = {
     'v_sqrt_f64_vop3': '[](auto a) { return util::sqrt_f64_simd(a); }',
-    'v_frexp_mant_f64_vop3': _flush_input_then(
-        'F64', '[](auto a) { return util::frexp_mant_f64_simd(a); }'
-    ),
     'v_rcp_f64_vop3': '[](auto a) { return util::native<double>(1.0) / a; }',
     'v_rsq_f64_vop3': '[](auto a) { return util::native<double>(1.0) / util::stdx::sqrt(a); }',
 }

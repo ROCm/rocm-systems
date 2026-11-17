@@ -1023,90 +1023,25 @@ inline native<float> frexp_mant_f32_simd(native<uint32_t> v) {
   return std::bit_cast<native<float>>(out);
 }
 
-/// 64-bit-lane port of the f64 `std::frexp` mantissa over native<double>. Same
-/// structure as frexp_mant_f32_simd at f64 widths (11 exp bits bias 1023, 52
-/// mantissa bits): normal lanes force the exponent field to 1022; denormals
-/// renormalize via p = floor(log2(M)) read from double(M)'s exponent (M < 2^53,
-/// exact); ±0 / Inf pass through; NaN is quieted (mantissa MSB set). Bit-identical
-/// to the scalar v_frexp_mant_f64 body.
-inline native<double> frexp_mant_f64_simd(native<double> x) {
-  using U = native<uint64_t>;
-  U v = std::bit_cast<U>(x);
-#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
-  U out = map_native64_scalar<uint64_t>(v, [](uint64_t bits) -> uint64_t {
-    constexpr uint64_t kSign = 0x8000000000000000ull;
-    constexpr uint64_t kMant = 0x000FFFFFFFFFFFFFull;
-    constexpr uint64_t kQuiet = 0x0008000000000000ull;
-    uint64_t sign = bits & kSign;
-    uint64_t E = (bits >> 52) & 0x7FFull;
-    uint64_t M = bits & kMant;
-    if (E == 0ull) {
-      if (M == 0ull) {
-        return bits;
-      }
-      uint64_t p = 63u - static_cast<uint64_t>(std::countl_zero(M));
-      return sign | (1022ull << 52) | ((M << (52ull - p)) & kMant);
-    }
-    if (E == 2047ull) {
-      return M == 0ull ? bits : bits | kQuiet;
-    }
-    return sign | (1022ull << 52) | M;
-  });
-  return std::bit_cast<native<double>>(out);
-#else
-  U sign = v & U(0x8000000000000000ull);
-  U E = (v >> 52) & U(0x7FFull);
-  U M = v & U(0xFFFFFFFFFFFFFull); // 52 mantissa bits
-  U normal = sign | (U(1022ull) << 52) | M;
-  const native<double> mf = stdx::static_simd_cast<native<double>>(M);
-  const U p = (std::bit_cast<U>(mf) >> 52) - U(1023ull);
-  U dn = sign | (U(1022ull) << 52) | ((M << (U(52ull) - p)) & U(0xFFFFFFFFFFFFFull));
+/// Vector port of the f32 `std::frexp` exponent over raw float bits, returned as
+/// the raw bits of the int32 result. Normal lanes give E - 126; denormals give
+/// p - 148 (p = floor(log2(M))); ±0 / Inf / NaN give 0 (the scalar body only
+/// calls frexp on finite non-zero inputs, leaving exp = 0 otherwise). Negative
+/// results carry the correct two's-complement bits. Bit-identical to the scalar
+/// v_frexp_exp_i32_f32 body.
+inline native<uint32_t> frexp_exp_f32_simd(native<uint32_t> v) {
+  using U = native<uint32_t>;
+  U E = (v >> 23) & U(0xFFu);
+  U M = v & U(0x7FFFFFu);
+  U normal = E - U(126u);
+  const native<float> mf = stdx::static_simd_cast<native<float>>(M);
+  const U p = (std::bit_cast<U>(mf) >> 23) - U(127u);
+  U dn = p - U(148u);
   U out = normal;
-  stdx::where(E == 0ull, out) = v;                   // ±0 (M==0); overwritten if denormal
-  stdx::where((E == 0ull) && (M != 0ull), out) = dn; // denormal -> renormalized
-  stdx::where(E == 2047ull, out) = v;                // Inf passes through unchanged
-  stdx::where((E == 2047ull) && (M != 0ull), out) = v | U(0x0008000000000000ull); // quiet NaN
-  return std::bit_cast<native<double>>(out);
-#endif
-}
-
-/// 64-bit-lane port of the f64 `std::frexp` exponent. Returns each int32 result
-/// in the low 32 bits of a native<uint64_t> lane (sign-extended), so the CVT
-/// f64->b32 glue narrows it with one static_simd_cast. Normal lanes give
-/// E - 1022; denormals p - 1073; ±0 / Inf / NaN give 0 (the scalar guards
-/// frexp to finite non-zero inputs). Bit-identical to v_frexp_exp_i32_f64.
-inline native<uint64_t> frexp_exp_f64_simd(native<double> x) {
-  using U = native<uint64_t>;
-  U v = std::bit_cast<U>(x);
-#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
-  return map_native64_scalar<uint64_t>(v, [](uint64_t bits) -> uint64_t {
-    uint64_t E = (bits >> 52) & 0x7FFull;
-    uint64_t M = bits & 0x000FFFFFFFFFFFFFull;
-    if (E == 0ull) {
-      if (M == 0ull) {
-        return 0ull;
-      }
-      uint64_t p = 63u - static_cast<uint64_t>(std::countl_zero(M));
-      return static_cast<uint64_t>(static_cast<int64_t>(p) - 1073);
-    }
-    if (E == 2047ull) {
-      return 0ull;
-    }
-    return static_cast<uint64_t>(static_cast<int64_t>(E) - 1022);
-  });
-#else
-  U E = (v >> 52) & U(0x7FFull);
-  U M = v & U(0xFFFFFFFFFFFFFull);
-  U normal = E - U(1022ull);
-  const native<double> mf = stdx::static_simd_cast<native<double>>(M);
-  const U p = (std::bit_cast<U>(mf) >> 52) - U(1023ull);
-  U dn = p - U(1073ull);
-  U out = normal;
-  stdx::where(E == 0ull, out) = U(0ull);
-  stdx::where((E == 0ull) && (M != 0ull), out) = dn;
-  stdx::where(E == 2047ull, out) = U(0ull);
+  stdx::where(E == 0u, out) = U(0u);             // ±0 (M==0); overwritten if denormal
+  stdx::where((E == 0u) && (M != 0u), out) = dn; // denormal exponent
+  stdx::where(E == 255u, out) = U(0u);           // Inf / NaN -> 0
   return out;
-#endif
 }
 
 #endif // RJ_HOST_HAS_STDX_SIMD
@@ -1122,6 +1057,7 @@ inline native<double> trunc_simd(native<double>) { return {}; }
 inline native<double> ceil_simd(native<double>) { return {}; }
 inline native<double> floor_simd(native<double>) { return {}; }
 inline native<double> rndne_simd(native<double>) { return {}; }
+
 #endif
 
 } // namespace util
