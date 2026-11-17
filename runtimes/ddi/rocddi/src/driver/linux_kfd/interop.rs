@@ -109,14 +109,9 @@ impl LinuxKfdDriver {
                 "system import requires a device",
             )
         })?;
-        if !peers.iter().all(|peer| owner.shares_vm(peer)) {
-            return Err(error(
-                ErrorKind::Unsupported,
-                "system import requires one native GPU address domain",
-            ));
-        }
         LinuxAllocation::import_system_dma_buf(
             owner.vm.clone(),
+            peers.iter().map(|peer| peer.vm.clone()),
             descriptor,
             source_offset,
             byte_length,

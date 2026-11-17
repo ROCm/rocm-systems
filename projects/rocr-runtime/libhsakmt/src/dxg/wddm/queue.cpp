@@ -221,8 +221,11 @@ void ComputeQueue::HandleError(hsa_status_t status) {
 
 void ComputeQueue::FaultMonitorThread(ComputeQueue* queue) {
   constexpr int kStallTimeoutMs = 30000;
+  // Bound how long a stall with a healthy fence is tolerated: 10 * 30s = 5 minutes.
+  constexpr int kMaxStallWindows = 10;
   uint64_t last_rptr = 0;
   uint64_t last_fence = 0;
+  int stall_windows = 0;
   auto last_progress = std::chrono::steady_clock::now();
 
   while (!queue->thread_stop_) {
@@ -245,16 +248,28 @@ void ComputeQueue::FaultMonitorThread(ComputeQueue* queue) {
       if (current_rptr != last_rptr || current_fence != last_fence) {
         last_rptr = current_rptr;
         last_fence = current_fence;
+        stall_windows = 0;
         last_progress = std::chrono::steady_clock::now();
       } else if (current_wptr > current_rptr) {
         auto stall_duration = std::chrono::steady_clock::now() - last_progress;
         if (stall_duration > std::chrono::milliseconds(kStallTimeoutMs)) {
-          if (queue->thread_stop_.exchange(true)) return;
-          pr_err("GPU stall detected: rptr=%" PRIu64 " wptr=%" PRIu64
-                 " fence=%" PRIu64 " stalled for %dms — possible device memory fault\n",
-                 current_rptr, current_wptr, current_fence, kStallTimeoutMs);
-          queue->HandleError(static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION));
-          return;
+          // A real reset has already aborted above on the poisoned fence, so a stalled
+          // rptr alone is not a fault: re-arm the window.
+          if (++stall_windows >= kMaxStallWindows) {
+            if (queue->thread_stop_.exchange(true)) return;
+            pr_err("GPU hang timeout: rptr=%" PRIu64 " wptr=%" PRIu64 " fence=%" PRIu64
+                   " made no progress for %dms with a healthy fence — aborting queue\n",
+                   current_rptr, current_wptr, current_fence,
+                   kStallTimeoutMs * kMaxStallWindows);
+            // Not a memory fault: no fence was ever poisoned, so report a hang rather
+            // than sending the application looking for an aperture violation.
+            queue->HandleError(HSA_STATUS_ERROR_EXCEPTION);
+            return;
+          }
+          last_progress = std::chrono::steady_clock::now();
+          pr_debug("queue blocked on dependency for %dms, fence healthy (0x%" PRIx64
+                   ") — window %d/%d, continuing to monitor\n",
+                   kStallTimeoutMs, current_fence, stall_windows, kMaxStallWindows);
         }
       }
     }

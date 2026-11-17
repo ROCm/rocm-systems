@@ -1894,7 +1894,8 @@ TEST_F(CollectivesMicrotest, AllReduce_CeTwoShotRunsInsideAProfilerEvent) {
   EXPECT_EQ(sizeof(float), fake.profArgs.eltSize);
   EXPECT_EQ(reinterpret_cast<uint8_t*>(send_.data()), fake.profArgs.sendBuff);
   EXPECT_EQ(reinterpret_cast<uint8_t*>(recv_.data()), fake.profArgs.recvBuff);
-  EXPECT_EQ(nullptr, fake.profArgs.collApiEventHandle);
+  // 2.32.6: the handle is an ncclProfilerEventRef holding one slot per profiler plugin; all must be empty.
+  for (void* h : fake.profArgs.collApiEventHandle.h) EXPECT_EQ(nullptr, h);
   ASSERT_EQ(1u, fake.ceArs.size());
   EXPECT_EQ(send_.data(), fake.ceArs[0].sendbuff);
   EXPECT_EQ(recv_.data(), fake.ceArs[0].recvbuff);

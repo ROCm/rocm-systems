@@ -32,6 +32,11 @@ extern "C" {
 // lanes contribute, after DPP filtering. RDNA3 entry points take
 // trapsts; mode 3 FP status reporting is unsupported, even with empty
 // EXEC. Both architectures support exact predicate results in mode 2.
+// gfx12 Compatibility with CLAMP preserves the legacy wave-wide reporting gate:
+// causes accumulate only when an active selected operand is nonfinite. Then all
+// participating lanes contribute, including finite denormal pairs elsewhere in
+// a Wave64. Without CLAMP, Compatibility leaves status unused. Reporting calls
+// require valid status storage; numeric-only calls leave it unused.
 // IEEE_MODE and output flushing do not affect predicate results. Loose mode
 // leaves optional architectural state unchanged on both architectures.
 int rj_arith_v_cmp_eq_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
