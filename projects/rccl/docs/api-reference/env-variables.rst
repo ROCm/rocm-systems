@@ -355,14 +355,6 @@ in the following table.
         | If unset, RCCL tries
           ``/var/run/nvidia-topologyd/virtualTopology.xml`` as the default.
 
-    * - | ``NCCL_PROFILER_PLUGIN``
-        | Controls selection of the external profiler plugin.
-      - | Plugin library name/path: loaded directly.
-        | Plugin suffix: resolves to ``libnccl-profiler-<suffix>.so``.
-        | ``STATIC_PLUGIN``: searches for profiler symbols in the program binary.
-        | ``none``: disables external profiler plugin loading.
-        | Default: unset (tries ``libnccl-profiler.so``).
-
     * - | ``NCCL_RAS_ENABLE``
         | Enables RCCL's reliability, availability, and serviceability (RAS)
           subsystem during communicator bootstrap and split initialization.
@@ -1444,12 +1436,6 @@ the following table.
         | ``1``: Cost model without ReduceScatter tuning.
         | Values outside 0 and 1 fall back to 0.
 
-    * - | ``RCCL_DIRECT_ALLGATHER_DISABLE``
-        | Disables the Direct AllGather path. Also requires ``gfx942`` or
-          ``gfx950``, a rank count divisible by 8, and is skipped on AINIC.
-      - | ``0``: Allowed (default).
-        | Non-zero: Disable Direct AllGather.
-
     * - | ``RCCL_DIRECT_ALLGATHER_THRESHOLD``
         | Maximum message size in bytes for Direct AllGather. Setting this
           variable at all suppresses the per-architecture auto-tuning (gfx950
@@ -1492,14 +1478,6 @@ the following table.
           ``gfx1250`` (fabric-based, scale-up domain).
       - | ``0``: Disabled.
         | ``1``: Enabled (default).
-
-    * - | ``RCCL_DDA_THRESHOLD``
-        | Maximum message size in bytes for DDA on ``gfx950`` and ``gfx1250``
-          for ``AllGather``, ``AllReduce``, and ``ReduceScatter``. ``gfx942``
-          uses a fixed 8 MiB threshold. ``AllToAll`` uses a fixed 4 MiB
-          threshold on all architectures.
-      - | Integer bytes. Default: ``134217728`` (128 MiB).
-        | ``0``: Disable DDA for collectives that read this variable.
 
     * - | ``RCCL_ROCSHMEM_ENABLE``
         | Enables rocshmem-based ``AllToAll`` and ``AllToAllv`` when RCCL is
@@ -1867,10 +1845,13 @@ plugin must export ``ncclProfiler_v7`` to receive them.
       - **Values**
 
     * - | ``NCCL_PROFILER_PLUGIN``
-        | Selects an external profiler plugin.
-      - | Path or short name.
-        | A short name is resolved against the ``librccl-profiler`` prefix, so
+        | Controls selection of the external profiler plugin.
+      - | Plugin library name/path: loaded directly.
+        | Plugin suffix: resolved against the ``librccl-profiler`` prefix, so
           ``example`` loads ``librccl-profiler-example.so``.
+        | ``STATIC_PLUGIN``: searches for profiler symbols in the program binary.
+        | ``none``: disables external profiler plugin loading.
+        | Default: unset (tries ``librccl-profiler.so``).
 
     * - | ``NCCL_PROFILE_EVENT_MASK``
         | Bitmask of the event types the plugin is offered.
