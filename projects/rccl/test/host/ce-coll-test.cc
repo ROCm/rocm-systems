@@ -862,8 +862,9 @@ constexpr CeBatchShape kCeBatchShapes[] = {
     {"round-robin chunks", true, false, 3},
 };
 
-// Every copy of a batch launch shares attrs[0]. NCCL_CE_INTRA_GPU_MEMCPY_ENABLE (default 1) decides whether it asks
-// the runtime to overlap the copies with compute; 0 drops only that request and keeps the copies stream-ordered.
+// Every copy of a batch launch shares attrs[0]. NCCL_CE_INTRA_GPU_MEMCPY_ENABLE (default 1) asks the runtime to
+// overlap the copies with compute.
+// NCCL_CE_INTRA_GPU_MEMCPY_ENABLE=0 drops only the overlap flag from the shared attrs[0]; copies stay stream-ordered.
 class CeBatchOpsMicrotest : public ::testing::Test {
  protected:
   struct Batch {
