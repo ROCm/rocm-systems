@@ -4,6 +4,7 @@
 #include "cli_test_support.h"
 #include "legacy_ordinary_fixture.h"
 #include "legacy_ordinary_oracle.h"
+#include "rdna3_ordinary_fixture.h"
 #include "rocjitsu/code/file_io.h"
 #include "rocjitsu/code/patch/fault_injection/ordinary_wrong_address.h"
 #include "scoped_temp.h"
@@ -117,26 +118,35 @@ protected:
   }
 };
 
-inline constexpr std::array<test::OrdinaryTargetCase, 2> kLegacyOrdinaryCliCases =
-    test::kCdna34OrdinaryCases;
+inline constexpr std::array<test::OrdinaryTargetCase, 4> kLegacyOrdinaryCliCases = {
+    test::kCdna34OrdinaryCases[0], test::kCdna34OrdinaryCases[1], test::kRdna3OrdinaryCases[0],
+    test::kRdna3OrdinaryCases[1]};
 
-std::vector<uint32_t> legacy_cli_words(const test::OrdinaryTargetCase &, int32_t offset = 4,
+std::vector<uint32_t> legacy_cli_words(const test::OrdinaryTargetCase &fixture, int32_t offset = 4,
                                        bool modifiers = false) {
-  return test::cdna34_ordinary_words(offset, modifiers);
+  return fixture.arch == IsaFamily::Rdna3 ? test::rdna3_ordinary_words(offset, modifiers)
+                                          : test::cdna34_ordinary_words(offset, modifiers);
 }
 
-std::string_view legacy_cli_form(const test::OrdinaryTargetCase &) { return "global_load_dword"; }
-
-std::string_view legacy_cli_profile(const test::OrdinaryTargetCase &) {
-  return "Cdna34GlobalDword";
+std::string_view legacy_cli_form(const test::OrdinaryTargetCase &fixture) {
+  return fixture.arch == IsaFamily::Rdna3 ? "global_load_b32" : "global_load_dword";
 }
 
-uint32_t legacy_cli_nonzero_wait(const test::OrdinaryTargetCase &) {
-  return test::kCdna34OrdinaryWait | 1u;
+std::string_view legacy_cli_profile(const test::OrdinaryTargetCase &fixture) {
+  return fixture.arch == IsaFamily::Rdna3 ? "Rdna3GlobalB32Pair" : "Cdna34GlobalDword";
 }
 
-uint32_t legacy_cli_store(const test::OrdinaryTargetCase &) { return 0xde708000u; }
-uint32_t legacy_cli_barrier(const test::OrdinaryTargetCase &) { return 0xbf8a0000u; }
+uint32_t legacy_cli_nonzero_wait(const test::OrdinaryTargetCase &fixture) {
+  return fixture.arch == IsaFamily::Rdna3 ? test::kRdna3OrdinaryWait | (1u << 10)
+                                          : test::kCdna34OrdinaryWait | 1u;
+}
+
+uint32_t legacy_cli_store(const test::OrdinaryTargetCase &fixture) {
+  return fixture.arch == IsaFamily::Rdna3 ? 0xdc6a0000u : 0xde708000u;
+}
+uint32_t legacy_cli_barrier(const test::OrdinaryTargetCase &fixture) {
+  return fixture.arch == IsaFamily::Rdna3 ? 0xbfbd0000u : 0xbf8a0000u;
+}
 
 class FaultLegacyOrdinaryCli : public FaultLegacyOrdinaryCliSupport,
                                public ::testing::WithParamInterface<test::OrdinaryTargetCase> {};
@@ -369,6 +379,14 @@ TEST_P(FaultLegacyOrdinaryCli, IncompleteAcquireProfilesRefuseWithoutPublishingA
   std::vector<uint32_t> barrier = valid;
   barrier.insert(barrier.begin() + 3, legacy_cli_barrier(fixture));
   invalid.push_back(barrier);
+  if (fixture.arch == IsaFamily::Rdna3) {
+    invalid.push_back({valid[0], valid[1], valid[2], valid[3], valid[4]});
+    invalid.push_back({valid[0], valid[1], valid[2], valid[5], valid[6]});
+    invalid.push_back({valid[0], valid[1], valid[2], valid[5], valid[6], valid[3], valid[4]});
+    std::vector<uint32_t> clause_single = valid;
+    clause_single.insert(clause_single.end(), {0xbf850000u, 0xf4840000u, 0});
+    invalid.push_back(std::move(clause_single));
+  }
   if (fixture.arch != IsaFamily::Rdna3) {
     std::vector<uint8_t> invalid_wave = test::make_ordinary_words_elf(fixture, valid);
     ASSERT_TRUE(test::mark_legacy_ordinary_wave32(invalid_wave, "test_kernel"));
@@ -471,6 +489,102 @@ TEST_P(FaultLegacyOrdinaryCli, RealSharedOwnerRoundtripAndUnrelatedOwnerRefusalA
     }
   }
 }
+
+class FaultRdna3OrdinaryScopeCli : public FaultLegacyOrdinaryCliSupport,
+                                   public ::testing::WithParamInterface<test::OrdinaryTargetCase> {
+};
+
+TEST_P(FaultRdna3OrdinaryScopeCli, GlcGatesQualifiedListingAndMutationWithEverySlcDlcHint) {
+  for (uint32_t hints : {0u, 1u << 13, 1u << 15, (1u << 13) | (1u << 15)}) {
+    SCOPED_TRACE(hints);
+    for (bool glc : {false, true}) {
+      SCOPED_TRACE(glc);
+      std::vector<uint32_t> words = test::rdna3_ordinary_words(-4);
+      words[0] = 0xdc521ffcu | hints | (glc ? 1u << 14 : 0u);
+      words[1] = 0x07040503u; // Native GLOBAL with valid ignored VDATA five, SVE clear.
+      const std::vector<uint8_t> image = test::make_ordinary_words_elf(GetParam(), words);
+      ASSERT_NO_FATAL_FAILURE(write(input_, image));
+      std::vector<std::string> list = args();
+      list.push_back("--list");
+      ASSERT_EQ(run(list), 0) << stderr_;
+      EXPECT_EQ(stdout_.find("ordinal=0 exact=0") != std::string::npos, glc);
+      const FaultMutationContext context(image);
+      FaultMutationError error;
+      const FailureOr<OrdinaryAcquireInventory> found =
+          discover_ordinary_acquires(context, "test_kernel", error);
+      ASSERT_TRUE(found.succeeded()) << error.message;
+      for (const std::vector<std::string> &selector :
+           {std::vector<std::string>{"--ordinal", "0"},
+            std::vector<std::string>{"--exact", "0", "--ordinal", "999"}}) {
+        if (!glc) {
+          EXPECT_NE(run(mutation_args(selector)), 0);
+          ASSERT_NO_FATAL_FAILURE(expect_no_partial_output());
+        } else {
+          const FailureOr<OrdinaryAcquireSelection> selected =
+              select_ordinary_acquire(found.value(), {}, error);
+          ASSERT_TRUE(selected.succeeded()) << error.message;
+          const FailureOr<OrdinaryWrongAddressResult> expected =
+              apply_ordinary_wrong_address(context, selected.value(), 8, error);
+          ASSERT_TRUE(expected.succeeded()) << error.message;
+          ASSERT_EQ(run(mutation_args(selector)), 0) << stderr_;
+          const std::vector<uint8_t> actual = read(output_);
+          EXPECT_EQ(actual, expected.value().image);
+          EXPECT_TRUE(
+              test::legacy_ordinary_output_matches(context, 0, 8, actual, "global_load_b32"));
+          ASSERT_TRUE(std::filesystem::remove(output_));
+        }
+        EXPECT_EQ(read(input_), image);
+      }
+    }
+  }
+}
+
+TEST_P(FaultRdna3OrdinaryScopeCli, CuLoadCannotShiftLaterAgentOrdinalOrSupplyAnExactHandle) {
+  std::vector<uint32_t> words = test::rdna3_ordinary_words();
+  words[0] &= ~(1u << 14);
+  const std::vector<uint32_t> agent = test::rdna3_ordinary_words();
+  words.insert(words.end(), agent.begin(), agent.end());
+  const std::vector<uint8_t> image = test::make_ordinary_words_elf(GetParam(), words);
+  ASSERT_NO_FATAL_FAILURE(write(input_, image));
+  std::vector<std::string> list = args();
+  list.push_back("--list");
+  ASSERT_EQ(run(list), 0) << stderr_;
+  EXPECT_NE(stdout_.find("ordinal=0 exact=28"), std::string::npos);
+  EXPECT_EQ(stdout_.find("ordinal=1"), std::string::npos);
+  const FaultMutationContext context(image);
+  FaultMutationError error;
+  const FailureOr<OrdinaryAcquireInventory> found =
+      discover_ordinary_acquires(context, "test_kernel", error);
+  ASSERT_TRUE(found.succeeded()) << error.message;
+  const FailureOr<OrdinaryAcquireSelection> selected =
+      select_ordinary_acquire(found.value(), {}, error);
+  ASSERT_TRUE(selected.succeeded()) << error.message;
+  const FailureOr<OrdinaryWrongAddressResult> expected =
+      apply_ordinary_wrong_address(context, selected.value(), 8, error);
+  ASSERT_TRUE(expected.succeeded()) << error.message;
+  for (const std::vector<std::string> &selector :
+       {std::vector<std::string>{"--ordinal", "0"},
+        std::vector<std::string>{"--exact", "28", "--ordinal", "999"}}) {
+    ASSERT_EQ(run(mutation_args(selector)), 0) << stderr_;
+    const std::vector<uint8_t> actual = read(output_);
+    EXPECT_EQ(actual, expected.value().image);
+    EXPECT_TRUE(test::legacy_ordinary_output_matches(context, 28, 8, actual, "global_load_b32"));
+    ASSERT_TRUE(std::filesystem::remove(output_));
+  }
+  for (const std::vector<std::string> &selector :
+       {std::vector<std::string>{"--exact", "0", "--ordinal", "0"},
+        std::vector<std::string>{"--ordinal", "1"}}) {
+    EXPECT_NE(run(mutation_args(selector)), 0);
+    ASSERT_NO_FATAL_FAILURE(expect_no_partial_output());
+    EXPECT_EQ(read(input_), image);
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(Targets, FaultRdna3OrdinaryScopeCli,
+                         ::testing::ValuesIn(test::kRdna3OrdinaryCases),
+                         [](const ::testing::TestParamInfo<test::OrdinaryTargetCase> &info) {
+                           return info.param.name;
+                         });
 
 INSTANTIATE_TEST_SUITE_P(Targets, FaultCdna34OrdinaryCacheCli,
                          ::testing::ValuesIn(test::kCdna34OrdinaryCases),

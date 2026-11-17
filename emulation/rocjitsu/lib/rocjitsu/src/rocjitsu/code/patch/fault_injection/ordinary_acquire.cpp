@@ -14,6 +14,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/legacy_memory_displacement_encoded_fields.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
@@ -41,7 +42,7 @@ namespace rocjitsu {
 
 namespace {
 
-enum class AcquireCacheKind { None, Single };
+enum class AcquireCacheKind { None, Single, PairPrefix, PairCompletion };
 
 struct DecodedAcquireLoad {
   int32_t byte_offset = 0;
@@ -95,6 +96,36 @@ std::optional<DecodedAcquireLoad> decode_cdna34_acquire_load(const Instruction &
   return DecodedAcquireLoad{.byte_offset = *offset, .raw_scope = std::nullopt};
 }
 
+std::optional<DecodedAcquireLoad> decode_rdna3_acquire_load(const Instruction &instruction,
+                                                            std::span<const uint8_t> bytes,
+                                                            rj_code_target_id_t target) {
+  if (instruction.mnemonic() != "global_load_b32" ||
+      bytes.size() != sizeof(rdna3::FlatGlobalMachineInst) ||
+      instruction.size() != static_cast<int>(sizeof(rdna3::FlatGlobalMachineInst)))
+    return std::nullopt;
+  rdna3::FlatGlobalMachineInst raw = {};
+  std::memcpy(&raw, bytes.data(), sizeof(raw));
+  // RDNA3 GLC selects DEVICE scope for loads; SLC/DLC remain independent cache hints.
+  if (raw.encoding != 0x37u || raw.seg != 2u || raw.pad_25 != 0 || raw.glc == 0)
+    return std::nullopt;
+  std::array<uint32_t, 2> words = {};
+  std::memcpy(words.data(), bytes.data(), sizeof(words));
+  const std::optional<int32_t> offset = amdgpu::read_legacy_memory_byte_offset(target, words);
+  if (!offset)
+    return std::nullopt;
+  return DecodedAcquireLoad{.byte_offset = *offset, .raw_scope = std::nullopt};
+}
+
+AcquireCacheKind rdna3_acquire_cache(std::string_view form) {
+  if (form == "s_dcache_inv")
+    return AcquireCacheKind::Single;
+  if (form == "buffer_gl1_inv")
+    return AcquireCacheKind::PairPrefix;
+  if (form == "buffer_gl0_inv")
+    return AcquireCacheKind::PairCompletion;
+  return AcquireCacheKind::None;
+}
+
 bool modern_acquire_wait(const Instruction &instruction, std::span<const uint8_t>) {
   return instruction.mnemonic().starts_with("s_wait");
 }
@@ -127,9 +158,10 @@ struct AcquireProfile {
   bool (*qualifying_wait)(const Instruction &, std::span<const uint8_t>);
   AcquireCacheKind (*classify_cache)(std::string_view);
   std::string_view first_cache;
+  std::string_view second_cache = {};
 };
 
-constexpr std::array<AcquireProfile, 4> kAcquireProfiles = {{
+constexpr std::array<AcquireProfile, 5> kAcquireProfiles = {{
     {.arch = IsaFamily::Cdna5,
      .id = OrdinaryAcquireProfile::Cdna5GlobalB32,
      .decode_load = decode_modern_acquire_load<cdna5::VglobalMachineInst>,
@@ -154,6 +186,13 @@ constexpr std::array<AcquireProfile, 4> kAcquireProfiles = {{
      .qualifying_wait = legacy_acquire_wait<IsaFamily::Cdna3>,
      .classify_cache = cdna34_acquire_cache,
      .first_cache = "buffer_inv"},
+    {.arch = IsaFamily::Rdna3,
+     .id = OrdinaryAcquireProfile::Rdna3GlobalB32Pair,
+     .decode_load = decode_rdna3_acquire_load,
+     .qualifying_wait = legacy_acquire_wait<IsaFamily::Rdna3>,
+     .classify_cache = rdna3_acquire_cache,
+     .first_cache = "buffer_gl1_inv",
+     .second_cache = "buffer_gl0_inv"},
 }};
 
 // Native BUFFER_INV without SC1 is either a NOP or conditional on TG_SPLIT,
@@ -245,24 +284,31 @@ struct AcquirePoint {
   bool exact = false;
 };
 
+bool metadata_compatible_endpoints(const AcquirePoint &load, const AcquirePoint &cache) {
+  return load.container && cache.container && load.container == cache.container &&
+         !load.owners.empty() && load.owners == cache.owners;
+}
+
 bool compatible_endpoints(const AcquirePoint &load, const AcquirePoint &cache) {
-  return load.exact && cache.exact && load.container && cache.container &&
-         load.container == cache.container && !load.owners.empty() && load.owners == cache.owners;
+  return load.exact && cache.exact && metadata_compatible_endpoints(load, cache);
+}
+
+bool fence_like_form(std::string_view form) {
+  constexpr std::array<std::string_view, 10> kFencePrefixes = {
+      "s_dcache",  "s_icache",   "global_wb",    "global_inv",     "global_wbinv",
+      "buffer_wb", "buffer_inv", "buffer_wbinv", "buffer_gl0_inv", "buffer_gl1_inv"};
+  return std::ranges::any_of(kFencePrefixes,
+                             [&](std::string_view prefix) { return form.starts_with(prefix); });
 }
 
 bool bounded_bookkeeping(const Instruction &instruction) {
   constexpr uint64_t kControlFlow =
       BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL | PROGRAM_TERMINATOR;
-  constexpr std::array<std::string_view, 10> kFencePrefixes = {
-      "s_dcache",  "s_icache",   "global_wb",    "global_inv",     "global_wbinv",
-      "buffer_wb", "buffer_inv", "buffer_wbinv", "buffer_gl0_inv", "buffer_gl1_inv"};
   const std::string_view form = instruction.mnemonic();
   return instruction.size() > 0 && (!instruction.is_memory_op() || form.starts_with("s_wait")) &&
          !instruction.is_barrier() && form.find("barrier") == std::string_view::npos &&
-         !std::ranges::any_of(kFencePrefixes,
-                              [&](std::string_view prefix) { return form.starts_with(prefix); }) &&
-         form != "s_clause" && (instruction.flags() & kControlFlow) == 0 &&
-         !instruction.branch_offset_bytes();
+         !fence_like_form(form) && form != "s_clause" &&
+         (instruction.flags() & kControlFlow) == 0 && !instruction.branch_offset_bytes();
 }
 
 struct AcquirePathProof {
@@ -282,7 +328,8 @@ OrdinaryAcquireMember member_of(const Instruction &instruction) {
 bool scan_bookkeeping(const BasicBlock &block, uint64_t begin, uint64_t end,
                       const AcquireContainer &container,
                       const std::map<uint64_t, AcquirePoint> &points, AcquirePathProof &proof,
-                      const AcquireProfile &profile, bool collect_waits = true) {
+                      const AcquireProfile &profile, bool collect_waits = true,
+                      bool waits_only = false) {
   uint64_t expected = begin;
   for (const Instruction &instruction : block.instructions()) {
     const uint64_t offset = instruction.src_loc();
@@ -293,7 +340,8 @@ bool scan_bookkeeping(const BasicBlock &block, uint64_t begin, uint64_t end,
     const std::map<uint64_t, AcquirePoint>::const_iterator point = points.find(offset);
     if (offset != expected || !bounded_bookkeeping(instruction) || point == points.end() ||
         !point->second.exact || point->second.container != container ||
-        static_cast<uint64_t>(instruction.size()) > end - offset)
+        static_cast<uint64_t>(instruction.size()) > end - offset ||
+        (waits_only && !instruction.mnemonic().starts_with("s_wait")))
       return false;
     proof.proof_offsets.push_back(offset);
     if (collect_waits && instruction.mnemonic().starts_with("s_wait")) {
@@ -402,10 +450,11 @@ FailureOr<OrdinaryAcquireInventory> discover_ordinary_acquires(const FaultMutati
   if (!target_facts ||
       (target != ROCJITSU_CODE_TARGET_GFX1250 && target != ROCJITSU_CODE_TARGET_GFX1251 &&
        target != ROCJITSU_CODE_TARGET_GFX1200 && target != ROCJITSU_CODE_TARGET_GFX1201 &&
-       target != ROCJITSU_CODE_TARGET_GFX950 && target != ROCJITSU_CODE_TARGET_GFX942))
+       target != ROCJITSU_CODE_TARGET_GFX950 && target != ROCJITSU_CODE_TARGET_GFX942 &&
+       target != ROCJITSU_CODE_TARGET_GFX1100))
     return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedTarget,
                                  "target has no ordinary acquire query profile");
-  const std::array<AcquireProfile, 4>::const_iterator profile =
+  const std::array<AcquireProfile, 5>::const_iterator profile =
       std::ranges::find(kAcquireProfiles, target_facts->family, &AcquireProfile::arch);
   if (profile == kAcquireProfiles.end())
     return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedTarget,
@@ -537,6 +586,15 @@ FailureOr<OrdinaryAcquireInventory> discover_ordinary_acquires(const FaultMutati
     std::vector<const AcquirePoint *> caches;
     AcquirePathProof proof;
   };
+  // Keep all fence events in source order, including metadata-incompatible
+  // interrupters. Build this once: load-only kernels must not rescan their
+  // remaining instruction suffix for each possible acquire load.
+  std::vector<const AcquirePoint *> fences;
+  if (!profile->second_cache.empty())
+    for (const std::pair<const uint64_t, AcquirePoint> &item : points)
+      if (profile->classify_cache(item.second.instruction->mnemonic()) != AcquireCacheKind::None ||
+          fence_like_form(item.second.instruction->mnemonic()))
+        fences.push_back(&item.second);
   std::unordered_set<uint64_t> claimed_caches;
   for (const std::pair<const uint64_t, AcquirePoint> &item : points) {
     const AcquirePoint &load = item.second;
@@ -548,24 +606,62 @@ FailureOr<OrdinaryAcquireInventory> discover_ordinary_acquires(const FaultMutati
       continue;
     const uint64_t load_end = item.first + static_cast<uint64_t>(load.instruction->size());
     std::vector<Association> single_matches;
+    std::vector<Association> pair_matches;
+    size_t single_metadata_matches = 0;
     for (std::map<uint64_t, AcquirePoint>::const_iterator candidate = points.lower_bound(load_end);
          candidate != points.end() && candidate->first - load_end <= 64; ++candidate) {
       const AcquirePoint &cache = candidate->second;
       if (profile->classify_cache(cache.instruction->mnemonic()) != AcquireCacheKind::Single ||
-          !compatible_endpoints(load, cache))
+          !metadata_compatible_endpoints(load, cache))
         continue;
+      ++single_metadata_matches;
       const std::optional<AcquirePathProof> proof =
           prove_acquire_path(load, cache, points, *profile);
       if (proof)
         single_matches.push_back({.caches = {&cache}, .proof = *proof});
     }
+    // Original single-fence metadata takes precedence even when its path
+    // fails. A nearby split pair must not bypass that candidate decision.
+    if (single_metadata_matches == 0 && !profile->second_cache.empty()) {
+      const std::vector<const AcquirePoint *>::const_iterator first_fence =
+          std::ranges::lower_bound(fences, load_end, {}, [](const AcquirePoint *point) {
+            return point->instruction->src_loc();
+          });
+      for (size_t index = static_cast<size_t>(first_fence - fences.cbegin());
+           index + 1 < fences.size(); ++index) {
+        const AcquirePoint &first = *fences[index];
+        const AcquirePoint &tail = *fences[index + 1];
+        if (first.instruction->src_loc() - load_end > 64)
+          break;
+        if (profile->classify_cache(first.instruction->mnemonic()) !=
+                AcquireCacheKind::PairPrefix ||
+            profile->classify_cache(tail.instruction->mnemonic()) !=
+                AcquireCacheKind::PairCompletion ||
+            !compatible_endpoints(load, first) || !compatible_endpoints(load, tail) ||
+            first.block != tail.block)
+          continue;
+        std::optional<AcquirePathProof> proof = prove_acquire_path(load, first, points, *profile);
+        const uint64_t first_end = first.instruction->src_loc() + first.instruction->size();
+        // Pair members are exact consecutive fence events. Only waits may
+        // separate them; the original 64-byte bound applies to the first.
+        if (!proof || !scan_bookkeeping(*first.block, first_end, tail.instruction->src_loc(),
+                                        *load.container, points, *proof, *profile, true, true))
+          continue;
+        pair_matches.push_back({.caches = {&first, &tail}, .proof = std::move(*proof)});
+      }
+    }
     std::optional<Association> association;
     if (single_matches.size() == 1)
       association = std::move(single_matches.front());
+    else if (single_metadata_matches == 0 && single_matches.empty() && pair_matches.size() == 1)
+      association = std::move(pair_matches.front());
     if (!association ||
         association->caches.front()->instruction->mnemonic() != profile->first_cache ||
         !qualifying_acquire_cache(*profile, *association->caches.front()->instruction,
                                   association->caches.front()->bytes) ||
+        association->caches.size() != (profile->second_cache.empty() ? 1u : 2u) ||
+        (association->caches.size() == 2 &&
+         association->caches.back()->instruction->mnemonic() != profile->second_cache) ||
         std::ranges::any_of(association->caches, [&](const AcquirePoint *cache) {
           return claimed_caches.contains(cache->instruction->src_loc());
         }))

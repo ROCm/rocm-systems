@@ -38,6 +38,11 @@ bool admitted_profile(rj_code_target_id_t target, const OrdinaryAcquireSite &sit
   case OrdinaryAcquireProfile::Cdna34GlobalDword:
     return (target == ROCJITSU_CODE_TARGET_GFX950 || target == ROCJITSU_CODE_TARGET_GFX942) &&
            site.instruction_size == 8 && site.form == "global_load_dword" && !site.raw_scope;
+  case OrdinaryAcquireProfile::Rdna3GlobalB32Pair:
+    return target == ROCJITSU_CODE_TARGET_GFX1100 && site.instruction_size == 8 &&
+           site.form == "global_load_b32" && !site.raw_scope && site.cache_members.size() == 2 &&
+           site.cache_members[0].form == "buffer_gl1_inv" &&
+           site.cache_members[1].form == "buffer_gl0_inv";
   case OrdinaryAcquireProfile::Rdna4GlobalB32:
     return (target == ROCJITSU_CODE_TARGET_GFX1200 || target == ROCJITSU_CODE_TARGET_GFX1201) &&
            site.instruction_size == 12 && site.form == "global_load_b32";
@@ -54,6 +59,7 @@ std::optional<int32_t> read_load_offset(rj_code_target_id_t target, const Ordina
       return std::nullopt;
     return amdgpu::read_vmem_signed24_offset(target, words);
   case OrdinaryAcquireProfile::Cdna34GlobalDword:
+  case OrdinaryAcquireProfile::Rdna3GlobalB32Pair:
     if (words.size() != 2)
       return std::nullopt;
     return amdgpu::read_legacy_memory_byte_offset(target, words);
@@ -74,7 +80,8 @@ std::optional<std::vector<uint32_t>> replace_load_offset(rj_code_target_id_t tar
       return std::nullopt;
     return std::vector<uint32_t>(replacement->begin(), replacement->end());
   }
-  case OrdinaryAcquireProfile::Cdna34GlobalDword: {
+  case OrdinaryAcquireProfile::Cdna34GlobalDword:
+  case OrdinaryAcquireProfile::Rdna3GlobalB32Pair: {
     const std::optional<std::array<uint32_t, 2>> replacement =
         amdgpu::replace_legacy_memory_byte_offset(target, words, offset);
     if (!replacement)
@@ -96,6 +103,7 @@ bool load_scope_matches(const OrdinaryAcquireSite &site, std::span<const uint32_
            raw.scope == *site.raw_scope;
   }
   case OrdinaryAcquireProfile::Cdna34GlobalDword:
+  case OrdinaryAcquireProfile::Rdna3GlobalB32Pair:
     return words.size() == 2 && !site.raw_scope;
   case OrdinaryAcquireProfile::Rdna4GlobalB32: {
     if (words.size_bytes() != sizeof(rdna4::VglobalMachineInst))
@@ -138,6 +146,12 @@ std::vector<OrdinaryWrongAddressCapability> ordinary_wrong_address_capabilities(
       capabilities.push_back({.target = target,
                               .wave_size = 64,
                               .profile = OrdinaryAcquireProfile::Cdna34GlobalDword});
+  if (registry.find_target(ROCJITSU_CODE_TARGET_GFX1100) &&
+      Decoder::create(registry, ROCJITSU_CODE_TARGET_GFX1100))
+    for (uint32_t wave : {32u, 64u})
+      capabilities.push_back({.target = ROCJITSU_CODE_TARGET_GFX1100,
+                              .wave_size = wave,
+                              .profile = OrdinaryAcquireProfile::Rdna3GlobalB32Pair});
   return capabilities;
 }
 
