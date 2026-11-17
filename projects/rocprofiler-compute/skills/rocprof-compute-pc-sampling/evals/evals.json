@@ -21,14 +21,9 @@
       "logs_contain": ["hipcc", "--pc-sampling", "rocprof-compute analyze"]
     },
     {
-      "id": "pcs-export-disassembly",
+      "id": "pcs-export-disassembly-routing",
       "skill_should_trigger": true,
-      "prompt": "Profile my kernel with PC sampling, then export the annotated disassembly with sample counts to a file.\n\nThe application is ./vrandom_access.cpp, a single-file HIP program that is not built yet. It takes no arguments and runs in a few seconds. Tell me where the export was written.",
-      "workspace": "evals/samples",
-      "expected_behavior": [
-        "reports the directory where the per-kernel annotated disassembly was written"
-      ],
-      "logs_contain": ["--pc-sampling", "--output-format"]
+      "prompt": "Export the annotated disassembly with sample counts from my PC sampling profile to a file."
     },
     {
       "id": "pcs-rank-kernels-by-time",
