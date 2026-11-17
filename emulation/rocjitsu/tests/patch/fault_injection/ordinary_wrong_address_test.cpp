@@ -34,7 +34,7 @@ TEST_P(FaultOrdinaryWrongAddress, ChangesOnlySignedByteOffsetAndPreservesComplet
         for (bool modifiers : {false, true}) {
           SCOPED_TRACE(modifiers);
           std::vector<uint8_t> image =
-              test::make_cdna5_ordinary_address_elf(fixture, scope, offset, modifiers);
+              test::make_modern_ordinary_address_elf(fixture, scope, offset, modifiers);
           if (zero_sized) {
             ASSERT_TRUE(test::zero_ordinary_function_size(image, 0));
           }
@@ -45,7 +45,9 @@ TEST_P(FaultOrdinaryWrongAddress, ChangesOnlySignedByteOffsetAndPreservesComplet
           ASSERT_TRUE(found.succeeded()) << error.message;
           ASSERT_EQ(found.value().sites().size(), 1u);
           const OrdinaryAcquireSite &site = found.value().sites().front();
-          EXPECT_EQ(site.profile, OrdinaryAcquireProfile::Cdna5GlobalB32);
+          EXPECT_EQ(site.profile, fixture.arch == IsaFamily::Cdna5
+                                      ? OrdinaryAcquireProfile::Cdna5GlobalB32
+                                      : OrdinaryAcquireProfile::Rdna4GlobalB32);
           EXPECT_EQ(site.form, "global_load_b32");
           EXPECT_EQ(site.instruction_size, 12u);
           EXPECT_EQ(site.byte_offset, offset);
@@ -75,12 +77,13 @@ TEST_P(FaultOrdinaryWrongAddress, ChangesOnlySignedByteOffsetAndPreservesComplet
           std::array<uint32_t, 3> changed = {};
           std::memcpy(changed.data(), text.data() + *guest, sizeof(changed));
           const std::array<uint32_t, 3> original =
-              test::cdna5_ordinary_address_words(scope, offset, modifiers);
+              test::modern_ordinary_address_words(fixture, scope, offset, modifiers);
           EXPECT_EQ(changed[0], original[0]);
           EXPECT_EQ(changed[1], original[1]);
           EXPECT_EQ(changed[2] & 0xffu, original[2] & 0xffu);
           EXPECT_EQ(changed[2] >> 8, static_cast<uint32_t>(offset + 8));
-          EXPECT_EQ((changed[1] >> 16) & 1u, static_cast<uint32_t>(modifiers));
+          EXPECT_EQ((changed[1] >> 16) & 1u,
+                    static_cast<uint32_t>(modifiers && fixture.arch == IsaFamily::Cdna5));
           EXPECT_EQ((changed[1] >> 18) & 3u, scope);
           EXPECT_EQ((changed[1] >> 20) & 7u, modifiers ? 6u : 0u);
           const std::array<uint32_t, 1> expected_wait = {test::kOrdinaryWaitLoadZero};
@@ -300,7 +303,7 @@ TEST_P(FaultOrdinaryWrongAddress, PreservesBoundedFallthroughAndSelfLoopProofMem
 
 TEST_P(FaultOrdinaryWrongAddress, IndependentOracleRejectsOperandModifierAndAcquireMemberDrift) {
   const test::OrdinaryTargetCase &fixture = GetParam();
-  const FaultMutationContext source(test::make_cdna5_ordinary_address_elf(fixture, 3, 4, true));
+  const FaultMutationContext source(test::make_modern_ordinary_address_elf(fixture, 3, 4, true));
   FaultMutationError error;
   const FailureOr<OrdinaryAcquireInventory> found =
       discover_ordinary_acquires(source, "test_kernel", error);
@@ -386,17 +389,19 @@ TEST_P(FaultOrdinaryWrongAddress, EmissionFailureLeavesPristineSourceForRepeated
   EXPECT_TRUE(test::ordinary_wrong_address_output_matches(independent, 0, 4, mutant.value().image));
 }
 
-TEST(FaultOrdinaryWrongAddressCapabilities, OnlyEnabledProfilesAdvertiseMutation) {
+TEST(FaultOrdinaryWrongAddressCapabilities, AllModernProfilesAdvertiseMatchingMutationRows) {
   const std::vector<OrdinaryWrongAddressCapability> capabilities =
       ordinary_wrong_address_capabilities();
-  ASSERT_EQ(capabilities.size(), 2u);
-  for (const test::OrdinaryTargetCase &fixture : test::kCdna5OrdinaryAddressCases)
+  ASSERT_EQ(capabilities.size(), 6u);
+  for (const test::OrdinaryTargetCase &fixture : test::kOrdinaryTargetCases)
     EXPECT_EQ(std::ranges::count_if(capabilities,
                                     [&](const OrdinaryWrongAddressCapability &capability) {
                                       return capability.target == fixture.target &&
                                              capability.wave_size == fixture.wave &&
                                              capability.profile ==
-                                                 OrdinaryAcquireProfile::Cdna5GlobalB32;
+                                                 (fixture.arch == IsaFamily::Cdna5
+                                                      ? OrdinaryAcquireProfile::Cdna5GlobalB32
+                                                      : OrdinaryAcquireProfile::Rdna4GlobalB32);
                                     }),
               1);
   for (const test::OrdinaryTargetCase &fixture : test::kOrdinaryTargetCases) {
@@ -411,13 +416,51 @@ TEST(FaultOrdinaryWrongAddressCapabilities, OnlyEnabledProfilesAdvertiseMutation
     const FailureOr<OrdinaryAcquireSelection> selected =
         select_ordinary_acquire(found.value(), {}, error);
     ASSERT_TRUE(selected.succeeded()) << error.message;
-    EXPECT_TRUE(apply_ordinary_wrong_address(source, selected.value(), 4, error).failed());
-    EXPECT_EQ(error.code, FaultMutationErrorCode::UnsupportedForm);
+    const FailureOr<OrdinaryWrongAddressResult> mutant =
+        apply_ordinary_wrong_address(source, selected.value(), 4, error);
+    ASSERT_TRUE(mutant.succeeded()) << error.message;
+    EXPECT_TRUE(test::ordinary_wrong_address_output_matches(source, 0, 4, mutant.value().image));
+  }
+}
+
+class FaultRdna4OrdinaryParity : public ::testing::TestWithParam<test::OrdinaryTargetCase> {};
+
+TEST_P(FaultRdna4OrdinaryParity, OriginalQualifiedVariantsKeepMutationAndExactIdentity) {
+  const test::OrdinaryTargetCase &fixture = GetParam();
+  for (const test::OrdinaryAddressParityCase &parity :
+       test::rdna4_ordinary_address_parity_cases(fixture)) {
+    SCOPED_TRACE(parity.name);
+    ASSERT_FALSE(parity.image.empty());
+    const FaultMutationContext source(parity.image);
+    FaultMutationError error;
+    const FailureOr<OrdinaryAcquireInventory> inventory =
+        discover_ordinary_acquires(source, parity.kernel, error);
+    ASSERT_TRUE(inventory.succeeded()) << error.message;
+    ASSERT_EQ(inventory.value().sites().size(), 1u);
+    const FailureOr<OrdinaryAcquireSelection> selected =
+        select_ordinary_acquire(inventory.value(), {}, error);
+    ASSERT_TRUE(selected.succeeded()) << error.message;
+    EXPECT_EQ(selected.value().site().offset, parity.offset);
+    const FailureOr<OrdinaryAcquireSelection> exact = select_ordinary_acquire(
+        inventory.value(), {.exact = selected.value(), .ordinal = SIZE_MAX}, error);
+    ASSERT_TRUE(exact.succeeded()) << error.message;
+    const FailureOr<OrdinaryWrongAddressResult> mutant =
+        apply_ordinary_wrong_address(source, exact.value(), 4, error);
+    ASSERT_TRUE(mutant.succeeded()) << error.message;
+    EXPECT_TRUE(test::ordinary_wrong_address_output_matches(source, parity.offset, 4,
+                                                            mutant.value().image));
+    EXPECT_TRUE(std::ranges::equal(source.image(), parity.image));
   }
 }
 
 INSTANTIATE_TEST_SUITE_P(Targets, FaultOrdinaryWrongAddress,
-                         ::testing::ValuesIn(test::kCdna5OrdinaryAddressCases),
+                         ::testing::ValuesIn(test::kOrdinaryTargetCases),
+                         [](const ::testing::TestParamInfo<test::OrdinaryTargetCase> &info) {
+                           return info.param.name;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(Targets, FaultRdna4OrdinaryParity,
+                         ::testing::ValuesIn(test::kRdna4OrdinaryAddressCases),
                          [](const ::testing::TestParamInfo<test::OrdinaryTargetCase> &info) {
                            return info.param.name;
                          });

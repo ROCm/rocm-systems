@@ -8,6 +8,7 @@
 #include "rocjitsu/code/patch/fault_injection/ordinary_acquire_internal.h"
 #include "rocjitsu/code/patch/instrumentor.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/memory_displacement_encoded_fields.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -34,7 +35,8 @@ bool admitted_profile(rj_code_target_id_t target, const OrdinaryAcquireSite &sit
     return (target == ROCJITSU_CODE_TARGET_GFX1250 || target == ROCJITSU_CODE_TARGET_GFX1251) &&
            site.instruction_size == 12 && site.form == "global_load_b32";
   case OrdinaryAcquireProfile::Rdna4GlobalB32:
-    return false;
+    return (target == ROCJITSU_CODE_TARGET_GFX1200 || target == ROCJITSU_CODE_TARGET_GFX1201) &&
+           site.instruction_size == 12 && site.form == "global_load_b32";
   }
   return false;
 }
@@ -43,11 +45,10 @@ std::optional<int32_t> read_load_offset(rj_code_target_id_t target, const Ordina
                                         std::span<const uint32_t> words) {
   switch (site.profile) {
   case OrdinaryAcquireProfile::Cdna5GlobalB32:
+  case OrdinaryAcquireProfile::Rdna4GlobalB32:
     if (words.size() != 3)
       return std::nullopt;
     return amdgpu::read_vmem_signed24_offset(target, words);
-  case OrdinaryAcquireProfile::Rdna4GlobalB32:
-    return std::nullopt;
   }
   return std::nullopt;
 }
@@ -57,15 +58,14 @@ std::optional<std::vector<uint32_t>> replace_load_offset(rj_code_target_id_t tar
                                                          std::span<const uint32_t> words,
                                                          int64_t offset) {
   switch (site.profile) {
-  case OrdinaryAcquireProfile::Cdna5GlobalB32: {
+  case OrdinaryAcquireProfile::Cdna5GlobalB32:
+  case OrdinaryAcquireProfile::Rdna4GlobalB32: {
     const std::optional<std::array<uint32_t, 3>> replacement =
         amdgpu::replace_vmem_signed24_offset(target, words, offset);
     if (!replacement)
       return std::nullopt;
     return std::vector<uint32_t>(replacement->begin(), replacement->end());
   }
-  case OrdinaryAcquireProfile::Rdna4GlobalB32:
-    return std::nullopt;
   }
   return std::nullopt;
 }
@@ -80,8 +80,14 @@ bool load_scope_matches(const OrdinaryAcquireSite &site, std::span<const uint32_
     return site.raw_scope && (*site.raw_scope == 2 || *site.raw_scope == 3) &&
            raw.scope == *site.raw_scope;
   }
-  case OrdinaryAcquireProfile::Rdna4GlobalB32:
-    return false;
+  case OrdinaryAcquireProfile::Rdna4GlobalB32: {
+    if (words.size_bytes() != sizeof(rdna4::VglobalMachineInst))
+      return false;
+    rdna4::VglobalMachineInst raw = {};
+    std::memcpy(&raw, words.data(), sizeof(raw));
+    return site.raw_scope && (*site.raw_scope == 2 || *site.raw_scope == 3) &&
+           raw.scope == *site.raw_scope;
+  }
   }
   return false;
 }
@@ -98,10 +104,17 @@ bool valid_extent(const FaultMutationSection &section, std::span<const uint8_t> 
 std::vector<OrdinaryWrongAddressCapability> ordinary_wrong_address_capabilities() {
   std::vector<OrdinaryWrongAddressCapability> capabilities;
   const IsaTargetRegistry &registry = default_isa_target_registry();
-  for (rj_code_target_id_t target : {ROCJITSU_CODE_TARGET_GFX1250, ROCJITSU_CODE_TARGET_GFX1251}) {
-    if (registry.find_target(target) && Decoder::create(registry, target))
-      capabilities.push_back(
-          {.target = target, .wave_size = 32, .profile = OrdinaryAcquireProfile::Cdna5GlobalB32});
+  for (rj_code_target_id_t target : {ROCJITSU_CODE_TARGET_GFX1250, ROCJITSU_CODE_TARGET_GFX1251,
+                                     ROCJITSU_CODE_TARGET_GFX1201, ROCJITSU_CODE_TARGET_GFX1200}) {
+    if (!registry.find_target(target) || !Decoder::create(registry, target))
+      continue;
+    const bool cdna5 =
+        target == ROCJITSU_CODE_TARGET_GFX1250 || target == ROCJITSU_CODE_TARGET_GFX1251;
+    const OrdinaryAcquireProfile profile =
+        cdna5 ? OrdinaryAcquireProfile::Cdna5GlobalB32 : OrdinaryAcquireProfile::Rdna4GlobalB32;
+    capabilities.push_back({.target = target, .wave_size = 32, .profile = profile});
+    if (!cdna5)
+      capabilities.push_back({.target = target, .wave_size = 64, .profile = profile});
   }
   return capabilities;
 }
