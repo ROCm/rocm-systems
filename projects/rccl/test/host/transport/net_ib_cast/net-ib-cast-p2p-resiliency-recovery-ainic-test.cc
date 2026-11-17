@@ -5,7 +5,7 @@
  ************************************************************************/
 
 // Host-only microtests for src/transport/net_ib_cast/p2p_resiliency_recovery_ainic.cc (via
-// P2P_RESILIENCY_RECOVERY_AINIC_CC_PATH): destroy+recreate recovery and the QPN exchange.
+// NET_IB_CAST_P2P_RESILIENCY_RECOVERY_AINIC_CC_PATH): destroy+recreate recovery and the QPN exchange.
 
 #include <gtest/gtest.h>
 
@@ -17,7 +17,7 @@
 #include "P2pResiliencyScene.h"
 #include "fakes/param_redirect.h"
 
-#include P2P_RESILIENCY_RECOVERY_AINIC_CC_PATH
+#include NET_IB_CAST_P2P_RESILIENCY_RECOVERY_AINIC_CC_PATH
 
 namespace {
 

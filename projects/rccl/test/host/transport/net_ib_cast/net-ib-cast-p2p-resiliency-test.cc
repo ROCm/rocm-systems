@@ -4,7 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Host-only microtests for src/transport/net_ib_cast/p2p_resiliency.cc (via P2P_RESILIENCY_CC_PATH).
+// Host-only microtests for src/transport/net_ib_cast/p2p_resiliency.cc (via NET_IB_CAST_P2P_RESILIENCY_CC_PATH).
 
 #include <gtest/gtest.h>
 
@@ -12,12 +12,12 @@
 #include <cstring>
 #include <string>
 
-#include "../common/LogCapture.hpp"
+#include "../../../common/LogCapture.hpp"
 #include "P2pResiliencyScene.h"
 #include "fakes/param_redirect.h"
 
 #define clockNano P2pResiliencyTestClockNano
-#include P2P_RESILIENCY_CC_PATH
+#include NET_IB_CAST_P2P_RESILIENCY_CC_PATH
 #undef clockNano
 
 namespace {
