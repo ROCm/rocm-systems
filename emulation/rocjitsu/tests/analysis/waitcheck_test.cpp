@@ -4454,6 +4454,30 @@ TEST(WaitcheckTest, Gfx11SkippedFlatDoesNotForceLdsAdmission) {
     }
 }
 
+TEST(WaitcheckTest, Gfx11EmptyExecFlatDoesNotAgeOlderDsWithModeledVmPending) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5})
+    for (bool active : {false, true}) {
+      SCOPED_TRACE(testing::Message() << arch << '/' << active);
+      std::vector<uint32_t> words{
+          0xd8d80000, 0x02000001, // ds_load_b32 v2,v1
+          0xdc520000, 0x080a0009, // global_load_b32 v8,v9,s[10:11]
+          active ? 0xbefe00c1u : 0xbefe0080u, // EXEC_LO=-1 or 0
+          0xdc680000, 0x007c0503, // flat_store_b32 v[3:4],v5
+          0xbefe00c1,             // Restore EXEC before consuming v2.
+          0xbf890017,             // s_waitcnt vmcnt(0) lgkmcnt(1)
+          0x7e0c0302,             // v_mov_b32 v6,v2
+          0xbfb00000};            // s_endpgm
+      const auto report = analyze_waitcnts(TestCodeObject(words), arch);
+      ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+      ASSERT_EQ(report.diagnostics.size(), !active) << diagnostic_summary(report);
+      if (!active) {
+        EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Ds);
+        EXPECT_EQ(report.diagnostics[0].producer_section_offset, 0u);
+        EXPECT_EQ(report.diagnostics[0].section_offset, 36u);
+      }
+    }
+}
+
 TEST(WaitcheckTest, Gfx11FlatStoreAgesTheDsSideOfAnEarlierFlatLoad) {
   for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5})
     for (uint32_t ds : {1u, 2u}) {
