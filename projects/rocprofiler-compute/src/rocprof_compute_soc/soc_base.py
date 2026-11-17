@@ -270,8 +270,11 @@ class OmniSoC_Base:
         Applies specific adjustments for MI300 series GPU models based on architecture.
         """
 
-        if gpu_model in ["mi300a", "mi300x"] and gpu_arch == "gfx942":
-            gpu_model += "_a1"
+        if gpu_model in ["mi300a", "mi300x"]:
+            if gpu_arch in ["gfx940", "gfx941"]:
+                gpu_model += "_a0"
+            elif gpu_arch == "gfx942":
+                gpu_model += "_a1"
 
         return gpu_model
 

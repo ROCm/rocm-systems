@@ -126,6 +126,8 @@ VALU_MFMA = dict.fromkeys(
 ARCH_OVERRIDES = {
     "gfx908": FLAT_MEMORY,
     "gfx90a": FLAT_MEMORY,
+    "gfx940": FLAT_MEMORY,
+    "gfx941": FLAT_MEMORY,
     "gfx942": {**FLAT_MEMORY, **VALU_MFMA},
     "gfx950": {**FLAT_MEMORY, **VALU_MFMA},
 }

@@ -8,6 +8,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       - gfx1150
@@ -35,6 +37,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       - gfx1150
@@ -62,6 +66,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       - gfx1150
@@ -89,6 +95,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       - gfx1150
@@ -116,6 +124,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       - gfx1150
@@ -132,6 +142,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       - gfx1150
@@ -159,6 +171,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       - gfx1150
@@ -175,6 +189,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       - gfx1150
@@ -191,6 +207,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       - gfx1150
@@ -207,6 +225,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       - gfx1150
@@ -223,6 +243,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       - gfx1150
@@ -1087,6 +1109,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       - gfx1150
@@ -1103,6 +1127,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       - gfx1150
@@ -1119,6 +1145,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       - gfx1150
@@ -1134,6 +1162,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       - gfx1150
@@ -1150,6 +1180,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       - gfx1150
@@ -1187,6 +1219,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       - gfx1150
@@ -1203,6 +1237,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       - gfx1150
@@ -1219,6 +1255,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       - gfx1150
@@ -1234,6 +1272,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       - gfx1150
@@ -1272,6 +1312,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SPI
@@ -1292,6 +1334,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SPI
@@ -1312,6 +1356,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SPI
@@ -1332,6 +1378,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SPI
@@ -1351,6 +1399,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SPI
@@ -1369,6 +1419,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SPI
@@ -1388,6 +1440,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SPI
@@ -1407,6 +1461,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SPI
@@ -1425,6 +1481,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SPI
@@ -1443,6 +1501,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SPI
@@ -1461,6 +1521,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SPI
@@ -1480,6 +1542,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SPI
@@ -1499,6 +1563,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SPI
@@ -1518,6 +1584,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SPI
@@ -1536,6 +1604,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SPI
@@ -1549,6 +1619,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       - gfx1150
@@ -1567,6 +1639,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       - gfx1150
@@ -1583,6 +1657,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       - gfx1150
@@ -1614,6 +1690,8 @@ rocprofiler-sdk:
       block: SQ
       event: 58
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 62
@@ -1646,6 +1724,8 @@ rocprofiler-sdk:
       block: SQ
       event: 61
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 66
@@ -1674,6 +1754,8 @@ rocprofiler-sdk:
       block: SQ
       event: 60
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 65
@@ -1706,6 +1788,8 @@ rocprofiler-sdk:
       block: SQ
       event: 56
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 60
@@ -1738,6 +1822,8 @@ rocprofiler-sdk:
       block: SQ
       event: 57
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 61
@@ -1796,6 +1882,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -1827,6 +1915,8 @@ rocprofiler-sdk:
       block: SQ
       event: 44
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 74
@@ -1863,6 +1953,8 @@ rocprofiler-sdk:
       block: SQ
       event: 43
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 73
@@ -1891,6 +1983,8 @@ rocprofiler-sdk:
       block: SQ
       event: 98
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 130
@@ -1919,6 +2013,8 @@ rocprofiler-sdk:
       block: SQ
       event: 121
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 126
@@ -1947,6 +2043,8 @@ rocprofiler-sdk:
       block: SQ
       event: 99
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 131
@@ -1975,6 +2073,8 @@ rocprofiler-sdk:
       block: SQ
       event: 97
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 129
@@ -2003,6 +2103,8 @@ rocprofiler-sdk:
       block: SQ
       event: 96
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 128
@@ -2025,6 +2127,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -2050,6 +2154,8 @@ rocprofiler-sdk:
       block: SQ
       event: 58
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 90
@@ -2077,6 +2183,8 @@ rocprofiler-sdk:
       block: SQ
       event: 61
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 93
@@ -2108,6 +2216,8 @@ rocprofiler-sdk:
       block: SQ
       event: 91
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 96
@@ -2126,6 +2236,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       - gfx1150
@@ -2158,6 +2270,8 @@ rocprofiler-sdk:
       block: SQ
       event: 47
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 79
@@ -2252,6 +2366,8 @@ rocprofiler-sdk:
       block: SQ
       event: 39
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 69
@@ -2281,6 +2397,8 @@ rocprofiler-sdk:
       block: SQ
       event: 38
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 68
@@ -2391,6 +2509,8 @@ rocprofiler-sdk:
       block: SQ
       event: 40
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       - gfx1250
       block: SQ
@@ -2422,6 +2542,8 @@ rocprofiler-sdk:
       block: SQ
       event: 161
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 187
@@ -2515,6 +2637,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -2584,6 +2708,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -2607,6 +2733,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -2630,6 +2758,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -2653,6 +2783,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -2676,6 +2808,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -2704,6 +2838,8 @@ rocprofiler-sdk:
       block: SQ
       event: 159
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 185
@@ -2735,6 +2871,8 @@ rocprofiler-sdk:
       block: SQ
       event: 160
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 186
@@ -2754,6 +2892,8 @@ rocprofiler-sdk:
       block: SQ
       event: 292
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -2776,6 +2916,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -2798,6 +2940,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -2836,6 +2980,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -2858,6 +3004,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -2880,6 +3028,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -2902,6 +3052,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -2920,6 +3072,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -2938,6 +3092,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -2956,6 +3112,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -2974,6 +3132,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -2992,6 +3152,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -3012,6 +3174,8 @@ rocprofiler-sdk:
       block: SQ
       event: 268
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -3034,6 +3198,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -3056,6 +3222,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -3076,6 +3244,8 @@ rocprofiler-sdk:
       block: SQ
       event: 280
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -3098,6 +3268,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -3120,6 +3292,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -3142,6 +3316,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -3187,6 +3363,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -3209,6 +3387,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -3231,6 +3411,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -3253,6 +3435,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -3275,6 +3459,8 @@ rocprofiler-sdk:
       block: TA
       event: 15
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: TA
@@ -3286,6 +3472,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       - gfx1150
@@ -3301,6 +3489,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       - gfx1150
@@ -4620,6 +4810,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       - gfx1150
@@ -4635,6 +4827,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       - gfx1150
@@ -4649,6 +4843,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       - gfx1150
@@ -4663,6 +4859,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       - gfx1150
@@ -4847,6 +5045,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: CPF
@@ -4858,6 +5058,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: CPF
@@ -4873,6 +5075,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: CPF
@@ -4884,6 +5088,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: CPF
@@ -4895,6 +5101,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: CPF
@@ -4906,6 +5114,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: CPF
@@ -4917,6 +5127,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: CPF
@@ -4928,6 +5140,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       - gfx1150
@@ -4942,6 +5156,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       - gfx1150
@@ -5043,6 +5259,8 @@ rocprofiler-sdk:
       - gfx90a
       expression: (TCC_EA_RDREQ_32B_sum*32+(TCC_EA_RDREQ_sum-TCC_EA_RDREQ_32B_sum)*64)/1024
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       expression: (TCC_BUBBLE_sum*128 + (TCC_EA0_RDREQ_sum-TCC_BUBBLE_sum-TCC_EA0_RDREQ_32B_sum)*64 + TCC_EA0_RDREQ_32B_sum*32)/1024
     - architectures:
@@ -5062,6 +5280,8 @@ rocprofiler-sdk:
       - gfx90a
       expression: 1024*(WRITE_SIZE+FETCH_SIZE)/reduce(GRBM_GUI_ACTIVE,max)
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       expression: (WRITE_SIZE*1024+TCC_BUBBLE_sum*128+(TCC_EA0_RDREQ_sum-TCC_BUBBLE_sum)*64)/reduce(GRBM_GUI_ACTIVE,max)
     - architectures:
@@ -5075,6 +5295,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: FETCH_SIZE
@@ -5177,6 +5399,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       - gfx1150
@@ -5191,6 +5415,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: GRBM
@@ -5208,6 +5434,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(accumulate(SQ_IFETCH_LEVEL, HIGH_RES),sum)/reduce(SQ_IFETCH,sum)
@@ -5280,6 +5508,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       - gfx1150
@@ -5300,6 +5530,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: 100*reduce(SQ_LDS_IDX_ACTIVE,sum)/(reduce(GRBM_GUI_ACTIVE,max)*CU_NUM)
@@ -5310,6 +5542,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       - gfx1150
@@ -5329,6 +5563,8 @@ rocprofiler-sdk:
       expression: reduce(SQ_WAVE_CYCLES,sum)/reduce(SQ_BUSY_CYCLES,sum)
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(accumulate(SQ_LEVEL_WAVES, LOW_RES),sum)/reduce(SQ_BUSY_CU_CYCLES,sum)
@@ -5344,6 +5580,8 @@ rocprofiler-sdk:
       expression: reduce(SQ_WAVE_CYCLES,sum)/reduce(GRBM_GUI_ACTIVE,max)/CU_NUM
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(accumulate(SQ_LEVEL_WAVES, HIGH_RES),sum)/reduce(GRBM_GUI_ACTIVE,max)/CU_NUM
@@ -5359,6 +5597,8 @@ rocprofiler-sdk:
       expression: 100*reduce(SQ_WAVE_CYCLES,sum)/reduce(GRBM_GUI_ACTIVE,max)/CU_NUM/32
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: 400*reduce(SQ_WAVE_CYCLES,sum)/reduce(GRBM_GUI_ACTIVE,max)/CU_NUM/32
@@ -5384,6 +5624,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: 100*TCP_TCP_TA_DATA_STALL_CYCLES_max/reduce(GRBM_GUI_ACTIVE,max)/SE_NUM
@@ -5394,6 +5636,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: WRITE_REQ_32B
@@ -5403,6 +5647,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: (SQ_INSTS_VALU_MFMA_MOPS_F16+SQ_INSTS_VALU_MFMA_MOPS_BF16+SQ_INSTS_VALU_MFMA_MOPS_F32+SQ_INSTS_VALU_MFMA_MOPS_F64)*512
@@ -5412,6 +5658,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: SQ_INSTS_VALU_MFMA_MOPS_BF16*512
@@ -5421,6 +5669,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: SQ_INSTS_VALU_MFMA_MOPS_F16*512
@@ -5430,6 +5680,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: SQ_INSTS_VALU_MFMA_MOPS_F32*512
@@ -5439,6 +5691,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: SQ_INSTS_VALU_MFMA_MOPS_F64*512
@@ -5448,6 +5702,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(SQ_VALU_MFMA_BUSY_CYCLES,sum)/(reduce(GRBM_GUI_ACTIVE,max)*SIMD_NUM)*100
@@ -5458,6 +5714,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: 100*reduce(SQ_INST_CYCLES_SALU,sum)/CU_NUM/reduce(GRBM_GUI_ACTIVE,max)
@@ -5480,6 +5738,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       - gfx1150
@@ -5507,6 +5767,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SPI
@@ -5520,6 +5782,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SPI
@@ -5533,6 +5797,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SPI
@@ -6064,6 +6330,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -6075,6 +6343,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -6086,6 +6356,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -6105,6 +6377,8 @@ rocprofiler-sdk:
       block: SQ
       event: 158
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 184
@@ -6127,6 +6401,8 @@ rocprofiler-sdk:
       block: SQ
       event: 69
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 101
@@ -6151,6 +6427,8 @@ rocprofiler-sdk:
       block: SQ
       event: 74
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 106
@@ -6174,6 +6452,8 @@ rocprofiler-sdk:
       block: SQ
       event: 76
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 108
@@ -6197,6 +6477,8 @@ rocprofiler-sdk:
       block: SQ
       event: 71
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 103
@@ -6220,6 +6502,8 @@ rocprofiler-sdk:
       block: SQ
       event: 75
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 107
@@ -6244,6 +6528,8 @@ rocprofiler-sdk:
       block: SQ
       event: 73
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 105
@@ -6267,6 +6553,8 @@ rocprofiler-sdk:
       block: SQ
       event: 99
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 104
@@ -6290,6 +6578,8 @@ rocprofiler-sdk:
       block: SQ
       event: 70
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 102
@@ -6305,6 +6595,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -6322,6 +6614,8 @@ rocprofiler-sdk:
       block: SQ
       event: 88
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 120
@@ -6343,6 +6637,8 @@ rocprofiler-sdk:
       block: SQ
       event: 89
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 121
@@ -6363,6 +6659,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -6394,6 +6692,8 @@ rocprofiler-sdk:
       block: SQ
       event: 27
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 56
@@ -6409,6 +6709,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -6421,6 +6723,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -6433,6 +6737,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -6444,6 +6750,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -6456,6 +6764,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -6468,6 +6778,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -6480,6 +6792,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -6491,6 +6805,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -6502,6 +6818,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -6514,6 +6832,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -6526,6 +6846,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -6538,6 +6860,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -6550,6 +6874,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -6561,6 +6887,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -6571,6 +6899,8 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -6595,6 +6925,8 @@ rocprofiler-sdk:
       block: SQ
       event: 49
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 51
@@ -6614,6 +6946,8 @@ rocprofiler-sdk:
       block: SQ
       event: 48
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 50
@@ -6633,6 +6967,8 @@ rocprofiler-sdk:
       block: SQ
       event: 50
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 52
@@ -6652,6 +6988,8 @@ rocprofiler-sdk:
       block: SQ
       event: 51
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 53
@@ -6670,6 +7008,8 @@ rocprofiler-sdk:
       block: SQ
       event: 47
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 49
@@ -6683,6 +7023,8 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 55
@@ -6716,6 +7058,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -6728,6 +7072,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -6740,6 +7086,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -6752,6 +7100,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -6764,6 +7114,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -6776,6 +7128,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: SQ
@@ -6794,6 +7148,8 @@ rocprofiler-sdk:
       block: SQ
       event: 30
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 59
@@ -6815,6 +7171,8 @@ rocprofiler-sdk:
       block: SQ
       event: 54
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 58
@@ -6836,6 +7194,8 @@ rocprofiler-sdk:
       block: SQ
       event: 53
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 57
@@ -6859,6 +7219,8 @@ rocprofiler-sdk:
       block: SQ
       event: 41
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 71
@@ -6880,6 +7242,8 @@ rocprofiler-sdk:
       block: SQ
       event: 112
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 117
@@ -6901,6 +7265,8 @@ rocprofiler-sdk:
       block: SQ
       event: 84
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 116
@@ -6922,6 +7288,8 @@ rocprofiler-sdk:
       block: SQ
       event: 78
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 110
@@ -6943,6 +7311,8 @@ rocprofiler-sdk:
       block: SQ
       event: 77
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 109
@@ -6965,6 +7335,8 @@ rocprofiler-sdk:
       block: SQ
       event: 42
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 72
@@ -6986,6 +7358,8 @@ rocprofiler-sdk:
       block: SQ
       event: 95
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 127
@@ -7007,6 +7381,8 @@ rocprofiler-sdk:
       block: SQ
       event: 113
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 118
@@ -7024,6 +7400,8 @@ rocprofiler-sdk:
       block: SQ
       event: 72
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: SQ
       event: 77
@@ -7253,6 +7631,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(accumulate(SQ_INST_LEVEL_SMEM, HIGH_RES),sum)/reduce(SQ_INSTS_SMEM_NORM,sum)
@@ -7273,6 +7653,8 @@ rocprofiler-sdk:
       block: TA
       event: 54
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: TA
@@ -7284,6 +7666,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TA_ADDR_STALLED_BY_TC_CYCLES,sum)
@@ -7297,6 +7681,8 @@ rocprofiler-sdk:
       block: TA
       event: 55
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: TA
@@ -7308,6 +7694,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TA_ADDR_STALLED_BY_TD_CYCLES,sum)
@@ -7336,6 +7724,8 @@ rocprofiler-sdk:
       block: TA
       event: 47
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: TA
@@ -7347,6 +7737,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TA_BUFFER_ATOMIC_WAVEFRONTS,sum)
@@ -7360,6 +7752,8 @@ rocprofiler-sdk:
       block: TA
       event: 52
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: TA
@@ -7371,6 +7765,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TA_BUFFER_COALESCED_READ_CYCLES,sum)
@@ -7384,6 +7780,8 @@ rocprofiler-sdk:
       block: TA
       event: 53
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: TA
@@ -7395,6 +7793,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TA_BUFFER_COALESCED_WRITE_CYCLES,sum)
@@ -7408,6 +7808,8 @@ rocprofiler-sdk:
       block: TA
       event: 45
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: TA
@@ -7419,6 +7821,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TA_BUFFER_READ_WAVEFRONTS,sum)
@@ -7432,6 +7836,8 @@ rocprofiler-sdk:
       block: TA
       event: 49
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: TA
@@ -7443,6 +7849,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TA_BUFFER_TOTAL_CYCLES,sum)
@@ -7456,6 +7864,8 @@ rocprofiler-sdk:
       block: TA
       event: 44
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: TA
@@ -7467,6 +7877,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TA_BUFFER_WAVEFRONTS,sum)
@@ -7480,6 +7892,8 @@ rocprofiler-sdk:
       block: TA
       event: 46
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: TA
@@ -7491,6 +7905,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TA_BUFFER_WRITE_WAVEFRONTS,sum)
@@ -7501,6 +7917,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       - gfx1150
@@ -7515,6 +7933,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       - gfx1150
@@ -7529,6 +7949,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       - gfx1150
@@ -7546,6 +7968,8 @@ rocprofiler-sdk:
       block: TA
       event: 56
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: TA
@@ -7557,6 +7981,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TA_DATA_STALLED_BY_TC_CYCLES,sum)
@@ -7570,6 +7996,8 @@ rocprofiler-sdk:
       block: TA
       event: 103
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: TA
@@ -7581,6 +8009,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TA_FLAT_ATOMIC_WAVEFRONTS,sum)
@@ -7594,6 +8024,8 @@ rocprofiler-sdk:
       block: TA
       event: 101
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: TA
@@ -7605,6 +8037,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TA_FLAT_READ_WAVEFRONTS,sum)
@@ -7618,6 +8052,8 @@ rocprofiler-sdk:
       block: TA
       event: 100
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: TA
@@ -7629,6 +8065,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TA_FLAT_WAVEFRONTS,sum)
@@ -7642,6 +8080,8 @@ rocprofiler-sdk:
       block: TA
       event: 102
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: TA
@@ -7653,6 +8093,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TA_FLAT_WRITE_WAVEFRONTS,sum)
@@ -7666,6 +8108,8 @@ rocprofiler-sdk:
       block: TA
       event: 32
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: TA
@@ -7677,6 +8121,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TA_TOTAL_WAVEFRONTS,sum)
@@ -7747,6 +8193,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: TCA
@@ -7757,6 +8205,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCA_BUSY,sum)
@@ -7767,6 +8217,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: TCA
@@ -7777,6 +8229,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCA_CYCLE,sum)
@@ -7787,6 +8241,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       block: TCC
       event: 80
@@ -7801,6 +8257,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCC_ALL_TC_OP_INV_EVICT,sum)
@@ -7811,6 +8269,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       block: TCC
       event: 73
@@ -7825,6 +8285,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCC_ALL_TC_OP_WB_WRITEBACK,sum)
@@ -7835,6 +8297,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       block: TCC
       event: 14
@@ -7849,6 +8313,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCC_ATOMIC,sum)
@@ -7859,6 +8325,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: TCC
@@ -7870,6 +8338,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCC_BUSY,avr)
@@ -7880,6 +8350,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCC_BUSY,sum)
@@ -7890,6 +8362,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       block: TCC
       event: 7
@@ -7904,6 +8378,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCC_CC_REQ,sum)
@@ -7914,6 +8390,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: TCC
@@ -7925,6 +8403,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCC_CYCLE,sum)
@@ -7934,6 +8414,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx908
+      - gfx940
+      - gfx941
       - gfx942
       block: TCC
       event: 36
@@ -7948,6 +8430,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx908
+      - gfx940
+      - gfx941
       - gfx942
       block: TCC
       event: 37
@@ -7962,6 +8446,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx908
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCC_EA0_ATOMIC_LEVEL,sum)
@@ -7972,6 +8458,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx908
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCC_EA0_ATOMIC,sum)
@@ -7981,6 +8469,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx908
+      - gfx940
+      - gfx941
       - gfx942
       block: TCC
       event: 38
@@ -7994,6 +8484,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx908
+      - gfx940
+      - gfx941
       - gfx942
       block: TCC
       event: 39
@@ -8007,6 +8499,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx908
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCC_EA0_RDREQ_32B,sum)
@@ -8016,6 +8510,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx908
+      - gfx940
+      - gfx941
       - gfx942
       block: TCC
       event: 102
@@ -8030,6 +8526,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx908
+      - gfx940
+      - gfx941
       - gfx942
       block: TCC
       event: 43
@@ -8044,6 +8542,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx908
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCC_EA0_RDREQ_DRAM_CREDIT_STALL,sum)
@@ -8053,6 +8553,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx908
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCC_EA0_RDREQ_DRAM,sum)
@@ -8063,6 +8565,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx908
+      - gfx940
+      - gfx941
       - gfx942
       block: TCC
       event: 42
@@ -8077,6 +8581,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx908
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCC_EA0_RDREQ_GMI_CREDIT_STALL,sum)
@@ -8087,6 +8593,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx908
+      - gfx940
+      - gfx941
       - gfx942
       block: TCC
       event: 41
@@ -8101,6 +8609,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx908
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCC_EA0_RDREQ_IO_CREDIT_STALL,sum)
@@ -8111,6 +8621,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx908
+      - gfx940
+      - gfx941
       - gfx942
       block: TCC
       event: 44
@@ -8125,6 +8637,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx908
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCC_EA0_RDREQ_LEVEL,sum)
@@ -8134,6 +8648,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx908
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCC_EA0_RDREQ,sum)
@@ -8143,6 +8659,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx908
+      - gfx940
+      - gfx941
       - gfx942
       block: TCC
       event: 40
@@ -8157,6 +8675,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx908
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCC_EA0_RD_UNCACHED_32B,sum)
@@ -8168,6 +8688,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       block: TCC
       event: 26
@@ -8182,6 +8704,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       block: TCC
       event: 27
@@ -8197,6 +8721,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCC_EA0_WRREQ_64B,sum)
@@ -8206,6 +8732,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx908
+      - gfx940
+      - gfx941
       - gfx942
       block: TCC
       event: 103
@@ -8219,6 +8747,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx908
+      - gfx940
+      - gfx941
       - gfx942
       block: TCC
       event: 33
@@ -8233,6 +8763,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx908
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCC_EA0_WRREQ_DRAM_CREDIT_STALL,sum)
@@ -8242,6 +8774,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx908
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCC_EA0_WRREQ_DRAM,sum)
@@ -8251,6 +8785,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx908
+      - gfx940
+      - gfx941
       - gfx942
       block: TCC
       event: 32
@@ -8265,6 +8801,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx908
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCC_EA0_WRREQ_GMI_CREDIT_STALL,sum)
@@ -8274,6 +8812,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx908
+      - gfx940
+      - gfx941
       - gfx942
       block: TCC
       event: 31
@@ -8288,6 +8828,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx908
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCC_EA0_WRREQ_IO_CREDIT_STALL,sum)
@@ -8298,6 +8840,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx908
+      - gfx940
+      - gfx941
       - gfx942
       block: TCC
       event: 35
@@ -8312,6 +8856,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx908
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCC_EA0_WRREQ_LEVEL,sum)
@@ -8320,6 +8866,8 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: TCC
       event: 28
@@ -8333,6 +8881,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx908
+      - gfx940
+      - gfx941
       - gfx942
       block: TCC
       event: 30
@@ -8346,6 +8896,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx908
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCC_EA0_WRREQ_STALL,sum)
@@ -8358,6 +8910,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCC_EA0_WRREQ,sum)
@@ -8368,6 +8922,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx908
+      - gfx940
+      - gfx941
       - gfx942
       block: TCC
       event: 29
@@ -8383,6 +8939,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx908
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCC_EA0_WR_UNCACHED_32B,sum)
@@ -8709,6 +9267,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       block: TCC
       event: 17
@@ -8723,6 +9283,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCC_HIT,sum)
@@ -8731,6 +9293,8 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: TCC
       event: 11
@@ -8745,6 +9309,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       block: TCC
       event: 19
@@ -8759,6 +9325,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCC_MISS,sum)
@@ -8769,6 +9337,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       block: TCC
       event: 5
@@ -8783,6 +9353,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCC_NC_REQ,sum)
@@ -8793,6 +9365,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       block: TCC
       event: 74
@@ -8807,6 +9381,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCC_NORMAL_EVICT,sum)
@@ -8817,6 +9393,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       block: TCC
       event: 68
@@ -8831,6 +9409,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCC_NORMAL_WRITEBACK,sum)
@@ -8841,6 +9421,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       block: TCC
       event: 9
@@ -8855,6 +9437,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       block: TCC
       event: 10
@@ -8869,6 +9453,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCC_PROBE_ALL,sum)
@@ -8877,6 +9463,8 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: TCC
       event: 81
@@ -8891,6 +9479,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCC_PROBE,sum)
@@ -8901,6 +9491,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       block: TCC
       event: 12
@@ -8916,6 +9508,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCC_READ,sum)
@@ -8927,6 +9521,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       block: TCC
       event: 3
@@ -8943,6 +9539,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCC_REQ,sum)
@@ -8953,6 +9551,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       block: TCC
       event: 8
@@ -8967,6 +9567,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCC_RW_REQ,sum)
@@ -8977,6 +9579,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       block: TCC
       event: 4
@@ -8991,6 +9595,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCC_STREAMING_REQ,sum)
@@ -9003,6 +9609,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       block: TCC
       event: 45
@@ -9017,6 +9625,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCC_TAG_STALL,sum)
@@ -9028,6 +9638,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       block: TCC
       event: 34
@@ -9043,6 +9655,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCC_TOO_MANY_EA_WRREQS_STALL,sum)
@@ -9053,6 +9667,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       block: TCC
       event: 6
@@ -9067,6 +9683,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCC_UC_REQ,sum)
@@ -9077,6 +9695,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       block: TCC
       event: 13
@@ -9092,6 +9712,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       block: TCC
       event: 22
@@ -9107,6 +9729,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCC_WRITEBACK,sum)
@@ -9117,6 +9741,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCC_WRITE,sum)
@@ -9129,6 +9755,8 @@ rocprofiler-sdk:
       - gfx90a
       expression: reduce(TCC_EA_WRREQ_STALL,max)
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCC_EA0_WRREQ_STALL,max)
@@ -9139,6 +9767,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       block: TCC
       event: 56
@@ -9153,6 +9783,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCC_BUBBLE,sum)
@@ -9575,6 +10207,8 @@ rocprofiler-sdk:
       block: TCP
       event: 13
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: TCP
@@ -9586,6 +10220,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES,sum)
@@ -9599,6 +10235,8 @@ rocprofiler-sdk:
       block: TCP
       event: 22
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: TCP
@@ -9610,6 +10248,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCP_PENDING_STALL_CYCLES,sum)
@@ -9623,6 +10263,8 @@ rocprofiler-sdk:
       block: TCP
       event: 11
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: TCP
@@ -9634,6 +10276,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCP_READ_TAGCONFLICT_STALL_CYCLES,sum)
@@ -9647,6 +10291,8 @@ rocprofiler-sdk:
       block: TCP
       event: 27
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: TCP
@@ -9658,6 +10304,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCP_TA_TCP_STATE_READ,sum)
@@ -9671,6 +10319,8 @@ rocprofiler-sdk:
       block: TCP
       event: 72
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: TCP
       event: 68
@@ -9685,6 +10335,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCP_TCC_ATOMIC_WITHOUT_RET_REQ,sum)
@@ -9698,6 +10350,8 @@ rocprofiler-sdk:
       block: TCP
       event: 71
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: TCP
       event: 67
@@ -9712,6 +10366,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCP_TCC_ATOMIC_WITH_RET_REQ,sum)
@@ -9725,6 +10381,8 @@ rocprofiler-sdk:
       block: TCP
       event: 83
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: TCP
       event: 79
@@ -9739,6 +10397,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCP_TCC_CC_ATOMIC_REQ,sum)
@@ -9752,6 +10412,8 @@ rocprofiler-sdk:
       block: TCP
       event: 81
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: TCP
       event: 77
@@ -9766,6 +10428,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCP_TCC_CC_READ_REQ,sum)
@@ -9779,6 +10443,8 @@ rocprofiler-sdk:
       block: TCP
       event: 82
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: TCP
       event: 78
@@ -9793,6 +10459,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCP_TCC_CC_WRITE_REQ,sum)
@@ -9806,6 +10474,8 @@ rocprofiler-sdk:
       block: TCP
       event: 77
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: TCP
       event: 73
@@ -9820,6 +10490,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCP_TCC_NC_ATOMIC_REQ,sum)
@@ -9833,6 +10505,8 @@ rocprofiler-sdk:
       block: TCP
       event: 75
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: TCP
       event: 71
@@ -9847,6 +10521,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCP_TCC_NC_READ_REQ,sum)
@@ -9860,6 +10536,8 @@ rocprofiler-sdk:
       block: TCP
       event: 76
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: TCP
       event: 72
@@ -9874,6 +10552,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCP_TCC_NC_WRITE_REQ,sum)
@@ -9887,6 +10567,8 @@ rocprofiler-sdk:
       block: TCP
       event: 69
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: TCP
       event: 65
@@ -9923,6 +10605,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCP_TCC_READ_REQ,sum)
@@ -9936,6 +10620,8 @@ rocprofiler-sdk:
       block: TCP
       event: 87
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: TCP
       event: 82
@@ -9950,6 +10636,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCP_TCC_RW_ATOMIC_REQ,sum)
@@ -9963,6 +10651,8 @@ rocprofiler-sdk:
       block: TCP
       event: 85
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: TCP
       event: 80
@@ -9977,6 +10667,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCP_TCC_RW_READ_REQ,sum)
@@ -9990,6 +10682,8 @@ rocprofiler-sdk:
       block: TCP
       event: 86
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: TCP
       event: 81
@@ -10004,6 +10698,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCP_TCC_RW_WRITE_REQ,sum)
@@ -10017,6 +10713,8 @@ rocprofiler-sdk:
       block: TCP
       event: 80
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: TCP
       event: 76
@@ -10031,6 +10729,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCP_TCC_UC_ATOMIC_REQ,sum)
@@ -10044,6 +10744,8 @@ rocprofiler-sdk:
       block: TCP
       event: 78
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: TCP
       event: 74
@@ -10058,6 +10760,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCP_TCC_UC_READ_REQ,sum)
@@ -10071,6 +10775,8 @@ rocprofiler-sdk:
       block: TCP
       event: 79
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: TCP
       event: 75
@@ -10085,6 +10791,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCP_TCC_UC_WRITE_REQ,sum)
@@ -10098,6 +10806,8 @@ rocprofiler-sdk:
       block: TCP
       event: 70
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: TCP
       event: 66
@@ -10134,6 +10844,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCP_TCC_WRITE_REQ,sum)
@@ -10144,6 +10856,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: TCP
@@ -10155,6 +10869,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCP_TCP_TA_DATA_STALL_CYCLES,max)
@@ -10165,6 +10881,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCP_TCP_TA_DATA_STALL_CYCLES,sum)
@@ -10175,6 +10893,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: TCP
@@ -10186,6 +10906,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCP_TCR_TCP_STALL_CYCLES,sum)
@@ -10196,6 +10918,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: TCP
@@ -10207,6 +10931,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCP_TD_TCP_STALL_CYCLES,sum)
@@ -10220,6 +10946,8 @@ rocprofiler-sdk:
       block: TCP
       event: 29
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: TCP
@@ -10232,6 +10960,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCP_TOTAL_ACCESSES,sum)
@@ -10245,6 +10975,8 @@ rocprofiler-sdk:
       block: TCP
       event: 39
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: TCP
@@ -10256,6 +10988,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCP_TOTAL_ATOMIC_WITHOUT_RET,sum)
@@ -10269,6 +11003,8 @@ rocprofiler-sdk:
       block: TCP
       event: 38
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: TCP
@@ -10280,6 +11016,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCP_TOTAL_ATOMIC_WITH_RET,sum)
@@ -10290,6 +11028,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       block: TCP
       event: 60
@@ -10304,6 +11044,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCP_TOTAL_CACHE_ACCESSES,sum)
@@ -10318,6 +11060,8 @@ rocprofiler-sdk:
       block: TCP
       event: 30
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: TCP
@@ -10330,6 +11074,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCP_TOTAL_READ,sum)
@@ -10343,6 +11089,8 @@ rocprofiler-sdk:
       block: TCP
       event: 32
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: TCP
@@ -10358,6 +11106,8 @@ rocprofiler-sdk:
       block: TCP
       event: 45
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: TCP
       event: 43
@@ -10373,6 +11123,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCP_TOTAL_WRITEBACK_INVALIDATES,sum)
@@ -10384,6 +11136,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCP_TOTAL_WRITE,sum)
@@ -10397,6 +11151,8 @@ rocprofiler-sdk:
       block: TCP
       event: 50
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: TCP
       event: 49
@@ -10411,6 +11167,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCP_UTCL1_PERMISSION_MISS,sum)
@@ -10424,6 +11182,8 @@ rocprofiler-sdk:
       block: TCP
       event: 47
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: TCP
       event: 45
@@ -10438,6 +11198,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCP_UTCL1_REQUEST,sum)
@@ -10451,6 +11213,8 @@ rocprofiler-sdk:
       block: TCP
       event: 49
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: TCP
       event: 48
@@ -10465,6 +11229,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCP_UTCL1_TRANSLATION_HIT,sum)
@@ -10478,6 +11244,8 @@ rocprofiler-sdk:
       block: TCP
       event: 48
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       block: TCP
       event: 47
@@ -10492,6 +11260,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCP_UTCL1_TRANSLATION_MISS,sum)
@@ -10520,6 +11290,8 @@ rocprofiler-sdk:
       block: TCP
       event: 28
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: TCP
@@ -10531,6 +11303,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCP_VOLATILE,sum)
@@ -10544,6 +11318,8 @@ rocprofiler-sdk:
       block: TCP
       event: 12
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: TCP
@@ -10555,6 +11331,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCP_WRITE_TAGCONFLICT_STALL_CYCLES,sum)
@@ -10883,6 +11661,8 @@ rocprofiler-sdk:
       block: TD
       event: 26
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: TD
@@ -10894,6 +11674,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TD_ATOMIC_WAVEFRONT,sum)
@@ -10907,6 +11689,8 @@ rocprofiler-sdk:
       block: TD
       event: 32
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: TD
@@ -10918,6 +11702,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TD_COALESCABLE_WAVEFRONT,sum)
@@ -10931,6 +11717,8 @@ rocprofiler-sdk:
       block: TD
       event: 25
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: TD
@@ -10942,6 +11730,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TD_LOAD_WAVEFRONT,sum)
@@ -10969,6 +11759,8 @@ rocprofiler-sdk:
       block: TD
       event: 18
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: TD
@@ -10979,6 +11771,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TD_SPI_STALL,sum)
@@ -10992,6 +11786,8 @@ rocprofiler-sdk:
       block: TD
       event: 27
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: TD
@@ -11003,6 +11799,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TD_STORE_WAVEFRONT,sum)
@@ -11016,6 +11814,8 @@ rocprofiler-sdk:
       block: TD
       event: 15
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: TD
@@ -11027,6 +11827,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TD_TC_STALL,sum)
@@ -11052,6 +11854,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       block: TD
@@ -11063,6 +11867,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TD_TD_BUSY,sum)
@@ -11095,6 +11901,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: (SQ_INSTS_VALU_FMA_F16*2+SQ_INSTS_VALU_ADD_F16+SQ_INSTS_VALU_MUL_F16+SQ_INSTS_VALU_TRANS_F16)*64+((SQ_INSTS_VALU_MFMA_MOPS_F16+SQ_INSTS_VALU_MFMA_MOPS_BF16)*512)
@@ -11104,6 +11912,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: (SQ_INSTS_VALU_FMA_F32*2+SQ_INSTS_VALU_INT32+SQ_INSTS_VALU_ADD_F32+SQ_INSTS_VALU_MUL_F32+SQ_INSTS_VALU_TRANS_F32)*64+(SQ_INSTS_VALU_MFMA_MOPS_F32*512)
@@ -11113,6 +11923,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: (SQ_INSTS_VALU_FMA_F64*2+SQ_INSTS_VALU_INT64+SQ_INSTS_VALU_ADD_F64+SQ_INSTS_VALU_MUL_F64)*64+(SQ_INSTS_VALU_MFMA_MOPS_F64*512)
@@ -11122,6 +11934,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: TOTAL_16_OPS/SIMD_NUM/reduce(GRBM_COUNT,max)
@@ -11131,6 +11945,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: TOTAL_32_OPS/SIMD_NUM/reduce(GRBM_COUNT,max)
@@ -11140,6 +11956,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: TOTAL_64_OPS/SIMD_NUM/reduce(GRBM_COUNT,max)
@@ -11164,6 +11982,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: 100*reduce(SQ_ACTIVE_INST_VALU,sum)/CU_NUM/reduce(GRBM_GUI_ACTIVE,max)
@@ -11187,6 +12007,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: 100*reduce(SQ_THREAD_CYCLES_VALU,sum)/(reduce(SQ_ACTIVE_INST_VALU,sum)*MAX_WAVE_SIZE)
@@ -11196,6 +12018,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(SQ_BUSY_CU_CYCLES,sum)/reduce(GRBM_COUNT,max)/CU_NUM
@@ -11207,6 +12031,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: (reduce(SQ_INSTS_VMEM_RD,sum)-TA_FLAT_READ_WAVEFRONTS_sum)/reduce(SQ_WAVES,sum)
@@ -11218,6 +12044,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: (reduce(SQ_INSTS_VMEM_WR,sum)-TA_FLAT_WRITE_WAVEFRONTS_sum)/reduce(SQ_WAVES,sum)
@@ -11234,6 +12062,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       expression: 100*reduce(SQ_ACTIVE_INST_VALU,sum)/(reduce(GRBM_GUI_ACTIVE,max)*CU_NUM)
   - name: VmemLatency
@@ -11242,6 +12072,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(accumulate(SQ_INST_LEVEL_VMEM, HIGH_RES),sum)/reduce(SQ_INSTS_VMEM,sum)
@@ -11261,6 +12093,8 @@ rocprofiler-sdk:
       - gfx90a
       expression: TCC_EA_WRREQ_64B_sum*2+(TCC_EA_WRREQ_sum-TCC_EA_WRREQ_64B_sum)
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: TCC_EA0_WRREQ_64B_sum*2+(TCC_EA0_WRREQ_sum-TCC_EA0_WRREQ_64B_sum)
@@ -11280,6 +12114,8 @@ rocprofiler-sdk:
       - gfx1153
       expression: ((GL2C_MC_WRREQ_sum-GL2C_EA_WRREQ_64B_sum)*32+GL2C_EA_WRREQ_64B_sum*64)/1024
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: ((TCC_EA0_WRREQ_sum-TCC_EA0_WRREQ_64B_sum)*32+TCC_EA0_WRREQ_64B_sum*64)/1024
@@ -11334,6 +12170,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       - gfx1250
@@ -11451,6 +12289,8 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES_sum/TCP_GATE_EN1_sum
@@ -11461,6 +12301,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       - gfx1250
@@ -11472,6 +12314,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       - gfx1250
@@ -11483,6 +12327,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: accumulate(SQ_INST_LEVEL_SMEM, HIGH_RES)
@@ -11493,6 +12339,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: accumulate(SQ_INST_LEVEL_VMEM, HIGH_RES)
@@ -11503,6 +12351,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: accumulate(SQ_LEVEL_WAVES, HIGH_RES)
@@ -11513,6 +12363,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       - gfx1250
@@ -11524,6 +12376,8 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       - gfx90a
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       - gfx1250
@@ -11554,6 +12408,8 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx940
+      - gfx941
       - gfx942
       - gfx950
       expression: reduce(TCC_PROBE_EVICT,sum)
@@ -23851,6 +24707,8 @@ rocprofiler-sdk:
   fw-restriction-schema-version: 1
   firmware_restrictions:
   - affected_architectures:
+    - gfx940
+    - gfx941
     - gfx942
     firmware_type: CP
     min_version: 186
