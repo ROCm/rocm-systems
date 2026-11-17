@@ -221,14 +221,7 @@ __device__ __forceinline__ void ddaLL128ArPeerLoadRed(const DdaLL128ArPeerLds& l
 //
 // A slice belongs to one group in both phases, and only that group's phase 2
 // writes it, after all of its reads, so an in-place call is safe.
-//
-// SPLIT_SEND moves phase 1 off the groups, AllToAll-style: blocks
-// [teamBlocks, gridDim.x) are nRanks - 1 sender columns of equal height, one
-// column per peer, whose warps push every slice to that peer; the team blocks
-// [0, teamBlocks) run phase 2 only. A slice's publish then spreads over a
-// column of CUs rather than its group's one. A team block may unpack a slice
-// before a sender has read it, so the launcher splits out-of-place calls only.
-template <typename T, int NRANKS_CT, bool SPLIT_SEND = false>
+template <typename T, int NRANKS_CT>
 __launch_bounds__(kDdaLL128ArPeerMaxThreads)
   __global__ void ddaAllReduceFlatLL128PeerPar(T* const* __restrict__ peerScratch, // ddaPeerPtrsDev: nRanks scratch bases
                                                T* __restrict__ recvbuff, // local user output
@@ -239,8 +232,7 @@ __launch_bounds__(kDdaLL128ArPeerMaxThreads)
                                                int epochLen, // number of cells in epochDev
                                                size_t slicesTotal, // slices this call actually uses
                                                size_t bankSize, // scratch bank size (from host)
-                                               DdaKernelParams params,
-                                               int teamBlocksArg) { // blocks before the sender columns (SPLIT_SEND)
+                                               DdaKernelParams params) {
   __shared__ DdaLL128ArPeerLds lds;
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const DdaLL128ArPeerPos p = ddaLL128ArPeerPos(nRanks);
@@ -258,56 +250,28 @@ __launch_bounds__(kDdaLL128ArPeerMaxThreads)
   const int8_t* srcBytes = reinterpret_cast<const int8_t*>(sendbuff);
   int8_t* dstBytes = reinterpret_cast<int8_t*>(recvbuff);
   const uint64_t* gatherBase = reinterpret_cast<const uint64_t*>(peerScratch[selfRank]) + bankWords;
-  const int teamBlocks = SPLIT_SEND ? teamBlocksArg : (int)gridDim.x;
 
-  if constexpr (SPLIT_SEND) {
-    // Sender column: block y of the column for peer selfRank + 1 + col pushes slices y * nwarps + warp, stepping
-    // the column's warps, then leaves; it takes no part in phase 2's barriers.
-    if ((int)blockIdx.x >= teamBlocks) {
-      const int height = ((int)gridDim.x - teamBlocks) / (nRanks - 1);
-      const int sb = (int)blockIdx.x - teamBlocks;
-      const int peer = (selfRank + 1 + sb / height) % nRanks;
+  // Phase 1: pack the slice once, push it to this warp's share of the peers.
+  for (size_t g = blockIdx.x; g < sliceGroups; g += gridDim.x) {
+    const size_t s = g * (size_t)p.groups + (size_t)p.group;
+    if (!p.inGroup || s >= slicesTotal || 1 + p.pw >= nRanks) {
+      break;
+    }
+    const size_t dataByte = s * (size_t)kDdaLL128DataBytesPerSlice;
+    const size_t rem = bytes - dataByte;
+    const int eltInSlice = rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
+    uint64_t regs[kDdaLL128WordsPerThread] = {};
+    ddaLL128LoadRegsBatched<int8_t>(regs, srcBytes + dataByte, eltInSlice, p.lane, p.flagLane);
+    for (int r = 1 + p.pw; r < nRanks; r += p.P) {
+      const int peer = (selfRank + r) % nRanks;
       uint64_t* scatterSlot =
         reinterpret_cast<uint64_t*>(peerScratch[peer]) + bankWords + (uint64_t)selfRank * (uint64_t)slotWords;
-      const size_t nwarps = blockDim.x / kDdaLL128Warp;
-      for (size_t s = (size_t)(sb % height) * nwarps + (size_t)p.warp; s < slicesTotal;
-           s += (size_t)height * nwarps) {
-        const size_t dataByte = s * (size_t)kDdaLL128DataBytesPerSlice;
-        const size_t rem = bytes - dataByte;
-        const int eltInSlice = rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
-        uint64_t regs[kDdaLL128WordsPerThread] = {};
-        ddaLL128LoadRegsBatched<int8_t>(regs, srcBytes + dataByte, eltInSlice, p.lane, p.flagLane);
-        ddaLL128StoreWire(scatterSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * p.lane, regs, flag, p.flagLane);
-      }
-#if defined(__gfx1250__) || defined(__gfx1250_strict__)
-      asm volatile("s_wait_storecnt 0x0" ::: "memory");
-#endif
-      ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag32);
-      return;
-    }
-  } else {
-    // Phase 1: pack the slice once, push it to this warp's share of the peers.
-    for (size_t g = blockIdx.x; g < sliceGroups; g += gridDim.x) {
-      const size_t s = g * (size_t)p.groups + (size_t)p.group;
-      if (!p.inGroup || s >= slicesTotal || 1 + p.pw >= nRanks) {
-        break;
-      }
-      const size_t dataByte = s * (size_t)kDdaLL128DataBytesPerSlice;
-      const size_t rem = bytes - dataByte;
-      const int eltInSlice = rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
-      uint64_t regs[kDdaLL128WordsPerThread] = {};
-      ddaLL128LoadRegsBatched<int8_t>(regs, srcBytes + dataByte, eltInSlice, p.lane, p.flagLane);
-      for (int r = 1 + p.pw; r < nRanks; r += p.P) {
-        const int peer = (selfRank + r) % nRanks;
-        uint64_t* scatterSlot =
-          reinterpret_cast<uint64_t*>(peerScratch[peer]) + bankWords + (uint64_t)selfRank * (uint64_t)slotWords;
-        ddaLL128StoreWire(scatterSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * p.lane, regs, flag, p.flagLane);
-      }
+      ddaLL128StoreWire(scatterSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * p.lane, regs, flag, p.flagLane);
     }
   }
 
   // Phase 2: fold every rank's copy of the slice; the group's storeWarp writes it out.
-  for (size_t g = blockIdx.x; g < sliceGroups; g += (size_t)teamBlocks) {
+  for (size_t g = blockIdx.x; g < sliceGroups; g += gridDim.x) {
     const size_t s = g * (size_t)p.groups + (size_t)p.group;
     const bool live = p.inGroup && s < slicesTotal;
     const size_t dataByte = s * (size_t)kDdaLL128DataBytesPerSlice;
