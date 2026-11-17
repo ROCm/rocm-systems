@@ -17,8 +17,8 @@
  * tiers: above the LL tier, up to the VMM tier. The gfx1250 tables can leave
  * that window empty (SPX keeps the AllGather VMM tier off, and below 8 ranks
  * its AllReduce LL tier reaches past the VMM tier), so these cases skip unless
- * the binary is launched with RCCL_DDA_LL=0 and RCCL_DDA_THRESHOLD covering
- * the payload.
+ * the binary is launched with an RCCL_DDA_LL_THRESHOLD below the payload and
+ * RCCL_DDA_THRESHOLD covering it.
  *
  * AllToAll is the exception: AllToAllOutOfPlace, RepeatedAllToAll, the AllToAll
  * step of AlternatingCollectivesOnSameCommunicator and the AllToAll barrier
@@ -203,7 +203,7 @@ protected:
         {
             why = std::string(name) + " has no DDA SIMPLE window on this comm (LL to " + std::to_string(ll)
                   + " bytes, VMM to " + std::to_string(vmm)
-                  + "); launch with RCCL_DDA_LL=0 and RCCL_DDA_THRESHOLD >= " + std::to_string(lowest);
+                  + "); launch with a lower RCCL_DDA_LL_THRESHOLD and RCCL_DDA_THRESHOLD >= " + std::to_string(lowest);
             return 0;
         }
         return std::clamp((desired + align - 1) / align * align, lowest, highest);
