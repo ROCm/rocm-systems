@@ -224,6 +224,15 @@ jobs:
       run: |
           echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
 
+    # ROCr writes a GPU core dump when a GPU memory fault kills a test. By default it
+    # is written to the working directory of that test and then lost with the job.
+    - name: Configure GPU core dumps
+      shell: bash
+      run: |
+        mkdir -p "${GITHUB_WORKSPACE}/gpu-coredumps"
+        echo "HSA_COREDUMP_PATTERN=${GITHUB_WORKSPACE}/gpu-coredumps/gpucore.%e.%p.gpu" >> "${GITHUB_ENV}"
+        echo "HSA_COREDUMP_SHOW_PROGRESS=1" >> "${GITHUB_ENV}"
+
     - name: Build ROCProfiler SDK Dependencies
       uses: ./.github/actions/rocprofiler-sdk-util
       with:
@@ -455,3 +464,12 @@ jobs:
             exit 1
         fi
         popd
+
+    - name: Archive GPU core dumps
+      if: ${{ failure() }}
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: gpu-coredumps-${{ matrix.system.gpu }}-${{ matrix.system.os }}-attempt-${{ github.run_attempt }}
+        path: gpu-coredumps/
+        if-no-files-found: ignore
+        retention-days: 7
