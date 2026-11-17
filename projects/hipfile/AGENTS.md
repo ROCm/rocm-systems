@@ -624,7 +624,7 @@ Shell scripts are bash, not POSIX sh: start them with `#!/usr/bin/env bash`
   CI: [hipfile-cmakelint.yml](../../.github/workflows/hipfile-cmakelint.yml),
   when a CMake file, `.cmakelintrc`, or the workflow file changes.
 - Use modern, target-based CMake, and keep to the minimum CMake version in
-  the top-level `CMakeLists.txt` (3.21); hipFile hasn't moved to CMake 4.
+  the top-level `CMakeLists.txt` (3.25.2); hipFile hasn't moved to CMake 4.
 
 ### Python
 
@@ -727,7 +727,7 @@ refactoring changes don't need an entry. Changes to the Python bindings go in
 [python/CHANGELOG.md](python/CHANGELOG.md) instead.
 
 Add the entry to the topmost (unreleased) version, under the matching
-heading: `Added`, `Changed`, `Resolved issues`, `Removed`, or `Known issues`.
+heading: `Added`, `Changed`, `Fixed`, `Removed`, or `Known issues`.
 Write it for users, like the existing entries: say what changed, and what
 users have to do differently, if anything.
 

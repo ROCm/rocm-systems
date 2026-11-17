@@ -85,6 +85,10 @@ __global__ void TeamReductionTest(int loop, int skip, long long int *start_time,
 
   rocshmem_wg_team_create_ctx(team, ctx_type, &ctx);
 
+  // Without an LDS-staged build (USE_LDS_STAGE/USE_TDM) this returns 0.
+  extern __shared__ uint8_t tdm_lds[];
+  rocshmem_set_lds_stage(tdm_lds, rocshmem_query_lds_stage_bytes());
+
   __syncthreads();
 
   for (int i = 0; i < loop + skip; i++) {
@@ -136,7 +140,9 @@ void TeamReductionTester<T1, T2>::preLaunchKernel() {
 template <typename T1, ROCSHMEM_OP T2>
 void TeamReductionTester<T1, T2>::launchKernel(dim3 gridSize, dim3 blockSize,
                                                int loop, size_t size) {
-  size_t shared_bytes = 0;
+  // Dynamic LDS for the LDS-staged copy path (0 when not built with
+  // USE_LDS_STAGE/USE_TDM)
+  size_t shared_bytes = rocshmem_query_lds_stage_bytes();
 
   hipLaunchKernelGGL(HIP_KERNEL_NAME(TeamReductionTest<T1, T2>), gridSize,
                      blockSize, shared_bytes, stream, loop, args.skip,

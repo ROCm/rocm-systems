@@ -144,6 +144,8 @@ HIP_TEST_CASE(Unit_hipMemAddressReserve_Capture) {
   hipDevice_t device = 0;
   void* device_ptr = nullptr;
 
+  HIP_TEST_DRIVER_INIT();
+  checkVMMSupported(kDeviceId);
   CTX_CREATE();
   HIP_CHECK(hipDeviceGet(&device, kDeviceId));
 

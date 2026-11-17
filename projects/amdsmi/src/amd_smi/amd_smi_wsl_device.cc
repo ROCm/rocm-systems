@@ -276,7 +276,7 @@ amdsmi_status_t WSLGPUBackend::GetKfdInfo(amdsmi_kfd_info_t* info) {
   if (info == nullptr) return AMDSMI_STATUS_INVAL;
   // No KFD in WSL — the KFD ID and node ID concepts don't apply.
   std::memset(info, 0xFF, sizeof(*info));
-  return AMDSMI_STATUS_SUCCESS;
+  return AMDSMI_STATUS_NOT_SUPPORTED;
 }
 
 amdsmi_status_t WSLGPUBackend::GetAsicInfo(amdsmi_asic_info_t* info) {
@@ -513,9 +513,6 @@ amdsmi_status_t WSLGPUBackend::GetDriverInfo(amdsmi_driver_info_t* info) {
   copy_rocdxg_string(info->driver_version, device_info_.driver.driver_version);
   copy_rocdxg_string(info->driver_date, device_info_.driver.driver_date);
   copy_rocdxg_string(info->driver_name, device_info_.driver.driver_name);
-  // WSL has no amdgpu sysfs/DKMS fields. CLI AMDGPU Version reads
-  // driver_full_version, so reuse the WDDM driver_version string.
-  copy_rocdxg_string(info->driver_full_version, device_info_.driver.driver_version);
   return AMDSMI_STATUS_SUCCESS;
 }
 

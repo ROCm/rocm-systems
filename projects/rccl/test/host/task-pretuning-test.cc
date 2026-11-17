@@ -25,8 +25,10 @@ constexpr size_t kFloatSize = sizeof(float);
 constexpr size_t kDoubleSize = sizeof(double);
 constexpr size_t kCollSendBytes = kCount * kFloatSize;
 constexpr size_t kAllGatherRecvBytes = kRanks * kCount * kFloatSize;
-constexpr size_t kAllGatherQueriedSendBytes = kCount;
-constexpr size_t kAllGatherQueriedRecvBytes = kRanks * kCount;
+// AllGather extents in bytes-as-elements (count * 1): what the lookup used before v2.32.6 sized it from the
+// user element type.
+constexpr size_t kAllGatherByteCountSendBytes = kCount;
+constexpr size_t kAllGatherByteCountRecvBytes = kRanks * kCount;
 constexpr size_t kReduceScatterSendBytes = kRanks * kCount * kFloatSize;
 constexpr int kTwoRanks = 2;
 constexpr int kEnvCTAs = 7;
@@ -70,7 +72,8 @@ class TaskPreTuning_LocallyValidRegistrations {
 // Routes ncclDevrFindWindow to a distinct window per buffer so send and recv cannot be confused.
 class TaskPreTuning_Windows {
  public:
-  TaskPreTuning_Windows(const void* sendbuff, void* sendUserPtr, const void* recvbuff, void* recvUserPtr)
+  TaskPreTuning_Windows(const void* sendbuff, void* sendUserPtr, const void* recvbuff, void* recvUserPtr,
+                        int winFlags = NCCL_WIN_COLL_SYMMETRIC)
     : sendbuff_(sendbuff), recvbuff_(recvbuff),
       hook_(g_devrFindWindow, [this](struct ncclComm*, void const* ptr, struct ncclDevrWindow** out) {
         *out = ptr == sendbuff_ ? sendWindow() : (ptr == recvbuff_ ? recvWindow() : nullptr);
@@ -78,6 +81,8 @@ class TaskPreTuning_Windows {
       }) {
     sendWindow_.userPtr = sendUserPtr;
     recvWindow_.userPtr = recvUserPtr;
+    sendWindow_.winFlags = winFlags;
+    recvWindow_.winFlags = winFlags;
   }
 
   struct ncclDevrWindow* sendWindow() { return sendbuff_ != nullptr ? &sendWindow_ : nullptr; }
@@ -148,6 +153,21 @@ TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_UnscaledColl_CopiesTheRawFiel
   EXPECT_EQ(TaskPrep_Poisoned<int>(), in.collNetSupport);
   EXPECT_EQ(TaskPrep_Poisoned<int>(), in.captured);
   EXPECT_EQ(TaskPrep_Poisoned<int>(), in.CTAPolicy);
+}
+
+// Across trays this path leaves the symmetric kernels out of AllGather only.
+TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_CrossTrayLeavesOutAllGatherSymmetricKernels) {
+  const uint64_t all = NCCL_TUNING_MASK_SYM_KERNELS | NCCL_TUNING_MASK_GENERAL_KERNELS;
+  struct ncclRawTask* allGather = scene_.NewColl(ncclFuncAllGather);
+  struct ncclRawTask* reduceScatter = scene_.NewColl(ncclFuncReduceScatter);
+  ncclTuningInput_t in = TaskPrep_Poisoned<ncclTuningInput_t>();
+  ASSERT_EQ(ncclSuccess, fillCollTuningInput(scene_.comm(), &allGather->coll, &in));
+  EXPECT_EQ(all, in.tuningMask) << "one tray";
+  scene_.comm()->spansTrays = true;
+  ASSERT_EQ(ncclSuccess, fillCollTuningInput(scene_.comm(), &allGather->coll, &in));
+  EXPECT_EQ(NCCL_TUNING_MASK_GENERAL_KERNELS, in.tuningMask) << "AllGather across trays";
+  ASSERT_EQ(ncclSuccess, fillCollTuningInput(scene_.comm(), &reduceScatter->coll, &in));
+  EXPECT_EQ(all, in.tuningMask) << "ReduceScatter across trays";
 }
 
 TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_AllGather_RescalesTheCountToBytesAndSwitchesToInt8) {
@@ -297,7 +317,8 @@ TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_NvlsSupport_NeedsTheCommFlagA
   }
 }
 
-TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_NoWindows_MeasuresTheAlignmentFromTheRawPointers) {
+// Raw addresses differ by rank, so without windows the answer could too, aligned or not.
+TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_NoWindows_NeverAligned) {
   for (size_t recvGap : {kAlignedGap, kMisalignedGap}) {
     TaskPrepScene scene;
     struct ncclRawTask* raw = scene.NewColl(ncclFuncAllReduce);
@@ -307,7 +328,7 @@ TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_NoWindows_MeasuresTheAlignmen
 
     ASSERT_EQ(ncclSuccess, fillCollTuningInput(scene.comm(), &raw->coll, &in));
 
-    EXPECT_EQ(recvGap == kAlignedGap, in.symAligned16B) << "recvGap = " << recvGap;
+    EXPECT_FALSE(in.symAligned16B) << "recvGap = " << recvGap;
   }
 }
 
@@ -329,8 +350,10 @@ TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_BuffersInWindows_MeasuresTheA
   }
 }
 
-// One window only: a single (sendWin && recvWin) gate over both offsets would read this pair as misaligned.
-TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_OnlyTheRecvBufferInAWindow_StillOffsetsByItsUserPtr) {
+// One window only: the other buffer's raw address differs by rank. Its window-relative offsets align, so
+// only the both-windows rule reports it unaligned. symAligned16B is bool and poison reads back as true, so
+// these need a written false.
+TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_OnlyTheRecvBufferInAWindow_NotAligned) {
   struct ncclRawTask* raw = scene_.NewColl(ncclFuncAllReduce);
   raw->coll.sendbuff = TaskPrep_Addr(kSendAddr);
   raw->coll.recvbuff = TaskPrep_Addr(kRecvWindowAlignedAddr);
@@ -341,11 +364,10 @@ TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_OnlyTheRecvBufferInAWindow_St
 
   ASSERT_EQ(ncclSuccess, fillCollTuningInput(scene_.comm(), &raw->coll, &in));
 
-  EXPECT_TRUE(in.symAligned16B);
+  EXPECT_FALSE(in.symAligned16B);
 }
 
-// The send twin: symAligned16B is bool, so poison reads back as true and only a written false can fail this.
-TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_OnlyTheSendBufferInAWindow_StillOffsetsByItsUserPtr) {
+TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_OnlyTheSendBufferInAWindow_NotAligned) {
   struct ncclRawTask* raw = scene_.NewColl(ncclFuncAllReduce);
   raw->coll.sendbuff = TaskPrep_Addr(kSendAddr);
   raw->coll.recvbuff = TaskPrep_Addr(kRawAlignedRecvAddr);
@@ -356,6 +378,44 @@ TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_OnlyTheSendBufferInAWindow_St
   ASSERT_EQ(ncclSuccess, fillCollTuningInput(scene_.comm(), &raw->coll, &in));
 
   EXPECT_FALSE(in.symAligned16B);
+}
+
+// The operands of FillCollTuningInput_BuffersInWindows_MeasuresTheAlignmentFromTheUserPtr, which align in
+// symmetric windows.
+TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_WindowsNotSymmetric_NotAligned) {
+  struct ncclRawTask* raw = scene_.NewColl(ncclFuncAllReduce);
+  raw->coll.sendbuff = TaskPrep_Addr(kSendAddr);
+  raw->coll.recvbuff = TaskPrep_Addr(kRecvAddr);
+  TaskPreTuning_Windows windows(TaskPrep_Addr(kSendAddr), TaskPrep_Addr(kSendWindowAddr), TaskPrep_Addr(kRecvAddr),
+                                TaskPrep_Addr(kRecvWindowAddr), /*winFlags=*/0);
+  ncclTuningInput_t in = TaskPrep_Poisoned<ncclTuningInput_t>();
+
+  ASSERT_EQ(ncclSuccess, fillCollTuningInput(scene_.comm(), &raw->coll, &in));
+
+  EXPECT_FALSE(in.symAligned16B);
+}
+
+// In place on rank 2 of 4: the operands are 2 * slice apart in one window. With a 24 B slice that is 48 B,
+// which passes the plain modulo-16 check, so only the func and slice size passed to ncclSymAligned16B
+// report it unaligned.
+TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_InPlaceSlice_AlignedOnlyWhenTheSliceIs) {
+  for (ncclFunc_t func : {ncclFuncAllGather, ncclFuncReduceScatter}) {
+    for (size_t sliceBytes : {size_t(24), size_t(32)}) {
+      TaskPrepScene scene(kRanks, /*rank=*/2);
+      struct ncclRawTask* raw = scene.NewColl(func, ncclInt8);
+      raw->coll.count = sliceBytes;
+      void* window = TaskPrep_Addr(kSendWindowAddr);
+      void* slice = TaskPrep_Addr(kSendWindowAddr + 2 * sliceBytes);
+      raw->coll.sendbuff = func == ncclFuncAllGather ? slice : window;
+      raw->coll.recvbuff = func == ncclFuncAllGather ? window : slice;
+      TaskPreTuning_Windows windows(raw->coll.sendbuff, window, raw->coll.recvbuff, window);
+      ncclTuningInput_t in = TaskPrep_Poisoned<ncclTuningInput_t>();
+
+      ASSERT_EQ(ncclSuccess, fillCollTuningInput(scene.comm(), &raw->coll, &in));
+
+      EXPECT_EQ(sliceBytes % 16 == 0, in.symAligned16B) << "func " << int(func) << " slice " << sliceBytes;
+    }
+  }
 }
 
 TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_UnscaledCollRegistrationsCoverBothBuffers_SetsRegBuff) {
@@ -484,8 +544,8 @@ TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_AllGatherRegistrationShorterT
     struct ncclRawTask* raw = scene.NewColl(ncclFuncAllGather);
     RegisteredRanges registered(
       &scene,
-      {{raw->coll.sendbuff, shortenSend ? kAllGatherQueriedSendBytes - 1 : kCollSendBytes},
-       {raw->coll.recvbuff, shortenSend ? kAllGatherRecvBytes : kAllGatherQueriedRecvBytes - 1}});
+      {{raw->coll.sendbuff, shortenSend ? kCollSendBytes - 1 : kCollSendBytes},
+       {raw->coll.recvbuff, shortenSend ? kAllGatherRecvBytes : kAllGatherRecvBytes - 1}});
     TaskPreTuning_LocallyValidRegistrations isValid;
     ncclTuningInput_t in = TaskPrep_Poisoned<ncclTuningInput_t>();
 
@@ -520,7 +580,7 @@ TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_RegistrationsSizedFromTheComm
     size_t sendBytes;
     size_t recvBytes;
   };
-  const std::vector<Case> cases = {{ncclFuncAllGather, kCount, kTwoRanks * kCount},
+  const std::vector<Case> cases = {{ncclFuncAllGather, kCollSendBytes, kTwoRanks * kCount * kFloatSize},
                                    {ncclFuncReduceScatter, kTwoRanks * kCount * kFloatSize, kCollSendBytes}};
   for (const Case& c : cases) {
     TaskPrepScene scene(kTwoRanks, 0);
@@ -536,24 +596,25 @@ TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_RegistrationsSizedFromTheComm
   }
 }
 
-// AICOMRCCL-2421: task_pretuning.cc:68-69 should size the lookup from the real extent, so this must become 0.
+// AICOMRCCL-2421 (fixed by v2.32.6): the lookup is sized from the user element type, so registrations covering
+// only the byte-normalized count no longer count as registered.
 TEST_F(TaskPreTuningMicrotest,
-       FillCollTuningInput_AllGatherRegistrationShorterThanTheRealExtent_TodaySetsRegBuff) {
+       FillCollTuningInput_AllGatherRegistrationShorterThanTheRealExtent_ClearsRegBuff) {
   struct ncclRawTask* raw = scene_.NewColl(ncclFuncAllGather);
-  RegisteredRanges registered(&scene_, {{raw->coll.sendbuff, kAllGatherQueriedSendBytes},
-                                       {raw->coll.recvbuff, kAllGatherQueriedRecvBytes}});
+  RegisteredRanges registered(&scene_, {{raw->coll.sendbuff, kAllGatherByteCountSendBytes},
+                                       {raw->coll.recvbuff, kAllGatherByteCountRecvBytes}});
   TaskPreTuning_LocallyValidRegistrations isValid;
   ncclTuningInput_t in = TaskPrep_Poisoned<ncclTuningInput_t>();
 
   ASSERT_EQ(ncclSuccess, fillCollTuningInput(scene_.comm(), &raw->coll, &in));
 
-  EXPECT_EQ(1, in.regBuff);
+  EXPECT_EQ(0, in.regBuff);
   EXPECT_EQ(kAllGatherRecvBytes, in.nBytes) << "nBytes uses the scaled count and stays correct";
 }
 
-// AICOMRCCL-2421 again: Broadcast takes the same elementSize = 1 branch, so an AllGather-only fix misses it.
+// AICOMRCCL-2421 again: Broadcast takes the same byte-normalization branch, so an AllGather-only fix would miss it.
 TEST_F(TaskPreTuningMicrotest,
-       FillCollTuningInput_BroadcastRegistrationShorterThanTheRealExtent_TodaySetsRegBuff) {
+       FillCollTuningInput_BroadcastRegistrationShorterThanTheRealExtent_ClearsRegBuff) {
   struct ncclRawTask* raw = scene_.NewColl(ncclFuncBroadcast, ncclFloat64);
   RegisteredRanges registered(&scene_, {{raw->coll.sendbuff, kCount}, {raw->coll.recvbuff, kCount}});
   TaskPreTuning_LocallyValidRegistrations isValid;
@@ -561,8 +622,20 @@ TEST_F(TaskPreTuningMicrotest,
 
   ASSERT_EQ(ncclSuccess, fillCollTuningInput(scene_.comm(), &raw->coll, &in));
 
-  EXPECT_EQ(1, in.regBuff);
+  EXPECT_EQ(0, in.regBuff);
   EXPECT_EQ(kCount * kDoubleSize, in.nBytes) << "nBytes uses the scaled count and stays correct";
+}
+
+TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_BroadcastRegistrationsCoverTheRealExtent_SetsRegBuff) {
+  struct ncclRawTask* raw = scene_.NewColl(ncclFuncBroadcast, ncclFloat64);
+  RegisteredRanges registered(&scene_, {{raw->coll.sendbuff, kCount * kDoubleSize},
+                                       {raw->coll.recvbuff, kCount * kDoubleSize}});
+  TaskPreTuning_LocallyValidRegistrations isValid;
+  ncclTuningInput_t in = TaskPrep_Poisoned<ncclTuningInput_t>();
+
+  ASSERT_EQ(ncclSuccess, fillCollTuningInput(scene_.comm(), &raw->coll, &in));
+
+  EXPECT_EQ(1, in.regBuff);
 }
 
 TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_CTABoundsInRange_PreferEnvThenCallThenComm) {
