@@ -35,8 +35,9 @@ constexpr uint64_t RJ_ARITH_CPU_FEATURES_MASK = 0xfff0ULL;
 // Mode 2 requires exact results. Mode 3 additionally requires FP status reporting.
 // Modes 0 through 2 never access FP status outputs. Values 4 through 6 are reserved.
 // Temporary migration mode 7 is outside this ordering: each instruction resolves
-// it to the mode closest to old rocjitsu behavior. FP status storage must be
-// valid if that resolution selects mode 3; otherwise it remains unused.
+// it to the behavior closest to old rocjitsu. Compatibility FP status follows
+// each instruction family's declaration, independently of its numeric mode;
+// supply valid storage whenever that family reports status.
 constexpr uint64_t RJ_ARITH_SEMANTICS_MASK = 7ULL << 16;
 constexpr uint64_t RJ_ARITH_SEMANTICS_LOOSE = 0ULL;
 constexpr uint64_t RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE = 1ULL << 16;
@@ -107,10 +108,11 @@ constexpr int RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS = 3;
 // nearest-even rounding, denormals enabled, and exceptions masked. Implementations
 // never explicitly modify host FP state; ordinary arithmetic may raise sticky flags.
 
-// FP status outputs are appended to the operand list. Their use is controlled
-// solely by the semantics field. Modes 0 through 2 do not access these pointers:
-// null is allowed and supplied storage remains unchanged. Mode 3 requires valid
-// storage as a caller precondition; entry points do not check pointer nullness.
+// FP status outputs are appended to the operand list. Modes 0 through 2 do not
+// access these pointers: null is allowed and supplied storage remains unchanged.
+// Mode 3 requires valid storage. Compatibility follows the instruction-family
+// status contract, which may require storage even when its numeric mode is 2.
+// Entry points assume required storage is valid; they do not check nullness.
 // trapsts (RDNA3) or excp_flag_user (RDNA4) accumulates participating-lane FP
 // exception causes with bitwise OR, preserving all existing bits. Status storage
 // must not overlap operands unless an instruction explicitly permits it.
@@ -213,6 +215,9 @@ constexpr uint32_t RJ_ARITH_ALU_HIGH_D = 1U << 12;
 // exact value before rounding. Source selection and destination byte placement
 // remain separate from this arithmetic control.
 constexpr uint32_t RJ_ARITH_CVT_SDWA = 1U << 16;
+// CDNA FP16 binary SDWA scaling order in Compatibility. Only the gfx942
+// binary arithmetic entry points accept this encoding selector.
+constexpr uint32_t RJ_ARITH_ALU_SDWA = 1U << 16;
 
 // Mixed FMA source formats: unset means FP32; set means FP16 in the half
 // selected by RJ_ARITH_ALU_HIGH_A/B/C. Half selectors are ignored for FP32 sources.

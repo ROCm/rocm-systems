@@ -12,8 +12,11 @@
 namespace {
 
 // Select source EXEC bits independently of destination participation.
-__m256i gather(const uint32_t *a, __m256i source, uint64_t exec_mask) {
+__m256i gather(const uint32_t *a, __m256i source, uint64_t exec_mask, bool fetch_inactive = false) {
   auto value = _mm256_i32gather_epi32(reinterpret_cast<const int *>(a), source, 4);
+  if (fetch_inactive) {
+    return value;
+  }
   auto upper = _mm256_cmpgt_epi32(source, _mm256_set1_epi32(31));
   auto bits = _mm256_blendv_epi8(_mm256_set1_epi32(int(uint32_t(exec_mask))),
                                  _mm256_set1_epi32(int(uint32_t(exec_mask >> 32))), upper);
@@ -42,7 +45,8 @@ namespace rocjitsu::arith {
 // exec_mask.
 // Requires the named CPU features and validated instruction controls.
 void ds_bpermute_x86_64_v3(int lanes, int group, uint64_t exec_mask, uint32_t *d,
-                           const uint32_t *addr, const uint32_t *data, uint16_t offset) {
+                           const uint32_t *addr, const uint32_t *data, uint16_t offset,
+                           bool fetch_inactive) {
   uint32_t result[64];
   for (int lane = 0; lane < lanes; lane += 8) {
     auto address =
@@ -52,7 +56,7 @@ void ds_bpermute_x86_64_v3(int lanes, int group, uint64_t exec_mask, uint32_t *d
         _mm256_and_si256(_mm256_srli_epi32(address, 2), _mm256_set1_epi32(group - 1)),
         _mm256_set1_epi32(lane & ~(group - 1)));
     _mm256_storeu_si256(reinterpret_cast<__m256i *>(result + lane),
-                        gather(data, source, exec_mask));
+                        gather(data, source, exec_mask, fetch_inactive));
   }
   store(lanes, exec_mask, d, result);
 }

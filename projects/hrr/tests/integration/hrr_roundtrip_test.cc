@@ -1041,7 +1041,7 @@ HRR_TEST_CASE(Unit_HRR_D2HShortBlobRoundtrip) {
  *     completion / D2H-fail), proving the guard is what produces exit 2, not
  *     some unrelated error.
  *
- *   Regression guard for ROCM-27652: the guard-ON path takes hrr-playback's
+ *   Regression guard: the guard-ON path takes hrr-playback's
  *   early divergence-abort exit, which must still tear down every GPU/host
  *   resource tracked in the PlaybackContext.  Under the AddressSanitizer CI
  *   build a leak on this path is reported by LeakSanitizer, so this test is the

@@ -104,34 +104,36 @@ TEST(s_xnor_b32, Arithmetic) {
 
 // Check integer results and SCC against the supplied scalar reference.
 TEST(s_and_not1_b32, Arithmetic) {
-  rocjitsu::arith::test::check_scalar_integer<uint32_t>(
-      [](uint64_t f, uint64_t m, uint32_t *d, uint64_t a, uint64_t b, uint32_t, uint32_t *out_cc) {
-        return rj_arith_s_and_not1_b32(f, m, d, a, b, out_cc);
-      },
-      [](uint64_t raw_a, uint64_t raw_b, uint32_t cc) {
-        uint32_t a = uint32_t(raw_a);
-        uint32_t b = uint32_t(raw_b);
-        uint64_t result = (a & ~b) & 0xffffffffULL;
-        cc = result != 0;
-        return std::make_pair(result, cc);
-      },
-      true);
+  for (auto operation : {rj_arith_s_and_not1_b32, rj_arith_s_andn2_b32}) {
+    rocjitsu::arith::test::check_scalar_integer<uint32_t>(
+        [operation](uint64_t f, uint64_t m, uint32_t *d, uint64_t a, uint64_t b, uint32_t,
+                    uint32_t *out_cc) { return operation(f, m, d, a, b, out_cc); },
+        [](uint64_t raw_a, uint64_t raw_b, uint32_t cc) {
+          uint32_t a = uint32_t(raw_a);
+          uint32_t b = uint32_t(raw_b);
+          uint64_t result = (a & ~b) & 0xffffffffULL;
+          cc = result != 0;
+          return std::make_pair(result, cc);
+        },
+        true);
+  }
 }
 
 // Check integer results and SCC against the supplied scalar reference.
 TEST(s_or_not1_b32, Arithmetic) {
-  rocjitsu::arith::test::check_scalar_integer<uint32_t>(
-      [](uint64_t f, uint64_t m, uint32_t *d, uint64_t a, uint64_t b, uint32_t, uint32_t *out_cc) {
-        return rj_arith_s_or_not1_b32(f, m, d, a, b, out_cc);
-      },
-      [](uint64_t raw_a, uint64_t raw_b, uint32_t cc) {
-        uint32_t a = uint32_t(raw_a);
-        uint32_t b = uint32_t(raw_b);
-        uint64_t result = (a | ~b) & 0xffffffffULL;
-        cc = result != 0;
-        return std::make_pair(result, cc);
-      },
-      true);
+  for (auto operation : {rj_arith_s_or_not1_b32, rj_arith_s_orn2_b32}) {
+    rocjitsu::arith::test::check_scalar_integer<uint32_t>(
+        [operation](uint64_t f, uint64_t m, uint32_t *d, uint64_t a, uint64_t b, uint32_t,
+                    uint32_t *out_cc) { return operation(f, m, d, a, b, out_cc); },
+        [](uint64_t raw_a, uint64_t raw_b, uint32_t cc) {
+          uint32_t a = uint32_t(raw_a);
+          uint32_t b = uint32_t(raw_b);
+          uint64_t result = (a | ~b) & 0xffffffffULL;
+          cc = result != 0;
+          return std::make_pair(result, cc);
+        },
+        true);
+  }
 }
 
 // Check integer results and SCC against the supplied scalar reference.
@@ -261,34 +263,36 @@ TEST(s_xnor_b64, Arithmetic) {
 
 // Check integer results and SCC against the supplied scalar reference.
 TEST(s_and_not1_b64, Arithmetic) {
-  rocjitsu::arith::test::check_scalar_integer<uint64_t>(
-      [](uint64_t f, uint64_t m, uint64_t *d, uint64_t a, uint64_t b, uint32_t, uint32_t *out_cc) {
-        return rj_arith_s_and_not1_b64(f, m, d, a, b, out_cc);
-      },
-      [](uint64_t raw_a, uint64_t raw_b, uint32_t cc) {
-        uint64_t a = uint64_t(raw_a);
-        uint64_t b = uint64_t(raw_b);
-        uint64_t result = (a & ~b) & UINT64_MAX;
-        cc = result != 0;
-        return std::make_pair(result, cc);
-      },
-      true);
+  for (auto operation : {rj_arith_s_and_not1_b64, rj_arith_s_andn2_b64}) {
+    rocjitsu::arith::test::check_scalar_integer<uint64_t>(
+        [operation](uint64_t f, uint64_t m, uint64_t *d, uint64_t a, uint64_t b, uint32_t,
+                    uint32_t *out_cc) { return operation(f, m, d, a, b, out_cc); },
+        [](uint64_t raw_a, uint64_t raw_b, uint32_t cc) {
+          uint64_t a = uint64_t(raw_a);
+          uint64_t b = uint64_t(raw_b);
+          uint64_t result = (a & ~b) & UINT64_MAX;
+          cc = result != 0;
+          return std::make_pair(result, cc);
+        },
+        true);
+  }
 }
 
 // Check integer results and SCC against the supplied scalar reference.
 TEST(s_or_not1_b64, Arithmetic) {
-  rocjitsu::arith::test::check_scalar_integer<uint64_t>(
-      [](uint64_t f, uint64_t m, uint64_t *d, uint64_t a, uint64_t b, uint32_t, uint32_t *out_cc) {
-        return rj_arith_s_or_not1_b64(f, m, d, a, b, out_cc);
-      },
-      [](uint64_t raw_a, uint64_t raw_b, uint32_t cc) {
-        uint64_t a = uint64_t(raw_a);
-        uint64_t b = uint64_t(raw_b);
-        uint64_t result = (a | ~b) & UINT64_MAX;
-        cc = result != 0;
-        return std::make_pair(result, cc);
-      },
-      true);
+  for (auto operation : {rj_arith_s_or_not1_b64, rj_arith_s_orn2_b64}) {
+    rocjitsu::arith::test::check_scalar_integer<uint64_t>(
+        [operation](uint64_t f, uint64_t m, uint64_t *d, uint64_t a, uint64_t b, uint32_t,
+                    uint32_t *out_cc) { return operation(f, m, d, a, b, out_cc); },
+        [](uint64_t raw_a, uint64_t raw_b, uint32_t cc) {
+          uint64_t a = uint64_t(raw_a);
+          uint64_t b = uint64_t(raw_b);
+          uint64_t result = (a | ~b) & UINT64_MAX;
+          cc = result != 0;
+          return std::make_pair(result, cc);
+        },
+        true);
+  }
 }
 
 // Check integer results and SCC against the supplied scalar reference.
