@@ -227,6 +227,8 @@ void ComputeQueue::FaultMonitorThread(ComputeQueue* queue) {
   uint64_t last_fence = 0;
   int stall_windows = 0;
   auto last_progress = std::chrono::steady_clock::now();
+  // Not re-armed per window, so the abort reports measured time, not the nominal bound.
+  auto stall_begin = last_progress;
 
   while (!queue->thread_stop_) {
     // Check both rptr and GPU fence since rptr stalls during CpuWait.
@@ -245,32 +247,41 @@ void ComputeQueue::FaultMonitorThread(ComputeQueue* queue) {
 
     // Time-based stall detection is only a heuristic; gate it on the wait-timeout policy.
     if (!dxg_runtime->disable_wait_timeout_) {
+      auto now = std::chrono::steady_clock::now();
       if (current_rptr != last_rptr || current_fence != last_fence) {
         last_rptr = current_rptr;
         last_fence = current_fence;
         stall_windows = 0;
-        last_progress = std::chrono::steady_clock::now();
+        last_progress = now;
+        stall_begin = now;
       } else if (current_wptr > current_rptr) {
-        auto stall_duration = std::chrono::steady_clock::now() - last_progress;
+        auto stall_duration = now - last_progress;
         if (stall_duration > std::chrono::milliseconds(kStallTimeoutMs)) {
+          auto elapsed_ms = static_cast<long long>(
+              std::chrono::duration_cast<std::chrono::milliseconds>(now - stall_begin).count());
           // A real reset has already aborted above on the poisoned fence, so a stalled
           // rptr alone is not a fault: re-arm the window.
           if (++stall_windows >= kMaxStallWindows) {
             if (queue->thread_stop_.exchange(true)) return;
             pr_err("GPU hang timeout: rptr=%" PRIu64 " wptr=%" PRIu64 " fence=%" PRIu64
-                   " made no progress for %dms with a healthy fence — aborting queue\n",
-                   current_rptr, current_wptr, current_fence,
-                   kStallTimeoutMs * kMaxStallWindows);
+                   " made no progress for %lldms with a healthy fence — aborting queue\n",
+                   current_rptr, current_wptr, current_fence, elapsed_ms);
             // Not a memory fault: no fence was ever poisoned, so report a hang rather
             // than sending the application looking for an aperture violation.
             queue->HandleError(HSA_STATUS_ERROR_EXCEPTION);
             return;
           }
-          last_progress = std::chrono::steady_clock::now();
-          pr_debug("queue blocked on dependency for %dms, fence healthy (0x%" PRIx64
+          last_progress = now;
+          pr_debug("queue blocked on dependency for %lldms, fence healthy (0x%" PRIx64
                    ") — window %d/%d, continuing to monitor\n",
-                   kStallTimeoutMs, current_fence, stall_windows, kMaxStallWindows);
+                   elapsed_ms, current_fence, stall_windows, kMaxStallWindows);
         }
+      } else {
+        // Idle: re-arm so a packet blocking after a long idle gets a full first window.
+        // Only on idle->busy; re-arming on every wptr advance would defer hang detection.
+        stall_windows = 0;
+        last_progress = now;
+        stall_begin = now;
       }
     }
 
