@@ -13,8 +13,9 @@
  * in place, for bf16, and across repeated launches. Each launch uses a new
  * input and is checked before the next one, so a stale bank or a missed epoch
  * bump cannot hide behind the previous sum. A near-cap launch lowers the block
- * cap so each warp walks the slice loop more than once. The COLL log confirms
- * the LL128 launcher actually ran.
+ * cap so each warp walks the slice loop more than once. Shards that end one
+ * 16-byte chunk into their last slice run fp32 and both fp8 formats with a
+ * guard after recvbuff. The COLL log confirms the LL128 launcher actually ran.
  *
  * Run (example):
  *   mpirun -np 4 ./rccl-UnitTestsMPI --gtest_filter=DdaMPI_ReduceScatterLL128.LL128*
@@ -34,6 +35,8 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <type_traits>
@@ -124,6 +127,37 @@ bool shardTakesAnotherPass(const ncclComm* comm, size_t shardBytes)
         blocks = 1;
     const size_t warps = static_cast<size_t>(blocks) * static_cast<size_t>(warpsPerBlock);
     return slices > warps;
+}
+
+constexpr size_t  kSliceBytes     = dda::common::kDdaLL128DataBytesPerSlice;
+constexpr size_t  kGuardBytes     = 256;  // after recvbuff, so a store past the shard lands here
+constexpr uint8_t kPoisonByte     = 0xa5;
+constexpr uint8_t kFp8E4m3One     = 0x38;
+constexpr uint8_t kFp8E5m2One     = 0x3c;
+constexpr char    kPeerParNeedle[] = "(peer-parallel, ";
+constexpr char    kBatchedNeedle[] = "(warp-per-slice, ";
+
+// k whole slices plus one 16-byte chunk at or above bytes, or at or below it when down. The kernel loads the other
+// 119 chunks of that last slice and must never store them.
+size_t partialLastSliceBytes(size_t bytes, bool down)
+{
+    if(bytes < 16)
+        return down ? 0 : 16;
+    const size_t k = down ? (bytes - 16) / kSliceBytes : (bytes - 16 + kSliceBytes - 1) / kSliceBytes;
+    return k * kSliceBytes + 16;
+}
+
+// Below 2039 per rank, so every sum stays exact in f32 up to kDdaMaxNranks ranks.
+float partialSliceValue(int rank, size_t shard, size_t elem)
+{
+    return static_cast<float>(1 + (static_cast<size_t>(rank) * 977u + shard * 131u + elem * 7u) % 2039u);
+}
+
+// The one rank whose fp8 element is 1 while the others send 0, so every partial sum is 0 or 1 and exact in fp8.
+int fp8Owner(size_t shard, size_t elem, int nRanks)
+{
+    const uint32_t h = static_cast<uint32_t>(elem) * 2654435761u + static_cast<uint32_t>(shard) * 40503u;
+    return static_cast<int>(h % static_cast<uint32_t>(nRanks));
 }
 } // namespace
 
@@ -251,6 +285,72 @@ protected:
         EXPECT_TRUE(logContains(*logCtx_, kLl128LaunchNeedle))
             << "Rank " << rank_ << " did not launch the ReduceScatter LL128 kernel";
     }
+
+    // One out-of-place launch: recvbuff holds wantValue's sums and the guard bytes after it stay poisoned.
+    template <typename T, typename SendValue, typename WantValue>
+    void runPartialLastSlice(ncclDataType_t dtype, size_t shardBytes, SendValue sendValue, WantValue wantValue)
+    {
+        const size_t recvCount  = shardBytes / sizeof(T);
+        const size_t totalCount = recvCount * static_cast<size_t>(nRanks_);
+
+        void* sendBuf = nullptr;
+        ASSERT_MPI_EQ(hipSuccess, hipMalloc(&sendBuf, totalCount * sizeof(T)));
+        DeviceBufferAutoGuard sendGuard(sendBuf);
+        void* recvBuf = nullptr;
+        ASSERT_MPI_EQ(hipSuccess, hipMalloc(&recvBuf, shardBytes + kGuardBytes));
+        DeviceBufferAutoGuard recvGuard(recvBuf);
+
+        ASSERT_MPI_EQ(hipSuccess, initializeBufferWithPattern<T>(sendBuf, totalCount, [&](size_t i) {
+                          return sendValue(i / recvCount, i % recvCount);
+                      }));
+        ASSERT_MPI_EQ(hipSuccess, hipMemset(recvBuf, kPoisonByte, shardBytes + kGuardBytes));
+        ASSERT_MPI_EQ(ncclSuccess, ncclReduceScatter(sendBuf, recvBuf, recvCount, dtype, ncclSum,
+                                                     getActiveCommunicator(), getActiveStream()));
+        ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+        ASSERT_MPI_TRUE(verifyBufferData<T>(recvBuf, recvCount, wantValue));
+        ASSERT_MPI_TRUE(verifyBufferData<uint8_t>(static_cast<char*>(recvBuf) + shardBytes, kGuardBytes,
+                                                  [](size_t) { return kPoisonByte; }));
+    }
+
+    // fp32 and both fp8 formats on a shard that ends one 16-byte chunk into its last slice, on the kernel that the
+    // size takes. Must be the last statement of the test body.
+    void runPartialLastSliceTypes(size_t shardBytes)
+    {
+        ASSERT_MPI_EQ(static_cast<size_t>(16), shardBytes % kSliceBytes);
+        const int self = rank_;
+        const int n    = nRanks_;
+        runPartialLastSlice<float>(
+            ncclFloat32, shardBytes,
+            [self](size_t shard, size_t elem) { return partialSliceValue(self, shard, elem); },
+            [self, n](size_t elem) {
+                float sum = 0.0f;
+                for(int r = 0; r < n; ++r)
+                    sum += partialSliceValue(r, static_cast<size_t>(self), elem);
+                return sum;
+            });
+        // A coordinated failure skips the passing ranks, so every rank leaves before the next collective.
+        if(HasFatalFailure() || IsSkipped())
+            return;
+        for(const ncclDataType_t dtype : {ncclFloat8e4m3, ncclFloat8e5m2})
+        {
+            const uint8_t one = dtype == ncclFloat8e4m3 ? kFp8E4m3One : kFp8E5m2One;
+            runPartialLastSlice<uint8_t>(
+                dtype, shardBytes,
+                [self, n, one](size_t shard, size_t elem) {
+                    return fp8Owner(shard, elem, n) == self ? one : uint8_t{0};
+                },
+                [one](size_t) { return one; });
+            if(HasFatalFailure() || IsSkipped())
+                return;
+        }
+
+        const bool peerPar = shardBytes * static_cast<size_t>(nRanks_)
+                             <= rcclDdaFabricRsLL128PeerMaxBytes(getActiveCommunicator());
+        EXPECT_TRUE(logContains(*logCtx_, kLl128LaunchNeedle))
+            << "Rank " << rank_ << " did not launch the ReduceScatter LL128 kernel";
+        EXPECT_TRUE(logContains(*logCtx_, peerPar ? kPeerParNeedle : kBatchedNeedle))
+            << "Rank " << rank_ << " did not run the " << (peerPar ? "peer-parallel" : "batched") << " kernel";
+    }
 };
 
 class DdaMPI_ReduceScatterLL128 : public DdaReduceScatterMPITest
@@ -296,6 +396,24 @@ TEST_F(DdaMPI_ReduceScatterNearCapLL128, LL128NearCap)
     ASSERT_MPI_NE(nearCapBytes, static_cast<size_t>(0));
     ASSERT_MPI_TRUE(shardTakesAnotherPass(getActiveCommunicator(), nearCapBytes));
     runReduceScatter<float>(ncclFloat32, nearCapBytes / sizeof(float), false, kRepeatedIterations);
+}
+
+// The smallest shard past the LL cap that ends one 16-byte chunk into its last slice.
+TEST_F(DdaMPI_ReduceScatterLL128, LL128PartialLastSliceSmallShard)
+{
+    const size_t bytes = partialLastSliceBytes(shardBytes_, /*down=*/false);
+    ASSERT_MPI_TRUE(bytes <= ll128NearCapShardBytes(getActiveCommunicator()));
+    runPartialLastSliceTypes(bytes);
+}
+
+// The largest shard inside the LL128 cap and the slot that ends one 16-byte chunk into its last slice.
+TEST_F(DdaMPI_ReduceScatterLL128, LL128PartialLastSliceNearCap)
+{
+    const size_t nearCapBytes = ll128NearCapShardBytes(getActiveCommunicator());
+    ASSERT_MPI_NE(nearCapBytes, static_cast<size_t>(0));
+    const size_t bytes = partialLastSliceBytes(nearCapBytes, /*down=*/true);
+    ASSERT_MPI_TRUE(bytes >= shardBytes_);
+    runPartialLastSliceTypes(bytes);
 }
 
 #endif // MPI_TESTS_ENABLED
