@@ -18,6 +18,7 @@ function run(id, sha, timestamp) {
   result.publication.id = id;
   result.publication.source = { branch: 'develop', base: null };
   result.provenance.rocjitsu.rocjitsu_commit_sha = sha;
+  result.execution_summary.timestamp = timestamp;
   result.execution_summary.finished_at = timestamp;
   for (const row of result.benchmark_results) row.timing_results_s = [100];
   return result;
@@ -302,4 +303,98 @@ test('duplicate measurements are rejected rather than silently replacing a resul
   const runs = publication();
   runs[1].benchmark_results.push(structuredClone(runs[1].benchmark_results[0]));
   assert.throws(() => buildBenchmarkSummary(runs, 'candidate', candidateSha), /Duplicate benchmark result/);
+});
+
+
+test('overview references are frozen before candidate start while exact-base comparison stays separate', async () => {
+  const runs = publication();
+  const latest = run('latest', 'd'.repeat(40), '2026-11-01T23:00:00Z');
+  const overlapping = run('overlap', 'e'.repeat(40), '2026-11-02T00:30:00Z');
+  runs[1].execution_summary.finished_at = '2026-11-02T01:00:00Z';
+  runs.push(latest, overlapping);
+  const summary = await summarize(runs);
+  assert.equal(summary.overview.latestDevelopRunId, 'latest');
+  assert.equal(summary.baselineRunId, 'baseline');
+  assert.ok(summary.markdown.indexOf('### Performance overview') < summary.markdown.indexOf('### Recorded-base comparison'));
+  assert.match(summary.markdown, /Latest develop reference:.*dddddddddddd/);
+  assert.match(summary.markdown, /completed before the candidate measurement started/);
+  const future = run('future', 'f'.repeat(40), '2026-11-03T00:00:00Z');
+  assert.equal((await summarize([...runs, future])).markdown, summary.markdown);
+});
+
+test('overview uses a single intersection and exposes matched coverage for all three durations', async () => {
+  const runs = publication();
+  runs[1].benchmark_results.pop();
+  const summary = await summarize(runs);
+  assert.match(summary.markdown, /\| gfx950 \| default \| 2\/3 \| 200 s \| 200 s \/ 1.000× \| 200 s \/ 1.000× \|/);
+});
+
+test('failed matched workloads make totals unavailable instead of making the suite faster', async () => {
+  const runs = publication();
+  runs[1].benchmark_results[0].status = 'failed';
+  const { markdown } = await summarize(runs);
+  assert.match(markdown, /\| gfx950 \| default \| 3\/3 \| N\/A \| 300 s \/ N\/A \| 300 s \/ N\/A \|/);
+});
+
+test('missing measurement chronology leaves overview references unavailable', async () => {
+  const runs = publication();
+  delete runs[1].execution_summary.timestamp;
+  const summary = await summarize(runs);
+  assert.deepEqual(summary.overview, { latestDevelopRunId: null, weeklyRunId: null });
+  assert.match(summary.markdown, /Latest develop reference:\*\* N\/A/);
+  assert.equal(summary.baselineRunId, 'baseline');
+});
+
+test('weekly reference matches the real dashboard selector on the candidate-time snapshot', async () => {
+  const { adaptPublishedDashboardData } = await import('../../../emulation/rocjitsu/website/dashboard/src/data/dashboardDataAdapter.js');
+  const { selectOverviewProjection } = await import('../../../emulation/rocjitsu/website/dashboard/src/data/overviewProjection.js');
+  const make = (id, sha, commit, completed, options = {}) => {
+    const entry = run(id, sha.repeat(40), completed);
+    entry.provenance.rocjitsu.rocjitsu_commit_timestamp = commit;
+    if (options.catalog) entry.execution_summary.benchmark_suite = options.catalog;
+    if (options.failed) entry.benchmark_results[0].status = 'failed';
+    if (options.extra) entry.benchmark_results.push({ ...structuredClone(entry.benchmark_results[0]), id: 'extra' });
+    if (options.missing) entry.benchmark_results.pop();
+    if (options.invalid) entry.benchmark_results[0].timing_results_s = [0];
+    return entry;
+  };
+  for (const variant of ['ordinary', 'failed', 'invalid', 'missing', 'catalog', 'repeated']) {
+    const history = [
+      make('outside', 'a', '2026-10-24T12:00:00Z', '2026-10-24T13:00:00Z'),
+      make('first', 'b', '2026-10-25T01:00:00Z', '2026-10-25T02:00:00Z', {
+        failed: variant === 'failed', invalid: variant === 'invalid', extra: variant === 'catalog',
+      }),
+      make('later', 'd', '2026-10-31T12:00:00Z', '2026-10-31T13:00:00Z', {
+        missing: variant === 'missing', catalog: variant === 'catalog' ? 'changed' : undefined,
+      }),
+    ];
+    if (variant === 'repeated') history.push(make('repeat', 'b', '2026-10-25T01:00:00Z', '2026-10-31T14:00:00Z'));
+    const candidate = make('candidate', 'c', '2026-11-01T01:00:00Z', '2026-11-01T02:00:00Z');
+    const source = dataset(history);
+    const { data } = adaptPublishedDashboardData(source);
+    const projection = selectOverviewProjection(data, { targets: ['gfx950'], modes: ['default'], suites: ['Triton', 'GPT-OSS'] }, { range: '1W' });
+    const expected = projection.rows[0]?.reference?.runId ?? null;
+    const summary = await summarize([...history, candidate]);
+    assert.equal(summary.overview.weeklyRunId, expected, variant);
+    assert.equal(summary.overview.latestDevelopRunId, variant === 'repeated' ? 'repeat' : 'later');
+  }
+});
+
+
+test('overview speedup is reference duration divided by candidate duration over benchmark medians', async () => {
+  const runs = publication();
+  for (const result of runs[1].benchmark_results) result.timing_results_s = [25, 50, 100];
+  const { markdown } = await summarize(runs);
+  assert.match(markdown, /\| gfx950 \| default \| 3\/3 \| 150 s \| 300 s \/ 2.000× \| 300 s \/ 2.000× \|/);
+});
+
+test('latest develop can be failed while weekly reference stays eligible', async () => {
+  const runs = publication();
+  const latest = run('failed-latest', 'd'.repeat(40), '2026-11-01T12:00:00Z');
+  latest.benchmark_results[0].status = 'failed';
+  runs.push(latest);
+  const summary = await summarize(runs);
+  assert.equal(summary.overview.latestDevelopRunId, 'failed-latest');
+  assert.equal(summary.overview.weeklyRunId, 'baseline');
+  assert.match(summary.markdown, /\| gfx950 \| default \| 3\/3 \| 300 s \| N\/A \| 300 s \/ 1.000× \|/);
 });

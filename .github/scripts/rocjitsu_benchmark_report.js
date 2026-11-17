@@ -307,6 +307,122 @@ function renderComparison(comparisons, band) {
   return lines;
 }
 
+// Keep the weekly selection aligned with dashboard Overview's 1W projection.
+// The bot is installed independently of the dashboard; parity tests cover this contract.
+function overviewReferences(runs, candidate, candidateResults) {
+  const time = (value) => typeof value === 'string' ? Date.parse(value) : NaN;
+  const cutoff = time(candidate.execution_summary.timestamp);
+  const available = runs.filter((run) => run !== candidate &&
+    time(run.execution_summary.finished_at) < cutoff);
+  const byExecution = (left, right) => time(left.execution_summary.finished_at) -
+    time(right.execution_summary.finished_at) || left.publication.id.localeCompare(right.publication.id);
+  const develop = available.filter((run) => run.publication.source.branch === 'develop');
+  const latest = [...develop].sort(byExecution).at(-1) ?? null;
+  const sha = (run) => run.provenance.rocjitsu.rocjitsu_commit_sha;
+  const commitTime = (run) => time(run.provenance.rocjitsu.rocjitsu_commit_timestamp);
+  const ordered = develop.filter((run) => Number.isFinite(commitTime(run))).sort((left, right) =>
+    (sha(left) === sha(right) ? 0 : commitTime(left) - commitTime(right) || sha(left).localeCompare(sha(right))) ||
+    byExecution(left, right));
+  if (!ordered.length) return { latest, weekly: null };
+  const day = (run) => Math.floor(commitTime(run) / 86400000);
+  const anchor = day(ordered.at(-1));
+  const weekly = ordered.filter((run) => day(run) >= anchor - 6 && day(run) <= anchor);
+
+  // Published catalog membership is immutable per configuration. Like the adapter,
+  // take its first definition before computing the range-wide cohort or eligibility.
+  const catalogs = new Map();
+  for (const run of available) {
+    const id = run.execution_summary.benchmark_suite;
+    if (!catalogs.has(id)) catalogs.set(id, new Map());
+    const catalog = catalogs.get(id);
+    const configurations = new Map();
+    for (const result of run.benchmark_results) {
+      const key = `${result.target}/${result.thread_policy}`;
+      if (!configurations.has(key)) configurations.set(key, []);
+      configurations.get(key).push(result);
+    }
+    for (const [key, results] of configurations) {
+      if (!catalog.has(key)) catalog.set(key, results);
+    }
+  }
+  const selected = [...candidateResults.values()];
+  const targets = [...new Set(selected.map((result) => result.target))].sort();
+  const modes = THREAD_POLICIES.filter((mode) => selected.some((result) => result.mode === mode));
+  const suites = new Set(selected.map((result) => result.suite));
+  const cohorts = targets.flatMap((target) => modes.map((mode) => {
+    const key = `${target}/${mode}`;
+    const memberships = [...new Set(weekly.filter((run) => run.benchmark_results.some(
+      (result) => result.target === target && result.thread_policy === mode,
+    )).map((run) => run.execution_summary.benchmark_suite))]
+      .map((id) => catalogs.get(id)?.get(key) ?? []);
+    return (memberships[0] ?? []).filter((result) => suites.has(result.suite) &&
+      memberships.every((rows) => rows.some((row) => row.id === result.id)))
+      .map((result) => `${key}:${result.id}`);
+  }));
+  const reference = weekly.find((run) => {
+    const results = indexResults(run);
+    return cohorts.length > 0 && cohorts.every((ids) => {
+      const durations = ids.map((id) => results.get(id)?.durationSeconds);
+      const total = durations.reduce((sum, duration) => sum + duration, 0);
+      return ids.length > 0 && durations.every((duration) => duration != null) &&
+        Number.isFinite(total) && total > 0;
+    });
+  }) ?? null;
+  return { latest, weekly: reference };
+}
+
+function renderPerformanceOverview(runs, candidate, candidateResults) {
+  const { latest, weekly } = overviewReferences(runs, candidate, candidateResults);
+  const commit = (run) => {
+    const sha = run?.provenance.rocjitsu.rocjitsu_commit_sha;
+    return typeof sha === 'string' && sha ?
+      `[\`${escapeMarkdown(sha.slice(0, 12))}\`](https://github.com/ROCm/rocm-systems/commit/${encodeURIComponent(sha)})` : 'N/A';
+  };
+  const sources = [candidate, latest, weekly];
+  const indexes = sources.map((run) => run ? indexResults(run) : null);
+  const configurations = [...new Set([...candidateResults.values()].map(
+    (result) => `${result.target}/${result.mode}`,
+  ))].sort((left, right) => left.split('/')[0].localeCompare(right.split('/')[0]) ||
+    THREAD_POLICIES.indexOf(left.split('/')[1]) - THREAD_POLICIES.indexOf(right.split('/')[1]));
+  const lines = [
+    '### Performance overview', '',
+    `- **Candidate commit:** ${commit(candidate)}`,
+    `- **Latest develop reference:** ${commit(latest)}`,
+    `- **1W reference (dashboard Overview):** ${commit(weekly)}`, '',
+    '| Target | Thread policy | Matched benchmarks | Candidate duration | Latest develop duration / speedup | 1W reference duration / speedup |',
+    '| --- | --- | ---: | ---: | ---: | ---: |',
+  ];
+  for (const configuration of configurations) {
+    const [target, mode] = configuration.split('/');
+    const selected = indexes.filter(Boolean).map((index) => new Map([...index].filter(
+      ([, result]) => result.target === target && result.mode === mode,
+    )));
+    const allIds = new Set(selected.flatMap((index) => [...index.keys()]));
+    const sharedIds = [...allIds].filter((id) => selected.every((index) => index.has(id)));
+    const durations = indexes.map((index) => {
+      if (!index || !sharedIds.length) return null;
+      const values = sharedIds.map((id) => index.get(id)?.durationSeconds);
+      const total = values.reduce((sum, value) => sum + value, 0);
+      return values.every((value) => value != null) && Number.isFinite(total) && total > 0
+        ? Number(total.toPrecision(15)) : null;
+    });
+    const [current, ...references] = durations;
+    const duration = (value) => value === null ? 'N/A' : formatSeconds(value);
+    const comparison = (value) => {
+      const speedup = value !== null && current !== null ? value / current : NaN;
+      if (value === null) return 'N/A';
+      return `${duration(value)} / ${Number.isFinite(speedup) ? `${speedup.toFixed(3)}×` : 'N/A'}`;
+    };
+    lines.push(`| ${escapeMarkdown(target)} | ${escapeMarkdown(mode)} | ${sharedIds.length}/${allIds.size} | ` +
+      `${duration(current)} | ${references.map(comparison).join(' | ')} |`);
+  }
+  if (!configurations.length) lines.push('| N/A | N/A | 0/0 | N/A | N/A | N/A |');
+  lines.push('', 'Durations sum benchmark medians over the same matched set in each row (matched/union across available runs). ' +
+    'Failed or invalid matched results make that duration N/A; speedup is reference / candidate. ' +
+    'References use only measurements completed before the candidate measurement started.');
+  return { lines, latestDevelopRunId: latest?.publication.id ?? null, weeklyRunId: weekly?.publication.id ?? null };
+}
+
 function buildBenchmarkSummary(runs, runId, headSha) {
   const candidate = runs.find((run) => run.publication.id === runId);
   if (!candidate || candidate.provenance.rocjitsu.rocjitsu_commit_sha !== headSha) {
@@ -320,8 +436,10 @@ function buildBenchmarkSummary(runs, runId, headSha) {
     else if (result.status === 'timeout') coverage.timeout += 1;
   }
   const baseline = findRecordedBase(runs, candidate);
-  const lines = [renderCoverage(coverage), ''];
-  const summary = { runId, headSha, baselineRunId: baseline?.publication.id ?? null };
+  const overview = renderPerformanceOverview(runs, candidate, candidateResults);
+  const lines = [...overview.lines, '', '### Recorded-base comparison', '', renderCoverage(coverage), ''];
+  const summary = { runId, headSha, baselineRunId: baseline?.publication.id ?? null,
+    overview: { latestDevelopRunId: overview.latestDevelopRunId, weeklyRunId: overview.weeklyRunId } };
   if (!baseline) {
     lines.push('Timing comparison unavailable: no published result for the recorded base.', '',
       'The Dashboard link chooses its own reference and may compare against an earlier develop run.');

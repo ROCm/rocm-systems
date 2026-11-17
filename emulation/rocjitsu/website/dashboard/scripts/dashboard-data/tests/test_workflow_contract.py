@@ -167,12 +167,17 @@ def test_report_includes_cancelled_pr_and_post_merge_benchmarks(
     report = next(s for s in job['steps'] if s['name'] == 'Comment on the pull request')
     assert report['env'] == {
         'BENCHMARK_RESULT': '${{ needs.benchmark.result }}',
+        'BENCHMARK_RUN_ATTEMPT': '${{ needs.benchmark.outputs.run_attempt }}',
         'PUBLICATION_RESULT': '${{ needs.publish.result }}',
         'PUBLISHED_RUN_ID': '${{ needs.publish.outputs.run_id }}',
         'SOURCE_SHA': '${{ needs.source-metadata.outputs.source_sha }}',
     }
     assert 'runNumber: process.env.GITHUB_RUN_NUMBER' in report['with']['script']
     assert 'runAttempt: process.env.GITHUB_RUN_ATTEMPT' in report['with']['script']
+    assert (
+        'benchmarkRunAttempt: process.env.BENCHMARK_RUN_ATTEMPT'
+        in report['with']['script']
+    )
     assert 'publishedRunId: process.env.PUBLISHED_RUN_ID' in report['with']['script']
     assert 'headSha: process.env.SOURCE_SHA' in report['with']['script']
     assert 'reportBenchmark' in report['with']['script']
@@ -188,6 +193,9 @@ def test_report_helper_changes_trigger_their_node_ci_tests():
     for event in ('push', 'pull_request'):
         for path in helper_paths:
             assert path in workflow[True][event]['paths']
+    formatting = yaml.safe_load((WORKFLOWS / 'rocjitsu-formatting.yml').read_text())
+    for path in helper_paths:
+        assert path in formatting[True]['pull_request']['paths']
     step = next(
         s
         for s in workflow['jobs']['verify']['steps']
