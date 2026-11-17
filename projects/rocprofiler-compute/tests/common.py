@@ -57,12 +57,11 @@ def memory_chart_layout_data(arch: str) -> dict:
 
 
 def with_metric_change(data: dict, metric: str, **fields) -> dict:
-    """A copy of layout *data* with *fields* set on every item and arrow whose
-    metric_id is *metric*."""
+    """A copy of layout *data* with *fields* set on every item and arrow of *metric*."""
     data = copy.deepcopy(data)
     items = [item for block in data["blocks"] for item in block.get("content", [])]
     for entry in (*items, *data["arrows"]):
-        if entry["metric_id"] == metric:
+        if entry["metric"] == metric:
             entry.update(fields)
     return data
 

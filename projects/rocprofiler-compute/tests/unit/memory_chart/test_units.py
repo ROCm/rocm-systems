@@ -48,9 +48,6 @@ def test_only_config_units_have_a_display_rule(unit, has_rule):
 
 def test_panel_units_skips_metrics_without_a_unit():
     table = {
-        "id": 301,
-        "metric": {"Hit": {"value": "x", "unit": "Percent"}, "Bare": {"value": "y"}},
+        "metric": {"Hit": {"value": "x", "unit": "Percent"}, "Bare": {"value": "y"}}
     }
-    assert panel_units({"data source": [{"metric_table": table}]}) == {
-        "3.1.0": "Percent"
-    }
+    assert panel_units({"data source": [{"metric_table": table}]}) == {"Hit": "Percent"}
