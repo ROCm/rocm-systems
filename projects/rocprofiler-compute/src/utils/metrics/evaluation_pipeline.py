@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -15,15 +15,16 @@ from utils.metrics.aggregation import calc_pct_of_peak
 from utils.metrics.common import ValuDualIssueDetector
 from utils.metrics.debug_row_tracker import DebugRowTracker, debug_row_tracker
 from utils.metrics.expression import build_eval_string
-from utils.metrics.metric_evaluator import (
-    MetricEvaluator,
-    counter_table_index,
-    table_holds,
+from utils.metrics.metric_evaluator import MetricEvaluator
+from utils.metrics.noise_clamper import (
+    clear_noise_clamp_warnings,
+    get_noise_clamp_warnings,
+    print_noise_clamp_summary,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.utils_analysis import PEAK_COL_PREFERENCE, VALUE_COL_PREFERENCE
 from utils.utils_common import SUPPORTED_FIELD
-from utils.utils_counter_defs import Collectables, extract_counters_and_variables
+from utils.utils_counter_defs import extract_counters_and_variables, get_build_in_vars
 
 
 def create_empirical_peaks_dict(empirical_peaks_df: pd.DataFrame) -> dict[str, float]:
@@ -99,29 +100,56 @@ def calc_builtin_vars(
     gpu_arch: str,
     expressions: list[str],
 ) -> dict[str, Optional[str | float | int]]:
-    """Evaluate the collectables that expressions use, on raw_pmc_df.
-
-    Each one is evaluated after the collectables it uses. A collectable whose
-    counters raw_pmc_df does not hold is left out.
-    """
+    """Evaluate built-in variables referenced by expressions."""
     # TODO: fix all $normUnit in Unit column or title
-    collectables = Collectables.of_arch(gpu_arch)
-    _, used = extract_counters_and_variables("\n".join(expressions), collectables)
-    values: dict[str, Any] = {}
-    for name, formula in collectables.items():
-        if name not in used:
+    builtin_vars_collection = {}
+    gpu_series = mi_gpu_specs.get_gpu_series(gpu_arch)
+    _, expression_builtin_vars = extract_counters_and_variables(
+        "\n".join(expressions), gpu_series
+    )
+    build_in_vars = {
+        k: v
+        for k, v in get_build_in_vars(gpu_series).items()
+        if k in expression_builtin_vars
+    }
+
+    # First pass: calculate per-XCD values
+    for variable_key, variable_value in build_in_vars.items():
+        if "PER_XCD" not in variable_key:
             continue
-        eval_string = build_eval_string(formula)
-        if not table_holds(eval_string, raw_pmc_df, collectables):
+
+        eval_string = build_eval_string(variable_value)
+        try:
+            # Create temporary evaluator for this calculation
+            # Pass sys_vars so that $num_xcd and other system variables are available
+            temporary_evaluator = MetricEvaluator(raw_pmc_df, sys_vars, {})
+            calculation_result = temporary_evaluator.eval_expression(eval_string)
+            # Convert "N/A" string to np.nan to maintain numeric type for calculations
+            if np.isscalar(calculation_result) and calculation_result == "N/A":
+                calculation_result = np.nan
+            builtin_vars_collection[f"ammolite__{variable_key}"] = calculation_result
+        except (TypeError, NameError, KeyError, AttributeError):
+            builtin_vars_collection[f"ammolite__{variable_key}"] = np.nan
+
+    # Second pass: calculate remaining variables that depend on per-XCD values
+    for variable_key, variable_value in build_in_vars.items():
+        if "PER_XCD" in variable_key:
             continue
-        result = MetricEvaluator(
-            raw_pmc_df, {**sys_vars, **values}, {}
-        ).eval_expression(eval_string)
-        # Keep a numeric type when the collectable has no value
-        if np.isscalar(result) and result == "N/A":
-            result = np.nan
-        values[f"ammolite__{name}"] = result
-    return values
+
+        eval_string = build_eval_string(variable_value)
+        try:
+            # Merge sys_vars with builtin_vars_collection for second pass
+            combined_vars = {**sys_vars, **builtin_vars_collection}
+            temporary_evaluator = MetricEvaluator(raw_pmc_df, combined_vars, {})
+            calculation_result = temporary_evaluator.eval_expression(eval_string)
+            # Convert "N/A" string to np.nan to maintain numeric type for calculations
+            if np.isscalar(calculation_result) and calculation_result == "N/A":
+                calculation_result = np.nan
+            builtin_vars_collection[f"ammolite__{variable_key}"] = calculation_result
+        except (TypeError, NameError, KeyError, AttributeError):
+            builtin_vars_collection[f"ammolite__{variable_key}"] = np.nan
+
+    return builtin_vars_collection
 
 
 @demarcate
@@ -133,13 +161,8 @@ def eval_metric(
     empirical_peaks_df: pd.DataFrame,
     raw_pmc_df: pd.DataFrame,
     debug: bool,
-    pass_tables: Optional[list[pd.DataFrame]] = None,
 ) -> None:
-    """Execute the expr string for each metric in the df.
-
-    A metric reads the first table in pass_tables that has all of its
-    counters. When none has them all, it reads raw_pmc_df.
-    """
+    """Execute the expr string for each metric in the df."""
     # confirm no illogical counter values
     gui_active_counter = next(
         (
@@ -161,29 +184,16 @@ def eval_metric(
         if dfs_type.get(df_id) == "metric_table"
         for expr in dfs_expressions.get(df_id, [])
     ]
-    gpu_arch = sys_info["gpu_arch"]
-    pass_values = [
-        calc_builtin_vars(table, sys_vars, gpu_arch, expressions)
-        for table in pass_tables or []
-    ]
-    # On raw_pmc_df a collectable takes its value from the first pass table
-    # that holds its counters, so it never mixes counters from two passes
-    merged_values = calc_builtin_vars(raw_pmc_df, sys_vars, gpu_arch, expressions)
-    for values in reversed(pass_values):
-        merged_values.update(values)
-    sys_vars.update(merged_values)
+    builtin_vars = calc_builtin_vars(
+        raw_pmc_df, sys_vars, sys_info["gpu_arch"], expressions
+    )
+    sys_vars.update(builtin_vars)
 
-    # One evaluator per pass table, with that pass's collectables. The merged
-    # table's evaluator comes last.
-    evaluators = [
-        *(
-            MetricEvaluator(table, {**sys_vars, **values}, empirical_peaks)
-            for table, values in zip(pass_tables or [], pass_values)
-        ),
-        MetricEvaluator(raw_pmc_df, sys_vars, empirical_peaks),
-    ]
-    tables = [evaluator.raw_pmc_df for evaluator in evaluators]
-    build_in_vars = Collectables.of_arch(gpu_arch)
+    # Clear any previous noise clamp warnings before this analysis
+    clear_noise_clamp_warnings()
+
+    # Create metric evaluator
+    metric_evaluator = MetricEvaluator(raw_pmc_df, sys_vars, empirical_peaks)
 
     exprs_to_eval = []
     debug_tracker = DebugRowTracker() if debug else None
@@ -203,23 +213,14 @@ def eval_metric(
                         "percent of peak",
                     }:
                         if row[expr]:
-                            evaluator = evaluators[
-                                counter_table_index(row[expr], tables, build_in_vars)
-                            ]
-                            exprs_to_eval.append((
-                                df_id,
-                                row_id,
-                                expr,
-                                row[expr],
-                                evaluator,
-                            ))
+                            exprs_to_eval.append((df_id, row_id, expr, row[expr]))
 
                             if debug:
                                 debug_row_tracker(
                                     expr,
                                     row[expr],
-                                    evaluator,
-                                    evaluator.raw_pmc_df,
+                                    metric_evaluator,
+                                    raw_pmc_df,
                                     show_inputs=debug_tracker.should_show_inputs(
                                         df_id,
                                         row_id,
@@ -230,8 +231,22 @@ def eval_metric(
                             # as string but not number if there is NONE
                             df.at[row_id, expr] = ""
 
-    for df_id, row_id, col, expr, evaluator in exprs_to_eval:
-        dfs[df_id].loc[row_id, col] = evaluator.eval_expression(expr)
+    for df_id, row_id, col, expr in exprs_to_eval:
+        noise_clamp_count_prev = get_noise_clamp_warnings()["count"]
+        eval_result = metric_evaluator.eval_expression(expr)
+        noise_clamp_count_new = get_noise_clamp_warnings()["count"]
+        if (
+            noise_clamp_count_new > noise_clamp_count_prev
+            and "Metric" in dfs[df_id].columns
+        ):
+            metric_name = dfs[df_id].loc[row_id, "Metric"]
+            console_warning(
+                f"Variance corrected for metric: {row_id} {metric_name} {col}"
+            )
+        dfs[df_id].loc[row_id, col] = eval_result
+
+    # Print aggregated summary of any noise clamping warnings
+    print_noise_clamp_summary()
 
     # Derive Percent of Peak from evaluated Value and Peak columns
     compute_pct_of_peak(dfs, dfs_type)

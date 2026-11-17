@@ -31,7 +31,6 @@ GPU_SPEC_PATH = PROJECT_ROOT / "src" / "utils" / "mi_gpu_spec.yaml"
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 from utils.utils_common import canonical_config_arch  # noqa: E402
 from utils.utils_counter_defs import (  # noqa: E402
-    Collectables,
     counter_to_block,
     extract_counters_and_variables,
     metric_expressions,
@@ -204,7 +203,7 @@ def validate() -> list[str]:
                     continue
 
                 counters, _ = extract_counters_and_variables(
-                    "\n".join(expressions), Collectables.of_arch(target_arch)
+                    "\n".join(expressions), gpu_series
                 )
                 # *_ACCUM is the per-bucket alias for SQ_ACCUM_PREV_HIRES, which is
                 # injected automatically by the profiler for level counters

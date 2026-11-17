@@ -1,0 +1,12 @@
+GRBM_COUNT_PER_XCD:
+  formula: GRBM_COUNT / $num_xcd
+GRBM_GUI_ACTIVE_PER_XCD:
+  formula: GRBM_GUI_ACTIVE / $num_xcd
+GRBM_SPI_BUSY_PER_XCD:
+  formula: GRBM_SPI_BUSY / $num_xcd
+hbmBandwidth:
+  formula: $max_mclk / 1000 * 32 * $num_memory_channels
+kernelBusyCycles:
+  formula: ROUND(AVG((End_Timestamp - Start_Timestamp) / 1000 * $max_sclk), 0)
+numActiveCUs:
+  formula: TO_INT(MIN(ROUND(4 * SUM(SQ_BUSY_CU_CYCLES) / SUM($GRBM_GUI_ACTIVE_PER_XCD), 0) / $max_waves_per_cu * 8 + MIN(MOD(ROUND(4 * SUM(SQ_BUSY_CU_CYCLES) / SUM($GRBM_GUI_ACTIVE_PER_XCD), 0), $max_waves_per_cu), 8), $cu_per_gpu))

@@ -565,6 +565,13 @@ add_test(
 )
 
 add_test(
+    NAME test_noise_clamper
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_noise_clamper.xml
+        ${COV_OPTION} tests/unit/utils/metrics/test_noise_clamper.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
     NAME test_benchmark_base
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_benchmark_base.xml
@@ -756,20 +763,6 @@ add_test(
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_metric_evaluator.xml
         ${COV_OPTION} tests/unit/utils/metrics/test_metric_evaluator.py
         ${WORKING_DIR_OPTION}
-)
-
-add_test(
-    NAME test_allocator
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_allocator.xml ${COV_OPTION}
-        tests/unit/utils/counters/test_allocator.py ${WORKING_DIR_OPTION}
-)
-
-add_test(
-    NAME test_counter_file
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_counter_file.xml
-        ${COV_OPTION} tests/unit/utils/counters/test_counter_file.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -1158,8 +1151,6 @@ if(${ENABLE_COVERAGE})
         test_expression
         test_evaluation_pipeline
         test_metric_evaluator
-        test_allocator
-        test_counter_file
         test_utils_counter_defs
         test_metric_library_loader
         test_parser
@@ -1174,6 +1165,7 @@ if(${ENABLE_COVERAGE})
         test_utils_profile
         test_common
         test_amdsmi_interface
+        test_noise_clamper
         test_benchmark_base
         test_analysis_cli
         test_pattern_matching
