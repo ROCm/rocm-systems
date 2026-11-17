@@ -179,6 +179,49 @@ TEST(ExecutableInputValidation, RejectsImpossibleBundleCountBeforeAllocation) {
   EXPECT_FALSE(executable.is_valid());
 }
 
+TEST(ExecutableInputValidation, IgnoresHostNobitsSectionOutsideFile) {
+  auto image = make_host_elf_with_fatbin(make_fatbin_header(0));
+  Elf64_Ehdr ehdr{};
+  std::memcpy(&ehdr, image.data(), sizeof(ehdr));
+  std::array<Elf64_Shdr, 4> sections{};
+  std::memcpy(sections.data(), image.data() + ehdr.e_shoff, 3 * sizeof(Elf64_Shdr));
+  std::vector<uint8_t> names(
+      image.begin() + sections[2].sh_offset,
+      image.begin() + sections[2].sh_offset + sections[2].sh_size);
+  const uint32_t bss_name = add_elf_name(names, ".bss");
+  const uint64_t names_offset = image.size();
+  image.insert(image.end(), names.begin(), names.end());
+  const uint64_t shoff = align_up(image.size(), alignof(Elf64_Shdr));
+  image.resize(shoff + sections.size() * sizeof(Elf64_Shdr));
+  sections[2].sh_offset = names_offset;
+  sections[2].sh_size = names.size();
+  sections[3].sh_name = bss_name;
+  sections[3].sh_type = SHT_NOBITS;
+  sections[3].sh_flags = SHF_ALLOC;
+  sections[3].sh_offset = image.size() + 1024;
+  sections[3].sh_size = 1024 * 1024;
+  ehdr.e_shoff = shoff;
+  ehdr.e_shnum = sections.size();
+  std::memcpy(image.data(), &ehdr, sizeof(ehdr));
+  std::memcpy(image.data() + shoff, sections.data(), sections.size() * sizeof(Elf64_Shdr));
+  const Executable executable{std::span<const uint8_t>(image)};
+  EXPECT_TRUE(executable.is_valid());
+  EXPECT_TRUE(executable.gpu_payload_recognized());
+}
+
+TEST(ExecutableInputValidation, RecordsRecognizedMalformedHipSection) {
+  auto image = make_host_elf_with_fatbin(make_fatbin_header(0));
+  Elf64_Ehdr ehdr{};
+  std::memcpy(&ehdr, image.data(), sizeof(ehdr));
+  Elf64_Shdr section{};
+  std::memcpy(&section, image.data() + ehdr.e_shoff + sizeof(section), sizeof(section));
+  section.sh_size = image.size();
+  std::memcpy(image.data() + ehdr.e_shoff + sizeof(section), &section, sizeof(section));
+  const Executable executable{std::span<const uint8_t>(image)};
+  EXPECT_FALSE(executable.is_valid());
+  EXPECT_TRUE(executable.gpu_payload_recognized());
+}
+
 TEST(ExecutableInputValidation, RejectsBundlePayloadOutsideItsSection) {
   constexpr std::string_view kTarget = "hip-amdgcn-amd-amdhsa--gfx1250";
   auto fatbin = make_fatbin_header(1);

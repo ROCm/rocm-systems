@@ -34,6 +34,31 @@ target_link_libraries(
 )
 rj_configure_target(rocjitsu_translate_cli TOOL)
 
+add_executable(rj_waitcheck waitcheck_main.cpp)
+target_link_libraries(
+    rj_waitcheck
+    PRIVATE
+        rocjitsu_cli
+        rocjitsu_waitcheck_internal
+        rocjitsu_amdgpu_isa_model_registry
+        rocjitsu_executable
+)
+rj_configure_target(rj_waitcheck PRIVATE_INCLUDES WARNINGS)
+install(TARGETS rj_waitcheck RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+add_custom_target(
+    rj_waitcheck_gfx950_tensile_e2e
+    COMMAND
+        ${CMAKE_SOURCE_DIR}/scripts/run_waitcheck_gfx950_tensile_e2e.sh
+        --waitcheck $<TARGET_FILE:rj_waitcheck> --work-dir
+        ${CMAKE_BINARY_DIR}/waitcheck-e2e/tensile-gfx950
+    DEPENDS rj_waitcheck
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    USES_TERMINAL
+    VERBATIM
+    COMMENT "Build and waitcheck representative gfx950 Tensile kernels"
+)
+
 add_executable(rj_dbt_translate rj_dbt_translate_main.cpp)
 target_link_libraries(rj_dbt_translate PRIVATE rocjitsu_translate_cli)
 rj_configure_target(rj_dbt_translate TOOL)

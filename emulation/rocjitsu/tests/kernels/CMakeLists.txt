@@ -42,6 +42,10 @@ rj_add_device_kernel(matmul_naive gfx950)
 rj_add_device_kernel(matmul_mfma gfx950)
 rj_add_device_kernel(matmul_mfma_16x16 gfx950)
 rj_add_device_kernel(matmul_tiled gfx950)
+foreach(_target gfx942 gfx1100)
+    rj_add_device_kernel(vector_add ${_target} OUTPUT_NAME vector_add_${_target})
+    rj_add_device_kernel(waitcheck_missing_wait ${_target} OUTPUT_NAME waitcheck_missing_wait_${_target})
+endforeach()
 rj_add_device_kernel(vector_add gfx950)
 rj_add_device_kernel(dynamic_copy_loop gfx950)
 rj_add_device_kernel(scratch_spill_probe gfx950)
@@ -173,6 +177,10 @@ if(RJ_INSTALL_TESTS)
         ${KERNEL_OUTPUT_DIR}/matmul_tiled.o
         ${KERNEL_OUTPUT_DIR}/vector_add.o
         ${KERNEL_OUTPUT_DIR}/vector_add_gfx90a.o
+        ${KERNEL_OUTPUT_DIR}/vector_add_gfx942.o
+        ${KERNEL_OUTPUT_DIR}/vector_add_gfx1100.o
+        ${KERNEL_OUTPUT_DIR}/waitcheck_missing_wait_gfx942.o
+        ${KERNEL_OUTPUT_DIR}/waitcheck_missing_wait_gfx1100.o
         ${KERNEL_OUTPUT_DIR}/vector_add_probe_gfx90a.o
         ${KERNEL_OUTPUT_DIR}/vector_add_probe_gfx950.o
         ${KERNEL_OUTPUT_DIR}/vector_add_gfx1201.o

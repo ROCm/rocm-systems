@@ -44,6 +44,7 @@ target_link_libraries(
 rj_add_object_library(rocjitsu_executable
     executable.cpp
 )
+target_link_libraries(rocjitsu_executable PUBLIC ZLIB::ZLIB zstd::libzstd)
 
 # CFG construction and dataflow share indirect-target discovery. Keep them in
 # one object group; neither depends on the DBT/DBI transformation layer.

@@ -86,8 +86,8 @@ build/tools/rj_waitcheck vector_add --list-code-objects
 build/tools/rj_waitcheck vector_add --target gfx950 --code-object-index 0
 ```
 
-When the analysis finds no hazards, the tool exits with code `0` and
-produces no diagnostic output.
+When the analysis finds no hazards, the tool prints a summary, produces
+no hazard diagnostics, and exits with code `0`.
 
 ## Step 3: interpret the report
 
@@ -104,12 +104,13 @@ A typical diagnostic identifies:
 -   The producer and consumer mnemonics.
 -   The counter and threshold that would resolve the hazard.
 
-Use `rj_co` to inspect the surrounding instructions when you need more
-context around a reported offset:
+Extract the selected AMDGPU ELF and disassemble it to inspect the
+instructions around a reported offset:
 
 ``` bash
-rj_co vector_add --target gfx950 \
-  --disassemble-window .text+0x1a0 --context-bytes 128
+build/tools/rj_waitcheck vector_add --target gfx950 \
+  --extract-code-object vector_add_gfx950.co
+llvm-objdump --disassemble --section=.text vector_add_gfx950.co
 ```
 
 ## Step 4: apply the fix and re-analyze
@@ -141,7 +142,9 @@ build/tools/rj_waitcheck /path/to/site-packages/torch \
 ```
 
 `--exhaustive` implies `--recursive --all-code-objects` and requires
-every selected code object to decode and analyze successfully.
+every selected code object to decode and analyze successfully. `-j16`
+runs up to 16 kernel analyses concurrently within one input; separate
+input files are scanned in sequence.
 
 ## Runtime checking
 
@@ -149,7 +152,8 @@ To check kernels at dispatch time without modifying the application,
 load the waitcheck HSA tools library:
 
 ``` bash
-HSA_TOOLS_LIB="build/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_waitcheck_hooks.so" \
+HSA_TOOLS_DISABLE_REGISTER=1 \
+  HSA_TOOLS_LIB="build/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_waitcheck_hooks.so" \
   ROCJITSU_WAITCHECK_FAIL=1 \
   ./vector_add
 ```
@@ -161,8 +165,7 @@ reported to stderr and the kernel is submitted normally.
 ## Next steps
 
 -   See [waitcheck hazard analyzer reference](../reference/waitcheck.md) for the
-    full CLI option reference, environment variables, exit codes, and
-    runtime tool configuration.
+    full CLI option reference and exit codes.
 -   See [Inspect and disassemble a code object with the C API](inspect-code-object.md)
     for loading and disassembling code objects through the rocJITsu C
     API.

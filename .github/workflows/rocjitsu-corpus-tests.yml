@@ -194,6 +194,8 @@ jobs:
             git \
             libclang-rt-dev \
             libdrm-dev \
+            libzstd-dev \
+            zlib1g-dev \
             ninja-build \
             tini \
             clang

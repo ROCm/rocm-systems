@@ -1376,6 +1376,88 @@ target_link_libraries(
 rj_configure_target(waitcheck_target_test WARNINGS)
 rj_add_gtest_tests(waitcheck_target_test)
 
+add_executable(rj_waitcheck_smoke_test tools/rj_waitcheck_smoke_test.cpp)
+add_test(
+    NAME RjWaitcheck.SampleRejectsAliases
+    COMMAND
+        ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/sample_waitcheck_diagnostics_test.py
+        ${PROJECT_SOURCE_DIR}/scripts/sample_waitcheck_diagnostics.py
+)
+target_link_libraries(
+    rj_waitcheck_smoke_test
+    PRIVATE GTest::gtest ZLIB::ZLIB zstd::libzstd
+)
+rj_configure_target(rj_waitcheck_smoke_test TEST)
+add_dependencies(rj_waitcheck_smoke_test rj_waitcheck)
+if(RJ_INSTALL_TESTS)
+    rj_install_test_target(rj_waitcheck_smoke_test)
+    install(
+        FILES ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_waitcheck_llvm_kernel.cmake
+        DESTINATION ${RJ_INSTALL_TEST_DIR}
+    )
+endif()
+rj_add_test(
+    NAME "RjWaitcheck.Smoke"
+    COMMAND $<TARGET_FILE:rj_waitcheck_smoke_test> $<TARGET_FILE:rj_waitcheck>
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    INSTALL_COMMAND
+        "bin/rj_waitcheck_smoke_test"
+        "\${RJ_INSTALLED_BINDIR}/rj_waitcheck"
+)
+
+if(HAS_DEVICE_KERNELS)
+    add_dependencies(
+        rj_waitcheck_smoke_test
+        kernel_vector_add_gfx942
+        kernel_vector_add_gfx1100
+        kernel_waitcheck_missing_wait_gfx942
+        kernel_waitcheck_missing_wait_gfx1100
+    )
+    add_test(
+        NAME RjWaitcheck.InventoryExtractsHipBundle
+        COMMAND
+            ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tools/inventory_waitcheck_corpus_test.py
+            ${PROJECT_SOURCE_DIR}/scripts/inventory_waitcheck_corpus.py
+            $<TARGET_FILE:rj_waitcheck>
+            ${KERNEL_OUTPUT_DIR}/vector_add_gfx942.o
+    )
+    function(rj_add_waitcheck_llvm_kernel_test name target input expect_hazard)
+        rj_add_test(
+            NAME "RjWaitcheck.LlvmKernel.${name}"
+            COMMAND
+                ${CMAKE_COMMAND} -DWAITCHECK=$<TARGET_FILE:rj_waitcheck>
+                -DINPUT=${KERNEL_OUTPUT_DIR}/${input} -DTARGET=${target}
+                -DEXPECT_HAZARD=${expect_hazard} -P
+                ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_waitcheck_llvm_kernel.cmake
+            INSTALL_COMMAND
+                "${CMAKE_COMMAND}"
+                "-DWAITCHECK=\${RJ_INSTALLED_BINDIR}/rj_waitcheck"
+                "-DINPUT=\${RJ_INSTALLED_KERNEL_DIR}/${input}"
+                "-DTARGET=${target}"
+                "-DEXPECT_HAZARD=${expect_hazard}"
+                -P
+                "check_waitcheck_llvm_kernel.cmake"
+        )
+    endfunction()
+
+    rj_add_waitcheck_llvm_kernel_test(Gfx942Clean gfx942 vector_add_gfx942.o OFF)
+    rj_add_waitcheck_llvm_kernel_test(
+        Gfx942PerturbedWait
+        gfx942
+        waitcheck_missing_wait_gfx942.o
+        ON
+    )
+    rj_add_waitcheck_llvm_kernel_test(Gfx1100Clean gfx1100 vector_add_gfx1100.o OFF)
+    rj_add_waitcheck_llvm_kernel_test(
+        Gfx1100PerturbedWait
+        gfx1100
+        waitcheck_missing_wait_gfx1100.o
+        ON
+    )
+endif()
+
 add_executable(waitcheck_object_test analysis/waitcheck_test.cpp)
 target_include_directories(
     waitcheck_object_test

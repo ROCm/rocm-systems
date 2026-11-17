@@ -65,11 +65,20 @@ public:
   /// @copydoc code_object(rj_code_target_id_t, uint32_t)
   const AmdGpuCodeObject *code_object(rj_code_target_id_t target, uint32_t index) const;
 
+  [[nodiscard]] bool read_failed() const { return read_failed_; }
+  /// @brief Whether the input declared an AMDGPU ELF or HIP payload, even if parsing failed.
+  [[nodiscard]] bool gpu_payload_recognized() const { return gpu_payload_recognized_; }
+
 private:
+  bool read_failed_ = false;
+  bool gpu_payload_recognized_ = false;
   static constexpr char CLANG_OFFLOAD_MAGIC_STR[] = {'_', '_', 'C', 'L', 'A', 'N', 'G', '_',
                                                      'O', 'F', 'F', 'L', 'O', 'A', 'D', '_',
                                                      'B', 'U', 'N', 'D', 'L', 'E', '_', '_'};
   static constexpr std::size_t CLANG_OFFLOAD_MAGIC_STR_SIZE = sizeof(CLANG_OFFLOAD_MAGIC_STR);
+
+  static constexpr char COMPRESSED_OFFLOAD_MAGIC_STR[] = {'C', 'C', 'O', 'B'};
+  static constexpr size_t COMPRESSED_OFFLOAD_MAGIC_STR_SIZE = sizeof(COMPRESSED_OFFLOAD_MAGIC_STR);
 
   struct ClangOffloadBundleInfo {
     uint64_t offset;
@@ -86,6 +95,7 @@ private:
   void load_device_elf();
   void load_fat_binary();
   void load_hip_fatbin(const Section &fatbin_section);
+  size_t load_clang_offload_bundle(const char *data, size_t size);
   void register_code_object(std::unique_ptr<AmdGpuCodeObject> co);
   void parse_image();
 

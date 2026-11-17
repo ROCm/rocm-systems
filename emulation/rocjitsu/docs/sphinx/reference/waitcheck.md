@@ -13,7 +13,10 @@ For a guided walkthrough, see [Analyze a code object for wait hazards with waitc
 
 ## Offline CLI
 
-The `rj_waitcheck` command analyzes code objects, HIP fat binaries, host executables, and directory trees.
+The `rj_waitcheck` command analyzes final AMDGPU ELF code objects, host ELF files
+containing HIP bundles, and directory trees of those files. A standalone
+compiler `.bundle` file is not an ELF input; extract its `.hsaco` payload before
+passing it to waitcheck.
 
 ### Invocation
 
@@ -32,13 +35,23 @@ rj_waitcheck path/to/input.co
 Select a target and code-object index when an executable contains multiple device images:
 
 ``` shell
-rj_waitcheck app_or_fatbin --target gfx1250 --code-object-index 0
+rj_waitcheck host_elf_or_code_object --target gfx1250 --code-object-index 0
 ```
 
 List the code objects in an input:
 
 ``` shell
-rj_waitcheck app_or_fatbin --list-code-objects
+rj_waitcheck host_elf_or_code_object --list-code-objects
+```
+
+List exact kernel descriptors as JSONL, or extract AMDGPU ELFs for inspection:
+
+``` shell
+rj_waitcheck host_elf_or_code_object --list-kernels
+rj_waitcheck host_elf_or_code_object --target gfx1250 --code-object-index 0 \
+  --extract-code-object selected.co
+rj_waitcheck host_elf_or_code_object --target gfx1250 \
+  --extract-code-objects extracted/
 ```
 
 #### Directory and corpus sweeps
@@ -68,23 +81,29 @@ rj_waitcheck /path/to/site-packages/torch \
 
 | Option | Meaning |
 | --- | --- |
-| `--target gfx942\|gfx950\|gfx1100\|gfx1150\|gfx1151\|gfx1200\|gfx1201\|gfx1250\|gfx1251` | Select one supported target from an executable input. |
+| `--target TARGET` | Select a target from the supported architectures listed below. |
 | `--code-object-index N` | Select the Nth code object for the selected target. |
-| `--kernel-entry OFFSET` | Analyze every merged entry/wave group at this `.text` offset. Descriptors sharing an entry and wave mode are conservatively merged, including their register allocation. This flag cannot select an individual descriptor or wave mode for a dispatch-specific check. |
+| `--kernel-entry OFFSET` | Analyze each merged entry/wave group at this `.text` byte offset. Same-wave descriptors are conservatively grouped, including register allocation. Use `--wave-size` to select one wave mode. This flag cannot select an individual descriptor for a dispatch-specific check. Offline callers iterating `waitcheck_kernels()` should pass each `WaitcheckKernelInfo` to the core overload to avoid repeating groups. |
+| `--wave-size 32\|64` | Select a descriptor wave size at `--kernel-entry`, or supply the wave size for a descriptorless entry. Requires `--kernel-entry`; a descriptorless entry remains incomplete without VGPR allocation. Descriptors keep their encoded wave size. |
 | `--all-code-objects` | Analyze all supported code objects in each input. |
 | `--recursive` | Expand directory inputs into recursive file sweeps. |
 | `--exhaustive` | Strict target-specific recursive sweep with code-object and kernel completeness totals. Requires `--target`. Implies `--recursive --all-code-objects`. |
 | `--progress` | Show exhaustive kernel progress even when standard error is not an interactive terminal. |
 | `--no-progress` | Disable exhaustive kernel progress, including on an interactive terminal. |
-| `-j N`, `--jobs N` | Analyze up to N kernels concurrently. Default is 1, maximum is 16. |
+| `-j N`, `--jobs N` | Analyze up to N kernels concurrently within each input's all-code-object analysis. Inputs are scanned in sequence. Default is 1, maximum is 16. |
 | `--slowest-kernels N` | Report the N slowest kernels after an all-code-object or exhaustive sweep. |
 | `--diagnostics-jsonl PATH` | Losslessly write one JSON object per retained per-kernel diagnostic. Requires `--all-code-objects` or `--exhaustive`. |
+| `--check-counter-parity` | Compare encoded wait fields with modeled required counts. |
+| `--counter-parity-jsonl PATH` | Write counter-parity findings as JSONL. Requires `--all-code-objects` or `--exhaustive`. |
 | `--skip-unsupported` | Skip unparsable inputs, inputs with no supported code object, or unsupported analysis failures. |
 | `--max-diagnostics N` | Limit collected and printed diagnostics. Use `0` to suppress diagnostic payloads while preserving counts. |
 | `--stop-after-first-diagnostic` | Stop each code object after the first observed hazard. |
 | `--summary-only` | Print only final batch totals. |
 | `--no-fail` | Return success even when hazards are reported. |
 | `--list-code-objects` | List extractable code objects in the input and exit. |
+| `--list-kernels` | List every exact kernel descriptor as JSONL and exit. The code-object row includes `kernel_count` for exact descriptors and `analysis_group_count` for merged entry/wave groups. Each descriptor row names its `analysis_group_name` and all `analysis_group_descriptor_vaddrs`; exhaustive summaries count groups. |
+| `--extract-code-object PATH` | Write the selected AMDGPU ELF to `PATH` and exit. |
+| `--extract-code-objects DIR` | Parse one input once, write each selected AMDGPU ELF to `DIR`, and emit its target, index, and path as JSONL. Existing files are reused only when their bytes match. |
 
 ## Supported architectures
 
@@ -132,11 +151,11 @@ A diagnostic is reported when a later instruction uses, overwrites, orders after
 
 ## Report format
 
-waitcheck prints diagnostics to standard error. Each diagnostic identifies the producer instruction, the consumer instruction, and the missing or too-weak wait between them. Locations are reported as section-relative offsets such as `.text+0xd1b44`.
+waitcheck prints analysis summaries and diagnostics to standard output. Progress and analysis errors are printed to standard error. Each diagnostic identifies the producer instruction, the consumer instruction, and the missing or too-weak wait between them. Locations are reported as section-relative offsets such as `.text+0xd1b44`.
 
-With `--diagnostics-jsonl`, each diagnostic is written as one JSON object per line. Each record carries the exact input path, code-object index, kernel name and entry point, producer and consumer instructions, and a replay command.
+With `--diagnostics-jsonl`, each diagnostic is written as one JSON object per line. Each record carries the exact input path, code-object index, producer and consumer instructions, and a replay command. Kernel name and entry point are present when the code object supplies a kernel descriptor.
 
-When `--summary-only` is used, only final batch totals are printed. For `--exhaustive` sweeps, the summary reports completed versus discovered code objects and kernel descriptors as `code-objects=C/D kernels=C/D`. A complete sweep has matching counts and `analysis-errors=0`.
+When `--summary-only` is used, only final batch totals are printed. For `--exhaustive` sweeps, the summary reports completed versus discovered code objects and merged entry/wave groups as `code-objects=C/D kernels=C/D`. A complete sweep has matching counts and `analysis-errors=0`.
 
 ## Exit codes
 
@@ -146,39 +165,6 @@ When `--summary-only` is used, only final batch totals are printed. For `--exhau
 | `1` | Command-line usage error. |
 | `2` | Input selection, parsing, or analysis error, including an incomplete `--exhaustive` sweep. |
 | `4` | One or more hazards were found. |
-
-## Runtime HSA tool
-
-`librocjitsu_waitcheck_hooks.so` checks the final code-object reader passed to the ROCR runtime loader via HSA tools.
-
-``` shell
-HSA_TOOLS_DISABLE_REGISTER=1 \
-HSA_TOOLS_LIB="build/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_waitcheck_hooks.so" \
-  ROCJITSU_WAITCHECK_FAIL=1 \
-  ./app
-```
-
-`HSA_TOOLS_DISABLE_REGISTER=1` selects the environment-driven HSA tools path on ROCR builds that also support rocprofiler registration.
-
-When combining waitcheck with the rocJITsu DBT tool, list waitcheck first so it checks the final translated code:
-
-``` shell
-HSA_TOOLS_DISABLE_REGISTER=1 \
-HSA_TOOLS_LIB="build/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_waitcheck_hooks.so build/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_hooks.so" \
-  ROCJITSU_WAITCHECK_FAIL=1 \
-  ./app
-```
-
-### Environment variables
-
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `ROCJITSU_WAITCHECK` | `1` | Set to `0` to disable checking while leaving the HSA tool loaded. |
-| `ROCJITSU_WAITCHECK_MODE` | `dispatch` | `dispatch` checks a kernel immediately before its first AQL dispatch and caches the result. `eager` exhaustively checks every kernel when its code object is loaded. |
-| `ROCJITSU_WAITCHECK_FAIL` | `0` | Set to `1` to stop on a missing wait. Dispatch mode aborts before submitting the bad packet; eager mode rejects the load with `HSA_STATUS_ERROR_INVALID_CODE_OBJECT`. |
-| `ROCJITSU_WAITCHECK_SUMMARY` | `0` | Set to `1` to print load, dispatch, check, cache, pass, and hazard counters at shutdown or process exit. |
-
-In dispatch mode, descriptors are indexed at code-object load, mapped to runtime `kernel_object` values after executable freeze, and not decoded or analyzed until the kernel is actually submitted. This avoids whole-library analysis costs for large code objects. Use `ROCJITSU_WAITCHECK_MODE=eager` for load-only validation or when the application does not create an interceptable HSA queue.
 
 ## Known limitations
 

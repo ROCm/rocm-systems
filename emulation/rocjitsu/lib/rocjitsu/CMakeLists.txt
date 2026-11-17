@@ -128,7 +128,8 @@ target_link_libraries(
         rocjitsu_kernel_descriptor_scan
         rocjitsu_kernarg_extension
         rocjitsu_amdhsa_metadata
-
+        ZLIB::ZLIB
+        zstd::libzstd
 )
 set_target_properties(
     rocjitsu_dbt_internal
@@ -186,7 +187,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         rocjitsu_gfx1250_b0_to_a0
         PRIVATE
             rocjitsu_cdna5_model_registry
-
+            ZLIB::ZLIB
+            zstd::libzstd
             rocjitsu_kernel_descriptor_scan
             rocjitsu_kernarg_extension
             rocjitsu_amdhsa_metadata
