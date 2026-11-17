@@ -85,7 +85,9 @@ artifact directory contains:
 - `prepared.hsaco`: the instrumented code object.
 - `facts.bin`: exact image and selection identities, an owning entry table with
   selected/native dispositions and ABI/resources, and each selected entry's
-  instruction facts including observation read/write kind and width.
+  instruction facts including observation read/write kind and width. Native rows
+  retain their reachable code ranges for byte preservation checks; entry-address
+  order does not determine ownership of intervening instructions.
 - `ready`: a marker published after the artifact files close successfully.
 
 The preparation tool embeds probe bodies compiled at build time for each
@@ -115,6 +117,9 @@ ABI and prepared resource plan. Known unselected entries retain their original
 packet, resources and completion signal and are native/uncovered. Unknown kernel
 objects are rejected. One module, a controlled queue, nonoverlap and dedicated
 completion signals remain required, including for native siblings.
+Admission recognizes a native completion already visible to the application even
+if the observer has not yet processed it. The observer retains its signal lease
+until its wait returns, so callers still drain before releasing that signal.
 
 The capture header owns the immutable image/entry facts. Each selected execution
 references its original descriptor offset within that exact image. Guest probe
@@ -472,6 +477,38 @@ names before publishing an artifact. The analyzer checks saved captures and
 rejects malformed names with input-error exit 2 before writing JSON. Binary
 capture retains the original name bytes. ASCII and valid UTF-8 names keep their
 original spelling.
+
+## Multiple disjoint entries
+
+Use repeated `--entry` options to select entries in one whole image:
+
+```bash
+"$consan_prepare" original.hsaco gfx1250 new-artifact-directory --entry mk_a --entry mk_b
+```
+
+A/B share one prepared ELF and one image table; an unselected C retains its native
+ABI/resources. Keep the printed selection profile with the exact original and
+prepared identities in the launch configuration. The HSA runtime's argument
+alignment query is distinct from the AMDHSA metadata requirement: the pinned
+ROCR code-object-v5 loader reports 16-byte alignment even for metadata alignment
+8. Replacement preserves the HSA query rather than projecting the metadata value.
+
+The registered `ConSanMultiEntrySim.SelectedAB` integration control runs the
+[whole A/B/C assembly fixture](../tests/patch/consan/fixtures/multi_entry.s) with
+one real load, A→B→C→A dispatches, different A/B argument/resource demands,
+independent guarded CPU output oracles, selected facts/observation attribution,
+and native accounting. It removes original/prepared artifacts before fresh-process
+analysis. `ConSanMultiEntrySim.WrongProfile` checks that a different configured
+profile cannot publish a successful capture. Run these with the required test
+dependencies built; they do not establish toy Llama or physical-GPU support.
+
+The analyzer reports an image entry/disposition table and each selected
+execution's EntryKey/name. Decoder checks reject unknown/native keys and
+inconsistent facts/extents. Local guest ID zero does not independently prove
+entry provenance if a fabricated key selects another entry with an identical
+layout; correct attribution depends on the runtime's validated kernel-object
+binding. Checksums preserve recorded bytes, without providing a security
+attestation of guest identity.
 
 ## Extending ConSan
 

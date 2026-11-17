@@ -294,6 +294,21 @@ if(
         PRIVATE ${ROCM_PATH}/lib/libhsa-runtime64.so ${CMAKE_DL_LIBS}
     )
     rj_configure_target(consan_hsa_runner WARNINGS)
+    add_executable(consan_multi_entry_runner consan_multi_entry_runner.cpp)
+    target_include_directories(
+        consan_multi_entry_runner
+        PRIVATE ${ROCJITSU_SRC_DIR} ${ROCJITSU_INCLUDE_DIR}
+    )
+    target_include_directories(
+        consan_multi_entry_runner
+        SYSTEM
+        PRIVATE ${ROCM_PATH}/include
+    )
+    target_link_libraries(
+        consan_multi_entry_runner
+        PRIVATE ${ROCM_PATH}/lib/libhsa-runtime64.so ${CMAKE_DL_LIBS}
+    )
+    rj_configure_target(consan_multi_entry_runner WARNINGS)
     add_test(
         NAME ConSanRuntimeIntegration.Guards
         COMMAND
@@ -610,4 +625,47 @@ if(RJ_BUILD_CONSAN_ANALYZER)
             ${Python3_EXECUTABLE} -B
             ${PROJECT_SOURCE_DIR}/tests/code/consan/test_required.py
     )
+endif()
+
+if(TARGET consan_multi_entry_runner AND TARGET rj_consan_analyze)
+    add_dependencies(consan_multi_entry_runner consan_multi_entry_fixture)
+    foreach(_profile IN ITEMS SelectedAB WrongProfile BarrierAB LoopAB)
+        set(_negative)
+        set(_multi_case_image ${_fixture_dir}/multi-entry.hsaco)
+        set(_multi_variant no-sync)
+        if(_profile STREQUAL "WrongProfile")
+            set(_negative --wrong-profile)
+        elseif(_profile STREQUAL "BarrierAB")
+            set(_multi_case_image ${_fixture_dir}/multi-entry-barrier.hsaco)
+            set(_multi_variant barrier)
+        elseif(_profile STREQUAL "LoopAB")
+            set(_multi_case_image ${_fixture_dir}/multi-entry-loop.hsaco)
+            set(_multi_variant loop)
+        endif()
+        set(_test ConSanMultiEntrySim.${_profile})
+        add_test(
+            NAME ${_test}
+            COMMAND
+                ${Python3_EXECUTABLE} -B
+                ${CMAKE_CURRENT_SOURCE_DIR}/consan_multi_entry_e2e.py --prepare
+                $<TARGET_FILE:rj_consan_prepare> --runner
+                $<TARGET_FILE:consan_multi_entry_runner> --inspect
+                $<TARGET_FILE:consan_capture_inspect> --analyze
+                $<TARGET_FILE:rj_consan_analyze> --plugin
+                $<TARGET_FILE:hsa_consan_testable> --launcher
+                $<TARGET_FILE:rocjitsu_bin> --fixture ${_multi_case_image}
+                --variant ${_multi_variant} --config
+                ${PROJECT_SOURCE_DIR}/configs/gfx1250_mi455x.json --root
+                ${RJ_CONSAN_TEST_ARTIFACT_ROOT} --source ${PROJECT_SOURCE_DIR}
+                ${_negative}
+        )
+        rj_test_runtime_dir_env(_runtime ${_test})
+        set_tests_properties(
+            ${_test}
+            PROPERTIES
+                TIMEOUT 240
+                LABELS "consan;simulator;required-consan"
+                ENVIRONMENT "${_runtime}"
+        )
+    endforeach()
 endif()
