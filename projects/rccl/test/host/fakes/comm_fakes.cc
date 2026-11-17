@@ -29,8 +29,8 @@ ASSERT_HOOK_MATCHES_PROD(g_profilerStartGroupApiEvent, ncclProfilerStartGroupApi
 ASSERT_HOOK_MATCHES_PROD(g_profilerStopGroupApiEvent, ncclProfilerStopGroupApiEvent);
 ASSERT_HOOK_MATCHES_PROD(g_profilerStartCollApiEvent, ncclProfilerStartCollApiEvent);
 ASSERT_HOOK_MATCHES_PROD(g_profilerStopCollApiEvent, ncclProfilerStopCollApiEvent);
-ASSERT_HOOK_MATCHES_PROD(g_profilerStartAddonCollEvent, ncclProfilerStartAddonCollEvent);
-ASSERT_HOOK_MATCHES_PROD(g_profilerStopAddonCollEvent, ncclProfilerStopAddonCollEvent);
+ASSERT_HOOK_MATCHES_PROD(g_profilerStartAddonEvent, ncclProfilerStartAddonEvent);
+ASSERT_HOOK_MATCHES_PROD(g_profilerStopAddonEvent, ncclProfilerStopAddonEvent);
 
 #undef ASSERT_HOOK_MATCHES_PROD
 
@@ -86,16 +86,17 @@ std::function<ncclResult_t()> g_profilerStopGroupApiEvent = DefaultProfilerStopA
 std::function<ncclResult_t(struct ncclInfo*, bool)> g_profilerStartCollApiEvent = DefaultProfilerStartApiEvent;
 std::function<ncclResult_t()> g_profilerStopCollApiEvent = DefaultProfilerStopApiEvent;
 
-static ncclResult_t DefaultProfilerStartAddonCollEvent(struct ncclInfo*, bool, void**) {
+static ncclResult_t DefaultProfilerStartAddonEvent(struct ncclInfo*, bool,
+                                                   struct ncclProfilerEventRef*, struct ncclProfilerEventRef*) {
   return ncclSuccess;
 }
-static ncclResult_t DefaultProfilerStopAddonCollEvent(void*) {
+static ncclResult_t DefaultProfilerStopAddonEvent(struct ncclProfilerEventRef*, struct ncclProfilerEventRef*) {
   return ncclSuccess;
 }
-std::function<ncclResult_t(struct ncclInfo*, bool, void**)> g_profilerStartAddonCollEvent =
-    DefaultProfilerStartAddonCollEvent;
-std::function<ncclResult_t(void*)> g_profilerStopAddonCollEvent =
-    DefaultProfilerStopAddonCollEvent;
+std::function<ncclResult_t(struct ncclInfo*, bool, struct ncclProfilerEventRef*, struct ncclProfilerEventRef*)>
+    g_profilerStartAddonEvent = DefaultProfilerStartAddonEvent;
+std::function<ncclResult_t(struct ncclProfilerEventRef*, struct ncclProfilerEventRef*)>
+    g_profilerStopAddonEvent = DefaultProfilerStopAddonEvent;
 
 // alloc.h per-device allocation counters, defined in src/init.cc.
 struct allocationTracker allocTracker[MAX_ALLOC_TRACK_NGPU] = {};
@@ -110,8 +111,8 @@ void ResetCommFakes() {
   g_profilerStopGroupApiEvent = DefaultProfilerStopApiEvent;
   g_profilerStartCollApiEvent = DefaultProfilerStartApiEvent;
   g_profilerStopCollApiEvent = DefaultProfilerStopApiEvent;
-  g_profilerStartAddonCollEvent = DefaultProfilerStartAddonCollEvent;
-  g_profilerStopAddonCollEvent = DefaultProfilerStopAddonCollEvent;
+  g_profilerStartAddonEvent = DefaultProfilerStartAddonEvent;
+  g_profilerStopAddonEvent = DefaultProfilerStopAddonEvent;
   g_commEnsureReadyResult = ncclSuccess;
   g_envCtaPolicy = NCCL_CONFIG_UNDEF_INT;
   ncclGdrCopy = nullptr;
@@ -158,11 +159,14 @@ ncclResult_t ncclProfilerStartP2pApiEvent(struct ncclInfo*, bool) {
 ncclResult_t ncclProfilerStopP2pApiEvent() {
   return ncclSuccess;
 }
-ncclResult_t ncclProfilerStartAddonCollEvent(struct ncclInfo* info, bool isGraphCaptured, void** eHandle) {
-  return g_profilerStartAddonCollEvent(info, isGraphCaptured, eHandle);
+ncclResult_t ncclProfilerStartAddonEvent(struct ncclInfo* info, bool isGraphCaptured,
+                                         struct ncclProfilerEventRef* groupEventHandle,
+                                         struct ncclProfilerEventRef* collEventHandle) {
+  return g_profilerStartAddonEvent(info, isGraphCaptured, groupEventHandle, collEventHandle);
 }
-ncclResult_t ncclProfilerStopAddonCollEvent(void* eHandle) {
-  return g_profilerStopAddonCollEvent(eHandle);
+ncclResult_t ncclProfilerStopAddonEvent(struct ncclProfilerEventRef* groupEventHandle,
+                                        struct ncclProfilerEventRef* collEventHandle) {
+  return g_profilerStopAddonEvent(groupEventHandle, collEventHandle);
 }
 ncclResult_t ncclProfilerStartCeCollEvent(struct ncclComm* comm, struct ncclCeCollArgs* args, hipStream_t stream) {
   return g_profilerStartCeCollEvent(comm, args, stream);
