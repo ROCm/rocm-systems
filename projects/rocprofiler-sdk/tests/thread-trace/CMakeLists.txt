@@ -35,22 +35,25 @@ rocprofiler_add_integration_execute_test(
     PRELOAD "$<TARGET_FILE:thread-trace-agent-tool>")
 
 # Same agent profiling test, but forcing the HSA queue/signal backend instead of KFD.
+# ROCPROFILER_LOG_LEVEL=info: this test hung once in CI and printed nothing. ctest shows
+# the output of a test that times out, so the log shows where it stopped.
 rocprofiler_add_integration_execute_test(
     thread-trace-api-agent-hsa-fallback-test
     TARGET thread-trace-test-app
     TIMEOUT 10
     LABELS "integration-tests"
     PRELOAD "$<TARGET_FILE:thread-trace-agent-tool>"
-    ENVIRONMENT "ROCPROFILER_SQTT_FORCE_HSA=1")
+    ENVIRONMENT "ROCPROFILER_SQTT_FORCE_HSA=1;ROCPROFILER_LOG_LEVEL=info")
 
 # Start before hsa_init(): verifies the request is cached and replayed once HSA registers.
+# ROCPROFILER_LOG_LEVEL=info: same reason as above.
 rocprofiler_add_integration_execute_test(
     thread-trace-api-agent-before-hsa-init-test
     TARGET thread-trace-test-app
     TIMEOUT 10
     LABELS "integration-tests"
     PRELOAD "$<TARGET_FILE:thread-trace-agent-tool>"
-    ENVIRONMENT "ATT_START_BEFORE_HSA_INIT=1")
+    ENVIRONMENT "ATT_START_BEFORE_HSA_INIT=1;ROCPROFILER_LOG_LEVEL=info")
 
 # Start+stop before hsa_init(): verifies the cached request is dropped and not replayed.
 rocprofiler_add_integration_execute_test(
