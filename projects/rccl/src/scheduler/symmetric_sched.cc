@@ -441,7 +441,7 @@ static ncclResult_t ncclSymmetricTaskSchedulerImpl(
       ret = ncclInternalError;
       goto fail;
     }
-    plan->kernelArgsSize = std::max<size_t>(plan->kernelArgsSize, kArgs4K);
+    plan->kernelArgsSize = kArgs4K;
   }
   argsBuf = (Args*)calloc(1, plan->kernelArgsSize);
   if (argsBuf == NULL) {
