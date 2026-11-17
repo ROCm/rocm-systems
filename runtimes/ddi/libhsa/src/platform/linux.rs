@@ -4,7 +4,7 @@
 //! Linux KFD and descriptor translation for the HSA frontend.
 
 mod fork;
-#[cfg(all(target_os = "linux", target_arch = "x86_64", not(test)))]
+#[cfg(all(hsa_tool_dispatch, not(test)))]
 pub(crate) mod tooling;
 pub(crate) use fork::{bind_process, process_is_current};
 

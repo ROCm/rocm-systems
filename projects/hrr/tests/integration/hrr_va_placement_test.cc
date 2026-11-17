@@ -10,7 +10,7 @@
  * @ingroup HRRTest
  * A device pointer the program stored in device memory with an H2D copy is
  * right at replay only if its allocation lands at its recorded address
- * (vLLM's block table, ROCM-31827). The kernel also gets the buffer as an
+ * (vLLM's block table). The kernel also gets the buffer as an
  * argument, which replay translates, and reads through the stored pointer only
  * when the two agree, so a stale pointer fails a D2H check instead of faulting.
  */
@@ -81,7 +81,7 @@ void hrr_place_round(int* out, int seed, hipStream_t s) {
 }  // namespace
 
 TEST_CASE("Unit_HRR_VaPlacement_Direct", "[.][hrr-direct]") {
-  HRR_HIP_CHECK(hipFree(nullptr));  // ROCM-30200: not the allocation first
+  HRR_HIP_CHECK(hipFree(nullptr));  // not the allocation first
   HRR_HIP_CHECK(hipSetDevice(0));
   int* out = nullptr;
   HRR_HIP_CHECK(hipMalloc(&out, kBytes));

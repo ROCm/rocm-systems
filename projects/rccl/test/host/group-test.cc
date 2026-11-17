@@ -1972,6 +1972,7 @@ class GroupRegisterSymmetricDevCommTest : public ::testing::Test {
   ncclDevComm outDevComm_{};
   ncclDevCommCompat saved22902_{}, saved22907_{};
   static int newToOldCalls_;
+  int lsaRank0_ = 0;
 
   void SetUp() override {
     ResetCeFakes();
@@ -1996,7 +1997,8 @@ class GroupRegisterSymmetricDevCommTest : public ::testing::Test {
     sharedRes_ = std::make_unique<ncclSharedResources>();
     comm_->sharedRes = sharedRes_.get();
     comm_->nRanks = 1;
-    comm_->devrState.lsaSize = 1;
+    comm_->devrState.lsaDomainSize = comm_->devrState.lsaTeamSize = 1;
+    comm_->devrState.lsaDomainRankList = comm_->devrState.lsaTeamRankList = &lsaRank0_;
     comm_->devrState.cftSize = 1;    // ncclDevrInitOnce never ran; it would set both to >= 1
     comm_->devrState.cftMcSize = 1;
     comm_->devrState.granularity = 1;

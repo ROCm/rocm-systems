@@ -13,6 +13,7 @@
 #include <csignal>
 #include <cstring>
 #include <new>
+#include <poll.h>
 #include <pthread.h>
 #include <string_view>
 #include <sys/epoll.h>
@@ -24,6 +25,7 @@
 #include <sys/shm.h>
 #include <sys/socket.h>
 #include <sys/statfs.h>
+#include <sys/timerfd.h>
 #include <sys/un.h>
 #include <sys/xattr.h>
 #include <unistd.h>
@@ -270,7 +272,42 @@ void *watch_lease(void *argument) {
                 offsetof(sockaddr_un, sun_path) + 1 + length) != 0 ||
       host_call(libc_passthrough().listen, ::listen, listener, SOMAXCONN) != 0)
     fail_startup(errno);
-  const int parent = host_pidfd_open(owner, 0);
+  int parent = host_pidfd_open(owner, 0);
+  UniqueDriverFd owner_stat;
+  if (parent < 0 && errno == ENOSYS) {
+    // Only the owner can pin its identity unambiguously when the mounted
+    // procfs belongs to an ancestor PID namespace.
+    const int pass_credentials = 1;
+    if (host_call(libc_passthrough().setsockopt, ::setsockopt, startup, SOL_SOCKET, SO_PASSCRED,
+                  &pass_credentials, sizeof(pass_credentials)) != 0)
+      fail_startup(errno);
+    if (send_keeper_descriptor(startup, &kKeeperRequestOwnerStat, sizeof(kKeeperRequestOwnerStat),
+                               -1) < 0)
+      fail_startup(errno);
+    // A concurrent application fork can retain a startup socket after the owner exits.
+    pollfd reply{startup, POLLIN, 0};
+    int ready;
+    do {
+      ready = host_call(libc_passthrough().poll, ::poll, &reply, 1, 10000);
+    } while (ready < 0 && errno == EINTR);
+    if (ready <= 0)
+      fail_startup(ready < 0 ? errno : ETIMEDOUT);
+    uint32_t response = 0;
+    int file = -1;
+    pid_t sender = -1;
+    const long received = receive_keeper_descriptor(startup, &response, sizeof(response), file,
+                                                    MSG_DONTWAIT, nullptr, &sender);
+    owner_stat.reset(file);
+    if (received != sizeof(response) || response != kKeeperRequestOwnerStat || !owner_stat ||
+        sender != owner)
+      fail_startup(received < 0 ? errno : EPROTO);
+    parent = timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC | TFD_NONBLOCK);
+    if (parent >= 0) {
+      constexpr itimerspec interval{{0, 250'000'000}, {0, 250'000'000}};
+      if (timerfd_settime(parent, 0, &interval, nullptr) < 0)
+        fail_startup(errno);
+    }
+  }
   if (parent < 0)
     fail_startup(errno);
   const int epoll = host_call(libc_passthrough().epoll_create1, ::epoll_create1, EPOLL_CLOEXEC);
@@ -484,6 +521,13 @@ void *watch_lease(void *argument) {
                request.mode == channel.mode) {
       descriptor = host_call(libc_passthrough().fcntl, ::fcntl, region->file, F_DUPFD_CLOEXEC, 0);
       result = descriptor >= 0 ? 0 : errno;
+    } else if (!region && request.operation == KeeperOperation::ReserveFile && incoming >= 0) {
+      // A sparse tmpfs file can SIGBUS on its first write with a full mount.
+      // Reserve in the keeper so the application retains its current file limit.
+      result = host_call(libc_passthrough().fallocate, ::fallocate, incoming, 0, 0,
+                         static_cast<off_t>(request.size)) == 0
+                   ? 0
+                   : errno;
     } else if (!region && (request.operation == KeeperOperation::SizeFile || batch_file)) {
       if (incoming >= 0) {
         result = host_call(libc_passthrough().ftruncate, ::ftruncate, incoming, request.size) == 0
@@ -520,7 +564,7 @@ void *watch_lease(void *argument) {
           result = descriptor >= 0 ? 0 : errno;
         }
       }
-      if (region || result == EFBIG || result == EOPNOTSUPP) {
+      if (region || result == EFBIG || result == EOPNOTSUPP || result == ENOSYS) {
         Region *backing =
             region ? region
                    : create_region(
@@ -561,7 +605,16 @@ void *watch_lease(void *argument) {
       if (channel == &parent_event || channel == &lease_event) {
         if (!owner_alive)
           continue;
+        if (channel == &parent_event && owner_stat) {
+          uint64_t expirations;
+          if (host_call(libc_passthrough().read, ::read, parent, &expirations,
+                        sizeof(expirations)) < 0)
+            continue;
+          if (proc_stat_is_exited(owner_stat.get()) == 0)
+            continue;
+        }
         owner_alive = false;
+        owner_stat.reset();
         host_call(libc_passthrough().epoll_ctl, ::epoll_ctl, epoll, EPOLL_CTL_DEL, parent, nullptr);
         host_call(libc_passthrough().epoll_ctl, ::epoll_ctl, epoll, EPOLL_CTL_DEL, listener,
                   nullptr);
@@ -580,9 +633,12 @@ void *watch_lease(void *argument) {
           continue;
         ucred peer{};
         socklen_t peer_size = sizeof(peer);
+        // A new process can reuse the PID between timer ticks. Check the pinned
+        // owner after reading the peer credentials.
         if (host_call(libc_passthrough().getsockopt, ::getsockopt, socket, SOL_SOCKET, SO_PEERCRED,
                       &peer, &peer_size) != 0 ||
-            peer.pid != owner || peer.uid != geteuid() || peer.gid != getegid()) {
+            peer.pid != owner || peer.uid != geteuid() || peer.gid != getegid() ||
+            (owner_stat && proc_stat_is_exited(owner_stat.get()) != 0)) {
           host_close_fd(socket);
           continue;
         }
