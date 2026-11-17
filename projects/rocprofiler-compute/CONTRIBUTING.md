@@ -84,9 +84,6 @@ empty (`metavar=""`).
 - If the value is optional (`nargs="?"` or `nargs="*"`), use `metavar="arg"`.
   The help adds the `[]` automatically.
 
-`CliHelpFormatter` adds `...` to options that take a list, so `<args>` shows as
-`<args>...` and `args` shows as `[args]...`.
-
 For an option that takes an argument, the help message follows these rules:
 
 | Case | Notation |
@@ -181,7 +178,7 @@ profile_group.add_argument(
     type=str,
     nargs="*",
     metavar="values",
-    help="Description of your feature",
+    help="\t\t\tDescription of your feature",
 )
 
 # For a boolean toggle flag
@@ -194,7 +191,7 @@ analyze_group.add_argument(
     experimental_enabled=experimental_enabled,
     feature_label="Your feature description",
     base_action="store_true",  # Required — see supported actions below
-    help="Description of your feature",
+    help="\t\tDescription of your feature",
 )
 ```
 
