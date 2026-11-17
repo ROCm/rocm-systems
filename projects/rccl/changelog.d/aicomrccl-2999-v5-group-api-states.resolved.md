@@ -1,0 +1,1 @@
+* Fixed v5 profiler plugins never receiving the `ncclProfilerGroupStartApiStop` and `ncclProfilerGroupEndApiStart` group-API states. RCCL records these states without arguments, and the v5 adapter dropped every state recorded without arguments. They now reach the plugin with zeroed arguments, as they already did for v6 plugins.
