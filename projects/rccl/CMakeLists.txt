@@ -103,7 +103,18 @@ endif()
 option(ENABLE_IFC                              "Enable indirect function call"                 OFF)
 option(ENABLE_NET_PROFILING                    "Emit NET_IB/NET_SOCK profiler events"          OFF)
 option(ENABLE_DEVICE_LINKER                    "Build with assembly-extract device linker"     ON)
-option(EMIT_LLVM_IR                            "Emit LLVM IR/bitcode for nccl_device APIs"     OFF)
+# EMIT_LLVM_IR is the name before NCCL 2.32.6. Consume it on every configure, so it still works in a build
+# directory that already caches NCCL_EMIT_LLVM_IR. An entry left by the old option() carries its help string;
+# it only seeds NCCL_EMIT_LLVM_IR. A value given with -DEMIT_LLVM_IR always wins, also over a -DNCCL_EMIT_LLVM_IR
+# on the same command line, because CMake cannot tell that from a value cached by an earlier configure.
+if(DEFINED EMIT_LLVM_IR)
+  get_property(_emitLlvmIrHelp CACHE EMIT_LLVM_IR PROPERTY HELPSTRING)
+  if(NOT (DEFINED NCCL_EMIT_LLVM_IR AND _emitLlvmIrHelp STREQUAL "Emit LLVM IR/bitcode for nccl_device APIs"))
+    set(NCCL_EMIT_LLVM_IR ${EMIT_LLVM_IR} CACHE BOOL "Emit LLVM IR/bitcode for nccl_device APIs" FORCE)
+  endif()
+  unset(EMIT_LLVM_IR CACHE)
+endif()
+option(NCCL_EMIT_LLVM_IR                       "Emit LLVM IR/bitcode for nccl_device APIs"     OFF)
 option(DISABLE_KERNARG_PRELOAD                 "Disable amdgpu-kernarg-preload-count compile/link flag" OFF)
 option(BUILD_NCCL4PY                           "Build the nccl4py Python bindings wheel"       OFF)
 # Move .hip_fatbin to the end of librccl.so so that small-code-model host
@@ -146,7 +157,6 @@ if(ENABLE_ROCSHMEM AND ENABLE_ROCSHMEM_GIN)
   message(FATAL_ERROR "ENABLE_ROCSHMEM and ENABLE_ROCSHMEM_GIN are mutually exclusive")
 endif()
 set(ROCSHMEM_CMAKE_OPTIONS "" CACHE STRING     "Extra cmake options passed to the rocSHMEM ExternalProject build")
-option(GIN_ANVIL_UNIT_TESTS                    "Build GIN Anvil device-template unit tests (ENABLE_ROCSHMEM_GIN on Fixtures; no full librocshmem in librccl)" OFF)
 option(ENABLE_WARP_SPEED                       "Enable WARP_SPEED optimizations"               OFF)
 option(ENABLE_RCCL_EP_TESTS                    "Build rccl_ep multi-GPU tests; needs ENABLE_MPI_TESTS and a runtime with working cuMem symmetric memory" OFF)
 option(ENABLE_RCCL_EP_IN_LIBRCCL               "Compile rccl_ep into librccl.so instead of the standalone librccl_ep.so; gfx9 only" OFF)
@@ -856,11 +866,11 @@ endif()
 
 # LLVM IR / bitcode for nccl_device APIs (HIP / AMDGPU)
 #==================================================================================================
-# When EMIT_LLVM_IR=ON, build a standalone LLVM bitcode artifact (librccl_device.bc)
+# When NCCL_EMIT_LLVM_IR=ON, build a standalone LLVM bitcode artifact (librccl_device.bc)
 # plus a C wrapper header (nccl_device_wrapper.h) from src/include/nccl_device/.
 # The bitcode is generated from the hipify-staged headers that librccl.so itself
 # is compiled from, so the IR is guaranteed to match the host library.
-if(EMIT_LLVM_IR)
+if(NCCL_EMIT_LLVM_IR)
   add_subdirectory(bindings/ir)
   # bindings/ir/ reads headers out of ${PROJECT_BINARY_DIR}/hipify, which is
   # populated by the copy_nccl_device_headers target defined in src/CMakeLists.txt.
@@ -909,11 +919,11 @@ if(ENABLE_ROCSHMEM_GIN AND ROCSHMEM_SOURCE_DIR)
     ${ROCSHMEM_SOURCE_DIR}/src/sdma/sdma_pkt_struct_mi4.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/nccl_device/gin/anvil_sdma/sdma)
 endif()
-## Optional: install LLVM bitcode artifacts when EMIT_LLVM_IR is enabled.
+## Optional: install LLVM bitcode artifacts when NCCL_EMIT_LLVM_IR is enabled.
 ## librccl_device.bc, nccl_device_wrapper.h, hipified nccl_device headers,
 ## and nccl.h (same as rccl.h; nccl_device #includes <nccl.h>) are produced
 ## before install because rccl_with_ir is part of ALL.
-if(EMIT_LLVM_IR)
+if(NCCL_EMIT_LLVM_IR)
   rocm_install(FILES       ${PROJECT_BINARY_DIR}/lib/librccl_device.bc
                DESTINATION ${CMAKE_INSTALL_LIBDIR}/rccl)
   rocm_install(FILES       ${PROJECT_BINARY_DIR}/include/nccl_device_wrapper.h

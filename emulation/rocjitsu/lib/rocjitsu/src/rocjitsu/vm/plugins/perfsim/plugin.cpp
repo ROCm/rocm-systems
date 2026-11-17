@@ -27,7 +27,6 @@
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -51,16 +50,23 @@ static_assert(kOldestCompatibleApiVersion <= FFM_OBSERVER_PLUGIN_CURRENT_API_VER
 
 class InstanceClaim {
 public:
-  InstanceClaim() {
+  InstanceClaim() = default;
+
+  util::Result acquire(util::DiagnosticEmitter diagnostic) {
     if (claimed().test_and_set(std::memory_order_acq_rel))
-      throw std::runtime_error("only one Perfsim plugin instance may be active in a process");
+      return diagnostic.emit() << "only one Perfsim plugin instance may be active in a process";
     owns_claim_ = true;
+    return util::Result::success();
   }
 
-  ~InstanceClaim() {
-    if (owns_claim_)
+  void release() {
+    if (owns_claim_) {
       claimed().clear(std::memory_order_release);
+      owns_claim_ = false;
+    }
   }
+
+  ~InstanceClaim() { release(); }
 
   InstanceClaim(const InstanceClaim &) = delete;
   InstanceClaim &operator=(const InstanceClaim &) = delete;
@@ -87,7 +93,8 @@ BackendLibraryRegistry &backend_libraries() {
   return *registry;
 }
 
-util::LibraryHandle retain_backend_library(const std::string &path) {
+util::FailureOr<util::LibraryHandle> retain_backend_library(const std::string &path,
+                                                            util::DiagnosticEmitter diagnostic) {
   BackendLibraryRegistry &registry = backend_libraries();
   std::lock_guard lock(registry.mutex);
 
@@ -96,15 +103,23 @@ util::LibraryHandle retain_backend_library(const std::string &path) {
 
   util::LibraryHandle handle = util::open_library(path.c_str());
   if (!handle)
-    throw std::runtime_error(
-        std::format("cannot load Perfsim backend '{}': {}", path, util::last_library_error()));
+    return diagnostic.emit() << "cannot load Perfsim backend '" << path
+                             << "': " << util::last_library_error();
   registry.by_path.emplace(path, handle);
   return handle;
 }
 
 class RetainedSharedLibrary {
 public:
-  explicit RetainedSharedLibrary(const std::string &path) : handle_(retain_backend_library(path)) {}
+  RetainedSharedLibrary() = default;
+
+  util::Result open(const std::string &path, util::DiagnosticEmitter diagnostic) {
+    const util::FailureOr<util::LibraryHandle> handle = retain_backend_library(path, diagnostic);
+    if (handle.failed())
+      return util::Result::failure();
+    handle_ = handle.value();
+    return util::Result::success();
+  }
 
   RetainedSharedLibrary(const RetainedSharedLibrary &) = delete;
   RetainedSharedLibrary &operator=(const RetainedSharedLibrary &) = delete;
@@ -122,31 +137,32 @@ struct AdapterConfig {
   std::optional<size_t> max_observed_workgroups;
 };
 
-AdapterConfig parse_config(const char *config_json) {
+util::FailureOr<AdapterConfig> parse_config(const char *config_json,
+                                            util::DiagnosticEmitter diagnostic) {
   if (!config_json)
-    throw std::invalid_argument("Perfsim plugin configuration is null");
+    return diagnostic.emit() << "Perfsim plugin configuration is null";
 
   flexbuffers::Builder builder;
   flatbuffers::Parser parser;
   if (!parser.ParseFlexBuffer(config_json, nullptr, &builder))
-    throw std::invalid_argument("Perfsim plugin configuration is not valid JSON");
+    return diagnostic.emit() << "Perfsim plugin configuration is not valid JSON";
 
   const auto root = flexbuffers::GetRoot(builder.GetBuffer());
   if (!root.IsMap())
-    throw std::invalid_argument("Perfsim plugin configuration must be an object");
+    return diagnostic.emit() << "Perfsim plugin configuration must be an object";
   const auto config = root.AsMap();
   const auto path = config["library_path"];
   if (!path.IsString() || path.AsString().size() == 0)
-    throw std::invalid_argument("Perfsim plugin requires a non-empty string 'library_path'");
+    return diagnostic.emit() << "Perfsim plugin requires a non-empty string 'library_path'";
   AdapterConfig result;
   result.library_path.assign(path.AsString().c_str(), path.AsString().size());
   if (!std::filesystem::path(result.library_path).is_absolute())
-    throw std::invalid_argument("Perfsim plugin 'library_path' must be absolute");
+    return diagnostic.emit() << "Perfsim plugin 'library_path' must be absolute";
 
   const auto dispatch_name = config["dispatch_name"];
   if (!dispatch_name.IsNull()) {
     if (!dispatch_name.IsString() || dispatch_name.AsString().size() == 0) {
-      throw std::invalid_argument("Perfsim plugin 'dispatch_name' must be a non-empty string");
+      return diagnostic.emit() << "Perfsim plugin 'dispatch_name' must be a non-empty string";
     }
     result.dispatch_name.emplace(dispatch_name.AsString().c_str(), dispatch_name.AsString().size());
   }
@@ -155,13 +171,13 @@ AdapterConfig parse_config(const char *config_json) {
   if (!max_staged_bytes.IsNull()) {
     if (!max_staged_bytes.IsIntOrUint() ||
         (max_staged_bytes.IsInt() && max_staged_bytes.AsInt64() <= 0)) {
-      throw std::invalid_argument("Perfsim plugin 'max_staged_bytes' must be a positive integer");
+      return diagnostic.emit() << "Perfsim plugin 'max_staged_bytes' must be a positive integer";
     }
     const uint64_t value = max_staged_bytes.AsUInt64();
     if (value == 0)
-      throw std::invalid_argument("Perfsim plugin 'max_staged_bytes' must be a positive integer");
+      return diagnostic.emit() << "Perfsim plugin 'max_staged_bytes' must be a positive integer";
     if (value > std::numeric_limits<size_t>::max())
-      throw std::invalid_argument("Perfsim plugin 'max_staged_bytes' is too large");
+      return diagnostic.emit() << "Perfsim plugin 'max_staged_bytes' is too large";
     result.max_staged_bytes = static_cast<size_t>(value);
   }
 
@@ -169,15 +185,15 @@ AdapterConfig parse_config(const char *config_json) {
   if (!max_observed_workgroups.IsNull()) {
     if (!max_observed_workgroups.IsIntOrUint() ||
         (max_observed_workgroups.IsInt() && max_observed_workgroups.AsInt64() <= 0)) {
-      throw std::invalid_argument(
-          "Perfsim plugin 'max_observed_workgroups' must be a positive integer");
+      return diagnostic.emit()
+             << "Perfsim plugin 'max_observed_workgroups' must be a positive integer";
     }
     const uint64_t value = max_observed_workgroups.AsUInt64();
     if (value == 0)
-      throw std::invalid_argument(
-          "Perfsim plugin 'max_observed_workgroups' must be a positive integer");
+      return diagnostic.emit()
+             << "Perfsim plugin 'max_observed_workgroups' must be a positive integer";
     if (value > std::numeric_limits<size_t>::max())
-      throw std::invalid_argument("Perfsim plugin 'max_observed_workgroups' is too large");
+      return diagnostic.emit() << "Perfsim plugin 'max_observed_workgroups' is too large";
     result.max_observed_workgroups = static_cast<size_t>(value);
   }
   return result;
@@ -505,14 +521,23 @@ FfmDispatchMetadata make_dispatch_metadata(const KernelDispatchInfo &info) {
 } // namespace
 
 struct PerfsimPlugin::Impl {
-  explicit Impl(PerfsimPlugin &owner, const char *config_json)
-      : owner(owner), config(parse_config(config_json)), library(config.library_path) {
+  explicit Impl(PerfsimPlugin &owner) : owner(owner) {}
+
+  util::Result initialize(const char *config_json, util::DiagnosticEmitter diagnostic) {
+    if (instance_claim.acquire(diagnostic).failed())
+      return util::Result::failure();
+    util::FailureOr<AdapterConfig> parsed = parse_config(config_json, diagnostic);
+    if (parsed.failed())
+      return util::Result::failure();
+    config = std::move(parsed).value();
+    if (library.open(config.library_path, diagnostic).failed())
+      return util::Result::failure();
     const auto get_api = util::lookup_symbol<FfmObserverPluginGetApiFn>(
         library.get(), "ffm_observer_plugin_get_api");
     if (!get_api)
-      throw std::runtime_error(
-          std::format("Perfsim backend '{}' is missing ffm_observer_plugin_get_api: {}",
-                      config.library_path, util::last_library_error()));
+      return diagnostic.emit() << "Perfsim backend '" << config.library_path
+                               << "' is missing ffm_observer_plugin_get_api: "
+                               << util::last_library_error();
 
     FfmObserverPluginApi *raw_api = nullptr;
     for (uint32_t requested_version = FFM_OBSERVER_PLUGIN_CURRENT_API_VERSION;;
@@ -523,11 +548,11 @@ struct PerfsimPlugin::Impl {
         std::memcpy(&returned_version, raw_api, sizeof(returned_version));
         if (returned_version < kOldestCompatibleApiVersion ||
             returned_version > requested_version) {
-          throw std::runtime_error(std::format(
-              "Perfsim backend returned incompatible API version {} for version {} request; "
-              "supported versions are {} through {}",
-              returned_version, requested_version, kOldestCompatibleApiVersion,
-              FFM_OBSERVER_PLUGIN_CURRENT_API_VERSION));
+          return diagnostic.emit() << std::format(
+                     "Perfsim backend returned incompatible API version {} for version {} request; "
+                     "supported versions are {} through {}",
+                     returned_version, requested_version, kOldestCompatibleApiVersion,
+                     FFM_OBSERVER_PLUGIN_CURRENT_API_VERSION);
         }
         negotiated_api_version = returned_version;
         std::memcpy(&api, raw_api, sizeof(api));
@@ -537,17 +562,26 @@ struct PerfsimPlugin::Impl {
         break;
     }
     if (!raw_api)
-      throw std::runtime_error(
-          std::format("Perfsim backend rejected supported FFM API versions {} through {}",
-                      kOldestCompatibleApiVersion, FFM_OBSERVER_PLUGIN_CURRENT_API_VERSION));
+      return diagnostic.emit() << std::format(
+                 "Perfsim backend rejected supported FFM API versions {} through {}",
+                 kOldestCompatibleApiVersion, FFM_OBSERVER_PLUGIN_CURRENT_API_VERSION);
 
-    require_callback(api.on_init, "on_init");
-    require_callback(api.on_dispatch_begin, "on_dispatch_begin");
-    require_callback(api.on_dispatch_end, "on_dispatch_end");
-    require_callback(api.on_instruction, "on_instruction");
-    require_callback(api.on_memory_access, "on_memory_access");
-    require_callback(api.on_tdm_memory_access, "on_tdm_memory_access");
-    require_callback(api.on_shutdown, "on_shutdown");
+    if (require_callback(api.on_init, "on_init", diagnostic).failed())
+      return util::Result::failure();
+    if (require_callback(api.on_dispatch_begin, "on_dispatch_begin", diagnostic).failed())
+      return util::Result::failure();
+    if (require_callback(api.on_dispatch_end, "on_dispatch_end", diagnostic).failed())
+      return util::Result::failure();
+    if (require_callback(api.on_instruction, "on_instruction", diagnostic).failed())
+      return util::Result::failure();
+    if (require_callback(api.on_memory_access, "on_memory_access", diagnostic).failed())
+      return util::Result::failure();
+    if (require_callback(api.on_tdm_memory_access, "on_tdm_memory_access", diagnostic).failed())
+      return util::Result::failure();
+    if (require_callback(api.on_shutdown, "on_shutdown", diagnostic).failed())
+      return util::Result::failure();
+    shutdown_called = false;
+    return util::Result::success();
   }
 
   ~Impl() {
@@ -556,10 +590,12 @@ struct PerfsimPlugin::Impl {
     // of the process lifetime.
   }
 
-  template <typename Callback> void require_callback(Callback callback, const char *name) {
+  template <typename Callback>
+  util::Result require_callback(Callback callback, const char *name,
+                                util::DiagnosticEmitter diagnostic) {
     if (!callback)
-      throw std::runtime_error(
-          std::format("Perfsim backend is missing required callback {}", name));
+      return diagnostic.emit() << "Perfsim backend is missing required callback " << name;
+    return util::Result::success();
   }
 
   static std::mutex &host_log_mutex() {
@@ -590,17 +626,12 @@ struct PerfsimPlugin::Impl {
   }
 
   static void host_log(FfmLogLevel level, const char *message) noexcept {
-    try {
-      std::lock_guard lock(host_log_mutex());
-      Impl *instance = host_log_instance();
-      if (!instance)
-        return;
-      instance->owner.sink().write(
-          std::format("[perfsim:{}] {}\n", host_log_level_name(level), message ? message : ""));
-    } catch (...) {
-      // The logger is a C ABI callback and must not propagate an exception into
-      // the backend. A failed diagnostic must not abort emulation.
-    }
+    std::lock_guard lock(host_log_mutex());
+    Impl *instance = host_log_instance();
+    if (!instance)
+      return;
+    instance->owner.sink().write(
+        std::format("[perfsim:{}] {}\n", host_log_level_name(level), message ? message : ""));
   }
 
   void activate_host_log() {
@@ -627,13 +658,7 @@ struct PerfsimPlugin::Impl {
     if (supports_host_log)
       activate_host_log();
     const FfmHostApi host{negotiated_api_version, supports_host_log ? &host_log : nullptr};
-    try {
-      invoke_foreign_abi(api.on_init, &host);
-    } catch (...) {
-      if (supports_host_log)
-        deactivate_host_log();
-      throw;
-    }
+    invoke_foreign_abi(api.on_init, &host);
     initialized = true;
   }
 
@@ -792,6 +817,8 @@ struct PerfsimPlugin::Impl {
   }
 
   bool record_event(OrderedEvent event) {
+    if (!initialized)
+      return false;
     const size_t dynamic_bytes = staged_dynamic_size(event);
     if (!can_stage_event(event.dispatch_id, dynamic_bytes))
       return false;
@@ -870,6 +897,8 @@ struct PerfsimPlugin::Impl {
   }
 
   void drain_epoch(bool shutdown) {
+    if (!initialized)
+      return;
     if (!replay_blockers.empty())
       return;
 
@@ -993,7 +1022,9 @@ struct PerfsimPlugin::Impl {
       reject_wave(wave, access.dispatch_id, "memory route or decoded address space is unknown");
       return;
     }
-    if (access.wavefront_size != 32 || access.addresses.size() != access.wavefront_size ||
+    if (access.wavefront_size != 32 ||
+        (access.image_sample_footprints.empty() &&
+         access.addresses.size() != access.wavefront_size) ||
         (!access.pre_routing_addresses.empty() &&
          access.pre_routing_addresses.size() != access.wavefront_size) ||
         (!access.secondary_addresses.empty() &&
@@ -1037,6 +1068,25 @@ struct PerfsimPlugin::Impl {
       }
     }
 
+    if (!access.image_sample_footprints.empty()) {
+      if (access.route != amdgpu::MemoryRoute::GLOBAL ||
+          access.decoded_space != amdgpu::DecodedMemorySpace::GLOBAL || !access.is_load ||
+          !access.addresses.empty() || !access.secondary_addresses.empty()) {
+        reject_wave(wave, access.dispatch_id, "image sample has inconsistent routing");
+        return;
+      }
+      for (const auto &footprint : access.image_sample_footprints) {
+        if (footprint.addresses.size() != access.wavefront_size ||
+            (footprint.lane_mask & ~access.request_lane_mask) != 0) {
+          reject_wave(wave, access.dispatch_id, "image sample has an invalid footprint");
+          return;
+        }
+        if (footprint.lane_mask)
+          record_memory(*wave, access, footprint.lane_mask, FFM_RESOURCE_GLOBAL,
+                        footprint.addresses);
+      }
+      return;
+    }
     const uint64_t requests = access.request_lane_mask;
     if (requests == 0)
       return;
@@ -1236,7 +1286,8 @@ struct PerfsimPlugin::Impl {
   FfmObserverPluginApiPrefix api{};
   uint32_t negotiated_api_version = 0;
   bool initialized = false;
-  bool shutdown_called = false;
+  // Failed startup candidates only release members; enable cleanup after validation.
+  bool shutdown_called = true;
   bool dispatch_name_matched = false;
   std::unordered_map<uint32_t, DispatchState> dispatches;
   // Only supported in-flight dispatches block ordered replay. Rejected
@@ -1248,14 +1299,30 @@ struct PerfsimPlugin::Impl {
   size_t staged_bytes = 0;
 };
 
-PerfsimPlugin::PerfsimPlugin(const char *config_json)
-    : ExecutionPlugin("perfsim"), impl_(std::make_unique<Impl>(*this, config_json)) {}
+PerfsimPlugin::PerfsimPlugin() : ExecutionPlugin("perfsim") {}
 
-PerfsimPlugin::~PerfsimPlugin() { impl_->shutdown(); }
+util::Result PerfsimPlugin::initialize(const char *config_json,
+                                       util::DiagnosticEmitter diagnostic) {
+  if (impl_)
+    return diagnostic.emit() << "Perfsim plugin is already configured";
+  auto impl = std::make_unique<Impl>(*this);
+  if (impl->initialize(config_json, diagnostic).failed())
+    return util::Result::failure();
+  impl_ = std::move(impl);
+  return util::Result::success();
+}
 
-void PerfsimPlugin::onInit() { impl_->init(); }
+PerfsimPlugin::~PerfsimPlugin() = default;
 
-void PerfsimPlugin::onShutdown() { impl_->shutdown(); }
+void PerfsimPlugin::onInit() {
+  assert(impl_ && "initialize() must succeed before onInit()");
+  impl_->init();
+}
+
+void PerfsimPlugin::onShutdown() {
+  if (impl_)
+    impl_->shutdown();
+}
 
 bool PerfsimPlugin::requires_serial_hot_hooks() const { return true; }
 
@@ -1469,6 +1536,8 @@ void PerfsimPlugin::record_instruction(uint64_t pc, const Instruction &inst, amd
                        "instruction callback could not be matched to its wavefront");
     return;
   }
+  // The FFM event holds four DWORDs. A five-DWORD GFX10 NSA instruction
+  // exceeds that event format even though the CU hook supplies the full window.
   const int encoding_bytes = inst.size();
   if (encoding_bytes <= 0 || encoding_bytes % 4 != 0 || encoding_bytes > 16 ||
       !inst.raw_encoding()) {

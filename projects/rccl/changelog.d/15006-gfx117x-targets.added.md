@@ -1,0 +1,1 @@
+* gfx1170 and gfx1171 GPU target support, in RCCL and rccl-tests. Like gfx1151, they are APUs deployed one GPU per node, so they take the gfx1151 host policies: load-balanced ring construction and connection, and the tuning table's channel thresholds with one GPU per node.

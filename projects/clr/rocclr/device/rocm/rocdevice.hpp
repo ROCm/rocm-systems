@@ -81,6 +81,7 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   bool use_retired_ = true;      //!< The last use is known to be complete
   bool armed_ = false;           //!< The value holds kInitSignalValueOne, visible to the GPU
   bool in_device_memory_ = false;  //!< Host stores to the value need FlushSignalStores
+  uint32_t event_id_ = 0;          //!< amd_signal_t::event_id, which never changes
   bool binary_use_ = false;  //!< The current use starts at 1 and only its packet decrements it
   bool timed_use_ = true;    //!< The current use captures timestamps
   //! Bit 0: a host check on any thread loaded the current use's value as 0, unlike use_retired_,
@@ -192,7 +193,7 @@ class Sampler : public device::Sampler {
   );
 
  private:
-  void fillSampleDescriptor(hsa_ext_sampler_descriptor_v2_t& samplerDescriptor,
+  void fillSampleDescriptor(hsa_ext_sampler_descriptor_v3_t& samplerDescriptor,
                             const amd::Sampler& sampler) const;
   Sampler& operator=(const Sampler&);
 
@@ -231,7 +232,8 @@ class NullDevice : public amd::Device {
   // List of dummy functions which are disabled for NullDevice
 
   //! Create a new virtual device environment.
-  device::VirtualDevice* createVirtualDevice(amd::CommandQueue* queue = nullptr) override {
+  device::VirtualDevice* createVirtualDevice(amd::CommandQueue* queue = nullptr,
+                                             bool cooperative = false) override {
     ShouldNotReachHere();
     return nullptr;
   }
@@ -328,6 +330,12 @@ class NullDevice : public amd::Device {
   virtual bool ValidateMemAccess(amd::Memory& mem, bool read_write) const override {
     ShouldNotReachHere();
     return true;
+  }
+
+  [[nodiscard]] bool writeDeviceGlobal(amd::Memory& dst, size_t offset, size_t size,
+                                       const void* src) const override {
+    ShouldNotReachHere();
+    return false;
   }
 
   //! Determine if we can use device memory for SVM
@@ -444,7 +452,7 @@ class Device : public NullDevice {
 
   //! Get the CPU agent that is in a 'index' NUMA node
   const hsa_agent_t getCpuAgent(int index) const {
-    if ((index < 0) || (index >= cpu_agents_.size())) {
+    if ((index < 0) || (static_cast<size_t>(index) >= cpu_agents_.size())) {
       // Return default CPU agent
       return cpu_agent_info_->agent;
     }
@@ -470,7 +478,8 @@ class Device : public NullDevice {
   ///////////////////////////////////////////////////////////////////////////////
 
   //! Instantiate a new virtual device
-  virtual device::VirtualDevice* createVirtualDevice(amd::CommandQueue* queue = nullptr) override;
+  virtual device::VirtualDevice* createVirtualDevice(amd::CommandQueue* queue = nullptr,
+                                                     bool cooperative = false) override;
 
   //! Construct an device program object from the ELF assuming it is valid
   virtual device::Program* createProgram(amd::Program& owner,
@@ -620,6 +629,9 @@ class Device : public NullDevice {
   //! reports that stores to device memory come over PCIe, re-store the last one and read it back.
   //! last_stored must be in device memory, or the readback does not drain HDP.
   void FlushSignalStores(hsa_signal_t last_stored, hsa_signal_value_t value) const;
+  //! Host stores to this device's memory come over PCIe through HDP and must be flushed before
+  //! the device can observe them (HSA_AMD_AGENT_INFO_PCIE_STORES_NEED_FLUSH)
+  bool PcieStoresNeedFlush() const { return pcie_stores_need_flush_; }
   //! AQL completion signal handles carry hints the CP firmware decodes
   bool SignalHints() const { return signal_hints_; }
   //! AQL queue ring buffers are placed in device memory. A profiler tool scans and rewrites the
@@ -652,6 +664,9 @@ class Device : public NullDevice {
   //! return a new device pointer accessible by the GPU agent.
   void* hostLock(void* hostMem, size_t size, MemorySegment memSegment) const;
 
+  [[nodiscard]] bool writeDeviceGlobal(amd::Memory& dst, size_t offset, size_t size,
+                                       const void* src) const override;
+
   //! Returns transfer engine object
   const device::BlitManager& xferMgr() const { return xferQueue()->blitMgr(); }
 
@@ -666,7 +681,7 @@ class Device : public NullDevice {
   bool addMapTarget(amd::Memory* memory) const;
 
   //! Returns a ROC memory object from AMD memory object
-  roc::Memory* getRocMemory(amd::Memory* mem  //!< Pointer to AMD memory object
+  [[nodiscard]] roc::Memory* getRocMemory(amd::Memory* mem  //!< Pointer to AMD memory object
   ) const;
 
   //! Create internal blit program
@@ -699,6 +714,9 @@ class Device : public NullDevice {
   VirtualGPUs vgpus_;  //!< The list of all running virtual gpus (lock protected)
 
   VirtualGPU* xferQueue() const;
+
+  //! Cooperative-launch queue, created on first cooperative launch
+  VirtualGPU* coopQueue() const;
 
   struct QueueExtras {
     void* metadataRingBuffer = nullptr;
@@ -769,7 +787,7 @@ class Device : public NullDevice {
   void HiddenHeapAlloc(const VirtualGPU& gpu);
   //! Init hidden heap for device memory allocations
   void HiddenHeapInit(const VirtualGPU& gpu);
-  bool isXgmi() const override { return isXgmi_; }
+  bool isXgmi() const override { return !PcieStoresNeedFlush(); }
 
   //! SDMA engine allocation for per-stream affinity
   uint32_t AllocateSdmaEngine(VirtualGPU* vgpu, HwQueueEngine engine_type,
@@ -866,6 +884,8 @@ class Device : public NullDevice {
   static constexpr bool offlineDevice_ = false;
   VirtualGPU* xferQueue_;  //!< Transfer queue, created on demand
   mutable std::once_flag xferQueueOnce_;  //!< Serialises lazy creation of xferQueue_
+  VirtualGPU* coopQueue_;  //!< Cooperative-launch queue, created on demand
+  mutable std::once_flag coopQueueOnce_;  //!< Serialises lazy creation of coopQueue_
 
   std::atomic<size_t> freeMem_;       //!< Total of free memory available
   mutable std::recursive_mutex vgpusAccess_;  //!< Lock to serialise virtual gpu list access
@@ -938,7 +958,6 @@ class Device : public NullDevice {
   //! Read and Write mask for device<->host
   uint32_t maxSdmaReadMask_;
   uint32_t maxSdmaWriteMask_;
-  bool isXgmi_;  //!< Flag to indicate if there is XGMI between CPU<->GPU
   bool isAPU_ = false;  //!< Flag to indicate the agent shares physical memory with the CPU
   bool pm4_emulation_ = false;  //!< Flag to indicate if PM4 emulation is enabled
   uint32_t numHwPipes_;  //!< Number of hardware pipes

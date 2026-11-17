@@ -3079,6 +3079,20 @@ HIP_PUBLIC_API hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3
                                                               stream);
   CATCH;
 }
+HIP_PUBLIC_API hipError_t hipMemcpyWithAttributesAsync(void* dst, const void* src, size_t size,
+                                                       hipMemcpyAttributes* attr,
+                                                       hipStream_t stream) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipMemcpyWithAttributesAsync_fn(dst, src, size, attr, stream);
+  CATCH;
+}
+HIP_PUBLIC_API hipError_t hipMemcpy3DWithAttributesAsync(struct hipMemcpy3DBatchOp* op,
+                                                         unsigned long long flags,
+                                                         hipStream_t stream) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipMemcpy3DWithAttributesAsync_fn(op, flags, stream);
+  CATCH;
+}
 HIP_PUBLIC_API hipError_t hipMemcpy3DPeer(hipMemcpy3DPeerParms* p) {
   TRY;
   return hip::GetHipDispatchTable()->hipMemcpy3DPeer_fn(p);
@@ -3399,5 +3413,12 @@ hipError_t hipDeviceFlushGPUDirectRDMAWrites(hipFlushGPUDirectRDMAWritesTarget t
 hipError_t hipKernelSetCacheConfig(hipKernel_t kernel, hipFuncCache_t config, hipDevice_t dev) {
   TRY;
   return hip::GetHipDispatchTable()->hipKernelSetCacheConfig_fn(kernel, config, dev);
+  CATCH;
+}
+
+HIP_PUBLIC_API hipError_t hipArrayGetSparseProperties(hipArraySparseProperties* sparseProperties,
+                                                      hipArray_t array) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipArrayGetSparseProperties_fn(sparseProperties, array);
   CATCH;
 }

@@ -22,7 +22,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
   Operand vdst;
   Operand addr;
@@ -39,7 +40,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
   Operand vdst;
   Operand addr;
@@ -56,7 +58,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
   Operand vdst;
   Operand addr;
@@ -73,7 +76,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
   Operand vdst;
   Operand addr;
@@ -90,7 +94,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
   Operand vdst;
   Operand addr;
@@ -107,7 +112,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
   Operand vdst;
   Operand addr;
@@ -124,7 +130,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
   Operand vdst;
   Operand addr;
@@ -141,7 +148,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
   Operand vdst;
   Operand addr;
@@ -158,7 +166,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
   Operand addr;
   Operand data;
@@ -175,7 +184,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
   Operand addr;
   Operand data;
@@ -192,7 +202,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
   Operand addr;
   Operand data;
@@ -209,7 +220,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
   Operand addr;
   Operand data;
@@ -226,7 +238,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
   Operand addr;
   Operand data;
@@ -243,7 +256,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
   Operand addr;
   Operand data;
@@ -260,7 +274,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
     modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0x3;
   }
   void implicit_uses(RegisterSet &uses) const override;
@@ -279,7 +294,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
     modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0x3;
   }
   void implicit_uses(RegisterSet &uses) const override;
@@ -298,7 +314,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
     modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0x3;
   }
   void implicit_uses(RegisterSet &uses) const override;
@@ -317,7 +334,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
     modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0xc;
   }
   void implicit_uses(RegisterSet &uses) const override;
@@ -336,7 +354,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
     modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0xc;
   }
   void implicit_uses(RegisterSet &uses) const override;
@@ -355,7 +374,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
     modifiers.memory_result_bytes = modifiers.memory_result_last_bytes = 0xc;
   }
   void implicit_uses(RegisterSet &uses) const override;
@@ -374,7 +394,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
   Operand addr;
   Operand data;
@@ -391,7 +412,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
   Operand addr;
   Operand data;
@@ -408,7 +430,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
   Operand vdst;
   Operand addr;
@@ -427,7 +450,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
   Operand vdst;
   Operand addr;
@@ -446,7 +470,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
   Operand vdst;
   Operand addr;
@@ -465,7 +490,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
   Operand vdst;
   Operand addr;
@@ -484,7 +510,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
   Operand vdst;
   Operand addr;
@@ -503,7 +530,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
   Operand vdst;
   Operand addr;
@@ -522,7 +550,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
   Operand vdst;
   Operand addr;
@@ -541,7 +570,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
   Operand vdst;
   Operand addr;
@@ -560,7 +590,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
   Operand vdst;
   Operand addr;
@@ -579,7 +610,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
   Operand vdst;
   Operand addr;
@@ -598,7 +630,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
   Operand vdst;
   Operand addr;
@@ -617,7 +650,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
   Operand vdst;
   Operand addr;
@@ -636,7 +670,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
   Operand vdst;
   Operand addr;
@@ -655,7 +690,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
   Operand vdst;
   Operand addr;
@@ -674,7 +710,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
   Operand vdst;
   Operand addr;
@@ -693,7 +730,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
   Operand vdst;
   Operand addr;
@@ -712,7 +750,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
   Operand vdst;
   Operand addr;
@@ -731,7 +770,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
   Operand vdst;
   Operand addr;
@@ -750,7 +790,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
   Operand vdst;
   Operand addr;
@@ -769,7 +810,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
   Operand vdst;
   Operand addr;
@@ -788,7 +830,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
   Operand vdst;
   Operand addr;
@@ -807,7 +850,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
   Operand vdst;
   Operand addr;
@@ -826,7 +870,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
   Operand vdst;
   Operand addr;
@@ -845,7 +890,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
   Operand vdst;
   Operand addr;
@@ -864,7 +910,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
   Operand vdst;
   Operand addr;
@@ -883,7 +930,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
   Operand vdst;
   Operand addr;
@@ -902,7 +950,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
   Operand vdst;
   Operand addr;
@@ -921,7 +970,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
   Operand vdst;
   Operand addr;
@@ -940,7 +990,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
   Operand vdst;
   Operand addr;
@@ -959,7 +1010,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
   Operand vdst;
   Operand addr;
@@ -996,7 +1048,8 @@ public:
     modifiers.flat_address = &addr;
     if (inst_.saddr != 0x7C && inst_.saddr != 127)
       modifiers.flat_scalar_address = &saddr;
-    modifiers.flat_offset = static_cast<int32_t>(inst_.offset << 19) >> 19;
+    modifiers.flat_offset = inst_.seg == 0 ? int32_t(inst_.offset & 0xfff)
+                                           : (static_cast<int32_t>(inst_.offset << 19) >> 19);
   }
   Operand vdst;
   Operand addr;

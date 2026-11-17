@@ -87,16 +87,7 @@ namespace RcclUnitTesting
     std::string SymmetricKernelFromLog(const std::string& path, const std::string& func)
     {
       std::ifstream f(path);
-      std::string   line, kernel;
-      while (std::getline(f, line))
-      {
-        const std::string onLine = SymmetricKernelOnLine(line, func);
-        if (!onLine.empty())
-        {
-          kernel = onLine;
-        }
-      }
-      return kernel;
+      return LastSymmetricKernel(f, func);
     }
 
     void RunInPlace(ncclFunc_t coll, size_t sliceCount)

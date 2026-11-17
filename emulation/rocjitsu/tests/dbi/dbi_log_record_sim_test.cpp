@@ -146,8 +146,11 @@ protected:
         /*granulated_vgpr_count=*/kKernelVgprs / 8 - 1,
         /*accum_offset=*/t_.wave32 ? 0 : kKernelVgprs / 4 - 1);
     std::vector<uint32_t> probe_body;
-    ASSERT_NO_FATAL_FAILURE(
-        test::build_log_record_probe_body(t_.arch, kRecordType, kSlotCount, probe_body));
+    util::StringDiagnostic diagnostic;
+    ASSERT_TRUE(test::build_log_record_probe_body(t_.arch, kRecordType, kSlotCount, probe_body,
+                                                  diagnostic.emitter())
+                    .succeeded())
+        << diagnostic.message();
     const auto probe = test::make_amdgpu_probe_elf(kProbeSymbol, probe_body, t_.e_flags);
     AmdGpuCodeObject obj(target.data(), target.size());
     AmdGpuCodeObject probe_obj(probe.data(), probe.size());
@@ -160,7 +163,10 @@ protected:
       pt.anchor_offset = anchor;
       pt.probe_obj = &probe_obj;
       pt.probe_symbol = kProbeSymbol;
-      pt.probe_args = test::log_record_probe_args(anchor, t_.wave32);
+      util::FailureOr<std::vector<ProbeArgValue>> maybe_args =
+          test::log_record_probe_args(anchor, t_.wave32, diagnostic.emitter());
+      ASSERT_TRUE(maybe_args.succeeded()) << diagnostic.message();
+      pt.probe_args = std::move(maybe_args.value());
       pt.force_full_exec = force_full_exec;
       instr.add_point(pt);
     }
@@ -196,7 +202,7 @@ protected:
     out.before.assign(image.begin(), image.end());
 
     test::DbiSim sim;
-    ASSERT_NO_FATAL_FAILURE(sim.initialize(t_.sim_arch, t_.wave_size));
+    ASSERT_NO_FATAL_FAILURE(sim.initialize(t_.sim_arch, t_.wave_size, kKernelSgprs / 8 - 1));
     sim.set_kernarg(wrapper);
     sim.set_entry_offset(kernel.entry);
     sim.write_memory(kBufferAddr, image);
