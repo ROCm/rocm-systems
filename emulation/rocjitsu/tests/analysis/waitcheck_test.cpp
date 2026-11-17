@@ -13903,11 +13903,15 @@ TEST(WaitcheckTest, TrapTwoIdWidthMatchesTargetGeneration) {
   }
 }
 
-TEST(WaitcheckTest, Gfx115xTrapTwoAtSizedFunctionZeroGap) {
-  for (const auto mach : {EF_AMDGPU_MACH_AMDGCN_GFX1150, EF_AMDGPU_MACH_AMDGCN_GFX1151}) {
-    const std::vector<uint32_t> trapping{build_s_trap(ROCJITSU_CODE_ARCH_RDNA3_5, 2).value()};
+TEST(WaitcheckTest, TrapTwoAtSizedFunctionZeroGap) {
+  for (const auto [arch, mach] :
+       {std::pair{ROCJITSU_CODE_ARCH_CDNA3, EF_AMDGPU_MACH_AMDGCN_GFX942},
+        std::pair{ROCJITSU_CODE_ARCH_CDNA4, EF_AMDGPU_MACH_AMDGCN_GFX950},
+        std::pair{ROCJITSU_CODE_ARCH_RDNA3_5, EF_AMDGPU_MACH_AMDGCN_GFX1150},
+        std::pair{ROCJITSU_CODE_ARCH_RDNA3_5, EF_AMDGPU_MACH_AMDGCN_GFX1151}}) {
+    const std::vector<uint32_t> trapping{build_s_trap(arch, 2).value()};
     const std::vector<uint32_t> padding(4, 0u);
-    const std::vector<uint32_t> next{build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA3_5).value()};
+    const std::vector<uint32_t> next{build_s_endpgm(arch).value()};
     auto image = waitcheck_test::make_gfx_multi_kernel_code_object(
         {{"trapping", trapping}, {"padding", padding}, {"next", next}}, mach);
     auto *ehdr = reinterpret_cast<Elf64_Ehdr *>(image.data());
@@ -13917,9 +13921,10 @@ TEST(WaitcheckTest, Gfx115xTrapTwoAtSizedFunctionZeroGap) {
     symbols[4] = {};
     AmdGpuCodeObject object(image.data(), image.size());
     ASSERT_TRUE(object.is_valid());
-    const auto report = analyze_waitcnts(object, ROCJITSU_CODE_ARCH_RDNA3_5);
+    const auto report = analyze_waitcnts(object, arch);
     EXPECT_TRUE(report.supported && report.complete) << report.analysis_error;
     EXPECT_EQ(report.kernels_analyzed, 2u);
+    EXPECT_EQ(report.instructions_analyzed, 2u);
     EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
   }
 }

@@ -863,7 +863,6 @@ BasicBlock::build_cfg(const CodeObject &co, Decoder &decoder, rj_code_arch_t arc
   DecodedSection prepared;
   auto &decoded = prepared.instructions;
   std::optional<TextAlignmentGaps> trap_alignment_gaps;
-  std::unique_ptr<Decoder> trap_probe_decoder;
   size_t analyzed_size = 0;
   size_t work_index = 0;
   std::vector<uint64_t> ordered_seeds(decode_seeds.begin(), decode_seeds.end());
@@ -933,25 +932,13 @@ BasicBlock::build_cfg(const CodeObject &co, Decoder &decoder, rj_code_arch_t arc
                 next_offset < section_end &&
                 section_end - next_offset >= sizeof(uint32_t) &&
                 words[next_offset / sizeof(uint32_t)] == 0) {
-              // A zero word can be a legal instruction on some generations.
-              // End the path only when the decoder rejects it and sized ELF
-              // functions prove the entire intervening zero span is alignment.
-              const auto next_words = std::span<const uint32_t>(
-                  words + next_offset / sizeof(uint32_t),
-                  (section_end - next_offset) / sizeof(uint32_t));
-              if (!trap_probe_decoder) {
-                trap_probe_decoder =
-                    target_id != ROCJITSU_CODE_TARGET_INVALID
-                        ? Decoder::create(default_isa_target_registry(), target_id)
-                        : Decoder::create(arch);
-              }
-              if (trap_probe_decoder &&
-                  trap_probe_decoder->decode_window(next_words, next_offset,
-                                                    DecodeErrorEmitter{}).failed()) {
-                if (!trap_alignment_gaps)
-                  trap_alignment_gaps.emplace(co, arch, /*for_resumable_trap=*/true);
-                gap_after_trap = trap_alignment_gaps->contains(next_offset);
-              }
+              // A zero word can decode as an instruction. Only a sized ELF
+              // function ending exactly here, followed by a verified zero
+              // alignment gap, proves that this trap has no local fallthrough.
+              if (!trap_alignment_gaps)
+                trap_alignment_gaps.emplace(co, arch, /*for_resumable_trap=*/true);
+              gap_after_trap = trap_alignment_gaps->contains(next_offset) &&
+                               !trap_alignment_gaps->contains(next_offset - 1);
             }
             if (gap_after_trap)
               prepared.trap_padding_exits.insert(inst.src_loc());
