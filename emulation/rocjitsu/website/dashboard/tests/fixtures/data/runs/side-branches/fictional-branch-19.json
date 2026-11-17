@@ -20,8 +20,8 @@
   },
   "execution_summary": {
     "benchmark_suite": "fictional-current",
-    "timestamp": "2026-10-05T10:00:00.000Z",
-    "finished_at": "2026-10-05T11:18:00.000Z",
+    "timestamp": "2026-10-05T11:18:00.000Z",
+    "finished_at": "2026-10-04T06:00:00.000Z",
     "wall_time_s": 1,
     "samples": 1,
     "warmups": 0,
