@@ -147,3 +147,12 @@ Loose uses FP32-intermediate MAD. Guest rounding, forced intermediate flushing,
 IEEE NaN quieting, FP16_OVFL and final output modifiers are retained. This is
 software-model reuse, not new empirical qualification; strict modes reject and
 FP status is unchanged. The native half FMA migration is independent.
+
+### gfx90a floating comparisons
+
+FP16/FP32/FP64 relational CMP/CMPX, including F/TRU, use the existing shared
+comparison APIs and scalar, AVX2 and AVX-512 backends. Compatibility carries
+raw ordering, guest input flushing and the existing absence of FP-status
+reporting; CLAMP does not add a classifier on this target. Mode 3 remains
+unsupported. The VM owns explicit SGPR/VCC and EXEC commits, including both
+mask writes for CMPX. This migration does not newly qualify a numerical model.
