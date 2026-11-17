@@ -5618,7 +5618,8 @@ if(RJ_ENABLE_HIP_TESTS)
             COMMAND
                 ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
                 "-DTEST_ARGS=--config;${RJ_HIP_TEST_CONFIG};--plugin;missing;--plugin;instruction-mix;--;${CMAKE_CURRENT_BINARY_DIR}/hip_vector_add_test;--gtest_filter=HipVectorAddTest.CorrectResult"
-                "-DTEST_REGEX=missing" -P ${_rj_cli_failure_script}
+                "-DTEST_REGEX=required plugin 'missing' failed to load" -P
+                ${_rj_cli_failure_script}
         )
         if(RJ_HIP_TEST_ARCH MATCHES "^(gfx942|gfx950)$")
             rj_add_hip_test(

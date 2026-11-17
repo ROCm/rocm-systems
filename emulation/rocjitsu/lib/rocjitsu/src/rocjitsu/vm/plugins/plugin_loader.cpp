@@ -98,7 +98,7 @@ parse_required_plugins(const flexbuffers::Reference &root, util::DiagnosticEmitt
     return std::vector<std::string>{};
 
   auto value = root.AsMap()["required_plugins"];
-  if (!value.IsVector())
+  if (!value.IsUntypedVector())
     return emit_error.emit() << "top-level 'required_plugins' must be an array";
 
   auto plugins = value.AsVector();

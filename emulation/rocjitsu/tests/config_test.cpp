@@ -3419,6 +3419,17 @@ TEST(EffectiveConfigTest, KeepsExistingPluginConfigWhenLaunchPluginRepeatsIt) {
             std::string::npos);
 }
 
+TEST(EffectiveConfigTest, RejectsObjectRequiredPluginsForLaunchPlugins) {
+  util::StringDiagnostic diagnostic;
+  const std::string json = R"({"required_plugins":{"site-tracer":"race"},"plugins":{"race":{}}})";
+  auto rewritten = config::json_with_launch_overrides(json, {.plugins = {"instruction-mix"}},
+                                                      diagnostic.emitter());
+
+  EXPECT_TRUE(rewritten.failed());
+  EXPECT_THAT(diagnostic.message(),
+              testing::HasSubstr("top-level 'required_plugins' must be an array"));
+}
+
 TEST(EffectiveConfigTest, RejectsInvalidLaunchPluginName) {
   util::StringDiagnostic diagnostic;
   auto rewritten = config::json_with_launch_overrides(R"({"plugins":{}})", {.plugins = {"../race"}},

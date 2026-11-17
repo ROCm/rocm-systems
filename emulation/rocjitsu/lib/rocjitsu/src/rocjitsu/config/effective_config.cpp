@@ -79,7 +79,7 @@ required_plugins_from_json(std::string_view json, const util::DiagnosticEmitter 
   if (!parser.ParseFlexBuffer(value.c_str(), nullptr, &builder))
     return emit_error.emit() << "top-level 'required_plugins' must be a JSON string array";
   const flexbuffers::Reference root = flexbuffers::GetRoot(builder.GetBuffer());
-  if (!root.IsVector())
+  if (!root.IsUntypedVector())
     return emit_error.emit() << "top-level 'required_plugins' must be an array";
   const flexbuffers::Vector entries = root.AsVector();
   std::vector<std::string> plugins;
