@@ -83,6 +83,7 @@ SET_ARGS = (
         ]
     ]
     + ["{perf_determinism}"]
+    + [f"--compute-partition {mode}" for mode in ["SPX", "DPX", "TPX", "QPX", "CPX"]]
     + [f"--memory-partition {mode}" for mode in ["NPS1", "NPS2", "NPS4", "NPS8"]]
     + ["--compute-partition-mem-alloc-mode CAPPING", "--compute-partition-mem-alloc-mode ALL"]
     + [
@@ -396,7 +397,7 @@ class _FakeCommon:
         return False
 
 
-def _make_test(host):
+def _make_test(host, other_devices=()):
     test = cli_test_set.TestSet("test_command")
     test.common = _FakeCommon(len(host.gpus))
     test.static_data = {"gpu_data": [gpu["static"] for gpu in host.gpus]}
@@ -407,6 +408,7 @@ def _make_test(host):
     }
     device_args = ["--gpu all", "--gpu 0", f"--gpu {host.bdf}", f"--gpu {host.uuid}"]
     device_args += [f"--gpu {gpu}" for gpu in range(1, len(host.gpus))]
+    device_args += list(other_devices)
     args = {
         "Set Arguments:": SET_ARGS,
         "Device Arguments:": device_args,
@@ -417,8 +419,8 @@ def _make_test(host):
     return test
 
 
-def _sweep(host):
-    return _make_test(host).CreateCmds(
+def _sweep(host, other_devices=()):
+    return _make_test(host, other_devices).CreateCmds(
         "set", "Set Arguments:", "Device Arguments:", "Command Modifiers:", ""
     )
 
@@ -443,3 +445,455 @@ class TestBaselineSweep(unittest.TestCase):
                 self.assertEqual(
                     _sweep(host), [(cmd, _baseline_cond(cmd)) for cmd in host.baseline]
                 )
+
+
+def _on_gpu(cmd, gpu):
+    """*cmd* aimed at one GPU, written the way the sweep writes its own --gpu commands."""
+    words = cmd.replace(" --gpu all ", " ").split()
+    at = words.index("--loglevel")
+    return " ".join(words[:at] + ["--gpu", str(gpu)] + words[at:])
+
+
+def _targets_all(cmd):
+    words = cmd.split()
+    return "--gpu" not in words or " --gpu all " in cmd
+
+
+def _for_other_device(cmd):
+    return bool({"--cpu", "--core", "--nic"}.intersection(cmd.split()))
+
+
+def _run(test, cmds, codes):
+    """RunCmds over *cmds*, each answering with its exit code in *codes*.
+
+    Returns:
+        tuple: (printed lines, failure message or None).
+    """
+    test.util = mock.Mock()
+    test.util.RunCmdSync.side_effect = lambda cmd, msg_in=None: (codes[cmd], "", "")
+    test.common.lines.clear()
+    try:
+        test.RunCmds(cmds)
+    except AssertionError as exc:
+        return test.common.lines, str(exc)
+    return test.common.lines, None
+
+
+def _group(cmds, cmd):
+    """*cmd*'s sweep entry and its per-GPU runs, in sweep order."""
+    members = set(dict(cmds)[cmd].members)
+    return [(text, cond) for text, cond in cmds if text == cmd or text in members]
+
+
+class TestPerGpuSweepCoverage(unittest.TestCase):
+    def test_single_gpu_sweep_is_unchanged(self):
+        host = GFX1151_APU
+        self.assertEqual(_sweep(host), [(cmd, _baseline_cond(cmd)) for cmd in host.baseline])
+
+    def test_every_baseline_command_still_runs_exactly_once(self):
+        for name, host in MULTI_GPU_HOSTS.items():
+            with self.subTest(host=name):
+                texts = [cmd for cmd, _ in _sweep(host)]
+                self.assertEqual(len(texts), len(set(texts)))
+                self.assertEqual(sorted(set(host.baseline) - set(texts)), [])
+
+    def test_single_gpu_commands_keep_their_baseline_codes(self):
+        for name, host in MULTI_GPU_HOSTS.items():
+            conds = dict(_sweep(host))
+            for cmd in host.baseline:
+                if not _targets_all(cmd):
+                    with self.subTest(host=name, cmd=cmd):
+                        self.assertEqual(conds[cmd], _baseline_cond(cmd))
+
+    def test_all_gpu_commands_are_followed_by_a_run_on_each_gpu(self):
+        for name, host in MULTI_GPU_HOSTS.items():
+            cmds = _sweep(host)
+            texts = [cmd for cmd, _ in cmds]
+            conds = dict(cmds)
+            for cmd in host.baseline:
+                if not _targets_all(cmd):
+                    continue
+                with self.subTest(host=name, cmd=cmd):
+                    members = tuple(_on_gpu(cmd, gpu) for gpu in range(len(host.gpus)))
+                    self.assertEqual(conds[cmd].members, members)
+                    at = texts.index(cmd)
+                    # A run queued earlier is reused; the others follow at once.
+                    later = [member for member in members if texts.index(member) > at]
+                    self.assertEqual(texts[at + 1 : at + 1 + len(later)], later)
+
+    def test_compute_partition_stays_excluded(self):
+        # FindArgs offers it, but it waits for a confirmation the sweep cannot
+        # give: it must not run, not even as a per-GPU or own-value run.
+        self.assertIn("--compute-partition SPX", SET_ARGS)
+        for name, host in ALL_HOSTS.items():
+            with self.subTest(host=name):
+                test = _make_test(host)
+                cmds = test.CreateCmds(
+                    "set", "Set Arguments:", "Device Arguments:", "Command Modifiers:", ""
+                )
+                self.assertEqual([cmd for cmd, _ in cmds if " --compute-partition " in cmd], [])
+                excluded = "Excluded (waits for confirmation): amd-smi set --compute-partition"
+                self.assertIn(excluded, [line.strip() for line in test.common.lines])
+
+    def test_commands_for_other_devices_stay_ungrouped(self):
+        other_devices = ["--cpu all", "--cpu 0", "--core 0", "--nic 0"]
+        no_per_gpu = mock.patch.object(
+            cli_base.TestCliBase, "PER_GPU_SWEEP_COMMANDS", frozenset(), create=True
+        )
+        for name, host in MULTI_GPU_HOSTS.items():
+            with self.subTest(host=name):
+                cmds = _sweep(host, other_devices)
+                with no_per_gpu:
+                    unexpanded = _sweep(host, other_devices)
+                other = [(cmd, cond) for cmd, cond in cmds if _for_other_device(cmd)]
+                self.assertTrue(other)
+                # The same commands with the same codes as without per-GPU runs:
+                # no GroupCheck, no --gpu run and no own-value run of them.
+                self.assertEqual(
+                    other, [entry for entry in unexpanded if _for_other_device(entry[0])]
+                )
+                for cmd, cond in other:
+                    self.assertNotIn("--gpu", cmd.split(), cmd)
+                    self.assertEqual(cond, _baseline_cond(cmd), cmd)
+                # They leave the GPU sweep as it was.
+                self.assertEqual(
+                    [entry for entry in cmds if not _for_other_device(entry[0])], _sweep(host)
+                )
+
+
+class TestPerGpuExpectations(unittest.TestCase):
+    def _conds(self, host):
+        return dict(_sweep(host))
+
+    def test_power_cap_outside_a_gpus_range_expects_invalid_value(self):
+        conds = self._conds(GFX908_GFX1030)
+        for watts in (1, 145, 290):
+            cmd = _set(f"--power-cap {watts} ppt0")
+            self.assertEqual(conds[_on_gpu(cmd, 1)], [INVALID_VALUE], watts)
+        conds = self._conds(GFX90A_X2_GFX1100)
+        for watts in (1, 150):
+            self.assertEqual(conds[_on_gpu(_set(f"--power-cap {watts} ppt0"), 2)], [INVALID_VALUE])
+        conds = self._conds(GFX90A_GFX1201)
+        for watts in (1, 150):
+            self.assertEqual(conds[_on_gpu(_set(f"--power-cap {watts} ppt0"), 1)], [INVALID_VALUE])
+
+    def test_power_cap_at_the_current_cap_expects_pass(self):
+        self.assertEqual(
+            self._conds(GFX908_GFX1030)[_on_gpu(_set("--power-cap 290 ppt0"), 0)], [PASS]
+        )
+        conds = self._conds(GFX90A_X2_GFX1100)
+        for gpu in (0, 1):
+            self.assertEqual(conds[_on_gpu(_set("--power-cap 300 ppt0"), gpu)], [PASS])
+
+    def test_power_cap_inside_a_gpus_range_allows_pass_or_not_supported(self):
+        conds = self._conds(GFX908_GFX1030)
+        for watts in (1, 145):
+            self.assertEqual(conds[_on_gpu(_set(f"--power-cap {watts} ppt0"), 0)], OK)
+        self.assertEqual(
+            self._conds(GFX90A_X2_GFX1100)[_on_gpu(_set("--power-cap 300 ppt0"), 2)], OK
+        )
+        self.assertEqual(self._conds(GFX90A_GFX1201)[_on_gpu(_set("--power-cap 300 ppt0"), 1)], OK)
+
+    def test_power_cap_boundaries_follow_the_cli(self):
+        test = _make_test(GFX90A_GFX1201)
+        cases = {
+            (1, 211): [INVALID_VALUE],
+            (1, 212): OK,
+            (1, 304): [PASS],
+            (1, 340): OK,
+            (1, 341): [INVALID_VALUE],
+            # The CLI clamps a reported minimum of 0 W up to 1 W.
+            (0, 0): [INVALID_VALUE],
+            (0, 1): OK,
+        }
+        for (gpu, watts), expected in cases.items():
+            words = _on_gpu(_set(f"--power-cap {watts} ppt0"), gpu).split()
+            self.assertEqual(test._power_cap_cond(words, gpu), expected, (gpu, watts))
+
+    def test_power_cap_on_a_gpu_without_a_cap_expects_not_supported(self):
+        # Derived: the gfx1030 GPU reporting no ppt0 cap.
+        host = _host(
+            [GFX908, _with_cap(GFX1030, NO_CAP)],
+            GFX908_GFX1030.bdf,
+            GFX908_GFX1030.uuid,
+            profiles=PROFILES,
+            determinism=1552,
+            caps=[1, 145, 290],
+            xgmi=[0],
+            clk_levels=[("SCLK", 3), ("MCLK", 1), ("FCLK", 1), ("SOCCLK", 1), ("PCIE", 1)],
+            clk_limits=["SCLK MAX 1210", "SCLK MIN 600"],
+        )
+        conds = self._conds(host)
+        for watts in (1, 145, 290):
+            self.assertEqual(conds[_on_gpu(_set(f"--power-cap {watts} ppt0"), 1)], [NOT_SUPPORTED])
+
+    def test_power_cap_with_a_zero_current_cap_expects_invalid_value(self):
+        # Derived: the gfx1030 GPU with its current cap at 0, which the CLI refuses
+        # to change even for a value inside the range.
+        host = _host(
+            [GFX908, _with_cap(GFX1030, _cap(255, 272, 0))],
+            GFX908_GFX1030.bdf,
+            GFX908_GFX1030.uuid,
+            profiles=PROFILES,
+            determinism=1552,
+            caps=[1, 145, 290],
+            xgmi=[0],
+            clk_levels=[("SCLK", 3), ("MCLK", 1), ("FCLK", 1), ("SOCCLK", 1), ("PCIE", 1)],
+            clk_limits=["SCLK MAX 1210", "SCLK MIN 600"],
+        )
+        conds = self._conds(host)
+        for watts in (1, 145, 290, 255, 263, 272):
+            with self.subTest(watts=watts):
+                self.assertEqual(
+                    conds[_on_gpu(_set(f"--power-cap {watts} ppt0"), 1)], [INVALID_VALUE]
+                )
+
+    def test_pcie_levels_beyond_a_gpus_count_expect_invalid_value(self):
+        pcie = _set(f"--clk-level PCIE {' '.join(str(level) for level in range(24))}")
+        conds = self._conds(GFX90A_X2_GFX1100)
+        self.assertEqual(conds[_on_gpu(pcie, 0)], OK)
+        self.assertEqual(conds[_on_gpu(pcie, 1)], OK)
+        self.assertEqual(conds[_on_gpu(pcie, 2)], [INVALID_VALUE])
+        self.assertEqual(self._conds(GFX90A_GFX1201)[_on_gpu(pcie, 1)], [INVALID_VALUE])
+
+    def test_pcie_level_boundary_and_unreadable_levels(self):
+        test = _make_test(GFX90A_X2_GFX1100)
+        self.assertEqual(test._pcie_level_cond(["0", "1", "2"], 2, OK), OK)
+        self.assertEqual(test._pcie_level_cond(["3"], 2, OK), [INVALID_VALUE])
+        self.assertEqual(test._pcie_level_cond(["0", "--gpu", "2"], 2, OK), OK)
+        # No PCIe level list: the CLI fails reading bandwidth before it validates.
+        self.assertEqual(_make_test(GFX1151_APU)._pcie_level_cond(["0"], 0, OK), OK)
+
+    def test_other_commands_keep_their_codes_on_each_gpu(self):
+        conds = self._conds(GFX90A_GFX1201)
+        for cmd in (
+            _set("--clk-level FCLK 0 1 2"),
+            _set("--clk-level SCLK 0 1"),
+            _set("--memory-partition NPS1"),
+            _set("--perf-level AUTO"),
+            _set("--ptl-format I8,F16"),
+            _set("--clk-limit MCLK MAX 1300"),
+        ):
+            for gpu in (0, 1):
+                with self.subTest(cmd=cmd, gpu=gpu):
+                    self.assertEqual(conds[_on_gpu(cmd, gpu)], _baseline_cond(cmd))
+
+
+class TestOwnValueRuns(unittest.TestCase):
+    def _own_values(self, host):
+        cmds = _sweep(host)
+        members = set()
+        for _, cond in cmds:
+            members.update(getattr(cond, "members", ()))
+        return {cmd: cond for cmd, cond in cmds if cmd not in host.baseline and cmd not in members}
+
+    def test_mixed_hosts_run_each_gpus_own_values(self):
+        expected = OWN_VALUE_RUNS
+        for name, host in MIXED_HOSTS.items():
+            with self.subTest(host=name):
+                self.assertEqual(self._own_values(host), expected[name])
+
+    def test_same_model_host_adds_no_own_value_runs(self):
+        self.assertEqual(self._own_values(GFX90A_X2), {})
+
+    def test_own_clock_limits_keep_max_before_min(self):
+        texts = [cmd for cmd, _ in _sweep(GFX908_GFX1030)]
+        for clk in ("SCLK", "MCLK", "FCLK"):
+            prefix = f"amd-smi set --clk-limit {clk} "
+            gpu1 = [cmd.split() for cmd in texts if cmd.startswith(prefix) and " --gpu 1 " in cmd]
+            bounds = [words[4] for words in gpu1]
+            self.assertIn("MIN", bounds, clk)
+            expected = ["MAX"] * bounds.count("MAX") + ["MIN"] * bounds.count("MIN")
+            self.assertEqual(bounds, expected, clk)
+
+
+class TestAggregateExitCode(unittest.TestCase):
+    def test_matches_the_cli_collector(self):
+        for count in (1, 2, 3):
+            for codes in itertools.product([0, 2, 198, 204], repeat=count):
+                collector = AmdSmiErrorCollector()
+                for code in codes:
+                    # A GPU exits 204 only when its own failures differ.
+                    for recorded in [2, 198] if code == MIXED else [code] if code else []:
+                        collector.record(recorded)
+                with self.subTest(codes=codes):
+                    self.assertEqual(
+                        cli_base._aggregate_exit_code(codes), collector.resolve_exit_code()
+                    )
+
+    def test_reachable_aggregates_match_every_combination(self):
+        codes = [PASS, NOT_SUPPORTED, INVALID_VALUE, MIXED]
+        subsets = [
+            list(subset)
+            for size in range(len(codes) + 1)
+            for subset in itertools.combinations(codes, size)
+        ]
+        for count in (1, 2, 3, 4):
+            mismatches = []
+            for per_gpu in itertools.product(subsets, repeat=count):
+                combinations = itertools.product(*per_gpu)
+                expected = sorted({cli_base._aggregate_exit_code(c) for c in combinations})
+                actual = cli_base._reachable_aggregates(per_gpu)
+                if actual != expected:
+                    mismatches.append((per_gpu, actual, expected))
+            self.assertEqual(mismatches[:3], [], f"{count} GPUs")
+
+    def test_reachable_aggregates_scale_to_many_gpus(self):
+        # 3**64 combinations: enumerating them would never finish.
+        self.assertEqual(
+            cli_base._reachable_aggregates([[*OK, INVALID_VALUE]] * 64),
+            [PASS, NOT_SUPPORTED, INVALID_VALUE, MIXED],
+        )
+        self.assertEqual(
+            cli_base._reachable_aggregates([OK] * 63 + [[INVALID_VALUE]]), [INVALID_VALUE, MIXED]
+        )
+
+    def test_only_runtime_dependent_commands_accept_any_allowed_aggregate(self):
+        conds = dict(_sweep(GFX908_GFX1030))
+        exact = {
+            _set("--power-cap 1 ppt0"): True,
+            _set("--clk-level PCIE 0"): True,
+            _set("--perf-level AUTO"): True,
+            _set("--ptl-format I8,F16"): True,
+            _set("--clk-level SCLK 0 1 2"): False,
+            _set("--clk-level MCLK 0"): False,
+            _set("--clk-limit SCLK MAX 1210"): False,
+            _set("--memory-partition NPS1"): False,
+        }
+        for cmd, expected in exact.items():
+            self.assertEqual(conds[cmd].exact, expected, cmd)
+
+
+class TestGroupGrading(unittest.TestCase):
+    def _grade(self, host, cmd, all_gpu_rc, per_gpu_rcs):
+        test = _make_test(host)
+        cmds = _group(_sweep(host), cmd)
+        codes = {cmd: all_gpu_rc}
+        codes.update({_on_gpu(cmd, gpu): rc for gpu, rc in enumerate(per_gpu_rcs)})
+        return _run(test, cmds, codes)
+
+    def test_all_gpu_code_must_equal_the_observed_aggregate(self):
+        cmd = _set("--power-cap 1 ppt0")
+        _, failure = self._grade(GFX908_GFX1030, cmd, INVALID_VALUE, [PASS, INVALID_VALUE])
+        self.assertIsNone(failure)
+        # MIXED_DEVICE_ERRORS is a possible aggregate here, but not the observed one.
+        _, failure = self._grade(GFX908_GFX1030, cmd, MIXED, [PASS, INVALID_VALUE])
+        self.assertIn(cmd, failure)
+
+    def test_differing_gpu_failures_aggregate_to_mixed_device_errors(self):
+        cmd = _set(f"--clk-level PCIE {' '.join(str(level) for level in range(24))}")
+        rcs = [NOT_SUPPORTED, NOT_SUPPORTED, INVALID_VALUE]
+        _, failure = self._grade(GFX90A_X2_GFX1100, cmd, MIXED, rcs)
+        self.assertIsNone(failure)
+        _, failure = self._grade(GFX90A_X2_GFX1100, cmd, INVALID_VALUE, rcs)
+        self.assertIn(cmd, failure)
+
+    def test_runtime_dependent_commands_accept_any_allowed_aggregate(self):
+        cases = [
+            (GFX90A_GFX1201, _set("--clk-level FCLK 0 1 2"), MIXED, [NOT_SUPPORTED] * 2),
+            (GFX908_GFX1030, _set("--clk-limit SCLK MAX 1210"), INVALID_VALUE, [PASS] * 2),
+            (GFX908_GFX1030, _set("--memory-partition NPS1"), MIXED, [NOT_SUPPORTED] * 2),
+        ]
+        for host, cmd, all_gpu_rc, per_gpu_rcs in cases:
+            with self.subTest(cmd=cmd):
+                _, failure = self._grade(host, cmd, all_gpu_rc, per_gpu_rcs)
+                self.assertIsNone(failure)
+        # An aggregate no combination of per-GPU codes can produce still fails.
+        cmd = _set("--clk-level FCLK 0 1 2")
+        _, failure = self._grade(GFX90A_GFX1201, cmd, INVAL, [NOT_SUPPORTED] * 2)
+        self.assertIn(cmd, failure)
+
+    def test_a_gpu_outside_its_codes_fails_even_when_the_aggregate_matches(self):
+        cmd = _set("--power-cap 1 ppt0")
+        _, failure = self._grade(GFX908_GFX1030, cmd, PASS, [PASS, PASS])
+        self.assertIn(_on_gpu(cmd, 1), failure)
+        self.assertNotIn(f"{cmd} ", failure.replace(_on_gpu(cmd, 1), ""))
+
+    def test_grouped_line_follows_its_per_gpu_runs_and_names_their_codes(self):
+        cmd = _set("--power-cap 1 ppt0")
+        lines, _ = self._grade(GFX908_GFX1030, cmd, INVALID_VALUE, [PASS, INVALID_VALUE])
+        self.assertEqual(len(lines), 3)
+        self.assertTrue(lines[0].strip().startswith(_on_gpu(cmd, 0)))
+        self.assertTrue(lines[1].strip().startswith(_on_gpu(cmd, 1)))
+        self.assertTrue(lines[2].strip().startswith(cmd))
+        self.assertIn("[aggregate of per-GPU runs: GPU 0 rc=0, GPU 1 rc=198]", lines[2])
+
+    def test_ungrouped_lines_keep_their_format(self):
+        test = _make_test(GFX1151_APU)
+        cmd = _set("--perf-level DETERMINISM")
+        lines, failure = _run(test, [(cmd, OK)], {cmd: NOT_SUPPORTED})
+        self.assertIsNone(failure)
+        expected = f"    {cmd:{len(cmd) + 2}s}: Unsupported: Received and Allowed FAIL"
+        self.assertEqual(lines, [f"{expected} (rc=2 NOT_SUPPORTED)"])
+
+    def test_a_group_whose_per_gpu_runs_did_not_run_fails(self):
+        test = _make_test(GFX908_GFX1030)
+        cmd = _set("--perf-level AUTO")
+        check = dict(_sweep(GFX908_GFX1030))[cmd]
+        _, failure = _run(test, [(cmd, check)], {cmd: PASS})
+        self.assertIn("not every per-GPU run of it ran", failure)
+
+
+def _own(gpu, args, cond):
+    return _on_gpu(_set(args), gpu), cond
+
+
+CLK_OK = [*OK, INVALID_VALUE]
+OWN_VALUE_RUNS = {
+    # gfx1030 (GPU 1) next to gfx908 (GPU 0)
+    "gfx908 + gfx1030": dict(
+        [
+            _own(1, "--perf-determinism 2625", OK),
+            _own(1, "--power-cap 255 ppt0", OK),
+            _own(1, "--power-cap 263 ppt0", OK),
+            _own(1, "--power-cap 272 ppt0", [PASS]),
+            _own(0, "--clk-level SCLK 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15", CLK_OK),
+            _own(1, "--clk-level MCLK 0 1 2 3", CLK_OK),
+            _own(1, "--clk-level FCLK 0 1 2", CLK_OK),
+            _own(1, "--clk-level SOCCLK 0 1 2", CLK_OK),
+            _own(1, "--clk-level PCIE 0 1", OK),
+            _own(1, "--clk-limit SCLK MAX 2060", CLK_OK),
+            _own(1, "--clk-limit SCLK MIN 1020", CLK_OK),
+            _own(1, "--clk-limit MCLK MAX 780", CLK_OK),
+            _own(1, "--clk-limit MCLK MIN 330", CLK_OK),
+            _own(1, "--clk-limit FCLK MAX 1590", CLK_OK),
+            _own(1, "--clk-limit FCLK MIN 860", CLK_OK),
+        ]
+    ),
+    # gfx1100 (GPU 2) next to two gfx90a
+    "2x gfx90a + gfx1100": dict(
+        [
+            _own(2, "--perf-determinism 2421", OK),
+            _own(2, "--power-cap 272 ppt0", OK),
+            _own(2, "--power-cap 311 ppt0", OK),
+            _own(2, "--power-cap 350 ppt0", OK),
+            _own(0, "--clk-level SOCCLK 0 1 2 3 4", CLK_OK),
+            _own(1, "--clk-level SOCCLK 0 1 2 3 4", CLK_OK),
+            _own(2, "--clk-level PCIE 0 1 2", OK),
+            _own(2, "--clk-limit SCLK MAX 1910", CLK_OK),
+            _own(2, "--clk-limit SCLK MIN 970", CLK_OK),
+            _own(2, "--clk-limit MCLK MAX 970", CLK_OK),
+            _own(2, "--clk-limit MCLK MIN 390", CLK_OK),
+            _own(2, "--clk-limit FCLK MAX 1880", CLK_OK),
+            _own(2, "--clk-limit FCLK MIN 1030", CLK_OK),
+        ]
+    ),
+    # gfx1201 (GPU 1) next to gfx90a (GPU 0)
+    "gfx90a + gfx1201": dict(
+        [
+            _own(1, "--perf-determinism 2450", OK),
+            _own(1, "--power-cap 212 ppt0", OK),
+            _own(1, "--power-cap 276 ppt0", OK),
+            _own(1, "--power-cap 340 ppt0", OK),
+            _own(0, "--clk-level SOCCLK 0 1 2 3 4", CLK_OK),
+            _own(1, "--clk-level MCLK 0 1 2 3 4 5", CLK_OK),
+            _own(1, "--clk-level PCIE 0 1 2", OK),
+            _own(1, "--clk-limit SCLK MAX 1930", CLK_OK),
+            _own(1, "--clk-limit SCLK MIN 980", CLK_OK),
+            _own(1, "--clk-limit MCLK MAX 970", CLK_OK),
+            _own(1, "--clk-limit MCLK MIN 390", CLK_OK),
+            _own(1, "--clk-limit FCLK MAX 1880", CLK_OK),
+            _own(1, "--clk-limit FCLK MIN 840", CLK_OK),
+        ]
+    ),
+}
