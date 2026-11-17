@@ -12,6 +12,7 @@
 /// required field names.
 
 #include "rocjitsu/isa/arch/amdgpu/shared/buffer_address.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_resolve.h"
 #include "rocjitsu/isa/isa_traits.h"
@@ -22,6 +23,7 @@
 #include "util/log.h"
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cassert>
 #include <cstdint>
@@ -42,6 +44,43 @@ inline bool buffer_resource_range_is_backed(const Wavefront &wf, uint32_t select
     return scalar_selector_range_is_backed(wf, selector, 2) &&
            scalar_selector_range_is_backed(wf, selector + 2, 2);
   return scalar_selector_range_is_backed(wf, selector, 4);
+}
+
+// Four ordinary SGPRs form one resource. Split SGPR/VCC descriptors and
+// special registers keep the selector-specific reads and observer callbacks.
+inline std::optional<std::array<uint32_t, 4>> read_buffer_resource(Wavefront &wf,
+                                                                   uint32_t selector) {
+  if (!buffer_resource_range_is_backed(wf, selector))
+    return std::nullopt;
+  if (selector + 3 < kFlatScratchSelectorFirst && !wf.cu().observes_register_access()) {
+    const auto words = RegisterAccess(wf).read_sgpr_region(wf.sgpr_alloc().base + selector, 4);
+    return std::array{words.dword(0), words.dword(1), words.dword(2), words.dword(3)};
+  }
+  return std::array{read_scalar_selector(wf, selector), read_scalar_selector(wf, selector + 1),
+                    read_scalar_selector(wf, selector + 2), read_scalar_selector(wf, selector + 3)};
+}
+
+/// @brief CDNA5 V# TYPE, SRD bits 127:126, from SRD word 3. Zero identifies a
+/// buffer.
+constexpr uint8_t cdna5_buffer_resource_type(uint32_t srd3) {
+  return static_cast<uint8_t>((srd3 >> 30) & 0x3u);
+}
+
+/// @brief Whether a gfx1250 VBUFFER instruction is ignored because its
+/// resource is not a buffer: an SRD TYPE other than 0 makes the instruction
+/// ignored (CDNA5 ISA 9.6). The SRD is read without a register-access
+/// observation. False when `modifiers` name no VBUFFER resource or its SRD is
+/// not backed by this wave.
+inline bool cdna5_ignores_buffer_resource(const RegisterModifiers &modifiers, const Wavefront &wf) {
+  if (wf.cu().arch() != ROCJITSU_CODE_ARCH_CDNA5 || !modifiers.buffer_resource ||
+      modifiers.scalar_buffer_words)
+    return false;
+  const uint32_t selector = modifiers.buffer_resource->encoding_value();
+  if (!buffer_resource_range_is_backed(wf, selector))
+    return false;
+  const auto range = resolve_scalar_register_range(wf, selector + 3, 1);
+  const auto word3 = range ? RegisterAccess(wf).read_scalar_unobserved(*range) : std::nullopt;
+  return word3 && cdna5_buffer_resource_type(*word3) != 0;
 }
 
 /// MUBUF/MTBUF SOFFSET accepts scalar registers and inline integer/float constants.
@@ -375,14 +414,12 @@ void mubuf_calculate_addresses(const MubufInst &inst, amdgpu::Wavefront &wf, Vec
   d.wg_id = wf.wg_id();
   d.wf_id = wf.wf_id();
   const uint32_t sb_sel = inst.srsrc * 4;
-  if (!buffer_resource_range_is_backed(wf, sb_sel)) {
+  const auto words = read_buffer_resource(wf, sb_sel);
+  if (!words) {
     reject_vector_memory_access(d);
     return;
   }
-  uint32_t srd0 = amdgpu::read_scalar_selector(wf, sb_sel);
-  uint32_t srd1 = amdgpu::read_scalar_selector(wf, sb_sel + 1);
-  uint32_t srd2 = amdgpu::read_scalar_selector(wf, sb_sel + 2);
-  uint32_t srd3 = amdgpu::read_scalar_selector(wf, sb_sel + 3);
+  const auto [srd0, srd1, srd2, srd3] = *words;
   if ((arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5) &&
       (srd3 >> 30) != 0) {
     // A resource type mismatch ignores the entire instruction, including load writeback.
@@ -534,14 +571,12 @@ void mtbuf_calculate_addresses(const MtbufInst &inst, amdgpu::Wavefront &wf, Vec
   d.wg_id = wf.wg_id();
   d.wf_id = wf.wf_id();
   const uint32_t sb_sel = inst.srsrc * 4;
-  if (!buffer_resource_range_is_backed(wf, sb_sel)) {
+  const auto words = read_buffer_resource(wf, sb_sel);
+  if (!words) {
     reject_vector_memory_access(d);
     return;
   }
-  uint32_t srd0 = amdgpu::read_scalar_selector(wf, sb_sel);
-  uint32_t srd1 = amdgpu::read_scalar_selector(wf, sb_sel + 1);
-  uint32_t srd2 = amdgpu::read_scalar_selector(wf, sb_sel + 2);
-  uint32_t srd3 = amdgpu::read_scalar_selector(wf, sb_sel + 3);
+  const auto [srd0, srd1, srd2, srd3] = *words;
   if ((arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5) &&
       (srd3 >> 30) != 0) {
     // A resource type mismatch ignores the entire instruction, including load writeback.

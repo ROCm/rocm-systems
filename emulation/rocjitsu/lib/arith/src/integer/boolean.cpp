@@ -1,7 +1,8 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// One- and two-input wordwise boolean operations; three-input logic is in integer_ternary.
+// One- and two-input wordwise boolean operations and the stochastic-rounding LFSR step.
+// Three-input logic is in integer_ternary.
 // Owns public entry points and their validation/dispatch policy.
 
 #include "integer/boolean.h"
@@ -36,7 +37,7 @@ int boolean(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *
     return RJ_ARITH_SUCCESS;
   }
   const uint32_t *bp = nullptr;
-  if constexpr (Op != rocjitsu::arith::Boolean::Not) {
+  if constexpr (Op != rocjitsu::arith::Boolean::Not && Op != rocjitsu::arith::Boolean::Prng) {
     bp = b[0];
   }
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
@@ -77,6 +78,10 @@ int boolean(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *
     if constexpr (Op == rocjitsu::arith::Boolean::Not) {
       result[lane] = ~x;
     }
+    if constexpr (Op == rocjitsu::arith::Boolean::Prng) {
+      // The inherited stochastic-rounding LFSR feeds back bits 7, 6, 2 and 0.
+      result[lane] = (x << 1) ^ ((0U - (x >> 31)) & 0xc5U);
+    }
     if constexpr (Half) {
       result[lane] =
           (d[0][lane] & ~(uint32_t(65535) << sd)) | (uint32_t(uint16_t(result[lane])) << sd);
@@ -115,7 +120,7 @@ int boolean_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *
     uint32_t *dest = d[0] + half * 32;
     const uint32_t *source_a = a[0] + half * 32;
     const uint32_t *source_b = nullptr;
-    if constexpr (Op != rocjitsu::arith::Boolean::Not) {
+    if constexpr (Op != rocjitsu::arith::Boolean::Not && Op != rocjitsu::arith::Boolean::Prng) {
       source_b = b[0] + half * 32;
     }
     if (int error = boolean<Op, Half>(flags, uint32_t(exec_mask >> (half * 32)),
@@ -358,4 +363,167 @@ int rj_arith_v_xnor_b32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruc
   }
   return boolean_wave64<rocjitsu::arith::Boolean::Xnor, false>(flags, exec_mask, instruction_flags,
                                                                d, a, b);
+}
+
+// Advance each active lane by one inherited stochastic-rounding LFSR step.
+int rj_arith_v_prng_b32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                            uint32_t *const *d, const uint32_t *const *a) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return boolean<rocjitsu::arith::Boolean::Prng, false>(flags, exec_mask, instruction_flags, d, a,
+                                                        nullptr);
+}
+
+// Advance each active lane by one inherited stochastic-rounding LFSR step.
+int rj_arith_v_prng_b32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                            uint32_t *const *d, const uint32_t *const *a) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return boolean_wave64<rocjitsu::arith::Boolean::Prng, false>(flags, exec_mask, instruction_flags,
+                                                               d, a, nullptr);
+}
+
+namespace {
+// Select all word bits according to the three-input truth table, without per-bit iteration.
+uint32_t truth_table(uint32_t a, uint32_t b, uint32_t c, uint8_t table) {
+  auto choose = [](uint32_t mask, uint32_t yes, uint32_t no) {
+    return (mask & yes) | (~mask & no);
+  };
+  auto bit = [table](int i) { return 0U - ((table >> i) & 1U); };
+  return choose(a, choose(b, choose(c, bit(7), bit(6)), choose(c, bit(5), bit(4))),
+                choose(b, choose(c, bit(3), bit(2)), choose(c, bit(1), bit(0))));
+}
+
+// Validate and apply the truth table to one Wave32, preserving inactive lanes and aliases.
+template <bool Half>
+int bitop3(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
+           const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c) {
+  if (mode >> 32) {
+    return rocjitsu::arith::execute_dpp(
+        flags, exec_mask, mode, a, [&](uint32_t exec_mask, const uint32_t *const *source) {
+          return bitop3<Half>(flags, exec_mask, uint32_t(mode), d, source, b, c);
+        });
+  }
+  const uint32_t known =
+      RJ_ARITH_BITOP3_TABLE_MASK | RJ_ARITH_ALU_CLAMP |
+      (Half ? RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_B | RJ_ARITH_ALU_HIGH_C | RJ_ARITH_ALU_HIGH_D
+            : 0);
+  if (int error = rocjitsu::arith::validate(flags, mode & ~known)) {
+    return error;
+  }
+  if (!exec_mask) {
+    return RJ_ARITH_SUCCESS;
+  }
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+    rocjitsu::arith::bitop3_x86_64_v4<Half>(exec_mask, mode, d[0], a[0], b[0], c[0]);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+    rocjitsu::arith::bitop3_x86_64_v3<Half>(exec_mask, mode, d[0], a[0], b[0], c[0]);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
+  const int sa = Half && (mode & RJ_ARITH_ALU_HIGH_A) ? 16 : 0;
+  const int sb = Half && (mode & RJ_ARITH_ALU_HIGH_B) ? 16 : 0;
+  const int sc = Half && (mode & RJ_ARITH_ALU_HIGH_C) ? 16 : 0;
+  const int sd = Half && (mode & RJ_ARITH_ALU_HIGH_D) ? 16 : 0;
+  uint32_t result[32];
+  for (int lane = 0; lane < 32; ++lane) {
+    result[lane] = truth_table(a[0][lane] >> sa, b[0][lane] >> sb, c[0][lane] >> sc, uint8_t(mode));
+    if constexpr (Half) {
+      result[lane] = (d[0][lane] & ~(0xffffU << sd)) | (uint32_t(uint16_t(result[lane])) << sd);
+    }
+  }
+  for (int lane = 0; lane < 32; ++lane) {
+    if (exec_mask >> lane & 1) {
+      d[0][lane] = result[lane];
+    }
+  }
+  return RJ_ARITH_SUCCESS;
+}
+
+// Split Wave64 into independent rows after validating all instruction controls.
+template <bool Half>
+int bitop3_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *d,
+                  const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c) {
+  if (int error = bitop3<Half>(flags, 0, mode, nullptr, nullptr, nullptr, nullptr)) {
+    return error;
+  }
+  if (!exec_mask) {
+    return RJ_ARITH_SUCCESS;
+  }
+  for (int half = 0; half < 2; ++half) {
+    uint64_t half_mode = mode;
+    if (mode & RJ_ARITH_DPP16) {
+      uint64_t rows = (mode & RJ_ARITH_DPP_ROW_MASK) >> RJ_ARITH_DPP_ROW_SHIFT;
+      half_mode =
+          (mode & ~RJ_ARITH_DPP_ROW_MASK) | (((rows >> (half * 2)) & 3) << RJ_ARITH_DPP_ROW_SHIFT);
+    }
+    int offset = half * 32;
+    uint32_t *dest = d[0] + offset;
+    const uint32_t *x = a[0] + offset, *y = b[0] + offset, *z = c[0] + offset;
+    if (int error =
+            bitop3<Half>(flags, uint32_t(exec_mask >> offset), half_mode, &dest, &x, &y, &z)) {
+      return error;
+    }
+  }
+  return RJ_ARITH_SUCCESS;
+}
+} // namespace
+
+// Apply the programmable truth table; invalid flags leave destination storage unchanged.
+int rj_arith_v_bitop3_b32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                              uint32_t *const *d, const uint32_t *const *a,
+                              const uint32_t *const *b, const uint32_t *const *c) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return bitop3<false>(flags, exec_mask, instruction_flags, d, a, b, c);
+}
+
+// Apply the programmable truth table; invalid flags leave destination storage unchanged.
+int rj_arith_v_bitop3_b32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                              uint32_t *const *d, const uint32_t *const *a,
+                              const uint32_t *const *b, const uint32_t *const *c) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return bitop3_wave64<false>(flags, exec_mask, instruction_flags, d, a, b, c);
+}
+
+// Apply the programmable truth table; invalid flags leave destination storage unchanged.
+int rj_arith_v_bitop3_b16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                              uint32_t *const *d, const uint32_t *const *a,
+                              const uint32_t *const *b, const uint32_t *const *c) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return bitop3<true>(flags, exec_mask, instruction_flags, d, a, b, c);
+}
+
+// Apply the programmable truth table; invalid flags leave destination storage unchanged.
+int rj_arith_v_bitop3_b16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                              uint32_t *const *d, const uint32_t *const *a,
+                              const uint32_t *const *b, const uint32_t *const *c) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return bitop3_wave64<true>(flags, exec_mask, instruction_flags, d, a, b, c);
 }

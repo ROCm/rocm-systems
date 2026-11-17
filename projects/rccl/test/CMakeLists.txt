@@ -369,7 +369,7 @@ if(BUILD_TESTS)
   target_link_options(rccl-UnitTests PRIVATE
     "LINKER:--export-dynamic-symbol=ncclNetPlugin_v12"
     "LINKER:--export-dynamic-symbol=ncclGinPlugin_v13"
-    "LINKER:--export-dynamic-symbol=ncclTunerPlugin_v6"
+    "LINKER:--export-dynamic-symbol=ncclTunerPlugin_v7"
     "LINKER:--export-dynamic-symbol=ncclProfiler_v7")
 
   # AICOMRCCL-2183: RcclMockFuncs.hpp's empty ncclDebugLog, needed to link the Release-only

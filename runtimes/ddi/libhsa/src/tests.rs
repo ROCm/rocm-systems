@@ -74,6 +74,30 @@ fn extension_metadata_matches_implemented_capabilities() {
 }
 
 #[test]
+/// Checks version-specific discovery against the implemented loader tables.
+fn legacy_extension_versions_match_available_tables() {
+    for minor in 0..=4 {
+        assert!(legacy_extension_supported(EXTENSION_AMD_LOADER, 1, minor));
+        assert!(legacy_agent_extension_supported(
+            EXTENSION_AMD_LOADER,
+            true,
+            1,
+            minor
+        ));
+    }
+    assert!(!legacy_extension_supported(EXTENSION_AMD_LOADER, 1, 5));
+    assert!(legacy_extension_supported(EXTENSION_AMD_LOADER, 0, 0));
+    assert!(!legacy_extension_supported(EXTENSION_AMD_LOADER, 0, 1));
+    assert!(!legacy_extension_supported(EXTENSION_AMD_LOADER, 2, 0));
+    for extension in [EXTENSION_IMAGES, EXTENSION_AMD_PC_SAMPLING] {
+        assert!(legacy_extension_supported(extension, 1, 0));
+        assert!(!legacy_extension_supported(extension, 1, 1));
+        assert!(!legacy_extension_supported(extension, 0, 0));
+        assert!(!legacy_extension_supported(extension, 2, 0));
+    }
+}
+
+#[test]
 /// Verifies that agent extension answers never exceed system capabilities.
 fn agent_extension_answers_never_exceed_system_capabilities() {
     let extensions = [
@@ -88,7 +112,7 @@ fn agent_extension_answers_never_exceed_system_capabilities() {
     ];
     for extension in extensions {
         for major in 0..=2 {
-            for minor in 0..=1 {
+            for minor in 0..=5 {
                 let system = legacy_extension_supported(extension, major, minor);
                 let agent = legacy_agent_extension_supported(extension, true, major, minor);
                 assert!(!agent || system);
