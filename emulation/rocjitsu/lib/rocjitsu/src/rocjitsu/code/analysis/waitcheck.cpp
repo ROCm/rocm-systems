@@ -748,14 +748,11 @@ struct Analyzer : private WaitcheckStateOps {
               return std::get<2>(frame) == callee_it->second;
             });
         if (recursive_reentry) {
-          if (!add_context_edge(continuation_it->second, std::get<1>(node_key),
-                                /*conservative_sgpr_entry=*/true,
-                                CallContinuationSeed{call.return_sreg, call.source_call_offset})) {
-            report_.supported = false;
-            set_call_context_limit_error();
-            return;
-          }
-          continue;
+          // A returning recursive call can write registers in its callee.
+          // Skipping directly to the continuation loses those writes.
+          report_.complete = false;
+          report_.analysis_error = "recursive call exceeds waitcheck call-context model";
+          return;
         }
         std::vector<CallFrame> callee_stack = std::get<1>(node_key);
         callee_stack.emplace_back(continuation_it->second, call.return_sreg, callee_it->second,
@@ -1655,7 +1652,7 @@ private:
         if ((inst.flags() & INDIRECT_CALL || inst.mnemonic().starts_with("s_call")) &&
             (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5) &&
             wavefront_size_ == 32 && !view.successors.empty()) {
-          // Summarized recursion and unresolved calls have a continuation edge.
+          // Unresolved calls have a continuation edge.
           // A fully traversed callee accounts for its own register writes.
           view.instructions.back().enters_resolved_callee =
               std::ranges::all_of(view.successors, [&](size_t succ) {
@@ -10186,6 +10183,7 @@ rj_code_arch_t waitcheck_arch_for_target(rj_code_target_id_t target) {
   case ROCJITSU_CODE_TARGET_GFX1201:
     return ROCJITSU_CODE_ARCH_RDNA4;
   case ROCJITSU_CODE_TARGET_GFX1250:
+  case ROCJITSU_CODE_TARGET_GFX1251:
     return ROCJITSU_CODE_ARCH_CDNA5;
   case ROCJITSU_CODE_TARGET_GFX950:
     return ROCJITSU_CODE_ARCH_CDNA4;
@@ -10245,6 +10243,21 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
           hsa_abi = ehdr.e_ident[EI_ABIVERSION];
       }
     }
+  }
+
+  for (const auto &owned_section : code_object.all_sections()) {
+    const Section *section = owned_section.get();
+    if ((section->flags() & SHF_EXECINSTR) == 0 || section->size() == 0)
+      continue;
+    if (std::ranges::find(code_object.text_sections(), section) !=
+        code_object.text_sections().end())
+      continue;
+    // CFG construction only covers text sections. A linear pass through
+    // another executable section could miss a branch that skips a wait.
+    report.complete = false;
+    report.analysis_error = "executable section outside waitcheck CFG coverage: " +
+                            std::string(section->name());
+    return report;
   }
 
   const auto image = std::span(reinterpret_cast<const uint8_t *>(code_object.image_data()),
@@ -10346,18 +10359,6 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
   if (selected_kernel_entry || kernels_known)
     return report;
 
-  for (const auto &owned_section : code_object.all_sections()) {
-    const Section *section = owned_section.get();
-    if ((section->flags() & SHF_EXECINSTR) == 0)
-      continue;
-    if (std::ranges::find(code_object.text_sections(), section) !=
-        code_object.text_sections().end())
-      continue;
-    const auto *words = reinterpret_cast<const uint32_t *>(section->data());
-    const size_t word_count = section->size() / sizeof(uint32_t);
-    analyzer.analyze_stream(std::span<const uint32_t>(words, word_count), arch, section->name(),
-                            section->sectionOffset());
-  }
   return report;
 }
 

@@ -1300,6 +1300,17 @@ TEST(WaitcheckTest, MapsGfx950TargetToCdna4) {
   EXPECT_EQ(waitcheck_arch_for_target(ROCJITSU_CODE_TARGET_GFX950), ROCJITSU_CODE_ARCH_CDNA4);
 }
 
+TEST(WaitcheckTest, MapsGfx1250AndGfx1251TargetsToCdna5) {
+  EXPECT_EQ(waitcheck_arch_for_target(ROCJITSU_CODE_TARGET_GFX1250), ROCJITSU_CODE_ARCH_CDNA5);
+  EXPECT_EQ(waitcheck_arch_for_target(ROCJITSU_CODE_TARGET_GFX1251), ROCJITSU_CODE_ARCH_CDNA5);
+
+  const auto image = waitcheck_test::make_gfx_code_object(
+      {build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5).value()}, EF_AMDGPU_MACH_AMDGCN_GFX1251);
+  AmdGpuCodeObject object(image.data(), image.size());
+  ASSERT_EQ(object.target_id(), ROCJITSU_CODE_TARGET_GFX1251);
+  EXPECT_EQ(waitcheck_kernels(object).size(), 1u);
+}
+
 TEST(WaitcheckTest, MapsGfx1100TargetToRdna3) {
   EXPECT_EQ(waitcheck_arch_for_target(ROCJITSU_CODE_TARGET_GFX1100), ROCJITSU_CODE_ARCH_RDNA3);
 }
@@ -15162,14 +15173,11 @@ TEST(WaitcheckTest, Gfx950SharedSwappcReturnsToMatchingContinuation) {
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
 }
 
-TEST(WaitcheckTest, Gfx950RecursiveHelperUsesFiniteCallContextSummary) {
+TEST(WaitcheckTest, Gfx950RecursiveHelperReportsIncomplete) {
   constexpr uint16_t kReturnSreg = 30;
 
   // The helper recursively calls its own entry before waiting for a VMEM load.
-  // Expanding every finite recursive stack produces exponentially many
-  // analysis nodes even though the helper body and pending-state lattice are
-  // finite. The recursive edge is summarized at its continuation; the outer
-  // call still returns to the exact main-kernel continuation.
+  // A finite context graph cannot prove its eventual return state.
   std::vector<uint32_t> program;
   program.push_back(
       build_s_call_b64(kReturnSreg, 2, ROCJITSU_CODE_ARCH_CDNA4).value()); // 0x00 -> 0x0c.
@@ -15188,8 +15196,69 @@ TEST(WaitcheckTest, Gfx950RecursiveHelperUsesFiniteCallContextSummary) {
   auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA4);
 
   EXPECT_TRUE(report.supported) << report.analysis_error;
-  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
-  EXPECT_LT(report.instructions_analyzed, 64u);
+  EXPECT_FALSE(report.complete);
+  EXPECT_FALSE(report.passed());
+  EXPECT_FALSE(report.analysis_error.empty());
+}
+
+TEST(WaitcheckTest, Gfx950ReturningRecursiveCallCannotSkipCalleeLoad) {
+  // A conditional helper recurses once and returns a load to the outer
+  // continuation. A direct leaf call exposes the missing VMEM wait; a
+  // recursive call must not be reported clean by skipping the inner callee.
+  const std::vector<uint32_t> recursive{
+      0xbe940081u, 0xba9e0001u, 0xbf810000u, 0xbf068014u, 0xbf850006u,
+      0xbea2011eu, 0xbe940080u, 0xba9efffbu, 0x7e020300u, 0xbe9e0122u,
+      0xbe801d1eu, 0xe0501000u, 0x80000008u, 0xbe801d1eu};
+  const auto check = [](const std::vector<uint32_t> &program) {
+    const auto image =
+        waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX950);
+    AmdGpuCodeObject code_object(image.data(), image.size());
+    EXPECT_TRUE(code_object.is_valid());
+    return analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA4);
+  };
+
+  const auto recursive_report = check(recursive);
+  EXPECT_TRUE(recursive_report.supported) << recursive_report.analysis_error;
+  EXPECT_FALSE(recursive_report.complete);
+  EXPECT_FALSE(recursive_report.passed());
+  EXPECT_NE(recursive_report.analysis_error.find("recursive call"), std::string::npos);
+
+  auto direct_leaf = recursive;
+  direct_leaf[7] = 0xba9e0003u; // Retarget inner call to the leaf load.
+  const auto leaf_report = check(direct_leaf);
+  ASSERT_TRUE(leaf_report.supported && leaf_report.complete) << leaf_report.analysis_error;
+  ASSERT_EQ(leaf_report.diagnostics.size(), 1u) << diagnostic_summary(leaf_report);
+  EXPECT_EQ(leaf_report.diagnostics.front().counter, WaitCounterKind::Load);
+}
+
+TEST(WaitcheckTest, ExecutableSectionOutsideTextReportsIncomplete) {
+  // The branch can skip the wait between the load and its use. The same
+  // instructions in a non-text executable section lack CFG coverage.
+  const std::vector<uint32_t> program{0xee05007cu, 0u, 0x8u, 0xbfa20001u,
+                                      0xbfc00000u, 0x7e020300u, 0xbfb00000u};
+  auto image = waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX1200);
+  AmdGpuCodeObject text_object(image.data(), image.size());
+  ASSERT_TRUE(text_object.is_valid());
+  const auto text_report = analyze_waitcnts(text_object, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(text_report.supported && text_report.complete) << text_report.analysis_error;
+  ASSERT_EQ(text_report.diagnostics.size(), 1u) << diagnostic_summary(text_report);
+
+  Elf64_Ehdr ehdr{};
+  std::memcpy(&ehdr, image.data(), sizeof(ehdr));
+  Elf64_Shdr text_section{}, section_names{};
+  std::memcpy(&text_section, image.data() + ehdr.e_shoff + ehdr.e_shentsize,
+              sizeof(text_section));
+  std::memcpy(&section_names,
+              image.data() + ehdr.e_shoff + ehdr.e_shentsize * ehdr.e_shstrndx,
+              sizeof(section_names));
+  std::memcpy(image.data() + section_names.sh_offset + text_section.sh_name, ".code", 5);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+  ASSERT_TRUE(code_object.is_valid());
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA4);
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_FALSE(report.complete);
+  EXPECT_FALSE(report.passed());
+  EXPECT_NE(report.analysis_error.find(".code"), std::string::npos);
 }
 
 } // namespace
