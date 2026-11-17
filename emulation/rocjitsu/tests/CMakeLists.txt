@@ -543,6 +543,7 @@ add_executable(
     older_integer64_compare_test.cpp
     older_packed_integer_test.cpp
     older_carry_wide_integer_test.cpp
+    older_integer16_compare_test.cpp
     rj_arith_policy_test.cpp
     rj_arith_config_test.cpp
     rj_arith_bridge_test.cpp

@@ -2009,31 +2009,6 @@ def test_vop3_compare_simd_probe_can_commit_raw_result():
     assert 'ROCJITSU_TRY_SIMD_VOPC_VOP3_INT_RESULT(commit_result,' in commit_probe
 
 
-def test_true16_vop3_cmp_uses_selected_source_halves():
-    body = gen_vector_cmp(['vdst'], ['src0', 'src1'], 'lt', 'i16', is_vop3=True)
-
-    assert 'uint32_t opsel = amdgpu::vop3_opsel(inst_);' in body
-    assert body.index('uint32_t opsel = amdgpu::vop3_opsel(inst_);') < body.index(
-        'for (uint32_t lane = 0; lane < wf.wf_size(); ++lane)'
-    )
-    assert 'if (opsel & (1u << 0)) s0_raw >>= 16;' in body
-    assert 'if (opsel & (1u << 1)) s1_raw >>= 16;' in body
-    assert 'vcc &= ~(1ULL << lane)' not in body
-
-
-def test_true16_vop3_cmpx_hoists_opsel():
-    opsel_line = 'uint32_t opsel = amdgpu::vop3_opsel(inst_);'
-    loop_line = 'for (uint32_t lane = 0; lane < wf.wf_size(); ++lane)'
-
-    for dtype in ('i16', 'u16'):
-        body = gen_vector_cmpx(['src0', 'src1'], 'lt', dtype, is_vop3=True)
-
-        assert body.count(opsel_line) == 1
-        assert body.index(opsel_line) < body.index(loop_line)
-        assert 'if (opsel & (1u << 0)) s0_raw >>= 16;' in body
-        assert 'if (opsel & (1u << 1)) s1_raw >>= 16;' in body
-
-
 def test_matrix_resolved_dense_operands_support_vgpr_and_inline_accumulators():
     inst = Instruction('V_WMMA_F32_16X16X32_F16', 'ENC_VOP3P', 0, [])
     profile = _matrix_profile(

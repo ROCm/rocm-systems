@@ -1316,18 +1316,6 @@ SIMD_VOP3_TRUE16_UNSAFE = frozenset(
         'v_add_nc_u16_vop3',
         'v_add_u16_vop3',
         'v_and_b16_vop3',
-        'v_cmp_eq_i16_vop3',
-        'v_cmp_eq_u16_vop3',
-        'v_cmp_ge_i16_vop3',
-        'v_cmp_ge_u16_vop3',
-        'v_cmp_gt_i16_vop3',
-        'v_cmp_gt_u16_vop3',
-        'v_cmp_le_i16_vop3',
-        'v_cmp_le_u16_vop3',
-        'v_cmp_lt_i16_vop3',
-        'v_cmp_lt_u16_vop3',
-        'v_cmp_ne_i16_vop3',
-        'v_cmp_ne_u16_vop3',
         'v_mul_lo_u16_vop3',
         'v_not_b16_vop3',
         'v_or_b16_vop3',
@@ -1860,11 +1848,14 @@ def _simd_probe_line(
     if specvopc64 is not None:
         lane_t, cpp_op = specvopc64
         return f'  ROCJITSU_TRY_SIMD_VOPC64({lane_t}, {cpp_op});'
-    # VOP3 form of the integer/bitwise VOPC compares (i16/u16/i32/u32 and
+    # VOP3 form of the remaining integer VOPC compares (i32/u32 and
     # i64/u64). Same functor as the VOPC table (no modifiers); result-writer
     # variants return the packed mask to the generated wrapper for commit.
     specvopcv3i32 = SIMD_VOPC_VOP3_INT_32.get(template_name)
     if specvopcv3i32 is not None:
+        # True16 comparisons need the half-selection adapter, never a whole-word probe.
+        if template_name.endswith(('_i16_vop3', '_u16_vop3')):
+            return None
         lane_t, cpp_op = specvopcv3i32
         writer_arg = f'{result_writer}, ' if result_writer is not None else ''
         suffix = '_RESULT' if result_writer is not None else ''

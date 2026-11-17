@@ -76,7 +76,7 @@ def test_integer_compare_signatures_and_result_commit(name):
     assert (
         gen_integer_compare(context('cdna2', name, [], ['a', 'b'], is_vop3=False))
         is not None
-    ) == (bits in (32, 64))
+    ) == (bits in (16, 32, 64))
 
 
 @pytest.mark.parametrize(
@@ -234,18 +234,19 @@ def test_every_vopc_handler_routes_through_rj_arith(arch):
     assert 'ROCJITSU_TRY_SIMD' not in source
 
 
+@pytest.mark.parametrize('bits', [16, 64])
 @pytest.mark.parametrize(
     'arch', ('cdna1', 'cdna2', 'cdna3', 'cdna4', 'cdna5', 'rdna1', 'rdna2', 'rdna3_5')
 )
 @pytest.mark.parametrize('cmpx', (False, True))
 @pytest.mark.parametrize('explicit_destination', (False, True))
 def test_cdna_integer_compare_architectural_destinations(
-    arch, cmpx, explicit_destination
+    arch, cmpx, explicit_destination, bits
 ):
-    name = 'V_CMPX_EQ_U64' if cmpx else 'V_CMP_EQ_U64'
+    name = f'V_CMPX_EQ_U{bits}' if cmpx else f'V_CMP_EQ_U{bits}'
     dst = ['dst'] if explicit_destination else []
     body = gen_integer_compare(context(arch, name, dst, ['a', 'b']))
-    assert 'execute_compare<64>' in body
+    assert f'execute_compare<{bits}>' in body
     assert ('wf.set_exec(result)' in body) == cmpx
     writes_scalar = not cmpx or _PROFILES[arch.replace('_', '.')]().cmpx_writes_vcc
     assert ('write_wave_mask_scalar(dst' in body) == (
