@@ -110,14 +110,15 @@ __device__ __forceinline__ bool ddaLL128RsPeerFold(DdaLL128RsPeerLds& lds, const
         ddaLL128LoadRegsBatched<int8_t>(vr, self, eltInSlice, p.lane, p.flagLane);
       } else if (!ddaLL128RsPeerPoll(gather + (uint64_t)rank * (uint64_t)slotWords + 2 * p.lane, vr, flag, p.lane,
                                      params)) {
-        lds.aborted = 1;
+        atomicExch(&lds.aborted, 1);
       }
 #pragma unroll
       for (int u = 0; u < kDdaLL128WordsPerThread; ++u) {
         lds.in[p.warp][ddaLL128RsWireWord(u, p.lane)] = vr[u];
       }
     }
-    __syncthreads();
+    // LDS only: every copy, my own slice included, is in lds.in by now, so stores still in flight need not land.
+    ddaLLSpreadLdsBarrier();
     if (lds.aborted) {
       return false;
     }
@@ -153,7 +154,7 @@ __device__ __forceinline__ bool ddaLL128RsPeerFold(DdaLL128RsPeerLds& lds, const
       }
     }
     // Ends the round: the next one overwrites lds.in, and the caller reads lds.red.
-    __syncthreads();
+    ddaLLSpreadLdsBarrier();
   }
   return true;
 }
