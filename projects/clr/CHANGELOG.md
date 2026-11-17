@@ -4,16 +4,36 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 ## HIP 7.18.0 for ROCm 10.3.0
 
+### Added
+* New HIP APIs
+    - Memory Management: support for API parity with corresponding CUDA API.
+      * `hipMemcpyWithAttributesAsync` performs a single asynchronous 1D copy with the attributes
+        described by a `hipMemcpyAttributes` structure, without requiring the caller to build the
+        arrays that `hipMemcpyBatchAsync` takes.
+      * `hipMemcpy3DWithAttributesAsync` performs a single asynchronous 3D copy described by a
+        `hipMemcpy3DBatchOp` structure, without requiring the caller to build the operation list
+        that `hipMemcpy3DBatchAsync` takes.
+      * `hipArrayGetSparseProperties` returns the layout properties of a sparse HIP array in a
+        `hipArraySparseProperties` structure. Added for source compatibility: AMD devices do not
+        support sparse arrays, so it zeroes the structure and returns `hipErrorNotSupported`.
+
 ### Resolved issues
 
 * `hipDrvLaunchKernelEx` now validates cluster dimensions before dispatch. Previously, an oversized or overflowing cluster size (e.g. exceeding the device maximum, or a product that overflows `uint32_t`) reached the hardware and caused an `HSA_STATUS_ERROR_INVALID_ARGUMENT` queue abort. Both `hipDrvLaunchKernelEx` and `hipLaunchKernelExC` now return `hipErrorInvalidClusterSize` at the API boundary for invalid cluster dimensions, matching CUDA's `cudaErrorInvalidClusterSize` / `CUDA_ERROR_INVALID_CLUSTER_SIZE` behavior. A cluster size greater than 1 on a device that does not support clusters (`clusterMaxSize == 0`) is also rejected.
 * Kernels without an LDS carveout preference now dispatch with no preference instead of a 0% LDS hint, and `hipFuncSetCacheConfig(hipFuncCachePreferNone)` no longer overrides `hipDeviceSetCacheConfig`.
 * `hipDeviceGetCacheConfig` now returns the value set by `hipDeviceSetCacheConfig` on devices with a configurable LDS carveout.
+* `hiprtcCreateProgram` and `hiprtcLinkCreate` no longer crash when the COMGR library cannot be loaded or is incompatible. They now return `HIPRTC_ERROR_INTERNAL_ERROR`. This check runs before argument validation, so when COMGR is unavailable, invalid arguments also yield `HIPRTC_ERROR_INTERNAL_ERROR` instead of `HIPRTC_ERROR_INVALID_PROGRAM` or `HIPRTC_ERROR_INVALID_INPUT`. The cause of the load failure is logged at `AMD_LOG_LEVEL=1` or higher.
+* Resolved heap corruption when `hipStreamDestroy` is called on a stream that `hipDeviceReset` already destroyed. When the stale handle no longer refers to a live stream, `hipStreamDestroy` now returns `hipErrorInvalidHandle`.
 * Resolved a segmentation fault on every call to the eight external-semaphore graph node APIs (`hipGraphAddExternalSemaphoresSignalNode`, `hipGraphAddExternalSemaphoresWaitNode`, and their `GetParams`/`SetParams`/`Exec...SetParams` APIs). Their runtime dispatch-table entries were never set; they now route to the implementations, and `hipGraphAddExternalSemaphoresSignalNode` returns `hipErrorInvalidValue` for invalid arguments as the wait variant does.
+* On Windows, `hipMalloc3DArray`, `hipArray3DCreate` and `hipMallocMipmappedArray` no longer reject 3D extents above 2048 or layered arrays with more than 2048 layers. `maxTexture3D`, `maxSurface3D` and the layered limits (`maxTexture1DLayered`, `maxTexture2DLayered` and their surface equivalents) now report the device's limits, matching Linux.
+* `hipCtxDestroy` no longer releases the device context for a context the caller did not create with `hipCtxCreate`, which could free the context while the runtime still referenced it.
 
 ### Changed
 
 * After `hipFuncSetCacheConfig`, `preferredShmemCarveout` reads back `-1` for `hipFuncCachePreferNone` (was `0`) and `0` for `hipFuncCachePreferL1` (was `1`).
+* `hipCtxDestroy` returns `hipErrorInvalidContext` for a context the caller did not create with `hipCtxCreate` (was `hipSuccess`).
+* On gfx12 and later, pitched allocations use 128-byte alignment instead of 256, matching the hardware's linear pitch granularity. `hipMallocPitch`, `hipMemAllocPitch` and `hipMalloc3D` return a 128-byte-aligned pitch, and `hipDeviceProp_t::texturePitchAlignment` (OpenCL `CL_DEVICE_IMAGE_PITCH_ALIGNMENT`) reports 128. A 260-byte row now yields a 384-byte pitch rather than 512, so the allocation size changes with it. Earlier hardware is unchanged at 256 bytes. Applications that hard-coded the previous pitch, or derived a buffer size from it, will see different values.
+* Stream completion signals are now placed in device memory by default, as graph signals already are, on GPUs with a large BAR whose ROCr reports a signal-capable device pool, while no profiler tool is attached. Empty kernel dispatches and multi-stream launches get faster, while host reads of completion state get slower: `hipEventQuery`, `hipEventElapsedTime`, and a short kernel launched and synchronized on its own can take a few microseconds longer. Set `DEBUG_CLR_DEV_SIGNALS=0` to keep stream completion signals in host memory.
 
 ## HIP 7.17.0 for ROCm 10.2.0
 

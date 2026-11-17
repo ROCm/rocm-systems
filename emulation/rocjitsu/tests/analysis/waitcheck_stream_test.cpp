@@ -89,19 +89,19 @@ void flat_load(Program &program, rj_code_arch_t arch) {
     ADD_FAILURE() << "no FLAT encoding for arch " << arch;
 }
 
-void direct_load(Program &program, rj_code_arch_t arch, bool parameter) {
+void direct_load(Program &program, rj_code_arch_t arch, bool parameter, uint8_t dst = 2) {
   if (arch == ROCJITSU_CODE_ARCH_RDNA3)
     append(program,
            rdna3::build_ldsdir(parameter ? rdna3::kLdsParamLoadLdsdir : rdna3::kLdsDirectLoadLdsdir,
-                               {.vdst = 2}));
+                               {.vdst = dst}));
   else if (arch == ROCJITSU_CODE_ARCH_RDNA3_5)
     append(program, rdna3_5::build_ldsdir(parameter ? rdna3_5::kLdsParamLoadLdsdir
                                                     : rdna3_5::kLdsDirectLoadLdsdir,
-                                          {.vdst = 2}));
+                                          {.vdst = dst}));
   else
     append(program,
            rdna4::build_vdsdir(parameter ? rdna4::kDsParamLoadVdsdir : rdna4::kDsDirectLoadVdsdir,
-                               {.vdst = 2}));
+                               {.vdst = dst}));
 }
 
 WaitcheckStreamReport analyze(const Program &program,
@@ -135,6 +135,161 @@ TEST(WaitcheckStream, ReportsProducerConsumerAndRequiredWait) {
   EXPECT_TRUE(diagnostic.producer.starts_with("global_load_b32"));
   EXPECT_TRUE(diagnostic.consumer.starts_with("v_mov_b32"));
   EXPECT_EQ(report.instructions_analyzed, 2u);
+}
+
+TEST(WaitcheckStream, Gfx1150ExportOnlyProtectsEnabledSources) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_RDNA3_5;
+  for (bool enabled : {false, true}) {
+    SCOPED_TRACE(enabled);
+    // Disabled channels often encode zero. Only enabling the first channel
+    // adds a v0 dependency, both when EXP issues and while it is outstanding.
+    const auto export_inst =
+        rdna3_5::build_exp({.en = static_cast<uint8_t>(enabled ? 3 : 2), .vsrc1 = 5});
+    Program before;
+    ds_load(before, arch);
+    append(before, export_inst);
+    const auto issue = analyze(before, arch, false, 32);
+    ASSERT_FALSE(issue.incomplete);
+    EXPECT_EQ(issue.diagnostics.size(), enabled ? 1u : 0u);
+    if (!issue.diagnostics.empty()) {
+      EXPECT_EQ(issue.diagnostics[0].counter, amdgpu::WaitCounterKind::Ds);
+      EXPECT_EQ(issue.diagnostics[0].access, WaitcheckAccess::Read);
+    }
+    Program after;
+    append(after, export_inst);
+    after.push_back(v_mov(0, 7));
+    const auto pending = analyze(after, arch, false, 32);
+    ASSERT_FALSE(pending.incomplete);
+    EXPECT_EQ(pending.diagnostics.size(), enabled ? 1u : 0u);
+    if (!pending.diagnostics.empty()) {
+      EXPECT_EQ(pending.diagnostics[0].counter, amdgpu::WaitCounterKind::Exp);
+      EXPECT_EQ(pending.diagnostics[0].access, WaitcheckAccess::Write);
+    }
+  }
+}
+
+TEST(WaitcheckStream, Cdna5SendmsgReturnToM0RequiresACompletionWait) {
+  Program program;
+  append(program, cdna5::build_sop1(cdna5::kSSendmsgRtnB32Sop1, {.ssrc0 = 128, .sdst = 125}));
+  append(program, cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 125, .sdst = 2}));
+  const auto report = analyze(program, ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_FALSE(report.incomplete);
+  ASSERT_EQ(report.diagnostics.size(), 1u);
+  EXPECT_EQ(report.diagnostics[0].counter, amdgpu::WaitCounterKind::Km);
+  EXPECT_EQ(report.diagnostics[0].reg.cls, RegClass::M0);
+}
+
+TEST(WaitcheckStream, ShaderExportsReadTheRowAtIssueAndRetainExecAndDataUntilCompletion) {
+  for (auto arch :
+       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
+    for (bool row : {false, true}) {
+      SCOPED_TRACE(testing::Message() << static_cast<unsigned>(arch) << " row=" << row);
+      const auto exp = arch == ROCJITSU_CODE_ARCH_RDNA4
+                           ? rdna4::build_vexport({.en = 1, .tgt = 12, .row_en = row, .vsrc0 = 9})
+                           : rdna3::build_exp({.en = 1, .tgt = 12, .row_en = row, .vsrc0 = 9});
+      // S_SENDMSG_RTN_B32 M0, MSG_RTN_GET_DOORBELL has an asynchronous destination.
+      Program before{rdna3::build_sop1(rdna3::kSSendmsgRtnB32Sop1, {.ssrc0 = 128, .sdst = 125})[0]};
+      append(before, exp);
+      const auto issue = analyze(before, arch);
+      ASSERT_FALSE(issue.incomplete);
+      ASSERT_EQ(issue.diagnostics.size(), unsigned(row));
+      if (row) {
+        EXPECT_EQ(issue.diagnostics[0].reg.cls, RegClass::M0);
+        EXPECT_EQ(issue.diagnostics[0].access, WaitcheckAccess::Read);
+      }
+
+      for (const uint8_t reg : {125, 126, 127}) {
+        Program after;
+        append(after, exp);
+        // S_MOV_B32 M0/EXEC_LO/EXEC_HI, 1.
+        append(after, rdna3::build_sop1(rdna3::kSMovB32Sop1, {.ssrc0 = 129, .sdst = reg}));
+        after.push_back(v_mov(9, 0));
+        const auto pending = analyze(after, arch);
+        ASSERT_FALSE(pending.incomplete);
+        ASSERT_EQ(pending.diagnostics.size(), reg == 125 ? 1u : 2u);
+        if (reg != 125) {
+          EXPECT_EQ(pending.diagnostics.front().reg.cls, RegClass::EXEC);
+          EXPECT_EQ(pending.diagnostics.front().access, WaitcheckAccess::Write);
+        }
+        EXPECT_EQ(pending.diagnostics.back().reg, (RegisterRef{RegClass::VGPR, 9, 1}));
+        EXPECT_EQ(pending.diagnostics.back().counter, amdgpu::WaitCounterKind::Exp);
+      }
+    }
+  }
+}
+
+TEST(WaitcheckStream, TypedPartialExpcntWaitsReleaseOnlyOlderRequestsOfTheSameType) {
+  constexpr int lds_direct = -1;
+  struct Case {
+    std::vector<int> targets;
+    std::vector<unsigned> younger_in_fifo;
+    std::vector<unsigned> gfx12_younger = {};
+  };
+  const Case cases[]{
+      {{12, 16}, {1, 0}}, // POS0 and POS4
+      {{0, 7}, {1, 0}},   // MRT0 and MRT7
+      {{21, 22}, {1, 0}}, // dual-source MRT0/MRT1
+      {{0, 21, 22}, {2, 1, 0}, {0, 1, 0}},
+      {{21, 22, 2}, {2, 1, 0}, {1, 0, 0}},
+      {{8, 2, 4}, {0, 1, 0}, {2, 1, 0}},
+      {{8, 20}, {0, 0}},        // Z and primitive
+      {{0, 8}, {0, 0}, {1, 0}}, // color and Z
+      {{12, 0, 16}, {1, 0, 0}}, // a younger position guarantees progress across a color export
+      {{12, lds_direct, 16}, {1, 0, 0}},
+  };
+  for (auto arch :
+       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
+    SCOPED_TRACE(arch);
+    for (const auto &test : cases) {
+      const auto &younger = arch == ROCJITSU_CODE_ARCH_RDNA4 && !test.gfx12_younger.empty()
+                                ? test.gfx12_younger
+                                : test.younger_in_fifo;
+      for (int threshold : {-1, 0, 1, 2}) {
+        SCOPED_TRACE(testing::Message() << "first=" << test.targets.front() << " last="
+                                        << test.targets.back() << " threshold=" << threshold);
+        Program program;
+        for (size_t i = 0; i < test.targets.size(); ++i) {
+          const auto reg = static_cast<uint8_t>(10 + i);
+          if (test.targets[i] == lds_direct)
+            direct_load(program, arch, false, reg);
+          else if (arch == ROCJITSU_CODE_ARCH_RDNA4)
+            append(program, rdna4::build_vexport({.en = 1,
+                                                  .tgt = static_cast<uint8_t>(test.targets[i]),
+                                                  .done = test.targets[i] == 20,
+                                                  .vsrc0 = reg}));
+          else
+            append(program, rdna3_5::build_exp({.en = 1,
+                                                .tgt = static_cast<uint8_t>(test.targets[i]),
+                                                .done = test.targets[i] == 20,
+                                                .vsrc0 = reg}));
+        }
+        if (threshold >= 0) {
+          if (arch == ROCJITSU_CODE_ARCH_RDNA4)
+            append(program, rdna4::build_sopp(rdna4::kSWaitExpcntSopp,
+                                              {.simm16 = static_cast<uint16_t>(threshold)}));
+          else
+            append(program,
+                   rdna3_5::build_sopp(rdna3_5::kSWaitcntSopp,
+                                       {.simm16 = static_cast<uint16_t>(0xfff0 | threshold)}));
+        }
+        for (size_t i = 0; i < test.targets.size(); ++i)
+          program.push_back(v_mov(10 + i, 30));
+        const auto report = analyze(program, arch, false, 32);
+        ASSERT_FALSE(report.incomplete);
+        size_t diagnostic = 0;
+        for (size_t i = 0; i < test.targets.size(); ++i) {
+          if (threshold >= 0 && younger[i] >= static_cast<unsigned>(threshold))
+            continue;
+          ASSERT_LT(diagnostic, report.diagnostics.size()) << "source " << i;
+          const auto &hazard = report.diagnostics[diagnostic++];
+          EXPECT_EQ(hazard.counter, amdgpu::WaitCounterKind::Exp);
+          EXPECT_EQ(hazard.reg, (RegisterRef{RegClass::VGPR, static_cast<uint16_t>(10 + i), 1}));
+          EXPECT_EQ(hazard.required_count, younger[i]);
+        }
+        EXPECT_EQ(diagnostic, report.diagnostics.size());
+      }
+    }
+  }
 }
 
 TEST(WaitcheckStream, Gfx1251PackedArithmeticPreservesSubsequentMemoryChecks) {
@@ -207,6 +362,21 @@ TEST(WaitcheckStream, UnknownAndUnsupportedConcreteTargetsFail) {
                                        error.emitter())
                   .failed());
   EXPECT_FALSE(error.message().empty());
+}
+
+TEST(WaitcheckStream, GlobalTransposeUsesTheWaveSizedReturnRegisters) {
+  for (unsigned wave_size : {32u, 64u}) {
+    for (unsigned width : {2u, 4u}) {
+      const uint32_t op = width == 2 ? 0xee16007cu : 0xee15c07cu;
+      for (unsigned reg : {28u, 29u, 30u}) {
+        const auto report =
+            analyze({op, 27u, 2u, v_mov(0, reg)}, ROCJITSU_CODE_ARCH_RDNA4, false, wave_size);
+        ASSERT_FALSE(report.incomplete);
+        const unsigned result_words = wave_size == 64 ? width / 2 : width;
+        EXPECT_EQ(report.diagnostics.size(), unsigned(reg < 27 + result_words));
+      }
+    }
+  }
 }
 
 TEST(WaitcheckStream, LoadWaitAndSentinelHaveDifferentEffects) {
@@ -779,8 +949,9 @@ TEST(WaitcheckStream, ControlFlowStopsBeforeAFallthroughWait) {
 
 TEST(WaitcheckStream, PcDestinationsStopBeforeAFallthroughWait) {
   for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
-    for (uint32_t transfer : {0xbe801f00u, 0xbe802e00u, 0x94800200u}) {
-      // s_rfe_b64, s_cbranch_join, s_cbranch_g_fork have explicit PC destinations.
+    for (uint32_t transfer : {0xbe801f00u, 0x95800000u, 0xbe802e00u, 0x94800200u}) {
+      // s_rfe_b64, s_rfe_restore_b64, s_cbranch_join, s_cbranch_g_fork have
+      // explicit PC destinations.
       Program program{0xe0501000u, 0x80000008u, transfer, 0xbf8c0f70u, v_mov(1, 0)};
       const auto report = analyze(program, arch);
       ASSERT_TRUE(report.incomplete);
@@ -816,7 +987,9 @@ TEST(WaitcheckStream, PartialMemoryInstructionsAreIncomplete) {
 
 TEST(WaitcheckStream, DirectToLdsParityOrderingIsIncomplete) {
   for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
-    const auto report = analyze({0xe05d1000u, 0x80100008u}, arch);
+    // CDNA3 supports buffer_load_dword lds. CDNA4 also supports buffer_load_dwordx4 lds.
+    const uint32_t load = arch == ROCJITSU_CODE_ARCH_CDNA3 ? 0xe0511000u : 0xe05d1000u;
+    const auto report = analyze({load, 0x80100008u}, arch);
     ASSERT_TRUE(report.incomplete);
     EXPECT_EQ(report.instructions_analyzed, 0u);
     EXPECT_NE(report.incomplete->reason.find("parity"), std::string::npos);

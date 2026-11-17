@@ -698,6 +698,8 @@ public:
 
 class Vintrp : public IsaInstruction<Isa> {
 public:
+  void append_interp_operand(std::string &out, uint8_t index,
+                             const ::rocjitsu::Operand &attribute) const;
   Vintrp(std::string_view mnemonic, const VintrpMachineInst *inst, ExecuteFn exec_fn);
   bool default_encoding();
   using OpEncoding = VintrpMachineInst;
@@ -707,6 +709,8 @@ public:
 
 class Vop3 : public IsaInstruction<Isa> {
 public:
+  void append_interp_operand(std::string &out, uint8_t index, const ::rocjitsu::Operand &attribute,
+                             const ::rocjitsu::Operand *interpolant) const;
   Vop3(std::string_view mnemonic, const Vop3MachineInst *inst, ExecuteFn exec_fn);
   bool displays_vop3_op_sel() const;
   uint32_t vop3_encoded_source_count() const;
@@ -796,6 +800,7 @@ public:
     if (inst->gds)
       out += " gds";
   }
+  void implicit_uses(RegisterSet &uses) const override;
   using OpEncoding = DsMachineInst;
   const OpEncoding inst_;
 };
@@ -803,6 +808,17 @@ public:
 class Mubuf : public IsaInstruction<Isa> {
 public:
   Mubuf(std::string_view mnemonic, const MubufMachineInst *inst, ExecuteFn exec_fn);
+  static Result validate_encoding([[maybe_unused]] std::string_view mnemonic,
+                                  const MubufMachineInst *inst,
+                                  const util::DiagnosticEmitter &emit_error) {
+    const auto &inst_ = *inst;
+    if (inst_.lds && !(!inst_.opm && (inst_.op == 0 || (inst_.op >= 8 && inst_.op <= 12))))
+        [[unlikely]]
+      return emit_error.emit() << mnemonic << " does not support LDS";
+    if (inst_.lds && inst_.tfe) [[unlikely]]
+      return emit_error.emit() << mnemonic << " cannot return TFE status to LDS";
+    return Result::success();
+  }
   void build_modifiers(std::string &out) const override {
     auto *inst = &inst_;
     (void)inst;
@@ -820,6 +836,8 @@ public:
       out += " slc";
     if (inst->lds)
       out += " lds";
+    if (inst->tfe && (flags_ & CONDITIONAL_LAST_VGPR_DEF))
+      out += " tfe";
   }
   using OpEncoding = MubufMachineInst;
   const OpEncoding inst_;
@@ -841,6 +859,8 @@ public:
       out += " dlc";
     if (inst->slc)
       out += " slc";
+    if (inst->tfe && (flags_ & CONDITIONAL_LAST_VGPR_DEF))
+      out += " tfe";
   }
   using OpEncoding = MtbufMachineInst;
   const OpEncoding inst_;
@@ -868,6 +888,42 @@ public:
     Instruction::append_src_operand(out, operand_index);
   }
   void capture_nsa_words(const MachineInst *inst, const Operand *vaddr);
+  void build_modifiers(std::string &out) const override {
+    auto *inst = &inst_;
+    (void)inst;
+    if (!mnemonic_.starts_with("image_bvh")) {
+      out += " dmask:0x";
+      out += "0123456789abcdef"[inst->dmask & 0xfu];
+    }
+    if (!mnemonic_.starts_with("image_bvh")) {
+      static constexpr std::string_view dims[] = {
+          "1D", "2D", "3D", "CUBE", "1D_ARRAY", "2D_ARRAY", "2D_MSAA", "2D_MSAA_ARRAY"};
+      out += " dim:SQ_RSRC_IMG_";
+      out += dims[inst->dim & 7u];
+    }
+    if (!mnemonic_.starts_with("image_bvh")) {
+      if (inst->unorm)
+        out += " unorm";
+      if (inst->glc)
+        out += " glc";
+      if (inst->slc)
+        out += " slc";
+      if (inst->dlc)
+        out += " dlc";
+      if (inst->r128)
+        out += " r128";
+    }
+    if (inst->a16)
+      out += " a16";
+    if (!mnemonic_.starts_with("image_bvh")) {
+      if (inst->tfe)
+        out += " tfe";
+      if (inst->lwe)
+        out += " lwe";
+      if (inst->d16)
+        out += " d16";
+    }
+  }
   bool has_nsa_1();
   bool has_nsa_2();
   bool has_nsa_3();
@@ -887,6 +943,20 @@ public:
 class Flat : public IsaInstruction<Isa> {
 public:
   Flat(std::string_view mnemonic, const FlatMachineInst *inst, ExecuteFn exec_fn);
+  static Result validate_encoding([[maybe_unused]] std::string_view mnemonic,
+                                  const FlatMachineInst *inst,
+                                  const util::DiagnosticEmitter &emit_error) {
+    const auto &inst_ = *inst;
+    static constexpr uint8_t segment_masks[128] = {
+        0, 0, 0, 0, 0, 0, 0, 0, 7, 7, 7, 7, 7, 7, 7, 7, 0, 0, 0, 0, 0, 0, 4, 4, 7, 7,
+        7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 5, 5, 5,
+        4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 5, 5, 5, 5, 0, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    if (!(segment_masks[inst_.op] & (1u << inst_.seg))) [[unlikely]]
+      return emit_error.emit() << mnemonic << " has an invalid segment";
+    return Result::success();
+  }
   void build_modifiers(std::string &out) const override {
     auto *inst = &inst_;
     (void)inst;

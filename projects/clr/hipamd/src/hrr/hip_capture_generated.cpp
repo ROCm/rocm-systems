@@ -2459,18 +2459,6 @@ static hipError_t capture_hipGraphKernelNodeSetAttribute(hipGraphNode_t hNode, h
 }
 
 
-// Generated shim
-static hipError_t capture_hipGraphLaunch(hipGraphExec_t graphExec, hipStream_t stream) {
-  hipError_t r = g_real_table.hipGraphLaunch_fn(graphExec, stream);
-  if (r == hipSuccess) {
-    hrr_args_hipGraphLaunch a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.graphExec = reinterpret_cast<uint64_t>(graphExec);
-    a.stream = reinterpret_cast<uint64_t>(stream);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPGRAPHLAUNCH, &a.hdr, sizeof(a));
-  }
-  return r;
-}
 
 // Generated shim
 static hipError_t capture_hipGraphMemAllocNodeGetParams(hipGraphNode_t node, hipMemAllocNodeParams* pNodeParams) {
@@ -5682,18 +5670,6 @@ static hipError_t capture_hipEventRecord_spt(hipEvent_t event, hipStream_t strea
 
 
 
-// Generated shim
-static hipError_t capture_hipGraphLaunch_spt(hipGraphExec_t graphExec, hipStream_t stream) {
-  hipError_t r = g_real_table.hipGraphLaunch_spt_fn(graphExec, stream);
-  if (r == hipSuccess) {
-    hrr_args_hipGraphLaunch_spt a{};
-    a.ret         = static_cast<int32_t>(r);
-    a.graphExec = reinterpret_cast<uint64_t>(graphExec);
-    a.stream = reinterpret_cast<uint64_t>(stream);
-    hrr_cap::writer::write_event_raw(HRR_API_HIPGRAPHLAUNCH_SPT, &a.hdr, sizeof(a));
-  }
-  return r;
-}
 
 // Generated shim
 static hipError_t capture_hipStreamBeginCapture_spt(hipStream_t stream, hipStreamCaptureMode mode) {
@@ -8034,6 +8010,49 @@ static hipError_t capture_hipExtMemcpyBatchAsync(void** dsts, void** srcs, size_
 }
 
 // Generated shim
+static hipError_t capture_hipMemcpyWithAttributesAsync(void* dst, const void* src, size_t size, hipMemcpyAttributes* attr, hipStream_t stream) {
+  hipError_t r = g_real_table.hipMemcpyWithAttributesAsync_fn(dst, src, size, attr, stream);
+  if (r == hipSuccess) {
+    hrr_args_hipMemcpyWithAttributesAsync a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.dst = reinterpret_cast<uint64_t>(dst);
+    a.src = reinterpret_cast<uint64_t>(src);
+    a.size = static_cast<decltype(a.size)>(size);
+    a.attr = reinterpret_cast<uint64_t>(attr);
+    a.stream = reinterpret_cast<uint64_t>(stream);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPMEMCPYWITHATTRIBUTESASYNC, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipMemcpy3DWithAttributesAsync(struct hipMemcpy3DBatchOp* op, unsigned long long flags, hipStream_t stream) {
+  hipError_t r = g_real_table.hipMemcpy3DWithAttributesAsync_fn(op, flags, stream);
+  if (r == hipSuccess) {
+    hrr_args_hipMemcpy3DWithAttributesAsync a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.op = reinterpret_cast<uint64_t>(op);
+    a.flags = static_cast<decltype(a.flags)>(flags);
+    a.stream = reinterpret_cast<uint64_t>(stream);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPMEMCPY3DWITHATTRIBUTESASYNC, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipArrayGetSparseProperties(hipArraySparseProperties* sparseProperties, hipArray_t array) {
+  hipError_t r = g_real_table.hipArrayGetSparseProperties_fn(sparseProperties, array);
+  if (r == hipSuccess) {
+    hrr_args_hipArrayGetSparseProperties a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.sparseProperties = reinterpret_cast<uint64_t>(sparseProperties);
+    a.array = reinterpret_cast<uint64_t>(array);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPARRAYGETSPARSEPROPERTIES, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
 static hipError_t capture___hipPopCallConfiguration(dim3* gridDim, dim3* blockDim, size_t* sharedMem, hipStream_t* stream) {
   hipError_t r = g_real_compiler_table.__hipPopCallConfiguration_fn(gridDim, blockDim, sharedMem, stream);
   if (r == hipSuccess) {
@@ -8168,6 +8187,7 @@ extern hipError_t capture_hipGraphAddMemcpyNodeToSymbol(hipGraphNode_t* pGraphNo
 extern hipError_t capture_hipGraphExecKernelNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t node, const hipKernelNodeParams* pNodeParams);
 extern hipError_t capture_hipGraphExecMemcpyNodeSetParamsToSymbol(hipGraphExec_t hGraphExec, hipGraphNode_t node, const void* symbol, const void* src, size_t count, size_t offset, hipMemcpyKind kind);
 extern hipError_t capture_hipGraphKernelNodeSetParams(hipGraphNode_t node, const hipKernelNodeParams* pNodeParams);
+extern hipError_t capture_hipGraphLaunch(hipGraphExec_t graphExec, hipStream_t stream);
 extern hipError_t capture_hipGraphMemcpyNodeSetParamsToSymbol(hipGraphNode_t node, const void* symbol, const void* src, size_t count, size_t offset, hipMemcpyKind kind);
 extern hipError_t capture_hipHostRegister(void* hostPtr, size_t sizeBytes, unsigned int flags);
 extern hipError_t capture_hipHostUnregister(void* hostPtr);
@@ -8203,6 +8223,7 @@ extern hipError_t capture_hipMemcpy3D_spt(const struct hipMemcpy3DParms* p);
 extern hipError_t capture_hipMemcpy3DAsync_spt(const hipMemcpy3DParms* p, hipStream_t stream);
 extern hipError_t capture_hipLaunchCooperativeKernel_spt(const void* f, dim3 gridDim, dim3 blockDim, void** kernelParams, uint32_t sharedMemBytes, hipStream_t hStream);
 extern hipError_t capture_hipLaunchKernel_spt(const void* function_address, dim3 numBlocks, dim3 dimBlocks, void** args, size_t sharedMemBytes, hipStream_t stream);
+extern hipError_t capture_hipGraphLaunch_spt(hipGraphExec_t graphExec, hipStream_t stream);
 extern hipError_t capture_hipGraphAddBatchMemOpNode(hipGraphNode_t* phGraphNode, hipGraph_t hGraph, const hipGraphNode_t* dependencies, size_t numDependencies, const hipBatchMemOpNodeParams* nodeParams);
 extern hipError_t capture_hipGraphBatchMemOpNodeSetParams(hipGraphNode_t hNode, hipBatchMemOpNodeParams* nodeParams);
 extern hipError_t capture_hipGraphExecBatchMemOpNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t hNode, const hipBatchMemOpNodeParams* nodeParams);
@@ -8773,6 +8794,9 @@ void hip_capture_build_table() {
   g_cap_table.hipKernelSetAttributeForDevice_fn = capture_hipKernelSetAttributeForDevice;
   g_cap_table.hipKernelSetCacheConfig_fn = capture_hipKernelSetCacheConfig;
   g_cap_table.hipExtMemcpyBatchAsync_fn = capture_hipExtMemcpyBatchAsync;
+  g_cap_table.hipMemcpyWithAttributesAsync_fn = capture_hipMemcpyWithAttributesAsync;
+  g_cap_table.hipMemcpy3DWithAttributesAsync_fn = capture_hipMemcpy3DWithAttributesAsync;
+  g_cap_table.hipArrayGetSparseProperties_fn = capture_hipArrayGetSparseProperties;
 }
 
 void hip_capture_build_compiler_table() {

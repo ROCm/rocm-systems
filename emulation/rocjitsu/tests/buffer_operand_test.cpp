@@ -5,6 +5,7 @@
 /// @brief Regression tests for semantic legacy buffer operands.
 
 #include "decode_test_util.h"
+#include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -16,6 +17,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <utility>
 
 namespace {
 
@@ -98,6 +100,91 @@ TEST_P(BufferOperandTest, AddressModeAndResourceUsePhysicalRegisters) {
     const auto vdata = inst->dst_operand(0)->to_register_ref();
     ASSERT_TRUE(vdata.has_value()) << tc.label;
     EXPECT_EQ(*vdata, (RegisterRef{RegClass::ACC_VGPR, 68, 1})) << tc.label;
+  }
+}
+
+TEST(BufferFeedbackTest, PrintedTfeMatchesTheConditionallyWrittenStatusRegister) {
+  struct Encoding {
+    uint32_t gfx10, gfx11;
+    unsigned payload;
+  };
+  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2,
+                          ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
+    const bool gfx10 = arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
+    const auto decoder = Decoder::create(arch);
+    for (const auto &[old_opcode, new_opcode, payload] :
+         {Encoding{0xe0300000, 0xe0500000, 1},    // Untyped dword.
+          Encoding{0xe0380000, 0xe05c0000, 4},    // Untyped dwordx4.
+          Encoding{0xe8a00000, 0xe8a00000, 1},    // Typed format X.
+          Encoding{0xe8a30000, 0xe8a18000, 4},    // Typed format XYZW.
+          Encoding{0xe0700000, 0xe0680000, 0},    // Ordinary store.
+          Encoding{0xe8a40000, 0xe8a20000, 0},    // Typed store.
+          Encoding{0xe0c00000, 0xe0cc0000, 0}}) { // Nonreturning atomic swap.
+      for (bool tfe : {false, true}) {
+        const uint32_t words[]{gfx10 ? old_opcode : new_opcode,
+                               0x80014400u | (uint32_t(tfe) << (gfx10 ? 23 : 21))};
+        auto result = decoder->decode_window(words);
+        ASSERT_TRUE(result.succeeded());
+        const auto &inst = *result.value();
+        SCOPED_TRACE(testing::Message() << arch << ' ' << inst.disassemble());
+        const bool feedback = tfe && payload != 0;
+        EXPECT_EQ(inst.disassemble().ends_with(" tfe"), feedback);
+        const InstDefUse uses(inst, 32);
+        const auto status = uses.conditional_vgpr_def;
+        EXPECT_EQ(status.has_value(), feedback);
+        if (feedback) {
+          ASSERT_TRUE(status);
+          EXPECT_EQ(*status, (RegisterRef{RegClass::VGPR, static_cast<uint16_t>(68 + payload), 1}));
+        }
+        if (payload) {
+          const auto dest = inst.dst_operand(0)->to_register_ref();
+          ASSERT_TRUE(dest);
+          EXPECT_EQ(dest->width, payload + unsigned(tfe));
+        }
+      }
+    }
+    if (!gfx10) {
+      for (bool tfe : {false, true}) {
+        // GLC returns the old atomic value and admits an additional TFE status.
+        const uint32_t words[]{0xe0cc4000u, 0x80014400u | (uint32_t(tfe) << 21)};
+        auto result = decoder->decode_window(words);
+        ASSERT_TRUE(result.succeeded());
+        const auto &inst = *result.value();
+        const InstDefUse uses(inst, 32);
+        EXPECT_EQ(inst.disassemble().ends_with(" tfe"), tfe);
+        EXPECT_EQ(uses.conditional_vgpr_def.has_value(), tfe);
+        if (tfe) {
+          ASSERT_TRUE(uses.conditional_vgpr_def);
+          EXPECT_EQ(*uses.conditional_vgpr_def, (RegisterRef{RegClass::VGPR, 69, 1}));
+        }
+      }
+    }
+  }
+}
+
+TEST(Gfx10BufferOperandTest, TfeFetchReservesOneConditionalStatusRegisterAfterTheData) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+    auto decoder = Decoder::create(arch);
+    ASSERT_NE(decoder, nullptr);
+    for (const auto &[opcode, data_words] : {
+             std::pair{0xe0300000u, 1u}, // buffer_load_dword
+             std::pair{0xe0380000u, 4u}, // buffer_load_dwordx4
+             std::pair{0xe8000000u, 1u}, // tbuffer_load_format_x
+         }) {
+      for (const uint32_t tfe : {0u, 1u}) {
+        const uint32_t words[] = {opcode, 0x80014400u | (tfe << 23)};
+        std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
+        ASSERT_TRUE(inst);
+        const auto vdata = inst->dst_operand(0)->to_register_ref();
+        ASSERT_TRUE(vdata);
+        EXPECT_EQ(*vdata,
+                  (RegisterRef{RegClass::VGPR, 68, static_cast<uint8_t>(data_words + tfe)}));
+        EXPECT_EQ(bool(inst->flags() & PREDICATED_DEF), tfe != 0);
+        EXPECT_EQ(inst->disassemble().find(" tfe") != std::string::npos, tfe != 0);
+      }
+    }
+    const uint32_t lds_tfe[] = {0xe0310000u, 0x80814400u};
+    EXPECT_TRUE(decode_fails(*decoder, lds_tfe));
   }
 }
 

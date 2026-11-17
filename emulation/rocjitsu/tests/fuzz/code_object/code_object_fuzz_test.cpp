@@ -23,8 +23,11 @@ namespace {
 
 TEST(CodeObjectFuzzTest, SeedsReachStandaloneAndBundledCodeObjects) {
   RunStats total;
-  for (const auto &seed : seed_corpus())
-    total += run_input(seed);
+  for (const auto &seed : seed_corpus()) {
+    const util::FailureOr<RunStats> result = run_input(seed);
+    ASSERT_TRUE(result.succeeded());
+    total += result.value();
+  }
 
   EXPECT_EQ(total.inputs, 4u);
   EXPECT_GE(total.code_objects_valid, 3u);
@@ -44,9 +47,18 @@ TEST(CodeObjectFuzzTest, ArbitraryBytesAreRejectedWithoutThrowing) {
   };
   for (const auto &input : inputs) {
     SCOPED_TRACE(input.size());
-    const RunStats stats = run_input(input);
+    const util::FailureOr<RunStats> result = run_input(input);
+    ASSERT_TRUE(result.succeeded());
+    const RunStats &stats = result.value();
     EXPECT_EQ(stats.inputs, 1u);
   }
+}
+
+TEST(CodeObjectFuzzTest, OversizedInputReturnsFailureWithDiagnostic) {
+  const std::vector<uint8_t> bytes(kMaxInputSize + 1);
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(run_input(bytes, diagnostic.emitter()).failed());
+  EXPECT_EQ(diagnostic.message(), "code-object fuzz input exceeds size limit");
 }
 
 TEST(CodeObjectFuzzTest, HostElfWithoutSectionHeadersIsRejected) {
@@ -65,7 +77,9 @@ TEST(CodeObjectFuzzTest, DeviceElfWithoutSectionHeadersIsRejected) {
   const Executable executable(image);
   EXPECT_FALSE(object.is_valid());
   EXPECT_FALSE(executable.is_valid());
-  EXPECT_EQ(run_input(image).inputs, 1u);
+  const util::FailureOr<RunStats> result = run_input(image);
+  ASSERT_TRUE(result.succeeded());
+  EXPECT_EQ(result.value().inputs, 1u);
 }
 
 TEST(CodeObjectFuzzTest, GeneratorIsDeterministicAndBounded) {
@@ -135,7 +149,9 @@ TEST(CodeObjectFuzzTest, UnknownBundledTargetStillExercisesCodeObject) {
   ASSERT_NE(target, image.end());
   std::copy_n("gfx9999", known_target.size(), target);
 
-  const RunStats stats = run_input(image);
+  const util::FailureOr<RunStats> result = run_input(image);
+  ASSERT_TRUE(result.succeeded());
+  const RunStats &stats = result.value();
   EXPECT_EQ(stats.executables_valid, 1u);
   EXPECT_EQ(stats.bundled_code_objects, 1u);
   EXPECT_EQ(stats.code_objects_valid, 1u);

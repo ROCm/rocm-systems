@@ -945,14 +945,14 @@ configure_settings(bool _init)
     ROCPROFSYS_CONFIG_SETTING(
         std::string, env_vars::TRACE_PERIOD_CLOCK_ID,
         "Clock used to measure delay and duration for ROCPROFSYS_TRACE_DELAY, "
-        "ROCPROFSYS_TRACE_DURATION, and ROCPROFSYS_TRACE_PERIODS.\n"
-        "  realtime (default) : wall-clock time. A 10-second delay waits for\n"
-        "    10 real seconds regardless of how many CPU cores are active.\n"
-        "  cputime : process CPU time (CLOCK_PROCESS_CPUTIME_ID). A 10-second\n"
-        "    delay waits until the process has consumed 10 CPU-seconds in total\n"
-        "    across all threads. Useful when you want to skip a fixed amount of\n"
-        "    computation rather than a fixed elapsed time. Note: rocprof-sys\n"
-        "    instrumentation itself contributes to the CPU-time counter.",
+        "ROCPROFSYS_TRACE_DURATION, and ROCPROFSYS_TRACE_PERIODS."
+        "  realtime (default) : wall-clock time. A 10-second delay waits for"
+        " 10 real seconds regardless of how many CPU cores are active."
+        "  cputime : process CPU time (CLOCK_PROCESS_CPUTIME_ID). A 10-second"
+        " delay waits until the process has consumed 10 CPU-seconds in total"
+        " across all threads. Useful when you want to skip a fixed amount of"
+        " computation rather than a fixed elapsed time. Note: rocprof-sys"
+        " instrumentation itself contributes to the CPU-time counter.",
         "realtime", "trace", "profile", "perfetto", "timemory")
         ->set_choices({ "realtime", "cputime" });
 
@@ -2337,12 +2337,13 @@ print_banner(std::ostream& _os)
             return _property_info;
         };
 
-    auto _properties =
-        _generate_properties({ { "rev", ROCPROFSYS_GIT_REVISION },
-                               { "tag", ROCPROFSYS_GIT_DESCRIBE },
-                               { "", ROCPROFSYS_LIBRARY_ARCH },
-                               { "compiler", ROCPROFSYS_COMPILER_STRING },
-                               { "rocm", "v" ROCPROFSYS_ROCM_VERSION_STRING } });
+    auto _properties = _generate_properties(
+        { { "rev", ROCPROFSYS_GIT_REVISION },
+          { "tag", ROCPROFSYS_GIT_DESCRIBE },
+          { "", ROCPROFSYS_LIBRARY_ARCH },
+          { "compiler", ROCPROFSYS_COMPILER_STRING },
+          { "rocm", "v" ROCPROFSYS_ROCM_VERSION_STRING },
+          { "profiler-hub", "v" ROCPROFSYS_PROFILER_HUB_VERSION_STRING } });
 
     // <NAME> <VERSION> (<PROPERTIES>)
     if(!_properties.empty())
@@ -3435,6 +3436,19 @@ reset_database_path_memo()
     s_db_path_memo.clear();
 }
 
+void
+refresh_output_format_settings()
+{
+    for(const auto* name : { env_vars::TRACE, env_vars::USE_ROCPD })
+    {
+        const auto value = rocprofsys::get_env<std::string>(name, "");
+        if(!value.empty())
+        {
+            set_setting_value(std::string{ name }, utility::string::to_bool(value));
+        }
+    }
+}
+
 std::string
 get_output_absolute_path(std::string_view basename, std::string_view extension,
                          std::string_view tag, std::string_view dir)
@@ -3642,13 +3656,11 @@ get_use_unified_memory_profiling()
     return static_cast<tim::tsettings<bool>&>(*_v).get();
 }
 
-bool&
+bool
 get_use_perfetto()
 {
     static auto const _trace_setting = get_config()->at(env_vars::TRACE);
-    auto const&       _trace = static_cast<tim::tsettings<bool>&>(*_trace_setting).get();
-    static bool       _v     = _trace;
-    return _v;
+    return static_cast<tim::tsettings<bool>&>(*_trace_setting).get();
 }
 
 int
