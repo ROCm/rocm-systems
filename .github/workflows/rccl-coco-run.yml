@@ -378,13 +378,23 @@ jobs:
             fi
             # Superset first, into the same -o tree the test pass reads its
             # stacks back out of.
+            # Read each baseline before its pass. Inside a command's arguments, a
+            # failed config load would leave --baseline-stack empty and not stop.
             if [[ -n "${BUILD_JOB}" ]]; then
+              build_baseline=$(job_baseline "${BUILD_JOB}") || {
+                echo "::error title=PR build pass (${BUILD_JOB})::Cannot read comparison.baseline from job ${BUILD_JOB}."
+                exit 1
+              }
               coco_pr 'PR build pass' "${BUILD_JOB}" "${BUILD_LOG}" \
                 "The PR smoke pass (${JOB}) did not run because the build pass failed." \
-                --build-only --baseline-stack "$(job_baseline "${BUILD_JOB}")"
+                --build-only --baseline-stack "${build_baseline}"
             fi
+            smoke_baseline=$(job_baseline "${JOB}") || {
+              echo "::error title=PR smoke pass (${JOB})::Cannot read comparison.baseline from job ${JOB}."
+              exit 1
+            }
             coco_pr 'PR smoke pass' "${JOB}" "${LOG_FILE}" '' \
-              --baseline-stack "$(job_baseline "${JOB}")"
+              --baseline-stack "${smoke_baseline}"
           elif [[ "${MODE}" == 'run' ]]; then
             echo "==> coco run --job ${JOB} --trigger-kind ${TRIGGER_KIND} ${COCO_ARGS}"
             run_status=0
