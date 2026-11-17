@@ -14,8 +14,6 @@ NCCL_PARAM(ColltraceRecordMax, "COLLTRACE_RECORD_MAX", 100);
 NCCL_PARAM(ColltraceMaxDumpSize, "COLLTRACE_MAX_DUMP_SIZE", 20);
 NCCL_PARAM(ColltraceDumpIntervalSec, "COLLTRACE_DUMP_INTERVAL_SEC", 300);
 
-constexpr int RANKS_PER_HOST = 8;
-
 namespace latency_profiler {
 
 namespace {
@@ -39,7 +37,7 @@ CollTrace::~CollTrace() {
       profilingWorkerThread_.join();
     }
 
-    if (rank_ == 0) {
+    if (comm_->localRank == 0) {
       reportIfNeeded(false);
     }
 
@@ -80,7 +78,7 @@ void* CollTrace::collTraceThreadFn(int cudaDev) {
       latency = *latencyMaybe;
     }
 
-    recordCurCollResult(cudaDev, latency);
+    recordCurCollResult(comm_->localRank, latency);
     curEvent_.reset();
   }
 
@@ -147,8 +145,7 @@ void CollTrace::recordCurCollResult(int rank, float latency) {
   }
 
   if (shouldAggregateRingBuffer(collId) && pastColls_.size() > 0) {
-    std::vector<float> latencyAllGather;
-    latencyAllGather.resize(RANKS_PER_HOST * NCCL_COLLTRACE_RECORD_MAX, 0);
+    std::vector<float> latencyAllGather(static_cast<size_t>(comm_->localRanks) * NCCL_COLLTRACE_RECORD_MAX, 0);
     int start = (comm_->localRank) * NCCL_COLLTRACE_RECORD_MAX;
     for (int i = start; i < start + NCCL_COLLTRACE_RECORD_MAX; i++) {
       latencyAllGather[i] = pastColls_[i - start]->latencyMs;
@@ -167,7 +164,7 @@ void CollTrace::recordCurCollResult(int rank, float latency) {
     if (rank == 0) {
       INFO(NCCL_COLL, "latency metrics all gather takes %ld us", interval_us);
       try {
-        auto stats = aggregateResults(pastColls_, latencyAllGather, RANKS_PER_HOST, NCCL_COLLTRACE_RECORD_MAX);
+        auto stats = aggregateResults(pastColls_, latencyAllGather, comm_->localRanks, NCCL_COLLTRACE_RECORD_MAX);
         stats_.push_back(stats);
         if (stats_.size() > ncclParamColltraceMaxDumpSize()) {
           stats_.pop_front();
