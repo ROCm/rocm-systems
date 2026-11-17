@@ -19,11 +19,17 @@
 #include "SymmetricMemPrereq.hpp"
 #include "TestChecks.hpp"
 #include "comm.h"
+#include "graph/topo.h"
 
 #include "nccl_device.h"
+// GIN-only backend header; the macro is pinned by test/CMakeLists.txt (see there).
+#if NCCL_GIN_ANVIL_SDMA_ENABLE
 #include "nccl_device/gin/anvil_sdma/gin_anvil_sdma_device_host_common.h"
+#endif
 #ifdef ENABLE_ROCSHMEM_GIN
+#include "gin/gin_anvil_sdma_factory.h"
 #include "gin/gin_host_anvil_sdma.h"
+#include "gin/gin_type_env.h"
 #endif
 
 #include <algorithm>
@@ -137,6 +143,25 @@ std::string anvilSingleNodeReason() {
   return "";
 }
 
+// AICOMRCCL-3417: NCCL_GIN_TYPE must be unset so Anvil SDMA and PROXY are both eligible.
+std::string mixedBackendTwoNodeSkipReason() {
+  std::string local = ginEnvDisabledReason();
+  if (local.empty()) local = cuMemReason();
+#ifndef ENABLE_ROCSHMEM_GIN
+  if (local.empty()) local = "Requires ENABLE_ROCSHMEM_GIN";
+#else
+  if (local.empty() && gin_anvil_sdma_probe() <= 0)
+    local = "Requires Anvil SDMA (gin_anvil_sdma_probe)";
+#endif
+  // Presence, not value: ginAnvilInit rejects an empty NCCL_GIN_TYPE.
+  if (local.empty() && std::getenv("NCCL_GIN_TYPE"))
+    local = "Requires NCCL_GIN_TYPE to be unset";
+  // crossNodeReason splits MPI_COMM_TYPE_SHARED. Every rank must call it.
+  std::string cross = crossNodeReason();
+  if (local.empty()) local = std::move(cross);
+  return mpiCoordinatedSkipReason(!local.empty(), local.empty() ? nullptr : local.c_str());
+}
+
 // Unlike anvilSingleNodeReason() above, this applies on every backend: the
 // fence-visibility tests pair each rank with one peer and read back the peer's
 // write, so they are only meaningful with all ranks on one node.
@@ -160,7 +185,8 @@ std::string ginProxyTestSkipReason() {
 // For runs that need anvil-sdma and the proxy active together: a set NCCL_GIN_TYPE
 // filters out all but one backend type, and anvil-sdma is single-node only.
 std::string ginMixedBackendSkipReason() {
-  if (std::getenv("NCCL_GIN_TYPE"))
+  const char* ginType = std::getenv("NCCL_GIN_TYPE");
+  if (ginType && ginType[0])
     return "Requires NCCL_GIN_TYPE unset so anvil-sdma and the proxy are both active";
   for (auto check : {ginEnvDisabledReason, cuMemReason, singleNodeReason}) {
     if (auto reason = check(); !reason.empty()) return reason;
@@ -168,11 +194,49 @@ std::string ginMixedBackendSkipReason() {
   return "";
 }
 
+#ifdef ENABLE_ROCSHMEM_GIN
+uint64_t listedGinTypes() {
+  uint64_t listed = 0;
+  if (const char* list = std::getenv("RCCL_GIN_TYPE_LIST")) ncclGinParseTypeList(list, &listed);
+  return listed;
+}
+
+bool ginTypeListed(uint64_t listed, ncclGinType_t type) { return (listed >> type) & 1; }
+
+// AICOMRCCL-3418: single-node Anvil SDMA, and NIC backends on one node need intranet mode.
+std::string gdaAlongsideSkipReason() {
+  std::string local = ginEnvDisabledReason();
+  if (local.empty()) local = cuMemReason();
+  if (local.empty() && ncclGinTypeEnv())
+    local = "Requires NCCL_GIN_TYPE unset so RCCL_GIN_TYPE_LIST selects the backends";
+  const uint64_t listed = listedGinTypes();
+  if (local.empty() && (!ginTypeListed(listed, NCCL_GIN_TYPE_ROCSHMEM_GDA) ||
+                        !(ginTypeListed(listed, NCCL_GIN_TYPE_ANVIL_SDMA) ||
+                          ginTypeListed(listed, NCCL_GIN_TYPE_PROXY))))
+    local = "Requires RCCL_GIN_TYPE_LIST to list rocSHMEM GDA (6) with Anvil SDMA (7) and/or the proxy (2)";
+  // Both split MPI_COMM_TYPE_SHARED, so every rank calls them.
+  std::string single = singleNodeReason();
+  std::string intranet = intranetReason();
+  if (local.empty() && ginTypeListed(listed, NCCL_GIN_TYPE_ANVIL_SDMA)) local = std::move(single);
+  if (local.empty()) local = std::move(intranet);
+  return mpiCoordinatedSkipReason(!local.empty(), local.empty() ? nullptr : local.c_str());
+}
+#endif
+
 // Host progress threads exist only on the PROXY backend.
 std::string proxyNthreadsSkipReason() {
   if (auto reason = ginProxyTestSkipReason(); !reason.empty()) return reason;
   if (requestedGinType() != NCCL_NET_DEVICE_GIN_PROXY)
     return "GIN_PROXY_NTHREADS is a host-proxy feature (NCCL_GIN_TYPE=" +
+           std::to_string(NCCL_NET_DEVICE_GIN_PROXY) + ")";
+  return "";
+}
+
+// GIN_PROXY_POLL_BATCH and the aggregation hint exist only on the PROXY backend.
+std::string proxyPollBatchSkipReason() {
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty()) return reason;
+  if (requestedGinType() != NCCL_NET_DEVICE_GIN_PROXY)
+    return "GIN_PROXY_POLL_BATCH is a host-proxy feature (NCCL_GIN_TYPE=" +
            std::to_string(NCCL_NET_DEVICE_GIN_PROXY) + ")";
   return "";
 }
@@ -199,6 +263,11 @@ std::string getBackendSkipReason() {
 // sign, so " -1" would otherwise become ULLONG_MAX, and an unchecked overflow
 // does the same. Either value silently skips the SDMA-path tests.
 size_t anvilSdmaThresholdFromEnv() {
+#if !NCCL_GIN_ANVIL_SDMA_ENABLE
+  // No backend: callers are SDMA-only skip reasons that never fire here, and the
+  // header owning the real default is not included, so return an inactive sentinel.
+  return SIZE_MAX;
+#else
   const char* e = std::getenv("NCCL_GIN_ANVIL_SDMA_THRESHOLD");
   if (!e || !e[0] || std::isspace(static_cast<unsigned char>(e[0])) || *e == '-')
     return NCCL_GIN_ANVIL_SDMA_THRESHOLD_DEFAULT;
@@ -207,6 +276,7 @@ size_t anvilSdmaThresholdFromEnv() {
   unsigned long long v = std::strtoull(e, &end, 10);
   if (end == e || *end != '\0' || errno == ERANGE) return NCCL_GIN_ANVIL_SDMA_THRESHOLD_DEFAULT;
   return static_cast<size_t>(v);
+#endif
 }
 
 // The GIN-SDMA alltoall exists only on the SDMA backend.
@@ -293,7 +363,7 @@ int countOccurrences(const std::string& text, const std::string& needle) {
 
 // Active backend of `type` on `comm`, or nullptr if that type is not active.
 const ncclGinBackendState* activeGinBackend(ncclComm_t comm, ncclGinType_t type) {
-  const ncclGinState& ginState = comm->sharedRes->ginState;
+  const ncclGinState& ginState = comm->ginState;
   for (int i = 0; i < ginState.numActiveBackends; i++) {
     if (ginState.backends[i].ginType == type) return &ginState.backends[i];
   }
@@ -483,9 +553,12 @@ __global__ void alltoallKernel(
 class GinMPIDeviceTests : public MPITestBase {
  protected:
   // Minimal 64-byte put + waitSignal round-trip from rank 0 to rank 1 on the
-  // caller's comm and stream. Contains ASSERT_MPI_*, so it must be the
-  // caller's last statement.
-  void runPutWaitRoundTrip(ncclComm_t comm, hipStream_t stream) {
+  // caller's comm and stream. A ginType other than NONE must also be the
+  // backend the DevComm binds. Contains ASSERT_MPI_* and rank-1-only asserts,
+  // so it must be the caller's last statement or be followed by
+  // ASSERT_MPI_TRUE(!HasFatalFailure()).
+  void runPutWaitRoundTrip(ncclComm_t comm, hipStream_t stream,
+                           ncclGinType_t ginType = NCCL_GIN_TYPE_NONE) {
     int rank = -1, nRanks = -1;
     ncclCommUserRank(comm, &rank);
     ncclCommCount(comm, &nRanks);
@@ -523,16 +596,20 @@ class GinMPIDeviceTests : public MPITestBase {
     ncclDevCommRequirements reqs = defaultGinReqs();
     reqs.railGinBarrierCount = 1;
     reqs.ginSignalCount      = 1;
+    reqs.ginType             = ginType;
     ncclDevComm devComm{};
     ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
     auto devCommCleanup = makeScopeGuard([&]() {
       (void)ncclDevCommDestroy(comm, &devComm);
     });
+    if (ginType != NCCL_GIN_TYPE_NONE) {
+      ASSERT_MPI_EQ(static_cast<int>(ginType), static_cast<int>(devComm.ginNetDeviceTypes[0]));
+    }
     // proxyNthreads is written only by ncclGinConnectOnce, which this create
     // reaches. Reading it before a GIN DevComm exists observes the calloc zero
     // whenever the internal sym-kernel DevComm did not already connect.
     if (checkProxyNthreads_) {
-      ASSERT_MPI_EQ(expectedProxyNthreads(), comm->sharedRes->ginState.proxyNthreads);
+      ASSERT_MPI_EQ(expectedProxyNthreads(), comm->ginState.proxyNthreads);
     }
 
     // Stage a deterministic byte pattern in the source buffer; dst stays zero.
@@ -1075,6 +1152,61 @@ TEST_F(GinMPIDeviceTests, Log_ReportsBackendPerComm) {
   EXPECT_EQ(childBefore + 1, countOccurrences(log, childLine)) << "expected: " << childLine << "\nactual log:\n"
                                                                << log;
 }
+
+#ifdef ENABLE_ROCSHMEM_GIN
+// AICOMRCCL-3418: run with RCCL_GIN_TYPE_LIST=6,7 and 6,2; each listed backend completes a put + signal.
+TEST_F(GinMPIDeviceTests, MixedBackends_GdaAlongside) {
+  if (auto reason = gdaAlongsideSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
+    GTEST_SKIP() << "Requires exactly 2 ranks";
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
+  ncclComm_t comm = getActiveCommunicator();
+  hipStream_t stream = getActiveStream();
+
+  // Default-backend order: Anvil SDMA, then rocSHMEM GDA, then the proxy.
+  const uint64_t listed = listedGinTypes();
+  std::vector<ncclGinType_t> types;
+  for (ncclGinType_t type : {NCCL_GIN_TYPE_ANVIL_SDMA, NCCL_GIN_TYPE_ROCSHMEM_GDA, NCCL_GIN_TYPE_PROXY}) {
+    if (ginTypeListed(listed, type)) types.push_back(type);
+  }
+  const ncclGinType_t expectedDefault = types.front();
+
+  const ncclGinState& ginState = comm->ginState;
+  for (ncclGinType_t type : types) {
+    SCOPED_TRACE("listed GIN type " + std::to_string(type));
+    ASSERT_MPI_TRUE(activeGinBackend(comm, type) != nullptr);
+  }
+  for (int i = 0; i < ginState.numActiveBackends; i++) {
+    SCOPED_TRACE("active GIN type " + std::to_string(ginState.backends[i].ginType));
+    ASSERT_MPI_TRUE(ginTypeListed(listed, ginState.backends[i].ginType));
+  }
+  ASSERT_MPI_EQ(static_cast<int>(expectedDefault), static_cast<int>(ginState.backends[0].ginType));
+
+  ncclCommProperties_t props = NCCL_COMM_PROPERTIES_INITIALIZER;
+  ASSERT_MPI_EQ(ncclSuccess, ncclCommQueryProperties(comm, &props));
+  EXPECT_EQ(expectedDefault, props.ginType);
+  for (ncclGinType_t type : types) EXPECT_TRUE(props.ginSupport[type]) << "ginSupport[" << type << "]";
+
+  {
+    ncclDevCommRequirements reqs = defaultGinReqs();
+    reqs.ginSignalCount = 1;
+    ncclDevComm devComm{};
+    ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
+    auto devCommCleanup = makeScopeGuard([&]() { (void)ncclDevCommDestroy(comm, &devComm); });
+    ASSERT_MPI_EQ(static_cast<int>(expectedDefault), static_cast<int>(devComm.ginNetDeviceTypes[0]));
+  }
+
+  for (ncclGinType_t type : types) {
+    SCOPED_TRACE("put + signal on GIN type " + std::to_string(type));
+    runPutWaitRoundTrip(comm, stream, type);
+    // The round trip ends in a rank-1-only byte check; agree before the next one.
+    ASSERT_MPI_TRUE(!HasFatalFailure());
+  }
+}
+#endif
 
 TEST_F(GinMPIDeviceTests, Put_BasicAndOffsets_MultiContext) {
   int n = ginEnvContextCount();
@@ -1844,6 +1976,85 @@ TEST_F(GinMPIDeviceTests, WaitCounter_Local) {
 
   // Sync so ScopeGuards (window/comm teardown is collective) see both
   // ranks past the kernel phase.
+  MPI_Barrier(MPI_COMM_WORLD);
+}
+
+// Every thread of the CTA puts to one peer at once, each put bumping a local
+// counter, so the proxy finds several GFDs queued and drains them per
+// GIN_PROXY_POLL_BATCH. Launched as a single CTA, which waits for all nPuts.
+__global__ void putBurstLocalCounterKernel(
+    ncclWindow_t srcWin, ncclWindow_t dstWin, size_t bytes, int nPuts,
+    ncclGinCounter_t cntIdx, int peer, struct ncclDevComm devComm) {
+  ncclGin gin{devComm, /*ginContext=*/0};
+  for (int i = threadIdx.x; i < nPuts; i += blockDim.x) {
+    gin.put(ncclTeamWorld(devComm), peer, dstWin, 0, srcWin, 0, bytes,
+            ncclGin_None{}, ncclGin_CounterInc{cntIdx});
+  }
+  gin.waitCounter(ncclCoopCta(), cntIdx, /*least=*/nPuts);
+}
+
+// Waits only on local completion, so it also runs over a backend that moves no
+// data, such as plugins/rma/example. The ext-rma suite uses it to check the
+// aggregation hint that backend receives.
+TEST_F(GinMPIDeviceTests, PutBurst_LocalCounter) {
+  if (auto reason = proxyPollBatchSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
+    GTEST_SKIP() << "Requires exactly 2 ranks";
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
+  ncclComm_t  comm   = getActiveCommunicator();
+  hipStream_t stream = getActiveStream();
+
+  int rank = -1, nRanks = -1;
+  ncclCommUserRank(comm, &rank);
+  ncclCommCount(comm, &nRanks);
+  ASSERT_EQ(2, nRanks);
+
+  constexpr size_t kBufBytes = 4 * 1024;
+  constexpr size_t kPutBytes = 64;
+  constexpr int kPuts = 256;
+  constexpr ncclGinCounter_t kCntIdx = 1;
+  constexpr int kPeer = 1;
+
+  void* dSrc = nullptr;
+  void* dDst = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dSrc, kBufBytes));
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dDst, kBufBytes));
+  auto memCleanup = makeScopeGuard([&]() {
+    if (dSrc) (void)ncclMemFree(dSrc);
+    if (dDst) (void)ncclMemFree(dDst);
+  });
+
+  ncclWindow_t srcWin = nullptr, dstWin = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess,
+                ncclCommWindowRegister(comm, dSrc, kBufBytes, &srcWin, NCCL_WIN_COLL_SYMMETRIC));
+  ASSERT_MPI_EQ(ncclSuccess,
+                ncclCommWindowRegister(comm, dDst, kBufBytes, &dstWin, NCCL_WIN_COLL_SYMMETRIC));
+  auto winCleanup = makeScopeGuard([&]() {
+    if (srcWin) (void)ncclCommWindowDeregister(comm, srcWin);
+    if (dstWin) (void)ncclCommWindowDeregister(comm, dstWin);
+  });
+
+  ncclDevCommRequirements reqs = defaultGinReqs();
+  reqs.railGinBarrierCount = 1;
+  reqs.ginCounterCount     = 2;
+  ncclDevComm devComm{};
+  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
+  auto devCommCleanup = makeScopeGuard([&]() {
+    (void)ncclDevCommDestroy(comm, &devComm);
+  });
+
+  MPI_Barrier(MPI_COMM_WORLD);
+
+  if (rank == 0) {
+    putBurstLocalCounterKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
+        srcWin, dstWin, kPutBytes, kPuts, kCntIdx, kPeer, devComm);
+  }
+  ASSERT_MPI_EQ(hipSuccess, syncStreamWithinTimeout(stream, /*seconds=*/60));
+
   MPI_Barrier(MPI_COMM_WORLD);
 }
 
@@ -3268,7 +3479,7 @@ TEST_F(GinMPIDeviceTests, CommDestroy_FreesAnvilInitContext) {
   ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
   // EXPECT_ before the collective ASSERT_MPI_EQ: a fatal ASSERT_ return leaves
   // the peer blocked in MPI_Allreduce.
-  EXPECT_TRUE(comm->sharedRes->ginState.connected);
+  EXPECT_TRUE(comm->ginState.connected);
   EXPECT_GT(ncclGinAnvilPluginTestLiveInitCtxCount(), liveBefore);
 
   ASSERT_MPI_EQ(ncclSuccess, ncclDevCommDestroy(comm, &devComm));
@@ -5907,6 +6118,55 @@ TEST_F(GinMPIDeviceTests, Properties_NLsaTeams) {
       << "nRanks=" << nRanks << " not divisible by nLsaTeams=" << props.nLsaTeams;
 }
 
+// ginContextCount reported by ncclDevCommCreate is the rounded-up allocation.
+TEST_F(GinMPIDeviceTests, GinContextCount_ReportsRoundedUp) {
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
+    GTEST_SKIP() << "Requires exactly 2 ranks";
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  // RAIL/NONE communicators cannot honor a FULL request. Skip together, then
+  // fail the probe create on every rank so a regression is not reported as SKIPPED.
+  SKIP_IF_GIN_UNSUPPORTED();
+  ncclComm_t comm = getActiveCommunicator();
+
+  ncclDevCommRequirements probeReqs = defaultGinReqs();
+  probeReqs.railGinBarrierCount = 1;
+  probeReqs.ginContextCount = 1;
+  probeReqs.ginSignalCount = 1;
+  ncclDevComm probe{};
+  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &probeReqs, &probe));
+  // ncclGinConnectOnce already min-reduces ginCommCount across ranks.
+  const int connCount = (int)probe.ginConnectionCount;
+  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommDestroy(comm, &probe));
+  if (auto reason = mpiCoordinatedSkipReason(
+          connCount < 2, "Needs >= 2 GIN connections for the request to round up");
+      !reason.empty())
+    GTEST_SKIP() << reason;
+
+  const int requested = connCount + 1;
+  const int expected = ((requested + connCount - 1) / connCount) * connCount;
+
+  ncclDevCommRequirements reqs = defaultGinReqs();
+  reqs.railGinBarrierCount = 1;
+  reqs.ginContextCount = requested;
+  reqs.ginSignalCount = 1;
+  ncclDevComm devComm{};
+  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
+  auto devCommCleanup = makeScopeGuard([&]() {
+    (void)ncclDevCommDestroy(comm, &devComm);
+  });
+
+  EXPECT_EQ(connCount, (int)devComm.ginConnectionCount);
+  EXPECT_EQ(expected, (int)devComm.ginContextCount)
+      << "requested " << requested << " contexts on " << connCount
+      << " connection(s); nccl#2301 reports the rounded-up allocation";
+  EXPECT_GE((int)devComm.ginContextCount, requested);
+  EXPECT_EQ(0, (int)devComm.ginContextCount % connCount);
+  EXPECT_GT((int)devComm.ginContextCount, requested);
+}
+
 // Exclusive GIN contexts -- reqs.ginExclusiveContexts (2.29.7).
 TEST_F(GinMPIDeviceTests, MultiContext_Exclusive) {
   if (auto reason = ginProxyTestSkipReason(); !reason.empty())
@@ -8113,6 +8373,45 @@ TEST_F(GinProxyNthreadsSplitTests, SplitShare_SecondDevCommPut) {
   runPutWaitRoundTrip(child, getActiveStream());
 }
 
+// AICOMRCCL-3417: 2 hosts, NCCL_GIN_TYPE unset; Anvil SDMA is dropped and PROXY carries the put/signal.
+TEST_F(GinMPIDeviceTests, MixedBackends_TwoNodeUnsetType) {
+  if (auto reason = mixedBackendTwoNodeSkipReason(); !reason.empty()) GTEST_SKIP() << reason;
+  if (auto reason = mpiCoordinatedSkipReason(
+          !validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2,
+                                     /*require_power_of_two=*/false, /*min_nodes=*/2, /*max_nodes=*/2),
+          "Requires exactly 2 ranks on 2 hosts");
+      !reason.empty())
+    GTEST_SKIP() << reason;
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
+  ncclComm_t comm = getActiveCommunicator();
+  if (auto reason = mpiCoordinatedSkipReason(comm->topo->nHosts < 2, "Requires topo->nHosts >= 2");
+      !reason.empty())
+    GTEST_SKIP() << reason;
+  ASSERT_MPI_EQ(true, comm->topo->nHosts >= 2);
+
+  ncclCommProperties_t props = NCCL_COMM_PROPERTIES_INITIALIZER;
+  ASSERT_MPI_EQ(ncclSuccess, ncclCommQueryProperties(comm, &props));
+  ASSERT_MPI_EQ(NCCL_GIN_TYPE_PROXY, props.ginType);
+  ASSERT_MPI_EQ(true, props.ginSupport[NCCL_GIN_TYPE_PROXY]);
+  ASSERT_MPI_EQ(false, props.ginSupport[NCCL_GIN_TYPE_ANVIL_SDMA]);
+
+  ncclDevCommRequirements anvilReqs = defaultGinReqs();
+  anvilReqs.ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
+  anvilReqs.railGinBarrierCount = 1;
+  anvilReqs.ginSignalCount = 1;
+  ncclDevComm anvil{};
+  ncclResult_t anvilSt = ncclDevCommCreate(comm, &anvilReqs, &anvil);
+  if (anvilSt == ncclSuccess) (void)ncclDevCommDestroy(comm, &anvil);
+  ASSERT_MPI_EQ(ncclInternalError, anvilSt);
+
+  // Default backend (ginType unset on the DevComm) and an explicit PROXY one.
+  runPutWaitRoundTrip(comm, getActiveStream());
+  ASSERT_MPI_TRUE(!HasFatalFailure());
+  runPutWaitRoundTrip(comm, getActiveStream(), NCCL_GIN_TYPE_PROXY);
+}
+
 // ---------------------------------------------------------------------------
 // Device-side timeouts on flush, wait, waitSignal and waitCounter, plus their C
 // entry points. Every timeout is forced by construction rather than by timing:
@@ -8292,35 +8591,39 @@ __global__ void timeoutFlushAsyncWaitKernel(ncclWindow_t srcWin, ncclWindow_t ds
   if (t == 0) results[3 * n] = peerDone;
 }
 
+// The ncclGin_C C entry points these kernels covered left nccl_device in NCCL 2.32.6 (upstream 0c0b366be6d). Their
+// successor, the ncclIr* ABI (bindings/ir/nccl_device_ir.h), is declaration-only and resolved from the optional
+// libnccl_device.bc / LTO-IR (NCCL_EMIT_LLVM_IR), exercised by bindings/ir/tests, so these in-tree kernels drive the
+// same operations through the ALL-mask C++ ncclGin, which the old C entry points forwarded to. Each call keeps the old
+// arguments: no signal/counter unless named, CTA/thread coops, no descriptor, and the same timeouts and orders.
 __global__ void timeoutCApiBeforeKernel(ncclWindow_t srcWin, ncclWindow_t dstWin, ncclWindow_t sigWin, int peer,
                                         uint64_t shortCycles, uint64_t longCycles, int* results,
                                         struct ncclDevComm devComm) {
-  ncclGin_C net(devComm, NCCL_GIN_BACKEND_MASK_ALL, /*contextIndex=*/0);
+  ncclGin net{devComm, /*contextIndex=*/0};
   ncclTeam team = ncclTeamWorld(devComm);
   const auto ord = cuda::memory_order_acquire;
   const auto given = cuda::thread_scope_thread;
   const auto required = cuda::thread_scope_device;
   const int t = threadIdx.x;
-  ncclResult_t sigUnmet = ncclGinWaitSignalTimeout(&net, ncclCoopCta(), kTimeoutSigIdx, 1, 64, ord, shortCycles);
-  ncclResult_t vaUnmet =
-    ncclGinWaitSignalTimeoutVA(&net, ncclCoopCta(), sigWin, kTimeoutVaSigOff, 1, 64, ord, shortCycles);
-  ncclResult_t cntUnmet = ncclGinWaitCounterTimeout(&net, ncclCoopCta(), kTimeoutCntIdx, 1, 56, ord, shortCycles);
+  ncclResult_t sigUnmet = net.waitSignal(ncclCoopCta(), kTimeoutSigIdx, 1, 64, ord, shortCycles);
+  ncclResult_t vaUnmet = net.waitSignal(ncclCoopCta(), sigWin, kTimeoutVaSigOff, 1, 64, ord, shortCycles);
+  ncclResult_t cntUnmet = net.waitCounter(ncclCoopCta(), kTimeoutCntIdx, 1, 56, ord, shortCycles);
   if (t == 0) {
-    ncclGinPut(&net, team, peer, dstWin, 0, srcWin, 0, kTimeoutBulkBytes, false, 0, ncclGinSignalInc, 0, false, 0,
-               ncclCoopThread(), false, nullptr, given, required);
+    net.put(team, peer, dstWin, 0, srcWin, 0, kTimeoutBulkBytes, ncclGin_None{}, ncclGin_None{}, ncclCoopThread(),
+            ncclGin_None{}, given, required);
   }
-  ncclResult_t flushUnmet = ncclGinFlushTimeout(&net, ncclCoopCta(), ord, false, nullptr, 0);
+  ncclResult_t flushUnmet = net.flush(ncclCoopCta(), ord, ncclGin_None{}, 0);
   ncclGinRequest_t request;
-  ncclGinFlushAsync(&net, team, peer, &request, ncclCoopThread(), ncclGinOptFlagsDefault, false, nullptr);
-  ncclResult_t waitUnmet = ncclGinWaitTimeout(&net, &request, ncclCoopThread(), false, nullptr, ord, 0);
-  ncclResult_t waitMet = ncclGinWaitTimeout(&net, &request, ncclCoopThread(), false, nullptr, ord, longCycles);
-  ncclResult_t flushMet = ncclGinFlushTimeout(&net, ncclCoopCta(), ord, false, nullptr, longCycles);
+  net.flushAsync(team, peer, &request, ncclCoopThread(), ncclGinOptFlagsDefault, ncclGin_None{});
+  ncclResult_t waitUnmet = net.wait(request, ncclCoopThread(), ncclGin_None{}, ord, 0);
+  ncclResult_t waitMet = net.wait(request, ncclCoopThread(), ncclGin_None{}, ord, longCycles);
+  ncclResult_t flushMet = net.flush(ncclCoopCta(), ord, ncclGin_None{}, longCycles);
   if (t == 0) {
-    ncclGinPut(&net, team, peer, dstWin, 0, srcWin, 0, kTimeoutSmallBytes, false, 0, ncclGinSignalInc, 0, true,
-               kTimeoutCntIdx, ncclCoopThread(), false, nullptr, given, required);
+    net.put(team, peer, dstWin, 0, srcWin, 0, kTimeoutSmallBytes, ncclGin_None{}, ncclGin_CounterInc{kTimeoutCntIdx},
+            ncclCoopThread(), ncclGin_None{}, given, required);
   }
-  ncclResult_t cntMet = ncclGinWaitCounterTimeout(&net, ncclCoopCta(), kTimeoutCntIdx, 1, 56, ord, longCycles);
-  ncclGinFlush(&net, ncclCoopCta(), ord);
+  ncclResult_t cntMet = net.waitCounter(ncclCoopCta(), kTimeoutCntIdx, 1, 56, ord, longCycles);
+  net.flush(ncclCoopCta(), ord);
   if (t == 0) {
     results[0] = sigUnmet;
     results[1] = vaUnmet;
@@ -8337,14 +8640,14 @@ __global__ void timeoutCApiBeforeKernel(ncclWindow_t srcWin, ncclWindow_t dstWin
 }
 
 __global__ void timeoutCApiAfterKernel(int peer, uint64_t longCycles, int* results, struct ncclDevComm devComm) {
-  ncclGin_C net(devComm, NCCL_GIN_BACKEND_MASK_ALL, /*contextIndex=*/0);
+  ncclGin net{devComm, /*contextIndex=*/0};
   const auto ord = cuda::memory_order_acquire;
   if (threadIdx.x == 0) {
-    ncclGinSignal(&net, ncclTeamWorld(devComm), peer, true, kTimeoutSigIdx, ncclGinSignalInc, 0, ncclCoopThread(),
-                  false, nullptr, cuda::thread_scope_thread, cuda::thread_scope_device);
+    net.signal(ncclTeamWorld(devComm), peer, ncclGin_SignalInc{kTimeoutSigIdx}, ncclCoopThread(), ncclGin_None{},
+               cuda::thread_scope_thread, cuda::thread_scope_device);
   }
-  ncclResult_t sigMet = ncclGinWaitSignalTimeout(&net, ncclCoopCta(), kTimeoutSigIdx, 1, 64, ord, longCycles);
-  ncclGinFlush(&net, ncclCoopCta(), ord);
+  ncclResult_t sigMet = net.waitSignal(ncclCoopCta(), kTimeoutSigIdx, 1, 64, ord, longCycles);
+  net.flush(ncclCoopCta(), ord);
   if (threadIdx.x == 0) results[8] = sigMet;
 }
 

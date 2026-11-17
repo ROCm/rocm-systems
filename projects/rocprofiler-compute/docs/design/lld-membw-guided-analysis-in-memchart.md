@@ -330,7 +330,7 @@ nodes:
     guidance_id: gl1_vmem
 
   # --- GL2: L2 Cache Bottleneck Detection ---
-  # Source metrics: Table 3012 (L2 Bottleneck Detection Indicators) in 3000_mem_bw.yaml
+  # Source metrics: Table 3002 (L2 Bottleneck Detection Indicators) in 3000_mem_bw.yaml
   #
   # GL2 detects L2 cache bottlenecks: back pressure (L2 stalling L1),
   # internal resource pressure (FIFO saturation), memory bandwidth bound
@@ -399,7 +399,7 @@ nodes:
     guidance_id: gl2_remote_pressure
 
   # --- EA: Efficiency Arbiter Bottleneck Detection ---
-  # Source metrics: Table 3018 (EA Bottleneck Detection Indicators) in 3000_mem_bw.yaml
+  # Source metrics: Table 3003 (EA Bottleneck Detection Indicators) in 3000_mem_bw.yaml
   # EA sits between L2 (TCC) and the SoC Data Fabric (HBM, GMI, PCIe)
   #
   # EA detects memory fabric bottlenecks. Primary indicators are HBM credit
@@ -462,7 +462,7 @@ nodes:
 
 ### Metric-to-threshold cross-reference
 
-All bottleneck indicator metrics in `3000_mem_bw.yaml` use `SUM/SUM` aggregation. The `AVG/AVG` pattern appears only in latency metrics (tables 3002, 3008, 3014) which are not referenced by the tree.
+All bottleneck indicator metrics in `3000_mem_bw.yaml` use `SUM/SUM` aggregation.
 
 | Metric key | Table | Denominator | Threshold | Tree node |
 |-----------|-------|-------------|-----------|-----------|
@@ -472,33 +472,25 @@ All bottleneck indicator metrics in `3000_mem_bw.yaml` use `SUM/SUM` aggregation
 | L1 Cache - TCP stalled by TD | 3001 | `TCP_GATE_EN2_sum` | >= 10% | `gl1_tcp_td_stall` |
 | L1 Cache - TCP stalled by L2 | 3001 | `TCP_GATE_EN2_sum` | >= 10% | `gl1_tcp_l2_stall` |
 | L1 Cache - VMEM stalled by L1 Cache | 3001 | `SQ_BUSY_CYCLES` | >= 10% | `gl1_vmem_stall` |
-| L2 Back Pressure Indicator | 3012 | `TCC_BUSY_sum` | >= 10% | `gl2_back_pressure` |
-| L2 Memory BW Bound - Combined Credit Pressure | 3012 | `TCC_BUSY_sum` | >= 10% | `gl2_mem_bw_bound` |
-| L2 Memory BW Bound - Read Credit Pressure | 3012 | `TCC_BUSY_sum` | >= 10% | `gl2_mem_bw_read` |
-| L2 Memory BW Bound - Write Credit Pressure | 3012 | `TCC_BUSY_sum` | >= 10% | `gl2_mem_bw_write` |
-| L2 Internal Resource Pressure - Latency FIFO | 3012 | `TCC_BUSY_sum` | >= 10% | `gl2_internal_resource` |
-| L2 Internal Resource Pressure - Source FIFO | 3012 | `TCC_BUSY_sum` | >= 10% | `gl2_src_fifo` |
-| L2 Cache Efficiency | 3012 | `TCC_HIT + TCC_MISS` | <= 50% | `gl2_cache_efficiency` |
-| L2 Remote Access Pressure (GMI) | 3012 | `TCC_BUSY_sum` | >= 10% | `gl2_remote_pressure` |
-| EA HBM BW Bound - Combined | 3018 | `TCC_BUSY_sum` | >= 10% | `ea_hbm_bw_bound` |
-| EA HBM BW Bound - Read Credit Pressure | 3018 | `TCC_BUSY_sum` | >= 10% | `ea_hbm_read` |
-| EA HBM BW Bound - Write Credit Pressure | 3018 | `TCC_BUSY_sum` | >= 10% | `ea_hbm_write` |
-| EA GMI BW Bound - Combined | 3018 | `TCC_BUSY_sum` | >= 10% | `ea_gmi_bw_bound` |
-| EA IO BW Bound - Combined | 3018 | `TCC_BUSY_sum` | >= 10% | `ea_io_bw_bound` |
-| EA Write Backpressure | 3018 | `TCC_BUSY_sum` | >= 10% | `ea_write_backpressure` |
-| EA HBM Atomic Pressure | 3018 | `TCC_EA0_WRREQ_DRAM_sum` | >= 10% | `ea_atomic_pressure` |
+| L2 Back Pressure Indicator | 3002 | `TCC_BUSY_sum` | >= 10% | `gl2_back_pressure` |
+| L2 Memory BW Bound - Combined Credit Pressure | 3002 | `TCC_BUSY_sum` | >= 10% | `gl2_mem_bw_bound` |
+| L2 Memory BW Bound - Read Credit Pressure | 3002 | `TCC_BUSY_sum` | >= 10% | `gl2_mem_bw_read` |
+| L2 Memory BW Bound - Write Credit Pressure | 3002 | `TCC_BUSY_sum` | >= 10% | `gl2_mem_bw_write` |
+| L2 Internal Resource Pressure - Latency FIFO | 3002 | `TCC_BUSY_sum` | >= 10% | `gl2_internal_resource` |
+| L2 Internal Resource Pressure - Source FIFO | 3002 | `TCC_BUSY_sum` | >= 10% | `gl2_src_fifo` |
+| L2 Cache Efficiency | 3002 | `TCC_HIT + TCC_MISS` | <= 50% | `gl2_cache_efficiency` |
+| L2 Remote Access Pressure (GMI) | 3002 | `TCC_BUSY_sum` | >= 10% | `gl2_remote_pressure` |
+| EA HBM BW Bound - Combined | 3003 | `TCC_BUSY_sum` | >= 10% | `ea_hbm_bw_bound` |
+| EA HBM BW Bound - Read Credit Pressure | 3003 | `TCC_BUSY_sum` | >= 10% | `ea_hbm_read` |
+| EA HBM BW Bound - Write Credit Pressure | 3003 | `TCC_BUSY_sum` | >= 10% | `ea_hbm_write` |
+| EA GMI BW Bound - Combined | 3003 | `TCC_BUSY_sum` | >= 10% | `ea_gmi_bw_bound` |
+| EA IO BW Bound - Combined | 3003 | `TCC_BUSY_sum` | >= 10% | `ea_io_bw_bound` |
+| EA Write Backpressure | 3003 | `TCC_BUSY_sum` | >= 10% | `ea_write_backpressure` |
+| EA HBM Atomic Pressure | 3003 | `TCC_EA0_WRREQ_DRAM_sum` | >= 10% | `ea_atomic_pressure` |
 
 ### Metrics NOT referenced by the tree
 
-The following table 3012/3018 metrics are diagnostic context, not bottleneck gates:
-
-| Metric | Reason not in tree |
-|--------|-------------------|
-| L2 to Memory Traffic Ratio | Diagnostic (cache locality measure), not a stall indicator |
-| EA Read/Write Balance | Diagnostic (traffic characterization), not a bottleneck condition |
-| EA Stall Destination Dominance - HBM/GMI/IO | Informational ranking (which path dominates), not a threshold-gated bottleneck |
-
-These could be included as `supporting` metrics on parent nodes for context without being tree evaluation nodes.
+None. Block 30 holds only the metrics the tree reads.
 
 ---
 

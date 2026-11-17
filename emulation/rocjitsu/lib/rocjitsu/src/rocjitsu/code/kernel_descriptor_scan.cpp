@@ -4,6 +4,7 @@
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/isa/register_set.h"
 #include "util/bit.h"
@@ -253,13 +254,18 @@ uint32_t ordinary_sgpr_bound(rj_code_arch_t arch, uint32_t kernel_sgpr_count) {
 uint32_t kernel_descriptor_initial_sgpr_count(rj_code_arch_t arch, const KD &desc) {
   uint32_t sgprs = kernel_descriptor_user_sgpr_count(arch, desc);
   const uint32_t rsrc2 = desc.compute_pgm_rsrc2;
-  if (RJ_AMDHSA_BITS_GET(rsrc2, rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X))
-    ++sgprs;
-  if (RJ_AMDHSA_BITS_GET(rsrc2, rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y))
-    ++sgprs;
-  if (RJ_AMDHSA_BITS_GET(rsrc2, rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z))
-    ++sgprs;
+  if (!isa_properties(arch).uses_ttmp_workgroup_ids) {
+    if (RJ_AMDHSA_BITS_GET(rsrc2, rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X))
+      ++sgprs;
+    if (RJ_AMDHSA_BITS_GET(rsrc2, rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y))
+      ++sgprs;
+    if (RJ_AMDHSA_BITS_GET(rsrc2, rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z))
+      ++sgprs;
+  }
   if (RJ_AMDHSA_BITS_GET(rsrc2, rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_INFO))
+    ++sgprs;
+  if (arch_appends_private_segment_wave_offset_sgpr(arch) &&
+      RJ_AMDHSA_BITS_GET(rsrc2, rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT))
     ++sgprs;
   return sgprs;
 }

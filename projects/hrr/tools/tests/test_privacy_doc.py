@@ -3,8 +3,8 @@
 # SPDX-License-Identifier: MIT
 """PRIVACY.md lists what capture writes into an archive.
 
-The page is the customer text for AIRUNTIME-2733. Its device table has to name
-exactly the fields hip_capture_metadata.cpp writes into a manifest, so a task
+The page is the customer text on what an archive holds. Its device table has
+to name exactly the fields hip_capture_metadata.cpp writes into a manifest, so a task
 that adds, removes or blanks one cannot land without updating the page. Its
 inventory has to list the active marker, the hipHostRegister snapshot, the
 hipLinkAddData inputs and the hipDeviceProp_t snapshots in events.bin.
@@ -20,16 +20,7 @@ HRR = Path(__file__).resolve().parents[2]
 PRIVACY = HRR / "PRIVACY.md"
 CAPTURE_SRC = HRR.parent / "clr" / "hipamd" / "src" / "hrr"
 METADATA_CPP = CAPTURE_SRC / "hip_capture_metadata.cpp"
-
-# The tasks under AIRUNTIME-2733 that the page links, one per statement.
-EPIC_TASKS = (
-    "AIRUNTIME-2847",
-    "AIRUNTIME-2857",
-    "AIRUNTIME-2858",
-    "AIRUNTIME-2878",
-    "AIRUNTIME-2880",
-    "AIRUNTIME-2881",
-)
+NOTICE_H = HRR / "include" / "hrr" / "hrr_archive_notice.h"
 
 
 def device_fields_written() -> set:
@@ -113,10 +104,17 @@ class PrivacyDocTest(unittest.TestCase):
         self.assertIn("untrusted executable input", text)
         self.assertIn("launches their kernels on the GPU", text)
 
-    def test_links_each_epic_task(self):
+    def test_sharing_section_links_the_notice_and_does_not_copy_it(self):
+        header = NOTICE_H.read_text(encoding="utf-8")
+        notice = header.split("hrr-archive-notice-begin", 1)[1]
+        notice = notice.split("hrr-archive-notice-end", 1)[0]
         text = PRIVACY.read_text(encoding="utf-8")
-        for key in EPIC_TASKS:
-            self.assertIn(f"https://amd-hub.atlassian.net/browse/{key}", text)
+        section = text.split("## Sharing an archive", 1)[1].split("\n## ", 1)[0]
+        self.assertIn("](include/hrr/hrr_archive_notice.h)", section)
+        # The header is the notice's only copy: no long line of it in the page.
+        long_lines = [l.strip() for l in notice.splitlines() if len(l.strip()) > 40]
+        self.assertGreater(len(long_lines), 10)
+        self.assertEqual([l for l in long_lines if l in text], [])
 
     def test_readme_and_recording_skill_link_the_page(self):
         readme = (HRR / "README.md").read_text(encoding="utf-8")

@@ -127,7 +127,8 @@ template <unsigned Arity, bool E32, bool HalfDst, unsigned HalfInputs, bool Scop
             result = op(load(a, 0), load(*b, 1), load(*c, 2));
           if constexpr (HalfDst)
             result = (result & U(0xffffu)) << (high_dst ? 16 : 0);
-          dst.template store_native<uint32_t>(base, result, chunk);
+          if (dst.template store_native<uint32_t>(base, result, chunk).failed())
+            return;
         }
       }))
     return false;
@@ -255,7 +256,8 @@ template <typename T, typename Inst, typename WriteResult>
     auto [value, bits] = div_scale_simd<T>(
         modify(a.template load_native<T>(base), 0), modify(b.template load_native<T>(base), 1),
         modify(c.template load_native<T>(base), 2), rounding, denorm);
-    dst.template store_native<T>(base, value, chunk);
+    if (dst.template store_native<T>(base, value, chunk).failed())
+      return true;
     mask = (mask & ~(chunk << base)) | ((bits & chunk) << base);
   }
   commit(mask);
@@ -269,9 +271,11 @@ template <typename T, typename Inst, typename WriteResult>
 
 /// VOPD uses one instruction-wide read phase. Both slot results are buffered
 /// before either destination is exposed for writing, including F64 pairs.
-template <bool Extended, typename Slot>
+template <bool Extended, bool TrackStatus = false, typename Slot,
+          typename Classify = std::nullptr_t>
   requires(util::has_stdx_simd)
-[[nodiscard]] inline bool try_execute_vopd_simd(const Slot &x, const Slot &y, Wavefront &wf) {
+[[nodiscard]] inline bool try_execute_vopd_simd(const Slot &x, const Slot &y, Wavefront &wf,
+                                                Classify classify = nullptr) {
   if (simd_force_scalar())
     return false;
   auto capable = [](const Slot &slot) {
@@ -305,6 +309,7 @@ template <bool Extended, typename Slot>
     alignas(util::native<uint32_t>) uint32_t words[64]{};
     alignas(util::native<uint64_t>) uint64_t pairs[64]{};
   } xr, yr;
+  uint32_t causes = 0;
   const uint64_t exec = wf.exec();
   RegisterAccess regs(wf);
   auto compute = [&](const Slot &slot, Results &out) {
@@ -484,39 +489,76 @@ template <bool Extended, typename Slot>
       default:
         return false;
       }
+      if constexpr (TrackStatus) {
+        if (slot.op <= 6 && !wf.dx10_clamp()) {
+          if (slot.op == 0)
+            cv = acc->template load_native<uint32_t>(base);
+          for (uint32_t i = 0; i < W; ++i) {
+            if (exec & (uint64_t{1} << (base + i))) {
+              const auto in = rdna3_5::dual_fma_inputs(slot.op, av[i], bv[i], cv[i]);
+              causes |= rdna3_5::fma_flags(in, result[i], wf);
+            }
+          }
+        }
+      }
+      if constexpr (!std::is_same_v<Classify, std::nullptr_t>) {
+        if (slot.op <= 7 || slot.op == 10 || slot.op == 11) {
+          if (acc)
+            cv = acc->template load_native<uint32_t>(base);
+          uint64_t active = (exec >> base) & util::mask<uint64_t>(W);
+          while (active) {
+            const unsigned i = std::countr_zero(active);
+            causes |= classify(slot.op, av[i], bv[i], cv[i], result[i], wf);
+            active &= active - 1;
+          }
+        }
+      }
       result.copy_to(out.words + base, util::stdx::vector_aligned);
     }
     return true;
   };
   if (!compute(x, xr) || !compute(y, yr))
     return false;
-  auto store = [&](const Slot &slot, const Results &result) {
+  auto store = [&](const Slot &slot, const Results &result) -> Result {
     if constexpr (Extended) {
       if (slot.op >= 32) {
         auto dst = regs.write_operand64(*slot.dst, exec);
         constexpr uint32_t W = util::native<uint64_t>::size();
         for (uint32_t base = 0; base < wf.wf_size(); base += W)
-          dst.template store_native<uint64_t>(
-              base, util::native<uint64_t>(result.pairs + base, util::stdx::vector_aligned),
-              (exec >> base) & util::mask<uint64_t>(W));
-        return;
+          if (dst.template store_native<uint64_t>(
+                     base, util::native<uint64_t>(result.pairs + base, util::stdx::vector_aligned),
+                     (exec >> base) & util::mask<uint64_t>(W))
+                  .failed())
+            return Result::failure();
+        return Result::success();
       }
     }
     auto dst = regs.write_operand(*slot.dst, exec);
     constexpr uint32_t W = util::native<uint32_t>::size();
     for (uint32_t base = 0; base < wf.wf_size(); base += W)
-      dst.template store_native<uint32_t>(
-          base, util::native<uint32_t>(result.words + base, util::stdx::vector_aligned),
-          (exec >> base) & util::mask<uint64_t>(W));
+      if (dst.template store_native<uint32_t>(
+                 base, util::native<uint32_t>(result.words + base, util::stdx::vector_aligned),
+                 (exec >> base) & util::mask<uint64_t>(W))
+              .failed())
+        return Result::failure();
+    return Result::success();
   };
-  store(x, xr);
-  store(y, yr);
+  if (store(x, xr).failed() || store(y, yr).failed())
+    return true;
+  if constexpr (TrackStatus)
+    rdna3_5::record_alu_causes(wf, causes);
+  if constexpr (!std::is_same_v<Classify, std::nullptr_t>) {
+    wf.set_trapsts(wf.trapsts() | causes);
+    wf.raise_alu_causes(causes);
+  }
   detail::record_simd_fast_path(SimdFastPath::VOPD);
   return true;
 }
 
-template <bool Extended, typename Slot>
-[[nodiscard]] bool try_execute_vopd_simd(const Slot &, const Slot &, Wavefront &) {
+template <bool Extended, bool TrackStatus = false, typename Slot,
+          typename Classify = std::nullptr_t>
+[[nodiscard]] bool try_execute_vopd_simd(const Slot &, const Slot &, Wavefront &,
+                                         Classify = nullptr) {
   return false;
 }
 
@@ -576,7 +618,8 @@ template <bool Vop3, typename Inst>
           fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
     };
     U low = compute(0), high = compute(16);
-    dst.template store_native<uint32_t>(base, low | (high << 16), mask);
+    if (dst.template store_native<uint32_t>(base, low | (high << 16), mask).failed())
+      return true;
   }
   return true;
 }

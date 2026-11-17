@@ -1,8 +1,9 @@
 import { resolveHistoryRange } from '../config/historyRanges.js';
+import { isValidTimestamp } from '../utils/timestamp.js';
 import { commitShaFor, commitTimestampFor, sortRunsByCommit } from './runOrdering.js';
 import { configurationKey, hasConfiguration, THREAD_POLICIES } from './runSchema.js';
 
-const utcDay = (timestamp) => typeof timestamp === 'string' && Number.isFinite(Date.parse(timestamp)) ? new Date(timestamp).toISOString().split('T')[0] : null;
+const utcDay = (timestamp) => isValidTimestamp(timestamp) ? new Date(timestamp).toISOString().split('T')[0] : null;
 const dayTime = (day) => Date.parse(`${day}T00:00:00Z`);
 const dayFor = (run) => utcDay(commitTimestampFor(run));
 const shiftDay = (day, offset) => {
@@ -96,6 +97,21 @@ function createSlots(dayKeys, runs, range) {
   });
 }
 
+// The runs whose commit day falls inside the date window, and the x-axis length for a slot layout.
+// Overview and Benchmarks both use these, so the two charts always plot the same days.
+const runsInWindow = (runs, window) => runs.filter((run) => dayTime(dayFor(run)) >= dayTime(window.startDay) && dayTime(dayFor(run)) <= dayTime(window.anchorDay));
+const axisMaxFor = (rangeId, window, slots) => (rangeId === '1W' ? window.dayKeys.length : Math.max(0, slots.length - 1));
+
+// Day-slot layout shared by Overview and Benchmarks: commit-time days, one run per day
+// except 1W, which keeps every run inside its day. Days without runs have run: null.
+export function selectDaySlots(runs, generatedAt, rangeId) {
+  const resolved = resolveHistoryRange(rangeId, { compatibility: true });
+  const sorted = sortRunsByCommit(runs);
+  const window = dateWindow(sorted, sorted.length ? null : generatedAt, resolved);
+  const slots = createSlots(window.dayKeys, selectRuns(runsInWindow(sorted, window), resolved.id), resolved.id);
+  return { range: resolved.id, ...window, slots, axisMax: axisMaxFor(resolved.id, window, slots) };
+}
+
 // Shared Overview projection; catalog scoping preserves the UTC window.
 // catalogId=null selects Shared benchmarks; an explicit immutable catalog ID scopes
 // candidate runs without moving the UTC window. Hover is intentionally not input.
@@ -103,8 +119,7 @@ export function selectOverviewProjection(data, filters, { range = 'ALL', catalog
   const resolved = resolveHistoryRange(range, { compatibility: true });
   const developRuns = sortRunsByCommit(data.runs.filter((run) => run.branch === (data.canonicalBranch ?? 'develop')));
   const window = dateWindow(developRuns, data.runs.length ? null : data.generatedAt, resolved);
-  const withinWindow = developRuns.filter((run) => dayTime(dayFor(run)) >= dayTime(window.startDay) && dayTime(dayFor(run)) <= dayTime(window.anchorDay)
-    && (catalogId === null || run.catalogId === catalogId));
+  const withinWindow = runsInWindow(developRuns, window).filter((run) => catalogId === null || run.catalogId === catalogId);
   const candidates = selectRuns(withinWindow, resolved.id);
   const configurations = configurationRows(data, filters, candidates);
   // Membership is fixed before weekly success eligibility; failed catalogs remain
@@ -139,6 +154,6 @@ export function selectOverviewProjection(data, filters, { range = 'ALL', catalog
     latestRun: slots[latestIndex]?.run ?? null,
     endpointLabel: resolved.id === '1W' ? 'Latest eligible plotted run' : 'Latest selected run',
     weeklyEligibility: resolved.id === '1W' ? 'selected-workloads-succeed' : null,
-    axisMax: resolved.id === '1W' ? window.dayKeys.length : Math.max(0, slots.length - 1),
+    axisMax: axisMaxFor(resolved.id, window, slots),
     defaultConfigurationKey: rows[0]?.key ?? null };
 }

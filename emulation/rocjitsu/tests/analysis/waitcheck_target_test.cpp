@@ -653,6 +653,44 @@ TEST(WaitcheckTarget, LegacyExportAndMessagesContributeEvents) {
   }
 }
 
+TEST(WaitcheckTarget, ShaderExportTargetsSelectSeparateCompletionFifos) {
+  for (auto arch :
+       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
+    SCOPED_TRACE(arch);
+    const auto depth =
+        arch == ROCJITSU_CODE_ARCH_RDNA4 ? WaitEventKind::ExportMrt : WaitEventKind::ExportZ;
+    const auto blend = arch == ROCJITSU_CODE_ARCH_RDNA4 ? WaitEventKind::ExportDualSourceBlend
+                                                        : WaitEventKind::ExportMrt;
+    for (const auto &[target, kind] : std::array{
+             std::pair{0u, WaitEventKind::ExportMrt}, std::pair{7u, WaitEventKind::ExportMrt},
+             std::pair{8u, depth}, std::pair{12u, WaitEventKind::ExportPosition},
+             std::pair{16u, WaitEventKind::ExportPosition},
+             std::pair{20u, WaitEventKind::ExportPrimitive}, std::pair{21u, blend},
+             std::pair{22u, blend}}) {
+      SCOPED_TRACE(target);
+      const auto words = arch == ROCJITSU_CODE_ARCH_RDNA4
+                             ? rdna4::build_vexport({.en = 15,
+                                                     .tgt = static_cast<uint8_t>(target),
+                                                     .done = 1,
+                                                     .vsrc1 = 1,
+                                                     .vsrc2 = 2,
+                                                     .vsrc3 = 3})
+                             : std::array<uint32_t, 2>{0xf800080fu | (target << 4), 0x03020100u};
+      auto inst = decode(words, arch);
+      ASSERT_NE(inst, nullptr);
+      auto events = Target::classify_events(*inst, arch);
+      ASSERT_TRUE(events.succeeded());
+      ASSERT_EQ(events.value().size(), 1u);
+      EXPECT_EQ(events.value().front().kind, kind);
+    }
+    NamedInstruction opaque("exp");
+    const auto events = Target::classify_events(opaque, arch);
+    ASSERT_TRUE(events.succeeded());
+    ASSERT_EQ(events.value().size(), 1u);
+    EXPECT_EQ(events.value().front().kind, WaitEventKind::Export);
+  }
+}
+
 TEST(WaitcheckTarget, FlatAndOrdinaryStoresUseTheSameHardwareCompletionEvent) {
   for (auto model : {WaitcntModel::LegacyVscnt, WaitcntModel::SplitGfx12}) {
     const auto ordinary = Target::normalized_hardware_event_kind(WaitCounterKind::Store,
@@ -675,8 +713,10 @@ TEST(WaitcheckTarget, FlatStoresKeepTheirIdentityOnBothCounters) {
 }
 
 TEST(WaitcheckTarget, DirectToLdsIsNotAVgprResultOnBothCdnaTargets) {
-  const std::array<uint32_t, 2> words{0xe05d1000u, 0x80100008u};
   for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    // CDNA3 supports buffer_load_dword lds. CDNA4 also supports buffer_load_dwordx4 lds.
+    const uint32_t load = arch == ROCJITSU_CODE_ARCH_CDNA3 ? 0xe0511000u : 0xe05d1000u;
+    const std::array<uint32_t, 2> words{load, 0x80100008u};
     std::unique_ptr<Instruction> inst = decode(words, arch);
     ASSERT_NE(inst, nullptr);
     auto events_result = Target::classify_events(*inst, arch);
@@ -707,7 +747,41 @@ TEST(WaitcheckTarget, GdsProtectsAddressAndDataSourcesUntilExpcnt) {
     EXPECT_TRUE(events[1].check_defs);
   }
   NamedInstruction always_gds("ds_ordered_count");
-  EXPECT_EQ(Target::classify_events(always_gds, ROCJITSU_CODE_ARCH_CDNA4).value().size(), 2u);
+  auto events_result = Target::classify_events(always_gds, ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_TRUE(events_result.succeeded());
+  const auto events = std::move(events_result).value();
+  ASSERT_EQ(events.size(), 2u);
+  EXPECT_EQ(events[1].counter, WaitCounterKind::Exp);
+  EXPECT_EQ(events[1].registers, TrackedRegisterSource::VectorUses);
+  EXPECT_TRUE(events[1].check_defs);
+  EXPECT_TRUE(events[1].check_exec_defs);
+}
+
+TEST(WaitcheckTarget, Cdna4GdsUsesOnlyLgkmcnt) {
+  auto expect_ds_only = [](const Instruction &inst) {
+    SCOPED_TRACE(inst.mnemonic());
+    auto events_result = Target::classify_events(inst, ROCJITSU_CODE_ARCH_CDNA4);
+    ASSERT_TRUE(events_result.succeeded());
+    const auto events = std::move(events_result).value();
+    ASSERT_EQ(events.size(), 1u);
+    EXPECT_EQ(events[0].counter, WaitCounterKind::Ds);
+    EXPECT_EQ(events[0].kind, WaitEventKind::Gds);
+    EXPECT_EQ(events[0].registers, TrackedRegisterSource::Defs);
+  };
+  // CDNA4 reserves GDS=1 (ISA Table 57). Exercise defensive classification,
+  // not supported executable GDS instructions.
+  for (const std::array<uint32_t, 2> words :
+       {std::array<uint32_t, 2>{0xd86d0000u, 1u},        // ds_read_b32 v0, v1 gds.
+        std::array<uint32_t, 2>{0xd81b0000u, 0x201u},    // ds_write_b32 v1, v2 gds.
+        std::array<uint32_t, 2>{0xd8010000u, 0x201u}}) { // ds_add_u32 v1, v2 gds.
+    std::unique_ptr<Instruction> inst = decode(words, ROCJITSU_CODE_ARCH_CDNA4);
+    ASSERT_NE(inst, nullptr);
+    expect_ds_only(*inst);
+  }
+  // This synthetic mnemonic is absent from the CDNA4 instruction set; it
+  // exercises the fallback for implicit GDS without consulting a GDS bit.
+  NamedInstruction always_gds("ds_ordered_count");
+  expect_ds_only(always_gds);
 }
 
 TEST(WaitcheckTarget, TimestampAndBarrierStateHaveScalarResults) {

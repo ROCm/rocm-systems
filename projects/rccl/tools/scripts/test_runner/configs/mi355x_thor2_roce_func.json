@@ -34,6 +34,7 @@
       "--log-trace",
       "--enable-code-coverage",
       "--enable-mpi-tests",
+      "--enable-rccl-ep-tests",
       "--no_clean"
     ],
     "cmake_options": "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DEMIT_LLVM_IR=OFF -DBITCODE_LIB_ARCH=gfx950",
@@ -45,6 +46,25 @@
       "rerun_env_variables": {
         "NCCL_DEBUG": "INFO"
       }
+    },
+    "rccl_ep_argument_checks": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 8,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 180,
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "1"
+      },
+      "tests": [
+        {
+          "name": "RcclEp_CreateRejectsOutOfRangeArguments",
+          "description": "Reject invalid rccl_ep create arguments and accept valid single-rank and minimum shapes",
+          "test_filter": "RcclEpDispatchCombineTest.CreateRejectsOutOfRangeArguments"
+        }
+      ]
     },
     "shm_comprehensive": {
       "extends": "default",
@@ -213,7 +233,7 @@
       ]
     },
     "cast_multithread": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 600,
       "command_args": "--net_ib_nthreads=4",
       "env_variables": {
@@ -235,7 +255,7 @@
       ]
     },
     "fault_inject_multithread": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 600,
       "command_args": "--net_ib_nthreads=4",
       "env_variables": {
@@ -628,7 +648,7 @@
         }
       ]
     },
-    "cast_base": {
+    "cast_scheduler_base": {
       "extends": "net_ib_base",
       "num_nodes": 2,
       "num_gpus": 1,
@@ -638,11 +658,33 @@
         "RCCL_IB_QP_SCHED_WEIGHT": "0",
         "RCCL_IB_QP_SCHED_UPDATE_INTERVAL": "50",
         "RCCL_IB_QP_SCHED_RESET_INTERVAL": "60000",
-        "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN": "65536"
+        "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN": "65536",
+        "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME": "0"
       }
     },
+    "cast_setup": {
+      "extends": "net_ib_base",
+      "timeout": 120,
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "2",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1"
+      },
+      "tests": [
+        {
+          "name": "Cast_SetupUnilateralConnectFailureReported",
+          "description": "One invalid connect-side device must fail setup on both ranks without hanging",
+          "test_filter": "NetIbMPITest.CastSetupUnilateralConnectFailureReported"
+        },
+        {
+          "name": "Cast_SetupPeerFailurePropagates",
+          "description": "A post-connect failure must reach the healthy peer through setup reduction",
+          "test_filter": "NetIbMPITest.CastSetupPeerFailurePropagates"
+        }
+      ]
+    },
+
     "cast_wrr_split": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 120,
       "env_variables": {
         "NCCL_IB_QPS_PER_CONNECTION": "2",
@@ -692,10 +734,11 @@
           "description": "regMr, regMrDmaBuf and deregMr reject a null communicator, and regMr rejects a zero size, instead of dereferencing it",
           "test_filter": "NetIbMPITest.CastRegistrationRejectsBadArguments"
         }
+
       ]
     },
     "cast_wrr_no_split": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 120,
       "env_variables": {
         "NCCL_IB_QPS_PER_CONNECTION": "2",
@@ -734,7 +777,7 @@
       ]
     },
     "cast_single_qp": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 60,
       "env_variables": {
         "NCCL_IB_QPS_PER_CONNECTION": "1",
@@ -749,7 +792,7 @@
       ]
     },
     "cast_subnet_routing": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 60,
       "env_variables": {
         "NCCL_IB_SUBNET_AWARE_ROUTING": "1"
@@ -763,7 +806,7 @@
       ]
     },
     "cast_four_qp": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 120,
       "env_variables": {
         "NCCL_IB_QPS_PER_CONNECTION": "4",
@@ -783,7 +826,7 @@
       ]
     },
     "cast_max_qp": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 120,
       "env_variables": {
         "NCCL_IB_QPS_PER_CONNECTION": "128",
@@ -798,7 +841,7 @@
       ]
     },
     "cast_stress": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 300,
       "env_variables": {
         "NCCL_IB_QPS_PER_CONNECTION": "2",
@@ -813,7 +856,7 @@
       ]
     },
     "fault_inject_cast": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 300,
       "env_variables": {
         "NCCL_IB_SPLIT_DATA_ON_QPS": "1",
@@ -854,7 +897,7 @@
       ]
     },
     "resiliency_failover": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 300,
       "env_variables": {
         "NCCL_IB_RESILIENCY_PORT_FAILOVER": "1",
@@ -901,7 +944,7 @@
       ]
     },
     "resiliency_recovery": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 300,
       "env_variables": {
         "NCCL_IB_RESILIENCY_PORT_FAILOVER": "1",
@@ -938,8 +981,8 @@
         },
         {
           "name": "Resiliency_GidChangeRefresh",
-          "description": "AICOMRCCL-2022: GID cache refresh on IBV_EVENT_GID_CHANGE and during port recovery (net_ib and net_ib_cast)",
-          "test_filter": "Transport/NetIbGidChangeTest.*"
+          "description": "AICOMRCCL-2022: GID cache refresh on IBV_EVENT_GID_CHANGE and during port recovery; excludes plain net_ib recovery until AICOMNET-433 adds its UC capability gate",
+          "test_filter": "Transport/NetIbGidChangeTest.*-Transport/NetIbGidChangeTest.PortRecoveryRefreshesStaleCommGid/NetIb"
         }
       ]
     },
@@ -966,6 +1009,11 @@
           "name": "NetIB_Branch_NullCommClose",
           "description": "closeSend/closeRecv/closeListen on NULL comm returns ncclSuccess without crash",
           "test_filter": "NetIbMPITest.NullCommClose"
+        },
+        {
+          "name": "NetIB_Branch_NullCommCastDataPath",
+          "description": "IB-CAST isend/irecv/iflush reject a NULL comm instead of dereferencing it",
+          "test_filter": "NetIbMPITest.NullCommCastDataPath"
         },
         {
           "name": "NetIB_Branch_SetNetAttrNoOp",
@@ -1902,6 +1950,11 @@
           "test_filter": "Register.ProcessIsolatedRegisterTests"
         },
         {
+          "name": "Register.P2pIpcSegmentReuse",
+          "description": "Verify a reused P2P IPC registration stays in bounds when the registered buffer spans multiple cuMem segments",
+          "test_filter": "Register.P2pIpcSegmentReuse"
+        },
+        {
           "name": "SendRecv.SinglePairs",
           "description": "SendRecv single pairs",
           "test_filter": "SendRecv.SinglePairs"
@@ -2154,6 +2207,21 @@
         {
           "name": "GinSdmaPolicy_AllTests",
           "description": "All GIN-SDMA AllReduce/put policy unit tests",
+          "test_filter": "*"
+        }
+      ]
+    },
+    "unit_tests_gin_scatter_reduce_gpu": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsGinScatterReduceGpu",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 300,
+      "tests": [
+        {
+          "name": "GinScatterReduceGpu_AllTests",
+          "description": "GinScatter local reduce, including 64 MiB and 1 GiB multi-rank sums",
           "test_filter": "*"
         }
       ]
@@ -2687,6 +2755,75 @@
           }
         }
       ]
+    },
+    "pat_forced_mpi_tests": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 4,
+      "num_nodes": 2,
+      "num_gpus": 2,
+      "timeout": 300,
+      "description": "Forced PAT at 4 ranks on 2 nodes: RCCL_TEST_PAT_HOST_PER_RANK=1 gives each rank its own host id, so RCCL counts one node per rank, refuses SHM and P2P between ranks on one node, and every PAT pair crosses the network. Each row runs in its own process because the profiler plugin and host id settle on the first communicator. The PAT rows set HSA_DISABLE_CACHE=1 to work around AICOMRCCL-2275, silent data corruption on gfx950: without it they left sentinel values in their output in some stock repeats (AllGather 1 of 10, ReduceScatter 4 of 20) and none failed with it. Added 2026-10-24; drop those env_variables entries once AICOMRCCL-2275 is fixed below RCCL. The avg row runs with the stock cache configuration.",
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "RCCL_MPI_LOG_ALL_RANKS": "1",
+        "NCCL_PAT_ENABLE": "1",
+        "NCCL_ALGO": "PAT",
+        "NCCL_PROTO": "Simple",
+        "RCCL_HIERARCHICAL_ALLGATHER": "0",
+        "RCCL_DIRECT_ALLGATHER_DISABLE": "1",
+        "RCCL_DIRECT_REDUCE_SCATTER_DISABLE": "1",
+        "RCCL_DDA_ENABLE": "0",
+        "RCCL_TEST_PAT_HOST_PER_RANK": "1"
+      },
+      "tests": [
+        {
+          "name": "PatForcedMPITests_ReduceScatterTakesPat",
+          "description": "Forced PAT ReduceScatter (sum, prod, max, min; four types; five counts; in and out of place) is correct and the profiler reports algo PAT, proto SIMPLE on every call. Sets HSA_DISABLE_CACHE=1, see the pat_forced_mpi_tests description.",
+          "test_filter": "PatForcedMPITest.ReduceScatterTakesPat",
+          "timeout": 300,
+          "env_variables": {
+            "HSA_DISABLE_CACHE": "1"
+          }
+        },
+        {
+          "name": "PatForcedMPITests_AllGatherTakesPat",
+          "description": "Forced PAT AllGather (four types; five counts; in and out of place) is correct and the profiler reports algo PAT, proto SIMPLE on every call. Sets HSA_DISABLE_CACHE=1, see the pat_forced_mpi_tests description.",
+          "test_filter": "PatForcedMPITest.AllGatherTakesPat",
+          "timeout": 300,
+          "env_variables": {
+            "HSA_DISABLE_CACHE": "1"
+          }
+        },
+        {
+          "name": "PatForcedMPITests_ReduceScatterAvgRunsWithoutPat",
+          "description": "ReduceScatter avg is correct and does not take PAT, which has no scaling step",
+          "test_filter": "PatForcedMPITest.ReduceScatterAvgRunsWithoutPat",
+          "timeout": 300
+        },
+        {
+          "name": "PatForcedMPITests_ReduceScatterAllGatherInterleaveTakesPat",
+          "description": "ReduceScatter, AllGather and ReduceScatter on one communicator take PAT and are correct, so shared connections carry state from one collective into the next. Sets HSA_DISABLE_CACHE=1, see the pat_forced_mpi_tests description.",
+          "test_filter": "PatForcedMPITest.ReduceScatterAllGatherInterleaveTakesPat",
+          "timeout": 300,
+          "env_variables": {
+            "HSA_DISABLE_CACHE": "1"
+          }
+        }
+      ]
+    },
+    "pat_forced_mpi_tests_3rank": {
+      "extends": "pat_forced_mpi_tests",
+      "num_ranks": 3,
+      "description": "Forced PAT at 3 ranks on 2 nodes (two plus one), the smallest PAT node count and not a power of two."
+    },
+    "pat_forced_mpi_tests_separate_qps": {
+      "extends": "pat_forced_mpi_tests",
+      "env_variables": {
+        "RCCL_PAT_SHARED_QPS": "0"
+      },
+      "description": "Forced PAT at 4 ranks with RCCL_PAT_SHARED_QPS=0, so ReduceScatter and AllGather each build their own connection set; the flag is cached for the process lifetime, so it is set here before launch."
     },
     "gin_traffic_class": {
       "extends": "default",
@@ -3331,8 +3468,11 @@
         },
         {
           "name": "CE_Internal_Launch",
-          "description": "ncclCeLaunchBatchOps: empty batch succeeds; 4-op batch transfers data correctly",
-          "test_filter": "CeInternalMPITest.Launch*"
+          "description": "ncclCeLaunchBatchOps: empty batch succeeds; 4-op batch transfers data correctly; chunked unequal sizes copy without overrun",
+          "test_filter": "CeInternalMPITest.Launch*",
+          "env_variables": {
+            "RCCL_CE_BATCH_ASYNC_ENABLE": "1"
+          }
         },
         {
           "name": "CE_Internal_Neg",
@@ -3734,7 +3874,7 @@
       "num_gpus": 1,
       "timeout": 600,
       "env_variables": {
-        "ARCH": "gfx1250"
+        "ARCH": "gfx950"
       },
       "tests": [
         {
@@ -3774,11 +3914,44 @@
           "name": "GIN_GetFlush_ConcurrentBlocks",
           "description": "8 CTAs get + flush concurrently on one GIN context",
           "test_filter": "GinMPIDeviceTests.GetFlush_ConcurrentBlocks"
+        },
+        {
+          "name": "GIN_PutBurst_LocalCounter",
+          "description": "256-put burst through the GIN proxy",
+          "test_filter": "GinMPIDeviceTests.PutBurst_LocalCounter"
+        },
+        {
+          "name": "GIN_PutBurst_LocalCounter_PollBatch1",
+          "description": "256-put burst through the GIN proxy, one GFD per peer per progress iteration",
+          "test_filter": "GinMPIDeviceTests.PutBurst_LocalCounter",
+          "env_variables": {
+            "NCCL_GIN_PROXY_POLL_BATCH": "1"
+          }
         }
       ]
+    },
+    "net_ib_transfer_max_msg": {
+      "extends": "net_ib_transfer",
+      "description": "Same InfiniBand transfer tests with RCCL_IB_MAX_MSG_SIZE at 1 MiB, so the 16 MiB transfer is posted as several work requests.",
+      "env_variables": {
+        "RCCL_IB_MAX_MSG_SIZE": "1048576"
+      }
+    },
+    "gin_device_get_flush_max_msg": {
+      "extends": "gin_device_get_flush",
+      "description": "Same GIN get/flush tests with RCCL_IB_MAX_MSG_SIZE at 1 MiB, below the 4 MiB get.",
+      "env_variables": {
+        "RCCL_IB_MAX_MSG_SIZE": "1048576"
+      }
     }
   },
   "test_suites": [
+    {
+      "name": "RCCL EP Create Argument Checks",
+      "description": "Eight-rank single-node rccl_ep argument validation with bounded initialization",
+      "config": "rccl_ep_argument_checks",
+      "enabled": true
+    },
     {
       "name": "SHM Tests - Complete Suite",
       "description": "All shared memory transport tests (single node)",
@@ -3909,6 +4082,12 @@
       "name": "NET IB - CAST WRR+Split (QPS=2, splitData=1)",
       "description": "White-box WRR scheduler tests with split-data path enabled: token counts, threshold boundary, split/WRR token accounting, sched enable/disable",
       "config": "cast_wrr_split",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - CAST Setup Failure Propagation",
+      "description": "Rank-agreed CAST setup failures must report cleanly without hanging",
+      "config": "cast_setup",
       "enabled": true
     },
     {
@@ -4170,6 +4349,12 @@
       "enabled": true
     },
     {
+      "name": "Unit Tests - GinScatter reduce GPU",
+      "description": "All rccl-UnitTestsGinScatterReduceGpu cases",
+      "config": "unit_tests_gin_scatter_reduce_gpu",
+      "enabled": true
+    },
+    {
       "name": "Unit Tests - GIN-SDMA AllGather policy",
       "description": "All rccl-UnitTestsGinSdmaAllGatherPolicy cases",
       "config": "unit_tests_gin_sdma_allgather_policy",
@@ -4215,6 +4400,24 @@
       "name": "Comm MPI Tests - 8-Rank (persistent communicator)",
       "description": "All 15 persistent-communicator rows from CommMPITests.cpp on 8 GPUs/ranks, single node: Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator",
       "config": "comm_mpi_tests_8rank",
+      "enabled": true
+    },
+    {
+      "name": "PAT Forced MPI Tests - 4-Rank",
+      "description": "ReduceScatter and AllGather under forced PAT on 4 ranks over 2 nodes, one host id per rank, algo checked through the recorder profiler plugin",
+      "config": "pat_forced_mpi_tests",
+      "enabled": true
+    },
+    {
+      "name": "PAT Forced MPI Tests - 3-Rank",
+      "description": "The same rows on 3 ranks over 2 nodes",
+      "config": "pat_forced_mpi_tests_3rank",
+      "enabled": true
+    },
+    {
+      "name": "PAT Forced MPI Tests - 4-Rank (separate connection sets)",
+      "description": "The same rows with RCCL_PAT_SHARED_QPS=0",
+      "config": "pat_forced_mpi_tests_separate_qps",
       "enabled": true
     },
     {
@@ -4375,8 +4578,20 @@
     },
     {
       "name": "GIN Device MPI - Get/Flush Visibility",
-      "description": "GIN proxy device-side get + flush / flushAsync + wait visibility over RoCE across two nodes",
+      "description": "GIN proxy device-side get + flush / flushAsync + wait visibility and a put burst over RoCE across two nodes",
       "config": "gin_device_get_flush",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Data Transfer (1 MiB post cap)",
+      "description": "InfiniBand transfer tests with RCCL_IB_MAX_MSG_SIZE=1 MiB",
+      "config": "net_ib_transfer_max_msg",
+      "enabled": true
+    },
+    {
+      "name": "GIN Device MPI - Get/Flush Visibility (1 MiB post cap)",
+      "description": "GIN get/flush tests with RCCL_IB_MAX_MSG_SIZE=1 MiB",
+      "config": "gin_device_get_flush_max_msg",
       "enabled": true
     }
   ]

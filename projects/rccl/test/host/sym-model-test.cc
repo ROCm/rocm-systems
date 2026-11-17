@@ -34,6 +34,18 @@
 #include SYM_MODEL_LSA_BASE_CC_PATH
 #include SYM_MODEL_LSA_A2A_CC_PATH
 
+// NCCL 2.32.6: sym_model.cc reads these params, defined in src/tuning/tuning.cc and src/group.cc, neither of which this
+// binary compiles. Both resolve through g_loadParam with their production defaults.
+int64_t ncclParamSymNoWinEnable() { return g_loadParam("SYM_NOWIN_ENABLE", 0); }
+int64_t ncclParamSingleProcMemRegEnable() { return g_loadParam("SINGLE_PROC_MEM_REG_ENABLE", 0); }
+
+// src/tuning/genk_model.cc: sym_model.cc delegates Genk kernels to it. AMD builds no Genk kernels (no SYM_GENK, so
+// ncclSymkMask clears kernelMask_Genk) and these tests pass none, so reaching it is a test bug.
+ncclResult_t ncclTuningGenkModelSim(struct ncclTuningInput_t* const, struct ncclTuningResult_t* const) {
+  ADD_FAILURE() << "ncclTuningGenkModelSim reached, but no Genk kernels are built on AMD";
+  return ncclInternalError;
+}
+
 namespace {
 
 constexpr int kRanks = 4;
@@ -110,7 +122,7 @@ class SymModelTdmTest : public ::testing::Test {
     ncclTuningResult_t r{};
     r.symKernelId = kernelId;
     r.valid = 1;
-    EXPECT_EQ(ncclTuningSymkModelSim(&in, &r), ncclSuccess);
+    EXPECT_EQ(ncclTuningSymkModelSim(&in, &r, /*internal=*/nullptr), ncclSuccess);  // NCCL 2.32.6 added the unused model-state arg
     return r;
   }
 
@@ -306,6 +318,129 @@ TEST_F(SymModelTdmReachableTest, DefaultParam_OneSidedRegistration_TmaValidOnlyO
     in.winRegType = c.reg;
     EXPECT_EQ(Evaluate(in, TmaKernelFor(c.func)).valid != 0, c.valid) << FuncName(c.func) << " winRegType " << c.reg;
   }
+}
+
+// ---- Hierarchical AllGather: gfx1250 partition mode, the only place the mask offers it ----
+
+// g_loadParam stub: SYM_CTAS reads as ncclSymkMaxBlocks; every other param keeps its default.
+int64_t SymCtasAtMaxBlocks(const char* env, int64_t deftVal) {
+  return std::string(env) == "SYM_CTAS" ? ncclSymkMaxBlocks : deftVal;
+}
+
+// g_loadParam stub: SYM_CTAS reads 100, above both hierarchical block caps.
+int64_t SymCtas100(const char* env, int64_t deftVal) {
+  return std::string(env) == "SYM_CTAS" ? 100 : deftVal;
+}
+
+// g_loadParam stub: SYM_CTAS reads 21, under the TDM block cap but not a multiple of the package split.
+int64_t SymCtas21(const char* env, int64_t deftVal) {
+  return std::string(env) == "SYM_CTAS" ? 21 : deftVal;
+}
+
+// Packages of two ranks, so the fixture's four ranks make two packages.
+class SymModelTdmHierTest : public SymModelTdmReachableTest {
+ protected:
+  void SetUp() override {
+    SymModelTdmReachableTest::SetUp();
+    comm_->hasMloPart = true;
+    comm_->symkState.kcomm.hierScaleInSize = 2;
+  }
+
+  // What NCCL_SYM_KERNEL=AllGather_HierLsaTmaST leaves to the model.
+  ncclTuningResult_t EvaluateForcedHierTma(size_t nBytes) {
+    comm_->tuningContext.forced[ncclFuncAllGather] = 1;
+    return Evaluate(Input(ncclFuncAllGather, nBytes), ncclSymkKernelId_AllGather_HierLsaTmaST);
+  }
+};
+
+TEST_F(SymModelTdmHierTest, ForcedHierTma_LaunchesItsBlockCapAtFullWidth) {
+  ncclTuningResult_t r = EvaluateForcedHierTma(size_t(64) << 20);
+  ASSERT_TRUE(r.valid);
+  EXPECT_EQ(r.nChannels, ncclSymkAgHierTmaMaxBlocks);
+  EXPECT_EQ(r.nWarps, ncclSymkWarpsPerBlock);
+}
+
+// Three packages split 48 blocks as 9 for the copying group and 19 for each pushing group, leaving one idle.
+TEST_F(SymModelTdmHierTest, ForcedHierTma_ThreePackages_LaunchesOnlyTheBlocksTheGroupsUse) {
+  comm_->nRanks = 6;
+  ncclTuningResult_t r = EvaluateForcedHierTma(size_t(64) << 20);
+  ASSERT_TRUE(r.valid);
+  EXPECT_EQ(r.nChannels, 47);
+}
+
+// NCCL_SYM_CTAS replaces the model's block bounds, so it has to respect the same cap.
+TEST_F(SymModelTdmHierTest, ForcedHierTma_SymCtasAboveTheCap_LaunchesTheCap) {
+  ScopedHook loadParam(g_loadParam, SymCtasAtMaxBlocks);
+  ncclTuningResult_t r = EvaluateForcedHierTma(size_t(64) << 20);
+  ASSERT_TRUE(r.valid);
+  EXPECT_EQ(r.nChannels, ncclSymkAgHierTmaMaxBlocks);
+}
+
+// Each hierarchical kernel keeps its own cap under NCCL_SYM_CTAS.
+TEST_F(SymModelTdmHierTest, SymCtasAboveBothCaps_EachKernelLaunchesItsOwnCap) {
+  ScopedHook loadParam(g_loadParam, SymCtas100);
+  comm_->tuningContext.forced[ncclFuncAllGather] = 1;
+  ncclTuningResult_t tma = Evaluate(Input(ncclFuncAllGather, size_t(64) << 20), ncclSymkKernelId_AllGather_HierLsaTmaST);
+  ASSERT_TRUE(tma.valid);
+  EXPECT_EQ(tma.nChannels, ncclSymkAgHierTmaMaxBlocks);
+  ncclTuningResult_t vec = Evaluate(Input(ncclFuncAllGather, size_t(64) << 20), ncclSymkKernelId_AllGather_HierLsaST);
+  ASSERT_TRUE(vec.valid);
+  EXPECT_EQ(vec.nChannels, ncclSymkAgHierMaxBlocks);
+}
+
+// 21 blocks on three packages split as 4 for the copying group and 8 for each pushing group, so 20 launch.
+TEST_F(SymModelTdmHierTest, ForcedHierTma_SymCtasTrimmedByThePackageSplit) {
+  ScopedHook loadParam(g_loadParam, SymCtas21);
+  comm_->nRanks = 6;
+  ncclTuningResult_t r = EvaluateForcedHierTma(size_t(64) << 20);
+  ASSERT_TRUE(r.valid);
+  EXPECT_EQ(r.nChannels, 20);
+}
+
+// Sixteen ranks in packages of two make eight packages; the TDM kernel launches 3 + 7 * 6 = 45 blocks, the vector one 4 + 7 * 9 = 67.
+TEST_F(SymModelTdmHierTest, EightPackages_BlockCounts) {
+  ScopedHook loadParam(g_loadParam, SymCtas100);  // The vector kernel only reaches its cap when asked to.
+  comm_->nRanks = 16;
+  comm_->tuningContext.forced[ncclFuncAllGather] = 1;
+  ncclTuningResult_t tma = EvaluateForcedHierTma(size_t(64) << 20);
+  ASSERT_TRUE(tma.valid);
+  EXPECT_EQ(tma.nChannels, 45);
+  ncclTuningResult_t vec = Evaluate(Input(ncclFuncAllGather, size_t(64) << 20), ncclSymkKernelId_AllGather_HierLsaST);
+  ASSERT_TRUE(vec.valid);
+  EXPECT_EQ(vec.nChannels, 67);
+}
+
+// The vector kernels hold every size range, so neither TDM kernel runs unless asked for.
+TEST_F(SymModelTdmHierTest, DefaultParam_AllGatherStaysOnVectorKernels) {
+  for (size_t nBytes : {size_t(16) << 10, size_t(1) << 20, size_t(64) << 20}) {
+    Pick p = Select(Input(ncclFuncAllGather, nBytes));
+    ASSERT_NE(p.kernelId, ncclSymkKernelId_Count) << nBytes;
+    EXPECT_FALSE(rcclSymkKernelIdIsTma(p.kernelId)) << nBytes << " B picked " << ncclSymkKernelIdToString(p.kernelId);
+  }
+}
+
+// NCCL_SYM_TMA_ENABLE=2 leaves only the TDM kernels, which take the size ranges of their vector twins.
+TEST_F(SymModelTdmHierTest, TmaForced_TdmKernelsSplitAllGatherLikeTheirVectorTwins) {
+  ScopedHook loadParam(g_loadParam, SymTmaEnable(2));
+  struct {
+    size_t nBytes;  // per rank; the thresholds count bus bytes, four times this
+    ncclSymkKernelId expected;
+  } const cases[] = {
+      {16 << 10, ncclSymkKernelId_AllGather_TmaST},  // LL's range, and there is no TDM LL
+      {1 << 20, ncclSymkKernelId_AllGather_TmaST},
+      {size_t(64) << 20, ncclSymkKernelId_AllGather_HierLsaTmaST},
+  };
+  for (const auto& c : cases) {
+    Pick p = Select(Input(ncclFuncAllGather, c.nBytes));
+    EXPECT_EQ(p.kernelId, c.expected) << c.nBytes << " B picked " << ncclSymkKernelIdToString(p.kernelId);
+  }
+}
+
+// An algorithm selection naming only the TDM hierarchical kernel reaches it without NCCL_SYM_KERNEL.
+TEST_F(SymModelTdmHierTest, SelectionOfOnlyHierTma_KeepsItValid) {
+  ncclTuningInput_t in = Input(ncclFuncAllGather, size_t(1) << 20);
+  in.tuningMask = uint64_t(1) << (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_AllGather_HierLsaTmaST);
+  EXPECT_TRUE(Evaluate(in, ncclSymkKernelId_AllGather_HierLsaTmaST).valid);
 }
 
 }  // namespace

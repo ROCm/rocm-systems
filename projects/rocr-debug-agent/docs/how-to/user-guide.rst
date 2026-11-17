@@ -202,7 +202,7 @@ The following table lists the supported options:
       none, info, warning, or error. The default log level is none.
 
   * - ``-h``, ``--help``
-    - Displays a usage message and aborts the process.
+    - Displays a usage message and exits.
 
 .. _supported % format tokens:
 

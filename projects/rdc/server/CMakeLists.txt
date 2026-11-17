@@ -67,6 +67,7 @@ include_directories(
 
 set(SERVER_SRC_LIST
     "${COMMON_DIR}/rdc_capabilities.cc"
+    "${COMMON_DIR}/rdc_fields_supported.cc"
     "${COMMON_DIR}/rdc_utils.cc"
     "${PROTOBUF_GENERATED_SRCS}"
     "${SRC_DIR}/rdc_admin_service.cc"

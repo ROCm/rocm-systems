@@ -35,6 +35,7 @@
  */
 
 #include <map>
+#include <memory>
 
 #include "rocshmem/rocshmem.hpp"
 #include "hdp_policy.hpp"
@@ -42,6 +43,10 @@
 #include "memory/window_info.hpp"
 #include "bootstrap/bootstrap.hpp"
 #include "mpi_instance.hpp"
+
+#ifdef USE_HOST_VERBS
+namespace rocshmem { namespace net { class VerbsHost; } }
+#endif
 
 namespace rocshmem {
 
@@ -225,6 +230,12 @@ class HostInterface {
                                         uint64_t signal, int sig_op, int pe,
                                         hipStream_t stream);
 
+  __host__ void signal_add_on_stream(uint64_t *sig_addr, uint64_t signal,
+                                     int pe, hipStream_t stream);
+
+  __host__ void signal_set_on_stream(uint64_t *sig_addr, uint64_t signal,
+                                     int pe, hipStream_t stream);
+
   __host__ void signal_wait_until_on_stream(uint64_t *sig_addr, int cmp,
                                             uint64_t cmp_value,
                                             hipStream_t stream);
@@ -404,6 +415,20 @@ class HostInterface {
   int find_win_info_in_pool(WindowInfo* window_info);
 
   int find_avail_pool_entry();
+
+#ifdef USE_HOST_VERBS
+  /**
+   * @brief Optional verbs host transport (selected by ROCSHMEM_HOST_TRANSPORT=verbs).
+   *
+   * When set, host RMA (put/get/nbi/quiet/fence) is served by a WindowInfoVerbs
+   * acquired from this stack instead of the MPI-window path. Barrier/sync/
+   * collectives continue to use the bootstrap path in this interface.
+   */
+  std::unique_ptr<net::VerbsHost> verbs_host_{};
+
+  /// Build the verbs host stack if selected; no-op otherwise. Collective.
+  __host__ void maybe_setup_verbs_host(SymmetricHeap* heap);
+#endif
 
   /*
    * @brief Used by comm_map map for active sets.
