@@ -202,6 +202,118 @@ TEST_F(ConSanPrepareImage, InvalidNativeNameCannotPublishFactsThatJsonAnalysisRe
   EXPECT_EQ(error_.message, "entry name is not valid UTF-8 for JSON output");
 }
 
+TEST_F(ConSanPrepareImage, PreservesCompilerHiddenArgumentsAndNativePrivateAbi) {
+  const std::filesystem::path path =
+      std::filesystem::path(CONSAN_MULTI_ENTRY_FIXTURE).parent_path() / "multi-entry-abi.hsaco";
+  const std::vector<uint8_t> original = test::read_fixture(path);
+  ASSERT_FALSE(original.empty());
+  const std::array<std::string_view, 2> selected = {"mk_a", "mk_b"};
+  const FailureOr<PreparedImageArtifact> artifact =
+      prepare_image(original, *target_profile("gfx1250"), selected, error_);
+  ASSERT_TRUE(artifact.succeeded()) << error_.message;
+  const ImageEntryFacts &native = artifact.value().facts.entries.back();
+  EXPECT_EQ(native.disposition, EntryDisposition::Native);
+  EXPECT_EQ(native.binding.kernarg_alignment, 32u);
+  EXPECT_EQ(native.binding.original_private_bytes, 68u);
+  EXPECT_EQ(native.binding.prepared_private_bytes, 68u);
+  EXPECT_EQ(native.binding.required_workgroup_size, (std::array<uint32_t, 3>{32, 2, 1}));
+  const Manifest &manifest = *artifact.value().facts.entries.front().selected;
+  for (const ImageEntryFacts &entry : artifact.value().facts.entries)
+    EXPECT_EQ(entry.binding.workgroup_id_scalar, kWorkgroupIdTtmp9Selector);
+  EXPECT_EQ(manifest.entry.required_workgroup_size, (std::array<uint32_t, 3>{64, 1, 1}));
+  EXPECT_TRUE(plan_launch(manifest, {{64, 1, 1}, {64, 1, 1}}, 8, 0).succeeded());
+  EXPECT_TRUE(plan_launch(manifest, {{32, 1, 1}, {32, 1, 1}}, 8, 0).failed());
+  util::StringDiagnostic contract_error;
+  EXPECT_TRUE(verify_artifact_images(artifact.value().facts, original, artifact.value().image,
+                                     contract_error.emitter())
+                  .succeeded())
+      << contract_error.message();
+  const FailureOr<std::vector<uint8_t>> encoded = encode_image_facts(artifact.value().facts);
+  ASSERT_TRUE(encoded.succeeded());
+  const FailureOr<ImageFacts> decoded = decode_image_facts(encoded.value());
+  ASSERT_TRUE(decoded.succeeded());
+  EXPECT_EQ(decoded.value(), artifact.value().facts);
+}
+
+TEST_F(ConSanPrepareImage, SelectedDynamicStackCannotPublishPreparedFacts) {
+  const std::filesystem::path path =
+      std::filesystem::path(CONSAN_MULTI_ENTRY_FIXTURE).parent_path() / "multi-entry-abi.hsaco";
+  std::vector<uint8_t> image = test::read_fixture(path);
+  ASSERT_FALSE(image.empty());
+  const FailureOr<amdhsa::MetadataDocument> metadata = amdhsa::MetadataDocument::parse(image);
+  ASSERT_TRUE(metadata.succeeded());
+  const amdhsa::MetadataValue *entries = metadata.value().root().field("amdhsa.kernels");
+  ASSERT_NE(entries, nullptr);
+  ASSERT_EQ(entries->array.size(), 3u);
+  const amdhsa::MetadataValue *dynamic_stack = entries->array.front().field(".uses_dynamic_stack");
+  ASSERT_NE(dynamic_stack, nullptr);
+  ASSERT_EQ(dynamic_stack->kind, amdhsa::MetadataValue::Kind::Boolean);
+  const size_t payload_offset = metadata.value().payload().data() - image.data();
+  const size_t flag_offset = payload_offset + dynamic_stack->offset;
+  ASSERT_LT(flag_offset, image.size());
+  ASSERT_EQ(image[flag_offset], 0xc2u);
+  image[flag_offset] = 0xc3u;
+  const std::array<std::string_view, 2> selected = {"mk_a", "mk_b"};
+  const FailureOr<PreparedImageArtifact> artifact =
+      prepare_image(image, *target_profile("gfx1250"), selected, error_);
+  EXPECT_TRUE(artifact.failed());
+  EXPECT_EQ(error_.code, InputErrorCode::UnsupportedEntry);
+  EXPECT_EQ(error_.message, "selected entry requires a statically bounded private frame");
+}
+
+TEST_F(ConSanPrepareImage, CompilerAbiCompatibilityRetainsStructuralRejections) {
+  const std::filesystem::path path =
+      std::filesystem::path(CONSAN_MULTI_ENTRY_FIXTURE).parent_path() / "multi-entry-abi.hsaco";
+  const std::vector<uint8_t> original = test::read_fixture(path);
+  ASSERT_FALSE(original.empty());
+  const std::array<std::string_view, 2> selected = {"mk_a", "mk_b"};
+  for (const std::pair<std::string_view, std::string_view> mutation :
+       {std::pair{"amdgpu12.50", "amdgpu12.51"},
+        {"hidden_block_count_x", "hidden_block_count_q"},
+        {"constant", "private_"}}) {
+    std::vector<uint8_t> image = original;
+    const std::vector<uint8_t>::iterator found =
+        std::search(image.begin(), image.end(), mutation.first.begin(), mutation.first.end());
+    ASSERT_NE(found, image.end());
+    ASSERT_EQ(mutation.first.size(), mutation.second.size());
+    std::copy(mutation.second.begin(), mutation.second.end(), found);
+    EXPECT_TRUE(prepare_image(image, *target_profile("gfx1250"), selected, error_).failed());
+    EXPECT_NE(error_.message.find("metadata"), std::string::npos);
+  }
+  for (const uint32_t variant : {0u, 1u, 2u, 3u}) {
+    SCOPED_TRACE(variant);
+    std::vector<uint8_t> image = original;
+    const FailureOr<amdhsa::MetadataDocument> metadata = amdhsa::MetadataDocument::parse(image);
+    ASSERT_TRUE(metadata.succeeded());
+    const amdhsa::MetadataValue *entries = metadata.value().root().field("amdhsa.kernels");
+    ASSERT_NE(entries, nullptr);
+    ASSERT_EQ(entries->array.size(), 3u);
+    const amdhsa::MetadataValue &first = entries->array.front();
+    const amdhsa::MetadataValue &native = entries->array.back();
+    const amdhsa::MetadataValue *number = nullptr;
+    uint8_t replacement = 0;
+    if (variant == 0) {
+      number = native.field(".kernarg_segment_align");
+      replacement = 3;
+    } else if (variant == 1) {
+      number = &first.field(".reqd_workgroup_size")->array.front();
+    } else if (variant == 2) {
+      number = &native.field(".reqd_workgroup_size")->array.front();
+      replacement = 64; // 64 * 2 exceeds the declared flat bound of 64.
+    } else {
+      number = first.field(".args")->array[1].field(".size");
+      replacement = 2; // hidden_block_count_x is a four-byte ABI scalar.
+    }
+    ASSERT_NE(number, nullptr);
+    ASSERT_EQ(number->kind, amdhsa::MetadataValue::Kind::Integer);
+    ASSERT_EQ(number->integer_bytes, 0u);
+    const size_t payload_offset = metadata.value().payload().data() - image.data();
+    image[payload_offset + number->offset] = replacement;
+    EXPECT_TRUE(prepare_image(image, *target_profile("gfx1250"), selected, error_).failed());
+    EXPECT_NE(error_.message.find("metadata"), std::string::npos);
+  }
+}
+
 TEST_F(ConSanPrepareImage, InvalidOrIncompleteSelectionPublishesNoResult) {
   const TargetProfile &target = *target_profile("gfx1250");
   EXPECT_TRUE(prepare_image(original_, target, {}, error_).failed());

@@ -70,3 +70,27 @@ foreach(
         consan_multi_entry_${_variant}_fixture
     )
 endforeach()
+
+set(_multi_abi_object ${_fixture_dir}/multi-entry-abi.o)
+set(_multi_abi_image ${_fixture_dir}/multi-entry-abi.hsaco)
+add_custom_command(
+    OUTPUT ${_multi_abi_object}
+    COMMAND
+        ${CMAKE_CXX_COMPILER_LAUNCHER} ${AMDCXX} -x assembler-with-cpp -target
+        amdgcn-amd-amdhsa -mcpu=gfx1250 -mcode-object-version=5
+        -mno-wavefrontsize64 -DMK_EXTENDED_ABI=1 -c
+        ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/multi_entry.s -o
+        ${_multi_abi_object}
+    DEPENDS fixtures/multi_entry.s ${AMDCXX}
+    VERBATIM
+)
+add_custom_command(
+    OUTPUT ${_multi_abi_image}
+    COMMAND
+        ${ROCM_PATH}/lib/llvm/bin/ld.lld -shared ${_multi_abi_object} -o
+        ${_multi_abi_image}
+    DEPENDS ${_multi_abi_object}
+    VERBATIM
+)
+add_custom_target(consan_multi_entry_abi_fixture DEPENDS ${_multi_abi_image})
+add_dependencies(consan_multi_entry_fixture consan_multi_entry_abi_fixture)

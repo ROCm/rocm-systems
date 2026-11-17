@@ -21,6 +21,9 @@
 #ifndef MK_UNREACHABLE_PC_READ
 #define MK_UNREACHABLE_PC_READ 0
 #endif
+#ifndef MK_EXTENDED_ABI
+#define MK_EXTENDED_ABI 0
+#endif
 .amdgcn_target "amdgcn-amd-amdhsa--gfx1250"
 
 .macro wait_all
@@ -164,12 +167,12 @@ mk_c:
 .size mk_c, .Lend_c-mk_c
 #endif
 
-.macro descriptor name, args, sgprs, vgprs, lds
+.macro descriptor name, args, sgprs, vgprs, lds, private=0
 .rodata
 .p2align 6
 .amdhsa_kernel \name
   .amdhsa_group_segment_fixed_size \lds
-  .amdhsa_private_segment_fixed_size 0
+  .amdhsa_private_segment_fixed_size \private
   .amdhsa_kernarg_size \args
   .amdhsa_user_sgpr_kernarg_segment_ptr 1
   .amdhsa_user_sgpr_count 15
@@ -188,13 +191,21 @@ mk_c:
   descriptor mk_b, 32, 32, 24, 256
 #endif
 #if MK_ENTRY_MASK & 4
+#if MK_EXTENDED_ABI
+  descriptor mk_c, 24, 24, 32, 64, 68
+#else
   descriptor mk_c, 24, 24, 16, 64
+#endif
 #endif
 
 .amdgpu_metadata
 ---
 amdhsa.version: [1, 2]
+#if MK_EXTENDED_ABI
+amdhsa.target: "amdgpu12.50-amd-amdhsa-unknown-gfx1250"
+#else
 amdhsa.target: "amdgcn-amd-amdhsa--gfx1250"
+#endif
 amdhsa.kernels:
 #if MK_ENTRY_MASK & 1
   - .name: mk_a
@@ -207,11 +218,22 @@ amdhsa.kernels:
     .vgpr_count: 8
     .wavefront_size: 32
     .max_flat_workgroup_size: 64
+#if MK_EXTENDED_ABI
+    .reqd_workgroup_size: [64, 1, 1]
+#endif
+#if MK_EXTENDED_ABI
+    .uses_dynamic_stack: false
+#endif
     .args:
       - .name: seed
         .size: 4
         .offset: 0
         .value_kind: by_value
+#if MK_EXTENDED_ABI
+      - .size: 4
+        .offset: 4
+        .value_kind: hidden_block_count_x
+#endif
       - .name: output
         .size: 8
         .offset: 8
@@ -229,6 +251,9 @@ amdhsa.kernels:
     .vgpr_count: 24
     .wavefront_size: 32
     .max_flat_workgroup_size: 64
+#if MK_EXTENDED_ABI
+    .reqd_workgroup_size: [64, 1, 1]
+#endif
     .args:
       - .name: output
         .size: 8
@@ -248,23 +273,46 @@ amdhsa.kernels:
   - .name: mk_c
     .symbol: mk_c.kd
     .kernarg_segment_size: 24
+#if MK_EXTENDED_ABI
+    .kernarg_segment_align: 32
+#else
     .kernarg_segment_align: 8
+#endif
     .group_segment_fixed_size: 64
+#if MK_EXTENDED_ABI
+    .private_segment_fixed_size: 68
+#else
     .private_segment_fixed_size: 0
+#endif
     .sgpr_count: 24
     .vgpr_count: 16
     .wavefront_size: 32
     .max_flat_workgroup_size: 64
+#if MK_EXTENDED_ABI
+    .reqd_workgroup_size: [32, 2, 1]
+#endif
     .args:
       - .name: output
         .size: 8
         .offset: 0
         .value_kind: global_buffer
         .address_space: global
+#if MK_EXTENDED_ABI
+      - .name: readonly_input
+        .size: 8
+        .offset: 8
+        .value_kind: global_buffer
+        .address_space: constant
+#endif
       - .name: seed
         .size: 4
         .offset: 16
         .value_kind: by_value
+#if MK_EXTENDED_ABI
+      - .size: 4
+        .offset: 20
+        .value_kind: hidden_block_count_x
+#endif
 #endif
 ...
 .end_amdgpu_metadata

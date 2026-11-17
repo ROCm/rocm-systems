@@ -298,13 +298,14 @@ public:
       if (status != HSA_STATUS_SUCCESS || binding.symbol.handle == 0 ||
           binding.kernel_object == 0 || !objects.insert(binding.kernel_object).second ||
           !symbols.insert(binding.symbol.handle).second || kernarg != expected_kernarg ||
-          !std::has_single_bit(binding.kernarg_alignment) ||
-          binding.kernarg_alignment < entry.binding.kernarg_alignment ||
+          !std::has_single_bit(binding.kernarg_alignment) || binding.kernarg_alignment < 8 ||
           group != entry.binding.prepared_group_bytes ||
           private_bytes != entry.binding.prepared_private_bytes) {
         valid = false;
         break;
       }
+      binding.kernarg_alignment =
+          std::max(binding.kernarg_alignment, entry.binding.kernarg_alignment);
       bindings.push_back(std::move(binding));
     }
     std::lock_guard lock(mutex_);
@@ -913,6 +914,8 @@ private:
         if (dimensions.grid != dimensions.workgroup || dimensions.workgroup[0] == 0 ||
             dimensions.workgroup[0] > entry.maximum_workgroup_size ||
             dimensions.workgroup[1] != 1 || dimensions.workgroup[2] != 1 ||
+            (entry.required_workgroup_size[0] != 0 &&
+             dimensions.workgroup != entry.required_workgroup_size) ||
             packet.private_segment_size != entry.original_private_bytes ||
             packet.group_segment_size < entry.original_group_bytes ||
             packet.group_segment_size > 65536 || acquire != HSA_FENCE_SCOPE_SYSTEM ||

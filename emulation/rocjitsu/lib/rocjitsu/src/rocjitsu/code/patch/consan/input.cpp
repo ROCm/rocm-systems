@@ -296,8 +296,14 @@ FailureOr<InputProgram> build_entry_program(std::span<const uint8_t> image,
   if (metadata.failed()) {
     return reject(error, InputErrorCode::UnsupportedEntry, metadata_error);
   }
+  if (metadata.value().uses_dynamic_stack) {
+    return reject(error, InputErrorCode::UnsupportedEntry,
+                  "selected entry requires a statically bounded private frame");
+  }
   program.original_sgprs = metadata.value().sgprs;
   program.maximum_workgroup_size = metadata.value().maximum_workgroup_size;
+  program.kernarg_alignment = metadata.value().kernarg_alignment;
+  program.required_workgroup_size = metadata.value().required_workgroup_size;
   program.original_vgprs =
       (RJ_AMDHSA_BITS_GET(kernel.descriptor.compute_pgm_rsrc1,
                           kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT) +

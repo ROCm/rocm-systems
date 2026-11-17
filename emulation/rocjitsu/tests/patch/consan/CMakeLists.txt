@@ -211,6 +211,26 @@ if(TARGET consan_original_fixtures)
         consan_multi_artifact_fixture
         DEPENDS ${_multi_artifact}/facts.bin
     )
+    set(_native_shape_artifact
+        ${CMAKE_CURRENT_BINARY_DIR}/prepared/native-required-shape
+    )
+    add_custom_command(
+        OUTPUT ${_native_shape_artifact}/facts.bin
+        BYPRODUCTS
+            ${_native_shape_artifact}/prepared.hsaco
+            ${_native_shape_artifact}/ready
+        COMMAND ${CMAKE_COMMAND} -E rm -rf ${_native_shape_artifact}
+        COMMAND
+            $<TARGET_FILE:rj_consan_prepare>
+            ${_fixture_dir}/multi-entry-abi.hsaco gfx1250
+            ${_native_shape_artifact} --entry mk_b
+        DEPENDS rj_consan_prepare ${_fixture_dir}/multi-entry-abi.hsaco
+        VERBATIM
+    )
+    add_custom_target(
+        consan_native_shape_artifact_fixture
+        DEPENDS ${_native_shape_artifact}/facts.bin
+    )
     add_executable(
         consan_image_test
         ${PROJECT_SOURCE_DIR}/tests/code/consan/artifact_test.cpp
@@ -258,6 +278,7 @@ if(RJ_BUILD_CONSAN_RUNTIME AND TARGET consan_original_fixtures)
         hsa_consan_testable
         consan_artifact_fixture
         consan_multi_artifact_fixture
+        consan_native_shape_artifact_fixture
     )
     target_compile_definitions(
         consan_hsa_plugin_test
@@ -267,6 +288,8 @@ if(RJ_BUILD_CONSAN_RUNTIME AND TARGET consan_original_fixtures)
             CONSAN_ARTIFACT_FIXTURE="${_artifact}"
             CONSAN_MULTI_ORIGINAL_FIXTURE="${_fixture_dir}/multi-entry.hsaco"
             CONSAN_MULTI_ARTIFACT_FIXTURE="${_multi_artifact}"
+            CONSAN_NATIVE_SHAPE_ORIGINAL_FIXTURE="${_fixture_dir}/multi-entry-abi.hsaco"
+            CONSAN_NATIVE_SHAPE_ARTIFACT_FIXTURE="${_native_shape_artifact}"
     )
     rj_add_gtest_tests(consan_hsa_plugin_test)
 endif()

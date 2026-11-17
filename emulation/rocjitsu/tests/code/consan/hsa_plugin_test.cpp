@@ -684,6 +684,47 @@ protected:
   bool installed_ = false, preserve_ = false, fail_proxy_ = false, auto_complete_ = true;
 };
 
+#if defined(CONSAN_NATIVE_SHAPE_ARTIFACT_FIXTURE)
+class ConSanLegacyNativeShapeHsaPlugin : public ConSanHsaPlugin {
+protected:
+  const char *original_fixture() const override { return CONSAN_NATIVE_SHAPE_ORIGINAL_FIXTURE; }
+  const char *artifact_fixture() const override { return CONSAN_NATIVE_SHAPE_ARTIFACT_FIXTURE; }
+
+  void submit_native(uint16_t threads) {
+    hsa_kernel_dispatch_packet_t packet = dispatch_packet(signal_, threads, nullptr, threads);
+    packet.header |= (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
+                     (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+    handler_(&packet, 1, 0, handler_context_, packet_writer);
+  }
+};
+
+TEST_F(ConSanLegacyNativeShapeHsaPlugin, RejectsWorkgroupDifferentFromOriginalRequiredShape) {
+  ASSERT_FALSE(image_facts_.entries[0].selected.has_value());
+  const std::array<uint32_t, 3> required = {64, 1, 1};
+  ASSERT_EQ(image_facts_.entries[0].binding.required_workgroup_size, required);
+  ASSERT_TRUE(bind());
+  ASSERT_TRUE(create_queue_and_signal());
+  submit_native(32);
+  EXPECT_EQ(published_packets_, 0u);
+  EXPECT_EQ(statistics_().native_submitted, 0u);
+  EXPECT_EQ(load_signal(signal_), -1);
+  EXPECT_NE(finish_(), 0);
+  EXPECT_FALSE(std::filesystem::exists(capture_));
+}
+
+TEST_F(ConSanLegacyNativeShapeHsaPlugin, RetainsTheOriginalRequiredShapeAndNativePacket) {
+  ASSERT_TRUE(bind());
+  ASSERT_TRUE(create_queue_and_signal());
+  submit_native(64);
+  ASSERT_EQ(published_packets_, 1u);
+  EXPECT_EQ(published_.workgroup_size_x, 64u);
+  EXPECT_EQ(drain_(), 0);
+  EXPECT_EQ(statistics_().native_submitted, 1u);
+  EXPECT_EQ(statistics_().native_completed, 1u);
+  EXPECT_EQ(finish_(), 0);
+}
+#endif
+
 #if defined(CONSAN_MULTI_ORIGINAL_FIXTURE) && defined(CONSAN_MULTI_ARTIFACT_FIXTURE)
 class ConSanMultiEntryHsaPlugin : public ConSanHsaPlugin {
 protected:

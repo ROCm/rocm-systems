@@ -17,9 +17,9 @@ namespace {
 constexpr std::array<uint8_t, 8> kImageFactsMagic = {'R', 'J', 'C', 'S', 'I', 'M', 'G', 'F'};
 constexpr uint64_t kEnvelopeBytes = 64;
 constexpr uint64_t kImageFixedBytes = 144;
-constexpr uint64_t kEntryFixedBytes = 112;
+constexpr uint64_t kEntryFixedBytes = 124;
 constexpr uint64_t kNativeCodeRangeBytes = 24;
-constexpr uint64_t kManifestFixedBytes = 64 + 232;
+constexpr uint64_t kManifestFixedBytes = 64 + 244;
 constexpr uint64_t kSiteBytes = 68;
 constexpr uint64_t kBarrierBytes = 56;
 
@@ -141,11 +141,13 @@ Result validate_image_facts(const ImageFacts &image, util::DiagnosticEmitter dia
         !std::has_single_bit(binding.kernarg_alignment) || binding.kernarg_alignment < 8 ||
         binding.original_kernarg_bytes == 0 || binding.maximum_workgroup_size == 0 ||
         binding.maximum_workgroup_size > 1024 || binding.original_group_bytes > 65536 ||
-        binding.prepared_group_bytes > 65536 || binding.original_private_bytes != 0 ||
-        binding.prepared_private_bytes != 0 || entry.original_sgprs == 0 ||
-        entry.original_sgprs > 106 || entry.original_vgprs == 0 || entry.original_vgprs > 256 ||
-        binding.prepared_sgprs < entry.original_sgprs || binding.prepared_sgprs > 106 ||
-        binding.prepared_vgprs < entry.original_vgprs || binding.prepared_vgprs > 256) {
+        binding.prepared_group_bytes > 65536 ||
+        !valid_workgroup_requirement(binding.required_workgroup_size,
+                                     binding.maximum_workgroup_size) ||
+        entry.original_sgprs == 0 || entry.original_sgprs > 106 || entry.original_vgprs == 0 ||
+        entry.original_vgprs > 256 || binding.prepared_sgprs < entry.original_sgprs ||
+        binding.prepared_sgprs > 106 || binding.prepared_vgprs < entry.original_vgprs ||
+        binding.prepared_vgprs > 256) {
       return diagnostic.emit() << "invalid or duplicate image entry binding";
     }
     previous_descriptor_end = entry.key + 64;
@@ -158,6 +160,7 @@ Result validate_image_facts(const ImageFacts &image, util::DiagnosticEmitter dia
     if (entry.disposition == EntryDisposition::Native) {
       if (entry.selected || entry.native_code.empty() ||
           binding.original_group_bytes != binding.prepared_group_bytes ||
+          binding.original_private_bytes != binding.prepared_private_bytes ||
           entry.original_sgprs != binding.prepared_sgprs ||
           entry.original_vgprs != binding.prepared_vgprs) {
         return diagnostic.emit() << "native entry changes ABI or resources";
