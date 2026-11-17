@@ -121,10 +121,12 @@ private:
             return fallback;
         }
 
-        const auto parsed = utility::string::safe_stod(token);
+        // Parses against the exact target type: a value outside Tp's range (such as
+        // 1e300 for float) is an error, so it falls back to the default.
+        const auto parsed = utility::string::safe_from_chars<Tp>(token);
         if(parsed.is_ok())
         {
-            return static_cast<Tp>(parsed.value());
+            return parsed.value();
         }
         LOG_ERROR("[get_env] Failed to convert getenv(\"{}\") = \"{}\" to float: {}",
                   env_id, raw, parsed.error());
