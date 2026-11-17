@@ -581,7 +581,7 @@ TEST_F(FaultAtomicCli, HelpAndCapabilitiesMatchEnabledProfiles) {
        (position = stdout_.find("kind=AtomicWrongAddress ", position)) != std::string::npos;
        ++position)
     ++atomic_lines;
-  EXPECT_EQ(atomic_lines, 28u);
+  EXPECT_EQ(atomic_lines, 34u);
   for (const test::AtomicTargetCase &target : test::kAtomicTargetCases) {
     const IsaTargetBinding *description = default_isa_target_registry().find_target(target.target);
     ASSERT_NE(description, nullptr);

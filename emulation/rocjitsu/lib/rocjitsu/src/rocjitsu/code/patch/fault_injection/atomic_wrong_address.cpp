@@ -8,6 +8,7 @@
 #include "rocjitsu/code/analysis/instruction_boundaries.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/kernel_scope.h"
+#include "rocjitsu/code/patch/fault_injection/atomic_legacy_fields.h"
 #include "rocjitsu/code/patch/fault_injection/fault_mutation_internal.h"
 #include "rocjitsu/code/patch/instrumentor.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/ds_offset_encoded_fields.h"
@@ -99,6 +100,8 @@ std::optional<int32_t> read_atomic_offset(rj_code_target_id_t target, std::strin
     const std::optional<uint32_t> offset = amdgpu::read_ds_offset0_field(target, words);
     return offset ? std::optional<int32_t>{static_cast<int32_t>(*offset)} : std::nullopt;
   }
+  if (words.size() == 2)
+    return fault_mutation_detail::read_legacy_atomic_byte_offset(target, form, words);
   return amdgpu::read_vmem_signed24_offset(target, words);
 }
 
@@ -107,6 +110,9 @@ bool admitted_atomic_form(rj_code_target_id_t target, std::string_view form, uin
   if (!offset)
     return false;
   if (size == 8 && ds_atomic32(form))
+    return true;
+  if (size == 8 && fault_mutation_detail::legacy_atomic_target(target) &&
+      (flat_like_atomic(form) || form.starts_with("buffer_atomic")))
     return true;
   return size == 12 && modern_atomic_target(target) && admitted_modern_atomic_form(form, offset);
 }
@@ -120,6 +126,13 @@ std::optional<std::vector<uint32_t>> replace_atomic_offset(rj_code_target_id_t t
       return std::nullopt;
     const std::optional<std::array<uint32_t, 2>> replacement =
         amdgpu::replace_ds_offset0_field(target, words, static_cast<uint32_t>(offset));
+    if (!replacement)
+      return std::nullopt;
+    return std::vector<uint32_t>(replacement->begin(), replacement->end());
+  }
+  if (words.size() == 2) {
+    const std::optional<std::array<uint32_t, 2>> replacement =
+        fault_mutation_detail::replace_legacy_atomic_byte_offset(target, form, words, offset);
     if (!replacement)
       return std::nullopt;
     return std::vector<uint32_t>(replacement->begin(), replacement->end());
@@ -155,7 +168,8 @@ std::vector<AtomicCapability> atomic_wrong_address_capabilities() {
                       target == ROCJITSU_CODE_TARGET_GFX1200 ||
                       target == ROCJITSU_CODE_TARGET_GFX1201;
     for (std::string_view form : {"flat_atomic", "global_atomic", "buffer_atomic", "ds_atomic"}) {
-      if (!modern_atomic_target(target) && form != "ds_atomic")
+      if (!modern_atomic_target(target) && !fault_mutation_detail::legacy_atomic_target(target) &&
+          form != "ds_atomic")
         continue;
       capabilities.push_back({.target = target, .wave_size = cdna5 ? 32u : 64u, .form = form});
       if (rdna)
