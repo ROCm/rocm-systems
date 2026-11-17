@@ -40,6 +40,25 @@ pub enum DriverContextLifetime {
     Session,
 }
 
+/// Native recoverable-page-fault mode requested before GPU activation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum XnackModeRequest {
+    /// Activation must confirm this mode or report a native configuration error.
+    Require(bool),
+    /// Attempt this mode; a confirmed existing mode is an acceptable fallback.
+    /// A failed live-mode query still prevents activation.
+    Prefer(bool),
+}
+
+/// Whether activation requires ownership of the native debugger rendezvous.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DebuggerRegistrationMode {
+    /// Reject an active context registered to another adapter.
+    Require,
+    /// Preserve an active context and report unavailable debugger ownership.
+    Prefer,
+}
+
 /// Caller-owned scope for discovery, activation, and driver shutdown.
 ///
 /// Each session has a requested [`DriverContextLifetime`] and zero or more
@@ -246,6 +265,78 @@ impl Session {
             drivers.push(construct(lifetime, process.clone())?);
         }
         Self::from_drivers_with_process(drivers, lifetime, process)
+    }
+
+    /// Requests the Linux KFD recoverable-page-fault mode for GPU activation.
+    ///
+    /// This records native configuration without opening KFD. Activation applies
+    /// and verifies the mode before acquiring or enabling a VM. A required mode
+    /// must match an already enabled shared context; a preferred mode can fall
+    /// back to its confirmed current mode. Call before the first GPU
+    /// activation and before sharing this session.
+    ///
+    /// # Errors
+    /// Reports `Busy` after sharing or activation, `Unsupported` without a KFD
+    /// provider, or an inherited/closed session error. Native configuration
+    /// errors are reported by the later activation call.
+    #[cfg(target_os = "linux")]
+    pub fn request_xnack_mode(&mut self, request: XnackModeRequest) -> Result<(), Error> {
+        self.unshared_kfd_driver()?.request_xnack_mode(request)
+    }
+
+    /// Registers a native runtime-debugger rendezvous for the first activation.
+    /// This records the address without opening KFD or changing an active VM.
+    ///
+    /// # Safety
+    /// `r_debug` must address a correctly initialized native `r_debug` record,
+    /// with its breakpoint and every reachable link-map record kept valid while
+    /// published. The record itself must remain valid for the process lifetime;
+    /// process-scoped contexts can outlive this session and share registration.
+    /// `setup_ttmp` must match the adapter's debugger/trap-handler ABI.
+    ///
+    /// # Errors
+    /// Rejects null/misaligned records, shared sessions, prior activation, or a
+    /// missing KFD provider. Activation rejects conflicting active registrations.
+    #[cfg(target_os = "linux")]
+    #[allow(unsafe_code)]
+    pub unsafe fn request_debugger_registration(
+        &mut self,
+        r_debug: usize,
+        setup_ttmp: bool,
+        mode: DebuggerRegistrationMode,
+    ) -> Result<(), Error> {
+        self.unshared_kfd_driver()?
+            .request_debugger_registration(r_debug, setup_ttmp, mode)
+    }
+
+    /// Borrows the unshared native configuration owner before activation.
+    #[cfg(target_os = "linux")]
+    #[allow(
+        clippy::unnecessary_find_map,
+        reason = "test and future native providers need not offer KFD configuration"
+    )]
+    fn unshared_kfd_driver(&mut self) -> Result<&mut crate::driver::KfdDriver, Error> {
+        self.ensure_open()?;
+        let registry = Shared::get_mut(&mut self.registry).ok_or(Error::Operation {
+            kind: ErrorKind::Busy,
+            detail: "native configuration requires an unshared session",
+        })?;
+        let driver = registry
+            .drivers
+            .iter_mut()
+            .find_map(|driver| match driver {
+                DriverInstance::LinuxKfd(driver) => Some(driver),
+                #[cfg(test)]
+                DriverInstance::Test(_) => None,
+            })
+            .ok_or(Error::Operation {
+                kind: ErrorKind::Unsupported,
+                detail: "this session has no KFD configuration provider",
+            })?;
+        Shared::get_mut(driver).ok_or(Error::Operation {
+            kind: ErrorKind::Busy,
+            detail: "native configuration must precede GPU activation",
+        })
     }
 
     /// Takes already constructed driver instances as one session registry.
@@ -1145,6 +1236,7 @@ mod tests {
             .unwrap();
         let gpu = first_device.gpu().unwrap();
         let request = QueueRequest {
+            control_memory: crate::device::gpu::queue::QueueRingMemory::System,
             ring_size_bytes: 4096,
             parameters: QueueParameters::Sdma,
             priority: QueuePriority::Normal,

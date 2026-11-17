@@ -241,7 +241,7 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
   if (!useWriteOp) {
     uint32_t immData;
     if (comm->base.recvMatchingScheme != BY_INDEX) {
-      immData = (uint32_t)(reqs[0]->id % UINT32_MAX);
+      immData = (uint32_t)reqs[0]->id;
       if (IbCastCommIsSharing(&comm->base) && comm->remCommId != 0) {
         immData = IbCastEncodeCommIdImmData((uint32_t)reqs[0]->id, comm->remCommId);
       }
@@ -513,6 +513,8 @@ ncclResult_t IbCastIsend(void* sendComm, void* data, size_t size, int tag, void*
       }
       return ncclSuccess;
     }
+    // Order the nreqs load after the idx load above; on weakly ordered CPUs it could otherwise return a stale value.
+    std::atomic_thread_fence(std::memory_order_acquire);
     nreqs = ctsFifoNreqs(slots, 0);
     // Wait until all data has arrived
     for (int r = 1; r < nreqs; r++)

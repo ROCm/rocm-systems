@@ -166,6 +166,13 @@ void TaskPostTuning_ExpectClearedRawIsNoOp(TaskPostTuning_FreeRawFn freeRaw) {
 
 using TaskPostTuning_TrafficFn = int (*)(ncclFunc_t, int);
 
+// NCCL 2.32.6 event handles are per-plugin ncclProfilerEventRef slots; a cleared handle has every slot null.
+bool TaskPostTuning_IsNullEventRef(const ncclProfilerEventRef& ref) {
+  for (void* h : ref.h)
+    if (h != nullptr) return false;
+  return true;
+}
+
 void TaskPostTuning_ExpectAllReduceTraffic(TaskPostTuning_TrafficFn traffic) {
   EXPECT_EQ(kAllReduceTrafficPerByte, traffic(ncclFuncAllReduce, kTrafficRanks));
   EXPECT_EQ(kAllReduceTrafficPerByte, traffic(ncclFuncAllReduce, kWideTrafficRanks));
@@ -178,20 +185,22 @@ void TaskPostTuning_ExpectPerRankTraffic(TaskPostTuning_TrafficFn traffic) {
   }
 }
 
-// ncclFuncAlltoAllvGda is excluded and pinned on its own because enqueue.cc's ncclFuncTrafficPerByte gives it nRanks.
+// AlltoAll and AlltoAllvGda are excluded and pinned on their own: they count every byte once per rank.
 void TaskPostTuning_ExpectSingleTraffic(TaskPostTuning_TrafficFn traffic) {
   for (int func = 0; func < ncclNumFuncs; func++) {
     if (func == ncclFuncAllReduce || func == ncclFuncAllGather || func == ncclFuncReduceScatter ||
-        func == ncclFuncAlltoAllvGda) {
+        func == ncclFuncAlltoAll || func == ncclFuncAlltoAllvGda) {
       continue;
     }
     EXPECT_EQ(kSingleTrafficPerByte, traffic(static_cast<ncclFunc_t>(func), kTrafficRanks)) << "func " << func;
   }
 }
 
-void TaskPostTuning_ExpectAlltoAllvGdaTraffic(TaskPostTuning_TrafficFn traffic) {
-  EXPECT_EQ(kSingleTrafficPerByte, traffic(ncclFuncAlltoAllvGda, kTrafficRanks));
-  EXPECT_EQ(kSingleTrafficPerByte, traffic(ncclFuncAlltoAllvGda, kWideTrafficRanks));
+void TaskPostTuning_ExpectAlltoAllTraffic(TaskPostTuning_TrafficFn traffic) {
+  for (ncclFunc_t func : {ncclFuncAlltoAll, ncclFuncAlltoAllvGda}) {
+    EXPECT_EQ(kTrafficRanks, traffic(func, kTrafficRanks)) << "func " << func;
+    EXPECT_EQ(kWideTrafficRanks, traffic(func, kWideTrafficRanks)) << "func " << func;
+  }
 }
 
 std::function<int64_t(const char*, int64_t)> TaskPostTuning_ParamOverride(const char* wanted, int64_t value) {
@@ -296,7 +305,9 @@ int TaskPostTuning_ResolvedMaxCtas(int64_t envValue, int perCallValue) {
 
 class TaskPostTuningMicrotest : public TaskPrepFakesFixture {};
 
-// TODO: ncclFuncTrafficPerByte, postTuningFuncTrafficPerByte and enqueue.cc keep 3 copies of this logic; collapse to 1.
+// NCCL 2.32.6 collapsed task_posttuning.cc's two private copies (ncclFuncTrafficPerByte and
+// postTuningFuncTrafficPerByte) into src/channel.cc's shared ncclFuncTrafficPerByte. fakes/channel_fakes.cc
+// compiles the real channel.cc body of it (initChannel & co. stay faked); these pin it to the shared arms.
 TEST_F(TaskPostTuningMicrotest, FuncTrafficPerByte_AllReduce_CountsEveryByteTwiceWhateverTheRankCount) {
   TaskPostTuning_ExpectAllReduceTraffic(ncclFuncTrafficPerByte);
 }
@@ -309,24 +320,8 @@ TEST_F(TaskPostTuningMicrotest, FuncTrafficPerByte_EveryOtherFunc_CountsEveryByt
   TaskPostTuning_ExpectSingleTraffic(ncclFuncTrafficPerByte);
 }
 
-TEST_F(TaskPostTuningMicrotest, FuncTrafficPerByte_AlltoAllvGda_CountsEveryByteOnceUnlikeTheEnqueueCopy) {
-  TaskPostTuning_ExpectAlltoAllvGdaTraffic(ncclFuncTrafficPerByte);
-}
-
-TEST_F(TaskPostTuningMicrotest, PostTuningFuncTrafficPerByte_AllReduce_CountsEveryByteTwiceWhateverTheRankCount) {
-  TaskPostTuning_ExpectAllReduceTraffic(postTuningFuncTrafficPerByte);
-}
-
-TEST_F(TaskPostTuningMicrotest, PostTuningFuncTrafficPerByte_AllGatherAndReduceScatter_CountEveryByteOncePerRank) {
-  TaskPostTuning_ExpectPerRankTraffic(postTuningFuncTrafficPerByte);
-}
-
-TEST_F(TaskPostTuningMicrotest, PostTuningFuncTrafficPerByte_EveryOtherFunc_CountsEveryByteOnce) {
-  TaskPostTuning_ExpectSingleTraffic(postTuningFuncTrafficPerByte);
-}
-
-TEST_F(TaskPostTuningMicrotest, PostTuningFuncTrafficPerByte_AlltoAllvGda_CountsEveryByteOnceUnlikeTheEnqueueCopy) {
-  TaskPostTuning_ExpectAlltoAllvGdaTraffic(postTuningFuncTrafficPerByte);
+TEST_F(TaskPostTuningMicrotest, FuncTrafficPerByte_AlltoAllAndAlltoAllvGda_CountEveryByteOncePerRank) {
+  TaskPostTuning_ExpectAlltoAllTraffic(ncclFuncTrafficPerByte);
 }
 
 // ALLREDUCE_, ALLGATHER_ and REDUCESCATTER_CHUNKSTEPS are all equal, so these arms are not separable by value.
@@ -690,8 +685,8 @@ TEST_F(TaskPostTuningMicrotest, FillCollTaskFromRaw_AllReduce_CopiesTheRawFields
   EXPECT_EQ(ALLREDUCE_CHUNKSTEPS, task->chunkSteps);
   EXPECT_EQ(ALLREDUCE_SLICESTEPS, task->sliceSteps);
   EXPECT_EQ(kProfilerEventMask, task->eActivationMask);
-  EXPECT_EQ(nullptr, task->groupApiEventHandle);
-  EXPECT_EQ(nullptr, task->collApiEventHandle);
+  EXPECT_TRUE(TaskPostTuning_IsNullEventRef(task->groupApiEventHandle));
+  EXPECT_TRUE(TaskPostTuning_IsNullEventRef(task->collApiEventHandle));
   EXPECT_EQ(1, task->forceAlgSelection);
   EXPECT_EQ(kAutomaticAlgMask, task->algMask);
   EXPECT_FALSE(task->aggIsolate);
@@ -1726,8 +1721,8 @@ TEST_F(TaskPostTuningMicrotest, FillP2pTaskFromRaw_SendAndRecv_CopyTheRawFieldsA
     EXPECT_EQ(kP2pBytes, task->bytes) << "func " << func;
     EXPECT_TRUE(task->allowUB) << "func " << func;
     EXPECT_EQ(kProfilerEventMask, task->eActivationMask) << "func " << func;
-    EXPECT_EQ(nullptr, task->groupApiEventHandle) << "func " << func;
-    EXPECT_EQ(nullptr, task->p2pApiEventHandle) << "func " << func;
+    EXPECT_TRUE(TaskPostTuning_IsNullEventRef(task->groupApiEventHandle)) << "func " << func;
+    EXPECT_TRUE(TaskPostTuning_IsNullEventRef(task->p2pApiEventHandle)) << "func " << func;
   }
 }
 

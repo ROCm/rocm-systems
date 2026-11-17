@@ -6,6 +6,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ## amd_smi_lib for ROCm 10.3.0
 
+### Changed
+
+- **Repeated `amd-smi` device selections now combine**.  
+  - Repeated `--gpu`, `--cpu`, `--core`, and `--nic` options combine without duplicates. `reset --gpureset -g all -g 0` now resets every GPU (previously GPU 0 only); `set -g 0 -C CPX -g 1 -C SPX` now applies SPX to GPUs 0 and 1 (previously GPU 1 only). Remove earlier device options to retain the previous target set.
+
 ### Resolved Issues
 
 - **Fixed `amd-smi ras --cper` crashing with `TypeError` when no GPU devices are available**.
@@ -284,6 +289,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 ### Optimized
 
 ### Resolved Issues
+
+- **Fixed `amdsmi_asic_info_t.oam_id` reporting an incorrect value for multi-digit XGMI node IDs**.  
+  - The field was parsed as hex instead of decimal, so any node ID of 10 or greater reported the wrong value; its doxygen comment also incorrectly described it as a socket number rather than the XGMI physical node ID within the hive.
 
 - **Fixed wrong values from PM metrics and register table queries in the Python library**.  
   - The record names were correct, but every value was wrong.

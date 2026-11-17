@@ -53,8 +53,11 @@ extern std::function<ncclResult_t(struct ncclComm*)> g_devrGinConnectOnce;
 // ncclDevrCommCreateInternal calls this after it has swapped the thread into
 // relaxed stream-capture mode. The default succeeds; a test that needs GIN
 // setup to fail installs its own so the capture-mode restore can be observed.
-extern std::function<ncclResult_t(struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*,
-                                  uint32_t)>
+// Arguments as ncclGinDevCommSetup: comm, reqs, resReqs, barrierReqs, nBarrierReqs,
+// devComm, deviceCodeVersion, devCompat.
+extern std::function<ncclResult_t(struct ncclComm*, struct ncclDevCommRequirements const*,
+                                  struct ncclDevResourceRequirements*, struct ncclGinBarrierReq const*, int,
+                                  struct ncclDevComm*, uint32_t, struct ncclDevCommCompat const*)>
     g_devrGinDevCommSetup;
 extern std::function<ncclResult_t(struct ncclComm*, void*, size_t, void*[NCCL_GIN_MAX_CONNECTIONS],
                                   ncclGinWindow_t[NCCL_GIN_MAX_CONNECTIONS],
@@ -82,12 +85,12 @@ extern std::function<ncclResult_t(struct ncclDevrMemory*, struct ncclComm*)> g_d
 extern std::function<ncclResult_t(struct ncclDevrMemory*)> g_devrBuildGinSegmentInfos;
 extern std::function<ncclResult_t(void*, size_t, struct ncclComm*, bool, int)> g_devrCheckRegistrationSupport;
 
-// The CFT seams 2.31 added: the two sizes ncclDevrInitOnce caches, and whether
-// the RMA proxy is in play. Defaults describe a comm without CFT and without the
-// proxy; see dev_runtime_micro_fakes.cc. (The CFT team accessors it also added
-// are in fakes/nccl_device_core_fakes.h with the rest of the ncclTeam* family.)
-extern std::function<int(struct ncclComm*)> g_devrComputeCftSize;
-extern std::function<int(struct ncclComm*)> g_devrComputeCftMcSize;
+// The CFT seams 2.31 added: the two sizes ncclDevrInitOnce caches (one
+// computeCftSizes call since 2.32.6), and whether the RMA proxy is in play.
+// Defaults describe a comm without CFT and without the proxy; see
+// dev_runtime_micro_fakes.cc. (The CFT team accessors it also added are in
+// fakes/nccl_device_core_fakes.h with the rest of the ncclTeam* family.)
+extern std::function<ncclResult_t(struct ncclComm*, int* /*cftSize*/, int* /*cftMcSize*/)> g_devrComputeCftSizes;
 
 extern std::function<ncclResult_t(struct ncclComm*)> g_devrRmaProxyConnectOnce;
 extern std::function<ncclResult_t(struct ncclComm*, void*, size_t, void*[NCCL_GIN_MAX_CONNECTIONS])>

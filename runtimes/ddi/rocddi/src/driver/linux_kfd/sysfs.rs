@@ -29,6 +29,8 @@ use std::path::Path;
 /// Stable KFD and DRM identity and capabilities for one topology node.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct KfdNode {
+    /// A coherent host XGMI route supports atomic access to local controls.
+    pub host_atomics: bool,
     /// Sysfs topology node number.
     pub node: u32,
     /// Native KFD GPU identifier used by ioctls.
@@ -932,6 +934,42 @@ fn memory_links(
     }
 }
 
+/// Requires the CPU-to-GPU direction of a coherent XGMI route before exposing
+/// CPU atomic operations on device-local queue controls.
+fn host_local_atomics(
+    root: &str,
+    gpu_node: u32,
+    links: Option<&[KfdReportedLink]>,
+) -> Result<bool, Error> {
+    for link in links
+        .unwrap_or_default()
+        .iter()
+        .filter(|link| link.target_is_host)
+    {
+        let host = link.target.node;
+        let path = StackPath::new(format_args!("{root}/nodes/{host}/properties"))?;
+        let mut bytes = [0; 16384];
+        let properties = Properties::new(read(path.path(), &mut bytes)?)?;
+        let reverse = node_memory_links(
+            root,
+            host,
+            0,
+            properties.optional_u32("io_links_count")?.unwrap_or(0),
+            properties.optional_u32("p2p_links_count")?.unwrap_or(0),
+        )?;
+        if reverse.iter().any(|route| {
+            route.target.node == gpu_node
+                && route.info.kind == MemoryLinkType::Xgmi
+                && route.info.coherent_support
+                && route.info.atomic_support_32bit
+                && route.info.atomic_support_64bit
+        }) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 #[allow(
     clippy::too_many_lines,
     reason = "all immutable native facts share one identity and generation bracket"
@@ -1122,6 +1160,7 @@ fn read_node(
     }
     name[..text.len()].copy_from_slice(text.as_bytes());
     let native = KfdNode {
+        host_atomics: host_local_atomics(root, node, memory_links.as_deref().map(Vec::as_slice))?,
         node,
         gpu_id,
         render_minor: Some(render),
@@ -1185,6 +1224,13 @@ fn read_node(
                 xcc_count: xcc,
                 shader_engine_count_per_xcc: arrays / arrays_per_xcc,
                 shader_array_count_per_engine: arrays_per_engine,
+                maximum_compute_units_per_shader_engine: p
+                    .optional_u32("cu_per_simd_array")?
+                    .unwrap_or(0)
+                    .checked_mul(arrays_per_engine)
+                    .ok_or_else(|| {
+                        error(ErrorKind::InvalidData, "shader engine capacity overflows")
+                    })?,
                 sdma_xgmi_engine_count: sdma_xgmi_engines,
                 gws_count,
                 iommu_v2_supported: capability & (1 << 1) != 0,
@@ -1199,13 +1245,20 @@ fn read_node(
                 ))
                 .is_ok_and(|path| File::open(path.path()).is_ok()),
                 queues: GpuQueueCapabilities {
-                    copy: if !cfg!(target_arch = "x86_64") || !sdma_qualified {
+                    copy: if !cfg!(any(target_arch = "x86_64", target_arch = "aarch64"))
+                        || !sdma_qualified
+                    {
                         None
                     } else {
                         match (target_profile.sdma_dialect(), sdma_ip) {
-                            (Some(GpuSdmaDialect::Gfx9), _) => {
-                                Some(crate::topology::GpuCopyTransport::User)
-                            }
+                            (
+                                Some(
+                                    GpuSdmaDialect::Gfx9
+                                    | GpuSdmaDialect::Gfx10
+                                    | GpuSdmaDialect::Gfx11,
+                                ),
+                                _,
+                            ) => Some(crate::topology::GpuCopyTransport::User),
                             (Some(GpuSdmaDialect::Gfx1200), Some((7, 0, 1)))
                             | (Some(GpuSdmaDialect::Gfx1250), Some((7, 1, 0))) => {
                                 Some(crate::topology::GpuCopyTransport::Kernel)
@@ -1225,8 +1278,10 @@ fn read_node(
                         ring_alignment: 1024,
                     }),
                     // GFX12 shares the AQL system-scope cache protocol.
-                    aql_system_cache_control: cfg!(target_arch = "x86_64")
-                        && supports_aql
+                    aql_system_cache_control: cfg!(any(
+                        target_arch = "x86_64",
+                        target_arch = "aarch64"
+                    )) && supports_aql
                         && target_profile.supports_kernel_submission(),
                     pm4: supports_pm4.then_some(crate::topology::GpuUserQueueCapabilities {
                         dispatch_scratch: target_profile.supports_pm4_dispatch_scratch(),
@@ -1245,7 +1300,7 @@ fn read_node(
                         ring_alignment: 1024,
                         ..crate::topology::GpuUserQueueCapabilities::default()
                     }),
-                    kernel_sdma: cfg!(target_arch = "x86_64")
+                    kernel_sdma: cfg!(any(target_arch = "x86_64", target_arch = "aarch64"))
                         && sdma_qualified
                         && matches!(
                             (target_profile.sdma_dialect(), sdma_ip),
@@ -1253,8 +1308,10 @@ fn read_node(
                                 | (Some(GpuSdmaDialect::Gfx1250), Some((7, 1, 0)))
                         ),
                     // USER_GCR requires the matching target-specific SDMA packet format.
-                    sdma_system_cache_control: cfg!(target_arch = "x86_64")
-                        && sdma_qualified
+                    sdma_system_cache_control: cfg!(any(
+                        target_arch = "x86_64",
+                        target_arch = "aarch64"
+                    )) && sdma_qualified
                         && matches!(
                             (target_profile.sdma_dialect(), sdma_ip),
                             (Some(GpuSdmaDialect::Gfx1200), Some((7, 0, 1)))
@@ -1266,7 +1323,7 @@ fn read_node(
         },
         local_memory_bytes: local,
         host_visible_local_memory_bytes: public,
-        host_local_cacheability: (cfg!(target_arch = "x86_64")
+        host_local_cacheability: (cfg!(any(target_arch = "x86_64", target_arch = "aarch64"))
             && public != 0
             && matches!(
                 target_profile,
@@ -1642,10 +1699,13 @@ mod tests {
             Some(HostCacheability::WriteCombined)
         );
         assert!(gpu.queues.aql.is_some() && gpu.queues.sdma.is_some());
-        assert_eq!(gpu.queues.pm4.is_some(), cfg!(target_arch = "x86_64"));
+        assert_eq!(
+            gpu.queues.pm4.is_some(),
+            cfg!(any(target_arch = "x86_64", target_arch = "aarch64"))
+        );
         assert_eq!(
             gpu.queues.aql_system_cache_control,
-            cfg!(target_arch = "x86_64")
+            cfg!(any(target_arch = "x86_64", target_arch = "aarch64"))
         );
         std::fs::create_dir(fixture.0.join("topology/nodes/2")).unwrap();
         std::fs::write(fixture.0.join("topology/nodes/2/gpu_id"), "not a number").unwrap();
@@ -2177,15 +2237,15 @@ mod tests {
             assert!(queues.aql.is_some());
             assert_eq!(
                 queues.aql_system_cache_control,
-                cfg!(target_arch = "x86_64") && supported
+                cfg!(any(target_arch = "x86_64", target_arch = "aarch64")) && supported
             );
             assert_eq!(
                 queues.pm4_system_cache_control,
-                cfg!(target_arch = "x86_64") && supported
+                cfg!(any(target_arch = "x86_64", target_arch = "aarch64")) && supported
             );
             assert_eq!(
                 queues.pm4.is_some(),
-                cfg!(target_arch = "x86_64") && supported
+                cfg!(any(target_arch = "x86_64", target_arch = "aarch64")) && supported
             );
         }
     }
