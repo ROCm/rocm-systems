@@ -5,7 +5,7 @@
  ************************************************************************/
 
 // TunerPluginConstants: a tuner plugin's init() takes the cost-model constants as an input/output argument
-// (plugin/tuner/tuner_v6.h). They must already hold the core's values when init() runs, and what init() writes
+// (plugin/tuner/tuner_v7.h). They must already hold the core's values when init() runs, and what init() writes
 // must survive the cost-model setup that follows it in ncclTuningInit() (src/tuning/tuning.cc). The tuner below
 // is built into rccl-UnitTests, loaded via NCCL_TUNER_PLUGIN=STATIC_PLUGIN; test/CMakeLists.txt exports it.
 
@@ -26,11 +26,11 @@ namespace {
 constexpr double kOverride = 42.5;
 
 int initCalls = 0;
-ncclTunerConstants_v6_t seenAtInit = {};
-ncclTunerConstants_v6_t* coreConstants = nullptr; // the core's own copy; valid until ncclCommDestroy()
+ncclTunerConstants_v7_t seenAtInit = {};
+ncclTunerConstants_v7_t* coreConstants = nullptr; // the core's own copy; valid until ncclCommDestroy()
 
-ncclResult_t tunerInit(void** context, uint64_t, size_t, size_t, ncclDebugLogger_t, ncclNvlDomainInfo_v6_t*,
-                       ncclTunerConstants_v6_t* constants) {
+ncclResult_t tunerInit(void** context, uint64_t, size_t, size_t, ncclDebugLogger_t, ncclNvlDomainInfo_v7_t*,
+                       ncclTunerConstants_v7_t* constants) {
   *context = nullptr;
   ++initCalls;
   if (constants == nullptr) return ncclSuccess;
@@ -72,7 +72,7 @@ void withTestTunerComm(Check check) {
 } // namespace
 
 // Not const: clang would then also emit it for the GPU, where the host functions it points to don't exist.
-extern "C" __attribute__((visibility("default"))) ncclTuner_v6_t ncclTunerPlugin_v6 = {
+extern "C" __attribute__((visibility("default"))) ncclTuner_v7_t ncclTunerPlugin_v7 = {
   .name = "TunerPluginConstantsTest",
   .init = tunerInit,
   .getCollInfo = tunerGetCollInfo,
@@ -96,7 +96,7 @@ TEST(TunerPluginConstants, InitSeesCoreConstantsAndKeepsItsWrites) {
     withTestTunerComm([] {
       // The comparison below would also hold if the constants were never populated at all.
       EXPECT_GT(seenAtInit.baseLatencies[NCCL_ALGO_TREE][NCCL_PROTO_LL], 0.0) << "init() saw unpopulated constants";
-      ncclTunerConstants_v6_t core = *coreConstants;
+      ncclTunerConstants_v7_t core = *coreConstants;
       double& written = core.baseLatencies[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE];
       EXPECT_EQ(written, kOverride) << "the cost model overwrote the constants init() set";
       written = seenAtInit.baseLatencies[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE];

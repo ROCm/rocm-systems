@@ -22,7 +22,7 @@
 #define MAX_CHANNELS                     256 // RCCL MAXCHANNELS
 
 // Bump when ncclProfiler_t alias changes to a new interface version.
-#define NCCL_PROFILER_INTERFACE_VERSION 5
+#define NCCL_PROFILER_INTERFACE_VERSION 8
 
 #define INS_CHK(call)                                                   \
   do {                                                                  \
@@ -155,6 +155,7 @@ struct inspectorCompletedOpInfo {
   const char* algo;   // coll only (nullptr for P2P)
   const char* proto;  // coll only (nullptr for P2P)
   int peer;           // P2P only (unused for coll)
+  uint64_t userTag;   // per-call user profiler tag (0 == untagged)
   struct inspectorEventTrkOpInfo evtTrk;
 };
 
@@ -255,6 +256,7 @@ struct inspectorCollInfo {
   const char* algo;
   const char* proto;
   uint64_t sn;
+  uint64_t userTag;   // per-call user profiler tag (0 == untagged)
   size_t msgSizeBytes;
   uint64_t tsStartUsec;
   uint64_t tsCompletedUsec;
@@ -272,6 +274,7 @@ struct inspectorP2pInfo {
   struct inspectorCommInfo *commInfo;
   const char* func;
   uint64_t sn;
+  uint64_t userTag;   // per-call user profiler tag (0 == untagged)
   size_t msgSizeBytes;
   uint64_t tsStartUsec;
   uint64_t tsCompletedUsec;
@@ -337,6 +340,7 @@ inline int ncclTypeSize(ncclDataType_t type) {
 // Global flag to control P2P tracking
 extern bool enableNcclInspectorP2p;
 extern bool requireKernelTiming;
+extern bool useNcclSourcedTimings;
 // Opt-in flag for extra per-device Prometheus stats metrics (totals + drops)
 extern bool enableNcclInspectorPromStats;
 // Minimum message size (bytes) to be `tracked by inspector

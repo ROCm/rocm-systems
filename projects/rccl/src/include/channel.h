@@ -22,10 +22,31 @@ RCCL_PARAM_DECLARE(
 #include <algorithm>
 
 ncclResult_t initChannel(struct ncclComm* comm, int channelid);
-ncclResult_t initNvlsChannel(struct ncclComm* comm, int channelId, struct ncclComm* parent, bool share);
+ncclResult_t initNvlsChannel(struct ncclComm* comm, int channelId, struct ncclComm* parent, const int* parentSlots);
 ncclResult_t initCollnetChannel(struct ncclComm* comm, int channelId, struct ncclComm* parent, bool share);
 ncclResult_t freeChannel(struct ncclChannel* channel, int nRanks, int collnetNRanks, int nvlsNRanks,
                          struct ncclComm* comm);
+
+static constexpr size_t ncclMinTrafficPerChannel = 16 << 10; // RCCL: 16K minimum traffic per channel
+
+struct ncclCollChannelLayout {
+  size_t countLo;
+  size_t countMid;
+  size_t countHi;
+  size_t cellsLo;
+  size_t cellsHi;
+  size_t elementsPerCell;
+  int channelOffset;
+  int nMidChannels;
+  int nChannels;
+};
+
+int ncclClampChannels(int nChannels, int minChannels, int maxChannels);
+int ncclFuncTrafficPerByte(ncclFunc_t func, int nRanks);
+size_t ncclCollTrafficPerChannel(size_t trafficBytes, int nChannels);
+struct ncclCollChannelLayout ncclComputeCollChannelLayout(size_t count, size_t elementSize, int trafficPerByte,
+                                                          size_t trafficPerChannel, size_t currentTraffic,
+                                                          int channelId, int maxChannels);
 
 inline uint8_t ncclP2pChannelBaseForRound(struct ncclComm* comm, int p2pRound, int p2pBatchEnable = 0) {
   int base;

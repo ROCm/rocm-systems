@@ -139,7 +139,8 @@ gdr_t ncclGdrCopy = nullptr;
 // src/misc/rocmwrap.cc's param, which fakes/rocmwrap_fakes.cc does not define yet.
 NCCL_PARAM(DmaBufEnable, "DMABUF_ENABLE", 1);
 
-// CreateContext frees nothing on its error paths; Create() records its host allocations to release them.
+// CreateContext's error paths destroy the partial context; Create() records its host allocations to check that
+// none survives a failure (and to release any that would, so one leak cannot cascade into later tests).
 namespace {
 bool g_trackCreate = false;
 std::set<void*> g_createAllocs;
@@ -185,6 +186,7 @@ class GinHostProxyMicrotest : public ::testing::Test {
   void* handles_[2] = {handle_, handle_};
   void* listenComm_ = nullptr;
   void* collComm_ = nullptr;
+  volatile uint32_t abortFlag_ = 0;
 
   // The DMA-BUF exports hipMemGetHandleForAddressRange hands out, and their scripted results.
   std::deque<hipError_t> exportResults_;  // one per export; empty means success
@@ -243,7 +245,7 @@ class GinHostProxyMicrotest : public ::testing::Test {
 
   ncclResult_t ListenAndConnect(int nRanks) {
     NCCLCHECK(ncclGinProxy.listen(kPluginCtx, /*dev=*/3, handle_, &listenComm_));
-    return ncclGinProxy.connect(kPluginCtx, handles_, nRanks, /*rank=*/1, listenComm_, &collComm_);
+    return ncclGinProxy.connect(kPluginCtx, handles_, nRanks, /*rank=*/1, listenComm_, &collComm_, &abortFlag_);
   }
 
   void CloseAll() {
@@ -294,6 +296,7 @@ TEST_F(GinHostProxyMicrotest, ListenConnectClose_WrapThePluginComms) {
   EXPECT_EQ(FakeRmaVtable::kListenComm, rma_.connectListenComm);
   EXPECT_EQ(2, rma_.connectNranks);
   EXPECT_EQ(1, rma_.connectRank);
+  EXPECT_EQ(&abortFlag_, rma_.connectAbortFlag);  // forwarded to the RMA plugin's connect
   ASSERT_NE(nullptr, collComm_);
   EXPECT_EQ(FakeRmaVtable::kCollComm, CollComm()->collComm);
   EXPECT_EQ(2, CollComm()->nRanks);
@@ -315,7 +318,7 @@ TEST_F(GinHostProxyMicrotest, Connect_GetPropertiesFailureSkipsConnect) {
   ASSERT_EQ(ncclSuccess, ncclGinProxy.listen(kPluginCtx, 0, handle_, &listenComm_));
   rma_.getPropertiesResult = ncclInternalError;
   void* collComm = kPluginCtx;
-  EXPECT_EQ(ncclInternalError, ncclGinProxy.connect(kPluginCtx, handles_, 2, 0, listenComm_, &collComm));
+  EXPECT_EQ(ncclInternalError, ncclGinProxy.connect(kPluginCtx, handles_, 2, 0, listenComm_, &collComm, &abortFlag_));
   EXPECT_EQ(kPluginCtx, collComm);
   EXPECT_EQ(nullptr, rma_.connectListenComm);
   CloseAll();
@@ -325,7 +328,7 @@ TEST_F(GinHostProxyMicrotest, Connect_PluginFailureLeavesCollCommUnset) {
   ASSERT_EQ(ncclSuccess, ncclGinProxy.listen(kPluginCtx, 0, handle_, &listenComm_));
   rma_.connectResult = ncclRemoteError;
   void* collComm = kPluginCtx;
-  EXPECT_EQ(ncclRemoteError, ncclGinProxy.connect(kPluginCtx, handles_, 2, 0, listenComm_, &collComm));
+  EXPECT_EQ(ncclRemoteError, ncclGinProxy.connect(kPluginCtx, handles_, 2, 0, listenComm_, &collComm, &abortFlag_));
   EXPECT_EQ(kPluginCtx, collComm);
   CloseAll();
 }
@@ -528,7 +531,10 @@ class GinHostProxyContextMicrotest : public GinHostProxyMicrotest {
     c.nContexts = nContexts;
     c.trafficClass = 5;
     c.backendVersion = version;
-    c.rankStride = 2;
+    // GIN v15 hands the plugin a sorted peer list in place of the old rank stride.
+    static int peers[] = {0, 1};
+    c.peerArray = peers;
+    c.peerArrayCount = 2;
     return c;
   }
   ncclResult_t Create(ncclGinConfig_t config) {
@@ -536,8 +542,10 @@ class GinHostProxyContextMicrotest : public GinHostProxyMicrotest {
     g_trackCreate = true;
     ncclResult_t res = ncclGinProxy.createContext(collComm_, &config, &ginCtx_, &devHandle_);
     g_trackCreate = false;
-    if (res != ncclSuccess)
+    if (res != ncclSuccess) {
+      EXPECT_TRUE(g_createAllocs.empty()) << g_createAllocs.size() << " host allocations leaked by a failed create";
       for (void* p : g_createAllocs) std::free(p);
+    }
     g_createAllocs.clear();
     return res;
   }
@@ -572,7 +580,9 @@ TEST_F(GinHostProxyContextMicrotest, Create_PublishesOneGpuContextPerContext) {
   ASSERT_EQ(ncclSuccess, Create(Config(3)));
   EXPECT_EQ(2, rma_.createConfig.nContexts);
   EXPECT_EQ(5, rma_.createConfig.trafficClass);
-  EXPECT_EQ(2, rma_.createConfig.rankStride);
+  // The peer list reaches the RMA plugin unchanged (RMA v17 takes it in place of rankStride).
+  EXPECT_EQ(2, rma_.createConfig.peerArrayCount);
+  EXPECT_EQ((std::vector<int>{0, 1}), rma_.createPeers);
 
   ASSERT_NE(nullptr, devHandle_);
   EXPECT_EQ(NCCL_NET_DEVICE_GIN_PROXY, devHandle_->netDeviceType);
@@ -611,8 +621,11 @@ TEST_F(GinHostProxyContextMicrotest, Create_AllocatesEachBufferWhereTheGpuAndPro
   EXPECT_EQ(3 * sizeof(uint64_t), g_mem.calls[1].bytes);
   EXPECT_EQ("cudaCalloc", g_mem.calls[2].kind);  // signal offsets
   EXPECT_EQ(3 * sizeof(uint64_t), g_mem.calls[2].bytes);
-  // pis, lastIssuedGet, lastVisibleGet: one uint32 per rank each.
-  for (int i = 3; i < 6; i++) {
+  // pis: a producer index and a cached copy of the ci per rank.
+  EXPECT_EQ("cudaCalloc", g_mem.calls[3].kind);
+  EXPECT_EQ(ncclGinProxyGpuPeerQueueIndexCount * 2 * sizeof(uint32_t), g_mem.calls[3].bytes);
+  // lastIssuedGet, lastVisibleGet: one uint32 per rank each.
+  for (int i = 4; i < 6; i++) {
     EXPECT_EQ("cudaCalloc", g_mem.calls[i].kind) << i;
     EXPECT_EQ(2 * sizeof(uint32_t), g_mem.calls[i].bytes) << i;
   }
@@ -637,7 +650,7 @@ TEST_F(GinHostProxyContextMicrotest, Create_GdrCopyForcesOnlyTheQueuesIntoHostMe
 
 TEST_F(GinHostProxyContextMicrotest, Create_ZeroesAndRegistersSignalsStronglyOrderedAndNeverReset) {
   ASSERT_EQ(ncclSuccess, Create(Config(3)));
-  ASSERT_EQ(3u, rma_.regs.size());  // signals, then inlines per context
+  ASSERT_EQ(3u, rma_.regs.size());  // signals, then the inline staging buffer per context
   EXPECT_EQ(Ctx()->signalsDev, rma_.regs[0].addr);
   EXPECT_EQ(2 * 3 * sizeof(uint64_t), rma_.regs[0].size);
   EXPECT_EQ(NCCL_PTR_CUDA, rma_.regs[0].type);
@@ -645,11 +658,12 @@ TEST_F(GinHostProxyContextMicrotest, Create_ZeroesAndRegistersSignalsStronglyOrd
   EXPECT_EQ(rma_.regs[0].mhandle, Ctx()->signalsGinHandle);
   for (int c = 0; c < 2; c++) {
     const FakeRmaVtable::MrReg& r = rma_.regs[1 + c];
-    EXPECT_EQ(Ctx()->hostGpuCtx[c].inlines, r.addr);
+    EXPECT_EQ(Ctx()->hostGpuCtx[c].inlineData, r.addr);
+    // One slot per request the plugin allows outstanding: NCCL_NET_MAX_REQUESTS * maxRecvs per rank.
     EXPECT_EQ(32 * 2 * sizeof(uint64_t), r.size);
     EXPECT_EQ(NCCL_PTR_HOST, r.type);
     EXPECT_EQ(0u, r.mrFlags);
-    EXPECT_EQ(r.mhandle, Ctx()->hostGpuCtx[c].inlinesMhandle);
+    EXPECT_EQ(r.mhandle, Ctx()->hostGpuCtx[c].inlineDataMhandle);
   }
 }
 
@@ -689,17 +703,18 @@ TEST_F(GinHostProxyContextMicrotest, Create_OlderBackendVersionsUseTheirOwnGpuCo
 }
 
 // 0 passes the version check up front, so the failure comes from the GPU-context writer after the RMA context
-// and every buffer exist, and none of them is released. Pins AICOMRCCL-2992; a fix flips this pin.
-TEST_F(GinHostProxyContextMicrotest, Create_BackendVersionZero_FailsLateAndLeaksEverything) {
+// and the first context's buffers exist. The fail path now tears down everything built so far (AICOMRCCL-2992,
+// fixed by the v2.32.6 merge: CreateContext's error paths go through DestroyContext).
+TEST_F(GinHostProxyContextMicrotest, Create_BackendVersionZero_FailsLateAndReleasesEverything) {
   ncclResult_t res = ncclSuccess;
   std::string log = CaptureLog([&] { res = Create(Config(0)); });
   EXPECT_EQ(ncclInternalError, res) << log;
   EXPECT_EQ(nullptr, ginCtx_);
   EXPECT_EQ(2, rma_.createConfig.nContexts);  // the RMA context was created ...
-  EXPECT_TRUE(rma_.destroyedContexts.empty());  // ... and never destroyed
-  EXPECT_FALSE(g_mem.live.empty());
-  EXPECT_FALSE(rma_.regs.empty());
-  EXPECT_TRUE(rma_.deregs.empty());
+  EXPECT_EQ(std::vector<void*>{FakeRmaVtable::kRmaCtx}, rma_.destroyedContexts);  // ... and destroyed
+  EXPECT_TRUE(g_mem.live.empty());
+  ASSERT_FALSE(rma_.regs.empty());
+  EXPECT_EQ(rma_.regs.size(), rma_.deregs.size());  // every registration was undone
 }
 
 TEST_F(GinHostProxyContextMicrotest, Create_WithoutSignalsOrCountersAllocatesNeither) {
@@ -800,12 +815,15 @@ TEST_F(GinHostProxyContextMicrotest, Create_PropagatesPluginAndAllocationFailure
   ASSERT_EQ(ncclSuccess, Create(Config(3)));
   const int nAllocs = static_cast<int>(g_mem.calls.size());
   Destroy();
-  // CreateContext has no cleanup on its error paths, so each attempt starts from a clean fake heap.
+  // Each attempt starts from a clean fake heap, so a leak on one path cannot hide in the next.
   for (int failAt = 0; failAt < nAllocs; failAt++) {
     g_mem.Reset();
     g_mem.failAt = failAt;
     EXPECT_EQ(ncclUnhandledCudaError, Create(Config(3))) << failAt;
     EXPECT_EQ((size_t)failAt + 1, g_mem.calls.size()) << "stopped at the failing allocation";
+    // The fail path destroys the partial context, so nothing allocated before the failure survives it.
+    EXPECT_TRUE(g_mem.live.empty()) << failAt;
+    EXPECT_EQ(rma_.regs.size(), rma_.deregs.size()) << failAt;
   }
 }
 
@@ -814,23 +832,22 @@ TEST_F(GinHostProxyContextMicrotest, Destroy_NullIsANoOp) {
   EXPECT_TRUE(rma_.destroyedContexts.empty());
 }
 
-// Destroy releases everything CreateContext allocated except the signal-offsets buffer.
-// Pins AICOMRCCL-2993; a fix flips this pin.
-TEST_F(GinHostProxyContextMicrotest, Destroy_ReleasesAllButTheSignalOffsets) {
+// Destroy releases everything CreateContext allocated, the signal-offsets buffer
+// included (AICOMRCCL-2993, fixed by the v2.32.6 merge: Destroy now frees it).
+TEST_F(GinHostProxyContextMicrotest, Destroy_ReleasesEverythingCreateAllocated) {
   ASSERT_EQ(ncclSuccess, Create(Config(3)));
-  void* signalOffsets = Ctx()->signalOffsetsDev;
+  ASSERT_NE(nullptr, Ctx()->signalOffsetsDev);
   void* signalsMh = Ctx()->signalsMhandle;
-  void* inlinesMh0 = Ctx()->hostGpuCtx[0].inlinesMhandle;
-  void* inlinesMh1 = Ctx()->hostGpuCtx[1].inlinesMhandle;
+  void* inlineMh0 = Ctx()->hostGpuCtx[0].inlineDataMhandle;
+  void* inlineMh1 = Ctx()->hostGpuCtx[1].inlineDataMhandle;
   Destroy();
 
   EXPECT_EQ(std::vector<void*>{FakeRmaVtable::kRmaCtx}, rma_.destroyedContexts);
   std::vector<std::pair<void*, void*>> deregs = {{FakeRmaVtable::kCollComm, signalsMh},
-                                                 {FakeRmaVtable::kCollComm, inlinesMh0},
-                                                 {FakeRmaVtable::kCollComm, inlinesMh1}};
+                                                 {FakeRmaVtable::kCollComm, inlineMh0},
+                                                 {FakeRmaVtable::kCollComm, inlineMh1}};
   EXPECT_EQ(deregs, rma_.deregs);
-  ASSERT_EQ(1u, g_mem.live.size());
-  EXPECT_EQ(signalOffsets, g_mem.live.begin()->first);
+  EXPECT_TRUE(g_mem.live.empty());
 }
 
 TEST_F(GinHostProxyContextMicrotest, Destroy_FreesGdrMemoryThroughItsHandle) {
@@ -897,10 +914,17 @@ class GinHostProxyProgressMicrotest : public GinHostProxyContextMicrotest {
     ginProxyHostGpuCtx& h = Ctx()->hostGpuCtx[context];
     return h.queues + rank * h.queueSize + (index & (h.queueSize - 1));
   }
-  // Producer side: every qword carries the flag bit, as the GPU writes it.
+  // The qwords a GFD of this version occupies: short (64-byte) descriptors from
+  // NCCL_GIN_PROXY_GFD_SHORT_VERSION on, the full 128-byte slot before that.
+  static int GfdQwords(const ncclGinProxyGfd_t& g) {
+    return g.qword[ncclGinProxyGfdHeader].header.version >= NCCL_GIN_PROXY_GFD_SHORT_VERSION
+               ? ncclGinProxyGfdShortQwords
+               : ncclGinProxyGfdQwords;
+  }
+  // Producer side: every qword the GFD occupies carries the flag bit, as the GPU writes it.
   void Post(int context, int rank, ncclGinProxyGfd_t g) {
-    for (auto& q : g.qword) q.raw |= 1;
-    *Slot(context, rank, pi_[{context, rank}]++) = g;
+    ncclGinProxyGfd_t* slot = Slot(context, rank, pi_[{context, rank}]++);
+    for (int k = 0; k < GfdQwords(g); k++) slot->qword[k].raw = g.qword[k].raw | 1;
   }
   ncclResult_t Progress() { return ncclGinProxy.ginProgress(ginCtx_); }
   bool HasError() {
@@ -926,6 +950,7 @@ TEST_F(GinHostProxyProgressMicrotest, Put_SubmitsAnIputAndReleasesTheSlot) {
   EXPECT_EQ(reinterpret_cast<void*>(0x3000), op.dstHandle);
   EXPECT_EQ(1u, op.rank);
   EXPECT_EQ((uint32_t)ncclRmaOptFlagsDefault, op.optFlags);
+  // A current-version GFD is short: its eight qwords are cleared, and the unused tail of the slot was never written.
   for (const auto& q : Slot(1, 1, 0)->qword) EXPECT_EQ(0u, q.raw);
   EXPECT_EQ(1u, Ctx()->hostGpuCtx[1].sis[1]);
   EXPECT_EQ(std::vector<void*>{FakeRmaVtable::kRmaCtx}, rma_.progressed);
@@ -942,7 +967,7 @@ TEST_F(GinHostProxyProgressMicrotest, Poll_WaitsForTheRestOfAPartiallyWrittenGfd
   std::thread producer([&] {
     while (!progressing.load(std::memory_order_acquire)) {
     }
-    for (int k = ncclGinProxyGfdQwords - 1; k > 0; k--) {
+    for (int k = ncclGinProxyGfdShortQwords - 1; k > 0; k--) {  // a current-version GFD is short
       __atomic_store_n(&slot->qword[k].raw, g.qword[k].raw, __ATOMIC_RELEASE);
     }
   });
@@ -952,6 +977,18 @@ TEST_F(GinHostProxyProgressMicrotest, Poll_WaitsForTheRestOfAPartiallyWrittenGfd
   ASSERT_EQ(1u, rma_.ops.size());
   EXPECT_EQ(0x20u, rma_.ops[0].dstOff);
   EXPECT_EQ(reinterpret_cast<void*>(0x3000), rma_.ops[0].dstHandle);
+}
+
+// A pre-short-descriptor GFD fills the whole 128-byte slot; the proxy waits for and clears all of it.
+TEST_F(GinHostProxyProgressMicrotest, Poll_LongGfdFromOlderDeviceCodeIsReadAndClearedWhole) {
+  ncclGinProxyGfd_t g = PutGfd(0, 64);
+  g.qword[ncclGinProxyGfdHeader].header.version = NCCL_GIN_PROXY_GFD_SHORT_VERSION - 1;
+  Post(0, 1, g);
+  ASSERT_NE(0u, Slot(0, 1, 0)->qword[ncclGinProxyGfdQwords - 1].raw);
+  ASSERT_EQ(ncclSuccess, Progress());
+  ASSERT_EQ(1u, rma_.ops.size());
+  EXPECT_EQ(0x20u, rma_.ops[0].dstOff);
+  for (int k = 0; k < ncclGinProxyGfdQwords; k++) EXPECT_EQ(0u, Slot(0, 1, 0)->qword[k].raw) << k;
 }
 
 TEST_F(GinHostProxyProgressMicrotest, EmptyQueuesSubmitNothing) {
@@ -995,7 +1032,10 @@ TEST_F(GinHostProxyProgressMicrotest, PutWithSignal_VersionOneGfdsAreAlwaysStron
   EXPECT_TRUE(rma_.ops[0].isStrong);
 }
 
-TEST_F(GinHostProxyProgressMicrotest, InlinePut_SendsTheReassembledValueFromTheInlinesMr) {
+// Each in-flight inline put stages its value in the slot of the inline buffer that
+// belongs to its outstanding-operation entry (one per request the plugin allows
+// outstanding, not one per queue slot), so the three puts use three distinct slots.
+TEST_F(GinHostProxyProgressMicrotest, InlinePut_SendsTheReassembledValueFromItsOwnInlineDataSlot) {
   const struct {
     uint64_t size, expected;
   } cases[] = {{4, 0x89abcdefull}, {6, 0x456789abcdefull}, {8, 0x0123456789abcdefull}};
@@ -1009,14 +1049,19 @@ TEST_F(GinHostProxyProgressMicrotest, InlinePut_SendsTheReassembledValueFromTheI
   ASSERT_EQ(ncclSuccess, Progress());
   ASSERT_EQ(3u, rma_.ops.size());
   ginProxyHostGpuCtx& h = Ctx()->hostGpuCtx[0];
+  const size_t nInlineSlots = 32 * 2;  // NCCL_NET_MAX_REQUESTS * maxRecvs(1) per rank, 2 ranks
+  std::set<uint64_t> slotsUsed;
   for (int i = 0; i < 3; i++) {
     SCOPED_TRACE(i);
-    const size_t stateIdx = 1 * h.queueSize + i;  // rank 1, slot i
     EXPECT_EQ('p', rma_.ops[i].kind);
-    EXPECT_EQ(stateIdx * sizeof(uint64_t), rma_.ops[i].srcOff);
-    EXPECT_EQ(h.inlinesMhandle, rma_.ops[i].srcHandle);
+    EXPECT_EQ(h.inlineDataMhandle, rma_.ops[i].srcHandle);
     EXPECT_EQ(cases[i].size, rma_.ops[i].size);
-    EXPECT_EQ(cases[i].expected, h.inlines[stateIdx]);
+    // srcOff is the byte offset of the op's staging slot inside the inline MR.
+    ASSERT_EQ(0u, rma_.ops[i].srcOff % sizeof(uint64_t));
+    const size_t slot = rma_.ops[i].srcOff / sizeof(uint64_t);
+    ASSERT_LT(slot, nInlineSlots);
+    EXPECT_TRUE(slotsUsed.insert(slot).second) << "slot " << slot << " shared by two in-flight puts";
+    EXPECT_EQ(cases[i].expected, h.inlineData[slot]);
   }
 }
 

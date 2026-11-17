@@ -26,7 +26,9 @@ ncclResult_t ncclMemAlloc_impl(void** ptr, size_t size) {
   CUmemGenericAllocationHandle handle = (CUmemGenericAllocationHandle)-1;
   int cudaDev;
   int flag;
+#if defined(__HIP_PLATFORM_AMD__)
   int dcnt;
+#endif
   bool handleCreated = false;
   bool addressReserved = false;
   bool mapped = false;
@@ -71,7 +73,9 @@ ncclResult_t ncclMemAlloc_impl(void** ptr, size_t size) {
     // if (flag) memprop.allocFlags.gpuDirectRDMACapable = 1;
 #endif
     CUCHECK(cuMemGetAllocationGranularity(&memGran, &memprop, CU_MEM_ALLOC_GRANULARITY_RECOMMENDED));
+#if defined(__HIP_PLATFORM_AMD__)
     CUDACHECK(cudaGetDeviceCount(&dcnt));
+#endif
     ALIGN_SIZE(handleSize, memGran);
 
     /* Allocate the physical memory on the device */
@@ -83,7 +87,8 @@ ncclResult_t ncclMemAlloc_impl(void** ptr, size_t size) {
     /* Map the virtual address range to the physical allocation */
     CUCHECKGOTO(cuMemMap((CUdeviceptr)*ptr, handleSize, 0, handle, 0), ret, vmm_fail);
     mapped = true;
-    /* Now allow RW access to the newly mapped memory */
+#if defined(__HIP_PLATFORM_AMD__)
+    /* [RCCL] Now allow RW access to the newly mapped memory from the owner and every peer-capable device. */
     for (int i = 0; i < dcnt; ++i) {
       int p2p = 0;
       if (i == cudaDev || (CUDASUCCESS(cudaDeviceCanAccessPeer(&p2p, i, cudaDev)) && p2p)) {
@@ -94,6 +99,14 @@ ncclResult_t ncclMemAlloc_impl(void** ptr, size_t size) {
       }
       if (0 == p2p && i != cudaDev) INFO(NCCL_ALLOC, "P2P not supported between GPU%d and GPU%d", cudaDev, i);
     }
+#else
+    /* Now allow RW access to the newly mapped memory -- owner device only.
+       Any ranks peer-mapping this memory will call cuMemSetAccess on their own. */
+    accessDesc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+    accessDesc.location.id = cudaDev;
+    accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+    CUCHECKGOTO(cuMemSetAccess((CUdeviceptr)*ptr, handleSize, &accessDesc, 1), ret, vmm_fail);
+#endif
     goto exit;
 
 vmm_fail:

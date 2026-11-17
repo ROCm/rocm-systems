@@ -103,7 +103,7 @@ protected:
     // Batch buffer for ncclPrepUCSync: capacity is based on the LSA-local team.
     std::vector<hipStreamBatchMemOpParams> makePrepSyncBatch() const
     {
-        size_t batchSize = NCCL_CE_SYNC_OPS_PER_RANK_UC * ceComm->devrState.lsaSize;
+        size_t batchSize = NCCL_CE_SYNC_OPS_PER_RANK_UC * ceComm->devrState.lsaTeamSize;
         return std::vector<hipStreamBatchMemOpParams>(batchSize);
     }
 
@@ -120,9 +120,9 @@ protected:
     // empty batch.
     void requireMinLsaRanks(int n)
     {
-        if(ceComm->devrState.lsaSize < n)
+        if(ceComm->devrState.lsaTeamSize < n)
             GTEST_SKIP() << "Need >= " << n << " ranks in the LSA team, have "
-                         << ceComm->devrState.lsaSize;
+                         << ceComm->devrState.lsaTeamSize;
     }
 
     // Allocate a batch, call ncclPrepUCSync once, and return both for inspection.
@@ -378,7 +378,7 @@ TEST_F(CeInternalMPITest, PrepUCSyncOpCount)
 {
     requireMinRanks(2);
     requireMinLsaRanks(2);
-    const int lsaSize = ceComm->devrState.lsaSize;
+    const int lsaSize = ceComm->devrState.lsaTeamSize;
     auto [batch, opIdx] = callPrepUCSync();
     EXPECT_EQ(opIdx, static_cast<size_t>(2 * (lsaSize - 1)))
         << "expected 2*(lsaSize-1) ops for lsaSize=" << lsaSize
@@ -390,7 +390,7 @@ TEST_F(CeInternalMPITest, PrepUCSyncNoSelfTargetedOp)
 {
     requireMinRanks(2);
     requireMinLsaRanks(2);
-    const int lsaRank = ceComm->devrState.lsaSelf;
+    const int lsaRank = ceComm->devrState.lsaTeamSelf;
 
     auto [batch, opIdx] = callPrepUCSync();
 

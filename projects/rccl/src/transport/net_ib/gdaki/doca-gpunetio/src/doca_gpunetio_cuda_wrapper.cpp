@@ -45,12 +45,18 @@ typedef CUresult (*cuMemGetHandleForAddressRange_t)(int *pHandle, CUdeviceptr dp
                                                     CUmemRangeHandleType handleType,
                                                     unsigned long long flags);
 typedef CUresult (*cuCtxGetCurrent_t)(CUcontext *pctx);
+typedef CUresult (*cuCtxSetCurrent_t)(CUcontext pctx);
+typedef CUresult (*cuDevicePrimaryCtxRetain_t)(CUcontext *pctx, CUdevice dev);
+typedef CUresult (*cuDevicePrimaryCtxRelease_t)(CUdevice dev);
 
 /* Global function pointers */
 cuDeviceGetAttribute_t p_cuDeviceGetAttribute = nullptr;
 cuPointerSetAttribute_t p_cuPointerSetAttribute = nullptr;
 cuMemGetHandleForAddressRange_t p_cuMemGetHandleForAddressRange = nullptr;
 cuCtxGetCurrent_t p_cuCtxGetCurrent = nullptr;
+cuCtxSetCurrent_t p_cuCtxSetCurrent = nullptr;
+cuDevicePrimaryCtxRetain_t p_cuDevicePrimaryCtxRetain = nullptr;
+cuDevicePrimaryCtxRelease_t p_cuDevicePrimaryCtxRelease = nullptr;
 
 static void *cuda_handle = nullptr;
 
@@ -66,14 +72,14 @@ static void *get_cuda_symbol(const char *symbol_name) {
 
 static void doca_gpunetio_cuda_wrapper_init(int *ret) {
     /* Open libcuda.so */
-    cuda_handle = dlopen("libcuda.so", RTLD_LAZY);
+    cuda_handle = dlopen("libcuda.so.1", RTLD_NOW);
     if (!cuda_handle) {
-        cuda_handle = dlopen("libcuda.so.1", RTLD_LAZY);
-        if (!cuda_handle) {
-            DOCA_LOG(LOG_ERR, "Failed to open libcuda: %s\n", dlerror());
-            *ret = -1;
-            return;
-        }
+        cuda_handle = dlopen("libcuda.so", RTLD_NOW);
+    }
+    if (!cuda_handle) {
+        DOCA_LOG(LOG_ERR, "Failed to open libcuda: %s\n", dlerror());
+        *ret = -1;
+        return;
     }
 
     /* Get function pointers */
@@ -82,10 +88,16 @@ static void doca_gpunetio_cuda_wrapper_init(int *ret) {
     p_cuMemGetHandleForAddressRange =
         (cuMemGetHandleForAddressRange_t)get_cuda_symbol("cuMemGetHandleForAddressRange");
     p_cuCtxGetCurrent = (cuCtxGetCurrent_t)get_cuda_symbol("cuCtxGetCurrent");
+    p_cuCtxSetCurrent = (cuCtxSetCurrent_t)get_cuda_symbol("cuCtxSetCurrent");
+    p_cuDevicePrimaryCtxRetain =
+        (cuDevicePrimaryCtxRetain_t)get_cuda_symbol("cuDevicePrimaryCtxRetain");
+    p_cuDevicePrimaryCtxRelease =
+        (cuDevicePrimaryCtxRelease_t)get_cuda_symbol("cuDevicePrimaryCtxRelease");
 
     /* Check if all symbols were found */
     if (!p_cuDeviceGetAttribute || !p_cuPointerSetAttribute || !p_cuMemGetHandleForAddressRange ||
-        !p_cuCtxGetCurrent) {
+        !p_cuCtxGetCurrent || !p_cuCtxSetCurrent || !p_cuDevicePrimaryCtxRetain ||
+        !p_cuDevicePrimaryCtxRelease) {
         DOCA_LOG(LOG_ERR, "Failed to get all required CUDA symbols\n");
         dlclose(cuda_handle);
         cuda_handle = nullptr;
@@ -97,7 +109,7 @@ static void doca_gpunetio_cuda_wrapper_init(int *ret) {
 }
 
 static int init_cuda_wrapper(void) {
-    int ret = 0;
+    static int ret = 0;
     static std::once_flag once;
     std::call_once(once, doca_gpunetio_cuda_wrapper_init, &ret);
     return ret;
@@ -128,4 +140,19 @@ CUresult doca_gpu_cuda_wrapper_cuMemGetHandleForAddressRange(int *pHandle, CUdev
 CUresult doca_gpu_cuda_wrapper_cuCtxGetCurrent(CUcontext *pctx) {
     if (init_cuda_wrapper() != 0) return CUDA_ERROR_NOT_INITIALIZED;
     return p_cuCtxGetCurrent(pctx);
+}
+
+CUresult doca_gpu_cuda_wrapper_cuCtxSetCurrent(CUcontext pctx) {
+    if (init_cuda_wrapper() != 0) return CUDA_ERROR_NOT_INITIALIZED;
+    return p_cuCtxSetCurrent(pctx);
+}
+
+CUresult doca_gpu_cuda_wrapper_cuDevicePrimaryCtxRetain(CUcontext *pctx, CUdevice dev) {
+    if (init_cuda_wrapper() != 0) return CUDA_ERROR_NOT_INITIALIZED;
+    return p_cuDevicePrimaryCtxRetain(pctx, dev);
+}
+
+CUresult doca_gpu_cuda_wrapper_cuDevicePrimaryCtxRelease(CUdevice dev) {
+    if (init_cuda_wrapper() != 0) return CUDA_ERROR_NOT_INITIALIZED;
+    return p_cuDevicePrimaryCtxRelease(dev);
 }

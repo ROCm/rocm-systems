@@ -23,10 +23,10 @@ ncclResult_t rcclDevrProbeNonSymWindow(struct ncclComm* comm, void* userPtr, siz
   CUmemorytype memType = CU_MEMORYTYPE_DEVICE;
   bool hasSysmemSegment = false;
   struct ncclDevrState* devr = &comm->devrState;
-  // No rank-local allocation here: lsaSize is team-uniform, so this bound
+  // No rank-local allocation here: lsaTeamSize is team-uniform, so this bound
   // fails on every rank alike and none is left waiting in the allgather.
-  if (devr->lsaSize > NCCL_MAX_LOCAL_RANKS) {
-    WARN("LSA team of %d exceeds %d local ranks", devr->lsaSize, NCCL_MAX_LOCAL_RANKS);
+  if (devr->lsaTeamSize > NCCL_MAX_LOCAL_RANKS) {
+    WARN("LSA team of %d exceeds %d local ranks", devr->lsaTeamSize, NCCL_MAX_LOCAL_RANKS);
     return ncclInternalError;
   }
   int kinds[NCCL_MAX_LOCAL_RANKS] = {};
@@ -80,20 +80,20 @@ ncclResult_t rcclDevrProbeNonSymWindow(struct ncclComm* comm, void* userPtr, siz
   }
   // Host VMM cannot cudaIpcGetMemHandle. Allgather the classify result so a
   // host rank cannot return while a device peer still enters the IPC exchange.
-  if (devr->lsaSize > 1) {
+  if (devr->lsaTeamSize > 1) {
     // 0 = device, 1 = host, 2 = probe failed.
     int localKind = (probeRet != ncclSuccess) ? 2 : (hasSysmemSegment ? 1 : 0);
-    kinds[devr->lsaSelf] = localKind;
-    NCCLCHECK(bootstrapIntraNodeAllGather(comm->bootstrap, devr->lsaRankList, devr->lsaSelf, devr->lsaSize, kinds,
+    kinds[devr->lsaTeamSelf] = localKind;
+    NCCLCHECK(bootstrapIntraNodeAllGather(comm->bootstrap, devr->lsaTeamRankList, devr->lsaTeamSelf, devr->lsaTeamSize, kinds,
                                           sizeof(int)));
     int anyHost = 0, anyFail = 0;
-    for (int r = 0; r < devr->lsaSize; r++) {
+    for (int r = 0; r < devr->lsaTeamSize; r++) {
       if (kinds[r] == 2) anyFail = 1;
       if (kinds[r] == 1) anyHost = 1;
     }
     if (anyFail) return (probeRet != ncclSuccess) ? probeRet : ncclInternalError;
     if (anyHost) {
-      WARN("Host-backed VMM cannot be exported via IPC for an LSA team of %d", devr->lsaSize);
+      WARN("Host-backed VMM cannot be exported via IPC for an LSA team of %d", devr->lsaTeamSize);
       return ncclInvalidArgument;
     }
     return ncclSuccess;

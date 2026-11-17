@@ -580,12 +580,45 @@ class SearchNetsMicrotest : public SearchMicrotest {
     Use(System(Cpu(0, here + far) + Cpu(1, GpuPci(GpuBus(1), 1, 1), "host_hash=\"0x9\"")), 4);
   }
 
+  // NCCL 2.32.6 split the selection into the uncached ncclTopoSelectNetsCompute and a cached lookup.
   std::vector<int> Select(int typeInter, int gpu) {
     int nets[NCCL_TOPO_MAX_NODES], count = 0;
-    EXPECT_EQ(ncclSuccess, ncclTopoSelectNets(system_.get(), typeInter, gpu, nets, &count));
+    EXPECT_EQ(ncclSuccess, ncclTopoSelectNetsCompute(system_.get(), typeInter, gpu, nets, &count));
     return std::vector<int>(nets, nets + count);
   }
 };
+
+TEST_F(SearchNetsMicrotest, SelectNets_OutsideComputeHasNoCacheAndFails) {
+  ASSERT_EQ(nullptr, system_->selectNetsCache);
+  const int* nets = nullptr;
+  int count = -1;
+  EXPECT_EQ(ncclInternalError, ncclTopoSelectNets(system_.get(), PATH_PIX, 0, &nets, &count));
+}
+
+TEST_F(SearchNetsMicrotest, SelectNets_CachedPerTypeAndGpuAndMatchesTheComputedList) {
+  g_params["MNNVL_SCATTER_NETS_ENABLE"] = 0;
+  ASSERT_EQ(ncclSuccess, ncclTopoSelectNetsCacheCreate(system_.get()));
+  EXPECT_EQ(ncclInternalError, ncclTopoSelectNetsCacheCreate(system_.get())) << "a second install is rejected";
+
+  const int* first = nullptr;
+  int count = 0;
+  ASSERT_EQ(ncclSuccess, ncclTopoSelectNets(system_.get(), PATH_PHB, 0, &first, &count));
+  EXPECT_EQ(Select(PATH_PHB, 0), std::vector<int>(first, first + count));
+  const int* again = nullptr;
+  int againCount = 0;
+  ASSERT_EQ(ncclSuccess, ncclTopoSelectNets(system_.get(), PATH_PHB, 0, &again, &againCount));
+  EXPECT_EQ(first, again) << "the second query reuses the cached list";
+  EXPECT_EQ(count, againCount);
+
+  const int* other = nullptr;
+  int otherCount = 0;
+  ASSERT_EQ(ncclSuccess, ncclTopoSelectNets(system_.get(), PATH_PIX, -1, &other, &otherCount));
+  EXPECT_NE(first, other) << "each (typeInter, gpu) has its own entry";
+  EXPECT_EQ(std::vector<int>({0, 1}), std::vector<int>(other, other + otherCount));
+
+  ncclTopoSelectNetsCacheDestroy(system_.get());
+  EXPECT_EQ(nullptr, system_->selectNetsCache);
+}
 
 TEST_F(SearchNetsMicrotest, SelectNets_LocalNicsFirstThenOthersUpToTheType) {
   g_params["MNNVL_SCATTER_NETS_ENABLE"] = 0;
@@ -669,7 +702,7 @@ TEST_F(SearchMicrotest, PrefNets_SkipGpusWithoutNicPaths) {
   ASSERT_EQ(ncclSuccess, ncclTopoPrefNetsChannelFirst(system_.get(), -1, nets, &count));
   EXPECT_EQ(1, count);
   count = 0;
-  ASSERT_EQ(ncclSuccess, ncclTopoSelectNets(system_.get(), PATH_SYS, 1, nets, &count));
+  ASSERT_EQ(ncclSuccess, ncclTopoSelectNetsCompute(system_.get(), PATH_SYS, 1, nets, &count));
   EXPECT_EQ(0, count);
 }
 

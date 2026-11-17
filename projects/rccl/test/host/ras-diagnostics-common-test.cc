@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <initializer_list>
 #include <memory>
 #include <mutex>
@@ -24,6 +25,11 @@
 #include "comm.h"
 #include "fakes/ras_diagnostics_test_support.h"
 #include "compiler.h"
+#include "fakes/fail_loud.h"
+#include "fakes/signature-drift.h"
+// NCCL 2.32.6: the unit includes graph/topo.h, whose xml.h has an inline xmlAlloc calling ncclCalloc(char**, n).
+// Include it before the ncclCalloc redirect below so the redirect only reaches the unit's own allocations.
+#include "graph/topo.h"
 #include "ras/diagnostics_checks_common.h"
 #include "ras/ras_internal.h"
 #include "transport.h"
@@ -50,6 +56,24 @@ ncclResult_t DiagnosticsTestCalloc(ncclUniquePtr<T>& ptr, size_t count) {
 #include RAS_DIAGNOSTICS_COMMON_CC_PATH
 
 #undef ncclCalloc
+
+// Link seams for rasDiagnosticsCollectCommSnapshots' net-device path. graph/topo.cc and transport/net_ib/ are not in
+// this binary; the unit only reads the IB device table and compares the comm's plugin against &ncclNetIb.
+ncclNet_t ncclNetIb = {.name = "IB"};
+int ncclNIbDevs = 0;
+struct ncclIbDev ncclIbDevs[MAX_IB_DEVS];
+
+static ncclResult_t DefaultTopoGetNetPropertiesSnapshot(struct ncclComm*, bool, struct ncclTopoNetPropertiesSnapshot**,
+                                                        int*) {
+  FailLoudUnfaked("ras-diagnostics-common-test", "ncclTopoGetNetPropertiesSnapshot");
+}
+static std::function<ncclResult_t(struct ncclComm*, bool, struct ncclTopoNetPropertiesSnapshot**, int*)>
+    g_topoGetNetPropertiesSnapshot = DefaultTopoGetNetPropertiesSnapshot;
+ASSERT_HOOK_MATCHES_PROD(g_topoGetNetPropertiesSnapshot, ncclTopoGetNetPropertiesSnapshot);
+ncclResult_t ncclTopoGetNetPropertiesSnapshot(struct ncclComm* comm, bool requireCommInitialized,
+                                              struct ncclTopoNetPropertiesSnapshot** snapshots, int* nSnapshots) {
+  return g_topoGetNetPropertiesSnapshot(comm, requireCommInitialized, snapshots, nSnapshots);
+}
 
 namespace {
 
@@ -89,6 +113,9 @@ ncclResult_t FillTestPayload(const rasDiagnosticsCommSnapshot* snapshot, void* c
 
 void ResetDiagnosticsCommonState() {
   ras_test::ResetNcclComms();
+  g_topoGetNetPropertiesSnapshot = DefaultTopoGetNetPropertiesSnapshot;
+  ncclNIbDevs = 0;
+  for (struct ncclIbDev& dev : ncclIbDevs) dev.currSpeed = 0;
   g_allocationCalls = 0;
   g_failAllocationCall = 0;
   g_allocationCounts.clear();
@@ -120,7 +147,9 @@ class RasDiagnosticsCommonMicrotest : public ::testing::Test {
 TEST_F(RasDiagnosticsCommonMicrotest, CommSnapshotCopiesEveryDiagnosticField) {
   OwnedComm owned(UINT64_C(0x1122334455667788), UINT64_C(0x99aabbccddeeff00),
                   UINT64_C(0x0123456789abcdef), 5);
-  owned.comm->rank = 0x11223344;
+  // rank stays 5: since NCCL 2.32.6 the snapshot reads its node identity from peerInfo[comm->rank], so the rank must
+  // index the peer table. That entry gets its own hostHash to show which one the snapshot reads.
+  owned.peers[5].hostHash = UINT64_C(0x5555aaaa5555aaaa);
   owned.comm->nRanks = 0x55667788;
   owned.comm->cudaDev = 7;
   owned.comm->nvmlDev = 9;
@@ -134,13 +163,18 @@ TEST_F(RasDiagnosticsCommonMicrotest, CommSnapshotCopiesEveryDiagnosticField) {
   EXPECT_EQ(UINT64_C(0x1122334455667788), snapshot.rank.commId.commHash);
   EXPECT_EQ(UINT64_C(0x99aabbccddeeff00), snapshot.rank.commId.hostHash);
   EXPECT_EQ(UINT64_C(0x0123456789abcdef), snapshot.rank.commId.pidHash);
-  EXPECT_EQ(0x11223344, snapshot.rank.commRank);
+  EXPECT_EQ(5, snapshot.rank.commRank);
   EXPECT_EQ(0x55667788, snapshot.rank.commNRanks);
   EXPECT_EQ(7, snapshot.cudaDev);
   EXPECT_EQ(9, snapshot.nvmlDev);
   EXPECT_EQ(0x123456, snapshot.busId);
   EXPECT_EQ(2, snapshot.localRank);
   EXPECT_EQ(6, snapshot.localRanks);
+  EXPECT_EQ(UINT64_C(0x5555aaaa5555aaaa), snapshot.hostHash);
+  // Net-device fields: no plugin means not a verbs plugin, and no properties until a collector asks for them.
+  EXPECT_FALSE(snapshot.netIbVerbs);
+  EXPECT_EQ(nullptr, snapshot.netProps);
+  EXPECT_EQ(0, snapshot.nNetProps);
 }
 
 TEST_F(RasDiagnosticsCommonMicrotest, CommIdCompareOrdersEveryIdentityComponent) {
@@ -276,8 +310,13 @@ TEST_F(RasDiagnosticsCommonMicrotest, CollectRejectsCombinedRecordBytesPastIntMa
   ASSERT_LE(stride, static_cast<size_t>(INT_MAX));
   ASSERT_EQ(1, INT_MAX / static_cast<int>(stride));
   EXPECT_EQ(ncclInternalError, rasDiagnosticsCollectLocalRecords(&ctx, payloadSize, FillTestPayload, &data));
-  EXPECT_EQ(0, g_allocationCalls);
+  // NCCL 2.32.6 counts comms by taking their snapshots (rasDiagnosticsCollectCommSnapshots) before this size check,
+  // so the two-entry snapshot array is the one allocation made (and released on the error path); the record buffer
+  // is never requested.
+  EXPECT_EQ(1, g_allocationCalls);
+  EXPECT_EQ((std::vector<size_t>{2}), g_allocationCounts);
   EXPECT_EQ(0, g_fillCalls);
+  EXPECT_EQ(nullptr, data.records);
 }
 
 TEST_F(RasDiagnosticsCommonMicrotest, CollectAcceptsRecordBytesExactlyAtIntMaxLimit) {
@@ -319,9 +358,8 @@ TEST_F(RasDiagnosticsCommonMicrotest, CollectFiltersCommsAndBuildsAlignedRecords
   OwnedComm invalid(10, 20, 30, 3, false);
   OwnedComm mismatch(11, 20, 30, 4);
   OwnedComm second(10, 20, 30, 5);
-  first.comm->rank = 0x11223344;
+  // Ranks stay 2 and 5: since NCCL 2.32.6 the snapshot reads peerInfo[comm->rank], so a rank must index the peer table.
   first.comm->nRanks = 0x55667788;
-  second.comm->rank = 0x22334455;
   second.comm->nRanks = 0x66778899;
   InstallNcclComms({first.comm.get(), nullptr, invalid.comm.get(), mismatch.comm.get(), second.comm.get(), nullptr});
   const rasDiagnosticsContext ctx = FilteredContext(10, 20, 30);
@@ -514,6 +552,159 @@ TEST_F(RasDiagnosticsCommonMicrotest, ReportIncompleteIncludesCountsAndFullCommI
 
   state.emitResult = ncclRemoteError;
   EXPECT_EQ(ncclRemoteError, rasDiagnosticsReportIncomplete(&reporter, "GPU model", &rank, 12));
+}
+
+// --- rasDiagnosticsCollectCommSnapshots' net-device path (NCCL 2.32.6) ---
+
+// One property-snapshot array the way ncclTopoGetNetPropertiesSnapshot hands it out: heap-owned by the caller.
+struct NetPropSpec {
+  bool valid;
+  std::vector<int> devs;
+  int speed;
+};
+ncclTopoNetPropertiesSnapshot* MakeNetProps(const std::vector<NetPropSpec>& specs) {
+  auto* props = static_cast<ncclTopoNetPropertiesSnapshot*>(std::calloc(specs.size(), sizeof(ncclTopoNetPropertiesSnapshot)));
+  for (size_t i = 0; i < specs.size(); i++) {
+    props[i].propertiesValid = specs[i].valid;
+    props[i].vProps.ndevs = static_cast<int>(specs[i].devs.size());
+    for (size_t d = 0; d < specs[i].devs.size(); d++) props[i].vProps.devs[d] = specs[i].devs[d];
+    props[i].speed = specs[i].speed;
+  }
+  return props;
+}
+
+struct NetSnapshotCall {
+  ncclComm* comm;
+  bool requireCommInitialized;
+};
+
+// RCCL's internal verbs transport counts as a verbs plugin; a name that only shares its prefix does not.
+TEST_F(RasDiagnosticsCommonMicrotest, CollectCommSnapshotsTreatsRcclIbCastAsVerbs) {
+  ncclNet_t ibCast = {.name = "IB-CAST"};
+  ncclNet_t ibCastPrefix = {.name = "IB-CASTX"};
+  OwnedComm c0(10, 20, 30, 0), c1(10, 20, 30, 1);
+  c0.comm->ncclNet = &ibCast;
+  c1.comm->ncclNet = &ibCastPrefix;
+  InstallNcclComms({c0.comm.get(), c1.comm.get()});
+
+  const rasDiagnosticsContext unfiltered = UnfilteredContext();
+  rasDiagnosticsCommSnapshot* snapshots = nullptr;
+  int nSnapshots = -1;
+  ASSERT_EQ(ncclSuccess, rasDiagnosticsCollectCommSnapshots(&unfiltered, false, &snapshots, &nSnapshots));
+  ASSERT_EQ(2, nSnapshots);
+  EXPECT_TRUE(snapshots[0].netIbVerbs);
+  EXPECT_FALSE(snapshots[1].netIbVerbs);
+  rasDiagnosticsFreeCommSnapshots(snapshots, nSnapshots);
+}
+
+TEST_F(RasDiagnosticsCommonMicrotest, CollectCommSnapshotsQueriesNetDevicesOnlyForVerbsPluginsWhenAsked) {
+  // Verbs plugin names match exactly or followed by '_' or ' '; a name that merely shares the prefix does not.
+  ncclNet_t ibExt = {.name = "IBext_v10"};
+  ncclNet_t ibPrefix = {.name = "IBX"};
+  ncclNet_t rdma = {.name = "NCCL RDMA Plugin v9"};
+  ncclNet_t socket = {.name = "Socket"};
+  OwnedComm c0(10, 20, 30, 0), c1(10, 20, 30, 1), c2(10, 20, 30, 2), c3(10, 20, 30, 3), c4(10, 20, 30, 4);
+  c0.comm->ncclNet = &ibExt;
+  c1.comm->ncclNet = &ibPrefix;
+  c2.comm->ncclNet = nullptr;
+  c3.comm->ncclNet = &rdma;
+  c4.comm->ncclNet = &socket;
+  InstallNcclComms({c0.comm.get(), c1.comm.get(), c2.comm.get(), c3.comm.get(), c4.comm.get()});
+  const std::vector<bool> verbs = {true, false, false, true, false};
+
+  // Not asked: the default seam fails loudly if reached.
+  const rasDiagnosticsContext unfiltered = UnfilteredContext();
+  rasDiagnosticsCommSnapshot* snapshots = nullptr;
+  int nSnapshots = -1;
+  ASSERT_EQ(ncclSuccess, rasDiagnosticsCollectCommSnapshots(&unfiltered, false, &snapshots, &nSnapshots));
+  ASSERT_EQ(5, nSnapshots);
+  for (int i = 0; i < nSnapshots; i++) {
+    EXPECT_EQ(verbs[i], snapshots[i].netIbVerbs) << i;
+    EXPECT_EQ(nullptr, snapshots[i].netProps) << i;
+    EXPECT_EQ(0, snapshots[i].nNetProps) << i;
+  }
+  rasDiagnosticsFreeCommSnapshots(snapshots, nSnapshots);
+
+  // Asked, unscoped: only the verbs comms are queried, and they must have finished initializing.
+  std::vector<NetSnapshotCall> calls;
+  std::vector<ncclTopoNetPropertiesSnapshot*> handedOut;
+  g_topoGetNetPropertiesSnapshot = [&](ncclComm* comm, bool requireInit, ncclTopoNetPropertiesSnapshot** out, int* n) {
+    calls.push_back({comm, requireInit});
+    *out = MakeNetProps({{true, {0}, 100}, {true, {1}, 200}});
+    *n = 2;
+    handedOut.push_back(*out);
+    return ncclSuccess;
+  };
+  ASSERT_EQ(ncclSuccess, rasDiagnosticsCollectCommSnapshots(&unfiltered, true, &snapshots, &nSnapshots));
+  ASSERT_EQ(5, nSnapshots);
+  ASSERT_EQ(2u, calls.size());
+  EXPECT_EQ(c0.comm.get(), calls[0].comm);
+  EXPECT_TRUE(calls[0].requireCommInitialized);
+  EXPECT_EQ(c3.comm.get(), calls[1].comm);
+  EXPECT_TRUE(calls[1].requireCommInitialized);
+  EXPECT_EQ(handedOut[0], snapshots[0].netProps);
+  EXPECT_EQ(2, snapshots[0].nNetProps);
+  EXPECT_EQ(handedOut[1], snapshots[3].netProps);
+  for (int i : {1, 2, 4}) EXPECT_EQ(nullptr, snapshots[i].netProps) << i;
+  // ibExt is not the built-in IB plugin, so the plugin-reported speeds stand.
+  EXPECT_EQ(100, snapshots[0].netProps[0].speed);
+  rasDiagnosticsFreeCommSnapshots(snapshots, nSnapshots);
+
+  // Comm-scoped: the run is triggered by that comm's own initialization, so it must not wait for it.
+  calls.clear();
+  const rasDiagnosticsContext scoped = FilteredContext(10, 20, 30);
+  ASSERT_EQ(ncclSuccess, rasDiagnosticsCollectCommSnapshots(&scoped, true, &snapshots, &nSnapshots));
+  ASSERT_EQ(2u, calls.size());
+  EXPECT_FALSE(calls[0].requireCommInitialized);
+  EXPECT_FALSE(calls[1].requireCommInitialized);
+  rasDiagnosticsFreeCommSnapshots(snapshots, nSnapshots);
+
+  // A failed property query is not fatal: the snapshot just carries no properties.
+  g_topoGetNetPropertiesSnapshot = [](ncclComm*, bool, ncclTopoNetPropertiesSnapshot**, int*) {
+    return ncclSystemError;
+  };
+  ASSERT_EQ(ncclSuccess, rasDiagnosticsCollectCommSnapshots(&unfiltered, true, &snapshots, &nSnapshots));
+  ASSERT_EQ(5, nSnapshots);
+  EXPECT_EQ(nullptr, snapshots[0].netProps);
+  EXPECT_EQ(0, snapshots[0].nNetProps);
+  rasDiagnosticsFreeCommSnapshots(snapshots, nSnapshots);
+}
+
+TEST_F(RasDiagnosticsCommonMicrotest, CollectCommSnapshotsTakesLiveSpeedFromBuiltInIbDeviceTable) {
+  ncclNIbDevs = 3;
+  ncclIbDevs[0].currSpeed = 400000;
+  ncclIbDevs[1].currSpeed = 0;  // not tracked: keep the plugin's speed
+  ncclIbDevs[2].currSpeed = static_cast<uint64_t>(INT_MAX) + 1;  // does not fit the int field: keep the plugin's speed
+  ncclNet_t notBuiltIn = {.name = "IB"};  // a verbs plugin by name, but not &ncclNetIb
+  OwnedComm builtIn(10, 20, 30, 0), other(10, 20, 30, 1);
+  builtIn.comm->ncclNet = &ncclNetIb;
+  other.comm->ncclNet = &notBuiltIn;
+  InstallNcclComms({builtIn.comm.get(), other.comm.get()});
+  g_topoGetNetPropertiesSnapshot = [](ncclComm*, bool, ncclTopoNetPropertiesSnapshot** out, int* n) {
+    *out = MakeNetProps({
+        {true, {0}, 100},     // live speed applies
+        {true, {1}, 200},     // currSpeed 0
+        {false, {0}, 300},    // properties invalid
+        {true, {0, 1}, 400},  // merged virtual device: no single IB device
+        {true, {2}, 500},     // currSpeed past INT_MAX
+        {true, {3}, 600},     // index past ncclNIbDevs
+    });
+    *n = 6;
+    return ncclSuccess;
+  };
+  const rasDiagnosticsContext ctx = UnfilteredContext();
+  rasDiagnosticsCommSnapshot* snapshots = nullptr;
+  int nSnapshots = 0;
+  ASSERT_EQ(ncclSuccess, rasDiagnosticsCollectCommSnapshots(&ctx, true, &snapshots, &nSnapshots));
+  ASSERT_EQ(2, nSnapshots);
+  ASSERT_EQ(6, snapshots[0].nNetProps);
+  const std::vector<int> builtInSpeeds = {400000, 200, 300, 400, 500, 600};
+  const std::vector<int> pluginSpeeds = {100, 200, 300, 400, 500, 600};
+  for (int d = 0; d < 6; d++) {
+    EXPECT_EQ(builtInSpeeds[d], snapshots[0].netProps[d].speed) << d;
+    EXPECT_EQ(pluginSpeeds[d], snapshots[1].netProps[d].speed) << d;
+  }
+  rasDiagnosticsFreeCommSnapshots(snapshots, nSnapshots);
 }
 
 }  // namespace

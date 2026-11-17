@@ -1005,25 +1005,25 @@ ncclResult_t ncclCommMemResume(struct ncclComm* comm) {
     if (barrierRet != ncclSuccess) {
       if (ret == ncclSuccess) ret = barrierRet;
       // Cleanup
-      if (allCounts) free(allCounts);
-      if (localInfos) free(localInfos);
-      if (allInfos) free(allInfos);
+      free(allCounts);
+      free(localInfos);
+      free(allInfos);
       WARN("MemManager: Final barrier failed during resume");
       return ret;
     }
   }
 
   // Cleanup
-  if (allCounts) free(allCounts);
-  if (localInfos) free(localInfos);
-  if (allInfos) free(allInfos);
+  free(allCounts);
+  free(localInfos);
+  free(allInfos);
 
   return ret;
 
 fail:
-  if (allCounts) free(allCounts);
-  if (localInfos) free(localInfos);
-  if (allInfos) free(allInfos);
+  free(allCounts);
+  free(localInfos);
+  free(allInfos);
   return ret;
 }
 

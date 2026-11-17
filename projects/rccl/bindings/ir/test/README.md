@@ -35,11 +35,11 @@ LTO link) and the run are driven by the pytest harness in `test/ir-device/`.
 2. **RCCL CMake build** run at least once to populate the hipify-staged headers
    and generate `nccl.h` / `rccl.h`:
    ```bash
-   cmake -B build/release -DEMIT_LLVM_IR=ON -DBITCODE_LIB_ARCH=<arch> .
+   cmake -B build/release -DNCCL_EMIT_LLVM_IR=ON -DBITCODE_LIB_ARCH=<arch> .
    cmake --build build/release
    ```
 3. **`librccl_device.bc`** present at `build/release/lib/librccl_device.bc`
-   (built by the `llvm_ir` CMake target, enabled by `-DEMIT_LLVM_IR=ON`).
+   (built by the `llvm_ir` CMake target, enabled by `-DNCCL_EMIT_LLVM_IR=ON`).
 
 ## Running
 

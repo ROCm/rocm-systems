@@ -40,6 +40,8 @@
 // copied verbatim, so its hipified line numbers match src/ exactly.
 #include DEVCOMM_V22902_CC_PATH
 #include DEVCOMM_V22907_CC_PATH
+// v23204 (NCCL 2.32.6) has no file-static callbacks; it is compiled here so the compat table is the real one.
+#include DEVCOMM_V23204_CC_PATH
 
 namespace {
 
@@ -757,6 +759,18 @@ TEST_F(DevcommCopyOldToNewV22902Microtest, CompatTables_PinTheVersionRangesThatS
   // The gap is deliberate: 2.29.4 matches no table and falls through to ncclInvalidUsage. If a
   // 2.29.4 shim set is ever added, this assertion is the one that must be revisited.
   EXPECT_EQ(NCCL_VERSION(2, 29, 4), ncclDevCommCompat_v22902.maxVersion + 1);
+}
+
+// v23204: device code from 2.32.4 up to this library strides GIN barrier signals by the backend's barrier slots, so
+// the record covers exactly that window and wires only the signals-per-barrier callback.
+TEST_F(DevcommCopyOldToNewV22902Microtest, CompatTables_V23204CoversFrom2324ToThisLibraryWithOnlyGinSignalsCallback) {
+  EXPECT_EQ(NCCL_VERSION(2, 32, 4), ncclDevCommCompat_v23204.minVersion);
+  EXPECT_EQ(NCCL_VERSION_CODE, ncclDevCommCompat_v23204.maxVersion);
+  EXPECT_EQ(nullptr, ncclDevCommCompat_v23204.commPropertiesFilter);
+  EXPECT_EQ(nullptr, ncclDevCommCompat_v23204.devCommRequirementsFilter);
+  EXPECT_EQ(nullptr, ncclDevCommCompat_v23204.devCommCopyNewToOld);
+  EXPECT_EQ(nullptr, ncclDevCommCompat_v23204.devCommCopyOldToNew);
+  EXPECT_EQ(&ncclDevCommGinSignalsPerBarrier_v23204, ncclDevCommCompat_v23204.ginSignalsPerBarrier);
 }
 
 }  // namespace

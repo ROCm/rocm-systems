@@ -554,14 +554,14 @@ TEST(RcclCeReduceScatterEligibility, RcclUseCeReduceScatter_Isolated)
                 CeReduceScatterMockComm mock;
                 mock.comm.nRanks            = 8;
                 mock.comm.devrState.bigSize = 1;
-                mock.comm.devrState.lsaSize = 4; // team does not span the comm
-                mock.comm.devrState.lsaSelf = 0;
+                mock.comm.devrState.lsaTeamSize = 4; // team does not span the comm
+                mock.comm.devrState.lsaTeamSelf = 0;
                 EXPECT_FALSE(rcclUseCeReduceScatter(mock.get(), /*recvcount=*/1024, ncclFloat32, ncclSum));
 
                 // Spanning team is only positively selectable on a CE-capable driver.
                 if(isCeRuntimeDriverSupported())
                 {
-                    mock.comm.devrState.lsaSize = 8;
+                    mock.comm.devrState.lsaTeamSize = 8;
                     EXPECT_TRUE(rcclUseCeReduceScatter(mock.get(), /*recvcount=*/1024, ncclFloat32, ncclSum));
                 }
             })
@@ -584,8 +584,8 @@ TEST(RcclCeReduceScatterEligibility, RcclUseCeReduceScatter_Isolated)
                     mock.comm.config.CTAPolicy = tc.ctaPolicy;
                     // reset() sets a spanning LSA team for the default nRanks;
                     // keep it consistent when the case overrides nRanks.
-                    mock.comm.devrState.lsaSize = tc.nRanks;
-                    mock.comm.devrState.lsaSelf = mock.comm.rank;
+                    mock.comm.devrState.lsaTeamSize = tc.nRanks;
+                    mock.comm.devrState.lsaTeamSelf = mock.comm.rank;
 
                     // Eligible rows also need a CE-capable driver (the new
                     // ncclCeImplemented gate in rcclUseCeReduceScatter).
