@@ -1047,8 +1047,6 @@ TEST(FpModePolicyTest, F64HelpersRestoreAmbientHostEnvironment) {
   for (const uint64_t input : {kOne, kSubnormal, kInfinity, kQuietNan}) {
     (void)amdgpu::fp_mode::fma_f64(input, kOne, kOne, 1, 3);
     EXPECT_EQ(std::fegetround(), FE_DOWNWARD);
-    (void)amdgpu::fp_mode::binary_f64(input, kOne, amdgpu::fp_mode::BinaryF64Op::Add, 1, 3);
-    EXPECT_EQ(std::fegetround(), FE_DOWNWARD);
     (void)amdgpu::fp_mode::finish_f64(input, 1, 1, false, true);
     EXPECT_EQ(std::fegetround(), FE_DOWNWARD);
     const uint64_t result = amdgpu::fp_mode::finish_f64(input, 1, 0, false, true);
@@ -3397,7 +3395,15 @@ TEST(Gfx1251PackedF64ExecutionTest, FusedOperationExecutesCrossWindowVgprTuples)
   wf->set_exec(1u);
   wf->set_mode_raw(3u << 6);
 
+  auto plugin_group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto recorder = std::make_unique<VgprReadRecorder>();
+  auto *recorder_ptr = recorder.get();
+  ASSERT_TRUE(plugin_group->add(std::move(recorder)));
+  plugin_group->onInit();
+
   for (const auto &test_case : kCases) {
+    // Exercise observed publication at the destination boundary; source cases keep direct stores.
+    cu->set_plugin_group(test_case.name == "vdst" ? plugin_group : nullptr);
     SCOPED_TRACE(test_case.name);
     write_vgpr_packed_u64(*cu, *wf, 8, 0, kMultiplicand);
     write_vgpr_packed_u64(*cu, *wf, 12, 0, kMultiplier);
@@ -3409,6 +3415,9 @@ TEST(Gfx1251PackedF64ExecutionTest, FusedOperationExecutesCrossWindowVgprTuples)
     ASSERT_NE(decoded->execute, nullptr);
     EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).succeeded());
     EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, test_case.destination, 0), kExpected);
+    if (test_case.name == "vdst") {
+      EXPECT_GT(recorder_ptr->read_count, 0u);
+    }
   }
 }
 

@@ -1112,7 +1112,21 @@ def test_bit_pack_input_layouts_and_state_policy(arch):
         assert gen_bit_pack(context(arch, name, ['d'], [], is_vop3=True)) is None
 
 
-@pytest.mark.parametrize('arch', ['rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5'])
+@pytest.mark.parametrize(
+    'arch',
+    [
+        'rdna1',
+        'rdna2',
+        'rdna3',
+        'rdna3_5',
+        'rdna4',
+        'cdna1',
+        'cdna2',
+        'cdna3',
+        'cdna4',
+        'cdna5',
+    ],
+)
 def test_fma64_pair_layout_modifiers_and_policy(arch):
     from amdisa.codegen.execute.rj_arith_float import FLOAT_NAMES, gen_float_fma64
 
@@ -1121,7 +1135,7 @@ def test_fma64_pair_layout_modifiers_and_policy(arch):
     )
     arch_suffix = (
         ('_gfx1250' if arch == 'cdna5' else '_gfx942')
-        if arch.startswith('cdna')
+        if arch.startswith('cdna') or arch in ('rdna1', 'rdna3_5')
         else ('_gfx12' if arch == 'rdna4' else '')
     )
     api = 'rj_arith_v_fma_f64'
@@ -1136,12 +1150,6 @@ def test_fma64_pair_layout_modifiers_and_policy(arch):
     assert 'RJ_ARITH_ALU_CLAMP' in body
     assert 'arithmetic_flags()' in body
     assert 'V_FMA_F64' in FLOAT_NAMES
-    assert (
-        gen_float_fma64(
-            context('cdna2', 'V_FMA_F64', ['d'], ['a', 'b', 'c'], is_vop3=True)
-        )
-        is None
-    )
     assert (
         gen_float_fma64(context(arch, 'V_FMA_F64', ['d'], ['a', 'b'], is_vop3=True))
         is None
@@ -2873,3 +2881,132 @@ def test_cdna2_half_mad_has_no_retired_evaluator():
         assert 'execute_cdna2_mad_f16' not in text
         assert 'MadVop2::Accumulate, true' not in text
     assert 'cdna2_mad_f16' not in (generated / 'shared/simd_glue.h').read_text()
+
+
+@pytest.mark.parametrize(
+    'arch', ['cdna1', 'cdna2', 'cdna3', 'cdna4', 'cdna5', 'rdna1', 'rdna2', 'rdna3_5']
+)
+def test_remaining_integral_f64_keeps_legacy_nan_and_architecture_policy(arch):
+    from amdisa.codegen.execute.rj_arith_float import gen_float_unary64
+
+    for op in ('TRUNC', 'CEIL', 'RNDNE', 'FLOOR'):
+        for vop3 in (False, True):
+            body = gen_float_unary64(
+                context(arch, f'V_{op}_F64', ['dst'], ['src'], is_vop3=vop3)
+            )
+            suffix = 'gfx12' if arch == 'cdna5' else 'gfx908'
+            assert f'rj_arith_v_{op.lower()}_f64_w32_{suffix}' in body
+            assert ('inst_.omod' in body) == vop3
+            assert 'wf.cu().arithmetic_flags()' in body
+    # Reciprocal/root and mantissa policy migrations remain independent.
+    assert gen_float_unary64(context(arch, 'V_SQRT_F64', ['dst'], ['src'])) is None
+
+
+@pytest.mark.parametrize('arch', ['cdna1', 'cdna2'])
+def test_gfx9_native_fp64_routes_each_encoding_without_enabling_fp32(arch):
+    from amdisa.codegen.execute.rj_arith_float import (
+        gen_float_binary64,
+        gen_float64_word,
+    )
+
+    root = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+        / arch
+    )
+    expected = {'VAddF64', 'VMulF64', 'VFmaF64', 'VLdexpF64'}
+    if arch == 'cdna2':
+        expected.add('VFmacF64')
+    found = set()
+    for source in root.glob('vop*_exec.cpp'):
+        text = source.read_text()
+        for match in re.finditer(
+            r'void (\w+)::execute(?:_modifier)?_impl\([^)]*\)\s*\{', text
+        ):
+            operation = re.sub(r'Vop[23]$', '', match[1])
+            if operation not in expected:
+                continue
+            end, depth = match.end(), 1
+            while depth:
+                depth += (text[end] == '{') - (text[end] == '}')
+                end += 1
+            body = text[match.end() : end - 1]
+            found.add(operation)
+            assert 'amdgpu::execute_v_' not in body, match[1]
+            if operation == 'VFmacF64':
+                assert 'execute_fmac64<true>' in body
+                assert 'vdst, src0,' in body
+                assert 'RJ_ARITH_ALU_NEG_C' not in body
+            else:
+                for wave in (32, 64):
+                    api = (
+                        'rj_arith_v_'
+                        + operation[1:-3].lower()
+                        + f'_f64_w{wave}_gfx942,'
+                    )
+                    assert api in body, (match[1], api)
+    assert found == expected
+    for name in ('V_ADD_F32', 'V_MUL_F32'):
+        assert (
+            gen_float_binary32(context(arch, name, ['d'], ['a', 'b'], is_vop3=True))
+            is None
+        )
+    for name in ('V_ADD_F64', 'V_MUL_F64'):
+        assert gen_float_binary64(context(arch, name, ['d'], ['a', 'b'], is_vop3=True))
+    body = gen_float64_word(
+        context(arch, 'V_LDEXP_F64', ['d'], ['a', 'exponent'], is_vop3=True)
+    )
+    assert 'RJ_ARITH_ALU_ABS_B' not in body
+    assert 'RJ_ARITH_ALU_NEG_B' not in body
+    assert '/*ldexp=*/true' in body
+
+
+@pytest.mark.parametrize('arch', ['rdna1', 'rdna2', 'rdna3_5'])
+def test_older_radeon_fp64_routes_and_policy(arch):
+    from amdisa.codegen.execute.rj_arith_float import gen_float64_word
+
+    root = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+        / arch
+    )
+    source = (root / 'vop3_exec.cpp').read_text()
+    expected = {
+        'VAddF64': 'add',
+        'VMulF64': 'mul',
+        'VFmaF64': 'fma',
+        'VLdexpF64': 'ldexp',
+    }
+    found = set()
+    for match in re.finditer(
+        r'void (\w+)Vop3::execute(?:_modifier)?_impl\([^)]*\)\s*\{', source
+    ):
+        if match[1] not in expected:
+            continue
+        found.add(match[1])
+        end, depth = match.end(), 1
+        while depth:
+            depth += (source[end] == '{') - (source[end] == '}')
+            end += 1
+        body = source[match.end() : end - 1]
+        suffix = '' if arch == 'rdna2' and match[1] == 'VFmaF64' else '_gfx942'
+        for wave in (32, 64):
+            assert f'rj_arith_v_{expected[match[1]]}_f64_w{wave}{suffix},' in body
+        assert 'arithmetic_flags()' in body
+        assert 'amdgpu::execute_v_' not in body
+    assert found == expected.keys()
+    for name in ('V_ADD_F32', 'V_MUL_F32'):
+        assert (
+            gen_float_binary32(context(arch, name, ['d'], ['a', 'b'], is_vop3=True))
+            is None
+        )
+    for name in ('V_LDEXP_F64', 'V_TRIG_PREOP_F64'):
+        body = gen_float64_word(
+            context(arch, name, ['d'], ['a', 'exponent'], is_vop3=True)
+        )
+        if name == 'V_TRIG_PREOP_F64':
+            assert body is None
+        else:
+            assert 'RJ_ARITH_ALU_ABS_B' not in body
+            assert 'RJ_ARITH_ALU_NEG_B' not in body
+            assert '/*ldexp=*/true' in body

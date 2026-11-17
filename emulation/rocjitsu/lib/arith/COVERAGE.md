@@ -152,3 +152,23 @@ Loose uses FP32-intermediate MAD. Guest rounding, forced intermediate flushing,
 IEEE NaN quieting, FP16_OVFL and final output modifiers are retained. This is
 software-model reuse, not new empirical qualification; strict modes reject and
 FP status is unchanged. The native half FMA migration is independent.
+
+## Older Radeon FP64 arithmetic
+
+Rocjitsu uses rj-arith for ADD, MUL, FMA and LDEXP on gfx1010, gfx1030 and
+gfx1150, for both wave widths. These bindings retain the inherited guest
+rounding, denormal, NaN and output-modifier policies. gfx1030 FMA keeps its
+existing Radeon model; the other bindings reuse the CDNA-named entry points
+because their preexisting numerical models agree. This reuse does not establish
+new hardware bit-exact qualification. Compatibility and Loose support these
+bindings, with scalar, AVX2 and AVX-512-v4 paths.
+
+## gfx1251 packed FP64
+
+ADD/MUL/FMA and MIN_NUM/MAX_NUM use the inherited MODE-aware model in
+Compatibility, Loose and allowed-fallback semantics. Their arithmetic reuses
+existing scalar/AVX2/v4 FP64 paths; packed selection fixups and masked stores
+are also SIMD. Directed AVX2 arithmetic uses its inherited integer fallback.
+Strict numeric and required FP-status semantics remain unsupported. All float
+values, per-element signs, CLAMP, scalar carriers, EXEC and overlap are supported.
+This is inherited behavior, not new empirical hardware qualification.

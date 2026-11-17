@@ -10,7 +10,7 @@ FMA64_VARIANTS = {'V_FMAC_F64', 'V_FMAMK_F64', 'V_FMAAK_F64'}
 
 def gen_fma64_variants(ctx: ExecuteContext) -> str | None:
     if (
-        ctx.arch_name not in ('cdna3', 'cdna4', 'cdna5')
+        ctx.arch_name not in ('cdna2', 'cdna3', 'cdna4', 'cdna5')
         or ctx.inst.name not in FMA64_VARIANTS
     ):
         return None
