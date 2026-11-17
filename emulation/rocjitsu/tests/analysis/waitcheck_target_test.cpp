@@ -38,6 +38,29 @@ std::unique_ptr<Instruction> decode(std::span<const uint32_t> words, rj_code_arc
   return std::move(result).value();
 }
 
+TEST(WaitcheckTarget, ExpertWideComparisonsUseTheDoublePrecisionPipe) {
+  // LLVM VOPC_F64/I64 and VOPCX_F64/I64 have IsDPMACCInstruction; the
+  // CLASS_F64 forms currently do not. Words are LLVM MC gfx1250 encodings.
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5})
+    for (const auto [word, expected] : {
+             std::pair{0x7c420500u, WaitEventKind::ValuDp},   // v_cmp_lt_f64
+             std::pair{0x7ca20500u, WaitEventKind::ValuDp},   // v_cmp_lt_i64
+             std::pair{0x7cb20500u, WaitEventKind::ValuDp},   // v_cmp_lt_u64
+             std::pair{0x7d420500u, WaitEventKind::ValuDp},   // v_cmpx_lt_f64
+             std::pair{0x7da20500u, WaitEventKind::ValuDp},   // v_cmpx_lt_i64
+             std::pair{0x7db20500u, WaitEventKind::ValuDp},   // v_cmpx_lt_u64
+             std::pair{0x7cfe0500u, WaitEventKind::ValuCore}, // v_cmp_class_f64
+             std::pair{0x7dfe0500u, WaitEventKind::ValuCore}, // v_cmpx_class_f64
+             std::pair{0x7c220300u, WaitEventKind::ValuCore}, // v_cmp_lt_f32
+         }) {
+      SCOPED_TRACE(testing::Message() << arch << '/' << std::hex << word);
+      const std::array words{word};
+      auto inst = decode(words, arch);
+      ASSERT_NE(inst, nullptr);
+      EXPECT_EQ(Target::expert_valu_kind(*inst, arch), expected);
+    }
+}
+
 TEST(WaitcheckTarget, Rdna1VmemReadsAreProtectedFromScalarWritesInOrdinaryMode) {
   const std::array<uint32_t, 2> load{0xdc308000, 0x02180000}; // global_load_dword v2, v0, s[24:25]
   for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {

@@ -390,7 +390,13 @@ std::optional<WaitEventKind> WaitcheckTarget::expert_valu_kind(const Instruction
       "v_min_num_f64",       "v_mul_f64",        "v_rcp_f64",        "v_rndne_f64",
       "v_rsq_f64",           "v_sqrt_f64",       "v_trig_preop_f64", "v_trunc_f64"};
   const auto stem = op.substr(0, std::min({op.find("_e32"), op.find("_e64"), op.find("_dpp")}));
-  if (std::ranges::find(dp, stem) != std::end(dp))
+  // LLVM tags the 64-bit VOPC/VOPCX comparisons as double-precision pipe
+  // operations. Its CLASS_F64 forms do not carry that tag.
+  const bool dp_compare =
+      (stem.starts_with("v_cmp_") || stem.starts_with("v_cmpx_")) &&
+      stem != "v_cmp_class_f64" && stem != "v_cmpx_class_f64" &&
+      (stem.ends_with("_f64") || stem.ends_with("_i64") || stem.ends_with("_u64"));
+  if (dp_compare || std::ranges::find(dp, stem) != std::end(dp))
     return WaitEventKind::ValuDp;
   return WaitEventKind::ValuCore;
 }
