@@ -7903,6 +7903,66 @@ TEST(WaitcheckTest, TargetlessCdna5ModeBankWriteIsIncomplete) {
   EXPECT_EQ(gfx1251.diagnostics.front().counter, WaitCounterKind::X);
 }
 
+TEST(WaitcheckTest, Cdna5ConcreteTargetControlsIndirectPcStashAndBundlePolicy) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_CDNA5;
+  constexpr uint16_t mode_bit_25_hwreg = 1u | (25u << 6);
+  constexpr auto set_mode_bit_25 =
+      cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = mode_bit_25_hwreg});
+  for (const bool stash_in_bank_one : {true, false}) {
+    SCOPED_TRACE(stash_in_bank_one);
+    const auto set_lane_banks = cdna5::build_sopp(
+        cdna5::kSSetVgprMsbSopp, {.simm16 = static_cast<uint16_t>(stash_in_bank_one ? 0x41 : 0)});
+    const auto set_mode = stash_in_bank_one
+                              ? set_mode_bit_25
+                              : cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk,
+                                                  {.simm16 = 1u | (12u << 6) | (7u << 11)});
+    const std::vector<uint32_t> words{
+        0xbe804700u, // getpc s[0:1]
+        0xa980fe00u,
+        64u,
+        0u, // target .text+0x44
+        set_lane_banks[0],
+        0xd761002cu,
+        0x02010000u, // stash low PC in v44 or v300 lane 0
+        0xd761002cu,
+        0x02010201u, // stash high PC in lane 1
+        set_mode[0],
+        stash_in_bank_one ? 1u : 4u,
+        0xd7600000u,
+        0x0201012cu, // recover low PC
+        0xd7600001u,
+        0x0201032cu, // recover high PC
+        0xbe9e4900u, // swap_pc to recovered target
+        0xbfb00000u, // continuation
+        0xbe80481eu, // callee return
+    };
+    const auto untagged = waitcheck_test::make_gfx_code_object(words, 0, true);
+    const auto tagged =
+        waitcheck_test::make_gfx_code_object(words, EF_AMDGPU_MACH_AMDGCN_GFX1251, true);
+    const AmdGpuCodeObject explicit_object(untagged.data(), untagged.size());
+    const AmdGpuCodeObject tagged_object(tagged.data(), tagged.size());
+    const AmdGpuCodeObject bundle_object(untagged.data(), untagged.size(), "hipv4", "gfx1251");
+    ASSERT_EQ(bundle_object.target_id(), ROCJITSU_CODE_TARGET_GFX1251);
+    WaitcheckOptions explicit_target;
+    explicit_target.concrete_gpu_target = ROCJITSU_CODE_TARGET_GFX1251;
+    const auto explicit_report = analyze_waitcnts(explicit_object, arch, explicit_target);
+    const auto tagged_report = analyze_waitcnts(tagged_object, arch);
+    const auto bundle_report = analyze_waitcnts(bundle_object, arch);
+    for (const auto *report : {&explicit_report, &tagged_report, &bundle_report}) {
+      ASSERT_TRUE(report->supported) << report->analysis_error;
+      EXPECT_EQ(report->complete, stash_in_bank_one) << report->analysis_error;
+      EXPECT_EQ(report->passed(), stash_in_bank_one) << report->analysis_error;
+    }
+    EXPECT_EQ(explicit_report.instructions_analyzed, tagged_report.instructions_analyzed);
+    EXPECT_EQ(bundle_report.instructions_analyzed, tagged_report.instructions_analyzed);
+
+    explicit_target.concrete_gpu_target = ROCJITSU_CODE_TARGET_GFX1250;
+    const auto conflict = analyze_waitcnts(bundle_object, arch, explicit_target);
+    EXPECT_FALSE(conflict.supported);
+    EXPECT_NE(conflict.analysis_error.find("conflicts with code object target"), std::string::npos);
+  }
+}
+
 TEST(WaitcheckTest, Gfx1250NopMakesSetVgprMsbAfterModeSetregEffective) {
   constexpr uint32_t kHwRegMode = 1;
   constexpr uint32_t kModeSrc0V256 = 0x04u << 12u;

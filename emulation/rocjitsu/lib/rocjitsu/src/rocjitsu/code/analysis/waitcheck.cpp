@@ -268,7 +268,8 @@ bool has_closed_device_transfers(const BasicBlock &block) {
 }
 
 void retry_gfx1250_indirect_calls(const CodeObject &code_object, Decoder &decoder,
-                                  std::span<const uint64_t> entry, uint32_t wavefront_size,
+                                  rj_code_target_id_t target, std::span<const uint64_t> entry,
+                                  uint32_t wavefront_size,
                                   std::vector<std::unique_ptr<BasicBlock>> &blocks) {
   if (std::ranges::none_of(blocks,
                            [](const auto &block) { return needs_indirect_call_target(*block); }) ||
@@ -299,7 +300,8 @@ void retry_gfx1250_indirect_calls(const CodeObject &code_object, Decoder &decode
   }
   const std::vector<uint64_t> seeds(candidates.begin(), candidates.end());
   auto candidate = BasicBlock::build_cfg(code_object, decoder, ROCJITSU_CODE_ARCH_CDNA5,
-                                         {.entries = entry,
+                                         {.target = target,
+                                          .entries = entry,
                                           .decode_seeds = seeds,
                                           .wave_size = static_cast<uint8_t>(wavefront_size),
                                           .verify_closed_zero_bank_calls = true,
@@ -484,6 +486,7 @@ struct Analyzer : private WaitcheckStateOps {
   }
 
   Decoder &decoder() const { return *decoder_; }
+  rj_code_target_id_t target() const { return target_; }
 
   void analyze_stream(std::span<const uint32_t> words, rj_code_arch_t arch,
                       std::string section_name, uint64_t file_offset_base) {
@@ -11067,7 +11070,6 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
     report.analysis_error = "fallback waitcheck wavefront size must be 32 or 64";
     return report;
   }
-
   uint32_t elf_flags = 0;
   uint8_t hsa_abi = 0;
   bool amd_gpu_elf = false;
@@ -11088,6 +11090,17 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
       }
     }
   }
+  if (const auto *amdgpu = dynamic_cast<const AmdGpuCodeObject *>(&code_object);
+      amdgpu && amdgpu->target_id() != ROCJITSU_CODE_TARGET_INVALID) {
+    if (options.concrete_gpu_target && *options.concrete_gpu_target != amdgpu->target_id()) {
+      report.supported = false;
+      report.analysis_error = (elf_flags & EF_AMDGPU_MACH) != 0
+                                  ? "concrete GPU target conflicts with ELF machine"
+                                  : "concrete GPU target conflicts with code object target";
+      return report;
+    }
+    options.concrete_gpu_target = amdgpu->target_id();
+  }
 
   if (!selected_kernel_entry) {
     for (const auto &owned_section : code_object.all_sections()) {
@@ -11100,8 +11113,8 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
       // CFG construction only covers text sections. A linear pass through
       // another executable section could miss a branch that skips a wait.
       report.complete = false;
-      report.analysis_error = "executable section outside waitcheck CFG coverage: " +
-                              std::string(section->name());
+      report.analysis_error =
+          "executable section outside waitcheck CFG coverage: " + std::string(section->name());
       return report;
     }
   }
@@ -11158,18 +11171,19 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
       return report;
     }
     if (kernels.empty() && function_entries.empty()) {
-      auto blocks = BasicBlock::build_cfg(
-          code_object, analyzer.decoder(), arch,
-          {.decode_policy = BasicBlock::DecodePolicy::FullSection,
-           .entry_policy = ExternalEntryPolicy::InferPredecessorless,
-           .wave_size = static_cast<uint8_t>(fallback_wavefront_size),
-           .trap_two_may_resume = true},
-          DecodeErrorEmitter(cfg_error));
+      auto blocks =
+          BasicBlock::build_cfg(code_object, analyzer.decoder(), arch,
+                                {.decode_policy = BasicBlock::DecodePolicy::FullSection,
+                                 .target = analyzer.target(),
+                                 .entry_policy = ExternalEntryPolicy::InferPredecessorless,
+                                 .wave_size = static_cast<uint8_t>(fallback_wavefront_size),
+                                 .trap_two_may_resume = true},
+                                DecodeErrorEmitter(cfg_error));
       if (blocks.failed())
         return report;
       analyzer.set_kernel_context(nullptr);
-      analyzer.analyze_cfg(blocks.value(), ".text", text_file_offset, arch,
-                           fallback_wavefront_size, text_size);
+      analyzer.analyze_cfg(blocks.value(), ".text", text_file_offset, arch, fallback_wavefront_size,
+                           text_size);
     } else {
       // Analyze each kernel independently. Building one combined CFG for a
       // multi-kernel library keeps two large wait states per basic block alive
@@ -11178,16 +11192,17 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
                                      uint32_t wavefront_size) {
         const std::array<uint64_t, 1> entry{entry_offset};
         const auto start = std::chrono::steady_clock::now();
-        auto blocks = BasicBlock::build_cfg(
-            code_object, analyzer.decoder(), arch,
-            {.entries = entry, .wave_size = static_cast<uint8_t>(wavefront_size),
-             .trap_two_may_resume = true},
-            DecodeErrorEmitter(cfg_error));
+        auto blocks = BasicBlock::build_cfg(code_object, analyzer.decoder(), arch,
+                                            {.target = analyzer.target(),
+                                             .entries = entry,
+                                             .wave_size = static_cast<uint8_t>(wavefront_size),
+                                             .trap_two_may_resume = true},
+                                            DecodeErrorEmitter(cfg_error));
         if (blocks.failed())
           return;
         if (arch == ROCJITSU_CODE_ARCH_CDNA5)
-          retry_gfx1250_indirect_calls(code_object, analyzer.decoder(), entry, wavefront_size,
-                                       blocks.value());
+          retry_gfx1250_indirect_calls(code_object, analyzer.decoder(), analyzer.target(), entry,
+                                       wavefront_size, blocks.value());
         analyzer.set_kernel_context(kernel);
         const bool preceding_entries_complete = report.complete;
         report.complete = true;
