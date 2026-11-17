@@ -14,7 +14,8 @@
 namespace rocjitsu::fault_mutation_detail {
 
 inline bool legacy_atomic_target(rj_code_target_id_t target) {
-  return target == ROCJITSU_CODE_TARGET_GFX950 || target == ROCJITSU_CODE_TARGET_GFX942;
+  return target == ROCJITSU_CODE_TARGET_GFX950 || target == ROCJITSU_CODE_TARGET_GFX942 ||
+         target == ROCJITSU_CODE_TARGET_GFX1100;
 }
 
 // The caller supplies the mnemonic decoded from these complete source words.
@@ -29,7 +30,8 @@ inline std::optional<int32_t> read_legacy_atomic_byte_offset(rj_code_target_id_t
     if (!mnemonic.starts_with("buffer_atomic"))
       return std::nullopt;
   } else if (prefix == 0xdc000000u) {
-    const uint32_t segment = (source[0] >> 14) & 3u;
+    const uint32_t shift = target == ROCJITSU_CODE_TARGET_GFX1100 ? 16u : 14u;
+    const uint32_t segment = (source[0] >> shift) & 3u;
     if (!((segment == 0 && mnemonic.starts_with("flat_atomic")) ||
           (segment == 2 && mnemonic.starts_with("global_atomic"))))
       return std::nullopt;
