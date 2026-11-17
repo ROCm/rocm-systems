@@ -771,9 +771,10 @@ def test_generated_execution_helper_includes_are_scoped(
         source = path.read_text()
         assert fp_include not in source, path
 
-    # CDNA FP32 VOP2 now uses rj-arith; VOP1 still has legacy FP-mode handlers.
+    # Unary, binary and dual CDNA math now use rj-arith.
     assert fp_include not in (gfx1250_generated_root / 'vop2_exec.cpp').read_text()
-    assert fp_include in (gfx1250_generated_root / 'vop1_exec.cpp').read_text()
+    assert fp_include not in (gfx1250_generated_root / 'vop1_exec.cpp').read_text()
+    assert fp_include not in (gfx1250_generated_root / 'vopd_exec.cpp').read_text()
 
     shared = execute_shared_path.read_text()
     assert fp_include in shared

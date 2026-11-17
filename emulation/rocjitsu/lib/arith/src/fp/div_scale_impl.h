@@ -29,7 +29,8 @@ template <int Width> struct DivisionScaleResult {
 template <int Width>
 inline DivisionScaleResult<Width>
 division_scale(typename IeeeFormat<Width>::Bits a, typename IeeeFormat<Width>::Bits b,
-               typename IeeeFormat<Width>::Bits c, uint32_t mode, bool quiet_nan, uint64_t flags) {
+               typename IeeeFormat<Width>::Bits c, uint32_t mode, bool quiet_nan, uint64_t flags,
+               bool rdna_scale_down = true) {
   using F = IeeeFormat<Width>;
   using T = typename F::Bits;
   constexpr int threshold = Width == 32 ? 96 : 768, scale = Width == 32 ? 64 : 128;
@@ -85,7 +86,7 @@ division_scale(typename IeeeFormat<Width>::Bits a, typename IeeeFormat<Width>::B
     // the overflow value. Inside it, flushed outputs are signed zero even if rounding
     // reaches the smallest normal; FP32 truncates in every rounding mode.
     const T magnitude = a & (F::sign - 1);
-    if (adjustment < 0 && magnitude && magnitude < F::infinity) {
+    if (rdna_scale_down && adjustment < 0 && magnitude && magnitude < F::infinity) {
       int exponent = int(magnitude >> F::fraction);
       if (!exponent) {
         exponent = 1 - (F::fraction + 1 - rocjitsu::arith::bit_width(magnitude));
