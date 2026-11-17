@@ -5,6 +5,7 @@
 #include "barrier_oracle.h"
 #include "cdna_lds_fixture.h"
 #include "lds_fixture.h"
+#include "lds_owner_fixture.h"
 #include "remaining_subword_fixture.h"
 #include "rocjitsu/code/file_io.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
@@ -323,7 +324,8 @@ TEST_F(FaultMutationCli, LdsMutationSummaryMatchesSelectedLibraryResultAndEmitte
                          std::to_string(selection.value().site().offset) +
                          " address_vgpr=7 logical_mutations=" +
                          std::to_string(result.value().logical_mutation_count) +
-                         " output_bytes=" + std::to_string(emitted.size()) + "\n");
+                         " output_bytes=" + std::to_string(emitted.size()) +
+                         " affected_owners=1 owner=test_kernel:0:276\n");
   EXPECT_TRUE(stderr_.empty());
 }
 
@@ -353,6 +355,8 @@ TEST_F(FaultMutationCli, HelpCapabilitiesAndArguments) {
   EXPECT_NE(stdout_.find("LdsWrongAddress admits gfx1200/gfx1201 wave32/wave64 scalar"),
             std::string::npos);
   EXPECT_NE(stdout_.find("allocated --address-vgpr"), std::string::npos);
+  EXPECT_NE(stdout_.find("LDS output lists every affected owner when a helper is shared."),
+            std::string::npos);
   EXPECT_NE(stdout_.find("Selected subword and transpose forms are also supported."),
             std::string::npos);
   EXPECT_NE(stdout_.find("the first member of a barrier, or the LDS instruction"),
@@ -361,33 +365,33 @@ TEST_F(FaultMutationCli, HelpCapabilitiesAndArguments) {
   const std::string capabilities = stdout_;
   EXPECT_EQ(std::count(capabilities.begin(), capabilities.end(), '\n'), 215);
   EXPECT_NE(capabilities.find("kind=LdsWrongAddress target=gfx1250 wave=32 "
-                              "form=ds_store_b32 admission=direct-single-owner\n"),
+                              "form=ds_store_b32 admission=proven-all-owners\n"),
             std::string::npos);
   EXPECT_NE(capabilities.find("kind=LdsWrongAddress target=gfx1250 wave=32 "
-                              "form=ds_load_b32 admission=direct-single-owner\n"),
+                              "form=ds_load_b32 admission=proven-all-owners\n"),
             std::string::npos);
   constexpr std::string_view lds1200 = "kind=LdsWrongAddress target=gfx1200 wave=64 "
-                                       "form=ds_store_b32 admission=direct-single-owner\n";
+                                       "form=ds_store_b32 admission=proven-all-owners\n";
   constexpr std::string_view lds1201 = "kind=LdsWrongAddress target=gfx1201 wave=64 "
-                                       "form=ds_store_b32 admission=direct-single-owner\n";
+                                       "form=ds_store_b32 admission=proven-all-owners\n";
   ASSERT_NE(capabilities.find(lds1200), std::string::npos);
   ASSERT_NE(capabilities.find(lds1201), std::string::npos);
   for (const std::string target : {"gfx1200", "gfx1201"}) {
     EXPECT_NE(capabilities.find("kind=LdsWrongAddress target=" + target +
-                                " wave=64 form=ds_load_b32 admission=direct-single-owner\n"),
+                                " wave=64 form=ds_load_b32 admission=proven-all-owners\n"),
               std::string::npos);
   }
   for (const std::string target : {"gfx1200", "gfx1201"}) {
     for (const std::string form : {"ds_store_b32", "ds_load_b32"}) {
       EXPECT_NE(capabilities.find("kind=LdsWrongAddress target=" + target +
-                                  " wave=32 form=" + form + " admission=direct-single-owner\n"),
+                                  " wave=32 form=" + form + " admission=proven-all-owners\n"),
                 std::string::npos);
     }
   }
   for (const std::string target : {"gfx942", "gfx950"}) {
     for (const std::string form : {"ds_write_b32", "ds_write_b128"}) {
       EXPECT_NE(capabilities.find("kind=LdsWrongAddress target=" + target +
-                                  " wave=64 form=" + form + " admission=direct-single-owner\n"),
+                                  " wave=64 form=" + form + " admission=proven-all-owners\n"),
                 std::string::npos);
     }
   }
@@ -399,7 +403,7 @@ TEST_F(FaultMutationCli, HelpCapabilitiesAndArguments) {
     const std::string line = "kind=LdsWrongAddress target=" + std::string(target->id) +
                              " wave=" + std::to_string(capability.wave_size) +
                              " form=" + std::string(capability.form) +
-                             " admission=direct-single-owner\n";
+                             " admission=proven-all-owners\n";
     const size_t position = capabilities.find(line);
     ASSERT_NE(position, std::string::npos) << line;
     EXPECT_EQ(capabilities.find(line, position + line.size()), std::string::npos) << line;
@@ -988,12 +992,101 @@ TEST_F(FaultMutationCli, Rdna4Wave32ListsSourceSites) {
                       "LdsWrongAddress", "--list"}),
               0)
         << stderr_;
-    EXPECT_NE(stdout_.find("ordinal=0 exact=0 address_vgpr=2 address_bank=0 target=" +
-                           std::string(target) + " form=ds_load_b32\n"),
+    EXPECT_NE(stdout_.find(
+                  "ordinal=0 exact=0 address_vgpr=2 address_bank=0 target=" + std::string(target) +
+                  " form=ds_load_b32 affected_owners=1 owner=test_kernel:0:276\n"),
               std::string::npos);
-    EXPECT_NE(stdout_.find("ordinal=1 exact=8 address_vgpr=1 address_bank=0 target=" +
-                           std::string(target) + " form=ds_store_b32\n"),
+    EXPECT_NE(stdout_.find(
+                  "ordinal=1 exact=8 address_vgpr=1 address_bank=0 target=" + std::string(target) +
+                  " form=ds_store_b32 affected_owners=1 owner=test_kernel:0:276\n"),
               std::string::npos);
+  }
+}
+
+TEST_F(FaultMutationCli, SharedLdsDisclosesBothOwnersAndMatchesLibrary) {
+  std::vector<uint8_t> image = test::make_shared_lds_elf(false);
+  constexpr size_t offset = 0x100 + 131 * sizeof(uint32_t) + sizeof(amdhsa::kernel_descriptor_t);
+  amdhsa::kernel_descriptor_t sibling = {};
+  std::memcpy(&sibling, image.data() + offset, sizeof(sibling));
+  RJ_AMDHSA_BITS_SET(sibling.kernel_code_properties,
+                     amdhsa::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, 1);
+  std::memcpy(image.data() + offset, &sibling, sizeof(sibling));
+  write(input_, image);
+  const FaultMutationContext source(image);
+  for (std::string_view entry : {"test_kernel0", "test_kernel1"}) {
+    SCOPED_TRACE(entry);
+    const std::vector<std::string> common = {
+        "--input", input_.string(), "--kernel", std::string(entry), "--kind", "LdsWrongAddress"};
+    std::vector<std::string> list = common;
+    list.push_back("--list");
+    ASSERT_EQ(invoke(list), 0) << stderr_;
+    EXPECT_NE(stdout_.find("affected_owners=2"), std::string::npos);
+    EXPECT_NE(stdout_.find("owner=test_kernel0:"), std::string::npos);
+    EXPECT_NE(stdout_.find("owner=test_kernel1:"), std::string::npos);
+    FaultMutationError error;
+    const FailureOr<LdsInventory> inventory = discover_lds_wrong_address(source, entry, error);
+    ASSERT_TRUE(inventory.succeeded()) << error.message;
+    const FailureOr<LdsSelection> selection =
+        select_lds_wrong_address(inventory.value(), {}, error);
+    ASSERT_TRUE(selection.succeeded());
+    const FailureOr<LdsResult> expected =
+        apply_lds_wrong_address(source, selection.value(), 1, error);
+    ASSERT_TRUE(expected.succeeded()) << error.message;
+    for (const std::vector<std::string> &selector :
+         {std::vector<std::string>{"--ordinal", "0"},
+          std::vector<std::string>{"--exact", "512", "--ordinal", "999"}}) {
+      std::vector<std::string> command = common;
+      command.insert(command.end(), {"--output", output_.string(), "--address-vgpr", "1"});
+      command.insert(command.end(), selector.begin(), selector.end());
+      ASSERT_EQ(invoke(command), 0) << stderr_;
+      EXPECT_NE(stdout_.find("affected_owners=2"), std::string::npos);
+      EXPECT_NE(stdout_.find("owner=test_kernel0:"), std::string::npos);
+      EXPECT_NE(stdout_.find("owner=test_kernel1:"), std::string::npos);
+      EXPECT_EQ(stdout_, "kind=LdsWrongAddress target=gfx1201 exact=512 address_vgpr=1 "
+                         "logical_mutations=1 output_bytes=" +
+                             std::to_string(expected.value().image.size()) +
+                             " affected_owners=2 owner=test_kernel0:0:780 "
+                             "owner=test_kernel1:256:844\n");
+      EXPECT_EQ(read(output_), expected.value().image);
+      EXPECT_TRUE(test::lds_owner_output_matches(source, 512, 1, read(output_)));
+      ASSERT_TRUE(std::filesystem::remove(output_));
+    }
+  }
+  EXPECT_NE(invoke({"--input", input_.string(), "--kernel", "unrelated", "--kind",
+                    "LdsWrongAddress", "--list"}),
+            0);
+  EXPECT_FALSE(std::filesystem::exists(output_));
+}
+
+TEST_F(FaultMutationCli, RecoveredSharedLdsListsOwnersAndRejectsGrowth) {
+  const std::vector<uint8_t> image = test::make_shared_lds_elf(true);
+  write(input_, image);
+  const FaultMutationContext source(image);
+  for (std::string_view entry : {"test_kernel0", "test_kernel1"}) {
+    SCOPED_TRACE(entry);
+    ASSERT_EQ(invoke({"--input", input_.string(), "--kernel", std::string(entry), "--kind",
+                      "LdsWrongAddress", "--list"}),
+              0)
+        << stderr_;
+    EXPECT_NE(stdout_.find("affected_owners=2"), std::string::npos);
+    EXPECT_NE(stdout_.find("owner=test_kernel0:"), std::string::npos);
+    EXPECT_NE(stdout_.find("owner=test_kernel1:"), std::string::npos);
+    FaultMutationError error;
+    const FailureOr<LdsInventory> inventory = discover_lds_wrong_address(source, entry, error);
+    ASSERT_TRUE(inventory.succeeded()) << error.message;
+    const FailureOr<LdsSelection> selection =
+        select_lds_wrong_address(inventory.value(), {}, error);
+    ASSERT_TRUE(selection.succeeded());
+    EXPECT_TRUE(apply_lds_wrong_address(source, selection.value(), 1, error).failed());
+    const std::string expected_error = error.message;
+    EXPECT_NE(invoke({"--input", input_.string(), "--kernel", std::string(entry), "--kind",
+                      "LdsWrongAddress", "--output", output_.string(), "--address-vgpr", "1",
+                      "--exact", "512", "--ordinal", "999"}),
+              0);
+    EXPECT_NE(stderr_.find(expected_error), std::string::npos);
+    EXPECT_TRUE(stdout_.empty());
+    EXPECT_FALSE(std::filesystem::exists(output_));
+    EXPECT_EQ(read(input_), image);
   }
 }
 

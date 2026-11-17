@@ -45,10 +45,12 @@ unreachable code still matter to byte editing. Each apply forks a fresh request
 batch that shares those immutable facts and repeats request-specific validation.
 The batches have independent queues and patch attempts; they do not inherit
 previous mutations. Facts are reusable for the same immutable source and analysis
-profile, not arbitrary new roots or broader helper ownership.
+profile. LDS discovery can additionally borrow complete hardware-root and execution-owner
+facts from `KernelOwnership`; Drop retains its exclusive direct-CFG qualification.
 Selections expire with their source context and cannot be replayed in another
 context, even if its input bytes are identical. Drop selections expose kind,
-owner, and barrier snapshots; LDS selections expose kind and site snapshots.
+owner, and barrier snapshots; LDS selections expose kind, selected owner, and site
+snapshots, including every affected execution owner.
 Those snapshots remain readable after expiry but cannot authorize a mutation.
 The in-process API does not require callers to supply a target or content digest.
 
@@ -259,7 +261,19 @@ The LDS inventory contains complete, reachable instructions of the admitted form
 the kernel; clause members are not advertised. It does not require a
 barrier or successful Drop qualification. The replacement register must be
 explicit, representable in the eight-bit encoded address field, different from
-the original, and inside the entry descriptor's allocated ordinary VGPR window.
+the original, and inside every affected descriptor's allocated ordinary VGPR window.
+A shared instruction is one physical site even when selected through either owner.
+Discovery retains all owners before applying the exact kernel filter, and requires
+all gfx1250 owners to prove the same address bank at that instruction. Preload
+roots use the shared hardware-entry policy. A shared exact handle may be rebound
+through another affected owner of the same immutable source; unrelated owners and
+foreign or expired contexts cannot authorize it.
+
+These owner facts do not change emission: LDS uses the existing `ReplaceWithInst`
+trampoline pipeline. Recovered-call inventory can succeed while apply rejects
+retained PC-relative references when growth moves storage. Out-of-range
+trampolines also remain unsupported; neither failure publishes a mutant. No
+stationary replacement option or PC-builder relocation is introduced.
 For CDNA3/4 this window ends at the accumulator allocation base when that base
 is below the total allocation. These checks do not prove that the register has
 been initialized or holds a valid LDS address at runtime: the caller must arrange
@@ -466,7 +480,10 @@ For `DropBarrier`, each listing line includes the zero-based logical `ordinal`,
 index, form, ID, scope, and ordered `members=offset:size,...`. A singleton has
 one member; a split pair has two. `LdsWrongAddress` listing lines contain
 `ordinal`, the instruction's `.text`-relative `exact` byte offset, its original
-`address_vgpr`, `address_bank`, target, and form. Coordinates describe only this input and exact entry;
+`address_vgpr`, `address_bank`, target, form, `affected_owners`, and one
+`owner=name:entry_offset:descriptor_file_offset` field for every affected kernel.
+The mutation summary reports that same source-coordinate owner set. These fields
+do not claim per-dispatch isolation. Coordinates describe only this input and exact entry;
 they are not reusable handles for another image or legacy physical indices.
 
 Drop emission redirects each selected member through a NOP trampoline. LDS
