@@ -389,7 +389,7 @@ TEST(VmEmbeddingApiDeathTest, UnloadsAfterStoresWithoutMemfd) {
       ::testing::ExitedWithCode(0), "");
 }
 
-TEST(VmEmbeddingApi, ConcurrentLocalCreationInitializesIndependentVms) {
+TEST(VmEmbeddingApi, ConcurrentLocalCreationAndSharedMappingInitializeLibc) {
   const size_t initial_leases = keeper_lease_count();
   for (unsigned cycle = 0; cycle < 2; ++cycle) {
     SCOPED_TRACE(cycle);
@@ -400,19 +400,46 @@ TEST(VmEmbeddingApi, ConcurrentLocalCreationInitializesIndependentVms) {
         library.get(), "rj_vm_create_from_string");
     const auto destroy =
         load_function<decltype(&rj_vm_destroy_checked)>(library.get(), "rj_vm_destroy_checked");
+    const auto map_shared =
+        load_function<decltype(&rj_vm_map_shared_mem)>(library.get(), "rj_vm_map_shared_mem");
     ASSERT_FALSE(::testing::Test::HasFailure());
+    std::unique_ptr<FILE, int (*)(FILE *)> backing(std::tmpfile(), std::fclose);
+    ASSERT_NE(backing, nullptr);
+    const size_t page = static_cast<size_t>(sysconf(_SC_PAGESIZE));
+    ASSERT_EQ(ftruncate(fileno(backing.get()), page), 0);
     std::array<rj_vm_t *, 2> vms{};
     std::array<rj_status_t, 2> statuses{};
     std::array<std::jthread, 2> creators;
-    std::barrier start(static_cast<std::ptrdiff_t>(creators.size()));
+    std::atomic<size_t> created{0};
+    std::barrier start(static_cast<std::ptrdiff_t>(creators.size() + 1));
+    std::jthread mapper([&] {
+      start.arrive_and_wait();
+      do {
+        rj_vm_map_t mapping{};
+        mapping.length = page;
+        mapping.prot = PROT_READ | PROT_WRITE;
+        mapping.flags = MAP_SHARED;
+        // Borrowed mappings need no VM, so this can be the library's first use.
+        ASSERT_EQ(map_shared(fileno(backing.get()), &mapping), ROCJITSU_STATUS_SUCCESS);
+        ASSERT_EQ(mapping.map_errno, 0);
+        ASSERT_NE(mapping.mapped_addr, reinterpret_cast<uint64_t>(MAP_FAILED));
+        *reinterpret_cast<uint32_t *>(mapping.mapped_addr) = 0x12345678;
+        EXPECT_EQ(munmap(reinterpret_cast<void *>(mapping.mapped_addr), page), 0);
+      } while (created.load(std::memory_order_acquire) != creators.size());
+    });
     for (size_t index = 0; index < creators.size(); ++index) {
       creators[index] = std::jthread([&, index] {
         start.arrive_and_wait();
         statuses[index] = create(kConfig, RJ_VM_MODE_LOCAL, &vms[index]);
+        created.fetch_add(1, std::memory_order_release);
       });
     }
     for (auto &creator : creators)
       creator.join();
+    mapper.join();
+    uint32_t stored = 0;
+    EXPECT_EQ(pread(fileno(backing.get()), &stored, sizeof(stored), 0), sizeof(stored));
+    EXPECT_EQ(stored, 0x12345678u);
     bool destroyed = true;
     for (size_t index = 0; index < vms.size(); ++index) {
       EXPECT_EQ(statuses[index], ROCJITSU_STATUS_SUCCESS);

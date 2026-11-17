@@ -6,6 +6,7 @@
 #include "embedded_schema.h"
 #include "rocjitsu/config/checkpoint.h"
 #include "rocjitsu/kmd/linux/host_mapping_lock.h"
+#include "rocjitsu/kmd/linux/libc_passthrough.h"
 #include "rocjitsu/kmd/linux/memory_backing.h"
 #include "rocjitsu/kmd/linux/simulated_kfd.h"
 #include "rocjitsu/vm/amdgpu/legacy_address_space.h"
@@ -666,6 +667,8 @@ rj_status_t rj_vm_map_shared_mem(rj_handle_t handle, rj_vm_map_t *map) {
       !map->length || map->offset < 0 || static_cast<uint64_t>(map->offset) % page ||
       map->length > SIZE_MAX - static_cast<uint64_t>(map->offset))
     return ROCJITSU_STATUS_ERROR;
+  // Borrowed shared mappings may precede every VM constructor.
+  libc_passthrough().resolve();
   const auto mapping_lock = host_mapping_lock().lock_exclusive();
   if (check_memory_backing_size(handle, static_cast<size_t>(map->offset) +
                                             static_cast<size_t>(map->length)) != 0) {

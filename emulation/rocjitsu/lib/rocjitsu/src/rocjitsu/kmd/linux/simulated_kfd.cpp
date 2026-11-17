@@ -2839,9 +2839,9 @@ SimulatedKfd::SimulatedKfd(SoC &soc, bool daemon_mode,
     : daemon_mode_(daemon_mode),
       debug_identity_validation_hook_(std::move(debug_identity_validation_hook)),
       debug_session_reaper_([this](std::stop_token stop) { reap_exited_debug_sessions(stop); }) {
-  // Resolve the real libc entry points once, up front and single-threaded, so no
-  // passthrough call site ever triggers a first-time dlsym under a per-process
-  // lock. Idempotent: a no-op if the interposer already resolved the table.
+  // Wait for the complete libc table before entering any per-process lock.
+  // Independent VM constructors may initialize concurrently; the interposer
+  // resolves the same table eagerly when enabled.
   libc_passthrough().resolve();
   cu_ingress_access_->driver = this;
   GpuDevice device;
