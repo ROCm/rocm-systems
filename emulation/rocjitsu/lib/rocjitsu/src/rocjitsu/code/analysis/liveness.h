@@ -66,6 +66,14 @@ struct ScopedCfgEdge {
   BasicBlock *to = nullptr;
 };
 
+/// @brief Caller-supplied ordinary-register reads around an instruction.
+struct AdditionalRegisterUse {
+  const Instruction *instruction = nullptr;
+  RegisterSet registers;
+  /// False reads the input value; true reads the result after the instruction.
+  bool after_instruction = false;
+};
+
 /// @brief Block-level dataflow state for one kernel scope.
 ///
 /// @details `gen` is the upward-exposed use set: registers read in the block
@@ -169,6 +177,17 @@ struct LivenessAnalysisOptions {
   /// src_loc()+4) instead of indexing past a decoded instruction's encoding word.
   /// Empty is tolerated: such writes then mark the affected banks ambiguous.
   std::span<const uint8_t> text = {};
+
+  /// @brief Additional ordinary-register reads around the specified instructions.
+  ///
+  /// @details Before reads precede the instruction's definitions. After reads
+  /// follow them and can be satisfied by that instruction's proven full write.
+  /// Both placements participate in eager global usage and full CFG dataflow,
+  /// independently of snapshot filtering. Construction copies the sets, merges
+  /// duplicate entries at the same instruction and placement, projects out
+  /// special registers and ignores instructions outside the analyzed scope.
+  /// The option span need not outlive construction.
+  std::span<const AdditionalRegisterUse> additional_uses = {};
 };
 
 /// @brief Reverse-post-order traversal of one kernel's implicit CFG.
@@ -394,7 +413,8 @@ private:
 
   /// @brief Collect whole-kernel register use without running backward dataflow.
   void collect_global_register_usage(KernelBlockScope blocks, std::span<const uint8_t> text,
-                                     rocjitsu::IsaFamily arch);
+                                     rocjitsu::IsaFamily arch,
+                                     std::span<const AdditionalRegisterUse> additional_uses);
 
   void analyze(KernelBlockScope blocks, bool restrict_live_before_to_instructions,
                std::span<const Instruction *const> live_before_instructions,
@@ -414,6 +434,8 @@ private:
   // where EXEC is provably full.
   std::unique_ptr<ExecMaskAnalysis> exec_;
   RegisterSet globally_used_registers_;
+  std::unordered_map<const Instruction *, RegisterSet> additional_uses_before_;
+  std::unordered_map<const Instruction *, RegisterSet> additional_uses_after_;
   std::vector<BasicBlock *> deferred_blocks_;
   std::unordered_set<const BasicBlock *> scoped_blocks_;
   bool deferred_restrict_live_before_to_instructions_ = false;

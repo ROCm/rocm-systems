@@ -22,6 +22,7 @@
 #include <deque>
 #include <limits>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 
@@ -292,7 +293,8 @@ LivenessAnalysis::LivenessAnalysis(KernelBlockScope blocks, uint8_t wave_size,
         options.additional_entry_blocks,
         target != nullptr && target->capabilities.setreg_vgpr_msb_fixup);
   }
-  collect_global_register_usage(deferred_scope, options.text, options.arch);
+  collect_global_register_usage(deferred_scope, options.text, options.arch,
+                                options.additional_uses);
 }
 
 LivenessAnalysis::~LivenessAnalysis() = default;
@@ -315,9 +317,19 @@ Result LivenessAnalysis::ensure_analyzed() const {
   return Result::success();
 }
 
-void LivenessAnalysis::collect_global_register_usage(KernelBlockScope blocks,
-                                                     std::span<const uint8_t> text,
-                                                     rocjitsu::IsaFamily arch) {
+void LivenessAnalysis::collect_global_register_usage(
+    KernelBlockScope blocks, std::span<const uint8_t> text, rocjitsu::IsaFamily arch,
+    std::span<const AdditionalRegisterUse> additional_uses) {
+  std::unordered_map<const Instruction *, RegisterSet> requested_before_uses;
+  std::unordered_map<const Instruction *, RegisterSet> requested_after_uses;
+  for (const AdditionalRegisterUse &use : additional_uses) {
+    const RegisterSet ordinary = use.registers.ordinary_only();
+    if (use.instruction == nullptr || ordinary.none())
+      continue;
+    std::unordered_map<const Instruction *, RegisterSet> &requested =
+        use.after_instruction ? requested_after_uses : requested_before_uses;
+    requested[use.instruction] |= ordinary;
+  }
   for (BasicBlock *block : blocks) {
     if (block == nullptr)
       continue;
@@ -331,6 +343,18 @@ void LivenessAnalysis::collect_global_register_usage(KernelBlockScope blocks,
                                 UnknownVgprDefPolicy::ExpandAll);
       globally_used_registers_ |= accesses.defs.ordinary_only();
       globally_used_registers_ |= accesses.uses.ordinary_only();
+      const std::unordered_map<const Instruction *, RegisterSet>::const_iterator before =
+          requested_before_uses.find(&inst);
+      if (before != requested_before_uses.end()) {
+        additional_uses_before_.emplace(&inst, before->second);
+        globally_used_registers_ |= before->second;
+      }
+      const std::unordered_map<const Instruction *, RegisterSet>::const_iterator after =
+          requested_after_uses.find(&inst);
+      if (after != requested_after_uses.end()) {
+        additional_uses_after_.emplace(&inst, after->second);
+        globally_used_registers_ |= after->second;
+      }
     }
   }
 }
@@ -407,9 +431,20 @@ void LivenessAnalysis::analyze(KernelBlockScope blocks, bool restrict_live_befor
       InstDefUse du(inst, wave_size_, gfx1250_vgpr_msb_.get());
       RegisterSet kills = kill_defs(du, exec_before(inst));
       RegisterSet upward_uses = du.uses.ordinary_only();
+      const std::unordered_map<const Instruction *, RegisterSet>::const_iterator before =
+          additional_uses_before_.find(&inst);
+      if (before != additional_uses_before_.end())
+        upward_uses |= before->second;
       upward_uses -= state.kill;
       state.gen |= upward_uses;
       state.kill |= kills;
+      const std::unordered_map<const Instruction *, RegisterSet>::const_iterator after =
+          additional_uses_after_.find(&inst);
+      if (after != additional_uses_after_.end()) {
+        RegisterSet after_uses = after->second;
+        after_uses -= state.kill;
+        state.gen |= after_uses;
+      }
     }
   }
   if (!filter_live_before)
@@ -475,8 +510,16 @@ void LivenessAnalysis::analyze(KernelBlockScope blocks, bool restrict_live_befor
       const Instruction *inst = &*it;
       InstDefUse du(*inst, wave_size_, gfx1250_vgpr_msb_.get());
       RegisterSet kills = kill_defs(du, exec_before(*inst));
+      const std::unordered_map<const Instruction *, RegisterSet>::const_iterator after =
+          additional_uses_after_.find(inst);
+      if (after != additional_uses_after_.end())
+        live |= after->second;
       live -= kills;
       live |= du.uses.ordinary_only();
+      const std::unordered_map<const Instruction *, RegisterSet>::const_iterator before =
+          additional_uses_before_.find(inst);
+      if (before != additional_uses_before_.end())
+        live |= before->second;
       if (!filter_live_before || requested_live_before.contains(inst)) {
         live_before_.emplace(inst, live);
         if (filter_live_before && --remaining_requested == 0)

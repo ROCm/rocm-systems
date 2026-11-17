@@ -1600,13 +1600,17 @@ Instrumentor::Instrumentor(const AmdGpuCodeObject &obj, rocjitsu::IsaFamily arch
 
 Instrumentor::~Instrumentor() = default;
 
-void Instrumentor::add_point(InstrumentationPoint pt) { points_.push_back(std::move(pt)); }
+void Instrumentor::add_point(InstrumentationPoint pt) {
+  points_.push_back(std::move(pt));
+  // Probe arguments contribute reads to liveness; a changed queue needs new facts.
+  liveness_.reset();
+}
 
 void Instrumentor::add_point_by_offset(uint64_t anchor_offset, InstrumentationKind kind) {
   InstrumentationPoint pt;
   pt.anchor_offset = anchor_offset;
   pt.kind = kind;
-  points_.push_back(std::move(pt));
+  add_point(std::move(pt));
 }
 
 bool Instrumentor::ensure_source_facts(TextEditError &error) {
@@ -1829,7 +1833,8 @@ const Instruction *Instrumentor::find_instruction_at_offset(uint64_t anchor_offs
 
 bool Instrumentor::ensure_liveness_built(uint8_t wave_size,
                                          std::span<const KernelDescriptorInfo> kernels,
-                                         std::string *error_out) {
+                                         std::string *error_out,
+                                         std::span<const InstrumentationPoint> observations) {
   if (liveness_)
     return true;
   if (!ensure_blocks_built(error_out) || obj_.text_sections().size() != 1) {
@@ -1849,6 +1854,20 @@ bool Instrumentor::ensure_liveness_built(uint8_t wave_size,
     if (kernels.size() == 1 && block->start_offset() == kernels.front().entry_text_offset)
       options.entry_block = block.get();
   }
+  std::vector<AdditionalRegisterUse> uses;
+  for (const InstrumentationPoint &point : observations) {
+    // KernelEntry probes run only on dispatch, before this CFG. Their arguments
+    // must not become reads on guest backedges to the original entry.
+    if (point.probe_obj == nullptr || point.kind == InstrumentationKind::KernelEntry)
+      continue;
+    const Instruction *anchor = find_instruction_at_offset(point.anchor_offset);
+    if (anchor != nullptr)
+      uses.push_back({.instruction = anchor,
+                      .registers = probe_argument_registers(point.probe_args),
+                      .after_instruction = point.kind == InstrumentationKind::AfterInst});
+  }
+  options.additional_uses = uses;
+
   // Ordinary successors omit callees; their live-ins must reach the caller.
   std::vector<ScopedCfgEdge> edges =
       scoped_call_liveness_edges(KernelBlockScope(scope), options.text);
@@ -1873,8 +1892,36 @@ bool Instrumentor::ensure_liveness_built(uint8_t wave_size,
       if (!add_entry_edge(call.callee, callee_reentry_target(call, kernels)))
         return false;
   }
-  liveness_ = std::make_unique<LivenessAnalysis>(KernelBlockScope(scope), wave_size, nullptr,
-                                                 options, edges);
+
+  // A full-lane definition ends an observed value's live range, but only when
+  // EXEC is proven over this same graph. Calls and opaque transfers lack an
+  // interprocedural EXEC proof. A descriptor entry inside a block is another
+  // unmodeled input, since preceding instructions need not run on dispatch.
+  bool can_analyze_exec = !kernels.empty();
+  std::vector<const BasicBlock *> entries;
+  for (const KernelDescriptorInfo &kernel : kernels) {
+    const std::vector<BasicBlock *>::const_iterator entry =
+        std::ranges::find(scope, kernel.entry_text_offset, &BasicBlock::start_offset);
+    if (entry == scope.end())
+      can_analyze_exec = false;
+    else
+      entries.push_back(*entry);
+  }
+  for (const BasicBlock *block : scope) {
+    if (!block->call_edges().empty() || block->has_implicit_terminator() ||
+        block->successor_issue() != BasicBlock::SuccessorIssue::None)
+      can_analyze_exec = false;
+    for (const Instruction &inst : block->instructions()) {
+      if (is_control_flow_transfer(inst) && !is_program_path_terminator(inst) &&
+          !inst.branch_offset_bytes())
+        can_analyze_exec = false;
+    }
+  }
+  std::unique_ptr<ExecMaskAnalysis> exec;
+  if (can_analyze_exec)
+    exec = std::make_unique<ExecMaskAnalysis>(KernelBlockScope(scope), wave_size, edges, entries);
+  liveness_ = std::make_unique<LivenessAnalysis>(KernelBlockScope(scope), wave_size,
+                                                 std::move(exec), options, edges);
   return true;
 }
 
@@ -2298,7 +2345,7 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
   const bool has_probe_requests = std::ranges::any_of(
       requests, [](const InstrumentationPoint &point) { return point.probe_obj != nullptr; });
   if (has_probe_requests && !out.kernels.empty() && out.wave_size) {
-    if (!ensure_liveness_built(*out.wave_size, out.kernels, &err)) {
+    if (!ensure_liveness_built(*out.wave_size, out.kernels, &err, requests)) {
       out.errors.push_back(std::move(err));
       return out;
     }
@@ -2751,8 +2798,8 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   KernelVgprBounds vgpr_bounds = kernels.size() == 1
                                      ? kernel_vgpr_bounds(arch_, kernels.front().descriptor)
                                      : KernelVgprBounds{};
-  // Observation inputs remain live across every probe, even if a replacement
-  // removes their last guest use. Queue order does not describe guest execution.
+  // Keep source bounds and growth reservations tied to the original allocation.
+  // Per-site preservation instead follows observation reads in the effective CFG.
   RegisterSet observed_vgprs;
   const uint32_t source_vgpr_bound = std::min(vgpr_bounds.ordinary_bound, 256u);
   for (const ResolvedInstrumentationSite &site : sites) {
@@ -3017,7 +3064,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
         result.errors.emplace_back("internal: anchor liveness is unavailable");
         continue;
       }
-      RegisterSet live = *maybe_live.value() | observed_vgprs;
+      RegisterSet live = *maybe_live.value() | probe_argument_registers(site.probe_args);
       // Including original definitions conservatively covers live-after state:
       // the callback must observe and preserve the relocated instruction's result.
       if (site.kind == InstrumentationKind::AfterInst)

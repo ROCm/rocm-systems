@@ -7928,6 +7928,111 @@ TEST(LivenessAnalysis, PartialDefRegisterStaysLiveOutWhenUsedBySuccessor) {
   EXPECT_TRUE((*maybe_block.value()).live_out.contains({RegClass::SGPR, 4, 1}));
 }
 
+TEST(LivenessAnalysis, AdditionalUsesReadBeforeDefinitionsAndRespectKills) {
+  const std::vector<std::unique_ptr<BasicBlock>> blocks =
+      build_test_blocks({TestOpcode::Nop, TestOpcode::DefSgpr4, TestOpcode::WriteExecFull,
+                         TestOpcode::DefVgpr0, TestOpcode::Nop, TestOpcode::End});
+  ASSERT_EQ(blocks.size(), 1u);
+  const std::vector<BasicBlock *> scope = block_scope(blocks);
+  const std::vector<const Instruction *> instructions = insts_of(*blocks.front());
+  ASSERT_EQ(instructions.size(), 6u);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), kScopeWaveSize);
+  ASSERT_EQ(exec.before(*instructions[3]), ExecState::Full);
+  RegisterSet scalar_use;
+  scalar_use.expand({RegClass::SGPR, 4, 1});
+  RegisterSet vector_use;
+  vector_use.expand({RegClass::VGPR, 0, 1});
+  for (const bool use_at_definition : {false, true}) {
+    SCOPED_TRACE(use_at_definition);
+    const std::array<AdditionalRegisterUse, 2> additional_uses = {{
+        {.instruction = instructions[use_at_definition ? 1 : 4], .registers = scalar_use},
+        {.instruction = instructions[use_at_definition ? 3 : 4], .registers = vector_use},
+    }};
+    const LivenessAnalysis liveness(
+        KernelBlockScope(scope), kScopeWaveSize, std::make_unique<ExecMaskAnalysis>(exec),
+        LivenessAnalysisOptions{.additional_entry_blocks = {}, .additional_uses = additional_uses});
+    const FailureOr<const RegisterSet *> before = liveness.live_before(*instructions.front());
+    ASSERT_TRUE(before.succeeded());
+    // A later use is bounded by the intervening full definition. A use at that
+    // definition observes its input and therefore also reaches the earlier NOP.
+    EXPECT_EQ(before.value()->contains({RegClass::SGPR, 4, 1}), use_at_definition);
+    EXPECT_EQ(before.value()->contains({RegClass::VGPR, 0, 1}), use_at_definition);
+    const FailureOr<bool> scalar_at_definition =
+        liveness.is_live_before(*instructions[1], {RegClass::SGPR, 4, 1});
+    const FailureOr<bool> vector_at_definition =
+        liveness.is_live_before(*instructions[3], {RegClass::VGPR, 0, 1});
+    ASSERT_TRUE(scalar_at_definition.succeeded());
+    ASSERT_TRUE(vector_at_definition.succeeded());
+    EXPECT_EQ(scalar_at_definition.value(), use_at_definition);
+    EXPECT_EQ(vector_at_definition.value(), use_at_definition);
+    const FailureOr<const RegisterSet *> after = liveness.live_before(*instructions[4]);
+    ASSERT_TRUE(after.succeeded());
+    EXPECT_EQ(after.value()->contains({RegClass::SGPR, 4, 1}), !use_at_definition);
+    EXPECT_EQ(after.value()->contains({RegClass::VGPR, 0, 1}), !use_at_definition);
+  }
+}
+
+TEST(LivenessAnalysis, AdditionalUsesAreOwnedScopedAndIndependentOfSnapshotFilter) {
+  const std::array<uint64_t, 1> leaders = {4};
+  const std::vector<std::unique_ptr<BasicBlock>> blocks =
+      build_test_blocks({TestOpcode::Nop, TestOpcode::Nop, TestOpcode::End}, leaders);
+  ASSERT_EQ(blocks.size(), 2u);
+  const std::vector<BasicBlock *> scope = block_scope(blocks);
+  const Instruction &first = *blocks.front()->instructions().begin();
+  const Instruction &second = *blocks.back()->instructions().begin();
+  ASSERT_TRUE(has_predecessor(*blocks.back(), blocks.front().get()));
+  const TestInstruction outside_scope("outside_scope");
+  const LivenessAnalysis liveness = [&] {
+    RegisterSet scalar_use;
+    scalar_use.expand({RegClass::SGPR, 0, 2});
+    scalar_use.expand({RegClass::EXEC, 0, 2});
+    RegisterSet vector_use;
+    vector_use.expand({RegClass::VGPR, 0, 1});
+    RegisterSet outside_use;
+    outside_use.expand({RegClass::SGPR, 2, 2});
+    outside_use.expand({RegClass::VGPR, 1, 1});
+    std::vector<AdditionalRegisterUse> uses = {
+        {.instruction = &second, .registers = scalar_use},
+        {.instruction = &second, .registers = vector_use},
+        {.instruction = &outside_scope, .registers = outside_use},
+    };
+    const std::array<const Instruction *, 1> snapshots = {&first};
+    LivenessAnalysis analysis(KernelBlockScope(scope), kScopeWaveSize, nullptr,
+                              LivenessAnalysisOptions{.additional_entry_blocks = {},
+                                                      .restrict_live_before_to_instructions = true,
+                                                      .live_before_instructions = snapshots,
+                                                      .additional_uses = uses});
+    // Caller buffers can be reused and then destroyed before deferred dataflow.
+    for (AdditionalRegisterUse &use : uses)
+      use.registers = {};
+    return analysis;
+  }();
+  EXPECT_FALSE(liveness.has_materialized_cfg_liveness());
+  const FailureOr<std::optional<uint16_t>> scalar_scratch =
+      liveness.find_globally_unused_sgpr_pair(&first);
+  const FailureOr<std::optional<uint16_t>> vector_scratch =
+      liveness.find_globally_unused_vgpr_run(&first, 1, 0, 1, 2);
+  ASSERT_TRUE(scalar_scratch.succeeded());
+  ASSERT_TRUE(vector_scratch.succeeded());
+  EXPECT_EQ(scalar_scratch.value(), 2);
+  EXPECT_EQ(vector_scratch.value(), 1);
+  EXPECT_FALSE(liveness.has_materialized_cfg_liveness());
+  const FailureOr<const RegisterSet *> before = liveness.live_before(first);
+  ASSERT_TRUE(before.succeeded());
+  EXPECT_TRUE(before.value()->contains({RegClass::SGPR, 0, 2}));
+  EXPECT_TRUE(before.value()->contains({RegClass::VGPR, 0, 1}));
+  EXPECT_FALSE(before.value()->contains({RegClass::SGPR, 2, 2}));
+  EXPECT_FALSE(before.value()->contains({RegClass::VGPR, 1, 1}));
+  EXPECT_FALSE(before.value()->has_specials());
+  const FailureOr<bool> second_snapshot = liveness.has_live_before(second);
+  ASSERT_TRUE(second_snapshot.succeeded());
+  EXPECT_FALSE(second_snapshot.value());
+  const FailureOr<const BlockLiveness *> predecessor = liveness.block_liveness(*blocks.front());
+  ASSERT_TRUE(predecessor.succeeded());
+  EXPECT_TRUE(predecessor.value()->live_out.contains({RegClass::SGPR, 0, 2}));
+  EXPECT_TRUE(predecessor.value()->live_out.contains({RegClass::VGPR, 0, 1}));
+}
+
 TEST(LivenessAnalysis, FullWidthDefKillsRegisterBeforeInstruction) {
   auto blocks = build_test_blocks({TestOpcode::DefSgpr4, TestOpcode::End});
   LivenessAnalysis liveness = analyze_scope(blocks);
