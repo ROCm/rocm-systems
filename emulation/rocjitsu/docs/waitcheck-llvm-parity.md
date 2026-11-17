@@ -48,7 +48,9 @@ final ISA; it is not silently counted as exact agreement. Consecutive explicit
 waits, combined wait encodings, embedded instruction wait fields, and waits
 implied by another counter are normalized before comparison. Every finding
 retains kernel identity, wait/producer/consumer offsets and instructions, a
-stable catalog key, and a single-kernel replay command.
+stable catalog key, and a replay command. The JSONL `repro_argv` and
+`repro_command` retain every entry that can reach a shared physical wait;
+single-entry inspection may produce a different parity conclusion.
 
 Run a strict corpus audit with:
 
@@ -165,12 +167,12 @@ scratch dword/dwordx2/ubyte rows. Running the three reduced family oracles for
 `gfx942` also emits waitcheck's `N`; no additional semantic class or analyzer
 change is needed.
 
-Replay any row directly from the packaged library by substituting its object
-and entry above:
+Replay a row with its JSONL `repro_argv` or `repro_command`. For a packaged
+multi-kernel library, keep all entries in the selected code object:
 
 ```sh
 rj_waitcheck libtorch_hip.so --target gfx950 --code-object-index OBJECT \
-  --kernel-entry ENTRY --check-counter-parity --no-fail
+  --check-counter-parity --no-fail
 ```
 
 The full gfx1150 PyTorch sweep adds three source-backed dispositions. The
@@ -232,13 +234,15 @@ The completed run reports 7,708,884 audited fields, 6,183,582 exact fields,
 indeterminate groups, and zero analysis errors. The 19,426 ordinary waitcheck
 diagnostics are deliberately reported separately: they are not parity
 under-accounting findings and are outside this one-sided audit's disposition.
-For example, the rocPRIM class is replayed with:
+For example, replay the rocPRIM class across the complete extracted object:
 
 ```sh
 rj_waitcheck 113__lib__libtorch_hip.so__2__gfx1150.co \
-  --target gfx1150 --code-object-index 0 --kernel-entry 0x7100 \
-  --check-counter-parity --no-fail
+  --target gfx1150 --code-object-index 0 --check-counter-parity --no-fail
 ```
+
+Use `--kernel-entry 0x7100` only to inspect that entry's instructions; it is
+not a parity-equivalent replay when other entries reach the same wait.
 
 The JSONL catalog deliberately keeps every edge, while triage deduplicates by
 target, entry, counter, wait offset, producer, and consumer. Kernel descriptors
