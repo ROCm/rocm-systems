@@ -14,9 +14,9 @@ set(ROCPROFSYS_PROFILER_HUB_GIT_REPOSITORY
 )
 
 set(ROCPROFSYS_PROFILER_HUB_GIT_TAG
-    "develop"
+    "profiler-hub/support-for-schema-versions"
     CACHE STRING
-    "Git ref (branch, tag or commit) for profiler-hub fallback sparse checkout; the default 'develop' is re-fetched on every configure"
+    "Git ref for profiler-hub fallback sparse checkout (profiler-hub/support-for-schema-versions, #14545: embedded RocPD schemas)"
 )
 
 set(ROCPROFSYS_PROFILER_HUB_GIT_SUBDIR
@@ -205,6 +205,7 @@ else()
 endif()
 
 if(NOT _PROFILER_HUB_IS_EXTERNAL)
+    set(PROFILER_HUB_FETCH_DEPENDENCIES ON CACHE BOOL "" FORCE)
     set(PROFILER_HUB_BUILD_TESTS OFF CACHE BOOL "" FORCE)
     set(PROFILER_HUB_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
     set(PROFILER_HUB_ENABLE_LOGGING
