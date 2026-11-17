@@ -33,7 +33,6 @@
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 
-#include <cstdlib>
 #include <fstream>
 #include <mutex>
 #include <string>
@@ -182,15 +181,6 @@ update_logging(const logging_config& cfg)
     {
         fs::create_directories(cfg.logdir);
     }
-}
-
-void
-fatal_exit(std::string_view msg)
-{
-    // ERROR instead of FATAL to keep us from aborting.
-    // LOG so that this error-out message is always relayed to the user.
-    LOG(ERROR) << msg;
-    std::exit(EXIT_FAILURE);
 }
 }  // namespace common
 }  // namespace rocprofiler

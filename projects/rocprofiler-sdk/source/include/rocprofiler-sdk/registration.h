@@ -70,7 +70,9 @@ typedef void (*rocprofiler_client_finalize_t)(rocprofiler_client_id_t);
  * ::rocprofiler_tool_configure_result_t.
  * @return int
  * @retval 0 Initialization succeeded.
- * @retval (non-zero) Initialization failed.
+ * @retval (non-zero) Initialization failed. rocprofiler stops and discards the contexts (and their
+ * buffers) created by the tool and does not invoke the tool's ::rocprofiler_tool_finalize_t
+ * function. Other tools and the application continue running.
  */
 typedef int (*rocprofiler_tool_initialize_t)(rocprofiler_client_finalize_t finalize_func,
                                              void*                         tool_data);

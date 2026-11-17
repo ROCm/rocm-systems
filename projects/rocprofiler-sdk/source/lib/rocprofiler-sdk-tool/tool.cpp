@@ -2359,6 +2359,7 @@ spm_data_callback(const rocprofiler_spm_dispatch_counting_service_data_t* dispat
 }
 rocprofiler_client_finalize_t client_finalizer  = nullptr;
 rocprofiler_client_id_t*      client_identifier = nullptr;
+bool                          tool_init_failed  = false;
 
 void
 initialize_logging()
@@ -2381,6 +2382,14 @@ initialize_rocprofv3()
     {
         ROCPROFILER_CALL(rocprofiler_force_configure(&rocprofiler_configure),
                          "force configuration");
+    }
+
+    // tool_init cannot exit the process itself because rocprofiler-sdk holds its registration
+    // mutex while invoking it
+    if(tool_init_failed)
+    {
+        ROCP_ERROR << "rocprofv3 failed to initialize. Exiting";
+        std::exit(EXIT_FAILURE);
     }
 
     ROCP_FATAL_IF(!client_identifier) << "nullptr to client identifier!";
@@ -3937,19 +3946,16 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         }
     }
 
-    if(tool::get_config().pc_sampling_host_trap)
-    {
-        // non-zero return propagates the failure to rocprofiler-sdk instead of calling
-        // std::exit() from here -- see the comment on configure_pc_sampling_on_all_agents().
-        if(!configure_pc_sampling_on_all_agents(
-               buffer_size, buffer_watermark, tool_data, callbacks.pc_sampling))
-            return -1;
-    }
-    else if(tool::get_config().pc_sampling_stochastic)
+    if(tool::get_config().pc_sampling_host_trap || tool::get_config().pc_sampling_stochastic)
     {
         if(!configure_pc_sampling_on_all_agents(
                buffer_size, buffer_watermark, tool_data, callbacks.pc_sampling))
+        {
+            // rocprofiler-sdk disables this client and initialize_rocprofv3() exits
+            tool_init_failed = true;
+            client_finalizer = nullptr;
             return -1;
+        }
     }
 
     for(auto itr : get_buffers().pc_sampling_buffers_as_array())

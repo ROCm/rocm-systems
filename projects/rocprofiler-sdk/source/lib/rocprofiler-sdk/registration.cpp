@@ -735,6 +735,24 @@ get_registration_mutex()
     return _v;
 }
 
+// true while this thread is inside a client's initialize function, which runs with the
+// registration mutex held
+bool&
+get_invoking_client_initialize()
+{
+    static thread_local bool _v = false;
+    return _v;
+}
+
+void
+disable_client(std::optional<client_library>& itr)
+{
+    context::stop_client_contexts(itr->internal_client_id);
+    context::deactivate_client_contexts(itr->internal_client_id);
+    context::deregister_client_contexts(itr->internal_client_id);
+    itr.reset();
+}
+
 bool
 invoke_client_configure(std::optional<client_library>& itr)
 {
@@ -851,19 +869,26 @@ invoke_client_initializer(std::optional<client_library>& itr)
                                  sdk::utility::as_hex(itr->configure_result->initialize),
                                  sdk::utility::as_hex(itr->configure_result->finalize));
         context::push_client(itr->internal_client_id.handle);
-        auto _init_rc =
-            itr->configure_result->initialize(client_fini_func, itr->configure_result->tool_data);
+        int _init_rc = 0;
+        {
+            auto _invoking_scope =
+                common::scope_destructor{[]() { get_invoking_client_initialize() = false; },
+                                         []() { get_invoking_client_initialize() = true; }};
+            _init_rc = itr->configure_result->initialize(client_fini_func,
+                                                         itr->configure_result->tool_data);
+        }
         context::pop_client(itr->internal_client_id.handle);
         // set to nullptr so initialize only gets called once
         itr->configure_result->initialize = nullptr;
 
         if(_init_rc != 0)
         {
-            ROCP_ERROR << fmt::format(
-                "rocprofiler-sdk client '{}' reported a fatal error during initialization "
-                "(return code={})",
-                itr->get_name(),
-                _init_rc);
+            ROCP_ERROR << fmt::format("rocprofiler-sdk client '{}' failed to initialize (return "
+                                      "code={}). It has been disabled and its finalize function "
+                                      "will not be invoked",
+                                      itr->get_name(),
+                                      _init_rc);
+            disable_client(itr);
             return false;
         }
     }
@@ -882,13 +907,12 @@ invoke_client_initializers()
 
     if(!get_clients()) return false;
 
-    bool _success = true;
     for(auto& itr : *get_clients())
     {
-        if(!invoke_client_initializer(itr)) _success = false;
+        invoke_client_initializer(itr);
     }
 
-    return _success;
+    return true;
 }
 
 bool
@@ -1024,7 +1048,15 @@ invoke_client_finalizer(rocprofiler_client_id_t client_id)
 {
     ROCP_INFO << __FUNCTION__ << "(client_id=" << client_id.handle << ")";
 
-    if(get_init_status() < 1) return;
+    // e.g. a client calling std::exit() from its initialize function runs the atexit handlers on
+    // this thread, which already holds the registration mutex
+    if(get_invoking_client_initialize())
+    {
+        ROCP_WARNING << fmt::format("ignoring finalization request for client (id={}) made from "
+                                    "within a client initialize function",
+                                    client_id.handle);
+        return;
+    }
 
     auto _lk = scoped_lock_t{get_registration_mutex()};
 
@@ -1131,19 +1163,15 @@ set_fini_status(int v)
     if(get_status()) get_status()->second.store(v, std::memory_order_release);
 }
 
-bool
+void
 client_initialize(std::optional<client_library>& client)
 {
     set_init_status(-1);
     invoke_client_configure(client);
-    bool _success = invoke_client_initializer(client);
-    if(_success)
-    {
-        if(get_num_clients() > 0) internal_threading::initialize();
-        // initialization is no longer available
-        set_init_status(1);
-    }
-    return _success;
+    invoke_client_initializer(client);
+    if(get_num_clients() > 0) internal_threading::initialize();
+    // initialization is no longer available
+    set_init_status(1);
 }
 
 void
@@ -1185,14 +1213,7 @@ initialize()
             common::destroy_static_objects();
         });
         invoke_client_configures();
-        bool _clients_initialized = invoke_client_initializers();
-        if(!_clients_initialized)
-        {
-            // exit to allow cmake test regex to categorize bad config errors as test skips
-            ROCP_FATAL_EXIT(
-                "rocprofiler-sdk: a client reported a fatal error during initialization; "
-                "exiting");
-        }
+        invoke_client_initializers();
         if(get_num_clients() > 0) internal_threading::initialize();
         // initialization is no longer available
         set_init_status(1);
@@ -1373,7 +1394,6 @@ rocprofiler_force_configure(rocprofiler_configure_func_t configure_func)
     if(_forced_cfg_info.num_forced_configs > 1 || rocprofiler::registration::get_init_status() > 0)
     {
         ROCP_INFO << "adding forced configure";
-        bool _client_initialized = false;
         {
             auto  _lk     = scoped_lock_t{rocprofiler::registration::get_registration_mutex()};
             auto& _client = emplace_client(*rocprofiler::registration::get_clients(),
@@ -1382,14 +1402,7 @@ rocprofiler_force_configure(rocprofiler_configure_func_t configure_func)
                                            configure_func,
                                            nullptr);
 
-            _client_initialized = rocprofiler::registration::client_initialize(_client);
-        }
-
-        if(!_client_initialized)
-        {
-            // exit to allow cmake test regex to categorize bad config errors as test skips
-            ROCP_FATAL_EXIT("rocprofiler-sdk: a client reported a fatal error during anytime "
-                            "initialization; exiting");
+            rocprofiler::registration::client_initialize(_client);
         }
 
         auto status = rocprofiler::registration::late::invoke_register_propagation();

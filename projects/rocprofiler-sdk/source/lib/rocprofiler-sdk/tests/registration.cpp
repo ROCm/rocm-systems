@@ -38,6 +38,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <iomanip>
 #include <iostream>
@@ -517,89 +518,120 @@ TEST(rocprofiler_lib, buffer_registration_lambda_with_result)
     EXPECT_EQ(cb_data.max_depth, 0);
 }
 
-//------------------------------------------------------------------------------
-// Regression test for ROCM-28657.
-//
-// A tool's `initialize` function used to be able to call std::exit() directly to report a
-// fatal configuration error (e.g. rocprofv3's PC sampling config validation). Because
-// rocprofiler-sdk holds its internal, non-recursive registration mutex on this thread for
-// the *entire* duration of the `initialize` call, doing so re-entered that same mutex via
-// the atexit-triggered finalize path as soon as a *second* client was registered, and
-// deadlocked. With a single client, the equivalent finalize path happened to bail out
-// before taking the lock, which is why the bug was only visible with 2+ clients (see the
-// Jira ticket for the full backtrace).
-//
-// `initialize` now reports a fatal error via a non-zero return code instead, and
-// rocprofiler-sdk (registration.cpp) is responsible for safely calling std::exit() only
-// after it has released the registration mutex. This test reproduces the exact shape of
-// the bug -- a first client that initializes successfully, followed by a second client
-// whose `initialize` reports a fatal error -- and verifies the process exits promptly and
-// cleanly (EXIT_FAILURE) instead of hanging.
-//
-// This has to run in a forked child process (via EXPECT_EXIT): a regression of the
-// underlying bug hangs forever rather than crashing, and a clean/fast non-zero exit is the
-// only observable way to tell "fixed" apart from "still deadlocks".
-//------------------------------------------------------------------------------
-TEST(rocprofiler_lib, registration_second_client_init_failure_exits_without_deadlock)
+namespace
 {
+namespace healthy_client
+{
+int
+tool_init(rocprofiler_client_finalize_t, void*)
+{
+    return 0;
+}
+
+void
+tool_fini(void*)
+{
+    std::fputs("healthy client finalized\n", stderr);
+}
+
+rocprofiler_tool_configure_result_t*
+configure(uint32_t, const char*, uint32_t, rocprofiler_client_id_t* client_id)
+{
+    client_id->name  = "healthy-client";
+    static auto _cfg = rocprofiler_tool_configure_result_t{
+        sizeof(rocprofiler_tool_configure_result_t), &tool_init, &tool_fini, nullptr};
+    return &_cfg;
+}
+}  // namespace healthy_client
+}  // namespace
+
+// A client whose initialize returns non-zero is disabled without affecting the other clients or
+// the process (ROCM-28657)
+TEST(rocprofiler_lib, registration_client_init_failure_disables_client)
+{
+    static auto failing_ctx = rocprofiler_context_id_t{0};
+
+    static rocprofiler_tool_initialize_t failing_init = [](rocprofiler_client_finalize_t,
+                                                           void*) -> int {
+        if(rocprofiler_create_context(&failing_ctx) != ROCPROFILER_STATUS_SUCCESS) std::_Exit(2);
+        return -1;
+    };
+
+    static rocprofiler_tool_finalize_t failing_fini = [](void*) { std::_Exit(3); };
+
+    static rocprofiler_configure_func_t failing_configure =
+        [](uint32_t,
+           const char*,
+           uint32_t,
+           rocprofiler_client_id_t* client_id) -> rocprofiler_tool_configure_result_t* {
+        client_id->name  = "failing-client";
+        static auto _cfg = rocprofiler_tool_configure_result_t{
+            sizeof(rocprofiler_tool_configure_result_t), failing_init, failing_fini, nullptr};
+        return &_cfg;
+    };
+
     EXPECT_EXIT(
         ([]() {
-            using init_func_t = int (*)(rocprofiler_client_finalize_t, void*);
+            if(rocprofiler_force_configure(&healthy_client::configure) !=
+               ROCPROFILER_STATUS_SUCCESS)
+                std::_Exit(4);
 
-            // First client: initializes successfully and becomes the fully-initialized,
-            // "primary" client -- this mirrors rocprofv3 in the original bug report.
-            static init_func_t first_tool_init = [](rocprofiler_client_finalize_t, void*) -> int {
-                return 0;
-            };
+            // rocprofiler-sdk is initialized, so this takes the anytime initialization path
+            rocprofiler_force_configure(failing_configure);
 
-            static auto first_cfg_result = rocprofiler_tool_configure_result_t{
-                sizeof(rocprofiler_tool_configure_result_t), first_tool_init, nullptr, nullptr};
+            int init_status = 0;
+            rocprofiler_is_initialized(&init_status);
+            if(init_status != 1) std::_Exit(5);
 
-            static rocprofiler_configure_func_t first_configure =
-                [](uint32_t,
-                   const char*,
-                   uint32_t,
-                   rocprofiler_client_id_t* client_id) -> rocprofiler_tool_configure_result_t* {
-                client_id->name = "rocm-28657-first-client";
-                return &first_cfg_result;
-            };
+            if(rocprofiler_start_context(failing_ctx) != ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND)
+                std::_Exit(6);
 
-            // Second client: registers no services -- the failing branch in the original
-            // bug depended only on the client count, not on what the client actually
-            // does -- and reports a fatal initialization error the safe way (a non-zero
-            // return code) instead of calling std::exit() itself.
-            static init_func_t second_tool_init = [](rocprofiler_client_finalize_t, void*) -> int {
-                return EXIT_FAILURE;
-            };
-
-            static auto second_cfg_result = rocprofiler_tool_configure_result_t{
-                sizeof(rocprofiler_tool_configure_result_t), second_tool_init, nullptr, nullptr};
-
-            static rocprofiler_configure_func_t second_configure =
-                [](uint32_t,
-                   const char*,
-                   uint32_t,
-                   rocprofiler_client_id_t* client_id) -> rocprofiler_tool_configure_result_t* {
-                client_id->name = "rocm-28657-second-client";
-                return &second_cfg_result;
-            };
-
-            // First call: this is the first-ever forced configure in this process, so it
-            // synchronously runs the *normal* (non-anytime) initialization path in
-            // registration.cpp's initialize(), fully initializing the first client.
-            if(rocprofiler_force_configure(first_configure) != ROCPROFILER_STATUS_SUCCESS)
-                std::exit(2);  // distinguish unexpected failures from the expected one below
-
-            // Second call: rocprofiler-sdk is already initialized (one client, fully set
-            // up), so this takes the anytime/late-initialization path, which initializes
-            // the second client while the first is already live -- the exact shape of
-            // ROCM-28657. second_tool_init()'s non-zero return should cause
-            // rocprofiler-sdk to safely std::exit(EXIT_FAILURE) here.
-            rocprofiler_force_configure(second_configure);
-
-            // Unreachable if rocprofiler-sdk correctly terminated the process above.
-            std::exit(3);
+            // the atexit finalization should still finalize the healthy client but not the
+            // failing one
+            std::exit(EXIT_SUCCESS);
         }()),
-        ::testing::ExitedWithCode(EXIT_FAILURE),
-        "reported a fatal error during initialization");
+        ::testing::ExitedWithCode(EXIT_SUCCESS),
+        "healthy client finalized");
+}
+
+// A client which calls std::exit() from its initialize function while another client is
+// registered must not deadlock on the registration mutex (ROCM-28657)
+TEST(rocprofiler_lib, registration_client_exit_during_init_does_not_deadlock)
+{
+    static constexpr int expected_exit_code = 7;
+
+    static rocprofiler_client_id_t*      exiting_client_id = nullptr;
+    static rocprofiler_client_finalize_t exiting_fini_func = nullptr;
+
+    static rocprofiler_tool_initialize_t exiting_init = [](rocprofiler_client_finalize_t fini_func,
+                                                           void*) -> int {
+        // mirrors rocprofv3, whose atexit handler invokes its client finalizer
+        exiting_fini_func = fini_func;
+        std::atexit([]() { exiting_fini_func(*exiting_client_id); });
+        std::exit(expected_exit_code);
+    };
+
+    static rocprofiler_configure_func_t exiting_configure =
+        [](uint32_t,
+           const char*,
+           uint32_t,
+           rocprofiler_client_id_t* client_id) -> rocprofiler_tool_configure_result_t* {
+        client_id->name   = "exiting-client";
+        exiting_client_id = client_id;
+        static auto _cfg  = rocprofiler_tool_configure_result_t{
+            sizeof(rocprofiler_tool_configure_result_t), exiting_init, nullptr, nullptr};
+        return &_cfg;
+    };
+
+    EXPECT_EXIT(([]() {
+                    if(rocprofiler_force_configure(&healthy_client::configure) !=
+                       ROCPROFILER_STATUS_SUCCESS)
+                        std::_Exit(4);
+
+                    rocprofiler_force_configure(exiting_configure);
+
+                    std::_Exit(5);
+                }()),
+                ::testing::ExitedWithCode(expected_exit_code),
+                "");
 }

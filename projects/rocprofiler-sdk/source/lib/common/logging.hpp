@@ -63,8 +63,6 @@
 #define ROCP_FATAL   LOG(FATAL)
 #define ROCP_DFATAL  DLOG(FATAL)
 
-#define ROCP_FATAL_EXIT(...) ::rocprofiler::common::fatal_exit(fmt::format(__VA_ARGS__))
-
 #define ROCP_TRACE_IF(CONDITION) VLOG_IF(ROCP_LOG_LEVEL_TRACE, (CONDITION))
 #define ROCP_INFO_IF(CONDITION)                                                                    \
     LOG_IF(INFO, ::absl::MinLogLevel() <= ::absl::LogSeverityAtLeast::kInfo && (CONDITION))
@@ -122,11 +120,6 @@ init_logging(std::string_view env_prefix, logging_config cfg = logging_config{})
 
 void
 update_logging(const logging_config& cfg);
-
-// an unrecoverable error that uses std::exit. for use with expected, environment-dependent
-// failures. Prefer the ROCP_FATAL_EXIT(...) macro over direct use
-[[noreturn]] void
-fatal_exit(std::string_view msg);
 }  // namespace common
 }  // namespace rocprofiler
 
