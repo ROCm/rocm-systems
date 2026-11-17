@@ -308,8 +308,9 @@ release(bool, DEBUG_CLR_DEV_SIGNALS, true,                                    \
         "signal-capable device pool, the device has a large BAR, and no "     \
         "profiler tool is attached")                                          \
 release(bool, DEBUG_CLR_GRAPH_FAST_LAUNCH, true,                             \
-        "Graph launches on several streams: one-packet end markers with a "  \
-        "gate for the other queues, fork waits without marker commands, "     \
+        "Graph launches on several streams: end markers that complete a "    \
+        "signal without interrupt for the other queues, fork waits without "  \
+        "marker commands, "                                                    \
         "empty nodes carrying their waits, no host read-backs of device "     \
         "memory on the launch path (0 = the previous launch path)")           \
 

@@ -5,7 +5,7 @@
  ************************************************************************/
 
 // Host-only microtests for src/plugin/profiler/profiler_v3.cc, the adapter that serves a v3 plugin through the
-// v7 interface. The plugin is a fake exported from a FakeLib (see profiler-test.cc's ncclOsDlsym).
+// v8 interface. The plugin is a fake exported from a FakeLib (see profiler-test.cc's ncclOsDlsym).
 
 #include <gtest/gtest.h>
 
@@ -28,6 +28,10 @@ struct FakeV3 {
   void** initCtx = nullptr;
   int* initMask = nullptr;
   ncclResult_t initResult = ncclSuccess;
+  int stopCalls = 0;
+  void* stopHandle = nullptr;
+  int finalizeCalls = 0;
+  void* finalizeCtx = nullptr;
   std::vector<ncclProfilerEventDescr_v3_t> starts;
   std::vector<std::pair<ncclProfilerEventState_v3_t, ncclProfilerEventStateArgs_v3_t>> records;
   ncclProfiler_v3_t vtable{"FakeV3", &Init, &Start, &Stop, &Record, &Finalize};
@@ -47,12 +51,20 @@ struct FakeV3 {
     *eHandle = H(0x1);
     return ncclSuccess;
   }
-  static ncclResult_t Stop(void*) { return ncclSuccess; }
+  static ncclResult_t Stop(void* h) {
+    cur()->stopCalls++;
+    cur()->stopHandle = h;
+    return ncclSuccess;
+  }
   static ncclResult_t Record(void*, ncclProfilerEventState_v3_t s, ncclProfilerEventStateArgs_v3_t* a) {
     cur()->records.push_back({s, *a});
     return ncclSuccess;
   }
-  static ncclResult_t Finalize(void*) { return ncclSuccess; }
+  static ncclResult_t Finalize(void* ctx) {
+    cur()->finalizeCalls++;
+    cur()->finalizeCtx = ctx;
+    return ncclSuccess;
+  }
 };
 
 class ProfilerV3Microtest : public ::testing::Test {
@@ -62,14 +74,20 @@ class ProfilerV3Microtest : public ::testing::Test {
   ncclProfiler_t* prof_ = nullptr;
   void* ctx_ = nullptr;
   int mask_ = 0;
+  void* target_ = nullptr;
 
   void SetUp() override {
     FakeV3::cur() = &fake_;
-    prof_ = getNcclProfiler_v3(&lib_);
+    prof_ = getNcclProfiler_v3(&lib_, &target_);
     ASSERT_NE(prof_, nullptr);
-    ASSERT_EQ(ncclSuccess, prof_->init(&ctx_, 0xABCD, &mask_, "c0", 2, 8, 3, nullptr));
+    ASSERT_EQ(target_, &fake_.vtable);
+    setNcclProfiler_v3(target_);  // what profilerActivate() does before each call
+    ASSERT_EQ(ncclSuccess, prof_->init(&ctx_, 0xABCD, &mask_, "c0", 2, 8, 3, nullptr, nullptr));
   }
-  void TearDown() override { FakeV3::cur() = nullptr; }
+  void TearDown() override {
+    setNcclProfiler_v3(nullptr);
+    FakeV3::cur() = nullptr;
+  }
 
   const ncclProfilerEventDescr_v3_t* Start(ncclProfilerEventDescr_t& d) {
     void* h = H(0xBAD);
@@ -86,21 +104,43 @@ class ProfilerV3Microtest : public ::testing::Test {
 
 TEST_F(ProfilerV3Microtest, GetProfiler_FindsOnlyTheV3Symbol) {
   FakeLib other{{"ncclProfiler_v2", &fake_.vtable}};
-  EXPECT_EQ(getNcclProfiler_v3(&other), nullptr);
+  void* target = H(0xBAD);
+  EXPECT_EQ(getNcclProfiler_v3(&other, &target), nullptr);
+  EXPECT_EQ(target, nullptr);
   EXPECT_STREQ(prof_->name, "FakeV3");
+}
+
+// The shim dispatches through the plugin profilerActivate() selected; with none selected nothing reaches it.
+TEST_F(ProfilerV3Microtest, NoActivePlugin_InitFailsAndCallbacksDoNotReachThePlugin) {
+  setNcclProfiler_v3(nullptr);
+  EXPECT_EQ(prof_->init(&ctx_, 0, &mask_, "c0", 2, 8, 3, nullptr, nullptr), ncclInternalError);
+  EXPECT_EQ(fake_.initCalls, 1);
+  EXPECT_EQ(ncclSuccess, prof_->stopEvent(H(0x5), nullptr));
+  EXPECT_EQ(ncclSuccess, prof_->finalize(H(0xC1)));
+  EXPECT_EQ(fake_.stopCalls, 0);
+  EXPECT_EQ(fake_.finalizeCalls, 0);
 }
 
 TEST_F(ProfilerV3Microtest, Init_ForwardsTheMaskAndWiresTheCallbacks) {
   EXPECT_EQ(fake_.initCalls, 1);
   EXPECT_EQ(fake_.initCtx, &ctx_);
   EXPECT_EQ(fake_.initMask, &mask_);
-  EXPECT_EQ(prof_->stopEvent, &FakeV3::Stop);
-  EXPECT_EQ(prof_->finalize, &FakeV3::Finalize);
+  EXPECT_EQ(prof_->stopEvent, &ncclProfiler_stopEvent);
+  EXPECT_EQ(prof_->finalize, &ncclProfiler_finalize);
   EXPECT_EQ(prof_->startEvent, &ncclProfiler_startEvent);
   EXPECT_EQ(prof_->recordEventState, &ncclProfiler_recordEventState);
+  // stopEvent/finalize are shim wrappers now; they forward to the active plugin and drop the v8 stop descriptor.
+  ncclProfilerEventDescr_t stopDescr{};
+  stopDescr.tsCpu = 123;
+  ASSERT_EQ(ncclSuccess, prof_->stopEvent(H(0x5), &stopDescr));
+  EXPECT_EQ(fake_.stopCalls, 1);
+  EXPECT_EQ(fake_.stopHandle, H(0x5));
+  ASSERT_EQ(ncclSuccess, prof_->finalize(H(0xC1)));
+  EXPECT_EQ(fake_.finalizeCalls, 1);
+  EXPECT_EQ(fake_.finalizeCtx, H(0xC1));
 
   fake_.initResult = ncclSystemError;
-  EXPECT_EQ(prof_->init(&ctx_, 0, &mask_, "c0", 2, 8, 3, nullptr), ncclSystemError);
+  EXPECT_EQ(prof_->init(&ctx_, 0, &mask_, "c0", 2, 8, 3, nullptr, nullptr), ncclSystemError);
 }
 
 TEST_F(ProfilerV3Microtest, StartEvent_Coll_KeepsTheStringsAndParentsToTheGroup) {

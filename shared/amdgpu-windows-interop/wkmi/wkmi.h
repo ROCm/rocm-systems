@@ -70,6 +70,11 @@ struct HwsInfo {
   uint64_t engineOrdinalMask;          ///< Bitfield indicating which engines (by ordinal) support MES HWS
 };
 
+/// Extents of the WGP bitmask arrays in DeviceInfo, matching the KMD's
+/// MAX_NUM_SE and MAX_NUM_SA_PER_SE.
+constexpr uint32_t kMaxShaderEngines = 12;
+constexpr uint32_t kMaxShaderArraysPerSe = 2;
+
 /// @brief Comprehensive GPU device information structure
 /// Contains all device capabilities, hardware specifications, and driver information
 /// for an AMD GPU. This structure is populated by ParseAdapterInfo().
@@ -86,7 +91,8 @@ struct DeviceInfo {
   
   // Compute capabilities
   uint32_t wavefront_size;                    ///< Wavefront size (32 or 64)
-  uint32_t compute_unit_count;                ///< Total number of compute units (CUs)
+  uint32_t compute_unit_count;                ///< Total number of compute units (CUs). Always 0
+                                              ///< when wgp_masks_valid is set: see the masks below
   uint32_t wave_per_cu;                       ///< Maximum waves per compute unit
   uint32_t simd_per_cu;                       ///< Number of SIMD units per CU (2 for RDNA, 4 for GCN)
   uint32_t max_scratch_slots_per_cu;          ///< Maximum scratch slots per CU
@@ -150,6 +156,14 @@ struct DeviceInfo {
   uint32_t kmd_version;                       ///< Kernel mode driver version (e.g., 2520 for 25.20)
   uint32_t gb_addr_config;                    ///< Graphics block address configuration
   uint32_t num_xcc;                           ///< Number of XCC (eXtended Compute Complex) units
+
+  // WGP bitmasks, one 8-bit mask per shader array, indexed [SE][SA].
+  // Only meaningful when wgp_masks_valid is set. On a part whose WGPs split into
+  // regular and tensor processors, wkmi reports none: compute_unit_count is 0
+  // and the client derives whichever count it needs from these masks.
+  bool wgp_masks_valid;                       ///< True when the two mask arrays below are populated
+  uint8_t active_wgp[kMaxShaderEngines][kMaxShaderArraysPerSe];  ///< Set bit = active WGP
+  uint8_t is_twgp[kMaxShaderEngines][kMaxShaderArraysPerSe];     ///< Set bit = tensor WGP, clear bit = regular WGP
 };
 
 struct KmdDbgVersion {

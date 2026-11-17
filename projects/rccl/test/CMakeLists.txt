@@ -370,7 +370,7 @@ if(BUILD_TESTS)
   target_link_options(rccl-UnitTests PRIVATE
     "LINKER:--export-dynamic-symbol=ncclNetPlugin_v12"
     "LINKER:--export-dynamic-symbol=ncclGinPlugin_v13"
-    "LINKER:--export-dynamic-symbol=ncclTunerPlugin_v6"
+    "LINKER:--export-dynamic-symbol=ncclTunerPlugin_v7"
     "LINKER:--export-dynamic-symbol=ncclProfiler_v7")
 
   # AICOMRCCL-2183: RcclMockFuncs.hpp's empty ncclDebugLog, needed to link the Release-only
@@ -442,6 +442,7 @@ if(BUILD_TESTS)
       device/GinBackendMaskDispatch_test.cpp
       device/HierarchicalShuffleTests.cpp
       device/NcclUtilityDeviceTests.cpp
+      device/SymkWorldPointerGetterTests.cpp
       device/ChannelMaskMapTests.cpp
       device/CoopApplicationBuildTests.cpp
       DeviceApiTests.cpp
@@ -504,9 +505,10 @@ if(BUILD_TESTS)
     set_source_files_properties(device/RcclEpTests.cpp PROPERTIES
       INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}/../src/algorithms/rccl_ep)
 
-    # device/TestTdmReduceCopy.cpp drives reduceCopy through common_kernel.h, whose common.h
-    # includes the generated device_table.h.
-    set_source_files_properties(device/TestTdmReduceCopy.cpp PROPERTIES
+    # device/TestTdmReduceCopy.cpp and device/SymkWorldPointerGetterTests.cpp drive
+    # common_kernel.h (directly or via symk.cuh), whose common.h includes the generated
+    # device_table.h.
+    set_source_files_properties(device/TestTdmReduceCopy.cpp device/SymkWorldPointerGetterTests.cpp PROPERTIES
       INCLUDE_DIRECTORIES ${PROJECT_BINARY_DIR}/hipify/gensrc)
 
   if(ENABLE_ROCSHMEM_GIN)

@@ -17,7 +17,7 @@
  *   events.bin:
  *     [0..7]   hrr_file_header  { magic, version, reserved }
  *     [8..]    hrr_event_header (32 bytes) + payload bytes, repeated per event
- *   blobs/<2hex>/   content-addressed raw buffers (FNV-1a-128 hash)
+ *   blobs/<2hex>/   content-addressed raw buffers (128-bit content hash)
  *   code_objects/   .hsaco ELFs keyed by hash
  *
  * hrr_event_header fields (32 bytes, pack(1)):
@@ -91,8 +91,11 @@
  * A v10 reader would decode those events as the wrong API.
  * v12: hipExtMemcpyBatchAsync was appended to HipDispatchTable,
  * shifting the compiler API IDs up by one. A v11 reader would decode
- * those events as the wrong API. */
-#define HRR_VERSION ((uint16_t)12u)
+ * those events as the wrong API.
+ * v13: a hipGraphLaunch or hipGraphLaunch_spt event carries pinned host
+ * snapshot records after its fixed fields. A v12 reader would launch the
+ * graph without restoring them. */
+#define HRR_VERSION ((uint16_t)13u)
 
 /* Written once at byte 0 of events.bin. */
 #pragma pack(push, 1)
@@ -210,8 +213,8 @@ typedef struct {
 typedef struct {
     hrr_event_header hdr;
     uint64_t ret;
-    uint64_t blob_hash_lo;  /* FNV-1a-128 lo of fat binary */
-    uint64_t blob_hash_hi;  /* FNV-1a-128 hi */
+    uint64_t blob_hash_lo;  /* 128-bit content lo of fat binary */
+    uint64_t blob_hash_hi;  /* 128-bit content hi */
     uint64_t blob_size;  /* fat binary byte count */
 } hrr_args___hipRegisterFatBinary;
 
