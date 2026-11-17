@@ -6730,6 +6730,56 @@ amdsmi_status_t amdsmi_get_fabric_cper_entries(amdsmi_processor_handle processor
                                                uint64_t* buf_size, amdsmi_cper_hdr_t** cper_hdrs,
                                                uint64_t* entry_count, uint64_t* cursor);
 
+/**
+ *  @brief Retrieve CPER entries for an AI-NIC device via the pds_core debugfs ring.
+ *
+ *  @ingroup tagRasInfo
+ *
+ *  @platform{nic}
+ *
+ *  @details Reads CPER records written by the NIC firmware into the pds_core kernel
+ *  driver's debugfs ring at:
+ *    /sys/kernel/debug/pds_core/<pds_core_bdf>/cper_events
+ *
+ *  The pds_core BDF is the management function's PCIe BDF, which is a downstream
+ *  endpoint under the same NIC bridge as the ionic port functions. It is resolved
+ *  automatically from the processor_handle at call time by traversing sysfs.
+ *
+ *  Records are in the same UEFI CPER binary format as GPU CPER entries.
+ *
+ *  @param[in] processor_handle AI-NIC processor handle (AMDSMI_PROCESSOR_TYPE_AMD_NIC).
+ *  @param[in] severity_mask Bitmask of severity levels to retrieve.
+ *                           Use (1U << AMDSMI_CPER_SEV_*) to construct the mask.
+ *                           Use (1U << AMDSMI_CPER_SEV_NUM) to retrieve all severities.
+ *
+ *  @param[in,out] cper_data Caller-allocated buffer for raw CPER data.
+ *                 Records are packed back-to-back.
+ *
+ *  @param[in,out] buf_size [in] size of cper_data buffer in bytes.
+ *                 [out] actual bytes written.
+ *
+ *  @param[in,out] cper_hdrs Array of pointers into cper_data, one per
+ *                 returned entry. Caller allocates the array.
+ *
+ *  @param[in,out] entry_count [in] maximum number of entries the cper_hdrs array can hold.
+ *                 [out] number of CPER entries returned.
+ *
+ *  @param[in,out] cursor [in] cursor from previous call (0 = start).
+ *                 [out] cursor for next call (0 = no more data).
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success with no more data,
+ *          ::AMDSMI_STATUS_MORE_DATA if entries returned but more remain,
+ *          ::AMDSMI_STATUS_NOT_SUPPORTED if processor_handle is not an AI-NIC,
+ *          ::AMDSMI_STATUS_NO_PERM if not running with sufficient privilege,
+ *          ::AMDSMI_STATUS_FILE_NOT_FOUND if pds_core debugfs path is absent,
+ *          ::AMDSMI_STATUS_INVAL if null pointer arguments,
+ *          ::AMDSMI_STATUS_OUT_OF_RESOURCES if buffer too small, non-zero on other failures
+ */
+amdsmi_status_t amdsmi_get_nic_cper_entries(amdsmi_processor_handle processor_handle,
+                                            uint32_t severity_mask, char* cper_data,
+                                            uint64_t* buf_size, amdsmi_cper_hdr_t** cper_hdrs,
+                                            uint64_t* entry_count, uint64_t* cursor);
+
 /** @} End tagRasInfo */
 
 /*****************************************************************************/

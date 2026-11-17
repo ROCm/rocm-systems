@@ -819,6 +819,30 @@ static amdsmi_status_t get_nic_bdf(amdsmi_processor_handle processor_handle, uin
   return AMDSMI_STATUS_SUCCESS;
 }
 
+// Resolve the pds_core management function BDF for a given NIC bridge BDF.
+// pds_core registers under a downstream PCIe function (e.g. 0000:03:00.2)
+// that is not the ionic NIC BDF. Its sysfs canonical path passes through
+// the NIC bridge, so we scan /sys/kernel/debug/pds_core/ and match on ancestry.
+// Falls back to nic_bridge_bdf so the caller gets FILE_NOT_FOUND if absent.
+static std::string find_pds_core_bdf(const std::string& nic_bridge_bdf) {
+  namespace fs = std::filesystem;
+  std::error_code ec;
+  fs::path root("/sys/kernel/debug/pds_core");
+  if (!fs::exists(root, ec)) return nic_bridge_bdf;
+  std::string needle = "/" + nic_bridge_bdf + "/";
+  for (const auto& entry : fs::directory_iterator(root, ec)) {
+    if (ec) continue;
+    fs::path sysfs_link("/sys/bus/pci/devices/" + entry.path().filename().string());
+    if (!fs::exists(sysfs_link, ec)) continue;
+    try {
+      if (fs::canonical(sysfs_link).string().find(needle) != std::string::npos)
+        return entry.path().filename().string();
+    } catch (const fs::filesystem_error&) {
+    }
+  }
+  return nic_bridge_bdf;
+}
+
 amdsmi_status_t amdsmi_get_ainic_info(amdsmi_processor_handle processor_handle,
                                       amd::smi::AMDSmiAINICDevice::AINICInfo* info) {
   AMDSMI_CHECK_INIT();
@@ -6081,6 +6105,41 @@ amdsmi_status_t amdsmi_get_gpu_cper_entries(amdsmi_processor_handle processor_ha
   return amdsmi_get_gpu_cper_entries_by_path(path.c_str(), severity_mask, cper_data, buf_size,
                                              cper_hdrs, entry_count, cursor,
                                              get_product_serial_number(processor_handle));
+}
+
+amdsmi_status_t amdsmi_get_nic_cper_entries(amdsmi_processor_handle processor_handle,
+                                            uint32_t severity_mask, char* cper_data,
+                                            uint64_t* buf_size, amdsmi_cper_hdr_t** cper_hdrs,
+                                            uint64_t* entry_count, uint64_t* cursor) {
+  if (cper_data == nullptr || buf_size == nullptr || cper_hdrs == nullptr ||
+      entry_count == nullptr || cursor == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  if (!amd::smi::is_sudo_user()) {
+    return AMDSMI_STATUS_NO_PERM;
+  }
+
+  uint64_t bdf_int = 0;
+  amdsmi_status_t status = get_nic_bdf(processor_handle, &bdf_int);
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    return status;
+  }
+
+  amdsmi_bdf_t bdf_struct;
+  bdf_struct.as_uint = bdf_int;
+  char bridge_bdf_buf[32];
+  snprintf(bridge_bdf_buf, sizeof(bridge_bdf_buf), "%04x:%02x:%02x.%x",
+           static_cast<unsigned>(bdf_struct.bdf.domain_number),
+           static_cast<unsigned>(bdf_struct.bdf.bus_number),
+           static_cast<unsigned>(bdf_struct.bdf.device_number),
+           static_cast<unsigned>(bdf_struct.bdf.function_number));
+
+  std::string pds_bdf = find_pds_core_bdf(bridge_bdf_buf);
+  std::string path = "/sys/kernel/debug/pds_core/" + pds_bdf + "/cper_events";
+
+  return amdsmi_get_gpu_cper_entries_by_path(path.c_str(), severity_mask, cper_data, buf_size,
+                                             cper_hdrs, entry_count, cursor, 0 /*serial*/);
 }
 
 amdsmi_status_t amdsmi_get_afids_from_cper(char* cper_buffer, uint32_t buf_size, uint64_t* afids,
