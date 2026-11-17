@@ -1,0 +1,75 @@
+# Purpose: host monitoring, not a test of any code change. The CI hosts run
+# real CI jobs, and a broken host (full disk, wedged GPU, wrong GPU or BIOS
+# state) makes unrelated PRs fail. This check names the unhealthy host and
+# layer, so those failures are not blamed on the code. It checks that the host
+# is the machine its labels say it is, that the amdgpu module is loaded, and
+# that ROCm sees the expected GPU. The BIOS version is reported. There is no
+# BMC check yet (see the end of this comment). Nothing is stored or compared.
+#
+# Why this is not part of TheRock CI: these hosts are not in TheRock's runner
+# pool, so TheRock CI does not cover them. This is a per-host check, not a build
+# or test of a component, so it is its own workflow and its failures do not
+# appear on unrelated PRs.
+#
+# Why there is no pull_request trigger: the job runs on the host itself, not in
+# a container, and this repository is public. A PR could change the script and
+# print anything from the host into a log anyone can download. It runs only from
+# develop (nightly, or by hand from develop), so the code that runs there has
+# been reviewed.
+# To try a change, run the script by hand on the host:
+#   python3 .github/scripts/lstt_hw_health.py --host <host> --gfx <gfx>
+#
+# There is no BMC step yet: no host in the matrix has a BMC. Add one with the
+# first host that does, together with a green run. It needs ipmitool and
+# /dev/ipmi0 on the host, and a passwordless sudo rule for the runner user so
+# that `sudo -n ipmitool` fails at once, with a clear message, without it.
+name: LSTT hardware health
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Nightly report. Schedules only run from the default branch.
+    - cron: '17 6 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  health:
+    name: ${{ matrix.host }}
+    # A manual run can pick any branch; only develop's reviewed code may run here.
+    if: ${{ github.ref == 'refs/heads/develop' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - host: lsttstrix
+            label: lstt-gfx1151
+            gfx: gfx1151
+    runs-on:
+      - ${{ matrix.label }}
+      - ${{ matrix.host }}
+    timeout-minutes: 20
+
+    steps:
+      # Only the script is needed, so the fetch is sparse.
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/scripts/lstt_hw_health.py
+          sparse-checkout-cone-mode: false
+
+      # Host-level, so no container: /sys/class/dmi is what the firmware
+      # exposes to the booted kernel. The script checks the host identity first
+      # (a GPU label can be on several hosts, so runs-on also selects by host
+      # name), then BIOS, the amdgpu module and the GPU, and reports every
+      # layer even when one fails.
+      - name: Hardware health
+        shell: bash
+        env:
+          HOST: ${{ matrix.host }}
+          GFX: ${{ matrix.gfx }}
+        run: python3 .github/scripts/lstt_hw_health.py --host "$HOST" --gfx "$GFX"

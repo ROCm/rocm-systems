@@ -148,6 +148,10 @@ issues locating the installed libraries:
    rocprof-sys-instrument --help
    rocprof-sys-avail --help
 
+   # rocsys, the new unified command-line entry point. The command is experimental.
+   rocsys --help
+   rocsys --version
+
 .. note::
 
    If ROCm support is enabled, you might have to add the path to the ROCm libraries to ``LD_LIBRARY_PATH``,

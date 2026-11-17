@@ -73,10 +73,10 @@ using PairState = std::unordered_map<uint16_t, PairValue>;
   return ref->index;
 }
 
-void kill_defined_pairs(PairState &state, const Instruction &inst) {
+void kill_defined_pairs(PairState &state, const Instruction &inst, uint8_t wave_size) {
   if (state.empty())
     return;
-  const InstDefUse def_use(inst);
+  const InstDefUse def_use(inst, wave_size);
   std::erase_if(state, [&](const auto &item) {
     const uint16_t pair = item.first;
     return def_use.defs.contains(RegisterRef{RegClass::SGPR, pair, 1}) ||
@@ -116,7 +116,7 @@ table_at_address(std::span<const RelocationFunctionTable> tables, uint64_t vaddr
 
 void transfer_instruction(PairState &state, const Instruction &inst,
                           std::span<const RelocationFunctionTable> tables, uint64_t text_vaddr,
-                          std::vector<RelocationTableDispatch> *dispatches,
+                          uint8_t wave_size, std::vector<RelocationTableDispatch> *dispatches,
                           std::vector<PcRelativeAddressBuilder> *address_builders) {
   const std::string_view mnemonic = inst.mnemonic();
   // Only getpc can create a tracked fact from an empty state. Large linked
@@ -149,7 +149,7 @@ void transfer_instruction(PairState &state, const Instruction &inst,
              .source_table_address_vaddr = value->second.source_table_address_vaddr});
       }
     }
-    kill_defined_pairs(state, inst);
+    kill_defined_pairs(state, inst, wave_size);
     return;
   }
 
@@ -222,7 +222,7 @@ void transfer_instruction(PairState &state, const Instruction &inst,
     }
   }
 
-  kill_defined_pairs(state, inst);
+  kill_defined_pairs(state, inst, wave_size);
   if (dst_pair && result)
     state[*dst_pair] = *result;
 }
@@ -262,7 +262,7 @@ meet_predecessors(const BasicBlock &block,
 /// @brief Shared getpc/add fixed point that collects both result kinds after convergence.
 void run_pair_dataflow(std::span<const std::unique_ptr<BasicBlock>> blocks,
                        std::span<const RelocationFunctionTable> tables, uint64_t text_vaddr,
-                       std::vector<RelocationTableDispatch> *dispatches,
+                       uint8_t wave_size, std::vector<RelocationTableDispatch> *dispatches,
                        std::vector<PcRelativeAddressBuilder> *address_builders);
 
 /// @brief Whether @p vaddr falls inside a section the loader maps.
@@ -683,12 +683,13 @@ discover_relocation_function_tables(const AmdGpuCodeObject &object) {
 
 RelocationPairAnalysis analyze_relocation_pairs(std::span<const std::unique_ptr<BasicBlock>> blocks,
                                                 std::span<const RelocationFunctionTable> tables,
-                                                uint64_t text_vaddr) {
+                                                uint64_t text_vaddr, uint8_t wave_size) {
   RelocationPairAnalysis result;
   if (blocks.empty())
     return result;
 
-  run_pair_dataflow(blocks, tables, text_vaddr, &result.dispatches, &result.address_builders);
+  run_pair_dataflow(blocks, tables, text_vaddr, wave_size, &result.dispatches,
+                    &result.address_builders);
   std::ranges::sort(result.dispatches, [](const auto &lhs, const auto &rhs) {
     if (lhs.source_call_offset != rhs.source_call_offset)
       return lhs.source_call_offset < rhs.source_call_offset;
@@ -716,7 +717,7 @@ namespace {
 
 void run_pair_dataflow(std::span<const std::unique_ptr<BasicBlock>> blocks,
                        std::span<const RelocationFunctionTable> tables, uint64_t text_vaddr,
-                       std::vector<RelocationTableDispatch> *dispatches,
+                       uint8_t wave_size, std::vector<RelocationTableDispatch> *dispatches,
                        std::vector<PcRelativeAddressBuilder> *address_builders) {
   std::unordered_map<const BasicBlock *, size_t> positions;
   positions.reserve(blocks.size());
@@ -757,7 +758,7 @@ void run_pair_dataflow(std::span<const std::unique_ptr<BasicBlock>> blocks,
     PairState next_in = meet_predecessors(*block, positions, out, initialized);
     PairState next_out = next_in;
     for (const Instruction &inst : block->instructions())
-      transfer_instruction(next_out, inst, tables, text_vaddr, nullptr, nullptr);
+      transfer_instruction(next_out, inst, tables, text_vaddr, wave_size, nullptr, nullptr);
 
     const bool changed = !initialized[index] || next_in != in[index] || next_out != out[index];
     initialized[index] = true;
@@ -780,7 +781,8 @@ void run_pair_dataflow(std::span<const std::unique_ptr<BasicBlock>> blocks,
       continue;
     PairState state = in[i];
     for (const Instruction &inst : blocks[i]->instructions())
-      transfer_instruction(state, inst, tables, text_vaddr, dispatches, address_builders);
+      transfer_instruction(state, inst, tables, text_vaddr, wave_size, dispatches,
+                           address_builders);
   }
 }
 

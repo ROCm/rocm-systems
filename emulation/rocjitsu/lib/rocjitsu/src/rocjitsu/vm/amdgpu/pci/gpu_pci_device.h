@@ -45,7 +45,7 @@ namespace rocjitsu {
 class SoC;
 class MesBlockModel;
 class SdmaBlockModel;
-
+class NbifHdpBlockModel;
 namespace amdgpu {
 class SdmaPacketCallbacks;
 class SdmaQueueBindingFactory;
@@ -72,9 +72,14 @@ public:
   /// drivers for hardware the identity says is not there. Derive it with
   /// @ref gpu_pci_spec_from_config, which reads both from one config.
   IpDiscoverySpec discovery;
+  simdojo::PcieSpec pcie; ///< Link and optional PCIe capabilities of this part.
 };
 
 /// @brief PCI function presenting a simulated GPU to a guest driver.
+///
+/// @details PCIe endpoint AtomicOp completion remains unadvertised until
+/// peer BAR atomics have a checked operation and completion path. Atomic
+/// access to guest system RAM through the DMA provider is a separate path.
 class GpuPciDevice final : public simdojo::PciDevice, private PciMemoryAccess {
 public:
   /// @brief BAR carrying the video memory aperture.
@@ -94,14 +99,7 @@ public:
   /// leaves this as the only free index.
   static constexpr int kMsixBar = 4;
 
-  /// @brief Size of that BAR.
-  ///
-  /// @details The table and the pending bits get a 4 KiB page each. Nothing
-  /// requires it -- they may share a page with each other, and a client asks
-  /// only that they be eight-byte aligned and not overlap -- but a page apiece
-  /// means neither can ever share one with anything else, which is what the
-  /// specification does care about, and it costs 8 KiB of a BAR that holds
-  /// nothing else.
+  /// @brief Size of the trapped BAR holding the MSI-X table and pending bits.
   static constexpr uint64_t kMsixBarBytes = 8 * 1024;
 
   /// @brief Where the table starts within that BAR.
@@ -196,13 +194,7 @@ public:
             .pending_offset = kMsixPendingOffset};
   }
 
-  /// @brief Advertise the PCIe AtomicOp completion widths KFD requires.
-  ///
-  /// @details The upstream driver enables 32- and 64-bit requests together and
-  /// declines this generation when either width cannot reach the function.
-  [[nodiscard]] simdojo::PcieSpec pcie() const override {
-    return {.atomic_completer_32 = true, .atomic_completer_64 = true};
-  }
+  [[nodiscard]] simdojo::PcieSpec pcie() const override { return spec_.pcie; }
 
   [[nodiscard]] int64_t bar_access(int bar, std::span<std::byte> buf, uint64_t offset,
                                    bool write) override;
@@ -221,6 +213,7 @@ public:
   [[nodiscard]] uint64_t sdma_pci_effect_count_for_test();
   void set_sdma_pci_effect_admitted_hook_for_test(std::function<void()> hook);
   void deliver_cp_interrupt_for_test(uint32_t process_id, uint32_t event_id);
+  void report_vm_fault_for_test(uint32_t process_id, uint64_t address, amdgpu::VmAccessKind access);
   [[nodiscard]] std::thread::id last_cp_interrupt_thread_for_test();
   /// @brief Queue a diagnostic interrupt for delivery by the simulation owner.
   /// @details External control threads use this instead of touching the
@@ -279,6 +272,9 @@ private:
   capture_transport_session() const override {
     return transport_session();
   }
+  [[nodiscard]] bool supports_translated_local_cache() const override {
+    return usable_ && soc_ != nullptr && hdp_ != nullptr;
+  }
   [[nodiscard]] bool read_vram(uint64_t offset, std::span<std::byte> bytes) override;
   [[nodiscard]] bool write_vram(uint64_t offset, std::span<const std::byte> bytes) override;
   [[nodiscard]] amdgpu::AtomicLoadResult atomic_load_vram(uint64_t offset, uint32_t width) override;
@@ -289,6 +285,9 @@ private:
                         uint64_t desired) override;
   [[nodiscard]] bool read_register(uint64_t byte_offset, uint32_t &value) override;
   [[nodiscard]] bool write_register(uint64_t byte_offset, uint32_t value) override;
+  [[nodiscard]] bool program_shader_apertures(uint32_t vmid, uint64_t shared_base,
+                                              uint64_t shared_limit, uint64_t private_base,
+                                              uint64_t private_limit) override;
 
   [[nodiscard]] int64_t access_registers(std::span<std::byte> buf, uint64_t offset, bool write);
   [[nodiscard]] int64_t access_memory(std::span<std::byte> buf, uint64_t offset, bool write,
@@ -406,7 +405,7 @@ private:
     bool terminal = false;
   };
 
-  enum class InterruptRequestKind : uint8_t { Completion, Diagnostic };
+  enum class InterruptRequestKind : uint8_t { Completion, VmFault, Diagnostic };
 
   class InterruptRequest {
   public:
@@ -434,6 +433,8 @@ private:
                                              const SdmaPciEffect &effect);
   [[nodiscard]] bool enqueue_interrupt(const InterruptEntry &entry, InterruptRequestKind kind);
   void enqueue_cp_interrupt(uint32_t process_id, uint32_t event_id);
+  void enqueue_vm_fault_interrupt(uint32_t process_id, uint64_t address,
+                                  amdgpu::VmAccessKind access);
   void drain_interrupts();
   void drain_sdma_pci_effects();
   void cancel_sdma_pci_effects();
@@ -504,6 +505,11 @@ private:
   /// never allocated.
   RegisterAperture registers_;
 
+  /// @brief Serializes a register transaction with its block-model side effect.
+  /// @details RegisterAperture protects each stored dword, while a bank-select
+  /// write and the selected block's update must also be ordered as one command.
+  mutable std::mutex register_command_mutex_;
+
   /// @brief Core SDMA queue binding factory shared by every PCI queue adapter.
   /// @details Declared before the block models so it outlives every binding factory
   /// pointer injected into them.
@@ -543,6 +549,7 @@ private:
   /// @brief Queue-owning adapters, borrowed from @ref models_.
   MesBlockModel *mes_ = nullptr;
   SdmaBlockModel *sdma_ = nullptr;
+  NbifHdpBlockModel *hdp_ = nullptr;
 
   /// @brief Video memory and the window onto it, owned as one thing.
   ///

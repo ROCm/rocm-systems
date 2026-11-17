@@ -212,6 +212,7 @@ performance:
   Performance_hipPerfDotProduct: *level_stress
   Performance_hipPerfMandelbrot: *level_stress
   Performance_hipPerfDispatchAndExecutionSpeed: *level_stress
+  Performance_hipPerfBlockingStreamDispatch: *level_stress
   Performance_hipKernelLookup: *level_stress
   Performance_hipEventOverflow: *level_stress
   Performance_GraphWithMoreAllocFreeNodes_SingleBranchNoOperations: *level_stress
@@ -230,6 +231,9 @@ performance:
   Performance_PyFR_Couette_IndividualGraphs: *level_stress
   Performance_PyFR_Couette_StepSimulation: *level_stress
   Performance_PyFR_Couette_SingleIteration: *level_stress
+  Performance_GraphBench_Launch: *level_stress
+  Performance_GraphBench_Sweep: *level_stress
+  Performance_GraphBench_Verify: *level_stress
   Performance_hipPerfMemcpy_test: *level_stress
   Performance_hipPerfBufferCopyRectSpeed_test: *level_stress
   Performance_hipPerfBufferCopySpeed_test: *level_stress
@@ -267,6 +271,7 @@ performance:
   Performance_KernelLaunchLatency_IncreasingNumberOfStreams: *level_stress
   Performance_hipPerfMultiStreamKernelLaunch: *level_stress
   Performance_hipPerfVMMAllocSpeed_test: *level_stress
+  Performance_hipMemImportFromShareableHandle_ImportedPeersBatchCopy: *level_stress
   Performance_hipPerfHostNumaAlloc_test_preferred_host_numa_node_on_each_GPU: *level_stress
   Performance_Graph_CollapseCorrectness: *level_stress
   Performance_Graph_DisabledBoundarySynchronization: *level_stress

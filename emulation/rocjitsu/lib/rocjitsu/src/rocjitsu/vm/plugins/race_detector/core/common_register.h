@@ -4,11 +4,11 @@
 #pragma once
 #include "rocjitsu/isa/arch/amdgpu/shared/memory_issue.h"
 
+#include <array>
 #include <cassert>
-#include <ostream>
+#include <cstddef>
+#include <optional>
 #include <span>
-#include <sstream>
-#include <string>
 
 namespace rocjitsu::plugins::race_detector {
 
@@ -34,11 +34,27 @@ enum class MemoryEventType {
   GLOBAL_TO_TTMP,   ///< Scalar load to a TTMP; the event stores its counter family separately.
   SCALAR_TO_GLOBAL, ///< Scalar store; retained to preserve partial-wait ordering.
 
-  N
+  /// LDS-to-global transfer, such as a tensor DMA store or a gfx1250 async
+  /// store: reads LDS and writes global memory, with no VGPR registers -- only
+  /// LDS intervals. The reverse direction is GLOBAL_TO_LDS.
+  ///
+  /// The event records its counter family and completion order separately: an
+  /// async store carries ASYNCCNT and ASYNC_STORE. defaultWaitCounterType and
+  /// defaultMemoryOrder return those of a tensor DMA store (TENSORCNT, TENSOR).
+  LDS_TO_GLOBAL,
+
+  /// A synchronous VALU operand read visible to peers until a barrier.
+  LDS_OPERAND_READ,
+
 };
 
 /// Race-detector name for the decoded hardware completion-order classification.
 using MemoryOrderClass = amdgpu::MemoryCompletionClass;
+
+struct LdsAccess {
+  bool read_modify_write = false;
+  uint8_t aligned_atomic_bytes = 0;
+};
 
 /// Derive the ordering usable for whole-event hazards such as destination WAW.
 /// Per-counter ordering remains useful for partial waits, but an event spanning
@@ -56,8 +72,7 @@ memoryOrderForObligations(std::span<const amdgpu::MemoryCounterObligation> oblig
   return order;
 }
 
-/// Event direction helpers: "to VGPR" means a load writing into a VGPR,
-/// "from VGPR" means a store reading out of a VGPR.
+/// True if the event loads into a VGPR.
 inline bool isToVgpr(MemoryEventType t) {
   return t == MemoryEventType::GLOBAL_TO_VGPR || t == MemoryEventType::LDS_TO_VGPR;
 }
@@ -70,16 +85,13 @@ inline bool isToSgpr(MemoryEventType t) { return t == MemoryEventType::GLOBAL_TO
 
 inline bool isToTtmp(MemoryEventType t) { return t == MemoryEventType::GLOBAL_TO_TTMP; }
 
-inline bool isToScalar(MemoryEventType t) { return isToSgpr(t) || isToTtmp(t); }
+inline bool isFromLds(MemoryEventType t) {
+  return t == MemoryEventType::LDS_TO_VGPR || t == MemoryEventType::LDS_TO_GLOBAL ||
+         t == MemoryEventType::LDS_OPERAND_READ;
+}
 
 /// True if the event touches LDS (read or write).
-inline bool isLdsInvolved(MemoryEventType t) {
-  return isToLds(t) || t == MemoryEventType::LDS_TO_VGPR;
-}
-
-inline bool isFromVgpr(MemoryEventType t) {
-  return t == MemoryEventType::VGPR_TO_GLOBAL || t == MemoryEventType::VGPR_TO_LDS;
-}
+inline bool isLdsInvolved(MemoryEventType t) { return isToLds(t) || isFromLds(t); }
 
 /// True if the event doesn't touch LDS — safe to trim at WAVE_COMPLETE.
 inline bool isWaveLocal(MemoryEventType t) { return !isLdsInvolved(t); }
@@ -98,7 +110,9 @@ inline amdgpu::WaitCounterType defaultWaitCounterType(MemoryEventType t) {
   case MemoryEventType::GLOBAL_TO_TTMP:
   case MemoryEventType::SCALAR_TO_GLOBAL:
     return amdgpu::WaitCounterType::LGKMCNT;
-  case MemoryEventType::N:
+  case MemoryEventType::LDS_TO_GLOBAL:
+    return amdgpu::WaitCounterType::TENSORCNT;
+  case MemoryEventType::LDS_OPERAND_READ:
     break;
   }
   assert(false && "invalid memory event type");
@@ -120,37 +134,41 @@ inline MemoryOrderClass defaultMemoryOrder(MemoryEventType t) {
   case MemoryEventType::GLOBAL_TO_TTMP:
   case MemoryEventType::SCALAR_TO_GLOBAL:
     return MemoryOrderClass::UNORDERED;
-  case MemoryEventType::N:
+  case MemoryEventType::LDS_TO_GLOBAL:
+    return MemoryOrderClass::TENSOR;
+  case MemoryEventType::LDS_OPERAND_READ:
     break;
   }
   assert(false && "invalid memory event type");
   return MemoryOrderClass::UNORDERED;
 }
 
-/// A register reference (type + index).
-class CommonRegister {
+/// @brief Owns one or two unit counter increments with the same completion order.
+/// @details The converted span borrows this object's storage. Event registration
+/// consumes it before returning, so passing a temporary directly is safe. Keep
+/// the owner alive when storing a span for later use. Use an explicit obligation
+/// array for different completion orders or non-unit counter increments.
+class CounterObligations {
 public:
-  enum class Type { SGPR, VGPR, UNKNOWN };
-  Type type;
-  int index;
-
-  static CommonRegister getVgpr(int idx) { return CommonRegister{Type::VGPR, idx}; }
-
-  void appendStr(std::ostream &os) const {
-    char prefix = (type == Type::SGPR) ? 's' : (type == Type::VGPR) ? 'v' : '?';
-    os << prefix << index;
+  CounterObligations(
+      amdgpu::WaitCounterType wait_counter_type, MemoryOrderClass memory_order,
+      std::optional<amdgpu::WaitCounterType> additional_wait_counter_type = std::nullopt)
+      : obligations_{amdgpu::MemoryCounterObligation{wait_counter_type, memory_order}, {}} {
+    if (additional_wait_counter_type)
+      obligations_[count_++] = {*additional_wait_counter_type, memory_order};
   }
 
-  std::string str() const {
-    std::ostringstream oss;
-    appendStr(oss);
-    return oss.str();
+  /// @brief The default counter and order for an event type.
+  explicit CounterObligations(MemoryEventType type)
+      : CounterObligations(defaultWaitCounterType(type), defaultMemoryOrder(type)) {}
+
+  operator std::span<const amdgpu::MemoryCounterObligation>() const {
+    return {obligations_.data(), count_};
   }
+
+private:
+  std::array<amdgpu::MemoryCounterObligation, 2> obligations_;
+  std::size_t count_ = 1;
 };
-
-inline std::ostream &operator<<(std::ostream &os, const CommonRegister &reg) {
-  reg.appendStr(os);
-  return os;
-}
 
 } // namespace rocjitsu::plugins::race_detector

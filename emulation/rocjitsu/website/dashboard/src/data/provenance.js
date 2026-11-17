@@ -17,17 +17,16 @@ function displayValue(value) {
 export function provenanceDetails(provenance = {}) {
   const details = [];
   const seenKeys = new Set();
-  const seenLabels = new Set();
+
 
   const addDetail = (key, label, value) => {
-    const normalizedKey = hasDisplayValue(key) ? String(key).trim() : '';
-    const normalizedLabel = hasDisplayValue(label) ? String(label).trim() : '';
+    const normalizedKey = hasDisplayValue(key) ? String(key) : '';
+    const normalizedLabel = hasDisplayValue(label) ? String(label) : '';
     const normalizedValue = displayValue(value);
-    const labelKey = normalizedLabel.toLocaleLowerCase();
-    if (!normalizedKey || !normalizedLabel || !hasDisplayValue(normalizedValue)) return;
-    if (seenKeys.has(normalizedKey) || seenLabels.has(labelKey)) return;
+    if (!normalizedKey || !normalizedLabel || normalizedValue === null) return;
+    if (seenKeys.has(normalizedKey)) return;
     seenKeys.add(normalizedKey);
-    seenLabels.add(labelKey);
+
     details.push({ key: normalizedKey, label: normalizedLabel, value: normalizedValue });
   };
 
@@ -39,4 +38,12 @@ export function provenanceDetails(provenance = {}) {
 
   legacyDetails.forEach(([key, label]) => addDetail(key, label, provenance[key]));
   return details;
+}
+
+export function runEnvironmentDetails(run) {
+  return new Map([
+    ...provenanceDetails(run?.provenance),
+    ...(run?.provenance?.details ?? []),
+    ...(run?.environment ?? []),
+  ].map((detail) => [detail.key, detail]));
 }
