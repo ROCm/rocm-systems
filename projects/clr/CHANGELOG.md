@@ -47,7 +47,6 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 * Support for the `hipMemRangeFlagDmaBufMappingTypePcie` flag in `hipMemGetHandleForAddressRange`, providing parity with CUDA behavior.
 * Support for recovering allocation properties from imported virtual memory handles. `hipMemGetAllocationPropertiesFromHandle` now correctly reports `hipMemLocationTypeHost` for host-backed allocations imported via `hipMemImportFromShareableHandle`, instead of always reporting device memory. For device-backed allocations, it reports the owning device rather than the device that was current when the handle was imported.
 * Support in WSL 2 to prevent indefinite application hangs and to report errors for device-side faults, including out-of-bounds writes, null pointer dereferences, and device asserts.
-* Added `HIP_TARGET_API_VERSION` to enable compile-time API version selection, helping maintain source compatibility with applications built against older HIP API versions.
 
 ### Resolved issues
 
@@ -73,7 +72,6 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 * Stream priority is now disabled to avoid known queue-priority-related issues. Priority streams are currently not supported.
 * HRR capture feature is now disabled.
-* `hipMemAdvise` now aliases `hipMemAdvise_v2`, which uses a `hipMemLocation` parameter instead of a device ID. Applications using the legacy `hipMemAdvise` signature may require source updates to pass a `hipMemLocation` structure. To maintain compatibility with the previous API signature, define `HIP_TARGET_API_VERSION` to a nonzero value less than 800 (for example, 700 for HIP 7.0 or 717 for HIP 7.17) at compile time. By default, `hipMemAdvise` alias to the `hipMemAdvise_v2` interface.
 * The `HIPRTC_USE_RUNTIME_UNBUNDLER` environment variable and its associated functionality have been removed from the HIP runtime. The runtime unbundler path is now always used; setting this variable no longer has any effect.
 
 ### Known issues
