@@ -57,13 +57,9 @@ namespace kfd
 {
 namespace
 {
-// The reader issues the unified-profiler ioctls, which need the dlog v6 layout. ABI 7
-// is the upstream perfmon-clock patch on top of v6 and leaves the VERSION/DLOG args
-// untouched; any other ABI may re-lay-out them and must not be silently accepted.
-// ABI 7 alone does not imply dlog: dispatch_log_stream_format remains the per-GPU gate.
-constexpr uint32_t kProfilerAbiVersion        = KFD_IOC_PROFILER_VERSION_NUM;
-constexpr uint32_t kProfilerAbiVersionPerfmon = 7;
-static_assert(kProfilerAbiVersion == 6, "re-validate ABI 7 acceptance against the new dlog UAPI");
+// Profiler ABI is backward compatible from v6 (dlog layout) on; a literal so a header bump
+// can't raise it. ABI alone does not imply dlog: dispatch_log_stream_format gates per GPU.
+constexpr uint32_t kMinProfilerAbiVersion = 6;
 
 // Translation-unit-owned state. Not exposed as bare globals; only the accessor
 // functions below read it. Reset by shutdown_kfd_profiler().
@@ -155,14 +151,12 @@ discover_stream_dispatch_log_gpus(const char* nodes_path)
 std::unordered_set<uint32_t>
 discover_dispatch_log_gpus(uint32_t profiler_abi_version, const char* nodes_path)
 {
-    if(profiler_abi_version != kProfilerAbiVersion &&
-       profiler_abi_version != kProfilerAbiVersionPerfmon)
+    if(profiler_abi_version < kMinProfilerAbiVersion)
     {
-        ROCP_INFO << fmt::format("KFD dispatch-log: profiler ABI version {} not in {{{}, {}}}, "
-                                 "using HSA timestamps",
-                                 profiler_abi_version,
-                                 kProfilerAbiVersion,
-                                 kProfilerAbiVersionPerfmon);
+        ROCP_INFO << fmt::format(
+            "KFD dispatch-log: profiler ABI version {} < minimum {}, using HSA timestamps",
+            profiler_abi_version,
+            kMinProfilerAbiVersion);
         return {};
     }
 
