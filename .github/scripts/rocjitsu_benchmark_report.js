@@ -307,8 +307,8 @@ function renderComparison(comparisons, band) {
   return lines;
 }
 
-// Keep the weekly selection aligned with dashboard Overview's 1W projection.
-// The bot is installed independently of the dashboard; parity tests cover this contract.
+// Select a weekly reference for the lightweight published-run summary.
+// The standalone bot's calculations can differ from the dashboard.
 function overviewReferences(runs, candidate, candidateResults) {
   const time = (value) => typeof value === 'string' ? Date.parse(value) : NaN;
   const cutoff = time(candidate.execution_summary.timestamp);
@@ -388,7 +388,7 @@ function renderPerformanceOverview(runs, candidate, candidateResults) {
     '### Performance overview', '',
     `- **Candidate commit:** ${commit(candidate)}`,
     `- **Latest develop reference:** ${commit(latest)}`,
-    `- **1W reference (dashboard Overview):** ${commit(weekly)}`, '',
+    `- **1W reference:** ${commit(weekly)}`, '',
     '| Target | Thread policy | Matched benchmarks | Candidate duration | Latest develop duration / speedup | 1W reference duration / speedup |',
     '| --- | --- | ---: | ---: | ---: | ---: |',
   ];

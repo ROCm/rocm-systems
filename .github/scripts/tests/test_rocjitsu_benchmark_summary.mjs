@@ -59,6 +59,8 @@ test('reports run coverage, timing changes and exact run links', async () => {
   assert.equal(url.searchParams.get('compareBaseline'), 'baseline');
   assert.equal(url.searchParams.get('compareCandidate'), 'candidate');
   assert.equal(url.searchParams.get('view'), 'compare');
+  assert.match(summary.markdown, /\*\*1W reference:\*\*/);
+  assert.doesNotMatch(summary.markdown, /dashboard Overview/);
   assert.deepEqual(url.searchParams.getAll('compareTargets'), ['gfx950']);
   assert.deepEqual(url.searchParams.getAll('compareSuites'), ['GPT-OSS', 'Triton']);
   assert.deepEqual(url.searchParams.getAll('compareModes'), ['default']);
@@ -345,9 +347,7 @@ test('missing measurement chronology leaves overview references unavailable', as
   assert.equal(summary.baselineRunId, 'baseline');
 });
 
-test('weekly reference matches the real dashboard selector on the candidate-time snapshot', async () => {
-  const { adaptPublishedDashboardData } = await import('../../../emulation/rocjitsu/website/dashboard/src/data/dashboardDataAdapter.js');
-  const { selectOverviewProjection } = await import('../../../emulation/rocjitsu/website/dashboard/src/data/overviewProjection.js');
+test('selects an eligible weekly reference from the candidate-time snapshot', async () => {
   const make = (id, sha, commit, completed, options = {}) => {
     const entry = run(id, sha.repeat(40), completed);
     entry.provenance.rocjitsu.rocjitsu_commit_timestamp = commit;
@@ -358,7 +358,10 @@ test('weekly reference matches the real dashboard selector on the candidate-time
     if (options.invalid) entry.benchmark_results[0].timing_results_s = [0];
     return entry;
   };
-  for (const variant of ['ordinary', 'failed', 'invalid', 'missing', 'catalog', 'repeated']) {
+  for (const [variant, expected] of Object.entries({
+    ordinary: 'first', failed: 'later', invalid: 'later',
+    missing: 'first', catalog: 'first', repeated: 'first',
+  })) {
     const history = [
       make('outside', 'a', '2026-10-24T12:00:00Z', '2026-10-24T13:00:00Z'),
       make('first', 'b', '2026-10-25T01:00:00Z', '2026-10-25T02:00:00Z', {
@@ -370,10 +373,6 @@ test('weekly reference matches the real dashboard selector on the candidate-time
     ];
     if (variant === 'repeated') history.push(make('repeat', 'b', '2026-10-25T01:00:00Z', '2026-10-31T14:00:00Z'));
     const candidate = make('candidate', 'c', '2026-11-01T01:00:00Z', '2026-11-01T02:00:00Z');
-    const source = dataset(history);
-    const { data } = adaptPublishedDashboardData(source);
-    const projection = selectOverviewProjection(data, { targets: ['gfx950'], modes: ['default'], suites: ['Triton', 'GPT-OSS'] }, { range: '1W' });
-    const expected = projection.rows[0]?.reference?.runId ?? null;
     const summary = await summarize([...history, candidate]);
     assert.equal(summary.overview.weeklyRunId, expected, variant);
     assert.equal(summary.overview.latestDevelopRunId, variant === 'repeated' ? 'repeat' : 'later');
