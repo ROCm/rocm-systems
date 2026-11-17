@@ -100,7 +100,8 @@ endif()
 # Tailor the test tags to the GPU(s) of the build machine: build and run the
 # hip_tests_sysinfo probe before generating the test definitions, and disable
 # test cases whose 'requires' list names a device feature the probe reports as
-# unavailable. The resulting binaries are specific to the build machine.
+# unavailable. Only devices matching the offload targets the tests are built for
+# are probed. The resulting binaries are specific to the build machine.
 # The probe runs once per build tree; delete hip_tests_features.yaml from the
 # config build directory to re-probe.
 option(
@@ -144,9 +145,24 @@ if(HIP_TESTS_TAILOR_TAGS_TO_CURRENT_MACHINE)
     endif()
     target_link_libraries(hip_tests_sysinfo PRIVATE ${GPGPU_LINKER_LIBRARIES})
 
+    # Target IDs (e.g. gfx942:xnack+) the tests are built for, taken from the
+    # --offload-arch flags. Devices that match none of them are not probed.
+    set(_sysinfo_targets)
+    foreach(_offload_arch ${OFFLOAD_ARCH_LIST})
+        string(REPLACE "--offload-arch=" "" _target_id "${_offload_arch}")
+        list(APPEND _sysinfo_targets "${_target_id}")
+    endforeach()
+    list(JOIN _sysinfo_targets "," _sysinfo_targets)
+    message(
+        STATUS
+        "hip_tests_sysinfo probes devices matching: ${_sysinfo_targets}"
+    )
+
     add_custom_command(
         OUTPUT ${HIP_TESTS_FEATURES_YAML}
-        COMMAND hip_tests_sysinfo --output ${HIP_TESTS_FEATURES_YAML}
+        COMMAND
+            hip_tests_sysinfo --targets "${_sysinfo_targets}" --output
+            ${HIP_TESTS_FEATURES_YAML}
         DEPENDS hip_tests_sysinfo
         COMMENT "Probing HIP device features of the build machine"
     )

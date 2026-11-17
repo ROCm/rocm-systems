@@ -135,7 +135,11 @@ When the tests are configured with `-DHIP_TESTS_TAILOR_TAGS_TO_CURRENT_MACHINE=O
 the build also compiles and runs `config/sysinfo/hip_tests_sysinfo.cc` before
 generating `hip_test_config.hh`. It probes the GPUs visible on the build machine and
 writes the available features to `hip_tests_features.yaml` in the config build
-directory. A feature counts as available only when every visible device supports it.
+directory. Only devices the tests are built for are probed: a device must match one
+of the `--offload-arch` target IDs (e.g. `gfx1201` or `gfx942:xnack+`, as derived
+from `OFFLOAD_ARCH_STR` or `GPU_TARGETS`). Other devices are listed in the report
+with `selected: false` and ignored, and the build fails if no device matches. A
+feature counts as available only when every probed device supports it.
 Test cases that require an unavailable feature are still compiled, but are disabled
 like a `disabled`/`unsupported` match: they get the `[disabled]` tag, plus a
 `[missing_<feature>]` tag for every missing feature. The resulting binaries are
