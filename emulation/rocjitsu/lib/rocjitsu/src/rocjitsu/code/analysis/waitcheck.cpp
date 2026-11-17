@@ -1461,7 +1461,7 @@ private:
           cfg_has_constant_scc_ |= predicate->kind == SccPredicate::Kind::Constant;
         }
         const InstDefUse du =
-            inst_def_use_for_waitcheck(inst, VgprMsbState{}, arch, wavefront_size_);
+            inst_def_use_for_waitcheck(inst, banks.vgpr_msb, arch, wavefront_size_);
         auto [defs, inserted] = path_scalar_defs_.try_emplace(&inst);
         if (inserted) {
           du.defs.for_each([&](RegisterRef ref) {
@@ -1475,7 +1475,7 @@ private:
         uint64_t issued_scc_write_counters = 0;
         bool scalar_result_from_operand = false;
         bool scalar_result_dest_scc = false;
-        const auto classified = classify_events(inst, arch).value();
+        const auto classified = effective_events(inst, banks.vgpr_msb, arch);
         may_defer_m0_write |= gfx11_wave32 && du.defs.contains({RegClass::M0, 0, 1}) &&
                               std::ranges::any_of(classified, [](const ClassifiedEvent &event) {
                                 return is_completion_counter(event.counter) &&
@@ -2186,8 +2186,8 @@ private:
     return encoding.scope >= 2; // SCOPE_DEV or SCOPE_SYS
   }
 
-  static bool cdna5_cache_wait_matches(const PendingWaitGroup &group, const Instruction &consumer,
-                                       WaitCounterKind counter, rj_code_arch_t arch) {
+  bool cdna5_cache_wait_matches(const PendingWaitGroup &group, const Instruction &consumer,
+                                WaitCounterKind counter, rj_code_arch_t arch) const {
     if (arch != ROCJITSU_CODE_ARCH_CDNA5 ||
         (counter != WaitCounterKind::Load && counter != WaitCounterKind::Store) ||
         !consumer.parent())
@@ -2263,7 +2263,7 @@ private:
         return false;
       // Global reads never dirty L2. Only writes and read-modify-writes
       // have data that a release writeback needs to publish.
-      const auto events = classify_events(previous, arch).value();
+      const auto events = effective_events(previous, {.known = false}, arch);
       return std::ranges::any_of(
           events, [counter](const ClassifiedEvent &event) { return event.counter == counter; });
     }
@@ -2311,7 +2311,7 @@ private:
       bool past_xcnt_drain = false, bool forward_search = false,
       CounterParityAlternatives *alternatives = nullptr) {
     const PendingState *requirement_state = &group.state_before;
-    auto current_events = classify_events(consumer, arch).value();
+    auto current_events = effective_events(consumer, requirement_state->vgpr_msb, arch);
     if (!expert_waits_enabled(*requirement_state)) {
       std::erase_if(current_events, [](const ClassifiedEvent &event) {
         return event.requires_expert_scheduling();
@@ -3328,7 +3328,7 @@ private:
       const PendingState *dependency_state = &state;
       const InstDefUse du = inst_def_use_for_waitcheck(instruction, dependency_state->vgpr_msb,
                                                        arch, wavefront_size_, dependency_state->m0);
-      auto current_events = classify_events(instruction, arch).value();
+      auto current_events = effective_events(instruction, state.vgpr_msb, arch);
       if (!expert_waits_enabled(*dependency_state)) {
         std::erase_if(current_events, [](const ClassifiedEvent &event) {
           return event.requires_expert_scheduling();
@@ -4041,7 +4041,7 @@ private:
         const bool immediate = requirement->consumer_section_offset == consumer_section_offset;
         bool verify = !immediate;
         if (immediate) {
-          const auto events = classify_events(consumer, arch).value();
+          const auto events = effective_events(consumer, group.state_before.vgpr_msb, arch);
           const auto capacity = *no_wait;
           verify = std::ranges::any_of(events, [&](const ClassifiedEvent &event) {
             if (event.counter != counter)
@@ -5028,24 +5028,58 @@ private:
     du.has_exec_masked_vector_def = vector;
   }
 
-  // CDNA2–4 nullify an entire vector memory operation if any result word
-  // falls outside its descriptor-selected bank (ISA section 3.6.1). Such an
-  // instruction still occupies a counter position with no register payload.
-  [[nodiscard]] bool rejects_memory_destination(const Instruction &inst) const {
-    if (!current_kernel_ || !current_kernel_->max_memory_vgprs || !inst.is_memory_op())
+  // A proven out-of-allocation result nullifies its vector memory operation.
+  // CDNA2–4 still occupy a counter position. GFX12 suppresses ordinary
+  // requests; a generic FLAT may reserve a conditional empty-EXEC position.
+  [[nodiscard]] bool rejects_memory_destination(const Instruction &inst, const VgprMsbState &banks,
+                                                rj_code_arch_t arch) const {
+    if (!current_kernel_ || !current_kernel_->max_memory_vgprs || source_allocation_may_change_ ||
+        !inst.is_memory_op())
       return false;
+    const bool gfx12 = arch == ROCJITSU_CODE_ARCH_CDNA5 || arch == ROCJITSU_CODE_ARCH_RDNA4;
+    bool buffer_load = false;
+    if (gfx12) {
+      const auto name = inst.mnemonic();
+      buffer_load = name.starts_with("buffer_load_") || name.starts_with("tbuffer_load_");
+      if (!(inst.flags() & SIMPLE_MEMORY_RESULT) && !name.starts_with("flat_") && !buffer_load &&
+          !(is_vmem_atomic(name) && (name.starts_with("global_") || name.starts_with("buffer_"))))
+        return false;
+    }
+    amdgpu::RegisterModifiers modifiers;
+    if (buffer_load)
+      inst.amdgpu_register_modifiers(modifiers);
     for (int i = 0; i < inst.num_dst_operands(); ++i) {
-      const auto reg = inst.dst_operand(i)->decoded_vgpr();
+      const auto *dst = inst.dst_operand(i);
+      const auto reg = dst->decoded_vgpr();
       if (!reg)
         continue;
-      const bool acc = reg->index >= amdgpu::ACC_VGPR_OFFSET;
+      const bool acc = !gfx12 && reg->index >= amdgpu::ACC_VGPR_OFFSET;
       const uint32_t base = acc ? amdgpu::ACC_VGPR_OFFSET : 0;
       const uint32_t count =
           acc ? current_kernel_->max_memory_acc_vgprs : current_kernel_->max_memory_vgprs;
-      if (reg->index - base + reg->width > count)
+      const uint32_t bank = arch == ROCJITSU_CODE_ARCH_CDNA5 && banks.known
+                                ? banks.for_role(dst->vgpr_msb_role()) * 256u
+                                : 0;
+      const uint32_t result_width =
+          gfx12 && wavefront_size_ == 64 && (inst.flags() & COMPACT_WAVE64_MEMORY_RESULT)
+              ? std::max(1u, uint32_t{reg->width} / 2)
+              : reg->width;
+      const uint32_t width = result_width + (buffer_load && modifiers.buffer_tfe);
+      // If the bank is unknown, bank zero is the smallest possible address.
+      // Crossing the limit there proves rejection for every possible bank.
+      if (reg->index - base + bank + width > count)
         return true;
     }
     return false;
+  }
+
+  [[nodiscard]] std::vector<ClassifiedEvent>
+  effective_events(const Instruction &inst, const VgprMsbState &banks, rj_code_arch_t arch) const {
+    auto events = classify_events(inst, arch).value();
+    if ((arch == ROCJITSU_CODE_ARCH_CDNA5 || arch == ROCJITSU_CODE_ARCH_RDNA4) &&
+        rejects_memory_destination(inst, banks, arch))
+      events.clear();
+    return events;
   }
 
   [[nodiscard]] InstDefUse inst_def_use_for_waitcheck(const Instruction &inst,
@@ -5057,7 +5091,7 @@ private:
     du.uses = {};
     du.has_exec_masked_vector_def = false;
     du.has_predicated_def = inst.flags() & PREDICATED_DEF;
-    if (rejects_memory_destination(inst))
+    if (rejects_memory_destination(inst, state, arch))
       return du;
 
     const bool relative = inst.mnemonic().starts_with("s_movrel") ||
@@ -7380,7 +7414,7 @@ private:
               allocated &&
               state.masks.exec.value_or(state.progress.source_implies_nonempty_exec &&
                                         (!state.progress.crossed_exec_expansion || dedicated));
-          const auto current = classify_events(inst, arch).value();
+          const auto current = effective_events(inst, inst_view.vgpr_msb, arch);
           for (const auto &issued : current) {
             if (vm_source && event.kind == WaitEventKind::VmemStore &&
                 issued.counter == WaitCounterKind::Store && issued.kind == WaitEventKind::VmemStore)
@@ -7413,7 +7447,7 @@ private:
           }
         } else if (is_completion_counter(event.counter)) {
           const auto order = completion_order_kind(event.counter, event.kind, arch);
-          const auto current = classify_events(inst, arch).value();
+          const auto current = effective_events(inst, inst_view.vgpr_msb, arch);
           for (const auto &issued : current) {
             const bool dedicated_vmem = issued.kind == WaitEventKind::VmemNoSamplerLoad ||
                                         issued.kind == WaitEventKind::VmemStore;
@@ -9735,7 +9769,7 @@ private:
         classification.check_defs = false;
       }
     }
-    if (rejects_memory_destination(inst)) {
+    if (rejects_memory_destination(inst, state.vgpr_msb, arch)) {
       classification.registers = TrackedRegisterSource::None;
       classification.check_uses = false;
       classification.check_defs = false;
@@ -9920,7 +9954,7 @@ private:
 
     InstDefUse du =
         inst_def_use_for_waitcheck(inst, state.vgpr_msb, arch, wavefront_size_, state.m0);
-    auto events = classify_events(inst, arch).value();
+    auto events = effective_events(inst, state.vgpr_msb, arch);
     apply_admission(state, inst, events, arch, false);
     const bool is_async_barrier =
         arch == ROCJITSU_CODE_ARCH_CDNA5 && inst.mnemonic() == "ds_atomic_async_barrier_arrive_b64";
@@ -10154,6 +10188,8 @@ waitcheck_kernel_from_descriptor(std::string name, uint64_t descriptor_vaddr, ui
       arch == ROCJITSU_CODE_ARCH_CDNA4) {
     ordinary = std::min(vgprs, amdhsa::gfx90a_accum_vgpr_base(descriptor.compute_pgm_rsrc3));
     accumulators = std::min(vgprs - ordinary, amdgpu::ACC_VGPR_OFFSET);
+  } else if (arch == ROCJITSU_CODE_ARCH_CDNA5 || arch == ROCJITSU_CODE_ARCH_RDNA4) {
+    ordinary = vgprs;
   }
   return {std::move(name),
           descriptor_vaddr,
