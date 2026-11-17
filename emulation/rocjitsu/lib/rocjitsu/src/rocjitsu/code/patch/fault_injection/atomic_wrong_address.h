@@ -89,7 +89,8 @@ discover_atomic_wrong_address(const FaultMutationContext &, std::string_view, Fa
 select_atomic_wrong_address(const AtomicInventory &, const AtomicSelector &, FaultMutationError &);
 /// @brief Apply a positive, four-byte-aligned byte delta to one supported atomic.
 /// @details The delta must not exceed 0x7fffff; the resulting offset must fit the
-/// form's signed field. Each call produces an independent pristine-source mutant
+/// form's signed field. Modern Buffer atomics require a nonnegative source offset.
+/// Each call produces an independent pristine-source mutant
 /// and changes only the immediate; runtime address validity remains the caller's duty.
 [[nodiscard]] FailureOr<AtomicResult> apply_atomic_wrong_address(const FaultMutationContext &,
                                                                  const AtomicSelection &,
