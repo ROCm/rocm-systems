@@ -430,7 +430,7 @@ TEST(WaitcheckStream, GlobalWritebackDoesNotAdvanceALoadOnGfx12) {
   EXPECT_EQ(report.diagnostics.front().required_count, 0u);
 }
 
-TEST(WaitcheckStream, CdnaBufferInvalidateAdvancesAnOlderLoad) {
+TEST(WaitcheckStream, CdnaBufferCacheAcknowledgmentsAdvanceAnOlderLoad) {
   for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
     for (bool invalidate : {false, true}) {
       for (unsigned threshold : {0u, 1u, 2u}) {
@@ -443,7 +443,7 @@ TEST(WaitcheckStream, CdnaBufferInvalidateAdvancesAnOlderLoad) {
         program.insert(program.end(), {0xbf8c0f70u | threshold, v_mov(1, 0)});
         const auto report = analyze(program, arch);
         ASSERT_FALSE(report.incomplete);
-        const unsigned required = invalidate ? 1 : 0;
+        const unsigned required = 1;
         ASSERT_EQ(report.diagnostics.size(), threshold > required ? 1u : 0u);
         if (threshold > required)
           EXPECT_EQ(report.diagnostics.front().required_count, required);
