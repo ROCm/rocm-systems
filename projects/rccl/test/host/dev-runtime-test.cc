@@ -224,8 +224,8 @@ TEST(SymIsHostSegment, Invalid_ReturnsFalse) {
 
 
 // ---------------------------------------------------------------------------
-// computeLsaSize returns the LSA team size by one of three paths:
-//   cached    bigSize != 0                             -> devrState.lsaSize
+// computeLsaTeamSize returns the LSA team size by one of three paths:
+//   cached    bigSize != 0                             -> devrState.lsaTeamSize
 //   clique    p2pCrossClique && nvlDomainSize == nRanks -> nRanks
 //   node gcd  otherwise, gcd over runs of equal rankToNode entries
 //
@@ -257,11 +257,11 @@ protected:
     g_devrCheckRegistrationSupport = RealDevrCheckRegistrationSupport;
   }
 
-  // Move nRanks, not lsaSize: lsaSize indexes the fixture's two-element
-  // lsaRankList, so growing it reads off the end.
+  // Move nRanks, not lsaTeamSize: lsaTeamSize indexes the fixture's two-element
+  // lsaTeamRankList, so growing it reads off the end.
   static void RmaProxyTerms(ncclComm* c, bool enabled) {
     c->nRanks = enabled ? 4 : 2;
-    c->devrState.lsaSize = 2;  // == nRanks when disabled, so one LSA team
+    c->devrState.lsaTeamSize = 2;  // == nRanks when disabled, so one LSA team
     c->config.numRmaCtx = enabled ? 1 : 0;
     c->globalRmaProxySupport = enabled;
   }
@@ -288,7 +288,7 @@ protected:
   }
 };
 
-class ComputeLsaSizeTest : public DevRuntimeMicroTest {
+class ComputeLsaTeamSizeTest : public DevRuntimeMicroTest {
 protected:
   std::unique_ptr<ncclComm> commStorage;
   ncclComm* comm = nullptr;
@@ -308,70 +308,70 @@ protected:
   }
 };
 
-// Branch: cached early return. lsaSize differs from nRanks so a recomputing
+// Branch: cached early return. lsaTeamSize differs from nRanks so a recomputing
 // path cannot pass; rankToNode is left null so a regression faults.
-TEST_F(ComputeLsaSizeTest, Cached_ReturnsStoredLsaSize) {
+TEST_F(ComputeLsaTeamSizeTest, Cached_ReturnsStoredLsaSize) {
   comm->nRanks = 8;
   comm->devrState.bigSize = 1 << 20;
-  comm->devrState.lsaSize = 4;
-  EXPECT_EQ(computeLsaSize(comm), 4);
+  comm->devrState.lsaTeamSize = 4;
+  EXPECT_EQ(computeLsaTeamSize(comm), 4);
 }
 
 // Branch: both && arms hold. The topology would give 2, so this pins the override.
-TEST_F(ComputeLsaSizeTest, CrossCliqueFullNvlDomain_ReturnsNRanks) {
+TEST_F(ComputeLsaTeamSizeTest, CrossCliqueFullNvlDomain_ReturnsNRanks) {
   SetTopology({0, 0, 1, 1});
   comm->p2pCrossClique = true;
   comm->nvlDomainSize = comm->nRanks;
-  EXPECT_EQ(computeLsaSize(comm), 4);
+  EXPECT_EQ(computeLsaTeamSize(comm), 4);
 }
 
 // Branch: second && arm fails, falling through to the gcd path.
-TEST_F(ComputeLsaSizeTest, CrossCliquePartialNvlDomain_FallsBackToNodeGcd) {
+TEST_F(ComputeLsaTeamSizeTest, CrossCliquePartialNvlDomain_FallsBackToNodeGcd) {
   SetTopology({0, 0, 1, 1});
   comm->p2pCrossClique = true;
   comm->nvlDomainSize = 2;
-  EXPECT_EQ(computeLsaSize(comm), 2);
+  EXPECT_EQ(computeLsaTeamSize(comm), 2);
 }
 
 // Branch: one node, so the run reaches nRanks and gcd(0, 4) == 4.
-TEST_F(ComputeLsaSizeTest, SingleNode_ReturnsNRanks) {
+TEST_F(ComputeLsaTeamSizeTest, SingleNode_ReturnsNRanks) {
   SetTopology({0, 0, 0, 0});
-  EXPECT_EQ(computeLsaSize(comm), 4);
+  EXPECT_EQ(computeLsaTeamSize(comm), 4);
 }
 
 // Branch: node index changes mid-loop; two runs of 2 give gcd(2, 2) == 2.
-TEST_F(ComputeLsaSizeTest, TwoEqualNodes_ReturnsRunLength) {
+TEST_F(ComputeLsaTeamSizeTest, TwoEqualNodes_ReturnsRunLength) {
   SetTopology({0, 0, 1, 1});
-  EXPECT_EQ(computeLsaSize(comm), 2);
+  EXPECT_EQ(computeLsaTeamSize(comm), 2);
 }
 
 // Uneven runs: gcd(2, 1) == 1.
-TEST_F(ComputeLsaSizeTest, UnevenNodes_ReturnsGcdOfRuns) {
+TEST_F(ComputeLsaTeamSizeTest, UnevenNodes_ReturnsGcdOfRuns) {
   SetTopology({0, 0, 1});
-  EXPECT_EQ(computeLsaSize(comm), 1);
+  EXPECT_EQ(computeLsaTeamSize(comm), 1);
 }
 
 // Three runs, so the fold inside the loop has to carry a value forward.
-// With only two runs it cannot be observed: lsaSize starts at 0 and
+// With only two runs it cannot be observed: lsaTeamSize starts at 0 and
 // gcd(0, n) == n, so dropping the mid-loop fold gives the same answer. Here
 // runs of 3, 3 and 2 fold to gcd(gcd(3, 3), 2) == 1, where skipping the
 // in-loop folds would yield 2.
-TEST_F(ComputeLsaSizeTest, ThreeRuns_FoldsEveryRunNotJustTheLast) {
+TEST_F(ComputeLsaTeamSizeTest, ThreeRuns_FoldsEveryRunNotJustTheLast) {
   SetTopology({0, 0, 0, 1, 1, 1, 2, 2});
-  EXPECT_EQ(computeLsaSize(comm), 1);
+  EXPECT_EQ(computeLsaTeamSize(comm), 1);
 }
 
 // Boundary: nRanks == 1 skips the loop; gcd(0, 1) == 1.
-TEST_F(ComputeLsaSizeTest, SingleRank_ReturnsOne) {
+TEST_F(ComputeLsaTeamSizeTest, SingleRank_ReturnsOne) {
   SetTopology({0});
-  EXPECT_EQ(computeLsaSize(comm), 1);
+  EXPECT_EQ(computeLsaTeamSize(comm), 1);
 }
 
 
 // ---------------------------------------------------------------------------
-// ncclDevrIsOneLsaTeam: computeLsaSize(comm) == comm->nRanks. No conditional of
-// its own, and computeLsaSize is covered above, so these pin only the compare.
-// The fixture uses the cached path to hand it a chosen lsaSize.
+// ncclDevrIsOneLsaTeam: computeLsaTeamSize(comm) == comm->nRanks. No conditional of
+// its own, and computeLsaTeamSize is covered above, so these pin only the compare.
+// The fixture uses the cached path to hand it a chosen lsaTeamSize.
 
 class DevrIsOneLsaTeamTest : public DevRuntimeMicroTest {
 protected:
@@ -383,19 +383,19 @@ protected:
     commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
     comm = commStorage.get();
     comm->nRanks = 8;
-    comm->devrState.bigSize = 1 << 20;  // take computeLsaSize's cached path
+    comm->devrState.bigSize = 1 << 20;  // take computeLsaTeamSize's cached path
   }
 };
 
-// lsaSize == nRanks: a single team spans the comm.
+// lsaTeamSize == nRanks: a single team spans the comm.
 TEST_F(DevrIsOneLsaTeamTest, LsaSizeEqualsNRanks_ReturnsTrue) {
-  comm->devrState.lsaSize = 8;
+  comm->devrState.lsaTeamSize = 8;
   EXPECT_TRUE(ncclDevrIsOneLsaTeam(comm));
 }
 
-// lsaSize < nRanks: the comm holds more than one team.
+// lsaTeamSize < nRanks: the comm holds more than one team.
 TEST_F(DevrIsOneLsaTeamTest, LsaSizeBelowNRanks_ReturnsFalse) {
-  comm->devrState.lsaSize = 4;
+  comm->devrState.lsaTeamSize = 4;
   EXPECT_FALSE(ncclDevrIsOneLsaTeam(comm));
 }
 
@@ -441,20 +441,22 @@ protected:
   }
 
   void TearDown() override {
-    free(comm->devrState.lsaRankList);
+    // lsaTeamRankList points into lsaDomainRankList, which owns the allocation.
+    free(comm->devrState.lsaDomainRankList);
     ResetDevRuntimeMicroFakes();
   }
 };
 
 // Branch: bigSize != 0 means a previous call already ran, so this one is a
-// no-op. lsaSize stays as set rather than being recomputed from the topology.
+// no-op. lsaTeamSize stays as set rather than being recomputed from the topology.
 TEST_F(DevrInitOnceTest, AlreadyInitialised_ReturnsWithoutTouchingState) {
   comm->devrState.bigSize = 1 << 20;
-  comm->devrState.lsaSize = 99;
+  comm->devrState.lsaTeamSize = 99;
 
   EXPECT_EQ(ncclDevrInitOnce(comm), ncclSuccess);
-  EXPECT_EQ(comm->devrState.lsaSize, 99);
-  EXPECT_EQ(comm->devrState.lsaRankList, nullptr);
+  EXPECT_EQ(comm->devrState.lsaTeamSize, 99);
+  EXPECT_EQ(comm->devrState.lsaTeamRankList, nullptr);
+  EXPECT_EQ(comm->devrState.lsaDomainRankList, nullptr);
 }
 
 // Branch: symmetric path with WIN_STRIDE unset (-1). bigSize comes from the
@@ -465,7 +467,7 @@ TEST_F(DevrInitOnceTest, SymmetricDefaultStride_SizesFromLargestPeer) {
   ASSERT_EQ(ncclDevrInitOnce(comm), ncclSuccess);
   EXPECT_EQ(comm->devrState.granularity, 4096u);
   EXPECT_EQ(comm->devrState.bigSize, size_t(1) << 32);  // 4MB aligned up to 4GB
-  EXPECT_EQ(comm->devrState.lsaSize, 2);
+  EXPECT_EQ(comm->devrState.lsaTeamSize, 2);
   EXPECT_EQ(comm->devrState.nLsaTeams, 1);
 }
 
@@ -492,7 +494,9 @@ TEST_F(DevrInitOnceTest, GranularityQueryFails_ReturnsError) {
 
   EXPECT_NE(ncclDevrInitOnce(comm), ncclSuccess);
   EXPECT_EQ(granularity.calls, 1);
-  comm->devrState.lsaRankList = nullptr;  // freed on the failure path already
+  // fail_lsaRankList frees the domain list (which the team list points into) and clears it.
+  EXPECT_EQ(comm->devrState.lsaDomainRankList, nullptr);
+  comm->devrState.lsaTeamRankList = nullptr;  // dangling into the freed domain list
 }
 
 // Branch: proxy-only. bigSize is just an initialised marker, and the LSA team
@@ -504,13 +508,137 @@ TEST_F(DevrInitOnceTest, ProxyOnly_RebuildsTeamFromLocalRanks) {
 
   ASSERT_EQ(ncclDevrInitOnce(comm), ncclSuccess);
   EXPECT_EQ(comm->devrState.bigSize, 1u);
-  EXPECT_EQ(comm->devrState.lsaSize, comm->localRanks);
-  EXPECT_EQ(comm->devrState.lsaSelf, comm->localRank);
-  ASSERT_NE(comm->devrState.lsaRankList, nullptr);
-  EXPECT_EQ(comm->devrState.lsaRankList[0], 0);
-  EXPECT_EQ(comm->devrState.lsaRankList[1], 1);
+  EXPECT_EQ(comm->devrState.lsaTeamSize, comm->localRanks);
+  EXPECT_EQ(comm->devrState.lsaTeamSelf, comm->localRank);
+  ASSERT_NE(comm->devrState.lsaTeamRankList, nullptr);
+  EXPECT_EQ(comm->devrState.lsaTeamRankList[0], 0);
+  EXPECT_EQ(comm->devrState.lsaTeamRankList[1], 1);
 }
 
+// Proxy-only under MNNVL (AMD scale-up fabric with HIP_FABRIC_API): the domain starts as the fabric clique, which
+// spans nodes, and is narrowed back to the node-local ranks so the CE/IPC team never covers a remote rank.
+TEST_F(DevrInitOnceTest, ProxyOnly_MnnvlNarrowsTheCliqueToTheLocalRanks) {
+  comm->symmetricSupport = 0;
+  comm->MNNVL = 1;
+  comm->nRanks = 4;
+  comm->rank = 3;
+  comm->localRanks = 2;
+  comm->localRank = 1;
+  rankToNode.assign({0, 0, 1, 1});
+  comm->rankToNode = rankToNode.data();
+  localRankToRank.assign({2, 3});
+  comm->localRankToRank = localRankToRank.data();
+  int cliqueRanks[] = {0, 1, 2, 3};
+  comm->clique.ranks = cliqueRanks;
+  comm->clique.size = 4;
+  comm->cliqueRank = 3;
+
+  ASSERT_EQ(ncclDevrInitOnce(comm), ncclSuccess);
+  ncclDevrState* devr = &comm->devrState;
+  EXPECT_EQ(devr->lsaDomainSize, 2);
+  EXPECT_EQ(devr->lsaDomainSelf, 1);
+  EXPECT_EQ(devr->lsaTeamSize, 2);
+  EXPECT_EQ(devr->lsaTeamSelf, 1);
+  EXPECT_EQ(devr->nLsaTeams, 2);
+  ASSERT_NE(devr->lsaTeamRankList, nullptr);
+  EXPECT_EQ(devr->lsaTeamRankList, devr->lsaDomainRankList);  // still the single allocation TearDown frees
+  EXPECT_EQ(std::vector<int>(devr->lsaTeamRankList, devr->lsaTeamRankList + 2), (std::vector<int>{2, 3}));
+}
+
+
+// 2.32.6 initLsaDomainData: the LSA domain is the node-local ranks normally, the MNNVL clique when MNNVL is active,
+// and every rank sharing this rank's NVLink fabric clusterUuid under cross-clique P2P. The list is always an owned
+// copy. (src/diagnostics/p2p.cc now takes its P2P rank set from here, so this is also that set's derivation.)
+TEST_F(DevrInitOnceTest, LsaDomain_MnnvlUsesCopyOfCliqueRanks) {
+  comm->symmetricSupport = 1;
+  comm->MNNVL = 1;
+  int cliqueRanks[] = {1, 0};
+  comm->clique.ranks = cliqueRanks;
+  comm->clique.size = 2;
+  comm->cliqueRank = 1;
+
+  ASSERT_EQ(ncclDevrInitOnce(comm), ncclSuccess);
+  ncclDevrState* devr = &comm->devrState;
+  ASSERT_NE(devr->lsaDomainRankList, nullptr);
+  EXPECT_NE(devr->lsaDomainRankList, cliqueRanks);
+  EXPECT_EQ(std::vector<int>(devr->lsaDomainRankList, devr->lsaDomainRankList + 2), (std::vector<int>{1, 0}));
+  EXPECT_EQ(devr->lsaDomainSelf, 1);
+  EXPECT_EQ(devr->lsaDomainSize, 2);
+}
+
+TEST_F(DevrInitOnceTest, LsaDomain_CrossCliqueCollectsSameClusterUuidInRankOrder) {
+  comm->symmetricSupport = 1;
+  comm->p2pCrossClique = true;
+  comm->MNNVL = 1;  // cross-clique takes precedence over the clique
+  comm->nRanks = 6;
+  comm->rank = 5;
+  comm->nvlDomainSize = 3;
+  // Three two-rank nodes, so the gcd LSA team is 2 (nvlDomainSize != nRanks keeps the gcd path).
+  rankToNode.assign({0, 0, 1, 1, 2, 2});
+  comm->rankToNode = rankToNode.data();
+  peers.assign(comm->nRanks, ncclPeerInfo{});
+  const uint8_t tags[] = {7, 9, 7, 9, 7, 9};
+  for (int r = 0; r < comm->nRanks; r++) {
+    peers[r].totalGlobalMem = 1u << 20;
+    peers[r].fabricInfo.clusterUuid[15] = tags[r];
+  }
+  comm->peerInfo = peers.data();
+
+  ASSERT_EQ(ncclDevrInitOnce(comm), ncclSuccess);
+  ncclDevrState* devr = &comm->devrState;
+  ASSERT_NE(devr->lsaDomainRankList, nullptr);
+  EXPECT_EQ(std::vector<int>(devr->lsaDomainRankList, devr->lsaDomainRankList + 3), (std::vector<int>{1, 3, 5}));
+  EXPECT_EQ(devr->lsaDomainSelf, 2);
+  EXPECT_EQ(devr->lsaDomainSize, 3);
+  EXPECT_EQ(devr->lsaTeamSize, 2);
+  EXPECT_EQ(devr->lsaTeamSelf, 1);
+  EXPECT_EQ(devr->lsaTeamRankList, devr->lsaDomainRankList + 1);  // domain slot of team rank 0
+}
+
+// Cross-clique with the whole comm in one NVLink domain extends the LSA team to every rank.
+TEST_F(DevrInitOnceTest, LsaDomain_CrossCliqueSingleDomainExtendsTeamToAllRanks) {
+  comm->symmetricSupport = 1;
+  comm->p2pCrossClique = true;
+  comm->nRanks = 2;
+  comm->rank = 1;
+  comm->nvlDomainSize = 2;
+  rankToNode.assign({0, 1});  // two nodes: the gcd path alone would give a team of 1
+  comm->rankToNode = rankToNode.data();
+
+  ASSERT_EQ(ncclDevrInitOnce(comm), ncclSuccess);
+  ncclDevrState* devr = &comm->devrState;
+  EXPECT_EQ(std::vector<int>(devr->lsaDomainRankList, devr->lsaDomainRankList + 2), (std::vector<int>{0, 1}));
+  EXPECT_EQ(devr->lsaDomainSelf, 1);
+  EXPECT_EQ(devr->lsaTeamSize, 2);
+  EXPECT_EQ(devr->nLsaTeams, 1);
+}
+
+// Neither MNNVL nor cross-clique: the domain is an owned copy of the node-local ranks, self = localRank.
+TEST_F(DevrInitOnceTest, LsaDomain_LocalRanksUsesCopyOfLocalRankToRank) {
+  comm->symmetricSupport = 1;
+  comm->rank = 1;
+  comm->localRank = 1;
+
+  ASSERT_EQ(ncclDevrInitOnce(comm), ncclSuccess);
+  ncclDevrState* devr = &comm->devrState;
+  ASSERT_NE(devr->lsaDomainRankList, nullptr);
+  EXPECT_NE(devr->lsaDomainRankList, localRankToRank.data());
+  EXPECT_EQ(std::vector<int>(devr->lsaDomainRankList, devr->lsaDomainRankList + 2), (std::vector<int>{0, 1}));
+  EXPECT_EQ(devr->lsaDomainSelf, 1);
+  EXPECT_EQ(devr->lsaDomainSize, 2);
+}
+
+// The cross-clique domain list's ncclCalloc fails: the error propagates and init is not marked done.
+TEST_F(DevrInitOnceTest, LsaDomain_CrossCliqueCallocFailurePropagates) {
+  comm->symmetricSupport = 1;
+  comm->p2pCrossClique = true;
+  comm->nvlDomainSize = 2;
+  ScopedCallocFailure callocFail;  // the domain list is the first ncclCalloc
+
+  EXPECT_EQ(ncclDevrInitOnce(comm), ncclSystemError);
+  EXPECT_EQ(comm->devrState.lsaDomainRankList, nullptr);
+  EXPECT_EQ(comm->devrState.bigSize, 0u);
+}
 
 // ---------------------------------------------------------------------------
 // ncclDevrFinalize tears down everything ncclDevrInitOnce built: the reg-task
@@ -896,11 +1024,11 @@ protected:
     commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
     comm = commStorage.get();
     lsaRankList.assign({0, 1});
-    comm->devrState.lsaRankList = lsaRankList.data();
+    comm->devrState.lsaDomainRankList = lsaRankList.data();
     msg.segmentSize = 4096;
   }
   void TearDown() override {
-    comm->devrState.lsaRankList = nullptr;  // borrowed from lsaRankList, not malloc'd
+    comm->devrState.lsaDomainRankList = nullptr;  // borrowed from lsaRankList, not malloc'd
     ncclCuMemHandleType = savedHandleType;
     ResetDevRuntimeMicroFakes();
   }
@@ -1086,11 +1214,11 @@ protected:
     comm = commStorage.get();
 
     ncclDevrState* devr = &comm->devrState;
-    devr->lsaSelf = 0;
+    devr->lsaDomainSelf = 0;
     devr->bigSize = kBigSize;
     devr->lsaFlatBase = reinterpret_cast<void*>(kBase);
     lsaRankList.assign({0, 1});
-    devr->lsaRankList = lsaRankList.data();
+    devr->lsaDomainRankList = lsaRankList.data();
 
     // messages is laid out [rank][segment], stride kMaxSegments.
     messages.assign(2 * kMaxSegments, symLsaMessage{});
@@ -1102,7 +1230,7 @@ protected:
   }
 
   void TearDown() override {
-    comm->devrState.lsaRankList = nullptr;  // borrowed, not malloc'd
+    comm->devrState.lsaDomainRankList = nullptr;  // borrowed, not malloc'd
     ResetDevRuntimeMicroFakes();
   }
 
@@ -1114,7 +1242,7 @@ protected:
   }
 };
 
-// Branch: r == lsaSelf, so every segment reuses the caller's handle and nothing
+// Branch: r == lsaDomainSelf, so every segment reuses the caller's handle and nothing
 // is imported.
 TEST_F(SymImportAndMapForRankTest, LocalRank_ReusesCallerHandles) {
   std::vector<hipMemGenericAllocationHandle_t> mapped;
@@ -1246,12 +1374,12 @@ TEST_F(SymImportAndMapForRankTest, SegmentFails_StopsWithoutMappingTheRest) {
 
 
 // ---------------------------------------------------------------------------
-// symMemoryMapLsaTeam publishes this rank's segment handles to its LSA team and
+// symMemoryMapLsa publishes this rank's segment handles to its LSA domain and
 // maps every peer's in return: size the message array from the widest rank,
 // export our own segments into it, all-gather, reserve the flat VA on first
 // use, map each rank's segments, then barrier so nobody unmaps early.
 
-class SymMemoryMapLsaTeamTest : public DevRuntimeMicroTest {
+class SymMemoryMapLsaTest : public DevRuntimeMicroTest {
 protected:
   std::unique_ptr<ncclComm> commStorage;
   ncclComm* comm = nullptr;
@@ -1268,12 +1396,12 @@ protected:
     comm->bootstrap = reinterpret_cast<void*>(0x1);  // opaque; bootstrap* are seams
 
     ncclDevrState* devr = &comm->devrState;
-    devr->lsaSelf = 0;
-    devr->lsaSize = 2;
+    devr->lsaDomainSelf = 0;
+    devr->lsaDomainSize = 2;
     devr->bigSize = 1u << 20;
     devr->lsaFlatBase = nullptr;  // force the reservation on first use
     lsaRankList.assign({0, 1});
-    devr->lsaRankList = lsaRankList.data();
+    devr->lsaDomainRankList = lsaRankList.data();
 
     lsaNumSegments.assign({1, 1});
     segmentSizes.assign({4096});
@@ -1286,14 +1414,14 @@ protected:
   }
 
   void TearDown() override {
-    comm->devrState.lsaRankList = nullptr;  // borrowed, not malloc'd
+    comm->devrState.lsaDomainRankList = nullptr;  // borrowed, not malloc'd
     ResetDevRuntimeMicroFakes();
   }
 };
 
-// Branch: lsaFlatBase is null, so the flat VA range is reserved for the whole
-// team -- lsaSize * bigSize, not one rank's worth.
-TEST_F(SymMemoryMapLsaTeamTest, FirstUse_ReservesFlatVaForWholeTeam) {
+// Branch: lsaFlatBase is null, so the flat VA range is reserved for the whole LSA
+// domain -- lsaDomainSize * bigSize, not one rank's worth.
+TEST_F(SymMemoryMapLsaTest, FirstUse_ReservesFlatVaForWholeTeam) {
   size_t reserved = 0;
   ScopedHook reserve(g_hipMemAddressReserve,
                      [&](void** ptr, size_t size, size_t, void*, unsigned long long) {
@@ -1302,28 +1430,28 @@ TEST_F(SymMemoryMapLsaTeamTest, FirstUse_ReservesFlatVaForWholeTeam) {
                        return hipSuccess;
                      });
 
-  EXPECT_EQ(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
+  EXPECT_EQ(symMemoryMapLsa(comm, &mem), ncclSuccess);
   EXPECT_EQ(reserve.calls, 1);
-  EXPECT_EQ(reserved, comm->devrState.lsaSize * comm->devrState.bigSize);
+  EXPECT_EQ(reserved, comm->devrState.lsaDomainSize * comm->devrState.bigSize);
   EXPECT_EQ(comm->devrState.lsaFlatBase, reinterpret_cast<void*>(0x200000));
 }
 
 // Branch: a base is already reserved, so the reservation is skipped and the
 // existing one is left alone.
-TEST_F(SymMemoryMapLsaTeamTest, AlreadyReserved_SkipsReservation) {
+TEST_F(SymMemoryMapLsaTest, AlreadyReserved_SkipsReservation) {
   void* existing = reinterpret_cast<void*>(0x300000);
   comm->devrState.lsaFlatBase = existing;
   ScopedHook reserve(g_hipMemAddressReserve,
                      [](void**, size_t, size_t, void*, unsigned long long) { return hipSuccess; });
 
-  EXPECT_EQ(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
+  EXPECT_EQ(symMemoryMapLsa(comm, &mem), ncclSuccess);
   EXPECT_EQ(reserve.calls, 0);
   EXPECT_EQ(comm->devrState.lsaFlatBase, existing);
 }
 
 // The message array is sized from the widest rank, so a peer with more segments
 // than us still has room. Two ranks x 2 segments each = 4 messages.
-TEST_F(SymMemoryMapLsaTeamTest, SizesMessagesFromWidestRank) {
+TEST_F(SymMemoryMapLsaTest, SizesMessagesFromWidestRank) {
   lsaNumSegments.assign({1, 2});  // the peer has more segments than we do
   mem.lsaNumSegments = lsaNumSegments.data();  // assign() may reallocate; SetUp cached the old data()
   size_t gatherBytes = 0;
@@ -1333,55 +1461,55 @@ TEST_F(SymMemoryMapLsaTeamTest, SizesMessagesFromWidestRank) {
                       return ncclSuccess;
                     });
 
-  EXPECT_EQ(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
+  EXPECT_EQ(symMemoryMapLsa(comm, &mem), ncclSuccess);
   EXPECT_EQ(gather.calls, 1);
   EXPECT_EQ(gatherBytes, sizeof(symLsaMessage) * 2);  // per-rank stride = maxSegments
 }
 
 // Branch: the message allocation fails before anything is exported.
-TEST_F(SymMemoryMapLsaTeamTest, MessageAllocFails_ReturnsError) {
+TEST_F(SymMemoryMapLsaTest, MessageAllocFails_ReturnsError) {
   ScopedCallocFailure callocFail;  // fail the next ncclCalloc
   ScopedHook gather(g_devrBootstrapIntraNodeAllGather,
                     [](void*, int*, int, int, void*, int) { return ncclSuccess; });
 
-  EXPECT_NE(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
+  EXPECT_NE(symMemoryMapLsa(comm, &mem), ncclSuccess);
   EXPECT_EQ(gather.calls, 0);
 }
 
 // Branch: exporting our own segment fails, so nothing is gathered.
-TEST_F(SymMemoryMapLsaTeamTest, ExportFails_ReturnsErrorWithoutGathering) {
+TEST_F(SymMemoryMapLsaTest, ExportFails_ReturnsErrorWithoutGathering) {
   ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle,
                    [](hipMemAllocationProp*, hipMemGenericAllocationHandle_t) { return hipErrorInvalidValue; });
   ScopedHook gather(g_devrBootstrapIntraNodeAllGather,
                     [](void*, int*, int, int, void*, int) { return ncclSuccess; });
 
-  EXPECT_NE(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
+  EXPECT_NE(symMemoryMapLsa(comm, &mem), ncclSuccess);
   EXPECT_EQ(gather.calls, 0);
 }
 
 // Branch: the all-gather fails, so no VA is reserved.
-TEST_F(SymMemoryMapLsaTeamTest, AllGatherFails_ReturnsErrorWithoutReserving) {
+TEST_F(SymMemoryMapLsaTest, AllGatherFails_ReturnsErrorWithoutReserving) {
   ScopedHook gather(g_devrBootstrapIntraNodeAllGather,
                     [](void*, int*, int, int, void*, int) { return ncclSystemError; });
   ScopedHook reserve(g_hipMemAddressReserve,
                      [](void**, size_t, size_t, void*, unsigned long long) { return hipSuccess; });
 
-  EXPECT_NE(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
+  EXPECT_NE(symMemoryMapLsa(comm, &mem), ncclSuccess);
   EXPECT_EQ(reserve.calls, 0);
 }
 
 // Branch: the VA reservation fails.
-TEST_F(SymMemoryMapLsaTeamTest, ReserveFails_ReturnsError) {
+TEST_F(SymMemoryMapLsaTest, ReserveFails_ReturnsError) {
   ScopedHook reserve(g_hipMemAddressReserve,
                      [](void**, size_t, size_t, void*, unsigned long long) { return hipErrorOutOfMemory; });
 
-  EXPECT_NE(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
+  EXPECT_NE(symMemoryMapLsa(comm, &mem), ncclSuccess);
   EXPECT_EQ(comm->devrState.lsaFlatBase, nullptr);
 }
 
 // Branch: mapping a rank's segments fails, so the closing barrier is skipped --
 // a rank that failed to map must not signal that it is ready.
-TEST_F(SymMemoryMapLsaTeamTest, MapFails_ReturnsErrorWithoutBarrier) {
+TEST_F(SymMemoryMapLsaTest, MapFails_ReturnsErrorWithoutBarrier) {
   ScopedHook reserve(g_hipMemAddressReserve,
                      [](void** ptr, size_t, size_t, void*, unsigned long long) {
                        *ptr = reinterpret_cast<void*>(0x200000);
@@ -1392,12 +1520,12 @@ TEST_F(SymMemoryMapLsaTeamTest, MapFails_ReturnsErrorWithoutBarrier) {
   });
   ScopedHook barrier(g_devrBootstrapIntraNodeBarrier, [](void*, int*, int, int, int) { return ncclSuccess; });
 
-  EXPECT_NE(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
+  EXPECT_NE(symMemoryMapLsa(comm, &mem), ncclSuccess);
   EXPECT_EQ(barrier.calls, 0);
 }
 
 // Branch: the closing barrier fails.
-TEST_F(SymMemoryMapLsaTeamTest, BarrierFails_ReturnsError) {
+TEST_F(SymMemoryMapLsaTest, BarrierFails_ReturnsError) {
   ScopedHook reserve(g_hipMemAddressReserve,
                      [](void** ptr, size_t, size_t, void*, unsigned long long) {
                        *ptr = reinterpret_cast<void*>(0x200000);
@@ -1405,7 +1533,7 @@ TEST_F(SymMemoryMapLsaTeamTest, BarrierFails_ReturnsError) {
                      });
   ScopedHook barrier(g_devrBootstrapIntraNodeBarrier, [](void*, int*, int, int, int) { return ncclSystemError; });
 
-  EXPECT_NE(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
+  EXPECT_NE(symMemoryMapLsa(comm, &mem), ncclSuccess);
   EXPECT_EQ(barrier.calls, 1);
 }
 
@@ -1413,7 +1541,7 @@ TEST_F(SymMemoryMapLsaTeamTest, BarrierFails_ReturnsError) {
 // ROCM-29810: HIP reports an imported host VMM handle as device, so one host owner
 // beside device peers is the owner's segment imported everywhere else; it maps.
 // Off the host-VMM compile gate ncclSymIsHostSegment(kLocHost) is false.
-TEST_F(SymMemoryMapLsaTeamTest, SingleHostOwnerBesideImportedDevice_Succeeds) {
+TEST_F(SymMemoryMapLsaTest, SingleHostOwnerBesideImportedDevice_Succeeds) {
   ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
     return std::string(env) == "SYM_REUSE_SYSMEM_HANDLES" ? 1 : deftVal;
   });
@@ -1436,7 +1564,7 @@ TEST_F(SymMemoryMapLsaTeamTest, SingleHostOwnerBesideImportedDevice_Succeeds) {
   ScopedHook import(g_hipMemImportFromShareableHandle,
                     [](hipMemGenericAllocationHandle_t*, void*, hipMemAllocationHandleType) { return hipSuccess; });
 
-  EXPECT_EQ(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
+  EXPECT_EQ(symMemoryMapLsa(comm, &mem), ncclSuccess);
   EXPECT_EQ(barrier.calls, 1);
   // The peer now reads as host, so it reuses the local system-memory handle.
   EXPECT_EQ(import.calls, 0);
@@ -1445,10 +1573,10 @@ TEST_F(SymMemoryMapLsaTeamTest, SingleHostOwnerBesideImportedDevice_Succeeds) {
 // Two host owners beside a device owner is a genuine mix. The reject must fire on
 // a segment index this rank does not own, otherwise the wider ranks fail while
 // this one waits at the closing barrier.
-TEST_F(SymMemoryMapLsaTeamTest, MixedOwnersOnPeerOnlySegment_ReturnsInvalidUsage) {
+TEST_F(SymMemoryMapLsaTest, MixedOwnersOnPeerOnlySegment_ReturnsInvalidUsage) {
   lsaRankList.assign({0, 1, 2, 3});
-  comm->devrState.lsaRankList = lsaRankList.data();
-  comm->devrState.lsaSize = 4;
+  comm->devrState.lsaDomainRankList = lsaRankList.data();
+  comm->devrState.lsaDomainSize = 4;
   lsaNumSegments.assign({1, 2, 2, 2});
   mem.lsaNumSegments = lsaNumSegments.data();
   mem.numSegments = 1;
@@ -1470,13 +1598,13 @@ TEST_F(SymMemoryMapLsaTeamTest, MixedOwnersOnPeerOnlySegment_ReturnsInvalidUsage
                     });
   ScopedHook barrier(g_devrBootstrapIntraNodeBarrier, [](void*, int*, int, int, int) { return ncclSuccess; });
 
-  EXPECT_EQ(symMemoryMapLsaTeam(comm, &mem), ncclInvalidUsage);
+  EXPECT_EQ(symMemoryMapLsa(comm, &mem), ncclInvalidUsage);
   EXPECT_EQ(barrier.calls, 0);
 }
 
 // All-host LSA with the reuse param on is accepted; mixed-owner reject must
 // not fire when every exported type is host.
-TEST_F(SymMemoryMapLsaTeamTest, AllHostOwnersWithReuseParam_Succeeds) {
+TEST_F(SymMemoryMapLsaTest, AllHostOwnersWithReuseParam_Succeeds) {
   ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
     return std::string(env) == "SYM_REUSE_SYSMEM_HANDLES" ? 1 : deftVal;
   });
@@ -1497,7 +1625,7 @@ TEST_F(SymMemoryMapLsaTeamTest, AllHostOwnersWithReuseParam_Succeeds) {
                     });
   ScopedHook barrier(g_devrBootstrapIntraNodeBarrier, [](void*, int*, int, int, int) { return ncclSuccess; });
 
-  EXPECT_EQ(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
+  EXPECT_EQ(symMemoryMapLsa(comm, &mem), ncclSuccess);
   EXPECT_EQ(barrier.calls, 1);
 }
 #endif
@@ -1505,7 +1633,7 @@ TEST_F(SymMemoryMapLsaTeamTest, AllHostOwnersWithReuseParam_Succeeds) {
 
 // ---------------------------------------------------------------------------
 // symBindTeamMemory binds memory into a team's multicast handle, guarded by
-// `comm->nvlsSupport && tm->mcBasePtr != nullptr`. The body is behind
+// `comm->nvlsSupport && tm->mcPartition.ptr != nullptr`. The body is behind
 // `#if CUDART_VERSION >= 12010`, which no HIP build defines, so on this target
 // the guard wraps nothing and the function always returns ncclSuccess. That
 // leaves the two && arms as the only reachable branches.
@@ -1543,7 +1671,7 @@ TEST_F(SymBindTeamMemoryTest, IsANoOpOnThisBuild) {
   for (int nvls : {0, 1}) {
     for (void* mc : {static_cast<void*>(nullptr), reinterpret_cast<void*>(0x1000)}) {
       comm->nvlsSupport = nvls;
-      team->mcBasePtr = mc;
+      team->mcPartition.ptr = mc;
       EXPECT_EQ(symBindTeamMemory(comm, team, &mem), ncclSuccess) << "nvls=" << nvls << " mc=" << mc;
     }
   }
@@ -1563,7 +1691,7 @@ TEST_F(SymUnbindTeamMemoryTest, IsANoOpOnThisBuild) {
     for (void* mc : {static_cast<void*>(nullptr), reinterpret_cast<void*>(0x1000)}) {
       for (bool sysmem : {false, true}) {
         comm->nvlsSupport = nvls;
-        team->mcBasePtr = mc;
+        team->mcPartition.ptr = mc;
         mem.globalHasSysmemSegment = sysmem;
         EXPECT_EQ(symUnbindTeamMemory(comm, team, &mem), ncclSuccess)
           << "nvls=" << nvls << " mc=" << mc << " sysmem=" << sysmem;
@@ -1645,7 +1773,8 @@ TEST_F(SymTeamObtainTest, EmptyList_CreatesAndLinksTeam) {
   ASSERT_EQ(Obtain(comm, team, /*multimem=*/false, &out), ncclSuccess);
   ASSERT_NE(out, nullptr);
   EXPECT_EQ(comm->devrState.teamHead, out);
-  EXPECT_EQ(out->mcBasePtr, nullptr);
+  EXPECT_EQ(out->mcPartition.ptr, nullptr);
+  EXPECT_EQ(out->mcGroup, nullptr);
   // comm->rank + (i - team.rank) * stride, for i in 0..2 with rank 4.
   EXPECT_EQ(out->worldRankList[0], 2);
   EXPECT_EQ(out->worldRankList[1], 4);
@@ -1685,7 +1814,7 @@ TEST_F(SymTeamObtainTest, MultimemAlreadyBound_ReturnsExisting) {
   ncclTeam team = MakeTeam(2, 0, 1);
   ncclDevrTeam* first = nullptr;
   ASSERT_EQ(Obtain(comm, team, false, &first), ncclSuccess);
-  first->mcBasePtr = reinterpret_cast<void*>(0x1000);  // pretend multicast is bound
+  first->mcPartition.ptr = reinterpret_cast<void*>(0x1000);  // pretend multicast is bound
 
   ncclDevrTeam* second = nullptr;
   EXPECT_EQ(Obtain(comm, team, /*multimem=*/true, &second), ncclSuccess);
@@ -1718,9 +1847,12 @@ TEST_F(SymTeamObtainTest, SingleRankTeam_ListsSelfOnly) {
 
 
 // ---------------------------------------------------------------------------
-// symTeamDestroyAll empties devrState.teamHead, tearing down each team's
-// multicast mapping first if it has one. It returns void, so the assertions are
-// on the resulting state and on which driver calls were made.
+// symTeamDestroyAll empties devrState.teamHead, unbinding every memory from a
+// team that has a multicast partition first. Since 2.32.6 the multicast VA and
+// handle are torn down by ncclMcGroupDestroy (src/multicast.cc), which is behind
+// `#if CUDART_VERSION >= 12010` and so not compiled on HIP: no team here reaches
+// cuMemUnmap/cuMemAddressFree/cuMemRelease directly any more. The assertions
+// are on the resulting state and on which driver calls were (not) made.
 
 class SymTeamDestroyAllTest : public DevRuntimeMicroTest {
 protected:
@@ -1740,7 +1872,7 @@ protected:
   ncclDevrTeam* PushTeam(void* mcBasePtr) {
     auto* t = static_cast<ncclDevrTeam*>(calloc(1, sizeof(ncclDevrTeam) + sizeof(int)));
     t->team.nRanks = 1;
-    t->mcBasePtr = mcBasePtr;
+    t->mcPartition.ptr = mcBasePtr;  // mcGroup stays null, as for a team sharing the NVLS group
     t->next = comm->devrState.teamHead;
     comm->devrState.teamHead = t;
     return t;
@@ -1772,31 +1904,20 @@ TEST_F(SymTeamDestroyAllTest, PlainTeams_FreedWithoutDriverCalls) {
   EXPECT_EQ(release.calls, 0);
 }
 
-// Branch: a team with a multicast mapping is unmapped, its VA freed and its
-// handle released -- in that order, each over the team's full bigSize.
-TEST_F(SymTeamDestroyAllTest, MulticastTeam_UnmapsFreesAndReleases) {
-  void* mcBase = reinterpret_cast<void*>(0x400000);
-  PushTeam(mcBase);
-  size_t unmapSize = 0, freeSize = 0;
-  ScopedHook unmap(g_hipMemUnmap, [&](void* p, size_t size) {
-    EXPECT_EQ(p, mcBase);
-    unmapSize = size;
-    return hipSuccess;
-  });
-  ScopedHook addrFree(g_hipMemAddressFree, [&](void* p, size_t size) {
-    EXPECT_EQ(p, mcBase);
-    freeSize = size;
-    return hipSuccess;
-  });
+// Branch: a team with a multicast partition. Its mapping belongs to the
+// (here null) mcGroup and is released by ncclMcGroupDestroy, compiled out on
+// HIP, so the team is freed without any direct unmap, VA free or handle release.
+TEST_F(SymTeamDestroyAllTest, MulticastTeam_FreedWithoutDirectDriverTeardown) {
+  PushTeam(reinterpret_cast<void*>(0x400000));
+  ScopedHook unmap(g_hipMemUnmap, [](void*, size_t) { return hipSuccess; });
+  ScopedHook addrFree(g_hipMemAddressFree, [](void*, size_t) { return hipSuccess; });
   ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; });
 
-  symTeamDestroyAll(comm);
+  EXPECT_EQ(symTeamDestroyAll(comm), ncclSuccess);
   EXPECT_EQ(comm->devrState.teamHead, nullptr);
-  EXPECT_EQ(unmap.calls, 1);
-  EXPECT_EQ(addrFree.calls, 1);
-  EXPECT_EQ(release.calls, 1);
-  EXPECT_EQ(unmapSize, comm->devrState.bigSize);
-  EXPECT_EQ(freeSize, comm->devrState.bigSize);
+  EXPECT_EQ(unmap.calls, 0);
+  EXPECT_EQ(addrFree.calls, 0);
+  EXPECT_EQ(release.calls, 0);
 }
 
 // Branch: the per-memory unbind loop. Every live memory is unbound from the
@@ -1810,10 +1931,9 @@ TEST_F(SymTeamDestroyAllTest, MulticastTeam_UnbindsMemoriesWithoutFreeingThem) {
   comm->nvlsSupport = 1;
   PushTeam(reinterpret_cast<void*>(0x400000));
   ScopedHook unmap(g_hipMemUnmap, [](void*, size_t) { return hipSuccess; });
-  // Required, not optional: without it DefaultMemAddressFree munmap()s the
-  // fabricated 0x400000 for real. Harmless only while the binary is PIE and
-  // that address sits below the load base -- test/host links -no-pie, where
-  // 0x400000 is the ELF text base.
+  // Kept as a guard: should a teardown path ever reach it again, the default
+  // DefaultMemAddressFree would munmap() the fabricated 0x400000 for real, and
+  // test/host links -no-pie, where 0x400000 is the ELF text base.
   ScopedHook addrFree(g_hipMemAddressFree, [](void*, size_t) { return hipSuccess; });
 
   symTeamDestroyAll(comm);
@@ -1822,30 +1942,17 @@ TEST_F(SymTeamDestroyAllTest, MulticastTeam_UnbindsMemoriesWithoutFreeingThem) {
   EXPECT_EQ(first.next, &second);
 }
 
-// A mixed list: only the multicast team reaches the driver, and both are freed.
-TEST_F(SymTeamDestroyAllTest, MixedList_TearsDownOnlyMulticastTeams) {
+// A mixed list: the walk frees both teams, and neither reaches the driver.
+TEST_F(SymTeamDestroyAllTest, MixedList_FreesEveryTeamWithoutDriverCalls) {
   PushTeam(nullptr);
   PushTeam(reinterpret_cast<void*>(0x400000));
   ScopedHook unmap(g_hipMemUnmap, [](void*, size_t) { return hipSuccess; });
   ScopedHook addrFree(g_hipMemAddressFree, [](void*, size_t) { return hipSuccess; });
 
-  symTeamDestroyAll(comm);
+  EXPECT_EQ(symTeamDestroyAll(comm), ncclSuccess);
   EXPECT_EQ(comm->devrState.teamHead, nullptr);
-  EXPECT_EQ(unmap.calls, 1);
-}
-
-// The driver calls are CUCHECKIGNORE'd, so a failure must not stop the walk --
-// this runs during finalize, where leaving teams linked would leak.
-TEST_F(SymTeamDestroyAllTest, DriverCallsFail_StillEmptiesList) {
-  PushTeam(reinterpret_cast<void*>(0x400000));
-  PushTeam(reinterpret_cast<void*>(0x500000));
-  ScopedHook unmap(g_hipMemUnmap, [](void*, size_t) { return hipErrorInvalidValue; });
-  ScopedHook addrFree(g_hipMemAddressFree, [](void*, size_t) { return hipErrorInvalidValue; });
-  ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipErrorInvalidValue; });
-
-  symTeamDestroyAll(comm);
-  EXPECT_EQ(comm->devrState.teamHead, nullptr);
-  EXPECT_EQ(unmap.calls, 2);  // both teams attempted, not abandoned after the first
+  EXPECT_EQ(unmap.calls, 0);
+  EXPECT_EQ(addrFree.calls, 0);
 }
 
 
@@ -2410,21 +2517,21 @@ protected:
     comm->bootstrap = reinterpret_cast<void*>(0x1);
 
     ncclDevrState* devr = &comm->devrState;
-    devr->lsaSelf = 0;
-    devr->lsaSize = 2;
+    devr->lsaDomainSelf = devr->lsaTeamSelf = 0;
+    devr->lsaDomainSize = devr->lsaTeamSize = 2;
     devr->nLsaTeams = 1;
     devr->bigSize = 1u << 20;
     devr->granularity = 4096;
     devr->lsaFlatBase = reinterpret_cast<void*>(0x200000);
     lsaRankList.assign({0, 1});
-    devr->lsaRankList = lsaRankList.data();
+    devr->lsaDomainRankList = devr->lsaTeamRankList = lsaRankList.data();
 
     memHandles.assign(1, reinterpret_cast<hipMemGenericAllocationHandle_t>(0x55));
   }
 
   void TearDown() override {
     if (obtained != nullptr) symMemoryDestroy(comm, obtained);
-    comm->devrState.lsaRankList = nullptr;  // borrowed, not malloc'd
+    comm->devrState.lsaDomainRankList = comm->devrState.lsaTeamRankList = nullptr;  // borrowed, not malloc'd
     ResetDevRuntimeMicroFakes();
   }
 
@@ -2576,7 +2683,7 @@ TEST_F(SymMemoryObtainRegisterTest, NullPrimaryAddr_DerivesFromLsaMapping) {
   ASSERT_EQ(symMemoryObtain(comm, memHandles.data(), 1, /*memAddr=*/nullptr, 4096, 0, &obtained, false), ncclSuccess);
   ncclDevrState* devr = &comm->devrState;
   EXPECT_EQ(obtained->primaryAddr,
-            static_cast<char*>(devr->lsaFlatBase) + devr->lsaSelf * devr->bigSize + 8192);
+            static_cast<char*>(devr->lsaFlatBase) + devr->lsaDomainSelf * devr->bigSize + 8192);
 }
 
 // Branch: a caller that supplied a VA keeps it.
@@ -2826,10 +2933,10 @@ protected:
     comm->config.numRmaCtx = 0;
 
     ncclDevrState* devr = &comm->devrState;
-    devr->lsaSelf = 0;
-    devr->lsaSize = 1;
+    devr->lsaDomainSelf = devr->lsaTeamSelf = 0;
+    devr->lsaDomainSize = devr->lsaTeamSize = 1;
     devr->nLsaTeams = 1;
-    devr->lsaRankList = &lsaRank0;
+    devr->lsaDomainRankList = devr->lsaTeamRankList = &lsaRank0;
     devr->granularity = 4096;
     devr->bigSize = 1 << 20;
     devr->ginEnabled = false;
@@ -2877,7 +2984,7 @@ TEST_F(SymMemoryObtainTest, DestroyIsIdempotent) {
   const int releases = release.calls;
   const int unmaps = unmap.calls;
   EXPECT_EQ(releases, 1);  // one cuMemRelease, numSegments == 1
-  EXPECT_EQ(unmaps, 1);    // lsaSize == 1 and lsaNumSegments[0] == 1
+  EXPECT_EQ(unmaps, 1);    // lsaDomainSize == 1 and lsaNumSegments[0] == 1
 
   // Second destroy must not walk off memHead or repeat unmap/release/free.
   symMemoryDestroy(comm, mem);
@@ -3057,16 +3164,26 @@ protected:
   std::unique_ptr<ncclComm> commStorage;
   ncclComm* comm = nullptr;
   ncclDevrMemory mem{};
+  std::vector<int> lsaDomainRankList;
 
   void SetUp() override {
     DevRuntimeMicroTest::SetUp();
     commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
     comm = commStorage.get();
     comm->rank = 7;
+    comm->nRanks = 8;
 
+    // The LSA domain is world ranks 4..7 (we are its slot 3); the consecutive LSA
+    // team is its last two (we are team rank 1), so the team starts at domain
+    // slot 2. Domain and team positions differ, so each use picks the right one.
     ncclDevrState* devr = &comm->devrState;
-    devr->lsaSelf = 1;
-    devr->lsaSize = 2;
+    lsaDomainRankList.assign({4, 5, 6, 7});
+    devr->lsaDomainSelf = 3;
+    devr->lsaDomainSize = 4;
+    devr->lsaDomainRankList = lsaDomainRankList.data();
+    devr->lsaTeamSelf = 1;
+    devr->lsaTeamSize = 2;
+    devr->lsaTeamRankList = lsaDomainRankList.data() + 2;
     devr->bigSize = size_t(1) << 33;  // 8GB, so stride4G is a non-trivial 2
     devr->lsaFlatBase = reinterpret_cast<void*>(0x40000000);
 
@@ -3121,10 +3238,11 @@ TEST_F(SymWindowCreateTest, PopulatesDeviceDescriptor) {
   EXPECT_EQ(win->size, 8192u);
   EXPECT_EQ(win->memory, &mem);
   // dev == host under the shadow-pool fake, so winDev is readable directly.
-  EXPECT_EQ(winDev->lsaFlatBase, static_cast<char*>(devr->lsaFlatBase) + win->bigOffset);
+  // The device lsaFlatBase is biased to the LSA team's first domain slot (2 here).
+  EXPECT_EQ(winDev->lsaFlatBase, static_cast<char*>(devr->lsaFlatBase) + 2 * devr->bigSize + win->bigOffset);
   EXPECT_EQ(winDev->mcOffset4K, win->bigOffset >> 12);
   EXPECT_EQ(winDev->stride4G, devr->bigSize >> 32);
-  EXPECT_EQ(winDev->lsaRank, devr->lsaSelf);
+  EXPECT_EQ(winDev->lsaRank, devr->lsaTeamSelf);
   EXPECT_EQ(winDev->worldRank, comm->rank);
   EXPECT_EQ(winDev->winHost, static_cast<void*>(win));
   EXPECT_EQ(winDev->ginOffset4K, 8192u >> 12);
@@ -3144,7 +3262,7 @@ TEST_F(SymWindowCreateTest, NullUserPtr_DerivesFromLsaMapping) {
 
   ncclDevrState* devr = &comm->devrState;
   EXPECT_EQ(win->userPtr,
-            static_cast<char*>(devr->lsaFlatBase) + devr->lsaSelf * devr->bigSize + mem.bigOffset);
+            static_cast<char*>(devr->lsaFlatBase) + devr->lsaDomainSelf * devr->bigSize + mem.bigOffset);
 }
 
 // Branch: a caller-supplied VA is kept as is.
@@ -3239,26 +3357,81 @@ TEST_F(SymWindowCreateTest, SegmentWindowsFail_ReturnsErrorWithoutPublishing) {
   EXPECT_EQ(comm->devrState.windowTable, nullptr);
 }
 
-// Branch: the descriptor allocation fails before any of it is filled in.
-TEST_F(SymWindowCreateTest, DescriptorAllocFails_ReturnsError) {
+// 2.32.6: the first window on a comm also builds the world-rank-indexed
+// lsaPeerDelta4G table (symLsaPeerDelta4GInitOnce): signed 4GiB offsets from
+// the window's team-biased lsaFlatBase for every LSA-domain peer, invalid for
+// the rest. It is built once and shared by every window's descriptor.
+TEST_F(SymWindowCreateTest, FirstWindow_BuildsPeerDelta4GTableOnce) {
+  ncclWindow_vidmem* first = nullptr;
+  ASSERT_EQ(Create(reinterpret_cast<void*>(0x100000), 4096, 0, &first), ncclSuccess);
+  ncclDevrState* devr = &comm->devrState;
+  ASSERT_NE(devr->lsaPeerDelta4GDev, nullptr);
+  EXPECT_EQ(first->lsaPeerDelta4G, devr->lsaPeerDelta4GDev);
+
+  // dev == host under the shadow-pool fake. stride4G is 2 and the team starts
+  // at domain slot 2, so domain slots 0..3 (world 4..7) sit at -4, -2, 0, 2.
+  const int* delta = devr->lsaPeerDelta4GDev;
+  for (int r = 0; r < 4; r++) EXPECT_EQ(delta[r], NCCL_LSA_PEER_DELTA4G_INVALID) << "world rank " << r;
+  EXPECT_EQ(delta[4], -4);
+  EXPECT_EQ(delta[5], -2);
+  EXPECT_EQ(delta[6], 0);
+  EXPECT_EQ(delta[7], 2);
+
+  int* table = devr->lsaPeerDelta4GDev;
+  ncclWindow_vidmem* second = nullptr;
+  ASSERT_EQ(Create(reinterpret_cast<void*>(0x200000), 4096, 0, &second), ncclSuccess);
+  EXPECT_EQ(devr->lsaPeerDelta4GDev, table);  // not rebuilt
+  EXPECT_EQ(second->lsaPeerDelta4G, table);
+}
+
+// Branch: the peer-delta table allocation (the function's first shadow-pool
+// allocation) fails, so no descriptor is built and nothing is published.
+TEST_F(SymWindowCreateTest, PeerDeltaTableAllocFails_ReturnsError) {
   ScopedHook alloc(g_devrShadowPoolAlloc,
                    [](ncclShadowPool*, size_t, void**, void**, hipStream_t) { return ncclSystemError; });
   ScopedHook poolFree(g_devrShadowPoolFree, [](ncclShadowPool*, void*, hipStream_t) { return ncclSuccess; });
 
   EXPECT_NE(Create(reinterpret_cast<void*>(0x100000), 4096), ncclSuccess);
+  EXPECT_EQ(alloc.calls, 1);
+  EXPECT_EQ(comm->devrState.lsaPeerDelta4GDev, nullptr);
   EXPECT_EQ(comm->devrState.winSortedCount, 0);
-  EXPECT_EQ(poolFree.calls, 0);  // no descriptor was handed out, so fail: has nothing to return
+  EXPECT_EQ(poolFree.calls, 0);  // returns before fail:, so nothing goes back to the pool
 }
 
-// Branch: the descriptor copy to the device fails. It is the first copy the
-// function makes, so the window table is never reached and the sorted list
-// never grows. fail: hands the descriptor back to the shadow pool.
+// Branch: the descriptor allocation fails before any of it is filled in. The
+// peer-delta table is allocated first, so fail the second allocation.
+TEST_F(SymWindowCreateTest, DescriptorAllocFails_ReturnsError) {
+  auto passThrough = g_devrShadowPoolAlloc;
+  int n = 0;
+  ScopedHook alloc(g_devrShadowPoolAlloc,
+                   [&](ncclShadowPool* pool, size_t size, void** dev, void** host, hipStream_t stream) {
+                     if (++n == 2) return ncclSystemError;
+                     return passThrough(pool, size, dev, host, stream);
+                   });
+  ScopedHook poolFree(g_devrShadowPoolFree, [](ncclShadowPool*, void*, hipStream_t) { return ncclSuccess; });
+
+  EXPECT_NE(Create(reinterpret_cast<void*>(0x100000), 4096), ncclSuccess);
+  EXPECT_EQ(n, 2);
+  EXPECT_EQ(comm->devrState.winSortedCount, 0);
+  // fail: runs with winDev still nullptr; the peer-delta table belongs to devrState, so nothing goes back to the pool.
+  EXPECT_EQ(poolFree.calls, 0);
+}
+
+// Branch: the descriptor copy to the device fails. It is the first copy after
+// the peer-delta table's, so the window table is never reached and the sorted
+// list never grows. fail: hands the descriptor back to the shadow pool.
 TEST_F(SymWindowCreateTest, DescriptorCopyFails_ReturnsErrorWithoutPublishing) {
+  int n = 0;
   void* winDev = nullptr;
-  ScopedHook copy(g_hipMemcpyAsync, [&](void* dst, const void*, size_t, hipMemcpyKind, hipStream_t) {
-    winDev = dst;
-    return hipErrorInvalidValue;
-  });
+  ScopedHook copy(g_hipMemcpyAsync,
+                  [&](void* dst, const void* src, size_t size, hipMemcpyKind, hipStream_t) {
+                    if (++n == 2) {
+                      winDev = dst;
+                      return hipErrorInvalidValue;
+                    }
+                    if (dst != nullptr && src != nullptr && dst != src) memcpy(dst, src, size);
+                    return hipSuccess;
+                  });
   // Records only: the fake's reset reclaims whatever the pool still holds.
   std::vector<void*> freed;
   ScopedHook poolFree(g_devrShadowPoolFree, [&](ncclShadowPool*, void* obj, hipStream_t) {
@@ -3267,7 +3440,7 @@ TEST_F(SymWindowCreateTest, DescriptorCopyFails_ReturnsErrorWithoutPublishing) {
   });
 
   EXPECT_NE(Create(reinterpret_cast<void*>(0x100000), 4096), ncclSuccess);
-  EXPECT_EQ(copy.calls, 1);  // failed on the descriptor, before the table copy
+  EXPECT_EQ(n, 2);  // the peer-delta table copy, then the failed descriptor copy
   EXPECT_EQ(comm->devrState.winSortedCount, 0);
   ASSERT_NE(winDev, nullptr);
   EXPECT_EQ(freed, std::vector<void*>({winDev}));
@@ -3275,15 +3448,15 @@ TEST_F(SymWindowCreateTest, DescriptorCopyFails_ReturnsErrorWithoutPublishing) {
 
 // Branch: the descriptor copy lands but publishing the entry into the window
 // table does not, so the window is still absent from the sorted list. Fails the
-// second copy rather than all of them, which is what separates this arm from
-// DescriptorCopyFails above.
+// third copy (after the peer-delta table and the descriptor), which is what
+// separates this arm from DescriptorCopyFails above.
 TEST_F(SymWindowCreateTest, TablePublishCopyFails_ReturnsErrorWithoutPublishing) {
   int n = 0;
   void* winDev = nullptr;
   ScopedHook copy(g_hipMemcpyAsync,
                   [&](void* dst, const void* src, size_t size, hipMemcpyKind, hipStream_t) {
-                    if (++n == 1) winDev = dst;
-                    if (n == 2) return hipErrorInvalidValue;
+                    if (++n == 2) winDev = dst;
+                    if (n == 3) return hipErrorInvalidValue;
                     // Mirrors the fake's default: the earlier copies must still
                     // land, or the table walk reads uninitialised entries.
                     if (dst != nullptr && src != nullptr && dst != src) memcpy(dst, src, size);
@@ -3296,7 +3469,7 @@ TEST_F(SymWindowCreateTest, TablePublishCopyFails_ReturnsErrorWithoutPublishing)
   });
 
   EXPECT_NE(Create(reinterpret_cast<void*>(0x100000), 4096), ncclSuccess);
-  EXPECT_EQ(n, 2);
+  EXPECT_EQ(n, 3);
   EXPECT_EQ(comm->devrState.winSortedCount, 0);
   ASSERT_NE(winDev, nullptr);
   EXPECT_EQ(freed, std::vector<void*>({winDev}));
@@ -3372,14 +3545,14 @@ protected:
     comm->bootstrap = reinterpret_cast<void*>(0x1);
 
     ncclDevrState* devr = &comm->devrState;
-    devr->lsaSelf = 0;
-    devr->lsaSize = 1;
+    devr->lsaDomainSelf = devr->lsaTeamSelf = 0;
+    devr->lsaDomainSize = devr->lsaTeamSize = 1;
     devr->nLsaTeams = 1;
     devr->bigSize = size_t(1) << 32;
     devr->granularity = 4096;
     devr->lsaFlatBase = reinterpret_cast<void*>(0x40000000);
     lsaRankList.assign({0});
-    devr->lsaRankList = lsaRankList.data();
+    devr->lsaDomainRankList = devr->lsaTeamRankList = lsaRankList.data();
 
     memHandles.assign(1, reinterpret_cast<hipMemGenericAllocationHandle_t>(0x55));
   }
@@ -3392,7 +3565,7 @@ protected:
     // those cases leak a window per run, which the sanitiser build reports.
     ReclaimDevrWindows(comm);
     devr->windowTable = nullptr;  // chain of shadow-pool buffers; the fake's reset owns them
-    devr->lsaRankList = nullptr;  // borrowed, not malloc'd
+    devr->lsaDomainRankList = devr->lsaTeamRankList = nullptr;  // borrowed, not malloc'd
     ResetDevRuntimeMicroFakes();
   }
 
@@ -3572,7 +3745,7 @@ protected:
     DevRuntimeMicroTest::SetUp();
     commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
     comm = commStorage.get();
-    comm->devrState.lsaSelf = 1;  // differs from 0 so "skip self" is observable
+    comm->devrState.lsaDomainSelf = comm->devrState.lsaTeamSelf = 1;  // differs from 0 so "skip self" is observable
 
     allocBase = {reinterpret_cast<void*>(0xA000), reinterpret_cast<void*>(0xB000),
                  reinterpret_cast<void*>(0xC000)};
@@ -3602,7 +3775,7 @@ TEST_F(WindowCloseIpcPeersTest, ClosesPeersButNotSelf) {
   windowCloseIpcPeers(comm, &win);
   ASSERT_EQ(closed.size(), 2u);
   EXPECT_EQ(closed[0], allocBase[0]);
-  EXPECT_EQ(closed[1], allocBase[2]);  // index 1 is lsaSelf
+  EXPECT_EQ(closed[1], allocBase[2]);  // index 1 is lsaTeamSelf
 }
 
 // Branch: a peer that never mapped has a null entry and is skipped.
@@ -3650,7 +3823,7 @@ TEST_F(WindowCloseIpcPeersTest, MixedCuMemAndLegacy_TakesMatchingRelease) {
   windowCloseIpcPeers(comm, &win);
   rcclShutdownFlag().store(false, std::memory_order_release);
 
-  // Index 1 is lsaSelf and skipped. Peer 0 is cuMem and peer 2 is legacy, so
+  // Index 1 is lsaTeamSelf and skipped. Peer 0 is cuMem and peer 2 is legacy, so
   // each arm takes its own release and neither takes the other's.
   ASSERT_EQ(ipcClosed.size(), 1u);
   EXPECT_EQ(ipcClosed[0], allocBase[2]);
@@ -3664,7 +3837,7 @@ TEST_F(WindowCloseIpcPeersTest, MixedCuMemAndLegacy_TakesMatchingRelease) {
 // windowRegisterNonSym registers a window that is not backed by the symmetric
 // VMM machinery. Three stages, the first two conditional:
 //
-//   1. intra-node IPC mapping   when lsaSize > 1
+//   1. intra-node IPC mapping   when lsaTeamSize > 1
 //   2. inter-node RMA MR        when hostRmaSupport and the team is not the comm
 //   3. the device-side handle, always
 //
@@ -3688,10 +3861,10 @@ protected:
     comm->bootstrap = reinterpret_cast<void*>(0x1);
 
     ncclDevrState* devr = &comm->devrState;
-    devr->lsaSelf = 0;
-    devr->lsaSize = 1;  // local: no IPC stage
+    devr->lsaDomainSelf = devr->lsaTeamSelf = 0;
+    devr->lsaDomainSize = devr->lsaTeamSize = 1;  // local: no IPC stage
     lsaRankList.assign({0});
-    devr->lsaRankList = lsaRankList.data();
+    devr->lsaDomainRankList = devr->lsaTeamRankList = lsaRankList.data();
 
     peers.assign(4, ncclPeerInfo{});
     comm->peerInfo = peers.data();
@@ -3700,7 +3873,7 @@ protected:
   void TearDown() override {
     ncclDevrState* devr = &comm->devrState;
     ReclaimDevrWindows(comm);
-    devr->lsaRankList = nullptr;  // borrowed, not malloc'd
+    devr->lsaDomainRankList = devr->lsaTeamRankList = nullptr;  // borrowed, not malloc'd
     ResetDevRuntimeMicroFakes();
   }
 
@@ -3734,7 +3907,7 @@ TEST_F(WindowRegisterNonSymTest, LocalOnly_RegistersWithoutIpcOrRma) {
 // back to the host window.
 TEST_F(WindowRegisterNonSymTest, PopulatesDeviceHeader) {
   comm->rank = 5;
-  comm->devrState.lsaSelf = 0;
+  comm->devrState.lsaDomainSelf = comm->devrState.lsaTeamSelf = 0;
 
   ncclWindow_t out = nullptr;
   ASSERT_EQ(Register(&out), ncclSuccess);
@@ -3809,10 +3982,10 @@ protected:
     DevRuntimeMicroTest::SetUp();
     WindowRegisterNonSymTest::SetUp();
     comm->nRanks = 4;
-    comm->devrState.lsaSize = 3;
-    comm->devrState.lsaSelf = 0;
+    comm->devrState.lsaDomainSize = comm->devrState.lsaTeamSize = 3;
+    comm->devrState.lsaDomainSelf = comm->devrState.lsaTeamSelf = 0;
     lsaRankList.assign({0, 1, 2});
-    comm->devrState.lsaRankList = lsaRankList.data();
+    comm->devrState.lsaDomainRankList = comm->devrState.lsaTeamRankList = lsaRankList.data();
     // Distinct host/pid hashes per rank, so no peer looks like our own process.
     for (int r = 0; r < 4; r++) {
       peers[r].hostHash = 100 + r;
@@ -4062,7 +4235,7 @@ TEST_F(WindowRegisterNonSymIpcTest, BarrierFails_RevertsSortedInsert) {
 // Stage 2: a team smaller than the communicator means remote ranks exist, so
 // the inter-node MR is registered.
 TEST_F(WindowRegisterNonSymIpcTest, HostRmaWithRemoteRanks_RegistersMr) {
-  comm->hostRmaSupport = true;  // lsaSize 3 < nRanks 4
+  comm->hostRmaSupport = true;  // lsaTeamSize 3 < nRanks 4
   ScopedHook gather(g_devrBootstrapIntraNodeAllGather, GatherPeers());
   ScopedHook open(g_hipIpcOpenMemHandle, [](void** ptr, hipIpcMemHandle_t, unsigned int) {
     *ptr = reinterpret_cast<void*>(0x900000);
@@ -4081,7 +4254,7 @@ TEST_F(WindowRegisterNonSymIpcTest, HostRmaWithRemoteRanks_RegistersMr) {
 // reach and the MR is skipped even with host RMA available.
 TEST_F(WindowRegisterNonSymIpcTest, HostRmaButTeamSpansComm_SkipsMr) {
   comm->hostRmaSupport = true;
-  comm->nRanks = 3;  // equal to lsaSize
+  comm->nRanks = 3;  // equal to lsaTeamSize
   ScopedHook gather(g_devrBootstrapIntraNodeAllGather, GatherPeers());
   ScopedHook open(g_hipIpcOpenMemHandle, [](void** ptr, hipIpcMemHandle_t, unsigned int) {
     *ptr = reinterpret_cast<void*>(0x900000);
@@ -4098,7 +4271,7 @@ TEST_F(WindowRegisterNonSymIpcTest, HostRmaButTeamSpansComm_SkipsMr) {
 // MR happens even with host RMA and remote ranks -- the same outcome the
 // symmetric path gets from ncclRmaProxyEnabled.
 TEST_F(WindowRegisterNonSymIpcTest, HostRmaButRmaDisabled_SkipsConnectAndMr) {
-  comm->hostRmaSupport = true;  // lsaSize 3 < nRanks 4
+  comm->hostRmaSupport = true;  // lsaTeamSize 3 < nRanks 4
   ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
     return std::string(env) == "RMA_DISABLE" ? 1 : deftVal;
   });
@@ -4595,10 +4768,10 @@ protected:
     comm->symmetricSupport = 0;  // dispatch to the non-symmetric helper
 
     ncclDevrState* devr = &comm->devrState;
-    devr->lsaSelf = 0;
-    devr->lsaSize = 1;
+    devr->lsaDomainSelf = devr->lsaTeamSelf = 0;
+    devr->lsaDomainSize = devr->lsaTeamSize = 1;
     lsaRankList.assign({0});
-    devr->lsaRankList = lsaRankList.data();
+    devr->lsaDomainRankList = devr->lsaTeamRankList = lsaRankList.data();
 
     peers.assign(1, ncclPeerInfo{});
     comm->peerInfo = peers.data();
@@ -4607,7 +4780,7 @@ protected:
   void TearDown() override {
     ncclDevrState* devr = &comm->devrState;
     ReclaimDevrWindows(comm);
-    devr->lsaRankList = nullptr;  // borrowed, not malloc'd
+    devr->lsaDomainRankList = devr->lsaTeamRankList = nullptr;  // borrowed, not malloc'd
     ResetDevRuntimeMicroFakes();
   }
 };
@@ -4694,10 +4867,10 @@ TEST_F(DevrWindowRegisterInGroupTest, NonSymHelperFails_ReleasesLocalRegistratio
 TEST_F(DevrWindowRegisterInGroupTest, HostVmmLsaTeam_AllgathersThenRejects) {
   comm->nRanks = 2;
   comm->localRanks = 2;
-  comm->devrState.lsaSize = 2;
-  comm->devrState.lsaSelf = 0;
+  comm->devrState.lsaDomainSize = comm->devrState.lsaTeamSize = 2;
+  comm->devrState.lsaDomainSelf = comm->devrState.lsaTeamSelf = 0;
   lsaRankList.assign({0, 1});
-  comm->devrState.lsaRankList = lsaRankList.data();
+  comm->devrState.lsaDomainRankList = comm->devrState.lsaTeamRankList = lsaRankList.data();
   peers.assign(2, ncclPeerInfo{});
   comm->peerInfo = peers.data();
 
@@ -4725,10 +4898,10 @@ TEST_F(DevrWindowRegisterInGroupTest, HostVmmLsaTeam_AllgathersThenRejects) {
 TEST_F(DevrWindowRegisterInGroupTest, DevicePeerHostVmm_AllgathersThenRejects) {
   comm->nRanks = 2;
   comm->localRanks = 2;
-  comm->devrState.lsaSize = 2;
-  comm->devrState.lsaSelf = 0;
+  comm->devrState.lsaDomainSize = comm->devrState.lsaTeamSize = 2;
+  comm->devrState.lsaDomainSelf = comm->devrState.lsaTeamSelf = 0;
   lsaRankList.assign({0, 1});
-  comm->devrState.lsaRankList = lsaRankList.data();
+  comm->devrState.lsaDomainRankList = comm->devrState.lsaTeamRankList = lsaRankList.data();
   peers.assign(2, ncclPeerInfo{});
   comm->peerInfo = peers.data();
 
@@ -4764,10 +4937,10 @@ TEST_F(DevrWindowRegisterInGroupTest, DevicePeerHostVmm_AllgathersThenRejects) {
 TEST_F(DevrWindowRegisterInGroupTest, ProbeFailure_AllgathersBeforeReturning) {
   comm->nRanks = 2;
   comm->localRanks = 2;
-  comm->devrState.lsaSize = 2;
-  comm->devrState.lsaSelf = 0;
+  comm->devrState.lsaDomainSize = comm->devrState.lsaTeamSize = 2;
+  comm->devrState.lsaDomainSelf = comm->devrState.lsaTeamSelf = 0;
   lsaRankList.assign({0, 1});
-  comm->devrState.lsaRankList = lsaRankList.data();
+  comm->devrState.lsaDomainRankList = comm->devrState.lsaTeamRankList = lsaRankList.data();
   peers.assign(2, ncclPeerInfo{});
   comm->peerInfo = peers.data();
 
@@ -4789,10 +4962,10 @@ TEST_F(DevrWindowRegisterInGroupTest, ProbeFailure_AllgathersBeforeReturning) {
 #if NCCL_VER_GE(HIP_VERSION, ROCM_VER_7_12_60540)
 // An address range can report base 0; the IPC-capability query must then use userPtr, not address 0.
 TEST_F(DevrWindowRegisterInGroupTest, ProbeZeroBase_QueriesUserPtr) {
-  comm->devrState.lsaSize = 2;
-  comm->devrState.lsaSelf = 0;
+  comm->devrState.lsaDomainSize = comm->devrState.lsaTeamSize = 2;
+  comm->devrState.lsaDomainSelf = comm->devrState.lsaTeamSelf = 0;
   lsaRankList.assign({0, 1});
-  comm->devrState.lsaRankList = lsaRankList.data();
+  comm->devrState.lsaDomainRankList = comm->devrState.lsaTeamRankList = lsaRankList.data();
   comm->cuMemSupport = 1;
 
   ScopedHook range(g_hipMemGetAddressRange, [](hipDeviceptr_t* pbase, size_t* psize, hipDeviceptr_t) {
@@ -4826,10 +4999,10 @@ TEST_F(DevrWindowRegisterInGroupTest, ProbeZeroBase_QueriesUserPtr) {
 TEST_F(DevrWindowRegisterInGroupTest, DeviceFirstPageHostTail_AllgathersThenRejects) {
   comm->nRanks = 2;
   comm->localRanks = 2;
-  comm->devrState.lsaSize = 2;
-  comm->devrState.lsaSelf = 0;
+  comm->devrState.lsaDomainSize = comm->devrState.lsaTeamSize = 2;
+  comm->devrState.lsaDomainSelf = comm->devrState.lsaTeamSelf = 0;
   lsaRankList.assign({0, 1});
-  comm->devrState.lsaRankList = lsaRankList.data();
+  comm->devrState.lsaDomainRankList = comm->devrState.lsaTeamRankList = lsaRankList.data();
   peers.assign(2, ncclPeerInfo{});
   comm->peerInfo = peers.data();
 
@@ -4877,10 +5050,10 @@ TEST_F(DevrWindowRegisterInGroupTest, DeviceFirstPageHostTail_AllgathersThenReje
 TEST_F(DevrWindowRegisterInGroupTest, DeviceFirstPageHostTail_AllgathersThenRejects) {
   comm->nRanks = 2;
   comm->localRanks = 2;
-  comm->devrState.lsaSize = 2;
-  comm->devrState.lsaSelf = 0;
+  comm->devrState.lsaDomainSize = comm->devrState.lsaTeamSize = 2;
+  comm->devrState.lsaDomainSelf = comm->devrState.lsaTeamSelf = 0;
   lsaRankList.assign({0, 1});
-  comm->devrState.lsaRankList = lsaRankList.data();
+  comm->devrState.lsaDomainRankList = comm->devrState.lsaTeamRankList = lsaRankList.data();
   peers.assign(2, ncclPeerInfo{});
   comm->peerInfo = peers.data();
 
@@ -5458,8 +5631,8 @@ protected:
     DevRuntimeMicroTest::SetUp();
     commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
     devr = &commStorage->devrState;
-    devr->lsaSelf = 1;
-    devr->lsaSize = 2;
+    devr->lsaDomainSelf = devr->lsaTeamSelf = 1;
+    devr->lsaDomainSize = devr->lsaTeamSize = 2;
     devr->bigSize = 0x10000;
     devr->lsaFlatBase = reinterpret_cast<void*>(0x400000);
 
@@ -5484,7 +5657,7 @@ TEST_F(DevrGetLsaSelfAddrTest, AddressInFlatRange_PassesThrough) {
 TEST_F(DevrGetLsaSelfAddrTest, AddressInRegisteredMemory_TranslatesToOwnSlot) {
   void* out = nullptr;
   ASSERT_EQ(ncclDevrGetLsaSelfAddr(devr, reinterpret_cast<void*>(0x900040), &out), ncclSuccess);
-  EXPECT_EQ(out, static_cast<char*>(devr->lsaFlatBase) + devr->lsaSelf * devr->bigSize + mem.bigOffset + 0x40);
+  EXPECT_EQ(out, static_cast<char*>(devr->lsaFlatBase) + devr->lsaDomainSelf * devr->bigSize + mem.bigOffset + 0x40);
 }
 
 // Branch: an address in neither the flat range nor any memory is "not found",
@@ -5506,7 +5679,7 @@ TEST_F(DevrGetLsaSelfAddrTest, AddressJustPastMemory_ReturnsNull) {
 
 // ---------------------------------------------------------------------------
 // ncclDevrWorldToLsaRank maps a world rank to its index within the LSA team.
-// Without symmetric support the team is the explicit lsaRankList.
+// Without symmetric support the team is the explicit lsaTeamRankList.
 
 class DevrWorldToLsaRankTest : public DevRuntimeMicroTest {
 protected:
@@ -5520,10 +5693,10 @@ protected:
     comm = commStorage.get();
     comm->symmetricSupport = 0;
     lsaRankList.assign({4, 5, 6});
-    comm->devrState.lsaSize = 3;
-    comm->devrState.lsaRankList = lsaRankList.data();
+    comm->devrState.lsaTeamSize = 3;
+    comm->devrState.lsaTeamRankList = lsaRankList.data();
   }
-  void TearDown() override { comm->devrState.lsaRankList = nullptr; }  // borrowed
+  void TearDown() override { comm->devrState.lsaTeamRankList = nullptr; }  // borrowed
 };
 
 // A member's index is its position in the list, not its world rank.
@@ -5546,7 +5719,7 @@ TEST_F(DevrWorldToLsaRankTest, NonMemberRank_ReturnsError) {
   EXPECT_NE(ncclDevrWorldToLsaRank(comm, 9, &lsaRank), ncclSuccess);
 }
 
-// With symmetric support the lsaRankList search is skipped entirely and the
+// With symmetric support the lsaTeamRankList search is skipped entirely and the
 // answer comes from the team descriptors instead. The two arms are separate
 // implementations of the same question, so both need driving.
 class DevrWorldToLsaRankSymTest : public DevrWorldToLsaRankTest {
@@ -5682,8 +5855,8 @@ protected:
     comm->symmetricSupport = 1;
 
     ncclDevrState* devr = &comm->devrState;
-    devr->lsaSelf = 1;
-    devr->lsaSize = 3;
+    devr->lsaDomainSelf = devr->lsaTeamSelf = 1;
+    devr->lsaDomainSize = devr->lsaTeamSize = 3;
     devr->bigSize = 0x10000;
     devr->lsaFlatBase = reinterpret_cast<void*>(0x400000);
 
@@ -5703,6 +5876,23 @@ TEST_F(DevrGetLsaRankPtrTest, SymmetricWindow_UsesFlatVaArithmetic) {
                                          win.bigOffset + 0x40));
 }
 
+// 2.32.6: lsaFlatBase has one slot per LSA-domain rank, and the LSA team is a
+// consecutive subrange of the domain starting at lsaDomainSelf - lsaTeamSelf.
+// A team rank therefore resolves to that base slot plus its team index.
+TEST_F(DevrGetLsaRankPtrTest, SymmetricWindow_TeamWithinLargerDomain_OffsetsByTeamBaseSlot) {
+  ncclDevrState* devr = &comm->devrState;
+  devr->lsaDomainSelf = 3;
+  devr->lsaDomainSize = 4;
+  devr->lsaTeamSelf = 1;
+  devr->lsaTeamSize = 2;  // team = domain slots 2..3
+  void* out = nullptr;
+  ASSERT_EQ(ncclDevrGetLsaRankPtr(comm, &win, /*offset=*/0x40, /*lsaRank=*/0, &out), ncclSuccess);
+  EXPECT_EQ(out, reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(devr->lsaFlatBase) + 2 * devr->bigSize +
+                                         win.bigOffset + 0x40));
+  // The bound is the team size, not the domain size.
+  EXPECT_EQ(ncclDevrGetLsaRankPtr(comm, &win, 0, /*lsaRank=*/2, &out), ncclInvalidArgument);
+}
+
 // Boundary: an offset at the window's size is past its end.
 TEST_F(DevrGetLsaRankPtrTest, OffsetAtWindowSize_ReturnsInvalidArgument) {
   void* out = nullptr;
@@ -5712,7 +5902,7 @@ TEST_F(DevrGetLsaRankPtrTest, OffsetAtWindowSize_ReturnsInvalidArgument) {
 // Boundary: a rank outside the team.
 TEST_F(DevrGetLsaRankPtrTest, RankPastTeam_ReturnsInvalidArgument) {
   void* out = nullptr;
-  EXPECT_EQ(ncclDevrGetLsaRankPtr(comm, &win, 0, comm->devrState.lsaSize, &out), ncclInvalidArgument);
+  EXPECT_EQ(ncclDevrGetLsaRankPtr(comm, &win, 0, comm->devrState.lsaTeamSize, &out), ncclInvalidArgument);
 }
 
 // Boundary: a negative rank; a missing check would resolve below the flat base, outside every rank's slot.
@@ -5727,7 +5917,7 @@ TEST_F(DevrGetLsaRankPtrTest, NegativeRank_ReturnsInvalidArgument) {
 TEST_F(DevrGetLsaRankPtrTest, NonSymmetricSelfTarget_UsesLocalBase) {
   comm->symmetricSupport = 0;
   void* out = nullptr;
-  ASSERT_EQ(ncclDevrGetLsaRankPtr(comm, &win, 0x40, comm->devrState.lsaSelf, &out), ncclSuccess);
+  ASSERT_EQ(ncclDevrGetLsaRankPtr(comm, &win, 0x40, comm->devrState.lsaTeamSelf, &out), ncclSuccess);
   EXPECT_EQ(out, static_cast<char*>(win.userPtr) + 0x40);
 }
 
@@ -5748,8 +5938,8 @@ TEST_F(DevrGetLsaRankPtrTest, IpcWindow_UsesPeerTable) {
 // is an internal error rather than a null dereference downstream.
 TEST_F(DevrGetLsaRankPtrTest, IpcWindowUnmappedPeer_ReturnsInternalError) {
   comm->symmetricSupport = 0;
-  comm->devrState.lsaSelf = 0;  // the unmapped rank must not be us, or the
-                                // self-target branch answers first
+  // The unmapped rank must not be us, or the self-target branch answers first.
+  comm->devrState.lsaDomainSelf = comm->devrState.lsaTeamSelf = 0;
   peerPtrs = {reinterpret_cast<void*>(0xA000), nullptr, reinterpret_cast<void*>(0xC000)};
   win.ipcPeerPtrs = peerPtrs.data();
   win.ipcPeerCount = 3;
@@ -5803,8 +5993,8 @@ protected:
     comm->symmetricSupport = 1;
 
     ncclDevrState* devr = &comm->devrState;
-    devr->lsaSelf = 0;
-    devr->lsaSize = 2;
+    devr->lsaDomainSelf = devr->lsaTeamSelf = 0;
+    devr->lsaDomainSize = devr->lsaTeamSize = 2;
     devr->bigSize = 0x10000;
     devr->lsaFlatBase = reinterpret_cast<void*>(0x400000);
 
@@ -5841,12 +6031,12 @@ TEST_F(DevicePointerAccessorTest, LsaPointer_ResolvesWithinFlatSpace) {
                                          win.bigOffset + 0x40));
 }
 
-// Boundary: a rank at lsaSize is outside the team. This check is the accessor's
-// own, ahead of the one inside ncclDevrGetLsaRankPtr, so it can name lsaSize in
+// Boundary: a rank at lsaTeamSize is outside the team. This check is the accessor's
+// own, ahead of the one inside ncclDevrGetLsaRankPtr, so it can name lsaTeamSize in
 // the diagnostic.
 TEST_F(DevicePointerAccessorTest, LsaPointerRankPastTeam_ReturnsInvalidArgument) {
   void* out = nullptr;
-  EXPECT_EQ(ncclGetLsaDevicePointer(Handle(), 0, comm->devrState.lsaSize, &out), ncclInvalidArgument);
+  EXPECT_EQ(ncclGetLsaDevicePointer(Handle(), 0, comm->devrState.lsaTeamSize, &out), ncclInvalidArgument);
 }
 
 // Boundary: the peer accessor validates against the communicator, not the team,
@@ -5953,8 +6143,8 @@ protected:
     DevRuntimeMicroTest::SetUp();
     commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
     devr = &commStorage->devrState;
-    devr->lsaSelf = 1;
-    devr->lsaSize = 2;
+    devr->lsaDomainSelf = devr->lsaTeamSelf = 1;
+    devr->lsaDomainSize = devr->lsaTeamSize = 2;
     devr->bigSize = size_t(2) << 32;  // stride4G of 2
     devr->lsaFlatBase = reinterpret_cast<void*>(0x400000);
     mem.primaryAddr = reinterpret_cast<void*>(0x900000);
@@ -5974,7 +6164,8 @@ TEST_F(DevrGetGinAnvilMemLayoutTest, UserAddress_ReportsLayout) {
 
 // Branch: the same memory addressed through our own slot of the flat space.
 TEST_F(DevrGetGinAnvilMemLayoutTest, FlatAddress_ReportsSameLayout) {
-  uintptr_t local = reinterpret_cast<uintptr_t>(devr->lsaFlatBase) + devr->lsaSelf * devr->bigSize + mem.bigOffset;
+  uintptr_t local =
+    reinterpret_cast<uintptr_t>(devr->lsaFlatBase) + devr->lsaDomainSelf * devr->bigSize + mem.bigOffset;
   ASSERT_EQ(ncclDevrGetGinAnvilMemLayout(devr, reinterpret_cast<void*>(local + 8), &base, &stride), ncclSuccess);
   EXPECT_EQ(base, reinterpret_cast<uintptr_t>(devr->lsaFlatBase) + mem.bigOffset);
 }
@@ -6044,7 +6235,7 @@ protected:
     while (!ncclIntruQueueEmpty(&comm->rmaCeInitTaskQueue)) {
       free(ncclIntruQueueDequeue(&comm->rmaCeInitTaskQueue));
     }
-    free(comm->devrState.lsaRankList);
+    free(comm->devrState.lsaDomainRankList);
     ResetDevRuntimeMicroFakes();
   }
 };
@@ -6404,22 +6595,29 @@ protected:
     saved22902_ = ncclDevCommCompat_v22902;
     saved22907_ = ncclDevCommCompat_v22907;
     saved23000_ = ncclDevCommCompat_v23000;
+    saved23100_ = ncclDevCommCompat_v23100;
+    saved23204_ = ncclDevCommCompat_v23204;
     Reset();
   }
   void TearDown() override {
     ncclDevCommCompat_v22902 = saved22902_;
     ncclDevCommCompat_v22907 = saved22907_;
     ncclDevCommCompat_v23000 = saved23000_;
+    ncclDevCommCompat_v23100 = saved23100_;
+    ncclDevCommCompat_v23204 = saved23204_;
     DevRuntimeMicroTest::TearDown();
   }
   static void Reset() {
     ncclDevCommCompat_v22902 = ncclDevCommCompat{};
     ncclDevCommCompat_v22907 = ncclDevCommCompat{};
     ncclDevCommCompat_v23000 = ncclDevCommCompat{};
+    ncclDevCommCompat_v23100 = ncclDevCommCompat{};
+    // Real since 2.32.6 (devcomm-test.cc compiles devcomm_v23204.cc); its window reaches NCCL_VERSION_CODE.
+    ncclDevCommCompat_v23204 = ncclDevCommCompat{};
   }
 
 private:
-  ncclDevCommCompat saved22902_{}, saved22907_{}, saved23000_{};
+  ncclDevCommCompat saved22902_{}, saved22907_{}, saved23000_{}, saved23100_{}, saved23204_{};
 };
 
 // A version inside a record's window selects it.
@@ -6507,7 +6705,7 @@ protected:
     comm->localRanks = 1;
     comm->symmetricSupport = 1;
     comm->bootstrap = reinterpret_cast<void*>(0x1);
-    // computeLsaSize walks rankToNode[0..nRanks-1], so it must be that long.
+    // computeLsaTeamSize walks rankToNode[0..nRanks-1], so it must be that long.
     rankToNode.assign(comm->nRanks, 0);
     comm->rankToNode = rankToNode.data();
     localRankToRank.assign({0});
@@ -6520,7 +6718,7 @@ protected:
   }
 
   void TearDown() override {
-    free(comm->devrState.lsaRankList);
+    free(comm->devrState.lsaDomainRankList);
     NcclVersionCompatTest::TearDown();
   }
 };
@@ -6557,26 +6755,23 @@ TEST_F(CommQueryPropertiesTest, SingleClique_ReportsMultimemSupport) {
 
 // ginSupport[] lists the backends this communicator can create a devComm on.
 TEST_F(CommQueryPropertiesTest, LiveGinBackend_ReportsGinSupport) {
-  auto sharedRes = std::make_unique<ncclSharedResources>();
-  comm->sharedRes = sharedRes.get();
+  // 2.32.6 moved ginState from ncclSharedResources onto the comm.
   comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
-  sharedRes->ginState.numActiveBackends = 1;
-  sharedRes->ginState.backends[0].ginType = NCCL_GIN_TYPE_PROXY;
+  comm->ginState.numActiveBackends = 1;
+  comm->ginState.backends[0].ginType = NCCL_GIN_TYPE_PROXY;
 
   ASSERT_EQ(ncclCommQueryProperties(comm, &props), ncclSuccess);
   EXPECT_TRUE(props.ginSupport[NCCL_GIN_TYPE_PROXY]);
 }
 
-// AICOMRCCL-2739: after a splitShare sibling's host finalize, the surviving
-// comm keeps globalGinSupport and the backend records, but every GIN devComm
-// create on it fails, so it must not advertise them.
+// AICOMRCCL-2739: after its host GIN finalize the comm keeps globalGinSupport
+// and the backend records (ncclGinFinalize still needs them), but every GIN
+// devComm create on it fails, so it must not advertise them.
 TEST_F(CommQueryPropertiesTest, FinalizedGinBackend_ReportsNoGinSupport) {
-  auto sharedRes = std::make_unique<ncclSharedResources>();
-  comm->sharedRes = sharedRes.get();
   comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
-  sharedRes->ginState.numActiveBackends = 1;
-  sharedRes->ginState.backends[0].ginType = NCCL_GIN_TYPE_PROXY;
-  sharedRes->ginState.finalized = true;
+  comm->ginState.numActiveBackends = 1;
+  comm->ginState.backends[0].ginType = NCCL_GIN_TYPE_PROXY;
+  comm->ginState.finalized = true;
 
   ASSERT_EQ(ncclCommQueryProperties(comm, &props), ncclSuccess);
   EXPECT_FALSE(props.ginSupport[NCCL_GIN_TYPE_PROXY]);
@@ -6648,7 +6843,7 @@ protected:
     teamStorage.assign(sizeof(ncclDevrTeam) + nRanks * sizeof(int), 0);
     auto* t = reinterpret_cast<ncclDevrTeam*>(teamStorage.data());
     t->team = team;
-    t->mcBasePtr = kMcBase;
+    t->mcPartition.ptr = kMcBase;
     comm->devrState.teamHead = t;
     return team;
   }
@@ -6892,7 +7087,7 @@ protected:
       freeDevCommRequirements(t->reqs);
       free(t);
     }
-    free(comm->devrState.lsaRankList);
+    free(comm->devrState.lsaDomainRankList);
     FreeMallocdDevrTeams(comm);
     NcclVersionCompatTest::TearDown();
   }
@@ -7203,53 +7398,22 @@ TEST_F(DevCommCreateFailureTest, MultimemWithoutNvls_RearchJobPath_ReleasesCopy)
   ExpectRejectedWithoutLeak(true, "NVLS is disabled or unsupported");
 }
 
-// devrGinContextsTotal sizes the per-context resource regions for the largest
-// ginContextCount any active backend could round nGinContextsRequested up to.
+// RCCL's devrGinContextsTotal (the max over every active backend) is gone: since
+// upstream 37af9bbbf1e ncclGinDevCommSetup runs before the per-context resource
+// regions are sized, so ncclDevrCommCreateInternal sizes them from
+// outDevComm->ginContextCount, which setup sets for the one backend it selected
+// via ncclGinContextCount (gin/gin_host.h).
 
-TEST(DevrGinContextsTotal, NoActiveBackends_ReturnsRequested) {
-  struct ncclGinState ginState{};
-  EXPECT_EQ(devrGinContextsTotal(&ginState, 4), 4);
-}
-
-TEST(DevrGinContextsTotal, SingleBackend_RoundsUpToConnectionCount) {
-  struct ncclGinState ginState{};
-  ginState.numActiveBackends = 1;
-  ginState.backends[0].ginCommCount = 3;
-  EXPECT_EQ(devrGinContextsTotal(&ginState, 8), 9);
-  EXPECT_EQ(devrGinContextsTotal(&ginState, 6), 6);
+TEST(GinContextCount, RoundsUpToConnectionCount) {
+  EXPECT_EQ(ncclGinContextCount(/*nGinContextsRequested=*/8, /*ginCommCount=*/3), 9);
+  EXPECT_EQ(ncclGinContextCount(6, 3), 6);
 }
 
 // AICOMRCCL-3181: a 0 request with an active backend must size the per-context
-// regions to one context per connection, matching ncclGinContextCount's promotion
-// in ginDevCommSetupWithBackend -- the two halves of the fix must not diverge.
-TEST(DevrGinContextsTotal, ZeroRequest_PromotedToConnectionCount) {
-  struct ncclGinState ginState{};
-  ginState.numActiveBackends = 1;
-  ginState.backends[0].ginCommCount = 3;
-  EXPECT_EQ(devrGinContextsTotal(&ginState, 0), 3);
-}
-
-// Branch: the widest backend is not the one that rounds furthest.
-TEST(DevrGinContextsTotal, MixedBackends_TakesLargestRoundedCount) {
-  struct ncclGinState ginState{};
-  ginState.numActiveBackends = 2;
-  ginState.backends[0].ginCommCount = 4;
-  ginState.backends[1].ginCommCount = 3;
-  EXPECT_EQ(devrGinContextsTotal(&ginState, 4), 6);
-
-  // Mirrored order: the further-rounding backend must still win when it is
-  // visited first. Without the max-over-backends accumulator this would return 4.
-  ginState.backends[0].ginCommCount = 3;
-  ginState.backends[1].ginCommCount = 4;
-  EXPECT_EQ(devrGinContextsTotal(&ginState, 4), 6);
-}
-
-// Branch: a backend reporting no connections must not divide by zero.
-TEST(DevrGinContextsTotal, ZeroConnectionBackend_TreatedAsOne) {
-  struct ncclGinState ginState{};
-  ginState.numActiveBackends = 1;
-  ginState.backends[0].ginCommCount = 0;
-  EXPECT_EQ(devrGinContextsTotal(&ginState, 5), 5);
+// regions to one context per connection, so 0 is promoted to 1 before rounding.
+TEST(GinContextCount, ZeroRequest_PromotedToConnectionCount) {
+  EXPECT_EQ(ncclGinContextCount(0, 3), 3);
+  EXPECT_EQ(ncclGinContextCount(-1, 3), 3);
 }
 
 
@@ -7276,6 +7440,7 @@ protected:
   hipMemGenericAllocationHandle_t memHandles[2] = {reinterpret_cast<hipMemGenericAllocationHandle_t>(0x55),
                                                    reinterpret_cast<hipMemGenericAllocationHandle_t>(0x56)};
   ncclDevrMemory mems[2] = {};
+  int lsaRank0 = 0;  // the one-rank LSA domain's rank list
 
   void SetUp() override {
     DevRuntimeMicroTest::SetUp();
@@ -7293,9 +7458,12 @@ protected:
     comm = commStorage.get();
     comm->sharedRes = sharedResStorage.get();
     comm->nRanks = 1;
-    comm->devrState.lsaSize = 1;
-    // This fixture skips ncclDevrInitOnce, which sets cftMcSize from
-    // computeCftMcSize. That helper returns at least 1, so production does
+    comm->devrState.lsaDomainSize = comm->devrState.lsaTeamSize = 1;
+    // ncclDevrInitOnce (skipped here) also fills the domain rank list; 2.32.6's resource window build reads it
+    // (symLsaPeerDelta4GInitOnce indexes the world-rank table by it).
+    comm->devrState.lsaDomainRankList = comm->devrState.lsaTeamRankList = &lsaRank0;
+    // This fixture skips ncclDevrInitOnce, which sets cftSize/cftMcSize from
+    // computeCftSizes. That helper returns at least 1, so production does
     // not pass 0 to idivRcp32. A value-initialized comm would.
     comm->devrState.cftSize = 1;
     comm->devrState.cftMcSize = 1;
@@ -7394,9 +7562,9 @@ TEST_F(DevrCommCreateInternalTest, GinSetupFails_RestoresStreamCaptureMode) {
     return hipSuccess;
   });
   ScopedHook ginSetup(g_devrGinDevCommSetup,
-                      [](struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*, uint32_t) {
-                        return ncclInternalError;
-                      });
+                      [](struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevResourceRequirements*,
+                         struct ncclGinBarrierReq const*, int, struct ncclDevComm*, uint32_t,
+                         struct ncclDevCommCompat const*) { return ncclInternalError; });
 
   EXPECT_EQ(Create(), ncclInternalError);
   EXPECT_EQ(ginSetup.calls, 1);
@@ -7415,19 +7583,24 @@ TEST_F(DevrCommCreateInternalTest, GinForceEnableClear_PassesGate) {
   EXPECT_EQ(Create(), ncclSuccess);
 }
 
-// Integration point: the resource-window allocation must use the rounded
-// context count, not merely the helper's result in isolation. Stop at
-// cuMemCreate after recording its requested size to avoid constructing the
-// unrelated symmetric-memory window.
-TEST_F(DevrCommCreateInternalTest, GinSignalRegions_UseLargestRoundedContextCount) {
+// Integration point: the resource-window allocation must use the context and
+// signal counts ncclGinDevCommSetup reports for its selected backend (2.32.6;
+// before, RCCL's devrGinContextsTotal took the max over every backend), not the
+// request. Stop at cuMemCreate after recording its requested size to avoid
+// constructing the unrelated symmetric-memory window.
+TEST_F(DevrCommCreateInternalTest, GinSignalRegions_UseSetupsRoundedContextCount) {
   reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
-  // 4 discriminates: ROUNDUP(4, 4) = 4 but ROUNDUP(4, 3) = 6.
+  // 4 discriminates: the selected backend (3 connections) rounds it to 6.
   reqs.ginContextCount = 4;
   reqs.ginSignalCount = 1;
   comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
-  comm->sharedRes->ginState.numActiveBackends = 2;
-  comm->sharedRes->ginState.backends[0].ginCommCount = 3;
-  comm->sharedRes->ginState.backends[1].ginCommCount = 4;
+  ScopedHook ginSetup(g_devrGinDevCommSetup,
+                      [](ncclComm*, ncclDevCommRequirements const* r, ncclDevResourceRequirements*,
+                         ncclGinBarrierReq const*, int, ncclDevComm* devComm, uint32_t, ncclDevCommCompat const*) {
+                        devComm->ginContextCount = ncclGinContextCount(r->ginContextCount, /*ginCommCount=*/3);
+                        devComm->ginSignalCount = r->ginSignalCount;
+                        return ncclSuccess;
+                      });
 
   size_t allocationSize = 0;
   ScopedHook create(g_hipMemCreate,
@@ -7438,6 +7611,7 @@ TEST_F(DevrCommCreateInternalTest, GinSignalRegions_UseLargestRoundedContextCoun
                     });
 
   EXPECT_NE(Create(), ncclSuccess);
+  EXPECT_EQ(ginSetup.calls, 1);
   EXPECT_EQ(create.calls, 1);
   // ROUNDUP(4, 3) = 6 contexts; shadow and Anvil regions each use 6 * 1 * 8 bytes.
   EXPECT_EQ(allocationSize, 96u);
@@ -7502,8 +7676,8 @@ TEST_F(DevrCommCreateInternalTest, GinRegisterFailsAfterConnect_RollsBackActivat
 TEST_F(DevrCommCreateInternalTest, StreamCreateFailsAfterGinRegister_RollsBackActivation) {
   reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
   comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
-  comm->sharedRes->ginState.numActiveBackends = 1;
-  comm->sharedRes->ginState.backends[0].ginCommCount = 1;
+  comm->ginState.numActiveBackends = 1;
+  comm->ginState.backends[0].ginCommCount = 1;
   LinkPreGinMemories();
 
   int registrations = 0;
@@ -7552,7 +7726,8 @@ TEST_F(DevrCommCreateInternalTest, NoGinRequestedOnGinEnabledComm_SkipsGinDevCom
   comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
   comm->devrState.ginEnabled = true;
   ScopedHook setup(g_devrGinDevCommSetup,
-                   [](ncclComm*, ncclDevCommRequirements const*, ncclDevComm*, uint32_t) { return ncclSuccess; });
+                   [](ncclComm*, ncclDevCommRequirements const*, ncclDevResourceRequirements*, ncclGinBarrierReq const*,
+                      int, ncclDevComm*, uint32_t, ncclDevCommCompat const*) { return ncclSuccess; });
 
   EXPECT_EQ(Create(), ncclSuccess);
   EXPECT_EQ(setup.calls, 0);
@@ -7643,7 +7818,9 @@ TEST_F(DevrCommCreateInternalJitTest, DeviceCodeVersion_ReachesGinDevCommSetup) 
   comm->devrState.ginEnabled = true;  // already connected: go straight to setup
   std::vector<uint32_t> seen;
   ScopedHook setup(g_devrGinDevCommSetup,
-                   [&](ncclComm*, ncclDevCommRequirements const*, ncclDevComm*, uint32_t deviceCodeVersion) {
+                   [&](ncclComm*, ncclDevCommRequirements const*, ncclDevResourceRequirements*,
+                       ncclGinBarrierReq const*, int, ncclDevComm*, uint32_t deviceCodeVersion,
+                       ncclDevCommCompat const*) {
                      seen.push_back(deviceCodeVersion);
                      return ncclInternalError;  // stop here; nothing below depends on the version
                    });

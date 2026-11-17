@@ -53,6 +53,7 @@ class VirtualMachine;
 
 namespace amdgpu {
 class ComputeUnitCore;
+class KfdInterruptTestAccess;
 class KfdPreparedProviderTestAccess;
 class Wavefront;
 } // namespace amdgpu
@@ -740,8 +741,12 @@ public:
     uint32_t gpu_id = 0;
     /// Legacy KFD binding factory layered over the frontend-neutral VM service.
     std::unique_ptr<amdgpu::LegacyGpuVmAdapter> legacy_vm;
-    /// One revocable route owned by this frontend and carried only by its queues.
+    /// SDMA and SQ interrupts require a marked event mailbox on every GPU.
     amdgpu::InterruptSubscription interrupt_subscription;
+    /// CP completions follow the GC version's named-event mailbox rule.
+    amdgpu::InterruptSubscription cp_interrupt_subscription;
+    /// Software queue exceptions signal runtime events without GPU mailboxes.
+    amdgpu::InterruptSubscription exception_event_subscription;
     bool cps_initialized = false;
     /// Whether the "no CWSR layout for this architecture" warning has been
     /// logged for this GPU. The check now runs per faulting access rather than
@@ -778,6 +783,7 @@ private:
       const std::shared_ptr<PrivateGttCopySourceGate> &gate) noexcept;
 
   friend class VirtualMachine;
+  friend class amdgpu::KfdInterruptTestAccess;
   friend class amdgpu::KfdPreparedProviderTestAccess;
 
   using CacheWritebackResolver =
