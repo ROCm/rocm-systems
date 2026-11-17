@@ -681,9 +681,9 @@ public:
         write_json_string(output_, "--kernel-entry");
         output_ << ',';
         write_json_string(output_, hex_value(kernel_entry));
+        output_ << ",\"--wave-size\",";
+        write_json_string(output_, std::to_string(wave_size));
       }
-      output_ << ",\"--wave-size\",";
-      write_json_string(output_, std::to_string(wave_size));
       output_ << ',';
       write_json_string(output_, "--");
       output_ << ',';
@@ -699,8 +699,8 @@ public:
       if (has_kernel) {
         repro_command += " '--kernel-entry' ";
         repro_command += shell_quote(hex_value(kernel_entry));
+        repro_command += " '--wave-size' " + shell_quote(std::to_string(wave_size));
       }
-      repro_command += " '--wave-size' " + shell_quote(std::to_string(wave_size));
       repro_command += " -- " + shell_quote(input_path);
       write_json_string(output_, repro_command);
       output_ << "}\n";
@@ -1708,7 +1708,9 @@ void print_slowest_kernels(const ScanTotals &totals) {
     for (size_t task_index = 0; task_index < code_object_tasks.size(); ++task_index) {
       CodeObjectTask &task = code_object_tasks[task_index];
       const size_t first_kernel = batch_index * kernel_batch_size;
-      if (options.stop_after_first_diagnostic || first_kernel >= task.kernels.size())
+      if (options.stop_after_first_diagnostic ||
+          (options.check_counter_parity && task.kernels.size() > 1) ||
+          first_kernel >= task.kernels.size())
         continue;
       task.work_item_indices.push_back(work_items.size());
       work_items.push_back({task_index, first_kernel,
@@ -1794,17 +1796,38 @@ void print_slowest_kernels(const ScanTotals &totals) {
           record_slow_kernel(totals, std::move(slow_kernel), options.slowest_kernels);
       }
     }
-    if (diagnostic_writer && (!result.report.supported || !result.report.complete)) {
-      // A completed kernel may have emitted a valid JSONL finding before a
-      // different kernel made the containing object incomplete. Keep the
-      // summary and hazard status aligned with those emitted records.
-      for (size_t work_index : task.work_item_indices) {
-        const WaitcheckReport &partial = work_results[work_index].report;
-        if (!partial.supported || !partial.complete)
-          continue;
-        totals.diagnostics += partial.diagnostics_observed;
-        totals.hazards = totals.hazards || partial.diagnostics_observed != 0;
-        totals.diagnostics_lower_bound = true;
+    if (!result.report.supported || !result.report.complete) {
+      // Shared parity requires one whole-object analysis. If one entry makes
+      // that analysis incomplete, recover ordinary hazards from independently
+      // complete entries without publishing incomplete parity conclusions.
+      if (options.check_counter_parity && task.kernels.size() > 1) {
+        CliOptions hazard_options = options;
+        hazard_options.check_counter_parity = false;
+        for (const WaitcheckKernelInfo &kernel : task.kernels) {
+          const CodeObjectAnalysis partial = run_kernel_batch_analysis(
+              hazard_options, input_path, task.target, task.index, *task.code_object,
+              std::span<const WaitcheckKernelInfo>{&kernel, 1}, nullptr);
+          if (!partial.report.supported || !partial.report.complete)
+            continue;
+          if (diagnostic_writer)
+            diagnostic_writer->write(input_path, task.target, task.index,
+                                     std::span<const WaitcheckKernelInfo>{&kernel, 1},
+                                     partial.report.diagnostics);
+          totals.diagnostics += partial.report.diagnostics_observed;
+          totals.hazards = totals.hazards || partial.report.diagnostics_observed != 0;
+          totals.diagnostics_lower_bound = true;
+        }
+      } else if (diagnostic_writer) {
+        // A completed kernel may already have emitted a valid JSONL finding
+        // before another kernel made the containing object incomplete.
+        for (size_t work_index : task.work_item_indices) {
+          const WaitcheckReport &partial = work_results[work_index].report;
+          if (!partial.supported || !partial.complete)
+            continue;
+          totals.diagnostics += partial.diagnostics_observed;
+          totals.hazards = totals.hazards || partial.diagnostics_observed != 0;
+          totals.diagnostics_lower_bound = true;
+        }
       }
     }
     if (merge_code_object_analysis(options, input_path, task.target, task.index, result, totals,

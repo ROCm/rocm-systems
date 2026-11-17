@@ -128,6 +128,40 @@ class InventoryWaitcheckCorpusTest(unittest.TestCase):
             self.assertEqual(artifacts[0]["artifact"], artifacts[1]["artifact"])
             self.assertEqual(artifacts[0]["artifact_sha256"], artifacts[1]["artifact_sha256"])
 
+    def test_raw_container_rebuild_preserves_prior_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            container = root / "program.vmfb"
+            first_image = INPUT.read_bytes()
+            second_image = bytearray(first_image)
+            embedded_offset = first_image.find(b"\x7fELF", 4)
+            self.assertGreater(embedded_offset, 0)
+            second_image[embedded_offset + 9] ^= 1  # Inner ELF identification padding.
+            extracted = root / "objects"
+            artifacts = []
+            for source, image in (("build-one", first_image),
+                                  ("build-two", bytes(second_image))):
+                container.write_bytes(b"prefix" + image)
+                manifest = root / f"{source}.jsonl"
+                result = subprocess.run(
+                    [sys.executable, str(SCRIPT), str(container), "--waitcheck",
+                     str(WAITCHECK), "--project", "iree", "--source", source,
+                     "--provenance", "llvm", "--extract-dir", str(extracted),
+                     "--target", "gfx942", "--output", str(manifest)],
+                    capture_output=True, text=True, check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                rows = [json.loads(line) for line in manifest.read_text().splitlines()]
+                self.assertEqual(rows[0]["artifact_count"], 1)
+                artifacts.append(next(row for row in rows if row["kind"] == "artifact"))
+
+            self.assertNotEqual(artifacts[0]["artifact"], artifacts[1]["artifact"])
+            for artifact in artifacts:
+                path = Path(artifact["artifact"])
+                self.assertTrue(path.is_file())
+                self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(),
+                                 artifact["artifact_sha256"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -83,7 +83,7 @@ rj_waitcheck /path/to/site-packages/torch \
 | --- | --- |
 | `--target TARGET` | Select a target from the supported architectures listed below. |
 | `--code-object-index N` | Select the Nth code object for the selected target. |
-| `--kernel-entry OFFSET` | Analyze each merged entry/wave group at this `.text` byte offset. Same-wave descriptors are conservatively grouped, including register allocation. Use `--wave-size` to select one wave mode. This flag cannot select an individual descriptor for a dispatch-specific check. Offline callers iterating `waitcheck_kernels()` should pass each `WaitcheckKernelInfo` to the core overload to avoid repeating groups. |
+| `--kernel-entry OFFSET` | Analyze each merged entry/wave group at this `.text` byte offset. Same-wave descriptors are conservatively grouped, including register allocation. Use `--wave-size` to select one wave mode. This flag cannot select an individual descriptor for a dispatch-specific check. When replaying `--list-kernels` output through the CLI, run once per unique `(kernel_entry, wavefront_size)` or `analysis_group_name`; exact descriptor rows can share one group. Offline callers iterating `waitcheck_kernels()` should pass each `WaitcheckKernelInfo` to the core overload. |
 | `--wave-size 32\|64` | Select a descriptor wave size at `--kernel-entry`, or supply the wave size for a descriptorless entry. Requires `--kernel-entry`; a descriptorless entry remains incomplete without VGPR allocation. Descriptors keep their encoded wave size. |
 | `--all-code-objects` | Analyze all supported code objects in each input. |
 | `--recursive` | Expand directory inputs into recursive file sweeps. |

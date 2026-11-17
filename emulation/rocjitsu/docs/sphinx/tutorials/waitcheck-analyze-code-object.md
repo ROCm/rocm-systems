@@ -146,22 +146,6 @@ every selected code object to decode and analyze successfully. `-j16`
 runs up to 16 kernel analyses concurrently within one input; separate
 input files are scanned in sequence.
 
-## Runtime checking
-
-To check kernels at dispatch time without modifying the application,
-load the waitcheck HSA tools library:
-
-``` bash
-HSA_TOOLS_DISABLE_REGISTER=1 \
-  HSA_TOOLS_LIB="build/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_waitcheck_hooks.so" \
-  ROCJITSU_WAITCHECK_FAIL=1 \
-  ./vector_add
-```
-
-With `ROCJITSU_WAITCHECK_FAIL=1`, the tool aborts before submitting a
-kernel that contains a wait hazard. Without that flag, hazards are
-reported to stderr and the kernel is submitted normally.
-
 ## Next steps
 
 -   See [waitcheck hazard analyzer reference](../reference/waitcheck.md) for the

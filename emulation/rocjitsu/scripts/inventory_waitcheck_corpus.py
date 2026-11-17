@@ -192,10 +192,17 @@ def extract_code_objects(path: Path, output_dir: Path) -> list[Artifact]:
         while offset >= 0:
             image_size = embedded_elf_size(data, offset)
             if image_size is not None:
+                image = data[offset : offset + image_size]
+                image_hash = hashlib.sha256(image).hexdigest()
                 output_path = output_dir / (
-                    f"{path.stem}-{container_id}-{len(artifacts):04d}-{offset:x}.hsaco"
+                    f"{path.stem}-{container_id}-{len(artifacts):04d}-{offset:x}"
+                    f"-{image_hash}.hsaco"
                 )
-                output_path.write_bytes(data[offset : offset + image_size])
+                if output_path.exists():
+                    if output_path.stat().st_size != image_size or sha256(output_path) != image_hash:
+                        raise RuntimeError(f"existing extracted artifact differs: {output_path}")
+                else:
+                    output_path.write_bytes(image)
                 artifacts.append(Artifact(output_path, path, offset))
                 offset = data.find(b"\x7fELF", offset + image_size)
             else:

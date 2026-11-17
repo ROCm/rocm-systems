@@ -629,6 +629,7 @@ TEST(RjWaitcheck, CompletedKernelHazardSurvivesIncompleteObjectSkip) {
   const auto input = temp_dir.path / "mixed-gfx1201.co";
   const auto output = temp_dir.path / "stdout.txt";
   const auto diagnostics = temp_dir.path / "diagnostics.jsonl";
+  const auto parity = temp_dir.path / "parity.jsonl";
   const auto image = rocjitsu::waitcheck_test::make_gfx_multi_kernel_code_object(
       {{"hazard", {0xEE05007CU, 0x00000000U, 0x00000008U, 0x7E020300U, 0xBFB00000U}},
        {"incomplete",
@@ -648,6 +649,20 @@ TEST(RjWaitcheck, CompletedKernelHazardSurvivesIncompleteObjectSkip) {
   const std::string jsonl = read_text_file(diagnostics);
   EXPECT_EQ(std::count(jsonl.begin(), jsonl.end(), '\n'), 1) << jsonl;
   EXPECT_TRUE(contains(jsonl, "\"kernel_name\":\"hazard\"")) << jsonl;
+
+  const std::string with_parity =
+      shell_quote(g_waitcheck_tool.string()) + " " + shell_quote(input.string()) +
+      " --all-code-objects --skip-unsupported --diagnostics-jsonl " +
+      shell_quote(diagnostics.string()) + " --counter-parity-jsonl " +
+      shell_quote(parity.string()) + " > " + shell_quote(output.string());
+  EXPECT_TRUE(command_exited_with(std::system(with_parity.c_str()), 4)) << read_text_file(output);
+  EXPECT_TRUE(contains(read_text_file(output), "skipped=1 code-objects=0 diagnostics=>=1"))
+      << read_text_file(output);
+  const std::string with_parity_jsonl = read_text_file(diagnostics);
+  EXPECT_EQ(std::count(with_parity_jsonl.begin(), with_parity_jsonl.end(), '\n'), 1)
+      << with_parity_jsonl;
+  EXPECT_TRUE(contains(with_parity_jsonl, "\"kernel_name\":\"hazard\""))
+      << with_parity_jsonl;
 }
 
 TEST(RjWaitcheck, ExhaustiveWritesLosslessGfx950CounterParityJsonl) {
@@ -725,6 +740,33 @@ TEST(RjWaitcheck, ExhaustiveWritesLosslessGfx950CounterParityJsonl) {
       shell_quote(error.string());
   EXPECT_FALSE(command_succeeded(std::system(fallback_command.c_str())));
   EXPECT_TRUE(contains(read_text_file(error), "descriptorless code needs an explicit entry offset"));
+
+  const auto multi_input = temp_dir.path / "counter_parity_multi_gfx950.co";
+  const auto multi_diagnostics = temp_dir.path / "counter-parity-multi.jsonl";
+  const auto multi_image = rocjitsu::waitcheck_test::make_gfx_multi_kernel_code_object(
+      {{"strong_wait",
+        {0xE0501000u, 0x80000008u, 0xE05D1000u, 0x80100008u, 0xBF8C0F70u,
+         0x7E020300u, 0xBF810000u}},
+       {"clean", {0xBF810000u}}},
+      rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX950);
+  ASSERT_TRUE(write_binary_file(multi_input, multi_image));
+  const std::string multi_command =
+      shell_quote(g_waitcheck_tool.string()) + " " + shell_quote(multi_input.string()) +
+      " --exhaustive --target gfx950 --summary-only --no-fail --counter-parity-jsonl " +
+      shell_quote(multi_diagnostics.string()) + " > " + shell_quote(output.string());
+  ASSERT_TRUE(command_succeeded(std::system(multi_command.c_str())));
+  const std::string multi_jsonl = read_text_file(multi_diagnostics);
+  EXPECT_EQ(std::count(multi_jsonl.begin(), multi_jsonl.end(), '\n'), 1) << multi_jsonl;
+  EXPECT_FALSE(contains(multi_jsonl, "--wave-size")) << multi_jsonl;
+  const std::string replay_script =
+      "import json,subprocess,sys; "
+      "row=json.loads(open(sys.argv[1]).readline()); "
+      "run=subprocess.run(row['repro_argv'],capture_output=True,text=True); "
+      "assert run.returncode == 0, run.stderr; "
+      "assert 'counter-underaccounting=1' in run.stdout, run.stdout";
+  const std::string replay = "python3 -c " + shell_quote(replay_script) + " " +
+                             shell_quote(multi_diagnostics.string());
+  EXPECT_TRUE(command_succeeded(std::system(replay.c_str())));
 }
 
 TEST(RjWaitcheck, CounterParityJsonlPreservesSharedWaitAcrossEntries) {
@@ -768,6 +810,23 @@ TEST(RjWaitcheck, CounterParityJsonlPreservesSharedWaitAcrossEntries) {
     if (include_diagnostics)
       EXPECT_TRUE(read_text_file(diagnostic_jsonl).empty());
   }
+
+  const auto mixed_input = temp_dir.path / "mixed-objects-gfx950";
+  const auto clean = rocjitsu::waitcheck_test::make_gfx_multi_kernel_code_object(
+      {{"clean", {0xBF810000u}}}, rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX950);
+  const auto mixed = make_gnu_host_fat_binary(
+      {make_compressed_offload_bundle(make_clang_offload_bundle(image), 1, true),
+       make_compressed_offload_bundle(make_clang_offload_bundle(clean), 1, true)});
+  ASSERT_TRUE(write_binary_file(mixed_input, mixed));
+  const std::string mixed_command =
+      shell_quote(g_waitcheck_tool.string()) + " " + shell_quote(mixed_input.string()) +
+      " --exhaustive --target gfx950 --summary-only --no-fail --counter-parity-jsonl " +
+      shell_quote(parity_jsonl.string()) + " > " + shell_quote(jsonl_output.string());
+  ASSERT_TRUE(command_succeeded(std::system(mixed_command.c_str())));
+  const std::string mixed_summary = read_text_file(jsonl_output);
+  EXPECT_TRUE(contains(mixed_summary, "code-objects=2/2 kernels=3/3")) << mixed_summary;
+  EXPECT_TRUE(contains(mixed_summary, "parity-fields=1 parity-exact=1")) << mixed_summary;
+  EXPECT_TRUE(read_text_file(parity_jsonl).empty());
 }
 
 TEST(RjWaitcheck, AnalyzesGfx942CodeObject) {
