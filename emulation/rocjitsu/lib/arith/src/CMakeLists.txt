@@ -56,6 +56,7 @@ add_library(
     fp/div_fixup.cpp
     fp/div_fmas.cpp
     fp/div_scale.cpp
+    fp/packed_f64_gfx1251.cpp
     fp/fp64.cpp
     fp/frexp_exp.cpp
     fp/half_mad.cpp

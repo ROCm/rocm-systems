@@ -195,12 +195,10 @@ def test_ldexp_simd_probes_use_the_shared_raw_operation():
         '  ROCJITSU_TRY_SIMD_VOP3_LDEXP_RAW_FP('
         'amdgpu::ldexp::Operation<amdgpu::fp_format::F32>{'
     )
-    assert vop3['f64'].startswith(
-        '  ROCJITSU_TRY_SIMD_VOP3_LDEXP_RAW_FP64('
-        'amdgpu::ldexp::Operation<amdgpu::fp_format::F64, 32>{'
-    )
+    assert vop3['f64'] is None
     # Effective OMOD makes a tiny result flush before scaling.
-    for dtype, line in vop3.items():
+    for dtype in ('f16', 'f32'):
+        line = vop3[dtype]
         assert line.endswith(
             f'amdgpu::output_modifier_policy<amdgpu::fp_format::{dtype.upper()}>'
             '(wf, inst.inst_.omod, inst.inst_.clamp).omod != 0)});'
@@ -239,6 +237,9 @@ def test_vop3_f16_simd_probes_split_true16_from_generic():
     assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16' in div_fixup_true16
     assert 'F16TernaryOutputOrder::MODIFY_THEN_ROUND' in div_fixup
     assert 'F16TernaryOutputOrder::MODIFY_THEN_ROUND' in div_fixup_true16
+    assert simd_probe_line('v_fmac_f64_vop2') is None
+    assert simd_probe_line('v_fma_f64_vop3') is None
+    assert simd_probe_line('v_fmac_f64_vop3') is None
 
 
 @pytest.mark.parametrize('true16', [False, True])

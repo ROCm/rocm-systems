@@ -3334,7 +3334,15 @@ TEST(Gfx1251PackedF64ExecutionTest, FusedOperationExecutesCrossWindowVgprTuples)
   wf->set_exec(1u);
   wf->set_mode_raw(3u << 6);
 
+  auto plugin_group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto recorder = std::make_unique<VgprReadRecorder>();
+  auto *recorder_ptr = recorder.get();
+  ASSERT_TRUE(plugin_group->add(std::move(recorder)));
+  plugin_group->onInit();
+
   for (const auto &test_case : kCases) {
+    // Exercise observed publication at the destination boundary; source cases keep direct stores.
+    cu->set_plugin_group(test_case.name == "vdst" ? plugin_group : nullptr);
     SCOPED_TRACE(test_case.name);
     write_vgpr_packed_u64(*cu, *wf, 8, 0, kMultiplicand);
     write_vgpr_packed_u64(*cu, *wf, 12, 0, kMultiplier);
@@ -3347,6 +3355,9 @@ TEST(Gfx1251PackedF64ExecutionTest, FusedOperationExecutesCrossWindowVgprTuples)
     ASSERT_NE(decoded->execute, nullptr);
     EXPECT_TRUE(cu->execute_instruction(decoded.get(), *wf).succeeded());
     EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, test_case.destination, 0), kExpected);
+    if (test_case.name == "vdst") {
+      EXPECT_GT(recorder_ptr->read_count, 0u);
+    }
   }
 }
 

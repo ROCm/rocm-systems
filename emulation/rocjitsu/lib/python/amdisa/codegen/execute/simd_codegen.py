@@ -498,7 +498,7 @@ SIMD_VOP2_TERNARY_ACCUMULATE = {
 # pairs, performs a native<double> fused operation under the architectural
 # FP_ROUND/FP_DENORM mode, and scalar-corrects NaN-input lanes so payload policy
 # remains identical to the scalar executor.
-SIMD_VOP2_FMA_F64 = {'v_fmac_f64_vop2'}
+SIMD_VOP2_FMA_F64 = set()
 
 
 # template_name -> cpp_bin_op (over native<double>, no modifiers). VOP2 f64
@@ -522,16 +522,6 @@ SIMD_VOP2_BINARY_FP64: dict[str, str] = {
 # the glue note + UtilSimd.*F64*_BitExact guards). v_mov_b64 is a pure 64-bit
 # copy (T = uint64_t).
 SIMD_VOP1_UNARY_F64: dict[str, tuple[str, str]] = {
-    'v_ceil_f64_vop1': (
-        'double',
-        _flush_input_then('F64', '[](auto a) { return util::ceil_simd(a); }'),
-    ),
-    'v_floor_f64_vop1': (
-        'double',
-        _flush_input_then('F64', '[](auto a) { return util::floor_simd(a); }'),
-    ),
-    'v_trunc_f64_vop1': ('double', '[](auto a) { return util::trunc_simd(a); }'),
-    'v_rndne_f64_vop1': ('double', '[](auto a) { return util::rndne_simd(a); }'),
     'v_fract_f64_vop1': ('uint64_t', float_fract.simd_functor('f64')),
     'v_rcp_f64_vop1': (
         'double',
@@ -543,8 +533,6 @@ SIMD_VOP1_UNARY_F64: dict[str, tuple[str, str]] = {
     ),
     'v_sqrt_f64_vop1': ('double', '[](auto a) { return util::sqrt_f64_simd(a); }'),
     'v_mov_b64_vop1': ('uint64_t', '[](auto a) { return a; }'),
-    # frexp mantissa: significand in [0.5,1) via bitfield rebias + denormal
-    # renorm (see util::frexp_mant_f64_simd). VOP3 twin in SIMD_VOP3_UNARY_FP64.
     'v_frexp_mant_f64_vop1': (
         'double',
         _flush_input_then('F64', '[](auto a) { return util::frexp_mant_f64_simd(a); }'),
@@ -1070,10 +1058,7 @@ SIMD_VOP3_UNARY_INT_EXTRA: dict[str, tuple[str, str, str]] = {
 #
 # Legacy min/max also route through the shared raw-bit selection stage.
 # The IEEE-2019 min/max forms read raw encodings; see float_minmax.simd_probe.
-SIMD_VOP3_BINARY_FP64: dict[str, str] = {
-    'v_add_f64_vop3': '[](auto a, auto b) { return a + b; }',
-    'v_mul_f64_vop3': '[](auto a, auto b) { return a * b; }',
-}
+SIMD_VOP3_BINARY_FP64: dict[str, str] = {}
 
 # Their host result is already rounded in the MODE the caller checked, so the
 # shared raw-bit stages apply ABS/NEG, OMOD and CLAMP around it.
@@ -1087,35 +1072,12 @@ _ROUNDED_VOP3_BINARY_FP64 = frozenset({'v_add_f64_vop3', 'v_mul_f64_vop3'})
 # preservation), so they are bit-identical to the scalar libm calls for every
 # finite / Inf / NaN / signed-zero input.
 SIMD_VOP3_UNARY_FP64: dict[str, str] = {
-    'v_ceil_f64_vop3': _flush_input_then(
-        'F64', '[](auto a) { return util::ceil_simd(a); }'
-    ),
-    'v_floor_f64_vop3': _flush_input_then(
-        'F64', '[](auto a) { return util::floor_simd(a); }'
-    ),
-    'v_trunc_f64_vop3': '[](auto a) { return util::trunc_simd(a); }',
-    'v_rndne_f64_vop3': '[](auto a) { return util::rndne_simd(a); }',
-    # sqrt_f64 is correctly-rounded IEEE (scalar uses transcendental::sqrt_f64
-    # which is `std::sqrt` after NaN/negative guards); stdx::sqrt matches.
-    'v_sqrt_f64_vop3': ('[](auto a) { return util::sqrt_f64_simd(a); }'),
-    # frexp mantissa: same functor as the VOP1 form, after MODE input flushing;
-    # the f64 unary FP glue applies abs/neg on the source and omod/clamp on the
-    # mantissa, matching the scalar.
+    'v_sqrt_f64_vop3': '[](auto a) { return util::sqrt_f64_simd(a); }',
     'v_frexp_mant_f64_vop3': _flush_input_then(
         'F64', '[](auto a) { return util::frexp_mant_f64_simd(a); }'
     ),
-    # v_rcp_f64 / v_rsq_f64: scalar uses transcendental::*_f64 with explicit
-    # NaN passthrough, ±0 -> copysign(Inf, x), ±Inf -> copysign(0, x); negative
-    # rsq inputs -> qNaN. Plain 1.0 / x and 1.0 / sqrt match the IEEE result
-    # for all non-NaN inputs; NaN-result lanes are skipped by the A/B test.
     'v_rcp_f64_vop3': '[](auto a) { return util::native<double>(1.0) / a; }',
     'v_rsq_f64_vop3': '[](auto a) { return util::native<double>(1.0) / util::stdx::sqrt(a); }',
-    # NOTE: v_mov_b64 is deliberately NOT here. It is an integer 64-bit bit-move;
-    # OMOD/CLAMP are float-only, so its generated VOP3 scalar body is a raw copy
-    # that ignores them. Routing it through the f64 modifier glue made the SIMD
-    # path apply clamp/omod the scalar never does (clamp=1: scalar keeps the raw
-    # bits vs simd clamps to 1.0). With no entry here it stays scalar (a 64-bit
-    # register copy gains nothing from vectorization anyway).
 }
 
 
@@ -1173,7 +1135,7 @@ SIMD_VOP3_TERNARY_FP16: dict[str, str] = {
     ),
 }
 
-SIMD_VOP3_FMA_MODE_FP64 = {'v_fma_f64_vop3'}
+SIMD_VOP3_FMA_MODE_FP64 = set()
 
 # f64 ternary FMA.
 SIMD_VOP3_TERNARY_FP64: dict[str, str] = {
@@ -1194,7 +1156,7 @@ SIMD_VOP3_FMAC_FP32: dict[str, str] = {
     'v_mac_f32_vop3': '[&inst, &wf](auto a, auto b, auto c) { return amdgpu::fma_f32_simd_unscoped(a, b, c, wf, amdgpu::effective_vop3_omod_f32(wf, inst.inst_.omod)); }',
     'v_fmac_dx9_zero_f32_vop3': SIMD_VOP3_TERNARY_FP32['v_fma_dx9_zero_f32_vop3'],
 }
-SIMD_VOP3_FMAC_FP64 = {'v_fmac_f64_vop3'}
+SIMD_VOP3_FMAC_FP64 = set()
 
 SIMD_VOP3_TERNARY_INT: dict[str, tuple[str, str]] = {
     # 16-bit: the scalar body sign-/zero-extends the low 16 bits, takes the

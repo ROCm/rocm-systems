@@ -1040,19 +1040,27 @@ void VCvtF64U32Vop1::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VTruncF64Vop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_trunc_f64_vop1(*this, wf);
+  amdgpu::arith::execute_float_unary64(wf, rj_arith_v_trunc_f64_w32_gfx908,
+                                       rj_arith_v_trunc_f64_w64_gfx908, wf.cu().arithmetic_flags(),
+                                       0, vdst, src0, true);
 }
 
 void VCeilF64Vop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_ceil_f64_vop1(*this, wf);
+  amdgpu::arith::execute_float_unary64(wf, rj_arith_v_ceil_f64_w32_gfx908,
+                                       rj_arith_v_ceil_f64_w64_gfx908, wf.cu().arithmetic_flags(),
+                                       0, vdst, src0, true);
 }
 
 void VRndneF64Vop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_rndne_f64_vop1(*this, wf);
+  amdgpu::arith::execute_float_unary64(wf, rj_arith_v_rndne_f64_w32_gfx908,
+                                       rj_arith_v_rndne_f64_w64_gfx908, wf.cu().arithmetic_flags(),
+                                       0, vdst, src0, true);
 }
 
 void VFloorF64Vop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_floor_f64_vop1(*this, wf);
+  amdgpu::arith::execute_float_unary64(wf, rj_arith_v_floor_f64_w32_gfx908,
+                                       rj_arith_v_floor_f64_w64_gfx908, wf.cu().arithmetic_flags(),
+                                       0, vdst, src0, true);
 }
 
 void VPipeflushVop1::execute_impl(amdgpu::Wavefront &wf) {
