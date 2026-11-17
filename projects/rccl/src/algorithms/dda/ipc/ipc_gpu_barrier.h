@@ -33,11 +33,21 @@ __device__ __forceinline__ uint32_t cas(uint32_t* addr, uint32_t compare, uint32
 #endif
 }
 
+// DDA revoke/abort is gfx1250 only; IpcGpuBarrier and FabricGpuBarrier share these waits. On gfx942/gfx950
+// the abort poll and the sticky bit in the by-value barrier cost every IPC launch, so the waits just spin.
+#if defined(__gfx1250__) || defined(__gfx1250_strict__)
+constexpr bool kDdaWaitPollsAbort = true;
+#else
+constexpr bool kDdaWaitPollsAbort = false;
+#endif
+
 template <std::memory_order Sem>
 __device__ __forceinline__ bool putFlag(uint32_t* addr, DdaKernelParams params) {
   int spins = 0;
   while (cas<Sem>(addr, 0, 1) != 0) {
-    if (params.abortSpinTick(spins)) return false;
+    if constexpr (kDdaWaitPollsAbort) {
+      if (params.abortSpinTick(spins)) return false;
+    }
   }
   return true;
 }
@@ -46,7 +56,9 @@ template <std::memory_order Sem>
 __device__ __forceinline__ bool waitFlag(uint32_t* addr, DdaKernelParams params) {
   int spins = 0;
   while (cas<Sem>(addr, 1, 0) != 1) {
-    if (params.abortSpinTick(spins)) return false;
+    if constexpr (kDdaWaitPollsAbort) {
+      if (params.abortSpinTick(spins)) return false;
+    }
   }
   return true;
 }
@@ -122,7 +134,7 @@ public:
     if constexpr (hasPreviousMemAccess) {
       __syncthreads();
     }
-    if (threadIdx.x < NRANKS && !aborted_) {
+    if (threadIdx.x < NRANKS && (!kDdaWaitPollsAbort || !aborted_)) {
       auto peerRank = threadIdx.x;
       bool signaled = false;
       if constexpr (fenceType == MemFenceType::ACQUIRE_ONLY) {
@@ -139,7 +151,7 @@ public:
           arrived = allMailboxes_[selfRank_].waitFlagWithMemFence(peerRank, blockIdx.x, params_);
         }
       }
-      aborted_ = __any(!arrived);
+      if constexpr (kDdaWaitPollsAbort) aborted_ = __any(!arrived);
     }
     if constexpr (hasSubsequentMemAccess) {
       __syncthreads();
