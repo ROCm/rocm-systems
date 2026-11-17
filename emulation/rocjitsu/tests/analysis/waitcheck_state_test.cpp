@@ -829,8 +829,9 @@ TEST(WaitcheckState, FlatSourceRetirementRequiresBothCounterOnlyFacets) {
       }
 }
 
-TEST(WaitcheckState, Cdna3And4FlatAdmissionNeedsAnActiveRequest) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+TEST(WaitcheckState, LegacyFlatCannotProveOlderCompletionFromAnUnroutedCredit) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
+                    ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
     auto nop = decode_wait(0xbf800000u, arch);
     ASSERT_TRUE(nop);
     for (auto kind : {WaitEventKind::FlatLoad, WaitEventKind::FlatStore})
@@ -840,6 +841,7 @@ TEST(WaitcheckState, Cdna3And4FlatAdmissionNeedsAnActiveRequest) {
         SCOPED_TRACE(static_cast<int>(kind));
         const auto maximum = Ops::maximum_dependency_wait(arch, counter);
         ASSERT_TRUE(maximum.succeeded());
+        EXPECT_FALSE(Ops::guaranteed_issue_order(counter, kind, arch, true));
         PendingState initial;
         auto older = load(8, maximum.value());
         older.counter = counter;
@@ -853,14 +855,60 @@ TEST(WaitcheckState, Cdna3And4FlatAdmissionNeedsAnActiveRequest) {
         Ops::apply_admission(active, *nop, issued, arch, false);
         EXPECT_EQ(active.pending[index], (std::vector<PendingEvent>{older}));
         Ops::apply_admission(active, *nop, issued, arch, true);
-        EXPECT_TRUE(active.pending[index].empty());
+        EXPECT_EQ(active.pending[index], (std::vector<PendingEvent>{older}));
         auto empty = initial;
         empty.exec_nonzero = false;
         Ops::apply_admission(empty, *nop, issued, arch, false);
         Ops::apply_admission(empty, *nop, issued, arch, true);
         EXPECT_EQ(empty.pending[index], (std::vector<PendingEvent>{older}));
+
+        // A native request on the same completion queue does provide the
+        // capacity proof. Keep that useful case when FLAT routing is unknown.
+        auto native = initial;
+        native.exec_nonzero = true;
+        const std::array native_issued{ClassifiedEvent{
+            counter,
+            counter == WaitCounterKind::Ds ? WaitEventKind::Ds : WaitEventKind::VmemNoSamplerLoad}};
+        EXPECT_TRUE(Ops::guaranteed_issue_order(counter, native_issued[0].kind, arch, true));
+        Ops::apply_admission(native, *nop, native_issued, arch, false);
+        EXPECT_TRUE(native.pending[index].empty());
       }
   }
+}
+
+TEST(WaitcheckState, LegacyFlatCannotAgeOlderNativeResultForAPartialWait) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
+                    ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2})
+    for (auto counter : {WaitCounterKind::Load, WaitCounterKind::Ds}) {
+      SCOPED_TRACE(arch);
+      SCOPED_TRACE(static_cast<int>(counter));
+      const auto maximum = Ops::maximum_dependency_wait(arch, counter);
+      ASSERT_TRUE(maximum.succeeded());
+      auto older = load(8, 0);
+      older.counter = counter;
+      older.kind =
+          counter == WaitCounterKind::Ds ? WaitEventKind::Ds : WaitEventKind::VmemNoSamplerLoad;
+      const size_t index = Ops::counter_index(counter);
+      PendingState state;
+      state.exec_nonzero = true;
+      state.pending[index] = {older};
+      auto incoming = older;
+      incoming.kind = WaitEventKind::FlatLoad;
+      Ops::age_events(state, incoming, arch, maximum.value());
+      EXPECT_EQ(state.pending[index][0].min_younger, 0u);
+      ASSERT_TRUE(Ops::apply_memory_wait(state, counter, 1, arch).succeeded());
+      EXPECT_EQ(state.pending[index], (std::vector<PendingEvent>{older}));
+
+      // A younger native request in the same queue has ordered completion.
+      PendingState native;
+      native.exec_nonzero = true;
+      native.pending[index] = {older};
+      incoming.kind = older.kind;
+      Ops::age_events(native, incoming, arch, maximum.value());
+      EXPECT_EQ(native.pending[index][0].min_younger, 1u);
+      ASSERT_TRUE(Ops::apply_memory_wait(native, counter, 1, arch).succeeded());
+      EXPECT_TRUE(native.pending[index].empty());
+    }
 }
 
 TEST(WaitcheckState, OnlyCdna5FlatAdmissionPrecedesSourceReads) {

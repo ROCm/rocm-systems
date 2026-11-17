@@ -76,13 +76,12 @@ bool gfx11_flat_ds(WaitCounterKind counter, WaitEventKind kind, rj_code_arch_t a
          (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5);
 }
 
-bool has_conditional_issue(WaitCounterKind counter, WaitEventKind kind, rj_code_arch_t arch,
-                           bool exec_nonzero) {
-  // CDNA3/4 charge both legacy counters for an active FLAT request, but the
-  // shared target policy does not guarantee an issue with empty EXEC.
-  if (has_conditional_route(kind) && !exec_nonzero &&
-      amdgpu::legacy_flat_issues_both_counter_domains(arch) &&
-      !amdgpu::legacy_flat_issues_with_empty_exec(arch))
+bool lacks_guaranteed_completion_position(WaitCounterKind counter, WaitEventKind kind,
+                                          rj_code_arch_t arch, bool exec_nonzero) {
+  // An active legacy FLAT reserves both counter credits, but an unused route
+  // is not evidence that an older result on that counter completed. Neither
+  // partial waits nor counter capacity may rely on a particular route here.
+  if (has_conditional_route(kind) && amdgpu::legacy_flat_issues_both_counter_domains(arch))
     return true;
   // A live VMcnt/VScnt position forces issue on GFX11. A live LGKM position
   // alone does not. Queue summaries are upper bounds, so a different VMEM
@@ -101,9 +100,9 @@ std::optional<uint32_t> WaitcheckStateOps::guaranteed_issue_order(WaitCounterKin
                                                                   WaitEventKind kind,
                                                                   rj_code_arch_t arch,
                                                                   bool exec_nonzero) {
-  // An admitted FLAT request can age either queue position independently of
-  // the lanes' completion route.
-  if (has_conditional_issue(counter, kind, arch, exec_nonzero))
+  // A younger credit may age an older result only when its completion
+  // position is guaranteed, independently of the lanes' route.
+  if (lacks_guaranteed_completion_position(counter, kind, arch, exec_nonzero))
     return std::nullopt;
   return completion_order_kind(counter, kind, arch);
 }
@@ -148,11 +147,12 @@ void WaitcheckStateOps::apply_admission(PendingState &state, const Instruction &
           !state.exec_nonzero || has_xcnt_smem(state))
         continue;
     } else if (!is_completion_counter(event.counter) ||
-               has_conditional_issue(event.counter, event.kind, arch, state.exec_nonzero)) {
+               lacks_guaranteed_completion_position(event.counter, event.kind, arch,
+                                                    state.exec_nonzero)) {
       continue;
     }
-    // The incoming instruction must reserve all its credits before accessing
-    // its registers. Only guaranteed younger members of an ordered FIFO count.
+    // Only a guaranteed younger completion position can force an older
+    // result out when the counter reaches capacity.
     const auto capacity = maximum_dependency_wait(arch, event.counter).value() + 1;
     const uint32_t remaining = capacity - (translation ? 1 : issue_units(inst, event, arch));
     const auto idx = counter_index(event.counter);

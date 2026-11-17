@@ -10832,6 +10832,31 @@ TEST(WaitcheckTest, Cdna3And4ActiveFlatLoadsCreditBothPartialWaitCounters) {
   }
 }
 
+TEST(WaitcheckTest, LegacyUnroutedFlatCannotMakeOlderNativeLoadReadyAtCountOne) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    SCOPED_TRACE(arch);
+    for (bool ds : {false, true})
+      for (bool full_wait : {false, true}) {
+        SCOPED_TRACE(ds);
+        std::vector<uint32_t> program =
+            ds ? std::vector<uint32_t>{0xD86C0000u, 0x00000001u}   // ds_read_b32 v0,v1
+               : std::vector<uint32_t>{0xDC508000u, 0x007F0002u};  // global_load_dword v0
+        program.insert(program.end(), {0xDC500000u, 0x0100000Eu}); // flat_load_dword v1
+        const uint32_t weak_wait = ds ? 0xBF8C0170u : 0xBF8C0071u;
+        program.insert(program.end(), {full_wait ? 0xBF8C0070u : weak_wait, 0x7E040300u,
+                                       0xBF810000u}); // v_mov v2,v0; end
+        const auto report = analyze_waitcnts(program, arch);
+        ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+        const bool missing = std::ranges::any_of(report.diagnostics, [&](const auto &d) {
+          return d.counter == (ds ? WaitCounterKind::Ds : WaitCounterKind::Load) &&
+                 d.producer_section_offset == 0 && d.section_offset == 20 &&
+                 d.access == WaitcheckAccessKind::Use;
+        });
+        EXPECT_EQ(missing, !full_wait) << diagnostic_summary(report);
+      }
+  }
+}
+
 TEST(WaitcheckTest, PreGfx12FlatReadsItsAddressBeforeCounterCapacityRetirement) {
   // A full VMcnt queue cannot retire the oldest load before the incoming
   // generic FLAT reads that load's address result.
