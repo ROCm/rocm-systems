@@ -180,6 +180,13 @@ int integer_wmma(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d,
   if (int error = rocjitsu::arith::validate(flags, 0)) {
     return error;
   }
+#if defined(RJ_ARITH_HAVE_AVX512VNNI)
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_ZEN4)) {
+    rocjitsu::arith::integer_wmma_replicated_avx512vnni<Bits, Lanes>(uint32_t(instruction_flags), d,
+                                                                     a, b, c);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
     rocjitsu::arith::integer_wmma_replicated_x86_64_v3<Bits, Lanes>(uint32_t(instruction_flags), d,

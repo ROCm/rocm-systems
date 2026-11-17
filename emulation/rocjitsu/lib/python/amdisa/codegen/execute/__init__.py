@@ -126,8 +126,6 @@ def _register_handlers() -> None:
         gen_dot8,
     )
     from amdisa.codegen.execute.matrix import (
-        gen_accvgpr_read,
-        gen_accvgpr_write,
         gen_mfma,
     )
 
@@ -386,8 +384,6 @@ def _register_handlers() -> None:
         )
 
     # Matrix
-    DISPATCH['accvgpr_read'] = lambda c: gen_accvgpr_read(c.dst_ops, c.src_ops)
-    DISPATCH['accvgpr_write'] = lambda c: gen_accvgpr_write(c.dst_ops, c.src_ops)
     DISPATCH['mfma'] = gen_mfma
 
 

@@ -409,7 +409,6 @@ def _flush_input_then(fmt: str, functor: str) -> str:
 SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
     # --- bitwise / move (uint32, bit-identical) ---
     'v_mov_b32_vop1': ('uint32_t', 'uint32_t', '[](auto a) { return a; }'),
-    'v_accvgpr_mov_b32_vop1': ('uint32_t', 'uint32_t', '[](auto a) { return a; }'),
     'v_not_b32_vop1': ('uint32_t', 'uint32_t', '[](auto a) { return ~a; }'),
     # RDNA3+ 16-bit move / not / int16<->int32 conversions (low-16, zero-extend
     # to the 32-bit VGPR). The _vop3 twins auto-route through the same VOP1 path,

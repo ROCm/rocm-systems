@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// gfx942/gfx950 signed-byte MFMA and gfx1250 mixed-signedness byte WMMA.
+// GFX9 signed-byte MFMA and gfx1250 mixed-signedness byte WMMA.
 #include "common/internal.h"
 #include "mfma/backends.h"
 #include "mfma/integer.h"
@@ -10,7 +10,7 @@
 #include "rj_arith/detail/rj_arith_wmma.h"
 namespace {
 // Validate source controls and dispatch the exact integer reduction.
-template <int M, int K, int Batch, bool Wmma>
+template <int M, int K, int Batch, bool Wmma, int ABlockLanes = 0, bool AllowSaturation = true>
 int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32_t *const *a,
              const uint32_t *const *b, const uint32_t *const *c) {
   using namespace rocjitsu::arith;
@@ -21,20 +21,21 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
                            kMatrixIgnoredFpFlags | RJ_ARITH_FP_DX10_CLAMP_OFF)) {
     return error;
   }
-  const bool clamp = Wmma ? (controls & RJ_ARITH_WMMA_CLAMP) : (flags & RJ_ARITH_FP16_OVFL);
+  const bool clamp =
+      AllowSaturation && (Wmma ? (controls & RJ_ARITH_WMMA_CLAMP) : (flags & RJ_ARITH_FP16_OVFL));
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
   if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
-    matrix_i8_x86_64_v4<M, K, Batch, Wmma>(controls, clamp, d, a, b, c);
+    matrix_i8_x86_64_v4<M, K, Batch, Wmma, ABlockLanes>(controls, clamp, d, a, b, c);
     return RJ_ARITH_SUCCESS;
   }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
-    matrix_i8_x86_64_v3<M, K, Batch, Wmma>(controls, clamp, d, a, b, c);
+    matrix_i8_x86_64_v3<M, K, Batch, Wmma, ABlockLanes>(controls, clamp, d, a, b, c);
     return RJ_ARITH_SUCCESS;
   }
 #endif
-  matrix_i8_kernel<M, K, Batch, Wmma>(controls, clamp, d, a, b, c);
+  matrix_i8_kernel<M, K, Batch, Wmma, ABlockLanes>(controls, clamp, d, a, b, c);
   return RJ_ARITH_SUCCESS;
 }
 } // namespace
@@ -93,4 +94,80 @@ int rj_arith_v_wmma_i32_16x16x64_iu8_w32(uint64_t flags, uint64_t controls, uint
                                          const uint32_t *const *a, const uint32_t *const *b,
                                          const uint32_t *const *c) {
   return evaluate<16, 64, 1, true>(flags, controls, d, a, b, c);
+}
+
+// Preserve gfx908's wrapping sum and inherited A broadcast mapping.
+int rj_arith_v_mfma_i32_32x32x4_2b_i8_w64_gfx908(uint64_t flags, uint64_t controls,
+                                                 uint32_t *const *d, const uint32_t *const *a,
+                                                 const uint32_t *const *b,
+                                                 const uint32_t *const *c) {
+  return evaluate<32, 4, 2, false, 0, false>(flags, controls, d, a, b, c);
+}
+
+// Preserve gfx908's wrapping sum and inherited A broadcast mapping.
+int rj_arith_v_mfma_i32_16x16x4_4b_i8_w64_gfx908(uint64_t flags, uint64_t controls,
+                                                 uint32_t *const *d, const uint32_t *const *a,
+                                                 const uint32_t *const *b,
+                                                 const uint32_t *const *c) {
+  return evaluate<16, 4, 4, false, 0, false>(flags, controls, d, a, b, c);
+}
+
+// Preserve gfx908's wrapping sum and inherited A broadcast mapping.
+int rj_arith_v_mfma_i32_4x4x4_16b_i8_w64_gfx908(uint64_t flags, uint64_t controls,
+                                                uint32_t *const *d, const uint32_t *const *a,
+                                                const uint32_t *const *b,
+                                                const uint32_t *const *c) {
+  return evaluate<4, 4, 16, false, 0, false>(flags, controls, d, a, b, c);
+}
+
+// Preserve gfx908's wrapping sum and inherited A broadcast mapping.
+int rj_arith_v_mfma_i32_32x32x8_i8_w64_gfx908(uint64_t flags, uint64_t controls, uint32_t *const *d,
+                                              const uint32_t *const *a, const uint32_t *const *b,
+                                              const uint32_t *const *c) {
+  return evaluate<32, 8, 1, false, 0, false>(flags, controls, d, a, b, c);
+}
+
+// Preserve gfx908's wrapping sum and inherited A broadcast mapping.
+int rj_arith_v_mfma_i32_16x16x16_i8_w64_gfx908(uint64_t flags, uint64_t controls,
+                                               uint32_t *const *d, const uint32_t *const *a,
+                                               const uint32_t *const *b, const uint32_t *const *c) {
+  return evaluate<16, 16, 1, false, 0, false>(flags, controls, d, a, b, c);
+}
+
+// Preserve gfx90a's wrapping sum and inherited A broadcast mapping.
+int rj_arith_v_mfma_i32_32x32x4_2b_i8_w64_gfx90a(uint64_t flags, uint64_t controls,
+                                                 uint32_t *const *d, const uint32_t *const *a,
+                                                 const uint32_t *const *b,
+                                                 const uint32_t *const *c) {
+  return evaluate<32, 4, 2, false, 32, false>(flags, controls, d, a, b, c);
+}
+
+// Preserve gfx90a's wrapping sum and inherited A broadcast mapping.
+int rj_arith_v_mfma_i32_16x16x4_4b_i8_w64_gfx90a(uint64_t flags, uint64_t controls,
+                                                 uint32_t *const *d, const uint32_t *const *a,
+                                                 const uint32_t *const *b,
+                                                 const uint32_t *const *c) {
+  return evaluate<16, 4, 4, false, 16, false>(flags, controls, d, a, b, c);
+}
+
+// Preserve gfx90a's wrapping sum and inherited A broadcast mapping.
+int rj_arith_v_mfma_i32_4x4x4_16b_i8_w64_gfx90a(uint64_t flags, uint64_t controls,
+                                                uint32_t *const *d, const uint32_t *const *a,
+                                                const uint32_t *const *b,
+                                                const uint32_t *const *c) {
+  return evaluate<4, 4, 16, false, 4, false>(flags, controls, d, a, b, c);
+}
+
+// Preserve gfx90a's wrapping sum and inherited A broadcast mapping.
+int rj_arith_v_mfma_i32_32x32x8_i8_w64_gfx90a(uint64_t flags, uint64_t controls, uint32_t *const *d,
+                                              const uint32_t *const *a, const uint32_t *const *b,
+                                              const uint32_t *const *c) {
+  return evaluate<32, 8, 1, false, 32, false>(flags, controls, d, a, b, c);
+}
+
+// Preserve gfx90a's wrapping sum and inherited A broadcast mapping.
+int rj_arith_v_mfma_i32_16x16x16_i8_w64_gfx90a(uint64_t flags, uint64_t controls,
+                                               uint32_t *const *d, const uint32_t *const *a,
+                                               const uint32_t *const *b, const uint32_t *const *c) {
+  return evaluate<16, 16, 1, false, 16, false>(flags, controls, d, a, b, c);
 }

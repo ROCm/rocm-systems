@@ -122,6 +122,7 @@ WIDEN16_NAMES = {'V_CVT_I32_I16', 'V_CVT_U32_U16'}
 SATURATE_NAMES = {'V_SAT_PK_U8_I16', 'V_SAT_PK4_I4_I8', 'V_SAT_PK4_U4_U8'}
 # Accumulator operands resolve their register bank before reaching the API.
 ACCUMULATOR_MOVES = {'V_ACCVGPR_MOV_B32', 'V_ACCVGPR_READ', 'V_ACCVGPR_WRITE'}
+ACCUMULATOR_ARCHITECTURES = ('cdna1', 'cdna2', 'cdna3', 'cdna4')
 UNARY32 |= ACCUMULATOR_MOVES | {'V_SCREEN_PARTITION_4SE_B32'}
 
 CONDITIONAL_NAMES = {'V_CNDMASK_B32', 'V_CNDMASK_B16'}
@@ -154,7 +155,12 @@ def gen_vector32(ctx: ExecuteContext) -> str | None:
         return None
     if mnemonic == 'V_PRNG_B32' and arch not in ('cdna4', 'cdna5'):
         return None
-    if arch not in INTEGER_ARCHITECTURES or mnemonic not in VECTOR32_NAMES:
+    architectures = (
+        ACCUMULATOR_ARCHITECTURES
+        if mnemonic in ACCUMULATOR_MOVES
+        else INTEGER_ARCHITECTURES
+    )
+    if arch not in architectures or mnemonic not in VECTOR32_NAMES:
         return None
     if (
         mnemonic in CONDITIONAL_NAMES | {'V_MOV_B32'}
@@ -164,7 +170,7 @@ def gen_vector32(ctx: ExecuteContext) -> str | None:
     if mnemonic in WIDEN16_NAMES and arch not in ('rdna3', 'rdna4', 'cdna5'):
         return None
     if mnemonic in ACCUMULATOR_MOVES:
-        if arch not in ('cdna3', 'cdna4') or len(dst) != 1 or len(src) != 1:
+        if len(dst) != 1 or len(src) != 1:
             return None
         return f'  amdgpu::arith::execute_move32(*this, wf, {dst[0]}, {src[0]});'
     if mnemonic == 'V_MOV_B32' and not is_vop3 and len(dst) == len(src) == 1:
