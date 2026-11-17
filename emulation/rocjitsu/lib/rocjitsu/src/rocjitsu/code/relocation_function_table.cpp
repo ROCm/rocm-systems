@@ -397,13 +397,13 @@ bool object_defines_only_kernels(const AmdGpuCodeObject &object) {
       function_names, [&](std::string_view name) { return descriptor_names.contains(name); });
 }
 
-// Shared ELF walk for the offset and range APIs. It validates function entries but deliberately
-// preserves each nonzero st_size verbatim: existing offset consumers do not depend on the rest of
-// the extent being valid, while discover_text_function_symbol_ranges() applies that stricter
-// contract before exposing ranges.
+// Shared ELF walk validates function entries while preserving st_size verbatim. Existing offset
+// consumers depend only on valid entries; the range APIs validate the resulting extents. Only the
+// extent query requests zero-sized symbols, leaving the existing strict consumers unchanged.
 static std::vector<TextFunctionSymbolRange>
 discover_text_function_symbol_candidates(const AmdGpuCodeObject &object,
-                                         bool externally_resolvable_only);
+                                         bool externally_resolvable_only,
+                                         bool include_zero_sized = false);
 
 std::vector<uint64_t>
 discover_externally_resolvable_text_function_offsets(const AmdGpuCodeObject &object) {
@@ -440,9 +440,57 @@ discover_text_function_symbol_ranges(const AmdGpuCodeObject &object) {
   return ranges;
 }
 
+std::vector<TextFunctionSymbolExtent>
+discover_text_function_symbol_extents(const AmdGpuCodeObject &object) {
+  if (!object.is_valid() || object.text_sections().size() != 1)
+    return {};
+  const uint64_t text_size = object.text_sections().front()->size();
+  const std::vector<TextFunctionSymbolRange> candidates = discover_text_function_symbol_candidates(
+      object, /*externally_resolvable_only=*/false, /*include_zero_sized=*/true);
+  std::vector<TextFunctionSymbolExtent> extents;
+  const auto append_extent = [&](uint64_t start, uint64_t size, bool inferred) {
+    if (size != 0 && size % sizeof(uint32_t) == 0 && size <= text_size - start)
+      extents.push_back(
+          {.range = {.start_offset = start, .size = size}, .inferred_from_zero = inferred});
+  };
+  for (size_t first = 0; first < candidates.size();) {
+    const uint64_t start = candidates[first].start_offset;
+    size_t next = first + 1;
+    while (next < candidates.size() && candidates[next].start_offset == start)
+      ++next;
+    const bool has_zero = candidates[first].size == 0;
+    const size_t explicit_first = first + (has_zero ? 1 : 0);
+    for (size_t index = explicit_first; index < next; ++index)
+      append_extent(start, candidates[index].size, false);
+    if (has_zero) {
+      if (next - explicit_first == 1) {
+        // A unique explicit size remains authoritative even when invalid. Reject
+        // that resulting extent rather than inventing a different fallback.
+        append_extent(start, candidates[explicit_first].size, false);
+      } else {
+        const uint64_t end = next < candidates.size() ? candidates[next].start_offset : text_size;
+        append_extent(start, end - start, true);
+      }
+    }
+    first = next;
+  }
+  // False sorts first so deduplication retains explicit provenance when an
+  // inferred alias happens to resolve to an existing explicit extent.
+  const auto order_key = [](const TextFunctionSymbolExtent &extent) {
+    return std::pair{std::pair{extent.range.start_offset, extent.range.size},
+                     extent.inferred_from_zero};
+  };
+  const auto extent_key = [](const TextFunctionSymbolExtent &extent) {
+    return std::pair{extent.range.start_offset, extent.range.size};
+  };
+  std::ranges::sort(extents, {}, order_key);
+  extents.erase(std::ranges::unique(extents, {}, extent_key).begin(), extents.end());
+  return extents;
+}
+
 static std::vector<TextFunctionSymbolRange>
 discover_text_function_symbol_candidates(const AmdGpuCodeObject &object,
-                                         bool externally_resolvable_only) {
+                                         bool externally_resolvable_only, bool include_zero_sized) {
   const auto *bytes = reinterpret_cast<const uint8_t *>(object.image_data());
   const std::span<const uint8_t> image(bytes, object.image_size());
   Elf64_Ehdr ehdr{};
@@ -470,9 +518,18 @@ discover_text_function_symbol_candidates(const AmdGpuCodeObject &object,
 
   std::vector<TextFunctionSymbolRange> ranges;
   for (const Elf64_Shdr &symtab : sections) {
-    if ((symtab.sh_type != SHT_SYMTAB && symtab.sh_type != SHT_DYNSYM) ||
-        symtab.sh_entsize != sizeof(Elf64_Sym) ||
-        !range_in_image(image, symtab.sh_offset, symtab.sh_size)) {
+    if (symtab.sh_type != SHT_SYMTAB && symtab.sh_type != SHT_DYNSYM) {
+      continue;
+    }
+    // A malformed table can hide entries bounding another table's zero-sized
+    // symbol. Refuse all extent inference while retaining existing queries'
+    // handling of unreadable tables and partial trailing records.
+    if (symtab.sh_entsize != sizeof(Elf64_Sym) ||
+        !range_in_image(image, symtab.sh_offset, symtab.sh_size) ||
+        (include_zero_sized && symtab.sh_size % sizeof(Elf64_Sym) != 0)) {
+      if (include_zero_sized) {
+        return {};
+      }
       continue;
     }
     const size_t count = symtab.sh_size / sizeof(Elf64_Sym);
@@ -481,7 +538,8 @@ discover_text_function_symbol_candidates(const AmdGpuCodeObject &object,
       if (!read_object(image, symtab.sh_offset + index * sizeof(Elf64_Sym), symbol)) {
         continue;
       }
-      if (elf_symbol_type(symbol.st_info) != kElfSymbolTypeFunc || symbol.st_size == 0) {
+      if (elf_symbol_type(symbol.st_info) != kElfSymbolTypeFunc ||
+          (!include_zero_sized && symbol.st_size == 0)) {
         continue;
       }
       if (externally_resolvable_only &&
