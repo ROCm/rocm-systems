@@ -162,6 +162,26 @@ find_waitcheck_function_sizes(const CodeObject &code_object) {
   }
   return entries;
 }
+struct CounterParityRequirement {
+  PendingEvent event;
+  RegisterRef reg{RegClass::VGPR, 0, 1};
+  WaitcheckAccessKind access = WaitcheckAccessKind::Use;
+  uint32_t required_count = 0;
+  const Instruction *consumer = nullptr;
+  uint64_t consumer_section_offset = 0;
+  uint64_t consumer_file_offset = 0;
+};
+
+struct PendingWaitGroup {
+  PendingState state_before;
+  std::array<std::optional<uint32_t>, kCounterCount> emitted_counts;
+  std::string section_name;
+  uint64_t section_offset = 0;
+  uint64_t file_offset = 0;
+  std::string instructions;
+  bool non_entry_function_prolog = false;
+};
+
 struct CfgInstructionView {
   uint64_t section_offset = 0;
   const Instruction *instruction = nullptr;
@@ -233,6 +253,7 @@ struct Analyzer : private WaitcheckStateOps {
 
     PendingState state;
     state.expert_scheduling.enabled = amdgpu::supports_expert_scheduling(arch);
+    std::optional<PendingWaitGroup> pending_wait_group;
     size_t word_index = 0;
     while (word_index < words.size()) {
       std::unique_ptr<Instruction> inst;
@@ -258,12 +279,15 @@ struct Analyzer : private WaitcheckStateOps {
 
       const auto section_offset = static_cast<uint64_t>(word_index * sizeof(uint32_t));
       const auto file_offset = file_offset_base + section_offset;
+      update_counter_parity_group(pending_wait_group, state, *inst, section_name, section_offset,
+                                  file_offset, arch);
       analyze_instruction(state, *inst, section_name, section_offset, file_offset, arch, true);
       ++report_.instructions_analyzed;
       word_index += inst_words;
       if (should_stop_after_diagnostic())
         break;
     }
+    finish_counter_parity_block(pending_wait_group, arch);
   }
 
   void analyze_cfg(std::vector<std::unique_ptr<BasicBlock>> &blocks,
@@ -661,13 +685,22 @@ struct Analyzer : private WaitcheckStateOps {
     }
 
     prepare_cfg_path_filter(analysis_blocks, cfg_predecessors, cfg_successors, arch);
+    cfg_outputs_ = out;
     for (size_t i = 0; i < analysis_blocks.size(); ++i) {
       current_cfg_view_index_ = i;
+      current_in_callee_context_ = !std::get<1>(analysis_node_keys[i]).empty();
+      current_call_return_sreg_ =
+          current_in_callee_context_
+              ? std::optional{std::get<1>(std::get<1>(analysis_node_keys[i]).back())}
+              : std::nullopt;
       (void)analyze_block(*analysis_blocks[i], in[i], section_name, file_offset_base, arch, true);
       if (should_stop_after_diagnostic())
         break;
     }
+    cfg_outputs_ = {};
     current_cfg_view_index_.reset();
+    current_in_callee_context_ = false;
+    current_call_return_sreg_.reset();
     clear_cfg_path_filter();
     if (missing_successor) {
       report_.complete = false;
@@ -972,11 +1005,943 @@ private:
     }
   }
 
+  [[nodiscard]] static bool instruction_emits_counter_wait(const Instruction &inst,
+                                                           WaitCounterKind counter,
+                                                           rj_code_arch_t arch) {
+    const size_t index = counter_index(counter);
+    if (const auto fields = explicit_wait_fields(inst, arch).value(); fields && (*fields)[index])
+      return true;
+    if (const auto fields = embedded_wait_fields(inst, arch).value(); fields && (*fields)[index])
+      return true;
+    return false;
+  }
+
+  static void apply_counter_parity_wait(PendingState &state, WaitCounterKind counter,
+                                        uint32_t count, rj_code_arch_t arch) {
+    switch (counter) {
+    case WaitCounterKind::Load:
+    case WaitCounterKind::Store:
+    case WaitCounterKind::Ds:
+    case WaitCounterKind::Sample:
+    case WaitCounterKind::Bvh:
+    case WaitCounterKind::Async:
+      (void)apply_memory_wait(state, counter, count, arch);
+      break;
+    case WaitCounterKind::Km:
+      (void)apply_kmcnt_wait(state, count, arch);
+      break;
+    case WaitCounterKind::X:
+      apply_xcnt_wait(state, count);
+      break;
+    case WaitCounterKind::Exp:
+    case WaitCounterKind::Tensor:
+    case WaitCounterKind::VmVsrc:
+      (void)apply_counter_wait(state, counter, count, arch);
+      break;
+    case WaitCounterKind::VaVdst:
+    case WaitCounterKind::Depctr:
+    case WaitCounterKind::Count:
+      break;
+    }
+  }
+
+  [[nodiscard]] static bool has_counter_parity_candidate(const PendingState &state,
+                                                         WaitCounterKind counter) {
+    if (counter == WaitCounterKind::VaVdst)
+      return !state.va_vdst_hazards.hazards.empty();
+    if (counter == WaitCounterKind::Depctr || counter == WaitCounterKind::Count)
+      return false;
+    if (!state.pending[counter_index(counter)].empty())
+      return true;
+
+    // Split memory-counter waits may also retire an older VM_VSRC event, and
+    // LOADCNT/KMCNT may imply an X_CNT wait. A future dependency can justify
+    // the current wait only when one of those events already existed before
+    // the wait. Events issued after it cannot retroactively make it useful.
+    switch (counter) {
+    case WaitCounterKind::Load:
+    case WaitCounterKind::Store:
+    case WaitCounterKind::Ds:
+    case WaitCounterKind::Sample:
+    case WaitCounterKind::Bvh:
+      return !state.pending[counter_index(WaitCounterKind::VmVsrc)].empty() ||
+             !state.pending[counter_index(WaitCounterKind::X)].empty();
+    case WaitCounterKind::Km:
+    case WaitCounterKind::Async:
+      return !state.pending[counter_index(WaitCounterKind::X)].empty();
+    case WaitCounterKind::Exp:
+    case WaitCounterKind::X:
+    case WaitCounterKind::Tensor:
+    case WaitCounterKind::VmVsrc:
+    case WaitCounterKind::VaVdst:
+    case WaitCounterKind::Depctr:
+    case WaitCounterKind::Count:
+      return false;
+    }
+    return false;
+  }
+
+  [[nodiscard]] static bool counter_may_retire_event(WaitCounterKind emitted_counter,
+                                                     const PendingEvent &event) {
+    if (event.counter == emitted_counter)
+      return true;
+    if (event.counter == WaitCounterKind::VmVsrc) {
+      return emitted_counter == WaitCounterKind::Load ||
+             emitted_counter == WaitCounterKind::Store || emitted_counter == WaitCounterKind::Ds ||
+             emitted_counter == WaitCounterKind::Sample || emitted_counter == WaitCounterKind::Bvh;
+    }
+    return event.counter == WaitCounterKind::X &&
+           (emitted_counter == WaitCounterKind::Load || emitted_counter == WaitCounterKind::Store ||
+            emitted_counter == WaitCounterKind::Ds || emitted_counter == WaitCounterKind::Sample ||
+            emitted_counter == WaitCounterKind::Bvh || emitted_counter == WaitCounterKind::Km ||
+            emitted_counter == WaitCounterKind::Async);
+  }
+
+  [[nodiscard]] static std::optional<uint32_t>
+  implied_counter_requirement(const PendingState &state, const PendingEvent &event,
+                              WaitCounterKind emitted_counter, rj_code_arch_t arch) {
+    const auto no_wait = counter_no_wait_value(arch, emitted_counter).value();
+    if (!no_wait || event.counter == emitted_counter ||
+        !counter_may_retire_event(emitted_counter, event))
+      return std::nullopt;
+
+    auto is_sufficient = [&](uint32_t count) {
+      PendingState after = state;
+      apply_counter_parity_wait(after, emitted_counter, count, arch);
+      const auto &pending = after.pending[counter_index(event.counter)];
+      return !std::ranges::any_of(pending, [&](const PendingEvent &candidate) {
+        return same_event_identity(candidate, event);
+      });
+    };
+    if (!is_sufficient(0))
+      return std::nullopt;
+
+    // Sufficiency is monotonic: a lower counter is always at least as strong.
+    // Find the weakest sufficient value without copying a potentially large
+    // pending state once for every representable counter value.
+    uint32_t lower = 0;
+    uint32_t upper = *no_wait;
+    while (lower + 1 < upper) {
+      const uint32_t middle = lower + (upper - lower) / 2;
+      if (is_sufficient(middle))
+        lower = middle;
+      else
+        upper = middle;
+    }
+    return lower;
+  }
+
+  void record_counter_underaccounting(WaitcheckCounterUnderaccountingDiagnostic diag) {
+    if (current_kernel_) {
+      diag.has_kernel = true;
+      diag.kernel_name = current_kernel_->name;
+      diag.kernel_entry_offset = current_kernel_->entry_offset;
+    }
+    const auto key =
+        std::make_tuple(diag.kernel_name, diag.counter, diag.wait_section_offset,
+                        diag.consumer_section_offset, diag.producer_section_offset,
+                        diag.emitted_count, diag.required_count, diag.has_required_dependency);
+    if (!counter_underaccounting_keys_.insert(key).second)
+      return;
+
+    ++report_.counter_underaccounting_observed;
+    if (!diag.has_required_dependency)
+      ++report_.counter_unmodeled_wait_observed;
+    if (report_.counter_underaccounting_diagnostics.size() <
+        options_.max_counter_parity_diagnostics) {
+      report_.counter_underaccounting_diagnostics.push_back(std::move(diag));
+    } else {
+      report_.counter_parity_diagnostics_truncated = true;
+    }
+  }
+
+  void collect_counter_parity_requirements(
+      const PendingWaitGroup &group, const Instruction &consumer, uint64_t consumer_section_offset,
+      uint64_t consumer_file_offset, rj_code_arch_t arch,
+      std::array<std::optional<CounterParityRequirement>, kCounterCount> &requirements) {
+    const PendingState *requirement_state = &group.state_before;
+    const InstDefUse du = inst_def_use_for_waitcheck(consumer, requirement_state->vgpr_msb, arch,
+                                                     wavefront_size_, requirement_state->m0);
+    auto current_events = classify_events(consumer, arch).value();
+    if (!expert_waits_enabled(*requirement_state)) {
+      std::erase_if(current_events, [](const ClassifiedEvent &event) {
+        return event.counter == WaitCounterKind::VmVsrc || event.counter == WaitCounterKind::VaVdst;
+      });
+    }
+    std::optional<PendingState> xcnt_adjusted_state;
+    if (std::ranges::any_of(current_events, [](const ClassifiedEvent &event) {
+          return event.counter == WaitCounterKind::X;
+        })) {
+      xcnt_adjusted_state.emplace(group.state_before);
+      apply_implicit_xcnt_ordering(*xcnt_adjusted_state, consumer, du, current_events, arch);
+      requirement_state = &*xcnt_adjusted_state;
+    }
+    visit_dependencies(
+        *requirement_state, consumer, du, current_events, arch,
+        [&](const PendingEvent &event, RegisterRef reg, WaitcheckAccessKind access,
+            uint32_t required_count) {
+          bool can_improve =
+              !requirements[counter_index(event.counter)] ||
+              required_count < requirements[counter_index(event.counter)]->required_count;
+          for (size_t counter_idx = 0; !can_improve && counter_idx < group.emitted_counts.size();
+               ++counter_idx) {
+            if (!group.emitted_counts[counter_idx])
+              continue;
+            const auto emitted_counter = static_cast<WaitCounterKind>(counter_idx);
+            const auto &current = requirements[counter_idx];
+            can_improve = counter_may_retire_event(emitted_counter, event) &&
+                          (!current || current->required_count != 0);
+          }
+          if (!can_improve)
+            return;
+          if (!event_can_reach_wait(event, group.section_offset, arch))
+            return;
+          auto record_requirement = [&](WaitCounterKind counter, uint32_t count) {
+            auto &strongest = requirements[counter_index(counter)];
+            if (!strongest || count < strongest->required_count) {
+              strongest = CounterParityRequirement{event,
+                                                   reg,
+                                                   access,
+                                                   count,
+                                                   &consumer,
+                                                   consumer_section_offset,
+                                                   consumer_file_offset};
+            }
+          };
+          record_requirement(event.counter, required_count);
+
+          // A split GFX12 memory-counter wait may also retire the
+          // corresponding VM_VSRC or X_CNT event. Attribute that
+          // dependency to the emitted field so a compiler using
+          // the implied form compares against its effective
+          // semantic strength rather than looking redundant.
+          for (size_t counter_idx = 0; counter_idx < group.emitted_counts.size(); ++counter_idx) {
+            if (!group.emitted_counts[counter_idx])
+              continue;
+            const auto emitted_counter = static_cast<WaitCounterKind>(counter_idx);
+            if (const auto implied =
+                    implied_counter_requirement(*requirement_state, event, emitted_counter, arch)) {
+              record_requirement(emitted_counter, *implied);
+            }
+          }
+        });
+
+    if (expert_waits_enabled(*requirement_state) && dsdir_wait_va_vdst(consumer)) {
+      auto &strongest = requirements[counter_index(WaitCounterKind::VaVdst)];
+      du.defs.for_each([&](RegisterRef ref) {
+        if (ref.cls != RegClass::VGPR || ref.index >= REGISTER_SET_MAX_VGPRS)
+          return;
+        const auto hazard_it = requirement_state->va_vdst_hazards.hazards.find(ref.index);
+        if (hazard_it == requirement_state->va_vdst_hazards.hazards.end())
+          return;
+        const VaVdstHazard &hazard = hazard_it->second;
+        const uint32_t required_count = hazard.trans_since ? 0u : hazard.age;
+        if (strongest && strongest->required_count <= required_count)
+          return;
+
+        PendingEvent producer;
+        producer.counter = WaitCounterKind::VaVdst;
+        producer.section_name = hazard.producer.section_name;
+        producer.section_offset = hazard.producer.section_offset;
+        producer.file_offset = hazard.producer.file_offset;
+        producer.instruction = hazard.producer.instruction;
+        strongest =
+            CounterParityRequirement{std::move(producer), ref,       WaitcheckAccessKind::Def,
+                                     required_count,      &consumer, consumer_section_offset,
+                                     consumer_file_offset};
+      });
+    }
+
+    if (amdgpu::uses_legacy_waitcnt(amdgpu::waitcnt_model(arch).value()) &&
+        consumer.mnemonic() == "s_barrier") {
+      // LLVM synchronization lowering may attach a local-memory ordering
+      // requirement to a barrier even when the final instruction has no
+      // explicit register operands. Attribute a legacy LGKM drain to the
+      // strongest outstanding LGKM event instead of losing that final-ISA
+      // intent as an unmodeled wait.
+      auto &strongest = requirements[counter_index(WaitCounterKind::Ds)];
+      for (const PendingEvent &event :
+           requirement_state->pending[counter_index(WaitCounterKind::Ds)]) {
+        if (!event_can_reach_wait(event, group.section_offset, arch))
+          continue;
+        const uint32_t required_count =
+            dependency_required_count(*requirement_state, event, arch).value();
+        if (!strongest || required_count < strongest->required_count) {
+          strongest = CounterParityRequirement{event,
+                                               RegisterRef{RegClass::PC, 0, 1},
+                                               WaitcheckAccessKind::MemoryOrder,
+                                               required_count,
+                                               &consumer,
+                                               consumer_section_offset,
+                                               consumer_file_offset};
+        }
+      }
+    }
+
+    if (!amdgpu::uses_legacy_waitcnt(amdgpu::waitcnt_model(arch).value()) &&
+        starts_with(consumer.mnemonic(), "s_barrier_signal")) {
+      // Split barriers do not encode an implicit DS drain. LLVM-produced
+      // synchronization sequences therefore place s_wait_dscnt 0 before the
+      // signal when LDS operations are outstanding. Attribute that field to
+      // the barrier's memory-order requirement; otherwise forward lookahead
+      // can incorrectly attach the deliberately strong wait to a register
+      // dependency after the matching barrier wait.
+      auto &strongest = requirements[counter_index(WaitCounterKind::Ds)];
+      for (const PendingEvent &event :
+           requirement_state->pending[counter_index(WaitCounterKind::Ds)]) {
+        if (!event_can_reach_wait(event, group.section_offset, arch))
+          continue;
+        strongest = CounterParityRequirement{event,
+                                             RegisterRef{RegClass::PC, 0, 1},
+                                             WaitcheckAccessKind::MemoryOrder,
+                                             0,
+                                             &consumer,
+                                             consumer_section_offset,
+                                             consumer_file_offset};
+        break;
+      }
+    }
+
+    if (!amdgpu::uses_legacy_waitcnt(amdgpu::waitcnt_model(arch).value()) &&
+        consumer.mnemonic() == "global_inv") {
+      // SIMemoryLegalizer lowers an acquire fence that crosses LDS and global
+      // address spaces to soft all-zero waits followed by GLOBAL_INV.  The
+      // cache instruction itself is not an ordinary register dependency, but
+      // it is the object-visible marker that gives the preceding wait group
+      // its memory-order meaning.  Attribute only counter fields that the
+      // GFX12 fence lowering can emit; otherwise forward lookahead can attach
+      // a fence drain to an unrelated register dependency after GLOBAL_INV.
+      constexpr std::array fence_counters{WaitCounterKind::Load, WaitCounterKind::Store,
+                                          WaitCounterKind::Ds, WaitCounterKind::Sample,
+                                          WaitCounterKind::Bvh};
+      for (WaitCounterKind counter : fence_counters) {
+        const size_t counter_idx = counter_index(counter);
+        if (!group.emitted_counts[counter_idx])
+          continue;
+        auto &strongest = requirements[counter_idx];
+        for (const PendingEvent &event : requirement_state->pending[counter_idx]) {
+          if (!event_can_reach_wait(event, group.section_offset, arch))
+            continue;
+          strongest = CounterParityRequirement{event,
+                                               RegisterRef{RegClass::PC, 0, 1},
+                                               WaitcheckAccessKind::MemoryOrder,
+                                               0,
+                                               &consumer,
+                                               consumer_section_offset,
+                                               consumer_file_offset};
+          break;
+        }
+      }
+    }
+
+    if (consumer.mnemonic() == "s_barrier" || starts_with(consumer.mnemonic(), "ds_")) {
+      for (size_t counter_idx = 0; counter_idx < requirement_state->pending.size(); ++counter_idx) {
+        auto &strongest = requirements[counter_idx];
+        for (const PendingEvent &event : requirement_state->pending[counter_idx]) {
+          if (!event.check_counter_parity_order ||
+              !event_can_reach_wait(event, group.section_offset, arch)) {
+            continue;
+          }
+          const uint32_t required_count =
+              dependency_required_count(*requirement_state, event, arch).value();
+          if (!strongest || required_count < strongest->required_count) {
+            strongest = CounterParityRequirement{event,
+                                                 RegisterRef{RegClass::PC, 0, 1},
+                                                 WaitcheckAccessKind::MemoryOrder,
+                                                 required_count,
+                                                 &consumer,
+                                                 consumer_section_offset,
+                                                 consumer_file_offset};
+          }
+        }
+      }
+    }
+  }
+
+  [[nodiscard]] std::optional<CounterParityRequirement> find_forward_counter_parity_requirement(
+      const PendingWaitGroup &group, const Instruction &first_consumer,
+      uint64_t first_consumer_section_offset, WaitCounterKind counter, uint32_t emitted_count,
+      rj_code_arch_t arch, size_t max_lookahead_positions, bool &complete) {
+    if (!current_cfg_view_index_ || *current_cfg_view_index_ >= cfg_views_.size())
+      return std::nullopt;
+
+    const CfgBlockView &start_block = cfg_views_[*current_cfg_view_index_];
+    const auto start_it = std::ranges::find_if(start_block.instructions, [&](const auto &view) {
+      return view.instruction == &first_consumer &&
+             view.section_offset == first_consumer_section_offset;
+    });
+    if (start_it == start_block.instructions.end())
+      return std::nullopt;
+
+    RegisterSet possible_uses;
+    RegisterSet possible_defs;
+    bool may_define_exec = false;
+    bool may_use_special = false;
+    bool may_define_special = false;
+    bool may_require_memory_order = false;
+    bool may_require_program_end = false;
+    bool may_require_counter_order = false;
+    for (const auto &events : group.state_before.pending) {
+      for (const PendingEvent &event : events) {
+        if (!counter_may_retire_event(counter, event))
+          continue;
+        if (event.check_uses)
+          possible_uses |= event.regs;
+        if (event.check_defs)
+          possible_defs |= event.regs;
+        may_define_exec |= event.check_exec_defs;
+        may_use_special |= event.check_uses && event.special_reg.has_value();
+        may_define_special |= event.check_defs && event.special_reg.has_value();
+        may_require_memory_order |= event.check_memory_order;
+        may_require_program_end |= event.check_program_end;
+        may_require_counter_order |= event.check_counter_parity_order;
+      }
+    }
+
+    using Position = std::pair<size_t, size_t>;
+    std::vector<Position> worklist{{
+        *current_cfg_view_index_,
+        static_cast<size_t>(std::distance(start_block.instructions.begin(), start_it)),
+    }};
+    std::set<Position> visited;
+    std::set<const Instruction *> dependencies_checked;
+    std::optional<CounterParityRequirement> strongest;
+    while (!worklist.empty() && visited.size() < max_lookahead_positions) {
+      const auto [block_index, instruction_index] = worklist.back();
+      worklist.pop_back();
+      if (!visited.insert({block_index, instruction_index}).second)
+        continue;
+
+      const CfgBlockView &block = cfg_views_[block_index];
+      if (instruction_index >= block.instructions.size()) {
+        for (size_t successor : block.successors)
+          worklist.emplace_back(successor, 0);
+        continue;
+      }
+
+      const CfgInstructionView &view = block.instructions[instruction_index];
+      const Instruction &instruction = *view.instruction;
+      if (instruction_emits_counter_wait(instruction, counter, arch)) {
+        continue;
+      }
+
+      if (dependencies_checked.insert(&instruction).second) {
+        const InstDefUse du = inst_def_use_for_waitcheck(instruction, group.state_before.vgpr_msb,
+                                                         arch, wavefront_size_);
+        const bool may_depend_on_register =
+            possible_uses.intersects(du.uses) || possible_defs.intersects(du.defs) ||
+            (possible_uses.contains({RegClass::VCC, 0, 1}) &&
+             vcc_access_halves(instruction, du, WaitcheckAccessKind::Use, arch, wavefront_size_)) ||
+            (possible_defs.contains({RegClass::VCC, 0, 1}) &&
+             vcc_access_halves(instruction, du, WaitcheckAccessKind::Def, arch, wavefront_size_));
+        const bool may_depend_on_special =
+            (may_use_special &&
+             instruction_uses_special(instruction, RegisterRef{RegClass::SCC, 0, 1})) ||
+            (may_define_special &&
+             instruction_defines_special(instruction, RegisterRef{RegClass::SCC, 0, 1}));
+        const bool may_depend_on_exec = may_define_exec && writes_exec_mask(instruction);
+        const bool is_barrier = instruction.mnemonic() == "s_barrier";
+        const bool is_ds = starts_with(instruction.mnemonic(), "ds_");
+        const bool may_depend_on_order =
+            may_require_memory_order ||
+            (may_require_program_end && is_program_end(instruction.mnemonic())) ||
+            (may_require_counter_order && (is_barrier || is_ds)) ||
+            (amdgpu::uses_legacy_waitcnt(amdgpu::waitcnt_model(arch).value()) &&
+             counter == WaitCounterKind::Ds && is_barrier) ||
+            (counter == WaitCounterKind::VaVdst && dsdir_wait_va_vdst(instruction));
+        if (may_depend_on_register || may_depend_on_special || may_depend_on_exec ||
+            may_depend_on_order) {
+          std::array<std::optional<CounterParityRequirement>, kCounterCount> requirements;
+          collect_counter_parity_requirements(
+              group, instruction, view.section_offset,
+              group.file_offset - group.section_offset + view.section_offset, arch, requirements);
+          if (const auto &requirement = requirements[counter_index(counter)]) {
+            if (!strongest || requirement->required_count < strongest->required_count)
+              strongest = requirement;
+            // Counter-parity auditing is intentionally one-sided. As soon as
+            // one guarded dependency requires a value no weaker than the
+            // emitted field, this wait cannot be an N > M under-accounting
+            // candidate. Avoid scanning the rest of a large CFG solely to
+            // discover an even stronger ordinary-hazard requirement.
+            if (strongest->required_count <= emitted_count)
+              return strongest;
+          }
+        }
+      }
+      if (is_program_end(instruction.mnemonic()))
+        continue;
+      worklist.emplace_back(block_index, instruction_index + 1);
+    }
+    if (!worklist.empty())
+      complete = false;
+    return strongest;
+  }
+
+  [[nodiscard]] std::optional<CounterParityRequirement> find_staged_counter_parity_requirement(
+      const PendingWaitGroup &group, const Instruction &first_consumer,
+      uint64_t first_consumer_section_offset, WaitCounterKind counter, uint32_t emitted_count,
+      rj_code_arch_t arch, bool &complete) {
+    if (!current_cfg_view_index_ || *current_cfg_view_index_ >= cfg_views_.size() ||
+        counter == WaitCounterKind::VaVdst) {
+      return std::nullopt;
+    }
+
+    const CfgBlockView &start_block = cfg_views_[*current_cfg_view_index_];
+    const auto start_it = std::ranges::find_if(start_block.instructions, [&](const auto &view) {
+      return view.instruction == &first_consumer &&
+             view.section_offset == first_consumer_section_offset;
+    });
+    if (start_it == start_block.instructions.end())
+      return std::nullopt;
+
+    PendingState initial_state = group.state_before;
+    for (size_t counter_idx = 0; counter_idx < group.emitted_counts.size(); ++counter_idx) {
+      if (counter_idx == counter_index(counter) || !group.emitted_counts[counter_idx])
+        continue;
+      apply_counter_parity_wait(initial_state, static_cast<WaitCounterKind>(counter_idx),
+                                *group.emitted_counts[counter_idx], arch);
+    }
+
+    const std::vector<PendingEvent> original_events = initial_state.pending[counter_index(counter)];
+    if (original_events.empty())
+      return std::nullopt;
+
+    auto original_event = [&](const PendingEvent &event) -> const PendingEvent * {
+      const auto found = std::ranges::find_if(original_events, [&](const PendingEvent &original) {
+        return same_event_identity(original, event);
+      });
+      return found == original_events.end() ? nullptr : &*found;
+    };
+
+    using Position = std::pair<size_t, size_t>;
+    const Position start_position{
+        *current_cfg_view_index_,
+        static_cast<size_t>(std::distance(start_block.instructions.begin(), start_it)),
+    };
+    std::map<Position, PendingState> states;
+    states.emplace(start_position, initial_state);
+    std::vector<Position> worklist{start_position};
+    std::optional<CounterParityRequirement> strongest;
+    constexpr size_t kMaxSimulationSteps = 200000;
+    size_t steps = 0;
+
+    auto enqueue = [&](Position position, const PendingState &state) {
+      auto [it, inserted] = states.try_emplace(position, state);
+      if (inserted) {
+        worklist.push_back(position);
+        return;
+      }
+      PendingState merged = it->second;
+      merge_into(merged, state);
+      if (merged != it->second) {
+        it->second = std::move(merged);
+        worklist.push_back(position);
+      }
+    };
+
+    while (!worklist.empty() && steps++ < kMaxSimulationSteps) {
+      const Position position = worklist.back();
+      worklist.pop_back();
+      const auto [block_index, instruction_index] = position;
+      PendingState state = states.at(position);
+      const CfgBlockView &block = cfg_views_[block_index];
+      if (instruction_index >= block.instructions.size()) {
+        for (size_t successor : block.successors)
+          enqueue({successor, 0}, state);
+        continue;
+      }
+
+      const CfgInstructionView &view = block.instructions[instruction_index];
+      const Instruction &instruction = *view.instruction;
+      if (view.section_offset == group.section_offset && position != start_position &&
+          instruction_emits_counter_wait(instruction, counter, arch)) {
+        continue;
+      }
+
+      const PendingState *dependency_state = &state;
+      const InstDefUse du = inst_def_use_for_waitcheck(instruction, dependency_state->vgpr_msb,
+                                                       arch, wavefront_size_, dependency_state->m0);
+      auto current_events = classify_events(instruction, arch).value();
+      if (!expert_waits_enabled(*dependency_state)) {
+        std::erase_if(current_events, [](const ClassifiedEvent &event) {
+          return event.counter == WaitCounterKind::VmVsrc ||
+                 event.counter == WaitCounterKind::VaVdst;
+        });
+      }
+      std::optional<PendingState> xcnt_adjusted_state;
+      if (std::ranges::any_of(current_events, [](const ClassifiedEvent &event) {
+            return event.counter == WaitCounterKind::X;
+          })) {
+        xcnt_adjusted_state.emplace(state);
+        apply_implicit_xcnt_ordering(*xcnt_adjusted_state, instruction, du, current_events, arch);
+        dependency_state = &*xcnt_adjusted_state;
+      }
+      auto record_if_original = [&](const PendingEvent &event, RegisterRef reg,
+                                    WaitcheckAccessKind access) {
+        const PendingEvent *original = original_event(event);
+        if (!original)
+          return;
+        const uint32_t required_count =
+            dependency_required_count(initial_state, *original, arch).value();
+        if (!strongest || required_count < strongest->required_count) {
+          strongest = CounterParityRequirement{*original,
+                                               reg,
+                                               access,
+                                               required_count,
+                                               &instruction,
+                                               view.section_offset,
+                                               group.file_offset - group.section_offset +
+                                                   view.section_offset};
+        }
+      };
+      visit_dependencies(
+          *dependency_state, instruction, du, current_events, arch,
+          [&](const PendingEvent &event, RegisterRef reg, WaitcheckAccessKind access, uint32_t) {
+            if (event.counter == counter)
+              record_if_original(event, reg, access);
+          });
+
+      if (amdgpu::uses_legacy_waitcnt(amdgpu::waitcnt_model(arch).value()) &&
+          instruction.mnemonic() == "s_barrier" && counter == WaitCounterKind::Ds) {
+        for (const PendingEvent &event :
+             dependency_state->pending[counter_index(WaitCounterKind::Ds)]) {
+          if (event.kind != WaitEventKind::Smem) {
+            record_if_original(event, RegisterRef{RegClass::PC, 0, 1},
+                               WaitcheckAccessKind::MemoryOrder);
+          }
+        }
+      }
+      if (instruction.mnemonic() == "s_barrier" || starts_with(instruction.mnemonic(), "ds_")) {
+        for (const PendingEvent &event : dependency_state->pending[counter_index(counter)]) {
+          if (event.check_counter_parity_order) {
+            record_if_original(event, RegisterRef{RegClass::PC, 0, 1},
+                               WaitcheckAccessKind::MemoryOrder);
+          }
+        }
+      }
+      if (strongest && strongest->required_count <= emitted_count)
+        return strongest;
+
+      analyze_instruction(state, instruction, group.section_name, view.section_offset,
+                          group.file_offset - group.section_offset + view.section_offset, arch,
+                          /*emit_diagnostics=*/false);
+      if (is_program_end(instruction.mnemonic()))
+        continue;
+
+      const auto &pending = state.pending[counter_index(counter)];
+      const bool has_original = std::ranges::any_of(
+          pending, [&](const PendingEvent &event) { return original_event(event) != nullptr; });
+      if (!has_original)
+        continue;
+      enqueue({block_index, instruction_index + 1}, state);
+    }
+    if (!worklist.empty())
+      complete = false;
+    return strongest;
+  }
+
+  void audit_counter_parity_group(const PendingWaitGroup &group, const Instruction &consumer,
+                                  uint64_t consumer_section_offset, uint64_t consumer_file_offset,
+                                  rj_code_arch_t arch) {
+    ++report_.counter_parity_wait_groups;
+
+    std::array<std::optional<CounterParityRequirement>, kCounterCount> strongest_requirements;
+    collect_counter_parity_requirements(group, consumer, consumer_section_offset,
+                                        consumer_file_offset, arch, strongest_requirements);
+
+    bool group_indeterminate = false;
+    for (size_t counter_idx = 0; counter_idx < group.emitted_counts.size(); ++counter_idx) {
+      if (!group.emitted_counts[counter_idx])
+        continue;
+      const auto counter = static_cast<WaitCounterKind>(counter_idx);
+      const auto no_wait = counter_no_wait_value(arch, counter).value();
+      if (!no_wait)
+        continue;
+      const uint32_t emitted_count = *group.emitted_counts[counter_idx];
+
+      ++report_.counter_parity_fields_checked;
+      auto &requirement = strongest_requirements[counter_idx];
+      // LLVM inserts unconditional all-zero waits at both boundaries of every
+      // non-entry function. Do not walk the entire callee/caller continuation
+      // trying to rediscover a dependency for a boundary-policy field: on
+      // large outlined helpers that turns a linear audit into a scan of the
+      // same CFG once per counter. An immediately attributable dependency can
+      // still establish exact agreement; otherwise the field is deliberately
+      // retained as unmodeled policy below.
+      const bool function_boundary_policy =
+          group.non_entry_function_prolog || is_non_entry_function_return(consumer);
+      bool boundary_policy_fallback = false;
+      if (has_counter_parity_candidate(group.state_before, counter) &&
+          (!requirement || requirement->required_count > emitted_count)) {
+        bool lookahead_complete = true;
+        constexpr size_t kMaxGeneralLookaheadPositions = 200000;
+        constexpr size_t kMaxFunctionBoundaryLookaheadPositions = 256;
+        const auto forward_requirement = find_forward_counter_parity_requirement(
+            group, consumer, consumer_section_offset, counter, emitted_count, arch,
+            function_boundary_policy ? kMaxFunctionBoundaryLookaheadPositions
+                                     : kMaxGeneralLookaheadPositions,
+            lookahead_complete);
+        if (!lookahead_complete) {
+          if (function_boundary_policy) {
+            boundary_policy_fallback = true;
+          } else {
+            group_indeterminate = true;
+            continue;
+          }
+        }
+        if (forward_requirement &&
+            (!requirement || forward_requirement->required_count < requirement->required_count)) {
+          requirement = forward_requirement;
+        }
+        if (!function_boundary_policy && emitted_count != 0 &&
+            (!requirement || requirement->required_count > emitted_count)) {
+          const auto staged_requirement = find_staged_counter_parity_requirement(
+              group, consumer, consumer_section_offset, counter, emitted_count, arch,
+              lookahead_complete);
+          if (!lookahead_complete) {
+            group_indeterminate = true;
+            continue;
+          }
+          if (staged_requirement &&
+              (!requirement || staged_requirement->required_count < requirement->required_count)) {
+            requirement = staged_requirement;
+          }
+        }
+      }
+      // A stronger boundary wait is ABI policy rather than evidence that LLVM
+      // calculated a tighter dependency count, so keep it in the unmodeled
+      // catalog. The fast path above intentionally permits an immediate exact
+      // dependency to remain an ordinary parity match.
+      // SIInsertWaitcnts reaches a fixed point over loop score brackets while
+      // retaining waits inserted by an earlier iteration. At a cyclic block,
+      // that process can conservatively strengthen a partial wait (often by
+      // one, or all the way to zero) even when the final-ISA dependency has a
+      // larger safe count. The encoded count is then loop policy, not a direct
+      // dependency score. Exact loop waits remain ordinary parity matches.
+      const bool cyclic_cfg_fixed_point_policy =
+          has_loop_carried_events(counter, group.state_before, group.section_offset, arch);
+      const bool needs_boundary_policy =
+          function_boundary_policy &&
+          (boundary_policy_fallback || !requirement || requirement->required_count > emitted_count);
+      if (needs_boundary_policy || (cyclic_cfg_fixed_point_policy && requirement &&
+                                    requirement->required_count > emitted_count)) {
+        requirement.reset();
+      }
+      const uint32_t required_count = requirement ? requirement->required_count : *no_wait;
+      if (requirement && required_count == emitted_count)
+        ++report_.counter_parity_exact;
+      if (required_count <= emitted_count)
+        continue;
+
+      WaitcheckCounterUnderaccountingDiagnostic diag;
+      diag.counter = counter;
+      diag.emitted_count = emitted_count;
+      diag.required_count = required_count;
+      diag.has_required_dependency = requirement.has_value();
+      diag.section_name = group.section_name;
+      diag.wait_section_offset = group.section_offset;
+      diag.wait_file_offset = group.file_offset;
+      diag.wait_instruction = group.instructions;
+      diag.consumer_section_offset =
+          requirement ? requirement->consumer_section_offset : consumer_section_offset;
+      diag.consumer_file_offset =
+          requirement ? requirement->consumer_file_offset : consumer_file_offset;
+      diag.consumer_instruction =
+          requirement ? requirement->consumer->disassemble() : consumer.disassemble();
+      if (requirement) {
+        diag.access = requirement->access;
+        diag.reg = requirement->reg;
+        diag.producer_section_offset = requirement->event.section_offset;
+        diag.producer_file_offset = requirement->event.file_offset;
+        diag.producer_instruction = requirement->event.instruction;
+      } else {
+        diag.reg = RegisterRef{RegClass::PC, 0, 1};
+      }
+      std::ostringstream message;
+      message << "emitted " << wait_expression(counter, emitted_count, arch).value()
+              << " is stronger than waitcheck requirement "
+              << wait_expression(counter, required_count, arch).value() << " before "
+              << diag.consumer_instruction;
+      diag.message = message.str();
+      record_counter_underaccounting(std::move(diag));
+    }
+    if (group_indeterminate)
+      ++report_.counter_parity_indeterminate_groups;
+  }
+
+  void update_counter_parity_group(std::optional<PendingWaitGroup> &pending_group,
+                                   const PendingState &state, const Instruction &inst,
+                                   const std::string &section_name, uint64_t section_offset,
+                                   uint64_t file_offset, rj_code_arch_t arch) {
+    if (!options_.check_counter_parity)
+      return;
+
+    const auto emitted_fields = explicit_wait_fields(inst, arch).value();
+    if (emitted_fields) {
+      const bool has_wait =
+          std::ranges::any_of(*emitted_fields, [](const auto &value) { return value.has_value(); });
+      if (!pending_group && has_wait) {
+        pending_group = PendingWaitGroup{state,
+                                         {},
+                                         section_name,
+                                         section_offset,
+                                         file_offset,
+                                         {},
+                                         is_non_entry_function_prolog(section_offset)};
+      }
+      if (!pending_group)
+        return;
+      for (size_t i = 0; i < emitted_fields->size(); ++i) {
+        if (!(*emitted_fields)[i])
+          continue;
+        auto &combined = pending_group->emitted_counts[i];
+        combined = combined ? std::min(*combined, *(*emitted_fields)[i]) : (*emitted_fields)[i];
+      }
+      if (!pending_group->instructions.empty())
+        pending_group->instructions += "; ";
+      pending_group->instructions += inst.disassemble();
+      return;
+    }
+
+    if (const auto embedded_fields = embedded_wait_fields(inst, arch).value()) {
+      if (!pending_group) {
+        pending_group = PendingWaitGroup{state,
+                                         {},
+                                         section_name,
+                                         section_offset,
+                                         file_offset,
+                                         {},
+                                         is_non_entry_function_prolog(section_offset)};
+      }
+      for (size_t i = 0; i < embedded_fields->size(); ++i) {
+        if (!(*embedded_fields)[i])
+          continue;
+        auto &combined = pending_group->emitted_counts[i];
+        combined = combined ? std::min(*combined, *(*embedded_fields)[i]) : (*embedded_fields)[i];
+      }
+      if (!pending_group->instructions.empty())
+        pending_group->instructions += "; ";
+      pending_group->instructions += inst.disassemble();
+      audit_counter_parity_group(*pending_group, inst, section_offset, file_offset, arch);
+      pending_group.reset();
+      return;
+    }
+
+    if (!pending_group)
+      return;
+    const std::string_view mnemonic = inst.mnemonic();
+    const bool known_non_counter_wait =
+        mnemonic == "s_waitcnt_depctr" || mnemonic == "s_wait_event";
+    if (inst.is_waitcnt() && !known_non_counter_wait) {
+      ++report_.counter_parity_indeterminate_groups;
+    } else {
+      audit_counter_parity_group(*pending_group, inst, section_offset, file_offset, arch);
+    }
+    pending_group.reset();
+  }
+
+  void finish_counter_parity_block(std::optional<PendingWaitGroup> &pending_group,
+                                   rj_code_arch_t arch) {
+    if (!pending_group)
+      return;
+
+    // A basic block can end at a label even when the final instruction is not
+    // a control-flow instruction. In that case an emitted wait at the block
+    // boundary still guards the first instruction in its sole fallthrough
+    // successor. Continue the pending wait group across that structural split.
+    // A block ending in a wait cannot itself branch, so multiple successors
+    // remain explicitly indeterminate.
+    if (current_cfg_view_index_ && *current_cfg_view_index_ < cfg_views_.size()) {
+      const CfgBlockView &block = cfg_views_[*current_cfg_view_index_];
+      if (block.successors.size() == 1) {
+        const size_t successor_index = block.successors.front();
+        if (successor_index < cfg_views_.size() &&
+            !cfg_views_[successor_index].instructions.empty()) {
+          const CfgInstructionView consumer = cfg_views_[successor_index].instructions.front();
+          bool overlapping_counter_wait = false;
+          if (const auto fields = explicit_wait_fields(*consumer.instruction, arch).value()) {
+            for (size_t i = 0; i < fields->size(); ++i) {
+              overlapping_counter_wait |=
+                  (*fields)[i].has_value() && pending_group->emitted_counts[i].has_value();
+            }
+          }
+          if (!overlapping_counter_wait &&
+              !embedded_wait_fields(*consumer.instruction, arch).value()) {
+            const size_t saved_block_index = *current_cfg_view_index_;
+            current_cfg_view_index_ = successor_index;
+            audit_counter_parity_group(*pending_group, *consumer.instruction,
+                                       consumer.section_offset,
+                                       pending_group->file_offset - pending_group->section_offset +
+                                           consumer.section_offset,
+                                       arch);
+            current_cfg_view_index_ = saved_block_index;
+            pending_group.reset();
+            return;
+          }
+        }
+      }
+    }
+    ++report_.counter_parity_indeterminate_groups;
+    pending_group.reset();
+  }
+
+  [[nodiscard]] bool is_non_entry_function_prolog(uint64_t section_offset) const {
+    if (!current_in_callee_context_ || !current_cfg_view_index_ ||
+        *current_cfg_view_index_ >= cfg_views_.size()) {
+      return false;
+    }
+    return cfg_views_[*current_cfg_view_index_].block->start_offset() == section_offset;
+  }
+
+  [[nodiscard]] bool is_non_entry_function_return(const Instruction &instruction) const {
+    if (!current_call_return_sreg_ || instruction.size() != static_cast<int>(sizeof(uint32_t)) ||
+        (instruction.mnemonic() != "s_setpc_b64" && instruction.mnemonic() != "s_set_pc_i64") ||
+        instruction.raw_encoding() == nullptr) {
+      return false;
+    }
+    return static_cast<uint16_t>(instruction.raw_encoding()[0] & 0xffu) ==
+           *current_call_return_sreg_;
+  }
+
+  [[nodiscard]] bool has_loop_carried_events(WaitCounterKind counter, const PendingState &at_wait,
+                                             uint64_t wait_offset, rj_code_arch_t arch) {
+    if (!current_cfg_view_index_ || *current_cfg_view_index_ >= cfg_views_.size())
+      return false;
+    const size_t block_index = *current_cfg_view_index_;
+    const SharedReachability reachable = blocks_reachable_from(block_index);
+    return std::ranges::any_of(cfg_views_[block_index].predecessors, [&](size_t predecessor) {
+      if (predecessor >= reachable->size() || !(*reachable)[predecessor])
+        return false;
+      const auto index = counter_index(counter);
+      if (cfg_outputs_[predecessor].pending[index].empty() || at_wait.pending[index].empty())
+        return false;
+      // Replay the block's waits on the incoming requests alone. A full drain
+      // before this group separates fresh requests from the previous iteration.
+      PendingState incoming = cfg_outputs_[predecessor];
+      for (const auto &view : cfg_views_[block_index].instructions) {
+        if (view.section_offset >= wait_offset)
+          break;
+        if (view.instruction->is_waitcnt())
+          (void)apply_waitcnt(incoming, *view.instruction, arch);
+        else
+          (void)apply_embedded_waitcnt(incoming, *view.instruction, arch);
+        if (incoming.pending[index].empty())
+          return false;
+      }
+      return std::ranges::any_of(incoming.pending[index], [&](const PendingEvent &carried) {
+        return std::ranges::any_of(at_wait.pending[index], [&](const PendingEvent &event) {
+          return same_event_identity(carried, event);
+        });
+      });
+    });
+  }
+
   [[nodiscard]] PendingState analyze_block(BasicBlock &block, const PendingState &input,
                                            const std::string &section_name,
                                            uint64_t file_offset_base, rj_code_arch_t arch,
                                            bool emit_diagnostics) {
     PendingState state = input;
+    std::optional<PendingWaitGroup> pending_wait_group;
     uint64_t section_offset = block.start_offset();
     for (const Instruction &inst : block.instructions()) {
       if (!emit_diagnostics && inst.is_waitcnt()) {
@@ -999,6 +1964,10 @@ private:
             facts.unordered |= uint64_t{1} << i;
         }
       }
+      if (emit_diagnostics) {
+        update_counter_parity_group(pending_wait_group, state, inst, section_name, section_offset,
+                                    file_offset_base + section_offset, arch);
+      }
       analyze_instruction(state, inst, section_name, section_offset,
                           file_offset_base + section_offset, arch, emit_diagnostics);
       if (emit_diagnostics)
@@ -1007,6 +1976,8 @@ private:
       if (emit_diagnostics && should_stop_after_diagnostic())
         break;
     }
+    if (emit_diagnostics)
+      finish_counter_parity_block(pending_wait_group, arch);
     return state;
   }
 
@@ -2885,6 +3856,11 @@ private:
     return has_cfg_path_with_event_pending(event, consumer_offset, arch, false, masked);
   }
 
+  [[nodiscard]] bool event_can_reach_wait(const PendingEvent &event, uint64_t wait_offset,
+                                          rj_code_arch_t arch) {
+    return has_cfg_path_with_event_pending(event, wait_offset, arch, true);
+  }
+
   [[nodiscard]] static bool instruction_uses_special(const Instruction &inst, RegisterRef ref) {
     if (ref.cls != RegClass::SCC)
       return false;
@@ -3509,6 +4485,9 @@ private:
       std::tuple<WaitCounterKind, WaitcheckAccessKind, RegClass, uint16_t, uint16_t, std::string,
                  uint64_t, uint64_t, uint64_t, uint64_t, uint32_t, std::string, std::string>>
       diagnostic_keys_;
+  std::set<std::tuple<std::string, WaitCounterKind, uint64_t, uint64_t, uint64_t, uint32_t,
+                      uint32_t, bool>>
+      counter_underaccounting_keys_;
   std::unordered_map<const Instruction *, std::vector<uint16_t>> path_scalar_defs_;
   std::set<uint16_t> path_mask_inputs_;
   bool cfg_has_mask_branches_ = false;
@@ -3523,6 +4502,9 @@ private:
   std::unordered_map<const Instruction *, PathWaitFacts> path_wait_facts_;
   std::vector<CfgBlockView> cfg_views_;
   std::optional<size_t> current_cfg_view_index_;
+  std::span<const PendingState> cfg_outputs_;
+  bool current_in_callee_context_ = false;
+  std::optional<uint16_t> current_call_return_sreg_;
   std::map<std::tuple<uint64_t, uint64_t, WaitCounterKind, bool, bool>, bool> feasible_path_cache_;
   std::map<size_t, SharedReachability> reverse_reachability_cache_;
   std::map<size_t, SharedReachability> forward_reachability_cache_;

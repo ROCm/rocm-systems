@@ -766,6 +766,10 @@ void append_gfx950_s_waitcnt_lgkmcnt_2(std::vector<uint32_t> &program) {
   program.push_back(0xBF8CC27Fu);
 }
 
+void append_gfx950_s_waitcnt_expcnt_0(std::vector<uint32_t> &program) {
+  program.push_back(0xBF8CCF0Fu);
+}
+
 void append_gfx950_buffer_load_dword_v0_v8_s0_offen(std::vector<uint32_t> &program) {
   program.push_back(0xE0501000u);
   program.push_back(0x80000008u);
@@ -1286,90 +1290,6 @@ TEST(WaitcheckTest, Gfx942IndexedDsReadsWriteTheirDestinationInOrder) {
 
   ASSERT_TRUE(report.supported) << report.analysis_error;
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
-}
-
-TEST(WaitcheckTest, Gfx11EmptyExecFlatCannotAgeAnIsolatedLdsResult) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5})
-    for (uint32_t exec : {0xbefe0080u, 0xbefe0008u, 0xbefe00c1u}) {
-      SCOPED_TRACE(testing::Message() << arch << " EXEC_LO write " << exec);
-      const std::vector<uint32_t> words{0xd8d80000, 0x02000001,  // ds_load_b32 v2,v1
-                                        exec,                    // s_mov_b32 exec_lo, 0 / s8 / -1
-                                        0xdc680000, 0x007c0503,  // flat_store_b32 v[3:4],v5
-                                        0xbefe00c1,              // s_mov_b32 exec_lo, -1
-                                        0xbf89fc17,              // s_waitcnt lgkmcnt(1)
-                                        0x7e0c0302, 0xbfb00000}; // v_mov_b32 v6,v2; s_endpgm
-      const auto report = analyze_waitcnts(TestCodeObject(words), arch);
-      ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
-      ASSERT_EQ(report.diagnostics.size(), exec != 0xbefe00c1) << diagnostic_summary(report);
-      if (!report.diagnostics.empty()) {
-        EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 2, 1}));
-        EXPECT_EQ(report.diagnostics[0].required_count, 0u);
-      }
-    }
-}
-
-TEST(WaitcheckTest, Gfx11SkippedFlatDoesNotForceLdsAdmission) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5})
-    for (bool active : {false, true}) {
-      std::vector<uint32_t> words{0xbefe00c1u, 0xd8d80000, 0x02000001}; // EXEC_LO=-1; load v2.
-      for (unsigned younger = 0; younger < 62; ++younger)
-        words.insert(words.end(), {0xd8d80000, 0x07000001}); // ds_load_b32 v7,v1
-      words.insert(words.end(), {active ? 0xbefe00c1u : 0xbefe0080u, 0xdc680000, 0x007c0503,
-                                 0xbefe00c1, 0x7e0c0302, 0xbfb00000});
-      const auto report = analyze_waitcnts(TestCodeObject(words), arch);
-      ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
-      ASSERT_EQ(report.diagnostics.size(), !active) << diagnostic_summary(report);
-      if (!active) {
-        EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 2, 1}));
-        EXPECT_EQ(report.diagnostics[0].required_count, 62u);
-      }
-    }
-}
-
-TEST(WaitcheckTest, Gfx11FlatStoreAgesTheDsSideOfAnEarlierFlatLoad) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5})
-    for (uint32_t ds : {1u, 2u}) {
-      SCOPED_TRACE(testing::Message() << arch << " lgkm=" << ds);
-      std::vector<uint32_t> words{0xdc500000,
-                                  0x027c0000, // flat_load_b32 v2,v[0:1]
-                                  0xdc680000,
-                                  0x007c0300,             // flat_store_b32 v[0:1],v3
-                                  0xbfbd0000,             // s_barrier
-                                  0xbf890007 | (ds << 4), // s_waitcnt vmcnt(0) lgkmcnt(ds)
-                                  0xdc680000,
-                                  0x007c0200,  // flat_store_b32 v[0:1],v2
-                                  0xbfb00000}; // s_endpgm
-      TestCodeObject object(words);
-      const auto report = analyze_waitcnts(object, arch);
-      ASSERT_TRUE(report.supported) << report.analysis_error;
-      ASSERT_EQ(report.diagnostics.size(), ds > 1) << diagnostic_summary(report);
-      if (ds > 1) {
-        EXPECT_EQ(report.diagnostics.front().counter, WaitCounterKind::Ds);
-        EXPECT_EQ(report.diagnostics.front().required_count, 1u);
-      }
-    }
-}
-
-TEST(WaitcheckTest, SplitCounterFlatLoadsAgeBothRoutesIndependently) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5})
-    for (unsigned load : {3u, 4u})
-      for (unsigned ds : {3u, 4u}) {
-        SCOPED_TRACE(testing::Message() << arch << " load=" << load << " ds=" << ds);
-        std::vector<uint32_t> program;
-        for (uint32_t dst = 0; dst < 4; ++dst)
-          append_inst(program, flat_load_b32(dst));
-        append_inst(program, sopp(72, (load << 8) | ds));
-        append_inst(program, v_mov_b32(5, 0));
-        TestCodeObject object(program);
-        const auto report = analyze_waitcnts(object, arch);
-        ASSERT_TRUE(report.supported) << report.analysis_error;
-        ASSERT_EQ(report.diagnostics.size(), (load > 3) + (ds > 3)) << diagnostic_summary(report);
-        for (const auto &diagnostic : report.diagnostics) {
-          EXPECT_EQ(diagnostic.required_count, 3u);
-          EXPECT_TRUE((diagnostic.counter == WaitCounterKind::Load && load > 3) ||
-                      (diagnostic.counter == WaitCounterKind::Ds && ds > 3));
-        }
-      }
 }
 
 TEST(WaitcheckTest, RelativeMovesUseM0ForEachPhysicalOperand) {
@@ -2013,6 +1933,67 @@ TEST(WaitcheckTest, Gfx950DirectToLdsBufferLoadAgesVmcnt) {
 // checked-in LLVM-produced Triton fixtures and extracted ROCm PyTorch objects.
 // The encoded waits are stable inputs: normal tests neither invoke LLVM nor
 // weaken a kernel before analysis.
+TEST(WaitcheckTest, Gfx950CounterParityMatchesRequiredVmcnt) {
+  std::vector<uint32_t> program;
+  append_gfx950_buffer_load_dword_v0_v8_s0_offen(program);
+  append_gfx950_buffer_load_dwordx4_v0_s64_offen_lds(program);
+  append_gfx950_s_waitcnt_vmcnt_1(program);
+  append_gfx950_v_mov_b32_v1_v0(program);
+
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_wait_groups, 1u);
+  EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(report.counter_parity_exact, 1u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 0u);
+  EXPECT_TRUE(report.counter_underaccounting_diagnostics.empty());
+}
+
+TEST(WaitcheckTest, Gfx950CounterParityMatchesPendingReplacementDefinitionsLikeLlvm) {
+  std::vector<uint32_t> program;
+  append_gfx950_v_mov_b32_v0_v2(program); // Initialize v0.
+  append_gfx950_v_mov_b32_v1_v0(program); // Initialize v1.
+  append_gfx950_buffer_load_dword_v0_v8_s0_offen(program);
+  append_gfx950_buffer_load_dword_v1_v8_s0_offen(program);
+  append_gfx950_s_waitcnt_vmcnt_0(program);
+  program.push_back(0x68040300u); // v_add_u32_e32 v2, v0, v1.
+
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_wait_groups, 1u);
+  EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(report.counter_parity_exact, 1u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 0u);
+  EXPECT_TRUE(report.counter_underaccounting_diagnostics.empty());
+}
+
+TEST(WaitcheckTest, Gfx950CounterParityForcesZeroForDsWithPendingScalarMemory) {
+  std::vector<uint32_t> program;
+  append_gfx950_ds_read_b32_v0_v4(program);
+  append_gfx950_s_load_dword_s4_s0(program);
+  append_gfx950_s_waitcnt_lgkmcnt_0(program);
+  append_gfx950_v_mov_b32_v1_v0(program);
+
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_wait_groups, 1u);
+  EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(report.counter_parity_exact, 1u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 0u);
+}
+
 TEST(WaitcheckTest, Gfx950RejectsPartialLgkmcntForDsWithPendingScalarMemory) {
   std::vector<uint32_t> program;
   append_gfx950_ds_read_b32_v0_v4(program);
@@ -2029,6 +2010,256 @@ TEST(WaitcheckTest, Gfx950RejectsPartialLgkmcntForDsWithPendingScalarMemory) {
   EXPECT_EQ(report.diagnostics[0].producer_instruction, "ds_read_b32 v0, v4");
 }
 
+TEST(WaitcheckTest, Gfx950CounterParityReportsStrongerEmittedVmcnt) {
+  std::vector<uint32_t> program;
+  append_gfx950_buffer_load_dword_v0_v8_s0_offen(program);
+  append_gfx950_buffer_load_dwordx4_v0_s64_offen_lds(program);
+  append_gfx950_s_waitcnt_vmcnt_0(program);
+  append_gfx950_v_mov_b32_v1_v0(program);
+
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  ASSERT_EQ(report.counter_underaccounting_diagnostics.size(), 1u);
+  const auto &diag = report.counter_underaccounting_diagnostics.front();
+  EXPECT_EQ(diag.counter, WaitCounterKind::Load);
+  EXPECT_EQ(diag.emitted_count, 0u);
+  EXPECT_EQ(diag.required_count, 1u);
+  EXPECT_TRUE(diag.has_required_dependency);
+  EXPECT_EQ(diag.access, WaitcheckAccessKind::Use);
+  EXPECT_EQ(diag.reg, (RegisterRef{RegClass::VGPR, 0, 1}));
+  EXPECT_EQ(diag.wait_section_offset, 16u);
+  EXPECT_EQ(diag.consumer_section_offset, 20u);
+  EXPECT_EQ(diag.producer_section_offset, 0u);
+}
+
+TEST(WaitcheckTest, Gfx950CounterParityUsesNoWaitSentinelWhenNoDependencyIsModeled) {
+  std::vector<uint32_t> program;
+  append_gfx950_buffer_load_dword_v0_v8_s0_offen(program);
+  append_gfx950_s_waitcnt_vmcnt_0(program);
+  append_gfx950_v_mov_b32_v8_v10(program);
+
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  ASSERT_EQ(report.counter_underaccounting_diagnostics.size(), 1u);
+  const auto &diag = report.counter_underaccounting_diagnostics.front();
+  EXPECT_EQ(diag.counter, WaitCounterKind::Load);
+  EXPECT_EQ(diag.emitted_count, 0u);
+  EXPECT_EQ(diag.required_count, 63u);
+  EXPECT_FALSE(diag.has_required_dependency);
+}
+
+TEST(WaitcheckTest, Gfx950CounterParityCombinesConsecutiveWaits) {
+  std::vector<uint32_t> program;
+  append_gfx950_buffer_load_dword_v0_v8_s0_offen(program);
+  append_gfx950_buffer_load_dwordx4_v0_s64_offen_lds(program);
+  append_gfx950_s_waitcnt_vmcnt_1(program);
+  append_gfx950_s_waitcnt_vmcnt_0(program);
+  append_gfx950_v_mov_b32_v1_v0(program);
+
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  ASSERT_EQ(report.counter_underaccounting_diagnostics.size(), 1u);
+  const auto &diag = report.counter_underaccounting_diagnostics.front();
+  EXPECT_EQ(diag.emitted_count, 0u);
+  EXPECT_EQ(diag.required_count, 1u);
+  EXPECT_NE(diag.wait_instruction.find(';'), std::string::npos);
+}
+
+TEST(WaitcheckTest, Gfx950CounterParityPreservesKernelIdentityInCodeObject) {
+  std::vector<uint32_t> program;
+  append_gfx950_buffer_load_dword_v0_v8_s0_offen(program);
+  append_gfx950_buffer_load_dwordx4_v0_s64_offen_lds(program);
+  append_gfx950_s_waitcnt_vmcnt_0(program);
+  append_gfx950_v_mov_b32_v1_v0(program);
+
+  const auto image =
+      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA4, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  ASSERT_EQ(report.counter_underaccounting_diagnostics.size(), 1u);
+  const auto &diag = report.counter_underaccounting_diagnostics.front();
+  EXPECT_TRUE(diag.has_kernel);
+  EXPECT_EQ(diag.kernel_name, "waitcheck");
+  EXPECT_EQ(diag.kernel_entry_offset, 0u);
+  EXPECT_EQ(diag.emitted_count, 0u);
+  EXPECT_EQ(diag.required_count, 1u);
+}
+
+TEST(WaitcheckTest, Gfx950CounterParityReportsStrongerEmittedLgkmcnt) {
+  std::vector<uint32_t> program;
+  append_gfx950_ds_read_b32_v0_v4(program);
+  append_gfx950_ds_read_b128_v82_v13_offset64(program);
+  append_gfx950_s_waitcnt_lgkmcnt_0(program);
+  append_gfx950_v_mov_b32_v1_v0(program);
+
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  ASSERT_EQ(report.counter_underaccounting_diagnostics.size(), 1u);
+  const auto &diag = report.counter_underaccounting_diagnostics.front();
+  EXPECT_EQ(diag.counter, WaitCounterKind::Ds);
+  EXPECT_EQ(diag.emitted_count, 0u);
+  EXPECT_EQ(diag.required_count, 1u);
+  EXPECT_TRUE(diag.has_required_dependency);
+}
+
+TEST(WaitcheckTest, Gfx950CounterParityDecodesExpcntField) {
+  std::vector<uint32_t> program;
+  append_gfx950_s_waitcnt_expcnt_0(program);
+  append_gfx950_v_mov_b32_v8_v10(program);
+
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  ASSERT_EQ(report.counter_underaccounting_diagnostics.size(), 1u);
+  const auto &diag = report.counter_underaccounting_diagnostics.front();
+  EXPECT_EQ(diag.counter, WaitCounterKind::Exp);
+  EXPECT_EQ(diag.emitted_count, 0u);
+  EXPECT_EQ(diag.required_count, 7u);
+  EXPECT_FALSE(diag.has_required_dependency);
+}
+
+TEST(WaitcheckTest, Gfx950CounterParityFollowsUnconditionalBranchToGuardedUse) {
+  std::vector<uint32_t> program;
+  append_gfx950_s_load_dword_s4_s0(program);
+  append_gfx950_s_waitcnt_lgkmcnt_0(program);
+  program.push_back(0xBF820001u); // s_branch over the dead instruction.
+  program.push_back(0xBF800000u); // s_nop 0.
+  append_gfx950_s_mov_b32_s8_s4(program);
+  program.push_back(0xBF810000u); // s_endpgm.
+
+  const auto image =
+      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA4, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(report.counter_parity_exact, 1u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 0u);
+}
+
+TEST(WaitcheckTest, Gfx950CounterParityContinuesAcrossFallthroughBlockLabel) {
+  std::vector<uint32_t> program;
+  program.push_back(0xBF840003u); // s_cbranch_scc0 to the guarded use.
+  append_gfx950_s_load_dword_s4_s0(program);
+  append_gfx950_s_waitcnt_lgkmcnt_0(program);
+  // This instruction starts a basic block because it is also the branch
+  // target, while the wait reaches it through the fallthrough predecessor.
+  append_gfx950_s_mov_b32_s8_s4(program);
+  program.push_back(0xBF810000u); // s_endpgm.
+
+  const auto image =
+      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA4, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_wait_groups, 1u);
+  EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(report.counter_parity_exact, 1u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 0u);
+  EXPECT_EQ(report.counter_parity_indeterminate_groups, 0u);
+}
+
+TEST(WaitcheckTest, Gfx950CounterParityFindsGuardedUseAfterIndependentInstruction) {
+  std::vector<uint32_t> program;
+  append_gfx950_ds_read_b32_v0_v4(program);
+  program.push_back(0xD86C0000u); // ds_read_b32 v2, v4.
+  program.push_back(0x02000004u);
+  append_gfx950_s_waitcnt_lgkmcnt_0(program);
+  append_gfx950_v_mov_b32_v8_v10(program);
+  append_gfx950_v_mov_b32_v0_v2(program);
+  program.push_back(0xBF810000u); // s_endpgm.
+
+  const auto image =
+      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA4, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(report.counter_parity_exact, 1u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 0u);
+}
+
+TEST(WaitcheckTest, Gfx950CounterParityCollectsAllUsesBeforeNextWait) {
+  std::vector<uint32_t> program;
+  append_gfx950_ds_read_b32_v0_v4(program);
+  program.push_back(0xD86C0000u); // ds_read_b32 v2, v4.
+  program.push_back(0x02000004u);
+  append_gfx950_s_waitcnt_lgkmcnt_0(program);
+  append_gfx950_v_mov_b32_v1_v0(program);
+  program.push_back(0xBF8A0000u); // s_barrier consumes the younger DS event.
+  program.push_back(0xBF810000u); // s_endpgm.
+
+  const auto image =
+      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA4, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(report.counter_parity_exact, 1u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 0u);
+}
+
+TEST(WaitcheckTest, Gfx950CounterParityAttributesLegacyLgkmDrainToBarrier) {
+  std::vector<uint32_t> program;
+  append_gfx950_s_load_dword_s4_s0(program);
+  append_gfx950_s_waitcnt_lgkmcnt_0(program);
+  program.push_back(0xBF8A0000u); // s_barrier.
+  program.push_back(0xBF810000u); // s_endpgm.
+
+  const auto image =
+      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA4, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(report.counter_parity_exact, 1u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 0u);
+}
+
 TEST(WaitcheckTest, Gfx950DoesNotRequireBarrierWaitForRegisterOnlyDsLoad) {
   std::vector<uint32_t> program;
   append_gfx950_ds_read_b32_v0_v4(program);
@@ -2041,10 +2272,1045 @@ TEST(WaitcheckTest, Gfx950DoesNotRequireBarrierWaitForRegisterOnlyDsLoad) {
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
 }
 
+TEST(WaitcheckTest, Gfx950CounterParityTracksPartialDirectToLdsWaitBeforeBarrier) {
+  std::vector<uint32_t> program;
+  append_gfx950_buffer_load_dwordx4_v0_s64_offen_lds(program);
+  append_gfx950_buffer_load_dword_v0_v8_s0_offen(program);
+  append_gfx950_s_waitcnt_vmcnt_1(program);
+  program.push_back(0xBF8A0000u); // s_barrier.
+  program.push_back(0xBF810000u); // s_endpgm.
+
+  const auto image =
+      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA4, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(report.counter_parity_exact, 1u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 0u);
+}
+
+TEST(WaitcheckTest, Gfx950CounterParityForcesZeroWithPendingFlatEvent) {
+  std::vector<uint32_t> program;
+  append_gfx950_ds_read_b32_v0_v4(program);
+  program.push_back(0xDC500000u); // flat_load_dword v109, v[12:13].
+  program.push_back(0x6D00000Cu);
+  append_gfx950_s_waitcnt_lgkmcnt_0(program);
+  append_gfx950_v_mov_b32_v1_v0(program);
+  program.push_back(0xBF810000u); // s_endpgm.
+
+  const auto image =
+      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA4, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(report.counter_parity_exact, 1u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 0u);
+}
+
+TEST(WaitcheckTest, Gfx942CounterParityMatchesLegacyVmcnt) {
+  std::vector<uint32_t> program;
+  append_gfx942_buffer_load_dword(program, 0, 8);
+  append_gfx942_buffer_load_dword(program, 2, 8);
+  program.push_back(0xBF8C0F71u); // s_waitcnt vmcnt(1).
+  append_gfx942_v_mov_b32_v1_v0(program);
+
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA3, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_wait_groups, 1u);
+  EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(report.counter_parity_exact, 1u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 0u);
+}
+
+TEST(WaitcheckTest, Gfx1100CounterParityMatchesSopkVmcnt) {
+  std::vector<uint32_t> program;
+  append_gfx1100_global_load_b32_v0_v8_s0(program);
+  append_gfx1100_global_load_b32_v2_v8_s0(program);
+  append_gfx1100_s_waitcnt_vmcnt_sopk_1(program);
+  append_gfx1100_v_mov_b32_v1_v0(program);
+
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  TestCodeObject code_object(program);
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA3, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_wait_groups, 1u);
+  EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(report.counter_parity_exact, 1u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 0u);
+}
+
+TEST(WaitcheckTest, Gfx1100CounterParityLooksPastAdjacentDepctrWait) {
+  std::vector<uint32_t> program;
+  append_gfx1100_global_load_b32_v0_v8_s0(program);
+  append_gfx1100_s_waitcnt_vmcnt_0(program);
+  program.push_back(0xBF880000u); // s_waitcnt_depctr 0.
+  append_gfx1100_v_mov_b32_v1_v0(program);
+
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  TestCodeObject code_object(program);
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA3, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_fields_checked, 3u);
+  EXPECT_EQ(report.counter_parity_exact, 1u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 2u);
+  EXPECT_EQ(report.counter_parity_indeterminate_groups, 0u);
+}
+
+TEST(WaitcheckTest, Gfx1100CounterParityNormalizesWaitIdle) {
+  std::vector<uint32_t> program;
+  append_gfx1100_global_load_b32_v0_v8_s0(program);
+  program.push_back(0xBF8A0000u); // s_wait_idle.
+  append_gfx1100_v_mov_b32_v1_v0(program);
+
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA3, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_fields_checked, 6u);
+  EXPECT_EQ(report.counter_parity_exact, 1u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 5u);
+  EXPECT_EQ(report.counter_unmodeled_wait_observed, 5u);
+  EXPECT_EQ(report.counter_parity_indeterminate_groups, 0u);
+}
+
+TEST(WaitcheckTest, Gfx1100CounterParityDecodesVscnt) {
+  std::vector<uint32_t> program;
+  append_gfx1100_s_waitcnt_vscnt_0(program);
+  append_gfx1100_v_mov_b32_v1_v0(program);
+
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA3, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.counter_underaccounting_diagnostics.size(), 1u);
+  const auto &diag = report.counter_underaccounting_diagnostics.front();
+  EXPECT_EQ(diag.counter, WaitCounterKind::Store);
+  EXPECT_EQ(diag.emitted_count, 0u);
+  EXPECT_EQ(diag.required_count, 63u);
+  EXPECT_FALSE(diag.has_required_dependency);
+}
+
+TEST(WaitcheckTest, Gfx1100CounterParityCatalogsConservativePairedD16Wait) {
+  // Final ISA from PyTorch 2.9.1 code object 139, entry 0, .text+0x4dc.
+  // The packaged compiler emits lgkmcnt(0) before the paired high-half load;
+  // current LLVM emits lgkmcnt(1) for the later v0 use, matching waitcheck.
+  std::vector<uint32_t> program{
+      0xDA880000u, 0x0000000Eu, // ds_load_u8_d16 v0, v14.
+      0xBF89FC07u,              // s_waitcnt lgkmcnt(0).
+      0xDA8C0002u, 0x0000000Eu, // ds_load_u8_d16_hi v0, v14 offset:2.
+      0xDA880000u, 0x0100000Fu, // ds_load_u8_d16 v1, v15.
+      0xBF89FC07u,              // s_waitcnt lgkmcnt(0).
+      0xDA8C0002u, 0x0100000Fu, // ds_load_u8_d16_hi v1, v15 offset:2.
+      0xD7620012u, 0x02020081u, // v_and_b16 v18.l, 1, v0.l.
+      0xBF810000u,              // s_endpgm.
+  };
+
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  TestCodeObject code_object(program);
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA3, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_fields_checked, 2u);
+  EXPECT_EQ(report.counter_parity_exact, 0u);
+  EXPECT_EQ(report.counter_unmodeled_wait_observed, 1u);
+  ASSERT_EQ(report.counter_underaccounting_diagnostics.size(), 2u);
+  const auto diag_it =
+      std::ranges::find_if(report.counter_underaccounting_diagnostics,
+                           [](const WaitcheckCounterUnderaccountingDiagnostic &diag) {
+                             return diag.has_required_dependency;
+                           });
+  ASSERT_NE(diag_it, report.counter_underaccounting_diagnostics.end());
+  const auto &diag = *diag_it;
+  EXPECT_EQ(diag.counter, WaitCounterKind::Ds);
+  EXPECT_EQ(diag.emitted_count, 0u);
+  EXPECT_EQ(diag.required_count, 1u);
+  EXPECT_EQ(diag.producer_instruction, "ds_load_u8_d16_hi v0, v14 offset:2");
+  EXPECT_EQ(diag.consumer_instruction, "v_and_b16 v18.l, 1, v0.l");
+}
+
+TEST(WaitcheckTest, Gfx1250CounterParityMatchesSplitLoadcnt) {
+  std::vector<uint32_t> program;
+  append_inst(program, global_load_b32(0));
+  append_inst(program, global_load_b32(2));
+  append_inst(program, sopp(64, 1)); // s_wait_loadcnt 1.
+  append_inst(program, v_mov_b32(1, 0));
+
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  TestCodeObject code_object(program);
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_wait_groups, 1u);
+  EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(report.counter_parity_exact, 1u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 0u);
+}
+
+TEST(WaitcheckTest, Gfx1250CounterParityNormalizesCombinedLoadAndDsWait) {
+  std::vector<uint32_t> program;
+  append_inst(program, flat_load_b32(0));
+  append_inst(program, global_load_b32(2));
+  append_inst(program, ds_load_b32(4, 12));
+  append_inst(program, sopp(72, 0x0101)); // s_wait_loadcnt_dscnt 1, 1.
+  append_inst(program, v_mov_b32(1, 0));
+
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  TestCodeObject code_object(program);
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_wait_groups, 1u);
+  EXPECT_EQ(report.counter_parity_fields_checked, 2u);
+  EXPECT_EQ(report.counter_parity_exact, 2u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 0u);
+}
+
+TEST(WaitcheckTest, Gfx11EmptyExecFlatCannotAgeAnIsolatedLdsResult) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5})
+    for (uint32_t exec : {0xbefe0080u, 0xbefe0008u, 0xbefe00c1u}) {
+      SCOPED_TRACE(testing::Message() << arch << " EXEC_LO write " << exec);
+      const std::vector<uint32_t> words{0xd8d80000, 0x02000001,  // ds_load_b32 v2,v1
+                                        exec,                    // s_mov_b32 exec_lo, 0 / s8 / -1
+                                        0xdc680000, 0x007c0503,  // flat_store_b32 v[3:4],v5
+                                        0xbefe00c1,              // s_mov_b32 exec_lo, -1
+                                        0xbf89fc17,              // s_waitcnt lgkmcnt(1)
+                                        0x7e0c0302, 0xbfb00000}; // v_mov_b32 v6,v2; s_endpgm
+      const auto report = analyze_waitcnts(TestCodeObject(words), arch);
+      ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+      ASSERT_EQ(report.diagnostics.size(), exec != 0xbefe00c1) << diagnostic_summary(report);
+      if (!report.diagnostics.empty()) {
+        EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 2, 1}));
+        EXPECT_EQ(report.diagnostics[0].required_count, 0u);
+      }
+    }
+}
+
+TEST(WaitcheckTest, Gfx11SkippedFlatDoesNotForceLdsAdmission) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5})
+    for (bool active : {false, true}) {
+      std::vector<uint32_t> words{0xbefe00c1u, 0xd8d80000, 0x02000001}; // EXEC_LO=-1; load v2.
+      for (unsigned younger = 0; younger < 62; ++younger)
+        words.insert(words.end(), {0xd8d80000, 0x07000001}); // ds_load_b32 v7,v1
+      words.insert(words.end(), {active ? 0xbefe00c1u : 0xbefe0080u, 0xdc680000, 0x007c0503,
+                                 0xbefe00c1, 0x7e0c0302, 0xbfb00000});
+      const auto report = analyze_waitcnts(TestCodeObject(words), arch);
+      ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+      ASSERT_EQ(report.diagnostics.size(), !active) << diagnostic_summary(report);
+      if (!active) {
+        EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 2, 1}));
+        EXPECT_EQ(report.diagnostics[0].required_count, 62u);
+      }
+    }
+}
+
+TEST(WaitcheckTest, Gfx11FlatStoreAgesTheDsSideOfAnEarlierFlatLoad) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5})
+    for (uint32_t ds : {1u, 2u}) {
+      SCOPED_TRACE(testing::Message() << arch << " lgkm=" << ds);
+      std::vector<uint32_t> words{0xdc500000,
+                                  0x027c0000, // flat_load_b32 v2,v[0:1]
+                                  0xdc680000,
+                                  0x007c0300,             // flat_store_b32 v[0:1],v3
+                                  0xbfbd0000,             // s_barrier
+                                  0xbf890007 | (ds << 4), // s_waitcnt vmcnt(0) lgkmcnt(ds)
+                                  0xdc680000,
+                                  0x007c0200,  // flat_store_b32 v[0:1],v2
+                                  0xbfb00000}; // s_endpgm
+      TestCodeObject object(words);
+      const auto report = analyze_waitcnts(object, arch);
+      ASSERT_TRUE(report.supported) << report.analysis_error;
+      ASSERT_EQ(report.diagnostics.size(), ds > 1) << diagnostic_summary(report);
+      if (ds > 1) {
+        EXPECT_EQ(report.diagnostics.front().counter, WaitCounterKind::Ds);
+        EXPECT_EQ(report.diagnostics.front().required_count, 1u);
+      }
+    }
+}
+
+TEST(WaitcheckTest, SplitCounterFlatLoadsAgeBothRoutesIndependently) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5})
+    for (unsigned load : {3u, 4u})
+      for (unsigned ds : {3u, 4u}) {
+        SCOPED_TRACE(testing::Message() << arch << " load=" << load << " ds=" << ds);
+        std::vector<uint32_t> program;
+        for (uint32_t dst = 0; dst < 4; ++dst)
+          append_inst(program, flat_load_b32(dst));
+        append_inst(program, sopp(72, (load << 8) | ds));
+        append_inst(program, v_mov_b32(5, 0));
+        TestCodeObject object(program);
+        const auto report = analyze_waitcnts(object, arch);
+        ASSERT_TRUE(report.supported) << report.analysis_error;
+        ASSERT_EQ(report.diagnostics.size(), (load > 3) + (ds > 3)) << diagnostic_summary(report);
+        for (const auto &diagnostic : report.diagnostics) {
+          EXPECT_EQ(diagnostic.required_count, 3u);
+          EXPECT_TRUE((diagnostic.counter == WaitCounterKind::Load && load > 3) ||
+                      (diagnostic.counter == WaitCounterKind::Ds && ds > 3));
+        }
+      }
+}
+
+TEST(WaitcheckTest, Gfx1250CounterParityRecognizesOrderedDsOverwriteNeedsNoWait) {
+  std::vector<uint32_t> program;
+  append_inst(program, ds_load_b32(0, 12));
+  append_inst(program, ds_load_b32(2, 12));
+  append_inst(program, ds_load_b32(4, 12));
+  append_inst(program, sopp(70, 2)); // s_wait_dscnt 2 retires the oldest result.
+  append_inst(program, ds_load_b32(0, 12));
+
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  TestCodeObject code_object(program);
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_wait_groups, 1u);
+  EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(report.counter_parity_exact, 0u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 1u);
+}
+
+TEST(WaitcheckTest, Gfx1250CounterParityMatchesXcnt) {
+  std::vector<uint32_t> program;
+  append_inst(program, global_load_b32(0));
+  append_inst(program, s_wait_xcnt_0());
+  append_inst(program, v_mov_b32(8, 10));
+
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  TestCodeObject code_object(program);
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_wait_groups, 1u);
+  EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(report.counter_parity_exact, 1u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 0u);
+}
+
+TEST(WaitcheckTest, Gfx1250CounterParityMatchesXcntBeforeImplicitCmpxExecDef) {
+  std::vector<uint32_t> program;
+  append_inst(program, global_load_b32(0));
+  append_inst(program, s_wait_xcnt_0());
+  // v_cmpx_ne_u16_e32 0, v1.h implicitly defines EXEC, but the final encoding
+  // has no explicit destination operand.
+  append_inst(program, 0x7D7B0280u);
+
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  TestCodeObject code_object(program);
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_wait_groups, 1u);
+  EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(report.counter_parity_exact, 1u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 0u);
+}
+
+TEST(WaitcheckTest, Gfx1250CounterParityCatalogsConservativeXcntClauseDrain) {
+  std::vector<uint32_t> program;
+  append_inst(program, global_load_b32(16, 2));
+  append_inst(program, global_load_b32(17, 7));
+  append_inst(program, global_load_b32(18, 10));
+  append_inst(program, global_load_b32(19, 12));
+  // LLVM's global-load clause policy emits one all-zero XCNT drain before a
+  // staged sequence of partial loadcnt waits and address-register reuses.
+  append_inst(program, s_wait_xcnt_0());
+  append_inst(program, v_mov_b32(2, 20));
+
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  TestCodeObject code_object(program);
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(report.counter_parity_exact, 0u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 1u);
+  ASSERT_EQ(report.counter_underaccounting_diagnostics.size(), 1u);
+  EXPECT_TRUE(report.counter_underaccounting_diagnostics[0].has_required_dependency);
+  EXPECT_EQ(report.counter_underaccounting_diagnostics[0].emitted_count, 0u);
+  EXPECT_EQ(report.counter_underaccounting_diagnostics[0].required_count, 3u);
+  EXPECT_EQ(report.counter_underaccounting_diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 2, 1}));
+}
+
+TEST(WaitcheckTest, Gfx1250CounterParityCatalogsConservativeScratchStoreXcnt) {
+  std::vector<uint32_t> program = {
+      // Four scratch_store_b128 instructions from the final gfx1250 corpus.
+      0xED0740FCu, 0x20000000u, 0x00002000u, 0xED0740FCu, 0x22000000u, 0x00003000u,
+      0xED0740FCu, 0x24000000u, 0x00004000u, 0xED0740FCu, 0x26000000u, 0x00005000u,
+  };
+  append_inst(program, s_wait_xcnt_0());
+  append_inst(program, v_mov_b32(68, 100));
+
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  TestCodeObject code_object(program);
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(report.counter_parity_exact, 0u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 1u);
+  ASSERT_EQ(report.counter_underaccounting_diagnostics.size(), 1u);
+  EXPECT_TRUE(report.counter_underaccounting_diagnostics[0].has_required_dependency);
+  EXPECT_EQ(report.counter_underaccounting_diagnostics[0].emitted_count, 0u);
+  EXPECT_EQ(report.counter_underaccounting_diagnostics[0].required_count, 2u);
+  EXPECT_EQ(report.counter_underaccounting_diagnostics[0].reg,
+            (RegisterRef{RegClass::VGPR, 68, 1}));
+}
+
+TEST(WaitcheckTest, Gfx1250CounterParityCatalogsConservativeScratchLoadReplacement) {
+  std::vector<uint32_t> program;
+  for (uint32_t vdst = 0; vdst != 64; vdst += 4)
+    append_inst(program, scratch_load_b128_off(vdst));
+  append_inst(program, sopp(64, 8)); // s_wait_loadcnt 8.
+  append_inst(program, v_mov_b32(0, 100));
+
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  TestCodeObject code_object(program);
+  auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(report.counter_parity_exact, 0u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 1u);
+  ASSERT_EQ(report.counter_underaccounting_diagnostics.size(), 1u);
+  EXPECT_TRUE(report.counter_underaccounting_diagnostics[0].has_required_dependency);
+  EXPECT_EQ(report.counter_underaccounting_diagnostics[0].emitted_count, 8u);
+  EXPECT_EQ(report.counter_underaccounting_diagnostics[0].required_count, 15u);
+  EXPECT_EQ(report.counter_underaccounting_diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 0, 1}));
+}
+
+TEST(WaitcheckTest, Gfx1250CounterParityMatchesVmVsrc) {
+  std::vector<uint32_t> program;
+  append_inst(program, global_load_b32(0));
+  append_inst(program, s_wait_alu_vm_vsrc_0());
+  append_inst(program, v_mov_b32(8, 10));
+
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_wait_groups, 1u);
+  EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(report.counter_parity_exact, 1u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 0u);
+}
+
+TEST(WaitcheckTest, Gfx1201CounterParityMatchesKmcnt) {
+  std::vector<uint32_t> program;
+  append_inst(program, s_load_b32(4, 0));
+  append_inst(program, sopp(71, 0)); // s_wait_kmcnt 0.
+  append_inst(program, s_mov_b32(8, 4));
+
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  const auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(report.counter_parity_exact, 1u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 0u);
+}
+
+TEST(WaitcheckTest, Gfx1201CounterParityMatchesSamplecnt) {
+  std::vector<uint32_t> program;
+  append_inst(program, image_sample(4));
+  append_inst(program, sopp(66, 0)); // s_wait_samplecnt 0.
+  append_inst(program, v_mov_b32(8, 4));
+
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  const auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(report.counter_parity_exact, 1u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 0u);
+}
+
+TEST(WaitcheckTest, Gfx1201CounterParityMatchesBvhcnt) {
+  std::vector<uint32_t> program;
+  append_inst(program, image_bvh_intersect_ray(4));
+  append_inst(program, sopp(67, 0)); // s_wait_bvhcnt 0.
+  append_inst(program, v_mov_b32(8, 4));
+
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  const auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(report.counter_parity_exact, 1u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 0u);
+}
+
+TEST(WaitcheckTest, Gfx1201CounterParityMatchesExpcnt) {
+  std::vector<uint32_t> program;
+  append_inst(program, export_mrt0_v0());
+  append_inst(program, sopp(68, 0)); // s_wait_expcnt 0.
+  append_inst(program, s_mov_b64_exec_from_s0());
+
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  const auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(report.counter_parity_exact, 1u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 0u);
+}
+
+TEST(WaitcheckTest, Gfx1250CounterParityMatchesAsynccnt) {
+  std::vector<uint32_t> program;
+  append_global_load_async_to_lds_b32(program);
+  append_inst(program, s_wait_asynccnt(0));
+  append_inst(program, ds_load_b32(4, 12));
+
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  TestCodeObject code_object(program);
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(report.counter_parity_exact, 1u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 0u);
+}
+
+TEST(WaitcheckTest, Gfx1250CounterParityMatchesTensorcnt) {
+  std::vector<uint32_t> program;
+  append_tensor_load_to_lds(program);
+  append_inst(program, s_wait_tensorcnt(0));
+  append_inst(program, ds_load_b32(4, 12));
+
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  TestCodeObject code_object(program);
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(report.counter_parity_exact, 1u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 0u);
+}
+
+TEST(WaitcheckTest, Gfx1201CounterParityMatchesEmbeddedVmVsrc) {
+  std::vector<uint32_t> program;
+  append_inst(program, global_load_b32(0)); // Uses v8 as the vector offset.
+  append_inst(program, ds_param_load_with_waits(8, 15, 0));
+
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  const auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(report.counter_parity_exact, 1u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 0u);
+}
+
+TEST(WaitcheckTest, Gfx1201CounterParityMatchesEmbeddedVaVdst) {
+  std::vector<uint32_t> program;
+  append_inst(program, v_add_f32_e32(0, 257, 1)); // VALU reads v1.
+  append_inst(program, ds_param_load_with_waits(1, 0, 1));
+
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  const auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(report.counter_parity_exact, 1u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 0u);
+}
+
+TEST(WaitcheckTest, Gfx1201CounterParityMatchesEmbeddedVinterpExpcnt) {
+  std::vector<uint32_t> program;
+  append_inst(program, ds_direct_load(1));
+  append_inst(program, v_interp_p10_f32(2, 1, 0));
+
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  const auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(report.counter_parity_exact, 1u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 0u);
+}
+
+TEST(WaitcheckTest, Gfx1201CounterParityAttributesImpliedVmVsrcToLoadcnt) {
+  std::vector<uint32_t> program;
+  append_inst(program, global_load_b32(0)); // Uses v8 as the vector offset.
+  append_inst(program, sopp(64, 0));        // s_wait_loadcnt 0 also waits VM_VSRC.
+  append_inst(program, v_mov_b32(8, 10));
+
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  const auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(report.counter_parity_exact, 1u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 0u);
+}
+
+TEST(WaitcheckTest, Gfx1250CounterParityAttributesImpliedXcntToLoadcnt) {
+  std::vector<uint32_t> program;
+  append_inst(program, global_load_b32(0)); // Uses s[0:1] as the scalar address.
+  append_inst(program, sopp(64, 0));        // s_wait_loadcnt 0 also waits VMEM X_CNT.
+  append_inst(program, s_mov_b32(0, 128));
+
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  TestCodeObject code_object(program);
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(report.counter_parity_exact, 1u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 0u);
+}
+
+TEST(WaitcheckTest, Gfx1250CounterParityAttributesImpliedXcntToKmcnt) {
+  std::vector<uint32_t> program;
+  append_inst(program, s_load_b32(4, 0)); // Uses s[0:1] as the scalar address.
+  append_inst(program, sopp(71, 0));      // s_wait_kmcnt 0 also waits SMEM X_CNT.
+  append_inst(program, s_mov_b32(0, 128));
+
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  TestCodeObject code_object(program);
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA5, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(report.counter_parity_exact, 1u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 0u);
+}
+
+TEST(WaitcheckTest, Gfx1201CounterParityMatchesStoreDataWar) {
+  constexpr uint32_t kHwRegWaveSchedMode = 26;
+  std::vector<uint32_t> program;
+  append_inst(program, s_setreg_imm32_b32(hwreg(kHwRegWaveSchedMode, 0, 2), 2));
+  append_inst(program, global_store_b32(10));
+  append_inst(program, s_wait_alu_vm_vsrc_0());
+  append_inst(program, v_mov_b32(10, 0));
+
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  TestCodeObject code_object(program);
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA4, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(report.counter_parity_exact, 1u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 0u);
+}
+
+TEST(WaitcheckTest, Gfx1201CounterParityMatchesUncertainLoadOrderAtCfgMerge) {
+  std::vector<uint32_t> program;
+  append_inst(program, sopp(33, 7)); // s_cbranch_scc0 to the else path.
+  append_inst(program, global_load_b32(0));
+  append_inst(program, global_load_b32(1));
+  append_inst(program, sopp(32, 6)); // s_branch to the join.
+  append_inst(program, global_load_b32(1));
+  append_inst(program, global_load_b32(0));
+  append_inst(program, sopp(64, 0)); // s_wait_loadcnt 0.
+  append_inst(program, v_mov_b32(2, 0));
+
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  TestCodeObject code_object(program);
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA4, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(report.counter_parity_exact, 1u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 0u);
+}
+
+TEST(WaitcheckTest, Gfx1201CounterParityMatchesLoopCarriedDsDependency) {
+  std::vector<uint32_t> program;
+  append_inst(program, sopp(70, 0)); // Loop header: s_wait_dscnt 0.
+  append_inst(program, v_mov_b32(1, 0));
+  append_inst(program, ds_load_b32(0, 4));
+  append_inst(program, sopp(34, static_cast<uint16_t>(-5))); // Back to the loop header.
+  append_inst(program, sopp(48, 0));                         // s_endpgm on the fallthrough path.
+
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  TestCodeObject code_object(program);
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA4, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(report.counter_parity_exact, 1u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 0u);
+}
+
+TEST(WaitcheckTest, Gfx1201CounterParityAttributesDsDrainToSplitBarrierSignal) {
+  std::vector<uint32_t> program;
+  append_inst(program, ds_load_b32(0, 12));
+  append_inst(program, sopp(70, 0)); // s_wait_dscnt 0.
+  program.push_back(0xBE804EC1u);    // s_barrier_signal -1.
+  program.push_back(0xBF810000u);    // s_endpgm.
+
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  TestCodeObject code_object(program);
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA4, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(report.counter_parity_exact, 1u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 0u);
+}
+
+TEST(WaitcheckTest, Gfx1201CounterParityAttributesAcquireFenceWaitBeforeGlobalInv) {
+  std::vector<uint32_t> program;
+  append_inst(program, global_load_b32(1));
+  append_inst(program, ds_load_b32(0, 12));
+  append_inst(program, ds_store_b32(13, 2));
+  append_inst(program, sopp(72, 0)); // s_wait_loadcnt_dscnt 0.
+  append_inst(program, global_inv());
+  append_inst(program, v_mov_b32(3, 1));
+  append_inst(program, ds_load_b32(0, 12));
+  program.push_back(0xBF810000u); // s_endpgm.
+
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  TestCodeObject code_object(program);
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA4, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_fields_checked, 2u);
+  EXPECT_EQ(report.counter_parity_exact, 2u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 0u);
+}
+
+TEST(WaitcheckTest, Gfx1201CounterParityHandlesConsecutiveWaitsAcrossCfgLabel) {
+  std::vector<uint32_t> program;
+  append_inst(program, sopp(33, 6)); // Branch target is the second wait below.
+  append_inst(program, global_load_b32(0));
+  append_inst(program, ds_load_b32(1, 12));
+  append_inst(program, sopp(70, 0)); // s_wait_dscnt 0.
+  append_inst(program, sopp(64, 0)); // s_wait_loadcnt 0 at a CFG label.
+  append_inst(program, v_mov_b32(2, 0));
+  append_inst(program, v_mov_b32(3, 1));
+
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  TestCodeObject code_object(program);
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA4, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_fields_checked, 2u);
+  EXPECT_EQ(report.counter_parity_exact, 2u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 0u);
+  EXPECT_EQ(report.counter_parity_indeterminate_groups, 0u);
+}
+
+TEST(WaitcheckTest, Gfx1150CounterParityMatchesPartialLoopCarriedDsDependency) {
+  std::vector<uint32_t> program;
+  append_gfx1150_s_waitcnt_lgkmcnt_1(program); // 0x00 loop header.
+  program.push_back(0x7E040300u);              // 0x04: v_mov_b32_e32 v2, v0.
+  program.push_back(0xD8D80000u);              // 0x08: ds_load_b32 v0, v4.
+  program.push_back(0x00000004u);
+  program.push_back(0xD8340000u); // 0x10: ds_store_b32 v4, v2.
+  program.push_back(0x00000204u);
+  program.push_back(0xBFA0FFF9u); // 0x18: s_branch to loop header.
+
+  const auto image =
+      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX1150);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA3_5, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(report.counter_parity_exact, 1u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 0u);
+  if (!report.counter_underaccounting_diagnostics.empty()) {
+    ADD_FAILURE() << report.counter_underaccounting_diagnostics.front().message << " from "
+                  << report.counter_underaccounting_diagnostics.front().producer_instruction;
+  }
+}
+
 // Reduced final ISA from a gfx1150 PyTorch CK kernel.  The compiler-emitted
 // vmcnt(2) is one step stronger than the vmcnt(3) required before the VOPD
 // reads v[24:25].  Keep the encoded instruction stream here so parity remains
 // anchored to the artifact rather than to an assembler or a synthetic opcode.
+TEST(WaitcheckTest, Gfx1150CounterParityCapturesConservativeScratchClauseWait) {
+  const std::vector<uint32_t> program = {
+      0xBF850003u,              // s_clause 0x3.
+      0xDC5D0640u, 0x187C0000u, // scratch_load_b128 v[24:27].
+      0xDC5D0650u, 0x1C7C0000u, // scratch_load_b128 v[28:31].
+      0xDC5D0040u, 0x007C0000u, // scratch_load_b128 v[0:3].
+      0xDC5D0050u, 0x047C0000u, // scratch_load_b128 v[4:7].
+      0xBF890BF7u,              // s_waitcnt vmcnt(2).
+      0xCA100118u, 0x10100119u, // v_dual_mov_b32 v16, v24 :: v17, v25.
+      0xBF810000u,              // s_endpgm.
+  };
+
+  const auto image =
+      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX1150);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA3_5, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(report.counter_parity_exact, 0u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 1u);
+  EXPECT_EQ(report.counter_unmodeled_wait_observed, 0u);
+  ASSERT_EQ(report.counter_underaccounting_diagnostics.size(), 1u);
+  const auto &diag = report.counter_underaccounting_diagnostics.front();
+  EXPECT_EQ(diag.counter, WaitCounterKind::Load);
+  EXPECT_EQ(diag.emitted_count, 2u);
+  EXPECT_EQ(diag.required_count, 3u);
+  EXPECT_TRUE(diag.has_required_dependency);
+  EXPECT_EQ(diag.access, WaitcheckAccessKind::Use);
+  EXPECT_EQ(diag.reg, (RegisterRef{RegClass::VGPR, 24, 1}));
+  EXPECT_EQ(diag.wait_section_offset, 36u);
+  EXPECT_EQ(diag.consumer_section_offset, 40u);
+  EXPECT_EQ(diag.producer_section_offset, 4u);
+}
+
+TEST(WaitcheckTest, Gfx1150CounterParityCatalogsStrongerCyclicWaitAsUnmodeled) {
+  std::vector<uint32_t> program;
+  program.push_back(0xBF89FC07u); // 0x00 loop header: s_waitcnt lgkmcnt(0).
+  program.push_back(0x7E040300u); // 0x04: v_mov_b32_e32 v2, v0.
+  program.push_back(0xD8D80000u); // 0x08: ds_load_b32 v0, v4.
+  program.push_back(0x00000004u);
+  program.push_back(0xD8340000u); // 0x10: ds_store_b32 v4, v2.
+  program.push_back(0x00000204u);
+  program.push_back(0xBFA0FFF9u); // 0x18: s_branch to loop header.
+
+  const auto image =
+      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX1150);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA3_5, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(report.counter_parity_exact, 0u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 1u);
+  EXPECT_EQ(report.counter_unmodeled_wait_observed, 1u);
+  ASSERT_EQ(report.counter_underaccounting_diagnostics.size(), 1u);
+  EXPECT_FALSE(report.counter_underaccounting_diagnostics[0].has_required_dependency);
+}
+
+TEST(WaitcheckTest, Gfx1201CounterParityMatchesSaturatedCounterAge) {
+  std::vector<uint32_t> program;
+  append_global_loads(program, kOverflowQueueSize, kOverflowBaseVgpr);
+  append_inst(program, sopp(64, kOverflowRequiredCount)); // s_wait_loadcnt 39.
+  append_inst(program, v_mov_b32(kOverflowConsumerVgpr, kOverflowBaseVgpr));
+
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  TestCodeObject code_object(program);
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_RDNA4, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(report.counter_parity_exact, 1u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 0u);
+}
+
+TEST(WaitcheckTest, Gfx950CounterParityFollowsResolvedCallReturn) {
+  constexpr uint16_t kTargetSreg = 8;
+  constexpr uint16_t kReturnSreg = 30;
+  constexpr uint16_t kLiteralOperand = 255;
+  constexpr uint16_t kInlineInt0 = 128;
+
+  std::vector<uint32_t> program;
+  append_gfx950_buffer_load_dword_v0_v8_s0_offen(program);                             // 0x00.
+  program.push_back(build_s_getpc_b64(kTargetSreg, ROCJITSU_CODE_ARCH_CDNA4).value()); // 0x08.
+  program.push_back(build_s_add_u32(kTargetSreg, kTargetSreg, kLiteralOperand,
+                                    ROCJITSU_CODE_ARCH_CDNA4)
+                        .value()); // 0x0c.
+  program.push_back(24);           // 0x10 -> helper 0x24.
+  program.push_back(build_s_addc_u32(kTargetSreg + 1, kTargetSreg + 1, kInlineInt0,
+                                     ROCJITSU_CODE_ARCH_CDNA4)
+                        .value()); // 0x14.
+  program.push_back(
+      build_s_swappc_b64(kReturnSreg, kTargetSreg, ROCJITSU_CODE_ARCH_CDNA4).value()); // 0x18.
+  append_gfx950_v_mov_b32_v1_v0(program);                                              // 0x1c.
+  program.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4).value());                 // 0x20.
+  append_gfx950_s_waitcnt_vmcnt_0(program); // 0x24 helper.
+  program.push_back(build_sop1_encoding(ROCJITSU_CODE_ARCH_CDNA4, 0x1d, 0,
+                                        kReturnSreg)
+                        .value()); // 0x28 return.
+
+  const auto image =
+      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA4, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(report.counter_parity_exact, 1u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 0u);
+}
+
+TEST(WaitcheckTest, Gfx950CounterParityCatalogsStrongerFunctionPrologWaitAsUnmodeled) {
+  constexpr uint8_t kTargetSreg = 26;
+  constexpr uint8_t kReturnSreg = 30;
+  constexpr uint8_t kLiteralOperand = 0xff;
+  constexpr uint8_t kInlineInt0 = 128;
+
+  std::vector<uint32_t> program;
+  append_gfx950_buffer_load_dword_v0_v8_s0_offen(program);                             // 0x00.
+  append_gfx950_buffer_load_dword_v1_v8_s0_offen(program);                             // 0x08.
+  program.push_back(build_s_getpc_b64(kTargetSreg, ROCJITSU_CODE_ARCH_CDNA4).value()); // 0x10.
+  program.push_back(build_s_add_u32(kTargetSreg, kTargetSreg, kLiteralOperand,
+                                    ROCJITSU_CODE_ARCH_CDNA4)
+                        .value()); // 0x14.
+  program.push_back(20);           // 0x18 -> helper 0x28.
+  program.push_back(build_s_addc_u32(kTargetSreg + 1, kTargetSreg + 1, kInlineInt0,
+                                     ROCJITSU_CODE_ARCH_CDNA4)
+                        .value()); // 0x1c.
+  program.push_back(
+      build_s_swappc_b64(kReturnSreg, kTargetSreg, ROCJITSU_CODE_ARCH_CDNA4).value()); // 0x20.
+  program.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4).value());                 // 0x24.
+  append_gfx950_s_waitcnt_vmcnt_0(program); // 0x28 helper.
+  program.push_back(0x7E040300u);           // 0x2c: v_mov_b32_e32 v2, v0.
+  program.push_back(build_sop1_encoding(ROCJITSU_CODE_ARCH_CDNA4, 0x1d, 0,
+                                        kReturnSreg)
+                        .value()); // 0x30 return.
+
+  const auto image =
+      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA4, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(report.counter_parity_exact, 0u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 1u);
+  EXPECT_EQ(report.counter_unmodeled_wait_observed, 1u);
+  ASSERT_EQ(report.counter_underaccounting_diagnostics.size(), 1u);
+  EXPECT_FALSE(report.counter_underaccounting_diagnostics[0].has_required_dependency);
+  EXPECT_EQ(report.counter_underaccounting_diagnostics[0].required_count, 0x3fu);
+}
+
+TEST(WaitcheckTest, Gfx950CounterParityCatalogsStrongerFunctionReturnWaitAsUnmodeled) {
+  constexpr uint8_t kTargetSreg = 26;
+  constexpr uint8_t kReturnSreg = 30;
+  constexpr uint8_t kLiteralOperand = 0xff;
+  constexpr uint8_t kInlineInt0 = 128;
+
+  std::vector<uint32_t> program;
+  program.push_back(build_s_getpc_b64(kTargetSreg, ROCJITSU_CODE_ARCH_CDNA4).value()); // 0x00.
+  program.push_back(build_s_add_u32(kTargetSreg, kTargetSreg, kLiteralOperand,
+                                    ROCJITSU_CODE_ARCH_CDNA4)
+                        .value()); // 0x04.
+  program.push_back(24);           // PC 0x04 -> helper 0x1c.
+  program.push_back(build_s_addc_u32(kTargetSreg + 1, kTargetSreg + 1, kInlineInt0,
+                                     ROCJITSU_CODE_ARCH_CDNA4)
+                        .value()); // 0x0c.
+  program.push_back(
+      build_s_swappc_b64(kReturnSreg, kTargetSreg, ROCJITSU_CODE_ARCH_CDNA4).value()); // 0x10.
+  program.push_back(0x7E040300u); // 0x14: v_mov_b32_e32 v2, v0.
+  program.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4).value()); // 0x18.
+  append_gfx950_buffer_load_dword_v0_v8_s0_offen(program);             // 0x1c helper.
+  append_gfx950_buffer_load_dword_v1_v8_s0_offen(program);             // 0x24.
+  append_gfx950_s_waitcnt_vmcnt_0(program);                            // 0x2c return wait.
+  program.push_back(build_sop1_encoding(ROCJITSU_CODE_ARCH_CDNA4, 0x1d, 0,
+                                        kReturnSreg)
+                        .value()); // 0x30 return.
+
+  const auto image =
+      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA4, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(report.counter_parity_exact, 0u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 1u);
+  EXPECT_EQ(report.counter_unmodeled_wait_observed, 1u);
+  ASSERT_EQ(report.counter_underaccounting_diagnostics.size(), 1u);
+  EXPECT_FALSE(report.counter_underaccounting_diagnostics[0].has_required_dependency);
+  EXPECT_EQ(report.counter_underaccounting_diagnostics[0].required_count, 0x3fu);
+}
+
 TEST(WaitcheckTest, Gfx950DoesNotTreatMfmaAccCdAccumulatorAsVgprUse) {
   std::vector<uint32_t> program;
   append_gfx950_ds_read_b128_v18_v12_offset64(program);
@@ -5155,6 +6421,24 @@ TEST(WaitcheckTest, AcceptsKmcntBeforeSendmsgRtnB32Use) {
 
   EXPECT_TRUE(report.supported);
   EXPECT_TRUE(report.diagnostics.empty());
+}
+
+TEST(WaitcheckTest, Gfx1201CounterParityForcesZeroForMixedKmcntEventKinds) {
+  std::vector<uint32_t> program;
+  append_inst(program, s_sendmsg_rtn_b32(4));
+  append_inst(program, s_barrier_signal_isfirst(0));
+  append_inst(program, sopp(71, 0)); // s_wait_kmcnt 0.
+  append_inst(program, s_mov_b32(8, 4));
+
+  WaitcheckOptions options;
+  options.check_counter_parity = true;
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4, options);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.passed()) << diagnostic_summary(report);
+  EXPECT_EQ(report.counter_parity_fields_checked, 1u);
+  EXPECT_EQ(report.counter_parity_exact, 1u);
+  EXPECT_EQ(report.counter_underaccounting_observed, 0u);
 }
 
 TEST(WaitcheckTest, Gfx1201RejectsPartialWaitForMixedKmcntEventKinds) {
