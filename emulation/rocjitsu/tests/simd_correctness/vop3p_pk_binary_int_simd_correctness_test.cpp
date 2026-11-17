@@ -3,7 +3,7 @@
 
 /// @file vop3p_pk_binary_int_simd_correctness_test.cpp
 /// @brief Bit-identity check (SIMD fast path vs scalar body) for the VOP3P
-/// packed-16 integer binary family wired into SIMD_VOP3P_PK_BINARY_INT on CDNA4.
+/// packed-16 integer binary family on CDNA4.
 /// Each (case, rot) runs TWICE in the same process -- once forcing the scalar
 /// body, once the SIMD fast path, with identical inputs/EXEC -- and the two
 /// 64-lane result arrays are asserted equal with EXPECT_EQ
@@ -23,7 +23,6 @@
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"

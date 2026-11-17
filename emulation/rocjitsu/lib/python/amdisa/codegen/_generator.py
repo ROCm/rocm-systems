@@ -7869,6 +7869,7 @@ class CodeGenerator:
             enc_name=enc_name,
             is_vop3=is_vop3,
             has_abs=has_abs,
+            uses_vop3_half_selectors=self._vop3_uses_half_selectors(inst),
             opsel_exprs=self._vop3p_opsel_exprs(),
             op_sel_hi_2_expr=self._op_sel_hi_2_expr(inst.enc_name),
             arch_name=self.isa_spec.arch_name.lower(),
@@ -18313,6 +18314,8 @@ class CodeGenerator:
                     VECTOR32_NAMES,
                     CDNA_INTEGER_ALIASES,
                     INTEGER_ARCHITECTURES,
+                    HALF_INTEGER_ARCHITECTURES,
+                    WIDEN16_NAMES,
                     CARRY32_NAMES,
                     WIDE_INTEGER_NAMES,
                     INTEGER16_NAMES,
@@ -18418,6 +18421,17 @@ class CodeGenerator:
                         or i.name in WIDENING_INTEGER_NAMES
                         or i.name in PACKED_INTEGER_NAMES
                         or i.name in INTEGER_DOT_NAMES
+                        for i in all_insts
+                    )
+                )
+                uses_vector_arith |= (
+                    self.isa_spec.arch_name in HALF_INTEGER_ARCHITECTURES
+                    and any(
+                        CDNA_INTEGER_ALIASES.get(i.name, i.name)
+                        in INTEGER16_NAMES
+                        | WIDENING_INTEGER_NAMES
+                        | PACKED_INTEGER_NAMES
+                        | WIDEN16_NAMES
                         for i in all_insts
                     )
                 )
