@@ -24,6 +24,23 @@ current backend topology; endpoint records can become stale. Separate sessions
 have independent driver identities. Sessions using
 `DriverContextLifetime::Process` reuse the native primary KFD context.
 
+`driver::linux_kfd::KfdConfiguration` owns the XNACK request and debugger
+registration options. Frontends assemble one complete value and pass it to
+`Session::configure`, which accepts a `DriverConfiguration` value, selects the
+installed driver by configuration type, and checks exclusive registry and
+driver ownership. The private `ConfigurableDriver` trait uses an associated
+configuration type to replace the driver's complete pending configuration
+before GPU activation. Each backend owns its options and validation, so
+KFD-specific data and native behavior remain in `linux_kfd`.
+Debugger registration descriptors preserve the frontend's unsafe obligation
+to keep the native record valid for the process lifetime.
+
+Activation applies required or preferred settings under the native context
+lock. `GpuDevice::xnack_enabled()` queries the effective mode through private
+provider dispatch; GPUs sharing a native KFD context share this mode. An absent
+option makes no native request, so it does not clear settings in an already
+active shared context.
+
 `DriverContextLifetime::Process` permits a process-owned driver context to
 survive session shutdown; `DriverContextLifetime::Session` requires the context
 and its bindings to be released with the session. `Session::destroy` requires
@@ -65,8 +82,9 @@ that operation. `memory::host` owns host allocations and reservations.
 - `session.rs` coordinates driver instances and their context lifetime;
   `topology/` holds passive endpoint and host topology, while `host/` groups
   the live profiling clock and cache recipes.
-- `driver.rs` defines private backend contracts; `driver/linux_kfd/` implements
-  the current GPU backend.
+- `driver.rs` defines configuration routing and private backend contracts;
+  `driver/linux_kfd/` implements the current GPU backend and owns its native
+  configuration types.
 - `device/` owns activated devices, events, GPU queues, copies, and profiling.
 - The Linux GPU event service owns KFD's first signal-page transaction across
   AMDF and HSA. Direct native queue owners retain frontend-supplied signal and
