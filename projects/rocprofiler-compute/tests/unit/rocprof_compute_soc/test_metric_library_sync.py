@@ -3,15 +3,16 @@
 
 """Check that the metric library matches the analysis configs, arch by arch.
 
-Until the cutover, the library copies the analysis configs:
+Until the cutover, the library is a copy of what the analysis configs show:
 
-- every equation of a panel row is a library formula, and every formula has a row;
-- every row has the unit of its metric;
-- every row peak is a peak of its metric, and every library peak has a row;
+- every equation a panel row shows is a library formula, and every formula is shown;
+- every row's unit is its metric's unit;
+- every row's peak is its metric's peak, and every library peak is shown;
 - the library reads the same counters as detect_counters();
 - the library variables equal get_build_in_vars().
 
-The check skips the roofline panel of an arch without a roofline benchmark (gfx908).
+An arch without a roofline benchmark (gfx908) never shows its roofline panel, so the
+check leaves that panel out.
 """
 
 from collections import defaultdict
@@ -28,7 +29,7 @@ from validate_metric_library import (
 )
 
 import config
-from rocprof_compute_soc.metric_library import loader
+from rocprof_compute_soc import metric_library
 from rocprof_compute_soc.soc_base import OmniSoC_Base, iter_analysis_config_metrics
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.utils_common import (
@@ -40,7 +41,7 @@ from utils.utils_counter_defs import get_build_in_vars, metric_value_keys
 
 
 class Row(NamedTuple):
-    """One equation of an analysis config row."""
+    """One equation an analysis config row shows."""
 
     legacy_id: str
     label: str
@@ -49,16 +50,17 @@ class Row(NamedTuple):
     unit: Optional[str]
 
 
-# Main equation columns, in order of preference.
+# A row's equation comes from the first of these columns it has; a row with none
+# shows one equation in each of its table's value columns.
 MAIN_FORMS = ("avg", "value", "expr")
-# Row value columns read as fields, not as equations.
+# Value columns that Row reads separately rather than as equations.
 ROW_FIELDS = ("unit", "peak")
-# Kernel time divisors in seconds (Bytes/s rows) and in nanoseconds (GB/s rows).
+# Time in seconds (Bytes/s rows) and in nanoseconds (GB/s).
 SECONDS_SCALE = "/(SUM(End_Timestamp-Start_Timestamp)/1e9)"
 NANOSECONDS = "/SUM(End_Timestamp-Start_Timestamp)"
-# Metric unit -> row unit when the row divides by seconds.
+# Metric unit -> the unit of a row that shows the metric in seconds.
 SECONDS_SCALE_UNITS = {"GB/s": "Bytes/s"}
-# Roofline L2 bandwidth, with the bytes per request as a format field.
+# The roofline's L2 bandwidth at its bytes per request (64 up to gfx90a, then 128).
 ROOFLINE_L2_BW_EQUATION = (
     "{} * SUM(TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum "
     "+ TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum + TCP_TCC_READ_REQ_sum) "
@@ -68,11 +70,6 @@ ROOFLINE_L2_BW = (
     "L2 Cache Bandwidth",
     "vl1d.l2_bw",
     ROOFLINE_L2_BW_EQUATION.format(64),
-)
-ROOFLINE_L2_BW_128B = (
-    "L2 Cache Bandwidth",
-    "vl1d.l2_bw",
-    ROOFLINE_L2_BW_EQUATION.format(128),
 )
 ROOFLINE_LDS_BW = (
     "LDS Bandwidth",
@@ -86,48 +83,23 @@ PIPELINE_MFMA_UTIL = (
     "100 * SUM(SQ_VALU_MFMA_BUSY_CYCLES) "
     "/ (4 * SUM($cu_per_gpu * $GRBM_GUI_ACTIVE_PER_XCD))",
 )
-# Rows with another form of a metric formula (positional id -> label, metric id,
-# row equation).
+# Rows that write a metric's formula differently (positional id -> label, metric id,
+# row equation). A row whose time is in seconds needs no entry: it shows a GB/s formula
+# scaled by 1e9, and its unit must say Bytes/s.
 DISPLAY_VARIANTS = {
     "gfx90a": {
         "4.1.9": ROOFLINE_L2_BW,
         "4.1.11": ROOFLINE_LDS_BW,
         "11.2.7": PIPELINE_MFMA_UTIL,
     },
-    "gfx942": {
-        "4.1.10": ROOFLINE_L2_BW_128B,
-        "4.1.12": ROOFLINE_LDS_BW,
-        "11.2.7": PIPELINE_MFMA_UTIL,
-        "16.3.5": (
-            "Cache Hit Rate",
-            "vl1d.hit_rate",
-            "100 * SUM(NOISE_CLAMP(TCP_TOTAL_CACHE_ACCESSES_sum - (TCP_TCC_READ_REQ_sum"
-            " + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum "
-            "+ TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum), TCP_TOTAL_CACHE_ACCESSES_sum)) "
-            "/ SUM(TCP_TOTAL_CACHE_ACCESSES_sum)",
-        ),
-    },
-    "gfx950": {
-        "2.1.23": (
-            "L2-Fabric Read BW",
-            "fabric.rd_bw",
-            "SUM(128 * TCC_EA0_RDREQ_128B_sum + 64 * TCC_EA0_RDREQ_64B_sum "
-            "+ 32 * TCC_EA0_RDREQ_32B_sum) / SUM(End_Timestamp - Start_Timestamp)",
-        ),
-        "4.1.12": ROOFLINE_L2_BW_128B,
-        "4.1.14": ROOFLINE_LDS_BW,
-        "11.2.9": PIPELINE_MFMA_UTIL,
-    },
 }
-# Rows with a different unit from their metric (positional id -> label, unit).
+# Rows whose unit differs from their metric's (positional id -> label, unit).
 CDNA_UNIT_VARIANTS = {"7.1.8": ("LDS Allocation", "Bytes")}
-UNIT_VARIANTS = {
-    arch: CDNA_UNIT_VARIANTS for arch in ("gfx908", "gfx90a", "gfx942", "gfx950")
-}
+UNIT_VARIANTS = {arch: CDNA_UNIT_VARIANTS for arch in ("gfx908", "gfx90a")}
 
 
 def member_arch(arch: str) -> str:
-    """Return a GPU arch with the analysis configs of arch (gfx1150 for gfx115x)."""
+    """Return a GPU arch that uses arch's analysis configs (gfx1150 for gfx115x)."""
     return next(
         gpu_arch
         for gpu_arch in sorted(mi_gpu_specs.get_gpu_series_dict())
@@ -136,14 +108,14 @@ def member_arch(arch: str) -> str:
 
 
 def unshown_file_ids(arch: str) -> Set[str]:
-    """Return the ids of analysis config files hidden on arch."""
+    """Return the ids of the analysis config files arch never shows."""
     if member_arch(arch) in mi_gpu_specs.get_roofline_archs():
         return set()
     return {f"{ROOFLINE_PANEL_ID:04d}"}
 
 
 def row_forms(table: Dict[str, Any], row: Dict[str, Any]) -> List[str]:
-    """Return the columns of row with an equation."""
+    """Return the columns of row that show an equation."""
     main_forms = [form for form in MAIN_FORMS if form in row]
     if main_forms:
         return main_forms[:1]
@@ -153,9 +125,9 @@ def row_forms(table: Dict[str, Any], row: Dict[str, Any]) -> List[str]:
 
 
 def read_rows(arch: str) -> List[Row]:
-    """Return every row equation in the analysis configs of arch.
+    """Return each equation a row of arch's analysis configs shows.
 
-    The placeholder_range key of a per-channel table adds no row.
+    A per-channel table's last key, placeholder_range, shows no column and adds no row.
     """
     rows = []
     for item in iter_analysis_config_metrics(
@@ -176,22 +148,22 @@ def read_rows(arch: str) -> List[Row]:
 
 
 def in_seconds(row: Row) -> bool:
-    """Return True if row divides by the kernel time in seconds (a Bytes/s row)."""
+    """Return whether a row divides by the kernel time in seconds (a Bytes/s row)."""
     return row.equation is not None and row.equation.endswith(SECONDS_SCALE)
 
 
 def gb_per_second(row: Row) -> Optional[str]:
-    """Return the equation of row in GB/s, with the kernel time in nanoseconds."""
+    """Return a row's equation, with time in seconds turned into nanoseconds (GB/s)."""
     if in_seconds(row):
         return row.equation[: -len(SECONDS_SCALE)] + NANOSECONDS
     return row.equation
 
 
 def row_peak(row: Row, peak: str) -> str:
-    """Return a GB/s library peak in the units of row.
+    """Return a library peak (GB/s) as row shows it.
 
-    A Bytes/s row writes "<MHz term> / 1000" as "<MHz term> * 1e6", and a measured peak
-    "$<ceiling>_empirical_peak" as "$<ceiling>_empirical_peak * 1e9".
+    A Bytes/s row shows a theoretical "<MHz term> / 1000" as "<MHz term> * 1e6", and a
+    measured "$<ceiling>_empirical_peak" as "... * 1e9".
     """
     if not in_seconds(row):
         return peak
@@ -200,10 +172,12 @@ def row_peak(row: Row, peak: str) -> str:
     return f"{peak}*1e9"
 
 
-def row_metric_id(row: Row, library: loader.MetricLibrary, arch: str) -> Optional[str]:
-    """Return the metric id of row, or None if no metric matches.
+def row_metric_id(
+    row: Row, library: metric_library.MetricLibrary, arch: str
+) -> Optional[str]:
+    """Return the id of the metric a row shows, or None if it shows none.
 
-    A row with the name of a SHARED_FORMULA_IDS id as its label gets that id.
+    A row whose label names an id of SHARED_FORMULA_IDS shows that id.
     """
     variants = DISPLAY_VARIANTS.get(arch, {})
     if row.legacy_id in variants:
@@ -226,7 +200,7 @@ def row_metric_id(row: Row, library: loader.MetricLibrary, arch: str) -> Optiona
 
 
 def make_soc(arch: str, membw_analysis: bool, filter_blocks: List[str]) -> OmniSoC_Base:
-    """Return an OmniSoC_Base for arch, with no GPU needed."""
+    """Return an OmniSoC_Base that reads the analysis configs without a GPU."""
     args = SimpleNamespace(
         config_dir=config.analysis_configs_dir,
         filter_blocks=filter_blocks,
@@ -247,7 +221,7 @@ def make_soc(arch: str, membw_analysis: bool, filter_blocks: List[str]) -> OmniS
 
 
 def shown_blocks(arch: str) -> List[str]:
-    """Return the -b blocks for the shown files of arch, or none when all are shown."""
+    """Return the -b blocks that select every file arch shows; none selects all."""
     unshown = unshown_file_ids(arch)
     if not unshown:
         return []
@@ -258,11 +232,13 @@ def shown_blocks(arch: str) -> List[str]:
     return [str(int(file_id) // 100) for file_id in sorted(file_ids - unshown)]
 
 
-@pytest.fixture(scope="module", params=list(loader.METRIC_LIBRARY_PARENT_ARCH))
+@pytest.fixture(scope="module", params=list(metric_library.METRIC_LIBRARY_PARENT_ARCH))
 def arch_view(request) -> SimpleNamespace:
     """One arch's library, its analysis config rows and the metric id of each row."""
     arch = request.param
-    library = loader.MetricLibrary.load(loader.default_metric_library_dir(), arch)
+    library = metric_library.MetricLibrary.load(
+        metric_library.default_metric_library_dir(), arch
+    )
     rows = read_rows(arch)
     return SimpleNamespace(
         arch=arch,
@@ -317,8 +293,8 @@ def test_row_units_are_metric_units(arch_view):
 
 
 def test_row_peaks_are_metric_peaks(arch_view):
-    """Skip measured row peaks with an unmeasured ceiling on the arch; an unknown
-    ceiling still fails."""
+    """A row's measured peak is skipped where the benchmark does not measure that
+    ceiling on the arch; a ceiling that is no roofline.csv column is still an error."""
     unmeasured = mi_gpu_specs.get_all_roofline_columns() - arch_ceilings(arch_view.arch)
     errors = []
     shown_fields = defaultdict(set)

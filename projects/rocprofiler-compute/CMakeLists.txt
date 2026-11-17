@@ -773,10 +773,10 @@ add_test(
 )
 
 add_test(
-    NAME test_metric_library_loader
+    NAME test_metric_library
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_metric_library_loader.xml
-        ${COV_OPTION} tests/unit/rocprof_compute_soc/metric_library/test_loader.py
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_metric_library.xml
+        ${COV_OPTION} tests/unit/rocprof_compute_soc/test_metric_library.py
         ${WORKING_DIR_OPTION}
 )
 
@@ -786,8 +786,7 @@ if(NOT TEST_FROM_INSTALL)
         NAME test_metric_library_sync
         COMMAND
             ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_metric_library_sync.xml
-            ${COV_OPTION}
-            tests/unit/rocprof_compute_soc/metric_library/test_metric_library_sync.py
+            ${COV_OPTION} tests/unit/rocprof_compute_soc/test_metric_library_sync.py
             ${WORKING_DIR_OPTION}
     )
 endif()
@@ -1152,7 +1151,7 @@ if(${ENABLE_COVERAGE})
         test_evaluation_pipeline
         test_metric_evaluator
         test_utils_counter_defs
-        test_metric_library_loader
+        test_metric_library
         test_parser
         test_argparser
         test_L1_cache_counters
