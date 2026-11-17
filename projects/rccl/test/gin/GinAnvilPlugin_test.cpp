@@ -808,7 +808,8 @@ TEST_F(GinAnvilPluginTest, CloseColl_AfterSignalBind) {
 }
 
 // Fabric registration is collective, so when a peer did not opt in
-// (RCCL_GIN_ANVIL_FABRIC_MEM) this rank registers through LSA with it.
+// (RCCL_GIN_ANVIL_FABRIC_MEM) or is not capable, this rank registers through
+// LSA with it.
 TEST_F(GinAnvilPluginTest, Connect_FabricMemNeedsEveryRank) {
   GinAnvilPluginStubs::SetUseFabricMem(true);
   setupFabricComm(2);
@@ -835,10 +836,10 @@ TEST_F(GinAnvilPluginTest, Connect_FabricMemNeedsEveryRank) {
   plugin_.finalize(ictx);
 }
 
-// The vote runs wherever topology allows fabric memory, including on a rank
-// that did not opt in, so ranks that did are not left waiting in it. Elsewhere
-// (MI300, MI350, no MNNVL) connect adds no collective.
-TEST_F(GinAnvilPluginTest, Connect_FabricMemVoteOnlyWhereCapable) {
+// Ranks can disagree on capability (cuMem, clique), so the vote cannot depend on
+// it: every connect runs the same collectives whether or not this rank is
+// capable, and a rank that is not capable votes no.
+TEST_F(GinAnvilPluginTest, Connect_FabricMemVoteRunsWhateverTheCapability) {
   setupFabricComm(2);
   void* ictx = nullptr;
   initCtx(&ictx);
@@ -851,7 +852,7 @@ TEST_F(GinAnvilPluginTest, Connect_FabricMemVoteOnlyWhereCapable) {
     calls[capable] = GinAnvilPluginStubs::GetBootstrapAllGatherCalls() - before;
     EXPECT_EQ(plugin_.closeColl(coll), ncclSuccess);
   }
-  EXPECT_EQ(calls[1], calls[0] + 1);
+  EXPECT_EQ(calls[1], calls[0]);
   plugin_.finalize(ictx);
 }
 

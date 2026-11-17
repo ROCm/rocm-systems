@@ -67,7 +67,16 @@ ncclResult_t ncclTopoGetLocalGinDevs(struct ncclComm*, int* localGinDevs, int* l
   return ncclSuccess;
 }
 
-ncclResult_t bootstrapAllGather(void*, void*, int) { return ncclSuccess; }
+// Slots for the next int allgather only; any other allgather leaves the buffer
+// as the caller filled it.
+static std::vector<int> g_nextIntAllGather;
+ncclResult_t bootstrapAllGather(void*, void* data, int size) {
+  if (size == static_cast<int>(sizeof(int)) && !g_nextIntAllGather.empty()) {
+    std::memcpy(data, g_nextIntAllGather.data(), g_nextIntAllGather.size() * sizeof(int));
+    g_nextIntAllGather.clear();
+  }
+  return ncclSuccess;
+}
 
 ncclTeam_t ncclTeamWorld(ncclComm_t comm) { return {comm->nRanks, comm->rank, 1}; }
 ncclTeam_t ncclTeamRail(ncclComm_t comm) { return {comm->nRanks, comm->rank, 1}; }
@@ -84,7 +93,9 @@ ncclResult_t ncclGinBarrierSizeRequirement(struct ncclComm*, struct ncclGinBacke
 }
 
 static bool g_anvilFabricMemCapable = false;
+static bool g_anvilFabricMemOptIn = false;
 bool ginAnvilFabricMemCapable(struct ncclComm*) { return g_anvilFabricMemCapable; }
+bool ginAnvilUseFabricMem(struct ncclComm*) { return g_anvilFabricMemCapable && g_anvilFabricMemOptIn; }
 
 #include "fakes/gin_vtable_fake.h"
 
@@ -108,6 +119,8 @@ class GinHostFinalizeTest : public ::testing::Test {
     gin_ = fake_.vtable();
     g_localGinDevCount = 2;
     g_anvilFabricMemCapable = false;
+    g_anvilFabricMemOptIn = false;
+    g_nextIntAllGather.clear();
     // Both are already value-initialized (make_unique, and `ncclComm comm_{}`);
     // do not memset either. ginState embeds std::thread / mutex / atomic, and
     // ncclComm embeds ncclRmaState, which holds a thread, mutex and condvar.
@@ -325,7 +338,8 @@ TEST_F(GinHostFinalizeTest, DeregisterSkipsWindowStampedByAnotherGeneration) {
 // owner's bootstrap, so there a child that does not span the owner's ranks in
 // order would wait alone. That includes a 1-rank child, which is not
 // fabric-capable itself once the owner has voted fabric memory on. Other
-// backends, and Anvil SDMA without that vote, keep the develop behavior.
+// backends, and Anvil SDMA without the opt-in or that vote, keep the develop
+// behavior.
 class GinHostSplitShareTest : public GinHostFinalizeTest {
  protected:
   std::unique_ptr<ncclComm> child_ = std::make_unique<ncclComm>();
@@ -334,6 +348,7 @@ class GinHostSplitShareTest : public GinHostFinalizeTest {
   void useAnvilFabric() {
     backend()->ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
     g_anvilFabricMemCapable = true;
+    g_anvilFabricMemOptIn = true;
   }
 
   void makeChild(int ownerNRanks, std::vector<int> topParentRanks) {
@@ -423,6 +438,7 @@ TEST_F(GinHostSplitShareTest, AnvilFabric_FullRankSetChildConnects) {
 // multi-node child, so rejecting here would fail the split itself.
 TEST_F(GinHostSplitShareTest, OtherBackend_SubsetChildConnects) {
   g_anvilFabricMemCapable = true;
+  g_anvilFabricMemOptIn = true;
   makeChild(/*ownerNRanks=*/2, {1});
 
   expectConnectsThroughOwnerContext();
@@ -436,7 +452,38 @@ TEST_F(GinHostSplitShareTest, AnvilWithoutFabricMem_SubsetChildConnects) {
   expectConnectsThroughOwnerContext();
 }
 
-// A 1-rank child never sets MNNVL, so ginAnvilFabricMemCapable is false. After
+// MI450 with MNNVL, one clique and cuMem is capable on default runs. Without
+// RCCL_GIN_ANVIL_FABRIC_MEM nothing registers through fabric memory, so a
+// subset child keeps the develop behavior.
+TEST_F(GinHostSplitShareTest, AnvilCapableWithoutOptIn_SubsetChildConnects) {
+  backend()->ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
+  g_anvilFabricMemCapable = true;
+  makeChild(/*ownerNRanks=*/2, {1});
+
+  expectConnectsThroughOwnerContext();
+  expectOwnerConnectionsUntouched();
+}
+
+TEST_F(GinHostSplitShareTest, AnvilCapableWithoutOptIn_ReorderedChildConnects) {
+  backend()->ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
+  g_anvilFabricMemCapable = true;
+  makeChild(/*ownerNRanks=*/2, {1, 0});
+
+  expectConnectsThroughOwnerContext();
+}
+
+// The opt-in is per rank. A peer that opted in would reject the child, so this
+// rank, which did not, must reject it too rather than wait for that peer.
+TEST_F(GinHostSplitShareTest, AnvilFabric_PeerOptInRejectsTheWholeChild) {
+  backend()->ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
+  g_anvilFabricMemCapable = true;
+  makeChild(/*ownerNRanks=*/2, {1, 0});
+  g_nextIntAllGather = {0, 1};
+
+  expectRejectedWithoutConnecting();
+}
+
+// A 1-rank child never sets MNNVL, so ginAnvilUseFabricMem is false. After
 // the owner has voted fabric registration on, the child still registers
 // through that context and would allgather alone.
 TEST_F(GinHostSplitShareTest, AnvilFabric_OneRankChildIsRejectedAfterOwnerVote) {

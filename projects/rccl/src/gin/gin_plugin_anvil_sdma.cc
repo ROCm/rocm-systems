@@ -438,21 +438,23 @@ static ncclResult_t ginAnvilConnect(void* ctx, void* handles[], int nranks, int 
     return ncclSystemError;
   }
 
-  // Fabric registration is collective, so every rank must take the same path;
-  // a rank without the opt-in keeps all of them on LSA.
-  if (ginAnvilFabricMemCapable(cctx->comm)) {
-    const int localFabricMem = ginAnvilUseFabricMem(cctx->comm) ? 1 : 0;
-    int allFabricMem = 0;
-    if (ncclGinBootstrapAgreeAll(cctx->comm, localFabricMem, &allFabricMem) != ncclSuccess) {
-      WARN("GIN anvil-sdma: fabric registration vote failed");
-      delete cctx;
-      return ncclSystemError;
-    }
-    if (localFabricMem && !allFabricMem) {
-      WARN("GIN anvil-sdma: RCCL_GIN_ANVIL_FABRIC_MEM=1 is not set on every rank; registering windows through LSA");
-    }
-    cctx->fabricMem = allFabricMem != 0;
+  // Fabric registration is collective, so every rank must take the same path.
+  // Every connect votes, whatever this rank's capability: gin_anvil_sdma_create
+  // allgathers on the same bootstrap below, so the vote asks no rank to join a
+  // collective it would otherwise skip. A rank that is not capable (topology,
+  // cuMem) or did not opt in votes no and keeps all of them on LSA.
+  const int localFabricMem = ginAnvilUseFabricMem(cctx->comm) ? 1 : 0;
+  int allFabricMem = 0;
+  if (ncclGinBootstrapAgreeAll(cctx->comm, localFabricMem, &allFabricMem) != ncclSuccess) {
+    WARN("GIN anvil-sdma: fabric registration vote failed");
+    delete cctx;
+    return ncclSystemError;
   }
+  if (localFabricMem && !allFabricMem) {
+    WARN("GIN anvil-sdma: fabric memory is not enabled on every rank (RCCL_GIN_ANVIL_FABRIC_MEM=1, MNNVL, cuMem); "
+         "registering windows through LSA");
+  }
+  cctx->fabricMem = allFabricMem != 0;
 
   int numCh = ginAnvilSdmaNumChannels();
 
