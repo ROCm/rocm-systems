@@ -76,8 +76,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCheckRuntimeDebugSupport(void) {
   }
 
   for (auto&& device : dxg_topology->wdevices_) {
-    if (!device->IsAqlSupported())
+#if defined(__linux__)
+    if (!device->IsAqlSupported() || !device->IsHwsEnabled(device->GetComputeEngine()))
       return HSAKMT_STATUS_NOT_SUPPORTED;
+#endif
 
     if (Wkmi::KmdDbgVersion version;
         !device->GetKmdDbgVersion(&version) ||
