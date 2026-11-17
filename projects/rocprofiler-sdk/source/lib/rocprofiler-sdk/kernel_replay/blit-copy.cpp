@@ -589,6 +589,12 @@ packet_info::wait()
             HSA_WAIT_STATE_BLOCKED);
     }
 
+    // The packets may still be writing the argument buffer, the workspace and the snapshot, so
+    // none of them can be released for another blit or the application to reuse.
+    ROCP_FATAL_IF(value >= 1)
+        << "kernel replay: an internal blit kernel did not finish after ~60s. Aborting, since it "
+           "may still be writing memory that would otherwise be reused";
+
     m_impl->status    = (value == 0) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
     m_impl->completed = true;
     return m_impl->status;

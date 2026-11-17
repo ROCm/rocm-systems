@@ -288,7 +288,8 @@ Limitations
   coordination.
 * **Async copies are not fenced.** ``hsa_amd_memory_async_copy`` (or HIP async memcpy) on another
   thread can mutate device memory during the replay window.
-* **Stuck drains abort the process** rather than hanging (roughly 60 s bounds inside the window).
+* **Stuck drains and internal blit kernels abort the process** rather than hanging (roughly 60 s
+  bounds inside the window).
 * **Snapshot memory** as large as the tracked device footprint, in device and pinned host memory by
   default (see :ref:`kernel-replay-snapshot-placement`), and kept for later replays unless the
   tool limits the snapshot to one memory. A snapshot that does not fit is declined and the dispatch

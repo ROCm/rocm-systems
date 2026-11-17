@@ -28,8 +28,8 @@ device memory between those executions so each pass observes identical inputs. I
      or because HSA would not enumerate a loaded executable's module-scope variables.
    * A failed device-memory **restore** aborts the process. Once part of the snapshot has been
      written back, continuing would leave the application's memory in a mixed state.
-   * A drain that does not complete within roughly 60 seconds aborts the process rather than
-     hanging.
+   * A drain, or an internal blit kernel, that does not complete within roughly 60 seconds aborts
+     the process rather than hanging.
 
 For the configure / ``replay_pass_count`` / local-context how-to, see :ref:`using-kernel-replay`. For
 pass-count semantics, localized context control, and source maps, see
