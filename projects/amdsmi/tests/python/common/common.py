@@ -836,7 +836,11 @@ def run_test_dir(subdir, title, top_level_dir):
     )
     # testNamePatterns is Python 3.7+; 3.6 ignores it and would run every test.
     if k_pattern and sys.version_info < (3, 7):
-        suite = _filter_suite(suite, lambda test_id: fnmatch.fnmatchcase(test_id, f"*{k_pattern}*"))
+        suite = _filter_suite(
+            suite,
+            lambda test_id: test_id.startswith("unittest.loader.")
+            or fnmatch.fnmatchcase(test_id, f"*{k_pattern}*"),
+        )
 
     # -x/--exclude drops any test whose id contains the substring (the inverse of
     # -k), e.g. run everything but the perf suites with `-x performance`.
