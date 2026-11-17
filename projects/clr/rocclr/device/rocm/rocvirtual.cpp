@@ -1613,6 +1613,10 @@ void VirtualGPU::LegacySignalTracker::NoteFenceUse(uint64_t fence_seq) {
 
 // ================================================================================================
 void VirtualGPU::LegacySignalTracker::NoteQueueChange() {
+  // The pins of the last WaitingSignal call stay open until the next one, so between submissions
+  // their consumers are all published, on the queue that is being left. Close them first, which
+  // moves the pins of AQL waiters that no fence followed to unfenced_pins_.
+  NoteWaitsSubmitted();
   // The HW queue may change while the old one still holds the AQL consumers of these pins, as in
   // ReacquireQueueExcluding(). A fence use on the new queue doesn't order them, so they are kept
   // until the tracker is destroyed, like the pins of RetiringSignalTracker from an earlier queue.
@@ -1623,7 +1627,9 @@ void VirtualGPU::LegacySignalTracker::NoteQueueChange() {
 // ================================================================================================
 void VirtualGPU::LegacySignalTracker::NoteQueueDrained() {
   // The queue's last packet completed, and packets are processed in order, so every consumer of
-  // a pin awaiting a fence passed its wait
+  // a pin awaiting a fence passed its wait, including those of the last WaitingSignal call, which
+  // closing its pins moves to unfenced_pins_
+  NoteWaitsSubmitted();
   for (ProfilingSignal* signal : unfenced_pins_) {
     signal->release();
   }
