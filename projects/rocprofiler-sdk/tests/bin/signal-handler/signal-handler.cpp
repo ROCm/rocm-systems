@@ -142,6 +142,39 @@ run_kernels(const char* label)
     fprintf(stderr, "  %s PID=%d: completed %d iterations\n", label, getpid(), iter);
 }
 
+bool
+wait_for_children_to_exit_successfully(const pid_t* children, int child_count)
+{
+    bool all_children_succeeded = true;
+
+    for(int i = 0; i < child_count; ++i)
+    {
+        int   status = 0;
+        pid_t waited = 0;
+        do
+        {
+            waited = waitpid(children[i], &status, 0);
+        } while(waited < 0 && errno == EINTR);
+
+        if(waited < 0)
+        {
+            fprintf(
+                stderr, "waitpid(%d) failed: %s\n", static_cast<int>(children[i]), strerror(errno));
+            all_children_succeeded = false;
+        }
+        else if(!WIFEXITED(status) || WEXITSTATUS(status) != 0)
+        {
+            fprintf(stderr,
+                    "Child PID=%d did not exit successfully (status=%d)\n",
+                    static_cast<int>(children[i]),
+                    status);
+            all_children_succeeded = false;
+        }
+    }
+
+    return all_children_succeeded;
+}
+
 // ============================================================================
 // GOOD CASE modes: app handles signals, coordinates shutdown
 // ============================================================================
@@ -174,6 +207,11 @@ mode_good_fork_exec(const char* self_path)
     for(int i = 0; i < NUM_CHILDREN; i++)
     {
         pid_t pid = fork();
+        if(pid < 0)
+        {
+            fprintf(stderr, "fork() failed while launching child %d: %s\n", i, strerror(errno));
+            return 1;
+        }
         if(pid == 0)
         {
             execl(self_path, self_path, "--single-process", "--app-signal-handler", nullptr);
@@ -189,8 +227,7 @@ mode_good_fork_exec(const char* self_path)
 
     run_kernels("parent");
 
-    for(int i = 0; i < NUM_CHILDREN; i++)
-        waitpid(children[i], nullptr, 0);
+    if(!wait_for_children_to_exit_successfully(children, NUM_CHILDREN)) return 1;
 
     emit_roctx_marker("exit_marker parent fork-exec ppid:%d pid:%d", getppid(), getpid());
     fprintf(stderr, "Parent PID=%d: clean exit\n", getpid());
@@ -208,6 +245,11 @@ mode_good_spawn(const char* self_path)
     for(int i = 0; i < NUM_CHILDREN; i++)
     {
         pid_t pid = vfork();
+        if(pid < 0)
+        {
+            fprintf(stderr, "vfork() failed while launching child %d: %s\n", i, strerror(errno));
+            return 1;
+        }
         if(pid == 0)
         {
             execl(self_path, self_path, "--single-process", "--app-signal-handler", nullptr);
@@ -223,8 +265,7 @@ mode_good_spawn(const char* self_path)
 
     run_kernels("parent");
 
-    for(int i = 0; i < NUM_CHILDREN; i++)
-        waitpid(children[i], nullptr, 0);
+    if(!wait_for_children_to_exit_successfully(children, NUM_CHILDREN)) return 1;
 
     emit_roctx_marker("exit_marker parent spawn ppid:%d pid:%d", getppid(), getpid());
     fprintf(stderr, "Parent PID=%d: clean exit\n", getpid());
@@ -367,6 +408,11 @@ mode_bad_fork_exec(const char* self_path)
     for(int i = 0; i < NUM_CHILDREN; i++)
     {
         pid_t pid = fork();
+        if(pid < 0)
+        {
+            fprintf(stderr, "fork() failed while launching child %d: %s\n", i, strerror(errno));
+            return 1;
+        }
         if(pid == 0)
         {
             execl(self_path, self_path, "--single-process", "--no-app-signal-handler", nullptr);
@@ -377,8 +423,7 @@ mode_bad_fork_exec(const char* self_path)
 
     run_kernels("parent");
 
-    for(int i = 0; i < NUM_CHILDREN; i++)
-        waitpid(children[i], nullptr, 0);
+    if(!wait_for_children_to_exit_successfully(children, NUM_CHILDREN)) return 1;
 
     emit_roctx_marker("exit_marker parent fork-exec ppid:%d pid:%d", getppid(), getpid());
     fprintf(stderr, "Parent PID=%d: exit\n", getpid());
@@ -396,6 +441,11 @@ mode_bad_spawn(const char* self_path)
     for(int i = 0; i < NUM_CHILDREN; i++)
     {
         pid_t pid = vfork();
+        if(pid < 0)
+        {
+            fprintf(stderr, "vfork() failed while launching child %d: %s\n", i, strerror(errno));
+            return 1;
+        }
         if(pid == 0)
         {
             execl(self_path, self_path, "--single-process", "--no-app-signal-handler", nullptr);
@@ -406,8 +456,7 @@ mode_bad_spawn(const char* self_path)
 
     run_kernels("parent");
 
-    for(int i = 0; i < NUM_CHILDREN; i++)
-        waitpid(children[i], nullptr, 0);
+    if(!wait_for_children_to_exit_successfully(children, NUM_CHILDREN)) return 1;
 
     emit_roctx_marker("exit_marker parent spawn ppid:%d pid:%d", getppid(), getpid());
     fprintf(stderr, "Parent PID=%d: exit\n", getpid());
