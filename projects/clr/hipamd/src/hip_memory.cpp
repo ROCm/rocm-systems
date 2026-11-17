@@ -2226,6 +2226,29 @@ hipError_t validateImageObject(hipArray_t array, amd::Coord3D& origin, amd::Coor
   return hipSuccess;
 }
 
+// ================================================================================================
+// A VMM mapping is a sub-buffer of its reserved VA range, and other mappings of the same range
+// can follow it back to back. Returns the size of the memory object or, for a VMM mapping, the
+// size of the mapping plus the mappings that directly follow it in the same range. The walk stops
+// as soon as `required` bytes are covered.
+static size_t getMappedSize(amd::Memory* memory, size_t required) {
+  size_t mapped_size = memory->getSize();
+  if (memory->parent() == nullptr || !(memory->getMemFlags() & CL_MEM_VA_RANGE_AMD)) {
+    return mapped_size;
+  }
+  amd::Memory* mapping = memory;
+  while (mapped_size < required) {
+    address next_ptr = reinterpret_cast<address>(mapping->getSvmPtr()) + mapping->getSize();
+    amd::Memory* next = amd::MemObjMap::FindMemObj(next_ptr);
+    if (next == nullptr || next->parent() != memory->parent() || next->getSvmPtr() != next_ptr) {
+      break;
+    }
+    mapped_size += next->getSize();
+    mapping = next;
+  }
+  return mapped_size;
+}
+
 hipError_t validateMemoryObject(const void* ptr, bool isDeviceMemory, amd::Coord3D& origin,
                                 amd::Coord3D& copyRegion, size_t rowPitch, size_t slicePitch,
                                 amd::BufferRect& rect) {
@@ -2247,7 +2270,13 @@ hipError_t validateMemoryObject(const void* ptr, bool isDeviceMemory, amd::Coord
 
   amd::Coord3D start(rect.start_, 0, 0);
   amd::Coord3D size(rect.end_, 1, 1);
-  if (memory && !memory->validateRegion(start, size)) {
+  if (memory && memory->parent() && (memory->getMemFlags() & CL_MEM_VA_RANGE_AMD)) {
+    // VMM mapping: the region may continue into the next mappings of the reserved range
+    size_t region_end = offset + rect.start_ + rect.end_;
+    if (getMappedSize(memory, region_end) < region_end) {
+      return hipErrorInvalidValue;
+    }
+  } else if (memory && !memory->validateRegion(start, size)) {
     return hipErrorInvalidValue;
   }
 
@@ -2801,7 +2830,9 @@ hipError_t ihipMemcpy3D_validate(const hipMemcpy3DParms* p) {
       const auto& dstUsrData = dstPtrMemObj->getUserData();
       //  dst ptr out of bound cases for linear memory
       if (dstUsrData.pitch_ == 0 || dstUsrData.height_ == 0 || dstUsrData.depth_ == 0) {
-        auto dstDepth = dstPtrMemObj->getSize() / (p->dstPtr.xsize * p->dstPtr.ysize);
+        size_t dstSize = getMappedSize(
+            dstPtrMemObj, p->dstPtr.pitch * p->dstPtr.ysize * (p->dstPos.z + p->extent.depth));
+        auto dstDepth = dstSize / (p->dstPtr.xsize * p->dstPtr.ysize);
         if ((p->dstPtr.xsize * (p->dstPtr.ysize - p->dstPos.y) * (dstDepth - p->dstPos.z)) <
             totalExtentBytes) {
           return hipErrorInvalidValue;
@@ -2817,7 +2848,9 @@ hipError_t ihipMemcpy3D_validate(const hipMemcpy3DParms* p) {
       const auto& srcUsrData = srcPtrMemObj->getUserData();
       //  src ptr out of bound cases for linear memory
       if (srcUsrData.pitch_ == 0 || srcUsrData.height_ == 0 || srcUsrData.depth_ == 0) {
-        auto srcDepth = srcPtrMemObj->getSize() / (p->srcPtr.xsize * p->srcPtr.ysize);
+        size_t srcSize = getMappedSize(
+            srcPtrMemObj, p->srcPtr.pitch * p->srcPtr.ysize * (p->srcPos.z + p->extent.depth));
+        auto srcDepth = srcSize / (p->srcPtr.xsize * p->srcPtr.ysize);
         if ((p->srcPtr.xsize * (p->srcPtr.ysize - p->srcPos.y) * (srcDepth - p->srcPos.z)) <
             totalExtentBytes) {
           return hipErrorInvalidValue;
@@ -3876,7 +3909,7 @@ hipError_t ihipMemset3D_validate(hipPitchedPtr pitchedDevPtr, amd::Memory* memor
     return hipErrorInvalidValue;
   }
   // Return error if sizeBytes passed to memcpy is more than the actual size allocated
-  if (sizeBytes > (memory->getSize() - offset)) {
+  if (sizeBytes > (getMappedSize(memory, offset + sizeBytes) - offset)) {
     return hipErrorInvalidValue;
   }
   if (pitchedDevPtr.pitch == memory->getUserData().pitch_) {
