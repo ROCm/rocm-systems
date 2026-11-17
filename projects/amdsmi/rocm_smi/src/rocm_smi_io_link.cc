@@ -327,20 +327,23 @@ int IOLink::Initialize(void) {
     return ret;
   }
 
-  ret = get_property_value(kIOLinkPropTYPEStr, reinterpret_cast<uint64_t*>(&type_));
+  ret = get_property_value(kIOLinkPropTYPEStr, &tmp64);
   if (ret) {
     return ret;
   }
+  type_ = static_cast<IO_LINK_TYPE>(static_cast<uint32_t>(tmp64));
 
-  ret = get_property_value(kIOLinkPropNODE_FROMStr, reinterpret_cast<uint64_t*>(&node_from_));
+  ret = get_property_value(kIOLinkPropNODE_FROMStr, &tmp64);
   if (ret) {
     return ret;
   }
+  node_from_ = static_cast<uint32_t>(tmp64);
 
-  ret = get_property_value(kIOLinkPropNODE_TOStr, reinterpret_cast<uint64_t*>(&node_to_));
+  ret = get_property_value(kIOLinkPropNODE_TOStr, &tmp64);
   if (ret) {
     return ret;
   }
+  node_to_ = static_cast<uint32_t>(tmp64);
 
   ret = get_property_value(kIOLinkPropWEIGHTStr, &weight_);
   if (ret) {
