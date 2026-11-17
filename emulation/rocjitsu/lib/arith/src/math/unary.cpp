@@ -11,6 +11,7 @@
 #include "fp/fma_scalar.h"
 #include "math/unary_exact.h"
 #include "math/unary_impl.h"
+#include "math/x86_64/exp_exact.h"
 #include "math/x86_64/rcp_exact.h"
 #include "math/x86_64/root_exact.h"
 #include "register/dpp.h"
@@ -55,6 +56,22 @@ template <rocjitsu::arith::Unary Op, bool QuietNan = false>
   }
   if constexpr (rocjitsu::arith::unary_flushes_f32<Op>) {
     flags &= ~RJ_ARITH_FP_ROUND_MASK;
+  }
+  if constexpr (Op == rocjitsu::arith::Unary::Exp) {
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+      rocjitsu::arith::exp_exact_x86_64_v4(flags, exec_mask, uint32_t(mode), d[0], a[0],
+                                           !rdna3 || (flags & RJ_ARITH_FP_IEEE_MODE));
+      return RJ_ARITH_SUCCESS;
+    }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+      rocjitsu::arith::exp_exact_x86_64_v3(flags, exec_mask, uint32_t(mode), d[0], a[0],
+                                           !rdna3 || (flags & RJ_ARITH_FP_IEEE_MODE));
+      return RJ_ARITH_SUCCESS;
+    }
+#endif
   }
   if constexpr (Op == rocjitsu::arith::Unary::Rcp) {
 #if defined(RJ_ARITH_HAVE_X86_64_V4)

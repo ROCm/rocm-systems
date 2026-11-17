@@ -101,15 +101,16 @@ template <int Width>
 void div_fmas_x86_64_v4(uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
                         const uint32_t *const *a, const uint32_t *const *b,
                         const uint32_t *const *c, uint32_t condition, uint64_t flags,
-                        uint32_t *state, bool quiet_nan) {
-  division_vector_run<Width, Ops>(exec_mask, mode, d, a, b, c, condition, flags, state, quiet_nan);
+                        uint32_t *state, bool quiet_nan, bool gradual_before_omod) {
+  division_vector_run<Width, Ops>(exec_mask, mode, d, a, b, c, condition, flags, state, quiet_nan,
+                                  gradual_before_omod);
 }
 
 template void div_fmas_x86_64_v4<32>(uint32_t, uint32_t, uint32_t *const *, const uint32_t *const *,
                                      const uint32_t *const *, const uint32_t *const *, uint32_t,
-                                     uint64_t, uint32_t *, bool);
+                                     uint64_t, uint32_t *, bool, bool);
 template void div_fmas_x86_64_v4<64>(uint32_t, uint32_t, uint32_t *const *, const uint32_t *const *,
                                      const uint32_t *const *, const uint32_t *const *, uint32_t,
-                                     uint64_t, uint32_t *, bool);
+                                     uint64_t, uint32_t *, bool, bool);
 
 } // namespace rocjitsu::arith
