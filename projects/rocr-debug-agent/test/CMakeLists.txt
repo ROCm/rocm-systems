@@ -50,22 +50,20 @@
 # whatever GPU target the tools can find on the system.
 #
 #
-# ENABLE_TESTS
-#
-# Enable the rocr-debug-agent-test testing target. Default is OFF.
-#
-# As part of building the rocr-debug-agent tests, we also add a testing
-# target that can be invoked to execute the tests. Alternatively the tests
-# can be invoked by hand.
+# This directory is added by the top-level CMakeLists.txt when ENABLE_TESTS
+# is ON.
 
-cmake_minimum_required(VERSION 3.21)
+if(NOT TARGET rocm-debug-agent)
+    message(
+        FATAL_ERROR
+        "The rocr-debug-agent tests cannot be configured on their own. "
+        "Configure from the top-level rocr-debug-agent CMakeLists.txt "
+        "with -DENABLE_TESTS=ON."
+    )
+endif()
 
-project(rocm-debug-agent-test LANGUAGES CXX HIP)
-
-include(GNUInstallDirs)
-
-# By default do not include the testing target.
-option(ENABLE_TESTS "Enable building Debug Agent testing target" OFF)
+# Only the integration tests have HIP sources.
+enable_language(HIP)
 
 set(Python3_FIND_VIRTUALENV "FIRST")
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
@@ -205,30 +203,28 @@ add_dependencies(
     save_code_objects-tgt
 )
 
-# Enable the testing target if requested. This enables running debug agent
-# tests from the build tree with ctest.
+# Add the testing target. This enables running debug agent tests from the
+# build tree with ctest.
 #
 # Tests can also be executed using the prebuilt test executable that is
 # installed alongside the debug agent library.
-if(ENABLE_TESTS)
-    # In order to keep our ability to run tests within the build tree, we need
-    # to copy the required source files over for tests to run properly.
-    foreach(source_file IN LISTS TEST_SOURCE_FILES)
-        configure_file(
-            "${CMAKE_CURRENT_SOURCE_DIR}/${source_file}"
-            "${CMAKE_CURRENT_BINARY_DIR}/${source_file}"
-            COPYONLY
-        )
-    endforeach()
-
-    enable_testing()
-    add_test(
-        NAME rocm-debug-agent-test
-        COMMAND
-            ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/run-test.py
-            ${CMAKE_CURRENT_BINARY_DIR}
+#
+# In order to keep our ability to run tests within the build tree, we need
+# to copy the required source files over for tests to run properly.
+foreach(source_file IN LISTS TEST_SOURCE_FILES)
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/${source_file}"
+        "${CMAKE_CURRENT_BINARY_DIR}/${source_file}"
+        COPYONLY
     )
-endif()
+endforeach()
+
+add_test(
+    NAME rocm-debug-agent-test
+    COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/run-test.py
+        ${CMAKE_CURRENT_BINARY_DIR}
+)
 
 # Install the test executable.
 install(
@@ -260,11 +256,3 @@ install(
     DESTINATION tests/rocm-debug-agent
     COMPONENT tests
 )
-
-# Unit tests (logic tests with no GPU/HIP runtime dependencies).
-# By default do not include unit tests.
-option(ENABLE_UNIT_TESTS "Enable building Debug Agent unit tests" OFF)
-
-if(ENABLE_UNIT_TESTS)
-    add_subdirectory(unit)
-endif()
