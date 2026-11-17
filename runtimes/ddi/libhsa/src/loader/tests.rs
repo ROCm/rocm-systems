@@ -26,16 +26,30 @@ fn memory_reader_rejects_oversized_slice_before_access() {
 }
 
 #[test]
-/// Verifies that loader extension table contains every version 1 03 entry point.
-fn loader_extension_table_contains_every_version_1_03_entry_point() {
+/// Verifies that loader extension table contains every version 1.04 entry point.
+fn loader_extension_table_contains_every_version_1_04_entry_point() {
+    assert_eq!(loader_extension_table().len(), 9);
     assert!(loader_extension_table().into_iter().all(|entry| entry != 0));
 }
 
 #[test]
 /// Verifies that file reader entry point matches the public ABI.
 fn file_reader_entry_point_matches_the_public_abi() {
-    let _: unsafe extern "C" fn(i32, *mut HsaCodeObjectReader) -> Status =
+    let _: unsafe extern "C" fn(HsaFile, *mut HsaCodeObjectReader) -> Status =
         hsa_code_object_reader_create_from_file;
+    let _: unsafe extern "C" fn(HsaFile, usize, usize, *mut HsaCodeObjectReader) -> Status =
+        crate::api::loader::query::hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size;
+    let _: unsafe extern "C" fn(HsaCodeObjectReader, *mut usize) -> Status =
+        crate::api::loader::query::hsa_ven_amd_loader_code_object_reader_get_load_size;
+    let _: unsafe extern "C" fn(
+        HsaExecutable,
+        HsaAgent,
+        HsaCodeObjectReader,
+        *const c_char,
+        *mut c_void,
+        usize,
+        *mut HsaLoadedCodeObject,
+    ) -> Status = hsa_ven_amd_loader_executable_load_agent_code_object_at_address;
 }
 
 #[test]
@@ -177,4 +191,42 @@ fn executable_symbol_lookup_checks_initialization_before_arguments() {
         },
         NOT_INITIALIZED
     );
+}
+
+#[cfg(unix)]
+#[test]
+/// A file snapshot keeps immutable bytes after both native owners are gone.
+fn bounded_file_snapshot_retains_bytes_and_optional_origin() {
+    use std::io::{Seek, SeekFrom, Write};
+    use std::os::fd::AsRawFd;
+    let path = std::env::temp_dir().join(format!("hsa-file-snapshot-{}", std::process::id()));
+    let mut caller = std::fs::OpenOptions::new()
+        .create_new(true)
+        .read(true)
+        .write(true)
+        .open(&path)
+        .unwrap();
+    caller.write_all(b"prefix-payload-suffix").unwrap();
+    caller.seek(SeekFrom::Start(2)).unwrap();
+    let file = crate::platform::acquire_code_object_file(caller.as_raw_fd()).unwrap();
+    let reader = Reader::snapshot_file(&file, 7, 7).unwrap();
+    assert_eq!(caller.stream_position().unwrap(), 2);
+    assert!(matches!(reader.snapshot().1, ReaderStorage::File { .. }));
+    assert_eq!(
+        Reader::snapshot_file(&file, usize::MAX, 1).err(),
+        Some(OUT_OF_RESOURCES)
+    );
+    assert_eq!(
+        Reader::snapshot_file(&file, 19, 4).err(),
+        Some(INVALID_FILE)
+    );
+    std::fs::remove_file(path).unwrap();
+    let anonymous = Reader::snapshot_file(&file, 7, 7).unwrap();
+    assert!(matches!(anonymous.snapshot().1, ReaderStorage::Memory));
+    caller.seek(SeekFrom::Start(7)).unwrap();
+    caller.write_all(b"changed").unwrap();
+    drop(file);
+    drop(caller);
+    assert_eq!(&*reader.snapshot().0, b"payload");
+    assert_eq!(&*anonymous.snapshot().0, b"payload");
 }

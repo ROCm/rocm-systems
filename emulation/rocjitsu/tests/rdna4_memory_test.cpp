@@ -57,7 +57,8 @@ protected:
     auto inst = std::move(decoded).value();
     ASSERT_TRUE(cu_->execute_instruction(inst.get(), *wf_).succeeded()) << inst->mnemonic();
     ASSERT_NE(inst->data(), nullptr);
-    EXPECT_EQ(test::ComputeUnitTestAccess::route_memory_inst(*cu_, inst.release(), *wf_), expected);
+    EXPECT_EQ(test::ComputeUnitTestAccess::route_memory_inst(*cu_, std::move(inst), *wf_),
+              expected);
   }
 };
 
@@ -188,7 +189,7 @@ TEST_F(Rdna4MemoryTest, DirectRouteSuppressesUnallocatedAtomicBeforeLdsUpdate) {
   inst->execute(*inst, wf_);
   ASSERT_NE(inst->data(), nullptr);
   ASSERT_EQ(inst->data_as<VectorMemState>()->lane_mask, 1u);
-  EXPECT_EQ(test::ComputeUnitTestAccess::route_memory_inst(*cu_, inst.release(), *wf_),
+  EXPECT_EQ(test::ComputeUnitTestAccess::route_memory_inst(*cu_, std::move(inst), *wf_),
             VmAccessOutcome::Complete);
   EXPECT_EQ(wf_->lds().read32(8), 41u);
   EXPECT_EQ(wf_->exec(), 1u);

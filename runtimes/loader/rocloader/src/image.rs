@@ -4,13 +4,133 @@
 //! Device allocation, relocation, and ownership of loaded AMD HSA images.
 
 use std::sync::Arc;
-use std::sync::atomic::{Ordering, fence};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering, fence};
 
 use rocddi::device::Device;
+use rocddi::device::gpu::CopyFailure;
 use rocddi::memory::device::{Allocation, DeviceAccess, MemoryKind};
 use rocelf::{Gfx1250TrampolinePlan, LoadSegment, align_up};
 
 use crate::{CodeObject, Error, Symbol, SymbolKind, SymbolLinkage, SymbolTableOrder, Target};
+
+/// Code-image placement alignment, independent of native allocation granularity.
+pub(crate) const CODE_ALIGNMENT: u64 = 256;
+
+const PUBLICATION_PENDING: u8 = 0;
+const PUBLICATION_ACTIVE: u8 = 1;
+const PUBLICATION_COMPLETE: u8 = 2;
+const PUBLICATION_UNCERTAIN: u8 = 3;
+
+/// Executable storage and work that makes its bytes visible to every GPU.
+struct PendingImage {
+    /// Retains the device and its copy service until publication retires.
+    device: Device,
+    /// Other GPUs that can consume this image in program scope.
+    peers: Vec<Device>,
+    /// Writable, executable GPU range.
+    destination: u64,
+    /// Logical loaded extent, independent of native allocation padding.
+    size: u64,
+    /// Relocated source for a borrowed destination; never aliases its host mapping.
+    bytes: Option<Vec<u8>>,
+    /// Owned executable backing survives all clones of the publication work.
+    _allocation: Option<Allocation>,
+    /// The full-range cache operation also publishes optional entry stubs.
+    _trampoline: Option<Allocation>,
+    /// Publication and native-retirement state.
+    state: AtomicU8,
+}
+
+/// Retained code publication work for an owned or caller-owned destination.
+///
+/// Caller-owned destinations follow `load_image_at_address`'s unsafe lifetime
+/// contract. Owned allocations remain retained by every clone of this work.
+#[derive(Clone)]
+pub struct ImagePublication(Arc<PendingImage>);
+
+impl ImagePublication {
+    /// Publishes staged bytes and invalidates code caches on every consuming GPU.
+    /// A successful repeat is a no-op; a retired failure permits a retry.
+    ///
+    /// # Errors
+    /// Returns device errors or `Busy` for concurrent or uncertain publication.
+    pub fn publish(&self, cancel: &AtomicBool) -> Result<(), Error> {
+        publish_once(&self.0.state, || {
+            let retired = |error| CopyFailure {
+                error,
+                operands_may_be_live: false,
+            };
+            let gpu = self.0.device.gpu().map_err(retired)?;
+            if let Some(bytes) = &self.0.bytes {
+                // SAFETY: load_image_at_address's caller retains the destination
+                // through every publication owner and any uncertain native use.
+                // copy_from_host owns native staging even on ambiguous failure.
+                unsafe { gpu.copy_from_host(self.0.destination, bytes, cancel) }?;
+            }
+            // Ordinary images and entry stubs were written before construction
+            // completed. Cache invalidation must follow all writes, including a
+            // caller-owned image's GPU copy, before the executable is frozen.
+            gpu.invalidate_code_cache(self.0.destination, self.0.size, cancel)?;
+            for peer in &self.0.peers {
+                peer.gpu().map_err(retired)?.invalidate_code_cache(
+                    self.0.destination,
+                    self.0.size,
+                    cancel,
+                )?;
+            }
+            Ok(())
+        })
+    }
+
+    /// Whether no native operation can still access the destination.
+    #[must_use]
+    pub fn can_release(&self) -> bool {
+        matches!(
+            self.0.state.load(Ordering::Acquire),
+            PUBLICATION_PENDING | PUBLICATION_COMPLETE
+        )
+    }
+
+    /// Whether bytes and all consuming GPUs' code caches have been published.
+    #[must_use]
+    pub fn is_complete(&self) -> bool {
+        self.0.state.load(Ordering::Acquire) == PUBLICATION_COMPLETE
+    }
+}
+
+/// Serializes publication and preserves uncertain native ownership on failure.
+fn publish_once(
+    state: &AtomicU8,
+    work: impl FnOnce() -> Result<(), CopyFailure>,
+) -> Result<(), Error> {
+    match state.compare_exchange(
+        PUBLICATION_PENDING,
+        PUBLICATION_ACTIVE,
+        Ordering::AcqRel,
+        Ordering::Acquire,
+    ) {
+        Ok(_) => {}
+        Err(PUBLICATION_COMPLETE) => return Ok(()),
+        Err(_) => return Err(Error::Busy),
+    }
+    match work() {
+        Ok(()) => {
+            state.store(PUBLICATION_COMPLETE, Ordering::Release);
+            Ok(())
+        }
+        Err(failure) => {
+            state.store(
+                if failure.operands_may_be_live {
+                    PUBLICATION_UNCERTAIN
+                } else {
+                    PUBLICATION_PENDING
+                },
+                Ordering::Release,
+            );
+            Err(Error::Device(failure.error))
+        }
+    }
+}
 
 /// One contiguous loaded address interval reported to loader clients.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -62,12 +182,10 @@ pub fn loaded_segments(
 ///
 /// Dropping this value releases the image and any gfx1250 entry trampolines.
 pub struct LoadedImage {
-    /// Keeps executable image backing alive.
-    _allocation: Allocation,
-    /// Keeps optional GFX1250 entry stubs alive.
-    _trampoline: Option<Allocation>,
+    /// Retains executable backing and publication for all consuming GPUs.
+    publication: Option<ImagePublication>,
     /// CPU mapping used while constructing the loaded image.
-    host_base: usize,
+    host_base: Option<usize>,
     /// GPU address of the image's first byte.
     device_base: u64,
     /// Logical loaded byte extent.
@@ -81,6 +199,19 @@ pub struct LoadedImage {
 }
 
 impl LoadedImage {
+    /// Clones pending publication work without exposing staging as destination memory.
+    #[must_use]
+    pub fn publication(&self) -> Option<ImagePublication> {
+        self.publication.clone()
+    }
+
+    /// Whether native publication has retired and this owner may be released.
+    #[must_use]
+    pub fn can_release(&self) -> bool {
+        self.publication
+            .as_ref()
+            .is_none_or(ImagePublication::can_release)
+    }
     /// Returns the device address of the loaded image.
     #[must_use]
     pub fn device_base(&self) -> u64 {
@@ -136,15 +267,49 @@ impl LoadedImage {
         if end > usize::try_from(self.size).map_err(|_| Error::InvalidRange)? {
             return Err(Error::InvalidRange);
         }
-        self.host_base
+        let Some(host_base) = self.host_base else {
+            return Ok(None);
+        };
+        host_base
             .checked_add(offset)
             .map(Some)
             .ok_or(Error::InvalidRange)
+    }
+
+    /// Resolves a range for read-only loader inspection, including retained staging.
+    /// This address must not be used as a writable alias of a caller-owned image.
+    ///
+    /// # Errors
+    /// Returns `InvalidRange` if a range starts inside the image but exceeds it.
+    pub fn query_host_range(&self, address: u64, size: usize) -> Result<Option<usize>, Error> {
+        if let Some(bytes) = self
+            .publication
+            .as_ref()
+            .and_then(|work| work.0.bytes.as_ref())
+        {
+            let Some(offset) = address.checked_sub(self.device_base) else {
+                return Ok(None);
+            };
+            if offset >= self.size {
+                return Ok(None);
+            }
+            let offset = usize::try_from(offset).map_err(|_| Error::InvalidRange)?;
+            let end = offset.checked_add(size).ok_or(Error::InvalidRange)?;
+            if end > bytes.len() {
+                return Err(Error::InvalidRange);
+            }
+            return (bytes.as_ptr() as usize)
+                .checked_add(offset)
+                .map(Some)
+                .ok_or(Error::InvalidRange);
+        }
+        self.host_range(address, size)
     }
 }
 
 fn install_gfx1250_trampolines(
     device: &Device,
+    peers: &[&Device],
     symbols: &[Symbol],
     image: &mut [u8],
     virtual_base: u64,
@@ -175,7 +340,8 @@ fn install_gfx1250_trampolines(
         .filter(|size| isize::try_from(*size).is_ok())
         .ok_or(Error::OutOfResources)?;
     let allocation = device
-        .allocate(
+        .allocate_with_peers(
+            peers,
             MemoryKind::System,
             size,
             page,
@@ -193,7 +359,8 @@ fn install_gfx1250_trampolines(
 
 /// Allocates and relocates one AMD HSA code object for an activated GPU.
 ///
-/// The returned image owns its native allocations. Symbols become public only
+/// The returned image owns its native allocations. Its publication work must
+/// complete before dispatch. Symbols become public only
 /// when the frontend commits the image to an executable. The resolver supplies
 /// previously defined external symbol addresses in the caller's scope.
 ///
@@ -206,8 +373,96 @@ pub fn load_image(
     page: u64,
     resolve_external: impl Fn(&str) -> Option<u64>,
 ) -> Result<(LoadedImage, Vec<Symbol>), Error> {
+    load_image_with_peers(
+        device,
+        &[],
+        code_object,
+        memory_kind,
+        page,
+        resolve_external,
+    )
+}
+
+/// Allocates a code image at one common address in the device and all peer VMs.
+///
+/// # Errors
+/// Returns code-object, target, symbol, peer-mapping, or allocation failures.
+pub fn load_image_with_peers(
+    device: &Device,
+    peers: &[&Device],
+    code_object: Arc<[u8]>,
+    memory_kind: MemoryKind,
+    page: u64,
+    resolve_external: impl Fn(&str) -> Option<u64>,
+) -> Result<(LoadedImage, Vec<Symbol>), Error> {
+    load_image_impl(
+        device,
+        peers,
+        code_object,
+        memory_kind,
+        page,
+        None,
+        resolve_external,
+    )
+}
+
+/// Stages a relocated code image for an application-owned GPU destination.
+/// The destination is written only when its publication work is executed.
+///
+/// # Safety
+/// `address..address + size` must remain mapped and writable/executable to
+/// `device` until the image and all publication work are released. After an
+/// uncertain publication failure it must remain live until conclusive native
+/// teardown. No writable host mapping is required or accessed. The caller must
+/// not dispatch from the destination before publication completes.
+///
+/// # Errors
+/// Returns invalid range, object, target, symbol, or staging-allocation errors.
+pub unsafe fn load_image_at_address(
+    device: &Device,
+    code_object: Arc<[u8]>,
+    address: u64,
+    size: usize,
+    page: u64,
+    resolve_external: impl Fn(&str) -> Option<u64>,
+) -> Result<(LoadedImage, Vec<Symbol>), Error> {
+    load_image_impl(
+        device,
+        &[],
+        code_object,
+        MemoryKind::System,
+        page,
+        Some((address, size)),
+        resolve_external,
+    )
+}
+
+fn validate_destination(address: u64, size: usize, load_size: usize) -> Result<(), Error> {
+    if address == 0
+        || address % CODE_ALIGNMENT != 0
+        || load_size > size
+        || address.checked_add(size as u64).is_none()
+    {
+        return Err(Error::InvalidRange);
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+fn load_image_impl(
+    device: &Device,
+    peers: &[&Device],
+    code_object: Arc<[u8]>,
+    memory_kind: MemoryKind,
+    page: u64,
+    destination: Option<(u64, usize)>,
+    resolve_external: impl Fn(&str) -> Option<u64>,
+) -> Result<(LoadedImage, Vec<Symbol>), Error> {
+    if page < CODE_ALIGNMENT || !page.is_power_of_two() {
+        return Err(Error::InvalidRange);
+    }
     let mut target = Target::from(device.endpoint().gpu().ok_or(Error::InvalidTarget)?);
-    if target.gfx_major == 9 {
+    if target.gfx_major == 9 || (target.gfx_major, target.gfx_minor) == (10, 1) {
         target.xnack_enabled = Some(
             device
                 .gpu()
@@ -218,10 +473,13 @@ pub fn load_image(
     }
     let object = CodeObject::parse(&code_object)?;
     object.validate_target(target)?;
-    let layout = object.layout();
-    let plan = rocelf::LoadPlan::new(&code_object, layout, page)?;
+    let plan = rocelf::LoadPlan::new(&code_object, object.layout(), CODE_ALIGNMENT)?;
     let virtual_base = plan.virtual_base();
     let virtual_end = plan.virtual_end();
+    let load_size = object.load_size()?;
+    if let Some((address, size)) = destination {
+        validate_destination(address, size, load_size)?;
+    }
     let mut symbols = object.symbols(SymbolTableOrder::DynamicFirst)?;
     if symbols.iter().any(|symbol| {
         !symbol.is_definition
@@ -230,62 +488,175 @@ pub fn load_image(
     }) {
         return Err(Error::UndefinedSymbol);
     }
-    let allocation_size =
-        u64::try_from(plan.allocation_size()).map_err(|_| Error::InvalidObject)?;
-    let allocation = device
-        .allocate(
-            memory_kind,
-            allocation_size,
-            page,
-            DeviceAccess::READ | DeviceAccess::WRITE | DeviceAccess::EXECUTE,
+    // Always stage relocation in owned host bytes. This keeps the destination
+    // contract identical for ordinary allocations and host-read-only mappings.
+    let mut bytes = Vec::new();
+    bytes
+        .try_reserve_exact(plan.allocation_size())
+        .map_err(|_| Error::OutOfResources)?;
+    bytes.resize(plan.allocation_size(), 0);
+    let allocation = if destination.is_none() {
+        let size = align_up(plan.allocation_size() as u64, page).ok_or(Error::OutOfResources)?;
+        Some(
+            device
+                .allocate_with_peers(
+                    peers,
+                    memory_kind,
+                    size,
+                    page,
+                    DeviceAccess::READ | DeviceAccess::WRITE | DeviceAccess::EXECUTE,
+                )
+                .map_err(Error::Device)?,
         )
-        .map_err(Error::Device)?;
-    let info = allocation.info();
-    let host_base = info.host_address.ok_or(Error::OutOfResources)?;
-    // SAFETY: The live, host-visible allocation spans the full page-aligned
-    // PT_LOAD range and owns plan.allocation_size() writable bytes.
-    let image =
-        unsafe { std::slice::from_raw_parts_mut(host_base as *mut u8, plan.allocation_size()) };
-    plan.write_amdgpu_image(info.device_address, image, &resolve_external)?;
+    } else {
+        None
+    };
+    let device_base = destination
+        .map(|(address, _)| address)
+        .or_else(|| {
+            allocation
+                .as_ref()
+                .map(|allocation| allocation.info().device_address)
+        })
+        .ok_or(Error::InvalidRange)?;
+    plan.write_amdgpu_image(device_base, &mut bytes, &resolve_external)?;
     let trampoline = if (target.gfx_major, target.gfx_minor, target.gfx_stepping) == (12, 5, 0) {
         install_gfx1250_trampolines(
             device,
+            peers,
             &symbols,
-            image,
+            &mut bytes,
             virtual_base,
-            info.device_address,
+            device_base,
             page,
         )?
     } else {
         None
     };
-    // The destination may be write-combined. Publish segment data and
-    // relocations before the frontend makes the object visible to submitters.
-    fence(Ordering::SeqCst);
-
+    let (host_base, bytes) = if let Some(allocation) = &allocation {
+        let host = allocation
+            .info()
+            .host_address
+            .ok_or(Error::OutOfResources)?;
+        // SAFETY: The newly allocated, unpublished backing owns at least the
+        // complete staged extent and has a writable host mapping.
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), host as *mut u8, bytes.len()) };
+        fence(Ordering::SeqCst);
+        (Some(host), None)
+    } else {
+        // Only logical image bytes belong to the caller's range; page padding
+        // must never be written past the size returned by get_load_size.
+        bytes.truncate(load_size);
+        (None, Some(bytes))
+    };
+    let mut consuming_peers = Vec::new();
+    consuming_peers
+        .try_reserve_exact(peers.len())
+        .map_err(|_| Error::OutOfResources)?;
+    consuming_peers.extend(peers.iter().map(|peer| (*peer).clone()));
+    let publication = Some(ImagePublication(Arc::new(PendingImage {
+        device: device.clone(),
+        peers: consuming_peers,
+        destination: device_base,
+        size: load_size as u64,
+        bytes,
+        _allocation: allocation,
+        _trampoline: trampoline,
+        state: AtomicU8::new(PUBLICATION_PENDING),
+    })));
     symbols.retain_mut(|symbol| {
         if !symbol.is_definition || symbol.value < virtual_base || symbol.value >= virtual_end {
             return false;
         }
-        let Some(address) = info.device_address.checked_add(symbol.value - virtual_base) else {
+        let Some(address) = device_base.checked_add(symbol.value - virtual_base) else {
             return false;
         };
         symbol.address = address;
         true
     });
-    let segments = loaded_segments(plan.segments(), info.device_address, virtual_base)?;
-    let size = u64::try_from(segments[0].size).map_err(|_| Error::InvalidObject)?;
+    let segments = loaded_segments(plan.segments(), device_base, virtual_base)?;
     Ok((
         LoadedImage {
-            _allocation: allocation,
-            _trampoline: trampoline,
+            publication,
             host_base,
-            device_base: info.device_address,
-            size,
+            device_base,
+            size: load_size as u64,
             virtual_base,
             code_object,
             segments,
         },
         symbols,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn copy_failure(operands_may_be_live: bool) -> CopyFailure {
+        CopyFailure {
+            error: rocddi::Error::Operation {
+                kind: rocddi::ErrorKind::Busy,
+                detail: "injected native publication failure",
+            },
+            operands_may_be_live,
+        }
+    }
+
+    #[test]
+    fn retired_publication_retries_but_completed_work_does_not_repeat() {
+        let state = AtomicU8::new(PUBLICATION_PENDING);
+        assert!(matches!(
+            publish_once(&state, || Err(copy_failure(false))),
+            Err(Error::Device(_))
+        ));
+        assert_eq!(state.load(Ordering::Acquire), PUBLICATION_PENDING);
+        let mut operations = 0;
+        assert!(
+            publish_once(&state, || {
+                operations += 1;
+                assert!(matches!(publish_once(&state, || Ok(())), Err(Error::Busy)));
+                Ok(())
+            })
+            .is_ok()
+        );
+        assert_eq!(state.load(Ordering::Acquire), PUBLICATION_COMPLETE);
+        assert!(
+            publish_once(&state, || {
+                operations += 1;
+                Ok(())
+            })
+            .is_ok()
+        );
+        assert_eq!(operations, 1);
+    }
+
+    #[test]
+    fn uncertain_publication_blocks_reuse_and_preserves_retention_state() {
+        let state = AtomicU8::new(PUBLICATION_PENDING);
+        assert!(matches!(
+            publish_once(&state, || Err(copy_failure(true))),
+            Err(Error::Device(_))
+        ));
+        assert_eq!(state.load(Ordering::Acquire), PUBLICATION_UNCERTAIN);
+        let mut retried = false;
+        assert!(matches!(
+            publish_once(&state, || {
+                retried = true;
+                Ok(())
+            }),
+            Err(Error::Busy)
+        ));
+        assert!(!retried);
+        assert_eq!(state.load(Ordering::Acquire), PUBLICATION_UNCERTAIN);
+    }
+
+    #[test]
+    fn caller_destination_uses_logical_extent_without_page_padding() {
+        assert!(validate_destination(0x100, 257, 257).is_ok());
+        assert!(validate_destination(0x100, 256, 257).is_err());
+        assert!(validate_destination(0x101, 257, 257).is_err());
+        assert!(validate_destination(0, 257, 257).is_err());
+        assert!(validate_destination(u64::MAX - 255, 257, 257).is_err());
+    }
 }

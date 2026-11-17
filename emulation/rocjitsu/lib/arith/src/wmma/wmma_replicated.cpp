@@ -10,6 +10,7 @@
 #include "common/simd.h"
 #include "dot/gfx11_dot2.h"
 #include "rj_arith/detail/rj_arith_wmma.h"
+#include "wmma/flags.h"
 
 #include <stdint.h>
 

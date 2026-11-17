@@ -25,6 +25,7 @@
 #include "rocjitsu/code/dbt/virtual_lds.h"
 #include "rocjitsu/code/dbt/waitcnt_translator.h"
 #include "rocjitsu/code/kernel_descriptor_abi.h"
+#include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/code/patch/kernel_text_layout.h"
@@ -3793,6 +3794,37 @@ TEST(CodeObjectPatcher, SupportsRelative64AddendIntoText) {
       << "RELATIVE64 addend outside .text must be accepted";
 }
 
+TEST(BinaryTranslator, ExpandsWaitWithoutTextPadding) {
+  // The entire source .text is one CDNA4 wait for all counters and s_endpgm.
+  const auto image = make_minimal_amdgpu_elf_with_descriptor_after_text({0xbf8c0000, 0xbf810000});
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto result = translator.translate(source);
+  ASSERT_TRUE(result.dispatchable()) << result.diagnostics.front().message;
+  AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  const Section *text = find_section(translated, ".text");
+  ASSERT_NE(text, nullptr);
+  const auto descriptors =
+      scan_kernel_descriptors(result.elf_bytes, text->sectionOffset(), text->size());
+  ASSERT_EQ(descriptors.size(), 1u);
+  const uint64_t entry = descriptors.front().entry_text_offset;
+  ASSERT_EQ(entry % sizeof(uint32_t), 0u);
+  auto expected = encode_waitcnt_gfx12(decode_waitcnt_gfx9(0));
+  ASSERT_GT(expected.size(), 1u);
+  constexpr auto endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
+  static_assert(endpgm.succeeded());
+  expected.push_back(endpgm.value());
+  const std::span words(reinterpret_cast<const uint32_t *>(text->data()),
+                        text->size() / sizeof(uint32_t));
+  ASSERT_LE(entry / sizeof(uint32_t) + expected.size(), words.size());
+  EXPECT_TRUE(
+      std::ranges::equal(words.subspan(entry / sizeof(uint32_t), expected.size()), expected));
+  EXPECT_EQ(find_section(translated, ".rj_translations"), nullptr);
+}
+
 TEST(BinaryTranslator, InlineExpansionAvoidsCaveBranchOverflow) {
   auto image = make_large_amdgpu_elf_with_waitcnt_entry();
   AmdGpuCodeObject co(image.data(), image.size());
@@ -4276,6 +4308,38 @@ TEST(BinaryTranslatorE2E, IncompleteIndirectConsumerTranslatesWhenScopeHasNoStal
   EXPECT_NE(std::ranges::find(target_words, target_words + word_count, pack_sop1(0x1d, 0, kPcSreg)),
             target_words + word_count)
       << "an incomplete consumer must keep its dynamic transfer, not become a direct window";
+}
+
+TEST(BinaryTranslatorE2E, PreservesInstructionsBetweenRdna4PcBuilderHalves) {
+  // LLVM sign-extends GETPC before adding the displacement on RDNA4. The
+  // unrelated write between its low and high adds must survive translation.
+  const std::vector<uint32_t> words = {
+      pack_sop1(0x47, 8, 0), // s_getpc_b64 s[8:9]
+      pack_sop1(0x0f, 9, 9), // s_sext_i32_i16 s9, s9
+      pack_sop2(0, 8, 8, 255),
+      28,         // s_add_co_u32 s8, s8, 28
+      0x7e040283, // v_mov_b32 v2, 3
+      pack_sop2(4, 9, 9, 255),
+      0,                     // s_add_co_ci_u32 s9, s9, lit(0)
+      pack_sop1(0x48, 0, 8), // s_setpc_b64 s[8:9]
+      build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4).value(),
+  };
+  auto image = make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+  auto header = read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+  header.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX1201;
+  write_elf_struct_for_test(image, 0, header);
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_RDNA4,
+                              EF_AMDGPU_MACH_AMDGCN_GFX1201);
+  const auto result = translator.translate(source);
+  EXPECT_FALSE(result.ok());
+  EXPECT_TRUE(std::ranges::any_of(result.diagnostics, [](const auto &diagnostic) {
+    return diagnostic.message.find("PC builder containing unrelated instructions") !=
+           std::string::npos;
+  }));
+  EXPECT_EQ(result.elf_bytes, image);
 }
 
 TEST(BinaryTranslatorE2E, IncompleteIndirectConsumerFailsClosedOnNonContiguousBuilderRange) {

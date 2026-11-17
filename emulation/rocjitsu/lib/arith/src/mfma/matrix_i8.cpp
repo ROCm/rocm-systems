@@ -5,7 +5,9 @@
 #include "common/internal.h"
 #include "mfma/backends.h"
 #include "mfma/integer.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
+#include "rj_arith/detail/rj_arith_mfma.h"
+#include "rj_arith/detail/rj_arith_wmma.h"
 namespace {
 // Validate source controls and dispatch the exact integer reduction.
 template <int M, int K, int Batch, bool Wmma>
