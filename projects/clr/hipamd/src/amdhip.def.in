@@ -571,6 +571,7 @@ hipKernelNameRefByPtr
 hipModuleEnumerateFunctions
 hipDeviceFlushGPUDirectRDMAWrites
 hipExtMemcpyBatchAsync
+hipArrayGetSparseProperties
 hipGraphNodeGetLocalId
 hipGraphNodeGetToolsId
 hipGraphGetId

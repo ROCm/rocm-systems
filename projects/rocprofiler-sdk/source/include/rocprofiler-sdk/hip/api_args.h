@@ -3714,6 +3714,13 @@ typedef union rocprofiler_hip_api_args_t
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 41
     struct
     {
+        hipArraySparseProperties* sparseProperties;
+        hipArray_t                array;
+    } hipArrayGetSparseProperties;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 42
+    struct
+    {
         hipGraphNode_t node;
         unsigned int*  nodeId;
     } hipGraphNodeGetLocalId;

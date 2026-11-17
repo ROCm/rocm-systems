@@ -2408,7 +2408,7 @@ struct BatchCopyAgentShape {
 ///
 /// @details `hsa_amd_memory_copy_op_t` stores scalar and list fields in unions.
 /// Current ROCR uses a scalar `src_agent` for every supported operation and uses
-/// `dst_agent_list` for multi-entry/broadcast forms. `src_agent_list` is
+/// `dst_agent_list` for multi-entry, broadcast, and rect forms. `src_agent_list` is
 /// documented as reserved, so probing it as a pointer misclassifies ordinary
 /// scalar source-agent handles as caller-owned arrays.
 BatchCopyAgentShape batch_copy_agent_shape(const hsa_amd_memory_copy_op_t &op) {
@@ -2424,6 +2424,7 @@ BatchCopyAgentShape batch_copy_agent_shape(const hsa_amd_memory_copy_op_t &op) {
         .dst_list = op.num_entries > 0,
     };
   case HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST:
+  case HSA_AMD_MEMORY_COPY_OP_RECT:
     return BatchCopyAgentShape{
         .src_scalar = true,
         .dst_scalar = false,
