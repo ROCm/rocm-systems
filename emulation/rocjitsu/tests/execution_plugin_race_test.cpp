@@ -795,6 +795,177 @@ TEST_F(TensorDmaRaceTest, TransferIsCheckedAgainstPendingLdsAccesses) {
   EXPECT_NE(report.find("wave=0 lane=-1"), std::string::npos) << report;
 }
 
+// Two waves' DS writes to the same bytes with no wait and barrier between them
+// race once a read observes the bytes; mayConflict must not skip the check.
+TEST_F(TensorDmaRaceTest, DsWriteOverAnotherWavesWriteRacesWhenRead) {
+  EXPECT_FALSE(ds_write(0, 4));
+  EXPECT_FALSE(ds_write(1, 4));
+  wait_dscnt(0);
+  wait_dscnt(1);
+  barrier();
+  EXPECT_TRUE(ds_read(0, 4));
+}
+
+/// Two waves' DS stores of known values to the same LDS bytes, with or without
+/// the race plugin's "notes" option. Each store is applied to LDS after the
+/// plugin observes it, as execution does.
+class LdsWriteValueRaceTest : public ::testing::Test {
+protected:
+  PluginFixture fixture;
+  StringSink *sink = nullptr;
+  std::array<Wavefront *, 2> waves{};
+
+  void start(bool notes) {
+    ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/2, "cdna4",
+                                               /*wavefront_size=*/64, /*sgprs_per_wf=*/104));
+    PluginSinkConfig sink_config;
+    sink = &sink_config.emplace<StringSink>();
+    fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+    ASSERT_TRUE(fixture.plugin_group_->add(
+        std::make_unique<RaceDetectorPlugin>(notes ? R"({"notes": true})" : "{}")));
+    fixture.soc->set_plugin_group(fixture.plugin_group_);
+    fixture.plugin_group_->onInit();
+    const uint32_t lds_base = fixture.cu()->allocate_lds(256);
+    for (auto &wave : waves) {
+      wave = fixture.cu()->dispatch_wf(/*wg_id=*/0, /*pc=*/0x100, /*sgprs=*/104, /*vgprs=*/256);
+      ASSERT_NE(wave, nullptr);
+      wave->set_exec(1);
+      wave->set_lds_base(lds_base);
+      wave->set_lds_size(256);
+    }
+    fixture.plugin_group_->onAmdgpuWorkgroupDispatched(/*dispatch_id=*/1, /*wg_id=*/0, 256, 104,
+                                                       waves);
+  }
+
+  /// Issue a one-lane DS access of `bytes` bytes at `offset` in the workgroup's
+  /// LDS; a store writes the low bytes of `value`. Returns whether it produced a
+  /// race report.
+  bool ds(int wave, uint32_t offset, std::optional<uint32_t> value, uint32_t bytes = 4) {
+    const uint32_t address = waves[wave]->lds_base() + offset;
+    waves[wave]->pc += 16;
+    const size_t previous = sink->str().size();
+    auto state = std::make_unique<VectorMemState>(LOCAL_MEM);
+    state->elem_size = bytes;
+    state->num_elems = 1;
+    state->is_load = !value;
+    state->wf_size = waves[wave]->wf_size();
+    state->exec_mask = 1;
+    state->lane_mask = 1;
+    state->dst_reg_base = waves[wave]->vgpr_alloc().base;
+    state->per_lane_addr[0] = address;
+    if (value) {
+      state->store_data.resize(bytes);
+      std::memcpy(state->store_data.data(), &*value, bytes);
+    }
+    TestMemoryInstruction inst(std::move(state),
+                               {{WaitCounterType::LGKMCNT, MemoryCompletionClass::LDS}});
+    fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(waves[wave]->pc, inst, *waves[wave]);
+    fixture.plugin_group_->onAmdgpuMemoryAccessRouted({}, inst, *waves[wave]);
+    if (value)
+      fixture.cu()->lds().write(address, reinterpret_cast<const uint8_t *>(&*value), bytes);
+    return sink->str().find("RACE ", previous) != std::string::npos;
+  }
+
+  void wait_and_barrier() {
+    for (auto *wave : waves)
+      execute_wait(*fixture.plugin_group_, *wave,
+                   legacy_wait_word(ROCJITSU_CODE_ARCH_CDNA4, /*vmcnt=*/63, /*lgkmcnt=*/0));
+    fixture.plugin_group_->onAmdgpuBarrierResolved(waves, BarrierKind::Workgroup);
+  }
+
+  bool has(std::string_view text) const { return sink->str().find(text) != std::string::npos; }
+};
+
+TEST_F(LdsWriteValueRaceTest, IdenticalValuesAreNotARace) {
+  ASSERT_NO_FATAL_FAILURE(start(/*notes=*/false));
+  EXPECT_FALSE(ds(0, 64, 7u));
+  EXPECT_FALSE(ds(1, 64, 7u));
+  wait_and_barrier();
+  EXPECT_FALSE(ds(0, 64, std::nullopt));
+  EXPECT_FALSE(has("NOTE "));
+}
+
+TEST_F(LdsWriteValueRaceTest, IdenticalValuesAreANoteWithNotes) {
+  ASSERT_NO_FATAL_FAILURE(start(/*notes=*/true));
+  EXPECT_FALSE(ds(0, 64, 7u));
+  EXPECT_FALSE(ds(1, 64, 7u));
+  wait_and_barrier();
+  EXPECT_FALSE(ds(0, 64, std::nullopt));
+  EXPECT_TRUE(has("NOTE redundant-write"));
+}
+
+TEST_F(LdsWriteValueRaceTest, DifferentValuesRaceWhenRead) {
+  ASSERT_NO_FATAL_FAILURE(start(/*notes=*/false));
+  EXPECT_FALSE(ds(0, 64, 7u));
+  EXPECT_FALSE(ds(1, 64, 8u));
+  wait_and_barrier();
+  EXPECT_TRUE(ds(0, 64, std::nullopt));
+  // The report names both writes. Each wave's first access is at PC 0x110.
+  EXPECT_TRUE(has("The read observes two unordered writes: 0x110 (wave 0) and 0x110 (wave 1)"))
+      << sink->str();
+}
+
+TEST_F(LdsWriteValueRaceTest, RepeatedWriteOverAConflictRacesWhenRead) {
+  // LDS holds wave 1's 8 when wave 1 stores 8 again, but wave 0's 7 can land last.
+  ASSERT_NO_FATAL_FAILURE(start(/*notes=*/false));
+  EXPECT_FALSE(ds(0, 64, 7u));
+  EXPECT_FALSE(ds(1, 64, 8u));
+  EXPECT_FALSE(ds(1, 64, 8u));
+  wait_and_barrier();
+  EXPECT_TRUE(ds(0, 64, std::nullopt));
+  EXPECT_TRUE(has("The read observes two unordered writes: 0x110 (wave 0) and 0x120 (wave 1)"))
+      << sink->str();
+}
+
+TEST_F(LdsWriteValueRaceTest, OrderedOverwriteWithTheLaterValueIsNotARace) {
+  // Wave 0's 8 lands after its 7, and wave 1 also wrote 8, so every order leaves 8.
+  ASSERT_NO_FATAL_FAILURE(start(/*notes=*/false));
+  EXPECT_FALSE(ds(0, 64, 7u));
+  EXPECT_FALSE(ds(1, 64, 8u));
+  EXPECT_FALSE(ds(0, 64, 8u));
+  wait_and_barrier();
+  EXPECT_FALSE(ds(0, 64, std::nullopt));
+}
+
+TEST_F(LdsWriteValueRaceTest, OnlyDifferingBytesRace) {
+  // Little-endian 0 and 1 differ only in their first byte.
+  ASSERT_NO_FATAL_FAILURE(start(/*notes=*/false));
+  EXPECT_FALSE(ds(0, 64, 0u));
+  EXPECT_FALSE(ds(1, 64, 1u));
+  wait_and_barrier();
+  EXPECT_FALSE(ds(0, 65, std::nullopt, /*bytes=*/1));
+  EXPECT_TRUE(ds(0, 64, std::nullopt, /*bytes=*/1));
+}
+
+TEST_F(LdsWriteValueRaceTest, RepeatedIdenticalWritesAreNotARace) {
+  ASSERT_NO_FATAL_FAILURE(start(/*notes=*/false));
+  EXPECT_FALSE(ds(0, 64, 7u));
+  EXPECT_FALSE(ds(1, 64, 7u));
+  EXPECT_FALSE(ds(1, 64, 7u));
+  wait_and_barrier();
+  EXPECT_FALSE(ds(0, 64, std::nullopt));
+}
+
+TEST_F(LdsWriteValueRaceTest, UnreadDifferentValuesAreANoteWithNotes) {
+  ASSERT_NO_FATAL_FAILURE(start(/*notes=*/true));
+  EXPECT_FALSE(ds(0, 64, 7u));
+  EXPECT_FALSE(ds(1, 64, 8u));
+  wait_and_barrier();
+  fixture.plugin_group_->onAmdgpuWorkgroupCompleted(/*dispatch_id=*/1, /*wg_id=*/0);
+  EXPECT_FALSE(has("RACE "));
+  EXPECT_TRUE(has("NOTE unread-write"));
+}
+
+TEST_F(LdsWriteValueRaceTest, UnreadDifferentValuesPrintNothingWithoutNotes) {
+  ASSERT_NO_FATAL_FAILURE(start(/*notes=*/false));
+  EXPECT_FALSE(ds(0, 64, 7u));
+  EXPECT_FALSE(ds(1, 64, 8u));
+  wait_and_barrier();
+  fixture.plugin_group_->onAmdgpuWorkgroupCompleted(/*dispatch_id=*/1, /*wg_id=*/0);
+  EXPECT_TRUE(sink->str().find("RACE ") == std::string::npos);
+  EXPECT_FALSE(has("NOTE "));
+}
+
 TEST_F(TensorDmaRaceTest, StoreIsCheckedAgainstAPendingDsWrite) {
   // DS writes and tensor transfers complete independently, so the store may
   // read the bytes before the earlier write lands.

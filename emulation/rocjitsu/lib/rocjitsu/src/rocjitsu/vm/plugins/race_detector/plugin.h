@@ -87,8 +87,9 @@ class RaceDetectorPlugin : public ExecutionPlugin,
                            public AmdgpuTrapEntryObserver,
                            public AmdgpuImplicitMemoryWaitObserver {
 public:
-  /// @param config_json Plugin configuration object as a JSON string (unused;
-  ///        this plugin takes no configuration). May be null.
+  /// @param config_json Plugin configuration object as a JSON string, resolved
+  ///        against the schema in plugin_export.cpp. May be null. Boolean
+  ///        "notes" enables NOTE lines for LDS writes that cannot change a result.
   explicit RaceDetectorPlugin(const char *config_json = nullptr);
   ~RaceDetectorPlugin() override;
 
@@ -165,6 +166,9 @@ private:
     std::string symbol;
   };
 
+  /// The dispatch's kernel names, or placeholders. Requires report_mutex_.
+  KernelNames kernel_names_locked(uint32_t dispatch_id) const;
+
   RaceWavefrontState *get_state(const amdgpu::Wavefront &wf) {
     return static_cast<RaceWavefrontState *>(wf.plugin_state(slot_index()));
   }
@@ -178,6 +182,12 @@ private:
 
   std::mutex report_mutex_;
   std::set<std::pair<uint32_t, uint64_t>> observed_races_;
+  /// (dispatch, PC) of reported NOTE lines, one set per kind: redundant-write,
+  /// keyed by the later write, and unread-write, keyed by the earlier write.
+  std::set<std::pair<uint32_t, uint64_t>> observed_redundant_notes_;
+  std::set<std::pair<uint32_t, uint64_t>> observed_unread_notes_;
+  /// Print NOTE lines; set by the "notes" option.
+  bool notes_ = false;
   std::unordered_map<uint32_t, KernelNames> dispatch_kernel_names_;
 };
 
