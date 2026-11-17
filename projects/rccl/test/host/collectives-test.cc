@@ -576,16 +576,17 @@ struct SharedHooks {
     if (ncclProfilerPluginLoaded()) fake.trace.push_back("collApiStop");
     return ncclSuccess;
   }};
-  ScopedHook<ncclResult_t(ncclInfo*, bool, void**)> addonCollStart{
-      g_profilerStartAddonCollEvent, [](ncclInfo* info, bool, void**) {
-        // ncclProfilerStartAddonCollEvent uses ncclFuncToString(info->coll) rather than info->opName
+  ScopedHook<ncclResult_t(ncclInfo*, bool, struct ncclProfilerEventRef*, struct ncclProfilerEventRef*)> addonStart{
+      g_profilerStartAddonEvent, [](ncclInfo* info, bool, struct ncclProfilerEventRef*, struct ncclProfilerEventRef*) {
+        // ncclProfilerStartAddonEvent uses ncclFuncToString(info->coll) rather than info->opName
         if (ncclProfilerPluginLoaded()) fake.trace.push_back(std::string("collStart ") + ncclFuncToString(info->coll));
         return fake.profStartResult;
       }};
-  ScopedHook<ncclResult_t(void*)> addonCollStop{g_profilerStopAddonCollEvent, [](void*) {
-    if (ncclProfilerPluginLoaded()) fake.trace.push_back("collStop");
-    return ncclSuccess;
-  }};
+  ScopedHook<ncclResult_t(struct ncclProfilerEventRef*, struct ncclProfilerEventRef*)> addonStop{
+      g_profilerStopAddonEvent, [](struct ncclProfilerEventRef*, struct ncclProfilerEventRef*) {
+        if (ncclProfilerPluginLoaded()) fake.trace.push_back("collStop");
+        return ncclSuccess;
+      }};
   ScopedHook<ncclResult_t(ncclComm*, ncclCeCollArgs*, hipStream_t)> ceCollStart{
       g_profilerStartCeCollEvent, [](ncclComm*, ncclCeCollArgs* args, hipStream_t) {
         if (ncclProfilerPluginLoaded()) {
@@ -697,9 +698,10 @@ class CollectivesMicrotest : public ::testing::Test {
       fake.addonResult = ncclRemoteError;
       EXPECT_EQ(ncclRemoteError, call());
       if (ncclProfilerPluginLoaded()) {
-        EXPECT_EQ((std::vector<std::string>{"record", "select", "log " + coll, "begin",
-                                            "groupApiStart", "collApiStart "+ coll, "collStart " + coll,
-                                            arm.fn, "end", "collStop", "collApiStop", "groupApiStop"}),
+        // Launch is unsuccessful (addonResult = ncclRemoteError), so collStart/collStop are not logged.
+        // TODO: add tests covering successful launches, so that collStart/collStop are logged before/after arm.fn.
+        EXPECT_EQ((std::vector<std::string>{"record", "select", "log " + coll, "begin", "groupApiStart",
+                                            "collApiStart "+ coll, arm.fn, "collApiStop", "end", "groupApiStop"}),
                   fake.trace);
       } else {
         EXPECT_EQ((std::vector<std::string>{"record", "select", "log " + coll, "begin", arm.fn, "end"}), fake.trace);

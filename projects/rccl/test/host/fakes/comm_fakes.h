@@ -52,9 +52,12 @@ extern std::function<ncclResult_t()> g_profilerStopGroupApiEvent;
 extern std::function<ncclResult_t(struct ncclInfo*, bool)> g_profilerStartCollApiEvent;
 extern std::function<ncclResult_t()> g_profilerStopCollApiEvent;
 
-// ncclProfilerStart/StopAddonCollEvent. Default succeed without a profiler.
-extern std::function<ncclResult_t(struct ncclInfo*, bool, void**)> g_profilerStartAddonCollEvent;
-extern std::function<ncclResult_t(void*)> g_profilerStopAddonCollEvent;
+// ncclProfilerStart/StopAddonEvent. Default succeed without a profiler.
+struct ncclProfilerEventRef;
+extern std::function<ncclResult_t(struct ncclInfo*, bool, struct ncclProfilerEventRef*, struct ncclProfilerEventRef*)>
+    g_profilerStartAddonEvent;
+extern std::function<ncclResult_t(struct ncclProfilerEventRef*, struct ncclProfilerEventRef*)>
+    g_profilerStopAddonEvent;
 
 // Restore every comm_fakes seam to its default. Call from a fixture TearDown.
 void ResetCommFakes();
