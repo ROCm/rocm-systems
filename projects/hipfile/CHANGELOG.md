@@ -6,8 +6,12 @@
 
 * Added a Host backend that enables file I/O using host memory. `hipFileBufRegister` now accepts host memory.
 * MD and LVM software RAID arrays running pass-through personalities whose member devices are all local NVMe are now fastpath capable, and `ais-check` reports them as such.
+* Added the `HIPFILE_DEVICE_STREAM_POOL_SIZE` environment variable, which sets the number of streams in the per-GPU pool that fallback I/O uses for its device copies. The default is 4; setting it to 0 selects the default.
 
 ### Changed
+
+* Fallback I/O operations now perform their device copies on a pool of per-GPU non-blocking streams instead of the default stream, so they no longer serialize against other work on the GPU's default (null) stream.
+* hipFile now requires CMake 3.25.2 or later, instead of 3.21, to build hipFile, its Python bindings, and the installed examples. Earlier versions couldn't fetch GoogleTest or rocm-cmake, and before 3.22.1, `find_library()` couldn't find system libraries when building with amdclang. Some distributions ship an older CMake, such as Ubuntu 22.04 (3.22.1) and Debian 12 (3.25.1); install a newer one there, for example with `pip install cmake` or from Kitware's APT repository.
 
 ### Fixed
 
@@ -39,6 +43,7 @@
 
 ### Fixed
 
+* On Windows Subsystem for Linux (WSL2), hipFile now sends all I/O to the fallback backend, since the fastpath is not yet implemented on WSL.
 * Asynchronous fastpath operations now fail over to the fallback backend on `ENODEV` or `EREMOTEIO`, matching the synchronous and batch paths.
 * hipFile now returns `hipFileGetNewFDFailed` instead of `hipFileInternalError` when the process or system runs out of file descriptors. API calls that need a new file descriptor, such as `hipFileHandleRegister()`, can return this error.
 * The `HIPFILE_WARN_UNSAFE_BUFFER_OPS` CMake option now applies the clang `-Wunsafe-buffer-usage` and `-fsafe-buffer-usage-suggestions` flags to C++ sources. Previously, the flags were never passed to the compiler.

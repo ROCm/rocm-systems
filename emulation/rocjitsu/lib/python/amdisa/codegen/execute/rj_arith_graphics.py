@@ -56,17 +56,25 @@ def gen_cube(ctx: ExecuteContext) -> str | None:
     dst = ctx.dst_ops
     src = ctx.src_ops
     is_vop3 = ctx.is_vop3
-    if arch not in ('rdna3', 'rdna4') or mnemonic not in CUBE_NAMES or not is_vop3:
+    if (
+        arch not in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5')
+        or mnemonic not in CUBE_NAMES
+        or not is_vop3
+    ):
         return None
     if len(dst) != 1 or len(src) != 3:
         return None
-    api = 'rj_arith_' + mnemonic.lower() + ('_gfx12' if arch == 'rdna4' else '')
+    api = (
+        'rj_arith_'
+        + mnemonic.lower()
+        + ('_gfx12' if arch in ('rdna4', 'cdna5') else '')
+    )
     lines = [
         '  uint64_t flags = wf.cu().arithmetic_flags();',
         '  flags |= uint64_t(wf.fp_round_mode_f32()) << 24;',
         '  if (wf.ieee_mode()) flags |= RJ_ARITH_FP_IEEE_MODE;',
     ]
-    if arch == 'rdna3':
+    if arch in ('rdna3', 'cdna3', 'cdna4'):
         lines += ['  if (!wf.dx10_clamp()) flags |= RJ_ARITH_FP_DX10_CLAMP_OFF;']
     lines += [
         '  const uint64_t modifiers = ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) |',
@@ -78,7 +86,8 @@ def gen_cube(ctx: ExecuteContext) -> str | None:
         '      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) |',
         '      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);',
         f'  amdgpu::arith::execute_ternary32(wf, {wave_api(api, 32)}, {wave_api(api, 64)}, flags, modifiers,',
-        f'      {dst[0]}, {src[0]}, {src[1]}, {src[2]});',
+        f'      {dst[0]}, {src[0]}, {src[1]}, {src[2]}, 0xF, 0xF,',
+        '      wf.exec() & wf.vgpr_write_mask());',
     ]
     return '\n'.join(lines)
 
@@ -89,11 +98,16 @@ def gen_mullit(ctx: ExecuteContext) -> str | None:
     dst = ctx.dst_ops
     src = ctx.src_ops
     is_vop3 = ctx.is_vop3
-    if arch not in ('rdna3', 'rdna4') or mnemonic != 'V_MULLIT_F32' or not is_vop3:
+    if (
+        arch not in ('rdna3', 'rdna4', 'cdna5')
+        or mnemonic != 'V_MULLIT_F32'
+        or not is_vop3
+    ):
         return None
     if len(dst) != 1 or len(src) != 3:
         return None
-    api = 'rj_arith_v_mullit_f32' + ('_gfx12' if arch == 'rdna4' else '')
+    # gfx1250 inherits the same NaN, rounding and OMOD model as gfx12.
+    api = 'rj_arith_v_mullit_f32' + ('_gfx12' if arch in ('rdna4', 'cdna5') else '')
     terms = []
     for i, letter in enumerate('ABC'):
         terms += [

@@ -64,6 +64,7 @@ target_link_libraries(hrr_reader PUBLIC hrr::api_args)
 if(TARGET hrr_sign)
   target_link_libraries(hrr_reader PUBLIC hrr_sign)
 endif()
+target_link_libraries(hrr_reader PRIVATE hrr::warnings)
 target_include_directories(hrr_reader PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
   $<INSTALL_INTERFACE:include/hrr/playback>
@@ -99,7 +100,7 @@ if(HRR_BUILD_PLAYBACK)
     "HRR_BUILD_TYPE=\"$<IF:$<BOOL:$<CONFIG>>,$<CONFIG>,unknown>\""
     $<$<BOOL:${WIN32}>:NOMINMAX WIN32_LEAN_AND_MEAN>
   )
-  target_link_libraries(hrr-playback PRIVATE hrr::reader hip::host Threads::Threads)
+  target_link_libraries(hrr-playback PRIVATE hrr::reader hrr::warnings hip::host Threads::Threads)
   if(TARGET hrr_sign)
     target_link_libraries(hrr-playback PRIVATE hrr::sign)
   endif()

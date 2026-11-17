@@ -61,11 +61,34 @@ include(GNUInstallDirs)
 # By default build the Debug Agent tests.
 option(ENABLE_TESTS "Enable building Debug Agent tests" ON)
 
+# Modules that are linked into both the rocm-debug-agent library and the unit
+# tests.  They are compiled once here so the tests exercise the same objects as
+# the shipping library.  They must not depend on libamd-dbgapi or the HSA
+# runtime, only on the amd-dbgapi headers.
+add_library(rocm-debug-agent-core OBJECT)
+target_sources(
+    rocm-debug-agent-core
+    PRIVATE
+        src/agent_config.cpp
+        src/agent_dbgapi_utils.cpp
+        src/agent_utils.cpp
+        src/logging.cpp
+)
+
+set_target_properties(
+    rocm-debug-agent-core
+    PROPERTIES
+        CXX_STANDARD 17
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+        POSITION_INDEPENDENT_CODE ON
+        NO_SYSTEM_FROM_IMPORTED ON
+)
+
 add_library(rocm-debug-agent SHARED)
 target_sources(
     rocm-debug-agent
-    PRIVATE src/agent_config.cpp src/agent_utils.cpp src/code_object.cpp
-            src/debug_agent.cpp src/logging.cpp
+    PRIVATE src/agent_dbgapi_logging.cpp src/code_object.cpp src/debug_agent.cpp
 )
 
 set_target_properties(
@@ -163,6 +186,13 @@ find_package(
 
 find_package(Threads REQUIRED)
 
+# Only the amd-dbgapi headers are used; libamd-dbgapi is not linked.  PUBLIC
+# so that targets linking the core objects also see the headers.
+target_include_directories(
+    rocm-debug-agent-core
+    PUBLIC $<TARGET_PROPERTY:amd-dbgapi,INTERFACE_INCLUDE_DIRECTORIES>
+)
+
 # The HSA headers describe the API table OnLoad receives from ROCr. The agent does not link the
 # runtime: it works with any runtime that registers its r_debug with the driver (ROCr, CLR/CRUX).
 target_include_directories(
@@ -173,6 +203,7 @@ target_include_directories(
 target_link_libraries(
     rocm-debug-agent
     PRIVATE
+        rocm-debug-agent-core
         amd-dbgapi
         elf::elf
         libdw::libdw
@@ -226,20 +257,28 @@ check_cxx_source_compiles(
     HAVE_MEMFD_CREATE
 )
 
-target_compile_options(
-    rocm-debug-agent
-    PRIVATE -Werror -Wall -Wno-attributes -fno-rtti -fvisibility=hidden
+# Shared by rocm-debug-agent and rocm-debug-agent-core so the two cannot drift.
+# The unit test sources reuse only AGENT_WARNING_OPTIONS: they include the
+# GoogleTest headers, which must see the same RTTI setting as the prebuilt
+# GoogleTest library.
+set(AGENT_WARNING_OPTIONS -Werror -Wall -Wno-attributes)
+set(AGENT_COMPILE_OPTIONS
+    ${AGENT_WARNING_OPTIONS}
+    -fno-rtti
+    -fvisibility=hidden
+)
+set(AGENT_COMPILE_DEFINITIONS
+    AMD_INTERNAL_BUILD
+    _GNU_SOURCE
+    __STDC_LIMIT_MACROS
+    __STDC_CONSTANT_MACROS
+    $<$<BOOL:${HAVE_MEMFD_CREATE}>:HAVE_MEMFD_CREATE>
 )
 
-target_compile_definitions(
-    rocm-debug-agent
-    PRIVATE
-        AMD_INTERNAL_BUILD
-        _GNU_SOURCE
-        __STDC_LIMIT_MACROS
-        __STDC_CONSTANT_MACROS
-        $<$<BOOL:${HAVE_MEMFD_CREATE}>:HAVE_MEMFD_CREATE>
-)
+foreach(target rocm-debug-agent rocm-debug-agent-core)
+    target_compile_options(${target} PRIVATE ${AGENT_COMPILE_OPTIONS})
+    target_compile_definitions(${target} PRIVATE ${AGENT_COMPILE_DEFINITIONS})
+endforeach()
 
 install(
     TARGETS rocm-debug-agent

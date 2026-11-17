@@ -28,9 +28,34 @@
 
 namespace rocjitsu {
 
+/// The kind of barrier passed to ExecutionPlugin::onAmdgpuBarrierResolved.
+enum class BarrierKind : uint8_t {
+  /// A workgroup barrier or workgroup trap barrier. It resolves only after
+  /// every wave of the workgroup has arrived or ended.
+  Workgroup,
+  /// A named barrier. It counts signals against a member count set by the
+  /// program and notifies the waves that joined it.
+  Named,
+  /// A cluster barrier or cluster trap barrier. One signal from any wave of
+  /// a workgroup counts for the whole workgroup.
+  Cluster,
+};
+
+/// Optional notification when an implicit instruction wait retires its memory producers.
+class AmdgpuImplicitMemoryWaitObserver {
+public:
+  virtual ~AmdgpuImplicitMemoryWaitObserver() = default;
+  virtual void onAmdgpuImplicitMemoryWait(amdgpu::Wavefront &wf,
+                                          const amdgpu::WaitFields &fields) = 0;
+};
+
 /// @brief Abstract plugin interface for execution hooks.
 ///
 /// Plugins receive callbacks at key points during simulation execution.
+/// Plugin callbacks, policy queries, construction and destruction must not throw.
+/// Expected instruction failures use Wavefront::report_instruction_execution_error();
+/// callbacks must still preserve issue/completion accounting and cancellation.
+/// This is a semantic contract; callback types do not impose noexcept.
 /// All hooks have empty default implementations so plugins only override
 /// what they need. The no-plugin path has near-zero overhead (the
 /// default empty group returns before locking or dispatch).
@@ -270,7 +295,10 @@ public:
   /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
   virtual void onAmdgpuWavefrontDispatched(amdgpu::Wavefront & /*wf*/) {}
 
-  /// Called when a wavefront terminates normally, before its resources are freed.
+  /// Called when a wavefront terminates normally, after its memory operations
+  /// have drained and before its resources are freed.
+  /// This is a terminal notification; report problems through sink().write().
+  /// Instruction-execution errors recorded here are discarded with the wave.
   /// Dispatch cancellation uses onAmdgpuWavefrontCancelled instead.
   /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
   virtual void onAmdgpuWavefrontHalted(amdgpu::Wavefront & /*wf*/) {}
@@ -342,8 +370,11 @@ public:
   virtual void onAmdgpuWriteScalarRegister(const amdgpu::Wavefront * /*wf*/, RegisterRef /*reg*/) {}
 
   /// Called with the waves synchronized by a completed barrier domain.
+  /// Workgroup callbacks include all surviving waves of one workgroup.
+  /// Waves that ended before the barrier resolved are not included.
   /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
-  virtual void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> /*wavefronts*/) {}
+  virtual void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> /*wavefronts*/,
+                                       BarrierKind /*kind*/) {}
 
   /// Whether this plugin consumes onAmdgpuMemoryAccessRouted(). Building the
   /// observation is real work on the per-instruction path, so a plugin that
@@ -370,11 +401,23 @@ public:
   /// continue unless a plugin explicitly opts out.
   virtual bool observes_sgpr_reads() const { return true; }
 
+  /// Opt in to reads of the LDS-direct VALU source. Sampled when the plugin is registered.
+  virtual bool observes_lds_direct_reads() const { return false; }
+  virtual void onAmdgpuLdsDirectRead(const amdgpu::Wavefront &, uint32_t, uint32_t, uint32_t) {}
+
 private:
   friend class ExecutionPluginGroup;
   std::string name_;
   uint32_t slot_index_ = 0;
   PluginSink *sink_ = &StderrSink::instance();
+};
+
+/// Optional interface for plugins that observe a wave entering its trap handler.
+/// Separate from ExecutionPlugin to preserve its vtable for loadable plugins.
+class AmdgpuTrapEntryObserver {
+public:
+  virtual ~AmdgpuTrapEntryObserver() = default;
+  virtual void onAmdgpuTrapEntered(amdgpu::Wavefront &wf) = 0;
 };
 
 } // namespace rocjitsu

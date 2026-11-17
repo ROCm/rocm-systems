@@ -90,7 +90,10 @@ class SmallHeap {
   iterator_t merge(iterator_t low, iterator_t high);
 
  public:
-  SmallHeap() : pool(nullptr), length(0), total_free(0) {}
+  SmallHeap() : pool(nullptr), length(0), total_free(0) {
+    // Keep the high water mark defined so high_split() is safe on an empty heap.
+    high.insert((void*)0xFFFFFFFFFFFFFFFFull);
+  }
   SmallHeap(void* base, size_t length)
       : pool(base), length(length), total_free(length) {
     assert(pool != nullptr && "Invalid base address.");

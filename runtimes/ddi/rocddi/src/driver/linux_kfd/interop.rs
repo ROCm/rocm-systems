@@ -109,14 +109,9 @@ impl LinuxKfdDriver {
                 "system import requires a device",
             )
         })?;
-        if !peers.iter().all(|peer| owner.shares_vm(peer)) {
-            return Err(error(
-                ErrorKind::Unsupported,
-                "system import requires one native GPU address domain",
-            ));
-        }
         LinuxAllocation::import_system_dma_buf(
             owner.vm.clone(),
+            peers.iter().map(|peer| peer.vm.clone()),
             descriptor,
             source_offset,
             byte_length,
@@ -180,39 +175,6 @@ impl LinuxKfdDriver {
         allocation: &LinuxAllocation,
     ) -> Result<KfdIpcMemoryHandle, Error> {
         allocation.export_ipc_memory()
-    }
-
-    pub(crate) fn set_kfd_svm_attributes(
-        &self,
-        address: u64,
-        size: u64,
-        attributes: &[KfdSvmAttribute],
-    ) -> Result<(), Error> {
-        self.ensure_open()?;
-        if attributes.is_empty() {
-            return Ok(());
-        }
-        let mut native = self.encode_svm_attributes(attributes)?;
-        self.kfd()?
-            .svm_attributes(address, size, uapi::SVM_OP_SET_ATTR, native.as_mut_slice())
-            .map_err(|source| native_error("AMDKFD_IOC_SVM set attributes", source))
-    }
-
-    pub(crate) fn get_kfd_svm_attributes(
-        &self,
-        address: u64,
-        size: u64,
-        attributes: &mut [KfdSvmAttribute],
-    ) -> Result<(), Error> {
-        self.ensure_open()?;
-        if attributes.is_empty() {
-            return Ok(());
-        }
-        let mut native = self.encode_svm_attributes(attributes)?;
-        self.kfd()?
-            .svm_attributes(address, size, uapi::SVM_OP_GET_ATTR, native.as_mut_slice())
-            .map_err(|source| native_error("AMDKFD_IOC_SVM get attributes", source))?;
-        self.decode_svm_attributes(attributes, native.as_slice())
     }
 
     pub(crate) fn retain_kfd_signal_event_page(

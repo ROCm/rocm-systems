@@ -12,7 +12,7 @@
 #include "common/registers.h"
 #include "common/semantics.h"
 #include "common/wave.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <cstring>
 #include <gtest/gtest.h>
@@ -25,11 +25,11 @@ namespace rocjitsu::arith::test {
 // Reference and invocation see separate register banks so in-place routing always
 // reads the original wave. Scenarios pair masks with selectors rather than taking
 // an exhaustive Cartesian product.
-template <int Lanes, bool Dpp = false, typename Call, typename Reference>
+template <int Lanes, bool Dpp = false, int RegisterCount = 6, typename Call, typename Reference>
 void check_register(Call call, Reference reference, uint64_t modifiers = 0) {
-  Registers<6, Lanes> input;
+  Registers<RegisterCount, Lanes> input;
   std::minstd_rand random;
-  for (int reg = 0; reg < 6; ++reg) {
+  for (int reg = 0; reg < RegisterCount; ++reg) {
     for (int lane = 0; lane < Lanes; ++lane) {
       input.v[reg][lane] = random_word(random);
     }
@@ -55,7 +55,7 @@ void check_register(Call call, Reference reference, uint64_t modifiers = 0) {
           reference(expected, input, exec_mask, mode, aliasing_offset, scenario);
           ASSERT_EQ(call(cpu | semantics, exec_mask, mode, actual, aliasing_offset, scenario),
                     RJ_ARITH_SUCCESS);
-          for (int reg = 0; reg < 6; ++reg) {
+          for (int reg = 0; reg < RegisterCount; ++reg) {
             for (int lane = 0; lane < Lanes; ++lane) {
               ASSERT_EQ(actual.v[reg][lane], expected.v[reg][lane])
                   << "register=" << reg << ", lane=" << lane;

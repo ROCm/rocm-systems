@@ -30,7 +30,7 @@ def context(arch, name, dst, src, *, is_vop3=False, enc_name=""):
     )
 
 
-@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4', 'cdna5'])
 def test_mullit_loose_policy_and_modifiers(arch):
     assert 'V_MULLIT_F32' in FLOAT_NAMES
     body = gen_mullit(
@@ -51,10 +51,10 @@ def test_mullit_loose_policy_and_modifiers(arch):
         'CLAMP',
     ):
         assert 'RJ_ARITH_ALU_' + modifier in body
-    assert ('rj_arith_v_mullit_f32_w32_gfx12' in body) == (arch == 'rdna4')
+    assert ('rj_arith_v_mullit_f32_w32_gfx12' in body) == (arch in ('rdna4', 'cdna5'))
     assert (
         gen_mullit(
-            context('cdna5', 'V_MULLIT_F32', ['d'], ['a', 'b', 'c'], is_vop3=True)
+            context('cdna2', 'V_MULLIT_F32', ['d'], ['a', 'b', 'c'], is_vop3=True)
         )
         is None
     )
@@ -123,6 +123,7 @@ def test_cube_reuses_ternary_adapter_and_guest_policies(arch):
         api = 'rj_arith_' + name.lower()
         assert api + '_w64' + arch_suffix in body
         assert 'execute_ternary32' in body
+        assert 'wf.exec() & wf.vgpr_write_mask()' in body
         assert 'arithmetic_flags()' in body
         assert 'fp_round_mode_f32()' in body
         assert 'RJ_ARITH_FP_IEEE_MODE' in body
@@ -140,7 +141,7 @@ def test_cube_reuses_ternary_adapter_and_guest_policies(arch):
         ):
             assert 'RJ_ARITH_ALU_' + modifier in body
         assert (
-            gen_cube(context('cdna4', name, ['dst'], ['x', 'y', 'z'], is_vop3=True))
+            gen_cube(context('cdna2', name, ['dst'], ['x', 'y', 'z'], is_vop3=True))
             is None
         )
         assert gen_cube(context(arch, name, ['dst'], ['x', 'y'], is_vop3=True)) is None
@@ -148,3 +149,18 @@ def test_cube_reuses_ternary_adapter_and_guest_policies(arch):
             gen_cube(context(arch, name, ['dst'], ['x', 'y', 'z'], is_vop3=False))
             is None
         )
+
+
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4', 'cdna5'])
+def test_cdna_cube_reuses_matching_nan_and_omod_policy(arch):
+    from amdisa.codegen.execute.rj_arith_graphics import CUBE_NAMES, gen_cube
+
+    for name in sorted(CUBE_NAMES):
+        body = gen_cube(context(arch, name, ['d'], ['x', 'y', 'z'], is_vop3=True))
+        suffix = '_gfx12' if arch == 'cdna5' else ''
+        for lanes in (32, 64):
+            assert f'rj_arith_{name.lower()}_w{lanes}{suffix}' in body
+        assert ('RJ_ARITH_FP_DX10_CLAMP_OFF' in body) == (arch != 'cdna5')
+        assert 'wf.fp_round_mode_f32()' in body
+        assert 'wf.ieee_mode()' in body
+        assert 'd, x, y, z' in body

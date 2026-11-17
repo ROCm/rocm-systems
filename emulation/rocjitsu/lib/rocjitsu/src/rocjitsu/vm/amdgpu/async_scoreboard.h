@@ -173,8 +173,8 @@ public:
 
   // Admission requires production decoding to have rejected every operand or
   // format that can reach report_instruction_execution_error() in a candidate.
-  // Helpers transport exceptions only: reporting through the shared Wavefront
-  // error field would race the issuer clearing it for subsequent instructions.
+  // Helpers transport exceptions only: reading or reporting through the shared
+  // Wavefront error field races the issuer clearing it for later instructions.
   // Keep new candidates synchronous unless their decode checks establish this
   // invariant (including any execution-state checks), and cover those checks.
   // Test/custom callbacks submitted here must obey the same restriction.

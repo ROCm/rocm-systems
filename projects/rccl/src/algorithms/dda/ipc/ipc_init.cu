@@ -13,8 +13,12 @@
 #include "debug.h"
 #include "algorithms/dda/dda_init_detail.h"
 #include "algorithms/dda/ipc/ipc_mem_handler.h"
+#include "bootstrap.h"
 
 #include <cuda_runtime.h>
+
+#include <algorithm>
+#include <vector>
 
 using nccl_dda_detail::DdaIpcBarrierState;
 using nccl_dda_detail::ddaMaxNBlocksForScratch;
@@ -171,35 +175,64 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   const int nBlocksMax = ddaMaxNBlocksForScratch();
   auto barrierPair = dda::common::IpcGpuBarrier::mallocAndInit(kDdaNranks, nBlocksMax, comm->rank, comm->bootstrap,
                                                                dda::common::DdaKernelParams{comm->abortFlagDev});
+  // From here on every rank reaches the ready allgather below, so a local failure cannot leave peers on DDA.
+  DdaIpcBarrierState* barrierState = nullptr;
   if (!barrierPair.first) {
-    free(comm->ddaPeerPtrsHost);
-    comm->ddaPeerPtrsHost = nullptr;
-    CUDACHECKIGNORE(cudaFree(peerDev));
-    delete handler;
-    CUDACHECKIGNORE(cudaFree(scratch));
     WARN("ncclDdaIpcCommInit: IpcGpuBarrier::mallocAndInit failed");
-    return ncclSuccess;
+  } else if ((barrierState = new (std::nothrow) DdaIpcBarrierState()) == nullptr) {
+    WARN("ncclDdaIpcCommInit: OOM allocating DdaIpcBarrierState");
+  } else {
+    barrierState->resources = std::move(barrierPair.first);
+    barrierState->barrierHost = barrierPair.second;
   }
 
-  auto* barrierState = new (std::nothrow) DdaIpcBarrierState();
-  if (barrierState == nullptr) {
+  // LL epoch cells (DDA broadcast LL); optional, a failure only disables that tier.
+  // Sized for the CU-derived cap so the Broadcast grid is not limited by the cells.
+  const size_t epochLen = nccl_dda_detail::ddaLLEpochCount(
+    kDdaNranks, nccl_dda_detail::ddaFabricMaxNBlocksForScratch(comm->cuCount, nullptr));
+  uint32_t* epochDev = nullptr;
+  if (barrierState != nullptr && (cudaMalloc(&epochDev, epochLen * sizeof(uint32_t)) != cudaSuccess ||
+                                  cudaMemset(epochDev, 0, epochLen * sizeof(uint32_t)) != cudaSuccess)) {
+    (void)cudaGetLastError(); // clear the sticky error
+    CUDACHECKIGNORE(cudaFree(epochDev));
+    epochDev = nullptr;
+  }
+
+  // Rank-uniform outcome, else ranks pick different backends and hang. 0: no DDA IPC, 1: no LL epoch cells, 2: all.
+  int ready = barrierState == nullptr ? 0 : (epochDev == nullptr ? 1 : 2);
+  std::vector<int> allReady(kDdaNranks, 0);
+  allReady[comm->rank] = ready;
+  if (bootstrapAllGather(comm->bootstrap, allReady.data(), sizeof(int)) != ncclSuccess) {
+    ready = 0;
+  } else {
+    ready = *std::min_element(allReady.begin(), allReady.end());
+  }
+  if (ready < 2 && epochDev != nullptr) {
+    CUDACHECKIGNORE(cudaFree(epochDev));
+    epochDev = nullptr;
+  }
+  if (ready == 0) {
+    delete barrierState;
     barrierPair.first.reset();
     free(comm->ddaPeerPtrsHost);
     comm->ddaPeerPtrsHost = nullptr;
     CUDACHECKIGNORE(cudaFree(peerDev));
     delete handler;
     CUDACHECKIGNORE(cudaFree(scratch));
-    WARN("ncclDdaIpcCommInit: OOM allocating DdaIpcBarrierState");
+    ATTN("DDA IPC setup failed on a rank; skipping the DDA IPC path");
     return ncclSuccess;
   }
-  barrierState->resources = std::move(barrierPair.first);
-  barrierState->barrierHost = barrierPair.second;
+  if (ready == 1) {
+    ATTN("LL epoch cells unavailable on a rank; DDA Broadcast disabled");
+  }
 
   comm->ddaIpcMemHandler = handler;
   comm->ddaScratch = scratch;
   comm->ddaScratchBytes = bytes;
   comm->ddaPeerPtrsDev = peerDev;
   comm->ddaIpcBarrierState = barrierState;
+  comm->ddaLLEpochDev = epochDev;
+  comm->ddaLLEpochLen = epochDev != nullptr ? (int)epochLen : 0;
   INFO(NCCL_INIT, "ncclDdaIpcCommInit: scratch %zu bytes, IpcGpuBarrier nBlocks=%d, peer IPC table on device", bytes,
        nBlocksMax);
   return ncclSuccess;
@@ -261,6 +294,9 @@ ncclResult_t ncclDdaIpcCommFini(ncclComm* comm) {
   comm->ddaPeerPtrsDev = nullptr;
   free(comm->ddaPeerPtrsHost);
   comm->ddaPeerPtrsHost = nullptr;
+  CUDACHECKIGNORE(cudaFree(comm->ddaLLEpochDev));
+  comm->ddaLLEpochDev = nullptr;
+  comm->ddaLLEpochLen = 0;
   if (comm->ddaIpcMemHandler != nullptr) {
     delete comm->ddaIpcMemHandler;
     comm->ddaIpcMemHandler = nullptr;
