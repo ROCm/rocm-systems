@@ -63,6 +63,8 @@ Settings::Settings() {
   imageBufferWar_ = false;
 
   sdma_p2p_threshold_ = ROC_P2P_SDMA_SIZE * Ki;
+  blitStreamCopyThreshold_ = 0;
+  blitStreamNtLoadThreshold_ = 0;
   hmmFlags_ = (!flagIsDefault(ROC_HMM_FLAGS)) ? ROC_HMM_FLAGS : 0;
 
   rocr_backend_ = true;
@@ -197,6 +199,14 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
     gwsInitSupported_ = false;
   }
 
+  if (gfxipMajor == 9 && gfxipMinor == 5) {
+    // Above half of the 256MB MALL, the copy no longer fits in cache and the grid-stride blit
+    // falls well short of HBM bandwidth on gfx950. Once the source alone exceeds MALL, caching
+    // it has no reuse value, so stream it too.
+    blitStreamCopyThreshold_ = 128 * Mi;
+    blitStreamNtLoadThreshold_ = 256 * Mi;
+  }
+
   if (GPU_MIPMAP) {
     enableExtension(ClKhrMipMapImage);
     enableExtension(ClKhrMipMapImageWrites);
@@ -266,6 +276,14 @@ void Settings::override() {
 
   if (!flagIsDefault(ROC_USE_FGS_KERNARG)) {
     fgs_kernel_arg_ = ROC_USE_FGS_KERNARG;
+  }
+
+  if (!flagIsDefault(DEBUG_CLR_BLIT_STREAM_COPY_SIZE)) {
+    blitStreamCopyThreshold_ = static_cast<size_t>(DEBUG_CLR_BLIT_STREAM_COPY_SIZE) * Ki;
+  }
+
+  if (!flagIsDefault(DEBUG_CLR_BLIT_STREAM_NT_LOAD_SIZE)) {
+    blitStreamNtLoadThreshold_ = static_cast<size_t>(DEBUG_CLR_BLIT_STREAM_NT_LOAD_SIZE) * Ki;
   }
 
   if (!flagIsDefault(DEBUG_CLR_BLIT_KERNARG_OPT)) {

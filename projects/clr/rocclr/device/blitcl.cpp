@@ -128,6 +128,47 @@ const char* BlitLinearSourceCode = BLIT_KERNELS(
       }
     }
 
+    // Large same-device copies: one 16-byte element per work-item over a full grid. Workgroups are
+    // dispatched in address order, which keeps the in-flight window contiguous in DRAM.
+    // The store is nontemporal so the destination does not evict the source from MALL. The NT
+    // variant also streams the source, for copies whose source cannot stay resident anyway.
+    // These are separate kernels on purpose: a kernarg-selected plain/nontemporal branch gets
+    // merged by the compiler and loses the hint.
+    __kernel void __amd_rocclr_copyBufferStream(__global uchar* src, __global uchar* dst,
+                                                ulong count, uint remainder, uint workgroup_size) {
+      ulong id = (ulong)__builtin_amdgcn_workgroup_id_x() * workgroup_size +
+                 __builtin_amdgcn_workitem_id_x();
+      __global ulong2* srcD = (__global ulong2*)(src);
+      __global ulong2* dstD = (__global ulong2*)(dst);
+      if (id < count) {
+        __builtin_nontemporal_store(srcD[id], &dstD[id]);
+      }
+      if ((remainder != 0) && (id == 0)) {
+        ulong tail = count * sizeof(ulong2);
+        for (ulong i = tail; i < tail + remainder; ++i) {
+          dst[i] = src[i];
+        }
+      }
+    }
+
+    __kernel void __amd_rocclr_copyBufferStreamNT(__global uchar* src, __global uchar* dst,
+                                                  ulong count, uint remainder,
+                                                  uint workgroup_size) {
+      ulong id = (ulong)__builtin_amdgcn_workgroup_id_x() * workgroup_size +
+                 __builtin_amdgcn_workitem_id_x();
+      __global ulong2* srcD = (__global ulong2*)(src);
+      __global ulong2* dstD = (__global ulong2*)(dst);
+      if (id < count) {
+        __builtin_nontemporal_store(__builtin_nontemporal_load(&srcD[id]), &dstD[id]);
+      }
+      if ((remainder != 0) && (id == 0)) {
+        ulong tail = count * sizeof(ulong2);
+        for (ulong i = tail; i < tail + remainder; ++i) {
+          dst[i] = src[i];
+        }
+      }
+    }
+
     typedef struct CopyBufferBatchDescriptor {
       ulong source_address;
       ulong destination_address;

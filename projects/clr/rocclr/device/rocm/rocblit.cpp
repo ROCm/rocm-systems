@@ -13,6 +13,7 @@
 #include "utils/debug.hpp"
 #include "utils/nontemporal.hpp"
 #include <algorithm>
+#include <limits>
 #include <map>
 
 namespace amd::roc {
@@ -2933,6 +2934,51 @@ bool KernelBlitManager::shaderCopyBuffer(address dst, address src, const amd::Co
   return result;
 }
 
+// ================================================================================================
+bool KernelBlitManager::shaderCopyBufferStream(address dst, address src,
+                                               const amd::Coord3D& dstOrigin,
+                                               const amd::Coord3D& srcOrigin,
+                                               const amd::Coord3D& sizeIn,
+                                               bool attachSignal) const {
+  const uint32_t kBlitType = (sizeIn[0] > dev().settings().blitStreamNtLoadThreshold_)
+                                 ? BlitCopyBufferStreamNT
+                                 : BlitCopyBufferStream;
+  constexpr uint32_t kElementSize = 2 * sizeof(uint64_t);
+  constexpr size_t kLocalWorkSize = 512;
+
+  const uint64_t srcAddr = reinterpret_cast<uint64_t>(src) + srcOrigin[0];
+  const uint64_t dstAddr = reinterpret_cast<uint64_t>(dst) + dstOrigin[0];
+  if (((srcAddr % kElementSize) != 0) || ((dstAddr % kElementSize) != 0)) {
+    return false;
+  }
+
+  uint64_t count = sizeIn[0] / kElementSize;
+  uint32_t remainder = sizeIn[0] % kElementSize;
+  // The dispatch grid size is 32-bit
+  size_t globalWorkSize = amd::alignUp(count, kLocalWorkSize);
+  if (count == 0 || globalWorkSize > std::numeric_limits<uint32_t>::max()) {
+    return false;
+  }
+
+  setArgument(kernels_[kBlitType], 0, sizeof(src), reinterpret_cast<void*>(src), srcOrigin[0],
+              nullptr, true);
+  setArgument(kernels_[kBlitType], 1, sizeof(dst), reinterpret_cast<void*>(dst), dstOrigin[0],
+              nullptr, true);
+  setArgument(kernels_[kBlitType], 2, sizeof(count), &count);
+  setArgument(kernels_[kBlitType], 3, sizeof(remainder), &remainder);
+  uint32_t lws = kLocalWorkSize;
+  setArgument(kernels_[kBlitType], 4, sizeof(lws), &lws);
+
+  amd::NDRangeContainer ndrange(1, nullptr, &globalWorkSize, &kLocalWorkSize);
+
+  address parameters = captureArguments(kernels_[kBlitType]);
+  bool result = gpu().submitKernelInternal(ndrange, *kernels_[kBlitType], parameters, nullptr, 0,
+                                           nullptr, nullptr, attachSignal);
+  releaseArguments(parameters);
+
+  return result;
+}
+
 // This layout must match the struct in blitcl.cpp
 struct CopyBufferBatchDescriptor {
   uint64_t source_address;
@@ -3515,10 +3561,24 @@ bool KernelBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& ds
         // scope issued by synchronization packet.
         gpu().addSystemScope();
       }
-      result =
-          shaderCopyBuffer(reinterpret_cast<address>(dstMemory.virtualAddress()),
-                           reinterpret_cast<address>(srcMemory.virtualAddress()), dstOrigin,
-                           srcOrigin, sizeIn, entire, blitWg, copyMetadata, !copyMetadata.isAsync_);
+      // Large copies within this device's local memory use a full grid instead of grid-stride
+      const size_t streamThreshold = dev().settings().blitStreamCopyThreshold_;
+      const uint64_t localAgent = dev().getBackendDevice().handle;
+      const bool localCopy = !srcMemory.isHostMemDirectAccess() &&
+                             !dstMemory.isHostMemDirectAccess() &&
+                             srcRocMemory.getOwningAgent().handle == localAgent &&
+                             dstRocMemory.getOwningAgent().handle == localAgent;
+      if (streamThreshold != 0 && sizeIn[0] > streamThreshold && localCopy) {
+        result = shaderCopyBufferStream(reinterpret_cast<address>(dstMemory.virtualAddress()),
+                                        reinterpret_cast<address>(srcMemory.virtualAddress()),
+                                        dstOrigin, srcOrigin, sizeIn, !copyMetadata.isAsync_);
+      }
+      if (!result) {
+        result = shaderCopyBuffer(reinterpret_cast<address>(dstMemory.virtualAddress()),
+                                  reinterpret_cast<address>(srcMemory.virtualAddress()), dstOrigin,
+                                  srcOrigin, sizeIn, entire, blitWg, copyMetadata,
+                                  !copyMetadata.isAsync_);
+      }
     }
   }
 

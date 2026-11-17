@@ -219,6 +219,13 @@ release(uint, ROC_SIGNAL_POOL_SIZE, 64,                                       \
         "Initial size of HSA signal pool")                                    \
 release(uint, DEBUG_CLR_LIMIT_BLIT_WG, 16,                                    \
         "Limit the number of workgroups in blit operations")                  \
+release(uint, DEBUG_CLR_BLIT_STREAM_COPY_SIZE, 0,                             \
+        "Same-device blit copies larger than this size in KB use one element "\
+        "per work-item with nontemporal stores; 0 disables. "                 \
+        "Default is device specific")                                         \
+release(uint, DEBUG_CLR_BLIT_STREAM_NT_LOAD_SIZE, 0,                          \
+        "Those copies also use nontemporal loads above this size in KB. "     \
+        "Default is device specific")                                         \
 release(bool, DEBUG_CLR_BLIT_KERNARG_OPT, false,                              \
         "Enable blit kernel arguments optimization")                          \
 release(bool, ROC_SKIP_KERNEL_ARG_COPY, false,                                \

@@ -164,6 +164,7 @@ set(TEST_SRC
     hipMemset2DAsyncMultiThreadAndKernel.cc
     hipMemcpyDtoD.cc
     hipMemcpyDtoDAsync.cc
+    hipMemcpyLargeD2D.cc
     hipHostMalloc.cc
     hipMemcpy_EdgeCases.cc
     hipMemcpy_derivatives.cc

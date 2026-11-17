@@ -308,6 +308,8 @@ class KernelBlitManager : public DmaBlitManager {
     StreamOpsIncrement,
     StreamOpsDecrement,
     BlitCopyBufferBatch,
+    BlitCopyBufferStream,
+    BlitCopyBufferStreamNT,
     BlitLinearTotal,
     FillImage = BlitLinearTotal,
     BlitCopyImage,
@@ -627,6 +629,12 @@ class KernelBlitManager : public DmaBlitManager {
                         const uint32_t blitWg, amd::CopyMetadata copyMetadata,
                         bool attachSignal = false) const;
 
+  //! Copies a large same-device buffer with one element per work-item.
+  //! Returns false if the copy isn't eligible, so the caller can fall back to shaderCopyBuffer.
+  bool shaderCopyBufferStream(address dst, address src, const amd::Coord3D& dstOrigin,
+                              const amd::Coord3D& srcOrigin, const amd::Coord3D& size,
+                              bool attachSignal) const;
+
   //! Returns true if a linear buffer copy should use the shader path.
   bool useShaderCopyBufferPath(const Memory& srcMemory, const Memory& dstMemory, size_t size,
                                amd::CopyMetadata copyMetadata,
@@ -670,6 +678,8 @@ class KernelBlitManager : public DmaBlitManager {
     "__amd_rocclr_streamOpsIncrement",
     "__amd_rocclr_streamOpsDecrement",
     "__amd_rocclr_copyBufferBatch",
+    "__amd_rocclr_copyBufferStream",
+    "__amd_rocclr_copyBufferStreamNT",
     "__amd_rocclr_fillImage",
     "__amd_rocclr_copyImage",
     "__amd_rocclr_copyImage1DA",

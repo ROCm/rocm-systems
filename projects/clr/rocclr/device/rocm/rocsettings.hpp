@@ -58,8 +58,11 @@ class Settings : public device::Settings {
   size_t pinnedXferSize_;     //!< Pinned buffer size for transfer
   size_t pinnedMinXferSize_;  //!< Minimal buffer size for pinned transfer
 
-  size_t sdmaCopyThreshold_;   //!< Use SDMA to copy above this size
-  size_t sdma_p2p_threshold_;  //!< Use SDMA in P2P above this size
+  size_t sdmaCopyThreshold_;          //!< Use SDMA to copy above this size
+  size_t sdma_p2p_threshold_;         //!< Use SDMA in P2P above this size
+  size_t blitStreamCopyThreshold_;    //!< Same-device blit copies above this size use the
+                                      //!< one-element-per-work-item kernel (0 = disabled)
+  size_t blitStreamNtLoadThreshold_;  //!< Above this size, that kernel also streams the source
 
   uint32_t hmmFlags_;       //!< HMM functionality control flags
   uint32_t limit_blit_wg_;  //!< The number of workgroups for blit execution
