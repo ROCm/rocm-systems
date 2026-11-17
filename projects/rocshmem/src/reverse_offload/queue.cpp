@@ -89,6 +89,10 @@ void Queue::sfence_flush_hdp() {
     asm volatile("sfence" ::: "memory");
 #elif defined(__powerpc__)
     asm volatile("lwsync" ::: "memory");
+#elif defined(__aarch64__)
+    // Order the queue stores before the HDP flush, an MMIO write the GPU
+    // observes: DSB, as in the Linux arm64 wmb(), not just a DMB.
+    asm volatile("dsb st" ::: "memory");
 #else
 #error "Unsupported architecture: add a store fence for this platform"
 #endif
