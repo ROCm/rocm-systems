@@ -7,13 +7,15 @@
 // Host-only microtests for src/ras/progress_monitor.cc: the per-device worker that mirrors each registered
 // communicator's device progress counters into host memory.
 
-#include <gtest/gtest.h>
-
 #include <atomic>
+#include <chrono>
 #include <cstring>
 #include <memory>
 #include <mutex>
+#include <thread>
 #include <vector>
+
+#include <gtest/gtest.h>
 
 #include "comm.h"
 #include "fakes/hip_fakes.h"
@@ -27,6 +29,8 @@ namespace {
 
 hipStream_t const kSideStream = reinterpret_cast<hipStream_t>(0x51);
 constexpr int kCallerDev = 3;
+// The device hipSetDevice last selected on the calling thread.
+thread_local int t_currentDev = -1;
 
 class RasProgressMonitorMicrotest : public ::testing::Test {
  protected:
@@ -41,6 +45,7 @@ class RasProgressMonitorMicrotest : public ::testing::Test {
     };
     g_hipSetDevice = [this](int dev) {
       lastSetDevice_ = dev;
+      t_currentDev = dev;
       return setDeviceResult_.load();
     };
     g_hipThreadExchangeStreamCaptureMode = [this](hipStreamCaptureMode*) { return captureModeResult_.load(); };
@@ -59,6 +64,7 @@ class RasProgressMonitorMicrotest : public ::testing::Test {
     };
     g_hipMemcpyAsync = [this](void* dst, const void* src, size_t n, hipMemcpyKind kind, hipStream_t stream) {
       if (kind != hipMemcpyDeviceToHost || stream != kSideStream) return hipErrorInvalidValue;
+      copyDev_ = t_currentDev;
       copies_++;
       if (memcpyResult_ != hipSuccess) return memcpyResult_.load();
       std::lock_guard<std::mutex> lock(countersMutex_);
@@ -116,6 +122,7 @@ class RasProgressMonitorMicrotest : public ::testing::Test {
   std::atomic<int> streamSyncs_{0};
   std::atomic<int> streamsDestroyed_{0};
   std::atomic<int> copies_{0};
+  std::atomic<int> copyDev_{-1};
   std::atomic<int> eventRecords_{0};
 };
 
@@ -146,6 +153,7 @@ TEST_F(RasProgressMonitorMicrotest, WorkerMirrorsDeviceCountersIntoHostMemory) {
   ASSERT_EQ(ncclSuccess, ncclProgressCounterMonitorInit(AddComm(1, 42)));
   EXPECT_EQ(kCallerDev, lastSetDevice_);  // setup restores the caller's device
   EXPECT_TRUE(waitUntil([&] { return HostMarker(0) == 42; }));
+  EXPECT_EQ(1, copyDev_);  // the worker copies on the comm's device
   EXPECT_TRUE(waitUntil([&] { return eventRecords_ > 0; }));
   // The device keeps counting; later polls pick that up.
   SetDeviceMarker(0, 43);
@@ -209,7 +217,10 @@ TEST_F(RasProgressMonitorMicrotest, InitFailsWhenTheDeviceCannotBeSelected) {
 
 TEST_F(RasProgressMonitorMicrotest, InitFailsWhenTheWorkerCannotStart) {
   captureModeResult_ = hipErrorUnknown;
+  auto start = std::chrono::steady_clock::now();
   EXPECT_EQ(ncclSystemError, ncclProgressCounterMonitorInit(AddComm(1, 10)));
+  // The worker wakes Init as it stops, well before Init's 2000 ms start-up deadline.
+  EXPECT_LT(std::chrono::steady_clock::now() - start, std::chrono::milliseconds(1000));
   EXPECT_EQ(1, streamsDestroyed_);
 }
 
@@ -219,6 +230,37 @@ TEST_F(RasProgressMonitorMicrotest, FailedCopyLaunchRecordsNoCompletionEvent) {
   // Two polls' worth of failed launches.
   EXPECT_TRUE(waitUntil([&] { return copies_ >= 2; }));
   EXPECT_EQ(0, eventRecords_);
+}
+
+TEST_F(RasProgressMonitorMicrotest, PendingCopyHoldsBackTheNextOne) {
+  // Every completion query reports the recorded copy still in flight.
+  g_hipAsyncOpsResult = hipErrorNotReady;
+  ASSERT_EQ(ncclSuccess, ncclProgressCounterMonitorInit(AddComm(1, 10)));
+  ASSERT_TRUE(waitUntil([&] { return eventRecords_ == 1; }));
+  // Several 50 ms polls.
+  std::this_thread::sleep_for(std::chrono::milliseconds(250));
+  EXPECT_EQ(1, copies_);
+  EXPECT_EQ(1, eventRecords_);
+}
+
+TEST_F(RasProgressMonitorMicrotest, IntervalsAreClampedAndWarningsRateLimited) {
+  EXPECT_EQ(kProgressCounterMonitorMinPollMs, progressCounterMonitorPollIntervalMs());
+  g_loadParam = ParamOverride({{"PROGRESS_COUNTER_MONITOR_POLL_MS", 200},
+                               {"PROGRESS_COUNTER_MONITOR_STALE_MS", 10},
+                               {"PROGRESS_COUNTER_MONITOR_STALE_WARN_SEC", 0}});
+  EXPECT_EQ(200, progressCounterMonitorPollIntervalMs());
+  EXPECT_EQ(kProgressCounterMonitorMinStaleMs, progressCounterMonitorStaleThresholdMs());
+  EXPECT_EQ(0u, progressCounterMonitorWarnIntervalNs());
+  g_loadParam = ParamOverride({{"PROGRESS_COUNTER_MONITOR_STALE_WARN_SEC", 3}});
+  EXPECT_EQ(3000000000ull, progressCounterMonitorWarnIntervalNs());
+
+  ncclGpuProgressCounterMonitor g{};
+  uint64_t lastWarnNs = 0;
+  EXPECT_FALSE(progressCounterMonitorShouldWarn(&g, &lastWarnNs, 100, 0));  // warnings disabled
+  EXPECT_TRUE(progressCounterMonitorShouldWarn(&g, &lastWarnNs, 10, 50));  // first warning, within one interval
+  EXPECT_FALSE(progressCounterMonitorShouldWarn(&g, &lastWarnNs, 59, 50));
+  EXPECT_TRUE(progressCounterMonitorShouldWarn(&g, &lastWarnNs, 60, 50));
+  EXPECT_EQ(60u, lastWarnNs);
 }
 
 }  // namespace
