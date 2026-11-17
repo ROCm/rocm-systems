@@ -1751,6 +1751,7 @@ def add_unit_counter(df: pd.DataFrame) -> None:
 @demarcate
 def impute_counters_iteration_multiplex(
     df: pd.DataFrame,
+    policy: str,
     workload_dir: Path,
 ) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
     """Fill in the counters each launch did not collect under iteration
@@ -1788,14 +1789,18 @@ def impute_counters_iteration_multiplex(
     ]
 
     # Group by unique kernel configurations
-    unique_occurences = df.groupby(
-        [
-            "Kernel_Name",
-            "Grid_Size",
-            "Workgroup_Size",
-            "LDS_Per_Workgroup",
-        ],
-        as_index=False,
+    unique_occurences = (
+        df.groupby("Kernel_Name")
+        if policy == "kernel"
+        else df.groupby(
+            [
+                "Kernel_Name",
+                "Grid_Size",
+                "Workgroup_Size",
+                "LDS_Per_Workgroup",
+            ],
+            as_index=False,
+        )
     )
 
     counter_columns = [col for col in df.columns if col not in non_counter_column_index]

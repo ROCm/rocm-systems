@@ -640,9 +640,10 @@ class db_analysis(OmniAnalyze_Base):
             if pmc_df.empty:
                 continue
 
-            if self._profiling_config.get("iteration_multiplexing"):
+            if self._profiling_config.get("iteration_multiplexing") is not None:
                 pmc_df, pass_tables = impute_counters_iteration_multiplex(
                     pmc_df,
+                    policy=self._profiling_config["iteration_multiplexing"],
                     workload_dir=Path(workload_path),
                 )
 

@@ -7,7 +7,6 @@ import argparse
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock
 
 import common
 import pandas as pd
@@ -174,26 +173,3 @@ def test_membw_analysis_collected(profiling_config, expected) -> None:
 def test_membw_analysis_collected_without_config_attribute() -> None:
     inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
     assert inst.membw_analysis_collected() is False
-
-
-def test_sanitize_errors_when_workload_profiled_with_kernel_multiplexing(
-    tmp_path, monkeypatch
-):
-    workload = tmp_path / "app" / "MI300"
-    workload.mkdir(parents=True)
-    (workload / "profiling_config.yaml").write_text(
-        "iteration_multiplexing: kernel\n", encoding="utf-8"
-    )
-    mock_error = common.patch_console(
-        monkeypatch, MODULE, "error", error=Mock(side_effect=SystemExit(1))
-    )["error"]
-    with pytest.raises(SystemExit):
-        OmniAnalyze_Base(
-            argparse.Namespace(tui=False, path=[[str(workload)]]), {}
-        ).sanitize()
-    assert mock_error.call_args.args == (
-        "analysis",
-        'This workload was profiled with "--iteration-multiplexing kernel", '
-        "which is no longer supported. "
-        'Profile it again with "--iteration-multiplexing".',
-    )

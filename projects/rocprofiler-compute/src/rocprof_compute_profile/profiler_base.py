@@ -245,13 +245,13 @@ class RocProfCompute_Base:
                 "a counter block."
             )
 
-        if args.no_native_tool and args.iteration_multiplexing:
+        if args.no_native_tool and args.iteration_multiplexing is not None:
             console_error(
                 "--no-native-tool cannot be used with --iteration-multiplexing. "
                 "Please remove one of these options."
             )
 
-        if args.attach_pid and args.iteration_multiplexing:
+        if args.attach_pid and args.iteration_multiplexing is not None:
             console_error(
                 "--attach-pid cannot be used with --iteration-multiplexing. "
                 "Please remove one of these options."
@@ -498,7 +498,7 @@ class RocProfCompute_Base:
             total_workload_runs > 1
             and total_ranks is not None
             and total_ranks >= 2
-            and not args.iteration_multiplexing
+            and args.iteration_multiplexing is None
         ):
             console_warning(
                 "Multi-rank application detected. Application replay mode "
@@ -513,21 +513,32 @@ class RocProfCompute_Base:
 
         total_profiling_time = 0.0
 
-        if args.iteration_multiplexing:
+        if args.iteration_multiplexing is not None:
             if native_tool_path is None:
                 console_error(
                     "Native tool is not supported which is required for "
                     "iteration multiplexing."
                 )
-            console_log("profiling", "Iteration multiplexing: Enabled")
-            console_warning(
-                "profiling",
-                (
-                    "Each kernel should be called at least "
-                    f"{len(input_files)} times with the same launch parameters "
-                    "to collect all counters."
-                ),
+            console_log(
+                "profiling", f"Iteration multiplexing: {args.iteration_multiplexing}"
             )
+            if args.iteration_multiplexing == "kernel":
+                console_warning(
+                    "profiling",
+                    (
+                        "Each kernel should be called atleast "
+                        f"{len(input_files)} times to collect all counters."
+                    ),
+                )
+            elif args.iteration_multiplexing == "kernel_launch_params":
+                console_warning(
+                    "profiling",
+                    (
+                        "Each kernel should be called atleast "
+                        f"{len(input_files)} times with the exact launch parameters "
+                        "to collect all counters."
+                    ),
+                )
 
             self.profile(input_files, options)
         else:

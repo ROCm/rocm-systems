@@ -309,14 +309,6 @@ class OmniAnalyze_Base:
             args.path[0][0]
         )
         profiling_config = self.get_profiling_config()
-        if profiling_config.get("iteration_multiplexing") == "kernel":
-            console_error(
-                "analysis",
-                'This workload was profiled with "--iteration-multiplexing kernel", '
-                "which is no longer supported. Profile it again with "
-                '"--iteration-multiplexing".',
-            )
-
         for dir_info in args.path:
             if not any([
                 profiling_config.get("iteration_multiplexing"),
@@ -344,7 +336,7 @@ class OmniAnalyze_Base:
                     "Please choose a different name."
                 )
 
-        if profiling_config.get("iteration_multiplexing"):
+        if profiling_config.get("iteration_multiplexing") is not None:
             console_log(
                 "analysis",
                 (

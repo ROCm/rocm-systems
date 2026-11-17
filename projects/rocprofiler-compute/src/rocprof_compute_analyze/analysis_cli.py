@@ -240,10 +240,11 @@ class cli_analysis(OmniAnalyze_Base):
                     path_info[0],
                     args.verbose,
                 )
-                if self._profiling_config.get("iteration_multiplexing"):
+                if self._profiling_config.get("iteration_multiplexing") is not None:
                     workload.raw_pmc, _pass_tables = (
                         impute_counters_iteration_multiplex(
                             workload.raw_pmc,
+                            policy=self._profiling_config["iteration_multiplexing"],
                             workload_dir=Path(path_info[0]),
                         )
                     )
@@ -288,10 +289,11 @@ class cli_analysis(OmniAnalyze_Base):
                     path_info[0], args.verbose
                 )
 
-            if self._profiling_config.get("iteration_multiplexing"):
+            if self._profiling_config.get("iteration_multiplexing") is not None:
                 workload.raw_pmc, workload.pass_tables = (
                     impute_counters_iteration_multiplex(
                         workload.raw_pmc,
+                        policy=self._profiling_config["iteration_multiplexing"],
                         workload_dir=Path(path_info[0]),
                     )
                 )

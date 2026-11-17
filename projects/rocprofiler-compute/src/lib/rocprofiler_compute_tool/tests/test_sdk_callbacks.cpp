@@ -9,7 +9,7 @@ using namespace rocprofiler_compute_tool;
 
 TEST_F(TestSdkCallbacks, ProvidedSameKernelWithMultiplexingDisabled_DispatchCbReturnsFirstPmc)
 {
-    m_tool_data->iteration_multiplexing = false;
+    m_tool_data->iteration_multiplexing_mode = iteration_multiplexing_mode_t::DISABLED;
     const auto config_index_0 = dispatch_kernel_with_id(1, m_counters_pmc0, m_counters_pmc1);
     const auto config_index_1 = dispatch_kernel_with_id(1, m_counters_pmc0, m_counters_pmc1);
 
@@ -20,7 +20,7 @@ TEST_F(TestSdkCallbacks, ProvidedSameKernelWithMultiplexingDisabled_DispatchCbRe
 
 TEST_F(TestSdkCallbacks, ProvidedDifferentKernelsWithMultiplexingDisabled_DispatchCbReturnsFirstPmc)
 {
-    m_tool_data->iteration_multiplexing = false;
+    m_tool_data->iteration_multiplexing_mode = iteration_multiplexing_mode_t::DISABLED;
     const auto config_index_0 = dispatch_kernel_with_id(1, m_counters_pmc0, m_counters_pmc1);
     const auto config_index_1 = dispatch_kernel_with_id(2, m_counters_pmc0, m_counters_pmc1);
 
@@ -29,9 +29,22 @@ TEST_F(TestSdkCallbacks, ProvidedDifferentKernelsWithMultiplexingDisabled_Dispat
     EXPECT_EQ(created_config_info[config_index_1].counter_names, m_counters_pmc0);
 }
 
-TEST_F(TestSdkCallbacks, ProvidedDifferentKernelsWithMultiplexing_DispatchCbRotatesPmcPerKernel)
+TEST_F(TestSdkCallbacks, ProvidedSameKernelWithKernelMultiplexing_DispatchCbReturnsEachPmc)
 {
-    m_tool_data->iteration_multiplexing = true;
+    m_tool_data->iteration_multiplexing_mode = iteration_multiplexing_mode_t::KERNEL;
+    const auto config_index_0 = dispatch_kernel_with_id(1, m_counters_pmc0, m_counters_pmc1);
+    const auto config_index_1 = dispatch_kernel_with_id(1, m_counters_pmc0, m_counters_pmc1);
+
+    const auto& created_config_info = m_sdk_wrapper->get_create_counter_config_info();
+    EXPECT_LT(config_index_0, created_config_info.size());
+    EXPECT_LT(config_index_1, created_config_info.size());
+    EXPECT_EQ(created_config_info[config_index_0].counter_names, m_counters_pmc0);
+    EXPECT_EQ(created_config_info[config_index_1].counter_names, m_counters_pmc1);
+}
+
+TEST_F(TestSdkCallbacks, ProvidedDifferentKernelsWithKernelMultiplexing_DispatchCbReturnsFirstPmc)
+{
+    m_tool_data->iteration_multiplexing_mode = iteration_multiplexing_mode_t::KERNEL;
     const auto config_index_0 = dispatch_kernel_with_id(1, m_counters_pmc0, m_counters_pmc1);
     const auto config_index_1 = dispatch_kernel_with_id(2, m_counters_pmc0, m_counters_pmc1);
     const auto config_index_2 = dispatch_kernel_with_id(1, m_counters_pmc0, m_counters_pmc1);
@@ -44,10 +57,10 @@ TEST_F(TestSdkCallbacks, ProvidedDifferentKernelsWithMultiplexing_DispatchCbRota
     EXPECT_EQ(created_config_info[config_index_3].counter_names, m_counters_pmc1);
 }
 
-TEST_F(TestSdkCallbacks, ProvidedSameKernelSameParamsWithMultiplexing_DispatchCbReturnsEachPmc)
+TEST_F(TestSdkCallbacks, ProvidedSameKernelSameParamsWithLaunchMultiplexing_DispatchCbReturnsEachPmc)
 {
-    m_tool_data->iteration_multiplexing   = true;
-    constexpr kernel_dispatch_info_t info = {1, 2, {3, 3, 3}, {4, 4, 4}, 5};
+    m_tool_data->iteration_multiplexing_mode = iteration_multiplexing_mode_t::LAUNCH;
+    constexpr kernel_dispatch_info_t info    = {1, 2, {3, 3, 3}, {4, 4, 4}, 5};
 
     const auto config_index_0 = dispatch_kernel_with_dispatch_info(info, m_counters_pmc0, m_counters_pmc1);
     const auto config_index_1 = dispatch_kernel_with_dispatch_info(info, m_counters_pmc0, m_counters_pmc1);
@@ -57,9 +70,9 @@ TEST_F(TestSdkCallbacks, ProvidedSameKernelSameParamsWithMultiplexing_DispatchCb
     EXPECT_EQ(created_config_info[config_index_1].counter_names, m_counters_pmc1);
 }
 
-TEST_F(TestSdkCallbacks, ProvidedSameKernelDifferentParamsWithMultiplexing_DispatchCbReturnsSamePmc)
+TEST_F(TestSdkCallbacks, ProvidedSameKernelDifferentParamsWithLaunchMultiplexing_DispatchCbReturnsSamePmc)
 {
-    m_tool_data->iteration_multiplexing        = true;
+    m_tool_data->iteration_multiplexing_mode   = iteration_multiplexing_mode_t::LAUNCH;
     kernel_dispatch_info_t info                = {1, 2, {3, 3, 3}, {4, 4, 4}, 5};
     const auto&            created_config_info = m_sdk_wrapper->get_create_counter_config_info();
 
@@ -104,9 +117,9 @@ TEST_P(TestSdkCallbacksMultiplexing, ProvidedKernelIdsOfInterest_DispatchCbRetur
 {
     m_tool_data->target_kernel_ids.insert(2);
 
-    m_tool_data->iteration_multiplexing = m_iteration_multiplexing;
-    const auto config_index_0           = dispatch_kernel_with_id(1, m_counters_pmc0);
-    const auto config_index_1           = dispatch_kernel_with_id(2, m_counters_pmc1);
+    m_tool_data->iteration_multiplexing_mode = m_multiplexing_mode;
+    const auto config_index_0                = dispatch_kernel_with_id(1, m_counters_pmc0);
+    const auto config_index_1                = dispatch_kernel_with_id(2, m_counters_pmc1);
 
     const auto& created_config_info = m_sdk_wrapper->get_create_counter_config_info();
     EXPECT_EQ(config_index_0, m_invalid_config_id);
@@ -117,9 +130,9 @@ TEST_P(TestSdkCallbacksMultiplexing, ProvidedKernelDispatchRanges_DispatchCbRetu
 {
     m_tool_data->kernel_filter_ranges.emplace_back(2, 2);
 
-    m_tool_data->iteration_multiplexing = m_iteration_multiplexing;
-    const auto config_index_0           = dispatch_kernel_with_id(1, m_counters_pmc0);
-    const auto config_index_1           = dispatch_kernel_with_id(1, m_counters_pmc1);
+    m_tool_data->iteration_multiplexing_mode = m_multiplexing_mode;
+    const auto config_index_0                = dispatch_kernel_with_id(1, m_counters_pmc0);
+    const auto config_index_1                = dispatch_kernel_with_id(1, m_counters_pmc1);
 
     const auto& created_config_info = m_sdk_wrapper->get_create_counter_config_info();
     EXPECT_EQ(config_index_0, m_invalid_config_id);
@@ -390,10 +403,15 @@ std::vector<std::string> TestSdkCallbacks::concat_counters(const std::vector<std
 void TestSdkCallbacksMultiplexing::SetUp()
 {
     TestSdkCallbacks::SetUp();
-    m_iteration_multiplexing = GetParam();
+    m_multiplexing_mode = GetParam();
 }
 
-INSTANTIATE_TEST_SUITE_P(Multiplexing, TestSdkCallbacksMultiplexing, ::testing::Bool());
+INSTANTIATE_TEST_SUITE_P(
+    Multiplexing,
+    TestSdkCallbacksMultiplexing,
+    ::testing::Values(rocprofiler_compute_tool::iteration_multiplexing_mode_t::DISABLED,
+                      rocprofiler_compute_tool::iteration_multiplexing_mode_t::KERNEL,
+                      rocprofiler_compute_tool::iteration_multiplexing_mode_t::LAUNCH));
 
 //////////////////////////////////////////////////////////////////////////
 /// TestSdkCallbacksKernelFiltering

@@ -1060,7 +1060,7 @@ Torch operator mapping can be combined with other profiling options. Use
    $ rocprof-compute profile -b 11 12 --experimental --trace-ml-api torch --name simple_net -- python simple_net.py
 
    # Combine with iteration multiplexing
-   $ rocprof-compute profile --experimental --trace-ml-api torch --name simple_net --iteration-multiplexing -- python simple_net.py
+   $ rocprof-compute profile --experimental --trace-ml-api torch --name simple_net --iteration-multiplexing kernel -- python simple_net.py
 
    # Combine with kernel filtering (filters by GPU kernel name)
    $ rocprof-compute profile --experimental --trace-ml-api torch --name simple_net -k elementwise -- python simple_net.py
@@ -1202,10 +1202,19 @@ results are later combined to provide a comprehensive view of the performance me
 Usage
 -----
 
-To enable iteration multiplexing in ROCm Compute Profiler, add the
-``--iteration-multiplexing`` option to your profiling command. Each dispatch of a
-kernel with the same launch parameters collects a different subset of counters.
-Launch parameters are the grid size, workgroup size, and LDS size.
+To enable iteration multiplexing in ROCm Compute Profiler, use the
+``--iteration-multiplexing`` option in your profiling command. You can optionally specify
+the policy for multiplexing. The available policies are:
+
+* ``kernel``
+   The counters are divided based on the kernels being executed. Each kernel call
+   for a particular kernel collects a different subset of counters.
+* ``kernel_launch_params``
+   The counters are divided based on both the kernels and their launch parameters.
+   This allows for more granular control over counter collection. Each unique combination of kernel and launch
+   parameters collects a different subset of counters.
+
+By default, if no policy is specified, ROCm Compute Profiler uses the ``kernel_launch_params`` policy.
 
 .. note::
 
@@ -1219,17 +1228,24 @@ Launch parameters are the grid size, workgroup size, and LDS size.
    * Do not use ``--attach-pid`` with ``--iteration-multiplexing``. Ensure that ``--attach-pid`` is not used in your profiling command.
 
    * Ensure that your workload runs for enough iterations to cover all counter subsets.
-     When using iteration multiplexing, the total number of iterations for each unique kernel
-     and launch parameters combination specified in the workload should be sufficient to cover
-     all subsets of counters. If the number of iterations is too low, some counters may not be
-     collected.
+     When using iteration multiplexing, the total number of iterations, for each kernel (for ``kernel`` policy)
+     or for each unique kernel and launch parameters combination (for ``kernel_launch_params`` policy),
+     specified in the workload should be sufficient to cover all subsets of counters. If the number of iterations
+     is too low, some counters may not be collected.
+
+   * Launch parameters for ``kernel_launch_params`` policy.
+     Launch parameters refer to the following paramaters:
+
+     - Grid size
+     - Workgroup size
+     - LDS size
 
 The following example demonstrates how to use iteration multiplexing with the
 ``vcopy`` workload:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute profile --name vcopy --iteration-multiplexing -- ./vcopy -i 20 -n 1048576 -b 256
+   $ rocprof-compute profile --name vcopy --iteration-multiplexing kernel -- ./vcopy -i 20 -n 1048576 -b 256
 
                                     __                                       _
     _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
@@ -1252,7 +1268,7 @@ The following example demonstrates how to use iteration multiplexing with the
    INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
    INFO
    INFO Using native counter collection tool: /tmp/rocprofiler-compute-tool-xxxxx/librocprofiler-compute-tool.so
-   INFO [profiling] Iteration multiplexing: Enabled
+   INFO [profiling] Iteration multiplexing: kernel
    INFO [profiling] Current input files: .../perfmon/pmc_perf_0.yaml, .../perfmon/pmc_perf_1.yaml, ...
    INFO    |-> [rocprofiler-sdk] [rocprofiler-compute] [rocprofiler_configure] (priority=1) is using rocprofiler-sdk v1.1.0 (1.1.0)
    INFO    |-> [rocprofiler-sdk] [rocprofiler-compute] In tool init
@@ -1283,7 +1299,7 @@ Iteration multiplexing feature comes with some caveats to be considered when pro
 
 * **Non-deterministic workloads**
 
-  Workloads which dispatch kernels with non-deterministic names and launch parameters may trigger warnings for insufficient dispatch counts because iteration multiplexing identifies unique kernels by their names and launch parameters; this is especially true of large AI workloads that dispatch kernels non-deterministically based on the model layers being used for the current input, and in such cases kernel filtering (``-k``, see :ref:`profiling-kernel-filtering`) of common kernels is recommended.
+  Workloads which dispatch kernels with non-deterministic names and launch parameters may trigger warnings for insufficient dispatch counts because iteration multiplexing identifies unique kernels by their names and optionally by their launch parameters; this is especially true of large AI workloads that dispatch kernels non-deterministically based on the model layers being used for the current input, and in such cases kernel filtering (``-k``, see :ref:`profiling-kernel-filtering`) of common kernels is recommended.
 
 Multi-rank profiling
 ========================

@@ -130,8 +130,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Removed the `-g`, `--view table`, and `--verify-deps` analyze options. Use `--debug-metric-expression`, `--debug-table-view`, and `--debug-verify-deps` instead.
 
-* Removed the `kernel` policy of `--iteration-multiplexing`. The option no longer takes a value and always spreads counters over repeated dispatches of each kernel with the same launch parameters, as it did by default.
-
 ### Optimized
 
 * Profile mode collects only the counters that metric equations use, which can reduce the number of profiling passes.
