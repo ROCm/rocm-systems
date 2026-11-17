@@ -32,6 +32,11 @@
 // libhsa-runtime64, or a thunk the HSA runtime already loaded. --then-open
 // dlopens NAME from DSO once the lookup has closed its handle, as the HSA
 // runtime would.
+//
+// The fixture thunk carries a versioned soname of its own, WSL_DXG_FIXTURE_THUNK,
+// so every name the lookup asks for as librocdxg's versioned soname - bare or
+// beside libhsa-runtime64 - is asked for as the fixture's instead. Everything
+// else reaches the dynamic loader unchanged.
 
 #include "lib/rocprofiler-sdk/platform/wsl/dxg_thunk.hpp"
 
@@ -64,6 +69,19 @@ fixture_opener(const char* path)
     auto* opener = reinterpret_cast<fixture_dlopen_t>(::dlsym(dso, "fixture_dlopen"));
     if(opener == nullptr) fail("fixture_dlopen", path);
     return opener;
+}
+
+// `name` with a trailing librocdxg versioned soname replaced by the fixture's.
+std::string
+as_fixture(std::string name)
+{
+    const auto versioned = std::string_view{rocprofiler::platform::wsl::kLibRocdxgVersionedName};
+    if(versioned.empty() || name.size() < versioned.size()) return name;
+
+    const auto at = name.size() - versioned.size();
+    if(name.compare(at, versioned.size(), versioned) == 0 && (at == 0 || name[at - 1] == '/'))
+        name.replace(at, versioned.size(), WSL_DXG_FIXTURE_THUNK);
+    return name;
 }
 
 std::string
@@ -155,7 +173,9 @@ main(int argc, char** argv)
     print_mapped("hsa-runtime", "libhsa-runtime64.so", /*canonical=*/false);
 
     auto ops = rocprofiler::platform::wsl::default_loader_ops();
-    ops.open = [opener](const char* name, int flags) { return opener(name, flags); };
+    ops.open = [opener](const char* name, int flags) {
+        return opener(as_fixture(name).c_str(), flags);
+    };
     std::printf("nodes %zu\n", rocprofiler::platform::wsl::read_dxg_gpu_topology(ops).size());
     print_mapped("after-read", "librocdxg", /*canonical=*/true);
 

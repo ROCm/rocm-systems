@@ -7,48 +7,13 @@ include(GoogleTest)
 include(rocprofiler-sdk-utilities)
 
 set(ROCPROFILER_LIB_PLATFORM_TEST_SOURCES platform_dispatch.cpp)
+set(ROCPROFILER_LIB_PLATFORM_TEST_HELPERS)
 
 rocprofiler_sdk_dxg_topology_supported(ROCPROFILER_SDK_DXG_TOPOLOGY_SUPPORTED)
 
-# The real-loader cases in wsl_dxg_loader.cpp need a stand-in librocdxg whose DT_SONAME is
-# the versioned name the SDK looks for, and only rocdxg_version.h knows its major.
-set(_ROCDXG_VERSION_MAJOR)
-if(ROCPROFILER_SDK_DXG_TOPOLOGY_SUPPORTED)
-    foreach(_TARGET hsakmt::hsakmt rocprofiler-sdk-hsakmt-nolink)
-        if(TARGET ${_TARGET})
-            foreach(_PROPERTY INTERFACE_INCLUDE_DIRECTORIES
-                              INTERFACE_SYSTEM_INCLUDE_DIRECTORIES)
-                get_target_property(_DIRS ${_TARGET} ${_PROPERTY})
-                foreach(_DIR ${_DIRS})
-                    if(NOT _ROCDXG_VERSION_MAJOR AND EXISTS
-                                                     "${_DIR}/hsakmt/rocdxg_version.h")
-                        file(STRINGS "${_DIR}/hsakmt/rocdxg_version.h"
-                             _ROCDXG_VERSION_MAJOR
-                             REGEX "^#define ROCDXG_LIB_VERSION_MAJOR [0-9]+")
-                        string(
-                            REGEX
-                            REPLACE "^#define ROCDXG_LIB_VERSION_MAJOR ([0-9]+).*" "\\1"
-                                    _ROCDXG_VERSION_MAJOR "${_ROCDXG_VERSION_MAJOR}")
-                    endif()
-                endforeach()
-            endforeach()
-        endif()
-    endforeach()
-endif()
-
 if(ROCPROFILER_SDK_DXG_TOPOLOGY_SUPPORTED)
     list(APPEND ROCPROFILER_LIB_PLATFORM_TEST_SOURCES wsl_dxg_topology.cpp
-         wsl_dxg_thunk.cpp)
-endif()
-
-if(_ROCDXG_VERSION_MAJOR)
-    list(APPEND ROCPROFILER_LIB_PLATFORM_TEST_SOURCES wsl_dxg_loader.cpp)
-
-    # wsl_dxg_loader.cpp finds these beside platform-dispatch-tests, in the build tree and
-    # the install tree alike.
-    set(_WSL_DXG_LOADER_TARGETS
-        wsl-dxg-loader-probe wsl-dxg-fixture-thunk wsl-dxg-fixture-runpath-caller
-        wsl-dxg-fixture-rpath-caller wsl-dxg-fixture-plain-caller)
+         wsl_dxg_thunk.cpp wsl_dxg_loader.cpp)
 
     # Not linked against the HSA runtime: a real libhsa-runtime64 mapped into the probe
     # would be one more directory for the lookup under test to consider.
@@ -57,15 +22,15 @@ if(_ROCDXG_VERSION_MAJOR)
         wsl-dxg-loader-probe PRIVATE rocprofiler-sdk::rocprofiler-sdk-static-library
                                      rocprofiler-sdk::rocprofiler-sdk-common-library)
 
-    # Like librocdxg itself: the versioned soname and -z nodelete
-    # (libhsakmt/CMakeLists_wsl.txt).
+    # A versioned soname of its own and -z nodelete, like librocdxg
+    # (libhsakmt/CMakeLists_wsl.txt). The probe asks for this soname wherever the lookup
+    # asks for librocdxg's.
     add_library(wsl-dxg-fixture-thunk SHARED wsl_dxg_loader_thunk_fixture.cpp)
     target_link_libraries(wsl-dxg-fixture-thunk
                           PRIVATE rocprofiler-sdk::rocprofiler-sdk-hsakmt-nolink)
-    target_link_options(
-        wsl-dxg-fixture-thunk PRIVATE
-        "LINKER:-soname,librocdxg.so.${_ROCDXG_VERSION_MAJOR}" "LINKER:-z,nodelete")
-    set_target_properties(wsl-dxg-fixture-thunk PROPERTIES NO_SONAME ON INSTALL_RPATH "")
+    target_link_options(wsl-dxg-fixture-thunk PRIVATE "LINKER:-z,nodelete")
+    set_target_properties(wsl-dxg-fixture-thunk PROPERTIES OUTPUT_NAME rocdxg-fixture
+                                                           SOVERSION 0)
 
     foreach(_KIND runpath rpath plain)
         add_library(wsl-dxg-fixture-${_KIND}-caller SHARED
@@ -80,22 +45,19 @@ if(_ROCDXG_VERSION_MAJOR)
     target_link_options(wsl-dxg-fixture-rpath-caller PRIVATE "LINKER:--disable-new-dtags")
     set_target_properties(wsl-dxg-fixture-runpath-caller wsl-dxg-fixture-rpath-caller
                           PROPERTIES INSTALL_RPATH "\$ORIGIN")
-    set_target_properties(wsl-dxg-fixture-plain-caller PROPERTIES INSTALL_RPATH "")
+    set_target_properties(wsl-dxg-fixture-thunk wsl-dxg-fixture-plain-caller
+                          PROPERTIES INSTALL_RPATH "")
 
+    # Each fixture's run path is part of what it stands for, so the build tree gets the
+    # same one as the install tree, and nothing is added from the link path.
     set_target_properties(
         wsl-dxg-fixture-thunk wsl-dxg-fixture-runpath-caller wsl-dxg-fixture-rpath-caller
-        wsl-dxg-fixture-plain-caller
-        PROPERTIES BUILD_WITH_INSTALL_RPATH ON
-                   INSTALL_RPATH_USE_LINK_PATH OFF
-                   LIBRARY_OUTPUT_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
+        wsl-dxg-fixture-plain-caller PROPERTIES BUILD_WITH_INSTALL_RPATH ON
+                                                INSTALL_RPATH_USE_LINK_PATH OFF)
 
-    install(
-        TARGETS ${_WSL_DXG_LOADER_TARGETS}
-        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}/tests/unit-tests/bin
-        COMPONENT tests)
-elseif(ROCPROFILER_SDK_DXG_TOPOLOGY_SUPPORTED)
-    message(
-        STATUS "hsakmt/rocdxg_version.h not found: not building the wsl_dxg_loader tests")
+    set(ROCPROFILER_LIB_PLATFORM_TEST_HELPERS
+        wsl-dxg-loader-probe wsl-dxg-fixture-thunk wsl-dxg-fixture-runpath-caller
+        wsl-dxg-fixture-rpath-caller wsl-dxg-fixture-plain-caller)
 endif()
 
 add_executable(platform-dispatch-tests)
@@ -108,8 +70,15 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-drm
             GTest::gtest
             GTest::gtest_main)
-if(_WSL_DXG_LOADER_TARGETS)
-    add_dependencies(platform-dispatch-tests ${_WSL_DXG_LOADER_TARGETS})
+
+if(ROCPROFILER_SDK_DXG_TOPOLOGY_SUPPORTED)
+    foreach(_TARGET platform-dispatch-tests wsl-dxg-loader-probe)
+        target_compile_definitions(
+            ${_TARGET}
+            PRIVATE
+                "WSL_DXG_FIXTURE_THUNK=\"$<TARGET_SONAME_FILE_NAME:wsl-dxg-fixture-thunk>\""
+            )
+    endforeach()
 endif()
 
 # Reuses the sysfs topology fixture from lib/tests so the gnulinux force-platform test can
@@ -120,6 +89,7 @@ endif()
 rocprofiler_add_unit_test(
     TARGET platform-dispatch-tests
     SOURCES ${ROCPROFILER_LIB_PLATFORM_TEST_SOURCES}
+    HELPERS ${ROCPROFILER_LIB_PLATFORM_TEST_HELPERS}
     TIMEOUT 30
     LABELS "unittests;platform-dispatch"
     ENVIRONMENT

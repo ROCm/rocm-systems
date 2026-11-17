@@ -26,6 +26,12 @@
 // read at startup as the loader requires and no loader state carries over from
 // one case to the next. No GPU, real thunk or HSA runtime is involved.
 //
+// The fixture thunk's DT_SONAME is a versioned name of its own,
+// WSL_DXG_FIXTURE_THUNK, and the probe asks for it wherever the lookup asks for
+// librocdxg's versioned soname. So the versioned name laid out here is the
+// fixture's, the unversioned name is librocdxg's, and a production
+// librocdxg.so.<major> in the default directories cannot answer for the fixture.
+//
 // The child starts through the dynamic loader with --inhibit-cache, because a
 // librocdxg listed in the host's ld.so.cache would otherwise satisfy every bare
 // name. LD_LIBRARY_PATH, DT_RPATH/DT_RUNPATH and the default directories are
@@ -67,7 +73,7 @@ using rocprofiler::platform::wsl::kLibRocdxgVersionedName;
 
 // Built and installed beside this test.
 constexpr const char* kProbe         = "wsl-dxg-loader-probe";
-constexpr const char* kThunkFixture  = "libwsl-dxg-fixture-thunk.so";
+constexpr const char* kThunkFixture  = WSL_DXG_FIXTURE_THUNK;
 constexpr const char* kRunpathCaller = "libwsl-dxg-fixture-runpath-caller.so";
 constexpr const char* kRpathCaller   = "libwsl-dxg-fixture-rpath-caller.so";
 constexpr const char* kPlainCaller   = "libwsl-dxg-fixture-plain-caller.so";
@@ -75,7 +81,7 @@ constexpr const char* kPlainCaller   = "libwsl-dxg-fixture-plain-caller.so";
 constexpr const char* kCaller     = "libcaller.so";
 constexpr const char* kHsaRuntime = "libhsa-runtime64.so.1";
 
-const std::string kVersioned   = kLibRocdxgVersionedName;
+const std::string kVersioned   = WSL_DXG_FIXTURE_THUNK;
 const std::string kUnversioned = kLibRocdxgUnversionedName;
 
 fs::path
@@ -418,7 +424,9 @@ class wsl_dxg_loader : public ::testing::Test
 protected:
     void SetUp() override
     {
-        if(kVersioned.empty()) GTEST_SKIP() << "built against headers without rocdxg_version.h";
+        if(std::string_view{kLibRocdxgVersionedName}.empty())
+            GTEST_SKIP() << "built against headers without rocdxg_version.h, so the lookup "
+                            "asks for no versioned soname";
         ASSERT_TRUE(fs::exists(fixture_dir() / kProbe))
             << kProbe << " is built and installed beside this test";
         ASSERT_FALSE(dynamic_loader().empty());
@@ -478,7 +486,7 @@ TEST_F(wsl_dxg_loader, the_rpath_of_an_rpath_caller_is_searched_before_ld_librar
     EXPECT_EQ(run.values("after-read"), paths({from_caller})) << run.output;
 }
 
-// The packaged layout: librocdxg.so.<major> only beside libhsa-runtime64, where
+// The packaged layout: the versioned name only beside libhsa-runtime64, where
 // no bare-name search reaches. It is found there, and once the lookup has
 // closed its handle the HSA runtime's own dlopen of the versioned name gets
 // that same copy by DT_SONAME rather than a second one. That last part holds

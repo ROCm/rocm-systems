@@ -310,6 +310,7 @@ parse:
         SOURCES: '*'
         CONFIGURE_FILES: '*'
         DATA: '*'
+        HELPERS: '*'
     rocprofiler_add_integration_execute_test:
       flags:
         - WILL_FAIL
