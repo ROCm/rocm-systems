@@ -58,6 +58,40 @@ def load_definitions(config_path):
         return yaml.safe_load(file)
 
 
+def load_feature_names(config_path):
+    """Return the device feature names declared in definitions.yaml.
+
+    Args:
+        config_path: Path to the config directory (containing definitions.yaml)
+
+    Returns:
+        Set of feature names listed under the 'features' key
+    """
+    definitions = load_definitions(config_path) or {}
+    return set(definitions.get("features") or {})
+
+
+def check_requires_field(value, known_features):
+    """Validate the 'requires' field of a test case.
+
+    Args:
+        value: The raw 'requires' value from the YAML config
+        known_features: Set of feature names declared in definitions.yaml
+
+    Returns:
+        An error message, or None if the field is valid
+    """
+    if not isinstance(value, list) or not all(isinstance(f, str) for f in value):
+        return "'requires' must be a YAML list of feature names"
+    unknown = sorted(set(value) - known_features)
+    if unknown:
+        return (
+            f"'requires' names features not declared in definitions.yaml: "
+            f"{', '.join(unknown)}"
+        )
+    return None
+
+
 def load_config(file_path, definitions_text):
     with open(file_path) as file:
         content = file.read()

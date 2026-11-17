@@ -6,7 +6,13 @@ import argparse
 import re
 import sys
 
-from common import iter_group_configs, ERROR, RESET
+from common import (
+    check_requires_field,
+    iter_group_configs,
+    load_feature_names,
+    ERROR,
+    RESET,
+)
 
 # Known Jira project keys accepted in a skip 'reason'. Add a new key here when
 # a new project starts tracking hip-tests skips.
@@ -35,11 +41,18 @@ def main():
     invalid_skip_fields = []
     missing_reasons = []
     missing_jira = []
+    invalid_requires = []
+
+    known_features = load_feature_names(configs_path)
 
     for group, cases in iter_group_configs(configs_path):
         for case_name, case_config in cases.items():
             if "level" not in case_config:
                 missing.append(f"  {group}/{case_name}")
+            if "requires" in case_config:
+                error = check_requires_field(case_config["requires"], known_features)
+                if error:
+                    invalid_requires.append(f"  {group}/{case_name}: {error}")
             for field in ("disabled", "unsupported"):
                 if field not in case_config:
                     continue
@@ -95,6 +108,15 @@ def main():
             file=sys.stderr,
         )
         for entry in missing_reasons:
+            print(f"[check_config] {ERROR}{entry}{RESET}", file=sys.stderr)
+        sys.exit(1)
+
+    if invalid_requires:
+        print(
+            f"[check_config] {ERROR}ERROR: The following test cases have an invalid 'requires' field. It must be a list of feature names declared under 'features' in definitions.yaml:{RESET}",
+            file=sys.stderr,
+        )
+        for entry in invalid_requires:
             print(f"[check_config] {ERROR}{entry}{RESET}", file=sys.stderr)
         sys.exit(1)
 

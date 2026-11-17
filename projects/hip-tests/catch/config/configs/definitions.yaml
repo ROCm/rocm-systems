@@ -17,6 +17,38 @@ definitions:
   level_all: &level_all
     level: [0, 1, 2, 3, 4]
 
+
+# ==============================================================================
+# DEVICE FEATURES - Capabilities a test case can list in its 'requires' field
+#
+# A test case that lists features in 'requires' is disabled when the build is
+# tailored to the current machine (HIP_TESTS_TAILOR_TAGS_TO_CURRENT_MACHINE=ON)
+# and any of those features is not available on it. A feature is available only
+# when every visible device supports it. Each feature is also emitted as a
+# [requires_<feature>] tag on the test case.
+#
+# This list is the single source of truth: 'requires' may only name features
+# listed here, and config/sysinfo/hip_tests_sysinfo.cc must report exactly
+# these features. Both are enforced at build time.
+# ==============================================================================
+features:
+  images: Image and texture objects (hipDeviceAttributeImageSupport)
+  managed_memory: Managed memory allocation (hipDeviceAttributeManagedMemory)
+  concurrent_managed_access: Coherent access to managed memory concurrently with the CPU (hipDeviceAttributeConcurrentManagedAccess)
+  pageable_memory_access: Coherent access to pageable host memory, HMM (hipDeviceAttributePageableMemoryAccess)
+  host_native_atomics: Native atomics on the device-host link (hipDeviceAttributeHostNativeAtomicSupported)
+  host_register: Host memory registration via hipHostRegister (hipDeviceAttributeHostRegisterSupported)
+  cooperative_launch: Cooperative kernel launch (hipDeviceAttributeCooperativeLaunch)
+  cooperative_multi_device_launch: Cooperative kernel launch on multiple devices (hipDeviceAttributeCooperativeMultiDeviceLaunch)
+  virtual_memory: Virtual memory management (hipDeviceAttributeVirtualMemoryManagementSupported)
+  memory_pools: Stream ordered memory allocator (hipDeviceAttributeMemoryPoolsSupported)
+  large_bar: Large BAR, host-visible device memory (hipDeviceAttributeIsLargeBar)
+  stream_wait_value: hipStreamWaitValue32/64 (hipDeviceAttributeCanUseStreamWaitValue)
+  xnack: XNACK enabled, the target ID contains xnack+
+  sramecc: SRAM ECC enabled, the target ID contains sramecc+
+  multi_gpu: At least two visible devices
+  p2p: At least two visible devices and every device can access every other device as a peer
+
 # ==============================================================================
 # LEVEL PARAMETERS - Test parameters for each level
 # These are converted to C++ compile-time constants at build time

@@ -4,10 +4,19 @@
 
 import argparse
 import re
+import sys
 
 import yaml
 
-from common import iter_group_configs, load_definitions, parse_size_string
+from common import (
+    check_requires_field,
+    iter_group_configs,
+    load_definitions,
+    load_feature_names,
+    parse_size_string,
+    ERROR,
+    RESET,
+)
 
 
 def parse_args():
@@ -54,7 +63,58 @@ def parse_args():
         "tag for every category whose levels it belongs to, and the category "
         "definitions are written into the parameter header.",
     )
+    parser.add_argument(
+        "--features-file",
+        default=None,
+        help="Path to the YAML device features report written by "
+        "hip_tests_sysinfo. When given, test cases whose 'requires' list "
+        "names a feature that is not available are disabled.",
+    )
     return parser.parse_args()
+
+
+def fail(message, entries=()):
+    print(f"[parse_config] {ERROR}ERROR: {message}{RESET}", file=sys.stderr)
+    for entry in entries:
+        print(f"[parse_config] {ERROR}  {entry}{RESET}", file=sys.stderr)
+    sys.exit(1)
+
+
+def load_available_features(features_path, known_features):
+    """Load the device features report and check it against definitions.yaml.
+
+    The report must list every feature declared in definitions.yaml, and
+    nothing else, each with a boolean value.
+
+    Returns:
+        Dict of feature name -> bool
+    """
+    with open(features_path) as file:
+        report = yaml.safe_load(file) or {}
+
+    features = report.get("features")
+    if not isinstance(features, dict):
+        fail(f"{features_path} has no 'features' mapping")
+
+    undeclared = sorted(set(features) - known_features)
+    if undeclared:
+        fail(
+            f"{features_path} reports features that are not declared under "
+            f"'features' in definitions.yaml:",
+            undeclared,
+        )
+    unreported = sorted(known_features - set(features))
+    if unreported:
+        fail(
+            f"definitions.yaml declares features that {features_path} does "
+            f"not report:",
+            unreported,
+        )
+    non_bool = sorted(f for f, v in features.items() if not isinstance(v, bool))
+    if non_bool:
+        fail(f"{features_path} reports non-boolean values for:", non_bool)
+
+    return features
 
 
 def _skip_targets(field):
@@ -87,7 +147,15 @@ def load_categories(categories_path):
 
 
 def create_test_definition(
-    group, case_name, case_config, platform, os_name, arch, categories, asan=False
+    group,
+    case_name,
+    case_config,
+    platform,
+    os_name,
+    arch,
+    categories,
+    asan=False,
+    available_features=None,
 ):
     levels = case_config.get("level", [0, 1, 2])
     if not isinstance(levels, list):
@@ -95,6 +163,7 @@ def create_test_definition(
     tags = case_config.get("tags", [])
     disabled = case_config.get("disabled", [])
     unsupported = case_config.get("unsupported", [])
+    requires = case_config.get("requires", [])
     # Extract the targets from each skip field (list form or {targets, reason}
     # mapping form) and merge into one ordered local (disabled first) so the
     # match and promotion logic below is identical for either field. Do not
@@ -117,6 +186,8 @@ def create_test_definition(
 
     for tag in tags:
         tags_str += f"[{tag}]"
+    for feature in requires:
+        tags_str += f"[requires_{feature}]"
     for level in levels:
         tags_str += f"[level_{level}]"
 
@@ -129,7 +200,13 @@ def create_test_definition(
 
     tags_str += f"[{group}]"
 
-    if any(entry in disable_keys for entry in skip_targets):
+    # Required features that the machine the build is tailored to lacks.
+    # Without a features report every requirement is assumed to be met.
+    missing_features = []
+    if available_features is not None:
+        missing_features = [f for f in requires if not available_features[f]]
+
+    if missing_features or any(entry in disable_keys for entry in skip_targets):
         # Disabled for this build - see disable_keys above for the spellings
         # a 'disabled'/'unsupported' target may use.
         # Use the [disabled] tag (no leading dot) so it is visible in --list-tests
@@ -145,6 +222,9 @@ def create_test_definition(
     # ctest -LE disabled filter; consumers should match anchored ^exclude_<entry>$.
     for entry in skip_targets:
         tags_str += f"[exclude_{entry}]"
+    # Likewise record which required features are missing.
+    for feature in missing_features:
+        tags_str += f"[missing_{feature}]"
 
     return f'#define {case_name} "{case_name}", "{tags_str}"'
 
@@ -335,23 +415,48 @@ def main():
     asan = args.asan
 
     categories = load_categories(args.categories)
+    known_features = load_feature_names(configs_path)
+
+    available_features = None
+    if args.features_file:
+        available_features = load_available_features(args.features_file, known_features)
+
+    # Validate every 'requires' field before generating anything, so a typo in
+    # a feature name fails the build instead of silently disabling a test.
+    all_cases = [
+        (group, case_name, case_config)
+        for group, cases in iter_group_configs(configs_path)
+        for case_name, case_config in cases.items()
+    ]
+    invalid_requires = []
+    for group, case_name, case_config in all_cases:
+        if "requires" not in case_config:
+            continue
+        error = check_requires_field(case_config["requires"], known_features)
+        if error:
+            invalid_requires.append(f"{group}/{case_name}: {error}")
+    if invalid_requires:
+        fail(
+            "The following test cases have an invalid 'requires' field:",
+            invalid_requires,
+        )
 
     test_macros = []
 
-    for group, cases in iter_group_configs(configs_path):
-        for case_name, case_config in cases.items():
-            test_macros.append(
-                create_test_definition(
-                    group,
-                    case_name,
-                    case_config,
-                    platform,
-                    os_name,
-                    arch,
-                    categories,
-                    asan,
-                )
+    for group, case_name, case_config in all_cases:
+        test_macros.append(
+            create_test_definition(
+                group,
+                case_name,
+                case_config,
+                platform,
+                os_name,
+                arch,
+                categories,
+                asan,
+                available_features,
             )
+        )
 
     with open(header_path, "w") as file:
         file.write("// Auto-generated from YAML config files\n")
@@ -362,6 +467,12 @@ def main():
 
     print(f"[parse_config] Generated test definitions: {header_path}")
     print(f"[parse_config]   Test cases: {len(test_macros)}")
+    if available_features is not None:
+        unavailable = sorted(f for f, v in available_features.items() if not v)
+        print(
+            f"[parse_config]   Tailored to {args.features_file}; "
+            f"unavailable features: {', '.join(unavailable) or 'none'}"
+        )
 
     # Generate parameter header if path provided
     if param_header_path:

@@ -97,6 +97,63 @@ if(HIP_TESTS_RUN_DISABLED)
     )
 endif()
 
+# Tailor the test tags to the GPU(s) of the build machine: build and run the
+# hip_tests_sysinfo probe before generating the test definitions, and disable
+# test cases whose 'requires' list names a device feature the probe reports as
+# unavailable. The resulting binaries are specific to the build machine.
+# The probe runs once per build tree; delete hip_tests_features.yaml from the
+# config build directory to re-probe.
+option(
+    HIP_TESTS_TAILOR_TAGS_TO_CURRENT_MACHINE
+    "Probe the GPU(s) of the build machine and disable tests whose required features are unavailable."
+    OFF
+)
+set(CONFIG_FEATURES_ARGS)
+set(CONFIG_FEATURES_DEPENDS)
+if(HIP_TESTS_TAILOR_TAGS_TO_CURRENT_MACHINE)
+    set(HIP_TESTS_FEATURES_YAML
+        ${CMAKE_CURRENT_BINARY_DIR}/hip_tests_features.yaml
+    )
+    message(
+        STATUS
+        "HIP_TESTS_TAILOR_TAGS_TO_CURRENT_MACHINE=ON: tests requiring device features "
+        "missing on this machine will be disabled (report: ${HIP_TESTS_FEATURES_YAML})"
+    )
+
+    set_source_files_properties(
+        sysinfo/hip_tests_sysinfo.cc
+        PROPERTIES LANGUAGE ${GPGPU_LANGUAGE}
+    )
+    add_executable(hip_tests_sysinfo sysinfo/hip_tests_sysinfo.cc)
+    # The probe runs from the build tree and is never installed, so it needs a
+    # build RPATH that finds the HIP runtime even when the project is configured
+    # with CMAKE_BUILD_WITH_INSTALL_RPATH (as TheRock does). The runtime
+    # directory is added explicitly because CMake drops it from the RPATH when
+    # it is also an implicit link directory of the HIP compiler.
+    set_target_properties(
+        hip_tests_sysinfo
+        PROPERTIES
+            LINKER_LANGUAGE ${GPGPU_LANGUAGE}
+            BUILD_WITH_INSTALL_RPATH OFF
+    )
+    if(TARGET hip::amdhip64)
+        set_target_properties(
+            hip_tests_sysinfo
+            PROPERTIES BUILD_RPATH "$<TARGET_FILE_DIR:hip::amdhip64>"
+        )
+    endif()
+    target_link_libraries(hip_tests_sysinfo PRIVATE ${GPGPU_LINKER_LIBRARIES})
+
+    add_custom_command(
+        OUTPUT ${HIP_TESTS_FEATURES_YAML}
+        COMMAND hip_tests_sysinfo --output ${HIP_TESTS_FEATURES_YAML}
+        DEPENDS hip_tests_sysinfo
+        COMMENT "Probing HIP device features of the build machine"
+    )
+    set(CONFIG_FEATURES_ARGS --features-file ${HIP_TESTS_FEATURES_YAML})
+    set(CONFIG_FEATURES_DEPENDS ${HIP_TESTS_FEATURES_YAML})
+endif()
+
 # Generate both test definitions and parameter headers from YAML
 # - hip_test_config.hh: TEST_CASE macros with tags (levels and test categories)
 # - hip_test_parameters.hh: Compile-time constants for level parameters, plus
@@ -109,12 +166,14 @@ add_custom_command(
         "${CONFIG_ARCH}" "${HIP_TEST_CONFIG_HEADER}"
         "${HIP_TEST_PARAMETERS_HEADER}" --categories
         "${HIP_TESTS_CATEGORIES_YAML}" ${CONFIG_ASAN_FLAG}
+        ${CONFIG_FEATURES_ARGS}
     DEPENDS
         ${CONFIG_COMMON_MODULE}
         ${CONFIG_PARSER_SCRIPT}
         ${HIP_TESTS_UNIT_CONFIGS}
         ${HIP_TESTS_GROUP_CONFIGS}
         ${HIP_TESTS_CATEGORIES_YAML}
+        ${CONFIG_FEATURES_DEPENDS}
     COMMENT "Generating hip_test_config.hh and hip_test_parameters.hh"
 )
 

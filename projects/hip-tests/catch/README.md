@@ -34,7 +34,7 @@ Running Subtest: ctest –R “...” (Regex to match the subtest name)
 ## New Features
 - Better CI integration via xunit compatible output
 - hip-tests can be built in SPIRV, where all kernels are compiled in SPIRV, enable with cmake flag `-DENABLE_SPIRV=ON`. By default it's `OFF`.
-- hip-tests can be built with `-Wall -Werror` so that compiler warnings are treated as errors, controlled by the cmake flag `-DHIP_TESTS_ENABLE_WERROR`. It defaults to `OFF` in all cases. 
+- hip-tests can be built with `-Wall -Werror` so that compiler warnings are treated as errors, controlled by the cmake flag `-DHIP_TESTS_ENABLE_WERROR`. It defaults to `OFF` in all cases.
 
 ## Testing Context
 HIP testing framework gives you a context for each test. This context will have useful information about the environment your test is running.
@@ -71,6 +71,7 @@ Every test case has its own entry. Currently supported options are:
 - tags : List all Catch2 tags that the case is associated with
 - disabled : Temporarily skip the case on the listed targets (a regression or tracked bug that is expected to be re-enabled)
 - unsupported : Permanently skip the case on the listed targets, where the platform, architecture, or backend cannot support it
+- requires : List of device features the case needs (see [Device feature requirements](#device-feature-requirements))
 `disabled` and `unsupported` share the same syntax and produce the same skip; they differ only in intent (temporary regression versus permanent capability gap).
 Each takes the mapping form `{targets: [...], reason: "..."}`. A section with a
 non-empty `targets` list **must** carry a non-empty `reason`, and that reason **must**
@@ -110,6 +111,40 @@ and this macro is expanded in the actual test case definition
 ```cpp
 TEMPLATE_TEST_CASE(Unit_atomicExch_system_Positive_Peer_GPUs, int, float, double)
 ```
+
+### Device feature requirements
+
+A test case can list the device features it needs in a `requires` field:
+```yaml
+texture:
+  Unit_hipCreateTextureObject_ArgValidation:
+    <<: *level_default
+    requires: [images]
+    tags: [texobj, image]
+```
+The available features are declared, with a short description of each, under
+`features` in `configs/definitions.yaml`. Naming a feature that is not declared
+there fails the build (and `check_config.py`).
+
+Every feature in `requires` is emitted as a `[requires_<feature>]` tag. By default
+that is all it does: the binaries are built to run on any machine, so a test must
+still skip itself at runtime (e.g. with `CHECK_IMAGE_SUPPORT`) when a feature is
+missing.
+
+When the tests are configured with `-DHIP_TESTS_TAILOR_TAGS_TO_CURRENT_MACHINE=ON`,
+the build also compiles and runs `config/sysinfo/hip_tests_sysinfo.cc` before
+generating `hip_test_config.hh`. It probes the GPUs visible on the build machine and
+writes the available features to `hip_tests_features.yaml` in the config build
+directory. A feature counts as available only when every visible device supports it.
+Test cases that require an unavailable feature are still compiled, but are disabled
+like a `disabled`/`unsupported` match: they get the `[disabled]` tag, plus a
+`[missing_<feature>]` tag for every missing feature. The resulting binaries are
+therefore specific to the build machine. This mode needs a working GPU at build time.
+
+The probe must report exactly the features declared in `definitions.yaml`; any
+difference fails the build. To add a feature, declare it in `definitions.yaml` and
+detect it in `hip_tests_sysinfo.cc`. The probe runs once per build tree; delete
+`hip_tests_features.yaml` to re-probe, for example after changing `HIP_VISIBLE_DEVICES`.
 
 <b>Every newly added test should mandate adding an entry to the configuration file.</b>
 
