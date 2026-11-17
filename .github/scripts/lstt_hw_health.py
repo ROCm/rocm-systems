@@ -9,9 +9,10 @@ with the same arguments, and the two results are the same.
 
 This repository is public, so the output is kept minimal: a generic id for the
 host, the BIOS version, and pass or fail for the module and GPU checks. The real
-host name is never printed. If EXPECT_HOSTNAME is set to the machine's short host
-name, the script checks that it is on that machine (in CI it comes from a masked
-repo secret; by hand, set it yourself); the check is skipped when it is not set. The amdgpu version and the output of rocminfo and docker are never read
+host name is never printed. When running by hand, set EXPECT_HOSTNAME to the
+machine's short host name to check that you are on the machine you mean; the
+check is skipped when it is not set, as in CI, where the runner labels pick the
+host. The amdgpu version and the output of rocminfo and docker are never read
 into the output.
 
 With --bmc it also checks that the host's BMC answers over IPMI. Only

@@ -5,16 +5,9 @@
 # module is loaded and that ROCm sees the expected GPU. The BIOS version is
 # reported. For hosts marked bmc: true it also checks that the BMC responds.
 # Nothing is stored or compared. Each row's runner labels pick its host, and no
-# host name is written in this file. Ids are opaque and sequential (host-01,
-# host-02, ...), never taken from the hardware; rows that run on one machine
-# share its number, and a machine added later takes the next number.
-#
-# Optional host identity check: each host may have a repo secret holding its
-# short host name (CI_HOST_01_NAME, CI_HOST_02_NAME, ...), which GitHub masks in
-# logs. Each secret is named explicitly in the EXPECT_HOSTNAME line below and is
-# never looked up by a computed key, because a dynamic lookup passes every secret
-# to the runner (CodeQL: excessive secrets exposure). A host whose secret is not
-# set skips the check. A new host adds one secret and one clause to that line.
+# host name or secret is used in this file. Ids are opaque and sequential
+# (host-01, host-02, ...), never taken from the hardware; rows that run on one
+# machine share its number, and a machine added later takes the next number.
 #
 # Why this is not part of TheRock CI: these hosts are not in TheRock's runner
 # pool, so TheRock CI does not cover them. This is a per-host check, not a build
@@ -85,14 +78,12 @@ jobs:
           sparse-checkout-cone-mode: false
 
       # Host-level, so no container: /sys/class/dmi is what the firmware
-      # exposes to the booted kernel. The script checks the host identity when
-      # EXPECT_HOSTNAME is set, then BIOS, the amdgpu module and the GPU, and
-      # reports every layer even when one fails.
+      # exposes to the booted kernel. The script checks BIOS, the amdgpu module
+      # and the GPU, and reports every layer even when one fails.
       - name: Hardware health
         shell: bash
         env:
           ID: ${{ matrix.id }}
           GFX: ${{ matrix.gfx }}
           BMC_FLAG: ${{ matrix.bmc && '--bmc' || '' }}
-          EXPECT_HOSTNAME: ${{ matrix.id == 'host-01' && secrets.CI_HOST_01_NAME || matrix.id == 'host-02' && secrets.CI_HOST_02_NAME || '' }}
         run: python3 .github/scripts/lstt_hw_health.py --id "$ID" --gfx "$GFX" $BMC_FLAG
