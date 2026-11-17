@@ -238,6 +238,7 @@ def run_tests(jax_src: Path, results_log: Path) -> tuple[int, dict]:
             text=True,
             bufsize=1,
         )
+        setup_report.tests_started()
         for line in proc.stdout:
             sys.stdout.write(line)
             sys.stdout.flush()
@@ -412,7 +413,7 @@ def main() -> None:
     # Step 5: Print environment info and run tests
     setup_report.step("Check JAX devices")
     print_environment_info()
-    setup_report.tests_started()
+    setup_report.step("Start pytest")
     exit_code, summary = run_tests(args.jax_src, args.results_log)
 
     # Step 6: Generate and distribute summary report

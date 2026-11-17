@@ -2349,6 +2349,7 @@ def run_ab_in_one_allocation(
     # Own process group: killing salloc alone leaves run_phases.sh and its
     # madengine/srun children running on the allocation.
     proc = subprocess.Popen(cmd, cwd=work_dir, env=env, start_new_session=True)
+    setup_report.tests_started()
 
     def release_allocation(reason: str) -> None:
         """Give the nodes back: cancel the job, then kill the whole group.
@@ -3155,7 +3156,7 @@ def main() -> None:
         log.exception("Could not write the repro bundle; continuing without it")
 
     # Step 5: Run both phases on the same nodes, in one allocation
-    setup_report.tests_started()
+    setup_report.step("Start A/B allocation")
     allocation = run_ab_in_one_allocation(
         phases,
         work_dir,

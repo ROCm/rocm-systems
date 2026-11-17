@@ -10,8 +10,9 @@ import sys
 import tempfile
 import types
 import unittest
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 sys.path.insert(0, os.fspath(Path(__file__).resolve().parent.parent))
@@ -183,7 +184,32 @@ class SetupFailureReportTest(ReportCapture):
         self.assertEqual(raised.exception.code, 3)
 
     def test_only_errors_logged_during_this_run_are_reported(self) -> None:
+        # Harnesses build their report at import, long before run().
+        report = SetupFailureReport("RCCL Test")
         log.error("from an earlier run")
+
+        def main() -> None:
+            report.step("Discover RCCL library")
+            sys.exit(1)
+
+        with self.assertRaises(SystemExit):
+            report.run(main)
+        self.assertNotIn("from an earlier run", self.summary())
+
+    def test_a_failed_summary_write_still_sends_email_and_teams(self) -> None:
+        def main(report: SetupFailureReport) -> None:
+            report.step("Discover RCCL library")
+            sys.exit(1)
+
+        with mock.patch.object(rccl_ci_utils, "write_github_summary",
+                               side_effect=OSError("summary file not writable")):
+            with self.assertRaises(SystemExit):
+                self.run_main(main)
+        self.email.assert_called_once()
+        self.webhook.assert_called_once()
+
+    def test_a_failed_email_still_sends_teams(self) -> None:
+        self.email.side_effect = RuntimeError("SMTP down")
 
         def main(report: SetupFailureReport) -> None:
             report.step("Discover RCCL library")
@@ -191,7 +217,18 @@ class SetupFailureReportTest(ReportCapture):
 
         with self.assertRaises(SystemExit):
             self.run_main(main)
-        self.assertNotIn("from an earlier run", self.summary())
+        self.webhook.assert_called_once()
+
+    def test_an_unformattable_error_message_goes_to_handle_error(self) -> None:
+        # Fed to the handler directly: pytest's own log capture re-raises
+        # formatting errors, so going through log.error() would test pytest.
+        handler = rccl_ci_utils._ErrorLog()
+        record = logging.LogRecord("harness", logging.ERROR, __file__, 1,
+                                   "%d libraries found", ("no",), None)
+        with mock.patch.object(handler, "handleError") as handle_error:
+            handler.handle(record)
+        handle_error.assert_called_once_with(record)
+        self.assertEqual(handler.messages, [])
 
 
 class HarnessSetupFailureTest(ReportCapture):
@@ -278,3 +315,133 @@ class HarnessSetupFailureTest(ReportCapture):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FakeProcess:
+    """A test process that starts, prints nothing, and exits 1."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self.stdout: Iterator[str] = iter([])
+        self.returncode = 1
+        self.pid = 0
+
+    def wait(self, timeout: float | None = None) -> int:
+        return self.returncode
+
+
+class HarnessTestLaunchTest(ReportCapture):
+    """Setup covers launching the tests; a failing test run is not a setup failure."""
+
+    def patch_all(self, module: types.ModuleType, names: tuple[str, ...],
+                  **returns: Any) -> None:
+        for name in names:
+            patcher = mock.patch.object(module, name, return_value=returns.get(name))
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def run_main(self, module: types.ModuleType, subject: str, argv: list[str],
+                 expected: type[BaseException] = SystemExit) -> SetupFailureReport:
+        report = SetupFailureReport(subject)
+        with mock.patch.object(module, "setup_report", report), \
+                mock.patch.object(sys, "argv", [script_path(module)] + argv):
+            with self.assertRaises(expected):
+                report.run(module.main)
+        return report
+
+    def patch_jax_setup(self) -> None:
+        self.patch_all(
+            test_jax_collective,
+            ("find_rccl_library", "find_lib_dirs", "set_github_output",
+             "populate_rocm_lib_dir", "setup_ld_library_path", "verify_rccl_override",
+             "setup_kpack_device_code", "setup_xla_environment",
+             "clone_jax_test_sources", "print_environment_info",
+             "generate_summary_report"),
+            find_rccl_library=self.tmp / "librccl.so", find_lib_dirs=[],
+            generate_summary_report="RCCL JAX Collective Test Report: FAILED",
+        )
+
+    def jax_argv(self, results_log: Path) -> list[str]:
+        return ["--artifact-dir", str(self.tmp), "--jax-src", str(self.tmp),
+                "--results-log", str(results_log)]
+
+    def test_jax_failing_tests_are_left_to_the_harness_report(self) -> None:
+        self.patch_jax_setup()
+        with mock.patch.object(test_jax_collective.subprocess, "Popen", FakeProcess):
+            report = self.run_main(test_jax_collective, "RCCL JAX Collective Test",
+                                   self.jax_argv(self.tmp / "results.log"))
+        self.assertTrue(report.setup_done)
+        self.assertIn("RCCL JAX Collective Test Report: FAILED", self.summary())
+        self.assertNotIn("FAILED before any tests ran", self.summary())
+
+    def test_jax_failure_to_launch_pytest_is_reported(self) -> None:
+        self.patch_jax_setup()
+        self.run_main(test_jax_collective, "RCCL JAX Collective Test",
+                      self.jax_argv(self.tmp / "missing" / "results.log"),
+                      expected=FileNotFoundError)
+        self.assertIn("Failed step: Start pytest", self.summary())
+
+    def patch_pytorch_setup(self) -> None:
+        self.patch_all(
+            test_pytorch_c10d,
+            ("find_rccl_library", "find_rocm_lib_dir", "set_github_output",
+             "find_pip_sdk_lib_dirs", "reconcile_soname_versions",
+             "quarantine_rocm_sysdeps", "override_bundled_rccl",
+             "override_bundled_hip_runtime", "override_bundled_hsa_runtime",
+             "setup_kpack_device_code", "setup_ld_library_path",
+             "clone_pytorch_test_sources", "patch_missing_torch_modules",
+             "print_environment_info", "generate_summary_report"),
+            find_rccl_library=self.tmp / "librccl.so", find_pip_sdk_lib_dirs=[],
+            generate_summary_report="RCCL PyTorch c10d Test Report: FAILED",
+        )
+        patcher = mock.patch.object(test_pytorch_c10d.tempfile, "mkdtemp",
+                                    return_value=str(self.tmp))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def pytorch_argv(self, results_log: Path) -> list[str]:
+        return ["--artifact-dir", str(self.tmp), "--pytorch-src", str(self.tmp),
+                "--results-log", str(results_log)]
+
+    def test_pytorch_failing_tests_are_left_to_the_harness_report(self) -> None:
+        self.patch_pytorch_setup()
+        with mock.patch.object(test_pytorch_c10d.subprocess, "Popen", FakeProcess):
+            report = self.run_main(test_pytorch_c10d, "RCCL PyTorch c10d Test",
+                                   self.pytorch_argv(self.tmp / "results.log"))
+        self.assertTrue(report.setup_done)
+        self.assertIn("RCCL PyTorch c10d Test Report: FAILED", self.summary())
+        self.assertNotIn("FAILED before any tests ran", self.summary())
+
+    def test_pytorch_failure_to_launch_pytest_is_reported(self) -> None:
+        self.patch_pytorch_setup()
+        self.run_main(test_pytorch_c10d, "RCCL PyTorch c10d Test",
+                      self.pytorch_argv(self.tmp / "missing" / "results.log"),
+                      expected=FileNotFoundError)
+        self.assertIn("Failed step: Start pytest", self.summary())
+
+    def madengine_phases(self) -> list[tuple[str, Path]]:
+        return [(phase, test_madengine.prepare_phase_dir(self.tmp, phase))
+                for phase in (test_madengine.BASELINE, test_madengine.CANDIDATE)]
+
+    def run_allocation(self, report: SetupFailureReport) -> dict[str, Any]:
+        workload = next(iter(test_madengine.WORKLOAD_CONFIGS))
+        with mock.patch.object(test_madengine, "setup_report", report):
+            return test_madengine.run_ab_in_one_allocation(
+                self.madengine_phases(), self.tmp, 2, workload,
+                test_madengine.WORKLOAD_CONFIGS[workload],
+                next(iter(test_madengine.CLUSTER_CONFIGS.values())), 1)
+
+    def test_madengine_tests_start_once_salloc_launches(self) -> None:
+        report = SetupFailureReport("RCCL MADEngine")
+        with mock.patch.object(test_madengine.subprocess, "run"), \
+                mock.patch.object(test_madengine.subprocess, "Popen", FakeProcess):
+            self.run_allocation(report)
+        self.assertTrue(report.setup_done)
+
+    def test_madengine_allocation_preparation_is_setup(self) -> None:
+        report = SetupFailureReport("RCCL MADEngine")
+        with mock.patch.dict(os.environ, {"MADENGINE_SLURM_EXCLUDE": "node1; rm -rf"}), \
+                mock.patch.object(test_madengine.subprocess, "Popen") as popen:
+            with self.assertRaises(RuntimeError):
+                self.run_allocation(report)
+        popen.assert_not_called()
+        self.assertFalse(report.setup_done)

@@ -211,6 +211,7 @@ def run_tests(pytorch_src: Path, results_log: Path, test_scope: str = "smoke") -
             text=True,
             bufsize=1,
         )
+        setup_report.tests_started()
         for line in proc.stdout:
             sys.stdout.write(line)
             sys.stdout.flush()
@@ -467,7 +468,7 @@ def main() -> None:
     setup_report.step("Check PyTorch environment")
     patch_missing_torch_modules()
     print_environment_info()
-    setup_report.tests_started()
+    setup_report.step("Start pytest")
     exit_code, summary = run_tests(args.pytorch_src, args.results_log, args.test_scope)
 
     # Step 7: Generate and distribute summary report

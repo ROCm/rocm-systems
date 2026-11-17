@@ -538,7 +538,12 @@ class _ErrorLog(logging.Handler):
         self.messages: list[str] = []
 
     def emit(self, record: logging.LogRecord) -> None:
-        self.messages = (self.messages + [record.getMessage()])[-self.limit:]
+        try:
+            message = record.getMessage()
+        except Exception:
+            self.handleError(record)
+            return
+        self.messages = (self.messages + [message])[-self.limit:]
 
 
 class SetupFailureReport:
@@ -547,8 +552,9 @@ class SetupFailureReport:
     A harness's main() reports only after its tests finish, so a setup step
     that calls sys.exit() or raises would end the job with no summary, email,
     or Teams message. Wrap main() with run(), call step() before each setup
-    step, and tests_started() once setup is done. If main() stops early,
-    run() reports the step and the errors logged so far, then re-raises.
+    step, and call tests_started() once the test process has launched. If
+    main() stops before that, run() reports the step and the errors logged
+    so far, then re-raises.
     """
 
     def __init__(self, subject_prefix: str) -> None:
@@ -588,7 +594,8 @@ class SetupFailureReport:
 
     def _report(self, cause: str) -> None:
         # Before the first step the notify targets may not be known yet (for
-        # example, an argparse error); after setup the harness reports itself.
+        # example, an argparse error); once the tests launch, the harness
+        # reports the result itself.
         if self.setup_done or not self.current_step:
             return
         lines = [
@@ -605,14 +612,19 @@ class SetupFailureReport:
             lines += ["", f"Run: {run_url}"]
         report = "\n".join(lines)
         log.error("\n%s", report)
-        # Never let a reporting problem replace the original failure.
-        try:
-            write_github_summary(report)
-            if self.notify_email:
-                send_email_report(report, self.notify_email, "FAILED",
-                                  subject_prefix=self.subject_prefix)
-            if self.notify_webhook:
-                send_teams_webhook(report, self.notify_webhook, "FAILED",
-                                   subject_prefix=self.subject_prefix)
-        except Exception:
-            log.exception("Could not send the setup failure report")
+        channels: list[tuple[str, Callable[[], None]]] = [
+            ("GitHub summary", lambda: write_github_summary(report)),
+        ]
+        if self.notify_email:
+            channels.append(("email", lambda: send_email_report(
+                report, self.notify_email, "FAILED", subject_prefix=self.subject_prefix)))
+        if self.notify_webhook:
+            channels.append(("Teams", lambda: send_teams_webhook(
+                report, self.notify_webhook, "FAILED", subject_prefix=self.subject_prefix)))
+        # Try every channel even if one fails, and never let a reporting
+        # problem replace the original failure.
+        for name, send in channels:
+            try:
+                send()
+            except Exception:
+                log.exception("Could not send the setup failure report to %s", name)
