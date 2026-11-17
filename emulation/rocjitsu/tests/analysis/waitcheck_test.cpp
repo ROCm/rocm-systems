@@ -7119,10 +7119,10 @@ TEST(WaitcheckTest, GlobalInvDoesNotInventMemoryDependency) {
   EXPECT_TRUE(report.diagnostics.empty());
 }
 
-TEST(WaitcheckTest, GlobalInvalidationDoesNotProveAnOlderLoadIsReady) {
+TEST(WaitcheckTest, GlobalInvalidationOccupiesOrderedLoadCompletionStream) {
   for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
-    for (unsigned invalidations : {1u, 80u}) {
-      for (unsigned threshold : {0u, 1u, 62u, 63u}) {
+    for (unsigned invalidations : {0u, 1u, 2u, 62u, 63u, 80u}) {
+      for (unsigned threshold : {0u, 1u, 2u, 61u, 62u, 63u}) {
         SCOPED_TRACE(testing::Message()
                      << arch << " invalidations=" << invalidations << " threshold=" << threshold);
         std::vector<uint32_t> program;
@@ -7133,13 +7133,30 @@ TEST(WaitcheckTest, GlobalInvalidationDoesNotProveAnOlderLoadIsReady) {
         append_inst(program, v_mov_b32(1, 0));
         const auto report = analyze_waitcnts(program, arch);
         ASSERT_TRUE(report.supported) << report.analysis_error;
-        ASSERT_EQ(report.diagnostics.size(), threshold != 0) << diagnostic_summary(report);
-        if (threshold != 0) {
+        const unsigned required = std::min(invalidations, 63u);
+        const bool missing = threshold > required;
+        ASSERT_EQ(report.diagnostics.size(), missing) << diagnostic_summary(report);
+        if (missing) {
           EXPECT_EQ(report.diagnostics.front().counter, WaitCounterKind::Load);
-          EXPECT_EQ(report.diagnostics.front().required_count, 0u);
+          EXPECT_EQ(report.diagnostics.front().required_count, required);
         }
       }
     }
+  }
+}
+
+TEST(WaitcheckTest, GlobalWritebackDoesNotOccupyLoadCompletionStream) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    std::vector<uint32_t> program;
+    append_inst(program, global_load_b32(0));
+    append_inst(program, global_wb());
+    append_inst(program, sopp(64, 1));
+    append_inst(program, v_mov_b32(1, 0));
+    const auto report = analyze_waitcnts(program, arch);
+    ASSERT_TRUE(report.supported) << report.analysis_error;
+    ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+    EXPECT_EQ(report.diagnostics.front().counter, WaitCounterKind::Load);
+    EXPECT_EQ(report.diagnostics.front().required_count, 0u);
   }
 }
 

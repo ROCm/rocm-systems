@@ -404,27 +404,63 @@ TEST(WaitcheckStream, PartialWaitRetiresOnlyOlderLoads) {
   EXPECT_EQ(report.diagnostics[0].reg.index, 2u);
 }
 
-TEST(WaitcheckStream, GlobalInvalidateDoesNotAgeAnOrdinaryLoad) {
+TEST(WaitcheckStream, GlobalInvalidateAdvancesTheOlderLoadOnGfx12) {
+  for (unsigned threshold : {0u, 1u, 2u}) {
+    SCOPED_TRACE(threshold);
+    Program program;
+    load(program);
+    program.insert(program.end(), {0xee0ac07cu, 0, 0}); // global_inv
+    program.insert(program.end(), {0xbfc00000u | threshold, v_mov(1, 0)});
+    const auto report = analyze(program);
+    ASSERT_FALSE(report.incomplete);
+    ASSERT_EQ(report.diagnostics.size(), threshold > 1 ? 1u : 0u);
+    if (threshold > 1)
+      EXPECT_EQ(report.diagnostics.front().required_count, 1u);
+  }
+}
+
+TEST(WaitcheckStream, GlobalWritebackDoesNotAdvanceALoadOnGfx12) {
   Program program;
-  load(program, 0);
-  // global_inv contributes to LOAD_CNT without a register result.
-  program.insert(program.end(), {0xee0ac07cu, 0, 0, 0xbfc00001u, v_mov(1, 0)});
+  load(program);
+  program.insert(program.end(), {0xee0b007cu, 0, 0}); // global_wb
+  program.insert(program.end(), {0xbfc00001u, v_mov(1, 0)});
   const auto report = analyze(program);
-  EXPECT_FALSE(report.incomplete);
+  ASSERT_FALSE(report.incomplete);
   ASSERT_EQ(report.diagnostics.size(), 1u);
   EXPECT_EQ(report.diagnostics.front().required_count, 0u);
 }
 
-TEST(WaitcheckStream, LongUnorderedSequenceDoesNotAgeAnOrdinaryLoad) {
+TEST(WaitcheckStream, CdnaBufferInvalidateAdvancesAnOlderLoad) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    for (bool invalidate : {false, true}) {
+      for (unsigned threshold : {0u, 1u, 2u}) {
+        SCOPED_TRACE(arch);
+        SCOPED_TRACE(invalidate);
+        SCOPED_TRACE(threshold);
+        Program program{0xe0501000u, 0x80000008u}; // buffer_load_dword v0
+        append(program, cdna3::build_mubuf(invalidate ? cdna3::kBufferInvMubuf
+                                                     : cdna3::kBufferWbl2Mubuf));
+        program.insert(program.end(), {0xbf8c0f70u | threshold, v_mov(1, 0)});
+        const auto report = analyze(program, arch);
+        ASSERT_FALSE(report.incomplete);
+        const unsigned required = invalidate ? 1 : 0;
+        ASSERT_EQ(report.diagnostics.size(), threshold > required ? 1u : 0u);
+        if (threshold > required)
+          EXPECT_EQ(report.diagnostics.front().required_count, required);
+      }
+    }
+  }
+}
+
+TEST(WaitcheckStream, LongSequenceOfInvalidationsAdvancesAnOlderLoad) {
   Program program;
-  load(program, 0);
+  load(program);
   for (unsigned i = 0; i < 300; ++i)
-    program.insert(program.end(), {0xee0ac07cu, 0, 0}); // global_inv issues on LOAD_CNT.
+    program.insert(program.end(), {0xee0ac07cu, 0, 0});
   program.insert(program.end(), {0xbfc0003eu, v_mov(4, 0)});
   const auto report = analyze(program);
   EXPECT_FALSE(report.incomplete);
-  ASSERT_EQ(report.diagnostics.size(), 1u);
-  EXPECT_EQ(report.diagnostics.front().required_count, 0u);
+  EXPECT_TRUE(report.diagnostics.empty());
 }
 
 TEST(WaitcheckStream, WrongCounterWaitDoesNotRetireLoad) {
