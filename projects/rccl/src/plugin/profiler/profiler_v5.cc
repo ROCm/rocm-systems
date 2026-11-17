@@ -135,9 +135,12 @@ static ncclResult_t ncclProfiler_recordEventState(void* eHandle, ncclProfilerEve
   default:
     break;
   }
-  if (!eStateArgs) return ncclSuccess;
+  // These states carry no args, and the core records the group-API ones with null args.
+  bool carriesNoArgs = eState == ncclProfilerProxyOpInProgress_v4 || eState == ncclProfilerGroupStartApiStop ||
+                       eState == ncclProfilerGroupEndApiStart;
+  if (!eStateArgs && !carriesNoArgs) return ncclSuccess;
 
-  ncclProfilerEventStateArgs_v5_t eStateArgs_v5;
+  ncclProfilerEventStateArgs_v5_t eStateArgs_v5 = {};
   switch (eState) {
   case ncclProfilerProxyStepSendGPUWait:
   case ncclProfilerProxyStepSendPeerWait_v4:

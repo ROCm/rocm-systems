@@ -38,6 +38,7 @@ struct FakeV5 {
   void* finalizeCtx = nullptr;
   std::vector<ncclProfilerEventDescr_v5_t> starts;
   std::vector<std::pair<ncclProfilerEventState_v5_t, ncclProfilerEventStateArgs_v5_t>> records;
+  int nullArgRecords = 0;
   ncclProfiler_v5_t vtable{"FakeV5", &Init, &Start, &Stop, &Record, &Finalize};
 
   static FakeV5*& cur() {
@@ -69,6 +70,10 @@ struct FakeV5 {
     return ncclSuccess;
   }
   static ncclResult_t Record(void*, ncclProfilerEventState_v5_t s, ncclProfilerEventStateArgs_v5_t* a) {
+    if (!a) {
+      cur()->nullArgRecords++;
+      return ncclSuccess;
+    }
     cur()->records.push_back({s, *a});
     return ncclSuccess;
   }
@@ -370,11 +375,27 @@ TEST_F(ProfilerV5Microtest, RecordEventState_ForwardsEachStateWithItsArgs) {
   EXPECT_EQ(fake_.records.size(), n);
 }
 
-// The core records group-API states with null args, which this adapter drops; a fix flips this pin.
-TEST_F(ProfilerV5Microtest, RecordEventState_KnownBug_GroupApiStatesWithNullArgs_NeverReachThePlugin) {
-  ASSERT_EQ(ncclSuccess, prof_->recordEventState(H(0x1), ncclProfilerGroupStartApiStop, nullptr));
-  ASSERT_EQ(ncclSuccess, prof_->recordEventState(H(0x1), ncclProfilerGroupEndApiStart, nullptr));
+// The core records the group-API states with null args (profiler.cc ncclProfilerRecordGroupApiEventState).
+TEST_F(ProfilerV5Microtest, RecordEventState_ArglessStatesWithNullArgs_ReachThePluginWithZeroedArgs) {
+  const ncclProfilerEventState_t argless[] = {ncclProfilerGroupStartApiStop, ncclProfilerGroupEndApiStart,
+                                              ncclProfilerProxyOpInProgress_v4};
+  for (ncclProfilerEventState_t s : argless) {
+    ASSERT_EQ(ncclSuccess, prof_->recordEventState(H(0x1), s, nullptr));
+  }
+  EXPECT_EQ(fake_.nullArgRecords, 0);
+  ASSERT_EQ(fake_.records.size(), 3u);
+  for (size_t i = 0; i < 3; i++) {
+    EXPECT_EQ(fake_.records[i].first, static_cast<ncclProfilerEventState_v5_t>(argless[i]));
+    EXPECT_EQ(fake_.records[i].second.proxyStep.transSize, 0u) << argless[i];
+  }
+}
+
+TEST_F(ProfilerV5Microtest, RecordEventState_StatesThatCarryArgs_AreDroppedWithNullArgs) {
+  for (ncclProfilerEventState_t s : {ncclProfilerProxyStepSendWait, ncclProfilerProxyCtrlAppend,
+                                     ncclProfilerNetPluginUpdate, ncclProfilerKernelChStop})
+    ASSERT_EQ(ncclSuccess, prof_->recordEventState(H(0x1), s, nullptr));
   EXPECT_TRUE(fake_.records.empty());
+  EXPECT_EQ(fake_.nullArgRecords, 0);
 }
 
 }  // namespace
