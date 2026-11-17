@@ -108,29 +108,14 @@ argument with a default states it at the end of the description as
 
 ### Renaming and Deprecation
 
-A renamed option must keep its old name working for now. Add the old name as an
-extra option string of the new option, keep the same `dest`, and declare the
-option with `DeprecatedAction`, the `base_action` it used before, and the old name
-in `deprecated_names`:
+A renamed option must keep its old name working for now. The old name:
 
-```python
-roofline_group.add_argument(
-    "--roofline-device",
-    "--device",
-    dest="device",
-    action=DeprecatedAction,
-    base_action="store",
-    deprecated_names=["--device"],
-    help="Target GPU device ID per amd-smi for roofline benchmarking (Default: 0).",
-)
-```
+- Works the same as the new name, so keep the same `dest`
+- Is listed in the help as a deprecated alias of the new name
+- Prints a warning that names the new option whenever it is used
 
-The help then lists `--device` as a deprecated alias, and using `--device` prints
-a warning that names `--roofline-device`.
-
-To deprecate an option without a rename, declare it with `DeprecatedAction` and
-leave out `deprecated_names`. Set `advice` to say what to use instead, if
-anything. Its help then starts with `DEPRECATED:`.
+An option deprecated without a rename starts its help with `DEPRECATED:` and what
+to do instead, and also prints a warning when used.
 
 Every rename also needs these updates:
 

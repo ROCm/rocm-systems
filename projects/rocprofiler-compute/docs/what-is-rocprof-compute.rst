@@ -162,11 +162,11 @@ The following are key ``profile`` and ``analyze`` commands:
 
      $ rocprof-compute profile -n my_run -b 2 5 -- ./app
 
-* To collect only roofline data, skipping other counter collection:
+* To run only the roofline micro-benchmarks, skipping standard counter collection:
 
   .. code-block:: shell-session
 
-     $ rocprof-compute profile -n my_run --roofline -- ./app
+     $ rocprof-compute profile -n my_run --roof-only -- ./app
 
 * To analyze a profiled run in the terminal:
 

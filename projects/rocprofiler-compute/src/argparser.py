@@ -4,13 +4,19 @@
 import argparse
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Dict, List, Optional, Tuple, Type
 
 from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS, OPERATOR_BACKENDS
 from utils.logger import console_warning
 from utils.utils_common import METRIC_ID_RE, resolve_rocm_library_path
 
-# Standard argparse actions that the CustomAction subclasses delegate to
+# Deprecated options by argparse dest: the option and what to use instead
+DEPRECATED_OPTIONS: Dict[str, Tuple[str, str]] = {
+    "list_blocks": ("--list-blocks", "--list-metrics"),
+    "list_available_metrics": ("--list-available-metrics", "--list-metrics"),
+}
+
+# Standard argparse actions that ExperimentalAction and DebugAction delegate to
 BASE_ACTIONS: Dict[str, Type[argparse.Action]] = {
     "store": argparse._StoreAction,
     "store_const": argparse._StoreConstAction,
@@ -21,6 +27,16 @@ BASE_ACTIONS: Dict[str, Type[argparse.Action]] = {
     "count": argparse._CountAction,
     "extend": argparse._ExtendAction,
 }
+
+
+def warn_deprecated_options(args: argparse.Namespace) -> None:
+    """Warn about each deprecated option the command line uses."""
+    for dest, (option, replacement) in DEPRECATED_OPTIONS.items():
+        if getattr(args, dest, None) not in (None, False):
+            console_warning(
+                f"{option} is deprecated and will be removed in a future release. "
+                f"Use {replacement} instead."
+            )
 
 
 def validate_block(value: str) -> str:
@@ -94,10 +110,8 @@ def add_general_group(
         dest="list_blocks",
         metavar="<arch>",
         choices=supported_archs.keys(),
-        action=DeprecatedAction,
-        base_action="store",
-        advice="Use --list-metrics instead.",
         help=(
+            "DEPRECATED: use --list-metrics instead.\n"
             "List available blocks and their aliases for specified GPU <arch>.\n"
             "Values: %(choices)s"
         ),
@@ -219,8 +233,8 @@ Examples:
 \trocprof-compute profile -n vcopy_blocks -b sol -- ./vcopy -n 1048576 -b 256
 \trocprof-compute profile -n vcopy_kernel -k vecCopy -- ./vcopy -n 1048576 -b 256
 \trocprof-compute profile -n vcopy_iter --kernel-iteration-range 1 -- ./vcopy -n 1048576 -b 256
-\trocprof-compute profile -n vcopy_roof --roofline -- ./vcopy -n 1048576 -b 256
-\trocprof-compute profile -n my_bench --roofline-bench-only
+\trocprof-compute profile -n vcopy_roof --roof-only -- ./vcopy -n 1048576 -b 256
+\trocprof-compute profile -n my_bench --bench-only
 ---------------------------------------------------------------------------------
         """,  # noqa: E501
         prog="rocprof-compute",
@@ -358,10 +372,11 @@ Examples:
     profile_group.add_argument(
         "--list-available-metrics",
         dest="list_available_metrics",
-        action=DeprecatedAction,
-        base_action="store_true",
-        advice="Use --list-metrics instead.",
-        help="List all available metrics for analysis on current arch.",
+        help=(
+            "DEPRECATED: use --list-metrics instead.\n"
+            "List all available metrics for analysis on current arch."
+        ),
+        action="store_true",
     )
     profile_group.add_argument(
         "-b",
@@ -380,7 +395,7 @@ Examples:
             "Alternatively, specify block alias(es) for filtering.\n"
             "Aliases are arch-specific; run --list-metrics to see\n"
             "all valid block ids and aliases.\n"
-            "Cannot be used with --set, --roofline or --roofline-bench-only."
+            "Cannot be used with --set, --roof-only or --bench-only."
         ),
     )
     profile_group.add_argument(
@@ -397,7 +412,7 @@ Examples:
             "Profile a set of metrics of topic of interest by collecting "
             "counters in a single pass.\n"
             "For available sets, see --list-sets.\n"
-            "Cannot be used with --block, --roofline or --roofline-bench-only."
+            "Cannot be used with --block, --roof-only or --bench-only."
         ),
     )
     profile_group.add_argument(
@@ -448,54 +463,49 @@ Examples:
         "--retain-rocpd-output",
         required=False,
         default=False,
-        action=DeprecatedAction,
-        base_action="store_true",
-        help="Retain the large raw rocpd database in workload directory.",
+        action="store_true",
+        help=(
+            "DEPRECATED: .db files will be retained automatically in a "
+            "future release.\n"
+            "Retain the large raw rocpd database in workload directory."
+        ),
     )
 
     ## Roofline Command Line Options
     roofline_group.add_argument(
-        "--roofline",
         "--roof-only",
         dest="roof_only",
         required=False,
         default=False,
-        action=DeprecatedAction,
-        base_action="store_true",
-        deprecated_names=["--roof-only"],
+        action="store_true",
         help=(
             "Profile roofline data only.\n"
-            "Cannot be used with --block, --set or --roofline-bench-only."
+            "Cannot be used with --block, --set or --bench-only."
         ),
     )
     roofline_group.add_argument(
-        "--roofline-bench-only",
         "--bench-only",
         dest="bench_only",
         required=False,
         default=False,
-        action=DeprecatedAction,
-        base_action="store_true",
-        deprecated_names=["--bench-only"],
+        action="store_true",
         help=(
             "Run roofline microbenchmark only.\n"
             "No application profiling or counter collection.\n"
             "No application run is required.\n"
-            "Cannot be used with --block, --set, --roofline or --no-roof."
+            "Cannot be used with --block, --set, --roof-only or --no-roof."
         ),
     )
     roofline_group.add_argument(
-        "--roofline-device",
         "--device",
         dest="device",
         metavar="<id>",
         required=False,
         default=0,
         type=int,
-        action=DeprecatedAction,
-        base_action="store",
-        deprecated_names=["--device"],
-        help="Target GPU device ID per amd-smi for roofline benchmarking (Default: 0).",
+        help=(
+            "Target GPU device ID per amd-smi for roofline benchmarking (Default: 0)."
+        ),
     )
 
     ## ----------------------------
@@ -636,10 +646,11 @@ Examples:
     analyze_group.add_argument(
         "--list-available-metrics",
         dest="list_available_metrics",
-        action=DeprecatedAction,
-        base_action="store_true",
-        advice="Use --list-metrics instead.",
-        help="List all available metrics for analysis on the workload arch.",
+        help=(
+            "DEPRECATED: use --list-metrics instead.\n"
+            "List all available metrics for analysis on the workload arch."
+        ),
+        action="store_true",
     )
     analyze_group.add_argument(
         "--list-operators",
@@ -989,53 +1000,6 @@ class DebugAction(CustomAction):
             help=help if debug_enabled else argparse.SUPPRESS,
             **kwargs,
         )
-
-
-class DeprecatedAction(CustomAction):
-    """
-    Custom action for deprecated option names.
-    - deprecated_names lists the old names of a renamed option; without it, the
-      whole option is deprecated
-    - advice says what to use instead; a rename defaults to the new name
-    - Adds the deprecation to the help text and warns when a deprecated name is used
-    """
-
-    def __init__(
-        self,
-        option_strings: List[str],
-        dest: str,
-        base_action: str,
-        help: str,
-        deprecated_names: Optional[List[str]] = None,
-        advice: str = "",
-        **kwargs: Any,
-    ) -> None:
-        self.deprecated_names = deprecated_names or option_strings
-        new_names = [
-            name for name in option_strings if name not in self.deprecated_names
-        ]
-        self.advice = advice or (f"Use {new_names[0]} instead." if new_names else "")
-        if new_names:
-            help = f"{help}\nDeprecated alias: {', '.join(self.deprecated_names)}."
-        else:
-            first_line = self.advice or "Will be removed in a future release."
-            help = f"DEPRECATED: {first_line}\n{help}"
-        super().__init__(option_strings, dest, base_action, help=help, **kwargs)
-
-    def __call__(
-        self,
-        parser: argparse.ArgumentParser,
-        namespace: argparse.Namespace,
-        values: object,
-        option_string: Optional[str] = None,
-    ) -> None:
-        if option_string in self.deprecated_names:
-            warning = (
-                f"{option_string} is deprecated and will be removed in a future "
-                "release."
-            )
-            console_warning(f"{warning} {self.advice}" if self.advice else warning)
-        super().__call__(parser, namespace, values, option_string)
 
 
 class CliHelpFormatter(argparse.RawTextHelpFormatter):
