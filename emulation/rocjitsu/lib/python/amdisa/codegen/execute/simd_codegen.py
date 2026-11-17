@@ -35,7 +35,6 @@ from amdisa.codegen.execute.floating_policy import (
 
 from amdisa.codegen.execute.cube import CUBE_OPERATIONS, cube_expression, cube_omod
 from amdisa.codegen.execute.fp8_formats import uses_shared_fp8_widening
-from amdisa.semantics import F64_TO_INTEGER_DTYPES
 
 # Operation and operands of each F32 binary functor. SUB and SUBREV add the
 # negated subtrahend, keeping the sources in operand order (see _vec_binop_expr).
@@ -356,11 +355,6 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
         'uint32_t',
         '[](auto a) { return a & 0xFFFFu; }',
     ),
-    # RDNA f32->i32 floor / nearest conversions (CDNA4 uses flr / rpi). The
-    # probe passes the scalar body's FloorI32/NearestI32 stage object, which
-    # applies ABS/NEG and the F32 input flush; see shared/conversion.h.
-    'v_cvt_floor_i32_f32_vop1': ('uint32_t', 'uint32_t', conversion.STAGES),
-    'v_cvt_nearest_i32_f32_vop1': ('uint32_t', 'uint32_t', conversion.STAGES),
     # --- frexp (f32 split into mantissa / exponent) ----------------------------
     # VOP1 returns mantissa floats or integer exponent bits.
     # VOP3 mantissa uses _VOP3_UNARY_FP_F32; the exponent twin uses
@@ -507,22 +501,6 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
         '[&wf](auto a) { return util::log_f32_simd(a, '
         'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode())); }',
     ),
-    # --- float -> int conversions with NaN->0 and saturating clamp. The float
-    # comparison masks are re-typed to the int lane via simd_mask_as<> before
-    # the where-blend. Masks are mutually exclusive so application order is
-    # irrelevant. Matches the scalar bodies' truncate-toward-zero cast. ---
-    'v_cvt_i32_f32_vop1': (
-        'float32_t',
-        'int32_t',
-        '[](auto s) { return ::rocjitsu::amdgpu::simd_cvt_i32_f32(s); }',
-    ),
-    'v_cvt_u32_f32_vop1': (
-        'float32_t',
-        'uint32_t',
-        '[](auto s) { return ::rocjitsu::amdgpu::simd_cvt_u32_f32(s); }',
-    ),
-    'v_cvt_flr_i32_f32_vop1': ('uint32_t', 'uint32_t', conversion.STAGES),
-    'v_cvt_rpi_i32_f32_vop1': ('uint32_t', 'uint32_t', conversion.STAGES),
     # --- f16 (half) ops. The SIMD functors widen exact half encodings, evaluate,
     # then narrow to F16. Their wrappers own any required source flush, modifiers,
     # and output policy so eligibility matches the generated scalar contract.
@@ -840,35 +818,8 @@ SIMD_VOP1_UNARY_F64: dict[str, tuple[str, str]] = {
 }
 
 
-# --- mixed-width f64 <-> 32-bit conversions -------------------------------
-#
-# These VOP1 cvt ops bridge an 8-wide (native_width64) f64 chunk and the same
-# number of 32-bit lanes, so they use dedicated glue rather than the equal-width
-# unary path. The 32-bit side is a util::narrow32<T> (fixed_size_simd<T,8>); a
-# direct static_simd_cast bridges it to/from native<double> with no bit_cast.
-#
-# f64 source -> 32-bit dst. template_name -> (out_lane_cpp_type, functor); the
-# functor is invoked as cvt_op(native<double>) -> narrow32<Tout> inside
-# try_execute_cvt_f64_to_b32_simd. cvt_f32_f64 is a single correctly-rounded
-# narrowing cast (vcvtpd2ps); the int forms do NaN->0 and the saturating clamp in
-# the double domain (all where-masks native<double>, so no cross-width mask cast)
-# then one truncating cast to the 8-wide int — bit-identical to the scalar body
-# for finite/Inf inputs. A NaN *result* of cvt_f32_f64 may differ in payload
-# (accepted; the A/B test skips it). INT32_MAX/MIN and UINT32_MAX are all exactly
-# representable in double, so the clamp constants cast back to the exact integers.
+# FREXP exponent extraction still needs a mixed-width FP64-to-32-bit bridge.
 SIMD_CVT_F64_TO_B32: dict[str, tuple[str, str]] = {
-    'v_cvt_i32_f64_vop1': (
-        'int32_t',
-        '[](auto s) {'
-        ' auto r = util::cvt_i32_f64_saturate_input_simd(s);'
-        ' return util::stdx::static_simd_cast<util::narrow32<int32_t>>(r); }',
-    ),
-    'v_cvt_u32_f64_vop1': (
-        'uint32_t',
-        '[](auto s) {'
-        ' auto r = util::cvt_u32_f64_saturate_input_simd(s);'
-        ' return util::stdx::static_simd_cast<util::narrow32<uint32_t>>(r); }',
-    ),
     # FREXP exponent (F64 -> int32): flush the source under MODE, then narrow
     # the low 32 exponent bits. The VOP3 twin reuses this functor: ABS/NEG
     # cannot change the exponent.
@@ -882,23 +833,6 @@ SIMD_CVT_F64_TO_B32: dict[str, tuple[str, str]] = {
         ),
     ),
 }
-
-# 32-bit source -> f64 dst. template_name -> (in_lane_cpp_type, functor); the
-# functor is invoked as cvt_op(narrow32<Tin>) -> native<double> inside
-# try_execute_cvt_b32_to_f64_simd. Each is an exact widening static_simd_cast
-# (vcvtps2pd for f32; int->double for i32/u32), bit-identical to the scalar body
-# (static_cast<double>) for every input.
-SIMD_CVT_B32_TO_F64: dict[str, tuple[str, str]] = {
-    'v_cvt_f64_i32_vop1': (
-        'int32_t',
-        '[](auto in) { return util::stdx::static_simd_cast<util::native<double>>(in); }',
-    ),
-    'v_cvt_f64_u32_vop1': (
-        'uint32_t',
-        '[](auto in) { return util::stdx::static_simd_cast<util::native<double>>(in); }',
-    ),
-}
-
 
 # template_name set for v_cndmask_b32 (VCC-driven per-lane select). No functor:
 # the op is fixed (dst = (VCC bit) ? vsrc1 : src0), a pure 32-bit bit select, so
@@ -2227,10 +2161,6 @@ def _simd_probe_line(
     if speccvtout is not None:
         out_t, cpp_op = speccvtout
         return f'  ROCJITSU_TRY_SIMD_CVT_F64_TO_B32({out_t}, {cpp_op});'
-    speccvtin = SIMD_CVT_B32_TO_F64.get(template_name)
-    if speccvtin is not None:
-        in_t, cpp_op = speccvtin
-        return f'  ROCJITSU_TRY_SIMD_CVT_B32_TO_F64({in_t}, {cpp_op});'
     specvopc = SIMD_VOPC.get(template_name)
     if specvopc is not None:
         lane_t, cpp_op = specvopc
@@ -2547,13 +2477,6 @@ def _simd_probe_line(
                 cpp_op = _modified_conversion_op(cpp_op, bits=16, arity=1)
             probe = f'  ROCJITSU_TRY_SIMD_VOP1_UNARY({cpp_tin}, {cpp_tout}, {cpp_op});'
             if base in (
-                'v_cvt_i32_f32',
-                'v_cvt_u32_f32',
-            ):
-                # The VOP1 shortcut does not apply floating source modifiers.
-                # Modified F32 inputs use the scalar conversion body.
-                return f'  if (!inst.inst_.abs && !inst.inst_.neg) {{\n{probe}\n  }}'
-            if base in (
                 'v_cvt_f32_ubyte0',
                 'v_cvt_f32_ubyte1',
                 'v_cvt_f32_ubyte2',
@@ -2565,34 +2488,14 @@ def _simd_probe_line(
                 ovfl_probe = f'  ROCJITSU_TRY_SIMD_VOP1_UNARY({cpp_tin}, {cpp_tout}, {_fp16_ovfl_cpp_op(cpp_op)});'
                 return _mode_aware_f16_result_simd_probe(probe, ovfl_probe)
             return probe
-        # VOP3 twins of the mixed-width f64<->b32 cvt ops. The f64->integer
-        # functors carry no modifiers, so an encoding with ABS/NEG set runs the
-        # scalar body, which applies them; these forms take no output modifiers.
-        # Retaining the raw shortcut for the other F64-source forms is not
-        # evidence that their VOP3 modifier fields are architecturally ignored.
-        # (A symmetric
-        # SIMD_VOP1_UNARY_F64 fallback was considered but explicitly NOT added:
-        # the f64-unary VOP3 forms apply modifiers via apply_vop3_*_mod_f64 —
-        # routed through SIMD_VOP3_UNARY_FP64 above instead — and the rcp/rsq
-        # forms use transcendental::*_f64 with NaN/±0/±Inf carve-outs not
-        # present in the plain VOP1 functors.)
+        # FREXP exponent ignores ABS/NEG and reuses its VOP1 lane operation.
         speccvtoutv3 = SIMD_CVT_F64_TO_B32.get(base + '_vop1')
         if speccvtoutv3 is not None:
             if base in _VOP3_UNARY_SKIP:
                 return None
             out_t, cpp_op = speccvtoutv3
             probe = f'  ROCJITSU_TRY_SIMD_CVT_F64_TO_B32({out_t}, {cpp_op});'
-            if base.removeprefix('v_cvt_') in F64_TO_INTEGER_DTYPES:
-                # The glue carries no modifiers; the scalar body applies ABS/NEG.
-                return f'  if (!inst.inst_.abs && !inst.inst_.neg) {{\n  {probe}\n  }}'
             return probe
-        speccvtinv3 = SIMD_CVT_B32_TO_F64.get(base + '_vop1')
-        if speccvtinv3 is not None:
-            in_t, cpp_op = speccvtinv3
-            # The glue has no modifiers; the scalar body applies the relevant
-            # source and destination fields.
-            probe = f'    ROCJITSU_TRY_SIMD_CVT_B32_TO_F64({in_t}, {cpp_op});'
-            return f'  if (!inst.inst_.omod && !inst.inst_.clamp) {{\n{probe}\n  }}'
     return None
 
 
