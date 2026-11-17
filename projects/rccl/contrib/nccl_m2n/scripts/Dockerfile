@@ -1,6 +1,7 @@
 # Primus (TheRock HIP 7.14, OpenMPI in /opt/openmpi) + rdma-core v61 for
 # Ruby's bnxt_re (kernel provider ABI rdmav59; image ships rdma-core 50 / rdmav34)
 # + sshd on 2222 so mpirun can launch orted inside the container.
+# The original base rocm/primus:v26.4-rccl-gfx950-run41014461271 is a local image, not on Docker Hub.
 ARG BASE_IMAGE=rocm/primus:v26.4
 FROM ${BASE_IMAGE}
 ENV DEBIAN_FRONTEND=noninteractive
