@@ -11,7 +11,6 @@
 
 // Limits
 #define ACCL_MAX_CHANNELS 256
-#define ACCL_MAX_PROXY_OPS 256
 
 static inline uint64_t acclGetTimeUs() {
   struct timespec ts;
@@ -78,12 +77,24 @@ struct acclProxyOpInfo {
   int      stepsCompleted;
 };
 
-// Per collective record
+// Per collective record. Also stands in for one launch of a collective that RCCL
+// lowered to P2P tasks (isFanout): every task of that call in one kernel plan
+// returns this slot as its P2p handle, so its KernelCh and ProxyOp children land
+// here exactly as a ring collective's do.
 struct acclCollInfo {
   uint64_t    type;         // ncclProfileColl
   int         collStopped;
   int         finalized;
   pthread_mutex_t mutex;
+  // Tenancy counter, bumped under mutex on every alloc and never cleared, so a
+  // fan-out call can tell whether the slot it last joined is still that launch.
+  uint64_t    generation;
+
+  // Fan-out launch bookkeeping. RCCL starts every task of a plan before it
+  // stops any, so the first task stop closes the launch to further joins.
+  int         isFanout;
+  uint32_t    nTasksStarted;
+  uint32_t    nTasksStopped;
 
   // Collective metadata
   const char* func;
@@ -101,19 +112,63 @@ struct acclCollInfo {
   uint64_t    tsCollStartUs;
   uint64_t    tsCollStopUs;
 
-  // Kernel channel data
+  // Kernel channel data. A fan-out launch can post several KernelCh events on
+  // one channel; they share the slot, which then spans the earliest start to the
+  // latest stop. Completion counts events, not channels.
+  uint32_t    nKernelChExpected;
   uint32_t    nKernelChStarted;
   uint32_t    nKernelChCompleted;
   struct acclKernelChInfo kernelCh[ACCL_MAX_CHANNELS];
 
-  // Proxy ops linked to this collective (indices into ctx->proxyOpPool)
-  int         nProxyOps;
+  // Proxy ops are folded in here at their stop and their slot released at once,
+  // so the op pool holds only ops still in flight.
   int         nProxyOpsStarted;
   int         nProxyOpsCompleted;
-  int         proxyOpIndices[ACCL_MAX_PROXY_OPS];
+  int         nSendOps;
+  int         nRecvOps;
+  uint64_t    sendGpuWaitUs;
+  uint64_t    sendPeerWaitUs;
+  uint64_t    sendNetworkUs;
+  uint64_t    recvFlushUs;
+  uint64_t    recvGpuWaitUs;
+  uint64_t    recvNetworkUs;
 
   // Comm info backpointer
   void*       commCtx;
+};
+
+// Returned as the P2pApi handle of every task a fanned-out collective posts, so
+// those tasks' P2p events find the call through their parent. Typed P2pApi
+// because that is the event it answers for.
+struct acclFanoutCall {
+  uint64_t    type;           // ncclProfileP2pApi
+  const char* func;
+  const char* datatype;
+  size_t      count;
+  int         graphCaptured;
+  uint64_t    seqNumber;
+  // One reference for the open CollApi bracket and one per task not yet
+  // started. A graph-captured call is never released: every replay restarts its
+  // tasks against this handle. Guarded by ctx->apiMutex, as are the fields below.
+  int         refCount;
+  struct acclCollInfo* openLaunch;
+  uint64_t    openLaunchGen;
+  struct acclFanoutCall* nextFree;
+  struct acclFanoutCall* nextAll;
+};
+
+// CollApi handle. Thread-local, because API events start and stop on the
+// calling thread and do not nest; ordinary collectives therefore cost nothing,
+// and an acclFanoutCall is created only when a P2pApi event starts inside.
+struct acclCollApiStub {
+  uint64_t    type;           // ncclProfileCollApi
+  void*       ctx;
+  int         open;
+  const char* func;
+  const char* datatype;
+  size_t      count;
+  int         graphCaptured;
+  struct acclFanoutCall* call;
 };
 
 // Schema for the "decomposition" JSON object. Drives the acclCompletedRecord
@@ -197,7 +252,6 @@ struct acclCommContext {
   // so these are atomic rather than adopting any one of them.
   uint64_t    droppedProxyOps;      // proxy-op pool was full: this op is unprofiled
   uint64_t    droppedProxySteps;    // proxy-step pool was full: this step is unprofiled
-  uint64_t    overflowProxyOps;     // op completed but the coll already held ACCL_MAX_PROXY_OPS
   uint64_t    staleProxySteps;      // stopped after its parent op's slot was reissued
   // Still held at finalize: their stop never arrived. Counted there, never
   // released there -- see acclPluginFinalize. Written only on that thread.
@@ -232,6 +286,20 @@ struct acclCommContext {
   struct acclProxyStepInfo proxyStepPool[ACCL_PROXY_STEP_POOL_SIZE];
   int                      proxyStepPoolUsed[ACCL_PROXY_STEP_POOL_SIZE];
   pthread_mutex_t          proxyStepPoolMutex;
+
+  // Peak slots in use, each under its pool's mutex, so a clean run still shows
+  // how close it came to dropping.
+  int         collPoolInUse, collPoolHighWater;
+  int         proxyOpPoolInUse, proxyOpPoolHighWater;
+  int         proxyStepPoolInUse, proxyStepPoolHighWater;
+
+  // Fan-out calls: every one allocated (freed with the context) and the free
+  // list they are recycled through. RCCL keeps no sequence number for these
+  // calls, so fanoutSeq numbers them per communicator.
+  pthread_mutex_t          apiMutex;
+  struct acclFanoutCall*   fanoutAll;
+  struct acclFanoutCall*   fanoutFree;
+  uint64_t                 fanoutSeq;
 };
 
 #endif
