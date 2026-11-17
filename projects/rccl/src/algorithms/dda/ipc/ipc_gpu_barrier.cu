@@ -27,7 +27,7 @@ __host__ DeviceMailbox::DeviceMailbox(int nRanks, int nBlocks, void* flagsBuf)
   int nRanks, int nBlocks) {
   assert(nRanks == NRANKS);
   auto flagBuf = std::make_unique<DeviceBuffer>(nRanks * nBlocks * sizeof(FlagType));
-  if (flagBuf == nullptr) {
+  if (flagBuf == nullptr || flagBuf->get() == nullptr) {
     ERROR("DeviceMailbox::mallocAndInit: allocation failed");
     return {nullptr, DeviceMailbox{}};
   }
@@ -52,20 +52,19 @@ __host__ IpcGpuBarrier::IpcGpuBarrier(int nRanks, int nBlocks, int selfRank,
   auto selfAlloc = DeviceMailbox::mallocAndInit(nRanks, nBlocks);
   auto& selfMboxBuf = selfAlloc.first;
   auto& selfMbox = selfAlloc.second;
-  if (!selfMboxBuf) {
-    return {nullptr, IpcGpuBarrier{}};
-  }
 
   auto memHandler = std::make_unique<ncclIpcMemHandler>(bootstrap, selfRank, nRanks);
 
-  ncclResult_t result = memHandler->addSelfDeviceMemPtr(selfMboxBuf->get());
-  if (result != ncclSuccess && result != ncclInProgress) {
-    if (ncclDebugNoWarn == 0) {
-      INFO(NCCL_ALL, "%s:%d -> %d", __FILE__, __LINE__, result);
-    }
+  // Joins the exchange even without a mailbox, so the peers do not block in it.
+  ncclResult_t result = selfMboxBuf ? memHandler->addSelfDeviceMemPtr(selfMboxBuf->get()) : ncclSuccess;
+  if (result == ncclSuccess || result == ncclInProgress) {
+    result = memHandler->exchangeMemPtrs();
+  } else {
+    (void)memHandler->exchangeMemPtrs();
+  }
+  if (!selfMboxBuf) {
     return {nullptr, IpcGpuBarrier{}};
   }
-  result = memHandler->exchangeMemPtrs();
   if (result != ncclSuccess && result != ncclInProgress) {
     if (ncclDebugNoWarn == 0) {
       INFO(NCCL_ALL, "%s:%d -> %d", __FILE__, __LINE__, result);

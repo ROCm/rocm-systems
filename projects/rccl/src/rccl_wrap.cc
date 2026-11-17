@@ -43,6 +43,7 @@ THE SOFTWARE.
 #endif
 #include "algorithms/dda/alltoall/dda_alltoall.h"
 #include "algorithms/dda/broadcast/dda_broadcast.h"
+#include "algorithms/dda/ipc/ipc_init.h"
 #include "algorithms/gin/gin_alltoall.h"
 #include "group.h"
 #include "sym_kernels.h"
@@ -102,6 +103,8 @@ RCCL_PARAM(SymKMinBytes,     "SYM_K_MIN_BYTES",      -1);
 // through rcclDda{LL,LL128,Vmm}Threshold(), which resolve unset against this
 // comm's arch table and yield 0 (no DDA) for arches that have none.
 RCCL_PARAM(DdaEnable, "DDA_ENABLE", 1);
+// 1: set up the DDA IPC scratch (256 MiB), peer table and barrier on first use; 0: at comm init.
+RCCL_PARAM(DdaIpcLazyInit, "DDA_IPC_LAZY_INIT", 1);
 RCCL_PARAM(DdaThreshold, "DDA_THRESHOLD", kDdaThresholdUnset);
 RCCL_PARAM(DdaLL, "DDA_LL", 1);
 RCCL_PARAM(DdaLLThreshold, "DDA_LL_THRESHOLD", kDdaThresholdUnset);
@@ -1543,6 +1546,22 @@ bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t threshold,
   return ok;
 }
 
+// Collective: callers gate on rank-invariant state only, never on buffer addresses. Skips grouped
+// calls (a group may order comms differently per rank) and comms ncclEnqueueCheck will reject.
+static ncclResult_t rcclDdaIpcDeferredInit(ncclComm* comm, bool query, bool capturing) {
+  if (query || comm->ddaIpcLazyScratchBytes == 0 || ncclGroupDepth != 0) return ncclSuccess;
+  if (ncclCommIsSuspended(comm) || __atomic_load_n(&comm->revokedFlag, __ATOMIC_ACQUIRE)) return ncclSuccess;
+  return ncclDdaIpcEnsureInit(comm, capturing);
+}
+
+// A query reports what the live call would pick, so a deferred comm counts as holding its IPC
+// resources. The alignment check mirrors ddaUserBuffers16ByteAligned.
+static bool rcclDdaIpcQueryDeferred(const ncclComm* comm, bool query, bool shapeEligible, const void* sendbuff,
+                                    const void* recvbuff) {
+  return query && comm->ddaIpcLazyScratchBytes != 0 && shapeEligible &&
+         reinterpret_cast<uintptr_t>(sendbuff) % 16 == 0 && reinterpret_cast<uintptr_t>(recvbuff) % 16 == 0;
+}
+
 bool rcclDdaDatatypeSupported(const ncclComm* comm, ncclDataType_t datatype) {
   switch (datatype) {
   case ncclFloat32:
@@ -2163,8 +2182,10 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
           if (!query) INFO(NCCL_TUNING, "AR cand DDA-VMM(fabric): inWindow=%d preferred=%d fallback=%d", (int)(msgBytes <= arDdaVmmMax), (int)cs.bestPreferredFound, (int)cs.bestFallbackFound);
         }
       } else {
-        if (arDdaVmmMax != 0 &&
-            ncclAllReduceDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
+        const bool arIpcShape = arDdaVmmMax != 0 && ncclAllReduceDdaIpcShapeEligible(comm, count, datatype, op);
+        if (arIpcShape) NCCLCHECK(rcclDdaIpcDeferredInit(comm, query, ceCapturing));
+        if (arDdaVmmMax != 0 && (ncclAllReduceDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype, op) ||
+                                 rcclDdaIpcQueryDeferred(comm, query, arIpcShape, sendbuff, recvbuff))) {
           rcclCollDecision cand = *decision;
           cand.algo = RCCL_DDA_IPC;
           cand.nMaxChannels = ncclAllReduceDdaIpcBlocks(comm, count, datatype);
@@ -2364,11 +2385,15 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
           decision->nMaxChannels = ncclAllGatherDdaFabricBlocks(comm, sendcount, datatype);
           return rcclSelectDone("AG", query, decision);
         }
-      } else if (agDdaVmmMax != 0 && totalBytes <= agDdaVmmMax &&
-                 ncclAllGatherDdaIpcEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
-        decision->algo = RCCL_DDA_IPC;
-        decision->nMaxChannels = ncclAllGatherDdaIpcBlocks(comm, sendcount, datatype);
-        return rcclSelectDone("AG", query, decision);
+      } else if (agDdaVmmMax != 0 && totalBytes <= agDdaVmmMax) {
+        const bool agIpcShape = ncclAllGatherDdaIpcShapeEligible(comm, sendcount, datatype);
+        if (agIpcShape) NCCLCHECK(rcclDdaIpcDeferredInit(comm, query, ceCapturing));
+        if (ncclAllGatherDdaIpcEligible(comm, sendbuff, recvbuff, sendcount, datatype) ||
+            rcclDdaIpcQueryDeferred(comm, query, agIpcShape, sendbuff, recvbuff)) {
+          decision->algo = RCCL_DDA_IPC;
+          decision->nMaxChannels = ncclAllGatherDdaIpcBlocks(comm, sendcount, datatype);
+          return rcclSelectDone("AG", query, decision);
+        }
       }
     }
 
@@ -2437,10 +2462,14 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
       const size_t agCeNonRegMax = rcclCeNonRegMaxTab(archTable, ncclFuncAllGather);
       const size_t agCeNonRegMin = rcclCeNonRegMinTab(archTable, ncclFuncAllGather);
       const bool agCeNonRegWindow = rcclWindowFits(totalBytes, agCeNonRegMin, agCeNonRegMax);
-      if (rcclForceCeScratchEnabled(comm) && ceScratch &&
-          winRegType == ncclSymSendNonregRecvNonreg &&
-          !hasSysmemSegment &&
-          comm->ddaScratch != nullptr && totalBytes <= (size_t)comm->ddaScratchBytes &&
+      if (rcclForceCeScratchEnabled(comm) && ceScratch && winRegType == ncclSymSendNonregRecvNonreg &&
+          !hasSysmemSegment && totalBytes <= ncclDdaScratchCapacity(comm) &&
+          ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) || agCeNonRegWindow)) {
+        NCCLCHECK(rcclDdaIpcDeferredInit(comm, query, ceCapturing));
+      }
+      if (rcclForceCeScratchEnabled(comm) && ceScratch && winRegType == ncclSymSendNonregRecvNonreg &&
+          !hasSysmemSegment && (comm->ddaScratch != nullptr || (query && comm->ddaIpcLazyScratchBytes != 0)) &&
+          totalBytes <= ncclDdaScratchCapacity(comm) &&
           ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) || agCeNonRegWindow)) {
         decision->algo = RCCL_CE_SCRATCH;
         return rcclSelectDone("AG", query, decision);
@@ -2657,10 +2686,14 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
           decision->algo = RCCL_DDA_FABRIC_VMM;
           return rcclSelectDone("RS", query, decision);
         }
-      } else if (rsDdaVmmMax != 0 && totalBytes <= rsDdaVmmMax &&
-                 ncclReduceScatterDdaIpcEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
-        decision->algo = RCCL_DDA_IPC;
-        return rcclSelectDone("RS", query, decision);
+      } else if (rsDdaVmmMax != 0 && totalBytes <= rsDdaVmmMax) {
+        const bool rsIpcShape = ncclReduceScatterDdaIpcShapeEligible(comm, recvcount, datatype, op);
+        if (rsIpcShape) NCCLCHECK(rcclDdaIpcDeferredInit(comm, query, graphCapturingHint));
+        if (ncclReduceScatterDdaIpcEligible(comm, sendbuff, recvbuff, recvcount, datatype, op) ||
+            rcclDdaIpcQueryDeferred(comm, query, rsIpcShape, sendbuff, recvbuff)) {
+          decision->algo = RCCL_DDA_IPC;
+          return rcclSelectDone("RS", query, decision);
+        }
       }
     }
 
@@ -2845,6 +2878,15 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
   if (!query && a2aSymkRequested && a2aSymSuppressedBySize)
     INFO(NCCL_TUNING, "A2A symk disqualified: totalBytes=%zu > a2aSymMaxR2=%zu", totalBytes, a2aSymMaxR2);
 
+  // CE is graph-unsafe and the DDA IPC trigger must not set up while capturing. Live probes the
+  // stream once; reporting uses graphCapturingHint.
+  bool ceCapturing = graphCapturingHint;
+  if (!query) {
+    struct ncclCudaGraph ceGraph;
+    NCCLCHECK(ncclCudaGetCapturingGraph(&ceGraph, stream, comm->config.graphUsageMode));
+    ceCapturing = ncclCudaGraphValid(ceGraph);
+  }
+
   // (3) gfx1250 fabric paths (rcclSelectAlltoAllFabric: LL, LL128).
   const bool a2aFabricArch = IsArchMatch(comm->archName, "gfx1250");
   if (!a2aSymEligible && a2aFabricArch && rcclDdaEnabled(comm, totalBytes, totalBytes, query, "A2A fabric")) {
@@ -2865,30 +2907,25 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
         decision->nMaxChannels = ncclAllToAllDdaFabricBlocks(comm, count, datatype);
         return rcclSelectDone("A2A", query, decision);
       }
-    } else if (a2aDdaMax != 0 && totalBytes <= a2aDdaMax &&
-               ncclAllToAllDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype)) {
-      decision->algo = RCCL_DDA_IPC;
-      decision->nMaxChannels = ncclAllToAllDdaIpcBlocks(comm, count, datatype);
-      return rcclSelectDone("A2A", query, decision);
+    } else if (a2aDdaMax != 0 && totalBytes <= a2aDdaMax) {
+      const bool a2aIpcShape = ncclAllToAllDdaIpcShapeEligible(comm, count, datatype);
+      if (a2aIpcShape) NCCLCHECK(rcclDdaIpcDeferredInit(comm, query, ceCapturing));
+      if (ncclAllToAllDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype) ||
+          rcclDdaIpcQueryDeferred(comm, query, a2aIpcShape, sendbuff, recvbuff)) {
+        decision->algo = RCCL_DDA_IPC;
+        decision->nMaxChannels = ncclAllToAllDdaIpcBlocks(comm, count, datatype);
+        return rcclSelectDone("A2A", query, decision);
+      }
     }
   }
 
   if (!query && a2aSymEligible) INFO(NCCL_TUNING, "A2A DDA disqualified: symk eligible");
-  // CE is graph-unsafe. Live probes the stream; reporting uses graphCapturingHint.
   // taskAppend honors this decision, so capture must be recorded here rather than
   // re-probed at enqueue.
   // Tick the latch on the live path so a capture containing only A2A (and no
   // AR) still sets graphModeSeen, preventing CE AR from firing on a later
   // eager AllReduce that shares this comm (ce_coll.h:93).
-  bool ceCapturing;
-  if (query) {
-    ceCapturing = graphCapturingHint;
-  } else {
-    struct ncclCudaGraph ceGraph;
-    NCCLCHECK(ncclCudaGetCapturingGraph(&ceGraph, stream, comm->config.graphUsageMode));
-    ceCapturing = ncclCudaGraphValid(ceGraph);
-    rcclCeAllReduceGraphLatchTick(comm, ceCapturing);
-  }
+  if (!query) rcclCeAllReduceGraphLatchTick(comm, ceCapturing);
   decision->ceCapturing = ceCapturing;
 
   // (4) CE registered: single-node, symmetric-registered buffers, CTA_POLICY_ZERO.
@@ -2932,8 +2969,14 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
     const size_t a2aCeNonRegMax = rcclCeNonRegMaxTab(archTable, ncclFuncAlltoAll);
     const size_t a2aCeNonRegMin = rcclCeNonRegMinTab(archTable, ncclFuncAlltoAll);
     const bool a2aCeNonRegWindow = rcclWindowFits(totalBytes, a2aCeNonRegMin, a2aCeNonRegMax);
+    if (rcclForceCeScratchEnabled(comm) && !a2aHasSysmem && totalBytes <= ncclDdaScratchCapacity(comm) &&
+        ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) || a2aCeNonRegWindow) &&
+        ncclCeScratchAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, a2aWinRegType)) {
+      NCCLCHECK(rcclDdaIpcDeferredInit(comm, query, ceCapturing));
+    }
     if (rcclForceCeScratchEnabled(comm) && !a2aHasSysmem &&
-        comm->ddaScratch != nullptr && totalBytes <= comm->ddaScratchBytes &&
+        (comm->ddaScratch != nullptr || (query && comm->ddaIpcLazyScratchBytes != 0)) &&
+        totalBytes <= ncclDdaScratchCapacity(comm) &&
         ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) || a2aCeNonRegWindow) &&
         ncclCeScratchAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, a2aWinRegType)) {
       decision->algo = RCCL_CE_SCRATCH;

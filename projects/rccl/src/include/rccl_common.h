@@ -221,8 +221,9 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
 // -> CE registered -> symmetric -> native ring/pat kernel.
 // Live enqueue carries the decision so taskAppend honors RCCL_SYMMETRIC / CE
 // vs ring (symkExtract) instead of re-deriving it.
-// graphCapturingHint is used only when query=true (rcclGetCollImplInfo). The live
-// path ticks the shared CE graph latch in ncclReduceScatter_impl before calling.
+// graphCapturingHint feeds selection only when query=true (rcclGetCollImplInfo). The live
+// path ticks the shared CE graph latch in ncclReduceScatter_impl before calling, and passes
+// the stream's capture state so a deferred DDA IPC setup is not attempted while capturing.
 ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t recvcount,
                                      ncclDataType_t datatype, ncclRedOp_t op, bool query,
                                      struct rcclCollDecision* decision, bool graphCapturingHint = false);
@@ -366,6 +367,7 @@ RCCL_PARAM_DECLARE(DdaLLThreshold);
 RCCL_PARAM_DECLARE(DdaLL128);
 RCCL_PARAM_DECLARE(DdaLL128Threshold);
 RCCL_PARAM_DECLARE(DdaEnable);
+RCCL_PARAM_DECLARE(DdaIpcLazyInit);
 extern int64_t ncclParamP2pDisable();
 
 // Value of RCCL_DDA_THRESHOLD / RCCL_DDA_LL_THRESHOLD / RCCL_DDA_LL128_THRESHOLD

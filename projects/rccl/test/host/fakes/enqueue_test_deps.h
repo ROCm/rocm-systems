@@ -35,4 +35,7 @@
 
 void ResetEnqueueTestDeps();
 
+// ncclDdaIpcEnsureInit (src/algorithms/dda/ipc/ipc_init.cu). Fails loud until a test installs it.
+extern std::function<ncclResult_t(struct ncclComm*, bool /*capturing*/)> g_ddaIpcEnsureInit;
+
 #endif  // RCCL_TEST_HOST_ENQUEUE_TEST_DEPS_H_

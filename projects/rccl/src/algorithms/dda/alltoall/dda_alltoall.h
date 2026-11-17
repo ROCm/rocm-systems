@@ -19,6 +19,9 @@ struct ncclComm;
  */
 bool ncclAllToAllDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                 ncclDataType_t datatype);
+// Eligible minus the IPC resources and the buffer addresses: every rank gets the same answer,
+// so a deferred IPC setup can be triggered from it.
+bool ncclAllToAllDdaIpcShapeEligible(ncclComm* comm, size_t count, ncclDataType_t datatype);
 
 /**
  * Execute DDA alltoall operation using IPC

@@ -17,6 +17,9 @@ struct ncclComm;
  */
 bool ncclReduceScatterDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t recvcount,
                                      ncclDataType_t datatype, ncclRedOp_t op);
+// Eligible minus the IPC resources and the buffer addresses: every rank gets the same answer,
+// so a deferred IPC setup can be triggered from it.
+bool ncclReduceScatterDdaIpcShapeEligible(ncclComm* comm, size_t recvcount, ncclDataType_t datatype, ncclRedOp_t op);
 
 /**
  * Execute DDA reduce-scatter operation using IPC

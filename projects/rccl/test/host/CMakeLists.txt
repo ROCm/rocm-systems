@@ -57,6 +57,10 @@ rccl_assert_source_line("${_rccl_src_root}/rccl_wrap.cc"
   "RCCL_PARAM(DdaEnable, \"DDA_ENABLE\", 1)" "fakes/rccl_wrap_fakes.cc: rcclParamDdaEnable()")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/rccl_wrap_fakes.cc"
   "int64_t g_rcclParamDdaEnable = 1" "the DdaEnable fake default")
+rccl_assert_source_line("${_rccl_src_root}/rccl_wrap.cc"
+  "RCCL_PARAM(DdaIpcLazyInit, \"DDA_IPC_LAZY_INIT\", 1)" "fakes/rccl_wrap_fakes.cc: rcclParamDdaIpcLazyInit()")
+rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/rccl_wrap_fakes.cc"
+  "int64_t g_rcclParamDdaIpcLazyInit = 1" "the DdaIpcLazyInit fake default")
 # Both arms of the ROCM_VERSION split at enqueue.cc:437-441; enqueue_fakes.cc mirrors both, so pin both.
 rccl_assert_source_line("${_rccl_src_root}/enqueue/enqueue.cc"
   "NCCL_PARAM(GraphRegister, \"GRAPH_REGISTER\", 1)"

@@ -79,13 +79,8 @@ static ncclResult_t ncclAllToAllDdaIpcTyped(const void* sendbuff, void* recvbuff
 
 } // namespace
 
-bool ncclAllToAllDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
-                                ncclDataType_t datatype) {
+bool ncclAllToAllDdaIpcShapeEligible(ncclComm* comm, size_t count, ncclDataType_t datatype) {
   if (comm == nullptr || comm->bootstrap == nullptr) {
-    return false;
-  }
-  if (comm->ddaIpcMemHandler == nullptr || comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr ||
-      comm->ddaIpcBarrierState == nullptr) {
     return false;
   }
   if (count == 0) {
@@ -103,7 +98,7 @@ bool ncclAllToAllDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* recv
 
   size_t totalCount = count * comm->nRanks;
   size_t need = totalCount * ncclTypeSize(datatype);
-  if (need > comm->ddaScratchBytes) {
+  if (need > ncclDdaScratchCapacity(comm)) {
     return false;
   }
 
@@ -112,11 +107,22 @@ bool ncclAllToAllDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* recv
     return false;
   }
 
-  if (!dda::common::ddaUserBuffers16ByteAligned(sendbuff, recvbuff)) {
+  return true;
+}
+
+bool ncclAllToAllDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                                ncclDataType_t datatype) {
+  if (comm == nullptr) {
     return false;
   }
-
-  return true;
+  if (comm->ddaIpcMemHandler == nullptr || comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr ||
+      comm->ddaIpcBarrierState == nullptr) {
+    return false;
+  }
+  if (!ncclAllToAllDdaIpcShapeEligible(comm, count, datatype)) {
+    return false;
+  }
+  return dda::common::ddaUserBuffers16ByteAligned(sendbuff, recvbuff);
 }
 
 uint32_t ncclAllToAllDdaIpcBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype) {

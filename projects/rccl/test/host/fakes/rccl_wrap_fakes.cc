@@ -315,6 +315,8 @@ bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize) {
 
 int64_t g_rcclParamDdaEnable = 1;  // rccl_wrap.cc:98 RCCL_PARAM default
 int64_t rcclParamDdaEnable() { return g_rcclParamDdaEnable; }
+int64_t g_rcclParamDdaIpcLazyInit = 1;  // RCCL_PARAM(DdaIpcLazyInit) default
+int64_t rcclParamDdaIpcLazyInit() { return g_rcclParamDdaIpcLazyInit; }
 int64_t g_rcclParamDdaLL = 1;                     // RCCL_PARAM(DdaLL) default
 int64_t rcclParamDdaLL() { return g_rcclParamDdaLL; }
 int64_t g_rcclParamDdaLL128 = kDdaThresholdUnset;  // RCCL_PARAM(DdaLL128) default
@@ -420,6 +422,7 @@ void ResetRcclWrapFakes() {
   g_rcclUseAllGatherDirect = DefaultUseAllGatherDirect;
   g_rcclUseReduceScatterDirect = DefaultUseReduceScatterDirect;
   g_rcclParamDdaEnable = 1;
+  g_rcclParamDdaIpcLazyInit = 1;
   g_rcclNetRegSegmentCount = DefaultNetRegSegmentCount;
   g_rcclNetGraphRegSegmentCount = DefaultNetRegSegmentCount;
   g_rcclNetRegCommitCalls = 0;
@@ -468,9 +471,10 @@ void rcclSetCeAllReduceFastPath(struct ncclComm*) {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclSetCeAllReduceFastPath");
 }
 // rcclCeAllReduceEnabled and rcclForceCeAllReduceEnabled have controllable fakes above.
-bool rcclForceCeScratchEnabled(const ncclComm*) {
+std::function<bool(const ncclComm*)> g_rcclForceCeScratchEnabled = [](const ncclComm*) -> bool {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclForceCeScratchEnabled");
-}
+};
+bool rcclForceCeScratchEnabled(const ncclComm* comm) { return g_rcclForceCeScratchEnabled(comm); }
 size_t rcclCeAr2ShotMax(const ncclComm*) {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclCeAr2ShotMax");
 }
@@ -478,9 +482,10 @@ size_t rcclCeAr2ShotMin(const ncclComm*) {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclCeAr2ShotMin");
 }
 // rcclCeArNonRegCap, which taskAppend and ncclCeInit call instead of rcclCeAr2ShotMax, is a seam above.
-bool rcclNcclAlgoEnvIsSet() {
+std::function<bool()> g_rcclNcclAlgoEnvIsSet = []() -> bool {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclNcclAlgoEnvIsSet");
-}
+};
+bool rcclNcclAlgoEnvIsSet() { return g_rcclNcclAlgoEnvIsSet(); }
 bool rcclAllGatherCeRegisteredWindow(const ncclComm*, size_t, ncclSymRegType_t, bool) {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclAllGatherCeRegisteredWindow");
 }

@@ -1237,7 +1237,8 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
     rcclCeAllReduceGraphLatchTick(comm, ceCapturing);
   }
   struct rcclCollDecision decision;
-  NCCLCHECK(rcclSelectReduceScatter(comm, sendbuff, recvbuff, recvcount, datatype, op, /*query=*/false, &decision));
+  NCCLCHECK(rcclSelectReduceScatter(comm, sendbuff, recvbuff, recvcount, datatype, op, /*query=*/false, &decision,
+                                    ceCapturing));
   decision.ceCapturing = ceCapturing;
   info.decision = decision;
   info.decisionValid = true;
