@@ -23,7 +23,10 @@ def _append_pk_f32_pair_read(
 ) -> None:
     """Read a packed F32 operand as a pair of 32-bit words."""
     if use_cdna5_helpers:
-        L.append(f'    const auto {var} = read_pk_f32_words({src}, wf, lane);')
+        L.append(
+            f'    const auto {var} = amdgpu::RegisterAccess(wf).read_lane_pair32('
+            f'{src}, lane, amdgpu::ScalarPairMode::Replicate32);'
+        )
         return
     L.append(
         f'    const auto {var}_pair_w = amdgpu::RegisterAccess(wf).read_lane_pair32({src}, lane);'

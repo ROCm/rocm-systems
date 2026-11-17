@@ -34,6 +34,14 @@ void check_float32(Call call, Conversion32 operation) {
       input.v[0][lane] = edges[lane];
     }
   }
+  if (op == 2 || op == 3) {
+    // Adjacent FP32 encodings around signed/unsigned saturation and upper-half conversion.
+    const uint32_t edges[] = {0x4effffffU, 0x4f000001U, 0x4f7fffffU, 0x4f800000U,
+                              0x4f800001U, 0xceffffffU, 0xcf000001U, 0xff800001U};
+    for (int lane = 0; lane < 8; ++lane) {
+      input.v[0][16 + lane] = edges[lane];
+    }
+  }
   if (op < 2) {
     const uint32_t *a[] = {input.v[0]};
     uint32_t *d[] = {input.v[6]};

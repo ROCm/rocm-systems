@@ -1442,6 +1442,7 @@ std::vector<ArithmeticCase> fma_mix_f32_cases() {
       {"SignalingNan", 0x7f800012, 0x3f800000, 0x3f800000, 0, 0x7f800012},
       {"IeeeNan", 0x7f800012, 0x3f800000, 0x3f800000, 0x200, 0x7fc00012},
   };
+  // Migrated gfx1250 mixed FMA shares rj-arith's default host-FP contract.
   std::vector<ArithmeticCase> cases;
   for (auto arch :
        {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3,
@@ -1457,9 +1458,13 @@ std::vector<ArithmeticCase> fma_mix_f32_cases() {
                        {{0, sample.a}, {1, sample.b}, {2, sample.c}},
                        {{6, expected}},
                        sample.mode,
-                       uses_default_host_controls(arch) ? FE_TONEAREST : (FE_DOWNWARD),
+                       (uses_default_host_controls(arch) || arch == ROCJITSU_CODE_ARCH_CDNA5)
+                           ? FE_TONEAREST
+                           : (FE_DOWNWARD),
                        0x9fc0u,
-                       uses_default_host_controls(arch) ? (0x1f80u & (0x9fc0u)) : (0x9f60u)});
+                       (uses_default_host_controls(arch) || arch == ROCJITSU_CODE_ARCH_CDNA5)
+                           ? (0x1f80u & (0x9fc0u))
+                           : (0x9f60u)});
     }
   }
   return cases;
@@ -1888,6 +1893,7 @@ std::vector<ArithmeticCase> half_log_exp_arithmetic_cases() {
 }
 
 std::vector<ArithmeticCase> fma_mix_half_cases() {
+  // Migrated gfx1250 mixed FMA shares rj-arith's default host-FP contract.
   std::vector<ArithmeticCase> cases;
   for (auto arch :
        {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3,
@@ -1904,9 +1910,13 @@ std::vector<ArithmeticCase> fma_mix_half_cases() {
                          {{2, 0x42b90000u}},
                          {{6, high ? (result << 16) | 0xbeefu : 0xdead0000u | result}},
                          240u | (mode << 2),
-                         uses_default_host_controls(arch) ? FE_TONEAREST : (FE_UPWARD),
+                         (uses_default_host_controls(arch) || arch == ROCJITSU_CODE_ARCH_CDNA5)
+                             ? FE_TONEAREST
+                             : (FE_UPWARD),
                          0x9fc0u,
-                         uses_default_host_controls(arch) ? (0x1f80u & (0x9fc0u)) : (0x9f60u)});
+                         (uses_default_host_controls(arch) || arch == ROCJITSU_CODE_ARCH_CDNA5)
+                             ? (0x1f80u & (0x9fc0u))
+                             : (0x9f60u)});
       }
     }
     // Both cards prioritize an invalid product over the addend NaN. Ordinary
@@ -1927,9 +1937,12 @@ std::vector<ArithmeticCase> fma_mix_half_cases() {
                {{0, a}, {1, b}, {2, 0x7fe9a000u}},
                {{6, high ? (result << 16) | 0xbeefu : 0xdead0000u | result}},
                0,
-               uses_default_host_controls(arch) ? FE_TONEAREST : FE_UPWARD,
+               (uses_default_host_controls(arch) || arch == ROCJITSU_CODE_ARCH_CDNA5) ? FE_TONEAREST
+                                                                                      : FE_UPWARD,
                0x9fc0u,
-               uses_default_host_controls(arch) ? (0x1f80u & 0x9fc0u) : 0x9f60u});
+               (uses_default_host_controls(arch) || arch == ROCJITSU_CODE_ARCH_CDNA5)
+                   ? (0x1f80u & 0x9fc0u)
+                   : 0x9f60u});
         }
       }
     }
@@ -2793,6 +2806,7 @@ std::vector<ArithmeticCase> f16_binary_modifier_cases() {
                              uint32_t result, uint8_t opsel) {
     const auto words = cdna4::build_vop3(multiply ? cdna4::kVMulF16Vop3 : cdna4::kVAddF16Vop3,
                                          {.vdst = 6, .op_sel = opsel, .src0 = V0, .src1 = V1});
+    // These migrated handlers dispatch inside rj-arith, outside the legacy tracker.
     cases.push_back({name,
                      ROCJITSU_CODE_ARCH_CDNA4,
                      {words[0], words[1], 0},
@@ -2802,7 +2816,7 @@ std::vector<ArithmeticCase> f16_binary_modifier_cases() {
                      FE_TONEAREST,
                      0,
                      0,
-                     expect_simd_path(amdgpu::SimdFastPath::VOP3_BINARY_MODE_FP16)});
+                     {}});
   };
   // CDNA true16 low-half writes zero the destination's high half; high-half
   // writes preserve the low half. Exercise both ADD and MUL with high sources.
