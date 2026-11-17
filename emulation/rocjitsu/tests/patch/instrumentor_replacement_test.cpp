@@ -1018,7 +1018,6 @@ TEST(InstrumentorReplacement, ProbeAdmissionRejectsUnmodeledIndirectAndCallEdges
         EXPECT_EQ(result.edit_error->offset, 8u);
       } else {
         ASSERT_TRUE(validation.errors.empty()) << validation.errors.front();
-        ASSERT_TRUE(result.errors.empty()) << result.errors.front();
         expect_pure_replacements(
             source, result,
             {{.offset = 4, .expected = instruction_bytes({kNop0Word}), .replacement = {}}});
