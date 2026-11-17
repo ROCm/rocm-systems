@@ -1631,12 +1631,10 @@ inline size_t rcclDdaVmmThresholdCtxTab(const rcclArchThresholds* table, ncclFun
 
 bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t threshold,
                     bool query, const char* prefix) {
-  // The environment parameter can be NCCL_CONFIG_UNDEF_INT when launch order
-  // is configured per communicator. Use the resolved communicator value:
-  // testing the raw sentinel as a boolean disables DDA by default, while
-  // testing only the environment would ignore an explicit config value.
-  if (!rcclParamDdaEnable() || comm->config.launchOrderImplicit == 1 || ncclGroupDepth != 0) {
-    if (!query && prefix) INFO(NCCL_TUNING, "%s DDA disqualified: RCCL_DDA_ENABLE=%d launchOrderImplicit=%d ncclGroupDepth=%d", prefix, (int)rcclParamDdaEnable(), comm->config.launchOrderImplicit, ncclGroupDepth);
+  // Implicit launch order does not disqualify DDA: rcclAddonLaunch joins the
+  // per-device launch order the same way native kernel launches do.
+  if (!rcclParamDdaEnable() || ncclGroupDepth != 0) {
+    if (!query && prefix) INFO(NCCL_TUNING, "%s DDA disqualified: RCCL_DDA_ENABLE=%d ncclGroupDepth=%d", prefix, (int)rcclParamDdaEnable(), ncclGroupDepth);
     return false;
   }
   if (comm->ddaDisabledAfterAbort) {

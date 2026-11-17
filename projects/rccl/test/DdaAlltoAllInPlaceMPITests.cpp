@@ -105,11 +105,10 @@ protected:
         const ncclComm_t comm = getActiveCommunicator();
         // These switch DDA AlltoAll off for the process, so there is no DDA tier to assert.
         const bool ddaOff = rcclNcclAlgoEnvIsSet() || rcclParamDdaEnable() == 0
-                            || comm->config.launchOrderImplicit == 1
                             || (rcclDdaLLThreshold(comm, ncclFuncAlltoAll) == 0
                                 && rcclDdaLL128Threshold(comm, ncclFuncAlltoAll) == 0);
         const std::string ddaOffSkip = mpiCoordinatedSkipReason(
-            ddaOff, "DDA AlltoAll off (NCCL_ALGO, RCCL_DDA_ENABLE, thresholds, implicit launch order)");
+            ddaOff, "DDA AlltoAll off (NCCL_ALGO, RCCL_DDA_ENABLE, thresholds)");
         if(!ddaOffSkip.empty())
             GTEST_SKIP() << ddaOffSkip;
         ll128On_ = rcclDdaLL128Threshold(comm, ncclFuncAlltoAll) > 0;
