@@ -606,8 +606,8 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
 
   auto &det = *detectors_[key];
   amdgpu::Lds &lds = wavefronts.front()->lds();
-  det.setLdsReader([&lds](int addr, int n, uint8_t *dst) {
-    lds.read(static_cast<uint64_t>(addr), dst, static_cast<uint32_t>(n));
+  det.setLdsReader([&lds](int addr, int nBytes, uint8_t *dst) {
+    lds.read(static_cast<uint64_t>(addr), dst, static_cast<uint32_t>(nBytes));
   });
   for (uint32_t w = 0; w < num_waves; ++w) {
     auto state = std::make_unique<RaceWavefrontState>();
@@ -631,18 +631,19 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupCompleted(uint32_t dispatch_id, uint32
     return;
   // Two unordered writes that no read observed before the workgroup ended; at least one of them
   // is wasted work.
-  for (const auto &[start, c] : detector->getLdsWawConflicts()) {
+  for (const auto &[start, conflict] : detector->getLdsWawConflicts()) {
     std::string kernel_name;
     {
       std::lock_guard<std::mutex> lock(report_mutex_);
-      if (!observed_unread_notes_.emplace(dispatch_id, c.first.pc()).second)
+      if (!observed_unread_notes_.emplace(dispatch_id, conflict.first.pc()).second)
         continue;
       kernel_name = kernel_names_locked(dispatch_id).name;
     }
     sink().write(std::format("NOTE unread-write kernel={} dispatch={} wg={} bytes=[{},{}) "
                              "first_pc=0x{:x} first_wave={} second_wave={}\n",
-                             kernel_name, dispatch_id, wg_id, c.start, c.end, c.first.pc(),
-                             c.firstWave.value, c.secondWave.value));
+                             kernel_name, dispatch_id, wg_id, conflict.start, conflict.end,
+                             conflict.first.pc(), conflict.firstWave.value,
+                             conflict.secondWave.value));
   }
 }
 

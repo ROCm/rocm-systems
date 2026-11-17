@@ -103,9 +103,9 @@ void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes,
 bool RaceDetector::sameAsLds(int start, int end, const uint8_t *data) const {
   std::array<uint8_t, 64> held;
   for (int at = start; at < end; at += static_cast<int>(held.size())) {
-    const int n = std::min(end - at, static_cast<int>(held.size()));
-    ldsReader(at, n, held.data());
-    if (!std::equal(held.begin(), held.begin() + n, data + (at - start)))
+    const int count = std::min(end - at, static_cast<int>(held.size()));
+    ldsReader(at, count, held.data());
+    if (!std::equal(held.begin(), held.begin() + count, data + (at - start)))
       return false;
   }
   return true;
@@ -165,18 +165,19 @@ void RaceDetector::reportUnorderedOverlaps(const std::vector<EventId> &pending, 
   // A later conflict on the same bytes replaces an earlier one. A conflict that
   // continues the one before it, between the same two writes, extends it: the
   // lanes of one instruction write adjacent ranges.
-  for (const LdsWawConflict &c : added) {
-    clearConflicts(c.start, c.end);
-    auto next = wawConflicts.lower_bound(c.start);
+  for (const LdsWawConflict &conflict : added) {
+    clearConflicts(conflict.start, conflict.end);
+    auto next = wawConflicts.lower_bound(conflict.start);
     if (next != wawConflicts.begin()) {
       LdsWawConflict &prev = std::prev(next)->second;
-      if (prev.end == c.start && prev.first == c.first && prev.firstWave == c.firstWave &&
-          prev.second == c.second && prev.secondWave == c.secondWave) {
-        prev.end = c.end;
+      if (prev.end == conflict.start && prev.first == conflict.first &&
+          prev.firstWave == conflict.firstWave && prev.second == conflict.second &&
+          prev.secondWave == conflict.secondWave) {
+        prev.end = conflict.end;
         continue;
       }
     }
-    wawConflicts.emplace_hint(next, c.start, c);
+    wawConflicts.emplace_hint(next, conflict.start, conflict);
   }
 }
 
@@ -189,19 +190,19 @@ void RaceDetector::reportObservedConflicts(int addr, int nBytes, WaveId wave, in
   if (it != wawConflicts.begin() && std::prev(it)->second.end > addr)
     --it;
   for (; it != wawConflicts.end() && it->first < end; ++it) {
-    const LdsWawConflict &c = it->second;
-    RaceViolation v{RaceViolation::Space::LDS,
-                    std::max(c.start, addr),
-                    wave.value,
-                    lane,
-                    false,
-                    workgroupId,
-                    EventId{}};
-    v.observedWrite = c.first;
-    v.observedWriteWave = c.firstWave.value;
-    v.observedLaterWrite = c.second;
-    v.observedLaterWriteWave = c.secondWave.value;
-    raceHandler(v);
+    const LdsWawConflict &conflict = it->second;
+    RaceViolation violation{RaceViolation::Space::LDS,
+                            std::max(conflict.start, addr),
+                            wave.value,
+                            lane,
+                            false,
+                            workgroupId,
+                            EventId{}};
+    violation.observedWrite = conflict.first;
+    violation.observedWriteWave = conflict.firstWave.value;
+    violation.observedLaterWrite = conflict.second;
+    violation.observedLaterWriteWave = conflict.secondWave.value;
+    raceHandler(violation);
   }
   clearConflicts(addr, end);
 }
@@ -211,12 +212,12 @@ void RaceDetector::splitConflictAt(int at) {
   if (it == wawConflicts.begin())
     return;
   --it;
-  LdsWawConflict &c = it->second;
-  if (c.start >= at || c.end <= at)
+  LdsWawConflict &conflict = it->second;
+  if (conflict.start >= at || conflict.end <= at)
     return;
-  LdsWawConflict right = c;
+  LdsWawConflict right = conflict;
   right.start = at;
-  c.end = at;
+  conflict.end = at;
   wawConflicts.emplace(at, right);
 }
 
