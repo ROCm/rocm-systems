@@ -536,8 +536,9 @@ TEST_F(BootstrapMicrotest, Accept_BadHandshakePeerIsClosedAndTheNextOneAccepted)
   for (auto* s : {&l, &stray, &good, &sock}) (void)ncclSocketClose(s);
 }
 
-// bootstrapAccept retries only on BadHandshake, so it returns a rejected peer unconnected; a fix flips this pin.
-TEST_F(BootstrapMicrotest, Accept_KnownBug_RejectedPeerReportedAsAccepting_IsReturnedUnconnected) {
+// socket.cc reports Accepting after bad magic. Bootstrap must skip that peer
+// and return a Ready connection before the caller reads its payload.
+TEST_F(BootstrapMicrotest, Accept_RejectedPeerReportedAsAccepting_RetriesUntilReady) {
   struct ncclSocket l, stray, good, sock;
   ASSERT_EQ(ncclSuccess, ncclSocketInit(&l, &bootstrapNetIfAddr, 7, ncclSocketTypeBootstrap, &abort_));
   ASSERT_EQ(ncclSuccess, ncclSocketListen(&l));
@@ -548,9 +549,11 @@ TEST_F(BootstrapMicrotest, Accept_KnownBug_RejectedPeerReportedAsAccepting_IsRet
 
   EXPECT_EQ(ncclSuccess, bootstrapAccept(&sock, &l, &abort_));
 
-  EXPECT_EQ(ncclSocketStateAccepting, sock.state);
-  char out[2];
-  EXPECT_NE(ncclSuccess, socketRecv(&sock, out, 2));
+  EXPECT_EQ(ncclSocketStateReady, sock.state);
+  ASSERT_EQ(ncclSuccess, socketSend(&good, (void*)"ok", 2));
+  char out[3] = {};
+  EXPECT_EQ(ncclSuccess, socketRecv(&sock, out, 2));
+  EXPECT_STREQ("ok", out);
   for (auto* s : {&l, &stray, &good, &sock}) (void)ncclSocketClose(s);
 }
 
@@ -678,17 +681,18 @@ TEST_F(BootstrapMicrotest, Root_RankGoneBeforeItsAnswer_MakesTheRootGiveUp) {
   (void)ncclSocketClose(&listen[1]);
 }
 
-// The Accept_KnownBug_ above makes one stray connection end the root; a fix flips this pin.
-TEST_F(BootstrapMicrotest, Root_KnownBug_StrayPeerWithTheWrongMagicMakesTheRootExit) {
+// A bad-cookie peer must not terminate the detached root before valid ranks
+// exchange their ring information.
+TEST_F(BootstrapMicrotest, Root_StrayPeerWithTheWrongMagicDoesNotPreventCheckIn) {
   ASSERT_EQ(ncclSuccess, bootstrapGetUniqueId(&handle_, nullptr));
   struct ncclSocket stray;
   ASSERT_EQ(ncclSuccess, ncclSocketInit(&stray, &handle_.addr, handle_.magic + 1, ncclSocketTypeBootstrap));
   ASSERT_EQ(ncclSuccess, ncclSocketConnect(&stray));
+  struct ncclSocket listen;
+  CheckIn(0, 1, &listen);
+  auto answer = Answer(&listen);
+  EXPECT_EQ(1, answer.fwd.handle[0]);
   WaitRoots();
-  // A valid one-rank check-in: a fixed root still listening then finishes, rather than dividing by nroots 0.
-  struct extInfo info = {};
-  info.nranks = info.nroots = 1;
-  EXPECT_EQ(ncclRemoteError, sendToRoot(&handle_, self_.comm.get(), &info));
   (void)ncclSocketClose(&stray);
 }
 
@@ -1093,8 +1097,6 @@ TEST_F(BootstrapMicrotest, BcastGrowHandle_CoordinatorReachesOnlyTheBoundaryRank
   ncclBootstrapHandle h = {};
   EXPECT_EQ(ncclInvalidArgument, bcastGrowHandle(nullptr, self_.comm.get(), true));
   EXPECT_EQ(ncclInvalidArgument, bcastGrowHandle(&h, nullptr, false));
-  self_.comm->nRanks = 1;
-  EXPECT_EQ(ncclSuccess, bcastGrowHandle(&h, self_.comm.get(), false));  // would block if it received
 
   ASSERT_EQ(ncclSuccess, InitRanks(4));
   ncclBootstrapHandle got[4] = {};
@@ -1109,6 +1111,23 @@ TEST_F(BootstrapMicrotest, BcastGrowHandle_CoordinatorReachesOnlyTheBoundaryRank
   EXPECT_EQ(4, got[3].nRanks);
   for (int r : {1, 2})  // neither the coordinator nor an inner rank was sent anything
     EXPECT_EQ(0u, PendingOn(static_cast<struct bootstrapState*>(State(r))->listen.peerSocket)) << r;
+  EXPECT_TRUE(AllOk(CloseRanks()));
+}
+
+// Since v2.32.6 a single-rank parent no longer short-circuits: the coordinator (rank 0 == nRanks-1) sends the
+// handle once, to itself, and its own ncclCommGrow receive as boundary rank picks it up.
+TEST_F(BootstrapMicrotest, BcastGrowHandle_SingleRankParent_CoordinatorSendsOneCopyToItself) {
+  ASSERT_EQ(ncclSuccess, InitRanks(1));
+  ncclBootstrapHandle sent = {};
+  sent.magic = 0xCD;
+  sent.nRanks = 1;
+  ncclBootstrapHandle got = {};
+  ASSERT_EQ(ncclSuccess, bcastGrowHandle(&sent, Comm(0), /*isRoot=*/true));
+  ASSERT_EQ(ncclSuccess, bcastGrowHandle(&got, Comm(0), /*isRoot=*/false));
+  EXPECT_EQ(0xCDu, got.magic);
+  EXPECT_EQ(1, got.nRanks);
+  EXPECT_EQ(0u, PendingOn(static_cast<struct bootstrapState*>(State(0))->listen.peerSocket))
+    << "only one copy may be sent when rank 0 is also the last rank";
   EXPECT_TRUE(AllOk(CloseRanks()));
 }
 

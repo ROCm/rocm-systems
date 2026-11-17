@@ -31,9 +31,9 @@ std::string_view EnvInputParameters::get_requested_counters()
     return get("ROCPROF_COUNTERS", kDefaultRequestedCounters);
 }
 
-std::string_view EnvInputParameters::get_iteration_multiplexing_mode()
+std::string_view EnvInputParameters::get_iteration_multiplexing()
 {
-    return get("ROCPROF_ITERATION_MULTIPLEXING", kDefaultIterationMultiplexingMode);
+    return get("ROCPROF_ITERATION_MULTIPLEXING", kDefaultIterationMultiplexing);
 }
 
 std::string_view EnvInputParameters::get_kernel_filter_include_regex()

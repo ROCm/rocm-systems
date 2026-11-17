@@ -586,7 +586,7 @@ hipError_t hipDeviceGetName(char* name, int len, hipDevice_t device) {
 
   // Only copy partial name if size of `dest` is smaller than size of `src` including
   // trailing zero byte
-  const auto memcpySize = (len <= (nameLen + 1) ? (len - 1) : nameLen);
+  const auto memcpySize = (static_cast<size_t>(len) <= (nameLen + 1) ? (len - 1) : nameLen);
   ::memcpy(name, info.boardName_, memcpySize);
   name[memcpySize] = '\0';
 
@@ -625,14 +625,13 @@ hipError_t hipDeviceGetLuid(char* luid, unsigned int* deviceNodeMask, hipDevice_
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  if (IS_LINUX) {
-    // The LUID is a Windows/DXGI adapter concept; unsupported elsewhere and the
-    // output parameters are left untouched.
-    HIP_RETURN(hipErrorNotSupported);
-  }
-
   auto* deviceHandle = g_devices[device]->devices()[0];
   const auto& info = deviceHandle->info();
+
+  // No WDDM/DXGI adapter behind this device, so no LUID to report.
+  if (info.luidLowPart_ == 0 && info.luidHighPart_ == 0) {
+    HIP_RETURN(hipErrorNotSupported);
+  }
 
   // The LUID is an 8-byte value formed from the low and high parts reported by the backend.
   static_assert(sizeof(info.luidLowPart_) + sizeof(info.luidHighPart_) == 8,
@@ -657,11 +656,11 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_t* props, int device) {
 
   constexpr auto kPixelSizeMax = 16;
   constexpr auto kInt32Max = static_cast<uint64_t>(std::numeric_limits<int32_t>::max());
-  hipDeviceProp_tR0600 deviceProps = {0};
+  hipDeviceProp_tR0600 deviceProps = {};
 
   const auto& info = deviceHandle->info();
   const auto& isa = deviceHandle->isa();
-  ::strncpy(deviceProps.name, info.boardName_, sizeof(info.boardName_));
+  ::snprintf(deviceProps.name, sizeof(deviceProps.name), "%s", info.boardName_);
   memcpy(deviceProps.uuid.bytes, info.uuid_, sizeof(info.uuid_));
   deviceProps.totalGlobalMem = info.globalMemSize_;
   const size_t ldsPerMultiprocessor = static_cast<size_t>(info.localMemSizePerCU_) *
@@ -826,11 +825,17 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_t* props, int device) {
   // Mapping HIP array
   deviceProps.deferredMappingHipArraySupported = 0;
   // RDMA options
-  deviceProps.gpuDirectRDMASupported = (info.dmabufSupported_ && info.largeBar_) ? 1 : 0;
   // Set option if we have a HDP register
   deviceProps.gpuDirectRDMAFlushWritesOptions =
       hip::ihipRdmaFlushWritesOptions(info.hdpMemFlushCntl);
   deviceProps.gpuDirectRDMAWritesOrdering = hip::ihipRdmaWritesOrdering();
+  // RDMA is only usable if an inbound write can be made visible, either by native ordering or
+  // by a flush.
+  const bool rdmaVisibilityPath =
+      (deviceProps.gpuDirectRDMAWritesOrdering != hipGPUDirectRDMAWritesOrderingNone) ||
+      (deviceProps.gpuDirectRDMAFlushWritesOptions != 0);
+  deviceProps.gpuDirectRDMASupported =
+      (info.dmabufSupported_ && info.largeBar_ && rdmaVisibilityPath) ? 1 : 0;
   // The LUID is a Windows/DXGI adapter concept; the backend reports a zero LUID
   // and zero node mask on platforms without a WDDM adapter.
   *reinterpret_cast<uint32_t*>(&deviceProps.luid[0]) = info.luidLowPart_;
@@ -871,7 +876,7 @@ hipError_t hipGetDevicePropertiesR0000(hipDeviceProp_tR0000* prop, int device) {
 
   constexpr auto kPixelSizeMax = 16;
   constexpr auto kInt32Max = static_cast<uint64_t>(std::numeric_limits<int32_t>::max());
-  hipDeviceProp_tR0000 deviceProps = {0};
+  hipDeviceProp_tR0000 deviceProps = {};
 
   const auto& info = deviceHandle->info();
   const auto& isa = deviceHandle->isa();

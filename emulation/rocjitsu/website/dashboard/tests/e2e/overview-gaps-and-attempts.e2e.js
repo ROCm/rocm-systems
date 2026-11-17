@@ -3,7 +3,7 @@ import { createMaintainedPublication } from '../fixtures/maintainedDataset.js';
 import { readChart } from './helpers/chart.js';
 import { installPublication, openDashboard } from './helpers/dashboard.js';
 
-test('daily gaps hide tooltip and latest failures never fall back to earlier success', async ({ page }) => {
+test('daily gaps hide tooltip, lines connect across them, and latest failures never fall back to earlier success', async ({ page }) => {
   const publication = createMaintainedPublication();
   const latest = publication.runs.find((r) => r.publication.id === 'fictional-develop-23');
   for (const config of latest.benchmark_results.filter(({ id }) => id === 'a')) {
@@ -24,7 +24,7 @@ test('daily gaps hide tooltip and latest failures never fall back to earlier suc
       tooltip: instance.getOption().tooltip[0].formatter([{ dataIndex: gap }]),
       connect: series.map((s) => s.connectNulls) };
   });
-  expect(probe.gap).toBeGreaterThanOrEqual(0); expect(probe.tooltip).toBe(''); expect(probe.connect.every((v) => v === false)).toBe(true);
+  expect(probe.gap).toBeGreaterThanOrEqual(0); expect(probe.tooltip).toBe(''); expect(probe.connect.every((v) => v === true)).toBe(true);
   const box = await chart.boundingBox();
   await page.mouse.move(box.x + probe.x * box.width / probe.width, box.y + probe.y * box.height / probe.height);
   await expect(trend.getByTestId('point-hover-guide')).not.toBeVisible();
@@ -33,7 +33,7 @@ test('daily gaps hide tooltip and latest failures never fall back to earlier suc
 test('weekly repeated attempts preserve collision-safe inspection and touch disclosure', async ({ page }) => {
   const publication = createMaintainedPublication();
   const attempt = structuredClone(publication.runs.find((r) => r.publication.id === 'fictional-develop-23'));
-  attempt.publication.id = 'fictional-repeat'; attempt.execution_summary.finished_at = '2026-10-04T07:00:00.000Z';
+  attempt.publication.id = 'fictional-repeat'; attempt.execution_summary.timestamp = '2026-10-04T07:00:00.000Z';
   publication.runs.push(attempt); publication.index.runFiles.push('runs/default-branch/fictional-repeat.json');
   await installPublication(page, { publication }); await openDashboard(page, '/?range=1W');
   const trend = page.getByTestId('performance-trend'); const group = trend.getByRole('group', { name: 'Inspect performance trend' });

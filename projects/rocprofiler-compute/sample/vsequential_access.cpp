@@ -1,6 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 
+// Keep in sync with its copies under projects/rocprofiler-compute/:
+//   skills/rocprof-compute-memory/evals/samples/vsequential_access.cpp
+
 /*
 An example code to execute sequential access to explore cache hits/misses in L2 Cache.
 */

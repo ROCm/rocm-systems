@@ -5,7 +5,7 @@
 
 #pragma once
 
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <gtest/gtest.h>
 #include <stdint.h>
@@ -25,6 +25,24 @@ template <typename Call> void expect_invalid_flags(Call call, uint64_t supported
       SCOPED_TRACE(bit);
       EXPECT_EQ(call(0, 1ULL << bit), RJ_ARITH_ERROR_INVALID_FLAGS);
     }
+  }
+}
+
+// The arithmetic test supplies low modifier bits; DPP is sampled separately.
+// Treat descriptor fields as a unit, then explicitly check malformed encodings.
+template <bool SupportsDpp, typename Call>
+void expect_alu_invalid_flags(Call call, uint64_t low_modifiers) {
+  uint64_t descriptor = !SupportsDpp ? 0
+                                     : RJ_ARITH_DPP8 | RJ_ARITH_DPP16 | RJ_ARITH_DPP_FI |
+                                           RJ_ARITH_DPP_BOUND_CTRL | RJ_ARITH_DPP_CTRL_MASK |
+                                           RJ_ARITH_DPP_ROW_MASK | RJ_ARITH_DPP_BANK_MASK |
+                                           RJ_ARITH_DPP8_SELECT_MASK;
+  expect_invalid_flags(call, low_modifiers | descriptor);
+  const uint64_t invalid_modes[] = {RJ_ARITH_DPP8 | RJ_ARITH_DPP16,
+                                    RJ_ARITH_DPP16 | (0x131ULL << RJ_ARITH_DPP_CTRL_SHIFT),
+                                    1ULL << RJ_ARITH_DPP8_SELECT_SHIFT};
+  for (uint64_t invalid : invalid_modes) {
+    EXPECT_EQ(call(0, invalid), RJ_ARITH_ERROR_INVALID_FLAGS);
   }
 }
 
