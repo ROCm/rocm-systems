@@ -62,11 +62,19 @@ struct RelocationFunctionTable {
 /// @brief Exact extent of one sized `STT_FUNC` symbol in `.text`.
 ///
 /// @details Both fields are byte offsets relative to the code object's single `.text` section.
-/// The size comes from the symbol's `st_size`; it is not inferred from the next symbol, because
-/// linkers may place non-code alignment padding between function symbols.
+/// Direct results of discover_text_function_symbol_ranges() take the size from `st_size`,
+/// excluding linker alignment padding. When embedded in TextFunctionSymbolExtent, the enclosing
+/// provenance identifies whether a zero-sized symbol required inference.
 struct TextFunctionSymbolRange {
   uint64_t start_offset = 0;
   uint64_t size = 0;
+};
+
+/// @brief One canonical explicit or inferred extent of an actual `STT_FUNC` symbol.
+struct TextFunctionSymbolExtent {
+  TextFunctionSymbolRange range;
+  /// True only when no unambiguous explicit alias supplied this extent's size.
+  bool inferred_from_zero = false;
 };
 
 /// @brief One dynamically indexed table load feeding a call-like scalar PC swap.
@@ -176,6 +184,28 @@ discover_relocation_function_tables(const AmdGpuCodeObject &object);
 /// more than one `.text`, or no qualifying symbol.
 [[nodiscard]] std::vector<TextFunctionSymbolRange>
 discover_text_function_symbol_ranges(const AmdGpuCodeObject &object);
+
+/// @brief Discover explicit function extents and resolve existing zero-sized `STT_FUNC` entries.
+///
+/// @details Uses the same validated entry coordinates as the strict range query. A zero size
+/// takes an unambiguous nonzero size from aliases at its entry, or otherwise reaches the next
+/// distinct function entry or the end of the single `.text` section. This inferred extent may
+/// include alignment padding. Conflicting explicit aliases remain distinct; their zero-sized
+/// alias uses the next-entry fallback. Every returned extent is nonempty, instruction-word
+/// aligned, and wholly in text. Invalid extents are discarded rather than clamped. Entries with
+/// an invalid explicit extent still delimit next-entry inference when their entry is valid.
+///
+/// Results are sorted and unique by `(start_offset, size)`. Explicit evidence wins provenance
+/// when several symbols resolve to the same extent. This query only interprets actual function
+/// symbols; it does not infer a function from a kernel descriptor or establish execution owners.
+/// The strict discover_text_function_symbol_ranges() query continues to exclude zero-only entries.
+/// An unreadable or incomplete symbol-record table makes this entire query return empty: a missing
+/// entry could change an inferred boundary even when another symbol table is readable.
+///
+/// @returns Value extents, or an empty vector for an invalid object, multiple `.text` sections,
+/// no readable symbol table, or no qualifying symbol.
+[[nodiscard]] std::vector<TextFunctionSymbolExtent>
+discover_text_function_symbol_extents(const AmdGpuCodeObject &object);
 
 /// @brief `.text`-relative offsets of every sized `STT_FUNC` symbol in the code object.
 ///

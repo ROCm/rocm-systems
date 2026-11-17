@@ -403,7 +403,8 @@ bool object_defines_only_kernels(const AmdGpuCodeObject &object) {
 // contract before exposing ranges.
 static std::vector<TextFunctionSymbolRange>
 discover_text_function_symbol_candidates(const AmdGpuCodeObject &object,
-                                         bool externally_resolvable_only);
+                                         bool externally_resolvable_only,
+                                         bool include_zero_sized = false);
 
 std::vector<uint64_t>
 discover_externally_resolvable_text_function_offsets(const AmdGpuCodeObject &object) {
@@ -440,21 +441,70 @@ discover_text_function_symbol_ranges(const AmdGpuCodeObject &object) {
   return ranges;
 }
 
+std::vector<TextFunctionSymbolExtent>
+discover_text_function_symbol_extents(const AmdGpuCodeObject &object) {
+  if (!object.is_valid() || object.text_sections().size() != 1)
+    return {};
+  const uint64_t text_size = object.text_sections().front()->size();
+  const std::vector<TextFunctionSymbolRange> candidates = discover_text_function_symbol_candidates(
+      object, /*externally_resolvable_only=*/false, /*include_zero_sized=*/true);
+  std::vector<TextFunctionSymbolExtent> extents;
+  const auto append_extent = [&](uint64_t start, uint64_t size, bool inferred) {
+    if (size != 0 && size % sizeof(uint32_t) == 0 && size <= text_size - start)
+      extents.push_back(
+          {.range = {.start_offset = start, .size = size}, .inferred_from_zero = inferred});
+  };
+  for (size_t first = 0; first < candidates.size();) {
+    const uint64_t start = candidates[first].start_offset;
+    size_t next = first + 1;
+    while (next < candidates.size() && candidates[next].start_offset == start)
+      ++next;
+    const bool has_zero = candidates[first].size == 0;
+    const size_t explicit_first = first + (has_zero ? 1 : 0);
+    for (size_t index = explicit_first; index < next; ++index)
+      append_extent(start, candidates[index].size, false);
+    if (has_zero) {
+      if (next - explicit_first == 1) {
+        // A unique explicit size remains authoritative even when invalid. Reject
+        // that resulting extent rather than inventing a different fallback.
+        append_extent(start, candidates[explicit_first].size, false);
+      } else {
+        const uint64_t end = next < candidates.size() ? candidates[next].start_offset : text_size;
+        append_extent(start, end - start, true);
+      }
+    }
+    first = next;
+  }
+  // False sorts first so deduplication retains explicit provenance when an
+  // inferred alias happens to resolve to an existing explicit extent.
+  const auto order_key = [](const TextFunctionSymbolExtent &extent) {
+    return std::pair{std::pair{extent.range.start_offset, extent.range.size},
+                     extent.inferred_from_zero};
+  };
+  const auto extent_key = [](const TextFunctionSymbolExtent &extent) {
+    return std::pair{extent.range.start_offset, extent.range.size};
+  };
+  std::ranges::sort(extents, {}, order_key);
+  extents.erase(std::ranges::unique(extents, {}, extent_key).begin(), extents.end());
+  return extents;
+}
+
 template <typename Visitor>
-static void visit_text_function_symbols(const AmdGpuCodeObject &object, Visitor visit) {
+static bool visit_text_function_symbols(const AmdGpuCodeObject &object, Visitor visit,
+                                        bool require_complete_tables = false) {
   const auto *bytes = reinterpret_cast<const uint8_t *>(object.image_data());
   const std::span<const uint8_t> image(bytes, object.image_size());
   Elf64_Ehdr ehdr{};
   if (!read_object(image, 0, ehdr) || ehdr.e_shentsize != sizeof(Elf64_Shdr) ||
       !range_in_image(image, ehdr.e_shoff,
                       static_cast<uint64_t>(ehdr.e_shnum) * sizeof(Elf64_Shdr)))
-    return;
+    return false;
 
   std::vector<Elf64_Shdr> sections(ehdr.e_shnum);
   std::memcpy(sections.data(), image.data() + ehdr.e_shoff, sections.size() * sizeof(Elf64_Shdr));
 
   if (object.text_sections().size() != 1)
-    return;
+    return false;
   const Section &text = *object.text_sections().front();
   const uint64_t text_vaddr = text.vaddr();
   const uint64_t text_size = text.size();
@@ -462,13 +512,20 @@ static void visit_text_function_symbols(const AmdGpuCodeObject &object, Visitor 
   // nothing costs the caller its extra split points, while guessing would invent them.
   const auto text_index = text_section_index(sections, text);
   if (!text_index)
-    return;
+    return false;
 
   for (const Elf64_Shdr &symtab : sections) {
-    if ((symtab.sh_type != SHT_SYMTAB && symtab.sh_type != SHT_DYNSYM) ||
-        symtab.sh_entsize != sizeof(Elf64_Sym) ||
-        !range_in_image(image, symtab.sh_offset, symtab.sh_size))
+    if (symtab.sh_type != SHT_SYMTAB && symtab.sh_type != SHT_DYNSYM)
       continue;
+    // Missing entries can hide boundaries used by zero-sized extent inference.
+    // Other visitors retain their existing tolerance of incomplete tables.
+    if (symtab.sh_entsize != sizeof(Elf64_Sym) ||
+        !range_in_image(image, symtab.sh_offset, symtab.sh_size) ||
+        (require_complete_tables && symtab.sh_size % sizeof(Elf64_Sym) != 0)) {
+      if (require_complete_tables)
+        return false;
+      continue;
+    }
     const size_t count = symtab.sh_size / sizeof(Elf64_Sym);
     for (size_t index = 0; index < count; ++index) {
       Elf64_Sym symbol{};
@@ -496,6 +553,7 @@ static void visit_text_function_symbols(const AmdGpuCodeObject &object, Visitor 
             symtab.sh_link < sections.size() ? &sections[symtab.sh_link] : nullptr);
     }
   }
+  return true;
 }
 
 std::optional<std::string_view> local_text_function_name(const AmdGpuCodeObject &object,
@@ -533,15 +591,19 @@ std::optional<std::string_view> local_text_function_name(const AmdGpuCodeObject 
 
 static std::vector<TextFunctionSymbolRange>
 discover_text_function_symbol_candidates(const AmdGpuCodeObject &object,
-                                         bool externally_resolvable_only) {
+                                         bool externally_resolvable_only, bool include_zero_sized) {
   std::vector<TextFunctionSymbolRange> ranges;
-  visit_text_function_symbols(object, [&](uint64_t offset, const Elf64_Sym &symbol,
-                                          std::span<const uint8_t>, const Elf64_Shdr *) {
-    if ((offset % sizeof(uint32_t)) == 0 && symbol.st_size &&
-        (!externally_resolvable_only ||
-         elf_symbol_is_externally_resolvable(symbol.st_info, symbol.st_other)))
-      ranges.push_back({.start_offset = offset, .size = symbol.st_size});
-  });
+  const bool complete = visit_text_function_symbols(
+      object,
+      [&](uint64_t offset, const Elf64_Sym &symbol, std::span<const uint8_t>, const Elf64_Shdr *) {
+        if ((offset % sizeof(uint32_t)) == 0 && (include_zero_sized || symbol.st_size != 0) &&
+            (!externally_resolvable_only ||
+             elf_symbol_is_externally_resolvable(symbol.st_info, symbol.st_other)))
+          ranges.push_back({.start_offset = offset, .size = symbol.st_size});
+      },
+      include_zero_sized);
+  if (include_zero_sized && !complete)
+    return {};
   const auto range_key = [](const TextFunctionSymbolRange &range) {
     return std::pair{range.start_offset, range.size};
   };

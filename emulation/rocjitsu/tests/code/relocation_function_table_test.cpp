@@ -459,6 +459,517 @@ TEST(RelocationFunctionTable, PreservesSizedTextFunctionGaps) {
   EXPECT_LT(ranges[1].start_offset + ranges[1].size, ranges[2].start_offset);
 }
 
+struct FunctionExtentSymbol {
+  uint64_t value;
+  uint64_t size;
+  uint16_t section = 1;
+  uint8_t type = kElfSymbolTypeFunc;
+  std::string_view name = {};
+};
+
+// Literal ELF records keep the extent oracle independent of symbol discovery,
+// kernel-descriptor association and generated instruction builders.
+std::vector<uint8_t> make_function_extent_elf(std::span<const FunctionExtentSymbol> functions,
+                                              uint16_t file_type = ET_DYN, uint64_t text_size = 64,
+                                              bool multiple_text = false,
+                                              uint32_t symbol_table_type = SHT_SYMTAB) {
+  constexpr uint64_t kTextOffset = 0x100;
+  constexpr uint64_t kTextVaddr = 0x1000;
+  std::vector<uint8_t> section_names{'\0'};
+  const uint32_t text_name = add_name(section_names, ".text");
+  const uint32_t data_name = add_name(section_names, ".data");
+  const uint32_t symbols_name = add_name(section_names, ".symtab");
+  const uint32_t strings_name = add_name(section_names, ".strtab");
+  const uint32_t section_names_name = add_name(section_names, ".shstrtab");
+  std::vector<uint8_t> names{'\0'};
+  std::vector<Elf64_Sym> symbols(functions.size() + 1);
+  for (size_t index = 0; index < functions.size(); ++index) {
+    const FunctionExtentSymbol &function = functions[index];
+    symbols[index + 1] = {.st_name = function.name.empty() ? 0 : add_name(names, function.name),
+                          .st_info = elf_symbol_info(kElfSymbolBindGlobal, function.type),
+                          .st_other = 0,
+                          .st_shndx = function.section,
+                          .st_value = function.value,
+                          .st_size = function.size};
+  }
+  const uint64_t data_offset = align_up(kTextOffset + text_size, 8);
+  const uint64_t symbols_offset = data_offset + 64;
+  const uint64_t strings_offset = symbols_offset + symbols.size() * sizeof(Elf64_Sym);
+  const uint64_t section_names_offset = strings_offset + names.size();
+  const uint64_t section_headers_offset = align_up(section_names_offset + section_names.size(), 8);
+  constexpr uint16_t kSectionCount = 6;
+  std::vector<uint8_t> image(section_headers_offset + kSectionCount * sizeof(Elf64_Shdr), 0);
+  Elf64_Ehdr header = {};
+  std::memcpy(header.e_ident, EI_MAGIC, EI_MAGIC_SIZE);
+  header.e_ident[EI_CLASS] = ELFCLASS64;
+  header.e_ident[EI_DATA] = ELFDATA2LSB;
+  header.e_ident[EI_VERSION] = 1;
+  header.e_ident[EI_OSABI] = ELFOSABI_AMDGPU_HSA;
+  header.e_type = file_type;
+  header.e_machine = EM_AMDGPU;
+  header.e_version = 1;
+  header.e_shoff = section_headers_offset;
+  header.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX1250;
+  header.e_ehsize = sizeof(Elf64_Ehdr);
+  header.e_shentsize = sizeof(Elf64_Shdr);
+  header.e_shnum = kSectionCount;
+  header.e_shstrndx = 5;
+  std::array<Elf64_Shdr, kSectionCount> sections = {};
+  sections[1] = {.sh_name = text_name,
+                 .sh_type = SHT_PROGBITS,
+                 .sh_flags = SHF_ALLOC | SHF_EXECINSTR,
+                 .sh_addr = kTextVaddr,
+                 .sh_offset = kTextOffset,
+                 .sh_size = text_size,
+                 .sh_link = 0,
+                 .sh_info = 0,
+                 .sh_addralign = 4,
+                 .sh_entsize = 0};
+  sections[2] = {.sh_name = multiple_text ? text_name : data_name,
+                 .sh_type = SHT_PROGBITS,
+                 .sh_flags = multiple_text ? SHF_ALLOC | SHF_EXECINSTR : SHF_ALLOC,
+                 .sh_addr = 0x2000,
+                 .sh_offset = data_offset,
+                 .sh_size = 64,
+                 .sh_link = 0,
+                 .sh_info = 0,
+                 .sh_addralign = 4,
+                 .sh_entsize = 0};
+  sections[3] = {.sh_name = symbols_name,
+                 .sh_type = symbol_table_type,
+                 .sh_flags = 0,
+                 .sh_addr = 0,
+                 .sh_offset = symbols_offset,
+                 .sh_size = symbols.size() * sizeof(Elf64_Sym),
+                 .sh_link = 4,
+                 .sh_info = 1,
+                 .sh_addralign = 8,
+                 .sh_entsize = sizeof(Elf64_Sym)};
+  sections[4] = {.sh_name = strings_name,
+                 .sh_type = SHT_STRTAB,
+                 .sh_flags = 0,
+                 .sh_addr = 0,
+                 .sh_offset = strings_offset,
+                 .sh_size = names.size(),
+                 .sh_link = 0,
+                 .sh_info = 0,
+                 .sh_addralign = 1,
+                 .sh_entsize = 0};
+  sections[5] = {.sh_name = section_names_name,
+                 .sh_type = SHT_STRTAB,
+                 .sh_flags = 0,
+                 .sh_addr = 0,
+                 .sh_offset = section_names_offset,
+                 .sh_size = section_names.size(),
+                 .sh_link = 0,
+                 .sh_info = 0,
+                 .sh_addralign = 1,
+                 .sh_entsize = 0};
+  std::memcpy(image.data(), &header, sizeof(header));
+  std::memcpy(image.data() + symbols_offset, symbols.data(), symbols.size() * sizeof(Elf64_Sym));
+  std::memcpy(image.data() + strings_offset, names.data(), names.size());
+  std::memcpy(image.data() + section_names_offset, section_names.data(), section_names.size());
+  std::memcpy(image.data() + section_headers_offset, sections.data(), sizeof(sections));
+  return image;
+}
+
+void expect_function_extents(std::span<const TextFunctionSymbolExtent> actual,
+                             std::span<const TextFunctionSymbolExtent> expected) {
+  ASSERT_EQ(actual.size(), expected.size());
+  for (size_t index = 0; index < expected.size(); ++index) {
+    EXPECT_EQ(actual[index].range.start_offset, expected[index].range.start_offset);
+    EXPECT_EQ(actual[index].range.size, expected[index].range.size);
+    EXPECT_EQ(actual[index].inferred_from_zero, expected[index].inferred_from_zero);
+  }
+}
+
+void expect_strict_function_ranges(std::span<const TextFunctionSymbolRange> actual,
+                                   std::span<const TextFunctionSymbolRange> expected) {
+  ASSERT_EQ(actual.size(), expected.size());
+  for (size_t index = 0; index < expected.size(); ++index) {
+    EXPECT_EQ(actual[index].start_offset, expected[index].start_offset);
+    EXPECT_EQ(actual[index].size, expected[index].size);
+  }
+}
+
+TEST(RelocationFunctionTable, FunctionExtentsKeepExplicitGapsAndDeduplicateAliases) {
+  const std::array<FunctionExtentSymbol, 4> functions = {{
+      {.value = 0x1024, .size = 4},
+      {.value = 0x1000, .size = 4},
+      {.value = 0x1010, .size = 8},
+      {.value = 0x1010, .size = 8},
+  }};
+  const std::vector<uint8_t> image = make_function_extent_elf(functions);
+  const AmdGpuCodeObject object(image.data(), image.size());
+  ASSERT_TRUE(object.is_valid());
+  const std::array<TextFunctionSymbolExtent, 3> expected = {{
+      {.range = {.start_offset = 0, .size = 4}},
+      {.range = {.start_offset = 16, .size = 8}},
+      {.range = {.start_offset = 36, .size = 4}},
+  }};
+  expect_function_extents(discover_text_function_symbol_extents(object), expected);
+  const std::array<TextFunctionSymbolRange, 3> strict = {{{.start_offset = 0, .size = 4},
+                                                          {.start_offset = 16, .size = 8},
+                                                          {.start_offset = 36, .size = 4}}};
+  expect_strict_function_ranges(discover_text_function_symbol_ranges(object), strict);
+  EXPECT_EQ(discover_text_function_symbol_offsets(object), (std::vector<uint64_t>{0, 16, 36}));
+}
+
+TEST(RelocationFunctionTable, ZeroFunctionExtentsReachNextDistinctEntryAndTextEnd) {
+  for (uint16_t file_type : {ET_DYN, ET_REL}) {
+    SCOPED_TRACE(file_type);
+    const uint64_t base = file_type == ET_REL ? 0 : 0x1000;
+    const std::array<FunctionExtentSymbol, 7> functions = {{
+        {.value = base + 48, .size = 0},
+        {.value = base, .size = 0},
+        {.value = base + 16, .size = 0},
+        {.value = base, .size = 0},
+        {.value = base + 2, .size = 0},
+        {.value = base + 4, .size = 0, .type = kElfSymbolTypeObject},
+        {.value = base + 8, .size = 0, .section = 2},
+    }};
+    const std::vector<uint8_t> image = make_function_extent_elf(functions, file_type);
+    const AmdGpuCodeObject object(image.data(), image.size());
+    ASSERT_TRUE(object.is_valid());
+    const std::array<TextFunctionSymbolExtent, 3> expected = {{
+        {.range = {.start_offset = 0, .size = 16}, .inferred_from_zero = true},
+        {.range = {.start_offset = 16, .size = 32}, .inferred_from_zero = true},
+        {.range = {.start_offset = 48, .size = 16}, .inferred_from_zero = true},
+    }};
+    expect_function_extents(discover_text_function_symbol_extents(object), expected);
+    EXPECT_TRUE(discover_text_function_symbol_ranges(object).empty());
+    EXPECT_TRUE(discover_text_function_symbol_offsets(object).empty());
+    EXPECT_TRUE(discover_externally_resolvable_text_function_offsets(object).empty());
+  }
+}
+
+TEST(RelocationFunctionTable, ZeroFunctionAliasesPreferUnambiguousExplicitSize) {
+  const std::array<FunctionExtentSymbol, 5> functions = {{
+      {.value = 0x1000, .size = 0},
+      {.value = 0x1000, .size = 8},
+      {.value = 0x1000, .size = 0},
+      {.value = 0x1000, .size = 8},
+      {.value = 0x1010, .size = 0},
+  }};
+  const std::vector<uint8_t> image = make_function_extent_elf(functions);
+  const AmdGpuCodeObject object(image.data(), image.size());
+  ASSERT_TRUE(object.is_valid());
+  const std::array<TextFunctionSymbolExtent, 2> expected = {{
+      {.range = {.start_offset = 0, .size = 8}},
+      {.range = {.start_offset = 16, .size = 48}, .inferred_from_zero = true},
+  }};
+  expect_function_extents(discover_text_function_symbol_extents(object), expected);
+  const std::array<TextFunctionSymbolRange, 1> strict = {{{.start_offset = 0, .size = 8}}};
+  expect_strict_function_ranges(discover_text_function_symbol_ranges(object), strict);
+}
+
+TEST(RelocationFunctionTable, ConflictingFunctionAliasesFallBackAndPreserveDistinctExtents) {
+  const std::array<FunctionExtentSymbol, 5> functions = {{
+      {.value = 0x1000, .size = 8},
+      {.value = 0x1000, .size = 0},
+      {.value = 0x1000, .size = 4},
+      {.value = 0x1010, .size = 0},
+      {.value = 0x1000, .size = 0},
+  }};
+  const std::vector<uint8_t> image = make_function_extent_elf(functions);
+  const AmdGpuCodeObject object(image.data(), image.size());
+  ASSERT_TRUE(object.is_valid());
+  const std::array<TextFunctionSymbolExtent, 4> expected = {{
+      {.range = {.start_offset = 0, .size = 4}},
+      {.range = {.start_offset = 0, .size = 8}},
+      {.range = {.start_offset = 0, .size = 16}, .inferred_from_zero = true},
+      {.range = {.start_offset = 16, .size = 48}, .inferred_from_zero = true},
+  }};
+  expect_function_extents(discover_text_function_symbol_extents(object), expected);
+  const std::array<TextFunctionSymbolRange, 2> strict = {
+      {{.start_offset = 0, .size = 4}, {.start_offset = 0, .size = 8}}};
+  expect_strict_function_ranges(discover_text_function_symbol_ranges(object), strict);
+}
+
+TEST(RelocationFunctionTable, FunctionExtentsPreserveExplicitOverlapAcrossDistinctEntries) {
+  const std::array<FunctionExtentSymbol, 3> functions = {{
+      {.value = 0x1000, .size = 0},
+      {.value = 0x1000, .size = 32},
+      {.value = 0x1010, .size = 16},
+  }};
+  const std::vector<uint8_t> image = make_function_extent_elf(functions);
+  const AmdGpuCodeObject object(image.data(), image.size());
+  ASSERT_TRUE(object.is_valid());
+  const std::array<TextFunctionSymbolExtent, 2> expected = {{
+      {.range = {.start_offset = 0, .size = 32}},
+      {.range = {.start_offset = 16, .size = 16}},
+  }};
+  expect_function_extents(discover_text_function_symbol_extents(object), expected);
+}
+
+TEST(RelocationFunctionTable, FunctionAliasEvidenceIsSharedAcrossSymtabAndDynsym) {
+  const std::array<FunctionExtentSymbol, 1> functions = {{{.value = 0x1000, .size = 0}}};
+  std::vector<uint8_t> image = make_function_extent_elf(functions);
+  Elf64_Ehdr header = {};
+  std::memcpy(&header, image.data(), sizeof(header));
+  Elf64_Shdr second_table = {};
+  const uint64_t second_header_offset = header.e_shoff + 2 * sizeof(Elf64_Shdr);
+  std::memcpy(&second_table, image.data() + second_header_offset, sizeof(second_table));
+  // Reuse the fixture's 64-byte data payload for two literal DYNSYM records.
+  const std::array<Elf64_Sym, 2> aliases = {
+      Elf64_Sym{}, Elf64_Sym{.st_name = 0,
+                             .st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeFunc),
+                             .st_other = 0,
+                             .st_shndx = 1,
+                             .st_value = 0x1000,
+                             .st_size = 8}};
+  std::memcpy(image.data() + second_table.sh_offset, aliases.data(), sizeof(aliases));
+  second_table.sh_type = SHT_DYNSYM;
+  second_table.sh_size = sizeof(aliases);
+  second_table.sh_link = 4;
+  second_table.sh_entsize = sizeof(Elf64_Sym);
+  std::memcpy(image.data() + second_header_offset, &second_table, sizeof(second_table));
+  const AmdGpuCodeObject object(image.data(), image.size());
+  ASSERT_TRUE(object.is_valid());
+  const std::array<TextFunctionSymbolExtent, 1> expected = {
+      {{.range = {.start_offset = 0, .size = 8}}}};
+  expect_function_extents(discover_text_function_symbol_extents(object), expected);
+  const std::array<TextFunctionSymbolRange, 1> strict = {{{.start_offset = 0, .size = 8}}};
+  expect_strict_function_ranges(discover_text_function_symbol_ranges(object), strict);
+}
+
+TEST(RelocationFunctionTable, MalformedSymbolTableRefusesAllExtentInferenceAcrossOtherTables) {
+  const std::array<FunctionExtentSymbol, 1> functions = {{{.value = 0x1020, .size = 4}}};
+  std::vector<uint8_t> image = make_function_extent_elf(functions);
+  Elf64_Ehdr header = {};
+  std::memcpy(&header, image.data(), sizeof(header));
+  const uint64_t dynsym_header_offset = header.e_shoff + 2 * sizeof(Elf64_Shdr);
+  Elf64_Shdr dynsym = {};
+  std::memcpy(&dynsym, image.data() + dynsym_header_offset, sizeof(dynsym));
+  const std::array<Elf64_Sym, 2> symbols = {
+      Elf64_Sym{}, Elf64_Sym{.st_name = 0,
+                             .st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeFunc),
+                             .st_other = 0,
+                             .st_shndx = 1,
+                             .st_value = 0x1000,
+                             .st_size = 0}};
+  std::memcpy(image.data() + dynsym.sh_offset, symbols.data(), sizeof(symbols));
+  dynsym.sh_type = SHT_DYNSYM;
+  dynsym.sh_size = sizeof(symbols);
+  dynsym.sh_link = 4;
+  dynsym.sh_entsize = sizeof(Elf64_Sym);
+  std::memcpy(image.data() + dynsym_header_offset, &dynsym, sizeof(dynsym));
+  const uint64_t symtab_header_offset = header.e_shoff + 3 * sizeof(Elf64_Shdr);
+  Elf64_Shdr symtab = {};
+  std::memcpy(&symtab, image.data() + symtab_header_offset, sizeof(symtab));
+  for (bool partial_tail : {true, false}) {
+    std::vector<uint8_t> malformed = image;
+    Elf64_Shdr unreadable = symtab;
+    if (partial_tail) {
+      ++unreadable.sh_size;
+    } else {
+      // Nonexecuting sections with invalid names are skipped before the
+      // object's payload bounds check; its later symbol walk also skips this.
+      unreadable.sh_name = std::numeric_limits<uint32_t>::max();
+      unreadable.sh_offset = std::numeric_limits<uint64_t>::max();
+    }
+    std::memcpy(malformed.data() + symtab_header_offset, &unreadable, sizeof(unreadable));
+    const AmdGpuCodeObject object(malformed.data(), malformed.size());
+    // Both parser shapes stay valid. Skipping only the malformed table would
+    // falsely extend the other table's zero FUNC through the whole text.
+    ASSERT_TRUE(object.is_valid());
+    if (partial_tail) {
+      const std::array<TextFunctionSymbolRange, 1> strict = {{{.start_offset = 32, .size = 4}}};
+      expect_strict_function_ranges(discover_text_function_symbol_ranges(object), strict);
+      EXPECT_EQ(discover_text_function_symbol_offsets(object), (std::vector<uint64_t>{32}));
+    } else {
+      EXPECT_TRUE(discover_text_function_symbol_ranges(object).empty());
+      EXPECT_TRUE(discover_text_function_symbol_offsets(object).empty());
+    }
+    EXPECT_TRUE(discover_text_function_symbol_extents(object).empty());
+  }
+}
+
+TEST(RelocationFunctionTable, ExplicitExtentWinsWhenFallbackHasIdenticalBounds) {
+  for (bool next_entry : {false, true}) {
+    const uint64_t end = next_entry ? 16 : 64;
+    std::vector<FunctionExtentSymbol> functions = {
+        {.value = 0x1000, .size = 0},
+        {.value = 0x1000, .size = 4},
+        {.value = 0x1000, .size = end},
+    };
+    if (next_entry) {
+      functions.push_back({.value = 0x1010, .size = 48});
+    }
+    const std::vector<uint8_t> image = make_function_extent_elf(functions);
+    const AmdGpuCodeObject object(image.data(), image.size());
+    ASSERT_TRUE(object.is_valid());
+    std::vector<TextFunctionSymbolExtent> expected = {
+        {.range = {.start_offset = 0, .size = 4}},
+        {.range = {.start_offset = 0, .size = end}},
+    };
+    if (next_entry) {
+      expected.push_back({.range = {.start_offset = 16, .size = 48}});
+    }
+    expect_function_extents(discover_text_function_symbol_extents(object), expected);
+  }
+}
+
+TEST(RelocationFunctionTable, InvalidFunctionEntriesAndExtentsDoNotBecomeContainers) {
+  const std::array<FunctionExtentSymbol, 12> functions = {{
+      {.value = 0x1000, .size = 4},
+      {.value = 0x1002, .size = 0},
+      {.value = 0x0ffc, .size = 0},
+      {.value = 0x1040, .size = 0},
+      {.value = 0x1044, .size = 0},
+      {.value = 0x1004, .size = 0, .section = SHN_UNDEF},
+      {.value = 0x1008, .size = 0, .section = 2},
+      {.value = 0x100c, .size = 0, .section = 0xfff1},
+      {.value = 0x1010, .size = 3},
+      {.value = 0x1020, .size = 36},
+      {.value = 0x1030, .size = std::numeric_limits<uint64_t>::max()},
+      {.value = 0x1004, .size = 0, .type = kElfSymbolTypeObject},
+  }};
+  const std::vector<uint8_t> image = make_function_extent_elf(functions);
+  const AmdGpuCodeObject object(image.data(), image.size());
+  ASSERT_TRUE(object.is_valid());
+  const std::array<TextFunctionSymbolExtent, 1> expected = {
+      {{.range = {.start_offset = 0, .size = 4}}}};
+  expect_function_extents(discover_text_function_symbol_extents(object), expected);
+  const std::array<TextFunctionSymbolRange, 1> strict = {{{.start_offset = 0, .size = 4}}};
+  expect_strict_function_ranges(discover_text_function_symbol_ranges(object), strict);
+  // The old entry-only query deliberately retains entries of malformed sized
+  // symbols. Adding the extent API must not silently strengthen its contract.
+  EXPECT_EQ(discover_text_function_symbol_offsets(object), (std::vector<uint64_t>{0, 16, 32, 48}));
+}
+
+TEST(RelocationFunctionTable, InvalidExplicitAliasIsRejectedWithoutInventingAReplacementSize) {
+  for (uint64_t size : {uint64_t{3}, uint64_t{68}, std::numeric_limits<uint64_t>::max()}) {
+    const std::array<FunctionExtentSymbol, 3> functions = {{
+        {.value = 0x1000, .size = 0},
+        {.value = 0x1000, .size = size},
+        {.value = 0x1010, .size = 4},
+    }};
+    const std::vector<uint8_t> image = make_function_extent_elf(functions);
+    const AmdGpuCodeObject object(image.data(), image.size());
+    ASSERT_TRUE(object.is_valid());
+    const std::array<TextFunctionSymbolExtent, 1> expected = {
+        {{.range = {.start_offset = 16, .size = 4}}}};
+    expect_function_extents(discover_text_function_symbol_extents(object), expected);
+    const std::array<TextFunctionSymbolRange, 1> strict = {{{.start_offset = 16, .size = 4}}};
+    expect_strict_function_ranges(discover_text_function_symbol_ranges(object), strict);
+  }
+}
+
+TEST(RelocationFunctionTable, ValidEntriesStillDelimitInferenceWhenTheirExplicitSizeIsMalformed) {
+  const std::array<FunctionExtentSymbol, 4> functions = {{
+      {.value = 0x1000, .size = 0},
+      {.value = 0x1010, .size = 3},
+      {.value = 0x1020, .size = 0},
+      {.value = 0x1030, .size = std::numeric_limits<uint64_t>::max()},
+  }};
+  const std::vector<uint8_t> image = make_function_extent_elf(functions);
+  const AmdGpuCodeObject object(image.data(), image.size());
+  ASSERT_TRUE(object.is_valid());
+  const std::array<TextFunctionSymbolExtent, 2> expected = {{
+      {.range = {.start_offset = 0, .size = 16}, .inferred_from_zero = true},
+      {.range = {.start_offset = 32, .size = 16}, .inferred_from_zero = true},
+  }};
+  expect_function_extents(discover_text_function_symbol_extents(object), expected);
+  EXPECT_TRUE(discover_text_function_symbol_ranges(object).empty());
+}
+
+TEST(RelocationFunctionTable, ZeroExtentRejectsAnUnalignedTextEnd) {
+  const std::array<FunctionExtentSymbol, 1> functions = {{{.value = 0x1000, .size = 0}}};
+  const std::vector<uint8_t> image = make_function_extent_elf(functions, ET_DYN, 14);
+  const AmdGpuCodeObject object(image.data(), image.size());
+  ASSERT_TRUE(object.is_valid());
+  EXPECT_TRUE(discover_text_function_symbol_extents(object).empty());
+  EXPECT_TRUE(discover_text_function_symbol_ranges(object).empty());
+}
+
+TEST(RelocationFunctionTable, ExtentDiscoveryReadsSymtabAndDynsymWithoutInventingDescriptorBodies) {
+  for (uint32_t table_type : {SHT_SYMTAB, SHT_DYNSYM}) {
+    const std::array<FunctionExtentSymbol, 1> functions = {{{.value = 0x1000, .size = 0}}};
+    const std::vector<uint8_t> image =
+        make_function_extent_elf(functions, ET_DYN, 64, false, table_type);
+    const AmdGpuCodeObject object(image.data(), image.size());
+    ASSERT_TRUE(object.is_valid());
+    const std::array<TextFunctionSymbolExtent, 1> expected = {
+        {{.range = {.start_offset = 0, .size = 64}, .inferred_from_zero = true}}};
+    expect_function_extents(discover_text_function_symbol_extents(object), expected);
+    EXPECT_TRUE(discover_text_function_symbol_ranges(object).empty());
+  }
+  const std::array<FunctionExtentSymbol, 1> descriptor = {{
+      {.value = 0x2000, .size = 64, .section = 2, .type = kElfSymbolTypeObject, .name = "only.kd"},
+  }};
+  for (std::span<const FunctionExtentSymbol> symbols :
+       {std::span<const FunctionExtentSymbol>{},
+        std::span<const FunctionExtentSymbol>(descriptor)}) {
+    const std::vector<uint8_t> image = make_function_extent_elf(symbols);
+    const AmdGpuCodeObject object(image.data(), image.size());
+    ASSERT_TRUE(object.is_valid());
+    if (!symbols.empty()) {
+      EXPECT_EQ(object.kernel_descriptor_offset("only"), 0x2000u);
+    }
+    EXPECT_TRUE(discover_text_function_symbol_extents(object).empty());
+    EXPECT_TRUE(discover_text_function_symbol_ranges(object).empty());
+  }
+}
+
+TEST(RelocationFunctionTable, FunctionExtentDiscoveryRejectsMultipleTextSections) {
+  const std::array<FunctionExtentSymbol, 1> functions = {{{.value = 0x1000, .size = 0}}};
+  const std::vector<uint8_t> image = make_function_extent_elf(functions, ET_DYN, 64, true);
+  const AmdGpuCodeObject object(image.data(), image.size());
+  ASSERT_TRUE(object.is_valid());
+  ASSERT_EQ(object.text_sections().size(), 2u);
+  EXPECT_TRUE(discover_text_function_symbol_extents(object).empty());
+  EXPECT_TRUE(discover_text_function_symbol_ranges(object).empty());
+}
+
+TEST(RelocationFunctionTable, FunctionExtentDiscoveryRejectsMalformedHeadersAndSymbolTables) {
+  const std::array<FunctionExtentSymbol, 1> functions = {{{.value = 0x1000, .size = 0}}};
+  for (int corruption = 0; corruption < 7; ++corruption) {
+    SCOPED_TRACE(corruption);
+    std::vector<uint8_t> image = make_function_extent_elf(functions);
+    Elf64_Ehdr header = {};
+    std::memcpy(&header, image.data(), sizeof(header));
+    Elf64_Shdr symbols = {};
+    const uint64_t symbols_header_offset = header.e_shoff + 3 * sizeof(Elf64_Shdr);
+    std::memcpy(&symbols, image.data() + symbols_header_offset, sizeof(symbols));
+    switch (corruption) {
+    case 0:
+      header.e_shoff = std::numeric_limits<uint64_t>::max();
+      std::memcpy(image.data(), &header, sizeof(header));
+      break;
+    case 1:
+      --symbols.sh_entsize;
+      break;
+    case 2:
+      symbols.sh_offset = std::numeric_limits<uint64_t>::max();
+      break;
+    case 3:
+      symbols.sh_size = std::numeric_limits<uint64_t>::max();
+      break;
+    case 4:
+      ++symbols.sh_size;
+      break;
+    case 5: {
+      Elf64_Shdr text = {};
+      const uint64_t text_header_offset = header.e_shoff + sizeof(Elf64_Shdr);
+      std::memcpy(&text, image.data() + text_header_offset, sizeof(text));
+      text.sh_size = std::numeric_limits<uint64_t>::max();
+      std::memcpy(image.data() + text_header_offset, &text, sizeof(text));
+      break;
+    }
+    case 6:
+      symbols.sh_type = SHT_PROGBITS;
+      symbols.sh_entsize = 0;
+      break;
+    }
+    if (corruption != 0) {
+      std::memcpy(image.data() + symbols_header_offset, &symbols, sizeof(symbols));
+    }
+    const AmdGpuCodeObject object(image.data(), image.size());
+    EXPECT_TRUE(discover_text_function_symbol_extents(object).empty());
+  }
+}
+
 TEST(RelocationFunctionTable, IgnoresExplicitNonAllocatedRelocations) {
   auto image = make_relocation_function_table_elf();
   const std::array<Elf64_Rela, 2> metadata_relocations = {
