@@ -135,8 +135,8 @@ rocjitsu --daemon --config configs/gfx950_mi350x_kmd.json
 # Attach to running daemon
 rocjitsu --attach -- ./app
 
-# Attach to a running daemon while validating an explicit config and handing
-# that config path to the exec'd client. This does not reconfigure the daemon.
+# Attach to a running daemon while validating an explicit config. The client
+# still uses the daemon's already-running machine.
 rocjitsu --attach --config configs/gfx950_mi350x_kmd.json -- ./app
 
 # Serve the gfx1250 PCI function to a VMM
@@ -193,9 +193,9 @@ The daemon has already built its machine from the config it was started with.
 For that reason, attach rejects launch-only settings that would otherwise mutate
 the machine being built, including `--profile`, `--node`,
 `--cpu-thread-budget`, and `--wait-checking`. `--attach --config <path>`
-validates the named config and writes the usual per-PID config handoff for the
-exec'd client, but it does not change the running daemon's config. Attach the
-client with the same config the daemon used when the client needs that metadata.
+validates the named config, but it does not write a per-PID config handoff and
+does not change the running daemon's config. The attached client gets its active
+machine state from the daemon it connects to.
 
 The only shared state selected by attach is the runtime directory and its
 well-known daemon socket. To run independent daemons for the same user, give
