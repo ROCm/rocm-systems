@@ -91,10 +91,11 @@ void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes,
   // The write replaces whatever two earlier unordered writes left in its
   // bytes. Where it is itself unordered with a pending write, the check below
   // records a new conflict.
+  const std::vector<Interval> contested = conflictRanges(addr, addr + nBytes);
   clearConflicts(addr, addr + nBytes);
   if (hasPotentialLdsConflict(addr, nBytes, byteWriteCounts, wave, currentMemoryOrder))
     reportUnorderedOverlaps(ldsWriteEvents, LdsHazard::WriteAfterWrite, addr, wave, lane, nBytes,
-                            currentMemoryOrder, atomicBytes, data, instruction);
+                            currentMemoryOrder, atomicBytes, data, instruction, contested);
   if (hasPotentialLdsConflict(addr, nBytes, byteReadCounts, wave, currentMemoryOrder))
     reportUnorderedOverlaps(ldsReadEvents, LdsHazard::WriteAfterRead, addr, wave, lane, nBytes,
                             currentMemoryOrder, atomicBytes);
@@ -115,9 +116,21 @@ void RaceDetector::reportUnorderedOverlaps(const std::vector<EventId> &pending, 
                                            int addr, WaveId wave, int lane, int nBytes,
                                            MemoryOrderClass currentMemoryOrder, uint8_t atomicBytes,
                                            const uint8_t *data,
-                                           const InstructionSnapshot *instruction) {
+                                           const InstructionSnapshot *instruction,
+                                           std::span<const Interval> contested) {
   const int end = addr + nBytes;
   std::vector<LdsWawConflict> added;
+  auto checkWrite = [&](EventId eventId, int start, int stop, bool knownValue) {
+    if (knownValue && sameAsLds(start, stop, data + (start - addr))) {
+      RaceViolation note{
+          RaceViolation::Space::LDS, start, wave.value, lane, true, workgroupId, eventId};
+      note.kind = RaceViolation::Kind::RedundantWrite;
+      raceHandler(note);
+      return;
+    }
+    added.push_back({start, stop, events_.instruction(eventId), events_.waveId(eventId),
+                     instruction ? std::optional(*instruction) : std::nullopt, wave, lane});
+  };
   for (EventId eventId : pending) {
     if (events_.atomicLdsElementMatches(eventId, atomicBytes))
       continue;
@@ -146,20 +159,28 @@ void RaceDetector::reportUnorderedOverlaps(const std::vector<EventId> &pending, 
     for (auto iv =
              std::ranges::upper_bound(intervals.begin(), intervals.end(), addr, {}, &Interval::end);
          iv != intervals.end() && iv->start < end; ++iv) {
-      const int start = std::max(iv->start, addr);
+      int at = std::max(iv->start, addr);
       const int stop = std::min(iv->end, end);
       // A pending store from VGPRs (DS, or FLAT to LDS) has already written
       // LDS, so LDS holds its bytes; a pending DMA write has not landed.
-      if (data && ldsReader && events_.type(eventId) == MemoryEventType::VGPR_TO_LDS &&
-          sameAsLds(start, stop, data + (start - addr))) {
-        RaceViolation note{
-            RaceViolation::Space::LDS, start, wave.value, lane, true, workgroupId, eventId};
-        note.kind = RaceViolation::Kind::RedundantWrite;
-        raceHandler(note);
-        continue;
+      //
+      // LDS bytes of a conflict hold the later of two unordered writes, which
+      // need not be the pending event's, so a match with the incoming data
+      // does not make the write redundant.
+      const bool fromVgprs =
+          data && ldsReader && events_.type(eventId) == MemoryEventType::VGPR_TO_LDS;
+      for (const Interval &held : contested) {
+        const int from = std::max(held.start, at);
+        const int to = std::min(held.end, stop);
+        if (from >= to)
+          continue;
+        if (at < from)
+          checkWrite(eventId, at, from, fromVgprs);
+        checkWrite(eventId, from, to, false);
+        at = to;
       }
-      added.push_back({start, stop, events_.instruction(eventId), events_.waveId(eventId),
-                       instruction ? std::optional(*instruction) : std::nullopt, wave, lane});
+      if (at < stop)
+        checkWrite(eventId, at, stop, fromVgprs);
     }
   }
   // A later conflict on the same bytes replaces an earlier one. A conflict that
@@ -227,6 +248,18 @@ void RaceDetector::clearConflicts(int start, int end) {
   splitConflictAt(start);
   splitConflictAt(end);
   wawConflicts.erase(wawConflicts.lower_bound(start), wawConflicts.lower_bound(end));
+}
+
+std::vector<Interval> RaceDetector::conflictRanges(int start, int end) const {
+  std::vector<Interval> ranges;
+  if (!overlapsConflict(start, end))
+    return ranges;
+  auto it = wawConflicts.upper_bound(start);
+  if (it != wawConflicts.begin() && std::prev(it)->second.end > start)
+    --it;
+  for (; it != wawConflicts.end() && it->first < end; ++it)
+    ranges.push_back({std::max(it->second.start, start), std::min(it->second.end, end)});
+  return ranges;
 }
 
 bool RaceDetector::overlapsConflict(int start, int end) const {

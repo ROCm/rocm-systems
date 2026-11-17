@@ -905,6 +905,27 @@ TEST_F(LdsWriteValueRaceTest, DifferentValuesRaceWhenRead) {
       << sink->str();
 }
 
+TEST_F(LdsWriteValueRaceTest, RepeatedWriteOverAConflictRacesWhenRead) {
+  // LDS holds wave 1's 8 when wave 1 stores 8 again, but wave 0's 7 can land last.
+  ASSERT_NO_FATAL_FAILURE(start(/*notes=*/false));
+  EXPECT_FALSE(ds(0, 64, 7u));
+  EXPECT_FALSE(ds(1, 64, 8u));
+  EXPECT_FALSE(ds(1, 64, 8u));
+  wait_and_barrier();
+  EXPECT_TRUE(ds(0, 64, std::nullopt));
+  EXPECT_TRUE(has("The read observes two unordered writes: 0x110 (wave 0) and 0x120 (wave 1)"))
+      << sink->str();
+}
+
+TEST_F(LdsWriteValueRaceTest, RepeatedIdenticalWritesAreNotARace) {
+  ASSERT_NO_FATAL_FAILURE(start(/*notes=*/false));
+  EXPECT_FALSE(ds(0, 64, 7u));
+  EXPECT_FALSE(ds(1, 64, 7u));
+  EXPECT_FALSE(ds(1, 64, 7u));
+  wait_and_barrier();
+  EXPECT_FALSE(ds(0, 64, std::nullopt));
+}
+
 TEST_F(LdsWriteValueRaceTest, UnreadDifferentValuesAreANoteWithNotes) {
   ASSERT_NO_FATAL_FAILURE(start(/*notes=*/true));
   EXPECT_FALSE(ds(0, 64, 7u));
