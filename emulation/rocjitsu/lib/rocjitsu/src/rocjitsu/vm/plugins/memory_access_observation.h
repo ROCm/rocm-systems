@@ -76,7 +76,7 @@ constexpr const char *decoded_memory_space_name(DecodedMemorySpace space) {
   return "unknown";
 }
 
-/// @brief One texel address set in a filtered-image footprint.
+/// @brief One tap or fragment address set in an image instruction.
 struct ImageSampleFootprint {
   std::span<const uint64_t> addresses;
   uint64_t lane_mask = 0;
@@ -282,9 +282,9 @@ struct MemoryAccessObservation {
   /// lanes as the first, so an instruction with a non-empty set here moves
   /// twice @ref bytes_per_lane().
   std::span<const uint64_t> secondary_addresses;
-  /// @brief Per-texel footprints of sampler instructions, regardless of filter mode.
-  /// @details IMAGE_SAMPLE*/IMAGE_GATHER4* replace addresses with these footprints,
-  /// including point samples. Each has wavefront_size addresses and a lane mask
+  /// @brief Per-texel footprints of sample, gather and multisample-load instructions.
+  /// @details IMAGE_SAMPLE*, IMAGE_GATHER4* and IMAGE_MSAA_LOAD replace addresses with these
+  /// footprints, including point samples. Each has wavefront_size addresses and a lane mask
   /// contained in request_lane_mask. Border/zero-weight taps have cleared masks.
   /// bytes_per_lane() is bytes per texel; all footprints share one instruction
   /// issue and one completion-counter event. A null resource or unbacked sampler

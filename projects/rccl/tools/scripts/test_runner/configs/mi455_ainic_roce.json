@@ -317,6 +317,11 @@
           "name": "GdrFlush_RepeatedFlushBurst",
           "description": "50-iteration GPU recv+flush burst over the dma-buf scratchpad; an intermittent QP async-fatal would surface as a non-success flush. The whole burst must stay clean.",
           "test_filter": "GdrFlushTest.RepeatedFlush_NoFaultBurst"
+        },
+        {
+          "name": "GdrFlush_ScratchpadWriteRoundTrip",
+          "description": "The chained flush must write the host sentinel into the RO=0 scratchpad and read it back. Dropping the write leaves the scratchpad zero.",
+          "test_filter": "GdrFlushTest.ScratchpadWrite_RoundTripsSentinel"
         }
       ]
     },
@@ -374,7 +379,13 @@
         }
       ]
     },
-    "gdr_flush_cumem_multinode": {
+    "net_ib_gdr_flush_cast": {
+      "extends": "net_ib_gdr_flush",
+      "env_variables": {
+        "NCCL_NET": "ib-cast",
+        "NCCL_GDR_FLUSH_DISABLE": "0"
+      }
+    },    "gdr_flush_cumem_multinode": {
       "extends": "default",
       "is_gtest": true,
       "binary": "rccl-UnitTestsMPI",
@@ -7090,6 +7101,12 @@
       "name": "GDR Flush Flag - 4 QPs split (2-Node, 2-Rank)",
       "description": "Remote GDR flush flag over 4 QPs with NCCL_IB_SPLIT_DATA_ON_QPS=1. Disabled: gfx1250 cannot use the flag, so every case would skip.",
       "config": "net_ib_gdr_flush_flag_4qps_split",
+      "enabled": false
+    },
+    {
+      "name": "GDR Flush - Whitebox ncclIbIflush (Single-Node, 2-Rank) (IB-CAST)",
+      "description": "Whitebox coverage of the NET/IB GDR flush fix: dma-buf and peermem RO=0 scratchpad reads, feature-disabled fallback, repeated-flush burst, and the fault-injection regression guard. Disabled: Broadcom Thor Ultra has no matching OFED/verbs userspace.",
+      "config": "net_ib_gdr_flush_cast",
       "enabled": false
     },
     {
