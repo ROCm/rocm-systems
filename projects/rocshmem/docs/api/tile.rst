@@ -225,26 +225,3 @@ ROCSHMEM_TILE_MIN_REDUCE
 **Description:**
 Performs an element-wise minimum reduction over the tile region ``[start_coord, boundary)``
 across all PEs in the team. The result is written to ``dst`` on every PE.
-
--------------------------------
-Collective completion
--------------------------------
-
-ROCSHMEM_TILE_COLLECTIVE_WAIT
------------------------------
-
-.. cpp:function:: __device__ int rocshmem_tile_collective_wait(rocshmem_team_t team, uint64_t flags)
-.. cpp:function:: __device__ int rocshmem_ctx_tile_collective_wait(rocshmem_ctx_t ctx, rocshmem_team_t team, uint64_t flags)
-
-  :param ctx:   Context with which to perform this operation.
-  :param team:  The team to wait on.
-  :param flags: Operation flags (reserved, pass 0).
-  :returns:     Zero on success, nonzero on failure.
-
-**Description:**
-
-.. WARNING::
-
-   This routine is currently unimplemented on the IPC, GDA, and RO backends.
-   Every backend logs a warning and returns ``ROCSHMEM_ERROR`` immediately
-   without waiting, so it must not be relied on for completion.
