@@ -18,7 +18,7 @@ test('recent canonical runs summarizes twenty per page and renders six equal sti
   expect(source.summaryCount).toBe(20);
   expect(html.match(/data-run-id="/g)).toHaveLength(20);
   const headings = [...html.matchAll(/<th\b[^>]*>(.*?)<\/th>/g)].map((match) => match[1].replace(/<[^>]+>/g, ''));
-  expect(headings).toEqual(['Commit', 'Run time (local time)', 'Commit time (local time)', 'Coverage', 'Duration', 'Status']);
+  expect(headings).toEqual(['Commit', 'Execution started (local time)', 'Commit time (local time)', 'Coverage', 'Duration', 'Status']);
   expect(html).toContain('✓ OK');
   expect(html).toContain('× Fail');
   expect(html).toContain('Unavailable');

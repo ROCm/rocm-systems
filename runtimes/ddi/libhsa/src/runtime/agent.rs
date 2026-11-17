@@ -183,6 +183,12 @@ pub(super) fn cpu_cache_sizes(caches: &[Cache], agent: HsaAgent) -> [u32; 4] {
 
 /// Activated GPU and its HSA-specific compatibility state.
 pub(crate) struct Gpu {
+    /// Target-resolved scratch allocation and reclamation policy.
+    pub(crate) scratch: Arc<crate::queue::ScratchPolicy>,
+    /// Process CU restriction after visible-agent reordering.
+    pub(crate) global_cu_mask: Option<Vec<u32>>,
+    /// Confirmed CP capabilities; failed probes remain retryable.
+    pub(crate) cp_caps: Arc<Mutex<Option<u32>>>,
     /// Passive endpoint used for identity and topology queries.
     pub(crate) endpoint: Endpoint,
     /// Process-wide recoverable page-fault mode observed at activation.
