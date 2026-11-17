@@ -80,7 +80,7 @@ ncclResult_t ncclParseCollConfig(const ncclCollConfig_t* config, ncclCollConfig_
   return ncclSuccess;
 }
 
-ncclResult_t ncclCollConfigGetAlgMask(const ncclCollConfig_t* config, ncclFunc_t func, uint64_t* outMask) {
+ncclResult_t ncclCollConfigGetAlgMask(const ncclCollConfig_t* config, ncclFunc_t func, ncclTuningMask_t* outMask) {
   // Each set bit keeps that algorithm in the filter; 0 == no selection == automatic (the
   // consumers skip narrowing when the mask is 0).
   *outMask = 0;
@@ -88,7 +88,7 @@ ncclResult_t ncclCollConfigGetAlgMask(const ncclCollConfig_t* config, ncclFunc_t
   const char* sel = config->algSelection;
   // A non-empty selection that cannot be honored -- bad syntax, or nothing valid/matching for this
   // collective -- is governed by forceAlgSelection: true -> hard error; false -> fall back to automatic.
-  uint64_t mask = 0;
+  ncclTuningMask_t mask = 0;
   ncclResult_t r = ncclAlgParse(sel, &mask);
   if (r == ncclSuccess) mask &= ncclAlgValidForFuncMask(func);
   if (r != ncclSuccess || mask == 0) {

@@ -12,16 +12,17 @@
 #include "nccl.h"
 #include "nccl_common.h"
 
+#include "tuner/tuner_v7.h"
 #include "tuner/tuner_v6.h"
 #include "tuner/tuner_v5.h"
 #include "tuner/tuner_v4.h"
 #include "tuner/tuner_v3.h"
 #include "tuner/tuner_v2.h"
 
-typedef ncclTuner_v6_t ncclTuner_t;
-typedef ncclNvlDomainInfo_v6_t ncclNvlDomainInfo_t;
+typedef ncclTuner_v7_t ncclTuner_t;
+typedef ncclNvlDomainInfo_v7_t ncclNvlDomainInfo_t;
 
-#define NCCL_TUNER_PLUGIN_SYMBOL "ncclTunerPlugin_v6"
+#define NCCL_TUNER_PLUGIN_SYMBOL "ncclTunerPlugin_v7"
 
 #define NCCL_ALGO_UNDEF -1
 #define NCCL_ALGO_TREE 0
@@ -39,7 +40,7 @@ typedef ncclNvlDomainInfo_v6_t ncclNvlDomainInfo_t;
 #define NCCL_PROTO_SIMPLE 2
 // NaN-flag protocol (src/device/prims_nan.h): the payload doubles as the ready
 // flag, so there is no flag lane on the wire. Kept last, and NCCL_NUM_PROTOCOLS
-// is deliberately not tied to NCCL_NUM_PROTOCOLS_V5 any more: the v5 tuner plugin
+// is deliberately not tied to NCCL_NUM_PROTOCOLS_V5 any more: the tuner plugin
 // ABI must keep exactly three protocol columns.
 #define NCCL_PROTO_NAN 3
 #define NCCL_NUM_PROTOCOLS 4 // Simple/LL/LL128/NaN
@@ -66,17 +67,18 @@ typedef ncclNvlDomainInfo_v6_t ncclNvlDomainInfo_t;
 #define NCCL_AMPERE_COMPCAP_IDX 1
 #define NCCL_HOPPER_COMPCAP_IDX 2
 #define NCCL_BLACKWELL_COMPCAP_IDX 3
-#define NCCL_NUM_COMPCAPS NCCL_NUM_COMPCAPS_V5
+#define NCCL_RUBIN_COMPCAP_IDX 4
+#define NCCL_NUM_COMPCAPS NCCL_NUM_COMPCAPS_V7
 
 #define NCCL_TUNING_SCALE_1NODE 0
 #define NCCL_TUNING_SCALE_2NODES 1
 #define NCCL_TUNING_SCALE_4NODES 2
 #define NCCL_NUM_TUNING_SCALES NCCL_NUM_TUNING_SCALES_V5
 
-// Internal mirror of ncclTunerConstants_v5_t widened to NCCL_NUM_PROTOCOLS. The
-// v5 struct is frozen at three protocol columns because external tuner plugins
-// compile against it, so anything that crosses the plugin boundary marshals
-// through ncclTunerConstantsFromV5 / ncclTunerConstantsToV5 instead of aliasing.
+// Internal mirror of ncclTunerConstants_v7_t widened to NCCL_NUM_PROTOCOLS. The
+// plugin structs are frozen at three protocol columns because external tuner plugins
+// compile against them, so anything that crosses the plugin boundary marshals
+// through ncclTunerConstantsFromV7 / ncclTunerConstantsToV7 instead of aliasing.
 typedef struct {
   double baseLatencies[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS];
   double hwLatencies[NCCL_NUM_HW_LINKS][NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS];
@@ -90,9 +92,9 @@ typedef struct {
 } ncclTunerConstants_t;
 
 #ifdef __cplusplus
-// Copies every field over the V5 extents, which both layouts share.
+// Copies every field over the V7 extents, which both layouts share.
 template <typename Dst, typename Src>
-inline void ncclTunerConstantsCopyV5(Dst* dst, const Src* src) {
+inline void ncclTunerConstantsCopyV7(Dst* dst, const Src* src) {
   for (int a = 0; a < NCCL_NUM_ALGORITHMS_V5; a++) {
     for (int p = 0; p < NCCL_NUM_PROTOCOLS_V5; p++) {
       dst->baseLatencies[a][p] = src->baseLatencies[a][p];
@@ -100,7 +102,7 @@ inline void ncclTunerConstantsCopyV5(Dst* dst, const Src* src) {
       for (int n = 0; n < 2; n++) dst->bwRatio[n][a][p] = src->bwRatio[n][a][p];
     }
   }
-  for (int c = 0; c < NCCL_NUM_COMPCAPS_V5; c++) {
+  for (int c = 0; c < NCCL_NUM_COMPCAPS_V7; c++) {
     for (int s = 0; s < NCCL_NUM_TUNING_SCALES_V5; s++) {
       dst->llMaxBws[c][s] = src->llMaxBws[c][s];
       dst->perChMaxRingLL128Bws[c][s] = src->perChMaxRingLL128Bws[c][s];
@@ -113,14 +115,14 @@ inline void ncclTunerConstantsCopyV5(Dst* dst, const Src* src) {
 
 // Narrow to the plugin-visible layout. Protocols beyond NCCL_NUM_PROTOCOLS_V5 are
 // dropped; no plugin knows about them.
-inline void ncclTunerConstantsToV5(ncclTunerConstants_v5_t* dst, const ncclTunerConstants_t* src) {
-  ncclTunerConstantsCopyV5(dst, src);
+inline void ncclTunerConstantsToV7(ncclTunerConstants_v7_t* dst, const ncclTunerConstants_t* src) {
+  ncclTunerConstantsCopyV7(dst, src);
 }
 
 // Widen back after the plugin has written its values. Columns the plugin cannot
 // see keep whatever the caller had in them.
-inline void ncclTunerConstantsFromV5(ncclTunerConstants_t* dst, const ncclTunerConstants_v5_t* src) {
-  ncclTunerConstantsCopyV5(dst, src);
+inline void ncclTunerConstantsFromV7(ncclTunerConstants_t* dst, const ncclTunerConstants_v7_t* src) {
+  ncclTunerConstantsCopyV7(dst, src);
 }
 #endif
 

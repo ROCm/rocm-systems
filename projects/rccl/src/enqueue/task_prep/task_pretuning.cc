@@ -23,7 +23,7 @@ static ncclResult_t preTuningEnqueueRawTask(struct ncclComm* comm, struct ncclRa
                                             struct ncclTaskTuningInfoQueue* tiq);
 
 static ncclResult_t fillCollTuningInput(struct ncclComm* comm, struct ncclRawTaskColl* raw, ncclTuningInput_t* in) {
-  size_t elementSize;
+  size_t userElementSize;
   size_t sendbuffSize;
   size_t recvbuffSize;
   struct ncclDevrWindow* sendWin;
@@ -44,23 +44,24 @@ static ncclResult_t fillCollTuningInput(struct ncclComm* comm, struct ncclRawTas
   in->datatype = raw->datatype;
   in->count = raw->count;
   in->countMax = raw->count;
+  in->chunkSteps = ncclDefaultChunkStep(raw->func);
+  in->sliceSteps = ncclDefaultSliceStep(raw->func);
   in->nWorks = 1;
   in->numPipeOps = 1;
   NCCLCHECK(ncclCollConfigGetAlgMask(&raw->collConfig, raw->func, &in->algMask));
-  elementSize = ncclTypeSize(in->datatype);
+  userElementSize = ncclTypeSize(raw->datatype);
   // Treat an AllGather as in-place when each rank sends from its own receive slice.
   in->inPlace = in->func == ncclFuncAllGather &&
-                ncclAllGatherIsInPlace(raw->sendbuff, raw->recvbuff, comm->rank, raw->count * elementSize);
-  // Broadcast stays int8.
+                ncclAllGatherIsInPlace(raw->sendbuff, raw->recvbuff, comm->rank, raw->count * userElementSize);
+  // Broadcast and AlltoAll stay int8.
   if ((in->func == ncclFuncAllGather &&
-       !rcclNanAllGatherKeepsDtype(comm, in->datatype, in->count * elementSize * comm->nRanks, in->algMask)) ||
-      in->func == ncclFuncBroadcast) {
-    in->count *= elementSize;
+       !rcclNanAllGatherKeepsDtype(comm, in->datatype, in->count * userElementSize * comm->nRanks, in->algMask)) ||
+      in->func == ncclFuncBroadcast || in->func == ncclFuncAlltoAll) {
+    in->count *= userElementSize;
     in->datatype = ncclInt8;
     in->countMax = in->count;
-    elementSize = 1;
   }
-  in->nBytes = elementSize * ncclFuncMaxSendRecvCount(in->func, comm->nRanks, in->count);
+  in->nBytes = ncclTypeSize(in->datatype) * ncclFuncMaxSendRecvCount(in->func, comm->nRanks, in->count);
 
   NCCLCHECK(ncclDevrFindWindow(comm, raw->sendbuff, &sendWin));
   NCCLCHECK(ncclDevrFindWindow(comm, raw->recvbuff, &recvWin));
@@ -72,8 +73,10 @@ static ncclResult_t fillCollTuningInput(struct ncclComm* comm, struct ncclRawTas
   in->symAligned16B = ncclSymAligned16B(raw->func, comm->rank, raw->sendbuff, raw->recvbuff, sendWin, recvWin,
                                         raw->count * ncclTypeSize(raw->datatype));
 
-  sendbuffSize = elementSize * ncclFuncSendCount(raw->func, comm->nRanks, raw->count);
-  recvbuffSize = elementSize * ncclFuncRecvCount(raw->func, comm->nRanks, raw->count);
+  // Registration covers the user buffers, whose element type is unchanged by
+  // the byte normalization above.
+  sendbuffSize = userElementSize * ncclFuncSendCount(raw->func, comm->nRanks, raw->count);
+  recvbuffSize = userElementSize * ncclFuncRecvCount(raw->func, comm->nRanks, raw->count);
   NCCLCHECK(ncclRegFind(comm, raw->sendbuff, sendbuffSize, &regSendBuf));
   NCCLCHECK(ncclRegFind(comm, raw->recvbuff, recvbuffSize, &regRecvBuf));
   NCCLCHECK(ncclRegLocalIsValid(regSendBuf, &isSendValid));

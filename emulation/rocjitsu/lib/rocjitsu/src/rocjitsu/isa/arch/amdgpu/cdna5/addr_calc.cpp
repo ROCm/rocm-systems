@@ -185,7 +185,7 @@ BufferResource decode_buffer_resource(uint32_t srd0, uint32_t srd1, uint32_t srd
   resource.stride = resource.raw_stride * kStrideMultipliers[resource.stride_scale_encoding];
   resource.swizzle_enabled = ((srd3 >> 28) & 0x1u) != 0;
   resource.oob_select = ((srd3 >> 29) & 0x1u) != 0;
-  resource.type = static_cast<uint8_t>((srd3 >> 30) & 0x3u);
+  resource.type = amdgpu::addr_calc::cdna5_buffer_resource_type(srd3);
   return resource;
 }
 
@@ -330,14 +330,12 @@ void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront
   // descriptor sourced from TTMPs lives in the trap-temporary file, and
   // read_sgpr() would fetch whatever the allocation holds at that index.
   const uint32_t sb_sel = inst.rsrc;
-  if (!amdgpu::addr_calc::buffer_resource_range_is_backed(wf, sb_sel)) {
+  const auto words = amdgpu::addr_calc::read_buffer_resource(wf, sb_sel);
+  if (!words) {
     amdgpu::reject_vector_memory_access(d);
     return;
   }
-  uint32_t srd0 = amdgpu::read_scalar_selector(wf, sb_sel);
-  uint32_t srd1 = amdgpu::read_scalar_selector(wf, sb_sel + 1);
-  uint32_t srd2 = amdgpu::read_scalar_selector(wf, sb_sel + 2);
-  uint32_t srd3 = amdgpu::read_scalar_selector(wf, sb_sel + 3);
+  const auto [srd0, srd1, srd2, srd3] = *words;
   BufferResource resource = decode_buffer_resource(srd0, srd1, srd2, srd3);
   if (resource.type != 0) {
     // CDNA5 ignores VBUFFER operations whose resource TYPE does not identify
@@ -362,11 +360,8 @@ void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront
   uint32_t vbase = 0;
   if (inst.idxen || inst.offen)
     vbase = resolved_vgpr_base(wf, inst.vaddr, amdgpu::VgprMsbRole::Src0);
-  std::optional<amdgpu::RegisterAccess::VgprReadRegion> vaddr_region;
-  if (inst.idxen || inst.offen) {
-    uint32_t reg_count = (inst.idxen && inst.offen) ? 2 : 1;
-    vaddr_region.emplace(regs.read_vgpr_region(vbase, reg_count, exec));
-  }
+  const auto address_regs =
+      amdgpu::addr_calc::read_buffer_address_registers(regs, vbase, inst.idxen, inst.offen, exec);
   assert(d.elem_size != 0 && d.num_elems != 0);
   d.element_lane_masks.clear();
   if (ioff < 0) {
@@ -376,29 +371,47 @@ void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront
     d.lane_mask = 0;
     return;
   }
+  // A linear single-element access has one bound for the whole wave. Its
+  // unsigned vector offset and nonnegative IOFFSET fit below the 45-bit wrap.
+  if (d.num_elems == 1 && !resource.swizzle_enabled && !inst.idxen && inst.offen &&
+      (exec == UINT32_MAX || exec == UINT64_MAX)) {
+    const uint64_t bias = uint64_t{soffset_val} + static_cast<uint32_t>(ioff);
+    uint64_t bound = resource.num_records;
+    if (resource.oob_select)
+      bound = std::min<uint64_t>(bound, resource.stride);
+    const unsigned lanes = exec == UINT32_MAX ? 32 : 64;
+    d.lane_mask = 0;
+    if (bias <= bound && d.elem_size <= bound - bias) {
+      const uint64_t maximum = bound - bias - d.elem_size;
+      const uint64_t base = resource.base_address + bias;
+      for (unsigned lane = 0; lane < lanes; ++lane) {
+        const uint32_t offset = address_regs.offsets[lane];
+        const bool valid = offset <= maximum;
+        d.per_lane_addr[lane] = valid ? base + offset : 0;
+        d.lane_mask |= uint64_t{valid} << lane;
+      }
+    } else {
+      std::fill_n(d.per_lane_addr.begin(), lanes, uint64_t{0});
+    }
+    d.element_lane_masks.assign(1, d.lane_mask);
+    return;
+  }
   if (!resource.swizzle_enabled)
     d.element_lane_masks.assign(d.num_elems, exec);
-  // Triton PR 12512 reports raw B128 crossings with 4/8 aligned bytes left
-  // that differ from CDNA5 ISA 9.4.1's exact per-DWORD check. Follow the PR's
-  // stated end + 4 <= NUM_RECORDS rule for crossing accesses, retaining all
-  // DWORDs when the whole access fits. Other widths and byte-granular bounds
-  // are model extensions awaiting gfx1250 qualification. Keep structured
-  // accesses on the documented rule until their behavior is measured.
+  // For a crossing raw vector access, keep a DWORD when its end + 4 <= NUM_RECORDS
+  // (Triton PR 12512). This differs from the exact per-DWORD check in CDNA5 ISA 9.4.1.
+  // gfx1250 loads confirm the crossing rule for B64 with 4 bytes left and B128
+  // with 4 or 8 bytes left, with SOFFSET encoded as null or an SGPR containing zero.
+  // Other raw crossing cases extrapolate this rule. Whole accesses retain all DWORDs,
+  // including exact fits. Structured accesses use the documented check.
   constexpr uint32_t kDwordBytes = sizeof(uint32_t);
+  const uint32_t access_size = d.elem_size * d.num_elems;
   d.lane_mask = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t index = 0;
-    uint32_t voffset = 0;
-    if (inst.idxen && inst.offen) {
-      index = vaddr_region->lane(0, lane);
-      voffset = vaddr_region->lane(1, lane);
-    } else if (inst.idxen) {
-      index = vaddr_region->lane(0, lane);
-    } else if (inst.offen) {
-      voffset = vaddr_region->lane(0, lane);
-    }
+    const uint32_t index = inst.idxen ? address_regs.indices[lane] : 0;
+    const uint32_t voffset = inst.offen ? address_regs.offsets[lane] : 0;
     if (resource.swizzle_enabled) {
       uint64_t buffer_offset =
           swizzled_buffer_offset(index, resource.stride, voffset, ioff, soffset_val);
@@ -413,9 +426,14 @@ void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront
 
     int64_t record_offset = static_cast<int64_t>(soffset_val) + voffset + ioff;
     int64_t total_offset = static_cast<int64_t>(soffset_val) + logical_offset;
+    const bool crosses_buffer = byte_range_exceeds(total_offset, access_size, resource.num_records);
+    if (!crosses_buffer && (!resource.oob_select ||
+                            !byte_range_exceeds(record_offset, access_size, resource.stride))) {
+      d.lane_mask |= uint64_t{1} << lane;
+      continue;
+    }
     const bool raw_vector_crosses_bound =
-        !inst.idxen && d.elem_size == kDwordBytes && d.num_elems > 1 &&
-        byte_range_exceeds(total_offset, d.elem_size * d.num_elems, resource.num_records);
+        !inst.idxen && d.elem_size == kDwordBytes && d.num_elems > 1 && crosses_buffer;
     const uint32_t component_bound_size =
         d.elem_size + (raw_vector_crosses_bound ? kDwordBytes : 0);
     for (uint32_t elem = 0; elem < d.num_elems; ++elem) {

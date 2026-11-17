@@ -635,8 +635,7 @@ private:
       errno = error;
       return -1;
     }
-    const int lease_fd =
-        host_call(libc_passthrough().memfd_create, ::memfd_create, "rocjitsu-owner", MFD_CLOEXEC);
+    const int lease_fd = create_scratch_fd("rocjitsu-owner");
     struct flock lock {};
     lock.l_type = F_WRLCK;
     lock.l_whence = SEEK_SET;
@@ -645,7 +644,7 @@ private:
         host_call(libc_passthrough().fcntl, ::fcntl, lease_fd, F_OFD_SETLK, &lock) == 0) {
       lease_mapping_size_ = static_cast<size_t>(sysconf(_SC_PAGESIZE));
       // A PROT_NONE mapping pins the locked open-file description without sizing
-      // or accessing the empty memfd. No long-lived fd number can be replaced by
+      // or accessing the empty lease file. No long-lived fd number can be replaced by
       // application close_range/dup2 while retirement is releasing the lease.
       lease_mapping_ = host_call(libc_passthrough().mmap, ::mmap, nullptr, lease_mapping_size_,
                                  PROT_NONE, MAP_SHARED, lease_fd, 0);
@@ -704,35 +703,52 @@ private:
     while (host_call(libc_passthrough().waitpid, ::waitpid, bootstrap, nullptr, __WCLONE) < 0 &&
            errno == EINTR) {
     }
-    pollfd startup{leases[0], POLLIN, 0};
-    long ready;
-    do {
-      ready = host_call(libc_passthrough().poll, ::poll, &startup, 1, 10000);
-    } while (ready < 0 && errno == EINTR);
-    if (ready <= 0) {
-      host_close_fd(leases[0]);
-      if (ready == 0)
-        errno = ETIMEDOUT;
-      return -1;
-    }
+    UniqueDriverFd startup(leases[0]);
     kmd::KeeperStartupReply reply{};
-    int descriptor = -1;
     pid_t sender_pid = -1;
-    const long received = kmd::receive_keeper_descriptor(leases[0], &reply, sizeof(reply),
-                                                         descriptor, 0, nullptr, &sender_pid);
-    int startup_error = reply.error;
-    if (received < 0)
-      startup_error = errno;
-    else if (received == 0)
-      startup_error = EIO;
-    else if (received != sizeof(reply) || reply.version != kmd::kKeeperProtocolVersion ||
-             descriptor >= 0 || sender_pid <= 0)
-      startup_error = EPROTO;
-    host_close_fd(leases[0]);
-    host_close_fd(descriptor);
-    if (startup_error) {
-      errno = startup_error;
-      return -1;
+    pid_t requesting_helper = -1;
+    for (;;) {
+      pollfd state{startup.get(), POLLIN, 0};
+      int ready;
+      do {
+        ready = host_call(libc_passthrough().poll, ::poll, &state, 1, 10000);
+      } while (ready < 0 && errno == EINTR);
+      if (ready <= 0) {
+        if (ready == 0)
+          errno = ETIMEDOUT;
+        return -1;
+      }
+      int descriptor = -1;
+      const long received = kmd::receive_keeper_descriptor(
+          startup.get(), &reply, sizeof(reply), descriptor, MSG_DONTWAIT, nullptr, &sender_pid);
+      if (received < 0)
+        return -1;
+      if (descriptor >= 0 || sender_pid <= 0 ||
+          (requesting_helper > 0 && sender_pid != requesting_helper)) {
+        host_close_fd(descriptor);
+        errno = received ? EPROTO : EIO;
+        return -1;
+      }
+      if (requesting_helper < 0 && received == sizeof(kmd::kKeeperRequestOwnerStat) &&
+          reply.version == kmd::kKeeperRequestOwnerStat) {
+        UniqueDriverFd stat(host_call(libc_passthrough().openat, ::openat, AT_FDCWD,
+                                      "/proc/self/stat", O_RDONLY | O_CLOEXEC, 0));
+        if (!stat ||
+            kmd::send_keeper_descriptor(startup.get(), &kmd::kKeeperRequestOwnerStat,
+                                        sizeof(kmd::kKeeperRequestOwnerStat), stat.get()) < 0)
+          return -1;
+        requesting_helper = sender_pid;
+        continue;
+      }
+      if (received != sizeof(reply) || reply.version != kmd::kKeeperProtocolVersion) {
+        errno = EPROTO;
+        return -1;
+      }
+      if (reply.error) {
+        errno = reply.error;
+        return -1;
+      }
+      break;
     }
     helper_pid_ = sender_pid;
     helper_inode_ = reply.process_inode;
@@ -956,7 +972,7 @@ int create_memory_backing(size_t size, bool preallocate, const char *name) {
   return allocate_backing(size, -1, operation, name);
 }
 
-int populate_backing_file(int fd, const void *data, size_t size) {
+int populate_backing_file(int fd, const void *data, size_t size, bool reserve_space) {
   if (!size)
     return 0;
   if (size > static_cast<size_t>(std::numeric_limits<off_t>::max())) {
@@ -965,7 +981,9 @@ int populate_backing_file(int fd, const void *data, size_t size) {
   }
   // The caller owns the descriptor and may have opened it with O_APPEND.
   // Linux pwrite would append even with offset zero; a mapping ignores that flag.
-  if (allocate_backing(size, fd, kmd::KeeperOperation::SizeFile) < 0)
+  const auto operation =
+      reserve_space ? kmd::KeeperOperation::ReserveFile : kmd::KeeperOperation::SizeFile;
+  if (allocate_backing(size, fd, operation) < 0)
     return -1;
   return populate_mapping(fd, data, size);
 }

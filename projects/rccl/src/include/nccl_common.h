@@ -18,6 +18,10 @@
 #include <cstdint>
 #include "nccl.h"
 
+// [RCCL] One bit per cost-model tuning id (tuning.h). RCCL's NaN protocol takes the id count past 64.
+typedef unsigned __int128 ncclTuningMask_t;
+#define NCCL_TUNING_BIT(i) ((ncclTuningMask_t)1 << (i))
+
 // Windows compatibility: define ssize_t if not available
 #ifdef NCCL_OS_WINDOWS
 #include <BaseTsd.h>
@@ -56,7 +60,8 @@ typedef enum {
   NCCL_RAS = 0x8000,
   NCCL_DESTROY = 0x10000,
   NCCL_ALLOC_HOST = 0x20000,
-  NCCL_VERBS = 0x40000, // RCCL-only: relocated to avoid collision with upstream NCCL_ALLOC_HOST at 0x20000
+  NCCL_DIAG = 0x40000,
+  NCCL_VERBS = 0x80000, // RCCL-only: placed after upstream's subsystems (NCCL_ALLOC_HOST 0x20000, NCCL_DIAG 0x40000)
   NCCL_ALL = ~0
 } ncclDebugLogSubSys;
 

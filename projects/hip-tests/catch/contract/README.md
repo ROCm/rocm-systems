@@ -74,6 +74,7 @@ The first domains are:
 - `graph_node_params`: graph memcpy, memset, event, and lifecycle node parameter contracts
 - `graph_node_setters`: pre-instantiation graph node parameter setter and attribute-copy contracts
 - `graph_symbol_copy_nodes`: graph memcpy-to/from-symbol node add, set-params, and exec-set-params contracts
+- `graph_id`: IDs for graphs, executable graphs, and graph nodes
 - `host_memory`: host allocation, registration, device-pointer, and flag contracts
 - `host_alloc_aliases`: alternate host allocation/free entry point and extended allocation contracts
 - `pitched_memory`: pitched allocation and host/device 2D copy contracts
@@ -91,7 +92,7 @@ The first domains are:
 - `memory_pool`: default memory pool, release-threshold, and stream-ordered allocation contracts
 - `vmm`: virtual memory management granularity, reserve, map, access, and roundtrip contracts
 - `vmm_handle`: VMM allocation-handle retain, property query, and dma-buf address-range export contracts
-- `mem_map_array`: sparse array map/unmap (`hipMemMapArrayAsync`) invalid-input rejection contracts
+- `mem_map_array`: sparse array map/unmap (`hipMemMapArrayAsync`) and sparse layout query (`hipArrayGetSparseProperties`) invalid-input rejection contracts
 - `copy3d`: 3D pitched allocation and host-device 3D copy contracts
 - `async_copy3d`: stream-ordered 3D copy, 3D memset, and memcpy-with-stream contracts
 - `driver_copy3d`: driver-style 3D copy contracts

@@ -667,6 +667,7 @@ TEST_F(NetAttrsMicrotest, SetNetAttrs_PluginWithoutHints_LeavesCacheUntouched) {
 TEST_F(NetAttrsMicrotest, SetXferAttrs_SendCollective_PinsSendPeersFlowsAndAlgo) {
   proxyState_.netAttr = NCCL_NET_ATTR_INIT;
   args_.nPeers = 2;
+  args_.minPeers = 2;
   args_.nChannels = 4;
   args_.collAPI = ncclFuncAllReduce;
   args_.algorithm = NCCL_ALGO_RING;
@@ -801,7 +802,7 @@ class NetAllocMicrotestBase : public NetMicrotestBase {
       return hipSuccess;
     };
     g_ncclP2pAllocateShareableBuffer = [this](size_t n, int, ncclIpcDesc* desc, void** p, int, ncclMemManager*,
-                                              ncclMemType_t) {
+                                              ncclMemType_t, bool) {
       ++shareableAllocs_;
       *p = Alloc(n);
       memset(desc, 0xAB, sizeof(*desc));
@@ -945,7 +946,7 @@ TEST_F(NetSharedBuffersMicrotest, Init_DeviceBufferWithCuMem_AllocatesShareable)
 
 TEST_F(NetSharedBuffersMicrotest, Init_AllocationFails_ReturnsError) {
   ScopedHook alloc(g_ncclP2pAllocateShareableBuffer,
-                   [](size_t, int, ncclIpcDesc*, void**, int, ncclMemManager*, ncclMemType_t) {
+                   [](size_t, int, ncclIpcDesc*, void**, int, ncclMemManager*, ncclMemType_t, bool) {
                      return ncclSystemError;
                    });
 
@@ -2777,12 +2778,13 @@ TEST_F(NetSendProxyConnectMicrotest, DedicatedGdrShareable_AllocatesIpcAlignedBa
   sendNetResources* r = AddConn(0, 1);
   conns_[0].sameProcess = 0;
   ScopedHook shm(g_shmAllocateShareableBuffer, [this](size_t n, bool, void*, void** h, void** d) {
-    *h = *d = Alloc(n);
+    EXPECT_EQ(d, nullptr);  // the proxy maps its SHM bank for the CPU only
+    *h = Alloc(n);
     return ncclSuccess;
   });
   size_t allocated = 0;
   ScopedHook alloc(g_ncclP2pAllocateShareableBuffer, [&](size_t n, int, ncclIpcDesc*, void** p, int,
-                                                         ncclMemManager*, ncclMemType_t) {
+                                                         ncclMemManager*, ncclMemType_t, bool) {
     allocated = n;
     *p = Alloc(n);
     return ncclSuccess;
@@ -2809,7 +2811,8 @@ TEST_F(NetSendProxyConnectMicrotest, RemoteProxy_ZeroesShmControlWords) {
   sendNetResources* r = AddConn();
   conns_[0].sameProcess = 0;
   ScopedHook shm(g_shmAllocateShareableBuffer, [this](size_t n, bool, void*, void** h, void** d) {
-    *h = *d = Alloc(n);
+    EXPECT_EQ(d, nullptr);  // the proxy maps its SHM bank for the CPU only
+    *h = Alloc(n);
     memset(*h, 0xFF, n);
     return ncclSuccess;
   });
@@ -3035,6 +3038,20 @@ TEST_F(NetSendProxyConnectMicrotest, CuMemDmaBufPoolBuffer_ExportedAndClosedOnIt
   EXPECT_EQ(net_.regMrDmaBufs[0].fd, exports_[0].fd);
   EXPECT_EQ(net_.regMrDmaBufs[0].offset, 0u);
   EXPECT_EQ(fcntl(exports_[0].fd, F_GETFD), -1);
+}
+
+TEST_F(NetSendProxyConnectMicrotest, CuMemDmaBufRegistrationFails_ClosesExportedFd) {
+  ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+  sendNetResources* r = AddConn(/*shared=*/1, ncclTopoGdrModeDefault);
+  r->useDmaBuf = 1;
+  net_.regMrDmaBufResult = ncclSystemError;
+
+  EXPECT_EQ(Connect(), ncclSystemError);
+
+  ASSERT_EQ(exports_.size(), 1u);
+  ASSERT_EQ(net_.regMrDmaBufs.size(), 1u);
+  EXPECT_EQ(net_.regMrDmaBufs[0].fd, exports_[0].fd);
+  EXPECT_FALSE(FdOpen(exports_[0].fd));
 }
 
 TEST_F(NetSendProxyConnectMicrotest, CuMemDmaBufPoolBesideStagingBank_ExportedSeparately) {
@@ -3343,7 +3360,7 @@ TEST_F(NetRecvProxyConnectMicrotest, DedicatedGdrCuMem_AllocatesShareableBank) {
   ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
   size_t allocated = 0;
   ScopedHook alloc(g_ncclP2pAllocateShareableBuffer, [&](size_t n, int, ncclIpcDesc*, void** p, int,
-                                                         ncclMemManager*, ncclMemType_t) {
+                                                         ncclMemManager*, ncclMemType_t, bool) {
     allocated = n;
     *p = Alloc(n);
     return ncclSuccess;
@@ -3594,6 +3611,20 @@ TEST_F(NetRecvProxyConnectMicrotest, CuMemDmaBufPoolBuffer_ExportedAndClosedOnIt
   EXPECT_EQ(fcntl(exports_[0].fd, F_GETFD), -1);
 }
 
+TEST_F(NetRecvProxyConnectMicrotest, CuMemDmaBufRegistrationFails_ClosesExportedFd) {
+  ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+  recvNetResources* r = AddRecvConn(/*shared=*/1, ncclTopoGdrModeDefault);
+  r->useDmaBuf = 1;
+  net_.regMrDmaBufResult = ncclSystemError;
+
+  EXPECT_EQ(Connect(), ncclSystemError);
+
+  ASSERT_EQ(exports_.size(), 1u);
+  ASSERT_EQ(net_.regMrDmaBufs.size(), 1u);
+  EXPECT_EQ(net_.regMrDmaBufs[0].fd, exports_[0].fd);
+  EXPECT_FALSE(FdOpen(exports_[0].fd));
+}
+
 TEST_F(NetRecvProxyConnectMicrotest, CuMemDmaBufPoolBesideStagingBank_ExportedSeparately) {
   ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
   proxyState_.allocP2pNetLLBuffers = true;
@@ -3683,7 +3714,8 @@ TEST_F(NetSendProxyFreeMicrotest, RemoteProxy_ClosesShmAndReleasesShareableBank)
   AddConn(0, 1);
   conns_[0].sameProcess = 0;
   ScopedHook shm(g_shmAllocateShareableBuffer, [this](size_t n, bool, void*, void** h, void** d) {
-    *h = *d = Alloc(n);
+    EXPECT_EQ(d, nullptr);  // the proxy maps its SHM bank for the CPU only
+    *h = Alloc(n);
     return ncclSuccess;
   });
   ASSERT_EQ(Connect(), ncclSuccess);
@@ -5272,7 +5304,7 @@ TEST_F(NetRecvProgressMicrotest, Post_SharedRegistered_WaitsForKernelThenPostsUs
 
   Fifo(sub.base).size = 0;  // the kernel has started
   ASSERT_EQ(Progress(), ncclSuccess);
-  Fifo(sub.base).size = -1;
+  EXPECT_EQ(Fifo(sub.base).size, -1);  // the gate consumes the kernel's flag
   ASSERT_EQ(Progress(), ncclSuccess);
 
   ASSERT_EQ(net_.irecvs.size(), 2u);
@@ -5371,7 +5403,7 @@ TEST_F(NetRecvProgressMicrotest, PostFirstPass_PinsTransferHints) {
   EXPECT_EQ(net_.lastAttr.recvCommAttr.maxFlowsPerPeer, 3);
 }
 
-TEST_F(NetRecvProgressMicrotest, Receive_Completed_ReleasesFifoSlotAndRecordsSize) {
+TEST_F(NetRecvProgressMicrotest, Receive_Completed_KeepsFifoSlotAndRecordsSize) {
   ncclProxySubArgs& sub = AddSub(1);
   Fifo(res_.step).size = 99;  // the slot of the op's first step
 
@@ -5381,7 +5413,7 @@ TEST_F(NetRecvProgressMicrotest, Receive_Completed_ReleasesFifoSlotAndRecordsSiz
   EXPECT_EQ(net_.tested[0], sub.recvRequestsCache[0]);  // requests are indexed by the op-relative step
   EXPECT_EQ(sub.received, 1u);
   EXPECT_EQ(sub.transSize, 64u);
-  EXPECT_EQ(Fifo(sub.base).size, -1);
+  EXPECT_EQ(Fifo(sub.base).size, 99);  // only the registered-buffer gate resets the slot
   EXPECT_EQ(sub.requests[0], nullptr);
   EXPECT_TRUE(net_.iflushes.empty());
 }

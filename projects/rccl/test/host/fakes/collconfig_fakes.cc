@@ -47,7 +47,7 @@ bool ncclCollConfigNeedAggIsolate(const ncclCollConfig_t* config) {
   return false;
 }
 
-ncclResult_t ncclCollConfigGetAlgMask(const ncclCollConfig_t* config, ncclFunc_t, uint64_t* outMask) {
+ncclResult_t ncclCollConfigGetAlgMask(const ncclCollConfig_t* config, ncclFunc_t, ncclTuningMask_t* outMask) {
   if (ncclCollConfigHasAlgSelection(config)) {
     FailLoud("collconfig_fakes", "ncclCollConfigGetAlgMask: config->algSelection needs the real parser");
   }

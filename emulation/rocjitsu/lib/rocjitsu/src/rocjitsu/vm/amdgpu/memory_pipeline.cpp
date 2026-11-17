@@ -556,18 +556,16 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
       }
     }
   }
-  // A dense D16 load fills the same half of one VGPR across the wave.
-  // Resolve the register and its preservation policy once for all lanes.
-  if (!is_atomic && d.elem_size == sizeof(uint16_t) && d.num_elems == 1 && (d.d16_lo || d.d16_hi) &&
-      writes_dword(0) &&
-      ((d.wf_size == 32 && d.lane_mask == UINT32_MAX) ||
-       (d.wf_size == 64 && d.lane_mask == UINT64_MAX)) &&
-      d.wf_size <= cu.vgpr_storage_lane_count()) {
+  // A dense halfword load widens into one VGPR or updates the selected half.
+  // Resolve the register and the preservation policy once per wave.
+  const bool full_wave = (d.wf_size == 32 && result_lanes == UINT32_MAX) ||
+                         (d.wf_size == 64 && result_lanes == UINT64_MAX);
+  if (!is_atomic && full_wave && d.elem_size == sizeof(uint16_t) && d.num_elems == 1 &&
+      !d.sign_extend && writes_dword(0) && d.wf_size <= cu.vgpr_storage_lane_count()) {
     auto *dst = reinterpret_cast<uint32_t *>(cu.raw_vgpr_data(d.dst_reg_base));
     const uint32_t shift = d.d16_hi ? 16 : 0;
-    const uint32_t preserve = cu.sram_ecc() ? 0u : ~(0xffffu << shift);
-    const uint32_t lanes = d.wf_size;
-    for (uint32_t lane = 0; lane < lanes; ++lane) {
+    const uint32_t preserve = (d.d16_hi || d.d16_lo) && !cu.sram_ecc() ? ~(0xffffu << shift) : 0u;
+    for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
       uint16_t halfword;
       std::memcpy(&halfword, d.response_data.data() + lane * sizeof(halfword), sizeof(halfword));
       const uint32_t retained = preserve ? (dst[lane] & preserve) : 0;
@@ -585,6 +583,16 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
       if (!writes_dword(i))
         continue;
       auto *destination = reinterpret_cast<uint32_t *>(cu.raw_vgpr_data(d.dst_reg_base + i));
+      if (full_wave) {
+        const auto *source = d.response_data.data() + i * sizeof(uint32_t);
+        if (vgpr_count == 1) {
+          std::memcpy(destination, source, d.wf_size * sizeof(uint32_t));
+        } else {
+          for (uint32_t lane = 0; lane < d.wf_size; ++lane)
+            std::memcpy(destination + lane, source + lane * stride, sizeof(uint32_t));
+        }
+        continue;
+      }
       uint64_t lanes = result_lanes;
       while (lanes) {
         const uint32_t lane = std::countr_zero(lanes);
@@ -1014,7 +1022,8 @@ Bits apply_fp_atomic(const VectorMemState &state, fp_mode::ScalarAtomicOp operat
                      Bits source_bits, Bits compare_bits, uint32_t denorm_mode,
                      bool local = false) {
   return fp_mode::atomic_scalar(operation, old_bits, source_bits, compare_bits, denorm_mode,
-                                state.atomic_legacy_minmax, local || state.atomic_source_nan_first);
+                                state.atomic_legacy_minmax, local || state.atomic_source_nan_first,
+                                state.atomic_minmax_snan_wins);
 }
 
 bool is_packed_add(AtomicOp op) {
@@ -1604,7 +1613,6 @@ void execute_lds_access(VectorMemState &d, Wavefront &wf, Lds &lds,
                         const std::vector<uint8_t> &store_data,
                         std::vector<uint8_t> &response_data) {
   const bool rdna2 = wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA2;
-  const uint64_t checked_lanes = lane_mask;
   const auto window = ds_address_window(d, wf, lds.size_bytes());
   const bool native_ds = d.flat_local_lane_mask == 0;
   const auto arch = wf.cu().arch();
@@ -1616,46 +1624,44 @@ void execute_lds_access(VectorMemState &d, Wavefront &wf, Lds &lds,
                                ? (d.is_load ? std::min(d.elem_size, 4u) : 1u)
                                : d.elem_size;
   const uint64_t reporting_lanes = rdna2 ? d.flat_local_lane_mask : 0;
+  const uint32_t minimum = full_tuple || d.atomic_op != AtomicOp::NONE ? bytes_per_lane : granule;
   uint64_t rejected = lane_mask & d.flat_local_oob_lane_mask;
-  for (uint64_t lanes = checked_lanes; lanes; lanes &= lanes - 1) {
+  const bool ordinary = d.atomic_op == AtomicOp::NONE && granule != 0;
+  for (uint64_t lanes = lane_mask & ~rejected; lanes; lanes &= lanes - 1) {
     const uint32_t lane = std::countr_zero(lanes);
     const uint64_t address = addresses[lane];
-    if (!window.contains(address,
-                         full_tuple || d.atomic_op != AtomicOp::NONE ? bytes_per_lane : granule))
+    if (!window.contains(address, minimum)) {
       rejected |= uint64_t{1} << lane;
+      continue;
+    }
+    if (!ordinary)
+      continue;
+    // Partial GFX12 accesses retain complete granules. A full transfer needs no
+    // division, and its read overwrites the entire response for this lane.
+    uint32_t bytes = bytes_per_lane;
+    const uint32_t offset = lane * bytes_per_lane;
+    if (bytes > window.end - address) {
+      bytes = static_cast<uint32_t>(
+          whole_element_bytes_in_range(address, bytes_per_lane, granule, window.end));
+      d.address_range_violation_lanes |= reporting_lanes & (uint64_t{1} << lane);
+      if (d.is_load)
+        std::memset(response_data.data() + offset + bytes, 0, bytes_per_lane - bytes);
+    }
+    if (d.is_load)
+      std::as_const(lds).read(static_cast<uint32_t>(address), response_data.data() + offset, bytes);
+    else
+      lds.write(static_cast<uint32_t>(address), store_data.data() + offset, bytes);
   }
   lane_mask &= ~rejected;
   d.address_range_violation_lanes |= rejected & reporting_lanes;
-  if (d.atomic_op == AtomicOp::NONE && granule != 0) {
-    // gfx1201 FLAT bounds retain complete DWORDs, including for byte-unaligned
-    // accesses. Stores crossing the end also discard the incomplete DWORD;
-    // the DS unaligned byte-store rule does not describe these FLAT requests.
-    const uint32_t bytes_per_lane = d.elem_size * d.num_elems;
-    const uint64_t local_lanes = lane_mask & checked_lanes;
-    for (uint64_t lanes = local_lanes; lanes; lanes &= lanes - 1) {
-      const uint32_t lane = std::countr_zero(lanes);
-      const uint64_t address = addresses[lane];
-      const uint32_t bytes = static_cast<uint32_t>(
-          whole_element_bytes_in_range(address, bytes_per_lane, granule, window.end));
-      if (bytes < bytes_per_lane)
-        d.address_range_violation_lanes |= reporting_lanes & (uint64_t{1} << lane);
-      const uint32_t data_offset = lane * bytes_per_lane;
-      if (d.is_load) {
-        std::memset(response_data.data() + data_offset, 0, bytes_per_lane);
-        std::as_const(lds).read(static_cast<uint32_t>(address), response_data.data() + data_offset,
-                                bytes);
-      } else {
-        lds.write(static_cast<uint32_t>(address), store_data.data() + data_offset, bytes);
-      }
-    }
-    lane_mask &= ~local_lanes;
-  }
   if (d.atomic_op != AtomicOp::NONE)
     execute_lds_atomic_rmw(d, &lds, addresses, store_data, response_data, lane_mask);
-  else if (d.is_load)
-    lds.vector_load(addresses.data(), lane_mask, d.elem_size, d.num_elems, response_data.data());
-  else
-    lds.vector_store(addresses.data(), lane_mask, d.elem_size, d.num_elems, store_data.data());
+  else if (!ordinary) {
+    if (d.is_load)
+      lds.vector_load(addresses.data(), lane_mask, d.elem_size, d.num_elems, response_data.data());
+    else
+      lds.vector_store(addresses.data(), lane_mask, d.elem_size, d.num_elems, store_data.data());
+  }
   if (d.is_load || d.atomic_op != AtomicOp::NONE) {
     for (uint64_t lanes = rejected; lanes; lanes &= lanes - 1)
       std::memset(response_data.data() + std::countr_zero(lanes) * bytes_per_lane, 0,
@@ -1860,8 +1866,41 @@ VmAccessOutcome GlobalMemPipeline::initiate_texel_access(VectorMemState &d, Wave
   // active requests first so one peer lane cannot enter L1 before another lane
   // reveals a route or a denial. Retain the route decision with this instruction
   // once a deferred request has been prepared.
-  if (d.translated.access && d.translated.access->info().legacy_cache_compatible &&
-      !d.translated.peer_data_route) {
+  MemoryIngressAdmission ingress;
+  bool local_range_admitted = false;
+  if (local_range_handler_ && request_lanes && !swizzled_lanes && d.atomic_op == AtomicOp::NONE &&
+      d.translated.access && d.translated.access->info().legacy_cache_compatible &&
+      !d.translated.peer_data_route && d.translated.requests.empty()) {
+    uint64_t begin = UINT64_MAX, last = 0;
+    if (request_lanes == UINT64_MAX || request_lanes == UINT32_MAX) {
+      const unsigned lanes = request_lanes == UINT64_MAX ? 64 : 32;
+      for (unsigned lane = 0; lane < lanes; ++lane) {
+        begin = std::min(begin, d.per_lane_addr[lane]);
+        last = std::max(last, d.per_lane_addr[lane]);
+      }
+    } else {
+      for (uint64_t mask = request_lanes; mask; mask &= mask - 1) {
+        const uint64_t address = d.per_lane_addr[std::countr_zero(mask)];
+        begin = std::min(begin, address);
+        last = std::max(last, address);
+      }
+    }
+    const uint64_t bytes = uint64_t{d.elem_size} * d.num_elems;
+    // Bound speculation across inactive gaps in a strided wave. The exact-lane
+    // path below handles wider requests without probing unrequested pages.
+    constexpr uint64_t page = IdentityAddressSpaceTranslator::kPageSize;
+    if (bytes && bytes <= UINT64_MAX - last && last + bytes - begin <= 128 * page) {
+      auto local = local_range_handler_(
+          wf.process_id(), *d.translated.access,
+          {begin, last + bytes - begin, d.is_load ? VmAccessKind::Read : VmAccessKind::Write});
+      if (local && local->outcome == VmAccessOutcome::Complete) {
+        ingress = std::move(*local);
+        local_range_admitted = true;
+      }
+    }
+  }
+  if (!local_range_admitted && d.translated.access &&
+      d.translated.access->info().legacy_cache_compatible && !d.translated.peer_data_route) {
     if (d.translated.access->revoked()) {
       auto refreshed = wf.snapshot_vm_access();
       if (!refreshed || refreshed->revoked())
@@ -1905,8 +1944,8 @@ VmAccessOutcome GlobalMemPipeline::initiate_texel_access(VectorMemState &d, Wave
       d.translated.access &&
       (!d.translated.access->info().legacy_cache_compatible || d.translated.peer_data_route);
 
-  MemoryIngressAdmission ingress;
-  if (!translated_address_space && d.translated.access && has_ingress_handler()) {
+  if (!local_range_admitted && !translated_address_space && d.translated.access &&
+      has_ingress_handler()) {
     std::vector<MemoryIngressSpan> spans;
     const VmAccessKind access = d.atomic_op != AtomicOp::NONE ? VmAccessKind::Atomic
                                 : d.is_load                   ? VmAccessKind::Read

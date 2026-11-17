@@ -27,8 +27,8 @@ int64_t ncclParamCGAClusterSize();
 namespace {
 
 // ncclRawTask is a union, so the entry count alone cannot tell which fill function ran; the mask can.
-std::vector<uint64_t> TuningMasks(struct ncclTaskTuningInfoQueue* tiq) {
-  std::vector<uint64_t> masks;
+std::vector<ncclTuningMask_t> TuningMasks(struct ncclTaskTuningInfoQueue* tiq) {
+  std::vector<ncclTuningMask_t> masks;
   for (struct ncclTaskTuningInfo* t = ncclIntruQueueHead(&tiq->queue); t != nullptr; t = t->next) {
     masks.push_back(t->tuningIn.tuningMask);
   }
@@ -36,7 +36,7 @@ std::vector<uint64_t> TuningMasks(struct ncclTaskTuningInfoQueue* tiq) {
 }
 
 // task_pretuning.cc:37 for the coll path; :89/:106/:130 use NCCL_TUNING_MASK_ALL for the other three.
-constexpr uint64_t kCollTuningMask = NCCL_TUNING_MASK_SYM_KERNELS | NCCL_TUNING_MASK_GENERAL_KERNELS;
+constexpr ncclTuningMask_t kCollTuningMask = NCCL_TUNING_MASK_SYM_KERNELS | NCCL_TUNING_MASK_GENERAL_KERNELS;
 
 // At rank == root: AlltoAll lowers 2 per rank, Gather 1 send plus nRanks recvs, Scatter the mirror of that.
 constexpr size_t kLoweredP2pTasks = 2 * kRanks + (1 + kRanks) + (kRanks + 1);
@@ -104,7 +104,7 @@ TEST_F(TaskPrepMicrotest, PreTuningDrainsEveryRawTaskKind) {
 
   EXPECT_EQ(5u, QueueTasks(&tiq.queue).size());
   // The bcast is last: preTuningBcastFallsBack always returns true, so it stays a coll.
-  EXPECT_EQ((std::vector<uint64_t>{kCollTuningMask, NCCL_TUNING_MASK_ALL, NCCL_TUNING_MASK_ALL,
+  EXPECT_EQ((std::vector<ncclTuningMask_t>{kCollTuningMask, NCCL_TUNING_MASK_ALL, NCCL_TUNING_MASK_ALL,
                                    NCCL_TUNING_MASK_ALL, kCollTuningMask}),
             TuningMasks(&tiq));
   EXPECT_TRUE(ncclIntruQueueEmpty(&scene.comm()->rawTaskQueue.genericQueue));
@@ -312,7 +312,9 @@ TEST_F(TaskPrepMicrotest, TaskPrepare_TuningExcludedCollFuncs_SkipTuningAndCarry
   ncclSimInfo_t sim = PoisonedSimInfo();
   ASSERT_EQ(ncclSuccess, ncclTaskPrepare(scene.comm(), &sim));
 
-  EXPECT_EQ(std::vector<ncclFunc_t>{ncclFuncAllReduce}, spy.funcs());
+  // Since v2.32.6 AlltoAll has a tuning slot (ncclTuningFuncIndex maps it to NCCL_NUM_FUNCTIONS), so it is tuned
+  // and, without a sym kernel, still lowered to p2p; Scatter, Gather and AllGatherV remain untuned.
+  EXPECT_EQ((std::vector<ncclFunc_t>{ncclFuncAllReduce, ncclFuncAlltoAll}), spy.funcs());
   struct ncclClassifiedTaskQueues* ctq = &scene.comm()->classifiedTaskQueues;
   std::vector<struct ncclTaskTuningInfo*> legacy = QueueTasks(&ctq->legacyTaskQueue);
   ASSERT_EQ(2u, legacy.size());
@@ -375,7 +377,8 @@ TEST_F(TaskPrepMicrotest, TaskPrepare_ClassificationFails_PropagatesWithoutPostT
   ncclSimInfo_t sim = PoisonedSimInfo();
   EXPECT_EQ(ncclInternalError, ncclTaskPrepare(scene.comm(), &sim));
 
-  EXPECT_EQ(1, tuning.calls);
+  // Both colls are tuned (AlltoAll gained a tuning slot in v2.32.6) before classification fails.
+  EXPECT_EQ(2, tuning.calls);
   EXPECT_FLOAT_EQ(kUnwrittenEstimate, sim.estimatedTime);
 }
 
