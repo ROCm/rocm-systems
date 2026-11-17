@@ -71,6 +71,21 @@ def count_markers_in_json(data):
     return count
 
 
+def summarize_records(data):
+    """Count the records of each kind (buffer and callback) in the rocprofv3 JSON."""
+    ret_arr = {}
+    try:
+        for tool_entry in data.get("rocprofiler-sdk-tool", []):
+            for group in ("buffer_records", "callback_records"):
+                for kind, records in tool_entry.get(group, {}).items():
+                    if isinstance(records, (list, dict)):
+                        key = f"{group}.{kind}"
+                        ret_arr[key] = ret_arr.get(key, 0) + len(records)
+    except (AttributeError, TypeError):
+        pass
+    return ret_arr
+
+
 def test_output_files_exist(output_dir):
     """JSON output files must exist."""
     files = find_json_files(output_dir)
@@ -128,12 +143,19 @@ def test_flushed_markers(output_dir, expect):
     assert len(files) > 0
 
     total_markers = 0
+    details = []
     for path in files:
         data = load_json(path)
-        total_markers += count_markers_in_json(data)
+        markers = count_markers_in_json(data)
+        total_markers += markers
+        details.append(
+            f"  {os.path.basename(path)}: {os.path.getsize(path)} bytes, "
+            f"{markers} markers, records: {summarize_records(data)}"
+        )
 
     assert total_markers > 10, (
         f"Expected >10 marker events in JSON output, got {total_markers}. "
         f"Profiler may not have flushed marker data before signal death. "
-        f"Files: {files}"
+        f"Files: {files}\n" + "\n".join(details) + "\n"
+        f"Entries in {output_dir}: {sorted(os.listdir(output_dir))}"
     )
