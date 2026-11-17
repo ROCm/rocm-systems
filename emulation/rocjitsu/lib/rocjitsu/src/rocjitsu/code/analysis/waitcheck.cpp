@@ -5227,7 +5227,12 @@ private:
     if (gfx12) {
       const auto name = inst.mnemonic();
       buffer_load = name.starts_with("buffer_load_") || name.starts_with("tbuffer_load_");
+      const bool d16_load = name.find("_d16") != std::string_view::npos &&
+                            (name.starts_with("global_load_") ||
+                             name.starts_with("scratch_load_")) &&
+                            !name.ends_with("_block");
       if (!(inst.flags() & SIMPLE_MEMORY_RESULT) && !name.starts_with("flat_") && !buffer_load &&
+          !d16_load &&
           !(is_vmem_atomic(name) && (name.starts_with("global_") || name.starts_with("buffer_"))))
         return false;
     }

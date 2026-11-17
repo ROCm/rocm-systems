@@ -8224,6 +8224,47 @@ TEST(WaitcheckTest, Gfx12OutOfRangeOrdinaryLoadsDoNotReadTheirAddresses) {
   }
 }
 
+TEST(WaitcheckTest, Gfx12OutOfRangeD16LoadsDoNotReadTheirAddresses) {
+  for (const auto [arch, machine] :
+       {std::pair{ROCJITSU_CODE_ARCH_CDNA5, EF_AMDGPU_MACH_AMDGCN_GFX1250},
+        std::pair{ROCJITSU_CODE_ARCH_RDNA4, EF_AMDGPU_MACH_AMDGCN_GFX1201}}) {
+    for (bool scratch : {false, true}) {
+      for (bool high : {false, true}) {
+        for (bool out_of_range : {false, true}) {
+          SCOPED_TRACE(testing::Message()
+                       << machine << '/' << scratch << '/' << high << '/' << out_of_range);
+          std::vector<uint32_t> program;
+          append_inst(program, global_load_b32(8, 4));
+          const uint64_t second = program.size() * sizeof(uint32_t);
+          const uint8_t dest = out_of_range ? 16 : 15;
+          if (scratch) {
+            append_inst(program, rdna4::build_vscratch(high ? rdna4::kScratchLoadD16HiB16Vscratch
+                                                            : rdna4::kScratchLoadD16B16Vscratch,
+                                                       {.vdst = dest, .sve = 1, .vaddr = 8}));
+          } else {
+            append_inst(program, rdna4::build_vglobal(high ? rdna4::kGlobalLoadD16HiB16Vglobal
+                                                           : rdna4::kGlobalLoadD16B16Vglobal,
+                                                      {.vdst = dest, .vaddr = 8}));
+          }
+          const uint64_t consumer = program.size() * sizeof(uint32_t);
+          append_inst(program, v_mov_b32(3, 8));
+          append_inst(program, s_endpgm());
+          const auto report = analyze_gfx12_with_vgpr_allocation(program, machine, arch, true, 16);
+          ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+          const bool address_hazard = std::ranges::any_of(report.diagnostics, [&](const auto &d) {
+            return d.producer_section_offset == 0 && d.section_offset == second && d.reg.index == 8;
+          });
+          EXPECT_EQ(address_hazard, !out_of_range) << diagnostic_summary(report);
+          EXPECT_TRUE(std::ranges::any_of(report.diagnostics, [&](const auto &d) {
+            return d.producer_section_offset == 0 && d.section_offset == consumer &&
+                   d.reg.index == 8;
+          })) << diagnostic_summary(report);
+        }
+      }
+    }
+  }
+}
+
 TEST(WaitcheckTest, Gfx12NullifiedFlatStillOccupiesAnOlderLoadsCounterPosition) {
   for (const auto [arch, machine] :
        {std::pair{ROCJITSU_CODE_ARCH_CDNA5, EF_AMDGPU_MACH_AMDGCN_GFX1250},
@@ -8256,7 +8297,7 @@ TEST(WaitcheckTest, Gfx12NullifiedVmemStillOccupiesAnOlderLoadsCounterPosition) 
   for (const auto [arch, machine] :
        {std::pair{ROCJITSU_CODE_ARCH_CDNA5, EF_AMDGPU_MACH_AMDGCN_GFX1250},
         std::pair{ROCJITSU_CODE_ARCH_RDNA4, EF_AMDGPU_MACH_AMDGCN_GFX1201}}) {
-    for (unsigned kind = 0; kind < 4; ++kind) {
+    for (unsigned kind = 0; kind < 6; ++kind) {
       for (bool wait : {false, true}) {
         SCOPED_TRACE(testing::Message() << machine << '/' << kind << '/' << wait);
         std::vector<uint32_t> program;
@@ -8274,8 +8315,16 @@ TEST(WaitcheckTest, Gfx12NullifiedVmemStillOccupiesAnOlderLoadsCounterPosition) 
           append_inst(program, global_load_b32(16, 8));
         } else if (kind == 2) {
           append_inst(program, global_atomic_add_u32(16, 8, 124, true));
-        } else {
+        } else if (kind == 3) {
           append_inst(program, buffer_atomic_add_u32(16));
+        } else if (kind == 4) {
+          append_inst(program, rdna4::build_vglobal(
+                                   rdna4::kGlobalLoadD16B16Vglobal,
+                                   {.vdst = 16, .vaddr = 8}));
+        } else {
+          append_inst(program, rdna4::build_vscratch(
+                                   rdna4::kScratchLoadD16B16Vscratch,
+                                   {.vdst = 16, .sve = 1, .vaddr = 8}));
         }
         if (wait)
           append_inst(program, sopp(64, 1));
@@ -8301,7 +8350,7 @@ TEST(WaitcheckTest, Gfx12NullifiedVmemWithoutOlderRequestDoesNotJustifyWait) {
   for (const auto [arch, machine] :
        {std::pair{ROCJITSU_CODE_ARCH_CDNA5, EF_AMDGPU_MACH_AMDGCN_GFX1250},
         std::pair{ROCJITSU_CODE_ARCH_RDNA4, EF_AMDGPU_MACH_AMDGCN_GFX1201}}) {
-    for (unsigned kind = 0; kind < 4; ++kind) {
+    for (unsigned kind = 0; kind < 6; ++kind) {
       SCOPED_TRACE(testing::Message() << machine << '/' << kind);
       std::vector<uint32_t> program;
       if (kind == 1) {
@@ -8317,8 +8366,14 @@ TEST(WaitcheckTest, Gfx12NullifiedVmemWithoutOlderRequestDoesNotJustifyWait) {
         append_inst(program, global_load_b32(16, 8));
       } else if (kind == 2) {
         append_inst(program, global_atomic_add_u32(16, 8, 124, true));
-      } else {
+      } else if (kind == 3) {
         append_inst(program, buffer_atomic_add_u32(16));
+      } else if (kind == 4) {
+        append_inst(program, rdna4::build_vglobal(rdna4::kGlobalLoadD16B16Vglobal,
+                                                 {.vdst = 16, .vaddr = 8}));
+      } else {
+        append_inst(program, rdna4::build_vscratch(rdna4::kScratchLoadD16B16Vscratch,
+                                                  {.vdst = 16, .sve = 1, .vaddr = 8}));
       }
       append_inst(program, sopp(64, 0));
       append_inst(program, s_endpgm());
