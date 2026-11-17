@@ -6,6 +6,13 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ## amd_smi_lib for ROCm 10.3.0
 
+### Added
+
+- **Added AI-NIC in-band CPER support to `amd-smi ras --cper`**.
+  - `amdsmi_get_nic_cper_entries()` retrieves CPER records from AMD Pensando (Ionic) NICs via the pds_core debugfs interface.
+  - `amd-smi ras --cper` now reports AI-NIC errors alongside GPU and fabric entries; use `--nic <bdf|id>` to filter to a specific NIC.
+  - Severity is reported using standard labels (NONFATAL-CORRECTED, FATAL, etc.) with device type shown in a separate `type` column.
+
 ### Changed
 
 - **Repeated `amd-smi` device selections now combine**.  
