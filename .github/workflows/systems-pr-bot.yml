@@ -1,6 +1,7 @@
 name: Systems PR Bot
 
-on:
+# Checks out the PR base commit only; PR head code is never executed.
+on: # zizmor: ignore[dangerous-triggers]
   workflow_dispatch:
   # SECURITY: pull_request_target runs in the BASE-repo context, so secrets and
   # a write token are available even for PRs opened from FORKS.
@@ -70,6 +71,10 @@ jobs:
         with:
           app-id: ${{ secrets.THEROCK_PR_BOT_APPID }}
           private-key: ${{ secrets.THEROCK_PRBOT_KEY }}
+          permission-contents: read
+          permission-pull-requests: write
+          permission-issues: write
+          permission-checks: read
 
       # SECURITY: only fixed, trusted dependencies — never installed from the PR.
       - name: Install deps

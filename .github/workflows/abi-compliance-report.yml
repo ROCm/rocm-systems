@@ -1,6 +1,8 @@
 name: ABI Compliance Report
 
-on:
+# Labels PRs through the API only; the downloaded outcome strings are matched
+# against fixed values and never executed.
+on: # zizmor: ignore[dangerous-triggers]
   workflow_run:
     workflows: ["ABI Compliance Check"]
     types:
