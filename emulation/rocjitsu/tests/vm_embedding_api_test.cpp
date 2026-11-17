@@ -20,6 +20,7 @@ RJ_DIAGNOSTIC_POP
 
 #include <array>
 #include <atomic>
+#include <barrier>
 #include <csignal>
 #include <cstddef>
 #include <cstring>
@@ -307,6 +308,53 @@ void exercise_lifecycle(Lifecycle lifecycle) {
         dlopen(RJ_VM_API_LIBRARY, RTLD_NOW | RTLD_LOCAL | RTLD_NOLOAD), dlclose);
     EXPECT_EQ(retained, nullptr) << "library retained after VM and worker teardown";
     ASSERT_NO_FATAL_FAILURE(check_actions());
+  }
+}
+
+TEST(VmEmbeddingApi, ConcurrentLocalCreationInitializesIndependentVms) {
+  const size_t initial_leases = keeper_lease_count();
+  for (unsigned cycle = 0; cycle < 2; ++cycle) {
+    SCOPED_TRACE(cycle);
+    std::unique_ptr<void, int (*)(void *)> library(dlopen(RJ_VM_API_LIBRARY, RTLD_NOW | RTLD_LOCAL),
+                                                   dlclose);
+    ASSERT_NE(library, nullptr) << dlerror();
+    const auto create = load_function<decltype(&rj_vm_create_from_string)>(
+        library.get(), "rj_vm_create_from_string");
+    const auto destroy =
+        load_function<decltype(&rj_vm_destroy_checked)>(library.get(), "rj_vm_destroy_checked");
+    ASSERT_FALSE(::testing::Test::HasFailure());
+    std::array<rj_vm_t *, 2> vms{};
+    std::array<rj_status_t, 2> statuses{};
+    std::array<std::jthread, 2> creators;
+    std::barrier start(static_cast<std::ptrdiff_t>(creators.size()));
+    for (size_t index = 0; index < creators.size(); ++index) {
+      creators[index] = std::jthread([&, index] {
+        start.arrive_and_wait();
+        statuses[index] = create(kConfig, RJ_VM_MODE_LOCAL, &vms[index]);
+      });
+    }
+    for (auto &creator : creators)
+      creator.join();
+    bool destroyed = true;
+    for (size_t index = 0; index < vms.size(); ++index) {
+      EXPECT_EQ(statuses[index], ROCJITSU_STATUS_SUCCESS);
+      EXPECT_NE(vms[index], nullptr);
+      if (vms[index]) {
+        const auto status = destroy(vms[index]);
+        EXPECT_EQ(status, ROCJITSU_STATUS_SUCCESS);
+        destroyed &= status == ROCJITSU_STATUS_SUCCESS;
+      }
+    }
+    // A failed checked destroy retains the VM; its code must remain mapped.
+    if (!destroyed) {
+      (void)library.release();
+      return;
+    }
+    EXPECT_EQ(dlclose(library.release()), 0);
+    EXPECT_EQ(keeper_lease_count(), initial_leases);
+    std::unique_ptr<void, int (*)(void *)> retained(
+        dlopen(RJ_VM_API_LIBRARY, RTLD_NOW | RTLD_LOCAL | RTLD_NOLOAD), dlclose);
+    EXPECT_EQ(retained, nullptr);
   }
 }
 

@@ -31,7 +31,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     )
     target_link_libraries(
         libc_passthrough_test
-        PRIVATE GTest::gtest_main ${CMAKE_DL_LIBS}
+        PRIVATE GTest::gtest_main Threads::Threads ${CMAKE_DL_LIBS}
     )
     target_link_options(libc_passthrough_test PRIVATE "-Wl,--wrap=dlsym")
     rj_configure_target(libc_passthrough_test WARNINGS)
