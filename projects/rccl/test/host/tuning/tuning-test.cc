@@ -807,7 +807,7 @@ TEST_F(TuningMicrotest, PluginTableOmitsNanAndLeavesItsTime) {
                     });
   ScopedHook channels(g_tuningGetChannels, ChannelsReturning());
 
-  ASSERT_EQ(ncclSuccess, TuningMicroCompute(&input, &result));
+  ASSERT_EQ(ncclSuccess, ncclTuningCompute(&input, &result));
   EXPECT_EQ(1, plugin.calls);
   EXPECT_EQ(ringNan, result.id);
   EXPECT_FLOAT_EQ(4.0f, result.timeUs);

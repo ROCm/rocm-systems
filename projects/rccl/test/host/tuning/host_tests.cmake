@@ -50,6 +50,7 @@ rccl_add_tuning_micro_binary(rccl-UnitTestsMicroTuningCostModel cost-model-test.
     fakes/collectives_fakes.cc  # ncclAlgoStr, ncclProtoStr
     fakes/env_fakes.cc
     fakes/nccl_fakes.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc  # IsArchMatch, via rcclNanProtoAutoTuned
     ${RCCL_HOST_HIPIFY_DIR}/src/tuning/tuning_general.cc)
 
 # tuning_general.cc sizes blocks through the real rcclOptThreadBlockSize, so this binary links rccl_wrap.cc through

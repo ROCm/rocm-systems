@@ -188,6 +188,7 @@ rccl_add_enqueue_micro_binary(rccl-UnitTestsMicroEnqueueTaskPrepTaskPretuning ta
   SOURCES
     fakes/allocator_fakes.cc
     fakes/ce_fakes.cc
+    fakes/collconfig_fakes.cc  # ncclCollConfigGetAlgMask
     fakes/comm_fakes.cc
     fakes/dev_runtime_fakes.cc
     fakes/enqueue_fakes.cc
@@ -206,6 +207,7 @@ rccl_add_enqueue_micro_binary(rccl-UnitTestsMicroEnqueueTaskPrepTaskPretuning ta
     fakes/sym_kernels_fakes.cc
     fakes/transport_stubs.cc
     fakes/tuning_fakes.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc  # IsArchMatch, via rcclNanProtoAutoTuned
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc)
 
 rccl_add_enqueue_micro_binary(rccl-UnitTestsMicroEnqueueTaskPrepTaskPosttuning task_prep/task-posttuning-test.cc
