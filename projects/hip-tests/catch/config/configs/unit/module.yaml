@@ -393,3 +393,12 @@ module:
   Unit_CodeObjectMetadata_ModuleApi:
     <<: *level_default
     tags: [load]
+  Unit_CodeObjectMetadata_MultiAsic:
+    <<: *level_default
+    tags: [load]
+  Unit_CodeObjectMetadata_EmbeddedFatBinary:
+    <<: *level_default
+    tags: [load]
+  Unit_CodeObjectMetadata_EmbeddedCompressedFatBinary:
+    <<: *level_default
+    tags: [load]

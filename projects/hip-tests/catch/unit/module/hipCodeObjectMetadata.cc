@@ -12,6 +12,7 @@
 #include <cstring>
 #include <fstream>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -140,27 +141,51 @@ std::string PerTargetFile(const std::string& prefix) {
     const std::string file = prefix + "-" + DeviceTag(features) + ".co";
     if (std::ifstream(file).good()) return file;
   }
+#if defined(CO_MD_TARGETS)
+  // Built for this device (OFFLOAD_ARCH_LIST): the file must be there
+  const std::string built = CO_MD_TARGETS;
+  for (bool features : {true, false}) {
+    if (built.find(" " + DeviceTag(features) + " ") != std::string::npos) {
+      FAIL(prefix << "-" << DeviceTag(features) << ".co was built for this device but is missing");
+    }
+  }
+#endif
   return std::string();
+}
+
+//! hipMalloc'd memory, freed on every exit: HIP_CHECK and REQUIRE throw
+template <typename T> std::unique_ptr<T, hipError_t (*)(void*)> DeviceAlloc(size_t bytes) {
+  T* ptr = nullptr;
+  HIP_CHECK(hipMalloc(&ptr, bytes));
+  return std::unique_ptr<T, hipError_t (*)(void*)>(ptr, hipFree);
 }
 
 #if !defined(_WIN32)
 //! Runs @p fn and returns what it wrote to stdout
 std::string CaptureStdout(const std::function<void()>& fn) {
   fflush(stdout);
-  const int saved = dup(STDOUT_FILENO);
-  FILE* capture = tmpfile();
+  std::unique_ptr<FILE, int (*)(FILE*)> capture(tmpfile(), fclose);
   REQUIRE(capture != nullptr);
-  dup2(fileno(capture), STDOUT_FILENO);
-  fn();
-  fflush(stdout);
-  dup2(saved, STDOUT_FILENO);
-  close(saved);
+  // fn's HIP_CHECKs throw on failure: restore stdout on every exit, or Catch2's own report
+  // goes to the capture file
+  struct RestoreStdout {
+    int saved = dup(STDOUT_FILENO);
+    ~RestoreStdout() {
+      fflush(stdout);
+      dup2(saved, STDOUT_FILENO);
+      close(saved);
+    }
+  };
+  {
+    RestoreStdout restore;
+    dup2(fileno(capture.get()), STDOUT_FILENO);
+    fn();
+  }
   std::string text;
-  rewind(capture);
+  rewind(capture.get());
   char buffer[256];
   size_t n = 0;
-  while ((n = fread(buffer, 1, sizeof(buffer), capture)) > 0) text.append(buffer, n);
-  fclose(capture);
+  while ((n = fread(buffer, 1, sizeof(buffer), capture.get())) > 0) text.append(buffer, n);
   return text;
 }
 #endif
@@ -168,15 +193,14 @@ std::string CaptureStdout(const std::function<void()>& fn) {
 //! Runs target_id: the target the loaded code object was built for, e.g. "gfx11-generic"
 std::string LoadedTarget(const Library& library) {
   constexpr size_t kSize = 64;
-  char* out = nullptr;
-  HIP_CHECK(hipMalloc(&out, kSize));
+  const auto buffer = DeviceAlloc<char>(kSize);
+  char* out = buffer.get();
   HIP_CHECK(hipMemset(out, 0, kSize));
   void* args[] = {&out};
   HIP_CHECK(hipModuleLaunchKernel(library.function("target_id"), 1, 1, 1, 1, 1, 1, 0, nullptr,
                                   args, nullptr));
   char host[kSize] = {};
   HIP_CHECK(hipMemcpy(host, out, kSize, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipFree(out));
   host[kSize - 1] = '\0';
   return host;
 }
@@ -206,8 +230,8 @@ void CheckMetadataKernels(const Library& library) {
   CHECK(Attribute(library.function("no_args"), HIP_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES) == 0);
 
   // The arguments as the kernel receives them
-  long long* out = nullptr;
-  HIP_CHECK(hipMalloc(&out, 9 * sizeof(long long)));
+  const auto buffer = DeviceAlloc<long long>(9 * sizeof(long long));
+  long long* out = buffer.get();
   HIP_CHECK(hipMemset(out, 0, 9 * sizeof(long long)));
   char c = -7;
   short s = 1234;
@@ -222,7 +246,6 @@ void CheckMetadataKernels(const Library& library) {
                                   args, nullptr));
   long long host[9] = {};
   HIP_CHECK(hipMemcpy(host, out, sizeof(host), hipMemcpyDeviceToHost));
-  HIP_CHECK(hipFree(out));
   const long long want[9] = {-7, 1234, -123456, 0x123456789abcll, 1500, -2250, 42, 'x', 321};
   for (int k = 0; k < 9; ++k) {
     INFO("argument " << k);
@@ -272,11 +295,15 @@ HIP_TEST_CASE(Unit_CodeObjectMetadata_FatBinary) {
  *   selected. Skipped on devices that have none.
  */
 HIP_TEST_CASE(Unit_CodeObjectMetadata_GenericTarget) {
-  Library library("codeObjectMetadataGeneric.code", false);
-  if (library.status() == hipErrorNoBinaryForGpu) {
+  // Decided from the device, not from the load: hipLibraryLoadFromFile reads the file only on
+  // the first query, and a device that has a generic target must load it
+  int device = 0;
+  HIP_CHECK(hipGetDevice(&device));
+  if (!isGenericTargetSupported(nullptr, device)) {
     HIP_SKIP_TEST("The device has no generic target");
     return;
   }
+  Library library("codeObjectMetadataGeneric.code", false);
   HIP_CHECK(library.status());
   CheckMetadataKernels(library);
   CHECK(LoadedTarget(library).find("-generic") != std::string::npos);
@@ -297,6 +324,28 @@ HIP_TEST_CASE(Unit_CodeObjectMetadata_NativeBeforeGeneric) {
     const std::string target = LoadedTarget(library);
     INFO("loaded " << target);
     CHECK(target.find("-generic") == std::string::npos);
+    CHECK(target.substr(0, target.find(':')) == DeviceTag(false));
+  }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - Fat binaries built for many processors (feature variants included) and the generic targets
+ *   besides the device's own, uncompressed and compressed: the runtime loads the device's native
+ *   entry, from a file and from memory, and reads its metadata.
+ */
+HIP_TEST_CASE(Unit_CodeObjectMetadata_MultiAsic) {
+  const char* file = nullptr;
+  SECTION("uncompressed") { file = "codeObjectMetadataMultiAsic.code"; }
+  SECTION("compressed") { file = "codeObjectMetadataMultiAsicCompressed.code"; }
+  for (bool fromMemory : {false, true}) {
+    INFO(file << (fromMemory ? " from memory" : " from file"));
+    Library library(file, fromMemory);
+    HIP_CHECK(library.status());
+    CheckMetadataKernels(library);
+    const std::string target = LoadedTarget(library);
+    INFO("loaded " << target);
     CHECK(target.substr(0, target.find(':')) == DeviceTag(false));
   }
 }
@@ -340,8 +389,8 @@ HIP_TEST_CASE(Unit_CodeObjectMetadata_MultipleNotes) {
   CHECK(Params(library.kernel("note_b")) ==
         std::vector<std::pair<size_t, size_t>>{{0, 8}, {8, 4}});
 
-  int* out = nullptr;
-  HIP_CHECK(hipMalloc(&out, 2 * sizeof(int)));
+  const auto buffer = DeviceAlloc<int>(2 * sizeof(int));
+  int* out = buffer.get();
   int* outB = out + 1;
   int v = 21;
   void* argsA[] = {&out};
@@ -352,7 +401,6 @@ HIP_TEST_CASE(Unit_CodeObjectMetadata_MultipleNotes) {
                                   nullptr));
   int host[2] = {};
   HIP_CHECK(hipMemcpy(host, out, sizeof(host), hipMemcpyDeviceToHost));
-  HIP_CHECK(hipFree(out));
   CHECK(host[0] == 11);
   CHECK(host[1] == 42);
 }
@@ -374,13 +422,16 @@ HIP_TEST_CASE(Unit_CodeObjectMetadata_UnknownCompressedVersion) {
   hipModule_t module = nullptr;
   HIP_CHECK_ERROR(hipModuleLoadData(&module, image.data()), hipErrorInvalidImage);
 
-  const char* file = "codeObjectMetadataVersion4.code";
+  // Removed on every exit: HIP_CHECK_ERROR throws
+  struct TempFile {
+    const char* name = "codeObjectMetadataVersion4.code";
+    ~TempFile() { std::remove(name); }
+  } file;
   {
-    std::ofstream out(file, std::ios::binary);
+    std::ofstream out(file.name, std::ios::binary);
     out.write(image.data(), static_cast<std::streamsize>(image.size()));
   }
-  HIP_CHECK_ERROR(hipModuleLoad(&module, file), hipErrorInvalidImage);
-  std::remove(file);
+  HIP_CHECK_ERROR(hipModuleLoad(&module, file.name), hipErrorInvalidImage);
 }
 
 /**
@@ -398,13 +449,12 @@ HIP_TEST_CASE(Unit_CodeObjectMetadata_ModuleApi) {
   CHECK(Attribute(shared, HIP_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES) == 1024);
   CHECK(Attribute(shared, HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK) == 128);
 
-  int* out = nullptr;
-  HIP_CHECK(hipMalloc(&out, 128 * sizeof(int)));
+  const auto buffer = DeviceAlloc<int>(128 * sizeof(int));
+  int* out = buffer.get();
   void* args[] = {&out};
   HIP_CHECK(hipModuleLaunchKernel(shared, 1, 1, 1, 128, 1, 1, 0, nullptr, args, nullptr));
   std::vector<int> host(128);
   HIP_CHECK(hipMemcpy(host.data(), out, 128 * sizeof(int), hipMemcpyDeviceToHost));
-  HIP_CHECK(hipFree(out));
   for (int t = 0; t < 128; ++t) {
     INFO("thread " << t);
     CHECK(host[t] == 127 - t + 1);
