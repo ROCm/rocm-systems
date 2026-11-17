@@ -42,6 +42,8 @@ using Blob = std::shared_ptr<std::vector<uint8_t>>;
 constexpr size_t kAmdTablePrefixBytes =
     offsetof(AmdExtTable, hsa_amd_external_semaphore_handle_close_fn) +
     sizeof(AmdExtTable::hsa_amd_external_semaphore_handle_close_fn);
+constexpr size_t kNativeQueueTableBytes =
+    offsetof(AmdExtTable, hsa_amd_queue_create_fn) + sizeof(AmdExtTable::hsa_amd_queue_create_fn);
 
 // A ROCR-tool diagnostic must survive log-groups-OFF and initialization failures.
 void diagnostic(std::string_view message) {
@@ -84,7 +86,9 @@ struct Module {
   hsa_agent_t agent{};
   LoadedArtifact artifact;
   std::shared_ptr<const ImageFacts> facts;
+  std::shared_ptr<const LoadedNativeImage> native_image;
   std::vector<EntryBinding> entries;
+  bool closing = false;
 };
 
 // Persistent backing capacity, not a launch's effective report length. A lease
@@ -108,21 +112,76 @@ struct Launch {
   // Protected by Runtime::mutex_. Admission can observe GPU completion while
   // the observer still owns a wait on the application's original signal.
   bool native_completion_visible = false;
+  bool application_native = false;
+  uint64_t sequence = 0;
+  hsa_queue_t *queue = nullptr;
   std::shared_ptr<const Module> module;
   std::unique_ptr<DispatchLifecycle> lifecycle;
+};
+
+class Runtime;
+struct QueueState {
+  Runtime *owner = nullptr;
+  hsa_queue_t *queue = nullptr;
+  hsa_agent_t agent = {};
+  uint32_t maximum_workgroup = 0;
+  std::array<uint16_t, 3> maximum_dimensions = {};
+  bool closing = false;
 };
 
 class Runtime {
 public:
   Runtime(const CoreApiTable &core, const AmdExtTable &amd, const char *artifacts,
-          const char *capture, const Digest &expected_profile)
+          const char *capture, const Digest &expected_profile, bool application_profile,
+          std::vector<std::shared_ptr<const LoadedNativeImage>> native_images)
       : core_(core), amd_{}, artifact_path_(artifacts), capture_path_(capture),
-        expected_profile_(expected_profile) {
-    std::memcpy(&amd_, &amd, kAmdTablePrefixBytes);
+        expected_profile_(expected_profile), application_profile_(application_profile),
+        native_images_(std::move(native_images)) {
+    std::memcpy(&amd_, &amd, std::min(sizeof(amd_), size_t{amd.version.minor_id}));
   }
 
   const CoreApiTable &core() const { return core_; }
   const AmdExtTable &amd() const { return amd_; }
+  bool application_profile() const { return application_profile_; }
+
+  void begin_shutdown() {
+    std::lock_guard lock(mutex_);
+    ++shutdown_calls_;
+  }
+
+  bool end_shutdown() {
+    std::lock_guard lock(mutex_);
+    --shutdown_calls_;
+    return shutdown_calls_ == 0 && unload_seen_;
+  }
+
+  bool defer_unload() {
+    std::lock_guard lock(mutex_);
+    unload_seen_ = true;
+    return shutdown_calls_ != 0;
+  }
+
+  hsa_status_t profiling(hsa_queue_t *queue, int enabled) {
+    if (!application_profile_) {
+      if (enabled != 0)
+        diagnostic("ConSan MVP requires profiling disabled");
+      return enabled == 0 ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+    {
+      std::lock_guard lock(mutex_);
+      if (closed_ ||
+          !std::ranges::any_of(queues_, [queue](const std::unique_ptr<QueueState> &state) {
+            return state->queue == queue && !state->closing;
+          }))
+        return HSA_STATUS_ERROR_INVALID_QUEUE;
+    }
+    return amd_.hsa_amd_profiling_set_profiler_enabled_fn(queue, enabled);
+  }
+
+  bool queue_cleanup_failed() {
+    std::lock_guard lock(mutex_);
+    return queue_cleanup_failed_;
+  }
 
   hsa_status_t reader_memory(const void *bytes, size_t size, hsa_code_object_reader_t *reader) {
     if (bytes == nullptr || reader == nullptr || size == 0 || size > ContractLimits{}.image_bytes) {
@@ -181,7 +240,8 @@ public:
     {
       std::lock_guard lock(mutex_);
       const std::unordered_map<uint64_t, Blob>::iterator found = readers_.find(reader.handle);
-      if (closed_ || status_ != RuntimeStatus::Success || module_ever_ || loading_ ||
+      if (closed_ || status_ != RuntimeStatus::Success || (!application_profile_ && module_ever_) ||
+          loading_ || find_module_locked(executable) != nullptr || native_modules_.size() >= 16 ||
           found == readers_.end()) {
         return reject_locked("load requires a tracked original reader and one admitted module");
       }
@@ -191,20 +251,45 @@ public:
     auto module = std::make_shared<Module>();
     util::StringDiagnostic artifact_diagnostic;
     const std::string target = agent_target(agent);
-    FailureOr<LoadedArtifact> artifact = load_artifact(
-        artifact_path_, *original, target, expected_profile_, artifact_diagnostic.emitter());
-    if (artifact.failed()) {
-      std::lock_guard lock(mutex_);
-      loading_ = false;
-      return reject_locked(artifact_diagnostic.message());
+    const Digest original_digest = digest(*original);
+    for (const std::shared_ptr<const LoadedNativeImage> &native : native_images_) {
+      if (native->inventory.identity.sha256 == original_digest && native->original == *original) {
+        module->native_image = native;
+        break;
+      }
     }
-    module->artifact = std::move(artifact.value());
-    module->facts = std::make_shared<const ImageFacts>(std::move(module->artifact.facts));
+    if (module->native_image) {
+      const TargetProfile *profile = target_profile(target);
+      if (profile == nullptr || profile->id != module->native_image->inventory.target) {
+        std::lock_guard lock(mutex_);
+        loading_ = false;
+        return reject_locked("known native image does not match the actual GPU agent");
+      }
+    } else {
+      {
+        std::lock_guard lock(mutex_);
+        if (module_ever_ || artifact_path_.empty()) {
+          loading_ = false;
+          return reject_locked("image is not an allowed native image or the single selected image");
+        }
+      }
+      FailureOr<LoadedArtifact> artifact = load_artifact(
+          artifact_path_, *original, target, expected_profile_, artifact_diagnostic.emitter());
+      if (artifact.failed()) {
+        std::lock_guard lock(mutex_);
+        loading_ = false;
+        return reject_locked(artifact_diagnostic.message());
+      }
+      module->artifact = std::move(artifact.value());
+      module->facts = std::make_shared<const ImageFacts>(std::move(module->artifact.facts));
+    }
     module->executable = executable;
     module->agent = agent;
     hsa_code_object_reader_t prepared{};
-    hsa_status_t status = core_.hsa_code_object_reader_create_from_memory_fn(
-        module->artifact.prepared.data(), module->artifact.prepared.size(), &prepared);
+    const std::vector<uint8_t> &image =
+        module->native_image ? module->native_image->original : module->artifact.prepared;
+    hsa_status_t status =
+        core_.hsa_code_object_reader_create_from_memory_fn(image.data(), image.size(), &prepared);
     if (status == HSA_STATUS_SUCCESS) {
       status = core_.hsa_executable_load_agent_code_object_fn(executable, agent, prepared, options,
                                                               loaded);
@@ -217,8 +302,12 @@ public:
     loading_ = false;
     // Keep prepared storage through executable destruction even when loader
     // failure has partially installed state in the application's executable.
-    module_ = std::move(module);
-    module_ever_ = true;
+    if (module->native_image)
+      native_modules_.push_back(std::move(module));
+    else {
+      module_ = std::move(module);
+      module_ever_ = true;
+    }
     if (status != HSA_STATUS_SUCCESS) {
       fail_locked(RuntimeStatus::InvalidFacts, "HSA refused the matched prepared image");
     }
@@ -229,11 +318,10 @@ public:
     std::shared_ptr<Module> module;
     {
       std::lock_guard lock(mutex_);
-      if (!module_ || module_->executable.handle != executable.handle || closed_ ||
-          status_ != RuntimeStatus::Success) {
+      module = find_module_locked(executable);
+      if (!module || closed_ || status_ != RuntimeStatus::Success) {
         return reject_locked("freeze has no active admitted ConSan module");
       }
-      module = module_;
     }
     // HSA may retain or partially freeze the prepared storage even on failure.
     // The local lease pins it while external HSA work runs without our mutex.
@@ -250,7 +338,9 @@ public:
     std::set<uint64_t> objects;
     std::set<uint64_t> symbols;
     bool valid = true;
-    for (const ImageEntryFacts &entry : module->facts->entries) {
+    const std::vector<ImageEntryFacts> &inventory =
+        module->facts ? module->facts->entries : module->native_image->inventory.entries;
+    for (const ImageEntryFacts &entry : inventory) {
       EntryBinding binding = {.key = entry.key,
                               .disposition = entry.disposition,
                               .binding = entry.binding,
@@ -310,13 +400,19 @@ public:
     }
     std::lock_guard lock(mutex_);
     // Queries call external HSA functions, so lifetime admission is rechecked.
-    if (closed_ || status_ != RuntimeStatus::Success || module_ != module) {
+    if (closed_ || status_ != RuntimeStatus::Success || find_module_locked(executable) != module)
       return reject_locked("freeze admission ended during HSA symbol queries");
-    }
-    if (!valid || bindings.size() != module->facts->entries.size()) {
+    if (!valid || bindings.size() != inventory.size())
       return reject_locked("loaded HSA symbols/resources do not match complete image facts");
-    }
-    if (!started_ && !start_locked(*module->facts)) {
+    const auto collides = [&](const std::shared_ptr<Module> &other) {
+      return other != module && std::ranges::any_of(other->entries, [&](const EntryBinding &entry) {
+               return objects.contains(entry.kernel_object) ||
+                      symbols.contains(entry.symbol.handle);
+             });
+    };
+    if ((module_ && collides(module_)) || std::ranges::any_of(native_modules_, collides))
+      return reject_locked("loaded entry identity collides with another admitted module");
+    if (module->facts && !started_ && !start_locked(*module->facts)) {
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
     }
     module->entries = std::move(bindings);
@@ -355,7 +451,19 @@ public:
 
   hsa_status_t executable_destroy(hsa_executable_t executable) {
     {
-      std::lock_guard lock(mutex_);
+      std::unique_lock lock(mutex_);
+      if (application_profile_) {
+        const std::shared_ptr<Module> module = find_module_locked(executable);
+        if (module) {
+          module->closing = true;
+          if (!condition_.wait_for(lock, std::chrono::seconds(30), [&] {
+                return !std::ranges::any_of(pending_, [&](const std::shared_ptr<Launch> &launch) {
+                  return launch->module == module;
+                });
+              }))
+            return HSA_STATUS_ERROR_INVALID_EXECUTABLE;
+        }
+      }
       if (module_ && module_->executable.handle == executable.handle && active_gpu_) {
         return HSA_STATUS_ERROR_INVALID_EXECUTABLE;
       }
@@ -366,6 +474,9 @@ public:
       if (module_ && module_->executable.handle == executable.handle) {
         module_.reset();
       }
+      std::erase_if(native_modules_, [executable](const std::shared_ptr<Module> &module) {
+        return module->executable.handle == executable.handle;
+      });
     }
     return status;
   }
@@ -375,51 +486,161 @@ public:
                             uint32_t private_bytes, uint32_t group, hsa_queue_t **queue) {
     {
       std::lock_guard lock(mutex_);
-      if (!started_ || closed_ || queue_ever_ || !module_ ||
-          agent.handle != module_->agent.handle) {
+      if (closed_ || status_ != RuntimeStatus::Success ||
+          (!application_profile_ &&
+           (!started_ || queue_ever_ || !module_ || agent.handle != module_->agent.handle)) ||
+          queues_.size() + queue_creations_ >= 16) {
         return reject_locked("MVP requires one queue created after the prepared module is frozen");
       }
       queue_ever_ = true;
+      ++queue_creations_;
+    }
+    std::unique_ptr<QueueState> context =
+        std::make_unique<QueueState>(QueueState{.owner = this, .agent = agent});
+    if (application_profile_ &&
+        (core_.hsa_agent_get_info_fn(agent, HSA_AGENT_INFO_WORKGROUP_MAX_SIZE,
+                                     &context->maximum_workgroup) != HSA_STATUS_SUCCESS ||
+         core_.hsa_agent_get_info_fn(agent, HSA_AGENT_INFO_WORKGROUP_MAX_DIM,
+                                     context->maximum_dimensions.data()) != HSA_STATUS_SUCCESS)) {
+      std::lock_guard lock(mutex_);
+      --queue_creations_;
+      condition_.notify_all();
+      return reject_locked("cannot query native queue hardware workgroup limits");
     }
     hsa_status_t status = amd_.hsa_amd_queue_intercept_create_fn(agent, size, type, callback, data,
                                                                  private_bytes, group, queue);
     if (status != HSA_STATUS_SUCCESS) {
+      std::lock_guard lock(mutex_);
+      --queue_creations_;
+      condition_.notify_all();
       return status;
     }
+    context->queue = *queue;
     status = amd_.hsa_amd_queue_intercept_register_fn(
         *queue,
         [](const void *packets, uint64_t count, uint64_t, void *context,
            hsa_amd_queue_intercept_packet_writer writer) noexcept {
-          auto *runtime = static_cast<Runtime *>(context);
-          runtime->intercept(packets, count, writer);
+          QueueState *binding = static_cast<QueueState *>(context);
+          binding->owner->intercept(*binding, packets, count, writer);
         },
-        this);
-    if (status == HSA_STATUS_SUCCESS) {
+        context.get());
+    if (status == HSA_STATUS_SUCCESS && !application_profile_)
       status = amd_.hsa_amd_profiling_set_profiler_enabled_fn(*queue, 0);
+    if (status == HSA_STATUS_SUCCESS) {
+      std::lock_guard lock(mutex_);
+      if (!closed_) {
+        --queue_creations_;
+        queues_.push_back(std::move(context));
+        condition_.notify_all();
+        return HSA_STATUS_SUCCESS;
+      }
+      status = HSA_STATUS_ERROR_INVALID_QUEUE_CREATION;
     }
     if (status != HSA_STATUS_SUCCESS) {
-      (void)core_.hsa_queue_destroy_fn(*queue);
+      const hsa_status_t destroyed = core_.hsa_queue_destroy_fn(*queue);
+      std::lock_guard lock(mutex_);
+      --queue_creations_;
+      if (destroyed != HSA_STATUS_SUCCESS) {
+        queue_cleanup_failed_ = true;
+        queues_.push_back(std::move(context));
+        fail_locked(RuntimeStatus::InvalidTransition,
+                    "failed to destroy a partially registered queue");
+      }
       *queue = nullptr;
+      condition_.notify_all();
       return status;
     }
-    std::lock_guard lock(mutex_);
-    queue_ = *queue;
-    return HSA_STATUS_SUCCESS;
+    return status;
+  }
+
+  hsa_status_t native_queue_create(hsa_agent_t agent, hsa_amd_queue_create_desc_t *descs,
+                                   uint32_t count) {
+    {
+      std::lock_guard lock(mutex_);
+      if (closed_)
+        return HSA_STATUS_ERROR_INVALID_QUEUE_CREATION;
+      ++queue_creations_;
+    }
+    const auto release = [this](Runtime *) {
+      std::lock_guard lock(mutex_);
+      --queue_creations_;
+      condition_.notify_all();
+    };
+    std::unique_ptr<Runtime, decltype(release)> reservation(this, release);
+    const hsa_status_t original = amd_.hsa_amd_queue_create_fn(agent, descs, count);
+    if (descs == nullptr)
+      return original;
+    hsa_status_t first_error = HSA_STATUS_SUCCESS;
+    for (uint32_t index = 0; index < count; ++index) {
+      hsa_amd_queue_create_desc_t &desc = descs[index];
+      hsa_queue_t *plain = desc.queue;
+      if (plain == nullptr)
+        continue;
+      hsa_status_t status = HSA_STATUS_ERROR_INVALID_QUEUE_CREATION;
+      hsa_queue_t *replacement = nullptr;
+      if (desc.engine_type == HSA_AMD_QUEUE_ENGINE_COMPUTE && desc.flags == 0) {
+        const hsa_amd_compute_queue_params_t &compute = desc.engine.compute;
+        status = queue_create(agent, desc.queue_size_bytes / sizeof(hsa_kernel_dispatch_packet_t),
+                              compute.type, desc.callback, desc.callback_data,
+                              compute.private_segment_size, UINT32_MAX, &replacement);
+        if (status == HSA_STATUS_SUCCESS && desc.priority != HSA_AMD_QUEUE_PRIORITY_NORMAL)
+          status = amd_.hsa_amd_queue_set_priority_fn != nullptr
+                       ? amd_.hsa_amd_queue_set_priority_fn(replacement, desc.priority)
+                       : HSA_STATUS_ERROR_INVALID_QUEUE_CREATION;
+        if (status == HSA_STATUS_SUCCESS && compute.cu_mask_count != 0)
+          status = amd_.hsa_amd_queue_cu_set_mask_fn != nullptr
+                       ? amd_.hsa_amd_queue_cu_set_mask_fn(replacement, compute.cu_mask_count,
+                                                           compute.cu_mask)
+                       : HSA_STATUS_ERROR_INVALID_QUEUE_CREATION;
+      }
+      const hsa_status_t destroyed = core_.hsa_queue_destroy_fn(plain);
+      if (destroyed != HSA_STATUS_SUCCESS) {
+        std::lock_guard lock(mutex_);
+        queue_cleanup_failed_ = true;
+        fail_locked(RuntimeStatus::InvalidTransition, "failed to retire an original native queue");
+        if (status == HSA_STATUS_SUCCESS)
+          status = destroyed;
+      }
+      if (status == HSA_STATUS_SUCCESS) {
+        desc.queue = replacement;
+      } else {
+        if (replacement != nullptr)
+          (void)queue_destroy(replacement);
+        desc.queue = nullptr;
+        if (first_error == HSA_STATUS_SUCCESS)
+          first_error = status;
+      }
+    }
+    return original != HSA_STATUS_SUCCESS ? original : first_error;
   }
 
   hsa_status_t queue_destroy(hsa_queue_t *queue) {
     {
-      std::lock_guard lock(mutex_);
-      if (queue == queue_ && active_gpu_) {
+      std::unique_lock lock(mutex_);
+      if (application_profile_) {
+        for (const std::unique_ptr<QueueState> &state : queues_)
+          if (state->queue == queue)
+            state->closing = true;
+        if (!condition_.wait_for(lock, std::chrono::seconds(30), [&] {
+              return !std::ranges::any_of(pending_, [queue](const std::shared_ptr<Launch> &launch) {
+                return launch->queue == queue;
+              });
+            }))
+          return HSA_STATUS_ERROR_INVALID_QUEUE;
+      }
+      if (active_gpu_ &&
+          std::ranges::any_of(queues_, [queue](const std::unique_ptr<QueueState> &binding) {
+            return binding->queue == queue;
+          })) {
         return HSA_STATUS_ERROR_INVALID_QUEUE;
       }
     }
     const hsa_status_t status = core_.hsa_queue_destroy_fn(queue);
     if (status == HSA_STATUS_SUCCESS) {
       std::lock_guard lock(mutex_);
-      if (queue_ == queue) {
-        queue_ = nullptr;
-      }
+      std::erase_if(queues_, [queue](const std::unique_ptr<QueueState> &binding) {
+        return binding->queue == queue;
+      });
     }
     return status;
   }
@@ -456,9 +677,13 @@ public:
   int drain() {
     std::unique_lock lock(mutex_);
     const uint64_t target = statistics_.submitted;
-    const uint64_t native_target = statistics_.native_submitted;
+    const uint64_t target_sequence = next_sequence_;
     if (!condition_.wait_for(lock, std::chrono::seconds(30), [&] {
-          return processed_ >= target && statistics_.native_completed >= native_target;
+          return processed_ >= target &&
+                 !std::ranges::any_of(pending_,
+                                      [target_sequence](const std::shared_ptr<Launch> &launch) {
+                                        return launch->sequence <= target_sequence;
+                                      });
         })) {
       fail_locked(RuntimeStatus::PendingCompletion,
                   "drain has no completion/copy proof; GPU resources remain retained");
@@ -472,12 +697,13 @@ public:
     // mutex_, so it remains able to forward completion while finish waits.
     std::lock_guard finishing(finish_mutex_);
     {
-      std::lock_guard lock(mutex_);
+      std::unique_lock lock(mutex_);
       if (finished_) {
         return static_cast<int>(status_);
       }
       closed_ = true;
-      if (!started_) {
+      condition_.wait(lock, [&] { return queue_creations_ == 0 && callbacks_ == 0; });
+      if (!started_ && !workers_started_) {
         if (output_ >= 0) {
           const int closed = ::close(output_);
           output_ = -1;
@@ -491,6 +717,8 @@ public:
         }
         return static_cast<int>(status_);
       }
+      if (!started_ && !artifact_path_.empty())
+        fail_locked(RuntimeStatus::InvalidFacts, "selected artifact never started its capture");
     }
     (void)drain();
     {
@@ -507,7 +735,7 @@ public:
     }
     if (collector_.joinable()) {
       collector_.join();
-    } else {
+    } else if (started_) {
       writer_.cancel(status_);
       (void)writer_.finish();
     }
@@ -558,6 +786,15 @@ public:
   }
 
 private:
+  std::shared_ptr<Module> find_module_locked(hsa_executable_t executable) {
+    if (module_ && module_->executable.handle == executable.handle)
+      return module_;
+    for (const std::shared_ptr<Module> &module : native_modules_)
+      if (module->executable.handle == executable.handle)
+        return module;
+    return nullptr;
+  }
+
   hsa_status_t record_signal(hsa_status_t status, hsa_signal_value_t value,
                              const hsa_signal_t *signal) {
     if (status == HSA_STATUS_SUCCESS) {
@@ -748,9 +985,16 @@ private:
     // Uncaught exceptions terminate the process: merely stopping a worker
     // cannot recover an interrupted ownership handoff. Status failures remain
     // handled by the loops without requiring exception recovery.
-    observer_ = std::thread([this] { observer_loop(); });
+    start_observer_locked();
     collector_ = std::thread([this] { collector_loop(); });
     return true;
+  }
+
+  void start_observer_locked() {
+    if (!workers_started_) {
+      workers_started_ = true;
+      observer_ = std::thread([this] { observer_loop(); });
+    }
   }
 
   void fail_packet_completion_locked(const hsa_kernel_dispatch_packet_t &packet) {
@@ -800,9 +1044,154 @@ private:
     }
   }
 
-  void intercept(const void *packets, uint64_t count,
+  void intercept_application(QueueState &queue, const void *packets, uint64_t count,
+                             hsa_amd_queue_intercept_packet_writer writer) {
+    {
+      std::lock_guard lock(mutex_);
+      ++callbacks_;
+    }
+    const auto leave = [this](Runtime *) {
+      std::lock_guard lock(mutex_);
+      --callbacks_;
+      condition_.notify_all();
+    };
+    std::unique_ptr<Runtime, decltype(leave)> callback(this, leave);
+    if (count > CaptureLimits{}.executions) {
+      std::lock_guard lock(mutex_);
+      fail_locked(RuntimeStatus::InvalidFacts, "application packet batch exceeds admission budget");
+      return;
+    }
+    if (count > 1) {
+      // ROCR can coalesce adjacent packets into one callback. Keep their
+      // publication order and individual ownership; the enclosing callback
+      // remains live through the whole batch for finish's publication fence.
+      const uint8_t *bytes = static_cast<const uint8_t *>(packets);
+      for (uint64_t index = 0; index < count; ++index)
+        intercept_application(queue, bytes + index * sizeof(hsa_kernel_dispatch_packet_t), 1,
+                              writer);
+      return;
+    }
+    hsa_kernel_dispatch_packet_t packet = {};
+    std::memcpy(&packet, packets, sizeof(packet));
+    const uint16_t type = packet.header & 0xff;
+    if (type == HSA_PACKET_TYPE_BARRIER_AND || type == HSA_PACKET_TYPE_BARRIER_OR) {
+      {
+        std::lock_guard lock(mutex_);
+        if (closed_ || queue.closing || status_ != RuntimeStatus::Success) {
+          fail_packet_completion_locked(packet);
+          return;
+        }
+      }
+      writer(packets, 1);
+      return;
+    }
+    hsa_amd_ext_kernel_dispatch_packet_t extended = {};
+    bool is_extended = false;
+    bool valid = type == HSA_PACKET_TYPE_KERNEL_DISPATCH;
+    if (type == HSA_PACKET_TYPE_VENDOR_SPECIFIC) {
+      std::memcpy(&extended, packets, sizeof(extended));
+      is_extended = true;
+      valid =
+          extended.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH && extended.reserved0 == 0;
+      packet.setup = extended.setup;
+      const std::array<uint32_t, 3> clusters = {extended.cluster_count_x, extended.cluster_count_y,
+                                                extended.cluster_count_z};
+      const std::array<uint32_t, 3> sizes = {extended.cluster_size_x, extended.cluster_size_y,
+                                             extended.cluster_size_z};
+      const std::array<uint32_t, 3> workgroup = {packet.workgroup_size_x, packet.workgroup_size_y,
+                                                 packet.workgroup_size_z};
+      std::array<uint32_t, 3> grid = {};
+      for (size_t dimension = 0; dimension < 3; ++dimension) {
+        const uint64_t extent =
+            uint64_t{clusters[dimension]} * sizes[dimension] * workgroup[dimension];
+        if (clusters[dimension] == 0 || sizes[dimension] == 0 || extent > UINT32_MAX)
+          valid = false;
+        grid[dimension] = static_cast<uint32_t>(extent);
+      }
+      packet.grid_size_x = grid[0];
+      packet.grid_size_y = grid[1];
+      packet.grid_size_z = grid[2];
+    }
+    auto launch = std::make_shared<Launch>();
+    {
+      std::lock_guard lock(mutex_);
+      std::shared_ptr<Module> owner;
+      const EntryBinding *binding = nullptr;
+      const auto find = [&](const std::shared_ptr<Module> &module) {
+        if (!module || module->closing || module->agent.handle != queue.agent.handle)
+          return;
+        for (const EntryBinding &entry : module->entries)
+          if (entry.kernel_object == packet.kernel_object) {
+            owner = module;
+            binding = &entry;
+          }
+      };
+      find(module_);
+      for (const std::shared_ptr<Module> &module : native_modules_)
+        find(module);
+      const std::array<uint32_t, 3> workgroup = {packet.workgroup_size_x, packet.workgroup_size_y,
+                                                 packet.workgroup_size_z};
+      const std::array<uint32_t, 3> grid = {packet.grid_size_x, packet.grid_size_y,
+                                            packet.grid_size_z};
+      const uint64_t threads = uint64_t{workgroup[0]} * workgroup[1] * workgroup[2];
+      valid = valid && packet.setup >= 1 && packet.setup <= 3 && threads != 0 &&
+              threads <= queue.maximum_workgroup;
+      for (size_t dimension = 0; dimension < 3; ++dimension)
+        valid = valid && workgroup[dimension] != 0 && grid[dimension] != 0 &&
+                workgroup[dimension] <= queue.maximum_dimensions[dimension] &&
+                (dimension < packet.setup || (workgroup[dimension] == 1 && grid[dimension] == 1));
+      if (!valid || closed_ || queue.closing || status_ != RuntimeStatus::Success ||
+          statistics_.submitted + statistics_.native_submitted >= CaptureLimits{}.executions ||
+          binding == nullptr || binding->disposition != EntryDisposition::Native ||
+          packet.completion_signal.handle != 0) {
+        fail_locked(RuntimeStatus::InvalidFacts, "application native packet violates binding, "
+                                                 "format, geometry or null-completion profile");
+        return;
+      }
+      const EntryFacts &entry = binding->binding;
+      // Native ROCR dispatches can exceed the metadata flat hint (the runtime
+      // helper corpus does so). Preserve that behavior within actual hardware
+      // limits; required shape remains an ABI constraint, not a detector limit.
+      if (packet.private_segment_size != entry.original_private_bytes ||
+          packet.group_segment_size < entry.original_group_bytes ||
+          packet.group_segment_size > 65536 ||
+          (entry.required_workgroup_size[0] != 0 && workgroup != entry.required_workgroup_size) ||
+          (entry.original_kernarg_bytes != 0 && packet.kernarg_address == nullptr) ||
+          reinterpret_cast<uintptr_t>(packet.kernarg_address) % binding->kernarg_alignment != 0) {
+        fail_locked(RuntimeStatus::InvalidFacts, "application native packet violates original ABI");
+        return;
+      }
+      if (core_.hsa_signal_create_fn(1, 0, nullptr, &launch->proxy) != HSA_STATUS_SUCCESS) {
+        fail_locked(RuntimeStatus::InvalidFacts, "application native completion allocation failed");
+        return;
+      }
+      launch->native = launch->application_native = true;
+      launch->module = std::move(owner);
+      launch->queue = queue.queue;
+      launch->sequence = ++next_sequence_;
+      pending_.push_back(launch);
+      ++statistics_.native_submitted;
+      start_observer_locked();
+      condition_.notify_all();
+    }
+    // A null application completion has no owner or timestamp consumer. Replace
+    // only that field, adding completion observation without a dependency edge.
+    if (is_extended) {
+      extended.completion_signal = launch->proxy;
+      writer(&extended, 1);
+    } else {
+      packet.completion_signal = launch->proxy;
+      writer(&packet, 1);
+    }
+  }
+
+  void intercept(QueueState &queue, const void *packets, uint64_t count,
                  hsa_amd_queue_intercept_packet_writer writer) {
     if (packets == nullptr || writer == nullptr || count == 0) {
+      return;
+    }
+    if (application_profile_) {
+      intercept_application(queue, packets, count, writer);
       return;
     }
     hsa_kernel_dispatch_packet_t packet{};
@@ -906,6 +1295,8 @@ private:
           {packet.grid_size_x, packet.grid_size_y, packet.grid_size_z},
           {packet.workgroup_size_x, packet.workgroup_size_y, packet.workgroup_size_z}};
       launch->module = module_;
+      launch->queue = queue.queue;
+      launch->sequence = ++next_sequence_;
       if (binding->disposition == EntryDisposition::Native) {
         const EntryFacts &entry = binding->binding;
         const uint16_t acquire = (packet.header >> HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) & 3;
@@ -997,6 +1388,7 @@ private:
         slot.leased = true;
         if (slot.generation == UINT32_MAX || (reinterpret_cast<uintptr_t>(slot.memory) % 64) != 0 ||
             !allocate_locked(layout.value().wrapper_bytes, &launch->wrapper) ||
+            reinterpret_cast<uintptr_t>(launch->wrapper) % binding->kernarg_alignment != 0 ||
             !allocate_locked(kContextBytes, &launch->context) ||
             core_.hsa_signal_create_fn(1, 0, nullptr, &launch->proxy) != HSA_STATUS_SUCCESS) {
           reject_packet_locked(packet, "wrapper/context/proxy allocation failed before submission");
@@ -1088,18 +1480,29 @@ private:
         launch = pending_.front();
       }
       const hsa_signal_value_t observed = core_.hsa_signal_wait_scacquire_fn(
-          launch->native ? launch->original : launch->proxy, HSA_SIGNAL_CONDITION_LT, 1, 1000000,
-          HSA_WAIT_STATE_BLOCKED);
+          launch->native && !launch->application_native ? launch->original : launch->proxy,
+          HSA_SIGNAL_CONDITION_LT, 1, 1000000, HSA_WAIT_STATE_BLOCKED);
       if (observed != 0) {
+        std::lock_guard lock(mutex_);
+        // Controlled admission relies on the newest launch remaining at back().
+        if (launch->application_native)
+          std::rotate(pending_.begin(), pending_.begin() + 1, pending_.end());
         continue; // A timeout/fault is never completion/visibility proof.
       }
       if (launch->native) {
+        const hsa_status_t destroyed = launch->application_native
+                                           ? core_.hsa_signal_destroy_fn(launch->proxy)
+                                           : HSA_STATUS_SUCCESS;
         std::lock_guard lock(mutex_);
-        signals_[launch->original.handle].pending = false;
-        // Admission may already have observed this completion and published
-        // another launch. Keep that launch's nonoverlap guard intact.
-        if (!launch->native_completion_visible) {
-          active_gpu_ = false;
+        if (destroyed != HSA_STATUS_SUCCESS)
+          fail_locked(RuntimeStatus::InvalidTransition,
+                      "native private completion signal cleanup failed");
+        if (!launch->application_native) {
+          signals_[launch->original.handle].pending = false;
+          // Admission may already have observed this completion and published
+          // another launch. Keep that launch's nonoverlap guard intact.
+          if (!launch->native_completion_visible)
+            active_gpu_ = false;
         }
         ++statistics_.native_completed;
         pending_.pop_front();
@@ -1199,14 +1602,24 @@ private:
   AmdExtTable amd_;
   std::string artifact_path_, capture_path_, partial_path_;
   Digest expected_profile_{};
+  const bool application_profile_;
+  const std::vector<std::shared_ptr<const LoadedNativeImage>> native_images_;
   std::mutex mutex_;
   std::mutex finish_mutex_;
   std::condition_variable condition_;
   std::unordered_map<uint64_t, Blob> readers_;
   std::unordered_map<uint64_t, Signal> signals_;
   std::shared_ptr<Module> module_;
+  std::vector<std::shared_ptr<Module>> native_modules_;
   hsa_amd_memory_pool_t pool_{};
-  hsa_queue_t *queue_ = nullptr;
+  std::vector<std::unique_ptr<QueueState>> queues_;
+  uint32_t queue_creations_ = 0;
+  uint32_t callbacks_ = 0;
+  uint32_t shutdown_calls_ = 0;
+  bool unload_seen_ = false;
+  uint64_t next_sequence_ = 0;
+  bool workers_started_ = false;
+  bool queue_cleanup_failed_ = false;
   std::vector<ReportSlot> slots_;
   std::deque<std::shared_ptr<Launch>> pending_, completed_;
   std::thread observer_, collector_;
@@ -1225,7 +1638,10 @@ private:
   int output_ = -1;
 };
 
-std::unique_ptr<Runtime> runtime;
+// HIP's earlier-registered exit handlers still call these hooks before ROCR
+// unloads its tools. An automatic C++ owner would destroy Runtime too early.
+// OnUnload owns deletion, deferred through any enclosing HSA shutdown call.
+Runtime *runtime = nullptr;
 // Non-owning ROCR core/AMD-extension tables, valid through OnUnload. Runtime
 // keeps original copies; these pointers identify the active tables we patched.
 CoreApiTable *installed_core = nullptr;
@@ -1272,6 +1688,10 @@ hsa_status_t HSA_API queue_create(hsa_agent_t agent, uint32_t size, hsa_queue_ty
 hsa_status_t HSA_API queue_destroy(hsa_queue_t *queue) {
   return boundary([&] { return runtime->queue_destroy(queue); });
 }
+hsa_status_t HSA_API native_queue_create(hsa_agent_t agent, hsa_amd_queue_create_desc_t *descs,
+                                         uint32_t count) {
+  return boundary([&] { return runtime->native_queue_create(agent, descs, count); });
+}
 hsa_status_t HSA_API signal_create(hsa_signal_value_t value, uint32_t consumers,
                                    const hsa_agent_t *agents, hsa_signal_t *signal) {
   return boundary([&] { return runtime->signal_create(value, consumers, agents, signal); });
@@ -1285,18 +1705,24 @@ hsa_status_t HSA_API amd_signal_create(hsa_signal_value_t value, uint32_t consum
 hsa_status_t HSA_API signal_destroy(hsa_signal_t signal) {
   return boundary([&] { return runtime->signal_destroy(signal); });
 }
-hsa_status_t HSA_API profiling(hsa_queue_t *, int enabled) {
-  if (enabled != 0) {
-    diagnostic("ConSan MVP requires profiling disabled");
-  }
-  return enabled == 0 ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
+hsa_status_t HSA_API profiling(hsa_queue_t *queue, int enabled) {
+  return boundary([&] { return runtime->profiling(queue, enabled); });
 }
 hsa_status_t HSA_API shutdown() noexcept {
+  if (runtime->application_profile() && !runtime->finished() && runtime->finish() != 0)
+    return HSA_STATUS_ERROR;
   if (!runtime->finished()) {
     diagnostic("call rj_consan_finish before hsa_shut_down");
     return HSA_STATUS_ERROR;
   }
-  return runtime->core().hsa_shut_down_fn();
+  Runtime *active = runtime;
+  active->begin_shutdown();
+  const hsa_status_t status = active->core().hsa_shut_down_fn();
+  if (active->end_shutdown()) {
+    runtime = nullptr;
+    delete active;
+  }
+  return status;
 }
 hsa_status_t HSA_API deprecated_load(hsa_executable_t, hsa_agent_t, hsa_code_object_t,
                                      const char *) {
@@ -1344,13 +1770,60 @@ bool install(HsaApiTable *table) {
   }
   const char *artifacts = std::getenv("RJ_CONSAN_ARTIFACT_DIR");
   const char *capture = std::getenv("RJ_CONSAN_CAPTURE_PATH");
-  if (!artifacts || !*artifacts || !capture || !*capture) {
+  const char *application = std::getenv("RJ_CONSAN_APPLICATION_PROFILE");
+  if (application != nullptr && std::strcmp(application, "1") != 0) {
+    diagnostic("RJ_CONSAN_APPLICATION_PROFILE must be 1 when configured");
+    return false;
+  }
+  std::vector<std::shared_ptr<const LoadedNativeImage>> native_images;
+  const char *native_paths = std::getenv("RJ_CONSAN_NATIVE_IMAGES");
+  if (native_paths != nullptr) {
+    if (application == nullptr || *native_paths == '\0') {
+      diagnostic("native image configuration requires the application profile");
+      return false;
+    }
+    const std::string_view paths(native_paths);
+    uint64_t total_bytes = 0;
+    size_t offset = 0;
+    for (;;) {
+      const size_t separator = paths.find(':', offset);
+      const std::string_view path = paths.substr(
+          offset, separator == std::string_view::npos ? separator : separator - offset);
+      if (path.empty() || native_images.size() >= 16) {
+        diagnostic("native image list is empty or exceeds its image budget");
+        return false;
+      }
+      util::StringDiagnostic native_diagnostic;
+      FailureOr<LoadedNativeImage> loaded =
+          load_native_image(std::string(path), native_diagnostic.emitter());
+      if (loaded.failed()) {
+        diagnostic(native_diagnostic.message());
+        return false;
+      }
+      const uint64_t bytes = loaded.value().original.size();
+      if (bytes > ContractLimits{}.image_bytes - total_bytes ||
+          std::ranges::any_of(
+              native_images, [&](const std::shared_ptr<const LoadedNativeImage> &image) {
+                return image->inventory.identity == loaded.value().inventory.identity;
+              })) {
+        diagnostic("native images are duplicate or exceed their aggregate byte budget");
+        return false;
+      }
+      total_bytes += bytes;
+      native_images.push_back(std::make_shared<const LoadedNativeImage>(std::move(loaded.value())));
+      if (separator == std::string_view::npos)
+        break;
+      offset = separator + 1;
+    }
+  }
+  const bool selected = artifacts != nullptr && *artifacts != '\0';
+  if ((!selected && native_images.empty()) || !capture || !*capture) {
     diagnostic("RJ_CONSAN_ARTIFACT_DIR and RJ_CONSAN_CAPTURE_PATH are required");
     return false;
   }
   const char *profile = std::getenv("RJ_CONSAN_SELECTION_PROFILE");
   Digest expected_profile{};
-  if (profile == nullptr || std::strlen(profile) != expected_profile.size() * 2) {
+  if (selected && (profile == nullptr || std::strlen(profile) != expected_profile.size() * 2)) {
     diagnostic("RJ_CONSAN_SELECTION_PROFILE must contain a 64-digit expected profile");
     return false;
   }
@@ -1366,7 +1839,7 @@ bool install(HsaApiTable *table) {
     }
     return -1;
   };
-  for (size_t index = 0; index < expected_profile.size(); ++index) {
+  for (size_t index = 0; selected && index < expected_profile.size(); ++index) {
     const int high = hex_digit(profile[index * 2]);
     const int low = hex_digit(profile[index * 2 + 1]);
     if (high < 0 || low < 0) {
@@ -1375,7 +1848,8 @@ bool install(HsaApiTable *table) {
     }
     expected_profile[index] = static_cast<uint8_t>((high << 4) | low);
   }
-  runtime = std::make_unique<Runtime>(core, amd, artifacts, capture, expected_profile);
+  runtime = new Runtime(core, amd, selected ? artifacts : "", capture, expected_profile,
+                        application != nullptr, std::move(native_images));
   CoreApiTable &patched = *table->core_;
   patched.hsa_code_object_reader_create_from_memory_fn = reader_memory;
   patched.hsa_code_object_reader_create_from_file_fn = reader_file;
@@ -1397,6 +1871,8 @@ bool install(HsaApiTable *table) {
   table->amd_ext_->hsa_amd_profiling_set_profiler_enabled_fn = profiling;
   table->amd_ext_->hsa_amd_queue_intercept_create_fn = intercept_create;
   table->amd_ext_->hsa_amd_queue_intercept_register_fn = intercept_register;
+  if (amd.version.minor_id >= kNativeQueueTableBytes && amd.hsa_amd_queue_create_fn != nullptr)
+    table->amd_ext_->hsa_amd_queue_create_fn = native_queue_create;
   installed_core = table->core_;
   installed_amd = table->amd_ext_;
   return true;
@@ -1422,6 +1898,10 @@ extern "C" RJ_API_EXPORT rj_consan_statistics rj_consan_get_statistics() noexcep
 extern "C" RJ_API_EXPORT void OnUnload() noexcept {
   if (!runtime) {
     return;
+  }
+  if (runtime->queue_cleanup_failed()) {
+    diagnostic("cannot unload ConSan while a partially destroyed queue may call its interceptor");
+    std::abort();
   }
   const bool retain = !runtime->finished();
   if (retain) {
@@ -1464,12 +1944,15 @@ extern "C" RJ_API_EXPORT void OnUnload() noexcept {
     RJ_CONSAN_RESTORE_HOOK(amd, original, hsa_amd_profiling_set_profiler_enabled_fn, profiling);
     RJ_CONSAN_RESTORE_HOOK(amd, original, hsa_amd_queue_intercept_create_fn, intercept_create);
     RJ_CONSAN_RESTORE_HOOK(amd, original, hsa_amd_queue_intercept_register_fn, intercept_register);
+    if (original.hsa_amd_queue_create_fn != nullptr)
+      RJ_CONSAN_RESTORE_HOOK(amd, original, hsa_amd_queue_create_fn, native_queue_create);
 #undef RJ_CONSAN_RESTORE_HOOK
   }
-  if (retain) {
-    (void)runtime.release();
-  } else {
-    runtime.reset();
+  if (!runtime->defer_unload()) {
+    Runtime *unloaded = runtime;
+    runtime = nullptr;
+    if (!retain)
+      delete unloaded;
   }
   installed_core = nullptr;
   installed_amd = nullptr;

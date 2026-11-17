@@ -168,6 +168,56 @@ status. A failed finish does not promise recovery from work still in flight.
 Unexpected C++ exceptions terminate the process and do not promise recovery,
 cleanup or completion of outstanding work.
 
+#### Native application infrastructure profile
+
+`RJ_CONSAN_APPLICATION_PROFILE=1` enables the bounded application adapter.
+`RJ_CONSAN_NATIVE_IMAGES` is a colon-separated list of exact original code-object
+files whose entries remain native and uncovered. The runtime verifies their
+complete ELF/metadata inventory and matches both bytes and digest before loading
+them. These images do not require a prepared artifact. An optional selected
+artifact still requires `RJ_CONSAN_ARTIFACT_DIR` and
+`RJ_CONSAN_SELECTION_PROFILE`; native execution cannot substitute for its capture.
+
+This adapter accepts up to 16 live system-memory compute queues, including queues
+created through `hsa_amd_queue_create` before image loading. Queue priority and CU
+mask are retained. Freeze resolves every entry before publishing bindings, and
+kernel objects must be distinct across the admitted modules. Native ABI checks
+permit compiler hidden arguments, constant pointers, nonzero private segments,
+and descriptor register allocations larger than their metadata requirement.
+Selected-entry qualification retains its stricter register and ISA requirements.
+
+The native packet profile accepts individual standard dispatches and AMD extended
+format 3 dispatches with original completion signal zero. Hardware workgroup
+limits and required workgroup shapes are checked; the metadata flat bound is
+retained as inventory rather than imposing the selected detector's launch bound
+on native packets. Only the null completion field changes, to a fresh runtime-owned
+signal. Header fences, dependency signal, arguments, resources, cluster geometry
+and performance hints are preserved. No barrier or dependency edge is added.
+The private completion publication has a cost; exact timing equivalence is not
+claimed. Nonzero native dispatch completions and extended format 4 are unsupported.
+
+Multiple launches may remain pending. The observer retires each private signal
+only after observing exactly zero, without reading, resetting or forwarding an
+application signal. Original barriers pass through while admission is healthy;
+queue profiling calls use the original API. Queue and executable destruction wait
+for their own launches. Drain waits for the submitted prefix even if a later
+launch completes first.
+
+Native-only finish drains and joins the observer without creating a selected
+capture. Success means native infrastructure completion, with no ConSan probe or
+LDS-analysis coverage. A configured selected artifact that never starts capture
+fails finish. In application mode, HSA shutdown automatically finishes before
+delegating to ROCR. Explicit finish remains available for retaining its status.
+An application must treat tool-install failure as failure: ROCR may continue
+running the original program after rejecting a tool.
+
+Runtime ownership ends at `OnUnload`, rather than at C++ static destruction, so
+earlier-registered HIP exit handlers can still destroy executables through the
+hooks. Deletion is deferred through an enclosing shutdown call. Both Linux plugin
+variants use `NODELETE` to keep hook code mapped when ROCR closes the tool inside
+that call; Runtime resources are still released, but the DSO mapping remains for
+the process lifetime.
+
 ### Offline diagnosis
 
 The analyzer validates the closed capture, joins GPU observations to static

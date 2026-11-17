@@ -44,6 +44,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             PRIVATE
                 "LINKER:--version-script=${_exports}"
                 "LINKER:--no-undefined"
+                # ROCR can dlclose tools inside the shutdown function we wrap.
+                # Keep hook code mapped until that function returns to its caller.
+                "LINKER:-z,nodelete"
                 "LINKER:-Map,${CMAKE_CURRENT_BINARY_DIR}/${_plugin}.link.map"
         )
     endforeach()
