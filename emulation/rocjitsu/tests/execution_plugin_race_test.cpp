@@ -7023,23 +7023,7 @@ TEST(RaceDetectorPluginOutputTest, CapturesWaitBarrierControlFlowAndNopMetadata)
   EXPECT_TRUE(state->trace[state->trace.size() - 1].is_nop());
 }
 
-TEST(RaceDetectorPluginOutputTest, KeepsDecodedBarrierOperationsInsideElidedSpan) {
-  PluginFixture fixture;
-  ASSERT_NO_FATAL_FAILURE(fixture.initialize(1, "cdna5", 32, 104));
-  fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
-  auto plugin = std::make_unique<RaceDetectorPlugin>();
-  RaceDetectorPlugin *reporter = plugin.get();
-  ASSERT_TRUE(fixture.plugin_group_->add(std::move(plugin)));
-  fixture.soc->set_plugin_group(fixture.plugin_group_);
-  fixture.plugin_group_->onInit();
-  Wavefront *wave = fixture.cu()->dispatch_wf(0, 0x100, 104, 256, 32);
-  ASSERT_NE(wave, nullptr);
-  std::array waves{wave};
-  fixture.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 256, 104, waves);
-  auto *state = static_cast<RaceWavefrontState *>(wave->plugin_state(reporter->slot_index()));
-  ASSERT_NE(state, nullptr);
-  std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
-  ASSERT_NE(decoder, nullptr);
+TEST(RaceDetectorPluginOutputTest, KeepsDecodedSynchronizationInsideElidedSpan) {
   const std::array<uint32_t, 1> signal_words = cdna5::build_sop1(
       cdna5::kSBarrierSignalSop1, {.ssrc0 = cdna5::OPR_SSRC_BARRIER_ID_NEG_INT_MIN});
   const std::array<uint32_t, 1> isfirst_words = cdna5::build_sop1(
@@ -7048,17 +7032,43 @@ TEST(RaceDetectorPluginOutputTest, KeepsDecodedBarrierOperationsInsideElidedSpan
       cdna5::build_vds(cdna5::kDsAtomicAsyncBarrierArriveB64Vds);
   const std::array<uint32_t, 2> returning_arrive_words =
       cdna5::build_vds(cdna5::kDsAtomicBarrierArriveRtnB64Vds);
-  const std::array<std::span<const uint32_t>, 4> barriers{
-      signal_words, isfirst_words, async_arrive_words, returning_arrive_words};
-  for (std::span<const uint32_t> barrier_words : barriers) {
-    DecodeResult barrier = decoder->decode_window(barrier_words);
-    ASSERT_TRUE(barrier.succeeded());
-    SCOPED_TRACE(barrier.value()->mnemonic());
-    state->trace = {};
-    const std::array<uint32_t, 1> nop_words = cdna5::build_sopp(cdna5::kSNopSopp);
+  const std::array<uint32_t, 2> acquire_words = cdna3::build_ds(cdna3::kDsGwsSemaPDs, {.gds = 1});
+  const std::array<uint32_t, 2> release_words = cdna3::build_ds(cdna3::kDsGwsSemaVDs, {.gds = 1});
+  const struct {
+    const char *arch;
+    uint32_t wave_size;
+    std::span<const uint32_t> words;
+  } cases[] = {
+      {"cdna5", 32, signal_words},       {"cdna5", 32, isfirst_words},
+      {"cdna5", 32, async_arrive_words}, {"cdna5", 32, returning_arrive_words},
+      {"cdna3", 64, acquire_words},      {"cdna3", 64, release_words},
+  };
+  for (const auto &[arch, wave_size, synchronization_words] : cases) {
+    SCOPED_TRACE(arch);
+    PluginFixture fixture;
+    ASSERT_NO_FATAL_FAILURE(fixture.initialize(1, arch, wave_size, 104));
+    fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+    auto plugin = std::make_unique<RaceDetectorPlugin>();
+    RaceDetectorPlugin *reporter = plugin.get();
+    ASSERT_TRUE(fixture.plugin_group_->add(std::move(plugin)));
+    fixture.soc->set_plugin_group(fixture.plugin_group_);
+    fixture.plugin_group_->onInit();
+    Wavefront *wave = fixture.cu()->dispatch_wf(0, 0x100, 104, 256, wave_size);
+    ASSERT_NE(wave, nullptr);
+    std::array waves{wave};
+    fixture.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 256, 104, waves);
+    auto *state = static_cast<RaceWavefrontState *>(wave->plugin_state(reporter->slot_index()));
+    ASSERT_NE(state, nullptr);
+    std::unique_ptr<Decoder> decoder = Decoder::create(fixture.cu()->arch());
+    ASSERT_NE(decoder, nullptr);
+    DecodeResult synchronization = decoder->decode_window(synchronization_words);
+    ASSERT_TRUE(synchronization.succeeded());
+    SCOPED_TRACE(synchronization.value()->mnemonic());
+    const std::array<uint32_t, 1> nop_words =
+        wave_size == 64 ? cdna3::build_sopp(cdna3::kSNopSopp) : cdna5::build_sopp(cdna5::kSNopSopp);
     uint64_t pc = 0x100;
     for (size_t index = 0; index < 135; ++index) {
-      const std::span<const uint32_t> words = index == 67 ? barrier_words : nop_words;
+      const std::span<const uint32_t> words = index == 67 ? synchronization_words : nop_words;
       DecodeResult decoded = decoder->decode_window(words);
       ASSERT_TRUE(decoded.succeeded());
       fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(pc, *decoded.value(), *wave);

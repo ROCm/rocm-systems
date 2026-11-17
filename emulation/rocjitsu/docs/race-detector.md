@@ -226,8 +226,8 @@ Consecutive identical `s_nop` instructions in the selected context share a row
 showing their execution count and final PC. Runs stop at a changed encoding,
 nonsequential PC, elision gap, or marked instruction. This is display compaction:
 context and gap counts still count individual executed instructions. Waits,
-barriers (including split-barrier signals and LDS barrier arrivals), and
-control-flow instructions are always shown individually.
+barriers (including split-barrier signals and LDS barrier arrivals), GWS
+operations, and control-flow instructions are always shown individually.
 
 The plugin writes a summary when it is destroyed during VM teardown. It counts
 emitted reports and observations suppressed by the existing PC-based

@@ -63,10 +63,11 @@ util::FailureOr<InstructionSnapshot> capture_instruction(uint64_t pc, const Inst
     report_plugin_failure(wf, "race detector instruction has no valid encoding");
     return util::Result::failure();
   }
-  // Not every barrier operation carries the BARRIER flag.
-  const bool preserve_in_trace =
-      inst.is_waitcnt() || inst.has_embedded_memory_wait() || inst.is_barrier() ||
-      inst.mnemonic().find("barrier") != std::string_view::npos || inst.writes_pc();
+  // Some synchronization operations lack the BARRIER flag.
+  const bool preserve_in_trace = inst.is_waitcnt() || inst.has_embedded_memory_wait() ||
+                                 inst.is_barrier() ||
+                                 inst.mnemonic().find("barrier") != std::string_view::npos ||
+                                 inst.mnemonic().starts_with("ds_gws_") || inst.writes_pc();
   return InstructionSnapshot{pc, std::span(inst.raw_encoding(), inst.size() / sizeof(uint32_t)),
                              preserve_in_trace, inst.mnemonic() == "s_nop"};
 }
