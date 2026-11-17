@@ -255,13 +255,31 @@ test('uses the even-sample median without modifying the published samples', asyn
   assert.deepEqual(runs, before);
 });
 
-test('changes exactly on the duration band remain within the band', async () => {
-  const runs = publication();
-  for (const [index, value] of [103, 97, 104].entries()) {
-    runs[1].benchmark_results[index].timing_results_s = [value];
-  }
-  assert.match((await summarize(runs)).markdown, /gfx950 \/ default: 0 faster, 1 slower, 2 within band/);
-});
+for (const baseline of [1, 100]) {
+  test(`changes exactly on the duration band remain within the band (baseline ${baseline})`, async () => {
+    const runs = publication();
+    for (const result of runs[0].benchmark_results) result.timing_results_s = [baseline];
+    for (const [index, scale] of [1.03, 0.97, 1].entries()) {
+      runs[1].benchmark_results[index].timing_results_s = [baseline * scale];
+    }
+    const { markdown } = await summarize(runs);
+    assert.match(markdown, /gfx950 \/ default: 0 faster, 0 slower, 3 within band/);
+    assert.match(markdown, /No comparable timing changes outside the duration band/);
+    assert.doesNotMatch(markdown, /Largest observed changes|Duration change \|/);
+  });
+
+  test(`changes just outside the duration band are counted and listed (baseline ${baseline})`, async () => {
+    const runs = publication();
+    for (const result of runs[0].benchmark_results) result.timing_results_s = [baseline];
+    for (const [index, scale] of [1.030001, 0.969999, 1].entries()) {
+      runs[1].benchmark_results[index].timing_results_s = [baseline * scale];
+    }
+    const { markdown } = await summarize(runs);
+    assert.match(markdown, /gfx950 \/ default: 1 faster, 1 slower, 1 within band/);
+    assert.match(markdown, /Largest observed changes/);
+    assert.equal(markdown.match(/\| [+-]3.0% \|/g).length, 2);
+  });
+}
 
 test('results only in the baseline remain not comparable', async () => {
   const runs = publication();

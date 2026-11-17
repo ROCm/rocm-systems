@@ -78,13 +78,24 @@ for (const publishedRunId of [undefined, '']) {
 
 test('report-only reruns link the original published benchmark attempt', async () => {
   const { args, comments } = fixture();
-  await reportBenchmark({ ...args, runAttempt: '3', publishedRunId: 'github-123-attempt-1' });
+  await reportBenchmark({ ...args, runAttempt: '3', benchmarkRunAttempt: '1',
+    publishedRunId: 'github-123-attempt-1' });
   const body = comments[0].body;
   const url = new URL(body.match(/\[Dashboard\]\(([^)]+)\)/)[1]);
   assert.equal(url.searchParams.get('run'), 'github-123-attempt-1');
   assert.equal(url.searchParams.get('detail'), '1');
-  assert.match(body, /actions\/runs\/123\/attempts\/3/);
+  assert.match(body, /actions\/runs\/123\/attempts\/1/);
+  assert.match(body, /<!-- rocjitsu-benchmark-report-run:123:10:3 -->/);
 });
+
+for (const benchmarkRunAttempt of [undefined, '']) {
+  test(`workflow link falls back to reporting attempt without benchmark output (${benchmarkRunAttempt})`, async () => {
+    const { args, comments } = fixture();
+    await reportBenchmark({ ...args, runAttempt: '3', benchmarkRunAttempt,
+      benchmarkResult: 'failure', publishResult: 'skipped', publishedRunId: '' });
+    assert.match(comments[0].body, /actions\/runs\/123\/attempts\/3/);
+  });
+}
 
 test('reports benchmark failure without attempt metadata', async () => {
   const { args, comments } = fixture();
@@ -143,6 +154,7 @@ for (const publishResult of ['failure', 'skipped', 'cancelled']) {
     assert.equal(url.searchParams.has('run'), false);
     assert.equal(url.searchParams.get('detail'), '1');
     assert.match(comments[0].body, /Results were not published/);
+    assert.match(comments[0].body, /## rocjitsu benchmark job: success/);
   });
 }
 

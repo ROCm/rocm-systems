@@ -753,6 +753,7 @@ jobs:
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
         env:
           BENCHMARK_RESULT: ${{ needs.benchmark.result }}
+          BENCHMARK_RUN_ATTEMPT: ${{ needs.benchmark.outputs.run_attempt }}
           PUBLICATION_RESULT: ${{ needs.publish.result }}
           PUBLISHED_RUN_ID: ${{ needs.publish.outputs.run_id }}
           SOURCE_SHA: ${{ needs.source-metadata.outputs.source_sha }}
@@ -769,6 +770,7 @@ jobs:
               publishResult: process.env.PUBLICATION_RESULT,
               runNumber: process.env.GITHUB_RUN_NUMBER,
               runAttempt: process.env.GITHUB_RUN_ATTEMPT,
+              benchmarkRunAttempt: process.env.BENCHMARK_RUN_ATTEMPT,
               publishedRunId: process.env.PUBLISHED_RUN_ID,
               headSha: process.env.SOURCE_SHA,
               summaryPath: process.env.PUBLICATION_RESULT === 'success'

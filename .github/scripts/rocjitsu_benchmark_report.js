@@ -62,11 +62,12 @@ async function readSummaryMarkdown({ summaryPath, publishedRunId, headSha, core 
 
 function renderReport({
   context, pull, marker, benchmarkResult, publishResult,
-  runNumber, runAttempt, publishedRunId, headSha, summaryMarkdown,
+  runNumber, runAttempt, benchmarkRunAttempt, publishedRunId, headSha, summaryMarkdown,
 }) {
   const { owner, repo } = context.repo;
   const postMerge = context.eventName === 'push';
-  const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}/attempts/${runAttempt}`;
+  const workflowAttempt = benchmarkRunAttempt || runAttempt;
+  const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}/attempts/${workflowAttempt}`;
   const commitUrl = `${context.serverUrl}/${owner}/${repo}/commit/${headSha}`;
   const dashboardUrl = new URL(DASHBOARD_URL);
   dashboardUrl.searchParams.set('view', 'branch');
@@ -78,8 +79,6 @@ function renderReport({
     if (!publishedRunId) throw new Error('Successful publication has no published run ID.');
     dashboardUrl.searchParams.set('run', publishedRunId);
   }
-  const status = benchmarkResult === 'success' && !published
-    ? 'results unavailable' : benchmarkResult;
   const phase = postMerge ? 'Post-merge' : 'Presubmit';
   const results = published
     ? summaryMarkdown || 'Result summary unavailable; see the dashboard.'
@@ -88,7 +87,7 @@ function renderReport({
   return [
     marker,
     `<!-- rocjitsu-benchmark-report-run:${context.runId}:${runNumber}:${runAttempt} -->`,
-    `## rocjitsu benchmark job: ${status}`,
+    `## rocjitsu benchmark job: ${benchmarkResult}`,
     '',
     `${phase} for commit [\`${headSha.slice(0, 12)}\`](${commitUrl}).`,
     '',
@@ -223,7 +222,6 @@ function compareBenchmarkResults(candidateResults, baselineResults) {
       configurations.set(key, {
         target, mode, comparable: [], notComparable: [],
         counts: { faster: 0, slower: 0, neutral: 0, unavailable: 0 },
-        tolerance: DURATION_CHANGE_BAND_PERCENT,
       });
     }
     const comparison = configurations.get(key);
@@ -237,10 +235,12 @@ function compareBenchmarkResults(candidateResults, baselineResults) {
       comparison.counts.unavailable += 1;
       continue;
     }
-    comparison.comparable.push({ candidateTest, baselineTest, delta });
-    if (delta > DURATION_CHANGE_BAND_PERCENT) comparison.counts.slower += 1;
-    else if (delta < -DURATION_CHANGE_BAND_PERCENT) comparison.counts.faster += 1;
-    else comparison.counts.neutral += 1;
+    // Subtraction and division can put an exact boundary a few ulps outside the band.
+    const roundingTolerance = Number.EPSILON * Math.max(100, Math.abs(delta)) * 4;
+    const outsideBand = Math.abs(delta) > DURATION_CHANGE_BAND_PERCENT + roundingTolerance;
+    const classification = outsideBand ? (delta > 0 ? 'slower' : 'faster') : 'neutral';
+    comparison.comparable.push({ candidateTest, baselineTest, delta, classification });
+    comparison.counts[classification] += 1;
   }
   return [...configurations.values()].sort((left, right) =>
     left.target.localeCompare(right.target) ||
@@ -268,7 +268,7 @@ function renderCoverage({ completed, total, failed, timeout }) {
 
 function renderTimingChanges(comparisons) {
   const changes = comparisons.flatMap((comparison) => comparison.comparable.filter(
-    ({ delta }) => Number.isFinite(delta) && Math.abs(delta) > comparison.tolerance,
+    ({ classification }) => classification !== 'neutral',
   ));
   changes.sort((left, right) => Math.abs(right.delta) - Math.abs(left.delta) ||
     left.candidateTest.testId.localeCompare(right.candidateTest.testId));
