@@ -532,11 +532,9 @@ TEST_F(FakeEnvGetEnvTest, FloatOutOfFloatRangeReturnsDefault)
 {
     constexpr auto k_max_float = std::numeric_limits<float>::max();
 
-    // Within float range: parses.
     fake_env::setenv("FOO", std::to_string(k_max_float).c_str(), 1);
     EXPECT_EQ(fake_environment::get_env("FOO", 7.0f), k_max_float);
 
-    // Outside float range: falls back to the default instead of becoming inf.
     fake_env::setenv("FOO", "1e300", 1);
     EXPECT_EQ(fake_environment::get_env("FOO", 7.0f), 7.0f);
 }

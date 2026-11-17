@@ -92,9 +92,9 @@ find_cache_files(const pid_t& root_pid, const data::directory_files_t& dir_conte
             const auto pid = rocprofsys::utility::string::safe_stoi(groups[2].str());
             if(parent_pid.is_error() || pid.is_error())
             {
-                throw std::invalid_argument(fmt::format(
-                    "Unparsable PID in cache file '{}': {}", filename,
-                    parent_pid.is_error() ? parent_pid.error() : pid.error()));
+                LOG_WARNING("Skipping cache file with unparsable PID '{}': {}", filename,
+                            parent_pid.is_error() ? parent_pid.error() : pid.error());
+                return std::nullopt;
             }
             if(parent_pid.value() != root_pid) return std::nullopt;
             return pid.value();

@@ -156,14 +156,13 @@ TEST(discovery_test, find_cache_files_skips_mismatched_parent_pid)
     EXPECT_TRUE(m.empty());
 }
 
-TEST(discovery_test, find_cache_files_throws_on_unparsable_pid)
+TEST(discovery_test, find_cache_files_skips_unparsable_pid_without_aborting)
 {
-    // A PID that overflows int.
-    EXPECT_THROW(
-        find_cache_files(100, { "buffered_storage_99999999999999999999_42.bin" }),
-        std::invalid_argument);
-    EXPECT_THROW(find_cache_files(100, { "metadata_100_99999999999999999999.json" }),
-                 std::invalid_argument);
+    auto m = find_cache_files(100, { "buffered_storage_99999999999999999999_42.bin",
+                                     "metadata_100_99999999999999999999.json",
+                                     "buffered_storage_100_42.bin" });
+    EXPECT_EQ(m.size(), 1U);
+    EXPECT_NE(m.find(42), m.end());
 }
 
 TEST_F(temp_dir_fixture, clear_removes_existing_files)
