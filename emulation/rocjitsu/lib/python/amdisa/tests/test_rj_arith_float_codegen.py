@@ -2171,10 +2171,13 @@ def test_cdna_half_exponent_bindings(arch, vop3):
     suffix = '_gfx12' if arch == 'cdna5' else ''
     assert 'rj_arith_v_frexp_exp_i16_f16_w64' + suffix in body
     assert ('execute_half_exponent_sdwa' in body) == (arch != 'cdna5' and not vop3)
+    operands = (
+        'word_destination, word_source' if arch == 'cdna5' and not vop3 else 'd, a'
+    )
     assert (
-        'd, a, true, /*guest_rounding=*/false, /*zero_extend_low=*/true'
+        f'{operands}, true, /*guest_rounding=*/false, /*zero_extend_low=*/true'
         if arch != 'cdna5'
-        else 'd, a, false, /*guest_rounding=*/false, /*zero_extend_low=*/false'
+        else f'{operands}, false, /*guest_rounding=*/false, /*zero_extend_low=*/false'
     ) in body
     assert 'RJ_ARITH_ALU_OMOD' not in body
 
@@ -2947,3 +2950,90 @@ def test_gfx1150_float_dot_rejects_unqualified_strict_replay(name, half, accumul
         < body.index('execute_dot2_')
     )
     assert 'RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS' in body
+
+
+@pytest.mark.parametrize(
+    'arch', ['cdna1', 'cdna2', 'cdna3', 'cdna4', 'rdna1', 'rdna2', 'rdna3_5']
+)
+@pytest.mark.parametrize('op', ['TRUNC', 'CEIL', 'RNDNE', 'FLOOR'])
+def test_older_half_rounding_keeps_policy_and_layout(arch, op):
+    from amdisa.codegen.execute.rj_arith_float import gen_float_unary16
+
+    body = gen_float_unary16(context(arch, f'V_{op}_F16', ['d'], ['a'], is_vop3=True))
+    assert f'rj_arith_v_{op.lower()}_f16_w32_gfx908' in body
+    assert ('RJ_ARITH_ALU_HIGH_D' in body) == (arch not in ('rdna1', 'rdna2'))
+    assert body.index('if (!wf.exec())') < body.index('arithmetic_flags()')
+    assert 'RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS' in body
+    assert 'execute_float_unary16' in body
+
+
+@pytest.mark.parametrize(
+    'arch', ['cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5', 'cdna3', 'cdna4']
+)
+@pytest.mark.parametrize('name', ['V_FREXP_MANT_F16', 'V_FREXP_EXP_I16_F16'])
+def test_older_half_frexp_preserves_operand_and_output_policy(arch, name):
+    from amdisa.codegen.execute.rj_arith_float import gen_float_unary16
+
+    body = gen_float_unary16(context(arch, name, ['d'], ['a'], is_vop3=True))
+    assert 'execute_float_unary16' in body
+    assert ('RJ_ARITH_ALU_HIGH_A' in body) == (arch not in ('rdna1', 'rdna2'))
+    assert ('_gfx908' in body) == (name == 'V_FREXP_MANT_F16')
+    assert ('inst_.clamp' in body) == (name == 'V_FREXP_MANT_F16')
+    body = gen_float_unary16(context(arch, name, ['d'], ['a'], is_vop3=False))
+    expected = (
+        'execute_half_exponent_sdwa'
+        if name == 'V_FREXP_EXP_I16_F16'
+        else 'execute_half_unary_sdwa'
+    )
+    assert expected in body
+
+
+@pytest.mark.parametrize(
+    'op', ['TRUNC', 'CEIL', 'RNDNE', 'FLOOR', 'FREXP_MANT', 'FREXP_EXP_I16']
+)
+@pytest.mark.parametrize('vop3', [False, True])
+def test_gfx1250_simple_half_unary_reuses_gfx12_and_preserves_halves(op, vop3):
+    from amdisa.codegen.execute.rj_arith_float import gen_float_unary16
+
+    body = gen_float_unary16(
+        context('cdna5', f'V_{op}_F16', ['d'], ['a'], is_vop3=vop3)
+    )
+    assert f'rj_arith_v_{op.lower()}_f16_w32_gfx12' in body
+    assert body.index('if (!wf.exec())') < body.index('arithmetic_flags()')
+    assert 'RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS' in body
+    assert 'zero_extend_low=*/false' in body
+    assert ('word_source' in body) == (not vop3)
+    assert ('e32_packed_vgpr_operand' in body) == (not vop3)
+    assert 'RJ_ARITH_ALU_HIGH_A' in body and 'RJ_ARITH_ALU_HIGH_D' in body
+    assert ('inst_.clamp' in body) == (vop3 and not op.startswith('FREXP_EXP'))
+
+
+@pytest.mark.parametrize(
+    'arch', ['cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5', 'cdna3', 'cdna4']
+)
+def test_older_half_fract_uses_rounded_result_adapter(arch):
+    from amdisa.codegen.execute.rj_arith_float import gen_float_unary16
+
+    for vop3 in (False, True):
+        body = gen_float_unary16(
+            context(arch, 'V_FRACT_F16', ['d'], ['a'], is_vop3=vop3)
+        )
+        assert 'rj_arith_v_fract_f16_w32_gfx908' in body
+        assert 'RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS' in body
+        assert ('execute_half_unary_sdwa' in body) == (not vop3)
+
+
+@pytest.mark.parametrize('vop3', [False, True])
+def test_gfx1250_half_fract_reuses_model_with_true16_selectors(vop3):
+    from amdisa.codegen.execute.rj_arith_float import gen_float_unary16
+
+    body = gen_float_unary16(
+        context('cdna5', 'V_FRACT_F16', ['d'], ['a'], is_vop3=vop3)
+    )
+    assert 'rj_arith_v_fract_f16_w32_gfx1250' in body
+    assert 'nullptr' in body  # The profile executes Wave32 only.
+    assert body.index('if (!wf.exec())') < body.index('arithmetic_flags()')
+    assert 'execute_float_unary16' in body
+    assert 'guest_rounding=*/true' in body
+    assert ('word_source' in body) == (not vop3)
+    assert ('RJ_ARITH_ALU_HIGH_A' in body) and ('RJ_ARITH_ALU_HIGH_D' in body)

@@ -18,7 +18,7 @@ namespace rocjitsu::arith {
 
 // Evaluate FP16 unary math. Preserve destination lanes outside exec_mask.
 // Requires the named CPU features and validated instruction controls.
-template <Unary Op, bool GuestDenormals>
+template <Unary Op, bool GuestDenormals, bool FractRounding>
 void half_unary_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *d,
                           const uint32_t *a) {
   bool saturate = flags & RJ_ARITH_FP16_OVFL;
@@ -41,6 +41,14 @@ void half_unary_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t mode, uin
       }
     }
     auto value = unary_value<Op, true>(x);
+    if constexpr (FractRounding) {
+      static_assert(Op == Unary::Fract);
+      // Half inputs give an exact FP32 difference. Round at half precision before
+      // output flushing/OMOD; F16C's immediate selects the guest rounding mode.
+      value = half_input<false>(
+          half_narrow<false>(value, false, unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24)), 0, 0);
+    }
+
     if constexpr (Op == Unary::Fract || half_unary_rcp_rsq_sqrt<Op>) {
       if (GuestDenormals && (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS)) {
         auto sign = _mm256_and_ps(value, _mm256_set1_ps(-0.0f));
@@ -86,7 +94,7 @@ void half_unary_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t mode, uin
       value = clamp_f32(value, flags & RJ_ARITH_FP_DX10_CLAMP_OFF);
     }
     auto narrowed = half_narrow<false>(value, saturate);
-    if constexpr (unary_rounds_f32<Op> || Op == Unary::Fract) {
+    if constexpr (unary_rounds_f32<Op> || Op == Unary::Fract || Op == Unary::FrexpMant) {
       if (!(flags & RJ_ARITH_FP_IEEE_MODE) &&
           (!(mode & RJ_ARITH_ALU_CLAMP) || (flags & RJ_ARITH_FP_DX10_CLAMP_OFF))) {
         auto raw = _mm256_and_si256(
@@ -136,5 +144,8 @@ template void half_unary_x86_64_v3<Unary::Exp, false>(uint64_t, uint32_t, uint32
                                                       const uint32_t *);
 template void half_unary_x86_64_v3<Unary::Log, false>(uint64_t, uint32_t, uint32_t, uint32_t *,
                                                       const uint32_t *);
+
+template void half_unary_x86_64_v3<Unary::Fract, true, true>(uint64_t, uint32_t, uint32_t,
+                                                             uint32_t *, const uint32_t *);
 
 } // namespace rocjitsu::arith
