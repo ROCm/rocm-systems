@@ -276,7 +276,9 @@ def test_att_consecutive_kernels_zero_does_not_conflict():
     # The option's default is zero, which means dispatch thread trace, not device mode.
     # argparse stores the flag as a string, and "0" must not be treated as a request.
     assert service_conflicts(advanced_thread_trace=True, att_consecutive_kernels=0) == []
-    assert service_conflicts(advanced_thread_trace=True, att_consecutive_kernels="0") == []
+    assert (
+        service_conflicts(advanced_thread_trace=True, att_consecutive_kernels="0") == []
+    )
 
 
 def test_selected_regions_with_att_conflict_with_replay():
