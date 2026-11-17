@@ -40,7 +40,10 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
+      # Two trailing spaces are a hard line break in Markdown, not stray
+      # whitespace; stripping them joins the lines when rendered.
       - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
       - id: end-of-file-fixer
       - id: check-yaml
       - id: check-added-large-files
