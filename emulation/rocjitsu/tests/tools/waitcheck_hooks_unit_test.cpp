@@ -561,7 +561,7 @@ TEST_F(WaitcheckHooksTest, RejectsMissingWaitAtLoadRatherThanReaderCreation) {
   EXPECT_EQ(g_load_calls, 0);
   EXPECT_TRUE(contains(captured.stderr_text, "1 waitcnt hazard")) << captured.stderr_text;
   EXPECT_TRUE(contains(captured.stderr_text, "in gfx1200 code object")) << captured.stderr_text;
-  EXPECT_TRUE(contains(captured.stderr_text, "missing s_wait_loadcnt <= 0"))
+  EXPECT_TRUE(contains(captured.stderr_text, "missing s_wait_loadcnt 0"))
       << captured.stderr_text;
   EXPECT_EQ(core_.hsa_code_object_reader_destroy_fn(reader), HSA_STATUS_SUCCESS);
 }
@@ -574,7 +574,7 @@ TEST_F(WaitcheckHooksTest, ReportOnlyModeShowsHazardAndIncompleteControlFlow) {
   EXPECT_EQ(g_load_calls, 1);
   EXPECT_TRUE(contains(captured.stderr_text, "1 waitcnt hazard(s) in gfx1200 code object"))
       << captured.stderr_text;
-  EXPECT_TRUE(contains(captured.stderr_text, "missing s_wait_loadcnt <= 0"))
+  EXPECT_TRUE(contains(captured.stderr_text, "missing s_wait_loadcnt 0"))
       << captured.stderr_text;
   EXPECT_TRUE(contains(captured.stderr_text, "analysis failed for gfx1200 code object"))
       << captured.stderr_text;
@@ -695,10 +695,11 @@ TEST_F(WaitcheckHooksTest, LoaderFileRangeMatchesSelectedImageAtItsOffset) {
   g_reader_files[reader.handle].uri =
       "file:///fake#offset=" + std::to_string(offset + 1) + "&size=" +
       std::to_string(bytes.size());
+  setenv("ROCJITSU_WAITCHECK_FAIL", "0", 1);
   const CapturedCall changed = capture_stderr([&] {
     return core_.hsa_executable_load_agent_code_object_fn({}, {}, reader, nullptr, nullptr);
   });
-  EXPECT_EQ(changed.status, HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
+  EXPECT_EQ(changed.status, HSA_STATUS_SUCCESS);
   EXPECT_TRUE(contains(changed.stderr_text, "differs from reader; check unavailable"))
       << changed.stderr_text;
   EXPECT_EQ(core_.hsa_code_object_reader_destroy_fn(reader), HSA_STATUS_SUCCESS);
@@ -771,14 +772,20 @@ TEST_F(WaitcheckHooksTest, EagerModeRejectsDownstreamImageSubstitution) {
   loaded_ = true;
 
   g_replacement_bytes = rocjitsu::waitcheck_test::make_gfx1200_missing_wait_code_object();
-  const CapturedCall clean_caller =
-      load_memory(rocjitsu::waitcheck_test::make_gfx1200_correct_wait_code_object());
-  EXPECT_EQ(clean_caller.status, HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
-  EXPECT_TRUE(contains(clean_caller.stderr_text, "differs from reader; check unavailable"))
-      << clean_caller.stderr_text;
-  EXPECT_FALSE(contains(clean_caller.stderr_text, "waitcnt hazard"))
-      << clean_caller.stderr_text;
-  EXPECT_EQ(g_load_calls, 1);
+  const auto clean = rocjitsu::waitcheck_test::make_gfx1200_correct_wait_code_object();
+  hsa_code_object_reader_t reader{};
+  ASSERT_EQ(core_.hsa_code_object_reader_create_from_memory_fn(clean.data(), clean.size(), &reader),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EXIT(
+      {
+        hsa_loaded_code_object_t loaded{};
+        (void)core_.hsa_executable_load_agent_code_object_fn({}, {}, reader, nullptr, &loaded);
+        (void)core_.hsa_executable_freeze_fn({}, nullptr);
+        std::_Exit(77);
+      },
+      ::testing::KilledBySignal(SIGABRT), "loaded code object image differs from reader; aborting");
+  EXPECT_EQ(core_.hsa_code_object_reader_destroy_fn(reader), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(g_load_calls, 0);
 
   g_replacement_bytes = rocjitsu::waitcheck_test::make_gfx1200_correct_wait_code_object();
   const CapturedCall hazardous_caller =
@@ -787,7 +794,7 @@ TEST_F(WaitcheckHooksTest, EagerModeRejectsDownstreamImageSubstitution) {
   EXPECT_TRUE(contains(hazardous_caller.stderr_text, "waitcnt hazard"))
       << hazardous_caller.stderr_text;
   // The caller image is rejected before the downstream loader can substitute it.
-  EXPECT_EQ(g_load_calls, 1);
+  EXPECT_EQ(g_load_calls, 0);
 }
 
 TEST_F(WaitcheckHooksTest, DispatchModeDoesNotMapDownstreamReplacement) {
@@ -805,13 +812,29 @@ TEST_F(WaitcheckHooksTest, DispatchModeDoesNotMapDownstreamReplacement) {
   loaded_ = true;
 
   g_replacement_bytes = rocjitsu::waitcheck_test::make_gfx1200_missing_wait_code_object();
-  const CapturedCall captured =
-      load_memory(rocjitsu::waitcheck_test::make_gfx1200_correct_wait_code_object());
-  EXPECT_EQ(captured.status, HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
-  EXPECT_TRUE(contains(captured.stderr_text, "differs from reader; check unavailable"))
-      << captured.stderr_text;
-  EXPECT_FALSE(contains(captured.stderr_text, "waitcnt hazard")) << captured.stderr_text;
-  EXPECT_EQ(g_load_calls, 1);
+  const auto clean = rocjitsu::waitcheck_test::make_gfx1200_correct_wait_code_object();
+  hsa_code_object_reader_t reader{};
+  ASSERT_EQ(core_.hsa_code_object_reader_create_from_memory_fn(clean.data(), clean.size(), &reader),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EXIT(
+      {
+        hsa_loaded_code_object_t loaded{};
+        (void)core_.hsa_executable_load_agent_code_object_fn({}, {}, reader, nullptr, &loaded);
+        (void)core_.hsa_executable_freeze_fn({}, nullptr);
+        hsa_queue_t *queue = nullptr;
+        (void)core_.hsa_queue_create_fn({}, 64, HSA_QUEUE_TYPE_MULTI, nullptr, nullptr, 0, 0,
+                                        &queue);
+        hsa_kernel_dispatch_packet_t packet{};
+        packet.header = HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE;
+        packet.kernel_object = kernel_descriptor_vaddr(clean, "waitcheck.kd") +
+                               static_cast<uint64_t>(g_load_delta);
+        if (g_intercept_handler != nullptr)
+          g_intercept_handler(&packet, 1, 0, g_intercept_data, fake_packet_writer);
+        std::_Exit(77);
+      },
+      ::testing::KilledBySignal(SIGABRT), "loaded code object image differs from reader; aborting");
+  EXPECT_EQ(core_.hsa_code_object_reader_destroy_fn(reader), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(g_load_calls, 0);
 
   setenv("ROCJITSU_WAITCHECK_FAIL", "0", 1);
   const CapturedCall report_only =
@@ -821,7 +844,7 @@ TEST_F(WaitcheckHooksTest, DispatchModeDoesNotMapDownstreamReplacement) {
       << report_only.stderr_text;
   EXPECT_FALSE(contains(report_only.stderr_text, "waitcnt hazard"))
       << report_only.stderr_text;
-  EXPECT_EQ(g_load_calls, 2);
+  EXPECT_EQ(g_load_calls, 1);
 
   g_replacement_bytes = rocjitsu::waitcheck_test::make_gfx1200_correct_wait_code_object();
   const auto hazardous_caller = rocjitsu::waitcheck_test::make_gfx1200_missing_wait_code_object();

@@ -176,7 +176,7 @@ A diagnostic names the required wait, the register being reused, and the
 producer and consumer instructions. Offline output looks like:
 
 ```text
-missing_wait:gfx1250[0]:.text+0x10: missing s_wait_kmcnt <= 0 before use of s4
+missing_wait:gfx1250[0]:.text+0x10: missing s_wait_kmcnt 0 before use of s4
   producer .text+0x8: s_load_b32 s4, s[0:1], 0x0
   consumer .text+0x10: s_mov_b32 s5, s4
 ```
@@ -495,7 +495,7 @@ Environment variables:
 | --- | --- | --- |
 | `ROCJITSU_WAITCHECK` | `1` | Set to `0` to disable checking while leaving the HSA tool loaded. |
 | `ROCJITSU_WAITCHECK_MODE` | `dispatch` | `dispatch` checks a kernel immediately before its first AQL dispatch and caches the result. `eager` exhaustively checks every kernel when its code object is loaded. |
-| `ROCJITSU_WAITCHECK_FAIL` | `0` | Set to `1` to stop on a missing wait. Dispatch mode aborts before submitting the bad packet; eager mode and dispatch mode with a cooperative queue reject a hazardous reader before ROCR loads it. A loaded image that cannot be matched to the checked reader is rejected before freeze. |
+| `ROCJITSU_WAITCHECK_FAIL` | `0` | Set to `1` to stop on a missing wait. Dispatch mode aborts before submitting the bad packet; eager mode and dispatch mode with a cooperative queue reject a hazardous reader before ROCR loads it. A post-load image mismatch aborts the process before freeze because the loaded image cannot be rolled back. |
 | `ROCJITSU_WAITCHECK_SUMMARY` | `0` | Set to `1` to print load/dispatch/check/cache/pass/hazard counters at shutdown or process exit. |
 
 The tool prints diagnostics to stderr. With `ROCJITSU_WAITCHECK_FAIL=0`, it
@@ -511,7 +511,8 @@ After a successful load, the hook compares the loader's selected image with
 the reader it checked. If another loader layer substitutes an image, or the
 selected bytes cannot be obtained, it discards the pending dispatch mapping
 and reports that checking is unavailable. With `ROCJITSU_WAITCHECK_FAIL=1`,
-the load returns an error before freeze. Eager mode and dispatch mode with an
+the process aborts before freeze because ROCR may already have published
+symbols from the selected image. Eager mode and dispatch mode with an
 active cooperative queue can conservatively reject a hazardous caller reader
 before a later loader layer substitutes it; that diagnostic describes the
 caller reader, not the selected image.

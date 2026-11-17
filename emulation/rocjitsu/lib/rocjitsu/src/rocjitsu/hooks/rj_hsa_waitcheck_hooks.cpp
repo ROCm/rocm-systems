@@ -1027,10 +1027,19 @@ enum class LoadedImageIdentity { Same, Changed, Unavailable };
 
 [[nodiscard]] hsa_status_t unchecked_loaded_image_status(LoadedImageIdentity identity) {
   g_stats.unavailable.fetch_add(1, std::memory_order_relaxed);
+  const char *reason = identity == LoadedImageIdentity::Changed ? "differs from reader"
+                                                                : "is unavailable";
+  if (env_enabled("ROCJITSU_WAITCHECK_FAIL", false)) {
+    // The underlying loader has already published the selected image. An
+    // error return cannot roll that load back or prevent later dispatch.
+    std::fprintf(stderr,
+                 "rocjitsu-waitcheck: loaded code object image %s; aborting process\n", reason);
+    std::fflush(stderr);
+    std::abort();
+  }
   std::fprintf(stderr, "rocjitsu-waitcheck: loaded code object image %s; check unavailable\n",
-               identity == LoadedImageIdentity::Changed ? "differs from reader" : "is unavailable");
-  return env_enabled("ROCJITSU_WAITCHECK_FAIL", false) ? HSA_STATUS_ERROR_INVALID_CODE_OBJECT
-                                                        : HSA_STATUS_SUCCESS;
+               reason);
+  return HSA_STATUS_SUCCESS;
 }
 
 [[nodiscard]] bool amd_loader_table_has_file_range_reader(size_t table_length) {
