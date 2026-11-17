@@ -52,6 +52,13 @@ int ternary(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *
   if (exec_mask == 0) {
     return RJ_ARITH_SUCCESS;
   }
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+    rocjitsu::arith::integer16_ternary_x86_64_v4<Signed, Op, Packed>(exec_mask, mode, d[0], a[0],
+                                                                     b[0], c[0]);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
     rocjitsu::arith::integer16_ternary_x86_64_v3<Signed, Op, Packed>(exec_mask, mode, d[0], a[0],
@@ -82,6 +89,18 @@ int ternary(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *
           value = rocjitsu::arith::clamp(value, Signed ? INT64_C(-32768) : INT64_C(0),
                                          Signed ? INT64_C(32767) : INT64_C(65535));
         }
+      } else if constexpr (Op == rocjitsu::arith::Integer16Ternary::AddMin ||
+                           Op == rocjitsu::arith::Integer16Ternary::AddMax) {
+        // Saturate the sum before selection, regardless of the CLAMP control.
+        int64_t sum = rocjitsu::arith::clamp(x + y, int64_t(Signed ? -32768 : 0),
+                                             int64_t(Signed ? 32767 : 65535));
+        value = Op == rocjitsu::arith::Integer16Ternary::AddMin ? rocjitsu::arith::minimum(sum, z)
+                                                                : rocjitsu::arith::maximum(sum, z);
+        if constexpr (Signed) {
+          if (arithmetic_mode & RJ_ARITH_PK_CLAMP) {
+            value = rocjitsu::arith::maximum(value, int64_t(0));
+          }
+        }
       } else if constexpr (Op == rocjitsu::arith::Integer16Ternary::Min) {
         value = rocjitsu::arith::minimum(rocjitsu::arith::minimum(x, y), z);
       } else if constexpr (Op == rocjitsu::arith::Integer16Ternary::Max) {
@@ -90,6 +109,13 @@ int ternary(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *
         value =
             rocjitsu::arith::maximum(rocjitsu::arith::minimum(x, y),
                                      rocjitsu::arith::minimum(rocjitsu::arith::maximum(x, y), z));
+      }
+      if constexpr (Packed && Signed &&
+                    (Op == rocjitsu::arith::Integer16Ternary::Min ||
+                     Op == rocjitsu::arith::Integer16Ternary::Max)) {
+        if (arithmetic_mode & RJ_ARITH_PK_CLAMP) {
+          value = rocjitsu::arith::maximum(value, int64_t(0));
+        }
       }
       result[lane] |= uint32_t(uint16_t(value)) << (16 * half);
     }
@@ -428,5 +454,269 @@ int rj_arith_v_med3_i16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruc
     return error;
   }
   return ternary_wave64<true, rocjitsu::arith::Integer16Ternary::Median, false>(
+      flags, exec_mask, instruction_flags, d, a, b, c);
+}
+
+// Select the packed result after saturating A+B to 16 bits; signed CLAMP additionally excludes
+// negative results.
+int rj_arith_v_pk_add_min_i16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return ternary<true, rocjitsu::arith::Integer16Ternary::AddMin>(flags, exec_mask,
+                                                                  instruction_flags, d, a, b, c);
+}
+
+// Select the packed result after saturating A+B to 16 bits; signed CLAMP additionally excludes
+// negative results.
+int rj_arith_v_pk_add_min_i16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return ternary_wave64<true, rocjitsu::arith::Integer16Ternary::AddMin>(
+      flags, exec_mask, instruction_flags, d, a, b, c);
+}
+
+// Select the packed result after saturating A+B to 16 bits; signed CLAMP additionally excludes
+// negative results.
+int rj_arith_v_pk_add_min_u16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return ternary<false, rocjitsu::arith::Integer16Ternary::AddMin>(flags, exec_mask,
+                                                                   instruction_flags, d, a, b, c);
+}
+
+// Select the packed result after saturating A+B to 16 bits; signed CLAMP additionally excludes
+// negative results.
+int rj_arith_v_pk_add_min_u16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return ternary_wave64<false, rocjitsu::arith::Integer16Ternary::AddMin>(
+      flags, exec_mask, instruction_flags, d, a, b, c);
+}
+
+// Select the packed result after saturating A+B to 16 bits; signed CLAMP additionally excludes
+// negative results.
+int rj_arith_v_pk_add_max_i16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return ternary<true, rocjitsu::arith::Integer16Ternary::AddMax>(flags, exec_mask,
+                                                                  instruction_flags, d, a, b, c);
+}
+
+// Select the packed result after saturating A+B to 16 bits; signed CLAMP additionally excludes
+// negative results.
+int rj_arith_v_pk_add_max_i16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return ternary_wave64<true, rocjitsu::arith::Integer16Ternary::AddMax>(
+      flags, exec_mask, instruction_flags, d, a, b, c);
+}
+
+// Select the packed result after saturating A+B to 16 bits; signed CLAMP additionally excludes
+// negative results.
+int rj_arith_v_pk_add_max_u16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return ternary<false, rocjitsu::arith::Integer16Ternary::AddMax>(flags, exec_mask,
+                                                                   instruction_flags, d, a, b, c);
+}
+
+// Select the packed result after saturating A+B to 16 bits; signed CLAMP additionally excludes
+// negative results.
+int rj_arith_v_pk_add_max_u16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return ternary_wave64<false, rocjitsu::arith::Integer16Ternary::AddMax>(
+      flags, exec_mask, instruction_flags, d, a, b, c);
+}
+
+// Select the packed minimum/maximum of three operands; CLAMP is ignored.
+int rj_arith_v_pk_min3_i16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, const uint32_t *const *c) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return ternary<true, rocjitsu::arith::Integer16Ternary::Min>(flags, exec_mask, instruction_flags,
+                                                               d, a, b, c);
+}
+
+// Select the packed minimum/maximum of three operands; CLAMP is ignored.
+int rj_arith_v_pk_min3_i16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, const uint32_t *const *c) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return ternary_wave64<true, rocjitsu::arith::Integer16Ternary::Min>(
+      flags, exec_mask, instruction_flags, d, a, b, c);
+}
+
+// Select the packed minimum/maximum of three operands; CLAMP is ignored.
+int rj_arith_v_pk_min3_u16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, const uint32_t *const *c) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return ternary<false, rocjitsu::arith::Integer16Ternary::Min>(flags, exec_mask, instruction_flags,
+                                                                d, a, b, c);
+}
+
+// Select the packed minimum/maximum of three operands; CLAMP is ignored.
+int rj_arith_v_pk_min3_u16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, const uint32_t *const *c) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return ternary_wave64<false, rocjitsu::arith::Integer16Ternary::Min>(
+      flags, exec_mask, instruction_flags, d, a, b, c);
+}
+
+// Select the packed minimum/maximum of three operands; CLAMP is ignored.
+int rj_arith_v_pk_max3_i16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, const uint32_t *const *c) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return ternary<true, rocjitsu::arith::Integer16Ternary::Max>(flags, exec_mask, instruction_flags,
+                                                               d, a, b, c);
+}
+
+// Select the packed minimum/maximum of three operands; CLAMP is ignored.
+int rj_arith_v_pk_max3_i16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, const uint32_t *const *c) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return ternary_wave64<true, rocjitsu::arith::Integer16Ternary::Max>(
+      flags, exec_mask, instruction_flags, d, a, b, c);
+}
+
+// Select the packed minimum/maximum of three operands; CLAMP is ignored.
+int rj_arith_v_pk_max3_u16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, const uint32_t *const *c) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return ternary<false, rocjitsu::arith::Integer16Ternary::Max>(flags, exec_mask, instruction_flags,
+                                                                d, a, b, c);
+}
+
+// Select the packed minimum/maximum of three operands; CLAMP is ignored.
+int rj_arith_v_pk_max3_u16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, const uint32_t *const *c) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return ternary_wave64<false, rocjitsu::arith::Integer16Ternary::Max>(
       flags, exec_mask, instruction_flags, d, a, b, c);
 }

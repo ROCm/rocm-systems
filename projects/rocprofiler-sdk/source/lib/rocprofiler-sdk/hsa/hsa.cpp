@@ -590,6 +590,7 @@ hsa_shut_down_refcnt_impl()
             // hsa_shut_down_fn tears down below. Stop and join it here, while those
             // signals are still valid.
             ::rocprofiler::hsa::queue_interposition::stop_completion_monitor();
+            async_copy_reset();
         }
         return get_core_table()->hsa_shut_down_fn();
     }

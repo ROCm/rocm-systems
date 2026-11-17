@@ -10,7 +10,6 @@ from amdisa.codegen.execute.sema_lower import lower_sema_block
 from amdisa.codegen.execute.simd_codegen import local_coverage_probe, simd_probe_line
 from amdisa.codegen.execute.vector_special import (
     gen_vector_cvt_pk,
-    gen_vector_cvt_scale,
 )
 from amdisa.sema_derive import derive_sema_block
 from amdisa.sema_enrich import enrich_block
@@ -223,7 +222,3 @@ def test_cdna5_uses_shared_narrowing_for_non_scaled_ocp_conversions(fmt, helper)
         ['dst'], ['a'], 'vector_cvt_pk', f'f32_{fmt}', arch_name='cdna5'
     )
     assert f'util::{helper}_to_f32' in widened
-    scaled = gen_vector_cvt_scale(
-        ['dst'], ['a', 'b', 'c'], 'vector_cvt_scale', f'pack_pk8_{fmt}_f32', 'cdna5'
-    )
-    assert f'util::f32_to_{helper}_rne_mode' in scaled

@@ -22,5 +22,5 @@ pub(crate) use native::{
 
 #[cfg(all(test, target_os = "linux"))]
 pub(crate) use linux::ais::ais_transfer;
-#[cfg(all(target_os = "linux", target_arch = "x86_64", not(test)))]
+#[cfg(all(hsa_tool_dispatch, not(test)))]
 pub(crate) use linux::tooling;
