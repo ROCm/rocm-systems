@@ -19,8 +19,10 @@
 ///         |  make_trampoline_plan() + TrampolineBuilder::build()
 ///         v
 ///   (preflight: per-site plan + built bytes, accumulated locally)
-///         |  splice anchors + append probe bodies, entry stub and trampolines
-///         |  into .text + redirect the entry to the stub + emit()
+///         |  KernelEntry callbacks: retarget only the entry-stub branch
+///         |  checked transaction into the private original-text buffer
+///         |  append probe bodies, entry stub and trampolines to .text
+///         |  replace_text() + finalize ELF/resource updates
 ///         v
 ///   InstrumentedCodeObject      -- patch(): patched ELF + diagnostics
 ///   InstrumentedCodeObjectDebug -- patch_with_debug_summaries(): same result
@@ -42,10 +44,12 @@
 
 #pragma once
 
+#include "rocjitsu/code/analysis/instruction_boundaries.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/probe_callable.h"
 #include "rocjitsu/code/patch/probe_clobber.h"
 #include "rocjitsu/code/patch/spill_manager.h"
+#include "rocjitsu/code/patch/text_edit_error.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/register_set.h"
@@ -189,6 +193,11 @@ struct InstrumentedSite {
   uint32_t instrumentation_size = 0;
 };
 
+/// @brief Runtime obligation for the entry-prologue wrapper declared in the ELF.
+enum class DbiKernargBinding { None, CallerSuppliedWrapper };
+/// @brief Whether growth preserves live values or every originally declared GPR.
+enum class GuestStatePreservation { LiveRegisters, DeclaredRegisters };
+
 /// @brief Original SGPR/VGPR metadata counts needed to request register growth.
 struct OriginalRegisterCounts {
   uint32_t sgprs = 0;
@@ -201,19 +210,35 @@ struct InstrumentationResources {
   uint32_t kernarg_bytes = 0;
 };
 
+/// @brief Source-bound attribution and resources for one explicitly selected entry.
+struct InstrumentedEntry {
+  uint64_t original_descriptor_offset = 0;
+  uint64_t prepared_descriptor_offset = 0;
+  uint64_t original_entry_offset = 0;
+  uint64_t prepared_entry_offset = 0;
+  InstrumentationResources resources;
+  std::vector<InstrumentedSite> sites = {};
+};
+
 /// @brief All-or-nothing result: failures publish neither ELF bytes nor sites.
 struct InstrumentedCodeObject {
   std::vector<uint8_t> elf_bytes;
   std::vector<std::string> errors;
+  /// Present for anchor-batch failures; errors retains the human-readable diagnostic.
+  std::optional<TextEditError> edit_error;
   std::vector<std::string> warnings;
   std::vector<InstrumentedSite> sites;
   InstrumentationResources resources;
+  std::vector<InstrumentedEntry> entries;
 };
 
-/// @brief Runtime obligation for the entry-prologue wrapper declared in the ELF.
-enum class DbiKernargBinding { None, CallerSuppliedWrapper };
-/// @brief Whether growth preserves live values or every originally declared GPR.
-enum class GuestStatePreservation { LiveRegisters, DeclaredRegisters };
+/// @brief Per-entry options keyed to a descriptor in the immutable input image.
+struct EntryInstrumentationOptions {
+  uint64_t descriptor_file_offset = 0;
+  DbiKernargBinding kernarg_binding = DbiKernargBinding::None;
+  GuestStatePreservation preservation = GuestStatePreservation::LiveRegisters;
+  std::optional<OriginalRegisterCounts> register_growth;
+};
 
 struct InstrumentationOptions {
   DbiKernargBinding kernarg_binding = DbiKernargBinding::None;
@@ -222,6 +247,9 @@ struct InstrumentationOptions {
   /// register-to-register preservation and bounded allocation growth; absent
   /// means the existing allocation/scratch policy.
   std::optional<OriginalRegisterCounts> register_growth;
+  /// Explicit disjoint-entry requests; cannot be combined with legacy options.
+  /// Every queued point must belong to exactly one requested entry scope.
+  std::vector<EntryInstrumentationOptions> entries = {};
 };
 
 /// @brief Result of Instrumentor::patch_with_debug_summaries().
@@ -460,7 +488,7 @@ make_trampoline_plan(const ResolvedInstrumentationSite &site, rj_code_arch_t arc
 class Instrumentor {
 public:
   /// @param obj  The code object to instrument. Borrowed; must outlive the
-  ///             Instrumentor.
+  ///             Instrumentor and must remain immutable and unmoved.
   /// @param arch The ISA used to decode @p obj. An arch that has no
   ///             registered Decoder (RV32I/RV64I/INVALID/etc.) surfaces as
   ///             a ValidationResult / InstrumentedCodeObject error at
@@ -492,6 +520,8 @@ public:
   /// Currently all-or-nothing: on any failure, `sites` is empty and `errors`
   /// lists every fatal diagnostic encountered. On success, `sites` contains
   /// one record per queued point in insertion order and `errors` is empty.
+  /// Success establishes per-site eligibility, not that the final patch will succeed.
+  /// Complete encoded-batch reference checks and final layout checks run in patch().
   [[nodiscard]] ValidationResult validate_points();
 
   /// @brief Validate, plan, build, and apply the queued points; emit a
@@ -528,6 +558,13 @@ private:
   std::vector<InstrumentationPoint> points_;
   bool patched_ = false;
 
+  struct EntryPatchPlan;
+  EntryPatchPlan *entry_plan_ = nullptr;
+  ValidationResult *entry_validation_ = nullptr;
+  std::optional<uint64_t> planning_descriptor_offset_;
+  std::optional<uint64_t> planning_cave_offset_;
+  [[nodiscard]] InstrumentedCodeObjectDebug patch_entries();
+
   // Tests can bypass runtime-binding gates to inspect a plan or supply their own
   // dispatch support. Planner validation still runs; production callers cannot
   // bypass the gates.
@@ -542,10 +579,9 @@ private:
   // blocks_ so find_instruction_at_offset is O(1). Pointers are stable for
   // the lifetime of blocks_ (BasicBlock owns the Instructions via unique_ptr).
   std::unordered_map<uint64_t, const Instruction *> offset_to_inst_;
-  // .text-relative byte offsets that cannot be trampoline anchors because they
-  // are among the following instructions covered by an s_clause. The s_clause
-  // instruction itself is rejected by is_relocatable_anchor().
-  std::unordered_set<uint64_t> clause_blocked_offsets_;
+  // Owned full-section index built with this source's decoder alongside blocks_.
+  // The local anchor transaction borrows it during patching.
+  InstructionBoundaries instruction_boundaries_;
   bool blocks_built_ = false;
 
   // Returns false if no decoder exists for arch_ (RV32I/RV64I/INVALID/etc.);

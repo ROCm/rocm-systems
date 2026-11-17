@@ -49,7 +49,8 @@ Result validate_execution(const Manifest &manifest, const CapturedExecution &exe
     return Result::failure();
   if (execution.arguments.size() > limits.argument_bytes)
     return reject(error, ContractErrorCode::ResourceLimit, "capture argument budget exceeded");
-  if (execution.serial == 0 || execution.storage_slot == 0 || execution.storage_generation == 0 ||
+  if (execution.entry_key != manifest.entry.original_descriptor_offset || execution.serial == 0 ||
+      execution.storage_slot == 0 || execution.storage_generation == 0 ||
       execution.completion != kCompletionVisibleForwarded ||
       execution.arguments.size() != manifest.entry.original_kernarg_bytes ||
       execution.report.size() != layout.value().report_bytes ||
@@ -95,6 +96,7 @@ std::vector<uint8_t> encode_execution(const CapturedExecution &execution) {
   wire::write_u32(payload, 56, static_cast<uint32_t>(execution.arguments.size()));
   wire::write_u64(payload, 64, execution.report.size());
   std::copy(execution.context.begin(), execution.context.end(), payload.begin() + 72);
+  wire::write_u64(payload, 136, execution.entry_key);
   std::copy(execution.arguments.begin(), execution.arguments.end(),
             payload.begin() + kExecutionBytes);
   std::copy(execution.report.begin(), execution.report.end(),
@@ -109,10 +111,10 @@ std::vector<uint8_t> encode_execution(const CapturedExecution &execution) {
 }
 
 FailureOr<CapturedExecution> decode_execution(std::span<const uint8_t> payload,
-                                              const Manifest &manifest, ContractError *error,
+                                              const ImageFacts &image, ContractError *error,
                                               const CaptureLimits &limits) {
   if (payload.size() < kExecutionBytes || !all_zero(payload.subspan(52, 4)) ||
-      !all_zero(payload.subspan(60, 4)) || !all_zero(payload.subspan(136, 8)))
+      !all_zero(payload.subspan(60, 4)))
     return reject(error, ContractErrorCode::InvalidEncoding,
                   "missing execution fields or reserved bytes");
   const uint32_t argument_bytes = *wire::read_u32(payload, 56);
@@ -124,6 +126,11 @@ FailureOr<CapturedExecution> decode_execution(std::span<const uint8_t> payload,
     return reject(error, ContractErrorCode::InvalidEncoding, "execution payload extent mismatch");
   CapturedExecution execution;
   execution.serial = *wire::read_u64(payload, 0);
+  execution.entry_key = *wire::read_u64(payload, 136);
+  const Manifest *manifest = selected_manifest(image, execution.entry_key);
+  if (manifest == nullptr)
+    return reject(error, ContractErrorCode::IdentityMismatch,
+                  "unknown or native capture entry key");
   for (size_t index = 0; index < 3; ++index) {
     execution.dimensions.grid[index] = *wire::read_u32(payload, 8 + index * 4);
     execution.dimensions.workgroup[index] = *wire::read_u32(payload, 20 + index * 4);
@@ -137,7 +144,7 @@ FailureOr<CapturedExecution> decode_execution(std::span<const uint8_t> payload,
   execution.arguments.assign(payload.begin() + kExecutionBytes,
                              payload.begin() + kExecutionBytes + argument_bytes);
   execution.report.assign(payload.begin() + kExecutionBytes + argument_bytes, payload.end());
-  if (validate_execution(manifest, execution, error, limits).failed())
+  if (validate_execution(*manifest, execution, error, limits).failed())
     return Result::failure();
   return execution;
 }
@@ -151,7 +158,7 @@ FailureOr<std::vector<uint8_t>> CaptureEncoder::start(const CaptureHeader &heade
   if (started_ || !valid_header(header))
     return reject(error, ContractErrorCode::InvalidFacts,
                   "capture already started or invalid run execution conditions/identity");
-  const FailureOr<std::vector<uint8_t>> facts = encode_manifest(header.manifest, error);
+  const FailureOr<std::vector<uint8_t>> facts = encode_image_facts(header.image, error);
   if (facts.failed())
     return Result::failure();
   std::vector<uint8_t> prefix(kHeaderBytes + facts.value().size());
@@ -176,7 +183,11 @@ FailureOr<std::vector<uint8_t>> CaptureEncoder::append(const CapturedExecution &
                   "capture not open or serial is not its next execution");
   if (count_ >= limits.executions)
     return reject(error, ContractErrorCode::ResourceLimit, "capture execution budget exceeded");
-  if (validate_execution(header_.manifest, execution, error, limits).failed())
+  const Manifest *manifest = selected_manifest(header_.image, execution.entry_key);
+  if (manifest == nullptr)
+    return reject(error, ContractErrorCode::IdentityMismatch,
+                  "unknown or native capture entry key");
+  if (validate_execution(*manifest, execution, error, limits).failed())
     return Result::failure();
   const std::map<uint32_t, uint32_t>::iterator generation =
       generations_.find(execution.storage_slot);
@@ -233,12 +244,12 @@ FailureOr<Capture> decode_capture(std::span<const uint8_t> bytes, ContractError 
     return reject(error, ContractErrorCode::ResourceLimit, "capture facts budget exceeded");
   if (facts_bytes > bytes.size() - kHeaderBytes - kEndBytes)
     return reject(error, ContractErrorCode::InvalidEncoding, "capture facts extent is truncated");
-  const FailureOr<Manifest> manifest =
-      decode_manifest(bytes.subspan(kHeaderBytes, facts_bytes), error, limits.contract);
-  if (manifest.failed())
+  const FailureOr<ImageFacts> image =
+      decode_image_facts(bytes.subspan(kHeaderBytes, facts_bytes), error, limits.contract);
+  if (image.failed())
     return Result::failure();
   Capture capture;
-  capture.header.manifest = manifest.value();
+  capture.header.image = image.value();
   std::copy_n(bytes.begin() + 24, capture.header.run_identity.size(),
               capture.header.run_identity.begin());
   capture.header.execution_conditions = *wire::read_u32(bytes, 48);
@@ -268,7 +279,7 @@ FailureOr<Capture> decode_capture(std::span<const uint8_t> bytes, ContractError 
     if (!std::equal(frame_hash.begin(), frame_hash.end(), bytes.begin() + offset + 16))
       return reject(error, ContractErrorCode::InvalidEncoding, "execution frame checksum mismatch");
     FailureOr<CapturedExecution> execution =
-        decode_execution(payload, capture.header.manifest, error, limits);
+        decode_execution(payload, capture.header.image, error, limits);
     if (execution.failed())
       return Result::failure();
     if (execution.value().serial != capture.executions.size() + 1 ||

@@ -949,6 +949,7 @@ add_executable(
     consan_contract_test
     code/consan/contract_test.cpp
     code/consan/capture_test.cpp
+    code/consan/image_facts_test.cpp
 )
 target_link_libraries(
     consan_contract_test
@@ -1037,6 +1038,23 @@ if(RJ_BUILD_CONSAN_ANALYZER)
         )
     endif()
 endif()
+
+# Host-only checked anchor regressions use model ISA providers.
+add_executable(rocjitsu_text_edit_tests patch/checked_text_edits_test.cpp)
+target_include_directories(
+    rocjitsu_text_edit_tests
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+)
+target_link_libraries(
+    rocjitsu_text_edit_tests
+    PRIVATE
+        rocjitsu_dbt_internal
+        rocjitsu_amdgpu_isa_model_registry
+        simdojo_headers
+        GTest::gtest_main
+)
+rj_configure_target(rocjitsu_text_edit_tests PRIVATE_INCLUDES WARNINGS)
+rj_add_gtest_tests(rocjitsu_text_edit_tests)
 
 # These existing suites exercise ELF inspection, CFG construction, kernel
 # reachability, and register queries using only the static-analysis composition.

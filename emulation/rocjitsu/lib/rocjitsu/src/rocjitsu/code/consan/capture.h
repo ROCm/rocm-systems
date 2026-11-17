@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "rocjitsu/code/consan/contract.h"
+#include "rocjitsu/code/consan/image/facts.h"
 #include "util/sha256.h"
 
 #include <map>
@@ -27,7 +27,7 @@ inline constexpr uint32_t kCompletionVisibleForwarded = 7;
 class CaptureHeader {
 public:
   std::array<uint8_t, 16> run_identity{};
-  Manifest manifest;
+  ImageFacts image;
   uint32_t execution_conditions = kSupportedExecutionConditions;
   bool operator==(const CaptureHeader &) const = default;
 };
@@ -37,6 +37,7 @@ class CapturedExecution {
 public:
   // Nonzero, increasing identity within the capture's run_identity.
   uint64_t serial = 0;
+  EntryKey entry_key = 0;
   LaunchDimensions dimensions;
   uint32_t group_bytes = 0;
   uint32_t private_bytes = 0;

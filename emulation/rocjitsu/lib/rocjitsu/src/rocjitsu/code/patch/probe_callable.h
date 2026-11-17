@@ -114,6 +114,14 @@ struct ProbeArgValue {
   return registers;
 }
 
+/// @brief Whether entry-TTMP capture supports @p arch without trap-handler privilege.
+/// @details RDNA4 and CDNA5 permit user reads of TTMP0-15. Keep the supported
+/// set explicit: CDNA4 reads return zero, and an unclassified target must not
+/// silently expose unavailable entry inputs.
+[[nodiscard]] inline constexpr bool supports_entry_ttmp_capture(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+}
+
 /// @brief Does @p source read the saved anchor EXEC pair?
 [[nodiscard]] inline constexpr bool reads_anchor_exec(ProbeArgSource source) {
   return source == ProbeArgSource::AnchorExecLo || source == ProbeArgSource::AnchorExecHi;

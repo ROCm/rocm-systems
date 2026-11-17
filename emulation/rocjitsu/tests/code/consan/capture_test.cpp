@@ -20,7 +20,7 @@ protected:
     FailureOr<std::vector<uint8_t>> prefix = encoder.start(header_, &error_);
     ASSERT_TRUE(prefix.succeeded()) << error_.message;
     FailureOr<std::vector<uint8_t>> frame =
-        encoder.append(test::execution(header_.manifest, 1), &error_);
+        encoder.append(test::execution(test::manifest(header_), 1), &error_);
     ASSERT_TRUE(frame.succeeded()) << error_.message;
     FailureOr<std::vector<uint8_t>> end = encoder.finish(&error_);
     ASSERT_TRUE(end.succeeded());
@@ -52,14 +52,14 @@ TEST_F(ConSanCapture, CompleteContainerOwnsFactsArgumentsContextAndRawBytes) {
   ASSERT_TRUE(decoded.succeeded()) << error_.message;
   ASSERT_EQ(decoded.value().executions.size(), 1u);
   EXPECT_EQ(decoded.value().header, header_);
-  const CapturedExecution original = test::execution(header_.manifest, 1);
+  const CapturedExecution original = test::execution(test::manifest(header_), 1);
   std::ranges::fill(bytes_, 0xcd);
   const CapturedExecution &execution = decoded.value().executions.front();
   EXPECT_EQ(execution.serial, 1u);
   EXPECT_EQ(execution.context, original.context);
   EXPECT_EQ(execution.report, original.report);
   EXPECT_EQ(execution.arguments, original.arguments);
-  EXPECT_EQ(decoded.value().header.manifest.entry.name, "synthetic_codec_fixture");
+  EXPECT_EQ(test::manifest(decoded.value().header).entry.name, "synthetic_codec_fixture");
 }
 
 TEST_F(ConSanCapture, EveryTruncatedPrefixAndTrailingBytesLackACompleteContainer) {
@@ -100,7 +100,7 @@ TEST_F(ConSanCapture, ValidChecksumsDoNotBypassExecutionIdentityAndVisibility) {
 TEST_F(ConSanCapture, ValidContainerPreservesMalformedRowsForIndependentDiagnosis) {
   CaptureEncoder encoder;
   const FailureOr<std::vector<uint8_t>> prefix = encoder.start(header_);
-  CapturedExecution execution = test::execution(header_.manifest, 1);
+  CapturedExecution execution = test::execution(test::manifest(header_), 1);
   wire::write_u32(execution.report, kReportHeaderBytes + wire::kRowStatus, UINT32_MAX);
   const FailureOr<std::vector<uint8_t>> frame = encoder.append(execution, &error_);
   ASSERT_TRUE(frame.succeeded()) << error_.message;
@@ -126,7 +126,7 @@ TEST_F(ConSanCapture, EndMembershipBoundsAndReservedFieldsAreCheckedBeyondTheChe
   EXPECT_TRUE(decode_capture(bytes_, &error_).failed());
   EXPECT_NE(error_.message.find("truncated execution"), std::string::npos);
   bytes_ = saved;
-  bytes_[frame_offset_ + 48 + 136] = 1;
+  bytes_[frame_offset_ + 48 + 52] = 1;
   reseal(true);
   EXPECT_TRUE(decode_capture(bytes_, &error_).failed());
   EXPECT_NE(error_.message.find("reserved"), std::string::npos);
@@ -169,20 +169,95 @@ TEST_F(ConSanCapture, UnsupportedExecutionConditionsRemainRejectedBeyondChecksum
 TEST_F(ConSanCapture, EncoderRequiresOrderedUniqueExecutionsAndIncreasingStorageGenerations) {
   CaptureEncoder encoder;
   EXPECT_TRUE(encoder.finish(&error_).failed());
-  EXPECT_TRUE(encoder.append(test::execution(header_.manifest, 1), &error_).failed());
+  EXPECT_TRUE(encoder.append(test::execution(test::manifest(header_), 1), &error_).failed());
   CaptureHeader invalid = header_;
   invalid.execution_conditions = 0;
   EXPECT_TRUE(encoder.start(invalid, &error_).failed());
   EXPECT_TRUE(encoder.start(header_, &error_).succeeded());
   EXPECT_TRUE(encoder.start(header_, &error_).failed());
-  EXPECT_TRUE(encoder.append(test::execution(header_.manifest, 2), &error_).failed());
-  EXPECT_TRUE(encoder.append(test::execution(header_.manifest, 1), &error_).succeeded());
-  EXPECT_TRUE(encoder.append(test::execution(header_.manifest, 1), &error_).failed());
-  EXPECT_TRUE(encoder.append(test::execution(header_.manifest, 2), &error_).failed());
-  EXPECT_TRUE(encoder.append(test::execution(header_.manifest, 2, 2), &error_).succeeded());
+  EXPECT_TRUE(encoder.append(test::execution(test::manifest(header_), 2), &error_).failed());
+  EXPECT_TRUE(encoder.append(test::execution(test::manifest(header_), 1), &error_).succeeded());
+  EXPECT_TRUE(encoder.append(test::execution(test::manifest(header_), 1), &error_).failed());
+  EXPECT_TRUE(encoder.append(test::execution(test::manifest(header_), 2), &error_).failed());
+  EXPECT_TRUE(encoder.append(test::execution(test::manifest(header_), 2, 2), &error_).succeeded());
   EXPECT_TRUE(encoder.finish(&error_).succeeded());
   EXPECT_TRUE(encoder.finish(&error_).failed());
-  EXPECT_TRUE(encoder.append(test::execution(header_.manifest, 3, 3), &error_).failed());
+  EXPECT_TRUE(encoder.append(test::execution(test::manifest(header_), 3, 3), &error_).failed());
+}
+
+TEST_F(ConSanCapture, DecoderRejectsUnknownEntryKeyEvenWithValidChecksums) {
+  wire::write_u64(bytes_, frame_offset_ + 48 + 136, 999);
+  reseal(true);
+  EXPECT_TRUE(decode_capture(bytes_, &error_).failed());
+  EXPECT_EQ(error_.code, ContractErrorCode::IdentityMismatch);
+  EXPECT_NE(error_.message.find("entry key"), std::string::npos);
+}
+
+TEST(ConSanMultiEntryCapture, NativeBindingCannotAcquireSelectedObservationFrames) {
+  CaptureHeader header = test::multi_entry_header();
+  ImageEntryFacts &native = header.image.entries.back();
+  native.disposition = EntryDisposition::Native;
+  native.selected.reset();
+  native.binding.prepared_sgprs = native.original_sgprs;
+  native.binding.prepared_vgprs = native.original_vgprs;
+  const std::array<EntryKey, 1> keys = {128};
+  header.image.selection_profile = selection_profile_digest(keys);
+  CaptureEncoder encoder;
+  ContractError error;
+  ASSERT_TRUE(encoder.start(header, &error).succeeded()) << error.message;
+  CapturedExecution execution = test::execution(test::manifest(header), 1);
+  execution.entry_key = native.key;
+  EXPECT_TRUE(encoder.append(execution, &error).failed());
+  EXPECT_EQ(error.code, ContractErrorCode::IdentityMismatch);
+}
+
+TEST(ConSanMultiEntryCapture, HeaderOwnsDifferentFactsAcrossOneImageAndRepeatedReportSlot) {
+  CaptureHeader header = test::multi_entry_header();
+  const ImageFacts expected = header.image;
+  CaptureEncoder encoder;
+  ContractError error;
+  const FailureOr<std::vector<uint8_t>> prefix = encoder.start(header, &error);
+  ASSERT_TRUE(prefix.succeeded()) << error.message;
+  std::vector<uint8_t> bytes = prefix.value();
+  const std::array<EntryKey, 3> keys = {128, 192, 128};
+  for (uint32_t index = 0; index < keys.size(); ++index) {
+    const Manifest *facts = selected_manifest(header.image, keys[index]);
+    ASSERT_NE(facts, nullptr);
+    const CapturedExecution execution = test::execution(*facts, index + 1, index + 1);
+    const FailureOr<std::vector<uint8_t>> frame = encoder.append(execution, &error);
+    ASSERT_TRUE(frame.succeeded()) << error.message;
+    bytes.insert(bytes.end(), frame.value().begin(), frame.value().end());
+  }
+  const FailureOr<std::vector<uint8_t>> end = encoder.finish(&error);
+  ASSERT_TRUE(end.succeeded()) << error.message;
+  bytes.insert(bytes.end(), end.value().begin(), end.value().end());
+  header.image.entries.clear();
+  const FailureOr<Capture> decoded = decode_capture(bytes, &error);
+  ASSERT_TRUE(decoded.succeeded()) << error.message;
+  EXPECT_EQ(decoded.value().header.image, expected);
+  ASSERT_EQ(decoded.value().executions.size(), 3u);
+  for (uint32_t index = 0; index < keys.size(); ++index) {
+    const CapturedExecution &execution = decoded.value().executions[index];
+    EXPECT_EQ(execution.entry_key, keys[index]);
+    EXPECT_EQ(execution.arguments.size(), index == 1 ? 32u : 16u);
+    EXPECT_EQ(execution.storage_generation, index + 1);
+  }
+}
+
+TEST(ConSanMultiEntryCapture, UnknownKeyAndWrongEntryExtentsCannotBorrowSiblingFacts) {
+  const CaptureHeader header = test::multi_entry_header();
+  ContractError error;
+  CaptureEncoder encoder;
+  ASSERT_TRUE(encoder.start(header, &error).succeeded()) << error.message;
+  CapturedExecution execution = test::execution(test::manifest(header), 1);
+  execution.entry_key = 999;
+  EXPECT_TRUE(encoder.append(execution, &error).failed());
+  EXPECT_EQ(error.code, ContractErrorCode::IdentityMismatch);
+  execution.entry_key = 192;
+  EXPECT_TRUE(encoder.append(execution, &error).failed());
+  EXPECT_EQ(error.message.find("checksum"), std::string::npos);
+  execution.entry_key = 128;
+  EXPECT_TRUE(encoder.append(execution, &error).succeeded()) << error.message;
 }
 
 } // namespace

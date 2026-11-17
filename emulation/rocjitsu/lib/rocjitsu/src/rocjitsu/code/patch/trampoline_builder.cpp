@@ -444,6 +444,11 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
     entry_storage.expand(RegisterRef{RegClass::SGPR, *plan.entry_storage_base, 2});
     std::vector<std::pair<RegClass, uint16_t>> captured_registers;
     for (const EntryRegisterCapture &capture : plan.entry_register_captures) {
+      if (capture.source_class == RegClass::TTMP && !supports_entry_ttmp_capture(plan.arch)) {
+        report(error_out, "entry TTMP capture requires unprivileged TTMP reads, which this "
+                          "target does not support");
+        return false;
+      }
       if (capture.sgpr < *plan.entry_storage_base + 2 ||
           capture.sgpr >= *plan.entry_storage_base + 4 || capture.sgpr >= sgpr_bound ||
           (capture.source_class != RegClass::SGPR && capture.source_class != RegClass::VGPR &&

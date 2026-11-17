@@ -17,7 +17,6 @@ class Instruction;
 namespace rocjitsu::consan {
 struct InputError;
 struct InputProgram;
-struct PreparedArtifact;
 
 /// @brief A decoder-qualified physical access; addresses remain runtime operands.
 struct NativeLdsAccess {
@@ -51,7 +50,7 @@ struct NativeLdsAccess {
 
 /// @brief Check decoded LDS multiplicity and original bytes independently of emission.
 [[nodiscard]] Result validate_lds_race_accesses(const InputProgram &program,
-                                                const PreparedArtifact &artifact,
+                                                const Manifest &manifest,
                                                 std::span<BasicBlock *const> blocks,
                                                 std::span<const uint8_t> prepared_text,
                                                 InputError &error);

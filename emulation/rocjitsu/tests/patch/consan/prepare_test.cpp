@@ -21,6 +21,266 @@
 namespace rocjitsu::consan {
 namespace {
 
+#ifdef CONSAN_MULTI_ENTRY_FIXTURE
+class ConSanPrepareImage : public ::testing::Test {
+protected:
+  void SetUp() override {
+    std::ifstream file(CONSAN_MULTI_ENTRY_FIXTURE, std::ios::binary);
+    original_ = {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+    ASSERT_FALSE(original_.empty());
+  }
+  std::vector<uint8_t> original_;
+  InputError error_;
+};
+
+TEST_F(ConSanPrepareImage, WholeImageHasIndependentEntryPlansAndNativeSibling) {
+  const std::array<std::string_view, 2> entries = {"mk_a", "mk_b"};
+  const FailureOr<PreparedImageArtifact> artifact =
+      prepare_image(original_, *target_profile("gfx1250"), entries, error_);
+  ASSERT_TRUE(artifact.succeeded()) << error_.message;
+  const ImageFacts &facts = artifact.value().facts;
+  ASSERT_EQ(facts.entries.size(), 3u);
+  const ImageEntryFacts &first = facts.entries[0];
+  const ImageEntryFacts &second = facts.entries[1];
+  const ImageEntryFacts &native = facts.entries[2];
+  ASSERT_TRUE(first.selected);
+  ASSERT_TRUE(second.selected);
+  EXPECT_FALSE(native.selected);
+  EXPECT_EQ(first.binding.name, "mk_a");
+  EXPECT_EQ(second.binding.name, "mk_b");
+  EXPECT_EQ(native.binding.name, "mk_c");
+  EXPECT_EQ(first.binding.original_kernarg_bytes, 16u);
+  EXPECT_EQ(second.binding.original_kernarg_bytes, 32u);
+  EXPECT_NE(first.binding.prepared_sgprs, second.binding.prepared_sgprs);
+  EXPECT_NE(first.binding.prepared_vgprs, second.binding.prepared_vgprs);
+  EXPECT_NE(first.binding.prepared_entry_offset, second.binding.prepared_entry_offset);
+  EXPECT_EQ(first.selected->sites.size(), 2u);
+  EXPECT_EQ(second.selected->sites.size(), 2u);
+  EXPECT_EQ(first.selected->entry.id, 0u);
+  EXPECT_EQ(second.selected->entry.id, 0u);
+  EXPECT_NE(first.selected->sites[0].original_offset, second.selected->sites[0].original_offset);
+  EXPECT_EQ(native.binding.original_kernarg_bytes, 24u);
+  EXPECT_EQ(native.binding.original_group_bytes, native.binding.prepared_group_bytes);
+  EXPECT_EQ(native.original_sgprs, native.binding.prepared_sgprs);
+  EXPECT_EQ(native.original_vgprs, native.binding.prepared_vgprs);
+  ContractError contract_error;
+  EXPECT_TRUE(
+      verify_artifact_images(facts, original_, artifact.value().image, &contract_error).succeeded())
+      << contract_error.message;
+  const FailureOr<std::vector<uint8_t>> encoded = encode_image_facts(facts);
+  ASSERT_TRUE(encoded.succeeded());
+  const FailureOr<ImageFacts> decoded = decode_image_facts(encoded.value());
+  ASSERT_TRUE(decoded.succeeded());
+  EXPECT_EQ(decoded.value(), facts);
+  AmdGpuCodeObject object(artifact.value().image.data(), artifact.value().image.size());
+  bool extensions_found = false;
+  for (const std::unique_ptr<Section> &section : object.all_sections()) {
+    if (section->name() != kKernargExtensionMetadataSectionName)
+      continue;
+    const std::optional<std::vector<KernargExtensionMetadata>> records =
+        parse_kernarg_extension_metadata(
+            {reinterpret_cast<const uint8_t *>(section->data()), section->size()});
+    ASSERT_TRUE(records);
+    ASSERT_EQ(records->size(), 2u);
+    EXPECT_EQ((*records)[0].kernel_name, "mk_a");
+    EXPECT_EQ((*records)[1].kernel_name, "mk_b");
+    EXPECT_EQ((*records)[0].original_kernarg_size, 16u);
+    EXPECT_EQ((*records)[1].original_kernarg_size, 32u);
+    extensions_found = true;
+  }
+  EXPECT_TRUE(extensions_found);
+}
+
+TEST_F(ConSanPrepareImage, SelectionOrderIsCanonicalAndSingleSubsetPreservesOtherEntries) {
+  const std::array<std::string_view, 2> forward = {"mk_a", "mk_b"};
+  const std::array<std::string_view, 2> reverse = {"mk_b", "mk_a"};
+  const FailureOr<PreparedImageArtifact> first =
+      prepare_image(original_, *target_profile("gfx1250"), forward, error_);
+  ASSERT_TRUE(first.succeeded()) << error_.message;
+  const FailureOr<PreparedImageArtifact> second =
+      prepare_image(original_, *target_profile("gfx1250"), reverse, error_);
+  ASSERT_TRUE(second.succeeded()) << error_.message;
+  EXPECT_EQ(first.value().facts, second.value().facts);
+  EXPECT_EQ(first.value().image, second.value().image);
+  for (const std::string_view name : {"mk_a", "mk_b"}) {
+    const std::array<std::string_view, 1> selected = {name};
+    const FailureOr<PreparedImageArtifact> subset =
+        prepare_image(original_, *target_profile("gfx1250"), selected, error_);
+    ASSERT_TRUE(subset.succeeded()) << name << ": " << error_.message;
+    EXPECT_NE(subset.value().facts.selection_profile, first.value().facts.selection_profile);
+    for (const ImageEntryFacts &entry : subset.value().facts.entries)
+      EXPECT_EQ(entry.disposition == EntryDisposition::Selected, entry.binding.name == name);
+  }
+}
+
+TEST_F(ConSanPrepareImage, InvalidNativeNameCannotPublishFactsThatJsonAnalysisRejects) {
+  constexpr std::array<uint8_t, 4> name = {'m', 'k', '_', 'c'};
+  size_t replacements = 0;
+  for (size_t offset = 0; offset + name.size() <= original_.size(); ++offset) {
+    if (std::equal(name.begin(), name.end(), original_.begin() + offset)) {
+      original_[offset] = 0xff;
+      ++replacements;
+    }
+  }
+  ASSERT_GT(replacements, 0u);
+  const std::array<std::string_view, 2> selected = {"mk_a", "mk_b"};
+  const FailureOr<PreparedImageArtifact> artifact =
+      prepare_image(original_, *target_profile("gfx1250"), selected, error_);
+  EXPECT_TRUE(artifact.failed());
+  EXPECT_EQ(error_.code, InputErrorCode::UnsupportedEntry);
+  EXPECT_EQ(error_.message, "entry name is not valid UTF-8 for JSON output");
+}
+
+TEST_F(ConSanPrepareImage, InvalidOrIncompleteSelectionPublishesNoResult) {
+  const TargetProfile &target = *target_profile("gfx1250");
+  EXPECT_TRUE(prepare_image(original_, target, {}, error_).failed());
+  const std::array<std::string_view, 2> duplicate = {"mk_a", "mk_a"};
+  EXPECT_TRUE(prepare_image(original_, target, duplicate, error_).failed());
+  const std::array<std::string_view, 2> missing = {"mk_a", "missing"};
+  EXPECT_TRUE(prepare_image(original_, target, missing, error_).failed());
+  const std::array<std::string_view, 2> selected = {"mk_a", "mk_b"};
+  Elf64_Ehdr header = {};
+  std::memcpy(&header, original_.data(), sizeof(header));
+  for (size_t index = 0; index < header.e_phnum; ++index) {
+    const size_t offset = header.e_phoff + index * sizeof(Elf64_Phdr);
+    Elf64_Phdr segment = {};
+    std::memcpy(&segment, original_.data() + offset, sizeof(segment));
+    if ((segment.p_flags & PF_X) != 0) {
+      segment.p_flags &= ~PF_X;
+      std::memcpy(original_.data() + offset, &segment, sizeof(segment));
+    }
+  }
+  EXPECT_TRUE(prepare_image(original_, target, selected, error_).failed());
+}
+#endif
+
+#if defined(CONSAN_MULTI_ENTRY_BARRIER_FIXTURE) || defined(CONSAN_MULTI_ENTRY_LOOP_FIXTURE)
+void expect_scoped_multi_entry_image(const char *fixture, ScopeKind expected_scope, bool repeated) {
+  std::ifstream file(fixture, std::ios::binary);
+  const std::vector<uint8_t> original = {std::istreambuf_iterator<char>(file),
+                                         std::istreambuf_iterator<char>()};
+  ASSERT_FALSE(original.empty());
+  const TargetProfile &target = *target_profile("gfx1250");
+  const std::array<std::string_view, 2> selected = {"mk_a", "mk_b"};
+  InputError error;
+  const FailureOr<PreparedImageArtifact> artifact =
+      prepare_image(original, target, selected, error);
+  ASSERT_TRUE(artifact.succeeded()) << error.message;
+  const ImageFacts &facts = artifact.value().facts;
+  ASSERT_EQ(facts.entries.size(), 3u);
+  EXPECT_EQ(selected_scope(facts), expected_scope);
+  const AmdGpuCodeObject prepared(artifact.value().image.data(), artifact.value().image.size());
+  ASSERT_TRUE(prepared.is_valid());
+  ASSERT_EQ(prepared.text_sections().size(), 1u);
+  const Section &text = *prepared.text_sections().front();
+  std::vector<EntryKey> keys;
+  std::vector<uint64_t> wait_offsets;
+  size_t native_count = 0;
+  for (const ImageEntryFacts &entry : facts.entries) {
+    if (!entry.selected) {
+      ++native_count;
+      EXPECT_EQ(entry.binding.name, "mk_c");
+      EXPECT_EQ(entry.binding.original_group_bytes, entry.binding.prepared_group_bytes);
+      EXPECT_EQ(entry.binding.prepared_sgprs, entry.original_sgprs);
+      EXPECT_EQ(entry.binding.prepared_vgprs, entry.original_vgprs);
+      continue;
+    }
+    keys.push_back(entry.key);
+    const Manifest &manifest = *entry.selected;
+    const FailureOr<InputProgram> program =
+        build_image_entry_program(original, target, entry.binding.name, error);
+    ASSERT_TRUE(program.succeeded()) << error.message;
+    EXPECT_EQ(program.value().repeated, repeated);
+    ASSERT_EQ(program.value().barriers.size(), 1u);
+    ASSERT_EQ(manifest.barriers.size(), 1u);
+    EXPECT_EQ(manifest.scope, expected_scope);
+    EXPECT_EQ(manifest.entry.workgroup_id_scalar, kWorkgroupIdTtmp9Selector);
+    ASSERT_EQ(manifest.sites.size(), program.value().accesses.size());
+    for (size_t index = 0; index < manifest.sites.size(); ++index) {
+      EXPECT_EQ(manifest.sites[index].width, program.value().accesses[index].width);
+      EXPECT_EQ(manifest.sites[index].original_offset,
+                program.value().accesses[index].original_offset);
+    }
+    const BarrierFacts &barrier = manifest.barriers.front();
+    const BarrierFacts &source_barrier = program.value().barriers.front();
+    EXPECT_EQ(barrier.original_drain, source_barrier.original_drain);
+    EXPECT_EQ(barrier.original_signal, source_barrier.original_signal);
+    EXPECT_EQ(barrier.original_wait, source_barrier.original_wait);
+    EXPECT_EQ(barrier.identity, source_barrier.identity);
+    EXPECT_EQ(barrier.prepared_signal, barrier.original_signal);
+    ASSERT_LT(barrier.prepared_wait + 4, text.size());
+    EXPECT_GE(barrier.completion_probe, barrier.prepared_wait + 4);
+    EXPECT_GT(barrier.probe_size, 0u);
+    EXPECT_EQ(std::memcmp(
+                  original.data() + program.value().text_file_offset + barrier.original_wait,
+                  artifact.value().image.data() + text.sectionOffset() + barrier.prepared_wait, 4),
+              0);
+    wait_offsets.push_back(barrier.original_wait);
+    const LaunchDimensions dimensions = {.grid = {128, 1, 1}, .workgroup = {64, 1, 1}};
+    const FailureOr<LaunchLayout> layout =
+        plan_launch(manifest, dimensions, manifest.entry.original_group_bytes, 0);
+    ASSERT_TRUE(layout.succeeded());
+    EXPECT_EQ(layout.value().workgroup_count, 2u);
+    EXPECT_EQ(layout.value().waves_per_workgroup, 2u);
+    EXPECT_EQ(layout.value().wave_count, 4u);
+    EXPECT_EQ(layout.value().row_stride, report_row_bytes(manifest.sites.size(), true));
+    EXPECT_GT(layout.value().row_stride, report_row_bytes(manifest.sites.size(), false));
+  }
+  EXPECT_EQ(native_count, 1u);
+  ASSERT_EQ(keys.size(), 2u);
+  ASSERT_EQ(wait_offsets.size(), 2u);
+  EXPECT_NE(wait_offsets[0], wait_offsets[1]);
+  EXPECT_EQ(facts.selection_profile, selection_profile_digest(keys, expected_scope));
+  ContractError contract_error;
+  EXPECT_TRUE(
+      verify_artifact_images(facts, original, artifact.value().image, &contract_error).succeeded())
+      << contract_error.message;
+  const FailureOr<std::vector<uint8_t>> encoded = encode_image_facts(facts);
+  ASSERT_TRUE(encoded.succeeded());
+  const FailureOr<ImageFacts> decoded = decode_image_facts(encoded.value());
+  ASSERT_TRUE(decoded.succeeded());
+  EXPECT_EQ(decoded.value(), facts);
+}
+#endif
+
+#ifdef CONSAN_MULTI_ENTRY_BARRIER_FIXTURE
+TEST(ConSanPrepareImageScopes, WholeImageKeepsPerEntryBarrierCompletionAndWorkgroupFacts) {
+  ASSERT_NO_FATAL_FAILURE(expect_scoped_multi_entry_image(
+      CONSAN_MULTI_ENTRY_BARRIER_FIXTURE, ScopeKind::NativeLdsWorkgroupBarrier, false));
+}
+#endif
+
+#ifdef CONSAN_MULTI_ENTRY_LOOP_FIXTURE
+TEST(ConSanPrepareImageScopes, WholeImageKeepsPerEntryLoopCompletionAndWorkgroupFacts) {
+  ASSERT_NO_FATAL_FAILURE(expect_scoped_multi_entry_image(
+      CONSAN_MULTI_ENTRY_LOOP_FIXTURE, ScopeKind::NativeLdsWorkgroupBarrierLoop, true));
+}
+#endif
+
+#ifdef CONSAN_MULTI_ENTRY_MIXED_FIXTURE
+TEST(ConSanPrepareImageScopes, MixedSelectedScopesRejectWhileHomogeneousSubsetsRemainValid) {
+  std::ifstream file(CONSAN_MULTI_ENTRY_MIXED_FIXTURE, std::ios::binary);
+  const std::vector<uint8_t> original = {std::istreambuf_iterator<char>(file),
+                                         std::istreambuf_iterator<char>()};
+  ASSERT_FALSE(original.empty());
+  const TargetProfile &target = *target_profile("gfx1250");
+  const std::array<std::string_view, 2> selected = {"mk_a", "mk_b"};
+  InputError error;
+  EXPECT_TRUE(prepare_image(original, target, selected, error).failed());
+  EXPECT_EQ(error.code, InputErrorCode::UnsupportedEntry);
+  EXPECT_EQ(error.message, "selected entries have inconsistent analysis scopes");
+  for (const std::string_view name : selected) {
+    const std::array<std::string_view, 1> subset = {name};
+    const FailureOr<PreparedImageArtifact> artifact =
+        prepare_image(original, target, subset, error);
+    ASSERT_TRUE(artifact.succeeded()) << error.message;
+    const ScopeKind expected = name == "mk_a" ? ScopeKind::NativeLdsWorkgroupBarrier
+                                              : ScopeKind::NativeLdsNoSynchronization;
+    EXPECT_EQ(selected_scope(artifact.value().facts), expected);
+  }
+}
+#endif
+
 class ConSanPrepare : public ::testing::Test {
 protected:
   void SetUp() override {
