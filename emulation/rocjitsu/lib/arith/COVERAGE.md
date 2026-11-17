@@ -96,3 +96,11 @@ Halfword and packed-integer operations also reuse the library, preserving CDNA
 low-half destination zero-extension. DOT2/4/8 use [integer_dot.cpp](src/dot/integer_dot.cpp); CDNA-specific
 PRNG, BITOP3, rotate, funnel-shift and bit-count forms also route through
 the library.
+
+## Comparison Compatibility ownership
+
+Gfx12 signaling FP comparisons classify Compatibility causes inside rj-arith,
+including the inherited whole-wave nonfinite gate. The VM owns operand views,
+VCC/EXEC writes and trap delivery. Ordinary Compatibility comparisons remain
+numeric-only; explicit reporting qualification is unchanged. Gfx10 signaling
+policy remains in the partially migrated RDNA2 adapter until that migration.

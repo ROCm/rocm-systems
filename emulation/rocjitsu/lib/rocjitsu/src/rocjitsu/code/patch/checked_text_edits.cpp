@@ -4,6 +4,7 @@
 #include "rocjitsu/code/patch/checked_text_edits.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
+#include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/analysis/instruction_boundaries.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/text_padding.h"
@@ -11,11 +12,16 @@
 #include "rocjitsu/isa/instruction.h"
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <iterator>
 #include <limits>
 #include <optional>
+#include <span>
+#include <string>
 #include <utility>
+#include <vector>
 
 namespace rocjitsu {
 namespace {
@@ -38,6 +44,67 @@ bool reference_enters_edit(uint64_t offset, std::span<const CheckedTextEdit> edi
     return false;
   const CheckedTextEdit &edit = *std::prev(next);
   return offset > edit.offset && offset - edit.offset < edit.expected.size();
+}
+
+Result validate_load_file_aliases(const AmdGpuCodeObject &source,
+                                  std::span<const CheckedTextEdit> edits, TextEditError &error) {
+  const std::span<const uint8_t> image = image_bytes(source);
+  Elf64_Ehdr header = {};
+  std::memcpy(&header, image.data(), sizeof(header));
+  const std::optional<std::vector<Elf64_Phdr>> segments =
+      read_elf_table<Elf64_Phdr>(image, header.e_phoff, header.e_phnum, header.e_phentsize);
+  if (!segments)
+    return reject(error, TextEditErrorCode::InvalidImage, "invalid PT_LOAD program header table",
+                  edits.front().offset);
+  for (const Elf64_Phdr &segment : *segments) {
+    if (segment.p_type != PT_LOAD || segment.p_filesz == 0)
+      continue;
+    if (segment.p_offset > image.size() || segment.p_filesz > image.size() - segment.p_offset ||
+        segment.p_filesz > segment.p_memsz ||
+        segment.p_memsz > std::numeric_limits<uint64_t>::max() - segment.p_vaddr)
+      return reject(error, TextEditErrorCode::InvalidImage, "invalid PT_LOAD extent",
+                    edits.front().offset);
+  }
+  const Section &text = *source.text_sections().front();
+  for (size_t left_index = 0; left_index < segments->size(); ++left_index) {
+    const Elf64_Phdr &left = (*segments)[left_index];
+    if (left.p_type != PT_LOAD || left.p_filesz == 0)
+      continue;
+    for (size_t right_index = left_index + 1; right_index < segments->size(); ++right_index) {
+      const Elf64_Phdr &right = (*segments)[right_index];
+      if (right.p_type != PT_LOAD || right.p_filesz == 0)
+        continue;
+      const uint64_t shared_begin = std::max(left.p_offset, right.p_offset);
+      const uint64_t shared_end =
+          std::min(left.p_offset + left.p_filesz, right.p_offset + right.p_filesz);
+      if (shared_begin >= shared_end)
+        continue;
+      // Both file ranges and virtual extents were checked above. Their affine
+      // mappings agree throughout the shared interval if they agree at its start.
+      const uint64_t left_address = left.p_vaddr + (shared_begin - left.p_offset);
+      const uint64_t right_address = right.p_vaddr + (shared_begin - right.p_offset);
+      if (left_address == right_address)
+        continue;
+      for (const CheckedTextEdit &edit : edits) {
+        // Source extent and per-edit bounds have already been validated, so
+        // these file coordinates stay inside the immutable source image.
+        const uint64_t edit_begin = text.sectionOffset() + edit.offset;
+        const uint64_t edit_end = edit_begin + edit.expected.size();
+        if (shared_begin < edit_end && edit_begin < shared_end)
+          return reject(
+              error, TextEditErrorCode::InvalidImage,
+              "edited source bytes have PT_LOAD file aliases at different virtual addresses",
+              edit.offset);
+      }
+    }
+  }
+  for (const CheckedTextEdit &edit : edits) {
+    if (!elf_load_file_mappings_match_range(*segments, text.sectionOffset() + edit.offset,
+                                            text.vaddr() + edit.offset, edit.expected.size()))
+      return reject(error, TextEditErrorCode::InvalidImage,
+                    "edited virtual addresses have conflicting PT_LOAD file backing", edit.offset);
+  }
+  return Result::success();
 }
 
 Result decode_replacement(Decoder &decoder, std::span<const uint8_t> bytes, uint64_t offset,
@@ -194,6 +261,9 @@ Result CheckedTextEdits::apply(std::span<const CheckedTextEdit> edits,
       return reject(error, TextEditErrorCode::StaleBytes, "expected bytes do not match source",
                     edit.offset);
   }
+
+  if (validate_load_file_aliases(source, edits, error).failed())
+    return Result::failure();
 
   for (const CheckedTextEdit &edit : edits) {
     const InstructionBoundaries::Entry *instruction = boundaries_.find(edit.offset);

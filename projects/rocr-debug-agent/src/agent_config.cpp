@@ -120,9 +120,10 @@ parse_debug_agent_options (const char *env_options)
         { "help", no_argument, nullptr, 'h' },
         { 0 } };
 
-  /* We use getopt_long locally, so preserve and reset the global optind.  */
+  /* We use getopt_long locally, so preserve the global optind.  Setting it
+     to 0 makes glibc fully reinitialize its getopt state.  */
   optind_guard guard;
-  optind = 1;
+  optind = 0;
 
   while (int c
          = getopt_long (argc, argv, ":as::o:dpezcl:h", long_options, nullptr))

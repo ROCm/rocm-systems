@@ -49,7 +49,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <dirent.h>
-#include <exception>
 #include <execinfo.h>
 #include <fcntl.h>
 #include <limits>
@@ -75,7 +74,6 @@
 // librocjitsu_hooks_testing.so exports a C entry point for them.
 namespace rocjitsu::hooks {
 namespace {
-
 std::mutex g_topology_nodes_root_mutex;
 std::optional<std::string> g_topology_nodes_root_for_test;
 
@@ -99,7 +97,6 @@ void set_topology_nodes_root_for_test(const char *root) {
 } // namespace rocjitsu::hooks
 
 namespace {
-
 using rocjitsu::AmdGpuCodeObject;
 using rocjitsu::arch_for_elf_mach;
 using rocjitsu::arch_lds_bytes;
@@ -363,21 +360,16 @@ void restore_signal_backtrace_handlers() {
 
 /// @brief Load and validate DBT hook configuration from the runtime config file.
 [[nodiscard]] std::optional<HookConfig> parse_config() {
-  std::optional<rocjitsu::config::DbtGuestConfig> dbt_guest;
-  try {
-    util::StringDiagnostic diagnostic;
-    auto maybe_dbt_guest =
-        rocjitsu::config::load_dbt_guest_config_from_runtime_config(diagnostic.emitter());
-    if (maybe_dbt_guest.failed()) {
-      std::fprintf(stderr, "[rocjitsu-hooks] failed to load runtime config: %s\n",
-                   diagnostic.message().c_str());
-      return std::nullopt;
-    }
-    dbt_guest = std::move(maybe_dbt_guest.value());
-  } catch (const std::exception &error) {
-    std::fprintf(stderr, "[rocjitsu-hooks] failed to load runtime config: %s\n", error.what());
+  util::StringDiagnostic diagnostic;
+  auto maybe_dbt_guest =
+      rocjitsu::config::load_dbt_guest_config_from_runtime_config(diagnostic.emitter());
+  if (maybe_dbt_guest.failed()) {
+    std::fprintf(stderr, "[rocjitsu-hooks] failed to load runtime config: %s\n",
+                 diagnostic.message().c_str());
     return std::nullopt;
   }
+  std::optional<rocjitsu::config::DbtGuestConfig> dbt_guest = std::move(maybe_dbt_guest.value());
+
   if (!dbt_guest) {
     std::fprintf(stderr, "[rocjitsu-hooks] runtime config is required for the DBT HSA hook\n");
     return std::nullopt;
@@ -836,7 +828,7 @@ hsa_status_t HSA_API rj_code_object_reader_create_from_memory(
 
 /// @brief Warn for file-backed readers, which the MVP cannot translate safely.
 hsa_status_t HSA_API rj_code_object_reader_create_from_file(
-    hsa_file_t file, hsa_code_object_reader_t *code_object_reader);
+    hsa_file_t file, hsa_code_object_reader_t *code_object_reader) noexcept;
 
 /// @brief Remove tracked reader bytes and forward reader destruction.
 hsa_status_t HSA_API rj_code_object_reader_destroy(hsa_code_object_reader_t code_object_reader);
@@ -851,7 +843,7 @@ hsa_status_t HSA_API rj_iterate_agents(hsa_status_t (*callback)(hsa_agent_t agen
 /// @brief Translate guest code objects and load the translated ELF on the host agent.
 hsa_status_t HSA_API rj_executable_load_agent_code_object(
     hsa_executable_t executable, hsa_agent_t agent, hsa_code_object_reader_t code_object_reader,
-    const char *options, hsa_loaded_code_object_t *loaded_code_object);
+    const char *options, hsa_loaded_code_object_t *loaded_code_object) noexcept;
 
 /// @brief Preserve guest ISA iteration so framework fatbin selection picks guest images.
 hsa_status_t HSA_API rj_agent_iterate_isas(hsa_agent_t agent,
@@ -2225,7 +2217,7 @@ hsa_status_t HSA_API rj_code_object_reader_create_from_memory(
 }
 
 hsa_status_t HSA_API rj_code_object_reader_create_from_file(
-    hsa_file_t file, hsa_code_object_reader_t *code_object_reader) {
+    hsa_file_t file, hsa_code_object_reader_t *code_object_reader) noexcept {
   auto *original = layer().create_from_file();
   if (original == nullptr)
     return HSA_STATUS_ERROR;
@@ -2238,29 +2230,21 @@ hsa_status_t HSA_API rj_code_object_reader_create_from_file(
     // the same DBT path as memory-backed framework code objects.
     struct stat statbuf {};
     if (file >= 0 && fstat(file, &statbuf) == 0 && statbuf.st_size > 0) {
-      std::shared_ptr<std::vector<uint8_t>> owned;
-      try {
-        owned = std::make_shared<std::vector<uint8_t>>(static_cast<size_t>(statbuf.st_size));
-      } catch (const std::bad_alloc &) {
-        // The HSA tools ABI cannot propagate C++ allocation failures. Fall
-        // through to the existing diagnostic and let ROCR keep the reader.
+      auto owned = std::make_shared<std::vector<uint8_t>>(static_cast<size_t>(statbuf.st_size));
+
+      size_t done = 0;
+      while (done < owned->size()) {
+        const ssize_t read =
+            pread(file, owned->data() + done, owned->size() - done, static_cast<off_t>(done));
+        if (read <= 0)
+          break;
+        done += static_cast<size_t>(read);
       }
-      if (owned) {
-        size_t done = 0;
-        while (done < owned->size()) {
-          const ssize_t read =
-              pread(file, owned->data() + done, owned->size() - done, static_cast<off_t>(done));
-          if (read <= 0)
-            break;
-          done += static_cast<size_t>(read);
-        }
-        if (done == owned->size() &&
-            CodeObjectReaderRegistry::instance().store(*code_object_reader, owned->data(),
-                                                       owned->size(), owned)) {
-          log_message(kLogDebug, "registered file-backed reader=%llu bytes=%zu",
-                      static_cast<unsigned long long>(code_object_reader->handle), owned->size());
-          return status;
-        }
+      if (done == owned->size() && CodeObjectReaderRegistry::instance().store(
+                                       *code_object_reader, owned->data(), owned->size(), owned)) {
+        log_message(kLogDebug, "registered file-backed reader=%llu bytes=%zu",
+                    static_cast<unsigned long long>(code_object_reader->handle), owned->size());
+        return status;
       }
     }
     std::fprintf(stderr,
@@ -4189,7 +4173,7 @@ hsa_status_t HSA_API rj_amd_agent_preload(hsa_agent_t agent, uint64_t flags) {
 
 hsa_status_t HSA_API rj_executable_load_agent_code_object(
     hsa_executable_t executable, hsa_agent_t agent, hsa_code_object_reader_t code_object_reader,
-    const char *options, hsa_loaded_code_object_t *loaded_code_object) {
+    const char *options, hsa_loaded_code_object_t *loaded_code_object) noexcept {
   auto *original_load = layer().load_agent_code_object();
   if (original_load == nullptr)
     return HSA_STATUS_ERROR;
@@ -4330,19 +4314,9 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
     return HSA_STATUS_ERROR;
   }
 
-  rocjitsu::TranslatedCodeObject translated;
-  try {
-    BinaryTranslator translator(source_target.arch, config->target.arch, config->target.mach,
-                                translator_options);
-    translated = translator.translate(source_object);
-  } catch (const std::exception &error) {
-    std::fprintf(stderr, "[rocjitsu-hooks] code-object translation threw an exception: %s\n",
-                 error.what());
-    return HSA_STATUS_ERROR;
-  } catch (...) {
-    std::fprintf(stderr, "[rocjitsu-hooks] code-object translation threw an unknown exception\n");
-    return HSA_STATUS_ERROR;
-  }
+  BinaryTranslator translator(source_target.arch, config->target.arch, config->target.mach,
+                              translator_options);
+  rocjitsu::TranslatedCodeObject translated = translator.translate(source_object);
 
   print_diagnostics(stderr, translated.diagnostics, config->log_level > kLogDisabled);
   if (translated.elf_bytes.empty() || has_error_diagnostic(translated.diagnostics)) {
@@ -4433,33 +4407,35 @@ extern "C" RJ_HOOK_EXPORT bool OnLoad(HsaApiTable *table, uint64_t runtime_versi
   (void)failed_tool_count;
   (void)failed_tool_names;
 
-  auto config = parse_config();
-  if (!config)
-    return false;
-  const bool signal_backtrace = config->signal_backtrace;
-  // The mapper is a process-wide singleton, so it outlives the layer. uninstall()
-  // clears it, but a discovery already in flight then republishes a kFinal miss
-  // behind that clear -- and nothing clears it again. Repeat the clear here so such
-  // a verdict cannot latch a permanent all-GPU suppression into this install.
-  clear_agent_mapper();
-  if (!layer().install(table, std::move(*config)))
-    return false;
-  // Virtual-LDS resource management lives in its own hook component. Give it
-  // only the original runtime entries so allocations cannot recurse through
-  // the wrappers installed above.
-  rocjitsu::hooks::set_virtual_lds_runtime_api({
-      .iterate_agents = layer().iterate_agents(),
-      .signal_create = layer().signal_create(),
-      .signal_destroy = layer().signal_destroy(),
-      .signal_load_scacquire = layer().signal_load_scacquire(),
-      .iterate_memory_pools = layer().amd_agent_iterate_memory_pools(),
-      .memory_pool_get_info = layer().amd_memory_pool_get_info(),
-      .memory_pool_allocate = layer().amd_memory_pool_allocate(),
-      .memory_pool_free = layer().amd_memory_pool_free(),
-      .agents_allow_access = layer().amd_agents_allow_access(),
-  });
-  maybe_install_signal_backtrace(signal_backtrace);
-  return true;
+  return [&]() noexcept {
+    auto config = parse_config();
+    if (!config)
+      return false;
+    const bool signal_backtrace = config->signal_backtrace;
+    // The mapper is a process-wide singleton, so it outlives the layer. uninstall()
+    // clears it, but a discovery already in flight then republishes a kFinal miss
+    // behind that clear -- and nothing clears it again. Repeat the clear here so such
+    // a verdict cannot latch a permanent all-GPU suppression into this install.
+    clear_agent_mapper();
+    if (!layer().install(table, std::move(*config)))
+      return false;
+    // Virtual-LDS resource management lives in its own hook component. Give it
+    // only the original runtime entries so allocations cannot recurse through
+    // the wrappers installed above.
+    rocjitsu::hooks::set_virtual_lds_runtime_api({
+        .iterate_agents = layer().iterate_agents(),
+        .signal_create = layer().signal_create(),
+        .signal_destroy = layer().signal_destroy(),
+        .signal_load_scacquire = layer().signal_load_scacquire(),
+        .iterate_memory_pools = layer().amd_agent_iterate_memory_pools(),
+        .memory_pool_get_info = layer().amd_memory_pool_get_info(),
+        .memory_pool_allocate = layer().amd_memory_pool_allocate(),
+        .memory_pool_free = layer().amd_memory_pool_free(),
+        .agents_allow_access = layer().amd_agents_allow_access(),
+    });
+    maybe_install_signal_backtrace(signal_backtrace);
+    return true;
+  }();
 }
 
 /// @brief ROCR HSA tools unload entry point.
