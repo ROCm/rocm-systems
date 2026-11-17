@@ -1283,6 +1283,226 @@ HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_WaitSignal_Swap) {
   HIP_CHECK(hipStreamDestroy(stream));
 }
 
+__global__ void countMismatches(const int* data, size_t n, int expected, int* mismatches) {
+  for (size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += gridDim.x * blockDim.x) {
+    if (data[i] != expected) atomicAdd(mismatches, 1);
+  }
+}
+
+__global__ void releaseFlags(uint64_t* f0, uint64_t* f1, uint64_t* f2, uint64_t* f3,
+                             uint64_t value) {
+  for (uint64_t* f : {f0, f1, f2, f3}) {
+    __hip_atomic_store(f, value, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
+  }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - Two-GPU ping-pong synchronised only by copy waits/signals: each round, each GPU copies its
+ *   source into the peer's receive buffer (waiting until the peer has consumed the previous
+ *   round, then signalling "ready"), and copies its own receive buffer out (waiting on "ready",
+ *   then signalling "consumed"). A kernel checks every received round. The flags live either
+ *   on the polling GPU (signals cross xGMI) or on the signalling GPU (polls cross xGMI); the
+ *   copies are either separate batches or one two-entry batch.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipExtMemcpyBatchAsync.cc
+ */
+HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_WaitSignal_Peer) {
+  constexpr int kIters = 8;
+  constexpr uint64_t kRescue = 0xffffffffull;
+
+  if (HipTest::getDeviceCount() < 2) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+  }
+  int canAccess01 = 0, canAccess10 = 0;
+  HIP_CHECK(hipDeviceCanAccessPeer(&canAccess01, 0, 1));
+  HIP_CHECK(hipDeviceCanAccessPeer(&canAccess10, 1, 0));
+  if (!canAccess01 || !canAccess10) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+  }
+
+  const size_t sizeBytes = GENERATE(kSmallCopySize, size_t{16} << 20);
+  const bool fineGrained = GENERATE(true, false);
+  const bool flagsOnPoller = GENERATE(true, false);
+  const bool oneBatch = GENERATE(false, true);
+  CAPTURE(sizeBytes, fineGrained, flagsOnPoller, oneBatch);
+  const size_t numElements = sizeBytes / sizeof(int);
+  const unsigned int mallocFlags =
+      fineGrained ? hipDeviceMallocFinegrained : hipDeviceMallocDefault;
+  auto pattern = [](int dev, int round) { return ((dev + 1) << 16) | round; };
+
+  for (int dev = 0; dev < 2; ++dev) {
+    HIP_CHECK(hipSetDevice(dev));
+    const hipError_t err = hipDeviceEnablePeerAccess(1 - dev, 0);
+    if (err != hipErrorPeerAccessAlreadyEnabled) HIP_CHECK(err);
+  }
+
+  struct Side {
+    hipStream_t stream;
+    int* src;
+    int* recv;
+    int* out;
+    int* mismatches;
+    uint64_t* ready;     // recv holds the current round; signalled by the peer, polled here
+    uint64_t* consumed;  // recv has been copied out; signalled here, polled by the peer
+  };
+  Side side[2] = {};
+  for (int dev = 0; dev < 2; ++dev) {
+    HIP_CHECK(hipSetDevice(dev));
+    Side& s = side[dev];
+    HIP_CHECK(hipStreamCreateWithFlags(&s.stream, hipStreamNonBlocking));
+    HIP_CHECK(hipMalloc(&s.src, sizeBytes));
+    HIP_CHECK(hipMalloc(&s.recv, sizeBytes));
+    HIP_CHECK(hipMalloc(&s.out, sizeBytes));
+    HIP_CHECK(hipMalloc(&s.mismatches, sizeof(int)));
+    HIP_CHECK(hipMemset(s.mismatches, 0, sizeof(int)));
+  }
+  for (int dev = 0; dev < 2; ++dev) {
+    Side& s = side[dev];
+    HIP_CHECK(hipSetDevice(flagsOnPoller ? dev : 1 - dev));
+    HIP_CHECK(hipExtMallocWithFlags(reinterpret_cast<void**>(&s.ready), sizeof(uint64_t),
+                                    mallocFlags));
+    HIP_CHECK(hipMemset(s.ready, 0, sizeof(uint64_t)));
+    HIP_CHECK(hipSetDevice(flagsOnPoller ? 1 - dev : dev));
+    HIP_CHECK(hipExtMallocWithFlags(reinterpret_cast<void**>(&s.consumed), sizeof(uint64_t),
+                                    mallocFlags));
+    HIP_CHECK(hipMemset(s.consumed, 0, sizeof(uint64_t)));
+  }
+  for (int dev = 0; dev < 2; ++dev) {
+    HIP_CHECK(hipSetDevice(dev));
+    HIP_CHECK(hipDeviceSynchronize());
+  }
+
+  auto cleanup = [&]() {
+    for (int dev = 0; dev < 2; ++dev) {
+      HIP_CHECK(hipSetDevice(dev));
+      Side& s = side[dev];
+      HIP_CHECK(hipStreamDestroy(s.stream));
+      HIP_CHECK(hipFree(s.src));
+      HIP_CHECK(hipFree(s.recv));
+      HIP_CHECK(hipFree(s.out));
+      HIP_CHECK(hipFree(s.mismatches));
+      HIP_CHECK(hipFree(s.ready));
+      HIP_CHECK(hipFree(s.consumed));
+    }
+    for (int dev = 0; dev < 2; ++dev) {
+      HIP_CHECK(hipSetDevice(dev));
+      HIP_CHECK(hipDeviceDisablePeerAccess(1 - dev));
+    }
+    HIP_CHECK(hipSetDevice(0));
+  };
+  auto drained = [&]() {
+    return hipStreamQuery(side[0].stream) == hipSuccess &&
+           hipStreamQuery(side[1].stream) == hipSuccess;
+  };
+  // Keeps releasing every pending wait (later signals lower the flags again) until both drain.
+  auto releaseAndDrain = [&]() {
+    HIP_CHECK(hipSetDevice(0));
+    hipStream_t rescue;
+    HIP_CHECK(hipStreamCreateWithFlags(&rescue, hipStreamNonBlocking));
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (!drained() && std::chrono::steady_clock::now() < deadline) {
+      hipLaunchKernelGGL(releaseFlags, dim3(1), dim3(1), 0, rescue, side[0].ready,
+                         side[0].consumed, side[1].ready, side[1].consumed, kRescue);
+      HIP_CHECK(hipGetLastError());
+      HIP_CHECK(hipStreamSynchronize(rescue));
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    HIP_CHECK(hipStreamDestroy(rescue));
+    REQUIRE(drained());
+  };
+
+  hipExtMemcpyAttributes attr{};
+  attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
+  size_t attrsIdxs[] = {0};
+  size_t sizes[] = {sizeBytes, sizeBytes};
+
+  for (int i = 1; i <= kIters; ++i) {
+    for (int dev = 0; dev < 2; ++dev) {
+      HIP_CHECK(hipSetDevice(dev));
+      HIP_CHECK(hipMemsetD32Async(reinterpret_cast<hipDeviceptr_t>(side[dev].src),
+                                  pattern(dev, i), numElements, side[dev].stream));
+    }
+    for (int dev = 0; dev < 2; ++dev) {
+      Side& s = side[dev];
+      Side& peer = side[1 - dev];
+      HIP_CHECK(hipSetDevice(dev));
+      // [0] = send into the peer, [1] = copy out of our receive buffer.
+      void* dsts[] = {peer.recv, s.out};
+      void* srcs[] = {s.src, s.recv};
+      hipExtMemcpyWait waits[2] = {};
+      waits[0].addr = peer.consumed;
+      waits[0].value = i - 1;
+      waits[1].addr = s.ready;
+      waits[1].value = i;
+      hipExtMemcpySignal signals[2] = {};
+      signals[0].addr = peer.ready;
+      signals[1].addr = s.consumed;
+      for (int e = 0; e < 2; ++e) {
+        waits[e].mask = 0xffffffffull;
+        waits[e].compareOp = hipExtMemcpyWaitGe;
+        signals[e].data = i;
+        signals[e].signalOp = hipExtMemcpySignalWrite;
+      }
+      hipError_t err = hipSuccess;
+      if (oneBatch) {
+        err = hipExtMemcpyBatchAsync(dsts, srcs, sizes, nullptr, waits, signals, 2, &attr,
+                                     attrsIdxs, 1, s.stream);
+      } else {
+        err = hipExtMemcpyBatchAsync(&dsts[0], &srcs[0], &sizes[0], nullptr, &waits[0],
+                                     &signals[0], 1, &attr, attrsIdxs, 1, s.stream);
+        if (err == hipSuccess) {
+          err = hipExtMemcpyBatchAsync(&dsts[1], &srcs[1], &sizes[1], nullptr, &waits[1],
+                                       &signals[1], 1, &attr, attrsIdxs, 1, s.stream);
+        }
+      }
+      if (i == 1 && err == hipErrorNotSupported) {
+        (void)hipGetLastError();  // Clear it for the checks in releaseAndDrain
+        releaseAndDrain();
+        cleanup();
+        HIP_SKIP_TEST(HipTest::SkipReason::kSdmaWaitSignalUnsupported);
+      }
+      HIP_CHECK(err);
+    }
+    for (int dev = 0; dev < 2; ++dev) {
+      HIP_CHECK(hipSetDevice(dev));
+      hipLaunchKernelGGL(countMismatches, dim3(64), dim3(256), 0, side[dev].stream, side[dev].out,
+                         numElements, pattern(1 - dev, i), side[dev].mismatches);
+      HIP_CHECK(hipGetLastError());
+    }
+  }
+
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  bool done = drained();
+  while (!done && std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    done = drained();
+  }
+  if (!done) releaseAndDrain();
+  CHECK(done);
+
+  for (int dev = 0; dev < 2; ++dev) {
+    CAPTURE(dev);
+    HIP_CHECK(hipSetDevice(dev));
+    int mismatches = -1;
+    uint64_t ready = 0, consumed = 0;
+    HIP_CHECK(hipMemcpy(&mismatches, side[dev].mismatches, sizeof(int), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(&ready, side[dev].ready, sizeof(uint64_t), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(&consumed, side[dev].consumed, sizeof(uint64_t), hipMemcpyDeviceToHost));
+    CHECK(mismatches == 0);
+    CHECK(ready == kIters);
+    CHECK(consumed == kIters);
+    std::vector<int> out(numElements);
+    HIP_CHECK(hipMemcpy(out.data(), side[dev].out, sizeBytes, hipMemcpyDeviceToHost));
+    const int expected = pattern(1 - dev, kIters);
+    CHECK(std::all_of(out.begin(), out.end(), [=](int v) { return v == expected; }));
+  }
+
+  cleanup();
+}
+
 /**
  * Test Description
  * ------------------------
