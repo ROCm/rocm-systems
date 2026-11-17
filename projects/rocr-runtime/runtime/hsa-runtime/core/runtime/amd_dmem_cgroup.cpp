@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include <algorithm>
+#include <fstream>
 #include <string>
 
 namespace rocr {
@@ -34,21 +35,15 @@ std::string VramRegionKey(HSAuint32 domain, HSAuint32 location_id) {
 // of /proc/self/cgroup. Inside a cgroup namespace this is "/", so the mount root is the process's
 // own cgroup.
 bool SelfCgroupPath(std::string* path) {
-  FILE* file = fopen("/proc/self/cgroup", "r");
-  if (file == nullptr) return false;
-
-  bool found = false;
-  char line[512];
-  while (fgets(line, sizeof(line), file) != nullptr) {
-    if (strncmp(line, "0::", 3) != 0) continue;
-    *path = line + 3;
-    while (!path->empty() && (path->back() == '\n' || path->back() == '/')) path->pop_back();
-    found = true;
-    break;
+  std::ifstream file("/proc/self/cgroup");
+  std::string line;
+  while (std::getline(file, line)) {
+    if (line.compare(0, 3, "0::") != 0) continue;
+    *path = line.substr(3);
+    while (!path->empty() && path->back() == '/') path->pop_back();
+    return true;
   }
-
-  fclose(file);
-  return found;
+  return false;
 }
 
 // Reads one region's value from a dmem interface file, where each line is "<region key> <value>"
