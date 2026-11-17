@@ -154,6 +154,12 @@ TEST_F(DdaReduceScatterFabricLLMicrotest, Eligible_ShardBytesMultipleOf16UpTo1Mi
   EXPECT_FALSE(Eligible(kMaxShardBytes / 4 + 4));
 }
 
+TEST_F(DdaReduceScatterFabricLLMicrotest, Eligible_BuffersMustBe16ByteAligned) {
+  void* const misaligned = reinterpret_cast<void*>(0x1008);
+  EXPECT_FALSE(ncclReduceScatterDdaFabricLLEligible(mock_.get(), misaligned, kRecvbuff, 4, ncclFloat32, ncclSum));
+  EXPECT_FALSE(ncclReduceScatterDdaFabricLLEligible(mock_.get(), kSendbuff, misaligned, 4, ncclFloat32, ncclSum));
+}
+
 TEST_F(DdaReduceScatterFabricLLMicrotest, Eligible_ScratchMustHoldBothBanksOfFixedSlots) {
   comm().ddaScratchBytes = 8 * kScratchPerRank;
   EXPECT_TRUE(Eligible(4));

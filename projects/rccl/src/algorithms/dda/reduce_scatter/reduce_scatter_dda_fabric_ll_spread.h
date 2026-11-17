@@ -194,7 +194,7 @@ __launch_bounds__(kDdaLLRsSpreadThreads)
       ldsIn[k] = make_uint2(in[w], in[w + 1]);
     }
     if (aborted) {
-      ldsAborted = 1;
+      atomicExch(&ldsAborted, 1);
     }
     ddaLLSpreadLdsBarrier();
     aborted = aborted || ldsAborted != 0;

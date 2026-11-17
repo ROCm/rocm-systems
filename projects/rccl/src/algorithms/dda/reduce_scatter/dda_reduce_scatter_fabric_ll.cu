@@ -78,8 +78,8 @@ static ncclResult_t ncclReduceScatterDdaFabricLLTyped(const void* sendbuff, void
   // Bank 1 starts at ddaBankSize, matching the other LL tiers on this scratch.
   const size_t bankSize = dda::common::ddaBankSize(comm->ddaScratchBytes);
 
-  INFO(NCCL_COLL, "DDA fabric ReduceScatter LL%s: nRanks=%d shardBytes=%zu nPk=%zu grid=%u block=%u bankSize=%zu",
-       geom.spread ? " spread" : "", nRanks, bytes, nPk, grid.x, block.x, bankSize);
+  INFO(NCCL_COLL, "DDA fabric ReduceScatter LL: nRanks=%d shardBytes=%zu nPk=%zu grid=%u block=%u bankSize=%zu%s",
+       nRanks, bytes, nPk, grid.x, block.x, bankSize, geom.spread ? " (spread)" : "");
 
   const dda::common::DdaKernelParams params{comm->abortFlagDev};
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
@@ -119,8 +119,6 @@ static ncclResult_t ncclReduceScatterDdaFabricLLTyped(const void* sendbuff, void
 
 bool ncclReduceScatterDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t recvcount,
                                           ncclDataType_t datatype, ncclRedOp_t op) {
-  (void)sendbuff;
-  (void)recvbuff;
   if (comm == nullptr || comm->bootstrap == nullptr) {
     return false;
   }
@@ -143,6 +141,11 @@ bool ncclReduceScatterDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, 
   const size_t bytes = recvcount * ncclTypeSize(datatype); // per-rank shard
 
   if (bytes % 16 != 0) {
+    return false;
+  }
+  // The kernels access both user buffers in 32-bit words.
+  // The 16B rule matches LL128, so both tiers reject the same buffers.
+  if (!dda::common::ddaUserBuffers16ByteAligned(sendbuff, recvbuff)) {
     return false;
   }
   // Slot holds kDdaLLRsMaxBytes of payload (stride = cap/8 packets).
