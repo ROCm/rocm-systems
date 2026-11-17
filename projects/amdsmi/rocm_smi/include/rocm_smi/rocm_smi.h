@@ -3669,6 +3669,8 @@ rsmi_status_t rsmi_dev_gpu_clk_freq_get(uint32_t dv_ind, rsmi_clk_type_t clk_typ
  *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
  *  support this function with the given arguments
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ *  @retval ::RSMI_STATUS_AMDGPU_RESTART_ERR the driver reported that the GPU
+ *  recovery failed
  *
  */
 rsmi_status_t rsmi_dev_gpu_reset(uint32_t dv_ind);

@@ -16,6 +16,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
+- **`amd-smi reset --gpureset` and `amdsmi_reset_gpu()` now report a failed GPU recovery**.  
+  - Previously they reported success even when the driver said the recovery failed; they now return `AMDSMI_STATUS_AMDGPU_RESTART_ERR` and the CLI exits non-zero.
+
 - **Fixed `amd-smi ras --cper` crashing with `TypeError` when no GPU devices are available**.
   - When the `amdgpu` driver is not loaded, the command now exits with a clear driver-not-loaded message and exit code 206 instead of an unhandled exception.
 

@@ -29,4 +29,8 @@ AMDSMI_TEST_HOOK const std::string& KfdNodesPathRoot();
 // leaving files that a later real run on the same host would read.
 AMDSMI_TEST_HOOK const std::string& AppTmpDir();
 
+// Root of the DRI debugfs tree, with no trailing "/". Defaults to "/sys/kernel/debug/dri", so
+// production reads "/sys/kernel/debug/dri/0/amdgpu_gpu_recover".
+AMDSMI_TEST_HOOK const std::string& DebugfsDriRoot();
+
 }  // namespace amd::smi::test_hooks

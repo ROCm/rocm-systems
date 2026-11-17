@@ -12,6 +12,7 @@
 #include <cerrno>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -22,6 +23,7 @@
 #include <string>
 #include <vector>
 
+#include "amd_smi/impl/amd_smi_test_overrides.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_exception.h"
 #include "rocm_smi/rocm_smi_logger.h"
@@ -30,9 +32,6 @@
 #include "shared_mutex.h"  // NOLINT
 
 namespace amd::smi {
-
-// Debug root file path
-static const char* kPathDebugRootFName = "/sys/kernel/debug/dri/";
 
 // Device debugfs file names
 static const char* kDevGpuResetFName = "amdgpu_gpu_recover";
@@ -728,7 +727,7 @@ template <typename T>
 int Device::openDebugFileStream(DevInfoTypes type, T* fs, const char* str) {
   std::string debugfs_path;
 
-  debugfs_path = kPathDebugRootFName;
+  debugfs_path = test_hooks::DebugfsDriRoot() + "/";
   debugfs_path += std::to_string(index());
   debugfs_path += "/";
   debugfs_path += kDevAttribNameMap.at(type);
@@ -1401,10 +1400,16 @@ int Device::readDevInfo(DevInfoTypes type, uint64_t* val) {
       *val = std::stoul(tempStr, nullptr, 16);
       break;
 
-    case kDevGpuReset:
+    case kDevGpuReset: {
       ret = readDebugInfoStr(type, &tempStr);
       RET_IF_NONZERO(ret);
+      // Older kernels print "gpu recover" instead of the recovery result; treat that as 0.
+      char* end = nullptr;
+      errno = 0;
+      const int64_t result = std::strtoll(tempStr.c_str(), &end, 10);
+      *val = (end != tempStr.c_str() && errno == 0) ? static_cast<uint64_t>(result) : 0;
       break;
+    }
 
     default:
       return EINVAL;
@@ -1603,7 +1608,7 @@ void Device::fillSupportedFuncs(void) {
     for (; dep != it->second.mandatory_depends.end(); dep++) {
       std::string dep_path = dev_rt + "/" + *dep;
       std::string debugfs_path;
-      debugfs_path = kPathDebugRootFName;
+      debugfs_path = test_hooks::DebugfsDriRoot() + "/";
       debugfs_path += std::to_string(index());
       debugfs_path += "/";
       debugfs_path += *dep;
