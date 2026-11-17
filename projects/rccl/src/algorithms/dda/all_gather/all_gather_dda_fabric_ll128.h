@@ -95,7 +95,8 @@ __launch_bounds__(1024)
       scatterSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, regs, flag, flagLane);
   }
 
-  // In-place AllGather already has this rank's input in its output slot.
+  // Local copy from sendbuff to this rank's output slot.
+  // In-place calls already have the input there, so skip the copy.
   char* localRecv = reinterpret_cast<char*>(recvbuff) + (size_t)selfRank * perRankBytes;
   if (reinterpret_cast<const char*>(sendbuff) != localRecv) {
     v4u_gptr s4 = (v4u_gptr)sendbuff;
