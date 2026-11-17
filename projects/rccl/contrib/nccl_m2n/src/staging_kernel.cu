@@ -1160,7 +1160,8 @@ __global__ __launch_bounds__(PIPE_GENERATOR_THREADS, 1) void StagingReshardKerne
   struct ncclDevComm devCommA, struct ncclDevComm devCommB) {
   /* Generator CTAs can be role-specialized at launch:
    *   RDMA phase: poll trainer/ring input and unpack/forward it.
-   *   LSA phase : TMA-pull from an in-domain leader and unpack it.
+   *   LSA phase : pull from an in-domain leader (TMA on CUDA, direct reads on AMD)
+   *               and unpack it.
    * Mixed roles use separate compact launch maps so one CTA does not have to
    * carry both RDMA and LSA work when the rank has both edge types. */
   const int num_channels = params->numChannels;
@@ -1202,8 +1203,9 @@ __global__ __launch_bounds__(PIPE_GENERATOR_THREADS, 1) void StagingReshardKerne
   }
 
   if constexpr (DoLsaSources) {
-    /* Only LSA-source CTAs use TMA.  Their control warp fills shared-memory
-     * tiles, and unpack warps wait on these mbarriers before scattering. */
+    /* Only LSA-source CTAs use TMA (CUDA only; no-ops on AMD).  Their control
+     * warp fills shared-memory tiles, and unpack warps wait on these mbarriers
+     * before scattering. */
     if (threadIdx.x < PIPE_GENERATOR_QUEUE_DEPTH) {
       staging_tma_mbarrier_init(&tma_mbar[threadIdx.x], 1);
     }
@@ -1524,9 +1526,10 @@ __global__ __launch_bounds__(PIPE_GENERATOR_THREADS, 1) void StagingReshardKerne
         if (active && chunks.count > 0 && is_control && lane_id == 0) {
           /* Generator LSA stage A: control warp lane 0.
            *
-           * Poll the local NVLink-domain leader FIFO, issue TMA loads from the
-           * leader's staging window into shared-memory tiles, enqueue each tile
-           * for unpack, and release LSA credits chunk by chunk. */
+           * Poll the local NVLink-domain leader FIFO, enqueue each tile for unpack
+           * (on CUDA after issuing its TMA load from the leader's staging window
+           * into shared memory; on AMD as a pointer into that window), and release
+           * LSA credits chunk by chunk. */
           StagingFlowCtrl poll_fc = source.fc;
           StagingFlowCtrl release_fc = source.fc;
           const uint64_t head_base = staging_cursor_load(lsa_region, source.fc.cursorHeadOffset);
@@ -1613,9 +1616,11 @@ __global__ __launch_bounds__(PIPE_GENERATOR_THREADS, 1) void StagingReshardKerne
         if (active && chunks.count > 0 && is_unpack) {
           /* Generator LSA stage B: unpack warps.
            *
-           * The unpack leader waits for the queued TMA tile mbarrier, then the
-           * unpack group scatters the tile to destination memory.  The last tile
-           * of each logical chunk advances q_done_chunks for LSA credit release. */
+           * The unpack leader waits for the next queued tile (on CUDA also for its
+           * TMA mbarrier), then the unpack group scatters it to destination memory:
+           * from shared memory on CUDA, directly from the leader's LSA window on AMD.
+           * The last tile of each logical chunk advances q_done_chunks for LSA
+           * credit release. */
           size_t tiles_done = 0;
           size_t chunks_done = 0;
           while (chunks_done < chunks.count) {
@@ -1642,11 +1647,10 @@ __global__ __launch_bounds__(PIPE_GENERATOR_THREADS, 1) void StagingReshardKerne
               staging_tma_mbarrier_wait(&tma_mbar[cur_desc.tile_buf], tma_consumer_phase[cur_desc.tile_buf]);
 #endif
             }
-            /* Publish the completed TMA tile descriptor to every unpack warp. */
+            /* Publish the tile descriptor (TMA-completed on CUDA) to every unpack warp. */
             barrier_sync_subset(PIPE_GENERATOR_UNPACK_BARRIER_ID, PIPE_GENERATOR_UNPACK_THREADS);
 #if defined(__HIP_PLATFORM_AMD__)
-            /* The control lane acquired the leader's tail; each unpack wave must
-             * also drop stale cached copies of a reused staging slot. */
+            /* Per-wave acquire fence after control-lane acquire load; formally weak, relies on AMD memory model. */
             __atomic_thread_fence(__ATOMIC_ACQUIRE);
             const char* tile_src = lsa_tile_src[cur_desc.tile_buf];
 #else
