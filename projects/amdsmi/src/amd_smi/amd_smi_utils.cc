@@ -274,7 +274,7 @@ amdsmi_status_t smi_amdgpu_get_power_cap(amd::smi::AMDSmiGPUDevice* device, uint
 
   file.getline(val, DATA_SIZE);
 
-  if (sscanf(val, "%d", cap) < 0) {
+  if (sscanf(val, "%d", cap) != 1) {
     return AMDSMI_STATUS_API_FAILED;
   }
 
@@ -612,7 +612,7 @@ amdsmi_status_t smi_amdgpu_get_bad_page_threshold(amd::smi::AMDSmiGPUDevice* dev
 
   std::string line;
   getline(fs, line);
-  if (sscanf(line.c_str(), "%d", threshold) < 0) {
+  if (sscanf(line.c_str(), "%d", threshold) != 1) {
     return AMDSMI_STATUS_API_FAILED;
   }
 
