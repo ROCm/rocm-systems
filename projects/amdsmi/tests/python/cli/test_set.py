@@ -36,29 +36,54 @@ class TestSet(TestCliBase):
 
     def _restore_starting_values(self):
         """Put the values the sweep changed back to what setUpClass recorded."""
-        cmds = []
-        for index, gpu in enumerate(self.common.processors):
-            # An APU reports no "fan" section, or one without max/speed (only
-            # apu_fan_pwm), so a missing field reads as "N/A" like an unreadable one.
-            fan = self.metric_data["gpu_data"][index].get("fan")
-            if not isinstance(fan, dict):
-                fan = {}
-            # max fan speed is the hwmon pwm1_max ceiling on every interface
-            fan_max = fan.get("max", "N/A")
-            if fan_max != "N/A":
-                self.assertGreater(fan_max, 0, f"GPU {index}: max fan speed must be > 0")
-                self.assertLessEqual(fan_max, 255, f"GPU {index}: max fan speed must be <= 255")
+        cmds, problems = self._restore_commands()
+        self.common.print("Restore Starting Values")
+        # Run every restore command before reporting anything, so a bad baseline
+        # field never leaves the GPU in the state the sweep put it in.
+        errors = []
+        try:
+            self.RunCmds(cmds)
+        except AssertionError as e:
+            errors.append(str(e))
+        errors.extend(problems)
+        if errors:
+            self.fail("\n".join(errors))
 
+    def _restore_commands(self):
+        """Commands that restore the recorded values, and baseline problems found.
+
+        Returns:
+            tuple: (list of (cmd, cond), list of problem messages).
+        """
+        cmds = []
+        problems = []
+        for index, gpu in enumerate(self.common.processors):
+            # The bare-metal default metric dump omits the fan section on an APU and
+            # reports it on a dGPU, with "N/A" fields when there is no fan.
+            # A dGPU fan is present when max is not "N/A". max is the constant pwm1_max,
+            # which the driver hides only along with every other fan attribute, pwm1_enable
+            # included (an APU, or a dGPU with no fan). Speed is not used: reading pwm1
+            # needs the device active, so a runtime-suspended dGPU reports it as "N/A".
+            fan = self.metric_data["gpu_data"][index].get("fan")
+            if self.is_apu[index]:
+                if fan is not None:
+                    problems.append(f"GPU {index}: APU metric dump has a fan section: {fan}")
+                fan_reset = [amdsmi.AmdSmiStatus.NOT_SUPPORTED]
+            elif not isinstance(fan, dict) or "max" not in fan or "speed" not in fan:
+                problems.append(f"GPU {index}: dGPU metric dump has no fan max/speed: {fan}")
+                fan_reset = [self.PASS, amdsmi.AmdSmiStatus.NOT_SUPPORTED]
+            elif fan["max"] == "N/A":
+                fan_reset = [amdsmi.AmdSmiStatus.NOT_SUPPORTED]
+            else:
+                # max fan speed is the hwmon pwm1_max ceiling on every interface
+                fan_max = fan["max"]
+                numeric = isinstance(fan_max, (int, float)) and not isinstance(fan_max, bool)
+                if not numeric or not 0 < fan_max <= 255:
+                    problems.append(f"GPU {index}: max fan speed {fan_max!r} is not in 1-255")
+                fan_reset = [self.PASS, amdsmi.AmdSmiStatus.NOT_SUPPORTED]
             # reset --fans (works for both legacy hwmon and gpu_od interfaces)
-            # A readable fan speed does not imply the fan can be controlled.
-            fan_speed = fan.get("speed", "N/A")
-            if fan_speed != "N/A":
-                cmds.append(
-                    (
-                        f"amd-smi reset --fans --gpu {index}",
-                        [self.PASS, amdsmi.AmdSmiStatus.NOT_SUPPORTED],
-                    )
-                )
+            # A present fan is not necessarily controllable, so NOT_SUPPORTED is allowed.
+            cmds.append((f"amd-smi reset --fans --gpu {index}", fan_reset))
 
             # set --profile defaults
             # Read from the static baseline: the library is shut down once setup
@@ -118,16 +143,19 @@ class TestSet(TestCliBase):
             # reset --power-cap
             # Writes each supported sensor's default_power_cap. Replaying the recorded
             # value did not restore it: min and max were written after it, so the cap
-            # was left at max.
-            # Skipped when no sensor reports a cap (e.g. an APU): the sweep had nothing
-            # to change, and the CLI returns NOT_SUPPORTED.
-            limits = self.static_data["gpu_data"][index].get("limit")
-            if isinstance(limits, dict) and any(
-                isinstance(limits.get(sensor), dict)
-                and limits[sensor].get("max_power_limit", "N/A") != "N/A"
+            # was left at max. A GPU with no supported cap sensor (e.g. an APU) has no
+            # power#_cap to write.
+            limits = self.static_data["gpu_data"][index]["limit"]
+            reports_cap = any(
+                isinstance(limits[sensor], dict) and limits[sensor]["max_power_limit"] != "N/A"
                 for sensor in self.power_types
-            ):
-                cmds.append((f"amd-smi reset --power-cap --gpu {index}", self.PASS))
+            )
+            cmds.append(
+                (
+                    f"amd-smi reset --power-cap --gpu {index}",
+                    self.PASS if reports_cap else [amdsmi.AmdSmiStatus.NOT_SUPPORTED],
+                )
+            )
 
             # set --soc-pstate defaults
             soc_pstate = self.static_data["gpu_data"][index]["soc_pstate"]
@@ -204,7 +232,4 @@ class TestSet(TestCliBase):
                     )
                 )
 
-        self.common.print("Restore Starting Values")
-        self.RunCmds(cmds)
-
-        return
+        return cmds, problems

@@ -185,6 +185,7 @@ class TestCliBase(unittest.TestCase):
     metric_data: dict
     partition_data: dict
     clk_freq: list
+    is_apu: list
     gpus: list
     sub_args: dict
 
@@ -211,6 +212,7 @@ class TestCliBase(unittest.TestCase):
         TestCliBase.list_data = baseline["list_data"]
         TestCliBase.partition_data = baseline["partition_data"]
         TestCliBase.clk_freq = baseline["clk_freq"]
+        TestCliBase.is_apu = baseline["is_apu"]
         TestCliBase.gpus = baseline["gpus"]
         TestCliBase.sub_args = baseline["sub_args"]
         TestCliBase._initialized = True
@@ -280,6 +282,7 @@ class TestCliBase(unittest.TestCase):
             #'LEVEL': ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
         }
         baseline["clk_freq"] = cls._read_clk_freq()
+        baseline["is_apu"] = cls._read_apu_flags()
         return baseline
 
     @classmethod
@@ -348,6 +351,31 @@ class TestCliBase(unittest.TestCase):
         finally:
             amdsmi.amdsmi_shut_down()
         return per_gpu
+
+    @classmethod
+    def _read_apu_flags(cls):
+        """Per-GPU APU flag, from the gpu_metrics field ``amd-smi metric`` keys on.
+
+        The CLI decides its APU-only output from ``is_apu`` in
+        ``amdsmi_get_gpu_metrics_info``; none of the JSON dumps carry it.
+
+        Returns:
+            list: one bool per GPU; False when the metrics table cannot be read.
+        """
+        flags = []
+        # Common.__init__ shuts the library down once it has read its own data.
+        cls.common.amdsmi_smart_init()
+        try:
+            for processor in amdsmi.amdsmi_get_processor_handles():
+                try:
+                    metrics = amdsmi.amdsmi_get_gpu_metrics_info(processor)
+                except amdsmi.AmdSmiLibraryException:
+                    flags.append(False)
+                    continue
+                flags.append(bool(metrics.get("is_apu", False)))
+        finally:
+            amdsmi.amdsmi_shut_down()
+        return flags
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
