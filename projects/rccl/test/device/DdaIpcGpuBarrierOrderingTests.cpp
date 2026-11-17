@@ -5,7 +5,7 @@
  ************************************************************************/
 
 // 8-GPU litmus for ipc_gpu_barrier.h fences; rounds repeat inside one kernel so kernel boundaries cannot hide them.
-// AbortedBarrierStaysSilent needs one GPU and checks that a barrier gives up for good once it sees the abort flag.
+// AbortedBarrierStaysSilent needs one gfx1250 GPU and checks that a barrier stays out once it sees the abort flag.
 
 #include <hip/hip_runtime.h>
 
@@ -416,6 +416,10 @@ TEST(DdaIpcGpuBarrierOrdering, AbortedBarrierStaysSilent) {
   if (std::getenv(ProcessIsolatedTestRunner::kReexecMarkerEnvVar) == nullptr &&
       (hipGetDeviceCount(&n) != hipSuccess || n < 1)) {
     GTEST_SKIP() << "needs a GPU";
+  }
+  hipDeviceProp_t prop{};
+  if (hipGetDeviceProperties(&prop, 0) != hipSuccess || std::strncmp(prop.gcnArchName, "gfx1250", 7) != 0) {
+    GTEST_SKIP() << "DDA revoke/abort is supported on gfx1250 only";
   }
   RUN_ISOLATED_TESTS(ProcessIsolatedTestRunner::TestConfig("DdaIpcGpuBarrierOrdering.AbortedBarrierStaysSilent",
                                                            runStickyAbortTest)

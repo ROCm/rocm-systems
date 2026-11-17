@@ -6059,7 +6059,7 @@
     },
     {
       "name": "Revoke MPI Tests - DDA IPC (8-rank, single-node)",
-      "description": "ncclCommRevoke unblocks ranks spinning in the DDA-IPC IpcGpuBarrier for AllReduce, AllGather, ReduceScatter and AlltoAll when one rank skips the collective",
+      "description": "ncclCommRevoke unblocks ranks spinning in the DDA-IPC IpcGpuBarrier for AllReduce, AllGather, ReduceScatter and AlltoAll when one rank skips the collective. DDA revoke/abort is supported on gfx1250 only, so on gfx942/gfx950 the five IncompleteCollective cases skip and ShrinkAbort_DisablesDdaOnParent runs",
       "config": "revoke_mpi_tests_dda_ipc",
       "enabled": true
     },

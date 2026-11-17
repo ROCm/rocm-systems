@@ -488,6 +488,16 @@ TEST_F(RevokeMPITest, IncompleteCollective_Revoke_Shrink_Collective)
     HIP_TEST_CHECK_GTEST_FAIL(zeroInitializeBuffer<float>(send_buf, kCount));
     HIP_TEST_CHECK_GTEST_FAIL(zeroInitializeBuffer<float>(recv_buf, kCount));
 
+    // DDA IPC (gfx942/gfx950) does not poll the abort flag, so revoke cannot unblock a stalled one.
+    int algo = -1, protocol = -1, maxChannels = -1;
+    const bool ddaIpc = rcclGetCollImplInfo(parent, ncclFuncAllReduce, kCount, ncclFloat32, ncclSum, send_buf,
+                                            recv_buf, /*graphCapturing=*/0, &algo, &protocol, &maxChannels)
+                            == ncclSuccess
+                        && algo == static_cast<int>(rcclAddonAlgos_t::RCCL_DDA_IPC);
+    const std::string ddaSkip = mpiCoordinatedSkipReason(ddaIpc, "DDA revoke/abort is supported on gfx1250 only");
+    if(!ddaSkip.empty())
+        GTEST_SKIP() << ddaSkip;
+
     if (rank != world_size - 1) {
         ASSERT_EQ(ncclSuccess,
                   ncclAllReduce(send_buf, recv_buf, kCount, ncclFloat, ncclSum, parent, stream));
@@ -628,6 +638,9 @@ bool ddaLL128OneShotThresholdAtDefault()
 /// Shared body: GTEST_SKIP() returns from here, so call it as the last statement of a test.
 void runIncompleteDdaRevokeShrink(MPITestBase& test, const DdaRevokeCase& tc)
 {
+    // IpcGpuBarrier does not poll the abort flag on gfx942/gfx950, so revoke cannot unblock it.
+    if(tc.expectedAlgo == static_cast<int>(rcclAddonAlgos_t::RCCL_DDA_IPC))
+        GTEST_SKIP() << "DDA revoke/abort is supported on gfx1250 only";
     std::vector<std::unique_ptr<MPIHelpers::MpiEnvGuard>> envGuards;
     for(const DdaEnvSetting& e : tc.overrides)
         envGuards.push_back(std::make_unique<MPIHelpers::MpiEnvGuard>(e.name, e.value));
