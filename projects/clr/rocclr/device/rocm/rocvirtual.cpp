@@ -1815,6 +1815,28 @@ void VirtualGPU::RetiringSignalTracker::ReleaseHeldSignals(size_t mark) {
 }
 
 // ================================================================================================
+void VirtualGPU::HwQueueTracker::KeepUntilRetired(const std::vector<void*>& pins) {
+  for (void* pin : pins) {
+    reinterpret_cast<ProfilingSignal*>(pin)->release();
+  }
+  ReleaseHeldSignals();
+}
+
+// ================================================================================================
+void VirtualGPU::RetiringSignalTracker::KeepUntilRetired(const std::vector<void*>& pins) {
+  // The references move into open pins, which close at the current queue position
+  for (void* pin : pins) {
+    pins_.push_back(PinnedWait{reinterpret_cast<ProfilingSignal*>(pin)});
+  }
+  for (ProfilingSignal* signal : held_signals_) {
+    pins_.push_back(PinnedWait{signal});
+  }
+  num_open_pins_ += pins.size() + held_signals_.size();
+  held_signals_.clear();
+  ClosePins();
+}
+
+// ================================================================================================
 bool VirtualGPU::RetiringSignalTracker::WaitCurrent() {
   if (!HwQueueTracker::WaitCurrent()) {
     return false;
@@ -4917,15 +4939,18 @@ void VirtualGPU::submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) {
   if (!Barriers().IsExternalSignalListEmpty()) {
     dispatchBarrierPacket(kNopPacketHeader);
   }
-  // The barrier pinned the batch signals it waits on
-  Barriers().ReleaseHeldSignals();
-
   if (!result) {
     LogError("submitBatchCopyMemory failed!");
+    // The error status drops the command's pins before the GPU passes the waits
+    Barriers().KeepUntilRetired(cmd.TakePinnedHwEvents());
     cmd.setStatus(CL_OUT_OF_RESOURCES);
-  } else if (!amd::IS_HIP) {
-    for (const auto& op : copyOps) {
-      op.dstMemory->signalWrite(&dev());
+  } else {
+    // The barrier pinned the batch signals it waits on
+    Barriers().ReleaseHeldSignals();
+    if (!amd::IS_HIP) {
+      for (const auto& op : copyOps) {
+        op.dstMemory->signalWrite(&dev());
+      }
     }
   }
 

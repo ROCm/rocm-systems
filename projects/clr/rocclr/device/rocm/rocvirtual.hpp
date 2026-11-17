@@ -346,6 +346,9 @@ class VirtualGPU : public device::VirtualDevice {
     //! Drops the HoldSignal references taken since mark once their waits have been captured
     virtual void ReleaseHeldSignals(size_t /*mark*/ = 0) {}
 
+    //! Keeps the pins and the held signals until the queue retires the packets submitted so far
+    virtual void KeepUntilRetired(const std::vector<void*>& pins);
+
     //! Most signals a caller may acquire before submitting the ops that use them
     virtual size_t MaxUnsubmittedSignals() const { return std::numeric_limits<size_t>::max(); }
 
@@ -516,6 +519,7 @@ class VirtualGPU : public device::VirtualDevice {
     void HoldSignal(ProfilingSignal* signal) override;
     size_t HeldSignalCount() const override { return held_signals_.size(); }
     void ReleaseHeldSignals(size_t mark = 0) override;
+    void KeepUntilRetired(const std::vector<void*>& pins) override;
 
    private:
     void PreparePooledSignals(const std::vector<ProfilingSignal*>& signals) override;
