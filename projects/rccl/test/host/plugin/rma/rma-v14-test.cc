@@ -4,9 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Host-only microtests for src/plugin/rma/rma_v14.cc, the adapter that presents a v14 RMA plugin as the current
-// ncclRma_t: iput, iputSignal and iget drop optFlags, connect drops the abort flag, createContext down-converts the
-// v17 config, the missing getRmaProperties reports no flush-on-signal, and every other call is used as exported.
+// Host-only microtests for src/plugin/rma/rma_v14.cc, the v14-to-current ncclRma_t adapter.
 
 #include <gtest/gtest.h>
 

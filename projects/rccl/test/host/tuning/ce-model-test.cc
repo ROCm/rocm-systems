@@ -108,6 +108,20 @@ TEST_F(CeModelMicrotest, CapturedUnicastAddsOneFloorPerIntraBatchSync) {
   // 4 out-of-place ops at frequency 3: the same 2 blocks. Captured runs skip the D2H slice.
   comm_->ceColl.intraBatchSyncFreq = 3;
   EXPECT_NEAR(kSm90UcGraphFloor4 * 3 + kSm90UcNvlinkUs4, TimeUs(ncclCeMethodId_AllGather_UC, 0, 1), 1e-3);
+  // A message exactly at the threshold syncs: 3 in-place ops of kPerRankBytes.
+  comm_->ceColl.intraBatchSyncFreq = 2;
+  comm_->ceColl.intraBatchSyncMsgThreshold = 3 * kPerRankBytes;
+  EXPECT_NEAR(kSm90UcGraphFloor4 * 3 + kSm90UcNvlinkUs4, TimeUs(ncclCeMethodId_AllGather_UC, 1, 1), 1e-3);
+}
+
+TEST_F(CeModelMicrotest, CapturedMulticastUsesTheGraphFloorWithoutIntraBatchSyncs) {
+  comm_->devrState.lsaTeamSize = 2;
+  comm_->ceColl.intraBatchSyncFreq = 1;
+  comm_->ceColl.intraBatchSyncMsgThreshold = 0;
+  // Hopper multicast, captured: floor 14.45 + 2.004 us per rank; 2 ranks' data over full NVLink. Out of place,
+  // so 2 ops exceed the frequency of 1.
+  EXPECT_NEAR(14.45f + 2.004f * 2 + 2.0f * kPerRankBytes / 392 / 1e3f, TimeUs(ncclCeMethodId_AllGather_MC, 0, 1),
+              1e-3);
 }
 
 TEST_F(CeModelMicrotest, CapturedUnicastSkipsSyncsBelowThresholdWithoutCeInitOrWithinOneBlock) {

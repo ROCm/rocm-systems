@@ -137,7 +137,8 @@ TEST_F(PatMicrotest, InitRejectsNonAlgoProtoIds) {
   EXPECT_EQ(ncclInvalidUsage, ncclTuningPatModelInit(comm_.get(), -1, enabled_, &state_));
   EXPECT_EQ(ncclInvalidUsage, ncclTuningPatModelInit(comm_.get(), NCCL_TUNING_COUNT, enabled_, &state_));
   // The first symmetric-kernel id.
-  EXPECT_EQ(ncclInvalidUsage, ncclTuningPatModelInit(comm_.get(), NCCL_NUM_ALGORITHMS * NCCL_NUM_PROTOCOLS, enabled_, &state_));
+  EXPECT_EQ(ncclInvalidUsage,
+            ncclTuningPatModelInit(comm_.get(), NCCL_NUM_ALGORITHMS * NCCL_NUM_PROTOCOLS, enabled_, &state_));
 }
 
 TEST_F(PatMicrotest, InitOneRpnModelsOnlyAllGatherAndReduceScatter) {
@@ -215,6 +216,11 @@ TEST_F(PatMicrotest, SimMultiRpnReduceScatterNeedsAnNvlsReduction) {
   comm_->tuningContext.generalBandwidths[ncclFuncReduceScatter][NCCL_ALGO_PAT][NCCL_PROTO_SIMPLE] = 2.0f;
   EXPECT_EQ(0, Sim(ncclFuncReduceScatter, ncclDevProd).valid);
   EXPECT_EQ(1, Sim(ncclFuncReduceScatter, ncclDevSum).valid);
+}
+
+TEST_F(PatMicrotest, SimOneRpnReduceScatterAcceptsAnyReduction) {
+  comm_->tuningContext.generalBandwidths[ncclFuncReduceScatter][NCCL_ALGO_PAT][NCCL_PROTO_SIMPLE] = 2.0f;
+  EXPECT_EQ(1, Sim(ncclFuncReduceScatter, ncclDevProd).valid);
 }
 
 }  // namespace

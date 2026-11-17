@@ -4,8 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Host-only microtests for src/plugin/env/env_v1.cc, the adapter that presents a v1 env plugin as the current
-// ncclEnv_t: init drops the logger argument, finalize and getEnv are used as exported.
+// Host-only microtests for src/plugin/env/env_v1.cc, the v1-to-current ncclEnv_t adapter.
 
 #include <gtest/gtest.h>
 
