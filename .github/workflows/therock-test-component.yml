@@ -41,10 +41,6 @@ on:
 
 permissions:
   contents: read
-  # Only exercised when aws_role_to_assume is set, and only granted by callers
-  # that pass one -- a reusable workflow cannot hold a permission its caller
-  # withheld, so components with no bucket to read get no token either.
-  id-token: write
 
 jobs:
   test_component:
@@ -54,6 +50,14 @@ jobs:
       ${{ fromJSON(inputs.component).expect_failure == true && '(xfail)' || '' }}
     runs-on: ${{ inputs.test_runs_on }}
     continue-on-error: ${{ fromJSON(inputs.component).expect_failure == true }}
+    permissions:
+      contents: read
+      # Used only by the credential step below, i.e. only when the caller passes
+      # aws_role_to_assume. One job serves every component, so the permission is
+      # declared unconditionally and EVERY caller has to grant it: permissions
+      # can be maintained or reduced through a reusable-workflow chain, never
+      # elevated, so a caller that withholds it makes this file fail to start.
+      id-token: write
     container:
       # If the component has specified an alternate image, honor that option.
       # Otherwise use the default image.

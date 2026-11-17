@@ -32,9 +32,7 @@ jobs:
     uses: './.github/workflows/therock-test-component.yml'
     permissions:
       contents: read
-      # To mint the OIDC token exchanged for aws_role_to_assume below. Granted
-      # here rather than at the top of the file so the rocjpeg job, which reads
-      # no bucket, cannot request one.
+      # To mint the OIDC token exchanged for aws_role_to_assume below.
       id-token: write
     with:
       artifact_run_id: ${{ inputs.artifact_run_id }}
@@ -79,6 +77,9 @@ jobs:
     name: 'Test rocjpeg'
     if: ${{ inputs.platform == 'linux' }}
     uses: './.github/workflows/therock-test-component.yml'
+    permissions:
+      contents: read
+      id-token: write
     with:
       artifact_run_id: ${{ inputs.artifact_run_id }}
       amdgpu_families: ${{ inputs.amdgpu_families }}
