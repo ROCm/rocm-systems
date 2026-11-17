@@ -413,6 +413,9 @@ contract:
     tags: [memset, P0]
   Contract_MemsetAsync_HipMemsetAsync_DeviceBuffer_IsFilledAfterStreamSynchronize:
     <<: *level_0
+    disabled:
+      targets: [amd_wsl]
+      reason: "AIRUNTIME-3125 - test takes too long on WSL (~104s). Skipping for now."
     tags: [memset, P0]
   Contract_MemsetD8_HipMemsetD8_DeviceBuffer_IsFilledWithBytePattern:
     <<: *level_0
@@ -461,6 +464,9 @@ contract:
     tags: [driver_memset_2d, P0]
   Contract_DriverMemsetAsync2D3D_HipMemsetD2D16Async_FillsWordRows_VisibleAfterSync:
     <<: *level_0
+    disabled:
+      targets: [amd_wsl]
+      reason: "AIRUNTIME-3125 - test takes too long on WSL (~104s). Skipping for now."
     tags: [driver_memset_async_2d3d, P0]
   Contract_DriverMemsetAsync2D3D_HipMemsetD2D32Async_FillsDwordRows_VisibleAfterSync:
     <<: *level_0
@@ -698,6 +704,9 @@ contract:
     tags: [graph_kernel, P0]
   Contract_GraphEvent_HipGraphAddEventRecordNode_Default_RecordsEvent:
     <<: *level_0
+    disabled:
+      targets: [amd_wsl]
+      reason: "AIRUNTIME-3125 - test takes too long on WSL (~130s). Skipping for now."
     tags: [graph_event, P0]
   Contract_GraphEvent_HipGraphAddEventWaitNode_Default_WaitsForRecordedEvent:
     <<: *level_0
@@ -734,6 +743,9 @@ contract:
     tags: [graph_update, P0]
   Contract_GraphUpdate_HipGraphExecMemsetNodeSetParams_Default_UpdatesFillValue:
     <<: *level_0
+    disabled:
+      targets: [amd_wsl]
+      reason: "AIRUNTIME-3125 - test takes too long on WSL (~105s). Skipping for now."
     tags: [graph_update, P0]
   Contract_GraphUpdate_HipGraphExecMemcpyNodeSetParams1D_Default_UpdatesCopyDestination:
     <<: *level_0
@@ -749,6 +761,9 @@ contract:
     tags: [graph_update, P0]
   Contract_GraphUpdate_HipGraphExecChildGraphNodeSetParams_Default_UpdatesEmbeddedMemset:
     <<: *level_0
+    disabled:
+      targets: [amd_wsl]
+      reason: "AIRUNTIME-3125 - test takes too long on WSL (~104s). Skipping for now."
     tags: [graph_update, P0]
   Contract_GraphUpdate_HipGraphExecEventRecordNodeSetEvent_Default_UpdatesRecordedEvent:
     <<: *level_0
@@ -842,6 +857,9 @@ contract:
     tags: [graph_memcpy3d_node, P0]
   Contract_GraphMemcpy3DNode_HipGraphMemcpyNodeSetParams_Default_RetargetsSourceBeforeInstantiate:
     <<: *level_0
+    disabled:
+      targets: [amd_wsl]
+      reason: "AIRUNTIME-3125 - test takes too long on WSL (~104s). Skipping for now."
     tags: [graph_memcpy3d_node, P0]
   Contract_GraphMemcpy3DNode_HipGraphExecMemcpyNodeSetParams_ExecSetParams_RetargetsSourceAfterInstantiate:
     <<: *level_0
@@ -908,6 +926,9 @@ contract:
     tags: [graph_batch_mem_op, P0]
   Contract_GraphBatchMemOp_HipGraphBatchMemOpNodeSetParams_Default_UpdatesWriteValueBeforeInstantiate:
     <<: *level_0
+    disabled:
+      targets: [amd_wsl]
+      reason: "AIRUNTIME-3125 - test takes too long on WSL (~104s). Skipping for now."
     tags: [graph_batch_mem_op, P0]
   Contract_GraphBatchMemOp_HipGraphExecBatchMemOpNodeSetParams_ExecSetParams_UpdatesWriteValueAfterInstantiate:
     <<: *level_0
@@ -920,6 +941,9 @@ contract:
     tags: [driver_graph_node, P0]
   Contract_DriverGraphNode_HipDrvGraphExecMemcpyNodeSetParams_Default_RetargetsSourceAfterInstantiate:
     <<: *level_0
+    disabled:
+      targets: [amd_wsl]
+      reason: "AIRUNTIME-3125 - test takes too long on WSL (~104s). Skipping for now."
     tags: [driver_graph_node, P0]
   Contract_DriverGraphNode_HipDrvGraphAddMemsetNode_Default_LaunchesExpectedValue:
     <<: *level_0
@@ -932,6 +956,9 @@ contract:
     tags: [graph_instantiate_params, P0]
   Contract_GraphInstantiateParams_HipGraphInstantiateWithParams_UploadStream_LaunchesUploadedGraph:
     <<: *level_0
+    disabled:
+      targets: [amd_wsl]
+      reason: "AIRUNTIME-3125 - test takes too long on WSL (~131s). Skipping for now."
     tags: [graph_instantiate_params, P0]
   Contract_GraphDebug_HipGraphDebugDotPrint_Default_WritesNonEmptyFile:
     <<: *level_0
@@ -968,6 +995,9 @@ contract:
     tags: [graph_node_enabled, P0]
   Contract_GraphNodeEnabled_HipGraphNodeSetEnabled_DisabledNode_ActsAsEmpty:
     <<: *level_0
+    disabled:
+      targets: [amd_wsl]
+      reason: "AIRUNTIME-3125 - test takes too long on WSL (~104s). Skipping for now."
     tags: [graph_node_enabled, P0]
   Contract_GraphNodeAttributes_HipGraphKernelNodeSetAttribute_Cooperative_RoundTrips:
     <<: *level_0

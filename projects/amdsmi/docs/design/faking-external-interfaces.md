@@ -92,7 +92,12 @@ Reusable test infrastructure (not RAS-specific) lives in
 `tests/amd_smi_test/test_fixture_utils.h`/`.cc`:
 - `FakeSysfsTree`: builds a real, temporary, hardware-inert file tree.
   `WriteFile()` fails the test if the fixture can't be written, so a missing
-  file can't pass a `NOT_SUPPORTED` assertion by accident.
+  file can't pass a `NOT_SUPPORTED` assertion by accident. `ReadFile()` returns the
+  first line of a file, to check what production code wrote (or did not write).
+- `RunAsUnprivilegedUser()`: runs a callable and returns its status. For a non-root
+  caller it just calls it; for root (which bypasses file modes) it forks and drops
+  to "nobody" in the child, so a `0444` file really does fail the write with
+  `AMDSMI_STATUS_NO_PERM`. Make the fixture directory reachable (`chmod 0755`) first.
 - A generic, header-only `ScopedOverride<T>` template: takes a getter, a setter, and
   a new value. Its constructor saves the current value and installs the new one;
   its destructor restores the saved value. Being fully templated/inline, it never
@@ -103,16 +108,43 @@ Reusable test infrastructure (not RAS-specific) lives in
 - `ScopedProcessorRegistration`: the RAII wrapper around the layer-1
   `AMDSmiSystem::register_processor_for_testing()`/`unregister_processor_for_testing()`
   seam.
+- `ScopedEnvVar`: sets one environment variable for the life of a test body and
+  restores the previous state on exit (the old value, or unset if there was none),
+  so the change cannot reach other tests. For example, the UMA-carveout write test
+  sets `AMDSMI_DRY_RUN=0` this way instead of requiring it in the caller's shell.
+  Single-threaded tests only: `setenv()` is not safe against a concurrent `getenv()`.
 - `ScopedRocmSmiDevice` and `ScopedAmdsmiInit`: reusable by any GPU unit test
   needing a fake `rocm_smi::Device` or a no-hardware-discovery `amdsmi_init()`, not
-  just this RAS fix.
+  just this RAS fix. `ScopedRocmSmiDevice` also gives the device a render node like a
+  real GPU: render minor `128 + index` and a `renderD<minor>` symlink beside the card
+  directory (removed on exit), so files written under the card path resolve through
+  either name.
+- `FakeKfdTopology` with `WriteGpuNode()`, `WriteCpuNode()` and `WriteIoLink()`: run
+  the real `amdsmi_init()` GPU discovery over a `FakeSysfsTree` holding a fake KFD
+  topology and DRM entries, and hand out the discovered processor handles by KFD node
+  index. Prefer it to hand-building a device stack: the test then goes through the
+  same init, handle lookup and shutdown as a real caller (see `kfd_numa_node_test.cc`
+  and the NPM getter tests). Real discovery reads a GPU's files through
+  `renderD<128 + C>`, so `WriteGpuNode()` links `card<C>` to it as sysfs does. The KFD node
+  index and the card index `C` are separate arguments, as they are unrelated on real systems.
 
 The one piece that must live in production code (compiled into
 `libamd_smi`/`amd_smi_static`, since production code calls the getter) stays in
 `amd_smi_test_overrides.h`/`.cc`:
-- The RAS-specific primitive: `smi_amdgpu_sysfs_drm_root()` (getter, called by
-  production code) and `smi_amdgpu_set_sysfs_drm_root_for_testing()` (setter — only
-  ever called by the guard). Both intentionally not `amdsmi_`-prefixed.
+- The sysfs-root hook: `amd::smi::test_hooks::SysfsDrmRoot()` (getter, called by
+  production code) and `amd::smi::test_hooks::SetSysfsDrmRoot()` (setter, declared
+  only in `test_fixture_utils.h` and only ever called by the guard). Both are
+  hidden-visibility, so no shared library exports them.
+- The KFD topology hook: `amd::smi::test_hooks::KfdNodesPathRoot()` and
+  `SetKfdNodesPathRoot()`, with the same split. `KFDNodesPathRoot()` in the
+  rocm_smi sources reads it, so `librocm_smi64` compiles `amd_smi_test_overrides.cc`
+  too. rocm_smi's own DRM discovery reads the sysfs-root hook above, so with both set
+  to a `FakeSysfsTree` a test can run the real `rsmi_init()` over a fake topology.
+- The app temp-directory hook: `AppTmpDir()` and `SetAppTmpDir()`, default `/tmp`.
+  Real discovery stores each device's boot compute and memory partition state in
+  read-only `rocmsmi_boot_*` files there, which later real runs on the same host read
+  as the boot state. `FakeKfdTopology` points the hook at its tree, so tests neither
+  leave those files behind nor read another run's.
 
 Each test uses the `FakeSysfsTree` fixture helper to build a real, temporary,
 hardware-inert file tree, and constructs a real `AMDSmiDrm` + `AMDSmiGPUDevice`
