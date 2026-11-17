@@ -627,6 +627,9 @@ deviceLib:
   Unit_fp8x2_ocp_split_compare:
     <<: *level_default
     tags: [types]
+  Unit_fp8x2_ocp_saturate_compare:
+    <<: *level_default
+    tags: [types]
   Unit_fp8x4_ocp_split_compare:
     <<: *level_default
     tags: [types]
