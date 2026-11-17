@@ -362,6 +362,19 @@ auto  att_device_trace_id =
     std::atomic<rocprofiler_dispatch_id_t>{std::numeric_limits<uint64_t>::max()};
 std::mutex att_shader_data;
 
+auto&
+att_dispatch_kernel_iterations()
+{
+    static auto value = common::Synchronized<kernel_iteration_t, true>{};
+    return value;
+}
+
+void
+reset_att_dispatch_kernel_iterations()
+{
+    att_dispatch_kernel_iterations().wlock([](auto& iterations) { iterations.clear(); });
+}
+
 thread_local auto thread_dispatch_rename      = as_pointer<kernel_rename_stack_t>();
 thread_local auto thread_dispatch_rename_dtor = common::scope_destructor{[]() {
     delete thread_dispatch_rename;
@@ -1974,10 +1987,9 @@ att_dispatch_callback(rocprofiler_agent_id_t /* agent_id  */,
                       void* /*userdata_config*/,
                       rocprofiler_user_data_t* userdata_shader)
 {
-    static auto kernel_iteration = common::Synchronized<kernel_iteration_t, true>{};
-    userdata_shader->value       = dispatch_id;
+    userdata_shader->value = dispatch_id;
 
-    if(is_targeted_kernel(kernel_id, dispatch_id, kernel_iteration))
+    if(is_targeted_kernel(kernel_id, dispatch_id, att_dispatch_kernel_iterations()))
         return ROCPROFILER_THREAD_TRACE_CONTROL_START_AND_STOP;
     return ROCPROFILER_THREAD_TRACE_CONTROL_NONE;
 }
@@ -2931,6 +2943,10 @@ tool_attach(rocprofiler_client_detach_t /*detach_func*/,
            "After the initial attachment, it is recommended to just use `rocprofv3 --pid=<pid> [-o "
            "<output_file> -d <output_directory> ...]` to attach to a new process.";
 
+    // Kernel registrations outlive an attachment, but dispatch iteration selection belongs to one
+    // attachment session.
+    if(tool::get_config().advanced_thread_trace) reset_att_dispatch_kernel_iterations();
+
     assign_attach_output_session_suffix();
 
     pid_t instrumented_pid = getpid();   // The process being profiled
@@ -2939,6 +2955,7 @@ tool_attach(rocprofiler_client_detach_t /*detach_func*/,
               << " (parent PID: " << parent_pid << ")";
     // NOLINTNEXTLINE(readability-suspicious-call-argument): parent_pid is correctly the _ppid arg
     tool_metadata->set_process_id(instrumented_pid, parent_pid);
+    tool_metadata->process_end_ns = 0;
 
     for(uint64_t i = 0; i < context_ids_length; ++i)
     {
