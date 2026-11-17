@@ -65,6 +65,15 @@ int mockAllgatherFillDevices(void* ctx, void* buf, size_t) {
   return 0;
 }
 
+int mockAllgatherDevice0AtRank1(void* ctx, void* buf, size_t) {
+  const int nRanks = static_cast<int>(reinterpret_cast<intptr_t>(ctx));
+  auto* devices = static_cast<int*>(buf);
+  for (int rank = 0; rank < nRanks; ++rank) {
+    if (devices[rank] < 0) devices[rank] = rank == 0 ? 1 : rank;
+  }
+  return 0;
+}
+
 struct CreateOut {
   gin_anvil_sdma_handle_t handle{nullptr};
   void* gpu_handles{nullptr};
@@ -84,6 +93,25 @@ void destroyOut(CreateOut* out) {
   out->handle = nullptr;
   out->gpu_handles = nullptr;
   out->sdma_dirty = nullptr;
+}
+
+std::vector<void*> readTable(const CreateOut& out, int count) {
+  std::vector<void*> table(count, reinterpret_cast<void*>(0x1));
+  EXPECT_EQ(hipMemcpy(table.data(), out.gpu_handles, count * sizeof(void*), hipMemcpyDeviceToHost),
+            hipSuccess);
+  return table;
+}
+
+bool hasXgmiPeerAccess(int peer) {
+  int canAccess = 0;
+  uint32_t linkType = 0;
+  uint32_t hopCount = 0;
+  const hipError_t peerStatus = hipDeviceCanAccessPeer(&canAccess, 0, peer);
+  EXPECT_EQ(peerStatus, hipSuccess);
+  if (peerStatus != hipSuccess || !canAccess) return false;
+  const hipError_t linkStatus = hipExtGetLinkTypeAndHopCount(0, peer, &linkType, &hopCount);
+  EXPECT_EQ(linkStatus, hipSuccess);
+  return linkStatus == hipSuccess && linkType == HSA_AMD_LINK_INFO_TYPE_XGMI;
 }
 
 class GinAnvilSdmaFactoryTest : public ::testing::Test {
@@ -250,7 +278,7 @@ TEST_F(GinAnvilSdmaFactoryTest, Create_MultiChannel) {
 
 // F10b: multi-rank create. The device table is pe-major (local_pe * numChannels + c) and
 // peers sharing a device share one queue (the connect loop skips an existing queue).
-TEST_F(GinAnvilSdmaFactoryTest, Create_MultiRankTable) {
+TEST_F(GinAnvilSdmaFactoryTest, Create_MultiRankTable_SameDevice) {
   if (gin_anvil_sdma_probe() <= 0) {
     GTEST_SKIP() << "Anvil SDMA probe failed";
   }
@@ -262,13 +290,6 @@ TEST_F(GinAnvilSdmaFactoryTest, Create_MultiRankTable) {
       if (devs[i] < 0) devs[i] = 0;
     }
     return 0;
-  };
-
-  auto readTable = [](const CreateOut& out, int n) {
-    std::vector<void*> t(n, reinterpret_cast<void*>(0x1));
-    EXPECT_EQ(hipMemcpy(t.data(), out.gpu_handles, n * sizeof(void*), hipMemcpyDeviceToHost),
-              hipSuccess);
-    return t;
   };
 
   void* dev0Handle = nullptr;
@@ -300,58 +321,73 @@ TEST_F(GinAnvilSdmaFactoryTest, Create_MultiRankTable) {
       destroyOut(&out);
     }
   }
+}
+
+TEST_F(GinAnvilSdmaFactoryTest, Create_MultiRankTable_CrossDevice) {
+  if (gin_anvil_sdma_probe() <= 0) {
+    GTEST_SKIP() << "Anvil SDMA probe failed";
+  }
 
   int ndev = 0;
   ASSERT_EQ(hipGetDeviceCount(&ndev), hipSuccess);
   if (ndev < 2) {
-    RecordProperty("cross_device_cases", "not run: fewer than two GPUs");
-    return;
+    GTEST_SKIP() << "Cross-device case requires at least two GPUs";
+  }
+  if (!hasXgmiPeerAccess(1)) {
+    GTEST_SKIP() << "GPUs 0 and 1 require peer-accessible XGMI";
   }
 
-  auto hasXgmiPeerAccess = [](int peer) {
-    int canAccess = 0;
-    uint32_t linkType = 0;
-    uint32_t hopCount = 0;
-    const hipError_t peerStatus = hipDeviceCanAccessPeer(&canAccess, 0, peer);
-    EXPECT_EQ(peerStatus, hipSuccess);
-    if (peerStatus != hipSuccess || !canAccess) return false;
-    const hipError_t linkStatus = hipExtGetLinkTypeAndHopCount(0, peer, &linkType, &hopCount);
-    EXPECT_EQ(linkStatus, hipSuccess);
-    return linkStatus == hipSuccess && linkType == HSA_AMD_LINK_INFO_TYPE_XGMI;
-  };
-  if (!hasXgmiPeerAccess(1)) {
-    RecordProperty("cross_device_cases", "not run: GPUs 0 and 1 require peer-accessible XGMI");
-    return;
-  }
+  sdma_anvil::anvil.disconnectDevice(0);
+  sdma_anvil::anvil.disconnectDevice(1);
+  ASSERT_EQ(sdma_anvil::anvil.getSdmaQueue(0, 0, 0), nullptr);
+  ASSERT_EQ(sdma_anvil::anvil.getSdmaQueue(0, 1, 0), nullptr);
 
   // A failed create on this peer-accessible XGMI path is a regression, not a skip.
   CreateOut out2{};
-  ASSERT_EQ(tryCreate(2, 0, 0, mockAllgatherFillDevices, 1, &out2), 0);
+  ASSERT_EQ(tryCreate(2, 1, 0, mockAllgatherDevice0AtRank1, 1, &out2), 0);
+  hipPointerAttribute_t attributes{};
+  ASSERT_EQ(hipPointerGetAttributes(&attributes, out2.gpu_handles), hipSuccess);
+  EXPECT_EQ(attributes.device, 0);
   std::vector<void*> t2 = readTable(out2, 2);
   EXPECT_NE(t2[0], nullptr);
   EXPECT_NE(t2[1], nullptr);
   EXPECT_NE(t2[0], t2[1]);
-  EXPECT_EQ(t2[0], dev0Handle);
+  ASSERT_NE(sdma_anvil::anvil.getSdmaQueue(0, 1, 0), nullptr);
+  ASSERT_NE(sdma_anvil::anvil.getSdmaQueue(0, 0, 0), nullptr);
+  EXPECT_EQ(t2[0], sdma_anvil::anvil.getSdmaQueue(0, 1, 0)->deviceHandle());
+  EXPECT_EQ(t2[1], sdma_anvil::anvil.getSdmaQueue(0, 0, 0)->deviceHandle());
   destroyOut(&out2);
+}
+
+TEST_F(GinAnvilSdmaFactoryTest, Create_MultiRankTable_TwoChannels) {
+  if (gin_anvil_sdma_probe() <= 0) {
+    GTEST_SKIP() << "Anvil SDMA probe failed";
+  }
 
   // With 2 channels a channel-major table differs from the pe-major one; peers reuse whatever queues already exist.
+  int ndev = 0;
+  ASSERT_EQ(hipGetDeviceCount(&ndev), hipSuccess);
   if (ndev < 3) {
-    RecordProperty("two_channel_case", "not run: fewer than three GPUs");
-    return;
+    GTEST_SKIP() << "Two-channel case requires at least three GPUs";
+  }
+  if (!hasXgmiPeerAccess(1)) {
+    GTEST_SKIP() << "GPUs 0 and 1 require peer-accessible XGMI";
   }
   if (!hasXgmiPeerAccess(2)) {
-    RecordProperty("two_channel_case", "not run: GPUs 0 and 2 require peer-accessible XGMI");
-    return;
+    GTEST_SKIP() << "GPUs 0 and 2 require peer-accessible XGMI";
   }
+  sdma_anvil::anvil.disconnectDevice(2);
+  ASSERT_EQ(sdma_anvil::anvil.getSdmaQueue(0, 2, 0), nullptr);
   constexpr int kChannels = 2;
+  constexpr int devices[] = {1, 0, 2};
   CreateOut out3{};
-  ASSERT_EQ(tryCreate(3, 0, 0, mockAllgatherFillDevices, kChannels, &out3), 0);
+  ASSERT_EQ(tryCreate(3, 1, 0, mockAllgatherDevice0AtRank1, kChannels, &out3), 0);
   std::vector<void*> t3 = readTable(out3, 3 * kChannels);
-  for (int pe = 0; pe < 3; ++pe) {
-    for (int c = 0; c < kChannels; ++c) {
-      sdma_anvil::SdmaQueue* q = sdma_anvil::anvil.getSdmaQueue(0, pe, c);
-      EXPECT_EQ(t3[pe * kChannels + c], q ? static_cast<void*>(q->deviceHandle()) : nullptr)
-          << "pe=" << pe << " c=" << c;
+  for (int rank = 0; rank < 3; ++rank) {
+    for (int channel = 0; channel < kChannels; ++channel) {
+      sdma_anvil::SdmaQueue* queue = sdma_anvil::anvil.getSdmaQueue(0, devices[rank], channel);
+      EXPECT_EQ(t3[rank * kChannels + channel], queue ? static_cast<void*>(queue->deviceHandle()) : nullptr)
+          << "rank=" << rank << " channel=" << channel;
     }
   }
   EXPECT_NE(t3[2 * kChannels], nullptr);
