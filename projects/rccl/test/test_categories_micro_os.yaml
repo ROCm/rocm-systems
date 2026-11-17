@@ -1,12 +1,11 @@
-# rccl-UnitTestsMicroRecorder — shared/ctest schema.
-# Host-only micro-tests for src/misc/recorder.cc (no GPU, no librccl).
+# CTest categories for the host-only src/os/ microtests (no GPU, no librccl).
 # RCCL does not support Windows: exclude_windows matches all tests so generated suites are empty on Windows.
 
 test_categories:
-  quick: &micro_recorder_quick
-    description: "Smoke — host-only misc/recorder.cc micro-tests, sub-second."
+  quick: &micro_os_quick
+    description: "Smoke — host-only src/os/ micro-tests, sub-second."
     test_patterns:
-      - "Recorder*"
+      - "Linux*"
     exclude_windows:
       - "*"
     labels:
@@ -16,21 +15,21 @@ test_categories:
       - "precheck"
       - "microtest"
   standard:
-    <<: *micro_recorder_quick
+    <<: *micro_os_quick
     labels:
       - "rccl"
       - "standard"
       - "regression"
       - "microtest"
   comprehensive:
-    <<: *micro_recorder_quick
+    <<: *micro_os_quick
     labels:
       - "rccl"
       - "comprehensive"
       - "comprehensive_regression"
       - "microtest"
   full:
-    <<: *micro_recorder_quick
+    <<: *micro_os_quick
     labels:
       - "rccl"
       - "full"
