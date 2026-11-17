@@ -27,6 +27,15 @@
 # handed.
 files: ^projects/rccl/
 
+# Mirror .clang-format-ignore
+exclude: |
+  (?x)^projects/rccl/(
+    external/
+    | src/include/nvtx3/
+    | src/transport/net_ib/gdaki/doca-gpunetio/
+    | src/transport/net_efa_gda/efa-dp-direct/
+  )
+
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
