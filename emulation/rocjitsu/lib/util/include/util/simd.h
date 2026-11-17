@@ -139,22 +139,6 @@ template <class Simd>
   }
 }
 
-/// Expand the low native<uint32_t>::size() bits into 0/1 uint32_t lanes. This
-/// is the numeric form needed by carry-in arithmetic; selection paths should
-/// use simd_mask_from_bits directly. AVX-512 materializes the lanes with a
-/// k-mask zero-masked broadcast; narrower targets use vector bit tests.
-[[gnu::always_inline]] inline native<uint32_t> simd_u32_lanes_from_bits(uint64_t bits) {
-  using U = native<uint32_t>;
-  static_assert(U::size() <= 32);
-#if RJ_HOST_HAS_AVX512F
-  static_assert(U::size() == 16);
-  return std::bit_cast<U>(_mm512_maskz_set1_epi32(static_cast<__mmask16>(bits), 1));
-#else
-  const U lane_bits([](auto i) { return uint32_t{1} << i; });
-  const U lane_indices([](auto i) { return static_cast<uint32_t>(i); });
-  return (U(static_cast<uint32_t>(bits)) & lane_bits) >> lane_indices;
-#endif
-}
 #else
 // Fallback definitions so `if constexpr (has_stdx_simd)` discarded
 // branches compile out even in non-template callers (e.g. gtest TEST
@@ -170,7 +154,6 @@ template <class T> native<T> load(const uint32_t *) { return {}; }
 template <class T> native<T> broadcast(uint32_t) { return {}; }
 template <class Mask> uint64_t simd_mask_to_bits(const Mask &) { return 0; }
 template <class Simd> bool simd_mask_from_bits(uint64_t) { return false; }
-inline native<uint32_t> simd_u32_lanes_from_bits(uint64_t) { return {}; }
 inline native<float> native_fma(native<float>, native<float>, native<float>) { return {}; }
 template <class T> void masked_store(uint32_t *, native<T>, uint64_t) {}
 template <class T> void blit_to_buffer(uint32_t (&)[native<T>::size()], native<T>) {}

@@ -87,9 +87,7 @@ def _register_handlers() -> None:
         gen_vector_sat_pack,
         gen_vector_mullit,
         gen_vector_perm_pk16,
-        gen_vector_qsad,
         gen_vector_trig_preop,
-        gen_vector_mad_64_32,
         gen_vector_div_fixup,
         gen_vector_div_scale,
         gen_vector_div_fmas,
@@ -170,23 +168,8 @@ def _register_handlers() -> None:
     DISPATCH['vector_perm_pk16'] = lambda c: gen_vector_perm_pk16(
         c.dst_ops, c.src_ops, c.op, c.profile.uses_vgpr_msb_indexing
     )
-    DISPATCH['vector_qsad'] = lambda c: gen_vector_qsad(
-        c.dst_ops,
-        c.src_ops,
-        c.op,
-        c.profile.uses_vgpr_msb_indexing,
-        c.is_vop3 and c.inst.name in c.profile.integer_clamp_dtypes,
-        c.arch_name == 'rdna3_5',
-    )
     DISPATCH['vector_trig_preop'] = lambda c: gen_vector_trig_preop(
         c.dst_ops, c.src_ops, c.is_vop3, c.has_abs
-    )
-    DISPATCH['vector_mad_64_32'] = lambda c: gen_vector_mad_64_32(
-        c.dst_ops,
-        c.src_ops,
-        c.dtype,
-        c.result_writer,
-        c.is_vop3 and c.inst.name in c.profile.integer_clamp_dtypes,
     )
     DISPATCH['vector_div_fixup'] = lambda c: gen_vector_div_fixup(
         c.dst_ops, c.src_ops, c.dtype, c.is_vop3, c.has_abs

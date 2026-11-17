@@ -2041,13 +2041,23 @@ public:
   }
 
   /// @brief Acquire observed storage for an undelegated VGPR operand.
-  /// reg_count is the number of consecutive physical source registers consumed.
-  /// @returns No view for uniform or delegated operands; their operand semantics
-  /// must be materialized through the logical read APIs instead.
+  /// reg_count is the number of consecutive logical source words consumed.
+  /// @returns No view for uniform/delegated operands or wordwise mappings that
+  /// cannot be represented by contiguous storage. Materialize those operands
+  /// through the logical per-word read APIs instead.
   [[nodiscard]] std::optional<VgprReadRegion>
   read_operand_region(const Operand &op, uint64_t lane_mask, uint32_t reg_count = 1) const {
     if (op.delegate()) {
       return std::nullopt;
+    }
+    if (reg_count > 1 && cu_->arch() == rocjitsu::IsaFamily::Cdna2) {
+      const auto first = op.decoded_vgpr();
+      // CDNA2 resolves missing words to V0, including words past the ordinary/AccVGPR split.
+      // Indexed tuples need per-word resolution too, even if their first word fits.
+      if (wavefront().gpr_idx_en() ||
+          (first && !wavefront().unified_vgpr_range_is_allocated(first->index, reg_count))) {
+        return std::nullopt;
+      }
     }
     auto base = op.simd_vgpr_base(wavefront());
     if (!base) {

@@ -219,24 +219,6 @@ TEST(UtilSimd, MaskBitBridgePortableFallbackRoundTripsEveryPattern) {
 #endif
 }
 
-TEST(UtilSimd, MaskBitsExpandToOrderedZeroOneLanes) {
-  SKIP_IF_NO_SIMD();
-  constexpr std::size_t W = util::native<uint32_t>::size();
-  ASSERT_LE(W, 16u) << "exhaustive mask sweep is intentionally bounded";
-  const uint64_t full = util::mask<uint64_t>(static_cast<int>(W));
-  for (uint64_t bits = 0; bits <= full; ++bits) {
-    const auto lanes = util::simd_u32_lanes_from_bits(bits);
-    for (std::size_t i = 0; i < W; ++i) {
-      ASSERT_EQ(lanes[i], static_cast<uint32_t>((bits >> i) & 1u))
-          << "bits " << bits << ", lane " << i;
-    }
-  }
-  const auto high_bits = util::simd_u32_lanes_from_bits(~uint64_t{0});
-  for (std::size_t i = 0; i < W; ++i) {
-    EXPECT_EQ(high_bits[i], 1u) << "lane " << i;
-  }
-}
-
 TEST(UtilSimd, MaskedStore_FullMask) {
   SKIP_IF_NO_SIMD();
   alignas(util::native<uint32_t>) uint32_t dst[kW] = {};

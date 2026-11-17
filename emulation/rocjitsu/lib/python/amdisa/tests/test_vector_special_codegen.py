@@ -28,7 +28,6 @@ from amdisa.codegen.execute.vector_special import (
     gen_vector_mullit,
     gen_vector_perm_pk16,
     gen_vector_permlane,
-    gen_vector_qsad,
     gen_vector_sat_pack,
     gen_vector_swaprel,
     gen_vector_trig_preop,
@@ -126,23 +125,13 @@ def test_saturating_pack_vop3_writes_the_opsel_destination_half():
     assert 'write_lane(vdst, lane, result)' in i4
 
 
-def test_perm_and_qsad_codegen_cover_multiword_results():
+def test_perm_codegen_covers_multiword_results():
     perm = gen_vector_perm_pk16(['vdst'], ['src0', 'src1', 'src2'], 'b6', True)
-    qsad = gen_vector_qsad(['vdst'], ['src0', 'src1', 'src2'], 'sad_pk_u16', True, True)
-    mqsad = gen_vector_qsad(['vdst'], ['src0', 'src1', 'src2'], 'msad_u32', True, True)
-
     assert 'uint32_t packed[3]' in perm
     assert 'source_bit = index * 6u' in perm
     assert 'Operand dst_word = vdst;' in perm
     assert 'dst_word.encoding_value_' in perm
     assert 'read_lane64(src1, lane)' in perm
-    assert '(window + byte) * 8' in qsad
-    assert 'write_lane64(vdst, lane, packed_result)' in qsad
-    assert 'inst_.clamp ? std::min(value, 0xffffu) : (value & 0xffffu)' in qsad
-    assert 'if (b != 0)' in mqsad
-    assert 'accum[window] = amdgpu::RegisterAccess(wf).read_lane' in mqsad
-    assert 'if (std::optional<uint64_t> constant = src2.const_value())' in mqsad
-    assert 'vop3_integer_add<uint32_t>(accum[window], sum, inst_.clamp)' in mqsad
 
 
 @pytest.mark.parametrize(
@@ -150,7 +139,6 @@ def test_perm_and_qsad_codegen_cover_multiword_results():
     [
         (gen_vector_movrel, (['vdst'], ['src0'], 'unknown')),
         (gen_vector_perm_pk16, (['vdst'], ['src0', 'src1', 'src2'], 'unknown', True)),
-        (gen_vector_qsad, (['vdst'], ['src0', 'src1', 'src2'], 'unknown', True)),
     ],
 )
 def test_unsupported_vector_special_operations_fail_during_generation(generator, args):

@@ -203,7 +203,21 @@ def test_generated_rj_arith_bodies_cannot_be_bypassed_by_legacy_simd(arch):
     assert all(count > 0 for count in checked.values())
 
 
-@pytest.mark.parametrize('arch', ['rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5'])
+@pytest.mark.parametrize(
+    'arch',
+    [
+        'rdna3',
+        'rdna4',
+        'cdna3',
+        'cdna4',
+        'cdna5',
+        'cdna1',
+        'cdna2',
+        'rdna1',
+        'rdna2',
+        'rdna3_5',
+    ],
+)
 @pytest.mark.parametrize('name', sorted(CARRY32_NAMES))
 @pytest.mark.parametrize('vop3', [False, True])
 def test_carry_bindings_keep_decoder_commit_and_snapshot_input(arch, name, vop3):
@@ -211,7 +225,9 @@ def test_carry_bindings_keep_decoder_commit_and_snapshot_input(arch, name, vop3)
     dst = ['vdst', 'sdst'] if vop3 else ['vdst']
     src = ['a', 'b', 'cin'] if vop3 and with_carry else ['a', 'b']
     body = gen_carry32(context(arch, name, dst, src, vop3, 'commit_result'))
-    carry_policy = ', false' if arch.startswith('cdna') else ''
+    carry_policy = (
+        ', false' if arch.startswith('cdna') or arch in ('rdna1', 'rdna2') else ''
+    )
     assert f'execute_carry32<{str(with_carry).lower()}{carry_policy}>' in body
     assert 'rj_arith_' + name.lower() + '_w64' in body
     assert 'input_carry, commit_result' in body
@@ -220,10 +236,23 @@ def test_carry_bindings_keep_decoder_commit_and_snapshot_input(arch, name, vop3)
         assert ('read_wave_mask_scalar(cin, wf)' if vop3 else 'wf.vcc()') in body
     else:
         assert 'input_carry = 0u' in body
-    assert gen_carry32(context('cdna2', name, dst, src, vop3)) is None
 
 
-@pytest.mark.parametrize('arch', ['rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5'])
+@pytest.mark.parametrize(
+    'arch',
+    [
+        'rdna3',
+        'rdna4',
+        'cdna3',
+        'cdna4',
+        'cdna5',
+        'cdna1',
+        'cdna2',
+        'rdna1',
+        'rdna2',
+        'rdna3_5',
+    ],
+)
 def test_wide_integer_bindings_and_generated_routing(arch):
     from amdisa.codegen.execute.rj_arith_vector import (
         SHIFT64_NAMES,
@@ -247,12 +276,7 @@ def test_wide_integer_bindings_and_generated_routing(arch):
         assert 'execute_mad64(wf, rj_arith_' + name.lower() in body
         assert 'rj_arith_' + name.lower() + '_w64' in body
         assert 'd, a, b, c, commit' in body
-        assert (
-            gen_wide_integer(
-                context('cdna2', name, ['d', 'sdst'], ['a', 'b', 'c'], True)
-            )
-            is None
-        )
+
     root = (
         Path(__file__).resolve().parents[3]
         / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
@@ -483,7 +507,21 @@ def test_packed_saturation_reads_word_and_writes_selected_half(arch):
         assert 'inst_.abs' not in body and 'inst_.neg' not in body
 
 
-@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+@pytest.mark.parametrize(
+    'arch',
+    [
+        'rdna3',
+        'rdna4',
+        'cdna3',
+        'cdna4',
+        'cdna5',
+        'cdna1',
+        'cdna2',
+        'rdna1',
+        'rdna2',
+        'rdna3_5',
+    ],
+)
 def test_qsad_register_layouts_and_no_legacy_bypass(arch):
     from amdisa.codegen.execute.rj_arith_vector import QSAD_NAMES, gen_wide_integer
 
@@ -491,7 +529,9 @@ def test_qsad_register_layouts_and_no_legacy_bypass(arch):
         Path(__file__).resolve().parents[3]
         / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
     )
-    source = (root / arch / 'vop3_exec.cpp').read_text()
+    source = '\n'.join(
+        path.read_text() for path in sorted((root / arch).glob('vop3_exec*.cpp'))
+    )
     for name in QSAD_NAMES:
         body = gen_wide_integer(context(arch, name, ['d'], ['a', 'b', 'c'], True))
         assert 'execute_qsad' in body
@@ -500,10 +540,6 @@ def test_qsad_register_layouts_and_no_legacy_bypass(arch):
         assert 'RJ_ARITH_ALU_ABS' not in body and 'RJ_ARITH_ALU_NEG' not in body
         assert ', ' + str(name != 'V_MQSAD_U32_U8').lower() + ');' in body
         assert 'arithmetic_flags()' in body
-        assert (
-            gen_wide_integer(context('cdna2', name, ['d'], ['a', 'b', 'c'], True))
-            is None
-        )
         assert (
             gen_wide_integer(context(arch, name, ['d'], ['a', 'b', 'c'], False)) is None
         )
