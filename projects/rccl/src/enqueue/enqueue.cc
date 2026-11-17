@@ -3277,7 +3277,7 @@ static ncclResult_t updateCollCostTable(struct ncclComm* comm, struct ncclTaskCo
       // to be least preferred.
       if (a == NCCL_ALGO_RING) {
         // Any factor large enough to act as a partition between lossy and non-lossy algos.
-        table[a][p] *= rcclFp8RingCostFactor(info->datatype, info->func, comm->nRanks, comm->nNodes, nBytes,
+        table[a][p] *= rcclFp8RingCostFactor(info->datatype, info->func, comm->nRanks, comm->nNodes,
                                              rcclDdaLL128Threshold(comm, ncclFuncAllReduce), comm->archName);
       }
     }
