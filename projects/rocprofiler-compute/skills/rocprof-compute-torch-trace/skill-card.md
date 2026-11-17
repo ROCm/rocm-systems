@@ -2,7 +2,7 @@
 
 ## Description
 
-Attributes AMD GPU kernel performance back to the PyTorch and Triton operators that launched them with rocprof-compute.
+Attributes AMD GPU kernel performance back to the PyTorch, Triton, and JAX operators that launched them with rocprof-compute.
 
 ## Owner
 

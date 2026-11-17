@@ -413,12 +413,16 @@ class RocProfCompute_Base:
                 )
         console_debug(f"Sending profiler options to run_prof: {options}")
 
+        frameworks = _frameworks_to_trace(args.trace_ml_api)
         run_prof(
             fnames=str_fnames,
             profiler_options=options,
             workload_dir=args.output_directory,
             ml_api_trace_enabled=args.trace_ml_api is not None,
             retain_rocpd_output=args.retain_rocpd_output,
+            share_jax_compilation_cache=(
+                frameworks is not None and "jax" in frameworks
+            ),
         )
 
         end_time = time.time()
