@@ -2743,29 +2743,6 @@ class TestDerivePacked:
             assert cpp.count('wf.fp16_ovfl()') == 2
         assert 'util::f32_to_f16' not in cpp
 
-    @pytest.mark.parametrize(
-        ('operation', 'data_type', 'helper'),
-        [
-            ('add', 'i16', 'vop3_integer_add<int16_t>'),
-            ('sub', 'i16', 'vop3_integer_sub<int16_t>'),
-            ('add', 'u16', 'vop3_integer_add<uint16_t>'),
-            ('sub', 'u16', 'vop3_integer_sub<uint16_t>'),
-        ],
-    )
-    def test_pk_integer_add_sub_clamps_each_selected_half(
-        self, operation, data_type, helper
-    ):
-        cpp = gen_pk_binop(
-            ['vdst'],
-            ['src0', 'src1'],
-            operation,
-            data_type,
-            ('inst_.opsel', 'inst_.opsel_hi'),
-        )
-
-        assert cpp.count(helper) == 2
-        assert cpp.count('inst_.clamp') == 2
-
     def test_pk_ternary_bf16_generator_uses_fma_and_bf16_helpers(self):
         cpp = gen_pk_ternary(
             ['vdst'],
@@ -2801,30 +2778,6 @@ class TestDerivePacked:
         assert sem.semantic_class == 'pk_ternary'
         assert sem.operation == operation
         assert sem.data_type == data_type
-
-    def test_pk_ternary_i16_min3_uses_component_min(self):
-        cpp = gen_pk_ternary(
-            ['vdst'],
-            ['src0', 'src1', 'src2'],
-            'min3',
-            'i16',
-            '((inst_.opsel_hi >> 2) & 1)',
-            ('inst_.opsel', 'inst_.opsel_hi'),
-        )
-        assert 'std::min(std::min(a_lo, b_lo), c_lo)' in cpp
-        assert 'a_lo * b_lo + c_lo' not in cpp
-
-    def test_pk_ternary_u16_max3_uses_component_max(self):
-        cpp = gen_pk_ternary(
-            ['vdst'],
-            ['src0', 'src1', 'src2'],
-            'max3',
-            'u16',
-            '((inst_.opsel_hi >> 2) & 1)',
-            ('inst_.opsel', 'inst_.opsel_hi'),
-        )
-        assert 'std::max(std::max(a_lo, b_lo), c_lo)' in cpp
-        assert 'a_lo * b_lo + c_lo' not in cpp
 
     def test_pk_ternary(self):
         sem = _FakeSem('V_PK_FMA_F16', 'pk_ternary', 'fma', 'f16')

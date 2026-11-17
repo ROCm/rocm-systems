@@ -82,35 +82,16 @@ def _packed_inline_narrow_to(dtype: str | None) -> str | None:
     return 'f16' if dtype == 'f16' else None
 
 
-def _append_pk16_integer_operands(
-    lines: list[str], dtype: str, count: int, opsel: str, opsel_hi: str, negations: str
-) -> None:
-    ctype = 'int16_t' if dtype == 'i16' else 'uint16_t'
-    for index, name in enumerate(('a', 'b', 'c')[:count]):
-        lines.append(
-            f'    const uint32_t {name} = amdgpu::select_packed_halves('
-            f'raw{index}, {opsel}, {opsel_hi}, {index}, {negations});'
-        )
-        lines.append(f'    const auto {name}_lo = static_cast<{ctype}>({name});')
-        lines.append(f'    const auto {name}_hi = static_cast<{ctype}>({name} >> 16);')
-
-
 def gen_pk_binop(
     dst: list[str],
     src: list[str],
     op: str | None,
     dtype: str | None,
     opsel_exprs: tuple[str, str] = ('', ''),
-    multiply_clamp: bool = False,
 ) -> str:
-    """Generate packed 16-bit binary op (V_PK_ADD_I16, V_PK_MUL_F16, etc.)."""
+    """Generate packed FP16/BF16 binary arithmetic."""
     d, s0, s1 = dst[0], src[0], src[1]
     L = []
-    integer = dtype in ('i16', 'u16')
-    if integer:
-        L.append(
-            '  const uint32_t negations = amdgpu::packed_integer_negations(wf.cu().arch(), inst_);'
-        )
     L.append('  uint64_t exec = wf.exec();')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
@@ -119,13 +100,10 @@ def gen_pk_binop(
     # op_sel: which half of each src for LO result
     # op_sel_hi: which half for HI result (default = hi)
     opsel, opsel_hi = opsel_exprs
-    if integer:
-        _append_pk16_integer_operands(L, dtype, 2, opsel, opsel_hi, 'negations')
-    else:
-        L.append(f'    bool sel0_lo = ({opsel} >> 0) & 1;')
-        L.append(f'    bool sel1_lo = ({opsel} >> 1) & 1;')
-        L.append(f'    bool sel0_hi = ({opsel_hi} >> 0) & 1;')
-        L.append(f'    bool sel1_hi = ({opsel_hi} >> 1) & 1;')
+    L.append(f'    bool sel0_lo = ({opsel} >> 0) & 1;')
+    L.append(f'    bool sel1_lo = ({opsel} >> 1) & 1;')
+    L.append(f'    bool sel0_hi = ({opsel_hi} >> 0) & 1;')
+    L.append(f'    bool sel1_hi = ({opsel_hi} >> 1) & 1;')
 
     if dtype == 'f16':
         for half, neg in (('lo', 'neg'), ('hi', 'neg_hi')):
@@ -184,66 +162,6 @@ def gen_pk_binop(
         L.append(
             f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, rlo | (static_cast<uint32_t>(rhi) << 16));'
         )
-    elif dtype == 'i16':
-        i_op_map = {
-            'add': ('a_lo + b_lo', 'a_hi + b_hi'),
-            'sub': ('a_lo - b_lo', 'a_hi - b_hi'),
-            'max': ('a_lo > b_lo ? a_lo : b_lo', 'a_hi > b_hi ? a_hi : b_hi'),
-            'min': ('a_lo < b_lo ? a_lo : b_lo', 'a_hi < b_hi ? a_hi : b_hi'),
-            'ashr': (
-                'static_cast<int16_t>(b_lo >> (a_lo & 15))',
-                'static_cast<int16_t>(b_hi >> (a_hi & 15))',
-            ),
-        }
-        lo_expr, hi_expr = i_op_map[op]
-        if op in ('add', 'sub'):
-            L.append(
-                f'    uint16_t rlo = static_cast<uint16_t>(amdgpu::vop3_integer_{op}<int16_t>(a_lo, b_lo, inst_.clamp));'
-            )
-            L.append(
-                f'    uint16_t rhi = static_cast<uint16_t>(amdgpu::vop3_integer_{op}<int16_t>(a_hi, b_hi, inst_.clamp));'
-            )
-        else:
-            L.append(f'    uint16_t rlo = static_cast<uint16_t>({lo_expr});')
-            L.append(f'    uint16_t rhi = static_cast<uint16_t>({hi_expr});')
-        L.append(
-            f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, static_cast<uint32_t>(rlo) | (static_cast<uint32_t>(rhi) << 16));'
-        )
-    else:  # u16
-        clamp = 'inst_.clamp' if multiply_clamp else 'false'
-        u_op_map = {
-            'add': ('a_lo + b_lo', 'a_hi + b_hi'),
-            'sub': ('a_lo - b_lo', 'a_hi - b_hi'),
-            'mul': (
-                f'amdgpu::vop3_integer_mul<uint16_t, 16>(a_lo, b_lo, {clamp})',
-                f'amdgpu::vop3_integer_mul<uint16_t, 16>(a_hi, b_hi, {clamp})',
-            ),
-            'max': ('a_lo > b_lo ? a_lo : b_lo', 'a_hi > b_hi ? a_hi : b_hi'),
-            'min': ('a_lo < b_lo ? a_lo : b_lo', 'a_hi < b_hi ? a_hi : b_hi'),
-            'shl': (
-                'static_cast<uint16_t>(b_lo << (a_lo & 15u))',
-                'static_cast<uint16_t>(b_hi << (a_hi & 15u))',
-            ),
-            'shr': (
-                'static_cast<uint16_t>(b_lo >> (a_lo & 15u))',
-                'static_cast<uint16_t>(b_hi >> (a_hi & 15u))',
-            ),
-        }
-        lo_expr, hi_expr = u_op_map[op]
-        if op in ('add', 'sub'):
-            L.append(
-                f'    uint16_t rlo = static_cast<uint16_t>(amdgpu::vop3_integer_{op}<uint16_t>(a_lo, b_lo, inst_.clamp));'
-            )
-            L.append(
-                f'    uint16_t rhi = static_cast<uint16_t>(amdgpu::vop3_integer_{op}<uint16_t>(a_hi, b_hi, inst_.clamp));'
-            )
-        else:
-            L.append(f'    uint16_t rlo = static_cast<uint16_t>({lo_expr});')
-            L.append(f'    uint16_t rhi = static_cast<uint16_t>({hi_expr});')
-        L.append(
-            f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, static_cast<uint32_t>(rlo) | (static_cast<uint32_t>(rhi) << 16));'
-        )
-
     L.append('  }')
     return '\n'.join(L)
 
@@ -255,33 +173,21 @@ def gen_pk_ternary(
     dtype: str | None,
     op_sel_hi_2_expr: str = '',
     opsel_exprs: tuple[str, str] = ('', ''),
-    integer_clamp: bool = False,
 ) -> str:
-    """Generate packed 16-bit ternary op (V_PK_FMA_F16, V_PK_MAD_I16, etc.)."""
+    """Generate packed FP16/BF16 ternary arithmetic."""
     d, s0, s1, s2 = dst[0], src[0], src[1], src[2]
     L = []
-    integer = dtype in ('i16', 'u16')
-    if integer and op == 'mad':
-        L.append(
-            '  const uint32_t negations = amdgpu::packed_integer_negations(wf.cu().arch(), inst_);'
-        )
     L.append('  uint64_t exec = wf.exec();')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
     _append_pk16_src_reads(L, [s0, s1, s2], _packed_inline_narrow_to(dtype))
     opsel, opsel_hi = opsel_exprs
-    if integer:
-        high = f'({opsel_hi} | ({op_sel_hi_2_expr} << 2))'
-        _append_pk16_integer_operands(
-            L, dtype, 3, opsel, high, ('negations' if op == 'mad' else '0')
-        )
-    else:
-        L.append(f'    bool sel0_lo = ({opsel} >> 0) & 1;')
-        L.append(f'    bool sel1_lo = ({opsel} >> 1) & 1;')
-        L.append(f'    bool sel2_lo = ({opsel} >> 2) & 1;')
-        L.append(f'    bool sel0_hi = ({opsel_hi} >> 0) & 1;')
-        L.append(f'    bool sel1_hi = ({opsel_hi} >> 1) & 1;')
-        L.append(f'    bool sel2_hi = {op_sel_hi_2_expr};')
+    L.append(f'    bool sel0_lo = ({opsel} >> 0) & 1;')
+    L.append(f'    bool sel1_lo = ({opsel} >> 1) & 1;')
+    L.append(f'    bool sel2_lo = ({opsel} >> 2) & 1;')
+    L.append(f'    bool sel0_hi = ({opsel_hi} >> 0) & 1;')
+    L.append(f'    bool sel1_hi = ({opsel_hi} >> 1) & 1;')
+    L.append(f'    bool sel2_hi = {op_sel_hi_2_expr};')
 
     if dtype == 'f16':
         if op in ('min3', 'max3', 'minimum3', 'maximum3'):
@@ -343,122 +249,6 @@ def gen_pk_ternary(
         L.append(
             f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, rlo | (static_cast<uint32_t>(rhi) << 16));'
         )
-    elif dtype == 'i16':
-        if op == 'add_max_sat':
-            L.append(
-                '    int16_t sum_lo = static_cast<int16_t>(std::clamp(static_cast<int32_t>(a_lo) + b_lo, -32768, 32767));'
-            )
-            L.append(
-                '    int16_t sum_hi = static_cast<int16_t>(std::clamp(static_cast<int32_t>(a_hi) + b_hi, -32768, 32767));'
-            )
-            L.append(
-                '    uint16_t rlo = static_cast<uint16_t>(std::max(sum_lo, c_lo));'
-            )
-            L.append(
-                '    uint16_t rhi = static_cast<uint16_t>(std::max(sum_hi, c_hi));'
-            )
-        elif op == 'add_min_sat':
-            L.append(
-                '    int16_t sum_lo = static_cast<int16_t>(std::clamp(static_cast<int32_t>(a_lo) + b_lo, -32768, 32767));'
-            )
-            L.append(
-                '    int16_t sum_hi = static_cast<int16_t>(std::clamp(static_cast<int32_t>(a_hi) + b_hi, -32768, 32767));'
-            )
-            L.append(
-                '    uint16_t rlo = static_cast<uint16_t>(std::min(sum_lo, c_lo));'
-            )
-            L.append(
-                '    uint16_t rhi = static_cast<uint16_t>(std::min(sum_hi, c_hi));'
-            )
-        elif op in ('min3', 'minimum3'):
-            L.append(
-                '    uint16_t rlo = static_cast<uint16_t>(std::min(std::min(a_lo, b_lo), c_lo));'
-            )
-            L.append(
-                '    uint16_t rhi = static_cast<uint16_t>(std::min(std::min(a_hi, b_hi), c_hi));'
-            )
-        elif op in ('max3', 'maximum3'):
-            L.append(
-                '    uint16_t rlo = static_cast<uint16_t>(std::max(std::max(a_lo, b_lo), c_lo));'
-            )
-            L.append(
-                '    uint16_t rhi = static_cast<uint16_t>(std::max(std::max(a_hi, b_hi), c_hi));'
-            )
-        elif op == 'mad' and integer_clamp:
-            L.append(
-                '    uint16_t rlo = amdgpu::vop3_integer_mad<int16_t, 16>('
-                'static_cast<uint16_t>(a_lo), static_cast<uint16_t>(b_lo), '
-                'static_cast<uint16_t>(c_lo), inst_.clamp);'
-            )
-            L.append(
-                '    uint16_t rhi = amdgpu::vop3_integer_mad<int16_t, 16>('
-                'static_cast<uint16_t>(a_hi), static_cast<uint16_t>(b_hi), '
-                'static_cast<uint16_t>(c_hi), inst_.clamp);'
-            )
-        else:
-            L.append(
-                '    uint16_t rlo = static_cast<uint16_t>(static_cast<uint32_t>(a_lo) * b_lo + c_lo);'
-            )
-            L.append(
-                '    uint16_t rhi = static_cast<uint16_t>(static_cast<uint32_t>(a_hi) * b_hi + c_hi);'
-            )
-        if op in ('add_max_sat', 'add_min_sat', 'min3', 'max3'):
-            L.extend(
-                [
-                    '    if (inst_.clamp) {',
-                    '      rlo = static_cast<uint16_t>(std::max<int16_t>(static_cast<int16_t>(rlo), 0));',
-                    '      rhi = static_cast<uint16_t>(std::max<int16_t>(static_cast<int16_t>(rhi), 0));',
-                    '    }',
-                ]
-            )
-        L.append(
-            f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, static_cast<uint32_t>(rlo) | (static_cast<uint32_t>(rhi) << 16));'
-        )
-    else:  # u16
-        if op == 'add_max_sat':
-            L.append(
-                '    uint16_t sum_lo = static_cast<uint16_t>(std::min(static_cast<uint32_t>(a_lo) + b_lo, 65535u));'
-            )
-            L.append(
-                '    uint16_t sum_hi = static_cast<uint16_t>(std::min(static_cast<uint32_t>(a_hi) + b_hi, 65535u));'
-            )
-            L.append('    uint16_t rlo = std::max(sum_lo, c_lo);')
-            L.append('    uint16_t rhi = std::max(sum_hi, c_hi);')
-        elif op == 'add_min_sat':
-            L.append(
-                '    uint16_t sum_lo = static_cast<uint16_t>(std::min(static_cast<uint32_t>(a_lo) + b_lo, 65535u));'
-            )
-            L.append(
-                '    uint16_t sum_hi = static_cast<uint16_t>(std::min(static_cast<uint32_t>(a_hi) + b_hi, 65535u));'
-            )
-            L.append('    uint16_t rlo = std::min(sum_lo, c_lo);')
-            L.append('    uint16_t rhi = std::min(sum_hi, c_hi);')
-        elif op in ('min3', 'minimum3'):
-            L.append('    uint16_t rlo = std::min(std::min(a_lo, b_lo), c_lo);')
-            L.append('    uint16_t rhi = std::min(std::min(a_hi, b_hi), c_hi);')
-        elif op in ('max3', 'maximum3'):
-            L.append('    uint16_t rlo = std::max(std::max(a_lo, b_lo), c_lo);')
-            L.append('    uint16_t rhi = std::max(std::max(a_hi, b_hi), c_hi);')
-        elif op == 'mad' and integer_clamp:
-            L.append(
-                '    uint16_t rlo = amdgpu::vop3_integer_mad<uint16_t, 16>('
-                'a_lo, b_lo, c_lo, inst_.clamp);'
-            )
-            L.append(
-                '    uint16_t rhi = amdgpu::vop3_integer_mad<uint16_t, 16>('
-                'a_hi, b_hi, c_hi, inst_.clamp);'
-            )
-        else:
-            L.append(
-                '    uint16_t rlo = static_cast<uint16_t>(static_cast<uint32_t>(a_lo) * b_lo + c_lo);'
-            )
-            L.append(
-                '    uint16_t rhi = static_cast<uint16_t>(static_cast<uint32_t>(a_hi) * b_hi + c_hi);'
-            )
-        L.append(
-            f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, static_cast<uint32_t>(rlo) | (static_cast<uint32_t>(rhi) << 16));'
-        )
-
     L.append('  }')
     return '\n'.join(L)
 

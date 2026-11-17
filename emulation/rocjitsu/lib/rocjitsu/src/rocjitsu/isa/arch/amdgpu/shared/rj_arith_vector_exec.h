@@ -4,6 +4,7 @@
 #pragma once
 
 // Generated vector handlers pass entry points from these operation families.
+#include "rj_arith/detail/rj_arith_conversion.h"
 #include "rj_arith/detail/rj_arith_dot.h"
 #include "rj_arith/detail/rj_arith_graphics.h"
 #include "rj_arith/detail/rj_arith_integer.h"
@@ -62,7 +63,8 @@ class VectorInput32 {
 public:
   VectorInput32(RegisterAccess &registers, Wavefront &wave, const Operand &operand,
                 uint64_t exec_mask, uint8_t byte_mask = 0xF) {
-    // A uniform fallback would otherwise read its SGPR even with no consuming lanes.
+    // A uniform fallback would otherwise read its SGPR even with no consuming
+    // lanes.
     if (!exec_mask) {
       values_.fill(0);
       data = values_.data();
@@ -72,7 +74,8 @@ public:
       if (auto region = registers.read_operand_region(operand, exec_mask)) {
         auto lanes = region->lanes(0);
         if (lanes.succeeded()) {
-          // The span refers to CU storage (or a static zero buffer), not the view.
+          // The span refers to CU storage (or a static zero buffer), not the
+          // view.
           data = lanes.value().data();
         } else {
           values_.fill(0);
@@ -188,7 +191,8 @@ public:
       return;
     }
     if (operand.simd_capable()) {
-      // Numeric scalar sources (including SCC) are widened, not replicated pairs.
+      // Numeric scalar sources (including SCC) are widened, not replicated
+      // pairs.
       auto view = registers.read_operand64(operand, exec_mask);
       for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
         const uint64_t value = view.lane(lane);
@@ -245,12 +249,13 @@ private:
   std::array<uint32_t, 64> values_;
 };
 
-// Direct stores are safe without observers: rj-arith preserves storage on rejection.
-// Other destinations stage the result before acquiring an observed write view.
-// preserve_destination is for APIs that may leave selected bytes unchanged and
-// also preserve unselected bytes. Such APIs can safely use direct full-word stores;
-// observed calls initialize scratch from the selected architectural bytes.
-// Returns true on success, or reports an instruction error and returns false.
+// Direct stores are safe without observers: rj-arith preserves storage on
+// rejection. Other destinations stage the result before acquiring an observed
+// write view. preserve_destination is for APIs that may leave selected bytes
+// unchanged and also preserve unselected bytes. Such APIs can safely use direct
+// full-word stores; observed calls initialize scratch from the selected
+// architectural bytes. Returns true on success, or reports an instruction error
+// and returns false.
 template <typename Invoke>
 inline bool write_vector32_result(Wavefront &wave, RegisterAccess &registers,
                                   const Operand &destination, uint64_t exec_mask, Invoke invoke,
@@ -338,8 +343,9 @@ inline void execute_conditional(Inst &inst, Wavefront &wave, Wave32 wave32, Wave
 // Consume the selected input halves and commit only the selected destination
 // half. VOP1's packed operands instead supply/accept a resolved low-half value.
 // SourceCount determines whether source_b and source_c must be provided.
-// FullSources observes whole input words for narrowing operations such as byte packing.
-// CDNA low-half destinations additionally clear the upper half when ZeroHigh is true.
+// FullSources observes whole input words for narrowing operations such as byte
+// packing. CDNA low-half destinations additionally clear the upper half when
+// ZeroHigh is true.
 template <unsigned SourceCount, bool ZeroHigh = false, bool FullSources = false, typename Wave32,
           typename Wave64>
 inline void execute_integer16(Wavefront &wave, Wave32 wave32, Wave64 wave64, uint64_t flags,
@@ -425,8 +431,9 @@ inline bool write_vector64_result(Wavefront &wave, RegisterAccess &registers,
   }
   return !wave.instruction_execution_failed();
 }
-// Copy numeric register pairs; preserve scalar widening and delegated DPP sources.
-// Packed MOV selects full words from two pairs, not replicated inline constants.
+// Copy numeric register pairs; preserve scalar widening and delegated DPP
+// sources. Packed MOV selects full words from two pairs, not replicated inline
+// constants.
 template <bool Packed>
 inline void execute_pair_move(Wavefront &wave, uint64_t modifiers, const Operand &destination,
                               const Operand &first, const Operand *second) {
@@ -561,7 +568,8 @@ inline void execute_mad64(Wavefront &wave, Wave32 wave32, Wave64 wave64, uint64_
     commit(carry);
 }
 
-// Non-carry MAD observes two narrow factors and a wide accumulator; only VGPR writes are published.
+// Non-carry MAD observes two narrow factors and a wide accumulator; only VGPR
+// writes are published.
 template <typename Wave32, typename Wave64>
 inline void execute_mad64_nc(Wavefront &wave, Wave32 wave32, Wave64 wave64, uint64_t flags,
                              uint64_t modifiers, const Operand &destination,
@@ -581,7 +589,8 @@ inline void execute_mad64_nc(Wavefront &wave, Wave32 wave32, Wave64 wave64, uint
 }
 
 // gfx11/gfx12 mask carry with the vector destination. Legacy CDNA carry uses
-// EXEC; the decoder separately preserves source-suppressed bits. Sources use EXEC.
+// EXEC; the decoder separately preserves source-suppressed bits. Sources use
+// EXEC.
 template <bool WithCarry, bool MaskCarry = true, typename Wave32, typename Wave64, typename Commit>
 inline void execute_carry32(Wavefront &wave, Wave32 wave32, Wave64 wave64, uint64_t flags,
                             uint64_t modifiers, const Operand &destination, const Operand &source_a,
@@ -616,7 +625,8 @@ inline void execute_carry32(Wavefront &wave, Wave32 wave32, Wave64 wave64, uint6
     commit(carry);
 }
 
-// Compute SDWA carry arithmetic on EXEC, then place the VGPR result and commit VCC separately.
+// Compute SDWA carry arithmetic on EXEC, then place the VGPR result and commit
+// VCC separately.
 template <bool WithCarry, typename Inst, typename Wave32, typename Wave64, typename Commit>
 inline void execute_sdwa_carry32(Inst &inst, Wavefront &wave, Wave32 wave32, Wave64 wave64,
                                  uint64_t flags, uint64_t modifiers, const Operand &destination,
@@ -745,8 +755,8 @@ inline void execute_qsad(Wavefront &wave, Ternary32Function wave32, Ternary64Fun
   }
 }
 
-// Handle integer SDWA destination placement after arithmetic. Ordinary encodings
-// return false so their direct-storage path remains unchanged.
+// Handle integer SDWA destination placement after arithmetic. Ordinary
+// encodings return false so their direct-storage path remains unchanged.
 template <typename Inst, typename Wave32, typename Wave64, typename... Sources>
 inline bool try_execute_sdwa_integer32(Inst &inst, Wavefront &wave, Wave32 wave32, Wave64 wave64,
                                        uint64_t flags, uint64_t modifiers,
@@ -781,8 +791,9 @@ inline bool try_execute_sdwa_integer32(Inst &inst, Wavefront &wave, Wave32 wave3
                       }) {
           if (destination.is_vgpr() && destination.simd_capable() &&
               inst.dst_operand(0) == &destination) {
-            // Place selected bytes in scratch, then resolve and observe the destination once.
-            // NONE has no FP scaling/clamping; PRESERVE is handled by the write view's byte mask.
+            // Place selected bytes in scratch, then resolve and observe the
+            // destination once. NONE has no FP scaling/clamping; PRESERVE is
+            // handled by the write view's byte mask.
             const auto selection = inst.sdwa_dst_sel_;
             const auto unused = inst.sdwa_dst_unused_;
             if (selection != sdwa::DWORD) {
@@ -810,8 +821,8 @@ inline bool try_execute_sdwa_integer32(Inst &inst, Wavefront &wave, Wave32 wave3
   return false;
 }
 
-// rj-arith preserves aliased source values. Direct stores and staged write views
-// both honor EXEC and the decoder's DPP write mask.
+// rj-arith preserves aliased source values. Direct stores and staged write
+// views both honor EXEC and the decoder's DPP write mask.
 inline void execute_binary32(Wavefront &wave, Binary32Function wave32, Binary64Function wave64,
                              uint64_t flags, uint64_t modifiers, const Operand &destination,
                              const Operand &source_a, const Operand &source_b,
@@ -858,7 +869,8 @@ inline void execute_unary32(Wavefront &wave, Unary32Function wave32, Unary64Func
 }
 
 // Pack a staged SDWA source before applying integer destination placement.
-// All source lanes are captured before any potentially aliased destination write.
+// All source lanes are captured before any potentially aliased destination
+// write.
 template <typename Inst>
 inline void execute_saturating_pack_sdwa(Inst &inst, Wavefront &wave, Unary32Function wave32,
                                          Unary64Function wave64, const Operand &destination,
@@ -888,7 +900,8 @@ inline void execute_saturating_pack_sdwa(Inst &inst, Wavefront &wave, Unary32Fun
   }
 }
 
-// Copy a routed word, retaining SDWA destination placement without FP interpretation.
+// Copy a routed word, retaining SDWA destination placement without FP
+// interpretation.
 template <typename Inst>
 inline void execute_move32(Inst &inst, Wavefront &wave, const Operand &destination,
                            const Operand &source) {
@@ -926,8 +939,8 @@ inline void execute_move32(Inst &inst, Wavefront &wave, const Operand &destinati
                   wave.cu().arithmetic_flags(), 0, destination, source);
 }
 
-// CDNA screen partition is Wave64-only. SDWA commits selected bytes through the decoder;
-// ordinary operands retain the direct bulk-write path.
+// CDNA screen partition is Wave64-only. SDWA commits selected bytes through the
+// decoder; ordinary operands retain the direct bulk-write path.
 template <typename Inst>
 inline void execute_screen_partition(Inst &inst, Wavefront &wave, const Operand &destination,
                                      const Operand &source) {
