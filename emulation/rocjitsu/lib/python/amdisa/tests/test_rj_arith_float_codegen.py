@@ -2393,3 +2393,13 @@ def test_gfx1250_scaled_fp6_narrow_bindings():
             gen_wide_scaled_narrow(context('cdna5', name, ['d'], [], is_vop3=True))
             is None
         )
+
+
+@pytest.mark.parametrize(
+    'name', ['V_MIN_NUM_F32', 'V_MAX_NUM_F32', 'V_MINIMUM_F32', 'V_MAXIMUM_F32']
+)
+def test_gfx1250_selection_owns_its_numeric_only_compatibility_policy(name):
+    body = gen_float_binary32(context('cdna5', name, ['d'], ['a', 'b'], is_vop3=True))
+    for wave in (32, 64):
+        assert f'rj_arith_{name.lower()}_w{wave}_gfx1250,' in body
+    assert 'BinaryFpOperation' not in body

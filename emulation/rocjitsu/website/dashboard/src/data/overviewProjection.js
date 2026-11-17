@@ -58,7 +58,7 @@ function configurationRows(data, filters, runs) {
 
 function projectPoint(run, row) {
   const identity = { run, runId: run?.runId ?? null, commit: run ? commitShaFor(run) : null,
-    commitTimestamp: run ? commitTimestampFor(run) : null, completedAt: run?.timestamp ?? null,
+    commitTimestamp: run ? commitTimestampFor(run) : null, startedAt: run?.timestamp ?? null,
     dayKey: run ? dayFor(run) : null };
   const required = row.cohortIds.length;
   const point = { ...identity, required, completed: 0, durationSeconds: null, speedup: null, results: [], reasons: [] };
