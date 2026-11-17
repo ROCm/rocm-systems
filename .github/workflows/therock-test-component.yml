@@ -26,21 +26,25 @@ on:
       default_container_image:
         type: string
         default: "ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98"
-    secrets:
-      # Read access to the private bucket holding the rocDecode conformance
-      # stream corpus. Optional: only the rocdecode job passes these, so for
-      # every other component they arrive empty and the conformance sweep skips
-      # itself. Declared individually rather than using `secrets: inherit` --
-      # this workflow runs an arbitrary test_script per component, so it should
-      # receive only the secrets it actually needs.
-      ROCDECODE_AWS_ACCESS_KEY_ID:
-        required: false
-      ROCDECODE_AWS_SECRET_ACCESS_KEY:
-        required: false
+      aws_role_to_assume:
+        # IAM role assumed through GitHub's OIDC provider before the test step,
+        # for components whose test script reads from a private S3 bucket. Empty
+        # for every component that needs no AWS access, which is the default:
+        # the credential step is then skipped entirely. A role ARN is not a
+        # secret, so this is a plain input rather than a secret.
+        type: string
+        default: ""
+      aws_region:
+        type: string
+        default: "us-east-1"
 
 
 permissions:
   contents: read
+  # Only exercised when aws_role_to_assume is set, and only granted by callers
+  # that pass one -- a reusable workflow cannot hold a permission its caller
+  # withheld, so components with no bucket to read get no token either.
+  id-token: write
 
 jobs:
   test_component:
@@ -135,6 +139,18 @@ jobs:
             echo "KUBE_CPU_REQUEST not set, thread limits not configured"
           fi
 
+      # Last step before the test, so the whole session lifetime is available to
+      # it. Skipped for pull requests from forks: GitHub withholds `id-token:
+      # write` there, so there is no token to exchange. A component that needs
+      # the bucket is expected to cope with that -- the rocDecode conformance
+      # sweep prints a skip banner and exits 0.
+      - name: Configure AWS credentials
+        if: ${{ inputs.aws_role_to_assume != '' && !github.event.pull_request.head.repo.fork }}
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          aws-region: ${{ inputs.aws_region }}
+          role-to-assume: ${{ inputs.aws_role_to_assume }}
+
       - name: Test
         timeout-minutes: ${{ fromJSON(inputs.component).timeout_minutes }}
         env:
@@ -145,12 +161,6 @@ jobs:
           # Windows hip-tests (PAL=1, ROCR=0) set this via matrix; other
           # components leave it empty. See: https://github.com/ROCm/TheRock/issues/3587
           GPU_ENABLE_PAL: ${{ fromJSON(inputs.component).gpu_enable_pal }}
-          # Read access to the rocDecode conformance corpus, consumed by boto3's
-          # default credential chain. Empty for every component except rocdecode,
-          # and empty there too on pull requests from forks, where GitHub
-          # withholds secrets -- the sweep skips rather than fails in that case.
-          AWS_ACCESS_KEY_ID: ${{ secrets.ROCDECODE_AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.ROCDECODE_AWS_SECRET_ACCESS_KEY }}
         run: |
           if [[ "${{ inputs.amdgpu_families }}" == "gfx125X-dcgpu" ]]; then
             python ./build_tools/memory_monitor.py --phase "Test ${{ fromJSON(inputs.component).job_name }}" -- \

@@ -21,13 +21,6 @@ on:
       artifact_run_id:
         type: string
         default: ""
-    secrets:
-      # Read access to the private bucket holding the rocDecode conformance
-      # stream corpus. Forwarded to the rocdecode job only.
-      ROCDECODE_AWS_ACCESS_KEY_ID:
-        required: false
-      ROCDECODE_AWS_SECRET_ACCESS_KEY:
-        required: false
 
 permissions:
   contents: read
@@ -37,14 +30,26 @@ jobs:
     name: 'Test rocdecode'
     if: ${{ inputs.platform == 'linux' }}
     uses: './.github/workflows/therock-test-component.yml'
-    secrets:
-      ROCDECODE_AWS_ACCESS_KEY_ID: ${{ secrets.ROCDECODE_AWS_ACCESS_KEY_ID }}
-      ROCDECODE_AWS_SECRET_ACCESS_KEY: ${{ secrets.ROCDECODE_AWS_SECRET_ACCESS_KEY }}
+    permissions:
+      contents: read
+      # To mint the OIDC token exchanged for aws_role_to_assume below. Granted
+      # here rather than at the top of the file so the rocjpeg job, which reads
+      # no bucket, cannot request one.
+      id-token: write
     with:
       artifact_run_id: ${{ inputs.artifact_run_id }}
       amdgpu_families: ${{ inputs.amdgpu_families }}
       test_runs_on: ${{ inputs.test_runs_on }}
       platform: "linux"
+      # Read-only access to the private bucket holding the rocDecode conformance
+      # stream corpus, via GitHub OIDC -- no long-lived access keys anywhere.
+      # The role trusts repo:ROCm/rocm-systems:* and is defined in TheRock-Infra
+      # at projects/self-service-s3/customer/knagesh-media-test.tf.
+      #
+      # Pull requests from forks get no token, so the sweep skips itself there
+      # rather than failing. See the credential step in therock-test-component.yml.
+      aws_role_to_assume: "arn:aws:iam::317668459450:role/therock-knagesh-media-test-s3-oidc"
+      aws_region: "us-east-1"
       # The conformance sweep downloads and unpacks a multi-GiB corpus, builds
       # the videoDecode sample and then decodes several hundred streams per
       # codec, each as its own process, so the budget here is dominated by the

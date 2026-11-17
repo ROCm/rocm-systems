@@ -146,7 +146,7 @@ for how an existing directory is treated).
 | `ROCDECODE_CONFORMANCE_DIR` | Corpus location, and the download destination. |
 | `ROCDECODE_CONFORMANCE_BUCKET` | Override the bucket. |
 | `ROCDECODE_CONFORMANCE_KEYS` | Override the object keys. |
-| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_DEFAULT_REGION` | Read via boto3's default credential chain. |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_DEFAULT_REGION` | Read via boto3's default credential chain. |
 
 Credentials are only needed to *download* the corpus. If the streams are already on disk —
 in `ROCDECODE_CONFORMANCE_DIR` or passed with `--conformance-dir` — the sweep uses them and
@@ -154,10 +154,21 @@ runs offline, with no boto3 and no AWS account.
 
 Otherwise fetching needs `boto3` (`pip install boto3`). **With no local corpus and no
 credentials that can read the bucket, the sweep prints a skip banner and exits `0`** rather
-than failing — pull requests from forks get no repository secrets, and that case is
-expected. The consequence is that a green run has not necessarily decoded anything; check
-for the skip banner if in doubt. Under GitHub Actions a missing `boto3` is a hard error
-instead, so CI cannot silently turn the gate into a no-op.
+than failing. The consequence is that a green run has not necessarily decoded anything;
+check for the skip banner if in doubt. Under GitHub Actions a missing `boto3` is a hard
+error instead, so CI cannot silently turn the gate into a no-op.
+
+In CI nothing long-lived is stored: `media-libs-ci.yml` assumes
+`therock-knagesh-media-test-s3-oidc`, a read-only role scoped to this one bucket and trusted
+only for `repo:ROCm/rocm-systems:*`, through GitHub's OIDC provider. The role is defined in
+[TheRock-Infra](https://github.com/ROCm/TheRock-Infra) under
+`projects/self-service-s3/customer/knagesh-media-test.tf`;
+`aws-actions/configure-aws-credentials` exchanges the workflow's OIDC token for session
+credentials and exports them as the variables above. Pull requests from forks are issued no
+token, so the sweep skips there — which is the expected outcome, not a failure.
+
+Locally, any credentials that can read the bucket will do: an AWS profile, `aws sso login`,
+or exported keys.
 
 ### Reading the results
 

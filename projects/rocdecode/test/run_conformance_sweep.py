@@ -16,15 +16,19 @@ local debugging. Three things happen here:
      it with a corpus, a binary and somewhere to write, and turns the per-codec
      exit codes into a single verdict.
 
-A run with no AWS credentials skips rather than fails. GitHub does not expose
-repository secrets to pull requests from forks, so that case is expected.
+A run with no AWS credentials skips rather than fails. In CI the credentials are
+short-lived, from a role assumed through GitHub's OIDC provider; pull requests
+from forks are not issued a token, so that case is expected.
 
 Environment variables:
   ROCM_PATH                     ROCm install prefix override.
   ROCDECODE_CONFORMANCE_DIR     Corpus location (also the fetch destination).
   ROCDECODE_CONFORMANCE_BUCKET  S3 bucket holding the corpus zips.
   ROCDECODE_CONFORMANCE_KEYS    Comma-separated object keys of the corpus zips.
-  AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_DEFAULT_REGION
+  AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_SESSION_TOKEN /
+  AWS_DEFAULT_REGION            Read via boto3's default credential chain, and
+                                what aws-actions/configure-aws-credentials
+                                exports after assuming the role.
 """
 
 import argparse
@@ -50,7 +54,7 @@ DEFAULT_BUCKET = "knagesh-media-test"
 # folders themselves. HEVC is published beside it as its own zip instead of being
 # folded in, so it has to be fetched separately.
 DEFAULT_KEYS = ["rocDecodeConformance.zip", "HevcConformance.zip"]
-DEFAULT_REGION = "us-east-2"
+DEFAULT_REGION = "us-east-1"
 
 # Codec -> the literal prefix of the folder it ships under. Matched as a prefix
 # rather than in full because the AV1 set carries a version suffix in its folder
@@ -79,7 +83,7 @@ class CorpusUnavailable(Exception):
 
 
 # S3 error codes that mean "these credentials cannot read this", as opposed to
-# "something is wrong". A fork PR gets no repository secrets, but a container or
+# "something is wrong". A fork PR is issued no OIDC token, but a container or
 # pod runner may still present an ambient identity -- an IMDS instance profile,
 # IRSA environment variables, a baked-in ~/.aws -- so the credential chain
 # resolves and the request is made and refused. That is the same skip case as
@@ -309,9 +313,10 @@ def fetch_feasibility() -> Optional[str]:
         return (
             "no AWS credentials available.\n"
             "\n"
-            "The stream corpus lives in a private bucket. GitHub does not\n"
-            "expose repository secrets to pull requests from forks, so this\n"
-            "is expected on fork PRs and is not a failure."
+            "The stream corpus lives in a private bucket, which CI reaches by\n"
+            "assuming a role through GitHub's OIDC provider. Pull requests from\n"
+            "forks are not issued a token, so this is expected on fork PRs and\n"
+            "is not a failure."
         )
     return None
 
@@ -485,9 +490,10 @@ def fetch_corpus(
         raise CorpusUnavailable(
             "no AWS credentials available.\n"
             "\n"
-            "The stream corpus lives in a private bucket. GitHub does not\n"
-            "expose repository secrets to pull requests from forks, so this\n"
-            "is expected on fork PRs and is not a failure."
+            "The stream corpus lives in a private bucket, which CI reaches by\n"
+            "assuming a role through GitHub's OIDC provider. Pull requests from\n"
+            "forks are not issued a token, so this is expected on fork PRs and\n"
+            "is not a failure."
         )
     except ClientError as exc:
         if not auth_failure(exc):
