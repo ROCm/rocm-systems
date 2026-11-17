@@ -195,12 +195,11 @@ Collect the counters to compute the metric for compute throughput utilization, s
 List the available blocks/metrics for profiling
 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
-List the blocks of the current GPU, then add a block to list its metrics. Note the index for each section. See :ref:`list-metrics`.
+The blocks/metrics are listed by page, because the list is long. Note the index for each section.
 
 .. code-block:: shell-session
 
-    $ rocprof-compute --list-metrics
-    $ rocprof-compute --list-metrics sol
+    $ rocprof-compute profile --list-available-metrics | more
 
 Using block 2 for system speed-of-light profiling
 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -281,7 +280,7 @@ Show a list of metrics supported for analysis
 
 .. code-block:: shell-session
 
-   rocprof-compute analyze -p workloads/vcopy/MI200/ --list-metrics all | more
+   rocprof-compute analyze -p workloads/vcopy/MI200/ --list-available-metrics | more
 
 
 Show or display System speed-of-light (2) and roofline (4) analysis

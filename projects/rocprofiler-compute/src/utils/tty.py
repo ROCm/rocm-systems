@@ -39,11 +39,7 @@ from utils.utils_analysis import (
     get_bw_scale_and_unit,
     simplify_kernel_name,
 )
-from utils.utils_common import (
-    convert_filter_blocks_to_panel_ids,
-    format_table_id,
-    strip_ansi,
-)
+from utils.utils_common import convert_filter_blocks_to_panel_ids, strip_ansi
 
 _GUIDANCE_PANEL_MIN_WIDTH = 100
 
@@ -795,7 +791,7 @@ def format_table_output(
 ) -> str:
     """Format table for output, handling special cases and saving to files if needed."""
 
-    table_id_str = format_table_id(table_config["id"])
+    table_id_str = f"{table_config['id'] // 100}.{table_config['id'] % 100}"
     content = ""
 
     # Check if any column in df is empty
@@ -1019,7 +1015,9 @@ def show_all(
                     and panel_id not in filter_panel_ids
                     and panel_id > 100
                 ):
-                    table_id_str = format_table_id(table_config["id"])
+                    table_id_str = (
+                        f"{table_config['id'] // 100}.{table_config['id'] % 100}"
+                    )
 
                     console_log(
                         f"Not showing table not selected during profiling: "

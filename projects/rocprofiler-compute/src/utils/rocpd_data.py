@@ -4,7 +4,7 @@
 import csv
 import sqlite3
 from contextlib import ExitStack, closing
-from typing import Dict, List, Optional, Tuple
+from typing import Optional
 
 import utils.utils_profile_csv as csv_ops
 from utils import csv_compression
@@ -72,7 +72,7 @@ PMC_EVENT_INSERT_BATCH_SIZE = 50_000
 
 
 def convert_dbs_to_csv(
-    db_paths: List[str],
+    db_paths: list[str],
     counter_collection_csv_path: str,
     marker_trace_csv_path: str,
     kernel_symbols_csv_path: str,
@@ -145,7 +145,7 @@ def update_rocpd_pmc_events(
 
 def _resolve_pmc_event_metadata(
     conn: sqlite3.Connection,
-) -> Optional[Tuple[str, str, Dict[str, str]]]:
+) -> Optional[tuple[str, str, dict[str, str]]]:
     """Look up the pmc_event table and build dispatch-to-event mapping.
 
     Returns (table_name, guid, dispatch_to_event) or None on failure.
@@ -185,7 +185,7 @@ def _stream_csv_to_pmc_event_table(
     counter_csv_path: str,
     table_name: str,
     guid: str,
-    dispatch_to_event: Dict[str, str],
+    dispatch_to_event: dict[str, str],
     batch_size: int,
 ) -> None:
     """Read counter CSV in batches and insert into the pmc_event table."""

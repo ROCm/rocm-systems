@@ -10,6 +10,7 @@
 
 import csv
 from abc import ABC
+from collections.abc import Generator
 from contextlib import contextmanager
 from ctypes import (
     POINTER,
@@ -26,7 +27,7 @@ from ctypes import (
     sizeof,
 )
 from pathlib import Path
-from typing import Any, Dict, Generator, List, Tuple
+from typing import Any, Tuple
 
 import utils.hip_interface as hip
 import utils.hiprtc_interface as hiprtc
@@ -163,7 +164,7 @@ class Bench_base(ABC):
     class Program:
         """Helper class for loading and compiling kernels."""
 
-        def __init__(self, src: str, templates: List[str] = []) -> None:
+        def __init__(self, src: str, templates: list[str] = []) -> None:
             self.prog = hiprtc.hiprtcCreateProgram(src, "prog")
 
             for t in templates:
@@ -188,11 +189,11 @@ class Bench_base(ABC):
     def launch_kernel(
         self,
         func: POINTER,
-        grid_size: List[int],
-        block_size: List[int],
+        grid_size: list[int],
+        block_size: list[int],
         shared_mem_size: int,
         stream: POINTER,
-        args: List[Any] = [],
+        args: list[Any] = [],
     ) -> None:
         """Helper method for launching kernel."""
         # Convert to native types
@@ -249,12 +250,12 @@ class Bench_base(ABC):
         count: int,
         work_per_kernel: int,
         func: POINTER,
-        grid_size: List[int],
-        block_size: List[int],
+        grid_size: list[int],
+        block_size: list[int],
         shared_mem_size: int,
         stream: POINTER,
-        args: List[Any] = [],
-    ) -> List[float]:
+        args: list[Any] = [],
+    ) -> list[float]:
         """Helper method to run a kernel and collect samples."""
         event_start = hip.hipEventCreate()
         event_stop = hip.hipEventCreate()
@@ -755,7 +756,7 @@ class Bench_base(ABC):
     def int64_benchmark(self, device: int) -> float:
         return self.flops_bench(device, "INT64", "IOP", "GOPS")
 
-    def run_benchmark(self, device: int, gpu_arch: str) -> Dict[str, float]:
+    def run_benchmark(self, device: int, gpu_arch: str) -> dict[str, float]:
         """
         Run the roofline tests on the specified device.
         Returns a dictionary mapping test name to its peak performance.
@@ -779,7 +780,7 @@ class Bench_base(ABC):
             print("GPU Benchmarking completed")
             return metrics_dict
 
-    def dump_csv(self, metrics: Dict[str, float], file_path: str) -> None:
+    def dump_csv(self, metrics: dict[str, float], file_path: str) -> None:
         """Generate a csv file containing the collected benchmark metrics."""
         # TODO: Better way to map CSV column names?
         with open(file_path, "w", newline="", encoding="utf-8") as f:
