@@ -48,6 +48,9 @@ storage_t::impl::impl(std::string             database_path,
                       profiler_hub::version_t schema_version)
 : m_database_path(std::move(database_path))
 , m_uuid(std::move(uuid))
+, m_library_version{ PROFILER_HUB_VERSION_MAJOR,
+                     PROFILER_HUB_VERSION_MINOR,
+                     PROFILER_HUB_VERSION_PATCH }
 {
     // Store the schema the writer will create. version_t{} is unspecified and resolves
     // to the newest writable schema. An embedded schema the writer cannot populate,
@@ -77,6 +80,12 @@ storage_t::impl::get_uuid() const
 
 profiler_hub::version_t
 storage_t::impl::get_storage_version() const
+{
+    return m_library_version;
+}
+
+profiler_hub::version_t
+storage_t::impl::get_writer_schema_version() const
 {
     return m_schema_version;
 }

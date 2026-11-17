@@ -1,6 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "backends/embedded_schema.hpp"
+#include "backends/sqlite_backend_impl.hpp"
 #include "profiler-hub/cpp/reader.hpp"
 #include "profiler-hub/cpp/storage.hpp"
 #include "profiler-hub/cpp/version.hpp"
@@ -61,31 +63,41 @@ protected:
     std::string m_uuid = "testuuid0000";
 };
 
-TEST_F(writer_test, get_storage_version_defaults_to_3_0_1_when_not_specified)
+TEST_F(writer_test, get_storage_version_returns_library_version)
+{
+    const storage_t storage{ m_db_path, m_uuid, version_t{ 3, 0, 0 } };
+
+    const auto version = storage.get_storage_version();
+    EXPECT_EQ(version.major, 0);
+    EXPECT_EQ(version.minor, 2);
+    EXPECT_EQ(version.patch, 0);
+}
+
+TEST_F(writer_test, get_writer_schema_version_defaults_to_3_0_1_when_not_specified)
 {
     const storage_t storage{ m_db_path, m_uuid };
 
-    const auto version = storage.get_storage_version();
+    const auto version = storage.get_writer_schema_version();
     EXPECT_EQ(version.major, 3);
     EXPECT_EQ(version.minor, 0);
     EXPECT_EQ(version.patch, 1);
 }
 
-TEST_F(writer_test, get_storage_version_returns_explicitly_passed_version)
+TEST_F(writer_test, get_writer_schema_version_returns_explicitly_passed_version)
 {
     const storage_t storage{ m_db_path, m_uuid, version_t{ 3, 0, 0 } };
 
-    const auto version = storage.get_storage_version();
+    const auto version = storage.get_writer_schema_version();
     EXPECT_EQ(version.major, 3);
     EXPECT_EQ(version.minor, 0);
     EXPECT_EQ(version.patch, 0);
 }
 
-TEST_F(writer_test, get_storage_version_resolves_unspecified_to_newest_writable)
+TEST_F(writer_test, get_writer_schema_version_resolves_unspecified_to_newest_writable)
 {
     const storage_t storage{ m_db_path, m_uuid, version_t{} };
 
-    const auto version = storage.get_storage_version();
+    const auto version = storage.get_writer_schema_version();
     EXPECT_EQ(version.major, 3);
     EXPECT_EQ(version.minor, 0);
     EXPECT_EQ(version.patch, 1);
@@ -113,17 +125,27 @@ TEST_F(writer_test, initialize_schema_called_twice_is_a_no_op)
 
 TEST_F(writer_test, construct_storage_accepts_supported_writable_schemas)
 {
-    EXPECT_NO_THROW((storage_t{ m_db_path, m_uuid, version_t{ 3, 0, 0 } }));
-    EXPECT_NO_THROW((storage_t{ m_db_path, m_uuid, version_t{ 3, 0, 1 } }));
+    for(const auto& version : k_writer_supported_versions)
+    {
+        SCOPED_TRACE(version.to_string());
+        EXPECT_NO_THROW((storage_t{ m_db_path, m_uuid, version }));
+    }
 }
 
 TEST_F(writer_test, construct_storage_rejects_schema_the_writer_cannot_write)
 {
-    // 3.0.2 and 3.0.5 are embedded. The writer can populate 3.0.0 and 3.0.1.
-    EXPECT_THROW((storage_t{ m_db_path, m_uuid, version_t{ 3, 0, 2 } }),
-                 std::runtime_error);
-    EXPECT_THROW((storage_t{ m_db_path, m_uuid, version_t{ 3, 0, 5 } }),
-                 std::runtime_error);
+    // Every embedded schema the writer cannot populate, including ones added
+    // to versions.yml after this test was written.
+    for(const auto& schema : rocpd::data_storage::schema::k_embedded_schemas)
+    {
+        const version_t version{ schema.major, schema.minor, schema.patch };
+        if(resolve_writable_schema(version) != nullptr)
+        {
+            continue;
+        }
+        SCOPED_TRACE(schema.version);
+        EXPECT_THROW((storage_t{ m_db_path, m_uuid, version }), std::runtime_error);
+    }
 }
 
 TEST_F(writer_test, initialize_schema_unsupported_version_throws_runtime_error)
