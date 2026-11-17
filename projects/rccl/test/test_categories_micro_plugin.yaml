@@ -8,6 +8,7 @@ test_categories:
     test_patterns:
       - "CsvTuner*"
       - "Gin*"  # gin.cc's GinPluginInitTest and GinFinalizeTest
+      - "PerSystem/GinAnvilReachTest.*"  # gin.cc's Anvil reach cases
       - "Plugin*"
       - "Profiler*"
       - "Rma*"  # rma.cc's RmaPluginInitTest
