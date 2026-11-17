@@ -23,10 +23,9 @@
 #include "alloc.h"
 #include "checks.h"
 #include "comm.h"
+#include "fakes/ras_diag_net_fakes.h"
 #include "fakes/ras_diagnostics_test_support.h"
 #include "compiler.h"
-#include "fakes/fail_loud.h"
-#include "fakes/signature-drift.h"
 // NCCL 2.32.6: the unit includes graph/topo.h, whose xml.h has an inline xmlAlloc calling ncclCalloc(char**, n).
 // Include it before the ncclCalloc redirect below so the redirect only reaches the unit's own allocations.
 #include "graph/topo.h"
@@ -56,24 +55,6 @@ ncclResult_t DiagnosticsTestCalloc(ncclUniquePtr<T>& ptr, size_t count) {
 #include RAS_DIAGNOSTICS_COMMON_CC_PATH
 
 #undef ncclCalloc
-
-// Link seams for rasDiagnosticsCollectCommSnapshots' net-device path. graph/topo.cc and transport/net_ib/ are not in
-// this binary; the unit only reads the IB device table and compares the comm's plugin against &ncclNetIb.
-ncclNet_t ncclNetIb = {.name = "IB"};
-int ncclNIbDevs = 0;
-struct ncclIbDev ncclIbDevs[MAX_IB_DEVS];
-
-static ncclResult_t DefaultTopoGetNetPropertiesSnapshot(struct ncclComm*, bool, struct ncclTopoNetPropertiesSnapshot**,
-                                                        int*) {
-  FailLoudUnfaked("ras-diagnostics-common-test", "ncclTopoGetNetPropertiesSnapshot");
-}
-static std::function<ncclResult_t(struct ncclComm*, bool, struct ncclTopoNetPropertiesSnapshot**, int*)>
-    g_topoGetNetPropertiesSnapshot = DefaultTopoGetNetPropertiesSnapshot;
-ASSERT_HOOK_MATCHES_PROD(g_topoGetNetPropertiesSnapshot, ncclTopoGetNetPropertiesSnapshot);
-ncclResult_t ncclTopoGetNetPropertiesSnapshot(struct ncclComm* comm, bool requireCommInitialized,
-                                              struct ncclTopoNetPropertiesSnapshot** snapshots, int* nSnapshots) {
-  return g_topoGetNetPropertiesSnapshot(comm, requireCommInitialized, snapshots, nSnapshots);
-}
 
 namespace {
 
@@ -113,9 +94,7 @@ ncclResult_t FillTestPayload(const rasDiagnosticsCommSnapshot* snapshot, void* c
 
 void ResetDiagnosticsCommonState() {
   ras_test::ResetNcclComms();
-  g_topoGetNetPropertiesSnapshot = DefaultTopoGetNetPropertiesSnapshot;
-  ncclNIbDevs = 0;
-  for (struct ncclIbDev& dev : ncclIbDevs) dev.currSpeed = 0;
+  ResetRasDiagNetFakes();
   g_allocationCalls = 0;
   g_failAllocationCall = 0;
   g_allocationCounts.clear();

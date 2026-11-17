@@ -20,35 +20,6 @@
 
 #include <gtest/gtest.h>
 
-#define rasClientsHead DiagnosticsTestRasClientsHead
-#define rasCollFree DiagnosticsTestRasCollFree
-#define rasCollReqInit DiagnosticsTestRasCollReqInit
-#define rasNetSendCollReq DiagnosticsTestRasNetSendCollReq
-#define rasDiagnosticsGpuModelCollectLocal DiagnosticsTestGpuModelCollectLocal
-#define rasDiagnosticsGpuModelSummarize DiagnosticsTestGpuModelSummarize
-#define rasDiagnosticsCudaDriverVersionCollectLocal DiagnosticsTestCudaDriverVersionCollectLocal
-#define rasDiagnosticsCudaDriverVersionSummarize DiagnosticsTestCudaDriverVersionSummarize
-#define rasDiagnosticsEccCollectLocal DiagnosticsTestEccCollectLocal
-#define rasDiagnosticsEccSummarize DiagnosticsTestEccSummarize
-#define rasDiagnosticsNvLinkCollectLocal DiagnosticsTestNvLinkCollectLocal
-#define rasDiagnosticsNvLinkSummarize DiagnosticsTestNvLinkSummarize
-#define rasDiagnosticsNcclEnvCollectLocal DiagnosticsTestNcclEnvCollectLocal
-#define rasDiagnosticsNcclEnvSummarize DiagnosticsTestNcclEnvSummarize
-#define rasDiagnosticsRdmaTopoCollectLocal DiagnosticsTestRdmaTopoCollectLocal
-#define rasDiagnosticsRdmaTopoSummarize DiagnosticsTestRdmaTopoSummarize
-#define rasDiagnosticsIommuCollectLocal DiagnosticsTestIommuCollectLocal
-#define rasDiagnosticsIommuSummarize DiagnosticsTestIommuSummarize
-#define rasDiagnosticsAtsCollectLocal DiagnosticsTestAtsCollectLocal
-#define rasDiagnosticsAtsSummarize DiagnosticsTestAtsSummarize
-#define rasDiagnosticsXidCollectLocal DiagnosticsTestXidCollectLocal
-#define rasDiagnosticsXidSummarize DiagnosticsTestXidSummarize
-#define rasDiagnosticsNvidiaDriverVersionCollectLocal DiagnosticsTestNvidiaDriverVersionCollectLocal
-#define rasDiagnosticsNvidiaDriverVersionSummarize DiagnosticsTestNvidiaDriverVersionSummarize
-#define rasDiagnosticsPathsCollectLocal DiagnosticsTestPathsCollectLocal
-#define rasDiagnosticsPathsSummarize DiagnosticsTestPathsSummarize
-#define rasDiagnosticsNetDeviceCollectLocal DiagnosticsTestNetDeviceCollectLocal
-#define rasDiagnosticsNetDeviceSummarize DiagnosticsTestNetDeviceSummarize
-
 #include "comm.h"
 #include "ras/diagnostics.h"
 #include "ras/diagnostics_checks.h"
@@ -107,8 +78,7 @@ uint64_t DiagnosticsTestClockNano() { return static_cast<uint64_t>(g_clockNano);
 
 // Test-local collaborator fakes.
 
-// Keep synthetic clients paired with this TU's rasCollFree and fixture cleanup,
-// independently of ras-test.cc's client ownership and collaborator fakes.
+// Keep synthetic clients paired with this TU's rasCollFree and fixture cleanup.
 struct rasClient* rasClientsHead = nullptr;
 
 namespace {
@@ -1443,31 +1413,3 @@ TEST_F(RasDiagnosticsMicrotest, Start_SendFailureFreesStaleCollectiveAndCleansUp
   free(client);
 }
 
-#undef rasDiagnosticsNetDeviceSummarize
-#undef rasDiagnosticsNetDeviceCollectLocal
-#undef rasDiagnosticsPathsSummarize
-#undef rasDiagnosticsPathsCollectLocal
-#undef rasDiagnosticsNvidiaDriverVersionSummarize
-#undef rasDiagnosticsNvidiaDriverVersionCollectLocal
-#undef rasDiagnosticsXidSummarize
-#undef rasDiagnosticsXidCollectLocal
-#undef rasDiagnosticsAtsSummarize
-#undef rasDiagnosticsAtsCollectLocal
-#undef rasDiagnosticsIommuSummarize
-#undef rasDiagnosticsIommuCollectLocal
-#undef rasDiagnosticsRdmaTopoSummarize
-#undef rasDiagnosticsRdmaTopoCollectLocal
-#undef rasDiagnosticsNcclEnvSummarize
-#undef rasDiagnosticsNcclEnvCollectLocal
-#undef rasDiagnosticsNvLinkSummarize
-#undef rasDiagnosticsNvLinkCollectLocal
-#undef rasDiagnosticsEccSummarize
-#undef rasDiagnosticsEccCollectLocal
-#undef rasDiagnosticsCudaDriverVersionSummarize
-#undef rasDiagnosticsCudaDriverVersionCollectLocal
-#undef rasDiagnosticsGpuModelSummarize
-#undef rasDiagnosticsGpuModelCollectLocal
-#undef rasNetSendCollReq
-#undef rasCollReqInit
-#undef rasCollFree
-#undef rasClientsHead

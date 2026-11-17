@@ -17,44 +17,7 @@
 
 #include <gtest/gtest.h>
 
-#include "../common/LogCapture.hpp"
-
-// collectives.cc is included directly below. These renames must be active before
-// comm.h and ras_internal.h declare the collaborators, and intentionally remain
-// active for the matching fakes and tests so this TU can share the host binary
-// with sibling RAS microtests without duplicate symbols.
-#define ncclSocketToString CollectivesTestNcclSocketToString
-#define rasNetListeningSocket CollectivesTestRasNetListeningSocket
-#define ncclCommsMutex CollectivesTestNcclCommsMutex
-#define ncclComms CollectivesTestNcclComms
-#define nNcclComms CollectivesTestNNcclComms
-#define ncclCommsSorted CollectivesTestNcclCommsSorted
-#define rasLine CollectivesTestRasLine
-#define rasNextLink CollectivesTestRasNextLink
-#define rasPrevLink CollectivesTestRasPrevLink
-#define rasConnsHead CollectivesTestRasConnsHead
-#define rasConnsTail CollectivesTestRasConnsTail
-#define rasPeers CollectivesTestRasPeers
-#define nRasPeers CollectivesTestNRasPeers
-#define rasTimeoutFactorNs CollectivesTestRasTimeoutFactorNs
-#define rasMsgAlloc CollectivesTestRasMsgAlloc
-#define rasMsgHandleBCDeadPeer CollectivesTestRasMsgHandleBCDeadPeer
-#define rasMsgHandleBCProfilerMask CollectivesTestRasMsgHandleBCProfilerMask
-#define rasCollDiagInit CollectivesTestRasCollDiagInit
-#define rasCollDiagMerge CollectivesTestRasCollDiagMerge
-#define rasClientResume CollectivesTestRasClientResume
-#define rasConnEnqueueMsg CollectivesTestRasConnEnqueueMsg
-#define rasCollFree CollectivesTestRasCollFree
-#define rasCollReqInit CollectivesTestRasCollReqInit
-#define rasCollsPurgeConn CollectivesTestRasCollsPurgeConn
-#define rasNetSendCollReq CollectivesTestRasNetSendCollReq
-#define rasMsgHandleCollReq CollectivesTestRasMsgHandleCollReq
-#define rasCollRecordHistory CollectivesTestRasCollRecordHistory
-#define rasMsgHandleCollResp CollectivesTestRasMsgHandleCollResp
-#define rasCollsHandleTimeouts CollectivesTestRasCollsHandleTimeouts
-#define rasCollectivesTerminate CollectivesTestRasCollectivesTerminate
-#define rasCollectivesHead CollectivesTestRasCollectivesHead
-#define rasCollectivesTail CollectivesTestRasCollectivesTail
+#include "../../common/LogCapture.hpp"
 
 #include "comm.h"
 #include "ras/ras_internal.h"
