@@ -381,7 +381,7 @@ class VirtualGPU : public device::VirtualDevice {
     virtual bool IsKnownRetired(const ProfilingSignal* signal) const { return false; }
 
     //! The operations consuming the waits of the previous WaitingSignal call have been submitted
-    virtual void NoteWaitsSubmitted() { CloseOpenPins(); }
+    virtual void NoteWaitsSubmitted() = 0;
 
     //! A GPU waiter will read the busy signal. Every operation submitted until the next
     //! WaitingSignal call may poll it, not just the one owning the following slot, so the signal
@@ -401,7 +401,7 @@ class VirtualGPU : public device::VirtualDevice {
     };
 
     //! Closes the pins captured by the last WaitingSignal call at the next use sequence
-    void CloseOpenPins(uint64_t close_aql = 0, uint64_t queue_gen = 0);
+    void CloseOpenPins(uint64_t close_aql, uint64_t queue_gen);
 
     //! Drops every pin, open, closed or awaiting a fence. The consumers must be complete or
     //! abandoned.
@@ -425,6 +425,10 @@ class VirtualGPU : public device::VirtualDevice {
     //! Closed pins of AQL waiters that no fence use followed yet, for LegacySignalTracker. The
     //! next fence use moves them into pins_, after the closed pins and ahead of the open ones.
     std::vector<ProfilingSignal*> unfenced_pins_;
+    //! Pins of AQL waiters that no fence use followed when the HW queue changed. Their consumers
+    //! may still be queued on the earlier queue, which a fence use on the new one doesn't order,
+    //! so they are held until the tracker is destroyed, as RetiringSignalTracker does.
+    std::vector<ProfilingSignal*> stale_pins_;
   };
 
   //! Reads and resets each signal when it is handed out
@@ -437,7 +441,15 @@ class VirtualGPU : public device::VirtualDevice {
     //! Pins of AQL waiters wait for a fence use. The AQL barrier optimization may clear the
     //! barrier bit of every use when other streams on the HW queue publish barrier packets after
     //! them, which would keep the pins forever, so past kMaxUnfencedPins the next use keeps it.
+    //! Until a use with a signal follows, the stream's packets then wait for all earlier packets
+    //! on the HW queue, as they would without the optimization.
     bool NeedsFence() const override { return unfenced_pins_.size() >= kMaxUnfencedPins; }
+
+    //! Pins awaiting a fence on the earlier HW queue are not retired by one on the new queue
+    void NoteQueueChange() override;
+
+    //! Every packet on the idle queue launched, past the waits that the pins awaiting a fence guard
+    void NoteQueueDrained() override;
 
    private:
     static constexpr size_t kMaxUnfencedPins = 64;
@@ -455,7 +467,7 @@ class VirtualGPU : public device::VirtualDevice {
     //! A fence use, whose packet was published on the AQL queue with the barrier bit, starts at
     //! fence_seq. Its completion proves that every earlier packet on the queue completed, so it
     //! closes the pins of AQL waiters that no fence followed yet at fence_seq + 1.
-    void NoteFence(uint64_t fence_seq);
+    void NoteFenceUse(uint64_t fence_seq);
 
     //! Wait for the next active signal
     void WaitNext();
@@ -469,7 +481,7 @@ class VirtualGPU : public device::VirtualDevice {
     void ProbeCompleted();
 
     //! Drops the closed pins whose consumers all completed
-    void ReleasePins();
+    void ReleaseCompletedPins();
 
     uint64_t completed_below_seq_ = 1;  //!< Every use below this sequence completed
   };

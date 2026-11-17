@@ -1440,6 +1440,10 @@ void VirtualGPU::HwQueueTracker::ReleaseAllPins() {
     signal->release();
   }
   unfenced_pins_.clear();
+  for (ProfilingSignal* signal : stale_pins_) {
+    signal->release();
+  }
+  stale_pins_.clear();
 }
 
 // ================================================================================================
@@ -1514,12 +1518,12 @@ void VirtualGPU::LegacySignalTracker::AcquireSlot() {
     WaitNext();
 
     // The GPU waiters, beyond the one owning the next slot, that a pin protects may be done
-    ReleasePins();
+    ReleaseCompletedPins();
     if (signal_list_[current_id_]->referenceCount() > 1 && pins_.size() > num_open_pins_) {
       // Several operations polled the signal, such as the ops of one batch copy. They are
       // usually long done, which saves replacing the signal.
       ProbeCompleted();
-      ReleasePins();
+      ReleaseCompletedPins();
     }
   }
 
@@ -1556,7 +1560,7 @@ void VirtualGPU::LegacySignalTracker::ArmForUse(ProfilingSignal* signal,
   signal->use_seq_ = next_use_seq_++;
   signal->use_fence_ = barrier_bit && aql_slot != kInvalidAqlSlot;
   if (signal->use_fence_) {
-    NoteFence(signal->use_seq_);
+    NoteFenceUse(signal->use_seq_);
   }
 }
 
@@ -1585,10 +1589,11 @@ void VirtualGPU::LegacySignalTracker::NoteWaitsSubmitted() {
 }
 
 // ================================================================================================
-void VirtualGPU::LegacySignalTracker::NoteFence(uint64_t fence_seq) {
+void VirtualGPU::LegacySignalTracker::NoteFenceUse(uint64_t fence_seq) {
   // The callers publish the AQL packets consuming a WaitingSignal result before the next use's
-  // packet, so the fence follows them on the queue even while their pins are open. A HW queue is
-  // released only once idle, so a fence on a later HW queue still follows them.
+  // packet, so the fence follows them on the queue even while their pins are open. The pins
+  // awaiting a fence when the HW queue changed are not in unfenced_pins_ any more (see
+  // NoteQueueChange), so every one of them was published on the queue of this fence.
   for (auto pin = pins_.end() - num_open_pins_; pin != pins_.end(); ++pin) {
     if (pin->aql_waiter && pin->close_seq == 0) {
       pin->close_seq = fence_seq + 1;
@@ -1602,6 +1607,25 @@ void VirtualGPU::LegacySignalTracker::NoteFence(uint64_t fence_seq) {
     PinnedWait pin{signal, fence_seq + 1};
     pin.aql_waiter = true;
     pins_.insert(pins_.end() - num_open_pins_, pin);
+  }
+  unfenced_pins_.clear();
+}
+
+// ================================================================================================
+void VirtualGPU::LegacySignalTracker::NoteQueueChange() {
+  // The HW queue may change while the old one still holds the AQL consumers of these pins, as in
+  // ReacquireQueueExcluding(). A fence use on the new queue doesn't order them, so they are kept
+  // until the tracker is destroyed, like the pins of RetiringSignalTracker from an earlier queue.
+  stale_pins_.insert(stale_pins_.end(), unfenced_pins_.begin(), unfenced_pins_.end());
+  unfenced_pins_.clear();
+}
+
+// ================================================================================================
+void VirtualGPU::LegacySignalTracker::NoteQueueDrained() {
+  // The queue's last packet completed, and packets are processed in order, so every consumer of
+  // a pin awaiting a fence passed its wait
+  for (ProfilingSignal* signal : unfenced_pins_) {
+    signal->release();
   }
   unfenced_pins_.clear();
 }
@@ -1656,7 +1680,7 @@ void VirtualGPU::LegacySignalTracker::ProbeCompleted() {
 }
 
 // ================================================================================================
-void VirtualGPU::LegacySignalTracker::ReleasePins() {
+void VirtualGPU::LegacySignalTracker::ReleaseCompletedPins() {
   // The consumers of a pin own a use below its close_seq, or precede the fence use below it on
   // the AQL queue. A pin still awaiting its fence is not in pins_ and blocks nothing.
   while (pins_.size() > num_open_pins_ && pins_.front().close_seq <= completed_below_seq_) {
