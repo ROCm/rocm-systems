@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <string>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -45,6 +46,17 @@ TEST(HipWaitcheckHazardTest, FailClosedRejectsKernelCodeObject) {
 TEST(HipWaitcheckHazardTest, ModuleLoadsWithoutChecking) {
   const auto image = read_hazard_fixture();
   ASSERT_FALSE(image.empty()) << g_hazard_fixture;
+  hipModule_t module = nullptr;
+  ASSERT_EQ(hipModuleLoadData(&module, image.data()), hipSuccess);
+  ASSERT_NE(module, nullptr);
+  EXPECT_EQ(hipModuleUnload(module), hipSuccess);
+}
+
+TEST(HipWaitcheckHazardTest, SameSizeLoaderSubstitutionDoesNotReadTemporaryImage) {
+  const auto image = read_hazard_fixture();
+  ASSERT_FALSE(image.empty()) << g_hazard_fixture;
+  const std::string option = "-substitute:1=" + g_hazard_fixture.string();
+  ASSERT_EQ(setenv("LOADER_OPTIONS_APPEND", option.c_str(), 1), 0);
   hipModule_t module = nullptr;
   ASSERT_EQ(hipModuleLoadData(&module, image.data()), hipSuccess);
   ASSERT_NE(module, nullptr);

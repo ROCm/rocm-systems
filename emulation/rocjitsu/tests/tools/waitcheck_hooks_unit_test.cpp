@@ -28,6 +28,18 @@
 extern "C" bool OnLoad(HsaApiTable *table, uint64_t runtime_version, uint64_t failed_tool_count,
                        const char *const *failed_tool_names);
 extern "C" void OnUnload();
+extern "C" void
+rj_waitcheck_test_prior_queue_configure(decltype(hsa_queue_create) *create,
+                                        decltype(hsa_queue_destroy) *destroy,
+                                        decltype(AmdExtTable::hsa_amd_queue_create_fn) amd_create);
+extern "C" size_t rj_waitcheck_test_prior_queue_count();
+extern "C" hsa_status_t HSA_API rj_waitcheck_test_prior_queue_create(
+    hsa_agent_t agent, uint32_t size, hsa_queue_type32_t type,
+    void (*callback)(hsa_status_t, hsa_queue_t *, void *), void *data,
+    uint32_t private_segment_size, uint32_t group_segment_size, hsa_queue_t **queue);
+extern "C" hsa_status_t HSA_API rj_waitcheck_test_prior_amd_queue_create(
+    hsa_agent_t agent, hsa_amd_queue_create_desc_t *descs, uint32_t num_descs);
+extern "C" hsa_status_t HSA_API rj_waitcheck_test_prior_queue_destroy(hsa_queue_t *queue);
 
 namespace {
 
@@ -66,6 +78,7 @@ hsa_queue_t g_intercept_queue{};
 hsa_queue_t g_descriptor_queue{};
 int g_queue_capacity = -1;
 int g_live_queues = 0;
+uint64_t g_loaded_image_base_override = 0;
 bool g_descriptor_create_returns_intercept = false;
 std::vector<hsa_amd_queue_intercept_handler> g_registered_interceptors;
 int g_amd_queue_create_calls = 0;
@@ -83,6 +96,8 @@ decltype(hsa_executable_load_agent_code_object) *g_inner_load = nullptr;
 std::vector<uint8_t> g_replacement_bytes;
 std::unordered_map<uint64_t, std::vector<uint8_t>> g_reader_images;
 std::unordered_map<uint64_t, std::vector<uint8_t>> g_loaded_images;
+std::unordered_map<uint64_t, uintptr_t> g_reader_image_bases;
+std::unordered_map<uint64_t, uintptr_t> g_loaded_image_bases;
 struct FileImage {
   int file = -1;
   size_t offset = 0;
@@ -116,6 +131,7 @@ hsa_status_t HSA_API fake_reader_create_from_memory(const void *bytes, size_t si
   if (bytes != nullptr && size != 0) {
     const auto *first = static_cast<const uint8_t *>(bytes);
     g_reader_images[reader->handle] = {first, first + size};
+    g_reader_image_bases[reader->handle] = reinterpret_cast<uintptr_t>(first);
   }
   return HSA_STATUS_SUCCESS;
 }
@@ -158,7 +174,7 @@ hsa_status_t HSA_API fake_get_major_extension_table(uint16_t extension, uint16_t
       if (attribute == 4)
         *static_cast<uint32_t *>(value) = 2;
       else if (attribute == 5)
-        *static_cast<uint64_t *>(value) = reinterpret_cast<uintptr_t>(it->second.data());
+        *static_cast<uint64_t *>(value) = g_loaded_image_bases.at(loaded.handle);
       else if (attribute == 6)
         *static_cast<uint64_t *>(value) = it->second.size();
       else
@@ -186,6 +202,7 @@ hsa_status_t HSA_API fake_get_major_extension_table(uint16_t extension, uint16_t
 
 hsa_status_t HSA_API fake_reader_destroy(hsa_code_object_reader_t reader) {
   g_reader_images.erase(reader.handle);
+  g_reader_image_bases.erase(reader.handle);
   g_reader_files.erase(reader.handle);
   return HSA_STATUS_SUCCESS;
 }
@@ -197,9 +214,12 @@ hsa_status_t HSA_API fake_load(hsa_executable_t executable, hsa_agent_t, hsa_cod
     return g_load_status;
   if (loaded != nullptr) {
     loaded->handle = static_cast<uint64_t>(g_load_calls);
-    if (const auto it = g_reader_images.find(reader.handle); it != g_reader_images.end())
+    if (const auto it = g_reader_images.find(reader.handle); it != g_reader_images.end()) {
       g_loaded_images[loaded->handle] = it->second;
-    else if (const auto it = g_reader_files.find(reader.handle); it != g_reader_files.end())
+      g_loaded_image_bases[loaded->handle] = g_loaded_image_base_override != 0
+                                                 ? g_loaded_image_base_override
+                                                 : g_reader_image_bases.at(reader.handle);
+    } else if (const auto it = g_reader_files.find(reader.handle); it != g_reader_files.end())
       g_loaded_files[loaded->handle] = it->second;
   }
   if (g_freeze_during_load != nullptr)
@@ -496,6 +516,7 @@ protected:
     g_intercept_data = nullptr;
     g_queue_capacity = -1;
     g_live_queues = 0;
+    g_loaded_image_base_override = 0;
     g_descriptor_create_returns_intercept = false;
     g_registered_interceptors.clear();
     g_amd_queue_create_calls = 0;
@@ -508,6 +529,8 @@ protected:
     g_cu_mask_first_word = 0;
     g_reader_images.clear();
     g_loaded_images.clear();
+    g_reader_image_bases.clear();
+    g_loaded_image_bases.clear();
     g_reader_files.clear();
     g_loaded_files.clear();
     setenv("ROCJITSU_WAITCHECK", "1", 1);
@@ -703,6 +726,19 @@ TEST_F(WaitcheckHooksTest, LoaderFileRangeMatchesSelectedImageAtItsOffset) {
   EXPECT_TRUE(contains(changed.stderr_text, "differs from reader; check unavailable"))
       << changed.stderr_text;
   EXPECT_EQ(core_.hsa_code_object_reader_destroy_fn(reader), HSA_STATUS_SUCCESS);
+}
+
+TEST_F(WaitcheckHooksTest, DoesNotReadAnUnownedLoadedMemoryBase) {
+  setenv("ROCJITSU_WAITCHECK_FAIL", "0", 1);
+  // The loader may report a temporary substitution buffer after it has been
+  // released. A same-sized image at an unreadable address must be reported as
+  // unavailable without dereferencing that address.
+  g_loaded_image_base_override = 1;
+  const CapturedCall captured =
+      load_memory(rocjitsu::waitcheck_test::make_gfx1200_correct_wait_code_object());
+  EXPECT_EQ(captured.status, HSA_STATUS_SUCCESS);
+  EXPECT_TRUE(contains(captured.stderr_text, "loaded code object image is unavailable"))
+      << captured.stderr_text;
 }
 
 TEST_F(WaitcheckHooksTest, DisabledHookPassesHazardThroughWithoutDiagnostics) {
@@ -1397,6 +1433,73 @@ TEST_F(WaitcheckHooksTest, DescriptorQueueNeedsOnlyOneHardwareSlot) {
   ASSERT_EQ(g_registered_interceptors.size(), 1u);
   EXPECT_EQ(core_.hsa_queue_destroy_fn(desc.queue), HSA_STATUS_SUCCESS);
   EXPECT_EQ(g_live_queues, 0);
+}
+
+TEST_F(WaitcheckHooksTest, PreservesPriorQueueOwnershipWithEagerFallback) {
+  OnUnload();
+  loaded_ = false;
+  setenv("ROCJITSU_WAITCHECK_MODE", "dispatch", 1);
+  rj_waitcheck_test_prior_queue_configure(fake_plain_queue_create, fake_queue_destroy,
+                                          fake_amd_queue_create);
+  core_ = make_core_table();
+  core_.hsa_queue_create_fn = rj_waitcheck_test_prior_queue_create;
+  core_.hsa_queue_destroy_fn = rj_waitcheck_test_prior_queue_destroy;
+  amd_ext_ = make_amd_ext_table();
+  amd_ext_.hsa_amd_queue_create_fn = rj_waitcheck_test_prior_amd_queue_create;
+  table_ = make_api_table(&core_, &amd_ext_);
+  ASSERT_TRUE(OnLoad(&table_, 1, 0, nullptr));
+  loaded_ = true;
+
+  hsa_queue_t *queue = nullptr;
+  ASSERT_EQ(core_.hsa_queue_create_fn({}, 64, HSA_QUEUE_TYPE_MULTI, nullptr, nullptr, 0, 0, &queue),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(queue, &g_descriptor_queue);
+  EXPECT_EQ(g_live_queues, 1);
+  EXPECT_EQ(rj_waitcheck_test_prior_queue_count(), 1u);
+  EXPECT_EQ(g_intercept_handler, nullptr);
+
+  const CapturedCall hazard =
+      load_memory(rocjitsu::waitcheck_test::make_gfx1200_missing_wait_code_object());
+  EXPECT_EQ(hazard.status, HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
+  EXPECT_EQ(g_load_calls, 0);
+  EXPECT_TRUE(contains(hazard.stderr_text, "waitcnt hazard")) << hazard.stderr_text;
+  EXPECT_EQ(core_.hsa_queue_destroy_fn(queue), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(g_live_queues, 0);
+  EXPECT_EQ(rj_waitcheck_test_prior_queue_count(), 0u);
+
+  hsa_queue_t *explicit_intercept = nullptr;
+  EXPECT_EQ(amd_ext_.hsa_amd_queue_intercept_create_fn({}, 64, HSA_QUEUE_TYPE_MULTI, nullptr,
+                                                       nullptr, 0, 0, &explicit_intercept),
+            HSA_STATUS_ERROR_INVALID_QUEUE_CREATION);
+  EXPECT_EQ(explicit_intercept, nullptr);
+  EXPECT_EQ(g_live_queues, 0);
+  EXPECT_EQ(rj_waitcheck_test_prior_queue_count(), 0u);
+
+  hsa_amd_queue_create_desc_t desc{};
+  desc.version = HSA_AMD_QUEUE_CREATE_DESC_VERSION;
+  desc.engine_type = HSA_AMD_QUEUE_ENGINE_COMPUTE;
+  desc.queue_size_bytes = 64u * sizeof(hsa_kernel_dispatch_packet_t);
+  desc.engine.compute.type = HSA_QUEUE_TYPE_MULTI;
+  ASSERT_EQ(amd_ext_.hsa_amd_queue_create_fn({}, &desc, 1), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(desc.queue, &g_descriptor_queue);
+  EXPECT_EQ(g_live_queues, 1);
+  EXPECT_EQ(rj_waitcheck_test_prior_queue_count(), 1u);
+  EXPECT_EQ(core_.hsa_queue_destroy_fn(desc.queue), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(g_live_queues, 0);
+  EXPECT_EQ(rj_waitcheck_test_prior_queue_count(), 0u);
+
+  // A queue created after a load also checks that pending load before return.
+  const CapturedCall loaded_hazard =
+      load_memory(rocjitsu::waitcheck_test::make_gfx1200_missing_wait_code_object());
+  EXPECT_EQ(loaded_hazard.status, HSA_STATUS_SUCCESS);
+  queue = nullptr;
+  const CapturedCall rejected = capture_stderr([&] {
+    return core_.hsa_queue_create_fn({}, 64, HSA_QUEUE_TYPE_MULTI, nullptr, nullptr, 0, 0, &queue);
+  });
+  EXPECT_EQ(rejected.status, HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
+  EXPECT_EQ(queue, nullptr);
+  EXPECT_EQ(g_live_queues, 0);
+  EXPECT_EQ(rj_waitcheck_test_prior_queue_count(), 0u);
 }
 
 TEST_F(WaitcheckHooksTest, DescriptorQueuePreservesPrecedingPacketInterceptor) {

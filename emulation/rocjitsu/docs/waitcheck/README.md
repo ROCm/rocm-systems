@@ -233,6 +233,19 @@ caller-owned structure with its actual allocation size. A diagnostic includes
 the inferred ISA target. `diagnostic.code` is a stable machine-readable reason;
 the English `message` is explanatory text and should not be parsed.
 
+Interpret `diagnostic.counter` using `result.target`. The legacy targets map
+the public counter slots to combined wait fields:
+
+| Targets | `LOAD` | `STORE` | `DS` | `EXP` |
+| --- | --- | --- | --- | --- |
+| `gfx90a`, `gfx942`, `gfx950` | `vmcnt` (also stores, samples, BVH) | No separate field | `lgkmcnt` (also scalar memory) | `expcnt` |
+| `gfx1100`, `gfx1150`, `gfx1151` | `vmcnt` (also samples, BVH) | `vscnt` | `lgkmcnt` (also scalar memory) | `expcnt` |
+| `gfx1200` and newer | `loadcnt` | `storecnt` | `dscnt` | `expcnt` |
+
+On gfx12, scalar memory uses the separate `KM` (`kmcnt`) slot; samples and BVH
+also have separate slots. The counter identifies a wait field, not whether an
+instruction accessed scalar memory, LDS, or another memory space.
+
 A hazard is not an API failure: the call returns `ROCJITSU_STATUS_SUCCESS`,
 sets `result.passed` to zero, and reports structured producer/consumer
 diagnostics through the callback. `result.diagnostics_observed` is complete
@@ -495,7 +508,7 @@ Environment variables:
 | --- | --- | --- |
 | `ROCJITSU_WAITCHECK` | `1` | Set to `0` to disable checking while leaving the HSA tool loaded. |
 | `ROCJITSU_WAITCHECK_MODE` | `dispatch` | `dispatch` checks a kernel immediately before its first AQL dispatch and caches the result. `eager` exhaustively checks every kernel when its code object is loaded. |
-| `ROCJITSU_WAITCHECK_FAIL` | `0` | Set to `1` to stop on a missing wait. Dispatch mode aborts before submitting the bad packet; eager mode and dispatch mode with a cooperative queue reject a hazardous reader before ROCR loads it. A post-load image mismatch aborts the process before freeze because the loaded image cannot be rolled back. |
+| `ROCJITSU_WAITCHECK_FAIL` | `0` | Set to `1` to stop on a missing wait. Dispatch mode aborts before submitting the bad packet; eager mode and dispatch mode with a queue requiring eager checks reject a hazardous reader before ROCR loads it. A post-load image mismatch aborts the process before freeze because the loaded image cannot be rolled back. |
 | `ROCJITSU_WAITCHECK_SUMMARY` | `0` | Set to `1` to print load/dispatch/check/cache/pass/hazard counters at shutdown or process exit. |
 
 The tool prints diagnostics to stderr. With `ROCJITSU_WAITCHECK_FAIL=0`, it
@@ -507,21 +520,29 @@ paying whole-library analysis costs. Use `ROCJITSU_WAITCHECK_MODE=eager` for
 load-only validation or when the application never creates an interceptable
 HSA queue.
 
-After a successful load, the hook compares the loader's selected image with
-the reader it checked. If another loader layer substitutes an image, or the
-selected bytes cannot be obtained, it discards the pending dispatch mapping
-and reports that checking is unavailable. With `ROCJITSU_WAITCHECK_FAIL=1`,
+After a successful load, the hook verifies the selected image against the
+reader bytes it checked. For a memory reader it only reads the reader-owned
+buffer; a different loader memory base may point to expired storage and is
+reported as unavailable without dereferencing it. A file reader is compared
+through a fresh file snapshot. If another loader layer substitutes an image,
+or the selected bytes cannot be verified, the hook discards the pending
+dispatch mapping and reports that checking is unavailable. With
+`ROCJITSU_WAITCHECK_FAIL=1`,
 the process aborts before freeze because ROCR may already have published
 symbols from the selected image. Eager mode and dispatch mode with an
 active cooperative queue can conservatively reject a hazardous caller reader
 before a later loader layer substitutes it; that diagnostic describes the
 caller reader, not the selected image.
 
-Descriptor queues requesting device-memory placement keep their original queue
-and cannot be intercepted by dispatch mode. With `ROCJITSU_WAITCHECK_FAIL=1`,
-queue creation fails; otherwise the tool warns that dispatch checking is
-unavailable for that queue. Select eager mode to check those code objects at
-load time.
+If a preceding HSA tool owns a plain queue, the hook preserves that tool's
+create/destroy chain. It checks already loaded kernels when the queue is
+created and checks future loads for the same agent eagerly. Descriptor queues
+requesting device-memory placement keep their original queue and use the same
+eager fallback. With `ROCJITSU_WAITCHECK_FAIL=1`, device-memory queue creation
+is rejected, and any fallback queue with a known hazard is rejected before it
+is returned to the application. An explicit AMD intercept-queue request still
+requires an intercept queue; it fails if a preceding tool only provides a plain
+queue.
 
 ## How It Works
 

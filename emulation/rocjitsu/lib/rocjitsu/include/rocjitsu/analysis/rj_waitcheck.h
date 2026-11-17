@@ -70,6 +70,14 @@ typedef enum rj_waitcheck_diagnostic_code_e {
 } rj_waitcheck_diagnostic_code_t;
 
 /// @brief Hardware wait counter associated with a diagnostic.
+/// @details Interpret this field together with the result target. On gfx90a,
+/// gfx942, and gfx950, LOAD is vmcnt, DS is lgkmcnt, and EXP is expcnt; stores,
+/// image samples, and BVH operations share vmcnt rather than a separate STORE,
+/// SAMPLE, or BVH counter. On gfx1100, gfx1150, and gfx1151, LOAD is vmcnt,
+/// STORE is vscnt, DS is lgkmcnt, and EXP is expcnt. In particular, scalar
+/// memory and LDS both use DS on these legacy targets. On gfx1200 and newer,
+/// LOAD, STORE, DS, KM, SAMPLE, BVH, and EXP name their separate wait fields.
+/// A counter value identifies the hardware wait field, not the operation class.
 typedef enum rj_waitcheck_counter_e {
   ROCJITSU_WAITCHECK_COUNTER_LOAD = 0,
   ROCJITSU_WAITCHECK_COUNTER_STORE,

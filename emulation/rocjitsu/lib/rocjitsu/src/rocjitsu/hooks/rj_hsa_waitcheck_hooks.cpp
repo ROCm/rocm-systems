@@ -34,6 +34,7 @@
 #include <utility>
 #include <vector>
 
+#include <dlfcn.h>
 #include <sys/stat.h>
 
 namespace {
@@ -81,6 +82,7 @@ struct ReaderEntry {
   const uint8_t *bytes = nullptr;
   size_t size = 0;
   rocjitsu::CodeObjectFileSnapshot owned;
+  std::vector<uint8_t> analyzed_bytes;
   AnalysisResult result;
 };
 
@@ -938,6 +940,30 @@ WaitcheckHsaLayer &layer() {
   return *state;
 }
 
+template <typename FunctionPointer>
+[[nodiscard]] bool is_rocr_queue_creator(FunctionPointer function, const char *symbol) {
+  Dl_info creator_info{};
+  if (function == nullptr || dladdr(reinterpret_cast<const void *>(function), &creator_info) == 0)
+    return false;
+
+  // A preceding HSA tool may own a queue it returns and require its matching
+  // destroy wrapper. Only replace a plain queue when its creator belongs to
+  // ROCR itself. Isolated API-table providers without a loaded ROCR DSO use
+  // the intercept callback's owner as the reference runtime module.
+  void *runtime = dlopen("libhsa-runtime64.so.1", RTLD_NOW | RTLD_NOLOAD);
+  if (runtime == nullptr)
+    runtime = dlopen("libhsa-runtime64.so", RTLD_NOW | RTLD_NOLOAD);
+  const void *reference = runtime == nullptr
+                              ? reinterpret_cast<const void *>(layer().intercept_register())
+                              : dlsym(runtime, symbol);
+  Dl_info reference_info{};
+  const bool same_owner = reference != nullptr && dladdr(reference, &reference_info) != 0 &&
+                          creator_info.dli_fbase == reference_info.dli_fbase;
+  if (runtime != nullptr)
+    dlclose(runtime);
+  return same_owner;
+}
+
 [[nodiscard]] LoadedCodeObjectGetInfoFn resolve_loaded_code_object_get_info() {
   if (auto *get_info = layer().loaded_code_object_get_info(); get_info != nullptr)
     return get_info;
@@ -953,9 +979,11 @@ WaitcheckHsaLayer &layer() {
 enum class LoadedImageIdentity { Same, Changed, Unavailable };
 
 [[nodiscard]] LoadedImageIdentity loaded_image_identity(hsa_loaded_code_object_t loaded,
-                                                        const uint8_t *expected, size_t size) {
+                                                        const uint8_t *reader_bytes,
+                                                        const uint8_t *analyzed_bytes,
+                                                        size_t size) {
   auto *get_info = resolve_loaded_code_object_get_info();
-  if (get_info == nullptr || expected == nullptr || size == 0)
+  if (get_info == nullptr || reader_bytes == nullptr || analyzed_bytes == nullptr || size == 0)
     return LoadedImageIdentity::Unavailable;
   uint32_t storage_type = 0;
   if (get_info(loaded, kLoadedCodeObjectInfoStorageType, &storage_type) != HSA_STATUS_SUCCESS)
@@ -970,9 +998,13 @@ enum class LoadedImageIdentity { Same, Changed, Unavailable };
       return LoadedImageIdentity::Unavailable;
     if (loaded_size != size)
       return LoadedImageIdentity::Changed;
-    const auto *bytes = reinterpret_cast<const uint8_t *>(static_cast<uintptr_t>(base));
-    return std::memcmp(bytes, expected, size) == 0 ? LoadedImageIdentity::Same
-                                                   : LoadedImageIdentity::Changed;
+    // The loader's reported base can refer to temporary substitution storage
+    // that is already gone when the load returns. Only the original reader
+    // buffer has a lifetime guaranteed by the HSA reader contract.
+    if (base != reinterpret_cast<uintptr_t>(reader_bytes))
+      return LoadedImageIdentity::Unavailable;
+    return std::memcmp(reader_bytes, analyzed_bytes, size) == 0 ? LoadedImageIdentity::Same
+                                                                : LoadedImageIdentity::Changed;
   }
   if (storage_type == 1) { // HSA file reader
     int file = -1;
@@ -1018,7 +1050,7 @@ enum class LoadedImageIdentity { Same, Changed, Unavailable };
     const auto bytes = rocjitsu::snapshot_code_object_file_range(file, offset, size);
     if (!bytes)
       return LoadedImageIdentity::Unavailable;
-    return bytes->size() == size && std::memcmp(bytes->data(), expected, size) == 0
+    return bytes->size() == size && std::memcmp(bytes->data(), analyzed_bytes, size) == 0
                ? LoadedImageIdentity::Same
                : LoadedImageIdentity::Changed;
   }
@@ -1193,7 +1225,14 @@ hsa_status_t HSA_API waitcheck_executable_load_agent_code_object(
       registry.complete(prepared, {}, false);
       return status;
     }
-    const auto identity = loaded_image_identity(*runtime_output, entry->bytes, entry->size);
+    if (!prepared.entry) {
+      g_stats.unavailable.fetch_add(1, std::memory_order_relaxed);
+      return status;
+    }
+    const auto &checked_image = *prepared.entry->kernels.front()->code_object;
+    const auto identity = loaded_image_identity(
+        *runtime_output, entry->bytes,
+        reinterpret_cast<const uint8_t *>(checked_image.image_data()), checked_image.image_size());
     if (identity != LoadedImageIdentity::Same) {
       registry.complete(prepared, {}, false);
       return unchecked_loaded_image_status(identity);
@@ -1207,8 +1246,19 @@ hsa_status_t HSA_API waitcheck_executable_load_agent_code_object(
       loaded_code_object == nullptr ? &captured_loaded : loaded_code_object;
   if (entry != nullptr) {
     std::lock_guard entry_lock(entry->mutex);
-    if (!entry->analyzed) {
-      entry->result = check_code_object(entry->bytes, entry->size);
+    if (entry->bytes != nullptr && entry->size != 0 &&
+        (!entry->analyzed || entry->analyzed_bytes.size() != entry->size ||
+         std::memcmp(entry->analyzed_bytes.data(), entry->bytes, entry->size) != 0)) {
+      try {
+        entry->analyzed_bytes.assign(entry->bytes, entry->bytes + entry->size);
+        entry->result =
+            check_code_object(entry->analyzed_bytes.data(), entry->analyzed_bytes.size());
+      } catch (...) {
+        entry->analyzed_bytes.clear();
+        entry->result = {.checked = true, .passed = false, .analysis_failed = true};
+        g_stats.analysis_errors.fetch_add(1, std::memory_order_relaxed);
+        std::fprintf(stderr, "rocjitsu-waitcheck: failed to snapshot reader image\n");
+      }
       entry->analyzed = true;
     }
     if (entry->result.checked && !entry->result.passed &&
@@ -1218,7 +1268,8 @@ hsa_status_t HSA_API waitcheck_executable_load_agent_code_object(
     const hsa_status_t status = original(executable, agent, reader, options, runtime_output);
     if (status != HSA_STATUS_SUCCESS || !env_enabled("ROCJITSU_WAITCHECK", true))
       return status;
-    const auto identity = loaded_image_identity(*runtime_output, entry->bytes, entry->size);
+    const auto identity = loaded_image_identity(
+        *runtime_output, entry->bytes, entry->analyzed_bytes.data(), entry->analyzed_bytes.size());
     return identity == LoadedImageIdentity::Same ? status : unchecked_loaded_image_status(identity);
   } else if (env_enabled("ROCJITSU_WAITCHECK", true)) {
     g_stats.unavailable.fetch_add(1, std::memory_order_relaxed);
@@ -1316,11 +1367,27 @@ hsa_status_t HSA_API waitcheck_queue_get_info(hsa_queue_t *queue,
   return layer().queue_info(queue, attribute, value);
 }
 
-hsa_status_t HSA_API waitcheck_queue_create(hsa_agent_t agent, uint32_t size,
-                                            hsa_queue_type32_t type,
-                                            void (*callback)(hsa_status_t, hsa_queue_t *, void *),
-                                            void *data, uint32_t private_segment_size,
-                                            uint32_t group_segment_size, hsa_queue_t **queue) {
+[[nodiscard]] hsa_status_t keep_queue_with_eager_checks(hsa_agent_t agent, hsa_queue_t *queue,
+                                                        const char *reason) {
+  auto &registry = DispatchRegistry::instance();
+  const bool passed = registry.begin_cooperative_create(agent, true);
+  if (!passed && env_enabled("ROCJITSU_WAITCHECK_FAIL", false)) {
+    registry.finish_cooperative_create(agent, nullptr);
+    return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+  }
+  registry.finish_cooperative_create(agent, queue);
+  g_stats.unavailable.fetch_add(1, std::memory_order_relaxed);
+  std::fprintf(stderr,
+               "rocjitsu-waitcheck: %s cannot be intercepted; "
+               "using eager checks for this agent\n",
+               reason);
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t create_checked_queue(hsa_agent_t agent, uint32_t size, hsa_queue_type32_t type,
+                                  void (*callback)(hsa_status_t, hsa_queue_t *, void *), void *data,
+                                  uint32_t private_segment_size, uint32_t group_segment_size,
+                                  hsa_queue_t **queue, bool require_intercept_queue) {
   if (!env_enabled("ROCJITSU_WAITCHECK", true)) {
     auto *create = layer().queue_create();
     return create == nullptr ? HSA_STATUS_ERROR_NOT_INITIALIZED
@@ -1344,7 +1411,7 @@ hsa_status_t HSA_API waitcheck_queue_create(hsa_agent_t agent, uint32_t size,
                                        status == HSA_STATUS_SUCCESS && queue ? *queue : nullptr);
     return status;
   }
-  auto create = layer().intercept_create();
+  auto create = layer().queue_create();
   auto register_intercept = layer().intercept_register();
   if (create == nullptr || register_intercept == nullptr)
     return HSA_STATUS_ERROR_NOT_INITIALIZED;
@@ -1361,10 +1428,60 @@ hsa_status_t HSA_API waitcheck_queue_create(hsa_agent_t agent, uint32_t size,
     return HSA_STATUS_SUCCESS;
   }
 
-  if (auto *destroy = layer().queue_destroy(); destroy != nullptr)
-    (void)destroy(*queue);
+  auto *destroy = layer().queue_destroy();
+  if (register_status == HSA_STATUS_ERROR_INVALID_QUEUE &&
+      (!is_rocr_queue_creator(create, "hsa_queue_create") ||
+       !is_rocr_queue_creator(destroy, "hsa_queue_destroy"))) {
+    if (require_intercept_queue) {
+      if (destroy != nullptr)
+        (void)destroy(*queue);
+      *queue = nullptr;
+      return HSA_STATUS_ERROR_INVALID_QUEUE_CREATION;
+    }
+    const hsa_status_t fallback_status =
+        keep_queue_with_eager_checks(agent, *queue, "preceding tool's queue");
+    if (fallback_status == HSA_STATUS_SUCCESS)
+      return HSA_STATUS_SUCCESS;
+    if (destroy != nullptr)
+      (void)destroy(*queue);
+    *queue = nullptr;
+    return fallback_status;
+  }
+
+  if (destroy == nullptr)
+    return HSA_STATUS_ERROR_NOT_INITIALIZED;
+  const hsa_status_t destroy_status = destroy(*queue);
   *queue = nullptr;
-  return register_status;
+  if (destroy_status != HSA_STATUS_SUCCESS)
+    return destroy_status;
+  if (register_status != HSA_STATUS_ERROR_INVALID_QUEUE)
+    return register_status;
+
+  create = layer().intercept_create();
+  if (create == nullptr)
+    return HSA_STATUS_ERROR_NOT_INITIALIZED;
+  const hsa_status_t replacement_status =
+      create(agent, size, type, callback, data, private_segment_size, group_segment_size, queue);
+  if (replacement_status != HSA_STATUS_SUCCESS || queue == nullptr || *queue == nullptr)
+    return replacement_status;
+  const hsa_status_t replacement_register_status =
+      register_intercept(*queue, waitcheck_queue_intercept, nullptr);
+  if (replacement_register_status == HSA_STATUS_SUCCESS) {
+    layer().track_queue(*queue);
+    return HSA_STATUS_SUCCESS;
+  }
+  (void)destroy(*queue);
+  *queue = nullptr;
+  return replacement_register_status;
+}
+
+hsa_status_t HSA_API waitcheck_queue_create(hsa_agent_t agent, uint32_t size,
+                                            hsa_queue_type32_t type,
+                                            void (*callback)(hsa_status_t, hsa_queue_t *, void *),
+                                            void *data, uint32_t private_segment_size,
+                                            uint32_t group_segment_size, hsa_queue_t **queue) {
+  return create_checked_queue(agent, size, type, callback, data, private_segment_size,
+                              group_segment_size, queue, false);
 }
 
 hsa_status_t HSA_API waitcheck_amd_queue_intercept_create(
@@ -1377,8 +1494,8 @@ hsa_status_t HSA_API waitcheck_amd_queue_intercept_create(
                              : create(agent, size, type, callback, data, private_segment_size,
                                       group_segment_size, queue);
   }
-  return waitcheck_queue_create(agent, size, type, callback, data, private_segment_size,
-                                group_segment_size, queue);
+  return create_checked_queue(agent, size, type, callback, data, private_segment_size,
+                              group_segment_size, queue, true);
 }
 
 hsa_status_t HSA_API waitcheck_amd_queue_create(hsa_agent_t agent,
@@ -1462,13 +1579,14 @@ hsa_status_t HSA_API waitcheck_amd_queue_create(hsa_agent_t agent,
         desc.engine.compute.type == HSA_QUEUE_TYPE_COOPERATIVE)
       continue;
     if (desc.flags & kDevicePlacement) {
-      // An intercept queue has a host staging ring. Keep the original queue so
-      // CLR's device-wide signal ordering assumption remains valid.
-      if (checking) {
-        g_stats.unavailable.fetch_add(1, std::memory_order_relaxed);
-        std::fprintf(stderr,
-                     "rocjitsu-waitcheck: device-memory queue cannot be intercepted; "
-                     "dispatch checking unavailable for this queue\n");
+      // An intercept queue has a host staging ring. Keep device placement and
+      // check all known and future code objects before they can use this queue.
+      const hsa_status_t fallback_status =
+          keep_queue_with_eager_checks(agent, plain_queue, "device-memory queue");
+      if (fallback_status != HSA_STATUS_SUCCESS) {
+        (void)destroy_queue(plain_queue);
+        desc.queue = nullptr;
+        note_replacement_error(fallback_status);
       }
       continue;
     }
@@ -1483,6 +1601,18 @@ hsa_status_t HSA_API waitcheck_amd_queue_create(hsa_agent_t agent,
             : register_intercept(plain_queue, waitcheck_queue_intercept, nullptr);
     if (reuse_status == HSA_STATUS_SUCCESS) {
       layer().track_queue(plain_queue);
+      continue;
+    }
+    if (reuse_status == HSA_STATUS_ERROR_INVALID_QUEUE &&
+        (!is_rocr_queue_creator(original_create, "hsa_amd_queue_create") ||
+         !is_rocr_queue_creator(layer().queue_destroy(), "hsa_queue_destroy"))) {
+      const hsa_status_t fallback_status =
+          keep_queue_with_eager_checks(agent, plain_queue, "preceding tool's queue");
+      if (fallback_status != HSA_STATUS_SUCCESS) {
+        (void)destroy_queue(plain_queue);
+        desc.queue = nullptr;
+        note_replacement_error(fallback_status);
+      }
       continue;
     }
     if (reuse_status != HSA_STATUS_ERROR_INVALID_QUEUE) {

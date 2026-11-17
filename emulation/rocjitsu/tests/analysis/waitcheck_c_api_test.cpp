@@ -420,6 +420,22 @@ TEST(WaitcheckCApiTest, SupportsRdna35Targets) {
   }
 }
 
+TEST(WaitcheckCApiTest, LegacyScalarMemoryUsesLgkmcntSlot) {
+  const auto image = rocjitsu::waitcheck_test::make_gfx942_code_object(
+      {0xC0020100u, 0x00000000u, 0xBE880004u, 0xBF810000u});
+  CallbackState state;
+  const rj_waitcheck_options_t options = callback_options(state);
+  rj_waitcheck_result_t result = initialized_result();
+
+  ASSERT_EQ(rj_waitcheck_analyze(image.data(), image.size(), &options, &result),
+            ROCJITSU_STATUS_SUCCESS);
+  EXPECT_EQ(result.target, ROCJITSU_WAITCHECK_TARGET_GFX942);
+  EXPECT_EQ(result.passed, 0u);
+  ASSERT_EQ(state.diagnostics.size(), 1u);
+  EXPECT_EQ(state.diagnostics[0].counter, ROCJITSU_WAITCHECK_COUNTER_DS);
+  EXPECT_NE(state.diagnostics[0].message.find("lgkmcnt"), std::string::npos);
+}
+
 TEST(WaitcheckCApiTest, ReportsDistinctGfx1251Target) {
   const auto image = rocjitsu::waitcheck_test::make_gfx_code_object(
       {0xBFB00000U}, rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1251);

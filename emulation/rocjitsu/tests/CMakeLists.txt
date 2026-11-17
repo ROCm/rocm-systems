@@ -1440,11 +1440,16 @@ if(RJ_INSTALL_TESTS)
 endif()
 
 
+add_library(waitcheck_prior_queue_tool_stub SHARED tools/waitcheck_prior_queue_tool_stub.cpp)
+target_link_libraries(waitcheck_prior_queue_tool_stub PRIVATE rocjitsu_hsa_tools_headers)
+rj_configure_target(waitcheck_prior_queue_tool_stub PRIVATE_INCLUDES WARNINGS HIDDEN)
+
 add_executable(waitcheck_hooks_unit_test tools/waitcheck_hooks_unit_test.cpp)
 target_link_libraries(
     waitcheck_hooks_unit_test
     PRIVATE
         rocjitsu_waitcheck_hooks
+        waitcheck_prior_queue_tool_stub
         rocjitsu_waitcheck_internal
         rocjitsu_amdgpu_isa_model_registry
         rocjitsu_hsa_tools_headers
@@ -4918,6 +4923,19 @@ if(RJ_ENABLE_HIP_TESTS)
                 NAME WaitcheckHsaToolsHipTest.HazardModuleLoadsWhenDisabled
                 CONFIG ${RJ_HIP_TEST_CONFIG}
                 ENVIRONMENT ${_waitcheck_disabled_env} "ROCJITSU_WAITCHECK_MODE=eager"
+            )
+            rj_add_hip_test_case(
+                hip_waitcheck_hazard_test
+                "HipWaitcheckHazardTest.SameSizeLoaderSubstitutionDoesNotReadTemporaryImage"
+                NAME WaitcheckHsaToolsHipTest.LoaderSubstitutionUsesReaderLifetime
+                CONFIG ${RJ_HIP_TEST_CONFIG}
+                ENVIRONMENT
+                    "HSA_TOOLS_DISABLE_REGISTER=1"
+                    "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_waitcheck_hooks>"
+                    "ROCJITSU_WAITCHECK=1"
+                    "ROCJITSU_WAITCHECK_FAIL=0"
+                    "ROCJITSU_WAITCHECK_MODE=eager"
+                REQUIRED_OUTPUT "loaded code object image is unavailable; check unavailable"
             )
             rj_add_hip_test_case(
                 hip_waitcheck_hazard_test "HipWaitcheckHazardTest.DispatchRejectsBeforeSubmission"
