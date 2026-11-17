@@ -250,6 +250,14 @@ emitted bytes afresh; pristine facts cannot be attached to a different source.
 
 ### Key design constraint
 
+Explicit `InstrumentationOptions::entries` requests plan each selected descriptor's
+reachable code, register preservation, bootstrap and resource changes separately,
+then commit one combined original-text edit transaction. Every selected or native
+entry must have a closed, disjoint scope. Kernarg-preloaded siblings are rejected:
+their additional firmware entry is outside this bounded ownership model. Validation
+records retain caller insertion order, including a `KernelEntry` callback and an
+ordinary point sharing the same source offset.
+
 Callable `AfterInst` requires an ordinary relocatable anchor and a supported
 post-anchor state. Pre-anchor liveness alone cannot justify a callback after
 the instruction; addressing and storage must be valid at the observation point.
