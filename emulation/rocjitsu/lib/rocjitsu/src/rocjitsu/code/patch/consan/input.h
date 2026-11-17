@@ -73,4 +73,13 @@ struct InputProgram {
                                                           std::string_view entry, InputError &error,
                                                           const InputLimits &limits = {});
 
+/// @brief Qualify one selected entry inside an intact multi-entry source image.
+/// @details Generic SBI independently proves disjoint ownership for the whole
+/// image. This analysis rejects selected control flow that enters a sibling.
+[[nodiscard]] FailureOr<InputProgram> build_image_entry_program(std::span<const uint8_t> image,
+                                                                const TargetProfile &target,
+                                                                std::string_view entry,
+                                                                InputError &error,
+                                                                const InputLimits &limits = {});
+
 } // namespace rocjitsu::consan

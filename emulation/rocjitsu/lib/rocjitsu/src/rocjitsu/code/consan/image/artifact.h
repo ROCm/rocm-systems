@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "rocjitsu/code/consan/contract.h"
+#include "rocjitsu/code/consan/image/facts.h"
 
 #include <filesystem>
 
@@ -14,8 +14,14 @@ struct LoadedArtifact {
   std::vector<uint8_t> prepared;
 };
 
-/// @brief Check exact artifacts and required ELF/descriptor/note consistency.
+/// @brief Check the complete entry inventory and ELF/descriptor/note consistency.
 /// @details Shared image inspection has no decoder, CFG analysis or lowering.
+[[nodiscard]] Result verify_artifact_images(const ImageFacts &facts,
+                                            std::span<const uint8_t> original,
+                                            std::span<const uint8_t> prepared,
+                                            util::DiagnosticEmitter diagnostic = {});
+
+/// @brief Single-entry compiler convenience; original metadata is read explicitly.
 [[nodiscard]] Result verify_artifact_images(const Manifest &manifest,
                                             std::span<const uint8_t> original,
                                             std::span<const uint8_t> prepared,

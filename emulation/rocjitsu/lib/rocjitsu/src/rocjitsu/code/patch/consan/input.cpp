@@ -183,11 +183,10 @@ Result validate_original_registers(const RegisterSet &used, uint32_t declared_vg
   return Result::success();
 }
 
-} // namespace
-
-FailureOr<InputProgram> build_input_program(std::span<const uint8_t> image,
+FailureOr<InputProgram> build_entry_program(std::span<const uint8_t> image,
                                             const TargetProfile &target, std::string_view entry,
-                                            InputError &error, const InputLimits &limits) {
+                                            InputError &error, const InputLimits &limits,
+                                            bool allow_siblings) {
   error = {};
   if (image.size() > limits.image_bytes)
     return reject(error, InputErrorCode::ResourceLimit, "code object exceeds image budget");
@@ -232,7 +231,7 @@ FailureOr<InputProgram> build_input_program(std::span<const uint8_t> image,
   if (selected == kernels.end())
     return reject(error, InputErrorCode::UnsupportedEntry,
                   "requested kernel entry '" + std::string(entry) + "' was not found");
-  if (kernels.size() != 1)
+  if (!allow_siblings && kernels.size() != 1)
     return reject(error, InputErrorCode::UnsupportedEntry,
                   "ConSan requires a single-kernel code object; found " +
                       std::to_string(kernels.size()) + " kernels");
@@ -281,6 +280,15 @@ FailureOr<InputProgram> build_input_program(std::span<const uint8_t> image,
       {}, profile->public_id);
   if (blocks.failed())
     return reject(error, InputErrorCode::DecodeFailure, "invalid original CFG: " + decode_message);
+  if (allow_siblings) {
+    for (const std::unique_ptr<BasicBlock> &block : blocks.value())
+      for (const Instruction &instruction : block->instructions())
+        for (const KernelDescriptorInfo &sibling : kernels)
+          if (sibling.descriptor_file_offset != kernel.descriptor_file_offset &&
+              instruction.src_loc() == sibling.entry_text_offset)
+            return reject(error, InputErrorCode::UnsupportedFlow,
+                          "selected control flow enters another kernel", instruction.src_loc());
+  }
   RegisterSet used;
   if (collect_original_code(blocks.value(), program, used, limits, error).failed() ||
       validate_original_registers(used, metadata.value().vgprs, program, error).failed())
@@ -293,6 +301,21 @@ FailureOr<InputProgram> build_input_program(std::span<const uint8_t> image,
   program.identity = {.sha256 = digest(image), .bytes = image.size()};
   program.image.assign(image.begin(), image.end());
   return program;
+}
+
+} // namespace
+
+FailureOr<InputProgram> build_input_program(std::span<const uint8_t> image,
+                                            const TargetProfile &target, std::string_view entry,
+                                            InputError &error, const InputLimits &limits) {
+  return build_entry_program(image, target, entry, error, limits, /*allow_siblings=*/false);
+}
+
+FailureOr<InputProgram> build_image_entry_program(std::span<const uint8_t> image,
+                                                  const TargetProfile &target,
+                                                  std::string_view entry, InputError &error,
+                                                  const InputLimits &limits) {
+  return build_entry_program(image, target, entry, error, limits, /*allow_siblings=*/true);
 }
 
 } // namespace rocjitsu::consan
