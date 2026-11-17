@@ -147,3 +147,45 @@ Loose uses FP32-intermediate MAD. Guest rounding, forced intermediate flushing,
 IEEE NaN quieting, FP16_OVFL and final output modifiers are retained. This is
 software-model reuse, not new empirical qualification; strict modes reject and
 FP status is unchanged. The native half FMA migration is independent.
+
+## Older CDNA ordinary FP16 arithmetic
+
+Rocjitsu routes gfx908/gfx90a ADD, SUB, SUBREV, MUL and LDEXP through the existing
+CDNA half-arithmetic APIs, including VOP2/VOP3, DPP and SDWA. Compatibility keeps
+the inherited guest-rounding, FP16 overflow and output-modifier policies; Loose
+uses the same scalar/AVX2/AVX-512-v4 backends with its established freedoms.
+This reuse adds no empirical bit-exact qualification. Older Radeon arithmetic,
+FP16 FMA/MAD, packed/mixed arithmetic and selection remain separate migrations.
+The shared legacy binary executors remain live on Radeon until that migration.
+
+## gfx1150 ordinary FP16 arithmetic
+
+ADD/SUB/SUBREV/MUL/LDEXP use the existing gfx942 numeric variant in both waves:
+Compatibility keeps the inherited destination-rounding tininess test and
+unconditional signaling-NaN quieting, guest rounding, FP16 overflow and
+round-before-OMOD order. Loose uses the established approximate arithmetic.
+Both share scalar, AVX2 and AVX-512-v4 backends, including guest modes.
+The gfx1150 adapters preserve selected halves, inline operands and DPP.
+Strict empirical modes remain unsupported; no new qualification is claimed.
+Legacy gfx1150 did not report FP status for these operations, so this
+migration introduces none. The shared legacy half executors remain live on
+CDNA1/2 and gfx10 until their separate migrations; their gfx1150 inline VOP3
+bodies and legacy calls are removed.
+
+## gfx10 ordinary FP16 arithmetic
+
+gfx1010/gfx1030 ADD/SUB/SUBREV/MUL use explicit model variants, with LDEXP
+reusing the gfx942 variant. Both waves and VOP2/VOP3/DPP/SDWA use rj-arith.
+gfx1010 retains encoded-result tininess and quiets input signaling NaNs;
+gfx1030 retains its existing gfx11 numeric model. Guest rounding, denormal
+controls, saturation and output ordering stay with each inherited model.
+Scalar/AVX2/AVX-512 numeric paths are shared; Loose skips status classification.
+
+Compatibility carries the legacy TRAPSTS classifier into the library:
+gfx1010 ADD reports causes, while gfx1030 reports all four binary operations.
+The corresponding Compatibility status pointers must be valid; other supported
+semantics leave them unused. Strict modes remain unsupported rather than
+claiming a new empirical qualification. Operand staging and destination-field
+placement remain in the VM; the old VM classifiers and rounded SDWA arithmetic
+adapter lose their final users and are deleted. CDNA1/2 and gfx1150 still need
+the shared legacy half numeric executors on this independent branch.

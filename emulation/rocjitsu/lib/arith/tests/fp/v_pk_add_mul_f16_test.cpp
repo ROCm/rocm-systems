@@ -4,6 +4,7 @@
 // Tests for packed FP16 addition and multiplication.
 
 #include "common/cpu.h"
+#include "common/integer.h"
 #include "fp/binary_arithmetic_test.h"
 #include "rj_arith/detail/rj_arith_common.h"
 #include "rj_arith/detail/rj_arith_fp.h"
@@ -477,10 +478,9 @@ TEST(HalfArithmetic, SimdGuestModes) {
           for (int batch = 0; batch < 4; ++batch) {
             uint32_t a[32], b[32], reference[32], actual[32];
             for (int lane = 0; lane < 32; ++lane) {
-              a[lane] = lane < 6 ? special[lane]
-                                 : (uint32_t(random() >> 15) << 16) | uint16_t(random() >> 15);
+              a[lane] = lane < 6 ? special[lane] : rocjitsu::arith::test::random_word(random);
               b[lane] = lane < 6 ? special[(lane + batch) % 6]
-                                 : (uint32_t(random() >> 15) << 16) | uint16_t(random() >> 15);
+                                 : rocjitsu::arith::test::random_word(random);
               reference[lane] = a[lane];
             }
             const uint32_t *x = a, *y = b;
@@ -532,11 +532,93 @@ TEST(PackedHalfArithmetic, CdnaCompatibilityOutputStages) {
       uint32_t a[32] = {test.a}, b[32] = {test.b}, d[32] = {0xdead0000};
       const uint32_t *pa = a, *pb = b;
       uint32_t *pd = d;
+      uint32_t status = 0;
       ASSERT_EQ(
           test.call(cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS, 1,
-                    test.omod | RJ_ARITH_ALU_SDWA, &pd, &pa, &pb, nullptr),
+                    test.omod | RJ_ARITH_ALU_SDWA, &pd, &pa, &pb, &status),
           RJ_ARITH_SUCCESS);
       EXPECT_EQ(d[0], 0xdead0000U | test.expected);
+    }
+  }
+}
+
+// Only gfx942 inherits CDNA3's ordinary arithmetic-step status. The same numerical
+// core serves older targets without reporting, and Loose never accesses status.
+TEST(PackedHalfArithmetic, CdnaOrdinaryCompatibilityStatus) {
+  using Wave32 = decltype(&rj_arith_v_add_f16_w32_gfx942);
+  using Wave64 = decltype(&rj_arith_v_add_f16_w64_gfx942);
+  struct Case {
+    Wave32 wave32, unreported;
+    Wave64 wave64;
+    uint16_t a, b;
+    uint32_t causes;
+  };
+  const Case cases[] = {
+      {rj_arith_v_add_f16_w32_gfx942, rj_arith_v_add_f16_w32_gfx908, rj_arith_v_add_f16_w64_gfx942,
+       0x3c00, 0x1000, RJ_ARITH_EXCEPTION_INEXACT},
+      {rj_arith_v_sub_f16_w32_gfx942, rj_arith_v_sub_f16_w32_gfx908, rj_arith_v_sub_f16_w64_gfx942,
+       0x7c00, 0x7c00, RJ_ARITH_EXCEPTION_INVALID},
+      {rj_arith_v_subrev_f16_w32_gfx942, rj_arith_v_subrev_f16_w32_gfx908,
+       rj_arith_v_subrev_f16_w64_gfx942, 0x7bff, 0xfbff,
+       RJ_ARITH_EXCEPTION_OVERFLOW | RJ_ARITH_EXCEPTION_INEXACT},
+      {rj_arith_v_mul_f16_w32_gfx942, rj_arith_v_mul_f16_w32_gfx908, rj_arith_v_mul_f16_w64_gfx942,
+       0x0001, 0x3800,
+       RJ_ARITH_EXCEPTION_INPUT_DENORM | RJ_ARITH_EXCEPTION_UNDERFLOW | RJ_ARITH_EXCEPTION_INEXACT},
+      {rj_arith_v_mul_f16_w32_gfx942, rj_arith_v_mul_f16_w32_gfx908, rj_arith_v_mul_f16_w64_gfx942,
+       0x0400, 0x3800, 0},
+      {rj_arith_v_add_f16_w32_gfx942, rj_arith_v_add_f16_w32_gfx908, rj_arith_v_add_f16_w64_gfx942,
+       0x7e01, 0x3c00, 0},
+      {rj_arith_v_add_f16_w32_gfx942, rj_arith_v_add_f16_w32_gfx908, rj_arith_v_add_f16_w64_gfx942,
+       0x7c01, 0x3c00, RJ_ARITH_EXCEPTION_INVALID},
+  };
+  for (uint64_t cpu : rocjitsu::arith::test::supported_cpu_levels()) {
+    for (const auto &test : cases) {
+      for (bool alias : {false, true}) {
+        for (bool high : {false, true}) {
+          const uint32_t modifiers = high ? RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_B : 0;
+          for (uint64_t semantics : {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_COMPATIBILITY}) {
+            uint32_t a[64] = {}, b[64] = {}, d[64] = {};
+            a[31] = a[63] = uint32_t(test.a) << (high ? 16 : 0);
+            b[31] = b[63] = uint32_t(test.b) << (high ? 16 : 0);
+            // This inactive signaling NaN must not contribute exceptions.
+            a[0] = 0x7c017c01;
+            const uint32_t *pa = a, *pb = b;
+            uint32_t *pd = alias ? a : d;
+            uint32_t status = 0x80;
+            const bool reporting = semantics == RJ_ARITH_SEMANTICS_COMPATIBILITY;
+            const uint32_t expected = 0x80 | (reporting ? test.causes : 0);
+            ASSERT_EQ(test.wave64(cpu | semantics, 0x8000000080000000ULL, modifiers, &pd, &pa, &pb,
+                                  reporting ? &status : nullptr),
+                      RJ_ARITH_SUCCESS);
+            EXPECT_EQ(status, expected);
+            a[31] = uint32_t(test.a) << (high ? 16 : 0);
+            ASSERT_EQ(test.wave32(cpu | semantics, 0x80000000U, modifiers, &pd, &pa, &pb,
+                                  reporting ? &status : nullptr),
+                      RJ_ARITH_SUCCESS);
+            EXPECT_EQ(status, expected);
+            a[31] = uint32_t(test.a) << (high ? 16 : 0);
+            status = 0x80;
+            ASSERT_EQ(
+                test.unreported(cpu | semantics, 0x80000000U, modifiers, &pd, &pa, &pb, &status),
+                RJ_ARITH_SUCCESS);
+            EXPECT_EQ(status, 0x80U);
+          }
+        }
+      }
+    }
+    // The classifier must see DPP's source, including FI reads from inactive lanes.
+    for (bool fi : {false, true}) {
+      uint32_t a[64] = {}, b[64] = {}, d[64] = {};
+      a[1] = a[33] = 0x7c01;
+      const uint32_t *pa = a, *pb = b;
+      uint32_t *pd = d;
+      uint32_t status = 0x80;
+      const uint64_t modifiers =
+          RJ_ARITH_DPP8 | (fi ? RJ_ARITH_DPP_FI : 0) | (1ULL << RJ_ARITH_DPP8_SELECT_SHIFT);
+      ASSERT_EQ(rj_arith_v_add_f16_w64_gfx942(cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY,
+                                              0x100000001ULL, modifiers, &pd, &pa, &pb, &status),
+                RJ_ARITH_SUCCESS);
+      EXPECT_EQ(status, 0x80U | (fi ? RJ_ARITH_EXCEPTION_INVALID : 0));
     }
   }
 }
