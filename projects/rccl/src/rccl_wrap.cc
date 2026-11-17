@@ -1254,12 +1254,20 @@ inline size_t ddaTierCapFromTable(const rcclArchThresholds* table, const size_t*
   return funcThresholdFromTable(totals, func);
 }
 
+// The table's LL tier cap. ReduceScatter on comms of at least ddaRsLLLargeCommMinRanks ranks runs to
+// ddaRsLLLargeCommMaxBytes when that is higher.
+inline size_t ddaLLTierCapFromTable(const rcclArchThresholds* table, ncclFunc_t func, int nRanks) {
+  const size_t cap = ddaTierCapFromTable(table, table->ddaLLMax, table->ddaLLMaxPerRank, func, nRanks);
+  const bool largeComm = table->ddaRsLLLargeCommMinRanks > 0 && nRanks >= table->ddaRsLLLargeCommMinRanks;
+  return func == ncclFuncReduceScatter && largeComm ? std::max(cap, table->ddaRsLLLargeCommMaxBytes) : cap;
+}
+
 inline size_t rcclDdaLLThresholdTab(const rcclArchThresholds* table, ncclFunc_t func, int nRanks) {
   if (!rcclParamDdaLL()) return 0;
   size_t threshold;
   if (ddaThresholdFromEnv(rcclParamDdaLLThreshold(), &threshold)) return threshold;
   if (table == nullptr) return kDdaLLBaseDefault;
-  return ddaTierCapFromTable(table, table->ddaLLMax, table->ddaLLMaxPerRank, func, nRanks);
+  return ddaLLTierCapFromTable(table, func, nRanks);
 }
 size_t rcclDdaLLThreshold(const ncclComm* comm, ncclFunc_t func) {
   return rcclDdaLLThresholdTab(extAlgoArchTable(comm), func, comm != nullptr ? comm->nRanks : 0);
@@ -2653,7 +2661,7 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
     }
 
     // (2) DDA fast paths. Symmetric wins when buffers are registered (-R 2); DDA
-    // enters only when symk is unavailable. Only LL128 has a Blocks helper, so the other tiers report 0.
+    // enters only when symk is unavailable. LL and LL128 have Blocks helpers, so the other tiers report 0.
     const size_t rsDdaVmmMax =
       rcclDdaVmmThresholdCtxTab(archTable, ncclFuncReduceScatter, rsWinRegType, /*graphMode=*/false, comm->nRanks);
     const size_t rsDdaEntryMax = rcclDdaEntryThresholdTab(archTable, ncclFuncReduceScatter, comm->nRanks);
@@ -2666,6 +2674,7 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
             ncclReduceScatterDdaFabricLLEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
           decision->algo = RCCL_DDA_FABRIC_LL;
           decision->protocol = NCCL_PROTO_LL;
+          decision->nMaxChannels = ncclReduceScatterDdaFabricLLBlocks(comm, recvcount, datatype);
           return rcclSelectDone("RS", query, decision);
         }
         if (rsDdaLL128Max > 0 && totalBytes <= rsDdaLL128Max &&

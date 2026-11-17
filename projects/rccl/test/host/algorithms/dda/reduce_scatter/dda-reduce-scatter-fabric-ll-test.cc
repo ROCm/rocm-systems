@@ -5,7 +5,8 @@
  ************************************************************************/
 
 // Host-only microtests for src/algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric_ll.cu: eligibility against
-// the fixed 1 MiB LL slot, the datatype dispatch, the packet grid and its epoch clamp, and the launch.
+// the fixed 1 MiB LL slot, the datatype dispatch, the packet grid and its epoch clamp, the reported block count, and
+// the launch.
 
 #include <gtest/gtest.h>
 
@@ -34,6 +35,11 @@ constexpr size_t kScratchPerRank = 4u << 20;
 template <typename T, int N>
 const void* Kernel() {
   return KernelPtr(&dda::common::ddaReduceScatterFabricLL<T, N>);
+}
+
+template <typename T>
+const void* SpreadKernel() {
+  return KernelPtr(&dda::common::ddaReduceScatterFabricSpreadLL<T, 0>);
 }
 
 class DdaReduceScatterFabricLLMicrotest : public ::testing::Test {
@@ -185,12 +191,15 @@ TEST_F(DdaReduceScatterFabricLLMicrotest, Launch_TakesTheStopEventOnTheStream) {
   EXPECT_EQ(launch.flags, 0u);
 }
 
+// From kDdaLLRsSpreadMinRanks ranks the spread kernel runs instead.
 TEST_F(DdaReduceScatterFabricLLMicrotest, Launch_FourAndEightRanksUnrolledOthersRuntime) {
   const std::pair<int, const void*> cases[] = {{4, Kernel<float, 4>()},
                                                {8, Kernel<float, 8>()},
                                                {2, Kernel<float, 0>()},
                                                {5, Kernel<float, 0>()},
-                                               {144, Kernel<float, 0>()}};
+                                               {15, Kernel<float, 0>()},
+                                               {16, SpreadKernel<float>()},
+                                               {144, SpreadKernel<float>()}};
   for (const auto& [nRanks, kernel] : cases) {
     comm().nRanks = nRanks;
     const DdaLaunch& launch = RunOne(4);
@@ -215,6 +224,49 @@ TEST_F(DdaReduceScatterFabricLLMicrotest, Launch_GridFollowsShardPacketsWithinCa
   EXPECT_EQ(RunOne(1u << 18).grid.x, 9u);
   comm().ddaLLEpochLen = 0;
   EXPECT_EQ(RunOne(1u << 18).grid.x, 1u);
+}
+
+// The spread kernel puts a block on every 256 packets (2 KiB) of the whole message, 16 shards here, within the same
+// caps, and its slices are whole 128 B lines.
+TEST_F(DdaReduceScatterFabricLLMicrotest, Launch_SpreadGridFollowsMessagePacketsWithinCaps) {
+  comm().nRanks = dda::common::kDdaLLRsSpreadMinRanks;
+  const DdaLaunch& launch = RunOne(32);
+  EXPECT_EQ(launch.kernel, (SpreadKernel<float>()));
+  EXPECT_EQ(launch.block.x, 256u);
+  EXPECT_EQ(launch.grid.x, 1u);
+  EXPECT_EQ(RunOne(1, ncclFloat16).grid.x, 1u);
+  EXPECT_EQ(RunOne(34).grid.x, 2u);
+  EXPECT_EQ(RunOne(64, ncclFloat16).grid.x, 1u);
+  EXPECT_EQ(RunOne(1u << 12).grid.x, 128u);
+  comm().ddaFabricMaxBlocks = 6;
+  EXPECT_EQ(RunOne(1u << 18).grid.x, 6u);
+  comm().ddaFabricMaxBlocks = 256;
+  comm().ddaLLEpochLen = 9;
+  EXPECT_EQ(RunOne(1u << 18).grid.x, 9u);
+  // 32768 packets in 176-packet slices fill 187 of 192 blocks.
+  comm().ddaLLEpochLen = 256;
+  comm().ddaFabricMaxBlocks = 192;
+  EXPECT_EQ(RunOne(1u << 16).grid.x, 187u);
+}
+
+// The reported block count is the launch grid, caps included, for both kernels.
+TEST_F(DdaReduceScatterFabricLLMicrotest, Blocks_MatchTheLaunchedGrid) {
+  struct Case {
+    size_t count;
+    ncclDataType_t datatype;
+  };
+  const Case cases[] = {{4, ncclFloat32}, {68, ncclFloat32}, {516, ncclFloat32}, {1u << 16, ncclBfloat16}};
+  for (int nRanks : {8, dda::common::kDdaLLRsSpreadMinRanks}) {
+    comm().nRanks = nRanks;
+    for (int maxBlocks : {256, 192, 6}) {
+      comm().ddaFabricMaxBlocks = maxBlocks;
+      for (const Case& c : cases) {
+        EXPECT_EQ(ncclReduceScatterDdaFabricLLBlocks(mock_.get(), c.count, c.datatype),
+                  RunOne(c.count, c.datatype).grid.x)
+          << "nRanks " << nRanks << " count " << c.count << " maxBlocks " << maxBlocks;
+      }
+    }
+  }
 }
 
 TEST_F(DdaReduceScatterFabricLLMicrotest, Launch_LaunchErrorIsReported) {

@@ -256,6 +256,9 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   // ReduceScatter LL128 beats Ring to 512M on large comms.
   .ddaRsLL128LargeCommMinRanks = 32,
   .ddaRsLL128LargeCommMaxBytes = 512ULL*1024*1024,
+  // ReduceScatter LL beats LL128 to 2M on large comms.
+  .ddaRsLLLargeCommMinRanks = 32,
+  .ddaRsLLLargeCommMaxBytes = 2ULL*1024*1024,
   // Ring / Tree crossovers, same sweep (AllReduce LL128: AICOMRCCL-2874/2875).
   .arRingLL128MaxPerRank = 32ULL*1024*1024,       // Ring LL128 beats Simple to 256M/512M/1G/2G at 8-64
   .arTreeLL128Unlimited = true,                   // Tree LL128 beats Tree Simple 1.3-2.9x at 32M-16G
