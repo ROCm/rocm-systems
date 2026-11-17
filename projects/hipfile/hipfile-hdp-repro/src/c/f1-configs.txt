@@ -1,0 +1,35 @@
+# c-hypotheses f1probe configs (Failure 1: CPU reads of VRAM through the BAR), from
+# reports/c-hypotheses.md §f1probe. One config per line: env assignments for ./f1probe.
+# Defaults: SIZE=65536 READERS=7 ITERS=200 KICK=none READ=plain SAMELINE=0 STOPREAD=0
+LABEL=baseline
+LABEL=read-clflush READ=clflush
+LABEL=readers1 READERS=1 ITERS=1000
+LABEL=readers1-stopread READERS=1 STOPREAD=1 ITERS=500
+LABEL=readers2 READERS=2
+LABEL=readers20 READERS=20 ITERS=1000
+LABEL=kick-memset KICK=memset
+LABEL=kick-emptykernel KICK=emptykernel
+LABEL=kick-eventrecord KICK=eventrecord
+LABEL=kick-hdpflush KICK=hdpflush
+LABEL=kick-hdpflush_nr KICK=hdpflush_nr
+LABEL=kick-hdpflush_nr-readers20 KICK=hdpflush_nr READERS=20 ITERS=1000
+LABEL=kick-hdpreg KICK=hdpreg
+LABEL=kick-barwrite KICK=barwrite
+LABEL=kick-barwrite_rb KICK=barwrite_rb
+LABEL=kick-barread KICK=barread
+LABEL=kick-barwrite-sameline KICK=barwrite SAMELINE=1
+LABEL=kick-sdma KICK=sdma
+LABEL=kick-sleep20us KICK=sleep_us:20
+LABEL=kick-sleep200us KICK=sleep_us:200
+LABEL=kick-sleep2000us KICK=sleep_us:2000
+LABEL=stopread STOPREAD=1
+LABEL=sdma0 HSA_ENABLE_SDMA=0
+LABEL=sdma0-stopread HSA_ENABLE_SDMA=0 STOPREAD=1
+LABEL=sdma-hdpflush0 HSA_ENABLE_SDMA_HDP_FLUSH=0
+LABEL=size16K-readers20 SIZE=16384 READERS=20 ITERS=1000
+LABEL=size16K-stopread SIZE=16384 STOPREAD=1 ITERS=500
+LABEL=blitcopy GPU_FORCE_BLIT_COPY_SIZE=1024 ITERS=300
+LABEL=blitcopy-stopread GPU_FORCE_BLIT_COPY_SIZE=1024 STOPREAD=1 ITERS=300
+LABEL=size1M SIZE=1048576
+LABEL=size4M SIZE=4194304
+LABEL=read-ntload READ=ntload

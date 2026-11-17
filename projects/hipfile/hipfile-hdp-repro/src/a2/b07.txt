@@ -1,0 +1,24 @@
+# session 7a: which HIP submission invalidates (during, coarse, cpu writer)
+--mem coarse --writer cpu --iters 200
+--mem uncached --writer cpu --iters 200
+--mem coarse --writer cpu --iters 200 --intervene kick_kernel
+--mem coarse --writer cpu --iters 200 --intervene kick_kernel_spinwait
+--mem coarse --writer cpu --iters 200 --intervene kick_ext_stopevent_spinwait
+--mem coarse --writer cpu --iters 1 --intervene kick_ext_stopevent_spinwait
+--mem coarse --writer cpu --iters 1 --intervene kick_ext_stopevent_spinwait
+AMD_OPT_FLUSH=0 --mem coarse --writer cpu --iters 200 --intervene kick_kernel_spinwait
+AMD_OPT_FLUSH=0 --mem coarse --writer cpu --iters 200
+# session 7b: after mode (new checker kernel after the CPU write)
+--mem coarse --writer cpu --iters 200 --mode after --after-stream same --after-resident 0
+--mem coarse --writer cpu --iters 200 --mode after --after-stream other --after-resident 0
+--mem coarse --writer cpu --iters 200 --mode after --after-stream same --after-resident 1
+--mem coarse --writer cpu --iters 200 --mode after --after-stream other --after-resident 1
+--mem uncached --writer cpu --iters 200 --mode after --after-stream same --after-resident 1
+--mem uncached --writer cpu --iters 200 --mode after --after-stream other --after-resident 1
+HSA_FORCE_FINE_GRAIN_PCIE=1 --mem fine --writer cpu --iters 200 --mode after --after-stream same --after-resident 1
+HSA_FORCE_FINE_GRAIN_PCIE=1 --mem fine --writer cpu --iters 200 --mode after --after-stream other --after-resident 1
+AMD_OPT_FLUSH=0 --mem coarse --writer cpu --iters 200 --mode after --after-stream same --after-resident 1
+AMD_OPT_FLUSH=0 --mem coarse --writer cpu --iters 200 --mode after --after-stream other --after-resident 1
+--mem hostnc --writer cpu --iters 200 --mode after --after-stream same --after-resident 0
+--mem hostnc --writer cpu --iters 200 --mode after --after-stream other --after-resident 1
+--mem coarse --writer cpu --iters 200

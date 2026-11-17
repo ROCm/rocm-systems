@@ -1,0 +1,10 @@
+# session 11: buffer size vs GL2 capacity (Navi21 GL2 = 4 MiB; Infinity Cache/MALL = 128 MiB)
+--mem coarse --writer cpu --iters 200 --kib 1024
+--mem coarse --writer cpu --iters 200 --kib 2048
+--mem coarse --writer cpu --iters 200 --kib 3072
+--mem coarse --writer cpu --iters 200 --kib 4096
+--mem coarse --writer cpu --iters 200 --kib 6144
+--mem coarse --writer cpu --iters 200 --kib 8192
+--mem coarse --writer cpu --iters 100 --kib 16384
+--mem coarse --writer cpu --iters 50 --kib 65536
+--mem uncached --writer cpu --iters 50 --kib 65536

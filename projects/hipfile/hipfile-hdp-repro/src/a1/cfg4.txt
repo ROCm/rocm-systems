@@ -1,0 +1,14 @@
+LABEL=base-none POST=none
+LABEL=kick POST=devsync,memset,devsync
+LABEL=w-pinned WRITER=pinned
+LABEL=w-async WRITER=async
+LABEL=w-asyncpinned WRITER=asyncpinned
+LABEL=w-cpubar WRITER=cpubar
+LABEL=w-memsetd32 WRITER=memsetd32
+LABEL=w-memsetd32+sync0 WRITER=memsetd32 POST=sync0
+LABEL=w-kernel WRITER=kernel
+LABEL=w-hsasdma WRITER=hsasdma
+LABEL=w-hsasdma-nohdpflush HSA_ENABLE_SDMA_HDP_FLUSH=0 WRITER=hsasdma
+LABEL=w-memcpy-SDMA0 HSA_ENABLE_SDMA=0 WRITER=memcpy
+LABEL=w-memcpy-SDMA0+sync HSA_ENABLE_SDMA=0 WRITER=memcpy POST=devsync
+LABEL=w-pinned-SDMA0 HSA_ENABLE_SDMA=0 WRITER=pinned

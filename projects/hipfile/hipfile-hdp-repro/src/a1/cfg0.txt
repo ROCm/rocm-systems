@@ -1,0 +1,2 @@
+LABEL=baseline-devsync POST=devsync
+LABEL=kick POST=devsync,memset,devsync

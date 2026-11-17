@@ -1,0 +1,33 @@
+# session 8: pointer pool flags; after-mode rerun (checker prime=0); fastpath writer confirmation
+--mem coarse --writer cpu --iters 200
+--mem fine --writer cpu --iters 200
+HSA_FORCE_FINE_GRAIN_PCIE=1 --mem fine --writer cpu --iters 200
+--mem uncached --writer cpu --iters 200
+--mem contiguous --writer cpu --iters 1
+--mem managed --writer cpu --iters 1
+--mem hostcoh --writer cpu --iters 1
+--mem hostnc --writer cpu --iters 1
+--mem fine --writer cpu --iters 200 --intervene hdpflush
+# after mode
+--mem coarse --writer cpu --iters 200 --mode after --after-stream same --after-resident 0
+--mem coarse --writer cpu --iters 200 --mode after --after-stream other --after-resident 0
+--mem coarse --writer cpu --iters 200 --mode after --after-stream same --after-resident 1
+--mem coarse --writer cpu --iters 200 --mode after --after-stream other --after-resident 1
+--mem uncached --writer cpu --iters 200 --mode after --after-stream other --after-resident 1
+HSA_FORCE_FINE_GRAIN_PCIE=1 --mem fine --writer cpu --iters 200 --mode after --after-stream other --after-resident 1
+AMD_OPT_FLUSH=0 --mem coarse --writer cpu --iters 200 --mode after --after-stream same --after-resident 1
+AMD_OPT_FLUSH=0 --mem coarse --writer cpu --iters 200 --mode after --after-stream other --after-resident 1
+--mem coarse --writer memcpy --iters 200 --mode after --after-stream other --after-resident 1
+# fastpath writer (hipFile, fallback disallowed)
+PROBE=./stale-probe-hf HF_PATH=/mnt/ais/ext4/johtyler/a2-probe.bin HIPFILE_ALLOW_COMPAT_MODE=false --mem fine --writer hipfile --iters 200
+PROBE=./stale-probe-hf HF_PATH=/mnt/ais/ext4/johtyler/a2-probe.bin HIPFILE_ALLOW_COMPAT_MODE=false --mem coarse --writer hipfile --iters 200
+PROBE=./stale-probe-hf HF_PATH=/mnt/ais/ext4/johtyler/a2-probe.bin HIPFILE_ALLOW_COMPAT_MODE=false --mem uncached --writer hipfile --iters 200
+PROBE=./stale-probe-hf HF_PATH=/mnt/ais/ext4/johtyler/a2-probe.bin HIPFILE_ALLOW_COMPAT_MODE=false HSA_FORCE_FINE_GRAIN_PCIE=1 --mem fine --writer hipfile --iters 200
+PROBE=./stale-probe-hf HF_PATH=/mnt/ais/ext4/johtyler/a2-probe.bin HIPFILE_ALLOW_COMPAT_MODE=false --mem coarse --writer hipfile --iters 200 --intervene hsa_barrier_20
+PROBE=./stale-probe-hf HF_PATH=/mnt/ais/ext4/johtyler/a2-probe.bin HIPFILE_ALLOW_COMPAT_MODE=false --mem coarse --writer hipfile --iters 200 --intervene hsa_barrier_12
+PROBE=./stale-probe-hf HF_PATH=/mnt/ais/ext4/johtyler/a2-probe.bin HIPFILE_ALLOW_COMPAT_MODE=false --mem coarse --writer hipfile --iters 200 --intervene hdpflush
+PROBE=./stale-probe-hf HF_PATH=/mnt/ais/ext4/johtyler/a2-probe.bin HIPFILE_ALLOW_COMPAT_MODE=false --mem coarse --writer hipfile --iters 200 --poll-ms 1000 --kick-delay-ms 20
+PROBE=./stale-probe-hf HF_PATH=/mnt/ais/ext4/johtyler/a2-probe.bin HIPFILE_ALLOW_COMPAT_MODE=false --mem coarse --writer hipfile --iters 200 --mode after --after-stream other --after-resident 1
+PROBE=./stale-probe-hf HF_PATH=/mnt/ais/ext4/johtyler/a2-probe.bin HIPFILE_ALLOW_COMPAT_MODE=false --mem coarse --writer hipfile --iters 200 --mode after --after-stream other --after-resident 0
+PROBE=./stale-probe-hf HF_PATH=/mnt/ais/ext4/johtyler/a2-probe.bin HIPFILE_FORCE_COMPAT_MODE=true --mem coarse --writer hipfile --iters 200
+--mem coarse --writer cpu --iters 200

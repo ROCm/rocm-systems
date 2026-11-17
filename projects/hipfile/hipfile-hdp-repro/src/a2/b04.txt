@@ -1,0 +1,22 @@
+# session 4: raw HSA barrier-AND kicks (acq,rel scopes 0=none 1=agent 2=system), fine, cpu
+--mem fine --writer cpu --iters 200
+--mem uncached --writer cpu --iters 200
+--mem fine --writer cpu --iters 200 --intervene hsa_barrier_00
+--mem fine --writer cpu --iters 200 --intervene hsa_barrier_01
+--mem fine --writer cpu --iters 200 --intervene hsa_barrier_02
+--mem fine --writer cpu --iters 200 --intervene hsa_barrier_10
+--mem fine --writer cpu --iters 200 --intervene hsa_barrier_11
+--mem fine --writer cpu --iters 200 --intervene hsa_barrier_12
+--mem fine --writer cpu --iters 200 --intervene hsa_barrier_20
+--mem fine --writer cpu --iters 200 --intervene hsa_barrier_21
+--mem fine --writer cpu --iters 200 --intervene hsa_barrier_22
+--mem fine --writer cpu --iters 200 --acq none --load glc_slc_dlc --intervene hsa_barrier_00
+--mem fine --writer cpu --iters 200 --acq none --load glc_slc_dlc --intervene hsa_barrier_01
+--mem fine --writer cpu --iters 200 --acq none --load glc_slc_dlc --intervene hsa_barrier_02
+--mem fine --writer cpu --iters 200 --acq none --load glc_slc_dlc --intervene hsa_barrier_10
+--mem fine --writer cpu --iters 200 --acq none --load glc_slc_dlc --intervene hsa_barrier_11
+--mem fine --writer cpu --iters 200 --acq none --load glc_slc_dlc --intervene hsa_barrier_12
+--mem fine --writer cpu --iters 200 --acq none --load glc_slc_dlc --intervene hsa_barrier_20
+--mem fine --writer cpu --iters 200 --acq none --load glc_slc_dlc --intervene hsa_barrier_21
+--mem fine --writer cpu --iters 200 --acq none --load glc_slc_dlc --intervene hsa_barrier_22
+--mem fine --writer cpu --iters 200

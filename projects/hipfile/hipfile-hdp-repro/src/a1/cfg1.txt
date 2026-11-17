@@ -1,0 +1,18 @@
+LABEL=base-none POST=none
+LABEL=base-devsync POST=devsync
+LABEL=kick POST=devsync,memset,devsync
+LABEL=sync0 POST=sync0
+LABEL=syncblk POST=syncblk
+LABEL=syncnb POST=syncnb
+LABEL=evt POST=evt
+LABEL=evtsys POST=evtsys
+LABEL=evtdev POST=evtdev
+LABEL=evtnofence POST=evtnofence
+LABEL=waitevt POST=waitevt
+LABEL=hdpmem-after POST=hdpmem
+LABEL=hdpmem0-after POST=hdpmem0
+LABEL=hdpreg-after POST=hdpreg
+LABEL=hdpmem-noread POST=hdpmemnoread
+LABEL=hdpmem-before PRE=hdpmem
+LABEL=hdpmem-before+devsync PRE=hdpmem POST=devsync
+LABEL=hdpreg-before PRE=hdpreg

@@ -1,0 +1,5 @@
+# session 10: long polling without any kick (does it ever become visible?)
+--mem uncached --writer cpu --iters 200
+--mem coarse --writer cpu --iters 30 --poll-ms 5000
+PROBE=./stale-probe-hf HF_PATH=/mnt/ais/ext4/johtyler/a2-probe.bin HIPFILE_ALLOW_COMPAT_MODE=false --mem coarse --writer hipfile --iters 20 --poll-ms 5000
+--mem coarse --writer cpu --iters 200 --poll-ms 1000 --kick-delay-ms 50

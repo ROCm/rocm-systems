@@ -1,0 +1,21 @@
+# session 3: interventions (fine, cpu writer, atomic_sys+plain unless noted)
+--mem fine --writer cpu --iters 200
+--mem uncached --writer cpu --iters 200
+--mem fine --writer cpu_nt --iters 200
+--mem fine --writer cpu --iters 200 --intervene kick_kernel
+--mem fine --writer cpu --iters 200 --intervene kick_kernel_nosync
+--mem fine --writer cpu --iters 200 --intervene kick_memset
+--mem fine --writer cpu --iters 200 --intervene kick_memcpy_h2d
+--mem fine --writer cpu --iters 200 --intervene event_sys
+--mem fine --writer cpu --iters 200 --intervene streamsync
+--mem fine --writer cpu --iters 200 --intervene hdpflush
+--mem fine --writer cpu --iters 200 --intervene sfence
+--mem fine --writer cpu --iters 200 --intervene mfence
+--mem fine --writer cpu --iters 200 --intervene clflush
+--mem fine --writer cpu --iters 200 --intervene sleep --host-sleep-ms 20
+--mem fine --writer cpu --iters 200 --intervene kick_kernel --acq none --load plain
+--mem fine --writer cpu --iters 200 --intervene kick_kernel --acq none --load glc_dlc
+--mem fine --writer cpu --iters 200 --intervene kick_kernel --acq gl0inv --load plain
+--mem fine --writer cpu --iters 200 --intervene kick_kernel --acq fence_agent --load plain
+--mem fine --writer cpu --iters 200 --intervene hdpflush --acq none --load glc_slc_dlc
+--mem fine --writer cpu --iters 200

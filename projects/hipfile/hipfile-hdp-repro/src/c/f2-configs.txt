@@ -1,0 +1,12 @@
+# c-hypotheses f2probe configs (Failure 2: a running kernel misses CPU-BAR writes to memory it
+# cached), from reports/c-hypotheses.md §f2probe. Defaults: MEM=fine PRIME=1 FLUSH=none LOAD=plain ITERS=20
+# MEM=fine without HSA_FORCE_FINE_GRAIN_PCIE=1 silently falls back to coarse-grained on PCIe GPUs.
+LABEL=fine-prime MEM=fine PRIME=1
+LABEL=fine-noprime MEM=fine PRIME=0
+LABEL=uncached-prime MEM=uncached PRIME=1 ITERS=100
+LABEL=coarse-prime MEM=coarse PRIME=1
+LABEL=fine-prime-flush-hdp MEM=fine PRIME=1 FLUSH=hdp
+LABEL=fine-prime-flush-hdpreg MEM=fine PRIME=1 FLUSH=hdpreg
+LABEL=fine-prime-load-atomic_sys MEM=fine PRIME=1 LOAD=atomic_sys
+LABEL=fine-prime-load-nt MEM=fine PRIME=1 LOAD=nt
+LABEL=truefine-prime MEM=fine PRIME=1 HSA_FORCE_FINE_GRAIN_PCIE=1

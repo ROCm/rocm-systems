@@ -1,0 +1,20 @@
+# session 6: memory types, during+prime, CPU writer (CPU writes BAR for device mem, system RAM for host mem)
+--mem coarse --writer cpu --iters 200
+--mem fine --writer cpu --iters 200
+HSA_FORCE_FINE_GRAIN_PCIE=1 --mem fine --writer cpu --iters 200
+--mem uncached --writer cpu --iters 200
+--mem contiguous --writer cpu --iters 200
+--mem managed --writer cpu --iters 200
+--mem hostcoh --writer cpu --iters 200
+--mem hostdefault --writer cpu --iters 200
+--mem hostnc --writer cpu --iters 200
+# same, hipMemcpy writer
+--mem coarse --writer memcpy --iters 200
+HSA_FORCE_FINE_GRAIN_PCIE=1 --mem fine --writer memcpy --iters 200
+--mem uncached --writer memcpy --iters 200
+--mem hostnc --writer memcpy --iters 200
+--mem coarse --writer memcpy_pageable --iters 200
+--mem coarse --writer memcpyasync --iters 200
+# controls
+--mem coarse --writer cpu --iters 200 --prime 0
+--mem fine --writer cpu --iters 200

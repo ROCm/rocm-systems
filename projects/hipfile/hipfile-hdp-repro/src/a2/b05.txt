@@ -1,0 +1,8 @@
+# session 5: polling (does it ever become visible?) and late kicks
+--mem fine --writer cpu --iters 200 --intervene hsa_barrier_00
+--mem fine --writer cpu --iters 200 --intervene hsa_barrier_20
+--mem uncached --writer cpu --iters 200 --poll-ms 1000
+--mem fine --writer cpu --iters 200 --poll-ms 1000 --kick-delay-ms 50
+--mem fine --writer cpu --iters 200 --poll-ms 1000 --kick-delay-ms 5
+--mem fine --writer cpu --iters 200 --poll-ms 1000
+--mem fine --writer cpu --iters 200 --poll-ms 1000 --acq none --load glc_slc_dlc

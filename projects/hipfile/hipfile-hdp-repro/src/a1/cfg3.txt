@@ -1,0 +1,9 @@
+A1_AQL=1 LABEL=base-none POST=none
+A1_AQL=1 LABEL=kick POST=devsync,memset,devsync
+A1_AQL=1 LABEL=aql-none/none POST=aqlnone
+A1_AQL=1 LABEL=aql-acqsys POST=aqlacqsys
+A1_AQL=1 LABEL=aql-relsys POST=aqlrelsys
+A1_AQL=1 LABEL=aql-bothsys POST=aqlbothsys
+A1_AQL=1 LABEL=aql-acqagent POST=aqlacqagent
+A1_AQL=1 LABEL=aql-relagent POST=aqlrelagent
+A1_AQL=1 LABEL=hdpmem POST=hdpmem

@@ -1,0 +1,10 @@
+LABEL=base-none POST=none
+LABEL=kick POST=devsync,memset,devsync
+LABEL=chk-clflush CHECK=clflush
+LABEL=chk-clflushopt CHECK=clflushopt
+LABEL=chk-nt CHECK=nt
+LABEL=chk-mfence CHECK=mfence
+LABEL=chk-lfence CHECK=lfence
+LABEL=rd-nt+chk-nt RLOAD=nt CHECK=nt
+LABEL=rd-clflush+chk-clflush RLOAD=clflush CHECK=clflush
+LABEL=rd-mfence+chk-mfence RLOAD=mfence CHECK=mfence

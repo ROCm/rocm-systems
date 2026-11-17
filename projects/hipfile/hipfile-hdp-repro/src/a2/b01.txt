@@ -1,0 +1,5 @@
+# session 1: baseline/control
+--mem fine --writer cpu --iters 200
+--mem uncached --writer cpu --iters 200
+--mem fine --writer memcpy --iters 200
+--mem fine --writer cpu --prime 0 --iters 200
