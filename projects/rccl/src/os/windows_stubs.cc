@@ -433,15 +433,20 @@ void ncclProfilerReserveSymCounters(struct ncclComm* comm, struct ncclKernelPlan
 }
 
 /* Addon Collective profiler stubs */
-ncclResult_t ncclProfilerStartAddonCollEvent(struct ncclInfo* info, bool isGraphCaptured, void** eHandle) {
+ncclResult_t ncclProfilerStartAddonEvent(struct ncclInfo* info, bool isGraphCaptured,
+                                         struct ncclProfilerEventRef* groupEventHandle,
+                                         struct ncclProfilerEventRef* collEventHandle) {
   (void)info;
   (void)isGraphCaptured;
-  (void)eHandle;
+  if (groupEventHandle) memset(groupEventHandle, 0, sizeof(*groupEventHandle));
+  if (collEventHandle) memset(collEventHandle, 0, sizeof(*collEventHandle));
   return ncclSuccess;
 }
 
-ncclResult_t ncclProfilerStopAddonCollEvent(void* eHandle) {
-  (void)eHandle;
+ncclResult_t ncclProfilerStopAddonEvent(struct ncclProfilerEventRef* groupEventHandle,
+                                        struct ncclProfilerEventRef* collEventHandle) {
+  (void)groupEventHandle;
+  (void)collEventHandle;
   return ncclSuccess;
 }
 
