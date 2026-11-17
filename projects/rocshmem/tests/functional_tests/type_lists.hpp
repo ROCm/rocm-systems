@@ -215,19 +215,34 @@ template <> inline std::string type_name<__hip_bfloat16>()     { return "bfloat1
 
 // All types compiled by team_reduction / team_reduce_scatter / reduce_wave /
 // team_reduce_scatter_wave, each gated the same way the X-macro lists are.
-#define ROCSHMEM_PUSH_REDUCTION_ALWAYS(TESTER, args, testers)                             \
-  if ((args).type_coverage == TypeCoverage::Full || (args).type_enabled("float"))         \
-    { ROCSHMEM_PUSH_REDUCTION_FLOAT(TESTER, float,     args, testers) }                   \
-  if ((args).type_coverage == TypeCoverage::Full || (args).type_enabled("double"))        \
-    { ROCSHMEM_PUSH_REDUCTION_FLOAT(TESTER, double,    args, testers) }                   \
-  if ((args).type_coverage == TypeCoverage::Full || (args).type_enabled("int"))           \
-    { ROCSHMEM_PUSH_REDUCTION_ARITH(TESTER, int,       args, testers) }                   \
-  if ((args).type_coverage == TypeCoverage::Full || (args).type_enabled("short"))         \
-    { ROCSHMEM_PUSH_REDUCTION_ARITH(TESTER, short,     args, testers) }                   \
-  if ((args).type_coverage == TypeCoverage::Full || (args).type_enabled("long"))          \
-    { ROCSHMEM_PUSH_REDUCTION_ARITH(TESTER, long,      args, testers) }                   \
-  if ((args).type_coverage == TypeCoverage::Full || (args).type_enabled("long long"))     \
-    { ROCSHMEM_PUSH_REDUCTION_ARITH(TESTER, long long, args, testers)}
+// Mirrors ROCSHMEM_COLL_TYPES_ALWAYS; half/bfloat16 are in the _NONRO variant.
+#define ROCSHMEM_PUSH_REDUCTION_ALWAYS(TESTER, args, testers)                                 \
+  if ((args).type_coverage == TypeCoverage::Full || (args).type_enabled("float"))             \
+    { ROCSHMEM_PUSH_REDUCTION_FLOAT(TESTER, float, args, testers) }                           \
+  if ((args).type_coverage == TypeCoverage::Full || (args).type_enabled("double"))            \
+    { ROCSHMEM_PUSH_REDUCTION_FLOAT(TESTER, double, args, testers) }                          \
+  if ((args).type_coverage == TypeCoverage::Full || (args).type_enabled("char"))              \
+    { ROCSHMEM_PUSH_REDUCTION_ARITH(TESTER, char, args, testers) }                            \
+  if ((args).type_coverage == TypeCoverage::Full || (args).type_enabled("signed char"))       \
+    { ROCSHMEM_PUSH_REDUCTION_ARITH(TESTER, signed char, args, testers) }                     \
+  if ((args).type_coverage == TypeCoverage::Full || (args).type_enabled("short"))             \
+    { ROCSHMEM_PUSH_REDUCTION_ARITH(TESTER, short, args, testers) }                           \
+  if ((args).type_coverage == TypeCoverage::Full || (args).type_enabled("int"))               \
+    { ROCSHMEM_PUSH_REDUCTION_ARITH(TESTER, int, args, testers) }                             \
+  if ((args).type_coverage == TypeCoverage::Full || (args).type_enabled("long"))              \
+    { ROCSHMEM_PUSH_REDUCTION_ARITH(TESTER, long, args, testers) }                            \
+  if ((args).type_coverage == TypeCoverage::Full || (args).type_enabled("long long"))         \
+    { ROCSHMEM_PUSH_REDUCTION_ARITH(TESTER, long long, args, testers) }                       \
+  if ((args).type_coverage == TypeCoverage::Full || (args).type_enabled("unsigned char"))     \
+    { ROCSHMEM_PUSH_REDUCTION_ARITH(TESTER, unsigned char, args, testers) }                   \
+  if ((args).type_coverage == TypeCoverage::Full || (args).type_enabled("unsigned short"))    \
+    { ROCSHMEM_PUSH_REDUCTION_ARITH(TESTER, unsigned short, args, testers) }                  \
+  if ((args).type_coverage == TypeCoverage::Full || (args).type_enabled("unsigned int"))      \
+    { ROCSHMEM_PUSH_REDUCTION_ARITH(TESTER, unsigned int, args, testers) }                    \
+  if ((args).type_coverage == TypeCoverage::Full || (args).type_enabled("unsigned long"))     \
+    { ROCSHMEM_PUSH_REDUCTION_ARITH(TESTER, unsigned long, args, testers) }                   \
+  if ((args).type_coverage == TypeCoverage::Full || (args).type_enabled("unsigned long long"))\
+    { ROCSHMEM_PUSH_REDUCTION_ARITH(TESTER, unsigned long long, args, testers) }
 
 // bfloat16 reductions (reduce, reduce_wave, reduce_scatter, reduce_scatter_wave,
 // reduce_on_stream) are compiled out of the library and the tester .cpp files
