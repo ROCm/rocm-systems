@@ -14,31 +14,6 @@ test_categories:
     # A trailing '.*' anchors the end of the suite name. Dropping the dot widens instead
     # ("Group*" matches all eight Group* suites).
     test_patterns:
-      # rma/rma_proxy_launch.cc
-      - "RmaProxyBatchMemOpTest.*"
-      - "RmaProxyDescriptorTest.*"
-      - "RmaProxyLaunchTest.*"
-      - "RmaProxyQueueTest.*"
-      - "RmaProxyParamsTest.*"
-      - "RmaProxyReclaimTest.*"
-      # rma/rma_proxy_progress.cc
-      - "RmaProxyProgressTest.*"
-      # rma/rma_ce.cc
-      - "RmaCeLaunchTest.*"
-      - "RmaCeInitTest.*"
-      - "RmaCeFinalizeTest.*"
-      - "RmaCePutLaunchTest.*"
-      - "RmaCeNonPersistTest.*"
-      - "RmaCePersistTest.*"
-      - "RmaCeWaitLaunchTest.*"
-      # rma/rma.cc
-      - "RmaWaitSignalTest.*"
-      - "RmaPutTest.*"
-      - "RmaLaunchTest.*"
-      - "RmaScheduleTest.*"
-      - "RmaDebugLoggingTest.*"
-      - "RmaProxyGatingTest.*"
-      - "RmaProxyReadyTest.*"
       # commDump.cc
       - "CommDumpMicrotest.*"
       # include/timer.h

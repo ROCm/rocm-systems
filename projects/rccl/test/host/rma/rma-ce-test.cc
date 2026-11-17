@@ -24,9 +24,9 @@
 #include "comm.h"
 #include "rma/rma_ce.h"
 
-// rma_fakes.cc seams ncclRmaCePutLaunch / ncclRmaCeWaitLaunch for rma-test.cc,
-// which needs them in this same binary. Rename the unit's own entry points so
-// both can coexist; the static helpers are distinct tokens and are untouched.
+// fakes/rma_fakes.cc, linked here for the real rma.cc, defines ncclRmaCePutLaunch /
+// ncclRmaCeWaitLaunch as seams. Rename the unit's own entry points so both can
+// coexist; the static helpers are distinct tokens and are untouched.
 #define ncclRmaCePutLaunch ncclRmaCePutLaunchUut
 #define ncclRmaCeWaitLaunch ncclRmaCeWaitLaunchUut
 #include RMA_CE_CC_PATH
