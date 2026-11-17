@@ -147,3 +147,12 @@ Loose uses FP32-intermediate MAD. Guest rounding, forced intermediate flushing,
 IEEE NaN quieting, FP16_OVFL and final output modifiers are retained. This is
 software-model reuse, not new empirical qualification; strict modes reject and
 FP status is unchanged. The native half FMA migration is independent.
+
+## gfx1251 packed U64
+
+The three packed U64 forms (ADD_NC, SUB_NC, LSHL_ADD) use scalar, AVX2 and
+AVX-512 paths for all semantics. ADD/SUB include independent half-element
+negation and mathematical U64 saturation. LSHL_ADD retains the inherited
+active count range0..4, checked before writes by Rocjitsu; no expanded hardware
+claim is made for other counts. Scalar carriers replicate the appropriate
+U64 data or U32 count. Existing decoder and simulator coverage is retained.

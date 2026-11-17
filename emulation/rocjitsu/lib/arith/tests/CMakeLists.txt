@@ -20,6 +20,7 @@ function(rj_arith_add_test target source)
     endif()
 endfunction()
 
+rj_arith_add_test(rj_arith_packed_u64_gfx1251_test integer/packed_u64_gfx1251_test.cpp)
 rj_arith_add_test(rj_arith_sparse_matrix_i8_test mfma/sparse_matrix_i8_test.cpp)
 rj_arith_add_test(rj_arith_matrix_i8_test mfma/matrix_i8_test.cpp)
 rj_arith_add_test(rj_arith_mfma_f64_test mfma/mfma_f64_test.cpp)
