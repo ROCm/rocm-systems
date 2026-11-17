@@ -177,14 +177,14 @@ private:
 
   /// Report each event of `pending` that overlaps the access and is not
   /// ordered before it. For WriteAfterWrite, record a conflict or report a
-  /// redundant write instead (see validateWrite). `contested` lists the bytes
-  /// that held a conflict before the write.
+  /// redundant write instead (see validateWrite). `contested` holds the parts
+  /// of conflicts in the write's bytes before the write.
   void reportUnorderedOverlaps(const std::vector<EventId> &pending, LdsHazard hazard, int addr,
                                WaveId wave, int lane, int nBytes,
                                MemoryOrderClass currentMemoryOrder, uint8_t atomicBytes,
                                const uint8_t *data = nullptr,
                                const InstructionSnapshot *instruction = nullptr,
-                               std::span<const Interval> contested = {});
+                               std::span<const LdsWawConflict> contested = {});
   /// Report and drop each conflict a read of [addr, addr + nBytes) observes.
   void reportObservedConflicts(int addr, int nBytes, WaveId wave, int lane);
   /// Drop the parts of conflicts inside [start, end).
@@ -193,9 +193,11 @@ private:
   void splitConflictAt(int at);
   bool overlapsConflict(int start, int end) const;
   /// The parts of conflicts inside [start, end), in address order.
-  std::vector<Interval> conflictRanges(int start, int end) const;
-  /// Whether LDS bytes [start, end) hold `data`.
-  bool sameAsLds(int start, int end, const uint8_t *data) const;
+  std::vector<LdsWawConflict> conflictsIn(int start, int end) const;
+  /// Append to `spans` the byte ranges in [start, end) where LDS does not hold
+  /// `data`.
+  void differingFromLds(int start, int end, const uint8_t *data,
+                        std::vector<Interval> &spans) const;
 
   std::map<int, LdsWawConflict> wawConflicts;
   LdsReader ldsReader;

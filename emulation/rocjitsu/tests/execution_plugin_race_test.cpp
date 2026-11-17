@@ -837,14 +837,15 @@ protected:
                                                        waves);
   }
 
-  /// Issue a one-lane DS access of one dword at `offset` in the workgroup's LDS;
-  /// a store writes `value`. Returns whether it produced a race report.
-  bool ds(int wave, uint32_t offset, std::optional<uint32_t> value) {
+  /// Issue a one-lane DS access of `bytes` bytes at `offset` in the workgroup's
+  /// LDS; a store writes the low bytes of `value`. Returns whether it produced a
+  /// race report.
+  bool ds(int wave, uint32_t offset, std::optional<uint32_t> value, uint32_t bytes = 4) {
     const uint32_t address = waves[wave]->lds_base() + offset;
     waves[wave]->pc += 16;
     const size_t previous = sink->str().size();
     auto state = std::make_unique<VectorMemState>(LOCAL_MEM);
-    state->elem_size = sizeof(uint32_t);
+    state->elem_size = bytes;
     state->num_elems = 1;
     state->is_load = !value;
     state->wf_size = waves[wave]->wf_size();
@@ -853,16 +854,15 @@ protected:
     state->dst_reg_base = waves[wave]->vgpr_alloc().base;
     state->per_lane_addr[0] = address;
     if (value) {
-      state->store_data.resize(sizeof(uint32_t));
-      std::memcpy(state->store_data.data(), &*value, sizeof(uint32_t));
+      state->store_data.resize(bytes);
+      std::memcpy(state->store_data.data(), &*value, bytes);
     }
     TestMemoryInstruction inst(std::move(state),
                                {{WaitCounterType::LGKMCNT, MemoryCompletionClass::LDS}});
     fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(waves[wave]->pc, inst, *waves[wave]);
     fixture.plugin_group_->onAmdgpuMemoryAccessRouted({}, inst, *waves[wave]);
     if (value)
-      fixture.cu()->lds().write(address, reinterpret_cast<const uint8_t *>(&*value),
-                                sizeof(uint32_t));
+      fixture.cu()->lds().write(address, reinterpret_cast<const uint8_t *>(&*value), bytes);
     return sink->str().find("RACE ", previous) != std::string::npos;
   }
 
@@ -915,6 +915,26 @@ TEST_F(LdsWriteValueRaceTest, RepeatedWriteOverAConflictRacesWhenRead) {
   EXPECT_TRUE(ds(0, 64, std::nullopt));
   EXPECT_TRUE(has("The read observes two unordered writes: 0x110 (wave 0) and 0x120 (wave 1)"))
       << sink->str();
+}
+
+TEST_F(LdsWriteValueRaceTest, OrderedOverwriteWithTheLaterValueIsNotARace) {
+  // Wave 0's 8 lands after its 7, and wave 1 also wrote 8, so every order leaves 8.
+  ASSERT_NO_FATAL_FAILURE(start(/*notes=*/false));
+  EXPECT_FALSE(ds(0, 64, 7u));
+  EXPECT_FALSE(ds(1, 64, 8u));
+  EXPECT_FALSE(ds(0, 64, 8u));
+  wait_and_barrier();
+  EXPECT_FALSE(ds(0, 64, std::nullopt));
+}
+
+TEST_F(LdsWriteValueRaceTest, OnlyDifferingBytesRace) {
+  // Little-endian 0 and 1 differ only in their first byte.
+  ASSERT_NO_FATAL_FAILURE(start(/*notes=*/false));
+  EXPECT_FALSE(ds(0, 64, 0u));
+  EXPECT_FALSE(ds(1, 64, 1u));
+  wait_and_barrier();
+  EXPECT_FALSE(ds(0, 65, std::nullopt, /*bytes=*/1));
+  EXPECT_TRUE(ds(0, 64, std::nullopt, /*bytes=*/1));
 }
 
 TEST_F(LdsWriteValueRaceTest, RepeatedIdenticalWritesAreNotARace) {
