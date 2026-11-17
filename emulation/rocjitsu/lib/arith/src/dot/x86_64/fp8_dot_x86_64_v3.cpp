@@ -7,7 +7,7 @@
 #include "common/compiler.h"
 #include "common/simd.h"
 #include "common/x86_64/fp8.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_dot.h"
 
 #include <immintrin.h>
 #include <stdint.h>

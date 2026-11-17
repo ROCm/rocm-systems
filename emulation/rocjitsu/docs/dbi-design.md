@@ -257,6 +257,44 @@ the orchestrator. Trampolines live inside `.text` as a local code cave (the same
 layout DBT uses) rather than a separate section, so cave offsets are plain
 `.text`-relative bytes in `[text_size, text_size + cave_bytes)`.
 
+#### Text growth safety
+
+The checked anchor batch validates edits against the original image. Appending
+code can create new relocation-write or mapping overlaps, so `replace_text()`
+also validates the loader-visible effects of text growth:
+
+- Before inserting file bytes, every `PT_LOAD` whose file range would grow,
+  including a range ending at the insertion point, must map that point to the
+  end of the original `.text`. Extending a mapping at another virtual address
+  would expose the inserted bytes there as well.
+- After remapping relocation destinations in moved sections, supported ROCr
+  dynamic writes must clear the complete final `.text` range. A write left at
+  the original text end can overwrite a trampoline; a destination that moves
+  clear with its allocated section remains eligible.
+- After segment layout, images with `PT_LOAD` segments require matching file
+  backing for the complete appended range. Every overlap with a LOAD memory
+  range must also load the same file bytes as `.text`. Missing backing,
+  different file backing, or overlap with zero-fill storage rejects the patch.
+- Every originally loaded part of another allocated section must retain its
+  backing after layout. A moved section or descriptor symbol must still name
+  the corresponding file bytes or zero-fill range in its LOAD; moving section
+  metadata without moving its backing rejects the patch.
+- For linked ROCr images, every final LOAD memory extent must fit the combined
+  allocation calculated from the first LOAD's base and the last LOAD's end.
+  This includes alignment padding outside `.text`, not just appended instructions.
+
+The final mapping check includes segments that neither grow nor move. For
+example, a data segment stored before `.text` in the file can map at the original
+text end. The source ranges are disjoint, but the appended trampoline then
+occupies the data segment's address. A loader copy from that segment would
+overwrite the trampoline even though the original anchor passed admission.
+
+The final overlap check permits touching memory ranges, empty memory mappings,
+and overlaps with matching file backing. Segments moved clear of the appended
+text remain eligible. A failed growth check returns through the existing patcher
+error path; Instrumentor publishes neither ELF bytes nor successful site records.
+Section-only images without LOAD segments retain their offline mutation path.
+
 ### Checked edits (`code/patch/checked_text_edits.h`)
 
 The checked operation is local to one original-text anchor batch. It requires
@@ -267,6 +305,27 @@ It does not cache source facts, create a fallback decoder or patcher,
 or expose a reusable context. All edits are validated before writing the
 orchestrator's private text buffer. Probe admission, layout, and resource policy
 remain with Instrumentor, and CodeObjectPatcher remains the ELF writer.
+
+Source admission checks the complete write interval of supported ROCr dynamic
+relocations against the original `.text`. A write can start before the section
+and still overwrite its first instruction. Overflowing write ends reject; an
+interval ending exactly at the section's start does not overlap it. Existing
+static, inert and unsupported-form policies remain separate.
+
+The batch also checks aliases of edited bytes in `PT_LOAD` file ranges. Every
+mapping of those shared file bytes must expose them at the same virtual address;
+otherwise, editing an anchor would also modify bytes visible at another address.
+
+At each edited virtual address, every LOAD file copy must also read the anchor's
+own file bytes. A disjoint file range containing another copy of the original
+instruction could otherwise restore that instruction over the patched branch.
+Empty file ranges perform no copy: modern ROCr zeroes the shared allocation
+once, rather than zeroing each segment's tail after copying it.
+
+Aliases outside the edited anchors do not participate in these source checks.
+The separate [text growth checks](#text-growth-safety) validate appended code,
+moved storage, and the final loader layout. Descriptor ownership and whole-kernel
+mapping qualification remain consumer responsibilities.
 
 The reference checks cover decoded direct-branch destinations, text-symbol
 start/end offsets, raw symbol-less RELATIVE64 destinations under the existing
@@ -683,7 +742,7 @@ Each aborts the whole patch with its own diagnostic. Those raised while planning
 - **Spill sim e2e (`tests/dbi/dbi_spill_sim_test.cpp`):** Runs the full `s_swappc` envelope + spill bracket through `DbiSim` and reads back registers after execution, each with a negative control that nops the restore. Fixtures cover VGPR, SGPR (VGPR-bridged), two-SGPR, reused-spilled-bridge, AccVGPR (CDNA), combined VGPR+SGPR+ACC, EXEC preserve (wave32 partial mask), full-mask EXEC-widen spill, and probe-runs-under-anchor-mask — parameterized across **CDNA3, CDNA4, and RDNA4** (AGPR is CDNA-only).
 - **Mask sim e2e (`tests/dbi/dbi_mask_sim_test.cpp`):** Covers the `force_full_exec` policy. The kernel narrows `EXEC` before the anchor (`s_mov_b64 exec, 3`), which is what makes the policy observable at all. A probe writing a sentinel into a dead observation VGPR reaches lanes 0..1 under the default policy and every lane under `force_full_exec`, so the two cases are each other's control. That pair runs in two envelope shapes: with no arguments the full-mask window never opens, so the masked probe inherits an untouched `EXEC`; with an argument in a live `v0` the window opens, `v0` spills, and the masked case additionally exercises the anchor-mask restore that `force_full_exec` is defined by skipping. Mask-as-value cases pass `AnchorExecLo` (all targets) and both dwords (Wave64 only, asserting `{3, 0}` against a preset register so the zero high dword is not vacuous), and the Wave32 target asserts the `AnchorExecHi` rejection instead — which is what makes its Wave32 descriptor load-bearing rather than decorative. A further pair covers a probe that narrows `EXEC` and returns without putting it back, at a site with a live argument VGPR: the post-call re-widen is the only thing that lets the spill reload reach the lanes the probe switched off, and no other probe here exercises it (they all return with `EXEC` already `-1`, where the re-widen is a no-op). Two negative controls, each nopping one `exec, -1` write: without the opening widen the full-exec probe falls back to the anchor's lanes, and without the re-widen the reload strands every lane the probe switched off. Parameterized across **CDNA3, CDNA4, and RDNA4**.
 - **Wave32 sim e2e (`tests/dbi/dbi_wave32_sim_test.cpp`):** The only suite that executes Wave32 (`DbiSim::set_wave32_dispatch()`). An RDNA4 kernel saves `EXEC` in `s1` and narrows it; after the anchor it compares into `s0` with `v_cmp_eq_u32_e64`, restores `EXEC` from `s1`, and writes `v3` on every lane. A Wave32 compare writes only `s0`. Liveness that took it to write `s[0:1]` would free `s1` for the call envelope's temps, and the restore would bring back the envelope's value, so the test requires every lane to have written `v3`. A second kernel holds a value in `s3` across a call to a probe that compares into `s2`; the probe's clobbers leave `s3` out, so the call does not spill it (the kernel has no scratch), and every lane must read the value back from `s3`. RDNA4 only.
-- **Argument sim e2e (`tests/dbi/dbi_arg_sim_test.cpp`):** Runs a probe call that passes an argument at an anchor where the argument register `v0` is *live*, so one execution covers the whole chain — argument VGPRs into `builder_clobbers`, into the spill set, argument write, probe read, restore. Asserts both halves out of one dispatch: the probe received the value the site passed, and the guest's `v0` survived carrying it. Negative control nops the two `v_mov_b32 v0, <literal>` words and requires the probe to read the guest's value instead. Parameterized across **CDNA3, CDNA4, and RDNA4**. Shares `test::DbiSim` (`tests/dbi/dbi_sim.h`) with the spill suite; note that harness dispatches its own descriptor with the full register file, so the register-ownership gates are exercised at patch time only.
+- **Argument sim e2e (`tests/dbi/dbi_arg_sim_test.cpp`):** Runs a probe call that passes an argument at an anchor where the argument register `v0` is *live*, so one execution covers the whole chain — argument VGPRs into `builder_clobbers`, into the spill set, argument write, probe read, restore. Asserts both halves out of one dispatch: the probe received the value the site passed, and the guest's `v0` survived carrying it. Negative control nops the two `v_mov_b32 v0, <literal>` words and requires the probe to read the guest's value instead. Parameterized across **CDNA3, CDNA4, and RDNA4**. Shares `test::DbiSim` (`tests/dbi/dbi_sim.h`) with the spill suite; note that harness dispatches its own descriptor with the target fixture's SGPR allocation and 256 VGPRs, so the VGPR ownership gates are exercised at patch time.
 - **Entry-prologue sim e2e (`tests/dbi/dbi_entry_prologue_sim_test.cpp`):** The only suite that *runs* the prologue. Two kernels, because its two halves are observed differently. The delivery kernel destroys the kernarg SGPR pair before the anchor, which is what makes the reason for the prologue observable rather than assumed: a probe that still receives the payload pointer received it from the framework's storage and not from a register that happened to survive. Emitting the argument from the kernarg pair instead of the reserved pair fails it on all three targets. The restore kernel reads the pair back into VGPRs after the anchor, which both observes the restore and keeps the pair live there, since dead registers are what the call envelope takes for its own temps. Two negative controls: nopping the payload `s_load_dwordx2` must stop the pointer arriving, and nopping the two restore moves must leave the guest seeing the CP's wrapper pointer. Call-and-return variants of both kernels put an `s_call_b64` to a helper returning through `s_setpc_b64` ahead of the anchor, so the storage and the restored kernarg pointer are shown to survive a call and an indirect return. Entry-point variants put the site on the entry itself, so the stub's branch runs into the entry's spliced trampoline. Re-entry variants come back to the original entry once, through a loop backedge, through a helper that rewrites its return address, and through a plain indirect jump built from `s_getpc_b64`, and assert the same two values plus the pass count, so the prologue is shown to run once. Two negative controls: sending the backedge to the stub instead must disturb the guest's kernarg pointer in a kernel that still completes both passes, and dispatching at the original entry must not deliver the payload. `DbiSim::set_entry_offset` is what dispatches at the stub. The wrapper image is built through `write_kernarg_extension_wrapper`, so the offsets loaded from are the ones a runtime would write. Parameterized across **CDNA3, CDNA4, and RDNA4**, though this suite dispatches Wave64 on all three; the prologue is pure scalar, so nothing here turns on the executing wave size. **No nop-the-wait control:** the simulator retires scalar loads synchronously, so it would fail to fail. Separately, `build_s_load_dwordx2` always sets RDNA4's SMEM `soffset` to NULL, so although the model reads that field nothing exercises a non-NULL value. Both need hardware.
 - **CP kernarg placement (`tests/dbi/kernarg_sgpr_slot_test.cpp`):** Pins `CommandProcessor::init_wavefront_regs`'s user-SGPR walk against `kernarg_segment_ptr_slot` by dispatching all eight combinations of the properties preceding the kernarg pointer. Each case writes the expected slot as a literal and asserts both sides independently, so neither computes the other; a ninth case checks the adjacent pairs are clear. A consistency check between two in-tree copies of the AMDHSA contract, not a conformance check against hardware.
 - **DbiSim memory (`tests/dbi/dbi_sim_memory_test.cpp`):** Pins the test-local global load/store encoders (`tests/dbi/global_memory_builders.h`, dword through dwordx4) against llvm-mc on CDNA3, CDNA4, and RDNA4, plus three guards: the CDNA offset field, the even base gfx942 and gfx950 require of a multi-dword VGPR tuple, and an SGPR base pair that is even and within the target's ordinary SGPRs (llvm-mc rejects an odd base and the simulator does not; past the ordinary SGPRs the field names a special register, RDNA4's `off`, or wraps to `s0`). A copy kernel then moves a word seeded with `DbiSim::write_memory` to a second address, read back with `run_and_read_memory`; the negative control replaces the store with `s_nop`s and requires the destination to stay zero, so the read-back is shown to observe the kernel's store rather than the seed. A `DbiSim` runs only its first dispatch, so a second dispatch on the same instance reads back nothing even when its kernel would halt, and a kernel that never halts reads back nothing. Each case runs on **CDNA3, CDNA4, and RDNA4**.

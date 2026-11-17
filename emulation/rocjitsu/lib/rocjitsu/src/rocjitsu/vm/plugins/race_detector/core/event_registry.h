@@ -53,6 +53,7 @@ class EventRegistry {
     uint64_t execMask;
     std::vector<uint32_t> registers;
     IntervalSet ldsIntervals;
+    LdsAccess ldsAccess;
   };
 
 public:
@@ -61,9 +62,11 @@ public:
               std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask,
               IntervalSet ldsIntervals,
               std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-              MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0) {
+              MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0,
+              LdsAccess ldsAccess = {}) {
     int id = base_offset_ + static_cast<int>(entries_.size());
-    assert(!counterObligations.empty());
+    assert(!counterObligations.empty() ||
+           (isFromLds(type) && registers.empty() && !ldsIntervals.empty()));
     assert(counterObligations.size() <= amdgpu::MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS);
     EventInfo event{waveId,
                     instruction,
@@ -72,12 +75,13 @@ public:
                     static_cast<uint8_t>(counterObligations.size()),
                     0,
                     memoryOrder,
-                    EventStatus::ACTIVE,
+                    counterObligations.empty() ? EventStatus::WAVE_COMPLETE : EventStatus::ACTIVE,
                     byteMask,
                     lastRegisterByteMask ? lastRegisterByteMask : byteMask,
                     execMask,
                     std::move(registers),
-                    std::move(ldsIntervals)};
+                    std::move(ldsIntervals),
+                    ldsAccess};
     std::ranges::copy(counterObligations, event.counterObligations.begin());
     entries_.push_back(std::move(event));
 
@@ -142,6 +146,17 @@ public:
     const auto &event = entries_[index(id)];
     return event.satisfiedCounterMask ==
            static_cast<uint8_t>((uint8_t{1} << event.numCounterObligations) - 1);
+  }
+  bool atomicLdsElementMatches(EventId id, uint8_t bytes) const {
+    return bytes != 0 && entries_[index(id)].ldsAccess.aligned_atomic_bytes == bytes;
+  }
+  bool readsLds(EventId id) const {
+    const auto &event = entries_[index(id)];
+    return event.ldsAccess.read_modify_write || isFromLds(event.type);
+  }
+  bool writesLds(EventId id) const {
+    const auto &event = entries_[index(id)];
+    return event.ldsAccess.read_modify_write || isToLds(event.type);
   }
   MemoryOrderClass memoryOrder(EventId id) const { return entries_[index(id)].memoryOrder; }
   EventStatus status(EventId id) const { return entries_[index(id)].status; }

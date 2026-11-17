@@ -525,7 +525,7 @@ __device__ __forceinline__ bool ddaLLSpinOneStale(const uint32_t* const (&line)[
   }
 }
 
-// Waits until both flags of every line selected by mask (wave uniform) match. Each sweep issues kN loads before testing
+// Waits until both flags of every line selected by mask (per lane) match. Each sweep issues kN loads before testing
 // any flag, so they share one wait (a load under a per-line branch would wait on its own); a slot outside mask reloads
 // the first selected line, so only selected lines are read. Sweeps repeat until every selected line is fresh, one abort
 // spin tick per sweep; with kDdaLLSpinOneMinLines or more selected lines a waiting lane spins on one stale line between

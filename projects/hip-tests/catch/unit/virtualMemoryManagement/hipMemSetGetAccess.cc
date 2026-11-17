@@ -1497,6 +1497,8 @@ HIP_TEST_CASE(Unit_hipMemSetAccessHostDevice_hostalloc) {
   // Ensure device 0 is selected
   REQUIRE(hipSetDevice(0) == hipSuccess);
 
+  checkVMMSupported(0);
+
   // ---- Describe a HOST-backed allocation (NUMA-unaware) ----
   hipMemAllocationProp prop{};
   prop.type = hipMemAllocationTypePinned;       // pinned system RAM
@@ -1568,6 +1570,8 @@ HIP_TEST_CASE(Unit_hipMemSetAccessHostDevice_hostalloc) {
 HIP_TEST_CASE(Unit_hipMemSetAccessHost_devicealloc) {
   // Ensure device 0 is selected
   REQUIRE(hipSetDevice(0) == hipSuccess);
+
+  checkVMMSupported(0);
 
   // ---- Describe a DEVICE-backed allocation
   hipMemAllocationProp prop{};

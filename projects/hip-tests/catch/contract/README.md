@@ -27,6 +27,7 @@ The first domains are:
 - `async_transfer`: async copy visibility and invalid-kind consistency contracts
 - `mem_batch_copy`: batch async device-to-device copy round-trip, per-copy attribute, and invalid-input contracts
 - `mem_batch_copy_3d`: batch async 3D pointer copy host-device-host round-trip and invalid-input contracts
+- `mem_copy_with_attributes`: single async 1D and 3D copy-with-attributes host-device-host round-trip and invalid-input contracts
 - `mem_batch_discard`: batch async memory discard and discard-and-prefetch accepted-or-unsupported and invalid-input contracts
 - `memset`: byte, word, dword, and async memset contracts
 - `driver_memset_async`: driver-style directed async byte, word, and dword memset contracts

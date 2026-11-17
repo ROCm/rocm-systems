@@ -156,6 +156,14 @@ integration retains Rocjitsu's existing exception classifier for Compatibility;
 explicit mode 3 uses the library's qualified reporting domain instead.
 Compatibility may retain demonstrated hardware-fidelity improvements over the
 previous interpreter; instruction contracts document such exceptions.
+On RDNA4 the simulator also records invalid inputs to FP32 binary arithmetic
+and min/max, overflow of FP32 add/subtract before OMOD, and signaling
+floating-point compares on NaN. The comparison library owns the inherited
+Compatibility reporting gate: a nonfinite selected operand enables signaling
+causes across the wave, including denormal pairs in the other Wave64 half.
+The simulator only commits the comparison mask and causes.
+Dual FP32 arithmetic slots share the wave’s
+exception flags. Explicit numeric-only modes suppress these additional flags.
 Rocjitsu's [`arithmetic.semantics`](configuration.md#cpu-arithmetic-policy)
 setting maps directly to these modes and defaults to compatibility. Its string
 values are the lowercase constant names without `RJ_ARITH_SEMANTICS_`.

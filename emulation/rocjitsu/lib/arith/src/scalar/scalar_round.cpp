@@ -7,9 +7,9 @@
 // Integer rounding extends rocjitsu util::rndne_scalar to directed rounding.
 // GFX1201 verifies all FP16 patterns and raw FP32 boundary/random values.
 
-#include "common/internal.h"
 #include "common/round_integral.h"
-#include "rj_arith/rj_arith.h"
+#include "common/validation.h"
+#include "rj_arith/detail/rj_arith_scalar.h"
 
 #include <stdint.h>
 
@@ -42,6 +42,25 @@ int run(uint64_t flags, uint32_t mode, uint32_t *d, uint32_t a, uint32_t *excp_f
   }
   *d = rocjitsu::arith::round_integral_bits<Op, Half>(a, flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS);
   return RJ_ARITH_SUCCESS;
+}
+
+// gfx1250 inherits scalar rounding without guest status or Compatibility flushing.
+// Quiet NaNs consistently, including legacy CEIL's compiler-dependent signaling NaNs.
+template <IntegralRound Op, bool Half>
+int run_gfx1250(uint64_t flags, uint64_t mode, uint32_t *d, uint32_t a, uint32_t *status) {
+  const bool compatibility = (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY;
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate(
+          flags, mode, RJ_ARITH_FP_FLUSH_INPUT_DENORMALS | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS)) {
+    return error;
+  }
+  if ((flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  if (compatibility) {
+    flags &= ~RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
+  }
+  return run<Op, Half>(flags, 0, d, a, status);
 }
 
 } // namespace
@@ -172,4 +191,52 @@ int rj_arith_s_rndne_f16(uint64_t flags, uint64_t instruction_flags, uint32_t *d
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
   return run<IntegralRound::Nearest, true>(flags, instruction_flags, d, a, excp_flag_user);
+}
+
+// Round the gfx1250 scalar input; strict empirical modes are unsupported.
+int rj_arith_s_ceil_f16_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
+                                uint32_t *excp_flag_user) {
+  return run_gfx1250<IntegralRound::Ceil, true>(flags, instruction_flags, d, a, excp_flag_user);
+}
+
+// Round the gfx1250 scalar input; strict empirical modes are unsupported.
+int rj_arith_s_ceil_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
+                                uint32_t *excp_flag_user) {
+  return run_gfx1250<IntegralRound::Ceil, false>(flags, instruction_flags, d, a, excp_flag_user);
+}
+
+// Round the gfx1250 scalar input; strict empirical modes are unsupported.
+int rj_arith_s_floor_f16_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                 uint32_t a, uint32_t *excp_flag_user) {
+  return run_gfx1250<IntegralRound::Floor, true>(flags, instruction_flags, d, a, excp_flag_user);
+}
+
+// Round the gfx1250 scalar input; strict empirical modes are unsupported.
+int rj_arith_s_floor_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                 uint32_t a, uint32_t *excp_flag_user) {
+  return run_gfx1250<IntegralRound::Floor, false>(flags, instruction_flags, d, a, excp_flag_user);
+}
+
+// Round the gfx1250 scalar input; strict empirical modes are unsupported.
+int rj_arith_s_trunc_f16_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                 uint32_t a, uint32_t *excp_flag_user) {
+  return run_gfx1250<IntegralRound::Trunc, true>(flags, instruction_flags, d, a, excp_flag_user);
+}
+
+// Round the gfx1250 scalar input; strict empirical modes are unsupported.
+int rj_arith_s_trunc_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                 uint32_t a, uint32_t *excp_flag_user) {
+  return run_gfx1250<IntegralRound::Trunc, false>(flags, instruction_flags, d, a, excp_flag_user);
+}
+
+// Round the gfx1250 scalar input; strict empirical modes are unsupported.
+int rj_arith_s_rndne_f16_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                 uint32_t a, uint32_t *excp_flag_user) {
+  return run_gfx1250<IntegralRound::Nearest, true>(flags, instruction_flags, d, a, excp_flag_user);
+}
+
+// Round the gfx1250 scalar input; strict empirical modes are unsupported.
+int rj_arith_s_rndne_f32_gfx1250(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                 uint32_t a, uint32_t *excp_flag_user) {
+  return run_gfx1250<IntegralRound::Nearest, false>(flags, instruction_flags, d, a, excp_flag_user);
 }

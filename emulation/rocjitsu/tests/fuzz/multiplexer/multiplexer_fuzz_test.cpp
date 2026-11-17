@@ -46,7 +46,11 @@ uint64_t focused_work_units(FuzzTarget target, std::span<const uint8_t> payload)
     return stats.executed;
   }
   case FuzzTarget::CodeObject: {
-    const code_object_fuzz::RunStats stats = code_object_fuzz::run_input(payload);
+    const util::FailureOr<code_object_fuzz::RunStats> result = code_object_fuzz::run_input(payload);
+    EXPECT_TRUE(result.succeeded());
+    if (result.failed())
+      return 0;
+    const code_object_fuzz::RunStats &stats = result.value();
     return stats.code_objects_valid + stats.executables_valid;
   }
   case FuzzTarget::ConcurrentDispatch:
@@ -118,8 +122,8 @@ TEST(MultiplexerFuzzTest, ExecutionWorkUnitsCountMigratedInstructionsOnce) {
   const execution_fuzz::RunStats focused =
       execution_fuzz::run_input(payload, std::nullopt, resources);
   ASSERT_EQ(focused.executed, 6u);
-  // The seed now includes a still-eligible FP4 operation as well as issuer-only FP8.
-  ASSERT_EQ(focused.async_executed, 1u);
+  // All matrix operations now execute on the issuer.
+  ASSERT_EQ(focused.async_executed, 0u);
   const std::optional<DispatchResult> dispatched = run_input(input);
   ASSERT_TRUE(dispatched);
   EXPECT_EQ(dispatched->work_units, 6u);
