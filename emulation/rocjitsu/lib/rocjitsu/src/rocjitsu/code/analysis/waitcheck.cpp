@@ -321,6 +321,11 @@ struct CounterParityRequirement {
   }
 };
 
+constexpr size_t kMaxParityAlternatives = 8;
+struct CounterParityAlternatives {
+  std::array<std::vector<CounterParityRequirement>, kCounterCount> values;
+};
+
 struct PendingWaitGroup {
   PendingState state_before;
   std::array<std::optional<uint32_t>, kCounterCount> emitted_counts;
@@ -2285,11 +2290,29 @@ private:
                                });
   }
 
+  bool needs_constant_overwrite_parity_path(const CounterParityRequirement &candidate,
+                                            const Instruction &immediate_consumer,
+                                            WaitCounterKind counter, uint32_t emitted_count,
+                                            rj_code_arch_t arch) const {
+    if (candidate.required_count != emitted_count || candidate.event.counter != counter ||
+        candidate.event.present_on_all_paths || candidate.consumer != &immediate_consumer ||
+        candidate.access != WaitcheckAccessKind::Def || candidate.reg.cls != RegClass::VGPR ||
+        immediate_consumer.mnemonic() != "v_mov_b32_e32" ||
+        !access_requires_active_lane(immediate_consumer, candidate.reg) ||
+        guarded_lane_operand(candidate.event, immediate_consumer, candidate.reg,
+                             candidate.access, arch) ||
+        has_guarded_scratch_result(candidate.event))
+      return false;
+    const auto *source = immediate_consumer.src_operand(0);
+    return source && source->const_value().has_value();
+  }
+
   void collect_counter_parity_requirements(
       const PendingWaitGroup &group, const Instruction &consumer, const InstDefUse &du,
       uint64_t consumer_section_offset, uint64_t consumer_file_offset, rj_code_arch_t arch,
       std::array<std::optional<CounterParityRequirement>, kCounterCount> &requirements,
-      bool past_xcnt_drain = false, bool forward_search = false) {
+      bool past_xcnt_drain = false, bool forward_search = false,
+      CounterParityAlternatives *alternatives = nullptr) {
     const PendingState *requirement_state = &group.state_before;
     auto current_events = classify_events(consumer, arch).value();
     if (!expert_waits_enabled(*requirement_state)) {
@@ -2351,6 +2374,15 @@ private:
         return;
       bool can_improve = CounterParityRequirement::can_improve(
           requirements[counter_index(event.counter)], required_count);
+      const auto can_retain_equal = [&](WaitCounterKind counter, uint32_t count) {
+        const auto index = counter_index(counter);
+        const auto &current = requirements[index];
+        return alternatives && counter == event.counter && group.emitted_counts[index] &&
+               current && current->required_count == count &&
+               needs_constant_overwrite_parity_path(*current, consumer, counter,
+                                                    *group.emitted_counts[index], arch);
+      };
+      can_improve |= can_retain_equal(event.counter, required_count);
       for (size_t counter_idx = 0; !can_improve && counter_idx < group.emitted_counts.size();
            ++counter_idx) {
         if (!group.emitted_counts[counter_idx])
@@ -2365,7 +2397,16 @@ private:
       if (!event_can_reach_wait(event, group.section_offset, arch))
         return;
       auto record_requirement = [&](WaitCounterKind counter, uint32_t count) {
-        auto &strongest = requirements[counter_index(counter)];
+        const auto index = counter_index(counter);
+        auto &strongest = requirements[index];
+        if (!CounterParityRequirement::can_improve(strongest, count) &&
+            can_retain_equal(counter, count)) {
+          auto &pool = alternatives->values[index];
+          if (pool.size() < kMaxParityAlternatives)
+            pool.push_back(CounterParityRequirement{event, reg, access, count, &consumer,
+                                                    consumer_section_offset, consumer_file_offset});
+          return;
+        }
         if (CounterParityRequirement::can_improve(strongest, count)) {
           CounterParityRequirement candidate{
               event, reg, access, count, &consumer, consumer_section_offset, consumer_file_offset};
@@ -2382,8 +2423,11 @@ private:
             if (!refine_guarded_load_count(group, arch, candidate))
               return;
           }
-          if (CounterParityRequirement::can_improve(strongest, candidate.required_count))
+          if (CounterParityRequirement::can_improve(strongest, candidate.required_count)) {
             strongest = std::move(candidate);
+            if (alternatives)
+              alternatives->values[index].clear();
+          }
         }
       };
       const bool translation_order = access == WaitcheckAccessKind::MemoryOrder &&
@@ -3784,10 +3828,12 @@ private:
     }
 
     std::array<std::optional<CounterParityRequirement>, kCounterCount> strongest_requirements;
+    CounterParityAlternatives alternatives;
     const InstDefUse du = inst_def_use_for_waitcheck(consumer, group.state_before.vgpr_msb, arch,
                                                      wavefront_size_, group.state_before.m0);
     collect_counter_parity_requirements(group, consumer, du, consumer_section_offset,
-                                        consumer_file_offset, arch, strongest_requirements);
+                                        consumer_file_offset, arch, strongest_requirements,
+                                        false, false, &alternatives);
 
     bool group_indeterminate = false;
     for (size_t counter_idx = 0; counter_idx < group.emitted_counts.size(); ++counter_idx) {
@@ -4058,6 +4104,46 @@ private:
       }
       if (needs_boundary_policy)
         requirement.reset();
+      // The fast parity path can name a conditional vector producer because
+      // it reaches the wait on one CFG route, even when no active lane can
+      // carry that producer through the measured field to its consumer.
+      // Check only an otherwise exact attribution; the full path replay is
+      // considerably more expensive than the counter dataflow pass.
+      const auto needs_path = [&](const CounterParityRequirement &candidate) {
+        return needs_constant_overwrite_parity_path(candidate, consumer, counter, emitted_count,
+                                                    arch);
+      };
+      if (requirement && needs_path(*requirement)) {
+        const auto has_witness = [&](CounterParityRequirement &candidate) {
+          const auto lane = guarded_lane_operand(candidate.event, *candidate.consumer,
+                                                 candidate.reg, candidate.access, arch);
+          const auto witness = has_cfg_path_with_event_pending(
+              candidate.event, candidate.consumer_section_offset, arch, false,
+              lane.has_value() || access_requires_active_lane(*candidate.consumer, candidate.reg),
+              0, WaitRange{group.section_offset, group.last_wait_section_offset, *no_wait}, lane);
+          return witness == true && refine_guarded_load_count(group, arch, candidate) &&
+                 candidate.required_count == emitted_count;
+        };
+        bool validated = has_witness(*requirement);
+        if (!validated) {
+          for (auto candidate : alternatives.values[counter_idx]) {
+            if (has_witness(candidate)) {
+              requirement = std::move(candidate);
+              validated = true;
+              break;
+            }
+          }
+        }
+        // The candidate pool retains only equal-count producers. A different
+        // producer or weaker requirement may still justify this field, so a
+        // failed or bounded proof cannot establish an excessive wait.
+        if (!validated) {
+          if (shared)
+            shared_parity_.at(key).cannot_relax = true;
+          group_indeterminate = true;
+          continue;
+        }
+      }
       const uint32_t required_count = requirement ? requirement->required_count : *no_wait;
       if (requirement && required_count == emitted_count) {
         if (emitted_count != 0) {

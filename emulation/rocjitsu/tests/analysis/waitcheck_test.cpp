@@ -13710,6 +13710,41 @@ TEST(WaitcheckTest, ObjectAnalysisIgnoresBranchInfeasibleSkippedWaitPath) {
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
 }
 
+TEST(WaitcheckTest, CounterParityRequiresPendingLoadAtActiveConsumer) {
+  for (const uint32_t machine : {EF_AMDGPU_MACH_AMDGCN_GFX1150,
+                                 EF_AMDGPU_MACH_AMDGCN_GFX1151}) {
+    for (const bool active_consumer : {false, true}) {
+      SCOPED_TRACE(machine);
+      SCOPED_TRACE(active_consumer);
+      std::vector<uint32_t> code;
+      append_inst(code, s_cmp_eq_u32(0, 129));
+      append_inst(code, sopp(34, 2)); // Skip the two-word load on one scalar path.
+      code.insert(code.end(), {0xdc520000u, 0x007c0004u}); // global_load_b32 v0,v[4:5]
+      append_inst(code, s_mov_b32(126, active_consumer ? 129 : 128));
+      const auto wait = code.size() * sizeof(uint32_t);
+      code.push_back(0xbf8903f7u); // VMcnt(0).
+      code.push_back(0x7e000280u); // v_mov_b32 v0,0: overwrite, with no source use.
+      append_inst(code, s_endpgm());
+
+      const auto bytes = waitcheck_test::make_gfx_code_object(code, machine, true);
+      const AmdGpuCodeObject object(bytes.data(), bytes.size());
+      WaitcheckOptions options;
+      options.check_counter_parity = true;
+      const auto report = analyze_waitcnts_for_kernel(object, ROCJITSU_CODE_ARCH_RDNA3_5, 0,
+                                                      options);
+      ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+      EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+      EXPECT_GE(report.counter_parity_fields_checked, 1u);
+      EXPECT_EQ(report.counter_parity_exact, active_consumer ? 1u : 0u);
+      EXPECT_EQ(report.counter_parity_indeterminate_groups, active_consumer ? 0u : 1u);
+      EXPECT_FALSE(std::ranges::any_of(report.counter_underaccounting_diagnostics,
+                                       [&](const auto &row) {
+                                         return row.wait_section_offset == wait;
+                                       }));
+    }
+  }
+}
+
 TEST(WaitcheckTest, ObjectAnalysisPreservesInfeasiblePathWithReachabilityCacheDisabled) {
   std::vector<uint32_t> program;
   append_inst(program, s_cmp_eq_u32(0, 129)); // s0 == 1
