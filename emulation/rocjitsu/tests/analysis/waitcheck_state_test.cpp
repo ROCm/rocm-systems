@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/analysis/waitcheck/state.h"
 #include "rocjitsu/isa/decoder.h"
 
@@ -24,6 +25,54 @@ PendingEvent load(uint16_t reg, uint32_t younger, uint64_t offset = 0) {
   event.min_younger = younger;
   event.section_offset = offset;
   return event;
+}
+
+TEST(WaitcheckState, Gfx9D16WritebackRequiresKnownSramEccSetting) {
+  EXPECT_TRUE(Ops::tracks_d16_subregisters(ROCJITSU_CODE_ARCH_CDNA1, EF_AMDGPU_MACH_AMDGCN_GFX900));
+  EXPECT_TRUE(Ops::tracks_d16_subregisters(ROCJITSU_CODE_ARCH_CDNA1, EF_AMDGPU_MACH_AMDGCN_GFX90C));
+  EXPECT_FALSE(Ops::tracks_d16_subregisters(ROCJITSU_CODE_ARCH_CDNA1));
+  constexpr auto off = EF_AMDGPU_FEATURE_SRAMECC_OFF_V4;
+  for (auto bits : {0u, 0x400u, off, 0xc00u}) {
+    const auto flags = EF_AMDGPU_MACH_AMDGCN_GFX942 | bits;
+    EXPECT_EQ(
+        Ops::tracks_d16_subregisters(ROCJITSU_CODE_ARCH_CDNA3, flags, ELFABIVERSION_AMDGPU_HSA_V5),
+        bits == off);
+    EXPECT_FALSE(
+        Ops::tracks_d16_subregisters(ROCJITSU_CODE_ARCH_CDNA3, flags, ELFABIVERSION_AMDGPU_HSA_V3));
+  }
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA1);
+  const std::array words{0xd8b60002u, 0x08000000u}; // ds_read_u16_d16_hi v8, v0 offset:2
+  auto inst = decoder->decode_window(words, 0);
+  ASSERT_TRUE(inst.succeeded());
+  const auto result = Ops::partial_d16_load_def(*inst.value(), true);
+  ASSERT_TRUE(result);
+  EXPECT_EQ(result->mask, kVgprHigh16Mask);
+  EXPECT_FALSE(Ops::partial_d16_load_def(*inst.value(), false));
+}
+
+TEST(WaitcheckState, Rdna1And2D16LoadsWriteOnlyTheSelectedHalf) {
+  constexpr RegisterRef dest{RegClass::VGPR, 8, 1};
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+    auto decoder = Decoder::create(arch);
+    for (auto [opcode, expected] : std::array<std::pair<uint32_t, uint8_t>, 3>{{
+             {0xdc908000u, kVgprLow16Mask},  // global_load_short_d16 v8, v[0:1], off
+             {0xdc948000u, kVgprHigh16Mask}, // global_load_short_d16_hi v8, v[0:1], off
+             {0xdc308000u, kVgprFull32Mask}, // global_load_dword v8, v[0:1], off
+         }}) {
+      const std::array words{opcode, 0x087d0000u};
+      auto inst = decoder->decode_window(words, 0);
+      ASSERT_TRUE(inst.succeeded());
+      const auto partial =
+          Ops::partial_d16_load_def(*inst.value(), Ops::tracks_d16_subregisters(arch));
+      if (expected == kVgprFull32Mask) {
+        EXPECT_FALSE(partial);
+      } else {
+        ASSERT_TRUE(partial);
+        EXPECT_EQ(partial->reg, dest);
+        EXPECT_EQ(partial->mask, expected);
+      }
+    }
+  }
 }
 
 TEST(WaitcheckState, Rdna1ScalarSourceLifetimeRequiresAZeroDependencyWait) {
@@ -319,7 +368,7 @@ TEST(WaitcheckState, ProducerAbsentOnOnePathStaysConditionalAcrossFurtherJoins) 
   EXPECT_TRUE(joined.pending[kLoad].empty());
 }
 
-TEST(WaitcheckState, MixedHardwareEventKindsPreventPartialCounterRetirement) {
+TEST(WaitcheckState, MixedVmSourceFifosRetainTheirOwnPartialWaitBounds) {
   PendingState state;
   const size_t vm = Ops::counter_index(WaitCounterKind::VmVsrc);
   auto vmem_event = load(0, 1);
@@ -331,10 +380,12 @@ TEST(WaitcheckState, MixedHardwareEventKindsPreventPartialCounterRetirement) {
   auto &ages = state.pending_event_ages[vm].values;
   ages[static_cast<size_t>(WaitEventKind::VmemNoSamplerLoad)] = 1;
   ages[static_cast<size_t>(WaitEventKind::Ds)] = 0;
-  const auto before = state;
   ASSERT_TRUE(Ops::apply_counter_wait(state, WaitCounterKind::VmVsrc, 1, ROCJITSU_CODE_ARCH_RDNA4)
                   .succeeded());
-  EXPECT_EQ(state, before);
+  ASSERT_EQ(state.pending[vm].size(), 1u);
+  EXPECT_EQ(state.pending[vm].front().kind, WaitEventKind::Ds);
+  EXPECT_EQ(ages[static_cast<size_t>(WaitEventKind::VmemNoSamplerLoad)], kNoPendingEventAge);
+  EXPECT_EQ(ages[static_cast<size_t>(WaitEventKind::Ds)], 0u);
   ASSERT_TRUE(Ops::apply_counter_wait(state, WaitCounterKind::VmVsrc, 0, ROCJITSU_CODE_ARCH_RDNA4)
                   .succeeded());
   EXPECT_TRUE(state.pending[vm].empty());
@@ -465,7 +516,7 @@ TEST(WaitcheckState, DependencyWaitsRetireOnlySelectedScalarHazards) {
       auto source = load(0, 0);
       source.counter = WaitCounterKind::VmVsrc;
       state.pending[Ops::counter_index(WaitCounterKind::VmVsrc)].push_back(source);
-      state.va_vdst_hazards.hazards[0] = {};
+      state.va_vdst_hazards.hazards[{0, false}] = {};
 
       auto expected = state;
       auto &remaining = expected.sgpr_hazards;
@@ -515,7 +566,7 @@ TEST(WaitcheckState, UnsupportedArchitectureFailsWithoutChangingState) {
        {ROCJITSU_CODE_ARCH_RV32I, ROCJITSU_CODE_ARCH_RV64I, ROCJITSU_CODE_ARCH_INVALID}) {
     PendingState state;
     state.pending[kLoad] = {load(0, 3)};
-    state.va_vdst_hazards.hazards[0] = {2, false, {}};
+    state.va_vdst_hazards.hazards[{0, false}] = {2, {}};
     const PendingState before = state;
     const Instruction idle("s_wait_idle", nullptr);
     const Instruction ordinary("s_nop", nullptr);
@@ -937,13 +988,13 @@ TEST(WaitcheckState, ExplicitAndEmbeddedWaitsRetireVectorHazards) {
   PendingEvent event = load(0, 0);
   event.counter = WaitCounterKind::VmVsrc;
   state.pending[vm].push_back(event);
-  state.va_vdst_hazards.hazards[0] = {.age = 0, .trans_since = true, .producer = {}};
+  state.va_vdst_hazards.hazards[{0, true}] = {};
   std::unique_ptr<Instruction> alu = decode_wait(0xbf880fffu, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_NE(alu, nullptr);
   ASSERT_TRUE(Ops::apply_waitcnt(state, *alu, ROCJITSU_CODE_ARCH_RDNA4).succeeded());
   EXPECT_TRUE(state.va_vdst_hazards.hazards.empty());
   EXPECT_EQ(state.pending[vm].size(), 1u);
-  state.va_vdst_hazards.hazards[0] = {.age = 0, .trans_since = true, .producer = {}};
+  state.va_vdst_hazards.hazards[{0, true}] = {};
   std::unique_ptr<Instruction> dsdir = decode_wait(0xce100000u, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_NE(dsdir, nullptr);
   ASSERT_TRUE(Ops::apply_embedded_waitcnt(state, *dsdir, ROCJITSU_CODE_ARCH_RDNA4).succeeded());
@@ -951,13 +1002,42 @@ TEST(WaitcheckState, ExplicitAndEmbeddedWaitsRetireVectorHazards) {
   EXPECT_TRUE(state.pending[vm].empty());
 }
 
+TEST(WaitcheckState, VaVdstJoinIsIndependentOfPredecessorOrder) {
+  // The same youngest age can recur with different producers on a backedge.
+  std::array<VaVdstHazardState, 3> paths;
+  for (size_t i = 0; i < paths.size(); ++i) {
+    paths[i].hazards[{0, false}] = {
+        static_cast<uint8_t>(i == 0 ? 2 : 1), {".text", 4 * i, 4 * i, "v_mov_b32"}};
+    paths[i].hazards[{0, true}] = {
+        static_cast<uint8_t>(10 - i), {".text", 16 + 4 * i, 16 + 4 * i, "v_sqrt_f32"}};
+  }
+  std::array<size_t, 3> order{0, 1, 2};
+  do {
+    auto joined = paths[order[0]];
+    Ops::merge_va_vdst_hazards(joined, paths[order[1]]);
+    Ops::merge_va_vdst_hazards(joined, paths[order[2]]);
+    const auto &ordinary = joined.hazards.at({0, false});
+    EXPECT_EQ(ordinary.age, 1u);
+    EXPECT_EQ(ordinary.producer.section_offset, 4u);
+    const auto [trans, required] = joined.requirement(0);
+    ASSERT_NE(trans, nullptr);
+    EXPECT_EQ(required, 0u);
+    EXPECT_EQ(trans->age, 8u);
+    EXPECT_EQ(trans->producer.section_offset, 24u);
+    const auto stable = joined;
+    for (size_t i : order)
+      Ops::merge_va_vdst_hazards(joined, paths[i]);
+    EXPECT_EQ(joined, stable);
+  } while (std::next_permutation(order.begin(), order.end()));
+}
+
 TEST(WaitcheckState, Rdna3EmbeddedWaitRetiresOnlyProvenValuHazards) {
   for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
     PendingState state;
     auto &hazards = state.va_vdst_hazards.hazards;
-    hazards[0] = {.age = 2, .trans_since = false, .producer = {}};
-    hazards[1] = {.age = 3, .trans_since = false, .producer = {}};
-    hazards[2] = {.age = 3, .trans_since = true, .producer = {}};
+    hazards[{0, false}] = {2, {}};
+    hazards[{1, false}] = {3, {}};
+    hazards[{2, true}] = {3, {}};
     auto nop_wait = decode_wait(0xce1f0000u, arch);
     ASSERT_NE(nop_wait, nullptr);
     ASSERT_TRUE(Ops::apply_embedded_waitcnt(state, *nop_wait, arch).succeeded());
@@ -965,9 +1045,9 @@ TEST(WaitcheckState, Rdna3EmbeddedWaitRetiresOnlyProvenValuHazards) {
     auto partial_wait = decode_wait(0xce130000u, arch);
     ASSERT_NE(partial_wait, nullptr);
     ASSERT_TRUE(Ops::apply_embedded_waitcnt(state, *partial_wait, arch).succeeded());
-    EXPECT_TRUE(hazards.contains(0));
-    EXPECT_FALSE(hazards.contains(1));
-    EXPECT_TRUE(hazards.contains(2));
+    EXPECT_TRUE(hazards.contains({0, false}));
+    EXPECT_FALSE(hazards.contains({1, false}));
+    EXPECT_TRUE(hazards.contains({2, true}));
     auto zero_wait = decode_wait(0xce100000u, arch);
     ASSERT_NE(zero_wait, nullptr);
     ASSERT_TRUE(Ops::apply_embedded_waitcnt(state, *zero_wait, arch).succeeded());

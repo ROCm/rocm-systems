@@ -184,6 +184,13 @@ template <typename T> void append_inst(std::vector<uint32_t> &words, const T &in
                                  static_cast<int64_t>(descriptor_vaddr);
     std::memcpy(kernel_descriptor.data() + kernel_code_entry_byte_offset_offset, &entry_offset,
                 sizeof(entry_offset));
+    if (mach == EF_AMDGPU_MACH_AMDGCN_GFX90A || mach == EF_AMDGPU_MACH_AMDGCN_GFX942 ||
+        mach == EF_AMDGPU_MACH_AMDGCN_GFX950) {
+      // Generic instruction fixtures can use either architectural vector bank.
+      constexpr uint32_t full_register_file = 63; // 256 ordinary and 256 accumulator VGPRs.
+      std::memcpy(kernel_descriptor.data() + 44, &full_register_file, sizeof(full_register_file));
+      std::memcpy(kernel_descriptor.data() + 48, &full_register_file, sizeof(full_register_file));
+    }
     const uint16_t kernel_code_properties = wave32 ? wavefront_size32_bit : 0;
     std::memcpy(kernel_descriptor.data() + kernel_code_properties_offset, &kernel_code_properties,
                 sizeof(kernel_code_properties));

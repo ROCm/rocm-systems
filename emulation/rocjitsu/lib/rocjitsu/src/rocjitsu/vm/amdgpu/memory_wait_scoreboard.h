@@ -238,9 +238,6 @@ public:
   bool cancel_last_issue(uint64_t pc, const IssueSnapshot &before);
   bool issues_flat_counter(const Instruction &inst, Wavefront &wf, uint64_t requests,
                            uint64_t returned_without_request, WaitCounterKind counter) const;
-  /// Resolve register-relative waits from the actual wave state.
-  [[nodiscard]] static util::FailureOr<std::optional<WaitFields>>
-  explicit_wait_fields(const Instruction &inst, rj_code_arch_t arch, Wavefront *wf);
   void before(const Instruction &inst, rj_code_arch_t arch, Wavefront *wf = nullptr);
   void track_gfx10_scalar_sources(const Instruction &inst, Wavefront &wf,
                                   const waitcheck_detail::ClassifiedEvent &source);

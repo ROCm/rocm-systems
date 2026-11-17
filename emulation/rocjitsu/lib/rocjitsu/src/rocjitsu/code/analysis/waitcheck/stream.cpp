@@ -5,6 +5,8 @@
 
 #include "rocjitsu/code/analysis/control_flow.h"
 #include "rocjitsu/code/analysis/waitcheck/state.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/target_registry.h"
@@ -109,10 +111,10 @@ RegisterEffects register_effects(const Instruction &inst, rj_code_arch_t arch, u
   return effects;
 }
 
-std::optional<std::string_view> deferred_reason(const Instruction &inst,
+std::optional<std::string_view> deferred_reason(const Instruction &inst, rj_code_arch_t arch,
                                                 std::span<const ClassifiedEvent> events) {
   const auto name = inst.mnemonic();
-  if (Ops::is_scalar_prefetch(name))
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5 && Ops::is_scalar_prefetch(name))
     return "scalar prefetch requires mode and memory-order analysis";
   // RegisterSet deliberately omits trap temporaries. Stop before silently
   // dropping either a pending result or one of its consumers.
@@ -136,6 +138,8 @@ std::optional<std::string_view> deferred_reason(const Instruction &inst,
   }
   if (is_control_flow_transfer(inst) && !is_program_path_terminator(inst))
     return "control flow requires CFG analysis";
+  if (name == "s_alloc_vgpr")
+    return "dynamic VGPR allocation requires dispatch state";
   if (name == "s_set_vgpr_msb" || name.starts_with("s_setreg") ||
       name.starts_with("s_set_gpr_idx") || name == "s_setvskip" ||
       name.starts_with("s_waitcnt_depctr") || name == "s_wait_alu") {
@@ -150,7 +154,12 @@ std::optional<std::string_view> deferred_reason(const Instruction &inst,
   if (name.starts_with("image_") || name.find("atomic") != std::string_view::npos)
     return "image and atomic operand semantics are not analyzed";
   for (const auto &event : events) {
-    if (event.check_counter_parity_order)
+    // The stream already ages BUFFER_WBL2 as a counter-only VM_CNT ACK. Its
+    // parity flag retains a source identity only in the CFG checker.
+    const bool legacy_wbl2_ack =
+        name == "buffer_wbl2" && event.kind == WaitEventKind::GlobalWb &&
+        (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4);
+    if (event.check_counter_parity_order && !legacy_wbl2_ack)
       return "counter parity ordering is not analyzed";
     if (event.counter == WaitCounterKind::Async || event.counter == WaitCounterKind::Tensor ||
         event.check_memory_order || event.barrier_id)
@@ -178,6 +187,8 @@ RegisterSet registers_for_event(const ClassifiedEvent &event, const RegisterEffe
     return effects.uses;
   case TrackedRegisterSource::VectorUses:
     return vector_registers(effects.uses);
+  case TrackedRegisterSource::VectorDefs:
+    return vector_registers(effects.defs);
   case TrackedRegisterSource::StoreDataUses: {
     const auto name = inst.mnemonic();
     const int index = name.starts_with("buffer_") || name.starts_with("tbuffer_") ? 0 : 1;
@@ -209,11 +220,17 @@ public:
 
   util::Result analyze(const Instruction &inst, std::span<const ClassifiedEvent> events,
                        uint64_t offset) {
+    const auto effects = register_effects(inst, arch_, options_.wave_size);
+    if (options_.expert_scheduling && amdgpu::supports_expert_scheduling(arch_)) {
+      const bool may_skip = state_.expert_valu_may_skip && state_.expert_delay.pending &&
+                            (inst.flags() & VALU) &&
+                            !Ops::expert_valu_issues_without_active_lanes(inst, effects.defs);
+      Ops::apply_expert_valu_delay(state_, inst, arch_, may_skip);
+    }
     if (inst.is_waitcnt())
       return Ops::apply_waitcnt(state_, inst, arch_);
     if (Ops::apply_embedded_waitcnt(state_, inst, arch_).failed())
       return util::Result::failure();
-    const auto effects = register_effects(inst, arch_, options_.wave_size);
     Ops::apply_admission(state_, inst, events, arch_);
     apply_translation_ordering(effects, events);
     if (check_dependencies(inst, effects, events, offset).failed())
@@ -221,6 +238,17 @@ public:
     for (const auto &event : events) {
       if (add_event(event, effects, inst, offset).failed())
         return util::Result::failure();
+    }
+    const bool writes_exec = effects.defs.contains({RegClass::EXEC, 0, 1});
+    if (options_.expert_scheduling && amdgpu::supports_expert_scheduling(arch_))
+      Ops::update_expert_valu_mask(state_, inst, effects.defs, options_.wave_size,
+                                   amdgpu::kVccSelectorFirst, writes_exec);
+    if (writes_exec) {
+      const bool preserves = options_.expert_scheduling && Ops::preserves_exec_lanes(inst);
+      for (auto &event : state_.pending[Ops::counter_index(WaitCounterKind::VmVsrc)]) {
+        event.implies_active_exec &= preserves;
+        event.crossed_exec_expansion = event.implies_active_exec;
+      }
     }
     return util::Result::success();
   }
@@ -235,7 +263,8 @@ private:
                                   std::span<const ClassifiedEvent> current, uint64_t offset) {
     for (const auto &pending : state_.pending) {
       for (const auto &event : pending) {
-        if (!Ops::checks_scalar_source(event.kind, inst))
+        if ((event.counter == WaitCounterKind::VaVdst && (inst.flags() & VALU)) ||
+            !Ops::checks_scalar_source(event.kind, inst))
           continue;
         std::optional<RegisterRef> reg;
         auto access = WaitcheckAccess::Read;
@@ -273,7 +302,15 @@ private:
     PendingEvent event;
     event.counter = classification.counter;
     event.kind = classification.kind;
+    if (event.kind == WaitEventKind::ValuMatrix)
+      event.wmma_wait_states = WaitcheckTarget::wmma_valu_wait_states(inst, arch_);
     event.regs = registers_for_event(classification, effects, inst);
+    if (event.counter == WaitCounterKind::VmVsrc &&
+        event.kind != WaitEventKind::Gfx10ScalarSource) {
+      if (state_.expert_exec_empty)
+        event.regs = {};
+      event.implies_active_exec = !event.regs.none();
+    }
     event.check_uses = classification.check_uses;
     event.check_defs = classification.check_defs;
     event.check_exec_defs = classification.check_exec_defs;
@@ -288,8 +325,16 @@ private:
     const auto max_wait = Ops::maximum_dependency_wait(arch_, event.counter);
     if (max_wait.failed())
       return util::Result::failure();
-    Ops::age_events(state_, event, arch_, max_wait.value(),
-                    Ops::issue_units(inst, classification, arch_));
+    const auto units = Ops::track_issue_units(state_, inst, classification, effects.defs, arch_);
+    if (!units)
+      return util::Result::success();
+    const bool vm_source = event.counter == WaitCounterKind::VmVsrc && options_.expert_scheduling;
+    // This API has no descriptor. Mode changes and S_ALLOC_VGPR end stream analysis.
+    const auto floor =
+        descriptor_vgpr_count_granule_for_wavefront(arch_, options_.wave_size).value_or(0);
+    const bool allocated = !vm_source || Ops::vm_source_results_allocated(inst, arch_, {}, floor);
+    Ops::age_events(state_, event, arch_, max_wait.value(), *units,
+                    vm_source && Ops::dedicated_source_issues(inst), allocated);
     // Counter-only operations must age older requests without accumulating a
     // dependency record of their own (notably long sequences of stores).
     if (!event.regs.none() || event.check_exec_defs || event.special_reg)
@@ -359,7 +404,7 @@ util::FailureOr<WaitcheckStreamReport> analyze_stream(std::span<const uint32_t> 
     auto events = waitcheck_detail::WaitcheckTarget::classify_events(inst, arch);
     if (events.failed())
       return util::Result::failure();
-    if (auto reason = deferred_reason(inst, events.value())) {
+    if (auto reason = deferred_reason(inst, arch, events.value())) {
       if (is_control_flow_transfer(inst) &&
           analyzer.check_control_flow_operands(inst, offset).failed())
         return emit_error.emit() << "waitcheck dependency check failed at byte " << offset;

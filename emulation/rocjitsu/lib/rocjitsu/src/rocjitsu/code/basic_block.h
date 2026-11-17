@@ -95,6 +95,10 @@ public:
 
     /// Width for wave-size-dependent destinations. Zero preserves the decoder's width.
     uint8_t wave_size = 0;
+
+    /// In a candidate closed CFG, preserve a known-zero VGPR bank state through calls.
+    /// The caller must prove the image preserves zero and discard a CFG with unknown exits.
+    bool verify_closed_zero_bank_calls = false;
   };
 
   /// @brief First missing successor, or control flow requiring indirect analysis.

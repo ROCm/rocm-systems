@@ -209,6 +209,7 @@ struct PcAddressBuilder {
     std::vector<PcAddressBuilder> *pc_builders = nullptr,
     std::span<const uint64_t> extra_split_points = {},
     std::span<const uint64_t> analysis_root_offsets = {},
-    rj_code_target_id_t target = ROCJITSU_CODE_TARGET_INVALID, uint8_t wave_size = 0);
+    rj_code_target_id_t target = ROCJITSU_CODE_TARGET_INVALID, uint8_t wave_size = 0,
+    bool verify_closed_zero_bank_calls = false);
 
 } // namespace rocjitsu

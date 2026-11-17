@@ -929,7 +929,8 @@ BasicBlock::build_cfg(const CodeObject &co, Decoder &decoder, rj_code_arch_t arc
       prepared.pc_address_builders.clear();
       prepared.indirect_targets = discover_indirect_branch_edges(
           decoded_insts, text, arch, entry_offsets, ExternalEntryPolicy::ExplicitOnly,
-          &prepared.pc_address_builders, split_points, decode_seeds, target_id, options.wave_size);
+          &prepared.pc_address_builders, split_points, decode_seeds, target_id, options.wave_size,
+          options.verify_closed_zero_bank_calls);
       analyzed_size = decoded.size();
       for (const IndirectCallFixup &fixup : prepared.indirect_targets) {
         if (!is_decoded_start(fixup.source_target_offset))

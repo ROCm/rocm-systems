@@ -74,7 +74,10 @@ bool WaitcheckTarget::flat_issues_both_counters(rj_code_arch_t arch) {
 
 uint32_t WaitcheckTarget::issue_units(const Instruction &inst, const ClassifiedEvent &event,
                                       rj_code_arch_t arch) {
-  // A scaled VOP3PX2 WMMA reserves two positions in the VA counter.
+  if (event.counter == WaitCounterKind::VaVdst &&
+      event.registers == TrackedRegisterSource::VectorUses)
+    return 0;
+  // A scaled VOP3PX2 WMMA reserves two positions in the one VA_VDST counter.
   if (event.counter == WaitCounterKind::VaVdst && inst.mnemonic().starts_with("v_wmma_scale"))
     return 2;
   const auto model = amdgpu::waitcnt_model(arch).value();
@@ -357,6 +360,21 @@ void ExpertValuDelayState::issue(const Instruction &inst, WaitEventKind kind, ui
   push_expert_delay_slot(*this, inst, kind, {kind, 0}, arch);
 }
 
+void ExpertValuDelayState::skip(const Instruction &inst, WaitEventKind kind, rj_code_arch_t arch) {
+  // An empty-EXEC VALU occupies an INSTID position without proving completion
+  // of an issue in its VA FIFO.
+  push_expert_delay_slot(*this, inst, kind, {}, arch);
+}
+
+void ExpertValuDelayState::merge(const ExpertValuDelayState &other) {
+  if (pending != other.pending)
+    pending = 0;
+  for (size_t group = 0; group < history.size(); ++group)
+    for (size_t i = 0; i < history[group].size(); ++i)
+      if (history[group][i] != other.history[group][i])
+        history[group][i] = {};
+}
+
 std::array<ExpertValuDelayState::Slot, 2> ExpertValuDelayState::before(const Instruction &inst,
                                                                        rj_code_arch_t arch) {
   std::array<Slot, 2> result{};
@@ -403,6 +421,18 @@ uint8_t WaitcheckTarget::wmma_valu_wait_states(const Instruction &inst, rj_code_
       (name.ends_with("_16x16x32_f16") || name.ends_with("_16x16x32_bf16")))
     return target == ROCJITSU_CODE_TARGET_GFX1250 ? 4 : 8;
   return 0;
+}
+
+bool WaitcheckTarget::expert_valu_issues_without_active_lanes(const Instruction &inst,
+                                                         const RegisterSet &defs) {
+  const auto name = inst.mnemonic();
+  return defs.intersects({RegClass::SGPR, 0, REGISTER_SET_MAX_SGPRS}) ||
+         defs.contains({RegClass::VCC, 0, 1}) || name.starts_with("v_cmp_") ||
+         name == "v_add_co_ci_u32_e32" || name == "v_sub_co_ci_u32_e32" ||
+         name == "v_subrev_co_ci_u32_e32" || name.starts_with("v_wmma_") ||
+         name.starts_with("v_swmmac_") || name.starts_with("v_nop") ||
+         name.starts_with("v_pipeflush") || name.starts_with("v_readlane") ||
+         name.starts_with("v_readfirstlane") || name.starts_with("v_writelane");
 }
 
 std::optional<WaitEventKind> WaitcheckTarget::expert_valu_kind(const Instruction &inst,
@@ -469,6 +499,13 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
     return util::Result::failure();
   if (auto source = gfx10_scalar_source(inst, arch))
     events.push_back(*source);
+  if (const auto kind = expert_valu_kind(inst, arch)) {
+    // Separate operand lifetimes share one hardware issue position. The read
+    // facet carries no additional credits (see issue_units).
+    events.emplace_back(WaitCounterKind::VaVdst, *kind, TrackedRegisterSource::VectorDefs);
+    events.emplace_back(WaitCounterKind::VaVdst, *kind, TrackedRegisterSource::VectorUses,
+                        /*check_uses=*/false, /*check_defs=*/true);
+  }
   return util::Result::success();
 }
 
@@ -566,7 +603,13 @@ util::Result WaitcheckTarget::classify_memory_events_into(const Instruction &ins
 
   if (mnemonic == "global_inv" || mnemonic == "buffer_inv" || mnemonic == "buffer_wbl2") {
     const auto kind = mnemonic == "buffer_wbl2" ? WaitEventKind::GlobalWb : WaitEventKind::GlobalInv;
-    events.emplace_back(WaitCounterKind::Load, kind, TrackedRegisterSource::None, false, false);
+    const bool legacy_wbl2 = mnemonic == "buffer_wbl2" &&
+                             (arch == ROCJITSU_CODE_ARCH_CDNA2 ||
+                              arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4);
+    // Keep the writeback ACK in parity state so a following vmcnt(0) can be
+    // attributed to its completion, even when no register payload is present.
+    events.emplace_back(WaitCounterKind::Load, kind, TrackedRegisterSource::None, false, false,
+                        false, std::nullopt, std::nullopt, false, false, legacy_wbl2);
     return util::Result::success();
   }
 

@@ -112,11 +112,15 @@ struct ExpertValuDelayState {
   struct Slot {
     WaitEventKind kind = WaitEventKind::Unknown;
     uint8_t units = 0;
+    bool operator==(const Slot &) const = default;
   };
   std::array<std::array<Slot, 4>, 2> history{};
   uint16_t pending = 0;
   void issue(const Instruction &inst, WaitEventKind kind, uint8_t units, rj_code_arch_t arch);
+  void skip(const Instruction &inst, WaitEventKind kind, rj_code_arch_t arch);
+  void merge(const ExpertValuDelayState &other);
   std::array<Slot, 2> before(const Instruction &inst, rj_code_arch_t arch);
+  bool operator==(const ExpertValuDelayState &) const = default;
 };
 
 enum class TrackedRegisterSource {
@@ -124,6 +128,7 @@ enum class TrackedRegisterSource {
   Defs,
   Uses,
   VectorUses,
+  VectorDefs,
   StoreDataUses,
 };
 
@@ -178,6 +183,8 @@ struct WaitcheckTarget : WaitCounterPolicy {
                                                                           rj_code_arch_t arch);
   [[nodiscard]] static std::optional<WaitEventKind> expert_valu_kind(const Instruction &inst,
                                                                      rj_code_arch_t arch);
+  [[nodiscard]] static bool expert_valu_issues_without_active_lanes(const Instruction &inst,
+                                                               const RegisterSet &defs);
   // The longest documented WMMA-to-VALU overlap window across CDNA5 targets.
   [[nodiscard]] static uint8_t
   wmma_valu_wait_states(const Instruction &inst, rj_code_arch_t arch,
@@ -185,7 +192,7 @@ struct WaitcheckTarget : WaitCounterPolicy {
   // A wait through this threshold completes more core positions than WMMA can
   // overlap. Zero is always sufficient because it drains the matrix pipeline.
   [[nodiscard]] static constexpr uint64_t wmma_core_wait_bound(uint64_t younger_core,
-                                                              uint8_t window) {
+                                                               uint8_t window) {
     return window && younger_core > window ? younger_core - window - 1 : 0;
   }
   [[nodiscard]] static bool checks_scalar_source(WaitEventKind kind, const Instruction &inst);

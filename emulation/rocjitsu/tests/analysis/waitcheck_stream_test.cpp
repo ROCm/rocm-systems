@@ -588,6 +588,81 @@ TEST(WaitcheckStream, LdsOrderDoesNotEndExpertModeDsSourceLifetimes) {
   }
 }
 
+TEST(WaitcheckStream, ExpertEmptyExecValuConsumesOnlyAnInstructionPosition) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    for (const uint32_t mask : {0xbefe0080u, 0xbefe0081u, 0xbefe0007u}) {
+      Program delayed{0xbefe0081, v_mov(8, 3), mask, 0xbf870001, v_mov(22, 23), 0xbefe0081};
+      load(delayed, 9);
+      const auto delayed_report = analyze(delayed, arch, true, 32);
+      ASSERT_FALSE(delayed_report.incomplete);
+      EXPECT_EQ(std::ranges::any_of(delayed_report.diagnostics,
+                                    [](const auto &diag) {
+                                      return diag.counter == amdgpu::WaitCounterKind::VaVdst &&
+                                             diag.reg.index == 8;
+                                    }),
+                mask != 0xbefe0081);
+      // DEP2 selects the older instruction; the optional younger write to v8
+      // can still be live when the restored wave reads it.
+      Program younger{0xbefe0081, v_mov(22, 23), mask,         v_mov(8, 3),
+                      0xbefe0081, 0xbf870002,    v_mov(16, 18)};
+      load(younger, 9);
+      const auto younger_report = analyze(younger, arch, true, 32);
+      ASSERT_FALSE(younger_report.incomplete);
+      EXPECT_EQ(std::ranges::any_of(younger_report.diagnostics,
+                                    [](const auto &diag) {
+                                      return diag.counter == amdgpu::WaitCounterKind::VaVdst &&
+                                             diag.reg.index == 8;
+                                    }),
+                mask != 0xbefe0080);
+      for (const auto tag : {0u, 1u, 2u}) {
+        Program program{0xbefe0081, v_mov(8, 3),       mask,         v_mov(22, 23),
+                        0xbefe0081, 0xbf870000u | tag, v_mov(16, 18)};
+        load(program, 9); // Uses the earlier v8 as its address.
+        const auto report = analyze(program, arch, true, 32);
+        ASSERT_FALSE(report.incomplete);
+        const bool completed = (tag == 2 && mask != 0xbefe0007) || (tag == 1 && mask == 0xbefe0081);
+        const auto observer = std::ranges::find_if(report.diagnostics, [](const auto &diag) {
+          return diag.counter == amdgpu::WaitCounterKind::VaVdst && diag.reg.index == 8;
+        });
+        EXPECT_EQ(observer == report.diagnostics.end(), completed);
+        if (observer != report.diagnostics.end())
+          EXPECT_EQ(observer->required_count, mask == 0xbefe0081 ? 2u : 1u);
+      }
+    }
+  }
+}
+
+TEST(WaitcheckStream, ExpertEmptyExecLoadCountsWithoutReadingAnAddressRegister) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    for (uint32_t wave_size : {32u, 64u}) {
+      for (uint32_t count : {0u, 1u, 2u}) {
+        SCOPED_TRACE(testing::Message() << arch << '/' << wave_size << '/' << count);
+        Program program;
+        load(program, 2);
+        program.push_back(0xbefe0080); // s_mov_b32 exec_lo, 0.
+        const auto younger = program.size() * sizeof(uint32_t);
+        load(program, 3);
+        program.push_back(0xbf88ff83u | (count << 2)); // s_wait_alu depctr_vm_vsrc(count).
+        program.push_back(0xbefe0081);                 // s_mov_b32 exec_lo, 1.
+        program.push_back(v_mov(8, 13));
+        const auto report = analyze(program, arch, true, wave_size);
+        ASSERT_FALSE(report.incomplete);
+        std::vector<std::pair<uint64_t, uint32_t>> sources;
+        for (const auto &d : report.diagnostics)
+          if (d.counter == amdgpu::WaitCounterKind::VmVsrc)
+            sources.emplace_back(d.producer_offset, d.required_count);
+        std::vector<std::pair<uint64_t, uint32_t>> expected;
+        if (count > 1)
+          expected.emplace_back(0, 1);
+        // Writing EXEC_LO alone leaves the upper lanes possible in wave64.
+        if (wave_size == 64 && count > 0)
+          expected.emplace_back(younger, 0);
+        EXPECT_EQ(sources, expected);
+      }
+    }
+  }
+}
+
 TEST(WaitcheckStream, UnorderedVmemWritebackRequiresAWait) {
   for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
     for (bool waited : {false, true}) {
@@ -684,6 +759,31 @@ TEST(WaitcheckStream, TrapTemporaryUsesAndOverwritesAreIncomplete) {
     EXPECT_EQ(report.incomplete->offset, 0u);
     EXPECT_EQ(report.instructions_analyzed, 0u);
   }
+}
+
+TEST(WaitcheckStream, ScalarPrefetchRequiresModeAndMemoryOrderAnalysis) {
+  for (auto opcode : {cdna5::kSPrefetchInstSmem, cdna5::kSPrefetchInstPcRelSmem,
+                      cdna5::kSPrefetchDataSmem, cdna5::kSBufferPrefetchDataSmem,
+                      cdna5::kSPrefetchDataPcRelSmem}) {
+    SCOPED_TRACE(opcode);
+    Program program;
+    load(program, 4);
+    const auto offset = program.size() * sizeof(uint32_t);
+    append(program, cdna5::build_smem(opcode, {.sbase = 2, .soffset = 124}));
+    program.push_back(v_mov(8, 10));
+    const auto report = analyze(program, ROCJITSU_CODE_ARCH_CDNA5);
+    ASSERT_TRUE(report.incomplete);
+    EXPECT_EQ(report.incomplete->offset, offset);
+    EXPECT_EQ(report.instructions_analyzed, 1u);
+  }
+  Program rdna_program;
+  append(rdna_program, rdna4::build_smem(rdna4::kSPrefetchDataSmem, {.sbase = 2, .soffset = 124}));
+  ds_load(rdna_program, ROCJITSU_CODE_ARCH_RDNA4, 8);
+  rdna_program.push_back(v_mov(8, 10));
+  const auto report = analyze(rdna_program, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_FALSE(report.incomplete);
+  ASSERT_EQ(report.diagnostics.size(), 1u);
+  EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 8, 1}));
 }
 
 TEST(WaitcheckStream, ScalarBufferStoresUseDecodedDataAndDescriptorWidths) {
@@ -823,6 +923,54 @@ TEST(WaitcheckStream, FlatLoadSourcesRequireBothCompletionRoutes) {
       }
     }
   }
+}
+
+TEST(WaitcheckStream, PartialStoreWaitReleasesOnlyTheOlderStoreSource) {
+  for (const uint32_t dst : {5u, 11u}) {
+    Program program = {0xbefe0081u, 0xee06807cu, 0x2800000u,  0x10u,         0xee06807cu,
+                       0x5800000u,  0x12u,       0xbfc10001u, v_mov(dst, 25)};
+    for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+      if (arch == ROCJITSU_CODE_ARCH_CDNA5)
+        program.insert(program.end() - 1, 0xbfc50000u); // XCNT(0)
+      const auto report = analyze(program, arch, true, 32);
+      ASSERT_FALSE(report.incomplete);
+      const auto it =
+          std::find_if(report.diagnostics.begin(), report.diagnostics.end(),
+                       [](const auto &d) { return d.counter == amdgpu::WaitCounterKind::VmVsrc; });
+      EXPECT_EQ(it != report.diagnostics.end(), dst == 11);
+      if (it != report.diagnostics.end())
+        EXPECT_EQ(it->required_count, 0u);
+    }
+  }
+}
+
+TEST(WaitcheckStream, DynamicVgprAllocationStopsBeforeCreditingYoungerMemorySources) {
+  // Active global_store v0, scratch_load v[4:7], VM_VSRC(1), then overwrite v0.
+  Program fixed = {0xbefe0081u, 0xee06807cu, 0, 2, 0xed05c07cu, 4, 0,
+                   0xbf88ff87u, v_mov(0, 1), 0xbfc00000u, 0xbfc10000u, 0xbfb00000u};
+  auto resized = fixed;
+  resized.insert(resized.begin() + 7, 0xbe805390u); // s_alloc_vgpr 16
+  resized.insert(resized.begin() + 4, 0xbe805380u); // s_alloc_vgpr 0
+  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    for (const bool expert : {false, true}) {
+      const auto report = analyze(resized, arch, expert, 32);
+      ASSERT_TRUE(report.incomplete);
+      EXPECT_EQ(report.instructions_analyzed, 2u);
+      EXPECT_EQ(report.incomplete->offset, 0x10u);
+      EXPECT_EQ(report.incomplete->reason, "dynamic VGPR allocation requires dispatch state");
+      EXPECT_TRUE(report.diagnostics.empty());
+    }
+  }
+
+  const auto covered = analyze(fixed, ROCJITSU_CODE_ARCH_RDNA4, true, 32);
+  EXPECT_FALSE(covered.incomplete);
+  EXPECT_TRUE(covered.diagnostics.empty());
+  fixed[7] = 0xbf88ff8bu; // VM_VSRC(2) leaves the store source live.
+  const auto pending = analyze(fixed, ROCJITSU_CODE_ARCH_RDNA4, true, 32);
+  EXPECT_FALSE(pending.incomplete);
+  ASSERT_EQ(pending.diagnostics.size(), 1u);
+  EXPECT_EQ(pending.diagnostics[0].counter, amdgpu::WaitCounterKind::VmVsrc);
+  EXPECT_EQ(pending.diagnostics[0].required_count, 1u);
 }
 
 TEST(WaitcheckStream, ExpertModeProtectsVmemAddressSources) {

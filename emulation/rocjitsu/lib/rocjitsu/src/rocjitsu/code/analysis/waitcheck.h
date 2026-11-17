@@ -159,6 +159,9 @@ struct WaitcheckKernelInfo {
   /// Kernel argument SGPR pair and byte extent common to the descriptors.
   std::optional<uint16_t> kernarg_sgpr = std::nullopt;
   uint32_t kernarg_size = 0;
+  /// Largest ordinary and accumulator banks across CDNA descriptors. A zero
+  /// ordinary limit denotes missing descriptor evidence.
+  uint16_t max_memory_vgprs = 0, max_memory_acc_vgprs = 0;
 };
 
 /// @brief Result of one waitcheck analysis run.

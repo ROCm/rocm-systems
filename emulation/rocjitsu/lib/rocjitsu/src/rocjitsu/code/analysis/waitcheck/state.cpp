@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/analysis/waitcheck/state.h"
+#include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
 
@@ -9,6 +12,54 @@
 #include <tuple>
 
 namespace rocjitsu::waitcheck_detail {
+
+bool WaitcheckStateOps::tracks_d16_subregisters(rj_code_arch_t arch, uint32_t flags,
+                                                uint8_t hsa_abi) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
+      arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
+      arch == ROCJITSU_CODE_ARCH_CDNA5) {
+    const auto machine = flags & EF_AMDGPU_MACH;
+    // Vega 10 and Renoir do not support SRAM ECC. On ECC-capable machines,
+    // only an image explicitly compiled for ECC off proves half writeback.
+    return (arch == ROCJITSU_CODE_ARCH_CDNA1 &&
+            (machine == EF_AMDGPU_MACH_AMDGCN_GFX900 || machine == EF_AMDGPU_MACH_AMDGCN_GFX90C)) ||
+           (hsa_abi >= ELFABIVERSION_AMDGPU_HSA_V4 && hsa_abi <= ELFABIVERSION_AMDGPU_HSA_V6 &&
+            (flags & EF_AMDGPU_FEATURE_SRAMECC_V4) == EF_AMDGPU_FEATURE_SRAMECC_OFF_V4);
+  }
+  // These families preserve the unselected half at memory writeback. VALU
+  // operand uses remain conservative when their selection is unknown.
+  return arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA4;
+}
+
+std::optional<PartialRegisterAccess>
+WaitcheckStateOps::partial_d16_load_def(const Instruction &inst, bool tracks_halves) {
+  if (!tracks_halves || !inst.is_memory_op())
+    return std::nullopt;
+
+  const std::string_view mnemonic = inst.mnemonic();
+  if ((mnemonic.find("load") == std::string_view::npos && !mnemonic.starts_with("ds_read_")) ||
+      mnemonic.find("d16") == std::string_view::npos)
+    return std::nullopt;
+
+  // Packed format XY produces two half values in one full destination VGPR.
+  // Image D16 results depend on the component mask and resource format.
+  if (mnemonic.starts_with("image_") || mnemonic.find("format_xy") != std::string_view::npos ||
+      mnemonic.find("format_d16_xy") != std::string_view::npos)
+    return std::nullopt;
+
+  const Operand *dst = inst.dst_operand(0);
+  if (!dst)
+    return std::nullopt;
+  auto ref = dst->to_register_ref();
+  if (!ref || ref->cls != RegClass::VGPR || ref->width != 1)
+    return std::nullopt;
+
+  const uint8_t mask =
+      mnemonic.find("d16_hi") != std::string_view::npos ? kVgprHigh16Mask : kVgprLow16Mask;
+  return PartialRegisterAccess{*ref, mask};
+}
 
 bool WaitcheckStateOps::is_completion_counter(WaitCounterKind counter) {
   return counter != WaitCounterKind::X && counter != WaitCounterKind::VmVsrc &&
@@ -77,13 +128,20 @@ void WaitcheckStateOps::apply_admission(PendingState &state, const Instruction &
                                         std::span<const ClassifiedEvent> events,
                                         rj_code_arch_t arch) {
   for (const auto &event : events) {
-    if (!is_completion_counter(event.counter) ||
-        has_conditional_issue(event.counter, event.kind, arch, state.exec_nonzero))
+    const bool translation = event.counter == WaitCounterKind::X;
+    if (translation) {
+      // A definite CDNA5 VMEM translation reserves one of 63 ordered X positions.
+      if (arch != ROCJITSU_CODE_ARCH_CDNA5 || !is_xcnt_vmem_kind(event.kind) ||
+          !state.exec_nonzero || has_xcnt_smem(state))
+        continue;
+    } else if (!is_completion_counter(event.counter) ||
+               has_conditional_issue(event.counter, event.kind, arch, state.exec_nonzero)) {
       continue;
+    }
     // The incoming instruction must reserve all its credits before accessing
     // its registers. Only guaranteed younger members of an ordered FIFO count.
     const auto capacity = maximum_dependency_wait(arch, event.counter).value() + 1;
-    const uint32_t remaining = capacity - issue_units(inst, event, arch);
+    const uint32_t remaining = capacity - (translation ? 1 : issue_units(inst, event, arch));
     const auto idx = counter_index(event.counter);
     const bool reaches_capacity =
         std::ranges::any_of(
@@ -92,6 +150,11 @@ void WaitcheckStateOps::apply_admission(PendingState &state, const Instruction &
         std::ranges::any_of(state.pending_event_ages[idx].values, [&](uint8_t age) {
           return age != kNoPendingEventAge && age >= remaining;
         });
+    if (translation) {
+      if (reaches_capacity)
+        apply_xcnt_group_wait(state, remaining);
+      continue;
+    }
     const auto &translations = state.pending[counter_index(WaitCounterKind::X)];
     const bool releases_translation = std::ranges::any_of(translations, [&](const auto &pending) {
       return vm_vsrc_event_implied_by_wait(pending.kind, event.counter) &&
@@ -102,23 +165,280 @@ void WaitcheckStateOps::apply_admission(PendingState &state, const Instruction &
   }
 }
 
+void WaitcheckStateOps::apply_expert_valu_delay(PendingState &state, const Instruction &inst,
+                                                rj_code_arch_t arch, bool may_skip) {
+  const auto selected = state.expert_delay.before(inst, arch);
+  if (may_skip)
+    return;
+  const size_t va = counter_index(WaitCounterKind::VaVdst);
+  for (const auto [kind, younger] : selected) {
+    if (kind == WaitEventKind::Unknown)
+      continue;
+    std::erase_if(state.pending[va], [&](const PendingEvent &event) {
+      if (event.kind == kind)
+        return event.min_younger >= younger;
+      // A completed core VALU past the WMMA coexecution window also
+      // completes the older matrix operation and releases its operands.
+      return kind == WaitEventKind::ValuCore && event.wmma_wait_states &&
+             event.min_younger_core > event.wmma_wait_states + younger;
+    });
+    auto &age = state.pending_event_ages[va].values[static_cast<size_t>(kind)];
+    if (age != kNoPendingEventAge && age >= younger)
+      age = kNoPendingEventAge;
+  }
+}
+
+std::optional<bool> WaitcheckStateOps::constant_exec_nonzero(const Instruction &inst,
+                                                             uint32_t wave_size) {
+  const auto name = inst.mnemonic();
+  if (name != "s_mov_b64" && name != "s_mov_b32")
+    return std::nullopt;
+  const auto *dst = inst.dst_operand(0);
+  const auto *src = inst.src_operand(0);
+  if (!dst || !dst->has_register_selector() ||
+      dst->encoding_value() != static_cast<int>(amdgpu::kExecSelectorFirst) || !src)
+    return std::nullopt;
+  const auto value = src->const_value();
+  if (!value)
+    return std::nullopt;
+  if (static_cast<uint32_t>(*value) != 0 || (name == "s_mov_b64" && wave_size == 64 && *value != 0))
+    return true;
+  if (wave_size == 32 || name == "s_mov_b64")
+    return false;
+  return std::nullopt;
+}
+
+void WaitcheckStateOps::update_expert_valu_mask(PendingState &state, const Instruction &inst,
+                                                const RegisterSet &defs, uint32_t wave_size,
+                                                uint32_t allocated_sgprs, bool writes_exec) {
+  if (wave_size != 32) {
+    if (writes_exec) {
+      const auto nonzero = constant_exec_nonzero(inst, wave_size);
+      state.expert_exec_empty = nonzero == false;
+      state.expert_exec_nonzero = nonzero == true;
+      state.expert_valu_may_skip = !state.expert_exec_nonzero;
+    }
+    return;
+  }
+  auto &saved = state.expert_saved_nonzero_exec;
+  const auto *dst = inst.dst_operand(0);
+  const auto *src = inst.src_operand(0);
+  const auto low_exec = [](const Operand *op) {
+    return op && op->has_register_selector() && op->encoding_value() == amdgpu::kExecSelectorFirst;
+  };
+  const auto saved_selector = [](const Operand *op) -> std::optional<unsigned> {
+    if (op && op->has_register_selector() &&
+        static_cast<unsigned>(op->encoding_value()) <= amdgpu::kVccSelectorLast)
+      return static_cast<unsigned>(op->encoding_value());
+    return std::nullopt;
+  };
+  bool restore = false;
+  const auto name = inst.mnemonic();
+  if (saved.any()) {
+    if (low_exec(dst) &&
+        (name == "s_mov_b32" || (name == "s_or_b32" && preserves_exec_lanes(inst)))) {
+      for (int i = 0; i < inst.num_src_operands(); ++i) {
+        const auto selector = saved_selector(inst.src_operand(i));
+        restore |= selector && saved.test(*selector);
+      }
+    }
+    if (saved.test(amdgpu::kVccSelectorFirst) || saved.test(amdgpu::kVccSelectorLast)) {
+      // VOPC and VOP2 carry use fieldless VCC destinations. RegisterSet also
+      // represents both scalar halves as one alias, so kill both conservatively.
+      bool writes_vcc = defs.contains({RegClass::VCC, 0, 1});
+      for (int i = 0; !writes_vcc && i < inst.num_dst_operands(); ++i) {
+        const auto *op = inst.dst_operand(i);
+        writes_vcc = op && op->to_special_reg_class() == RegClass::VCC;
+      }
+      if (writes_vcc) {
+        saved.reset(amdgpu::kVccSelectorFirst);
+        saved.reset(amdgpu::kVccSelectorLast);
+      }
+    }
+    if ((inst.flags() & INDIRECT_CALL) || name.starts_with("s_call") ||
+        name.starts_with("s_movrel") || name.starts_with("s_setpc") ||
+        name.starts_with("s_set_pc") || name.starts_with("s_rfe"))
+      saved.reset();
+    else
+      defs.for_each([&](RegisterRef reg) {
+        if (reg.cls == RegClass::SGPR)
+          for (unsigned i = reg.index; i < reg.index + reg.width && i < saved.size(); ++i)
+            saved.reset(i);
+      });
+  }
+  const bool copies_exec = name == "s_mov_b32" && low_exec(src);
+  if (state.expert_exec_nonzero && (name == "s_and_saveexec_b32" || copies_exec)) {
+    const auto selector = saved_selector(dst);
+    const bool vcc = selector && *selector >= amdgpu::kVccSelectorFirst;
+    if (selector && (*selector < allocated_sgprs || vcc)) {
+      const RegisterRef reg{
+          vcc ? RegClass::VCC : RegClass::SGPR,
+          static_cast<uint16_t>(vcc ? *selector - amdgpu::kVccSelectorFirst : *selector), 1};
+      const bool pending = std::ranges::any_of(state.pending, [&](const auto &queue) {
+        return std::ranges::any_of(queue, [&](const PendingEvent &event) {
+          return (event.check_uses || event.check_defs) && event.regs.contains(reg);
+        });
+      });
+      const bool unstable = vcc ? state.sgpr_hazards.vcc_hazard != 0
+                                : (state.sgpr_hazards.valu_hazards.test(*selector) ||
+                                   state.sgpr_hazards.salu_hazards.test(*selector));
+      if (!pending && !unstable)
+        saved.set(*selector);
+    }
+  }
+  if (!writes_exec)
+    return;
+  const auto nonzero = constant_exec_nonzero(inst, wave_size);
+  state.expert_exec_empty = nonzero == false;
+  state.expert_exec_nonzero =
+      nonzero == true || restore || (state.expert_exec_nonzero && preserves_exec_lanes(inst));
+  state.expert_valu_may_skip = !state.expert_exec_nonzero;
+}
+
+std::optional<uint32_t> WaitcheckStateOps::track_issue_units(PendingState &state,
+                                                             const Instruction &inst,
+                                                             const ClassifiedEvent &event,
+                                                             const RegisterSet &defs,
+                                                             rj_code_arch_t arch) {
+  const auto units = issue_units(inst, event, arch);
+  if (event.counter != WaitCounterKind::VaVdst)
+    return units;
+  if (!state.expert_valu_may_skip || expert_valu_issues_without_active_lanes(inst, defs)) {
+    state.expert_delay.issue(inst, event.kind, units, arch);
+    return units;
+  }
+  if (state.expert_exec_empty) {
+    if (units)
+      state.expert_delay.skip(inst, event.kind, arch);
+    return std::nullopt;
+  }
+  if (units) {
+    // If this producer is live it issued. Older delay selections must still
+    // distinguish its younger operand from the FIFO entry they complete.
+    auto skipped = state.expert_delay;
+    skipped.skip(inst, event.kind, arch);
+    state.expert_delay.issue(inst, event.kind, units, arch);
+    state.expert_delay.merge(skipped);
+  }
+  return 0;
+}
+
+bool WaitcheckStateOps::preserves_exec_lanes(const Instruction &inst) {
+  const auto name = inst.mnemonic();
+  if (name != "s_or_b32" && name != "s_or_b64")
+    return false;
+  const auto *dst = inst.dst_operand(0);
+  if (!dst || !dst->has_register_selector())
+    return false;
+  const auto selector = dst->encoding_value();
+  if (selector != amdgpu::kExecSelectorFirst &&
+      !(name == "s_or_b32" && selector == amdgpu::kExecSelectorFirst + 1))
+    return false;
+  // The unmodified half is preserved too. The second operand may have any value.
+  for (int i = 0; i < inst.num_src_operands(); ++i) {
+    const auto *op = inst.src_operand(i);
+    if (op->has_register_selector() && op->encoding_value() == selector)
+      return true;
+  }
+  return false;
+}
+
+bool WaitcheckStateOps::vm_source_results_allocated(const Instruction &inst, rj_code_arch_t arch,
+                                                    const VgprMsbState &banks, uint32_t min_vgprs) {
+  for (int i = 0; i < inst.num_dst_operands(); ++i) {
+    const auto *dst = inst.dst_operand(i);
+    const auto reg = dst->decoded_vgpr();
+    if (!reg)
+      continue;
+    // Complex memory encodings can return an extra status word or a variable number
+    // of results. Leave their issue conditional unless an older primary forces it.
+    if (!(inst.flags() & SIMPLE_MEMORY_RESULT) || (inst.flags() & RESERVES_UNWRITTEN_VGPR))
+      return false;
+    uint32_t base = reg->index;
+    if (arch == ROCJITSU_CODE_ARCH_CDNA5 && dst->vgpr_msb_role() != amdgpu::VgprMsbRole::None)
+      base += 256u * (banks.known ? banks.for_role(dst->vgpr_msb_role()) : 3u);
+    if (base + reg->width > min_vgprs)
+      return false;
+  }
+  return true;
+}
+
+bool WaitcheckStateOps::dedicated_source_issues(const Instruction &inst) {
+  const auto name = inst.mnemonic();
+  if (name.starts_with("global_store_") || name.starts_with("scratch_store_"))
+    return inst.num_dst_operands() == 0 || !inst.dst_operand(0)->decoded_vgpr();
+  return (name.starts_with("global_load_") || name.starts_with("scratch_load_")) &&
+         (inst.flags() & SIMPLE_MEMORY_RESULT) && inst.num_dst_operands() == 1 &&
+         inst.dst_operand(0)->decoded_vgpr().has_value();
+}
+
+uint8_t WaitcheckStateOps::dedicated_source_primary(WaitEventKind kind) {
+  if (kind == WaitEventKind::VmemNoSamplerLoad)
+    return 1;
+  return kind == WaitEventKind::VmemStore ? 2 : 0;
+}
+
+bool WaitcheckStateOps::pending_source_forces_issue(WaitEventKind older, WaitEventKind younger,
+                                                    bool empty_exec) {
+  // A live operand implies its primary queue has not completed. Dedicated
+  // reads, writes, samples and BVH requests have separate primary counters
+  // even though they share a source FIFO (RDNA4/CDNA5 ISA 3.2.2.1).
+  if (has_conditional_route(older) && has_conditional_route(younger))
+    return empty_exec; // Either live FLAT route prevents an empty-EXEC skip.
+  return older == younger &&
+         (older == WaitEventKind::Ds || older == WaitEventKind::VmemNoSamplerLoad ||
+          older == WaitEventKind::VmemStore || older == WaitEventKind::Sample ||
+          older == WaitEventKind::Bvh);
+}
+
 void WaitcheckStateOps::age_events(PendingState &state, const PendingEvent &event,
-                                   rj_code_arch_t arch, uint32_t maximum_wait, uint32_t units) {
+                                   rj_code_arch_t arch, uint32_t maximum_wait, uint32_t units,
+                                   bool expanded_source_issues, bool results_allocated) {
   const size_t idx = counter_index(event.counter);
   const uint32_t max_age = event.counter == WaitCounterKind::VmVsrc ? 62 : maximum_wait;
   const bool completion = is_completion_counter(event.counter);
   const auto incoming =
       completion ? guaranteed_issue_order(event.counter, event.kind, arch, state.exec_nonzero)
                  : std::nullopt;
-  auto age = [&](WaitEventKind older, auto &value) {
+  const bool expert_source =
+      event.counter == WaitCounterKind::VmVsrc && arch != ROCJITSU_CODE_ARCH_RDNA1;
+  const auto same_source_order = [&](WaitEventKind older) {
+    const auto model = amdgpu::waitcnt_model(arch).value();
+    return normalized_hardware_event_kind(event.counter, older, model) ==
+           normalized_hardware_event_kind(event.counter, event.kind, model);
+  };
+  auto age = [&](WaitEventKind older, auto &value, bool active_source = false,
+                 bool primary_live = false) {
     // Direct async VMEM may need to retain its sources for replay. Its X
     // position is unqualified, so neither side can use it to prove X ordering.
     if (event.counter == WaitCounterKind::X &&
         (is_async_transfer_kind(event.kind) || is_async_transfer_kind(older)))
       return;
+    if (event.counter == WaitCounterKind::VaVdst && older != event.kind)
+      return;
+    if (expert_source) {
+      // The single VM_VSRC bound applies separately to each FIFO. An
+      // unrelated PIPE cannot make an earlier source arbitrarily young.
+      if (!same_source_order(older))
+        return;
+      if (!primary_live &&
+          !pending_source_forces_issue(older, event.kind, state.expert_exec_empty) &&
+          !(results_allocated && (state.exec_nonzero || active_source)))
+        return;
+    }
     if (!completion || (incoming && completion_order_kind(event.counter, older, arch) == incoming))
       value = std::min<uint32_t>(value + units, max_age);
   };
+  // Stores have a primary counter position without a register-result event. A
+  // live dedicated store source implies its STORECNT is still outstanding, so
+  // even a dedicated store with empty EXEC must issue its primary position.
+  if (event.counter == WaitCounterKind::Store && event.kind == WaitEventKind::VmemStore &&
+      amdgpu::supports_expert_scheduling(arch)) {
+    for (auto &source : state.pending[counter_index(WaitCounterKind::VmVsrc)])
+      if (source.kind == WaitEventKind::VmemStore)
+        source.min_younger_primary =
+            std::min<uint32_t>(maximum_wait, source.min_younger_primary + units);
+  }
   if (arch == ROCJITSU_CODE_ARCH_CDNA5 && incoming) {
     // X and primary sequence numbers diverge as soon as different VMEM families
     // interleave. Count only definitely-issued younger credits in the same FIFO.
@@ -127,7 +447,14 @@ void WaitcheckStateOps::age_events(PendingState &state, const PendingEvent &even
           (is_async_transfer_kind(translation.kind) && event.counter == WaitCounterKind::Async) ||
           (is_xcnt_vmem_event(translation) &&
            vm_vsrc_event_implied_by_wait(translation.kind, event.counter));
-      if (same_completion && !has_conditional_route(translation.kind) &&
+      // An outstanding routed FLAT source implies a live completion queue.
+      // Another FLAT of the same family occupies both queues on gfx1250,
+      // even when its lanes select a different route. Count it once on its
+      // VMEM facet. Either FIFO can then certify the same minimum age.
+      const bool same_flat = has_conditional_route(translation.kind) &&
+                             translation.kind == event.kind &&
+                             event.counter != WaitCounterKind::Ds;
+      if (same_completion && (!has_conditional_route(translation.kind) || same_flat) &&
           completion_order_kind(event.counter, translation.kind, arch) == incoming)
         translation.min_younger_primary =
             std::min<uint32_t>(maximum_wait, translation.min_younger_primary + units);
@@ -139,13 +466,27 @@ void WaitcheckStateOps::age_events(PendingState &state, const PendingEvent &even
       age(static_cast<WaitEventKind>(kind), ages[kind]);
   ages[static_cast<size_t>(event.kind)] = 0;
   for (auto &pending : state.pending[idx]) {
+    if (pending.wmma_wait_states && event.kind == WaitEventKind::ValuCore && units) {
+      // One core VALU is one instruction-position and one VA_VDST credit.
+      pending.min_younger_core = static_cast<uint8_t>(std::min<uint32_t>(
+          pending.min_younger_core + 1, pending.wmma_wait_states + maximum_wait + 1));
+    }
     if (!incoming && pending.implies_active_exec &&
         gfx11_flat_ds(event.counter, event.kind, arch) &&
         completion_order_kind(event.counter, pending.kind, arch) ==
             completion_order_kind(event.counter, event.kind, arch))
       pending.min_younger = std::min<uint32_t>(pending.min_younger + units, max_age);
-    else
-      age(pending.kind, pending.min_younger);
+    else {
+      const bool active = pending.implies_active_exec &&
+                          (!pending.crossed_exec_expansion || expanded_source_issues);
+      const uint8_t primary = dedicated_source_primary(event.kind);
+      age(pending.kind, pending.min_younger, active, pending.younger_source_primaries & primary);
+      // A potentially pending earlier store is not evidence. The active
+      // source must be younger than this one on the same ordered VM FIFO.
+      if (expert_source && primary && (state.exec_nonzero || active) && expanded_source_issues &&
+          results_allocated && !event.regs.none() && same_source_order(pending.kind))
+        pending.younger_source_primaries |= primary;
+    }
   }
 }
 
@@ -240,19 +581,33 @@ bool WaitcheckStateOps::event_identity_less(const PendingEvent &lhs, const Pendi
   return register_set_less(lhs.regs, rhs.regs);
 }
 
+void VaVdstHazardState::merge_hazard(Key key, const VaVdstHazard &hazard) {
+  auto [it, inserted] = hazards.try_emplace(key, hazard);
+  if (!inserted && hazard < it->second)
+    it->second = hazard;
+}
+
+std::pair<const VaVdstHazard *, uint32_t> VaVdstHazardState::requirement(uint16_t reg) const {
+  if (auto it = hazards.find({reg, true}); it != hazards.end())
+    return {&it->second, 0};
+  if (auto it = hazards.find({reg, false}); it != hazards.end())
+    return {&it->second, it->second.age};
+  return {nullptr, 0};
+}
+
+bool VaVdstHazardState::contains_producer(uint16_t reg, const SgprHazardProducer &producer) const {
+  for (bool trans : {false, true}) {
+    if (auto it = hazards.find({reg, trans});
+        it != hazards.end() && it->second.producer == producer)
+      return true;
+  }
+  return false;
+}
+
 void WaitcheckStateOps::merge_va_vdst_hazards(VaVdstHazardState &dst,
                                               const VaVdstHazardState &src) {
-  for (const auto &[index, src_hazard] : src.hazards) {
-    auto [dst_it, inserted] = dst.hazards.try_emplace(index, src_hazard);
-    if (inserted)
-      continue;
-    VaVdstHazard &dst_hazard = dst_it->second;
-    if (dst_hazard == src_hazard)
-      continue;
-
-    dst_hazard.trans_since = dst_hazard.trans_since || src_hazard.trans_since;
-    dst_hazard.age = dst_hazard.trans_since ? 0 : std::min(dst_hazard.age, src_hazard.age);
-  }
+  for (const auto &[key, hazard] : src.hazards)
+    dst.merge_hazard(key, hazard);
 }
 
 void WaitcheckStateOps::merge_delay_alu(std::vector<PendingDelayAlu> &dst,
@@ -279,14 +634,17 @@ void WaitcheckStateOps::merge_delay_alu(std::vector<PendingDelayAlu> &dst,
 void ScalarOffsetValues::merge(const ScalarOffsetValues &other) {
   if (count == 0 || *this == other)
     return;
-  if (other.count == 0) {
+  // A single masked instruction can establish more alternatives. At joins
+  // preserve identical sets, but bound unions to the existing four-value limit.
+  constexpr unsigned join_limit = 4;
+  if (other.count == 0 || count > join_limit || other.count > join_limit) {
     *this = {};
     return;
   }
   for (uint32_t value : other.values()) {
     if (std::ranges::find(values(), value) != values().end())
       continue;
-    if (count == literals.size()) {
+    if (count == join_limit) {
       *this = {};
       return;
     }
@@ -296,6 +654,12 @@ void ScalarOffsetValues::merge(const ScalarOffsetValues &other) {
 }
 
 void WaitcheckStateOps::merge_into(PendingState &dst, const PendingState &src) {
+  if (dst.vector_skip != src.vector_skip)
+    dst.vector_skip.reset();
+  dst.expert_exec_empty &= src.expert_exec_empty;
+  dst.expert_valu_may_skip |= src.expert_valu_may_skip;
+  dst.expert_exec_nonzero &= src.expert_exec_nonzero;
+  dst.expert_saved_nonzero_exec &= src.expert_saved_nonzero_exec;
   dst.exec_nonzero &= src.exec_nonzero;
   dst.previous_vm_vsrc_zero_wait &= src.previous_vm_vsrc_zero_wait;
   if (dst.prefetch_enabled != src.prefetch_enabled)
@@ -314,6 +678,7 @@ void WaitcheckStateOps::merge_into(PendingState &dst, const PendingState &src) {
   }
   if (dst.vgpr_msb != src.vgpr_msb)
     dst.vgpr_msb = {.mode = 0, .known = false};
+  dst.expert_delay.merge(src.expert_delay);
   if (dst.expert_scheduling != src.expert_scheduling)
     dst.expert_scheduling = {.enabled = true, .known = false};
   for (size_t i = 0; i < kCounterCount; ++i) {
@@ -345,7 +710,10 @@ void WaitcheckStateOps::merge_into(PendingState &dst, const PendingState &src) {
         position->present_on_all_paths = false;
       } else {
         position->implies_active_exec &= event.implies_active_exec;
+        position->crossed_exec_expansion |= event.crossed_exec_expansion;
+        position->younger_source_primaries &= event.younger_source_primaries;
         position->min_younger = std::min(position->min_younger, event.min_younger);
+        position->min_younger_core = std::min(position->min_younger_core, event.min_younger_core);
         position->min_younger_primary =
             std::min(position->min_younger_primary, event.min_younger_primary);
       }
@@ -353,6 +721,12 @@ void WaitcheckStateOps::merge_into(PendingState &dst, const PendingState &src) {
   }
   merge_sgpr_hazards(dst.sgpr_hazards, src.sgpr_hazards);
   merge_va_vdst_hazards(dst.va_vdst_hazards, src.va_vdst_hazards);
+  for (const auto &[key, hazard] : src.trans_use_hazards) {
+    auto [it, inserted] = dst.trans_use_hazards.try_emplace(key, hazard);
+    if (!inserted && std::tie(hazard.valu_age, hazard.producer.section_offset) <
+                         std::tie(it->second.valu_age, it->second.producer.section_offset))
+      it->second = hazard;
+  }
   dst.vgpr_msb_setreg_hazard = dst.vgpr_msb_setreg_hazard || src.vgpr_msb_setreg_hazard;
   if (!dst.async_barrier_post_wait && src.async_barrier_post_wait)
     dst.async_barrier_post_wait = src.async_barrier_post_wait;
@@ -399,7 +773,10 @@ void WaitcheckStateOps::apply_wait(PendingState &state, WaitCounterKind counter,
     state.uncertain_order[idx] = false;
     return;
   }
-  std::erase_if(pending, [count](const PendingEvent &event) { return event.min_younger >= count; });
+  std::erase_if(pending, [count](const PendingEvent &event) {
+    return event.min_younger >= count ||
+           wmma_core_wait_bound(event.min_younger_core, event.wmma_wait_states) >= count;
+  });
   if (pending.empty())
     state.uncertain_order[idx] = false;
 }
@@ -538,6 +915,12 @@ void WaitcheckStateOps::retire_xcnt_group(PendingState &state, Predicate belongs
     state.uncertain_order[idx] = false;
 }
 
+void WaitcheckStateOps::apply_xcnt_smem_group_wait(PendingState &state) {
+  // Different incoming paths may carry different groups. Only the opposite
+  // group is guaranteed to drain when this instruction issues.
+  retire_xcnt_group(state, is_xcnt_smem_event, 0);
+}
+
 void WaitcheckStateOps::apply_xcnt_group_wait(PendingState &state, uint32_t count) {
   // Switching translations or ordering a VMEM write only retires definite
   // group members. A possible async replay source needs its own completion
@@ -556,16 +939,10 @@ void WaitcheckStateOps::apply_xcnt_wait_implied_by_kmcnt(PendingState &state, ui
   retire_xcnt_group(state, is_xcnt_smem_event);
 }
 
-void WaitcheckStateOps::apply_xcnt_wait_implied_by_memory(PendingState &state,
-                                                          WaitCounterKind counter, uint32_t count) {
+template <typename Predicate>
+void WaitcheckStateOps::retire_completed_xcnt(PendingState &state, Predicate completed) {
   const size_t index = counter_index(WaitCounterKind::X);
   auto &translations = state.pending[index];
-  auto linked = [&](const PendingEvent &event) {
-    if (is_async_transfer_kind(event.kind))
-      return counter == WaitCounterKind::Async;
-    return is_xcnt_vmem_event(event) && vm_vsrc_event_implied_by_wait(event.kind, counter) &&
-           !flat_has_other_pending_counters(state, event.kind, counter);
-  };
   // A completed translation also proves that older VMEM translations have
   // finished. Compare X ages only on an ordered path, using an event present
   // on every path, and never let a scalar-group alternative establish a prefix.
@@ -575,23 +952,36 @@ void WaitcheckStateOps::apply_xcnt_wait_implied_by_memory(PendingState &state,
       maximum_dependency_wait(ROCJITSU_CODE_ARCH_CDNA5, WaitCounterKind::X).value();
   if (!state.uncertain_order[index] && !has_xcnt_smem(state)) {
     for (const auto &event : translations) {
-      if (is_xcnt_vmem_event(event) && event.present_on_all_paths && linked(event) &&
-          event.min_younger_primary >= count && event.min_younger < maximum_x_age)
+      if (is_xcnt_vmem_event(event) && event.present_on_all_paths && completed(event) &&
+          event.min_younger < maximum_x_age)
         prefix_age = std::min(prefix_age.value_or(event.min_younger), event.min_younger);
     }
   }
   auto in_prefix = [&](uint32_t age) { return prefix_age && age >= *prefix_age; };
   std::erase_if(translations, [&](const PendingEvent &event) {
-    return (linked(event) && event.min_younger_primary >= count) ||
-           (is_xcnt_vmem_event(event) && in_prefix(event.min_younger));
+    return completed(event) || (is_xcnt_vmem_event(event) && in_prefix(event.min_younger));
+  });
+  if (prefix_age)
+    retire_event_kind_ages(state, WaitCounterKind::X, is_xcnt_vmem_event, *prefix_age);
+}
+
+void WaitcheckStateOps::apply_xcnt_wait_implied_by_memory(PendingState &state,
+                                                          WaitCounterKind counter, uint32_t count) {
+  auto linked = [&](const PendingEvent &event) {
+    if (is_async_transfer_kind(event.kind))
+      return counter == WaitCounterKind::Async;
+    return is_xcnt_vmem_event(event) && vm_vsrc_event_implied_by_wait(event.kind, counter) &&
+           !flat_has_other_pending_counters(state, event.kind, counter);
+  };
+  retire_completed_xcnt(state, [&](const PendingEvent &event) {
+    return linked(event) && event.min_younger_primary >= count;
   });
   // A primary zero proves every request of its class complete, including
   // summary-only entries. A partial wait only proves the ordered prefix.
   if (count == 0)
     retire_event_kind_ages(state, WaitCounterKind::X, linked);
-  if (prefix_age)
-    retire_event_kind_ages(state, WaitCounterKind::X, is_xcnt_vmem_event, *prefix_age);
-  if (translations.empty())
+  const size_t index = counter_index(WaitCounterKind::X);
+  if (state.pending[index].empty())
     state.uncertain_order[index] = false;
 }
 
@@ -666,7 +1056,8 @@ util::Result WaitcheckStateOps::apply_counter_wait(PendingState &state, WaitCoun
   const auto out_of_order = counter_out_of_order(state, counter, arch);
   if (out_of_order.failed())
     return util::Result::failure();
-  if (count != 0 && !is_completion_counter(counter) && out_of_order.value())
+  if (count != 0 && counter != WaitCounterKind::VaVdst && counter != WaitCounterKind::VmVsrc &&
+      !is_completion_counter(counter) && out_of_order.value())
     return util::Result::success();
   apply_wait(state, counter, count);
   return util::Result::success();
@@ -677,10 +1068,20 @@ util::FailureOr<uint32_t> WaitcheckStateOps::dependency_required_count(const Pen
                                                                        rj_code_arch_t arch) {
   if (event.kind == WaitEventKind::Gfx10ScalarSource)
     return 0;
-  if (is_completion_counter(event.counter)) {
+  if (event.counter == WaitCounterKind::VaVdst) {
+    const auto maximum = maximum_dependency_wait(arch, event.counter);
+    if (maximum.failed())
+      return util::Result::failure();
+    const auto core_bound =
+        static_cast<uint32_t>(wmma_core_wait_bound(event.min_younger_core, event.wmma_wait_states));
+    return std::min(maximum.value(), std::max(event.min_younger, core_bound));
+  }
+  if (is_completion_counter(event.counter) || event.counter == WaitCounterKind::VmVsrc) {
     if (amdgpu::waitcnt_model(arch).failed())
       return util::Result::failure();
-    return event.min_younger;
+    return event.counter == WaitCounterKind::VmVsrc
+               ? std::min(event.min_younger, maximum_dependency_wait(arch, event.counter).value())
+               : event.min_younger;
   }
   const auto out_of_order = counter_out_of_order(state, event.counter, arch);
   if (out_of_order.failed())
@@ -703,6 +1104,14 @@ util::Result WaitcheckStateOps::apply_memory_wait(PendingState &state, WaitCount
                                                   uint32_t count, rj_code_arch_t arch) {
   if (amdgpu::waitcnt_model(arch).failed())
     return util::Result::failure();
+  if (amdgpu::supports_expert_scheduling(arch) &&
+      (counter == WaitCounterKind::Store || counter == WaitCounterKind::Load)) {
+    const uint8_t primary = dedicated_source_primary(counter == WaitCounterKind::Store
+                                                         ? WaitEventKind::VmemStore
+                                                         : WaitEventKind::VmemNoSamplerLoad);
+    for (auto &source : state.pending[counter_index(WaitCounterKind::VmVsrc)])
+      source.younger_source_primaries &= ~primary;
+  }
   if (count != 0) {
     // A primary-counter wait can complete an operation even when a younger
     // counter-only request has no VM_VSRC facet. Correlate existing facets by
@@ -721,7 +1130,9 @@ util::Result WaitcheckStateOps::apply_memory_wait(PendingState &state, WaitCount
         return false;
       // The primary kind's newest request being complete proves the entire
       // kind complete, including operations with no materialized primary facet.
-      if (kind_completed(source))
+      if (kind_completed(source) ||
+          (counter == WaitCounterKind::Store && source.kind == WaitEventKind::VmemStore &&
+           source.min_younger_primary >= count))
         return true;
       bool covered_on_all_paths = false;
       for (const PendingEvent &event : primary) {
@@ -810,6 +1221,20 @@ util::Result WaitcheckStateOps::apply_wait_fields(PendingState &state, const Wai
                                                   rj_code_arch_t arch) {
   if (amdgpu::waitcnt_model(arch).failed())
     return util::Result::failure();
+  const auto ds = fields[counter_index(WaitCounterKind::Ds)];
+  const auto load = fields[counter_index(WaitCounterKind::Load)];
+  const auto store = fields[counter_index(WaitCounterKind::Store)];
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5 && ds && (load || store)) {
+    // A translation can complete through either the VMEM or LDS path. A
+    // combined wait proves it is safe when both thresholds cover the same
+    // operation, independently of addresses or routing of individual lanes.
+    retire_completed_xcnt(state, [&](const PendingEvent &event) {
+      if (!has_conditional_route(event.kind))
+        return false;
+      const auto primary = event.kind == WaitEventKind::FlatLoad ? load : store;
+      return primary && event.min_younger_primary >= std::max(*ds, *primary);
+    });
+  }
   for (size_t i = 0; i < fields.size(); ++i) {
     if (!fields[i])
       continue;
@@ -833,9 +1258,10 @@ util::Result WaitcheckStateOps::apply_wait_fields(PendingState &state, const Wai
       apply_xcnt_wait(state, count);
       break;
     case WaitCounterKind::VaVdst:
+      if (count == 0)
+        state.trans_use_hazards.clear();
       std::erase_if(state.va_vdst_hazards.hazards, [count](const auto &entry) {
-        const VaVdstHazard &hazard = entry.second;
-        return count == 0 || (!hazard.trans_since && hazard.age >= count);
+        return count == 0 || (!entry.first.second && entry.second.age >= count);
       });
       if (apply_counter_wait(state, counter, count, arch).failed())
         return util::Result::failure();

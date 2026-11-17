@@ -116,6 +116,26 @@ TEST(WaitcheckTarget, LegacyWaitSeparatesPackedCounters) {
   EXPECT_FALSE((*fields)[Target::counter_index(WaitCounterKind::Exp)]);
 }
 
+TEST(WaitcheckTarget, CdnaBufferWbl2TracksTheLegacyVmcntAck) {
+  for (const auto [arch, opcode] : {std::pair{ROCJITSU_CODE_ARCH_CDNA2, 0xE0A00000u},
+                                    std::pair{ROCJITSU_CODE_ARCH_CDNA3, 0xE0A0C000u},
+                                    std::pair{ROCJITSU_CODE_ARCH_CDNA4, 0xE0A0C000u}}) {
+    SCOPED_TRACE(arch);
+    const std::array<uint32_t, 2> words{opcode, 0u};
+    auto inst = decode(words, arch);
+    ASSERT_NE(inst, nullptr);
+    ASSERT_EQ(inst->mnemonic(), "buffer_wbl2");
+    const auto events = Target::classify_events(*inst, arch).value();
+    ASSERT_EQ(events.size(), 1u);
+    EXPECT_EQ(events[0].counter, WaitCounterKind::Load);
+    EXPECT_EQ(events[0].kind, WaitEventKind::GlobalWb);
+    EXPECT_TRUE(events[0].check_counter_parity_order);
+    EXPECT_EQ(Target::normalized_hardware_event_kind(WaitCounterKind::Load, WaitEventKind::GlobalWb,
+                                                     amdgpu::waitcnt_model(arch).value()),
+              WaitEventKind::VmemNoSamplerLoad);
+  }
+}
+
 TEST(WaitcheckTarget, Rdna3DependencyWaitDecodesBothFieldsAndSentinels) {
   for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
     const std::array<uint32_t, 1> words{0xbf882fe7u};

@@ -60,6 +60,10 @@ inline constexpr Elf_Half SHN_ABS = 0xfff1;
 
 inline constexpr uint32_t EF_AMDGPU_MACH = 0x0ff;
 inline constexpr uint32_t EF_AMDGPU_MACH_NONE = 0;
+inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX900 = 0x2c;
+inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX90C = 0x32;
+inline constexpr uint32_t EF_AMDGPU_FEATURE_SRAMECC_V4 = 0xc00;
+inline constexpr uint32_t EF_AMDGPU_FEATURE_SRAMECC_OFF_V4 = 0x800;
 inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX908 = 0x30;
 inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX90A = 0x3f;
 inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX940 = 0x40;

@@ -360,6 +360,7 @@ struct AnalysisContext {
   rj_code_arch_t arch;
   uint8_t wave_size = 0;
   bool setreg_vgpr_msb_fixup = false;
+  bool verify_closed_zero_bank_calls = false;
   std::vector<InstructionFacts> facts;
 
   // Whole-text superset of every SGPR pair that a deferred cross-block
@@ -2890,6 +2891,21 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
     return result;
   };
 
+  const auto apply_return_mode = [&](VectorLaneFlowState &state,
+                                     const std::optional<CalleeSummary> &summary) {
+    if (summary) {
+      state.vgpr_msb_imm = summary->return_mode;
+      state.gpr_idx_enabled = summary->return_gpr_idx_enabled;
+      return;
+    }
+    // A closed-image check proves that no instruction can change zero to a
+    // nonzero bank. It says nothing about other incoming bank values.
+    if (!ctx.verify_closed_zero_bank_calls || state.vgpr_msb_imm != std::optional<uint8_t>{0})
+      state.vgpr_msb_imm.reset();
+    state.gpr_idx_enabled =
+        ctx.verify_closed_zero_bank_calls ? std::optional<bool>{false} : std::nullopt;
+  };
+
   const auto scan_block = [&](const AnalysisBlock &block, VectorLaneFlowState state,
                               bool emit_fixups,
                               std::optional<VectorLaneFlowState> *call_entry_state) {
@@ -2999,10 +3015,7 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
           if (!survives_call(pair_lo) || !survives_call(static_cast<uint16_t>(pair_lo + 1)))
             builders.invalidate_pair(pair_lo);
         }
-        state.vgpr_msb_imm =
-            callee_summary ? callee_summary->return_mode : std::optional<uint8_t>{};
-        state.gpr_idx_enabled =
-            callee_summary ? callee_summary->return_gpr_idx_enabled : std::optional<bool>{};
+        apply_return_mode(state, callee_summary);
       }
 
       if (mnemonic == "v_writelane_b32") {
@@ -3145,10 +3158,7 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
           if (!survives_call(active_pair) || !survives_call(static_cast<uint16_t>(active_pair + 1)))
             builders.invalidate_pair(active_pair);
         }
-        state.vgpr_msb_imm =
-            callee_summary ? callee_summary->return_mode : std::optional<uint8_t>{};
-        state.gpr_idx_enabled =
-            callee_summary ? callee_summary->return_gpr_idx_enabled : std::optional<bool>{};
+        apply_return_mode(state, callee_summary);
       }
 
       // VGPR defs are decoded only to invalidate tracked slots; no slots makes
@@ -3569,12 +3579,13 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
     std::span<const Instruction *const> insts, std::span<const uint8_t> text, rj_code_arch_t arch,
     std::span<const uint64_t> extra_leaders, ExternalEntryPolicy entry_policy,
     std::vector<PcAddressBuilder> *pc_builders, std::span<const uint64_t> extra_split_points,
-    std::span<const uint64_t> analysis_root_offsets, rj_code_target_id_t target,
-    uint8_t wave_size) {
+    std::span<const uint64_t> analysis_root_offsets, rj_code_target_id_t target, uint8_t wave_size,
+    bool verify_closed_zero_bank_calls) {
   std::vector<IndirectCallFixup> recovered;
   FixupIndex recovered_index;
   AnalysisContext ctx = build_context(insts, text, arch, target);
   ctx.wave_size = wave_size;
+  ctx.verify_closed_zero_bank_calls = verify_closed_zero_bank_calls;
   std::vector<uint64_t> sorted_extra_leaders(extra_leaders.begin(), extra_leaders.end());
   std::ranges::sort(sorted_extra_leaders);
   sorted_extra_leaders.erase(std::ranges::unique(sorted_extra_leaders).begin(),
@@ -3683,8 +3694,8 @@ std::vector<IndirectCallFixup> discover_indirect_branch_edges(
     std::span<const Instruction *const> insts, std::span<const uint8_t> text, rj_code_arch_t arch,
     std::span<const uint64_t> extra_leaders, ExternalEntryPolicy entry_policy,
     std::vector<PcAddressBuilder> *pc_builders, std::span<const uint64_t> extra_split_points,
-    std::span<const uint64_t> analysis_root_offsets, rj_code_target_id_t target,
-    uint8_t wave_size) {
+    std::span<const uint64_t> analysis_root_offsets, rj_code_target_id_t target, uint8_t wave_size,
+    bool verify_closed_zero_bank_calls) {
   if (pc_builders != nullptr)
     pc_builders->clear();
   if (insts.empty())
@@ -3704,15 +3715,15 @@ std::vector<IndirectCallFixup> discover_indirect_branch_edges(
     // recovery path for another consumer kind must extend the predicate above.
     const auto unfiltered = discover_indirect_branch_edges_unfiltered(
         insts, text, arch, extra_leaders, entry_policy, nullptr, extra_split_points,
-        analysis_root_offsets, target, wave_size);
+        analysis_root_offsets, target, wave_size, verify_closed_zero_bank_calls);
     assert(unfiltered.empty() && "indirect-recovery prefilter skipped a fixup-producing consumer");
 #endif
     return {};
   }
 
-  return discover_indirect_branch_edges_unfiltered(insts, text, arch, extra_leaders, entry_policy,
-                                                   pc_builders, extra_split_points,
-                                                   analysis_root_offsets, target, wave_size);
+  return discover_indirect_branch_edges_unfiltered(
+      insts, text, arch, extra_leaders, entry_policy, pc_builders, extra_split_points,
+      analysis_root_offsets, target, wave_size, verify_closed_zero_bank_calls);
 }
 
 } // namespace rocjitsu
