@@ -38,7 +38,7 @@ set(attachment-env
     "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
     )
 
-set(ATT_EXPECTED_DISPATCHES 3)
+set(ATT_MAX_DISPATCHES 3)
 
 # Attach twice to one live process with identical ATT configuration. Each attachment must
 # independently produce raw, metadata, and decoded ATT output.
@@ -47,7 +47,7 @@ rocprofiler_add_integration_execute_test(
     COMMAND
         ${CMAKE_CURRENT_SOURCE_DIR}/run_attachment_att_test.sh
         $<TARGET_FILE:attachment-test> $<TARGET_FILE:rocprofiler-sdk::rocprofv3>
-        ${CMAKE_CURRENT_BINARY_DIR} ${LOG_LEVEL} ${ATT_EXPECTED_DISPATCHES}
+        ${CMAKE_CURRENT_BINARY_DIR} ${LOG_LEVEL} ${ATT_MAX_DISPATCHES}
         "${attdecoder_LIB_DIR}"
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
@@ -72,5 +72,5 @@ rocprofiler_add_integration_validate_test(
     SKIP_REGULAR_EXPRESSION "SKIPPED"
     FIXTURES_REQUIRED rocprofv3-test-attachment-attach-twice-att
     ARGS --output-root ${CMAKE_CURRENT_BINARY_DIR}/attachment-att-twice-output
-         --expected-dispatches ${ATT_EXPECTED_DISPATCHES} --skip-if
+         --max-dispatches ${ATT_MAX_DISPATCHES} --skip-if
          ${CMAKE_CURRENT_BINARY_DIR}/attachment-att-twice-output/skipped)

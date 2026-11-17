@@ -32,11 +32,11 @@ def pytest_addoption(parser):
         "--output-root", action="store", help="Repeated ATT output directory"
     )
     parser.addoption(
-        "--expected-dispatches",
+        "--max-dispatches",
         action="store",
         default=3,
         type=int,
-        help="Expected captured dispatches in each attachment",
+        help="Maximum captured dispatches in each attachment",
     )
     parser.addoption("--skip-if", action="store", help="Skip test if file exists")
 
@@ -57,6 +57,6 @@ def output_root(request):
 
 
 @pytest.fixture(scope="session")
-def expected_dispatches(request):
+def max_dispatches(request):
     _skip_if(request)
-    return request.config.getoption("--expected-dispatches")
+    return request.config.getoption("--max-dispatches")
