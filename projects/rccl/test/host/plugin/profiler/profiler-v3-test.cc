@@ -4,8 +4,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Host-only microtests for src/plugin/profiler/profiler_v1.cc, the adapter that serves a v1 plugin through the
-// v8 interface. The plugin is a fake exported from a FakeLib (see profiler-test.cc's ncclOsDlsym).
+// Host-only microtests for src/plugin/profiler/profiler_v3.cc, the adapter that serves a v3 plugin through the
+// v8 interface. The plugin is a fake exported from a FakeLib (see plugin/profiler/fake_lib_dlsym.cc).
 
 #include <gtest/gtest.h>
 
@@ -16,14 +16,14 @@
 #include "comm.h"
 #include "nccl_profiler.h"
 
-#include PROFILER_V1_CC_PATH
+#include PROFILER_V3_CC_PATH
 
 namespace {
 
 using FakeLib = std::map<std::string, void*>;
 void* H(uintptr_t v) { return reinterpret_cast<void*>(v); }
 
-struct FakeV1 {
+struct FakeV3 {
   int initCalls = 0;
   void** initCtx = nullptr;
   int* initMask = nullptr;
@@ -32,12 +32,12 @@ struct FakeV1 {
   void* stopHandle = nullptr;
   int finalizeCalls = 0;
   void* finalizeCtx = nullptr;
-  std::vector<ncclProfilerEventDescr_v1_t> starts;
-  std::vector<std::pair<ncclProfilerEventState_v1_t, ncclProfilerEventStateArgs_v1_t>> records;
-  ncclProfiler_v1_t vtable{"FakeV1", &Init, &Start, &Stop, &Record, &Finalize};
+  std::vector<ncclProfilerEventDescr_v3_t> starts;
+  std::vector<std::pair<ncclProfilerEventState_v3_t, ncclProfilerEventStateArgs_v3_t>> records;
+  ncclProfiler_v3_t vtable{"FakeV3", &Init, &Start, &Stop, &Record, &Finalize};
 
-  static FakeV1*& cur() {
-    static FakeV1* p = nullptr;
+  static FakeV3*& cur() {
+    static FakeV3* p = nullptr;
     return p;
   }
   static ncclResult_t Init(void** ctx, int* mask) {
@@ -46,7 +46,7 @@ struct FakeV1 {
     cur()->initMask = mask;
     return cur()->initResult;
   }
-  static ncclResult_t Start(void*, void** eHandle, ncclProfilerEventDescr_v1_t* d) {
+  static ncclResult_t Start(void*, void** eHandle, ncclProfilerEventDescr_v3_t* d) {
     cur()->starts.push_back(*d);
     *eHandle = H(0x1);
     return ncclSuccess;
@@ -56,7 +56,7 @@ struct FakeV1 {
     cur()->stopHandle = h;
     return ncclSuccess;
   }
-  static ncclResult_t Record(void*, ncclProfilerEventState_v1_t s, ncclProfilerEventStateArgs_v1_t* a) {
+  static ncclResult_t Record(void*, ncclProfilerEventState_v3_t s, ncclProfilerEventStateArgs_v3_t* a) {
     cur()->records.push_back({s, *a});
     return ncclSuccess;
   }
@@ -67,30 +67,29 @@ struct FakeV1 {
   }
 };
 
-class ProfilerV1Microtest : public ::testing::Test {
+class ProfilerV3Microtest : public ::testing::Test {
  protected:
-  FakeV1 fake_;
-  FakeLib lib_{{"ncclProfiler_v1", &fake_.vtable}};
+  FakeV3 fake_;
+  FakeLib lib_{{"ncclProfiler_v3", &fake_.vtable}};
   ncclProfiler_t* prof_ = nullptr;
   void* ctx_ = nullptr;
   int mask_ = 0;
   void* target_ = nullptr;
 
   void SetUp() override {
-    FakeV1::cur() = &fake_;
-    prof_ = getNcclProfiler_v1(&lib_, &target_);
+    FakeV3::cur() = &fake_;
+    prof_ = getNcclProfiler_v3(&lib_, &target_);
     ASSERT_NE(prof_, nullptr);
     ASSERT_EQ(target_, &fake_.vtable);
-    setNcclProfiler_v1(target_);  // what profilerActivate() does before each call
+    setNcclProfiler_v3(target_);  // what profilerActivate() does before each call
     ASSERT_EQ(ncclSuccess, prof_->init(&ctx_, 0xABCD, &mask_, "c0", 2, 8, 3, nullptr, nullptr));
   }
   void TearDown() override {
-    setNcclProfiler_v1(nullptr);
-    FakeV1::cur() = nullptr;
+    setNcclProfiler_v3(nullptr);
+    FakeV3::cur() = nullptr;
   }
 
-  // Starts one event and returns what the v1 plugin saw, or nullptr if it was not forwarded.
-  const ncclProfilerEventDescr_v1_t* Start(ncclProfilerEventDescr_t& d) {
+  const ncclProfilerEventDescr_v3_t* Start(ncclProfilerEventDescr_t& d) {
     void* h = H(0xBAD);
     size_t before = fake_.starts.size();
     EXPECT_EQ(ncclSuccess, prof_->startEvent(H(0xC0), &h, &d));
@@ -103,17 +102,17 @@ class ProfilerV1Microtest : public ::testing::Test {
   }
 };
 
-TEST_F(ProfilerV1Microtest, GetProfiler_FindsOnlyTheV1Symbol) {
+TEST_F(ProfilerV3Microtest, GetProfiler_FindsOnlyTheV3Symbol) {
   FakeLib other{{"ncclProfiler_v2", &fake_.vtable}};
   void* target = H(0xBAD);
-  EXPECT_EQ(getNcclProfiler_v1(&other, &target), nullptr);
+  EXPECT_EQ(getNcclProfiler_v3(&other, &target), nullptr);
   EXPECT_EQ(target, nullptr);
-  EXPECT_STREQ(prof_->name, "FakeV1");
+  EXPECT_STREQ(prof_->name, "FakeV3");
 }
 
 // The shim dispatches through the plugin profilerActivate() selected; with none selected nothing reaches it.
-TEST_F(ProfilerV1Microtest, NoActivePlugin_InitFailsAndCallbacksDoNotReachThePlugin) {
-  setNcclProfiler_v1(nullptr);
+TEST_F(ProfilerV3Microtest, NoActivePlugin_InitFailsAndCallbacksDoNotReachThePlugin) {
+  setNcclProfiler_v3(nullptr);
   EXPECT_EQ(prof_->init(&ctx_, 0, &mask_, "c0", 2, 8, 3, nullptr, nullptr), ncclInternalError);
   EXPECT_EQ(fake_.initCalls, 1);
   EXPECT_EQ(ncclSuccess, prof_->stopEvent(H(0x5), nullptr));
@@ -122,7 +121,7 @@ TEST_F(ProfilerV1Microtest, NoActivePlugin_InitFailsAndCallbacksDoNotReachThePlu
   EXPECT_EQ(fake_.finalizeCalls, 0);
 }
 
-TEST_F(ProfilerV1Microtest, Init_ForwardsTheMaskAndWiresTheCallbacks) {
+TEST_F(ProfilerV3Microtest, Init_ForwardsTheMaskAndWiresTheCallbacks) {
   EXPECT_EQ(fake_.initCalls, 1);
   EXPECT_EQ(fake_.initCtx, &ctx_);
   EXPECT_EQ(fake_.initMask, &mask_);
@@ -144,7 +143,7 @@ TEST_F(ProfilerV1Microtest, Init_ForwardsTheMaskAndWiresTheCallbacks) {
   EXPECT_EQ(prof_->init(&ctx_, 0, &mask_, "c0", 2, 8, 3, nullptr, nullptr), ncclSystemError);
 }
 
-TEST_F(ProfilerV1Microtest, StartEvent_Coll_ConvertsTheStringsAndParentsToTheGroup) {
+TEST_F(ProfilerV3Microtest, StartEvent_Coll_KeepsTheStringsAndParentsToTheGroup) {
   ncclProfilerEventDescr_t d{};
   d.type = ncclProfileColl;
   d.parentObj = H(0x31);
@@ -161,29 +160,27 @@ TEST_F(ProfilerV1Microtest, StartEvent_Coll_ConvertsTheStringsAndParentsToTheGro
   d.coll.nWarps = 8;
   d.coll.algo = "RING";
   d.coll.proto = "LL";
-  const auto* v1 = Start(d);
-  ASSERT_NE(v1, nullptr);
-  EXPECT_EQ(v1->type, ncclProfileColl);
-  EXPECT_EQ(v1->parentObj, H(0x30));
-  EXPECT_EQ(v1->rank, 3);
-  EXPECT_EQ(v1->coll.name, nullptr);
-  EXPECT_EQ(v1->coll.commHash, 0u);
-  EXPECT_EQ(v1->coll.seqNumber, 7u);
-  EXPECT_EQ(v1->coll.func, ncclFuncAllGather);
-  EXPECT_EQ(v1->coll.sendBuff, H(0x100));
-  EXPECT_EQ(v1->coll.recvBuff, H(0x200));
-  EXPECT_EQ(v1->coll.count, 1000u);
-  EXPECT_EQ(v1->coll.root, 2);
-  EXPECT_EQ(v1->coll.datatype, ncclInt32);
-  EXPECT_EQ(v1->coll.op, 0u);
-  EXPECT_EQ(v1->coll.trafficBytes, 0u);
-  EXPECT_EQ(v1->coll.nMaxChannels, 4);
-  EXPECT_EQ(v1->coll.nWarps, 8);
-  EXPECT_EQ(v1->coll.algo, NCCL_ALGO_RING);
-  EXPECT_EQ(v1->coll.proto, NCCL_PROTO_LL);
+  const auto* v3 = Start(d);
+  ASSERT_NE(v3, nullptr);
+  EXPECT_EQ(v3->type, ncclProfileColl);
+  EXPECT_EQ(v3->parentObj, H(0x30));
+  EXPECT_EQ(v3->rank, 3);
+  EXPECT_EQ(v3->coll.name, nullptr);
+  EXPECT_EQ(v3->coll.commHash, 0u);
+  EXPECT_EQ(v3->coll.seqNumber, 7u);
+  EXPECT_STREQ(v3->coll.func, "AllGather");
+  EXPECT_EQ(v3->coll.sendBuff, H(0x100));
+  EXPECT_EQ(v3->coll.recvBuff, H(0x200));
+  EXPECT_EQ(v3->coll.count, 1000u);
+  EXPECT_EQ(v3->coll.root, 2);
+  EXPECT_STREQ(v3->coll.datatype, "ncclInt32");
+  EXPECT_EQ(v3->coll.nMaxChannels, 4);
+  EXPECT_EQ(v3->coll.nWarps, 8);
+  EXPECT_STREQ(v3->coll.algo, "RING");
+  EXPECT_STREQ(v3->coll.proto, "LL");
 }
 
-TEST_F(ProfilerV1Microtest, StartEvent_P2pProxyAndGroupEvents) {
+TEST_F(ProfilerV3Microtest, StartEvent_P2pProxyAndGroupEvents) {
   ncclProfilerEventDescr_t d{};
   d.type = ncclProfileP2p;
   d.parentObj = H(0x32);
@@ -193,91 +190,79 @@ TEST_F(ProfilerV1Microtest, StartEvent_P2pProxyAndGroupEvents) {
   d.p2p.count = 77;
   d.p2p.datatype = "ncclUint64";
   d.p2p.peer = 4;
-  const auto* v1 = Start(d);
-  ASSERT_NE(v1, nullptr);
-  EXPECT_EQ(v1->parentObj, H(0x30));
-  EXPECT_EQ(v1->p2p.name, nullptr);
-  EXPECT_EQ(v1->p2p.commHash, 0u);
-  EXPECT_EQ(v1->p2p.func, ncclFuncRecv);
-  EXPECT_EQ(v1->p2p.buff, H(0x300));
-  EXPECT_EQ(v1->p2p.count, 77u);
-  EXPECT_EQ(v1->p2p.datatype, ncclUint64);
-  EXPECT_EQ(v1->p2p.peer, 4);
+  const auto* v3 = Start(d);
+  ASSERT_NE(v3, nullptr);
+  EXPECT_EQ(v3->parentObj, H(0x30));
+  EXPECT_EQ(v3->p2p.name, nullptr);
+  EXPECT_EQ(v3->p2p.commHash, 0u);
+  EXPECT_STREQ(v3->p2p.func, "Recv");
+  EXPECT_EQ(v3->p2p.buff, H(0x300));
+  EXPECT_EQ(v3->p2p.count, 77u);
+  EXPECT_STREQ(v3->p2p.datatype, "ncclUint64");
+  EXPECT_EQ(v3->p2p.peer, 4);
 
   d = {};
   d.type = ncclProfileProxyOp;
   d.parentObj = H(0x41);
   d.proxyOp = {99, 7, 5, 3, 200, 1};
-  v1 = Start(d);
-  ASSERT_NE(v1, nullptr);
-  EXPECT_EQ(v1->parentObj, H(0x41));
-  EXPECT_EQ(v1->proxyOp.pid, 99);
-  EXPECT_EQ(v1->proxyOp.channelId, 7);
-  EXPECT_EQ(v1->proxyOp.peer, 5);
-  EXPECT_EQ(v1->proxyOp.nSteps, 3);
-  EXPECT_EQ(v1->proxyOp.chunkSize, 200);
-  EXPECT_EQ(v1->proxyOp.isSend, 1);
+  v3 = Start(d);
+  ASSERT_NE(v3, nullptr);
+  EXPECT_EQ(v3->parentObj, H(0x41));
+  EXPECT_EQ(v3->proxyOp.pid, 99);
+  EXPECT_EQ(v3->proxyOp.channelId, 7);
+  EXPECT_EQ(v3->proxyOp.peer, 5);
+  EXPECT_EQ(v3->proxyOp.nSteps, 3);
+  EXPECT_EQ(v3->proxyOp.chunkSize, 200);
+  EXPECT_EQ(v3->proxyOp.isSend, 1);
 
   d = {};
   d.type = ncclProfileProxyStep;
   d.proxyStep.step = 9;
-  v1 = Start(d);
-  ASSERT_NE(v1, nullptr);
-  EXPECT_EQ(v1->proxyStep.step, 9);
+  v3 = Start(d);
+  ASSERT_NE(v3, nullptr);
+  EXPECT_EQ(v3->proxyStep.step, 9);
 
   for (uint64_t type : {ncclProfileGroup, ncclProfileProxyCtrl}) {
     d = {};
     d.type = type;
     d.parentObj = H(0x42);
-    v1 = Start(d);
-    ASSERT_NE(v1, nullptr) << type;
-    EXPECT_EQ(v1->type, type);
-    EXPECT_EQ(v1->parentObj, H(0x42));
+    v3 = Start(d);
+    ASSERT_NE(v3, nullptr) << type;
+    EXPECT_EQ(v3->type, type);
+    EXPECT_EQ(v3->parentObj, H(0x42));
   }
 }
 
-TEST_F(ProfilerV1Microtest, StartEvent_EventsNewerThanV1_AreDroppedWithANullHandle) {
-  for (uint64_t type : {ncclProfileKernelCh, ncclProfileNetPlugin, ncclProfileGroupApi, ncclProfileCeColl}) {
+TEST_F(ProfilerV3Microtest, StartEvent_KernelChAndNetPlugin) {
+  ncclProfilerEventDescr_t d{};
+  d.type = ncclProfileKernelCh;
+  d.parentObj = H(0x51);
+  d.kernelCh.channelId = 9;
+  d.kernelCh.pTimer = 111;  // v3 has no start timestamp
+  const auto* v3 = Start(d);
+  ASSERT_NE(v3, nullptr);
+  EXPECT_EQ(v3->parentObj, H(0x51));
+  EXPECT_EQ(v3->kernelCh.channelId, 9);
+
+  d = {};
+  d.type = ncclProfileNetPlugin;
+  d.netPlugin.id = 17;
+  d.netPlugin.data = H(0xE0);
+  v3 = Start(d);
+  ASSERT_NE(v3, nullptr);
+  EXPECT_EQ(v3->netPlugin.id, 17);
+  EXPECT_EQ(v3->netPlugin.data, H(0xE0));
+}
+
+TEST_F(ProfilerV3Microtest, StartEvent_EventsNewerThanV3_AreDroppedWithANullHandle) {
+  for (uint64_t type : {ncclProfileGroupApi, ncclProfileKernelLaunch, ncclProfileCeColl, ncclProfileKernelPhase}) {
     ncclProfilerEventDescr_t d{};
     d.type = type;
     EXPECT_EQ(Start(d), nullptr) << type;
   }
 }
 
-TEST_F(ProfilerV1Microtest, StringToEnum_MapsEveryNameTheV1HeaderKnows) {
-  const std::pair<const char*, uint8_t> kFuncs[] = {
-    {"AllGather", ncclFuncAllGather}, {"AllReduce", ncclFuncAllReduce}, {"Broadcast", ncclFuncBroadcast},
-    {"Recv", ncclFuncRecv},           {"Reduce", ncclFuncReduce},       {"ReduceScatter", ncclFuncReduceScatter},
-    {"SendRecv", ncclFuncSendRecv},   {"Send", ncclFuncSend}};
-  for (const auto& f : kFuncs) EXPECT_EQ(ncclStringToFunc(f.first), f.second) << f.first;
-
-  const std::pair<const char*, uint8_t> kAlgos[] = {
-    {"TREE", NCCL_ALGO_TREE}, {"RING", NCCL_ALGO_RING},           {"COLLNET_DIRECT", NCCL_ALGO_COLLNET_DIRECT},
-    {"NVLS", NCCL_ALGO_NVLS}, {"COLLNET_CHAIN", NCCL_ALGO_COLLNET_CHAIN}, {"NVLS_TREE", NCCL_ALGO_NVLS_TREE},
-    {"PAT", NCCL_ALGO_PAT},   {"Unknown", NCCL_ALGO_PAT}};
-  for (const auto& a : kAlgos) EXPECT_EQ(ncclStringToAlgo(a.first), a.second) << a.first;
-
-  EXPECT_EQ(ncclStringToProto("LL"), NCCL_PROTO_LL);
-  EXPECT_EQ(ncclStringToProto("LL128"), NCCL_PROTO_LL128);
-  EXPECT_EQ(ncclStringToProto("SIMPLE"), NCCL_PROTO_SIMPLE);
-  EXPECT_EQ(ncclStringToProto(""), NCCL_PROTO_SIMPLE);  // sym kernels report no protocol
-
-  const std::pair<const char*, uint8_t> kTypes[] = {
-    {"ncclInt8", ncclInt8},       {"ncclInt32", ncclInt32},     {"ncclUint32", ncclUint32},
-    {"ncclInt64", ncclInt64},     {"ncclUint64", ncclUint64},   {"ncclFloat16", ncclFloat16},
-    {"ncclFloat32", ncclFloat32}, {"ncclFloat64", ncclFloat64}, {"Unknown", ncclFloat64}};
-  for (const auto& t : kTypes) EXPECT_EQ(ncclStringToDatatype(t.first), t.second) << t.first;
-}
-
-// The v1 tables lack RCCL's extra collectives and bf16/fp8, so they arrive as Send and Float64; a fix flips this pin.
-TEST_F(ProfilerV1Microtest, StringToEnum_KnownBug_RcclOnlyFunctionsAndTypes_ArriveAsSendAndFloat64) {
-  for (const char* f : {"AlltoAll", "AlltoAllv", "Gather", "Scatter"})
-    EXPECT_EQ(ncclStringToFunc(f), ncclFuncSend) << f;
-  for (const char* t : {"ncclBfloat16", "ncclFloat8e4m3", "ncclFloat8e5m2"})
-    EXPECT_EQ(ncclStringToDatatype(t), ncclFloat64) << t;
-}
-
-TEST_F(ProfilerV1Microtest, RecordEventState_ForwardsProxyStatesOnly) {
+TEST_F(ProfilerV3Microtest, RecordEventState_ForwardsProxyStatesOnly) {
   ncclProfilerEventStateArgs_t a{};
   a.proxyCtrl.appendedProxyOps = 6;
   for (ncclProfilerEventState_t s :
@@ -294,7 +279,7 @@ TEST_F(ProfilerV1Microtest, RecordEventState_ForwardsProxyStatesOnly) {
                                      ncclProfilerProxyStepRecvGPUWait}) {
     ASSERT_EQ(ncclSuccess, prof_->recordEventState(H(0x1), s, &a));
     EXPECT_EQ(fake_.records.back().first, s);
-    EXPECT_EQ(fake_.records.back().second.proxyOp.transSize, 0u) << s;  // v1 has no per-step size
+    EXPECT_EQ(fake_.records.back().second.proxyOp.transSize, 0u) << s;
   }
   size_t n = fake_.records.size();
   for (ncclProfilerEventState_t s : {ncclProfilerProxyOpInProgress_v4, ncclProfilerProxyStepSendPeerWait_v4,

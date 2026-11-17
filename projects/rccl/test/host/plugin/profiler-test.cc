@@ -36,7 +36,7 @@
 #include "transport.h"
 #include "ce_coll.h"
 
-// This binary links no shared nccl fakes. The adapter TUs (profiler-v*-test.cc) also resolve their
+// This binary links no shared nccl fakes. The real profiler_vN.cc adapters it links resolve their
 // ncclProfiler_vN symbol through ncclOsDlsym below, where a library handle is a FakeLib of exported symbols.
 uint32_t ncclDebugLevelMask = NCCL_DEBUG_LEVEL_MASK_UNINITIALIZED;  // log everything
 uint64_t ncclDebugMask = ~uint64_t(0);

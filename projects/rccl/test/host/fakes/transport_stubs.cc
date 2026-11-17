@@ -58,7 +58,7 @@ int64_t ncclParamNvlsEnable() { return g_loadParam("NVLS_ENABLE", 2); }
 int64_t ncclParamGdrCopySyncEnable() { return g_loadParam("GDRCOPY_SYNC_ENABLE", 1); }
 int64_t ncclParamGdrCopyFlushEnable() { return g_loadParam("GDRCOPY_FLUSH_ENABLE", 0); }
 
-// src/plugin/net.cc: initTransportsRank's GDR probe. Omitted for rccl-UnitTestsMicroPlugin, which compiles net.cc.
+// src/plugin/net.cc: initTransportsRank's GDR probe. Omitted for rccl-UnitTestsMicroPluginNet, which compiles net.cc.
 int g_gdrSupportValue = 0;
 int g_gdrSupportCalls = 0;
 #ifndef RCCL_TRANSPORT_STUBS_OMIT_ncclGpuGdrSupport

@@ -6,7 +6,7 @@
 
 // Host-only microtests for src/plugin/profiler/profiler_v7.cc. The internal interface is v8, so v7 is now served
 // through a shim that drops the v8 timestamps, stop descriptor and init config. The plugin is a FakeLib entry (see
-// profiler-test.cc's ncclOsDlsym).
+// plugin/profiler/fake_lib_dlsym.cc).
 
 #include <gtest/gtest.h>
 
