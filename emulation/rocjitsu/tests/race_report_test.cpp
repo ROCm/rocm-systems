@@ -331,7 +331,7 @@ TEST(RaceReportTraceDeathTest, AssertsReversedExecutionOrder) {
   Trace trace;
   trace.push(snapshot(0x100, 0, 1));
   trace.push(snapshot(0x104, 1, 1));
-  EXPECT_DEATH(formatTrace(trace, text, mark(trace, 1), mark(trace, 0)),
+  EXPECT_DEATH(static_cast<void>(formatTrace(trace, text, mark(trace, 1), mark(trace, 0))),
                "race conflict follows the current access");
 }
 #endif
