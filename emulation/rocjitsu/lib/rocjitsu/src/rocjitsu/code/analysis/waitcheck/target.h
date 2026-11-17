@@ -105,24 +105,6 @@ enum class WaitEventKind {
 inline constexpr size_t kWaitEventKindCount = static_cast<size_t>(WaitEventKind::Count);
 inline constexpr uint8_t kNoPendingEventAge = std::numeric_limits<uint8_t>::max();
 
-// The immediately following VALU can be delayed until a particular earlier
-// instruction completes. The delay tag and the VA completion FIFO are distinct:
-// gfx1250 XDL WMMA shares the TRANS delay history with 16/32-bit TRANS.
-struct ExpertValuDelayState {
-  struct Slot {
-    WaitEventKind kind = WaitEventKind::Unknown;
-    uint8_t units = 0;
-    bool operator==(const Slot &) const = default;
-  };
-  std::array<std::array<Slot, 4>, 2> history{};
-  uint16_t pending = 0;
-  void issue(const Instruction &inst, WaitEventKind kind, uint8_t units, rj_code_arch_t arch);
-  void skip(const Instruction &inst, WaitEventKind kind, rj_code_arch_t arch);
-  void merge(const ExpertValuDelayState &other);
-  std::array<Slot, 2> before(const Instruction &inst, rj_code_arch_t arch);
-  bool operator==(const ExpertValuDelayState &) const = default;
-};
-
 enum class TrackedRegisterSource {
   None,
   Defs,

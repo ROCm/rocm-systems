@@ -588,7 +588,7 @@ TEST(WaitcheckStream, LdsOrderDoesNotEndExpertModeDsSourceLifetimes) {
   }
 }
 
-TEST(WaitcheckStream, ExpertEmptyExecValuConsumesOnlyAnInstructionPosition) {
+TEST(WaitcheckStream, OptionalExpertDelayDoesNotCompleteVa) {
   for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
     for (const uint32_t mask : {0xbefe0080u, 0xbefe0081u, 0xbefe0007u}) {
       Program delayed{0xbefe0081, v_mov(8, 3), mask, 0xbf870001, v_mov(22, 23), 0xbefe0081};
@@ -600,9 +600,8 @@ TEST(WaitcheckStream, ExpertEmptyExecValuConsumesOnlyAnInstructionPosition) {
                                       return diag.counter == amdgpu::WaitCounterKind::VaVdst &&
                                              diag.reg.index == 8;
                                     }),
-                mask != 0xbefe0081);
-      // DEP2 selects the older instruction; the optional younger write to v8
-      // can still be live when the restored wave reads it.
+                true);
+      // The optional hint does not prove completion for the later memory read.
       Program younger{0xbefe0081, v_mov(22, 23), mask,         v_mov(8, 3),
                       0xbefe0081, 0xbf870002,    v_mov(16, 18)};
       load(younger, 9);
@@ -620,11 +619,10 @@ TEST(WaitcheckStream, ExpertEmptyExecValuConsumesOnlyAnInstructionPosition) {
         load(program, 9); // Uses the earlier v8 as its address.
         const auto report = analyze(program, arch, true, 32);
         ASSERT_FALSE(report.incomplete);
-        const bool completed = (tag == 2 && mask != 0xbefe0007) || (tag == 1 && mask == 0xbefe0081);
         const auto observer = std::ranges::find_if(report.diagnostics, [](const auto &diag) {
           return diag.counter == amdgpu::WaitCounterKind::VaVdst && diag.reg.index == 8;
         });
-        EXPECT_EQ(observer == report.diagnostics.end(), completed);
+        EXPECT_NE(observer, report.diagnostics.end());
         if (observer != report.diagnostics.end())
           EXPECT_EQ(observer->required_count, mask == 0xbefe0081 ? 2u : 1u);
       }

@@ -221,12 +221,6 @@ public:
   util::Result analyze(const Instruction &inst, std::span<const ClassifiedEvent> events,
                        uint64_t offset) {
     const auto effects = register_effects(inst, arch_, options_.wave_size);
-    if (options_.expert_scheduling && amdgpu::supports_expert_scheduling(arch_)) {
-      const bool may_skip = state_.expert_valu_may_skip && state_.expert_delay.pending &&
-                            (inst.flags() & VALU) &&
-                            !Ops::expert_valu_issues_without_active_lanes(inst, effects.defs);
-      Ops::apply_expert_valu_delay(state_, inst, arch_, may_skip);
-    }
     if (inst.is_waitcnt())
       return Ops::apply_waitcnt(state_, inst, arch_);
     if (Ops::apply_embedded_waitcnt(state_, inst, arch_).failed())

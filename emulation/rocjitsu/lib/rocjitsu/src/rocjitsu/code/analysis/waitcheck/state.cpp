@@ -178,29 +178,6 @@ void WaitcheckStateOps::apply_admission(PendingState &state, const Instruction &
   }
 }
 
-void WaitcheckStateOps::apply_expert_valu_delay(PendingState &state, const Instruction &inst,
-                                                rj_code_arch_t arch, bool may_skip) {
-  const auto selected = state.expert_delay.before(inst, arch);
-  if (may_skip)
-    return;
-  const size_t va = counter_index(WaitCounterKind::VaVdst);
-  for (const auto [kind, younger] : selected) {
-    if (kind == WaitEventKind::Unknown)
-      continue;
-    std::erase_if(state.pending[va], [&](const PendingEvent &event) {
-      if (event.kind == kind)
-        return event.min_younger >= younger;
-      // A completed core VALU past the WMMA coexecution window also
-      // completes the older matrix operation and releases its operands.
-      return kind == WaitEventKind::ValuCore && event.wmma_wait_states &&
-             event.min_younger_core > event.wmma_wait_states + younger;
-    });
-    auto &age = state.pending_event_ages[va].values[static_cast<size_t>(kind)];
-    if (age != kNoPendingEventAge && age >= younger)
-      age = kNoPendingEventAge;
-  }
-}
-
 std::optional<bool> WaitcheckStateOps::constant_exec_nonzero(const Instruction &inst,
                                                              uint32_t wave_size) {
   const auto name = inst.mnemonic();
@@ -317,21 +294,10 @@ std::optional<uint32_t> WaitcheckStateOps::track_issue_units(PendingState &state
   if (event.counter != WaitCounterKind::VaVdst)
     return units;
   if (!state.expert_valu_may_skip || expert_valu_issues_without_active_lanes(inst, defs)) {
-    state.expert_delay.issue(inst, event.kind, units, arch);
     return units;
   }
   if (state.expert_exec_empty) {
-    if (units)
-      state.expert_delay.skip(inst, event.kind, arch);
     return std::nullopt;
-  }
-  if (units) {
-    // If this producer is live it issued. Older delay selections must still
-    // distinguish its younger operand from the FIFO entry they complete.
-    auto skipped = state.expert_delay;
-    skipped.skip(inst, event.kind, arch);
-    state.expert_delay.issue(inst, event.kind, units, arch);
-    state.expert_delay.merge(skipped);
   }
   return 0;
 }
@@ -692,7 +658,6 @@ void WaitcheckStateOps::merge_into(PendingState &dst, const PendingState &src) {
   }
   if (dst.vgpr_msb != src.vgpr_msb)
     dst.vgpr_msb = {.mode = 0, .known = false};
-  dst.expert_delay.merge(src.expert_delay);
   if (dst.expert_scheduling != src.expert_scheduling)
     dst.expert_scheduling = {.enabled = true, .known = false};
   for (size_t i = 0; i < kCounterCount; ++i) {

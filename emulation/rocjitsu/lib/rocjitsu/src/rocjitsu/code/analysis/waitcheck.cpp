@@ -446,7 +446,9 @@ struct Analyzer : private WaitcheckStateOps {
                                            &IsaGpuTargetDescription::elf_machine);
       const auto *gpu_target =
           bound != arch->gpu_targets.end() ? &*bound : registry.find_default_gpu_target(*arch);
-      target_ = gpu_target ? gpu_target->public_id : ROCJITSU_CODE_TARGET_INVALID;
+      // A default target can supply a decoder, but its faster completion
+      // windows are not evidence for a target-less input.
+      target_ = bound != arch->gpu_targets.end() ? bound->public_id : ROCJITSU_CODE_TARGET_INVALID;
       setreg_vgpr_msb_fixup_ = gpu_target && gpu_target->capabilities.setreg_vgpr_msb_fixup;
       decoder_ = gpu_target ? Decoder::create(registry, gpu_target->public_id)
                             : Decoder::create(registry, report.arch);
@@ -511,7 +513,7 @@ struct Analyzer : private WaitcheckStateOps {
       if (should_stop_after_diagnostic())
         break;
     }
-    finish_counter_parity_block(pending_wait_group, state, arch);
+    finish_counter_parity_block(pending_wait_group, arch);
   }
 
   void analyze_cfg(std::vector<std::unique_ptr<BasicBlock>> &blocks,
@@ -1068,8 +1070,6 @@ struct Analyzer : private WaitcheckStateOps {
         append("async-barrier-post-wait");
       if (lhs.delay_alu != rhs.delay_alu)
         append("delay-alu");
-      if (lhs.expert_delay != rhs.expert_delay)
-        append("expert-valu-delay");
       if (lhs.expert_scheduling != rhs.expert_scheduling)
         append("expert-scheduling");
       return result;
@@ -1594,7 +1594,6 @@ private:
     cfg_has_exec_guards_ = false;
     cfg_has_salu_exec_write_ = false;
     cfg_has_scalar_prefetch_ = false;
-    cfg_has_expert_delay_ = false;
     cfg_has_repeated_exec_filter_ = false;
     wave64_guarded_loads_.clear();
     path_query_starts_.clear();
@@ -1649,8 +1648,6 @@ private:
       for (const Instruction &inst : block->instructions()) {
         if (options_.check_counter_parity && track_banks && is_scalar_prefetch(inst.mnemonic()))
           cfg_has_scalar_prefetch_ = true;
-        cfg_has_expert_delay_ |=
-            amdgpu::supports_expert_scheduling(arch) && inst.mnemonic() == "s_delay_alu";
         const auto predicate = scalar_scc_predicate(inst, arch);
         const size_t predicate_index =
             predicate ? path_predicates_.size() : std::numeric_limits<size_t>::max();
@@ -2535,15 +2532,6 @@ private:
       apply_implicit_xcnt_ordering(*xcnt_adjusted_state, consumer, du, current_events, arch);
       requirement_state = &*xcnt_adjusted_state;
     }
-    std::optional<PendingState> delay_adjusted_state;
-    if (!forward_search && (consumer.flags() & VALU) && requirement_state->expert_delay.pending &&
-        expert_waits_enabled(*requirement_state)) {
-      delay_adjusted_state.emplace(*requirement_state);
-      apply_expert_valu_delay(*delay_adjusted_state, consumer, arch,
-                              requirement_state->expert_valu_may_skip &&
-                                  !expert_valu_issues_without_active_lanes(consumer, du.defs));
-      requirement_state = &*delay_adjusted_state;
-    }
     std::optional<PendingState> x_without_field;
     if (arch == ROCJITSU_CODE_ARCH_CDNA5 &&
         group.emitted_counts[counter_index(WaitCounterKind::X)] &&
@@ -2846,12 +2834,9 @@ private:
     const bool may_track_xcnt =
         arch == ROCJITSU_CODE_ARCH_CDNA5 &&
         !group.state_before.pending[counter_index(WaitCounterKind::X)].empty();
-    const bool may_retire_valu = counter == WaitCounterKind::VaVdst &&
-                                 expert_waits_enabled(group.state_before) && cfg_has_expert_delay_;
     const bool may_retire_source = counter == WaitCounterKind::VmVsrc &&
                                    amdgpu::supports_expert_scheduling(arch) &&
                                    expert_waits_enabled(group.state_before);
-    reached_expert_completion |= may_retire_valu && group.state_before.expert_delay.pending;
     using Position = std::tuple<size_t, size_t, bool>;
     // At ABI boundaries spend the short search budget on both sides of a
     // branch before a long path can hide a dependency in a nearby caller.
@@ -2904,9 +2889,7 @@ private:
           continue;
       }
       if (!reached_expert_completion) {
-        if (may_retire_valu && instruction.mnemonic() == "s_delay_alu") {
-          reached_expert_completion = true;
-        } else if (may_retire_source && instruction.is_waitcnt()) {
+        if (may_retire_source && instruction.is_waitcnt()) {
           if (const auto fields = cfg_explicit_wait_fields(block_index, instruction, arch)) {
             for (size_t i = 0; i < fields->size(); ++i)
               reached_expert_completion |=
@@ -3559,18 +3542,6 @@ private:
         apply_implicit_xcnt_ordering(*xcnt_adjusted_state, instruction, du, current_events, arch);
         dependency_state = &*xcnt_adjusted_state;
       }
-      // The selected ALU delay takes effect before the receiving instruction
-      // reads and writes its operands. Preserve the original state so that
-      // analyze_instruction consumes the tag exactly once on the way forward.
-      std::optional<PendingState> delay_adjusted_state;
-      if (counter == WaitCounterKind::VaVdst && (instruction.flags() & VALU) &&
-          dependency_state->expert_delay.pending && expert_waits_enabled(*dependency_state)) {
-        delay_adjusted_state.emplace(*dependency_state);
-        apply_expert_valu_delay(*delay_adjusted_state, instruction, arch,
-                                state.expert_valu_may_skip &&
-                                    !expert_valu_issues_without_active_lanes(instruction, du.defs));
-        dependency_state = &*delay_adjusted_state;
-      }
       if (actual && counter == WaitCounterKind::VaVdst) {
         if (arch == ROCJITSU_CODE_ARCH_RDNA3) {
           auto hazard =
@@ -4010,17 +3981,12 @@ private:
 
   void audit_counter_parity_group(PendingWaitGroup &group, const Instruction &consumer,
                                   uint64_t consumer_section_offset, uint64_t consumer_file_offset,
-                                  const PendingState &consumer_input, rj_code_arch_t arch) {
+                                  rj_code_arch_t arch) {
     ++report_.counter_parity_wait_groups;
     if (consumer.is_vskip_affected() && group.state_before.vector_skip != false) {
       ++report_.counter_parity_indeterminate_groups;
       return;
     }
-    // Keep the producer ages from before the candidate field. The delay
-    // selector follows actual instruction positions across all encoded waits,
-    // even when one of their counter fields is omitted in a replay.
-    group.state_before.expert_delay = consumer_input.expert_delay;
-
     // Only direct VM_VSRC attribution uses the state with its field omitted.
     // Apply the primary waits in encoded order to preserve FLAT route checks.
     if (group.emitted_counts[counter_index(WaitCounterKind::VmVsrc)] &&
@@ -4467,7 +4433,7 @@ private:
     if (pending_group && relative_wait_operand(inst, arch)) {
       // The selector observes the state after earlier waits in this group
       // and before this instruction applies its own counter field.
-      audit_counter_parity_group(*pending_group, inst, section_offset, file_offset, state, arch);
+      audit_counter_parity_group(*pending_group, inst, section_offset, file_offset, arch);
       pending_group.reset();
     }
     const auto emitted_fields = resolved_wait_fields(state, inst, arch).value();
@@ -4529,7 +4495,7 @@ private:
       if (!pending_group->instructions.empty())
         pending_group->instructions += "; ";
       pending_group->instructions += inst.disassemble();
-      audit_counter_parity_group(*pending_group, inst, section_offset, file_offset, state, arch);
+      audit_counter_parity_group(*pending_group, inst, section_offset, file_offset, arch);
       pending_group.reset();
       return;
     }
@@ -4542,13 +4508,13 @@ private:
     if (inst.is_waitcnt() && !known_non_counter_wait) {
       ++report_.counter_parity_indeterminate_groups;
     } else {
-      audit_counter_parity_group(*pending_group, inst, section_offset, file_offset, state, arch);
+      audit_counter_parity_group(*pending_group, inst, section_offset, file_offset, arch);
     }
     pending_group.reset();
   }
 
   void finish_counter_parity_block(std::optional<PendingWaitGroup> &pending_group,
-                                   const PendingState &state, rj_code_arch_t arch) {
+                                   rj_code_arch_t arch) {
     if (!pending_group)
       return;
 
@@ -4581,7 +4547,7 @@ private:
                                        consumer.section_offset,
                                        pending_group->file_offset - pending_group->section_offset +
                                            consumer.section_offset,
-                                       state, arch);
+                                       arch);
             current_cfg_view_index_ = saved_block_index;
             pending_group.reset();
             return;
@@ -4691,7 +4657,7 @@ private:
         break;
     }
     if (emit_diagnostics)
-      finish_counter_parity_block(pending_wait_group, state, arch);
+      finish_counter_parity_block(pending_wait_group, arch);
     return state;
   }
 
@@ -4700,7 +4666,6 @@ private:
   }
 
   static void clear_expert_wait_state(PendingState &state) {
-    state.expert_delay = {};
     for (const auto counter : {WaitCounterKind::VmVsrc, WaitCounterKind::VaVdst}) {
       const auto i = counter_index(counter);
       state.pending[i].clear();
@@ -5328,7 +5293,7 @@ private:
 
     for (int i = 0; !relative && i < inst.num_src_operands(); ++i) {
       const Operand *op = inst.src_operand(i);
-      if (op == nullptr)
+      if (op == nullptr || !inst.tracks_explicit_source(i))
         continue;
       if (add_adjusted_source_use(du, inst, *op, i, wavefront_size))
         continue;
@@ -6211,37 +6176,6 @@ private:
     return result;
   }
 
-  // Keep the eight delay slots out of ordinary CFG search states. A small
-  // ID represents one immutable history on a path after this producer.
-  struct PathDelayHistories {
-    std::vector<ExpertValuDelayState> values{ExpertValuDelayState{}};
-    std::unordered_map<std::string, uint16_t> ids;
-
-    std::optional<uint16_t> intern(const ExpertValuDelayState &history, uint16_t previous) {
-      if (history == values[previous])
-        return previous;
-      if (history == values.front())
-        return 0;
-      std::string key;
-      key.reserve(18);
-      key.push_back(static_cast<char>(history.pending));
-      key.push_back(static_cast<char>(history.pending >> 8));
-      for (const auto &group : history.history)
-        for (const auto &slot : group) {
-          key.push_back(static_cast<char>(slot.kind));
-          key.push_back(static_cast<char>(slot.units));
-        }
-      if (auto found = ids.find(key); found != ids.end())
-        return found->second;
-      if (values.size() >= 4096)
-        return std::nullopt;
-      const auto next = static_cast<uint16_t>(values.size());
-      ids.emplace(std::move(key), next);
-      values.push_back(history);
-      return next;
-    }
-  };
-
   // These counts belong to the replay prefix, independent of the dataflow
   // event supplied at the consumer. In particular, a later core VALU cannot
   // help a VA_VDST wait that precedes it.
@@ -6249,7 +6183,6 @@ private:
     uint32_t age = 0;
     uint8_t store_age = 0;
     uint8_t core = 0;
-    uint16_t delay_id = 0;
     bool expert_enabled = false;
     bool source_implies_nonempty_exec = false;
     bool crossed_exec_expansion = false;
@@ -6257,7 +6190,6 @@ private:
     uint8_t gfx10_younger_ds = 0;
     bool gfx10_ds_source_active = false;
     std::bitset<128> saved_source_exec;
-    bool unknown_delay_issue = false;
     bool operator==(const PathProgress &) const = default;
   };
 
@@ -7272,10 +7204,6 @@ private:
       return true;
     }
 
-    std::optional<PathDelayHistories> delay_histories;
-    if (expert && event.counter == WaitCounterKind::VaVdst && cfg_has_expert_delay_)
-      delay_histories.emplace();
-
     struct SearchState {
       size_t block_index = 0;
       size_t inst_index = 0;
@@ -7361,8 +7289,6 @@ private:
               static_cast<size_t>(key.progress.gfx10_younger_ds),
               static_cast<size_t>(key.progress.gfx10_ds_source_active),
               std::hash<std::bitset<128>>{}(key.progress.saved_source_exec),
-              static_cast<size_t>(key.progress.delay_id),
-              static_cast<size_t>(key.progress.unknown_delay_issue),
               static_cast<size_t>(key.constraint_id)})
           hash ^= value + 0x9e3779b9u + (hash << 6) + (hash >> 2);
         return hash;
@@ -7442,8 +7368,7 @@ private:
 
       const CfgInstructionView &inst_view = block_view.instructions[state.inst_index];
       const bool scratch_sgpr_write = resolve_scratch_relative && inst_view.scratch_relative_sgpr;
-      size_t run_end =
-          delay_histories && state.pending ? state.inst_index : inst_view.neutral_run_end;
+      size_t run_end = inst_view.neutral_run_end;
       if (expert) {
         // A scheduling-mode write is neutral to ordinary path queries. An
         // expert event cannot survive a switch back to automatic scheduling.
@@ -7504,11 +7429,8 @@ private:
         continue;
       }
       if (before_target && inst_view.section_offset == consumer_offset && state.pending &&
-          (!minimum_younger || state.progress.age < minimum_younger)) {
-        if (!state.progress.unknown_delay_issue)
-          return feasible_path_cache_[cache_key] = true;
-        unknown_lane_witness = true;
-      }
+          (!minimum_younger || state.progress.age < minimum_younger))
+        return feasible_path_cache_[cache_key] = true;
       std::optional<WaitFields> replacement;
       if (weakened && state.pending && inst_view.section_offset >= weakened->first &&
           inst_view.section_offset <= weakened->last) {
@@ -7524,29 +7446,9 @@ private:
         }
       }
       if (expert && inst_view.expert_mode_write) {
-        if (!inst_view.expert_mode_write->known || !inst_view.expert_mode_write->enabled)
-          state.progress.delay_id = 0;
         state.progress.expert_enabled = inst_view.expert_mode_write->enabled;
         if (!state.progress.expert_enabled)
           state.pending = false;
-      }
-      std::optional<ExpertValuDelayState> delay;
-      if (delay_histories && state.pending) {
-        delay = delay_histories->values[state.progress.delay_id];
-        const auto selected = delay->before(inst, arch);
-        const bool certain_issue =
-            state.masks.exec == true || inst_view.valu_issues_with_empty_exec;
-        if (certain_issue) {
-          for (const auto [kind, younger] : selected) {
-            if ((kind == event.kind && state.progress.age >= younger) ||
-                (kind == WaitEventKind::ValuCore && event.wmma_wait_states &&
-                 state.progress.core > event.wmma_wait_states + younger))
-              state.pending = false;
-          }
-        } else if (std::ranges::any_of(
-                       selected, [](auto slot) { return slot.kind != WaitEventKind::Unknown; })) {
-          state.progress.unknown_delay_issue = true;
-        }
       }
       if (scalar_full_drains_only) {
         // Allow every lane to issue, skip and consume. Only an explicit zero
@@ -7585,8 +7487,6 @@ private:
         state.progress.younger_source_primaries = 0;
         state.progress.gfx10_younger_ds = 0;
         state.progress.gfx10_ds_source_active = false;
-        state.progress.delay_id = 0;
-        state.progress.unknown_delay_issue = false;
       }
 
       if (!before_target && inst_view.section_offset == consumer_offset && state.pending &&
@@ -7599,10 +7499,9 @@ private:
                                       (state.masks.exec != false &&
                                        (!track_exec_source ||
                                         state.masks.issue_lanes.overlaps(state.masks.exec_lanes)))};
-        if (reaches == true && !state.progress.unknown_delay_issue)
+        if (reaches == true)
           return feasible_path_cache_[cache_key] = true;
-        unknown_lane_witness |=
-            !reaches.has_value() || (reaches == true && state.progress.unknown_delay_issue);
+        unknown_lane_witness |= !reaches.has_value();
       }
 
       const auto *issue = inst.amdgpu_memory_issue_info();
@@ -7737,35 +7636,6 @@ private:
         state.progress.gfx10_younger_ds = std::min<unsigned>(
             UINT8_MAX, state.progress.gfx10_younger_ds + native_ds_issues);
 
-      if (delay_histories && state.pending) {
-        // Only a known issue may prove queue progress. Although skipped VALUs
-        // count toward INSTID, they need not have completed any registers.
-        // Forget the prefix if its issue was ambiguous, on opaque calls, and
-        // on reissue (earlier histories cannot establish this new producer).
-        if (inst_view.section_offset == event.section_offset || !delay) {
-          delay.emplace();
-          state.progress.unknown_delay_issue = false;
-        }
-        if ((inst.flags() & INDIRECT_CALL) || inst.mnemonic().starts_with("s_call")) {
-          delay.emplace();
-          state.progress.unknown_delay_issue = true;
-        }
-        if (const auto kind = expert_valu_kind(inst, arch)) {
-          if (state.masks.exec == true || inst_view.valu_issues_with_empty_exec) {
-            delay->issue(inst, *kind,
-                         issue_units(inst, ClassifiedEvent{event.counter, *kind}, arch), arch);
-          } else if (state.masks.exec == false) {
-            delay->skip(inst, *kind, arch);
-          } else {
-            delay.emplace();
-            state.progress.unknown_delay_issue = true;
-          }
-        }
-        const auto id = delay_histories->intern(*delay, state.progress.delay_id);
-        if (!id)
-          return feasible_path_cache_[cache_key] = std::nullopt;
-        state.progress.delay_id = *id;
-      }
       if (state.pending && expert && event.counter == WaitCounterKind::VmVsrc &&
           cfg_has_saved_source_exec_ && !cfg_has_unknown_successor_) {
         transfer_saved_source_mask(
@@ -10174,15 +10044,6 @@ private:
                                            file_offset);
       state.async_barrier_post_wait.reset();
     }
-    if (expert_waits_enabled(state) && amdgpu::supports_expert_scheduling(arch)) {
-      const bool may_skip =
-          state.expert_valu_may_skip && state.expert_delay.pending && (inst.flags() & VALU) &&
-          !expert_valu_issues_without_active_lanes(
-              inst,
-              inst_def_use_for_waitcheck(inst, state.vgpr_msb, arch, wavefront_size_, state.m0)
-                  .defs);
-      apply_expert_valu_delay(state, inst, arch, may_skip);
-    }
     if (inst.mnemonic() == "s_delay_alu") {
       apply_s_delay_alu(state, inst);
       return;
@@ -10242,6 +10103,12 @@ private:
 
     InstDefUse du =
         inst_def_use_for_waitcheck(inst, state.vgpr_msb, arch, wavefront_size_, state.m0);
+    if (state.exec_empty && (inst.mnemonic() == "export" || inst.mnemonic() == "exp")) {
+      // POS0 and DONE still reserve an export position and protect EXEC when
+      // every lane is inactive, but read no enabled VGPR channel.
+      du.uses.clear_class(RegClass::VGPR);
+      du.uses.clear_class(RegClass::ACC_VGPR);
+    }
     auto events = effective_events(inst, state.vgpr_msb, arch);
     apply_admission(state, inst, events, arch, false);
     const bool is_async_barrier =
@@ -10413,7 +10280,6 @@ private:
   bool cfg_has_saved_source_exec_ = false;
   std::bitset<128> valu_source_mask_writes_;
   bool cfg_has_scalar_prefetch_ = false;
-  bool cfg_has_expert_delay_ = false;
   bool cfg_has_repeated_exec_filter_ = false;
   std::unordered_set<uint64_t> wave64_guarded_loads_;
   std::vector<std::tuple<size_t, uint64_t, SccPredicate>> path_predicates_;
@@ -10684,10 +10550,14 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
           retry_gfx1250_indirect_calls(code_object, analyzer.decoder(), entry, wavefront_size,
                                        blocks.value());
         analyzer.set_kernel_context(kernel);
+        const bool preceding_entries_complete = report.complete;
+        report.complete = true;
         analyzer.analyze_cfg(blocks.value(), ".text", text_file_offset, arch, wavefront_size,
                              text_size, entry,
                              /*non_entry_function=*/kernel == nullptr, abi_function_entries);
-        if (kernel && report.supported && !report.stopped_early) {
+        const bool entry_complete = report.complete;
+        report.complete &= preceding_entries_complete;
+        if (kernel && report.supported && entry_complete && !report.stopped_early) {
           ++report.kernels_analyzed;
           if (options.kernel_analyzed_callback)
             options.kernel_analyzed_callback();

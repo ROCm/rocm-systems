@@ -313,7 +313,6 @@ struct PendingState {
   std::optional<SgprHazardProducer> async_barrier_post_wait;
   std::vector<PendingDelayAlu> delay_alu;
   ExpertSchedulingState expert_scheduling;
-  ExpertValuDelayState expert_delay;
 
   bool operator==(const PendingState &) const = default;
 };
@@ -371,8 +370,6 @@ struct WaitcheckStateOps : WaitcheckTarget {
 
   static void merge_va_vdst_hazards(VaVdstHazardState &dst, const VaVdstHazardState &src);
 
-  static void apply_expert_valu_delay(PendingState &state, const Instruction &inst,
-                                      rj_code_arch_t arch, bool may_skip);
   static void merge_delay_alu(std::vector<PendingDelayAlu> &dst,
                               const std::vector<PendingDelayAlu> &src);
 

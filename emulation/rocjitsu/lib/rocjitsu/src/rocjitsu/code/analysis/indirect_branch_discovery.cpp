@@ -1759,7 +1759,8 @@ bool try_apply_pair_update(AnalysisContext &ctx, size_t index, BlockState &state
     // whole-scope proof declines to rewrite the range.
     const bool adjacent = inst.src_loc() == updated.source_recovery_end_offset;
     // Sign-extending the high half of a canonical 48-bit text PC preserves the
-    // local branch target. Leave the instruction intact during DBT relocation.
+    // local branch target. Retain the high-half normalization instruction:
+    // treating it as another high-half update would change the recovered target.
     if (ctx.arch == ROCJITSU_CODE_ARCH_RDNA4 && !updated.pending_high_carry &&
         sop1_same_sreg(inst, word, "s_sext_i32_i16", pair_lo + 1)) {
       updated.source_recovery_end_offset = inst.src_loc() + inst.size();
