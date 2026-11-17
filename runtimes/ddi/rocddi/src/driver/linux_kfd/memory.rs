@@ -147,8 +147,8 @@ impl VmBindings {
         &self,
         kfd: &Shared<sys::Kfd>,
         node: &sysfs::KfdNode,
-        xnack_requested: Option<crate::session::XnackModeRequest>,
-        debugger: Option<sys::RuntimeDebuggerRegistration>,
+        xnack_requested: Option<super::XnackModeRequest>,
+        debugger: Option<super::DebuggerRegistration>,
     ) -> Result<Shared<DeviceVm>, Error> {
         self.device_with_render(kfd, node, xnack_requested, debugger, sysfs::open_render)
     }
@@ -163,8 +163,8 @@ impl VmBindings {
         &self,
         kfd: &Shared<sys::Kfd>,
         node: &sysfs::KfdNode,
-        xnack_requested: Option<crate::session::XnackModeRequest>,
-        debugger: Option<sys::RuntimeDebuggerRegistration>,
+        xnack_requested: Option<super::XnackModeRequest>,
+        debugger: Option<super::DebuggerRegistration>,
         open_render: impl FnOnce(u32) -> io::Result<File>,
     ) -> Result<Shared<DeviceVm>, Error> {
         kfd.check_process()

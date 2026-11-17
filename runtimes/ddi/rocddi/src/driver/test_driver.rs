@@ -5,7 +5,8 @@
 //! routing without relying on KFD hardware.
 
 use super::{
-    AddressSpaceInfo, AllocationOperations, CachedInfo, Driver, EndpointSelector, UserQueueResource,
+    AddressSpaceInfo, AllocationOperations, CachedInfo, ConfigurableDriver, Driver, DriverInstance,
+    EndpointSelector, UserQueueResource,
 };
 use crate::device::event::DeviceEvent;
 use crate::device::gpu::queue::{
@@ -14,7 +15,7 @@ use crate::device::gpu::queue::{
 use crate::memory::host::HostBackingLease;
 use crate::memory::storage::Owned;
 use crate::memory::{AllocationInfo, DeviceAccess, HostRegistration, MemoryKind};
-use crate::session::DriverContextLifetime;
+use crate::session::{DriverContextLifetime, Session};
 use crate::topology::{Endpoint, EndpointKind};
 use crate::{Error, ErrorKind};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -133,6 +134,32 @@ impl Drop for TestEventSubscription {
             .cursors
             .retain(|cursor| !Arc::ptr_eq(cursor, &self.cursor));
         state.prune();
+    }
+}
+
+/// Test-only options for exercising typed configuration without KFD.
+pub(crate) struct TestConfiguration {
+    pub(crate) host_registration: bool,
+}
+
+impl super::configuration::Apply for TestConfiguration {
+    fn apply(self, session: &mut Session) -> Result<(), Error> {
+        session.configure_driver(self, |driver| match driver {
+            DriverInstance::Test(driver) => Some(driver),
+            #[cfg(target_os = "linux")]
+            DriverInstance::LinuxKfd(_) => None,
+            #[cfg(not(target_os = "linux"))]
+            DriverInstance::Unavailable(never) => match *never {},
+        })
+    }
+}
+
+impl ConfigurableDriver for TestDriver {
+    type Configuration = TestConfiguration;
+
+    fn configure(&mut self, configuration: Self::Configuration) -> Result<(), Error> {
+        self.host_registration = configuration.host_registration;
+        Ok(())
     }
 }
 

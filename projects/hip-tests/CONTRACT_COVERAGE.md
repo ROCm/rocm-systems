@@ -13,22 +13,22 @@ contract tier intentionally pins only small, portable semantic guarantees.
 ## Snapshot
 
 <!-- contract-coverage-snapshot
-contract_tests: 636
-contract_domains: 119
-declared_apis: 508
-covered_apis: 495
+contract_tests: 644
+contract_domains: 120
+declared_apis: 512
+covered_apis: 499
 uncovered_allowlisted: 13
-coverage_pct: 97.4
+coverage_pct: 97.5
 -->
 
-- Snapshot date: 2026-11-12
-- Snapshot commit: `f1dcbbeeca6`
-- Contract tests: 636
-- Contract domains: 119
-- Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 508
-- Declared HIP runtime APIs directly exercised by contract tests: 495
+- Snapshot date: 2026-11-16
+- Snapshot commit: `6f9d517d5c6`
+- Contract tests: 644
+- Contract domains: 120
+- Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 512
+- Declared HIP runtime APIs directly exercised by contract tests: 499
 - Intentionally uncovered, allowlisted APIs: 13
-- Approximate declared API-name coverage: 97.4%
+- Approximate declared API-name coverage: 97.5%
 - Additional public macro exercised: `hipLaunchKernelGGL`
 - Additional non-runtime-header APIs exercised: HIPRTC (`hiprtcCreateProgram`,
   `hiprtcCompileProgram`, `hiprtcGetCodeSize`, `hiprtcGetCode`,
@@ -55,7 +55,7 @@ plan or the full covered-API listing here.
 
 ## Current allowlisted gaps
 
-The checker currently reports these 11 uncovered declared APIs, all intentionally
+The checker currently reports these 13 uncovered declared APIs, all intentionally
 allowlisted:
 
 ### External-semaphore graph nodes
@@ -137,6 +137,7 @@ binaries instead of exposing portable state to assert.
 | `graph_exec_lifecycle` | 5 |
 | `graph_generic_node` | 3 |
 | `graph_host` | 3 |
+| `graph_id` | 8 |
 | `graph_instantiate_params` | 2 |
 | `graph_kernel` | 3 |
 | `graph_mem_nodes` | 7 |
