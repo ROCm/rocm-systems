@@ -203,6 +203,7 @@ TEST_F(ProfilerV4Microtest, StartEvent_P2p_ParentsToTheGroup) {
   d.p2p.count = 77;
   d.p2p.datatype = "ncclUint64";
   d.p2p.peer = 4;
+  d.p2p.nChannels = 3;
   const auto* v4 = Start(d);
   ASSERT_NE(v4, nullptr);
   EXPECT_EQ(v4->parentObj, H(0x30));
@@ -211,6 +212,18 @@ TEST_F(ProfilerV4Microtest, StartEvent_P2p_ParentsToTheGroup) {
   EXPECT_EQ(v4->p2p.count, 77u);
   EXPECT_STREQ(v4->p2p.datatype, "ncclUint64");
   EXPECT_EQ(v4->p2p.peer, 4);
+  EXPECT_EQ(v4->p2p.nChannels, 3);
+}
+
+TEST_F(ProfilerV4Microtest, StartEvent_P2p_ForwardsEveryChannelCount) {
+  for (int nChannels : {0, 1, 3, 64, 255}) {
+    ncclProfilerEventDescr_t d{};
+    d.type = ncclProfileP2p;
+    d.p2p.nChannels = nChannels;
+    const auto* v4 = Start(d);
+    ASSERT_NE(v4, nullptr);
+    EXPECT_EQ(v4->p2p.nChannels, nChannels);
+  }
 }
 
 TEST_F(ProfilerV4Microtest, StartEvent_ProxyKernelAndNetEvents) {
