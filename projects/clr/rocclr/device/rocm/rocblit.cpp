@@ -1145,11 +1145,17 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
           gpu().Barriers().ResetCurrentSignal();
         }
         LogPrintfError("HSA batch copy failed with code %d for engine %d", status, engine);
+        // Nothing joins the submitted ops after a failure, so drain them here
+        for (size_t s = 0; s < groupSignals.size() - (last - first); ++s) {
+          WaitForSignal(groupSignals[s]->signal_, gpu().ActiveWait(), /*yield=*/false,
+                        groupSignals[s]->in_device_memory_);
+        }
+        gpu().Barriers().ReleaseHeldSignals();
         return false;
       }
       // Later acquisitions must not rearm these before the final barrier waits on them.
       for (size_t s = groupSignals.size() - (last - first); s < groupSignals.size(); ++s) {
-        gpu().Barriers().PinUntilWait(groupSignals[s]);
+        gpu().Barriers().HoldSignal(groupSignals[s]);
       }
     }
   }
@@ -1160,6 +1166,9 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
     for (size_t i = 0; i + 1 < groupSignals.size(); ++i) {
       outBatchSignals->push_back(groupSignals[i]);
     }
+  } else {
+    // No caller joins the earlier signals, so the holds only had to cover the submission
+    gpu().Barriers().ReleaseHeldSignals();
   }
 
   gpu().addSystemScope();

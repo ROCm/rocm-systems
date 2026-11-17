@@ -766,6 +766,7 @@ VirtualGPU::RetiringSignalTracker::~RetiringSignalTracker() {
     disarm(signal);
   }
   ReleasePins(/*release_all=*/true);
+  ReleaseHeldSignals();
   for (ProfilingSignal* signal : spare_signals_) {
     disarm(signal);
     signal->release();
@@ -1797,6 +1798,20 @@ void VirtualGPU::RetiringSignalTracker::NoteGpuWait(ProfilingSignal* signal, boo
     return;
   }
   HwQueueTracker::NoteGpuWait(signal, aql_waiter);
+}
+
+// ================================================================================================
+void VirtualGPU::RetiringSignalTracker::HoldSignal(ProfilingSignal* signal) {
+  signal->retain();
+  held_signals_.push_back(signal);
+}
+
+// ================================================================================================
+void VirtualGPU::RetiringSignalTracker::ReleaseHeldSignals() {
+  for (ProfilingSignal* signal : held_signals_) {
+    signal->release();
+  }
+  held_signals_.clear();
 }
 
 // ================================================================================================
@@ -4902,6 +4917,8 @@ void VirtualGPU::submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) {
   if (result && !Barriers().IsExternalSignalListEmpty()) {
     dispatchBarrierPacket(kNopPacketHeader);
   }
+  // The barrier pinned the batch signals it waits on
+  Barriers().ReleaseHeldSignals();
 
   if (!result) {
     LogError("submitBatchCopyMemory failed!");
