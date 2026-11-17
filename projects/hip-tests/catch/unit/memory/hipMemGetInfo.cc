@@ -32,8 +32,8 @@ static std::string memGetInfoEventName(const std::string& tag, const char* what)
 
 /**
  * Spawn a child process that allocates 2 GB of device memory and signals the
- * parent. Verify from the parent process that the 2 GB held by the other process
- * is not reported as free. Windows counterpart of the fork() based
+ * parent. Verify from the parent process that free memory drops while the other
+ * process holds the 2 GB. Windows counterpart of the fork() based
  * Unit_hipMemGetInfo_Functional_Scenario2 in multiproc/hipMemGetInfoMProc.cc.
  */
 HIP_TEST_CASE(Unit_hipMemGetInfo_Functional_OtherProcess) {
@@ -43,9 +43,9 @@ HIP_TEST_CASE(Unit_hipMemGetInfo_Functional_OtherProcess) {
   if (prop.integrated) {
     HIP_SKIP_TEST("Free memory of an integrated GPU is not device-wide on Windows.");
   }
-  size_t free = 0, total = 0;
-  HIP_CHECK(hipMemGetInfo(&free, &total));
-  if (free < 2 * size) {
+  size_t freeBefore = 0, free = 0, total = 0;
+  HIP_CHECK(hipMemGetInfo(&freeBefore, &total));
+  if (freeBefore < 2 * size) {
     HIP_SKIP_TEST("Not enough free device memory.");
   }
 
@@ -60,19 +60,25 @@ HIP_TEST_CASE(Unit_hipMemGetInfo_Functional_OtherProcess) {
   REQUIRE(child.spawn("Unit_hipMemGetInfo_Functional_OtherProcess_Child") == 0);
   // Wait until the child holds the memory (or exits early), then check it from this process
   HANDLE waitFor[] = {ready, child.getProcess().hProcess};
-  const bool childReady = (WaitForMultipleObjects(2, waitFor, FALSE, 60000) == WAIT_OBJECT_0);
+  const DWORD waitResult = WaitForMultipleObjects(2, waitFor, FALSE, 60000);
+  const bool childReady = (waitResult == WAIT_OBJECT_0);
   if (childReady) {
     HIP_CHECK(hipMemGetInfo(&free, &total));
   }
-  // Let the child free the memory and exit
+  // Let the child free the memory and exit; don't wait forever for a child that hangs
   SetEvent(done);
+  if (waitResult == WAIT_TIMEOUT) {
+    TerminateProcess(child.getProcess().hProcess, 1);
+  }
   const int exitCode = child.wait();
   CloseHandle(ready);
   CloseHandle(done);
 
   REQUIRE(childReady);
   REQUIRE(exitCode == 0);
-  REQUIRE((total - free) >= size);
+  // Allow for other processes releasing memory meanwhile
+  REQUIRE(freeBefore > free);
+  REQUIRE((freeBefore - free) >= size / 2);
 }
 
 /**
@@ -97,9 +103,10 @@ HIP_TEST_CASE(Unit_hipMemGetInfo_Functional_OtherProcess_Child) {
   HIP_CHECK(hipDeviceSynchronize());
   // Signal the parent and wait until it has checked the memory
   SetEvent(ready);
-  WaitForSingleObject(done, 60000);
+  const DWORD waitResult = WaitForSingleObject(done, 60000);
   HIP_CHECK(hipFree(A_d));
   CloseHandle(ready);
   CloseHandle(done);
+  REQUIRE(waitResult == WAIT_OBJECT_0);
 }
 #endif
