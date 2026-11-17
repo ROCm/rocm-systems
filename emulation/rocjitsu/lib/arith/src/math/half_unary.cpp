@@ -141,6 +141,16 @@ template <rocjitsu::arith::Unary Op, bool GuestDenormals = true, bool PreserveCl
   if (exec_mask == 0) {
     return RJ_ARITH_SUCCESS;
   }
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if constexpr (rocjitsu::arith::half_unary_rcp_rsq_sqrt<Op> || Op == rocjitsu::arith::Unary::Exp ||
+                Op == rocjitsu::arith::Unary::Log) {
+    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+      rocjitsu::arith::half_unary_loose_x86_64_v4<Op>(flags, exec_mask, uint32_t(modifiers), d[0],
+                                                      a[0]);
+      return RJ_ARITH_SUCCESS;
+    }
+  }
+#endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if (!(flags & RJ_ARITH_FP_ROUND_MASK) &&
       rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
@@ -351,6 +361,25 @@ int unary_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *co
       return error;
     }
   }
+  return RJ_ARITH_SUCCESS;
+}
+
+// Resolve older TRANS semantics and fixed rounding without qualifying new targets.
+// Reject strict requests before output access; rewrite only this call's local flags.
+int prepare_older_half_trans_flags(uint64_t &flags) {
+  const uint64_t semantics = flags & RJ_ARITH_SEMANTICS_MASK;
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  // Compatibility uses the inherited arithmetic; modes 0/1 retain Loose SIMD.
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  // TRANS and its OMOD overflow ignore guest ROUND; do not disable SIMD for it.
+  flags &= ~RJ_ARITH_FP_ROUND_MASK;
   return RJ_ARITH_SUCCESS;
 }
 
@@ -1302,6 +1331,104 @@ int rj_arith_v_frexp_mant_f16_w64_gfx908(uint64_t flags, uint64_t exec_mask,
   }
   return unary_wave64<rocjitsu::arith::Unary::FrexpMant, false, false, false, true>(
       flags, exec_mask, instruction_flags, d, a, trapsts);
+}
+
+// Older-profile RCP reuses the inherited mapping without strict target qualification.
+int rj_arith_v_rcp_f16_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts) {
+  if (int error = prepare_older_half_trans_flags(flags)) {
+    return error;
+  }
+  return run<rocjitsu::arith::Unary::Rcp, true>(flags, exec_mask, instruction_flags, d, a, trapsts);
+}
+
+// Older-profile RCP reuses the inherited mapping without strict target qualification.
+int rj_arith_v_rcp_f16_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts) {
+  if (int error = prepare_older_half_trans_flags(flags)) {
+    return error;
+  }
+  return unary_wave64<rocjitsu::arith::Unary::Rcp, true>(flags, exec_mask, instruction_flags, d, a,
+                                                         trapsts);
+}
+
+// Older-profile RSQ reuses the inherited mapping without strict target qualification.
+int rj_arith_v_rsq_f16_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts) {
+  if (int error = prepare_older_half_trans_flags(flags)) {
+    return error;
+  }
+  return run<rocjitsu::arith::Unary::Rsq, true>(flags, exec_mask, instruction_flags, d, a, trapsts);
+}
+
+// Older-profile RSQ reuses the inherited mapping without strict target qualification.
+int rj_arith_v_rsq_f16_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts) {
+  if (int error = prepare_older_half_trans_flags(flags)) {
+    return error;
+  }
+  return unary_wave64<rocjitsu::arith::Unary::Rsq, true>(flags, exec_mask, instruction_flags, d, a,
+                                                         trapsts);
+}
+
+// Older-profile SQRT reuses the inherited mapping without strict target qualification.
+int rj_arith_v_sqrt_f16_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   uint32_t *trapsts) {
+  if (int error = prepare_older_half_trans_flags(flags)) {
+    return error;
+  }
+  return run<rocjitsu::arith::Unary::Sqrt, true>(flags, exec_mask, instruction_flags, d, a,
+                                                 trapsts);
+}
+
+// Older-profile SQRT reuses the inherited mapping without strict target qualification.
+int rj_arith_v_sqrt_f16_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   uint32_t *trapsts) {
+  if (int error = prepare_older_half_trans_flags(flags)) {
+    return error;
+  }
+  return unary_wave64<rocjitsu::arith::Unary::Sqrt, true>(flags, exec_mask, instruction_flags, d, a,
+                                                          trapsts);
+}
+
+// Older-profile EXP retains the existing half model in Compatibility and SIMD in Loose.
+int rj_arith_v_exp_f16_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts) {
+  if (int error = prepare_older_half_trans_flags(flags)) {
+    return error;
+  }
+  return run<rocjitsu::arith::Unary::Exp, true>(flags, exec_mask, instruction_flags, d, a, trapsts);
+}
+
+// Older-profile EXP retains the existing half model in Compatibility and SIMD in Loose.
+int rj_arith_v_exp_f16_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts) {
+  if (int error = prepare_older_half_trans_flags(flags)) {
+    return error;
+  }
+  return unary_wave64<rocjitsu::arith::Unary::Exp, true>(flags, exec_mask, instruction_flags, d, a,
+                                                         trapsts);
+}
+
+// Older-profile LOG retains the existing half model in Compatibility and SIMD in Loose.
+int rj_arith_v_log_f16_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts) {
+  if (int error = prepare_older_half_trans_flags(flags)) {
+    return error;
+  }
+  return run<rocjitsu::arith::Unary::Log, true>(flags, exec_mask, instruction_flags, d, a, trapsts);
+}
+
+// Older-profile LOG retains the existing half model in Compatibility and SIMD in Loose.
+int rj_arith_v_log_f16_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts) {
+  if (int error = prepare_older_half_trans_flags(flags)) {
+    return error;
+  }
+  return unary_wave64<rocjitsu::arith::Unary::Log, true>(flags, exec_mask, instruction_flags, d, a,
+                                                         trapsts);
 }
 
 // Older-profile FRACT preserves guest rounding, denormals and rounded-result output controls.

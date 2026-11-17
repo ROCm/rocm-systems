@@ -62,10 +62,10 @@ FMA64_SUFFIX = {
     'cdna3': '_gfx942',
     'cdna4': '_gfx950',
     'cdna5': '_gfx1250',
-    'cdna1': '_gfx942',
-    'cdna2': '_gfx942',
-    'rdna1': '_gfx942',
-    'rdna3_5': '_gfx942',
+    'cdna1': '_gfx950',
+    'cdna2': '_gfx950',
+    'rdna1': '_gfx950',
+    'rdna3_5': '_gfx950',
 }
 
 
@@ -3708,3 +3708,71 @@ def test_old_cdna_conversion_half_selectors(arch):
         assert 'opsel = amdgpu::vop3_opsel(inst_)' in body
         if not name.startswith('V_CVT_F32_'):
             assert 'RJ_ARITH_ALU_HIGH_D) ? 0xC : 0xF' in body
+
+
+@pytest.mark.parametrize('vop3', [False, True])
+@pytest.mark.parametrize('op', ['RCP', 'RSQ', 'SQRT', 'EXP', 'LOG'])
+def test_gfx1250_half_roots_keep_qualification_and_true16_layout(vop3, op):
+    from amdisa.codegen.execute.rj_arith_float import gen_float_unary16
+
+    body = gen_float_unary16(
+        context('cdna5', f'V_{op}_F16', ['d'], ['a'], is_vop3=vop3)
+    )
+    assert f'rj_arith_v_{op.lower()}_f16_w32_gfx12' in body
+    assert 'nullptr' in body
+    assert body.index('if (!wf.exec())') < body.index('arithmetic_flags()')
+    assert 'guest_rounding=*/false' in body
+    if vop3:
+        assert 'RJ_ARITH_ALU_HIGH_A' in body and 'RJ_ARITH_ALU_HIGH_D' in body
+    else:
+        # Native E32 operands retain half selection in their operand views.
+        assert 'd, a,' in body
+
+
+@pytest.mark.parametrize('arch', ['cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5'])
+@pytest.mark.parametrize('op', ['RCP', 'RSQ', 'SQRT', 'EXP', 'LOG'])
+def test_older_half_roots_use_fixed_rounding_and_staged_sdwa(arch, op):
+    from amdisa.codegen.execute.rj_arith_float import gen_float_unary16
+
+    for vop3 in (False, True):
+        body = gen_float_unary16(
+            context(arch, f'V_{op}_F16', ['d'], ['a'], is_vop3=vop3)
+        )
+        assert f'rj_arith_v_{op.lower()}_f16_w32_gfx908' in body
+        assert '/*guest_rounding=*/false' in body
+        assert ('execute_half_unary_sdwa' in body) == (not vop3)
+        assert 'RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS' in body
+
+
+@pytest.mark.parametrize('arch', ['cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5'])
+@pytest.mark.parametrize('op', ['SIN', 'COS'])
+def test_older_half_trig_inherits_policy_and_staged_sdwa(arch, op):
+    from amdisa.codegen.execute.rj_arith_float import gen_float_unary16
+
+    for vop3 in (False, True):
+        body = gen_float_unary16(
+            context(arch, f'V_{op}_F16', ['d'], ['a'], is_vop3=vop3)
+        )
+        assert f'rj_arith_v_{op.lower()}_f16_w32_gfx908' in body
+        assert '/*guest_rounding=*/false' in body
+        assert ('execute_half_unary_sdwa' in body) == (not vop3)
+        assert 'RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS' in body
+
+
+@pytest.mark.parametrize('vop3', [False, True])
+@pytest.mark.parametrize('op', ['SIN', 'COS'])
+def test_gfx1250_half_trig_keeps_qualification_and_true16_layout(vop3, op):
+    from amdisa.codegen.execute.rj_arith_float import gen_float_unary16
+
+    body = gen_float_unary16(
+        context('cdna5', f'V_{op}_F16', ['d'], ['a'], is_vop3=vop3)
+    )
+    assert f'rj_arith_v_{op.lower()}_f16_w32_gfx12' in body
+    assert 'nullptr' in body
+    assert body.index('if (!wf.exec())') < body.index('arithmetic_flags()')
+    assert 'guest_rounding=*/false' in body
+    if vop3:
+        assert 'RJ_ARITH_ALU_HIGH_A' in body and 'RJ_ARITH_ALU_HIGH_D' in body
+    else:
+        # E32 operands carry their native half selection into the shared adapter.
+        assert 'd, a,' in body

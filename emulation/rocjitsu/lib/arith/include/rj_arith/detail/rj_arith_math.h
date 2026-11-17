@@ -857,6 +857,46 @@ int rj_arith_v_frexp_mant_f16_w64_gfx908(uint64_t flags, uint64_t exec_mask,
                                          uint64_t instruction_flags, uint32_t *const *d,
                                          const uint32_t *const *a, uint32_t *trapsts);
 
+// Older-profile RCP/RSQ/SQRT inherit the existing FP32 approximation and half narrowing
+// in Compatibility. Loose uses CPU arithmetic. Guest ROUND is ignored; denormals,
+// FP16_OVFL, half selectors and eligible OMOD/CLAMP are supported. Strict modes are unqualified.
+int rj_arith_v_rcp_f16_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_rcp_f16_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_rsq_f16_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_rsq_f16_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_sqrt_f16_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_sqrt_f16_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+
+// Older-profile EXP/LOG inherit the existing FP64-libm/FP16-rounding model in
+// Compatibility, with fixed nearest rounding and IEEE-dependent NaN quieting.
+// Loose uses SIMD polynomials. Other controls match the older RCP/RSQ/SQRT group.
+int rj_arith_v_exp_f16_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_exp_f16_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_log_f16_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_log_f16_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+
+// Older half SIN/COS inherit the existing FP32 model before half narrowing and
+// MODE modifiers. Inputs are turns; guest ROUND is ignored. Strict target modes
+// remain unqualified; Compatibility retains the existing numerical behavior.
+int rj_arith_v_sin_f16_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_sin_f16_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_cos_f16_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+int rj_arith_v_cos_f16_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+
 // Older-profile fractional parts round under guest MODE before OMOD/CLAMP.
 // NaNs are quieted, infinities produce negative quiet NaN, integer inputs +0.
 // Compatibility inherits the existing model without new strict qualification.

@@ -244,8 +244,8 @@ TEST(MathOlderHalfFrexp, Arithmetic) {
 
 // Fractional decomposition keeps the inherited special-value and aliasing contract.
 TEST(MathOlderHalfFract, Arithmetic) {
-  rocjitsu::arith::test::check_older_half_unary<32>(rj_arith_v_fract_f16_w32_gfx908, 5);
+  rocjitsu::arith::test::check_older_half_unary<32>(rj_arith_v_fract_f16_w32_gfx908, 12);
   rocjitsu::arith::test::check_half_fract_rounding<32>(rj_arith_v_fract_f16_w32_gfx908);
-  rocjitsu::arith::test::check_older_half_unary<64>(rj_arith_v_fract_f16_w64_gfx908, 5);
+  rocjitsu::arith::test::check_older_half_unary<64>(rj_arith_v_fract_f16_w64_gfx908, 12);
   rocjitsu::arith::test::check_half_fract_rounding<64>(rj_arith_v_fract_f16_w64_gfx908);
 }
