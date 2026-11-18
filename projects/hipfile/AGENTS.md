@@ -511,16 +511,21 @@ warnings have their own suppression mechanism, described under
   don't count.
 - **clang-tidy**: configure with `-DHIPFILE_USE_CLANG_TIDY=ON` and Clang as
   the C++ compiler, and build; it must report nothing (every finding is an
-  error). [`.clang-tidy`](.clang-tidy) enables only the `clang-analyzer-*`
-  checks, which ROCm's clang-tidy doesn't have, so point
-  `HIPFILE_CLANG_TIDY_EXECUTABLE` at an upstream clang-tidy whose LLVM major
-  version matches ROCm's (the CI workflow sets the version it uses). If it
-  reports "no checks enabled," it's the wrong clang-tidy; don't work around
-  it. CI:
+  error). [`.clang-tidy`](.clang-tidy) enables whole groups of checks
+  (`bugprone-*`, `clang-analyzer-*`, `cppcoreguidelines-*`, `modernize-*`,
+  `readability-*`, and more) and turns off the ones that aren't wanted, with
+  the reason for each; [`examples/.clang-tidy`](examples/.clang-tidy) turns
+  off the ones that don't suit C++17 examples. ROCm's clang-tidy is built
+  without the `clang-analyzer-*` checks and silently skips them, so point
+  `HIPFILE_CLANG_TIDY_EXECUTABLE` at an upstream clang-tidy, version 19 or
+  later, whose LLVM major version matches ROCm's (the CI workflow sets the
+  version it uses). CI:
   [hipfile-clang-tidy.yml](../../.github/workflows/hipfile-clang-tidy.yml).
-  **Advisory:** hipObject runs a much broader set of checks
-  (`bugprone-*`, `cppcoreguidelines-*`, `modernize-*`, `readability-*`, and
-  more); keep new code clean of what those would report where you can.
+  **Advisory:** the checks in `.clang-tidy`'s TODO section still report
+  existing code, so they're turned off. Keep new and changed code clean of
+  what they report: delete a check's line, build, and read what it reports
+  for the files you touched. When a check reports nothing, delete its line
+  for good.
 - **include-what-you-use (IWYU)**: configure with `-DHIPFILE_USE_IWYU=ON`
   (Clang only) in a separate build directory, since it leaves out the
   warning flags, and build; IWYU prints the `#include` lines it suggests
