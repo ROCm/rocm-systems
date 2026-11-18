@@ -3561,13 +3561,16 @@ void GpuAgent::SyncClocks() {
 
 bool GpuAgent::RawTsValid(uint64_t start, uint64_t end) {
   if ((start == 0) || (end == 0)) return false;
-  // Compare against t0_ after removing any epoch offset between packet timestamps
-  // and the calibration clock.  The offset is 0 when the clocks share an epoch (e.g.
-  // KFD), which makes this the plain "does not predate t0_" check.  A nonzero offset
-  // is negative (packet clock lags); reinterpreted as uint64_t, "start - off" wraps
-  // to "start + |offset|" - intentional modular arithmetic, not underflow.
-  const uint64_t off = uint64_t(ClockEpochOffset(end));
-  return (start - off >= t0_.GPUClockCounter) && (end - off >= t0_.GPUClockCounter);
+  // The upstream check, lock-free: ticks that do not predate t0_ are valid.  This
+  // is the common case on every platform and keeps t1_lock_ off the native path.
+  if ((start >= t0_.GPUClockCounter) && (end >= t0_.GPUClockCounter)) return true;
+  // A tick predates t0_: valid only if the packet clock lags the calibration clock
+  // by an epoch offset (WSL/DXG, negative offset) that explains it.  A zero or
+  // positive offset (KFD, native Windows) leaves these ticks invalid, as upstream.
+  const int64_t off = ClockEpochOffset(end);
+  if (off >= 0) return false;
+  const uint64_t lag = uint64_t(-off);
+  return (start + lag >= t0_.GPUClockCounter) && (end + lag >= t0_.GPUClockCounter);
 }
 
 int64_t GpuAgent::ClockEpochOffset(uint64_t raw_tick) {
