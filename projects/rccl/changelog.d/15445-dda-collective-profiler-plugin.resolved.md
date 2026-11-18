@@ -1,0 +1,1 @@
+* Fixed profiler plugin host event tracing for collectives that select the RCCL DDA path; tracing for device events is not yet implemented. Under graph capture, these events are emitted once when the graph is captured, but not on subsequent graph replay. `RCCL_DDA_ENABLE=0` can be used to route the collectives through the fully-instrumented path while profiling.
