@@ -246,7 +246,7 @@ TEST_F(MemoryWaitScoreboardTest, CancellationPreservesOlderScalarReplaySources) 
                {RegClass::SGPR, static_cast<uint16_t>(i), 1},
                WaitCounterKind::Km,
                0xf});
-    const auto translation = state.issue_xcnt(std::array{WaitCounterKind::Km}, true);
+    const auto translation = state.issue_xcnt(WaitCounterKind::Km, true);
     state.add({translation, pc, ~uint64_t{0}, {RegClass::SGPR, 2, 1}, WaitCounterKind::X, 0xf});
   }
   const std::array counters{WaitCounterType::KMCNT};
@@ -263,12 +263,12 @@ TEST_F(MemoryWaitScoreboardTest, CancellationPreservesOlderScalarReplaySources) 
 
 TEST_F(MemoryWaitScoreboardTest, IssueSnapshotPreservesOlderCompletionAndReplayPositions) {
   load(5);
-  const auto older_x = state.issue_xcnt(std::array{WaitCounterKind::Load}, false);
+  const auto older_x = state.issue_xcnt(WaitCounterKind::Load, false);
   state.add({older_x, 0x100, 1, {RegClass::VGPR, 7, 1}, WaitCounterKind::X, 0xf});
   const auto before = state.issue_snapshot();
   const auto completion = state.issue(WaitCounterKind::Ds);
   state.add({completion, 0x104, 1, {RegClass::VGPR, 6, 1}, WaitCounterKind::Ds, 0xf});
-  const auto replay = state.issue_xcnt(std::array{WaitCounterKind::Ds}, false);
+  const auto replay = state.issue_xcnt(WaitCounterKind::Ds, false);
   state.add({replay, 0x104, 1, {RegClass::VGPR, 8, 1}, WaitCounterKind::X, 0xf});
   ASSERT_TRUE(state.cancel_last_issue(0x104, before));
   EXPECT_EQ(state.outstanding(WaitCounterKind::Load), 1u);
@@ -596,7 +596,7 @@ TEST_F(MemoryWaitScoreboardTest, AsyncDirectionsAndLegacyImageTypesHaveSeparateC
 
 TEST_F(MemoryWaitScoreboardTest, CompletionBackpressureAlsoProvesReplayTranslation) {
   state.issue(WaitCounterKind::Load);
-  state.add({state.issue_xcnt(std::array{WaitCounterKind::Load}, false),
+  state.add({state.issue_xcnt(WaitCounterKind::Load, false),
              0x100,
              1,
              {RegClass::VGPR, 5, 1},
@@ -3632,7 +3632,7 @@ TEST_F(MemoryWaitScoreboardTest, ReplayCompletionWaitsMapMixedCountersToTranslat
   state.xcnt_group(false);
   auto issue = [&](WaitCounterKind counter, uint16_t reg) {
     state.issue(counter);
-    state.add({state.issue_xcnt(std::array{counter}, false),
+    state.add({state.issue_xcnt(counter, false),
                0x100,
                1,
                {RegClass::VGPR, reg, 1},
@@ -3662,14 +3662,18 @@ TEST_F(MemoryWaitScoreboardTest, UnmappedReplayEntriesRetainTheirPlaceInTheTrans
   for (bool wait_for_completion : {false, true}) {
     state.clear();
     state.issue(WaitCounterKind::Load);
-    state.add({state.issue_xcnt(std::array{WaitCounterKind::Load}, false),
+    state.add({state.issue_xcnt(WaitCounterKind::Load, false),
                0x100,
                1,
                {RegClass::VGPR, 5, 1},
                WaitCounterKind::X,
                0xf});
-    state.add(
-        {state.issue_xcnt({}, false), 0x104, 1, {RegClass::EXEC, 0, 1}, WaitCounterKind::X, 0xf});
+    state.add({state.issue_xcnt(std::nullopt, false),
+               0x104,
+               1,
+               {RegClass::EXEC, 0, 1},
+               WaitCounterKind::X,
+               0xf});
     state.wait(WaitCounterKind::Store, 0);
     EXPECT_TRUE(shadow.test(5, true));
     EXPECT_TRUE(shadow.pending({RegClass::EXEC, 0, 1}, true));
@@ -3680,7 +3684,7 @@ TEST_F(MemoryWaitScoreboardTest, UnmappedReplayEntriesRetainTheirPlaceInTheTrans
     EXPECT_EQ(state.outstanding(WaitCounterKind::X), 1u);
     // A later mapped instruction's completion proves the remaining X prefix.
     state.issue(WaitCounterKind::Store);
-    state.issue_xcnt(std::array{WaitCounterKind::Store}, false);
+    state.issue_xcnt(WaitCounterKind::Store, false);
     state.wait(WaitCounterKind::Store, 0);
     EXPECT_FALSE(shadow.pending({RegClass::EXEC, 0, 1}, true));
     EXPECT_EQ(state.outstanding(WaitCounterKind::X), 0u);
@@ -4390,65 +4394,6 @@ TEST(XcntExecutionTest, FlatReplayCompletionFollowsTheWholeRequestRoute) {
       }
     }
   }
-}
-
-TEST(XcntExecutionTest, AsyncCompletionReleasesOnlyProvenReplaySources) {
-  GpuMemory memory("async_replay_memory");
-  L2Cache l2("async_replay_l2");
-  ComputeUnitCore::Config config{};
-  config.arch = ROCJITSU_CODE_ARCH_CDNA5;
-  config.xcnt_diagnostics = MemoryWaitDiagnostics::Warn;
-  config.num_wf_slots = 1;
-  config.sgprs_per_wf = 128;
-  config.vgprs_per_wf = 32;
-  config.lds_size_kb = 64;
-  std::unique_ptr<ComputeUnitCore> cu;
-  ASSERT_NO_FATAL_FAILURE(
-      rocjitsu::test::initialize_compute_unit(cu, "async_replay_cu", config, &memory, &l2));
-  auto *wf = cu->dispatch_wf(0, 0x100, 128, 32);
-  ASSERT_NE(wf, nullptr);
-  wf->set_exec(1);
-  wf->set_mode_raw(wf->mode_raw() | (1u << 25));
-  auto decoder = Decoder::create(config.arch);
-  for (bool load : {false, true})
-    for (bool mixed : {false, true})
-      for (unsigned wait = 0; wait < 5; ++wait) {
-        SCOPED_TRACE(testing::Message()
-                     << "load=" << load << " mixed=" << mixed << " wait=" << wait);
-        auto &state = wf->ensure_memory_wait_scoreboard();
-        state.clear();
-        for (unsigned index = 0; index < 2; ++index) {
-          const bool issue_load = load != (mixed && index == 1);
-          util::StringDiagnostic error;
-          auto decoded = decoder->decode_window(
-              cdna5::build_vglobal(
-                  issue_load ? cdna5::kGlobalLoadAsyncToLdsB32Vglobal
-                             : cdna5::kGlobalStoreAsyncFromLdsB32Vglobal,
-                  {.saddr = 0, .vdst = 8, .vsrc = 8, .vaddr = static_cast<uint8_t>(index)}),
-              0, error.emitter());
-          ASSERT_TRUE(decoded.succeeded()) << error.message();
-          cu->track_memory_wait(*decoded.value(), *wf);
-        }
-        ASSERT_EQ(state.outstanding(WaitCounterKind::X), 2u);
-        if (wait == 1 || wait == 2)
-          state.wait(WaitCounterKind::Async, wait == 1 ? 1 : 0);
-        else if (wait == 3)
-          state.wait(load ? WaitCounterKind::Load : WaitCounterKind::Store, 0);
-        else if (wait == 4)
-          state.wait(WaitCounterKind::X, 0);
-        unsigned reports = 0;
-        state.bind(0x200, &reports,
-                   [](void *context, const auto &) { ++*static_cast<unsigned *>(context); });
-        state.access({RegClass::VGPR, 0, 1}, 1, 0xf, true);
-        // CDNA5 ISA 10.8: async loads and stores each complete in order,
-        // but a partial wait cannot choose between the two directions.
-        const bool reusable = wait >= 2 || (wait == 1 && !mixed);
-        EXPECT_EQ(reports, reusable ? 0u : 1u);
-        reports = 0;
-        state.access({RegClass::VGPR, 1, 1}, 1, 0xf, true);
-        const bool later_reusable = wait == 2 || wait == 4 || (wait == 3 && !mixed);
-        EXPECT_EQ(reports, later_reusable ? 0u : 1u);
-      }
 }
 
 TEST(XcntExecutionTest, EmptyExecWithoutPendingTranslationsHasNoReplayDependency) {

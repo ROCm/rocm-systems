@@ -79,7 +79,7 @@ Enable the race detector by adding it to the `plugins` section of your
 rocjitsu config file (`my_config.json`):
 
 ```json
-{ "wait_checking": "all", "plugins": { "race": {} } }
+{ "wait_checking": "on", "plugins": { "race": {} } }
 ```
 
 Run it under the emulator:
@@ -150,7 +150,7 @@ scripted workflows), add a `sinks` section to your config:
 
 ```json
 {
-  "wait_checking": "all",
+  "wait_checking": "on",
   "plugins": { "race": {} },
   "sinks": { "types": ["file"], "dir": "/tmp/output" }
 }
@@ -163,17 +163,16 @@ $BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- ./my_app
 
 ### Core-backed register reports
 
-Enabling `"race": {}` requires all wait checks supported by the target. Use
-`"wait_checking": "all"` or `--wait-checking=all`; this works on every architecture.
-Other architectures also accept `on`, while gfx1250 requires the additional input
-register reuse checks controlled by XCNT. Incompatible effective settings, including
-per-CU overrides, reject plugin loading.
+Enabling `"race": {}` requires ordinary wait checking enabled and XCNT checking
+disabled on every target. Use `"wait_checking": "on"` or `--wait-checking=on`,
+or retain the default settings. Loading with `off`, `all`, or incompatible
+per-CU settings is rejected. The plugin does not report XCNT replay-source hazards.
 
 The core checks each instruction once for both warnings and plugin reports; the
 plugin does not subscribe to register-access hooks or maintain another set of
 register dependencies. See
 [memory wait diagnostics](memory-wait-diagnostics.md) for target coverage,
-recovery policy, and replay-mode limits.
+recovery policy, and coverage limits.
 
 Every `RACE` record includes `producer_pc`, `consumer_pc`, and `checker`.
 Register records have `checker=core`; LDS records have `checker=plugin`.
@@ -235,9 +234,6 @@ races. Some examples:
   read or overwritten before its pending result is ready. A later scalar load
   to the same destination is also checked because scalar-memory results can
   complete out of order.
-- **Replay-source hazards** (gfx1250, opt-in): a protected memory source is
-  overwritten before address translation is known complete. See the core's
-  [XCNT coverage](memory-wait-diagnostics.md#xcnt-replay-source-diagnostics).
 - **LDS races**: an LDS byte is read by one wave while another wave has an
   outstanding write to the same byte, or written by one wave while another
   wave has an outstanding read of the same byte, without an intervening
@@ -316,8 +312,8 @@ a byte shared by the two accesses.
 
 The [core register scoreboard](memory-wait-diagnostics.md#access-planning-and-cost)
 checks decoded operands before execution or asynchronous MMA publication. It
-tracks returned register bytes and, when enabled, replay sources. Register
-accessors and memory writeback do not run the checker. Its
+tracks returned register bytes for the plugin. Register accessors and memory
+writeback do not run the checker. Its
 [counter coverage](memory-wait-counter-coverage.md) defines producer families,
 target-specific waits, completion ordering, mixed-FLAT lane readiness, and
 capacity proofs.

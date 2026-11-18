@@ -19,7 +19,7 @@ rerun to expose later sites. For an unfiltered investigation, a host debugger
 breakpoint at `ComputeUnitCore::report_memory_wait` observes every reported
 hazard before the output limit is applied.
 
-An execution plugin can instead request structured register findings through
+An execution plugin can instead request structured register-result findings through
 `observes_register_hazards()`. With such an observer attached, dependencies remain
 available after a finding until a wait or another architectural guarantee releases
 them. A later consumer can therefore report the same producer. Observers receive
@@ -45,11 +45,11 @@ Use `--wait-checking=on` for ordinary checks only, or `--wait-checking=all` to i
 gfx1250 XCNT. These modes override both per-CU settings on every GPU. Omitting the
 flag preserves JSON settings and defaults. See [configuration](configuration.md#memory-wait-diagnostics)
 for persistent global overrides and launch-mode restrictions.
-The race plugin requires all wait checks supported by the target: `all` on gfx1250,
-and `on` or `all` elsewhere. This also applies to other plugins that observe
-register findings. Plugin loading checks each CU's effective settings, including
-per-CU overrides. Ordinary checking must be enabled everywhere, and XCNT must
-also be enabled on gfx1250.
+The race plugin requires `on` on every target: ordinary checking enabled and XCNT
+checking disabled. The default settings also satisfy this policy. This applies to
+other plugins that observe register findings. Plugin loading checks each CU's
+effective settings, including per-CU overrides, and rejects `off` or `all`. XCNT
+replay-source findings remain core diagnostics and are not delivered to plugins.
 
 Without a global override, memory-result diagnostics default to
 `memory_wait_diagnostics=warn`. To disable them per CU, add this entry to each
@@ -86,7 +86,7 @@ hardware XNACK support. A global `wait_checking` override takes precedence over
 both per-CU keys. Without one, setting `memory_wait_diagnostics=off` leaves an
 explicitly enabled XCNT check active. Use `--wait-checking=off` to disable both
 when no register-finding plugin is enabled. Use `--wait-checking=on` to disable
-XCNT while retaining ordinary checking when no register-finding plugin is enabled.
+XCNT while retaining ordinary checking, including when using the race plugin.
 
 VMEM coverage is qualified for `MODE.REPLAY_MODE=1` (bit 25), the multi-group mode
 selected by LLVM at kernel entry. VMEM replay sources in single-group mode are
@@ -95,9 +95,9 @@ coverage boundary, not a claim that single-group kernels are replay-safe.
 
 Within the qualified model, X waits retire an ordered VMEM queue prefix. SMEM
 translation is unordered and requires a zero wait. A zero KM wait also releases
-SMEM sources. VMEM and async completion waits map completed instructions back to
-their X queue positions and release the proven translation prefix, including mixed
-loads and stores. Completion counters retain their independent positions.
+SMEM sources. VMEM completion waits map completed instructions back to their X
+queue positions and release the proven translation prefix, including mixed loads
+and stores. Completion counters retain their independent positions.
 The checker accounts for implicit drains at branches, register-control operations,
 messages and barriers, SMEM/VMEM transitions, and ordered VMEM destination reuse.
 It protects source dwords and executed vector lanes, without retaining payloads or

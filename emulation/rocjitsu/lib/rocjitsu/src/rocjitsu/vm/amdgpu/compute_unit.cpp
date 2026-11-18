@@ -1675,7 +1675,7 @@ void ComputeUnitCore::report_memory_wait(void *context,
       WaitCounterPolicy::maximum_dependency_wait(cu.arch(), hazard.producer.counter);
   const auto required = max_wait.succeeded() ? std::min(hazard.required_wait, max_wait.value())
                                              : hazard.required_wait;
-  if (cu.observes_register_hazards_) {
+  if (cu.observes_register_hazards_ && !replay) {
     const RegisterHazardObservation observation{hazard.producer.pc,
                                                 hazard.consumer_pc,
                                                 hazard.reg,
@@ -1724,8 +1724,8 @@ void ComputeUnitCore::report_memory_wait(void *context,
     util::Logger::warn(std::format(
         "xcnt-wait: {} wg={} wave={} pc={:#x}: overwrite of {} before the replay source from "
         "pc={:#x} is known safe to reuse. XNACK replay may need the original value. "
-        "s_wait_xcnt <= {} is required. Disabling XCNT checking requires "
-        "--wait-checking=on and no register-hazard plugins (including race).",
+        "s_wait_xcnt <= {} is required; set top-level wait_checking to \"on\" "
+        "(rocjitsu --wait-checking=on) for ordinary checks without XCNT checking.",
         cu.full_path(), wf.wg_id(), wf.wf_id(), hazard.consumer_pc, register_name,
         hazard.producer.pc, required));
   } else {
@@ -1990,8 +1990,7 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
       flat && flat_requests != 0 && (flat_requests & ~flat_shared_lanes) == 0;
   const auto xcnt_completion_counter =
       flat_local_route ? WaitCounterKind::Ds : classified.front().counter;
-  std::array<WaitCounterKind, 2> xcnt_completions;
-  size_t xcnt_completion_count = 0;
+  std::optional<WaitCounterKind> xcnt_completion;
   for (const auto &event : classified) {
     const auto counter = event.counter;
     if (!MemoryWaitScoreboard::counts_memory_counter(inst, wf, counter))
@@ -2000,8 +1999,7 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
       continue;
     if (counter == WaitCounterKind::X) {
       if (track_xcnt && (xscalar || vector_lanes || scoreboard.outstanding(counter))) {
-        const auto sequence = scoreboard.issue_xcnt(
-            std::span(xcnt_completions).first(xcnt_completion_count), xscalar);
+        const auto sequence = scoreboard.issue_xcnt(xcnt_completion, xscalar);
         const RegisterAccess registers(wf);
         auto add_source = [&](RegisterRef reg) {
           scoreboard.add({sequence, wf.pc, reg.cls == RegClass::VGPR ? vector_lanes : ~uint64_t{0},
@@ -2058,9 +2056,8 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
       continue;
     const auto sequence =
         scoreboard.issue(event, config_.arch, scoreboard.issue_units(inst, event, config_.arch));
-    // Either VMEM or async completion proves an async copy's inputs reusable.
-    if (counter == xcnt_completion_counter || counter == WaitCounterKind::Async)
-      xcnt_completions[xcnt_completion_count++] = counter;
+    if (counter == xcnt_completion_counter)
+      xcnt_completion = counter;
     // Replay-only checking still needs completion positions to retire X, but
     // must not add result dependencies or report completion hazards.
     if (!memory_result_checks_enabled())

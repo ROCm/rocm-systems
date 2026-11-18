@@ -197,7 +197,7 @@ plugin's configuration:
 
 ```json
 {
-  "wait_checking": "all",
+  "wait_checking": "on",
   "plugins": {
     "race": {},
     "logging": {},
@@ -228,14 +228,15 @@ plugins the profile already enables:
 
 ```bash
 # Enable the race detector and the kernel logger for a single run.
-mirage run --wait-checking=all --plugin race --plugin logging -- ./my_app
+mirage run --wait-checking=on --plugin race --plugin logging -- ./my_app
 
 # Same, when starting a session.
 mirage session start --profile mi350x --plugin race
 ```
 
-The race plugin requires all supported wait checks. Use `--wait-checking=all`
-with `mirage run`, or set `"wait_checking": "all"` in a session profile.
+The race plugin requires ordinary checking enabled and XCNT checking disabled.
+Use `--wait-checking=on` with `mirage run`, or set `"wait_checking": "on"` in a
+session profile. The defaults also satisfy this policy; `off` and `all` are rejected.
 
 Each `--plugin` enables the plugin with its schema defaults. Plugins that
 take required arguments, or runs that need custom sink settings, are
@@ -313,7 +314,7 @@ own report remains controlled by its `GPUCSIM_*` configuration.
 Interactive use — output goes to stderr (the default):
 
 ```json
-{ "wait_checking": "all", "plugins": { "race": {} } }
+{ "wait_checking": "on", "plugins": { "race": {} } }
 ```
 
 ```bash
@@ -324,7 +325,7 @@ Save race reports to files (for test harnesses):
 
 ```json
 {
-  "wait_checking": "all",
+  "wait_checking": "on",
   "plugins": { "race": {} },
   "sinks": { "types": ["file"], "dir": "/tmp/output" }
 }
@@ -339,7 +340,7 @@ Send output to both stderr and a file simultaneously:
 
 ```json
 {
-  "wait_checking": "all",
+  "wait_checking": "on",
   "plugins": { "race": {} },
   "sinks": { "types": ["stderr", "file"], "dir": "/tmp/output" }
 }
@@ -421,11 +422,11 @@ width. Subscribe through `observes_scalar_register_reads()` and
 
 ### Core register findings
 
-`observes_register_hazards()` defaults to false. Opting in requests core register
-findings without enabling register-access hooks. Loading an observer through the
-VM API requires all wait checks supported by each receiving CU: ordinary checking
-everywhere, plus XCNT replay-source checking on gfx1250. Use `wait_checking=all`
-to satisfy this requirement on any target. Both finding types use the same hook.
+`observes_register_hazards()` defaults to false. Opting in requests core
+register-result findings without enabling register-access hooks. Loading an
+observer through the VM API requires ordinary checking enabled and XCNT checking
+disabled on every receiving CU. Use `wait_checking=on` on any target, or retain
+the default settings. XCNT replay-source findings are not delivered to observers.
 
 `onAmdgpuRegisterHazard(observation, wave)` runs on the issuer during instruction
 issue. It normally precedes the before-execute callback, and always precedes

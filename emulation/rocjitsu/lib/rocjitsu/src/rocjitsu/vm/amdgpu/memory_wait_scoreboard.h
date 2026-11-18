@@ -209,8 +209,8 @@ public:
                               uint64_t shared_limit);
   /// X has one translation group at a time, independent of completion queues.
   void xcnt_group(bool scalar);
-  /// Map translation to each completion position issued for this instruction.
-  uint64_t issue_xcnt(std::span<const WaitCounterKind> completions, bool scalar);
+  /// Map translation to this instruction's completion position, if it received one.
+  uint64_t issue_xcnt(std::optional<WaitCounterKind> completion, bool scalar);
   /// A VMEM destination orders translation of older overlapping VMEM sources.
   void xcnt_ordered_write(RegisterRef reg, uint64_t lanes, uint8_t bytes);
   /// Count every operation, including stores without a register destination.

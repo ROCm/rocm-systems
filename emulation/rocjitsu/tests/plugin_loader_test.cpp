@@ -324,19 +324,17 @@ TEST_F(PluginLoaderTest, RaceModuleUsesCoreRegisterChecking) {
   EXPECT_TRUE(group.value()->observes_tensor_dma_issue());
 }
 
-TEST_F(PluginLoaderTest, CApiRequiresEffectiveWaitCheckingForRace) {
+TEST_F(PluginLoaderTest, CApiRequiresEffectiveOrdinaryOnlyWaitCheckingForRace) {
   struct Case {
     const char *global;
     const char *second_cu;
     const char *second_cu_xcnt;
     bool accepted;
-    bool accepted_cdna5;
   };
   const Case cases[] = {
-      {"", "warn", "off", true, false},      {"", "warn", "warn", true, true},
-      {"on", "warn", "warn", true, false},   {"all", "warn", "off", true, true},
-      {"on", "off", "warn", true, false},    {"all", "off", "off", true, true},
-      {"off", "warn", "warn", false, false}, {"", "off", "warn", false, false},
+      {"", "warn", "off", true},     {"", "warn", "warn", false}, {"on", "warn", "warn", true},
+      {"all", "warn", "off", false}, {"on", "off", "warn", true}, {"all", "off", "off", false},
+      {"off", "warn", "off", false}, {"", "off", "off", false},
   };
   for (const char *arch : {"cdna5", "cdna4", "rdna4"}) {
     SCOPED_TRACE(arch);
@@ -356,8 +354,7 @@ TEST_F(PluginLoaderTest, CApiRequiresEffectiveWaitCheckingForRace) {
             {"name":"l2","type":"l2_cache"},
             {"name":"cp","type":"command_processor"},
             {"name":"se0","type":"shader_engine","children":[
-              {"name":"cu0","type":"compute_unit","config":[
-                {"key":"xcnt_diagnostics","value":"warn"}]},
+              {"name":"cu0","type":"compute_unit"},
               {"name":"cu1","type":"compute_unit","config":[
                 {"key":"memory_wait_diagnostics","value":")" +
                                  test.second_cu + R"("},{"key":"xcnt_diagnostics","value":")" +
@@ -382,12 +379,12 @@ TEST_F(PluginLoaderTest, CApiRequiresEffectiveWaitCheckingForRace) {
       const auto status = rj_vm_load_plugins(vm.get(), race, PLUGIN_LOADER_RACE_DIR);
       const std::string diagnostic = testing::internal::GetCapturedStderr();
       EXPECT_TRUE(vm->plugin_group_active.load());
-      if (std::string_view(arch) == "cdna5" ? test.accepted_cdna5 : test.accepted) {
+      if (test.accepted) {
         EXPECT_EQ(status, ROCJITSU_STATUS_SUCCESS) << diagnostic;
         EXPECT_TRUE(vm->soc->plugin_group().observes_register_hazards());
       } else {
         EXPECT_EQ(status, ROCJITSU_STATUS_INVALID_ARGUMENT);
-        EXPECT_NE(diagnostic.find("require all supported wait checks on every CU"),
+        EXPECT_NE(diagnostic.find("ordinary wait checking enabled and XCNT checking disabled"),
                   std::string::npos)
             << diagnostic;
         EXPECT_EQ(&vm->soc->plugin_group(), installed);

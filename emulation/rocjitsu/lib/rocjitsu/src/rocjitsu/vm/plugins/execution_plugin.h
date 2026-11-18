@@ -135,9 +135,10 @@ public:
   virtual bool observes_tensor_dma_memory_access() const { return false; }
   virtual bool observes_tensor_dma_issue() const { return false; }
 
-  /// Request core register-dependency checking, independently of stderr warning
-  /// settings. Findings retain pending dependencies for later consumers; the
-  /// observer owns suppression. This does not request register-access hooks.
+  /// Request core register-result dependency checking, independently of stderr
+  /// warning settings. Findings retain pending dependencies for later consumers;
+  /// the observer owns suppression. This does not request register-access hooks
+  /// or XCNT replay-source findings.
   virtual bool observes_register_hazards() const { return false; }
 
   /// Called on the issuer during issue, before async submission or memory

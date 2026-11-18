@@ -1069,7 +1069,7 @@ TEST(RegisterHazardPluginTest, CounterOnlyIssuesParticipateInLdsPartialWaits) {
   }
 }
 
-TEST(RegisterHazardPluginTest, ReplayFindingsRespectTheExplicitXcntSetting) {
+TEST(RegisterHazardPluginTest, ReplayFindingsRemainCoreDiagnosticsOnly) {
   for (bool enabled : {false, true})
     for (bool waited : {false, true}) {
       DiagnosticHarness h;
@@ -1086,15 +1086,9 @@ TEST(RegisterHazardPluginTest, ReplayFindingsRespectTheExplicitXcntSetting) {
       program.emit(cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 129, .sdst = 0}));
       program.emit(cdna5::build_sopp(cdna5::kSEndpgmSopp));
       ASSERT_NO_FATAL_FAILURE(h.run(program.words, 32, 32));
-      const auto output = reports(h.sink->str());
-      ASSERT_EQ(output.size(), enabled && !waited ? 1u : 0u) << h.sink->str();
+      EXPECT_TRUE(reports(h.sink->str()).empty()) << h.sink->str();
+      EXPECT_TRUE(h.probe->hazards.empty());
       EXPECT_EQ(h.fixture.cu()->xcnt_diagnostic_count(), enabled && !waited ? 1u : 0u);
-      if (enabled && !waited) {
-        EXPECT_EQ(output.front().fields.at("counter"), "xcnt");
-        EXPECT_EQ(output.front().fields.at("access"), "write");
-        EXPECT_EQ(output.front().fields.at("type"), "SGPR");
-        EXPECT_EQ(output.front().fields.at("reg"), "0");
-      }
     }
 }
 

@@ -12,11 +12,11 @@
 
 namespace rocjitsu::amdgpu {
 
-/// A register dependency found by the issuer, before async or memory publication.
+/// A register-result dependency found before async or memory publication.
 /// Buffer payload checks needing prepared lane masks follow address preparation.
 /// Register numbers are wave-relative physical indices, including bank selection.
 /// Lanes and bytes describe the overlap, not the whole producer or consumer.
-/// X protects replay sources against overwrite; other counters protect results.
+/// XCNT replay-source dependencies are not delivered to observers.
 /// Encodings are owned when available. Synthetic producers or dependencies that
 /// predate observer attachment can have a PC without an encoding.
 struct RegisterHazardObservation {
