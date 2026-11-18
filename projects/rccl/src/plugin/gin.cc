@@ -13,6 +13,8 @@
 #include "plugin.h"
 #include "nccl_gin.h"
 #include "graph/topo.h"
+#include "gin/gin_anvil_reach.h"
+#include "gin/gin_bootstrap_agree.h"
 #include "gin/gin_host_proxy.h"
 #include "gin/gin_type_env.h"
 #ifdef ENABLE_ROCSHMEM_GIN
@@ -501,20 +503,46 @@ ncclResult_t ncclGinSetDefaultBackend(struct ncclComm* comm, uint64_t globalBitM
   // Finalized backends are kept for ncclGinFinalize alone: leave them in place
   // and do not re-arm supported, which would let a new shared split reconnect.
   if (ginState->finalized) return ncclSuccess;
+
+  // Anvil SDMA reach is in gin_anvil_reach.h. The pod vote is a bootstrap
+  // allgather, so it runs before pluginMutex, and only where the all-ranks mask
+  // and ginAnvilFabricPodVotePredicate, which every rank shares, allow a pod.
+  // Whether this rank is in the pod (MNNVL, clique, cuMem) and opted in goes
+  // into its vote: comm->MNNVL is set per rank, so it must not gate the vote.
+  GinAnvilSdmaReach anvilReach = ginAnvilSdmaReachCapable(comm);
+  if ((BIT(NCCL_GIN_TYPE_ANVIL_SDMA) & globalBitMask) &&
+      ginAnvilFabricPodVotePredicate(comm->topo->nHosts, comm->nRanks, ginAnvilCrossNic(comm))) {
+    const int localPod = ginAnvilUseFabricPod(comm) ? 1 : 0;
+    int allPod = 0;
+    NCCLCHECK(ncclGinBootstrapAgreeAll(comm, localPod, &allPod));
+    if (localPod && !allPod) {
+      WARN("GIN backend ANVIL_SDMA: not every rank is in the fabric pod with RCCL_GIN_ANVIL_FABRIC_POD=1 and "
+           "RCCL_GIN_ANVIL_FABRIC_MEM=1; keeping it off across hosts");
+    }
+    anvilReach = allPod ? GinAnvilSdmaReach::FabricPod : GinAnvilSdmaReach::None;
+  }
+
   std::lock_guard<std::mutex> lock(pluginMutex);
 
-  // Close ALL non-global backends and compact the array. Anvil SDMA addresses
-  // peers by local device id, so it is dropped when more than one physical host
-  // is in the communicator (including multi-host MNNVL where nNodes folds to 1).
+  // Close ALL non-global backends and compact the array, and Anvil SDMA when
+  // some peer is beyond this GPU's SDMA engines. A network backend then serves
+  // the communicator.
   for (int i = 0; i < initialNumActiveBackends; i++) {
     struct ncclGinBackendState* backend = &ginState->backends[i];
-    const bool anvilMultiHost =
-        comm->topo->nHosts > 1 && backend->ginType == NCCL_GIN_TYPE_ANVIL_SDMA;
-    if (anvilMultiHost || !(BIT(backend->ginType) & globalBitMask)) {
-      if (anvilMultiHost) {
+    const bool isAnvil = backend->ginType == NCCL_GIN_TYPE_ANVIL_SDMA;
+    const bool anvilUnreachable = isAnvil && anvilReach == GinAnvilSdmaReach::None;
+    if (isAnvil && anvilReach == GinAnvilSdmaReach::FabricPod && (BIT(backend->ginType) & globalBitMask)) {
+      INFO(NCCL_INIT | NCCL_NET, "GIN backend ANVIL_SDMA kept across %d hosts in one fabric clique (size %d)",
+           comm->topo->nHosts, comm->clique.size);
+    }
+    if (anvilUnreachable || !(BIT(backend->ginType) & globalBitMask)) {
+      if (anvilUnreachable) {
         INFO(NCCL_INIT | NCCL_NET,
-             "GIN backend ANVIL_SDMA is single-host only; removing it from active backends (nHosts=%d)",
-             comm->topo->nHosts);
+             "GIN backend ANVIL_SDMA removed from active backends on %s: %s (nHosts=%d MNNVL=%d cliqueSize=%d "
+             "nRanks=%d anvilMaxRanks=%d)",
+             comm->archName,
+             ginAnvilSdmaNoReachReason(ginAnvilFabricMemCapable(comm), ginAnvilCrossNic(comm), comm->nRanks),
+             comm->topo->nHosts, comm->MNNVL, comm->clique.size, comm->nRanks, kGinAnvilIpcMaxRanks);
       } else {
         WARN("GIN backend type %d not supported on all ranks, removing from active backends", backend->ginType);
       }

@@ -22,6 +22,10 @@
   * Env vars renamed: `ROCSHMEM_TDM_TILE_BYTES`/`ROCSHMEM_TDM_PUT_THRESHOLD`/
     `ROCSHMEM_TDM_GET_THRESHOLD` -> `ROCSHMEM_LDS_STAGE_TILE_BYTES`/
     `ROCSHMEM_LDS_STAGE_PUT_THRESHOLD`/`ROCSHMEM_LDS_STAGE_GET_THRESHOLD`.
+* Added Anvil SDMA queues for a peer on another host, reached through its fabric-mapped memory
+  (`AnvilLib::connectRemotePeer`, `getRemotePeerQueue`, `disconnectRemotePeer`). They are keyed
+  by a caller-supplied peer key, so they never share a queue with a peer on the same host, and
+  each goes on the usable engine carrying the fewest of this process's queues.
 
 ### Resolved issues
 * Fixed `rocshmem_fence` on the RO backend taking a host proxy round trip from every calling thread.
@@ -47,6 +51,10 @@
 * `ROCSHMEM_SDMA_THRESHOLD` default changed from 256 to 1024 bytes.
   Wave and workgroup operations automatically scale the threshold by the wavefront size,
   avoiding SDMA for small-to-medium transfers where parallel IPC copy is faster.
+* Anvil SDMA queues for a peer on the same host now go on the least loaded usable engine
+  within HSA's preferred copy-engine mask, chosen per channel, instead of the lowest one.
+  MI450 reports every engine as preferred, so all such queues went on engine 0 and could
+  exceed its KFD queue limit. A single-engine mask selects the same engine as before.
 
 ## rocSHMEM 3.8.0 for ROCm 10.2
 

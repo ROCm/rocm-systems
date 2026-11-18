@@ -7,6 +7,7 @@ test_categories:
     test_patterns:
       - "GinHost*"  # gin_host.cc; also matches the GinHostProxy (gin_host_proxy.cc) suites
       - "GinAnvilReach*"  # gin_anvil_reach.cc
+      - "PerSystem/GinAnvilReachMicrotestPerSystem.*"  # gin_anvil_reach.cc
     exclude_windows:
       - "*"
     labels:
