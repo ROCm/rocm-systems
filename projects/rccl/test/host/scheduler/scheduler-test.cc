@@ -1732,8 +1732,10 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_BatchBoundary_ArgsSizeBudgetExh
 // The default workArgsBytes is 5 KB, but the symmetric kernels take a 4 KB argument: batches must still fit 4 KB.
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_BatchBoundary_WorkArgsAbove4K_CapsBatchesAt4KKernelArg) {
   constexpr size_t kSymkArgBytes = sizeof(ncclSymkDevWorkArgs4K);
+  // The scheduler must reserve exactly this many channel ranges for a 128-channel communicator.
+  constexpr int nCh = 128;
   MakeSymmetricTaskList_Scene scene;
-  const int nCh = symkMaxLaunchChannels(scene.comm.get());
+  scene.comm->nChannels = scene.comm->config.maxCTAs = nCh;
   int maxWorksIn4K = 0;
   while (symkMaxDevWorkArgsSize(nCh, maxWorksIn4K + 1, false) <= kSymkArgBytes) maxWorksIn4K++;
   ASSERT_GT(maxWorksIn4K, 0);
@@ -1774,6 +1776,19 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_BatchBoundary_WorkArgsAbove4K_C
   EXPECT_EQ(batchSizes[0], maxWorksIn4K);
   EXPECT_EQ(batchSizes[1], nTasks - maxWorksIn4K);
   for (int n : batchSizes) EXPECT_LE(symkMaxDevWorkArgsSize(nCh, n, false), kSymkArgBytes);
+}
+
+// The per-launch channel bound: at least ncclSymkAgHierMaxBlocks (72), else min(nChannels, maxCTAs).
+TEST_F(SchedulerMicrotest, SymkMaxLaunchChannels_FloorAt72_ElseMinOfNChannelsAndMaxCtas) {
+  std::unique_ptr<ncclComm> comm(new ncclComm{});
+  struct Case {
+    int nChannels, maxCTAs, expected;
+  };
+  for (const Case& c : {Case{0, 0, 72}, Case{128, 128, 128}, Case{128, 64, 72}, Case{200, 100, 100}}) {
+    comm->nChannels = c.nChannels;
+    comm->config.maxCTAs = c.maxCTAs;
+    EXPECT_EQ(symkMaxLaunchChannels(comm.get()), c.expected) << "nChannels=" << c.nChannels << " maxCTAs=" << c.maxCTAs;
+  }
 }
 
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_BasicScalarFieldsWiring) {
