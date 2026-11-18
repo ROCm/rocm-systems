@@ -167,7 +167,9 @@ class AnalysisDriver(Driver):
                     assert participant['original_offset'] == site['original_offset']
             if case.startswith('grouped_'):
                 groups = self.args.workgroups
-                waves = (self.args.threads + 31) // 32
+                waves = (
+                    self.args.threads + self.args.wave_size - 1
+                ) // self.args.wave_size
                 assert (
                     analyzed['workgroup_count'] == groups
                     and analyzed['waves_per_workgroup'] == waves
@@ -187,7 +189,9 @@ class AnalysisDriver(Driver):
                             and finding['second']['wave'] == 1
                         )
                         assert finding['ordering'] == 'unordered'
-                if case in ('grouped_barrier', 'grouped_empty', 'grouped_repeat'):
+                if case in ('grouped_barrier', 'grouped_empty') or (
+                    case == 'grouped_repeat' and self.args.target == 'gfx1250'
+                ):
                     assert analyzed['ordered_pairs'] == groups * (waves - 1)
                     assert (
                         analyzed['required_barrier_waves']
@@ -208,6 +212,13 @@ class AnalysisDriver(Driver):
                             and finding['second']['wave'] > 0
                         )
                         assert finding['ordering'] == 'ordered'
+                else:
+                    assert analyzed['ordered_pairs'] == 0
+                    assert analyzed['required_barrier_waves'] == 0
+                    assert analyzed['completed_barrier_waves'] == 0
+                    assert (
+                        result['scope'] == 'native_lds_single_range_no_sync_bounded_1d'
+                    )
             if case == 'mixed_barrier':
                 assert analyzed['ordered_pairs'] == 1
                 assert (

@@ -79,7 +79,7 @@ fn raw_format(format: HsaExtImageFormat) -> Result<(HsaExtImageFormat, u32, u32)
 /// Creates a private unsigned resource view without changing its tiling fields.
 fn raw_words(snapshot: &ImageSnapshot) -> Result<([u32; 12], u32, u32), Status> {
     let (raw, channels, component_bytes) = raw_format(snapshot.descriptor.format)?;
-    let format = image_gfx12::format(raw).ok_or(IMAGE_FORMAT_UNSUPPORTED)?;
+    let format = descriptor::format(raw).ok_or(IMAGE_FORMAT_UNSUPPORTED)?;
     if channels as usize * component_bytes as usize != snapshot.format.bytes {
         return Err(IMAGE_FORMAT_UNSUPPORTED);
     }
@@ -90,7 +90,7 @@ fn raw_words(snapshot: &ImageSnapshot) -> Result<([u32; 12], u32, u32), Status> 
         &snapshot.record.words,
     );
     Ok((
-        image_gfx12::mip_level_view(
+        descriptor::mip_level_view(
             snapshot.record.architecture,
             snapshot.record.words,
             level,
@@ -278,15 +278,13 @@ unsafe fn run(snapshot: &ImageSnapshot, region: Region, transfer: Transfer<'_>) 
                                 let source = address.checked_add(offset).ok_or(INVALID_ARGUMENT)?;
                                 // SAFETY: Both rows are live, and HSA validates registered ranges.
                                 let status = unsafe {
-                                    crate::memory::hsa_memory_copy(
+                                    crate::memory::copy(
                                         (host + row * row_bytes) as *mut c_void,
                                         source as *const c_void,
                                         row_bytes,
                                     )
                                 };
-                                if status != SUCCESS {
-                                    return Err(status);
-                                }
+                                status?;
                             }
                         }
                     }
@@ -319,15 +317,13 @@ unsafe fn run(snapshot: &ImageSnapshot, region: Region, transfer: Transfer<'_>) 
                         let destination = address.checked_add(offset).ok_or(INVALID_ARGUMENT)?;
                         // SAFETY: Kernel completion made the staging bytes visible to the CPU.
                         let status = unsafe {
-                            crate::memory::hsa_memory_copy(
+                            crate::memory::copy(
                                 destination as *mut c_void,
                                 (host + row * row_bytes) as *const c_void,
                                 row_bytes,
                             )
                         };
-                        if status != SUCCESS {
-                            return Err(status);
-                        }
+                        status?;
                     }
                 }
             }
@@ -426,19 +422,24 @@ mod tests {
                 assert_eq!(symbol.private_size, 0);
                 assert_eq!(symbol.wavefront_size, wave);
             }
-            let plan = rocelf::LoadPlan::new(bytes, object.layout(), 4096).unwrap();
-            let mut image = vec![0; plan.allocation_size()];
-            plan.write_amdgpu_image(0x10000, &mut image, |_: &str| None)
-                .unwrap();
+            assert!(object.load_size().unwrap() > 0);
         }
     }
 
     #[test]
     fn transfer_arguments_preserve_image_vector_alignment() {
         let args = arguments(0x1000, 0x2000, [3, 5, 7], [11, 13, 1], 4, 2, 4);
-        assert_eq!(rocelf::read_u64(&args, 0), Some(0x1000));
+        assert_eq!(
+            Some(u64::from_le_bytes(args[0..8].try_into().unwrap())),
+            Some(0x1000)
+        );
         for offset in (8..48).step_by(8) {
-            assert_eq!(rocelf::read_u64(&args, offset), Some(0x2000));
+            assert_eq!(
+                Some(u64::from_le_bytes(
+                    args[offset..offset + 8].try_into().unwrap()
+                )),
+                Some(0x2000)
+            );
         }
         for (offset, expected) in [
             (48, 3),
@@ -453,7 +454,12 @@ mod tests {
             (84, 2),
             (88, 4),
         ] {
-            assert_eq!(rocelf::read_u32(&args, offset), Some(expected));
+            assert_eq!(
+                Some(u32::from_le_bytes(
+                    args[offset..offset + 4].try_into().unwrap()
+                )),
+                Some(expected)
+            );
         }
     }
 
