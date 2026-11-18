@@ -32,6 +32,7 @@ namespace {
 using dda::common::ddaBankSize;
 using dda::common::ddaLL128BcTwoShotChunkSlices;
 using dda::common::ddaLL128BcTwoShotSlotSlices;
+using dda::common::ddaLL128BlocksPerPeer;
 using dda::common::ddaLL128Slices;
 using dda::common::kDdaLL128DataBytesPerSlice;
 using dda::common::kDdaLL128Warp;
@@ -45,12 +46,6 @@ unsigned ddaLL128BcThreads() {
   return kDdaLL128BcDefaultThreads;
 }
 
-unsigned ddaLL128BcBlocksPerPeer(size_t chunkSlices, size_t warps, int nPeers, size_t totalBlockCap) {
-  const size_t cap = totalBlockCap / (size_t)nPeers;
-  size_t bpp = (chunkSlices + warps - 1) / warps;
-  if (bpp > cap) bpp = cap;
-  return bpp < 1 ? 1u : (unsigned)bpp;
-}
 
 static inline std::pair<dim3, dim3> ddaBroadcastFabricLL128Geom(ncclComm* comm, size_t totalBytes) {
   // Two-shot uses the arch table thread count if set, else falls back to the env var / default.
@@ -66,7 +61,7 @@ static inline std::pair<dim3, dim3> ddaBroadcastFabricLL128Geom(ncclComm* comm, 
 
   const size_t slices = ddaLL128Slices(totalBytes);
   const size_t cs = ddaLL128BcTwoShotChunkSlices(slices, comm->nRanks);
-  const unsigned bpp = ddaLL128BcBlocksPerPeer(cs, warps, nPeers, (size_t)nBlocksMax);
+  const unsigned bpp = ddaLL128BlocksPerPeer(cs, warps, nPeers, (size_t)nBlocksMax);
   return std::make_pair(dim3((unsigned)nPeers, bpp), dim3(threads));
 }
 

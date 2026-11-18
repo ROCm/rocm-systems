@@ -434,4 +434,13 @@ __device__ __forceinline__ void ddaLL128ClearWire(uint64_t* wire, int lane) {
     ddaLL128StoreAtomic16B(wire + u * kDdaLL128Warp, 0, 0);
 }
 
+// Blocks in one peer column: a warp per slice, capped by the column's share of
+// the grid budget. Used by AllGather, Broadcast, and other fabric LL128 launchers.
+inline unsigned ddaLL128BlocksPerPeer(size_t slices, size_t warps, int nPeers, size_t totalBlockCap) {
+  const size_t cap = totalBlockCap / (size_t)nPeers;
+  size_t bpp = (slices + warps - 1) / warps;
+  if (bpp > cap) bpp = cap;
+  return bpp < 1 ? 1u : (unsigned)bpp;
+}
+
 } // namespace dda::common
