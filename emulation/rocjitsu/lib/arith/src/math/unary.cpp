@@ -7,6 +7,7 @@
 // and is checked against gfx1201 hardware captures.
 
 #include "common/alu.h"
+#include "common/sdwa_dispatch.h"
 #include "common/sdwa_output.h"
 #include "common/validation.h"
 #include "fp/fma_scalar.h"
@@ -52,28 +53,13 @@ template <rocjitsu::arith::Unary Op, bool QuietNan = false>
                                            !(flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS)))) {
     mode &= ~uint64_t(RJ_ARITH_ALU_OMOD_MASK);
   }
-  if constexpr (rocjitsu::arith::unary_flushes_f32<Op>) {
-    flags &= ~RJ_ARITH_FP_ROUND_MASK;
-  }
-  if constexpr (Op == rocjitsu::arith::Unary::Exp) {
-#if defined(RJ_ARITH_HAVE_X86_64_V4)
-    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
-      rocjitsu::arith::exp_exact_x86_64_v4(flags, exec_mask, uint32_t(mode), d[0], a[0],
-                                           !rdna3 || (flags & RJ_ARITH_FP_IEEE_MODE));
-      return RJ_ARITH_SUCCESS;
-    }
-#endif
-#if defined(RJ_ARITH_HAVE_X86_64_V3)
-    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
-      rocjitsu::arith::exp_exact_x86_64_v3(flags, exec_mask, uint32_t(mode), d[0], a[0],
-                                           !rdna3 || (flags & RJ_ARITH_FP_IEEE_MODE));
-      return RJ_ARITH_SUCCESS;
-    }
-#endif
-  }
-  // Resolve the guest OMOD gate before selecting CDNA's unconditional NaN quieting.
+  // CDNA integral operations quiet NaNs independently of the guest IEEE gate.
+  // Resolve OMOD above before using IEEE to select the shared NaN policy.
   if constexpr (QuietNan) {
     flags |= RJ_ARITH_FP_IEEE_MODE;
+  }
+  if constexpr (rocjitsu::arith::unary_flushes_f32<Op>) {
+    flags &= ~RJ_ARITH_FP_ROUND_MASK;
   }
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
   if constexpr (Op == rocjitsu::arith::Unary::FrexpMant) {
@@ -93,6 +79,22 @@ template <rocjitsu::arith::Unary Op, bool QuietNan = false>
     }
   }
 #endif
+  if constexpr (Op == rocjitsu::arith::Unary::Exp) {
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+      rocjitsu::arith::exp_exact_x86_64_v4(flags, exec_mask, uint32_t(mode), d[0], a[0],
+                                           !rdna3 || (flags & RJ_ARITH_FP_IEEE_MODE));
+      return RJ_ARITH_SUCCESS;
+    }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+      rocjitsu::arith::exp_exact_x86_64_v3(flags, exec_mask, uint32_t(mode), d[0], a[0],
+                                           !rdna3 || (flags & RJ_ARITH_FP_IEEE_MODE));
+      return RJ_ARITH_SUCCESS;
+    }
+#endif
+  }
   if constexpr (Op == rocjitsu::arith::Unary::Rcp) {
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
     if (!((flags & RJ_ARITH_FP_ROUND_MASK) && (mode & RJ_ARITH_ALU_OMOD_MASK)) &&
@@ -157,7 +159,7 @@ template <rocjitsu::arith::Unary Op, bool QuietNan = false>
   uint32_t result[32];
   for (int lane = 0; lane < 32; ++lane) {
     if constexpr (Op == rocjitsu::arith::Unary::Sqrt) {
-      // Borrow rocjitsu's classify_sqrt_f32_vop3: test the modified input
+      // The inherited SQRT classifier tests the modified input
       // before flushing or CLAMP. Negative zero and NaNs do not contribute.
       if (rocjitsu::arith::reports_fp_status(flags) && ((exec_mask >> lane) & 1)) {
         uint32_t input = a[0][lane];
@@ -365,7 +367,7 @@ int unary(uint64_t flags, uint32_t exec_mask, uint64_t modifiers, uint32_t *cons
                                             !(flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS))) {
       modifiers &= ~uint64_t(RJ_ARITH_ALU_OMOD_MASK);
     }
-    // CDNA shares the guest OMOD gate but always quiets NaNs.
+    // CDNA keeps the existing guest OMOD gate but always quiets NaNs.
     if constexpr (QuietNan) {
       flags |= RJ_ARITH_FP_IEEE_MODE;
     }
@@ -1083,6 +1085,236 @@ int rj_arith_v_frexp_mant_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint
 }
 
 // Evaluate the instruction under its inherited architecture policy.
+int rj_arith_v_trunc_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts) {
+  if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F32Mode>(
+      flags, exec_mask, instruction_flags, d, [&](uint64_t core_mode) {
+        return unary<rocjitsu::arith::Unary::Trunc, true, true>(
+            rocjitsu::arith::sdwa_fixed_round_flags(flags, instruction_flags), exec_mask, core_mode,
+            d, a, trapsts);
+      });
+}
+
+// Evaluate the instruction under its inherited architecture policy.
+int rj_arith_v_trunc_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts) {
+  if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F32Mode>(
+      flags, exec_mask, instruction_flags, d, [&](uint64_t core_mode) {
+        return unary_wave64<rocjitsu::arith::Unary::Trunc, true, true>(
+            rocjitsu::arith::sdwa_fixed_round_flags(flags, instruction_flags), exec_mask, core_mode,
+            d, a, trapsts);
+      });
+}
+
+// Evaluate the instruction under its inherited architecture policy.
+int rj_arith_v_ceil_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   uint32_t *trapsts) {
+  if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F32Mode>(
+      flags, exec_mask, instruction_flags, d, [&](uint64_t core_mode) {
+        return unary<rocjitsu::arith::Unary::Ceil, true, true>(
+            rocjitsu::arith::sdwa_fixed_round_flags(flags, instruction_flags), exec_mask, core_mode,
+            d, a, trapsts);
+      });
+}
+
+// Evaluate the instruction under its inherited architecture policy.
+int rj_arith_v_ceil_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   uint32_t *trapsts) {
+  if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F32Mode>(
+      flags, exec_mask, instruction_flags, d, [&](uint64_t core_mode) {
+        return unary_wave64<rocjitsu::arith::Unary::Ceil, true, true>(
+            rocjitsu::arith::sdwa_fixed_round_flags(flags, instruction_flags), exec_mask, core_mode,
+            d, a, trapsts);
+      });
+}
+
+// Evaluate the instruction under its inherited architecture policy.
+int rj_arith_v_floor_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts) {
+  if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F32Mode>(
+      flags, exec_mask, instruction_flags, d, [&](uint64_t core_mode) {
+        return unary<rocjitsu::arith::Unary::Floor, true, true>(
+            rocjitsu::arith::sdwa_fixed_round_flags(flags, instruction_flags), exec_mask, core_mode,
+            d, a, trapsts);
+      });
+}
+
+// Evaluate the instruction under its inherited architecture policy.
+int rj_arith_v_floor_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts) {
+  if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F32Mode>(
+      flags, exec_mask, instruction_flags, d, [&](uint64_t core_mode) {
+        return unary_wave64<rocjitsu::arith::Unary::Floor, true, true>(
+            rocjitsu::arith::sdwa_fixed_round_flags(flags, instruction_flags), exec_mask, core_mode,
+            d, a, trapsts);
+      });
+}
+
+// Evaluate the instruction under its inherited architecture policy.
+int rj_arith_v_rndne_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts) {
+  if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F32Mode>(
+      flags, exec_mask, instruction_flags, d, [&](uint64_t core_mode) {
+        return unary<rocjitsu::arith::Unary::Rndne, true, true>(
+            rocjitsu::arith::sdwa_fixed_round_flags(flags, instruction_flags), exec_mask, core_mode,
+            d, a, trapsts);
+      });
+}
+
+// Evaluate the instruction under its inherited architecture policy.
+int rj_arith_v_rndne_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts) {
+  if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F32Mode>(
+      flags, exec_mask, instruction_flags, d, [&](uint64_t core_mode) {
+        return unary_wave64<rocjitsu::arith::Unary::Rndne, true, true>(
+            rocjitsu::arith::sdwa_fixed_round_flags(flags, instruction_flags), exec_mask, core_mode,
+            d, a, trapsts);
+      });
+}
+
+// Evaluate the instruction under its inherited architecture policy.
+int rj_arith_v_frexp_mant_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a, uint32_t *trapsts) {
+  if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F32Mode>(
+      flags, exec_mask, instruction_flags, d, [&](uint64_t core_mode) {
+        return unary<rocjitsu::arith::Unary::FrexpMant, true, true>(
+            rocjitsu::arith::sdwa_fixed_round_flags(flags, instruction_flags), exec_mask, core_mode,
+            d, a, trapsts);
+      });
+}
+
+// Evaluate the instruction under its inherited architecture policy.
+int rj_arith_v_frexp_mant_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a, uint32_t *trapsts) {
+  if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F32Mode>(
+      flags, exec_mask, instruction_flags, d, [&](uint64_t core_mode) {
+        return unary_wave64<rocjitsu::arith::Unary::FrexpMant, true, true>(
+            rocjitsu::arith::sdwa_fixed_round_flags(flags, instruction_flags), exec_mask, core_mode,
+            d, a, trapsts);
+      });
+}
+
+// Evaluate the instruction under its inherited architecture policy.
+int rj_arith_v_fract_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F32Mode>(
+      flags, exec_mask, instruction_flags, d, [&](uint64_t core_mode) {
+        return unary<rocjitsu::arith::Unary::Fract, true, true>(flags, exec_mask, core_mode, d, a,
+                                                                trapsts);
+      });
+}
+
+// Evaluate the instruction under its inherited architecture policy.
+int rj_arith_v_fract_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F32Mode>(
+      flags, exec_mask, instruction_flags, d, [&](uint64_t core_mode) {
+        return unary_wave64<rocjitsu::arith::Unary::Fract, true, true>(flags, exec_mask, core_mode,
+                                                                       d, a, trapsts);
+      });
+}
+
+// Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_trunc_f32_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                     uint32_t *const *d, const uint32_t *const *a, uint32_t *state) {
   flags = rocjitsu::arith::resolve_compatibility(
@@ -1264,188 +1496,4 @@ int rj_arith_v_fract_f32_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t
   }
   return unary_wave64<rocjitsu::arith::Unary::Fract, true, true, false, true>(flags, exec_mask,
                                                                               mode, d, a);
-}
-
-// Retain the existing CDNA entry point and its established policy.
-int rj_arith_v_trunc_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
-                                    uint32_t *const *d, const uint32_t *const *a,
-                                    uint32_t *trapsts) {
-  if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
-  }
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
-  return unary<rocjitsu::arith::Unary::Trunc, true, true>(flags, exec_mask, instruction_flags, d, a,
-                                                          trapsts);
-}
-
-// Retain the existing CDNA entry point and its established policy.
-int rj_arith_v_trunc_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
-                                    uint32_t *const *d, const uint32_t *const *a,
-                                    uint32_t *trapsts) {
-  if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
-  }
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
-  return unary_wave64<rocjitsu::arith::Unary::Trunc, true, true>(flags, exec_mask,
-                                                                 instruction_flags, d, a, trapsts);
-}
-
-// Retain the existing CDNA entry point and its established policy.
-int rj_arith_v_ceil_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
-                                   uint32_t *const *d, const uint32_t *const *a,
-                                   uint32_t *trapsts) {
-  if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
-  }
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
-  return unary<rocjitsu::arith::Unary::Ceil, true, true>(flags, exec_mask, instruction_flags, d, a,
-                                                         trapsts);
-}
-
-// Retain the existing CDNA entry point and its established policy.
-int rj_arith_v_ceil_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
-                                   uint32_t *const *d, const uint32_t *const *a,
-                                   uint32_t *trapsts) {
-  if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
-  }
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
-  return unary_wave64<rocjitsu::arith::Unary::Ceil, true, true>(flags, exec_mask, instruction_flags,
-                                                                d, a, trapsts);
-}
-
-// Retain the existing CDNA entry point and its established policy.
-int rj_arith_v_floor_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
-                                    uint32_t *const *d, const uint32_t *const *a,
-                                    uint32_t *trapsts) {
-  if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
-  }
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
-  return unary<rocjitsu::arith::Unary::Floor, true, true>(flags, exec_mask, instruction_flags, d, a,
-                                                          trapsts);
-}
-
-// Retain the existing CDNA entry point and its established policy.
-int rj_arith_v_floor_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
-                                    uint32_t *const *d, const uint32_t *const *a,
-                                    uint32_t *trapsts) {
-  if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
-  }
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
-  return unary_wave64<rocjitsu::arith::Unary::Floor, true, true>(flags, exec_mask,
-                                                                 instruction_flags, d, a, trapsts);
-}
-
-// Retain the existing CDNA entry point and its established policy.
-int rj_arith_v_rndne_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
-                                    uint32_t *const *d, const uint32_t *const *a,
-                                    uint32_t *trapsts) {
-  if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
-  }
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
-  return unary<rocjitsu::arith::Unary::Rndne, true, true>(flags, exec_mask, instruction_flags, d, a,
-                                                          trapsts);
-}
-
-// Retain the existing CDNA entry point and its established policy.
-int rj_arith_v_rndne_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
-                                    uint32_t *const *d, const uint32_t *const *a,
-                                    uint32_t *trapsts) {
-  if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
-  }
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
-  return unary_wave64<rocjitsu::arith::Unary::Rndne, true, true>(flags, exec_mask,
-                                                                 instruction_flags, d, a, trapsts);
-}
-
-// Retain the existing CDNA entry point and its established policy.
-int rj_arith_v_frexp_mant_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask,
-                                         uint64_t instruction_flags, uint32_t *const *d,
-                                         const uint32_t *const *a, uint32_t *trapsts) {
-  if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
-  }
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
-  return unary<rocjitsu::arith::Unary::FrexpMant, true, true>(flags, exec_mask, instruction_flags,
-                                                              d, a, trapsts);
-}
-
-// Retain the existing CDNA entry point and its established policy.
-int rj_arith_v_frexp_mant_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask,
-                                         uint64_t instruction_flags, uint32_t *const *d,
-                                         const uint32_t *const *a, uint32_t *trapsts) {
-  if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
-  }
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
-  return unary_wave64<rocjitsu::arith::Unary::FrexpMant, true, true>(
-      flags, exec_mask, instruction_flags, d, a, trapsts);
-}
-
-// Retain the existing CDNA entry point and its established policy.
-int rj_arith_v_fract_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
-                                    uint32_t *const *d, const uint32_t *const *a,
-                                    uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
-  return unary<rocjitsu::arith::Unary::Fract, true, true>(flags, exec_mask, instruction_flags, d, a,
-                                                          trapsts);
-}
-
-// Retain the existing CDNA entry point and its established policy.
-int rj_arith_v_fract_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
-                                    uint32_t *const *d, const uint32_t *const *a,
-                                    uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
-  return unary_wave64<rocjitsu::arith::Unary::Fract, true, true>(flags, exec_mask,
-                                                                 instruction_flags, d, a, trapsts);
 }

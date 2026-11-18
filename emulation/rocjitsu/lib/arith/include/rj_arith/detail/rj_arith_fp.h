@@ -2080,7 +2080,8 @@ int rj_arith_v_pk_min_num_bf16_w32(uint64_t flags, uint32_t exec_mask, uint64_t 
 int rj_arith_v_pk_max_num_bf16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,
                                    const uint32_t *const *b, uint32_t *excp_flag_user);
-// DIV_SCALE for gfx942/gfx950 and gfx1250 Wave32. A equals B or C after NEG.
+// DIV_SCALE for gfx942/gfx950, older CDNA/RDNA and gfx1250 Wave32.
+// A equals B or C after NEG.
 // OMOD/CLAMP are ignored; selected NaNs are quieted. Condition contains active bits only.
 // Loose/allow-Loose/Compatibility use the inherited model; strict CDNA modes are unsupported.
 int rj_arith_v_div_scale_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask,
@@ -2103,7 +2104,7 @@ int rj_arith_v_div_scale_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask,
                                         uint64_t *condition, const uint32_t *const *a,
                                         const uint32_t *const *b, const uint32_t *const *c);
 
-// CDNA fused multiply-add with per-lane conditional division scaling.
+// Inherited CDNA/older RDNA fused multiply-add with conditional division scaling.
 // gfx950 shares gfx942; gfx1250 is Wave32. Compatibility retains inherited guest rounding,
 // gradual core rounding before OMOD, and NaN quieting. FP status is unused; strict modes
 // unsupported.
@@ -3033,6 +3034,28 @@ int rj_arith_v_mul_f32_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t i
 int rj_arith_v_mul_f32_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
                                   const uint32_t *const *b, uint32_t *trapsts);
+
+// Older native FP64 math inherits host-double evaluation with raw subnormal inputs/results.
+// Source NaNs retain their payload; IEEE mode quiets signaling NaNs, otherwise
+// they pass through unchanged. MODE gates OMOD/CLAMP.
+// Compatibility and Loose share the model; strict numeric/reporting modes are unsupported.
+int rj_arith_v_rcp_f64_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+
+int rj_arith_v_rsq_f64_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+
+int rj_arith_v_sqrt_f64_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+
+int rj_arith_v_rcp_f64_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+
+int rj_arith_v_rsq_f64_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
+
+int rj_arith_v_sqrt_f64_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 
 #ifdef __cplusplus
 } // extern "C"

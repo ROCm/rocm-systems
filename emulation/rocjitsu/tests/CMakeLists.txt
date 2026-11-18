@@ -640,6 +640,8 @@ add_executable(
     scalar_buffer_test.cpp
     scalar_cache_policy_test.cpp
     scalar_cache_discard_test.cpp
+    legacy_special_f32_test.cpp
+    legacy_native_f32_test.cpp
     transcendental_test.cpp
     comparison_test.cpp
     gfx1150_compare_test.cpp
@@ -724,6 +726,8 @@ add_executable(
     frexp_mantissa_test.cpp
     integral_rounding_f32_test.cpp
     gfx1150_dual_test.cpp
+    legacy_division_test.cpp
+    legacy_native_f64_test.cpp
     division_macro_test.cpp
     valu_floating_policy_test.cpp
     gfx11_dot2_test.cpp
