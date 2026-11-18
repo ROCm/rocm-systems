@@ -512,12 +512,17 @@ class IsaProfile(ABC):
 
     @property
     def atomic_legacy_minmax(self) -> bool:
-        """Older float-atomic rules preserve selected input bits and propagate SNaNs."""
+        """Current emulator policy: return the selected input bits and propagate SNaNs."""
         return True
 
     @property
     def atomic_source_nan_first(self) -> bool:
         """L2 ADD NaN order; indexed LDS always prefers the incoming operand."""
+        return False
+
+    @property
+    def atomic_minmax_snan_wins(self) -> bool:
+        """Flushed-input MIN/MAX still return a quieted SNaN, the data operand's first."""
         return False
 
     def scalar_atomic_denorm_modes(
@@ -668,6 +673,10 @@ class IsaProfile(ABC):
     @property
     def image_dimensions_in_resource(self) -> bool:
         """Whether image dimensions come from T# rather than instruction DIM."""
+        return False
+
+    def mimg_r128_resource(self, name: str) -> bool:
+        """Whether R128 selects a four-DWORD resource for this MIMG opcode."""
         return False
 
     @property
@@ -1963,6 +1972,8 @@ class CdnaProfile(_AmdgpuProfileBase):
     flat_offset_bits = 13
     flat_lds_m0_mask = 0x3FFFC
     scratch_has_vaddr_expr = 'inst_.lds != 0'
+    # Float atomic rules measured on MI300A (gfx942) and MI350X (gfx950).
+    measured_float_atomics = True
 
     @property
     def dpp_reverse_shifts_use_src1(self) -> bool:
@@ -1976,6 +1987,30 @@ class CdnaProfile(_AmdgpuProfileBase):
     def ds_compare_store_compare_first(self) -> bool:
         # CDNA1-4 / RDNA1-2 DS CMPST reverses the BUFFER operand order.
         return True
+
+    @property
+    def atomic_legacy_minmax(self) -> bool:
+        # MI300A/MI350X MIN/MAX return the MODE-flushed winner.
+        return not self.measured_float_atomics
+
+    @property
+    def atomic_minmax_snan_wins(self) -> bool:
+        return self.measured_float_atomics
+
+    @property
+    def atomic_source_nan_first(self) -> bool:
+        return self.measured_float_atomics
+
+    def scalar_atomic_denorm_modes(
+        self, operation: str, elem_size: int, *, ds: bool
+    ) -> tuple[str, str]:
+        memory_mode, lds_mode = super().scalar_atomic_denorm_modes(
+            operation, elem_size, ds=ds
+        )
+        # MI300A/MI350X L2 never flushes, contrary to the ISA's ADD_F32 table.
+        if self.measured_float_atomics and not ds:
+            memory_mode = '3'
+        return memory_mode, lds_mode
 
     @property
     def vmem_stores_complete_in_order(self) -> bool:
@@ -2196,6 +2231,7 @@ class Cdna1Profile(CdnaProfile):
     - Scratch base via SGPR pair (not HW register).
     - ENC_VOP3PX2 does not exist in CDNA1 XML.
     - The current runtime ISA trait leaves SRAM ECC disabled.
+    - Older float-atomic rules; the MI300A/MI350X captures do not cover it.
     """
 
     separately_rounded_mad_opcodes = _SEPARATELY_ROUNDED_F32_MAD
@@ -2205,6 +2241,7 @@ class Cdna1Profile(CdnaProfile):
 
     legacy_flat_lds = True
     scratch_has_vaddr_expr = 'inst_.saddr == 0x7F'
+    measured_float_atomics = False
 
     flat_lds_m0_mask = 0xFFFC
 
@@ -2283,12 +2320,14 @@ class Cdna2Profile(CdnaProfile):
     - GFX9-style GLC-only coherency model.
     - Scratch base via SGPR pair.
     - ENC_VOP3PX2 does not exist in CDNA2 XML.
+    - Older float-atomic rules; the MI300A/MI350X captures do not cover it.
     """
 
     mul_lo_u16_clamp_encodings = frozenset()
 
     legacy_flat_lds = True
     scratch_has_vaddr_expr = 'inst_.saddr == 0x7F'
+    measured_float_atomics = False
 
     flat_lds_m0_mask = 0xFFFC
 
@@ -2339,6 +2378,11 @@ class Cdna2Profile(CdnaProfile):
                 EncodingModifier('scc'),
                 EncodingModifier('lds'),
             ]
+        if upper == 'ENC_MIMG':
+            return [
+                EncodingModifier(flag)
+                for flag in ('unorm', 'glc', 'slc', 'scc', 'a16', 'lwe', 'da', 'd16')
+            ]
         return []
 
     @property
@@ -2372,6 +2416,9 @@ class Rdna1Profile(_AmdgpuProfileBase):
     coincident_ds_ignores_data1 = True
 
     models_nop_issue_delay = True
+
+    def mimg_r128_resource(self, name: str) -> bool:
+        return not name.startswith('IMAGE_BVH')
 
     @property
     def mimg_max_nsa_words(self) -> int:
@@ -2575,12 +2622,39 @@ class Rdna3Profile(_AmdgpuProfileBase):
     flat_saddr_null_aliases = ('127',)
 
     @property
+    def renders_gfx11_image_syntax(self) -> bool:
+        return True
+
+    @property
     def has_gfx11_image_address_extension(self) -> bool:
         return True
+
+    def mimg_r128_resource(self, name: str) -> bool:
+        return name not in self.gfx11_mimg_fixed_vaddr_words
 
     @property
     def mimg_max_nsa_words(self) -> int:
         return 1
+
+    @property
+    def gfx11_mimg_nsa_group_words(
+        self,
+    ) -> dict[str, tuple[tuple[int, ...], tuple[int, ...]]]:
+        return {
+            'IMAGE_BVH_INTERSECT_RAY': ((1, 1, 3, 3, 3), (1, 1, 3, 3)),
+            'IMAGE_BVH64_INTERSECT_RAY': ((2, 1, 3, 3, 3), (2, 1, 3, 3)),
+        }
+
+    @property
+    def gfx11_mimg_gather_style_instructions(self) -> frozenset[str]:
+        return frozenset({'IMAGE_MSAA_LOAD'})
+
+    @property
+    def gfx11_mimg_fixed_vdata_words(self) -> dict[str, int]:
+        return {
+            'IMAGE_BVH_INTERSECT_RAY': 4,
+            'IMAGE_BVH64_INTERSECT_RAY': 4,
+        }
 
     @property
     def gfx11_mimg_fixed_vaddr_words(self) -> dict[str, tuple[int, int]]:
@@ -2838,36 +2912,12 @@ class Rdna3_5Profile(Rdna3Profile):
         return ((192, 192),)
 
     @property
-    def renders_gfx11_image_syntax(self) -> bool:
-        return True
-
-    @property
     def split_ds_2addr_offsets(self) -> bool:
         return True
 
     @property
     def vop3p_absolute_source_instructions(self) -> frozenset[str]:
         return frozenset({'V_FMA_MIX_F32', 'V_FMA_MIXLO_F16', 'V_FMA_MIXHI_F16'})
-
-    @property
-    def gfx11_mimg_gather_style_instructions(self) -> frozenset[str]:
-        return frozenset({'IMAGE_MSAA_LOAD'})
-
-    @property
-    def gfx11_mimg_fixed_vdata_words(self) -> dict[str, int]:
-        return {
-            'IMAGE_BVH_INTERSECT_RAY': 4,
-            'IMAGE_BVH64_INTERSECT_RAY': 4,
-        }
-
-    @property
-    def gfx11_mimg_nsa_group_words(
-        self,
-    ) -> dict[str, tuple[tuple[int, ...], tuple[int, ...]]]:
-        return {
-            'IMAGE_BVH_INTERSECT_RAY': ((1, 1, 3, 3, 3), (1, 1, 3, 3)),
-            'IMAGE_BVH64_INTERSECT_RAY': ((2, 1, 3, 3, 3), (2, 1, 3, 3)),
-        }
 
     @property
     def sendmsg_return_symbolic(self) -> bool:

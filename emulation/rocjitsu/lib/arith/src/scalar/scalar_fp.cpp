@@ -12,11 +12,13 @@
 
 #include "common/float_encoding.h"
 #include "common/validation.h"
+#include "compare/float_compare_impl.h"
 #include "fp/binary.h"
 #include "fp/fma_scalar.h"
 #include "fp/half_fma_scalar.h"
 #include "fp/minmax_impl.h"
 #include "rj_arith/detail/rj_arith_scalar.h"
+#include "scalar/fp_status.h"
 
 #include <stdint.h>
 
@@ -123,6 +125,40 @@ int run(uint64_t flags, uint32_t mode, uint32_t *d, uint32_t a, uint32_t b) {
   return RJ_ARITH_SUCCESS;
 }
 
+// Preserve gfx12 Compatibility status around the shared numerical operation.
+// Explicit reporting modes retain their existing qualification restrictions.
+template <rocjitsu::arith::Binary Op, bool Half>
+int run_policy(uint64_t flags, uint64_t mode, uint32_t *d, uint32_t a, uint32_t b,
+               uint32_t *status) {
+  using namespace rocjitsu::arith;
+  const bool compatibility = (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY;
+  flags = resolve_compatibility(flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = validate_semantics(flags)) {
+    return error;
+  }
+  if (reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  if (mode >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  int error = run<Op, Half>(flags, uint32_t(mode), d, a, b);
+  if (error || !compatibility) {
+    return error;
+  }
+  if constexpr (Op == Binary::Add || Op == Binary::Sub || Op == Binary::Mul) {
+    constexpr uint32_t sign = Half ? 0x8000 : 0x80000000;
+    constexpr uint32_t one = Half ? 0x3c00 : 0x3f800000;
+    const uint32_t c = Op == Binary::Mul ? (a ^ b) & sign : Op == Binary::Sub ? b ^ sign : b;
+    *status |= scalar_fma_causes<Half>(flags, a, Op == Binary::Mul ? b : one, c, *d);
+  } else {
+    *status |= float_compare_exceptions < Half
+                   ? 16
+                   : 32 > (a, b, flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS);
+  }
+  return RJ_ARITH_SUCCESS;
+}
+
 // Keep legacy gfx1250 scalar arithmetic gradual, while selection honors input MODE.
 // No FP status model is inherited for these instructions.
 template <rocjitsu::arith::Binary Op, bool Half>
@@ -152,266 +188,126 @@ int run_gfx1250(uint64_t flags, uint64_t mode, uint32_t *d, uint32_t a, uint32_t
 // Return errors before changing outputs. FP status is accumulated only when resolved semantics
 // require it.
 int rj_arith_s_add_f32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
-                       uint32_t b, [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
-  if (rocjitsu::arith::reports_fp_status(flags)) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
-  }
-  if (instruction_flags >> 32) {
-    return RJ_ARITH_ERROR_INVALID_FLAGS;
-  }
-  return run<rocjitsu::arith::Binary::Add, false>(flags, instruction_flags, d, a, b);
+                       uint32_t b, uint32_t *excp_flag_user) {
+  return run_policy<rocjitsu::arith::Binary::Add, false>(flags, instruction_flags, d, a, b,
+                                                         excp_flag_user);
 }
 
 // Add the operands.
 // Return errors before changing outputs. FP status is accumulated only when resolved semantics
 // require it.
 int rj_arith_s_add_f16(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
-                       uint32_t b, [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
-  if (rocjitsu::arith::reports_fp_status(flags)) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
-  }
-  if (instruction_flags >> 32) {
-    return RJ_ARITH_ERROR_INVALID_FLAGS;
-  }
-  return run<rocjitsu::arith::Binary::Add, true>(flags, instruction_flags, d, a, b);
+                       uint32_t b, uint32_t *excp_flag_user) {
+  return run_policy<rocjitsu::arith::Binary::Add, true>(flags, instruction_flags, d, a, b,
+                                                        excp_flag_user);
 }
 
 // Subtract B from A.
 // Return errors before changing outputs. FP status is accumulated only when resolved semantics
 // require it.
 int rj_arith_s_sub_f32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
-                       uint32_t b, [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
-  if (rocjitsu::arith::reports_fp_status(flags)) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
-  }
-  if (instruction_flags >> 32) {
-    return RJ_ARITH_ERROR_INVALID_FLAGS;
-  }
-  return run<rocjitsu::arith::Binary::Sub, false>(flags, instruction_flags, d, a, b);
+                       uint32_t b, uint32_t *excp_flag_user) {
+  return run_policy<rocjitsu::arith::Binary::Sub, false>(flags, instruction_flags, d, a, b,
+                                                         excp_flag_user);
 }
 
 // Subtract B from A.
 // Return errors before changing outputs. FP status is accumulated only when resolved semantics
 // require it.
 int rj_arith_s_sub_f16(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
-                       uint32_t b, [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
-  if (rocjitsu::arith::reports_fp_status(flags)) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
-  }
-  if (instruction_flags >> 32) {
-    return RJ_ARITH_ERROR_INVALID_FLAGS;
-  }
-  return run<rocjitsu::arith::Binary::Sub, true>(flags, instruction_flags, d, a, b);
+                       uint32_t b, uint32_t *excp_flag_user) {
+  return run_policy<rocjitsu::arith::Binary::Sub, true>(flags, instruction_flags, d, a, b,
+                                                        excp_flag_user);
 }
 
 // Multiply the operands.
 // Return errors before changing outputs. FP status is accumulated only when resolved semantics
 // require it.
 int rj_arith_s_mul_f32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
-                       uint32_t b, [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
-  if (rocjitsu::arith::reports_fp_status(flags)) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
-  }
-  if (instruction_flags >> 32) {
-    return RJ_ARITH_ERROR_INVALID_FLAGS;
-  }
-  return run<rocjitsu::arith::Binary::Mul, false>(flags, instruction_flags, d, a, b);
+                       uint32_t b, uint32_t *excp_flag_user) {
+  return run_policy<rocjitsu::arith::Binary::Mul, false>(flags, instruction_flags, d, a, b,
+                                                         excp_flag_user);
 }
 
 // Multiply the operands.
 // Return errors before changing outputs. FP status is accumulated only when resolved semantics
 // require it.
 int rj_arith_s_mul_f16(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
-                       uint32_t b, [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
-  if (rocjitsu::arith::reports_fp_status(flags)) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
-  }
-  if (instruction_flags >> 32) {
-    return RJ_ARITH_ERROR_INVALID_FLAGS;
-  }
-  return run<rocjitsu::arith::Binary::Mul, true>(flags, instruction_flags, d, a, b);
+                       uint32_t b, uint32_t *excp_flag_user) {
+  return run_policy<rocjitsu::arith::Binary::Mul, true>(flags, instruction_flags, d, a, b,
+                                                        excp_flag_user);
 }
 
 // Select the minimum with numeric-preferred NaN selection.
 // Return errors before changing outputs. FP status is accumulated only when resolved semantics
 // require it.
 int rj_arith_s_min_num_f32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
-                           uint32_t b, [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
-  if (rocjitsu::arith::reports_fp_status(flags)) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
-  }
-  if (instruction_flags >> 32) {
-    return RJ_ARITH_ERROR_INVALID_FLAGS;
-  }
-  return run<rocjitsu::arith::Binary::MinNum, false>(flags, instruction_flags, d, a, b);
+                           uint32_t b, uint32_t *excp_flag_user) {
+  return run_policy<rocjitsu::arith::Binary::MinNum, false>(flags, instruction_flags, d, a, b,
+                                                            excp_flag_user);
 }
 
 // Select the minimum with numeric-preferred NaN selection.
 // Return errors before changing outputs. FP status is accumulated only when resolved semantics
 // require it.
 int rj_arith_s_min_num_f16(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
-                           uint32_t b, [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
-  if (rocjitsu::arith::reports_fp_status(flags)) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
-  }
-  if (instruction_flags >> 32) {
-    return RJ_ARITH_ERROR_INVALID_FLAGS;
-  }
-  return run<rocjitsu::arith::Binary::MinNum, true>(flags, instruction_flags, d, a, b);
+                           uint32_t b, uint32_t *excp_flag_user) {
+  return run_policy<rocjitsu::arith::Binary::MinNum, true>(flags, instruction_flags, d, a, b,
+                                                           excp_flag_user);
 }
 
 // Select the maximum with numeric-preferred NaN selection.
 // Return errors before changing outputs. FP status is accumulated only when resolved semantics
 // require it.
 int rj_arith_s_max_num_f32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
-                           uint32_t b, [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
-  if (rocjitsu::arith::reports_fp_status(flags)) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
-  }
-  if (instruction_flags >> 32) {
-    return RJ_ARITH_ERROR_INVALID_FLAGS;
-  }
-  return run<rocjitsu::arith::Binary::MaxNum, false>(flags, instruction_flags, d, a, b);
+                           uint32_t b, uint32_t *excp_flag_user) {
+  return run_policy<rocjitsu::arith::Binary::MaxNum, false>(flags, instruction_flags, d, a, b,
+                                                            excp_flag_user);
 }
 
 // Select the maximum with numeric-preferred NaN selection.
 // Return errors before changing outputs. FP status is accumulated only when resolved semantics
 // require it.
 int rj_arith_s_max_num_f16(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
-                           uint32_t b, [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
-  if (rocjitsu::arith::reports_fp_status(flags)) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
-  }
-  if (instruction_flags >> 32) {
-    return RJ_ARITH_ERROR_INVALID_FLAGS;
-  }
-  return run<rocjitsu::arith::Binary::MaxNum, true>(flags, instruction_flags, d, a, b);
+                           uint32_t b, uint32_t *excp_flag_user) {
+  return run_policy<rocjitsu::arith::Binary::MaxNum, true>(flags, instruction_flags, d, a, b,
+                                                           excp_flag_user);
 }
 
 // Select the NaN-propagating minimum.
 // Return errors before changing outputs. FP status is accumulated only when resolved semantics
 // require it.
 int rj_arith_s_minimum_f32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
-                           uint32_t b, [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
-  if (rocjitsu::arith::reports_fp_status(flags)) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
-  }
-  if (instruction_flags >> 32) {
-    return RJ_ARITH_ERROR_INVALID_FLAGS;
-  }
-  return run<rocjitsu::arith::Binary::Minimum, false>(flags, instruction_flags, d, a, b);
+                           uint32_t b, uint32_t *excp_flag_user) {
+  return run_policy<rocjitsu::arith::Binary::Minimum, false>(flags, instruction_flags, d, a, b,
+                                                             excp_flag_user);
 }
 
 // Select the NaN-propagating minimum.
 // Return errors before changing outputs. FP status is accumulated only when resolved semantics
 // require it.
 int rj_arith_s_minimum_f16(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
-                           uint32_t b, [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
-  if (rocjitsu::arith::reports_fp_status(flags)) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
-  }
-  if (instruction_flags >> 32) {
-    return RJ_ARITH_ERROR_INVALID_FLAGS;
-  }
-  return run<rocjitsu::arith::Binary::Minimum, true>(flags, instruction_flags, d, a, b);
+                           uint32_t b, uint32_t *excp_flag_user) {
+  return run_policy<rocjitsu::arith::Binary::Minimum, true>(flags, instruction_flags, d, a, b,
+                                                            excp_flag_user);
 }
 
 // Select the NaN-propagating maximum.
 // Return errors before changing outputs. FP status is accumulated only when resolved semantics
 // require it.
 int rj_arith_s_maximum_f32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
-                           uint32_t b, [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
-  if (rocjitsu::arith::reports_fp_status(flags)) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
-  }
-  if (instruction_flags >> 32) {
-    return RJ_ARITH_ERROR_INVALID_FLAGS;
-  }
-  return run<rocjitsu::arith::Binary::Maximum, false>(flags, instruction_flags, d, a, b);
+                           uint32_t b, uint32_t *excp_flag_user) {
+  return run_policy<rocjitsu::arith::Binary::Maximum, false>(flags, instruction_flags, d, a, b,
+                                                             excp_flag_user);
 }
 
 // Select the NaN-propagating maximum.
 // Return errors before changing outputs. FP status is accumulated only when resolved semantics
 // require it.
 int rj_arith_s_maximum_f16(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
-                           uint32_t b, [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
-  if (rocjitsu::arith::reports_fp_status(flags)) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
-  }
-  if (instruction_flags >> 32) {
-    return RJ_ARITH_ERROR_INVALID_FLAGS;
-  }
-  return run<rocjitsu::arith::Binary::Maximum, true>(flags, instruction_flags, d, a, b);
+                           uint32_t b, uint32_t *excp_flag_user) {
+  return run_policy<rocjitsu::arith::Binary::Maximum, true>(flags, instruction_flags, d, a, b,
+                                                            excp_flag_user);
 }
 
 // Evaluate gfx1250 scalar add; strict empirical modes are unsupported.

@@ -1094,6 +1094,30 @@ TEST(TrampolineBuilderEmit, LiteralArgumentSourceFailurePropagates) {
   }
 }
 
+TEST(TrampolineBuilderEmit, EntrySnapshotArgumentSourceFailurePropagates) {
+  for (const ProbeArgSource source : {ProbeArgSource::EntrySgpr, ProbeArgSource::EntryVgprLane0}) {
+    SCOPED_TRACE(static_cast<int>(source));
+    TrampolinePlan plan = make_probe_plan();
+    plan.entry_storage_base = 20;
+    plan.entry_register_captures = {
+        {.source_index = 0,
+         .sgpr = 22,
+         .source_class = source == ProbeArgSource::EntrySgpr ? RegClass::SGPR : RegClass::VGPR}};
+    plan.probe_args = {{source, 0}};
+    std::string error;
+    ASSERT_TRUE(
+        TrampolineBuilder::plan_probe_call(plan, arg_abi(1), make_sgpr_set({4}), {}, &error))
+        << error;
+    plan.entry_register_captures.front().sgpr = kVectorSrcLiteral;
+    EXPECT_FALSE(TrampolineBuilder::emit_probe_call(plan, &error).has_value());
+    const std::string source_name =
+        source == ProbeArgSource::EntrySgpr ? "EntrySgpr" : "EntryVgprLane0";
+    EXPECT_EQ(error, "probe-call emission: argument 0 (" + source_name +
+                         "): v_mov_b32 from a literal needs build_v_mov_b32_imm");
+    EXPECT_FALSE(TrampolineBuilder::emit_probe_call(plan).has_value());
+  }
+}
+
 // The envelope materializes the target address with getpc + add + addc.
 TEST(TrampolineBuilderEmit, ContainsTargetMaterialization) {
   const TrampolinePlan plan = make_probe_plan();
@@ -1455,7 +1479,7 @@ TEST(TrampolineBuilderEmit, MovrelsM0RestorePadsToOneWaitState) {
                            .argument_moves = {},
                            .argument_copy_temp = std::nullopt,
                            .entry_storage_base = std::nullopt,
-                           .entry_vgpr_captures = {},
+                           .entry_register_captures = {},
                            .register_saves = {},
                            .preserve_m0 = true,
                            .special_state_saves = {},
@@ -1884,6 +1908,52 @@ TEST(TrampolineBuilderEmit, Rdna4GuardsScalarSavesBeforeArgumentReads) {
                                                    make_sgpr_set({8}), &error))
         << error;
     EXPECT_EQ(plan.planned_envelope_word_count, cdna.planned_envelope_word_count + 3);
+  }
+}
+
+TEST(TrampolineBuilderEmit, Rdna3WaitsForValuDestinationsAtBothCallBoundaries) {
+  // Immediate 0x0fff waits for VA_VDST=0 and disables the other counters.
+  constexpr uint32_t kWaitVaVdst = 0xbf880fffu;
+  for (const bool saves_vgpr : {false, true}) {
+    SCOPED_TRACE(saves_vgpr);
+    TrampolinePlan plan = make_probe_plan(ROCJITSU_CODE_ARCH_RDNA3);
+    RegisterSet live;
+    if (saves_vgpr) {
+      live.expand({RegClass::VGPR, 8, 1});
+      plan.register_saves = {{.cls = RegClass::VGPR, .source = 8, .destination = 16}};
+    }
+    std::string error;
+    ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, kProbeAbi, live, live, &error)) << error;
+    const std::optional<TrampolineBytes> bytes = TrampolineBuilder::emit_probe_call(plan, &error);
+    ASSERT_TRUE(bytes) << error;
+    const std::vector<uint32_t> &words = bytes->trampoline_words;
+    ASSERT_GE(words.size(), 2u);
+    EXPECT_EQ(words[1], kWaitVaVdst);
+    EXPECT_EQ(std::ranges::count(words, kWaitVaVdst), 2);
+
+    const util::FailureOr<uint32_t> call_word =
+        build_s_swappc_b64(30, plan.target_pair_base, plan.arch);
+    ASSERT_TRUE(call_word.succeeded());
+    const std::vector<uint32_t>::const_iterator call = std::ranges::find(words, call_word.value());
+    ASSERT_NE(call, words.end());
+    ASSERT_GT(words.end() - call, 2);
+    EXPECT_EQ(*(call + 2), kWaitVaVdst);
+
+    if (saves_vgpr) {
+      const util::FailureOr<uint32_t> save_word = build_v_mov_b32_src(16, 256 + 8, plan.arch);
+      const util::FailureOr<uint32_t> restore_word = build_v_mov_b32_src(8, 256 + 16, plan.arch);
+      ASSERT_TRUE(save_word.succeeded());
+      ASSERT_TRUE(restore_word.succeeded());
+      const std::vector<uint32_t>::const_iterator save =
+          std::ranges::find(words, save_word.value());
+      const std::vector<uint32_t>::const_iterator restore =
+          std::ranges::find(words, restore_word.value());
+      ASSERT_NE(save, words.end());
+      ASSERT_NE(restore, words.end());
+      EXPECT_LT(words.begin() + 1, save);
+      EXPECT_LT(save, call);
+      EXPECT_LT(call + 2, restore);
+    }
   }
 }
 

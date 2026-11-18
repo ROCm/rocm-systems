@@ -663,5 +663,11 @@ typedef enum rocprofiler_hip_runtime_api_id_t  // NOLINT(performance-enum-size)
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 41
     ROCPROFILER_HIP_RUNTIME_API_ID_hipArrayGetSparseProperties,
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 42
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipGraphNodeGetLocalId,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipGraphNodeGetToolsId,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipGraphGetId,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipGraphExecGetId,
+#endif
     ROCPROFILER_HIP_RUNTIME_API_ID_LAST,
 } rocprofiler_hip_runtime_api_id_t;
