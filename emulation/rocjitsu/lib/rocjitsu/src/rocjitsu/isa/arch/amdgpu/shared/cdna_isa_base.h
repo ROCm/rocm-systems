@@ -30,9 +30,8 @@ class Wavefront;
 
 /// @brief Shared STATUS register layout for all CDNA ISAs (GFX9 family).
 ///
-/// @details Bit positions follow the CDNA3/4 ISA specification, which is a
-/// superset of CDNA1/2.  CDNA1/2 do not expose COND_DBG_USER or COND_DBG_SYS
-/// in hardware, but those bits are inert in simulation.
+/// @details CDNA2 and later GFX9 manuals place the conditional-debug
+/// predicates at STATUS[20:21].
 ///
 /// Each accessor returns a lightweight `Bitfield<32>` proxy that supports
 /// implicit read (integral conversion) and write (`operator=`).

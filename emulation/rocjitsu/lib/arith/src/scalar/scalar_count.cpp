@@ -7,8 +7,8 @@
 // Models follow rocjitsu generated/shared/execute_shared.h, verified on GFX1201.
 
 #include "common/bits.h"
-#include "common/internal.h"
-#include "rj_arith/rj_arith.h"
+#include "common/validation.h"
+#include "rj_arith/detail/rj_arith_scalar.h"
 
 #include <stdint.h>
 
@@ -214,4 +214,44 @@ int rj_arith_s_cls_i32_i64(uint64_t flags, uint64_t instruction_flags, uint32_t 
   uint32_t result = rocjitsu::arith::bit_count_zero<false>(a);
   *d = result;
   return RJ_ARITH_SUCCESS;
+}
+
+// Find the least-significant zero bit, with the same validation as CTZ.
+int rj_arith_s_ff0_i32_b32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a) {
+  return rj_arith_s_ctz_i32_b32(flags, instruction_flags, d, ~a);
+}
+
+// Find the least-significant zero bit, with the same validation as CTZ.
+int rj_arith_s_ff0_i32_b64(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint64_t a) {
+  return rj_arith_s_ctz_i32_b64(flags, instruction_flags, d, ~a);
+}
+
+// Search bits using the legacy mnemonic; same result and validation as s_ctz_i32_b32.
+int rj_arith_s_ff1_i32_b32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a) {
+  return rj_arith_s_ctz_i32_b32(flags, instruction_flags, d, a);
+}
+
+// Search bits using the legacy mnemonic; same result and validation as s_ctz_i32_b64.
+int rj_arith_s_ff1_i32_b64(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint64_t a) {
+  return rj_arith_s_ctz_i32_b64(flags, instruction_flags, d, a);
+}
+
+// Search bits using the legacy mnemonic; same result and validation as s_clz_i32_u32.
+int rj_arith_s_flbit_i32_b32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a) {
+  return rj_arith_s_clz_i32_u32(flags, instruction_flags, d, a);
+}
+
+// Search bits using the legacy mnemonic; same result and validation as s_clz_i32_u64.
+int rj_arith_s_flbit_i32_b64(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint64_t a) {
+  return rj_arith_s_clz_i32_u64(flags, instruction_flags, d, a);
+}
+
+// Search bits using the legacy mnemonic; same result and validation as s_cls_i32.
+int rj_arith_s_flbit_i32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a) {
+  return rj_arith_s_cls_i32(flags, instruction_flags, d, a);
+}
+
+// Search bits using the legacy mnemonic; same result and validation as s_cls_i32_i64.
+int rj_arith_s_flbit_i32_i64(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint64_t a) {
+  return rj_arith_s_cls_i32_i64(flags, instruction_flags, d, a);
 }

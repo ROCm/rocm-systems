@@ -101,6 +101,68 @@ TEST(pcs_parser, hello_world)
     pcs_parser_hello_world<rocprofiler_pc_sampling_record_stochastic_v0_t>();
 }
 
+template <typename PcSamplingRecordT>
+void
+pcs_parser_code_object_attribution()
+{
+    auto buffer   = std::make_shared<MockRuntimeBuffer<PcSamplingRecordT>>();
+    auto queue    = std::make_shared<MockQueue<PcSamplingRecordT>>(16, buffer);
+    auto dispatch = std::make_shared<MockDispatch<PcSamplingRecordT>>(queue);
+
+    buffer->genUpcomingSamples(1);
+    MockWave(dispatch).genPCSample();
+    ASSERT_EQ(buffer->packets.size(), 3);
+
+    auto* translator =
+        rocprofiler::pc_sampling::code_object::CodeobjTableTranslatorSynchronized::Get();
+    const auto object_range = address_range_t{0x100000, 0x1000, 71};
+    translator->insert(object_range);
+
+    for(bool mapped_pc : {false, true})
+    {
+        for(bool correlated : {false, true})
+        {
+            Parser::CorrelationMap correlation;
+            if(correlated) correlation.newDispatch(buffer->packets.front().dispatch_id);
+
+            const auto sample_pc           = object_range.addr + (mapped_pc ? 64 : 0x2000);
+            buffer->packets.back().snap.pc = sample_pc;
+            auto sample                    = PcSamplingRecordT{};
+            auto status                    = add_upcoming_samples<GFX9>(
+                buffer->packets.at(1).upcoming.device,
+                reinterpret_cast<const generic_sample_t*>(&buffer->packets.back()),
+                1,
+                &correlation,
+                &sample);
+
+            EXPECT_EQ(status, correlated ? PCSAMPLE_STATUS_SUCCESS : PCSAMPLE_STATUS_PARSER_ERROR);
+            EXPECT_EQ(sample.pc.code_object_id,
+                      mapped_pc ? object_range.id : ROCPROFILER_CODE_OBJECT_ID_NONE);
+            EXPECT_EQ(sample.pc.code_object_offset, mapped_pc ? 64 : sample_pc);
+            EXPECT_EQ(sample.size, !mapped_pc && correlated ? 0 : sizeof(PcSamplingRecordT));
+            EXPECT_EQ(sample.correlation_id.internal,
+                      correlated ? dispatch->unique_id : ROCPROFILER_CORRELATION_ID_INTERNAL_NONE);
+            if(!correlated)
+            {
+                EXPECT_EQ(sample.dispatch_id, 0);
+            }
+        }
+    }
+
+    translator->remove(object_range);
+    translator->clear_backlog();
+}
+
+TEST(pcs_parser, host_trap_code_object_attribution)
+{
+    pcs_parser_code_object_attribution<rocprofiler_pc_sampling_record_host_trap_v0_t>();
+}
+
+TEST(pcs_parser, stochastic_code_object_attribution)
+{
+    pcs_parser_code_object_attribution<rocprofiler_pc_sampling_record_stochastic_v0_t>();
+}
+
 /**
  * A little more complicated.
  * Generates a few dispatches for 2 different queues and samples in forward and reverse order.

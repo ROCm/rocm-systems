@@ -4,6 +4,7 @@
 // Tests for lit-multiply special values and gfx11/gfx12 modifier behavior.
 
 #include "graphics/helpers.h"
+#include "rj_arith/detail/rj_arith_graphics.h"
 
 // Check graphics results, modifiers, EXEC masks, and source/destination aliases.
 TEST(GraphicsMullitF32W32Gfx11, Arithmetic) {

@@ -18,7 +18,7 @@
 #include "math/half_unary_reference.h"
 #include "math/unary_goldens.h"
 #include "math/unary_reference.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 #include <bit>
 
 #include <cmath>
@@ -270,7 +270,8 @@ void check_unary(Call call, int op, bool iflag = false) {
             EXPECT_EQ(status, 0x80000040U);
           }
           uint32_t effective = uint32_t(mode);
-          if (!Gfx12 && (Half || iflag || op < 4 || op >= 9)) {
+          // These flags keep output denormals with IEEE clear: RDNA3 RCP_IFLAG keeps OMOD.
+          if (!Gfx12 && (Half || op < 4 || op >= 9)) {
             effective &= ~RJ_ARITH_ALU_OMOD_HALF;
           }
           for (int lane = 0; lane < Lanes; ++lane) {

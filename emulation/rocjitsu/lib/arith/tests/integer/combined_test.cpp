@@ -4,7 +4,7 @@
 // Tests for combined shift, boolean, and three-input integer operations.
 
 #include "integer/combined_test.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_integer.h"
 
 #include <gtest/gtest.h>
 
@@ -102,4 +102,16 @@ TEST(IntegerLerpU8W32, Arithmetic) {
 TEST(IntegerLerpU8W64, Arithmetic) {
   rocjitsu::arith::test::check_combined<64, 3>(rj_arith_v_lerp_u8_w64,
                                                rocjitsu::arith::test::Ternary::Lerp);
+}
+
+// Full-width multiply-add wraps, including when CLAMP is set.
+TEST(IntegerMadU32W32, Arithmetic) {
+  rocjitsu::arith::test::check_combined<32, 3>(rj_arith_v_mad_u32_w32,
+                                               rocjitsu::arith::test::Ternary::Mad);
+}
+
+// Full-width multiply-add wraps, including when CLAMP is set.
+TEST(IntegerMadU32W64, Arithmetic) {
+  rocjitsu::arith::test::check_combined<64, 3>(rj_arith_v_mad_u32_w64,
+                                               rocjitsu::arith::test::Ternary::Mad);
 }

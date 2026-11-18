@@ -10,15 +10,10 @@ from amdisa.codegen.execute.packed import (
     gen_dot2_true16,
     gen_dot4,
     gen_dot8,
-    gen_mad_mix_bf16,
-    gen_mad_mix_f32,
-    gen_mad_mix_lo_hi,
     gen_pk_binop,
     gen_pk_binop_f32,
     gen_pk_binop_f64,
     gen_pk_ternary_f64,
-    gen_pk_fmac_vop2,
-    gen_pk_fmac_vop3,
     gen_pk_binop_u64,
     gen_pk_lshl_add_u64,
     gen_pk_ternary,
@@ -59,53 +54,18 @@ def test_dot2_integer_clamp_uses_widened_signed_and_unsigned_ranges():
     assert 'std::numeric_limits<uint32_t>::max()' in unsigned
 
 
-def test_pk_fmac_vop2_reads_old_destination_and_fuses_both_halves():
-    cpp = gen_pk_fmac_vop2(['vdst'], ['src0', 'vsrc1'])
+def test_pk_fma_f16_has_no_legacy_ternary_fallback():
+    import pytest
 
-    assert 'read_lane(vdst, lane)' in cpp
-    assert cpp.count('amdgpu::fp_mode::fma_f16') == 2
-    assert 'wf.fp_round_mode_f16_f64()' in cpp
-    assert 'wf.fp_denorm_mode_f16_f64()' in cpp
-    assert 'sdwa::output_modifier<amdgpu::sdwa::ResultFormat::PK_F16>' in cpp
-    assert (
-        cpp.count(
-            ', omod, false, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf), '
-            'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))'
+    with pytest.raises(ValueError, match='does not support fma'):
+        gen_pk_ternary(
+            ['d'],
+            ['a', 'b', 'c'],
+            'fma',
+            'f16',
+            op_sel_hi_2_expr='hi_c',
+            opsel_exprs=('lo', 'hi'),
         )
-        == 2
-    )
-
-
-def test_promoted_pk_fmac_applies_vop3_modifiers_to_multiplicands_only():
-    cpp = gen_pk_fmac_vop3(['vdst'], ['src0', 'src1'])
-
-    assert 'read_lane(vdst, lane)' in cpp
-    assert cpp.count('amdgpu::fp_mode::fma_f16') == 2
-    assert 'inst_.abs & 1u, inst_.abs & 2u, false' in cpp
-    assert 'inst_.neg & 1u, inst_.neg & 2u, false' in cpp
-    assert 'effective_f16_omod' in cpp
-    assert 'wf.ieee_mode(), true, inst_.omod' in cpp
-    assert 'omod, inst_.clamp' in cpp
-    assert 'op_sel' not in cpp
-
-
-def test_pk_fma_f16_uses_mode_helper_and_clamp_for_both_halves():
-    cpp = gen_pk_ternary(
-        ['vdst'],
-        ['src0', 'src1', 'src2'],
-        'fma',
-        'f16',
-        op_sel_hi_2_expr='inst_.op_sel_hi_2',
-        opsel_exprs=('inst_.op_sel', 'inst_.op_sel_hi'),
-    )
-
-    assert cpp.count('amdgpu::fp_mode::fma_f16') == 2
-    assert 'wf.fp_round_mode_f16_f64()' in cpp
-    assert 'wf.fp_denorm_mode_f16_f64()' in cpp
-    assert (
-        ', 0, inst_.clamp, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf), '
-        'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))'
-    ) in cpp
 
 
 def test_pk_add_minmax_saturates_add_before_selecting_third_operand():
@@ -511,8 +471,8 @@ def test_gfx1250_pk_f32_uses_literal_aware_pair_helper():
         use_cdna5_helpers=True,
     )
 
-    assert 'const auto s0 = read_pk_f32_words(src0, wf, lane)' in cpp
-    assert 'read_pk_f32_words(src0, wf, lane)' in cpp
+    assert 'const auto s0 = amdgpu::RegisterAccess(wf).read_lane_pair32(' in cpp
+    assert 'src0, lane, amdgpu::ScalarPairMode::Replicate32)' in cpp
     assert 's0_hi_w' not in cpp
     assert 's0.hi' in cpp
     assert 'read_lane64' not in cpp
@@ -683,123 +643,8 @@ def test_renamed_vop3p_packed_fma_f32_probe_passes_all_profile_selectors():
     )
 
 
-def test_gfx1250_mad_mix_f32_uses_helper_and_fma():
-    cpp = gen_mad_mix_f32(
-        ['vdst'],
-        ['src0', 'src1', 'src2'],
-        op_sel_hi_2_expr='inst_.pad_14',
-        opsel_exprs=('inst_.opsel', 'inst_.opsel_hi'),
-        use_cdna5_helpers=True,
-        fused_result=True,
-    )
-
-    assert 'read_fma_mix_source_f32(src0, wf, lane' in cpp
-    assert 'arithmetic<amdgpu::fp_mode::Arithmetic::FMA>' in cpp
-    assert 'a * b + c' not in cpp
-
-
-def test_mad_mix_applies_abs_before_neg():
-    cpp = gen_mad_mix_f32(
-        ['vdst'],
-        ['src0', 'src1', 'src2'],
-        op_sel_hi_2_expr='inst_.op_sel_hi_2',
-        opsel_exprs=('inst_.op_sel', 'inst_.op_sel_hi'),
-    )
-
-    abs_line = 'if (inst_.neg_hi & 1) a = std::fabs(a);'
-    neg_line = 'if (inst_.neg & 1) a = -a;'
-    assert 'read_mix_src(raw1, inst_.src1' in cpp
-    assert 'uint16_t bits = amdgpu::is_inline_float_src(src_selector)' in cpp
-    assert abs_line in cpp
-    assert cpp.index(abs_line) < cpp.index(neg_line)
-
-
-def test_gfx1250_mad_mixlo_f16_uses_helper_and_fma():
-    cpp = gen_mad_mix_lo_hi(
-        ['vdst'],
-        ['src0', 'src1', 'src2'],
-        is_lo=True,
-        op_sel_hi_2_expr='inst_.pad_14',
-        opsel_exprs=('inst_.opsel', 'inst_.opsel_hi'),
-        use_cdna5_helpers=True,
-    )
-
-    assert 'read_fma_mix_source_f32(src0, wf, lane' in cpp
-    assert 'std::fma(a, b, c)' in cpp
-    assert 'amdgpu::pseudo_scalar::round_f16_result(' in cpp
-    assert 'result, wf.fp_round_mode_f16_f64(), 0, false, wf.fp16_ovfl(), false' in cpp
-
-
-def test_mad_mixhi_f16_uses_true16_high_write():
-    cpp = gen_mad_mix_lo_hi(
-        ['vdst'],
-        ['src0', 'src1', 'src2'],
-        is_lo=False,
-        op_sel_hi_2_expr='inst_.op_sel_hi_2',
-        opsel_exprs=('inst_.op_sel', 'inst_.op_sel_hi'),
-    )
-
-    assert 'write_vop3_true16_dst(vdst, wf, lane, 0x8u, h)' in cpp
-    assert 'vdst.write_lane(wf, lane, (prev & 0x0000FFFFu)' not in cpp
-
-
-def test_mad_mixlo_bf16_uses_true16_low_write():
-    cpp = gen_mad_mix_bf16(
-        ['vdst'],
-        ['src0', 'src1', 'src2'],
-        result='lo',
-        op_sel_hi_2_expr='inst_.op_sel_hi_2',
-        opsel_exprs=('inst_.op_sel', 'inst_.op_sel_hi'),
-    )
-
-    assert 'write_vop3_true16_dst(vdst, wf, lane, 0u, h)' in cpp
-    assert 'vdst.write_lane(wf, lane, (prev & 0xFFFF0000u)' not in cpp
-
-
-def test_gfx1250_bf16_mad_mix_variants_use_mode_rounding_helper():
-    cpp_f32 = gen_mad_mix_bf16(
-        ['vdst'],
-        ['src0', 'src1', 'src2'],
-        result='f32',
-        op_sel_hi_2_expr='inst_.pad_14',
-        opsel_exprs=('inst_.opsel', 'inst_.opsel_hi'),
-        use_cdna5_helpers=True,
-    )
-    cpp_lo = gen_mad_mix_bf16(
-        ['vdst'],
-        ['src0', 'src1', 'src2'],
-        result='lo',
-        op_sel_hi_2_expr='inst_.pad_14',
-        opsel_exprs=('inst_.opsel', 'inst_.opsel_hi'),
-        use_cdna5_helpers=True,
-    )
-    cpp_hi = gen_mad_mix_bf16(
-        ['vdst'],
-        ['src0', 'src1', 'src2'],
-        result='hi',
-        op_sel_hi_2_expr='inst_.pad_14',
-        opsel_exprs=('inst_.opsel', 'inst_.opsel_hi'),
-        use_cdna5_helpers=True,
-    )
-
-    assert 'read_fma_mix_bf16_source_f32(src0, wf, lane' in cpp_f32
-    assert 'std::bit_cast<uint32_t>(result)' in cpp_f32
-    mode_round = 'amdgpu::fp_mode::detail::fma_f32_to_bf16_nearest_environment('
-    assert mode_round in cpp_lo
-    assert mode_round in cpp_hi
-    assert 'amdgpu::fp_mode::detail::ScopedFenv nearest_environment(0);' in cpp_lo
-    assert 'amdgpu::fp_mode::detail::ScopedFenv nearest_environment(0);' in cpp_hi
-    assert 'amdgpu::fp_mode::detail::ScopedFenv nearest_environment(0);' not in cpp_f32
-    assert 'std::fma(a, b, c)' not in cpp_lo
-    assert 'std::fma(a, b, c)' not in cpp_hi
-    assert 'wf.fp_round_mode_f16_f64(), inst_.clamp' in cpp_lo
-    assert 'util::f32_to_bf16(result)' not in cpp_lo
-    assert 'util::f32_to_bf16(result)' not in cpp_hi
-
-
 def test_renamed_packed_float_routes_use_exact_helpers():
     for spelling, operation, bf16 in (
-        ('v_pk_fma_f16_vop3p', 'FMA', False),
         ('v_pk_min_f16_vop3p', 'MIN', False),
         ('v_pk_max_f16_vop3p', 'MAX', False),
         ('v_pk_add_bf16_vop3p', 'ADD', True),

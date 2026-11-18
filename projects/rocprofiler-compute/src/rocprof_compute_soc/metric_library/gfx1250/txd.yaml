@@ -1,0 +1,46 @@
+txd.cache_return_stalled_by_txd:
+  name: Cache Return Stalled by TXD
+  formula: 100 * SUM(TX_VCD_VC_OUTPUT_STALL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of VMW-busy cycles GL0 cache return to VGPRs is stalled by TXD.
+txd.output_stalled_by_shader:
+  name: TXD Output Stalled by Shader
+  formula: 100 * SUM(TX_VCD_OUTPUT_STALL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of VMW-busy cycles the TXD has data ready but the shader VGPR port
+    is busy.
+txd.output_stalled_by_spi_wr_to_shader:
+  name: TXD Output Stalled by SPI Write to Shader
+  formula: 100 * SUM(TX_VCD_LDS_SPI_VGPR_WRITE_STALL_TD_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of VMW-busy cycles the TXD is stalled because SPI is writing to the
+    same shader VGPR bank.
+txd.shader_bus_util_gl0_return:
+  name: TXD-Shader Bus Utilization - GL0 Return
+  formula: 100 * SUM(TX_VCD_VC_VGPRS_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of VMW-busy cycles the TXD-to-shader bus is carrying GL0 cache results
+    to VGPRs.
+txd.shader_bus_util_lds_return:
+  name: TXD-Shader Bus Utilization - LDS Return
+  formula: 100 * SUM(TX_VCD_LDS_VGPRS_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of VMW-busy cycles the TXD-to-shader bus is carrying LDS results to
+    VGPRs.
+txd.stalled_by_gl0_cache_lds:
+  name: TXD Stalled by GL0 Cache / LDS
+  formula: 100 * SUM(TX_VCD_VMW_DATA_STALL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of VMW-busy cycles the TXD is stalled waiting for GL0 or LDS data.
+txd.util:
+  name: TXD Utilization
+  formula: 100 * SUM(TX_VCD_TD_BUSY_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of VMW-busy cycles the TXD unit is busy returning data to shader VGPRs.

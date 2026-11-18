@@ -4,6 +4,7 @@
 #pragma once
 #include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
 #include "rocjitsu/vm/plugins/race_detector/core/event_registry.h"
+#include "rocjitsu/vm/plugins/race_detector/core/interval_set.h"
 #include "rocjitsu/vm/plugins/race_detector/core/types.h"
 #include "rocjitsu/vm/plugins/race_detector/core/wave_race_state.h"
 #include <algorithm>
@@ -56,7 +57,11 @@ public:
                           std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask,
                           IntervalSet ldsIntervals,
                           std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-                          MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0);
+                          VgprWriteOrder writeOrder, uint8_t lastRegisterByteMask = 0,
+                          LdsAccess ldsAccess = {});
+
+  /// Attach the LDS footprint after a mixed FLAT issue successfully translates its global lanes.
+  void attachLdsIntervals(EventId event, IntervalSet intervals);
 
   /// Transition an event from ACTIVE to WAVE_COMPLETE.
   void markEventWaveComplete(EventId);
@@ -64,17 +69,25 @@ public:
   /// Satisfy the event's obligations covered by one wait-counter update.
   /// Returns true once every obligation for the event has been satisfied.
   bool satisfyEventWaitCounter(EventId, amdgpu::WaitCounterType);
+  bool appendCounterOnly(EventId id, amdgpu::MemoryCounterObligation issue,
+                         EventRegistry::RoutedChanges *changes) {
+    return events_.appendCounterOnly(id, issue, changes);
+  }
 
   /// Retire an event. For LDS-touching events, removes from live lists
   /// and decrements per-byte counts. All events are marked RETIRED in the
   /// registry, enabling prefix trimming.
   void retireEvent(EventId);
+  /// Publish a completed LDS portion at a workgroup barrier. Its VGPR result
+  /// and other counter obligations may still be active.
+  void retireLdsIntervals(EventId);
 
   /// Check for RAW hazards: no outstanding LDS writes overlap the range.
   /// Same-wave operations are ordered only when both belong to the same
   /// non-UNORDERED completion class.
   void validateRead(int addr, WaveId, int lane, int nBytes,
-                    MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS) const;
+                    MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS,
+                    uint8_t atomicBytes = 0) const;
 
   /// Check for WAR hazards: no outstanding LDS reads overlap the range.
   /// Same-wave operations are ordered only when both belong to the same
@@ -82,7 +95,17 @@ public:
   /// TODO(newling): WAW detection (write vs outstanding writes) is not
   /// implemented.
   void validateWrite(int addr, WaveId, int lane, int nBytes,
-                     MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS) const;
+                     MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS,
+                     uint8_t atomicBytes = 0) const;
+
+  /// @brief Conservatively check an instruction's LDS intervals for conflicts.
+  /// @details The intervals must describe valid LDS byte ranges. False proves
+  /// that validateRead (or validateWrite, when isWrite) would report nothing
+  /// for any access by `wave` within `accessed`, so per-lane validation can be
+  /// skipped. Visits the 16-byte chunks of each interval, without scanning gaps
+  /// between intervals. Separate intervals can visit the same chunk.
+  bool mayConflict(const IntervalSet &accessed, WaveId wave, bool isWrite,
+                   MemoryOrderClass currentMemoryOrder) const;
 
   /// True only when the complete access lies in the CU's logical LDS backing.
   bool validLdsRange(uint64_t address, uint64_t bytes) const {
@@ -97,6 +120,16 @@ public:
     return std::min(bytes, ldsSizeBytes_ - address) / elementBytes * elementBytes;
   }
 
+  void restoreRoutedChanges(const EventRegistry::RoutedChanges &changes) {
+    events_.restoreRoutedChanges(changes);
+  }
+  void supersedeFlatResult(EventId id, VgprWriteOrder replacement, uint32_t reg, uint64_t lanes,
+                           uint8_t bytes, EventRegistry::RoutedChanges *changes) {
+    events_.supersedeFlatResult(id, replacement, reg, lanes, bytes, changes);
+  }
+  void setConditionalVgprWrite(EventId id, ConditionalVgprWrite feedback) {
+    events_.setConditionalVgprWrite(id, feedback);
+  }
   const EventRegistry &events() const { return events_; }
 
   const std::vector<EventId> &getLdsWriteEvents() const { return ldsWriteEvents; }
@@ -119,6 +152,8 @@ public:
   }
 
 private:
+  void indexLdsIntervals(EventId event);
+
   struct LdsChunkCounts {
     int bytes = 0;
     /// When bytes > 0, a nonnegative owner proves that every counted event
