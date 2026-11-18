@@ -2317,7 +2317,8 @@ memory:
   Unit_hipMemDiscardAndPrefetchBatchAsync_NegativeTests:
     <<: *level_default
     tags: [query]
-  Unit_hipMemDiscardAndPrefetchBatchAsync_SingleBuffer: *level_default
+  Unit_hipMemDiscardAndPrefetchBatchAsync_SingleBuffer:
+    <<: *level_default
   Unit_hipMemDiscardAndPrefetchBatchAsync_MultipleSameDevice: *level_default
   Unit_hipMemDiscardAndPrefetchBatchAsync_ParitySeparateCalls: *level_default
   Unit_hipMemDiscardAndPrefetchBatchAsync_Atomicity: *level_default
@@ -2931,7 +2932,8 @@ memory:
     <<: *level_default
     tags: []
   Unit_hipMemGetMemPool_Negative: *level_default
-  Unit_hipMemGetMemPool_Basic: *level_default
+  Unit_hipMemGetMemPool_Basic:
+    <<: *level_default
   Unit_hipMemSetMemPool_Negative: *level_default
   Unit_hipMemSetMemPool_Basic: *level_default
   Unit_hipFreeHost_Capture_negative:

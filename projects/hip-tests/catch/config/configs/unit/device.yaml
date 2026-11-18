@@ -460,7 +460,8 @@ device:
   Unit_hipGetProcAddress_SetGetMemPoolAPIs:
     <<: *level_default
     tags: [multigpu, P0]
-  Unit_hipGetDriverEntryPoint_Positive: *level_default
+  Unit_hipGetDriverEntryPoint_Positive:
+    <<: *level_default
   Unit_hipGetDriverEntryPoint_Negative: *level_default
   Unit_hipGetDriverEntryPoint_spt_Positive: *level_default
   Unit_hipGetDriverEntryPoint_spt_Negative: *level_default
