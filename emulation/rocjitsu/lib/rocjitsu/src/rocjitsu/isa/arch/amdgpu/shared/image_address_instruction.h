@@ -12,8 +12,10 @@ enum class ImageAddressKind { Sample, ResourceInfo, Bvh, Bvh64 };
 
 struct ImageAddressForm {
   ImageAddressKind kind = ImageAddressKind::Sample;
-  uint8_t extra_words = 0; // Offset, bias and depth reference each occupy a DWORD.
-  bool lod = false;        // LOD or clamp is packed with the coordinate body.
+  bool offset = false;
+  bool bias = false;
+  bool compare = false;
+  bool lod = false; // LOD or clamp is packed with the coordinate body.
   bool gradients = false;
   bool g16 = false;
   bool sample_result = false; // Gather and MSAA always return four components.
@@ -27,6 +29,12 @@ class ImageAddressInstruction : public Encoding {
   static constexpr bool ray =
       Form.kind == ImageAddressKind::Bvh || Form.kind == ImageAddressKind::Bvh64;
   static constexpr bool gfx12 = requires(typename Encoding::OpEncoding e) { e.vaddr0; };
+
+  bool reads_address_inputs() const {
+    if constexpr (Form.kind == ImageAddressKind::ResourceInfo && requires { this->inst_.dim; })
+      return this->inst_.dmask != 0;
+    return true;
+  }
 
   bool scattered() const {
     if constexpr (requires { this->inst_.nsa; })
@@ -83,19 +91,16 @@ class ImageAddressInstruction : public Encoding {
       return words;
     } else {
       m.image_a16 = e.a16;
-      m.image_prefix_words = Form.extra_words;
+      constexpr unsigned control_words = Form.offset + Form.bias + Form.compare;
+      m.image_prefix_words = control_words;
       if constexpr (Form.kind == ImageAddressKind::ResourceInfo) {
         m.image_coordinate_count = 1; // Only the LOD, regardless of DIM.
       } else {
         m.image_coordinate_count = image_coordinate_count(e.dim) + Form.lod;
-        if constexpr (Form.gradients) {
-          const unsigned dimensions = image_derivative_component_count(e.dim);
-          const unsigned axis_words = Form.g16 ? (dimensions + 1) / 2 : dimensions;
-          m.image_prefix_words += 2 * axis_words;
-          if (Form.g16 && (dimensions & 1))
-            m.image_low_half_prefix =
-                (1u << (Form.extra_words + axis_words - 1)) | (1u << (m.image_prefix_words - 1));
-        }
+        const unsigned dimensions = Form.gradients ? image_derivative_component_count(e.dim) : 0;
+        m.image_prefix_words += 2 * image_gradient_vector_words(dimensions, Form.g16);
+        m.image_prefix_low16_words = image_prefix_low16_words(
+            control_words, Form.g16 ? dimensions : 0, e.a16, Form.bias, Form.offset);
       }
       return m.image_prefix_words +
              (m.image_a16 ? (m.image_coordinate_count + 1) / 2 : m.image_coordinate_count);
@@ -103,7 +108,7 @@ class ImageAddressInstruction : public Encoding {
   }
 
   std::optional<RegisterRef> preserved_half() const {
-    const unsigned components = std::popcount(uint32_t{this->inst_.dmask});
+    const unsigned components = image_result_components(this->inst_.dmask, !gfx10);
     if (this->inst_.d16 && (components & 1u))
       if (auto reg = this->dst_operand(0)->to_register_ref())
         return RegisterRef{reg->cls, static_cast<uint16_t>(reg->index + components / 2), 1};
@@ -117,14 +122,15 @@ public:
     address(m);
     if constexpr (Form.sample_result)
       if (this->inst_.d16)
-        m.set_packed_image_result(std::popcount(uint32_t{this->inst_.dmask}),
-                                  this->dst_operand(0)->size_bits() / 32);
+        m.set_packed_image_result(image_result_components(this->inst_.dmask, !gfx10));
   }
   bool tracks_explicit_source(uint8_t index) const override {
-    return index != 0 && Encoding::tracks_explicit_source(index);
+    return index != 0 && reads_address_inputs() && Encoding::tracks_explicit_source(index);
   }
   void implicit_uses(RegisterSet &uses) const override {
     Encoding::implicit_uses(uses);
+    if (!reads_address_inputs())
+      return;
     RegisterModifiers m;
     const auto words = address(m);
     for (unsigned i = 0; i < words; ++i)

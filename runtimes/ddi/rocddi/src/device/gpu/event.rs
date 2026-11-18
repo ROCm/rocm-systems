@@ -23,7 +23,7 @@ use crate::driver::kfd_notifications;
 use crate::driver::{DeviceDriverState, DriverInstance, DriverInstanceId};
 use crate::error::error;
 use crate::memory::storage::try_vec_with_capacity;
-use crate::session::Session;
+use crate::session::{Session, SessionAdmission};
 use crate::{Error, ErrorKind};
 
 /// Address relationship required by a frontend's signal representation.
@@ -147,6 +147,7 @@ enum ProviderService {
 
 /// One frontend's services, separately owned for each installed provider.
 pub struct SignalEventService {
+    admission: SessionAdmission,
     process: crate::os::ProcessIdentity,
     providers: Vec<(DriverInstanceId, ProviderService)>,
     unresolved: bool,
@@ -158,6 +159,8 @@ impl SignalEventService {
     /// # Errors
     /// Reports invalid session ownership or metadata allocation failure.
     pub fn new(session: &Session) -> Result<Self, Error> {
+        let admission = session.admission().clone();
+        let _operation = admission.enter()?;
         let drivers = session.installed_drivers()?;
         let mut providers = try_vec_with_capacity(drivers.len())?;
         for driver in drivers {
@@ -174,6 +177,7 @@ impl SignalEventService {
             }
         }
         Ok(Self {
+            admission,
             process: session.process_identity(),
             providers,
             unresolved: false,
@@ -217,6 +221,7 @@ impl SignalEventService {
         device: &Device,
         addressing: SignalEventAddressing,
     ) -> Result<(SignalEvent, SignalEventMailbox), Error> {
+        let _operation = self.admission.enter()?;
         self.check()?;
         let id = device.endpoint.driver_instance;
         let (_, provider) = self
@@ -255,6 +260,7 @@ impl SignalEventService {
         device: &Device,
         event: &SignalEvent,
     ) -> Result<SignalEventMailbox, Error> {
+        let _operation = self.admission.enter()?;
         self.check()?;
         if event.provider != device.endpoint.driver_instance {
             return Err(error(
@@ -308,6 +314,7 @@ impl SignalEventService {
 /// # Errors
 /// Reports provider state failure. This is not an event or capacity reservation.
 pub fn signal_event_available(device: &Device) -> Result<bool, Error> {
+    let _operation = device.driver_state.admit()?;
     match &device.driver_state {
         #[cfg(target_os = "linux")]
         DeviceDriverState::LinuxKfd { .. } => {
@@ -396,6 +403,42 @@ mod tests {
         drop(allocations);
         host.free().unwrap();
         session.destroy().unwrap();
+    }
+
+    #[test]
+    fn passive_service_cannot_acquire_after_retirement_and_can_still_release() {
+        let driver = DriverInstance::Test(
+            Shared::new(TestDriver::new(
+                [0x74; 16],
+                EndpointKind::Npu,
+                DriverContextLifetime::Session,
+            ))
+            .unwrap(),
+        );
+        let mut session =
+            Session::from_drivers(vec![driver], DriverContextLifetime::Session).unwrap();
+        let mut service = SignalEventService::new(&session).unwrap();
+        let device = session
+            .activate(&session.open_endpoint([0x74; 16]).unwrap())
+            .unwrap();
+        session.begin_retirement().unwrap();
+        assert!(SignalEventService::new(&session).is_err());
+        let error = service
+            .create(&device, SignalEventAddressing::Mapped)
+            .err()
+            .unwrap();
+        assert!(matches!(
+            error,
+            Error::Operation {
+                kind: ErrorKind::Unsupported,
+                detail: "session cannot admit a new operation",
+            }
+        ));
+        drop(device);
+        assert!(!service.release().unwrap());
+        service.preflight_session_destroy(&mut session).unwrap();
+        session.destroy().unwrap();
+        assert!(!service.release().unwrap());
     }
 
     #[test]

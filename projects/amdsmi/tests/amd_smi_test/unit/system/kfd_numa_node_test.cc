@@ -13,6 +13,7 @@
 #include <string>
 
 #include "amd_smi/amdsmi.h"
+#include "amd_smi/impl/amd_smi_test_overrides.h"
 #include "rocm_smi/rocm_smi_kfd.h"
 #include "test_common.h"
 #include "test_fixture_utils.h"
@@ -135,20 +136,26 @@ TEST(SystemUnit, KFD_TOPOLOGY__KfdInfoUsesOverride) {
 
 // amdsmi_get_pcie_info() relies on this type to tell an xGMI host link from PCIe.
 TEST(SystemUnit, KfdNodeInitializeFindsXgmiCpuIoLink) {
-  ScopedTempDir root;
-  ASSERT_FALSE(root.path().empty());
-  ScopedKfdRootOverride kfd_root_override(root.path().string());
+  constexpr uint32_t kGpuNode = 1;
+  constexpr uint32_t kGpuCard = 0;
+  constexpr uint32_t kCpuNode = 0;
+  constexpr uint32_t kLinkIndex = 0;
+  constexpr uint64_t kGpuId = 23456;
+  constexpr uint64_t kXgmiWeight = 15;
 
-  WriteGpuId(root.path(), 1, 23456);
-  WriteNodeProperties(root.path(), 1);
-  WriteIoLink(root.path(), 1, 0, /*node_to=*/0, amd::smi::IOLINK_TYPE_XGMI, /*weight=*/15);
-  WriteGpuId(root.path(), 0, 0);  // CPU node
+  FakeSysfsTree tree;
+  WriteGpuNode(tree, kGpuNode, kGpuCard, kGpuId);
+  WriteIoLink(tree, kGpuNode, kLinkIndex, kCpuNode, amd::smi::IOLINK_TYPE_XGMI, kXgmiWeight);
+  WriteCpuNode(tree, kCpuNode);
+  amd::smi::testing::ScopedOverride<std::string> kfd_root(amd::smi::test_hooks::KfdNodesPathRoot,
+                                                          amd::smi::test_hooks::SetKfdNodesPathRoot,
+                                                          tree.root());
 
-  amd::smi::KFDNode node(1);
+  amd::smi::KFDNode node(kGpuNode);
   ASSERT_EQ(node.Initialize(), 0);
 
-  EXPECT_EQ(node.numa_node_number(), 0u);
-  EXPECT_EQ(node.numa_node_weight(), 15u);
+  EXPECT_EQ(node.numa_node_number(), kCpuNode);
+  EXPECT_EQ(node.numa_node_weight(), kXgmiWeight);
   EXPECT_EQ(node.numa_node_type(), amd::smi::IOLINK_TYPE_XGMI);
 }
 
