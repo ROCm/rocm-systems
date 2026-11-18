@@ -96,7 +96,7 @@ TEST(rocprofiler_lib, agent_abi)
     EXPECT_EQ(offsetof(rocprofiler_agent_t, num_cp_queues), 132) << msg;
     EXPECT_EQ(offsetof(rocprofiler_agent_t, max_engine_clk_ccompute), 136) << msg;
     EXPECT_EQ(offsetof(rocprofiler_agent_t, max_engine_clk_fcompute), 140) << msg;
-    EXPECT_EQ(offsetof(rocprofiler_agent_t, sdma_fw_version), 144) << msg;
+    EXPECT_EQ(offsetof(rocprofiler_agent_t, fw_version), 144) << msg;
     EXPECT_EQ(offsetof(rocprofiler_agent_t, gfxip_version), 148) << msg;
     EXPECT_EQ(offsetof(rocprofiler_agent_t, capability), 152) << msg;
     EXPECT_EQ(offsetof(rocprofiler_agent_t, cu_per_engine), 156) << msg;
@@ -326,8 +326,8 @@ TEST(rocprofiler_lib, agent)
             // HSA lib doesn't set family ID for CPU-only but we do
             EXPECT_EQ(agent->family_id, hsa_agent->family_id) << msg;
         }
-        EXPECT_EQ(agent->sdma_fw_version.uCodeCompute, hsa_agent->ucode_version) << msg;
-        EXPECT_EQ(agent->sdma_fw_version.uCodeSDMA, hsa_agent->sdma_ucode_version) << msg;
+        EXPECT_EQ(agent->fw_version.uCodeCompute, hsa_agent->ucode_version) << msg;
+        EXPECT_EQ(agent->fw_version.uCodeSDMA, hsa_agent->sdma_ucode_version) << msg;
 
         if(hsa_agent->shader_engs > 0)
         {

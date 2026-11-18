@@ -657,8 +657,8 @@ apply_node_topology(const DxgNode& node, rocprofiler_agent_t& info)
     info.gfxip_version.ui32.Major      = gfxip.Major;
     info.gfxip_version.ui32.Minor      = gfxip.Minor;
     info.gfxip_version.ui32.Stepping   = gfxip.Stepping;
-    info.sdma_fw_version.uCodeCompute  = props.uCodeEngineVersions.uCodeCompute;
-    info.sdma_fw_version.uCodeSDMA     = props.uCodeEngineVersions.uCodeSDMA;
+    info.fw_version.uCodeCompute       = props.uCodeEngineVersions.uCodeCompute;
+    info.fw_version.uCodeSDMA          = props.uCodeEngineVersions.uCodeSDMA;
 
     auto _uuid       = ::rocprofiler::agent::uuid_view_t{};
     _uuid.value64[0] = props.UniqueID;
