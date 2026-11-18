@@ -195,6 +195,37 @@ void check_case(const Case &c, uint64_t exec) {
   }
 }
 
+TEST(VopcVop3Fp32SimdCorrectness, ScalarCmpxClassWritesExplicitSgprPairAndExec) {
+  ForceScalarGuard guard;
+  util::set_force_scalar_for_testing(true);
+  Fixture fx;
+  ASSERT_NE(fx.wf, nullptr);
+  ASSERT_NE(fx.decoder, nullptr);
+  // v_cmpx_class_f32_e64 s[4:5], v0, v1
+  uint32_t words[2];
+  vop3_cmp_encode(17, 4, 256, 257, 0, 0, words);
+  std::unique_ptr<Instruction> inst(decode_valid(*fx.decoder, words));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(inst->mnemonic(), "v_cmpx_class_f32");
+  constexpr uint64_t vcc = 0x12345678abcdef01ULL;
+  constexpr uint64_t matching_lanes = (uint64_t{1} << 32) | 1u;
+  fx.wf->set_vcc_raw(vcc);
+  fx.wf->set_exec(matching_lanes | 2u);
+  const auto vb = fx.wf->vgpr_alloc().base;
+  const auto sb = fx.wf->sgpr_alloc().base;
+  fx.cu->write_sgpr(sb + 4, 0xffffffffu);
+  fx.cu->write_sgpr(sb + 5, 0xffffffffu);
+  for (uint32_t lane : {0u, 1u, 32u}) {
+    fx.cu->write_vgpr(vb, lane, lane == 1 ? 0u : 0x3f800000u);
+    fx.cu->write_vgpr(vb + 1, lane, 0x100u); // positive normal
+  }
+  ASSERT_TRUE(fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded());
+  EXPECT_EQ(fx.cu->read_sgpr(sb + 4), 1u);
+  EXPECT_EQ(fx.cu->read_sgpr(sb + 5), 1u);
+  EXPECT_EQ(fx.wf->exec(), matching_lanes);
+  EXPECT_EQ(fx.wf->vcc(), vcc);
+}
+
 TEST(VopcVop3Fp32SimdCorrectness, FullExec) {
   if constexpr (!util::has_stdx_simd) {
     GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";

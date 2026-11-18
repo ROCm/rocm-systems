@@ -63,7 +63,7 @@ TEST_F(TestEnvironCache, MultipleRocprofKeys_AllCaptured)
 {
     Envp         envp{{"ROCPROF_OUTPUT_PATH=/tmp/p",
                        "ROCPROF_COUNTERS=SQ_WAVES",
-                       "ROCPROF_ITERATION_MULTIPLEXING=kernel",
+                       "ROCPROF_ITERATION_MULTIPLEXING=1",
                        "ROCPROF_KERNEL_FILTER_INCLUDE_REGEX=.*conv.*",
                        "ROCPROF_KERNEL_FILTER_RANGE=1-5"}};
     EnvironCache cache{envp.data()};
@@ -72,7 +72,7 @@ TEST_F(TestEnvironCache, MultipleRocprofKeys_AllCaptured)
     EXPECT_EQ(cache.get("ROCPROF_COUNTERS"),
               std::optional<std::string_view>{std::string_view{"SQ_WAVES"}});
     EXPECT_EQ(cache.get("ROCPROF_ITERATION_MULTIPLEXING"),
-              std::optional<std::string_view>{std::string_view{"kernel"}});
+              std::optional<std::string_view>{std::string_view{"1"}});
     EXPECT_EQ(cache.get("ROCPROF_KERNEL_FILTER_INCLUDE_REGEX"),
               std::optional<std::string_view>{std::string_view{".*conv.*"}});
     EXPECT_EQ(cache.get("ROCPROF_KERNEL_FILTER_RANGE"),
@@ -91,14 +91,14 @@ TEST_F(TestEnvironCache, EnvInputParametersInjectedCache_ReturnsInjectedValues)
 {
     Envp               envp{{"ROCPROF_OUTPUT_PATH=/tmp/injected",
                              "ROCPROF_COUNTERS=SQ_WAVES",
-                             "ROCPROF_ITERATION_MULTIPLEXING=kernel",
+                             "ROCPROF_ITERATION_MULTIPLEXING=1",
                              "ROCPROF_KERNEL_FILTER_INCLUDE_REGEX=.*gemm.*",
                              "ROCPROF_KERNEL_FILTER_RANGE=3-7"}};
     EnvInputParameters input_parameters{std::make_shared<EnvironCache>(envp.data())};
 
     EXPECT_EQ(input_parameters.get_output_path(), std::string_view{"/tmp/injected"});
     EXPECT_EQ(input_parameters.get_requested_counters(), std::string_view{"SQ_WAVES"});
-    EXPECT_EQ(input_parameters.get_iteration_multiplexing_mode(), std::string_view{"kernel"});
+    EXPECT_EQ(input_parameters.get_iteration_multiplexing(), std::string_view{"1"});
     EXPECT_EQ(input_parameters.get_kernel_filter_include_regex(), std::string_view{".*gemm.*"});
     EXPECT_EQ(input_parameters.get_kernel_filter_range(), std::string_view{"3-7"});
 }

@@ -165,6 +165,7 @@ class LoweringContext:
     trans_f32: bool = False
     arithmetic_flush_output: str | None = None
     integer_saturation_dtype: str | None = None
+    mul_lo_u16_clamp: str | None = None
 
 
 _INFIX_OPS: dict[SemaNodeKind, str] = {
@@ -193,7 +194,7 @@ _CONTEXT_READS: dict[str, str] = {
     'VCC': 'wf.vcc_mask()',
     'EXEC': 'wf.exec()',
     'EXEC_RAW': 'wf.exec_raw()',
-    'EXEC_LO': 'static_cast<uint32_t>(wf.exec())',
+    'EXEC_LO': 'static_cast<uint32_t>(wf.exec_raw())',
     'M0': 'wf.m0()',
     'laneId': 'lane',
 }
@@ -203,6 +204,7 @@ _CONTEXT_WRITES: dict[str, str] = {
     'VCC': 'wf.write_vcc',
     'EXEC': 'wf.set_exec',
     'EXEC_RAW': 'wf.write_exec',
+    'EXEC_LO': 'wf.write_exec_lo',
 }
 
 _STD_MATH: dict[SemaNodeKind, str] = {
@@ -1990,6 +1992,8 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
                 'amdgpu::vop3_opsel(inst_), 8))'
             )
     args_str = ', '.join(args)
+    if callee == 'mul_lo_u16' and ctx.mul_lo_u16_clamp is not None:
+        return f'amdgpu::vop3_integer_mul<uint16_t, 16>({args_str}, {ctx.mul_lo_u16_clamp})'
     if callee == 'mul_legacy':
         if (arithmetic := _mode_arithmetic(node, ctx, 'MUL_LEGACY', args)) is not None:
             return arithmetic

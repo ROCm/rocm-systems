@@ -31,19 +31,6 @@
 namespace rocjitsu {
 namespace amdgpu {
 
-enum class TransposeKind : uint8_t {
-  NONE = 0,
-  TR_B4 = 1,
-  TR_B6 = 2,
-  B64_TR_B8 = 3,
-  TR16_B128 = 4,
-  B64_TR_B16 = 5,
-  WMMA_TR_B8 = 6,
-  CDNA5_DS_TR_B8 = 7,
-  CDNA4_TR_B4 = 8,
-  CDNA4_TR_B6 = 9,
-};
-
 /// @brief CDNA4 MFMA B64 byte-level transpose (B64_TR_B8 only).
 ///
 /// Within each 16-lane group, destination lane `l` byte `n` comes from source
@@ -165,6 +152,21 @@ inline void transpose_tr16_b128(std::vector<uint8_t> &response_data, uint32_t nu
 
   const uint32_t source_bytes_per_lane = num_elems * 4;
   compact_wave64 = compact_wave64 && wf_size == 64;
+  // Each ordinary B128 group is a self-contained 8x8 halfword tile.
+  // Snapshot it before overwriting the same eight destination lanes.
+  if (!compact_wave64 && num_elems == 4 && (wf_size == 32 || wf_size == 64) &&
+      response_data.size() == wf_size * 16) {
+    for (uint32_t base = 0; base < wf_size; base += 8) {
+      uint16_t source[8][8];
+      auto *group = response_data.data() + base * 16;
+      std::memcpy(source, group, sizeof(source));
+      for (unsigned row = 0; row < 8; ++row)
+        for (unsigned col = 0; col < 8; ++col)
+          std::memcpy(group + (row * 8 + col) * sizeof(uint16_t), &source[col][row],
+                      sizeof(uint16_t));
+    }
+    return;
+  }
   const uint32_t destination_bytes_per_lane =
       compact_wave64 ? source_bytes_per_lane / 2 : source_bytes_per_lane;
   const uint32_t halfwords_per_source_lane = source_bytes_per_lane / 2;
@@ -357,8 +359,7 @@ inline void transpose_b6(std::vector<uint8_t> &response_data, uint32_t num_elems
 
 inline void transpose_response(VectorMemState &d) {
   auto kind = static_cast<TransposeKind>(d.transpose);
-  const bool compact_wave64 =
-      d.tag() == GLOBAL_MEM && d.wf_size == 64 && kind == TransposeKind::TR16_B128;
+  const bool compact_wave64 = d.compact_wave64_global_transpose();
   switch (kind) {
   case TransposeKind::B64_TR_B8:
     transpose_b64_tr_b8(d.response_data, d.num_elems, d.wf_size);
@@ -386,8 +387,11 @@ inline void transpose_response(VectorMemState &d) {
   case TransposeKind::NONE:
     break;
   }
-  if (compact_wave64)
-    d.num_elems /= 2;
+  if (compact_wave64) {
+    if (kind == TransposeKind::TR16_B128)
+      d.num_elems /= 2;
+    d.transpose = 0; // The response now contains the compact destination words.
+  }
 }
 
 } // namespace amdgpu

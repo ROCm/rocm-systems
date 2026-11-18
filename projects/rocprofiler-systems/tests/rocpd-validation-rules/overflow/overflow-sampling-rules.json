@@ -1,0 +1,17 @@
+{
+    "required_tables": [
+        {
+            "name": "regions",
+            "required_columns": ["name", "category", "duration"],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "Overflow sampling recorded fib frames with a non-zero duration",
+                    "error_message": "Expected more than 10 overflow_sampling regions named fib with duration > 0",
+                    "expected_result": 10,
+                    "query": "SELECT COUNT(*) FROM regions WHERE category = 'overflow_sampling' AND name LIKE 'fib%' AND duration > 0;"
+                }
+            ]
+        }
+    ]
+}
