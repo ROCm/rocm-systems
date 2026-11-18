@@ -26,6 +26,7 @@
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_correlation.hpp"
@@ -165,131 +166,213 @@ destroy_queue(hsa_queue_t* hsa_queue)
 }
 
 #if defined(HSA_AMD_EXT_API_TABLE_STEP_VERSION) && HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x10
+// Returns the profiled GPU agent whose HSA handle is AGENT, or nullptr when rocprofiler does not
+// profile that agent.
+const AgentCache*
+find_supported_agent(const QueueController& controller, hsa_agent_t agent)
+{
+    for(const auto& [_, agent_info] : controller.get_supported_agents())
+    {
+        if(agent_info.get_hsa_agent().handle == agent.handle) return &agent_info;
+    }
+    return nullptr;
+}
+
+// Registers NEW_QUEUE, rocprofiler's view of the HSA queue QUEUE that hsa_amd_queue_create
+// produced for AGENT, with the controller (serializer entry, queue map, QueueState for compute).
+void
+register_amd_queue(QueueController&       controller,
+                   hsa_queue_t*           queue,
+                   std::unique_ptr<Queue> new_queue,
+                   bool                   is_compute,
+                   hsa_agent_t            agent)
+{
+    controller.serializer(new_queue.get()).wlock([&](auto& serializer) {
+        serializer.add_queue(&queue, *new_queue);
+    });
+    controller.add_queue(queue, std::move(new_queue), is_compute);
+    ROCP_INFO << "created queue (hsa_amd_queue_create) for HSA agent handle " << agent.handle;
+}
+
+// Legacy (non-inline) intercept mode: builds the InterceptQueue that stands in for the compute
+// queue described by DESC. On success DESC.queue is the InterceptQueue and NEW_QUEUE wraps it; on
+// failure DESC.queue is nullptr and the HSA status is returned, which is the per-descriptor
+// contract of hsa_amd_queue_create.
+//
+// A queue created by hsa_amd_queue_create is a plain queue that cannot carry a ROCr packet
+// interceptor (hsa_amd_queue_intercept_register only accepts an InterceptQueue), so in this mode
+// the queue has to be an InterceptQueue, and it is created as one from the start. It must never be
+// obtained by letting ROCr create the plain queue and destroying it afterwards: hsa_queue_destroy
+// blocks until ROCr's async-events thread has retired the queue's error handler, and HIP calls
+// hsa_amd_queue_create while holding its per-device lock, which that same thread needs when the
+// completion callback of an already destroyed stream releases the stream's last reference. That
+// lock cycle hung hipStreamCreate in every rocprofv3 mode using this path (ROCM-33989).
+hsa_status_t
+create_intercept_queue(const AgentCache&            agent_info,
+                       const CoreApiTable&          core_table,
+                       const AmdExtTable&           ext_table,
+                       hsa_amd_queue_create_desc_t& desc,
+                       std::unique_ptr<Queue>&      new_queue)
+{
+    const auto  agent   = agent_info.get_hsa_agent();
+    const auto& compute = desc.engine.compute;
+
+    // The InterceptQueue is created through the classic hsa_amd_queue_intercept_create path, so
+    // the descriptor's device-memory placement, priority and CU mask are not honored: the queue is
+    // a system-memory ring with default priority and no CU mask. The placement flags are cleared
+    // in the descriptor because the caller (HIP) reads them back after the call to decide how it
+    // writes packets and kernel arguments.
+    //
+    // Known limitation: passing priority and CU mask through (SetPriority / SetCUMasking on the
+    // InterceptQueue) is deferred to a follow-up change. A CU-partitioned or high-priority stream
+    // may behave differently while profiled.
+    constexpr uint16_t device_mem_flags =
+        HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF | HSA_AMD_QUEUE_CREATE_DEVICE_MEM_QUEUE_DESCRIPTOR;
+    const bool device_mem_requested = (desc.flags & device_mem_flags) != 0;
+    const bool priority_requested   = (desc.priority != HSA_AMD_QUEUE_PRIORITY_NORMAL);
+    const bool cu_mask_requested    = (compute.cu_mask_count > 0);
+    desc.flags &= static_cast<uint16_t>(~device_mem_flags);
+    desc.queue = nullptr;
+
+    ROCP_WARNING_IF(device_mem_requested || priority_requested || cu_mask_requested)
+        << "[queue-intercept] hsa_amd_queue_create compute queue for agent " << agent.handle
+        << " is created as a system-memory InterceptQueue; not honored:"
+        << (device_mem_requested ? " device-memory placement (cleared from the descriptor flags)"
+                                 : "")
+        << (priority_requested ? " priority" : "") << (cu_mask_requested ? " CU mask" : "");
+    ROCP_INFO << "[queue-intercept] creating hsa_amd_queue_create compute queue via LEGACY path "
+                 "(InterceptQueue) for agent "
+              << agent.handle;
+
+    // Queue size in AQL packets. hsa_amd_queue_intercept_create validates it and the queue type,
+    // and reports a failure the way hsa_amd_queue_create would, so the caller can retry or fall
+    // back. Descriptor v1 does not expose group_segment_size; UINT32_MAX requests the runtime
+    // default, matching the classic hsa_queue_create behavior.
+    const auto ring_packets =
+        static_cast<uint32_t>(desc.queue_size_bytes / sizeof(hsa_kernel_dispatch_packet_t));
+    hsa_queue_t* intercept_queue = nullptr;
+    auto         status          = ext_table.hsa_amd_queue_intercept_create_fn(agent,
+                                                              ring_packets,
+                                                              compute.type,
+                                                              desc.callback,
+                                                              desc.callback_data,
+                                                              compute.private_segment_size,
+                                                              UINT32_MAX,
+                                                              &intercept_queue);
+    if(status != HSA_STATUS_SUCCESS || intercept_queue == nullptr)
+    {
+        if(status == HSA_STATUS_SUCCESS) status = HSA_STATUS_ERROR;
+        ROCP_WARNING << "[queue-intercept] hsa_amd_queue_intercept_create failed for agent "
+                     << agent.handle << " :: " << get_hsa_status_string(status);
+        return status;
+    }
+
+    // Same setup as for every InterceptQueue rocprofiler creates (see the creating Queue
+    // constructor): per-dispatch timestamps on, then the packet interceptor registered once the
+    // Queue's signals exist.
+    ROCP_HSA_TABLE_CALL(FATAL,
+                        ext_table.hsa_amd_profiling_set_profiler_enabled_fn(intercept_queue, true))
+        << "Could not setup intercept profiler";
+
+    const auto register_fn = ext_table.hsa_amd_queue_intercept_register_fn;
+    new_queue              = std::make_unique<Queue>(
+        agent_info,
+        core_table,
+        ext_table,
+        intercept_queue,
+        [register_fn, intercept_queue](write_interceptor_t handler, void* data) {
+            ROCP_HSA_TABLE_CALL(FATAL, register_fn(intercept_queue, handler, data))
+                << "Could not register interceptor";
+        });
+    desc.queue = intercept_queue;
+    return HSA_STATUS_SUCCESS;
+}
+
 hsa_status_t
 create_amd_queue(hsa_agent_t agent, hsa_amd_queue_create_desc_t* descs, uint32_t num_descs)
 {
-    auto* controller = CHECK_NOTNULL(get_queue_controller());
-    auto  status     = controller->get_ext_table().hsa_amd_queue_create_fn(agent, descs, num_descs);
+    auto*       controller = CHECK_NOTNULL(get_queue_controller());
+    const auto& core_table = controller->get_core_table();
+    const auto& ext_table  = controller->get_ext_table();
+    const auto* agent_info = find_supported_agent(*controller, agent);
 
-    // hsa_amd_queue_create permits partial batch success: it may return an error for the first
-    // failing descriptor while leaving earlier descs[i].queue entries valid.  Process every
-    // non-null queue so those successful queues are still registered with rocprofiler-sdk (Queue,
-    // serializer entry, QueueState).  The original status is returned afterward.
-    const bool inline_intercept = queue_interposition::supports_queue_interposition();
+    // Agents rocprofiler does not profile, and malformed calls, go to ROCr untouched.
+    if(agent_info == nullptr || descs == nullptr || num_descs == 0)
+    {
+        return ext_table.hsa_amd_queue_create_fn(agent, descs, num_descs);
+    }
 
+    if(queue_interposition::supports_queue_interposition())
+    {
+        // Inline path: the write-index wrappers intercept plain queues directly (via the per-queue
+        // state registered in add_queue), so ROCr creates every queue exactly as requested and no
+        // ROCr-level packet interceptor is attached.
+        //
+        // hsa_amd_queue_create permits partial batch success: it may return an error for one
+        // descriptor while leaving the others' descs[i].queue valid. Every created queue is
+        // registered with rocprofiler-sdk (Queue, serializer entry, QueueState) and the original
+        // status is returned afterward.
+        auto status = ext_table.hsa_amd_queue_create_fn(agent, descs, num_descs);
+        for(uint32_t desc_idx = 0; desc_idx < num_descs; ++desc_idx)
+        {
+            hsa_queue_t* queue = descs[desc_idx].queue;
+            if(!queue) continue;
+
+            ROCP_INFO << "[queue-intercept] registering hsa_amd_queue_create queue via INLINE "
+                         "path for agent "
+                      << agent.handle;
+            auto new_queue = std::make_unique<Queue>(
+                *agent_info, core_table, ext_table, queue, [](write_interceptor_t, void*) {});
+            register_amd_queue(*controller,
+                               queue,
+                               std::move(new_queue),
+                               descs[desc_idx].engine_type == HSA_AMD_QUEUE_ENGINE_COMPUTE,
+                               agent);
+        }
+        return status;
+    }
+
+    // Legacy path: compute queues are created directly as InterceptQueues (see
+    // create_intercept_queue). Non-compute engines (e.g. SDMA) dispatch no kernels, so ROCr creates
+    // them as requested and they are registered without a packet interceptor; they also skip the
+    // inline QueueState registration (add_queue is_compute=false) because SDMA queue sizes are
+    // byte counts and use a packet format incompatible with AQL interposition.
+    //
+    // Descriptors are handled one at a time under ROCr's own partial-success contract: every
+    // descriptor is attempted, descs[i].queue is nullptr for the ones that failed, and the first
+    // error is returned.
+    auto first_error = HSA_STATUS_SUCCESS;
     for(uint32_t desc_idx = 0; desc_idx < num_descs; ++desc_idx)
     {
-        hsa_queue_t* queue = descs[desc_idx].queue;
-        if(!queue) continue;
-
-        for(const auto& [_, agent_info] : controller->get_supported_agents())
+        auto&      desc       = descs[desc_idx];
+        const bool is_compute = (desc.engine_type == HSA_AMD_QUEUE_ENGINE_COMPUTE);
+        auto       new_queue  = std::unique_ptr<Queue>{};
+        auto       status     = HSA_STATUS_SUCCESS;
+        if(is_compute)
         {
-            if(agent_info.get_hsa_agent().handle != agent.handle) continue;
-
-            std::unique_ptr<Queue> new_queue;
-            if(inline_intercept)
+            status = create_intercept_queue(*agent_info, core_table, ext_table, desc, new_queue);
+        }
+        else
+        {
+            status = ext_table.hsa_amd_queue_create_fn(agent, &desc, 1);
+            if(desc.queue != nullptr)
             {
-                // Inline write-index wrappers intercept this plain queue directly (via the
-                // per-queue state registered in add_queue), so no ROCr-level packet
-                // interceptor needs to be attached here.
-                ROCP_INFO << "[queue-intercept] registering hsa_amd_queue_create queue via "
-                             "INLINE path for agent "
-                          << agent.handle;
-                new_queue = std::make_unique<Queue>(agent_info,
-                                                    controller->get_core_table(),
-                                                    controller->get_ext_table(),
-                                                    queue,
-                                                    [](write_interceptor_t, void*) {});
-            }
-            else if(descs[desc_idx].engine_type == HSA_AMD_QUEUE_ENGINE_COMPUTE)
-            {
-                // A queue created by hsa_amd_queue_create is a plain queue that cannot carry a
-                // ROCr packet interceptor (hsa_amd_queue_intercept_register only accepts an
-                // InterceptQueue). In non-inline mode we therefore discard the plain queue and
-                // build a ROCr InterceptQueue that mirrors the descriptor's compute parameters,
-                // then hand that back to the caller in place of the original queue.
-                //
-                // NOTE: the InterceptQueue is created via the classic hsa_queue_create path, so
-                // the descriptor's device-memory flags are not honored while a non-inline
-                // profiling context (e.g. --sys-trace / HIP graph tracing) is active; the queue
-                // falls back to a system-memory ring. The flags are cleared in the descriptor
-                // below because callers (HIP) read them back after the call to decide how to
-                // write packets and kernel arguments.
-                //
-                // Known limitation: the replacement InterceptQueue does not preserve the
-                // descriptor's priority or CU-mask settings. A CU-partitioned or high-priority
-                // stream may behave differently while profiled. Passing these attributes through
-                // (e.g. via SetPriority / SetCUMasking on the replacement queue) is deferred to a
-                // follow-up change.
-                constexpr uint16_t device_mem_flags =
-                    HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF |
-                    HSA_AMD_QUEUE_CREATE_DEVICE_MEM_QUEUE_DESCRIPTOR;
-                const bool device_mem_requested = (descs[desc_idx].flags & device_mem_flags) != 0;
-                descs[desc_idx].flags &= static_cast<uint16_t>(~device_mem_flags);
-
-                ROCP_WARNING << "[queue-intercept] replacing hsa_amd_queue_create queue with a "
-                                "system-memory InterceptQueue for agent "
-                             << agent.handle
-                             << (device_mem_requested
-                                     ? " (device-memory placement was requested; cleared from "
-                                       "the descriptor flags)"
-                                     : "")
-                             << "; priority and CU mask from the descriptor are not preserved";
-
-                const auto&    compute_params = descs[desc_idx].engine.compute;
-                const uint32_t ring_packets   = static_cast<uint32_t>(
-                    descs[desc_idx].queue_size_bytes / sizeof(hsa_kernel_dispatch_packet_t));
-
-                // Release the plain queue that hsa_amd_queue_create just handed us; the
-                // InterceptQueue built below replaces it. get_core_table() holds the real ROCr
-                // functions (saved before the interception wrappers were installed).
-                controller->get_core_table().hsa_queue_destroy_fn(queue);
-
-                hsa_queue_t* intercept_queue = nullptr;
-                new_queue                    = std::make_unique<Queue>(
-                    agent_info,
-                    ring_packets,
-                    compute_params.type,
-                    descs[desc_idx].callback,
-                    descs[desc_idx].callback_data,
-                    compute_params.private_segment_size,
-                    // Descriptor v1 does not expose group_segment_size; UINT32_MAX requests the
-                    // runtime default, matching the classic hsa_queue_create behavior.
-                    UINT32_MAX,
-                    controller->get_core_table(),
-                    controller->get_ext_table(),
-                    &intercept_queue);
-
-                queue                 = intercept_queue;
-                descs[desc_idx].queue = intercept_queue;
-            }
-            else
-            {
-                // Non-compute engines (e.g. SDMA) do not dispatch kernels; keep the plain queue
-                // and register it without a packet interceptor.  Skip inline QueueState
-                // registration because SDMA queue sizes are byte counts and use a different
-                // packet format incompatible with AQL interposition.
                 ROCP_INFO << "[queue-intercept] registering non-compute hsa_amd_queue_create "
                              "queue (no packet interception) for agent "
                           << agent.handle;
-                new_queue = std::make_unique<Queue>(agent_info,
-                                                    controller->get_core_table(),
-                                                    controller->get_ext_table(),
-                                                    queue,
-                                                    [](write_interceptor_t, void*) {});
+                new_queue = std::make_unique<Queue>(
+                    *agent_info, core_table, ext_table, desc.queue, [](write_interceptor_t, void*) {
+                    });
             }
+        }
 
-            const bool is_compute = (descs[desc_idx].engine_type == HSA_AMD_QUEUE_ENGINE_COMPUTE);
-            controller->serializer(new_queue.get()).wlock([&](auto& serializer) {
-                serializer.add_queue(&queue, *new_queue);
-            });
-            controller->add_queue(queue, std::move(new_queue), is_compute);
-            ROCP_INFO << "created queue (hsa_amd_queue_create) for HSA agent handle "
-                      << agent.handle;
-            break;
+        if(status != HSA_STATUS_SUCCESS && first_error == HSA_STATUS_SUCCESS) first_error = status;
+        if(new_queue)
+        {
+            register_amd_queue(*controller, desc.queue, std::move(new_queue), is_compute, agent);
         }
     }
-    return status;
+    return first_error;
 }
 #endif
 
