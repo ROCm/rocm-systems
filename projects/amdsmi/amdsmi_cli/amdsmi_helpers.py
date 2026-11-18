@@ -2443,7 +2443,7 @@ class AMDSMIHelpers:
         if logger is not None and (logger.is_json_format() or logger.is_csv_format()):
             return
 
-        header = f"{'timestamp':<20} {'type':<8} {'severity':<20}"
+        header = f"{'timestamp':<20} {'device':<8} {'severity':<20}"
         if folder:
             header += f" {'file_name':<25} {'list of afids'}"
 
@@ -3115,7 +3115,7 @@ class AMDSMIHelpers:
                 collected_json_rows,
                 emit_inline,
                 cper_counter,
-                device_label=f"AINIC {ainic_idx}",
+                device_label=f"NIC {ainic_idx}",
             )
 
         if num_entries == 0 and not args.follow:
@@ -3128,7 +3128,7 @@ class AMDSMIHelpers:
                 collected_json_rows,
                 emit_inline,
                 cper_counter,
-                device_label=f"AINIC {ainic_idx}",
+                device_label=f"NIC {ainic_idx}",
             )
 
         return collected_json_rows
