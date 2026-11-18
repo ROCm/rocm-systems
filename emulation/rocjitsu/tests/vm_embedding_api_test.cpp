@@ -313,8 +313,9 @@ void exercise_lifecycle(Lifecycle lifecycle, Teardown teardown = Teardown::Comma
         stopper.request_stop();
       }
       EXPECT_TRUE(completed());
-      if (dispatch_kernel)
+      if (dispatch_kernel) {
         EXPECT_EQ(*reinterpret_cast<const uint32_t *>(output_mapping.mapped_addr), 1u);
+      }
       EXPECT_EQ(
           std::atomic_ref<uint64_t>(const_cast<uint64_t &>(descriptor.read_dispatch_id)).load(),
           1u);
@@ -356,8 +357,9 @@ void exercise_lifecycle(Lifecycle lifecycle, Teardown teardown = Teardown::Comma
         ASSERT_NO_FATAL_FAILURE(command(AMDKFD_IOC_FREE_MEMORY_OF_GPU, free_memory));
       }
     }
-    if (teardown != Teardown::Destroy)
+    if (teardown != Teardown::Destroy) {
       EXPECT_EQ(close_device(vm.get(), process_id), ROCJITSU_STATUS_SUCCESS);
+    }
     ASSERT_EQ(destroy(vm.get()), ROCJITSU_STATUS_SUCCESS);
     (void)vm.release();
     EXPECT_EQ(keeper_lease_count(), initial_leases + 1);
