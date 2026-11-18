@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <set>
+#include <stdexcept>
 #include <unordered_set>
 #include <vector>
 
@@ -110,6 +111,16 @@ TEST(parse_numeric_range, invalid_tokens_skipped_valid_kept)
     // 'garbage' non-numeric, '10-0' reversed, '-1' negative all dropped;
     // '2' and '4-5' survive.
     EXPECT_EQ(parse_set("garbage,10-0,-1,2,4-5"), (std::set<std::int64_t>{ 2, 4, 5 }));
+}
+
+TEST(parse_numeric_range, zero_increment_throws)
+{
+    EXPECT_THROW(parse_set("0-40:0"), std::invalid_argument);
+}
+
+TEST(parse_numeric_range, unparsable_increment_throws)
+{
+    EXPECT_THROW(parse_set("0-40:99999999999999999999"), std::invalid_argument);
 }
 
 TEST(parse_numeric_range, single_element_range)

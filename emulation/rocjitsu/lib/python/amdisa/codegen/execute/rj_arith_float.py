@@ -1502,7 +1502,7 @@ def gen_float_binary32(ctx: ExecuteContext) -> str | None:
     )
     if arch in ('cdna3', 'cdna4') and mnemonic in SELECTION_F32[arch]:
         api += '_gfx942'
-    if arch == 'cdna5' and mnemonic in ('V_PK_MINIMUM_F16', 'V_PK_MAXIMUM_F16'):
+    if arch == 'cdna5' and mnemonic in SELECTION_F32[arch]:
         api += '_gfx1250'
     lines = []
     modifiers = '0'
@@ -1525,19 +1525,7 @@ def gen_float_binary32(ctx: ExecuteContext) -> str | None:
         ]
         modifiers = 'modifiers'
     controls = f'/*rdna3=*/{str(arch in ("rdna3", "cdna3", "cdna4")).lower()}, /*compatibility_mul=*/{str(mnemonic == "V_MUL_F32").lower()}'
-    status_kind = ''
-    if arch == 'rdna4':
-        kind = {
-            'V_ADD_F32': 'Add',
-            'V_SUB_F32': 'Sub',
-            'V_SUBREV_F32': 'Subrev',
-            'V_MUL_F32': 'Mul',
-        }.get(mnemonic)
-        if mnemonic in SELECTION_F32['rdna4']:
-            kind = 'Select'
-        if kind:
-            status_kind = f'<::rocjitsu::rdna4::BinaryFpOperation::{kind}>'
-    helper, receiver = f'execute_float_binary32{status_kind}', 'wf'
+    helper, receiver = 'execute_float_binary32', 'wf'
     if arch in ('cdna3', 'cdna4') and not is_vop3 and mnemonic in SELECTION_F32[arch]:
         helper, receiver = 'execute_cdna_selection<32>', '*this, wf'
     lines += [

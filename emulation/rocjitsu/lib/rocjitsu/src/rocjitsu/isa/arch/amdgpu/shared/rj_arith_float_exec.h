@@ -3,8 +3,8 @@
 
 #pragma once
 
+#include "rj_arith/internal/compatibility.h"
 #include "rj_arith/rj_arith.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/binary_fp_status.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/alu_exceptions.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/conversion.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
@@ -493,74 +493,60 @@ inline void execute_float_pack(Wavefront &wave, FloatBinary32Function wave32,
   }
 }
 
-// Execute a binary operation with guest FP modes and optional accumulated state.
-// All sources are acquired before writes, including when destinations alias them.
-// MUL keeps the legacy status classifier in Compatibility; the library owns
-// explicit mode 3 reporting. Other instructions leave compatibility_mul false.
-template <
-    ::rocjitsu::rdna4::BinaryFpOperation Gfx12Status = ::rocjitsu::rdna4::BinaryFpOperation::None>
+// Execute binary arithmetic and let the library compute optional FP causes.
+// DPP can suppress vector stores without suppressing Compatibility MUL status;
+// stage only that differing-mask case, preserving the ordinary direct SIMD call.
 inline void execute_float_binary32(Wavefront &wave, FloatBinary32Function wave32,
                                    FloatBinary64Function wave64, uint64_t flags, uint64_t modifiers,
                                    const Operand &destination, const Operand &lhs,
                                    const Operand &rhs, bool rdna3, bool compatibility_mul = false) {
-  const bool report_legacy_mul =
+  if (!wave.exec()) {
+    return;
+  }
+  const bool status_uses_exec =
       compatibility_mul && (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY;
   const uint64_t write_mask = wave.exec() & wave.vgpr_write_mask();
-  // DPP suppresses destination writes, not the legacy MUL status calculation.
-  const uint64_t exec_mask = report_legacy_mul ? wave.exec() : write_mask;
-  if (!wave.exec())
-    return;
   flags = float32_flags(wave, flags, rdna3);
   RegisterAccess registers(wave);
-  // DPP suppresses results, not ordinary EXEC-participating source reads.
   VectorInput32 a(registers, wave, lhs, wave.exec());
   VectorInput32 b(registers, wave, rhs, wave.exec());
+  if (wave.instruction_execution_failed()) {
+    return;
+  }
   uint32_t causes = 0;
-  if constexpr (Gfx12Status != ::rocjitsu::rdna4::BinaryFpOperation::None) {
-    if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY) {
-      for (uint64_t active = write_mask; active; active &= active - 1) {
-        const unsigned lane = std::countr_zero(active);
-        causes |= ::rocjitsu::rdna4::binary_causes<Gfx12Status>(a.data[lane], b.data[lane],
-                                                                modifiers, wave.fp_round_mode_f32(),
-                                                                wave.fp_denorm_mode_f32());
-      }
+  auto invoke = [&](uint32_t *const *d, uint64_t mask) {
+    return wave.wf_size() == 32
+               ? wave32(flags, uint32_t(mask), modifiers, d, &a.data, &b.data, &causes)
+               : wave64(flags, mask, modifiers, d, &a.data, &b.data, &causes);
+  };
+  bool success;
+  if (status_uses_exec && write_mask != wave.exec()) {
+    uint32_t results[64]{};
+    uint32_t *output = results;
+    if (::rocjitsu::arith::mul_f32_compatibility_staged(
+            flags, wave.exec(), write_mask, wave.wf_size(), rdna3, uint32_t(modifiers), &output,
+            &a.data, &b.data, &causes) != RJ_ARITH_SUCCESS) {
+      wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+      return;
     }
-  }
-  if (report_legacy_mul) {
-    // Match classify_mul_f32_vop3's OMOD policy, using the already acquired
-    // operands so aliasing is safe and observers see no duplicate reads.
-    const uint32_t omod =
-        fp_mode::effective_omod(wave.cu().arch(), wave.fp_denorm_mode_f32(), wave.ieee_mode(),
-                                (modifiers & RJ_ARITH_ALU_OMOD_MASK) / RJ_ARITH_ALU_OMOD_2);
-    const float scale = omod == 1 ? 2.0f : omod == 2 ? 4.0f : omod == 3 ? 0.5f : 1.0f;
-    const uint32_t suppressed =
-        omod && wave.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4 ? (1u << 4) | (1u << 5) : 0;
-    for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
-      if (!(exec_mask & (1ULL << lane)))
-        continue;
-      uint32_t x = a.data[lane], y = b.data[lane];
-      if (modifiers & RJ_ARITH_ALU_ABS_A)
-        x &= 0x7fffffffu;
-      if (modifiers & RJ_ARITH_ALU_NEG_A)
-        x ^= 0x80000000u;
-      if (modifiers & RJ_ARITH_ALU_ABS_B)
-        y &= 0x7fffffffu;
-      if (modifiers & RJ_ARITH_ALU_NEG_B)
-        y ^= 0x80000000u;
-      causes |=
-          classify_mul_f32(std::bit_cast<float>(x), std::bit_cast<float>(y), scale) & ~suppressed;
+    success = write_vector32_result(wave, registers, destination, write_mask,
+                                    [&](uint32_t *const *d, uint64_t mask) {
+                                      for (unsigned lane = 0; lane < wave.wf_size(); ++lane) {
+                                        if (mask & (1ULL << lane)) {
+                                          d[0][lane] = results[lane];
+                                        }
+                                      }
+                                      return RJ_ARITH_SUCCESS;
+                                    });
+  } else if (!write_mask) {
+    // Active EXEC still requires semantics validation even when DPP writes nothing.
+    success = invoke(nullptr, 0) == RJ_ARITH_SUCCESS;
+    if (!success) {
+      wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
     }
+  } else {
+    success = write_vector32_result(wave, registers, destination, write_mask, invoke);
   }
-  const bool success =
-      !wave.instruction_execution_failed() &&
-      (!write_mask ||
-       write_vector32_result(
-           wave, registers, destination, write_mask, [&](uint32_t *const *d, uint64_t write_mask) {
-             uint32_t *state = &causes;
-             return wave.wf_size() == 32
-                        ? wave32(flags, uint32_t(write_mask), modifiers, d, &a.data, &b.data, state)
-                        : wave64(flags, write_mask, modifiers, d, &a.data, &b.data, state);
-           }));
   if (success) {
     wave.set_trapsts(wave.trapsts() | causes);
     wave.raise_alu_causes(causes);

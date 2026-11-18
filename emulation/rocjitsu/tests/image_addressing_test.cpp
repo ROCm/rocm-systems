@@ -3,6 +3,7 @@
 
 #include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/vm/amdgpu/image_addressing.h"
+#include "rocjitsu/vm/graphics/image_address.h"
 
 #include <array>
 #include <cstdint>
@@ -624,6 +625,35 @@ TEST_P(AllImageAddressingTest, BaseAlignmentDependsOnTheStorageBlock) {
   ASSERT_TRUE(addressing);
   EXPECT_TRUE(addressing->has_supported_base(kBase));
   EXPECT_FALSE(addressing->has_supported_base(kBase + 256));
+}
+
+TEST(ImageAddressingTest, Gfx11ZModeMipTailUsesThe32BitDepthThresholdOnBothAxes) {
+  const amdgpu::ImageAddressConfig config{ROCJITSU_CODE_ARCH_RDNA3, 0x545};
+  for (const auto swizzle : {24u, 28u}) {
+    // Scaled 64 KiB and 256 KiB layouts have the same mip-tail transition.
+    const uint32_t scale = swizzle == 24 ? 1 : 2;
+    const uint32_t width = 64 * scale, height = 256 * scale;
+    const amdgpu::ImageLayout layout{.width = width,
+                                     .height = height,
+                                     .element_bytes = 2,
+                                     .swizzle_mode = swizzle,
+                                     .mip_levels = 9};
+    for (unsigned level : {0u, 1u, 2u, 3u}) {
+      const auto mip = amdgpu::image_mip_layout(false, swizzle, 2, width, height, 9, level);
+      const auto addressing = amdgpu::ImageAddressing::prepare(config, layout, level);
+      ASSERT_TRUE(mip);
+      ASSERT_TRUE(addressing);
+      EXPECT_EQ(mip->first_tail, 2u);
+      const auto address = amdgpu::gfx11_image_address(mip->offset, mip->tail_x, mip->tail_y,
+                                                       mip->pitch, 2, swizzle);
+      ASSERT_TRUE(address);
+      EXPECT_EQ(*address, addressing->byte_offset(0, 0, 0));
+      if (swizzle == 24) {
+        constexpr std::array offsets{0x20000u, 0x10000u, 0x5000u, 0x1000u};
+        EXPECT_EQ(*address, offsets[level]);
+      }
+    }
+  }
 }
 
 TEST(ImageAddressingTest, Navi10ZModeMipTailMatchesIndependentOffsets) {
