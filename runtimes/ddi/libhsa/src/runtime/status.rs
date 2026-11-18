@@ -7,13 +7,14 @@
 use super::{ApiLeaseScope, process_admission};
 #[cfg(not(test))]
 use crate::ffi::NOT_INITIALIZED;
-use crate::ffi::{ERROR, INVALID_ARGUMENT, OUT_OF_RESOURCES, RESOURCE_BUSY, Status};
+use crate::ffi::{ERROR, INVALID_ARGUMENT, NOT_SUPPORTED, OUT_OF_RESOURCES, RESOURCE_BUSY, Status};
 
 #[allow(clippy::needless_pass_by_value)]
 /// Maps a private native error to its HSA status.
 pub(crate) fn map_error(error: rocddi::Error) -> Status {
     match error.kind() {
         rocddi::ErrorKind::InvalidArgument => INVALID_ARGUMENT,
+        rocddi::ErrorKind::Unsupported => NOT_SUPPORTED,
         rocddi::ErrorKind::ResourceExhausted => OUT_OF_RESOURCES,
         // Busy describes a live native dependency. Only queue-handle
         // validation in the queue adapter may return INVALID_QUEUE.

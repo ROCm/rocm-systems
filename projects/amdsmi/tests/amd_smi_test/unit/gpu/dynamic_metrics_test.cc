@@ -3,17 +3,14 @@
 
 #include <amd_smi_test/test_base.h>
 #include <gtest/gtest.h>
-#include <unistd.h>
 
 #include <algorithm>
-#include <atomic>
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
-#include <fstream>
 #include <limits>
 #include <memory>
 #include <string>
@@ -98,12 +95,15 @@ auto BuildFakeMetricsBlob(amd::smi::AMDGpuMetricsHeader_v1_t new_header) -> std:
   return std::vector<uint8_t>(begin, begin + sizeof(header));
 }
 
-// Writes blob into tree, which deletes it when the test ends.
-auto WriteBlobToTempFile(FakeSysfsTree& tree, const std::vector<uint8_t>& blob,
-                         const std::string& filename = "amdsmi_fake_metrics.bin")
-    -> std::filesystem::path {
-  tree.WriteFile(filename, std::string(blob.begin(), blob.end()));
-  return std::filesystem::path(tree.root()) / filename;
+auto BlobToString(const std::vector<uint8_t>& blob) -> std::string {
+  return std::string(blob.begin(), blob.end());
+}
+
+// Writes `blob` as `filename` under `tree` and returns the file's path.
+auto WriteBlob(FakeSysfsTree& tree, const std::vector<uint8_t>& blob, const std::string& filename)
+    -> std::string {
+  tree.WriteFile(filename, BlobToString(blob));
+  return tree.root() + "/" + filename;
 }
 
 using AttrId = amd::smi::details::AMDGpuMetricAttributeId_t;
@@ -147,27 +147,6 @@ auto ToPublicMetrics(const std::vector<std::byte>& blob) -> amd::smi::AMGpuMetri
   return out;
 }
 
-// Appends a device to the library's list for the duration of a test and puts
-// the list back afterwards, so one test cannot leave the singleton altered for
-// the rest of the binary.
-class ScopedLibraryDevice {
- public:
-  explicit ScopedLibraryDevice(const std::string& device_path)
-      : devices_(amd::smi::RocmSMI::getInstance().devices()), original_count_(devices_.size()) {
-    devices_.push_back(std::make_shared<amd::smi::Device>(device_path, nullptr));
-  }
-  ~ScopedLibraryDevice() { devices_.resize(original_count_); }
-
-  ScopedLibraryDevice(const ScopedLibraryDevice&) = delete;
-  ScopedLibraryDevice& operator=(const ScopedLibraryDevice&) = delete;
-
-  uint32_t index() const { return static_cast<uint32_t>(original_count_); }
-
- private:
-  std::vector<std::shared_ptr<amd::smi::Device>>& devices_;
-  std::size_t original_count_;
-};
-
 }  // namespace
 
 TEST(GpuUnit, GPUMetricDynamicVersionSupported) {
@@ -188,8 +167,8 @@ TEST(GpuUnit, GPUMetricDynamicVersionSupported) {
         .m_content_revision = static_cast<uint8_t>(ver),  // Known minor versions
     });
     FakeSysfsTree tree;
-    const auto fake_path = WriteBlobToTempFile(
-        tree, blob, "amdsmi_fake_gpu_metrics_v1" + std::to_string(ver) + ".bin");
+    const std::filesystem::path fake_path =
+        WriteBlob(tree, blob, "amdsmi_fake_gpu_metrics_v1" + std::to_string(ver) + ".bin");
 
     ASSERT_FALSE(blob.empty());
     ASSERT_TRUE(std::filesystem::exists(fake_path));
@@ -233,8 +212,8 @@ TEST(GpuUnit, XCPMetricDynamicVersionSupported) {
         .m_content_revision = static_cast<uint8_t>(ver),  // Known minor versions
     });
     FakeSysfsTree tree;
-    const auto fake_path = WriteBlobToTempFile(
-        tree, blob, "amdsmi_fake_xcp_metrics_v1" + std::to_string(ver) + ".bin");
+    const std::filesystem::path fake_path =
+        WriteBlob(tree, blob, "amdsmi_fake_xcp_metrics_v1" + std::to_string(ver) + ".bin");
 
     ASSERT_FALSE(blob.empty());
     ASSERT_TRUE(std::filesystem::exists(fake_path));
@@ -342,9 +321,10 @@ TEST(GpuUnit, GPUMetricVersionSupportClassification) {
         .m_content_revision = c.content,
     });
     FakeSysfsTree tree;
-    const auto fake_path = WriteBlobToTempFile(tree, blob,
-                                               "amdsmi_fake_metrics_v" + std::to_string(c.format) +
-                                                   "_" + std::to_string(c.content) + ".bin");
+    const std::filesystem::path fake_path =
+        WriteBlob(tree, blob,
+                  "amdsmi_fake_metrics_v" + std::to_string(c.format) + "_" +
+                      std::to_string(c.content) + ".bin");
     ASSERT_TRUE(std::filesystem::exists(fake_path));
 
     const auto* header = reinterpret_cast<const amd::smi::AMDGpuMetricsHeader_v1_t*>(blob.data());
@@ -396,26 +376,14 @@ constexpr T FilledValue(std::size_t offset) {
   return value;
 }
 
-// Fake sysfs tree at <tmp>/<name>/device/gpu_metrics. Binary reads are cached
-// per (device path, read size), so each case needs its own directory. The
-// process id and a counter keep that true for concurrent runs and for repeats
-// of the same case, which would otherwise share a path and its cache entry.
+// Fake sysfs tree holding <name>/device/gpu_metrics. Binary reads are cached per (device path, read
+// size), so each case needs its own directory; every FakeSysfsTree gets a fresh one.
 class FakeMetricsDevice {
  public:
-  explicit FakeMetricsDevice(const std::string& name)
-      : root_(std::filesystem::temp_directory_path() /
-              ("amdsmi_apu_metrics_" + name + "_" + std::to_string(::getpid()) + "_" +
-               std::to_string(NextInstanceId()))) {
-    std::filesystem::remove_all(root_);
-    std::filesystem::create_directories(root_ / "device");
-  }
-  ~FakeMetricsDevice() { std::filesystem::remove_all(root_); }
+  explicit FakeMetricsDevice(const std::string& name) : name_(name) {}
 
-  FakeMetricsDevice(const FakeMetricsDevice&) = delete;
-  FakeMetricsDevice& operator=(const FakeMetricsDevice&) = delete;
-
-  void WriteMetrics(const std::vector<uint8_t>& blob) const {
-    Write(root_ / "device" / "gpu_metrics", blob);
+  void WriteMetrics(const std::vector<uint8_t>& blob) {
+    tree_.WriteFile(MetricsNode(), BlobToString(blob));
   }
 
   // A directory is the only way to get fopen() to succeed and the following
@@ -423,33 +391,22 @@ class FakeMetricsDevice {
   // the same shape as an empty node apart from that flag, which is what tells the
   // two apart. Permissions are not a substitute -- they fail the open instead and
   // would move the test onto a different branch.
-  void ReplaceMetricsFileWithDirectory() const {
-    const auto node = root_ / "device" / "gpu_metrics";
-    std::error_code ignored;
-    std::filesystem::remove(node, ignored);
-    std::filesystem::create_directories(node);
+  void ReplaceMetricsFileWithDirectory() {
+    tree_.RemoveFile(MetricsNode());
+    tree_.WriteFile(MetricsNode() + "/placeholder", "");
   }
 
-  void WritePartitionMetrics(const std::vector<uint8_t>& blob) const {
-    std::filesystem::create_directories(root_ / "device" / "xcp");
-    Write(root_ / "device" / "xcp" / "xcp_metrics", blob);
+  void WritePartitionMetrics(const std::vector<uint8_t>& blob) {
+    tree_.WriteFile(name_ + "/device/xcp/xcp_metrics", BlobToString(blob));
   }
 
-  std::string path() const { return root_.string(); }
+  std::string path() const { return tree_.root() + "/" + name_; }
 
  private:
-  static unsigned NextInstanceId() {
-    static std::atomic<unsigned> counter{0};
-    return counter.fetch_add(1);
-  }
+  std::string MetricsNode() const { return name_ + "/device/gpu_metrics"; }
 
-  static void Write(const std::filesystem::path& file, const std::vector<uint8_t>& blob) {
-    std::ofstream stream(file, std::ios::binary | std::ios::trunc);
-    stream.write(reinterpret_cast<const char*>(blob.data()),
-                 static_cast<std::streamsize>(blob.size()));
-  }
-
-  std::filesystem::path root_;
+  FakeSysfsTree tree_;
+  std::string name_;
 };
 
 // A full table-sized blob whose every metric byte carries the filler, with a
@@ -890,7 +847,7 @@ TEST(GpuUnit, PublicMetricsEntryReportsUnsupportedRevision) {
   FakeMetricsDevice fake_device("public_unsupported_v2_5");
   fake_device.WriteMetrics(BuildApuMetricsBlob(5, sizeof(ApuMetrics)));
 
-  const ScopedLibraryDevice library_device(fake_device.path());
+  const ScopedRocmSmiDevice library_device(fake_device.path());
   rsmi_gpu_metrics_t metrics{};
 
   EXPECT_EQ(rsmi_dev_gpu_metrics_info_get(library_device.index(), &metrics),
@@ -920,7 +877,7 @@ TEST(GpuUnit, PublicMetricsEntryReportsAMalformedTable) {
   FakeMetricsDevice fake_device("public_declared_size_zero");
   fake_device.WriteMetrics(BuildApuMetricsBlob(1, 0));
 
-  const ScopedLibraryDevice library_device(fake_device.path());
+  const ScopedRocmSmiDevice library_device(fake_device.path());
   rsmi_gpu_metrics_t metrics{};
 
   EXPECT_EQ(rsmi_dev_gpu_metrics_info_get(library_device.index(), &metrics),
@@ -936,7 +893,7 @@ TEST(GpuUnit, PublicPartitionMetricsEntryReportsUnsupportedRevision) {
   // Partition metrics are read from device/xcp/xcp_metrics.
   fake_device.WritePartitionMetrics(BuildMetricsBlob(sizeof(ApuMetrics), 9, 9, sizeof(ApuMetrics)));
 
-  const ScopedLibraryDevice library_device(fake_device.path());
+  const ScopedRocmSmiDevice library_device(fake_device.path());
   rsmi_gpu_metrics_t metrics{};
 
   EXPECT_EQ(rsmi_dev_gpu_partition_metrics_info_get(library_device.index(), &metrics),

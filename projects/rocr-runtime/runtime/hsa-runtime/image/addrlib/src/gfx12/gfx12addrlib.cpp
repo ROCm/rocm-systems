@@ -405,11 +405,27 @@ VOID Gfx12Lib::GetMipOffset(
         }
         else
         {
-            const UINT_32 pitch  = UseCustomPitch(pIn)
-                                        ? pOut->pitch
-                                        : ((mipIdx == 0) && CanTrimLinearPadding(pIn))
-                                          ? PowTwoAlign(mipExtents.width,  128u / bytesPerPixel)
-                                          : PowTwoAlign(mipExtents.width,  pOut->blockExtent.width);
+            UINT_32 pitchImgData   = 0u;
+            UINT_32 pitchSliceSize = 0u;
+            if (IsLinear(pIn->swizzleMode))
+            {
+                // The slice size of a linear image is calculated as if the "pitch" is 256 byte aligned.
+                // However, the rendering pitch is aligned to 128 bytes, and that is what needs to be reported
+                // to our clients in the normal 'pitch' field.
+                // Note this is NOT the same as the total size of the image being aligned to 256 bytes!
+                pitchImgData   = UseCustomPitch(pIn)
+                                     ? pOut->pitch
+                                     : PowTwoAlign(mipExtents.width, 128u / bytesPerPixel);
+                pitchSliceSize = PowTwoAlign(pitchImgData, blockSize / bytesPerPixel);
+            }
+            else
+            {
+                // UseCustomPitch() implies a linear swizzle mode, so there is no custom pitch to
+                // honour on this path.
+                pitchImgData   = PowTwoAlign(mipExtents.width, pOut->blockExtent.width);
+                pitchSliceSize = pitchImgData;
+            }
+
             const UINT_32 height = UseCustomHeight(pIn)
                                         ? pOut->height
                                         : PowTwoAlign(mipExtents.height, pOut->blockExtent.height);
@@ -418,7 +434,19 @@ VOID Gfx12Lib::GetMipOffset(
             // The original "blockExtent" calculation does subtraction of logs (i.e., division) to get the
             // sizes.  We aligned our pitch and height to those sizes, which means we need to multiply the various
             // factors back together to get back to the slice size.
-            const UINT_64 sliceSize = static_cast<UINT_64>(pitch) * height * pIn->numSamples * (pIn->bpp >> 3);
+            const UINT_64 sizeExceptPitch =
+                static_cast<UINT_64>(height) * pIn->numSamples * (pIn->bpp >> 3);
+            UINT_64 sliceSize           = static_cast<UINT_64>(pitchSliceSize) * sizeExceptPitch;
+            const UINT_64 sliceDataSize = PowTwoAlign(static_cast<UINT_64>(pitchImgData) * sizeExceptPitch,
+                                                      static_cast<UINT_64>(blockSize));
+
+            if ((mipIdx == 0) && CanTrimLinearPadding(pIn))
+            {
+                // When this is the last linear subresource of the whole image (as laid out in memory), then we
+                // don't need to worry about the real slice size and can reduce it to the end of the image data.
+                pitchSliceSize = pitchImgData;
+                sliceSize      = UseCustomHeight(pIn) ? pIn->sliceAlign : sliceDataSize;
+            }
 
             mipSize[mipIdx]       = sliceSize * depth;
             mipSliceSize[mipIdx]  = sliceSize * pOut->blockExtent.depth;
@@ -426,17 +454,10 @@ VOID Gfx12Lib::GetMipOffset(
 
             if (pOut->pMipInfo != NULL)
             {
-                pOut->pMipInfo[mipIdx].pitch  = pitch;
-                pOut->pMipInfo[mipIdx].height = height;
+                pOut->pMipInfo[mipIdx].pitch         = pitchImgData;
+                pOut->pMipInfo[mipIdx].pitchForSlice = pitchSliceSize;
+                pOut->pMipInfo[mipIdx].height        = height;
                 pOut->pMipInfo[mipIdx].depth  = depth;
-
-                // The slice size of a linear image was calculated above as if the "pitch" is 256 byte aligned.
-                // However, the rendering pitch is aligned to 128 bytes, and that is what needs to be reported
-                // to our clients.
-                if (IsLinear(pIn->swizzleMode))
-                {
-                    pOut->pMipInfo[mipIdx].pitch = PowTwoAlign(mipExtents.width,  128u / bytesPerPixel);
-                }
             }
         }
     }

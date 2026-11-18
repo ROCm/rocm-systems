@@ -16,7 +16,7 @@ namespace rocjitsu::arith {
 // Requires the named CPU features and validated instruction controls.
 template <bool Saturate>
 void pack_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *d,
-                    const uint32_t *a, const uint32_t *b, bool quiet_nan) {
+                    const uint32_t *a, const uint32_t *b, bool quiet_nan, bool preserve_half) {
   for (int lane = 0; lane < 32; lane += 8) {
     auto x = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(a + lane));
     __m256i result;
@@ -26,11 +26,14 @@ void pack_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t 
       lo = _mm256_min_epi32(_mm256_max_epi32(lo, _mm256_setzero_si256()), _mm256_set1_epi32(255));
       hi = _mm256_min_epi32(_mm256_max_epi32(hi, _mm256_setzero_si256()), _mm256_set1_epi32(255));
       auto packed = _mm256_or_si256(lo, _mm256_slli_epi32(hi, 8));
-      auto old = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(d + lane));
-      unsigned shift = mode & RJ_ARITH_ALU_HIGH_D ? 16 : 0;
-      auto selected = _mm256_sll_epi32(packed, _mm_cvtsi32_si128(shift));
-      result = _mm256_or_si256(_mm256_andnot_si256(_mm256_set1_epi32(int(65535u << shift)), old),
-                               selected);
+      result = packed;
+      if (preserve_half || (mode & RJ_ARITH_ALU_HIGH_D)) {
+        auto old = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(d + lane));
+        unsigned shift = mode & RJ_ARITH_ALU_HIGH_D ? 16 : 0;
+        auto selected = _mm256_sll_epi32(packed, _mm_cvtsi32_si128(shift));
+        result = _mm256_or_si256(_mm256_andnot_si256(_mm256_set1_epi32(int(65535u << shift)), old),
+                                 selected);
+      }
     } else {
       auto y = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(b + lane));
       x = _mm256_srl_epi32(x, _mm_cvtsi32_si128(mode & RJ_ARITH_ALU_HIGH_A ? 16 : 0));
@@ -67,8 +70,8 @@ void pack_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t 
 }
 
 template void pack_x86_64_v3<true>(uint64_t, uint32_t, uint32_t, uint32_t *, const uint32_t *,
-                                   const uint32_t *, bool);
+                                   const uint32_t *, bool, bool);
 template void pack_x86_64_v3<false>(uint64_t, uint32_t, uint32_t, uint32_t *, const uint32_t *,
-                                    const uint32_t *, bool);
+                                    const uint32_t *, bool, bool);
 
 } // namespace rocjitsu::arith

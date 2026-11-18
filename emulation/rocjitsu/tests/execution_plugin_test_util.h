@@ -67,9 +67,10 @@ public:
     return cu.sgpr_owner(reg_idx);
   }
 
-  static amdgpu::VmAccessOutcome route_memory_inst(amdgpu::ComputeUnitCore &cu, Instruction *inst,
+  static amdgpu::VmAccessOutcome route_memory_inst(amdgpu::ComputeUnitCore &cu,
+                                                   std::unique_ptr<Instruction> inst,
                                                    amdgpu::Wavefront &wf) {
-    return cu.route_memory_inst(inst, wf);
+    return cu.route_memory_inst(std::move(inst), wf);
   }
 };
 
@@ -124,10 +125,12 @@ inline constexpr uint64_t kPartialExecMask = 0xA5A5'F0F0'1234'8001ULL;
 
 class TestMemoryInstruction : public Instruction {
 public:
+  /// `mnemonic` must have static storage duration; a `flat_` prefix makes the
+  /// instruction a generic FLAT access to plugins.
   TestMemoryInstruction(std::unique_ptr<DynamicInstState> state,
                         std::initializer_list<amdgpu::MemoryCounterObligation> counter_obligations,
-                        bool exec_masked = true)
-      : Instruction("test_mem", nullptr) {
+                        bool exec_masked = true, std::string_view mnemonic = "test_mem")
+      : Instruction(mnemonic, nullptr) {
     size_ = sizeof(encoding_);
     raw_encoding_ = &encoding_;
     set_memory_issue_info(counter_obligations, exec_masked);
@@ -315,6 +318,9 @@ struct CapturedAccess {
   std::vector<uint64_t> pre_routing_addresses;
   std::vector<uint64_t> execution_addresses;
   std::vector<uint64_t> secondary_addresses;
+  std::optional<amdgpu::LdsAllocationRange> lds_allocation;
+  uint64_t ds_suppressed_lanes = 0;
+  uint64_t ds2_suppressed_lanes = 0;
   std::vector<amdgpu::WaitCounterType> issued_counters;
 };
 
@@ -403,6 +409,9 @@ public:
                                           access.pre_routing_addresses.end());
     captured.secondary_addresses.assign(access.secondary_addresses.begin(),
                                         access.secondary_addresses.end());
+    captured.lds_allocation = access.lds_allocation;
+    captured.ds_suppressed_lanes = access.ds_suppressed_lanes;
+    captured.ds2_suppressed_lanes = access.ds2_suppressed_lanes;
     accesses.push_back(std::move(captured));
   }
 

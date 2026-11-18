@@ -152,6 +152,21 @@ inline void transpose_tr16_b128(std::vector<uint8_t> &response_data, uint32_t nu
 
   const uint32_t source_bytes_per_lane = num_elems * 4;
   compact_wave64 = compact_wave64 && wf_size == 64;
+  // Each ordinary B128 group is a self-contained 8x8 halfword tile.
+  // Snapshot it before overwriting the same eight destination lanes.
+  if (!compact_wave64 && num_elems == 4 && (wf_size == 32 || wf_size == 64) &&
+      response_data.size() == wf_size * 16) {
+    for (uint32_t base = 0; base < wf_size; base += 8) {
+      uint16_t source[8][8];
+      auto *group = response_data.data() + base * 16;
+      std::memcpy(source, group, sizeof(source));
+      for (unsigned row = 0; row < 8; ++row)
+        for (unsigned col = 0; col < 8; ++col)
+          std::memcpy(group + (row * 8 + col) * sizeof(uint16_t), &source[col][row],
+                      sizeof(uint16_t));
+    }
+    return;
+  }
   const uint32_t destination_bytes_per_lane =
       compact_wave64 ? source_bytes_per_lane / 2 : source_bytes_per_lane;
   const uint32_t halfwords_per_source_lane = source_bytes_per_lane / 2;

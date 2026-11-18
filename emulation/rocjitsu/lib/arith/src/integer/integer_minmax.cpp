@@ -1,7 +1,8 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Signed/unsigned 32-bit two-input min/max; packed min/max is in integer16.
+// Signed/unsigned 32-bit selection, including saturating add-then-select.
+// Packed min/max is in integer16.
 // Owns public entry points and their validation/dispatch policy.
 
 #include "integer/integer_minmax.h"
@@ -35,15 +36,15 @@ int minmax(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d
       Op == rocjitsu::arith::IntegerMinmax::Min || Op == rocjitsu::arith::IntegerMinmax::Max;
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
   if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
-    rocjitsu::arith::integer_minmax_x86_64_v4<Op, Signed>(exec_mask, d[0], a[0], b[0],
-                                                          binary ? nullptr : c[0]);
+    rocjitsu::arith::integer_minmax_x86_64_v4<Op, Signed>(
+        exec_mask, mode & RJ_ARITH_ALU_CLAMP, d[0], a[0], b[0], binary ? nullptr : c[0]);
     return RJ_ARITH_SUCCESS;
   }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
-    rocjitsu::arith::integer_minmax_x86_64_v3<Op, Signed>(exec_mask, d[0], a[0], b[0],
-                                                          binary ? nullptr : c[0]);
+    rocjitsu::arith::integer_minmax_x86_64_v3<Op, Signed>(
+        exec_mask, mode & RJ_ARITH_ALU_CLAMP, d[0], a[0], b[0], binary ? nullptr : c[0]);
     return RJ_ARITH_SUCCESS;
   }
 #endif
@@ -82,6 +83,24 @@ int minmax(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d
     if constexpr (Op == rocjitsu::arith::IntegerMinmax::Median) {
       value = rocjitsu::arith::maximum(rocjitsu::arith::minimum(rocjitsu::arith::maximum(x, y), z),
                                        rocjitsu::arith::minimum(x, y));
+    }
+    if constexpr (Op == rocjitsu::arith::IntegerMinmax::AddMin ||
+                  Op == rocjitsu::arith::IntegerMinmax::AddMax) {
+      // Addition saturates before selection; CLAMP additionally excludes negative results.
+      // Undo the ordering bias into a wide intermediate before saturating.
+      int64_t lhs = int64_t(x) - bias, rhs = int64_t(y) - bias;
+      uint32_t sum =
+          uint32_t(rocjitsu::arith::clamp(lhs + rhs, Signed ? int64_t(INT32_MIN) : 0,
+                                          Signed ? int64_t(INT32_MAX) : int64_t(UINT32_MAX)));
+      value = Op == rocjitsu::arith::IntegerMinmax::AddMin
+                  ? rocjitsu::arith::minimum(sum ^ bias, z)
+                  : rocjitsu::arith::maximum(sum ^ bias, z);
+    }
+    if constexpr (Signed && (Op == rocjitsu::arith::IntegerMinmax::AddMin ||
+                             Op == rocjitsu::arith::IntegerMinmax::AddMax)) {
+      if (mode & RJ_ARITH_ALU_CLAMP) {
+        value = rocjitsu::arith::maximum(value, bias);
+      }
     }
     result[lane] = value ^ bias;
   }
@@ -501,5 +520,105 @@ int rj_arith_v_med3_u32_w64(uint64_t flags, uint64_t exec_mask, uint64_t mode, u
     return error;
   }
   return minmax_wave64<rocjitsu::arith::IntegerMinmax::Median, false>(flags, exec_mask, mode, d, a,
+                                                                      b, c);
+}
+
+// Saturate A+B to the operand type, then select against C; CLAMP is ignored.
+int rj_arith_v_add_min_i32_w32(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, const uint32_t *const *c) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return minmax<rocjitsu::arith::IntegerMinmax::AddMin, true>(flags, exec_mask, mode, d, a, b, c);
+}
+
+// Saturate A+B to the operand type, then select against C; CLAMP is ignored.
+int rj_arith_v_add_min_i32_w64(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, const uint32_t *const *c) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return minmax_wave64<rocjitsu::arith::IntegerMinmax::AddMin, true>(flags, exec_mask, mode, d, a,
+                                                                     b, c);
+}
+
+// Saturate A+B to the operand type, then select against C; CLAMP is ignored.
+int rj_arith_v_add_min_u32_w32(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, const uint32_t *const *c) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return minmax<rocjitsu::arith::IntegerMinmax::AddMin, false>(flags, exec_mask, mode, d, a, b, c);
+}
+
+// Saturate A+B to the operand type, then select against C; CLAMP is ignored.
+int rj_arith_v_add_min_u32_w64(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, const uint32_t *const *c) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return minmax_wave64<rocjitsu::arith::IntegerMinmax::AddMin, false>(flags, exec_mask, mode, d, a,
+                                                                      b, c);
+}
+
+// Saturate A+B to the operand type, then select against C; CLAMP is ignored.
+int rj_arith_v_add_max_i32_w32(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, const uint32_t *const *c) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return minmax<rocjitsu::arith::IntegerMinmax::AddMax, true>(flags, exec_mask, mode, d, a, b, c);
+}
+
+// Saturate A+B to the operand type, then select against C; CLAMP is ignored.
+int rj_arith_v_add_max_i32_w64(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, const uint32_t *const *c) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return minmax_wave64<rocjitsu::arith::IntegerMinmax::AddMax, true>(flags, exec_mask, mode, d, a,
+                                                                     b, c);
+}
+
+// Saturate A+B to the operand type, then select against C; CLAMP is ignored.
+int rj_arith_v_add_max_u32_w32(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, const uint32_t *const *c) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return minmax<rocjitsu::arith::IntegerMinmax::AddMax, false>(flags, exec_mask, mode, d, a, b, c);
+}
+
+// Saturate A+B to the operand type, then select against C; CLAMP is ignored.
+int rj_arith_v_add_max_u32_w64(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, const uint32_t *const *c) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  return minmax_wave64<rocjitsu::arith::IntegerMinmax::AddMax, false>(flags, exec_mask, mode, d, a,
                                                                       b, c);
 }

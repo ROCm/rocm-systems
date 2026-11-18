@@ -5,6 +5,7 @@
 
 #include "common/env_vars.hpp"
 #include "common/path.hpp"
+#include "common/string_utility.hpp"
 #include "core/config.hpp"
 #include "core/timemory.hpp"
 #include "core/trace_cache/cacheable.hpp"
@@ -19,6 +20,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <regex>
 #include <stdexcept>
 #include <string>
@@ -83,34 +85,36 @@ find_cache_files(const pid_t& root_pid, const data::directory_files_t& dir_conte
         const std::regex meta_regex(R"(metadata_(\d+)_(\d+)\.json)");
         std::smatch      match;
 
-        // Wrap stoi: regex's (\d+) can match digit runs that overflow int.
-        // A pathological file in the temp dir must not abort discovery.
-        try
-        {
-            if(std::regex_match(filename, match, buff_regex))
+        // Returns the child pid when the file belongs to root_pid.
+        auto const owned_pid = [&](const std::smatch& groups) -> std::optional<int> {
+            const auto parent_pid =
+                rocprofsys::utility::string::safe_stoi(groups[1].str());
+            const auto pid = rocprofsys::utility::string::safe_stoi(groups[2].str());
+            if(parent_pid.is_error() || pid.is_error())
             {
-                const int parent_pid = std::stoi(match[1]);
-                const int pid        = std::stoi(match[2]);
-                if(parent_pid == root_pid)
-                {
-                    cache_map[pid].buff_storage =
-                        std::string{ trace_cache::k_tmp_directory } + filename;
-                }
+                LOG_WARNING("Skipping cache file with unparsable PID '{}': {}", filename,
+                            parent_pid.is_error() ? parent_pid.error() : pid.error());
+                return std::nullopt;
             }
-            else if(std::regex_match(filename, match, meta_regex))
-            {
-                const int parent_pid = std::stoi(match[1]);
-                const int pid        = std::stoi(match[2]);
-                if(parent_pid == root_pid)
-                {
-                    cache_map[pid].metadata =
-                        std::string{ trace_cache::k_tmp_directory } + filename;
-                }
-            }
-        } catch(const std::exception& e)
+            if(parent_pid.value() != root_pid) return std::nullopt;
+            return pid.value();
+        };
+
+        if(std::regex_match(filename, match, buff_regex))
         {
-            LOG_WARNING("Skipping cache file with unparsable PID '{}': {}", filename,
-                        e.what());
+            if(auto const pid = owned_pid(match))
+            {
+                cache_map[*pid].buff_storage =
+                    std::string{ trace_cache::k_tmp_directory } + filename;
+            }
+        }
+        else if(std::regex_match(filename, match, meta_regex))
+        {
+            if(auto const pid = owned_pid(match))
+            {
+                cache_map[*pid].metadata =
+                    std::string{ trace_cache::k_tmp_directory } + filename;
+            }
         }
     };
 
@@ -159,13 +163,14 @@ merge_perfetto_files()
     }
     else if(std::holds_alternative<std::string>(suffix_variant))
     {
-        try
+        const auto& suffix = std::get<std::string>(suffix_variant);
+        const auto  parsed = rocprofsys::utility::string::safe_stoi(suffix);
+        if(parsed.is_error())
         {
-            cached_mpi_rank = std::stoi(std::get<std::string>(suffix_variant));
-        } catch(...)
-        {
-            cached_mpi_rank = 0;
+            LOG_WARNING("Unparsable MPI rank suffix '{}': {}. Assuming rank 0.", suffix,
+                        parsed.error());
         }
+        cached_mpi_rank = parsed.value_or(0);
     }
 
     LOG_DEBUG("Merging perfetto files: rank={} (from settings::default_process_suffix)",

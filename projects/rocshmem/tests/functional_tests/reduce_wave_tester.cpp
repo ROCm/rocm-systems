@@ -22,6 +22,8 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
+#include <hip/hip_version.h>
+
 /* Declare the template with a generic implementation */
 template <typename T, ROCSHMEM_OP Op>
 __device__ int wave_reduce([[maybe_unused]] rocshmem_ctx_t ctx,
@@ -60,12 +62,23 @@ __device__ int wave_reduce([[maybe_unused]] rocshmem_ctx_t ctx,
 #define FLOAT_REDUCTION_WAVE_DEF_GEN(T, TNAME) \
   ARITH_REDUCTION_WAVE_DEF_GEN(T, TNAME)
 
-INT_REDUCTION_WAVE_DEF_GEN(int, int)
+INT_REDUCTION_WAVE_DEF_GEN(char, char)
+INT_REDUCTION_WAVE_DEF_GEN(signed char, schar)
+INT_REDUCTION_WAVE_DEF_GEN(unsigned char, uchar)
 INT_REDUCTION_WAVE_DEF_GEN(short, short)
+INT_REDUCTION_WAVE_DEF_GEN(unsigned short, ushort)
+INT_REDUCTION_WAVE_DEF_GEN(int, int)
+INT_REDUCTION_WAVE_DEF_GEN(unsigned int, uint)
 INT_REDUCTION_WAVE_DEF_GEN(long, long)
+INT_REDUCTION_WAVE_DEF_GEN(unsigned long, ulong)
 INT_REDUCTION_WAVE_DEF_GEN(long long, longlong)
+INT_REDUCTION_WAVE_DEF_GEN(unsigned long long, ulonglong)
 FLOAT_REDUCTION_WAVE_DEF_GEN(float, float)
 FLOAT_REDUCTION_WAVE_DEF_GEN(double, double)
+FLOAT_REDUCTION_WAVE_DEF_GEN(__half, half)
+#if !(HIP_VERSION_MAJOR == 7 && (HIP_VERSION_MINOR == 16 || HIP_VERSION_MINOR == 17))
+FLOAT_REDUCTION_WAVE_DEF_GEN(__hip_bfloat16, bfloat16)
+#endif
 
 /******************************************************************************
  * DEVICE TEST KERNEL
@@ -91,6 +104,9 @@ __global__ void ReduceWaveTest(int loop, int skip, long long int *start_time,
                                 &ctx_array[wf_i]);
     __syncthreads();
   }
+
+  uint8_t *tdm_lds = reinterpret_cast<uint8_t*>(&ctx_array[num_waves_per_wg]);
+  rocshmem_set_lds_stage(tdm_lds, rocshmem_query_lds_stage_bytes());
 
   int num_elems = size / sizeof(T1);
 
@@ -179,7 +195,8 @@ void ReduceWaveTester<T1, T2>::preLaunchKernel() {
 template <typename T1, ROCSHMEM_OP T2>
 void ReduceWaveTester<T1, T2>::launchKernel(dim3 gridSize, dim3 blockSize,
                                             int loop, size_t size) {
-  size_t shared_bytes = num_warps * sizeof(rocshmem_ctx_t);
+  size_t shared_bytes = num_warps * sizeof(rocshmem_ctx_t) +
+                        rocshmem_query_lds_stage_bytes();
 
   hipLaunchKernelGGL(HIP_KERNEL_NAME(ReduceWaveTest<T1, T2>), gridSize,
                      blockSize, shared_bytes, stream, loop, args.skip,
