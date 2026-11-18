@@ -16,9 +16,10 @@ test_nccl_device_h_compiles_as_c99.
 Probes compile against $RCCL_BUILD/include, the hipify-staged tree RCCL
 installs, with a plain C compiler at -std=c99. The control compiles nccl.h and
 nccl_device/net_device.h with the same flags and HIP headers, so its failure
-means a broken toolchain or build tree. Run after building RCCL:
-python3 test/test_nccl_device_c99.py. Exits 0 on pass, 1 on a failed test,
-2 on a harness error, 77 when every selected test skipped.
+means a broken toolchain or build tree. The host-test guards phase builds
+copy_nccl_device_headers and runs this script with RCCL_BUILD set to that
+tree. It exits 0 on pass, 1 on a failed test, 2 on a harness error, 77 when
+every selected test skipped. The guards phase treats 77 as a failure.
 """
 
 import os
