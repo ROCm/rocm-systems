@@ -143,6 +143,14 @@ template <bool Bf8A, bool Bf8B>
 void fp8_wmma_x86_64_v3(uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
                         const uint32_t *const *c);
 
+// Empirical bit-exact FP8 (E4M3 x E4M3) WMMA in gfx12 Wave32 layout, vectorised across
+// output columns. D may alias any input.
+// Requires the named CPU features and validated instruction controls.
+void fp8_wmma_exact_x86_64_v3(uint32_t *const *d, const uint32_t *const *a,
+                              const uint32_t *const *b, const uint32_t *const *c);
+void fp8_wmma_exact_x86_64_v4(uint32_t *const *d, const uint32_t *const *a,
+                              const uint32_t *const *b, const uint32_t *const *c);
+
 // Loose four-product FP8/BF8 dot with FP32 accumulation.
 // Preserve inactive lanes; D may alias inputs.
 // Requires the named CPU features and validated instruction controls.

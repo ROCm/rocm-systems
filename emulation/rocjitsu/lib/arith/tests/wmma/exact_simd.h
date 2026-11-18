@@ -182,4 +182,93 @@ void expect_wmma_exact_simd(Call call) {
   }
 }
 
+// Scalar/SIMD agreement for the vectorised exact gfx12 FP8 WMMA kernels.
+//
+// Random factors and accumulators never drive a DOT8 result into the FP32 subnormal range or
+// to overflow, so they never reach the kernels' integer-pack repair path, and they never leave
+// every product zero, which is the only way the accumulation grid falls below the FP32 normal
+// floor. The directed accumulators and factor bytes below cover all three, and alternate with
+// random tiles so that per-group grid selection is still exercised.
+template <int Lanes, typename Call> void expect_wmma_fp8_exact_simd(Call call) {
+  const auto levels = supported_cpu_levels();
+  if (levels.size() < 2) {
+    return;
+  }
+  constexpr int dest_regs = 256 / Lanes;
+  // Signed zero, both subnormal ends, the smallest normal, the largest finite, the infinities
+  // and a quiet NaN: the accumulators that put a result on an FP32 boundary.
+  static constexpr uint32_t kAccumulators[] = {
+      0x00000000, 0x80000000, 0x00000001, 0x80000001, 0x007fffff, 0x807fffff, 0x00800000,
+      0x80800000, 0x7f7fffff, 0xff7fffff, 0x7f800000, 0xff800000, 0x7fc00000, 0x3f800000,
+      0xbf800000, 0x00000010};
+  // E4M3 zero, smallest and largest subnormal, smallest normal, largest finite, NaN and one.
+  static constexpr uint32_t kFactors[] = {0x00, 0x80, 0x01, 0x81, 0x07, 0x87,
+                                          0x08, 0x7e, 0xfe, 0x7f, 0x38, 0xb8};
+  std::minstd_rand random;
+  int sample = 0;
+  for (uint32_t accumulator : kAccumulators) {
+    for (uint32_t left : kFactors) {
+      for (uint32_t right : kFactors) {
+        Registers<32, Lanes> input;
+        const int shape = sample % 4;
+        for (int lane = 0; lane < Lanes; ++lane) {
+          // shape 1 and 2 blank half of A or B, so a whole group of four products is zero
+          // while its neighbour is not.
+          const bool live_a = shape != 1 || lane < Lanes / 2;
+          const bool live_b = shape != 2 || (lane % 2) == 0;
+          for (int reg : {0, 1}) {
+            input.v[reg][lane] = live_a ? left * 0x01010101U : 0;
+          }
+          for (int reg : {8, 9}) {
+            input.v[reg][lane] = live_b ? right * 0x01010101U : 0;
+          }
+          for (int reg = 16; reg < 32; ++reg) {
+            input.v[reg][lane] = accumulator;
+          }
+          if (shape == 3) {
+            // Mixed magnitudes so the two groups of a DOT8 choose different grids.
+            input.v[0][lane] = left * 0x01010101U;
+            input.v[1][lane] = uint32_t(random()) & 0x7f7f7f7fU;
+            input.v[8][lane] = right * 0x01010101U;
+            input.v[9][lane] = uint32_t(random()) & 0x7f7f7f7fU;
+          }
+        }
+        const uint64_t instruction_flags =
+            (sample % 2 ? RJ_ARITH_WMMA_NEG_C : 0) | (sample % 3 == 0 ? RJ_ARITH_WMMA_ABS_C : 0);
+        uint64_t flags = sample % 2 ? RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL
+                                    : RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS;
+        // Ignored for matrix operations; the result must not depend on them.
+        if (sample % 3 == 0) {
+          flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS |
+                   RJ_ARITH_FP_IEEE_MODE;
+        }
+        const int aliases[] = {0, 1, 8, 16, 24};
+        const int destination = aliases[sample % 5];
+        auto expected = input;
+        ASSERT_EQ(call(flags, instruction_flags, expected.v + destination, expected.v,
+                       expected.v + 8, expected.v + 16),
+                  RJ_ARITH_SUCCESS);
+        for (uint64_t cpu : levels) {
+          if (cpu == RJ_ARITH_CPU_BASELINE) {
+            continue;
+          }
+          SCOPED_TRACE(::testing::Message() << sample << '/' << cpu << '/' << accumulator << '/'
+                                            << left << '/' << right);
+          auto actual = input;
+          ASSERT_EQ(call(flags | cpu, instruction_flags, actual.v + destination, actual.v,
+                         actual.v + 8, actual.v + 16),
+                    RJ_ARITH_SUCCESS);
+          for (int reg = destination; reg < destination + dest_regs; ++reg) {
+            for (int lane = 0; lane < Lanes; ++lane) {
+              ASSERT_EQ(actual.v[reg][lane], expected.v[reg][lane]) << reg << '/' << lane;
+            }
+          }
+          actual.expect_preserved(input, destination, dest_regs);
+        }
+        ++sample;
+      }
+    }
+  }
+}
+
 } // namespace rocjitsu::arith::test

@@ -11,6 +11,7 @@
 #include "common/semantics.h"
 #include "rj_arith/detail/rj_arith_common.h"
 #include "rj_arith/detail/rj_arith_wmma.h"
+#include "wmma/exact_simd.h"
 #include "wmma/helpers.h"
 #include <limits>
 
@@ -136,4 +137,11 @@ TEST(WmmaF32FP8FP8W32Gfx12, Arithmetic) {
       }
     }
   }
+}
+
+// Every CPU level must reproduce the baseline integer model bit for bit, including the
+// subnormal, overflow and all-zero-product tiles the vectorised kernels repair scalar-side.
+TEST(WmmaF32FP8FP8W32Gfx12, ExactSimdAgreement) {
+  rocjitsu::arith::test::expect_wmma_fp8_exact_simd<32>(
+      rj_arith_v_wmma_f32_16x16x16_fp8_fp8_w32_gfx12);
 }
