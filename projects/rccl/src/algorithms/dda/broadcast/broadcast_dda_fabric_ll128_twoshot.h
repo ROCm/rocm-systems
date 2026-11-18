@@ -29,7 +29,7 @@ namespace dda::common {
 constexpr size_t ddaLL128BcTwoShotChunkSlices(size_t totalSlices, int nRanks) {
   // chunk into nPeers = nRanks-1 so root has no separate chunk.
   const int nPeers = nRanks - 1;
-  size_t cs = (totalSlices + (size_t)nPeers - 1) / (size_t)nPeers;
+  size_t cs = ddaCeilDiv(totalSlices, (size_t)nPeers);
   return cs < 1 ? 1 : cs;
 }
 
@@ -85,7 +85,7 @@ __global__ void ddaBroadcastFabricLL128TwoShot(
 
   // Fan-out: 0 or >= nPeers means full fan-out
   const int kFanOut = (fanOut <= 0 || fanOut >= nPeers) ? nPeers : fanOut;
-  const int nFanRounds = (nPeers + kFanOut - 1) / kFanOut;
+  const int nFanRounds = (int)ddaCeilDiv((size_t)nPeers, (size_t)kFanOut);
 
   if (isRoot) {
     // scatter chunk[col] to peer (nPeers chunks, no root chunk).
@@ -141,7 +141,7 @@ __global__ void ddaBroadcastFabricLL128TwoShot(
       if (tgtCol >= nPeers) continue;
       const int tgtPeer = tgtCol < selfRank ? tgtCol : tgtCol + 1;
       const int localCol = col / kActive;
-      const int myColCount = (nPeers - peerGroup + kActive - 1) / kActive;
+      const int myColCount = (int)ddaCeilDiv((size_t)(nPeers - peerGroup), (size_t)kActive);
       if (localCol >= myColCount) continue;
       const size_t gwarp_r = ((size_t)localCol * (size_t)gridDim.y + (size_t)blockIdx.y)
                              * (size_t)nwarps + (size_t)warp;

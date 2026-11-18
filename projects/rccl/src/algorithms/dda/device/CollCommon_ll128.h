@@ -45,9 +45,13 @@ struct LLLine128 {
 };
 static_assert(sizeof(LLLine128) == 128, "LLLine128 must be exactly 128 bytes");
 
+// Integer ceiling division, usable in constexpr and device code.
+template <typename T>
+__host__ __device__ constexpr T ddaCeilDiv(T a, T b) { return (a + b - 1) / b; }
+
 // Number of 128B lines needed to carry nWords 8B words (ceil).
 __host__ __device__ __forceinline__ size_t ddaLL128NumLines(size_t nWords) {
-  return (nWords + (size_t)kDdaLL128DataElems - 1) / (size_t)kDdaLL128DataElems;
+  return ddaCeilDiv(nWords, (size_t)kDdaLL128DataElems);
 }
 
 // ---- 8B system-scope, non-tearing store/load (one word == one lane) ----
