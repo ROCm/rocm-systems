@@ -45,6 +45,12 @@ Available examples:
     descriptor points at the new code. An `s_getpc` whose value is used
     in ways that cannot be re-aimed is pinned to the original code. If a
     kernel cannot be relaid out, an unchanged copy marked with stubs is used.
+  - Per block (`--per-block`): one marker per basic block, before its first
+    LDS instruction, instead of one per LDS instruction. Instructions in a
+    block always run together, so the counts are the same; the funcmap row
+    `site_lds_block@<lines>` lists every line in the block, and
+    `counter_fit.py` attributes to the block. Much cheaper in hot loops (MIOpen
+    Winograd: no measurable slowdown).
   - Only instructions reachable from kernel and function entries are marked
     (computed jumps built from `s_getpc` plus a constant are followed), so data
     stored in `.text` is never patched. Original code is never moved; code
@@ -64,7 +70,7 @@ Available examples:
   limits rewriting to matching kernels. The original code object is loaded
   whenever the rewriter fails, finds nothing to mark, exceeds
   `SQTT_SITE_TIMEOUT` seconds (default 600; a 60 MB library takes about 3
-  minutes), or the runtime rejects the
+  minutes and 5 GB), or the runtime rejects the
   rewritten object. It works alongside rocprofv3, which appends its own tool
   library.
 

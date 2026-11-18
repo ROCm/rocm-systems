@@ -57,6 +57,9 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import io
+from array import array
+from collections.abc import Sequence
 import bisect
 import os
 import re
@@ -143,6 +146,134 @@ class Insn:
     @property
     def end(self) -> int:
         return self.addr + self.size
+
+
+class Code(Sequence):
+    """Decoded .text stored compactly: a few arrays and one text blob.
+
+    Large libraries have millions of instructions; holding each as an object
+    took about 10 GB for a 60 MB library. Items are Insn objects made on
+    demand; hot loops use the *_at accessors and never make objects.
+    """
+
+    def __init__(self):
+        self.addrs = array("Q")  # instruction addresses, ascending
+        self.word_data = array("I")  # all encoding words, concatenated
+        self.word_start = array("I", [0])  # per instruction: index into word_data
+        self.text_start = array("I", [0])  # per instruction: index into the text blob
+        self.mn_id = array("H")  # per instruction: index into mn_names
+        self.fn_id = array("I")  # per instruction: index into fn_names
+        self.mn_names: list[str] = []
+        self.fn_names: list[str] = []
+        self._mn_index: dict[str, int] = {}
+        self._fn_index: dict[str, int] = {}
+        self._text = io.StringIO()
+        self._chars = 0
+        self.text = ""
+
+    def append(self, addr: int, words: list[int], text: str, function: str, mnemonic: str) -> None:
+        self.addrs.append(addr)
+        self.word_data.extend(words)
+        self.word_start.append(len(self.word_data))
+        self._text.write(text)
+        self._chars += len(text)
+        self.text_start.append(self._chars)
+        m = self._mn_index.get(mnemonic)
+        if m is None:
+            m = self._mn_index[mnemonic] = len(self.mn_names)
+            self.mn_names.append(mnemonic)
+        self.mn_id.append(m)
+        f = self._fn_index.get(function)
+        if f is None:
+            f = self._fn_index[function] = len(self.fn_names)
+            self.fn_names.append(function)
+        self.fn_id.append(f)
+
+    def finish(self) -> "Code":
+        self.text = self._text.getvalue()
+        self._text = None
+        return self
+
+    def __len__(self) -> int:
+        return len(self.addrs)
+
+    def __getitem__(self, k):
+        if isinstance(k, slice):
+            return [self[i] for i in range(*k.indices(len(self)))]
+        if k < 0:
+            k += len(self)
+        if not 0 <= k < len(self):
+            raise IndexError(k)
+        return Insn(
+            self.addrs[k],
+            list(self.word_data[self.word_start[k] : self.word_start[k + 1]]),
+            self.text[self.text_start[k] : self.text_start[k + 1]],
+            self.fn_names[self.fn_id[k]],
+            self.mn_names[self.mn_id[k]],
+        )
+
+    def __iter__(self):
+        for k in range(len(self)):
+            yield self[k]
+
+    def mnemonic_at(self, k: int) -> str:
+        return self.mn_names[self.mn_id[k]]
+
+    def word0_at(self, k: int) -> int:
+        return self.word_data[self.word_start[k]]
+
+    def size_at(self, k: int) -> int:
+        return 4 * (self.word_start[k + 1] - self.word_start[k])
+
+    def uses(self, mnemonics) -> bool:
+        """Does any instruction have one of these mnemonics?"""
+        return any(m in self._mn_index for m in mnemonics)
+
+
+class AddrIndex:
+    """Instruction index by address (binary search over Code.addrs); used like a dict."""
+
+    def __init__(self, code: Code):
+        self.addrs = code.addrs
+
+    def get(self, addr: int, default=None):
+        k = bisect.bisect_left(self.addrs, addr)
+        return k if k < len(self.addrs) and self.addrs[k] == addr else default
+
+    def __contains__(self, addr: int) -> bool:
+        return self.get(addr) is not None
+
+    def __getitem__(self, addr: int) -> int:
+        k = self.get(addr)
+        if k is None:
+            raise KeyError(addr)
+        return k
+
+
+class IndexSet:
+    """A set of instruction indices in one byte per instruction."""
+
+    def __init__(self, n: int):
+        self.flags = bytearray(n)
+        self.count = 0
+
+    def add(self, k: int) -> None:
+        if not self.flags[k]:
+            self.flags[k] = 1
+            self.count += 1
+
+    def __contains__(self, k: int) -> bool:
+        return 0 <= k < len(self.flags) and self.flags[k] == 1
+
+    def __iter__(self):
+        flags = self.flags
+        k = flags.find(1)
+        while k >= 0:
+            yield k
+            k = flags.find(1, k + 1)
+
+    def __len__(self) -> int:
+        return self.count
 
 
 @dataclass
@@ -232,7 +363,7 @@ def probe_target(llvm: str, cpu: str) -> Target:
     )
 
 
-def disassemble(llvm: str, path: str, start: int | None = None) -> tuple[list[Insn], dict[int, str]]:
+def disassemble(llvm: str, path: str, start: int | None = None) -> tuple[Code, dict[int, str]]:
     """Instructions in .text (address, encoding words, text) and labels by address,
     optionally only from address start onwards."""
     cmd = [f"{llvm}/llvm-objdump", "-d", "-z", "--section=.text", path]
@@ -248,7 +379,7 @@ def disassemble(llvm: str, path: str, start: int | None = None) -> tuple[list[In
         return _parse_listing(line.rstrip("\n") for line in f)
 
 
-def _parse_listing(lines) -> tuple[list[Insn], dict[int, str]]:
+def _parse_listing(lines) -> tuple[Code, dict[int, str]]:
     """Parse llvm-objdump lines.
 
     Instruction lines, e.g. "\\tds_load_b32 v4, v4   // 000000001D3C: D8D80000 04000004";
@@ -256,7 +387,7 @@ def _parse_listing(lines) -> tuple[list[Insn], dict[int, str]]:
     Label lines, e.g. "0000000000001900 <_Z12lds_conflictPfii>:".
     """
     hexdigits = set("0123456789abcdefABCDEF")
-    insns: list[Insn] = []
+    code = Code()
     labels: dict[int, str] = {}
     current = ""
     for line in lines:
@@ -276,14 +407,16 @@ def _parse_listing(lines) -> tuple[list[Insn], dict[int, str]]:
             fields = tail.split()
             if not fields or any(len(w) != 8 or not set(w) <= hexdigits for w in fields):
                 continue
-            insn = Insn(int(rest[:colon], 16), [int(w, 16) for w in fields], text, current)
-            insns.append(insn)
+            code.append(
+                int(rest[:colon], 16), [int(w, 16) for w in fields], text, current,
+                text.split(None, 1)[0],
+            )
         elif line.endswith(">:") and " <" in line:
             addr, _, name = line.partition(" <")
             if addr and set(addr) <= hexdigits:
                 current = name[:-2]
                 labels[int(addr, 16)] = current
-    return insns, labels
+    return code.finish(), labels
 
 
 def source_lines(llvm: str, path: str, addrs: list[int]) -> dict[int, str]:
@@ -313,13 +446,13 @@ def classify(insn: Insn, categories: list[str]) -> str | None:
     return None
 
 
-def clause_owner(insns: list[Insn]) -> dict[int, int]:
+def clause_owner(insns: Code) -> dict[int, int]:
     """Map each instruction index inside an s_clause window to the s_clause index."""
     owner = {}
-    for i, insn in enumerate(insns):
-        if insn.mnemonic == "s_clause":
+    for i in range(len(insns)):
+        if insns.mnemonic_at(i) == "s_clause":
             # s_clause N groups the next N + 1 instructions.
-            length = (insn.words[0] & 0x3F) + 1
+            length = (insns.word0_at(i) & 0x3F) + 1
             owner.update({j: i for j in range(i + 1, i + 1 + length)})
     return owner
 
@@ -333,20 +466,19 @@ def target_cpu(llvm: str, path: str) -> str:
     return m.group(1)
 
 
-def free_sgpr(insns: list[Insn], max_sgpr: int) -> int | None:
+def free_sgpr(insns: Code, max_sgpr: int) -> int | None:
     """An SGPR above every SGPR the code names, or None if there is none.
 
     Kernel metadata (.sgpr_count) is not reliable for hand-written kernels, so
     the operands are scanned instead. Relative SGPR addressing (s_movrel*) can
     reach any SGPR, so it rules the free register out.
     """
+    if any(m.startswith("s_movrel") for m in insns.mn_names):
+        return None
+    # One scan over all instruction text (mnemonics never look like sN).
     highest = -1
-    for insn in insns:
-        if insn.mnemonic.startswith("s_movrel"):
-            return None
-        operands = insn.text[len(insn.mnemonic) :]
-        for m in re.finditer(r"\bs\[(\d+):(\d+)\]|\bs(\d+)\b", operands):
-            highest = max(highest, int(m.group(2) or m.group(3)))
+    for m in re.finditer(r"\bs\[(\d+):(\d+)\]|\bs(\d+)\b", insns.text):
+        highest = max(highest, int(m.group(2) or m.group(3)))
     return highest + 1 if highest + 1 <= max_sgpr else None
 
 
@@ -427,9 +559,10 @@ def pc_references(insns: list[Insn]) -> tuple[list[PcRef], list[int]]:
         got = operands(insn)
         return len(got) == len(ops) and all(o is None or o == g for o, g in zip(ops, got))
 
-    for i, insn in enumerate(insns):
-        if insn.mnemonic != "s_getpc_b64":
+    for i in range(len(insns)):
+        if insns.mnemonic_at(i) != "s_getpc_b64":
             continue
+        insn = insns[i]
         m = re.fullmatch(r"s_getpc_b64\s+s\[(\d+):(\d+)\]", insn.text.strip())
         if not m:
             unknown.append(insn.addr)
@@ -523,7 +656,7 @@ class PcFlow:
     escapes: set[int]  # s_getpc addresses whose value is used in a way not followed
 
 
-def pc_flow(insns: list[Insn], roots: set[int], pc_refs: list["PcRef"]) -> PcFlow:
+def pc_flow(insns: Code, roots: set[int], pc_refs: list["PcRef"]) -> PcFlow:
     """Follow every path from the roots, tracking SGPR pairs that hold
     PC-derived values (an s_getpc result plus constants), to find which code
     is reachable and where computed jumps (s_setpc / s_swappc) go.
@@ -533,8 +666,10 @@ def pc_flow(insns: list[Insn], roots: set[int], pc_refs: list["PcRef"]) -> PcFlo
     the s_getpc as escaped (its code cannot be moved). Recognised Tensile and
     LLVM patterns (pc_refs) are applied as a whole.
     """
-    index = {i.addr: k for k, i in enumerate(insns)}
+    index = AddrIndex(insns)
     n = len(insns)
+    branch_mn = {m for m in insns.mn_names if DIRECT_BRANCH.match(m)}
+    terminator_mn = {m for m in insns.mn_names if TERMINATOR_MNEMONICS.match(m)}
     # Recognised patterns: from the s_getpc to the last instruction that
     # forms the address, applied as one step.
     pattern_end: dict[int, tuple[int, "PcRef", int]] = {}  # getpc index -> (last index, ref, pair)
@@ -553,7 +688,7 @@ def pc_flow(insns: list[Insn], roots: set[int], pc_refs: list["PcRef"]) -> PcFlo
     jumps: dict[int, set[int]] = {}
     lit_adds: dict[int, LitAdd] = {}
     escapes: set[int] = set()
-    reachable: set[int] = set()
+    reachable = IndexSet(n)
     empty: dict = {}  # shared: most instructions track nothing
     work = [(index[a], empty) for a in sorted(roots) if a in index]
 
@@ -576,15 +711,14 @@ def pc_flow(insns: list[Insn], roots: set[int], pc_refs: list["PcRef"]) -> PcFlo
             continue
         state[k] = merged
         reachable.add(k)
-        if not merged and k not in pattern_end and insns[k].mnemonic != "s_getpc_b64":
+        mn = insns.mnemonic_at(k)
+        if not merged and k not in pattern_end and mn != "s_getpc_b64":
             # Nothing tracked here: only follow the control flow.
-            insn = insns[k]
-            mn = insn.mnemonic
-            fall = not TERMINATOR_MNEMONICS.match(mn) or mn == "s_swappc_b64"
-            if DIRECT_BRANCH.match(mn):
-                t = branch_target(insn.addr, insn.words[0])
-                if t in index:
-                    work.append((index[t], empty))
+            fall = mn not in terminator_mn
+            if mn in branch_mn:
+                j = index.get(branch_target(insns.addrs[k], insns.word0_at(k)))
+                if j is not None:
+                    work.append((j, empty))
                 fall = fall or mn == "s_call_b64"
             if mn == "s_swappc_b64":
                 fall = True
@@ -686,16 +820,15 @@ def pc_flow(insns: list[Insn], roots: set[int], pc_refs: list["PcRef"]) -> PcFlo
     return PcFlow(reachable, jumps, lit_adds, escapes)
 
 
-def flow_successors(insns: list[Insn], flow: PcFlow, k: int, index: dict[int, int]):
+def flow_successors(insns: Code, flow: PcFlow, k: int, index: AddrIndex):
     """(successor indices, leaves to unknown code?) of a reachable instruction."""
-    insn = insns[k]
-    mn = insn.mnemonic
+    mn = insns.mnemonic_at(k)
     succ, unknown = [], False
     fall = not TERMINATOR_MNEMONICS.match(mn)
     if DIRECT_BRANCH.match(mn):
-        t = branch_target(insn.addr, insn.words[0])
-        if t in index:
-            succ.append(index[t])
+        j = index.get(branch_target(insns.addrs[k], insns.word0_at(k)))
+        if j is not None:
+            succ.append(j)
         if mn == "s_call_b64":
             fall = True
     if mn == "s_setpc_b64":
@@ -710,10 +843,10 @@ def flow_successors(insns: list[Insn], flow: PcFlow, k: int, index: dict[int, in
     return succ, unknown
 
 
-def loop_depths(insns: list[Insn], flow: PcFlow, sites: list[int]) -> list[int]:
+def loop_depths(insns: Code, flow: PcFlow, sites: list[int]) -> list[int]:
     """How many loops (backward branches or resolved backward jumps in
     reachable code) contain each of the given instruction indices."""
-    index = {i.addr: k for k, i in enumerate(insns)}
+    index = AddrIndex(insns)
     events = []
     for k in flow.reachable:
         for j in flow_successors(insns, flow, k, index)[0]:
@@ -768,7 +901,7 @@ def sgpr_def_use(insn: Insn) -> tuple[int, int]:
     return 0, first | rest
 
 
-def sgpr_liveness(insns: list[Insn], flow: PcFlow) -> list[int]:
+def sgpr_liveness(insns: Code, flow: PcFlow) -> list[int]:
     """SGPRs live on entry to each reachable instruction (bit masks).
 
     Backward data flow over the reachable code. Returns, jumps the scan could
@@ -776,7 +909,7 @@ def sgpr_liveness(insns: list[Insn], flow: PcFlow) -> list[int]:
     reported dead when every path writes it before reading it (or ends).
     """
     n = len(insns)
-    index = {i.addr: k for k, i in enumerate(insns)}
+    index = AddrIndex(insns)
     succ: dict[int, list[int]] = {}
     preds: dict[int, list[int]] = {}
     unknown: set[int] = set()
@@ -1001,7 +1134,7 @@ class Relayout:
         return 4 * len(self.words)
 
 
-def find_islands(target: Target, insns: list[Insn], labels: dict[int, str]) -> list[Region]:
+def find_islands(target: Target, insns: Code, labels: dict[int, str]) -> list[Region]:
     """Alignment padding that never runs, usable for stubs and hops.
 
     A run of padding words qualifies when it follows an unconditional end of
@@ -1011,23 +1144,28 @@ def find_islands(target: Target, insns: list[Insn], labels: dict[int, str]) -> l
     i.e. be pure function alignment, so data tables in .text are never touched.
     The padding after the last function is the prefetch guard and is kept.
     """
-    targets = {
-        branch_target(i.addr, i.words[0]) for i in insns if DIRECT_BRANCH.match(i.mnemonic)
-    }
-    pc_relative = any(PC_RELATIVE.match(i.mnemonic) for i in insns)
+    n = len(insns)
+    branch_mn = {m for m in insns.mn_names if DIRECT_BRANCH.match(m)}
+    terminator_mn = {m for m in insns.mn_names if TERMINATORS.match(m)}
+    targets = sorted(
+        branch_target(insns.addrs[k], insns.word0_at(k))
+        for k in range(n)
+        if insns.mnemonic_at(k) in branch_mn
+    )
+    pc_relative = any(PC_RELATIVE.match(m) for m in insns.mn_names)
     islands = []
     i = 0
-    while i < len(insns):
-        insn = insns[i]
-        if not TERMINATORS.match(insn.mnemonic):
+    while i < n:
+        if insns.mnemonic_at(i) not in terminator_mn:
             i += 1
             continue
         j = i + 1
-        while j < len(insns) and len(insns[j].words) == 1 and insns[j].words[0] in target.padding:
+        while j < n and insns.size_at(j) == 4 and insns.word0_at(j) in target.padding:
             j += 1
-        if j > i + 1 and j < len(insns) and insns[j].addr in labels:
-            start, end = insns[i + 1].addr, insns[j].addr
-            ok = not any(start <= t < end for t in targets)
+        if j > i + 1 and j < n and insns.addrs[j] in labels:
+            start, end = insns.addrs[i + 1], insns.addrs[j]
+            t = bisect.bisect_left(targets, start)
+            ok = not (t < len(targets) and targets[t] < end)  # no branch lands in it
             if pc_relative:
                 ok = ok and end % 256 == 0 and end - start < 256
             if ok:
@@ -1401,7 +1539,15 @@ def tool_check(
         out_insns, _ = disassemble(llvm, rewritten, start=new_code)
     except subprocess.CalledProcessError as e:
         raise VerifyError("llvm-objdump failed: " + (e.stderr or "")[:300])
-    by_addr = {i.addr: i.mnemonic for i in out_insns}
+    out_index = AddrIndex(out_insns)
+
+    class _ByAddr:
+        @staticmethod
+        def get(addr):
+            k = out_index.get(addr)
+            return None if k is None else out_insns.mnemonic_at(k)
+
+    by_addr = _ByAddr()
     out_refs, _ = pc_references(out_insns)
     by_base = {r.base: r.target for r in out_refs}
     for base, want in expected_pc.items():
@@ -1479,11 +1625,13 @@ def rewrite(args) -> int:
     insns, labels = disassemble(args.llvm, args.input)
     # The decoded instructions must tile .text exactly; otherwise there is data
     # or something objdump cannot decode, and a site could be misread.
+    if any(m.startswith("<unknown>") for m in insns.mn_names):
+        raise Unchanged("objdump cannot decode some of .text")
     pos = text_addr
-    for insn in insns:
-        if insn.addr != pos or insn.mnemonic.startswith("<unknown>"):
+    for k in range(len(insns)):
+        if insns.addrs[k] != pos:
             raise Unchanged(f"cannot decode .text cleanly at {pos:#x}")
-        pos = insn.end
+        pos += insns.size_at(k)
     if pos != text_end:
         raise Unchanged(f"cannot decode .text cleanly at {pos:#x}")
     kernels = list(dict.fromkeys(labels[a] for a in sorted(labels)))
@@ -1503,10 +1651,12 @@ def rewrite(args) -> int:
     owner = clause_owner(insns) if target.has_clause else {}
     sites = []
     clause_of = {}  # site address -> index of the s_clause covering it
-    for i, insn in enumerate(insns):
-        kind = classify(insn, args.sites)
-        if kind is None:
+    site_mn = {m for m in insns.mn_names if classify(Insn(0, [0], m), args.sites)}
+    for i in range(len(insns)):
+        if insns.mnemonic_at(i) not in site_mn:
             continue
+        insn = insns[i]
+        kind = classify(insn, args.sites)
         if i not in flow.reachable:
             unreached += 1
             print(f"skip {insn.addr:#x} {insn.text}: not reached from any entry", file=sys.stderr)
@@ -1533,7 +1683,32 @@ def rewrite(args) -> int:
     if not sites:
         raise Unchanged("no sites to mark")
 
-    index_of = {i.addr: k for k, i in enumerate(insns)}
+    index_of = AddrIndex(insns)
+
+    # --per-block: instructions in one basic block always run together, so one
+    # marker (before the block's first LDS instruction) counts them all. The
+    # funcmap row lists the source lines of every LDS instruction in the block.
+    block_members: dict[int, list[tuple[Insn, str]]] = {}
+    if args.per_block:
+        leaders = {index_of[a] for a in roots if a in index_of}
+        for k in flow.reachable:
+            succ, unknown = flow_successors(insns, flow, k, index_of)
+            mn = insns[k].mnemonic
+            if unknown or DIRECT_BRANCH.match(mn) or TERMINATOR_MNEMONICS.match(mn) or mn in (
+                "s_setpc_b64", "s_swappc_b64"
+            ):
+                leaders.update(succ)
+                leaders.add(k + 1)
+            else:
+                leaders.update(j for j in succ if j != k + 1)
+        leader_list = sorted(leaders)
+        first_of_block: dict[int, int] = {}
+        for insn, kind in sites:
+            k = index_of[insn.addr]
+            block = leader_list[bisect.bisect_right(leader_list, k) - 1] if leader_list else -1
+            first = first_of_block.setdefault(block, insn.addr)
+            block_members.setdefault(first, []).append((insn, kind))
+        sites = [(insn, "lds_block") for insn, _ in sites if insn.addr in block_members]
 
     # Marker IDs: one-instruction markers (IDs 1..MAX_IMM_ID, gfx10+) go to the
     # sites in the most deeply nested loops, where marker cost matters most.
@@ -1602,7 +1777,7 @@ def rewrite(args) -> int:
     # cannot refer to them, or every s_getpc is recognised and the ones that
     # point into later segments have literals that are adjusted below.
     stub_base = (text_end + 15) & ~15
-    insn_addrs = [i.addr for i in insns]
+    insn_addrs = insns.addrs
 
     # PC-relative addresses the flow scan found outside the recognised
     # patterns: s_getpc + a literal add (e.g. hand-written jump tables and
@@ -1985,7 +2160,7 @@ def rewrite(args) -> int:
         # Only kernels that own a site, unless code can call across kernels
         # (then a site in one kernel's range may run under another's descriptor).
         site_ranges = {kernel_range(m[2]) for m in marked}
-        calls = any(i.mnemonic in ("s_swappc_b64", "s_call_b64") for i in insns)
+        calls = insns.uses(("s_swappc_b64", "s_call_b64"))
         all_kernels = calls or None in site_ranges
         for name, (off, entry) in entries.items():
             if not all_kernels and kernel_range(entry) not in site_ranges:
@@ -2001,7 +2176,10 @@ def rewrite(args) -> int:
             if entry == r.start:
                 moved_entries[name] = r.new
 
-    lines = source_lines(args.llvm, args.input, [m[2] for m in marked])
+    line_addrs = [m[2] for m in marked]
+    for m in marked:
+        line_addrs += [i.addr for i, _ in block_members.get(m[2], [])[1:]]
+    lines = source_lines(args.llvm, args.input, line_addrs)
 
     # Lay the words down: original .text patches and the pool.
     words_at: dict[int, int] = {}
@@ -2027,7 +2205,9 @@ def rewrite(args) -> int:
         put(p.back_branch, [back_first])
     funcmap = []
     for marker_id, kind, orig in marked:
-        loc = lines.get(orig) or f"pc{orig:#x}"
+        members = [i.addr for i, _ in block_members.get(orig, [])] or [orig]
+        # A block marker names every source line in the block, in order.
+        loc = ";".join(dict.fromkeys(lines.get(a) or f"pc{a:#x}" for a in members))
         funcmap.append(f"P:{marker_id}:site_{kind}@{loc}")
     # Dissolve the clauses that cover a site (in a kernel copy: the copy's clause).
     clause_addrs = sorted(
@@ -2218,11 +2398,10 @@ def rewrite(args) -> int:
     )
     # What relaid-out code must decode to: the original instruction at its new
     # address, and the first instruction of each marker.
-    insn_at = {i.addr: i for i in insns}
     expected_mnemonics = {}
     for rl in relayouts:
         for a, na in rl.new_at.items():
-            expected_mnemonics[na] = insn_at[a].mnemonic
+            expected_mnemonics[na] = insns.mnemonic_at(index_of[a])
         for m_id, _, _, maddr, _ in rl.markers:
             expected_mnemonics[maddr] = "s_mov_b32" if uses_m0(m_id) else "s_ttracedata_imm"
         for g in rl.pins:
@@ -2246,6 +2425,7 @@ def rewrite(args) -> int:
     hops = sum(len(p.forward) + len(p.back) for p in placements)
     print(
         f"{len(marked)} of {len(sites)} sites marked"
+        + (f" (blocks covering {sum(len(v) for v in block_members.values())} LDS instructions)" if block_members else "")
         + (f" ({len(skipped)} skipped)" if skipped else "")
         + (f"; {unreached} unreachable LDS instructions left alone" if unreached else "")
         + f"; {len(marked) - m0_sites} imm, {m0_sites} via M0"
@@ -2304,6 +2484,13 @@ def main() -> int:
         "--no-relocate",
         action="store_true",
         help="Never run a kernel from a marked copy; skip sites that cannot be marked in place.",
+    )
+    parser.add_argument(
+        "--per-block",
+        action="store_true",
+        help="One marker per basic block (before its first LDS instruction) instead of one per "
+        "LDS instruction; instructions in a block always run together. Funcmap rows "
+        "site_lds_block@<all lines in the block>.",
     )
     parser.add_argument(
         "--relayout",
