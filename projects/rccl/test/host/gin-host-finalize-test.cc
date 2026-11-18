@@ -75,6 +75,14 @@ int ncclTeamRankToWorld(ncclComm_t, ncclTeam_t team, int rank) { return rank * t
 
 void ncclSetThreadName(std::thread&, const char*, ...) {}
 
+// ncclGinDevCommSetup sizes NCCL's barrier requirements through src/dev_runtime.cc. These tests pass no
+// barrier requirements (nBarrierReqs == 0), so reaching this seam is a bug.
+ncclResult_t ncclGinBarrierSizeRequirement(struct ncclComm*, struct ncclGinBackendState const*,
+                                           struct ncclDevCommCompat const*, struct ncclGinBarrierReq const*) {
+  ADD_FAILURE() << "ncclGinBarrierSizeRequirement reached with no barrier requirements";
+  return ncclInternalError;
+}
+
 #include "fakes/gin_vtable_fake.h"
 
 namespace {
@@ -106,7 +114,7 @@ class GinHostFinalizeTest : public ::testing::Test {
     comm_.symmetricSupport = true;
     comm_.globalGinSupport = NCCL_GIN_CONNECTION_FULL;
 
-    struct ncclGinState* ginState = &sharedRes_->ginState;
+    struct ncclGinState* ginState = &comm_.ginState;
     ginState->connected = true;
     ginState->supported = true;
     ginState->numActiveBackends = 1;
@@ -128,7 +136,7 @@ class GinHostFinalizeTest : public ::testing::Test {
 
   void TearDown() override { FakeGinVtable::setCurrent(nullptr); }
 
-  struct ncclGinState* ginState() { return &sharedRes_->ginState; }
+  struct ncclGinState* ginState() { return &comm_.ginState; }
   struct ncclGinBackendState* backend() { return &ginState()->backends[0]; }
 
   ncclResult_t registerWindow() {
@@ -211,7 +219,7 @@ TEST_F(GinHostFinalizeTest, RegisterAndDeregisterSkipClosedBackend) {
             ncclSuccess);
   EXPECT_EQ(ncclGinDeregister(&comm_, hostWins_, winGens_), ncclSuccess);
 
-  // Surviving splitShare siblings must not call through the NULLed ginComms[].
+  // Register / deregister after host finalize must not call through the NULLed ginComms[].
   EXPECT_EQ(fake_.regMrSymCalls, 0);
   EXPECT_EQ(fake_.deregMrSymCalls, 0);
 }
@@ -221,11 +229,12 @@ TEST_F(GinHostFinalizeTest, DevCommSetupSkipsClosedBackend) {
 
   ncclDevCommRequirements reqs{};
   ncclDevComm devComm{};
-  EXPECT_EQ(ncclGinDevCommSetup(&comm_, &reqs, &devComm, NCCL_VERSION_CODE), ncclInternalError);
+  EXPECT_EQ(ncclGinDevCommSetup(&comm_, &reqs, /*resReqs=*/nullptr, /*barrierReqs=*/nullptr, 0, &devComm,
+                                NCCL_VERSION_CODE, /*devCompat=*/nullptr), ncclInternalError);
   EXPECT_EQ(fake_.createContextCalls, 0);
 }
 
-// Even if supported were re-armed, a finalized sharedRes must not reconnect:
+// Even if supported were re-armed, a finalized comm must not reconnect:
 // ginInstance still points at the comm that ran ncclGinInit, which may be freed.
 TEST_F(GinHostFinalizeTest, ConnectOnceAfterFinalizeIsRejectedWithoutListening) {
   ASSERT_EQ(ncclGinHostFinalize(&comm_), ncclSuccess);
@@ -276,7 +285,12 @@ TEST_F(GinHostFinalizeTest, ConnectOnceFailureThenRetry_ReopensUnderNewGeneratio
   EXPECT_EQ(fake_.regMrSymCalls, 0);
 
   fake_.connectFailOnCall = 0;
+  uint32_t abortFlag = 0;
+  comm_.abortFlag = &abortFlag;
   ASSERT_EQ(ncclGinConnectOnce(&comm_), ncclSuccess);
+  // connect() gets the comm's abort flag so a blocked handshake can be interrupted.
+  EXPECT_EQ(fake_.connectAbortFlag, &abortFlag);
+  comm_.abortFlag = nullptr;
   EXPECT_TRUE(ginState()->connected);
   EXPECT_FALSE(backend()->closed);
   EXPECT_EQ(backend()->connectGeneration, 2u);

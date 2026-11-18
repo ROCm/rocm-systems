@@ -50,6 +50,18 @@
 #include "fakes/os_fakes.h"
 #include "fakes/topo_stubs.h"
 
+// Link seam for src/nccl_device/gin_barrier.cc, which ncclGinDevCommSetup calls to
+// size each of NCCL's own GIN barrier requirements for the backend it is trying.
+// Production asks devCompat how many signals one barrier takes on that backend;
+// the seam records what it was handed and charges g_ginSignalsPerBarrier per barrier.
+struct GinBarrierSizeCall {
+  const ncclGinBackendState* backend;
+  const ncclDevCommCompat* devCompat;
+  const ncclGinBarrierReq* barrierReq;
+};
+std::vector<GinBarrierSizeCall> g_ginBarrierSizeCalls;
+int g_ginSignalsPerBarrier = 0;
+
 namespace {
 
 int g_nLocalGinDevs = 1;
@@ -100,6 +112,8 @@ ncclResult_t GinCommCountAllGather(void*, void* allData, int size) {
 // Every fixture calls this from SetUp: the knobs are file-scope, so a test that
 // moves one would otherwise reach the next fixture in the same binary.
 void ResetGinHostGlobals() {
+  g_ginBarrierSizeCalls.clear();
+  g_ginSignalsPerBarrier = 0;
   g_nLocalGinDevs = 1;
   g_peerGinCommCount = -1;
   g_peerGinCommCountRanks = 2;
@@ -146,6 +160,15 @@ int64_t ncclParamGinType() { return g_paramGinType; }
 #include "fakes/param_redirect.h"
 
 #include GIN_HOST_CC_PATH
+
+// The ncclGinBarrierSizeRequirement link seam (defined below, after gin_host.cc).
+ncclResult_t ncclGinBarrierSizeRequirement(struct ncclComm*, struct ncclGinBackendState const* backend,
+                                           struct ncclDevCommCompat const* devCompat,
+                                           struct ncclGinBarrierReq const* barrierReq) {
+  g_ginBarrierSizeCalls.push_back({backend, devCompat, barrierReq});
+  barrierReq->req->ginSignalCount = barrierReq->nBarriers * g_ginSignalsPerBarrier;
+  return ncclSuccess;
+}
 
 namespace {
 
@@ -230,6 +253,10 @@ struct FakeGin {
   std::vector<char*> lastConnectHandles;
   // Every ginConfig handed to createContext, in call order.
   std::vector<ncclGinConfig_t> createdConfigs;
+  // Each config's peerArray, copied: production frees it once setup returns.
+  std::vector<std::vector<int>> createdPeerArrays;
+  // The abortFlag of every connect, in call order.
+  std::vector<volatile uint32_t*> connectAbortFlags;
   BadContext badContext = BadContext::None;
 
   std::vector<RegMrCall> regMrCalls;
@@ -324,7 +351,11 @@ struct FakeGin {
 
   ncclResult_t createContext(ncclGinConfig_t* config, void** ginCtx, ncclNetDeviceHandle_t** devHandle) {
     ++createContextCalls;
-    if (config) createdConfigs.push_back(*config);
+    if (config) {
+      createdConfigs.push_back(*config);
+      createdPeerArrays.emplace_back(config->peerArray,
+                                     config->peerArray + (config->peerArray ? config->peerArrayCount : 0));
+    }
     ncclResult_t ret = failCreateContext.at(createContextCalls);
     if (ret != ncclSuccess) return ret;
     FakeSlot* slot = addSlot();
@@ -413,8 +444,10 @@ struct FakeGin {
   static ncclResult_t Listen(void* ctx, int dev, void*, void** listenComm) {
     return fakeFrom(ctx, FakeHandle::Role::Instance)->listen(dev, listenComm);
   }
-  static ncclResult_t Connect(void* ctx, void** handles, int nRanks, int rank, void* listenComm, void** collComm) {
+  static ncclResult_t Connect(void* ctx, void** handles, int nRanks, int rank, void* listenComm, void** collComm,
+                              volatile uint32_t* abortFlag) {
     fakeFrom(listenComm, FakeHandle::Role::ListenComm);
+    fakeFrom(ctx, FakeHandle::Role::Instance)->connectAbortFlags.push_back(abortFlag);
     return fakeFrom(ctx, FakeHandle::Role::Instance)->connect(handles, nRanks, rank, collComm);
   }
   static ncclResult_t CloseListen(void* listenComm) {
@@ -473,7 +506,7 @@ class GinHostFixture : public ::testing::Test {
   int64_t nthreadsParam_ = 1;
   int64_t nconnParam_ = -2;
 
-  ncclGinState* gin() { return &sr_->ginState; }
+  ncclGinState* gin() { return &comm_->ginState; }
   ncclComm* comm() { return comm_.get(); }
 
   void SetUp() override {
@@ -781,7 +814,8 @@ TEST_F(GinHostProgressThreadsMicrotest, DevCommSetup_FirstProxyDevComm_StartsOne
   ncclDevComm devComm{};
   auto reqs = proxyReqs();
   reqs.ginContextCount = gin()->backends[0].ginCommCount;
-  ASSERT_EQ(ncclSuccess, ncclGinDevCommSetup(comm(), &reqs, &devComm, NCCL_VERSION_CODE));
+  ASSERT_EQ(ncclSuccess, ncclGinDevCommSetup(comm(), &reqs, /*resReqs=*/nullptr, /*barrierReqs=*/nullptr, 0,
+                                             &devComm, NCCL_VERSION_CODE, /*devCompat=*/nullptr));
   EXPECT_TRUE(gin()->proxyThreadsCreated);
   EXPECT_TRUE(gin()->thread[0].joinable());
   EXPECT_TRUE(gin()->thread[1].joinable());
@@ -798,12 +832,14 @@ TEST_F(GinHostProgressThreadsMicrotest, DevCommSetup_EarlierDevCommNeededNoProxy
   ncclDevComm first{};
   auto reqs = proxyReqs();
   reqs.ginContextCount = gin()->backends[0].ginCommCount;
-  ASSERT_EQ(ncclSuccess, ncclGinDevCommSetup(comm(), &reqs, &first, NCCL_VERSION_CODE));
+  ASSERT_EQ(ncclSuccess, ncclGinDevCommSetup(comm(), &reqs, /*resReqs=*/nullptr, /*barrierReqs=*/nullptr, 0,
+                                             &first, NCCL_VERSION_CODE, /*devCompat=*/nullptr));
   EXPECT_FALSE(gin()->proxyThreadsCreated);
 
   fake_.needsProxyProgress = true;
   ncclDevComm second{};
-  ASSERT_EQ(ncclSuccess, ncclGinDevCommSetup(comm(), &reqs, &second, NCCL_VERSION_CODE));
+  ASSERT_EQ(ncclSuccess, ncclGinDevCommSetup(comm(), &reqs, /*resReqs=*/nullptr, /*barrierReqs=*/nullptr, 0,
+                                             &second, NCCL_VERSION_CODE, /*devCompat=*/nullptr));
   EXPECT_TRUE(gin()->proxyThreadsCreated);
   EXPECT_TRUE(gin()->thread[0].joinable());
 
@@ -820,8 +856,10 @@ TEST_F(GinHostProgressThreadsMicrotest, DevCommFree_OneOfTwoDevComms_StopsProgre
 
   ncclDevComm keep{};
   ncclDevComm drop{};
-  ASSERT_EQ(ncclSuccess, ncclGinDevCommSetup(comm(), &reqs, &keep, NCCL_VERSION_CODE));
-  ASSERT_EQ(ncclSuccess, ncclGinDevCommSetup(comm(), &reqs, &drop, NCCL_VERSION_CODE));
+  ASSERT_EQ(ncclSuccess, ncclGinDevCommSetup(comm(), &reqs, /*resReqs=*/nullptr, /*barrierReqs=*/nullptr, 0,
+                                             &keep, NCCL_VERSION_CODE, /*devCompat=*/nullptr));
+  ASSERT_EQ(ncclSuccess, ncclGinDevCommSetup(comm(), &reqs, /*resReqs=*/nullptr, /*barrierReqs=*/nullptr, 0,
+                                             &drop, NCCL_VERSION_CODE, /*devCompat=*/nullptr));
   ASSERT_EQ(2u, fake_.slots.size());
   FakeSlot* dropSlot = fake_.slots.back().get();
   ASSERT_TRUE(waitUntil([&] { return dropSlot->progressCalls.load() > 0; }))
@@ -1115,6 +1153,17 @@ TEST_F(GinHostConnectOnceMicrotest, ConnectOnce_DevicesFails_PropagatesTheStatus
   EXPECT_EQ(0, fake_.connectCalls);
 }
 
+// Every connection's handshake is handed the comm's abort flag, so an abort can
+// interrupt a connect that is waiting on an unresponsive peer.
+TEST_F(GinHostConnectOnceMicrotest, ConnectOnce_EveryConnect_IsHandedTheCommAbortFlag) {
+  nthreadsParam_ = 2;  // two connections
+  uint32_t abortFlag = 0;
+  comm_->abortFlag = &abortFlag;
+  ASSERT_EQ(ncclSuccess, connectOnce());
+  ASSERT_EQ(2, fake_.connectCalls);
+  EXPECT_EQ((std::vector<volatile uint32_t*>{&abortFlag, &abortFlag}), fake_.connectAbortFlags);
+}
+
 // More local GIN devices than connections: the extra devices are dropped rather
 // than overrunning the fixed-size connection arrays.
 TEST_F(GinHostConnectOnceMicrotest, ConnectOnce_MoreLocalDevsThanMaxConnections_ClampsToMaxConnections) {
@@ -1274,7 +1323,8 @@ class GinHostBackendSelectMicrotest : public GinHostFixture {
   }
 
   ncclResult_t setup(ncclDevCommRequirements const& reqs) {
-    return ncclGinDevCommSetup(comm(), &reqs, &devComm_, NCCL_VERSION_CODE);
+    return ncclGinDevCommSetup(comm(), &reqs, /*resReqs=*/nullptr, /*barrierReqs=*/nullptr, 0,
+                               &devComm_, NCCL_VERSION_CODE, /*devCompat=*/nullptr);
   }
 
   void TearDown() override {
@@ -1370,7 +1420,8 @@ TEST_F(GinHostBackendSelectMicrotest, DevCommSetup_RequestedTypeIsNotTheDefault_
   // Without a type the DevComm takes the default, which is what the SDMA paths got before.
   reqs.ginType = NCCL_GIN_TYPE_NONE;
   ncclDevComm dflt{};
-  ASSERT_EQ(ncclSuccess, ncclGinDevCommSetup(comm(), &reqs, &dflt, NCCL_VERSION_CODE));
+  ASSERT_EQ(ncclSuccess, ncclGinDevCommSetup(comm(), &reqs, /*resReqs=*/nullptr, /*barrierReqs=*/nullptr, 0,
+                                             &dflt, NCCL_VERSION_CODE, /*devCompat=*/nullptr));
   EXPECT_EQ(0, dflt.backendIndex);
   ASSERT_EQ(ncclSuccess, ncclGinDevCommFree(comm(), &dflt));
 }
@@ -1403,7 +1454,8 @@ class GinHostDevCommSetupMicrotest : public GinHostFixture {
 
   ncclResult_t setup(ncclDevCommRequirements const& reqs, ncclDevComm* devComm,
                      uint32_t deviceCodeVersion = NCCL_VERSION_CODE) {
-    return ncclGinDevCommSetup(comm(), &reqs, devComm, deviceCodeVersion);
+    return ncclGinDevCommSetup(comm(), &reqs, /*resReqs=*/nullptr, /*barrierReqs=*/nullptr, 0,
+                               devComm, deviceCodeVersion, /*devCompat=*/nullptr);
   }
 
   // One setup plus the matching free, so a table-driven test can loop over
@@ -1421,7 +1473,9 @@ class GinHostDevCommSetupMicrotest : public GinHostFixture {
   // observable here. Every other test in this suite goes through setup() above.
   ncclResult_t setupWithBackend(ncclDevCommRequirements const& reqs, ncclDevComm* devComm,
                                 uint32_t deviceCodeVersion = NCCL_VERSION_CODE, int backendIdx = 0) {
-    return ginDevCommSetupWithBackend(comm(), &reqs, devComm, deviceCodeVersion, &gin()->backends[backendIdx]);
+    return ginDevCommSetupWithBackend(comm(), &reqs, /*resReqs=*/nullptr, /*barrierReqs=*/nullptr, 0,
+                                      devComm, deviceCodeVersion,
+                                      /*devCompat=*/nullptr, &gin()->backends[backendIdx]);
   }
 
   const ncclGinConfig_t& lastConfig() { return fake_.createdConfigs.back(); }
@@ -1627,9 +1681,43 @@ TEST_F(GinHostDevCommSetupMicrotest, DevCommSetup_SignalCounterAndQueueDepthRequ
   EXPECT_EQ(64, lastConfig().queueDepth);
 }
 
+// NCCL's own barrier requirements are sized for the backend being tried, then
+// every resource requirement is handed the next signal ids after the user's, and
+// the plugin and devComm are sized for the total.
+TEST_F(GinHostDevCommSetupMicrotest, DevCommSetup_ResourceAndBarrierRequirements_AssignSignalsAfterTheUsersAndSizeTheTotal) {
+  g_ginSignalsPerBarrier = 3;
+  auto reqs = proxyReqs();
+  reqs.ginSignalCount = 5;
+
+  ncclGinSignal_t barrierStart = -1, plainStart = -1;
+  ncclDevResourceRequirements plain{};
+  plain.ginSignalCount = 2;
+  plain.outGinSignalStart = &plainStart;
+  ncclDevResourceRequirements barrier{};
+  barrier.next = &plain;
+  barrier.ginSignalCount = 1000;  // provisional; resized for the backend below
+  barrier.outGinSignalStart = &barrierStart;
+  ncclGinBarrierReq barrierReqs[1] = {{&barrier, ncclTeam_t{1, 0, 1}, /*nBarriers=*/4}};
+  ncclDevCommCompat devCompat{};
+
+  ASSERT_EQ(ncclSuccess, ncclGinDevCommSetup(comm(), &reqs, &barrier, barrierReqs, 1, &devComm_, NCCL_VERSION_CODE,
+                                             &devCompat));
+
+  ASSERT_EQ(1u, g_ginBarrierSizeCalls.size());
+  EXPECT_EQ(&gin()->backends[0], g_ginBarrierSizeCalls[0].backend);
+  EXPECT_EQ(&devCompat, g_ginBarrierSizeCalls[0].devCompat);
+  EXPECT_EQ(&barrierReqs[0], g_ginBarrierSizeCalls[0].barrierReq);
+  EXPECT_EQ(12, barrier.ginSignalCount);  // 4 barriers * 3 signals
+  EXPECT_EQ(5, barrierStart);             // right after the user's 5
+  EXPECT_EQ(17, plainStart);              // 5 + 12
+  EXPECT_EQ(19, devComm_.ginSignalCount);  // 5 + 12 + 2
+  EXPECT_EQ(19, lastConfig().nSignals);
+}
+
 // A rail request takes its stride from the rail team.
 TEST_F(GinHostDevCommSetupMicrotest, DevCommSetup_RailRequestOnAFullyConnectedComm_UsesTheRailStride) {
   g_railStride = 2;
+  comm_->nRanks = 4;  // the stride must divide the comm
   auto reqs = proxyReqs();
   reqs.ginConnectionType = NCCL_GIN_CONNECTION_RAIL;
 
@@ -1637,14 +1725,15 @@ TEST_F(GinHostDevCommSetupMicrotest, DevCommSetup_RailRequestOnAFullyConnectedCo
 
   EXPECT_EQ(2, devComm_.ginContextStride);
   EXPECT_EQ(1, devComm_.ginConnectionStride);  // the comm itself is FULL-connected
-  EXPECT_EQ(2, lastConfig().rankStride);
+  EXPECT_EQ((std::vector<int>{0, 2}), fake_.createdPeerArrays.back());  // every rail stride from rank 0
 }
 
 // A rail-connected comm's connections already span whole hosts, so the config
-// stride is expressed relative to that.
+// peers are expressed relative to that.
 TEST_F(GinHostDevCommSetupMicrotest, DevCommSetup_CustomStrideOnARailConnectedComm_ExpressesTheStrideRelativeToTheConnection) {
   gin()->ginConnectionType = NCCL_GIN_CONNECTION_RAIL;  // connectedStride = ranks per host
   comm_->contiguousRanksPerHost = 2;
+  comm_->nRanks = 8;  // the stride must divide the comm
   g_railStride = 4;
 
   auto reqs = proxyReqs();
@@ -1654,7 +1743,8 @@ TEST_F(GinHostDevCommSetupMicrotest, DevCommSetup_CustomStrideOnARailConnectedCo
 
   EXPECT_EQ(2, devComm_.ginConnectionStride);
   EXPECT_EQ(4, devComm_.ginContextStride);
-  EXPECT_EQ(2, lastConfig().rankStride);  // 4 world ranks / 2 ranks per connection
+  // World ranks 0 and 4, each divided by the 2 ranks per connection.
+  EXPECT_EQ((std::vector<int>{0, 2}), fake_.createdPeerArrays.back());
 }
 
 // A successful setup publishes what the device side reads: the connection
@@ -1663,6 +1753,7 @@ TEST_F(GinHostDevCommSetupMicrotest, DevCommSetup_CustomStrideOnARailConnectedCo
 TEST_F(GinHostDevCommSetupMicrotest, DevCommSetup_Succeeds_PublishesTheStrideReciprocalAndTheDeviceTypes) {
   gin()->ginConnectionType = NCCL_GIN_CONNECTION_RAIL;  // connectedStride = ranks per host
   comm_->contiguousRanksPerHost = 2;
+  comm_->nRanks = 4;  // setup rejects a stride that does not divide the comm
   g_railStride = 2;
   gin()->backends[0].ginCommCount = 2;
   gin()->backends[0].ginComms[1] = fake_.collCommHandle(1);
@@ -1825,7 +1916,8 @@ class GinHostDevCommFreeMicrotest : public GinHostFixture {
     ncclDevComm devComm{};
     auto reqs = proxyReqs();
     reqs.ginContextCount = gin()->backends[0].ginCommCount;
-    EXPECT_EQ(ncclSuccess, ncclGinDevCommSetup(comm(), &reqs, &devComm, NCCL_VERSION_CODE));
+    EXPECT_EQ(ncclSuccess, ncclGinDevCommSetup(comm(), &reqs, /*resReqs=*/nullptr, /*barrierReqs=*/nullptr, 0,
+                                               &devComm, NCCL_VERSION_CODE, /*devCompat=*/nullptr));
     return devComm;
   }
 };
@@ -1892,7 +1984,7 @@ TEST_F(GinHostFinalizeMicrotest, HostFinalize_ConnectedComm_ClosesEveryConnectio
   EXPECT_FALSE(gin()->connected);
   EXPECT_TRUE(gin()->backends[0].closed);
   // AICOMRCCL-2739: numActiveBackends and ginInstance deliberately survive, so the
-  // last sharedRes reference can still reach the plugin's finalize().
+  // comm's ncclGinFinalize can still reach the plugin's finalize().
   EXPECT_EQ(1, gin()->numActiveBackends);
 }
 
@@ -1945,7 +2037,8 @@ TEST_F(GinHostFinalizeMicrotest, HostFinalize_WorkerInsideGinProgress_WaitsForEv
   ncclDevComm devComm{};
   auto reqs = proxyReqs();
   reqs.ginContextCount = gin()->backends[0].ginCommCount;
-  ASSERT_EQ(ncclSuccess, ncclGinDevCommSetup(comm(), &reqs, &devComm, NCCL_VERSION_CODE));
+  ASSERT_EQ(ncclSuccess, ncclGinDevCommSetup(comm(), &reqs, /*resReqs=*/nullptr, /*barrierReqs=*/nullptr, 0,
+                                             &devComm, NCCL_VERSION_CODE, /*devCompat=*/nullptr));
   ASSERT_TRUE(gin()->thread[0].joinable());
   ASSERT_TRUE(gin()->thread[1].joinable());
 
@@ -2204,7 +2297,8 @@ class GinHostQueryLastErrorMicrotest : public GinHostFixture {
     devComms_.push_back(std::make_unique<ncclDevComm>());
     auto reqs = proxyReqs();
     reqs.ginContextCount = gin()->backends[0].ginCommCount;
-    ASSERT_EQ(ncclSuccess, ncclGinDevCommSetup(comm(), &reqs, devComms_.back().get(), NCCL_VERSION_CODE));
+    ASSERT_EQ(ncclSuccess, ncclGinDevCommSetup(comm(), &reqs, /*resReqs=*/nullptr, /*barrierReqs=*/nullptr, 0,
+                                               devComms_.back().get(), NCCL_VERSION_CODE, /*devCompat=*/nullptr));
   }
 
   void TearDown() override {
@@ -2261,11 +2355,12 @@ TEST_F(GinHostQueryLastErrorMicrotest, QueryLastError_QueryFails_PropagatesTheSt
   EXPECT_EQ(1, fake_.queryCalls);  // the devComm's second connection is never asked
 }
 
-// Records the rankStride ginDevCommSetupWithBackend hands to createContext.
+// Records the peerArray ginDevCommSetupWithBackend hands to createContext (GIN v15
+// replaced the plugin's rankStride with a sorted list of connected-group peers).
 // needsProxyProgress stays off so a successful setup does not spawn workers.
 struct CapturedGinConfig {
   int calls = 0;
-  int rankStride = -1;
+  std::vector<int> peers;
   ncclNetDeviceHandle_t devHandle{};
 };
 CapturedGinConfig* g_capturedGinConfig = nullptr;
@@ -2273,7 +2368,9 @@ CapturedGinConfig* g_capturedGinConfig = nullptr;
 ncclResult_t CaptureStrideCreateContext(void* /*collComm*/, ncclGinConfig_t* config, void** ginCtx,
                                          ncclNetDeviceHandle_t** devHandle) {
   g_capturedGinConfig->calls++;
-  g_capturedGinConfig->rankStride = config->rankStride;
+  // Copied: production frees the array once setup returns.
+  g_capturedGinConfig->peers.assign(config->peerArray,
+                                    config->peerArray + (config->peerArray ? config->peerArrayCount : 0));
   g_capturedGinConfig->devHandle.handle = reinterpret_cast<void*>(0x21);
   g_capturedGinConfig->devHandle.needsProxyProgress = 0;
   *ginCtx = reinterpret_cast<void*>(0x11);
@@ -2285,8 +2382,8 @@ ncclResult_t CaptureStrideDestroyContext(void* /*ginCtx*/) { return ncclSuccess;
 
 // NCCL_GIN_CONNECTION_CUSTOM_STRIDE: the requested world-rank stride must be
 // positive, no larger than the rail team, and a multiple of the stride the
-// communicator actually connected. The plugin sees that stride in units of the
-// connected group.
+// communicator actually connected. The plugin sees the peers at that stride from
+// this rank, indexed in units of the connected group and sorted.
 class GinHostCustomStrideMicrotest : public ::testing::Test {
 protected:
   std::unique_ptr<ncclComm> comm_ = std::make_unique<ncclComm>();
@@ -2305,8 +2402,12 @@ protected:
 
     comm_->sharedRes = sr_.get();
     comm_->contiguousRanksPerHost = 1;
+    // Eight ranks so every stride under test divides the comm (setup now rejects one
+    // that does not), and rank 1 so a peer list anchored at rank 0 would show.
+    comm_->nRanks = 8;
+    comm_->rank = 1;
 
-    struct ncclGinState& ginState = sr_->ginState;
+    struct ncclGinState& ginState = comm_->ginState;
     ginState.ginConnectionType = NCCL_GIN_CONNECTION_FULL;  // connectedStride == 1
     ginState.proxyNthreads = 1;
     ginState.proxyThreadsCreated = true;  // do not spawn progress threads
@@ -2324,7 +2425,7 @@ protected:
   }
 
   void TearDown() override {
-    struct ncclGinState& ginState = sr_->ginState;
+    struct ncclGinState& ginState = comm_->ginState;
     if (ginState.devComms != nullptr) {
       EXPECT_EQ(ncclSuccess, ncclGinDevCommFree(comm_.get(), &devComm_));
     }
@@ -2343,8 +2444,10 @@ protected:
   }
 
   ncclResult_t Setup(const ncclDevCommRequirements& reqs) {
-    return ginDevCommSetupWithBackend(comm_.get(), &reqs, &devComm_, /*deviceCodeVersion=*/0,
-                                      &sr_->ginState.backends[0]);
+    return ginDevCommSetupWithBackend(comm_.get(), &reqs, /*resReqs=*/nullptr, /*barrierReqs=*/nullptr, 0,
+                                      &devComm_, /*deviceCodeVersion=*/0,
+                                      /*devCompat=*/nullptr,
+                                      &comm_->ginState.backends[0]);
   }
 };
 
@@ -2354,21 +2457,23 @@ TEST_F(GinHostCustomStrideMicrotest, FullConnectivity_PassesCustomStrideToPlugin
   ASSERT_EQ(ncclSuccess, Setup(reqs));
 
   EXPECT_EQ(1, captured_.calls);
-  EXPECT_EQ(2, captured_.rankStride);  // requestedStride / connectedStride(1)
+  // Every second world rank from rank 1, in connected-group units (connectedStride 1).
+  EXPECT_EQ((std::vector<int>{1, 3, 5, 7}), captured_.peers);
   EXPECT_EQ(1, devComm_.ginConnectionStride);
   EXPECT_EQ(idivRcp32(1), devComm_.ginConnectionStride_rcp32);
   EXPECT_EQ(2, devComm_.ginContextStride);
 }
 
 TEST_F(GinHostCustomStrideMicrotest, RailConnectivity_ScalesPluginStrideByConnectedGroup) {
-  sr_->ginState.ginConnectionType = NCCL_GIN_CONNECTION_RAIL;
+  comm_->ginState.ginConnectionType = NCCL_GIN_CONNECTION_RAIL;
   comm_->contiguousRanksPerHost = 2;  // connectedStride
   ncclDevCommRequirements reqs = MakeReqs(NCCL_GIN_CONNECTION_CUSTOM_STRIDE, /*customStride=*/4);
 
   ASSERT_EQ(ncclSuccess, Setup(reqs));
 
   EXPECT_EQ(1, captured_.calls);
-  EXPECT_EQ(2, captured_.rankStride);  // 4 / 2
+  // World ranks 1 and 5, divided by the two ranks per connected group.
+  EXPECT_EQ((std::vector<int>{0, 2}), captured_.peers);
   EXPECT_EQ(2, devComm_.ginConnectionStride);
   EXPECT_EQ(idivRcp32(2), devComm_.ginConnectionStride_rcp32);
   EXPECT_EQ(4, devComm_.ginContextStride);
@@ -2396,16 +2501,17 @@ TEST_F(GinHostCustomStrideMicrotest, RejectsStrideGreaterThanRail) {
 // after that backend fails. numActiveBackends is 1 so the stride check runs;
 // with no backends the same code comes back without reaching it.
 TEST_F(GinHostCustomStrideMicrotest, OverRailStride_PublicSetupReturnsInternalError) {
-  sr_->ginState.numActiveBackends = 1;
+  comm_->ginState.numActiveBackends = 1;
   ncclDevCommRequirements reqs = MakeReqs(NCCL_GIN_CONNECTION_CUSTOM_STRIDE, /*customStride=*/8);
 
-  EXPECT_EQ(ncclInternalError, ncclGinDevCommSetup(comm_.get(), &reqs, &devComm_, /*deviceCodeVersion=*/0));
+  EXPECT_EQ(ncclInternalError, ncclGinDevCommSetup(comm_.get(), &reqs, /*resReqs=*/nullptr, /*barrierReqs=*/nullptr, 0,
+                                                   &devComm_, /*deviceCodeVersion=*/0, /*devCompat=*/nullptr));
   EXPECT_EQ(0, captured_.calls);
   EXPECT_EQ(0, devComm_.ginContextStride);
 }
 
 TEST_F(GinHostCustomStrideMicrotest, RejectsStrideNotMultipleOfConnectedStride) {
-  sr_->ginState.ginConnectionType = NCCL_GIN_CONNECTION_RAIL;
+  comm_->ginState.ginConnectionType = NCCL_GIN_CONNECTION_RAIL;
   comm_->contiguousRanksPerHost = 2;
   ncclDevCommRequirements reqs = MakeReqs(NCCL_GIN_CONNECTION_CUSTOM_STRIDE, /*customStride=*/1);
 
@@ -2420,7 +2526,7 @@ TEST_F(GinHostCustomStrideMicrotest, RailConnectionType_UsesRailStride) {
   ASSERT_EQ(ncclSuccess, Setup(reqs));
 
   EXPECT_EQ(1, captured_.calls);
-  EXPECT_EQ(g_railStride, captured_.rankStride);
+  EXPECT_EQ((std::vector<int>{1, 5}), captured_.peers);  // rail stride 4 from rank 1
   EXPECT_EQ(1, devComm_.ginConnectionStride);
   EXPECT_EQ(g_railStride, devComm_.ginContextStride);
 }
@@ -2431,9 +2537,64 @@ TEST_F(GinHostCustomStrideMicrotest, OtherConnectionType_IgnoresCustomStride) {
   ASSERT_EQ(ncclSuccess, Setup(reqs));
 
   EXPECT_EQ(1, captured_.calls);
-  EXPECT_EQ(1, captured_.rankStride);
+  EXPECT_EQ((std::vector<int>{0, 1, 2, 3, 4, 5, 6, 7}), captured_.peers);  // every rank
   EXPECT_EQ(1, devComm_.ginConnectionStride);
   EXPECT_EQ(1, devComm_.ginContextStride);
+}
+
+TEST_F(GinHostCustomStrideMicrotest, RejectsStrideThatDoesNotDivideTheComm) {
+  comm_->nRanks = 6;
+  ncclDevCommRequirements reqs = MakeReqs(NCCL_GIN_CONNECTION_CUSTOM_STRIDE, /*customStride=*/4);
+
+  EXPECT_EQ(ncclInvalidUsage, Setup(reqs));
+  EXPECT_EQ(0, captured_.calls);
+}
+
+// NCCL_GIN_CONNECTION_CUSTOM_ARRAY: the caller's world ranks reach the plugin
+// sorted, and the context stride is the -1 that marks barriers unsupported.
+TEST_F(GinHostCustomStrideMicrotest, CustomArray_PassesTheSortedPeersToThePlugin) {
+  int peers[] = {6, 1, 3};
+  ncclDevCommRequirements reqs = MakeReqs(NCCL_GIN_CONNECTION_CUSTOM_ARRAY, /*customStride=*/0);
+  reqs.ginCustomArray = peers;
+  reqs.ginCustomArrayCount = 3;
+
+  ASSERT_EQ(ncclSuccess, Setup(reqs));
+
+  EXPECT_EQ(1, captured_.calls);
+  EXPECT_EQ((std::vector<int>{1, 3, 6}), captured_.peers);
+  EXPECT_EQ(-1, devComm_.ginContextStride);
+  EXPECT_EQ(1, devComm_.ginConnectionStride);
+}
+
+// On a rail-connected comm each listed rank must share this rank's rail, and is
+// translated to its connected group.
+TEST_F(GinHostCustomStrideMicrotest, CustomArray_RailConnectedComm_TranslatesReachablePeersAndRejectsOthers) {
+  comm_->ginState.ginConnectionType = NCCL_GIN_CONNECTION_RAIL;
+  comm_->contiguousRanksPerHost = 2;  // connectedStride; rank 1 reaches the odd ranks
+  int reachable[] = {7, 3};
+  ncclDevCommRequirements reqs = MakeReqs(NCCL_GIN_CONNECTION_CUSTOM_ARRAY, /*customStride=*/0);
+  reqs.ginCustomArray = reachable;
+  reqs.ginCustomArrayCount = 2;
+
+  ASSERT_EQ(ncclSuccess, Setup(reqs));
+  EXPECT_EQ((std::vector<int>{1, 3}), captured_.peers);  // 3 / 2, 7 / 2
+  ASSERT_EQ(ncclSuccess, ncclGinDevCommFree(comm_.get(), &devComm_));
+  devComm_ = {};
+
+  int unreachable[] = {3, 4};
+  reqs.ginCustomArray = unreachable;
+  EXPECT_EQ(ncclInvalidUsage, Setup(reqs));
+  EXPECT_EQ(1, captured_.calls);
+}
+
+TEST_F(GinHostCustomStrideMicrotest, CustomArray_DuplicatePeer_IsRejected) {
+  int peers[] = {3, 1, 3};
+  ncclDevCommRequirements reqs = MakeReqs(NCCL_GIN_CONNECTION_CUSTOM_ARRAY, /*customStride=*/0);
+  reqs.ginCustomArray = peers;
+  reqs.ginCustomArrayCount = 3;
+
+  EXPECT_EQ(ncclInvalidUsage, Setup(reqs));
+  EXPECT_EQ(0, captured_.calls);
 }
 
 }  // namespace
