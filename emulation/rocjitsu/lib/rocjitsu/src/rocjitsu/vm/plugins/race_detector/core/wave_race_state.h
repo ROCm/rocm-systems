@@ -278,12 +278,16 @@ public:
   ///   sent when its own transfer completes (CDNA5 ISA 10.11.3), and the wave
   ///   issues nothing between a transfer and its arrival.
   /// Accesses of any other class stay in flight until the wave waits for them.
-  /// That includes a tensor transfer at an async arrive: the ISA says the
-  /// async arrive "follows previous async operations including TDM" (CDNA5 ISA
-  /// 11.2.2), but also that tensor instructions "are unordered with respect to
-  /// other types of memory instructions" (CDNA5 ISA 10.11.1) and that the
-  /// arrive waits only for "all previously issued asynchronous loads" (CDNA5
-  /// ISA 15.15). The detector takes the conservative reading.
+  /// That includes a tensor transfer at an async arrive, where the ISA is not
+  /// consistent. The async arrive "follows previous async operations including
+  /// TDM" (CDNA5 ISA 11.2.2), and a transfer sends its own arrival "to keep
+  /// ordering of operations between descriptors of the same wave" (CDNA5 ISA
+  /// 10.11.3). But tensor instructions "are unordered with respect to other
+  /// types of memory instructions" (CDNA5 ISA 10.11.1), and the arrive waits
+  /// only for "all previously issued asynchronous loads" (CDNA5 ISA 15.15).
+  /// The detector takes the reading that hides no race: an async arrive does
+  /// not hand off a tensor transfer, and a transfer's arrival does not hand off
+  /// an async load.
   void handOffPending(BarrierCellArrival kind, uint32_t epoch);
 
   /// Check a VGPR read by a set of lanes for races. Calls the RaceHandler on violation.
