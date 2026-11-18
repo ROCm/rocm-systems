@@ -208,9 +208,11 @@ rocprofv3 kernel trace :  gemm_fusion_dot_general_0   Correlation_Id = C
   executable with no per-op Python call, so one marker names the function and
   several kernels sit directly under it. Eager JAX is one primitive per
   `Execute`, closer to Triton's one-launch marker.
-- Torch attaches autograd worker ranges by publishing the launcher thread id.
-  JAX multi-device workers are not under that collector, so this design uses
-  the launch-timestamp fallback instead of a launcher-thread field.
+- Torch attaches autograd worker *marker* trees to the launcher with a
+  published launcher thread id (`ltid`). That is marker-to-marker attach,
+  not kernel join. JAX multi-device compute launches miss the Python
+  marker's `Correlation_ID`, so this design uses the launch-timestamp
+  fallback for those kernels.
 
 ### Analyze display
 
@@ -236,8 +238,8 @@ x = jnp.ones((512, 512))
 train_step(w, x)                 # line 13
 ```
 
-- `--list-jax-operators` prints the call tree the ML API trace already prints
-  for Torch and Triton (`--list-*-operators` / `--*-operator`):
+- `--list-operators jax` prints the call tree the ML API trace already prints
+  for Torch and Triton:
   - One node per compiled function or eager primitive.
   - Caller `file:line` on that node.
   - Kernels underneath sorted by total GPU time.
@@ -260,8 +262,8 @@ jax.jit.train_step jax_workload.py:13 (calls: N, dispatches: M, total: T)
 └─ input_reduce_fusion_1 (dispatches: M, total: T)
 ```
 
-- `--jax-operator <PATTERN>` filters that tree by function name, for example
-  `--jax-operator 'jax:*train_step*'`, and prints the matched nodes in the same
+- `--operator jax:<PATTERN>` filters that tree by function name, for example
+  `--operator 'jax:*train_step*'`, and prints the matched nodes in the same
   form.
 
 ## Validation, security and debuggability
@@ -285,7 +287,7 @@ jax.jit.train_step jax_workload.py:13 (calls: N, dispatches: M, total: T)
   Analysis reads the trace files the workload produced.
 - **Debug.** The injector logs which entry points it wrapped during profile
   (`ml api trace` on the profile stdout). A wrap miss is an absent `jax.*`
-  node in the `--list-jax-operators` tree (analyze stdout).
+  node in the `--list-operators jax` tree (analyze stdout).
 
 Limitations:
 
