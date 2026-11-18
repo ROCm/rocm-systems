@@ -4,14 +4,13 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Tests for the TDM reduce and multi-destination copy paths of reduceCopy (reduceCopyTdm and copyTdm in
-// tdm/tdmReduce.h).
+// Tests for the TDM reduce and multi-destination copy paths of reduceCopy (reduceCopyTdm in tdm/tdmReduce.h).
 //
 // Each kernel drives reduceCopy from one block the way genericOp does: the pointer
 // lists live in shared memory and EnableTdmReduce is set. Every case runs twice, with
 // the runtime switch on and off, and both outputs must match a host reference exactly,
 // so the TDM tiles and the vector passes that finish each slice are checked together.
-// The CopyTdmOnly cases call copyTdm alone, so only the mover can have written their output.
+// The CopyTdmOnly cases call reduceCopyTdm alone, so only the mover can have written their output.
 // Inputs are small multiples of 1/4, so float sums are exact in any order.
 
 #include "DeviceTestBase.hpp"
@@ -88,8 +87,8 @@ __global__ void __launch_bounds__(kBlockThreads)
 #endif
 }
 
-// Runs copyTdm alone, without the vector passes reduceCopy adds after it, so every output byte comes from the mover.
-// Writes the bytes copyTdm left for the vector path, or -1 when the device code has no TDM path.
+// Runs reduceCopyTdm on a copy alone, without the vector passes reduceCopy adds after it, so every output byte comes
+// from the mover. Writes the bytes it left for the vector path, or -1 when the device code has no TDM path.
 template<typename T, int NDsts>
 __global__ void __launch_bounds__(kBlockThreads)
   kCopyTdmOnly(T* src, T* const* dsts, ssize_t nElts, ssize_t* left) {
@@ -99,9 +98,12 @@ __global__ void __launch_bounds__(kBlockThreads)
     for (int d = 0; d < NDsts; d++) dstPtrs[d] = dsts[d];
   __syncthreads();
   void** dstList = dstPtrs;
+  int thread = threadIdx.x;
   ssize_t behind = 0, ahead = nElts * static_cast<ssize_t>(sizeof(T));
-  copyTdm<NDsts>(blockDim.x, threadIdx.x, [=] __device__(int) { return static_cast<void*>(src); }, NDsts,
-                 [=] __device__(int i) { return dstList[i]; }, behind, ahead);
+  reduceCopyTdm<FuncSum<T>, T, /*MaxSrcs=*/1, NDsts, /*PreOpSrcs=*/0>(
+    blockDim.x, thread, /*redArg=*/0, /*postOp=*/false, /*nSrcs=*/1,
+    [=] __device__(int) { return static_cast<void*>(src); }, NDsts, [=] __device__(int i) { return dstList[i]; },
+    behind, ahead);
   if (threadIdx.x == 0) *left = ahead;
 #else
   if (threadIdx.x == 0) *left = -1;
@@ -203,8 +205,8 @@ protected:
     }
   }
 
-  // Copies nElts through copyTdm alone and checks that it consumed the whole slice and that every destination matches
-  // the source with its guards intact.
+  // Copies nElts through reduceCopyTdm alone and checks that it consumed the whole slice and that every destination
+  // matches the source with its guards intact.
   template<typename T, int NDsts>
   void runCopyTdmOnly(size_t nElts, const std::string& tag) {
 #if !ENABLE_TDM_SIMPLE
@@ -237,7 +239,7 @@ protected:
     syncAndCheck();
     const ssize_t left = dLeft.copyTo()[0];
     if (left < 0) GTEST_SKIP() << "Device code was built without the TDM path";
-    ASSERT_EQ(0, left) << tag << ": copyTdm left bytes for the vector path";
+    ASSERT_EQ(0, left) << tag << ": reduceCopyTdm left bytes for the vector path";
 
     for (int d = 0; d < NDsts; d++) {
       std::vector<T> out = dDst[d].copyTo();
@@ -386,7 +388,7 @@ TEST_F(TdmReduceCopyTest, CopyF32MisalignedFallsBack) {
                                       /*copySwitch=*/true);
 }
 
-// The cases below call copyTdm without the vector passes, so they pass only if the mover copies every byte.
+// The cases below call reduceCopyTdm without the vector passes, so they pass only if the mover copies every byte.
 TEST_F(TdmReduceCopyTest, CopyTdmOnlyF32TwoDsts) {
   runCopyTdmOnly<float, 2>(tileElts<float>(3) + 333, "copyOnly1x2");
 }
