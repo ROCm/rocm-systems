@@ -489,7 +489,14 @@ public:
     }
     const funcmap::Funcmap& getFuncmap() const;
     bool                    has_decoder() const noexcept { return bool(decoder); }
-    const uint64_t          load_addr;
+
+    // Code-object bytes this decoder was built from, or nullptr without a decoder.
+    const std::vector<char>* getCodeobjBytes() const noexcept
+    {
+        if(!decoder || !decoder->disassembly) return nullptr;
+        return &decoder->disassembly->buffer;
+    }
+    const uint64_t load_addr;
 
 private:
     uint64_t load_end{0};
@@ -549,6 +556,14 @@ public:
         } catch(std::out_of_range&)
         {}
         return nullptr;
+    }
+
+    // Bytes of the code object registered under `id`, or nullptr if there is none. Valid until
+    // that decoder is removed or replaced.
+    const std::vector<char>* getCodeobjBytes(marker_id_t id) const
+    {
+        auto itr = decoders.find(id);
+        return (itr != decoders.end() && itr->second) ? itr->second->getCodeobjBytes() : nullptr;
     }
 
     funcmap::Funcmap::EntryPtr getMarker(marker_id_t id, uint32_t funcmap_id) const;

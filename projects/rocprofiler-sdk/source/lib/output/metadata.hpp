@@ -259,7 +259,10 @@ private:
     std::vector<std::string> instruction_comment = {};
     std::map<inst_t, size_t> indexes             = {};
 
-    synced_map<std::unordered_map<uint64_t, std::string>> code_object_content_hashes = {};
+    // code object id -> content hash, computed on first request (nullopt until then). Only ids
+    // registered by add_decoder with capture_content_hash are present.
+    mutable synced_map<std::unordered_map<uint64_t, std::optional<std::string>>>
+        code_object_content_hashes = {};
 };
 
 template <typename Tp>
@@ -282,8 +285,8 @@ create_agent_index(const agent_indexing   index,
                    uint32_t               agent_type_index,
                    const std::string_view agent_type);
 
-// Identity of a code object's bytes ("fnv1a64:<hex>"). Recorded when ROCpd PC sampling decodes a
-// code object and compared by rocpd before it decodes the same object again from disk.
+// Identity of a code object's bytes ("fnv1a64:<hex>"). Recorded for code objects that ROCpd PC
+// sampling decodes and compared by rocpd before it decodes the same object again from disk.
 std::string
 compute_code_object_content_hash(const char* data, size_t size);
 }  // namespace tool

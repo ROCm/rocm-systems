@@ -26,6 +26,7 @@
 import os
 import re
 import sys
+import sqlite3
 
 from typing import Union, Tuple, List, Optional
 from datetime import datetime
@@ -480,6 +481,23 @@ def add_args(parser):
     return process_args
 
 
+def _needs_blob_view_rewrite(db, query):
+    """Return True when *query* does not compile against the raw tables as written.
+
+    Queries that are valid against the raw blob-source tables (e.g. ``SELECT *`` over
+    rocpd_gpu_pc_sample, or a UNION/INSERT that depends on its column set) keep their
+    original meaning. Only a query that fails to compile -- typically because it names a
+    decoded column such as ``instruction`` -- is rewritten to the ``_decoded`` views.
+    """
+    if not query:
+        return False
+    try:
+        db.execute(f"EXPLAIN {query}")
+        return False
+    except sqlite3.Error:
+        return True
+
+
 def execute(input, args, config=None, **kwargs):
 
     config = (
@@ -500,11 +518,12 @@ def execute(input, args, config=None, **kwargs):
     query = args.query
     db = input
 
-    query = update_query_for_blob_views(
-        db,
-        query=query,
-        profile=getattr(args, "blob_view_profile", False),
-    )
+    if _needs_blob_view_rewrite(db, query):
+        query = update_query_for_blob_views(
+            db,
+            query=query,
+            profile=getattr(args, "blob_view_profile", False),
+        )
 
     export_format = args.format
     export_path = os.path.join(config.output_path, config.output_file)

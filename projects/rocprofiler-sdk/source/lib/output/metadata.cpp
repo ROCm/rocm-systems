@@ -853,22 +853,11 @@ metadata::get_instruction_index(rocprofiler_pc_t record)
 void
 metadata::add_decoder(rocprofiler_code_object_info_t* obj_data, bool capture_content_hash)
 {
-    auto add_content_hash = [this, capture_content_hash](
-                                uint64_t code_object_id, const char* data, size_t size) {
-        if(!capture_content_hash) return;
-        code_object_content_hashes.wlock(
-            [](auto& _hashes, uint64_t _id, std::string _hash) { _hashes[_id] = std::move(_hash); },
-            code_object_id,
-            compute_code_object_content_hash(data, size));
-    };
-
     if(obj_data->storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_FILE)
     {
         if(obj_data->uri == nullptr) throw std::runtime_error("Empty filepath.");
 
-        // Read the object once: the same bytes are used for optional hashing and decoding.
         auto binary = rocprofiler::sdk::codeobj::disassembly::CodeObjectBinary{obj_data->uri};
-        add_content_hash(obj_data->code_object_id, binary.buffer.data(), binary.buffer.size());
         decoder.wlock(
             [](auto&                           _decoder,
                rocprofiler_code_object_info_t* obj_data_v,
@@ -884,30 +873,49 @@ metadata::add_decoder(rocprofiler_code_object_info_t* obj_data, bool capture_con
     }
     else
     {
-        // NOLINTBEGIN(performance-no-int-to-ptr)
-        const auto* bytes = reinterpret_cast<const char*>(obj_data->memory_base);
-        // NOLINTEND(performance-no-int-to-ptr)
-        add_content_hash(obj_data->code_object_id, bytes, obj_data->memory_size);
         decoder.wlock(
-            [](auto& _decoder, rocprofiler_code_object_info_t* obj_data_v, const char* bytes_v) {
-                _decoder.addDecoder(bytes_v,
-                                    obj_data_v->memory_size,
-                                    obj_data_v->code_object_id,
-                                    obj_data_v->load_delta,
-                                    obj_data_v->load_size);
+            [](auto& _decoder, rocprofiler_code_object_info_t* obj_data_v) {
+                _decoder.addDecoder(
+                    // NOLINTBEGIN(performance-no-int-to-ptr)
+                    reinterpret_cast<const void*>(obj_data_v->memory_base),
+                    // NOLINTEND(performance-no-int-to-ptr)
+                    obj_data_v->memory_size,
+                    obj_data_v->code_object_id,
+                    obj_data_v->load_delta,
+                    obj_data_v->load_size);
             },
-            obj_data,
-            bytes);
+            obj_data);
+    }
+
+    // Hashing is deferred to get_code_object_content_hash: only code objects that are written to
+    // rocpd pay for it, not every load in the application. A reload under the same id resets it.
+    if(capture_content_hash)
+    {
+        code_object_content_hashes.wlock(
+            [](auto& _hashes, uint64_t _id) { _hashes[_id] = std::nullopt; },
+            obj_data->code_object_id);
     }
 }
 
 std::optional<std::string>
 metadata::get_code_object_content_hash(uint64_t code_obj_id) const
 {
-    return code_object_content_hashes.rlock(
-        [](const auto& _hashes, uint64_t _id) -> std::optional<std::string> {
-            if(auto itr = _hashes.find(_id); itr != _hashes.end()) return itr->second;
-            return std::nullopt;
+    return code_object_content_hashes.wlock(
+        [this](auto& _hashes, uint64_t _id) -> std::optional<std::string> {
+            auto itr = _hashes.find(_id);
+            if(itr == _hashes.end()) return std::nullopt;  // hashing not requested
+            if(!itr->second)
+            {
+                // The decoder keeps a copy of the exact bytes it decodes, so hash those.
+                itr->second = decoder.rlock(
+                    [](const auto& _decoder, uint64_t _co_id) -> std::optional<std::string> {
+                        const auto* bytes = _decoder.getCodeobjBytes(_co_id);
+                        if(bytes == nullptr) return std::nullopt;
+                        return compute_code_object_content_hash(bytes->data(), bytes->size());
+                    },
+                    _id);
+            }
+            return itr->second;
         },
         code_obj_id);
 }

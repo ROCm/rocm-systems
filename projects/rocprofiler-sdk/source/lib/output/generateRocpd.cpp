@@ -160,6 +160,7 @@ struct rocpd_db
     track_map_t         tracks              = {};
     size_t              event_id_counter    = 0;
     size_t              sample_id_counter   = 0;
+    size_t              blob_schema_counter = 0;
     statement_cache_t   statements          = {};
     pending_batch_map_t pending_batches     = {};
     fk_parent_map_t     fk_parent_tables    = {};
@@ -175,6 +176,7 @@ struct rocpd_db
 
     size_t get_event_id() { return ++event_id_counter; }
     size_t get_sample_id() { return ++sample_id_counter; }
+    size_t get_blob_schema_id() { return ++blob_schema_counter; }
 
     // Acquire an empty pooled buffer (no copy); the caller fills it in place, e.g. when
     // assembling a PC-sample blob field-by-field.
@@ -648,6 +650,10 @@ get_fk_parent_tables(rocpd_db& db, const std::string& table)
 
         const auto* parent_table = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2));
         if(parent_table == nullptr || parent_table[0] == '\0') continue;
+        // A self-reference (e.g. rocpd_event.parent_id) is satisfied within the table's own
+        // batch; counting it as a parent would make the batch look permanently blocked to
+        // select_pending_batch_victim.
+        if(table == parent_table) continue;
         if(std::find(parents.begin(), parents.end(), parent_table) == parents.end())
             parents.emplace_back(parent_table);
     }
@@ -829,6 +835,13 @@ get_insert_statement(rocpd_db& db, std::string_view _table, std::vector<sql_inse
             << "Pending insert batch row has " << values.size() << " values, expected "
             << pending.fields.size() << " for table: " << table;
 #endif
+
+        // Any row may carry the first blob (e.g. the first row bound the column as NULL), so
+        // keep has_blob sticky; otherwise later blob buffers would skip the recycle pool.
+        if(!pending.has_blob)
+            pending.has_blob = std::any_of(values.begin(), values.end(), [](const auto& v) {
+                return std::holds_alternative<blob_data>(v.value);
+            });
 
         pending.last_touched = ++db.pending_touch_count;
         pending.rows.emplace_back(std::move(values));
@@ -1626,18 +1639,17 @@ build_pc_sample_blob(rocpd_db&                             db,
     return buf;
 }
 
-// Register a self-describing blob schema and return its rowid.
+// Register a self-describing blob schema and return its id.
 //
-// Design note: get_insert_statement batches inserts, so the schema row is not visible to
-// sqlite3_last_insert_rowid() until its batch is flushed.  Flush the schema batch before
-// reading the rowid, and read it before enqueueing any field rows.
+// The id is assigned explicitly (like event and sample ids) so it is known before the batched
+// insert is flushed; the FK-ordered flush still writes the schema row before its field rows.
 inline uint64_t
 register_blob_schema(rocpd_db&               db,
                      uint64_t                node_id,
                      uint64_t                this_pid,
                      const blob_schema_desc& schema)
 {
-    auto schema_table = replace_uuid(db, "rocpd_info_blob_schema{{uuid}}");
+    const auto schema_id = static_cast<uint64_t>(db.get_blob_schema_id());
 
     // NOTE: the caller (insert_pc_sampling_data) already holds a deferred_transaction.
     // SQLite has no nested transactions, so we must NOT open another one here (doing so
@@ -1646,6 +1658,7 @@ register_blob_schema(rocpd_db&               db,
         db,
         "rocpd_info_blob_schema{{uuid}}",
         {
+            insert_value("id", schema_id),
             insert_value("nid", node_id),
             insert_value("pid", this_pid),
             insert_value("name", std::string{schema.name}),
@@ -1656,11 +1669,6 @@ register_blob_schema(rocpd_db&               db,
             insert_value("struct_size", schema.struct_size),
             insert_value("version", schema.version),
         });
-
-    if(auto itr = db.pending_batches.find(schema_table); itr != db.pending_batches.end())
-        flush_pending_insert_batch(db, itr->second);
-
-    const auto schema_id = static_cast<uint64_t>(sqlite3_last_insert_rowid(db.conn));
 
     for(const auto& field : schema.fields)
     {
@@ -2600,13 +2608,22 @@ write_rocpd(
             return pmc_id;
         };
 
+        size_t untracked_spm_records = 0;
         for(auto ditr : spm_collection_gen)
         {
             for(const auto& record : spm_collection_gen.get(ditr))
             {
                 const auto& info        = record.dispatch_data.dispatch_info;
                 auto        dispatch_id = info.dispatch_id;
-                auto        evt_id      = dispatch_evt_ids.at(dispatch_id);
+
+                auto dispatch_itr = dispatch_evt_ids.find(dispatch_id);
+                if(dispatch_itr == dispatch_evt_ids.end())
+                {
+                    ++untracked_spm_records;
+                    continue;
+                }
+
+                auto evt_id = dispatch_itr->second;
 
                 auto track_id =
                     get_track_id(db, node_id, this_pid, record.thread_id, spm_name_id, "{}");
@@ -2646,6 +2663,11 @@ write_rocpd(
                 }
             }
         }
+
+        if(untracked_spm_records > 0)
+            ROCP_WARNING << fmt::format("rocpd: dropped {} SPM record(s) whose kernel dispatch "
+                                        "was not recorded",
+                                        untracked_spm_records);
     };
 
     auto insert_memory_copy_data =

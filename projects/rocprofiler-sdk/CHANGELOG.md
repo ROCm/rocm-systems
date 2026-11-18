@@ -11,9 +11,21 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Changed
 
+- rocpd post-processing no longer writes lazily decoded PC-sampling disassembly back into its input databases by default. Pass `--cache-disassembly` (or `cache_disassembly=True` to `RocpdImportData`) to opt in; `--no-cache-disassembly` is still accepted. The write-back now runs when the `RocpdImportData` object is released (or at interpreter exit) instead of through a per-instance `atexit` handler.
+- `rocpd query` only rewrites `rocpd_gpu_pc_sample` references to the decoded view when the query does not compile against the raw table as written, so existing `SELECT *`, `UNION` and `INSERT ... SELECT` queries keep their column set.
+- rocprofv3 computes PC-sampling code-object content hashes when the ROCpd database is written rather than in the code-object load callback.
+- The rocpd schema adds indexes on `rocpd_blob_event(event_id, guid)` and `rocpd_disassembly_data(code_object_id, code_object_offset, guid)` for the PC-sampling decoded views.
+
 ### Resolved issues
 
 - Fixed rocpd reporting a counter at N times its value under `rocprofv3 --replay-mode kernel` when N `--pmc` groups list it, for example a sanity counter such as `SQ_WAVES` in every group. Every pass of a replayed dispatch shares the dispatch's record, so the `counters_collection` view, and the counter CSV and Perfetto output that `rocpd convert` builds from it, summed the passes. Passes after the first are now tagged with `replay_pass` in `rocpd_pmc_event.extdata`, the view averages a counter over the passes that collected it, and the `pmc_events` view reports each row's pass in a new `replay_pass` column. This behavior is identified by rocpd schema version 3.0.6.
+- Fixed the gfx9 stochastic PC-sampling validation checking `arb_state_stall_matrix` instead of `arb_state_issue_matrix` for VALU samples that lost arbitration, which failed intermittently when another wave issued a matrix instruction.
+- Fixed ROCpd output aborting with `std::out_of_range` when an SPM record's kernel dispatch was not recorded; such records are now skipped with a warning, like counter-collection records.
+- Fixed a possible deadlock when `rocprofiler-sdk` finalization is reached from inside a tool's finalize or detach callback on the same thread (for example a tool that calls `exit()`).
+- Fixed rocpd combining inputs whose tables have different column sets (for example `rocpd_event.parent_id` added in schema 3.1.0) by position; columns are now matched by name, so mixed-version inputs report a schema-version error instead of a SQL error.
+- Fixed `rocpd convert` silently omitting the PC-sampling CSV files when the decoded view could not be set up; a warning is now printed when raw samples exist.
+- Fixed `CodeObjectBinary` mangling plain file paths that have no URI scheme.
+- Fixed ROCpd blob-schema ids depending on `sqlite3_last_insert_rowid` after a forced batch flush, the `rocpd_event` batch never being chosen for eviction because of its self-referencing foreign key, and blob buffers bypassing the reuse pool when a batch's first row had no blob.
 
 ### Known issues
 

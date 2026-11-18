@@ -26,6 +26,7 @@
 import os
 import re
 import sqlite3
+import sys
 
 from .importer import RocpdImportData, add_decode_args, get_decode_args
 from .query import export_sqlite_query
@@ -530,19 +531,37 @@ def write_region_csv(importData, config) -> None:
     write_sql_query_to_csv(importData, config, query, "regions")
 
 
-def _pc_sampling_query_runs(importData, query: str) -> bool:
-    """Return False when *query* needs a decoded view or column that is missing."""
+def _pc_sampling_query_runs(importData, query: str, output_name: str) -> bool:
+    """Return False when *query* needs a decoded view or column that is missing.
+
+    Decoded-view setup is best-effort, so a missing view is not an error by itself. When
+    the database still holds raw PC samples, warn that the CSV is being skipped instead
+    of silently producing no file.
+    """
     try:
         importData.execute(f"SELECT * FROM ({query}) LIMIT 0")
         return True
     except sqlite3.OperationalError as error:
         message = str(error).lower()
-        if any(
+        if not any(
             text in message
             for text in ("no such table", "no such view", "no such column")
         ):
-            return False
-        raise
+            raise
+        try:
+            has_samples = (
+                importData.execute("SELECT 1 FROM rocpd_gpu_pc_sample LIMIT 1").fetchone()
+                is not None
+            )
+        except sqlite3.OperationalError:
+            has_samples = False
+        if has_samples:
+            sys.stderr.write(
+                f"rocpd: skipping {output_name} CSV: the decoded PC-sampling view is "
+                f"unavailable ({error}); raw samples remain in rocpd_gpu_pc_sample\n"
+            )
+            sys.stderr.flush()
+        return False
 
 
 def write_pc_sampling_host_trap_csv(importData, config) -> None:
@@ -560,7 +579,7 @@ def write_pc_sampling_host_trap_csv(importData, config) -> None:
         WHERE sample.wave_issued IS NULL
         ORDER BY sample.guid ASC, sample.id ASC
     """
-    if not _pc_sampling_query_runs(importData, query):
+    if not _pc_sampling_query_runs(importData, query, "pc_sampling_host_trap"):
         return
     # exec_mask is stored as decimal text to keep all 64 bits; export it unquoted.
     write_sql_query_to_csv(
@@ -591,7 +610,7 @@ def write_pc_sampling_stochastic_csv(importData, config) -> None:
         WHERE sample.wave_issued IS NOT NULL
         ORDER BY sample.guid ASC, sample.id ASC
     """
-    if not _pc_sampling_query_runs(importData, query):
+    if not _pc_sampling_query_runs(importData, query, "pc_sampling_stochastic"):
         return
     write_sql_query_to_csv(
         importData,
