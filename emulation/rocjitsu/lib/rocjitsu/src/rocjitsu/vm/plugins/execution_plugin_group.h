@@ -23,6 +23,7 @@
 #include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "rocjitsu/vm/plugins/plugin_sink.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -129,22 +130,8 @@ public:
     const bool observes_scalar_register_writes = p->observes_scalar_register_writes();
     const bool observes_memory_routing = p->observes_memory_routing();
     const bool observes_lds_direct_reads = p->observes_lds_direct_reads();
-    observes_lds_direct_reads_ |= observes_lds_direct_reads;
     const bool observes_tensor_dma_memory_access = p->observes_tensor_dma_memory_access();
     const bool observes_tensor_dma_issue = p->observes_tensor_dma_issue();
-    serialize_hot_hooks_ |= p->requires_serial_hot_hooks();
-    observes_before_execute_instruction_ |= observes_before_execute_instruction;
-    observes_after_execute_instruction_ |= observes_after_execute_instruction;
-    observes_async_instruction_issued_ |= observes_async_instruction_issued;
-    observes_memory_instruction_routing_ |= observes_memory_instruction_routing;
-    observes_vgpr_reads_ |= observes_vgpr_reads;
-    observes_vgpr_writes_ |= observes_vgpr_writes;
-    observes_sgpr_reads_ |= observes_sgpr_reads;
-    observes_scalar_register_writes_ |= observes_scalar_register_writes;
-    observes_memory_routing_ |= observes_memory_routing;
-    observes_tensor_dma_memory_access_ |= observes_tensor_dma_memory_access;
-    observes_tensor_dma_issue_ |= observes_tensor_dma_issue;
-    supports_async_instructions_ &= p->supports_async_instructions();
     SinkBundle sink = build_sink_bundle(p->name() + ".log");
     if (auto *configured_sink = sink.get())
       p->sink_ = configured_sink;
@@ -153,13 +140,49 @@ public:
         observes_async_instruction_issued, observes_memory_instruction_routing, observes_vgpr_reads,
         observes_vgpr_writes, observes_sgpr_reads, observes_scalar_register_writes,
         observes_memory_routing, observes_tensor_dma_memory_access, observes_tensor_dma_issue,
-        observes_lds_direct_reads, std::move(p)});
+        observes_lds_direct_reads, p->requires_serial_hot_hooks(), p->supports_async_instructions(),
+        std::move(p)});
+    include_hook_policy(plugins_.back());
     return true;
   }
 
   /// Add an in-tree plugin freed with `delete` (host/test convenience).
   bool add(std::unique_ptr<ExecutionPlugin> p) {
     return add(OwnedPlugin(p.release(), PluginDeleter{&delete_execution_plugin}));
+  }
+
+  /// @brief Remove one plugin while the group and its consumers are quiescent.
+  /// @details Call onShutdown() on the removed plugin first, then republish the
+  /// group to refresh consumer hook policies before dispatching new waves.
+  /// Existing wave-local plugin state must no longer be in use.
+  bool remove(ExecutionPlugin *plugin) {
+    const std::vector<PluginEntry>::iterator found = std::ranges::find(
+        plugins_, plugin, [](const PluginEntry &entry) { return entry.plugin.get(); });
+    if (found == plugins_.end())
+      return false;
+    // Destroy the removed plugin before its sink, including when erasing from
+    // the middle would otherwise move-assign the sink ahead of the plugin.
+    PluginEntry removed = std::move(*found);
+    plugins_.erase(found);
+    serialize_hot_hooks_ = false;
+    observes_before_execute_instruction_ = false;
+    observes_after_execute_instruction_ = false;
+    observes_async_instruction_issued_ = false;
+    observes_memory_instruction_routing_ = false;
+    observes_vgpr_reads_ = false;
+    observes_vgpr_writes_ = false;
+    observes_sgpr_reads_ = false;
+    observes_scalar_register_writes_ = false;
+    observes_memory_routing_ = false;
+    observes_tensor_dma_memory_access_ = false;
+    observes_tensor_dma_issue_ = false;
+    observes_lds_direct_reads_ = false;
+    supports_async_instructions_ = true;
+    for (size_t index = 0; index < plugins_.size(); ++index) {
+      plugins_[index].plugin->slot_index_ = static_cast<uint32_t>(index);
+      include_hook_policy(plugins_[index]);
+    }
+    return true;
   }
 
   uint32_t num_plugins() const { return static_cast<uint32_t>(plugins_.size()); }
@@ -806,8 +829,27 @@ private:
     bool observes_tensor_dma_memory_access = false;
     bool observes_tensor_dma_issue = false;
     bool observes_lds_direct_reads = false;
+    bool requires_serial_hot_hooks = false;
+    bool supports_async_instructions = true;
     OwnedPlugin plugin;
   };
+
+  void include_hook_policy(const PluginEntry &entry) {
+    serialize_hot_hooks_ |= entry.requires_serial_hot_hooks;
+    observes_before_execute_instruction_ |= entry.observes_before_execute_instruction;
+    observes_after_execute_instruction_ |= entry.observes_after_execute_instruction;
+    observes_async_instruction_issued_ |= entry.observes_async_instruction_issued;
+    observes_memory_instruction_routing_ |= entry.observes_memory_instruction_routing;
+    observes_vgpr_reads_ |= entry.observes_vgpr_reads;
+    observes_vgpr_writes_ |= entry.observes_vgpr_writes;
+    observes_sgpr_reads_ |= entry.observes_sgpr_reads;
+    observes_scalar_register_writes_ |= entry.observes_scalar_register_writes;
+    observes_memory_routing_ |= entry.observes_memory_routing;
+    observes_tensor_dma_memory_access_ |= entry.observes_tensor_dma_memory_access;
+    observes_tensor_dma_issue_ |= entry.observes_tensor_dma_issue;
+    observes_lds_direct_reads_ |= entry.observes_lds_direct_reads;
+    supports_async_instructions_ &= entry.supports_async_instructions;
+  }
 
   std::vector<PluginEntry> plugins_;
 };

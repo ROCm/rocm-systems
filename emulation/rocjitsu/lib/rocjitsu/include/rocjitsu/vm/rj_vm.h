@@ -191,8 +191,9 @@ RJ_API_EXPORT rj_status_t rj_vm_create_from_string_for_node(const char *json, co
 /// enable plugins without linking the simulator's C++ ABI. Call after
 /// rj_vm_create / rj_vm_create_from_string; repeated calls are allowed before
 /// the first rj_vm_step or rj_vm_run. A config with
-/// no `plugins` attaches an empty group (near-zero overhead). Plugin load
-/// failures are best-effort unless the config sets the top-level
+/// no `plugins` clears the user plugins; the built-in statistics adapter remains
+/// active when execution metrics are selected. Plugin load failures are
+/// best-effort unless the config sets the top-level
 /// `require_all_plugins` boolean to true. This function must complete before the
 /// first rj_vm_step or rj_vm_run call and must not overlap either call; that
 /// ordering keeps plugin initialization and replacement outside the
@@ -200,13 +201,15 @@ RJ_API_EXPORT rj_status_t rj_vm_create_from_string_for_node(const char *json, co
 /// and its active state. Exceptions during shutdown, replacement, or initialization
 /// are translated to errors without a state-preservation guarantee. To reconfigure
 /// a single-instance plugin such as Perfsim, first pass an empty string to remove
-/// the installed group, then load the new config. This removes the old group
-/// before the replacement is validated; a rejected replacement leaves no plugins.
+/// the user plugins, then load the new config. This removes the old user plugins
+/// before the replacement is validated; a rejected replacement leaves no user
+/// plugins, while the selected built-in statistics adapter remains active.
 /// @param[in] vm VM handle from rj_vm_create / rj_vm_create_from_string.
 /// @param[in] config_json The full config-file JSON containing the plugin
 ///            configuration; it may differ from the text used to create the VM.
-///            Never NULL. An empty string removes all installed plugins; a non-empty
-///            config must be a JSON object.
+///            Never NULL. An empty string removes the user plugins while retaining
+///            the built-in statistics adapter when execution metrics are selected.
+///            A non-empty config must be a JSON object.
 /// @param[in] plugin_dir Trusted directory to load plugin shared objects from
 ///            by explicit path — required in daemon mode, where the process is
 ///            not re-exec'd and cannot rely on a launcher-populated

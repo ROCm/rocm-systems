@@ -1,9 +1,11 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "config_test_util.h"
 #include "rocjitsu/stats/statistics.h"
 #include "rocjitsu/vm/api.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
+#include "rocjitsu/vm/topology_assembly.h"
 #include "scoped_temp.h"
 
 #include <gtest/gtest.h>
@@ -56,6 +58,12 @@ TEST(StatisticsVmTest, PassiveConfigDoesNotOpenOutputAndAllGpusShareSession) {
   ASSERT_NE(session, nullptr);
   EXPECT_EQ(vm->vm->soc(0)->statistics(), session);
   EXPECT_EQ(vm->vm->soc(1)->statistics(), session);
+  EXPECT_EQ(vm->vm->soc(0)->plugin_group().num_plugins(), 1u);
+  EXPECT_EQ(vm->vm->soc(1)->plugin_group().num_plugins(), 1u);
+  ASSERT_EQ(rj_vm_load_plugins(vm.get(), "{}", nullptr), ROCJITSU_STATUS_SUCCESS);
+  ASSERT_EQ(rj_vm_load_plugins(vm.get(), "{}", nullptr), ROCJITSU_STATUS_SUCCESS);
+  EXPECT_EQ(vm->vm->soc(0)->plugin_group().num_plugins(), 1u);
+  EXPECT_EQ(vm->vm->soc(1)->plugin_group().num_plugins(), 1u);
   const std::string output_path = session->output_path();
   EXPECT_TRUE(std::filesystem::exists(output_path));
   ASSERT_EQ(rj_vm_run(vm.get(), nullptr), ROCJITSU_STATUS_SUCCESS);
@@ -81,6 +89,29 @@ TEST(StatisticsVmTest, DisabledSessionDoesNotCreateOutput) {
   EXPECT_EQ(raw->vm->statistics(), nullptr);
   rj_vm_destroy(raw);
   EXPECT_FALSE(std::filesystem::exists(directory));
+}
+
+TEST(StatisticsVmTest, AttachesToTopologyWithoutCommandProcessor) {
+  rocjitsu::test::ScopedTempDirectory temporary;
+  ASSERT_TRUE(temporary.initialize("rocjitsu-stats-no-cp-"));
+  std::string json = statistics_vm_config(temporary.path());
+  const std::string cp = R"({"name":"cp","type":"command_processor"},)";
+  const auto position = json.find(cp);
+  ASSERT_NE(position, std::string::npos);
+  json.erase(position, cp.size());
+  rocjitsu::config::LoadedConfig loaded;
+  ASSERT_TRUE(rocjitsu::test::load_valid_config_from_string(json, loaded));
+  simdojo::Topology topology;
+  util::StringDiagnostic diagnostic;
+  auto assembled =
+      rocjitsu::assemble_virtual_machine_topology(loaded, topology, false, diagnostic.emitter());
+  ASSERT_TRUE(assembled.succeeded()) << diagnostic.message();
+  auto *vm = assembled.value();
+  ASSERT_NE(vm->statistics(), nullptr);
+  for (uint32_t gpu = 0; gpu < vm->num_socs(); ++gpu) {
+    EXPECT_EQ(vm->soc(gpu)->xcd(0)->command_processor(), nullptr);
+    EXPECT_EQ(vm->soc(gpu)->all_cus().front()->plugin_group().num_plugins(), 1u);
+  }
 }
 
 TEST(StatisticsVmTest, InvalidFormatFailsBeforeOutputActivation) {
