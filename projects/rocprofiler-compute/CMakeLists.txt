@@ -787,15 +787,75 @@ add_test(
         ${WORKING_DIR_OPTION}
 )
 
-# The metric library sync test imports tools/, which an install tree lacks.
+# Tests of tools/ scripts. An install tree has no tools/.
 if(NOT TEST_FROM_INSTALL)
+    add_test(
+        NAME test_counter_grouping_inspector
+        COMMAND
+            ${PYTHON_TEST_COMMAND} -m pytest
+            --junitxml=tests/test_counter_grouping_inspector.xml ${COV_OPTION}
+            tools/test_counter_grouping_inspector.py ${WORKING_DIR_OPTION}
+    )
+
+    add_test(
+        NAME test_format_yaml
+        COMMAND
+            ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_format_yaml.xml
+            ${COV_OPTION} tools/test_format_yaml.py ${WORKING_DIR_OPTION}
+    )
+
+    add_test(
+        NAME test_generate_metric_health_report
+        COMMAND
+            ${PYTHON_TEST_COMMAND} -m pytest
+            --junitxml=tests/test_generate_metric_health_report.xml ${COV_OPTION}
+            tools/test_generate_metric_health_report.py ${WORKING_DIR_OPTION}
+    )
+
+    add_test(
+        NAME test_instruction_pipeline_generator
+        COMMAND
+            ${PYTHON_TEST_COMMAND} -m pytest
+            --junitxml=tests/test_instruction_pipeline_generator.xml ${COV_OPTION}
+            tools/test_instruction_pipeline_generator.py ${WORKING_DIR_OPTION}
+    )
+
+    add_test(
+        NAME test_memory_chart_layout_format
+        COMMAND
+            ${PYTHON_TEST_COMMAND} -m pytest
+            --junitxml=tests/test_memory_chart_layout_format.xml ${COV_OPTION}
+            tools/test_memory_chart_layout_format.py ${WORKING_DIR_OPTION}
+    )
+
+    add_test(
+        NAME test_memory_chart_preview
+        COMMAND
+            ${PYTHON_TEST_COMMAND} -m pytest
+            --junitxml=tests/test_memory_chart_preview.xml ${COV_OPTION}
+            tools/test_memory_chart_preview.py ${WORKING_DIR_OPTION}
+    )
+
     add_test(
         NAME test_metric_library_sync
         COMMAND
             ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_metric_library_sync.xml
-            ${COV_OPTION}
-            tests/unit/rocprof_compute_soc/metric_library/test_metric_library_sync.py
-            ${WORKING_DIR_OPTION}
+            ${COV_OPTION} tools/test_metric_library_sync.py ${WORKING_DIR_OPTION}
+    )
+
+    add_test(
+        NAME test_schema_visualizer
+        COMMAND
+            ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_schema_visualizer.xml
+            ${COV_OPTION} tools/test_schema_visualizer.py ${WORKING_DIR_OPTION}
+    )
+
+    add_test(
+        NAME test_validate_metric_library
+        COMMAND
+            ${PYTHON_TEST_COMMAND} -m pytest
+            --junitxml=tests/test_validate_metric_library.xml ${COV_OPTION}
+            tools/test_validate_metric_library.py ${WORKING_DIR_OPTION}
     )
 endif()
 

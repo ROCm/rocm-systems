@@ -370,6 +370,8 @@ python tools/format_yaml.py --diff src/rocprof_compute_soc/analysis_configs/gfx9
 python tools/format_yaml.py --fix src/rocprof_compute_soc/analysis_configs/gfx950/*.yaml
 ```
 
+`tools/test_format_yaml.py` tests the formatter.
+
 ## Documentation Changes
 
 For instructions on building and testing changes to files under the `docs/` folder, see the [ROCm documentation contributing guide](https://rocm.docs.amd.com/en/latest/contribute/contributing.html).
@@ -398,9 +400,13 @@ A metric whose counters do not fit one profiling pass is split into collectables
 
 The metric library in `src/rocprof_compute_soc/metric_library/` defines each metric once per architecture. Until production reads the library, a metric change goes into both the panel YAMLs and the metric library. See the [metric library README](./src/rocprof_compute_soc/metric_library/README.md) for its layout, inheritance and checks.
 
+`tools/test_metric_library_sync.py` checks that the metric library matches the panel YAMLs.
+
 ## Memory Chart Layouts
 
 The memory chart is drawn from one JSON layout per architecture family. To add or change a layout, see the [memory chart layouts README](./src/memory_chart/README.md).
+
+`tools/test_memory_chart_layout_format.py` and `tools/test_memory_chart_preview.py` test the layout formatter and the preview script.
 
 ## Analysis Database Schema Diagrams
 
@@ -418,6 +424,8 @@ the ORM metadata for the schema diagram, and materializes the views in a
 throwaway database to read back their real columns for the views diagram, so
 neither diagram can drift from the code. Do not edit the PNGs by hand.
 
+`tools/test_schema_visualizer.py` tests the diagram generator.
+
 ## Instruction Execution Pipeline Table
 
 [`src/pc_sampling/instruction_pipelines.yaml`](src/pc_sampling/instruction_pipelines.yaml)
@@ -432,6 +440,8 @@ and commit the regenerated file as is:
 This requires `llvm-tblgen` and `llvm-objdump` from ROCm (set `ROCM_PATH` if
 they are not under `/opt/rocm`) and network access. Do not edit the YAML by
 hand.
+
+`tools/test_instruction_pipeline_generator.py` tests the generator.
 
 ## Vendoring External Dependencies
 
