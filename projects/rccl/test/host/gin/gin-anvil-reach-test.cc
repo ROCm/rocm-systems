@@ -38,11 +38,12 @@ struct ReachComm {
   std::unique_ptr<ncclComm> comm = std::make_unique<ncclComm>();
   std::string arch;
 
-  ReachComm(const char* archName, int mnnvl, int nRanks, int cliqueSize) : arch(archName) {
+  ReachComm(const char* archName, int mnnvl, int nRanks, int cliqueSize, int cuMemSupport = 1) : arch(archName) {
     comm->archName = &arch[0];
     comm->MNNVL = mnnvl;
     comm->nRanks = nRanks;
     comm->clique.size = cliqueSize;
+    comm->cuMemSupport = cuMemSupport;
   }
 };
 
@@ -60,8 +61,17 @@ TEST_F(GinAnvilReachMicrotest, UseFabricMem_OnlyForMi450SingleCliqueWithCuMem) {
   EXPECT_FALSE(ginAnvilUseFabricMem(ReachComm("gfx1250", 1, 8, 4).comm.get()));
   EXPECT_FALSE(ginAnvilUseFabricMem(ReachComm("gfx1250", 0, 8, 8).comm.get()));
   EXPECT_FALSE(ginAnvilUseFabricMem(ReachComm("gfx950", 1, 8, 8).comm.get()));
+  EXPECT_FALSE(ginAnvilUseFabricMem(ReachComm("gfx1250", 1, 8, 8, /*cuMemSupport=*/0).comm.get()));
+}
+
+// A caller may run a collective only where ginAnvilFabricMemCapable holds, so a
+// rank must not decide from its own cuMem setting: with cuMem on here and off on
+// a peer, every rank, this one included, must read false.
+TEST_F(GinAnvilReachMicrotest, FabricMemCapable_NeedsCuMemOnEveryRank) {
+  g_cuMemEnable = [] { return 1; };
+  EXPECT_FALSE(ginAnvilFabricMemCapable(ReachComm("gfx1250", 1, 8, 8, /*cuMemSupport=*/0).comm.get()));
   g_cuMemEnable = [] { return 0; };
-  EXPECT_FALSE(ginAnvilUseFabricMem(ReachComm("gfx1250", 1, 8, 8).comm.get()));
+  EXPECT_TRUE(ginAnvilFabricMemCapable(ReachComm("gfx1250", 1, 8, 8, /*cuMemSupport=*/1).comm.get()));
 }
 
 // Off unless RCCL_GIN_ANVIL_FABRIC_MEM=1. Capability ignores the opt-in, so a

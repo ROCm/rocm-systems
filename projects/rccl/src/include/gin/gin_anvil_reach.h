@@ -12,8 +12,9 @@ struct ncclComm;
 // Readers of comm state, defined in src/gin/gin_anvil_reach.cc.
 
 // True when comm could register Anvil SDMA windows through exported fabric VMM
-// handles: MI450 with MNNVL, one clique covering comm, and cuMem. Depends on
-// topology only, so every rank of comm gets the same answer.
+// handles: MI450 with MNNVL, one clique covering comm, and cuMem on every rank.
+// Reads only state that the ranks agreed on at init, so every rank of comm gets
+// the same answer.
 bool ginAnvilFabricMemCapable(struct ncclComm* comm);
 
 // ginAnvilFabricMemCapable plus this rank's RCCL_GIN_ANVIL_FABRIC_MEM=1 opt-in.
