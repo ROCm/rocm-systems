@@ -4,11 +4,11 @@
 // Division-result fixup, special values, and optional guest exception causes.
 // Owns public entry points and their validation/dispatch policy.
 
-#include "common/internal.h"
+#include "common/validation.h"
 #include "fp/div_fixup_impl.h"
 #include "fp/float_output.h"
 #include "register/dpp.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 
 #include <stdint.h>
 

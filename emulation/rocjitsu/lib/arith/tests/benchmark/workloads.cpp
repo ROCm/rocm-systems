@@ -24,9 +24,10 @@ std::vector<std::string> element_types(const std::string &name) {
     auto position = name.find('_', begin);
     int end = position == std::string::npos ? int(name.size()) : int(position);
     std::string token = name.substr(begin, end - begin);
-    if (token == "bf16f32" || token == "f16" || token == "bf16" || token == "f32" ||
-        token == "f64" || token == "fp8" || token == "bf8" || token == "i32" || token == "u32" ||
-        token == "iu8" || token == "iu4" || token == "u8" || token == "u4") {
+    if (token == "f8f6f4" || token == "f4" || token == "bf16f32" || token == "f16" ||
+        token == "bf16" || token == "f32" || token == "f64" || token == "fp8" || token == "bf8" ||
+        token == "i32" || token == "u32" || token == "iu8" || token == "iu4" || token == "u8" ||
+        token == "u4") {
       types.push_back(token);
     }
     begin = end + 1;
@@ -59,6 +60,9 @@ uint32_t word(const std::string &type, uint32_t random, int reg) {
   if (type == "bf8") {
     return 0x38383838U | (random & 0x03030303U);
   }
+  if (type == "f4") {
+    return 0x22222222U | (random & 0x11111111U);
+  }
   return 0x01010101U | (random & 0x0f0f0f0fU);
 }
 
@@ -81,6 +85,10 @@ Operands::Operands(const std::string &instruction, bool one_nan_lane, OperandLay
   if (instruction.find("frexp_exp") != std::string::npos) {
     left = right = types.back();
   }
+  // Zero format controls select FP8 for the mixed-format instruction.
+  if (left == "f8f6f4") {
+    left = right = "fp8";
+  }
   std::string formats[] = {left, right, output, output};
   if (output == "bf16f32") {
     // Packed BF16 results consume an FP32 accumulator.
@@ -91,10 +99,16 @@ Operands::Operands(const std::string &instruction, bool one_nan_lane, OperandLay
     left = right = formats[0] = formats[1] = formats[2] = "f32";
   }
   floating_point = left == "f16" || left == "bf16" || left == "f32" || left == "f64" ||
-                   left == "fp8" || left == "bf8";
+                   left == "fp8" || left == "bf8" || left == "f4";
+  for (int reg = 0; reg < 2; ++reg) {
+    scale[reg] = scale_data[reg];
+    for (int lane = 0; lane < 64; ++lane) {
+      scale_data[reg][lane] = 0x7f7f7f7fU;
+    }
+  }
   std::minstd_rand random;
   for (int operand = 0; operand < 4; ++operand) {
-    for (int reg = 0; reg < 8; ++reg) {
+    for (int reg = 0; reg < kRegisters; ++reg) {
       for (int lane = 0; lane < 16; ++lane) {
         uint32_t raw = (uint32_t(random()) >> 15) | ((uint32_t(random()) >> 15) << 16);
         uint32_t value = word(formats[operand], raw, reg);
@@ -110,7 +124,7 @@ Operands::Operands(const std::string &instruction, bool one_nan_lane, OperandLay
       data[1][0][lane] = lane % 4;
     }
   }
-  for (int reg = 0; reg < 8; ++reg) {
+  for (int reg = 0; reg < kRegisters; ++reg) {
     a[reg] = data[0][reg];
     b[reg] = data[1][reg];
     c[reg] = data[2][reg];
@@ -133,7 +147,7 @@ Operands::Operands(const std::string &instruction, bool one_nan_lane, OperandLay
     // Mix positive and negative fields, retaining gfx11's lane-group replication.
     const uint32_t sign = left == "iu4" ? 0x88888888U : 0x80808080U;
     for (int operand = 0; operand < 2; ++operand) {
-      for (int reg = 0; reg < 8; ++reg) {
+      for (int reg = 0; reg < kRegisters; ++reg) {
         for (int lane = 0; lane < 64; ++lane) {
           if ((lane >> operand) & 1) {
             data[operand][reg][lane] |= sign;
@@ -158,7 +172,8 @@ Operands::Operands(const std::string &instruction, bool one_nan_lane, OperandLay
     bool gfx11 =
         instruction.find("v_wmma_") == 0 && instruction.find("gfx12") == std::string::npos &&
         instruction.find("_16x16x16_") != std::string::npos && (left == "f16" || left == "bf16");
-    int operand = gfx11 ? 2 : 0;
+    // FP4 has no NaN encoding; inject the NaN into FP32 C instead.
+    int operand = gfx11 || left == "f4" ? 2 : 0;
     const auto &type = formats[operand];
     auto &value = data[operand][0][5];
     if (type == "f64") {

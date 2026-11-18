@@ -270,10 +270,13 @@ fn first_and_later_gpu_activation_failures_retire_the_session_join() {
     struct Activated {
         /// Number of mock GPU owners still live.
         live: Arc<AtomicUsize>,
+        /// Admission must close before a resource owner is released.
+        retiring: Arc<AtomicBool>,
     }
     impl Drop for Activated {
         /// Records destruction of the test owner.
         fn drop(&mut self) {
+            assert!(self.retiring.load(AtomicOrdering::Relaxed));
             self.live.fetch_sub(1, AtomicOrdering::Relaxed);
         }
     }
@@ -283,10 +286,21 @@ fn first_and_later_gpu_activation_failures_retire_the_session_join() {
         live: Arc<AtomicUsize>,
         /// Number of mock session joins still outstanding.
         joins: Arc<AtomicUsize>,
+        /// Expected live owners when rollback closes admission.
+        live_at_begin: usize,
+        /// Shared retirement state observed by resource destructors.
+        retiring: Arc<AtomicBool>,
     }
     impl RetireSession for Joined {
+        fn begin_retirement(&self) -> bool {
+            assert_eq!(self.live.load(AtomicOrdering::Relaxed), self.live_at_begin);
+            self.retiring.store(true, AtomicOrdering::Relaxed);
+            true
+        }
+
         /// Checks native owners are gone before retiring the mock session.
         fn retire(&mut self) -> bool {
+            assert!(self.retiring.load(AtomicOrdering::Relaxed));
             assert_eq!(self.live.load(AtomicOrdering::Relaxed), 0);
             self.joins.fetch_sub(1, AtomicOrdering::Relaxed);
             true
@@ -296,13 +310,20 @@ fn first_and_later_gpu_activation_failures_retire_the_session_join() {
     for completed_activations in [0, 1] {
         let live = Arc::new(AtomicUsize::new(completed_activations));
         let joins = Arc::new(AtomicUsize::new(1));
+        let retiring = Arc::new(AtomicBool::new(false));
         let mut pending = PendingInit {
+            debugger: None,
             session: Some(Joined {
                 live: live.clone(),
                 joins: joins.clone(),
+                live_at_begin: completed_activations,
+                retiring: retiring.clone(),
             }),
             gpus: (0..completed_activations)
-                .map(|_| Activated { live: live.clone() })
+                .map(|_| Activated {
+                    live: live.clone(),
+                    retiring: retiring.clone(),
+                })
                 .collect(),
         };
         assert!(pending.cleanup());
@@ -312,18 +333,29 @@ fn first_and_later_gpu_activation_failures_retire_the_session_join() {
 }
 
 #[test]
-fn failed_or_unwound_initialization_retains_the_native_session() {
+fn failed_or_unwound_initialization_retains_required_owners() {
     /// Records whether failed native rollback releases its owner.
     struct SessionProbe {
         /// Drop count that must remain zero after an uncertain rollback.
         drops: Arc<AtomicUsize>,
-        /// Injects an unwind instead of a returned native error.
-        panic_on_retire: bool,
+        /// Fails admission closure before releasing any resource owner.
+        fail_before_release: bool,
+        /// Injects an unwind instead of a returned error.
+        panic_on_failure: bool,
     }
 
     impl RetireSession for SessionProbe {
+        fn begin_retirement(&self) -> bool {
+            if self.fail_before_release {
+                assert!(!self.panic_on_failure, "injected admission closure unwind");
+                return false;
+            }
+            true
+        }
+
         fn retire(&mut self) -> bool {
-            assert!(!self.panic_on_retire, "injected native rollback unwind");
+            assert!(!self.fail_before_release);
+            assert!(!self.panic_on_failure, "injected native rollback unwind");
             false
         }
     }
@@ -334,23 +366,41 @@ fn failed_or_unwound_initialization_retains_the_native_session() {
         }
     }
 
-    for panic_on_retire in [false, true] {
-        let drops = Arc::new(AtomicUsize::new(0));
-        let mut pending = PendingInit {
-            session: Some(SessionProbe {
-                drops: drops.clone(),
-                panic_on_retire,
-            }),
-            gpus: Vec::<()>::new(),
-        };
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| pending.cleanup()));
-        if panic_on_retire {
-            assert!(result.is_err());
-        } else {
-            assert!(!result.unwrap());
+    struct GpuProbe(Arc<AtomicUsize>);
+
+    impl Drop for GpuProbe {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, AtomicOrdering::Relaxed);
         }
-        drop(pending);
-        assert_eq!(drops.load(AtomicOrdering::Relaxed), 0);
+    }
+
+    for fail_before_release in [false, true] {
+        for panic_on_failure in [false, true] {
+            let drops = Arc::new(AtomicUsize::new(0));
+            let gpu_drops = Arc::new(AtomicUsize::new(0));
+            let mut pending = PendingInit {
+                debugger: None,
+                session: Some(SessionProbe {
+                    drops: drops.clone(),
+                    fail_before_release,
+                    panic_on_failure,
+                }),
+                gpus: vec![GpuProbe(gpu_drops.clone())],
+            };
+            let result =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| pending.cleanup()));
+            if panic_on_failure {
+                assert!(result.is_err());
+            } else {
+                assert!(!result.unwrap());
+            }
+            drop(pending);
+            assert_eq!(drops.load(AtomicOrdering::Relaxed), 0);
+            assert_eq!(
+                gpu_drops.load(AtomicOrdering::Relaxed),
+                usize::from(!fail_before_release)
+            );
+        }
     }
 }
 
@@ -560,21 +610,39 @@ fn hardware_exception_events_match_the_amd_extension_layout() {
 }
 
 #[test]
-/// Verifies that GPU ticks translate around the correlated system sample.
-fn gpu_ticks_translate_around_the_correlated_system_sample() {
+/// Verifies that GPU ticks translate around the correlated host sample.
+fn gpu_ticks_translate_around_the_correlated_host_sample() {
     let counters = ClockCounters {
         gpu: 100,
-        host: 0,
-        system: 1_000,
-        system_frequency: 1_000_000_000,
-        gpu_frequency: 100_000_000,
+        host: 1_000,
+        system: None,
+        gpu_info: rocddi::host::clock::ClockInfo {
+            frequency_hz: 100_000_000,
+            counter_bit_count: 0,
+        },
     };
+    assert_eq!(
+        translate_gpu_tick(
+            ClockCounters {
+                gpu_info: rocddi::host::clock::ClockInfo {
+                    counter_bit_count: 32,
+                    ..counters.gpu_info
+                },
+                ..counters
+            },
+            110
+        ),
+        Err(NOT_SUPPORTED)
+    );
     assert_eq!(translate_gpu_tick(counters, 110), Ok(1_100));
     assert_eq!(translate_gpu_tick(counters, 90), Ok(900));
     assert_eq!(
         translate_gpu_tick(
             ClockCounters {
-                gpu_frequency: 200_000_000,
+                gpu_info: rocddi::host::clock::ClockInfo {
+                    frequency_hz: 200_000_000,
+                    ..counters.gpu_info
+                },
                 ..counters
             },
             110,
@@ -584,7 +652,10 @@ fn gpu_ticks_translate_around_the_correlated_system_sample() {
     assert_eq!(
         translate_gpu_tick(
             ClockCounters {
-                system_frequency: 0,
+                gpu_info: rocddi::host::clock::ClockInfo {
+                    frequency_hz: 0,
+                    ..counters.gpu_info
+                },
                 ..counters
             },
             100,
@@ -682,20 +753,20 @@ fn cache_handles_and_names_are_stable_runtime_objects() {
 #[test]
 /// Verifies that OS caches are not assigned to an unidentified CPU node.
 fn cpu_cache_source_requires_a_unique_cpu_without_domain_evidence() {
-    use rocddi::topology::host::{CpuCache, HostCaches, HostTopologySnapshot};
+    use rocddi::topology::host::{CpuCache, HostCaches, HostTopologyGraphSnapshot};
 
     let cache = |cpu| CpuCache {
         cpu,
         shared_cpus: None,
         info: rocddi::topology::CacheInfo::new(1, 32 * 1024, None, CpuCacheKind::Data),
     };
-    let topology = HostTopologySnapshot {
+    let topology = HostTopologyGraphSnapshot {
         memory_bytes: None,
         cpu: None,
         cpu_apic_ids: Vec::new(),
         online_cpus: None,
         caches: HostCaches {
-            records: vec![cache(7)],
+            records: vec![cache(rocddi::topology::host::CpuId::linux(7))],
             complete: true,
         },
         domains: Vec::new(),
@@ -703,26 +774,27 @@ fn cpu_cache_source_requires_a_unique_cpu_without_domain_evidence() {
     };
     assert_eq!(
         host_caches_for_cpu(&topology, None, 1).unwrap().records[0].cpu,
-        7
+        rocddi::topology::host::CpuId::linux(7)
     );
     assert!(host_caches_for_cpu(&topology, None, 2).is_none());
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 /// Verifies separate KFD CPU nodes retain their bank sizes and APU policy.
 fn cpu_agents_follow_kfd_cpu_nodes_and_system_banks() {
-    use rocddi::topology::host::{HostCaches, HostTopologySnapshot};
+    use rocddi::topology::host::{HostCaches, HostTopologyGraphSnapshot};
     use rocddi::topology::{
         CpuNodeInfo, MemoryBank, MemoryBankKind, NativeNodeId, NodeId, NodeKind, SourceId,
         TopologyNode,
     };
 
     let host = CpuInfo {
-        name: "test CPU".into(),
+        name: Some("test CPU".into()),
         compute_units: 12,
     };
-    let topology = TopologySnapshot {
-        host: HostTopologySnapshot {
+    let topology = TopologyGraphSnapshot {
+        host: HostTopologyGraphSnapshot {
             memory_bytes: Some(3 << 30),
             cpu: Some(host.clone()),
             cpu_apic_ids: Vec::new(),
@@ -851,4 +923,16 @@ fn hsa_runtime_reinitializes_after_shutdown() {
         assert_eq!(crate::hsa_init(), SUCCESS);
         assert_eq!(crate::hsa_shut_down(), SUCCESS);
     }
+}
+
+#[test]
+/// Unsupported native services retain an actionable public status.
+fn unsupported_native_services_report_not_supported() {
+    assert_eq!(
+        map_error(rocddi::Error::Operation {
+            kind: rocddi::ErrorKind::Unsupported,
+            detail: "unqualified transport",
+        }),
+        NOT_SUPPORTED
+    );
 }

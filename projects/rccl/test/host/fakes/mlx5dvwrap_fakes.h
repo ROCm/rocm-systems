@@ -35,6 +35,10 @@ extern std::function<ncclResult_t(struct ibv_mr** /*ret*/, struct ibv_pd* /*pd*/
                                   size_t /*length*/, uint64_t /*iova*/, int /*fd*/, int /*access*/,
                                   int /*mlx5_access*/)>
     g_mlx5dvRegDmabufMr;
+extern std::function<ncclResult_t(struct ibv_mr** /*ret*/, struct ibv_pd* /*pd*/, uint64_t /*offset*/,
+                                  size_t /*length*/, uint64_t /*iova*/, int /*fd*/, int /*access*/,
+                                  bool /*dataDirect*/)>
+    g_regDmabufMr;
 extern std::function<struct ibv_mr*(struct ibv_pd* /*pd*/, uint64_t /*offset*/, size_t /*length*/,
                                     uint64_t /*iova*/, int /*fd*/, int /*access*/, int /*mlx5_access*/)>
     g_mlx5dvDirectRegDmabufMr;

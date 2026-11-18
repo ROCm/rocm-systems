@@ -60,6 +60,7 @@ pub(crate) fn map_loader_error(error: rocloader::Error) -> Status {
         rocloader::Error::InvalidRange => INVALID_ALLOCATION,
         rocloader::Error::Frozen => FROZEN_EXECUTABLE,
         rocloader::Error::AlreadyDefined => VARIABLE_ALREADY_DEFINED,
+        rocloader::Error::Busy => ERROR,
     }
 }
 
@@ -185,15 +186,36 @@ fn resolve_executable_symbol(
 }
 
 /// Parses a code object and loads its segments for the selected agent.
-pub(super) fn parse_and_load(
+pub(super) unsafe fn parse_and_load(
     runtime: &HsaState,
     executable: HsaExecutable,
     agent: HsaAgent,
     code_object: Arc<[u8]>,
     storage: ReaderStorage,
     program: bool,
+    destination: Option<(u64, usize)>,
 ) -> Result<(LoadedObject, Vec<rocloader::Symbol>), Status> {
     let object = LoaderCodeObject::parse(&code_object).map_err(map_loader_error)?;
+    let record = runtime
+        .loader
+        .executables
+        .get(&executable.handle)
+        .ok_or(INVALID_EXECUTABLE)?;
+    let profile = match record.profile {
+        PROFILE_BASE => rocloader::Profile::Base,
+        PROFILE_FULL => rocloader::Profile::Full,
+        _ => return Err(INCOMPATIBLE_ARGUMENTS),
+    };
+    let rounding = match record.default_rounding {
+        DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT => rocloader::FloatRoundingMode::Default,
+        DEFAULT_FLOAT_ROUNDING_MODE_ZERO => rocloader::FloatRoundingMode::Zero,
+        DEFAULT_FLOAT_ROUNDING_MODE_NEAR => rocloader::FloatRoundingMode::Near,
+        _ => return Err(INCOMPATIBLE_ARGUMENTS),
+    };
+    object
+        .contract()
+        .validate(profile, rounding)
+        .map_err(map_loader_error)?;
     let (gpu_index, memory_kind, object_kind) = if program {
         let gpu_index = runtime
             .gpus
@@ -228,13 +250,42 @@ pub(super) fn parse_and_load(
         .into_bytes(),
         ReaderStorage::File { uri } => uri,
     };
-    let (image, symbols) = rocloader::load_image(
-        &gpu.device,
-        code_object,
-        memory_kind,
-        runtime.host_page_size as u64,
-        |name| resolve_executable_symbol(runtime, executable, agent, name),
-    )
+    let resolve = |name: &str| resolve_executable_symbol(runtime, executable, agent, name);
+    let (image, symbols) = if let Some((address, size)) = destination {
+        // SAFETY: The at-address API caller owns the writable/executable GPU
+        // range through executable destruction and any uncertain publication.
+        unsafe {
+            rocloader::load_image_at_address(
+                &gpu.device,
+                code_object,
+                address,
+                size,
+                runtime.host_page_size as u64,
+                resolve,
+            )
+        }
+    } else {
+        // Program resources are visible from every agent that can run this
+        // executable, including agents whose code objects are loaded later.
+        let peers = if program {
+            runtime
+                .gpus
+                .iter()
+                .enumerate()
+                .filter_map(|(index, peer)| (index != gpu_index).then_some(&peer.device))
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        rocloader::load_image_with_peers(
+            &gpu.device,
+            &peers,
+            code_object,
+            memory_kind,
+            runtime.host_page_size as u64,
+            resolve,
+        )
+    }
     .map_err(map_loader_error)?;
     Ok((
         LoadedObject {

@@ -4,8 +4,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// HIP runtime fakes for rccl-UnitTestsMicro. The binary does not link the real
-// HIP runtime, so this file provides (1) controllable std::function seams
+// HIP runtime fakes for the rccl-UnitTestsMicro* binaries, which do not link the
+// real HIP runtime, so this file provides (1) controllable std::function seams
 // (g_hip*) the tests drive via the macro shims in p2p-test.cc, and (2) plain
 // stubs for every other HIP symbol the object code references (returning
 // hipErrorInvalidValue so unexercised paths fail loudly instead of binding the
@@ -82,6 +82,10 @@ ASSERT_HOOK_MATCHES_PROD(g_hipFuncSetAttribute,           hipFuncSetAttribute);
 #define RCCL_ASSERT_INTERCEPTOR_HOOK(name, params) ASSERT_HOOK_MATCHES_PROD(g_##name, name);
 RCCL_HIP_PROFILE_INTERCEPTORS_HOOKED(RCCL_ASSERT_INTERCEPTOR_HOOK)
 #undef RCCL_ASSERT_INTERCEPTOR_HOOK
+
+ASSERT_HOOK_MATCHES_PROD(g_hipHostRegister,               hipHostRegister);
+ASSERT_HOOK_MATCHES_PROD(g_hipHostGetDevicePointer,       hipHostGetDevicePointer);
+ASSERT_HOOK_MATCHES_PROD(g_hipHostUnregister,             hipHostUnregister);
 
 #undef ASSERT_HOOK_MATCHES_PROD
 

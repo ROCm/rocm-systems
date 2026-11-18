@@ -16,6 +16,7 @@
 
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna3_5/valu.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/comparison.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/conversion.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/denormal_value.h"
@@ -29,7 +30,6 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/ldexp.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/minmax.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/mixed_fma_simd.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/output_denormal.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/output_modifier.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_static_resolve.h"
@@ -43,6 +43,7 @@
 #include "util/simd.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <bit>
 #include <cassert>
@@ -51,6 +52,7 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <span>
 #include <type_traits>
 
 namespace rocjitsu::cdna5 {
@@ -115,6 +117,7 @@ enum class SimdFastPath : uint8_t {
   CVT_F64_TO_B32,
   CVT_B32_TO_F64,
   VOPD,
+  VOPC_COMPARE_STATUS,
 };
 
 namespace detail {
@@ -330,7 +333,7 @@ inline std::make_unsigned_t<T> vop3_integer_sub(std::make_unsigned_t<T> lhs,
                                       static_cast<Wide>(std::numeric_limits<T>::max()));
     return static_cast<U>(saturated);
   } else {
-    return lhs_bits < rhs_bits ? U{0} : static_cast<U>(lhs_bits - rhs_bits);
+    return static_cast<U>(std::max(lhs_bits, rhs_bits) - rhs_bits);
   }
 }
 
@@ -3441,6 +3444,168 @@ template <bool Scoped = false, typename Inst, typename FmaOp>
   return false;
 }
 
+/// MAD/MAC produces the separately rounded F32 multiply and add, with
+/// denormal inputs and outputs flushed. The DX9 form makes 0*x positive zero.
+template <bool Legacy, typename T> inline T separately_rounded_mad_f32(T a, T b, T c) {
+  a = denormal::flush_value(a);
+  b = denormal::flush_value(b);
+  c = denormal::flush_value(c);
+  if constexpr (Legacy) {
+    if constexpr (std::is_same_v<T, float>) {
+      if (a == 0.0f || b == 0.0f) {
+        a = 0.0f;
+        b = 1.0f;
+      }
+    } else {
+      const auto zero = (a == T(0.0f)) || (b == T(0.0f));
+      util::stdx::where(zero, a) = T(0.0f);
+      util::stdx::where(zero, b) = T(1.0f);
+    }
+  }
+  if constexpr (std::is_same_v<T, float>) {
+    // Keep the rounded product even when the host permits FP contraction.
+    volatile float product = a * b;
+    return denormal::flush_value(denormal::flush_value(float(product)) + c);
+  } else {
+    return denormal::flush_value(denormal::flush_value(a * b) + c);
+  }
+}
+
+template <bool Legacy, typename Inst> inline void execute_cdna2_mad_f32(Inst &inst, Wavefront &wf) {
+  auto evaluate = [](auto a, auto b, auto c) {
+    return separately_rounded_mad_f32<Legacy>(a, b, c);
+  };
+  if constexpr (requires { inst.src2; }) {
+    if (try_execute_ternary_vop3_fp_simd<true>(inst, wf, evaluate))
+      return;
+  } else if (try_execute_fmac_vop3_fp_simd<true>(inst, wf, evaluate)) {
+    return;
+  }
+  fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());
+  auto output = output_modifier_policy<fp_format::F32>(wf, inst.inst_.omod, inst.inst_.clamp);
+  RegisterAccess regs(wf);
+  const uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (uint64_t{1} << lane)))
+      continue;
+    const auto read = [&](const auto &operand, unsigned index) {
+      const float raw = std::bit_cast<float>(regs.read_lane(operand, lane));
+      return source_modifier::apply_to_float(raw, index, inst.inst_.abs, inst.inst_.neg);
+    };
+    const float addend = [&] {
+      if constexpr (requires { inst.src2; })
+        return read(inst.src2, 2);
+      else
+        return std::bit_cast<float>(regs.read_lane(inst.vdst, lane));
+    }();
+    const float result = evaluate(read(inst.src0, 0), read(inst.src1, 1), addend);
+    regs.write_lane(
+        inst.vdst, lane,
+        output_modifier::apply<fp_format::F32>(std::bit_cast<uint32_t>(result), output));
+  }
+}
+
+/// Evaluate two separately rounded half operations. A signed zero addend
+/// preserves the sign of the product in the multiply step.
+template <typename T> inline T cdna2_mad_f16(T a, T b, T c, const Wavefront &wf) {
+  const auto rounded_fma = [&](T x, T y, T z) -> T {
+    const auto round = wf.fp_round_mode_f16_f64();
+    const bool quiet = fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode());
+    if constexpr (std::is_same_v<T, uint32_t>)
+      return fp_mode::fma_f16(x, y, z, false, false, false, false, false, false, round, 0, 0, false,
+                              wf.fp16_ovfl(), false, quiet);
+    else
+      return fma_f16_mode_simd(x, y, z, false, false, false, false, false, false, round, 0, 0,
+                               false, wf.fp16_ovfl(), false, quiet);
+  };
+  const T product = rounded_fma(a, b, (a ^ b) & T(0x8000u));
+  return rounded_fma(product, T(0x3c00u), c);
+}
+
+template <typename Inst> inline void execute_cdna2_mad_f16(Inst &inst, Wavefront &wf) {
+  constexpr bool has_src2 = requires { inst.src2; };
+  const uint32_t opsel = vop3_opsel(inst.inst_);
+  auto output = output_modifier_policy<fp_format::F16>(wf, inst.inst_.omod, inst.inst_.clamp);
+  const auto evaluate = [&](auto a, auto b, auto c) {
+    a = source_modifier::apply<fp_format::F16>(a, 0, inst.inst_.abs, inst.inst_.neg);
+    b = source_modifier::apply<fp_format::F16>(b, 1, inst.inst_.abs, inst.inst_.neg);
+    if constexpr (has_src2)
+      c = source_modifier::apply<fp_format::F16>(c, 2, inst.inst_.abs, inst.inst_.neg);
+    return output_modifier::apply<fp_format::F16>(cdna2_mad_f16(a, b, c, wf), output);
+  };
+  if constexpr (has_src2) {
+    if (try_execute_ternary_vop3_true16_simd<uint32_t>(inst, wf, evaluate))
+      return;
+  }
+  const uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (uint64_t{1} << lane)))
+      continue;
+    const auto a = read_vop3_true16_src(inst.src0, wf, lane, opsel, 0);
+    const auto b = read_vop3_true16_src(inst.src1, wf, lane, opsel, 1);
+    const auto c = [&] {
+      if constexpr (has_src2)
+        return read_vop3_true16_src(inst.src2, wf, lane, opsel, 2);
+      else
+        return (RegisterAccess(wf).read_lane(inst.vdst, lane) >> ((opsel & 8u) ? 16u : 0u)) &
+               0xffffu;
+    }();
+    write_vop3_true16_dst(inst.vdst, wf, lane, opsel, evaluate(a, b, c), true);
+  }
+}
+
+enum class MadVop2 { Accumulate, MultiplyLiteral, AddLiteral };
+
+/// E32 MAC reads the old destination. MADMK and MADAK instead use the literal
+/// in its encoded multiplier or addend position.
+template <MadVop2 Form, bool Half, typename Inst>
+inline void execute_cdna2_mad_vop2(Inst &inst, Wavefront &wf) {
+  using T = std::conditional_t<Half, uint32_t, float>;
+  constexpr bool accumulate = Form == MadVop2::Accumulate;
+  RegisterAccess regs(wf);
+  const T k = [&] {
+    if constexpr (!accumulate)
+      return std::bit_cast<T>(regs.read_scalar(inst.simm32));
+    return T{};
+  }();
+  const auto mad = [&](auto a, auto b, auto c) {
+    if constexpr (Half)
+      return cdna2_mad_f16(a, b, c, wf);
+    else
+      return separately_rounded_mad_f32<false>(a, b, c);
+  };
+  const auto evaluate = [&](auto a, auto b, auto d, auto literal) {
+    if constexpr (Form == MadVop2::MultiplyLiteral)
+      return mad(a, literal, b);
+    else if constexpr (Form == MadVop2::AddLiteral)
+      return mad(a, b, literal);
+    else
+      return mad(a, b, d);
+  };
+  const auto round = Half ? wf.fp_round_mode_f16_f64() : wf.fp_round_mode_f32();
+  if constexpr (accumulate) {
+    if (try_execute_ternary_vop2_acc_simd<T, !Half>(inst, wf, util::native<T>(k), evaluate, round))
+      return;
+  } else if (try_execute_ternary_vop2_simd<T, !Half>(inst, wf, util::native<T>(k), evaluate,
+                                                     round)) {
+    return;
+  }
+  fp_mode::ScopedEnvironment environment(round);
+  const uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (uint64_t{1} << lane)))
+      continue;
+    const T a = std::bit_cast<T>(regs.read_lane(inst.src0, lane));
+    const T b = std::bit_cast<T>(regs.read_lane(inst.vsrc1, lane));
+    T dst{};
+    if constexpr (accumulate)
+      dst = std::bit_cast<T>(regs.read_lane(inst.vdst, lane));
+    constexpr auto format = Half ? sdwa::ResultFormat::F16 : sdwa::ResultFormat::F32;
+    sdwa::write_lane<format>(inst, wf, inst.vdst, lane,
+                             std::bit_cast<uint32_t>(evaluate(a, b, dst, k)));
+  }
+}
+
 /// @brief MODE-aware VOP3 F16 destination-accumulate FMA SIMD fast path.
 template <bool True16, typename Inst>
   requires(util::has_stdx_simd)
@@ -4009,142 +4174,6 @@ inline uint32_t packed_integer_negations(rj_code_arch_t arch, const Encoding &en
 /// full 32-bit float into vdst; F16_LO writes the f16-narrowed result into
 /// the low half of vdst (high half preserved); F16_HI writes it into the
 /// high half (low half preserved). Selected by the per-mnemonic glue probe.
-enum class FmaMixDst { F32, F16_LO, F16_HI };
-
-inline util::native<float> fma_mix_mul_add(util::native<float> a, util::native<float> b,
-                                           util::native<float> c) {
-  return a * b + c;
-}
-
-/// VOP3P fma_mix / mad_mix SIMD fast path. Six ops share one body because all
-/// six differ only in (a) the f16-vs-f32 widening shape per source and (b) the
-/// f16-lo/f16-hi/f32 narrowing shape on the destination. The generated scalar
-/// bodies use `a * b + c` for legacy profiles and explicit FMA for CDNA5.
-/// The Fused parameter selects the matching arithmetic policy.
-///
-/// Per-source data fetch is gated by `op_sel_hi` (src0/src1) and
-/// `op_sel_hi_2` (src2): when the bit is 0 the source is read as f32; when
-/// 1 the source is read as a 32-bit word and the low or high f16 half
-/// (selected by the matching `op_sel` bit) is widened via f16_to_f32_simd.
-/// Per-source abs is gated by the field named `neg_hi` in the shared VOP3P
-/// layout for this mix-family encoding, and per-source sign-flip is gated by
-/// `neg` (xor of bit 31). Result-clamp saturates to [0, 1] via stdx::where.
-///
-/// All modifier fields are uniform across the wave so the per-source mode
-/// branches live outside the chunk loop and feed into the same `a*b+c`
-/// inner kernel regardless of fetch shape, keeping the SIMD path branch-
-/// predictable on every chunk.
-template <FmaMixDst DstMode, bool Fused = false, typename Inst>
-  requires(util::has_stdx_simd)
-[[nodiscard]] inline bool try_execute_vop3p_fma_mix_simd(Inst &inst, Wavefront &wf) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.src1.simd_capable() || !inst.src2.simd_capable() || !inst.vdst.simd_capable())
-    return false;
-
-#if RJ_HOST_HAS_FMA
-  if constexpr (!Fused && DstMode == FmaMixDst::F32) {
-    // Legacy scalar a*b+c and stdx SIMD expressions can contract differently
-    // with hardware FMA, including GCC with UBSan. Preserve the scalar path
-    // for those profiles; CDNA5 explicitly uses fused arithmetic in both
-    // execution paths.
-    return false;
-  }
-#endif
-  using T = float32_t;
-  const uint32_t op_sel = packed_opsel(inst.inst_);
-  const uint32_t op_sel_hi = packed_opsel_hi(inst.inst_);
-  const uint32_t op_sel_hi_2 = packed_opsel_hi_2(inst.inst_);
-  const uint32_t abs = inst.inst_.neg_hi;
-  const uint32_t neg = inst.inst_.neg;
-  const uint32_t clamp = inst.inst_.clamp;
-  constexpr std::size_t W = util::native_width_v<T>;
-  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
-  const uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  using U = util::native<uint32_t>;
-  using F = util::native<float>;
-  const U kSignBit(0x80000000u);
-  const U kAbsMask(~0x80000000u);
-  RegisterAccess regs(wf);
-  auto src0 = regs.read_operand(inst.src0, exec, inst.src0.register_byte_mask());
-  auto src1 = regs.read_operand(inst.src1, exec, inst.src1.register_byte_mask());
-  auto src2 = regs.read_operand(inst.src2, exec, inst.src2.register_byte_mask());
-  auto load_src = [&](const RegisterAccess::OperandReadView &op, uint32_t base,
-                      uint32_t src_selector, uint32_t sel_hi_bit, uint32_t sel_bit,
-                      uint32_t abs_bit, uint32_t neg_bit) -> F {
-    F v;
-    if (sel_hi_bit) {
-      U raw = op.template load_native<uint32_t>(base);
-      U halves = is_inline_float_src(src_selector) ? util::f32_to_f16_simd(std::bit_cast<F>(raw))
-                                                   : (sel_bit ? (raw >> 16) : (raw & 0xFFFFu));
-      v = util::f16_to_f32_simd(halves);
-    } else {
-      v = op.template load_native<float>(base);
-    }
-    if (abs_bit)
-      v = std::bit_cast<F>(std::bit_cast<U>(v) & kAbsMask);
-    if (neg_bit)
-      v = std::bit_cast<F>(std::bit_cast<U>(v) ^ kSignBit);
-    return v;
-  };
-  auto compute_result = [&](uint32_t base) {
-    F a = load_src(src0, base, inst.inst_.src0, op_sel_hi & 1u, op_sel & 1u, abs & 1u, neg & 1u);
-    F b = load_src(src1, base, inst.inst_.src1, (op_sel_hi >> 1) & 1u, (op_sel >> 1) & 1u,
-                   (abs >> 1) & 1u, (neg >> 1) & 1u);
-    F c = load_src(src2, base, inst.inst_.src2, op_sel_hi_2, (op_sel >> 2) & 1u, (abs >> 2) & 1u,
-                   (neg >> 2) & 1u);
-    F r;
-    // Fused results reach here only from the F32 branch, inside its environment.
-    if constexpr (Fused)
-      r = fma_f32_simd_unscoped(a, b, c, wf);
-    else
-      r = fma_mix_mul_add(a, b, c);
-    if (clamp)
-      r = apply_vop3_dst_mod_f32(r, 0, 1, floating_clamp_nan_to_zero(wf), wf.fp_round_mode_f32());
-    return r;
-  };
-  if constexpr (DstMode == FmaMixDst::F32) {
-    fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());
-    auto dst = regs.write_operand(inst.vdst, exec);
-    for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
-      const uint64_t chunk = (exec >> base) & chunk_full;
-      if (chunk == 0)
-        continue;
-      if (dst.template store_native<float>(base, compute_result(base), chunk).failed())
-        return true;
-    }
-  } else {
-    auto dst = regs.write_operand(inst.vdst, exec, DstMode == FmaMixDst::F16_LO ? 0x3 : 0xc);
-    for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
-      const uint64_t chunk = (exec >> base) & chunk_full;
-      if (chunk == 0)
-        continue;
-      U h;
-      if constexpr (Fused) {
-        const F a =
-            load_src(src0, base, inst.inst_.src0, op_sel_hi & 1u, op_sel & 1u, abs & 1u, neg & 1u);
-        const F b =
-            load_src(src1, base, inst.inst_.src1, op_sel_hi & 2u, op_sel & 2u, abs & 2u, neg & 2u);
-        const F c =
-            load_src(src2, base, inst.inst_.src2, op_sel_hi_2, op_sel & 4u, abs & 4u, neg & 4u);
-        h = mixed_fma_f16_simd<true>(a, b, c, wf.fp_round_mode_f16_f64(), clamp, wf.fp16_ovfl(),
-                                     floating_clamp_nan_to_zero(wf));
-      } else {
-        h = mixed_fma_f16_simd<false>(F(0), F(0), compute_result(base), wf.fp_round_mode_f16_f64(),
-                                      false, wf.fp16_ovfl(), false);
-      }
-      const U packed = DstMode == FmaMixDst::F16_LO ? h : h << 16;
-      if (dst.template store_native<uint32_t>(base, packed, chunk).failed())
-        return true;
-    }
-  }
-  return true;
-}
-
-template <FmaMixDst DstMode, bool Fused = false, typename Inst>
-[[nodiscard]] bool try_execute_vop3p_fma_mix_simd(Inst &, Wavefront &) {
-  return false;
-}
-
 enum class PackedFloatOp { ADD, MUL, FMA, MIN, MAX, MINIMUM, MAXIMUM };
 
 /// SIMD arithmetic in F64 avoids the F32 intermediate rounding of packed F16.
@@ -4152,6 +4181,7 @@ enum class PackedFloatOp { ADD, MUL, FMA, MIN, MAX, MINIMUM, MAXIMUM };
 /// F16 and BF16 sums retain a residual when their terms exceed F64 precision.
 template <PackedFloatOp Op, bool Bf16, typename U>
 inline U packed_float_half_simd(U a_bits, U b_bits, U c_bits, Wavefront &wf, bool clamp) {
+  static_assert(Bf16 || Op != PackedFloatOp::FMA);
   if constexpr (!Bf16 && (Op == PackedFloatOp::MIN || Op == PackedFloatOp::MAX)) {
     return fp_mode::packed_minmax_f16<Op == PackedFloatOp::MIN>(
         a_bits, b_bits, wf.fp_denorm_mode_f16_f64(), clamp, floating_clamp_nan_to_zero(wf),
@@ -4262,26 +4292,6 @@ inline U packed_float_half_simd(U a_bits, U b_bits, U c_bits, Wavefront &wf, boo
       if constexpr (Op == PackedFloatOp::ADD) {
         if (value == 0.0 && std::signbit(a[i]) != std::signbit(b[i]))
           value = wf.fp_round_mode_f16_f64() == 2 ? -0.0 : 0.0;
-      }
-      if constexpr (Op == PackedFloatOp::FMA) {
-        if (!std::isfinite(a[i]) || !std::isfinite(b[i]) || !std::isfinite(c[i])) {
-          output[i] = fp_mode::fma_f16(
-              a_bits[i], b_bits[i], c_bits[i], false, false, false, false, false, false,
-              wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), 0, clamp, wf.fp16_ovfl(),
-              floating_clamp_nan_to_zero(wf), fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
-          continue;
-        }
-        value = fp_mode::detail::round_to_odd({value, residual[i]});
-        if (value == 0.0) {
-          const bool product_negative = ((a_bits[i] ^ b_bits[i]) & 0x8000u) != 0;
-          const bool matching_zeros = c[i] == 0.0 && product_negative == std::signbit(c[i]);
-          value =
-              (matching_zeros ? product_negative : wf.fp_round_mode_f16_f64() == 2) ? -0.0 : 0.0;
-        }
-        output[i] =
-            fp_mode::finish_fma_f16(value, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(),
-                                    0, clamp, wf.fp16_ovfl(), floating_clamp_nan_to_zero(wf));
-        continue;
       }
       uint16_t rounded =
           pseudo_scalar::round_f16_result(value, wf.fp_round_mode_f16_f64(), 0, clamp,
@@ -5729,25 +5739,6 @@ template <bool Vop3, typename Inst>
                                                                   WRITE_RESULT))                   \
   return
 
-/// VOP3P fma_mix / mad_mix probes. The destination shape is the only thing
-/// that differs across the six ops, so the probe is parameterised by
-/// `FmaMixDst::{F32,F16_LO,F16_HI}` and the shared scalar formula `a*b+c`
-/// (incl. clamp) lives in the glue. No functor argument.
-#define ROCJITSU_TRY_SIMD_VOP3P_FMA_MIX_F32()                                                      \
-  if (::rocjitsu::amdgpu::try_execute_vop3p_fma_mix_simd<::rocjitsu::amdgpu::FmaMixDst::F32>(inst, \
-                                                                                             wf))  \
-  return
-
-#define ROCJITSU_TRY_SIMD_VOP3P_FMA_MIX_F16_LO()                                                   \
-  if (::rocjitsu::amdgpu::try_execute_vop3p_fma_mix_simd<::rocjitsu::amdgpu::FmaMixDst::F16_LO>(   \
-          inst, wf))                                                                               \
-  return
-
-#define ROCJITSU_TRY_SIMD_VOP3P_FMA_MIX_F16_HI()                                                   \
-  if (::rocjitsu::amdgpu::try_execute_vop3p_fma_mix_simd<::rocjitsu::amdgpu::FmaMixDst::F16_HI>(   \
-          inst, wf))                                                                               \
-  return
-
 /// VOP3P packed-16 integer binary probe. Functor takes two u32 simd vectors
 /// (each holding {low16, high16} packed) and returns the same shape with
 /// the per-half op applied. The glue applies half selectors and retains
@@ -5827,12 +5818,6 @@ template <bool Vop3, typename Inst>
 #define ROCJITSU_TRY_SIMD_PACKED_FLOAT(Op, Bf16)                                                   \
   if (::rocjitsu::amdgpu::try_execute_packed_float_simd<::rocjitsu::amdgpu::PackedFloatOp::Op,     \
                                                         Bf16>(inst, wf))                           \
-  return
-
-/// Fused mixed-precision arithmetic with the selected destination format.
-#define ROCJITSU_TRY_SIMD_FUSED_MIX(Dst)                                                           \
-  if (::rocjitsu::amdgpu::try_execute_vop3p_fma_mix_simd<::rocjitsu::amdgpu::FmaMixDst::Dst,       \
-                                                         true>(inst, wf))                          \
   return
 
 #endif // ROCJITSU_ISA_AMDGPU_SHARED_SIMD_GLUE_H_

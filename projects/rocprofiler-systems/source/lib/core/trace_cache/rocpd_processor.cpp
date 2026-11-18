@@ -24,9 +24,9 @@
 
 #include <algorithm>
 #include <array>
-#include <profiler-hub/storage.hpp>
-#include <profiler-hub/writer.hpp>
-#include <profiler-hub/writer_types.hpp>
+#include <profiler-hub/cpp/storage.hpp>
+#include <profiler-hub/cpp/writer.hpp>
+#include <profiler-hub/cpp/writer_types.hpp>
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/context.h>
 #include <rocprofiler-sdk/fwd.h>
@@ -151,7 +151,7 @@ rocpd_processor_t::handle(const scratch_memory_sample& sms)
     const auto& agent_ref = m_agent_manager->get_agent_by_handle(sms.agent_id_handle);
 
     auto [memory_operation, memory_type_val] = parse_memory_operation_name(sms.name);
-    auto extdata_json_str = fmt::format("{{\"flags\": {}}}", sms.flags);
+    auto extdata_json_str = fmt::format("{{\"flags\": \"{}\"}}", sms.flags);
 
     auto const event =
         make_event(sms.correlation_id_internal, sms.correlation_id_ancestor, 0,

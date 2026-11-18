@@ -245,7 +245,7 @@ def test_packed_binary_routes_modes_inline_sources_and_policy(arch, name):
     assert (
         gen_packed_binary16(
             context(
-                'cdna4',
+                'cdna2',
                 name,
                 ['d'],
                 ['a', 'b'],
@@ -681,7 +681,7 @@ def test_ternary_selection_routes_all_encodings_and_modifiers(arch, count):
             assert 'RJ_ARITH_ALU_HIGH' not in body
         assert (
             gen_float_ternary_selection(
-                context('cdna4', name, ['d'], ['a', 'b', 'c'], is_vop3=True)
+                context('cdna2', name, ['d'], ['a', 'b', 'c'], is_vop3=True)
             )
             is None
         )
@@ -750,7 +750,7 @@ def test_fp64_selection_pair_adapter(arch):
             assert 'RJ_ARITH_ALU_' + modifier in body
         assert (
             gen_float_binary64(
-                context('cdna4', name, ['dst'], ['a', 'b'], is_vop3=True)
+                context('cdna2', name, ['dst'], ['a', 'b'], is_vop3=True)
             )
             is None
         )
@@ -779,7 +779,7 @@ def test_fp64_binary_arithmetic_adapter(arch):
             assert 'arithmetic_flags()' in body
 
 
-@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5'])
 def test_byte_conversion_policy_and_selected_read_byte(arch):
     from amdisa.codegen.execute.rj_arith_float import gen_byte_nibble_conversion
 
@@ -790,7 +790,7 @@ def test_byte_conversion_policy_and_selected_read_byte(arch):
             body = gen_byte_nibble_conversion(
                 context(arch, name, ['dst'], ['src'], is_vop3=vop3)
             )
-            arch_suffix = '_gfx12' if arch == 'rdna4' else ''
+            arch_suffix = '_gfx12' if arch in ('rdna4', 'cdna5') else ''
             api = 'rj_arith_' + name.lower()
             assert api + '_w64' + arch_suffix in body
             assert 'execute_unary32' in body
@@ -800,12 +800,9 @@ def test_byte_conversion_policy_and_selected_read_byte(arch):
             assert 'RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS' in body
             assert ('inst_.omod' in body) == vop3
             assert 'inst_.abs' not in body and 'inst_.neg' not in body
-        assert (
-            gen_byte_nibble_conversion(
-                context('cdna4', name, ['dst'], ['src'], is_vop3=True)
+            assert ('execute_byte_conversion_sdwa' in body) == (
+                arch in ('cdna3', 'cdna4') and not vop3
             )
-            is None
-        )
 
 
 @pytest.mark.parametrize('packed', [False, True])
@@ -819,7 +816,7 @@ def test_fp8_widen_selectors_and_pair_result(packed):
             assert 'rj_arith_' + name.lower() + '_w64' in body
             assert ('execute_widen32_to_pair' if packed else 'execute_unary32') in body
             assert 'arithmetic_flags()' in body
-            assert ('inst_.opsel' in body) == vop3
+            assert ('amdgpu::vop3_opsel(inst_)' in body) == vop3
             assert 'source_bytes' in body
             assert 'arithmetic_reports_fp_status' not in body
             assert 'inst_.clamp' not in body
@@ -827,10 +824,22 @@ def test_fp8_widen_selectors_and_pair_result(packed):
             gen_fp8_widen(context('rdna3', name, ['dst'], ['src'], is_vop3=True))
             is None
         )
-        assert (
-            gen_fp8_widen(context('cdna5', name, ['dst'], ['src'], is_vop3=True))
-            is None
-        )
+        for arch, suffix in [
+            ('cdna3', 'gfx942'),
+            ('cdna4', 'gfx950'),
+            ('cdna5', 'gfx950'),
+        ]:
+            if arch == 'cdna5' and name == 'V_CVT_F32_FP8':
+                suffix = 'gfx1250'
+            for vop3 in (False, True):
+                body = gen_fp8_widen(
+                    context(arch, name, ['dst'], ['src'], is_vop3=vop3)
+                )
+                assert f'rj_arith_{name.lower()}_w64_{suffix}' in body
+                assert ('inst_.clamp' in body) == (vop3 and suffix == 'gfx1250')
+                assert ('execute_fp8_widen_sdwa' in body) == (
+                    not packed and not vop3 and arch != 'cdna5'
+                )
         assert gen_fp8_widen(context('rdna4', name, ['dst'], [], is_vop3=True)) is None
 
 
@@ -855,17 +864,26 @@ def test_fp8_narrow_modes_and_partial_destination(stochastic):
             gen_fp8_narrow(context('rdna3', name, ['dst'], ['a', 'b'], is_vop3=True))
             is None
         )
-        assert (
-            gen_fp8_narrow(context('cdna5', name, ['dst'], ['a', 'b'], is_vop3=True))
-            is None
-        )
+        for arch, suffix in [
+            ('cdna3', 'gfx942'),
+            ('cdna4', 'gfx950'),
+            ('cdna5', 'gfx950'),
+        ]:
+            if arch == 'cdna5':
+                suffix = 'gfx1250'
+            body = gen_fp8_narrow(
+                context(arch, name, ['dst'], ['a', 'b'], is_vop3=True)
+            )
+            assert f'rj_arith_{name.lower()}_w64_{suffix}' in body
+            assert 'amdgpu::vop3_opsel(inst_)' in body
+            assert ('inst_.clamp' in body) == (suffix == 'gfx1250' and kind == 'FP8')
         assert (
             gen_fp8_narrow(context('rdna4', name, ['dst'], ['a', 'b'], is_vop3=False))
             is None
         )
 
 
-@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5'])
 def test_conversion64_operand_layouts_and_policy(arch):
     from amdisa.codegen.execute.rj_arith_float import (
         CONVERSION64_NAMES,
@@ -877,7 +895,7 @@ def test_conversion64_operand_layouts_and_policy(arch):
         from_integer = source in ('I32', 'U32')
         for vop3 in (False, True):
             body = gen_conversion64(context(arch, name, ['dst'], ['src'], is_vop3=vop3))
-            arch_suffix = '_gfx12' if arch == 'rdna4' else ''
+            arch_suffix = '_gfx12' if arch in ('rdna4', 'cdna5') else ''
             api = 'rj_arith_' + name.lower()
             assert api + '_w64' + arch_suffix in body
             assert 'arithmetic_flags()' in body
@@ -893,14 +911,10 @@ def test_conversion64_operand_layouts_and_policy(arch):
             assert ('RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS' in body) == output.startswith(
                 'F'
             )
-        assert (
-            gen_conversion64(context('cdna4', name, ['dst'], ['src'], is_vop3=True))
-            is None
-        )
         assert gen_conversion64(context(arch, name, ['dst'], [], is_vop3=True)) is None
 
 
-@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5'])
 def test_conversion32_modifiers_and_state_policy(arch):
     from amdisa.codegen.execute.rj_arith_float import (
         CONVERSION32_NAMES,
@@ -913,7 +927,9 @@ def test_conversion32_modifiers_and_state_policy(arch):
         for vop3 in (False, True):
             body = gen_conversion32(context(arch, name, ['dst'], ['src'], is_vop3=vop3))
             api = 'rj_arith_' + name.lower()
-            arch_suffix = '_gfx12' if arch == 'rdna4' and not fixed_round else ''
+            arch_suffix = (
+                '_gfx12' if arch in ('rdna4', 'cdna5') and not fixed_round else ''
+            )
             assert api + '_w64' + arch_suffix in body
             assert 'float32_flags' in body
             assert 'arithmetic_flags()' in body
@@ -921,10 +937,6 @@ def test_conversion32_modifiers_and_state_policy(arch):
             assert ('inst_.omod' in body) == (vop3 and not fixed_round)
             assert ('RJ_ARITH_ALU_ABS_A' in body) == (vop3 and not to_float)
             assert ('RJ_ARITH_ALU_NEG_A' in body) == (vop3 and not to_float)
-        assert (
-            gen_conversion32(context('cdna4', name, ['dst'], ['src'], is_vop3=True))
-            is None
-        )
         assert gen_conversion32(context(arch, name, ['dst'], [], is_vop3=True)) is None
 
 
@@ -964,14 +976,10 @@ def test_conversion16_halves_and_guest_modes(arch):
                 assert 'flags, modifiers, word_destination, word_source,' in body
                 assert ('src.encoding_value() & 0x80' in body) == (source != 'F32')
                 assert ('dst.encoding_value() & 0x80' in body) == (output != 'F32')
-        assert (
-            gen_conversion16(context('cdna4', name, ['dst'], ['src'], is_vop3=True))
-            is None
-        )
         assert gen_conversion16(context(arch, name, ['dst'], [], is_vop3=True)) is None
 
 
-@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5'])
 def test_packed_conversion_uses_fixed_rounding_and_optional_state(arch):
     from amdisa.codegen.execute.rj_arith_float import (
         PACKED_CONVERSION_NAMES,
@@ -983,7 +991,7 @@ def test_packed_conversion_uses_fixed_rounding_and_optional_state(arch):
             body = gen_packed_conversion(
                 context(arch, name, ['dst'], ['a', 'b'], is_vop3=vop3)
             )
-            arch_suffix = '_gfx12' if arch == 'rdna4' else ''
+            arch_suffix = '_gfx12' if arch in ('rdna4', 'cdna5') else ''
             api = 'rj_arith_' + name.lower()
             assert api + '_w64' + arch_suffix in body
             assert 'arithmetic_flags()' in body
@@ -995,19 +1003,25 @@ def test_packed_conversion_uses_fixed_rounding_and_optional_state(arch):
             assert ('RJ_ARITH_ALU_NEG_A' in body) == vop3
             assert ('RJ_ARITH_ALU_CLAMP' in body) == vop3
             assert ('RJ_ARITH_ALU_OMOD_2' in body) == (vop3 and '_RTZ_' in name)
-        assert (
-            gen_packed_conversion(
-                context('cdna4', name, ['dst'], ['a', 'b'], is_vop3=True)
+        if name == 'V_CVT_PK_RTZ_F16_F32':
+            assert gen_packed_conversion(
+                context(
+                    arch,
+                    name.replace('_PK_RTZ_', '_PKRTZ_'),
+                    ['dst'],
+                    ['a', 'b'],
+                    is_vop3=True,
+                )
+            ) == gen_packed_conversion(
+                context(arch, name, ['dst'], ['a', 'b'], is_vop3=True)
             )
-            is None
-        )
         assert (
             gen_packed_conversion(context(arch, name, ['dst'], ['a'], is_vop3=True))
             is None
         )
 
 
-@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5'])
 def test_normalized_conversion_layouts_and_state_contract(arch):
     from amdisa.codegen.execute.rj_arith_float import NORMALIZED_NAMES, gen_normalized
 
@@ -1018,7 +1032,11 @@ def test_normalized_conversion_layouts_and_state_contract(arch):
         for vop3 in (False, True):
             body = gen_normalized(context(arch, name, ['d'], sources, is_vop3=vop3))
             api = 'rj_arith_' + name.lower()
-            arch_suffix = '_gfx12' if packed and half and arch == 'rdna4' else ''
+            arch_suffix = (
+                '_gfx12'
+                if packed and half and arch in ('rdna4', 'cdna5')
+                else '_gfx942' if not packed and arch in ('cdna3', 'cdna4') else ''
+            )
             assert api + '_w64' + arch_suffix in body
             assert 'arithmetic_flags()' in body
             assert 'arithmetic_reports_fp_status' not in body
@@ -1028,9 +1046,16 @@ def test_normalized_conversion_layouts_and_state_contract(arch):
             assert 'RJ_ARITH_ALU_OMOD_2' not in body
             assert ('RJ_ARITH_ALU_CLAMP' in body) == (packed and vop3)
             assert 'fp_round_mode' not in body
-        assert (
-            gen_normalized(context('cdna4', name, ['d'], sources, is_vop3=True)) is None
-        )
+        if packed and arch in ('cdna3', 'cdna4'):
+            assert gen_normalized(
+                context(
+                    arch,
+                    name.replace('_PK_NORM_', '_PKNORM_'),
+                    ['d'],
+                    sources,
+                    is_vop3=True,
+                )
+            ) == gen_normalized(context(arch, name, ['d'], sources, is_vop3=True))
         assert gen_normalized(context(arch, name, ['d'], [], is_vop3=True)) is None
 
 
@@ -1061,7 +1086,7 @@ def test_generated_float_pack_methods_have_no_legacy_bypass(arch):
     assert checked == 14
 
 
-@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5'])
 def test_bit_pack_input_layouts_and_state_policy(arch):
     from amdisa.codegen.execute.rj_arith_float import BIT_PACK_NAMES, gen_bit_pack
 
@@ -1069,7 +1094,7 @@ def test_bit_pack_input_layouts_and_state_policy(arch):
         half = name == 'V_PACK_B32_F16'
         sources = ['a', 'b'] if half else ['a', 'b', 'c']
         body = gen_bit_pack(context(arch, name, ['d'], sources, is_vop3=True))
-        arch_suffix = '_gfx12' if arch == 'rdna4' else ''
+        arch_suffix = '_gfx12' if arch in ('rdna4', 'cdna5') else ''
         api = 'rj_arith_' + name.lower()
         assert api + '_w64' + arch_suffix in body
         assert 'arithmetic_flags()' in body
@@ -1082,9 +1107,7 @@ def test_bit_pack_input_layouts_and_state_policy(arch):
         assert 'RJ_ARITH_ALU_OMOD' not in body
         assert 'RJ_ARITH_ALU_NEG_C' not in body
         assert 'RJ_ARITH_ALU_HIGH_D' not in body
-        assert (
-            gen_bit_pack(context('cdna4', name, ['d'], sources, is_vop3=True)) is None
-        )
+
         assert gen_bit_pack(context(arch, name, ['d'], sources, is_vop3=False)) is None
         assert gen_bit_pack(context(arch, name, ['d'], [], is_vop3=True)) is None
 
@@ -1137,7 +1160,7 @@ def test_fma64_pair_layout_modifiers_and_policy(arch):
     assert 'amdgpu::execute_v_' not in match[1]
 
 
-@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4', 'cdna5'])
 def test_mixed_fma_formats_abs_partial_outputs_and_routing(arch):
     from amdisa.codegen.execute.rj_arith_float import MIXED_FMA_NAMES, gen_mixed_fma
 
@@ -1284,11 +1307,9 @@ def test_integer_dot_dispatch(arch, name):
     body = generator._gen_execute_body(
         inst, derive_semantics(name, 'ENC_VOP3P'), 'ENC_VOP3P'
     )
-    if arch not in ('rdna3', 'rdna4'):
+    if arch == 'rdna3_5':
         assert 'arith::execute_ternary32' not in body
         assert 'rj_arith_' not in body
-        if arch == 'cdna5' and 'DOT4' in name:
-            assert 'inst_.clamp && amdgpu::dot4_clamp_supported(wf)' in body
         return
     assert 'arith::execute_ternary32' in body
     assert 'wf.cu().arithmetic_flags(),' in body
@@ -1296,8 +1317,9 @@ def test_integer_dot_dispatch(arch, name):
         assert 'RJ_ARITH_DOT_' + flag in body
     for operand in ('A', 'B'):
         assert ('RJ_ARITH_DOT_SIGNED_' + operand in body) == ('_I32_' in name)
+    suffix = '_gfx1250' if arch == 'cdna5' and 'DOT4' in name else ''
     for wave in (32, 64):
-        assert f'rj_arith_{name.lower()}_w{wave},' in body
+        assert f'rj_arith_{name.lower()}_w{wave}{suffix},' in body
     assert 'ROCJITSU_TRY_SIMD' not in body
     assert 'amdgpu::execute_v_dot' not in body
 
@@ -1305,7 +1327,6 @@ def test_integer_dot_dispatch(arch, name):
 @pytest.mark.parametrize(
     'arch,encoding',
     [
-        ('cdna5', 'ENC_VOP3P'),
         ('rdna3_5', 'ENC_VOP3P'),
         ('rdna3', 'ENC_VOP3'),
         ('rdna4', 'ENC_VOP3'),
@@ -1367,11 +1388,12 @@ def test_pseudo_scalar_routing_and_semantics(arch):
 
     for name in PSEUDO_SCALAR_NAMES:
         body = gen_pseudo_scalar(context(arch, name, ['d'], ['a'], is_vop3=True))
-        if arch != 'rdna4':
+        if arch not in ('rdna4', 'cdna5'):
             assert body is None
             continue
         assert 'execute_pseudo_scalar' in body
         assert 'rj_arith_' + name.lower() in body
+        assert ('_gfx1250' in body) == (arch == 'cdna5')
         assert 'arithmetic_flags()' in body
         assert 'arithmetic_reports_fp_status' not in body
         assert 'wave64' not in body and 'exec_mask' not in body
@@ -1393,3 +1415,1108 @@ def test_pseudo_scalar_routing_and_semantics(arch):
         for body in bodies:
             assert 'execute_pseudo_scalar' in body
             assert 'transcendental::' not in body and 'amdgpu::execute_v_' not in body
+
+
+@pytest.mark.parametrize('arch', ['rdna4', 'cdna3', 'cdna4', 'cdna5'])
+def test_f16_to_fp8_migration(arch):
+    from amdisa.codegen.execute.rj_arith_float import gen_fp8_narrow
+
+    for stochastic in (False, True):
+        for kind in ('FP8', 'BF8'):
+            name = 'V_CVT_' + ('SR_' if stochastic else 'PK_') + kind + '_F16'
+            body = gen_fp8_narrow(
+                context(
+                    arch,
+                    name,
+                    ['d'],
+                    ['a', 'seed'] if stochastic else ['a'],
+                    is_vop3=True,
+                )
+            )
+            if arch != 'cdna5':
+                assert body is None
+                continue
+            assert 'FP16_OVFL' not in body
+            assert 'rj_arith_' + name.lower() + '_w64' in body
+            assert ('execute_binary32' in body) == stochastic
+            assert ('execute_unary32' in body) == (not stochastic)
+            assert ('ALU_HIGH_A' in body) == stochastic
+            assert ('ALU_CLAMP' in body) == (kind == 'FP8')
+            assert 'destination_bytes' in body
+
+
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4', 'cdna5'])
+def test_fp8_to_f16_migration(arch):
+    from amdisa.codegen.execute.rj_arith_float import gen_fp8_widen
+
+    for packed in (False, True):
+        for kind in ('FP8', 'BF8'):
+            name = 'V_CVT_' + ('PK_' if packed else '') + 'F16_' + kind
+            body = gen_fp8_widen(context(arch, name, ['d'], ['a'], is_vop3=True))
+            if arch != 'cdna5':
+                assert body is None
+                continue
+            assert 'execute_unary32' in body
+            assert 'FP16_OVFL' in body
+            assert 'rj_arith_' + name.lower() + '_w32' in body
+            assert ('ALU_HIGH_D' in body) == (not packed)
+            assert ('ALU_CLAMP' in body) == (not packed and kind == 'FP8')
+            assert ('source_bytes, (selector & 8) ? 0xC : 0x3' in body) == (not packed)
+
+
+def test_fp8_to_f16_vop1_true16_selection():
+    from amdisa.codegen.execute.rj_arith_float import gen_fp8_widen
+
+    generated = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/cdna5/vop1_exec.cpp'
+    ).read_text()
+    for packed in (False, True):
+        for kind in ('FP8', 'BF8'):
+            name = 'V_CVT_' + ('PK_' if packed else '') + 'F16_' + kind
+            body = gen_fp8_widen(context('cdna5', name, ['d'], ['a']))
+            assert 'e32_word_operand(a)' in body
+            assert 'e32_word_operand(d)' in body
+            assert f'e32_packed_vgpr_operand({"a" if packed else "d"})' in body
+            assert 'inst_.opsel' not in body
+            assert 'ALU_CLAMP' not in body
+            assert 'rj_arith_' + name.lower() + '_w32' in generated
+
+
+@pytest.mark.parametrize('arch', ['cdna2', 'cdna3', 'cdna4'])
+@pytest.mark.parametrize(
+    'name', ['V_MAD_MIX_F32', 'V_MAD_MIXLO_F16', 'V_MAD_MIXHI_F16']
+)
+def test_cdna_mixed_mad_bridge(arch, name):
+    from amdisa.codegen.execute.rj_arith_float import gen_mixed_fma
+
+    body = gen_mixed_fma(
+        context(
+            arch,
+            name,
+            ['dst'],
+            ['a', 'b', 'c'],
+            enc_name='ENC_VOP3P',
+            opsel_exprs=('inst_.op_sel', 'inst_.op_sel_hi'),
+            op_sel_hi_2_expr='inst_.op_sel_hi_2',
+        )
+    )
+    assert f'rj_arith_{name.lower()}_w32' in body
+    assert f'rj_arith_{name.lower()}_w64' in body
+    assert 'is_inline_float_src' in body
+
+
+@pytest.mark.parametrize(
+    'name', ['V_FMA_MIX_F32_BF16', 'V_FMA_MIXLO_BF16', 'V_FMA_MIXHI_BF16']
+)
+def test_cdna_mixed_bf16_preserves_raw_inline_halves(name):
+    from amdisa.codegen.execute.rj_arith_float import gen_mixed_fma
+
+    body = gen_mixed_fma(
+        context(
+            'cdna5',
+            name,
+            ['d'],
+            ['a', 'b', 'c'],
+            enc_name='ENC_VOP3P',
+            opsel_exprs=('low', 'high'),
+            op_sel_hi_2_expr='high_c',
+        )
+    )
+    assert 'execute_mixed_bf16' in body
+    assert 'rj_arith_' + name.lower() + '_w32' in body
+    assert 'narrow_sources' not in body and 'is_inline_float_src' not in body
+    for source in 'ABC':
+        assert 'RJ_ARITH_MIX_BF16_' + source in body
+        assert 'RJ_ARITH_ALU_ABS_' + source in body
+    for arch in ('cdna3', 'cdna4'):
+        assert (
+            gen_mixed_fma(
+                context(
+                    arch,
+                    name,
+                    ['d'],
+                    ['a', 'b', 'c'],
+                    enc_name='ENC_VOP3P',
+                    opsel_exprs=('low', 'high'),
+                    op_sel_hi_2_expr='high_c',
+                )
+            )
+            is None
+        )
+
+
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4'])
+def test_cdna_float_dot_bindings(arch):
+    from amdisa.codegen.execute.rj_arith_float import gen_float_dot32
+
+    for fmt in ('F16', 'BF16'):
+        for accumulate in (False, True):
+            name = f'V_DOT2{"C" if accumulate else ""}_F32_{fmt}'
+            for encoding in (
+                ('ENC_VOP2', 'ENC_VOP3') if accumulate else ('ENC_VOP3P',)
+            ):
+                body = gen_float_dot32(
+                    context(
+                        arch,
+                        name,
+                        ['d'],
+                        ['a', 'b'] if accumulate else ['a', 'b', 'c'],
+                        enc_name=encoding,
+                        opsel_exprs=('low', 'high'),
+                    )
+                )
+                if arch == 'cdna3' and fmt == 'BF16':
+                    assert body is None
+                    continue
+                suffix = 'gfx942' if fmt == 'F16' else 'gfx950'
+                assert f'rj_arith_v_dot2_f32_{fmt.lower()}_w64_{suffix},' in body
+                assert 'const unsigned replicate_sources = 0;' in body
+                if accumulate:
+                    assert 'const unsigned narrow_sources = 0;' in body
+                    assert 'const uint64_t modifiers = 0;' in body
+                    assert ', d, ' in body
+                else:
+                    assert 'pk16_src_needs_narrowing' in body
+
+
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4', 'cdna5'])
+def test_packed_f32_fma_pair_selectors(arch):
+    from amdisa.codegen.execute.rj_arith_packed_f32 import gen_packed_f32
+
+    body = gen_packed_f32(
+        context(
+            arch,
+            'V_PK_FMA_F32',
+            ['dst'],
+            ['a', 'b', 'c'],
+            enc_name='ENC_VOP3P',
+            opsel_exprs=('inst_.op_sel', 'inst_.op_sel_hi'),
+            op_sel_hi_2_expr='inst_.op_sel_hi_2',
+        )
+    )
+    assert 'dst, a, b, c' in body
+    assert 'inst_.op_sel_hi_2 ? 0u : RJ_ARITH_PK_HI_C_LOW' in body
+    assert 'RJ_ARITH_PK_NEG_HI_C' in body
+    assert (
+        'rj_arith_v_pk_fma_f32_w32_' + ('gfx1250' if arch == 'cdna5' else 'gfx942')
+        in body
+    )
+    assert ('rj_arith_v_pk_fma_f32_w64_gfx942' in body) == (arch != 'cdna5')
+    assert (
+        gen_packed_f32(context(arch, 'V_PK_FMA_F32', ['dst'], ['a', 'b', 'c'])) is None
+    )
+
+
+@pytest.mark.parametrize('operation', ['Add', 'Mul', 'Fma', 'MinNum', 'MaxNum'])
+def test_cdna_packed_bf16_uses_raw_word_adapter(operation):
+    root = Path(__file__).resolve().parents[3] / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu'
+    source = (root / 'generated/cdna5/vop3p_exec.cpp').read_text()
+    body = re.search(
+        rf'void VPk{operation}Bf16Vop3p::execute_impl\([^)]*\)\s*\{{(.*?)\n\}}',
+        source,
+        re.S,
+    )[1]
+    assert f'execute_packed_bf16<{str(operation == "Fma").lower()}>' in body
+    mnemonic = operation.lower().replace('num', '_num')
+    assert f'rj_arith_v_pk_{mnemonic}_bf16_w32' in body
+    for operand in 'ABC' if operation == 'Fma' else 'AB':
+        for flag in ('LO_{}_HIGH', 'HI_{}_LOW', 'NEG_LO_{}', 'NEG_HI_{}'):
+            assert 'RJ_ARITH_PK_' + flag.format(operand) in body
+    assert 'RJ_ARITH_PK_CLAMP' in body
+    assert 'fp_mode::' not in body
+
+
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4'])
+def test_cdna_byte_accumulator_keeps_legacy_policy(arch):
+    from amdisa.codegen.execute.rj_arith_float import gen_bit_pack
+
+    body = gen_bit_pack(
+        context(arch, 'V_CVT_PKACCUM_U8_F32', ['d'], ['a', 'b'], is_vop3=True)
+    )
+    assert 'rj_arith_v_cvt_pkaccum_u8_f32_w64' in body
+    assert 'd, a, b, d' in body
+    assert 'fp_round_mode' not in body
+    assert 'RJ_ARITH_ALU_' not in body
+
+
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4', 'cdna5'])
+def test_float16_conversion_architectures_and_layouts(arch):
+    from amdisa.codegen.execute.rj_arith_float import (
+        FLOAT16_CONVERSION_NAMES,
+        gen_float16_conversion,
+    )
+
+    for name in FLOAT16_CONVERSION_NAMES:
+        widen = name == 'V_CVT_F32_BF16'
+        packed_sr = name in ('V_CVT_SR_PK_BF16_F32', 'V_CVT_SR_PK_F16_F32')
+        single_sr = name in ('V_CVT_SR_BF16_F32', 'V_CVT_SR_F16_F32')
+        sources = ['a'] if widen else ['a', 'b', 'seed'] if packed_sr else ['a', 'b']
+        for vop3 in (False, True):
+            body = gen_float16_conversion(
+                context(arch, name, ['d'], sources, is_vop3=vop3)
+            )
+            supported = (
+                arch != 'cdna3'
+                and (widen or vop3)
+                and not (
+                    (single_sr and arch != 'cdna4') or (packed_sr and arch != 'cdna5')
+                )
+            )
+            if not supported:
+                assert body is None
+                continue
+            assert 'rj_arith_' + name.lower() + '_w64' in body
+            assert ('RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS' in body) == (
+                arch == 'cdna5' and name == 'V_CVT_PK_F16_F32'
+            )
+            assert 'FP16_OVFL' in body
+            assert ('execute_bf16_widen_sdwa' in body) == (
+                widen and not vop3 and arch == 'cdna4'
+            )
+            assert ('execute_ternary32' in body) == packed_sr
+            assert ('? 0xC : 0x3' in body) == (widen or single_sr)
+            assert ('inst_.abs & 1' in body) == (not widen and not packed_sr)
+            assert ('inst_.abs & 2' in body) == (
+                not widen and not packed_sr and not single_sr
+            )
+
+
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4', 'cdna5'])
+def test_cdna_half_conversion_layout_and_sdwa(arch):
+    from amdisa.codegen.execute.rj_arith_float import (
+        CONVERSION16_NAMES,
+        gen_conversion16,
+    )
+
+    for name in CONVERSION16_NAMES:
+        output = name.split('_')[-2]
+        for vop3 in (False, True):
+            body = gen_conversion16(context(arch, name, ['dst'], ['src'], is_vop3=vop3))
+            suffix = (
+                '_gfx12' if arch == 'cdna5' else '_gfx942' if output != 'F32' else ''
+            )
+            assert 'rj_arith_' + name.lower() + '_w64' + suffix in body
+            assert ('execute_conversion16_sdwa' in body) == (
+                arch != 'cdna5' and not vop3
+            )
+            if arch != 'cdna5' and output != 'F32':
+                assert 'RJ_ARITH_ALU_HIGH_D) ? 0xC : 0xF' in body
+
+
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4', 'cdna5'])
+def test_cdna_conversion32_legacy_names_and_sdwa(arch):
+    from amdisa.codegen.execute.rj_arith_float import gen_conversion32
+
+    for old, current in [('RPI', 'nearest'), ('FLR', 'floor')]:
+        for vop3 in (False, True):
+            body = gen_conversion32(
+                context(arch, f'V_CVT_{old}_I32_F32', ['dst'], ['src'], is_vop3=vop3)
+            )
+            assert f'rj_arith_v_cvt_{current}_i32_f32_w64' in body
+            assert ('execute_conversion32_sdwa' in body) == (
+                arch != 'cdna5' and not vop3
+            )
+
+
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4', 'cdna5'])
+def test_cdna_integer_conversion_bindings(arch):
+    from amdisa.codegen.execute.rj_arith_vector import (
+        gen_vector32,
+        gen_widening_integer,
+    )
+
+    for signed in ('I', 'U'):
+        name = f'V_CVT_PK_{signed}16_{signed}32'
+        body = gen_widening_integer(
+            context(arch, name, ['d'], ['a', 'b'], is_vop3=True)
+        )
+        assert f'rj_arith_{name.lower()}_w64,' in body
+        assert '0u, d, a, b);' in body
+        name = f'V_CVT_{signed}32_{signed}16'
+        body = gen_vector32(context(arch, name, ['d'], ['a']))
+        if arch != 'cdna5':
+            assert body is None
+        else:
+            assert f'rj_arith_{name.lower()}_w32,' in body
+            assert 'e32_word_operand(a)' in body
+            assert 'RJ_ARITH_ALU_HIGH_A' in body
+
+
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4'])
+def test_cdna_integer_dot_bindings(arch):
+    from amdisa.codegen.execute.rj_arith_vector import (
+        gen_integer_dot,
+        CDNA_INTEGER_DOT_NAMES,
+        ACCUMULATING_INTEGER_DOT_NAMES,
+    )
+
+    for name in sorted(CDNA_INTEGER_DOT_NAMES):
+        body = gen_integer_dot(
+            context(
+                arch,
+                name,
+                ['d'],
+                ['a', 'b', 'c'],
+                enc_name='ENC_VOP3P',
+                opsel_exprs=('low', 'high'),
+            )
+        )
+        assert f'rj_arith_{name.lower()}_w64,' in body
+        assert 'RJ_ARITH_DOT_SIGNED_' not in body
+        assert 'RJ_ARITH_DOT_CLAMP' in body
+    for name in sorted(ACCUMULATING_INTEGER_DOT_NAMES):
+        for encoding in ('ENC_VOP2', 'ENC_VOP3'):
+            body = gen_integer_dot(
+                context(arch, name, ['d'], ['a', 'b'], enc_name=encoding)
+            )
+            api = name.lower().replace('c_i32', '_i32')
+            assert f'rj_arith_{api}_w64,' in body
+            assert '0, d, a, b, d);' in body
+            assert 'inst_.' not in body
+
+
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4', 'cdna5'])
+def test_cdna_binary_selection_policy_mapping(arch):
+    from amdisa.codegen.execute.rj_arith_float import (
+        SELECTION_F32,
+        SELECTION_F64,
+        gen_float_binary64,
+    )
+
+    root = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+        / arch
+    )
+    generated = '\n'.join(p.read_text() for p in root.glob('vop*_exec*.cpp'))
+    for names, emitter in [
+        (SELECTION_F32[arch], gen_float_binary32),
+        (SELECTION_F64[arch], gen_float_binary64),
+    ]:
+        for name in names:
+            body = emitter(context(arch, name, ['d'], ['a', 'b'], is_vop3=True))
+            suffix = '_gfx942' if arch != 'cdna5' else ''
+            for wave in (32, 64):
+                api = 'rj_arith_' + name.lower() + '_w' + str(wave) + suffix
+                assert api in body
+                assert api in generated
+            assert 'RJ_ARITH_ALU_OMOD_2' in body
+            assert 'RJ_ARITH_ALU_CLAMP' in body
+
+
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4', 'cdna5'])
+def test_cdna_ternary_selection_mapping(arch):
+    from amdisa.codegen.execute.rj_arith_float import (
+        CDNA_TERNARY_SELECTION,
+        TERNARY_SELECTION_RDNA4,
+        gen_float_ternary_selection,
+    )
+
+    root = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+        / arch
+    )
+    generated = '\n'.join(p.read_text() for p in root.glob('vop3_exec*.cpp'))
+    for name in (
+        TERNARY_SELECTION_RDNA4 if arch == 'cdna5' else CDNA_TERNARY_SELECTION
+    ):
+        body = gen_float_ternary_selection(
+            context(arch, name, ['d'], ['a', 'b', 'c'], is_vop3=True)
+        )
+        for wave in (32, 64):
+            api = (
+                'rj_arith_'
+                + name.lower()
+                + '_w'
+                + str(wave)
+                + ('_gfx942' if arch != 'cdna5' else '')
+            )
+            assert api in body
+            assert api in generated
+        assert 'RJ_ARITH_ALU_NEG_C' in body
+
+
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4'])
+def test_cdna_half_selection_vop2_clears_upper_half(arch):
+    from amdisa.codegen.execute.rj_arith_float import gen_float_binary16
+
+    for name in ('V_MIN_F16', 'V_MAX_F16'):
+        body = gen_float_binary16(context(arch, name, ['d'], ['a', 'b']))
+        assert 'd, a, b, true, true);' in body
+
+
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4', 'cdna5'])
+def test_cdna_half_selection_policy_mapping(arch):
+    from amdisa.codegen.execute.rj_arith_float import (
+        gen_float_binary16,
+        gen_packed_binary16,
+    )
+
+    root = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+        / arch
+    )
+    generated = '\n'.join(p.read_text() for p in root.glob('vop*_exec*.cpp'))
+    for packed, emitter in [(False, gen_float_binary16), (True, gen_packed_binary16)]:
+        for op in (
+            ('MIN_NUM', 'MAX_NUM', 'MINIMUM', 'MAXIMUM')
+            if arch == 'cdna5'
+            else ('MIN', 'MAX')
+        ):
+            name = 'V_' + ('PK_' if packed else '') + op + '_F16'
+            body = emitter(
+                context(
+                    arch,
+                    name,
+                    ['d'],
+                    ['a', 'b'],
+                    is_vop3=not packed,
+                    enc_name='ENC_VOP3P' if packed else 'ENC_VOP3',
+                    opsel_exprs=('low', 'high'),
+                )
+            )
+            suffix = '_gfx942' if arch != 'cdna5' else ''
+            for wave in (32, 64):
+                api = 'rj_arith_' + name.lower() + '_w' + str(wave) + suffix
+                assert api in body
+                assert api in generated
+            assert 'CLAMP' in body
+
+
+@pytest.mark.parametrize('arch', ['cdna4', 'cdna5'])
+@pytest.mark.parametrize('op', ['MINIMUM3', 'MAXIMUM3', 'MIN3_NUM', 'MAX3_NUM'])
+def test_cdna_packed_ternary_selection(arch, op):
+    from amdisa.codegen.execute.rj_arith_float import gen_packed_fma16
+
+    name = f'V_PK_{op}_F16'
+    body = gen_packed_fma16(
+        context(
+            arch,
+            name,
+            ['d'],
+            ['a', 'b', 'c'],
+            enc_name='ENC_VOP3P',
+            opsel_exprs=('low', 'high'),
+            op_sel_hi_2_expr='high_c',
+        )
+    )
+    if arch == 'cdna4' and '_NUM' in op:
+        assert body is None
+        return
+    for wave in (32, 64):
+        assert f'rj_arith_{name.lower()}_w{wave}' in body
+    for operand in 'ABC':
+        assert f'RJ_ARITH_PK_NEG_HI_{operand}' in body
+        assert f'RJ_ARITH_PK_LO_{operand}_HIGH' in body
+    assert 'high_c ? 0u : RJ_ARITH_PK_HI_C_LOW' in body
+    assert 'narrow_sources, replicate_sources' in body
+
+
+@pytest.mark.parametrize('name', ['V_MINIMUM3_F32', 'V_MAXIMUM3_F32'])
+def test_cdna4_propagating_selection(name):
+    from amdisa.codegen.execute.rj_arith_float import gen_float_ternary_selection
+
+    body = gen_float_ternary_selection(
+        context('cdna4', name, ['d'], ['a', 'b', 'c'], is_vop3=True)
+    )
+    for wave in (32, 64):
+        assert f'rj_arith_{name.lower()}_w{wave}_gfx950' in body
+    assert 'a, b, c, true);' in body
+    assert (
+        gen_float_ternary_selection(
+            context('cdna3', name, ['d'], ['a', 'b', 'c'], is_vop3=True)
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4', 'cdna5'])
+def test_cdna_half_arithmetic_modes_and_destination(arch):
+    from amdisa.codegen.execute.rj_arith_float import (
+        gen_float_binary16,
+        BINARY_ARITHMETIC_F16,
+    )
+
+    for name in sorted(BINARY_ARITHMETIC_F16):
+        body = gen_float_binary16(context(arch, name, ['d'], ['a', 'b'], is_vop3=True))
+        suffix = '_gfx12' if arch == 'cdna5' else '_gfx942'
+        if arch == 'cdna5' and name == 'V_MUL_F16':
+            suffix = '_gfx1250'
+        for lanes in (32, 64):
+            assert f'rj_arith_{name.lower()}_w{lanes}{suffix},' in body
+        assert (
+            'd, a, b, false);' if arch == 'cdna5' else 'd, a, b, true, true);'
+        ) in body
+        assert ('RJ_ARITH_ALU_NEG_B' in body) == (name != 'V_LDEXP_F16')
+        assert 'RJ_ARITH_ALU_HIGH_B' in body
+        body = gen_float_binary16(context(arch, name, ['d'], ['a', 'b']))
+        assert (', true, true);' in body) == (arch != 'cdna5')
+        assert ('execute_float_binary16_sdwa' in body) == (arch != 'cdna5')
+    selection = gen_float_binary16(context(arch, 'V_MIN_F16', ['d'], ['a', 'b']))
+    assert (selection is not None) == (arch != 'cdna5')
+    if selection:
+        assert 'execute_cdna_selection<16>' in selection
+        assert 'execute_float_binary16_sdwa' not in selection
+
+
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4', 'cdna5'])
+@pytest.mark.parametrize('vop3', [False, True])
+def test_cdna_half_exponent_bindings(arch, vop3):
+    from amdisa.codegen.execute.rj_arith_float import gen_float_unary16
+
+    body = gen_float_unary16(
+        context(arch, 'V_FREXP_EXP_I16_F16', ['d'], ['a'], is_vop3=vop3)
+    )
+    suffix = '_gfx12' if arch == 'cdna5' else ''
+    assert 'rj_arith_v_frexp_exp_i16_f16_w64' + suffix in body
+    assert ('execute_half_exponent_sdwa' in body) == (arch != 'cdna5' and not vop3)
+    assert (
+        'd, a, true, /*guest_rounding=*/false, /*zero_extend_low=*/true'
+        if arch != 'cdna5'
+        else 'd, a, false, /*guest_rounding=*/false, /*zero_extend_low=*/false'
+    ) in body
+    assert 'RJ_ARITH_ALU_OMOD' not in body
+
+
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4', 'cdna5'])
+def test_cdna_half_fma_policy_and_destination(arch):
+    from amdisa.codegen.execute.rj_arith_float import gen_float_fma16
+
+    body = gen_float_fma16(
+        context(arch, 'V_FMA_F16', ['d'], ['a', 'b', 'c'], is_vop3=True)
+    )
+    suffix = '_gfx12' if arch == 'cdna5' else ''
+    for lanes in (32, 64):
+        assert f'rj_arith_v_fma_f16_w{lanes}{suffix},' in body
+    assert (
+        'd, a, b, c, false);' if arch == 'cdna5' else 'd, a, b, c, true, true);'
+    ) in body
+    assert 'RJ_ARITH_ALU_HIGH_C' in body
+    # Legacy MAD has a different intermediate rounding contract.
+    assert gen_float_fma16(context(arch, 'V_MAD_F16', ['d'], ['a', 'b', 'c'])) is None
+    if arch == 'cdna5':
+        body = gen_float_fma16(
+            context(arch, 'V_FMAC_F16', ['d'], ['a', 'b'], is_vop3=True)
+        )
+        assert 'd, a, b, d, false);' in body
+        assert 'RJ_ARITH_ALU_HIGH_C' in body
+
+
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4'])
+@pytest.mark.parametrize('name', ['V_FMA_LEGACY_F16', 'V_MAC_F16'])
+def test_cdna_legacy_half_fma_reuses_architectural_model(arch, name):
+    from amdisa.codegen.execute.rj_arith_float import gen_float_fma16
+
+    inputs = ['a', 'b'] if name == 'V_MAC_F16' else ['a', 'b', 'c']
+    body = gen_float_fma16(context(arch, name, ['d'], inputs, is_vop3=True))
+    assert 'rj_arith_v_fma_f16_w32' in body
+    assert 'rj_arith_v_fma_f16_w64' in body
+    assert ('d, a, b, d' if name == 'V_MAC_F16' else 'd, a, b, c') in body
+    assert 'true, true' in body
+    if name == 'V_MAC_F16':
+        body = gen_float_fma16(context(arch, name, ['d'], inputs, enc_name='ENC_VOP2'))
+        assert 'd, a, b, d' in body
+
+
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4'])
+@pytest.mark.parametrize('name', ['V_MAD_F16', 'V_MAD_LEGACY_F16'])
+def test_cdna_half_mad_preserves_its_distinct_intermediate(arch, name):
+    from amdisa.codegen.execute.rj_arith_float import gen_float_fma16
+
+    body = gen_float_fma16(context(arch, name, ['d'], ['a', 'b', 'c'], is_vop3=True))
+    assert 'rj_arith_' + name.lower() + '_w64' in body
+    assert 'rj_arith_v_fma_f16' not in body
+    assert 'RJ_ARITH_ALU_HIGH_D' in body and 'RJ_ARITH_ALU_ABS_C' in body
+    assert 'RJ_ARITH_ALU_OMOD_2' in body
+    assert 'd, a, b, c, true, true' in body
+
+
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4'])
+@pytest.mark.parametrize('name', ['V_MADMK_F16', 'V_MADAK_F16'])
+def test_cdna_literal_half_mad_reuses_mad_arithmetic(arch, name):
+    from amdisa.codegen.execute.rj_arith_float import gen_float_fma16
+
+    sources = ['a', 'literal', 'b'] if name == 'V_MADMK_F16' else ['a', 'b', 'literal']
+    body = gen_float_fma16(context(arch, name, ['d'], sources))
+    assert 'rj_arith_v_mad_f16_w64' in body
+    assert 'arithmetic_flags(), 0,' in body
+    assert 'd, ' + ', '.join(sources) + ', true, true' in body
+    assert gen_float_fma16(context(arch, name, ['d'], sources, is_vop3=True)) is None
+
+
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4', 'cdna5'])
+@pytest.mark.parametrize('encoding', ['ENC_VOP2', 'ENC_VOP3'])
+def test_cdna_packed_fmac_retains_modifiers_and_omod(arch, encoding):
+    from amdisa.codegen.execute.rj_arith_float import gen_packed_fma16
+
+    body = gen_packed_fma16(
+        context(arch, 'V_PK_FMAC_F16', ['d'], ['a', 'b'], enc_name=encoding)
+    )
+    suffix = '_gfx12' if arch == 'cdna5' else '_gfx942'
+    for wave in (32, 64):
+        assert f'rj_arith_v_pk_fmac_f16_w{wave}{suffix},' in body
+    assert 'execute_packed_fma16<true>' in body
+    assert 'd, a, b, d' in body
+    assert ('RJ_ARITH_ALU_OMOD_2' in body) == (arch != 'cdna5')
+    assert ('RJ_ARITH_ALU_ABS_A' in body) == (encoding == 'ENC_VOP3')
+    if encoding == 'ENC_VOP2':
+        assert 'inst_.src1' not in body
+        assert ('sdwa::output_modifier' in body) == (arch != 'cdna5')
+    assert 'dot2_src_needs_half_replication(inst_.src0)' in body
+
+
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4', 'cdna5'])
+def test_cdna_packed_half_arithmetic(arch):
+    from amdisa.codegen.execute.rj_arith_float import (
+        gen_packed_binary16,
+        gen_packed_fma16,
+    )
+
+    for name in ('V_PK_ADD_F16', 'V_PK_MUL_F16', 'V_PK_FMA_F16'):
+        fma = name == 'V_PK_FMA_F16'
+        emit = gen_packed_fma16 if fma else gen_packed_binary16
+        body = emit(
+            context(
+                arch,
+                name,
+                ['d'],
+                ['a', 'b', 'c'] if fma else ['a', 'b'],
+                enc_name='ENC_VOP3P',
+                opsel_exprs=('inst_.lo', 'inst_.hi'),
+                op_sel_hi_2_expr='inst_.hi_c',
+            )
+        )
+        suffix = (
+            ('_gfx1250' if arch == 'cdna5' else '_gfx942')
+            if name == 'V_PK_MUL_F16' or (name == 'V_PK_ADD_F16' and arch != 'cdna5')
+            else ('_gfx12' if arch == 'cdna5' else '')
+        )
+        for lanes in (32, 64):
+            assert f'rj_arith_{name.lower()}_w{lanes}{suffix},' in body
+        assert 'pk16_src_needs_narrowing' in body
+        assert 'RJ_ARITH_PK_HI_A_LOW' in body
+        assert 'RJ_ARITH_PK_NEG_HI_B' in body
+    # Promoted FMAC has a separate modifier policy from VOP3P FMA.
+    assert (
+        gen_packed_fma16(
+            context(arch, 'V_PK_FMAC_F16', ['d'], ['a', 'b'], enc_name='ENC_VOP3')
+        )
+        is not None
+    )
+
+
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4', 'cdna5'])
+def test_cdna_half_fma_qualification_precedes_execution(arch):
+    from amdisa.codegen.execute.rj_arith_float import (
+        gen_float_fma16,
+        gen_packed_binary16,
+        gen_packed_fma16,
+    )
+
+    for name, emit, sources in (
+        ('V_FMA_F16', gen_float_fma16, ['a', 'b', 'c']),
+        ('V_PK_FMA_F16', gen_packed_fma16, ['a', 'b', 'c']),
+        ('V_PK_FMAC_F16', gen_packed_fma16, ['a', 'b']),
+        ('V_PK_ADD_F16', gen_packed_binary16, ['a', 'b']),
+    ):
+        body = emit(context(arch, name, ['d'], sources, enc_name='ENC_VOP3P'))
+        if name == 'V_PK_ADD_F16' and arch != 'cdna5':
+            continue  # Its CDNA API already rejects strict requests.
+        guard = body.index('RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS')
+        assert 'RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL)' in body
+        assert guard < body.index('amdgpu::arith::execute_')
+
+
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4', 'cdna5'])
+@pytest.mark.parametrize('vop3', [False, True])
+def test_cdna_half_exponent_qualification(arch, vop3):
+    from amdisa.codegen.execute.rj_arith_float import (
+        gen_float_binary16,
+        gen_float_unary16,
+    )
+
+    cases = [('V_FREXP_EXP_I16_F16', gen_float_unary16, ['a'])]
+    if arch == 'cdna5':
+        cases.append(('V_LDEXP_F16', gen_float_binary16, ['a', 'b']))
+    for name, emit, sources in cases:
+        body = emit(context(arch, name, ['d'], sources, is_vop3=vop3))
+        assert body.index(
+            'RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS'
+        ) < body.index('amdgpu::arith::execute_')
+
+
+def test_scaled_widen_gfx950_bindings_and_gates():
+    from amdisa.codegen.execute.rj_arith_float import (
+        SCALED_WIDEN_NAMES,
+        gen_scaled_widen,
+    )
+
+    generated = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/cdna4/vop3_exec.cpp'
+    ).read_text()
+    assert (
+        sum(
+            generated.count('rj_arith_' + name.lower() + '_w')
+            for name in SCALED_WIDEN_NAMES
+        )
+        == 26
+    )
+    assert len(SCALED_WIDEN_NAMES) == 13
+    for name in sorted(SCALED_WIDEN_NAMES):
+        body = gen_scaled_widen(
+            context('cdna4', name, ['dst'], ['a', 'b'], is_vop3=True)
+        )
+        assert 'rj_arith_' + name.lower() + '_w64_gfx950' in body
+        assert 'rj_arith_' + name.lower() + '_w64_gfx950' in generated
+        pair = '_PK_F32_' in name
+        assert (
+            f'execute_scaled_conversion<false, false, false, {str(pair).lower()}>'
+            in body
+        )
+        assert (
+            'uint64_t(inst_.op_sel & 3) << 16' in body
+            if '_PK_' not in name or name.endswith('_FP4')
+            else 'RJ_ARITH_ALU_HIGH_A' in body
+        )
+        if '_PK_' not in name and '_F16_' in name:
+            assert 'RJ_ARITH_ALU_HIGH_D' in body
+            assert '? 0xC : 0x3' in body
+        for arch in ('rdna4', 'cdna3', 'cdna5'):
+            assert (
+                gen_scaled_widen(context(arch, name, ['dst'], ['a', 'b'], is_vop3=True))
+                is None
+            )
+        assert (
+            gen_scaled_widen(context('cdna4', name, ['dst'], ['a'], is_vop3=True))
+            is None
+        )
+        assert gen_scaled_widen(context('cdna4', name, ['dst'], ['a', 'b'])) is None
+
+
+def test_scaled_fp6_widen_bindings_and_gates():
+    from amdisa.codegen.execute.rj_arith_float import (
+        SCALED_FP6_WIDEN_NAMES,
+        gen_wide_scaled_widen,
+    )
+
+    generated = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/cdna4/vop3_exec.cpp'
+    ).read_text()
+    assert len(SCALED_FP6_WIDEN_NAMES) == 6
+    for name in SCALED_FP6_WIDEN_NAMES:
+        body = gen_wide_scaled_widen(
+            context('cdna4', name, ['d'], ['a', 'b'], is_vop3=True)
+        )
+        assert 'rj_arith_' + name.lower() + '_w64_gfx950' in body
+        assert 'rj_arith_' + name.lower() + '_w64_gfx950' in generated
+        assert 'execute_wide_scaled_widen' in body
+        assert 'source_base, b, ' + ('32' if '_F32_' in name else '16') in body
+        assert 'inst_.op_sel' not in body and 'inst_.neg' not in body
+        assert body.count('resolved_vgpr_offset') == 2
+        for arch in ('cdna3', 'cdna5', 'rdna4'):
+            assert (
+                gen_wide_scaled_widen(
+                    context(arch, name, ['d'], ['a', 'b'], is_vop3=True)
+                )
+                is None
+            )
+        assert (
+            gen_wide_scaled_widen(context('cdna4', name, ['d'], ['a'], is_vop3=True))
+            is None
+        )
+        assert gen_wide_scaled_widen(context('cdna4', name, ['d'], ['a', 'b'])) is None
+
+
+def test_scaled_fp6_widen_gfx1250_bindings_and_gates():
+    from amdisa.codegen.execute.rj_arith_float import (
+        WIDE_SCALED_WIDEN_GFX1250_NAMES,
+        gen_wide_scaled_widen,
+    )
+
+    generated = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/cdna5/vop3_exec_cvt.cpp'
+    ).read_text()
+    assert len(WIDE_SCALED_WIDEN_GFX1250_NAMES) == 15
+    for name in WIDE_SCALED_WIDEN_GFX1250_NAMES:
+        body = gen_wide_scaled_widen(
+            context('cdna5', name, ['d'], ['a', 'b'], is_vop3=True)
+        )
+        assert 'execute_wide_scaled_widen<true>' in body
+        assert (
+            'resolved_vgpr_offset(wf, a.opr_type_, a.encoding_value_, a.vgpr_msb_role())'
+            in body
+        )
+        assert 'apply_gpr_idx' not in body
+        assert 'CvtScaleSelection::' in body
+        assert 'rj_arith_' + name.lower() + '_w32_gfx1250' in generated
+        elements = 8 if '_PK8_' in name else 16
+        assert (
+            'source_base, b, ' + str(elements if '_F32_' in name else elements // 2)
+            in body
+        )
+        for arch in ('cdna3', 'cdna4', 'rdna4'):
+            assert (
+                gen_wide_scaled_widen(
+                    context(arch, name, ['d'], ['a', 'b'], is_vop3=True)
+                )
+                is None
+            )
+
+
+def test_scaled_narrow_gfx950_bindings_and_gates():
+    from amdisa.codegen.execute.rj_arith_float import (
+        SCALED_NARROW_NAMES,
+        gen_scaled_narrow,
+    )
+
+    generated = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/cdna4/vop3_exec.cpp'
+    ).read_text()
+    assert (
+        sum(
+            generated.count('rj_arith_' + name.lower() + '_w')
+            for name in SCALED_NARROW_NAMES
+        )
+        == 36
+    )
+    assert len(SCALED_NARROW_NAMES) == 18
+    for name in sorted(SCALED_NARROW_NAMES):
+        fp4 = '_FP4_' in name
+        stochastic = '_SR_' in name
+        f32 = name.endswith('_F32')
+        sources = ['a', 'b', 'c'] if stochastic or f32 else ['a', 'b']
+        body = gen_scaled_narrow(context('cdna4', name, ['dst'], sources, is_vop3=True))
+        assert 'rj_arith_' + name.lower() + '_w64_gfx950' in body
+        assert 'rj_arith_' + name.lower() + '_w64_gfx950' in generated
+        ternary = len(sources) == 3
+        pair_a = fp4 and stochastic and f32
+        assert (
+            f'execute_scaled_conversion<true, {str(ternary).lower()}, {str(pair_a).lower()}>'
+            in body
+        )
+        source_bytes = '0x3' if stochastic and not f32 and not fp4 else '0xF'
+        assert f'{source_bytes}, destination_bytes' in body
+        assert (
+            '(inst_.op_sel >> 2) & 3' in body
+            if stochastic or fp4
+            else 'RJ_ARITH_ALU_HIGH_D' in body
+        )
+        for arch in ('rdna4', 'cdna3', 'cdna5'):
+            assert (
+                gen_scaled_narrow(context(arch, name, ['dst'], sources, is_vop3=True))
+                is None
+            )
+        assert (
+            gen_scaled_narrow(
+                context('cdna4', name, ['dst'], sources[:-1], is_vop3=True)
+            )
+            is None
+        )
+        assert gen_scaled_narrow(context('cdna4', name, ['dst'], sources)) is None
+
+
+def test_scaled_fp6_narrow_bindings_and_gates():
+    from amdisa.codegen.execute.rj_arith_float import (
+        SCALED_FP6_NARROW_NAMES,
+        gen_wide_scaled_narrow,
+    )
+
+    generated = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/cdna4/vop3_exec.cpp'
+    ).read_text()
+    assert len(SCALED_FP6_NARROW_NAMES) == 12
+    for name in SCALED_FP6_NARROW_NAMES:
+        ternary = '_SR_' in name or name.endswith('_F32')
+        sources = ['a', 'b', 'c'] if ternary else ['a', 'b']
+        body = gen_wide_scaled_narrow(
+            context('cdna4', name, ['d'], sources, is_vop3=True)
+        )
+        assert f'execute_wide_scaled_narrow<{str(ternary).lower()}>' in body
+        assert 'rj_arith_' + name.lower() + '_w64_gfx950' in generated
+        assert 'resolved_vgpr_offset' in body
+        for arch in ('rdna3', 'rdna4', 'cdna3', 'cdna5'):
+            assert (
+                gen_wide_scaled_narrow(
+                    context(arch, name, ['d'], sources, is_vop3=True)
+                )
+                is None
+            )
+        assert gen_wide_scaled_narrow(context('cdna4', name, ['d'], sources)) is None
+        assert (
+            gen_wide_scaled_narrow(context('cdna4', name, ['d'], [], is_vop3=True))
+            is None
+        )
+
+
+def test_gfx1250_scaled_fp6_narrow_bindings():
+    from amdisa.codegen.execute.rj_arith_float import (
+        WIDE_SCALED_NARROW_GFX1250_NAMES,
+        gen_wide_scaled_narrow,
+    )
+
+    generated = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/cdna5/vop3_exec_cvt.cpp'
+    ).read_text()
+    assert len(WIDE_SCALED_NARROW_GFX1250_NAMES) == 30
+    for name in WIDE_SCALED_NARROW_GFX1250_NAMES:
+        sr = '_SR_' in name
+        sources = ['a', 'b', 'c'] if sr else ['a', 'b']
+        body = gen_wide_scaled_narrow(
+            context('cdna5', name, ['d'], sources, is_vop3=True)
+        )
+        policy = ', 1' if '_PK8_FP4_' in name else ', 2' if '_PK8_' in name else ''
+        assert f'execute_wide_scaled_narrow<{str(sr).lower()}, true{policy}>' in body
+        assert ('RJ_ARITH_FP16_OVFL' in body) == (
+            '_PK8_' in name and '_FP4_' not in name
+        )
+        assert 'resolved_vgpr_offset(wf,' in body
+        assert 'nullptr' in body
+        assert 'rj_arith_' + name.lower() + '_w32_gfx1250' in generated
+        for arch in ('rdna3', 'rdna4', 'cdna3', 'cdna4'):
+            assert (
+                gen_wide_scaled_narrow(
+                    context(arch, name, ['d'], sources, is_vop3=True)
+                )
+                is None
+            )
+        assert gen_wide_scaled_narrow(context('cdna5', name, ['d'], sources)) is None
+        assert (
+            gen_wide_scaled_narrow(context('cdna5', name, ['d'], [], is_vop3=True))
+            is None
+        )
+
+
+@pytest.mark.parametrize(
+    'name', ['V_MIN_NUM_F32', 'V_MAX_NUM_F32', 'V_MINIMUM_F32', 'V_MAXIMUM_F32']
+)
+def test_gfx1250_selection_owns_its_numeric_only_compatibility_policy(name):
+    body = gen_float_binary32(context('cdna5', name, ['d'], ['a', 'b'], is_vop3=True))
+    for wave in (32, 64):
+        assert f'rj_arith_{name.lower()}_w{wave}_gfx1250,' in body
+    assert 'BinaryFpOperation' not in body
+
+
+@pytest.mark.parametrize('arch', ['cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5'])
+@pytest.mark.parametrize('accumulate', [False, True])
+def test_older_packed_fma_uses_inherited_policy(arch, accumulate):
+    from amdisa.codegen.execute.rj_arith_float import gen_packed_fma16
+
+    cdna = arch.startswith('cdna')
+    name = 'V_PK_FMAC_F16' if accumulate else 'V_PK_FMA_F16'
+    encodings = (
+        ['ENC_VOP2', 'ENC_VOP3']
+        if accumulate and cdna
+        else ['ENC_VOP2'] if accumulate else ['ENC_VOP3P']
+    )
+    for enc in encodings:
+        body = gen_packed_fma16(
+            context(
+                arch,
+                name,
+                ['d'],
+                ['a', 'b'] if accumulate else ['a', 'b', 'c'],
+                enc_name=enc,
+                opsel_exprs=('lo', 'hi'),
+                op_sel_hi_2_expr='hi_c',
+            )
+        )
+        suffix = '_gfx942' if accumulate and cdna else ''
+        for lanes in (32, 64):
+            assert f'rj_arith_{name.lower()}_w{lanes}{suffix}' in body
+        assert body.index('if (!wf.exec())') < body.index('UnsupportedOperandValue')
+        assert 'pk16_src_needs_narrowing' in body
+        assert ('execute_packed_fmac_sdwa' in body) == (
+            accumulate and cdna and enc == 'ENC_VOP2'
+        )
+        assert ('RJ_ARITH_ALU_OMOD_2' in body) == (accumulate and cdna)
+
+
+@pytest.mark.parametrize('arch', ['rdna1', 'rdna2', 'rdna3_5'])
+@pytest.mark.parametrize(
+    'name', ['V_FMA_MIX_F32', 'V_FMA_MIXLO_F16', 'V_FMA_MIXHI_F16']
+)
+def test_older_radeon_mixed_uses_preserved_half_policy(arch, name):
+    from amdisa.codegen.execute.rj_arith_float import gen_mixed_fma
+
+    body = gen_mixed_fma(
+        context(
+            arch,
+            name,
+            ['d'],
+            ['a', 'b', 'c'],
+            enc_name='ENC_VOP3P',
+            opsel_exprs=('lo', 'hi'),
+            op_sel_hi_2_expr='hi_c',
+        )
+    )
+    for lanes in (32, 64):
+        assert f'rj_arith_{name.lower()}_w{lanes}' in body
+    assert body.index('if (!wf.exec())') < body.index('UnsupportedOperandValue')
+    assert 'true, true);' in body
+    assert 'RJ_ARITH_MIX_F16_C' in body
+    assert 'is_inline_float_src(inst_.src2)' in body
+
+
+@pytest.mark.parametrize(
+    'name', ['V_MAD_MIX_F32', 'V_MAD_MIXLO_F16', 'V_MAD_MIXHI_F16']
+)
+def test_gfx908_mixed_fma_routes_independent_rounding_model(name):
+    from amdisa.codegen.execute.rj_arith_float import gen_mixed_fma
+
+    body = gen_mixed_fma(
+        context(
+            'cdna1',
+            name,
+            ['d'],
+            ['a', 'b', 'c'],
+            enc_name='ENC_VOP3P',
+            opsel_exprs=('inst_.op_sel', 'inst_.op_sel_hi'),
+            op_sel_hi_2_expr='inst_.op_sel_hi_2',
+        )
+    )
+    assert f'rj_arith_{name.lower()}_w32_gfx908' in body
+    assert f'rj_arith_{name.lower()}_w64_gfx908' in body
+    assert 'true, false, true);' in body
+
+
+def test_mixed_fma_has_no_legacy_dispatch_for_any_registered_profile():
+    from amdisa.__main__ import _PROFILES
+    from amdisa.codegen.execute import DISPATCH
+    from amdisa.codegen.execute.rj_arith_float import (
+        MIXED_FMA_NAMES,
+        MIXED_BF16_NAMES,
+        gen_mixed_fma,
+    )
+
+    assert not any(name.startswith('mad_mix') for name in DISPATCH)
+    for profile in _PROFILES:
+        if profile == 'cdna':
+            continue
+        arch = profile.replace('.', '_')
+        names = MIXED_FMA_NAMES
+        if arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4'):
+            names = {name.replace('FMA', 'MAD') for name in names}
+        elif arch == 'cdna5':
+            names = names | MIXED_BF16_NAMES
+        for name in names:
+            body = gen_mixed_fma(
+                context(
+                    arch,
+                    name,
+                    ['d'],
+                    ['a', 'b', 'c'],
+                    enc_name='ENC_VOP3P',
+                    opsel_exprs=('lo', 'hi'),
+                    op_sel_hi_2_expr='hi_c',
+                )
+            )
+            assert body and 'arith::execute_mixed_' in body, (arch, name)

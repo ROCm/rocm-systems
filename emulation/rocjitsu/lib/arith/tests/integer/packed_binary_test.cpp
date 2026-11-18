@@ -4,7 +4,7 @@
 // Tests for packed 16-bit integer arithmetic and selection.
 
 #include "integer/packed_binary_test.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_integer.h"
 
 #include <gtest/gtest.h>
 
@@ -150,4 +150,14 @@ TEST(IntegerPkAshrrevI16W32, Arithmetic) {
 TEST(IntegerPkAshrrevI16W64, Arithmetic) {
   rocjitsu::arith::test::check_packed_binary<64, 2>(rj_arith_v_pk_ashrrev_i16_w64,
                                                     rocjitsu::arith::test::HalfBinary::Ashr);
+}
+
+TEST(IntegerPkMulLoU16W32Gfx942, Arithmetic) {
+  rocjitsu::arith::test::check_packed_binary<32, 2>(
+      rj_arith_v_pk_mul_lo_u16_w32_gfx942, rocjitsu::arith::test::HalfBinary::MulLoU16Clamp);
+}
+
+TEST(IntegerPkMulLoU16W64Gfx942, Arithmetic) {
+  rocjitsu::arith::test::check_packed_binary<64, 2>(
+      rj_arith_v_pk_mul_lo_u16_w64_gfx942, rocjitsu::arith::test::HalfBinary::MulLoU16Clamp);
 }
