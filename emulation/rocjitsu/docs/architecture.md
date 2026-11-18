@@ -55,6 +55,12 @@ Models the GPU hardware pipeline:
 - **ComputeUnit** — Executes wavefronts. Manages SGPR/VGPR register
   files, LDS, and scratch memory. Supports functional and cycle-accurate
   modes.
+- **Image addressing and completion** — The AMDGPU VM owns the texture helpers under
+  `vm/graphics/` and builds them into `rocjitsu_vm_amdgpu`. The ISA decoder
+  prepares image requests against AMDGPU descriptors and the CU's address
+  configuration. These helpers calculate texel footprints, access metadata
+  through the VM, and publish sampled values and feedback through AMDGPU
+  register and memory state.
 - **CompletionTracker** — Tracks per-dispatch workgroup retirement.
   Fires completion signals in submission order. On HQD idle, it writes the queue
   event's mailbox when present and delivers the idle interrupts. Guest-visible
