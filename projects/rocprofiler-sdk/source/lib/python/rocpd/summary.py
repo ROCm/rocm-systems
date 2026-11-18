@@ -638,17 +638,16 @@ def create_summary_region_queries(
 
     category_prefixes = ["rocm_"]
 
+    # Keep the categories exactly as stored so the marker query can match them with
+    # plain equality (no LIKE wildcards).
+    raw_categories = [cat[0] for cat in categories if cat[0] is not None]
+
     # Convert all categories and prefixes to lowercase for correct comparison
-    categories = [(cat[0].lower(),) for cat in categories]
+    categories = [(cat[0].lower(),) for cat in categories if cat[0] is not None]
     category_prefixes = [prefix.lower() for prefix in category_prefixes]
 
     if region_categories is not None:
         region_categories = [cat.lower() for cat in region_categories]
-        if (
-            "markers" in region_categories
-        ):  # this is a common mistake, so we convert it to the singular marker
-            region_categories.remove("markers")
-            region_categories.append("marker")
     else:
         # Automatically retrieve region categories from the database
         region_categories = set()
@@ -664,6 +663,13 @@ def create_summary_region_queries(
             )
             first_part = category_name[len(matching_prefix) :].split("_")[0]
             region_categories.add(f"{matching_prefix}{first_part}")
+
+    # rocprofiler-systems writes rocm_marker_*, rocprofiler-sdk writes marker_*, and
+    # "markers" is a common typo. Treat all of them as the single "marker" category.
+    marker_aliases = {"markers", "rocm_marker", "rocm_markers"}
+    region_categories = {
+        "marker" if cat in marker_aliases else cat for cat in region_categories
+    }
 
     category_map = {
         cat: [c[0] for c in categories if c[0] == cat or c[0].startswith(cat + "_")]
@@ -702,11 +708,23 @@ def create_summary_region_queries(
     if "marker" not in region_categories:
         return queries
 
+    # Resolve the stored marker category names once and match them with IN. LIKE
+    # patterns over the regions_and_samples view are slow.
+    marker_categories = sorted(
+        c for c in raw_categories if c.lower().startswith(("marker_", "rocm_marker_"))
+    )
+    if not marker_categories:
+        return queries
+
+    marker_in_list = ", ".join(
+        "'" + c.replace("'", "''") + "'" for c in marker_categories
+    )
+
     marker_query_name = "marker"
-    marker_query = """
+    marker_query = f"""
         SELECT COALESCE(JSON_EXTRACT(extdata, '$.message'), name) AS marker_name, *
         FROM regions_and_samples
-        WHERE category LIKE 'MARKER_%'
+        WHERE category IN ({marker_in_list})
     """
 
     # Create regular summary query
