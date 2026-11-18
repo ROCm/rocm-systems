@@ -63,10 +63,9 @@ struct ScratchFree {
 fn emit(slot: usize, event: *const c_void) {
     #[cfg(all(hsa_tool_dispatch, not(test)))]
     if let Some(callback) = crate::api_trace::scratch_callback(slot) {
-        let _scope = CallbackScope::enter();
         // SAFETY: The stack event has the C layout required by this slot and
         // lives through the synchronous tool callback.
-        let _ = unsafe { callback(event) };
+        let _ = CallbackScope::run(|| unsafe { callback(event) });
     }
     #[cfg(not(all(hsa_tool_dispatch, not(test))))]
     let _ = (slot, event);

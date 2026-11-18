@@ -209,6 +209,7 @@ impl MemoryState {
     }
 
     /// Joins memory workers after the shared stop request is published.
+    #[cfg(test)]
     pub(crate) fn join_workers(&mut self) {
         for worker in self.take_workers() {
             let _ = worker.join();

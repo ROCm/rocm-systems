@@ -714,10 +714,9 @@ fn deliver_pending(
             break;
         };
         let lost_count = std::mem::take(lost);
-        let _callback_scope = CallbackScope::enter();
         // SAFETY: Pending bytes and the thread-local copy context remain live
         // through this synchronous callback. The token is invalidated below.
-        unsafe {
+        CallbackScope::run(|| unsafe {
             callback(
                 callback_data,
                 available,
@@ -725,7 +724,7 @@ fn deliver_pending(
                 Some(copy_samples),
                 copy.opaque_token(),
             );
-        }
+        });
         let progress = copy.progress();
         drop(copy);
         let Some((consumed, aborted)) = progress else {
@@ -818,14 +817,21 @@ impl SessionHandle {
                     if session.stop_worker.load(Ordering::Acquire) {
                         break;
                     }
-                    let Some(_lease) = crate::runtime::enter_runtime_service() else {
+                    let Some(token) = crate::runtime::enter_runtime_service() else {
                         continue;
                     };
-                    let Ok(mut resources) = session.resources.lock() else {
+                    if crate::runtime::ApiLeaseScope::run(token, || {
+                        let Ok(mut resources) = session.resources.lock() else {
+                            return std::ops::ControlFlow::Break(());
+                        };
+                        if resources.active && resources.drain_all() == SUCCESS {
+                            resources.deliver(false);
+                        }
+                        std::ops::ControlFlow::Continue(())
+                    })
+                    .is_break()
+                    {
                         break;
-                    };
-                    if resources.active && resources.drain_all() == SUCCESS {
-                        resources.deliver(false);
                     }
                 }
             });

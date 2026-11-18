@@ -13,10 +13,10 @@ fn with_copy_worker_lease(
     cleanup: Option<InFlightToken>,
     body: impl FnOnce(bool),
 ) {
-    let lease = cleanup
-        .or_else(|| inflight.enter())
-        .map(ApiLeaseScope::enter);
-    body(lease.is_some());
+    match cleanup.or_else(|| inflight.enter()) {
+        Some(token) => ApiLeaseScope::run(token, || body(true)),
+        None => body(false),
+    }
 }
 
 /// Enqueued copy with its operands retained until completion signaling.

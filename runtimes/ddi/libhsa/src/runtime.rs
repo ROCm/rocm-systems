@@ -74,9 +74,7 @@ pub(crate) use clock::{
     clock_counters, enable_high_precision_timestamps, translate_gpu_interval, translate_gpu_tick,
 };
 #[cfg(all(hsa_tool_dispatch, not(test)))]
-pub(crate) use lifecycle::{
-    begin_tool_preparation, enter_delegated_tool_cleanup, enter_tool_cleanup,
-};
+pub(crate) use lifecycle::enter_delegated_tool_cleanup;
 mod logging;
 mod status;
 #[cfg(test)]
@@ -86,94 +84,84 @@ pub(crate) use admission::{
     process_admission,
 };
 pub(crate) use lifecycle::{
-    GenerationHealth, InFlightGeneration, LIFECYCLE_CONDVAR, LifecycleCallScope,
-    LifecycleTransition, RetainOnDrop, ShutdownWork, begin_init_waiting, initialized_mut, lock,
+    GenerationHealth, InFlightGeneration, RetainOnDrop, initialize, initialized_mut, lock, shutdown,
 };
 #[cfg(test)]
-pub(crate) use lifecycle::{HsaLifecycle, LIFECYCLE};
+pub(crate) use lifecycle::{HsaLifecycle, LIFECYCLE, LifecycleCallScope, begin_init_waiting};
 #[cfg(test)]
 use logging::logging_flag_enabled;
 pub(crate) use logging::{LogOutput, LogWork, LogWriteScope};
 pub(crate) use status::{boundary, map_error, plain_boundary};
 
-/// Initialization error with evidence that native rollback also failed.
+/// Startup failure together with the owner of any unfinished rollback.
 pub(crate) struct InitFailure {
-    /// HSA status returned to the caller.
+    /// Original HSA initialization status, preserved while rollback is pending.
     pub(crate) status: Status,
-    /// Native state was retained because cleanup could not be proved.
-    pub(crate) cleanup_failed: bool,
+    /// Cleanup progress must not erase a retryable native retirement owner.
+    pub(crate) rollback: InitRollback,
+}
+
+/// Ownership remaining after an unpublished generation has rolled back.
+pub(crate) enum InitRollback {
+    /// All startup resources have retired.
+    Complete,
+    /// Frontend owners are gone; only native session retirement remains.
+    NativeRetry(SessionRetirement),
+    /// An uncertain frontend rollback retained its dependency graph.
+    Uncertain,
 }
 
 impl From<Status> for InitFailure {
-    /// Wraps an HSA status when rollback itself has not failed.
     fn from(status: Status) -> Self {
         Self {
             status,
-            cleanup_failed: false,
+            rollback: InitRollback::Complete,
         }
-    }
-}
-
-/// Minimal cleanup contract shared by real and test session owners.
-trait RetireSession {
-    /// Closes admission before rollback releases any resource owner.
-    fn begin_retirement(&self) -> bool;
-    /// Releases native resources and reports whether cleanup was conclusive.
-    fn retire(&mut self) -> bool;
-}
-
-impl RetireSession for Session {
-    fn begin_retirement(&self) -> bool {
-        Session::begin_retirement(self).is_ok()
-    }
-
-    /// Destroys the native session and reports whether cleanup succeeded.
-    fn retire(&mut self) -> bool {
-        matches!(self.try_close(), RetirementOutcome::Closed)
     }
 }
 
 /// Holds startup resources until publication or rollback finishes.
-struct PendingInit<S: RetireSession = Session, G = Gpu> {
+struct PendingInit<G = Gpu> {
     /// Trap publication owners retained through startup rollback.
     debugger: Option<PendingDebugger>,
     /// Session released after all activated GPU owners.
-    session: Option<S>,
+    session: Option<Session>,
     /// Activated GPUs that must be dropped before their session.
     gpus: Vec<G>,
 }
 
-impl<S: RetireSession, G> PendingInit<S, G> {
-    /// Closes admission, then drops activated GPUs before native retirement.
-    fn cleanup(&mut self) -> bool {
+impl<G> PendingInit<G> {
+    /// Closes admission and releases frontend borrowers before native retirement.
+    fn cleanup(&mut self) -> InitRollback {
         let Some(session) = self.session.take() else {
-            return true;
+            return InitRollback::Complete;
         };
-        // Retain the full rollback graph if admission closure fails or unwinds.
-        let mut session = RetainOnDrop::new(session);
+        // An early error or unwind must retain every owner still reachable by
+        // native work. Extract owners only after their release proof succeeds.
+        let session = RetainOnDrop::new(session);
         let debugger = RetainOnDrop::new(self.debugger.take());
         let gpus = RetainOnDrop::new(std::mem::take(&mut self.gpus));
-        if !session.begin_retirement() {
-            return false;
+        if session.begin_retirement().is_err() {
+            return InitRollback::Uncertain;
         }
-        // Normal traps remain in the process context for other runtime clients.
-        // Uncertain publication queues retain their own session dependencies.
+        // Normal traps remain owned by the shared process context. Uncertain
+        // trap publication queues retain their own native dependencies.
         drop(debugger.into_inner());
-        // Device and MMIO owners must release their session borrows first.
         drop(gpus.into_inner());
-        if !session.retire() {
-            // A failed native close may retain a VM or KFD runtime state.
-            // Keep its owning controller alive until process teardown.
-            return false;
+        let mut retirement = session.into_inner().into_retirement();
+        match retirement.try_close() {
+            RetirementOutcome::Closed => InitRollback::Complete,
+            RetirementOutcome::Busy | RetirementOutcome::Failed(_) => {
+                InitRollback::NativeRetry(retirement)
+            }
         }
-        drop(session.into_inner());
-        true
     }
 }
 
-impl<S: RetireSession, G> Drop for PendingInit<S, G> {
-    /// Rolls back unpublished GPUs and their native session.
+impl<G> Drop for PendingInit<G> {
     fn drop(&mut self) {
+        // If unwinding prevents returning a typed result, SessionRetirement's
+        // destructor retains unfinished native ownership until process exit.
         self.cleanup();
     }
 }
@@ -481,7 +469,7 @@ impl HsaState {
             Err(status) => {
                 return Err(InitFailure {
                     status,
-                    cleanup_failed: !pending.cleanup(),
+                    rollback: pending.cleanup(),
                 });
             }
         };
@@ -497,7 +485,7 @@ impl HsaState {
         if host_memory_bytes == 0 {
             return Err(InitFailure {
                 status: ERROR,
-                cleanup_failed: !pending.cleanup(),
+                rollback: pending.cleanup(),
             });
         }
         let host = topology.host.cpu.clone().unwrap_or(CpuInfo {
@@ -514,7 +502,7 @@ impl HsaState {
             Ok(runtime) => Ok(runtime),
             Err(status) => Err(InitFailure {
                 status,
-                cleanup_failed: !pending.cleanup(),
+                rollback: pending.cleanup(),
             }),
         }
     }
@@ -708,9 +696,9 @@ impl HsaState {
         for (gpu, mask) in pending.gpus.iter_mut().zip(masks) {
             gpu.global_cu_mask = mask;
         }
-        let gpus = std::mem::take(&mut pending.gpus);
         let signal_state = SignalState::new(pending.session.as_ref().ok_or(ERROR)?)?;
         let session = pending.session.take().ok_or(ERROR)?;
+        let gpus = std::mem::take(&mut pending.gpus);
         let health = Arc::new(GenerationHealth::new());
         Ok(Self {
             debugger: pending.debugger.take(),
@@ -979,19 +967,15 @@ impl HsaState {
         self.logging.prepare(&self.inflight, flag, arguments)
     }
 
-    /// Stops this session.
+    /// Prepares an isolated test generation without public/tool orchestration.
+    #[cfg(test)]
     pub(crate) fn stop(self) -> ShutdownOutcome {
-        // A panic after detachment must never drop owners that native work may
-        // still reach. Only the proved-clean path extracts and drops this state.
         let mut state = RetainOnDrop::new(self);
-        // Prepared shutdown already closed core admission after tool unload.
-        // Repeat idempotently for direct teardown before releasing any owners.
         if let Err(status) = state.begin_session_retirement() {
             return ShutdownOutcome::RetainedGeneration { status, state };
         }
         state.logging.stop();
         if state.running_on_worker() || CallbackScope::active() {
-            // Releasing signal storage from its own callback worker is unsafe.
             state.request_stop();
             return ShutdownOutcome::RetainedGeneration {
                 status: INVALID_RUNTIME_STATE,
@@ -999,21 +983,27 @@ impl HsaState {
             };
         }
         state.request_stop();
-        // Multi-signal waits observe stop_workers and release their signal
-        // references. Native calls finish before we release the device VM.
         state.inflight.wait_idle();
         state.memory_state.join_workers();
         state.signal_state.join_worker();
+        notify_system_shutdown(&state.system_event_handlers);
+        if let Some(worker) = state.system_event_worker.take() {
+            let _ = worker.join();
+        }
+        state.into_inner().retire_prepared()
+    }
+
+    /// Retires backing after the lifecycle owner has drained calls, stopped
+    /// callbacks and tools, and closed core session admission.
+    fn retire_prepared(self) -> ShutdownOutcome {
+        // Unwinding cannot release backing whose last native user is uncertain.
+        let mut state = RetainOnDrop::new(self);
         if state.health.is_quarantined() {
             state.pc_sampling_state.quarantine_all();
             return ShutdownOutcome::RetainedGeneration {
                 status: INVALID_RUNTIME_STATE,
                 state,
             };
-        }
-        notify_system_shutdown(&state.system_event_handlers);
-        if let Some(worker) = state.system_event_worker.take() {
-            let _ = worker.join();
         }
         if !state.pc_sampling_state.shutdown() {
             return ShutdownOutcome::RetainedGeneration {

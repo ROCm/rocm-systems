@@ -72,8 +72,7 @@ fn shutdown_waits_for_inflight_calls() {
 /// Verifies that callback scope restricts queue and sampling teardown.
 fn callback_scope_restricts_queue_and_sampling_teardown() {
     assert!(!CallbackScope::active());
-    {
-        let _scope = CallbackScope::enter();
+    CallbackScope::run(|| {
         // SAFETY: Queue teardown is rejected before inspecting the
         // non-null pointer while a callback is active.
         assert_eq!(
@@ -88,9 +87,9 @@ fn callback_scope_restricts_queue_and_sampling_teardown() {
             crate::api::pc_sampling::hsa_ven_amd_pcs_stop(HsaPcSampling { handle: 1 }),
             INVALID_RUNTIME_STATE
         );
-        let _nested = CallbackScope::enter();
+        CallbackScope::run(|| assert!(CallbackScope::active()));
         assert!(CallbackScope::active());
-    }
+    });
     assert!(!CallbackScope::active());
 }
 
@@ -98,7 +97,7 @@ fn callback_scope_restricts_queue_and_sampling_teardown() {
 #[allow(clippy::unwrap_used)]
 fn parked_shutdown_helper_exits_if_commit_is_aborted() {
     let mut lifecycle = HsaLifecycle::new();
-    let generation = lifecycle.begin_init().unwrap().unwrap();
+    let generation = lifecycle.begin_init().unwrap().created().unwrap();
     let (commit, instruction) = std::sync::mpsc::channel::<u64>();
     let (finished, completion) = std::sync::mpsc::channel();
     let cleanup_called = Arc::new(AtomicBool::new(false));
@@ -120,7 +119,9 @@ fn parked_shutdown_helper_exits_if_commit_is_aborted() {
     completion.recv_timeout(Duration::from_secs(1)).unwrap();
     assert!(!cleanup_called.load(Ordering::Acquire));
     assert_eq!(lifecycle.begin_init().err(), Some(INVALID_RUNTIME_STATE));
-    lifecycle.cancel_init(generation, false).unwrap();
+    lifecycle
+        .cancel_init(generation, InitRollback::Complete)
+        .unwrap();
 }
 
 #[test]
@@ -168,20 +169,28 @@ fn deferred_cleanup_joins_the_callback_worker_after_exit() {
 /// Verifies that initialization gate rejects overlapping generations.
 fn initialization_gate_rejects_overlapping_generations() {
     let mut registry = HsaLifecycle::new();
-    let first = registry.begin_init().unwrap().unwrap();
-    assert_eq!(registry.begin_init().unwrap_err(), INVALID_RUNTIME_STATE);
+    let first = registry.begin_init().unwrap().created().unwrap();
+    assert_eq!(registry.begin_init().err().unwrap(), INVALID_RUNTIME_STATE);
     assert_eq!(registry.begin_shutdown().err(), Some(INVALID_RUNTIME_STATE));
-    registry.cancel_init(first, false).unwrap();
-    let second = registry.begin_init().unwrap().unwrap();
+    registry.cancel_init(first, InitRollback::Complete).unwrap();
+    let second = registry.begin_init().unwrap().created().unwrap();
     assert_ne!(second, first);
-    registry.cancel_init(second, false).unwrap();
+    registry
+        .cancel_init(second, InitRollback::Complete)
+        .unwrap();
 }
 
 #[test]
 fn concurrent_init_waits_for_the_first_generation_to_finish() {
     let lifecycle = Arc::new(Mutex::new(HsaLifecycle::new()));
     let changed = Arc::new(Condvar::new());
-    let generation = lifecycle.lock().unwrap().begin_init().unwrap().unwrap();
+    let generation = lifecycle
+        .lock()
+        .unwrap()
+        .begin_init()
+        .unwrap()
+        .created()
+        .unwrap();
     let ready = Arc::new(std::sync::Barrier::new(2));
     let worker_lifecycle = lifecycle.clone();
     let worker_changed = changed.clone();
@@ -195,44 +204,62 @@ fn concurrent_init_waits_for_the_first_generation_to_finish() {
     lifecycle
         .lock()
         .unwrap()
-        .cancel_init_with_notification(generation, false, &changed)
+        .cancel_init_with_notification(generation, InitRollback::Complete, &changed)
         .unwrap();
-    let next = worker.join().unwrap().unwrap().unwrap();
+    let next = worker.join().unwrap().unwrap().created().unwrap();
     assert_ne!(next, generation);
-    lifecycle.lock().unwrap().cancel_init(next, false).unwrap();
+    lifecycle
+        .lock()
+        .unwrap()
+        .cancel_init(next, InitRollback::Complete)
+        .unwrap();
 }
 
 #[test]
 fn callback_init_does_not_wait_for_preparing_shutdown() {
     let lifecycle = Mutex::new(HsaLifecycle::new());
-    let generation = lifecycle.lock().unwrap().begin_init().unwrap().unwrap();
+    let generation = lifecycle
+        .lock()
+        .unwrap()
+        .begin_init()
+        .unwrap()
+        .created()
+        .unwrap();
     lifecycle
         .lock()
         .unwrap()
-        .prepare_without_runtime_for_test(generation);
-    let _scope = CallbackScope::enter();
-    assert_eq!(
-        begin_init_waiting(lifecycle.lock().unwrap(), &Condvar::new()).err(),
-        Some(INVALID_RUNTIME_STATE)
-    );
+        .stop_without_runtime_for_test(generation);
+    CallbackScope::run(|| {
+        assert_eq!(
+            begin_init_waiting(lifecycle.lock().unwrap(), &Condvar::new()).err(),
+            Some(INVALID_RUNTIME_STATE)
+        );
+    });
 }
 
 #[test]
 fn admitted_call_init_does_not_wait_for_preparing_shutdown() {
     let lifecycle = Mutex::new(HsaLifecycle::new());
-    let generation = lifecycle.lock().unwrap().begin_init().unwrap().unwrap();
+    let generation = lifecycle
+        .lock()
+        .unwrap()
+        .begin_init()
+        .unwrap()
+        .created()
+        .unwrap();
     lifecycle
         .lock()
         .unwrap()
-        .prepare_without_runtime_for_test(generation);
+        .stop_without_runtime_for_test(generation);
     let gate = Arc::new(InFlightTracker::new());
     gate.close();
     gate.open(generation);
-    let _scope = ApiLeaseScope::enter(gate.enter().unwrap());
-    assert_eq!(
-        begin_init_waiting(lifecycle.lock().unwrap(), &Condvar::new()).err(),
-        Some(INVALID_RUNTIME_STATE)
-    );
+    ApiLeaseScope::run(gate.enter().unwrap(), || {
+        assert_eq!(
+            begin_init_waiting(lifecycle.lock().unwrap(), &Condvar::new()).err(),
+            Some(INVALID_RUNTIME_STATE)
+        );
+    });
 }
 
 #[test]
@@ -256,152 +283,97 @@ fn same_thread_lifecycle_reentry_is_rejected() {
 /// Verifies that failed initialization cleanup quarantines the next generation.
 fn failed_initialization_cleanup_quarantines_the_next_generation() {
     let mut registry = HsaLifecycle::new();
-    let generation = registry.begin_init().unwrap().unwrap();
-    registry.cancel_init(generation, true).unwrap();
-    assert_eq!(registry.begin_init().unwrap_err(), INVALID_RUNTIME_STATE);
+    let generation = registry.begin_init().unwrap().created().unwrap();
+    registry
+        .cancel_init(generation, InitRollback::Uncertain)
+        .unwrap();
+    assert_eq!(registry.begin_init().err().unwrap(), INVALID_RUNTIME_STATE);
     assert_eq!(registry.begin_shutdown().err(), Some(INVALID_RUNTIME_STATE));
 }
 
 #[test]
-/// Verifies that first and later GPU activation failures retire the session
-/// join.
-fn first_and_later_gpu_activation_failures_retire_the_session_join() {
-    /// Counts activated GPU owners in a rollback test.
+fn initialization_rollback_closes_admission_before_releasing_gpu_borrows() {
     struct Activated {
-        /// Number of mock GPU owners still live.
-        live: Arc<AtomicUsize>,
-        /// Admission must close before a resource owner is released.
-        retiring: Arc<AtomicBool>,
+        session: Session,
+        released: Arc<AtomicUsize>,
     }
     impl Drop for Activated {
-        /// Records destruction of the test owner.
         fn drop(&mut self) {
-            assert!(self.retiring.load(AtomicOrdering::Relaxed));
-            self.live.fetch_sub(1, AtomicOrdering::Relaxed);
+            assert_eq!(
+                self.session.state().unwrap(),
+                rocddi::session::SessionState::Retiring
+            );
+            self.released.fetch_add(1, AtomicOrdering::Relaxed);
         }
     }
-    /// Tracks retirement of a mock session.
-    struct Joined {
-        /// Number of GPU owners that must retire before the session.
-        live: Arc<AtomicUsize>,
-        /// Number of mock session joins still outstanding.
-        joins: Arc<AtomicUsize>,
-        /// Expected live owners when rollback closes admission.
-        live_at_begin: usize,
-        /// Shared retirement state observed by resource destructors.
-        retiring: Arc<AtomicBool>,
-    }
-    impl RetireSession for Joined {
-        fn begin_retirement(&self) -> bool {
-            assert_eq!(self.live.load(AtomicOrdering::Relaxed), self.live_at_begin);
-            self.retiring.store(true, AtomicOrdering::Relaxed);
-            true
-        }
-
-        /// Checks native owners are gone before retiring the mock session.
-        fn retire(&mut self) -> bool {
-            assert!(self.retiring.load(AtomicOrdering::Relaxed));
-            assert_eq!(self.live.load(AtomicOrdering::Relaxed), 0);
-            self.joins.fetch_sub(1, AtomicOrdering::Relaxed);
-            true
-        }
-    }
-
-    for completed_activations in [0, 1] {
-        let live = Arc::new(AtomicUsize::new(completed_activations));
-        let joins = Arc::new(AtomicUsize::new(1));
-        let retiring = Arc::new(AtomicBool::new(false));
+    for completed_activations in [0, 1, 2] {
+        let session = Session::new(DriverContextLifetime::Session).unwrap();
+        let released = Arc::new(AtomicUsize::new(0));
+        let gpus = (0..completed_activations)
+            .map(|_| Activated {
+                session: session.clone(),
+                released: released.clone(),
+            })
+            .collect();
         let mut pending = PendingInit {
             debugger: None,
-            session: Some(Joined {
-                live: live.clone(),
-                joins: joins.clone(),
-                live_at_begin: completed_activations,
-                retiring: retiring.clone(),
-            }),
-            gpus: (0..completed_activations)
-                .map(|_| Activated {
-                    live: live.clone(),
-                    retiring: retiring.clone(),
-                })
-                .collect(),
+            session: Some(session),
+            gpus,
         };
-        assert!(pending.cleanup());
-        assert_eq!(live.load(AtomicOrdering::Relaxed), 0);
-        assert_eq!(joins.load(AtomicOrdering::Relaxed), 0);
+        assert!(matches!(pending.cleanup(), InitRollback::Complete));
+        assert_eq!(
+            released.load(AtomicOrdering::Relaxed),
+            completed_activations
+        );
     }
 }
 
 #[test]
-fn failed_or_unwound_initialization_retains_required_owners() {
-    /// Records whether failed native rollback releases its owner.
-    struct SessionProbe {
-        /// Drop count that must remain zero after an uncertain rollback.
-        drops: Arc<AtomicUsize>,
-        /// Fails admission closure before releasing any resource owner.
-        fail_before_release: bool,
-        /// Injects an unwind instead of a returned error.
-        panic_on_failure: bool,
-    }
+#[allow(clippy::panic)]
+fn initialization_rollback_keeps_native_retirement_retryable() {
+    let session = Session::new(DriverContextLifetime::Session).unwrap();
+    let borrower = session.clone();
+    let mut pending = PendingInit::<()> {
+        debugger: None,
+        session: Some(session),
+        gpus: Vec::new(),
+    };
+    let InitRollback::NativeRetry(mut retirement) = pending.cleanup() else {
+        panic!("a live session borrower must retain native retirement");
+    };
+    assert_eq!(
+        borrower.state().unwrap(),
+        rocddi::session::SessionState::Retiring
+    );
+    assert!(matches!(retirement.try_close(), RetirementOutcome::Busy));
+    drop(borrower);
+    assert!(matches!(retirement.try_close(), RetirementOutcome::Closed));
+    assert!(matches!(pending.cleanup(), InitRollback::Complete));
+}
 
-    impl RetireSession for SessionProbe {
-        fn begin_retirement(&self) -> bool {
-            if self.fail_before_release {
-                assert!(!self.panic_on_failure, "injected admission closure unwind");
-                return false;
-            }
-            true
-        }
-
-        fn retire(&mut self) -> bool {
-            assert!(!self.fail_before_release);
-            assert!(!self.panic_on_failure, "injected native rollback unwind");
-            false
-        }
-    }
-
-    impl Drop for SessionProbe {
+#[test]
+#[allow(clippy::panic)]
+fn initialization_rollback_retains_the_session_if_frontend_release_unwinds() {
+    struct PanickingOwner;
+    impl Drop for PanickingOwner {
         fn drop(&mut self) {
-            self.drops.fetch_add(1, AtomicOrdering::Relaxed);
+            panic!("injected frontend rollback unwind");
         }
     }
-
-    struct GpuProbe(Arc<AtomicUsize>);
-
-    impl Drop for GpuProbe {
-        fn drop(&mut self) {
-            self.0.fetch_add(1, AtomicOrdering::Relaxed);
-        }
-    }
-
-    for fail_before_release in [false, true] {
-        for panic_on_failure in [false, true] {
-            let drops = Arc::new(AtomicUsize::new(0));
-            let gpu_drops = Arc::new(AtomicUsize::new(0));
-            let mut pending = PendingInit {
-                debugger: None,
-                session: Some(SessionProbe {
-                    drops: drops.clone(),
-                    fail_before_release,
-                    panic_on_failure,
-                }),
-                gpus: vec![GpuProbe(gpu_drops.clone())],
-            };
-            let result =
-                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| pending.cleanup()));
-            if panic_on_failure {
-                assert!(result.is_err());
-            } else {
-                assert!(!result.unwrap());
-            }
-            drop(pending);
-            assert_eq!(drops.load(AtomicOrdering::Relaxed), 0);
-            assert_eq!(
-                gpu_drops.load(AtomicOrdering::Relaxed),
-                usize::from(!fail_before_release)
-            );
-        }
-    }
+    let session = Session::new(DriverContextLifetime::Session).unwrap();
+    let mut observer = session.clone();
+    let mut pending = PendingInit {
+        debugger: None,
+        session: Some(session),
+        gpus: vec![PanickingOwner],
+    };
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| pending.cleanup())).is_err());
+    drop(pending);
+    assert_eq!(
+        observer.state().unwrap(),
+        rocddi::session::SessionState::Retiring
+    );
+    assert!(matches!(observer.try_close(), RetirementOutcome::Busy));
 }
 
 /// Captures system-event callback observations.

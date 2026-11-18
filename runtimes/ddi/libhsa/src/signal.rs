@@ -1177,9 +1177,8 @@ pub(crate) unsafe fn with_public_signal<R>(
     operation: impl for<'a> FnOnce(&'a AmdSignal) -> R,
 ) -> Option<R> {
     let admission = crate::runtime::enter_public_raw_handle()?;
-    let _lease_scope = crate::runtime::ApiLeaseScope::enter(admission);
     // SAFETY: The caller supplies the same ownership guarantee as with_signal.
-    unsafe { with_signal(signal, operation) }
+    crate::runtime::ApiLeaseScope::run(admission, || unsafe { with_signal(signal, operation) })
 }
 
 /// Evaluates an HSA signal wait condition against the observed value.

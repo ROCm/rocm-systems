@@ -163,8 +163,9 @@ pub(crate) struct LogWork {
 impl LogWork {
     /// Writes a prepared log record after releasing the runtime lock.
     pub(crate) fn write(self) {
-        let _lease_scope = ApiLeaseScope::enter(self.inflight);
-        self.output.write(self.flag, self.line.as_bytes());
+        ApiLeaseScope::run(self.inflight, || {
+            self.output.write(self.flag, self.line.as_bytes());
+        });
     }
 }
 
@@ -184,11 +185,17 @@ mod tests {
     #[test]
     fn log_write_init_does_not_wait_for_preparing_shutdown() {
         let lifecycle = Mutex::new(HsaLifecycle::new());
-        let generation = lifecycle.lock().unwrap().begin_init().unwrap().unwrap();
+        let generation = lifecycle
+            .lock()
+            .unwrap()
+            .begin_init()
+            .unwrap()
+            .created()
+            .unwrap();
         lifecycle
             .lock()
             .unwrap()
-            .prepare_without_runtime_for_test(generation);
+            .stop_without_runtime_for_test(generation);
         let scope = LogWriteScope::enter();
         assert!(scope.is_some());
         assert_eq!(

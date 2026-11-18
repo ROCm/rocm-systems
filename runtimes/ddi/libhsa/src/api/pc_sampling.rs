@@ -61,15 +61,15 @@ pub extern "C" fn hsa_ven_amd_pcs_iterate_configuration(
             Ok(configurations) => configurations,
             Err(error) => return sampling_error(error),
         };
-        let _scope = CallbackScope::enter();
-        for configuration in configurations {
-            let (Ok(minimum_interval), Ok(maximum_interval)) = (
-                usize::try_from(configuration.minimum_interval),
-                usize::try_from(configuration.maximum_interval),
-            ) else {
-                continue;
-            };
-            let record = HsaPcSamplingConfiguration {
+        CallbackScope::run(|| {
+            for configuration in configurations {
+                let (Ok(minimum_interval), Ok(maximum_interval)) = (
+                    usize::try_from(configuration.minimum_interval),
+                    usize::try_from(configuration.maximum_interval),
+                ) else {
+                    continue;
+                };
+                let record = HsaPcSamplingConfiguration {
                 method: match configuration.method {
                     PcSamplingMethod::HostTrap => 0,
                     PcSamplingMethod::Stochastic => 1,
@@ -86,15 +86,16 @@ pub extern "C" fn hsa_ven_amd_pcs_iterate_configuration(
                     rocddi::device::gpu::profiling::PcSamplingIntervalRestriction::PowerOfTwo => 1,
                 },
             };
-            // SAFETY: The callback is synchronous and the record stays live
-            // through its return. The caller retains callback_data.
-            match unsafe { callback(&raw const record, callback_data) } {
-                SUCCESS => (),
-                INFO_BREAK => return SUCCESS,
-                status => return status,
+                // SAFETY: The callback is synchronous and the record stays live
+                // through its return. The caller retains callback_data.
+                match unsafe { callback(&raw const record, callback_data) } {
+                    SUCCESS => (),
+                    INFO_BREAK => return SUCCESS,
+                    status => return status,
+                }
             }
-        }
-        SUCCESS
+            SUCCESS
+        })
     })
 }
 

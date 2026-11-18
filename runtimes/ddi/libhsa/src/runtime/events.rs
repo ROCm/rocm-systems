@@ -13,29 +13,35 @@ thread_local! {
     static IN_CALLBACK: Cell<bool> = const { Cell::new(false) };
 }
 
-/// Marks application callbacks whose teardown would wait for the caller.
-pub(crate) struct CallbackScope {
+/// Runs application callbacks whose teardown would wait for the caller.
+pub(crate) struct CallbackScope;
+
+/// Lexically restores the callback marker before returning to its caller.
+struct CallbackGuard {
     /// Prior callback state restored when this invocation returns.
     previous: bool,
-    /// Owns a worker callback's lease and thread-local inheritance marker.
-    _lease_scope: Option<ApiLeaseScope>,
 }
 
 impl CallbackScope {
-    /// Marks entry into an application callback scope for reentrancy checks.
-    pub(crate) fn enter() -> Self {
-        let previous = IN_CALLBACK.with(|active| active.replace(true));
+    /// Runs an application callback with reentrancy and lifetime protection.
+    pub(crate) fn run<R>(operation: impl FnOnce() -> R) -> R {
         // A synchronous callback already runs under its caller's lease.
         // Independent worker callbacks acquire one before invoking user code.
         // After close, their owning worker is joined before state detachment;
         // new HSA API calls from those callbacks are refused admission.
-        let lease_scope = (!ApiLeaseScope::current())
+        let token = (!ApiLeaseScope::current())
             .then(|| process_admission().enter())
-            .flatten()
-            .map(ApiLeaseScope::enter);
-        Self {
-            previous,
-            _lease_scope: lease_scope,
+            .flatten();
+        let invoke = || {
+            let _guard = CallbackGuard {
+                previous: IN_CALLBACK.with(|active| active.replace(true)),
+            };
+            operation()
+        };
+        if let Some(token) = token {
+            ApiLeaseScope::run(token, invoke)
+        } else {
+            invoke()
         }
     }
 
@@ -45,7 +51,7 @@ impl CallbackScope {
     }
 }
 
-impl Drop for CallbackScope {
+impl Drop for CallbackGuard {
     /// Restores the previous callback reentrancy state for this thread.
     fn drop(&mut self) {
         IN_CALLBACK.with(|active| active.set(self.previous));
@@ -125,10 +131,9 @@ pub(super) fn notify_system_event(
         if stop.is_some_and(|stop| stop.load(Ordering::Acquire)) {
             break;
         }
-        let _scope = CallbackScope::enter();
         // SAFETY: Registration supplies an ABI-compatible callback. The event
         // remains live for the duration of each synchronous invocation.
-        handled |= unsafe { callback(event, data.as_ptr()) } == SUCCESS;
+        handled |= CallbackScope::run(|| unsafe { callback(event, data.as_ptr()) }) == SUCCESS;
     }
     handled
 }
@@ -204,134 +209,140 @@ fn system_event_worker_with(
     let mut retry_delay = Duration::from_millis(1);
     let mut driver_failures = 0u8;
     while !stop.load(Ordering::Acquire) {
-        let Some(_lease) = enter_runtime_service() else {
+        let Some(token) = enter_runtime_service() else {
             pause(Duration::from_millis(1));
             continue;
         };
-        match wait(Duration::from_millis(1)) {
-            Ok(Some(DeviceEvent::GpuMemoryFault(fault))) => {
-                retry_delay = Duration::from_millis(1);
-                driver_failures = 0;
-                let notification = {
-                    let Ok(mut guard) = lock() else {
-                        return;
-                    };
-                    let Some(runtime) = guard.as_mut() else {
-                        return;
-                    };
-                    let Some(index) = runtime
-                        .gpus
-                        .iter()
-                        .position(|gpu| Some(gpu.endpoint.id) == fault.endpoint_id)
-                    else {
-                        continue;
-                    };
-                    let agent = HsaAgent {
-                        handle: GPU_AGENT_BASE + index as u64,
-                    };
-                    let event = memory_fault_event(agent, fault);
-                    let reason = event.payload[2] as u32;
-                    runtime.vm_fault_details = Some((agent, fault.virtual_address, reason));
-                    // KFD reports the process fault and the queue error on
-                    // different workers. Let the queue worker identify the
-                    // faulted queue before delivering the system callback.
-                    let Ok((mut guard, _)) = VM_FAULT_CONDVAR.wait_timeout_while(
-                        guard,
-                        Duration::from_millis(50),
-                        |registry| {
-                            registry.as_ref().is_some_and(|runtime| {
-                                runtime
-                                    .queue_state
-                                    .queues
-                                    .values()
-                                    .any(|queue| queue.agent == agent)
-                                    && !runtime
-                                        .queue_state
-                                        .queues
-                                        .values()
-                                        .any(|queue| queue.agent == agent && queue.vm_faulted)
-                            })
-                        },
-                    ) else {
-                        return;
-                    };
-                    let Some(runtime) = guard.as_mut() else {
-                        return;
-                    };
-                    for queue in runtime.queue_state.queues.values_mut() {
-                        if queue.agent == agent && queue.vm_faulted {
-                            queue.vm_fault_address = fault.virtual_address;
-                            queue.vm_fault_reason = reason;
-                            // Only queue errors already observed are covered
-                            // by this callback. A later queue error has no
-                            // native ID to correlate with this process event.
-                            queue.vm_fault_callback_state.report_by_system();
-                        }
+        if crate::runtime::ApiLeaseScope::run(token, || {
+            match wait(Duration::from_millis(1)) {
+                Ok(Some(DeviceEvent::GpuMemoryFault(fault))) => {
+                    retry_delay = Duration::from_millis(1);
+                    driver_failures = 0;
+                    let notification =
+                        {
+                            let Ok(mut guard) = lock() else {
+                                return std::ops::ControlFlow::Break(());
+                            };
+                            let Some(runtime) = guard.as_mut() else {
+                                return std::ops::ControlFlow::Break(());
+                            };
+                            let Some(index) = runtime
+                                .gpus
+                                .iter()
+                                .position(|gpu| Some(gpu.endpoint.id) == fault.endpoint_id)
+                            else {
+                                return std::ops::ControlFlow::Continue(());
+                            };
+                            let agent = HsaAgent {
+                                handle: GPU_AGENT_BASE + index as u64,
+                            };
+                            let event = memory_fault_event(agent, fault);
+                            let reason = event.payload[2] as u32;
+                            runtime.vm_fault_details = Some((agent, fault.virtual_address, reason));
+                            // KFD reports the process fault and the queue error on
+                            // different workers. Let the queue worker identify the
+                            // faulted queue before delivering the system callback.
+                            let Ok((mut guard, _)) = VM_FAULT_CONDVAR.wait_timeout_while(
+                                guard,
+                                Duration::from_millis(50),
+                                |registry| {
+                                    registry.as_ref().is_some_and(|runtime| {
+                                        runtime
+                                            .queue_state
+                                            .queues
+                                            .values()
+                                            .any(|queue| queue.agent == agent)
+                                            && !runtime.queue_state.queues.values().any(|queue| {
+                                                queue.agent == agent && queue.vm_faulted
+                                            })
+                                    })
+                                },
+                            ) else {
+                                return std::ops::ControlFlow::Break(());
+                            };
+                            let Some(runtime) = guard.as_mut() else {
+                                return std::ops::ControlFlow::Break(());
+                            };
+                            for queue in runtime.queue_state.queues.values_mut() {
+                                if queue.agent == agent && queue.vm_faulted {
+                                    queue.vm_fault_address = fault.virtual_address;
+                                    queue.vm_fault_reason = reason;
+                                    // Only queue errors already observed are covered
+                                    // by this callback. A later queue error has no
+                                    // native ID to correlate with this process event.
+                                    queue.vm_fault_callback_state.report_by_system();
+                                }
+                            }
+                            (event, runtime.system_event_handlers.clone())
+                        };
+                    let handled = notify_system_event(&notification.1, &notification.0, Some(stop));
+                    if stop.load(Ordering::Acquire) {
+                        return std::ops::ControlFlow::Break(());
                     }
-                    (event, runtime.system_event_handlers.clone())
-                };
-                let handled = notify_system_event(&notification.1, &notification.0, Some(stop));
-                if stop.load(Ordering::Acquire) {
-                    return;
+                    if !handled {
+                        std::process::abort();
+                    }
                 }
-                if !handled {
-                    std::process::abort();
+                Ok(Some(DeviceEvent::GpuHardwareException(exception))) => {
+                    retry_delay = Duration::from_millis(1);
+                    driver_failures = 0;
+                    let notification = {
+                        let Ok(guard) = lock() else {
+                            return std::ops::ControlFlow::Break(());
+                        };
+                        let Some(runtime) = guard.as_ref() else {
+                            return std::ops::ControlFlow::Break(());
+                        };
+                        let Some(index) = runtime
+                            .gpus
+                            .iter()
+                            .position(|gpu| Some(gpu.endpoint.id) == exception.endpoint_id)
+                        else {
+                            return std::ops::ControlFlow::Continue(());
+                        };
+                        let agent = HsaAgent {
+                            handle: GPU_AGENT_BASE + index as u64,
+                        };
+                        (
+                            hardware_exception_event(agent, exception),
+                            runtime.system_event_handlers.clone(),
+                        )
+                    };
+                    let handled = notify_system_event(&notification.1, &notification.0, Some(stop));
+                    if stop.load(Ordering::Acquire) {
+                        return std::ops::ControlFlow::Break(());
+                    }
+                    if !handled {
+                        std::process::abort();
+                    }
+                }
+                Ok(None) => {
+                    retry_delay = Duration::from_millis(1);
+                    driver_failures = 0;
+                }
+                Err(error) if error.kind() == rocddi::ErrorKind::Busy => {
+                    driver_failures = 0;
+                    pause(retry_delay);
+                    retry_delay = (retry_delay * 2).min(Duration::from_millis(20));
+                }
+                Err(error) if error.kind() == rocddi::ErrorKind::Driver && driver_failures < 16 => {
+                    driver_failures += 1;
+                    pause(retry_delay);
+                    retry_delay = (retry_delay * 2).min(Duration::from_millis(20));
+                }
+                Err(_) => {
+                    // Queue error callbacks remain available even after this
+                    // process event observer can no longer deliver notifications.
+                    failed.store(true, Ordering::Release);
+                    VM_FAULT_CONDVAR.notify_all();
+                    return std::ops::ControlFlow::Break(());
                 }
             }
-            Ok(Some(DeviceEvent::GpuHardwareException(exception))) => {
-                retry_delay = Duration::from_millis(1);
-                driver_failures = 0;
-                let notification = {
-                    let Ok(guard) = lock() else {
-                        return;
-                    };
-                    let Some(runtime) = guard.as_ref() else {
-                        return;
-                    };
-                    let Some(index) = runtime
-                        .gpus
-                        .iter()
-                        .position(|gpu| Some(gpu.endpoint.id) == exception.endpoint_id)
-                    else {
-                        continue;
-                    };
-                    let agent = HsaAgent {
-                        handle: GPU_AGENT_BASE + index as u64,
-                    };
-                    (
-                        hardware_exception_event(agent, exception),
-                        runtime.system_event_handlers.clone(),
-                    )
-                };
-                let handled = notify_system_event(&notification.1, &notification.0, Some(stop));
-                if stop.load(Ordering::Acquire) {
-                    return;
-                }
-                if !handled {
-                    std::process::abort();
-                }
-            }
-            Ok(None) => {
-                retry_delay = Duration::from_millis(1);
-                driver_failures = 0;
-            }
-            Err(error) if error.kind() == rocddi::ErrorKind::Busy => {
-                driver_failures = 0;
-                pause(retry_delay);
-                retry_delay = (retry_delay * 2).min(Duration::from_millis(20));
-            }
-            Err(error) if error.kind() == rocddi::ErrorKind::Driver && driver_failures < 16 => {
-                driver_failures += 1;
-                pause(retry_delay);
-                retry_delay = (retry_delay * 2).min(Duration::from_millis(20));
-            }
-            Err(_) => {
-                // Queue error callbacks remain available even after this
-                // process event observer can no longer deliver notifications.
-                failed.store(true, Ordering::Release);
-                VM_FAULT_CONDVAR.notify_all();
-                return;
-            }
+            std::ops::ControlFlow::Continue(())
+        })
+        .is_break()
+        {
+            return;
         }
     }
 }
