@@ -638,15 +638,11 @@ __device__ __forceinline__ void pipe_edge_chunk_range(const StagingPipePeerEdge&
 }
 
 #ifdef STAGING_PIPE_SYNC_TIMEOUT_DEBUG
-#ifndef STAGING_PIPE_SYNC_TIMEOUT_CYCLES
-#define STAGING_PIPE_SYNC_TIMEOUT_CYCLES 10000000000ULL
-#endif
-
 #define PIPE_SPIN_INIT(name) \
-  unsigned long long name##_spin_start = clock64()
+  unsigned long long name##_spin_start = STAGING_PIPE_SYNC_CLOCK()
 #define PIPE_SYNC_TIMEOUT(name, params, epoch, channel_id, peer, progress, expected, observed) \
   do { \
-    const unsigned long long name##_spin_elapsed = clock64() - name##_spin_start; \
+    const unsigned long long name##_spin_elapsed = STAGING_PIPE_SYNC_CLOCK() - name##_spin_start; \
     if (name##_spin_elapsed > STAGING_PIPE_SYNC_TIMEOUT_CYCLES) { \
       staging_pipe_sync_timeout((params), (epoch), (channel_id), #name, (peer), (size_t)(progress), \
                                 (uint64_t)(expected), (uint64_t)(observed), name##_spin_elapsed); \
