@@ -281,7 +281,8 @@ Result validate_manifest(const Manifest &manifest, ContractError *error,
     if (site.id != index || site.owner_entry != entry.id ||
         site.analysis != AnalysisKind::LdsRaceDetection || site.record != RecordKind::Access ||
         site.range_id != 0 ||
-        (site.access != AccessKind::Read && site.access != AccessKind::Write) || site.width != 4 ||
+        (site.access != AccessKind::Read && site.access != AccessKind::Write) ||
+        (site.width != 2 && site.width != 4 && site.width != 8 && site.width != 16) ||
         site.original_size != 8 || site.prepared_guest_size != 8 || site.probe_size == 0 ||
         (site.probe_size % 4) != 0 || (site.original_offset % 4) != 0 ||
         (site.prepared_guest_offset % 4) != 0 || (site.probe_offset % 4) != 0 ||

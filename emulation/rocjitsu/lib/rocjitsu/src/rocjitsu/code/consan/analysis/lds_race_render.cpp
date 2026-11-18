@@ -80,8 +80,8 @@ std::string render_lds_race_analysis(const LdsRaceResult &result) {
       << (result.cross_wave_pairs || result.collision_groups ? "findings" : "no_observed_findings")
       << "\",\"scope\":\""
       << (result.scope == ScopeKind::NativeLdsWorkgroupBarrier
-              ? "native_lds_b32_epoch_workgroup_barriers"
-              : "native_lds_b32_no_sync_one_workgroup")
+              ? "native_lds_single_range_epoch_workgroup_barriers"
+              : "native_lds_single_range_no_sync_one_workgroup")
       << "\"" << ",\"run_identity\":\"" << hex_bytes(result.run_identity)
       << "\",\"original_sha256\":\"" << hex_bytes(result.original.sha256)
       << "\",\"original_bytes\":" << result.original.bytes << ",\"entry\":";

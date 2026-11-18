@@ -32,7 +32,7 @@ TEST(ConSanDigest, OptionsIdentityNamesTheSoftwareAddressGroupReservation) {
       "address-groups-per-site=" + std::to_string(kAddressGroupsPerSite) + ";";
   EXPECT_NE(kMvpOptions.find(reservation), std::string_view::npos);
   EXPECT_EQ(hex(mvp_options_digest()),
-            "e60fe5ab32246cc8ea82200c7ffb626c68af9885b9fe931646140fd201c203c2");
+            "b2f5df0ebf21cc2187da4f0a1f8ed3c580433d23574a073c338ad8b2aa971ce3");
 }
 
 TEST(ConSanDigest, KnownAnswersIncludePaddingAndMultipleBlocks) {
@@ -92,6 +92,7 @@ Manifest example() {
   manifest.sites = {{.id = 0,
                      .analysis = AnalysisKind::LdsRaceDetection,
                      .access = AccessKind::Write,
+                     .width = 4,
                      .original_offset = 0,
                      .original_size = 8,
                      .prepared_guest_offset = 32,
@@ -102,6 +103,7 @@ Manifest example() {
                     {.id = 1,
                      .analysis = AnalysisKind::LdsRaceDetection,
                      .access = AccessKind::Read,
+                     .width = 4,
                      .original_offset = 16,
                      .original_size = 8,
                      .prepared_guest_offset = 256,

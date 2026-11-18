@@ -35,7 +35,7 @@ int main(int argc, char **argv) {
       std::cout << ',';
     first = false;
     std::cout << "{\"id\":" << site.id << ",\"access\":" << uint32_t(site.access)
-              << ",\"original_offset\":" << site.original_offset
+              << ",\"width\":" << site.width << ",\"original_offset\":" << site.original_offset
               << ",\"guest_offset\":" << site.prepared_guest_offset << '}';
   }
   std::cout << "],\"executions\":[";
