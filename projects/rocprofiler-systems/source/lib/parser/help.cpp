@@ -137,7 +137,7 @@ void
 append_usage(std::ostream& out, const schema_param& param)
 {
     out << "  " << spellings(param);
-    if(param.arg && !param.flag)
+    if(param.arg && param.type != param_type::boolean)
     {
         out << " <value>";
     }

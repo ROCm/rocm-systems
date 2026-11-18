@@ -25,7 +25,6 @@
 #include <map>
 #include <memory>
 #include <optional>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -147,7 +146,6 @@ letter_schema()
     auto trace          = named("trace", param_type::boolean);
     trace.category      = "tracing";
     trace.default_value = "false";
-    trace.flag          = true;
     trace.arg           = "--trace";
     add_param(value, std::move(letter));
     add_param(value, std::move(trace));
@@ -167,7 +165,6 @@ level_schema()
     auto hidden        = named("hidden", param_type::boolean);
     hidden.category    = "sampling";
     hidden.level       = param_level::advanced;
-    hidden.flag        = true;
     hidden.arg         = "--hidden";
     hidden.description = "Hidden option";
     add_param(value, std::move(mode));
@@ -180,7 +177,6 @@ flag_row(std::string param_id, std::string category, std::string description)
 {
     auto param        = named(std::move(param_id), param_type::boolean);
     param.arg         = "--" + param.id;
-    param.flag        = true;
     param.category    = std::move(category);
     param.description = std::move(description);
     return param;
@@ -288,7 +284,6 @@ effect_schema()
     auto   debug          = named("debug", param_type::boolean);
     debug.category        = "logging";
     debug.default_value   = "false";
-    debug.flag            = true;
     debug.arg             = "--debug";
     debug.env             = "ROCPROFSYS_DEBUG";
     debug.assigns         = { { "log_level", "debug" } };
@@ -298,21 +293,17 @@ effect_schema()
     auto profile          = named("profile", param_type::boolean);
     profile.category      = "tracing";
     profile.default_value = "false";
-    profile.flag          = true;
     profile.arg           = "--profile";
     auto flat             = named("flat_profile", param_type::boolean);
     flat.category         = "tracing";
-    flat.flag             = true;
     flat.arg              = "--flat-profile";
     flat.required         = { "profile" };
     auto left             = named("left", param_type::boolean);
     left.category         = "tracing";
-    left.flag             = true;
     left.arg              = "--left";
     left.conflicts        = { "right" };
     auto right            = named("right", param_type::boolean);
     right.category        = "tracing";
-    right.flag            = true;
     right.arg             = "--right";
     add_param(value, std::move(debug));
     add_param(value, std::move(log_level));
@@ -650,13 +641,29 @@ TEST(parser_configuration, flag_does_not_consume_the_command)
     EXPECT_TRUE(contains_text(parser.errors(), "unexpected argument"));
 }
 
-TEST(parser_configuration, a_directory_config_path_throws)
+TEST(parser_configuration, a_directory_config_path_is_reported)
 {
+    auto       parser    = make_parser();
+    const auto directory = ::testing::TempDir();
+    const auto values    = parser.parse({ "--config", directory });
+    ASSERT_EQ(parser.errors().size(), 1U);
+    EXPECT_EQ(parser.errors().front(),
+              "configuration path '" + directory + "' is a directory");
+    EXPECT_EQ(values.at("verbose"), "0");
+}
+
+TEST(parser_configuration, parse_reads_argv_after_the_program_name)
+{
+    constexpr int k_argc  = 2;
+    auto          program = std::string{ "tool" };
+    auto          option  = std::string{ "--trace" };
+    auto          argv = std::array<char*, 3>{ program.data(), option.data(), nullptr };
+
     auto parser = make_parser();
-    EXPECT_EQ(parser.parse({}).at("verbose"), "0");
-    EXPECT_THROW(static_cast<void>(parser.parse({ "--config", ::testing::TempDir() })),
-                 std::runtime_error);
-    EXPECT_EQ(parser.get<std::int64_t>("verbose"), 0);
+    EXPECT_EQ(parser.parse(k_argc, argv.data()).at("trace"), "true");
+    EXPECT_TRUE(parser.errors().empty());
+    EXPECT_EQ(parser.parse(0, nullptr).at("trace"), "false");
+    EXPECT_TRUE(parser.errors().empty());
 }
 
 TEST(parser_configuration, refuses_a_catalog_that_assigns_an_invalid_value)
@@ -668,7 +675,6 @@ TEST(parser_configuration, refuses_a_catalog_that_assigns_an_invalid_value)
     auto broken_catalog = effect_schema();
     auto broken         = named("broken", param_type::boolean);
     broken.category     = "logging";
-    broken.flag         = true;
     broken.arg          = "--broken";
     broken.assigns      = { { "profile", "not-a-bool" } };
     add_param(broken_catalog, std::move(broken));
@@ -735,7 +741,6 @@ TEST(parser_configuration, help_shows_backend_choices_and_a_category_word)
     schema extra    = letter_schema();
     auto   orphan   = named("orphan", param_type::boolean);
     orphan.category = "ghost";
-    orphan.flag     = true;
     orphan.arg      = "--orphan";
     ASSERT_TRUE(extra.add_param(std::move(orphan)));
     ASSERT_TRUE(parser.initialize(extra));

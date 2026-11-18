@@ -40,8 +40,9 @@ public:
 
     /// What the command line does with an option the catalog does not know.
     /// unknown_option::report, the default, records an error. unknown_option::forward
-    /// keeps it, and any plain argument before "--", in unparsed() for the tool a
-    /// wrapper runs.
+    /// keeps it, and the plain arguments that follow it, in unparsed() for the tool a
+    /// wrapper runs. A plain argument right after an option the catalog knows is an
+    /// error either way.
     void set_unknown_option(unknown_option policy);
     /// Replace process-environment lookup. An empty function reads the process.
     void set_environment(env_parser::lookup_t lookup);
@@ -79,8 +80,8 @@ public:
     {
         return m_command;
     }
-    /// With unknown_option::forward, every unknown option and plain argument before
-    /// "--", in order.
+    /// With unknown_option::forward, every unknown option before "--" with the plain
+    /// arguments that follow it, and any plain argument that comes first, in order.
     [[nodiscard]] const std::vector<std::string>& unparsed() const noexcept
     {
         return m_unparsed;

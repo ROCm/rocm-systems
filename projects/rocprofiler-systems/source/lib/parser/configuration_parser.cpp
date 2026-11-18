@@ -25,6 +25,7 @@
 #include <stdlib.h>  // POSIX ::setenv
 
 #include <algorithm>
+#include <cstddef>
 #include <exception>
 #include <iterator>
 #include <memory>
@@ -285,6 +286,26 @@ catalog_errors(const schema& catalog)
     return fmt::format(
         "{}", fmt::join(problems | std::views::transform(&violation::message), "; "));
 }
+
+/// Copies argv[1..argc). argv[0], the program name, is not an option.
+std::vector<std::string>
+arguments_from(int argc, char** argv)
+{
+    std::vector<std::string> args;
+    if(argv == nullptr || argc < 2)
+    {
+        return args;
+    }
+    args.reserve(static_cast<std::size_t>(argc - 1));
+    for(int index = 1; index < argc; ++index)
+    {
+        if(argv[index] != nullptr)
+        {
+            args.emplace_back(argv[index]);
+        }
+    }
+    return args;
+}
 }  // namespace
 
 void
@@ -388,22 +409,15 @@ configuration_parser::parse(const std::vector<std::string>& arguments)
     auto resolved = resolve_collected(collected);
     apply_assigns(resolved, request.config_schema);
     append_violations(m_errors, request.config_schema, resolved);
-    try
-    {
-        m_store->clear();
-        apply_resolved(*m_store, resolved);
-    } catch(const std::exception& err)
-    {
-        m_errors.emplace_back(err.what());
-        return {};
-    }
+    m_store->clear();
+    apply_resolved(*m_store, resolved);
     return m_store->values();
 }
 
 value_map_t
 configuration_parser::parse(int argc, char** argv)
 {
-    return parse(cli_parser::arguments_from(argc, argv));
+    return parse(arguments_from(argc, argv));
 }
 
 value_map_t

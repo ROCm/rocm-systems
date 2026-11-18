@@ -69,21 +69,18 @@ get_default_schema()
 
     auto debug = text_param("debug", "Enable debug mode", "logging", param_type::boolean);
     debug.default_value = "false";
-    debug.flag          = true;
     debug.env           = env_vars::DEBUG_MODE;
     debug.arg           = "--debug";
 
     auto trace =
         text_param("trace", "Enable Perfetto tracing", "tracing", param_type::boolean);
     trace.default_value = "false";
-    trace.flag          = true;
     trace.env           = env_vars::TRACE;
     trace.arg           = "--trace";
 
     auto profile = text_param("profile", "Enable call-stack profiling", "tracing",
                               param_type::boolean);
     profile.default_value = "false";
-    profile.flag          = true;
     profile.env           = env_vars::PROFILE;
     profile.arg           = "--profile";
 
