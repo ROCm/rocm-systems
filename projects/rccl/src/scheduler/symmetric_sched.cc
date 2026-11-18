@@ -137,7 +137,7 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
     if (task->acc != nullptr) symAvailable = false;
     // Env (NCCL_ALGO/PROTO/SYM_KERNEL) is a global override that wins over per-call
     // algSelection for any function it forced.
-    uint64_t effAlgMask = symTaskHasForcedTuning(comm, task->func) ? 0 : task->algMask;
+    ncclTuningMask_t effAlgMask = symTaskHasForcedTuning(comm, task->func) ? 0 : task->algMask;
     bool cfgAllowsSymk = (effAlgMask == 0) || ((effAlgMask & NCCL_TUNING_MASK_SYM_KERNELS) != 0);
 
     bool wantSym = symAvailable && cfgAllowsSymk;
@@ -220,15 +220,15 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
       input.tuningMask = NCCL_TUNING_MASK_SYM_KERNELS;
       // Env (NCCL_ALGO/PROTO/SYM_KERNEL) is a global override that wins over per-call
       // algSelection for any function it forced.
-      uint64_t effAlgMask = symTaskHasForcedTuning(comm, headTask->func) ? 0 : headTask->algMask;
+      ncclTuningMask_t effAlgMask = symTaskHasForcedTuning(comm, headTask->func) ? 0 : headTask->algMask;
       if (effAlgMask != 0) {
-        uint64_t symkMask = effAlgMask & NCCL_TUNING_MASK_SYM_KERNELS;
+        ncclTuningMask_t symkMask = effAlgMask & NCCL_TUNING_MASK_SYM_KERNELS;
         if (symkMask != 0) input.tuningMask = symkMask;
       }
       // [RCCL] The selector admitted this task for its TDM kernel, so offer only TDM kernels,
       // unless the caller's algSelection leaves them out.
       if (headTask->symkExtract == RCCL_SYMK_EXTRACT_ALLOW_TDM_ONLY) {
-        const uint64_t tdmMask = (uint64_t)(uint32_t)ncclSymkTmaKernelMask() << NCCL_TUNING_SYM_KERNEL_ID_OFFSET;
+        const ncclTuningMask_t tdmMask = (ncclTuningMask_t)ncclSymkTmaKernelMask() << NCCL_TUNING_SYM_KERNEL_ID_OFFSET;
         if (input.tuningMask & tdmMask) input.tuningMask &= tdmMask;
       }
       input.func = headTask->func;
@@ -252,6 +252,7 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
       input.minCTAs = headTask->minCTAs;
       input.maxCTAs = headTask->maxCTAs;
       input.CTAPolicy = headTask->CTAPolicy;
+      input.algMask = effAlgMask;
       // Symmetric kernels use comm->symkState.hasLsaMultimem for multicast capability.
       // input.nvlsSupport only gates NVLS/NVLS_TREE during general-kernel fallback tuning.
       input.nvlsSupport =

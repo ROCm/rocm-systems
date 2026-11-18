@@ -1,0 +1,214 @@
+{
+  "system_configurations": {
+    "name": "RCCL-Validate-MI455X-TDM-NaN",
+    "description": "Functional validation of the gfx1250 TDM path of the NaN-flag protocol. Builds with --enable-tdm-nan and runs the unit suite under NCCL_PROTO=NaN with RCCL_TDM_NAN_MIN_BYTES=0, so every NaN primitive op, however small, moves through the tensor data mover."
+  },
+  "paths": {
+    "workdir": "${WORKDIR:-$PWD}",
+    "rocm_path": "${ROCM_PATH:-/opt/rocm}",
+    "mpi_path": "${MPI_PATH:-$HOME/ompi}"
+  },
+  "env_variables": {
+    "NCCL_DEBUG": "INFO",
+    "RCCL_USE_AMD_SMI_LIB": "0",
+    "HSA_NO_SCRATCH_RECLAIM": "1",
+    "RCCL_TDM_NAN_ENABLE": "1",
+    "RCCL_TDM_NAN_MIN_BYTES": "0",
+    "RCCL_TEST_EXPECT_TDM_NAN": "1"
+  },
+  "mpi_args": [
+    "--mca pml ob1",
+    "--mca btl ^openib",
+    "--mca rmaps_base_oversubscribe 1",
+    "--bind-to none"
+  ],
+  "build_configuration": {
+    "install_flags": [
+      "-l",
+      "-t",
+      "--enable-tdm-nan"
+    ],
+    "parallel_jobs": 64
+  },
+  "test_configurations": {
+    "default": {
+      "env_variables": {},
+      "rerun_env_variables": {
+        "NCCL_DEBUG": "INFO"
+      }
+    },
+    "tdm_nan_ring": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTests",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 7200,
+      "env_variables": {
+        "RCCL_LOG_ROCTX": "1",
+        "UT_MIN_GPUS": "1",
+        "UT_MAX_GPUS": "8",
+        "UT_POW2_GPUS": "1",
+        "UT_DATATYPES": "all",
+        "UT_REDOPS": "all",
+        "NCCL_PROTO": "NaN",
+        "NCCL_ALGO": "Ring"
+      },
+      "tests": [
+        {
+          "name": "TDM_NaN_Ring_AllReduce",
+          "description": "AllReduce under forced Ring + NaN with the TDM path built in",
+          "test_filter": "AllReduce.*:-AllReduce.UserBufferRegistration:-AllReduce.ManagedMemUserBufferRegistration:-AllReduce.ROCTX"
+        },
+        {
+          "name": "TDM_NaN_Ring_AllGather",
+          "description": "AllGather under forced Ring + NaN",
+          "test_filter": "AllGather.*:-AllGather.UserBufferRegistration:-AllGather.ManagedMemUserBufferRegistration"
+        },
+        {
+          "name": "TDM_NaN_Ring_ReduceScatter",
+          "description": "ReduceScatter under forced Ring + NaN",
+          "test_filter": "ReduceScatter.*"
+        },
+        {
+          "name": "TDM_NaN_AlltoAll",
+          "description": "AlltoAll under NCCL_PROTO=NaN, whose intra-node send/recv halves take the NaN p2p kernel",
+          "test_filter": "AlltoAll.*"
+        }
+      ]
+    },
+    "tdm_nan_tree": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTests",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 7200,
+      "env_variables": {
+        "RCCL_LOG_ROCTX": "1",
+        "UT_MIN_GPUS": "1",
+        "UT_MAX_GPUS": "8",
+        "UT_POW2_GPUS": "1",
+        "UT_DATATYPES": "all",
+        "UT_REDOPS": "all",
+        "NCCL_PROTO": "NaN",
+        "NCCL_ALGO": "Tree"
+      },
+      "tests": [
+        {
+          "name": "TDM_NaN_Tree_AllReduce",
+          "description": "AllReduce under forced Tree + NaN with the TDM path built in",
+          "test_filter": "AllReduce.*:-AllReduce.UserBufferRegistration:-AllReduce.ManagedMemUserBufferRegistration:-AllReduce.ROCTX"
+        }
+      ]
+    },
+    "tdm_nan_escape": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsFixtures",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 1800,
+      "env_variables": {},
+      "tests": [
+        {
+          "name": "TDM_NaN_SentinelEscape",
+          "description": "All-ones payload dwords are escaped on every collective with a NaN kernel, on the register and TDM paths",
+          "test_filter": "PrimsNanSentinelEscape.*"
+        }
+      ]
+    },
+    "tdm_capability": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsFixtures",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 600,
+      "env_variables": {},
+      "tests": [
+        {
+          "name": "TDM_Capability",
+          "description": "Fails when the SDK cannot build the tensor data mover, which would otherwise compile the TDM NaN path away and leave the suites below covering nothing",
+          "test_filter": "TdmCopyTest.HostCapabilityMatchesArch"
+        }
+      ]
+    },
+    "tdm_nan_build_flag": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicro",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 600,
+      "env_variables": {},
+      "tests": [
+        {
+          "name": "TDM_NaN_BuildFlag",
+          "description": "Fails when --enable-tdm-nan did not reach the build, which would leave every suite below on the register path",
+          "test_filter": "WrapMicrotest.NanTdmBuildFlagMatchesExpectation"
+        }
+      ]
+    },
+    "tdm_nan_micro": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicro",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 600,
+      "env_variables": {},
+      "tests": [
+        {
+          "name": "TDM_NaN_FifoDepth",
+          "description": "NaN FIFO sizing and selection with ENABLE_TDM_NAN compiled in, including the deeper TDM step",
+          "test_filter": "WrapMicrotest*.*Nan*"
+        }
+      ]
+    }
+  },
+  "test_suites": [
+    {
+      "name": "TDM NaN - Toolchain capability",
+      "description": "Guards the suites below: a build without tensor-data-mover support makes them vacuous",
+      "config": "tdm_capability",
+      "enabled": true
+    },
+    {
+      "name": "TDM NaN - Build flag",
+      "description": "Guards the suites below: a build without --enable-tdm-nan makes them vacuous",
+      "config": "tdm_nan_build_flag",
+      "enabled": true
+    },
+    {
+      "name": "TDM NaN - Host microtests",
+      "description": "NaN FIFO sizing under ENABLE_TDM_NAN",
+      "config": "tdm_nan_micro",
+      "enabled": true
+    },
+    {
+      "name": "TDM NaN - Sentinel escape",
+      "description": "Device escape checks on a TDM-enabled build",
+      "config": "tdm_nan_escape",
+      "enabled": true
+    },
+    {
+      "name": "TDM NaN - Ring",
+      "description": "Unit suite under forced Ring + NaN on a TDM-enabled build",
+      "config": "tdm_nan_ring",
+      "enabled": true
+    },
+    {
+      "name": "TDM NaN - Tree",
+      "description": "Unit suite under forced Tree + NaN on a TDM-enabled build",
+      "config": "tdm_nan_tree",
+      "enabled": true
+    }
+  ]
+}

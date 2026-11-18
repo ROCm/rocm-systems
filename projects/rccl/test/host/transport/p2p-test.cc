@@ -4275,6 +4275,59 @@ TEST_F(P2pSetupMicrotest, RecvSetupThenConnect_WritePath_WiresConnBuffers)
     p2pTransport.recv.free(&comm_, &recv);
 }
 
+// A free NaN slot reads back as the all-ones sentinel, so connect fills the
+// whole NaN buffer with 0xFF, and does nothing when the comm sizes no NaN buffer.
+TEST_F(P2pSetupMicrotest, RecvConnect_SeedsNanBufferWithSentinel)
+{
+    InstallTopo(/*read=*/0);
+    InstallHappyProxy();
+
+    struct Fill { void* ptr; int value; std::size_t bytes; };
+    std::vector<Fill> fills;
+    ScopedHook memsetAsync(g_hipMemsetAsync,
+        [&fills](void* p, int v, std::size_t n, hipStream_t) -> hipError_t {
+            fills.push_back({p, v, n});
+            return hipSuccess;
+        });
+    // ncclCudaMemsetSync looks up the device's side stream by bus id, then runs
+    // the fill on a fresh stream and waits for it.
+    ScopedHook busid(g_hipDeviceGetPCIBusId, DeviceDistinctBusIds());
+    ScopedHook capture(g_hipThreadExchangeStreamCaptureMode,
+        [](hipStreamCaptureMode*) -> hipError_t { return hipSuccess; });
+    ScopedHook create(g_hipStreamCreateWithFlags,
+        [](hipStream_t* s, unsigned) -> hipError_t {
+            *s = reinterpret_cast<hipStream_t>(0x1);
+            return hipSuccess;
+        });
+    ScopedHook sync(g_hipStreamSynchronize, [](hipStream_t) -> hipError_t { return hipSuccess; });
+    ScopedHook destroy(g_hipStreamDestroy, [](hipStream_t) -> hipError_t { return hipSuccess; });
+
+    for (std::size_t nanBytes : {std::size_t{0}, std::size_t{0x4000}}) {
+        SCOPED_TRACE(nanBytes);
+        comm_.buffSizes[NCCL_PROTO_NAN] = nanBytes;
+
+        ncclConnector recv{};
+        ASSERT_EQ(p2pTransport.recv.setup(&comm_, nullptr, &myInfo_, &peer_,
+                                          &connect_info_, &recv, 0, 0),
+                  ncclSuccess);
+        fills.clear();
+        ASSERT_EQ(p2pTransport.recv.connect(&comm_, &connect_info_, comm_.nRanks,
+                                            /*rank=*/0, &recv),
+                  ncclSuccess);
+
+        if (nanBytes == 0) {
+            EXPECT_TRUE(fills.empty());
+        } else {
+            ASSERT_EQ(fills.size(), 1u);
+            EXPECT_EQ(fills[0].ptr, recv.conn.buffs[NCCL_PROTO_NAN]);
+            EXPECT_EQ(fills[0].value, 0xFF);
+            EXPECT_EQ(fills[0].bytes, nanBytes);
+        }
+
+        p2pTransport.recv.free(&comm_, &recv);
+    }
+}
+
 TEST_F(P2pSetupMicrotest, RecvSetupThenConnect_ReadPath_TakesRemoteSimpleBuffer)
 {
     // On the read path recv setup sizes the buffer pool without the SIMPLE

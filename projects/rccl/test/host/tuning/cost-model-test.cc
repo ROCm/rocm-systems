@@ -198,8 +198,12 @@ class CostModelMicrotest : public ::testing::Test {
   // Drive one id through the dispatcher; the caller seeds enabled[][] first.
   ncclTuningResult_t Sim(int id, ncclFunc_t func = ncclFuncAllReduce) {
     ncclTuningInput_t input{};
-    input.comm = comm_.get();
     input.func = func;
+    return Sim(id, input);
+  }
+
+  ncclTuningResult_t Sim(int id, ncclTuningInput_t input) {
+    input.comm = comm_.get();
     ncclTuningResult_t result = NCCL_TUNING_RESULT_INIT;
     result.id = id;
     result.valid = 1;
@@ -263,7 +267,7 @@ TEST_F(CostModelMicrotest, FamilyMasksPartitionTheIdSpace) {
   // Each family's bits must sit where ncclTuningExpandId decodes that family. This is the half
   // that can go red: tuning_general.cc respells both boundaries instead of reusing the macros.
   for (int i = 0; i < NCCL_TUNING_COUNT; i++) {
-    uint64_t bit = 1ull << i;
+    ncclTuningMask_t bit = NCCL_TUNING_BIT(i);
     int algo = -9, proto = -9, sym = -9, ce = -9;
     ASSERT_EQ(ncclSuccess, ncclTuningExpandId(i, &algo, &proto, &sym, &ce)) << "id " << i;
     if (bit & NCCL_TUNING_MASK_GENERAL_KERNELS) {
@@ -293,7 +297,7 @@ TEST_F(CostModelMicrotest, RegistryNamesEveryModelledGeneralIdAndNoOther) {
         << (name ? "names" : "omits") << " it";
 
     // The row's mask bit IS the tuning id; that is the whole correspondence.
-    if (name != nullptr) EXPECT_NE(0ull, ncclAlgTagMask(name) & (1ull << id)) << name << " -> id " << id;
+    if (name != nullptr) EXPECT_NE(0ull, ncclAlgTagMask(name) & NCCL_TUNING_BIT(id)) << name << " -> id " << id;
   }
 }
 
@@ -310,7 +314,7 @@ TEST_F(CostModelMicrotest, RegistryNamesEverySymmetricKernelId) {
       continue;
     }
     ASSERT_NE(nullptr, name) << "symKernelId " << sym << " (tuning id " << id << ") has no registry row";
-    EXPECT_NE(0ull, ncclAlgTagMask(name) & (1ull << id)) << name << " -> id " << id;
+    EXPECT_NE(0ull, ncclAlgTagMask(name) & NCCL_TUNING_BIT(id)) << name << " -> id " << id;
     // Every symmetric row is priced; modelMap has no null symk entries.
     EXPECT_NE(nullptr, modelMap[id].model) << "tuning id " << id;
   }
@@ -319,7 +323,7 @@ TEST_F(CostModelMicrotest, RegistryNamesEverySymmetricKernelId) {
 TEST_F(CostModelMicrotest, RegistryCollMaskMirrorsModelMapEnabledColumns) {
   // algorithm_registry.cc: "collMask mirrors modelMap[].enabled[func]".
   for (int f = 0; f < NCCL_NUM_FUNCTIONS; f++) {
-    uint64_t valid = ncclAlgValidForFuncMask(static_cast<ncclFunc_t>(f));
+    ncclTuningMask_t valid = ncclAlgValidForFuncMask(static_cast<ncclFunc_t>(f));
     for (int id = 0; id < kCeOffset; id++) {
       bool inRegistry = (valid >> id) & 1;
       bool inModelMap = modelMap[id].enabled[f] != 0;
@@ -334,7 +338,7 @@ TEST_F(CostModelMicrotest, CopyEngineIdsAreDeliberatelyOutsideTheRegistry) {
   // The registry stops before the CE ids, and cost_model.cc's "TODO: allow NCCL_ALGO=CE" is the
   // other half of that gap. Pinned so adding CE rows forces this test and the TODO together.
   for (int f = 0; f < NCCL_NUM_FUNCTIONS; f++) {
-    uint64_t valid = ncclAlgValidForFuncMask(static_cast<ncclFunc_t>(f));
+    ncclTuningMask_t valid = ncclAlgValidForFuncMask(static_cast<ncclFunc_t>(f));
     EXPECT_EQ(0ull, valid & NCCL_TUNING_MASK_CE) << "func " << ncclFuncStr[f];
   }
   EXPECT_EQ(0ull, ncclAlgAllBits() & NCCL_TUNING_MASK_CE);
@@ -347,16 +351,16 @@ TEST_F(CostModelMicrotest, CopyEngineIdsAreDeliberatelyOutsideTheRegistry) {
 
 TEST_F(CostModelMicrotest, TagPrefixMatchStaysInsideItsFamily) {
   // Prefix match: "RING" spans the three RING_* rows without reaching SYMK_RailRing_LsaSTMC.
-  uint64_t ring = ncclAlgTagMask("RING");
+  ncclTuningMask_t ring = ncclAlgTagMask("RING");
   for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
-    EXPECT_NE(0ull, ring & (1ull << (NCCL_ALGO_RING * NCCL_NUM_PROTOCOLS + p))) << "proto " << p;
+    EXPECT_NE(0ull, ring & NCCL_TUNING_BIT(NCCL_ALGO_RING * NCCL_NUM_PROTOCOLS + p)) << "proto " << p;
   }
   EXPECT_EQ(0ull, ring & NCCL_TUNING_MASK_SYM_KERNELS);
 
   // "NVLS" spans NVLS_SIMPLE and NVLSTREE_SIMPLE, also by prefix.
-  uint64_t nvls = ncclAlgTagMask("NVLS");
-  EXPECT_NE(0ull, nvls & (1ull << (NCCL_ALGO_NVLS * NCCL_NUM_PROTOCOLS + NCCL_PROTO_SIMPLE)));
-  EXPECT_NE(0ull, nvls & (1ull << (NCCL_ALGO_NVLS_TREE * NCCL_NUM_PROTOCOLS + NCCL_PROTO_SIMPLE)));
+  ncclTuningMask_t nvls = ncclAlgTagMask("NVLS");
+  EXPECT_NE(0ull, nvls & NCCL_TUNING_BIT(NCCL_ALGO_NVLS * NCCL_NUM_PROTOCOLS + NCCL_PROTO_SIMPLE));
+  EXPECT_NE(0ull, nvls & NCCL_TUNING_BIT(NCCL_ALGO_NVLS_TREE * NCCL_NUM_PROTOCOLS + NCCL_PROTO_SIMPLE));
 
   EXPECT_EQ(0ull, ncclAlgTagMask("NOT_AN_ALGORITHM"));
   EXPECT_EQ(0ull, ncclAlgTagMask(""));
@@ -375,14 +379,58 @@ TEST_F(CostModelMicrotest, EveryIdDispatchesToItsFamilyModel) {
       EXPECT_EQ(ModelKind::None, g_lastModel) << "tuning id " << id << " has no model but something ran";
       continue;
     }
+    if (id < kSymOffset && id % NCCL_NUM_PROTOCOLS == NCCL_PROTO_NAN) {
+      // NaN rows are priced only under NCCL_PROTO=NaN, which this fixture does not set.
+      EXPECT_EQ(ModelKind::None, g_lastModel) << "tuning id " << id << " priced without NCCL_PROTO=NaN";
+      EXPECT_EQ(0, result.valid) << "tuning id " << id;
+      continue;
+    }
     EXPECT_EQ(ExpectedKind(id), g_lastModel) << "tuning id " << id << " routed to the wrong family";
     EXPECT_EQ(1, result.valid) << "tuning id " << id;
     EXPECT_FLOAT_EQ(g_modelTimeUs, result.timeUs) << "tuning id " << id;
   }
 }
 
+// Under RCCL_NAN_PROTO_AUTO, on two gfx950 nodes of 8 where AUTO picks NaN for a 1 MiB float AllReduce, a per-call
+// selection naming no NaN row keeps its rows priced and NaN off; with no selection AUTO prices NaN alone.
+TEST_F(CostModelMicrotest, NanAutoStandsDownForSelectionWithoutNan) {
+  const std::string style = ::testing::GTEST_FLAG(death_test_style);
+  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
+  EXPECT_EXIT(
+      {
+        SetMicroEnv("RCCL_NAN_PROTO_AUTO", "1");
+        SetMicroEnvAbsent("NCCL_PROTO");
+        char arch[] = "gfx950";
+        comm_->nRanks = 16;
+        comm_->nNodes = 2;
+        comm_->archName = arch;
+        comm_->buffSizes[NCCL_PROTO_NAN] = 1 << 20;
+#if ENABLE_TDM_NAN
+        comm_->nanTdmMinBytes = -1;
+#endif
+        EnableEverything();
+        const int ringNan = NCCL_ALGO_RING * NCCL_NUM_PROTOCOLS + NCCL_PROTO_NAN;
+        const int ringLl128 = NCCL_ALGO_RING * NCCL_NUM_PROTOCOLS + NCCL_PROTO_LL128;
+        auto valid = [this](int id, ncclTuningMask_t algMask) {
+          ncclTuningInput_t input{};
+          input.func = ncclFuncAllReduce;
+          input.datatype = ncclFloat32;
+          input.nBytes = 1 << 20;
+          input.algMask = algMask;
+          return Sim(id, input).valid;
+        };
+        EXPECT_EQ(1, valid(ringLl128, 1ull << ringLl128));
+        EXPECT_EQ(0, valid(ringNan, 1ull << ringLl128));
+        EXPECT_EQ(0, valid(ringLl128, 0));
+        EXPECT_EQ(1, valid(ringNan, 0));
+        std::exit(::testing::Test::HasFailure() ? 1 : 0);
+      },
+      ::testing::ExitedWithCode(0), "");
+  ::testing::GTEST_FLAG(death_test_style) = style;
+}
+
 TEST_F(CostModelMicrotest, UnimplementedCombinationsAreIgnoredNotFree) {
-  // The ten {nullptr,...} rows are combinations that do not exist. The selector is an argmin
+  // The fifteen {nullptr,...} rows are combinations that do not exist. The selector is an argmin
   // over timeUs, so a default 0 would make an unbuildable kernel beat every real one.
   EnableEverything();
   int nullRows = 0;
@@ -393,8 +441,8 @@ TEST_F(CostModelMicrotest, UnimplementedCombinationsAreIgnoredNotFree) {
     EXPECT_EQ(0, result.valid) << "tuning id " << id;
     EXPECT_FLOAT_EQ(NCCL_TUNING_IGNORE, result.timeUs) << "tuning id " << id;
   }
-  // CollNetDirect/Chain, NVLS/NVLSTree under LL and LL128, plus PAT under both.
-  EXPECT_EQ(10, nullRows);
+  // CollNetDirect/Chain, NVLS/NVLSTree and PAT under LL, LL128 and NaN.
+  EXPECT_EQ(15, nullRows);
 }
 
 TEST_F(CostModelMicrotest, OutOfRangeIdIsRejectedRatherThanIndexed) {

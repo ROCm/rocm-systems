@@ -18,6 +18,10 @@
 #include <cstdint>
 #include "nccl.h"
 
+// [RCCL] One bit per cost-model tuning id (tuning.h). RCCL's NaN protocol takes the id count past 64.
+typedef unsigned __int128 ncclTuningMask_t;
+#define NCCL_TUNING_BIT(i) ((ncclTuningMask_t)1 << (i))
+
 // Windows compatibility: define ssize_t if not available
 #ifdef NCCL_OS_WINDOWS
 #include <BaseTsd.h>

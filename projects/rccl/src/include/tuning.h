@@ -28,12 +28,12 @@ static inline int ncclTuningFuncIndex(ncclFunc_t func) {
   return func == ncclFuncAlltoAll ? NCCL_NUM_FUNCTIONS : -1;
 }
 
-#define NCCL_TUNING_MASK_GENERAL_KERNELS ((1ULL << NCCL_TUNING_SYM_KERNEL_ID_OFFSET) - 1ULL)
+#define NCCL_TUNING_MASK_GENERAL_KERNELS (NCCL_TUNING_BIT(NCCL_TUNING_SYM_KERNEL_ID_OFFSET) - 1)
 #define NCCL_TUNING_MASK_SYM_KERNELS \
-  ((1ULL << NCCL_TUNING_CE_METHOD_ID_OFFSET) - 1ULL - NCCL_TUNING_MASK_GENERAL_KERNELS)
-#define NCCL_TUNING_MASK_CE ((1ULL << NCCL_TUNING_COUNT) - (1ULL << NCCL_TUNING_CE_METHOD_ID_OFFSET))
-#define NCCL_TUNING_MASK_ALL ((1ULL << NCCL_TUNING_COUNT) - 1ULL)
-static_assert(NCCL_TUNING_COUNT < 64, "Tuning masks cannot represent every tuning entry");
+  (NCCL_TUNING_BIT(NCCL_TUNING_CE_METHOD_ID_OFFSET) - 1 - NCCL_TUNING_MASK_GENERAL_KERNELS)
+#define NCCL_TUNING_MASK_CE (NCCL_TUNING_BIT(NCCL_TUNING_COUNT) - NCCL_TUNING_BIT(NCCL_TUNING_CE_METHOD_ID_OFFSET))
+#define NCCL_TUNING_MASK_ALL (NCCL_TUNING_BIT(NCCL_TUNING_COUNT) - 1)
+static_assert(NCCL_TUNING_COUNT < 8 * sizeof(ncclTuningMask_t), "Tuning masks cannot represent every tuning entry");
 
 #define NCCL_TUNING_ENTRY_INIT_VALUE -1
 #define NCCL_TUNING_RESULT_INIT \
@@ -69,7 +69,7 @@ struct ncclTuningResult_t {
 
 struct ncclTuningInput_t {
   struct ncclComm* comm;
-  uint64_t tuningMask;
+  ncclTuningMask_t tuningMask;
   ncclFunc_t func;
   ncclRedOp_t redOp;
   ncclDevRedOp_t devRedOp;
@@ -89,6 +89,7 @@ struct ncclTuningInput_t {
   int minCTAs;  // resolved lower CTA bound (env > per-call > comm)
   int maxCTAs;  // resolved upper CTA bound (env > per-call > comm)
   int CTAPolicy;   // resolved effective CTAPolicy (per-call)
+  ncclTuningMask_t algMask; // [RCCL] per-call algSelection mask, 0 for none (ncclCollConfigGetAlgMask)
   int chunkSteps;
   int sliceSteps;
   // [RCCL] Cached ncclSymkMask() result; set once per ncclTuningCompute() invocation.

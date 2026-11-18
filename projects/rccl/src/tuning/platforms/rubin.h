@@ -22,24 +22,31 @@ Enable order: Broadcast, Reduce, AllGather, ReduceScatter, AllReduce
   {ncclTuningPipelineTreeModelInit, ncclTuningPipelineModelSim, nullptr, {0, 0, 0, 0, 1}, {}},       // Tree/LL
   {ncclTuningPipelineTreeModelInit, ncclTuningPipelineModelSim, nullptr, {0, 0, 0, 0, 1}, {}},       // Tree/LL128
   {ncclTuningPipelineTreeModelInit, ncclTuningPipelineModelSim, nullptr, {0, 0, 0, 0, 1}, {}},       // Tree/Simple
+  {nullptr, nullptr, nullptr, {0}, {}}, // Tree/NaN, disabled as there is no implementation
   {ncclTuningPipelineRingModelInit, ncclTuningPipelineModelSim, nullptr, {1, 1, 1, 1, 1}, {}},       // Ring/LL
   {ncclTuningPipelineRingModelInit, ncclTuningPipelineModelSim, nullptr, {1, 1, 1, 1, 1}, {}},       // Ring/LL128
   {ncclTuningPipelineRingModelInit, ncclTuningPipelineModelSim, nullptr, {1, 1, 1, 1, 1}, {}},       // Ring/Simple
+  {nullptr, nullptr, nullptr, {0}, {}}, // Ring/NaN, disabled as there is no implementation
   {nullptr, nullptr, nullptr, {0}, {}}, // CollNetDirect/LL, disabled as there is no implementation
   {nullptr, nullptr, nullptr, {0}, {}}, // CollNetDirect/LL128, disabled as there is no implementation
   {nullptr, nullptr, nullptr, {0, 0, 1, 1, 1}, {}}, // CollNetDirect/Simple
+  {nullptr, nullptr, nullptr, {0}, {}}, // CollNetDirect/NaN, disabled as there is no implementation
   {nullptr, nullptr, nullptr, {0}, {}}, // CollNetChain/LL, disabled as there is no implementation
   {nullptr, nullptr, nullptr, {0}, {}}, // CollNetChain/LL128, disabled as there is no implementation
   {nullptr, nullptr, nullptr, {0, 0, 0, 0, 1}, {}}, // CollNetChain/Simple
+  {nullptr, nullptr, nullptr, {0}, {}}, // CollNetChain/NaN, disabled as there is no implementation
   {nullptr, nullptr, nullptr, {0}, {}}, // NVLS/LL, disabled as there is no implementation
   {nullptr, nullptr, nullptr, {0}, {}}, // NVLS/LL128, disabled as there is no implementation
   {ncclTuningPipelineNvlsModelInit, ncclTuningPipelineModelSim, nullptr, {0, 0, 1, 1, 1}, {}}, // NVLS/Simple
+  {nullptr, nullptr, nullptr, {0}, {}}, // NVLS/NaN, disabled as there is no implementation
   {nullptr, nullptr, nullptr, {0}, {}}, // NVLSTree/LL, disabled as there is no implementation
   {nullptr, nullptr, nullptr, {0}, {}}, // NVLSTree/LL128, disabled as there is no implementation
   {ncclTuningPipelineNvlsTreeModelInit, ncclTuningPipelineModelSim, nullptr, {0, 0, 1, 1, 1}, {}}, // NVLSTree/Simple
+  {nullptr, nullptr, nullptr, {0}, {}}, // NVLSTree/NaN, disabled as there is no implementation
   {nullptr, nullptr, nullptr, {0}, {}}, // PAT/LL
   {nullptr, nullptr, nullptr, {0}, {}}, // PAT/LL128
   {nullptr, nullptr, nullptr, {0, 0, 1, 1, 0}, {}}, // PAT/Simple
+  {nullptr, nullptr, nullptr, {0}, {}}, // PAT/NaN, disabled as there is no implementation
   {nullptr, nullptr, nullptr, {0, 0, 0, 0, 1}, {}}, // AllReduce_AGxLL_R
   {nullptr, nullptr, nullptr, {0, 0, 0, 0, 1}, {}}, // AllReduce_AGxLLMC_R
   {nullptr, nullptr, nullptr, {0, 0, 0, 0, 1}, {}}, // AllReduce_RSxTmaLD_AGxTmaST

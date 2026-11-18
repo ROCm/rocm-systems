@@ -8,6 +8,7 @@
 #define NCCL_CONFIG_ALGORITHM_PARSER_H_
 
 #include "nccl.h"
+#include "nccl_common.h"
 #include <stdint.h>
 
 // Parse an algSelection string into an algorithmMask.
@@ -20,6 +21,6 @@
 // No logging here: the caller (ncclCollConfigGetAlgMask) decides WARN vs
 // INFO based on forceAlgSelection.
 // All the valid strings can be found in src/config/algorithm_registry.cc
-ncclResult_t ncclAlgParse(const char* sel, uint64_t* outMask);
+ncclResult_t ncclAlgParse(const char* sel, ncclTuningMask_t* outMask);
 
 #endif

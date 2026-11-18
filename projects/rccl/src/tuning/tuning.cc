@@ -46,9 +46,14 @@ ncclResult_t ncclTuningInit(struct ncclComm* comm) {
 
   NCCLCHECKGOTO(ncclTunerPluginLoad(comm), ret, fail);
   if (comm->tuner) {
+    // The plugin ABI is frozen at NCCL_NUM_PROTOCOLS_V5 columns, so hand it a v7
+    // view rather than the wider internal struct.
+    ncclTunerConstants_v7_t v7Constants;
+    ncclTunerConstantsToV7(&v7Constants, &comm->tuningContext.tuningConstants);
     NCCLCHECKGOTO(comm->tuner->init(&comm->tunerContext, comm->commHash, comm->nRanks, comm->nNodes, ncclDebugLog,
-                                    &comm->nvlDomainInfo, &comm->tuningContext.tuningConstants),
+                                    &comm->nvlDomainInfo, &v7Constants),
                   ret, fail);
+    ncclTunerConstantsFromV7(&comm->tuningContext.tuningConstants, &v7Constants);
   }
 
   NCCLCHECKGOTO(ncclTuningCostModelInit(comm), ret, fail);
@@ -132,7 +137,7 @@ ncclResult_t ncclTuningComputeAllTunings(struct ncclTuningInput_t* const input,
     tuning.id = i;
     tuning.valid = 1;
 
-    if (!(input->tuningMask & (1ULL << i))) {
+    if (!(input->tuningMask & NCCL_TUNING_BIT(i))) {
       tuning.valid = 0;
       continue;
     }
@@ -190,9 +195,11 @@ static ncclResult_t ncclTuningSelectBestTuning(
 ncclResult_t ncclTuningCompute(struct ncclTuningInput_t* const input, struct ncclTuningResult_t* const result) {
   ncclResult_t ret = ncclSuccess;
   TRACE(NCCL_TUNING,
-        "Input: { .comm = %p, .tuningMask = 0x%lx, .func = %s, .redOp = %d, .devRedop = %d, .dataType = %d, .nBytes = "
-        "%lu, .numPipeOps = %d, .count = %lu, .countMax = %lu, .nWorks = %d, .winRegType = %d, .regBuff = %d }",
-        input->comm, input->tuningMask, ncclFuncToString(input->func), input->redOp, input->devRedOp, input->datatype,
+        "Input: { .comm = %p, .tuningMask = 0x%lx%016lx, .func = %s, .redOp = %d, .devRedop = %d, .dataType = %d, "
+        ".nBytes = %lu, .numPipeOps = %d, .count = %lu, .countMax = %lu, .nWorks = %d, .winRegType = %d, "
+        ".regBuff = %d }",
+        input->comm, (unsigned long)(input->tuningMask >> 64), (unsigned long)input->tuningMask,
+        ncclFuncToString(input->func), input->redOp, input->devRedOp, input->datatype,
         input->nBytes, input->numPipeOps, input->count, input->countMax, input->nWorks, input->winRegType,
         input->regBuff);
   struct ncclTuningResultList_t tunings;
@@ -221,9 +228,10 @@ ncclResult_t ncclTuningCompute(struct ncclTuningInput_t* const input, struct ncc
     NCCLCHECKGOTO(ncclTuningComputeAllTunings(input, &tunings), ret, exit);
     // The tuner plugin API covers the five standard collectives only.
     if (input->comm->tuner != NULL && (unsigned)input->func < NCCL_NUM_FUNCTIONS) {
-      float generalTable[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS];
+      // Plugins see NCCL_NUM_PROTOCOLS_V5 columns; protocols past them keep the core's time.
+      float generalTable[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS_V5];
       for (int i = 0; i < NCCL_NUM_ALGORITHMS; i++) {
-        for (int j = 0; j < NCCL_NUM_PROTOCOLS; j++) {
+        for (int j = 0; j < NCCL_NUM_PROTOCOLS_V5; j++) {
           generalTable[i][j] = NCCL_TUNING_IGNORE;
         }
       }
@@ -232,19 +240,21 @@ ncclResult_t ncclTuningCompute(struct ncclTuningInput_t* const input, struct ncc
         const struct ncclTuningResult_t& tuning = node->result;
         node = node->next;
         if (tuning.algo == NCCL_ALGO_UNDEF || tuning.proto == NCCL_PROTO_UNDEF) continue;
+        if (tuning.proto >= NCCL_NUM_PROTOCOLS_V5) continue;
         generalTable[tuning.algo][tuning.proto] = tuning.timeUs;
       }
       node = tunings.head;
       int nMaxChannels = 0;
       NCCLCHECKGOTO(input->comm->tuner->getCollInfo(input->comm->tunerContext, input->func, input->nBytes,
                                                     input->numPipeOps, (float**)generalTable, NCCL_NUM_ALGORITHMS,
-                                                    NCCL_NUM_PROTOCOLS, input->regBuff, &nMaxChannels),
+                                                    NCCL_NUM_PROTOCOLS_V5, input->regBuff, &nMaxChannels),
                     ret, exit);
       while (node != nullptr) {
         struct ncclTuningResult_t& tuning = node->result;
         node = node->next;
         if (tuning.algo == NCCL_ALGO_UNDEF || tuning.proto == NCCL_PROTO_UNDEF) continue;
         tuning.maxChannels = nMaxChannels;
+        if (tuning.proto >= NCCL_NUM_PROTOCOLS_V5) continue;
         tuning.timeUs = generalTable[tuning.algo][tuning.proto];
       }
     }
@@ -259,7 +269,7 @@ ncclResult_t ncclTuningCompute(struct ncclTuningInput_t* const input, struct ncc
   // algSelection may have narrowed tuningMask, so EFFICIENCY must not resurrect NVLS when excluded.
   if (input->comm->tuner == NULL && (input->CTAPolicy & NCCL_CTA_POLICY_EFFICIENCY) &&
       ncclGetEnv("NCCL_ALGO") == NULL && ncclGetEnv("NCCL_PROTO") == NULL && !input->comm->MNNVL &&
-      (input->tuningMask & (1ull << (NCCL_ALGO_NVLS * NCCL_NUM_PROTOCOLS + NCCL_PROTO_SIMPLE)))) {
+      (input->tuningMask & NCCL_TUNING_BIT(NCCL_ALGO_NVLS * NCCL_NUM_PROTOCOLS + NCCL_PROTO_SIMPLE))) {
     if (input->regBuff && (input->func == ncclFuncAllGather || input->func == ncclFuncReduceScatter)) {
       if ((input->comm->nNodes > 1 && input->collNetSupport && input->nvlsSupport) ||
           (input->comm->nNodes == 1 && input->nvlsSupport)) {
@@ -344,9 +354,10 @@ ncclResult_t ncclTuningCompute(struct ncclTuningInput_t* const input, struct ncc
     if (protoEnv) {
       snprintf(ncclProtoEnvStr, 1023, " NCCL_PROTO was set to %s.", protoEnv);
     }
-    WARN("No algorithm/protocol nor symKernelId available for function %s with datatype %s tuning mask 0x%lx.%s%s%s",
-         ncclFuncToString(input->func), ncclDatatypeToString(input->datatype), input->tuningMask, ncclAlgoEnvStr,
-         ncclProtoEnvStr, ncclSymKernelIdEnvStr);
+    WARN("No algorithm/protocol nor symKernelId available for function %s with datatype %s tuning mask "
+         "0x%lx%016lx.%s%s%s",
+         ncclFuncToString(input->func), ncclDatatypeToString(input->datatype), (unsigned long)(input->tuningMask >> 64),
+         (unsigned long)input->tuningMask, ncclAlgoEnvStr, ncclProtoEnvStr, ncclSymKernelIdEnvStr);
     ret = (algoEnv || protoEnv || symKernelIdEnv) ? ncclInvalidUsage : ncclInternalError;
   }
   *result = bestTuning;

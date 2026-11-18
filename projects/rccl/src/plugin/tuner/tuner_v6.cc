@@ -15,7 +15,7 @@ static ncclTuner_t ncclTuner;
 
 static ncclResult_t ncclTuner_init(void** context, uint64_t commId, size_t nRanks, size_t nNodes,
                                    ncclDebugLogger_t logfn, ncclNvlDomainInfo_v5_t* nvlDomainInfo,
-                                   ncclTunerConstants_t* constants) {
+                                   ncclTunerConstants_v7_t* constants) {
   ncclTunerConstants_v6_t constants_v6;
   ncclTunerConstants_v7_to_v5(&constants_v6, constants);
   NCCLCHECK(ncclTuner_v6->init(context, commId, nRanks, nNodes, logfn, nvlDomainInfo, &constants_v6));

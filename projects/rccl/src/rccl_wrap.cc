@@ -204,13 +204,6 @@ static bool rcclEnvIsSet(const char* name) {
   return v != nullptr && v[0] != '\0';
 }
 
-// The user restricted the protocol set via NCCL_PROTO. Cached like rcclNcclAlgoEnvIsSet().
-static bool rcclNcclProtoEnvIsSet() {
-  static int cached = -1;
-  if (cached == -1) cached = getenv("NCCL_PROTO") != nullptr ? 1 : 0;
-  return cached == 1;
-}
-
 // The arch table's Ring / Tree crossovers come from single-node (one clique) sweeps,
 // so they apply only when nNodes == 1; the rank-scaled ones also need
 // rankScaledMinRanks ranks. Null when they do not apply.
@@ -253,7 +246,7 @@ void rcclUpdateCollectiveAlgorithm(struct ncclComm* comm, size_t nBytes, struct 
                                    float table[][NCCL_NUM_PROTOCOLS]) {
   // With NCCL_PROTO set, rcclUpdateCollectiveProtocol leaves the protocol alone, so a
   // switch to Tree would keep the protocol picked for Ring.
-  if (rcclNcclAlgoEnvIsSet() || rcclNcclProtoEnvIsSet()) return;
+  if (rcclNcclAlgoEnvIsSet() || rcclProtoPinned(comm, info->func, info->datatype, nBytes, info->algMask)) return;
   if (info->func != ncclFuncAllReduce || info->algorithm != NCCL_ALGO_RING) return;
   const rcclArchThresholds* t = rcclRingTreeTable(comm, /*rankScaled=*/true);
   if (t == nullptr || t->arTreeMaxPerRank == 0 || nBytes > (uint64_t)comm->nRanks * t->arTreeMaxPerRank) return;
@@ -273,7 +266,7 @@ static bool rcclRemoteFlushTuned(struct ncclComm* comm) {
 
 void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, struct ncclTaskColl* info) {
   // Honor user input for protocol choice
-  const bool userProtocolInput = rcclNcclProtoEnvIsSet();
+  const bool userProtocolInput = rcclProtoPinned(comm, info->func, info->datatype, nBytes, info->algMask);
   size_t sizePerRank = rcclGetSizePerRank(info->func, nBytes, comm->nRanks);
 
   // Broadcast on a table with total-byte ceilings (gfx1250 DPX). NCCL_PROTO still wins.
@@ -668,7 +661,9 @@ void rcclUpdateThreadThreshold(struct ncclComm* comm, size_t const& nBytes, stru
     userChannelControlInput = !inputStr ? 0 : 1;
   }
 
+  // minMaxLLRange is tuned for LL and LL128 only.
   if (!userChannelControlInput && comm->nNodes >= 2 &&
+      (info->protocol == NCCL_PROTO_LL || info->protocol == NCCL_PROTO_LL128) &&
       (info->func == ncclFuncReduceScatter || info->func == ncclFuncAllGather)) {
     auto tunableIndex = rcclGetTunableIndex(info->func);
     auto tunedThreshold = comm->minMaxLLRange[tunableIndex][info->protocol][RCCL_PROTOCOL_THREAD_THRESHOLD_IDX];
@@ -714,6 +709,22 @@ extern ncclResult_t getAlgoInfo(struct ncclComm* comm, struct ncclTaskColl* task
 extern int rcclKernelPackedChannels(struct ncclComm* comm, ncclFunc_t func, size_t count, ncclDataType_t datatype,
                                     int protocol, int nMaxChannels);
 
+// The task a query hands getAlgoInfo(), shaped as collTaskAppend() plans it. An AllGather that will not run Ring/NaN
+// is collapsed to bytes there; left typed, getAlgoInfo() would price it on the NaN cells alone.
+static void rcclQueryTaskInit(struct ncclComm* comm, struct ncclTaskColl* task, ncclFunc_t func, size_t count,
+                              ncclDataType_t datatype) {
+  *task = {};
+  task->func = func;
+  task->count = count;
+  task->datatype = datatype;
+  const size_t elementSize = ncclTypeSize(datatype);
+  if (func == ncclFuncAllGather &&
+      !rcclNanAllGatherKeepsDtype(comm, datatype, count * elementSize * comm->nRanks, /*algMask=*/0)) {
+    task->count = count * elementSize;
+    task->datatype = ncclInt8;
+  }
+}
+
 ncclResult_t rcclHierarchicalAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t count, ncclDataType_t dataType,
                                       int* algo, int* protocol, int* maxChannels) {
   const bool isAllGather = (coll == ncclFuncAllGather);
@@ -732,10 +743,8 @@ ncclResult_t rcclHierarchicalAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, ui
     *protocol = NCCL_PROTO_SIMPLE;
     *maxChannels = interComm->p2pnChannels;
   } else {
-    struct ncclTaskColl task = {};
-    task.func = coll;
-    task.count = count;
-    task.datatype = dataType;
+    struct ncclTaskColl task;
+    rcclQueryTaskInit(interComm, &task, coll, count, dataType);
     NCCLCHECK(getAlgoInfo(interComm, &task, 0, 0, 1));
     *protocol = task.protocol;
     *maxChannels = task.nMaxChannels;
@@ -747,13 +756,11 @@ ncclResult_t rcclHierarchicalAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, ui
   size_t intraCount = count * nNodes;
   size_t intraMsgSize = intraCount * ncclTypeSize(dataType) * intraComm->nRanks;
   if (isAllGather && rcclUseAllGatherDirect(intraComm, intraMsgSize)) {
-    intraProto = NCCL_PROTO_SIMPLE;
+    intraProto = rcclNanProtoForcedFor(intraComm, dataType) ? NCCL_PROTO_NAN : NCCL_PROTO_SIMPLE;
     intraChan = intraComm->p2pnChannels;
   } else {
-    struct ncclTaskColl task = {};
-    task.func = coll;
-    task.count = intraCount;
-    task.datatype = dataType;
+    struct ncclTaskColl task;
+    rcclQueryTaskInit(intraComm, &task, coll, intraCount, dataType);
     NCCLCHECK(getAlgoInfo(intraComm, &task, 0, 0, 1));
     intraProto = task.protocol;
     intraChan = task.nMaxChannels;
@@ -780,7 +787,9 @@ ncclResult_t rcclGetAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t co
   }
   if (coll == ncclFuncAllGather && rcclUseAllGatherDirect(comm, msgSize)) {
     *algo = rcclAddonAlgos_t::RCCL_DIRECT_ALLGATHER;
-    *protocol = NCCL_PROTO_SIMPLE; // TODO: consider LL for small messages
+    // Across nodes Direct AllGather stays off NaN (addP2pToPlan).
+    *protocol =
+      comm->nNodes == 1 && rcclNanProtoFor(comm, coll, dataType, msgSize) ? NCCL_PROTO_NAN : NCCL_PROTO_SIMPLE;
     *maxChannels = comm->p2pnChannels;
     return ncclSuccess;
   }
@@ -789,14 +798,12 @@ ncclResult_t rcclGetAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t co
   // answer (DDA / CE / pivot for these operands) comes from rcclGetCollImplInfo().
   if (coll == ncclFuncAlltoAll) {
     *algo = rcclAddonAlgos_t::RCCL_DIRECT_ALLTOALL;
-    *protocol = NCCL_PROTO_SIMPLE;
+    *protocol = rcclNanProtoFor(comm, coll, dataType, msgSize) ? NCCL_PROTO_NAN : NCCL_PROTO_SIMPLE;
     *maxChannels = comm->p2pnChannels;
     return ncclSuccess;
   }
-  struct ncclTaskColl task = {};
-  task.func = coll;
-  task.count = count;
-  task.datatype = dataType;
+  struct ncclTaskColl task;
+  rcclQueryTaskInit(comm, &task, coll, count, dataType);
   NCCLCHECK(getAlgoInfo(comm, &task, collNetSupport, nvlsSupport, numPipeOps));
   *protocol = task.protocol;
 #ifdef ENABLE_WARP_SPEED
@@ -1852,12 +1859,9 @@ static ncclResult_t rcclRingFallback(struct ncclComm* comm, const void* sendbuff
   decision->protocol = NCCL_PROTO_SIMPLE;
   if (query) {
     struct ncclTaskColl task;
-    memset(&task, 0, sizeof(task));
-    task.func = func;
+    rcclQueryTaskInit(comm, &task, func, count, datatype);
     task.sendbuff = sendbuff;
     task.recvbuff = recvbuff;
-    task.count = count;
-    task.datatype = datatype;
     NCCLCHECK(getAlgoInfo(comm, &task, 0, 0, 1));
     decision->protocol = task.protocol;
     if (threadsPerBlock != nullptr) {
@@ -1919,7 +1923,10 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
     INFO(NCCL_TUNING, "AR CE-2shot/CE-registered disqualified: graph capture active (graphModeSeen=%d ceArGraphAllowed=%d)",
          (int)comm->ceColl.graphModeSeen, (int)rcclCeArGraphSafe(comm));
   const size_t msgBytes = count * ncclTypeSize(datatype);
-  if (!rcclNcclAlgoEnvIsSet()) {
+  // Under NCCL_PROTO=NaN only ring and tree have a NaN-flag variant, so the
+  // GIN, symmetric, CE and DDA backends are skipped.
+  const bool nanForced = rcclNanProtoFor(comm, ncclFuncAllReduce, datatype, msgBytes);
+  if (!rcclNcclAlgoEnvIsSet() && !nanForced) {
   #if defined(ENABLE_ROCSHMEM_GIN)
     // GIN-SDMA scaleup AllReduce. Same gates as the previous early return in
     // ncclAllReduce_impl (group depth 0 + eligibility). Graph-capture-safe: init
@@ -2279,7 +2286,11 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
   }
   decision->ceCapturing = ceCapturing;
 
-  if (!rcclNcclAlgoEnvIsSet()) {
+  // Under NCCL_PROTO=NaN only ring and Direct have a NaN-flag variant, so the
+  // DDA, CE and symmetric backends are skipped. Hierarchical AllGather is
+  // multi-node, where this is false.
+  const bool nanForced = rcclNanProtoFor(comm, ncclFuncAllGather, datatype, totalBytes);
+  if (!rcclNcclAlgoEnvIsSet() && !nanForced) {
     // Window registration type is needed for both symSuppressedByMax and CE
     // branch gates below; hoist the lookup here so it is computed once.
     struct ncclDevrWindow* sendWin = nullptr;
@@ -2394,10 +2405,8 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
           decision->nMaxChannels = interComm->p2pnChannels;
         } else {
           // Zero-initialized: getAlgoInfo now reads task.algMask/forceAlgSelection.
-          struct ncclTaskColl task = {};
-          task.func = ncclFuncAllGather;
-          task.count = sendcount;
-          task.datatype = datatype;
+          struct ncclTaskColl task;
+          rcclQueryTaskInit(interComm, &task, ncclFuncAllGather, sendcount, datatype);
           NCCLCHECK(getAlgoInfo(interComm, &task, 0, 0, 1));
           decision->protocol = task.protocol;
           decision->nMaxChannels = task.nMaxChannels;
@@ -2406,14 +2415,12 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
         size_t intraCount = sendcount * nNodes;
         size_t intraMsgSize = intraCount * typeSize * intraComm->nRanks;
         if (rcclUseAllGatherDirect(intraComm, intraMsgSize)) {
-          intraProto = NCCL_PROTO_SIMPLE;
+          intraProto = rcclNanProtoForcedFor(intraComm, datatype) ? NCCL_PROTO_NAN : NCCL_PROTO_SIMPLE;
           intraChan = intraComm->p2pnChannels;
         } else {
           // Zero-initialized: getAlgoInfo now reads task.algMask/forceAlgSelection.
-          struct ncclTaskColl task = {};
-          task.func = ncclFuncAllGather;
-          task.count = intraCount;
-          task.datatype = datatype;
+          struct ncclTaskColl task;
+          rcclQueryTaskInit(intraComm, &task, ncclFuncAllGather, intraCount, datatype);
           NCCLCHECK(getAlgoInfo(intraComm, &task, 0, 0, 1));
           intraProto = task.protocol;
           intraChan = task.nMaxChannels;
@@ -2504,7 +2511,7 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
   // (5) Direct AllGather (per-peer Send/Recv).
   if (rcclUseAllGatherDirect(comm, msgSize)) {
     decision->algo = RCCL_DIRECT_ALLGATHER;
-    decision->protocol = NCCL_PROTO_SIMPLE;
+    decision->protocol = nanForced && comm->nNodes == 1 ? NCCL_PROTO_NAN : NCCL_PROTO_SIMPLE;
     decision->nMaxChannels = comm->p2pnChannels;
     return rcclSelectDone("AG", query, decision);
   }
@@ -2572,7 +2579,11 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
   const size_t typeSize = ncclTypeSize(datatype);
   const size_t totalBytes = (size_t)comm->nRanks * recvcount * typeSize;
 
-  if (!rcclNcclAlgoEnvIsSet()) {
+  // Under NCCL_PROTO=NaN only ring has a NaN-flag variant, so the symmetric, DDA
+  // and CE backends are skipped. Hierarchical and Direct ReduceScatter are
+  // multi-node, where this is false.
+  const bool nanForced = rcclNanProtoFor(comm, ncclFuncReduceScatter, datatype, totalBytes);
+  if (!rcclNcclAlgoEnvIsSet() && !nanForced) {
     // (1) Symmetric eligibility (sum/avg). Reported last but gates DDA / hierarchical / Direct here.
     // symMinR2: below this threshold DDA beats symk for R2 buffers -- suppress symk so DDA wins.
     // Window lookup hoisted above isSymmetricKernelRequested to avoid the
@@ -2780,6 +2791,15 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
   const size_t typeSize = ncclTypeSize(datatype);
   const size_t rankOffset = count * typeSize;           // bytes per peer
   const size_t totalBytes = comm->nRanks * rankOffset;  // total message bytes
+
+  // Under NCCL_PROTO=NaN AlltoAll is per-peer Send/Recv on the NaN-flag protocol:
+  // pivot, GDA, GIN, symmetric, DDA and CE have no NaN variant.
+  if (rcclNanProtoFor(comm, ncclFuncAlltoAll, datatype, totalBytes)) {
+    decision->algo = RCCL_DIRECT_ALLTOALL;
+    decision->protocol = NCCL_PROTO_NAN;
+    decision->nMaxChannels = comm->p2pnChannels;
+    return rcclSelectDone("A2A", query, decision);
+  }
 
   // (1) Pivot: large, cache-line-aligned messages on pivot-enabled comms.
   const size_t rankAlign = rankOffset & ((~rankOffset) + 1);
@@ -3370,6 +3390,24 @@ void rcclSetDefaultBuffSizes(struct ncclComm* comm, int defaultBuffSizes[]) {
   defaultBuffSizes[NCCL_PROTO_LL128] =
     rcclLL128ElemsPerThreadFromArch(comm->archName) * maxNthreads[NCCL_PROTO_LL128] * NCCL_STEPS * sizeof(uint64_t);
   defaultBuffSizes[NCCL_PROTO_SIMPLE] = (1 << 22); /* 4MiB */
+  // NaN protocol: every wire word is payload. Sized off the hard NCCL_MAX_NTHREADS
+  // cap rather than a per-protocol max, because rcclOptThreadBlockSize can raise a
+  // kernel's thread count after the fact and a step slot smaller than
+  // nthreads*ELEMS_PER_THREAD words would let a warp's slice run off the end.
+  //
+  // The protocol is opt-in, so a comm that NCCL_PROTO=NaN or RCCL_NAN_PROTO_AUTO does not cover gets no NaN
+  // FIFO and never picks NaN (rcclNanProtoFor).
+  if (!rcclNanProtoForced() && !rcclNanProtoAutoTuned(comm)) {
+    defaultBuffSizes[NCCL_PROTO_NAN] = 0;
+    return;
+  }
+  int nanElemsPerThread = NCCL_NAN_STEP_ELEMS_PER_THREAD;
+#if ENABLE_TDM_NAN
+  if (comm->nanTdmMinBytes >= 0) {
+    nanElemsPerThread = NCCL_NAN_TDM_STEP_ELEMS_PER_THREAD;
+  }
+#endif
+  defaultBuffSizes[NCCL_PROTO_NAN] = nanElemsPerThread * NCCL_MAX_NTHREADS * NCCL_STEPS * sizeof(uint64_t);
 }
 
 ncclResult_t rcclFuncMaxSendRecvCount(ncclFunc_t func, int nRanks, size_t count, size_t& maxCount) {

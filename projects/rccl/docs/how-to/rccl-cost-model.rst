@@ -94,7 +94,7 @@ cases cross family boundaries:
 *  ``ncclTuningCompute`` queries itself recursively with a general-only mask to decide whether a
    symmetric LL kernel must fall back, and again when the fallback is taken. So a symmetric
    decision can emit a second ``Input:``/``Best tuning`` pair carrying
-   ``NCCL_TUNING_MASK_GENERAL_KERNELS`` (``0x1fffff``). Those extra records come from the
+   ``NCCL_TUNING_MASK_GENERAL_KERNELS`` (``0xfffffff``). Those extra records come from the
    fallback check, not from a general selection the enqueue path requested.
 *  With ``NCCL_ENQUEUE_REARCH_ENABLE=1``, ``fillCollTuningInput`` builds one mask spanning
    general and symmetric candidates, and the model does compare them head to head.
@@ -122,26 +122,26 @@ partitioned into three contiguous families, defined in ``src/include/tuning.h``:
       - **Family**
       - **How the ID is formed**
 
-    * - ``[0, 21)``
+    * - ``[0, 28)``
       - General kernels
       - ``algo * NCCL_NUM_PROTOCOLS + proto``, covering 7 algorithms
         (``TREE``, ``RING``, ``COLLNET_DIRECT``, ``COLLNET_CHAIN``, ``NVLS``, ``NVLS_TREE``, ``PAT``)
-        times 3 protocols (``LL``, ``LL128``, ``SIMPLE``). Not every combination is implemented.
+        times 4 protocols (``LL``, ``LL128``, ``SIMPLE``, ``NAN``). Not every combination is implemented.
 
-    * - ``[21, 39)``
+    * - ``[28, 49)``
       - Symmetric device-API kernels
-      - ``21 + ncclSymkKernelId_*``, the 18 symmetric AllReduce, AllGather, and ReduceScatter kernels.
+      - ``28 + ncclSymkKernelId_*``, the 21 symmetric AllReduce, AllGather, and ReduceScatter kernels.
 
-    * - ``[39, 41)``
+    * - ``[49, 51)``
       - Copy engine methods
-      - ``39 + ncclCeMethodId_*``: ``AllGather_UC`` (unicast) and ``AllGather_MC`` (multicast).
+      - ``49 + ncclCeMethodId_*``: ``AllGather_UC`` (unicast) and ``AllGather_MC`` (multicast).
 
 A caller restricts the model to a subset of these families with a 64-bit candidate mask. Four
 mask constants name the useful subsets:
 
-*  ``NCCL_TUNING_MASK_GENERAL_KERNELS``: bits ``[0, 21)``
-*  ``NCCL_TUNING_MASK_SYM_KERNELS``: bits ``[21, 40)``
-*  ``NCCL_TUNING_MASK_CE``: bits ``[40, 42)``
+*  ``NCCL_TUNING_MASK_GENERAL_KERNELS``: bits ``[0, 28)``
+*  ``NCCL_TUNING_MASK_SYM_KERNELS``: bits ``[28, 49)``
+*  ``NCCL_TUNING_MASK_CE``: bits ``[49, 51)``
 *  ``NCCL_TUNING_MASK_ALL``: all of the above
 
 The mask is the single most useful thing to read out of the logs, because it tells you which
@@ -201,23 +201,23 @@ The second record states what was chosen:
 The fields worth reading first:
 
 *  ``.tuningMask`` is the candidate mask from :ref:`cost-model-id-space`, printed in hexadecimal.
-   Compare it against all three bounded ranges, not against a single threshold: bits ``[0, 21)``
-   are general algorithm and protocol candidates (``0x1fffff``), bits ``[21, 40)`` are symmetric
-   kernels (``0xffffe00000``), and bits 40 and 41 are copy engine methods (``0x30000000000``).
-   "At or above bit 21" is not enough to call a decision symmetric, because the copy engine bits
-   are above 21 as well.
+   Compare it against all three bounded ranges, not against a single threshold: bits ``[0, 28)``
+   are general algorithm and protocol candidates (``0xfffffff``), bits ``[28, 49)`` are symmetric
+   kernels (``0x1fffff0000000``), and bits 49 and 50 are copy engine methods (``0x6000000000000``).
+   "At or above bit 28" is not enough to call a decision symmetric, because the copy engine bits
+   are above 28 as well.
 
 *  Only the caller narrows ``.tuningMask``. On the symmetric path that is the per-call
    ``algSelection``, intersected with the symmetric range. The process-wide overrides work
    differently: ``NCCL_ALGO``, ``NCCL_PROTO``, and ``NCCL_SYM_KERNEL`` are parsed once at
    communicator init and clear entries in ``tuningContext.enabled[id][func]``, which the model
    checks per candidate. Pinning one symmetric kernel with ``NCCL_SYM_KERNEL`` therefore still
-   logs the full symmetric mask ``0xffffe00000``. A full mask is not evidence that the override
+   logs the full symmetric mask ``0x1fffff0000000``. A full mask is not evidence that the override
    was ignored. Read ``.forced`` on the "Best tuning" line for that.
 
 *  ``.id`` on the "Best tuning" line is the flat candidate ID of the winner. Map it into the three
-   ranges to find out which family won: below 21 it is a general ``algo``/``proto`` pair, from 21
-   to 38 a symmetric kernel, and 39 or 40 a copy engine method. The ``.algo``/``.proto``,
+   ranges to find out which family won: below 28 it is a general ``algo``/``proto`` pair, from 28
+   to 48 a symmetric kernel, and 49 or 50 a copy engine method. The ``.algo``/``.proto``,
    ``.symKernelId``, and ``.ceMethodId`` fields are the expanded form of the same answer; the
    fields belonging to the families that did not win are left at their "none" values.
 
@@ -318,7 +318,7 @@ Restricting the candidate set per call
 Environment variables such as ``NCCL_ALGO`` apply to the whole process. To narrow the candidate
 set for one collective call instead, set ``ncclCollConfig_t::algSelection`` to a selection string.
 The names come from an algorithm registry that covers both the general rows (``TREE_LL``,
-``TREE_LL128``, ``TREE_SIMPLE``, ``RING_LL``, ``RING_LL128``, ``RING_SIMPLE``,
+``TREE_LL128``, ``TREE_SIMPLE``, ``TREE_NAN``, ``RING_LL``, ``RING_LL128``, ``RING_SIMPLE``, ``RING_NAN``,
 ``COLLNET_DIRECT_SIMPLE``, ``COLLNET_CHAIN_SIMPLE``, ``NVLS_SIMPLE``, ``NVLSTREE_SIMPLE``,
 ``PAT_SIMPLE``) and the symmetric rows (``SYMK_AGxLL_R``, ``SYMK_LLMC``, ``SYMK_TmaST``, and so on).
 
@@ -340,6 +340,10 @@ The names come from an algorithm registry that covers both the general rows (``T
    example ``NVLS_SIMPLE`` without NVLS, the call fails with ``ncclInvalidArgument``. Set
    ``forceAlgSelection`` to ``0`` to fall back to automatic selection instead.
 
+   Under ``RCCL_NAN_PROTO_AUTO=1``, a selection that names no ``NAN`` row turns the NaN protocol
+   off for that call, as ``NCCL_PROTO`` does. ``NCCL_PROTO=NaN`` wins over the selection like any
+   other ``NCCL_PROTO``.
+
    Every rank must pass a selection that resolves to the same algorithm and protocol for a
    given call. Selection is local and nothing compares the winner across ranks, so a
    disagreement is undefined behavior, as it is for ``cgaClusterSize``. Eligibility is per
@@ -359,12 +363,12 @@ The names come from an algorithm registry that covers both the general rows (``T
 Matching is a case-insensitive **name prefix**, not an exact comparison. A short name therefore
 selects a family:
 
-*  ``SYMK_LL`` selects three rows, not two: the AllGather ``SYMK_LL`` (bit 26) and ``SYMK_LLMC``
-   (bit 27), and also the ReduceScatter ``SYMK_LL`` (bit 34). A registry name is unique per
+*  ``SYMK_LL`` selects three rows, not two: the AllGather ``SYMK_LL`` (bit 33) and ``SYMK_LLMC``
+   (bit 34), and also the ReduceScatter ``SYMK_LL`` (bit 43). A registry name is unique per
    collective but can repeat across collectives, and the prefix match does not look at the
    collective, so a name shared by two collectives selects both rows.
 *  ``SYMK_RailA2A`` selects both ``SYMK_RailA2A_LsaLD`` and ``SYMK_RailA2A_LsaLDMC``.
-*  ``RING`` selects ``RING_LL``, ``RING_LL128``, and ``RING_SIMPLE``, but not
+*  ``RING`` selects ``RING_LL``, ``RING_LL128``, ``RING_SIMPLE``, and ``RING_NAN``, but not
    ``SYMK_RailRing_LsaSTMC``. The match is anchored at the start of the name, so a name that
    merely *contains* the tag is not selected.
 
