@@ -72,15 +72,15 @@ class DdaReduceScatterFabricLLMicrotest : public ::testing::Test {
   }
 
   template <typename T>
-  void ExpectLaunchOf(const DdaLaunch& launch, size_t recvcount) {
-    EXPECT_EQ(launch.kernel, (Kernel<T, 8>()));
+  void ExpectLaunchOf(const DdaLaunch& launch, const void* kernel, size_t recvcount) {
+    EXPECT_EQ(launch.kernel, kernel);
     ASSERT_EQ(launch.args.size(), 10u);
     EXPECT_EQ(launch.Arg<T**>(0), comm().ddaPeerPtrsDev);
     EXPECT_EQ(launch.Arg<T*>(1), kRecvbuff);
     EXPECT_EQ(launch.Arg<const T*>(2), kSendbuff);
     EXPECT_EQ(launch.Arg<size_t>(3), recvcount);
     EXPECT_EQ(launch.Arg<int>(4), 7);
-    EXPECT_EQ(launch.Arg<int>(5), 8);
+    EXPECT_EQ(launch.Arg<int>(5), comm().nRanks);
     EXPECT_EQ(launch.Arg<uint32_t*>(6), comm().ddaLLEpochDev);
     EXPECT_EQ(launch.Arg<int>(7), comm().ddaLLEpochLen);
     EXPECT_EQ(launch.Arg<size_t>(8), dda::common::ddaBankSize(comm().ddaScratchBytes));
@@ -180,22 +180,34 @@ TEST_F(DdaReduceScatterFabricLLMicrotest, Launch_UnsupportedDatatypeReturnsInval
 }
 
 TEST_F(DdaReduceScatterFabricLLMicrotest, Launch_EachDatatypeLaunchesItsOwnKernel) {
-  ExpectLaunchOf<float>(RunOne(16, ncclFloat32), 16);
-  ExpectLaunchOf<half>(RunOne(16, ncclFloat16), 16);
-  ExpectLaunchOf<bf16>(RunOne(16, ncclBfloat16), 16);
-  ExpectLaunchOf<dda::common::fp8e4m3>(RunOne(16, ncclFloat8e4m3), 16);
-  ExpectLaunchOf<dda::common::fp8e5m2>(RunOne(16, ncclFloat8e5m2), 16);
+  ExpectLaunchOf<float>(RunOne(16, ncclFloat32), Kernel<float, 8>(), 16);
+  ExpectLaunchOf<half>(RunOne(16, ncclFloat16), Kernel<half, 8>(), 16);
+  ExpectLaunchOf<bf16>(RunOne(16, ncclBfloat16), Kernel<bf16, 8>(), 16);
+  ExpectLaunchOf<dda::common::fp8e4m3>(RunOne(16, ncclFloat8e4m3), Kernel<dda::common::fp8e4m3, 8>(), 16);
+  ExpectLaunchOf<dda::common::fp8e5m2>(RunOne(16, ncclFloat8e5m2), Kernel<dda::common::fp8e5m2, 8>(), 16);
+  comm().nRanks = dda::common::kDdaLLRsSpreadMinRanks;
+  ExpectLaunchOf<float>(RunOne(16, ncclFloat32), SpreadKernel<float>(), 16);
+  ExpectLaunchOf<half>(RunOne(16, ncclFloat16), SpreadKernel<half>(), 16);
+  ExpectLaunchOf<bf16>(RunOne(16, ncclBfloat16), SpreadKernel<bf16>(), 16);
+  ExpectLaunchOf<dda::common::fp8e4m3>(RunOne(16, ncclFloat8e4m3), SpreadKernel<dda::common::fp8e4m3>(), 16);
+  ExpectLaunchOf<dda::common::fp8e5m2>(RunOne(16, ncclFloat8e5m2), SpreadKernel<dda::common::fp8e5m2>(), 16);
 }
 
+// The shard and spread kernels. Each launch takes the stop event, so the loop re-arms it.
 TEST_F(DdaReduceScatterFabricLLMicrotest, Launch_TakesTheStopEventOnTheStream) {
-  const DdaLaunch& launch = RunOne(4);
-  EXPECT_EQ(launch.block.x, 256u);
-  EXPECT_EQ(launch.stream, kStream);
-  EXPECT_EQ(launch.startEvent, nullptr);
-  EXPECT_EQ(launch.stopEvent, kStopEvent);
-  EXPECT_EQ(comm().addonStopEvent, nullptr);
-  EXPECT_EQ(launch.sharedMemBytes, 0u);
-  EXPECT_EQ(launch.flags, 0u);
+  for (int nRanks : {8, dda::common::kDdaLLRsSpreadMinRanks}) {
+    SCOPED_TRACE(::testing::Message() << "nRanks " << nRanks);
+    comm().nRanks = nRanks;
+    comm().addonStopEvent = kStopEvent;
+    const DdaLaunch& launch = RunOne(4);
+    EXPECT_EQ(launch.block.x, 256u);
+    EXPECT_EQ(launch.stream, kStream);
+    EXPECT_EQ(launch.startEvent, nullptr);
+    EXPECT_EQ(launch.stopEvent, kStopEvent);
+    EXPECT_EQ(comm().addonStopEvent, nullptr);
+    EXPECT_EQ(launch.sharedMemBytes, 0u);
+    EXPECT_EQ(launch.flags, 0u);
+  }
 }
 
 // From kDdaLLRsSpreadMinRanks ranks the spread kernel runs instead.
@@ -278,7 +290,10 @@ TEST_F(DdaReduceScatterFabricLLMicrotest, Blocks_MatchTheLaunchedGrid) {
 
 TEST_F(DdaReduceScatterFabricLLMicrotest, Launch_LaunchErrorIsReported) {
   g_hipGetLastError = [] { return hipErrorLaunchFailure; };
-  EXPECT_EQ(Run(4), ncclUnhandledCudaError);
+  for (int nRanks : {8, dda::common::kDdaLLRsSpreadMinRanks}) {
+    comm().nRanks = nRanks;
+    EXPECT_EQ(Run(4), ncclUnhandledCudaError) << "nRanks " << nRanks;
+  }
 }
 
 }  // namespace
