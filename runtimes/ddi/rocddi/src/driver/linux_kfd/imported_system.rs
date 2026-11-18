@@ -491,7 +491,7 @@ impl Drop for DrmImportedSystem {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-    use super::super::{memory, sys};
+    use super::super::{connection, memory};
     use super::*;
     use std::fs::{File, OpenOptions};
     use std::sync::Arc;
@@ -521,10 +521,10 @@ mod tests {
     }
 
     fn fixtures() -> [Shared<DeviceVm>; 2] {
-        let kfd = Shared::new(sys::Kfd::with_hook(
+        let kfd = Shared::new(connection::Kfd::with_hook(
             File::open("/dev/null").unwrap(),
             Arc::new(|call| {
-                if let sys::Call::Wait(args, _) = call {
+                if let connection::Call::Wait(args, _) = call {
                     args.result = uapi::WAIT_TIMEOUT;
                 }
                 Ok(())
