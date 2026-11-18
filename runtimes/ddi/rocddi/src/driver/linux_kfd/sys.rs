@@ -28,13 +28,14 @@ use std::sync::{Mutex, MutexGuard};
 
 use super::errno;
 use super::uapi;
+use super::{DebuggerRegistration, DebuggerRegistrationMode, XnackModeRequest};
 use crate::os::ProcessIdentity;
 use crate::os::linux::{
     file::{close_descriptor, close_file},
     invalid_data,
     memory::{Reservation, page_size},
 };
-use crate::session::{DebuggerRegistrationMode, DriverContextLifetime, XnackModeRequest};
+use crate::session::DriverContextLifetime;
 
 /// DMA-BUF extent and metadata copied out of one synchronous KFD query.
 pub(super) struct DmaBufDetails {
@@ -138,17 +139,6 @@ enum ContextState {
     SelectionUncertain,
 }
 
-/// Process-lifetime adapter record consumed by KFD runtime enablement.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) struct RuntimeDebuggerRegistration {
-    /// Stable native `r_debug` address retained by the registering adapter.
-    pub(super) address: u64,
-    /// Requests trap-temporary save/setup as part of runtime enablement.
-    pub(super) setup_ttmp: bool,
-    /// Whether an already-active different adapter may keep its registration.
-    pub(super) mode: DebuggerRegistrationMode,
-}
-
 /// Context selection and enablement guarded as one KFD transaction.
 struct RuntimeControl {
     /// Primary or secondary context selected for this file description.
@@ -156,7 +146,7 @@ struct RuntimeControl {
     /// Last known native runtime enablement state.
     enable: RuntimeState,
     /// Registration carried by the current or pending enable transaction.
-    debugger: Option<RuntimeDebuggerRegistration>,
+    debugger: Option<DebuggerRegistration>,
 }
 
 /// Guard retaining exclusive access to one runtime-enable transaction.
@@ -577,7 +567,7 @@ impl Kfd {
     pub(super) fn configure_debugger_locked(
         &self,
         runtime: &mut RuntimeGuard<'_>,
-        registration: Option<RuntimeDebuggerRegistration>,
+        registration: Option<DebuggerRegistration>,
     ) -> io::Result<bool> {
         self.check_process()?;
         if runtime.state.context == ContextState::SelectionUncertain {

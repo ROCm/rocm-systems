@@ -77,7 +77,9 @@ gfx1250 supports numeric and propagating binary/ternary selection, including
 packed FP16 forms. Loose and Compatibility retain their respective numerical
 and output-control policies, with scalar, AVX2 and AVX-512 paths.
 
-FP-status reporting is not implemented for these selection entry points, so
+Gfx1250 binary FP32 selection uses `_gfx1250` entry points to preserve its
+numeric-only Compatibility policy separately from gfx12's reporting policy.
+FP-status reporting is not implemented for these CDNA selection entry points, so
 explicit mode 3 stops execution. Mode 2 also rejects effective OMOD scaling on
 gfx950 propagating FP32 ternary selection. Selected NaN inputs are also rejected
 for gfx950/gfx1250 packed FP16 MINIMUM3/MAXIMUM3 and gfx1250 packed FP16

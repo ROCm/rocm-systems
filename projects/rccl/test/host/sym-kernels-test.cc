@@ -17,31 +17,17 @@
 
 #include "ScopedHook.h"
 #include "fakes/devcomm_fakes.h"
+#include "fakes/gin_fakes.h"
 #include "fakes/hip_fakes.h"
 #include "fakes/nccl_fakes.h"
 #include "fakes/param_redirect.h"
 #include "sym_kernels.h"
 
-// Neuter __global__: a real definition needs hipLaunchKernel/__hipRegisterFunction, unavailable under -no-hip-rt.
-#undef __global__
-#define __global__
-
-#include "fakes/sym_kernels_test_stubs.h"
-
-#include SYM_KERNELS_HOST_CC_PATH
-
-#undef __global__
+#include "fakes/sym_kernels_host_include.h"
 
 #include SYM_KERNELS_CC_PATH
 
 #include "SymTdmTestHelpers.h"
-
-// sym_kernels.cc asks for the railed GIN backend; gin_host.cc is not linked into this binary.
-std::function<ncclGinType_t(ncclComm*)> g_railedGinType = [](ncclComm*) { return NCCL_GIN_TYPE_NONE; };
-ncclResult_t ncclGetRailedGinType(struct ncclComm* comm, ncclGinType_t* ginType) {
-  *ginType = g_railedGinType(comm);
-  return ncclSuccess;
-}
 
 namespace {
 

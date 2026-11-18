@@ -89,7 +89,9 @@ impl GpuDevice<'_> {
         self.driver.asic_family_id()
     }
 
-    /// Queries the active KFD process's recoverable page-fault mode.
+    /// Queries the effective XNACK mode of this GPU's native execution context.
+    ///
+    /// GPUs sharing a native KFD context share this recoverable-page-fault mode.
     ///
     /// # Errors
     /// Returns a native or device-lifetime failure when the mode is unavailable.

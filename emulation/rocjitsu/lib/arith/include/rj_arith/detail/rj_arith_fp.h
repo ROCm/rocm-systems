@@ -625,10 +625,12 @@ int rj_arith_v_pk_mul_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t
 // gfx12 MUL supports FP status for nearest-even rounding, preserved denormals
 // and no OMOD/CLAMP: INVALID, INPUT_DENORM, OVERFLOW, UNDERFLOW and INEXACT.
 // Exact subnormal products report INPUT_DENORM without UNDERFLOW. Other guest
-// controls and RDNA3 reporting return UNSUPPORTED_FP_STATUS. Compatibility uses
-// numeric-only exact semantics for MUL in every configuration. Rocjitsu retains
-// its existing MUL status classifier when integrating Compatibility mode.
-// Other binary operations do not support mode 3 FP status reporting.
+// controls and RDNA3 reporting return UNSUPPORTED_FP_STATUS. Compatibility retains
+// the inherited numerical model and native-nearest MUL exception classifier,
+// independently of strict reporting qualification. gfx12 ADD/SUB/SUBREV also
+// accumulate inherited input/invalid and pre-OMOD overflow causes. Compatibility
+// requires valid status storage for these instructions; modes 0–2 leave it unused.
+// Other binary operations do not support explicit mode 3 FP status reporting.
 int rj_arith_v_add_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                            uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
                            uint32_t *trapsts);
@@ -1491,7 +1493,10 @@ int rj_arith_v_pk_max_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instr
 // priority, payload/quieting, or the sign of zero.
 // Guest input flushing applies before selection;
 // output flushing is ignored except as required by OMOD. RJ_ARITH_FP_IEEE_MODE is
-// accepted without changing RDNA4's selection or OMOD rules.
+// accepted without changing RDNA4's selection or OMOD rules. Compatibility requires
+// valid status storage and accumulates gfx12 input classification (including a
+// preserved subnormal paired with a nonfinite input). Explicit mode 3 is unsupported.
+// The _gfx1250 variants retain the same numeric selection without reporting causes.
 int rj_arith_v_min_num_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                uint32_t *const *d, const uint32_t *const *a,
                                const uint32_t *const *b, uint32_t *excp_flag_user);
@@ -2103,6 +2108,41 @@ int rj_arith_v_ldexp_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t
 int rj_arith_v_ldexp_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                     uint32_t *const *d, const uint32_t *const *a,
                                     const uint32_t *const *b, uint32_t *trapsts);
+
+// gfx1250 FP32 selection shares numeric rules with the unsuffixed instructions,
+// but Compatibility produces no FP status. Explicit mode 3 is unsupported.
+int rj_arith_v_min_num_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *excp_flag_user);
+int rj_arith_v_min_num_f32_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *excp_flag_user);
+int rj_arith_v_max_num_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *excp_flag_user);
+int rj_arith_v_max_num_f32_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *excp_flag_user);
+int rj_arith_v_minimum_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *excp_flag_user);
+int rj_arith_v_minimum_f32_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *excp_flag_user);
+int rj_arith_v_maximum_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *excp_flag_user);
+int rj_arith_v_maximum_f32_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *excp_flag_user);
 
 #ifdef __cplusplus
 } // extern "C"
