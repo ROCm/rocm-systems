@@ -16,10 +16,10 @@ build:
    os: ubuntu-26.04
    tools:
       python: "3.10"
-   apt-packages:
+   apt_packages:
       - jq
    jobs:
-      post_checkout:
+      post_system_dependencies:
          - mkdir -p $HOME/.local/bin /tmp/doxygen
-         - curl -fsSL   https://api.github.com/repos/doxygen/doxygen/releases/latest | jq -r '.assets[] | select(.name | test("linux\\.bin\\.tar\\.gz")) | .browser_download_url' | xargs curl -fsSL | tar xz -C /tmp/doxygen --strip-components=1
+         - curl -fsSL https://api.github.com/repos/doxygen/doxygen/releases/latest | jq -r '.assets[] | select(.name | test("linux\\.bin\\.tar\\.gz")) | .browser_download_url' | xargs curl -fsSL | tar xz -C /tmp/doxygen --strip-components=1
          - cp /tmp/doxygen/bin/doxygen $HOME/.local/bin/doxygen
