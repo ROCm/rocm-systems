@@ -439,6 +439,13 @@ class FailBeforeRun(unittest.TestCase):
         self.assert_reported("Could not read the RCCL version of the baseline and "
                              "candidate library")
 
+    def test_a_published_baseline_is_named(self):
+        with mock.patch.dict(os.environ, {"BASELINE_ARTIFACT_RUN_ID": "",
+                                          "BASELINE_RCCL_SOURCE": "release:10.1.0"}):
+            self.run_main(get_rccl_fingerprint=mock.Mock(
+                return_value={"md5": "", "version": "", "size": 0}))
+        self.assert_reported("RCCL unknown (release:10.1.0)")
+
     def test_an_unpinned_base_image(self):
         self.run_main(resolve_base_digest=mock.Mock(
             side_effect=RuntimeError("the registry gave no digest for rocm/primus")))

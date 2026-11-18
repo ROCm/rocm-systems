@@ -3020,7 +3020,8 @@ def fail_before_run(args: argparse.Namespace, scale: str, reason: str) -> NoRetu
     report = generate_summary_report(
         args.workload, scale, 1, f"not run: {reason}", "", args.cluster,
         builds={CANDIDATE: os.environ.get("ARTIFACT_RUN_ID", ""),
-                BASELINE: os.environ.get("BASELINE_ARTIFACT_RUN_ID", "")},
+                BASELINE: os.environ.get("BASELINE_ARTIFACT_RUN_ID", "")
+                or os.environ.get("BASELINE_RCCL_SOURCE", "")},
     )
     log.info("\n%s", report)
     write_github_summary(report)
