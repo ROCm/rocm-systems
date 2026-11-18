@@ -2941,9 +2941,9 @@ TEST_F(LdsBarrierCellRaceTest, MixedFlatLoadOfTheCellAcquiresWhenItsLdsLanesAreA
 }
 
 // With EXEC zero no lane arrives, so the simulator reports no arrival (see
-// LdsBarrierArriveTest.ExecZeroArriveReportsNothing) and nothing is released:
-// the instruction is issued here without one.
-TEST_F(LdsBarrierCellRaceTest, ExecZeroArriveReleasesNothing) {
+// LdsBarrierArriveTest.ExecZeroArriveReportsNothing) and nothing is handed
+// off: the instruction is issued here without one.
+TEST_F(LdsBarrierCellRaceTest, ExecZeroArriveHandsOffNothing) {
   EXPECT_FALSE(async_load(0, kTile));
   EXPECT_FALSE(issue_arrive(0, Source::AsyncDsAtomic, kCell, /*exec=*/0));
   EXPECT_FALSE(poll(1));
