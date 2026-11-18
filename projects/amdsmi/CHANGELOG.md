@@ -6,6 +6,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ## amd_smi_lib for ROCm 10.3.0
 
+### Added
+
+- **Added `amdsmi_get_rocm_version()` C API**.  
+  - Returns the installed ROCm version (major, minor, release) by locating and querying `librocm-core.so`.
+  - The Python `amdsmi_get_rocm_version()` now calls through this C API instead of loading `librocm-core.so` directly; its `Tuple[bool, str]` return contract (no exceptions raised) is unchanged.
+
 ### Resolved Issues
 
 - **Fixed `amd-smi` failures on non-x86 systems where the library is built without ESMI (EPYC CPU) support**.  
@@ -14,10 +20,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 ## amd_smi_lib for ROCm 10.2.0
 
 ### Added
-
-- **Added `amdsmi_get_rocm_version()` C API**.  
-  - Returns the installed ROCm version (major, minor, release) by locating and querying `librocm-core.so`.
-  - The Python `amdsmi_get_rocm_version()` now calls through this C API instead of loading `librocm-core.so` directly; its `Tuple[bool, str]` return contract (no exceptions raised) is unchanged.
 
 - **Added unified `amdsmi_get_link_topology()` API on baremetal**.  
   - Returns link weight, status, type, hop count, and framebuffer-sharing data.

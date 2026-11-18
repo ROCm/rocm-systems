@@ -85,6 +85,46 @@ TEST(SystemUnit, RocmCoreCandidatesFallsBackToRocmPathDir) {
   EXPECT_TRUE(Contains(candidates, "/tmp/fake-rocm-path/lib/librocm-core.so"));
 }
 
+TEST(SystemUnit, RocmCoreCandidatesPreferRocmHomeOverRocmPathAndOptRocm) {
+  EnvVarGuard home_guard("ROCM_HOME");
+  EnvVarGuard path_guard("ROCM_PATH");
+  setenv("ROCM_HOME", "/tmp/fake-rocm-home", /*overwrite=*/1);
+  setenv("ROCM_PATH", "/tmp/fake-rocm-path", /*overwrite=*/1);
+
+  std::vector<std::string> candidates = rocm_core_candidates();
+
+  auto index_of = [&](const std::string& value) {
+    return std::find(candidates.begin(), candidates.end(), value) - candidates.begin();
+  };
+  EXPECT_LT(index_of("/tmp/fake-rocm-home/lib/librocm-core.so.1"),
+            index_of("/opt/rocm/lib/librocm-core.so.1"));
+  EXPECT_FALSE(Contains(candidates, "/tmp/fake-rocm-path/lib/librocm-core.so.1"));
+}
+
+TEST(SystemUnit, RocmCoreCandidatesTreatsEmptyRocmHomeAsUnset) {
+  EnvVarGuard home_guard("ROCM_HOME");
+  EnvVarGuard path_guard("ROCM_PATH");
+  setenv("ROCM_HOME", "", /*overwrite=*/1);
+  setenv("ROCM_PATH", "/tmp/fake-rocm-path", /*overwrite=*/1);
+
+  std::vector<std::string> candidates = rocm_core_candidates();
+
+  EXPECT_TRUE(Contains(candidates, "/tmp/fake-rocm-path/lib/librocm-core.so.1"));
+  EXPECT_FALSE(Contains(candidates, "/lib/librocm-core.so.1"));
+}
+
+TEST(SystemUnit, RocmCoreCandidatesIgnoresRelativeRocmHome) {
+  EnvVarGuard home_guard("ROCM_HOME");
+  EnvVarGuard path_guard("ROCM_PATH");
+  setenv("ROCM_HOME", ".", /*overwrite=*/1);
+  setenv("ROCM_PATH", "/tmp/fake-rocm-path", /*overwrite=*/1);
+
+  std::vector<std::string> candidates = rocm_core_candidates();
+
+  EXPECT_FALSE(Contains(candidates, "./lib/librocm-core.so.1"));
+  EXPECT_TRUE(Contains(candidates, "/tmp/fake-rocm-path/lib/librocm-core.so.1"));
+}
+
 TEST(SystemUnit, RocmCoreStatusToAmdsmiMapsSuccess) {
   amdsmi_version_t version{0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, nullptr};
   std::string build_str;

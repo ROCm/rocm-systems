@@ -5875,11 +5875,15 @@ std::vector<std::string> rocm_core_candidates() {
   // secure_getenv(), not getenv(): these vars pick a dlopen() path, so a
   // setuid/setgid process must not trust them from its (possibly attacker-
   // controlled) environment.
+  //
+  // An empty or relative value is treated as unset: empty must not shadow
+  // ROCM_PATH, and a relative one (e.g. ".") would have dlopen() resolve the
+  // candidate against cwd instead of a real install directory.
   const char* rocm_home = secure_getenv("ROCM_HOME");
-  if (rocm_home == nullptr) {
+  if (rocm_home == nullptr || rocm_home[0] != '/') {
     rocm_home = secure_getenv("ROCM_PATH");
   }
-  if (rocm_home != nullptr) {
+  if (rocm_home != nullptr && rocm_home[0] == '/') {
     dirs.push_back(std::string(rocm_home) + "/lib");
   }
   dirs.push_back("/opt/rocm/lib");

@@ -36,8 +36,8 @@ class TestAmdSmiGetRocmVersion(unittest.TestCase):
     def test_success_formats_version_string(self) -> None:
         def _stub(version_ptr):
             version_ptr._obj.major = 7
-            version_ptr._obj.minor = 0
-            version_ptr._obj.release = 0
+            version_ptr._obj.minor = 1
+            version_ptr._obj.release = 3
             return amdsmi.amdsmi_wrapper.AMDSMI_STATUS_SUCCESS
 
         with mock.patch.object(
@@ -45,7 +45,7 @@ class TestAmdSmiGetRocmVersion(unittest.TestCase):
         ):
             result = amdsmi.amdsmi_interface.amdsmi_get_rocm_version()
 
-        self.assertEqual(result, (True, "7.0.0"))
+        self.assertEqual(result, (True, "7.1.3"))
 
     def test_not_supported_reports_missing_rocm_core(self) -> None:
         def _stub(_version_ptr):
