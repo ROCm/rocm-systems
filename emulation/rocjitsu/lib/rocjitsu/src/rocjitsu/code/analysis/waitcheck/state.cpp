@@ -282,7 +282,7 @@ void WaitcheckStateOps::update_expert_valu_mask(PendingState &state, const Instr
       });
   }
   const bool copies_exec = name == "s_mov_b32" && low_exec(src);
-  if (state.expert_exec_nonzero && (name == "s_and_saveexec_b32" || copies_exec)) {
+  if (state.expert_exec_nonzero && (saves_old_exec_b32(name) || copies_exec)) {
     const auto selector = saved_selector(dst);
     const bool vcc = selector && *selector >= amdgpu::kVccSelectorFirst;
     if (selector && (*selector < allocated_sgprs || vcc)) {
@@ -347,6 +347,10 @@ bool WaitcheckStateOps::preserves_exec_lanes(const Instruction &inst) {
       return true;
   }
   return false;
+}
+
+bool WaitcheckStateOps::saves_old_exec_b32(std::string_view mnemonic) {
+  return mnemonic.starts_with("s_") && mnemonic.ends_with("_saveexec_b32");
 }
 
 bool WaitcheckStateOps::vm_source_results_allocated(const Instruction &inst, rj_code_arch_t arch,
@@ -667,6 +671,7 @@ void WaitcheckStateOps::merge_into(PendingState &dst, const PendingState &src) {
   dst.expert_valu_may_skip |= src.expert_valu_may_skip;
   dst.expert_exec_nonzero &= src.expert_exec_nonzero;
   dst.expert_saved_nonzero_exec &= src.expert_saved_nonzero_exec;
+  dst.saved_nonzero_if_exec_empty &= src.saved_nonzero_if_exec_empty;
   dst.exec_empty &= src.exec_empty;
   dst.exec_nonzero &= src.exec_nonzero;
   dst.previous_vm_vsrc_zero_wait &= src.previous_vm_vsrc_zero_wait;

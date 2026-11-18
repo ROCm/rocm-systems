@@ -8097,6 +8097,226 @@ TEST(WaitcheckTest, RelativeWaitSelectorIsAReadBeforeItsCounterIsApplied) {
   }
 }
 
+TEST(WaitcheckTest, Rdna1SavedExecProvesNativeDsDrainOnlyOnIntactActivePaths) {
+  enum class Case {
+    Restore,
+    XorEmptyEdge,
+    Clobber,
+    XorClobber,
+    PartialWait,
+    PendingScalar,
+    SkippedLoop,
+    SkippedLoopDrained,
+    FirstPassSkipsDs
+  };
+  for (const auto [test, expect_source_warning] :
+       {std::pair{Case::Restore, false}, std::pair{Case::XorEmptyEdge, false},
+        std::pair{Case::Clobber, true}, std::pair{Case::XorClobber, true},
+        std::pair{Case::PartialWait, true}, std::pair{Case::PendingScalar, true},
+        std::pair{Case::SkippedLoop, true}, std::pair{Case::SkippedLoopDrained, false},
+        std::pair{Case::FirstPassSkipsDs, false}}) {
+    SCOPED_TRACE(static_cast<int>(test));
+    std::vector<uint32_t> code;
+    const bool two_pass = test == Case::SkippedLoop || test == Case::SkippedLoopDrained;
+    const bool skip_first = test == Case::FirstPassSkipsDs;
+    code.push_back(two_pass || skip_first ? 0xbefe0380u : 0xbefe0381u); // EXEC_LO = 0 or 1.
+    if (!two_pass && !skip_first) {
+      if (test == Case::PendingScalar)
+        code.insert(code.end(), {0xf4000100u, 0xfa000000u}); // s_load_dword s4, s[0:1], 0.
+      code.push_back(0xbe843c00u);                           // s_and_saveexec_b32 s4, s0.
+      if (test == Case::XorEmptyEdge || test == Case::XorClobber) {
+        code.push_back(0x8904047eu); // s_xor_b32 s4, exec_lo, s4.
+        code.push_back(test == Case::XorClobber ? 0xbf890002u : 0xbf890001u);
+      }
+      if (test == Case::Clobber || test == Case::XorClobber)
+        code.push_back(0xbe840380u); // s_mov_b32 s4, 0.
+      code.push_back(0x887e047eu);   // s_or_b32 exec_lo, exec_lo, s4.
+    }
+    const auto guard = code.size();
+    if (skip_first)
+      code.push_back(0); // s_cbranch_execz over the DS instruction on the first pass.
+    const auto producer = code.size() * sizeof(uint32_t);
+    code.insert(code.end(), {0xd9340800u, 0x00002b34u}); // ds_write_b64 v52, v[43:44].
+    code.push_back(test == Case::PartialWait ? 0xbf8cc17fu : 0xbf8cc07fu);
+    const auto repeat = code.size();
+    if (two_pass)
+      code.push_back(0); // Empty EXEC repeats the same DS PC after restoring EXEC.
+    if (test == Case::SkippedLoopDrained)
+      code.push_back(0xbfa3ff03u); // VM_VSRC(0) also retires the earlier skipped source.
+    const auto consumer = code.size() * sizeof(uint32_t);
+    code.push_back(two_pass || skip_first ? 0xbefe0380u : 0xbefe0381u);
+    code.push_back(0xbf810000u); // s_endpgm.
+    if (two_pass || skip_first) {
+      const auto restore = code.size();
+      code.push_back(0xbefe0381u); // s_mov_b32 exec_lo, 1.
+      const auto back = code.size();
+      code.push_back(0xbf820000u |
+                     (static_cast<uint32_t>(
+                          static_cast<int>(skip_first ? guard : producer / sizeof(uint32_t)) -
+                          static_cast<int>(back + 1)) &
+                      0xffffu));
+      const auto branch = skip_first ? guard : repeat;
+      code[branch] = 0xbf880000u | static_cast<uint32_t>(restore - branch - 1);
+    }
+    const auto image =
+        waitcheck_test::make_gfx_code_object(code, EF_AMDGPU_MACH_AMDGCN_GFX1010, true, false);
+    AmdGpuCodeObject object(image.data(), image.size());
+    const auto default_report = analyze_waitcnts(object, ROCJITSU_CODE_ARCH_RDNA1);
+    EXPECT_FALSE(default_report.supported);
+    const auto report = analyze_rdna1_waitcnts_for_qualification(object);
+    ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+    const bool source_warning = std::ranges::any_of(report.diagnostics, [&](const auto &diag) {
+      return diag.counter == WaitCounterKind::VmVsrc && diag.producer_section_offset == producer &&
+             diag.section_offset == consumer && diag.reg.cls == RegClass::EXEC;
+    });
+    EXPECT_EQ(source_warning, expect_source_warning) << diagnostic_summary(report);
+  }
+}
+
+WaitcheckReport analyze_rdna1_workgroup_id_x(const std::vector<uint32_t> &code) {
+  auto image = waitcheck_test::make_gfx_code_object(code, EF_AMDGPU_MACH_AMDGCN_GFX1010,
+                                                    /*wave32=*/true, /*allocation_alias=*/false);
+  Elf64_Ehdr header{};
+  std::memcpy(&header, image.data(), sizeof(header));
+  Elf64_Shdr rodata{};
+  std::memcpy(&rodata, image.data() + header.e_shoff + 2 * sizeof(rodata), sizeof(rodata));
+  const uint32_t group_segment_bytes = 256;
+  const uint32_t rsrc2 = 1u << 7; // Workgroup ID X arrives in s0.
+  std::memcpy(image.data() + rodata.sh_offset, &group_segment_bytes, sizeof(group_segment_bytes));
+  std::memcpy(image.data() + rodata.sh_offset + 52, &rsrc2, sizeof(rsrc2));
+  AmdGpuCodeObject object(image.data(), image.size());
+  return analyze_rdna1_waitcnts_for_qualification(object);
+}
+
+TEST(WaitcheckTest, Rdna1B32SaveexecFamilyPreservesOldExecForNativeDsDrain) {
+  for (const auto [saveexec, name] :
+       {std::pair{0xbe843c00u, "and"}, std::pair{0xbe843f00u, "andn2"},
+        std::pair{0xbe843d00u, "or"}, std::pair{0xbe843e00u, "xor"},
+        std::pair{0xbe844100u, "nand"}}) {
+    for (bool native_ds_wait : {false, true}) {
+      SCOPED_TRACE(name);
+      SCOPED_TRACE(native_ds_wait);
+      const std::vector<uint32_t> code{
+          0xbefe0381u, // s_mov_b32 exec_lo, 1.
+          saveexec,    // sX = old EXEC; the Boolean operation may then change EXEC.
+          0xbefe0304u, // s_mov_b32 exec_lo, s4 restores a nonzero mask.
+          0xd8340000u,
+          0u, // ds_write_b32 v0, v0.
+          native_ds_wait ? 0xbf8cc07fu : 0xbf800000u,
+          0xbefe0380u, // s_mov_b32 exec_lo, 0.
+          0xbf810000u, // s_endpgm.
+      };
+      const auto report = analyze_rdna1_workgroup_id_x(code);
+      ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+      const bool source_warning = std::ranges::any_of(report.diagnostics, [](const auto &diag) {
+        return diag.counter == WaitCounterKind::VmVsrc && diag.producer_section_offset == 12 &&
+               diag.section_offset == 24 && diag.reg.cls == RegClass::EXEC;
+      });
+      EXPECT_EQ(source_warning, !native_ds_wait) << diagnostic_summary(report);
+    }
+  }
+}
+
+TEST(WaitcheckTest, Rdna1XorSavedMaskDiesWhenExecChangesBeforeBranch) {
+  for (bool partial_wait : {false, true}) {
+    SCOPED_TRACE(partial_wait);
+    std::vector<uint32_t> code{
+        0xbefe0381u, // s_mov_b32 exec_lo, 1.
+        0xbe843c00u, // s_and_saveexec_b32 s4, s0; s4 = 1.
+        0xbefe0304u, // s_mov_b32 exec_lo, s4; exec = 1.
+        0x8904047eu, // s_xor_b32 s4, exec_lo, s4; s4 = 0.
+        0x877e007eu, // s_and_b32 exec_lo, exec_lo, s0 may empty EXEC.
+        0xbf880001u, // s_cbranch_execz over the next instruction.
+        partial_wait ? 0xbf800000u : 0xbf810000u,
+        0x887e047eu, // s_or_b32 exec_lo, exec_lo, s4; zero edge stays empty.
+        0xd8340000u,
+        0u, // ds_write_b32 v0, v0; skipped on the zero edge.
+    };
+    if (partial_wait)
+      code.insert(code.end(), {0xd8340000u, 0x00000101u}); // ds_write_b32 v1, v1.
+    code.push_back(partial_wait ? 0xbf8cc17fu : 0xbf8cc07fu);
+    const auto consumer = code.size() * sizeof(uint32_t);
+    code.push_back(0xbefe0381u); // s_mov_b32 exec_lo, 1.
+    code.push_back(0xbf810000u); // s_endpgm.
+    const auto report = analyze_rdna1_workgroup_id_x(code);
+    ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+    EXPECT_TRUE(std::ranges::any_of(report.diagnostics, [&](const auto &diag) {
+      return diag.counter == WaitCounterKind::VmVsrc && diag.producer_section_offset == 32 &&
+             diag.section_offset == consumer && diag.reg.cls == RegClass::EXEC;
+    })) << diagnostic_summary(report);
+  }
+}
+
+TEST(WaitcheckTest, Rdna1DispatchEntryBackedgeRetainsInitialUnsavedPath) {
+  for (bool explicit_source_wait : {false, true}) {
+    SCOPED_TRACE(explicit_source_wait);
+    const std::vector<uint32_t> code{
+        0xbefe0300u, // s_mov_b32 exec_lo, s0; workgroup zero skips the DS issue.
+        0xd8340000u,
+        0u, // ds_write_b32 v0, v0.
+        explicit_source_wait ? 0xbfa3ff03u : 0xbf8cc07fu,
+        0xbefe0381u, // s_mov_b32 exec_lo, 1; the skipped source is still pending.
+        0xbfa3ff03u, // Retire the source before the loop backedge.
+        0xbf068000u, // s_cmp_eq_u32 s0, 0.
+        0xbf840003u, // s_cbranch_scc0 exit.
+        0xbe803c80u, // s_and_saveexec_b32 s0, 0; save full EXEC for the second pass.
+        0xbf82fff6u, // s_branch entry.
+        0xbf800000u, // s_nop 0.
+        0xbf810000u, // exit: s_endpgm.
+    };
+    const auto report = analyze_rdna1_workgroup_id_x(code);
+    ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+    const bool source_warning = std::ranges::any_of(report.diagnostics, [](const auto &diag) {
+      return diag.counter == WaitCounterKind::VmVsrc && diag.producer_section_offset == 4 &&
+             diag.section_offset == 16 && diag.reg.cls == RegClass::EXEC;
+    });
+    EXPECT_EQ(source_warning, !explicit_source_wait) << diagnostic_summary(report);
+  }
+}
+
+TEST(WaitcheckTest, Rdna1XorSavedMaskPromotesOnlyOnEmptyExecEdge) {
+  const std::vector<uint32_t> code{
+      0xbefe0381u,              // s_mov_b32 exec_lo, 1.
+      0xbe843c00u,              // s_and_saveexec_b32 s4, s0.
+      0x8904047eu,              // s_xor_b32 s4, exec_lo, s4.
+      0xbf880005u,              // s_cbranch_execz exit; fallthrough has s4 = 0.
+      0xbefe0304u,              // s_mov_b32 exec_lo, s4.
+      0xd9340000u, 0x00000302u, // ds_write_b64 v2, v[3:4] with empty EXEC.
+      0xbf8cc07fu,              // s_waitcnt lgkmcnt(0) cannot retire the skipped source.
+      0xbefe0381u,              // s_mov_b32 exec_lo, 1.
+      0xbf810000u,              // exit: s_endpgm.
+  };
+  const auto report = analyze_rdna1_workgroup_id_x(code);
+  ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+  EXPECT_TRUE(std::ranges::any_of(report.diagnostics, [](const auto &diag) {
+    return diag.counter == WaitCounterKind::VmVsrc && diag.producer_section_offset == 20 &&
+           diag.section_offset == 32 && diag.reg.cls == RegClass::EXEC;
+  })) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Rdna1VccSavedMaskRestoreProvesNativeDsDrain) {
+  for (bool native_ds_wait : {false, true}) {
+    SCOPED_TRACE(native_ds_wait);
+    const std::vector<uint32_t> code{
+        0xbefe0381u, // s_mov_b32 exec_lo, 1.
+        0xbeea3c00u, // s_and_saveexec_b32 vcc_lo, s0.
+        0xbefe036au, // s_mov_b32 exec_lo, vcc_lo restores a nonzero mask.
+        0xd8340000u,
+        0u, // ds_write_b32 v0, v0.
+        native_ds_wait ? 0xbf8cc07fu : 0xbf800000u,
+        0xbefe0380u, // s_mov_b32 exec_lo, 0.
+        0xbf810000u, // s_endpgm.
+    };
+    const auto report = analyze_rdna1_workgroup_id_x(code);
+    ASSERT_TRUE(report.supported && report.complete) << report.analysis_error;
+    const bool source_warning = std::ranges::any_of(report.diagnostics, [](const auto &diag) {
+      return diag.counter == WaitCounterKind::VmVsrc && diag.producer_section_offset == 12 &&
+             diag.section_offset == 24 && diag.reg.cls == RegClass::EXEC;
+    });
+    EXPECT_EQ(source_warning, !native_ds_wait) << diagnostic_summary(report);
+  }
+}
+
 TEST(WaitcheckTest, Gfx1250FlatResultNeedsAVmemRouteToOrderTranslation) {
   // The returning dword overlaps the older load's address. Unknown FLAT may
   // return through LDS; a lane-private scratch dword uses VMEM instead.

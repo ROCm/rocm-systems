@@ -54,6 +54,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -306,6 +307,8 @@ struct PendingState {
   bool expert_valu_may_skip = false;
   bool expert_exec_nonzero = false;
   std::bitset<amdgpu::kVccSelectorLast + 1> expert_saved_nonzero_exec;
+  // An XOR of EXEC with a saved nonzero mask recovers that mask on an EXEC=0 edge.
+  std::bitset<amdgpu::kVccSelectorLast + 1> saved_nonzero_if_exec_empty;
   bool exec_empty = false; ///< Every incoming path has a proven zero EXEC mask.
   bool exec_nonzero = false; ///< All incoming paths have at least one active lane.
   bool vgpr_msb_setreg_hazard = false;
@@ -338,6 +341,7 @@ struct WaitcheckStateOps : WaitcheckTarget {
   track_issue_units(PendingState &state, const Instruction &inst, const ClassifiedEvent &event,
                     const RegisterSet &defs, rj_code_arch_t arch, uint32_t wave_size);
   [[nodiscard]] static bool preserves_exec_lanes(const Instruction &inst);
+  [[nodiscard]] static bool saves_old_exec_b32(std::string_view mnemonic);
   [[nodiscard]] static bool vm_source_results_allocated(const Instruction &inst,
                                                         rj_code_arch_t arch,
                                                         const VgprMsbState &banks,

@@ -271,6 +271,14 @@ waitcheck_kernels_exact(const AmdGpuCodeObject &code_object);
 [[nodiscard]] WaitcheckReport analyze_waitcnts(const CodeObject &code_object, rj_code_arch_t arch,
                                                WaitcheckOptions options = {});
 
+/// @brief Analyze RDNA1 code objects for internal regression and corpus qualification.
+///
+/// @details Ordinary waitcheck target selection remains unchanged. This entry
+/// point is limited to explicit qualification of finalized RDNA1 code objects.
+[[nodiscard]] WaitcheckReport
+analyze_rdna1_waitcnts_for_qualification(const CodeObject &code_object,
+                                         WaitcheckOptions options = {});
+
 /// @brief Analyze all merged entry/wave groups at @p kernel_entry_offset.
 ///
 /// @details waitcheck_kernels() merges same-wave descriptors at one entry and

@@ -554,6 +554,7 @@ struct Analyzer : private WaitcheckStateOps {
     if (blocks.empty())
       return;
     wavefront_size_ = wavefront_size;
+    rdna1_saved_exec_enabled_ = false;
     path_wait_facts_.clear();
     private_flat_addresses_.clear();
     rdna3_flat_result_counters_.clear();
@@ -700,6 +701,8 @@ struct Analyzer : private WaitcheckStateOps {
           private_proof_roots_.insert(call.callee);
       }
     }
+    std::vector<size_t> root_nodes;
+    root_nodes.reserve(root_blocks.size());
     for (size_t i : root_blocks) {
       std::vector<CallFrame> root_stack;
       if (non_entry_function && !entry_offsets.empty() &&
@@ -715,6 +718,7 @@ struct Analyzer : private WaitcheckStateOps {
         set_call_context_limit_error();
         return;
       }
+      root_nodes.push_back(*root);
       if (tracks_gfx12_sgpr_hazards(arch) && (entry_offsets.empty() || non_entry_function))
         conservative_sgpr_entries[*root] = 1;
     }
@@ -997,6 +1001,9 @@ struct Analyzer : private WaitcheckStateOps {
       for (size_t to : cfg_successors[from])
         cfg_predecessors[to].push_back(from);
     }
+    std::vector<uint8_t> is_root_node(analysis_blocks.size());
+    for (size_t root : root_nodes)
+      is_root_node[root] = 1;
 
     // Dynamic allocation may release even the lowest VGPR block. Without a
     // closed entry graph and a fixed allocation, a returning VMEM can use effective EXEC=0.
@@ -1007,6 +1014,8 @@ struct Analyzer : private WaitcheckStateOps {
              return inst.mnemonic() == "s_alloc_vgpr";
            });
          }));
+    rdna1_saved_exec_enabled_ =
+        arch == ROCJITSU_CODE_ARCH_RDNA1 && wavefront_size == 32 && !missing_successor;
     // A mode switch on any reachable path can remove the arbiter stall while
     // a preceding WMMA is outstanding. Do not infer completion from younger
     // core VALUs for any WMMA in such a kernel.
@@ -1019,26 +1028,33 @@ struct Analyzer : private WaitcheckStateOps {
 
     // On a guarded edge the instruction itself tests EXEC. No scalar register
     // or pending operand can substitute for that test at a CFG merge.
+    const bool track_saved_exec =
+        amdgpu::supports_expert_scheduling(arch) || rdna1_saved_exec_enabled_;
+    const auto exec_edge_nonzero = [&](size_t predecessor, uint64_t dest) -> std::optional<bool> {
+      const auto *pred = analysis_blocks[predecessor];
+      const auto *branch = pred->terminator();
+      if (!branch ||
+          (branch->mnemonic() != "s_cbranch_execz" && branch->mnemonic() != "s_cbranch_execnz"))
+        return std::nullopt;
+      const auto delta = branch->branch_offset_bytes();
+      if (!delta || *delta == 0)
+        return std::nullopt;
+      const auto taken = pred->end_offset() + *delta;
+      const auto fallthrough = pred->end_offset();
+      if (dest != taken && dest != fallthrough)
+        return std::nullopt;
+      return branch->mnemonic() == "s_cbranch_execz" ? dest == fallthrough : dest == taken;
+    };
     std::vector<bool> expert_entry_nonzero(analysis_blocks.size());
-    if (amdgpu::supports_expert_scheduling(arch) && !missing_successor) {
+    if (track_saved_exec && !missing_successor) {
       for (size_t i = 1; i < analysis_blocks.size(); ++i) {
+        if (rdna1_saved_exec_enabled_ && is_root_node[i])
+          continue;
         const auto dest = analysis_blocks[i]->start_offset();
-        const auto nonempty_edge = [&](size_t predecessor) {
-          const auto *pred = analysis_blocks[predecessor];
-          const auto *branch = pred->terminator();
-          if (!branch ||
-              (branch->mnemonic() != "s_cbranch_execz" && branch->mnemonic() != "s_cbranch_execnz"))
-            return false;
-          const auto delta = branch->branch_offset_bytes();
-          if (!delta || *delta == 0)
-            return false;
-          const auto nonempty = branch->mnemonic() == "s_cbranch_execz"
-                                    ? pred->end_offset()
-                                    : pred->end_offset() + *delta;
-          return dest == nonempty;
-        };
         const auto &preds = cfg_predecessors[i];
-        expert_entry_nonzero[i] = !preds.empty() && std::ranges::all_of(preds, nonempty_edge);
+        expert_entry_nonzero[i] = !preds.empty() && std::ranges::all_of(preds, [&](size_t pred) {
+          return exec_edge_nonzero(pred, dest) == true;
+        });
       }
     }
     std::vector<PendingState> in(analysis_blocks.size());
@@ -1093,7 +1109,8 @@ struct Analyzer : private WaitcheckStateOps {
       if (lhs.expert_valu_may_skip != rhs.expert_valu_may_skip)
         append("expert-valu-may-skip");
       if (lhs.expert_exec_nonzero != rhs.expert_exec_nonzero ||
-          lhs.expert_saved_nonzero_exec != rhs.expert_saved_nonzero_exec)
+          lhs.expert_saved_nonzero_exec != rhs.expert_saved_nonzero_exec ||
+          lhs.saved_nonzero_if_exec_empty != rhs.saved_nonzero_if_exec_empty)
         append("expert-saved-mask");
       if (lhs.exec_empty != rhs.exec_empty)
         append("exec-empty");
@@ -1123,15 +1140,51 @@ struct Analyzer : private WaitcheckStateOps {
       // ordering facts cannot disappear as earlier states circulate in a loop.
       // An unvisited input is bottom, not an initialized empty state.
       PendingState merged = merge_predecessors(cfg_predecessors[i], out, out_initialized).value();
-      if (flat_issues_both_counters(arch) && i == 0 && current_kernel_ &&
-          cfg_predecessors[i].empty()) {
+      const bool rdna1_root = rdna1_saved_exec_enabled_ && is_root_node[i];
+      if (rdna1_root) {
+        // A backedge to the entry cannot replace the initial dispatch path.
+        // In particular, it cannot supply a saved EXEC mask before dispatch.
+        PendingState dispatch;
+        if (current_kernel_) {
+          dispatch.exec_nonzero = true;
+          dispatch.expert_exec_nonzero = true;
+        }
+        const bool has_initialized_predecessor = std::ranges::any_of(
+            cfg_predecessors[i], [&](size_t pred) { return out_initialized[pred] != 0; });
+        if (has_initialized_predecessor)
+          merge_into(merged, dispatch);
+        else
+          merged = std::move(dispatch);
+      } else if (flat_issues_both_counters(arch) && i == 0 && current_kernel_ &&
+                 cfg_predecessors[i].empty()) {
         merged.exec_nonzero = true;
-        merged.expert_exec_nonzero = amdgpu::supports_expert_scheduling(arch);
+        merged.expert_exec_nonzero = track_saved_exec;
       }
       if (out_initialized[i])
         merge_into(merged, in[i]);
+      if (rdna1_saved_exec_enabled_ && !rdna1_root) {
+        bool have_predecessor = false;
+        std::bitset<amdgpu::kVccSelectorLast + 1> saved_on_edges;
+        for (size_t pred : cfg_predecessors[i]) {
+          if (!out_initialized[pred])
+            continue;
+          auto saved = out[pred].expert_saved_nonzero_exec;
+          if (exec_edge_nonzero(pred, analysis_blocks[i]->start_offset()) == false)
+            saved |= out[pred].saved_nonzero_if_exec_empty;
+          if (!have_predecessor) {
+            saved_on_edges = saved;
+            have_predecessor = true;
+          } else {
+            saved_on_edges &= saved;
+          }
+        }
+        if (have_predecessor)
+          merged.expert_saved_nonzero_exec |= saved_on_edges;
+      }
       if (expert_entry_nonzero[i]) {
         merged.expert_exec_nonzero = true;
+        if (rdna1_saved_exec_enabled_)
+          merged.exec_nonzero = true;
         merged.expert_exec_empty = false;
         merged.expert_valu_may_skip = false;
         merged.exec_empty = false;
@@ -6800,6 +6853,8 @@ private:
     bool vcc_is_exec = false;
     bool vcc_subset_exec = false;
     bool scc_is_exec = false;
+    std::bitset<128> saved_nonzero_exec;
+    std::bitset<128> saved_nonzero_if_exec_empty;
     Wave32Lanes exec_lanes{};
     Wave32Lanes issue_lanes{};
     uint64_t scalar_pending_counters = 0;
@@ -6849,11 +6904,83 @@ private:
 
   static void update_path_masks(PathMasks &masks, const CfgInstructionView &view,
                                 const ScalarConstraints &facts, uint32_t wave_size,
-                                bool track_exec_source, bool writes_only_sgpr) {
+                                bool track_exec_source, bool writes_only_sgpr,
+                                bool track_rdna1_saved_exec, std::span<const uint16_t> scalar_defs,
+                                uint32_t allocated_sgprs) {
     const Instruction &inst = *view.instruction;
+    const auto name = inst.mnemonic();
+    const auto old_exec = masks.exec;
+    bool restored_nonzero = false;
+    bool xor_saved_nonzero = false;
+    std::optional<uint16_t> saved_destination;
+    if (track_rdna1_saved_exec) {
+      const auto *dst = inst.dst_operand(0);
+      const auto dst_reg = dst ? dst->to_register_ref() : std::nullopt;
+      const auto *src0 = inst.src_operand(0);
+      const auto *src1 = inst.src_operand(1);
+      if (dst_reg && dst_reg->cls == RegClass::SGPR && dst_reg->width == 1 &&
+          dst_reg->index < masks.saved_nonzero_exec.size()) {
+        const bool saved = masks.saved_nonzero_exec.test(dst_reg->index);
+        if (saves_old_exec_b32(name) && old_exec == true && dst_reg->index < allocated_sgprs &&
+            !masks.scalar_pending_unknown && !masks.scalar_pending_exec &&
+            !masks.scalar_pending_sgprs.contains(dst_reg->index))
+          saved_destination = dst_reg->index;
+        if (name == "s_xor_b32" && saved && src0 && src1 &&
+            ((src0->to_register_ref() == dst_reg &&
+              low_selector(src1, amdgpu::kExecSelectorFirst)) ||
+             (src1->to_register_ref() == dst_reg &&
+              low_selector(src0, amdgpu::kExecSelectorFirst))))
+          xor_saved_nonzero = true;
+      }
+      if ((name == "s_mov_b32" || (name == "s_or_b32" && preserves_exec_lanes(inst))) &&
+          low_selector(dst, amdgpu::kExecSelectorFirst)) {
+        for (int i = 0; i < inst.num_src_operands(); ++i) {
+          const auto *source = inst.src_operand(i);
+          const auto reg = source ? source->to_register_ref() : std::nullopt;
+          restored_nonzero |= reg && reg->cls == RegClass::SGPR && reg->width == 1 &&
+                              reg->index < masks.saved_nonzero_exec.size() &&
+                              masks.saved_nonzero_exec.test(reg->index) &&
+                              !path_operand_has_pending_scalar_result(source, masks);
+        }
+      }
+      restored_nonzero |= old_exec == true && preserves_exec_lanes(inst);
+      const bool unknown_transfer = name.starts_with("s_call") || name.starts_with("s_swappc") ||
+                                    name.starts_with("s_movrel") || name.starts_with("s_setpc") ||
+                                    name.starts_with("s_set_pc") || name.starts_with("s_rfe");
+      if (unknown_transfer || view.scalar_result_dest_unknown || view.scalar_result_dest_exec) {
+        masks.saved_nonzero_exec.reset();
+        masks.saved_nonzero_if_exec_empty.reset();
+        restored_nonzero = false;
+        xor_saved_nonzero = false;
+        saved_destination.reset();
+      } else {
+        for (uint16_t reg : scalar_defs) {
+          if (reg < masks.saved_nonzero_exec.size()) {
+            masks.saved_nonzero_exec.reset(reg);
+            masks.saved_nonzero_if_exec_empty.reset(reg);
+          }
+        }
+        for (uint16_t reg : view.scalar_result_dest_sgprs) {
+          if (reg < masks.saved_nonzero_exec.size()) {
+            masks.saved_nonzero_exec.reset(reg);
+            masks.saved_nonzero_if_exec_empty.reset(reg);
+          }
+        }
+        if (view.invalidates_exec && !writes_only_sgpr)
+          masks.saved_nonzero_if_exec_empty.reset();
+        if (saved_destination)
+          masks.saved_nonzero_exec.set(*saved_destination);
+        if (xor_saved_nonzero && dst_reg)
+          masks.saved_nonzero_if_exec_empty.set(dst_reg->index);
+      }
+    }
     // A summarized call may change every mask and scalar that describes it.
-    if ((inst.flags() & INDIRECT_CALL ||
-         (track_exec_source && inst.mnemonic().starts_with("s_call"))) &&
+    const bool rdna1_unknown_transfer =
+        track_rdna1_saved_exec && (name.starts_with("s_call") || name.starts_with("s_swappc") ||
+                                   name.starts_with("s_setpc") || name.starts_with("s_set_pc") ||
+                                   name.starts_with("s_rfe") || name.starts_with("s_movrel"));
+    if ((inst.flags() & INDIRECT_CALL || (track_exec_source && name.starts_with("s_call")) ||
+         rdna1_unknown_transfer) &&
         !(track_exec_source && view.enters_resolved_callee)) {
       masks = {};
       masks.scalar_pending_counters = UINT64_MAX;
@@ -6952,6 +7079,9 @@ private:
     if (view.invalidates_exec && !writes_only_sgpr) {
       masks.exec.reset();
       masks.exec_lanes = {};
+      if (track_rdna1_saved_exec && restored_nonzero && !masks.scalar_pending_exec &&
+          !masks.scalar_pending_unknown)
+        masks.exec = true;
       if (!masks.scalar_pending_exec && !masks.scalar_pending_unknown &&
           low_selector(dst, amdgpu::kExecSelectorFirst)) {
         if (inst.mnemonic() == "s_mov_b64") {
@@ -7508,6 +7638,17 @@ private:
           key.push_back(state.masks.scalar_pending_vcc ? '1' : '0');
           key.push_back(state.masks.scalar_pending_scc ? '1' : '0');
           key.push_back(state.masks.scalar_pending_unknown ? '1' : '0');
+          if (track_gfx10_ds_completion) {
+            for (const auto *facts :
+                 {&state.masks.saved_nonzero_exec, &state.masks.saved_nonzero_if_exec_empty}) {
+              for (unsigned base = 0; base < facts->size(); base += 8) {
+                unsigned byte = 0;
+                for (unsigned bit = 0; bit < 8; ++bit)
+                  byte |= unsigned(facts->test(base + bit)) << bit;
+                key.push_back(static_cast<char>(byte));
+              }
+            }
+          }
           if (track_exec_source) {
             state.masks.exec_lanes.append_key(key, 'e');
             if (lane_operand && state.masks.exec_lanes.exact)
@@ -7598,6 +7739,16 @@ private:
         }
       }
       const Instruction &inst = *inst_view.instruction;
+      const auto path_name = inst.mnemonic();
+      const bool rdna1_unknown_path_transfer =
+          track_gfx10_ds_completion && rdna1_saved_exec_enabled_ &&
+          (path_name.starts_with("s_call") || path_name.starts_with("s_swappc") ||
+           path_name.starts_with("s_setpc") || path_name.starts_with("s_set_pc") ||
+           path_name.starts_with("s_rfe") || path_name.starts_with("s_movrel"));
+      const bool unknown_path_transfer =
+          (inst.flags() & INDIRECT_CALL || (track_exec_source && path_name.starts_with("s_call")) ||
+           rdna1_unknown_path_transfer) &&
+          !(track_exec_source && inst_view.enters_resolved_callee);
       if (inst.is_vskip_affected() && inst_view.vector_skip != false) {
         if (!inst_view.vector_skip.has_value())
           return feasible_path_cache_[cache_key] = std::nullopt;
@@ -7707,6 +7858,8 @@ private:
           (!expert || state.progress.expert_enabled)) {
         // A masked issue with empty EXEC cannot replace the original result.
         if (!no_result) {
+          const bool older_gfx10_source_active = state.progress.gfx10_ds_source_active;
+          const bool older_gfx10_source_pending = state.pending;
           if (track_exec_source) {
             if (state.pending)
               state.masks.issue_lanes.include(state.masks.exec_lanes);
@@ -7718,7 +7871,8 @@ private:
           state.progress.saved_source_exec.reset();
           state.progress.younger_source_primaries = 0;
           state.progress.gfx10_younger_ds = 0;
-          state.progress.gfx10_ds_source_active = native_ds_issues != 0;
+          state.progress.gfx10_ds_source_active =
+              native_ds_issues != 0 && (!older_gfx10_source_pending || older_gfx10_source_active);
           // The live physical source implies its original mask had a lane.
           // This evidence applies only to the pending event, never to a CFG edge.
           state.progress.source_implies_nonempty_exec =
@@ -7852,21 +8006,21 @@ private:
       uint64_t pending_scc_write_counters = state.masks.pending_scc_write_counters;
       pending_scc_write_counters &= ~inst_view.zero_wait_counters;
       pending_scc_write_counters |= inst_view.issued_scc_write_counters;
-      if ((inst.flags() & INDIRECT_CALL ||
-           (track_exec_source && inst.mnemonic().starts_with("s_call"))) &&
-          !(track_exec_source && inst_view.enters_resolved_callee))
+      if (unknown_path_transfer)
         pending_scc_write_counters = UINT64_MAX;
       if (track_masks) {
         const auto previous_masks = state.masks;
-        update_path_masks(state.masks, inst_view, state.constraints, wavefront_size_,
-                          track_exec_source, scratch_sgpr_write);
+        update_path_masks(
+            state.masks, inst_view, state.constraints, wavefront_size_, track_exec_source,
+            scratch_sgpr_write, track_gfx10_ds_completion && rdna1_saved_exec_enabled_,
+            path_scalar_defs_.at(&inst),
+            current_kernel_ && current_kernel_->min_sgprs ? current_kernel_->min_sgprs
+                                                          : amdgpu::kVccSelectorFirst);
         if (expert && block_view.repeated_exec_filter_arm && state.inst_index < 2)
           state.masks.exec = previous_masks.exec;
         if (state.masks != previous_masks)
           state.constraint_id.reset();
-        if ((inst.flags() & INDIRECT_CALL ||
-             (track_exec_source && inst.mnemonic().starts_with("s_call"))) &&
-            !(track_exec_source && inst_view.enters_resolved_callee)) {
+        if (unknown_path_transfer) {
           state.constraints.clear();
           state.scc_predicate.reset();
           state.constraint_id.reset();
@@ -7963,6 +8117,9 @@ private:
                   continue;
                 auto &mask = *branch == RegClass::EXEC ? successor.masks.exec : successor.masks.vcc;
                 mask = pending_write ? std::optional<bool>{} : std::optional<bool>{edge_nonempty};
+                if (!pending_write && !edge_nonempty && *branch == RegClass::EXEC &&
+                    track_gfx10_ds_completion && rdna1_saved_exec_enabled_)
+                  successor.masks.saved_nonzero_exec |= successor.masks.saved_nonzero_if_exec_empty;
                 if (!pending_write && *branch == RegClass::VCC) {
                   if (successor.masks.vcc_is_exec)
                     successor.masks.exec = edge_nonempty;
@@ -10754,10 +10911,21 @@ private:
 
   static void materialize_event(std::vector<PendingEvent> &pending, PendingEvent event) {
     auto position = std::ranges::lower_bound(pending, event, event_identity_less);
-    if (position != pending.end() && same_event_identity(*position, event))
+    if (position != pending.end() && same_event_identity(*position, event)) {
+      if (event.kind == WaitEventKind::Gfx10ScalarSource) {
+        // Reissuing a DS instruction at the same PC cannot make an older
+        // skipped-EXEC source acquire a native-DS completion position.
+        event.implies_active_exec &= position->implies_active_exec;
+        event.present_on_all_paths &= position->present_on_all_paths;
+        event.min_younger = std::min(event.min_younger, position->min_younger);
+        event.min_younger_primary =
+            std::min(event.min_younger_primary, position->min_younger_primary);
+        event.younger_source_primaries &= position->younger_source_primaries;
+      }
       *position = std::move(event);
-    else
+    } else {
       pending.insert(position, std::move(event));
+    }
   }
 
   void analyze_instruction(PendingState &state, const Instruction &inst,
@@ -10943,9 +11111,51 @@ private:
     update_scalar_offsets(state, inst, du, arch);
     const bool writes_exec = writes_exec_mask(inst) || du.defs.contains({RegClass::EXEC, 0, 1}) ||
                              (inst.flags() & INDIRECT_CALL);
+    const bool rdna1_wave32 = rdna1_saved_exec_enabled_;
+    std::optional<unsigned> saved_xor;
+    if (rdna1_wave32 && inst.mnemonic() == "s_xor_b32") {
+      const auto *dst_operand = inst.dst_operand(0);
+      const auto *src0 = inst.src_operand(0);
+      const auto *src1 = inst.src_operand(1);
+      const auto dst = dst_operand ? dst_operand->to_register_ref() : std::nullopt;
+      if (dst && dst->cls == RegClass::SGPR && dst->width == 1 && src0 && src1 &&
+          dst->index < state.expert_saved_nonzero_exec.size() &&
+          state.expert_saved_nonzero_exec.test(dst->index) &&
+          ((src0->to_register_ref() == dst && src1->has_register_selector() &&
+            src1->encoding_value() == amdgpu::kExecSelectorFirst) ||
+           (src1->to_register_ref() == dst && src0->has_register_selector() &&
+            src0->encoding_value() == amdgpu::kExecSelectorFirst)))
+        saved_xor = dst->index;
+    }
+    if (rdna1_wave32) {
+      auto &conditional = state.saved_nonzero_if_exec_empty;
+      const auto name = inst.mnemonic();
+      const bool unknown_transfer = name.starts_with("s_call") || name.starts_with("s_swappc") ||
+                                    name.starts_with("s_movrel") || name.starts_with("s_setpc") ||
+                                    name.starts_with("s_set_pc") || name.starts_with("s_rfe");
+      if (writes_exec || unknown_transfer) {
+        conditional.reset();
+      } else {
+        du.defs.for_each([&](RegisterRef reg) {
+          if (reg.cls == RegClass::SGPR)
+            for (unsigned i = reg.index; i < reg.index + reg.width && i < conditional.size(); ++i)
+              conditional.reset(i);
+        });
+      }
+      if (saved_xor)
+        conditional.set(*saved_xor);
+      if (unknown_transfer) {
+        state.expert_saved_nonzero_exec.reset();
+        state.expert_exec_nonzero = false;
+        state.expert_exec_empty = false;
+        state.expert_valu_may_skip = true;
+        state.exec_nonzero = false;
+        state.exec_empty = false;
+      }
+    }
     if (writes_exec)
       state.exec_empty = constant_exec_nonzero(inst, wavefront_size_) == false;
-    if (amdgpu::supports_expert_scheduling(arch) &&
+    if ((amdgpu::supports_expert_scheduling(arch) || rdna1_wave32) &&
         (writes_exec || state.expert_saved_nonzero_exec.any() ||
          (state.expert_exec_nonzero && inst.mnemonic() == "s_mov_b32")))
       update_expert_valu_mask(state, inst, du.defs, wavefront_size_,
@@ -10957,7 +11167,8 @@ private:
       if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5)
         for (auto &pending : state.pending[counter_index(WaitCounterKind::Ds)])
           pending.implies_active_exec = false;
-      state.exec_nonzero = constant_exec_nonzero(inst, 32) == true;
+      state.exec_nonzero =
+          constant_exec_nonzero(inst, 32) == true || (rdna1_wave32 && state.expert_exec_nonzero);
       if (amdgpu::supports_expert_scheduling(arch)) {
         const bool preserves = preserves_exec_lanes(inst);
         for (auto &source : state.pending[counter_index(WaitCounterKind::VmVsrc)]) {
@@ -11014,6 +11225,7 @@ private:
   std::span<const uint8_t> image_;
   std::optional<std::map<std::string, uint32_t>> metadata_sizes_;
   bool cfg_has_unknown_successor_ = false;
+  bool rdna1_saved_exec_enabled_ = false;
   std::unordered_map<const Instruction *, std::vector<uint16_t>> path_scalar_defs_;
   std::unordered_map<const Instruction *, MaskedSccPredicate> masked_predicates_;
   std::optional<MaskedSccPredicate> repeated_masked_predicate_;
@@ -11189,10 +11401,11 @@ namespace {
 WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_t arch,
                                     std::optional<uint64_t> selected_kernel_entry,
                                     std::span<const WaitcheckKernelInfo> known_kernels,
-                                    bool kernels_known, WaitcheckOptions options) {
+                                    bool kernels_known, WaitcheckOptions options,
+                                    bool admit_rdna1 = false) {
   WaitcheckReport report;
   report.arch = arch;
-  if (!is_supported_waitcheck_arch(arch)) {
+  if (!is_supported_waitcheck_arch(arch) && !(admit_rdna1 && arch == ROCJITSU_CODE_ARCH_RDNA1)) {
     report.supported = false;
     report.analysis_error = "unsupported architecture";
     return report;
@@ -11420,6 +11633,12 @@ WaitcheckReport analyze_code_object(const CodeObject &code_object, rj_code_arch_
 WaitcheckReport analyze_waitcnts(const CodeObject &code_object, rj_code_arch_t arch,
                                  WaitcheckOptions options) {
   return analyze_code_object(code_object, arch, std::nullopt, {}, false, options);
+}
+
+WaitcheckReport analyze_rdna1_waitcnts_for_qualification(const CodeObject &code_object,
+                                                         WaitcheckOptions options) {
+  return analyze_code_object(code_object, ROCJITSU_CODE_ARCH_RDNA1, std::nullopt, {}, false,
+                             options, true);
 }
 
 WaitcheckReport analyze_waitcnts_for_kernel(const CodeObject &code_object, rj_code_arch_t arch,
