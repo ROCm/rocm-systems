@@ -4,8 +4,8 @@
 //! Translation between HSA image contracts and GPU resource descriptors.
 
 use crate::ffi::{
-    HsaExtImageDataInfo, HsaExtImageDescriptor, HsaExtImageFormat, IMAGE_FORMAT_UNSUPPORTED,
-    IMAGE_PITCH_UNSUPPORTED, IMAGE_SIZE_UNSUPPORTED, Status,
+    HsaExtImageDataInfo, HsaExtImageDescriptor, HsaExtImageDescriptorV2, HsaExtImageFormat,
+    IMAGE_FORMAT_UNSUPPORTED, IMAGE_PITCH_UNSUPPORTED, IMAGE_SIZE_UNSUPPORTED, Status,
 };
 use rocaddr3::SurfaceLayout;
 use rocddi::device::gpu::image::{
@@ -25,7 +25,7 @@ fn map_image_error(error: ImageError) -> Status {
     }
 }
 
-/// Converts an HSA image descriptor to a validated GFX12 surface description.
+/// Converts an HSA image descriptor to a validated GPU surface description.
 fn description(desc: HsaExtImageDescriptor) -> Result<Description, Status> {
     let (geometry, height, slices) = match desc.geometry {
         0 if desc.height == 0 && desc.depth == 0 && desc.array_size == 0 => {
@@ -56,7 +56,7 @@ fn description(desc: HsaExtImageDescriptor) -> Result<Description, Status> {
     })
 }
 
-/// Checks whether the image geometry is supported by the GFX12 backend.
+/// Checks whether the image geometry is supported by the GPU backend.
 pub(crate) fn supported_geometry(geometry: u32) -> bool {
     matches!(geometry, 0..=7)
 }
@@ -216,6 +216,20 @@ pub(crate) fn mip_level_view(
     hardware::mip_level_view_for(generation, words, level, format)
         .map(|words| hsa_metadata(words, desc))
         .map_err(map_image_error)
+}
+
+impl From<HsaExtImageDescriptorV2> for HsaExtImageDescriptor {
+    /// Copies the common descriptor fields while omitting the mip count.
+    fn from(value: HsaExtImageDescriptorV2) -> Self {
+        Self {
+            geometry: value.geometry,
+            width: value.width,
+            height: value.height,
+            depth: value.depth,
+            array_size: value.array_size,
+            format: value.format,
+        }
+    }
 }
 
 #[cfg(test)]

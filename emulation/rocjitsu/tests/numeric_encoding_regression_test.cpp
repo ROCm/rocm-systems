@@ -1018,5 +1018,166 @@ TEST_P(Rdna2NumericEncoding, DirectLdsBroadcastUsesM0TypeAndWaveAllocation) {
   check({0x7e0802fe, 0}, 0);
 }
 
+TEST_P(Cdna2VectorRegression, HalfMadGuestModesAndMaskedWrites) {
+  constexpr uint16_t expected[] = {0x3c00, 0x3c01, 0x3c00, 0x3c00};
+  wave_->set_exec(1ULL | (1ULL << 63));
+  for (uint32_t round = 0; round < 4; ++round) {
+    // Preserve-denormal MODE does not override CDNA2 MAD's forced intermediate flush.
+    wave_->set_mode_raw(0xf0 | (round << 2));
+    wave_->set_trapsts(0x80000000);
+    put(0, 0x3c00);
+    put(1, 0x3c00);
+    put(2, 0x1000);
+    check(vop3(515), expected[round], 0);
+    EXPECT_EQ(wave_->trapsts(), 0x80000000U);
+  }
+  wave_->set_mode_raw(0xf0);
+  put(0, 1);
+  put(1, 0x3c00);
+  put(2, 0);
+  check(vop3(515), 0, 0);
+}
+
+// Exercise the migrated fused forms; gfx90a MAD/MAC deliberately stays separate.
+class OlderHalfFma : public NumericEncodingRegression {};
+
+INSTANTIATE_TEST_SUITE_P(
+    OlderProfiles, OlderHalfFma,
+    testing::Combine(testing::Values(ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
+                                     ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2,
+                                     ROCJITSU_CODE_ARCH_RDNA3_5),
+                     testing::Bool()));
+
+TEST_P(OlderHalfFma, FusedFormsGuestRoundingAndHalfWrites) {
+  const auto arch = std::get<0>(GetParam());
+  const bool cdna = arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2;
+  const bool gfx1150 = arch == ROCJITSU_CODE_ARCH_RDNA3_5;
+  const uint32_t prefix = cdna ? 0xd0000000U : 0xd4000000U;
+  // VOP3 opcodes differ; VOP2 FMAC/FMA literal encodings agree across these Radeon profiles.
+  const uint32_t fma_opcode = cdna ? 518 : gfx1150 ? 584 : 843;
+  struct Form {
+    std::array<uint32_t, 2> words;
+    uint32_t b = 0x3c00, initial = 0xdeadbeef;
+    bool clears_high = false;
+  };
+  const auto vop3_form = [&](uint32_t opcode, bool accumulate, bool clears_high) {
+    return Form{{prefix | (opcode << 16) | 4, 256U | (257U << 9) | (accumulate ? 0 : 258U << 18)},
+                0x3c00,
+                accumulate ? 0xdead0001U : 0xdeadbeefU,
+                clears_high};
+  };
+  std::vector<Form> forms = {vop3_form(fma_opcode, false, false)};
+  if (cdna) {
+    forms.push_back(vop3_form(494, false, true)); // FMA_LEGACY_F16
+    if (arch == ROCJITSU_CODE_ARCH_CDNA1) {
+      forms.push_back(vop3_form(291, true, true)); // Fused MAC_F16 VOP3, unlike gfx90a.
+      forms.push_back(
+          {{(35U << 25) | (4U << 17) | (1U << 9) | 256U, 0}, 0x3c00, 0xdead0001}); // MAC_F16 VOP2
+    }
+  } else {
+    forms.push_back(vop3_form(310, true, false)); // FMAC_F16 VOP3
+    forms.push_back(
+        {{(54U << 25) | (4U << 17) | (1U << 9) | 256U, 0}, 0x3c00, 0xdead0001}); // FMAC_F16 VOP2
+    forms.push_back(
+        {{(55U << 25) | (4U << 17) | (1U << 9) | 256U, 0x3c00}, 1}); // FMAMK_F16: A * literal + B
+    forms.push_back({{(56U << 25) | (4U << 17) | (1U << 9) | 256U, 1}}); // FMAAK_F16
+  }
+  for (uint32_t width : {32u, 64u}) {
+    if (cdna && width != 64) {
+      continue;
+    }
+    wave_->halt();
+    wave_ = cu_->dispatch_wf(0, 0, 106, 256, width);
+    ASSERT_NE(wave_, nullptr);
+    wave_->set_exec(1ULL | (1ULL << (width - 1)));
+    for (uint32_t rounding = 0; rounding < 4; ++rounding) {
+      wave_->set_mode_raw(0xc0 | (rounding << 2)); // Preserve the tiny addend.
+      put(0, 0x3c00);
+      put(2, 1);
+      for (const auto &form : forms) {
+        put(1, form.b);
+        wave_->set_trapsts(0x100);
+        check(form.words,
+              (form.clears_high ? 0 : 0xdead0000U) | (rounding == 1 ? 0x3c01U : 0x3c00U),
+              form.initial);
+        EXPECT_EQ(wave_->trapsts(), 0x100U);
+      }
+    }
+    // A tiny negative addend moves an exact midpoint down; FP32 MAD loses it.
+    wave_->set_mode_raw(0xf0);
+    put(0, 0x3e00);
+    put(2, 0x8001);
+    for (auto form : forms) {
+      put(1, 0x3c01);
+      const unsigned vop2 = form.words[0] >> 25;
+      if (vop2 == 55) {
+        form.words[1] = 0x3c01; // FMAMK's multiplier literal.
+        put(1, 0x8001);
+      } else if (vop2 == 56) {
+        form.words[1] = 0x8001; // FMAAK's addend literal.
+      }
+      if (form.initial == 0xdead0001)
+        form.initial = 0xdead8001; // Accumulator forms read their addend from D.
+      check(form.words, (form.clears_high ? 0 : 0xdead0000U) | 0x3e01U, form.initial);
+    }
+    // High-half native FMA preserves the low half, including for IEEE-clear sNaNs.
+    put(0, 0x3c000000);
+    put(1, 0x3c000000);
+    put(2, 0x7c010000);
+    for (bool ieee : {false, true}) {
+      wave_->set_mode_raw(0xc0 | (ieee ? 1U << 9 : 0));
+      check({prefix | (fma_opcode << 16) | (15U << 11) | 4, 256U | (257U << 9) | (258U << 18)},
+            (ieee ? 0x7e010000U : 0x7c010000U) | 0xbeefU);
+    }
+  }
+}
+
+// Qualification depends on active EXEC, rather than whether DPP permits stores.
+TEST_P(OlderHalfFma, QualificationAndInactiveExec) {
+  const auto arch = std::get<0>(GetParam());
+  const bool cdna = arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2;
+  const uint32_t prefix = cdna ? 0xd0000000U : 0xd4000000U;
+  const uint32_t fma_opcode = cdna ? 518 : arch == ROCJITSU_CODE_ARCH_RDNA3_5 ? 584 : 843;
+  using amdgpu::ArithmeticSemantics;
+  for (auto semantics :
+       {ArithmeticSemantics::Loose, ArithmeticSemantics::BitExactEmpiricalAllowLoose,
+        ArithmeticSemantics::BitExactEmpiricalNoFpStatus, ArithmeticSemantics::BitExactEmpirical,
+        ArithmeticSemantics::Compatibility}) {
+    wave_->halt();
+    ASSERT_FALSE(cu_->has_active_wfs());
+    cu_->restore_arithmetic_policy({semantics});
+    wave_ = cu_->dispatch_wf(0, 0, 106, 256, 64);
+    ASSERT_NE(wave_, nullptr);
+    put(0, 0x3c00);
+    put(1, 0x3c00);
+    put(2, 0x3c00);
+    const bool strict = semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus ||
+                        semantics == ArithmeticSemantics::BitExactEmpirical;
+    for (bool suppressed : {false, true}) {
+      if (cdna && suppressed) {
+        continue; // These CDNA native VOP3 forms have no DPP encoding.
+      }
+      const std::array<uint32_t, 2> words =
+          suppressed
+              ? std::array<uint32_t, 2>{(54U << 25) | (4U << 17) | (1U << 9) | amdgpu::SRC_DPP,
+                                        0x0f000000U | (0x140U << 8)} // FMAC, row mask zero.
+              : std::array<uint32_t, 2>{prefix | (fma_opcode << 16) | 4,
+                                        256U | (257U << 9) | (258U << 18)};
+      for (uint64_t exec_mask : {0ULL, 1ULL}) {
+        wave_->set_exec(exec_mask);
+        wave_->set_trapsts(0x100);
+        put(4, 0xdeadbeef);
+        std::unique_ptr<Instruction> instruction(decode_valid(*decoder_, words.data()));
+        ASSERT_NE(instruction, nullptr);
+        const bool rejected = strict && exec_mask;
+        EXPECT_EQ(cu_->execute_instruction(instruction.get(), *wave_).failed(), rejected);
+        EXPECT_EQ(cu_->read_vgpr(wave_->vgpr_alloc().base + 4, 0),
+                  exec_mask && !rejected && !suppressed ? 0xdead4000U : 0xdeadbeefU);
+        EXPECT_EQ(wave_->trapsts(), 0x100U);
+      }
+    }
+  }
+}
+
 } // namespace
 } // namespace rocjitsu

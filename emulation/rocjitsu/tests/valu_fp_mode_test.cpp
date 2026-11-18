@@ -1214,6 +1214,7 @@ std::vector<ArithmeticCase> f16_fma_nan_cases() {
   return cases;
 }
 
+// Native FMA uses the default-host contract; guest MODE still varies below.
 std::vector<ArithmeticCase> f16_fma_omod_cases() {
   std::vector<ArithmeticCase> cases;
   for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
@@ -1235,7 +1236,7 @@ std::vector<ArithmeticCase> f16_fma_omod_cases() {
                    {{0, a}, {1, b}, {2, c}, {6, 0u}},
                    {{6, expected}},
                    (uint32_t(ieee) << 9) | (uint32_t(overflow) << 23) | (denorm << 6),
-                   uses_default_host_controls(arch) ? FE_TONEAREST : FE_UPWARD});
+                   FE_TONEAREST});
             };
             // Both physical cards round the arithmetic before applying OMOD.
             add("NegativeUnderflow", 0x0400u, 0xbc00u, 0u, 3,
@@ -1270,7 +1271,7 @@ std::vector<ArithmeticCase> f16_fma_omod_cases() {
                {{0, a}, {1, b}, {2, c}, {6, c}},
                {{6, expected}},
                0x40u | (round << 2),
-               uses_default_host_controls(arch) ? FE_TONEAREST : FE_TOWARDZERO});
+               FE_TONEAREST});
         };
         // RNE retains a negative normal until div:2 makes it tiny; RTZ first
         // flushes the arithmetic result, so the modifier receives a signed zero.
@@ -1286,6 +1287,8 @@ std::vector<ArithmeticCase> host_mxcsr_cases() {
   constexpr uint32_t kDazMask = 1u << 6;
   constexpr uint32_t kFtzMask = 1u << 15;
   constexpr uint32_t kControlMask = _MM_ROUND_MASK | kDazMask | kFtzMask;
+  // Native and packed FMA use rj-arith's default-host contract. These
+  // exceptional guest operands remain covered under default host controls.
   for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_CDNA5})
     for (bool packed : {false, true})
       for (bool trap_invalid : {false, true}) {
@@ -1303,12 +1306,7 @@ std::vector<ArithmeticCase> host_mxcsr_cases() {
                FE_UPWARD,
                0xffffu,
                trap_invalid ? 0x1f00u : 0x1f80u});
-          if (packed || arch == ROCJITSU_CODE_ARCH_CDNA5) {
-            auto &test = cases.back();
-            test.host_rounding = FE_TONEAREST;
-            test.mxcsr_bits = 0x1f80;
-            test.arith_host_contract = true;
-          }
+          use_arith_host_contract(cases.back());
         };
         // The residual must not expose Inf-Inf to the caller's exception state.
         add("InfiniteProduct", 0x7c00u, 0x3c00u, 0u, 0x7c00u);

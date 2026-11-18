@@ -530,6 +530,32 @@ int rj_arith_v_mad_legacy_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t i
                                   const uint32_t *const *b, const uint32_t *const *c,
                                   uint32_t *trapsts);
 
+// Gfx90a MAD/MAC: one VGPR per operand, selected halves, ABS/NEG, OMOD and CLAMP.
+// Compatibility rounds the product and sum separately to FP16, always flushing
+// denormals at both steps. Guest rounding, IEEE-dependent NaN quieting and FP16_OVFL
+// apply to each step; OMOD eligibility follows the original guest denormal controls.
+// Loose uses the FP32-intermediate MAD model above. Neither path is empirically
+// qualified: strict semantics are rejected, and FP status is left unchanged.
+int rj_arith_v_mad_f16_w32_gfx90a(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c,
+                                  uint32_t *trapsts);
+
+int rj_arith_v_mad_f16_w64_gfx90a(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c,
+                                  uint32_t *trapsts);
+
+int rj_arith_v_mad_legacy_f16_w32_gfx90a(uint64_t flags, uint32_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a, const uint32_t *const *b,
+                                         const uint32_t *const *c, uint32_t *trapsts);
+
+int rj_arith_v_mad_legacy_f16_w64_gfx90a(uint64_t flags, uint64_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a, const uint32_t *const *b,
+                                         const uint32_t *const *c, uint32_t *trapsts);
+
 // Packed FP16 FMAC: component-wise A * B + D. Promoted encodings support
 // RJ_ARITH_ALU_ABS_A/B, NEG_A/B and CLAMP, applied to both halves.
 // Half selectors and modifiers on the implicit D input are unsupported.
