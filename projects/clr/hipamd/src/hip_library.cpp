@@ -84,8 +84,8 @@ hipError_t LibraryContainer::Kernel(hipKernel_t* k, const std::string &name) {
   return hipSuccess;
 }
 
-hipError_t LibraryContainer::ResolveKernelForDevice(hipKernel_t* k, const std::string& name,
-                                                    int device) {
+hipError_t LibraryContainer::ResolveKernelByNameForDevice(hipKernel_t* k, const std::string& name,
+                                                          int device) {
   IHIP_RETURN_ONFAIL(BuildIt());
   if (device == DeviceId()) {
     return Kernel(k, name);
@@ -99,10 +99,11 @@ hipError_t LibraryContainer::ResolveKernelForDevice(hipKernel_t* k, const std::s
     auto target = std::make_unique<hip::DynCO>(device);
     const char* fname = filename_.empty() ? nullptr : filename_.c_str();
     const void* image = filename_.empty() ? image_storage_.data() : nullptr;
-    // This code object is used only to resolve functions for the requested device, no need to
-    // initialize global and managed variables.
+    // Managed variables are shared across devices. Do not allocate them again for this module;
+    // bind its managed-variable pointer symbols to the existing allocations instead.
     constexpr bool init_global_vars = false;
     IHIP_RETURN_ONFAIL(target->loadCodeObject(fname, image, init_global_vars));
+    IHIP_RETURN_ONFAIL(target->bindManagedVarsFrom(*dynco_));
     dynco = code_objects_by_device_.emplace(device, std::move(target)).first;
   }
 
@@ -192,6 +193,25 @@ hipError_t LibraryContainer::BuildIt() {
   built_.store(true, std::memory_order_release);
   return hipSuccess;
 }
+
+namespace {
+hipError_t ResolveKernelForDevice(hipKernel_t* resolved, hipKernel_t kernel, int device) {
+  *resolved = kernel;
+  hipLibrary_t library = nullptr;
+  if (!hip::PlatformState::Instance().GetFunctionLibrary(kernel, &library)) {
+    if (!hip::PlatformState::Instance().IsValidFuncHandle(kernel)) {
+      return hipErrorInvalidHandle;
+    }
+    return hipSuccess;
+  }
+  auto* container = reinterpret_cast<hip::LibraryContainer*>(library);
+  const char* kernel_name = nullptr;
+  if (container->GetKernelName(&kernel_name, kernel) != hipSuccess || kernel_name == nullptr) {
+    return hipErrorInvalidHandle;
+  }
+  return container->ResolveKernelByNameForDevice(resolved, kernel_name, device);
+}
+}  // namespace
 
 hipError_t hipLibraryLoadData(hipLibrary_t* library, const void* image, hipJitOption* jitOptions,
                               void** jitOptionsValues, unsigned int numJitOptions,
@@ -411,25 +431,13 @@ hipError_t hipKernelGetAttribute(int* pi, hipFunction_attribute attrib, hipKerne
 
 
   // Load code object for the target device if not already loaded
-  hipKernel_t target_kernel = kernel;
-  hipLibrary_t library = nullptr;
-  if (hip::PlatformState::Instance().GetFunctionLibrary(kernel, &library)) {
-    auto* container = reinterpret_cast<hip::LibraryContainer*>(library);
-    const char* kernel_name = nullptr;
-    if (container->GetKernelName(&kernel_name, kernel) != hipSuccess || kernel_name == nullptr) {
-      HIP_RETURN(hipErrorInvalidHandle);
-    }
-    hipError_t status = container->ResolveKernelForDevice(&target_kernel, kernel_name, dev);
-    if (status != hipSuccess) {
-      HIP_RETURN(status);
-    }
+  hipKernel_t target_kernel = nullptr;
+  hipError_t status = ResolveKernelForDevice(&target_kernel, kernel, dev);
+  if (status != hipSuccess) {
+    HIP_RETURN(status);
   }
 
   const auto* const d_kernel = hip::asKernel(target_kernel);
-  if (d_kernel == nullptr) {
-    HIP_RETURN(hipErrorInvalidHandle);
-  }
-
   const auto& device = *hip::g_devices[dev]->devices()[0];
 
   auto* dev_kernel = d_kernel->getDeviceKernel(device);
@@ -504,19 +512,20 @@ hipError_t hipKernelSetAttribute(hipFunction_attribute attrib, int value, hipKer
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  amd::Kernel* d_kernel = hip::asKernel(kernel);
-  if (d_kernel == nullptr) {
-    HIP_RETURN(hipErrorInvalidDeviceFunction);
-  }
-
-  auto* currentDevice = hip::getCurrentDevice();
-  const auto& devices = currentDevice->devices();
-  if (dev < 0 || static_cast<size_t>(dev) >= devices.size()) {
+  if (dev < 0 || static_cast<size_t>(dev) >= hip::g_devices.size()) {
     HIP_RETURN(hipErrorInvalidDevice);
   }
 
-  device::Kernel* deviceKernel = const_cast<device::Kernel*>(
-      d_kernel->getDeviceKernel(*devices[dev]));
+  // Load code object for the target device if not already loaded
+  hipKernel_t targetKernel = nullptr;
+  hipError_t status = ResolveKernelForDevice(&targetKernel, kernel, dev);
+  if (status != hipSuccess) {
+    HIP_RETURN(status);
+  }
+
+  amd::Kernel* d_kernel = hip::asKernel(targetKernel);
+  device::Kernel* deviceKernel =
+      const_cast<device::Kernel*>(d_kernel->getDeviceKernel(*hip::g_devices[dev]->devices()[0]));
   if (deviceKernel == nullptr) {
     HIP_RETURN(hipErrorMissingConfiguration);
   }
@@ -582,30 +591,21 @@ hipError_t hipKernelSetAttributeForDevice(hipKernel_t kernel, hipFuncAttribute a
   }
 
   // Load code object for the target device if not already loaded
-  hipKernel_t target_kernel = kernel;
-  hipLibrary_t library = nullptr;
-  if (hip::PlatformState::Instance().GetFunctionLibrary(kernel, &library)) {
-    auto* container = reinterpret_cast<hip::LibraryContainer*>(library);
-    const char* kernel_name = nullptr;
-    if (container->GetKernelName(&kernel_name, kernel) != hipSuccess || kernel_name == nullptr) {
-      HIP_RETURN(hipErrorInvalidResourceHandle);
-    }
-    hipError_t status = container->ResolveKernelForDevice(&target_kernel, kernel_name, device);
-    if (status != hipSuccess) {
-      HIP_RETURN(status);
-    }
+  hipKernel_t target_kernel = nullptr;
+  hipError_t status = ResolveKernelForDevice(&target_kernel, kernel, device);
+  if (status == hipErrorInvalidHandle) {
+    HIP_RETURN(hipErrorInvalidDeviceFunction);
+  }
+  if (status != hipSuccess) {
+    HIP_RETURN(status);
   }
 
   amd::Kernel* amd_kernel = hip::asKernel(target_kernel);
-  if (amd_kernel == nullptr) {
-    HIP_RETURN(hipErrorInvalidResourceHandle);
-  }
-
   const amd::Device& amd_device = *hip::g_devices[device]->devices()[0];
   amd::device::Kernel* device_kernel =
       const_cast<amd::device::Kernel*>(amd_kernel->getDeviceKernel(amd_device));
   if (device_kernel == nullptr) {
-    HIP_RETURN(hipErrorInvalidDevice);
+    HIP_RETURN(hipErrorInvalidDeviceFunction);
   }
 
   amd::device::Kernel::WorkGroupInfo* work_group_info = device_kernel->workGroupInfo();
@@ -680,28 +680,13 @@ hipError_t hipKernelSetCacheConfig(hipKernel_t kernel, hipFuncCache_t config, hi
   }
 
   // Load code object for the target device if not already loaded
-  hipKernel_t targetKernel = kernel;
-  hipLibrary_t library = nullptr;
-
-  if (hip::PlatformState::Instance().GetFunctionLibrary(kernel, &library)) {
-    auto* container = reinterpret_cast<hip::LibraryContainer*>(library);
-    const char* kernelName = nullptr;
-    if (container->GetKernelName(&kernelName, kernel) != hipSuccess || kernelName == nullptr) {
-      HIP_RETURN(hipErrorInvalidResourceHandle);
-    }
-    hipError_t status = container->ResolveKernelForDevice(&targetKernel, kernelName, device);
-    if (status != hipSuccess) {
-      HIP_RETURN(status);
-    }
-  } else {
-    HIP_RETURN(hipErrorInvalidResourceHandle);
+  hipKernel_t targetKernel = nullptr;
+  status = ResolveKernelForDevice(&targetKernel, kernel, device);
+  if (status != hipSuccess) {
+    HIP_RETURN(status);
   }
 
   amd::Kernel* amdKernel = hip::asKernel(targetKernel);
-  if (amdKernel == nullptr) {
-    HIP_RETURN(hipErrorInvalidResourceHandle);
-  }
-
   const amd::Device& amdDevice = *hip::g_devices[device]->devices()[0];
   amd::device::Kernel* deviceKernel =
       const_cast<amd::device::Kernel*>(amdKernel->getDeviceKernel(amdDevice));
@@ -736,7 +721,13 @@ hipError_t hipKernelGetFunction(hipFunction_t* pFunc, hipKernel_t kernel) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  *pFunc = reinterpret_cast<hipFunction_t>(kernel);
+  hipKernel_t target_kernel = nullptr;
+  hipError_t status = ResolveKernelForDevice(&target_kernel, kernel, hip::ihipGetDevice());
+  if (status != hipSuccess) {
+    HIP_RETURN(status);
+  }
+
+  *pFunc = reinterpret_cast<hipFunction_t>(target_kernel);
 
   HIP_RETURN(hipSuccess);
 }

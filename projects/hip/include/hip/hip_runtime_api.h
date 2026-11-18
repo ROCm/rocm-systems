@@ -3107,10 +3107,12 @@ hipError_t hipKernelSetAttributeForDevice(hipKernel_t kernel, hipFuncAttribute a
 /**
  * @brief Function will be extracted for specific kernel
  *
+ * Returns the function handle for @p kernel on the current device.
+ *
  * @param [out] pFunc  Pointer to function handle for the kernel
  * @param [in] kernel  kernel to get handle for
  *
- * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotFound
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidHandle, #hipErrorNotFound
  */
 hipError_t hipKernelGetFunction(hipFunction_t* pFunc, hipKernel_t kernel);
 
