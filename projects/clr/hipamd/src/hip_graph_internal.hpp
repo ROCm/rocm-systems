@@ -35,6 +35,7 @@ class GraphNode;
 class GraphExecBase;
 class GraphExecClassic;
 class GraphExecSegmented;
+class ChildGraphNode;
 class UserObject;
 class GraphKernelNode;
 class GraphMemAllocNode;
@@ -760,18 +761,6 @@ class Graph {
   /// add node to the graph
   void AddNode(const Node& node);
   void RemoveNode(const Node& node);
-  //! Transfer every node of `src` into this graph, re-parenting them. `src` is left
-  //! empty and no longer owns (or deletes) them. Used by ownership-MOVE child graph
-  //! nodes so the caller's node handles become nodes of the parent's tree.
-  void AdoptNodesFrom(Graph* src);
-  //! True once this graph's nodes have been moved into a child graph node. Such a
-  //! graph is owned by that node: it cannot be instantiated, destroyed, re-parented
-  //! or passed to hipGraphExecUpdate.
-  bool IsMoved() const { return movedInto_ != nullptr; }
-  Graph* GetMovedInto() const { return movedInto_; }
-  void SetMovedInto(Graph* owner) { movedInto_ = owner; }
-  //! Queries on a moved graph see the node that now holds its nodes.
-  Graph* ResolveMoved() { return movedInto_ != nullptr ? movedInto_ : this; }
   /// Returns root nodes, all vertices with 0 in-degrees
   std::vector<Node> GetRootNodes() const;
   /// Returns leaf nodes, all vertices with 0 out-degrees
@@ -881,7 +870,10 @@ class Graph {
   bool TopologicalOrder(std::vector<Node>& TopoOrder);
 
   void clone(Graph* newGraph, bool cloneNodes = false) const;
-  Graph* clone() const;
+  //! Allocating counterpart of clone(Graph*, bool). `cloneNodes` has the same meaning:
+  //! keep the original-to-copy node map, which GraphExecBase::ResolveClonedNode needs to
+  //! translate a caller's node handle into the copy.
+  Graph* clone(bool cloneNodes = false) const;
   void GenerateDOT(std::ostream& fout, hipGraphDebugDotFlags flag) {
     fout << "subgraph cluster_" << GetID() << " {" << std::endl;
     fout << "label=\"graph_" << GetID() << "\"graph[style=\"dashed\"];\n";
@@ -1058,15 +1050,35 @@ class Graph {
   std::unordered_map<int, std::vector<int>> segments_per_level_;
 
   std::unordered_map<Node, Node> clonedNodes_;
+  //!< Non-null when this Graph object is the storage of a child graph node. Lets a node
+  //!< be mapped back to its owning ChildGraphNode without RTTI.
+  ChildGraphNode* owningNode_ = nullptr;
+
+ public:
+  ChildGraphNode* GetOwningNode() const { return owningNode_; }
+  //! Makes this graph observe `src`'s nodes without owning or re-parenting them, so the
+  //! scheduling and segment machinery on a child graph node's Graph base can walk the
+  //! topology that lives in the graph it holds. The borrower must clear vertices_ before
+  //! ~Graph() runs, or the nodes would be freed twice.
+  void ShareNodesFrom(const Graph* src) {
+    vertices_ = src->vertices_;
+    topologyVersion_ = src->topologyVersion_;
+  }
+  void ReleaseSharedNodes() { vertices_.clear(); }
+  void SetOwningNode(ChildGraphNode* node) { owningNode_ = node; }
+  //! Maps a node of the graph this was cloned from to its copy here. Virtual so a child
+  //! graph node can answer from the graph it holds rather than from its own base.
+  virtual Node GetClonedNode(Node node) {
+    auto it = clonedNodes_.find(node);
+    return (it != clonedNodes_.end()) ? it->second : nullptr;
+  }
+  bool IsOwnedByNode() const { return owningNode_ != nullptr; }
 
  private:
   friend class GraphExecBase;
   friend class GraphExecSegmented;
   friend class GraphExecClassic;
   std::vector<Node> vertices_;
-  //!< Non-null once AdoptNodesFrom() has emptied this graph into a ChildGraphNode.
-  //!< That node owns this object and deletes it.
-  Graph* movedInto_ = nullptr;
   const Graph* pOriginalGraph_ = nullptr;
   //!< graphUserObj_.second stores refcount owned by this graph for user object,
   std::unordered_map<UserObject*, int> graphUserObj_;
@@ -1177,10 +1189,7 @@ class GraphExecBase : public amd::ReferenceCountedObject, public Graph {
   // pooled signals, then drops the launch's reference on the GraphExecBase.
   static void OnLaunchComplete(cl_event event, cl_int command_exec_status, void* user_data);
 
-  Node GetClonedNode(Node node) {
-    auto it = clonedNodes_.find(node);
-    return (it != clonedNodes_.end()) ? it->second : nullptr;
-  }
+  // GetClonedNode() is inherited from Graph.
 
   //! A node of this instantiated graph, paired with the exec object that owns its
   //! segment/packet state. For a top-level node that is this graphExec; for a node
@@ -1507,7 +1516,12 @@ class ChildGraphNode : public GraphNode, public GraphExecSegmented {
  protected:
   // Copy Constructor. This is protected to prevent accidental copies causing unexpected behaviors.
   ChildGraphNode(const ChildGraphNode& rhs) : GraphNode(rhs), GraphExecSegmented() {
-    rhs.Graph::clone(this, /*clonesNodes=*/true);
+    // Keep the node map here: this copy is the one an executable graph runs, so
+    // ResolveClonedNode must be able to map the caller's handles onto its nodes. The
+    // non-exec constructor below does not need it and uses the default.
+    childGraph_ = rhs.childGraph_->clone(/*cloneNodes=*/true);
+    childGraph_->SetOwningNode(this);
+    ShareNodesFrom(childGraph_);
     graphCaptureStatus_ = rhs.graphCaptureStatus_;
   }
 
@@ -1518,17 +1532,19 @@ class ChildGraphNode : public GraphNode, public GraphExecSegmented {
       : GraphNode(hipGraphNodeTypeGraph, "solid", "rectangle"), GraphExecSegmented() {
     graphCaptureStatus_ = false;
     if (ownership == Ownership::kClone) {
-      g->clone(this);
-    }
+      childGraph_ = g->clone();
+      childGraph_->SetOwningNode(this);
+      ShareNodesFrom(childGraph_);
+      }
     // kMove leaves this node empty until CommitMove() runs. Taking the caller's graph is
     // not reversible, so it must wait until the node is known to be addable.
   }
 
   //! Completes an ownership MOVE once the node has been added to its parent.
   void CommitMove(Graph* g) {
-    Graph::AdoptNodesFrom(g);
-    movedFrom_ = g;
-    g->SetMovedInto(this);
+    childGraph_ = g;
+    childGraph_->SetOwningNode(this);
+    ShareNodesFrom(childGraph_);
   }
 
   ~ChildGraphNode() {
@@ -1541,7 +1557,12 @@ class ChildGraphNode : public GraphNode, public GraphExecSegmented {
     // Ownership MOVE: the caller's graph object is an empty shell we own. Its nodes were
     // adopted into this object's Graph base and are freed by ~Graph(); deleting the shell
     // here is what makes "destroyed when the parent is destroyed" true.
-    delete movedFrom_;
+    // vertices_ only borrows childGraph_'s nodes; drop the view before ~Graph() runs so
+    // they are freed exactly once, by childGraph_'s destructor.
+    ReleaseSharedNodes();
+    // The node owns its graph in both modes: a private copy under clone, the caller's own
+    // object under move. Deleting it here is what makes "destroyed with the parent" true.
+    delete childGraph_;
   }
 
   // Delete copy-assignment operator to prevent accidental copies causing unexpected behaviors.
@@ -1549,7 +1570,7 @@ class ChildGraphNode : public GraphNode, public GraphExecSegmented {
 
   GraphNode* clone() const override { return new ChildGraphNode(*this); }
 
-  Graph* GetChildGraph() override { return movedFrom_ != nullptr ? movedFrom_ : this; }
+  Graph* GetChildGraph() override { return childGraph_; }
 
   void SetGraphCaptureStatus(bool status) { graphCaptureStatus_ = status; }
 
@@ -1557,12 +1578,15 @@ class ChildGraphNode : public GraphNode, public GraphExecSegmented {
 
   bool GraphCaptureEnabled() override { return graphCaptureStatus_; }
 
+  Node GetClonedNode(Node node) override { return childGraph_->GetClonedNode(node); }
+
+
   std::vector<Node>& GetChildGraphNodeOrder() { return topoOrder_; }
 
   void SetStream(hip::Stream* stream) override { stream_ = stream; }
 
   bool TopologicalOrder(std::vector<Node>& TopoOrder) override {
-    return Graph::TopologicalOrder(TopoOrder);
+    return childGraph_->TopologicalOrder(TopoOrder);
   }
 
   hipError_t EnqueueCommands(hip::Stream* stream) override {
@@ -1588,7 +1612,7 @@ class ChildGraphNode : public GraphNode, public GraphExecSegmented {
       // Classic path: no segments, no AQL capture — walk topoOrder_ directly.
       // Populate topoOrder_ on first launch if not yet done.
       if (topoOrder_.empty()) {
-        Graph::TopologicalOrder(topoOrder_);
+        childGraph_->TopologicalOrder(topoOrder_);
       }
       for (auto* node : topoOrder_) {
         node->SetStream(stream);
@@ -1614,8 +1638,7 @@ class ChildGraphNode : public GraphNode, public GraphExecSegmented {
 
   hipError_t SetParams(GraphNode* node) override {
     const ChildGraphNode* childGraphNode = static_cast<ChildGraphNode const*>(node);
-    return SetParamsInternal(static_cast<const Graph*>(childGraphNode),
-                             parentAllowsKernargReuse_);
+    return SetParamsInternal(childGraphNode->childGraph_, parentAllowsKernargReuse_);
   }
 
   //! Set by the parent exec's BeginAQLPacketUpdates with its kernarg-reuse decision.
@@ -1623,7 +1646,7 @@ class ChildGraphNode : public GraphNode, public GraphExecSegmented {
 
   bool HasSameTopology(const Graph* childGraph) const {
     const std::vector<Node>& newNodes = childGraph->GetNodes();
-    const std::vector<Node>& oldNodes = Graph::GetNodes();
+    const std::vector<Node>& oldNodes = childGraph_->GetNodes();
     if (newNodes.size() != oldNodes.size()) {
       return false;
     }
@@ -1655,21 +1678,22 @@ class ChildGraphNode : public GraphNode, public GraphExecSegmented {
 
   bool HasSameTopology(const GraphNode* node) const override {
     const ChildGraphNode* childGraphNode = static_cast<const ChildGraphNode*>(node);
-    return HasSameTopology(static_cast<const Graph*>(childGraphNode));
+    return HasSameTopology(childGraphNode->childGraph_);
   }
 
   virtual std::string GetLabel(hipGraphDebugDotFlags flag) override {
-    return std::to_string(GraphNode::GetID()) + "\n" + "graph_" + std::to_string(Graph::GetID());
+    return std::to_string(GraphNode::GetID()) + "\n" + "graph_" +
+        std::to_string(childGraph_->GetID());
   }
 
   virtual void GenerateDOT(std::ostream& fout, hipGraphDebugDotFlags flag) override {
-    Graph::GenerateDOT(fout, flag);
+    childGraph_->GenerateDOT(fout, flag);
   }
 
  private:
   hipError_t SetParamsInternal(const Graph* childGraph, bool allowKernargReuse) {
     const std::vector<Node>& newNodes = childGraph->GetNodes();
-    const std::vector<Node>& oldNodes = Graph::GetNodes();
+    const std::vector<Node>& oldNodes = childGraph_->GetNodes();
     BeginAQLPacketUpdates(allowKernargReuse);
     MAKE_SCOPE_GUARD(endAQLPacketUpdates, [&]() { EndAQLPacketUpdates(); });
     for (std::vector<Node>::size_type i = 0; i != newNodes.size(); i++) {
@@ -1690,7 +1714,7 @@ class ChildGraphNode : public GraphNode, public GraphExecSegmented {
   }
 
   bool graphCaptureStatus_;
-  Graph* movedFrom_ = nullptr;  //!< Points to the original graph if ownership was moved
+  Graph* childGraph_ = nullptr;  //!< The child's topology. Owned; see dtor.
   bool parentAllowsKernargReuse_ = false;
 };
 
